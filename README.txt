@@ -61,8 +61,9 @@ Good to know
 
 Running from source
 -------------------
-Needs Windows, Python 3 (python.org; Tkinter comes with it) and NumPy
-(fast maths for millions of notes). Double-click Spiderweb.bat. If NumPy
+Needs Windows, Python 3.10 or newer (python.org; tested with 3.14; Tkinter
+comes with it) and NumPy (fast maths for millions of notes).
+Double-click Spiderweb.bat. If NumPy
 isn't installed yet, Spiderweb offers to install it for you; or type
   pip install numpy
 in a command prompt.
