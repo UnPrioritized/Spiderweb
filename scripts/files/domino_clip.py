@@ -170,27 +170,28 @@ def note_run(body, i):
 
 
 def read_notes(raw):
-    """Clipboard bytes -> (notes, ppq): (tick, gate, key, velocity) rows of every track's notes, ticks counted
-    from the start of the copied stretch; ppq = the PPQ it was copied at (None if missing). ValueError if raw
-    isn't Domino's data."""
+    """Clipboard bytes -> (notes, ppq): (tick, gate, key, velocity, track) rows of every track's notes, ticks
+    counted from the start of the copied stretch, track = which copied track (0 = the first); ppq = the PPQ it was
+    copied at (None if missing). ValueError if raw isn't Domino's data."""
     if not raw.startswith(MAGIC) or len(raw) < len(MAGIC) + 4:
         raise ValueError("not Domino's data")
     try:
         data = zlib.decompress(raw[len(MAGIC) + 4:])
     except zlib.error:
         raise ValueError("Domino's data is damaged") from None
-    runs, odd, ppq = [], [], None
+    runs, odd, ppq, track = [], [], None, -1
     for tag, body in items(data):
         if tag == 1002 and len(body) == 2:
             ppq = struct.unpack("<H", body)[0]
         if tag != 1003:
             continue
+        track += 1
         i = 0
         while i + 6 <= len(body):
             t, n = struct.unpack_from("<HI", body, i)
             if t == 2001 and n == NOTE.itemsize - 6:  # notes in the usual layout: all of them at once
                 got, i = note_run(body, i)
-                runs += got
+                runs += [(r, track) for r in got]
                 if got and sum(map(len, got)):
                     continue
             if i + 6 + n > len(body):
@@ -200,10 +201,11 @@ def read_notes(raw):
                 if len(f.get(1001, b"")) == 4 and len(f.get(2001, b"")) == 1 and len(f.get(2003, b"")) == 4:
                     vel = f.get(2002, b"")[:1] or bytes([100])
                     odd.append((int.from_bytes(f[1001], "little"), int.from_bytes(f[2003], "little"),
-                                f[2001][0], vel[0]))
+                                f[2001][0], vel[0], track))
             i += 6 + n
-    rows = np.concatenate([np.column_stack([r["tick"], r["gate"], r["key"], r["vel"]]).astype(np.int64)
-                           for r in runs] + [np.array(odd, np.int64).reshape(-1, 4)])
+    rows = np.concatenate([np.column_stack([r["tick"], r["gate"], r["key"], r["vel"],
+                                            np.full(len(r), k)]).astype(np.int64) for r, k in runs]
+                          + [np.array(odd, np.int64).reshape(-1, 5)])
     rows = rows[rows[:, 2] <= 127]
     rows[:, 1] = np.maximum(rows[:, 1], 1)
     rows[:, 3] = np.clip(rows[:, 3], 1, 127)

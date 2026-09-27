@@ -208,15 +208,21 @@ def unique_rows(a):
 def shape_notes(sh, ppq):
     """All notes of one shape as a NumPy array of (start, end, pitch, velocity) rows in ticks, before overlap
     handling."""
+    return shape_notes_tracks(sh, ppq)[0]
+
+
+def shape_notes_tracks(sh, ppq):
+    """shape_notes, and for pasted notes which track each note came from (one number per row; None for every
+    other shape)."""
     end_dot = sh.get("end_dot", False)
     path = dedupe(np.concatenate(cached_arrays(sh)))  # (drawing the line uses the same points)
     if path[-1, 0] < path[0, 0]:
         path = path[::-1]  # drawn right to left: the "last point" is the later end in time, same as left to right
     path = path * [ppq, 1]  # beats -> ticks
-    own = None  # pasted notes' own velocities
+    own = None  # pasted notes' own velocities and tracks
     if sh["kind"] == "custom" and "notes" in sh:
         raw = block_notes(sh, ppq)
-        raw, own = raw[:, :3], raw[:, 3]
+        raw, own = raw[:, :3], raw[:, 3:5]
     elif sh["kind"] in ("custom", "funnel"):
         raw = custom_notes(sh, ppq) if sh["kind"] == "custom" else funnel_notes(sh, ppq)
     elif end_dot and sh["kind"] == "poly" and len(path) > 2:
@@ -230,15 +236,22 @@ def shape_notes(sh, ppq):
     keep = (raw[:, 2] >= 0) & (raw[:, 2] <= 127) & (raw[:, 1] > 0)
     raw = raw[keep]
     raw[:, 0] = np.maximum(raw[:, 0], 0)
-    if own is not None and sh.get("own_vel"):
-        return unique_rows(np.column_stack([raw, own[keep]]))
-    raw = unique_rows(raw)
+    tracks = None
+    if own is not None:
+        own = own[keep]
+        if sh.get("own_vel"):  # (the same note in two tracks stays twice: they can go to different channels)
+            got = unique_rows(np.column_stack([raw, own]))
+            return got[:, :4], got[:, 4]
+        got = unique_rows(np.column_stack([raw, own[:, 1]]))
+        raw, tracks = got[:, :3], got[:, 3]
+    else:
+        raw = unique_rows(raw)
     if len({v for _, v in env}) == 1:  # the same velocity everywhere
         vel = np.full(len(raw), max(1, min(127, round(env[0][1]))), np.int64)
     else:
         frac = np.clip((raw[:, 0] - t_lo) / (t_hi - t_lo), 0, 1) if t_hi > t_lo else np.zeros(len(raw))
         vel = np.clip(np.round(env_values(env, frac)), 1, 127).astype(np.int64)  # (rounds halves to even, like round)
-    return np.column_stack([raw, vel])
+    return np.column_stack([raw, vel]), tracks
 
 
 # ---------------------------------------------------------------- overlaps and channels
@@ -339,20 +352,38 @@ CHANNEL_MODES = ("raw", "single", "auto")
 SPLITS = ("key", "time")
 
 
-def render(note_lists, mode, split="key"):
+def render(note_lists, mode, split="key", tracks=None):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
     mode: "raw" = one channel, notes kept as they are (overlaps allowed), "single" = one channel with overlaps
     fixed, "auto" = overlapping shapes get their own channels (split: see assign_slots).
+    tracks: per shape None, or the track of each of its notes (pasted notes, shape_notes_tracks): with "auto" each
+    track of the shape gets channels as if it were a shape of its own.
     """
-    slots = assign_slots(note_lists, split) if mode == "auto" else [0] * len(note_lists)
-    parts = [np.column_stack([lst, np.full((len(lst), 2), (slots[o], o), np.int64)])
+    tracks = tracks or [None] * len(note_lists)
+    if mode == "auto":
+        units, unit_of = [], []  # the shapes, pasted notes split up by track; unit_of = each note's unit
+        for lst, tr in zip(note_lists, tracks):
+            if tr is None or not len(lst):
+                unit_of.append(len(units))
+                units.append(lst)
+                continue
+            ids, which = np.unique(tr, return_inverse=True)
+            which = which.ravel()
+            unit_of.append(len(units) + which)
+            units += [lst[which == k] for k in range(len(ids))]
+        unit_slots = np.array(assign_slots(units, split), np.int64)
+        slot_of = [unit_slots[u] for u in unit_of]
+        count = int(unit_slots.max()) + 1 if len(units) else 0
+    else:
+        slot_of, count = [0] * len(note_lists), 1 if note_lists else 0
+    parts = [np.column_stack([lst, np.broadcast_to(slot_of[o], len(lst)), np.full(len(lst), o, np.int64)])
              for o, lst in enumerate(note_lists)]
-    notes = np.concatenate(parts) if parts else NO_NOTES
+    notes = np.concatenate(parts).astype(np.int64) if parts else NO_NOTES
     if mode != "raw":
         notes = resolve_overlaps(notes)
-    return notes, (max(slots) + 1 if slots else 0)
+    return notes, count
 
 
 def slot_track_channel(slot):

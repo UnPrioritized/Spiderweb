@@ -16,7 +16,8 @@ from notes.custom import CUSTOM_DEFAULTS, custom_note_count
 from window.drawer import help_box
 from window.help import Tips, open_help
 from window.help_texts import BY_ID, TOOL_TOPICS
-from notes.engine import KINDS, NO_NOTES, SHAPE_DEFAULTS, point_names, render, shape_notes, slot_track_channel
+from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, point_names, render, shape_notes_tracks,
+                          slot_track_channel)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.smooth import SMOOTH_DEFAULT
 from notes.text import TEXT_DEFAULTS
@@ -644,11 +645,15 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
     # ------------------------------------------------------------ shapes
 
     def notes_of(self, sh):
+        return self.notes_tracks(sh)[0]
+
+    def notes_tracks(self, sh):
+        """shape_notes_tracks, remembered."""
         key = (json.dumps(sh, sort_keys=True), self.ppq)
         if key not in self._notes_cache:
             if len(self._notes_cache) > 500:
                 self._notes_cache.clear()
-            self._notes_cache[key] = shape_notes(sh, self.ppq)
+            self._notes_cache[key] = shape_notes_tracks(sh, self.ppq)
             self._notes_worked += 1
         return self._notes_cache[key]
 
@@ -666,8 +671,9 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         started, worked = time.perf_counter(), self._notes_worked
         self.channel_split = SPLIT_CHOICES[max(self.split_box.current(), 0)][0]
         self.split_box.config(state="readonly" if self.channel_mode.get() == "auto" else "disabled")
-        self.rendered, self.slot_count = render([self.notes_of(sh) for sh in self.shapes], self.channel_mode.get(),
-                                                self.channel_split)
+        got = [self.notes_tracks(sh) for sh in self.shapes]
+        self.rendered, self.slot_count = render([n for n, _ in got], self.channel_mode.get(), self.channel_split,
+                                                [t for _, t in got])
         if self._notes_worked != worked:
             self._notes_time = time.perf_counter() - started
         counts = self.note_counts = np.bincount(self.rendered[:, 5], minlength=len(self.shapes)).tolist()

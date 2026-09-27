@@ -391,8 +391,10 @@ TOPICS = [
               "Paste from Domino (or Ctrl+Shift+V) works the other way: select notes in Domino, press Ctrl+C there, "
               "then paste here. The start of what you copied lands on the play line (snapped to the grid), like "
               "pasting in Domino, and ticks are taken as they are. The notes of every copied track become ONE shape "
-              "(Pasted notes); controllers and other events are left out. Channels are then handled by Spiderweb like "
-              "any other shape's notes (Channels setting).\n\n"
+              "(Pasted notes); controllers and other events are left out. Each note remembers its track: with Multi "
+              "channel every track counts as a shape of its own (tracks that overlap get different channels, the "
+              "others can share one), with Single channel all of them go on one channel and overlaps are "
+              "removed.\n\n"
               "Move, flip, turn, stretch or skew the shape like a custom shape: the notes go with its box. The notes "
               "keep their own velocities until you change the shape's velocity (in the panel or the velocity "
               "pane).",

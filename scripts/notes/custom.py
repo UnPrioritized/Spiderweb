@@ -469,24 +469,30 @@ def custom_notes(sh, ppq):
 # (pack_notes), sh["strokes"] = just the box's outline. In the box a note runs from u = start / T to end / T at
 # v = (row + 0.5) / K (T = the last note's end in ticks, K = keys from the lowest to the highest), so moving,
 # stretching, flipping and turning the box moves the notes with it. sh["own_vel"]: the notes keep their own
-# velocities (until the velocity is changed in Spiderweb).
+# velocities (until the velocity is changed in Spiderweb). Each note also remembers its track (which copied track
+# it came from): with Multi channel every track counts as a shape of its own (engine.render).
 
 BOX_STROKE = {"kind": "poly", "pts": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]}
+TRACKS = "t:"  # packed notes starting with this have the track column (the first test version didn't)
 _unpacked = {}
 
 
 def pack_notes(rows):
-    """(start, end, row, velocity) rows -> text for the save file (zlib, base64)."""
-    return base64.b64encode(zlib.compress(np.asarray(rows, "<i4").tobytes(), 1)).decode("ascii")
+    """(start, end, row, velocity, track) rows -> text for the save file (zlib, base64)."""
+    return TRACKS + base64.b64encode(zlib.compress(np.asarray(rows, "<i4").tobytes(), 1)).decode("ascii")
 
 
 def unpack_notes(text):
-    """pack_notes' text -> (start, end, row, velocity) int64 rows (remembered: it's asked for often)."""
+    """pack_notes' text -> (start, end, row, velocity, track) int64 rows (remembered: it's asked for often)."""
     got = _unpacked.get(text)
     if got is None:
         if len(_unpacked) > 20:
             _unpacked.clear()
-        got = np.frombuffer(zlib.decompress(base64.b64decode(text)), "<i4").reshape(-1, 4).astype(np.int64)
+        tracks = text.startswith(TRACKS)
+        got = np.frombuffer(zlib.decompress(base64.b64decode(text[len(TRACKS):] if tracks else text)), "<i4")
+        got = got.reshape(-1, 5 if tracks else 4).astype(np.int64)
+        if not tracks:
+            got = np.column_stack([got, np.zeros(len(got), np.int64)])
         got.flags.writeable = False
         _unpacked[text] = got
     return got
@@ -499,14 +505,15 @@ def check_notes(text):
     except (TypeError, ValueError, zlib.error):
         return False
     return (len(rows) > 0 and (rows[:, 0] >= 0).all() and (rows[:, 1] > rows[:, 0]).all() and (rows[:, 2] >= 0).all()
-            and (rows[:, 3] >= 1).all() and (rows[:, 3] <= 127).all())
+            and (rows[:, 3] >= 1).all() and (rows[:, 3] <= 127).all() and (rows[:, 4] >= 0).all())
 
 
 def notes_shape(notes, ppq, name):
-    """(tick, gate, key, velocity) rows -> the settings of a custom shape holding them (see above), its box starting
-    at the first note's tick / ppq beats and the lowest key."""
+    """(tick, gate, key, velocity, track) rows -> the settings of a custom shape holding them (see above), its box
+    starting at the first note's tick / ppq beats and the lowest key."""
     t0, k0 = int(notes[:, 0].min()), int(notes[:, 2].min())
-    rows = np.column_stack([notes[:, 0] - t0, notes[:, 0] - t0 + notes[:, 1], notes[:, 2] - k0, notes[:, 3]])
+    rows = np.column_stack([notes[:, 0] - t0, notes[:, 0] - t0 + notes[:, 1], notes[:, 2] - k0, notes[:, 3],
+                            notes[:, 4]])
     b0, b1 = t0 / ppq, (t0 + int(rows[:, 1].max())) / ppq
     vel = max(1, min(127, round(float(notes[:, 3].mean()))))
     return dict(kind="custom", name=name, strokes=[dict(BOX_STROKE)], fill="empty", notes=pack_notes(rows),
@@ -514,8 +521,9 @@ def notes_shape(notes, ppq, name):
 
 
 def block_notes(sh, ppq):
-    """A pasted-notes shape's (start, end, pitch, velocity) notes where its box is now. Each note is a flat line in
-    the box; a stretched / turned box makes them like any line (a note turned upright = 1-tick notes up the keys)."""
+    """A pasted-notes shape's (start, end, pitch, velocity, track) notes where its box is now. Each note is a flat
+    line in the box; a stretched / turned box makes them like any line (a note turned upright = 1-tick notes up the
+    keys)."""
     rows = unpack_notes(sh["notes"])
     (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
     ub, up, vb, vp = b1 - b0, p1 - p0, b2 - b0, p2 - p0
@@ -529,4 +537,4 @@ def block_notes(sh, ppq):
     a, b = np.where(swap[:, None], b, a), np.where(swap[:, None], a, b)
     n = len(rows)
     raw, per = parts_notes(np.stack([a, b], axis=1).reshape(-1, 2), np.arange(n) * 2, np.zeros(n, bool), counts=True)
-    return np.column_stack([raw, np.repeat(rows[:, 3], per)])
+    return np.column_stack([raw, np.repeat(rows[:, 3:5], per, axis=0)])
