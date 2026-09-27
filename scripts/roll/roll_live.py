@@ -31,7 +31,8 @@ class LiveDrawing:
     def live_target(self):
         """The custom shape new strokes go into (Live shape on and one custom shape selected), or None."""
         app, sh = self.app, self.app.selected()
-        if app.live.get() and sh and sh["kind"] == "custom" and not sh.get("text") and len(app.sels) == 1:
+        if (app.live.get() and sh and sh["kind"] == "custom" and not sh.get("text") and "notes" not in sh
+                and len(app.sels) == 1):
             return sh
         return None
 
@@ -145,8 +146,9 @@ class LiveDrawing:
 
     def point_strokes(self, sh):
         """The strokes of the selected custom shape whose points show (and drag with the Select tool): all of them
-        with Live shape on (long freehand strokes only when picked), else just the picked one. Not for text."""
-        if sh.get("text"):
+        with Live shape on (long freehand strokes only when picked), else just the picked one. Not for text or
+        pasted notes."""
+        if sh.get("text") or "notes" in sh:
             return []
         k = self.picked_stroke(sh)
         if self.app.live.get() and len(self.app.sels) == 1:

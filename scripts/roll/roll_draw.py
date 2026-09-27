@@ -389,6 +389,8 @@ class RollDrawing:
         self.create_image(kb, top, image=self.note_img, anchor="nw")
 
     def draw_path(self, sh, color, width, dash=None):
+        if "notes" in sh:  # pasted notes: their box, thin and dashed (the notes are the shape)
+            width, dash = 1, (4, 3)
         ax, bx = self.sx, self.kb_w - self.view_t * self.sx
         ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
         view = (self.kb_w - 20, self.ruler_h - 20, self.winfo_width() + 20, self.winfo_height() + 20)

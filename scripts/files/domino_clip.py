@@ -8,6 +8,9 @@ Ticks count from the start of the copied stretch; Domino pastes that start at it
 convert ticks to its own PPQ (the user matches the PPQ). The track's channel isn't in the data: the tracks
 go into the highlighted track and the ones below it (tracks past the last one are dropped). Everything but the notes, the PPQ and the length is copied from a real
 Domino copy (the copyright text left empty).
+
+Paste from Domino reads the same format back: only the notes (controller and other events are skipped), all
+tracks together.
 """
 
 import ctypes
@@ -104,3 +107,104 @@ def put_on_clipboard(raw):
     finally:
         user32.CloseClipboard()
     return True
+
+
+def get_from_clipboard():
+    """The clipboard's FORMAT bytes, b"" if it has none, or None if the clipboard was busy."""
+    user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+    user32.RegisterClipboardFormatW.restype = wintypes.UINT
+    user32.GetClipboardData.argtypes = [wintypes.UINT]
+    user32.GetClipboardData.restype = ctypes.c_void_p
+    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalSize.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalSize.restype = ctypes.c_size_t
+    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+    fmt = user32.RegisterClipboardFormatW(FORMAT)
+    for _ in range(10):  # another program may have it open for a moment
+        if user32.OpenClipboard(None):
+            break
+        kernel32.Sleep(20)
+    else:
+        return None
+    try:
+        h = user32.GetClipboardData(fmt)
+        if not h:
+            return b""
+        at = kernel32.GlobalLock(h)
+        if not at:
+            return b""
+        try:
+            return ctypes.string_at(at, kernel32.GlobalSize(h))
+        finally:
+            kernel32.GlobalUnlock(h)
+    finally:
+        user32.CloseClipboard()
+
+
+def items(data, i=0):
+    """(tag, body) of each item in data from byte i; stops at anything that doesn't fit."""
+    while i + 6 <= len(data):
+        tag, n = struct.unpack_from("<HI", data, i)
+        if i + 6 + n > len(data):
+            return
+        yield tag, data[i + 6:i + 6 + n]
+        i += 6 + n
+
+
+def note_run(body, i):
+    """The notes written one after another in NOTE's layout from byte i of body (at least the first one is)."""
+    got, n = [], 64
+    while i + NOTE.itemsize <= len(body):
+        recs = np.frombuffer(body, NOTE, count=min(n, (len(body) - i) // NOTE.itemsize), offset=i)
+        ok = ((recs["tag"] == 2001) & (recs["len"] == NOTE.itemsize - 6) & (recs["t1"] == 1001) & (recs["l1"] == 4)
+              & (recs["t2"] == 2001) & (recs["l2"] == 1) & (recs["t3"] == 2002) & (recs["l3"] == 1)
+              & (recs["t4"] == 2003) & (recs["l4"] == 4))
+        run = len(recs) if ok.all() else int(ok.argmin())
+        got.append(recs[:run])
+        i += run * NOTE.itemsize
+        if run < len(recs):
+            break
+        n *= 2  # (checked in growing pieces: something else between the notes stops a run early)
+    return got, i
+
+
+def read_notes(raw):
+    """Clipboard bytes -> (notes, ppq): (tick, gate, key, velocity) rows of every track's notes, ticks counted
+    from the start of the copied stretch; ppq = the PPQ it was copied at (None if missing). ValueError if raw
+    isn't Domino's data."""
+    if not raw.startswith(MAGIC) or len(raw) < len(MAGIC) + 4:
+        raise ValueError("not Domino's data")
+    try:
+        data = zlib.decompress(raw[len(MAGIC) + 4:])
+    except zlib.error:
+        raise ValueError("Domino's data is damaged") from None
+    runs, odd, ppq = [], [], None
+    for tag, body in items(data):
+        if tag == 1002 and len(body) == 2:
+            ppq = struct.unpack("<H", body)[0]
+        if tag != 1003:
+            continue
+        i = 0
+        while i + 6 <= len(body):
+            t, n = struct.unpack_from("<HI", body, i)
+            if t == 2001 and n == NOTE.itemsize - 6:  # notes in the usual layout: all of them at once
+                got, i = note_run(body, i)
+                runs += got
+                if got and sum(map(len, got)):
+                    continue
+            if i + 6 + n > len(body):
+                break
+            if t == 2001:  # a note in some other layout; anything else (controllers, settings) is skipped
+                f = dict(items(body[i + 6:i + 6 + n]))
+                if len(f.get(1001, b"")) == 4 and len(f.get(2001, b"")) == 1 and len(f.get(2003, b"")) == 4:
+                    vel = f.get(2002, b"")[:1] or bytes([100])
+                    odd.append((int.from_bytes(f[1001], "little"), int.from_bytes(f[2003], "little"),
+                                f[2001][0], vel[0]))
+            i += 6 + n
+    rows = np.concatenate([np.column_stack([r["tick"], r["gate"], r["key"], r["vel"]]).astype(np.int64)
+                           for r in runs] + [np.array(odd, np.int64).reshape(-1, 4)])
+    rows = rows[rows[:, 2] <= 127]
+    rows[:, 1] = np.maximum(rows[:, 1], 1)
+    rows[:, 3] = np.clip(rows[:, 3], 1, 127)
+    return rows, ppq

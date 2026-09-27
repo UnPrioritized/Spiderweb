@@ -8,12 +8,12 @@ from tkinter import filedialog, messagebox
 
 import numpy as np
 
-from notes.custom import ALIGNS, CUSTOM_DEFAULTS, FILLS
+from notes.custom import ALIGNS, CUSTOM_DEFAULTS, FILLS, notes_shape
 from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_shape
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.text import TEXT_DEFAULTS, clean_text
-from files.domino_clip import clip_data, put_on_clipboard
+from files.domino_clip import clip_data, get_from_clipboard, put_on_clipboard, read_notes
 from files.midi_out import PPQ_WARN, write_midi
 from files.about import HERE, VERSION
 from files.safefile import write_bytes, write_text
@@ -326,3 +326,34 @@ class ProjectFiles:
         where = "a track" if tracks == 1 else f"the first of {tracks} tracks"
         self.status.config(text=f"Copied {what} for Domino (PPQ {ppq}) — highlight {where} there, put the play "
                                 "cursor on a bar line and press Ctrl+V")
+
+    def paste_from_domino(self):
+        """Ctrl+Shift+V: the notes copied in Domino as one shape (custom.py's pasted notes), placed like Domino
+        pastes: the start of what was copied on the play line (snapped to the grid). Every track's notes go into
+        the one shape; controllers and other events are left out. Ticks are taken as they are (same PPQ)."""
+        raw = get_from_clipboard()
+        if raw is None:
+            messagebox.showerror("Spiderweb", "Couldn't use the clipboard (another program has it open). Try again.")
+            return
+        try:
+            notes, their_ppq = read_notes(raw) if raw else (None, None)
+        except ValueError as e:
+            messagebox.showerror("Spiderweb", f"Couldn't read the notes on the clipboard ({e}).")
+            return
+        if notes is None or not len(notes):
+            messagebox.showerror("Spiderweb", "No notes from Domino on the clipboard — select notes in Domino and "
+                                 "press Ctrl+C there first." if notes is None else
+                                 "What was copied in Domino has no notes (only notes are pasted).")
+            return
+        sh = clean_shape({**SHAPE_DEFAULTS, **self.defaults, **notes_shape(notes, self.ppq, "Pasted notes")})
+        if not self.confirm_big([sh]):
+            return
+        at, sb = self.playhead, self.snap_beats()
+        if sb:
+            at = round(at / sb) * sb
+        self.roll.cancel_draft()
+        self.add_copies([sh], at)
+        n = len(notes)
+        note = (f" — they were copied at PPQ {their_ppq}, ticks kept as they are" if their_ppq and their_ppq != self.ppq
+                else "")
+        self.status.config(text=f"Pasted {n:,} note{'s' * (n != 1)} from Domino as one shape{note}")

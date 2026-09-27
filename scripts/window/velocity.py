@@ -270,6 +270,7 @@ class VelocityPane(tk.Canvas):
             else:
                 env = [[0.0, float(max(1, min(127, round(env_at(drawn, dus, lo)))))]]  # every note is at the start
             sh["vel_env"] = env
+            sh.pop("own_vel", None)  # pasted notes: their own velocities are replaced
             us = [u for u, _ in env]
             sh["vel0"], sh["vel1"] = (max(1, min(127, round(env_at(env, us, u)))) for u in (0.0, 1.0))
             done[i] = (sh, env, base, (lo, hi))

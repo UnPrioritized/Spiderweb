@@ -55,6 +55,9 @@ Good to know
   With Multi channel, each channel goes into its own track, from the
   highlighted one down. Use the same PPQ in both (the ticks are copied as
   they are).
+  Paste from Domino (Ctrl+Shift+V) does the opposite: notes copied in
+  Domino (Ctrl+C there) become one shape, starting at the play line.
+  Only the notes come along (no controllers).
 - Domino can't open MIDI files with a PPQ of 32767 or higher. Spiderweb warns
   you (the PPQ turns red) but still writes them.
 - Everything you do is saved on its own (autosave.json). Each time Spiderweb

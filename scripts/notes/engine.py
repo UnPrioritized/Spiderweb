@@ -10,7 +10,8 @@ import math
 
 import numpy as np
 
-from notes.custom import ALIGNS, CUSTOM_DEFAULTS, FILLS, clean_curve, clean_strokes, custom_notes, custom_strokes
+from notes.custom import (ALIGNS, CUSTOM_DEFAULTS, FILLS, BOX_STROKE, block_notes, check_notes, clean_curve,
+                          clean_strokes, custom_notes, custom_strokes)
 from notes.envelope import env_values, velocity_env
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
@@ -90,6 +91,12 @@ def clean_shape(sh):
         tx = clean_text(sh["text"]) if isinstance(sh.get("text"), dict) else None
         if tx:  # typed text (text.py): its strokes are the letters, the settings let it be retyped
             out["text"] = tx
+        if "notes" in sh:  # pasted notes (custom.py): the strokes are just the box
+            if not isinstance(sh["notes"], str) or not check_notes(sh["notes"]):
+                return None
+            out.update(notes=sh["notes"], strokes=[dict(BOX_STROKE)], fill="empty")
+            if sh.get("own_vel"):
+                out["own_vel"] = True
     if out["kind"] == "arc":  # start, a point it passes through, end; k = beats per key on screen (arc.py)
         if len(out["pts"]) != 3:
             return None
@@ -206,7 +213,11 @@ def shape_notes(sh, ppq):
     if path[-1, 0] < path[0, 0]:
         path = path[::-1]  # drawn right to left: the "last point" is the later end in time, same as left to right
     path = path * [ppq, 1]  # beats -> ticks
-    if sh["kind"] in ("custom", "funnel"):
+    own = None  # pasted notes' own velocities
+    if sh["kind"] == "custom" and "notes" in sh:
+        raw = block_notes(sh, ppq)
+        raw, own = raw[:, :3], raw[:, 3]
+    elif sh["kind"] in ("custom", "funnel"):
         raw = custom_notes(sh, ppq) if sh["kind"] == "custom" else funnel_notes(sh, ppq)
     elif end_dot and sh["kind"] == "poly" and len(path) > 2:
         raw = dot_segment_notes(path)
@@ -216,8 +227,11 @@ def shape_notes(sh, ppq):
     t_hi = float(path[:, 0].max())
     env = velocity_env(sh)
     raw = note_array(raw, 3)
-    raw = raw[(raw[:, 2] >= 0) & (raw[:, 2] <= 127) & (raw[:, 1] > 0)]
+    keep = (raw[:, 2] >= 0) & (raw[:, 2] <= 127) & (raw[:, 1] > 0)
+    raw = raw[keep]
     raw[:, 0] = np.maximum(raw[:, 0], 0)
+    if own is not None and sh.get("own_vel"):
+        return unique_rows(np.column_stack([raw, own[keep]]))
     raw = unique_rows(raw)
     if len({v for _, v in env}) == 1:  # the same velocity everywhere
         vel = np.full(len(raw), max(1, min(127, round(env[0][1]))), np.int64)

@@ -180,6 +180,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                     if math.hypot(x - ax - u * dx, y - ay - u * dy) < 6:
                         return i
             sh = self.app.shapes[i]
+            if "notes" in sh and self.inside_strokes(cached_strokes(sh), self.x2t(x), self.y2p(y)):
+                return i  # pasted notes: anywhere in their box
             if sh["kind"] == "custom" and sh["fill"] in ("fill", "spam") and fillable(sh["strokes"]):
                 gap = gap_line(sh)
                 if self.inside_strokes(cached_strokes(sh) + ([gap] if gap else []), self.x2t(x), self.y2p(y)):
@@ -248,7 +250,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             again = i is not None and app.sels == {i} and app.shapes[i]["kind"] == "funnel"
             part = self.part_at(app.shapes[i], e.x, e.y) if again else None
             if (i is not None and app.sels == {i} and app.shapes[i]["kind"] == "custom" and not app.shapes[i].get("text")
-                    and not e.state & CTRL):
+                    and "notes" not in app.shapes[i] and not e.state & CTRL):
                 again, part = True, ("stroke", self.stroke_at(app.shapes[i], e.x, e.y))
             if part and e.state & CTRL:  # Ctrl+click: highlight just this one too (or not any more)
                 app.set_parts(app.parts ^ {part})

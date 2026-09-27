@@ -180,6 +180,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
             self.bind_all(key, lambda e, fn=fn: None if self.in_drawer(e) else fn())
         for keys, fn in (("space", self.toggle_play), ("Control-c Control-C", self.copy_selected),
                          ("Control-Shift-c Control-Shift-C", self.copy_to_domino),
+                         ("Control-Shift-v Control-Shift-V", self.paste_from_domino),
                          ("Control-v Control-V", self.paste), ("Control-h Control-H", lambda: self.flip(True)),
                          ("Control-j Control-J", lambda: self.flip(False)), ("Control-a Control-A", self.select_all),
                          ("Control-Left", lambda: self.rotate(False)), ("Control-Right", lambda: self.rotate(True))):
@@ -387,8 +388,16 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         ttk.Button(btns, text="Open…", command=self.open_project).pack(side="left")
         ttk.Button(btns, text="Save…", command=self.save_project).pack(side="left", padx=4)
         ttk.Button(btns, text="Generate MIDI", command=self.generate).pack(side="right")
-        b = ttk.Button(box, text="Copy to Domino", command=self.copy_to_domino)
-        b.grid(row=r + 1, column=0, columnspan=2, sticky="e", pady=(4, 0))
+        domino = ttk.Frame(box)
+        domino.grid(row=r + 1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        b = ttk.Button(domino, text="Paste from Domino", command=self.paste_from_domino)
+        b.pack(side="left")
+        Tooltip(b, "Ctrl+Shift+V: the notes copied in Domino (Ctrl+C there) become one shape here.\n"
+                   "What was copied starts at the play line, like pasting in Domino. Every track's notes go into\n"
+                   "the one shape; controllers and other events are left out.\n"
+                   "Ticks are taken as they are: use the same PPQ here.")
+        b = ttk.Button(domino, text="Copy to Domino", command=self.copy_to_domino)
+        b.pack(side="right")
         Tooltip(b, "Ctrl+Shift+C: copies the selected shapes' notes (all notes when nothing is selected).\n"
                    "In Domino, highlight a track, put the play cursor on a bar line and press Ctrl+V.\n"
                    "Multi channel: each channel goes into its own track, from the highlighted one down.\n"
@@ -558,6 +567,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         for t in tgts:
             t[key] = value
             t.pop("vel_env", None)
+            t.pop("own_vel", None)  # pasted notes: their own velocities are replaced
         self.env_note.pack_forget()
         self.shapes_changed()
 
@@ -852,6 +862,8 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.shapes_changed()
 
     def shape_label(self, sh):
+        if "notes" in sh:
+            return "Pasted notes"
         if sh.get("text"):
             return f"Text: {sh.get('name') or '?'}"
         return f"Custom: {sh.get('name') or '?'}" if sh["kind"] == "custom" else KINDS[sh["kind"]]

@@ -110,13 +110,27 @@ class CustomPanel:
         if not self._rows["custom"]:
             return
         # text: no library shape to pick (its letters are the shape)
-        text = all(t.get("text") for t in tgts) if placed else tool == "text"
+        text = all(t.get("text") or "notes" in t for t in tgts) if placed else tool == "text"
+        # pasted notes: nothing to fill either (the notes are the shape)
+        pasted = placed and all("notes" in t for t in tgts)
+        if not self.custom_fill_row.winfo_manager():
+            self.custom_fill_row.pack(fill="x", before=self.custom_info)
         if text and self.custom_shape_row.winfo_manager():
             self.custom_shape_row.pack_forget()
             self.custom_fill_row.pack_configure(pady=0)
         elif not text and not self.custom_shape_row.winfo_manager():
             self.custom_shape_row.pack(fill="x", before=self.custom_fill_row)
             self.custom_fill_row.pack_configure(pady=(4, 0))
+        if pasted:
+            self.custom_fill_row.pack_forget()
+            own = all(t.get("own_vel") for t in tgts)
+            self.custom_info.config(text=(
+                f"{sum(self.note_count(t) for t in tgts):,} pasted notes. "
+                + ("They keep their own velocities until you change the velocity here or in the velocity pane. "
+                   if own else "")
+                + "Drag a corner or side to stretch them, just outside a corner to turn them, just outside a "
+                  "side's middle to skew them."))
+            return
         # gaps in the outline (open lines once touching strokes are joined): one is closed with a straight line
         # for Fill / Spam, with more it's unclear what's inside
         if placed:
@@ -183,7 +197,8 @@ class CustomPanel:
             messagebox.showerror("Spiderweb", f"Couldn't read the shape \"{name}\".")
             return self.sync_custom()
         self.custom_shape = name
-        tgts = [t for t in self.custom_targets() if t is not self.custom_defaults and not t.get("text")]
+        tgts = [t for t in self.custom_targets()
+                if t is not self.custom_defaults and not t.get("text") and "notes" not in t]
         if tgts:
             self.push_undo()
             for t in tgts:

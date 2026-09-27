@@ -1,13 +1,15 @@
 """Custom shapes: drawings from the drawer placed on the roll, as outlines or filled with notes."""
 
+import base64
 import math
+import zlib
 
 import numpy as np
 
 from notes.arc import arc_k, arc_points, ellipse_bezier
 from notes.bezier import sample
 from notes.smooth import clean_level, smooth_path
-from notes.paths import dedupe, keep_longest, line_notes, loop_from_left, pitch_of, stretch_ends
+from notes.paths import dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of, stretch_ends
 from notes.text import text_polys, threshold_spans
 
 # Custom shapes: how the inside is filled, and the gate of "spam" in beats (1/64 = 60 ticks at PPQ 960).
@@ -435,6 +437,8 @@ def outline_spam(sh, ppq):
 
 def custom_note_count(sh, ppq):
     """How many notes a custom shape makes, without making them (spam can be millions)."""
+    if "notes" in sh:
+        return len(unpack_notes(sh["notes"]))
     if sh["fill"] == "outline_spam":
         g = spam_gate(sh, ppq)
         return sum(max(1, spam_starts(sh, s, e, g)[1]) for s, e, _ in outline_notes(sh, ppq).tolist())
@@ -450,9 +454,79 @@ def custom_notes(sh, ppq):
     """Empty = the outline; Fill = one note per stretch of each key inside; Spam = each stretch filled with
     back-to-back notes of the spam gate, starting at its left edge or on the gate grid (see ALIGNS); what doesn't
     fit a whole gate is dropped. Outline spam = the outline chopped the same way (open ends are fine)."""
+    if "notes" in sh:
+        return block_notes(sh, ppq)[:, :3]
     if sh["fill"] == "outline_spam":
         return outline_spam(sh, ppq)
     if sh["fill"] == "empty" or not fillable(sh["strokes"]):
         return outline_notes(sh, ppq)
     spans = np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]  # (start, end, key)
     return spans if sh["fill"] == "fill" else chop(sh, spans, spam_gate(sh, ppq))
+
+
+# ---------------------------------------------------------------- pasted notes
+# A custom shape can hold notes pasted from another program instead of a drawing: sh["notes"] = the notes packed
+# (pack_notes), sh["strokes"] = just the box's outline. In the box a note runs from u = start / T to end / T at
+# v = (row + 0.5) / K (T = the last note's end in ticks, K = keys from the lowest to the highest), so moving,
+# stretching, flipping and turning the box moves the notes with it. sh["own_vel"]: the notes keep their own
+# velocities (until the velocity is changed in Spiderweb).
+
+BOX_STROKE = {"kind": "poly", "pts": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]}
+_unpacked = {}
+
+
+def pack_notes(rows):
+    """(start, end, row, velocity) rows -> text for the save file (zlib, base64)."""
+    return base64.b64encode(zlib.compress(np.asarray(rows, "<i4").tobytes(), 1)).decode("ascii")
+
+
+def unpack_notes(text):
+    """pack_notes' text -> (start, end, row, velocity) int64 rows (remembered: it's asked for often)."""
+    got = _unpacked.get(text)
+    if got is None:
+        if len(_unpacked) > 20:
+            _unpacked.clear()
+        got = np.frombuffer(zlib.decompress(base64.b64decode(text)), "<i4").reshape(-1, 4).astype(np.int64)
+        got.flags.writeable = False
+        _unpacked[text] = got
+    return got
+
+
+def check_notes(text):
+    """True if text is packed notes Spiderweb can use."""
+    try:
+        rows = unpack_notes(text)
+    except (TypeError, ValueError, zlib.error):
+        return False
+    return (len(rows) > 0 and (rows[:, 0] >= 0).all() and (rows[:, 1] > rows[:, 0]).all() and (rows[:, 2] >= 0).all()
+            and (rows[:, 3] >= 1).all() and (rows[:, 3] <= 127).all())
+
+
+def notes_shape(notes, ppq, name):
+    """(tick, gate, key, velocity) rows -> the settings of a custom shape holding them (see above), its box starting
+    at the first note's tick / ppq beats and the lowest key."""
+    t0, k0 = int(notes[:, 0].min()), int(notes[:, 2].min())
+    rows = np.column_stack([notes[:, 0] - t0, notes[:, 0] - t0 + notes[:, 1], notes[:, 2] - k0, notes[:, 3]])
+    b0, b1 = t0 / ppq, (t0 + int(rows[:, 1].max())) / ppq
+    vel = max(1, min(127, round(float(notes[:, 3].mean()))))
+    return dict(kind="custom", name=name, strokes=[dict(BOX_STROKE)], fill="empty", notes=pack_notes(rows),
+                own_vel=True, vel0=vel, vel1=vel, pts=box_frame(b0, k0 - 0.5, b1, k0 + 0.5 + int(rows[:, 2].max())))
+
+
+def block_notes(sh, ppq):
+    """A pasted-notes shape's (start, end, pitch, velocity) notes where its box is now. Each note is a flat line in
+    the box; a stretched / turned box makes them like any line (a note turned upright = 1-tick notes up the keys)."""
+    rows = unpack_notes(sh["notes"])
+    (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
+    ub, up, vb, vp = b1 - b0, p1 - p0, b2 - b0, p2 - p0
+    t_all, k_all = float(rows[:, 1].max()), float(rows[:, 2].max() + 1)
+    v = (rows[:, 2] + 0.5) / k_all
+    ends = []
+    for u in (rows[:, 0] / t_all, rows[:, 1] / t_all):
+        ends.append(np.column_stack([(b0 + u * ub + v * vb) * ppq, p0 + u * up + v * vp]))
+    a, b = ends
+    swap = (a[:, 0] > b[:, 0]) | ((a[:, 0] == b[:, 0]) & (a[:, 1] > b[:, 1]))  # every note left to right
+    a, b = np.where(swap[:, None], b, a), np.where(swap[:, None], a, b)
+    n = len(rows)
+    raw, per = parts_notes(np.stack([a, b], axis=1).reshape(-1, 2), np.arange(n) * 2, np.zeros(n, bool), counts=True)
+    return np.column_stack([raw, np.repeat(rows[:, 3], per)])

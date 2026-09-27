@@ -373,8 +373,9 @@ TOPICS = [
               "PPQ 32767 or higher: many MIDI programs can't open the file (the box turns red).\n\n"
               "If something goes wrong, the details go to errors.log next to Spiderweb.",
          words="save open export generate midi file ppq bpm autosave backup"),
-    dict(id="domino", section="Sound and MIDI", title="Copy to Domino",
-         tip="Ctrl+Shift+C copies the notes; Ctrl+V in Domino pastes them at its play cursor.",
+    dict(id="domino", section="Sound and MIDI", title="Copy to / Paste from Domino",
+         tip="Ctrl+Shift+C copies the notes; Ctrl+V in Domino pastes them at its play cursor.\n"
+             "Ctrl+Shift+V pastes notes copied in Domino as one shape.",
          text="Copy to Domino (under Project, or Ctrl+Shift+C) puts the selected shapes' notes on the clipboard, or "
               "all notes when nothing is selected. In Domino, highlight a track, put the play cursor where the notes "
               "should go and press Ctrl+V.\n\n"
@@ -386,8 +387,16 @@ TOPICS = [
               "it, and so on. The pasted notes play on those tracks' own channels, and tracks that don't fit below "
               "the last one are dropped.\n\n"
               "Ticks are copied as they are: with a different PPQ in Domino the notes come out longer or shorter, so "
-              "set the same PPQ in both (or use that on purpose).",
-         words="copy paste clipboard domino track bar ppq"),
+              "set the same PPQ in both (or use that on purpose).\n\n"
+              "Paste from Domino (or Ctrl+Shift+V) works the other way: select notes in Domino, press Ctrl+C there, "
+              "then paste here. The start of what you copied lands on the play line (snapped to the grid), like "
+              "pasting in Domino, and ticks are taken as they are. The notes of every copied track become ONE shape "
+              "(Pasted notes); controllers and other events are left out. Channels are then handled by Spiderweb like "
+              "any other shape's notes (Channels setting).\n\n"
+              "Move, flip, turn, stretch or skew the shape like a custom shape: the notes go with its box. The notes "
+              "keep their own velocities until you change the shape's velocity (in the panel or the velocity "
+              "pane).",
+         words="copy paste clipboard domino track bar ppq import pasted notes"),
 
     # ------------------------------------------------------------ drawer
     dict(id="drawer", section="Custom shape drawer", title="The drawer",
@@ -462,7 +471,7 @@ TOPICS = [
               "Curves: Alt+drag a handle = sharp corner, Alt+drag an anchor = new handles, Ctrl = change only this "
               "curve (linked funnel curves).\n\n"
               "Number boxes: drag the name, Up / Down, wheel; Shift = big steps, Ctrl = small.\n\n"
-              "F1 = Help. Ctrl+S = save. Ctrl+Shift+C = Copy to Domino.",
+              "F1 = Help. Ctrl+S = save. Ctrl+Shift+C = Copy to Domino, Ctrl+Shift+V = Paste from Domino.",
          words="keys hotkeys keyboard mouse shortcuts"),
 ]
 

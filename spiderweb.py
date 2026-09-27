@@ -46,7 +46,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     errors.py        errors.log and the "something went wrong" message
     about.py         version number, the program's folder
     midi_out.py      MIDI file writer
-    domino_clip.py   Copy to Domino (notes on the clipboard in Domino's own format)
+    domino_clip.py   Copy to / Paste from Domino (notes on the clipboard in Domino's own format)
     playback.py      playing through Windows MIDI out
     mathexpr.py      math in number boxes (960*4 etc.)
 """

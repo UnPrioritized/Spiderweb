@@ -73,7 +73,7 @@ class ShapeMenu:
             symmetry_menu(m, sh.get("sym"), lambda mode: self.set_symmetry(sh, mode, at))
         if sh.get("text") and len(app.sels) == 1:
             item("Edit text", "", lambda: self.edit_text(at))
-        if sh["kind"] == "custom" and len(app.sels) == 1:
+        if sh["kind"] == "custom" and "notes" not in sh and len(app.sels) == 1:
             k = None if sh.get("text") else self.stroke_at(sh, e.x, e.y)
             if k is not None:  # the stroke right-clicked gets picked
                 app.set_stroke(k)
