@@ -139,7 +139,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.channel_mode = tk.StringVar(value="single")
         self.channel_split = "key"  # what counts as an overlap for Multi channel (engine.SPLITS)
         self.keys = 128  # the project's key range: 0 .. keys - 1 (paths.KEYS)
-        self.keys256 = tk.BooleanVar(value=False)
+        self.keys_var = tk.StringVar(value=str(KEYS[0]))
         self.show_velocity = tk.BooleanVar(value=False)  # off on a fresh start: turning it on shows its tip
         self.vel_tool = tk.StringVar(value="line")
         self.midi_device = tk.StringVar(value=DEFAULT_DEVICE)
@@ -371,10 +371,12 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
                       *((4, 100000) if key == "bpm" else (1, 32)), label=lb)
             r += 1
         ttk.Label(box, text="Keys").grid(row=r, column=0, sticky="w", pady=1)
-        b = ttk.Checkbutton(box, text="256 keys", variable=self.keys256, command=self.on_project_change)
+        b = ttk.Combobox(box, textvariable=self.keys_var, values=[str(k) for k in KEYS], state="readonly",
+                         width=7)
         b.grid(row=r, column=1, sticky="w", padx=5)
-        Tooltip(b, "Off: the standard 128 keys (0–127), which every MIDI program reads.\n"
-                   "On: 256 keys (0–255), for players that support them (handy for tunings like 31edo).\n"
+        b.bind("<<ComboboxSelected>>", lambda e: self.on_project_change())
+        Tooltip(b, "128: the standard keys 0–127, which every MIDI program reads.\n"
+                   "256: keys 0–255, for players that support them (handy for tunings like 31edo).\n"
                    "Many MIDI programs can't read keys above 127, and playback here skips them.")
         r += 1
         ttk.Label(box, text="Output file").grid(row=r, column=0, sticky="w", pady=1)
@@ -630,7 +632,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
                 setattr(self, key, calc_int(self.pvar[key].get(), lo, hi))
             except ValueError:
                 pass
-        self.keys = KEYS[1] if self.keys256.get() else KEYS[0]
+        self.keys = KEYS[1] if self.keys_var.get() == str(KEYS[1]) else KEYS[0]
         self.roll.clamp_view()
         warn = self.ppq >= PPQ_WARN
         self.ppq_box.config(style="Bad.TCombobox" if warn else "TCombobox")

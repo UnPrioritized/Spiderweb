@@ -60,7 +60,7 @@ Good to know
   Only the notes come along (no controllers).
 - Domino can't open MIDI files with a PPQ of 32767 or higher. Spiderweb warns
   you (the PPQ turns red) but still writes them.
-- 256 keys (under Project) takes the piano roll up to key 255, for players
+- Keys: 256 (under Project) takes the piano roll up to key 255, for players
   that read 256-key MIDI (handy for tunings like 31edo). Most MIDI programs,
   Domino included, only read keys 0-127, and Spiderweb's own playback
   skips the keys above 127.

@@ -371,10 +371,10 @@ TOPICS = [
               "project files (.json). Shapes are stored in beats, so changing PPQ doesn't move them.\n\n"
               "Generate MIDI writes the file set under Output file, with the PPQ, BPM and beats per bar from Project. "
               "PPQ 32767 or higher: many MIDI programs can't open the file (the box turns red).\n\n"
-              "256 keys (under Project): the piano roll goes up to key 255 instead of 127, and the MIDI file keeps "
-              "those keys. That's for players that support 256 keys (handy for tunings like 31edo, which need more "
-              "keys per octave). Many MIDI programs can't read keys above 127, and playback here skips them. Turned "
-              "off, notes above 127 are left out; the shapes stay as they are.\n\n"
+              "Keys (under Project) set to 256: the piano roll goes up to key 255 instead of 127, and the MIDI file "
+              "keeps those keys. That's for players that support 256 keys (handy for tunings like 31edo, which need more "
+              "keys per octave). Many MIDI programs can't read keys above 127, and playback here skips them. Back at "
+              "128, notes above 127 are left out; the shapes stay as they are.\n\n"
               "If something goes wrong, the details go to errors.log next to Spiderweb.",
          words="save open export generate midi file ppq bpm autosave backup 256 keys 31edo microtonal range"),
     dict(id="domino", section="Sound and MIDI", title="Copy to / Paste from Domino",

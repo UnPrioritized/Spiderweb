@@ -124,7 +124,7 @@ class ProjectFiles:
                 self.pvar[key].set(str(data[key]))
         mode = data.get("channel_mode", "auto" if data.get("auto_channels") else "single")
         self.channel_mode.set(mode if mode in CHANNEL_MODES else "single")
-        self.keys256.set(data.get("keys") == KEYS[1])
+        self.keys_var.set(str(KEYS[1] if data.get("keys") == KEYS[1] else KEYS[0]))
         split = data.get("channel_split")
         self.split_box.current(SPLITS.index(split) if split in SPLITS else 0)
         if data.get("snap") in SNAPS:
