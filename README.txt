@@ -1,4 +1,4 @@
-Spiderweb 1.0.0
+Spiderweb 1.1.0
 ===============
 
 Draw lines, curves and shapes on a piano roll and turn them into MIDI notes
