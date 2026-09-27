@@ -1,0 +1,100 @@
+"""Copy to Domino: notes on the clipboard in the format Domino's own Ctrl+C uses, so Ctrl+V in Domino pastes them.
+
+The clipboard format is "MidiPortalSequence": b"PortalSequenceData", the unpacked size (u32), then zlib data.
+Unpacked it's items of [tag u16][length u32][data], some holding more items: song settings, one track per
+copied track (settings, the notes, the copied stretch's length, more settings), more song settings.
+A note = item 2001 holding 1001 (start tick, u32), 2001 (key, u8), 2002 (velocity, u8), 2003 (gate, u32).
+Ticks count from the start of the copied stretch; Domino pastes that start at its play cursor and doesn't
+convert ticks to its own PPQ (the user matches the PPQ). The track's channel isn't in the data: pasted notes
+go into the highlighted track. Everything but the notes, the PPQ and the length is copied from a real
+Domino copy (the copyright text left empty).
+"""
+
+import ctypes
+import struct
+import zlib
+from ctypes import wintypes
+
+import numpy as np
+
+FORMAT = "MidiPortalSequence"
+MAGIC = b"PortalSequenceData"
+
+SONG_START = bytes.fromhex("e80300000000e90300000000")  # 1000 (empty), 1001 = copyright text (empty)
+SONG_REST = bytes.fromhex(  # after 1002 = PPQ
+    "ef030400000030000000f1030400000000000000f403080000000000000000000000f5030400000000000000f6030400000000"
+    "000000fb0300000000fc030400000010000000fd030100000001fe030100000001ff03040000001100000000040100000001")
+TRACK_HEAD = bytes.fromhex(
+    "e803020000000000e9030100000000ea0300000000eb030100000000ec030100000000f003010000003cf103110000004765"
+    "6e6572616c204d494449204472756df303020000000000f4030400000000000000f8030400000064000000f9030400000000"
+    "000000f5030100000001f603020000000100f7030100000001fa0301000000fffb030400000001000000fc03100000000000"
+    "0000000000000000000000000000fd030100000000fe03010000007f")
+TRACK_TAIL = bytes.fromhex(
+    "ed030400000032000000ee030100000064ef0304000000e0010000f2030e000000e8030100000000e9030100000000")
+SONG_TAIL = bytes.fromhex(
+    "ee0300000000f0031a000000e80300000000e9030400000001000000ea030400000001000000f90342000000640001000000"
+    "0065000100000000660001000000006700040000006400000068000100000000690004000000640000006a000c0000000505"
+    "05050505050505050505")
+
+# one note = 40 bytes: the note item's tag and length, then its four items (tag, length, value)
+NOTE = np.dtype([("tag", "<u2"), ("len", "<u4"),
+                 ("t1", "<u2"), ("l1", "<u4"), ("tick", "<u4"),
+                 ("t2", "<u2"), ("l2", "<u4"), ("key", "u1"),
+                 ("t3", "<u2"), ("l3", "<u4"), ("vel", "u1"),
+                 ("t4", "<u2"), ("l4", "<u4"), ("gate", "<u4")])
+
+
+def item(tag, body):
+    return struct.pack("<HI", tag, len(body)) + body
+
+
+def clip_data(notes, ppq, bar):
+    """notes: (start, end, pitch, velocity, ...) rows -> the clipboard bytes. The copy starts at the bar line at
+    or before the first note (so the notes keep their place in the bar) and runs to the bar line after the last."""
+    notes = notes[np.lexsort((notes[:, 2], notes[:, 0]))]
+    first = int(notes[:, 0].min()) // bar * bar
+    length = -(-(int(notes[:, 1].max()) - first) // bar) * bar
+    rows = np.zeros(len(notes), NOTE)
+    rows["tag"], rows["len"] = 2001, NOTE.itemsize - 6
+    rows["t1"], rows["l1"], rows["tick"] = 1001, 4, notes[:, 0] - first
+    rows["t2"], rows["l2"], rows["key"] = 2001, 1, notes[:, 2]
+    rows["t3"], rows["l3"], rows["vel"] = 2002, 1, notes[:, 3]
+    rows["t4"], rows["l4"], rows["gate"] = 2003, 4, notes[:, 1] - notes[:, 0]
+    track = TRACK_HEAD + rows.tobytes() + item(2009, item(1001, struct.pack("<I", max(length, bar)))) + TRACK_TAIL
+    data = SONG_START + item(1002, struct.pack("<H", ppq)) + SONG_REST + item(1003, track) + SONG_TAIL
+    return MAGIC + struct.pack("<I", len(data)) + zlib.compress(data)
+
+
+def put_on_clipboard(raw):
+    """raw bytes -> the clipboard as FORMAT (replaces what's there). Returns False if the clipboard was busy."""
+    user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+    user32.RegisterClipboardFormatW.restype = wintypes.UINT
+    user32.SetClipboardData.argtypes = [wintypes.UINT, ctypes.c_void_p]
+    user32.SetClipboardData.restype = ctypes.c_void_p
+    kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+    kernel32.GlobalAlloc.restype = ctypes.c_void_p
+    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
+    fmt = user32.RegisterClipboardFormatW(FORMAT)
+    h = kernel32.GlobalAlloc(0x0002, len(raw))  # GMEM_MOVEABLE
+    if not h:
+        raise MemoryError("not enough memory for the clipboard")
+    ctypes.memmove(kernel32.GlobalLock(h), raw, len(raw))
+    kernel32.GlobalUnlock(h)
+    for _ in range(10):  # another program may have it open for a moment
+        if user32.OpenClipboard(None):
+            break
+        kernel32.Sleep(20)
+    else:
+        kernel32.GlobalFree(h)
+        return False
+    try:
+        user32.EmptyClipboard()
+        if not user32.SetClipboardData(fmt, h):  # on success the clipboard owns h
+            kernel32.GlobalFree(h)
+            return False
+    finally:
+        user32.CloseClipboard()
+    return True

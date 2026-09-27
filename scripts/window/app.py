@@ -179,6 +179,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         for key, fn in (("<Control-z>", self.undo), ("<Control-y>", self.redo), ("<Control-s>", self.save_project)):
             self.bind_all(key, lambda e, fn=fn: None if self.in_drawer(e) else fn())
         for keys, fn in (("space", self.toggle_play), ("Control-c Control-C", self.copy_selected),
+                         ("Control-Shift-c Control-Shift-C", self.copy_to_domino),
                          ("Control-v Control-V", self.paste), ("Control-h Control-H", lambda: self.flip(True)),
                          ("Control-j Control-J", lambda: self.flip(False)), ("Control-a Control-A", self.select_all),
                          ("Control-Left", lambda: self.rotate(False)), ("Control-Right", lambda: self.rotate(True))):
@@ -386,6 +387,11 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         ttk.Button(btns, text="Open…", command=self.open_project).pack(side="left")
         ttk.Button(btns, text="Save…", command=self.save_project).pack(side="left", padx=4)
         ttk.Button(btns, text="Generate MIDI", command=self.generate).pack(side="right")
+        b = ttk.Button(box, text="Copy to Domino", command=self.copy_to_domino)
+        b.grid(row=r + 1, column=0, columnspan=2, sticky="e", pady=(4, 0))
+        Tooltip(b, "Ctrl+Shift+C: copies the selected shapes' notes (all notes when nothing is selected).\n"
+                   "In Domino, highlight a track, put the play cursor on a bar line and press Ctrl+V.\n"
+                   "Everything goes into that one track. Ticks are copied as they are: use the same PPQ there.")
 
     def _build_shape_list(self, side):
         box = ttk.LabelFrame(side, text="Shapes", padding=6)

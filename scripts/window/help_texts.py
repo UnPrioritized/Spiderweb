@@ -373,6 +373,17 @@ TOPICS = [
               "PPQ 32767 or higher: many MIDI programs can't open the file (the box turns red).\n\n"
               "If something goes wrong, the details go to errors.log next to Spiderweb.",
          words="save open export generate midi file ppq bpm autosave backup"),
+    dict(id="domino", section="Sound and MIDI", title="Copy to Domino",
+         tip="Ctrl+Shift+C copies the notes; Ctrl+V in Domino pastes them at its play cursor.",
+         text="Copy to Domino (under Project, or Ctrl+Shift+C) puts the selected shapes' notes on the clipboard, or "
+              "all notes when nothing is selected. In Domino, highlight a track, put the play cursor where the notes "
+              "should go and press Ctrl+V.\n\n"
+              "The copy starts at the bar line before the first note, so put the play cursor on a bar line: the notes "
+              "keep their place in the bar.\n\n"
+              "Everything goes into the one highlighted track, on that track's channel (with Multi channel too).\n\n"
+              "Ticks are copied as they are: with a different PPQ in Domino the notes come out longer or shorter, so "
+              "set the same PPQ in both (or use that on purpose).",
+         words="copy paste clipboard domino track bar ppq"),
 
     # ------------------------------------------------------------ drawer
     dict(id="drawer", section="Custom shape drawer", title="The drawer",
@@ -447,7 +458,7 @@ TOPICS = [
               "Curves: Alt+drag a handle = sharp corner, Alt+drag an anchor = new handles, Ctrl = change only this "
               "curve (linked funnel curves).\n\n"
               "Number boxes: drag the name, Up / Down, wheel; Shift = big steps, Ctrl = small.\n\n"
-              "F1 = Help. Ctrl+S = save.",
+              "F1 = Help. Ctrl+S = save. Ctrl+Shift+C = Copy to Domino.",
          words="keys hotkeys keyboard mouse shortcuts"),
 ]
 
@@ -485,8 +496,9 @@ SEE = {
     "view": ["playback", "shortcuts"],
     "velocity": ["playback", "selecting"],
     "playback": ["velocity", "channels", "files"],
-    "channels": ["files", "playback"],
-    "files": ["channels"],
+    "channels": ["files", "domino", "playback"],
+    "files": ["channels", "domino"],
+    "domino": ["files", "channels"],
     "drawer": ["drawer_select", "custom", "fill"],
     "drawer_select": ["drawer", "curves_pen", "symmetric"],
     "drawer_line": ["drawer", "drawer_poly"],

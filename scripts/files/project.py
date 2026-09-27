@@ -6,11 +6,14 @@ import time
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
+import numpy as np
+
 from notes.custom import ALIGNS, CUSTOM_DEFAULTS, FILLS
 from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_shape
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.text import TEXT_DEFAULTS, clean_text
+from files.domino_clip import clip_data, put_on_clipboard
 from files.midi_out import PPQ_WARN, write_midi
 from files.about import HERE, VERSION
 from files.safefile import write_bytes, write_text
@@ -298,3 +301,25 @@ class ProjectFiles:
                 if ppq >= PPQ_WARN else "")
         messagebox.showinfo("Spiderweb", f"Saved {len(self.rendered):,} notes on {channels} track(s), one channel "
                                          f"each:\n{path}{note}")
+
+    def copy_to_domino(self):
+        """Ctrl+Shift+C: the selected shapes' notes (all notes when nothing is selected) on the clipboard, for
+        Ctrl+V in Domino. One track; the copy starts at the bar line before the first note."""
+        try:
+            ppq, _, beats = self.read_project()
+        except ValueError as e:
+            messagebox.showerror("Spiderweb", str(e))
+            return
+        notes = self.rendered
+        if self.sels:
+            notes = notes[np.isin(notes[:, 5], sorted(self.sels))]
+        if not len(notes):
+            messagebox.showerror("Spiderweb", "No notes to copy — draw something inside the 0–127 pitch range first."
+                                 if not self.sels else "The selected shapes have no notes.")
+            return
+        if not put_on_clipboard(clip_data(notes, ppq, beats * ppq)):
+            messagebox.showerror("Spiderweb", "Couldn't use the clipboard (another program has it open). Try again.")
+            return
+        what = f"{len(notes):,} notes" if self.sels else f"all {len(notes):,} notes"
+        self.status.config(text=f"Copied {what} for Domino (PPQ {ppq}) — highlight a track there, put the play "
+                                "cursor on a bar line and press Ctrl+V")
