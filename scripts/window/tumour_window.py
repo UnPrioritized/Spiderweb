@@ -13,9 +13,14 @@ from window.widgets import Scrub, Tooltip
 SHAPE_CHOICES = [("triangle", "Triangle"), ("square", "Square"), ("circle", "Circle"), ("parabola", "Parabola")]
 SIDE_CHOICES = [("alt", "Alternating"), ("left", "Left"), ("right", "Right"), ("random", "Random")]
 WRAP_CHOICES = [("simple", "Straight"), ("wrap", "Bent with the line")]
-# the number boxes: (setting, label, unit, quick change steps (step, Shift step, Ctrl step) for widgets.Scrub)
-NUMBERS = [("size", "Size", "keys", (0.1, 1, 0.01)), ("length", "Length", "ticks", (1, 10, 0.1)),
-           ("dist", "Distance", "ticks", (1, 10, 0.1)), ("ease", "Lead in", "ticks", (1, 10, 0.1))]
+# the number boxes: (setting, label, unit, quick change steps (step, Shift step, Ctrl step) for widgets.Scrub,
+# lowest, highest (as typed))
+NUMBERS = [("size", "Size", "keys", (0.1, 1, 0.01), 0, 1000), ("length", "Length", "ticks", (1, 10, 0.1), 0, 10 ** 7),
+           ("dist", "Distance", "ticks", (1, 10, 0.1), 1, 10 ** 7),
+           ("rot", "Rotation", "degrees", (1, 15, 0.1), -180, 180),
+           ("slant", "Slant", "% (square)", (1, 10, 0.1), -100, 100),
+           ("ease", "Lead in", "ticks", (1, 10, 0.1), 0, 10 ** 7)]
+TICKS = ("length", "dist", "ease")  # stored in beats, shown in ticks
 TIPS = {
     "size": "How far the bumps stick out, in keys (as the piano roll looks).",
     "length": "How long each bump is along the line, in ticks.\n0 = spikes: every bump is one point pushed sideways,\n"
@@ -25,6 +30,12 @@ TIPS = {
     "ease": "Smooth start and end: over this many ticks from each end of the range,\n"
             "the bumps grow from nothing to full size (and shrink back to nothing at the end),\n"
             "so the line leads into them instead of starting with a sudden side.\n0 = off.",
+    "rot": "Tilts every bump, its two feet staying on the line.\n"
+           "Plus leans it forward (the way the line runs), minus leans it back.\n"
+           "90 lays it flat along the line, 180 turns it over to the other side.",
+    "slant": "Square bumps only: slants the square's sides.\n"
+             "0 = a square, 100 = the top narrows to a point (like a triangle),\n"
+             "minus = the top is wider than the bottom (the sides lean outwards).",
     "side": "Which side of the line the bumps go (left / right as you go along the line from its start).",
     "wrap": "Only matters where the line curves under a bump (long bumps on a curve, arc or circle).\n"
             "Straight: each bump sits on a straight shortcut between its ends (angular).\n"
@@ -64,7 +75,7 @@ class TumourWindow(tk.Toplevel):
                                       command=lambda: self.set("on", self.on.get()))
         self.on_box.pack(side="left")
         self.combo(top, "shape", SHAPE_CHOICES, 9, "Shape")
-        for r, (key, label, unit, steps) in enumerate(NUMBERS, start=2):
+        for r, (key, label, unit, steps, lo, hi) in enumerate(NUMBERS, start=2):
             lb = ttk.Label(box, text=label)
             lb.grid(row=r, column=0, sticky="w")
             var = self.vars[key] = tk.StringVar()
@@ -72,17 +83,17 @@ class TumourWindow(tk.Toplevel):
             e.grid(row=r, column=1, sticky="w", padx=(5, 3), pady=1)
             e.bind("<Return>", lambda ev, key=key: self.on_entry(key))
             e.bind("<FocusOut>", lambda ev, key=key: self.on_entry(key))
-            Scrub(app, [(e, var, lambda key=key: self.on_entry(key))], steps, 1 if key == "dist" else 0, label=lb)
+            Scrub(app, [(e, var, lambda key=key: self.on_entry(key))], steps, lo, hi, label=lb)
             ttk.Label(box, text=unit, foreground="#777").grid(row=r, column=2, sticky="w")
             Tooltip(e, TIPS[key])
             self.widgets.append(e)
             self.entries[key] = e
         row = ttk.Frame(box)
-        row.grid(row=6, column=0, columnspan=4, sticky="w", pady=(1, 0))
+        row.grid(row=8, column=0, columnspan=4, sticky="w", pady=(1, 0))
         self.combo(row, "side", SIDE_CHOICES, 10, "Side", pad=0)
         self.combo(row, "wrap", WRAP_CHOICES, 15, "")
         row = ttk.Frame(box)
-        row.grid(row=7, column=0, columnspan=4, sticky="w", pady=(1, 0))
+        row.grid(row=9, column=0, columnspan=4, sticky="w", pady=(1, 0))
         ttk.Label(row, text="Range").pack(side="left")
         for i, key in enumerate(("start", "end")):
             if i:
@@ -106,7 +117,7 @@ class TumourWindow(tk.Toplevel):
         Tooltip(self.reroll, "Random sides: pick them again.")
         self.info = ttk.Label(box, text="", foreground="#777", font=("Segoe UI", 8),
                               wraplength=int(300 * app.scale), justify="left")
-        self.info.grid(row=8, column=0, columnspan=4, sticky="ew", pady=(4, 0))
+        self.info.grid(row=10, column=0, columnspan=4, sticky="ew", pady=(4, 0))
 
         self.bind("<Escape>", lambda e: self.close())
         self.bind("<Configure>", self.remember, add="+")
@@ -150,8 +161,8 @@ class TumourWindow(tk.Toplevel):
         self.fit.set(tm["fit"])
         for key, choices in (("shape", SHAPE_CHOICES), ("side", SIDE_CHOICES), ("wrap", WRAP_CHOICES)):
             self.vars[key].set(dict(choices)[tm[key]])
-        for key, _, _, _ in NUMBERS:
-            value = tm[key] * (1 if key == "size" else app.ppq)
+        for key, *_ in NUMBERS:
+            value = tm[key] * (app.ppq if key in TICKS else 100 if key == "slant" else 1)
             self.vars[key].set(fmt(round(value, 3)))
         for key in ("start", "end"):
             self.vars[key].set(fmt(round(tm[key] * 100, 3)))
@@ -163,6 +174,7 @@ class TumourWindow(tk.Toplevel):
         for w in self.widgets:
             w.config(state=("readonly" if isinstance(w, ttk.Combobox) else "normal") if on else "disabled")
         self.reroll.config(state="normal" if on and tm["side"] == "random" else "disabled")
+        self.entries["slant"].config(state="normal" if on and tm["shape"] == "square" else "disabled")
         self.info.config(text="" if not tgts else
                          "Bumps along the line. The line's points stay draggable. Length 0 = spikes (a zigzag)."
                          if on else "Tick Tumours to put bumps along this line.")
@@ -198,12 +210,9 @@ class TumourWindow(tk.Toplevel):
             return
         try:
             x = calc(var.get())
-            if key == "size":
-                value = x if 0 <= x <= 1000 else None
-            elif key in ("start", "end"):
-                value = x / 100 if 0 <= x <= 100 else None
-            else:
-                value = x / self.app.ppq if (1 if key == "dist" else 0) <= x <= 10 ** 7 else None
+            lo, hi = next(((lo, hi) for k, *_, lo, hi in NUMBERS if k == key), (0, 100))
+            scale = self.app.ppq if key in TICKS else 100 if key in ("slant", "start", "end") else 1
+            value = x / scale if lo <= x <= hi else None
             if value is None:
                 raise ValueError
         except ValueError:

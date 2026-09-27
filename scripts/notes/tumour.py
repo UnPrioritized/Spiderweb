@@ -5,6 +5,10 @@ A line, polyline, freehand stroke, curve or arc can carry sh["tumour"] = {"on", 
 notes from gets a bump every `dist` along it, each `length` long and `size` keys high, on the side `side` picks.
 `ease` > 0: over that far from each end of the range the bumps grow from nothing, so the line leads into them
 smoothly instead of starting with a sudden (e.g. straight-up) side.
+`rot` (degrees): each bump tilts, its feet staying on the line: every point's sideways part turns by that much,
+positive leaning forward (the way the line runs), so 90 lays it flat along the line and 180 puts it on the other side.
+`slant` (-1..1, square only): the square's top is narrowed by that much of its length (1 = a point, like a
+triangle; minus = wider than its base).
 `fit`: the distance is stretched a little so a whole number of steps fits the range exactly; round a closed loop
 (e.g. a full circle) the bumps then meet up where it starts.
 Worked out as it looks on screen: k = beats per key on screen when the settings were last changed (like arcs, see
@@ -26,7 +30,7 @@ WRAPS = ("simple", "wrap")
 LINE_KINDS = ("line", "poly", "free", "curve", "arc")  # the shapes that can have tumours
 MAX_TUMOURS = 20000
 TUMOUR_DEFAULTS = {"on": True, "shape": "triangle", "size": 3.0, "length": 0.125, "dist": 0.125, "side": "alt",
-                   "wrap": "simple", "start": 0.0, "end": 1.0, "ease": 0.0, "fit": False, "seed": 1, "mirror": False,
+                   "wrap": "simple", "start": 0.0, "end": 1.0, "ease": 0.0, "rot": 0.0, "slant": 0.0, "fit": False, "seed": 1, "mirror": False,
                    "k": 0.25}
 
 
@@ -39,7 +43,7 @@ def clean_tumour(tm):
         if tm.get(key) in choices:
             out[key] = tm[key]
     for key, lo, hi in (("size", -1000, 1000), ("length", 0, 1e6), ("dist", 1e-9, 1e6), ("start", 0, 1),
-                        ("end", 0, 1), ("ease", 0, 1e6), ("k", 1e-9, 1e9)):
+                        ("end", 0, 1), ("ease", 0, 1e6), ("k", 1e-9, 1e9), ("rot", -180, 180), ("slant", -1, 1)):
         try:
             v = float(tm.get(key, out[key]))
             if math.isfinite(v):
@@ -56,12 +60,13 @@ def clean_tumour(tm):
     return out
 
 
-def template(shape, length, size):
+def template(shape, length, size, slant=0.0):
     """The bump as (x along the line, y sideways) points from (0, 0) to (length, 0)."""
     if shape == "triangle":
         return [(0.0, 0.0), (length / 2, size), (length, 0.0)]
     if shape == "square":
-        return [(0.0, 0.0), (0.0, size), (length, size), (length, 0.0)]
+        m = length / 2 * slant
+        return [(0.0, 0.0), (m, size), (length - m, size), (length, 0.0)]
     if shape == "parabola":
         return [(length * t / 16, size * 4 * (t / 16) * (1 - t / 16)) for t in range(17)]
     if abs(size) < 1e-12:
@@ -203,6 +208,9 @@ def tumour_path(path, tm):
         while s <= hi + 1e-9 and len(starts) < MAX_TUMOURS:
             starts.append(min(s, hi))
             s += dist
+    rot = math.radians(tm.get("rot", 0.0))
+    lean = abs(rot) > 1e-12
+    sin, cos = math.sin(rot), math.cos(rot)
     rnd = random.Random(tm["seed"])
     flip = -1 if tm["mirror"] else 1
     sides = []
@@ -259,12 +267,17 @@ def tumour_path(path, tm):
             out.add([w.pts[0]])
         s, side = np.array(starts), np.array(sides, float)
         (x, y), (nx, ny) = w.at_many(s), normals(s)
-        h = size * side * grows(s)
-        out.block(np.column_stack([x + nx * h, y + ny * h]))
+        h = size * grows(s)
+        if lean:  # tilted: part of the push goes along the line
+            ux, uy = ny, -nx
+            out.block(np.column_stack([x + (nx * cos * side + ux * sin) * h, y + (ny * cos * side + uy * sin) * h]))
+        else:
+            h = h * side
+            out.block(np.column_stack([x + nx * h, y + ny * h]))
         if not fit_loop:
             out.add(base(starts[-1], w.total) + [w.pts[-1]])
     else:
-        shape = template(tm["shape"], length, size)
+        shape = template(tm["shape"], length, size, tm.get("slant", 0.0))
         pts, per_bump, sizes = [], [], []
         for i, (s, side) in enumerate(zip(starts, sides)):
             room = min(hi, starts[i + 1] if i + 1 < len(starts) else math.inf)
@@ -306,6 +319,8 @@ def tumour_path(path, tm):
             if tm["wrap"] == "simple":
                 p = np.array(pts, float)
                 x, y = p[:, 0] * par[:, 4], p[:, 1]
+                if lean:
+                    x, y = x + y * sin, y * cos
                 ax, ay, ux, uy, side = par[:, 0], par[:, 1], par[:, 2], par[:, 3], par[:, 5]
                 out.fill(np.column_stack([ax + ux * x - uy * y * side, ay + uy * x + ux * y * side]))
             else:
@@ -313,6 +328,8 @@ def tumour_path(path, tm):
                 s, side = par[:, 0], par[:, 1]
                 x = p[:, 0]
                 y = p[:, 1] * grows(s + x)
+                if lean:
+                    x, y = x + y * sin, y * cos
                 d = s + x
                 if w.closed:  # a round bump bulging past a loop's start / end: round the loop
                     d = np.mod(d, w.total)
