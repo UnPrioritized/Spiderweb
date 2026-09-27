@@ -394,7 +394,8 @@ TOPICS = [
               "(Pasted notes); controllers and other events are left out. Each note remembers its track: with Multi "
               "channel every track counts as a shape of its own (tracks that overlap get different channels, the "
               "others can share one), with Single channel all of them go on one channel and overlaps are "
-              "removed.\n\n"
+              "removed. If Ctrl+Shift+V does nothing, another program (often a clipboard manager) has taken that "
+              "shortcut for itself: free it in that program's settings, or use the button.\n\n"
               "Move, flip, turn, stretch or skew the shape like a custom shape: the notes go with its box. The notes "
               "keep their own velocities until you change the shape's velocity (in the panel or the velocity "
               "pane).",
