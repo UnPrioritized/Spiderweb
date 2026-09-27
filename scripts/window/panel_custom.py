@@ -204,6 +204,8 @@ class CustomPanel:
             for t in tgts:
                 t["name"], t["strokes"] = name, copy.deepcopy(tpl[0])
             self.shapes_changed()
+        if self.tool.get() in BOX_TOOLS:  # Square / Circle / Triangle: a library shape picked = back to Custom shape
+            self.tool.set("custom")
         self.sync_custom()
         self.schedule_autosave()
 

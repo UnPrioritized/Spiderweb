@@ -202,9 +202,16 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         top.pack(fill="x")
         top.columnconfigure(1, weight=1)
         bar = self.tool_bar = ttk.Frame(top)
+        # Custom shape stays lit while Square / Circle / Triangle (they make custom shapes) is the tool, so it has
+        # its own on/off (set in show_shape_tools) instead of lighting up only for its own value
+        self.custom_lit = tk.BooleanVar(value=False)
         for key, label, hot in TOOLS:
-            b = ttk.Radiobutton(bar, text=f"{label} ({hot.upper()})", value=key, variable=self.tool,
-                                style="Toolbutton")
+            if key == "custom":
+                b = ttk.Checkbutton(bar, text=f"{label} ({hot.upper()})", variable=self.custom_lit,
+                                    style="Toolbutton", command=lambda: self.tool.set("custom"))
+            else:
+                b = ttk.Radiobutton(bar, text=f"{label} ({hot.upper()})", value=key, variable=self.tool,
+                                    style="Toolbutton")
             b.pack(side="left", padx=1)
             Tooltip(b, BY_ID[TOOL_TOPICS[key]]["tip"])
             if key == "custom":
@@ -278,6 +285,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
                 self.shape_tool_bar.pack(side="left", after=self.custom_tool_btn)
             else:
                 self.shape_tool_bar.pack_forget()
+        self.custom_lit.set(show)  # (Custom shape stays lit with them: they make custom shapes)
         self.after_idle(self.fit_toolbar)
 
     def fit_toolbar(self):
@@ -391,14 +399,14 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         ttk.Button(btns, text="Generate MIDI", command=self.generate).pack(side="right")
         domino = ttk.Frame(box)
         domino.grid(row=r + 1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
-        b = ttk.Button(domino, text="Paste from Domino", command=self.paste_from_domino)
-        b.pack(side="left")
+        paste = b = ttk.Button(domino, text="Paste from Domino", command=self.paste_from_domino)
         Tooltip(b, "Ctrl+Shift+V: the notes copied in Domino (Ctrl+C there) become one shape here.\n"
                    "What was copied starts at the play line, like pasting in Domino. Every track's notes go into\n"
                    "the one shape; controllers and other events are left out.\n"
                    "Ticks are taken as they are: use the same PPQ here.")
         b = ttk.Button(domino, text="Copy to Domino", command=self.copy_to_domino)
         b.pack(side="right")
+        paste.pack(side="right", padx=4)  # (next to it, the same gap as Open… / Save…)
         Tooltip(b, "Ctrl+Shift+C: copies the selected shapes' notes (all notes when nothing is selected).\n"
                    "In Domino, highlight a track, put the play cursor on a bar line and press Ctrl+V.\n"
                    "Multi channel: each channel goes into its own track, from the highlighted one down.\n"
