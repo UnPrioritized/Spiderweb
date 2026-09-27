@@ -8,6 +8,7 @@ import numpy as np
 from notes.custom import custom_note_count, gap_line
 from notes.engine import cached_arrays, shape_notes
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count
+from notes.paths import KEYS
 from roll.roll_shared import (BLACK, DRAFT_COLOR, PIANO_88, PREVIEW_LIMIT, SELECTED_COLOR, SLOT_COLORS,
                               fade, note_name)
 
@@ -520,13 +521,15 @@ class RollDrawing:
         self.create_rectangle(0, top, kb, h, fill="#ffffff", outline="")
         p_lo, p_hi = self.visible_pitches(h)
         font_size = max(7, min(11, int(self.sy * 0.6 / self.scale)))
+        # faintly greyed: outside a real 88-key piano; with 256 keys, above the standard 128 instead
+        usual = PIANO_88 if self.app.keys == KEYS[0] else range(KEYS[0])
         for p in range(p_lo, p_hi + 1):
             y0, y1 = self.row_y(p)
             n = p % 12
-            if p not in PIANO_88:  # outside a real 88-key piano: faintly greyed
+            if p not in usual:
                 self.create_rectangle(0, y0, kb, y1, fill="#e2e2e2", outline="")
             if n in BLACK:
-                self.create_rectangle(0, y0, kb * 0.6, y1, fill="#222222" if p in PIANO_88 else "#6a6a6a", outline="")
+                self.create_rectangle(0, y0, kb * 0.6, y1, fill="#222222" if p in usual else "#6a6a6a", outline="")
             if n in (0, 5):  # bottom edge of C and F = white key border
                 self.create_line(0, y1, kb, y1, fill="#606060" if n == 0 else "#b0b0b0")
             label = note_name(p) if n == 0 and self.sy >= 6 else (
@@ -552,4 +555,4 @@ class RollDrawing:
                 self.create_text(x + 3, top / 2, text=str(int(b // beats) + 1), anchor="w", fill="#333",
                                  font=("Segoe UI", 8))
             b += step
-        self.create_rectangle(0, 0, kb, top, fill="#e4e4e4", outline="")
+        self.create_rectangle(0, 0, kb, top, fill="#f0f0f0", outline="")

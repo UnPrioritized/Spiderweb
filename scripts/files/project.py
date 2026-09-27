@@ -294,6 +294,10 @@ class ProjectFiles:
         path = self.pvar["output"].get().strip() or os.path.join(OUTPUT_DIR, "spiderweb.mid")
         if not path.lower().endswith((".mid", ".midi")):
             path += ".mid"
+        if os.path.exists(path) and not messagebox.askyesno(  # (asked like the Output file dialog does)
+                "Confirm Save As", f"{os.path.basename(path)} already exists.\nDo you want to replace it?",
+                icon="warning", default="no"):
+            return
         try:
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
             write_midi(path, ppq, bpm, beats, self.rendered)
