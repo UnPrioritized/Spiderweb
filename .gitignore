@@ -1,0 +1,11 @@
+__pycache__/
+*.tmp
+*.spec
+build/
+dist/
+output/
+shapes/
+autosave*.json
+errors*.log
+curves.json
+icon.png
