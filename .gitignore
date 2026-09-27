@@ -9,3 +9,4 @@ autosave*.json
 errors*.log
 curves.json
 icon.png
+/*.json
