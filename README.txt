@@ -51,9 +51,9 @@ The basics:
 Good to know
 ------------
 - Copy to Domino (Ctrl+Shift+C) puts the notes on the clipboard: in Domino,
-  highlight a track, put the play cursor on a bar line and press Ctrl+V.
-  With Multi channel, each channel goes into its own track, from the
-  highlighted one down. Use the same PPQ in both (the ticks are copied as
+  double-click a bar line in a track to paste there.
+  With Multi channel, each channel goes into its own track, from that
+  track down. Use the same PPQ in both (the ticks are copied as
   they are).
   Paste from Domino (Ctrl+Shift+V) does the opposite: notes copied in
   Domino (Ctrl+C there) become one shape, starting at the play line.

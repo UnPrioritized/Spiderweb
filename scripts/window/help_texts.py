@@ -374,16 +374,16 @@ TOPICS = [
               "If something goes wrong, the details go to errors.log next to Spiderweb.",
          words="save open export generate midi file ppq bpm autosave backup"),
     dict(id="domino", section="Sound and MIDI", title="Copy to / Paste from Domino",
-         tip="Ctrl+Shift+C copies the notes; Ctrl+V in Domino pastes them at its play cursor.\n"
+         tip="Ctrl+Shift+C copies the notes; double-click a track in Domino to paste them there.\n"
              "Ctrl+Shift+V pastes notes copied in Domino as one shape.",
          text="Copy to Domino (under Project, or Ctrl+Shift+C) puts the selected shapes' notes on the clipboard, or "
-              "all notes when nothing is selected. In Domino, highlight a track, put the play cursor where the notes "
-              "should go and press Ctrl+V.\n\n"
-              "The copy starts at the bar line before the first note, so put the play cursor on a bar line: the notes "
+              "all notes when nothing is selected. In Domino, double-click the track where the notes "
+              "should go.\n\n"
+              "The copy starts at the bar line before the first note, so double-click on a bar line: the notes "
               "keep their place in the bar.\n\n"
-              "As drawn / Single channel: everything goes into the highlighted track, on that track's channel.\n"
+              "As drawn / Single channel: everything goes into the track you paste into, on that track's channel.\n"
               "Multi channel: each channel with notes becomes a track, in channel order, packed together (channels "
-              "without notes are skipped): the first goes into the highlighted track, the next into the track below "
+              "without notes are skipped): the first goes into the track you paste into, the next into the track below "
               "it, and so on. The pasted notes play on those tracks' own channels, and tracks that don't fit below "
               "the last one are dropped.\n\n"
               "Ticks are copied as they are: with a different PPQ in Domino the notes come out longer or shorter, so "

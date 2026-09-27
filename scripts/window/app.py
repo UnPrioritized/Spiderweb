@@ -408,8 +408,8 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         b.pack(side="right")
         paste.pack(side="right", padx=4)  # (next to it, the same gap as Open… / Save…)
         Tooltip(b, "Ctrl+Shift+C: copies the selected shapes' notes (all notes when nothing is selected).\n"
-                   "In Domino, highlight a track, put the play cursor on a bar line and press Ctrl+V.\n"
-                   "Multi channel: each channel goes into its own track, from the highlighted one down.\n"
+                   "In Domino, double-click a bar line in a track to paste there.\n"
+                   "Multi channel: each channel goes into its own track, from that one down.\n"
                    "Ticks are copied as they are: use the same PPQ there.")
 
     def _build_shape_list(self, side):

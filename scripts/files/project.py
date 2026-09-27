@@ -324,8 +324,8 @@ class ProjectFiles:
         what = f"{len(notes):,} note{'s' * (len(notes) != 1)}" if self.sels else f"all {len(notes):,} notes"
         tracks = len(np.unique(notes[:, 4]))
         where = "a track" if tracks == 1 else f"the first of {tracks} tracks"
-        self.status.config(text=f"Copied {what} for Domino (PPQ {ppq}) — highlight {where} there, put the play "
-                                "cursor on a bar line and press Ctrl+V")
+        self.status.config(text=f"Copied {what} for Domino (PPQ {ppq}) — in Domino, double-click a bar line in "
+                                f"{where} to paste")
 
     def paste_from_domino(self):
         """Ctrl+Shift+V: the notes copied in Domino as one shape (custom.py's pasted notes), placed like Domino
