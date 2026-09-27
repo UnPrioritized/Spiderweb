@@ -10,7 +10,7 @@ of its topic, and "[clip:<name>]" on a line of its own in a text puts clips/<nam
 
 import re
 
-from files.about import VERSION
+from files.about import VERSION, WEBSITE
 
 SECTIONS = ["Getting started", "Tools", "Shapes and settings", "Editing", "Sound and MIDI", "Custom shape drawer",
             "Reference"]
@@ -23,11 +23,13 @@ TOPICS = [
          text=f"Version {VERSION}\n"
               "© 2026 Kanade Tachibana\n\n"
               "Free to use, share and change under the MIT License.\n\n"
+              f"New versions, the source code and problem reports: {WEBSITE}\n\n"
               "All of the code was written by an AI model (Claude Opus 5.5, by Anthropic). Kanade Tachibana directed "
               "the project: decided what it should do, tested it and asked for changes.\n\n"
               "Spiderweb's folder holds your autosave (and autosave-backup), your shape library (shapes), the MIDI "
               "files you generate (output) and errors.log, where the details go if something goes wrong.",
-         words="about version license copyright author credits folder errors log"),
+         words="about version license copyright author credits folder errors log website github download update "
+               "source bug report"),
     dict(id="welcome", section="Getting started", title="Welcome to Spiderweb",
          tip="Draw lines and shapes on the piano roll and they become notes.\n"
              "Pick a tool at the top; a short tip like this one explains each the first time.\n"

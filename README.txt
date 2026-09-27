@@ -4,6 +4,9 @@ Spiderweb 1.0.0
 Draw lines, curves and shapes on a piano roll and turn them into MIDI notes
 (made for black MIDI, styled after Domino).
 
+New versions, source code and problem reports:
+https://github.com/UnPrioritized/Spiderweb
+
 About this program
 ------------------
 All of the code was written by an AI model (Claude Opus 5.5, by Anthropic).
@@ -53,7 +56,8 @@ Good to know
   starts, the previous session is also kept as autosave-backup.json; open it
   with Open... if something went wrong.
 - If Spiderweb runs into an error, the details go to errors.log in its
-  folder. Please include that file when you report a problem.
+  folder. Please include that file when you report a problem (on the
+  website's Issues page).
 
 Running from source
 -------------------

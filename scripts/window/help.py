@@ -8,9 +8,10 @@ import re
 import subprocess
 import sys
 import tkinter as tk
+import webbrowser
 from tkinter import ttk
 
-from files.about import BANNER, BANNER_HALF, HERE, LICENSE, VERSION
+from files.about import BANNER, BANNER_HALF, HERE, LICENSE, VERSION, WEBSITE
 from window.help_texts import BY_ID, NEXT, SECTIONS, SEE, TOPICS
 
 CLIPS = os.path.join(getattr(sys, "_MEIPASS", HERE), "clips")  # (the .exe carries them inside)
@@ -414,8 +415,18 @@ class HelpWindow(tk.Toplevel):
         self.text.insert("end", "\n\n")
 
     def about_buttons(self):
-        """The About page's buttons: the license, Spiderweb's folder."""
+        """The About page's website link and buttons: the website, the license, Spiderweb's folder."""
+        t = self.text
+        at = t.search(WEBSITE, "1.0", "end")
+        if at:
+            t.tag_add("web", at, f"{at}+{len(WEBSITE)}c")
+            t.tag_add("link", at, f"{at}+{len(WEBSITE)}c")
+            t.tag_bind("web", "<Button-1>", lambda e: webbrowser.open(WEBSITE))
+            t.tag_bind("web", "<Enter>", lambda e: (t.config(cursor="hand2"), t.tag_add("hover", *t.tag_ranges("web"))))
+            t.tag_bind("web", "<Leave>", lambda e: (t.config(cursor="arrow"), t.tag_remove("hover", "1.0", "end")))
         row = ttk.Frame(self.text)
+        ttk.Button(row, text="Website", takefocus=False,
+                   command=lambda: webbrowser.open(WEBSITE)).pack(side="left", padx=(0, 8))
         if os.path.exists(LICENSE):
             ttk.Button(row, text="License", takefocus=False,
                        command=lambda: subprocess.Popen(["notepad.exe", LICENSE])).pack(side="left")
