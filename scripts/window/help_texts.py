@@ -380,7 +380,11 @@ TOPICS = [
               "should go and press Ctrl+V.\n\n"
               "The copy starts at the bar line before the first note, so put the play cursor on a bar line: the notes "
               "keep their place in the bar.\n\n"
-              "Everything goes into the one highlighted track, on that track's channel (with Multi channel too).\n\n"
+              "As drawn / Single channel: everything goes into the highlighted track, on that track's channel.\n"
+              "Multi channel: each channel with notes becomes a track, in channel order, packed together (channels "
+              "without notes are skipped): the first goes into the highlighted track, the next into the track below "
+              "it, and so on. The pasted notes play on those tracks' own channels, and tracks that don't fit below "
+              "the last one are dropped.\n\n"
               "Ticks are copied as they are: with a different PPQ in Domino the notes come out longer or shorter, so "
               "set the same PPQ in both (or use that on purpose).",
          words="copy paste clipboard domino track bar ppq"),

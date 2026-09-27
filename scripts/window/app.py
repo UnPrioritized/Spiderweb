@@ -391,7 +391,8 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         b.grid(row=r + 1, column=0, columnspan=2, sticky="e", pady=(4, 0))
         Tooltip(b, "Ctrl+Shift+C: copies the selected shapes' notes (all notes when nothing is selected).\n"
                    "In Domino, highlight a track, put the play cursor on a bar line and press Ctrl+V.\n"
-                   "Everything goes into that one track. Ticks are copied as they are: use the same PPQ there.")
+                   "Multi channel: each channel goes into its own track, from the highlighted one down.\n"
+                   "Ticks are copied as they are: use the same PPQ there.")
 
     def _build_shape_list(self, side):
         box = ttk.LabelFrame(side, text="Shapes", padding=6)

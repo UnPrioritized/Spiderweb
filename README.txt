@@ -52,7 +52,9 @@ Good to know
 ------------
 - Copy to Domino (Ctrl+Shift+C) puts the notes on the clipboard: in Domino,
   highlight a track, put the play cursor on a bar line and press Ctrl+V.
-  Use the same PPQ in both (the ticks are copied as they are).
+  With Multi channel, each channel goes into its own track, from the
+  highlighted one down. Use the same PPQ in both (the ticks are copied as
+  they are).
 - Domino can't open MIDI files with a PPQ of 32767 or higher. Spiderweb warns
   you (the PPQ turns red) but still writes them.
 - Everything you do is saved on its own (autosave.json). Each time Spiderweb

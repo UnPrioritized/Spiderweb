@@ -304,7 +304,8 @@ class ProjectFiles:
 
     def copy_to_domino(self):
         """Ctrl+Shift+C: the selected shapes' notes (all notes when nothing is selected) on the clipboard, for
-        Ctrl+V in Domino. One track; the copy starts at the bar line before the first note."""
+        Ctrl+V in Domino. One track per channel that has notes; the copy starts at the bar line before the first
+        note."""
         try:
             ppq, _, beats = self.read_project()
         except ValueError as e:
@@ -320,6 +321,8 @@ class ProjectFiles:
         if not put_on_clipboard(clip_data(notes, ppq, beats * ppq)):
             messagebox.showerror("Spiderweb", "Couldn't use the clipboard (another program has it open). Try again.")
             return
-        what = f"{len(notes):,} notes" if self.sels else f"all {len(notes):,} notes"
-        self.status.config(text=f"Copied {what} for Domino (PPQ {ppq}) — highlight a track there, put the play "
+        what = f"{len(notes):,} note{'s' * (len(notes) != 1)}" if self.sels else f"all {len(notes):,} notes"
+        tracks = len(np.unique(notes[:, 4]))
+        where = "a track" if tracks == 1 else f"the first of {tracks} tracks"
+        self.status.config(text=f"Copied {what} for Domino (PPQ {ppq}) — highlight {where} there, put the play "
                                 "cursor on a bar line and press Ctrl+V")

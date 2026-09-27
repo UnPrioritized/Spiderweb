@@ -5,8 +5,8 @@ Unpacked it's items of [tag u16][length u32][data], some holding more items: son
 copied track (settings, the notes, the copied stretch's length, more settings), more song settings.
 A note = item 2001 holding 1001 (start tick, u32), 2001 (key, u8), 2002 (velocity, u8), 2003 (gate, u32).
 Ticks count from the start of the copied stretch; Domino pastes that start at its play cursor and doesn't
-convert ticks to its own PPQ (the user matches the PPQ). The track's channel isn't in the data: pasted notes
-go into the highlighted track. Everything but the notes, the PPQ and the length is copied from a real
+convert ticks to its own PPQ (the user matches the PPQ). The track's channel isn't in the data: the tracks
+go into the highlighted track and the ones below it (tracks past the last one are dropped). Everything but the notes, the PPQ and the length is copied from a real
 Domino copy (the copyright text left empty).
 """
 
@@ -49,19 +49,25 @@ def item(tag, body):
 
 
 def clip_data(notes, ppq, bar):
-    """notes: (start, end, pitch, velocity, ...) rows -> the clipboard bytes. The copy starts at the bar line at
-    or before the first note (so the notes keep their place in the bar) and runs to the bar line after the last."""
-    notes = notes[np.lexsort((notes[:, 2], notes[:, 0]))]
+    """notes: (start, end, pitch, velocity, slot, ...) rows -> the clipboard bytes. One track per slot (channel)
+    that has notes, in slot order, packed together (no empty tracks); Domino fills tracks downwards from the
+    highlighted one. The copy starts at the bar line at or before the first note (so the notes keep their place
+    in the bar) and runs to the bar line after the last; every track shares that stretch."""
     first = int(notes[:, 0].min()) // bar * bar
-    length = -(-(int(notes[:, 1].max()) - first) // bar) * bar
-    rows = np.zeros(len(notes), NOTE)
-    rows["tag"], rows["len"] = 2001, NOTE.itemsize - 6
-    rows["t1"], rows["l1"], rows["tick"] = 1001, 4, notes[:, 0] - first
-    rows["t2"], rows["l2"], rows["key"] = 2001, 1, notes[:, 2]
-    rows["t3"], rows["l3"], rows["vel"] = 2002, 1, notes[:, 3]
-    rows["t4"], rows["l4"], rows["gate"] = 2003, 4, notes[:, 1] - notes[:, 0]
-    track = TRACK_HEAD + rows.tobytes() + item(2009, item(1001, struct.pack("<I", max(length, bar)))) + TRACK_TAIL
-    data = SONG_START + item(1002, struct.pack("<H", ppq)) + SONG_REST + item(1003, track) + SONG_TAIL
+    length = max(-(-(int(notes[:, 1].max()) - first) // bar) * bar, bar)
+    end = item(2009, item(1001, struct.pack("<I", length)))
+    tracks = b""
+    for slot in np.unique(notes[:, 4]).tolist():
+        mine = notes[notes[:, 4] == slot]
+        mine = mine[np.lexsort((mine[:, 2], mine[:, 0]))]
+        rows = np.zeros(len(mine), NOTE)
+        rows["tag"], rows["len"] = 2001, NOTE.itemsize - 6
+        rows["t1"], rows["l1"], rows["tick"] = 1001, 4, mine[:, 0] - first
+        rows["t2"], rows["l2"], rows["key"] = 2001, 1, mine[:, 2]
+        rows["t3"], rows["l3"], rows["vel"] = 2002, 1, mine[:, 3]
+        rows["t4"], rows["l4"], rows["gate"] = 2003, 4, mine[:, 1] - mine[:, 0]
+        tracks += item(1003, TRACK_HEAD + rows.tobytes() + end + TRACK_TAIL)
+    data = SONG_START + item(1002, struct.pack("<H", ppq)) + SONG_REST + tracks + SONG_TAIL
     return MAGIC + struct.pack("<I", len(data)) + zlib.compress(data)
 
 
