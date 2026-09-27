@@ -86,11 +86,13 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         sb = self.app.snap_beats()
         if snap and sb and not e.state & SHIFT:
             b, p = round(b / sb) * sb, round(p)
-        return [max(0.0, b), min(max(p, 0), 127)]
+        return [max(0.0, b), min(max(p, 0), self.app.keys - 1)]
 
     def clamp_view(self):
-        rows = (self.winfo_height() - self.ruler_h) / self.sy
-        self.view_top = 127.5 if rows >= 128 else min(127.5, max(rows - 0.5, self.view_top))
+        if self.sy is None:
+            return
+        rows, top = (self.winfo_height() - self.ruler_h) / self.sy, self.app.keys - 0.5
+        self.view_top = top if rows >= self.app.keys else min(top, max(rows - 0.5, self.view_top))
         self.view_t = max(0.0, self.view_t)
 
     def fit_view(self):
@@ -102,8 +104,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         span = max(hi - lo, 1)
         self.sx = (w - self.kb_w) / (span * 1.06)
         self.view_t = max(0.0, lo - span * 0.03)
-        self.sy = (h - self.ruler_h) / 128
-        self.view_top = 127.5
+        self.sy = (h - self.ruler_h) / self.app.keys
+        self.view_top = self.app.keys - 0.5
         self.request_redraw()
 
     def view_state(self):
@@ -775,6 +777,6 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return None
         text = self.time_text(e.x)
         p = round(self.y2p(e.y))
-        if 0 <= p <= 127:
+        if 0 <= p < self.app.keys:
             text += f"     {note_name(p)} ({p})"
         return text

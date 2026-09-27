@@ -11,6 +11,7 @@ import numpy as np
 from notes.custom import ALIGNS, CUSTOM_DEFAULTS, FILLS, notes_shape
 from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_shape
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
+from notes.paths import KEYS
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.text import TEXT_DEFAULTS, clean_text
 from files.domino_clip import clip_data, get_from_clipboard, put_on_clipboard, read_notes
@@ -98,6 +99,7 @@ class ProjectFiles:
             "version": 2, "app_version": VERSION,  # the file format, and the Spiderweb that saved it
             "ppq": self.pvar["ppq"].get(), "bpm": self.pvar["bpm"].get(), "beats": self.pvar["beats"].get(),
             "output": self.pvar["output"].get(), "channel_mode": self.channel_mode.get(), "channel_split": self.channel_split,
+            "keys": self.keys,
             "snap": self.snap.get(), "defaults": self.defaults,
             "custom_defaults": dict(self.custom_defaults, shape=self.custom_shape),
             "funnel_defaults": self.funnel_defaults, "text_defaults": self.text_defaults,
@@ -122,6 +124,7 @@ class ProjectFiles:
                 self.pvar[key].set(str(data[key]))
         mode = data.get("channel_mode", "auto" if data.get("auto_channels") else "single")
         self.channel_mode.set(mode if mode in CHANNEL_MODES else "single")
+        self.keys256.set(data.get("keys") == KEYS[1])
         split = data.get("channel_split")
         self.split_box.current(SPLITS.index(split) if split in SPLITS else 0)
         if data.get("snap") in SNAPS:
@@ -285,7 +288,8 @@ class ProjectFiles:
             messagebox.showerror("Spiderweb", str(e))
             return
         if not len(self.rendered):
-            messagebox.showerror("Spiderweb", "No notes yet — draw something inside the 0–127 pitch range first.")
+            messagebox.showerror("Spiderweb", f"No notes yet — draw something inside the 0–{self.keys - 1} "
+                                              "pitch range first.")
             return
         path = self.pvar["output"].get().strip() or os.path.join(OUTPUT_DIR, "spiderweb.mid")
         if not path.lower().endswith((".mid", ".midi")):
@@ -299,6 +303,8 @@ class ProjectFiles:
         channels = self.slot_count if self.channel_mode.get() == "auto" else 1
         note = (f"\n\nPPQ {ppq}: many MIDI programs can't open this file (it needs a PPQ below {PPQ_WARN})."
                 if ppq >= PPQ_WARN else "")
+        if (self.rendered[:, 2] > 127).any():
+            note += "\n\nIt has keys above 127 (256 keys): many MIDI programs can't read those."
         messagebox.showinfo("Spiderweb", f"Saved {len(self.rendered):,} notes on {channels} track(s), one channel "
                                          f"each:\n{path}{note}")
 
@@ -314,9 +320,11 @@ class ProjectFiles:
         notes = self.rendered
         if self.sels:
             notes = notes[np.isin(notes[:, 5], sorted(self.sels))]
+        high = int((notes[:, 2] > 127).sum())  # (256 keys: Domino only has 128)
+        notes = notes[notes[:, 2] <= 127]
         if not len(notes):
             messagebox.showerror("Spiderweb", "No notes to copy — draw something inside the 0–127 pitch range first."
-                                 if not self.sels else "The selected shapes have no notes.")
+                                 if not self.sels or high else "The selected shapes have no notes.")
             return
         if not put_on_clipboard(clip_data(notes, ppq, beats * ppq)):
             messagebox.showerror("Spiderweb", "Couldn't use the clipboard (another program has it open). Try again.")
@@ -325,7 +333,7 @@ class ProjectFiles:
         tracks = len(np.unique(notes[:, 4]))
         where = "a track" if tracks == 1 else f"the first of {tracks} tracks"
         self.status.config(text=f"Copied {what} for Domino (PPQ {ppq}) — in Domino, double-click a bar line in "
-                                f"{where} to paste")
+                                f"{where} to paste" + (f" ({high:,} notes above key 127 left out)" if high else ""))
 
     def paste_from_domino(self):
         """Ctrl+Shift+V: the notes copied in Domino as one shape (custom.py's pasted notes), placed like Domino

@@ -15,6 +15,8 @@ import math
 import numpy as np
 
 EDGE = 0.5 - 1e-6  # half a pitch row, just inside the row
+KEYS = (128, 256)  # the project's key range: the MIDI standard 0-127, or 0-255 (256-key MIDI)
+TOP_KEY = KEYS[-1] - 1  # the highest key a shape can ever make (the project's range filters the rest)
 
 
 def lerp(a, b, u):

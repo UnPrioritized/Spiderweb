@@ -7,7 +7,7 @@ import numpy as np
 
 from notes.bezier import anchor_count, fit, handle_anchor, sample
 from notes.custom import row_spans
-from notes.paths import EDGE, pitch_of
+from notes.paths import EDGE, TOP_KEY, pitch_of
 
 # ---------------------------------------------------------------- funnels
 # sh["pts"] = [line start, line end, wall end 1, wall end 2, (line 2 start, line 2 end, ...)]: straight lines,
@@ -463,7 +463,7 @@ def line_band(a, b, q):
 
 
 def _keys(ps):
-    return range(max(0, pitch_of(min(ps))), min(127, pitch_of(max(ps))) + 1)
+    return range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1)
 
 
 def funnel_key_spans(sh):

@@ -19,6 +19,7 @@ from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, point_names, render, shape_notes_tracks,
                           slot_track_channel)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
+from notes.paths import KEYS
 from notes.smooth import SMOOTH_DEFAULT
 from notes.text import TEXT_DEFAULTS
 from files.mathexpr import calc, calc_int, fmt
@@ -137,6 +138,8 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.show_notes = tk.BooleanVar(value=True)
         self.channel_mode = tk.StringVar(value="single")
         self.channel_split = "key"  # what counts as an overlap for Multi channel (engine.SPLITS)
+        self.keys = 128  # the project's key range: 0 .. keys - 1 (paths.KEYS)
+        self.keys256 = tk.BooleanVar(value=False)
         self.show_velocity = tk.BooleanVar(value=False)  # off on a fresh start: turning it on shows its tip
         self.vel_tool = tk.StringVar(value="line")
         self.midi_device = tk.StringVar(value=DEFAULT_DEVICE)
@@ -367,6 +370,13 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
                 Scrub(self, [(e, self.pvar[key], None)], (1, 10, 0.1) if key == "bpm" else (1, 1, 1),
                       *((4, 100000) if key == "bpm" else (1, 32)), label=lb)
             r += 1
+        ttk.Label(box, text="Keys").grid(row=r, column=0, sticky="w", pady=1)
+        b = ttk.Checkbutton(box, text="256 keys", variable=self.keys256, command=self.on_project_change)
+        b.grid(row=r, column=1, sticky="w", padx=5)
+        Tooltip(b, "Off: the standard 128 keys (0–127), which every MIDI program reads.\n"
+                   "On: 256 keys (0–255), for players that support them (handy for tunings like 31edo).\n"
+                   "Many MIDI programs can't read keys above 127, and playback here skips them.")
+        r += 1
         ttk.Label(box, text="Output file").grid(row=r, column=0, sticky="w", pady=1)
         out = ttk.Frame(box)
         out.grid(row=r, column=1, sticky="ew", padx=5)
@@ -620,6 +630,8 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
                 setattr(self, key, calc_int(self.pvar[key].get(), lo, hi))
             except ValueError:
                 pass
+        self.keys = KEYS[1] if self.keys256.get() else KEYS[0]
+        self.roll.clamp_view()
         warn = self.ppq >= PPQ_WARN
         self.ppq_box.config(style="Bad.TCombobox" if warn else "TCombobox")
         if warn and not self.ppq_warning.winfo_manager():
@@ -657,11 +669,11 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
 
     def notes_tracks(self, sh):
         """shape_notes_tracks, remembered."""
-        key = (json.dumps(sh, sort_keys=True), self.ppq)
+        key = (json.dumps(sh, sort_keys=True), self.ppq, self.keys)
         if key not in self._notes_cache:
             if len(self._notes_cache) > 500:
                 self._notes_cache.clear()
-            self._notes_cache[key] = shape_notes_tracks(sh, self.ppq)
+            self._notes_cache[key] = shape_notes_tracks(sh, self.ppq, self.keys)
             self._notes_worked += 1
         return self._notes_cache[key]
 

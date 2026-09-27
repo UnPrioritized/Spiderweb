@@ -213,7 +213,7 @@ class CustomBox:
             dy = math.copysign(abs(dx) / aspect, dy or 1)
         else:
             dx = math.copysign(abs(dy) * aspect, dx or 1)
-        return [max(0.0, start[0] + dx / self.sx), min(max(start[1] + dy / self.sy, 0), 127)]
+        return [max(0.0, start[0] + dx / self.sx), min(max(start[1] + dy / self.sy, 0), self.app.keys - 1)]
 
     def draw_custom_box(self, sh):
         """The box of the selected custom shape: dashed outline and corner squares to resize it."""

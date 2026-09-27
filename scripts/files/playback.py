@@ -77,8 +77,9 @@ class MidiOut:
             _winmm.midiOutShortMsg(self.handle, msg)
 
     def note(self, ch, pitch, vel):
-        """Note on (vel 0 = note off)."""
-        self.send(0x90 | ch | pitch << 8 | vel << 16)
+        """Note on (vel 0 = note off). Keys above 127 (256 keys) can't be sent: skipped."""
+        if pitch <= 127:
+            self.send(0x90 | ch | pitch << 8 | vel << 16)
 
     def close(self):
         if self.handle:
@@ -111,7 +112,7 @@ class Player:
         """Play from start_beat until stop_beat (notes: rendered [start, end, pitch, vel, slot, ...] in ticks)."""
         self.stop()
         t0, t1 = start_beat * ppq, stop_beat * ppq
-        notes = notes[(notes[:, 0] >= t0) & (notes[:, 0] < t1)]
+        notes = notes[(notes[:, 0] >= t0) & (notes[:, 0] < t1) & (notes[:, 2] <= 127)]  # (a synth has 128 keys)
         s, e, p, v = notes[:, 0], notes[:, 1], notes[:, 2], notes[:, 3]
         ch = np.array(CHANNELS, np.int64)[notes[:, 4] % len(CHANNELS)]
         off = e < t1

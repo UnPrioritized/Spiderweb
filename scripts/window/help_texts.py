@@ -371,8 +371,12 @@ TOPICS = [
               "project files (.json). Shapes are stored in beats, so changing PPQ doesn't move them.\n\n"
               "Generate MIDI writes the file set under Output file, with the PPQ, BPM and beats per bar from Project. "
               "PPQ 32767 or higher: many MIDI programs can't open the file (the box turns red).\n\n"
+              "256 keys (under Project): the piano roll goes up to key 255 instead of 127, and the MIDI file keeps "
+              "those keys. That's for players that support 256 keys (handy for tunings like 31edo, which need more "
+              "keys per octave). Many MIDI programs can't read keys above 127, and playback here skips them. Turned "
+              "off, notes above 127 are left out; the shapes stay as they are.\n\n"
               "If something goes wrong, the details go to errors.log next to Spiderweb.",
-         words="save open export generate midi file ppq bpm autosave backup"),
+         words="save open export generate midi file ppq bpm autosave backup 256 keys 31edo microtonal range"),
     dict(id="domino", section="Sound and MIDI", title="Copy to / Paste from Domino",
          tip="Ctrl+Shift+C copies the notes; double-click a track in Domino to paste them there.\n"
              "Ctrl+Shift+V pastes notes copied in Domino as one shape.",
@@ -387,7 +391,8 @@ TOPICS = [
               "it, and so on. The pasted notes play on those tracks' own channels, and tracks that don't fit below "
               "the last one are dropped.\n\n"
               "Ticks are copied as they are: with a different PPQ in Domino the notes come out longer or shorter, so "
-              "set the same PPQ in both (or use that on purpose).\n\n"
+              "set the same PPQ in both (or use that on purpose). With 256 keys, notes above key 127 are left out "
+              "(Domino has 128 keys).\n\n"
               "Paste from Domino (or Ctrl+Shift+V) works the other way: select notes in Domino, press Ctrl+C there, "
               "then paste here. The start of what you copied lands on the play line (snapped to the grid), like "
               "pasting in Domino, and ticks are taken as they are. The notes of every copied track become ONE shape "

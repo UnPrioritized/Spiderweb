@@ -172,7 +172,7 @@ class RollDrawing:
             pane.draw_playhead()
 
     def visible_pitches(self, h):
-        return max(0, math.ceil(self.y2p(h) - 0.5)), min(127, math.floor(self.y2p(self.ruler_h) + 0.5))
+        return max(0, math.ceil(self.y2p(h) - 0.5)), min(self.app.keys - 1, math.floor(self.y2p(self.ruler_h) + 0.5))
 
     def grid_parts(self, w, h):
         """
@@ -195,8 +195,8 @@ class RollDrawing:
                 rows.append((self.row_y(p)[1], None, "#606060"))
         if self.p2y(-0.5) < h:
             rows.append((self.row_y(0)[1], h, "#ececec"))
-        if self.p2y(127.5) > top:
-            rows.append((top, self.row_y(127)[0], "#ececec"))
+        if self.p2y(self.app.keys - 0.5) > top:
+            rows.append((top, self.row_y(self.app.keys - 1)[0], "#ececec"))
         return rows, self.grid_cols(w)
 
     def row_y(self, p):
@@ -266,7 +266,7 @@ class RollDrawing:
         kb, top = self.kb_w, self.ruler_h
         ax, bx = self.sx / ppq, kb - self.view_t * self.sx  # x = tick * ax + bx
         ay, by = -self.sy, top + self.view_top * self.sy    # y = pitch * ay + by
-        keys = np.arange(128)
+        keys = np.arange(app.keys)
         row0, row1 = np.round((keys + 0.5) * ay + by).astype(np.int64), np.round((keys - 0.5) * ay + by).astype(np.int64)
         shown = ~((row1 < top) | (row0 > h))  # each key's row on screen?
         row1 = np.maximum(row1, row0 + 1)
@@ -285,7 +285,7 @@ class RollDrawing:
         elif self.draft and self.draft["kind"] == "funnel":
             big = funnel_note_count(self.draft, ppq) > PREVIEW_LIMIT
         if self.draft and not big:
-            d = shape_notes(self.draft, ppq)
+            d = shape_notes(self.draft, ppq, app.keys)
             parts.append((d, np.full(len(d), DRAFT)))
         s = np.concatenate([p[:, 0] for p, _ in parts])
         e = np.concatenate([p[:, 1] for p, _ in parts])
@@ -302,7 +302,7 @@ class RollDrawing:
         # low velocity = paler fill (outline stays); 32 shades is plenty
         color = color[on] * 32 + np.minimum(vel[on], 127) // 4
         # zoomed out, lots of notes land on the very same pixels: keep the first
-        packed = ((((x0 - left) << 16) | (x1 - left)) << 7 | key) << 10 | color
+        packed = ((((x0 - left) << 16) | (x1 - left)) << 8 | key) << 10 | color
         _, first = np.unique(packed, return_index=True)
         if len(first) < len(packed):
             first.sort()

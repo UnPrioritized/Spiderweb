@@ -442,7 +442,7 @@ class VelocityPane(tk.Canvas):
             layer = NORMAL + slot
         s, e = notes[:, 0], notes[:, 1]
         if roll.draft:
-            d = shape_notes(roll.draft, ppq)
+            d = shape_notes(roll.draft, ppq, self.app.keys)
             s, e = np.concatenate([s, d[:, 0]]), np.concatenate([e, d[:, 1]])
             vel = np.concatenate([vel, d[:, 3]])
             layer = np.concatenate([layer, np.full(len(d), DRAFT)])

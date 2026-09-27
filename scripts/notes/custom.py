@@ -9,7 +9,8 @@ import numpy as np
 from notes.arc import arc_k, arc_points, ellipse_bezier
 from notes.bezier import sample
 from notes.smooth import clean_level, smooth_path
-from notes.paths import dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of, stretch_ends
+from notes.paths import (TOP_KEY, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
+                         stretch_ends)
 from notes.text import text_polys, threshold_spans
 
 # Custom shapes: how the inside is filled, and the gate of "spam" in beats (1/64 = 60 ticks at PPQ 960).
@@ -392,7 +393,7 @@ def inside_spans(sh, ppq):
     ps = [p for poly in polys for _, p in poly]
     tx = sh.get("text")
     out = []
-    for q in range(max(0, pitch_of(min(ps))), min(127, pitch_of(max(ps))) + 1):
+    for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1):
         for a, b in threshold_spans(polys, q, tx["threshold"]) if tx else row_spans(polys, q):
             s = math.floor(a * ppq + 0.5)
             out.append((q, s, max(math.floor(b * ppq + 0.5), s + 1)))

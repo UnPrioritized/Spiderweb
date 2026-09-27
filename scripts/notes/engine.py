@@ -205,13 +205,13 @@ def unique_rows(a):
     return a[np.sort(order[new])]
 
 
-def shape_notes(sh, ppq):
+def shape_notes(sh, ppq, keys=128):
     """All notes of one shape as a NumPy array of (start, end, pitch, velocity) rows in ticks, before overlap
-    handling."""
-    return shape_notes_tracks(sh, ppq)[0]
+    handling. keys: the project's key range (keys 0 .. keys - 1)."""
+    return shape_notes_tracks(sh, ppq, keys)[0]
 
 
-def shape_notes_tracks(sh, ppq):
+def shape_notes_tracks(sh, ppq, keys=128):
     """shape_notes, and for pasted notes which track each note came from (one number per row; None for every
     other shape)."""
     end_dot = sh.get("end_dot", False)
@@ -233,7 +233,7 @@ def shape_notes_tracks(sh, ppq):
     t_hi = float(path[:, 0].max())
     env = velocity_env(sh)
     raw = note_array(raw, 3)
-    keep = (raw[:, 2] >= 0) & (raw[:, 2] <= 127) & (raw[:, 1] > 0)
+    keep = (raw[:, 2] >= 0) & (raw[:, 2] < keys) & (raw[:, 1] > 0)
     raw = raw[keep]
     raw[:, 0] = np.maximum(raw[:, 0], 0)
     tracks = None
@@ -327,7 +327,7 @@ def resolve_overlaps(notes):
     """
     if not len(notes):
         return notes
-    _, first, where = np.unique(notes[:, 4] * 128 + notes[:, 2], return_index=True, return_inverse=True)
+    _, first, where = np.unique(notes[:, 4] * 256 + notes[:, 2], return_index=True, return_inverse=True)
     group = np.argsort(np.argsort(first))[where]  # groups numbered in the order they first show up
     # same start: the loudest comes last, so it's the one kept
     order = np.lexsort((-notes[:, 1], notes[:, 3], notes[:, 0], group))
