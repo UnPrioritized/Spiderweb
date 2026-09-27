@@ -82,6 +82,8 @@ class ShapeMenu:
                     symmetry_menu(m, sh["strokes"][k].get("sym"), lambda mode: self.stroke_symmetry(sh, mode, at))
                 item("Delete this stroke", "Del", lambda: self.delete_stroke(sh, k), keys=True)
             item("Save drawing to the shape library…", "", lambda: app.save_to_library(sh))
+        if app.tumour_targets():
+            item("Tumours…", "", app.open_tumours)
         n = len(app.sels)
         shapes = "shape" if n == 1 else f"{n} shapes"
         item(f"Delete {shapes}", "Del", app.delete_selected, keys=keys and self.picked_stroke(sh) is None)

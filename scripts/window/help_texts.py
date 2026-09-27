@@ -186,7 +186,9 @@ TOPICS = [
     dict(id="tumours", section="Shapes and settings", title="Tumours",
          tip="Bumps along the line: size, length, distance apart, which side.\nLength 0 = spikes (a zigzag).\n"
              "Bumps take the current zoom's shape: zoom first, then set them up.",
-         text="Select a line, polyline, freehand stroke, curve or arc and tick Tumours in the panel: bumps along it. "
+         text="Select a line, polyline, freehand stroke, curve or arc, click Tumours… in the panel (or right-click it: "
+              "Tumours…) and tick Tumours in the window that opens: bumps along it. The window can stay open; it "
+              "shows whatever you select. "
               "The line's points stay draggable; the line as drawn shows faint and dashed.\n\n"
               "Shape: triangle, square, circle or parabola.\n"
               "[clip:tumours-shape]\n\n"

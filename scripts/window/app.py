@@ -1,5 +1,5 @@
 """Main window: toolbar, side panel, shapes, playback and undo.
-Its other parts: panel_custom.py / panel_funnel.py / panel_tumour.py / panel_text.py (those panel sections),
+Its other parts: panel_custom.py / panel_funnel.py / panel_tumour.py (+ tumour_window.py) / panel_text.py (those panel sections),
 project.py (files, autosave, MIDI export), widgets.py (tooltips), font_dialog.py (picking a font)."""
 
 import copy
