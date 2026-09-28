@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.mathexpr import calc, fmt
+from notes.joined import shown_tumour, unify_tumours
 from notes.tumour import GRAPH_KEYS, TUMOUR_DEFAULTS, clean_graph
 from window.graph_window import GraphWindow
 from window.widgets import Scrub, Tooltip
@@ -168,7 +169,7 @@ class TumourWindow(tk.Toplevel):
             self.what.config(text=f"Shape {i + 1}: {app.shape_label(tgts[0])}")
         else:
             self.what.config(text=f"{len(tgts)} shapes (they all change together)")
-        tm = dict(TUMOUR_DEFAULTS, **((tgts[0].get("tumour") if tgts else None) or {"on": False}))
+        tm = dict(TUMOUR_DEFAULTS, **((shown_tumour(tgts[0]) if tgts else None) or {"on": False}))
         self.loading = True
         self.on.set(tm["on"])
         self.fit.set(tm["fit"])
@@ -199,6 +200,8 @@ class TumourWindow(tk.Toplevel):
         if self.graph_window:
             self.graph_window.sync()
         self.info.config(text="" if not tgts else
+                         "The joined shapes kept their own tumours (these are the first one's). Changing anything "
+                         "here gives the whole curve these settings." if any(t.get("tumours") for t in tgts) else
                          "Bumps along the line. The line's points stay draggable. Length 0 = spikes (a zigzag)."
                          if on else "Tick Tumours to put bumps along this line.")
 
@@ -216,6 +219,7 @@ class TumourWindow(tk.Toplevel):
             app.push_undo()
         k = app.roll.sy / app.roll.sx if app.roll.sx else 0.25
         for t in tgts:
+            unify_tumours(t)  # (a joined curve's shapes with their own tumours: these become the whole curve's)
             tm = t.setdefault("tumour", dict(TUMOUR_DEFAULTS))
             tm[key] = value
             tm["k"] = k  # sizes as the roll looks now
@@ -243,7 +247,8 @@ class TumourWindow(tk.Toplevel):
             return
         e.config(style="TEntry")
         tgts = self.app.tumour_targets()
-        if tgts and all(abs(t.get("tumour", TUMOUR_DEFAULTS).get(key, 0.0) - value) < 1e-12 for t in tgts):
+        if tgts and all(abs((shown_tumour(t) or TUMOUR_DEFAULTS).get(key, 0.0) - value) < 1e-12 and
+                        "tumours" not in t for t in tgts):
             return
         self.set(key, value, group=True)
         self.app.sync_tumour()
@@ -266,6 +271,7 @@ class TumourWindow(tk.Toplevel):
         g = clean_graph(pts)
         k = app.roll.sy / app.roll.sx if app.roll.sx else 0.25
         for t in tgts:
+            unify_tumours(t)
             tm = t.setdefault("tumour", dict(TUMOUR_DEFAULTS))
             graphs = dict(tm.get("graphs") or {})
             if g:

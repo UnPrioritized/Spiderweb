@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 from notes.custom import box_frame, fillable, gap_line
 from notes.engine import make_shape
+from notes.joined import all_tumours
 from notes.funnel import funnel_contains, funnel_handles
 from roll.roll_curve import CurveEditing
 from roll.roll_custom import CustomBox
@@ -169,8 +170,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def hit_shape(self, x, y):
         for i in range(len(self.app.shapes) - 1, -1, -1):
             strokes = cached_strokes(self.app.shapes[i])
-            if (self.app.shapes[i].get("tumour") or {}).get("on"):  # the faint line as drawn counts too
-                strokes = strokes + cached_strokes(dict(self.app.shapes[i], tumour=None))
+            if any(tm["on"] for tm in all_tumours(self.app.shapes[i])):  # the faint line as drawn counts too
+                strokes = strokes + cached_strokes(dict(self.app.shapes[i], tumour=None, tumours=None))
             for stroke in strokes:
                 pts = [(self.t2x(b), self.p2y(p)) for b, p in stroke]
                 if len(pts) == 1 and math.hypot(pts[0][0] - x, pts[0][1] - y) < 6:

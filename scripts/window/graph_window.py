@@ -8,6 +8,7 @@ from tkinter import ttk
 import numpy as np
 
 from files.mathexpr import formula, fmt
+from notes.joined import shown_tumour
 from notes.tumour import GRAPH_LIMIT, TUMOUR_DEFAULTS
 
 FLAT = [[0.0, 1.0], [1.0, 1.0]]
@@ -87,7 +88,7 @@ class GraphWindow(tk.Toplevel):
 
     def tm(self):
         tgts = self.app.tumour_targets()
-        return dict(TUMOUR_DEFAULTS, **((tgts[0].get("tumour") if tgts else None) or {}))
+        return dict(TUMOUR_DEFAULTS, **((shown_tumour(tgts[0]) if tgts else None) or {}))
 
     def sync(self, fit_view=False):
         """Show the first selected line's graph (not while a point is being dragged)."""

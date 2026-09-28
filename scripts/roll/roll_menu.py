@@ -4,6 +4,7 @@ import tkinter as tk
 from types import SimpleNamespace
 
 from window.curve_dialog import load_formulas
+from notes.joined import is_joined
 from notes.funnel import CURVE_PRESETS, inside_out, turned_curve
 from roll.roll_shared import SHIFT
 from window.widgets import symmetry_menu
@@ -69,8 +70,8 @@ class ShapeMenu:
             item("Add point here", "", lambda: self.insert_poly_point(sh, at))
         if sh["kind"] == "curve" and len(app.sels) == 1:
             item("Add anchor here", "", lambda: self.curve_click(sh, at))
-            # one half follows the other; the half right-clicked keeps its shape
-            symmetry_menu(m, sh.get("sym"), lambda mode: self.set_symmetry(sh, mode, at))
+            if not is_joined(sh):  # one half follows the other; the half right-clicked keeps its shape
+                symmetry_menu(m, sh.get("sym"), lambda mode: self.set_symmetry(sh, mode, at))
         if sh.get("text") and len(app.sels) == 1:
             item("Edit text", "", lambda: self.edit_text(at))
         if sh["kind"] == "custom" and "notes" not in sh and len(app.sels) == 1:
@@ -84,6 +85,12 @@ class ShapeMenu:
             item("Save drawing to the shape library…", "", lambda: app.save_to_library(sh))
         if app.tumour_targets():
             item("Tumours…", "", app.open_tumours)
+        if app.can_join():
+            item(f"Join {len(app.sels)} shapes into one curve", "", app.join_selected)
+        if len(app.sels) == 1 and sh["kind"] in ("curve", "poly", "line"):
+            item("Split here", "", lambda: app.split_here(i, at))
+        if len(app.sels) == 1 and app.can_split_pieces(sh):
+            item("Split into separate shapes", "", lambda: app.split_pieces(i))
         n = len(app.sels)
         shapes = "shape" if n == 1 else f"{n} shapes"
         item(f"Delete {shapes}", "Del", app.delete_selected, keys=keys and self.picked_stroke(sh) is None)

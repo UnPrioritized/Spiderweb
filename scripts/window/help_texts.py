@@ -189,7 +189,8 @@ TOPICS = [
          text="Select a line, polyline, freehand stroke, curve or arc, click Tumours… in the panel (or right-click it: "
               "Tumours…) and tick Tumours in the window that opens: bumps along it. The window can stay open; it "
               "shows whatever you select. "
-              "The line's points stay draggable; the line as drawn shows faint and dashed.\n\n"
+              "The line's points stay draggable; the line as drawn shows faint and dashed.\n"
+              "[clip:tumours-window]\n\n"
               "Shape: triangle, square, circle or parabola.\n"
               "[clip:tumours-shape]\n\n"
               "Size: how far the bumps stick out, in keys.\n"
@@ -200,14 +201,17 @@ TOPICS = [
               "[clip:tumours-distance]\n\n"
               "Rotation: tilts every bump while its two feet stay on the line. Plus leans it forward (the way the "
               "line runs), minus leans it back; 90 lays it flat along the line, 180 turns it over to the other "
-              "side.\n\n"
+              "side.\n"
+              "[clip:tumours-rotation]\n\n"
               "Slant (square bumps only): 0 = a square, 100 = the top narrows to a point, minus = the top is wider "
-              "than the bottom.\n\n"
+              "than the bottom.\n"
+              "[clip:tumours-slant]\n\n"
               "Graphs: the … button next to Size, Length, Distance, Rotation or Slant opens a graph of that number "
               "along the whole line (from its start on the left to its end on the right). 100 % = the number in "
               "the box, so the box still scales the whole graph. Drag the points (Shift = free), click to add one, "
               "right-click one to remove it, or pick a preset or type a formula. The part outside the tumour Range "
-              "is greyed out. A number following a graph says \"× graph\" in blue; Flat (off) removes it.\n\n"
+              "is greyed out. A number following a graph says \"× graph\" in blue; Flat (off) removes it.\n"
+              "[clip:tumours-graph]\n\n"
               "Side: alternating, left, right or random.\n"
               "[clip:tumours-side]\n\n"
               "Straight or Bent with the line: this only matters where the line curves under a bump (long bumps "
@@ -265,6 +269,35 @@ TOPICS = [
               "[clip:symmetric-s]\n\n"
               "Off: the halves go their own way again.",
          words="mirror arch s-curve symmetry"),
+    dict(id="join", section="Editing", title="Join and split",
+         tip="Select several lines, curves or arcs, right-click → Join: one curve.\n"
+             "Right-click a curve, polyline or line → Split here cuts it in two.",
+         text="Join: select two or more lines, polylines, freehand strokes, curves or arcs, right-click one of them → "
+              "Join into one curve. They become one Curve shape: ends that touch are joined (with a corner there), "
+              "and the curve's anchors and handles can be edited like any curve. Freehand strokes are turned into "
+              "a smooth curve that follows them closely.\n"
+              "[clip:join-touching]\n\n"
+              "Shapes that don't touch stay separate pieces of the same curve: nothing is drawn between them and "
+              "they make no notes there, but they're selected, moved, flipped and copied together. Each piece works "
+              "like a shape of its own (its own row of tumours, range, graphs and last note). The squares at a "
+              "piece's ends can't be removed.\n"
+              "[clip:join-pieces]\n\n"
+              "Tumours: if the shapes had different tumours, each keeps its own after joining. The first time you "
+              "change any tumour setting of the joined curve, the whole curve gets the settings shown in the tumour "
+              "window. So set up each shape's tumours first, then join. Velocity and Last note come from the first "
+              "shape.\n"
+              "[clip:join-tumours]\n\n"
+              "Split here: right-click a curve, polyline or line where you want to cut it → Split here. On an anchor "
+              "or a polyline point it's cut there; anywhere else a point is added there first. Each half keeps the "
+              "velocities it had.\n"
+              "[clip:join-split-here]\n\n"
+              "Split into separate shapes: a joined curve goes back to one curve per piece (and per shape that kept "
+              "its own tumours). A custom shape, like one drawn with Live shape, splits into one shape per group of "
+              "strokes that touch each other.\n"
+              "[clip:join-split-shapes]\n\n"
+              "Notes: a joined curve plays like one curve, so where two lines meet it doesn't start a new note the "
+              "way two separate lines would.",
+         words="join merge combine connect split cut separate pieces break apart"),
     dict(id="funnel_curves", section="Editing", title="Funnel curves",
          tip="Middle-click the line: a new curve start. Middle-click near a curve: an anchor.\n"
              "Select tool: click a curve again to highlight it (Del, right-click = shapes, linking).",
@@ -508,19 +541,20 @@ SEE = {
     "line": ["poly", "tumours", "selecting"],
     "poly": ["line", "tumours"],
     "free": ["straighten", "tumours", "live"],
-    "curve": ["curves_pen", "symmetric", "tumours"],
+    "curve": ["curves_pen", "symmetric", "tumours", "join"],
     "arc": ["curve", "tumours"],
     "custom": ["drawer", "fill", "custom_edit", "box"],
     "box": ["custom", "fill", "custom_edit", "live"],
     "funnel": ["funnel_curves", "funnel_links", "formulas"],
     "text": ["fill", "custom_edit"],
-    "live": ["fill", "curves_pen", "straighten", "drawer"],
+    "live": ["fill", "curves_pen", "straighten", "drawer", "join"],
     "fill": ["custom", "drawer", "live"],
     "custom_edit": ["custom", "selecting"],
-    "tumours": ["line", "curve", "arc", "view"],
+    "tumours": ["line", "curve", "arc", "join", "view"],
     "straighten": ["free", "live"],
     "curves_pen": ["curve", "symmetric", "funnel_curves"],
     "symmetric": ["curves_pen", "curve"],
+    "join": ["curve", "tumours", "live", "curves_pen"],
     "funnel_curves": ["funnel", "curves_pen", "funnel_links", "formulas"],
     "funnel_links": ["funnel_curves", "formulas"],
     "formulas": ["funnel_curves", "funnel_links"],

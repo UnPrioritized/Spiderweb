@@ -13,6 +13,7 @@ import numpy as np
 from notes.custom import (ALIGNS, CUSTOM_DEFAULTS, FILLS, BOX_STROKE, block_notes, check_notes, clean_curve,
                           clean_strokes, custom_notes, custom_strokes)
 from notes.envelope import env_values, velocity_env
+from notes.joined import clean_joined, is_joined, joined_paths
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
 from notes.bezier import anchor_count, sample
@@ -111,6 +112,9 @@ def clean_shape(sh):
         c = clean_curve(sh, out["pts"][:n - (n - 1) % 3])
         del c["kind"]
         out.update(c)
+        clean_joined(sh, out)  # a joined curve's pieces / tumours (joined.py)
+        if is_joined(out):
+            out.pop("sym", None)
     if out["kind"] == "funnel":
         try:
             starts = sh.get("starts")
@@ -146,11 +150,13 @@ def shape_strokes(sh):
         return custom_strokes(sh)
     if sh["kind"] == "funnel":
         return funnel_strokes(sh)
+    if is_joined(sh):  # one path per piece
+        return joined_paths(sh, tumour_path)
     return [shape_path(sh)]
 
 
 _paths = {}
-SHAPE_KEYS = ("starts", "tumour", "k", "text", "smooth")  # what changes how a funnel / tumours / an arc / text /
+SHAPE_KEYS = ("starts", "tumour", "k", "text", "smooth", "gaps", "splits", "tumours")  # what changes how a funnel / tumours / an arc / text /
 # a straightened freehand stroke look (besides the points)
 
 
@@ -225,6 +231,14 @@ def shape_notes_tracks(sh, ppq, keys=128):
         raw, own = raw[:, :3], raw[:, 3:5]
     elif sh["kind"] in ("custom", "funnel"):
         raw = custom_notes(sh, ppq) if sh["kind"] == "custom" else funnel_notes(sh, ppq)
+    elif sh["kind"] in LINE_KINDS and len(cached_arrays(sh)) > 1:  # a joined curve's pieces: each like a line
+        pieces = []
+        for a in cached_arrays(sh):
+            a = dedupe(a)
+            if len(a) and a[-1, 0] < a[0, 0]:
+                a = a[::-1]
+            pieces.append(note_array(path_notes(a * [ppq, 1], end_dot), 3))
+        raw = np.concatenate(pieces)
     elif end_dot and sh["kind"] == "poly" and len(path) > 2:
         raw = dot_segment_notes(path)
     else:

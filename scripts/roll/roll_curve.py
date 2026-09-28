@@ -22,11 +22,11 @@ class CurveEditing:
         """(beat, pitch, point number, draggable with any tool) of a curve: handle points, anchors on top. The two
         ends need the Select tool (like a line's ends), so the Curve tool can start a new curve there."""
         pts = sh["pts"]
-        return [(*pts[i], i, kind != "end") for i, kind in pen_handles(pts)]
+        return [(*pts[i], i, kind != "end") for i, kind in pen_handles(pts, gaps=sh.get("gaps", ()))]
 
     @staticmethod
     def curve_handle_lines(sh):
-        return handle_lines(sh["pts"])
+        return handle_lines(sh["pts"], sh.get("gaps", ()))
 
     def keep_symmetric(self, sh, i=0):
         """A symmetric curve's other half follows the half point i is in. True if it's symmetric."""
@@ -39,7 +39,7 @@ class CurveEditing:
     def curve_click(self, sh, e, near=None):
         """A new anchor on the curve where it's nearest to the mouse, moved to the mouse (snapped unless Shift).
         near: only if the curve is that close (pixels). True if one was added."""
-        seg, t, d = nearest(sh["pts"], self.to_xy, e.x, e.y)
+        seg, t, d = nearest(sh["pts"], self.to_xy, e.x, e.y, gaps=sh.get("gaps", ()))
         if near is not None and d > near:
             return False
         before = json.dumps(self.app.shapes)

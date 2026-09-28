@@ -28,6 +28,8 @@ from window.panel_freehand import FreehandPanel
 from window.panel_funnel import FunnelPanel
 from window.panel_text import TextPanel
 from window.panel_tumour import TumourPanel
+from notes.joined import all_tumours
+from window.join_split import JoinSplit
 from roll.pianoroll import PianoRoll
 from files import errors
 from files.about import ICONS, VERSION
@@ -77,7 +79,7 @@ SPLIT_TIP = (
 )
 
 
-class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, TextPanel, tk.Tk):
+class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, TextPanel, JoinSplit, tk.Tk):
     def __init__(self, autosave=AUTOSAVE):
         super().__init__()
         errors.install(self)
@@ -852,8 +854,8 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.push_undo()
         for sh in shapes:
             sh["pts"] = [[mid2 - b, p] if sideways else [b, mid2 - p] for b, p in sh["pts"]]
-            if sh.get("tumour"):  # mirrored: the bumps swap sides too
-                sh["tumour"]["mirror"] = not sh["tumour"]["mirror"]
+            for tm in all_tumours(sh):  # mirrored: the bumps swap sides too
+                tm["mirror"] = not tm["mirror"]
             if sideways:  # the velocities flip with it
                 if sh.get("vel_env"):
                     sh["vel_env"] = [[1 - u, v] for u, v in reversed(sh["vel_env"])]
@@ -879,8 +881,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
                 sh["k"] = r * r / sh.get("k", 1.0)
             if sh.get("text"):  # its size / grow are measured the same way (see text.py)
                 sh["text"]["k"] = r * r / sh["text"]["k"]
-            tm = sh.get("tumour")
-            if tm:  # the bumps turn with it (sizes as they look on screen, see tumour.py)
+            for tm in all_tumours(sh):  # the bumps turn with it (sizes as they look on screen, see tumour.py)
                 tm["size"] *= tm["k"] / r
                 tm["length"] *= r / tm["k"]
                 tm["dist"] *= r / tm["k"]

@@ -11,6 +11,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     panel_tumour.py  the panel's tumour line (summary + button)
     tumour_window.py the tumour window: the tumour settings (bumps along lines)
     graph_window.py  a tumour setting's graph (the number changing along the line)
+    join_split.py    Join (shapes -> one curve) and Split (cut in two, pieces -> separate shapes)
     panel_freehand.py  the panel's Straighten setting for freehand strokes
     panel_text.py    the panel's text settings (font, size, spacing, threshold, grow)
     font_dialog.py   the font window (type a font's name or pick one)
@@ -40,6 +41,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     bezier.py        Bezier curves (anchors + handles) for curves and funnel curves, symmetry, fitting to points
     arc.py           arcs: pieces of a perfect circle through three points
     tumour.py        tumours: bumps along lines
+    joined.py        joining shapes into one curve (pieces, their tumours) and splitting shapes
     envelope.py      velocity envelopes
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes
   files/             saving, MIDI, sound

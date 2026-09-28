@@ -149,6 +149,25 @@ def make_symmetric(pts, sharp, mode, axis, source=0):
 # For the Curve shape on the roll and curve strokes in the drawer: a curve c is a dict with "pts", and optional
 # "sharp" (anchor numbers that are corners) and "sym" ("mirror" / "turn", see above). to_screen(p) -> (x, y) and
 # from_screen(x, y) -> p map a curve point to the screen and back. exact: mirror exactly (see Symmetry).
+# A joined curve (joined.py) can also have "gaps" (segment numbers that aren't drawn: the curve is in pieces) and
+# "splits" (anchor numbers where a piece's next tumour section starts); their anchors stay, like the ends.
+
+def piece_ends(c):
+    """Anchor numbers that end a piece: the curve's two ends and the anchors on either side of each gap."""
+    last = anchor_count(c["pts"]) - 1
+    return {0, last} | {g for g in c.get("gaps", ())} | {g + 1 for g in c.get("gaps", ())}
+
+
+def fixed_anchors(c):
+    """Anchors that can't be removed: piece ends and tumour section starts."""
+    return piece_ends(c) | set(c.get("splits", ()))
+
+
+def shift_marks(c, after, d):
+    """Anchor (and gap segment) numbers after `after` moved by d (an anchor added / removed there)."""
+    for key in ("gaps", "splits"):
+        if c.get(key):
+            c[key] = [a + d if a > after else a for a in c[key]]
 
 def set_sharp(c, sharp):
     if sharp:
@@ -222,9 +241,12 @@ def add_anchor(c, seg, t, new, to_screen, exact=False):
     if c.get("sym"):  # the same place on the other half
         splits.append((len(segments(pts)) - 1 - seg, 1 - t))
     at = 3 * (seg + 1)
+    if seg in c.get("gaps", ()):
+        return False  # (a gap between pieces isn't part of the curve)
     for s, tt in sorted(splits, reverse=True):  # the later one first, so the earlier keeps its number
         pts = split(pts, s, tt)
         sharp = [a + 1 if a > s else a for a in sharp]
+        shift_marks(c, s, 1)
         if s < seg:
             at += 3
     d = [new[0] - pts[at][0], new[1] - pts[at][1]]
@@ -241,7 +263,7 @@ def can_delete(c, i):
     curve's middle anchor: stays) or None (the ends and their handles stay, you couldn't grab them again)."""
     n = len(c["pts"])
     a = handle_anchor(i) if i % 3 else i
-    if not 0 < a < n - 1:
+    if not 0 < a < n - 1 or a // 3 in piece_ends(c) or not i % 3 and a // 3 in fixed_anchors(c):
         return None
     if i % 3:
         return "handle"
@@ -258,6 +280,7 @@ def delete_point(c, i, to_screen, exact=False):
         for k in sorted({a} | ({anchor_count(pts) - 1 - a} if c.get("sym") else set()), reverse=True):
             pts = remove_anchor(pts, k)
             sharp = [b - 1 if b > k else b for b in sharp if b != k]
+            shift_marks(c, k, -1)
         c["pts"] = pts
         set_sharp(c, sharp)
     elif what == "handle":
@@ -287,25 +310,33 @@ def half_at(pts, to_screen, x, y):
     return 1 if (seg + t) * 2 > len(segments(pts)) else 0
 
 
-def pen_handles(pts, selected=True):
+def pen_handles(pts, selected=True, gaps=()):
     """[(point number, "ctrl" / "anchor" / "end")] to show, in drawing order (anchors on top): handle points (the
-    ones between anchors only while pulled out of their anchor), anchors, the two ends. Not selected: the ends only."""
+    ones between anchors only while pulled out of their anchor), anchors, the two ends. Not selected: the ends only.
+    gaps: segments between the pieces of a joined curve (their handles aren't shown, the anchors beside them are
+    ends)."""
     n = len(pts)
+    ends = {0, n - 1} | {3 * g for g in gaps} | {3 * g + 3 for g in gaps}
     if not selected:
-        return [(0, "end"), (n - 1, "end")]
-    ctrls = [(i, "ctrl") for i in range(n) if i % 3 and (i in (1, n - 2) or pts[i] != pts[handle_anchor(i)])]
-    return ctrls + [(i, "anchor") for i in range(3, n - 1, 3)] + [(0, "end"), (n - 1, "end")]
+        return [(i, "end") for i in sorted(ends)]
+    ctrls = [(i, "ctrl") for i in range(n) if i % 3 and (i - 1) // 3 not in gaps and
+             (handle_anchor(i) in ends or pts[i] != pts[handle_anchor(i)])]
+    return ctrls + [(i, "anchor") for i in range(3, n - 1, 3) if i not in ends] + [(i, "end") for i in sorted(ends)]
 
 
-def handle_lines(pts):
+def handle_lines(pts, gaps=()):
     """[(anchor, handle point)]: the handle lines to draw."""
-    return [(pts[handle_anchor(i)], p) for i, p in enumerate(pts) if i % 3 and p != pts[handle_anchor(i)]]
+    return [(pts[handle_anchor(i)], p) for i, p in enumerate(pts)
+            if i % 3 and (i - 1) // 3 not in gaps and p != pts[handle_anchor(i)]]
 
 
-def nearest(pts, to_screen, x, y, n=64):
-    """(segment, t, distance) of the curve point nearest to (x, y) on screen; to_screen maps a curve point."""
+def nearest(pts, to_screen, x, y, n=64, gaps=()):
+    """(segment, t, distance) of the curve point nearest to (x, y) on screen; to_screen maps a curve point.
+    gaps: segments to leave out."""
     best = None
     for s, seg in enumerate(segments(pts)):
+        if s in gaps:
+            continue
         for i in range(n + 1):
             sx, sy = to_screen(seg_point(*seg, i / n))
             d = math.hypot(sx - x, sy - y)

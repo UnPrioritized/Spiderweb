@@ -57,6 +57,11 @@ def short_stroke(st):
     return dict(st, pts=[[short_num(a) for a in p] for p in st["pts"]])  # a curve keeps its corners / symmetry
 
 
+def short_tumour(tm):
+    return {a: {g: [[short_num(x) for x in p] for p in pts] for g, pts in b.items()} if a == "graphs"
+            else short_num(b) for a, b in tm.items()}
+
+
 def short_shape(sh):
     def short(k, v):
         if k == "vel_env":
@@ -70,8 +75,9 @@ def short_shape(sh):
                      "ends": [c and dict(c, pts=[[short_num(a) for a in uf] for uf in c["pts"]]) for c in st["ends"]]}
                     for st in v]
         if k == "tumour":
-            return {a: {g: [[short_num(x) for x in p] for p in pts] for g, pts in b.items()} if a == "graphs"
-                    else short_num(b) for a, b in v.items()}
+            return short_tumour(v)
+        if k == "tumours":
+            return [short_tumour(t) if t else None for t in v]
         if k == "text":
             return {a: [short_num(x) for x in b] if a == "bbox" else short_num(b) for a, b in v.items()}
         return short_num(v) if k in ("gate", "gate0", "gate1", "k") else v

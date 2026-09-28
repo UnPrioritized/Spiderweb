@@ -3,6 +3,7 @@ and a button that opens the tumour window (tumour_window.py), where the settings
 
 from tkinter import ttk
 
+from notes.joined import shown_tumour
 from notes.tumour import LINE_KINDS
 from window.tumour_window import SHAPE_CHOICES, TumourWindow
 from window.widgets import Tooltip
@@ -45,8 +46,10 @@ class TumourPanel:
         self.layout_rows()
         if not tgts:
             return
-        on = [t["tumour"] for t in tgts if (t.get("tumour") or {}).get("on")]
-        if not on:
+        on = [shown_tumour(t) for t in tgts if (shown_tumour(t) or {}).get("on")]
+        if any(t.get("tumours") for t in tgts):
+            text = "Different tumours per joined shape"
+        elif not on:
             text = "No tumours"
         elif len(tgts) > 1:
             text = f"Tumours on {len(on)} of {len(tgts)}"
