@@ -181,6 +181,7 @@ class ProjectFiles:
         self.stroke = None
         self.undo_stack.clear()
         self.redo_stack.clear()
+        self._redo_kept = None
         self.on_project_change()
         return True
 
@@ -189,7 +190,7 @@ class ProjectFiles:
         if window:  # only the autosave remembers the window
             data["window"] = {"geometry": self._normal_geometry or self.wm_geometry(),
                               "maximized": self.wm_state() == "zoomed",
-                              "velocity": self.show_velocity.get(),
+                              "velocity": self.show_velocity.get(), "history": self.show_history.get(),
                               "velocity_height": self.velocity_height() / self.scale,
                               "midi_device": self.midi_device.get(), "live": self.live.get(),
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
@@ -262,8 +263,10 @@ class ProjectFiles:
             pos = win.get("history_window")
             if isinstance(pos, str) and re.fullmatch(r"(\d+x\d+)?\+-?\d+\+-?\d+", pos):
                 self.history_pos = pos
-            if win.get("history_undocked") is True and not self.history_undocked:
-                self.undock_history()
+            self.history_undocked = win.get("history_undocked") is True
+            if win.get("history") is True:  # it starts off; on again if it was on last time
+                self.show_history.set(True)
+                self.toggle_history(tip=False)
             if win.get("velocity") is True:  # it starts off; on again if it was on last time
                 self.show_velocity.set(True)
                 self.toggle_velocity(tip=False)

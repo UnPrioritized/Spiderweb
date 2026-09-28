@@ -1,6 +1,7 @@
-"""The History panel: every undo step by name, oldest at the top; click one to go back (or forward) to it. It sits
-in the side panel between Project and Shapes; Undock puts it in a window of its own (Dock, or closing that window,
-puts it back). The steps themselves are App.undo_stack / redo_stack: (shapes as JSON, name) pairs."""
+"""The History panel: every undo step by name, oldest at the top; click one to go back (or forward) to it. The
+toolbar's History box shows / hides it (off on a fresh start). It sits in the side panel between Project and Shapes;
+Undock puts it in a window of its own (Dock, or closing that window, puts it back). The steps themselves are
+App.undo_stack / redo_stack: (shapes as JSON, name) pairs."""
 
 import json
 import tkinter as tk
@@ -32,8 +33,7 @@ class HistoryPanel:
         self.history_pos = ""  # the undocked window's size and place ("WxH+x+y", remembered in the autosave)
         self.history_window = None
         self._history_sig = None
-        box = self.history_box = ttk.LabelFrame(side, text=tr("history.history"), padding=6)
-        box.pack(fill="x", pady=(8, 0))
+        box = self.history_box = ttk.LabelFrame(side, text=tr("history.history"), padding=6)  # (packed when shown)
         self.history_frame = self._history_list(box, 6)
         self.history_frame.pack(fill="x")
 
@@ -63,7 +63,7 @@ class HistoryPanel:
 
     def sync_history(self, force=False):
         """Refresh the list if the steps changed (cheap to call often)."""
-        if not hasattr(self, "history_list"):
+        if not hasattr(self, "history_list") or not self.show_history.get():
             return
         sig = (len(self.undo_stack), len(self.redo_stack), id(self.undo_stack[-1]) if self.undo_stack else None,
                id(self.redo_stack[-1]) if self.redo_stack else None)
@@ -99,7 +99,11 @@ class HistoryPanel:
         """The last step changed nothing (e.g. a click on a shape without dragging it): it's taken out, so it
         doesn't show in the History (before: the shapes as JSON now, before the next change)."""
         if self.undo_stack and self.undo_stack[-1][0] == before and not self.redo_stack:
+            kept = getattr(self, "_redo_kept", None)
+            if kept and kept[1] == len(self.undo_stack):
+                self.redo_stack[:] = kept[0]  # (the steps undone before it are back)
             self.undo_stack.pop()
+            self._redo_kept = None
 
     def settle_history(self):
         """After a mouse drag: a step that changed nothing goes."""
@@ -108,6 +112,24 @@ class HistoryPanel:
             self.sync_history()
 
     # ------------------------------------------------------------ docked / undocked
+
+    def toggle_history(self, tip=True):
+        """The toolbar's History box: show the list (docked or in its window, whichever it was) or hide it."""
+        if self.show_history.get():
+            if self.history_undocked:
+                self._history_window()
+            else:
+                self.history_box.pack(fill="x", pady=(8, 0), before=self.shapes_box)
+            self.sync_history(force=True)
+            if tip:
+                self.tips.show("history")
+        else:
+            if self.history_window:
+                self.remember_history()
+                self.history_window.destroy()
+                self.history_window = None
+            self.history_box.pack_forget()
+        self.schedule_autosave()
 
     def toggle_history_dock(self):
         if self.history_undocked:
@@ -119,6 +141,9 @@ class HistoryPanel:
     def undock_history(self):
         self.history_undocked = True
         self.history_box.pack_forget()
+        self._history_window()
+
+    def _history_window(self):
         self.history_frame.destroy()
         win = self.history_window = tk.Toplevel(self)
         win.title(tr("history.history"))

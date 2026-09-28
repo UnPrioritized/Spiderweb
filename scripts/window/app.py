@@ -117,6 +117,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.note_counts = []  # notes per shape in rendered
         self.ppq, self.beats = 960, 4
         self.undo_stack, self.redo_stack = [], []
+        self._redo_kept = None  # (push_undo)
         self._edit_key = None
         self._scrub = None  # the number box being stepped (scrub_step)
         self._loading = False
@@ -140,6 +141,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.channel_split = "key"  # what counts as an overlap for Multi channel (engine.SPLITS)
         self.keys = 128  # the project's key range: 0 .. keys - 1 (paths.KEYS)
         self.keys_var = tk.StringVar(value=str(KEYS[0]))
+        self.show_history = tk.BooleanVar(value=False)  # the History panel (off on a fresh start, like the velocity pane)
         self.show_velocity = tk.BooleanVar(value=False)  # off on a fresh start: turning it on shows its tip
         self.vel_tool = tk.StringVar(value="line")
         self.midi_device = tk.StringVar(value=DEFAULT_DEVICE)
@@ -246,6 +248,8 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
                         command=redraw).pack(side="left", padx=(8, 0))
         ttk.Checkbutton(bar, text=tr("app.velocity_pane"), variable=self.show_velocity,
                         command=self.toggle_velocity).pack(side="left", padx=(8, 0))
+        ttk.Checkbutton(bar, text=tr("app.history"), variable=self.show_history,
+                        command=self.toggle_history).pack(side="left", padx=(8, 0))
         ttk.Button(bar, text=tr("app.fit_view"), command=lambda: self.roll.fit_view()).pack(side="left", padx=(12, 0))
         ttk.Button(bar, text=tr("app.undo"), command=self.undo).pack(side="left", padx=(12, 0))
         ttk.Button(bar, text=tr("app.redo"), command=self.redo).pack(side="left", padx=(4, 0))
@@ -1139,6 +1143,9 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.drop_empty_step(before)
         self.undo_stack.append((before, name or tr("app.change")))
         del self.undo_stack[:-300]
+        # the undone steps are kept aside until this step turns out to change something (a click on a shape that
+        # doesn't drag it mustn't throw them away: drop_empty_step brings them back)
+        self._redo_kept = (self.redo_stack[:], len(self.undo_stack)) if self.redo_stack else None
         self.redo_stack.clear()
         self._edit_key = None
         self.sync_history()
@@ -1175,6 +1182,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
             return
         self.roll.cancel_draft()
         state, name = src.pop()
+        self._redo_kept = None
         dst.append((json.dumps(self.shapes), name))
         self.shapes = json.loads(state)
         self.sels = {i for i in self.sels if i < len(self.shapes)}
