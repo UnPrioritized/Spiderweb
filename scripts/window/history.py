@@ -8,6 +8,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
+from window.widgets import Tooltip
 
 START = tr("history.start")  # the first row: the oldest state still kept
 FUTURE = "#a0a0a0"  # steps undone (Ctrl+Y / clicking them brings them back; a new change drops them)
@@ -44,8 +45,10 @@ class HistoryPanel:
         row = ttk.Frame(frame)
         row.pack(side="bottom", fill="x", pady=(4, 0))
         ttk.Label(row, text=tr("history.click_a_step_to_go_back"), foreground="#777").pack(side="left")
-        ttk.Button(row, text=tr("history.dock") if parent is not self.history_box else tr("history.undock"),
-                   command=self.toggle_history_dock).pack(side="right")
+        b = ttk.Button(row, text=tr("history.dock") if parent is not self.history_box else tr("history.undock"),
+                       command=self.toggle_history_dock)
+        b.pack(side="right")
+        Tooltip(b, tr("history.dock_tip"))
         lst = tk.Listbox(frame, height=height, activestyle="none", exportselection=False, font=("Segoe UI", 9))
         sb = ttk.Scrollbar(frame, orient="vertical", command=lst.yview)
         lst.config(yscrollcommand=sb.set)

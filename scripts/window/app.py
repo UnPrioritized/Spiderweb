@@ -248,8 +248,9 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
                         command=redraw).pack(side="left", padx=(8, 0))
         ttk.Checkbutton(bar, text=tr("app.velocity_pane"), variable=self.show_velocity,
                         command=self.toggle_velocity).pack(side="left", padx=(8, 0))
-        ttk.Checkbutton(bar, text=tr("app.history"), variable=self.show_history,
-                        command=self.toggle_history).pack(side="left", padx=(8, 0))
+        b = ttk.Checkbutton(bar, text=tr("app.history"), variable=self.show_history, command=self.toggle_history)
+        b.pack(side="left", padx=(8, 0))
+        Tooltip(b, tr("app.history_tip"))
         ttk.Button(bar, text=tr("app.fit_view"), command=lambda: self.roll.fit_view()).pack(side="left", padx=(12, 0))
         ttk.Button(bar, text=tr("app.undo"), command=self.undo).pack(side="left", padx=(12, 0))
         ttk.Button(bar, text=tr("app.redo"), command=self.redo).pack(side="left", padx=(4, 0))

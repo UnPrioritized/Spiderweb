@@ -103,7 +103,7 @@ class TumourWindow(tk.Toplevel):
         ttk.Label(row, text=tr("tumour_window.range")).pack(side="left")
         for i, key in enumerate(("start", "end")):
             if i:
-                ttk.Label(row, text="% to").pack(side="left", padx=(3, 3))
+                ttk.Label(row, text=tr("tumour_window.percent_to")).pack(side="left", padx=(3, 3))
             var = self.vars[key] = tk.StringVar()
             e = ttk.Entry(row, textvariable=var, width=5)
             e.pack(side="left", padx=(5 if not i else 0, 0))
