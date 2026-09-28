@@ -74,7 +74,7 @@
  "snap.setup": "Setup",
  "snap.note": "note",
  "snap.divided_by": "divided by:",
- "snap.kind_tip": "/ = that many notes (3 / 16 = three 16th notes).\n. = a dotted note (one and a half notes), .. = double dotted (one and three quarters).",
+ "snap.kind_tip": "Empty = one plain note (16 = a 16th note), the left number isn't used.\n/ = that many notes (3 / 16 = three 16th notes).\n. = a dotted note (one and a half notes), .. = double dotted (one and three quarters).",
  "snap.divided_by_tip": "Splits the length into this many equal steps (3 = triplets).",
  "snap.ok": "OK",
  "snap.cancel": "Cancel",

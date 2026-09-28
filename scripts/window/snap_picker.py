@@ -132,8 +132,9 @@ class SnapPicker:
 
 
 class CustomSnapWindow(tk.Toplevel):
-    """Customised snap: [count] [/ . ..] [note] note, divided by [n]. / = that many notes (3 / 16 = three 16ths),
-    . = a dotted note (1.5 notes), .. = double dotted (1.75); the count is greyed out for the dotted ones."""
+    """Customised snap: [count] [  / . ..] [note] note, divided by [n]. Empty = one plain note (16 = a 16th),
+    / = that many notes (3 / 16 = three 16ths), . = a dotted note (1.5 notes), .. = double dotted (1.75); the count
+    is greyed out unless it's /."""
 
     def __init__(self, app, var):
         super().__init__(app)
@@ -142,8 +143,8 @@ class CustomSnapWindow(tk.Toplevel):
         self.transient(app)
         self.resizable(False, False)
         count, note, div = custom_parts(var.get()) or ("3", 16, 1)
-        self.count = tk.StringVar(value=count if count not in (".", "..") else "3")
-        self.kind = tk.StringVar(value=count if count in (".", "..") else "/")
+        self.count = tk.StringVar(value=count if count not in DOTS else "3")
+        self.kind = tk.StringVar(value=count if count in DOTS else "/")
         self.note, self.div = tk.StringVar(value=str(note)), tk.StringVar(value=str(div))
         box = ttk.Frame(self, padding=10)
         box.pack(fill="both", expand=True)
@@ -200,7 +201,8 @@ class CustomSnapWindow(tk.Toplevel):
             return
         beats = whole_notes(snap) * 4
         ppq = self.app.ppq
-        self.info.config(text=tr("snap.length", beats=fmt(round(float(beats), 4)), ticks=fmt(round(float(beats * ppq), 2)),
+        self.info.config(text=tr("snap.length", beats=f"{float(beats):.4f}".rstrip("0").rstrip("."),
+                                 ticks=fmt(round(float(beats * ppq), 2)),
                                  ppq=ppq), foreground="#777")
 
     def ok(self):
@@ -208,5 +210,7 @@ class CustomSnapWindow(tk.Toplevel):
         if snap is None:
             self.bell()
             return
+        if snap in (custom_snap("", n, 1) for n in (1, 2, 4, 8, 16, 32)):
+            snap = "1/" + snap.split("/")[1]  # a plain note that's in the list anyway
         self.var.set(snap)
         self.destroy()
