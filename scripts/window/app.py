@@ -360,6 +360,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         box.pack(fill="x")
         box.columnconfigure(1, weight=1)
         r = 0
+        boxes = []  # BPM and Beats per bar: made as wide as the dropdowns below, so all four line up
         for label, key in ((tr("app.ppq"), "ppq"), (tr("app.bpm"), "bpm"), (tr("app.beats_per_bar"), "beats")):
             lb = ttk.Label(box, text=label)
             lb.grid(row=r, column=0, sticky="w", pady=1)
@@ -373,8 +374,11 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
                                              font=("Segoe UI", 8))
                 Tooltip(self.ppq_warning, tr("app.a_ppq_of_or_more_many", PPQ_WARN=PPQ_WARN))
             else:
-                e = ttk.Entry(box, textvariable=self.pvar[key], width=8)
-                e.grid(row=r, column=1, sticky="w", padx=5)
+                cell = ttk.Frame(box)
+                cell.grid(row=r, column=1, sticky="w", padx=5)
+                e = ttk.Entry(cell, textvariable=self.pvar[key], width=6)
+                e.pack(fill="both", expand=True)
+                boxes.append(e)
                 Scrub(self, [(e, self.pvar[key], None)], (1, 10, 0.1) if key == "bpm" else (1, 1, 1),
                       *((4, 100000) if key == "bpm" else (1, 32)), label=lb)
             r += 1
@@ -384,6 +388,10 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         b.grid(row=r, column=1, sticky="w", padx=5)
         b.bind("<<ComboboxSelected>>", lambda e: self.on_project_change())
         Tooltip(b, tr("app.128_the_standard_keys_0_127"))
+        box.update_idletasks()
+        for e in boxes:
+            e.master.config(width=b.winfo_reqwidth(), height=e.winfo_reqheight())
+            e.master.pack_propagate(False)
         r += 1
         ttk.Label(box, text=tr("app.output_file")).grid(row=r, column=0, sticky="w", pady=1)
         out = ttk.Frame(box)
