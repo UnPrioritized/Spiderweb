@@ -33,6 +33,7 @@ class HistoryPanel:
         self.history_pos = ""  # the undocked window's size and place ("WxH+x+y", remembered in the autosave)
         self.history_window = None
         self._history_sig = None
+        self._history_jumping = False  # (history_jump)
         box = self.history_box = ttk.LabelFrame(side, text=tr("history.history"), padding=6)  # (packed when shown)
         self.history_frame = self._history_list(box, 6)
         self.history_frame.pack(fill="x")
@@ -63,7 +64,7 @@ class HistoryPanel:
 
     def sync_history(self, force=False):
         """Refresh the list if the steps changed (cheap to call often)."""
-        if not hasattr(self, "history_list") or not self.show_history.get():
+        if not hasattr(self, "history_list") or not self.show_history.get() or self._history_jumping:
             return
         sig = (len(self.undo_stack), len(self.redo_stack), id(self.undo_stack[-1]) if self.undo_stack else None,
                id(self.redo_stack[-1]) if self.redo_stack else None)
@@ -72,6 +73,7 @@ class HistoryPanel:
         self._history_sig = sig
         names, now = self.history_rows()
         lst = self.history_list
+        top = lst.yview()[0]  # (refilling it scrolls to the top: put the scroll back, see() below only moves it if needed)
         lst.delete(0, "end")
         for i, name in enumerate(names):
             lst.insert("end", f"{name}")
@@ -79,6 +81,7 @@ class HistoryPanel:
                 lst.itemconfig(i, foreground=FUTURE, selectforeground="#ffffff")
         lst.selection_clear(0, "end")
         lst.selection_set(now)
+        lst.yview_moveto(top)
         lst.see(now)
 
     def history_clicked(self, lst):
@@ -89,10 +92,14 @@ class HistoryPanel:
     def history_jump(self, row):
         """Undo / redo until row is the current step."""
         self.roll.cancel_draft()
-        while len(self.undo_stack) > row and self.undo_stack:
-            self._restore(self.undo_stack, self.redo_stack)
-        while len(self.undo_stack) < row and self.redo_stack:
-            self._restore(self.redo_stack, self.undo_stack)
+        self._history_jumping = True  # (no list refresh for every step on the way: each would scroll it)
+        try:
+            while len(self.undo_stack) > row and self.undo_stack:
+                self._restore(self.undo_stack, self.redo_stack)
+            while len(self.undo_stack) < row and self.redo_stack:
+                self._restore(self.redo_stack, self.undo_stack)
+        finally:
+            self._history_jumping = False
         self.sync_history(force=True)
 
     def drop_empty_step(self, before):
