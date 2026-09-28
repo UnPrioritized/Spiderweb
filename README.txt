@@ -1,8 +1,22 @@
-Spiderweb 1.1.0
-===============
+Spiderweb
+=========
 
-Draw lines, curves and shapes on a piano roll and turn them into MIDI notes
-(made for black MIDI, styled after Domino).
+Spiderweb turns drawings into MIDI notes. Instead of placing notes one by
+one, you draw on a piano roll (it looks and works much like Domino's) and
+every key your drawing crosses gets a note: a slanted line becomes a smooth
+staircase of notes, a filled circle becomes a round block of notes. It's made
+for black MIDI, where pictures drawn out of thousands of notes like this are
+called spiderwebs.
+
+What it can do:
+- Draw lines, polylines, freehand strokes, curves, arcs, squares, circles,
+  triangles, funnels, text, and shapes you draw yourself.
+- Fill shapes with notes: one long note per key, or chopped into notes of
+  any length (spam).
+- Add bumps along lines (tumours), shape the velocities, and put
+  overlapping shapes on different channels.
+- Play it as you go, then write a .mid file, or copy the notes straight into
+  Domino (and paste notes from Domino).
 
 New versions, source code and problem reports:
 https://github.com/UnPrioritized/Spiderweb
