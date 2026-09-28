@@ -8,6 +8,8 @@ import math
 import tkinter as tk
 from types import SimpleNamespace
 
+import numpy as np
+
 from files.lang import tr
 from notes.custom import box_frame, fill_plan
 from notes.engine import make_shape
@@ -195,6 +197,23 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if sh["kind"] == "funnel" and funnel_contains(sh, self.x2t(x), self.y2p(y)):
                 return i
         return None
+
+    def note_owner(self, x, y):
+        """The shape whose note is under the mouse (a few pixels either side count for short notes), or None.
+        Only while the notes are shown."""
+        if not self.app.show_notes.get() or not len(self.app.rendered):
+            return None
+        ppq, near = self.app.ppq, 3 * self.scale
+        t, t_lo, t_hi = (self.x2t(v) * ppq for v in (x, x - near, x + near))
+        ns = self.visible_notes(t_lo, t_hi)
+        ns = ns[(ns[:, 2] == math.floor(self.y2p(y) + 0.5)) & (ns[:, 0] <= t_hi) & (ns[:, 1] >= t_lo)]
+        if not len(ns):
+            return None
+        on = ns[(ns[:, 0] <= t) & (ns[:, 1] > t)]  # right on a note first, else the nearest
+        if len(on):
+            return int(on[:, 5].max())  # (the shape drawn on top)
+        gap = np.maximum(ns[:, 0] - t, t - ns[:, 1])
+        return int(ns[gap == gap.min(), 5].max())
 
     # ------------------------------------------------------------ mouse
 
@@ -644,7 +663,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return
         if sc["tick"] is None:
             i = None if self.draft else self.hit_shape(sc["x"], sc["y"])
-            if i is not None and sc["deselect"]:  # near a shape: its menu
+            if i is None and not self.draft:
+                i = self.note_owner(sc["x"], sc["y"])  # on one of a shape's notes counts too
+            if i is not None and sc["deselect"]:  # near a shape (or on its notes): its menu
                 self.show_menu(e, i)
             elif sc["deselect"]:
                 self.cancel_draft()
