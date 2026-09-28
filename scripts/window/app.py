@@ -456,6 +456,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         ttk.Button(btns, text="Duplicate", command=self.duplicate).pack(side="left")
         ttk.Button(btns, text="Delete", command=self.delete_selected).pack(side="left", padx=4)
         ttk.Button(btns, text="Delete all", command=self.delete_all).pack(side="left")
+        self._build_join(box)
 
     def _build_shape_settings(self, side):
         self.settings = ttk.LabelFrame(side, text="New shape defaults", padding=6)
@@ -558,6 +559,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.sync_custom()
         self.sync_funnel()
         self.sync_list_selection()
+        self.sync_join()
         if self.sel is not None:
             self.listbox.see(self.sel)
         # the first time one is selected: how it's edited
@@ -716,6 +718,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         for i, sh in enumerate(self.shapes):
             self.listbox.insert("end", f"{i + 1}.  {self.shape_label(sh)}  —  {counts[i]:,} notes")
         self.sync_list_selection()
+        self.sync_join()
         self.roll.request_redraw()
         self.update_status()
         self.schedule_autosave()

@@ -85,8 +85,10 @@ class ShapeMenu:
             item("Save drawing to the shape library…", "", lambda: app.save_to_library(sh))
         if app.tumour_targets():
             item("Tumours…", "", app.open_tumours)
-        if app.can_join():
-            item("Join shapes into one curve", "", app.join_selected)
+        if len(app.sels) >= 2:  # (greyed out, saying why, when something else is selected too)
+            ok = app.can_join()
+            item("Join shapes into one curve" if ok else "Join shapes into one curve  (only lines, polylines, "
+                 "freehand strokes, curves and arcs)", "", app.join_selected, ok)
         if len(app.sels) == 1 and sh["kind"] in ("curve", "poly", "line"):
             item("Split here", "", lambda: app.split_here(i, at))
         if len(app.sels) == 1 and app.can_split_pieces(sh):

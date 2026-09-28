@@ -271,11 +271,12 @@ TOPICS = [
               "Off: the halves go their own way again.",
          words="mirror arch s-curve symmetry"),
     dict(id="join", section="Editing", title="Join and split",
-         tip="Select several lines, polylines, freehand strokes, curves or arcs,\n"
-             "right-click → Join shapes into one curve.\n"
+         tip="Select several lines, polylines, freehand strokes, curves or arcs, then\n"
+             "Join shapes into one curve (under the shape list, or right-click).\n"
              "Right-click a curve, polyline or line → Split here cuts it in two.",
-         text="Join: select two or more lines, polylines, freehand strokes, curves or arcs, right-click one of them → "
-              "Join shapes into one curve. They become one Curve shape: ends that touch are joined (with a corner there), "
+         text="Join: select two or more lines, polylines, freehand strokes, curves or arcs, then click Join shapes "
+              "into one curve under the shape list (or right-click one of them → Join shapes into one curve). They "
+              "become one Curve shape: ends that touch are joined (with a corner there), "
               "and the curve's anchors and handles can be edited like any curve. Freehand strokes are turned into "
               "a smooth curve that follows them closely.\n"
               "[clip:join-touching]\n\n"
@@ -293,7 +294,7 @@ TOPICS = [
               "or a polyline point it's cut there; anywhere else a point is added there first. Each half keeps the "
               "velocities it had.\n"
               "[clip:join-split-here]\n\n"
-              "Split into separate shapes: a joined curve goes back to one curve per piece (and per shape that kept "
+              "Split into separate shapes (under the shape list, or right-click): a joined curve goes back to one curve per piece (and per shape that kept "
               "its own tumours). A custom shape, like one drawn with Live shape, splits into one shape per group of "
               "strokes that touch each other.\n"
               "[clip:join-split-shapes]\n\n"

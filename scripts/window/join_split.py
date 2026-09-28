@@ -4,13 +4,15 @@ drawings). The maths is in notes/joined.py."""
 
 import copy
 import math
+from tkinter import ttk
 
 from notes.bezier import anchor_count, nearest, split
 from notes.joined import join_shapes, piece_velocity, sections, split_at, split_custom, split_pieces, custom_groups
 from notes.tumour import LINE_KINDS
 from roll.roll_shared import cached_path
+from window.widgets import Tooltip
 
-TOUCH_PX = 6  # ends closer than this on screen count as touching
+TOUCH_PX = 8  # ends closer than this on screen (times the display scaling) count as touching, like Live shape snaps
 
 
 def span(sh):
@@ -18,11 +20,61 @@ def span(sh):
     return min(bs), max(bs)
 
 
+JOIN_KINDS = "lines, polylines, freehand strokes, curves and arcs"
+JOIN_TIP = "Joins the selected shapes into one Curve shape (ends that touch become one line with a corner)."
+SPLIT_TIP = ("Splits a joined curve back into its pieces, or a custom shape (like one drawn with Live shape)\n"
+             "into its separate drawings.")
+SPLIT_HERE = "To cut a line in two where you want: right-click it there → Split here."
+
+
 class JoinSplit:
     """Mixed into App."""
 
+    def _build_join(self, box):
+        """The Shapes box's Join / Split buttons (also in the right-click menu)."""
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=(4, 0))
+        self.join_btn = ttk.Button(row, text="Join shapes into one curve", command=self.join_selected)
+        self.join_btn.pack(side="left")
+        self.split_btn = ttk.Button(row, text="Split into separate shapes", command=self.split_selected)
+        self.split_btn.pack(side="left", padx=(4, 0))
+        self.join_tip, self.split_tip = Tooltip(self.join_btn, JOIN_TIP), Tooltip(self.split_btn, SPLIT_TIP)
+
+    def join_problem(self):
+        """Why the selection can't be joined (None = it can)."""
+        if len(self.sels) < 2:
+            return f"Select two or more {JOIN_KINDS.replace(' and ', ' or ')} to join them (Ctrl+click adds one)."
+        other = sorted({self.shape_label(self.shapes[i]).split(":")[0] for i in self.sels
+                        if self.shapes[i]["kind"] not in LINE_KINDS})
+        if other:
+            return f"Only {JOIN_KINDS} can be joined ({' and '.join(other).lower()} selected)."
+        return None
+
+    def split_problem(self):
+        """Why the selection can't be split into separate shapes (None = it can)."""
+        if len(self.sels) != 1:
+            return "Select one shape to split it."
+        sh = self.selected()
+        if not self.can_split_pieces(sh):
+            return ("It's all one piece: nothing to split into separate shapes." if sh["kind"] in ("curve", "custom")
+                    else "Only joined curves and custom shapes split into separate shapes.")
+        return None
+
+    def sync_join(self):
+        """Join / Split buttons greyed out (their tooltip says why) when they can't be used."""
+        for btn, tip, text, problem in ((self.join_btn, self.join_tip, JOIN_TIP, self.join_problem()),
+                                        (self.split_btn, self.split_tip, SPLIT_TIP, self.split_problem())):
+            btn.state(["disabled"] if problem else ["!disabled"])
+            tip.text = f"{text}\n\n{problem}" if problem else text
+            if btn is self.split_btn:
+                tip.text += "\n" + SPLIT_HERE
+
+    def split_selected(self):
+        if not self.split_problem():
+            self.split_pieces(self.sel)
+
     def can_join(self):
-        return len(self.sels) >= 2 and all(self.shapes[i]["kind"] in LINE_KINDS for i in self.sels)
+        return self.join_problem() is None
 
     def join_selected(self):
         if not self.can_join() or self.roll.sx is None:
@@ -30,7 +82,7 @@ class JoinSplit:
         roll = self.roll
 
         def touch(p, q):
-            return math.hypot(roll.t2x(p[0]) - roll.t2x(q[0]), roll.p2y(p[1]) - roll.p2y(q[1])) <= TOUCH_PX
+            return math.hypot(roll.t2x(p[0]) - roll.t2x(q[0]), roll.p2y(p[1]) - roll.p2y(q[1])) <= TOUCH_PX * self.scale
 
         order = sorted(self.sels)
         new = join_shapes([self.shapes[i] for i in order], roll.sy / roll.sx, touch)
@@ -105,7 +157,7 @@ class JoinSplit:
         """The segment's anchor the right-click was on (near), or None."""
         d, a = min((math.hypot(self.roll.to_xy(pts[3 * a])[0] - at.x, self.roll.to_xy(pts[3 * a])[1] - at.y), a)
                    for a in (seg, seg + 1))
-        return a if d <= TOUCH_PX + 2 else None
+        return a if d <= TOUCH_PX * self.scale else None
 
     def split_line(self, sh, at):
         """A line / polyline cut in two: at the point right-clicked on, or on the nearest part of it."""
@@ -122,9 +174,9 @@ class JoinSplit:
         _, j, u = best
         a, b = pts[j], pts[j + 1]
         seg_px = math.hypot(roll.t2x(b[0]) - roll.t2x(a[0]), roll.p2y(b[1]) - roll.p2y(a[1]))
-        if u * seg_px <= TOUCH_PX + 2:
+        if u * seg_px <= TOUCH_PX * self.scale:
             cut, k = list(a), j
-        elif (1 - u) * seg_px <= TOUCH_PX + 2:
+        elif (1 - u) * seg_px <= TOUCH_PX * self.scale:
             cut, k = list(b), j + 1
         else:
             cut, k = [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u], None
