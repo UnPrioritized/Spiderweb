@@ -187,8 +187,9 @@ class TextTyping:
         if ty["i"] is not None:
             sh = app.shapes[ty["i"]]
             if not ty["undo"]:
-                app.push_undo(name=tr("roll_text.type"))
-                ty["undo"] = True
+                ty["was"] = sh.get("name") or "?"  # (the History says what the text was if it's all erased)
+                app.push_undo(name=tr("roll_text.type", text=ty["was"]))
+                ty["undo"], ty["step"], ty["new"] = True, app.undo_stack[-1], False
             if build(sh, tx, axes):
                 app.shapes_changed()
             else:  # nothing to see any more: the shape goes, the typing stays
@@ -207,11 +208,30 @@ class TextTyping:
                     app.shapes_changed()
                 else:
                     app.add_shape(sh)
-                    ty["undo"] = True
+                    ty["undo"], ty["step"], ty["new"] = True, app.undo_stack[-1], True
             else:
                 ty["tx"] = tx
+        self.name_typing_step()
         app.sync_title()
         app.sync_custom()
+
+    def name_typing_step(self):
+        """The History name of this typing's undo step follows the text (it was named after the first letter)."""
+        app, ty = self.app, self.typing
+        step = ty.get("step")
+        if not step or not app.undo_stack or app.undo_stack[-1] is not step:
+            return  # (another step came after it)
+        if ty["i"] is not None:
+            sh = app.shapes[ty["i"]]
+            name = (tr("app.draw", shape_label=app.shape_label(sh)) if ty.get("new") else
+                    tr("roll_text.type", text=sh.get("name") or "?"))
+        elif ty.get("new"):
+            return  # (a new text typed and erased again: the step changes nothing)
+        else:
+            name = tr("roll_text.erase", text=ty["was"])
+        if name != step[1]:
+            ty["step"] = app.undo_stack[-1] = (step[0], name)
+            app.sync_history()
 
     def retype(self, tx, axes):
         """New settings (the panel) for the text being typed."""
