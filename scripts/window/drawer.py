@@ -124,6 +124,8 @@ class Drawer(tk.Toplevel):
         self.clipboard = None  # copied strokes, and how many times they've been pasted
         self.pastes = 0
         self.undo_stack = []
+        self.redo_stack = []   # undone steps, until something new is drawn
+        self.redo_kept = []    # the redo steps before the last push_undo (a click that moved nothing gets them back)
         self.draft = None      # stroke being drawn
         self.drag = None
         self.follow = None     # a stroke started with a click: its drag, following the mouse until the next click
@@ -170,8 +172,7 @@ class Drawer(tk.Toplevel):
         bar.pack(fill="x")
         ttk.Label(bar, text=tr("drawer.grid")).pack(side="left", padx=(0, 4))
         ttk.Combobox(bar, textvariable=self.grid_n, values=GRIDS, width=4, state="readonly").pack(side="left")
-        ttk.Button(bar, text=tr("drawer.undo"), command=self.undo).pack(side="left", padx=(12, 0))
-        ttk.Button(bar, text=tr("drawer.clear"), command=self.clear).pack(side="left", padx=(4, 0))
+        ttk.Button(bar, text=tr("drawer.clear"), command=self.clear).pack(side="left", padx=(12, 0))
         ttk.Button(bar, text=tr("drawer.reset_view"), command=self.reset_view).pack(side="left", padx=(12, 0))
         ttk.Button(bar, text=tr("drawer.help_f1"), command=self.open_help).pack(side="left", padx=(12, 0))
 
@@ -224,7 +225,10 @@ class Drawer(tk.Toplevel):
         c.bind("<MouseWheel>", self.on_wheel)
         self.bind("<Key>", self.on_key)
         self.bind("<F1>", lambda e: self.open_help())
-        self.bind("<Control-z>", lambda e: (self.undo(), "break")[1])
+        for k in ("z", "Z"):
+            self.bind(f"<Control-{k}>", lambda e: (self.undo(), "break")[1])
+        for k in ("y", "Y"):
+            self.bind(f"<Control-{k}>", lambda e: (self.redo(), "break")[1])
         for keys, fn in (("c C", self.copy), ("v V", self.paste), ("h H", lambda: self.flip(True)),
                          ("j J", lambda: self.flip(False)), ("Left", lambda: self.turn(False)),
                          ("Right", lambda: self.turn(True))):
@@ -480,7 +484,8 @@ class Drawer(tk.Toplevel):
         if self.drag[0] == "pan":
             return
         if self.undo_stack and self.undo_stack[-1] == json.dumps(self.strokes):
-            self.undo_stack.pop()  # clicked without moving anything
+            self.undo_stack.pop()  # clicked without moving anything (the undone steps stay redoable)
+            self.redo_stack = self.redo_kept
         else:
             self.changed()
 
@@ -754,8 +759,7 @@ class Drawer(tk.Toplevel):
             return
         before = json.dumps(self.strokes)
         if add_anchor(st, seg, t, self.event_pt(e), self.to_xy, exact=True):
-            self.undo_stack.append(before)
-            del self.undo_stack[:-200]
+            self.push_undo(before)
             self.changed()
 
     def add_poly_point(self, i, e):
@@ -849,15 +853,26 @@ class Drawer(tk.Toplevel):
         self.arc_bend = False
         self.redraw()
 
-    def push_undo(self):
-        self.undo_stack.append(json.dumps(self.strokes))
+    def push_undo(self, before=None):
+        """A step to undo (before: the strokes as JSON, if they were already changed); drops the redo steps."""
+        self.undo_stack.append(before or json.dumps(self.strokes))
         del self.undo_stack[:-200]
+        self.redo_kept, self.redo_stack = self.redo_stack, []
 
     def undo(self):
         if self.draft:
             return self.cancel_draft()
         if self.undo_stack:
+            self.redo_stack.append(json.dumps(self.strokes))
             self.strokes = json.loads(self.undo_stack.pop())
+            self.changed()
+
+    def redo(self):
+        if self.draft:
+            return self.cancel_draft()
+        if self.redo_stack:
+            self.undo_stack.append(json.dumps(self.strokes))
+            self.strokes = json.loads(self.redo_stack.pop())
             self.changed()
 
     def clear(self):
@@ -906,6 +921,7 @@ class Drawer(tk.Toplevel):
 
     def open_shape(self, name, strokes):
         self.strokes, self.undo_stack, self.draft, self.sel = strokes, [], None, None
+        self.redo_stack, self.redo_kept = [], []
         self.name.set(name)
         self.saved_name = name or None
         self.dirty = False

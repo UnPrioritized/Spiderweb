@@ -252,8 +252,6 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         b.pack(side="left", padx=(8, 0))
         Tooltip(b, tr("app.history_tip"))
         ttk.Button(bar, text=tr("app.fit_view"), command=lambda: self.roll.fit_view()).pack(side="left", padx=(12, 0))
-        ttk.Button(bar, text=tr("app.undo"), command=self.undo).pack(side="left", padx=(12, 0))
-        ttk.Button(bar, text=tr("app.redo"), command=self.redo).pack(side="left", padx=(4, 0))
         self.play_btn = ttk.Button(bar, text=tr("app.play_space"), width=14, command=self.toggle_play, takefocus=False)
         self.play_btn.pack(side="left", padx=(12, 0))
         help_btn = ttk.Button(bar, text=tr("app.help_f1"), command=self.open_help, takefocus=False)
