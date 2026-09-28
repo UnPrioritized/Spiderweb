@@ -26,6 +26,8 @@ class Scrub:
             for key in ("<Up>", "<Down>"):
                 entry.bind(key, lambda e, box=(entry, var, apply): self.key(e, box))
             entry.bind("<MouseWheel>", lambda e, box=(entry, var, apply): self.wheel(e, box))
+            # the first time one is clicked into: how else it can be changed
+            entry.bind("<FocusIn>", lambda e: app.tips.show("numbers", wait=True), add="+")
         if label is not None:
             label.config(cursor="sb_h_double_arrow")
             label.bind("<ButtonPress-1>", self.press)

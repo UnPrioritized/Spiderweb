@@ -1050,6 +1050,16 @@
   "Right-click highlighted funnel curves → Curve shape (presets) or Custom formula. A formula is y of x: x goes from 0 at the curve's start to 1 at the wall end, y is how far open the funnel is, stretched to fit (so x^2 and 5*x^2 give the same curve). Numbers, x, + - * / ^ ( ), pi, e, sin cos tan asin acos atan sqrt exp ln log abs min max. The result becomes anchors and handles, so it can still be dragged."
  ],
  "help.formulas.words": "formula math preset expression",
+ "help.undo.title": "Undo and redo",
+ "help.undo.tip": "Made a mistake? Ctrl+Z = undo, Ctrl+Y = redo. Tick History in the toolbar to see every change as a step and jump back to any of them.",
+ "help.undo.text": [
+  "Ctrl+Z undoes the last change, Ctrl+Y does it again. Ctrl+Z while something is half drawn drops just that.",
+  "",
+  "Every change is a step with a name (the last 300 are kept). Tick History in the toolbar to see them all and click any step to jump straight to it (see History).",
+  "",
+  "The drawer has its own Ctrl+Z / Ctrl+Y for its drawing."
+ ],
+ "help.undo.words": "undo redo ctrl+z ctrl+y mistake back",
  "help.history.title": "History (undo steps)",
  "help.history.tip": "Every change is a step in the History list (tick History in the toolbar: it shows between Project and Shapes). Click a step to go back to it; Undock puts the list in a window of its own.",
  "help.history.text": [

@@ -275,6 +275,8 @@ class CustomPanel:
                 del t[key]  # (shapes only have them when they're on)
         self.shapes_changed()
         self.sync_custom()
+        if key == "fill" and value != "empty":
+            self.tips.show("fill", wait=True)
 
     def on_gate(self):
         if self._loading or str(self.gate_entry.cget("state")) == "disabled":

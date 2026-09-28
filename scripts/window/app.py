@@ -398,7 +398,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         ch.grid(row=r, column=1, sticky="w", padx=5, pady=(3, 0))
         for value, text, tip in CHANNEL_CHOICES:
             b = ttk.Radiobutton(ch, text=text, value=value, variable=self.channel_mode,
-                                command=lambda: (self.shapes_changed(), self.sync_custom()))
+                                command=self.on_channel_mode)
             b.pack(anchor="w")
             Tooltip(b, tip)
         names = [name for _, name in SPLIT_CHOICES]
@@ -752,6 +752,15 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.shapes.append(sh)
         self.select(len(self.shapes) - 1)
         self.shapes_changed()
+        if sh["kind"] == "curve":  # the first curve: its anchors and handles
+            self.tips.show("curves_pen", wait=True)
+        self.tips.show("undo", wait=True)  # the first shape: how to take it back
+
+    def on_channel_mode(self):
+        self.shapes_changed()
+        self.sync_custom()
+        if self.channel_mode.get() == "auto":
+            self.tips.show("channels", wait=True)
 
     def select(self, i, toggle=False):
         """Select shape i only (None = nothing), or with toggle add it to / take it out of the selection."""

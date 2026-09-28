@@ -13,8 +13,9 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.about import BANNER, BANNER_HALF, HERE, LICENSE, VERSION, WEBSITE
-from window.help_texts import BY_ID, NEXT, SECTION_NAMES, SECTIONS, SEE, TOPICS
+from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS, NEXT, SECTION_NAMES, SECTIONS, SEE, TOOL_TOPICS, TOPICS
 
+TOOL_TIPS = set(TOOL_TOPICS.values()) | set(DRAWER_TOOL_TOPICS.values())
 CLIPS = os.path.join(getattr(sys, "_MEIPASS", HERE), "clips")  # (the .exe carries them inside)
 
 
@@ -128,22 +129,27 @@ class Tips:
         self.seen = set()
         self.on = tk.BooleanVar(value=True)
         self.popup = None
-        self.waiting = None  # (topic, parent) shown when the open tip is closed
+        self.waiting = []  # [(topic, parent, force)] shown one after another once the open tip is closed
 
-    def show(self, topic_id, parent=None, force=False, wait=False):
+    def show(self, topic_id, parent=None, force=False, wait=False, done=False):
         """The topic's tip, unless it was seen before or tips are off (force: anyway). wait: if another tip is
-        open, show it once that one is closed instead of replacing it."""
+        open, show it once that one is closed instead of replacing it. done: the open tip was read ("Got it" going
+        on to the next one), so it isn't shown again later."""
         if topic_id not in BY_ID or not force and (not self.on.get() or topic_id in self.seen):
             return
-        if wait and self.popup is not None and self.popup.winfo_exists() and self.popup.topic != topic_id:
-            self.waiting = topic_id, parent
+        open_now = self.popup is not None and self.popup.winfo_exists()
+        if wait and open_now and self.popup.topic != topic_id:
+            if topic_id not in [w[0] for w in self.waiting]:
+                self.waiting.append((topic_id, parent, force))
             return
-        if self.waiting and self.waiting[0] == topic_id:
-            self.waiting = None
+        self.waiting = [w for w in self.waiting if w[0] != topic_id]
+        if open_now and not done and self.popup.topic != topic_id and self.popup.topic not in TOOL_TIPS:
+            # a tip pushed aside (by a tool's tip, say) comes back next; one tool's tip replacing another's doesn't
+            self.waiting.insert(0, (self.popup.topic, self.popup.master, True))
         self.seen.add(topic_id)
         self.app.schedule_autosave()
         parent = parent or self.app
-        if self.popup is not None and self.popup.winfo_exists() and self.popup.master is parent:
+        if open_now and self.popup.master is parent:
             self.popup.set_topic(topic_id)
         else:
             self.close()
@@ -155,10 +161,11 @@ class Tips:
         self.popup = None
 
     def closed(self):
-        """A tip was closed: the one waiting for it, if any."""
-        if self.waiting:
-            (topic_id, parent), self.waiting = self.waiting, None
-            self.show(topic_id, parent)
+        """A tip was closed: the next one waiting, if any (skipping ones seen in the meantime)."""
+        while self.waiting and (self.popup is None or not self.popup.winfo_exists()):
+            topic_id, parent, force = self.waiting.pop(0)
+            if parent is None or parent.winfo_exists():
+                self.show(topic_id, parent, force=force)
 
     def reset(self):
         self.seen.clear()
@@ -180,6 +187,7 @@ class TipPopup(tk.Toplevel):
     that topic), "Got it". It doesn't block anything."""
 
     def __init__(self, tips, parent, topic_id):
+        f = parent.focus_get()  # (before this window exists)
         super().__init__(parent)
         self.tips, self.parent = tips, parent
         s = self.scale = tips.app.scale
@@ -205,8 +213,10 @@ class TipPopup(tk.Toplevel):
         self.bind("<Escape>", lambda e: self.got_it())
         self.protocol("WM_DELETE_WINDOW", lambda: (self.destroy(), tips.closed()))
         self.set_topic(topic_id)
-        # back to what you were doing: the popup doesn't take the keyboard
-        self.after(30, lambda: parent.focus_force() if parent.winfo_exists() else None)
+        # back to what you were doing: the popup doesn't take the keyboard (a box being typed in keeps it)
+        back = f if f is not None and f.winfo_toplevel() is parent.winfo_toplevel() else parent
+        self.after(30, lambda: (back if back.winfo_exists() else parent).focus_force() if parent.winfo_exists()
+                   else None)
 
     def set_topic(self, topic_id):
         t = BY_ID[topic_id]
@@ -225,7 +235,7 @@ class TipPopup(tk.Toplevel):
         """Close it, or go on to the tip that follows this one (NEXT) if that wasn't seen yet."""
         nxt = NEXT.get(self.topic)
         if nxt and self.tips.on.get() and nxt not in self.tips.seen:
-            self.tips.show(nxt, parent=self.parent)
+            self.tips.show(nxt, parent=self.parent, done=True)
         else:
             self.destroy()
             self.tips.closed()

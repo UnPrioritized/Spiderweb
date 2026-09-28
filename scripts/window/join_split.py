@@ -111,6 +111,7 @@ class JoinSplit:
         self.status.config(text=tr("join_split.turned_the_shape_into_a_live")
                            if n == 1 else
                            tr("join_split.turned_shapes_into_a_live_shape", n=n))
+        self.tips.show("turn_live", wait=True)
 
     def join_problem(self):
         """Why the selection can't be joined (None = it can)."""
@@ -187,6 +188,7 @@ class JoinSplit:
         pieces = len(new.get("gaps", [])) + 1
         self.status.config(text=tr("join_split.joined_shapes_into_one_curve", n=len(order)) +
                            (tr("join_split.pieces_some_ends_didn_t_touch", pieces=pieces) if pieces > 1 else ""))
+        self.tips.show("join", wait=True)
 
     def can_split_pieces(self, sh):
         """A joined curve with more than one piece / shape in it, a live shape that can go back to the shapes it was
@@ -221,10 +223,12 @@ class JoinSplit:
             n = len(back)
             self.status.config(text=tr("join_split.back_to_the_shape_it_was") if n == 1 else
                                tr("join_split.back_to_the_shapes_it_was", n=n))
+            self.tips.show("turn_live", wait=True)
             return
         parts = split_pieces(sh) if sh["kind"] == "curve" else split_custom(sh)
         self.replace_shape(i, parts)
         self.status.config(text=tr("join_split.split_into_shapes", n=len(parts)))
+        self.tips.show("join", wait=True)
 
     def split_here(self, i, at):
         """Cut a line kind in two where it was right-clicked (at: x, y on screen; near an anchor or
@@ -253,6 +257,7 @@ class JoinSplit:
             return
         self.replace_shape(i, list(got), name=tr("join_split.split_here"))
         self.status.config(text=tr("join_split.split_in_two"))
+        self.tips.show("join", wait=True)
 
     def anchor_near(self, pts, seg, at):
         """The segment's anchor the right-click was on (near), or None."""

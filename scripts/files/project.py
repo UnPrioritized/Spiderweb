@@ -376,6 +376,7 @@ class ProjectFiles:
                tr("project.double_click_a_bar_line_to"))
         self.status.config(text=tr("project.copied_for_domino_ppq_in_domino", what=what, ppq=ppq, where=where, how=how)
                                 + (tr("project.notes_above_key_127_left_out", high=high) if high else ""))
+        self.tips.show("domino", wait=True)
 
     def domino_start(self):
         """The start dropdown above the Domino buttons: "note" (first note at tick 0) or "bar" (from the bar line)."""
@@ -416,3 +417,4 @@ class ProjectFiles:
                 else "")
         self.status.config(text=tr("project.pasted_one_note_from_domino", note=note) if n == 1 else
                            tr("project.pasted_note_from_domino_as_one", n=n, note=note))
+        self.tips.show("domino", wait=True)
