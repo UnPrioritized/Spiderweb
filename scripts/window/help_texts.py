@@ -1,8 +1,8 @@
 """Every help text in one place: the tip that pops up the first time you use something, the Help window (F1, a
-searchable list of all of them), the tool buttons' tooltips and the side panel's help all come from here.
+searchable list of all of them), the tool buttons' tooltips and the drawer's help all come from here.
 
 A topic: id, section, title, tip (a few lines: the popup and the tool button's tooltip), text (the whole story:
-the Help window and, for tools, the side panel) and optional search words. The texts themselves are in the language
+the Help window and, for drawer tools, the drawer's side panel) and optional search words. The texts themselves are in the language
 files (lang/en.json: help.<id>.title / tip / text / words; a text is a list of lines, an empty line = a new paragraph);
 this file lists the topics and how they're linked. The About page also gets the picture and the License / folder
 buttons (help.py).
@@ -77,7 +77,7 @@ for _id, _section in TOPIC_LIST:
     if f"help.{_id}.words" in texts():
         _t["words"] = tr(f"help.{_id}.words")
     TOPICS.append(_t)
-for _t in TOPICS:  # "page" = the text with its clips (Help window); "text" = without (side panel, search)
+for _t in TOPICS:  # "page" = the text with its clips (Help window); "text" = without (drawer's help, search)
     _t["page"] = _t["text"]
     _t["text"] = re.sub(r"\n*\[clip:[^\]]*\]\n*", "\n\n", _t["text"]).strip()
 BY_ID = {t["id"]: t for t in TOPICS}

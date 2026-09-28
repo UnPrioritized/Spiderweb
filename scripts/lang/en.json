@@ -146,7 +146,6 @@
  "app.joined_pieces": "{curve} (joined, {pieces} pieces)",
  "app.custom": "Custom: {value}",
  "app.this_makes_about_notes_which_can": "This makes about {total:,} notes, which can make Spiderweb slow.\nGo ahead?",
- "app.help_f1_every_tip_searchable": "{title}\n{text}\n\nHelp (F1): every tip, searchable.",
  "app.shapes_notes": "{n} shapes · {n2:,} notes",
  "app.tracks_one_channel_each": "{slot_count} tracks (one channel each)",
  "app.shapes_2": "{n} shapes, ",

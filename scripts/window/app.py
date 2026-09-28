@@ -14,7 +14,6 @@ import numpy as np
 
 from files.lang import tr
 from notes.custom import CUSTOM_DEFAULTS, custom_note_count, outline_apart
-from window.drawer import help_box
 from window.help import Tips, open_help
 from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, point_names, render, shape_notes_tracks,
@@ -169,7 +168,6 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.restore_window()
         self.load_autosave()
         self.sync_panel()
-        self.update_side_help()
         self.after(800, lambda: self.tips.show("welcome"))  # the first time Spiderweb starts
 
         for v in self.pvar.values():
@@ -269,8 +267,6 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self._build_history(side)
         self._build_shape_list(side)
         self._build_shape_settings(side)
-        self.side_help = help_box(side, "")  # the current tool's help (update_side_help)
-        self.side_help.pack(fill="both", expand=True, pady=(8, 0))
         self.settings.bind("<Configure>", lambda e: self.after_idle(self.fit_side), add="+")
 
         s = self.scale
@@ -337,7 +333,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
     def fit_side(self):
         c, side = self.side_canvas, self.side
         need, have = side.winfo_reqheight(), c.winfo_height()
-        # room to spare: stretched to the panel's height (the help text fills it); too tall: its own height (0), so
+        # room to spare: stretched to the panel's height; too tall: its own height (0), so
         # it keeps following what it needs
         c.itemconfigure(self._side_win, width=c.winfo_width(), height=have if need < have else 0)
         c.configure(scrollregion=(0, 0, c.winfo_width(), max(need, have)))
@@ -351,7 +347,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
             c.yview_moveto(0)
 
     def side_wheel(self, e):
-        """The mouse wheel over the side panel scrolls it (lists and the help text scroll themselves)."""
+        """The mouse wheel over the side panel scrolls it (lists scroll themselves)."""
         w = str(e.widget)
         if (w.startswith(str(self.side_canvas)) and self.side_bar.winfo_ismapped()
                 and not isinstance(e.widget, (tk.Listbox, tk.Text, ttk.Combobox))):
@@ -1011,16 +1007,10 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.sync_text()
         self.sync_custom()
         self.sync_funnel()
-        self.update_side_help()
         self.tips.show(TOOL_TOPICS.get(self.tool.get()))
 
     def tool_topic(self):
         return TOOL_TOPICS.get(self.tool.get(), "select")
-
-    def update_side_help(self):
-        """The side panel's help: the current tool's (everything else: Help, F1)."""
-        t = BY_ID[self.tool_topic()]
-        self.side_help.set_text(tr("app.help_f1_every_tip_searchable", title=t['title'], text=t['text']))
 
     def open_help(self, topic_id=None):
         open_help(self, topic_id or self.tool_topic())
