@@ -15,7 +15,7 @@ from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
 from notes.paths import KEYS
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.text import TEXT_DEFAULTS, clean_text
-from files.domino_clip import clip_data, get_from_clipboard, put_on_clipboard, read_notes
+from files.domino_clip import DOMINO_STARTS, clip_data, get_from_clipboard, put_on_clipboard, read_notes
 from files.midi_out import PPQ_WARN, write_midi
 from files.about import HERE, VERSION
 from files.safefile import write_bytes, write_text
@@ -107,7 +107,7 @@ class ProjectFiles:
             "version": 2, "app_version": VERSION,  # the file format, and the Spiderweb that saved it
             "ppq": self.pvar["ppq"].get(), "bpm": self.pvar["bpm"].get(), "beats": self.pvar["beats"].get(),
             "output": self.pvar["output"].get(), "channel_mode": self.channel_mode.get(), "channel_split": self.channel_split,
-            "keys": self.keys,
+            "keys": self.keys, "domino_start": self.domino_start(),
             "snap": self.snap.get(), "defaults": self.defaults,
             "custom_defaults": dict(self.custom_defaults, shape=self.custom_shape),
             "funnel_defaults": self.funnel_defaults, "text_defaults": self.text_defaults,
@@ -135,6 +135,9 @@ class ProjectFiles:
         self.keys_var.set(str(KEYS[1] if data.get("keys") == KEYS[1] else KEYS[0]))
         split = data.get("channel_split")
         self.split_box.current(SPLITS.index(split) if split in SPLITS else 0)
+        starts = [v for v, _ in DOMINO_STARTS]
+        if data.get("domino_start") in starts:
+            self.domino_box.current(starts.index(data["domino_start"]))
         if data.get("snap") in SNAPS:
             self.snap.set(data["snap"])
         self.defaults = defaults
@@ -326,8 +329,8 @@ class ProjectFiles:
 
     def copy_to_domino(self):
         """Ctrl+Shift+C: the selected shapes' notes (all notes when nothing is selected) on the clipboard, for
-        Ctrl+V in Domino. One track per channel that has notes; the copy starts at the bar line before the first
-        note."""
+        Ctrl+V in Domino. One track per channel that has notes; the copy starts on the first note or at the bar
+        line before it (domino_start)."""
         try:
             ppq, _, beats = self.read_project()
         except ValueError as e:
@@ -342,18 +345,24 @@ class ProjectFiles:
             messagebox.showerror("Spiderweb", "No notes to copy — draw something inside the 0–127 pitch range first."
                                  if not self.sels or high else "The selected shapes have no notes.")
             return
-        if not put_on_clipboard(clip_data(notes, ppq, beats * ppq)):
+        if not put_on_clipboard(clip_data(notes, ppq, beats * ppq, self.domino_start())):
             messagebox.showerror("Spiderweb", "Couldn't use the clipboard (another program has it open). Try again.")
             return
         what = f"{len(notes):,} note{'s' * (len(notes) != 1)}" if self.sels else f"all {len(notes):,} notes"
         tracks = len(np.unique(notes[:, 4]))
-        where = "a track" if tracks == 1 else f"the first of {tracks} tracks"
-        self.status.config(text=f"Copied {what} for Domino (PPQ {ppq}) — in Domino, double-click a bar line in "
-                                f"{where} to paste" + (f" ({high:,} notes above key 127 left out)" if high else ""))
+        where = "the track" if tracks == 1 else f"the first of {tracks} tracks"
+        how = ("paste at the cursor" if self.domino_start() == "note" else "double-click a bar line to paste")
+        self.status.config(text=f"Copied {what} for Domino (PPQ {ppq}) — in Domino, pick {where} and {how}"
+                                + (f" ({high:,} notes above key 127 left out)" if high else ""))
+
+    def domino_start(self):
+        """The start dropdown above the Domino buttons: "note" (first note at tick 0) or "bar" (from the bar line)."""
+        return DOMINO_STARTS[max(self.domino_box.current(), 0)][0]
 
     def paste_from_domino(self):
         """Ctrl+Shift+V: the notes copied in Domino as one shape (custom.py's pasted notes), placed like Domino
-        pastes: the start of what was copied on the play line (snapped to the grid). Every track's notes go into
+        pastes: the start of what was copied (or its first note, see domino_start) on the play line (snapped to the
+        grid). Every track's notes go into
         the one shape; controllers and other events are left out. Ticks are taken as they are (same PPQ)."""
         raw = get_from_clipboard()
         if raw is None:
@@ -369,6 +378,8 @@ class ProjectFiles:
                                  "press Ctrl+C there first." if notes is None else
                                  "What was copied in Domino has no notes (only notes are pasted).")
             return
+        if self.domino_start() == "note":  # the first note on the play line, without the copy's empty lead
+            notes[:, 0] -= notes[:, 0].min()
         sh = clean_shape({**SHAPE_DEFAULTS, **self.defaults, **notes_shape(notes, self.ppq, "Pasted notes")})
         if not self.confirm_big([sh]):
             return

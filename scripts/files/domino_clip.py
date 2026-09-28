@@ -10,7 +10,8 @@ go into the highlighted track and the ones below it (tracks past the last one ar
 Domino copy (the copyright text left empty).
 
 Paste from Domino reads the same format back: only the notes (controller and other events are skipped), all
-tracks together.
+tracks together. The start dropdown (DOMINO_STARTS) picks whether the empty lead before the first note (from
+the bar line) comes along, both ways.
 """
 
 import ctypes
@@ -47,17 +48,28 @@ NOTE = np.dtype([("tag", "<u2"), ("len", "<u4"),
                  ("t4", "<u2"), ("l4", "<u4"), ("gate", "<u4")])
 
 
+DOMINO_STARTS = [  # (saved value, dropdown text): where copied / pasted notes start (app.domino_start)
+    ("note", "First note at tick 0 (at the cursor)"),
+    ("bar", "From the bar line (keeps its place in the bar)"),
+]
+
+
 def item(tag, body):
     return struct.pack("<HI", tag, len(body)) + body
 
 
-def clip_data(notes, ppq, bar):
+def clip_data(notes, ppq, bar, start="bar"):
     """notes: (start, end, pitch, velocity, slot, ...) rows -> the clipboard bytes. One track per slot (channel)
     that has notes, in slot order, packed together (no empty tracks); Domino fills tracks downwards from the
-    highlighted one. The copy starts at the bar line at or before the first note (so the notes keep their place
-    in the bar) and runs to the bar line after the last; every track shares that stretch."""
-    first = int(notes[:, 0].min()) // bar * bar
-    length = max(-(-(int(notes[:, 1].max()) - first) // bar) * bar, bar)
+    highlighted one. start "bar": the copy starts at the bar line at or before the first note (so the notes keep
+    their place in the bar) and runs to the bar line after the last; "note": it starts on the first note and ends
+    with the last, so the first note pastes right at Domino's cursor. Every track shares that stretch."""
+    if start == "note":
+        first = int(notes[:, 0].min())
+        length = max(int(notes[:, 1].max()) - first, 1)
+    else:
+        first = int(notes[:, 0].min()) // bar * bar
+        length = max(-(-(int(notes[:, 1].max()) - first) // bar) * bar, bar)
     end = item(2009, item(1001, struct.pack("<I", length)))
     tracks = b""
     for slot in np.unique(notes[:, 4]).tolist():

@@ -35,6 +35,7 @@ from files import errors
 from files.about import ICONS, VERSION
 from files.playback import DEFAULT_DEVICE, MidiOut, Player, devices
 from files.midi_out import PPQ_WARN
+from files.domino_clip import DOMINO_STARTS
 from files.project import AUTOSAVE, OUTPUT_DIR, SNAPS, ProjectFiles
 from roll.roll_shared import cached_path
 from window.velocity import VelocityPane
@@ -406,25 +407,34 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         dev.configure(postcommand=lambda: dev.configure(values=devices()))  # re-list when it opens
         dev.grid(row=r, column=1, sticky="ew", padx=5, pady=(3, 0))
         r += 1
-        btns = ttk.Frame(box)
-        btns.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        ttk.Button(btns, text="Open…", command=self.open_project).pack(side="left")
-        ttk.Button(btns, text="Save…", command=self.save_project).pack(side="left", padx=4)
-        ttk.Button(btns, text="Generate MIDI", command=self.generate).pack(side="right")
+        names = [name for _, name in DOMINO_STARTS]
+        self.domino_box = ttk.Combobox(box, state="readonly", values=names, width=max(map(len, names)))
+        self.domino_box.grid(row=r, column=0, columnspan=2, sticky="e", pady=(6, 0))
+        self.domino_box.current(0)
+        self.domino_box.bind("<<ComboboxSelected>>", lambda e: self.schedule_autosave())
+        Tooltip(self.domino_box, "Where copied and pasted notes start:\n"
+                                 "First note at tick 0: the first note lands right on the cursor / play line.\n"
+                                 "From the bar line: the empty space from the bar line before the first note\n"
+                                 "comes along, so the notes keep their place in the bar.")
         domino = ttk.Frame(box)
         domino.grid(row=r + 1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         paste = b = ttk.Button(domino, text="Paste from Domino", command=self.paste_from_domino)
         Tooltip(b, "Ctrl+Shift+V: the notes copied in Domino (Ctrl+C there) become one shape here.\n"
-                   "What was copied starts at the play line, like pasting in Domino. Every track's notes go into\n"
-                   "the one shape; controllers and other events are left out.\n"
+                   "It starts at the play line, like pasting in Domino (see the start setting above).\n"
+                   "Every track's notes go into the one shape; controllers and other events are left out.\n"
                    "Ticks are taken as they are: use the same PPQ here.")
         b = ttk.Button(domino, text="Copy to Domino", command=self.copy_to_domino)
         b.pack(side="right")
         paste.pack(side="right", padx=4)  # (next to it, the same gap as Open… / Save…)
         Tooltip(b, "Ctrl+Shift+C: copies the selected shapes' notes (all notes when nothing is selected).\n"
-                   "In Domino, double-click a bar line in a track to paste there.\n"
+                   "In Domino, paste with Ctrl+V at the cursor, or double-click a bar line in a track.\n"
                    "Multi channel: each channel goes into its own track, from that one down.\n"
                    "Ticks are copied as they are: use the same PPQ there.")
+        btns = ttk.Frame(box)
+        btns.grid(row=r + 2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        ttk.Button(btns, text="Open…", command=self.open_project).pack(side="left")
+        ttk.Button(btns, text="Save…", command=self.save_project).pack(side="left", padx=4)
+        ttk.Button(btns, text="Generate MIDI", command=self.generate).pack(side="right")
 
     def _build_shape_list(self, side):
         box = ttk.LabelFrame(side, text="Shapes", padding=6)

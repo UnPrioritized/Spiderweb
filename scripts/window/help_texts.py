@@ -423,13 +423,15 @@ TOPICS = [
               "If something goes wrong, the details go to errors.log next to Spiderweb.",
          words="save open export generate midi file ppq bpm autosave backup 256 keys 31edo microtonal range"),
     dict(id="domino", section="Sound and MIDI", title="Copy to / Paste from Domino",
-         tip="Ctrl+Shift+C copies the notes; double-click a track in Domino to paste them there.\n"
+         tip="Ctrl+Shift+C copies the notes; paste them in Domino with Ctrl+V.\n"
              "Ctrl+Shift+V pastes notes copied in Domino as one shape.",
          text="Copy to Domino (under Project, or Ctrl+Shift+C) puts the selected shapes' notes on the clipboard, or "
-              "all notes when nothing is selected. In Domino, double-click the track where the notes "
-              "should go.\n\n"
-              "The copy starts at the bar line before the first note, so double-click on a bar line: the notes "
-              "keep their place in the bar.\n\n"
+              "all notes when nothing is selected. In Domino, pick the track and press Ctrl+V, or double-click "
+              "where the notes should go.\n\n"
+              "The dropdown above the buttons sets where the notes start, for copying and pasting both:\n"
+              "• First note at tick 0: the first note lands right on Domino's cursor (or on the play line here).\n"
+              "• From the bar line: the empty space from the bar line before the first note comes along, so "
+              "paste on a bar line and the notes keep their place in the bar.\n\n"
               "As drawn / Single channel: everything goes into the track you paste into, on that track's channel.\n"
               "Multi channel: each channel with notes becomes a track, in channel order, packed together (channels "
               "without notes are skipped): the first goes into the track you paste into, the next into the track below "
@@ -439,8 +441,8 @@ TOPICS = [
               "set the same PPQ in both (or use that on purpose). With 256 keys, notes above key 127 are left out "
               "(Domino has 128 keys).\n\n"
               "Paste from Domino (or Ctrl+Shift+V) works the other way: select notes in Domino, press Ctrl+C there, "
-              "then paste here. The start of what you copied lands on the play line (snapped to the grid), like "
-              "pasting in Domino, and ticks are taken as they are. The notes of every copied track become ONE shape "
+              "then paste here. The start of what you copied (or its first note, see the dropdown) lands on the play "
+              "line (snapped to the grid), like pasting in Domino, and ticks are taken as they are. The notes of every copied track become ONE shape "
               "(Pasted notes); controllers and other events are left out. Each note remembers its track: with Multi "
               "channel every track counts as a shape of its own (tracks that overlap get different channels, the "
               "others can share one), with Single channel all of them go on one channel and overlaps are "
