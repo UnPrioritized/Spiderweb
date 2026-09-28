@@ -176,7 +176,7 @@ class FunnelPanel:
         if same or not self.confirm_big([changed_funnel(t, key, value) for t in placed]):
             return self.sync_funnel()
         if placed:
-            self.push_undo()
+            self.push_undo(name="Funnel setting")
         for t in tgts:
             t.update(changed_funnel(t, key, value))
         self.shapes_changed()

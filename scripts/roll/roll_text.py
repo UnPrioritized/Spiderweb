@@ -186,7 +186,7 @@ class TextTyping:
         if ty["i"] is not None:
             sh = app.shapes[ty["i"]]
             if not ty["undo"]:
-                app.push_undo()
+                app.push_undo(name="Type")
                 ty["undo"] = True
             if build(sh, tx, axes):
                 app.shapes_changed()

@@ -192,6 +192,7 @@ class ProjectFiles:
                               "velocity_height": self.velocity_height() / self.scale,
                               "midi_device": self.midi_device.get(), "live": self.live.get(),
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
+                              "history_window": self.history_pos, "history_undocked": self.history_undocked,
                               **self.tips.state()}
         write_text(path, project_json(data))
 
@@ -257,6 +258,11 @@ class ProjectFiles:
                 pos = win.get(key)
                 if isinstance(pos, str) and re.fullmatch(r"\+-?\d+\+-?\d+", pos):
                     setattr(self, attr, pos)
+            pos = win.get("history_window")
+            if isinstance(pos, str) and re.fullmatch(r"(\d+x\d+)?\+-?\d+\+-?\d+", pos):
+                self.history_pos = pos
+            if win.get("history_undocked") is True and not self.history_undocked:
+                self.undock_history()
             if win.get("velocity") is True:  # it starts off; on again if it was on last time
                 self.show_velocity.set(True)
                 self.toggle_velocity(tip=False)
@@ -391,7 +397,7 @@ class ProjectFiles:
         if sb:
             at = round(at / sb) * sb
         self.roll.cancel_draft()
-        self.add_copies([sh], at)
+        self.add_copies([sh], at, "Paste from Domino")
         n = len(notes)
         note = (f" — they were copied at PPQ {their_ppq}, ticks kept as they are" if their_ppq and their_ppq != self.ppq
                 else "")

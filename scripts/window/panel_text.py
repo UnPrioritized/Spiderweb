@@ -166,12 +166,12 @@ class TextPanel:
         if roll.typing:
             tx, axes = roll.typing_state()
             if roll.typing["i"] is not None:
-                self.push_undo()
+                self.push_undo(name="Text setting")
             roll.retype(*restyle(tx, axes, changes))
         else:
             shapes = self.text_shapes()
             if shapes:
-                self.push_undo()
+                self.push_undo(name="Text setting")
             for sh in shapes:
                 build(sh, *restyle(sh["text"], text_axes(sh), changes))
         self.shapes_changed()

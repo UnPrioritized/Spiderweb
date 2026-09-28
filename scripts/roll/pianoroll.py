@@ -221,14 +221,14 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if not self.draft:  # first: a picked curve stroke's handles can be near its custom shape's box
             i = self.hit_handle(e.x, e.y, tool == "select")
             if i is not None:
-                app.push_undo()
+                app.push_undo(name="Drag a point")
                 self.drag = ("handle", i)
                 return
 
         hit = self.custom_hit(e.x, e.y)
         if hit and hit[0] != "inside":  # the selected custom shape's corner / side: resize, just outside: turn / skew
             orig = copy.deepcopy(app.selected()["pts"])
-            app.push_undo()
+            app.push_undo(name={"turn": "Turn", "skew": "Skew"}.get(hit[0], "Resize"))
             if hit[0] == "turn":
                 self.drag = ("turn", orig, self.screen_angle(orig, e.x, e.y))
             elif hit[0] == "skew":
@@ -276,7 +276,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 app.select(i)
             elif i != app.sel:
                 app.select_many(app.sels, i)
-            app.push_undo()
+            app.push_undo(name="Move")
             orig = {j: copy.deepcopy(app.shapes[j]["pts"]) for j in app.sels}
             # clicking one shape of several without dragging selects just that one; clicking the selected funnel
             # without dragging highlights the part under the mouse (none: clears it)
@@ -446,6 +446,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         """second: the click that finishes a shape started with a click (see follow)."""
         if not self.drag:
             return
+        self.after_idle(self.app.settle_history)  # (a click that changed nothing isn't a step)
         kind = self.drag[0]
         self.app.catch_up_notes()
         still = False  # let go where it was pressed
@@ -703,7 +704,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return math.dist(a, q) + math.dist(q, b) - math.dist(a, b)
 
         i = min(range(len(pts) + 1), key=extra_length)
-        self.app.push_undo()
+        self.app.push_undo(name="Add a point")
         pts.insert(i, pt)
         self.app.shape_edited()
 

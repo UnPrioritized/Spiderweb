@@ -396,6 +396,20 @@ TOPICS = [
               "fit (so x^2 and 5*x^2 give the same curve). Numbers, x, + - * / ^ ( ), pi, e, sin cos tan asin acos "
               "atan sqrt exp ln log abs min max. The result becomes anchors and handles, so it can still be dragged.",
          words="formula math preset expression"),
+    dict(id="history", section="Editing", title="History (undo steps)",
+         tip="Every change is a step in the History list (between Project and Shapes).\n"
+             "Click a step to go back to it; Undock puts the list in a window of its own.",
+         text="The History list (in the side panel, between Project and Shapes) shows every change as a step, the "
+              "oldest at the top: Start is how things were before the oldest step still kept (the last 300 are "
+              "kept). The highlighted step is where you are now.\n\n"
+              "Click a step to go back to it: everything after it is undone and turns grey. Click a grey step to "
+              "go forward again. Making a new change while steps are grey drops them (like Ctrl+Z and then "
+              "changing something). Ctrl+Z / Ctrl+Y move up and down the same list. Typing in one box, or "
+              "dragging a number box, is one step.\n\n"
+              "Undock puts the list in a window of its own that you can make taller; Dock (or closing that "
+              "window) puts it back. Spiderweb remembers which, and where the window was.\n"
+              "[clip:history]",
+         words="undo redo history steps back undock"),
     dict(id="selecting", section="Editing", title="Selecting, copying, flipping, turning",
          tip="Ctrl+click = more shapes, Ctrl+A = all. Ctrl+C / V = copy / paste at the play line.\n"
              "Ctrl+H / J = flip, Ctrl+Left / Right = turn 90°.",
@@ -572,7 +586,7 @@ TOPICS = [
               "Right-drag = listen. Middle-click = add a point / anchor / funnel curve start. Middle-drag = scroll.\n\n"
               "Wheel = scroll, Shift+wheel = sideways, Ctrl+wheel = zoom, Ctrl+Shift+wheel = zoom time, "
               "Alt+wheel = zoom pitch.\n\n"
-              "Editing: Del delete, Ctrl+D duplicate, Ctrl+Z / Ctrl+Y undo / redo, Ctrl+A select all, Ctrl+C / "
+              "Editing: Del delete, Ctrl+D duplicate, Ctrl+Z / Ctrl+Y undo / redo (see History), Ctrl+A select all, Ctrl+C / "
               "Ctrl+V copy / paste, Ctrl+H / Ctrl+J flip, Ctrl+Left / Ctrl+Right turn 90°, Ctrl+G join into one "
               "curve, Ctrl+Shift+G split into separate shapes, Ctrl+L turn into live shape, Esc clear highlight / "
               "unpick a stroke. With a stroke of a live shape picked, the copy / paste / flip / turn keys work on "
@@ -616,7 +630,8 @@ SEE = {
     "funnel_curves": ["funnel", "curves_pen", "funnel_links", "formulas"],
     "funnel_links": ["funnel_curves", "formulas"],
     "formulas": ["funnel_curves", "funnel_links"],
-    "selecting": ["select", "shortcuts"],
+    "selecting": ["select", "shortcuts", "history"],
+    "history": ["selecting", "shortcuts"],
     "numbers": ["shortcuts"],
     "view": ["playback", "shortcuts"],
     "velocity": ["playback", "selecting"],

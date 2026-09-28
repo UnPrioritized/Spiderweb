@@ -110,7 +110,7 @@ class LiveDrawing:
             k = add_stroke(target, st)
             app.add_shape(target)
         else:
-            app.push_undo()
+            app.push_undo(name="Draw into the live shape")
             k = add_stroke(target, st)
             app.shapes_changed()
         # a new curve is picked, so its anchors and handles can be bent right away
@@ -252,7 +252,7 @@ class LiveDrawing:
             self.app.status.config(text="The middle anchor of a symmetric curve stays (turn Symmetric halves off "
                                         "to remove it).")
         elif what:
-            self.app.push_undo()
+            self.app.push_undo(name="Remove a point")
             delete_point(st, hid[1], self.stroke_maps(sh)[0])
             refit(sh)
             self.app.shape_edited()
@@ -271,7 +271,7 @@ class LiveDrawing:
         if not add_anchor(st, seg, t, list(to_uv(*self.event_pt(e))), to_xy):
             return False
         refit(sh)
-        self.app.push_undo(before)
+        self.app.push_undo(before, "Add an anchor")
         self.app.shape_edited()
         return True
 
@@ -281,7 +281,7 @@ class LiveDrawing:
         if st is None or (st.get("sym") or None) == mode:
             return
         to_xy = self.stroke_maps(sh)[0]
-        self.app.push_undo()
+        self.app.push_undo(name="Symmetric halves")
         set_symmetry(st, mode, half_at(st["pts"], to_xy, at.x, at.y), to_xy)
         refit(sh)
         self.app.shape_edited()
@@ -291,7 +291,7 @@ class LiveDrawing:
         app = self.app
         if len(sh["strokes"]) <= 1:
             return app.delete_selected()
-        app.push_undo()
+        app.push_undo(name="Delete a stroke")
         del sh["strokes"][k]
         refit(sh)
         app.set_stroke(None)
@@ -323,22 +323,22 @@ class LiveDrawing:
         if host is None:
             host = new_live_shape(app.defaults, app.custom_defaults)
             k = add_stroke(host, st)
-            app.add_shape(host)
+            app.add_shape(host, "Paste a stroke")
         else:
-            app.push_undo()
+            app.push_undo(name="Paste a stroke")
             k = add_stroke(host, st)
             app.shapes_changed()
         app.set_stroke(k)
         app.sync_custom()
 
-    def change_stroke(self, sh, k, fn, turn=None):
+    def change_stroke(self, sh, k, fn, turn=None, name="Change a stroke"):
         """Stroke k moved point by point by fn(beat, pitch) (turn: beats per key on screen, when it's turned 90°)."""
         st = stroke_bp(sh, k)
         new = map_stroke(st, fn)
         if turn and "k" in st:  # still round (arcs, straightened freehand), like turning a shape
             new["k"] = turn * turn / st["k"]
         app = self.app
-        app.push_undo()
+        app.push_undo(name=name)
         del sh["strokes"][k]
         add_stroke(sh, new, at=k)
         app.shape_edited()
@@ -351,7 +351,7 @@ class LiveDrawing:
 
     def flip_stroke(self, sh, k, sideways):
         cb, cp = self.stroke_middle(sh, k)
-        self.change_stroke(sh, k, (lambda b, p: (2 * cb - b, p)) if sideways else (lambda b, p: (b, 2 * cp - p)))
+        self.change_stroke(sh, k, (lambda b, p: (2 * cb - b, p)) if sideways else (lambda b, p: (b, 2 * cp - p)), name="Flip a stroke")
 
     def turn_stroke(self, sh, k, clockwise):
         """Turned 90° around its middle as it looks on screen (like turning a shape)."""
@@ -359,7 +359,7 @@ class LiveDrawing:
             return
         cb, cp = self.stroke_middle(sh, k)
         r, sign = self.sy / self.sx, 1 if clockwise else -1
-        self.change_stroke(sh, k, lambda b, p: (cb + sign * (p - cp) * r, cp - sign * (b - cb) / r), turn=r)
+        self.change_stroke(sh, k, lambda b, p: (cb + sign * (p - cp) * r, cp - sign * (b - cb) / r), turn=r, name="Turn a stroke")
 
     def draw_picked_stroke(self, sh):
         """The picked stroke of the selected custom shape: thick, under the handles."""

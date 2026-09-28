@@ -230,7 +230,7 @@ class TumourWindow(tk.Toplevel):
         if group:
             app.begin_edit(("tumour", tuple(sorted(app.sels)), key))
         else:
-            app.push_undo()
+            app.push_undo(name="Tumours")
         k = app.roll.sy / app.roll.sx if app.roll.sx else 0.25
         shown = app.shown_tumours()
         if self.mixed and key == "on" and value:  # (half ticked: the others get the settings shown)

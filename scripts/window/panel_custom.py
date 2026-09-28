@@ -20,6 +20,8 @@ FILL_CHOICES = [
     ("spam", "Spam", "The inside filled with back-to-back notes of one gate."),
     ("outline_spam", "Outline spam", "Just the outline, chopped into notes of one gate."),
 ]
+CUSTOM_NAMES = {"fill": "Inside fill", "gate": "Spam gate", "align": "Spam start", "union": "Overlaps cancel out",
+                "apart": "Normal / Outline"}  # (History)
 APART_CHOICES = ["Normal", "Outline"]
 APART_TIP = ("Normal: all its notes together.\n"
              "Outline: the notes along the outline go on a channel of their own and the inside's on\n"
@@ -238,7 +240,7 @@ class CustomPanel:
         tgts = [t for t in self.custom_targets()
                 if t is not self.custom_defaults and not t.get("text") and "notes" not in t]
         if tgts:
-            self.push_undo()
+            self.push_undo(name="Custom shape")
             for t in tgts:
                 t["name"], t["strokes"] = name, copy.deepcopy(tpl[0])
             self.shapes_changed()
@@ -258,7 +260,7 @@ class CustomPanel:
         if same or not self.confirm_big([dict(t, **{key: value}) for t in placed]):
             return self.sync_custom()
         if placed:
-            self.push_undo()
+            self.push_undo(name=CUSTOM_NAMES.get(key, key))
         for t in tgts:
             t[key] = value
             if key in CUSTOM_FLAGS and not value and t is not self.custom_defaults:

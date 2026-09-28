@@ -104,7 +104,7 @@ class JoinSplit:
             return
         new = to_live(olds, [cached_strokes(sh) for sh in olds], self.defaults, self.custom_defaults)
         self.roll.cancel_draft()
-        self.push_undo()
+        self.push_undo(name="Turn into live shape")
         at = order[0]
         for i in reversed(order):
             del self.shapes[i]
@@ -178,7 +178,7 @@ class JoinSplit:
             return
         join_velocity(new, olds, [span(sh) for sh in olds], span(new))  # (each keeps its velocities)
         self.roll.cancel_draft()
-        self.push_undo()
+        self.push_undo(name="Join")
         at = order[0]
         for i in reversed(order):
             del self.shapes[i]
@@ -199,12 +199,12 @@ class JoinSplit:
         return (sh["kind"] == "custom" and "notes" not in sh and not sh.get("text") and
                 len(custom_groups(sh)) > 1)
 
-    def replace_shape(self, i, parts, velocity=True):
+    def replace_shape(self, i, parts, velocity=True, name="Split"):
         """Shape i replaced by parts (selected), velocities kept where they were (velocity=False: the parts have
         their own)."""
         old = self.shapes[i]
         self.roll.cancel_draft()
-        self.push_undo()
+        self.push_undo(name=name)
         whole = span(old)
         for p in parts if velocity else ():
             piece_velocity(p, old, span(p), whole)
@@ -218,7 +218,7 @@ class JoinSplit:
             return
         back = originals(sh) if sh["kind"] == "custom" else None
         if back:  # the shapes it was made of (Turn into live shape), as they were
-            self.replace_shape(i, back, velocity=False)
+            self.replace_shape(i, back, velocity=False, name="Split back into the old shapes")
             self.status.config(text=f"Back to the {len(back)} shape{'s' if len(back) > 1 else ''} it was made of")
             return
         parts = split_pieces(sh) if sh["kind"] == "curve" else split_custom(sh)
@@ -249,7 +249,7 @@ class JoinSplit:
         if not got:
             self.status.config(text="Can't split there (that's an end)")
             return
-        self.replace_shape(i, list(got))
+        self.replace_shape(i, list(got), name="Split here")
         self.status.config(text="Split in two")
 
     def anchor_near(self, pts, seg, at):

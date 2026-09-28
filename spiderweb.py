@@ -10,6 +10,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     panel_funnel.py  the panel's funnel settings
     panel_tumour.py  the panel's tumour line (summary + button)
     tumour_window.py the tumour window: the tumour settings (bumps along lines)
+    history.py       the History list (named undo steps; docked in the side panel or its own window)
     graph_window.py  a tumour setting's graph (the number changing along the line)
     join_split.py    Join (shapes -> one curve) and Split (cut in two, pieces -> separate shapes)
     panel_freehand.py  the panel's Straighten setting for freehand strokes

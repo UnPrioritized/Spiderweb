@@ -185,7 +185,7 @@ class FunnelEditing:
             st = new_start(sh, hit[1], hit[0])
             if not st:
                 return False
-            self.app.push_undo()
+            self.app.push_undo(name="Funnel curve")
             sh["starts"].append(st)
             self.app.shape_edited()
             self.app.sync_funnel()
@@ -205,7 +205,7 @@ class FunnelEditing:
                 best = d, k, end, seg, t
         _, k, end, seg, t = best
         c, box = self.curve_at(sh, k, end)
-        self.app.push_undo()
+        self.app.push_undo(name="Funnel curve")
         n_before = len(c["pts"])
         self.add_anchor(c, seg, t)
         i = 3 * (seg + 1)
@@ -251,7 +251,7 @@ class FunnelEditing:
         if not pts or pts[2:] != sh["pts"][2:4]:
             return False
         self.cancel_draft()
-        self.app.push_undo()
+        self.app.push_undo(name="Add a funnel line")
         sh["pts"] += pts[:2]
         self.app.shape_edited()
         self.app.build_points()
@@ -263,7 +263,7 @@ class FunnelEditing:
         back into its anchor: a sharp corner there). Linked curves do the same unless Ctrl is held."""
         k = hid[1]
         if hid[0] == "start":
-            self.app.push_undo()
+            self.app.push_undo(name="Remove a funnel point")
             del sh["starts"][k]
             self.app.parts = set()  # the curves after it moved up a number
         else:
@@ -272,7 +272,7 @@ class FunnelEditing:
             a = handle_anchor(i) if hid[0] == "ctrl" else i
             if a in (0, len(c["pts"]) - 1):
                 return  # the handles at the start and the wall end stay (you couldn't grab them again)
-            self.app.push_undo()
+            self.app.push_undo(name="Remove a funnel point")
             if hid[0] == "anchor":
                 n = anchor_count(c["pts"])
                 if not e.state & CTRL:
@@ -351,7 +351,7 @@ class FunnelEditing:
         app = self.app
         if len(lines) >= len(funnel_lines(sh)):  # every line: the whole funnel goes
             return app.delete_selected()
-        app.push_undo()
+        app.push_undo(name="Delete highlighted")
         remove_funnel_parts(sh, lines, curves)
         app.parts = set()
         app.build_points()
@@ -366,7 +366,7 @@ class FunnelEditing:
             return
         sh, _, curves = got
         if undo:
-            self.app.push_undo()
+            self.app.push_undo(name="Change curves")
         done = set()
         for k, end in sorted(curves):
             if (k, end) in done:
@@ -425,7 +425,7 @@ class FunnelEditing:
         if not got or not got[2]:
             return
         sh, _, curves = got
-        self.app.push_undo()
+        self.app.push_undo(name="Link curves")
         if mode is None:
             for k, end in curves:
                 c = sh["starts"][k]["ends"][end]
@@ -465,5 +465,5 @@ class FunnelEditing:
         def done(shape):
             preview(shape)
             if shape:
-                app.push_undo(before)
+                app.push_undo(before, "Curve formula")
         CurveFormulaDialog(app, preview, done)

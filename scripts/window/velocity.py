@@ -244,7 +244,7 @@ class VelocityPane(tk.Canvas):
         if not ed["owners"]:
             self.request_redraw()
             return
-        self.app.push_undo()
+        self.app.push_undo(name="Draw velocity")
         done = self.commit(ed["drawn"], ed["owners"])
         if "curve" in ed and ed["curve"][0][0] != ed["curve"][1][0]:
             a, b, c = ed["curve"]

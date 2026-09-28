@@ -45,7 +45,7 @@ class CurveEditing:
         before = json.dumps(self.app.shapes)
         if not add_anchor(sh, seg, t, self.event_pt(e), self.to_xy):
             return False
-        self.app.push_undo(before)
+        self.app.push_undo(before, "Add an anchor")
         self.app.shape_edited()
         self.app.build_points()
         return True
@@ -60,7 +60,7 @@ class CurveEditing:
             self.app.status.config(text="The middle anchor of a symmetric curve stays (turn Symmetric halves off "
                                         "to remove it).")
             return True
-        self.app.push_undo()
+        self.app.push_undo(name="Remove a point")
         delete_point(sh, i, self.to_xy)
         self.app.shape_edited()
         self.app.build_points()
@@ -71,7 +71,7 @@ class CurveEditing:
         right-clicked) keeps its shape, the other half follows it."""
         if (sh.get("sym") or None) == mode:
             return
-        self.app.push_undo()
+        self.app.push_undo(name="Symmetric halves")
         set_symmetry(sh, mode, half_at(sh["pts"], self.to_xy, at.x, at.y), self.to_xy)
         self.app.shape_edited()
         self.app.build_points()

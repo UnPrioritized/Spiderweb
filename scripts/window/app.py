@@ -30,6 +30,7 @@ from window.panel_text import TextPanel
 from window.panel_tumour import TumourPanel
 from notes.joined import all_tumours, is_joined
 from window.join_split import JoinSplit
+from window.history import HistoryPanel, edit_name
 from roll.pianoroll import PianoRoll
 from files import errors
 from files.about import ICONS, VERSION
@@ -84,7 +85,8 @@ SPLIT_TIP = (
 )
 
 
-class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, TextPanel, JoinSplit, tk.Tk):
+class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, TextPanel, JoinSplit, HistoryPanel,
+          tk.Tk):
     def __init__(self, autosave=AUTOSAVE):
         super().__init__()
         errors.install(self)
@@ -267,6 +269,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
 
         side = self._build_side()
         self._build_project(side)
+        self._build_history(side)
         self._build_shape_list(side)
         self._build_shape_settings(side)
         self.side_help = help_box(side, "")  # the current tool's help (update_side_help)
@@ -447,7 +450,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         ttk.Button(btns, text="Generate MIDI", command=self.generate).pack(side="right")
 
     def _build_shape_list(self, side):
-        box = ttk.LabelFrame(side, text="Shapes", padding=6)
+        box = self.shapes_box = ttk.LabelFrame(side, text="Shapes", padding=6)
         box.pack(fill="x", pady=(8, 0))
         row = ttk.Frame(box)
         row.pack(fill="x")
@@ -625,7 +628,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         if all(t.get("end_dot", False) == value for t in tgts):
             return
         if self.sels:
-            self.push_undo()
+            self.push_undo(name="Last note")
         for t in tgts:
             t["end_dot"] = value
         self.shapes_changed()
@@ -740,6 +743,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.roll.request_redraw()
         self.update_status()
         self.schedule_autosave()
+        self.sync_history()
 
     def _notes_rested(self):
         # after the mouse moves still waiting to be handled (a slow redraw can make the timer run out first)
@@ -755,8 +759,8 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.sync_points()
         self.shapes_changed()
 
-    def add_shape(self, sh):
-        self.push_undo()
+    def add_shape(self, sh, name=None):
+        self.push_undo(name=name or f"Draw: {self.shape_label(sh)}")
         self.shapes.append(sh)
         self.select(len(self.shapes) - 1)
         self.shapes_changed()
@@ -816,7 +820,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         if not self.sels:
             return
         self.roll.end_typing()  # first: it refreshes the panel, which must still see the old shapes
-        self.push_undo()
+        self.push_undo(name="Delete")
         for i in sorted(self.sels, reverse=True):
             del self.shapes[i]
         self.select(None)
@@ -829,7 +833,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
                                    "(Ctrl+Z can bring them back.)", icon="warning", parent=self):
             return
         self.roll.cancel_draft()  # first: it refreshes the panel, which must still see the old shapes
-        self.push_undo()
+        self.push_undo(name="Delete all")
         self.shapes.clear()
         self.select(None)
         self.shapes_changed()
@@ -838,11 +842,11 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         if not self.sels:
             return
         shift = self.snap_beats() or 1.0
-        self.add_copies([self.shapes[i] for i in sorted(self.sels)], shift)
+        self.add_copies([self.shapes[i] for i in sorted(self.sels)], shift, "Duplicate")
 
-    def add_copies(self, shapes, shift):
+    def add_copies(self, shapes, shift, name="Paste"):
         """Add copies of shapes moved shift beats later, and select them."""
-        self.push_undo()
+        self.push_undo(name=name)
         first = len(self.shapes)
         for sh in shapes:
             new = copy.deepcopy(sh)
@@ -896,7 +900,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         k = 0 if sideways else 1
         vals = [pt[k] for sh in shapes for pt in cached_path(sh)]
         mid2 = min(vals) + max(vals)  # twice the middle
-        self.push_undo()
+        self.push_undo(name="Flip sideways" if sideways else "Flip upside down")
         for sh in shapes:
             sh["pts"] = [[mid2 - b, p] if sideways else [b, mid2 - p] for b, p in sh["pts"]]
             for tm in all_tumours(sh):  # mirrored: the bumps swap sides too
@@ -921,7 +925,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         cb, cp = (min(bs) + max(bs)) / 2, (min(ps) + max(ps)) / 2
         r = self.roll.sy / self.roll.sx  # beats per key on screen
         sign = 1 if clockwise else -1
-        self.push_undo()
+        self.push_undo(name="Turn 90°")
         for sh in shapes:
             sh["pts"] = [[cb + sign * (p - cp) * r, cp - sign * (b - cb) / r] for b, p in sh["pts"]]
             if sh["kind"] == "arc" or sh["kind"] == "free" and "k" in sh:  # still round (arc.py, smooth.py)
@@ -1136,8 +1140,9 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
 
     # ------------------------------------------------------------ undo
 
-    def push_undo(self, state=None):
-        """Remember the shapes (or `state`, shapes saved earlier as JSON) for Ctrl+Z."""
+    def push_undo(self, state=None, name=None):
+        """Remember the shapes (or `state`, shapes saved earlier as JSON) for Ctrl+Z; name = what the step does
+        (the History panel)."""
         sc = self._scrub
         if sc and sc["active"]:  # stepping a number box: only its first step takes an undo step
             if sc["pushed"]:
@@ -1145,10 +1150,13 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
             sc["pushed"] = True
         else:
             self._scrub = None
-        self.undo_stack.append(state or json.dumps(self.shapes))
+        before = state or json.dumps(self.shapes)
+        self.drop_empty_step(before)
+        self.undo_stack.append((before, name or "Change"))
         del self.undo_stack[:-300]
         self.redo_stack.clear()
         self._edit_key = None
+        self.sync_history()
 
     def scrub_step(self, gesture, run):
         """run() steps a number box (widgets.Scrub). The steps of one gesture (a label drag, or arrows / wheel on the
@@ -1165,12 +1173,13 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
     def begin_edit(self, key):
         """Typing in one box counts as a single undo step until you move to another box."""
         if key != self._edit_key:
-            self.push_undo()
+            self.push_undo(name=edit_name(key))
             self._edit_key = key
 
     def undo(self):
         if self.roll.draft:  # something half drawn (a funnel waiting for its wall, a polyline): just drop it
             return self.roll.cancel_draft()
+        self.drop_empty_step(json.dumps(self.shapes))  # (a click that changed nothing isn't a step)
         self._restore(self.undo_stack, self.redo_stack)
 
     def redo(self):
@@ -1180,8 +1189,9 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         if not src:
             return
         self.roll.cancel_draft()
-        dst.append(json.dumps(self.shapes))
-        self.shapes = json.loads(src.pop())
+        state, name = src.pop()
+        dst.append((json.dumps(self.shapes), name))
+        self.shapes = json.loads(state)
         self.sels = {i for i in self.sels if i < len(self.shapes)}
         self.parts = set()
         self.stroke = None

@@ -178,7 +178,7 @@ class GraphWindow(tk.Toplevel):
                 app.shapes_changed()
             else:  # other changes since then: just this graph goes back
                 if any(t is s for t in ses["tgts"] for s in app.shapes):
-                    app.push_undo()
+                    app.push_undo(name="Tumour graph")
                     for t, g in zip(ses["tgts"], ses["graphs"]):
                         tm = t.get("tumour") if any(t is s for s in app.shapes) else None
                         if not tm:
@@ -352,7 +352,7 @@ class GraphWindow(tk.Toplevel):
         if ses["step"] is None or len(self.app.undo_stack) != ses["step"]:
             if ses["step"] is not None:  # (something else changed in between: Cancel can only put the graph back)
                 ses["exact"] = False
-            self.app.push_undo()
+            self.app.push_undo(name="Tumour graph")
             ses["step"] = len(self.app.undo_stack)
         self.app._edit_key = None  # (typing in a box afterwards is its own undo step)
 
