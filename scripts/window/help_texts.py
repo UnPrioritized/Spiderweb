@@ -9,7 +9,8 @@ buttons (help.py).
 
 Clips (short GIFs, clips/<name>.gif next to Spiderweb) show in the Help window only: clips/<topic id>.gif at the top
 of its topic, and "[clip:<name>]" on a line of its own in a text puts clips/<name>.gif right there (name them
-<topic id>-<what it shows>). A clip that isn't there is just left out."""
+<topic id>-<what it shows>). A still picture works the same way as clips/<name>.png (the GIF wins when both are
+there). A clip that isn't there is just left out."""
 
 import re
 

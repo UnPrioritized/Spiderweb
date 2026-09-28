@@ -846,6 +846,7 @@
  "help.tumours.tip": "Bumps along the line: size, length, distance apart, which side. Length 0 = spikes (a zigzag). Bumps take the current zoom's shape: zoom first, then set them up.",
  "help.tumours.text": [
   "Select a line, polyline, freehand stroke, curve or arc, click Tumours… in the panel (or right-click it: Tumours…) and tick Tumours in the window that opens: bumps along it. The window can stay open; it shows whatever you select. The line's points stay draggable; the line as drawn shows faint and dashed.",
+  "[clip:tumours-menu]",
   "[clip:tumours-window]",
   "",
   "Shape: triangle, square, circle or parabola.",
@@ -867,7 +868,9 @@
   "[clip:tumours-slant]",
   "",
   "Graphs: the … button next to Size, Length, Distance, Rotation or Slant opens a graph of that number along the whole line (from its start on the left to its end on the right). 100 % = the number in the box, so the box still scales the whole graph. Drag the points (Shift = free), click to add one, right-click one to remove it, or pick a preset or type a formula. The part outside the tumour Range is greyed out. A number following a graph says \"× graph\" in blue; Flat (off) removes it. The piano roll shows the change as you go; OK keeps it, Cancel (or Esc) puts the graph back as it was.",
+  "[clip:tumours-graph-window]",
   "[clip:tumours-graph]",
+  "[clip:tumours-graph-example]",
   "",
   "Side: alternating, left, right or random.",
   "[clip:tumours-side]",

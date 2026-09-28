@@ -437,8 +437,19 @@ class HelpWindow(tk.Toplevel):
         self.embed(row)
 
     def add_clip(self, name):
-        """Put clips/<name>.gif (playing) at the end of the text. False if there's no such clip."""
+        """Put clips/<name>.gif (playing) or clips/<name>.png (a still picture) at the end of the text. False if
+        there's neither."""
         path = os.path.join(CLIPS, name + ".gif")
+        picture = os.path.join(CLIPS, name + ".png")
+        if not os.path.exists(path) and os.path.exists(picture):
+            try:
+                image = tk.PhotoImage(file=picture)
+            except tk.TclError:
+                return False
+            label = tk.Label(self.text, image=image, borderwidth=0)
+            label.image = image  # (Tk forgets a picture nobody keeps)
+            self.embed(label)
+            return True
         try:
             clip = Clip(self.text, path) if os.path.exists(path) and gif_frames(path) else None
         except (OSError, tk.TclError):
