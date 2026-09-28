@@ -3,6 +3,7 @@ and a button that opens the tumour window (tumour_window.py), where the settings
 
 from tkinter import ttk
 
+from files.lang import tr
 from notes.joined import shown_tumour
 from notes.tumour import LINE_KINDS
 from window.tumour_window import SHAPE_CHOICES, TumourWindow
@@ -17,10 +18,9 @@ class TumourPanel:
         self.tumour_window = None
         self.tumour_pos = ""  # where the tumour window was last ("+x+y", remembered in the autosave)
         self.graph_pos = ""   # the same for the graph window (graph_window.py)
-        self.tumour_btn = ttk.Button(box, text="Tumours…", command=self.open_tumours)
+        self.tumour_btn = ttk.Button(box, text=tr("panel_tumour.tumours"), command=self.open_tumours)
         self.tumour_btn.pack(side="left")
-        Tooltip(self.tumour_btn, "Bumps along the line: opens the tumour window.\n"
-                                 "Also in the right-click menu (Tumours…).")
+        Tooltip(self.tumour_btn, tr("panel_tumour.bumps_along_the_line_opens_the"))
         self.tumour_summary = ttk.Label(box, text="", foreground="#777")
         self.tumour_summary.pack(side="left", padx=(8, 0))
 
@@ -55,13 +55,13 @@ class TumourPanel:
             return
         on = [shown_tumour(t) for t in tgts if (shown_tumour(t) or {}).get("on")]
         if any(t.get("tumours") for t in tgts):
-            text = "Each joined shape has its own tumours"
+            text = tr("panel_tumour.each_joined_shape_has_its_own")
         elif not on:
-            text = "No tumours"
+            text = tr("panel_tumour.no_tumours")
         elif len(tgts) > 1:
-            text = f"Tumours on {len(on)} of {len(tgts)}"
+            text = tr("panel_tumour.tumours_on_of", n=len(on), n2=len(tgts))
         else:
-            text = f"{dict(SHAPE_CHOICES)[on[0]['shape']]}, {round(on[0]['size'], 2):g} keys"
+            text = tr("panel_tumour.keys", dict=dict(SHAPE_CHOICES)[on[0]['shape']], size=round(on[0]['size'], 2))
             if on[0].get("graphs"):
-                text += ", with graphs"
+                text += tr("panel_tumour.with_graphs")
         self.tumour_summary.config(text=text)

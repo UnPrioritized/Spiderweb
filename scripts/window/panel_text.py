@@ -3,6 +3,7 @@
 import tkinter as tk
 from tkinter import ttk
 
+from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.fonts import WEIGHTS
 from notes.text import TEXT_DEFAULTS, build, restyle, shown_size, text_axes, text_font
@@ -10,27 +11,24 @@ from window.font_dialog import FontDialog
 from window.widgets import Scrub, Tooltip
 
 # number boxes: setting -> (label, unit, smallest, largest)
-ENTRIES = {"size": ("Size", "", 0.01, 2000), "tracking": ("Letter spacing", "/1000 em", -1000, 10000),
-           "leading": ("Line spacing", "%", 1, 1000), "threshold": ("Threshold", "%", 0, 100),
-           "grow": ("Grow", "keys", -100, 100)}
+ENTRIES = {"size": (tr("panel_text.size"), "", 0.01, 2000),
+           "tracking": (tr("panel_text.letter_spacing"), tr("panel_text.1000_em"), -1000, 10000),
+           "leading": (tr("panel_text.line_spacing"), "%", 1, 1000),
+           "threshold": (tr("panel_text.threshold"), "%", 0, 100),
+           "grow": (tr("panel_text.grow"), tr("unit.keys"), -100, 100)}
 # quick changes (widgets.Scrub): (step, Shift step, Ctrl step)
 STEPS = {"size": (1, 10, 0.1), "tracking": (10, 100, 1), "leading": (5, 25, 1), "threshold": (1, 10, 0.1),
          "grow": (0.1, 1, 0.01)}
-UNIT_CHOICES =[("font", "Font size"), ("rows", "Rows")]
-ALIGN_CHOICES = [("left", "Left"), ("center", "Centre"), ("right", "Right")]
+UNIT_CHOICES =[("font", tr("panel_text.font_size")), ("rows", tr("panel_text.rows"))]
+ALIGN_CHOICES = [("left", tr("panel_text.left")), ("center", tr("panel_text.centre")),
+                 ("right", tr("panel_text.right"))]
 TIPS = {
-    "unit": "Font size: the number is the font size in keys, like a font size anywhere\n"
-            "(capital letters come out smaller than that).\n"
-            "Rows: capital letters are exactly that many keys tall.\n"
-            "The number stays the same when you switch, so the text changes size.",
-    "tracking": "Extra room between letters, in 1/1000 of the font size (tracking).\n"
-                "Minus numbers pull the letters closer together.",
-    "leading": "Room between lines, in % of the font's own line spacing.",
-    "threshold": "How much of a key's height has to be inside a letter for that key to play there\n"
-                 "(Fill / Spam only). 50% = the key's middle. Lower = chunkier letters, higher = thinner.",
-    "grow": "Makes the letters' strokes thicker, in keys (minus = thinner),\n"
-            "as the text looked on screen when it was typed. Big values can look odd in tight corners.",
-    "font": "Pick the font (you can type its name in the window that opens).",
+    "unit": tr("panel_text.font_size_the_number_is_the"),
+    "tracking": tr("panel_text.extra_room_between_letters_in_1"),
+    "leading": tr("panel_text.room_between_lines_in_of_the"),
+    "threshold": tr("panel_text.how_much_of_a_key_s"),
+    "grow": tr("panel_text.makes_the_letters_strokes_thicker_in"),
+    "font": tr("panel_text.pick_the_font_you_can_type"),
 }
 
 
@@ -49,9 +47,10 @@ class TextPanel:
         self.text_align = tk.StringVar(value="left")
         self.font_dialog = None
 
-        ttk.Label(box, text="Text", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, columnspan=2, sticky="w")
-        ttk.Label(box, text="Font").grid(row=1, column=0, sticky="w", pady=1)
-        self.font_btn = ttk.Button(box, text="Arial…", command=self.open_font_dialog)
+        ttk.Label(box, text=tr("panel_text.text"), font=("Segoe UI", 9, "bold")).grid(row=0, column=0, columnspan=2,
+                                                                                    sticky="w")
+        ttk.Label(box, text=tr("panel_text.font")).grid(row=1, column=0, sticky="w", pady=1)
+        self.font_btn = ttk.Button(box, text=tr("panel_text.arial"), command=self.open_font_dialog)
         self.font_btn.grid(row=1, column=1, sticky="ew", padx=(5, 0), pady=1)
         Tooltip(self.font_btn, TIPS["font"])
 
@@ -80,7 +79,7 @@ class TextPanel:
                     Tooltip(b, TIPS["unit"])
             r += 1
             if key == "size":  # weight and italic under the size
-                ttk.Label(box, text="Weight").grid(row=r, column=0, sticky="w", pady=1)
+                ttk.Label(box, text=tr("panel_text.weight")).grid(row=r, column=0, sticky="w", pady=1)
                 row = ttk.Frame(box)
                 row.grid(row=r, column=1, sticky="w", padx=(5, 0), pady=1)
                 w = ttk.Combobox(row, textvariable=self.text_weight, state="readonly", width=10,
@@ -88,12 +87,12 @@ class TextPanel:
                 w.pack(side="left")
                 w.bind("<<ComboboxSelected>>", lambda ev: self.set_text_setting(
                     {"weight": next(n for n, name in WEIGHTS if name == self.text_weight.get())}))
-                ttk.Checkbutton(row, text="Italic", variable=self.text_italic,
+                ttk.Checkbutton(row, text=tr("panel_text.italic"), variable=self.text_italic,
                                 command=lambda: self.set_text_setting({"italic": self.text_italic.get()})
                                 ).pack(side="left", padx=(8, 0))
                 r += 1
             if key == "leading":  # alignment under the spacing
-                ttk.Label(box, text="Align").grid(row=r, column=0, sticky="w", pady=1)
+                ttk.Label(box, text=tr("panel_text.align")).grid(row=r, column=0, sticky="w", pady=1)
                 row = ttk.Frame(box)
                 row.grid(row=r, column=1, sticky="w", padx=(5, 0), pady=1)
                 for value, text in ALIGN_CHOICES:
@@ -141,19 +140,18 @@ class TextPanel:
         self.text_italic.set(tx["italic"])
         self.text_align.set(tx["align"])
         self._loading = False
-        self.font_btn.config(text=f"{tx['font']}…")
+        self.font_btn.config(text=tr("panel_text.text_2", font=tx['font']))
         font = text_font(tx)
         if not font.found:
-            info = (f"“{tx['font']}” isn't installed on this PC. The letters stay as they were saved; "
-                    f"retyping uses “{font.face}” instead.")
+            info = (tr("panel_text.isn_t_installed_on_this_pc", font=tx['font'], face=font.face))
         elif typing:
-            info = "Typing: Enter = new line, Esc = done. Click somewhere else for a new text, on a text to retype it."
+            info = tr("panel_text.typing_enter_new_line_esc_done")
         elif tool == "text":
-            info = "Click on the piano roll and type. Click a text to retype it."
+            info = tr("panel_text.click_on_the_piano_roll_and")
         else:
-            info = "Double-click the text (or right-click → Edit text) to retype it."
+            info = tr("panel_text.double_click_the_text_or_right")
         if len(shapes) > 1 and not typing:
-            info += f"  Changes go to all {len(shapes)} selected texts."
+            info += tr("panel_text.changes_go_to_all_selected_texts", n=len(shapes))
         self.text_info.config(text=info)
 
     def set_text_setting(self, changes, refocus=True):
@@ -166,12 +164,12 @@ class TextPanel:
         if roll.typing:
             tx, axes = roll.typing_state()
             if roll.typing["i"] is not None:
-                self.push_undo(name="Text setting")
+                self.push_undo(name=tr("panel_text.text_setting"))
             roll.retype(*restyle(tx, axes, changes))
         else:
             shapes = self.text_shapes()
             if shapes:
-                self.push_undo(name="Text setting")
+                self.push_undo(name=tr("panel_text.text_setting"))
             for sh in shapes:
                 build(sh, *restyle(sh["text"], text_axes(sh), changes))
         self.shapes_changed()

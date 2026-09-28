@@ -21,6 +21,8 @@ from ctypes import wintypes
 
 import numpy as np
 
+from files.lang import tr
+
 FORMAT = "MidiPortalSequence"
 MAGIC = b"PortalSequenceData"
 
@@ -49,8 +51,8 @@ NOTE = np.dtype([("tag", "<u2"), ("len", "<u4"),
 
 
 DOMINO_STARTS = [  # (saved value, dropdown text): where copied / pasted notes start (app.domino_start)
-    ("note", "First note at tick 0"),
-    ("bar", "From the bar line"),
+    ("note", tr("domino_clip.first_note_at_tick_0")),
+    ("bar", tr("domino_clip.from_the_bar_line")),
 ]
 
 
@@ -101,7 +103,7 @@ def put_on_clipboard(raw):
     fmt = user32.RegisterClipboardFormatW(FORMAT)
     h = kernel32.GlobalAlloc(0x0002, len(raw))  # GMEM_MOVEABLE
     if not h:
-        raise MemoryError("not enough memory for the clipboard")
+        raise MemoryError(tr("domino_clip.not_enough_memory_for_the_clipboard"))
     ctypes.memmove(kernel32.GlobalLock(h), raw, len(raw))
     kernel32.GlobalUnlock(h)
     for _ in range(10):  # another program may have it open for a moment
@@ -186,11 +188,11 @@ def read_notes(raw):
     counted from the start of the copied stretch, track = which copied track (0 = the first); ppq = the PPQ it was
     copied at (None if missing). ValueError if raw isn't Domino's data."""
     if not raw.startswith(MAGIC) or len(raw) < len(MAGIC) + 4:
-        raise ValueError("not Domino's data")
+        raise ValueError(tr("domino_clip.not_domino_s_data"))
     try:
         data = zlib.decompress(raw[len(MAGIC) + 4:])
     except zlib.error:
-        raise ValueError("Domino's data is damaged") from None
+        raise ValueError(tr("domino_clip.domino_s_data_is_damaged")) from None
     runs, odd, ppq, track = [], [], None, -1
     for tag, body in items(data):
         if tag == 1002 and len(body) == 2:

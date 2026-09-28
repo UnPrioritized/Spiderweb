@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from types import SimpleNamespace
 
+from files.lang import tr
 from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half_at, handle_lines, nearest, pen_handles,
                           set_symmetry)
 from notes.custom import clean_strokes, join_strokes, open_ends, open_paths, stroke_points, strokes_closed
@@ -25,9 +26,10 @@ BUILT_IN = {
     "Triangle": [{"kind": "poly", "pts": [[0, 0], [1, 0], [0.5, 1], [0, 0]]}],
 }
 GRIDS = ["4", "8", "12", "16", "24", "32", "48", "64"]
-TOOLS = [("select", "Select", "v"), ("line", "Line", "l"), ("poly", "Polyline", "p"), ("free", "Freehand", "f"),
-         ("curve", "Curve", "c"), ("arc", "Arc", "a"), ("square", "Square", "s"), ("circle", "Circle", "o"),
-         ("erase", "Eraser", "e")]
+TOOLS = [("select", tr("drawer.select"), "v"), ("line", tr("drawer.line"), "l"), ("poly", tr("drawer.polyline"), "p"),
+         ("free", tr("drawer.freehand"), "f"), ("curve", tr("drawer.curve"), "c"), ("arc", tr("drawer.arc"), "a"),
+         ("square", tr("drawer.square"), "s"), ("circle", tr("drawer.circle"), "o"),
+         ("erase", tr("drawer.eraser"), "e")]
 SHIFT, CTRL, ALT = 0x1, 0x4, 0x20000
 BAD_CHARS = '<>:"/\\|?*'
 
@@ -115,7 +117,7 @@ class Drawer(tk.Toplevel):
         super().__init__(app)
         self.app = app
         s = self.scale = app.scale
-        self.title("Spiderweb — custom shape drawer")
+        self.title(tr("drawer.spiderweb_custom_shape_drawer"))
         self.geometry(f"{int(1000 * s)}x{int(720 * s)}")
         self.minsize(int(700 * s), int(500 * s))
         self.strokes = []      # {"kind": "poly" / "curve", "pts": [[u, v], ...]} or {"kind": "ellipse", "box": [...]}
@@ -149,7 +151,8 @@ class Drawer(tk.Toplevel):
     def update_side_help(self):
         """The side panel's help: the current tool's, then the drawer's (everything: Help, F1)."""
         t, d = BY_ID[self.tool_topic()], BY_ID["drawer"]
-        self.side_help.set_text(f"{t['title']}\n{t['text']}\n\n{d['text']}\n\nHelp (F1): every tip, searchable.")
+        self.side_help.set_text(tr("drawer.help_f1_every_tip_searchable", title=t['title'], text=t['text'],
+                                   text2=d['text']))
 
     def on_tool(self):
         self.update_side_help()
@@ -165,17 +168,17 @@ class Drawer(tk.Toplevel):
             Tooltip(b, BY_ID[DRAWER_TOOL_TOPICS[key]]["tip"])
         bar = ttk.Frame(self, padding=(6, 0, 6, 4))
         bar.pack(fill="x")
-        ttk.Label(bar, text="Grid").pack(side="left", padx=(0, 4))
+        ttk.Label(bar, text=tr("drawer.grid")).pack(side="left", padx=(0, 4))
         ttk.Combobox(bar, textvariable=self.grid_n, values=GRIDS, width=4, state="readonly").pack(side="left")
-        ttk.Button(bar, text="Undo", command=self.undo).pack(side="left", padx=(12, 0))
-        ttk.Button(bar, text="Clear", command=self.clear).pack(side="left", padx=(4, 0))
-        ttk.Button(bar, text="Reset view", command=self.reset_view).pack(side="left", padx=(12, 0))
-        ttk.Button(bar, text="Help (F1)", command=self.open_help).pack(side="left", padx=(12, 0))
+        ttk.Button(bar, text=tr("drawer.undo"), command=self.undo).pack(side="left", padx=(12, 0))
+        ttk.Button(bar, text=tr("drawer.clear"), command=self.clear).pack(side="left", padx=(4, 0))
+        ttk.Button(bar, text=tr("drawer.reset_view"), command=self.reset_view).pack(side="left", padx=(12, 0))
+        ttk.Button(bar, text=tr("drawer.help_f1"), command=self.open_help).pack(side="left", padx=(12, 0))
 
         side = ttk.Frame(self, padding=(6, 0, 6, 6), width=int(300 * self.scale))
         side.pack(side="right", fill="y")
         side.pack_propagate(False)
-        box = ttk.LabelFrame(side, text="Shape library", padding=6)
+        box = ttk.LabelFrame(side, text=tr("drawer.shape_library"), padding=6)
         box.pack(fill="x")
         row = ttk.Frame(box)
         row.pack(fill="x")
@@ -187,17 +190,17 @@ class Drawer(tk.Toplevel):
         self.listbox.bind("<Double-Button-1>", lambda e: self.open_selected())
         btns = ttk.Frame(box)
         btns.pack(fill="x", pady=(4, 0))
-        ttk.Button(btns, text="Open", command=self.open_selected).pack(side="left")
-        ttk.Button(btns, text="Delete", command=self.delete_selected).pack(side="left", padx=4)
-        ttk.Button(btns, text="New", command=self.new).pack(side="left")
+        ttk.Button(btns, text=tr("drawer.open"), command=self.open_selected).pack(side="left")
+        ttk.Button(btns, text=tr("drawer.delete"), command=self.delete_selected).pack(side="left", padx=4)
+        ttk.Button(btns, text=tr("drawer.new"), command=self.new).pack(side="left")
         name = ttk.Frame(box)
         name.pack(fill="x", pady=(8, 0))
-        ttk.Label(name, text="Name").pack(side="left")
+        ttk.Label(name, text=tr("drawer.name")).pack(side="left")
         ttk.Entry(name, textvariable=self.name).pack(side="left", fill="x", expand=True, padx=(5, 0))
         btns = ttk.Frame(box)
         btns.pack(fill="x", pady=(4, 0))
-        ttk.Button(btns, text="Save", command=self.save).pack(side="left")
-        ttk.Button(btns, text="Use on the piano roll", command=self.use).pack(side="right")
+        ttk.Button(btns, text=tr("drawer.save"), command=self.save).pack(side="left")
+        ttk.Button(btns, text=tr("drawer.use_on_the_piano_roll"), command=self.use).pack(side="right")
         self.pos_label = ttk.Label(side, text="", foreground="#555", font=("Segoe UI", 9))
         self.pos_label.pack(fill="x", pady=(8, 0))
         self.state_label = ttk.Label(side, text="", wraplength=int(285 * self.scale), justify="left")
@@ -310,7 +313,7 @@ class Drawer(tk.Toplevel):
     def show_position(self, e):
         n = int(self.grid_n.get())
         u, v = self.from_screen(e.x, e.y)
-        self.pos_label.config(text=f"Mouse: x {(u - 0.5) * n:+.1f}, y {(v - 0.5) * n:+.1f} grid squares from the middle")
+        self.pos_label.config(text=tr("drawer.mouse_x_y_grid_squares_from", u=(u - 0.5) * n, v=(v - 0.5) * n))
 
     # ------------------------------------------------------------ mouse
 
@@ -696,8 +699,7 @@ class Drawer(tk.Toplevel):
             st = self.strokes[self.sel]
             what = can_delete(st, j)
             if what == "middle":
-                self.pos_label.config(text="The middle anchor of a symmetric curve stays (turn Symmetric halves "
-                                           "off to remove it).")
+                self.pos_label.config(text=tr("drawer.the_middle_anchor_of_a_symmetric"))
                 return
             if what:
                 self.push_undo()
@@ -717,20 +719,25 @@ class Drawer(tk.Toplevel):
         st = self.strokes[i]
         m = tk.Menu(self, tearoff=0)
         if st["kind"] == "curve":
-            m.add_command(label="Add anchor here", command=lambda: self.add_curve_anchor(e))
+            m.add_command(label=tr("drawer.add_anchor_here"), command=lambda: self.add_curve_anchor(e))
             # one half follows the other; the half right-clicked keeps its shape
             symmetry_menu(m, st.get("sym"), lambda mode: self.set_curve_symmetry(i, mode, e))
         elif st["kind"] == "poly":
-            m.add_command(label="Add point here", command=lambda: self.add_poly_point(i, e))
-        m.add_command(label="Delete stroke", accelerator="Del", command=lambda: self.delete_stroke(i))
-        m.add_command(label="Copy stroke", accelerator="Ctrl+C", command=self.copy)
-        m.add_command(label="Paste", accelerator="Ctrl+V", command=self.paste,
+            m.add_command(label=tr("drawer.add_point_here"), command=lambda: self.add_poly_point(i, e))
+        m.add_command(label=tr("drawer.delete_stroke"), accelerator=tr("drawer.del"),
+                      command=lambda: self.delete_stroke(i))
+        m.add_command(label=tr("drawer.copy_stroke"), accelerator=tr("drawer.ctrl_c"), command=self.copy)
+        m.add_command(label=tr("drawer.paste"), accelerator=tr("drawer.ctrl_v"), command=self.paste,
                       state="normal" if self.clipboard else "disabled")
         m.add_separator()
-        m.add_command(label="Flip sideways", accelerator="Ctrl+H", command=lambda: self.flip(True))
-        m.add_command(label="Flip upside down", accelerator="Ctrl+J", command=lambda: self.flip(False))
-        m.add_command(label="Turn 90° left", accelerator="Ctrl+Left", command=lambda: self.turn(False))
-        m.add_command(label="Turn 90° right", accelerator="Ctrl+Right", command=lambda: self.turn(True))
+        m.add_command(label=tr("drawer.flip_sideways"), accelerator=tr("drawer.ctrl_h"),
+                      command=lambda: self.flip(True))
+        m.add_command(label=tr("drawer.flip_upside_down"), accelerator=tr("drawer.ctrl_j"),
+                      command=lambda: self.flip(False))
+        m.add_command(label=tr("drawer.turn_90_left"), accelerator=tr("drawer.ctrl_left"),
+                      command=lambda: self.turn(False))
+        m.add_command(label=tr("drawer.turn_90_right"), accelerator=tr("drawer.ctrl_right"),
+                      command=lambda: self.turn(True))
         try:
             m.tk_popup(e.x_root, e.y_root)
         finally:
@@ -885,7 +892,7 @@ class Drawer(tk.Toplevel):
     def keep_changes(self):
         """True if it's fine to throw away the drawing (nothing unsaved, or the user said so)."""
         return not (self.dirty and self.strokes) or messagebox.askyesno(
-            "Spiderweb", "The current drawing isn't saved. Throw it away?", parent=self)
+            tr("drawer.spiderweb"), tr("drawer.the_current_drawing_isn_t_saved"), parent=self)
 
     def open_selected(self):
         name = self.picked()
@@ -893,7 +900,7 @@ class Drawer(tk.Toplevel):
             return
         strokes = load_shape(name)
         if strokes is None:
-            messagebox.showerror("Spiderweb", f"Couldn't read the shape \"{name}\".", parent=self)
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_read_the_shape", name=name), parent=self)
             return
         self.open_shape(name, strokes)
 
@@ -914,39 +921,39 @@ class Drawer(tk.Toplevel):
             return
         saved = name.lower() in (n.lower() for n in saved_names())
         if not saved:
-            messagebox.showinfo("Spiderweb", f"\"{name}\" is built in and can't be deleted.", parent=self)
+            messagebox.showinfo(tr("drawer.spiderweb"), tr("drawer.is_built_in_and_can_t", name=name), parent=self)
             return
-        back = f"\nThe built-in \"{built_in_name(name)}\" comes back in its place." if built_in_name(name) else ""
+        back = tr("drawer.the_built_in_comes_back_in", built_in_name=built_in_name(name)) if built_in_name(name) else ""
         if not messagebox.askyesno(
-                "Spiderweb", f"Delete \"{name}\" from the library?\n"
-                "Shapes already placed on the piano roll stay as they are." + back, icon="warning", parent=self):
+                tr("drawer.spiderweb"), tr("drawer.delete_from_the_library_shapes_already",
+                                           name=name) + back, icon="warning", parent=self):
             return
         try:
             os.remove(shape_file(name))
         except OSError as e:
-            messagebox.showerror("Spiderweb", f"Couldn't delete:\n{e}", parent=self)
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_delete", e=e), parent=self)
         self.refresh_list()
 
     def save(self):
         """Save to the library under the name in the box. Returns the name, or None if it wasn't saved."""
         name = clean_name(self.name.get())
         if not self.strokes:
-            messagebox.showerror("Spiderweb", "Draw something first.", parent=self)
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.draw_something_first"), parent=self)
             return None
         if not name:
-            messagebox.showerror("Spiderweb", "Give the shape a name first.", parent=self)
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.give_the_shape_a_name_first"), parent=self)
             return None
         taken = name.lower() in (n.lower() for n in library_names())
         if taken and name.lower() != (self.saved_name or "").lower():
-            if not messagebox.askyesno("Spiderweb", f"\"{name}\" is already in the library. Replace it?\n"
-                                       "Shapes already placed on the piano roll stay as they are.", parent=self):
+            if not messagebox.askyesno(tr("drawer.spiderweb"),
+                                       tr("drawer.is_already_in_the_library_replace", name=name), parent=self):
                 return None
         self.strokes = join_strokes(self.strokes)
         self.sel = None  # joining can change the order
         try:
             save_shape(name, self.strokes)
         except OSError as e:
-            messagebox.showerror("Spiderweb", f"Couldn't save:\n{e}", parent=self)
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_save", e=e), parent=self)
             return None
         self.name.set(name)
         self.saved_name = name
@@ -1032,15 +1039,15 @@ class Drawer(tk.Toplevel):
             self.draw_stroke(self.draft, "#0a8f0a", w)
             self.draw_draft_points(r, h)
         if not self.strokes:
-            text = "Nothing drawn yet."
+            text = tr("drawer.nothing_drawn_yet")
         elif closed:
-            text = "Closed shape: Empty, Fill and Spam all work."
+            text = tr("drawer.closed_shape_empty_fill_and_spam")
         elif len(open_paths(self.strokes)) == 1:
-            text = "One gap (red dots): Fill and Spam close it with a straight line."
+            text = tr("drawer.one_gap_red_dots_fill_and")
         else:
-            text = "Open ends (red dots): Fill and Spam close each gap with a straight line."
+            text = tr("drawer.open_ends_red_dots_fill_and")
         if self.dirty and self.strokes:
-            text += "\nNot saved yet."
+            text += tr("drawer.not_saved_yet")
         self.state_label.config(text=text, foreground="#1d6b1d" if closed else "#9a4b00")
 
     def draw_draft_points(self, r, h):
@@ -1061,7 +1068,8 @@ class Drawer(tk.Toplevel):
                 q = r + 1.5 * s
                 c.create_oval(x - q, y - q, x + q, y + q, fill="#ffffff", outline="#0050d0", width=max(2, round(2 * s)))
             else:
-                c.create_rectangle(x - h, y - h, x + h, y + h, fill="#ffffff", outline="#0a8f0a", width=max(1, round(s)))
+                c.create_rectangle(x - h, y - h, x + h, y + h, fill="#ffffff", outline="#0a8f0a",
+                                   width=max(1, round(s)))
 
     def draw_stroke(self, st, color, width):
         coords = [c for u, v in stroke_points(st) for c in self.to_screen(u, v)]

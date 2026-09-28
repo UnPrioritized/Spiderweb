@@ -5,6 +5,7 @@ import math
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 
+from files.lang import tr
 from notes.custom import (CUSTOM_FLAGS, SPAM_FILLS, box_frame, custom_settings, gap_lines, join_strokes, map_stroke,
                           normalize_strokes, open_paths)
 from window.drawer import Drawer, clean_name, library_names, load_shape, save_shape
@@ -15,26 +16,21 @@ from window.widgets import Scrub, Tooltip
 
 GAP_COLOR = "#c06000"  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
 FILL_CHOICES = [
-    ("empty", "Empty", "Just the outline, like lines."),
-    ("fill", "Fill", "One long note per key inside."),
-    ("spam", "Spam", "The inside filled with back-to-back notes of one gate."),
-    ("outline_spam", "Outline spam", "Just the outline, chopped into notes of one gate."),
+    ("empty", tr("panel_custom.empty"), tr("panel_custom.just_the_outline_like_lines")),
+    ("fill", tr("panel_custom.fill"), tr("panel_custom.one_long_note_per_key_inside")),
+    ("spam", tr("panel_custom.spam"), tr("panel_custom.the_inside_filled_with_back_to")),
+    ("outline_spam", tr("panel_custom.outline_spam"), tr("panel_custom.just_the_outline_chopped_into_notes")),
 ]
-CUSTOM_NAMES = {"fill": "Inside fill", "gate": "Spam gate", "align": "Spam start", "union": "Overlaps cancel out",
-                "apart": "Normal / Outline"}  # (History)
-APART_CHOICES = ["Normal", "Outline"]
-APART_TIP = ("Normal: all its notes together.\n"
-             "Outline: the notes along the outline go on a channel of their own and the inside's on\n"
-             "another (the same gate, so they line up). Needs Channels: Multi channel.")
-APART_NEEDS = "\n\nChannels isn't Multi channel now, so it's all one channel (turns orange)."
-CANCEL_TIP = ("Fill and Spam: where outlines overlap, the overlap is left empty\n"
-              "(a shape inside a shape makes a hole). Off: inside any outline is filled,\n"
-              "overlaps and holes too.")
+CUSTOM_NAMES = {"fill": tr("panel_custom.inside_fill"), "gate": tr("panel_custom.spam_gate"),
+                "align": tr("panel_custom.spam_start"), "union": tr("panel_custom.overlaps_cancel_out"),
+                "apart": tr("panel_custom.normal_outline")}  # (History)
+APART_CHOICES = [tr("panel_custom.normal"), tr("panel_custom.outline")]
+APART_TIP = tr("panel_custom.normal_all_its_notes_together_outline")
+APART_NEEDS = tr("panel_custom.channels_isn_t_multi_channel_now")
+CANCEL_TIP = tr("panel_custom.fill_and_spam_where_outlines_overlap")
 ALIGN_CHOICES = [
-    ("auto", "Auto", "Each key's notes start at that key's left edge,\nso the left side is exact and the right side ragged."),
-    ("aligned", "Aligned", "Every note sits on the gate grid counted from the start of the song,\n"
-                           "so the notes form straight columns (lined up with bar lines and\n"
-                           "other shapes); both sides are a little ragged."),
+    ("auto", tr("panel_custom.auto"), tr("panel_custom.each_key_s_notes_start_at")),
+    ("aligned", tr("panel_custom.aligned"), tr("panel_custom.every_note_sits_on_the_gate")),
 ]
 
 
@@ -46,15 +42,15 @@ class CustomPanel:
         box = self.custom_box = ttk.Frame(self.settings)
         row = self.custom_shape_row = ttk.Frame(box)
         row.pack(fill="x")
-        ttk.Label(row, text="Shape").pack(side="left")
+        ttk.Label(row, text=tr("panel_custom.shape")).pack(side="left")
         self.custom_combo = ttk.Combobox(row, textvariable=self.custom_pick, state="readonly", width=18,
                                          postcommand=self.refresh_custom_names)
         self.custom_combo.pack(side="left", padx=(5, 0))
         self.custom_combo.bind("<<ComboboxSelected>>", lambda e: self.on_custom_pick())
-        ttk.Button(row, text="Drawer…", command=self.open_drawer).pack(side="left", padx=(4, 0))
+        ttk.Button(row, text=tr("panel_custom.drawer"), command=self.open_drawer).pack(side="left", padx=(4, 0))
         row = self.custom_fill_row = ttk.Frame(box)
         row.pack(fill="x", pady=(4, 0))
-        ttk.Label(row, text="Inside").pack(side="left", anchor="n")
+        ttk.Label(row, text=tr("panel_custom.inside")).pack(side="left", anchor="n")
         opts = ttk.Frame(row)
         opts.pack(side="left", padx=(5, 0))
         self.fill_buttons = {}
@@ -80,17 +76,17 @@ class CustomPanel:
                 self.apart_boxes[value], self.apart_tips[value] = drop, Tooltip(drop, APART_TIP)
         g = ttk.Frame(opts)
         g.pack(anchor="w", padx=(20, 0))
-        lb = ttk.Label(g, text="gate")
+        lb = ttk.Label(g, text=tr("panel_custom.gate"))
         lb.pack(side="left")
         self.gate_entry = ttk.Entry(g, textvariable=self.gate_var, width=7)
         self.gate_entry.pack(side="left", padx=4)
-        ttk.Label(g, text="ticks (Enter to apply)", foreground="#777").pack(side="left")
+        ttk.Label(g, text=tr("panel_custom.ticks_enter_to_apply"), foreground="#777").pack(side="left")
         self.gate_entry.bind("<Return>", lambda e: self.on_gate())
         self.gate_entry.bind("<FocusOut>", lambda e: self.on_gate())
         Scrub(self, [(self.gate_entry, self.gate_var, self.on_gate)], GATE_STEPS, 1, 10 ** 7, label=lb)
         a = ttk.Frame(opts)
         a.pack(anchor="w", padx=(20, 0), pady=(1, 0))
-        ttk.Label(a, text="start").pack(side="left")
+        ttk.Label(a, text=tr("panel_custom.start")).pack(side="left")
         self.align_buttons = []
         for value, text, tip in ALIGN_CHOICES:
             b = ttk.Radiobutton(a, text=text, value=value, variable=self.align_var,
@@ -99,7 +95,7 @@ class CustomPanel:
             Tooltip(b, tip)
             self.align_buttons.append(b)
         self.cancel_var = tk.BooleanVar(value=True)
-        self.cancel_box = ttk.Checkbutton(opts, text="Overlaps cancel out", variable=self.cancel_var,
+        self.cancel_box = ttk.Checkbutton(opts, text=tr("panel_custom.overlaps_cancel_out"), variable=self.cancel_var,
                                           command=lambda: self.set_custom("union", not self.cancel_var.get()))
         self.cancel_box.pack(anchor="w", pady=(2, 0))
         Tooltip(self.cancel_box, CANCEL_TIP)
@@ -155,17 +151,16 @@ class CustomPanel:
             self.custom_fill_row.pack_forget()
             own = all(t.get("own_vel") for t in tgts)
             self.custom_info.config(text=(
-                f"{sum(self.note_count(t) for t in tgts):,} pasted notes. "
-                + ("They keep their own velocities until you change the velocity here or in the velocity pane. "
+                tr("panel_custom.pasted_notes", value=sum(self.note_count(t) for t in tgts))
+                + (tr("panel_custom.they_keep_their_own_velocities_until")
                    if own else "")
-                + "Drag a corner or side to stretch them, just outside a corner to turn them, just outside a "
-                  "side's middle to skew them."))
+                + tr("panel_custom.drag_a_corner_or_side_to")))
             return
         # gaps in the outline: Fill / Spam close them with straight lines (custom.fill_plan)
         if placed:
             name, gaps = tgts[0]["name"], max(len(gap_lines(t)) for t in tgts)
         elif tool != "custom":  # drawn on the roll: the fill settings are for what gets drawn
-            name, gaps = "Live drawing" if live else tool.title(), 0
+            name, gaps = tr("custom.live_drawing") if live else tool.title(), 0
         else:
             name, tpl = self.custom_shape, self.custom_template(self.custom_shape)
             gaps = len(open_paths(tpl[0])) if tpl else 0
@@ -180,13 +175,12 @@ class CustomPanel:
         for value, b in self.fill_buttons.items():
             b.config(style="Gap.TRadiobutton" if gaps and value in ("fill", "spam") else "TRadiobutton")
         for value, _, base in FILL_CHOICES:
-            gap = ("The outline has a gap: it's filled as if a straight line closed it (the dashed line)."
+            gap = (tr("panel_custom.the_outline_has_a_gap_it")
                    if gaps == 1 else
-                   f"The outline has {gaps} gaps: each is closed with a straight line (the dashed lines)."
+                   tr("panel_custom.the_outline_has_gaps_each_is", gaps=gaps)
                    if gaps else "")
             if gap:
-                gap += ("\nEnds that nearly touch (1/64 beat, 1 key) are joined; open parts that are almost\n"
-                        "straight aren't filled. Close the gaps yourself to decide where the edge goes.")
+                gap += tr("panel_custom.ends_that_nearly_touch_1_64")
             self.fill_tips[value].text = base + ("\n\n" + gap if gap and value in ("fill", "spam") else "")
         spam = fill in SPAM_FILLS
         self.gate_entry.config(state="normal" if spam else "disabled")
@@ -204,29 +198,27 @@ class CustomPanel:
             self.apart_tips[value].text = APART_TIP + (APART_NEEDS if lonely else "")
         self.cancel_box.config(state="normal" if fill in ("fill", "spam") and not text else "disabled")
         if not placed and live:
-            info = ("Live shape: what you draw goes into one custom shape (a new one now). Close its outline "
-                    "(points snap onto its ends) to fill it.")
+            info = tr("panel_custom.live_shape_what_you_draw_goes")
         elif not placed and tool == "text":
-            info = "Inside fill for new text."
+            info = tr("panel_custom.inside_fill_for_new_text")
         elif not placed and tool in BOX_TOOLS:
-            info = f"Drag a box on the piano roll, or click two corners (Ctrl = a perfect {tool} on screen)."
+            info = tr("panel_custom.drag_a_box_on_the_piano", tool=tool)
         elif not placed and not self.custom_template(name):
-            info = "Pick a shape, or make one with Drawer…"
+            info = tr("panel_custom.pick_a_shape_or_make_one")
         elif placed:
-            info = f"{sum(self.note_count(t) for t in tgts):,} notes."
+            info = tr("panel_custom.n_notes", n=sum(self.note_count(t) for t in tgts))
             if gaps and fill in ("fill", "spam"):
-                info += ("  One gap in the outline: filled as if the dashed line closed it." if gaps == 1 else
-                         f"  {gaps} gaps in the outline: filled as if the dashed lines closed them.")
+                info += (tr("panel_custom.one_gap_in_the_outline_filled") if gaps == 1 else
+                         tr("panel_custom.gaps_in_the_outline_filled_as", gaps=gaps))
         else:
-            info = "Drag a box on the piano roll, or click two corners, to place it (Ctrl = keep its proportions)."
+            info = tr("panel_custom.drag_a_box_on_the_piano_2")
         if placed and tool != "text":
-            info += ("  Drag a corner or side to resize, just outside a corner to turn it, just outside a side's "
-                     "middle to skew it.")
+            info += tr("panel_custom.drag_a_corner_or_side_to_2")
             if live and len(tgts) == 1:
-                info += "  Live shape: what you draw now goes into this shape."
+                info += tr("panel_custom.live_shape_what_you_draw_now")
             if self.stroke is not None and len(tgts) == 1:
-                info += (f"  Picked: stroke {self.stroke + 1} of {len(tgts[0]['strokes'])} (Del = delete it, "
-                         "Ctrl+C / H / J / arrows = copy, flip, turn it, Esc = unpick). Select tool: click a stroke of the selected shape to pick it.")
+                info += (tr("panel_custom.picked_stroke_of_del_delete_it", stroke=self.stroke + 1,
+                            n=len(tgts[0]['strokes'])))
         self.custom_info.config(text=info)
 
     def on_custom_pick(self):
@@ -234,13 +226,13 @@ class CustomPanel:
         name = self.custom_pick.get()
         tpl = self.custom_template(name)
         if not tpl:
-            messagebox.showerror("Spiderweb", f"Couldn't read the shape \"{name}\".")
+            messagebox.showerror(tr("panel_custom.spiderweb"), tr("panel_custom.couldn_t_read_the_shape", name=name))
             return self.sync_custom()
         self.custom_shape = name
         tgts = [t for t in self.custom_targets()
                 if t is not self.custom_defaults and not t.get("text") and "notes" not in t]
         if tgts:
-            self.push_undo(name="Custom shape")
+            self.push_undo(name=tr("panel_custom.custom_shape"))
             for t in tgts:
                 t["name"], t["strokes"] = name, copy.deepcopy(tpl[0])
             self.shapes_changed()
@@ -294,14 +286,15 @@ class CustomPanel:
     def save_to_library(self, sh):
         """A custom shape's drawing (e.g. drawn live) into the shape library, under a name asked for. It keeps the
         proportions it has on screen now."""
-        name = clean_name(simpledialog.askstring("Spiderweb", "Save the drawing to the shape library as:",
-                                                 initialvalue="" if sh["name"] == "Live drawing" else sh["name"],
-                                                 parent=self) or "")
+        live = sh["name"] == tr("custom.live_drawing")
+        name = clean_name(simpledialog.askstring(tr("panel_custom.spiderweb"),
+                                                 tr("panel_custom.save_the_drawing_to_the_shape"),
+                                                 initialvalue="" if live else sh["name"], parent=self) or "")
         if not name:
             return
         if name.lower() in (n.lower() for n in library_names()) and not messagebox.askyesno(
-                "Spiderweb", f"\"{name}\" is already in the library. Replace it?\n"
-                "Shapes already placed on the piano roll stay as they are.", parent=self):
+                tr("panel_custom.spiderweb"), tr("panel_custom.is_already_in_the_library_replace",
+                                                 name=name), parent=self):
             return
         (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
         w = math.hypot((b1 - b0) * self.roll.sx, (p1 - p0) * self.roll.sy)  # the box on screen
@@ -314,7 +307,7 @@ class CustomPanel:
         try:
             save_shape(name, join_strokes(strokes))
         except OSError as e:
-            messagebox.showerror("Spiderweb", f"Couldn't save:\n{e}", parent=self)
+            messagebox.showerror(tr("panel_custom.spiderweb"), tr("panel_custom.couldn_t_save", e=e), parent=self)
             return
         sh["name"] = name
         self.refresh_custom_names()
@@ -322,7 +315,7 @@ class CustomPanel:
             self.drawer.refresh_list()
         self.shapes_changed()
         self.sync_custom()
-        self.status.config(text=f"Saved \"{name}\" to the shape library.")
+        self.status.config(text=tr("panel_custom.saved_to_the_shape_library", name=name))
 
     def use_custom(self, name):
         """The drawer's "Use on the piano roll": new custom shapes are made of this one."""

@@ -5,6 +5,7 @@ import math
 
 import numpy as np
 
+from files.lang import tr
 from notes.bezier import anchor_count, fit, handle_anchor, sample
 from notes.custom import row_spans
 from notes.paths import EDGE, TOP_KEY, pitch_of
@@ -245,20 +246,20 @@ def _smooth_curve(xs, ys):
 # A formula is y of x, x going 0 -> 1 from the curve's start (A) to its wall end (B); it's stretched so it starts
 # at 0 and ends at 1, and becomes anchors + handles that follow it (so it can still be dragged afterwards).
 CURVE_PRESETS = [  # (name, formula; None = the default curve)
-    ("Default", None),
-    ("Straight", "x"),
-    ("Slow start (x²)", "x^2"),
-    ("Slower start (x³)", "x^3"),
-    ("Very slow start (x⁵)", "x^5"),
-    ("Fast start (x² flipped)", "1-(1-x)^2"),
-    ("Faster start (x³ flipped)", "1-(1-x)^3"),
-    ("S-curve (slow, fast, slow)", "x*x*(3-2*x)"),
-    ("Steep S-curve", "x^3*(x*(6*x-15)+10)"),
-    ("Reverse S (fast, slow, fast)", "0.5-sin(asin(1-2*x)/3)"),
-    ("Quarter circle (slow start)", "1-sqrt(1-x^2)"),
-    ("Quarter circle (fast start)", "sqrt(1-(1-x)^2)"),
-    ("Exponential", "exp(5*x)"),
-    ("Logarithmic", "ln(1+20*x)"),
+    (tr("funnel.default"), None),
+    (tr("funnel.straight"), "x"),
+    (tr("funnel.slow_start_x"), "x^2"),
+    (tr("funnel.slower_start_x"), "x^3"),
+    (tr("funnel.very_slow_start_x"), "x^5"),
+    (tr("funnel.fast_start_x_flipped"), "1-(1-x)^2"),
+    (tr("funnel.faster_start_x_flipped"), "1-(1-x)^3"),
+    (tr("funnel.s_curve_slow_fast_slow"), "x*x*(3-2*x)"),
+    (tr("funnel.steep_s_curve"), "x^3*(x*(6*x-15)+10)"),
+    (tr("funnel.reverse_s_fast_slow_fast"), "0.5-sin(asin(1-2*x)/3)"),
+    (tr("funnel.quarter_circle_slow_start"), "1-sqrt(1-x^2)"),
+    (tr("funnel.quarter_circle_fast_start"), "sqrt(1-(1-x)^2)"),
+    (tr("funnel.exponential"), "exp(5*x)"),
+    (tr("funnel.logarithmic"), "ln(1+20*x)"),
 ]
 FIT_TOLERANCE = 0.003  # how close (part of the curve's size) the anchors + handles follow a formula
 
@@ -271,13 +272,13 @@ def formula_curve(fn, n=400):
         try:
             y = float(fn(x))
         except (ValueError, ArithmeticError, TypeError):
-            raise ValueError(f"it can't be worked out at x = {x:g}")
+            raise ValueError(tr("funnel.it_can_t_be_worked_out", x=x))
         if not math.isfinite(y):
-            raise ValueError(f"it can't be worked out at x = {x:g}")
+            raise ValueError(tr("funnel.it_can_t_be_worked_out", x=x))
         pts.append((x, y))
     y0, y1 = pts[0][1], pts[-1][1]
     if abs(y1 - y0) < 1e-12:
-        raise ValueError("it has to end at a different height than it starts (x = 0 and x = 1)")
+        raise ValueError(tr("funnel.it_has_to_end_at_a"))
     return [(x, (y - y0) / (y1 - y0)) for x, y in pts]
 
 

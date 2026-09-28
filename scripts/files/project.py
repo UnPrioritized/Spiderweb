@@ -9,6 +9,7 @@ from tkinter import filedialog, messagebox
 
 import numpy as np
 
+from files.lang import tr
 from notes.custom import ALIGNS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, notes_shape
 from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_shape
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
@@ -125,7 +126,7 @@ class ProjectFiles:
                              if k in SHAPE_DEFAULTS})
         except (OSError, ValueError, TypeError, AttributeError) as e:
             if not quiet:
-                messagebox.showerror("Spiderweb", f"Couldn't open project:\n{e}")
+                messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_open_project", e=e))
             return False
         for key in ("ppq", "bpm", "beats", "output"):
             if key in data:
@@ -222,16 +223,16 @@ class ProjectFiles:
             broken = os.path.join(os.path.dirname(path), f"{stamp}-{n}.json")
         try:
             os.replace(path, broken)
-            kept = f"It was kept as:\n{broken}\n\n"
+            kept = tr("project.it_was_kept_as", broken=broken)
         except OSError:
             kept = ""
         if os.path.exists(backup) and opens(backup):
-            what = ("Opened the backup instead: your work as it was when you last started Spiderweb "
-                    f"({time.strftime('%Y-%m-%d %H:%M', time.localtime(os.path.getmtime(backup)))}).")
+            what = (tr("project.opened_the_backup_instead_your_work",
+                       strftime=time.strftime('%Y-%m-%d %H:%M', time.localtime(os.path.getmtime(backup)))))
         else:
-            what = "There's no usable backup either, so Spiderweb starts with an empty project."
+            what = tr("project.there_s_no_usable_backup_either")
         self.after(300, lambda: messagebox.showwarning(
-            "Spiderweb", f"The autosave (your last session) couldn't be opened — it's damaged.\n\n{kept}{what}",
+            tr("project.spiderweb"), tr("project.the_autosave_your_last_session_couldn", kept=kept, what=what),
             parent=self))
 
     def restore_window(self):
@@ -282,27 +283,29 @@ class ProjectFiles:
             pass
 
     def open_project(self):
-        path = filedialog.askopenfilename(title="Open project", initialdir=OUTPUT_DIR,
-                                          filetypes=[("Spiderweb project", "*.json"), ("All files", "*.*")])
+        path = filedialog.askopenfilename(title=tr("project.open_project"), initialdir=OUTPUT_DIR,
+                                          filetypes=[(tr("project.spiderweb_project"), "*.json"),
+                                                     (tr("project.all_files"), "*.*")])
         if path and self.load_file(path):
             self.sync_panel()
 
     def save_project(self):
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-        path = filedialog.asksaveasfilename(title="Save project", initialdir=OUTPUT_DIR,
-                                            defaultextension=".json", filetypes=[("Spiderweb project", "*.json")])
+        path = filedialog.asksaveasfilename(title=tr("project.save_project"), initialdir=OUTPUT_DIR,
+                                            defaultextension=".json",
+                                            filetypes=[(tr("project.spiderweb_project"), "*.json")])
         if not path:
             return
         try:
             self.write_json(path)
         except OSError as e:
-            messagebox.showerror("Spiderweb", f"Couldn't save:\n{e}")
+            messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_save", e=e))
 
     def browse_output(self):
         cur = self.pvar["output"].get()
-        path = filedialog.asksaveasfilename(title="MIDI output", initialdir=os.path.dirname(cur) or HERE,
+        path = filedialog.asksaveasfilename(title=tr("project.midi_output"), initialdir=os.path.dirname(cur) or HERE,
                                             initialfile=os.path.basename(cur), defaultextension=".mid",
-                                            filetypes=[("MIDI file", "*.mid *.midi")])
+                                            filetypes=[(tr("project.midi_file"), "*.mid *.midi")])
         if path:
             self.pvar["output"].set(os.path.normpath(path))
 
@@ -310,32 +313,34 @@ class ProjectFiles:
         try:
             ppq, bpm, beats = self.read_project()
         except ValueError as e:
-            messagebox.showerror("Spiderweb", str(e))
+            messagebox.showerror(tr("project.spiderweb"), str(e))
             return
         if not len(self.rendered):
-            messagebox.showerror("Spiderweb", f"No notes yet — draw something inside the 0–{self.keys - 1} "
-                                              "pitch range first.")
+            messagebox.showerror(tr("project.spiderweb"),
+                                 tr("project.no_notes_yet_draw_something_inside", keys=self.keys - 1))
             return
         path = self.pvar["output"].get().strip() or os.path.join(OUTPUT_DIR, "spiderweb.mid")
         if not path.lower().endswith((".mid", ".midi")):
             path += ".mid"
         if os.path.exists(path) and not messagebox.askyesno(  # (asked like the Output file dialog does)
-                "Confirm Save As", f"{os.path.basename(path)} already exists.\nDo you want to replace it?",
+                tr("project.confirm_save_as"), tr("project.already_exists_do_you_want_to",
+                                                  basename=os.path.basename(path)),
                 icon="warning", default="no"):
             return
         try:
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
             write_midi(path, ppq, bpm, beats, self.rendered)
         except OSError as e:
-            messagebox.showerror("Spiderweb", f"Couldn't save:\n{e}")
+            messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_save", e=e))
             return
         channels = self.slot_count if self.channel_mode.get() == "auto" else 1
-        note = (f"\n\nPPQ {ppq}: many MIDI programs can't open this file (it needs a PPQ below {PPQ_WARN})."
+        note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
                 if ppq >= PPQ_WARN else "")
         if (self.rendered[:, 2] > 127).any():
-            note += "\n\nIt has keys above 127 (256 keys): many MIDI programs can't read those."
-        messagebox.showinfo("Spiderweb", f"Saved {len(self.rendered):,} notes on {channels} track(s), one channel "
-                                         f"each:\n{path}{note}")
+            note += tr("project.it_has_keys_above_127_256")
+        messagebox.showinfo(tr("project.spiderweb"),
+                            tr("project.saved_notes_on_track_s_one", n=len(self.rendered), channels=channels, path=path,
+                               note=note))
 
     def copy_to_domino(self):
         """Ctrl+Shift+C: the selected shapes' notes (all notes when nothing is selected) on the clipboard, for
@@ -344,7 +349,7 @@ class ProjectFiles:
         try:
             ppq, _, beats = self.read_project()
         except ValueError as e:
-            messagebox.showerror("Spiderweb", str(e))
+            messagebox.showerror(tr("project.spiderweb"), str(e))
             return
         notes = self.rendered
         if self.sels:
@@ -352,18 +357,20 @@ class ProjectFiles:
         high = int((notes[:, 2] > 127).sum())  # (256 keys: Domino only has 128)
         notes = notes[notes[:, 2] <= 127]
         if not len(notes):
-            messagebox.showerror("Spiderweb", "No notes to copy — draw something inside the 0–127 pitch range first."
-                                 if not self.sels or high else "The selected shapes have no notes.")
+            messagebox.showerror(tr("project.spiderweb"), tr("project.no_notes_to_copy_draw_something")
+                                 if not self.sels or high else tr("project.the_selected_shapes_have_no_notes"))
             return
         if not put_on_clipboard(clip_data(notes, ppq, beats * ppq, self.domino_start())):
-            messagebox.showerror("Spiderweb", "Couldn't use the clipboard (another program has it open). Try again.")
+            messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_use_the_clipboard_another"))
             return
-        what = f"{len(notes):,} note{'s' * (len(notes) != 1)}" if self.sels else f"all {len(notes):,} notes"
+        what = ((tr("project.one_note") if len(notes) == 1 else tr("project.n_notes", n=len(notes))) if self.sels else
+                tr("project.all_notes", n=len(notes)))
         tracks = len(np.unique(notes[:, 4]))
-        where = "the track" if tracks == 1 else f"the first of {tracks} tracks"
-        how = ("paste at the cursor" if self.domino_start() == "note" else "double-click a bar line to paste")
-        self.status.config(text=f"Copied {what} for Domino (PPQ {ppq}) — in Domino, pick {where} and {how}"
-                                + (f" ({high:,} notes above key 127 left out)" if high else ""))
+        where = tr("project.the_track") if tracks == 1 else tr("project.the_first_of_tracks", tracks=tracks)
+        how = (tr("project.paste_at_the_cursor") if self.domino_start() == "note" else
+               tr("project.double_click_a_bar_line_to"))
+        self.status.config(text=tr("project.copied_for_domino_ppq_in_domino", what=what, ppq=ppq, where=where, how=how)
+                                + (tr("project.notes_above_key_127_left_out", high=high) if high else ""))
 
     def domino_start(self):
         """The start dropdown above the Domino buttons: "note" (first note at tick 0) or "bar" (from the bar line)."""
@@ -376,29 +383,31 @@ class ProjectFiles:
         the one shape; controllers and other events are left out. Ticks are taken as they are (same PPQ)."""
         raw = get_from_clipboard()
         if raw is None:
-            messagebox.showerror("Spiderweb", "Couldn't use the clipboard (another program has it open). Try again.")
+            messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_use_the_clipboard_another"))
             return
         try:
             notes, their_ppq = read_notes(raw) if raw else (None, None)
         except ValueError as e:
-            messagebox.showerror("Spiderweb", f"Couldn't read the notes on the clipboard ({e}).")
+            messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_read_the_notes_on", e=e))
             return
         if notes is None or not len(notes):
-            messagebox.showerror("Spiderweb", "No notes from Domino on the clipboard — select notes in Domino and "
-                                 "press Ctrl+C there first." if notes is None else
-                                 "What was copied in Domino has no notes (only notes are pasted).")
+            messagebox.showerror(tr("project.spiderweb"),
+                                 tr("project.no_notes_from_domino_on_the") if notes is None else
+                                 tr("project.what_was_copied_in_domino_has"))
             return
         if self.domino_start() == "note":  # the first note on the play line, without the copy's empty lead
             notes[:, 0] -= notes[:, 0].min()
-        sh = clean_shape({**SHAPE_DEFAULTS, **self.defaults, **notes_shape(notes, self.ppq, "Pasted notes")})
+        sh = clean_shape({**SHAPE_DEFAULTS, **self.defaults,
+                          **notes_shape(notes, self.ppq, tr("project.pasted_notes"))})
         if not self.confirm_big([sh]):
             return
         at, sb = self.playhead, self.snap_beats()
         if sb:
             at = round(at / sb) * sb
         self.roll.cancel_draft()
-        self.add_copies([sh], at, "Paste from Domino")
+        self.add_copies([sh], at, tr("project.paste_from_domino"))
         n = len(notes)
-        note = (f" — they were copied at PPQ {their_ppq}, ticks kept as they are" if their_ppq and their_ppq != self.ppq
+        note = (tr("project.they_were_copied_at_ppq_ticks", their_ppq=their_ppq) if their_ppq and their_ppq != self.ppq
                 else "")
-        self.status.config(text=f"Pasted {n:,} note{'s' * (n != 1)} from Domino as one shape{note}")
+        self.status.config(text=tr("project.pasted_one_note_from_domino", note=note) if n == 1 else
+                           tr("project.pasted_note_from_domino_as_one", n=n, note=note))

@@ -7,6 +7,7 @@ import zlib
 
 import numpy as np
 
+from files.lang import tr
 from notes.arc import arc_k, arc_points, ellipse_bezier
 from notes.bezier import sample
 from notes.smooth import clean_level, smooth_path
@@ -439,7 +440,7 @@ def add_stroke(sh, st, at=None):
 
 def new_live_shape(defaults, custom_defaults):
     """An empty custom shape to draw into (its box: 1 beat by 1 key at 0, fitted once something is drawn)."""
-    return dict(defaults, kind="custom", name="Live drawing", strokes=[], **custom_settings(custom_defaults),
+    return dict(defaults, kind="custom", name=tr("custom.live_drawing"), strokes=[], **custom_settings(custom_defaults),
                 pts=[[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
 
 

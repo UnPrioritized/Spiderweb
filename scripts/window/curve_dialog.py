@@ -6,6 +6,7 @@ import os
 import tkinter as tk
 from tkinter import ttk, messagebox
 
+from files.lang import tr
 from notes.bezier import anchor_count, sample
 from notes.funnel import formula_curve, preset_curve
 from files.mathexpr import formula
@@ -13,10 +14,7 @@ from files.project import HERE
 from files.safefile import write_text
 
 CURVES_FILE = os.path.join(HERE, "curves.json")
-HELP = ("x goes from 0 at the curve's start (A) to 1 at the wall end (B); y is how far open the funnel is. "
-        "The curve is stretched to fit from A to B, so x^2 and 5*x^2 give the same curve.\n"
-        "Works: numbers, x, + - * / ^ ( ), pi, e, sin cos tan asin acos atan sqrt exp ln log abs min max.\n"
-        "Examples: x^2   sin(x*pi/2)   1-(1-x)^3   exp(3*x)")
+HELP = tr("curve_dialog.x_goes_from_0_at_the")
 
 
 def load_formulas():
@@ -39,7 +37,7 @@ class CurveFormulaDialog(tk.Toplevel):
 
     def __init__(self, app, preview, done):
         super().__init__(app)
-        self.title("Custom curve formula")
+        self.title(tr("curve_dialog.custom_curve_formula"))
         self.transient(app)
         self.resizable(False, False)
         self.preview, self.done = preview, done
@@ -50,22 +48,22 @@ class CurveFormulaDialog(tk.Toplevel):
 
         body = ttk.Frame(self, padding=8)
         body.pack(fill="both", expand=True)
-        left = ttk.LabelFrame(body, text="Saved formulas", padding=6)
+        left = ttk.LabelFrame(body, text=tr("curve_dialog.saved_formulas"), padding=6)
         left.pack(side="left", fill="y")
         self.listbox = tk.Listbox(left, height=14, width=24, activestyle="none", exportselection=False,
                                   font=("Segoe UI", 9))
         self.listbox.pack(fill="y", expand=True)
         self.listbox.bind("<<ListboxSelect>>", self.on_pick)
-        ttk.Button(left, text="Delete", command=self.delete).pack(anchor="w", pady=(4, 0))
+        ttk.Button(left, text=tr("curve_dialog.delete"), command=self.delete).pack(anchor="w", pady=(4, 0))
 
         right = ttk.Frame(body, padding=(10, 0, 0, 0))
         right.pack(side="left", fill="both")
         right.columnconfigure(1, weight=1)
         self.name = tk.StringVar()
         self.text = tk.StringVar()
-        ttk.Label(right, text="Name").grid(row=0, column=0, sticky="w")
+        ttk.Label(right, text=tr("curve_dialog.name")).grid(row=0, column=0, sticky="w")
         ttk.Entry(right, textvariable=self.name, width=30).grid(row=0, column=1, sticky="ew", padx=(5, 0), pady=1)
-        ttk.Label(right, text="y =").grid(row=1, column=0, sticky="w")
+        ttk.Label(right, text=tr("curve_dialog.y")).grid(row=1, column=0, sticky="w")
         entry = ttk.Entry(right, textvariable=self.text, width=30, font=("Consolas", 11))
         entry.grid(row=1, column=1, sticky="ew", padx=(5, 0), pady=1)
         ttk.Label(right, text=HELP, foreground="#777", font=("Segoe UI", 8), wraplength=int(300 * s),
@@ -77,9 +75,9 @@ class CurveFormulaDialog(tk.Toplevel):
         self.info.grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
         btns = ttk.Frame(right)
         btns.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        ttk.Button(btns, text="Save", command=self.save).pack(side="left")
-        ttk.Button(btns, text="Cancel", command=self.cancel).pack(side="right")
-        ttk.Button(btns, text="Apply", command=self.apply).pack(side="right", padx=4)
+        ttk.Button(btns, text=tr("curve_dialog.save"), command=self.save).pack(side="left")
+        ttk.Button(btns, text=tr("curve_dialog.cancel"), command=self.cancel).pack(side="right")
+        ttk.Button(btns, text=tr("curve_dialog.apply"), command=self.apply).pack(side="right", padx=4)
 
         self.text.trace_add("write", lambda *_: self.update_curve())
         self.bind("<Return>", lambda e: self.apply())
@@ -114,10 +112,12 @@ class CurveFormulaDialog(tk.Toplevel):
             fn = formula(self.text.get())
             self.target = formula_curve(fn)
             self.curve = preset_curve(fn)
-            self.info.config(text=f"OK — {anchor_count(self.curve['pts'])} anchors", foreground="#1d6b1d")
+            self.info.config(text=tr("curve_dialog.ok_anchors", anchor_count=anchor_count(self.curve['pts'])),
+                             foreground="#1d6b1d")
         except ValueError as e:
             self.target = self.curve = None
-            self.info.config(text=f"Can't use it: {e}" if self.text.get().strip() else "Type a formula of x.",
+            self.info.config(text=tr("curve_dialog.can_t_use_it",
+                                     e=e) if self.text.get().strip() else tr("curve_dialog.type_a_formula_of_x"),
                              foreground="#c00000" if self.text.get().strip() else "#777")
         self.draw()
         self.preview(self.curve)
@@ -133,8 +133,8 @@ class CurveFormulaDialog(tk.Toplevel):
         c.create_rectangle(*xy(0, 0), *xy(1, 1), outline="#d8d8d8")
         c.create_line(*xy(0, 0), *xy(1, 1), fill="#d8d8d8", dash=(3, 3))
         font = ("Segoe UI", 8)
-        c.create_text(*xy(0, 0), text="A start", anchor="n", fill="#555", font=font)
-        c.create_text(pad + w, pad - 3, text="B wall end", anchor="se", fill="#555", font=font)
+        c.create_text(*xy(0, 0), text=tr("curve_dialog.a_start"), anchor="n", fill="#555", font=font)
+        c.create_text(pad + w, pad - 3, text=tr("curve_dialog.b_wall_end"), anchor="se", fill="#555", font=font)
         if self.target:
             c.create_line(*[v for u, f in self.target for v in xy(u, f)], fill="#c8c8c8", width=5)
         if self.curve:
@@ -154,18 +154,22 @@ class CurveFormulaDialog(tk.Toplevel):
     def save(self):
         name, text = self.name.get().strip(), self.text.get().strip()
         if not self.curve:
-            return messagebox.showerror("Spiderweb", "The formula doesn't work yet.", parent=self)
+            return messagebox.showerror(tr("curve_dialog.spiderweb"), tr("curve_dialog.the_formula_doesn_t_work_yet"),
+                                        parent=self)
         if not name:
-            return messagebox.showerror("Spiderweb", "Give the formula a name first.", parent=self)
+            return messagebox.showerror(tr("curve_dialog.spiderweb"), tr("curve_dialog.give_the_formula_a_name_first"),
+                                        parent=self)
         names = [n for n, _ in self.saved]
-        if name in names and not messagebox.askyesno("Spiderweb", f"Replace the saved formula \"{name}\"?",
+        if name in names and not messagebox.askyesno(tr("curve_dialog.spiderweb"),
+                                                     tr("curve_dialog.replace_the_saved_formula", name=name),
                                                      parent=self):
             return
         items = [(n, t) for n, t in self.saved if n != name] + [(name, text)]
         try:
             save_formulas(items)
         except OSError as e:
-            return messagebox.showerror("Spiderweb", f"Couldn't save:\n{e}", parent=self)
+            return messagebox.showerror(tr("curve_dialog.spiderweb"), tr("curve_dialog.couldn_t_save", e=e),
+                                        parent=self)
         self.fill_list()
         i = [n for n, _ in self.saved].index(name)
         self.listbox.selection_set(i)
@@ -176,12 +180,14 @@ class CurveFormulaDialog(tk.Toplevel):
         if not sel:
             return
         name = self.saved[sel[0]][0]
-        if not messagebox.askyesno("Spiderweb", f"Delete the saved formula \"{name}\"?", parent=self):
+        if not messagebox.askyesno(tr("curve_dialog.spiderweb"), tr("curve_dialog.delete_the_saved_formula", name=name),
+                                   parent=self):
             return
         try:
             save_formulas([(n, t) for n, t in self.saved if n != name])
         except OSError as e:
-            return messagebox.showerror("Spiderweb", f"Couldn't save:\n{e}", parent=self)
+            return messagebox.showerror(tr("curve_dialog.spiderweb"), tr("curve_dialog.couldn_t_save", e=e),
+                                        parent=self)
         self.fill_list()
 
     def apply(self):

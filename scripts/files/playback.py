@@ -8,6 +8,7 @@ from ctypes import wintypes
 
 import numpy as np
 
+from files.lang import tr
 from notes.engine import CHANNELS
 
 DEFAULT_DEVICE = "Windows default (MIDI Mapper)"
@@ -43,7 +44,7 @@ def devices():
     for i in range(_winmm.midiOutGetNumDevs()):
         caps = _Caps()
         ok = _winmm.midiOutGetDevCapsW(i, ctypes.byref(caps), ctypes.sizeof(caps)) == 0
-        out.append(caps.szPname if ok else f"Device {i + 1}")
+        out.append(caps.szPname if ok else tr("playback.device", i=i + 1))
     return out
 
 
@@ -60,15 +61,15 @@ class MidiOut:
             return None
         self.close()
         if not _winmm:
-            return "MIDI playback only works on Windows."
+            return tr("playback.midi_playback_only_works_on_windows")
         names = devices()
         if name not in names:
-            return f"The MIDI device \"{name}\" isn't there any more — pick another one under Project."
+            return tr("playback.the_midi_device_isn_t_there", name=name)
         dev = MAPPER if name == DEFAULT_DEVICE else names.index(name) - 1
         h = wintypes.HANDLE()
         err = _winmm.midiOutOpen(ctypes.byref(h), dev, 0, 0, 0)
         if err:
-            return f"Couldn't open \"{name}\" (Windows error {err}). Another program may be using it."
+            return tr("playback.couldn_t_open_windows_error_another", name=name, err=err)
         self.handle, self.name = h, name
         return None
 

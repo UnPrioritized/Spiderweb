@@ -11,8 +11,9 @@ import tkinter as tk
 import webbrowser
 from tkinter import ttk
 
+from files.lang import tr
 from files.about import BANNER, BANNER_HALF, HERE, LICENSE, VERSION, WEBSITE
-from window.help_texts import BY_ID, NEXT, SECTIONS, SEE, TOPICS
+from window.help_texts import BY_ID, NEXT, SECTION_NAMES, SECTIONS, SEE, TOPICS
 
 CLIPS = os.path.join(getattr(sys, "_MEIPASS", HERE), "clips")  # (the .exe carries them inside)
 
@@ -182,7 +183,7 @@ class TipPopup(tk.Toplevel):
         super().__init__(parent)
         self.tips, self.parent = tips, parent
         s = self.scale = tips.app.scale
-        self.title("Tip")
+        self.title(tr("help.tip"))
         self.transient(parent)
         self.resizable(False, False)
         try:
@@ -197,10 +198,10 @@ class TipPopup(tk.Toplevel):
         self.body.pack(anchor="w", pady=(4, 10))
         row = ttk.Frame(box)
         row.pack(fill="x")
-        ttk.Checkbutton(row, text="Show tips", variable=tips.on,
+        ttk.Checkbutton(row, text=tr("help.show_tips"), variable=tips.on,
                         command=tips.app.schedule_autosave).pack(side="left")
-        ttk.Button(row, text="Got it", command=self.got_it).pack(side="right")
-        ttk.Button(row, text="More…", command=self.more).pack(side="right", padx=(0, 6))
+        ttk.Button(row, text=tr("help.got_it"), command=self.got_it).pack(side="right")
+        ttk.Button(row, text=tr("help.more"), command=self.more).pack(side="right", padx=(0, 6))
         self.bind("<Escape>", lambda e: self.got_it())
         self.protocol("WM_DELETE_WINDOW", lambda: (self.destroy(), tips.closed()))
         self.set_topic(topic_id)
@@ -243,7 +244,7 @@ class HelpWindow(tk.Toplevel):
         super().__init__(app)
         self.app = app
         s = self.scale = app.scale
-        self.title(f"Spiderweb {VERSION} — Help")
+        self.title(tr("help.spiderweb_help", VERSION=VERSION))
         self.geometry(f"{int(900 * s)}x{int(620 * s)}")
         self.minsize(int(600 * s), int(360 * s))
         self.topic = None
@@ -254,7 +255,7 @@ class HelpWindow(tk.Toplevel):
         self.query = tk.StringVar()
         search = ttk.Entry(left, textvariable=self.query, width=30)
         search.pack(fill="x")
-        ttk.Label(left, text="Search: type words (all of them have to be in the topic)", foreground="#777",
+        ttk.Label(left, text=tr("help.search_type_words_all_of_them"), foreground="#777",
                   font=("Segoe UI", 8)).pack(anchor="w", pady=(2, 4))
         self.query.trace_add("write", lambda *_: self.fill_list())
         search.bind("<Down>", lambda e: (self.tree.focus_set(), self.pick_first()))
@@ -272,12 +273,12 @@ class HelpWindow(tk.Toplevel):
         right.pack(side="left", fill="both", expand=True)
         bottom = ttk.Frame(right)
         bottom.pack(side="bottom", fill="x", pady=(6, 0))
-        ttk.Checkbutton(bottom, text="Show a tip the first time I use something", variable=app.tips.on,
+        ttk.Checkbutton(bottom, text=tr("help.show_a_tip_the_first_time"), variable=app.tips.on,
                         command=app.schedule_autosave).pack(side="left")
-        ttk.Button(bottom, text="Show all tips again", command=self.reset_tips).pack(side="left", padx=(8, 0))
+        ttk.Button(bottom, text=tr("help.show_all_tips_again"), command=self.reset_tips).pack(side="left", padx=(8, 0))
         self.reset_note = ttk.Label(bottom, text="", foreground="#1d6b1d")
         self.reset_note.pack(side="left", padx=(6, 0))
-        version = ttk.Label(bottom, text=f"Spiderweb {VERSION}", foreground="#999", cursor="hand2")
+        version = ttk.Label(bottom, text=tr("help.spiderweb", VERSION=VERSION), foreground="#999", cursor="hand2")
         version.pack(side="right")
         version.bind("<Button-1>", lambda e: self.open_topic("about"))
         version.bind("<Enter>", lambda e: version.config(font=("Segoe UI", 9, "underline")))
@@ -314,7 +315,7 @@ class HelpWindow(tk.Toplevel):
             topics = [t for t in found if t["section"] == section]
             if not topics:
                 continue
-            node = self.tree.insert("", "end", iid="section:" + section, text=section, open=True)
+            node = self.tree.insert("", "end", iid="section:" + section, text=SECTION_NAMES[section], open=True)
             for t in topics:
                 self.tree.insert(node, "end", iid=t["id"], text=t["title"])
         if self.topic and self.tree.exists(self.topic):
@@ -360,10 +361,10 @@ class HelpWindow(tk.Toplevel):
         t.delete("1.0", "end")
         self.stop_clip()
         if topic_id is None:
-            t.insert("end", "Nothing found. Try fewer or other words.", "section")
+            t.insert("end", tr("help.nothing_found_try_fewer_or_other"), "section")
         else:
             topic = BY_ID[topic_id]
-            t.insert("end", topic["section"] + "\n", "section")
+            t.insert("end", SECTION_NAMES[topic["section"]] + "\n", "section")
             t.insert("end", topic["title"] + "\n", "title")
             if topic_id == "about":
                 self.about_banner()
@@ -394,7 +395,7 @@ class HelpWindow(tk.Toplevel):
         t = self.text
         if not ids:
             return
-        t.insert("end", "\n\nSee also: ", "section")
+        t.insert("end", tr("help.see_also"), "section")
         for n, tid in enumerate(ids):
             if n:
                 t.insert("end", "  ·  ", "section")
@@ -425,12 +426,12 @@ class HelpWindow(tk.Toplevel):
             t.tag_bind("web", "<Enter>", lambda e: (t.config(cursor="hand2"), t.tag_add("hover", *t.tag_ranges("web"))))
             t.tag_bind("web", "<Leave>", lambda e: (t.config(cursor="arrow"), t.tag_remove("hover", "1.0", "end")))
         row = ttk.Frame(self.text)
-        ttk.Button(row, text="Website", takefocus=False,
+        ttk.Button(row, text=tr("help.website"), takefocus=False,
                    command=lambda: webbrowser.open(WEBSITE)).pack(side="left", padx=(0, 8))
         if os.path.exists(LICENSE):
-            ttk.Button(row, text="License", takefocus=False,
+            ttk.Button(row, text=tr("help.license"), takefocus=False,
                        command=lambda: subprocess.Popen(["notepad.exe", LICENSE])).pack(side="left")
-        ttk.Button(row, text="Open Spiderweb's folder", takefocus=False,
+        ttk.Button(row, text=tr("help.open_spiderweb_s_folder"), takefocus=False,
                    command=lambda: os.startfile(HERE)).pack(side="left", padx=(8, 0))
         self.text.insert("end", "\n\n")
         self.embed(row)
@@ -461,7 +462,7 @@ class HelpWindow(tk.Toplevel):
     def reset_tips(self):
         self.app.tips.reset()
         self.app.tips.on.set(True)
-        self.reset_note.config(text="Done: every tip shows again the next time.")
+        self.reset_note.config(text=tr("help.done_every_tip_shows_again_the"))
 
 
 def open_help(app, topic_id=None):

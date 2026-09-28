@@ -14,6 +14,7 @@ beats per key then).
 
 import math
 
+from files.lang import tr
 from notes.bezier import segments
 from notes.fonts import get_font
 
@@ -216,7 +217,7 @@ def restyle(tx, axes, changes):
 
 def text_name(text):
     one = " ".join(text.split())
-    return f"“{one[:24]}…”" if len(one) > 25 else f"“{one}”"
+    return tr("text.text", one=one[:24]) if len(one) > 25 else f"“{one}”"
 
 
 # ---------------------------------------------------------------- outlines -> notes

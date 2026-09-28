@@ -6,9 +6,12 @@ import json
 import tkinter as tk
 from tkinter import ttk
 
-START = "Start"  # the first row: the oldest state still kept
+from files.lang import tr
+
+START = tr("history.start")  # the first row: the oldest state still kept
 FUTURE = "#a0a0a0"  # steps undone (Ctrl+Y / clicking them brings them back; a new change drops them)
-EDIT_NAMES = {"vel0": "Velocity", "vel1": "Velocity", "point": "Move a point", "smooth": "Straighten"}
+EDIT_NAMES = {"vel0": tr("history.velocity"), "vel1": tr("history.velocity"), "point": tr("history.move_a_point"),
+              "smooth": tr("history.straighten")}
 
 
 def edit_name(key):
@@ -17,7 +20,7 @@ def edit_name(key):
     if kind == "field":
         return EDIT_NAMES.get(key[2], key[2])
     if kind == "tumour":
-        return f"Tumour {key[2]}" if len(key) > 2 else "Tumours"
+        return tr("history.tumour", key=key[2]) if len(key) > 2 else tr("history.tumours")
     return EDIT_NAMES.get(kind, "Change")
 
 
@@ -29,7 +32,7 @@ class HistoryPanel:
         self.history_pos = ""  # the undocked window's size and place ("WxH+x+y", remembered in the autosave)
         self.history_window = None
         self._history_sig = None
-        box = self.history_box = ttk.LabelFrame(side, text="History", padding=6)
+        box = self.history_box = ttk.LabelFrame(side, text=tr("history.history"), padding=6)
         box.pack(fill="x", pady=(8, 0))
         self.history_frame = self._history_list(box, 6)
         self.history_frame.pack(fill="x")
@@ -39,8 +42,8 @@ class HistoryPanel:
         frame = ttk.Frame(parent)
         row = ttk.Frame(frame)
         row.pack(side="bottom", fill="x", pady=(4, 0))
-        ttk.Label(row, text="Click a step to go back to it.", foreground="#777").pack(side="left")
-        ttk.Button(row, text="Dock" if parent is not self.history_box else "Undock",
+        ttk.Label(row, text=tr("history.click_a_step_to_go_back"), foreground="#777").pack(side="left")
+        ttk.Button(row, text=tr("history.dock") if parent is not self.history_box else tr("history.undock"),
                    command=self.toggle_history_dock).pack(side="right")
         lst = tk.Listbox(frame, height=height, activestyle="none", exportselection=False, font=("Segoe UI", 9))
         sb = ttk.Scrollbar(frame, orient="vertical", command=lst.yview)
@@ -118,7 +121,7 @@ class HistoryPanel:
         self.history_box.pack_forget()
         self.history_frame.destroy()
         win = self.history_window = tk.Toplevel(self)
-        win.title("History")
+        win.title(tr("history.history"))
         win.transient(self)
         win.minsize(int(200 * self.scale), int(160 * self.scale))
         win.geometry(self.history_pos or f"{int(260 * self.scale)}x{int(360 * self.scale)}")

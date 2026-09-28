@@ -9,6 +9,7 @@ import threading
 import time
 import traceback
 
+from files.lang import tr
 from files.about import HERE, VERSION
 
 LOG = os.path.join(HERE, "errors.log")
@@ -51,24 +52,21 @@ def tell_user(saved, fatal=False):
     if _told:
         return
     _told = True
-    where = f"The details were saved to:\n{LOG}" if saved else f"(The details couldn't be saved to {LOG}.)"
+    where = (tr("errors.the_details_were_saved_to", LOG=LOG) if saved else
+             tr("errors.the_details_couldn_t_be_saved", LOG=LOG))
     if fatal:
-        msg = f"Spiderweb couldn't start because of an error.\n\n{where}\n\nPlease include errors.log when you report it."
+        msg = tr("errors.spiderweb_couldn_t_start_because_of", where=where)
     else:
-        msg = (f"Something went wrong in Spiderweb.\n\n{where}\n\n"
-               "You can carry on. If your project looks wrong now, autosave-backup.json (in the same folder) holds "
-               "your work as it was when you started Spiderweb; open it with Open project.\n\n"
-               "Please include errors.log when you report the problem. (This message only shows once; later "
-               "errors are saved to the log too.)")
+        msg = (tr("errors.something_went_wrong_in_spiderweb_you", where=where))
     if _app is not None and not fatal:
         from tkinter import messagebox
         try:
-            messagebox.showerror("Spiderweb", msg, parent=_app)
+            messagebox.showerror(tr("errors.spiderweb"), msg, parent=_app)
             return
         except Exception:
             pass
     try:
-        ctypes.windll.user32.MessageBoxW(None, msg, "Spiderweb", 0x10)  # works without a Tk window
+        ctypes.windll.user32.MessageBoxW(None, msg, tr("errors.spiderweb"), 0x10)  # works without a Tk window
     except (AttributeError, OSError):
         pass
 

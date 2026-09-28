@@ -8,6 +8,7 @@ import tkinter as tk
 
 import numpy as np
 
+from files.lang import tr
 from notes.engine import shape_notes
 from notes.envelope import env_at, env_values, paint_env, tidy_env, velocity_env
 from roll.roll_shared import CTRL, DRAFT_COLOR, SHIFT, SELECTED_COLOR, SLOT_COLORS, cached_path, fade
@@ -244,7 +245,7 @@ class VelocityPane(tk.Canvas):
         if not ed["owners"]:
             self.request_redraw()
             return
-        self.app.push_undo(name="Draw velocity")
+        self.app.push_undo(name=tr("velocity.draw_velocity"))
         done = self.commit(ed["drawn"], ed["owners"])
         if "curve" in ed and ed["curve"][0][0] != ed["curve"][1][0]:
             a, b, c = ed["curve"]
@@ -319,7 +320,7 @@ class VelocityPane(tk.Canvas):
         roll = self.app.roll
         text = None
         if roll.sx is not None and e.x >= roll.kb_w:
-            text = roll.time_text(e.x) + f"     velocity {round(self.y2v(e.y))}"
+            text = roll.time_text(e.x) + tr("velocity.velocity", y2v=round(self.y2v(e.y)))
         self.app.show_position(text)
         cv = None if self.edit else self.live_curve()
         want = "fleur" if cv and self.near_handle(cv, e) else "crosshair"

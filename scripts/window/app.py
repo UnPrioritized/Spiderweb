@@ -12,6 +12,7 @@ from tkinter import ttk, messagebox
 
 import numpy as np
 
+from files.lang import tr
 from notes.custom import CUSTOM_DEFAULTS, custom_note_count, outline_apart
 from window.drawer import help_box
 from window.help import Tips, open_help
@@ -48,40 +49,29 @@ VEL_KEYS = ("vel0", "vel1")
 PPQS = [2, 4, 8, 16, 24, 48, 96, 120, 144, 192, 240, 384, 480, 768, 960, 1024, 1440, 1920, 2048, 2880,
         3840, 4096, 5760, 7680, 8192, 11520, 12288, 15360, 16384, 23040, 24576, 30720, 32768, 36864,
         46080, 49152, 65535]
-TOOLS = [("select", "Select", "v"), ("line", "Line", "l"), ("poly", "Polyline", "p"),
-         ("free", "Freehand", "f"), ("curve", "Curve", "c"), ("arc", "Arc", "a"), ("custom", "Custom shape", "s"),
-         ("funnel", "Funnel", "n"), ("text", "Text", "x")]
+TOOLS = [("select", tr("app.select"), "v"), ("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"),
+         ("free", tr("app.freehand"), "f"), ("curve", tr("app.curve"), "c"), ("arc", tr("app.arc"), "a"),
+         ("custom", tr("app.custom_shape"), "s"),
+         ("funnel", tr("app.funnel"), "n"), ("text", tr("app.text"), "x")]
 # shown next to Custom shape while it (or one of them) is the tool; their keys work any time
-SHAPE_TOOLS = [("square", "Square", "q"), ("circle", "Circle", "o"), ("triangle", "Triangle", "t")]
+SHAPE_TOOLS = [("square", tr("app.square"), "q"), ("circle", tr("app.circle"), "o"),
+               ("triangle", tr("app.triangle"), "t")]
 BIG = 1_000_000  # ask before making a custom shape / funnel with more notes than this
 MANY_CHANNELS = 15  # a shape spread over more channels than this is shown orange in the shape list
 CHANNEL_CHOICES = [
-    ("raw", "As drawn",
-     "Keeps overlaps.\n"
-     "Every note exactly as the shapes make it, all on one channel.\n"
-     "Notes on the same key can overlap or start on the same tick."),
-    ("single", "Single channel",
-     "Removes overlaps, all on one channel.\n"
-     "Where two notes on the same key overlap, the earlier one is cut\n"
-     "where the later one starts, and the later one is stretched\n"
-     "to where the earlier one would have ended.\n"
-     "Notes starting on the same tick become one note: the loudest wins,\n"
-     "and it's as long as the longest of them."),
-    ("auto", "Multi channel",
-     "A channel per overlap.\n"
-     "Shapes whose notes overlap go on different channels, each on its own\n"
-     "track (channel 10 is skipped). Shapes that don't clash share a channel.\n"
-     "The box below picks what counts as an overlap."),
+    ("raw", tr("app.as_drawn"),
+     tr("app.keeps_overlaps_every_note_exactly_as")),
+    ("single", tr("app.single_channel"),
+     tr("app.removes_overlaps_all_on_one_channel")),
+    ("auto", tr("app.multi_channel"),
+     tr("app.a_channel_per_overlap_shapes_whose")),
 ]
 SPLIT_CHOICES = [
-    ("key", "Split: same key at the same time"),
-    ("time", "Split: any notes at the same time"),
+    ("key", tr("app.split_same_key_at_the_same")),
+    ("time", tr("app.split_any_notes_at_the_same")),
 ]
 SPLIT_TIP = (
-    "Same key: shapes only get split when they play the same key at the same time.\n"
-    "Any notes: shapes get split whenever their notes play at the same time,\n"
-    "even on different keys (e.g. two parallel lines, or lines starting on the\n"
-    "same tick). Shapes that follow one after another still share a channel."
+    tr("app.same_key_shapes_only_get_split")
 )
 
 
@@ -90,7 +80,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
     def __init__(self, autosave=AUTOSAVE):
         super().__init__()
         errors.install(self)
-        self.title(f"Spiderweb {VERSION}")
+        self.title(tr("app.spiderweb", VERSION=VERSION))
         try:  # title bar + taskbar icon; True = every other window (drawer, Help, ...) gets it too
             self.icons = [tk.PhotoImage(file=os.path.join(ICONS, f"icon-{n}.png")) for n in (16, 24, 32, 48, 64, 256)]
             self.iconphoto(True, *self.icons)
@@ -241,27 +231,29 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
             b.pack(side="left", padx=1)
             Tooltip(b, BY_ID[TOOL_TOPICS[key]]["tip"])
         ttk.Separator(self.shape_tool_bar, orient="vertical").pack(side="left", fill="y", padx=(3, 2), pady=2)
-        live = ttk.Checkbutton(bar, text="Live shape (G)", variable=self.live)
+        live = ttk.Checkbutton(bar, text=tr("app.live_shape_g"), variable=self.live)
         live.pack(side="left", padx=(12, 0))
         Tooltip(live, BY_ID["live"]["tip"])
         bar = self.option_bar = ttk.Frame(top)
         self._toolbar_rows = None
         top.bind("<Configure>", lambda e: self.fit_toolbar())
-        ttk.Label(bar, text="Snap").pack(side="left", padx=(0, 4))
+        ttk.Label(bar, text=tr("app.snap")).pack(side="left", padx=(0, 4))
         ttk.Combobox(bar, textvariable=self.snap, values=SNAPS, width=6, state="readonly").pack(side="left")
         redraw = lambda: self.roll.request_redraw()
-        ttk.Checkbutton(bar, text="Show lines", variable=self.show_lines, command=redraw).pack(side="left", padx=(12, 0))
-        ttk.Checkbutton(bar, text="Show notes", variable=self.show_notes, command=redraw).pack(side="left", padx=(8, 0))
-        ttk.Checkbutton(bar, text="Velocity pane", variable=self.show_velocity,
+        ttk.Checkbutton(bar, text=tr("app.show_lines"), variable=self.show_lines,
+                        command=redraw).pack(side="left", padx=(12, 0))
+        ttk.Checkbutton(bar, text=tr("app.show_notes"), variable=self.show_notes,
+                        command=redraw).pack(side="left", padx=(8, 0))
+        ttk.Checkbutton(bar, text=tr("app.velocity_pane"), variable=self.show_velocity,
                         command=self.toggle_velocity).pack(side="left", padx=(8, 0))
-        ttk.Button(bar, text="Fit view", command=lambda: self.roll.fit_view()).pack(side="left", padx=(12, 0))
-        ttk.Button(bar, text="Undo", command=self.undo).pack(side="left", padx=(12, 0))
-        ttk.Button(bar, text="Redo", command=self.redo).pack(side="left", padx=(4, 0))
-        self.play_btn = ttk.Button(bar, text="▶ Play (Space)", width=14, command=self.toggle_play, takefocus=False)
+        ttk.Button(bar, text=tr("app.fit_view"), command=lambda: self.roll.fit_view()).pack(side="left", padx=(12, 0))
+        ttk.Button(bar, text=tr("app.undo"), command=self.undo).pack(side="left", padx=(12, 0))
+        ttk.Button(bar, text=tr("app.redo"), command=self.redo).pack(side="left", padx=(4, 0))
+        self.play_btn = ttk.Button(bar, text=tr("app.play_space"), width=14, command=self.toggle_play, takefocus=False)
         self.play_btn.pack(side="left", padx=(12, 0))
-        help_btn = ttk.Button(bar, text="Help (F1)", command=self.open_help, takefocus=False)
+        help_btn = ttk.Button(bar, text=tr("app.help_f1"), command=self.open_help, takefocus=False)
         help_btn.pack(side="left", padx=(12, 0))
-        Tooltip(help_btn, "Every tip, searchable. Opens at the tool you're using.")
+        Tooltip(help_btn, tr("app.every_tip_searchable_opens_at_the"))
         self.show_shape_tools()
 
         self.status = ttk.Label(self, text="", padding=(6, 2), font=("Segoe UI", 9))
@@ -285,11 +277,11 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.vel_box = ttk.Frame(self.panes)
         vbar = ttk.Frame(self.vel_box, padding=(2, 2))
         vbar.pack(fill="x")
-        ttk.Label(vbar, text="Velocity").pack(side="left", padx=(2, 8))
-        for key, label in (("line", "Linear"), ("curve", "Curve"), ("pencil", "Pencil")):
+        ttk.Label(vbar, text=tr("app.velocity")).pack(side="left", padx=(2, 8))
+        for key, label in (("line", tr("app.linear")), ("curve", tr("app.curve")), ("pencil", tr("app.pencil"))):
             ttk.Radiobutton(vbar, text=label, value=key, variable=self.vel_tool,
                             style="Toolbutton").pack(side="left", padx=1)
-        ttk.Label(vbar, text="Ctrl = flat · Shift = snap · Enter = done · select a shape to edit only its notes",
+        ttk.Label(vbar, text=tr("app.ctrl_flat_shift_snap_enter_done"),
                   foreground="#777", font=("Segoe UI", 8)).pack(side="left", padx=(10, 0))
         self.vel = VelocityPane(self.vel_box, self, s)
         self.vel.pack(fill="both", expand=True)  # the pane itself is added when it's turned on (off at first)
@@ -361,11 +353,11 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
             self.side_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
 
     def _build_project(self, side):
-        box = ttk.LabelFrame(side, text="Project", padding=6)
+        box = ttk.LabelFrame(side, text=tr("app.project"), padding=6)
         box.pack(fill="x")
         box.columnconfigure(1, weight=1)
         r = 0
-        for label, key in (("PPQ", "ppq"), ("BPM", "bpm"), ("Beats per bar", "beats")):
+        for label, key in ((tr("app.ppq"), "ppq"), (tr("app.bpm"), "bpm"), (tr("app.beats_per_bar"), "beats")):
             lb = ttk.Label(box, text=label)
             lb.grid(row=r, column=0, sticky="w", pady=1)
             if key == "ppq":
@@ -374,32 +366,29 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
                 self.ppq_box = ttk.Combobox(row, textvariable=self.pvar[key], values=PPQS, width=7, height=12)
                 self.ppq_box.pack(side="left")
                 # Many MIDI programs can't open a file with a PPQ of 32767 or more (above that it's SMPTE timing anyway)
-                self.ppq_warning = ttk.Label(row, text="Many programs can't open this", foreground="#d00000",
+                self.ppq_warning = ttk.Label(row, text=tr("app.many_programs_can_t_open_this"), foreground="#d00000",
                                              font=("Segoe UI", 8))
-                Tooltip(self.ppq_warning, f"A PPQ of {PPQ_WARN} or more: many MIDI programs can't open "
-                                          "the file.\nSpiderweb still writes it.")
+                Tooltip(self.ppq_warning, tr("app.a_ppq_of_or_more_many", PPQ_WARN=PPQ_WARN))
             else:
                 e = ttk.Entry(box, textvariable=self.pvar[key], width=8)
                 e.grid(row=r, column=1, sticky="w", padx=5)
                 Scrub(self, [(e, self.pvar[key], None)], (1, 10, 0.1) if key == "bpm" else (1, 1, 1),
                       *((4, 100000) if key == "bpm" else (1, 32)), label=lb)
             r += 1
-        ttk.Label(box, text="Keys").grid(row=r, column=0, sticky="w", pady=1)
+        ttk.Label(box, text=tr("app.keys")).grid(row=r, column=0, sticky="w", pady=1)
         b = ttk.Combobox(box, textvariable=self.keys_var, values=[str(k) for k in KEYS], state="readonly",
                          width=7)
         b.grid(row=r, column=1, sticky="w", padx=5)
         b.bind("<<ComboboxSelected>>", lambda e: self.on_project_change())
-        Tooltip(b, "128: the standard keys 0–127, which every MIDI program reads.\n"
-                   "256: keys 0–255, for players that support them (handy for tunings like 31edo).\n"
-                   "Many MIDI programs can't read keys above 127, and playback here skips them.")
+        Tooltip(b, tr("app.128_the_standard_keys_0_127"))
         r += 1
-        ttk.Label(box, text="Output file").grid(row=r, column=0, sticky="w", pady=1)
+        ttk.Label(box, text=tr("app.output_file")).grid(row=r, column=0, sticky="w", pady=1)
         out = ttk.Frame(box)
         out.grid(row=r, column=1, sticky="ew", padx=5)
         ttk.Entry(out, textvariable=self.pvar["output"]).pack(side="left", fill="x", expand=True)
         ttk.Button(out, text="…", width=3, command=self.browse_output).pack(side="left", padx=(3, 0))
         r += 1
-        ttk.Label(box, text="Channels").grid(row=r, column=0, sticky="nw", pady=(3, 0))
+        ttk.Label(box, text=tr("app.channels")).grid(row=r, column=0, sticky="nw", pady=(3, 0))
         ch = ttk.Frame(box)
         ch.grid(row=r, column=1, sticky="w", padx=5, pady=(3, 0))
         for value, text, tip in CHANNEL_CHOICES:
@@ -414,43 +403,34 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.split_box.current(0)
         Tooltip(self.split_box, SPLIT_TIP)
         r += 1
-        ttk.Label(box, text="MIDI out").grid(row=r, column=0, sticky="w", pady=(3, 0))
+        ttk.Label(box, text=tr("app.midi_out")).grid(row=r, column=0, sticky="w", pady=(3, 0))
         dev = ttk.Combobox(box, textvariable=self.midi_device, state="readonly", values=devices())
         dev.configure(postcommand=lambda: dev.configure(values=devices()))  # re-list when it opens
         dev.grid(row=r, column=1, sticky="ew", padx=5, pady=(3, 0))
         r += 1
         names = [name for _, name in DOMINO_STARTS]
-        ttk.Label(box, text="Domino start").grid(row=r, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(box, text=tr("app.domino_start")).grid(row=r, column=0, sticky="w", pady=(6, 0))
         self.domino_box = ttk.Combobox(box, state="readonly", values=names)
         self.domino_box.grid(row=r, column=1, sticky="ew", padx=5, pady=(6, 0))
         self.domino_box.current(0)
         self.domino_box.bind("<<ComboboxSelected>>", lambda e: self.schedule_autosave())
-        Tooltip(self.domino_box, "Where copied and pasted notes start:\n"
-                                 "First note at tick 0: the first note lands right on the cursor / play line.\n"
-                                 "From the bar line: the empty space from the bar line before the first note\n"
-                                 "comes along, so the notes keep their place in the bar.")
+        Tooltip(self.domino_box, tr("app.where_copied_and_pasted_notes_start"))
         domino = ttk.Frame(box)
         domino.grid(row=r + 1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
-        paste = b = ttk.Button(domino, text="Paste from Domino", command=self.paste_from_domino)
-        Tooltip(b, "Ctrl+Shift+V: the notes copied in Domino (Ctrl+C there) become one shape here.\n"
-                   "It starts at the play line, like pasting in Domino (see the start setting above).\n"
-                   "Every track's notes go into the one shape; controllers and other events are left out.\n"
-                   "Ticks are taken as they are: use the same PPQ here.")
-        b = ttk.Button(domino, text="Copy to Domino", command=self.copy_to_domino)
+        paste = b = ttk.Button(domino, text=tr("app.paste_from_domino"), command=self.paste_from_domino)
+        Tooltip(b, tr("app.ctrl_shift_v_the_notes_copied"))
+        b = ttk.Button(domino, text=tr("app.copy_to_domino"), command=self.copy_to_domino)
         b.pack(side="right")
         paste.pack(side="right", padx=4)  # (next to it, the same gap as Open… / Save…)
-        Tooltip(b, "Ctrl+Shift+C: copies the selected shapes' notes (all notes when nothing is selected).\n"
-                   "In Domino, paste with Ctrl+V at the cursor, or double-click a bar line in a track.\n"
-                   "Multi channel: each channel goes into its own track, from that one down.\n"
-                   "Ticks are copied as they are: use the same PPQ there.")
+        Tooltip(b, tr("app.ctrl_shift_c_copies_the_selected"))
         btns = ttk.Frame(box)
         btns.grid(row=r + 2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        ttk.Button(btns, text="Open…", command=self.open_project).pack(side="left")
-        ttk.Button(btns, text="Save…", command=self.save_project).pack(side="left", padx=4)
-        ttk.Button(btns, text="Generate MIDI", command=self.generate).pack(side="right")
+        ttk.Button(btns, text=tr("app.open"), command=self.open_project).pack(side="left")
+        ttk.Button(btns, text=tr("app.save"), command=self.save_project).pack(side="left", padx=4)
+        ttk.Button(btns, text=tr("app.generate_midi"), command=self.generate).pack(side="right")
 
     def _build_shape_list(self, side):
-        box = self.shapes_box = ttk.LabelFrame(side, text="Shapes", padding=6)
+        box = self.shapes_box = ttk.LabelFrame(side, text=tr("app.shapes"), padding=6)
         box.pack(fill="x", pady=(8, 0))
         row = ttk.Frame(box)
         row.pack(fill="x")
@@ -465,17 +445,17 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.listbox.bind("<ButtonRelease-1>", lambda e: self.roll.focus_set(), add="+")
         btns = ttk.Frame(box)
         btns.pack(fill="x", pady=(4, 0))
-        ttk.Button(btns, text="Duplicate", command=self.duplicate).pack(side="left")
-        ttk.Button(btns, text="Delete", command=self.delete_selected).pack(side="left", padx=4)
-        ttk.Button(btns, text="Delete all", command=self.delete_all).pack(side="left")
+        ttk.Button(btns, text=tr("app.duplicate"), command=self.duplicate).pack(side="left")
+        ttk.Button(btns, text=tr("app.delete"), command=self.delete_selected).pack(side="left", padx=4)
+        ttk.Button(btns, text=tr("app.delete_all"), command=self.delete_all).pack(side="left")
         self._build_join(box)
 
     def _build_shape_settings(self, side):
-        self.settings = ttk.LabelFrame(side, text="New shape defaults", padding=6)
+        self.settings = ttk.LabelFrame(side, text=tr("app.new_shape_defaults"), padding=6)
         self.settings.pack(fill="x", pady=(8, 0))
         v = ttk.Frame(self.settings)
         v.pack(fill="x")
-        lb = ttk.Label(v, text="Velocity")
+        lb = ttk.Label(v, text=tr("app.velocity"))
         lb.pack(side="left")
         for i, key in enumerate(("vel0", "vel1")):
             if i:
@@ -484,17 +464,18 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
             self.fentries[key].pack(side="left", padx=(5 if not i else 0, 0))
         # dragging "Velocity" moves both ends together
         Scrub(self, [(self.fentries[k], self.fvars[k], None) for k in ("vel0", "vel1")], (1, 10, 1), 1, 127, label=lb)
-        ttk.Label(v, text="start → end", foreground="#777").pack(side="left", padx=(5, 0))
-        self.env_note = ttk.Label(self.settings, text="Velocity drawn in the velocity pane. Typing a start/end "
-                                  "here goes back to a straight ramp.", foreground="#777", font=("Segoe UI", 8),
+        ttk.Label(v, text=tr("app.start_end"), foreground="#777").pack(side="left", padx=(5, 0))
+        self.env_note = ttk.Label(self.settings, text=tr("app.velocity_drawn_in_the_velocity_pane"), foreground="#777",
+                                  font=("Segoe UI", 8),
                                   wraplength=int(300 * self.scale), justify="left")
         last = self.last_row = ttk.Frame(self.settings)
         last.pack(fill="x", pady=(4, 0))
-        ttk.Label(last, text="Last note").pack(side="left", anchor="n")
+        ttk.Label(last, text=tr("app.last_note")).pack(side="left", anchor="n")
         opts = ttk.Frame(last)
         opts.pack(side="left", padx=(5, 0))
-        ttk.Radiobutton(opts, text="ends on the last point", value=False, variable=self.end_dot).pack(anchor="w")
-        ttk.Radiobutton(opts, text="starts exactly on the last point", value=True,
+        ttk.Radiobutton(opts, text=tr("app.ends_on_the_last_point"), value=False,
+                        variable=self.end_dot).pack(anchor="w")
+        ttk.Radiobutton(opts, text=tr("app.starts_exactly_on_the_last_point"), value=True,
                         variable=self.end_dot).pack(anchor="w")
         self._build_line_fill()
         self._build_freehand()
@@ -514,7 +495,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         names = point_names(sh) if sh and len(self.sels) == 1 else None
         if not names:
             return
-        for col, text in enumerate(("Point", "Tick", "Pitch")):
+        for col, text in enumerate((tr("app.point"), tr("app.tick"), tr("app.pitch"))):
             ttk.Label(self.points_box, text=text, foreground="#777").grid(row=0, column=col, sticky="w", padx=(0, 5))
         for i, name in enumerate(names):
             tv, pv = tk.StringVar(), tk.StringVar()
@@ -547,9 +528,10 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
 
     def sync_title(self):
         sh = self.selected()
-        title = f"Shape {self.sel + 1}: {self.shape_label(sh)}" if sh else "New shape defaults"
+        title = tr("app.shape", sel=self.sel + 1,
+                   shape_label=self.shape_label(sh)) if sh else tr("app.new_shape_defaults")
         if len(self.sels) > 1:
-            title += f"  (+{len(self.sels) - 1} more selected)"
+            title += tr("app.more_selected", n=len(self.sels) - 1)
         self.settings.config(text=title)
 
     def sync_panel(self):
@@ -628,7 +610,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         if all(t.get("end_dot", False) == value for t in tgts):
             return
         if self.sels:
-            self.push_undo(name="Last note")
+            self.push_undo(name=tr("app.last_note"))
         for t in tgts:
             t["end_dot"] = value
         self.shapes_changed()
@@ -680,17 +662,17 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         try:
             ppq = calc_int(self.pvar["ppq"].get(), 1, 65535)
         except ValueError:
-            raise ValueError("PPQ must be a whole number from 1 to 65535")
+            raise ValueError(tr("app.ppq_must_be_a_whole_number"))
         try:
             bpm = calc(self.pvar["bpm"].get())
             if not 4 <= bpm <= 100000:
                 raise ValueError
         except ValueError:
-            raise ValueError("BPM must be a number, at least 4")
+            raise ValueError(tr("app.bpm_must_be_a_number_at"))
         try:
             beats = calc_int(self.pvar["beats"].get(), 1, 32)
         except ValueError:
-            raise ValueError("Beats per bar must be a whole number from 1 to 32")
+            raise ValueError(tr("app.beats_per_bar_must_be_a"))
         return ppq, bpm, beats
 
     # ------------------------------------------------------------ shapes
@@ -734,8 +716,9 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
             chans = np.bincount(pairs // (self.slot_count + 1), minlength=len(self.shapes)).tolist()
         self.listbox.delete(0, "end")
         for i, sh in enumerate(self.shapes):
-            uses = f", {chans[i]} channels" if chans[i] > 1 else ""
-            self.listbox.insert("end", f"{i + 1}.  {self.shape_label(sh)}  —  {counts[i]:,} notes{uses}")
+            uses = tr("app.channels_2", chans=chans[i]) if chans[i] > 1 else ""
+            self.listbox.insert("end",
+                                tr("app.notes", i=i + 1, shape_label=self.shape_label(sh), counts=counts[i], uses=uses))
             if chans[i] > MANY_CHANNELS:  # (past this the note colours and channel numbers repeat)
                 self.listbox.itemconfig(i, foreground=GAP_COLOR, selectforeground="#ffd9b0")
         self.sync_list_selection()
@@ -760,7 +743,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.shapes_changed()
 
     def add_shape(self, sh, name=None):
-        self.push_undo(name=name or f"Draw: {self.shape_label(sh)}")
+        self.push_undo(name=name or tr("app.draw", shape_label=self.shape_label(sh)))
         self.shapes.append(sh)
         self.select(len(self.shapes) - 1)
         self.shapes_changed()
@@ -820,7 +803,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         if not self.sels:
             return
         self.roll.end_typing()  # first: it refreshes the panel, which must still see the old shapes
-        self.push_undo(name="Delete")
+        self.push_undo(name=tr("app.delete"))
         for i in sorted(self.sels, reverse=True):
             del self.shapes[i]
         self.select(None)
@@ -829,11 +812,11 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
     def delete_all(self):
         if not self.shapes:
             return
-        if not messagebox.askyesno("Spiderweb", f"Are you sure you want to delete all {len(self.shapes)} shapes?\n"
-                                   "(Ctrl+Z can bring them back.)", icon="warning", parent=self):
+        if not messagebox.askyesno(tr("app.spiderweb_2"), tr("app.are_you_sure_you_want_to", n=len(self.shapes)),
+                                   icon="warning", parent=self):
             return
         self.roll.cancel_draft()  # first: it refreshes the panel, which must still see the old shapes
-        self.push_undo(name="Delete all")
+        self.push_undo(name=tr("app.delete_all"))
         self.shapes.clear()
         self.select(None)
         self.shapes_changed()
@@ -842,9 +825,9 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         if not self.sels:
             return
         shift = self.snap_beats() or 1.0
-        self.add_copies([self.shapes[i] for i in sorted(self.sels)], shift, "Duplicate")
+        self.add_copies([self.shapes[i] for i in sorted(self.sels)], shift, tr("app.duplicate"))
 
-    def add_copies(self, shapes, shift, name="Paste"):
+    def add_copies(self, shapes, shift, name=tr("app.paste")):
         """Add copies of shapes moved shift beats later, and select them."""
         self.push_undo(name=name)
         first = len(self.shapes)
@@ -870,7 +853,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         if self.sels:
             self.clipboard = copy.deepcopy([self.shapes[i] for i in sorted(self.sels)])
             self.clip_kind = "shapes"
-            self.status.config(text=f"Copied {len(self.clipboard)} shape(s) — Ctrl+V pastes them at the play line")
+            self.status.config(text=tr("app.copied_shape_s_ctrl_v_pastes", n=len(self.clipboard)))
 
     def paste(self, whole=False):
         """Paste the copied shapes so they start at the play line (snapped to the grid). With curves highlighted
@@ -900,7 +883,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         k = 0 if sideways else 1
         vals = [pt[k] for sh in shapes for pt in cached_path(sh)]
         mid2 = min(vals) + max(vals)  # twice the middle
-        self.push_undo(name="Flip sideways" if sideways else "Flip upside down")
+        self.push_undo(name=tr("app.flip_sideways") if sideways else tr("app.flip_upside_down"))
         for sh in shapes:
             sh["pts"] = [[mid2 - b, p] if sideways else [b, mid2 - p] for b, p in sh["pts"]]
             for tm in all_tumours(sh):  # mirrored: the bumps swap sides too
@@ -925,7 +908,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         cb, cp = (min(bs) + max(bs)) / 2, (min(ps) + max(ps)) / 2
         r = self.roll.sy / self.roll.sx  # beats per key on screen
         sign = 1 if clockwise else -1
-        self.push_undo(name="Turn 90°")
+        self.push_undo(name=tr("app.turn_90"))
         for sh in shapes:
             sh["pts"] = [[cb + sign * (p - cp) * r, cp - sign * (b - cb) / r] for b, p in sh["pts"]]
             if sh["kind"] == "arc" or sh["kind"] == "free" and "k" in sh:  # still round (arc.py, smooth.py)
@@ -943,13 +926,14 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
 
     def shape_label(self, sh):
         if "notes" in sh:
-            return "Pasted notes"
+            return tr("app.pasted_notes")
         if sh.get("text"):
-            return f"Text: {sh.get('name') or '?'}"
+            return tr("app.text_2", value=sh.get('name') or '?')
         if is_joined(sh):
             pieces = len(sh.get("gaps", [])) + 1
-            return f"{KINDS['curve']} (joined, {pieces} pieces)" if pieces > 1 else f"{KINDS['curve']} (joined)"
-        return f"Custom: {sh.get('name') or '?'}" if sh["kind"] == "custom" else KINDS[sh["kind"]]
+            return (tr("app.joined_pieces", curve=KINDS['curve'], pieces=pieces) if pieces > 1 else
+                    tr("app.joined", curve=KINDS['curve']))
+        return tr("app.custom", value=sh.get('name') or '?') if sh["kind"] == "custom" else KINDS[sh["kind"]]
 
     def note_count(self, sh):
         """Notes a shape makes (quick for spam, which can be millions)."""
@@ -960,7 +944,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
     def confirm_big(self, shapes):
         total = sum(self.note_count(sh) for sh in shapes)
         return total <= BIG or messagebox.askyesno(
-            "Spiderweb", f"This makes about {total:,} notes, which can make Spiderweb slow.\nGo ahead?",
+            tr("app.spiderweb_2"), tr("app.this_makes_about_notes_which_can", total=total),
             icon="warning", parent=self)
 
     def layout_rows(self):
@@ -1015,7 +999,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
     def update_side_help(self):
         """The side panel's help: the current tool's (everything else: Help, F1)."""
         t = BY_ID[self.tool_topic()]
-        self.side_help.set_text(f"{t['title']}\n{t['text']}\n\nHelp (F1): every tip, searchable.")
+        self.side_help.set_text(tr("app.help_f1_every_tip_searchable", title=t['title'], text=t['text']))
 
     def open_help(self, topic_id=None):
         open_help(self, topic_id or self.tool_topic())
@@ -1027,12 +1011,13 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
 
     def update_status(self):
         parts = [self._position] if self._position else []
-        parts.append(f"{len(self.shapes)} shapes · {len(self.rendered):,} notes")
+        parts.append(tr("app.shapes_notes", n=len(self.shapes), n2=len(self.rendered)))
         if self.channel_mode.get() == "auto" and self.slot_count:
-            parts.append(f"{self.slot_count} tracks (one channel each)")
+            parts.append(tr("app.tracks_one_channel_each", slot_count=self.slot_count))
         if self.sels:
-            shapes = f"{len(self.sels)} shapes, " if len(self.sels) > 1 else ""
-            parts.append(f"selected: {shapes}{sum(self.note_counts[i] for i in self.sels if i < len(self.note_counts)):,} notes")
+            shapes = tr("app.shapes_2", n=len(self.sels)) if len(self.sels) > 1 else ""
+            parts.append(tr("app.selected_notes", shapes=shapes,
+                            value=sum(self.note_counts[i] for i in self.sels if i < len(self.note_counts))))
         self.status.config(text="     ".join(parts))
 
     def in_drawer(self, e):
@@ -1064,11 +1049,11 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         try:
             ppq, bpm, beats = self.read_project()
         except ValueError as e:
-            messagebox.showerror("Spiderweb", str(e))
+            messagebox.showerror(tr("app.spiderweb_2"), str(e))
             return
         err = self.out.open(self.midi_device.get())
         if err:
-            messagebox.showerror("Spiderweb", err)
+            messagebox.showerror(tr("app.spiderweb_2"), err)
             return
         # Stops a quarter bar after the last note ends (or after the play line if already past it), rounded up to
         # the next quarter-bar line
@@ -1076,7 +1061,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         last = (int(self.rendered[:, 1].max()) if len(self.rendered) else 0) / ppq
         stop = math.ceil((max(last, self.playhead) + quarter) / quarter - 1e-9) * quarter
         self.player.start(self.rendered, ppq, bpm, self.playhead, stop)
-        self.play_btn.config(text="■ Stop (Space)")
+        self.play_btn.config(text=tr("app.stop_space"))
         self.roll.show_playhead(start=True)
         self._play_job = self.after(15, self._play_tick)
 
@@ -1098,7 +1083,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
             self.player.stop()
             self.roll.show_playhead()
             self.schedule_autosave()
-        self.play_btn.config(text="▶ Play (Space)")
+        self.play_btn.config(text=tr("app.play_space"))
 
     def set_playhead(self, beat):
         self.playhead = max(0.0, beat)
@@ -1152,7 +1137,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
             self._scrub = None
         before = state or json.dumps(self.shapes)
         self.drop_empty_step(before)
-        self.undo_stack.append((before, name or "Change"))
+        self.undo_stack.append((before, name or tr("app.change")))
         del self.undo_stack[:-300]
         self.redo_stack.clear()
         self._edit_key = None

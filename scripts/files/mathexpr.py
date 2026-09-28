@@ -4,6 +4,8 @@ import ast
 import math
 import operator
 
+from files.lang import tr
+
 _OPS = {
     ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
     ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv,
@@ -23,7 +25,7 @@ def calc(text):
         if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
             left, right = ev(node.left), ev(node.right)
             if isinstance(node.op, ast.Pow) and abs(right) > 64:
-                raise ValueError("exponent too large")
+                raise ValueError(tr("mathexpr.exponent_too_large"))
             return _OPS[type(node.op)](left, right)
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
             return -ev(node.operand) if isinstance(node.op, ast.USub) else ev(node.operand)
@@ -32,9 +34,9 @@ def calc(text):
     try:
         return ev(ast.parse(text, mode="eval"))
     except ZeroDivisionError:
-        raise ValueError("division by zero")
+        raise ValueError(tr("mathexpr.division_by_zero"))
     except (SyntaxError, ValueError, TypeError, OverflowError):
-        raise ValueError(f"can't read \"{text}\"")
+        raise ValueError(tr("mathexpr.can_t_read", text=text))
 
 
 FORMULA_NAMES = {"pi": math.pi, "e": math.e}
@@ -51,11 +53,11 @@ def formula(text):
     Numbers, x, pi, e, + - * / % ^ ( ) and FORMULA_FUNCS."""
     text = text.strip().replace("×", "*").replace("^", "**")
     if not text:
-        raise ValueError("type a formula")
+        raise ValueError(tr("mathexpr.type_a_formula"))
     try:
         tree = ast.parse(text, mode="eval")
     except SyntaxError:
-        raise ValueError("can't read it (check the brackets and signs)")
+        raise ValueError(tr("mathexpr.can_t_read_it_check_the"))
 
     def check(node):
         if isinstance(node, ast.Expression):
@@ -64,7 +66,7 @@ def formula(text):
             return
         if isinstance(node, ast.Name):
             if node.id != "x" and node.id not in FORMULA_NAMES:
-                raise ValueError(f"unknown name \"{node.id}\" (use x for the position)")
+                raise ValueError(tr("mathexpr.unknown_name_use_x_for_the", id=node.id))
             return
         if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
             check(node.left)
@@ -74,11 +76,11 @@ def formula(text):
             return check(node.operand)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and not node.keywords:
             if node.func.id not in FORMULA_FUNCS:
-                raise ValueError(f"unknown function \"{node.func.id}\"")
+                raise ValueError(tr("mathexpr.unknown_function", id=node.func.id))
             for a in node.args:
                 check(a)
             return
-        raise ValueError("only numbers, x, + - * / ^ and functions like sin( ) work")
+        raise ValueError(tr("mathexpr.only_numbers_x_and_functions_like"))
 
     check(tree)
 
@@ -90,7 +92,7 @@ def formula(text):
         if isinstance(node, ast.BinOp):
             left, right = ev(node.left, x), ev(node.right, x)
             if isinstance(node.op, ast.Pow) and abs(right) > 64:
-                raise ValueError("exponent too large")
+                raise ValueError(tr("mathexpr.exponent_too_large"))
             return _OPS[type(node.op)](left, right)
         if isinstance(node, ast.UnaryOp):
             v = ev(node.operand, x)
@@ -100,7 +102,7 @@ def formula(text):
     def fn(x):
         v = ev(tree.body, x)
         if isinstance(v, complex):
-            raise ValueError("not a real number")
+            raise ValueError(tr("mathexpr.not_a_real_number"))
         return float(v)
     return fn
 
@@ -108,10 +110,10 @@ def formula(text):
 def calc_int(text, lo=None, hi=None):
     value = calc(text)
     if value != int(value):
-        raise ValueError("whole number needed")
+        raise ValueError(tr("mathexpr.whole_number_needed"))
     value = int(value)
     if (lo is not None and value < lo) or (hi is not None and value > hi):
-        raise ValueError("out of range")
+        raise ValueError(tr("mathexpr.out_of_range"))
     return value
 
 

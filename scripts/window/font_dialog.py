@@ -4,6 +4,7 @@ preview of the text in it."""
 import tkinter as tk
 from tkinter import ttk
 
+from files.lang import tr
 from notes.fonts import font_families
 
 SAMPLE = "AaBbCc 0123"
@@ -13,7 +14,7 @@ class FontDialog(tk.Toplevel):
     def __init__(self, app, current, sample, on_pick):
         super().__init__(app)
         self.app, self.on_pick = app, on_pick
-        self.title("Font")
+        self.title(tr("font_dialog.font"))
         self.transient(app)
         s = app.scale
         self.geometry(f"{int(420 * s)}x{int(460 * s)}")
@@ -24,7 +25,7 @@ class FontDialog(tk.Toplevel):
 
         box = ttk.Frame(self, padding=8)
         box.pack(fill="both", expand=True)
-        ttk.Label(box, text="Type a font's name, or pick one:").pack(anchor="w")
+        ttk.Label(box, text=tr("font_dialog.type_a_font_s_name_or")).pack(anchor="w")
         self.name = tk.StringVar(value=current)
         self.entry = ttk.Entry(box, textvariable=self.name)
         self.entry.pack(fill="x", pady=(2, 6))
@@ -42,8 +43,8 @@ class FontDialog(tk.Toplevel):
         self.note.pack(anchor="w")
         btns = ttk.Frame(box)
         btns.pack(fill="x", pady=(6, 0))
-        ttk.Button(btns, text="Cancel", command=self.destroy).pack(side="right")
-        ttk.Button(btns, text="OK", command=self.pick).pack(side="right", padx=4)
+        ttk.Button(btns, text=tr("font_dialog.cancel"), command=self.destroy).pack(side="right")
+        ttk.Button(btns, text=tr("font_dialog.ok"), command=self.pick).pack(side="right", padx=4)
 
         self.name.trace_add("write", lambda *_: self.filter())
         self.entry.bind("<Down>", lambda e: self.move(1))
@@ -102,7 +103,7 @@ class FontDialog(tk.Toplevel):
             self.preview.config(text=self.sample, font=(f, 22))
             self.note.config(text=f)
         else:
-            self.preview.config(text="(no font with that name)", font=("Segoe UI", 11))
+            self.preview.config(text=tr("font_dialog.no_font_with_that_name"), font=("Segoe UI", 11))
             self.note.config(text="")
 
     def pick(self):

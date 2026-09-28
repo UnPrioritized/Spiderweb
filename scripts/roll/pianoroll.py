@@ -8,6 +8,7 @@ import math
 import tkinter as tk
 from types import SimpleNamespace
 
+from files.lang import tr
 from notes.custom import box_frame, fill_plan
 from notes.engine import make_shape
 from notes.joined import all_tumours
@@ -221,14 +222,14 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if not self.draft:  # first: a picked curve stroke's handles can be near its custom shape's box
             i = self.hit_handle(e.x, e.y, tool == "select")
             if i is not None:
-                app.push_undo(name="Drag a point")
+                app.push_undo(name=tr("pianoroll.drag_a_point"))
                 self.drag = ("handle", i)
                 return
 
         hit = self.custom_hit(e.x, e.y)
         if hit and hit[0] != "inside":  # the selected custom shape's corner / side: resize, just outside: turn / skew
             orig = copy.deepcopy(app.selected()["pts"])
-            app.push_undo(name={"turn": "Turn", "skew": "Skew"}.get(hit[0], "Resize"))
+            app.push_undo(name={"turn": tr("pianoroll.turn"), "skew": tr("pianoroll.skew")}.get(hit[0], "Resize"))
             if hit[0] == "turn":
                 self.drag = ("turn", orig, self.screen_angle(orig, e.x, e.y))
             elif hit[0] == "skew":
@@ -276,7 +277,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 app.select(i)
             elif i != app.sel:
                 app.select_many(app.sels, i)
-            app.push_undo(name="Move")
+            app.push_undo(name=tr("pianoroll.move"))
             orig = {j: copy.deepcopy(app.shapes[j]["pts"]) for j in app.sels}
             # clicking one shape of several without dragging selects just that one; clicking the selected funnel
             # without dragging highlights the part under the mouse (none: clears it)
@@ -315,7 +316,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if tool == "custom":
             tpl = app.custom_template(app.custom_shape)
             if not tpl:
-                app.status.config(text="Pick a custom shape in the panel first, or draw one with Drawer…")
+                app.status.config(text=tr("pianoroll.pick_a_custom_shape_in_the"))
                 return
             self.draft = app.new_custom(tpl[0], *pt, *pt)
             self.drag = ("place", pt, e.x, e.y, tpl[1])
@@ -389,7 +390,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                     self.draft["pts"][2] = [2 * mid[0] - pt[0], 2 * mid[1] - pt[1]]
             self.request_redraw()
             text = self.position_text(e) or ""
-            self.app.show_position(f"{text}     new funnel: {self.app.note_count(self.draft):,} notes")
+            self.app.show_position(tr("pianoroll.new_funnel_notes", text=text,
+                                      note_count=self.app.note_count(self.draft)))
         elif kind == "resize":
             _, k, orig, side, start = self.drag
             pt = self.resize_point(orig, k, side, start, e)
@@ -408,7 +410,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 angle = round(angle / step) * step
             self.app.selected()["pts"] = self.turn_custom(orig, angle)
             self.app.shape_edited()
-            self.app.show_position(f"turned {math.degrees(angle):+.1f}°")
+            self.app.show_position(tr("pianoroll.turned", degrees=math.degrees(angle)))
         elif kind == "place":
             _, start, _, _, aspect = self.drag
             pt = self.event_pt(e)
@@ -417,7 +419,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.draft["pts"] = box_frame(start[0], start[1], pt[0], pt[1])
             self.request_redraw()
             text = self.position_text(e) or ""
-            self.app.show_position(f"{text}     new shape: {self.app.note_count(self.draft):,} notes")
+            self.app.show_position(tr("pianoroll.new_shape_notes", text=text,
+                                      note_count=self.app.note_count(self.draft)))
 
     def free_drag(self, e):
         """Freehand: every place the mouse passed since the last move (also the ones Windows skipped while the
@@ -492,7 +495,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             elif not self.arrange_funnel(self.draft["pts"]):
                 del self.draft["pts"][2:]  # the wall can't run along the line: still waiting for a wall
                 self.request_redraw()
-                self.app.sync_funnel(note="The wall has to cross the line's direction — draw it again.")
+                self.app.sync_funnel(note=tr("pianoroll.the_wall_has_to_cross_the"))
             elif self.app.confirm_big([dict(self.draft, pts=self.arrange_funnel(self.draft["pts"]))]):
                 self.draft["pts"] = self.arrange_funnel(self.draft["pts"])
                 self.commit_draft()
@@ -704,7 +707,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return math.dist(a, q) + math.dist(q, b) - math.dist(a, b)
 
         i = min(range(len(pts) + 1), key=extra_length)
-        self.app.push_undo(name="Add a point")
+        self.app.push_undo(name=tr("pianoroll.add_a_point"))
         pts.insert(i, pt)
         self.app.shape_edited()
 
@@ -774,7 +777,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         ppq, beats = self.app.ppq, self.app.beats
         ticks = max(0, self.x2t(x) * ppq)
         bar, rest = int(ticks // (ppq * beats)) + 1, ticks % (ppq * beats)
-        return f"{bar}:{int(rest // ppq) + 1}:{int(rest % ppq):03d}  (tick {int(ticks)})"
+        return tr("pianoroll.tick", bar=bar, rest=int(rest // ppq) + 1, rest2=int(rest % ppq), ticks=int(ticks))
 
     def position_text(self, e):
         if self.sx is None or e.x < self.kb_w or e.y < self.ruler_h:

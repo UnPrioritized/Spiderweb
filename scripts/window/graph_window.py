@@ -8,29 +8,31 @@ from tkinter import ttk
 
 import numpy as np
 
+from files.lang import tr
 from files.mathexpr import formula, fmt
 from notes.joined import shown_tumour
 from notes.tumour import GRAPH_LIMIT, TUMOUR_DEFAULTS
 
 FLAT = [[0.0, 1.0], [1.0, 1.0]]
-PRESETS = [("Flat (off)", FLAT), ("Rise", [[0.0, 0.0], [1.0, 1.0]]), ("Fall", [[0.0, 1.0], [1.0, 0.0]]),
-           ("Hill", [[0.0, 0.0], [0.5, 1.0], [1.0, 0.0]]), ("Valley", [[0.0, 1.0], [0.5, 0.0], [1.0, 1.0]])]
+PRESETS = [(tr("graph_window.flat_off"), FLAT), (tr("graph_window.rise"), [[0.0, 0.0], [1.0, 1.0]]),
+           (tr("graph_window.fall"), [[0.0, 1.0], [1.0, 0.0]]),
+           (tr("graph_window.hill"), [[0.0, 0.0], [0.5, 1.0], [1.0, 0.0]]),
+           (tr("graph_window.valley"), [[0.0, 1.0], [0.5, 0.0], [1.0, 1.0]])]
 VIEWS = [(0, 100), (0, 200), (0, 400), (-100, 100), (-200, 200), (-400, 400), (-1000, 1000)]  # shown heights, %
 U_SNAP, F_SNAP = 1 / 40, 0.05  # dragging moves points in these steps (Shift = free)
-HINT = ("Drag a point to move it (Shift = free). Click anywhere to add a point, right-click a point to remove it.\n"
-        "100 % = the number in the box; the bumps change along the line as the graph does.")
-FORMULA_HINT = "x = 0 at the line's start, 1 at its end; the result is in %. E.g. 100*x   50+50*sin(x*2*pi)"
+HINT = tr("graph_window.drag_a_point_to_move_it")
+FORMULA_HINT = tr("graph_window.x_0_at_the_line_s")
 
 
 def view_text(v):
-    return f"{v[0]} to {v[1]} %"
+    return tr("graph_window.to", v=v[0], v2=v[1])
 
 
 class GraphWindow(tk.Toplevel):
     def __init__(self, tw, key, label, unit):
         super().__init__(tw)
         self.tw, self.app, self.key, self.label, self.unit = tw, tw.app, key, label, unit
-        self.title(f"Graph: {label}")
+        self.title(tr("graph_window.graph", label=label))
         self.transient(tw)
         self.resizable(False, False)
         s = self.s = self.app.scale
@@ -52,27 +54,26 @@ class GraphWindow(tk.Toplevel):
         row.pack(fill="x")
         for name, pts in PRESETS:
             ttk.Button(row, text=name, command=lambda pts=pts: self.set_points(pts)).pack(side="left", padx=(0, 4))
-        ttk.Label(row, text="Show").pack(side="left", padx=(8, 0))
+        ttk.Label(row, text=tr("graph_window.show")).pack(side="left", padx=(8, 0))
         self.view = tk.StringVar(value=view_text(VIEWS[1]))
         c = ttk.Combobox(row, textvariable=self.view, state="readonly", width=15, values=[view_text(v) for v in VIEWS])
         c.pack(side="left", padx=(5, 0))
         c.bind("<<ComboboxSelected>>", lambda e: self.draw())
         row = ttk.Frame(box)
         row.pack(fill="x", pady=(6, 0))
-        ttk.Label(row, text="Formula").pack(side="left")
+        ttk.Label(row, text=tr("graph_window.formula")).pack(side="left")
         self.formula = tk.StringVar()
         self.formula_box = ttk.Entry(row, textvariable=self.formula, width=34)
         self.formula_box.pack(side="left", padx=(5, 4))
         self.formula_box.bind("<Return>", lambda e: (self.apply_formula(), "break")[1])
-        ttk.Button(row, text="Apply", command=self.apply_formula).pack(side="left")
+        ttk.Button(row, text=tr("graph_window.apply"), command=self.apply_formula).pack(side="left")
         self.formula_note = ttk.Label(box, text=FORMULA_HINT, foreground="#777", font=("Segoe UI", 8))
         self.formula_note.pack(anchor="w")
-        ttk.Label(box, text=HINT, foreground="#777", font=("Segoe UI", 8), justify="left").pack(anchor="w",
-                                                                                                pady=(6, 0))
+        ttk.Label(box, text=HINT, foreground="#777", font=("Segoe UI", 8), justify="left").pack(anchor="w", pady=(6, 0))
         row = ttk.Frame(box)
         row.pack(anchor="e", pady=(6, 0))
-        ttk.Button(row, text="OK", command=self.ok).pack(side="left")
-        ttk.Button(row, text="Cancel", command=self.cancel).pack(side="left", padx=(4, 0))
+        ttk.Button(row, text=tr("graph_window.ok"), command=self.ok).pack(side="left")
+        ttk.Button(row, text=tr("graph_window.cancel"), command=self.cancel).pack(side="left", padx=(4, 0))
         self.session = None  # the graph as it was when the window opened / these shapes were selected (see begin)
 
         cv = self.canvas
@@ -134,12 +135,12 @@ class GraphWindow(tk.Toplevel):
             for i in range(41):
                 v = float(f(i / 40)) / 100
                 if v != v or abs(v) == float("inf"):
-                    raise ValueError("it doesn't give a number everywhere from x = 0 to 1")
+                    raise ValueError(tr("graph_window.it_doesn_t_give_a_number"))
                 pts.append([i / 40, min(GRAPH_LIMIT, max(-GRAPH_LIMIT, v))])
         except (ValueError, ZeroDivisionError, OverflowError, TypeError) as e:
-            msg = str(e) if isinstance(e, ValueError) else "it doesn't give a number everywhere from x = 0 to 1"
+            msg = str(e) if isinstance(e, ValueError) else tr("graph_window.it_doesn_t_give_a_number")
             self.formula_box.config(style="Bad.TEntry")
-            self.formula_note.config(text=f"Can't use it: {msg}.", foreground="#d00000")
+            self.formula_note.config(text=tr("graph_window.can_t_use_it", msg=msg), foreground="#d00000")
             return
         self.formula_box.config(style="TEntry")
         self.formula_note.config(text=FORMULA_HINT, foreground="#777")
@@ -178,7 +179,7 @@ class GraphWindow(tk.Toplevel):
                 app.shapes_changed()
             else:  # other changes since then: just this graph goes back
                 if any(t is s for t in ses["tgts"] for s in app.shapes):
-                    app.push_undo(name="Tumour graph")
+                    app.push_undo(name=tr("graph_window.tumour_graph"))
                     for t, g in zip(ses["tgts"], ses["graphs"]):
                         tm = t.get("tumour") if any(t is s for s in app.shapes) else None
                         if not tm:
@@ -235,7 +236,7 @@ class GraphWindow(tk.Toplevel):
         """What f (a multiplier) makes of the box's number, as the box shows it."""
         tm = self.tm()
         v = tm[self.key] * f * (self.app.ppq if self.key in ("length", "dist") else 100 if self.key == "slant" else 1)
-        return f"{fmt(round(f * 100, 1))} % = {fmt(round(v, 2))} {self.unit}"
+        return tr("graph_window.text", f=fmt(round(f * 100, 1)), v=fmt(round(v, 2)), unit=self.unit)
 
     def draw(self):
         cv, s = self.canvas, self.s
@@ -260,10 +261,13 @@ class GraphWindow(tk.Toplevel):
             x = self.u2x(j / 4)
             cv.create_line(x, y_top, x, y_bot, fill="#d3dff0")
         cv.create_rectangle(x0, y_top, x1, y_bot, outline="#808080")
-        cv.create_text(x0, y_bot + 4 * s, text="line start", anchor="nw", fill="#333", font=("Segoe UI", 7))
-        cv.create_text(x1, y_bot + 4 * s, text="line end", anchor="ne", fill="#333", font=("Segoe UI", 7))
+        cv.create_text(x0, y_bot + 4 * s, text=tr("graph_window.line_start"), anchor="nw", fill="#333",
+                       font=("Segoe UI", 7))
+        cv.create_text(x1, y_bot + 4 * s, text=tr("graph_window.line_end"), anchor="ne", fill="#333",
+                       font=("Segoe UI", 7))
         if r0 > 1e-9 or r1 < 1 - 1e-9:
-            cv.create_text((self.u2x(r0) + self.u2x(r1)) / 2, y_bot + 4 * s, text="tumour range", anchor="n",
+            cv.create_text((self.u2x(r0) + self.u2x(r1)) / 2, y_bot + 4 * s, text=tr("graph_window.tumour_range"),
+                           anchor="n",
                            fill="#777", font=("Segoe UI", 7))
         lw = max(1, round(1.5 * s))
         cv.create_line(*[c for u, f in self.pts for c in (self.u2x(u), self.f2y(f))], fill="#d00000", width=lw)
@@ -275,11 +279,12 @@ class GraphWindow(tk.Toplevel):
         # what's under the mouse (or the point being dragged)
         at = self.pts[self.drag["i"]] if self.drag else self.hover
         if at is not None:
-            text = f"at {fmt(round(at[0] * 100, 1))} % of the line: {self.value_text(at[1])}"
+            text = tr("graph_window.at_of_the_line", at=fmt(round(at[0] * 100, 1)), value_text=self.value_text(at[1]))
             cv.create_text(x1 - 4 * s, y_top + 4 * s, text=text, anchor="ne", fill="#0a50e0", font=("Segoe UI", 8))
         name = self.label.lower()
-        self.info.config(text=f"{self.label} along the line: 100 % = the box's {self.value_text(1).split('= ')[1]}."
-                         if self.app.tumour_targets() else f"Select a line with tumours to give its {name} a graph.")
+        self.info.config(text=tr("graph_window.along_the_line_100_the_box", label=self.label,
+                                 split=self.value_text(1).split('= ')[1])
+                         if self.app.tumour_targets() else tr("graph_window.select_a_line_with_tumours_to", name=name))
 
     # ------------------------------------------------------------ mouse
 
@@ -352,7 +357,7 @@ class GraphWindow(tk.Toplevel):
         if ses["step"] is None or len(self.app.undo_stack) != ses["step"]:
             if ses["step"] is not None:  # (something else changed in between: Cancel can only put the graph back)
                 ses["exact"] = False
-            self.app.push_undo(name="Tumour graph")
+            self.app.push_undo(name=tr("graph_window.tumour_graph"))
             ses["step"] = len(self.app.undo_stack)
         self.app._edit_key = None  # (typing in a box afterwards is its own undo step)
 

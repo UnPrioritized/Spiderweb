@@ -3,14 +3,12 @@
 import tkinter as tk
 from tkinter import ttk
 
+from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import refit, uv_k
 from window.widgets import Scrub, Tooltip
 
-TIP = ("Makes the freehand stroke perfect: 0 = as you drew it. Higher = straighter lines and smoother curves,\n"
-       "and a stroke that ends where it started becomes a perfect circle, ellipse, square, rectangle or triangle.\n"
-       "The higher, the simpler (a slightly oval loop: an ellipse, then a circle). The stroke as drawn is kept,\n"
-       "so you can change this any time. New freehand strokes use the last number picked.")
+TIP = tr("panel_freehand.makes_the_freehand_stroke_perfect_0")
 
 
 class FreehandPanel:
@@ -18,7 +16,7 @@ class FreehandPanel:
 
     def _build_freehand(self):
         box = self.free_box = ttk.Frame(self.settings)
-        lb = ttk.Label(box, text="Straighten")
+        lb = ttk.Label(box, text=tr("panel_freehand.straighten"))
         lb.pack(side="left")
         self.free_var = tk.StringVar()
         e = self.free_entry = ttk.Entry(box, textvariable=self.free_var, width=5)
@@ -26,7 +24,7 @@ class FreehandPanel:
         e.bind("<Return>", lambda ev: self.on_free_entry())
         e.bind("<FocusOut>", lambda ev: self.on_free_entry())
         Scrub(self, [(e, self.free_var, self.on_free_entry)], (1, 10, 1), 0, 100, label=lb)
-        ttk.Label(box, text="0 = as drawn, 100 = simplest", foreground="#777").pack(side="left")
+        ttk.Label(box, text=tr("panel_freehand.0_as_drawn_100_simplest"), foreground="#777").pack(side="left")
         for w in (lb, e):
             Tooltip(w, TIP)
 

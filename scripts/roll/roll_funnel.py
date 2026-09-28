@@ -5,6 +5,7 @@ import json
 import math
 from tkinter import messagebox
 
+from files.lang import tr
 from notes.bezier import anchor_count, difference, handle_anchor, nearest, remove_anchor, segments, split
 from window.curve_dialog import CurveFormulaDialog
 from notes.funnel import (box_point, box_uf, curve_box, funnel_curves, funnel_lines, line_index, new_start,
@@ -185,7 +186,7 @@ class FunnelEditing:
             st = new_start(sh, hit[1], hit[0])
             if not st:
                 return False
-            self.app.push_undo(name="Funnel curve")
+            self.app.push_undo(name=tr("roll_funnel.funnel_curve"))
             sh["starts"].append(st)
             self.app.shape_edited()
             self.app.sync_funnel()
@@ -205,7 +206,7 @@ class FunnelEditing:
                 best = d, k, end, seg, t
         _, k, end, seg, t = best
         c, box = self.curve_at(sh, k, end)
-        self.app.push_undo(name="Funnel curve")
+        self.app.push_undo(name=tr("roll_funnel.funnel_curve"))
         n_before = len(c["pts"])
         self.add_anchor(c, seg, t)
         i = 3 * (seg + 1)
@@ -251,7 +252,7 @@ class FunnelEditing:
         if not pts or pts[2:] != sh["pts"][2:4]:
             return False
         self.cancel_draft()
-        self.app.push_undo(name="Add a funnel line")
+        self.app.push_undo(name=tr("roll_funnel.add_a_funnel_line"))
         sh["pts"] += pts[:2]
         self.app.shape_edited()
         self.app.build_points()
@@ -263,7 +264,7 @@ class FunnelEditing:
         back into its anchor: a sharp corner there). Linked curves do the same unless Ctrl is held."""
         k = hid[1]
         if hid[0] == "start":
-            self.app.push_undo(name="Remove a funnel point")
+            self.app.push_undo(name=tr("roll_funnel.remove_a_funnel_point"))
             del sh["starts"][k]
             self.app.parts = set()  # the curves after it moved up a number
         else:
@@ -272,7 +273,7 @@ class FunnelEditing:
             a = handle_anchor(i) if hid[0] == "ctrl" else i
             if a in (0, len(c["pts"]) - 1):
                 return  # the handles at the start and the wall end stay (you couldn't grab them again)
-            self.app.push_undo(name="Remove a funnel point")
+            self.app.push_undo(name=tr("roll_funnel.remove_a_funnel_point"))
             if hid[0] == "anchor":
                 n = anchor_count(c["pts"])
                 if not e.state & CTRL:
@@ -339,9 +340,11 @@ class FunnelEditing:
         got = self.funnel_parts()
         if not got:
             return ""
-        words = [f"{n} {what}{'s' if n > 1 else ''}" for n, what in ((len(got[2]), "curve"), (len(got[1]), "line"))
-                 if n]
-        return " and ".join(words)
+        curves, lines = len(got[2]), len(got[1])
+        words = ([(tr("roll_funnel.1_curve") if curves == 1 else tr("roll_funnel.n_curves",
+                                                                    n=curves))] if curves else []) + \
+                ([(tr("roll_funnel.1_line") if lines == 1 else tr("roll_funnel.n_lines", n=lines))] if lines else [])
+        return tr("roll_funnel.and").join(words)
 
     def delete_parts(self):
         got = self.funnel_parts()
@@ -351,7 +354,7 @@ class FunnelEditing:
         app = self.app
         if len(lines) >= len(funnel_lines(sh)):  # every line: the whole funnel goes
             return app.delete_selected()
-        app.push_undo(name="Delete highlighted")
+        app.push_undo(name=tr("roll_funnel.delete_highlighted"))
         remove_funnel_parts(sh, lines, curves)
         app.parts = set()
         app.build_points()
@@ -366,7 +369,7 @@ class FunnelEditing:
             return
         sh, _, curves = got
         if undo:
-            self.app.push_undo(name="Change curves")
+            self.app.push_undo(name=tr("roll_funnel.change_curves"))
         done = set()
         for k, end in sorted(curves):
             if (k, end) in done:
@@ -387,7 +390,8 @@ class FunnelEditing:
         try:
             shape = preset_curve(None if text is None else formula(text))
         except ValueError as e:
-            messagebox.showerror("Spiderweb", f"Can't use the formula \"{text}\":\n{e}", parent=self)
+            messagebox.showerror(tr("roll_funnel.spiderweb"), tr("roll_funnel.can_t_use_the_formula", text=text, e=e),
+                                 parent=self)
             return
         self.set_curves(lambda _: shape)
 
@@ -396,7 +400,7 @@ class FunnelEditing:
         if curves:
             k, end = min(curves)
             self.curve_clip = turned_curve(self.app.selected()["starts"][k]["ends"][end], False)
-            self.app.status.config(text="Copied the curve's shape — highlight other curves and Ctrl+V to give it to them")
+            self.app.status.config(text=tr("roll_funnel.copied_the_curve_s_shape_highlight"))
 
     def paste_curve(self):
         if self.curve_clip:
@@ -410,7 +414,7 @@ class FunnelEditing:
         different sides, like a start's two curves) or "Same shape"."""
         (_, ua, va), (_, ub, vb) = self.curve_at(sh, *a)[1], self.curve_at(sh, *b)[1]
         same_side = (ua[0] * va[1] - ua[1] * va[0] > 0) == (ub[0] * vb[1] - ub[1] * vb[0] > 0)
-        return "Same shape" if same_side else "Mirrored"
+        return tr("roll_funnel.same_shape") if same_side else tr("roll_funnel.mirrored")
 
     def closest_link(self, sh, a, b):
         """Is curve b closer to curve a turned end to end (True) than to a as it is (False)?"""
@@ -425,7 +429,7 @@ class FunnelEditing:
         if not got or not got[2]:
             return
         sh, _, curves = got
-        self.app.push_undo(name="Link curves")
+        self.app.push_undo(name=tr("roll_funnel.link_curves"))
         if mode is None:
             for k, end in curves:
                 c = sh["starts"][k]["ends"][end]
@@ -465,5 +469,5 @@ class FunnelEditing:
         def done(shape):
             preview(shape)
             if shape:
-                app.push_undo(before, "Curve formula")
+                app.push_undo(before, tr("roll_funnel.curve_formula"))
         CurveFormulaDialog(app, preview, done)

@@ -2,10 +2,12 @@
 
 import tkinter as tk
 
+from files.lang import tr
 from files.mathexpr import calc, fmt
 
 SHIFT, CTRL = 0x1, 0x4
 DRAG_PX = 4  # pixels of label dragging per step
+TIP_WIDTH = 560  # tooltips wrap longer lines at this width (at 100 % scaling), so a text needs no line breaks
 
 
 class Scrub:
@@ -120,7 +122,7 @@ class Tooltip:
         self.tip = tk.Toplevel(w)
         self.tip.wm_overrideredirect(True)
         tk.Label(self.tip, text=self.text, justify="left", background="#ffffe8", relief="solid",
-                 borderwidth=1, padx=6, pady=4).pack()
+                 borderwidth=1, padx=6, pady=4, wraplength=round(TIP_WIDTH * w.winfo_fpixels("1i") / 96)).pack()
         self.tip.update_idletasks()
         # keep it inside the window (the panel sits at its right edge)
         top = w.winfo_toplevel()
@@ -141,8 +143,8 @@ def symmetry_menu(m, current, choose):
     sub = tk.Menu(m, tearoff=0)
     now = tk.StringVar(m, value=current or "off")
     m.symmetry_var = now  # keep it alive while the menu is open
-    for value, label in (("off", "Off"), ("mirror", "Mirrored (like an arch)"),
-                         ("turn", "Turned half way round (like an S)")):
+    for value, label in (("off", tr("widgets.off")), ("mirror", tr("widgets.mirrored_like_an_arch")),
+                         ("turn", tr("widgets.turned_half_way_round_like_an"))):
         sub.add_radiobutton(label=label, value=value, variable=now,
                             command=lambda v=value: choose(None if v == "off" else v))
-    m.add_cascade(label="Symmetric halves", menu=sub)
+    m.add_cascade(label=tr("widgets.symmetric_halves"), menu=sub)

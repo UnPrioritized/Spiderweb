@@ -1,6 +1,7 @@
 """Piano roll: the Text tool. Click to put a blinking caret there and type straight onto the roll; click a text to
 retype it. The text is a custom shape with sh["text"] (notes/text.py); it's rebuilt on every key."""
 
+from files.lang import tr
 from notes.custom import custom_settings
 from notes.text import build, from_roll, layout, new_axes, text_axes, text_font
 from roll.roll_shared import CTRL, SHIFT
@@ -186,7 +187,7 @@ class TextTyping:
         if ty["i"] is not None:
             sh = app.shapes[ty["i"]]
             if not ty["undo"]:
-                app.push_undo(name="Type")
+                app.push_undo(name=tr("roll_text.type"))
                 ty["undo"] = True
             if build(sh, tx, axes):
                 app.shapes_changed()

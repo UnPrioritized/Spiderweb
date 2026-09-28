@@ -8,6 +8,7 @@ from tkinter import messagebox, ttk
 
 import numpy as np
 
+from files.lang import tr
 from notes.arc import arc_circle, arc_points
 from notes.convert import CAN_TURN, losses, originals, to_live
 from notes.bezier import anchor_count, nearest, split
@@ -27,18 +28,12 @@ def span(sh):
     return min(bs), max(bs)
 
 
-JOIN_KINDS = "lines, polylines, freehand strokes, curves and arcs"
-JOIN_TIP = ("Joins the selected shapes into one Curve shape (ends that touch become one line with a corner).\n"
-            "Shortcut: Ctrl+G")
-SPLIT_TIP = ("Splits a joined curve back into its pieces, or a custom shape (like one drawn with Live shape)\n"
-             "into its separate drawings.\nShortcut: Ctrl+Shift+G")
-SPLIT_HERE = "To cut a line in two where you want: right-click it there → Split here."
-LIVE_TIP = ("Turns the selected shapes into one live shape (a custom shape), so it can be filled.\n"
-            "Curves stay curves, arcs stay arcs, and the notes stay the same.\n"
-            "Split into separate shapes gives the old shapes back (until the drawing is changed).\n"
-            "Shortcut: Ctrl+L")
-LINE_FILL_TIP = ("Lines can't be filled. Turn it into a live shape first (Ctrl+L, the button under the shape\n"
-                 "list, or right-click → Turn into live shape): then Fill, Spam and Outline spam work.")
+JOIN_KINDS = tr("join_split.lines_polylines_freehand_strokes_curves")
+JOIN_TIP = tr("join_split.joins_the_selected_shapes_into_one")
+SPLIT_TIP = tr("join_split.splits_a_joined_curve_back_into")
+SPLIT_HERE = tr("join_split.to_cut_a_line_in_two")
+LIVE_TIP = tr("join_split.turns_the_selected_shapes_into_one")
+LINE_FILL_TIP = tr("join_split.lines_can_t_be_filled_turn")
 
 
 class JoinSplit:
@@ -48,22 +43,23 @@ class JoinSplit:
         """The Shapes box's Join / Split buttons (also in the right-click menu)."""
         row = ttk.Frame(box)
         row.pack(fill="x", pady=(4, 0))
-        self.join_btn = ttk.Button(row, text="Join shapes into one curve", command=self.join_selected)
+        self.join_btn = ttk.Button(row, text=tr("join_split.join_shapes_into_one_curve"), command=self.join_selected)
         self.join_btn.pack(side="left")
-        self.split_btn = ttk.Button(row, text="Split into separate shapes", command=self.split_selected)
+        self.split_btn = ttk.Button(row, text=tr("join_split.split_into_separate_shapes"), command=self.split_selected)
         self.split_btn.pack(side="left", padx=(4, 0))
         self.join_tip, self.split_tip = Tooltip(self.join_btn, JOIN_TIP), Tooltip(self.split_btn, SPLIT_TIP)
         row = ttk.Frame(box)
         row.pack(fill="x", pady=(4, 0))
-        self.live_btn = ttk.Button(row, text="Turn into live shape", command=self.turn_into_live)
+        self.live_btn = ttk.Button(row, text=tr("join_split.turn_into_live_shape"), command=self.turn_into_live)
         self.live_btn.pack(side="left")
         self.live_tip = Tooltip(self.live_btn, LIVE_TIP)
 
     def _build_line_fill(self):
         """A greyed-out Inside row for lines: says how to fill them."""
         row = self.line_fill_row = ttk.Frame(self.settings)
-        ttk.Label(row, text="Inside", foreground="#999").pack(side="left")
-        for text in ("Empty", "Fill", "Spam", "Outline spam"):
+        ttk.Label(row, text=tr("join_split.inside"), foreground="#999").pack(side="left")
+        for text in (tr("join_split.empty"), tr("join_split.fill"), tr("join_split.spam"),
+                     tr("join_split.outline_spam")):
             b = ttk.Radiobutton(row, text=text, value=text, state="disabled")
             b.pack(side="left", padx=(5, 0))
             Tooltip(b, LINE_FILL_TIP)
@@ -78,15 +74,15 @@ class JoinSplit:
         """Why the selection can't be turned into a live shape (None = it can)."""
         sels = [i for i in self.sels if i < len(self.shapes)]
         if not sels:
-            return f"Select the shapes to turn into a live shape ({JOIN_KINDS} or custom shapes)."
+            return tr("join_split.select_the_shapes_to_turn_into", JOIN_KINDS=JOIN_KINDS)
         shapes = [self.shapes[i] for i in sels]
         if any(sh["kind"] not in CAN_TURN or sh.get("text") or "notes" in sh for sh in shapes):
             other = sorted({self.shape_label(sh).split(":")[0] for sh in shapes
                             if sh["kind"] not in CAN_TURN or sh.get("text") or "notes" in sh})
-            return f"Only {JOIN_KINDS} and custom shapes can be turned into a live shape " \
-                   f"({' and '.join(other).lower()} selected)."
+            return tr("join_split.only_and_custom_shapes_can_be", JOIN_KINDS=JOIN_KINDS,
+                      join=tr("roll_funnel.and").join(other).lower())
         if all(sh["kind"] == "custom" for sh in shapes) and len(shapes) == 1:
-            return "It's a custom shape already (select more shapes to put them into one)."
+            return tr("join_split.it_s_a_custom_shape_already")
         return None
 
     def turn_into_live(self):
@@ -99,42 +95,45 @@ class JoinSplit:
         olds = [self.shapes[i] for i in order]
         lost = losses(olds)
         if lost and not messagebox.askokcancel(
-                "Spiderweb", "Turning these into a live shape changes this:\n\n• " + "\n• ".join(lost) +
-                "\n\nSplit into separate shapes (or Ctrl+Z) gives the old shapes back.", icon="warning", parent=self):
+                tr("join_split.spiderweb"), tr("join_split.turning_these_into_a_live_shape") + "\n• ".join(lost) +
+                tr("join_split.split_into_separate_shapes_or_ctrl"), icon="warning", parent=self):
             return
         new = to_live(olds, [cached_strokes(sh) for sh in olds], self.defaults, self.custom_defaults)
         self.roll.cancel_draft()
-        self.push_undo(name="Turn into live shape")
+        self.push_undo(name=tr("join_split.turn_into_live_shape"))
         at = order[0]
         for i in reversed(order):
             del self.shapes[i]
         self.shapes.insert(at, new)
         self.select(at)
         self.shapes_changed()
-        self.status.config(text=f"Turned {len(olds)} shape{'s' if len(olds) > 1 else ''} into a live shape "
-                                "(Split into separate shapes gives them back)")
+        n = len(olds)
+        self.status.config(text=tr("join_split.turned_the_shape_into_a_live")
+                           if n == 1 else
+                           tr("join_split.turned_shapes_into_a_live_shape", n=n))
 
     def join_problem(self):
         """Why the selection can't be joined (None = it can)."""
         sels = [i for i in self.sels if i < len(self.shapes)]
         if len(sels) < 2:
-            return f"Select two or more {JOIN_KINDS.replace(' and ', ' or ')} to join them (Ctrl+click adds one)."
+            return tr("join_split.select_two_or_more_to_join", JOIN_KINDS=JOIN_KINDS.replace(' and ', ' or '))
         other = sorted({self.shape_label(self.shapes[i]).split(":")[0] for i in sels
                         if self.shapes[i]["kind"] not in LINE_KINDS})
         if other:
-            return f"Only {JOIN_KINDS} can be joined ({' and '.join(other).lower()} selected)."
+            return tr("join_split.only_can_be_joined_selected", JOIN_KINDS=JOIN_KINDS,
+                      join=tr("roll_funnel.and").join(other).lower())
         return None
 
     def split_problem(self):
         """Why the selection can't be split into separate shapes (None = it can)."""
         if len(self.sels) != 1 or self.sel is None or self.sel >= len(self.shapes):
-            return "Select one shape to split it."
+            return tr("join_split.select_one_shape_to_split_it")
         sh = self.selected()
         if sh["kind"] == "custom" and (sh.get("text") or "notes" in sh):
-            return "Text and pasted notes can't be split."
+            return tr("join_split.text_and_pasted_notes_can_t")
         if not self.can_split_pieces(sh):
-            return ("It's all one piece: nothing to split into separate shapes." if sh["kind"] in ("curve", "custom")
-                    else "Only joined curves and custom shapes split into separate shapes.")
+            return (tr("join_split.it_s_all_one_piece_nothing") if sh["kind"] in ("curve", "custom")
+                    else tr("join_split.only_joined_curves_and_custom_shapes"))
         return None
 
     def sync_join(self):
@@ -178,7 +177,7 @@ class JoinSplit:
             return
         join_velocity(new, olds, [span(sh) for sh in olds], span(new))  # (each keeps its velocities)
         self.roll.cancel_draft()
-        self.push_undo(name="Join")
+        self.push_undo(name=tr("join_split.join"))
         at = order[0]
         for i in reversed(order):
             del self.shapes[i]
@@ -186,8 +185,8 @@ class JoinSplit:
         self.select(at)
         self.shapes_changed()
         pieces = len(new.get("gaps", [])) + 1
-        self.status.config(text=f"Joined {len(order)} shapes into one curve" +
-                           (f" ({pieces} pieces: some ends didn't touch)" if pieces > 1 else ""))
+        self.status.config(text=tr("join_split.joined_shapes_into_one_curve", n=len(order)) +
+                           (tr("join_split.pieces_some_ends_didn_t_touch", pieces=pieces) if pieces > 1 else ""))
 
     def can_split_pieces(self, sh):
         """A joined curve with more than one piece / shape in it, a live shape that can go back to the shapes it was
@@ -199,7 +198,7 @@ class JoinSplit:
         return (sh["kind"] == "custom" and "notes" not in sh and not sh.get("text") and
                 len(custom_groups(sh)) > 1)
 
-    def replace_shape(self, i, parts, velocity=True, name="Split"):
+    def replace_shape(self, i, parts, velocity=True, name=tr("join_split.split")):
         """Shape i replaced by parts (selected), velocities kept where they were (velocity=False: the parts have
         their own)."""
         old = self.shapes[i]
@@ -218,12 +217,14 @@ class JoinSplit:
             return
         back = originals(sh) if sh["kind"] == "custom" else None
         if back:  # the shapes it was made of (Turn into live shape), as they were
-            self.replace_shape(i, back, velocity=False, name="Split back into the old shapes")
-            self.status.config(text=f"Back to the {len(back)} shape{'s' if len(back) > 1 else ''} it was made of")
+            self.replace_shape(i, back, velocity=False, name=tr("join_split.split_back_into_the_old_shapes"))
+            n = len(back)
+            self.status.config(text=tr("join_split.back_to_the_shape_it_was") if n == 1 else
+                               tr("join_split.back_to_the_shapes_it_was", n=n))
             return
         parts = split_pieces(sh) if sh["kind"] == "curve" else split_custom(sh)
         self.replace_shape(i, parts)
-        self.status.config(text=f"Split into {len(parts)} shapes")
+        self.status.config(text=tr("join_split.split_into_shapes", n=len(parts)))
 
     def split_here(self, i, at):
         """Cut a line kind in two where it was right-clicked (at: x, y on screen; near an anchor or
@@ -239,7 +240,8 @@ class JoinSplit:
                 for key in ("sharp", "gaps", "splits"):
                     if c.get(key):
                         c[key] = [x + 1 if x > seg else x for x in c[key]]
-                c["sharp"] = sorted(set(c.get("sharp", [])) | {seg + 1})  # (a corner there, so each half keeps its shape)
+                c["sharp"] = sorted(set(c.get("sharp",
+                                              [])) | {seg + 1})  # (a corner there, so each half keeps its shape)
                 a = seg + 1
             got = split_at(c, a)
         elif sh["kind"] == "arc":
@@ -247,10 +249,10 @@ class JoinSplit:
         else:
             got = self.split_line(sh, at)
         if not got:
-            self.status.config(text="Can't split there (that's an end)")
+            self.status.config(text=tr("join_split.can_t_split_there_that_s"))
             return
-        self.replace_shape(i, list(got), name="Split here")
-        self.status.config(text="Split in two")
+        self.replace_shape(i, list(got), name=tr("join_split.split_here"))
+        self.status.config(text=tr("join_split.split_in_two"))
 
     def anchor_near(self, pts, seg, at):
         """The segment's anchor the right-click was on (near), or None."""

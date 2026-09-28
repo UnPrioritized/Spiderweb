@@ -3,6 +3,7 @@ in bezier.py, shared with the drawer)."""
 
 import json
 
+from files.lang import tr
 from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half_at, handle_lines, keep_symmetric,
                           nearest, pen_handles, set_symmetry)
 from roll.roll_shared import ALT
@@ -45,7 +46,7 @@ class CurveEditing:
         before = json.dumps(self.app.shapes)
         if not add_anchor(sh, seg, t, self.event_pt(e), self.to_xy):
             return False
-        self.app.push_undo(before, "Add an anchor")
+        self.app.push_undo(before, tr("roll_curve.add_an_anchor"))
         self.app.shape_edited()
         self.app.build_points()
         return True
@@ -57,10 +58,9 @@ class CurveEditing:
         if what is None:
             return False
         if what == "middle":
-            self.app.status.config(text="The middle anchor of a symmetric curve stays (turn Symmetric halves off "
-                                        "to remove it).")
+            self.app.status.config(text=tr("roll_curve.the_middle_anchor_of_a_symmetric"))
             return True
-        self.app.push_undo(name="Remove a point")
+        self.app.push_undo(name=tr("roll_curve.remove_a_point"))
         delete_point(sh, i, self.to_xy)
         self.app.shape_edited()
         self.app.build_points()
@@ -71,7 +71,7 @@ class CurveEditing:
         right-clicked) keeps its shape, the other half follows it."""
         if (sh.get("sym") or None) == mode:
             return
-        self.app.push_undo(name="Symmetric halves")
+        self.app.push_undo(name=tr("roll_curve.symmetric_halves"))
         set_symmetry(sh, mode, half_at(sh["pts"], self.to_xy, at.x, at.y), self.to_xy)
         self.app.shape_edited()
         self.app.build_points()

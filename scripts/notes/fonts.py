@@ -10,9 +10,12 @@ import ctypes
 import struct
 from ctypes import wintypes
 
+from files.lang import tr
+
 EM = 2048  # the font is asked for at this many units per em (fine enough for any size)
-WEIGHTS = [(100, "Thin"), (200, "Extra light"), (300, "Light"), (400, "Regular"), (500, "Medium"),
-           (600, "Semibold"), (700, "Bold"), (800, "Extra bold"), (900, "Black")]
+WEIGHTS = [(100, tr("fonts.thin")), (200, tr("fonts.extra_light")), (300, tr("fonts.light")),
+           (400, tr("fonts.regular")), (500, tr("fonts.medium")), (600, tr("fonts.semibold")), (700, tr("fonts.bold")),
+           (800, tr("fonts.extra_bold")), (900, tr("fonts.black"))]
 
 GGO_METRICS, GGO_BEZIER, GGO_UNHINTED = 0, 3, 0x100
 GDI_ERROR = 0xFFFFFFFF

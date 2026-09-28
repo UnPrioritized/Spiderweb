@@ -11,6 +11,7 @@ drawing wasn't changed (moving the whole shape is fine; resizing, turning, flipp
 import json
 import math
 
+from files.lang import tr
 from notes.bezier import anchor_count
 from notes.custom import add_stroke, custom_strokes, new_live_shape, stroke_bp
 from notes.joined import is_joined, join_velocity
@@ -55,9 +56,9 @@ def losses(shapes):
     """What turning these into a live shape changes (for the warning), as sentences; empty = nothing."""
     out = []
     if any(sh["kind"] in LINE_KINDS and has_tumours(sh) for sh in shapes):
-        out.append("Tumours become fixed points: they can't be changed with the tumour settings any more.")
+        out.append(tr("convert.tumours_become_fixed_points_they_can"))
     if any(sh["kind"] in LINE_KINDS and sh.get("end_dot") for sh in shapes):
-        out.append('"Last note: starts on it" is dropped (every stroke ends on its last point).')
+        out.append(tr("convert.last_note_starts_on_it_is"))
     return out
 
 

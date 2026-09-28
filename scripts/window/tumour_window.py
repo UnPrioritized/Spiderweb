@@ -7,6 +7,7 @@ import random
 import tkinter as tk
 from tkinter import ttk
 
+from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.joined import shown_tumour, unify_tumours
 from notes.tumour import GRAPH_KEYS, TUMOUR_DEFAULTS, clean_graph
@@ -14,50 +15,40 @@ from window.graph_window import GraphWindow
 from window.panel_custom import GAP_COLOR
 from window.widgets import Scrub, Tooltip
 
-SHAPE_CHOICES = [("triangle", "Triangle"), ("square", "Square"), ("circle", "Circle"), ("parabola", "Parabola")]
-SIDE_CHOICES = [("alt", "Alternating"), ("left", "Left"), ("right", "Right"), ("random", "Random")]
-WRAP_CHOICES = [("simple", "Straight"), ("wrap", "Bent with the line")]
+SHAPE_CHOICES = [("triangle", tr("tumour_window.triangle")), ("square", tr("tumour_window.square")),
+                 ("circle", tr("tumour_window.circle")), ("parabola", tr("tumour_window.parabola"))]
+SIDE_CHOICES = [("alt", tr("tumour_window.alternating")), ("left", tr("tumour_window.left")),
+                ("right", tr("tumour_window.right")), ("random", tr("tumour_window.random"))]
+WRAP_CHOICES = [("simple", tr("tumour_window.straight")), ("wrap", tr("tumour_window.bent_with_the_line"))]
 # the number boxes: (setting, label, unit, quick change steps (step, Shift step, Ctrl step) for widgets.Scrub,
 # lowest, highest (as typed))
-NUMBERS = [("size", "Size", "keys", (0.1, 1, 0.01), 0, 1000), ("length", "Length", "ticks", (1, 10, 0.1), 0, 10 ** 7),
-           ("dist", "Distance", "ticks", (1, 10, 0.1), 1, 10 ** 7),
-           ("rot", "Rotation", "degrees", (1, 15, 0.1), -180, 180),
-           ("slant", "Slant", "%", (1, 10, 0.1), -100, 100),
-           ("ease", "Lead in", "ticks", (1, 10, 0.1), 0, 10 ** 7)]
+NUMBERS = [("size", tr("tumour_window.size"), tr("unit.keys"), (0.1, 1, 0.01), 0, 1000),
+           ("length", tr("tumour_window.length"), tr("unit.ticks"), (1, 10, 0.1), 0, 10 ** 7),
+           ("dist", tr("tumour_window.distance"), tr("unit.ticks"), (1, 10, 0.1), 1, 10 ** 7),
+           ("rot", tr("tumour_window.rotation"), tr("unit.degrees"), (1, 15, 0.1), -180, 180),
+           ("slant", tr("tumour_window.slant"), "%", (1, 10, 0.1), -100, 100),
+           ("ease", tr("tumour_window.lead_in"), tr("unit.ticks"), (1, 10, 0.1), 0, 10 ** 7)]
 TICKS = ("length", "dist", "ease")  # stored in beats, shown in ticks
 TIPS = {
-    "size": "How far the bumps stick out, in keys (as the piano roll looks).",
-    "length": "How long each bump is along the line, in ticks.\n0 = spikes: every bump is one point pushed sideways,\n"
-              "and the line zigzags straight from spike to spike.",
-    "dist": "From the start of one bump to the start of the next, in ticks.\n"
-            "A bump longer than this is cut where the next one starts.",
-    "ease": "Smooth start and end: over this many ticks from each end of the range,\n"
-            "the bumps grow from nothing to full size (and shrink back to nothing at the end),\n"
-            "so the line leads into them instead of starting with a sudden side.\n0 = off.",
-    "rot": "Tilts every bump, its two feet staying on the line.\n"
-           "Plus leans it forward (the way the line runs), minus leans it back.\n"
-           "90 lays it flat along the line, 180 turns it over to the other side.",
-    "slant": "Square bumps only: slants the square's sides.\n"
-             "0 = a square, 100 = the top narrows to a point (like a triangle),\n"
-             "minus = the top is wider than the bottom (the sides lean outwards).",
-    "side": "Which side of the line the bumps go (left / right as you go along the line from its start).",
-    "wrap": "Only matters where the line curves under a bump (long bumps on a curve, arc or circle).\n"
-            "Straight: each bump sits on a straight shortcut between its ends (angular).\n"
-            "Bent with the line: each bump follows the curve under it (stays round).",
-    "range": "Only this part of the line gets bumps (0 % = its start, 100 % = its end).",
-    "fit": "Fit the bumps evenly: the distance is changed a little so a whole number of them fits\n"
-           "the range exactly, with the last one landing right on its end.\n"
-           "On a closed loop (like a full circle) the bumps meet up seamlessly where it starts\n"
-           "(alternating sides: an even number, so they keep alternating there too).",
+    "size": tr("tumour_window.how_far_the_bumps_stick_out"),
+    "length": tr("tumour_window.how_long_each_bump_is_along"),
+    "dist": tr("tumour_window.from_the_start_of_one_bump"),
+    "ease": tr("tumour_window.smooth_start_and_end_over_this"),
+    "rot": tr("tumour_window.tilts_every_bump_its_two_feet"),
+    "slant": tr("tumour_window.square_bumps_only_slants_the_square"),
+    "side": tr("tumour_window.which_side_of_the_line_the"),
+    "wrap": tr("tumour_window.only_matters_where_the_line_curves"),
+    "range": tr("tumour_window.only_this_part_of_the_line"),
+    "fit": tr("tumour_window.fit_the_bumps_evenly_the_distance"),
 }
-NOTHING = "Select a line, polyline, freehand stroke, curve or arc to give it tumours."
+NOTHING = tr("tumour_window.select_a_line_polyline_freehand_stroke")
 
 
 class TumourWindow(tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
-        self.title("Tumours")
+        self.title(tr("tumour_window.tumours"))
         self.transient(app)
         self.resizable(False, False)
         if app.tumour_pos:
@@ -77,11 +68,11 @@ class TumourWindow(tk.Toplevel):
         top = ttk.Frame(box)
         top.grid(row=1, column=0, columnspan=5, sticky="w")
         self.on = tk.BooleanVar()
-        self.on_box = ttk.Checkbutton(top, text="Tumours", variable=self.on,
+        self.on_box = ttk.Checkbutton(top, text=tr("tumour_window.tumours"), variable=self.on,
                                       command=lambda: self.set("on", True if self.mixed else self.on.get()))
         self.mixed = False  # some of the selected shapes have tumours on, some not: half ticked, a click = all on
         self.on_box.pack(side="left")
-        self.combo(top, "shape", SHAPE_CHOICES, 9, "Shape")
+        self.combo(top, "shape", SHAPE_CHOICES, 9, tr("tumour_window.shape"))
         for r, (key, label, unit, steps, lo, hi) in enumerate(NUMBERS, start=2):
             lb = ttk.Label(box, text=label)
             lb.grid(row=r, column=0, sticky="w")
@@ -96,7 +87,7 @@ class TumourWindow(tk.Toplevel):
                                                       command=lambda key=key, label=label, unit=unit:
                                                       self.open_graph(key, label, unit))
                 b.grid(row=r, column=2, sticky="w", padx=(0, 5))
-                Tooltip(b, "A graph: this number changes along the line.")
+                Tooltip(b, tr("tumour_window.a_graph_this_number_changes_along"))
                 self.widgets.append(b)
             u = self.units[key] = ttk.Label(box, text=unit, foreground="#777")
             u.grid(row=r, column=3, sticky="w")
@@ -105,11 +96,11 @@ class TumourWindow(tk.Toplevel):
             self.entries[key] = e
         row = ttk.Frame(box)
         row.grid(row=8, column=0, columnspan=5, sticky="w", pady=(1, 0))
-        self.combo(row, "side", SIDE_CHOICES, 10, "Side", pad=0)
+        self.combo(row, "side", SIDE_CHOICES, 10, tr("tumour_window.side"), pad=0)
         self.combo(row, "wrap", WRAP_CHOICES, 15, "")
         row = ttk.Frame(box)
         row.grid(row=9, column=0, columnspan=5, sticky="w", pady=(1, 0))
-        ttk.Label(row, text="Range").pack(side="left")
+        ttk.Label(row, text=tr("tumour_window.range")).pack(side="left")
         for i, key in enumerate(("start", "end")):
             if i:
                 ttk.Label(row, text="% to").pack(side="left", padx=(3, 3))
@@ -121,20 +112,22 @@ class TumourWindow(tk.Toplevel):
             Tooltip(e, TIPS["range"])
             self.widgets.append(e)
             self.entries[key] = e
-        ttk.Label(row, text="%").pack(side="left", padx=(3, 0))
+        ttk.Label(row, text=tr("unit.percent")).pack(side="left", padx=(3, 0))
         self.fit = tk.BooleanVar()
-        fit = ttk.Checkbutton(row, text="Fit", variable=self.fit, command=lambda: self.set("fit", self.fit.get()))
+        fit = ttk.Checkbutton(row, text=tr("tumour_window.fit"), variable=self.fit,
+                              command=lambda: self.set("fit", self.fit.get()))
         fit.pack(side="left", padx=(8, 0))
         Tooltip(fit, TIPS["fit"])
         self.widgets.append(fit)
-        self.reroll = ttk.Button(row, text="New random", command=lambda: self.set("seed", random.randrange(1, 10 ** 9)))
+        self.reroll = ttk.Button(row, text=tr("tumour_window.new_random"),
+                                 command=lambda: self.set("seed", random.randrange(1, 10 ** 9)))
         self.reroll.pack(side="left", padx=(8, 0))
-        Tooltip(self.reroll, "Random sides: pick them again.")
+        Tooltip(self.reroll, tr("tumour_window.random_sides_pick_them_again"))
         self.info = ttk.Label(box, text="", foreground="#777", font=("Segoe UI", 8),
                               wraplength=int(300 * app.scale), justify="left")
         self.info.grid(row=10, column=0, columnspan=5, sticky="ew", pady=(4, 0))
-        ttk.Button(box, text="Close", command=self.close).grid(row=11, column=0, columnspan=5, sticky="e",
-                                                               pady=(6, 0))
+        ttk.Button(box, text=tr("tumour_window.close"), command=self.close).grid(row=11, column=0, columnspan=5,
+                                                                                 sticky="e", pady=(6, 0))
 
         self.bind("<Escape>", lambda e: self.close())
         self.bind("<Configure>", self.remember, add="+")
@@ -171,12 +164,12 @@ class TumourWindow(tk.Toplevel):
             self.what.config(text=NOTHING)
         elif len(tgts) == 1:
             i = next(i for i in sorted(app.sels) if app.shapes[i] is tgts[0])
-            self.what.config(text=f"Shape {i + 1}: {app.shape_label(tgts[0])}")
+            self.what.config(text=tr("tumour_window.shape_2", i=i + 1, shape_label=app.shape_label(tgts[0])))
         else:
             on = sum(bool((shown_tumour(t) or {}).get("on")) for t in tgts)
-            self.what.config(text=f"{len(tgts)} shapes (they all change together)" if on in (0, len(tgts)) else
-                             f"{len(tgts)} shapes, {on} with tumours: the settings change those. Clicking the "
-                             f"half-ticked Tumours box gives the others these tumours too.")
+            self.what.config(text=tr("tumour_window.shapes_they_all_change_together", n=len(tgts))
+                             if on in (0, len(tgts)) else
+                             tr("tumour_window.shapes_with_tumours_the_settings_change", n=len(tgts), on=on))
         tm = dict(TUMOUR_DEFAULTS, **(app.shown_tumours() or {"on": False}))
         self.loading = True
         self.on.set(tm["on"])
@@ -206,17 +199,15 @@ class TumourWindow(tk.Toplevel):
         graphs = tm.get("graphs") or {}
         for key, _, unit, *_ in NUMBERS:
             if key in self.graph_btns:
-                self.units[key].config(text=f"{unit}  × graph" if key in graphs else unit,
+                self.units[key].config(text=tr("tumour_window.graph", unit=unit) if key in graphs else unit,
                                        foreground="#0a50e0" if key in graphs else "#777")
         if self.graph_window:
             self.graph_window.sync()
         own = bool(tgts) and any(t.get("tumours") for t in tgts)
         self.info.config(text="" if not tgts else
-                         "The joined shapes kept their own tumours (these are the first one's). Changing anything "
-                         "here, even just switching Tumours off and on, gives the WHOLE curve these settings and the "
-                         "other shapes' tumours are gone (Ctrl+Z brings them back)." if own else
-                         "Bumps along the line. The line's points stay draggable. Length 0 = spikes (a zigzag)."
-                         if on else "Tick Tumours to put bumps along this line.",
+                         tr("tumour_window.the_joined_shapes_kept_their_own") if own else
+                         tr("tumour_window.bumps_along_the_line_the_line")
+                         if on else tr("tumour_window.tick_tumours_to_put_bumps_along"),
                          foreground=GAP_COLOR if own else "#777")
 
     def set(self, key, value, group=False):
@@ -230,7 +221,7 @@ class TumourWindow(tk.Toplevel):
         if group:
             app.begin_edit(("tumour", tuple(sorted(app.sels)), key))
         else:
-            app.push_undo(name="Tumours")
+            app.push_undo(name=tr("tumour_window.tumours"))
         k = app.roll.sy / app.roll.sx if app.roll.sx else 0.25
         shown = app.shown_tumours()
         if self.mixed and key == "on" and value:  # (half ticked: the others get the settings shown)

@@ -10,7 +10,9 @@ import math
 
 import numpy as np
 
-from notes.custom import (ALIGNS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX_STROKE, block_notes, check_notes, clean_curve,
+from files.lang import tr
+from notes.custom import (ALIGNS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX_STROKE, block_notes, check_notes,
+                          clean_curve,
                           clean_strokes, custom_notes_groups, custom_strokes)
 from notes.envelope import env_values, velocity_env
 from notes.joined import clean_joined, is_joined, joined_paths
@@ -22,10 +24,12 @@ from notes.smooth import clean_level, smooth_path
 from notes.text import clean_text
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
 
-KINDS = {"line": "Line", "poly": "Polyline", "free": "Freehand", "curve": "Curve", "arc": "Arc", "custom": "Custom",
-         "funnel": "Funnel"}
-POINT_NAMES = {"line": ["A", "B"], "arc": ["Start", "Through", "End"],
-               "funnel": ["Line start", "Line end", "Wall 1", "Wall 2"]}
+KINDS = {"line": tr("engine.line"), "poly": tr("engine.polyline"), "free": tr("engine.freehand"),
+         "curve": tr("engine.curve"), "arc": tr("engine.arc"), "custom": tr("engine.custom"),
+         "funnel": tr("engine.funnel")}
+POINT_NAMES = {"line": [tr("engine.a"), tr("engine.b")],
+               "arc": [tr("engine.start"), tr("engine.through"), tr("engine.end")],
+               "funnel": [tr("engine.line_start"), tr("engine.line_end"), tr("engine.wall_1"), tr("engine.wall_2")]}
 
 
 def point_names(sh):
@@ -33,12 +37,13 @@ def point_names(sh):
     if sh["kind"] == "curve":  # anchors + handles (bezier.py); a plain curve: Start, Handle 1, Handle 2, End
         pts = sh["pts"]
         if len(pts) == 4:
-            return ["Start", "Handle 1", "Handle 2", "End"]
+            return [tr("engine.start"), tr("engine.handle_1"), tr("engine.handle_2"), tr("engine.end")]
         last = anchor_count(pts) - 1
-        return [("Start" if i == 0 else "End" if i // 3 == last else f"Anchor {i // 3 + 1}") if i % 3 == 0 else
-                "  handle" for i in range(len(pts))]
+        return [(tr("engine.start") if i == 0 else tr("engine.end") if i // 3 == last else
+                 tr("engine.anchor", i=i // 3 + 1)) if i % 3 == 0 else "  " + tr("engine.handle")
+                for i in range(len(pts))]
     if sh["kind"] == "funnel":  # extra lines
-        return POINT_NAMES["funnel"] + [f"Line {k} {end}" for k in range(2, len(sh["pts"]) // 2)
+        return POINT_NAMES["funnel"] + [tr("engine.line_2", k=k, end=end) for k in range(2, len(sh["pts"]) // 2)
                                         for end in ("start", "end")]
     return POINT_NAMES.get(sh["kind"])
 SHAPE_DEFAULTS = {"vel0": 127, "vel1": 127, "end_dot": False}
@@ -166,7 +171,8 @@ def shape_strokes(sh):
 
 
 _paths = {}
-SHAPE_KEYS = ("starts", "tumour", "k", "text", "smooth", "gaps", "splits", "tumours")  # what changes how a funnel / tumours / an arc / text /
+SHAPE_KEYS = ("starts", "tumour", "k", "text", "smooth", "gaps", "splits",
+              "tumours")  # what changes how a funnel / tumours / an arc / text /
 # a straightened freehand stroke look (besides the points)
 
 
