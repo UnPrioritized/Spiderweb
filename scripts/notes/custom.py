@@ -653,7 +653,12 @@ def custom_notes_groups(sh, ppq):
         return np.concatenate([spans, flat]), None
     notes = np.concatenate([chop(sh, spans, spam_gate(sh, ppq), True), chop_outline(sh, flat, ppq)])
     if apart:  # the same spam; notes over the outline are the outline's
-        return notes, np.where(touching(notes, outline_notes(sh, ppq)), 0, 1).astype(np.int64)
+        outline = outline_notes(sh, ppq)
+        # outline notes no spam note reaches (in the bit left over after the last whole gate, or before the first
+        # aligned one) are added like Outline spam, so the outline stays closed
+        missed = chop_outline(sh, outline[~touching(outline, notes)], ppq)
+        groups = np.where(touching(notes, outline), 0, 1).astype(np.int64)
+        return np.concatenate([notes, missed]), np.concatenate([groups, np.zeros(len(missed), np.int64)])
     return notes, None
 
 
