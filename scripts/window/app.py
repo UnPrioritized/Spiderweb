@@ -102,6 +102,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.stroke = None  # the selected custom shape's picked stroke (roll_live.py)
         self.part_main = None  # the highlighted part that was clicked (the others are its linked curves)
         self.clipboard = None
+        self.stroke_clip, self.clip_kind, self.stroke_pastes = None, None, 0  # a copied stroke (roll_live.py)
         self.playhead = 0.0  # beat of the play line
         self.out = MidiOut()
         self.player = Player(self.out)
@@ -835,12 +836,21 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.select_many(range(first, len(self.shapes)), len(self.shapes) - 1)
         self.shapes_changed()
 
+    def picked(self):
+        """(shape, stroke number) of the picked stroke of the selected custom shape, or None."""
+        sh = self.selected()
+        k = self.roll.picked_stroke(sh) if len(self.sels) == 1 else None
+        return None if k is None else (sh, k)
+
     def copy_selected(self, whole=False):
-        """Ctrl+C: the selected shapes (or with curves highlighted: the curve's shape)."""
+        """Ctrl+C: the selected shapes (or with curves highlighted: the curve's shape; a stroke picked: it)."""
         if not whole and self.roll.curve_parts():
             return self.roll.copy_curve()
+        if not whole and self.picked():
+            return self.roll.copy_stroke(*self.picked())
         if self.sels:
             self.clipboard = copy.deepcopy([self.shapes[i] for i in sorted(self.sels)])
+            self.clip_kind = "shapes"
             self.status.config(text=f"Copied {len(self.clipboard)} shape(s) — Ctrl+V pastes them at the play line")
 
     def paste(self, whole=False):
@@ -848,6 +858,8 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         and a curve copied: its shape onto them."""
         if not whole and self.roll.curve_parts() and self.roll.curve_clip:
             return self.roll.paste_curve()
+        if not whole and self.clip_kind == "stroke":
+            return self.roll.paste_stroke()
         if not self.clipboard:
             return
         start = min(b for sh in self.clipboard for b, _ in cached_path(sh))
@@ -861,6 +873,8 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         With a funnel's curves highlighted: those curves (end to end / inside out)."""
         if not whole and self.roll.curve_parts():
             return self.roll.set_curves(turned_curve if sideways else inside_out)
+        if not whole and self.picked():
+            return self.roll.flip_stroke(*self.picked(), sideways)
         if not self.sels:
             return
         shapes = [self.shapes[i] for i in sorted(self.sels)]
@@ -879,9 +893,11 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.sync_panel()
         self.shapes_changed()
 
-    def rotate(self, clockwise):
+    def rotate(self, clockwise, whole=False):
         """Turn the selected shapes 90 degrees as a group, around their middle, as they look on screen
-        (so the current zoom decides how many beats one key becomes)."""
+        (so the current zoom decides how many beats one key becomes). A stroke picked: just it."""
+        if not whole and self.picked():
+            return self.roll.turn_stroke(*self.picked(), clockwise)
         if not self.sels or self.roll.sx is None:
             return
         shapes = [self.shapes[i] for i in sorted(self.sels)]

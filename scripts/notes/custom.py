@@ -301,15 +301,39 @@ def stroke_ends(strokes):
     return out
 
 
-def add_stroke(sh, st):
+def bp_k(pts, k):
+    """uv_k the other way round: the beats per key on screen at which one v of the box is k u (for a stroke's k
+    taken out of the box). 1 if there's none."""
+    (b0, p0), (b1, p1), (b2, p2) = pts
+    ub, up, vb, vp = b1 - b0, p1 - p0, b2 - b0, p2 - p0
+    # uv_k = hypot(vb / K, vp) / hypot(ub / K, up) = k, solved for x = 1 / K²
+    num, den = k * k * up * up - vp * vp, vb * vb - k * k * ub * ub
+    x = num / den if abs(den) > 1e-18 else -1
+    return 1 / math.sqrt(x) if x > 1e-18 else 1.0
+
+
+def stroke_bp(sh, k):
+    """Stroke k of custom shape sh in beats / pitch (like a stroke drawn on the roll, for add_stroke): an ellipse
+    in a turned box becomes a curve; an arc's / freehand stroke's k becomes beats per key."""
+    st = sh["strokes"][k]
+    to_bp = frame_to_bp(sh["pts"])
+    if st["kind"] == "ellipse" and not frame_upright(sh["pts"]):
+        st = {"kind": "curve", "pts": ellipse_bezier(st["box"])}
+    new = map_stroke(st, to_bp)
+    if "k" in st:
+        new["k"] = bp_k(sh["pts"], st["k"])
+    return new
+
+
+def add_stroke(sh, st, at=None):
     """Put stroke st (drawn in beats / pitch: poly / curve points, or an ellipse box) into custom shape sh and fit its
     box around the drawing again. Its ends that land on another stroke's point are made exactly the same (so the
-    outline counts as joined). Returns the new stroke's number."""
+    outline counts as joined). at: its number (default: after the others). Returns the new stroke's number."""
     to_uv = frame_to_uv(sh["pts"])
     if st["kind"] == "ellipse" and not frame_upright(sh["pts"]):  # turned: an ellipse only fits as a curve
         st = {"kind": "curve", "pts": ellipse_bezier(st["box"])}
     new = map_stroke(st, to_uv)
-    if new.get("free"):  # its k: beats per key on screen -> how many u one v is on screen
+    if new.get("free") or new["kind"] == "arc":  # its k: beats per key on screen -> how many u one v is on screen
         new["k"] = uv_k(sh["pts"], st.get("k", 1.0))
     if new["kind"] != "ellipse":
         near = stroke_ends(sh["strokes"])
@@ -320,9 +344,10 @@ def add_stroke(sh, st):
                 new["pts"][i] = list(q)
         if new["kind"] == "poly" and len(new["pts"]) >= 3 and math.dist(new["pts"][0], new["pts"][-1]) < 1e-7:
             new["pts"][-1] = list(new["pts"][0])
-    sh["strokes"].append(new)
+    at = len(sh["strokes"]) if at is None else at
+    sh["strokes"].insert(at, new)
     refit(sh)
-    return len(sh["strokes"]) - 1
+    return at
 
 
 def new_live_shape(defaults, custom_defaults):

@@ -83,6 +83,18 @@ class ShapeMenu:
                     item("Add anchor here", "", lambda: self.stroke_click(sh, at))
                     symmetry_menu(m, sh["strokes"][k].get("sym"), lambda mode: self.stroke_symmetry(sh, mode, at))
                 item("Delete this stroke", "Del", lambda: self.delete_stroke(sh, k), keys=True)
+                item("Copy this stroke", "Ctrl+C", lambda: self.copy_stroke(sh, k), keys=True)
+            if app.stroke_clip is not None:
+                item("Paste stroke into this shape", "Ctrl+V", self.paste_stroke, keys=app.clip_kind == "stroke")
+            if k is not None:
+                sub = tk.Menu(m, tearoff=0)
+                for label, key, fn in (
+                        ("Flip sideways", "Ctrl+H", lambda: self.flip_stroke(sh, k, True)),
+                        ("Flip upside down", "Ctrl+J", lambda: self.flip_stroke(sh, k, False)),
+                        ("Turn 90° left", "Ctrl+Left", lambda: self.turn_stroke(sh, k, False)),
+                        ("Turn 90° right", "Ctrl+Right", lambda: self.turn_stroke(sh, k, True))):
+                    sub.add_command(label=label, accelerator=key, command=fn)
+                m.add_cascade(label="This stroke", menu=sub)
             item("Save drawing to the shape library…", "", lambda: app.save_to_library(sh))
         if app.tumour_targets():
             item("Tumours…", "", app.open_tumours)
@@ -96,15 +108,17 @@ class ShapeMenu:
             item("Split into separate shapes", "Ctrl+Shift+G", lambda: app.split_pieces(i), keys=True)
         n = len(app.sels)
         shapes = "shape" if n == 1 else f"{n} shapes"
-        item(f"Delete {shapes}", "Del", app.delete_selected, keys=keys and self.picked_stroke(sh) is None)
+        whole = app.picked() is None  # (with a stroke picked, the keys work on it)
+        item(f"Delete {shapes}", "Del", app.delete_selected, keys=keys and whole)
         item(f"Duplicate {shapes}", "Ctrl+D", app.duplicate, keys=True)
-        item(f"Copy {shapes}", "Ctrl+C", lambda: app.copy_selected(whole=True), keys=curve_keys)
-        item("Paste at the play line", "Ctrl+V", lambda: app.paste(whole=True), bool(app.clipboard), keys=curve_keys)
+        item(f"Copy {shapes}", "Ctrl+C", lambda: app.copy_selected(whole=True), keys=curve_keys and whole)
+        item("Paste at the play line", "Ctrl+V", lambda: app.paste(whole=True), bool(app.clipboard),
+             keys=curve_keys and app.clip_kind != "stroke")
         m.add_separator()
-        item("Flip sideways", "Ctrl+H", lambda: app.flip(True, whole=True), keys=curve_keys)
-        item("Flip upside down", "Ctrl+J", lambda: app.flip(False, whole=True), keys=curve_keys)
-        item("Turn 90° left", "Ctrl+Left", lambda: app.rotate(False), keys=True)
-        item("Turn 90° right", "Ctrl+Right", lambda: app.rotate(True), keys=True)
+        item("Flip sideways", "Ctrl+H", lambda: app.flip(True, whole=True), keys=curve_keys and whole)
+        item("Flip upside down", "Ctrl+J", lambda: app.flip(False, whole=True), keys=curve_keys and whole)
+        item("Turn 90° left", "Ctrl+Left", lambda: app.rotate(False, whole=True), keys=whole)
+        item("Turn 90° right", "Ctrl+Right", lambda: app.rotate(True, whole=True), keys=whole)
         try:
             m.tk_popup(e.x_root, e.y_root)
         finally:

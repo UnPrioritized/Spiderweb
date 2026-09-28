@@ -4,13 +4,15 @@ meet can be filled like a drawer shape. Also: picking one stroke of a custom sha
 curve stroke with its anchors / handles (bezier.py, like the Curve shape). The strokes live in the shape's own box
 (custom.py: add_stroke, refit)."""
 
+import copy
 import json
 import math
 
 from notes.arc import arc_bezier
 from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half_at, handle_lines, nearest, pen_handles,
                           set_symmetry)
-from notes.custom import add_stroke, box_frame, frame_to_bp, frame_to_uv, new_live_shape, refit, stroke_ends
+from notes.custom import (add_stroke, box_frame, frame_to_bp, frame_to_uv, map_stroke, new_live_shape, refit,
+                          stroke_bp, stroke_ends)
 from roll.roll_funnel import seg_dist
 from roll.roll_shared import ALT, cached_strokes
 
@@ -297,6 +299,69 @@ class LiveDrawing:
         app.set_stroke(None)
         app.shape_edited()
         app.sync_custom()
+
+    # ------------------------------------------------------------ copy / paste / flip / turn one stroke
+
+    def stroke_host(self):
+        """The selected custom shape a pasted stroke goes into (one selected, not text or pasted notes), or None."""
+        app, sh = self.app, self.app.selected()
+        ok = sh and sh["kind"] == "custom" and not sh.get("text") and "notes" not in sh and len(app.sels) == 1
+        return sh if ok else None
+
+    def copy_stroke(self, sh, k):
+        app = self.app
+        app.stroke_clip, app.clip_kind, app.stroke_pastes = stroke_bp(sh, k), "stroke", 0
+        app.status.config(text="Copied the stroke — Ctrl+V pastes it into the selected custom shape")
+
+    def paste_stroke(self):
+        """The copied stroke into the selected custom shape (none selected: a new one), a grid step later and a key
+        lower each time, so it doesn't sit exactly on the copy. The pasted stroke gets picked."""
+        app = self.app
+        app.stroke_pastes += 1
+        n = app.stroke_pastes
+        db, dp = n * (app.snap_beats() or 0.25), -n
+        st = map_stroke(copy.deepcopy(app.stroke_clip), lambda b, p: (b + db, p + dp))
+        host = self.stroke_host()
+        if host is None:
+            host = new_live_shape(app.defaults, app.custom_defaults)
+            k = add_stroke(host, st)
+            app.add_shape(host)
+        else:
+            app.push_undo()
+            k = add_stroke(host, st)
+            app.shapes_changed()
+        app.set_stroke(k)
+        app.sync_custom()
+
+    def change_stroke(self, sh, k, fn, turn=None):
+        """Stroke k moved point by point by fn(beat, pitch) (turn: beats per key on screen, when it's turned 90°)."""
+        st = stroke_bp(sh, k)
+        new = map_stroke(st, fn)
+        if turn and "k" in st:  # still round (arcs, straightened freehand), like turning a shape
+            new["k"] = turn * turn / st["k"]
+        app = self.app
+        app.push_undo()
+        del sh["strokes"][k]
+        add_stroke(sh, new, at=k)
+        app.shape_edited()
+        app.set_stroke(k)
+
+    def stroke_middle(self, sh, k):
+        path = cached_strokes(sh)[k]
+        bs, ps = [b for b, _ in path], [p for _, p in path]
+        return (min(bs) + max(bs)) / 2, (min(ps) + max(ps)) / 2
+
+    def flip_stroke(self, sh, k, sideways):
+        cb, cp = self.stroke_middle(sh, k)
+        self.change_stroke(sh, k, (lambda b, p: (2 * cb - b, p)) if sideways else (lambda b, p: (b, 2 * cp - p)))
+
+    def turn_stroke(self, sh, k, clockwise):
+        """Turned 90° around its middle as it looks on screen (like turning a shape)."""
+        if self.sx is None:
+            return
+        cb, cp = self.stroke_middle(sh, k)
+        r, sign = self.sy / self.sx, 1 if clockwise else -1
+        self.change_stroke(sh, k, lambda b, p: (cb + sign * (p - cp) * r, cp - sign * (b - cb) / r), turn=r)
 
     def draw_picked_stroke(self, sh):
         """The picked stroke of the selected custom shape: thick, under the handles."""

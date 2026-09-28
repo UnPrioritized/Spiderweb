@@ -148,8 +148,11 @@ TOPICS = [
               "While it's on, the selected shape's points show (purple squares): drag them with Select. Points in "
               "the same spot move together, and a point dropped on another one joins it.\n\n"
               "Select tool: click a stroke of the selected shape to pick it: Del deletes it, a curve shows its "
-              "handles, a freehand stroke can be straightened. Right-click a stroke = its menu, also: save the "
-              "drawing to the shape library.",
+              "handles, a freehand stroke can be straightened. Ctrl+C / Ctrl+V, Ctrl+H / Ctrl+J and Ctrl+Left / "
+              "Ctrl+Right copy, paste, flip and turn just that stroke (Esc unpicks it: then they work on the whole "
+              "shape again). A copied stroke is pasted into the selected custom shape, a grid step later and a key "
+              "lower each time (nothing selected: into a new shape). Right-click a stroke = its menu, also: save "
+              "the drawing to the shape library.",
          words="combine join merge strokes outline"),
     dict(id="fill", section="Shapes and settings", title="Inside fill (custom shapes)",
          tip="Empty = just the outline. Fill = one long note per key inside. Spam = back-to-back notes of the gate.\n"
@@ -532,7 +535,8 @@ TOPICS = [
               "Editing: Del delete, Ctrl+D duplicate, Ctrl+Z / Ctrl+Y undo / redo, Ctrl+A select all, Ctrl+C / "
               "Ctrl+V copy / paste, Ctrl+H / Ctrl+J flip, Ctrl+Left / Ctrl+Right turn 90°, Ctrl+G join into one "
               "curve, Ctrl+Shift+G split into separate shapes, Esc clear highlight / "
-              "unpick a stroke.\n\n"
+              "unpick a stroke. With a stroke of a live shape picked, the copy / paste / flip / turn keys work on "
+              "that stroke.\n\n"
               "Playing: Space play / stop. Click or drag the bar numbers = move the play line.\n\n"
               "Curves: Alt+drag a handle = sharp corner, Alt+drag an anchor = new handles, Ctrl = change only this "
               "curve (linked funnel curves).\n\n"

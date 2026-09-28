@@ -186,7 +186,7 @@ class CustomPanel:
                 info += "  Live shape: what you draw now goes into this shape."
             if self.stroke is not None and len(tgts) == 1:
                 info += (f"  Picked: stroke {self.stroke + 1} of {len(tgts[0]['strokes'])} (Del = delete it, "
-                         "Esc = unpick). Select tool: click a stroke of the selected shape to pick it.")
+                         "Ctrl+C / H / J / arrows = copy, flip, turn it, Esc = unpick). Select tool: click a stroke of the selected shape to pick it.")
         self.custom_info.config(text=info)
 
     def on_custom_pick(self):
