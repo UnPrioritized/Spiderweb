@@ -38,8 +38,10 @@ from files.about import ICONS, VERSION
 from files.playback import DEFAULT_DEVICE, MidiOut, Player, devices
 from files.midi_out import PPQ_WARN
 from files.domino_clip import DOMINO_STARTS
-from files.project import AUTOSAVE, OUTPUT_DIR, SNAPS, ProjectFiles
+from files.project import AUTOSAVE, OUTPUT_DIR, ProjectFiles
+from files.snap import DEFAULT_SNAP, snap_beats
 from roll.roll_shared import cached_path
+from window.snap_picker import SnapPicker
 from window.velocity import VelocityPane
 from window.widgets import Scrub, Tooltip
 
@@ -134,7 +136,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.help_window = None
         self.live = tk.BooleanVar(value=False)  # drawing tools draw into one custom shape (roll_live.py)
         self.draw_tool = "line"  # the drawing tool a double right-click goes back to
-        self.snap = tk.StringVar(value="1/16")
+        self.snap = tk.StringVar(value=DEFAULT_SNAP)
         self.show_lines = tk.BooleanVar(value=True)
         self.show_notes = tk.BooleanVar(value=True)
         self.channel_mode = tk.StringVar(value="single")
@@ -240,7 +242,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self._toolbar_rows = None
         top.bind("<Configure>", lambda e: self.fit_toolbar())
         ttk.Label(bar, text=tr("app.snap")).pack(side="left", padx=(0, 4))
-        ttk.Combobox(bar, textvariable=self.snap, values=SNAPS, width=6, state="readonly").pack(side="left")
+        SnapPicker(self, bar, self.snap).button.pack(side="left")
         redraw = lambda: self.roll.request_redraw()
         ttk.Checkbutton(bar, text=tr("app.show_lines"), variable=self.show_lines,
                         command=redraw).pack(side="left", padx=(12, 0))
@@ -983,8 +985,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
                 w.pack(fill="x", pady=(4, 0), before=self.points_box)
 
     def snap_beats(self):
-        v = self.snap.get()
-        return None if v == "Off" else 4 / int(v.split("/")[1])
+        return snap_beats(self.snap.get(), self.beats)
 
     def snap_ticks(self):
         """The snap step in ticks (one tick with snapping off)."""

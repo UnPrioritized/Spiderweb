@@ -20,10 +20,10 @@ from files.domino_clip import DOMINO_STARTS, clip_data, get_from_clipboard, put_
 from files.midi_out import PPQ_WARN, write_midi
 from files.about import HERE, VERSION
 from files.safefile import write_bytes, write_text
+from files.snap import clean_snap
 
 AUTOSAVE = os.path.join(HERE, "autosave.json")
 OUTPUT_DIR = os.path.join(HERE, "output")
-SNAPS = ["Off", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64", "1/128", "1/6", "1/12", "1/24", "1/48"]
 
 
 def backup_path(autosave):
@@ -139,8 +139,8 @@ class ProjectFiles:
         starts = [v for v, _ in DOMINO_STARTS]
         if data.get("domino_start") in starts:
             self.domino_box.current(starts.index(data["domino_start"]))
-        if data.get("snap") in SNAPS:
-            self.snap.set(data["snap"])
+        if "snap" in data:
+            self.snap.set(clean_snap(data["snap"]))
         self.defaults = defaults
         custom = data.get("custom_defaults") or {}
         if isinstance(custom, dict):

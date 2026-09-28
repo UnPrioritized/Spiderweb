@@ -17,6 +17,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     panel_text.py    the panel's text settings (font, size, spacing, threshold, grow)
     font_dialog.py   the font window (type a font's name or pick one)
     widgets.py       tooltips
+    snap_picker.py   the Snap dropdown (note pictures) and the Customised snap window
     help_texts.py    every help text: tips, the Help window, tool tooltips, the side panel's help
     help.py          the tip popups and the Help window (F1, searchable)
     curve_dialog.py  the custom curve formula window, saved formulas (curves.json)
@@ -55,6 +56,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     domino_clip.py   Copy to / Paste from Domino (notes on the clipboard in Domino's own format)
     playback.py      playing through Windows MIDI out
     mathexpr.py      math in number boxes (960*4 etc.)
+    snap.py          the snap choices (bar, note lengths, custom ones) and their length in beats
 """
 
 import ctypes
