@@ -11,7 +11,7 @@ import math
 import numpy as np
 
 from files.lang import tr
-from notes.custom import (ALIGNS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX_STROKE, block_notes, check_notes,
+from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX_STROKE, block_notes, check_notes,
                           clean_curve,
                           clean_strokes, custom_notes_groups, custom_strokes)
 from notes.envelope import env_values, velocity_env
@@ -94,6 +94,7 @@ def clean_shape(sh):
         out["fill"] = sh.get("fill") if sh.get("fill") in FILLS else "empty"
         out["gate"] = max(1e-6, float(sh.get("gate", CUSTOM_DEFAULTS["gate"])))
         out["align"] = sh.get("align") if sh.get("align") in ALIGNS else "auto"
+        out["ends"] = sh.get("ends") if sh.get("ends") in ENDS else "drop"
         out.update({k: True for k in CUSTOM_FLAGS if sh.get(k) is True})
         fr = sh.get("from")  # the shapes it was made of (convert.py)
         if isinstance(fr, dict) and isinstance(fr.get("shapes"), list) and fr["shapes"]:

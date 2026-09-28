@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 
 from files.lang import tr
-from notes.custom import (CUSTOM_FLAGS, SPAM_FILLS, box_frame, custom_settings, gap_lines, join_strokes, map_stroke,
+from notes.custom import (CUSTOM_FLAGS, ENDS, SPAM_FILLS, box_frame, custom_settings, gap_lines, join_strokes, map_stroke,
                           normalize_strokes, open_paths)
 from window.drawer import Drawer, clean_name, library_names, load_shape, save_shape
 from window.panel_funnel import GATE_STEPS
@@ -22,7 +22,8 @@ FILL_CHOICES = [
     ("outline_spam", tr("panel_custom.outline_spam"), tr("panel_custom.just_the_outline_chopped_into_notes")),
 ]
 CUSTOM_NAMES = {"fill": tr("panel_custom.inside_fill"), "gate": tr("panel_custom.spam_gate"),
-                "align": tr("panel_custom.spam_start"), "union": tr("panel_custom.overlaps_cancel_out"),
+                "align": tr("panel_custom.spam_start"), "ends": tr("panel_custom.spam_ends"),
+                "union": tr("panel_custom.overlaps_cancel_out"),
                 "apart": tr("panel_custom.normal_outline")}  # (History)
 APART_CHOICES = [tr("panel_custom.normal"), tr("panel_custom.outline")]
 APART_TIP = tr("panel_custom.normal_all_its_notes_together_outline")
@@ -31,7 +32,9 @@ CANCEL_TIP = tr("panel_custom.fill_and_spam_where_outlines_overlap")
 ALIGN_CHOICES = [
     ("auto", tr("panel_custom.auto"), tr("panel_custom.each_key_s_notes_start_at")),
     ("aligned", tr("panel_custom.aligned"), tr("panel_custom.every_note_sits_on_the_gate")),
+    ("centred", tr("panel_custom.centred"), tr("panel_custom.centred_tip")),
 ]
+END_CHOICES = [(value, tr("panel_custom.ends_" + value)) for value in ENDS]
 
 
 class CustomPanel:
@@ -84,6 +87,16 @@ class CustomPanel:
         self.gate_entry.bind("<Return>", lambda e: self.on_gate())
         self.gate_entry.bind("<FocusOut>", lambda e: self.on_gate())
         Scrub(self, [(self.gate_entry, self.gate_var, self.on_gate)], GATE_STEPS, 1, 10 ** 7, label=lb)
+        e = ttk.Frame(opts)
+        e.pack(anchor="w", padx=(20, 0), pady=(1, 0))
+        ttk.Label(e, text=tr("panel_custom.ends")).pack(side="left")
+        self.ends_var = tk.StringVar(value=END_CHOICES[0][1])
+        self.ends_box = ttk.Combobox(e, textvariable=self.ends_var, values=[t for _, t in END_CHOICES],
+                                     state="readonly", width=15)
+        self.ends_box.pack(side="left", padx=4)
+        self.ends_box.bind("<<ComboboxSelected>>", lambda ev: (
+            self.set_custom("ends", ENDS[self.ends_box.current()]), self.roll.focus_set()))
+        Tooltip(self.ends_box, tr("panel_custom.ends_tip"))
         a = ttk.Frame(opts)
         a.pack(anchor="w", padx=(20, 0), pady=(1, 0))
         ttk.Label(a, text=tr("panel_custom.start")).pack(side="left")
@@ -170,6 +183,8 @@ class CustomPanel:
         self.fill_var.set(fill)
         self.gate_var.set(fmt(round(gate * self.ppq, 3)))
         self.align_var.set(tgts[0].get("align", "auto"))
+        ends = tgts[0].get("ends", "drop")
+        self.ends_box.current(ENDS.index(ends) if ends in ENDS else 0)
         self.gate_entry.config(style="TEntry")
         self._loading = False
         for value, b in self.fill_buttons.items():
@@ -184,8 +199,9 @@ class CustomPanel:
             self.fill_tips[value].text = base + ("\n\n" + gap if gap and value in ("fill", "spam") else "")
         spam = fill in SPAM_FILLS
         self.gate_entry.config(state="normal" if spam else "disabled")
-        for b in self.align_buttons:
-            b.config(state="normal" if spam else "disabled")
+        self.ends_box.config(state="readonly" if spam else "disabled")
+        for b in self.align_buttons:  # (stretched gates fill each key exactly: where they start doesn't matter)
+            b.config(state="normal" if spam and ends != "stretch" else "disabled")
         self._loading = True
         self.cancel_var.set(not tgts[0].get("union"))
         apart = bool(tgts[0].get("apart"))

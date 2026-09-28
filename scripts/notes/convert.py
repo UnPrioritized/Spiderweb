@@ -69,7 +69,7 @@ def to_live(shapes, paths, defaults, custom_defaults):
     new = new_live_shape(defaults, custom_defaults)
     if first:
         new.update(name=first.get("name") or new["name"], fill=first["fill"], gate=first["gate"],
-                   align=first.get("align", "auto"))
+                   align=first.get("align", "auto"), ends=first.get("ends", "drop"))
     src = 0
     for sh, path in zip(shapes, paths):
         if sh["kind"] == "custom":

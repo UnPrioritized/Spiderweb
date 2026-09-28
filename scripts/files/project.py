@@ -10,7 +10,7 @@ from tkinter import filedialog, messagebox
 import numpy as np
 
 from files.lang import tr
-from notes.custom import ALIGNS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, notes_shape
+from notes.custom import ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, notes_shape
 from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_shape
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
 from notes.paths import KEYS
@@ -148,6 +148,8 @@ class ProjectFiles:
                 self.custom_defaults["fill"] = custom["fill"]
             if custom.get("align") in ALIGNS:
                 self.custom_defaults["align"] = custom["align"]
+            if custom.get("ends") in ENDS:
+                self.custom_defaults["ends"] = custom["ends"]
             for key in CUSTOM_FLAGS:
                 self.custom_defaults[key] = bool(custom.get(key))
             try:

@@ -20,9 +20,17 @@ from notes.text import text_polys, threshold_spans
 FILLS = ("empty", "fill", "spam", "outline_spam")
 SPAM_FILLS = ("spam", "outline_spam")  # the ones that use the gate and spam start
 # Spam start: "auto" = each stretch of a key starts at its own left edge, "aligned" = every note sits on the
-# gate grid counted from tick 0 (straight columns, lined up with bar lines and other shapes)
-ALIGNS = ("auto", "aligned")
-CUSTOM_DEFAULTS = {"fill": "empty", "gate": 0.0625, "align": "auto", "union": False, "apart": False}
+# gate grid counted from tick 0 (straight columns, lined up with bar lines and other shapes), "centred" = what
+# doesn't fit a whole gate is shared between both ends (a peak comes out the same on both sides)
+ALIGNS = ("auto", "aligned", "centred")
+# Spam ends (what happens to the bit of a stretch that doesn't fit a whole gate): "drop" = dropped, but a stretch
+# too short for even one gate stays one note as it is; "keep" = kept as a shorter note; "round" = a whole gate if
+# it's at least half a gate, else dropped (every stretch gets at least one gate); "min" = like "drop", but no note
+# shorter than a quarter gate (it grows, centred); "stretch" = the gates in the stretch are stretched or squeezed
+# so a whole number fits exactly (the spam start doesn't matter then)
+ENDS = ("drop", "keep", "round", "min", "stretch")
+CUSTOM_DEFAULTS = {"fill": "empty", "gate": 0.0625, "align": "auto", "ends": "drop", "union": False,
+                   "apart": False}
 # on / off settings a custom shape only has when they're on: "union" = where outlines overlap it's filled too (off:
 # overlaps cancel out, even-odd); "apart" = Fill / Spam "Outline": the outline's notes on a channel of their own
 # (with Multi channel), the inside's on another
@@ -31,7 +39,7 @@ CUSTOM_FLAGS = ("union", "apart")
 
 def custom_settings(cd):
     """The fill settings a new custom shape gets from cd (the settings for new ones)."""
-    out = {k: cd[k] for k in ("fill", "gate", "align")}
+    out = {k: cd[k] for k in ("fill", "gate", "align", "ends")}
     out.update({k: True for k in CUSTOM_FLAGS if cd.get(k)})
     return out
 
@@ -537,29 +545,77 @@ def spam_gate(sh, ppq):
     return max(1, math.floor(sh["gate"] * ppq + 0.5))
 
 
-def spam_starts(sh, s, e, g):
-    """First note start and how many whole gates fit in the stretch s..e (ticks)."""
-    if sh.get("align") == "aligned":
-        s = -(-s // g) * g  # the first gate line at or after s
-    return s, max(0, (e - s) // g)
-
-
-def chop(sh, stretches, g, keep_short=False):
-    """stretches: NumPy array of (start, end, key) rows in ticks -> each filled with back-to-back notes of gate g
-    (spam start like spam_starts), as an array of (start, end, key) rows in the same order. What doesn't fit a
-    whole gate is dropped; keep_short: a stretch too short for even one gate stays as it is."""
+def chop(sh, stretches, g, count=False):
+    """stretches: NumPy array of (start, end, key) rows in ticks -> each filled with back-to-back notes of gate g,
+    as an array of (start, end, key) rows in the same order. Where they start: ALIGNS; what happens to the bit that
+    doesn't fit a whole gate: ENDS. count: just how many notes each stretch gets."""
     s0, e0, q = stretches[:, 0], stretches[:, 1], stretches[:, 2]
-    s = -(-s0 // g) * g if sh.get("align") == "aligned" else s0
+    size = e0 - s0
+    ends, align = sh.get("ends", "drop"), sh.get("align", "auto")
+
+    def number(n):  # note number inside its stretch
+        return np.arange(n.sum()) - np.repeat(np.cumsum(n) - n, n)
+
+    if ends in ("round", "stretch"):
+        n = np.maximum(1, (2 * size + g) // (2 * g))  # whole gates, rounded (half up)
+        if ends == "stretch":
+            if count:
+                return n
+            k, a, m, length = number(n), np.repeat(s0, n), np.repeat(n, n), np.repeat(size, n)
+            return np.column_stack([a + length * k // m, a + length * (k + 1) // m, np.repeat(q, n)])
+        if align == "aligned":  # the gate grid's squares with at least half a gate of the stretch in them
+            lo = -((g - 2 * s0) // (2 * g))
+            n = (2 * e0 + g) // (2 * g) - lo
+            none = n <= 0  # (none: the square the stretch's middle is in)
+            first = np.where(none, (s0 + e0) // 2 // g, lo) * g
+            n = np.where(none, 1, n)
+        else:
+            first = s0 + (size - n * g) // 2 if align == "centred" else s0
+        if count:
+            return n
+        starts = np.repeat(first, n) + number(n) * g
+        return np.column_stack([starts, starts + g, np.repeat(q, n)])
+    if align == "aligned":
+        s = -(-s0 // g) * g  # the first gate line at or after s0
+    else:
+        s = s0 + size % g // 2 if align == "centred" else s0
     n = np.maximum(0, (e0 - s) // g)
-    short = (n == 0) & keep_short
+    if ends == "keep":  # a shorter note before the first whole gate (aligned / centred) and after the last
+        head_end = np.minimum(s, e0)
+        head = head_end > s0
+        tail = np.where(s < e0, s + n * g, e0) < e0
+        c = n + head + tail
+        if count:
+            return c
+        k = number(c)
+        starts = np.repeat(s, c) + (k - np.repeat(head, c)) * g
+        stops = starts + g
+        first, last = np.repeat(head, c) & (k == 0), np.repeat(tail, c) & (k == np.repeat(c, c) - 1)
+        starts = np.where(first, np.repeat(s0, c), starts)
+        stops = np.where(first, np.repeat(head_end, c), np.where(last, np.repeat(e0, c), stops))
+        return np.column_stack([starts, stops, np.repeat(q, c)])
+    short = n == 0  # too short for even one gate: stays one note as it is ("min": at least a quarter gate)
     n = np.where(short, 1, n)
-    k = np.arange(n.sum()) - np.repeat(np.cumsum(n) - n, n)  # note number inside its stretch
-    starts = np.repeat(s, n) + k * g
+    if count:
+        return n
+    starts = np.repeat(s, n) + number(n) * g
     out = np.column_stack([starts, starts + g, np.repeat(q, n)])
     if short.any():
         whole = np.repeat(short, n)
-        out[whole, 0], out[whole, 1] = np.repeat(s0, n)[whole], np.repeat(e0, n)[whole]
+        a, b = s0[short], e0[short]
+        if ends == "min":
+            least = max(1, -(-g // 4))
+            grow = b - a < least
+            a = np.where(grow, a + (b - a - least) // 2, a)
+            b = np.where(grow, a + least, b)
+        out[whole, 0], out[whole, 1] = a, b
     return out
+
+
+def chop_count(sh, stretches, g):
+    """How many notes chop makes of stretches (a list or array of (start, end, key))."""
+    st = np.asarray(stretches, np.int64).reshape(-1, 3)
+    return int(chop(sh, st, g, count=True).sum()) if len(st) else 0
 
 
 def stroke_groups(sh):
@@ -589,10 +645,9 @@ def outline_groups(sh, ppq, spam=False):
 
 
 def chop_outline(sh, notes, ppq):
-    """Outline notes chopped into back-to-back notes of the spam gate (spam start like Spam). What doesn't fit a
-    whole gate is dropped, but a note too short for even one gate stays as it is (steep parts of the outline would
-    vanish otherwise)."""
-    return chop(sh, np.asarray(notes, np.int64).reshape(-1, 3), spam_gate(sh, ppq), True)
+    """Outline notes chopped into back-to-back notes of the spam gate (spam start and ends like Spam; a note too
+    short for even one gate never vanishes, so steep parts of the outline stay)."""
+    return chop(sh, np.asarray(notes, np.int64).reshape(-1, 3), spam_gate(sh, ppq))
 
 
 def outline_spam(sh, ppq):
@@ -607,16 +662,15 @@ def custom_note_count(sh, ppq):
     if sh.get("apart") and sh["fill"] in ("fill", "spam"):
         return None  # (made to count them)
     if sh["fill"] == "outline_spam":
-        g = spam_gate(sh, ppq)
-        return sum(max(1, spam_starts(sh, s, e, g)[1]) for s, e, _ in outline_groups(sh, ppq)[0].tolist())
+        return chop_count(sh, outline_groups(sh, ppq)[0], spam_gate(sh, ppq))
     if sh["fill"] == "empty" or not fillable(sh["strokes"]):
         return None
     flat = flat_notes(sh, ppq)
     if sh["fill"] == "fill":
         return len(inside_spans(sh, ppq)) + len(flat)
     g = spam_gate(sh, ppq)
-    return (sum(max(1, spam_starts(sh, s, e, g)[1]) for _, s, e in inside_spans(sh, ppq)) +
-            sum(max(1, spam_starts(sh, s, e, g)[1]) for s, e, _ in flat.tolist()))
+    spans = np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]
+    return chop_count(sh, spans, g) + chop_count(sh, flat, g)
 
 
 def flat_notes(sh, ppq):
@@ -627,9 +681,8 @@ def flat_notes(sh, ppq):
 
 def custom_notes(sh, ppq):
     """Empty = the outline; Fill = one note per stretch of each key inside; Spam = each stretch filled with
-    back-to-back notes of the spam gate, starting at its left edge or on the gate grid (see ALIGNS); what doesn't
-    fit a whole gate is dropped, but a stretch too short for even one gate stays one note. Outline spam = the
-    outline chopped the same way (open ends are fine)."""
+    back-to-back notes of the spam gate (chop: where they start and what happens to the bit that doesn't fit a
+    whole gate). Outline spam = the outline chopped the same way (open ends are fine)."""
     return custom_notes_groups(sh, ppq)[0]
 
 
@@ -652,7 +705,7 @@ def custom_notes_groups(sh, ppq):
             return (np.concatenate([outline, inside]),
                     np.concatenate([np.zeros(len(outline), np.int64), np.ones(len(inside), np.int64)]))
         return notes, None
-    notes = np.concatenate([chop(sh, spans, spam_gate(sh, ppq), True), chop_outline(sh, flat, ppq)])
+    notes = np.concatenate([chop(sh, spans, spam_gate(sh, ppq)), chop_outline(sh, flat, ppq)])
     if apart:  # the same spam; the notes on the edge of what's filled are the outline's
         return notes, np.where(on_edge(notes), 0, 1).astype(np.int64)
     return notes, None
