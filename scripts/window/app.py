@@ -408,8 +408,9 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         dev.grid(row=r, column=1, sticky="ew", padx=5, pady=(3, 0))
         r += 1
         names = [name for _, name in DOMINO_STARTS]
-        self.domino_box = ttk.Combobox(box, state="readonly", values=names, width=max(map(len, names)))
-        self.domino_box.grid(row=r, column=0, columnspan=2, sticky="e", pady=(6, 0))
+        ttk.Label(box, text="Domino start").grid(row=r, column=0, sticky="w", pady=(6, 0))
+        self.domino_box = ttk.Combobox(box, state="readonly", values=names)
+        self.domino_box.grid(row=r, column=1, sticky="ew", padx=5, pady=(6, 0))
         self.domino_box.current(0)
         self.domino_box.bind("<<ComboboxSelected>>", lambda e: self.schedule_autosave())
         Tooltip(self.domino_box, "Where copied and pasted notes start:\n"

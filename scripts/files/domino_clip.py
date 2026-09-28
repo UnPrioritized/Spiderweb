@@ -49,8 +49,8 @@ NOTE = np.dtype([("tag", "<u2"), ("len", "<u4"),
 
 
 DOMINO_STARTS = [  # (saved value, dropdown text): where copied / pasted notes start (app.domino_start)
-    ("note", "First note at tick 0 (at the cursor)"),
-    ("bar", "From the bar line (keeps its place in the bar)"),
+    ("note", "First note at tick 0"),
+    ("bar", "From the bar line"),
 ]
 
 
