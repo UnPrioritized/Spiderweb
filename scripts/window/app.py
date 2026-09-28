@@ -54,16 +54,19 @@ TOOLS = [("select", "Select", "v"), ("line", "Line", "l"), ("poly", "Polyline", 
 SHAPE_TOOLS = [("square", "Square", "q"), ("circle", "Circle", "o"), ("triangle", "Triangle", "t")]
 BIG = 1_000_000  # ask before making a custom shape / funnel with more notes than this
 CHANNEL_CHOICES = [
-    ("raw", "As drawn (keep overlaps)",
+    ("raw", "As drawn",
+     "Keeps overlaps.\n"
      "Every note exactly as the shapes make it, all on one channel.\n"
      "Notes on the same key can overlap or start on the same tick."),
-    ("single", "Single channel (remove overlaps)",
-     "One channel. Where two notes on the same key overlap, the earlier one\n"
-     "is cut where the later one starts, and the later one is stretched\n"
+    ("single", "Single channel",
+     "Removes overlaps, all on one channel.\n"
+     "Where two notes on the same key overlap, the earlier one is cut\n"
+     "where the later one starts, and the later one is stretched\n"
      "to where the earlier one would have ended.\n"
      "Notes starting on the same tick become one note: the loudest wins,\n"
      "and it's as long as the longest of them."),
-    ("auto", "Multi channel (a channel per overlap)",
+    ("auto", "Multi channel",
+     "A channel per overlap.\n"
      "Shapes whose notes overlap go on different channels, each on its own\n"
      "track (channel 10 is skipped). Shapes that don't clash share a channel.\n"
      "The box below picks what counts as an overlap."),

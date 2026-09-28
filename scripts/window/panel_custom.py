@@ -12,6 +12,12 @@ from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
 from window.widgets import Scrub, Tooltip
 
 GAP_COLOR = "#c06000"  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
+FILL_CHOICES = [
+    ("empty", "Empty", "Just the outline, like lines."),
+    ("fill", "Fill", "One long note per key inside."),
+    ("spam", "Spam", "The inside filled with back-to-back notes of one gate."),
+    ("outline_spam", "Outline spam", "Just the outline, chopped into notes of one gate."),
+]
 ALIGN_CHOICES = [
     ("auto", "Auto", "Each key's notes start at that key's left edge,\nso the left side is exact and the right side ragged."),
     ("aligned", "Aligned", "Every note sits on the gate grid counted from the start of the song,\n"
@@ -40,17 +46,14 @@ class CustomPanel:
         opts = ttk.Frame(row)
         opts.pack(side="left", padx=(5, 0))
         self.fill_buttons = {}
-        self.fill_tips = {}  # Fill / Spam: why they're orange (one gap) or greyed out (more)
+        self.fill_tips = {}  # (Fill / Spam also say why they're orange (one gap) or greyed out (more))
         ttk.Style(self).configure("Gap.TRadiobutton", foreground=GAP_COLOR)
-        for value, text in (("empty", "Empty (outline only)"), ("fill", "Fill (one long note per key)"),
-                            ("spam", "Spam (notes of one gate)"),
-                            ("outline_spam", "Outline spam (the outline in notes of one gate)")):
+        for value, text, tip in FILL_CHOICES:
             b = ttk.Radiobutton(opts, text=text, value=value, variable=self.fill_var,
                                 command=lambda: self.set_custom("fill", self.fill_var.get()))
             b.pack(anchor="w")
             self.fill_buttons[value] = b
-            if value in ("fill", "spam"):
-                self.fill_tips[value] = Tooltip(b, "")
+            self.fill_tips[value] = Tooltip(b, tip)
         g = ttk.Frame(opts)
         g.pack(anchor="w", padx=(20, 0))
         lb = ttk.Label(g, text="gate")
@@ -151,12 +154,13 @@ class CustomPanel:
         self._loading = False
         for value, b in self.fill_buttons.items():
             b.config(state="normal" if fillable or value in ("empty", "outline_spam") else "disabled",
-                     style="Gap.TRadiobutton" if gaps == 1 and value in self.fill_tips else "TRadiobutton")
-        for tip in self.fill_tips.values():
-            tip.text = ("The outline has a gap: it's filled as if a straight line closed it (the dashed line).\n"
-                        "Close the gap yourself to decide where the edge goes." if gaps == 1 else
-                        f"The outline has {gaps} gaps, so it's unclear what's inside.\n"
-                        "Close all but one of them to fill it." if gaps else "")
+                     style="Gap.TRadiobutton" if gaps == 1 and value in ("fill", "spam") else "TRadiobutton")
+        for value, _, base in FILL_CHOICES:
+            gap = ("The outline has a gap: it's filled as if a straight line closed it (the dashed line).\n"
+                   "Close the gap yourself to decide where the edge goes." if gaps == 1 else
+                   f"The outline has {gaps} gaps, so it's unclear what's inside.\n"
+                   "Close all but one of them to fill it." if gaps else "")
+            self.fill_tips[value].text = base + ("\n\n" + gap if gap and value in ("fill", "spam") else "")
         spam = fill in SPAM_FILLS and (fillable or fill == "outline_spam")
         self.gate_entry.config(state="normal" if spam else "disabled")
         for b in self.align_buttons:
