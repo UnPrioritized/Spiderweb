@@ -193,6 +193,11 @@ TOPICS = [
               "start. An open part that's almost straight (never more than half a key or 1/64 beat from that "
               "closing line) has nothing inside, so it isn't filled: it just keeps its notes. Close the gaps "
               "yourself to decide exactly where the edge goes.\n\n"
+              "Normal / Outline (the box next to Fill and Spam): Outline puts the notes along the outline on a "
+              "channel of their own and the inside's on another, with the same gate so they line up (where both "
+              "would play, the outline's note is kept). It needs Channels: Multi channel; with the others it's all "
+              "one channel and the box turns orange.\n"
+              "[clip:fill-outline]\n\n"
               "Overlaps cancel out (ticked unless you change it): where outlines overlap, the overlap stays empty, "
               "and a shape inside a shape makes a hole. Untick it to fill inside any outline, overlaps and holes "
               "too. (Text always fills its letters the way the font means them.)\n\n"
@@ -452,8 +457,8 @@ TOPICS = [
               "Multi channel: shapes whose notes clash go on different channels, each on its own track (channel 10, "
               "drums, is skipped). Split: Same key = only notes on the same key at the same time clash; Any notes = "
               "any notes at the same time. Shapes that follow one after another share a channel. Pasted notes (by "
-              "track) and live shapes made with Turn into live shape (by the shape each stroke came from) can "
-              "spread over several channels: the shape list says how many, in orange above 15 (from there the "
+              "track), live shapes made with Turn into live shape (by the shape each stroke came from) and Fill / "
+              "Spam set to Outline (the outline and the inside) can spread over several channels: the shape list says how many, in orange above 15 (from there the "
               "colours and channel numbers repeat).\n\n"
               "Every channel has its own note colour.",
          words="channel track overlap colour"),

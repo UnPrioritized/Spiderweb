@@ -286,11 +286,12 @@ def shape_notes_tracks(sh, ppq, keys=128):
 
 # ---------------------------------------------------------------- overlaps and channels
 
-def assign_slots(note_lists, split="key"):
+def assign_slots(note_lists, split="key", apart=()):
     """
     Auto channels: shapes whose notes overlap get different slots, shapes that don't clash reuse the lowest
     free one. Earlier shapes get the lower slots. split="key": only notes on the same key at the same time
     clash; split="time": any notes sounding at the same time clash, whatever their key.
+    apart: groups of note list numbers that always get different slots (a custom shape's outline and inside).
     """
     n = len(note_lists)
     by_pitch = {}
@@ -323,6 +324,9 @@ def assign_slots(note_lists, split="key"):
                     clashes[o].add(ao)
                     clashes[ao].add(o)
             active.append((e, o))
+    for group in apart:
+        for a in group:
+            clashes[a] |= set(group) - {a}
 
     first = [int(notes[:, 0].min()) if len(notes) else math.inf for notes in note_lists]
     order = sorted(range(n), key=lambda i: (first[i], i))
@@ -382,7 +386,7 @@ CHANNEL_MODES = ("raw", "single", "auto")
 SPLITS = ("key", "time")
 
 
-def render(note_lists, mode, split="key", tracks=None):
+def render(note_lists, mode, split="key", tracks=None, apart=None):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -390,11 +394,13 @@ def render(note_lists, mode, split="key", tracks=None):
     fixed, "auto" = overlapping shapes get their own channels (split: see assign_slots).
     tracks: per shape None, or the track of each of its notes (pasted notes, shape_notes_tracks): with "auto" each
     track of the shape gets channels as if it were a shape of its own.
+    apart: per shape True if its tracks must get different channels (Fill / Spam "Outline").
     """
     tracks = tracks or [None] * len(note_lists)
+    apart = apart or [False] * len(note_lists)
     if mode == "auto":
-        units, unit_of = [], []  # the shapes, pasted notes split up by track; unit_of = each note's unit
-        for lst, tr in zip(note_lists, tracks):
+        units, unit_of, forced = [], [], []  # the shapes, pasted notes split up by track; unit_of = each note's unit
+        for lst, tr, sep in zip(note_lists, tracks, apart):
             if tr is None or not len(lst):
                 unit_of.append(len(units))
                 units.append(lst)
@@ -402,8 +408,10 @@ def render(note_lists, mode, split="key", tracks=None):
             ids, which = np.unique(tr, return_inverse=True)
             which = which.ravel()
             unit_of.append(len(units) + which)
+            if sep:
+                forced.append(range(len(units), len(units) + len(ids)))
             units += [lst[which == k] for k in range(len(ids))]
-        unit_slots = np.array(assign_slots(units, split), np.int64)
+        unit_slots = np.array(assign_slots(units, split, forced), np.int64)
         slot_of = [unit_slots[u] for u in unit_of]
         count = int(unit_slots.max()) + 1 if len(units) else 0
     else:

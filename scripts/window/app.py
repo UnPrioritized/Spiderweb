@@ -12,7 +12,7 @@ from tkinter import ttk, messagebox
 
 import numpy as np
 
-from notes.custom import CUSTOM_DEFAULTS, custom_note_count
+from notes.custom import CUSTOM_DEFAULTS, custom_note_count, outline_apart
 from window.drawer import help_box
 from window.help import Tips, open_help
 from window.help_texts import BY_ID, TOOL_TOPICS
@@ -400,7 +400,8 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         ch = ttk.Frame(box)
         ch.grid(row=r, column=1, sticky="w", padx=5, pady=(3, 0))
         for value, text, tip in CHANNEL_CHOICES:
-            b = ttk.Radiobutton(ch, text=text, value=value, variable=self.channel_mode, command=self.shapes_changed)
+            b = ttk.Radiobutton(ch, text=text, value=value, variable=self.channel_mode,
+                                command=lambda: (self.shapes_changed(), self.sync_custom()))
             b.pack(anchor="w")
             Tooltip(b, tip)
         names = [name for _, name in SPLIT_CHOICES]
@@ -720,7 +721,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.split_box.config(state="readonly" if self.channel_mode.get() == "auto" else "disabled")
         got = [self.notes_tracks(sh) for sh in self.shapes]
         self.rendered, self.slot_count = render([n for n, _ in got], self.channel_mode.get(), self.channel_split,
-                                                [t for _, t in got])
+                                                [t for _, t in got], [outline_apart(sh) for sh in self.shapes])
         if self._notes_worked != worked:
             self._notes_time = time.perf_counter() - started
         counts = self.note_counts = np.bincount(self.rendered[:, 5], minlength=len(self.shapes)).tolist()
@@ -730,7 +731,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
             chans = np.bincount(pairs // (self.slot_count + 1), minlength=len(self.shapes)).tolist()
         self.listbox.delete(0, "end")
         for i, sh in enumerate(self.shapes):
-            uses = f", uses {chans[i]} channels" if chans[i] > 1 else ""
+            uses = f", {chans[i]} channels" if chans[i] > 1 else ""
             self.listbox.insert("end", f"{i + 1}.  {self.shape_label(sh)}  —  {counts[i]:,} notes{uses}")
             if chans[i] > MANY_CHANNELS:  # (past this the note colours and channel numbers repeat)
                 self.listbox.itemconfig(i, foreground=GAP_COLOR, selectforeground="#ffd9b0")

@@ -20,6 +20,11 @@ FILL_CHOICES = [
     ("spam", "Spam", "The inside filled with back-to-back notes of one gate."),
     ("outline_spam", "Outline spam", "Just the outline, chopped into notes of one gate."),
 ]
+APART_CHOICES = ["Normal", "Outline"]
+APART_TIP = ("Normal: all its notes together.\n"
+             "Outline: the notes along the outline go on a channel of their own and the inside's on\n"
+             "another (the same gate, so they line up). Needs Channels: Multi channel.")
+APART_NEEDS = "\n\nChannels isn't Multi channel now, so it's all one channel (turns orange)."
 CANCEL_TIP = ("Fill and Spam: where outlines overlap, the overlap is left empty\n"
               "(a shape inside a shape makes a hole). Off: inside any outline is filled,\n"
               "overlaps and holes too.")
@@ -53,12 +58,24 @@ class CustomPanel:
         self.fill_buttons = {}
         self.fill_tips = {}  # (Fill / Spam also say why they're orange (one gap) or greyed out (more))
         ttk.Style(self).configure("Gap.TRadiobutton", foreground=GAP_COLOR)
+        ttk.Style(self).configure("Gap.TCombobox", foreground=GAP_COLOR)
+        self.apart_var = tk.StringVar(value=APART_CHOICES[0])
+        self.apart_boxes, self.apart_tips = {}, {}  # Fill / Spam: Normal, or Outline (on a channel of its own)
         for value, text, tip in FILL_CHOICES:
-            b = ttk.Radiobutton(opts, text=text, value=value, variable=self.fill_var,
+            line = ttk.Frame(opts)
+            line.pack(anchor="w", fill="x")
+            b = ttk.Radiobutton(line, text=text, value=value, variable=self.fill_var,
                                 command=lambda: self.set_custom("fill", self.fill_var.get()))
-            b.pack(anchor="w")
+            b.pack(side="left")
             self.fill_buttons[value] = b
             self.fill_tips[value] = Tooltip(b, tip)
+            if value in ("fill", "spam"):
+                drop = ttk.Combobox(line, textvariable=self.apart_var, values=APART_CHOICES, state="readonly",
+                                    width=8)
+                drop.pack(side="left", padx=(6, 0))
+                drop.bind("<<ComboboxSelected>>", lambda e: (
+                    self.set_custom("apart", self.apart_var.get() == APART_CHOICES[1]), self.roll.focus_set()))
+                self.apart_boxes[value], self.apart_tips[value] = drop, Tooltip(drop, APART_TIP)
         g = ttk.Frame(opts)
         g.pack(anchor="w", padx=(20, 0))
         lb = ttk.Label(g, text="gate")
@@ -175,7 +192,14 @@ class CustomPanel:
             b.config(state="normal" if spam else "disabled")
         self._loading = True
         self.cancel_var.set(not tgts[0].get("union"))
+        apart = bool(tgts[0].get("apart"))
+        self.apart_var.set(APART_CHOICES[apart])
         self._loading = False
+        lonely = apart and self.channel_mode.get() != "auto"  # (Outline without Multi channel: all one channel)
+        for value, box in self.apart_boxes.items():
+            box.config(state="readonly" if fill == value else "disabled",
+                       style="Gap.TCombobox" if lonely and fill == value else "TCombobox")
+            self.apart_tips[value].text = APART_TIP + (APART_NEEDS if lonely else "")
         self.cancel_box.config(state="normal" if fill in ("fill", "spam") and not text else "disabled")
         if not placed and live:
             info = ("Live shape: what you draw goes into one custom shape (a new one now). Close its outline "

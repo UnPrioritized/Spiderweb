@@ -21,10 +21,11 @@ SPAM_FILLS = ("spam", "outline_spam")  # the ones that use the gate and spam sta
 # Spam start: "auto" = each stretch of a key starts at its own left edge, "aligned" = every note sits on the
 # gate grid counted from tick 0 (straight columns, lined up with bar lines and other shapes)
 ALIGNS = ("auto", "aligned")
-CUSTOM_DEFAULTS = {"fill": "empty", "gate": 0.0625, "align": "auto", "union": False}
+CUSTOM_DEFAULTS = {"fill": "empty", "gate": 0.0625, "align": "auto", "union": False, "apart": False}
 # on / off settings a custom shape only has when they're on: "union" = where outlines overlap it's filled too (off:
-# overlaps cancel out, even-odd)
-CUSTOM_FLAGS = ("union",)
+# overlaps cancel out, even-odd); "apart" = Fill / Spam "Outline": the outline's notes on a channel of their own
+# (with Multi channel), the inside's on another
+CUSTOM_FLAGS = ("union", "apart")
 
 
 def custom_settings(cd):
@@ -602,6 +603,8 @@ def custom_note_count(sh, ppq):
     """How many notes a custom shape makes, without making them (spam can be millions)."""
     if "notes" in sh:
         return len(unpack_notes(sh["notes"]))
+    if sh.get("apart") and sh["fill"] in ("fill", "spam"):
+        return None  # (made to count them)
     if sh["fill"] == "outline_spam":
         g = spam_gate(sh, ppq)
         return sum(max(1, spam_starts(sh, s, e, g)[1]) for s, e, _ in outline_groups(sh, ppq)[0].tolist())
@@ -639,9 +642,72 @@ def custom_notes_groups(sh, ppq):
         return outline_groups(sh, ppq)
     spans = np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]  # (start, end, key)
     flat = flat_notes(sh, ppq)  # (like Outline spam in Spam)
+    apart = sh.get("apart")
     if sh["fill"] == "fill":
+        if apart:  # the outline's notes, and the inside's long notes between them
+            outline = outline_notes(sh, ppq)
+            inside = cut_out(spans, outline)
+            return (np.concatenate([outline, inside]),
+                    np.concatenate([np.zeros(len(outline), np.int64), np.ones(len(inside), np.int64)]))
         return np.concatenate([spans, flat]), None
-    return np.concatenate([chop(sh, spans, spam_gate(sh, ppq), True), chop_outline(sh, flat, ppq)]), None
+    notes = np.concatenate([chop(sh, spans, spam_gate(sh, ppq), True), chop_outline(sh, flat, ppq)])
+    if apart:  # the same spam; notes over the outline are the outline's
+        return notes, np.where(touching(notes, outline_notes(sh, ppq)), 0, 1).astype(np.int64)
+    return notes, None
+
+
+def outline_apart(sh):
+    """Fill / Spam with "Outline": the outline and the inside must get channels of their own."""
+    return bool(sh["kind"] == "custom" and sh.get("apart") and sh.get("fill") in ("fill", "spam") and "notes" not in sh)
+
+
+def merged_by_key(notes):
+    """(start, end, key) notes -> per key, the stretches they cover: (key, start, end) arrays sorted by key and
+    start, not overlapping."""
+    if not len(notes):
+        return np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.int64)
+    a = notes[np.lexsort((notes[:, 0], notes[:, 2]))]
+    s, e, k = a[:, 0], a[:, 1], a[:, 2]
+    from notes.engine import running_max
+    run = running_max(e, k)
+    new = np.ones(len(a), bool)
+    new[1:] = (k[1:] != k[:-1]) | (s[1:] > run[:-1])
+    at = np.nonzero(new)[0]
+    return k[at], s[at], np.maximum.reduceat(e, at)
+
+
+def touching(notes, others):
+    """Which notes overlap one of the others on the same key (at least one tick in common)."""
+    ks, ss, es = merged_by_key(others)
+    if not len(ks) or not len(notes):
+        return np.zeros(len(notes), bool)
+    big = np.int64(1) << 40
+    starts = ks * big + ss
+    i = np.searchsorted(starts, notes[:, 2] * big + notes[:, 1], "left") - 1  # the last stretch starting before
+    ok = i >= 0
+    i = np.maximum(i, 0)
+    return ok & (ks[i] == notes[:, 2]) & (es[i] > notes[:, 0])
+
+
+def cut_out(spans, others):
+    """(start, end, key) stretches with the time the others cover on the same key taken out."""
+    ks, ss, es = merged_by_key(others)
+    by_key = {}
+    for k, s, e in zip(ks.tolist(), ss.tolist(), es.tolist()):
+        by_key.setdefault(k, []).append((s, e))
+    out = []
+    for s, e, k in spans.tolist():
+        for os_, oe in by_key.get(k, ()):
+            if oe <= s or os_ >= e:
+                continue
+            if os_ > s:
+                out.append((s, os_, k))
+            s = max(s, oe)
+            if s >= e:
+                break
+        if s < e:
+            out.append((s, e, k))
+    return np.asarray(out, np.int64).reshape(-1, 3)
 
 
 # ---------------------------------------------------------------- pasted notes
