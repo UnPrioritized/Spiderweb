@@ -59,18 +59,18 @@ class CustomPanel:
         ttk.Style(self).configure("Gap.TCombobox", foreground=GAP_COLOR)
         self.apart_var = tk.StringVar(value=APART_CHOICES[0])
         self.apart_boxes, self.apart_tips = {}, {}  # Fill / Spam: Normal, or Outline (on a channel of its own)
-        for value, text, tip in FILL_CHOICES:
-            line = ttk.Frame(opts)
-            line.pack(anchor="w", fill="x")
-            b = ttk.Radiobutton(line, text=text, value=value, variable=self.fill_var,
+        rows = ttk.Frame(opts)  # (a grid, so the Fill and Spam dropdowns line up)
+        rows.pack(anchor="w", fill="x")
+        for row, (value, text, tip) in enumerate(FILL_CHOICES):
+            b = ttk.Radiobutton(rows, text=text, value=value, variable=self.fill_var,
                                 command=lambda: self.set_custom("fill", self.fill_var.get()))
-            b.pack(side="left")
+            b.grid(row=row, column=0, sticky="w", columnspan=1 if value in ("fill", "spam") else 2)
             self.fill_buttons[value] = b
             self.fill_tips[value] = Tooltip(b, tip)
             if value in ("fill", "spam"):
-                drop = ttk.Combobox(line, textvariable=self.apart_var, values=APART_CHOICES, state="readonly",
+                drop = ttk.Combobox(rows, textvariable=self.apart_var, values=APART_CHOICES, state="readonly",
                                     width=8)
-                drop.pack(side="left", padx=(6, 0))
+                drop.grid(row=row, column=1, sticky="w", padx=(14, 0))
                 drop.bind("<<ComboboxSelected>>", lambda e: (
                     self.set_custom("apart", self.apart_var.get() == APART_CHOICES[1]), self.roll.focus_set()))
                 self.apart_boxes[value], self.apart_tips[value] = drop, Tooltip(drop, APART_TIP)
