@@ -252,28 +252,44 @@ def split_pieces(sh):
     return [_cut(sh, a, b, tm) for a, b, tm in sections(sh)]
 
 
+def set_tumours(sh, tms, splits):
+    """Give a curve one tumour setting per section (tms, in order; splits = where sections start inside a piece).
+    When they're all the same and every section is a whole piece, that's one setting for the curve (each piece
+    gets its own row of bumps either way, so it looks the same)."""
+    for key in ("tumour", "tumours", "splits"):
+        sh.pop(key, None)
+    tms = [json.loads(json.dumps(tm)) if tm else None for tm in tms]
+    if not splits and len(set(json.dumps(t, sort_keys=True) for t in tms)) == 1:
+        if tms[0]:
+            sh["tumour"] = tms[0]
+        return
+    sh["tumours"] = tms
+    if splits:
+        sh["splits"] = list(splits)
+
+
 def split_at(sh, a):
-    """A curve cut in two at anchor a (a joined curve's tumours go with their sections; the section that's cut
-    goes to both halves). None if a is an end of a piece."""
+    """A curve cut in two at anchor a (a joined curve's tumours go with their sections; the section that's cut is
+    shared out so its bumps stay where they were, see tumour.split_tumour). None if a is an end of a piece."""
     from notes.bezier import piece_ends
+    from notes.tumour import split_tumour
     if a in piece_ends(sh):
         return None
-    left, right = _cut(sh, 0, a, sh.get("tumour")), _cut(sh, a, anchor_count(sh["pts"]) - 1, sh.get("tumour"))
-    if sh.get("tumours"):
-        secs = sections(sh)
-        for half, keep in ((left, lambda s: s[0] < a), (right, lambda s: s[1] > a)):
-            mine = [s for s in secs if keep(s)]
-            half.pop("tumour", None)
-            half["tumours"] = [json.loads(json.dumps(tm)) if tm else None for _, _, tm in mine]
-            off = 0 if half is left else a
-            splits = [s - off for s in sh.get("splits", []) if (s < a if half is left else s > a)]
-            if splits:
-                half["splits"] = splits
-            if len(set(json.dumps(t, sort_keys=True) for t in half["tumours"])) == 1:
-                tm = half.pop("tumours")[0]
-                half.pop("splits", None)
-                if tm:
-                    half["tumour"] = tm
+    pts = sh["pts"]
+    left, right = _cut(sh, 0, a, None), _cut(sh, a, anchor_count(pts) - 1, None)
+    tl, tr = [], []
+    for s0, s1, tm in sections(sh):
+        if s1 <= a:
+            tl.append(tm)
+        elif s0 >= a:
+            tr.append(tm)
+        else:
+            l, r = split_tumour(tm, sample(pts[3 * s0:3 * a + 1], 240), sample(pts[3 * a:3 * s1 + 1], 240))
+            tl.append(l)
+            tr.append(r)
+    splits = sh.get("splits", []) if sh.get("tumours") else []
+    set_tumours(left, tl, [s for s in splits if s < a])
+    set_tumours(right, tr, [s - a for s in splits if s > a])
     return left, right
 
 

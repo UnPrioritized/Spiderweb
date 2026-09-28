@@ -8,7 +8,7 @@ from tkinter import ttk
 
 from notes.bezier import anchor_count, nearest, split
 from notes.joined import join_shapes, piece_velocity, sections, split_at, split_custom, split_pieces, custom_groups
-from notes.tumour import LINE_KINDS
+from notes.tumour import LINE_KINDS, split_tumour
 from roll.roll_shared import cached_path
 from window.widgets import Tooltip
 
@@ -185,9 +185,12 @@ class JoinSplit:
         left = pts[:j + 1] + [cut] if k is None else pts[:k + 1]
         right = [cut] + pts[j + 1:] if k is None else pts[k:]
         out = []
-        for half in (left, right):
-            new = copy.deepcopy({key: v for key, v in sh.items() if key != "pts"})
+        tms = split_tumour(sh.get("tumour"), left, right)  # (the bumps stay where they were)
+        for half, tm in zip((left, right), tms):
+            new = copy.deepcopy({key: v for key, v in sh.items() if key not in ("pts", "tumour")})
             new["pts"] = [list(p) for p in half]
             new["kind"] = "line" if len(half) == 2 else "poly"
+            if tm:
+                new["tumour"] = tm
             out.append(new)
         return out

@@ -20,6 +20,7 @@ arc.py), so sizes are in keys, lengths / distances in beats along the line. leng
 point pushed sideways and the line zigzags straight from spike to spike."""
 
 import bisect
+import json
 import math
 import random
 
@@ -98,19 +99,23 @@ def graph_fn(tm, key, total):
 def graph_starts(dg, lo, hi, dist, fit, even):
     """Where the bumps start when the distance follows the graph dg: counting bumps along the range (1 / distance
     per unit of length), bump i starts where the count reaches i. fit: the count is stretched so a whole number of
-    steps fits the range (even: an even number)."""
+    steps fits the range (even: an even number). Also returns how much that stretched the distance (1 = not)."""
     if hi - lo < 1e-9:
-        return [lo]
+        return [lo], 1.0
     d = np.linspace(lo, hi, 4097)
     rate = 1 / np.maximum(dist * dg(d), max((hi - lo) / MAX_TUMOURS, 1e-9))
     count = np.concatenate([[0.0], np.cumsum((rate[1:] + rate[:-1]) / 2 * np.diff(d))])
     total = count[-1]
+    stretch = 1.0
     if fit:
         n = max(2, 2 * round(total / 2)) if even else max(1, round(total))
         marks = np.linspace(0.0, total, n + 1)
+        stretch = total / n
     else:
-        marks = np.arange(min(math.floor(total + 1e-9), MAX_TUMOURS - 1) + 1, dtype=float)
-    return np.interp(marks, count, d).tolist()
+        # (a bump within a thousandth of a step of the end still counts: after a split, the half whose Fit was
+        # turned off must still get the one Fit put right on the end)
+        marks = np.arange(min(math.floor(total + 1e-3), MAX_TUMOURS - 1) + 1, dtype=float)
+    return np.interp(marks, count, d).tolist(), stretch
 
 
 def template(shape, length, size, slant=0.0):
@@ -228,6 +233,87 @@ class Walk:
         return v[:, 0], v[:, 1]
 
 
+def bump_starts(w, tm):
+    """Where the bumps start along the Walk w (on-screen units): (range start, range end, whether it's a closed loop
+    with bumps all the way round, the starts, how much Fit stretched the distance (1 = not at all))."""
+    k = tm["k"]
+    lo, hi = min(tm["start"], tm["end"]) * w.total, max(tm["start"], tm["end"]) * w.total
+    dist = max(tm["dist"] / k, (hi - lo) / MAX_TUMOURS, 1e-9)
+    # a closed loop (e.g. a full circle) with bumps all the way round: its end is its start again
+    loop = w.closed and lo < 1e-9 and hi > w.total - 1e-9
+    dg = graph_fn(tm, "dist", w.total)
+    stretch = 1.0
+    if dg is not None:
+        starts, stretch = graph_starts(dg, lo, hi, dist, tm.get("fit"), loop and tm["side"] == "alt")
+    elif tm.get("fit") and hi - lo > 1e-9:
+        # a whole number of steps fits the range, so the last one lands right on its end; round a loop with
+        # alternating sides, an even number, so the sides keep alternating where it meets up
+        n = max(1, round((hi - lo) / dist))
+        if loop and tm["side"] == "alt":
+            n = max(2, 2 * round((hi - lo) / dist / 2))
+        stretch = (hi - lo) / n / dist
+        starts = [lo + (hi - lo) * i / n for i in range(n + 1)]
+    else:
+        starts = []
+        s = lo
+        while s <= hi + 1e-9 and len(starts) < MAX_TUMOURS:
+            starts.append(min(s, hi))
+            s += dist
+    return lo, hi, loop, starts, stretch
+
+
+def _walk(path, k):
+    pts = []
+    for b, p in path:
+        q = (b / k, p)
+        if not pts or q != pts[-1]:
+            pts.append(q)
+    return Walk(pts) if len(pts) > 1 else None
+
+
+def sub_graph(g, a, b):
+    """The part of a graph from u = a to u = b, stretched to 0..1."""
+    us, fs = [p[0] for p in g], [p[1] for p in g]
+    inner = [[(u - a) / (b - a), f] for u, f in g if a + 1e-12 < u < b - 1e-12]
+    return [[0.0, float(np.interp(a, us, fs))]] + inner + [[1.0, float(np.interp(b, us, fs))]]
+
+
+def split_tumour(tm, left, right):
+    """Tumour settings for the two halves of a line cut in two (left, right: their (beat, pitch) points, both with
+    the cut point), so the bumps stay where they were: each half gets its own part of the range and graphs, Fit is
+    turned off (keeping the distance it had worked out) and the right half starts at the first bump after the cut
+    (a bump across the cut is cut off there). Random sides are picked again; Lead in works at each half's ends."""
+    if not tm:
+        return tm, tm
+    copy = json.loads(json.dumps(tm))
+    w, wl = _walk(list(left) + list(right)[1:], tm["k"]), _walk(left, tm["k"])
+    if w is None or wl is None or w.total - wl.total < 1e-9 * w.total:
+        return copy, json.loads(json.dumps(tm))
+    lo, hi, _, starts, stretch = bump_starts(w, tm)
+    cut = wl.total
+    base = dict(copy, fit=False, dist=tm["dist"] * stretch, start=0.0, end=1.0)
+
+    def half(a, b, r0, r1):
+        out = json.loads(json.dumps(base))
+        length = b - a
+        out["start"] = min(1.0, max(0.0, (r0 - a) / length))
+        out["end"] = min(1.0, max(0.0, (r1 - a) / length))
+        if r1 - r0 < 1e-9:  # (no bumps left on this half)
+            out["on"] = False
+        graphs = {key: g2 for key, g in (tm.get("graphs") or {}).items()
+                  if (g2 := clean_graph(sub_graph(g, a / w.total, b / w.total)))}
+        out.pop("graphs", None)
+        if graphs:
+            out["graphs"] = graphs
+        return out
+    first = half(0.0, cut, lo, min(hi, cut))
+    nxt = next(((i, s) for i, s in enumerate(starts) if s >= cut - 1e-9), None)
+    second = half(cut, w.total, nxt[1] if nxt else hi, hi if nxt else hi)
+    if nxt and tm["side"] == "alt" and nxt[0] % 2:  # (alternating: it has to start on the other side)
+        second["mirror"] = not second.get("mirror", False)
+    return first, second
+
+
 def tumour_path(path, tm):
     """The path (beat, pitch points) with the tumours on it."""
     k = tm["k"]
@@ -242,28 +328,9 @@ def tumour_path(path, tm):
     w = Walk(pts)
     if w.total < 1e-12:
         return path
-    lo, hi = min(tm["start"], tm["end"]) * w.total, max(tm["start"], tm["end"]) * w.total
     length = max(0.0, tm["length"] / k)
-    dist = max(tm["dist"] / k, (hi - lo) / MAX_TUMOURS, 1e-9)
-    # a closed loop (e.g. a full circle) with bumps all the way round: its end is its start again
-    loop = w.closed and lo < 1e-9 and hi > w.total - 1e-9
-    zg, lg, dg, rg, sg = (graph_fn(tm, key, w.total) for key in ("size", "length", "dist", "rot", "slant"))
-    if dg is not None:
-        starts = graph_starts(dg, lo, hi, dist, tm.get("fit"), loop and tm["side"] == "alt")
-    elif tm.get("fit") and hi - lo > 1e-9:
-        # a whole number of steps fits the range, so the last one lands right on its end; round a loop with
-        # alternating sides, an even number, so the sides keep alternating where it meets up
-        n = max(1, round((hi - lo) / dist))
-        if loop and tm["side"] == "alt":
-            n = max(2, 2 * round((hi - lo) / dist / 2))
-        dist = (hi - lo) / n
-        starts = [lo + (hi - lo) * i / n for i in range(n + 1)]
-    else:
-        starts = []
-        s = lo
-        while s <= hi + 1e-9 and len(starts) < MAX_TUMOURS:
-            starts.append(min(s, hi))
-            s += dist
+    lo, hi, loop, starts, _ = bump_starts(w, tm)
+    zg, lg, rg, sg = (graph_fn(tm, key, w.total) for key in ("size", "length", "rot", "slant"))
     rot = math.radians(tm.get("rot", 0.0))
     lean = abs(rot) > 1e-12
     sin, cos = math.sin(rot), math.cos(rot)
