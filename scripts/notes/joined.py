@@ -309,6 +309,51 @@ def piece_velocity(new, old, new_span, old_span):
         new["vel_env"] = [[0.0, va], [1.0, vb]]
 
 
+def join_velocity(new, olds, spans, new_span):
+    """Give `new` (olds joined) the velocities its parts had: one envelope over its time span made of each old
+    shape's own, over the time that shape covered (spans: (earliest, latest) beat of each). Where shapes cover the
+    same time, the one listed first wins; in time between shapes the velocity goes straight from one to the next."""
+    from notes.envelope import env_values, velocity_env
+    import numpy as np
+    envs = [velocity_env(sh) for sh in olds]
+    t0, t1 = new_span
+    if t1 - t0 < 1e-12:
+        return
+
+    def value(i, t):
+        a, b = spans[i]
+        u = 0.0 if b - a < 1e-12 else (t - a) / (b - a)
+        return float(env_values(envs[i], np.array([u]))[0])
+    times = sorted({t for a, b in spans for t in (a, b)} |
+                   {a + (b - a) * u for (a, b), env in zip(spans, envs) for u, _ in env})
+    pts = []
+    for ta, tb in zip(times, times[1:]):
+        m = (ta + tb) / 2
+        owner = next((i for i, (a, b) in enumerate(spans) if a - 1e-12 <= m <= b + 1e-12), None)
+        if owner is None:  # (no shape here: straight on to the next one)
+            continue
+        for t in (ta, tb):
+            p = [(t - t0) / (t1 - t0), value(owner, t)]
+            if not pts or p != pts[-1]:
+                pts.append(p)
+    if not pts:
+        return
+    pts = [[min(1.0, max(0.0, u)), v] for u, v in pts]
+    # (points on a straight stretch aren't needed)
+    keep = [pts[0]] + [b for a, b, c in zip(pts, pts[1:], pts[2:])
+                       if not (b[0] - a[0] > 1e-12 and c[0] - b[0] > 1e-12 and
+                               abs((b[1] - a[1]) / (b[0] - a[0]) - (c[1] - b[1]) / (c[0] - b[0])) < 1e-9)] + [pts[-1]]
+    if keep[0][0] > 1e-12:
+        keep.insert(0, [0.0, keep[0][1]])
+    if keep[-1][0] < 1 - 1e-12:
+        keep.append([1.0, keep[-1][1]])
+    new.pop("vel_env", None)
+    new["vel0"], new["vel1"] = int(round(keep[0][1])), int(round(keep[-1][1]))
+    straight = len(keep) == 2 and all(abs(v - round(v)) < 1e-9 for _, v in keep)
+    if not straight:
+        new["vel_env"] = keep
+
+
 def custom_groups(sh):
     """A custom shape's strokes in groups that touch each other (end on end or on a point), as lists of stroke
     numbers; one group = nothing to split."""

@@ -7,7 +7,8 @@ import math
 from tkinter import ttk
 
 from notes.bezier import anchor_count, nearest, split
-from notes.joined import join_shapes, piece_velocity, sections, split_at, split_custom, split_pieces, custom_groups
+from notes.joined import (custom_groups, join_shapes, join_velocity, piece_velocity, sections, split_at, split_custom,
+                          split_pieces)
 from notes.tumour import LINE_KINDS, split_tumour
 from roll.roll_shared import cached_path
 from window.widgets import Tooltip
@@ -42,9 +43,10 @@ class JoinSplit:
 
     def join_problem(self):
         """Why the selection can't be joined (None = it can)."""
-        if len(self.sels) < 2:
+        sels = [i for i in self.sels if i < len(self.shapes)]
+        if len(sels) < 2:
             return f"Select two or more {JOIN_KINDS.replace(' and ', ' or ')} to join them (Ctrl+click adds one)."
-        other = sorted({self.shape_label(self.shapes[i]).split(":")[0] for i in self.sels
+        other = sorted({self.shape_label(self.shapes[i]).split(":")[0] for i in sels
                         if self.shapes[i]["kind"] not in LINE_KINDS})
         if other:
             return f"Only {JOIN_KINDS} can be joined ({' and '.join(other).lower()} selected)."
@@ -52,9 +54,11 @@ class JoinSplit:
 
     def split_problem(self):
         """Why the selection can't be split into separate shapes (None = it can)."""
-        if len(self.sels) != 1:
+        if len(self.sels) != 1 or self.sel is None or self.sel >= len(self.shapes):
             return "Select one shape to split it."
         sh = self.selected()
+        if sh["kind"] == "custom" and (sh.get("text") or "notes" in sh):
+            return "Text and pasted notes can't be split."
         if not self.can_split_pieces(sh):
             return ("It's all one piece: nothing to split into separate shapes." if sh["kind"] in ("curve", "custom")
                     else "Only joined curves and custom shapes split into separate shapes.")
@@ -85,9 +89,11 @@ class JoinSplit:
             return math.hypot(roll.t2x(p[0]) - roll.t2x(q[0]), roll.p2y(p[1]) - roll.p2y(q[1])) <= TOUCH_PX * self.scale
 
         order = sorted(self.sels)
-        new = join_shapes([self.shapes[i] for i in order], roll.sy / roll.sx, touch)
+        olds = [self.shapes[i] for i in order]
+        new = join_shapes(olds, roll.sy / roll.sx, touch)
         if new is None:
             return
+        join_velocity(new, olds, [span(sh) for sh in olds], span(new))  # (each keeps its velocities)
         self.roll.cancel_draft()
         self.push_undo()
         at = order[0]
@@ -112,10 +118,9 @@ class JoinSplit:
         old = self.shapes[i]
         self.roll.cancel_draft()
         self.push_undo()
-        if old["kind"] != "custom":
-            whole = span(old)
-            for p in parts:
-                piece_velocity(p, old, span(p), whole)
+        whole = span(old)
+        for p in parts:
+            piece_velocity(p, old, span(p), whole)
         self.shapes[i:i + 1] = parts
         self.select_many(range(i, i + len(parts)), i)
         self.shapes_changed()
