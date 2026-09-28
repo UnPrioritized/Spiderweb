@@ -679,7 +679,7 @@
  "help.select.title": "Select (V)",
  "help.select.tip": "Click a shape to select it, drag it to move, drag its squares to reshape. Drag empty space = scroll, click empty space = move the play line. Double right-click = to the last drawing tool and back.",
  "help.select.text": [
-  "Click a shape (its line or one of its notes) to select it; Ctrl+click selects more (Ctrl+A = all). Drag a shape to move it (all selected ones move together), drag its squares to reshape it.",
+  "Click a shape (its line or one of its notes) to select it (where shapes overlap: a line first, then the one on top; a selected shape under the mouse stays the one you drag); Ctrl+click selects more (Ctrl+A = all). Drag a shape to move it (all selected ones move together), drag its squares to reshape it.",
   "",
   "Drag empty space to scroll. Click empty space (no drag) to move the play line there.",
   "",

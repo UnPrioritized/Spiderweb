@@ -274,6 +274,9 @@ class RollDrawing:
         row1 = np.maximum(row1, row0 + 1)
 
         notes = self.visible_notes(self.x2t(kb) * ppq, self.x2t(w) * ppq)
+        owner = notes[:, 5]
+        if len(owner) and owner.min() != owner.max():  # shapes drawn later go on top (clicks pick that one too)
+            notes = notes[np.argsort(owner.astype(np.uint16) if 0 <= owner.min() and owner.max() < 65536 else owner, kind="stable")]
         color = notes[:, 4] % len(SLOT_COLORS)
         if app.sels:
             mine = np.isin(notes[:, 5], list(app.sels))

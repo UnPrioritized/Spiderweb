@@ -170,8 +170,24 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 return i
         return None
 
-    def hit_shape(self, x, y):
-        for i in range(len(self.app.shapes) - 1, -1, -1):
+    def shape_at(self, x, y, prefer_selected=True):
+        """The shape a click at x, y is for, or None. A selected shape under the mouse comes first (so a selected
+        shape can be dragged from where another one lies over it); then lines (drawn over every note), the one on
+        top first; then insides / notes, again the one on top (drawn later = on top)."""
+        sels = sorted(self.app.sels, reverse=True) if prefer_selected else []
+        for among in ([sels] if sels else []) + [None]:
+            i = self.hit_shape(x, y, among)
+            if i is None:
+                i = self.note_owner(x, y, among)
+            if i is not None:
+                return i
+        return None
+
+    def hit_shape(self, x, y, among=None):
+        """The shape whose line is near x, y (the one on top first), else the one on top whose inside it is.
+        among: just these shape numbers (top first)."""
+        order = range(len(self.app.shapes) - 1, -1, -1) if among is None else among
+        for i in order:
             strokes = cached_strokes(self.app.shapes[i])
             if any(tm["on"] for tm in all_tumours(self.app.shapes[i])):  # the faint line as drawn counts too
                 strokes = strokes + cached_strokes(dict(self.app.shapes[i], tumour=None, tumours=None))
@@ -185,6 +201,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                     u = 0 if ll == 0 else max(0, min(1, ((x - ax) * dx + (y - ay) * dy) / ll))
                     if math.hypot(x - ax - u * dx, y - ay - u * dy) < 6:
                         return i
+        for i in order:
             sh = self.app.shapes[i]
             if "notes" in sh and self.inside_strokes(cached_strokes(sh), self.x2t(x), self.y2p(y)):
                 return i  # pasted notes: anywhere in their box
@@ -198,15 +215,17 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 return i
         return None
 
-    def note_owner(self, x, y):
+    def note_owner(self, x, y, among=None):
         """The shape whose note is under the mouse (a few pixels either side count for short notes), or None.
-        Only while the notes are shown."""
+        Only while the notes are shown. among: just these shapes."""
         if not self.app.show_notes.get() or not len(self.app.rendered):
             return None
         ppq, near = self.app.ppq, 3 * self.scale
         t, t_lo, t_hi = (self.x2t(v) * ppq for v in (x, x - near, x + near))
         ns = self.visible_notes(t_lo, t_hi)
         ns = ns[(ns[:, 2] == math.floor(self.y2p(y) + 0.5)) & (ns[:, 0] <= t_hi) & (ns[:, 1] >= t_lo)]
+        if among is not None:
+            ns = ns[np.isin(ns[:, 5], list(among))]
         if not len(ns):
             return None
         on = ns[(ns[:, 0] <= t) & (ns[:, 1] > t)]  # right on a note first, else the nearest
@@ -267,9 +286,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.request_redraw()
             return
         if tool == "select":
-            i = self.hit_shape(e.x, e.y)
-            if i is None:
-                i = self.note_owner(e.x, e.y)  # on one of a shape's notes counts too
+            # (its notes count too; a selected shape under the mouse first, except Ctrl+click: adds the one on top)
+            i = self.shape_at(e.x, e.y, prefer_selected=not e.state & CTRL)
             if i is None and hit and not e.state & CTRL:
                 i = app.sel  # anywhere inside the selected custom shape's box moves it
             # clicking the one selected funnel again: its line / curve under the mouse gets highlighted;
@@ -664,9 +682,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if not sc:
             return
         if sc["tick"] is None:
-            i = None if self.draft else self.hit_shape(sc["x"], sc["y"])
-            if i is None and not self.draft:
-                i = self.note_owner(sc["x"], sc["y"])  # on one of a shape's notes counts too
+            i = None if self.draft else self.shape_at(sc["x"], sc["y"])  # (its notes count too)
             if i is not None and sc["deselect"]:  # near a shape (or on its notes): its menu
                 self.show_menu(e, i)
             elif sc["deselect"]:
