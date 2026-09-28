@@ -1,12 +1,17 @@
 """Join (selected lines / polylines / freehand strokes / curves / arcs -> one curve) and Split (a joined curve back
-into pieces, a curve / polyline / line cut in two where it was right-clicked, a custom shape into its separate
-drawings). The maths is in notes/joined.py."""
+into pieces, any of those cut in two where it was right-clicked, a custom shape into its separate drawings). The
+maths is in notes/joined.py."""
 
 import copy
 import math
 from tkinter import ttk
 
+import numpy as np
+
+from notes.arc import arc_circle, arc_points
 from notes.bezier import anchor_count, nearest, split
+from notes.engine import shape_path
+from notes.smooth import smooth_path
 from notes.joined import (custom_groups, join_shapes, join_velocity, piece_velocity, sections, split_at, split_custom,
                           split_pieces)
 from notes.tumour import LINE_KINDS, split_tumour
@@ -134,7 +139,7 @@ class JoinSplit:
         self.status.config(text=f"Split into {len(parts)} shapes")
 
     def split_here(self, i, at):
-        """Cut a curve / polyline / line in two where it was right-clicked (at: x, y on screen; near an anchor or
+        """Cut a line kind in two where it was right-clicked (at: x, y on screen; near an anchor or
         polyline point: there)."""
         sh = self.shapes[i]
         roll = self.roll
@@ -150,6 +155,8 @@ class JoinSplit:
                 c["sharp"] = sorted(set(c.get("sharp", [])) | {seg + 1})  # (a corner there, so each half keeps its shape)
                 a = seg + 1
             got = split_at(c, a)
+        elif sh["kind"] == "arc":
+            got = self.split_arc(sh, at)
         else:
             got = self.split_line(sh, at)
         if not got:
@@ -164,38 +171,82 @@ class JoinSplit:
                    for a in (seg, seg + 1))
         return a if d <= TOUCH_PX * self.scale else None
 
-    def split_line(self, sh, at):
-        """A line / polyline cut in two: at the point right-clicked on, or on the nearest part of it."""
+    def nearest_on(self, pts, at):
+        """The spot on the polyline pts (beat, pitch) nearest the click on screen: (segment, 0..1 along it, its
+        length on screen)."""
         roll = self.roll
+        p = np.array([[roll.t2x(b), roll.p2y(q)] for b, q in pts], float)
+        a, ab = p[:-1], p[1:] - p[:-1]
+        L = (ab ** 2).sum(1)
+        u = np.clip(((at.x - a[:, 0]) * ab[:, 0] + (at.y - a[:, 1]) * ab[:, 1]) / np.where(L > 0, L, 1), 0, 1)
+        d = np.hypot(a[:, 0] + ab[:, 0] * u - at.x, a[:, 1] + ab[:, 1] * u - at.y)
+        j = int(np.argmin(d))
+        return j, float(u[j]), float(np.sqrt(L[j]))
+
+    def split_line(self, sh, at):
+        """A line / polyline / freehand stroke cut in two: at the point right-clicked on, or on the nearest part of
+        it (a freehand stroke: at its nearest drawn point; a straightened one is cut from the straightened line, so
+        the halves look the same, and they're no longer straightened)."""
         pts = sh["pts"]
-        best = None
-        for j, (a, b) in enumerate(zip(pts, pts[1:])):
-            ax, ay, bx, by = roll.t2x(a[0]), roll.p2y(a[1]), roll.t2x(b[0]), roll.p2y(b[1])
-            L = (bx - ax) ** 2 + (by - ay) ** 2
-            u = 0.0 if L == 0 else max(0.0, min(1.0, ((at.x - ax) * (bx - ax) + (at.y - ay) * (by - ay)) / L))
-            d = math.hypot(ax + (bx - ax) * u - at.x, ay + (by - ay) * u - at.y)
-            if best is None or d < best[0]:
-                best = (d, j, u)
-        _, j, u = best
+        if sh["kind"] == "free" and sh.get("smooth"):
+            pts = [list(p) for p in smooth_path([tuple(p) for p in pts], sh["smooth"], sh.get("k", 1.0))]
+            sh = {key: v for key, v in sh.items() if key != "smooth"}
+        j, u, seg_px = self.nearest_on(pts, at)
         a, b = pts[j], pts[j + 1]
-        seg_px = math.hypot(roll.t2x(b[0]) - roll.t2x(a[0]), roll.p2y(b[1]) - roll.p2y(a[1]))
-        if u * seg_px <= TOUCH_PX * self.scale:
+        near = TOUCH_PX * self.scale
+        if sh["kind"] == "free":
+            cut, k = (list(a), j) if u < 0.5 else (list(b), j + 1)
+        elif u * seg_px <= near:
             cut, k = list(a), j
-        elif (1 - u) * seg_px <= TOUCH_PX * self.scale:
+        elif (1 - u) * seg_px <= near:
             cut, k = list(b), j + 1
         else:
             cut, k = [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u], None
-        if k is not None and k in (0, len(pts) - 1):
+        if k is not None and (k in (0, len(pts) - 1) or sh["kind"] == "free" and
+                              min(self.screen_dist(cut, pts[0]), self.screen_dist(cut, pts[-1])) <= near):
             return None
         left = pts[:j + 1] + [cut] if k is None else pts[:k + 1]
         right = [cut] + pts[j + 1:] if k is None else pts[k:]
+        kinds = [sh["kind"]] * 2 if sh["kind"] == "free" else ["line" if len(h) == 2 else "poly" for h in (left, right)]
+        return self.halves(sh, (left, right), kinds)
+
+    def split_arc(self, sh, at):
+        """An arc cut in two where it was right-clicked: two arcs on the same circle."""
+        k = sh.get("k", 1.0)
+        path = arc_points(sh["pts"], k)
+        j, u, _ = self.nearest_on(path, at)
+        f = (j + u) / (len(path) - 1)  # (arc_points: evenly round the circle)
+        got = arc_circle(sh["pts"], k)
+
+        def point(f):
+            if got is None:  # (in a straight line)
+                (a, _, c) = sh["pts"]
+                return [a[0] + (c[0] - a[0]) * f, a[1] + (c[1] - a[1]) * f]
+            centre, r, t0, turn = got
+            t = t0 + turn * f
+            return [(centre[0] + r * math.cos(t)) * k, centre[1] + r * math.sin(t)]
+        cut = point(f)
+        a, c = sh["pts"][0], sh["pts"][2]
+        if min(self.screen_dist(cut, a), self.screen_dist(cut, c)) <= TOUCH_PX * self.scale:
+            return None
+        left, right = [list(a), point(f / 2), cut], [cut, point((1 + f) / 2), list(c)]
+        return self.halves(sh, (left, right), ["arc", "arc"])
+
+    def screen_dist(self, p, q):
+        roll = self.roll
+        return math.hypot(roll.t2x(p[0]) - roll.t2x(q[0]), roll.p2y(p[1]) - roll.p2y(q[1]))
+
+    def halves(self, sh, parts, kinds):
+        """The two halves of a cut shape (their points and kinds), with its other settings; the tumours stay where
+        they were (tumour.split_tumour)."""
         out = []
-        tms = split_tumour(sh.get("tumour"), left, right)  # (the bumps stay where they were)
-        for half, tm in zip((left, right), tms):
+        for half, kind in zip(parts, kinds):
             new = copy.deepcopy({key: v for key, v in sh.items() if key not in ("pts", "tumour")})
             new["pts"] = [list(p) for p in half]
-            new["kind"] = "line" if len(half) == 2 else "poly"
+            new["kind"] = kind
+            out.append(new)
+        tms = split_tumour(sh.get("tumour"), *(shape_path(h) for h in out))
+        for new, tm in zip(out, tms):
             if tm:
                 new["tumour"] = tm
-            out.append(new)
         return out

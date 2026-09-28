@@ -273,7 +273,7 @@ TOPICS = [
     dict(id="join", section="Editing", title="Join and split",
          tip="Select several lines, polylines, freehand strokes, curves or arcs, then\n"
              "Join shapes into one curve (under the shape list, or right-click).\n"
-             "Right-click a curve, polyline or line → Split here cuts it in two.",
+             "Right-click any of them → Split here cuts it in two.",
          text="Join: select two or more lines, polylines, freehand strokes, curves or arcs, then click Join shapes "
               "into one curve under the shape list (or right-click one of them → Join shapes into one curve). They "
               "become one Curve shape: ends that touch are joined (with a corner there), "
@@ -291,8 +291,11 @@ TOPICS = [
               "tumours first, then join. Each shape keeps its velocities (where shapes play at the same time, the "
               "first selected one's win); Last note comes from the first shape.\n"
               "[clip:join-tumours]\n\n"
-              "Split here: right-click a curve, polyline or line where you want to cut it → Split here. On an anchor "
-              "or a polyline point it's cut there; anywhere else a point is added there first. Each half keeps the "
+              "Split here: right-click a line, polyline, freehand stroke, curve or arc where you want to cut it → "
+              "Split here. On an anchor or a polyline point it's cut there; anywhere else a point is added there "
+              "first. An arc becomes two arcs of the same circle; a freehand stroke is cut at its nearest drawn "
+              "point (a straightened one is cut from the straightened line, and the halves are no longer "
+              "straightened, so they look the same). Each half keeps the "
               "velocities it had, and its tumours stay where they were: each half gets its part of the Range and "
               "graphs (Fit is turned off, keeping the distance it had worked out). Only a bump across the cut is "
               "cut off, random sides are picked again and Lead in starts again at the cut.\n"

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from window.curve_dialog import load_formulas
 from notes.joined import is_joined
 from notes.funnel import CURVE_PRESETS, inside_out, turned_curve
+from notes.tumour import LINE_KINDS
 from roll.roll_shared import SHIFT
 from window.widgets import symmetry_menu
 
@@ -89,7 +90,7 @@ class ShapeMenu:
             ok = app.can_join()
             item("Join shapes into one curve" if ok else "Join shapes into one curve  (only lines, polylines, "
                  "freehand strokes, curves and arcs)", "", app.join_selected, ok)
-        if len(app.sels) == 1 and sh["kind"] in ("curve", "poly", "line"):
+        if len(app.sels) == 1 and sh["kind"] in LINE_KINDS:
             item("Split here", "", lambda: app.split_here(i, at))
         if len(app.sels) == 1 and app.can_split_pieces(sh):
             item("Split into separate shapes", "", lambda: app.split_pieces(i))

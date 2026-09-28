@@ -60,6 +60,12 @@ def _arc(m):
     return (*got, *_angles(*m, got[0]))
 
 
+def arc_circle(pts, k=1.0):
+    """The arc through pts[0], pts[1], pts[2] as (centre, radius, start angle, signed span), worked out with beats
+    divided by k (as arc_points does: multiply a point's x by k again), or None if they're in a straight line."""
+    return _arc([(p[0] / k, p[1]) for p in pts[:3]])
+
+
 def arc_points(pts, k=1.0, step=STEP):
     """The arc as a list of points from pts[0] through pts[1] to pts[2] (a straight line if they're in a line; the
     whole circle if pts[2] is pts[0]). Starts and ends exactly on the end points (so outlines that meet there stay
