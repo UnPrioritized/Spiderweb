@@ -270,10 +270,11 @@ TOPICS = [
               "Off: the halves go their own way again.",
          words="mirror arch s-curve symmetry"),
     dict(id="join", section="Editing", title="Join and split",
-         tip="Select several lines, curves or arcs, right-click → Join: one curve.\n"
+         tip="Select several lines, polylines, freehand strokes, curves or arcs,\n"
+             "right-click → Join shapes into one curve.\n"
              "Right-click a curve, polyline or line → Split here cuts it in two.",
          text="Join: select two or more lines, polylines, freehand strokes, curves or arcs, right-click one of them → "
-              "Join into one curve. They become one Curve shape: ends that touch are joined (with a corner there), "
+              "Join shapes into one curve. They become one Curve shape: ends that touch are joined (with a corner there), "
               "and the curve's anchors and handles can be edited like any curve. Freehand strokes are turned into "
               "a smooth curve that follows them closely.\n"
               "[clip:join-touching]\n\n"

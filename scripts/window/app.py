@@ -28,7 +28,7 @@ from window.panel_freehand import FreehandPanel
 from window.panel_funnel import FunnelPanel
 from window.panel_text import TextPanel
 from window.panel_tumour import TumourPanel
-from notes.joined import all_tumours
+from notes.joined import all_tumours, is_joined
 from window.join_split import JoinSplit
 from roll.pianoroll import PianoRoll
 from files import errors
@@ -906,6 +906,9 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
             return "Pasted notes"
         if sh.get("text"):
             return f"Text: {sh.get('name') or '?'}"
+        if is_joined(sh):
+            pieces = len(sh.get("gaps", [])) + 1
+            return f"{KINDS['curve']} (joined, {pieces} pieces)" if pieces > 1 else f"{KINDS['curve']} (joined)"
         return f"Custom: {sh.get('name') or '?'}" if sh["kind"] == "custom" else KINDS[sh["kind"]]
 
     def note_count(self, sh):

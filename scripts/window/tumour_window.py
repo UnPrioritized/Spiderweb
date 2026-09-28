@@ -10,6 +10,7 @@ from files.mathexpr import calc, fmt
 from notes.joined import shown_tumour, unify_tumours
 from notes.tumour import GRAPH_KEYS, TUMOUR_DEFAULTS, clean_graph
 from window.graph_window import GraphWindow
+from window.panel_custom import GAP_COLOR
 from window.widgets import Scrub, Tooltip
 
 SHAPE_CHOICES = [("triangle", "Triangle"), ("square", "Square"), ("circle", "Circle"), ("parabola", "Parabola")]
@@ -20,7 +21,7 @@ WRAP_CHOICES = [("simple", "Straight"), ("wrap", "Bent with the line")]
 NUMBERS = [("size", "Size", "keys", (0.1, 1, 0.01), 0, 1000), ("length", "Length", "ticks", (1, 10, 0.1), 0, 10 ** 7),
            ("dist", "Distance", "ticks", (1, 10, 0.1), 1, 10 ** 7),
            ("rot", "Rotation", "degrees", (1, 15, 0.1), -180, 180),
-           ("slant", "Slant", "% (square)", (1, 10, 0.1), -100, 100),
+           ("slant", "Slant", "%", (1, 10, 0.1), -100, 100),
            ("ease", "Lead in", "ticks", (1, 10, 0.1), 0, 10 ** 7)]
 TICKS = ("length", "dist", "ease")  # stored in beats, shown in ticks
 TIPS = {
@@ -130,6 +131,8 @@ class TumourWindow(tk.Toplevel):
         self.info = ttk.Label(box, text="", foreground="#777", font=("Segoe UI", 8),
                               wraplength=int(300 * app.scale), justify="left")
         self.info.grid(row=10, column=0, columnspan=5, sticky="ew", pady=(4, 0))
+        ttk.Button(box, text="Close", command=self.close).grid(row=11, column=0, columnspan=5, sticky="e",
+                                                               pady=(6, 0))
 
         self.bind("<Escape>", lambda e: self.close())
         self.bind("<Configure>", self.remember, add="+")
@@ -199,11 +202,14 @@ class TumourWindow(tk.Toplevel):
                                        foreground="#0a50e0" if key in graphs else "#777")
         if self.graph_window:
             self.graph_window.sync()
+        own = bool(tgts) and any(t.get("tumours") for t in tgts)
         self.info.config(text="" if not tgts else
                          "The joined shapes kept their own tumours (these are the first one's). Changing anything "
-                         "here gives the whole curve these settings." if any(t.get("tumours") for t in tgts) else
+                         "here, even just switching Tumours off and on, gives the WHOLE curve these settings and the "
+                         "other shapes' tumours are gone (Ctrl+Z brings them back)." if own else
                          "Bumps along the line. The line's points stay draggable. Length 0 = spikes (a zigzag)."
-                         if on else "Tick Tumours to put bumps along this line.")
+                         if on else "Tick Tumours to put bumps along this line.",
+                         foreground=GAP_COLOR if own else "#777")
 
     def set(self, key, value, group=False):
         """A tumour setting changed (group: one undo step while typing / quick-changing)."""

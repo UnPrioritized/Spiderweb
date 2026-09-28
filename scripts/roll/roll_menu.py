@@ -86,7 +86,7 @@ class ShapeMenu:
         if app.tumour_targets():
             item("Tumours…", "", app.open_tumours)
         if app.can_join():
-            item(f"Join {len(app.sels)} shapes into one curve", "", app.join_selected)
+            item("Join shapes into one curve", "", app.join_selected)
         if len(app.sels) == 1 and sh["kind"] in ("curve", "poly", "line"):
             item("Split here", "", lambda: app.split_here(i, at))
         if len(app.sels) == 1 and app.can_split_pieces(sh):
