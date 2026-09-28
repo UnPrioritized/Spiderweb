@@ -2,6 +2,7 @@
 arcs. It stays open while you work and follows the selection; the side panel only shows a summary line and a
 button that opens it (panel_tumour.py)."""
 
+import json
 import random
 import tkinter as tk
 from tkinter import ttk
@@ -71,13 +72,14 @@ class TumourWindow(tk.Toplevel):
         box = ttk.Frame(self, padding=8)
         box.pack(fill="both", expand=True)
         box.columnconfigure(3, weight=1)
-        self.what = ttk.Label(box, text="", foreground="#777")
+        self.what = ttk.Label(box, text="", foreground="#777", wraplength=int(300 * app.scale), justify="left")
         self.what.grid(row=0, column=0, columnspan=5, sticky="w", pady=(0, 4))
         top = ttk.Frame(box)
         top.grid(row=1, column=0, columnspan=5, sticky="w")
         self.on = tk.BooleanVar()
         self.on_box = ttk.Checkbutton(top, text="Tumours", variable=self.on,
-                                      command=lambda: self.set("on", self.on.get()))
+                                      command=lambda: self.set("on", True if self.mixed else self.on.get()))
+        self.mixed = False  # some of the selected shapes have tumours on, some not: half ticked, a click = all on
         self.on_box.pack(side="left")
         self.combo(top, "shape", SHAPE_CHOICES, 9, "Shape")
         for r, (key, label, unit, steps, lo, hi) in enumerate(NUMBERS, start=2):
@@ -171,8 +173,11 @@ class TumourWindow(tk.Toplevel):
             i = next(i for i in sorted(app.sels) if app.shapes[i] is tgts[0])
             self.what.config(text=f"Shape {i + 1}: {app.shape_label(tgts[0])}")
         else:
-            self.what.config(text=f"{len(tgts)} shapes (they all change together)")
-        tm = dict(TUMOUR_DEFAULTS, **((shown_tumour(tgts[0]) if tgts else None) or {"on": False}))
+            on = sum(bool((shown_tumour(t) or {}).get("on")) for t in tgts)
+            self.what.config(text=f"{len(tgts)} shapes (they all change together)" if on in (0, len(tgts)) else
+                             f"{len(tgts)} shapes, {on} with tumours: the settings change those. Clicking the "
+                             f"half-ticked Tumours box gives the others these tumours too.")
+        tm = dict(TUMOUR_DEFAULTS, **(app.shown_tumours() or {"on": False}))
         self.loading = True
         self.on.set(tm["on"])
         self.fit.set(tm["fit"])
@@ -188,6 +193,9 @@ class TumourWindow(tk.Toplevel):
         self.loading = False
         on = tm["on"] and bool(tgts)
         self.on_box.config(state="normal" if tgts else "disabled")
+        ons = [bool((shown_tumour(t) or {}).get("on")) for t in tgts]
+        self.mixed = any(ons) and not all(ons)
+        self.on_box.state(["alternate"] if self.mixed else ["!alternate"])
         for w in self.widgets:
             w.config(state=("readonly" if isinstance(w, ttk.Combobox) else "normal") if on else "disabled")
         self.reroll.config(state="normal" if on and tm["side"] == "random" else "disabled")
@@ -224,9 +232,18 @@ class TumourWindow(tk.Toplevel):
         else:
             app.push_undo()
         k = app.roll.sy / app.roll.sx if app.roll.sx else 0.25
+        shown = app.shown_tumours()
+        if self.mixed and key == "on" and value:  # (half ticked: the others get the settings shown)
+            for t in tgts:
+                if not (shown_tumour(t) or {}).get("on"):
+                    t.pop("tumours", None)
+                    t.pop("splits", None)
+                    t["tumour"] = dict(json.loads(json.dumps(shown)), k=k)
+        elif self.mixed or not (key == "on" and value):  # (the settings only change shapes with tumours on)
+            tgts = [t for t in tgts if (shown_tumour(t) or {}).get("on" if self.mixed else "shape")]
         for t in tgts:
             unify_tumours(t)  # (a joined curve's shapes with their own tumours: these become the whole curve's)
-            tm = t.setdefault("tumour", dict(TUMOUR_DEFAULTS))
+            tm = t.setdefault("tumour", json.loads(json.dumps(shown or TUMOUR_DEFAULTS)))
             tm[key] = value
             tm["k"] = k  # sizes as the roll looks now
         app.shapes_changed()
@@ -276,7 +293,7 @@ class TumourWindow(tk.Toplevel):
             return
         g = clean_graph(pts)
         k = app.roll.sy / app.roll.sx if app.roll.sx else 0.25
-        for t in tgts:
+        for t in [t for t in tgts if (shown_tumour(t) or {}).get("on" if self.mixed else "shape")]:
             unify_tumours(t)
             tm = t.setdefault("tumour", dict(TUMOUR_DEFAULTS))
             graphs = dict(tm.get("graphs") or {})

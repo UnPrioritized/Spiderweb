@@ -94,8 +94,7 @@ class GraphWindow(tk.Toplevel):
     # ------------------------------------------------------------ the shapes' graph
 
     def tm(self):
-        tgts = self.app.tumour_targets()
-        return dict(TUMOUR_DEFAULTS, **((shown_tumour(tgts[0]) if tgts else None) or {}))
+        return dict(TUMOUR_DEFAULTS, **(self.app.shown_tumours() or {}))
 
     def sync(self, fit_view=False):
         """Show the first selected line's graph (not while a point is being dragged)."""

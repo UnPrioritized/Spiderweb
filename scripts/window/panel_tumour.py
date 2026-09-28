@@ -28,6 +28,12 @@ class TumourPanel:
         """What the tumour settings change: the selected lines / polylines / freehand strokes / curves / arcs."""
         return [self.shapes[i] for i in sorted(self.sels) if self.shapes[i]["kind"] in LINE_KINDS]
 
+    def shown_tumours(self):
+        """The tumour settings the tumour window shows: the first selected line's that has tumours on (else the first
+        one's that has any), None when none of them has any."""
+        tms = [tm for tm in map(shown_tumour, self.tumour_targets()) if tm]
+        return next((tm for tm in tms if tm.get("on")), tms[0] if tms else None)
+
     def open_tumours(self):
         if self.tumour_window:
             self.tumour_window.deiconify()
