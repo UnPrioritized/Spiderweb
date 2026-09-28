@@ -203,6 +203,11 @@ TOPICS = [
               "side.\n\n"
               "Slant (square bumps only): 0 = a square, 100 = the top narrows to a point, minus = the top is wider "
               "than the bottom.\n\n"
+              "Graphs: the … button next to Size, Length, Distance, Rotation or Slant opens a graph of that number "
+              "along the whole line (from its start on the left to its end on the right). 100 % = the number in "
+              "the box, so the box still scales the whole graph. Drag the points (Shift = free), click to add one, "
+              "right-click one to remove it, or pick a preset or type a formula. The part outside the tumour Range "
+              "is greyed out. A number following a graph says \"× graph\" in blue; Flat (off) removes it.\n\n"
               "Side: alternating, left, right or random.\n"
               "[clip:tumours-side]\n\n"
               "Straight or Bent with the line: this only matters where the line curves under a bump (long bumps "
@@ -219,7 +224,7 @@ TOPICS = [
               "comes out round at that zoom). Zooming afterwards stretches them like the rest of the piano roll; "
               "changing any tumour setting again reshapes them for the zoom you're at now. So zoom to how you want "
               "to see them first, then set them up.",
-         words="bumps spikes zigzag wave zoom round stretched rotate tilt lean slant trapezoid"),
+         words="bumps spikes zigzag wave zoom round stretched rotate tilt lean slant trapezoid graph grow shrink change along formula"),
     dict(id="straighten", section="Shapes and settings", title="Straighten (freehand)",
          tip="0 = as drawn. Higher = straighter lines, smoother curves, perfect shapes.",
          text="Freehand strokes (and freehand strokes in a live shape: pick the stroke first) have a Straighten "

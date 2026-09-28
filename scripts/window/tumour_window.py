@@ -7,7 +7,8 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.mathexpr import calc, fmt
-from notes.tumour import TUMOUR_DEFAULTS
+from notes.tumour import GRAPH_KEYS, TUMOUR_DEFAULTS, clean_graph
+from window.graph_window import GraphWindow
 from window.widgets import Scrub, Tooltip
 
 SHAPE_CHOICES = [("triangle", "Triangle"), ("square", "Square"), ("circle", "Circle"), ("parabola", "Parabola")]
@@ -62,14 +63,16 @@ class TumourWindow(tk.Toplevel):
         self.vars = {}     # setting -> StringVar of its entry / combobox
         self.entries = {}  # setting -> its entry box
         self.widgets = []  # everything greyed out while tumours are off
+        self.graph_btns, self.units = {}, {}  # setting -> its "…" button / unit label
+        self.graph_window = None
 
         box = ttk.Frame(self, padding=8)
         box.pack(fill="both", expand=True)
-        box.columnconfigure(2, weight=1)
+        box.columnconfigure(3, weight=1)
         self.what = ttk.Label(box, text="", foreground="#777")
-        self.what.grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 4))
+        self.what.grid(row=0, column=0, columnspan=5, sticky="w", pady=(0, 4))
         top = ttk.Frame(box)
-        top.grid(row=1, column=0, columnspan=4, sticky="w")
+        top.grid(row=1, column=0, columnspan=5, sticky="w")
         self.on = tk.BooleanVar()
         self.on_box = ttk.Checkbutton(top, text="Tumours", variable=self.on,
                                       command=lambda: self.set("on", self.on.get()))
@@ -84,16 +87,24 @@ class TumourWindow(tk.Toplevel):
             e.bind("<Return>", lambda ev, key=key: self.on_entry(key))
             e.bind("<FocusOut>", lambda ev, key=key: self.on_entry(key))
             Scrub(app, [(e, var, lambda key=key: self.on_entry(key))], steps, lo, hi, label=lb)
-            ttk.Label(box, text=unit, foreground="#777").grid(row=r, column=2, sticky="w")
+            if key in GRAPH_KEYS:
+                b = self.graph_btns[key] = ttk.Button(box, text="…", width=2,
+                                                      command=lambda key=key, label=label, unit=unit:
+                                                      self.open_graph(key, label, unit))
+                b.grid(row=r, column=2, sticky="w", padx=(0, 5))
+                Tooltip(b, "A graph: this number changes along the line.")
+                self.widgets.append(b)
+            u = self.units[key] = ttk.Label(box, text=unit, foreground="#777")
+            u.grid(row=r, column=3, sticky="w")
             Tooltip(e, TIPS[key])
             self.widgets.append(e)
             self.entries[key] = e
         row = ttk.Frame(box)
-        row.grid(row=8, column=0, columnspan=4, sticky="w", pady=(1, 0))
+        row.grid(row=8, column=0, columnspan=5, sticky="w", pady=(1, 0))
         self.combo(row, "side", SIDE_CHOICES, 10, "Side", pad=0)
         self.combo(row, "wrap", WRAP_CHOICES, 15, "")
         row = ttk.Frame(box)
-        row.grid(row=9, column=0, columnspan=4, sticky="w", pady=(1, 0))
+        row.grid(row=9, column=0, columnspan=5, sticky="w", pady=(1, 0))
         ttk.Label(row, text="Range").pack(side="left")
         for i, key in enumerate(("start", "end")):
             if i:
@@ -117,7 +128,7 @@ class TumourWindow(tk.Toplevel):
         Tooltip(self.reroll, "Random sides: pick them again.")
         self.info = ttk.Label(box, text="", foreground="#777", font=("Segoe UI", 8),
                               wraplength=int(300 * app.scale), justify="left")
-        self.info.grid(row=10, column=0, columnspan=4, sticky="ew", pady=(4, 0))
+        self.info.grid(row=10, column=0, columnspan=5, sticky="ew", pady=(4, 0))
 
         self.bind("<Escape>", lambda e: self.close())
         self.bind("<Configure>", self.remember, add="+")
@@ -140,6 +151,8 @@ class TumourWindow(tk.Toplevel):
             self.app.tumour_pos = f"+{self.winfo_x()}+{self.winfo_y()}"
 
     def close(self):
+        if self.graph_window:
+            self.graph_window.close()
         self.app.tumour_window = None
         self.destroy()
         self.app.roll.focus_set()
@@ -174,7 +187,17 @@ class TumourWindow(tk.Toplevel):
         for w in self.widgets:
             w.config(state=("readonly" if isinstance(w, ttk.Combobox) else "normal") if on else "disabled")
         self.reroll.config(state="normal" if on and tm["side"] == "random" else "disabled")
-        self.entries["slant"].config(state="normal" if on and tm["shape"] == "square" else "disabled")
+        square = on and tm["shape"] == "square"
+        self.entries["slant"].config(state="normal" if square else "disabled")
+        self.graph_btns["slant"].config(state="normal" if square else "disabled")
+        # a number following a graph: blue, "× graph" after its unit
+        graphs = tm.get("graphs") or {}
+        for key, _, unit, *_ in NUMBERS:
+            if key in self.graph_btns:
+                self.units[key].config(text=f"{unit}  × graph" if key in graphs else unit,
+                                       foreground="#0a50e0" if key in graphs else "#777")
+        if self.graph_window:
+            self.graph_window.sync()
         self.info.config(text="" if not tgts else
                          "Bumps along the line. The line's points stay draggable. Length 0 = spikes (a zigzag)."
                          if on else "Tick Tumours to put bumps along this line.")
@@ -224,3 +247,35 @@ class TumourWindow(tk.Toplevel):
             return
         self.set(key, value, group=True)
         self.app.sync_tumour()
+
+    def open_graph(self, key, label, unit):
+        if self.graph_window and self.graph_window.key != key:
+            self.graph_window.close()
+        if self.graph_window:
+            self.graph_window.lift()
+        else:
+            self.graph_window = GraphWindow(self, key, label, unit)
+        self.graph_window.focus_set()
+
+    def set_graph(self, key, pts):
+        """The graph window changed a graph (its undo step is already taken)."""
+        app = self.app
+        tgts = app.tumour_targets()
+        if not tgts:
+            return
+        g = clean_graph(pts)
+        k = app.roll.sy / app.roll.sx if app.roll.sx else 0.25
+        for t in tgts:
+            tm = t.setdefault("tumour", dict(TUMOUR_DEFAULTS))
+            graphs = dict(tm.get("graphs") or {})
+            if g:
+                graphs[key] = [list(p) for p in g]
+            else:
+                graphs.pop(key, None)
+            if graphs:
+                tm["graphs"] = graphs
+            else:
+                tm.pop("graphs", None)
+            tm["k"] = k  # sizes as the roll looks now
+        app.shapes_changed()
+        app.sync_tumour()

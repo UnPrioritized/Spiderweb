@@ -9,6 +9,10 @@ smoothly instead of starting with a sudden (e.g. straight-up) side.
 positive leaning forward (the way the line runs), so 90 lays it flat along the line and 180 puts it on the other side.
 `slant` (-1..1, square only): the square's top is narrowed by that much of its length (1 = a point, like a
 triangle; minus = wider than its base).
+`graphs` (optional): {setting: [[u, f], ...]} for the settings in GRAPH_KEYS: along the whole line (u = 0 its start,
+1 its end, by length on screen) that setting is multiplied by f (1 = 100 %), straight between the points. Size
+changes point by point (like easing); length, slant and rotation per bump (at its start, rotation at its middle);
+distance sets how far apart bumps are wherever they are.
 `fit`: the distance is stretched a little so a whole number of steps fits the range exactly; round a closed loop
 (e.g. a full circle) the bumps then meet up where it starts.
 Worked out as it looks on screen: k = beats per key on screen when the settings were last changed (like arcs, see
@@ -29,6 +33,8 @@ SIDES = ("alt", "left", "right", "random")
 WRAPS = ("simple", "wrap")
 LINE_KINDS = ("line", "poly", "free", "curve", "arc")  # the shapes that can have tumours
 MAX_TUMOURS = 20000
+GRAPH_KEYS = ("size", "length", "dist", "rot", "slant")  # the settings that can follow a graph
+GRAPH_LIMIT = 10.0  # graph values from -1000 % to 1000 %
 TUMOUR_DEFAULTS = {"on": True, "shape": "triangle", "size": 3.0, "length": 0.125, "dist": 0.125, "side": "alt",
                    "wrap": "simple", "start": 0.0, "end": 1.0, "ease": 0.0, "rot": 0.0, "slant": 0.0, "fit": False, "seed": 1, "mirror": False,
                    "k": 0.25}
@@ -57,7 +63,54 @@ def clean_tumour(tm):
     out["on"] = tm.get("on", True) is not False
     out["mirror"] = tm.get("mirror") is True
     out["fit"] = tm.get("fit") is True
+    graphs = {key: g for key in GRAPH_KEYS if (g := clean_graph((tm.get("graphs") or {}).get(key)
+                                                               if isinstance(tm.get("graphs"), dict) else None))}
+    if graphs:
+        out["graphs"] = graphs
     return out
+
+
+def clean_graph(g):
+    """A graph from a file: [[u, f], ...] from u = 0 to u = 1, u never going back (None if it's unusable or flat
+    at 100 %)."""
+    try:
+        pts = [[min(1.0, max(0.0, float(u))), min(GRAPH_LIMIT, max(-GRAPH_LIMIT, float(f)))] for u, f in g]
+    except (TypeError, ValueError):
+        return None
+    if len(pts) < 2 or not all(math.isfinite(a) for p in pts for a in p):
+        return None
+    pts[0][0], pts[-1][0] = 0.0, 1.0
+    for a, b in zip(pts, pts[1:]):
+        b[0] = max(b[0], a[0])
+    return None if all(abs(f - 1) < 1e-12 for _, f in pts) else pts
+
+
+def graph_fn(tm, key, total):
+    """The setting's graph as a function of distances along the line (array or number in, multipliers out),
+    None when it has none."""
+    g = (tm.get("graphs") or {}).get(key)
+    if not g:
+        return None
+    u, f = np.array([p[0] for p in g]) * total, np.array([p[1] for p in g], float)
+    return lambda d: np.interp(d, u, f)
+
+
+def graph_starts(dg, lo, hi, dist, fit, even):
+    """Where the bumps start when the distance follows the graph dg: counting bumps along the range (1 / distance
+    per unit of length), bump i starts where the count reaches i. fit: the count is stretched so a whole number of
+    steps fits the range (even: an even number)."""
+    if hi - lo < 1e-9:
+        return [lo]
+    d = np.linspace(lo, hi, 4097)
+    rate = 1 / np.maximum(dist * dg(d), max((hi - lo) / MAX_TUMOURS, 1e-9))
+    count = np.concatenate([[0.0], np.cumsum((rate[1:] + rate[:-1]) / 2 * np.diff(d))])
+    total = count[-1]
+    if fit:
+        n = max(2, 2 * round(total / 2)) if even else max(1, round(total))
+        marks = np.linspace(0.0, total, n + 1)
+    else:
+        marks = np.arange(min(math.floor(total + 1e-9), MAX_TUMOURS - 1) + 1, dtype=float)
+    return np.interp(marks, count, d).tolist()
 
 
 def template(shape, length, size, slant=0.0):
@@ -194,7 +247,10 @@ def tumour_path(path, tm):
     dist = max(tm["dist"] / k, (hi - lo) / MAX_TUMOURS, 1e-9)
     # a closed loop (e.g. a full circle) with bumps all the way round: its end is its start again
     loop = w.closed and lo < 1e-9 and hi > w.total - 1e-9
-    if tm.get("fit") and hi - lo > 1e-9:
+    zg, lg, dg, rg, sg = (graph_fn(tm, key, w.total) for key in ("size", "length", "dist", "rot", "slant"))
+    if dg is not None:
+        starts = graph_starts(dg, lo, hi, dist, tm.get("fit"), loop and tm["side"] == "alt")
+    elif tm.get("fit") and hi - lo > 1e-9:
         # a whole number of steps fits the range, so the last one lands right on its end; round a loop with
         # alternating sides, an even number, so the sides keep alternating where it meets up
         n = max(1, round((hi - lo) / dist))
@@ -268,8 +324,13 @@ def tumour_path(path, tm):
         s, side = np.array(starts), np.array(sides, float)
         (x, y), (nx, ny) = w.at_many(s), normals(s)
         h = size * grows(s)
+        if zg is not None:
+            h = h * zg(s)
         if lean:  # tilted: part of the push goes along the line
             ux, uy = ny, -nx
+            if rg is not None:
+                r = rot * rg(s)
+                sin, cos = np.sin(r), np.cos(r)
             out.block(np.column_stack([x + (nx * cos * side + ux * sin) * h, y + (ny * cos * side + uy * sin) * h]))
         else:
             h = h * side
@@ -277,17 +338,26 @@ def tumour_path(path, tm):
         if not fit_loop:
             out.add(base(starts[-1], w.total) + [w.pts[-1]])
     else:
-        shape = template(tm["shape"], length, size, tm.get("slant", 0.0))
+        slant = tm.get("slant", 0.0)
+        shape = template(tm["shape"], length, size, slant) if lg is None and sg is None else None
         pts, per_bump, sizes = [], [], []
         for i, (s, side) in enumerate(zip(starts, sides)):
             room = min(hi, starts[i + 1] if i + 1 < len(starts) else math.inf)
-            e = min(s + length, room)
+            li = length if lg is None else max(0.0, length * float(lg(s)))
+            e = min(s + li, room)
+            if e - s < 1e-9:  # no room left (it would start right on the end of the range), or no length
+                out.add([w.at(s)])
+                out.add(base(e, starts[i + 1] if i + 1 < len(starts) else w.total))
+                continue
             # (cut only where the next bump or the range's end is in the way: a round bump taller than half its
             # length bulges out past its own ends, and that part is kept when there's room)
-            bump = cut(shape, room - s)
-            if e - s < 1e-9:  # no room left (it would start right on the end of the range)
-                out.add([w.at(s)])
-            elif tm["wrap"] == "simple":  # on the straight line from where it starts to where it ends
+            bump = cut(shape or template(tm["shape"], li, size, slant if sg is None else
+                                         min(1.0, max(-1.0, slant * float(sg(s))))), room - s)
+            r = rot if rg is None else rot * float(rg(s + li / 2))
+            sn, cs = (sin, cos) if rg is None else (math.sin(r), math.cos(r))
+            if zg is not None and tm["wrap"] == "simple":  # (points for the size to change along)
+                bump = subdivide(bump, sorted({(e - s) * j / 16 for j in range(17)}))
+            if tm["wrap"] == "simple":  # on the straight line from where it starts to where it ends
                 a, b = w.at(s), w.at(e)
                 ux, uy = b[0] - a[0], b[1] - a[1]
                 n = math.hypot(ux, uy)
@@ -295,7 +365,7 @@ def tumour_path(path, tm):
                 stretch = n / (e - s) if e - s > 1e-12 else 1.0
                 bump = eased(bump, s)
                 pts += bump
-                per_bump.append((a[0], a[1], ux, uy, stretch, side))
+                per_bump.append((a[0], a[1], ux, uy, stretch, side, s, sn, cs))
                 sizes.append(len(bump))
                 out.block(len(bump))
             else:  # bending with the line: every point sideways from where it is along the line, with extra
@@ -308,7 +378,7 @@ def tumour_path(path, tm):
                             ({x for x, _ in eb} if (eb := eased(bump, s)) is not bump else set()))
                 bump = subdivide(bump, xs)
                 pts += bump
-                per_bump.append((s, side))
+                per_bump.append((s, side, sn, cs))
                 sizes.append(len(bump))
                 out.block(len(bump))
             nxt = starts[i + 1] if i + 1 < len(starts) else w.total
@@ -319,8 +389,10 @@ def tumour_path(path, tm):
             if tm["wrap"] == "simple":
                 p = np.array(pts, float)
                 x, y = p[:, 0] * par[:, 4], p[:, 1]
+                if zg is not None:
+                    y = y * zg(par[:, 6] + p[:, 0])
                 if lean:
-                    x, y = x + y * sin, y * cos
+                    x, y = x + y * par[:, 7], y * par[:, 8]
                 ax, ay, ux, uy, side = par[:, 0], par[:, 1], par[:, 2], par[:, 3], par[:, 5]
                 out.fill(np.column_stack([ax + ux * x - uy * y * side, ay + uy * x + ux * y * side]))
             else:
@@ -328,8 +400,10 @@ def tumour_path(path, tm):
                 s, side = par[:, 0], par[:, 1]
                 x = p[:, 0]
                 y = p[:, 1] * grows(s + x)
+                if zg is not None:
+                    y = y * zg(s + x)
                 if lean:
-                    x, y = x + y * sin, y * cos
+                    x, y = x + y * par[:, 2], y * par[:, 3]
                 d = s + x
                 if w.closed:  # a round bump bulging past a loop's start / end: round the loop
                     d = np.mod(d, w.total)

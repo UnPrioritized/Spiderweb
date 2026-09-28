@@ -52,4 +52,6 @@ class TumourPanel:
             text = f"Tumours on {len(on)} of {len(tgts)}"
         else:
             text = f"{dict(SHAPE_CHOICES)[on[0]['shape']]}, {round(on[0]['size'], 2):g} keys"
+            if on[0].get("graphs"):
+                text += ", with graphs"
         self.tumour_summary.config(text=text)

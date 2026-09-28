@@ -10,6 +10,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     panel_funnel.py  the panel's funnel settings
     panel_tumour.py  the panel's tumour line (summary + button)
     tumour_window.py the tumour window: the tumour settings (bumps along lines)
+    graph_window.py  a tumour setting's graph (the number changing along the line)
     panel_freehand.py  the panel's Straighten setting for freehand strokes
     panel_text.py    the panel's text settings (font, size, spacing, threshold, grow)
     font_dialog.py   the font window (type a font's name or pick one)
