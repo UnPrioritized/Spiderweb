@@ -1,6 +1,7 @@
 """Custom shapes: drawings from the drawer placed on the roll, as outlines or filled with notes."""
 
 import base64
+import json
 import math
 import zlib
 
@@ -163,21 +164,94 @@ def strokes_closed(strokes):
 
 
 def fillable(strokes):
-    """Fill and Spam work: the outline is closed, or has just one gap (closed with a straight line, see
-    gap_line). With more gaps it's unclear what's inside."""
-    return bool(strokes) and len(open_paths(strokes)) <= 1
+    """Fill and Spam work (any drawing: gaps are closed with straight lines, see fill_plan)."""
+    return bool(strokes)
 
 
-def gap_line(sh):
-    """A custom shape with one gap in its outline: the straight line that closes it for Fill / Spam, as two
-    (beat, pitch) points (from the open outline's end back to its start). None otherwise."""
-    if sh.get("text"):
-        return None
-    paths = open_paths(sh["strokes"])
-    if len(paths) != 1:
-        return None
-    to_bp = frame_to_bp(sh["pts"])
-    return [to_bp(*paths[0][-1]), to_bp(*paths[0][0])]
+# Gaps in the outline, for Fill / Spam (in beats / keys, not on screen, so zooming never changes the notes):
+TOUCH_BEATS, TOUCH_KEYS = 1 / 64, 1.0  # loose ends at most this far apart count as touching (joined straight)
+FLAT_KEYS, FLAT_BEATS = 0.5, 1 / 64  # an open part never further than this from its closing line is left unfilled
+_plans = {}
+
+
+def near_ends(p, q):
+    return abs(p[0] - q[0]) <= TOUCH_BEATS + 1e-9 and abs(p[1] - q[1]) <= TOUCH_KEYS + 1e-9
+
+
+def flat_path(path):
+    """The open path never gets further than half a key (up / down) or 1/64 beat (sideways) from the straight line
+    between its ends: it has no inside worth filling (a straight line, a very gentle curve)."""
+    a = np.asarray(path, float).reshape(-1, 2)
+    (b0, p0), (b1, p1) = a[0], a[-1]
+    db, dp = b1 - b0, p1 - p0
+    for along, across, lim, d_along, d_across, s in ((0, 1, FLAT_KEYS, db, dp, b0), (1, 0, FLAT_BEATS, dp, db, p0)):
+        if abs(d_along) < 1e-12:
+            continue
+        t = (a[:, along] - s) / d_along
+        if ((t < -1e-9) | (t > 1 + 1e-9)).any():  # (it goes back past its ends)
+            continue
+        line = a[0, across] + t * d_across
+        if (np.abs(a[:, across] - line) <= lim + 1e-9).all():
+            return True
+    return abs(db) < 1e-12 and abs(dp) < 1e-12
+
+
+def fill_plan(sh):
+    """How Fill / Spam see a custom shape's outline (beats / pitch), remembered:
+    "polys": the paths whose edges make the inside (even-odd), "closers": the straight lines added to close gaps
+    (loose ends that nearly touch are joined; every open part left is closed from its end back to its start),
+    "flat": open parts too flat to have an inside (they just keep their outline notes)."""
+    key = (json.dumps(sh["strokes"]), json.dumps(sh["pts"]))
+    got = _plans.get(key)
+    if got is not None:
+        return got
+    if len(_plans) > 300:
+        _plans.clear()
+    paths = join_paths(custom_strokes(sh))
+    polys = [p for p in paths if path_closed(p)]
+    opens = [list(map(tuple, p)) for p in paths if not path_closed(p)]
+    closers = []
+    while True:  # the nearest two loose ends that count as touching, joined, until there are none
+        best = None
+        for i, a in enumerate(opens):
+            for j in range(i, len(opens)):
+                b = opens[j]
+                pairs = [(a[-1], a[0], 0)] if i == j else [(a[-1], b[0], 1), (a[-1], b[-1], 2), (a[0], b[0], 3),
+                                                            (a[0], b[-1], 4)]
+                for p, q, how in pairs:
+                    if i == j and len(a) < 3:
+                        continue
+                    if near_ends(p, q):
+                        d = max(abs(p[0] - q[0]) / TOUCH_BEATS, abs(p[1] - q[1]) / TOUCH_KEYS)
+                        if best is None or d < best[0]:
+                            best = (d, i, j, how, p, q)
+        if best is None:
+            break
+        _, i, j, how, p, q = best
+        closers.append([p, q])
+        a, b = opens[i], opens[j]
+        if how == 0:
+            polys.append(a + [a[0]])
+            del opens[i]
+            continue
+        a = a if how in (1, 2) else a[::-1]
+        b = b if how in (1, 3) else b[::-1]
+        opens[i] = a + b
+        del opens[j]
+    flat = []
+    for path in opens:
+        if flat_path(path):
+            flat.append(path)
+        else:
+            polys.append(path)
+            closers.append([path[-1], path[0]])
+    got = _plans[key] = {"polys": polys + closers, "closers": closers, "flat": flat}
+    return got
+
+
+def gap_lines(sh):
+    """The straight lines closing gaps in a custom shape's outline for Fill / Spam (drawn dashed)."""
+    return [] if sh.get("text") else fill_plan(sh)["closers"]
 
 
 def join_strokes(strokes):
@@ -362,8 +436,13 @@ def outline_notes(sh, ppq, only=None):
     """(start, end, pitch) notes along every stroke of a custom shape (only: just these stroke numbers), like
     lines."""
     paths = custom_strokes(sh)
+    return paths_outline(join_paths(paths if only is None else [paths[k] for k in only]), ppq)
+
+
+def paths_outline(paths, ppq):
+    """(start, end, pitch) notes along these (joined) paths, like lines."""
     raw = []
-    for path in join_paths(paths if only is None else [paths[k] for k in only]):
+    for path in paths:
         closed = path_closed(path)
         path = dedupe(path)
         if len(path) < 2:
@@ -414,13 +493,12 @@ def row_spans(polys, q):
 
 def inside_spans(sh, ppq):
     """[(pitch, start tick, end tick)] for every stretch of every key inside the shape. Text: the nonzero rule and
-    its threshold (text.py). One gap in the outline is closed with a straight line."""
-    polys = custom_strokes(sh)
-    gap = gap_line(sh)
-    if gap:
-        polys = polys + [gap]
-    ps = [p for poly in polys for _, p in poly]
+    its threshold (text.py). Gaps in the outline are closed with straight lines (fill_plan)."""
     tx = sh.get("text")
+    polys = custom_strokes(sh) if tx else fill_plan(sh)["polys"]
+    ps = [p for poly in polys for _, p in poly]
+    if not ps:
+        return []
     out = []
     for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1):
         for a, b in threshold_spans(polys, q, tx["threshold"]) if tx else row_spans(polys, q):
@@ -505,16 +583,25 @@ def custom_note_count(sh, ppq):
         return sum(max(1, spam_starts(sh, s, e, g)[1]) for s, e, _ in outline_groups(sh, ppq)[0].tolist())
     if sh["fill"] == "empty" or not fillable(sh["strokes"]):
         return None
+    flat = flat_notes(sh, ppq)
     if sh["fill"] == "fill":
-        return len(inside_spans(sh, ppq))
+        return len(inside_spans(sh, ppq)) + len(flat)
     g = spam_gate(sh, ppq)
-    return sum(spam_starts(sh, s, e, g)[1] for _, s, e in inside_spans(sh, ppq))
+    return (sum(max(1, spam_starts(sh, s, e, g)[1]) for _, s, e in inside_spans(sh, ppq)) +
+            sum(max(1, spam_starts(sh, s, e, g)[1]) for s, e, _ in flat.tolist()))
+
+
+def flat_notes(sh, ppq):
+    """The outline notes of a filled shape's parts too flat to fill (fill_plan), so they don't vanish."""
+    flat = [] if sh.get("text") else fill_plan(sh)["flat"]
+    return paths_outline(flat, ppq) if flat else np.zeros((0, 3), np.int64)
 
 
 def custom_notes(sh, ppq):
     """Empty = the outline; Fill = one note per stretch of each key inside; Spam = each stretch filled with
     back-to-back notes of the spam gate, starting at its left edge or on the gate grid (see ALIGNS); what doesn't
-    fit a whole gate is dropped. Outline spam = the outline chopped the same way (open ends are fine)."""
+    fit a whole gate is dropped, but a stretch too short for even one gate stays one note. Outline spam = the
+    outline chopped the same way (open ends are fine)."""
     return custom_notes_groups(sh, ppq)[0]
 
 
@@ -527,7 +614,10 @@ def custom_notes_groups(sh, ppq):
     if sh["fill"] == "empty" or not fillable(sh["strokes"]):
         return outline_groups(sh, ppq)
     spans = np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]  # (start, end, key)
-    return (spans if sh["fill"] == "fill" else chop(sh, spans, spam_gate(sh, ppq))), None
+    flat = flat_notes(sh, ppq)  # (like Outline spam in Spam)
+    if sh["fill"] == "fill":
+        return np.concatenate([spans, flat]), None
+    return np.concatenate([chop(sh, spans, spam_gate(sh, ppq), True), chop_outline(sh, flat, ppq)]), None
 
 
 # ---------------------------------------------------------------- pasted notes

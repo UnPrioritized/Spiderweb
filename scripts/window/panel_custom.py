@@ -4,7 +4,7 @@ import copy
 import math
 from tkinter import ttk, messagebox, simpledialog
 
-from notes.custom import SPAM_FILLS, box_frame, join_strokes, map_stroke, normalize_strokes, open_paths
+from notes.custom import SPAM_FILLS, box_frame, gap_lines, join_strokes, map_stroke, normalize_strokes, open_paths
 from window.drawer import Drawer, clean_name, library_names, load_shape, save_shape
 from window.panel_funnel import GATE_STEPS
 from files.mathexpr import calc, fmt
@@ -134,34 +134,34 @@ class CustomPanel:
                 + "Drag a corner or side to stretch them, just outside a corner to turn them, just outside a "
                   "side's middle to skew them."))
             return
-        # gaps in the outline (open lines once touching strokes are joined): one is closed with a straight line
-        # for Fill / Spam, with more it's unclear what's inside
+        # gaps in the outline: Fill / Spam close them with straight lines (custom.fill_plan)
         if placed:
-            name, gaps = tgts[0]["name"], max(len(open_paths(t["strokes"])) for t in tgts)
+            name, gaps = tgts[0]["name"], max(len(gap_lines(t)) for t in tgts)
         elif tool != "custom":  # drawn on the roll: the fill settings are for what gets drawn
             name, gaps = "Live drawing" if live else tool.title(), 0
         else:
             name, tpl = self.custom_shape, self.custom_template(self.custom_shape)
-            gaps = len(open_paths(tpl[0])) if tpl else 2
-        fillable = gaps <= 1
+            gaps = len(open_paths(tpl[0])) if tpl else 0
         fill, gate = tgts[0]["fill"], tgts[0]["gate"]
         self._loading = True
         self.custom_pick.set(name)
-        self.fill_var.set(fill if fillable or fill == "outline_spam" else "empty")
+        self.fill_var.set(fill)
         self.gate_var.set(fmt(round(gate * self.ppq, 3)))
         self.align_var.set(tgts[0].get("align", "auto"))
         self.gate_entry.config(style="TEntry")
         self._loading = False
         for value, b in self.fill_buttons.items():
-            b.config(state="normal" if fillable or value in ("empty", "outline_spam") else "disabled",
-                     style="Gap.TRadiobutton" if gaps == 1 and value in ("fill", "spam") else "TRadiobutton")
+            b.config(style="Gap.TRadiobutton" if gaps and value in ("fill", "spam") else "TRadiobutton")
         for value, _, base in FILL_CHOICES:
-            gap = ("The outline has a gap: it's filled as if a straight line closed it (the dashed line).\n"
-                   "Close the gap yourself to decide where the edge goes." if gaps == 1 else
-                   f"The outline has {gaps} gaps, so it's unclear what's inside.\n"
-                   "Close all but one of them to fill it." if gaps else "")
+            gap = ("The outline has a gap: it's filled as if a straight line closed it (the dashed line)."
+                   if gaps == 1 else
+                   f"The outline has {gaps} gaps: each is closed with a straight line (the dashed lines)."
+                   if gaps else "")
+            if gap:
+                gap += ("\nEnds that nearly touch (1/64 beat, 1 key) are joined; open parts that are almost\n"
+                        "straight aren't filled. Close the gaps yourself to decide where the edge goes.")
             self.fill_tips[value].text = base + ("\n\n" + gap if gap and value in ("fill", "spam") else "")
-        spam = fill in SPAM_FILLS and (fillable or fill == "outline_spam")
+        spam = fill in SPAM_FILLS
         self.gate_entry.config(state="normal" if spam else "disabled")
         for b in self.align_buttons:
             b.config(state="normal" if spam else "disabled")
@@ -174,13 +174,11 @@ class CustomPanel:
             info = f"Drag a box on the piano roll, or click two corners (Ctrl = a perfect {tool} on screen)."
         elif not placed and not self.custom_template(name):
             info = "Pick a shape, or make one with Drawer…"
-        elif not fillable:
-            info = (f"This shape's outline has {gaps} gaps, so only Empty and Outline spam work. Close all but one "
-                    "to fill it.")
         elif placed:
             info = f"{sum(self.note_count(t) for t in tgts):,} notes."
             if gaps and fill in ("fill", "spam"):
-                info += "  One gap in the outline: filled as if the dashed line closed it."
+                info += ("  One gap in the outline: filled as if the dashed line closed it." if gaps == 1 else
+                         f"  {gaps} gaps in the outline: filled as if the dashed lines closed them.")
         else:
             info = "Drag a box on the piano roll, or click two corners, to place it (Ctrl = keep its proportions)."
         if placed and tool != "text":

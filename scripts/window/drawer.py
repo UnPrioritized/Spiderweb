@@ -1038,8 +1038,7 @@ class Drawer(tk.Toplevel):
         elif len(open_paths(self.strokes)) == 1:
             text = "One gap (red dots): Fill and Spam close it with a straight line."
         else:
-            text = ("Open ends (red dots): more than one gap, so only Empty and Outline spam work until all but one "
-                    "are closed.")
+            text = "Open ends (red dots): Fill and Spam close each gap with a straight line."
         if self.dirty and self.strokes:
             text += "\nNot saved yet."
         self.state_label.config(text=text, foreground="#1d6b1d" if closed else "#9a4b00")

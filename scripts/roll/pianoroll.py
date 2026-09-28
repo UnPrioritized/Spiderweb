@@ -8,7 +8,7 @@ import math
 import tkinter as tk
 from types import SimpleNamespace
 
-from notes.custom import box_frame, fillable, gap_line
+from notes.custom import box_frame, fill_plan
 from notes.engine import make_shape
 from notes.joined import all_tumours
 from notes.funnel import funnel_contains, funnel_handles
@@ -185,9 +185,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             sh = self.app.shapes[i]
             if "notes" in sh and self.inside_strokes(cached_strokes(sh), self.x2t(x), self.y2p(y)):
                 return i  # pasted notes: anywhere in their box
-            if sh["kind"] == "custom" and sh["fill"] in ("fill", "spam") and fillable(sh["strokes"]):
-                gap = gap_line(sh)
-                if self.inside_strokes(cached_strokes(sh) + ([gap] if gap else []), self.x2t(x), self.y2p(y)):
+            if sh["kind"] == "custom" and sh["fill"] in ("fill", "spam"):
+                polys = cached_strokes(sh) if sh.get("text") else fill_plan(sh)["polys"]
+                if self.inside_strokes(polys, self.x2t(x), self.y2p(y)):
                     return i  # filled shapes can be clicked anywhere inside
             if sh["kind"] == "funnel" and funnel_contains(sh, self.x2t(x), self.y2p(y)):
                 return i

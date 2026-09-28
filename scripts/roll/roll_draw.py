@@ -5,7 +5,7 @@ import tkinter as tk
 
 import numpy as np
 
-from notes.custom import custom_note_count, gap_line
+from notes.custom import custom_note_count, gap_lines
 from notes.engine import cached_arrays, shape_notes
 from notes.joined import all_tumours
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count
@@ -408,9 +408,7 @@ class RollDrawing:
                     self.create_line(*[v + (dx if n % 2 == 0 else dy) for n, v in enumerate(coords)], fill=color,
                                      width=1, dash=dash)
         if sh["kind"] == "custom" and sh.get("fill") in ("fill", "spam"):
-            gap = gap_line(sh)  # the straight line closing the one gap in its outline: faint, dashed
-            if gap:
-                (b0, p0), (b1, p1) = gap
+            for (b0, p0), (b1, p1) in gap_lines(sh):  # the straight lines closing gaps in its outline: dashed
                 self.create_line(b0 * ax + bx, p0 * ay + by, b1 * ax + bx, p1 * ay + by, fill=color, width=1,
                                  dash=(4, 3))
 
