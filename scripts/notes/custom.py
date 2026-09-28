@@ -645,20 +645,16 @@ def custom_notes_groups(sh, ppq):
     flat = flat_notes(sh, ppq)  # (like Outline spam in Spam)
     apart = sh.get("apart")
     if sh["fill"] == "fill":
-        if apart:  # the outline's notes, and the inside's long notes between them
-            outline = outline_notes(sh, ppq)
-            inside = cut_out(spans, outline)
+        notes = np.concatenate([spans, flat])
+        if apart:  # the edge's notes, and the inside's long notes between them
+            outline = edge_parts(notes)
+            inside = cut_out(notes, outline)
             return (np.concatenate([outline, inside]),
                     np.concatenate([np.zeros(len(outline), np.int64), np.ones(len(inside), np.int64)]))
-        return np.concatenate([spans, flat]), None
+        return notes, None
     notes = np.concatenate([chop(sh, spans, spam_gate(sh, ppq), True), chop_outline(sh, flat, ppq)])
-    if apart:  # the same spam; notes over the outline are the outline's
-        outline = outline_notes(sh, ppq)
-        # outline notes no spam note reaches (in the bit left over after the last whole gate, or before the first
-        # aligned one) are added like Outline spam, so the outline stays closed
-        missed = chop_outline(sh, outline[~touching(outline, notes)], ppq)
-        groups = np.where(touching(notes, outline), 0, 1).astype(np.int64)
-        return np.concatenate([notes, missed]), np.concatenate([groups, np.zeros(len(missed), np.int64)])
+    if apart:  # the same spam; the notes on the edge of what's filled are the outline's
+        return notes, np.where(on_edge(notes), 0, 1).astype(np.int64)
     return notes, None
 
 
@@ -682,17 +678,45 @@ def merged_by_key(notes):
     return k[at], s[at], np.maximum.reduceat(e, at)
 
 
-def touching(notes, others):
-    """Which notes overlap one of the others on the same key (at least one tick in common)."""
+def covered(notes, others):
+    """Which notes lie wholly inside what the others cover on the same key."""
     ks, ss, es = merged_by_key(others)
     if not len(ks) or not len(notes):
         return np.zeros(len(notes), bool)
     big = np.int64(1) << 40
-    starts = ks * big + ss
-    i = np.searchsorted(starts, notes[:, 2] * big + notes[:, 1], "left") - 1  # the last stretch starting before
+    i = np.searchsorted(ks * big + ss, notes[:, 2] * big + notes[:, 0], "right") - 1  # the last stretch starting at or before
     ok = i >= 0
     i = np.maximum(i, 0)
-    return ok & (ks[i] == notes[:, 2]) & (es[i] > notes[:, 0])
+    return ok & (ks[i] == notes[:, 2]) & (es[i] >= notes[:, 1])
+
+
+def shifted(notes, keys):
+    out = notes.copy()
+    out[:, 2] += keys
+    return out
+
+
+def on_edge(notes):
+    """Fill / Spam "Outline": which (start, end, key) notes are on the edge of the area they fill: not wholly
+    covered by the notes on the key above or below, or first / last on their key. So only the filled area's own
+    edge counts: outlines inside it (overlaps filled in) are left out, and where overlaps cancel out, every side of
+    every filled bit is the outline, whichever way it slants."""
+    s, e = notes[:, 0:1], notes[:, 1:2]
+    before = np.hstack([s - 1, s, notes[:, 2:3]])
+    after = np.hstack([e, e + 1, notes[:, 2:3]])
+    return ~(covered(notes, shifted(notes, -1)) & covered(notes, shifted(notes, 1)) &
+             covered(before, notes) & covered(after, notes))
+
+
+def edge_parts(notes):
+    """Fill "Outline": the parts of the (start, end, key) long notes on the edge of the area they fill: the time
+    the key above or below doesn't cover, and the first and last tick of each stretch (like a line's upright
+    part), as (start, end, key) notes."""
+    ks, ss, es = merged_by_key(notes)
+    ends = np.column_stack([np.concatenate([ss, es - 1]), np.concatenate([ss + 1, es]), np.concatenate([ks, ks])])
+    parts = np.concatenate([cut_out(notes, shifted(notes, -1)), cut_out(notes, shifted(notes, 1)), ends])
+    ks, ss, es = merged_by_key(parts)
+    return np.column_stack([ss, es, ks]).astype(np.int64).reshape(-1, 3)
 
 
 def cut_out(spans, others):
