@@ -272,10 +272,10 @@ TOPICS = [
          words="mirror arch s-curve symmetry"),
     dict(id="join", section="Editing", title="Join and split",
          tip="Select several lines, polylines, freehand strokes, curves or arcs, then\n"
-             "Join shapes into one curve (under the shape list, or right-click).\n"
+             "press Ctrl+G (or Join shapes into one curve under the shape list, or right-click).\n"
              "Right-click any of them → Split here cuts it in two.",
-         text="Join: select two or more lines, polylines, freehand strokes, curves or arcs, then click Join shapes "
-              "into one curve under the shape list (or right-click one of them → Join shapes into one curve). They "
+         text="Join: select two or more lines, polylines, freehand strokes, curves or arcs, then press Ctrl+G or "
+              "click Join shapes into one curve under the shape list (or right-click one of them → Join shapes into one curve). They "
               "become one Curve shape: ends that touch are joined (with a corner there), "
               "and the curve's anchors and handles can be edited like any curve. Freehand strokes are turned into "
               "a smooth curve that follows them closely.\n"
@@ -300,7 +300,8 @@ TOPICS = [
               "graphs (Fit is turned off, keeping the distance it had worked out). Only a bump across the cut is "
               "cut off, random sides are picked again and Lead in starts again at the cut.\n"
               "[clip:join-split-here]\n\n"
-              "Split into separate shapes (under the shape list, or right-click): a joined curve goes back to one curve per piece (and per shape that kept "
+              "Split into separate shapes (Ctrl+Shift+G, under the shape list, or right-click): a joined curve goes "
+              "back to one curve per piece (and per shape that kept "
               "its own tumours). A custom shape, like one drawn with Live shape, splits into one shape per group of "
               "strokes that touch each other. Each part keeps the velocities it had.\n"
               "[clip:join-split-shapes]\n\n"
@@ -529,7 +530,8 @@ TOPICS = [
               "Wheel = scroll, Shift+wheel = sideways, Ctrl+wheel = zoom, Ctrl+Shift+wheel = zoom time, "
               "Alt+wheel = zoom pitch.\n\n"
               "Editing: Del delete, Ctrl+D duplicate, Ctrl+Z / Ctrl+Y undo / redo, Ctrl+A select all, Ctrl+C / "
-              "Ctrl+V copy / paste, Ctrl+H / Ctrl+J flip, Ctrl+Left / Ctrl+Right turn 90°, Esc clear highlight / "
+              "Ctrl+V copy / paste, Ctrl+H / Ctrl+J flip, Ctrl+Left / Ctrl+Right turn 90°, Ctrl+G join into one "
+              "curve, Ctrl+Shift+G split into separate shapes, Esc clear highlight / "
               "unpick a stroke.\n\n"
               "Playing: Space play / stop. Click or drag the bar numbers = move the play line.\n\n"
               "Curves: Alt+drag a handle = sharp corner, Alt+drag an anchor = new handles, Ctrl = change only this "

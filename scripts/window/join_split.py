@@ -27,9 +27,10 @@ def span(sh):
 
 
 JOIN_KINDS = "lines, polylines, freehand strokes, curves and arcs"
-JOIN_TIP = "Joins the selected shapes into one Curve shape (ends that touch become one line with a corner)."
+JOIN_TIP = ("Joins the selected shapes into one Curve shape (ends that touch become one line with a corner).\n"
+            "Shortcut: Ctrl+G")
 SPLIT_TIP = ("Splits a joined curve back into its pieces, or a custom shape (like one drawn with Live shape)\n"
-             "into its separate drawings.")
+             "into its separate drawings.\nShortcut: Ctrl+Shift+G")
 SPLIT_HERE = "To cut a line in two where you want: right-click it there → Split here."
 
 
@@ -79,14 +80,21 @@ class JoinSplit:
                 tip.text += "\n" + SPLIT_HERE
 
     def split_selected(self):
-        if not self.split_problem():
+        problem = self.split_problem()
+        if problem:  # (the shortcut: say why)
+            self.status.config(text=problem)
+        else:
             self.split_pieces(self.sel)
 
     def can_join(self):
         return self.join_problem() is None
 
     def join_selected(self):
-        if not self.can_join() or self.roll.sx is None:
+        problem = self.join_problem()
+        if problem:  # (the shortcut: say why)
+            self.status.config(text=problem)
+            return
+        if self.roll.sx is None:
             return
         roll = self.roll
 

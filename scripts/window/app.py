@@ -188,6 +188,8 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         for keys, fn in (("space", self.toggle_play), ("Control-c Control-C", self.copy_selected),
                          ("Control-Shift-c Control-Shift-C", self.copy_to_domino),
                          ("Control-Shift-v Control-Shift-V", self.paste_from_domino),
+                         ("Control-g Control-G", self.join_selected),
+                         ("Control-Shift-g Control-Shift-G", self.split_selected),
                          ("Control-v Control-V", self.paste), ("Control-h Control-H", lambda: self.flip(True)),
                          ("Control-j Control-J", lambda: self.flip(False)), ("Control-a Control-A", self.select_all),
                          ("Control-Left", lambda: self.rotate(False)), ("Control-Right", lambda: self.rotate(True))):

@@ -89,11 +89,11 @@ class ShapeMenu:
         if len(app.sels) >= 2:  # (greyed out, saying why, when something else is selected too)
             ok = app.can_join()
             item("Join shapes into one curve" if ok else "Join shapes into one curve  (only lines, polylines, "
-                 "freehand strokes, curves and arcs)", "", app.join_selected, ok)
+                 "freehand strokes, curves and arcs)", "Ctrl+G", app.join_selected, ok, keys=True)
         if len(app.sels) == 1 and sh["kind"] in LINE_KINDS:
             item("Split here", "", lambda: app.split_here(i, at))
         if len(app.sels) == 1 and app.can_split_pieces(sh):
-            item("Split into separate shapes", "", lambda: app.split_pieces(i))
+            item("Split into separate shapes", "Ctrl+Shift+G", lambda: app.split_pieces(i), keys=True)
         n = len(app.sels)
         shapes = "shape" if n == 1 else f"{n} shapes"
         item(f"Delete {shapes}", "Del", app.delete_selected, keys=keys and self.picked_stroke(sh) is None)
