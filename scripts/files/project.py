@@ -189,7 +189,8 @@ class ProjectFiles:
                               "velocity": self.show_velocity.get(),
                               "velocity_height": self.velocity_height() / self.scale,
                               "midi_device": self.midi_device.get(), "live": self.live.get(),
-                              "tumour_window": self.tumour_pos, **self.tips.state()}
+                              "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
+                              **self.tips.state()}
         write_text(path, project_json(data))
 
     def load_autosave(self):
@@ -250,9 +251,10 @@ class ProjectFiles:
             if win.get("midi_device"):
                 self.midi_device.set(str(win["midi_device"]))
             self.live.set(win.get("live") is True)
-            pos = win.get("tumour_window")
-            if isinstance(pos, str) and re.fullmatch(r"\+-?\d+\+-?\d+", pos):
-                self.tumour_pos = pos
+            for key, attr in (("tumour_window", "tumour_pos"), ("graph_window", "graph_pos")):
+                pos = win.get(key)
+                if isinstance(pos, str) and re.fullmatch(r"\+-?\d+\+-?\d+", pos):
+                    setattr(self, attr, pos)
             if win.get("velocity") is True:  # it starts off; on again if it was on last time
                 self.show_velocity.set(True)
                 self.toggle_velocity(tip=False)

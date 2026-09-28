@@ -156,7 +156,7 @@ class TumourWindow(tk.Toplevel):
 
     def close(self):
         if self.graph_window:
-            self.graph_window.close()
+            self.graph_window.ok()
         self.app.tumour_window = None
         self.destroy()
         self.app.roll.focus_set()
@@ -261,7 +261,7 @@ class TumourWindow(tk.Toplevel):
 
     def open_graph(self, key, label, unit):
         if self.graph_window and self.graph_window.key != key:
-            self.graph_window.close()
+            self.graph_window.ok()
         if self.graph_window:
             self.graph_window.lift()
         else:

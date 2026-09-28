@@ -16,6 +16,7 @@ class TumourPanel:
         box = self.tumour_box = ttk.Frame(self.settings)
         self.tumour_window = None
         self.tumour_pos = ""  # where the tumour window was last ("+x+y", remembered in the autosave)
+        self.graph_pos = ""   # the same for the graph window (graph_window.py)
         self.tumour_btn = ttk.Button(box, text="Tumours…", command=self.open_tumours)
         self.tumour_btn.pack(side="left")
         Tooltip(self.tumour_btn, "Bumps along the line: opens the tumour window.\n"

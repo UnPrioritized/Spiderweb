@@ -2,6 +2,7 @@
 multiplied by the graph (100 % = as typed). Drag points, click to add one, right-click to remove one; presets and
 a formula. Stored as tm["graphs"][setting] (tumour.py)."""
 
+import json
 import tkinter as tk
 from tkinter import ttk
 
@@ -62,13 +63,17 @@ class GraphWindow(tk.Toplevel):
         self.formula = tk.StringVar()
         self.formula_box = ttk.Entry(row, textvariable=self.formula, width=34)
         self.formula_box.pack(side="left", padx=(5, 4))
-        self.formula_box.bind("<Return>", lambda e: self.apply_formula())
+        self.formula_box.bind("<Return>", lambda e: (self.apply_formula(), "break")[1])
         ttk.Button(row, text="Apply", command=self.apply_formula).pack(side="left")
         self.formula_note = ttk.Label(box, text=FORMULA_HINT, foreground="#777", font=("Segoe UI", 8))
         self.formula_note.pack(anchor="w")
         ttk.Label(box, text=HINT, foreground="#777", font=("Segoe UI", 8), justify="left").pack(anchor="w",
                                                                                                 pady=(6, 0))
-        ttk.Button(box, text="Close", command=self.close).pack(anchor="e", pady=(6, 0))
+        row = ttk.Frame(box)
+        row.pack(anchor="e", pady=(6, 0))
+        ttk.Button(row, text="OK", command=self.ok).pack(side="left")
+        ttk.Button(row, text="Cancel", command=self.cancel).pack(side="left", padx=(4, 0))
+        self.session = None  # the graph as it was when the window opened / these shapes were selected (see begin)
 
         cv = self.canvas
         cv.bind("<ButtonPress-1>", self.press)
@@ -77,12 +82,14 @@ class GraphWindow(tk.Toplevel):
         cv.bind("<ButtonPress-3>", self.remove)
         cv.bind("<Motion>", self.on_hover)
         cv.bind("<Leave>", lambda e: self.on_hover(None))
-        self.bind("<Escape>", lambda e: self.close())
-        self.protocol("WM_DELETE_WINDOW", self.close)
+        self.bind("<Escape>", lambda e: self.cancel())
+        self.bind("<Return>", lambda e: self.ok())
+        self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.sync(fit_view=True)
-        # beside the tumour window
+        # where it was last time, else beside the tumour window
         self.update_idletasks()
-        self.geometry(f"+{tw.winfo_rootx() + tw.winfo_width() + int(8 * s)}+{tw.winfo_rooty()}")
+        self.geometry(self.app.graph_pos or f"+{tw.winfo_rootx() + tw.winfo_width() + int(8 * s)}+{tw.winfo_rooty()}")
+        self.bind("<Configure>", self.remember, add="+")
 
     # ------------------------------------------------------------ the shapes' graph
 
@@ -92,6 +99,10 @@ class GraphWindow(tk.Toplevel):
 
     def sync(self, fit_view=False):
         """Show the first selected line's graph (not while a point is being dragged)."""
+        tgts = self.app.tumour_targets()
+        old = self.session["tgts"] if self.session else None
+        if old is None or len(old) != len(tgts) or any(a is not b for a, b in zip(old, tgts)):
+            self.begin()  # (other shapes selected: what was done to the last ones is kept, like OK)
         if self.drag:
             return
         g = (self.tm().get("graphs") or {}).get(self.key)
@@ -138,12 +149,60 @@ class GraphWindow(tk.Toplevel):
                            if abs((b[1] - a[1]) - (c[1] - b[1])) > 1e-9] + [pts[-1]]
         self.set_points(keep)
 
-    def close(self):
+    def begin(self):
+        """Start again from the selected shapes' graphs as they are now (Cancel goes back to this)."""
+        app = self.app
+        tgts = app.tumour_targets()
+        self.session = {"tgts": tgts, "shapes": json.dumps(app.shapes), "step": None, "exact": True,
+                        "graphs": [json.loads(json.dumps(((shown_tumour(t) or {}).get("graphs") or {}).get(self.key)))
+                                   for t in tgts]}
+
+    def ok(self):
+        """Keep the graph."""
         if self.job:
             self.after_cancel(self.job)
             self.store()
+        self.close()
+
+    def cancel(self):
+        """Put the graph back as it was when the window opened (or when these shapes were selected)."""
+        if self.job:
+            self.after_cancel(self.job)
+            self.job = None
+        app, ses = self.app, self.session
+        if ses and ses["step"] is not None:
+            if ses["exact"] and len(app.undo_stack) == ses["step"]:  # nothing else changed: exactly as it was
+                app.undo_stack.pop()
+                app.shapes = json.loads(ses["shapes"])
+                app._edit_key = None
+                app.sync_panel()
+                app.shapes_changed()
+            else:  # other changes since then: just this graph goes back
+                if any(t is s for t in ses["tgts"] for s in app.shapes):
+                    app.push_undo()
+                    for t, g in zip(ses["tgts"], ses["graphs"]):
+                        tm = t.get("tumour") if any(t is s for s in app.shapes) else None
+                        if not tm:
+                            continue
+                        graphs = dict(tm.get("graphs") or {})
+                        graphs.pop(self.key, None)
+                        if g:
+                            graphs[self.key] = g
+                        if graphs:
+                            tm["graphs"] = graphs
+                        else:
+                            tm.pop("graphs", None)
+                    app.shapes_changed()
+                    app.sync_tumour()
+        self.close()
+
+    def close(self):
         self.tw.graph_window = None
         self.destroy()
+
+    def remember(self, e):
+        if e.widget is self:
+            self.app.graph_pos = f"+{self.winfo_x()}+{self.winfo_y()}"
 
     # ------------------------------------------------------------ view
 
@@ -289,7 +348,13 @@ class GraphWindow(tk.Toplevel):
         self.store()
 
     def push_undo(self):
-        self.app.push_undo()
+        """One undo step for everything done to the graph until OK (or other shapes are selected)."""
+        ses = self.session
+        if ses["step"] is None or len(self.app.undo_stack) != ses["step"]:
+            if ses["step"] is not None:  # (something else changed in between: Cancel can only put the graph back)
+                ses["exact"] = False
+            self.app.push_undo()
+            ses["step"] = len(self.app.undo_stack)
         self.app._edit_key = None  # (typing in a box afterwards is its own undo step)
 
     def on_hover(self, e):
