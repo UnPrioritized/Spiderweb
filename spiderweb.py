@@ -42,6 +42,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     arc.py           arcs: pieces of a perfect circle through three points
     tumour.py        tumours: bumps along lines
     joined.py        joining shapes into one curve (pieces, their tumours) and splitting shapes
+    convert.py       Turn into live shape: shapes -> one custom shape (and back)
     envelope.py      velocity envelopes
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes
   files/             saving, MIDI, sound

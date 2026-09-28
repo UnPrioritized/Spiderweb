@@ -154,6 +154,28 @@ TOPICS = [
               "lower each time (nothing selected: into a new shape). Right-click a stroke = its menu, also: save "
               "the drawing to the shape library.",
          words="combine join merge strokes outline"),
+    dict(id="turn_live", section="Shapes and settings", title="Turn into live shape (Ctrl+L)",
+         tip="Select lines, curves, arcs (or custom shapes) and press Ctrl+L: they become one live shape,\n"
+             "so they can be filled. Split into separate shapes (Ctrl+Shift+G) gives them back.",
+         text="Lines can't be filled, custom shapes can. Select one or more lines, polylines, freehand strokes, "
+              "curves or arcs (custom shapes too) and press Ctrl+L, click Turn into live shape under the shape "
+              "list, or right-click one → Turn into live shape. They become one live shape (a custom shape) with "
+              "each of them as a stroke of its own kind: curves stay curves with their anchors, arcs stay arcs, a "
+              "straightened freehand stroke stays straightened. Then Fill, Spam and Outline spam work (see Inside "
+              "fill), and its strokes can be edited like any live shape's.\n"
+              "[clip:turn_live-fill]\n\n"
+              "The notes stay the same, and so do the velocities (where shapes play at the same time, the first "
+              "selected one's win). With Multi channel each stroke still remembers the shape it came from, so "
+              "strokes that clash still get channels of their own; the shape list says how many channels a shape "
+              "uses (orange above 15).\n\n"
+              "What changes (Spiderweb asks first when it applies): tumours become fixed points, and \"Last note: "
+              "starts on it\" is dropped.\n\n"
+              "Going back: Split into separate shapes (Ctrl+Shift+G, or right-click → Split back into the shapes it "
+              "was made of) gives the old shapes back exactly as they were, tumours and all, as long as the drawing "
+              "wasn't changed (moving the whole shape is fine; resizing, turning, flipping or editing its strokes "
+              "isn't: then it splits into groups of touching strokes instead). Ctrl+Z always works.\n"
+              "[clip:turn_live-back]",
+         words="convert live custom fill combine group lines curves arcs"),
     dict(id="fill", section="Shapes and settings", title="Inside fill (custom shapes)",
          tip="Empty = just the outline. Fill = one long note per key inside. Spam = back-to-back notes of the gate.\n"
              "Outline spam = the outline chopped into notes of the gate.",
@@ -166,6 +188,8 @@ TOPICS = [
               "Fill and Spam need a closed outline. With one gap (two red dots in the drawer), they close it with a "
               "straight line, shown dashed, and the buttons turn orange. With more gaps only Empty and Outline "
               "spam work. Holes (a shape inside a shape) stay empty.\n\n"
+              "Lines, curves and arcs can't be filled: turn them into a live shape first (Ctrl+L, see Turn into "
+              "live shape).\n\n"
               "Spiderweb asks before making more than a million notes.",
          words="spam gate empty inside outline gap hole"),
     dict(id="custom_edit", section="Shapes and settings", title="Custom shapes: resize, turn, skew",
@@ -419,7 +443,10 @@ TOPICS = [
               "same tick become one (the loudest, as long as the longest).\n"
               "Multi channel: shapes whose notes clash go on different channels, each on its own track (channel 10, "
               "drums, is skipped). Split: Same key = only notes on the same key at the same time clash; Any notes = "
-              "any notes at the same time. Shapes that follow one after another share a channel.\n\n"
+              "any notes at the same time. Shapes that follow one after another share a channel. Pasted notes (by "
+              "track) and live shapes made with Turn into live shape (by the shape each stroke came from) can "
+              "spread over several channels: the shape list says how many, in orange above 15 (from there the "
+              "colours and channel numbers repeat).\n\n"
               "Every channel has its own note colour.",
          words="channel track overlap colour"),
     dict(id="files", section="Sound and MIDI", title="Saving and MIDI export",
@@ -534,7 +561,7 @@ TOPICS = [
               "Alt+wheel = zoom pitch.\n\n"
               "Editing: Del delete, Ctrl+D duplicate, Ctrl+Z / Ctrl+Y undo / redo, Ctrl+A select all, Ctrl+C / "
               "Ctrl+V copy / paste, Ctrl+H / Ctrl+J flip, Ctrl+Left / Ctrl+Right turn 90°, Ctrl+G join into one "
-              "curve, Ctrl+Shift+G split into separate shapes, Esc clear highlight / "
+              "curve, Ctrl+Shift+G split into separate shapes, Ctrl+L turn into live shape, Esc clear highlight / "
               "unpick a stroke. With a stroke of a live shape picked, the copy / paste / flip / turn keys work on "
               "that stroke.\n\n"
               "Playing: Space play / stop. Click or drag the bar numbers = move the play line.\n\n"
@@ -564,14 +591,15 @@ SEE = {
     "box": ["custom", "fill", "custom_edit", "live"],
     "funnel": ["funnel_curves", "funnel_links", "formulas"],
     "text": ["fill", "custom_edit"],
-    "live": ["fill", "curves_pen", "straighten", "drawer", "join"],
-    "fill": ["custom", "drawer", "live"],
+    "live": ["turn_live", "fill", "curves_pen", "straighten", "drawer", "join"],
+    "turn_live": ["live", "fill", "join", "channels"],
+    "fill": ["custom", "drawer", "live", "turn_live"],
     "custom_edit": ["custom", "selecting"],
     "tumours": ["line", "curve", "arc", "join", "view"],
     "straighten": ["free", "live"],
     "curves_pen": ["curve", "symmetric", "funnel_curves"],
     "symmetric": ["curves_pen", "curve"],
-    "join": ["curve", "tumours", "live", "curves_pen"],
+    "join": ["curve", "tumours", "live", "turn_live", "curves_pen"],
     "funnel_curves": ["funnel", "curves_pen", "funnel_links", "formulas"],
     "funnel_links": ["funnel_curves", "formulas"],
     "formulas": ["funnel_curves", "funnel_links"],

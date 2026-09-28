@@ -56,6 +56,8 @@ def clean_strokes(strokes):
                     out.append({"kind": "poly", "pts": pts})
                     if st.get("free"):  # drawn freehand: can be made perfect (smooth.py)
                         out[-1].update(free=True, smooth=clean_level(st.get("smooth", 0)), k=arc_k(st))
+            if isinstance(st.get("src"), int) and out:  # which shape it came from (convert.py)
+                out[-1]["src"] = st["src"]
         except (AttributeError, KeyError, TypeError, ValueError):
             continue
     return out
@@ -356,10 +358,12 @@ def new_live_shape(defaults, custom_defaults):
                 gate=custom_defaults["gate"], align=custom_defaults["align"], pts=[[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
 
 
-def outline_notes(sh, ppq):
-    """(start, end, pitch) notes along every stroke of a custom shape, like lines."""
+def outline_notes(sh, ppq, only=None):
+    """(start, end, pitch) notes along every stroke of a custom shape (only: just these stroke numbers), like
+    lines."""
+    paths = custom_strokes(sh)
     raw = []
-    for path in join_paths(custom_strokes(sh)):
+    for path in join_paths(paths if only is None else [paths[k] for k in only]):
         closed = path_closed(path)
         path = dedupe(path)
         if len(path) < 2:
@@ -454,11 +458,42 @@ def chop(sh, stretches, g, keep_short=False):
     return out
 
 
+def stroke_groups(sh):
+    """{group: [stroke numbers]} of a custom shape whose strokes came from different shapes (convert.py: each
+    shape's strokes make their notes on their own, like the shapes did), or None if they're all one."""
+    groups = {}
+    for k, st in enumerate(sh["strokes"]):
+        groups.setdefault(st.get("src", -1), []).append(k)
+    return groups if len(groups) > 1 else None
+
+
+def outline_groups(sh, ppq, spam=False):
+    """The outline's notes (spam: chopped like Outline spam) and which stroke group each belongs to (None if the
+    strokes are all one group, see stroke_groups)."""
+    groups = stroke_groups(sh)
+    if groups is None:
+        notes = outline_notes(sh, ppq)
+        return (chop_outline(sh, notes, ppq) if spam else notes), None
+    parts, ids = [], []
+    for n, (_, strokes) in enumerate(sorted(groups.items())):
+        notes = outline_notes(sh, ppq, strokes)
+        if spam:
+            notes = chop_outline(sh, notes, ppq)
+        parts.append(notes)
+        ids.append(np.full(len(notes), n, np.int64))
+    return np.concatenate(parts), np.concatenate(ids)
+
+
+def chop_outline(sh, notes, ppq):
+    """Outline notes chopped into back-to-back notes of the spam gate (spam start like Spam). What doesn't fit a
+    whole gate is dropped, but a note too short for even one gate stays as it is (steep parts of the outline would
+    vanish otherwise)."""
+    return chop(sh, np.asarray(notes, np.int64).reshape(-1, 3), spam_gate(sh, ppq), True)
+
+
 def outline_spam(sh, ppq):
-    """The outline's notes chopped into back-to-back notes of the spam gate (spam start like Spam). What doesn't
-    fit a whole gate is dropped, but a note too short for even one gate stays as it is (steep parts of the
-    outline would vanish otherwise)."""
-    return chop(sh, np.asarray(outline_notes(sh, ppq), np.int64).reshape(-1, 3), spam_gate(sh, ppq), True)
+    """The outline in notes of the spam gate (chop_outline)."""
+    return outline_groups(sh, ppq, spam=True)[0]
 
 
 def custom_note_count(sh, ppq):
@@ -467,7 +502,7 @@ def custom_note_count(sh, ppq):
         return len(unpack_notes(sh["notes"]))
     if sh["fill"] == "outline_spam":
         g = spam_gate(sh, ppq)
-        return sum(max(1, spam_starts(sh, s, e, g)[1]) for s, e, _ in outline_notes(sh, ppq).tolist())
+        return sum(max(1, spam_starts(sh, s, e, g)[1]) for s, e, _ in outline_groups(sh, ppq)[0].tolist())
     if sh["fill"] == "empty" or not fillable(sh["strokes"]):
         return None
     if sh["fill"] == "fill":
@@ -480,14 +515,19 @@ def custom_notes(sh, ppq):
     """Empty = the outline; Fill = one note per stretch of each key inside; Spam = each stretch filled with
     back-to-back notes of the spam gate, starting at its left edge or on the gate grid (see ALIGNS); what doesn't
     fit a whole gate is dropped. Outline spam = the outline chopped the same way (open ends are fine)."""
+    return custom_notes_groups(sh, ppq)[0]
+
+
+def custom_notes_groups(sh, ppq):
+    """custom_notes, and which group each note belongs to (None = all one: see outline_groups)."""
     if "notes" in sh:
-        return block_notes(sh, ppq)[:, :3]
+        return block_notes(sh, ppq)[:, :3], None
     if sh["fill"] == "outline_spam":
-        return outline_spam(sh, ppq)
+        return outline_groups(sh, ppq, spam=True)
     if sh["fill"] == "empty" or not fillable(sh["strokes"]):
-        return outline_notes(sh, ppq)
+        return outline_groups(sh, ppq)
     spans = np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]  # (start, end, key)
-    return spans if sh["fill"] == "fill" else chop(sh, spans, spam_gate(sh, ppq))
+    return (spans if sh["fill"] == "fill" else chop(sh, spans, spam_gate(sh, ppq))), None
 
 
 # ---------------------------------------------------------------- pasted notes

@@ -4,6 +4,7 @@ import tkinter as tk
 from types import SimpleNamespace
 
 from window.curve_dialog import load_formulas
+from notes.convert import originals
 from notes.joined import is_joined
 from notes.funnel import CURVE_PRESETS, inside_out, turned_curve
 from notes.tumour import LINE_KINDS
@@ -104,8 +105,11 @@ class ShapeMenu:
                  "freehand strokes, curves and arcs)", "Ctrl+G", app.join_selected, ok, keys=True)
         if len(app.sels) == 1 and sh["kind"] in LINE_KINDS:
             item("Split here", "", lambda: app.split_here(i, at))
+        if app.live_problem() is None:
+            item("Turn into live shape", "Ctrl+L", app.turn_into_live, keys=True)
         if len(app.sels) == 1 and app.can_split_pieces(sh):
-            item("Split into separate shapes", "Ctrl+Shift+G", lambda: app.split_pieces(i), keys=True)
+            label = "Split back into the shapes it was made of" if originals(sh) else "Split into separate shapes"
+            item(label, "Ctrl+Shift+G", lambda: app.split_pieces(i), keys=True)
         n = len(app.sels)
         shapes = "shape" if n == 1 else f"{n} shapes"
         whole = app.picked() is None  # (with a stroke picked, the keys work on it)

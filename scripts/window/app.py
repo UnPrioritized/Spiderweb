@@ -23,7 +23,7 @@ from notes.paths import KEYS
 from notes.smooth import SMOOTH_DEFAULT
 from notes.text import TEXT_DEFAULTS
 from files.mathexpr import calc, calc_int, fmt
-from window.panel_custom import CustomPanel
+from window.panel_custom import GAP_COLOR, CustomPanel
 from window.panel_freehand import FreehandPanel
 from window.panel_funnel import FunnelPanel
 from window.panel_text import TextPanel
@@ -53,6 +53,7 @@ TOOLS = [("select", "Select", "v"), ("line", "Line", "l"), ("poly", "Polyline", 
 # shown next to Custom shape while it (or one of them) is the tool; their keys work any time
 SHAPE_TOOLS = [("square", "Square", "q"), ("circle", "Circle", "o"), ("triangle", "Triangle", "t")]
 BIG = 1_000_000  # ask before making a custom shape / funnel with more notes than this
+MANY_CHANNELS = 15  # a shape spread over more channels than this is shown orange in the shape list
 CHANNEL_CHOICES = [
     ("raw", "As drawn",
      "Keeps overlaps.\n"
@@ -117,7 +118,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.funnel_defaults = dict(FUNNEL_DEFAULTS)  # settings for new funnels
         self.free_smooth = SMOOTH_DEFAULT  # how much new freehand strokes are made perfect (smooth.py)
         self.text_defaults = dict(TEXT_DEFAULTS)  # settings for new text (the last ones used)
-        self._rows = {"last": True, "free": False, "tumour": False, "text": False, "custom": False,
+        self._rows = {"last": True, "line_fill": False, "free": False, "tumour": False, "text": False, "custom": False,
                       "funnel": False}  # optional panel parts
         self.drawer = None
         self.rendered, self.slot_count = NO_NOTES, 0  # (start, end, pitch, velocity, slot, owner) rows
@@ -194,6 +195,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
                          ("Control-Shift-v Control-Shift-V", self.paste_from_domino),
                          ("Control-g Control-G", self.join_selected),
                          ("Control-Shift-g Control-Shift-G", self.split_selected),
+                         ("Control-l Control-L", self.turn_into_live),
                          ("Control-v Control-V", self.paste), ("Control-h Control-H", lambda: self.flip(True)),
                          ("Control-j Control-J", lambda: self.flip(False)), ("Control-a Control-A", self.select_all),
                          ("Control-Left", lambda: self.rotate(False)), ("Control-Right", lambda: self.rotate(True))):
@@ -490,6 +492,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         ttk.Radiobutton(opts, text="ends on the last point", value=False, variable=self.end_dot).pack(anchor="w")
         ttk.Radiobutton(opts, text="starts exactly on the last point", value=True,
                         variable=self.end_dot).pack(anchor="w")
+        self._build_line_fill()
         self._build_freehand()
         self._build_tumour()
         self._build_text()
@@ -566,6 +569,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.sync_funnel()
         self.sync_list_selection()
         self.sync_join()
+        self.sync_line_fill()
         if self.sel is not None:
             self.listbox.see(self.sel)
         # the first time one is selected: how it's edited
@@ -720,9 +724,16 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         if self._notes_worked != worked:
             self._notes_time = time.perf_counter() - started
         counts = self.note_counts = np.bincount(self.rendered[:, 5], minlength=len(self.shapes)).tolist()
+        chans = [1] * len(self.shapes)  # Multi channel: how many channels each shape spreads over
+        if self.channel_mode.get() == "auto" and len(self.rendered):
+            pairs = np.unique(self.rendered[:, 5] * (self.slot_count + 1) + self.rendered[:, 4])
+            chans = np.bincount(pairs // (self.slot_count + 1), minlength=len(self.shapes)).tolist()
         self.listbox.delete(0, "end")
         for i, sh in enumerate(self.shapes):
-            self.listbox.insert("end", f"{i + 1}.  {self.shape_label(sh)}  —  {counts[i]:,} notes")
+            uses = f", uses {chans[i]} channels" if chans[i] > 1 else ""
+            self.listbox.insert("end", f"{i + 1}.  {self.shape_label(sh)}  —  {counts[i]:,} notes{uses}")
+            if chans[i] > MANY_CHANNELS:  # (past this the note colours and channel numbers repeat)
+                self.listbox.itemconfig(i, foreground=GAP_COLOR, selectforeground="#ffd9b0")
         self.sync_list_selection()
         self.sync_join()
         self.roll.request_redraw()
@@ -949,7 +960,8 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
 
     def layout_rows(self):
         """Show the panel's optional parts, always in the same order above the point boxes."""
-        rows = ((self.last_row, "last"), (self.free_box, "free"), (self.tumour_box, "tumour"),
+        rows = ((self.last_row, "last"), (self.line_fill_row, "line_fill"), (self.free_box, "free"),
+                (self.tumour_box, "tumour"),
                 (self.text_box, "text"), (self.custom_box, "custom"), (self.funnel_box, "funnel"))
         shown = [key for _, key in rows if self._rows[key]]
         if shown == getattr(self, "_rows_shown", None):

@@ -8,7 +8,6 @@ import copy
 import json
 import math
 
-from notes.arc import arc_bezier
 from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half_at, handle_lines, nearest, pen_handles,
                           set_symmetry)
 from notes.custom import (add_stroke, box_frame, frame_to_bp, frame_to_uv, map_stroke, new_live_shape, refit,
@@ -70,7 +69,7 @@ class LiveDrawing:
 
     @staticmethod
     def draft_stroke(sh):
-        """A finished draft as a stroke in beats / pitch (arcs become curves, so they bend like curves)."""
+        """A finished draft as a stroke in beats / pitch."""
         kind = sh.get("draw") or sh["kind"]
         if kind in BOX_TOOLS:
             (b0, p0), (b1, _), (_, p1) = sh["pts"]
@@ -81,8 +80,8 @@ class LiveDrawing:
             return {"kind": "poly", "pts": [[b0, p0], [b1, p0], [b1, p1], [b0, p1], [b0, p0]]}
         if kind == "curve":
             return {"kind": "curve", "pts": [list(p) for p in sh["pts"]]}
-        if kind == "arc":
-            return {"kind": "curve", "pts": arc_bezier(sh["pts"], sh.get("k", 1.0))}
+        if kind == "arc":  # (stays an arc, so its notes are exactly the Arc tool's)
+            return {"kind": "arc", "pts": [list(p) for p in sh["pts"]], "k": sh.get("k", 1.0)}
         if kind == "free":  # stays freehand, so it can be made perfect (k: beats per key, add_stroke converts it)
             return {"kind": "poly", "pts": [list(p) for p in sh["pts"]], "free": True, "smooth": sh.get("smooth", 0),
                     "k": sh.get("k", 1.0)}

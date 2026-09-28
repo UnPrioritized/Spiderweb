@@ -11,7 +11,7 @@ import math
 import numpy as np
 
 from notes.custom import (ALIGNS, CUSTOM_DEFAULTS, FILLS, BOX_STROKE, block_notes, check_notes, clean_curve,
-                          clean_strokes, custom_notes, custom_strokes)
+                          clean_strokes, custom_notes_groups, custom_strokes)
 from notes.envelope import env_values, velocity_env
 from notes.joined import clean_joined, is_joined, joined_paths
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
@@ -89,6 +89,15 @@ def clean_shape(sh):
         out["fill"] = sh.get("fill") if sh.get("fill") in FILLS else "empty"
         out["gate"] = max(1e-6, float(sh.get("gate", CUSTOM_DEFAULTS["gate"])))
         out["align"] = sh.get("align") if sh.get("align") in ALIGNS else "auto"
+        fr = sh.get("from")  # the shapes it was made of (convert.py)
+        if isinstance(fr, dict) and isinstance(fr.get("shapes"), list) and fr["shapes"]:
+            olds = [clean_shape(o) if isinstance(o, dict) else None for o in fr["shapes"]]
+            try:
+                if all(olds) and len(fr["pts"]) == 3:
+                    out["from"] = {"shapes": olds, "strokes": clean_strokes(fr["strokes"]),
+                                   "pts": [[float(b), float(p)] for b, p in fr["pts"]]}
+            except (KeyError, TypeError, ValueError):
+                pass
         tx = clean_text(sh["text"]) if isinstance(sh.get("text"), dict) else None
         if tx:  # typed text (text.py): its strokes are the letters, the settings let it be retyped
             out["text"] = tx
@@ -218,19 +227,22 @@ def shape_notes(sh, ppq, keys=128):
 
 
 def shape_notes_tracks(sh, ppq, keys=128):
-    """shape_notes, and for pasted notes which track each note came from (one number per row; None for every
-    other shape)."""
+    """shape_notes, and for pasted notes which track each note came from, for a custom shape made of other shapes
+    which of them (one number per row; None for every other shape)."""
     end_dot = sh.get("end_dot", False)
     path = dedupe(np.concatenate(cached_arrays(sh)))  # (drawing the line uses the same points)
     if path[-1, 0] < path[0, 0]:
         path = path[::-1]  # drawn right to left: the "last point" is the later end in time, same as left to right
     path = path * [ppq, 1]  # beats -> ticks
     own = None  # pasted notes' own velocities and tracks
+    groups = None  # a custom shape made of other shapes (convert.py): which of them each note came from
     if sh["kind"] == "custom" and "notes" in sh:
         raw = block_notes(sh, ppq)
         raw, own = raw[:, :3], raw[:, 3:5]
-    elif sh["kind"] in ("custom", "funnel"):
-        raw = custom_notes(sh, ppq) if sh["kind"] == "custom" else funnel_notes(sh, ppq)
+    elif sh["kind"] == "custom":
+        raw, groups = custom_notes_groups(sh, ppq)
+    elif sh["kind"] == "funnel":
+        raw = funnel_notes(sh, ppq)
     elif sh["kind"] in LINE_KINDS and len(cached_arrays(sh)) > 1:  # a joined curve's pieces: each like a line
         pieces = []
         for a in cached_arrays(sh):
@@ -257,6 +269,9 @@ def shape_notes_tracks(sh, ppq, keys=128):
             got = unique_rows(np.column_stack([raw, own]))
             return got[:, :4], got[:, 4]
         got = unique_rows(np.column_stack([raw, own[:, 1]]))
+        raw, tracks = got[:, :3], got[:, 3]
+    elif groups is not None:  # (the same note from two of them stays twice, like two shapes)
+        got = unique_rows(np.column_stack([raw, np.asarray(groups, np.int64)[keep]]))
         raw, tracks = got[:, :3], got[:, 3]
     else:
         raw = unique_rows(raw)
