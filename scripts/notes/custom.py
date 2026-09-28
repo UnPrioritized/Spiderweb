@@ -21,7 +21,17 @@ SPAM_FILLS = ("spam", "outline_spam")  # the ones that use the gate and spam sta
 # Spam start: "auto" = each stretch of a key starts at its own left edge, "aligned" = every note sits on the
 # gate grid counted from tick 0 (straight columns, lined up with bar lines and other shapes)
 ALIGNS = ("auto", "aligned")
-CUSTOM_DEFAULTS = {"fill": "empty", "gate": 0.0625, "align": "auto"}
+CUSTOM_DEFAULTS = {"fill": "empty", "gate": 0.0625, "align": "auto", "union": False}
+# on / off settings a custom shape only has when they're on: "union" = where outlines overlap it's filled too (off:
+# overlaps cancel out, even-odd)
+CUSTOM_FLAGS = ("union",)
+
+
+def custom_settings(cd):
+    """The fill settings a new custom shape gets from cd (the settings for new ones)."""
+    out = {k: cd[k] for k in ("fill", "gate", "align")}
+    out.update({k: True for k in CUSTOM_FLAGS if cd.get(k)})
+    return out
 
 
 # ---------------------------------------------------------------- custom shapes
@@ -198,7 +208,7 @@ def flat_path(path):
 
 def fill_plan(sh):
     """How Fill / Spam see a custom shape's outline (beats / pitch), remembered:
-    "polys": the paths whose edges make the inside (even-odd), "closers": the straight lines added to close gaps
+    "polys": the closed loops that make the inside, "closers": the straight lines added to close gaps
     (loose ends that nearly touch are joined; every open part left is closed from its end back to its start),
     "flat": open parts too flat to have an inside (they just keep their outline notes)."""
     key = (json.dumps(sh["strokes"]), json.dumps(sh["pts"]))
@@ -243,9 +253,9 @@ def fill_plan(sh):
         if flat_path(path):
             flat.append(path)
         else:
-            polys.append(path)
+            polys.append(path + [path[0]])
             closers.append([path[-1], path[0]])
-    got = _plans[key] = {"polys": polys + closers, "closers": closers, "flat": flat}
+    got = _plans[key] = {"polys": polys, "closers": closers, "flat": flat}
     return got
 
 
@@ -428,8 +438,8 @@ def add_stroke(sh, st, at=None):
 
 def new_live_shape(defaults, custom_defaults):
     """An empty custom shape to draw into (its box: 1 beat by 1 key at 0, fitted once something is drawn)."""
-    return dict(defaults, kind="custom", name="Live drawing", strokes=[], fill=custom_defaults["fill"],
-                gate=custom_defaults["gate"], align=custom_defaults["align"], pts=[[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    return dict(defaults, kind="custom", name="Live drawing", strokes=[], **custom_settings(custom_defaults),
+                pts=[[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
 
 
 def outline_notes(sh, ppq, only=None):
@@ -491,6 +501,18 @@ def row_spans(polys, q):
     return merged
 
 
+def union_spans(polys, q):
+    """row_spans, but inside ANY of the loops counts (where they overlap it's filled, holes too)."""
+    spans = sorted(s for poly in polys for s in row_spans([poly], q))
+    merged = []
+    for a, b in spans:
+        if merged and a <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    return merged
+
+
 def inside_spans(sh, ppq):
     """[(pitch, start tick, end tick)] for every stretch of every key inside the shape. Text: the nonzero rule and
     its threshold (text.py). Gaps in the outline are closed with straight lines (fill_plan)."""
@@ -499,9 +521,11 @@ def inside_spans(sh, ppq):
     ps = [p for poly in polys for _, p in poly]
     if not ps:
         return []
+    union = sh.get("union") and not tx
     out = []
     for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1):
-        for a, b in threshold_spans(polys, q, tx["threshold"]) if tx else row_spans(polys, q):
+        for a, b in (threshold_spans(polys, q, tx["threshold"]) if tx else
+                     union_spans(polys, q) if union else row_spans(polys, q)):
             s = math.floor(a * ppq + 0.5)
             out.append((q, s, max(math.floor(b * ppq + 0.5), s + 1)))
     return out

@@ -192,11 +192,14 @@ TOPICS = [
               "and 1 key) are joined to each other first; every open part left is closed from its end back to its "
               "start. An open part that's almost straight (never more than half a key or 1/64 beat from that "
               "closing line) has nothing inside, so it isn't filled: it just keeps its notes. Close the gaps "
-              "yourself to decide exactly where the edge goes. Holes (a shape inside a shape) stay empty.\n\n"
+              "yourself to decide exactly where the edge goes.\n\n"
+              "Overlaps cancel out (ticked unless you change it): where outlines overlap, the overlap stays empty, "
+              "and a shape inside a shape makes a hole. Untick it to fill inside any outline, overlaps and holes "
+              "too. (Text always fills its letters the way the font means them.)\n\n"
               "Lines, curves and arcs can't be filled: turn them into a live shape first (Ctrl+L, see Turn into "
               "live shape).\n\n"
               "Spiderweb asks before making more than a million notes.",
-         words="spam gate empty inside outline gap hole"),
+         words="spam gate empty inside outline gap hole overlap cancel union"),
     dict(id="custom_edit", section="Shapes and settings", title="Custom shapes: resize, turn, skew",
          tip="Drag a corner or side to resize, just outside a corner to turn,\n"
              "just outside a side's middle to skew. Drag inside to move it.",

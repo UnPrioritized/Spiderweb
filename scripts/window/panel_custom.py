@@ -2,9 +2,11 @@
 
 import copy
 import math
+import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 
-from notes.custom import SPAM_FILLS, box_frame, gap_lines, join_strokes, map_stroke, normalize_strokes, open_paths
+from notes.custom import (CUSTOM_FLAGS, SPAM_FILLS, box_frame, custom_settings, gap_lines, join_strokes, map_stroke,
+                          normalize_strokes, open_paths)
 from window.drawer import Drawer, clean_name, library_names, load_shape, save_shape
 from window.panel_funnel import GATE_STEPS
 from files.mathexpr import calc, fmt
@@ -18,6 +20,9 @@ FILL_CHOICES = [
     ("spam", "Spam", "The inside filled with back-to-back notes of one gate."),
     ("outline_spam", "Outline spam", "Just the outline, chopped into notes of one gate."),
 ]
+CANCEL_TIP = ("Fill and Spam: where outlines overlap, the overlap is left empty\n"
+              "(a shape inside a shape makes a hole). Off: inside any outline is filled,\n"
+              "overlaps and holes too.")
 ALIGN_CHOICES = [
     ("auto", "Auto", "Each key's notes start at that key's left edge,\nso the left side is exact and the right side ragged."),
     ("aligned", "Aligned", "Every note sits on the gate grid counted from the start of the song,\n"
@@ -74,6 +79,11 @@ class CustomPanel:
             b.pack(side="left", padx=(4, 0))
             Tooltip(b, tip)
             self.align_buttons.append(b)
+        self.cancel_var = tk.BooleanVar(value=True)
+        self.cancel_box = ttk.Checkbutton(opts, text="Overlaps cancel out", variable=self.cancel_var,
+                                          command=lambda: self.set_custom("union", not self.cancel_var.get()))
+        self.cancel_box.pack(anchor="w", pady=(2, 0))
+        Tooltip(self.cancel_box, CANCEL_TIP)
         self.custom_info = ttk.Label(box, text="", foreground="#777", font=("Segoe UI", 8),
                                      wraplength=int(300 * self.scale), justify="left")
         self.custom_info.pack(fill="x", pady=(2, 0))
@@ -88,9 +98,7 @@ class CustomPanel:
 
     def new_custom(self, strokes, b0, p0, b1, p1):
         return dict(self.defaults, kind="custom", name=self.custom_shape, strokes=copy.deepcopy(strokes),
-                    fill=self.custom_defaults["fill"], gate=self.custom_defaults["gate"],
-                    align=self.custom_defaults["align"],
-                    pts=box_frame(b0, p0, b1, p1))
+                    **custom_settings(self.custom_defaults), pts=box_frame(b0, p0, b1, p1))
 
     def custom_targets(self):
         """What the custom shape panel changes: the selected custom shapes, or (with nothing selected) the
@@ -165,6 +173,10 @@ class CustomPanel:
         self.gate_entry.config(state="normal" if spam else "disabled")
         for b in self.align_buttons:
             b.config(state="normal" if spam else "disabled")
+        self._loading = True
+        self.cancel_var.set(not tgts[0].get("union"))
+        self._loading = False
+        self.cancel_box.config(state="normal" if fill in ("fill", "spam") and not text else "disabled")
         if not placed and live:
             info = ("Live shape: what you draw goes into one custom shape (a new one now). Close its outline "
                     "(points snap onto its ends) to fill it.")
@@ -212,18 +224,21 @@ class CustomPanel:
         self.schedule_autosave()
 
     def set_custom(self, key, value):
-        """A custom shape setting (fill / gate / align) changed in the panel."""
+        """A custom shape setting (fill / gate / align / the on-off CUSTOM_FLAGS) changed in the panel."""
         if self._loading:
             return
         tgts = self.custom_targets()
         placed = [t for t in tgts if t is not self.custom_defaults]
-        same = all(abs(t[key] - value) < 1e-12 if key == "gate" else t.get(key) == value for t in tgts)
+        same = all(abs(t[key] - value) < 1e-12 if key == "gate" else bool(t.get(key)) == value if key in CUSTOM_FLAGS
+                   else t.get(key) == value for t in tgts)
         if same or not self.confirm_big([dict(t, **{key: value}) for t in placed]):
             return self.sync_custom()
         if placed:
             self.push_undo()
         for t in tgts:
             t[key] = value
+            if key in CUSTOM_FLAGS and not value and t is not self.custom_defaults:
+                del t[key]  # (shapes only have them when they're on)
         self.shapes_changed()
         self.sync_custom()
 

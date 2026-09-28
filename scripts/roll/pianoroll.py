@@ -187,7 +187,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 return i  # pasted notes: anywhere in their box
             if sh["kind"] == "custom" and sh["fill"] in ("fill", "spam"):
                 polys = cached_strokes(sh) if sh.get("text") else fill_plan(sh)["polys"]
-                if self.inside_strokes(polys, self.x2t(x), self.y2p(y)):
+                b, p = self.x2t(x), self.y2p(y)
+                if (any(self.inside_strokes([poly], b, p) for poly in polys) if sh.get("union") else
+                        self.inside_strokes(polys, b, p)):
                     return i  # filled shapes can be clicked anywhere inside
             if sh["kind"] == "funnel" and funnel_contains(sh, self.x2t(x), self.y2p(y)):
                 return i

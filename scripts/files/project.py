@@ -9,7 +9,7 @@ from tkinter import filedialog, messagebox
 
 import numpy as np
 
-from notes.custom import ALIGNS, CUSTOM_DEFAULTS, FILLS, notes_shape
+from notes.custom import ALIGNS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, notes_shape
 from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_shape
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
 from notes.paths import KEYS
@@ -147,6 +147,8 @@ class ProjectFiles:
                 self.custom_defaults["fill"] = custom["fill"]
             if custom.get("align") in ALIGNS:
                 self.custom_defaults["align"] = custom["align"]
+            for key in CUSTOM_FLAGS:
+                self.custom_defaults[key] = bool(custom.get(key))
             try:
                 self.custom_defaults["gate"] = max(1e-6, float(custom.get("gate", CUSTOM_DEFAULTS["gate"])))
             except (TypeError, ValueError):

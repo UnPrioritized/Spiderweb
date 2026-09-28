@@ -10,8 +10,8 @@ import math
 
 from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half_at, handle_lines, nearest, pen_handles,
                           set_symmetry)
-from notes.custom import (add_stroke, box_frame, frame_to_bp, frame_to_uv, map_stroke, new_live_shape, refit,
-                          stroke_bp, stroke_ends)
+from notes.custom import (add_stroke, box_frame, custom_settings, frame_to_bp, frame_to_uv, map_stroke,
+                          new_live_shape, refit, stroke_bp, stroke_ends)
 from roll.roll_funnel import seg_dist
 from roll.roll_shared import ALT, cached_strokes
 
@@ -63,9 +63,8 @@ class LiveDrawing:
         app = self.app
         strokes = ([{"kind": "ellipse", "box": [0, 0, 1, 1]}] if tool == "circle" else
                    [{"kind": "poly", "pts": TRIANGLE if tool == "triangle" else SQUARE}])
-        return dict(app.defaults, kind="custom", name=tool.title(), strokes=strokes, fill=app.custom_defaults["fill"],
-                    gate=app.custom_defaults["gate"], align=app.custom_defaults["align"],
-                    pts=box_frame(a[0], a[1], b[0], b[1]), draw=tool)
+        return dict(app.defaults, kind="custom", name=tool.title(), strokes=strokes,
+                    **custom_settings(app.custom_defaults), pts=box_frame(a[0], a[1], b[0], b[1]), draw=tool)
 
     @staticmethod
     def draft_stroke(sh):
