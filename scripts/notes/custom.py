@@ -23,13 +23,14 @@ SPAM_FILLS = ("spam", "outline_spam")  # the ones that use the gate and spam sta
 # gate grid counted from tick 0 (straight columns, lined up with bar lines and other shapes), "centred" = what
 # doesn't fit a whole gate is shared between both ends (a peak comes out the same on both sides)
 ALIGNS = ("auto", "aligned", "centred")
-# Spam ends (what happens to the bit of a stretch that doesn't fit a whole gate): "drop" = dropped, but a stretch
-# too short for even one gate stays one note as it is; "keep" = kept as a shorter note; "round" = a whole gate if
-# it's at least half a gate, else dropped (every stretch gets at least one gate); "min" = like "drop", but no note
-# shorter than a quarter gate (it grows, centred); "stretch" = the gates in the stretch are stretched or squeezed
-# so a whole number fits exactly (the spam start doesn't matter then)
-ENDS = ("drop", "keep", "round", "min", "stretch")
-CUSTOM_DEFAULTS = {"fill": "empty", "gate": 0.0625, "align": "auto", "ends": "drop", "union": False,
+# Spam ends (what happens to the bit of a stretch that doesn't fit a whole gate), in the dropdown's order:
+# "round" (the default for new shapes) = a whole gate if it's at least half a gate, else dropped (every stretch gets
+# at least one gate); "keep" = kept as a shorter note; "drop" = dropped, but a stretch too short for even one gate
+# stays one note as it is (shapes saved before Ends existed have no "ends" and load as "drop", so their notes stay);
+# "min" = like "drop", but no note shorter than a quarter gate (it grows, centred); "stretch" = the gates in the
+# stretch are stretched or squeezed so a whole number fits exactly (the spam start doesn't matter then)
+ENDS = ("round", "keep", "drop", "min", "stretch")
+CUSTOM_DEFAULTS = {"fill": "empty", "gate": 0.0625, "align": "auto", "ends": "round", "union": False,
                    "apart": False}
 # on / off settings a custom shape only has when they're on: "union" = where outlines overlap it's filled too (off:
 # overlaps cancel out, even-odd); "apart" = Fill / Spam "Outline": the outline's notes on a channel of their own
