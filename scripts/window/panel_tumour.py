@@ -55,7 +55,7 @@ class TumourPanel:
             return
         on = [shown_tumour(t) for t in tgts if (shown_tumour(t) or {}).get("on")]
         if any(t.get("tumours") for t in tgts):
-            text = "Different tumours per joined shape"
+            text = "Each joined shape has its own tumours"
         elif not on:
             text = "No tumours"
         elif len(tgts) > 1:

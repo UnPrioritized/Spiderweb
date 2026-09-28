@@ -5,10 +5,11 @@ ends (turned round when that's nearer). Ends that touch (or nearly: `touch`) are
 with a corner there; shapes that don't touch stay separate pieces of the same curve, with a gap between them that
 isn't drawn and makes no notes: sh["gaps"] = the segment numbers of those gaps (bezier.piece_ends).
 
-Tumours: if every joined shape had the same tumours (or none), the curve gets them (each piece gets its own row of
-bumps, like separate shapes). Otherwise every shape keeps its own: sh["tumours"] = one setting (or None) per joined
-shape in chain order, sh["splits"] = the anchors where a new one starts inside a piece. Changing any tumour setting
-of the joined curve gives it one setting for all (tumour_window.py drops "tumours" / "splits")."""
+Tumours: every joined shape keeps its own, so joining moves no bumps: sh["tumours"] = one setting (or None) per
+joined shape in chain order, sh["splits"] = the anchors where a new one starts inside a piece (set_tumours). Only
+when every piece is one whole shape and they all had the same tumours (or none) does the curve get one setting
+(each piece gets its own row of bumps anyway). Changing any tumour setting of the joined curve gives it one
+setting for all (tumour_window.py drops "tumours" / "splits"): then the bumps run on across the joints."""
 
 import json
 import math
@@ -116,14 +117,7 @@ def join_shapes(shapes, k, touch):
         out["sharp"] = sharp
     if gaps:
         out["gaps"] = gaps
-    tms = [p["tm"] for p in chain]
-    if all(json.dumps(t, sort_keys=True) == json.dumps(tms[0], sort_keys=True) for t in tms):
-        if tms[0]:
-            out["tumour"] = tms[0]
-    else:
-        out["tumours"] = tms
-        if splits:
-            out["splits"] = splits
+    set_tumours(out, [p["tm"] for p in chain], splits)  # (each shape keeps its own, so no bump moves)
     return out
 
 
@@ -259,6 +253,8 @@ def set_tumours(sh, tms, splits):
     for key in ("tumour", "tumours", "splits"):
         sh.pop(key, None)
     tms = [json.loads(json.dumps(tm)) if tm else None for tm in tms]
+    if not any(tms):
+        return
     if not splits and len(set(json.dumps(t, sort_keys=True) for t in tms)) == 1:
         if tms[0]:
             sh["tumour"] = tms[0]

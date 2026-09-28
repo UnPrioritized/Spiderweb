@@ -449,6 +449,8 @@ def tumour_path(path, tm):
                 sizes.append(len(bump))
                 out.block(len(bump))
             nxt = starts[i + 1] if i + 1 < len(starts) else w.total
+            if e >= hi - 1e-12 and nxt > e + 1e-12:  # cut off by the range's end: down onto the line there
+                out.add([w.at(e)])
             out.add(base(e, nxt))
         out.add([w.pts[-1]])
         if per_bump:
