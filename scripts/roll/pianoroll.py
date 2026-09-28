@@ -268,6 +268,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return
         if tool == "select":
             i = self.hit_shape(e.x, e.y)
+            if i is None:
+                i = self.note_owner(e.x, e.y)  # on one of a shape's notes counts too
             if i is None and hit and not e.state & CTRL:
                 i = app.sel  # anywhere inside the selected custom shape's box moves it
             # clicking the one selected funnel again: its line / curve under the mouse gets highlighted;
