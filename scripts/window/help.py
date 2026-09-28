@@ -311,8 +311,27 @@ class HelpWindow(tk.Toplevel):
         self.text.config(state="disabled")
         self.bind("<Escape>", lambda e: self.destroy())
         self.bind("<Control-f>", lambda e: (search.focus_set(), search.select_range(0, "end")))
+        self.bind("<Key>", lambda e: self.type_to_search(e, search))
         self.fill_list()
         search.focus_set()
+
+    def type_to_search(self, e, search):
+        """Typing anywhere in the window types into the search box (Backspace too)."""
+        if e.widget is search or e.state & 0x4 or e.state & 0x20000:  # (Ctrl / Alt: shortcuts)
+            return None
+        if e.keysym == "BackSpace":
+            search.focus_set()
+            search.delete(max(0, len(search.get()) - 1), "end")
+            return "break"
+        if not e.char or not e.char.isprintable():
+            return None
+        if e.char == " " and isinstance(e.widget, (ttk.Button, ttk.Checkbutton)):
+            return None  # (Space presses a button that has the keyboard)
+        search.focus_set()
+        search.select_clear()
+        search.insert("end", e.char)
+        search.icursor("end")
+        return "break"
 
     def matches(self):
         words = self.query.get().lower().split()
