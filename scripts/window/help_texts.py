@@ -95,7 +95,7 @@ SEE = {
     "curve": ["curves_pen", "formulas", "symmetric", "tumours", "join"],
     "arc": ["curve", "tumours"],
     "custom": ["drawer", "fill", "custom_edit", "box"],
-    "box": ["custom", "fill", "custom_edit", "live"],
+    "box": ["custom", "fill", "custom_edit", "formulas", "live"],
     "funnel": ["funnel_curves", "funnel_links", "formulas"],
     "text": ["fill", "custom_edit"],
     "live": ["turn_live", "fill", "curves_pen", "straighten", "drawer", "join"],
@@ -132,9 +132,9 @@ SEE = {
     "drawer_erase": ["drawer", "drawer_select"],
     "shortcuts": ["selecting", "view", "numbers", "curves_pen"],
 }
-# the tip for each tool (Square / Circle / Triangle share one)
+# the tip for each tool (Circle / Polygon share one)
 TOOL_TOPICS = {"select": "select", "line": "line", "poly": "poly", "free": "free", "curve": "curve", "arc": "arc",
-               "custom": "custom", "square": "box", "circle": "box", "triangle": "box", "funnel": "funnel",
+               "custom": "custom", "circle": "box", "polygon": "box", "funnel": "funnel",
                "text": "text"}
 DRAWER_TOOL_TOPICS = {"select": "drawer_select", "line": "drawer_line", "poly": "drawer_poly", "free": "drawer_free",
                       "curve": "drawer_curve", "arc": "drawer_arc", "square": "drawer_square",

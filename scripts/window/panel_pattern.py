@@ -1,6 +1,7 @@
 """The side panel's formula settings for curves (pattern.py): the shape of the curve and the pattern along it, each
 with the numbers in its formula (a pattern also how many loops, and on a joined curve whether they run on across
-the pieces). Also what the right-click menu's Formula items do (roll_menu.py)."""
+the pieces), and its symmetric halves. A selected polygon's pattern along its sides shows here too (its holder is
+sh["polygon"], polygon.py). Also what the right-click menu's Formula items do (roll_menu.py)."""
 
 import math
 import tkinter as tk
@@ -9,7 +10,8 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.pattern import FORMULA_KINDS, formula_shape, loop_points
-from window.formula_host import SYM_CHOICES, RollHost, layer_name, sym_label
+from notes.polygon import update_polygon
+from window.formula_host import SYM_CHOICES, RollHost, layer_name, set_loop_sym, sym_label
 from window.widgets import Scrub, Tooltip
 
 LAYERS = ("shape", "pattern")  # (a curve's shape first: the pattern runs along it)
@@ -60,12 +62,23 @@ class PatternPanel:
         """The selected curves, lines and arcs (what the Formula menu changes)."""
         return [self.shapes[i] for i in sorted(self.sels) if self.shapes[i]["kind"] in FORMULA_KINDS]
 
+    def formula_holders(self):
+        """What the panel's formula part changes: the selected curves, lines and arcs, and the selected polygons'
+        settings (their pattern is laid along the sides)."""
+        return self.pattern_targets() + [sh["polygon"] for sh in self.polygon_shapes()]
+
     def with_layer(self, layer):
-        return [sh for sh in self.pattern_targets() if sh.get(layer)]
+        return [sh for sh in self.formula_holders() if sh.get(layer)]
 
     def patterned(self):
-        """The selected curves that have a shape or pattern formula."""
-        return [sh for sh in self.pattern_targets() if sh.get("shape") or sh.get("pattern")]
+        """The selected curves (and polygons) that have a shape or pattern formula."""
+        return [sh for sh in self.formula_holders() if sh.get("shape") or sh.get("pattern")]
+
+    def formulas_edited(self):
+        """After the panel changed formulas: polygons' strokes made again, the notes worked out."""
+        for sh in self.polygon_shapes():
+            update_polygon(sh)
+        self.shapes_changed()
 
     # ------------------------------------------------------------ the right-click menu's Formula items
     # (formula_host.py: the same menu / window works on drawer strokes and funnel curves)
@@ -107,8 +120,9 @@ class PatternPanel:
             ui["row"].pack(fill="x", pady=(0, 4))
             p = tgts[0][layer]
             names = (["loops"] if layer == "pattern" else []) + ([] if p.get("loop") else list(p["vars"]))
-            if names != ui["names"]:
-                self._build_formula_boxes(layer, names)
+            polygon = "points" in tgts[0]  # (a polygon's sizes are hundredths of its height, not keys)
+            if (names, polygon) != ui["names"]:
+                self._build_formula_boxes(layer, names, polygon)
             self._loading = True
             text = layer_name(layer, p)
             if len({layer_name(layer, sh[layer]) for sh in tgts}) > 1:
@@ -122,16 +136,16 @@ class PatternPanel:
         pats = self.with_layer("pattern")
         if pats:
             self.pattern_each.set(pats[0]["pattern"]["each"])
-        if any(sh.get("gaps") for sh in pats):  # only a joined curve with gaps has pieces
+        if any(sh.get("gaps") or "points" in sh for sh in pats):  # a joined curve with gaps / a polygon has pieces
             self.pattern_each_row.pack(fill="x", pady=(2, 0))
         else:
             self.pattern_each_row.pack_forget()
 
-    def _build_formula_boxes(self, layer, names):
+    def _build_formula_boxes(self, layer, names, polygon=False):
         ui = self.formula_ui[layer]
         for w in ui["numbers"].winfo_children():
             w.destroy()
-        ui["boxes"], ui["names"] = {}, names
+        ui["boxes"], ui["names"] = {}, (names, polygon)
         for name in names:
             cell = ttk.Frame(ui["numbers"])
             cell.pack(side="left", padx=(0, 8))
@@ -146,7 +160,8 @@ class PatternPanel:
             Scrub(self, [(e, var, lambda n=name: self.on_formula_entry(layer, n))],
                   LOOP_STEPS if loops else NUMBER_STEPS, 0.01 if loops else None, None, label=lb)
             tip = (tr("panel_pattern.loops_tip") if loops else
-                   tr("panel_pattern.shape_number_tip" if layer == "shape" else "panel_pattern.number_tip", name=name))
+                   tr("panel_pattern.shape_number_tip" if layer == "shape" else
+                      "panel_pattern.number_tip_polygon" if polygon else "panel_pattern.number_tip", name=name))
             for w in (lb, e):
                 Tooltip(w, tip)
             ui["boxes"][name] = (var, e)
@@ -179,14 +194,27 @@ class PatternPanel:
                 sh[layer]["loops"] = value
             else:
                 sh[layer]["vars"][name] = value
-        self.shapes_changed()
+        self.formulas_edited()
 
     def on_formula_sym(self, layer):
         if self._loading:
             return
         text = self.formula_ui[layer]["sym"].get()
         mode = next(value for value, key in SYM_CHOICES if tr(key) == text) or None
-        RollHost(self).set_sym(layer, mode)
+        tgts = [h for h in self.with_layer(layer) if h[layer].get("sym") != mode]
+        if not tgts:
+            return
+        self.push_undo(name=tr("pattern_dialog.symmetric_step", name=sym_label(mode)))
+        for h in tgts:  # (like RollHost.set_sym, for curves and polygons together)
+            p = h[layer]
+            if mode:
+                p["sym"] = mode
+            else:
+                p.pop("sym", None)
+            if p.get("loop"):
+                set_loop_sym(p["loop"], mode)
+        self.formulas_edited()
+        self.sync_panel()
 
     def set_pattern_each(self, each):
         tgts = [sh for sh in self.with_layer("pattern") if sh["pattern"]["each"] != each]
@@ -195,4 +223,4 @@ class PatternPanel:
         self.push_undo(name=tr("panel_pattern.each_piece") if each else tr("panel_pattern.across_all"))
         for sh in tgts:
             sh["pattern"]["each"] = each
-        self.shapes_changed()
+        self.formulas_edited()

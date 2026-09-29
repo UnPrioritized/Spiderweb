@@ -14,6 +14,7 @@ from notes.custom import ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, note
 from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_shape
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
 from notes.paths import KEYS
+from notes.polygon import POLYGON_DEFAULTS, clean_polygon
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.text import TEXT_DEFAULTS, clean_text
 from files.domino_clip import DOMINO_STARTS, clip_data, get_from_clipboard, put_on_clipboard, read_notes
@@ -81,6 +82,8 @@ def short_shape(sh):
             return [short_tumour(t) if t else None for t in v]
         if k in ("pattern", "shape"):
             return {a: {n: short_num(x) for n, x in b.items()} if a == "vars" else short_num(b) for a, b in v.items()}
+        if k == "polygon":
+            return {a: short("pattern", b) if a == "pattern" else short_num(b) for a, b in v.items()}
         if k == "text":
             return {a: [short_num(x) for x in b] if a == "bbox" else short_num(b) for a, b in v.items()}
         return short_num(v) if k in ("gate", "gate0", "gate1", "k") else v
@@ -114,6 +117,7 @@ class ProjectFiles:
             "snap": self.snap.get(), "defaults": self.defaults,
             "custom_defaults": dict(self.custom_defaults, shape=self.custom_shape),
             "funnel_defaults": self.funnel_defaults, "text_defaults": self.text_defaults,
+            "polygon_defaults": self.polygon_defaults,
             "free_smooth": self.free_smooth, "shapes": self.shapes,
             "view": self.roll.view_state(), "playhead": self.playhead,
         }
@@ -171,6 +175,9 @@ class ProjectFiles:
         if text:
             self.text_defaults = {k: text[k] for k in TEXT_DEFAULTS}
         self.free_smooth = clean_level(data.get("free_smooth", SMOOTH_DEFAULT))
+        pg = clean_polygon(data.get("polygon_defaults"))
+        if pg:
+            self.polygon_defaults = {k: pg[k] for k in POLYGON_DEFAULTS}
         self.roll.cancel_draft()
         self.shapes = shapes
         self.roll.set_view(data.get("view"))

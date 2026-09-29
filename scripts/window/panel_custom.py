@@ -138,7 +138,7 @@ class CustomPanel:
         tgts = self.custom_targets()
         placed = bool(tgts) and tgts[0] is not self.custom_defaults
         tool = self.tool.get()
-        # the tools that make custom shapes: Custom shape, Square, Circle, and with Live shape on the drawing tools
+        # the tools that make custom shapes: Custom shape, Circle, Polygon, and with Live shape on the drawing tools
         live = self.live.get() and tool in STROKE_TOOLS
         makes_custom = tool in ("custom", "text") or tool in BOX_TOOLS or live
         # "last note" means nothing for custom shapes and funnels
@@ -148,6 +148,7 @@ class CustomPanel:
         self.layout_rows()
         if not self._rows["custom"]:
             return
+        self.sync_polygon()
         # text: no library shape to pick (its letters are the shape)
         text = all(t.get("text") or "notes" in t for t in tgts) if placed else tool == "text"
         # pasted notes: nothing to fill either (the notes are the shape)
@@ -251,8 +252,9 @@ class CustomPanel:
             self.push_undo(name=tr("panel_custom.custom_shape"))
             for t in tgts:
                 t["name"], t["strokes"] = name, copy.deepcopy(tpl[0])
+                t.pop("polygon", None)  # (a polygon becomes that shape)
             self.shapes_changed()
-        if self.tool.get() in BOX_TOOLS:  # Square / Circle / Triangle: a library shape picked = back to Custom shape
+        if self.tool.get() in BOX_TOOLS:  # Circle / Polygon: a library shape picked = back to Custom shape
             self.tool.set("custom")
         self.sync_custom()
         self.schedule_autosave()

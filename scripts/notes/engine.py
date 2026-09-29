@@ -21,6 +21,7 @@ from notes.arc import arc_k, arc_points
 from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
+from notes.polygon import clean_polygon, polygon_strokes
 from notes.smooth import clean_level, smooth_path
 from notes.text import clean_text
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
@@ -106,6 +107,10 @@ def clean_shape(sh):
                                    "pts": [[float(b), float(p)] for b, p in fr["pts"]]}
             except (KeyError, TypeError, ValueError):
                 pass
+        pg = clean_polygon(sh.get("polygon"))
+        if pg and "notes" not in sh and not sh.get("text"):  # made by the Polygon tool (polygon.py)
+            out["polygon"] = pg
+            out["strokes"] = polygon_strokes(pg)
         tx = clean_text(sh["text"]) if isinstance(sh.get("text"), dict) else None
         if tx:  # typed text (text.py): its strokes are the letters, the settings let it be retyped
             out["text"] = tx

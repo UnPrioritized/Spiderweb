@@ -14,7 +14,7 @@ START = tr("history.start")  # the first row: the oldest state still kept
 FUTURE = "#a0a0a0"  # steps undone (Ctrl+Y / clicking them brings them back; a new change drops them)
 EDIT_NAMES = {"vel0": tr("history.velocity"), "vel1": tr("history.velocity"), "point": tr("history.move_a_point"),
               "smooth": tr("history.straighten"), "pattern": tr("history.pattern"),
-              "shape": tr("history.shape")}
+              "shape": tr("history.shape"), "polygon": tr("history.polygon")}
 
 
 def edit_name(key):

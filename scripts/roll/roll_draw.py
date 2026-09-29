@@ -509,7 +509,7 @@ class RollDrawing:
         pts = d["pts"]
         if kind == "curve":
             pts = [pts[0], pts[-1]]
-        elif d["kind"] == "custom":  # square / circle / triangle / custom shape: its box's four corners
+        elif d["kind"] == "custom":  # circle / polygon / custom shape: its box's four corners
             (b0, p0), (b1, p1), (b2, p2) = pts
             pts = [pts[0], pts[1], [b1 + b2 - b0, p1 + p2 - p0], pts[2]]
         s = self.scale

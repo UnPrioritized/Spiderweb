@@ -1,5 +1,5 @@
-"""Where curve formulas (pattern.py) can be put: the piano roll's curves, the drawer's curve strokes and a funnel's
-curves. Each kind of place is a "host": the right-click menu's Formula items and the Custom… window
+"""Where curve formulas (pattern.py) can be put: the piano roll's curves, the drawer's curve strokes, a funnel's
+curves and a polygon's sides (only a pattern). Each kind of place is a "host": the right-click menu's Formula items and the Custom… window
 (pattern_dialog.py) work through it, so they look and work the same everywhere.
 
 A host's "holders" are the dicts that get "shape" / "pattern" (a curve shape, a drawer stroke, a funnel curve).
@@ -64,6 +64,8 @@ class FormulaHost:
     pattern_help = "pattern_dialog.help"  # (texts that say what a pattern's sizes are in)
     number_tip = "panel_pattern.number_tip"
     sym_modes = ("mirror", "turn")  # symmetric halves a baked curve can get (a funnel's curves have none)
+    layers = ("shape", "pattern")  # the formulas it can have
+    plain_label = "roll_menu.turn_into_plain_curve"
 
     def targets(self):
         """The holders the menu / window change."""
@@ -213,6 +215,8 @@ def formula_menu(m, host, picks):
             ("shape", tr("roll_menu.shape_of_the_line"), [(sid, name) for sid, name, _, _, _ in SHAPE_PRESETS]),
             ("pattern", tr("roll_menu.pattern_along_the_line"),
              [(pid, name) for pid, name, _, _ in PATTERN_PRESETS])):
+        if layer not in host.layers:
+            continue
         pat = h.get(layer) or {}
         if not pat:
             now = "none"
@@ -241,7 +245,7 @@ def formula_menu(m, host, picks):
     sub.add_separator()
     on = "normal" if host.with_formula() else "disabled"
     sub.add_command(label=tr("roll_menu.remove_formula"), command=host.remove, state=on)
-    sub.add_command(label=tr("roll_menu.turn_into_plain_curve"), command=host.plain, state=on)
+    sub.add_command(label=tr(host.plain_label), command=host.plain, state=on)
     m.add_cascade(label=tr("roll_menu.formula"), menu=sub)
 
 
@@ -425,3 +429,76 @@ class FunnelHost(FormulaHost):
         holder["pts"][0], holder["pts"][-1] = [0.0, 0.0], [1.0, 1.0]  # (a funnel curve runs from A to B)
         n = anchor_count(holder["pts"])
         holder["sharp"] = [a for a in holder["sharp"] if 0 < a < n - 1]
+
+
+# ---------------------------------------------------------------- a polygon's sides (polygon.py)
+
+class PolygonHost(FormulaHost):
+    """The selected polygons: the holders are their settings (sh["polygon"]), whose pattern is laid along every side
+    (their strokes are made again after each change). Sizes: hundredths of the polygon's height, so the pattern grows
+    with it; round as the piano roll looks when it's put on."""
+    pattern_help = "pattern_dialog.help_polygon"
+    number_tip = "panel_pattern.number_tip_polygon"
+    layers = ("pattern",)
+    plain_label = "roll_menu.turn_into_plain_lines"
+
+    def __init__(self, app):
+        self.app = self.parent = app
+
+    def targets(self):
+        return [sh["polygon"] for sh in self.app.polygon_shapes()]
+
+    def shape_of(self, holder):
+        return next((sh for sh in self.app.shapes if sh.get("polygon") is holder), None)
+
+    def fresh(self, holder, layer):
+        from notes.custom import uv_k
+        roll, sh = self.app.roll, self.shape_of(holder)
+        k = roll.sy / roll.sx if roll.sx else 0.25
+        return {"k": uv_k(sh["pts"], k) if sh else 1.0, "scale": DRAWER_SCALE}
+
+    def placed(self, holder, layer, before):
+        if not before.get("pattern"):  # (every side gets all the loops, to start with)
+            holder["pattern"]["each"] = True
+
+    def begin(self, name):
+        self.app.push_undo(name=name)
+
+    def changed(self, final=True):
+        from notes.polygon import update_polygon
+        for sh in self.app.polygon_shapes():
+            update_polygon(sh)
+        self.app.shapes_changed()
+        if final:
+            self.app.sync_panel()
+        else:
+            self.app.sync_pattern()
+
+    def snapshot(self):
+        return json.dumps(self.app.shapes), super().snapshot()
+
+    def restore(self, snap):
+        super().restore(snap[1])
+
+    def commit(self, snap, name):
+        self.app.push_undo(snap[0], name)
+        self.app.sync_panel()
+
+    def loop_length(self, holder, pat):
+        """One loop along a side (Each piece) or round the whole outline (Across all), in hundredths."""
+        from notes.polygon import polygon_strokes
+        k, scale = pat.get("k", 1.0), pat.get("scale", 1.0)
+        sides = [math.hypot((b[0] - a[0]) / k, b[1] - a[1])
+                 for st in polygon_strokes(dict(holder, pattern=None)) for a, b in zip(st["pts"], st["pts"][1:])]
+        if not sides or scale <= 0:
+            return 0.0
+        return (sides[0] if pat.get("each") else sum(sides)) / pat.get("loops", 1.0) / scale
+
+    def bake(self, holder):
+        """Turn into plain lines: the polygon's outline as it is now (pattern and all) becomes plain polylines; it's
+        no longer a polygon (its settings go)."""
+        from notes.custom import stroke_points
+        sh = self.shape_of(holder)
+        if sh:
+            sh["strokes"] = [{"kind": "poly", "pts": [list(p) for p in stroke_points(st)]} for st in sh["strokes"]]
+            del sh["polygon"]

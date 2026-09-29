@@ -10,7 +10,9 @@ import numpy as np
 from files.lang import tr
 from notes.arc import arc_k, arc_points, ellipse_bezier
 from notes.bezier import sample
-from notes.pattern import clean_pattern, clean_shape_formula, formed_path, has_formula, moved_formulas
+from notes.pattern import (clean_pattern, clean_shape_formula, formed_path, has_formula, moved_formulas,
+                           pattern_paths)
+from notes.polygon import side_paths
 from notes.smooth import clean_level, smooth_path
 from notes.paths import (TOP_KEY, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
@@ -52,7 +54,8 @@ def custom_settings(cd):
 # anchor, ...]} (bezier.py; optional "sharp" / "sym" like the roll's Curve shape, "shape" / "pattern" formulas like its
 # too: pattern.py, their k = how many u one v is where they look round), {"kind": "arc", "pts": [start,
 # through, end], "k": ...} (arc.py; k = how many u one v is, for it to be round) or
-# {"kind": "ellipse", "box": [u0, v0, u1, v1]}.
+# {"kind": "ellipse", "box": [u0, v0, u1, v1]}. A polygon's stroke (polygon.py) is a closed poly with "sides" and
+# maybe a "pattern" laid along each side.
 # On the roll, sh["pts"] = three corners of that box: [u=0 v=0, u=1 v=0, u=0 v=1]. Moving, flipping and turning
 # the shape just moves these three points, and the drawing follows.
 
@@ -80,6 +83,11 @@ def clean_strokes(strokes):
                     out.append({"kind": "poly", "pts": pts})
                     if st.get("free"):  # drawn freehand: can be made perfect (smooth.py)
                         out[-1].update(free=True, smooth=clean_level(st.get("smooth", 0)), k=arc_k(st))
+                    elif st.get("sides"):  # a polygon's (polygon.py), maybe with a pattern along the sides
+                        out[-1]["sides"] = True
+                        pat = clean_pattern(st.get("pattern"))
+                        if pat:
+                            out[-1]["pattern"] = pat
             if isinstance(st.get("src"), int) and out:  # which shape it came from (convert.py)
                 out[-1]["src"] = st["src"]
         except (AttributeError, KeyError, TypeError, ValueError):
@@ -121,6 +129,11 @@ def stroke_points(st):
         return arc_points(st["pts"], st.get("k", 1.0))
     if st.get("smooth"):  # a freehand stroke made perfect (its drawn points stay)
         return smooth_path(st["pts"], st["smooth"], st.get("k", 1.0))
+    if st.get("pattern"):  # a polygon's sides with a pattern along each (polygon.py)
+        out = []
+        for side in pattern_paths(side_paths(st["pts"]), st["pattern"]):
+            out += side[1:] if out else side
+        return out
     return [tuple(p) for p in st["pts"]]
 
 

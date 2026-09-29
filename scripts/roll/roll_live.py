@@ -1,5 +1,5 @@
-"""Piano roll: live drawing. With "Live shape" on, lines, polylines, freehand strokes, curves, arcs, squares and
-circles drawn on the roll become strokes of one custom shape (the selected one, or a new one), so outlines that
+"""Piano roll: live drawing. With "Live shape" on, lines, polylines, freehand strokes, curves, arcs, circles and
+polygons drawn on the roll become strokes of one custom shape (the selected one, or a new one), so outlines that
 meet can be filled like a drawer shape. Also: picking one stroke of a custom shape, deleting it, and bending a
 curve stroke with its anchors / handles (bezier.py, like the Curve shape). The strokes live in the shape's own box
 (custom.py: add_stroke, refit)."""
@@ -13,14 +13,12 @@ from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half
                           set_symmetry)
 from notes.custom import (add_stroke, box_frame, custom_settings, frame_to_bp, frame_to_uv, map_stroke,
                           new_live_shape, refit, stroke_bp, stroke_ends)
+from notes.polygon import polygon_aspect, polygon_strokes
 from roll.roll_funnel import seg_dist
 from roll.roll_shared import ALT, PICK, cached_strokes
 
-STROKE_TOOLS = ("line", "poly", "free", "curve", "arc", "square", "circle", "triangle")
-BOX_TOOLS = ("square", "circle", "triangle")  # always make custom shapes (their own, or a stroke of the live one)
-BOX_ASPECT = {"square": 1.0, "circle": 1.0, "triangle": 2 / math.sqrt(3)}  # width / height with Ctrl (equilateral)
-SQUARE = [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]
-TRIANGLE = [[0, 0], [1, 0], [0.5, 1], [0, 0]]  # like the drawer's built-in Triangle
+STROKE_TOOLS = ("line", "poly", "free", "curve", "arc", "circle", "polygon")
+BOX_TOOLS = ("circle", "polygon")  # always make custom shapes (their own, or strokes of the live one)
 LONG_STROKE = 64  # a stroke with more points than this (freehand) only shows them when picked, like the drawer
 
 
@@ -59,25 +57,38 @@ class LiveDrawing:
                 best, reach = q, dist
         return [best[0], best[1]] if best is not None else pt
 
+    def box_aspect(self, tool):
+        """Width / height with Ctrl (round as it looks: a circle, an equal-sided polygon / star)."""
+        return polygon_aspect(self.app.polygon_defaults) if tool == "polygon" else 1.0
+
     def box_draft(self, tool, a, b):
-        """A square / circle / triangle being dragged: a custom shape of just that, filling the box from a to b."""
+        """A circle / polygon being dragged: a custom shape of just that, filling the box from a to b. A polygon
+        keeps its settings (polygon.py: the panel's, for new ones)."""
         app = self.app
-        strokes = ([{"kind": "ellipse", "box": [0, 0, 1, 1]}] if tool == "circle" else
-                   [{"kind": "poly", "pts": TRIANGLE if tool == "triangle" else SQUARE}])
-        return dict(app.defaults, kind="custom", name=tool.title(), strokes=strokes,
+        extra = {}
+        if tool == "polygon":
+            extra["polygon"] = dict(app.polygon_defaults)
+            strokes = polygon_strokes(extra["polygon"])
+        else:
+            strokes = [{"kind": "ellipse", "box": [0, 0, 1, 1]}]
+        return dict(app.defaults, kind="custom", name=tool.title(), strokes=strokes, **extra,
                     **custom_settings(app.custom_defaults), pts=box_frame(a[0], a[1], b[0], b[1]), draw=tool)
 
     @staticmethod
-    def draft_stroke(sh):
-        """A finished draft as a stroke in beats / pitch."""
+    def draft_strokes(sh):
+        """A finished draft as strokes in beats / pitch (a crossing star can be several loops)."""
         kind = sh.get("draw") or sh["kind"]
-        if kind in BOX_TOOLS:
+        if kind == "circle":
             (b0, p0), (b1, _), (_, p1) = sh["pts"]
-            if kind == "circle":
-                return {"kind": "ellipse", "box": [b0, p0, b1, p1]}
-            if kind == "triangle":
-                return {"kind": "poly", "pts": [[b0, p0], [b1, p0], [(b0 + b1) / 2, p1], [b0, p0]]}
-            return {"kind": "poly", "pts": [[b0, p0], [b1, p0], [b1, p1], [b0, p1], [b0, p0]]}
+            return [{"kind": "ellipse", "box": [b0, p0, b1, p1]}]
+        if kind == "polygon":
+            return [stroke_bp(sh, k) for k in range(len(sh["strokes"]))]
+        return [LiveDrawing.draft_stroke(sh)]
+
+    @staticmethod
+    def draft_stroke(sh):
+        """A finished (not box) draft as a stroke in beats / pitch."""
+        kind = sh.get("draw") or sh["kind"]
         if kind == "curve":
             return {"kind": "curve", "pts": [list(p) for p in sh["pts"]]}
         if kind == "arc":  # (stays an arc, so its notes are exactly the Arc tool's)
@@ -88,14 +99,15 @@ class LiveDrawing:
         return {"kind": "poly", "pts": [list(p) for p in sh["pts"]]}
 
     def live_commit(self, sh):
-        """A finished draft goes into the live shape (or a new one) as a stroke; a square / circle drawn without Live
+        """A finished draft goes into the live shape (or a new one) as a stroke; a circle / polygon drawn without Live
         shape becomes a custom shape of its own. False if it's a normal shape (the caller adds it)."""
         app = self.app
         kind = sh.get("draw") or sh["kind"]
         box = kind in BOX_TOOLS
         if not box and not (app.live.get() and kind in STROKE_TOOLS):
             return False
-        st = self.draft_stroke(sh)
+        sts = self.draft_strokes(sh)
+        st = sts[0]
         (b0, p0), (b1, _), (_, p1) = sh["pts"][:3] if box else ((0, 0), (1, 0), (0, 1))
         if b0 == b1 or p0 == p1 or st["kind"] != "ellipse" and all(p == st["pts"][0] for p in st["pts"]):
             self.request_redraw()  # nothing to see: dropped
@@ -108,11 +120,13 @@ class LiveDrawing:
             return True
         if target is None:
             target = new_live_shape(app.defaults, app.custom_defaults)
-            k = add_stroke(target, st)
+            for st in sts:
+                k = add_stroke(target, st)
             app.add_shape(target)
         else:
             app.push_undo(name=tr("roll_live.draw_into_the_live_shape"))
-            k = add_stroke(target, st)
+            for st in sts:
+                k = add_stroke(target, st)
             app.shapes_changed()
         # a new curve is picked, so its anchors and handles can be bent right away
         app.set_stroke(k if target["strokes"][k]["kind"] == "curve" else None)

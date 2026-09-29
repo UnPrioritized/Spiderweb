@@ -10,6 +10,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     panel_funnel.py  the panel's funnel settings
     panel_tumour.py  the panel's tumour line (summary + button)
     panel_pattern.py the panel's pattern numbers (a formula along a curve) + the Formula menu's actions
+    panel_polygon.py the panel's polygon settings (points, polygon / star / crossing star)
     pattern_dialog.py the Custom... windows for a curve's shape and pattern (presets, formulas, edited by hand)
     formula_host.py  where formulas go (piano roll curves, drawer strokes, funnel curves) + the Formula menu
     tumour_window.py the tumour window: the tumour settings (bumps along lines)
@@ -48,6 +49,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     arc.py           arcs: pieces of a perfect circle through three points
     tumour.py        tumours: bumps along lines
     pattern.py       a curve's formulas: its shape (circle, spiral...) and a pattern along it (wave...)
+    polygon.py       polygons and stars made by the Polygon tool (a pattern along every side)
     joined.py        joining shapes into one curve (pieces, their tumours) and splitting shapes
     convert.py       Turn into live shape: shapes -> one custom shape (and back)
     envelope.py      velocity envelopes

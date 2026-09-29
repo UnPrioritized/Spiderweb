@@ -22,6 +22,7 @@ from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, point_names, render, 
                           slot_track_channel)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.paths import KEYS
+from notes.polygon import POLYGON_DEFAULTS
 from notes.smooth import SMOOTH_DEFAULT
 from notes.text import TEXT_DEFAULTS
 from files.mathexpr import calc, calc_int, fmt
@@ -29,6 +30,7 @@ from window.panel_custom import GAP_COLOR, CustomPanel
 from window.panel_freehand import FreehandPanel
 from window.panel_funnel import FunnelPanel
 from window.panel_pattern import PatternPanel
+from window.panel_polygon import PolygonPanel
 from window.panel_text import TextPanel
 from window.panel_tumour import TumourPanel
 from notes.joined import all_tumours, is_joined
@@ -59,8 +61,7 @@ TOOLS = [("select", tr("app.select"), "v"), ("line", tr("app.line"), "l"), ("pol
          ("custom", tr("app.custom_shape"), "s"),
          ("funnel", tr("app.funnel"), "n"), ("text", tr("app.text"), "x")]
 # shown next to Custom shape while it (or one of them) is the tool; their keys work any time
-SHAPE_TOOLS = [("square", tr("app.square"), "q"), ("circle", tr("app.circle"), "o"),
-               ("triangle", tr("app.triangle"), "t")]
+SHAPE_TOOLS = [("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q")]
 BIG = 1_000_000  # ask before making a custom shape / funnel with more notes than this
 MANY_CHANNELS = 15  # a shape spread over more channels than this is shown orange in the shape list
 CHANNEL_CHOICES = [
@@ -80,7 +81,7 @@ SPLIT_TIP = (
 )
 
 
-class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit,
+class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit,
           HistoryPanel, tk.Tk):
     def __init__(self, autosave=AUTOSAVE):
         super().__init__()
@@ -115,6 +116,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Pa
         self.funnel_defaults = dict(FUNNEL_DEFAULTS)  # settings for new funnels
         self.free_smooth = SMOOTH_DEFAULT  # how much new freehand strokes are made perfect (smooth.py)
         self.text_defaults = dict(TEXT_DEFAULTS)  # settings for new text (the last ones used)
+        self.polygon_defaults = dict(POLYGON_DEFAULTS)  # points / kind of new polygons (polygon.py)
         self._rows = {"last": True, "line_fill": False, "free": False, "tumour": False, "pattern": False, "text": False,
                       "custom": False, "funnel": False}  # optional panel parts
         self.drawer = None
@@ -218,7 +220,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Pa
         top.pack(fill="x")
         top.columnconfigure(1, weight=1)
         bar = self.tool_bar = ttk.Frame(top)
-        # Custom shape stays lit while Square / Circle / Triangle (they make custom shapes) is the tool, so it has
+        # Custom shape stays lit while Circle / Polygon (they make custom shapes) is the tool, so it has
         # its own on/off (set in show_shape_tools) instead of lighting up only for its own value
         self.custom_lit = tk.BooleanVar(value=False)
         for key, label, hot in TOOLS:
@@ -232,7 +234,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Pa
             Tooltip(b, BY_ID[TOOL_TOPICS[key]]["tip"])
             if key == "custom":
                 self.custom_tool_btn = b
-        # Square / Circle / Triangle: only while one of them or Custom shape is the tool
+        # Circle / Polygon: only while one of them or Custom shape is the tool
         self.shape_tool_bar = ttk.Frame(bar)
         ttk.Separator(self.shape_tool_bar, orient="vertical").pack(side="left", fill="y", padx=(2, 3), pady=2)
         for key, label, hot in SHAPE_TOOLS:
@@ -309,7 +311,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Pa
             self.vel_formula_bar.pack_forget()
 
     def show_shape_tools(self):
-        """Square / Circle / Triangle next to Custom shape, only while one of those is the tool."""
+        """Circle / Polygon next to Custom shape, only while one of those is the tool."""
         show = self.tool.get() in ("custom",) + tuple(key for key, _, _ in SHAPE_TOOLS)
         if show != bool(self.shape_tool_bar.winfo_manager()):
             if show:
@@ -513,6 +515,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Pa
         self._build_pattern()
         self._build_text()
         self._build_custom()
+        self._build_polygon()
         self._build_funnel()
         self.points_box = ttk.Frame(self.settings)
         self.points_box.pack(fill="x", pady=(6, 0))

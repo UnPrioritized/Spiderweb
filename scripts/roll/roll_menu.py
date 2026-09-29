@@ -4,7 +4,7 @@ import tkinter as tk
 from types import SimpleNamespace
 
 from files.lang import tr
-from window.formula_host import FunnelHost, RollHost, formula_menu
+from window.formula_host import FunnelHost, PolygonHost, RollHost, formula_menu
 from notes.convert import originals
 from notes.joined import is_joined
 from notes.funnel import inside_out, turned_curve
@@ -73,6 +73,8 @@ class ShapeMenu:
                 symmetry_menu(m, sh.get("sym"), lambda mode: self.set_symmetry(sh, mode, at))
         if app.pattern_targets():
             self.formula_menu(m)
+        elif app.polygon_shapes():  # (a pattern along the sides)
+            self.formula_menu(m, PolygonHost(app))
         if sh.get("text") and len(app.sels) == 1:
             item(tr("roll_menu.edit_text"), "", lambda: self.edit_text(at))
         if sh["kind"] == "custom" and "notes" not in sh and len(app.sels) == 1:

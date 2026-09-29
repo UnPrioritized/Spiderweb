@@ -19,7 +19,7 @@ from roll.roll_curve import CurveEditing
 from roll.roll_custom import CustomBox
 from roll.roll_draw import RollDrawing
 from roll.roll_funnel import FunnelEditing
-from roll.roll_live import BOX_ASPECT, BOX_TOOLS, LiveDrawing
+from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
 from roll.roll_shared import ALT, CTRL, PICK, SHIFT, cached_path, cached_strokes, mouse_trail, note_name
 from roll.roll_text import TextTyping
@@ -418,8 +418,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         elif kind == "create":
             kind, pt = self.draft.get("draw") or self.draft["kind"], self.draw_pt(e)
             if kind in BOX_TOOLS:
-                if e.state & CTRL:  # a perfect square / circle / triangle on screen
-                    pt = self.keep_aspect(self.drag[1], pt, BOX_ASPECT[kind])
+                if e.state & CTRL:  # a perfect circle / polygon on screen
+                    pt = self.keep_aspect(self.drag[1], pt, self.box_aspect(kind))
                 self.draft = self.box_draft(kind, self.drag[1], pt)
             else:
                 self.draft = make_shape(kind, [self.drag[1], pt], self.app.new_defaults(kind))
@@ -697,7 +697,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
     def commit_draft(self):
         sh, self.draft = self.draft, None
-        if not self.live_commit(sh):  # a stroke of a live shape / a square or circle: done there
+        if not self.live_commit(sh):  # a stroke of a live shape / a circle or polygon: done there
             self.app.add_shape(sh)
 
     def cancel_draft(self):
