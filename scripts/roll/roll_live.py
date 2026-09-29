@@ -14,7 +14,7 @@ from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half
 from notes.custom import (add_stroke, box_frame, custom_settings, frame_to_bp, frame_to_uv, map_stroke,
                           new_live_shape, refit, stroke_bp, stroke_ends)
 from roll.roll_funnel import seg_dist
-from roll.roll_shared import ALT, cached_strokes
+from roll.roll_shared import ALT, PICK, cached_strokes
 
 STROKE_TOOLS = ("line", "poly", "free", "curve", "arc", "square", "circle", "triangle")
 BOX_TOOLS = ("square", "circle", "triangle")  # always make custom shapes (their own, or a stroke of the live one)
@@ -120,7 +120,7 @@ class LiveDrawing:
 
     # ------------------------------------------------------------ one stroke of a custom shape
 
-    def stroke_at(self, sh, x, y, near=6):
+    def stroke_at(self, sh, x, y, near=PICK):
         """The number of the custom shape's stroke under (x, y) on screen, or None."""
         best = None
         for k, path in enumerate(cached_strokes(sh)):

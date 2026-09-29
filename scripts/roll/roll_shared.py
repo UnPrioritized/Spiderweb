@@ -6,6 +6,7 @@ import ctypes
 from notes.engine import cached_path, cached_strokes  # (used from here by the piano roll's parts)
 
 PREVIEW_LIMIT = 200_000  # a custom shape / funnel being drawn with more notes than this previews as its outline only
+PICK = 10  # how near (screen pixels) the mouse must be to a shape's line / stroke / funnel part to pick it
 
 
 class _MouseMovePoint(ctypes.Structure):

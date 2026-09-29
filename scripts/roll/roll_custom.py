@@ -43,14 +43,14 @@ class CustomBox:
         s = self.scale
         k = min(range(4), key=lambda i: math.hypot(corners[i][0] - x, corners[i][1] - y))
         d = math.hypot(corners[k][0] - x, corners[k][1] - y)
-        if d <= 7 * s:
+        if d <= 9 * s:
             return ("corner", k)
         for side in range(4):
             (ax, ay), (bx, by) = corners[side], corners[(side + 1) % 4]
             dx, dy = bx - ax, by - ay
             ll = dx * dx + dy * dy
             u = 0 if ll == 0 else max(0, min(1, ((x - ax) * dx + (y - ay) * dy) / ll))
-            if math.hypot(x - ax - u * dx, y - ay - u * dy) <= 5 * s:
+            if math.hypot(x - ax - u * dx, y - ay - u * dy) <= 7 * s:
                 return ("side", side)
         inside = self.inside_box(corners, x, y)
         if not inside:

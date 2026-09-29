@@ -198,13 +198,18 @@ def parts_notes(r, first, tails, counts=False):
     part = np.repeat(np.arange(k_parts), per)
     e_last = off + per - 1
     # A note lasts until the next note that starts on a later tick.
-    # (Very steep lines put several pitches on the same tick; they share it.)
+    # (Very steep lines put several pitches on the same tick: all but the last of them get 1 tick, so a tight
+    # turn followed by a flat stretch doesn't stack two long notes into a block.)
+    same_part = part[1:] == part[:-1]
     later = np.zeros(m, bool)
-    later[:-1] = (part[1:] == part[:-1]) & (starts[1:] > starts[:-1])
+    later[:-1] = same_part & (starts[1:] > starts[:-1])
     nxt_at = np.minimum.accumulate(np.where(later, np.arange(m), m)[::-1])[::-1]
     inside = nxt_at < e_last[part]
     nxt = np.where(inside, starts[np.minimum(nxt_at + 1, m - 1)], end_tick[part])
     ends = np.maximum(nxt, starts + 1)
+    tied = np.zeros(m, bool)
+    tied[:-1] = same_part & (starts[1:] == starts[:-1])
+    ends[tied] = starts[tied] + 1
     tl = e_last[tails & (per >= 2)]
     tl = tl[starts[tl] == end_tick[tails & (per >= 2)]]
     ends[tl] = starts[tl] + np.maximum(1, ends[tl - 1] - starts[tl - 1])

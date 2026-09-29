@@ -7,7 +7,7 @@ from files.lang import tr
 from notes.bezier import anchor_count, difference, handle_anchor, nearest, remove_anchor, segments, split
 from notes.funnel import (box_point, box_uf, curve_box, funnel_curves, funnel_lines, line_index, new_start,
                           new_curve, next_link, partners, remove_funnel_parts, set_shape, turned, turned_curve)
-from roll.roll_shared import ALT, CTRL
+from roll.roll_shared import ALT, CTRL, PICK
 
 
 def seg_dist(x, y, a, b):
@@ -22,7 +22,7 @@ def seg_dist(x, y, a, b):
 class FunnelEditing:
     """Mixed into PianoRoll."""
 
-    def on_funnel_line(self, sh, e, near=6):
+    def on_funnel_line(self, sh, e, near=PICK):
         """(line number, where along it 0..1) of the funnel line the mouse is on, or None."""
         for line in range(len(funnel_lines(sh))):
             at = self.line_at(sh, e, line, near)
@@ -292,7 +292,7 @@ class FunnelEditing:
     # (a curve together with its twin on the other side; Ctrl+click adds / removes just one). app.parts holds
     # ("line", n) and ("curve", start, wall end); Del, Ctrl+C/V/H/J and the right-click menu then work on them.
 
-    def part_at(self, sh, x, y, near=6):
+    def part_at(self, sh, x, y, near=PICK):
         """The funnel line or curve at (x, y) on screen, or None."""
         if len(sh["pts"]) < 4:
             return None
