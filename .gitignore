@@ -4,6 +4,7 @@ __pycache__/
 build/
 dist/
 output/
+dev/
 shapes/
 autosave*.json
 errors*.log
