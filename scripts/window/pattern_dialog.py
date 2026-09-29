@@ -18,8 +18,8 @@ from files.lang import tr
 from files.mathexpr import calc, fmt, formula
 from files.project import HERE
 from files.safefile import write_text
-from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, fit, handle_lines, nearest,
-                          pen_handles, sample)
+from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_point, fit_symmetric, handle_lines,
+                          keep_symmetric, nearest, pen_handles, sample)
 from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, SHAPE_PRESETS, clean_loop, formula_loop, formula_shape,
                            new_pattern, new_shape, pattern_name, shape_name, shape_names)
 from roll.roll_shared import ALT
@@ -506,11 +506,14 @@ class FormulaDialog(tk.Toplevel):
         else:
             u, v = formula_loop(self.pat)
             tol, length = LOOP_TOLERANCE, self.loop_len()
-        corners = []
-        pts = fit([(a * length, b) for a, b in zip(u.tolist(), v.tolist())], tol, corners)
+        corners = []  # (symmetric halves first: then dragging a point moves its partner in the other half too)
+        pts, sym = fit_symmetric([(a * length, b) for a, b in zip(u.tolist(), v.tolist())], tol, corners,
+                                 SYM_MODES if self.layer == "shape" else ("mirror", "turn"))
         out = {"pts": [[x / length, y] for x, y in pts]}
         if corners:
             out["sharp"] = corners
+        if sym:
+            out["sym"] = sym
         if self.layer == "shape" and math.dist(out["pts"][0], out["pts"][-1]) < 1e-6:
             out["pts"][-1] = list(out["pts"][0])  # (a closed shape stays closed)
         return out
@@ -692,6 +695,13 @@ class FormulaDialog(tk.Toplevel):
             if d[0] or d[1]:
                 for j in (i, handle):
                     c["pts"][j] = [c["pts"][j][0] + d[0], c["pts"][j][1] + d[1]]
+        if c.get("sym"):
+            if c["sym"] == "mirror" and self.drag in (0, last):  # a mirrored loop's ends stay level
+                other, handle = (last, last - 1) if self.drag == 0 else (0, 1)
+                dy = c["pts"][self.drag][1] - c["pts"][other][1]
+                for j in (other, handle):
+                    c["pts"][j] = [c["pts"][j][0], c["pts"][j][1] + dy]
+            keep_symmetric(c, self.drag, self.to_xy)
         self.set_info(tr("pattern_dialog.shape_edited_by_hand") if self.layer == "shape" else
                       tr("pattern_dialog.edited_by_hand"), "#1d6b1d", back=True)
         want = ["loops"] if self.layer == "pattern" else []

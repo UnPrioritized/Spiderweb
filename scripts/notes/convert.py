@@ -30,9 +30,8 @@ def line_strokes(sh, paths):
     kind = sh["kind"]
     if (sh.get("shape") or sh.get("pattern")) and not has_tumours(sh):  # its formulas as ordinary curves
         from notes.pattern import baked  # (pattern.py)
-        sh = dict(sh, **baked(sh), kind="curve")
+        sh = dict(sh, **baked(sh), kind="curve")  # (with symmetric halves if it has them)
         kind = "curve"
-        sh.pop("sym", None)
     if has_tumours(sh):
         return [{"kind": "poly", "pts": [list(p) for p in path]} for path in paths]
     if kind == "curve":

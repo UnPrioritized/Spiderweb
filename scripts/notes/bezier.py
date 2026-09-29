@@ -63,6 +63,8 @@ def handle_anchor(i):
 # The mirror line runs along `axis`: 0 = the time direction, 1 = the pitch direction (on the roll: a mirrored point
 # keeps its distance along that axis and its side swaps, so it doesn't depend on the zoom), None = at right angles
 # to the line between the ends, an exact mirror (the drawer, whose board is the same scale both ways).
+# "flip" (only for a closed curve, its ends on one spot: the Custom... window's shapes, like a circle) = the second
+# half is the first one mirrored across the line through the start that runs along x.
 
 class Symmetry:
     def __init__(self, pts, mode, axis):
@@ -73,6 +75,8 @@ class Symmetry:
         self.w = (1.0, 0.0) if axis == 0 else (0.0, 1.0) if axis == 1 else (-d[1], d[0])
         self.det = d[0] * self.w[1] - d[1] * self.w[0]
         self.ok = abs(self.det) > 1e-12 if mode == "mirror" else True
+        if mode == "flip":
+            self.m = (ax, ay)
 
     def split(self, v):
         """v = alpha * d + beta * w (w = along the mirror line)."""
@@ -86,6 +90,8 @@ class Symmetry:
         m = self.m
         if self.mode == "turn":
             return [2 * m[0] - p[0], 2 * m[1] - p[1]]
+        if self.mode == "flip":
+            return [p[0], 2 * m[1] - p[1]]
         alpha, beta = self.split((p[0] - m[0], p[1] - m[1]))
         v = self.join(-alpha, beta)
         return [m[0] + v[0], m[1] + v[1]]
@@ -94,13 +100,17 @@ class Symmetry:
         """The nearest place for the middle anchor: the middle point (turn) or on the mirror line."""
         if self.mode == "turn":
             return list(self.m)
+        if self.mode == "flip":
+            return [p[0], self.m[1]]
         _, beta = self.split((p[0] - self.m[0], p[1] - self.m[1]))
         v = self.join(0, beta)
         return [self.m[0] + v[0], self.m[1] + v[1]]
 
     def flat(self, anchor, h):
         """A smooth middle anchor's handle on a mirrored curve: along the ends' direction (the top of the arch is
-        round), keeping how far it reaches that way."""
+        round), keeping how far it reaches that way. Flipped: straight up or down (across the line)."""
+        if self.mode == "flip":
+            return [anchor[0], h[1]]
         alpha, _ = self.split((h[0] - anchor[0], h[1] - anchor[1]))
         v = self.join(alpha, 0)
         return [anchor[0] + v[0], anchor[1] + v[1]]
@@ -128,7 +138,7 @@ def symmetric(pts, sharp, mode, axis, source=0):
     hp = [pts[h][0] + new[0] - pts[c][0], pts[h][1] + new[1] - pts[c][1]]
     pts[c] = new
     smooth_mid = mode == "turn" or mid not in sharp
-    if mode == "mirror" and smooth_mid:
+    if mode in ("mirror", "flip") and smooth_mid:
         hp = sym.flat(new, hp)
     pts[h] = hp
     pts[2 * c - h] = sym.reflect(hp)
@@ -434,10 +444,10 @@ def _fit_one(part, t_left, t_right, tol):
     return bez, err
 
 
-def fit(points, tol=0.003, sharp=None):
+def fit(points, tol=0.003, sharp=None, end_dir=None):
     """A curve (flat list, see the top) through the first and last point that stays within tol of all points, with
     as few anchors as it can: each piece reaches as far along as it can, and sharp corners stay sharp (their
-    anchor numbers are added to the list sharp, if given)."""
+    anchor numbers are added to the list sharp, if given). end_dir: which way it goes at its end, if known."""
     pts = [tuple(points[0])]
     for p in points[1:]:
         if math.dist(p, pts[-1]) > 1e-9:
@@ -448,6 +458,8 @@ def fit(points, tol=0.003, sharp=None):
     pts = _fill_in(np.array(pts, float), tol)
     w = tol * 4
     come, go = _directions(pts, w)
+    if end_dir is not None and math.hypot(*end_dir) > 1e-12:
+        come[-1] = np.asarray(end_dir, float) / math.hypot(*end_dir)
     corners = _corners(come, go, pts, w)
     ends = [0] + corners + [len(pts) - 1]
     smooth = _unit_rows(come + go)
@@ -495,6 +507,70 @@ def fit(points, tol=0.003, sharp=None):
         if last != len(pts) - 1 and sharp is not None:
             sharp.append(anchor_count(out) - 1)
     return out
+
+
+SYM_MODES = ("mirror", "turn", "flip")
+
+
+def symmetry_of(points, tol, modes=SYM_MODES):
+    """Which symmetric halves the points have, within tol (see Symmetry; mirror: across the up-and-down line through
+    the middle, so the ends must be level): the first of modes that fits, or None."""
+    a = np.array(resample([tuple(p) for p in points], 400), float)
+    if len(a) < 3:
+        return None
+    b, (ax, ay), (bx, by) = a[::-1], a[0], a[-1]
+    closed = math.hypot(bx - ax, by - ay) <= tol
+    for mode in modes:
+        if mode == "mirror" and not closed and abs(by - ay) <= tol:
+            want = np.column_stack([ax + bx - a[:, 0], a[:, 1]])
+        elif mode == "turn":
+            want = [ax + bx, ay + by] - a
+        elif mode == "flip" and closed:
+            want = np.column_stack([a[:, 0], 2 * ay - a[:, 1]])
+        else:
+            continue
+        if np.hypot(*(b - want).T).max() <= tol:
+            return mode
+    return None
+
+
+def fit_symmetric(points, tol=0.003, sharp=None, modes=SYM_MODES):
+    """Like fit, but when the points have symmetric halves (symmetry_of) they come first: only the first half is
+    fitted and the second half is made from it, so the curve can be edited as symmetric halves (one half follows
+    the other). Returns (curve, mode), mode None = not symmetric (a plain fit)."""
+    mode = symmetry_of(points, tol / 4, modes) if modes else None
+    if mode is None:
+        return fit(points, tol, sharp), None
+    pts = [tuple(points[0])]
+    for p in points[1:]:
+        if math.dist(p, pts[-1]) > 1e-9:
+            pts.append(tuple(p))
+    a = np.array(pts, float)
+    s = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(a, axis=0).T))])
+    half = s[-1] / 2
+    j = int(np.searchsorted(s, half))
+    mid = [float(np.interp(half, s, a[:, 0])), float(np.interp(half, s, a[:, 1]))]
+    first = pts[:j] + [tuple(mid)]
+
+    def at(d):
+        return [float(np.interp(half + d, s, a[:, 0])) - mid[0], float(np.interp(half + d, s, a[:, 1])) - mid[1]]
+    back = min(half, tol * 4)
+    (bx, by), (fx, fy) = at(-back), at(back)
+    tip = False
+    if mode != "turn":  # a sharp tip in the middle (a turned curve is always smooth there)
+        across = abs(by) if mode == "mirror" else abs(bx)  # (smooth = level / straight up or down there)
+        tip = math.hypot(bx, by) > 1e-12 and across > math.hypot(bx, by) * math.sin(FIT_CORNER / 2)
+    corners = []
+    got = fit(first, tol, corners, None if tip else (fx - bx, fy - by))  # (smooth: the way it goes there)
+    sym = Symmetry([pts[0], pts[-1]], mode, 1)
+    n = anchor_count(got) - 1
+    out = got + [sym.reflect(p) for p in reversed(got[:-1])]
+    out[-1] = list(pts[-1])
+    marks = corners + [2 * n - c for c in corners] + ([n] if tip else [])
+    out, marks = symmetric(out, sorted(set(marks)), mode, 1)
+    if sharp is not None:
+        sharp += marks
+    return out, mode
 
 
 def _unit_rows(v):

@@ -35,6 +35,7 @@ class FormulaHost:
     app = None
     pattern_help = "pattern_dialog.help"  # (texts that say what a pattern's sizes are in)
     number_tip = "panel_pattern.number_tip"
+    sym_modes = ("mirror", "turn")  # symmetric halves a baked curve can get (a funnel's curves have none)
 
     def targets(self):
         """The holders the menu / window change."""
@@ -78,11 +79,13 @@ class FormulaHost:
 
     def bake(self, holder):
         """Turn into plain curve: the formulas become ordinary anchors and handles."""
-        pts, sharp = baked_path(holder, holder["pts"])
+        pts, sharp, sym = baked_path(holder, holder["pts"], self.sym_modes)
         for key in ("shape", "pattern", "sym", "rev"):
             holder.pop(key, None)
         holder["pts"] = pts
         holder["sharp"] = sharp
+        if sym:
+            holder["sym"] = sym
 
     # ------------------------------------------------------------ what the menu does
     def current(self):
@@ -240,6 +243,8 @@ class RollHost(FormulaHost):
             sh["sharp"] = got["sharp"]
         if got["gaps"]:
             sh["gaps"] = got["gaps"]
+        if got["sym"]:
+            sh["sym"] = got["sym"]
         if tm:
             sh["tumour"] = tm
 
@@ -285,6 +290,7 @@ class FunnelHost(FormulaHost):
     """The highlighted curves of the selected funnel. Shapes are laid out in the curve's box as it is (so Slow start
     is x² from the start to the wall end, like the old curve formulas); patterns as the piano roll looks. Linked
     curves get the same formulas (turned end to end: they run from the other end)."""
+    sym_modes = ()
 
     def __init__(self, roll):
         self.roll = roll

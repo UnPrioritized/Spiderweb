@@ -52,6 +52,8 @@ def clean_loop(c):
         sharp = sorted({int(a) for a in c.get("sharp", ()) if 0 < int(a) < (n - 1) // 3})
         if sharp:
             out["sharp"] = sharp
+        if c.get("sym") in ("mirror", "turn", "flip") and (n - 1) % 6 == 0:  # symmetric halves (bezier.py)
+            out["sym"] = c["sym"]
         return out
     except (KeyError, TypeError, ValueError, AttributeError):
         return None
@@ -392,23 +394,26 @@ BAKE_TOLERANCE = 0.05  # how closely "Turn into plain curve" follows the pattern
 BAKE_SHARE = 0.001  # the same for a drawer stroke / funnel curve, as a share of its size
 
 
-def baked_path(holder, pts):
-    """A drawer stroke's / funnel curve's formulas made into ordinary anchors and handles: (pts, sharp)."""
-    from notes.bezier import fit, sample
+BAKE_SYM = ("mirror", "turn")  # symmetric halves a baked curve gets when it has them (bezier.fit_symmetric)
+
+
+def baked_path(holder, pts, modes=BAKE_SYM):
+    """A drawer stroke's / funnel curve's formulas made into ordinary anchors and handles: (pts, sharp, sym)."""
+    from notes.bezier import fit_symmetric, sample
     path = formed_path(sample([tuple(q) for q in pts], 240), holder)
     k = (holder.get("pattern") or holder["shape"])["k"]
     a = np.asarray(path, float) / [k, 1.0]
     size = max(1e-9, float(np.hypot(*(a.max(axis=0) - a.min(axis=0)))))
     corners = []
-    got = fit([tuple(q) for q in a.tolist()], BAKE_SHARE * size, corners)
-    return [[x * k, y] for x, y in got], corners
+    got, sym = fit_symmetric([tuple(q) for q in a.tolist()], BAKE_SHARE * size, corners, modes)
+    return [[x * k, y] for x, y in got], corners, sym
 
 
 def baked(sh):
-    """The curve's shape / pattern made into ordinary anchors and handles: {"pts", "sharp", "gaps"} (tumours aren't
-    baked in: they stay a setting of the curve)."""
+    """The curve's shape / pattern made into ordinary anchors and handles: {"pts", "sharp", "gaps", "sym"} (tumours
+    aren't baked in: they stay a setting of the curve). One piece with symmetric halves keeps them ("sym")."""
     from notes.arc import line_bezier
-    from notes.bezier import anchor_count, fit
+    from notes.bezier import anchor_count, fit_symmetric
     from notes.joined import is_joined, joined_paths
     plain = dict(sh, tumour=None, tumours=None, splits=None)
     if sh["kind"] == "curve" and is_joined(plain):
@@ -416,10 +421,12 @@ def baked(sh):
     else:
         paths = formed_paths(origin_paths(dict(sh, gaps=[])), sh)
     k = (sh.get("pattern") or sh["shape"])["k"]
-    pts, sharp, gaps = None, [], []
+    pts, sharp, gaps, sym = None, [], [], None
     for path in paths:
         corners = []
-        got = [[b * k, q] for b, q in fit([(b / k, q) for b, q in path], BAKE_TOLERANCE, corners)]
+        got, sym = fit_symmetric([(b / k, q) for b, q in path], BAKE_TOLERANCE, corners,
+                                 BAKE_SYM if len(paths) == 1 else ())
+        got = [[b * k, q] for b, q in got]
         if pts is None:
             pts, sharp = got, corners
             continue
@@ -427,7 +434,7 @@ def baked(sh):
         gaps.append(last)
         pts += line_bezier(pts[-1], got[0])[1:3] + got
         sharp += [a + last + 1 for a in corners]
-    return {"pts": pts, "sharp": sharp, "gaps": gaps}
+    return {"pts": pts, "sharp": sharp, "gaps": gaps, "sym": sym}
 
 
 def pattern_paths(paths, p):
