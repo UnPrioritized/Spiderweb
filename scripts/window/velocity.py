@@ -1,7 +1,8 @@
 """
 The velocity pane under the piano roll: one bar per note at its start, a cap as long as its gate.
 Drag a line (or draw with the pencil) to set velocities. With a shape selected only its notes change,
-the others are faded; with nothing selected every note under the drag changes.
+the others are faded; with nothing selected every note under the drag changes. The Formula tool is a line with a
+pattern (pattern.py: Wave, Zigzag, ...) swinging up and down around it (velocity_formula.py: its settings).
 """
 
 import tkinter as tk
@@ -11,10 +12,12 @@ import numpy as np
 from files.lang import tr
 from notes.engine import shape_notes
 from notes.envelope import env_at, env_values, paint_env, tidy_env, velocity_env
+from notes.pattern import loop_points
 from roll.roll_shared import CTRL, DRAFT_COLOR, SHIFT, SELECTED_COLOR, SLOT_COLORS, cached_path, fade
 
 LEVELS = (127, 96, 64, 32, 0)
 CURVE_STEPS = 48
+FORMULA_POINTS = 4000  # the most points a Formula line has
 
 
 # Bar colours, lowest first (higher ones are drawn on top): faded slots, normal slots, selected shape, shape being drawn
@@ -45,6 +48,38 @@ def curve_env(a, b, c, pad):
         pts.append([s * s * a[0] + 2 * s * t * cx + t * t * b[0],
                     max(1.0, min(127.0, s * s * a[1] + 2 * s * t * c[1] + t * t * b[1]))])
     return [[a[0] - pad, a[1]]] + pts + [[b[0] + pad, b[1]]]
+
+
+def formula_env(a, b, pat, pad):
+    """The straight line from a to b (beat, velocity) with the pattern pat on it (its sizes in velocity steps, its
+    loops between a and b), as envelope points reaching pad beats past both ends. Just the line if pat can't be
+    worked out."""
+    if a[0] > b[0]:
+        a, b = b, a
+    if a[0] == b[0]:
+        return segment(a, b, pad)
+    try:
+        u, v = loop_points(pat)
+    except ValueError:
+        return segment(a, b, pad)
+    loops = pat["loops"]
+    count = max(1, int(np.ceil(loops - 1e-9)))
+    per = max(8, min(len(u) - 1, FORMULA_POINTS // count))
+    t = np.linspace(0.0, 1.0, per + 1)
+    uu, vv = np.interp(t, np.linspace(0.0, 1.0, len(u)), u), np.interp(t, np.linspace(0.0, 1.0, len(v)), v)
+    along = np.concatenate([np.tile(uu[:-1], count) + np.repeat(np.arange(count), per), [count - 1 + uu[-1]]])
+    side = np.concatenate([np.tile(vv[:-1], count), [vv[-1]]])
+    along = np.maximum.accumulate(np.clip(along / loops, 0.0, None))  # (a loop drawn going back: straight up)
+    keep = along <= 1.0
+    if not keep.all():  # a part of a loop at the end: up to b exactly
+        i = int(np.argmax(~keep))
+        f = (1.0 - along[i - 1]) / max(1e-12, along[i] - along[i - 1])
+        end = side[i - 1] + (side[i] - side[i - 1]) * f
+        along, side = np.append(along[:i], 1.0), np.append(side[:i], end)
+    beats = a[0] + (b[0] - a[0]) * along
+    vel = np.clip(a[1] + (b[1] - a[1]) * along + side, 1.0, 127.0)
+    pts = np.column_stack([beats, vel]).tolist()
+    return [[a[0] - pad, pts[0][1]]] + pts + [[b[0] + pad, pts[-1][1]]]
 
 
 def limit_bend(a, b, c):
@@ -175,7 +210,7 @@ class VelocityPane(tk.Canvas):
                 if abs(pt[0] - other[0]) < 1e-9:
                     return
                 a, b = (pt, b) if ed["which"] == "a" else (a, pt)
-                if cv["kind"] == "line":
+                if cv["kind"] != "curve":
                     c = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
             self.draw_curve(a, b, c, only=cv["done"])
         elif ed["kind"] == "pencil":
@@ -189,7 +224,7 @@ class VelocityPane(tk.Canvas):
             else:
                 if e.state & CTRL:  # perfectly flat
                     pt = [pt[0], a[1]]
-                self.draw_curve(a, pt, [(a[0] + pt[0]) / 2, (a[1] + pt[1]) / 2])  # a straight line
+                self.draw_curve(a, pt, [(a[0] + pt[0]) / 2, (a[1] + pt[1]) / 2])  # a straight line (+ a pattern)
 
     def snap_spots(self):
         """Times (beats) the drag's ends snap onto: the first and last note of the selected shapes."""
@@ -221,12 +256,22 @@ class VelocityPane(tk.Canvas):
         ed["last"] = pt
         self.request_redraw()
 
+    def kind(self):
+        ed = self.edit
+        return ed["handle"]["kind"] if "handle" in ed else ed["kind"]
+
+    def shape_env(self, kind, a, b, c, pad):
+        """The envelope of a line / curve / formula line from a to b."""
+        if kind == "formula":
+            return formula_env(a, b, self.app.vel_pattern, pad)
+        return curve_env(a, b, c, pad)
+
     def draw_curve(self, a, b, c, only=None):
-        """Make the drag the curve a -> b bent towards c."""
+        """Make the drag the curve a -> b bent towards c (a line with a pattern for the Formula tool)."""
         ed = self.edit
         c = limit_bend(a, b, c)
         ed["curve"] = (a, b, c)
-        ed["drawn"] = curve_env(a, b, c, self.pad())
+        ed["drawn"] = self.shape_env(self.kind(), a, b, c, self.pad())
         ed["preview"], ed["owners"] = None, {}
         self.mark(ed["drawn"], only)
         self.request_redraw()
@@ -298,6 +343,14 @@ class VelocityPane(tk.Canvas):
         self.curve = None
         return None
 
+    def formula_changed(self):
+        """The Formula tool's settings changed: the last formula line drawn (while it can still be changed) takes
+        them, in the same undo step."""
+        cv = self.live_curve()
+        if cv and cv["kind"] == "formula":
+            self.commit(formula_env(cv["a"], cv["b"], self.app.vel_pattern, self.pad()), cv["done"], cv)
+            self.request_redraw()
+
     def confirm(self):
         """Done with the last line / curve: its handles go away. True if there was one."""
         if self.curve is None:
@@ -310,7 +363,7 @@ class VelocityPane(tk.Canvas):
         """Which of the curve's handles the mouse is on: "mid" (the bend), "a" / "b" (its ends), or None."""
         roll = self.app.roll
         for which, (b, v) in (("mid", curve_mid(cv["a"], cv["b"], cv["c"])), ("a", cv["a"]), ("b", cv["b"])):
-            if which == "mid" and cv["kind"] == "line":
+            if which == "mid" and cv["kind"] != "curve":
                 continue  # a line stays straight
             if abs(roll.t2x(b) - e.x) <= 7 * self.scale and abs(self.v2y(v) - e.y) <= 7 * self.scale:
                 return which
@@ -384,13 +437,12 @@ class VelocityPane(tk.Canvas):
         lw = max(1, round(self.scale))
         cv = ed.get("curve") if ed else None
         if cv:
-            kind = ed["handle"]["kind"] if "handle" in ed else ed["kind"]
-            self.draw_curve_line(*cv, lw, bend=kind == "curve")
+            self.draw_curve_line(*cv, lw, kind=self.kind())
         elif ed and len(ed["trail"]) >= 2:
             self.create_line(*[c for p in ed["trail"] for c in p], fill="#d00000", width=lw)
         cv = None if ed else self.live_curve()
         if cv:
-            self.draw_curve_line(cv["a"], cv["b"], cv["c"], lw, bend=cv["kind"] == "curve")
+            self.draw_curve_line(cv["a"], cv["b"], cv["c"], lw, kind=cv["kind"])
         self.draw_playhead()
 
     def draw_playhead(self):
@@ -403,10 +455,11 @@ class VelocityPane(tk.Canvas):
             self.create_line(x, 0, x, self.winfo_height(), fill="#0a50e0", width=max(1, round(self.scale)),
                              tags="playhead")
 
-    def draw_curve_line(self, a, b, c, lw, bend=True):
-        """The red line / curve with square handles on its ends and (bend) a curve's round handle in the middle."""
+    def draw_curve_line(self, a, b, c, lw, kind="curve"):
+        """The red line / curve with square handles on its ends and a curve's round handle in the middle."""
         roll = self.app.roll
-        pts = curve_env(a, b, c, 0)[1:-1]
+        bend = kind == "curve"
+        pts = self.shape_env(kind, a, b, c, 0)[1:-1]
         if len(pts) < 2:
             return
         self.create_line(*[q for b_, v in pts for q in (roll.t2x(b_), self.v2y(v))], fill="#d00000", width=lw)

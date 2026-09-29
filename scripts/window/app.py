@@ -44,6 +44,7 @@ from files.snap import DEFAULT_SNAP, snap_beats
 from roll.roll_shared import cached_path
 from window.snap_picker import SnapPicker
 from window.velocity import VelocityPane
+from window.velocity_formula import VelocityFormulaBar
 from window.widgets import Scrub, Tooltip
 
 
@@ -201,7 +202,9 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Pa
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.bind("<Configure>", self.remember_geometry, add="+")
         # a click anywhere outside the velocity pane = done with its line / curve
-        self.bind("<ButtonPress>", lambda e: e.widget is self.vel or self.vel.confirm(), add="+")
+        # (the Formula tool's settings change the line just drawn: clicking them keeps it)
+        self.bind("<ButtonPress>", lambda e: e.widget is self.vel or str(e.widget).startswith(str(self.vel_formula_bar))
+                  or self.vel.confirm(), add="+")
 
     # ------------------------------------------------------------ layout
 
@@ -281,13 +284,26 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Pa
         vbar = ttk.Frame(self.vel_box, padding=(2, 2))
         vbar.pack(fill="x")
         ttk.Label(vbar, text=tr("app.velocity")).pack(side="left", padx=(2, 8))
-        for key, label in (("line", tr("app.linear")), ("curve", tr("app.curve")), ("pencil", tr("app.pencil"))):
-            ttk.Radiobutton(vbar, text=label, value=key, variable=self.vel_tool,
-                            style="Toolbutton").pack(side="left", padx=1)
-        ttk.Label(vbar, text=tr("app.ctrl_flat_shift_snap_enter_done"),
-                  foreground="#777", font=("Segoe UI", 8)).pack(side="left", padx=(10, 0))
+        for key, label in (("line", tr("app.linear")), ("curve", tr("app.curve")), ("pencil", tr("app.pencil")),
+                           ("formula", tr("app.formula"))):
+            b = ttk.Radiobutton(vbar, text=label, value=key, variable=self.vel_tool, style="Toolbutton")
+            b.pack(side="left", padx=1)
+            if key == "formula":
+                Tooltip(b, tr("app.formula_tip"))
+        self.vel_formula_bar = VelocityFormulaBar(vbar, self)  # (shown while Formula is the tool)
+        self.vel_hint = ttk.Label(vbar, text=tr("app.ctrl_flat_shift_snap_enter_done"),
+                                  foreground="#777", font=("Segoe UI", 8))
+        self.vel_hint.pack(side="left", padx=(10, 0))
+        self.vel_tool.trace_add("write", lambda *_: self.show_vel_formula())
         self.vel = VelocityPane(self.vel_box, self, s)
         self.vel.pack(fill="both", expand=True)  # the pane itself is added when it's turned on (off at first)
+
+    def show_vel_formula(self):
+        if self.vel_tool.get() == "formula":
+            self.vel_formula_bar.fill_list()
+            self.vel_formula_bar.pack(side="left", before=self.vel_hint)
+        else:
+            self.vel_formula_bar.pack_forget()
 
     def show_shape_tools(self):
         """Square / Circle / Triangle next to Custom shape, only while one of those is the tool."""

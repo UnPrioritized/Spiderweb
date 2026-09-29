@@ -25,6 +25,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     help.py          the tip popups and the Help window (F1, searchable)
     drawer.py        the custom shape drawer window and the shape library (shapes/*.json)
     velocity.py      the velocity pane under the piano roll
+    velocity_formula.py the velocity pane's Formula tool settings (pattern, loops, its numbers)
   roll/              the piano roll
     pianoroll.py     the piano roll canvas: view, hit testing, mouse editing
     roll_draw.py     painting the grid, notes, handles, keyboard, ruler
