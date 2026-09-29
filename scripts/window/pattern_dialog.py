@@ -4,7 +4,8 @@ preview shows ONE loop of a pattern (as long as it is on the curve), or the whol
 and B, with anchors and handles: dragging them changes it by hand (every loop along the curve follows). The user's
 saved ones are in spiderweb/patterns.json (the funnel's old saved curve formulas, curves.json, are moved in there).
 It works on a host (formula_host.py: the piano roll's curves, a drawer stroke, a funnel's curves). Changes show
-straight away; Apply keeps them as one undo step, Cancel puts back how it was."""
+straight away; Apply keeps them as one undo step, Cancel puts back how it was. Ctrl+Z / Ctrl+Y step through the
+changes made in the window (they never reach the piano roll's undo while it's open)."""
 
 import copy
 import json
@@ -23,7 +24,7 @@ from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_
 from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, SHAPE_PRESETS, clean_loop, formula_loop, formula_shape,
                            new_pattern, new_shape, pattern_name, shape_name, shape_names)
 from roll.roll_shared import ALT
-from window.widgets import Scrub, Tooltip
+from window.widgets import LocalUndo, Scrub, Tooltip
 
 PATTERNS_FILE = os.path.join(HERE, "patterns.json")
 OLD_CURVES_FILE = os.path.join(HERE, "curves.json")  # the funnel's saved curve formulas (before shapes of curves)
@@ -229,19 +230,15 @@ class FormulaDialog(tk.Toplevel):
         ttk.Button(btns, text=tr("pattern_dialog.cancel"), command=self.cancel).pack(side="right")
         ttk.Button(btns, text=tr("pattern_dialog.apply"), command=self.apply).pack(side="right", padx=4)
 
-        for var in self.texts.values():
-            var.trace_add("write", lambda *_: self.on_formula())
+        for key, var in self.texts.items():
+            var.trace_add("write", lambda *_, k=key: (self.on_formula(), self.mark(("text", k))))
         self.bind("<Return>", lambda e: self.apply())
         self.bind("<Escape>", lambda e: self.cancel())
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.fill_list()
-        for i, (kind, what, name) in enumerate(self.items):  # the one it has now, picked in the list
-            if not self.pat.get("loop") or self.pat.get("name"):
-                if (kind == "preset" and not self.pat.get("name") and what == self.pat.get("preset")
-                        or kind == "saved" and name == self.pat.get("name")):
-                    self.listbox.selection_set(i)
-                    self.listbox.see(i)
+        self.pick_current()
         self.refresh()
+        self.hist = LocalUndo(self, self.state, self.put_state)
         self.update_idletasks()  # over the middle of the window it's for
         x = parent.winfo_rootx() + (parent.winfo_width() - self.winfo_width()) // 2
         y = parent.winfo_rooty() + (parent.winfo_height() - self.winfo_height()) // 3
@@ -261,7 +258,40 @@ class FormulaDialog(tk.Toplevel):
     def name_of(self, p):
         return shape_name(p) if self.layer == "shape" else pattern_name(p)
 
+    # ------------------------------------------------------------ undo inside the window
+    def state(self):
+        return json.dumps({"pat": self.pat, "name": self.name.get(),
+                           "texts": {key: var.get() for key, var in self.texts.items()}})
+
+    def put_state(self, state):
+        d = json.loads(state)
+        self.pat, self.drag, self.pan = d["pat"], None, None
+        self._loading = True
+        self.name.set(d["name"])
+        for key, var in self.texts.items():
+            var.set(d["texts"][key])
+        self._loading = False
+        self.pick_current()
+        self.refresh()
+        if any(d["texts"][key] != self.pat[key] for key in self.texts):
+            self.on_formula()  # (a formula that was being typed and doesn't work yet)
+
+    def mark(self, key=None):
+        """A change done: an undo step (see LocalUndo)."""
+        if not self._loading and hasattr(self, "hist"):
+            self.hist.mark(key)
+
     # ------------------------------------------------------------ the list
+    def pick_current(self):
+        """The one it has now, picked in the list."""
+        self.listbox.selection_clear(0, "end")
+        for i, (kind, what, name) in enumerate(self.items):
+            if not self.pat.get("loop") or self.pat.get("name"):
+                if (kind == "preset" and not self.pat.get("name") and what == self.pat.get("preset")
+                        or kind == "saved" and name == self.pat.get("name")):
+                    self.listbox.selection_set(i)
+                    self.listbox.see(i)
+
     def fill_list(self):
         self.saved = load_patterns(self.layer)
         self.items = [("preset", pid, name) for pid, name, _, _ in self.presets()]
@@ -291,6 +321,7 @@ class FormulaDialog(tk.Toplevel):
         self.ok = True
         self.own_view = False
         self.refresh()
+        self.mark()
 
     def save(self):
         name = self.name.get().strip()
@@ -444,6 +475,7 @@ class FormulaDialog(tk.Toplevel):
         else:
             self.pat["vars"][name] = value
         self.refresh()
+        self.mark(("num", name))
 
     def set_info(self, text, color, back=False):
         self.info.config(text=text, foreground=color)
@@ -455,6 +487,7 @@ class FormulaDialog(tk.Toplevel):
     def back_to_formula(self):
         self.pat.pop("loop", None)
         self.refresh()
+        self.mark()
 
     # ------------------------------------------------------------ the piano roll (or the drawer)
     def show_on_roll(self):
@@ -720,6 +753,7 @@ class FormulaDialog(tk.Toplevel):
             if not self.own_view:
                 self.view = None
             self.draw()
+            self.mark()
 
     def right_click(self, e):
         i = self.point_at(e.x, e.y)
@@ -730,6 +764,7 @@ class FormulaDialog(tk.Toplevel):
             return
         delete_point(self.pat["loop"], i, self.to_xy)
         self.refresh()
+        self.mark()
 
     def add_point(self, e):
         if self.view is None or (not self.ok and not self.pat.get("loop")):
@@ -741,3 +776,4 @@ class FormulaDialog(tk.Toplevel):
         self.by_hand()
         if add_anchor(self.pat["loop"], seg, t, self.from_xy(e.x, e.y), self.to_xy):
             self.refresh()
+            self.mark()

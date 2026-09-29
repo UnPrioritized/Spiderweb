@@ -103,6 +103,53 @@ class Scrub:
         self.drag = None
 
 
+class LocalUndo:
+    """Ctrl+Z / Ctrl+Y inside a pop-up window: its own steps, which never reach the main window's undo.
+    get(): how it is now (a string, e.g. JSON); put(state): make it so. mark(key) after each change: changes with the
+    same key (not None) in a row are one step (typing in one box, stepping one number)."""
+
+    def __init__(self, win, get, put, limit=300):
+        self.get, self.put, self.limit = get, put, limit
+        self.reset()
+        for k in ("z", "Z"):
+            win.bind(f"<Control-{k}>", lambda e: (self.undo(), "break")[1])
+        for k in ("y", "Y"):
+            win.bind(f"<Control-{k}>", lambda e: (self.redo(), "break")[1])
+
+    def reset(self):
+        """Start again from how it is now (nothing to undo)."""
+        self.states, self.at, self.key = [self.get()], 0, None
+
+    def mark(self, key=None):
+        state = self.get()
+        if state == self.states[self.at]:
+            return
+        del self.states[self.at + 1:]
+        if key is not None and key == self.key and self.at > 0:
+            self.states[self.at] = state
+        else:
+            self.states.append(state)
+            self.at += 1
+            if len(self.states) > self.limit:
+                del self.states[0]
+                self.at -= 1
+        self.key = key
+
+    def undo(self):
+        self.step(-1)
+
+    def redo(self):
+        self.step(1)
+
+    def step(self, d):
+        if self.get() != self.states[self.at]:  # (a change not marked yet: it's the step to undo)
+            self.mark()
+        if 0 <= self.at + d < len(self.states):
+            self.at += d
+            self.key = None
+            self.put(self.states[self.at])
+
+
 class Tooltip:
     """Shows a small box of text while the mouse rests on a widget (none while the text is empty)."""
 
