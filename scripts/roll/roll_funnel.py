@@ -1,16 +1,12 @@
 """Piano roll: editing funnels (curve starts, anchors + handles, links, extra lines, the wall, highlighted lines /
 curves)."""
 
-import json
 import math
-from tkinter import messagebox
 
 from files.lang import tr
 from notes.bezier import anchor_count, difference, handle_anchor, nearest, remove_anchor, segments, split
-from window.curve_dialog import CurveFormulaDialog
 from notes.funnel import (box_point, box_uf, curve_box, funnel_curves, funnel_lines, line_index, new_start,
-                          next_link, partners, preset_curve, remove_funnel_parts, set_shape, turned, turned_curve)
-from files.mathexpr import formula
+                          new_curve, next_link, partners, remove_funnel_parts, set_shape, turned, turned_curve)
 from roll.roll_shared import ALT, CTRL
 
 
@@ -385,15 +381,9 @@ class FunnelEditing:
         self.app.shape_edited()
         self.app.sync_funnel()
 
-    def apply_formula(self, text):
-        """A preset or saved formula (None = the default curve) onto the highlighted curves."""
-        try:
-            shape = preset_curve(None if text is None else formula(text))
-        except ValueError as e:
-            messagebox.showerror(tr("roll_funnel.spiderweb"), tr("roll_funnel.can_t_use_the_formula", text=text, e=e),
-                                 parent=self)
-            return
-        self.set_curves(lambda _: shape)
+    def default_curves(self):
+        """The highlighted curves back to the default curve (no formulas)."""
+        self.set_curves(lambda _: new_curve())
 
     def copy_curve(self):
         curves = self.curve_parts()
@@ -446,28 +436,3 @@ class FunnelEditing:
                 c["link"], c["flip"] = cs["link"], flip
         self.app.shape_edited()
         self.app.sync_funnel()
-
-    def open_formulas(self):
-        """The custom formula window, previewing on the highlighted curves as you type."""
-        got = self.funnel_parts()
-        if not got or not got[2]:
-            return
-        sh, _, curves = got
-        app = self.app
-        before = json.dumps(app.shapes)
-        orig = {(k, end): turned_curve(sh["starts"][k]["ends"][end], False) for k, end in curves}
-
-        def preview(shape):
-            if shape:
-                self.set_curves(lambda _: shape, undo=False)
-            else:
-                for (k, end), old in orig.items():
-                    set_shape(sh["starts"][k]["ends"][end], old)
-                app.shapes_changed()
-                app.sync_funnel()
-
-        def done(shape):
-            preview(shape)
-            if shape:
-                app.push_undo(before, tr("roll_funnel.curve_formula"))
-        CurveFormulaDialog(app, preview, done)

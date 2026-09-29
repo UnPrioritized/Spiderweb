@@ -8,19 +8,13 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.joined import shown_tumour
-from notes.pattern import (baked, formula_shape, loop_points, new_pattern, new_shape, pattern_name, shape_name,
-                           SHAPE_NAMES)
-from window.pattern_dialog import FormulaDialog, saved_pattern, saved_shape
+from notes.pattern import formula_shape, loop_points
+from window.formula_host import RollHost, layer_name
 from window.widgets import Scrub, Tooltip
 
 LAYERS = ("shape", "pattern")  # (a curve's shape first: the pattern runs along it)
 LOOP_STEPS = (1, 10, 0.1)    # quick changes (widgets.Scrub): step, Shift step, Ctrl step
 NUMBER_STEPS = (0.5, 5, 0.1)
-
-
-def layer_name(layer, p):
-    return shape_name(p) if layer == "shape" else pattern_name(p)
 
 
 class PatternPanel:
@@ -61,31 +55,11 @@ class PatternPanel:
         return [sh for sh in self.pattern_targets() if sh.get("shape") or sh.get("pattern")]
 
     # ------------------------------------------------------------ the right-click menu's Formula items
+    # (formula_host.py: the same menu / window works on drawer strokes and funnel curves)
     def set_formula(self, layer, preset, saved=None):
         """A preset (None: none) or a saved one (pattern_dialog.load_patterns) as the shape of / pattern along every
         selected curve."""
-        tgts = self.pattern_targets()
-        if not tgts:
-            return
-        if saved:
-            name = saved["name"]
-        elif preset:
-            name = SHAPE_NAMES[preset] if layer == "shape" else pattern_name({"preset": preset})
-        else:
-            name = None
-        step = "panel_pattern.shape_step" if layer == "shape" else "panel_pattern.pattern_step"
-        self.push_undo(name=tr(step, name=name) if name else tr("panel_pattern.remove_" + layer))
-        k = self.roll.sy / self.roll.sx if self.roll.sx else 0.25  # sideways worked out as the roll looks now
-        for sh in tgts:
-            if preset is None and not saved:
-                sh.pop(layer, None)
-            elif layer == "shape":
-                sh["shape"] = saved_shape(saved, k) if saved else new_shape(preset, k)
-            else:
-                sh["pattern"] = (saved_pattern(saved, k, sh.get("pattern")) if saved else
-                                 new_pattern(preset, k, sh.get("pattern")))
-        self.shapes_changed()
-        self.sync_panel()
+        RollHost(self).set_formula(layer, preset, saved)
 
     def set_pattern(self, preset, saved=None):
         self.set_formula("pattern", preset, saved)
@@ -95,41 +69,15 @@ class PatternPanel:
 
     def remove_formulas(self):
         """Remove formula: the selected curves back to their plain (dotted) path."""
-        tgts = self.patterned()
-        if not tgts:
-            return
-        self.push_undo(name=tr("panel_pattern.remove_formula"))
-        for sh in tgts:
-            sh.pop("shape", None)
-            sh.pop("pattern", None)
-        self.shapes_changed()
-        self.sync_panel()
+        RollHost(self).remove()
 
     def open_formula_dialog(self, layer):
-        if self.pattern_targets():
-            FormulaDialog(self, layer)
+        RollHost(self).open_dialog(layer)
 
     def plain_curve(self):
         """Turn into plain curve: the shapes / patterns become ordinary anchors and handles (tumours stay a
         setting)."""
-        tgts = self.patterned()
-        if not tgts:
-            return
-        self.push_undo(name=tr("panel_pattern.turn_into_plain_curve"))
-        for sh in tgts:
-            got = baked(sh)
-            tm = shown_tumour(sh)
-            for key in ("shape", "pattern", "sym", "tumours", "splits", "gaps", "sharp"):
-                sh.pop(key, None)
-            sh["pts"] = got["pts"]
-            if got["sharp"]:
-                sh["sharp"] = got["sharp"]
-            if got["gaps"]:
-                sh["gaps"] = got["gaps"]
-            if tm:
-                sh["tumour"] = tm
-        self.shapes_changed()
-        self.sync_panel()
+        RollHost(self).plain()
 
     # ------------------------------------------------------------ the panel
     def sync_pattern(self):

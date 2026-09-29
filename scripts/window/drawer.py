@@ -11,10 +11,12 @@ from files.lang import tr
 from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half_at, handle_lines, nearest, pen_handles,
                           set_symmetry)
 from notes.custom import clean_strokes, join_strokes, open_ends, open_paths, stroke_points, strokes_closed
+from notes.pattern import has_formula, moved_formulas
 from files.about import HERE
 from files.safefile import write_text
 from roll.roll_shared import mouse_trail
 from window.help import open_help
+from window.formula_host import DrawerHost, formula_menu
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
 from window.widgets import Tooltip, symmetry_menu
 
@@ -526,7 +528,9 @@ class Drawer(tk.Toplevel):
         if st["kind"] == "ellipse":
             (a, b), (c, d) = pt(*st["box"][:2]), pt(*st["box"][2:])
             return {"kind": "ellipse", "box": [min(a, c), min(b, d), max(a, c), max(b, d)]}
-        return dict(st, pts=[pt(u, v) for u, v in st["pts"]])  # a curve keeps its corners and symmetry
+        new = dict(st, pts=[pt(u, v) for u, v in st["pts"]])  # a curve keeps its corners and symmetry
+        moved_formulas(new, fn)  # (and its formulas look the same)
+        return new
 
     def middle(self, idx):
         """The middle of the strokes' points, in grid squares (a whole or half square if they're all on the grid,
@@ -727,6 +731,8 @@ class Drawer(tk.Toplevel):
             m.add_command(label=tr("drawer.add_anchor_here"), command=lambda: self.add_curve_anchor(e))
             # one half follows the other; the half right-clicked keeps its shape
             symmetry_menu(m, st.get("sym"), lambda mode: self.set_curve_symmetry(i, mode, e))
+            self._formula_picks = {}  # (kept, so the dots show)
+            formula_menu(m, DrawerHost(self), self._formula_picks)
         elif st["kind"] == "poly":
             m.add_command(label=tr("drawer.add_point_here"), command=lambda: self.add_poly_point(i, e))
         m.add_command(label=tr("drawer.delete_stroke"), accelerator=tr("drawer.del"),
@@ -1021,6 +1027,10 @@ class Drawer(tk.Toplevel):
         c.create_rectangle(x0, y0, x1, y1, outline="#606060")
         w = max(2, round(2 * self.scale))
         closed = strokes_closed(self.strokes)
+        for i, st in enumerate(self.strokes):  # a curve with formulas: the curve as drawn (the origin path), dashed
+            if st["kind"] == "curve" and has_formula(st):
+                self.draw_stroke(dict(st, shape=None, pattern=None), "#e89a9a" if i == self.sel else "#efc0c0", 1,
+                                 dash=(6, 4))
         for i, st in enumerate(self.strokes):
             self.draw_stroke(st, "#ff8c1a" if i == self.sel else "#c0392b", w + (1 if i == self.sel else 0))
         s = self.scale
@@ -1087,10 +1097,10 @@ class Drawer(tk.Toplevel):
                 c.create_rectangle(x - h, y - h, x + h, y + h, fill="#ffffff", outline="#0a8f0a",
                                    width=max(1, round(s)))
 
-    def draw_stroke(self, st, color, width):
+    def draw_stroke(self, st, color, width, dash=None):
         coords = [c for u, v in stroke_points(st) for c in self.to_screen(u, v)]
         if len(coords) >= 4:
-            self.canvas.create_line(*coords, fill=color, width=width, capstyle="round", joinstyle="round")
+            self.canvas.create_line(*coords, fill=color, width=width, capstyle="round", joinstyle="round", dash=dash)
         elif coords:
             x, y = coords
             self.canvas.create_oval(x - 2, y - 2, x + 2, y + 2, fill=color, outline=color)

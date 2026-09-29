@@ -1,14 +1,15 @@
 """Funnels: lines leading to a wall, opening along curves, filled with spam or long notes."""
 
 import bisect
+import copy
 import math
 
 import numpy as np
 
-from files.lang import tr
 from notes.bezier import anchor_count, fit, handle_anchor, sample
 from notes.custom import row_spans
 from notes.paths import EDGE, TOP_KEY, pitch_of
+from notes.pattern import clean_pattern, clean_shape_formula, formed_path, has_formula, moved_formulas
 
 # ---------------------------------------------------------------- funnels
 # sh["pts"] = [line start, line end, wall end 1, wall end 2, (line 2 start, line 2 end, ...)]: straight lines,
@@ -26,6 +27,8 @@ from notes.paths import EDGE, TOP_KEY, pitch_of
 # [0, 0] (the start) to [1, 1] (the wall end), "sharp": anchors whose two handles move separately (a corner),
 # "link": group number, "flip": bool}. Linked curves change together; "flip" = turned end to end compared to the
 # rest of its group (same "flip" = the same [u, f], which for the two curves of one start looks mirrored).
+# A curve can have "shape" / "pattern" formulas (pattern.py) laid along it in its box; its points are then the
+# origin path (drawn dashed), and "rev" = they run from its wall end (a curve turned end to end).
 # (The first versions had "bends" the curve went through; old projects are converted when they load.)
 # Every key plays while it's inside a curve's area (between the curve, the line and the wall) or on the line,
 # the wall or a curve.
@@ -94,6 +97,13 @@ def clean_curve(c):
     out = {"pts": pts, "sharp": sorted({int(a) for a in c.get("sharp", ()) if 0 < int(a) < n - 1})}
     if c.get("link") is not None:
         out["link"], out["flip"] = int(c["link"]), bool(c.get("flip"))
+    pat, form = clean_pattern(c.get("pattern")), clean_shape_formula(c.get("shape"))
+    if pat:
+        out["pattern"] = pat
+    if form:
+        out["shape"] = form
+    if (pat or form) and c.get("rev"):
+        out["rev"] = True
     return out
 
 
@@ -124,23 +134,50 @@ def turned(pts):
     return [[1 - u, 1 - f] for u, f in reversed(pts)]
 
 
+FORMULA_KEYS = ("shape", "pattern", "rev")
+
+
+def curve_shape(c):
+    """What makes a curve look the way it does (its points, corners, formulas), without its link."""
+    out = {"pts": [list(p) for p in c["pts"]], "sharp": list(c["sharp"])}
+    out.update({key: copy.deepcopy(c[key]) for key in FORMULA_KEYS if c.get(key)})
+    return out
+
+
 def turned_curve(c, flip=True):
     """The curve as its partner gets it: turned end to end when flip, otherwise the same."""
-    if not flip:
-        return {"pts": [list(p) for p in c["pts"]], "sharp": list(c["sharp"])}
-    n = anchor_count(c["pts"])
-    return {"pts": turned(c["pts"]), "sharp": sorted(n - 1 - a for a in c["sharp"])}
+    out = curve_shape(c)
+    if flip:
+        n = anchor_count(c["pts"])
+        out.update(pts=turned(c["pts"]), sharp=sorted(n - 1 - a for a in c["sharp"]))
+        if has_formula(out):  # (the formulas run from the other end)
+            out["rev"] = not out.get("rev")
+            if not out["rev"]:
+                del out["rev"]
+    return out
 
 
 def inside_out(c):
     """The curve flipped inside out: bulging the other way (slow start <-> fast start, S <-> reverse S)."""
-    return {"pts": [[f, u] for u, f in c["pts"]], "sharp": list(c["sharp"])}
+    out = dict(curve_shape(c), pts=[[f, u] for u, f in c["pts"]])
+    moved_formulas(out, lambda u, f: (f, u))
+    return out
 
 
 def set_shape(c, shape):
-    """Give curve c the points / corners of shape (a curve dict), keeping its link."""
+    """Give curve c the points / corners / formulas of shape (a curve dict), keeping its link."""
     c["pts"] = [list(p) for p in shape["pts"]]
     c["sharp"] = list(shape["sharp"])
+    for key in FORMULA_KEYS:
+        if shape.get(key):
+            c[key] = copy.deepcopy(shape[key])
+        else:
+            c.pop(key, None)
+
+
+def curve_points(c, n=64):
+    """[(u, f)] along the curve in its box, its formulas on it."""
+    return formed_path(sample(c["pts"], n), c)
 
 
 # ---------------------------------------------------------------- the first version's bends (for old projects)
@@ -242,56 +279,6 @@ def _smooth_curve(xs, ys):
     return fn
 
 
-# ---------------------------------------------------------------- curve shapes (presets, formulas)
-# A formula is y of x, x going 0 -> 1 from the curve's start (A) to its wall end (B); it's stretched so it starts
-# at 0 and ends at 1, and becomes anchors + handles that follow it (so it can still be dragged afterwards).
-CURVE_PRESETS = [  # (name, formula; None = the default curve)
-    (tr("funnel.default"), None),
-    (tr("funnel.straight"), "x"),
-    (tr("funnel.slow_start_x"), "x^2"),
-    (tr("funnel.slower_start_x"), "x^3"),
-    (tr("funnel.very_slow_start_x"), "x^5"),
-    (tr("funnel.fast_start_x_flipped"), "1-(1-x)^2"),
-    (tr("funnel.faster_start_x_flipped"), "1-(1-x)^3"),
-    (tr("funnel.s_curve_slow_fast_slow"), "x*x*(3-2*x)"),
-    (tr("funnel.steep_s_curve"), "x^3*(x*(6*x-15)+10)"),
-    (tr("funnel.reverse_s_fast_slow_fast"), "0.5-sin(asin(1-2*x)/3)"),
-    (tr("funnel.quarter_circle_slow_start"), "1-sqrt(1-x^2)"),
-    (tr("funnel.quarter_circle_fast_start"), "sqrt(1-(1-x)^2)"),
-    (tr("funnel.exponential"), "exp(5*x)"),
-    (tr("funnel.logarithmic"), "ln(1+20*x)"),
-]
-FIT_TOLERANCE = 0.003  # how close (part of the curve's size) the anchors + handles follow a formula
-
-
-def formula_curve(fn, n=400):
-    """[(x, y)] of a formula at n+1 even steps, stretched so y goes 0 -> 1 (ValueError if it can't be)."""
-    pts = []
-    for i in range(n + 1):
-        x = i / n
-        try:
-            y = float(fn(x))
-        except (ValueError, ArithmeticError, TypeError):
-            raise ValueError(tr("funnel.it_can_t_be_worked_out", x=x))
-        if not math.isfinite(y):
-            raise ValueError(tr("funnel.it_can_t_be_worked_out", x=x))
-        pts.append((x, y))
-    y0, y1 = pts[0][1], pts[-1][1]
-    if abs(y1 - y0) < 1e-12:
-        raise ValueError(tr("funnel.it_has_to_end_at_a"))
-    return [(x, (y - y0) / (y1 - y0)) for x, y in pts]
-
-
-def preset_curve(formula_fn):
-    """A curve (dict, no link) for a formula function (None = the default curve)."""
-    if formula_fn is None:
-        return new_curve()
-    sharp = []
-    pts = fit(formula_curve(formula_fn), FIT_TOLERANCE, sharp)
-    pts[0], pts[-1] = [0.0, 0.0], [1.0, 1.0]
-    return dict(new_curve(pts), sharp=sharp)
-
-
 def remove_funnel_parts(sh, lines, curves):
     """Take lines (numbers) and curves ((start, wall end)) out of a funnel. Curves starting on a removed line go
     with it; the next line takes over as the first. False if no line would be left (remove the funnel)."""
@@ -376,7 +363,18 @@ def funnel_curves(sh, short=False):
                 box = s_, u_, (v_[0] * k_, v_[1] * k_)
             if box:
                 corner = box_point(box, 1, 0)
-                out.append((k, end, [box_point(box, u, f) for u, f in sample(c["pts"], 64)], corner))
+                out.append((k, end, [box_point(box, u, f) for u, f in curve_points(c)], corner))
+    return out
+
+
+def funnel_origins(sh):
+    """[(beat, pitch) points] of the curves with formulas as drawn (their origin paths, shown dashed)."""
+    out = []
+    for k, end, c in all_curves(sh):
+        st = sh["starts"][k]
+        box = curve_box(sh, st["at"], end, st.get("line", 0)) if has_formula(c) else None
+        if box:
+            out.append([box_point(box, u, f) for u, f in sample(c["pts"], 64)])
     return out
 
 

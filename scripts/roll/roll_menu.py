@@ -4,12 +4,10 @@ import tkinter as tk
 from types import SimpleNamespace
 
 from files.lang import tr
-from window.curve_dialog import load_formulas
-from window.pattern_dialog import load_patterns
+from window.formula_host import FunnelHost, RollHost, formula_menu
 from notes.convert import originals
 from notes.joined import is_joined
-from notes.funnel import CURVE_PRESETS, inside_out, turned_curve
-from notes.pattern import PATTERN_PRESETS, SHAPE_PRESETS
+from notes.funnel import inside_out, turned_curve
 from notes.tumour import LINE_KINDS
 from roll.roll_shared import SHIFT
 from window.widgets import symmetry_menu
@@ -37,17 +35,8 @@ class ShapeMenu:
             _, lines, curves = got
             m.add_command(label=tr("roll_menu.highlighted", parts_text=self.parts_text()), state="disabled")
             if curves:
-                presets = tk.Menu(m, tearoff=0)
-                for name, text in CURVE_PRESETS:
-                    presets.add_command(label=name, command=lambda t=text: self.apply_formula(t))
-                m.add_cascade(label=tr("roll_menu.curve_shape"), menu=presets)
-                mine = tk.Menu(m, tearoff=0)
-                for name, text in load_formulas():
-                    mine.add_command(label=f"{name}   ({text})", command=lambda t=text: self.apply_formula(t))
-                if mine.index("end") is not None:
-                    mine.add_separator()
-                mine.add_command(label=tr("roll_menu.new_edit_formulas"), command=self.open_formulas)
-                m.add_cascade(label=tr("roll_menu.custom_formula"), menu=mine)
+                self.formula_menu(m, FunnelHost(self))
+                m.add_command(label=tr("roll_menu.default_curve"), command=self.default_curves)
                 self.link_menu(m, sh, curves, part)
                 m.add_command(label=tr("roll_menu.turn_curve_end_to_end"), accelerator=tr("roll_menu.ctrl_h"),
                               command=lambda: self.set_curves(turned_curve))
@@ -150,45 +139,11 @@ class ShapeMenu:
         finally:
             m.grab_release()
 
-    def formula_menu(self, m):
-        """"Formula ▸" for the selected curves: the shape of the curve and the pattern along it (pattern.py), taking
-        them off, or making them plain anchors and handles. The dots show the curve right-clicked's."""
-        app = self.app
-        sh = app.selected()
-        sub = tk.Menu(m, tearoff=0)
+    def formula_menu(self, m, host=None):
+        """"Formula ▸" for the selected curves (host: formula_host.py, default the piano roll's curves). The dots
+        show the curve right-clicked's."""
         self._formula_picks = {}  # (kept, so the dots show)
-        for layer, label, presets in (
-                ("shape", tr("roll_menu.shape_of_the_curve"), [(sid, name) for sid, name, _, _, _ in SHAPE_PRESETS]),
-                ("pattern", tr("roll_menu.pattern_along_the_curve"),
-                 [(pid, name) for pid, name, _, _ in PATTERN_PRESETS])):
-            pat = (sh.get(layer) or {}) if sh and sh["kind"] == "curve" else {}
-            if not pat:
-                now = "none"
-            elif pat.get("name"):  # a saved one
-                now = "saved:" + pat["name"]
-            else:  # a preset (edited by hand: none of the list any more)
-                now = "" if pat.get("loop") else pat.get("preset", "")
-            pick = self._formula_picks[layer] = tk.StringVar(self, value=now)
-            menu = tk.Menu(sub, tearoff=0)
-            menu.add_command(label=tr("roll_menu.custom"), command=lambda l=layer: app.open_formula_dialog(l))
-            menu.add_separator()
-            menu.add_radiobutton(label=tr("roll_menu.none"), value="none", variable=pick,
-                                 command=lambda l=layer: app.set_formula(l, None))
-            for pid, name in presets:
-                menu.add_radiobutton(label=name, value=pid, variable=pick,
-                                     command=lambda l=layer, p=pid: app.set_formula(l, p))
-            saved = load_patterns(layer)
-            if saved:
-                menu.add_separator()
-            for item in saved:
-                menu.add_radiobutton(label=item["name"], value="saved:" + item["name"], variable=pick,
-                                     command=lambda l=layer, it=item: app.set_formula(l, None, it))
-            sub.add_cascade(label=label, menu=menu)
-        sub.add_separator()
-        on = "normal" if app.patterned() else "disabled"
-        sub.add_command(label=tr("roll_menu.remove_formula"), command=app.remove_formulas, state=on)
-        sub.add_command(label=tr("roll_menu.turn_into_plain_curve"), command=app.plain_curve, state=on)
-        m.add_cascade(label=tr("roll_menu.formula"), menu=sub)
+        formula_menu(m, host or RollHost(self.app), self._formula_picks)
 
     def link_menu(self, m, sh, curves, part):
         """"Link curves ▸" for the highlighted curves. The curve right-clicked keeps its shape, the others follow."""

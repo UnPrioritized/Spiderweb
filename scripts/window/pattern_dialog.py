@@ -2,13 +2,15 @@
 preset or a saved one, change its numbers (each other name in a formula gets a number box), or type formulas. The
 preview shows ONE loop of a pattern (as long as it is on the curve), or the whole shape between the curve's ends A
 and B, with anchors and handles: dragging them changes it by hand (every loop along the curve follows). The user's
-saved ones are in spiderweb/patterns.json. Changes show on the piano roll straight away; Apply keeps them as one
-undo step, Cancel puts back how it was."""
+saved ones are in spiderweb/patterns.json (the funnel's old saved curve formulas, curves.json, are moved in there).
+It works on a host (formula_host.py: the piano roll's curves, a drawer stroke, a funnel's curves). Changes show
+straight away; Apply keeps them as one undo step, Cancel puts back how it was."""
 
 import copy
 import json
 import math
 import os
+import re
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -19,11 +21,12 @@ from files.safefile import write_text
 from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, fit, handle_lines, nearest,
                           pen_handles, sample)
 from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, SHAPE_PRESETS, clean_loop, formula_loop, formula_shape,
-                           loop_length, new_pattern, new_shape, pattern_name, shape_name, shape_names)
+                           new_pattern, new_shape, pattern_name, shape_name, shape_names)
 from roll.roll_shared import ALT
 from window.widgets import Scrub, Tooltip
 
 PATTERNS_FILE = os.path.join(HERE, "patterns.json")
+OLD_CURVES_FILE = os.path.join(HERE, "curves.json")  # the funnel's saved curve formulas (before shapes of curves)
 LOOP_TOLERANCE = 0.02    # how closely the anchors + handles follow a pattern's formula when first edited, in keys
 SHAPE_TOLERANCE = 0.002  # the same for a shape, as a share of the curve's length
 GRAB = 7  # how near (pixels) a point has to be to be dragged
@@ -33,6 +36,8 @@ FILE_KEYS = {"pattern": "patterns", "shape": "shapes"}
 def load_patterns(layer="pattern"):
     """The user's saved patterns [{"name", "formula", "vars", maybe "loop"}] or shapes [{"name", "x", "y", "vars",
     maybe "loop"}]."""
+    if layer == "shape" and os.path.exists(OLD_CURVES_FILE):
+        move_old_curves()
     try:
         with open(PATTERNS_FILE, encoding="utf-8") as f:
             data = json.load(f)
@@ -54,6 +59,53 @@ def save_patterns(items, layer="pattern"):
     data = {key: load_patterns(other) for other, key in FILE_KEYS.items() if other != layer}
     data[FILE_KEYS[layer]] = items
     write_text(PATTERNS_FILE, json.dumps(data, indent=1))
+
+
+def move_old_curves():
+    """The funnel's saved curve formulas (y of x, stretched to go from 0 to 1) become saved shapes; curves.json is
+    renamed curves-old.json (kept, just in case)."""
+    try:
+        with open(OLD_CURVES_FILE, encoding="utf-8") as f:
+            old = [(str(c["name"]), str(c["formula"])) for c in json.load(f).get("curves", [])]
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        old = []
+    try:
+        with open(PATTERNS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError
+    except FileNotFoundError:
+        data = {}
+    except (OSError, ValueError):
+        return  # (a broken patterns.json: leave both alone)
+    shapes = data.setdefault(FILE_KEYS["shape"], [])
+    names = {str(p.get("name")) for p in shapes if isinstance(p, dict)}
+    for name, text in old:
+        y = old_curve_y(text)
+        if y and name not in names:
+            shapes.append({"name": name, "x": "t", "y": y, "vars": {}})
+            names.add(name)
+    try:
+        write_text(PATTERNS_FILE, json.dumps(data, indent=1))
+        os.replace(OLD_CURVES_FILE, os.path.splitext(OLD_CURVES_FILE)[0] + "-old.json")
+    except OSError:
+        pass
+
+
+def old_curve_y(text):
+    """An old funnel curve formula (y of x) as y(t) of a shape, stretched so it goes from 0 to 1 like it did then,
+    or None if it doesn't work."""
+    y = re.sub(r"\bx\b", "t", text)
+    try:
+        fn = formula(y, var="t")
+        y0, y1 = float(fn(0.0)), float(fn(1.0))
+    except (ValueError, ArithmeticError, TypeError):
+        return None
+    if not (math.isfinite(y0) and math.isfinite(y1)) or abs(y1 - y0) < 1e-12:
+        return None
+    if abs(y0) < 1e-12 and abs(y1 - 1) < 1e-12:
+        return y
+    return f"(({y}) - {y0:.12g}) / {y1 - y0:.12g}"
 
 
 def saved_pattern(item, k, old=None):
@@ -78,20 +130,22 @@ def saved_shape(item, k):
 
 
 class FormulaDialog(tk.Toplevel):
-    """Custom… for the selected curves' shape (layer "shape") or pattern along them (layer "pattern")."""
+    """Custom… for the host's (formula_host.py) curves' shape (layer "shape") or pattern along them (layer
+    "pattern")."""
 
-    def __init__(self, app, layer="pattern"):
-        super().__init__(app)
+    def __init__(self, host, layer="pattern"):
+        parent = host.parent
+        super().__init__(parent)
         self.layer = layer
         shape = layer == "shape"
         self.title(tr("pattern_dialog.shape_title") if shape else tr("pattern_dialog.title"))
-        self.transient(app)
+        self.transient(parent)
         self.resizable(False, False)
-        self.app = app
-        self.targets = app.pattern_targets()
-        self.before_json = json.dumps(app.shapes)
-        self.before = [copy.deepcopy(sh.get(layer)) for sh in self.targets]
-        self.k = app.roll.sy / app.roll.sx if app.roll.sx else 0.25
+        self.host, self.app = host, host.app
+        self.targets = host.targets()
+        self.snap = host.snapshot()
+        self.before = [copy.deepcopy(h) for h in self.targets]
+        self.k = host.fresh(self.targets[0], layer)["k"]
         first = self.targets[0].get(layer)
         self.pat = copy.deepcopy(first) if first else new_shape("circle", self.k) if shape else new_pattern("wave",
                                                                                                           self.k)
@@ -99,7 +153,7 @@ class FormulaDialog(tk.Toplevel):
         self.view = None    # (pixels per unit, left x, middle y, loop length in units) while dragging
         self.drag = None    # the point being dragged
         self._loading = False
-        s = self.scale = app.scale
+        s = self.scale = self.app.scale
         self.w, self.h = int(460 * s), int(250 * s) if not shape else int(300 * s)
 
         body = ttk.Frame(self, padding=8)
@@ -138,7 +192,7 @@ class FormulaDialog(tk.Toplevel):
                 b.pack(side="left", padx=(6, 0))
                 Tooltip(b, tr("pattern_dialog.edit_formula_tip"))
         r = len(keys) + 1
-        ttk.Label(right, text=tr("pattern_dialog.shape_help") if shape else tr("pattern_dialog.help"),
+        ttk.Label(right, text=tr("pattern_dialog.shape_help") if shape else tr(host.pattern_help),
                   foreground="#777", font=("Segoe UI", 8), wraplength=int(440 * s),
                   justify="left").grid(row=r, column=0, columnspan=2, sticky="w", pady=(3, 4))
         self.numbers = ttk.Frame(right)  # (a pattern: Loops, then) a box per name in the formulas
@@ -180,9 +234,9 @@ class FormulaDialog(tk.Toplevel):
                     self.listbox.selection_set(i)
                     self.listbox.see(i)
         self.refresh()
-        self.update_idletasks()  # over the middle of the main window
-        x = app.winfo_rootx() + (app.winfo_width() - self.winfo_width()) // 2
-        y = app.winfo_rooty() + (app.winfo_height() - self.winfo_height()) // 3
+        self.update_idletasks()  # over the middle of the window it's for
+        x = parent.winfo_rootx() + (parent.winfo_width() - self.winfo_width()) // 2
+        y = parent.winfo_rooty() + (parent.winfo_height() - self.winfo_height()) // 3
         self.geometry(f"+{max(0, x)}+{max(0, y)}")
         self.grab_set()  # the roll can't change under it while it previews
         self.focus_set()
@@ -354,10 +408,10 @@ class FormulaDialog(tk.Toplevel):
             e.bind("<Return>", lambda ev, n=name: (self.on_number(n), "break")[1])
             e.bind("<FocusOut>", lambda ev, n=name: self.on_number(n))
             loops = name == "loops"
-            Scrub(self.app, [(e, var, lambda n=name: self.on_number(n))], (1, 10, 0.1) if loops else (0.5, 5, 0.1),
+            Scrub(self.host.app, [(e, var, lambda n=name: self.on_number(n))], (1, 10, 0.1) if loops else (0.5, 5, 0.1),
                   0.01 if loops else None, None, label=lb)
             tip = (tr("panel_pattern.loops_tip") if loops else
-                   tr("panel_pattern.shape_number_tip" if self.layer == "shape" else "panel_pattern.number_tip",
+                   tr("panel_pattern.shape_number_tip" if self.layer == "shape" else self.host.number_tip,
                       name=name))
             for w in (lb, e):
                 Tooltip(w, tip)
@@ -393,20 +447,21 @@ class FormulaDialog(tk.Toplevel):
         self.pat.pop("loop", None)
         self.refresh()
 
-    # ------------------------------------------------------------ the piano roll
+    # ------------------------------------------------------------ the piano roll (or the drawer)
     def show_on_roll(self):
-        """It on every selected curve (each keeps its own screen proportions / mirroring)."""
+        """It on every curve (each keeps its own proportions / mirroring)."""
         if not self.ok and not self.pat.get("loop"):
             return
-        for sh in self.targets:
-            own = sh.get(self.layer) or {"k": self.k, "mirror": False, "scale": 1.0}
+        for h, before in zip(self.targets, self.before):
+            own = h.get(self.layer) or dict(self.host.fresh(h, self.layer), mirror=False)
             new = copy.deepcopy(self.pat)
             new.update(k=own["k"], mirror=own["mirror"])
             if self.layer == "pattern":
                 new["scale"] = own.get("scale", 1.0)
-            sh[self.layer] = new
-        self.app.shapes_changed()
-        self.app.sync_pattern()
+            h[self.layer] = new
+            self.host.placed(h, self.layer, before)
+        self.host.spread()
+        self.host.changed(final=False)
 
     def apply(self):
         if not self.ok and not self.pat.get("loop"):
@@ -414,18 +469,11 @@ class FormulaDialog(tk.Toplevel):
         self.show_on_roll()
         self.destroy()
         step = "panel_pattern.shape_step" if self.layer == "shape" else "panel_pattern.pattern_step"
-        self.app.push_undo(self.before_json, tr(step, name=self.name_of(self.pat)))
-        self.app.sync_panel()
+        self.host.commit(self.snap, tr(step, name=self.name_of(self.pat)))
 
     def cancel(self):
-        for sh, old in zip(self.targets, self.before):
-            if old is None:
-                sh.pop(self.layer, None)
-            else:
-                sh[self.layer] = old
         self.destroy()
-        self.app.shapes_changed()
-        self.app.sync_panel()
+        self.host.restore(self.snap)
 
     # ------------------------------------------------------------ the preview
     def loop_len(self):
@@ -433,12 +481,9 @@ class FormulaDialog(tk.Toplevel):
         roll). A shape: 1 (its sizes are shares of the curve's length)."""
         if self.layer == "shape":
             return 1.0
-        sh = self.targets[0]
-        own = sh.get("pattern") or {}
-        try:
-            got = loop_length(dict(sh, pattern=dict(self.pat, k=own.get("k", self.k))))
-        except (ValueError, ZeroDivisionError, KeyError):
-            got = 0.0
+        h = self.targets[0]
+        own = h.get("pattern") or self.host.fresh(h, "pattern")
+        got = self.host.loop_length(h, dict(self.pat, k=own["k"], scale=own.get("scale", 1.0)))
         return got if got > 1e-6 else 8.0
 
     def shown_loop(self):

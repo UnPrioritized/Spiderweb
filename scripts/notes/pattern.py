@@ -194,9 +194,13 @@ SHAPE_PRESETS = [
     ("heart", tr("pattern.heart"), "16 * sin(t * 2 * pi)^3",
      "13 * cos(t * 2 * pi) - 5 * cos(4 * pi * t) - 2 * cos(6 * pi * t) - cos(8 * pi * t)", {}),
     ("figure8", tr("pattern.figure8"), "sin(t * 2 * pi)", "sin(t * 2 * pi) * cos(t * 2 * pi)", {}),
-    ("slow", tr("pattern.slow_start"), "t", "t^2", {}),
-    ("fast", tr("pattern.fast_start"), "t", "1 - (1 - t)^2", {}),
-    ("scurve", tr("pattern.s_curve"), "t", "t * t * (3 - 2 * t)", {}),
+    ("slow", tr("pattern.slow_start"), "t", "t^bend", {"bend": 2.0}),
+    ("fast", tr("pattern.fast_start"), "t", "1 - (1 - t)^bend", {"bend": 2.0}),
+    ("scurve", tr("pattern.s_curve"), "t", "t^steep / (t^steep + (1 - t)^steep)", {"steep": 2.0}),
+    ("reverse_s", tr("pattern.reverse_s"), "t^steep / (t^steep + (1 - t)^steep)", "t", {"steep": 2.0}),
+    ("quarter", tr("pattern.quarter_circle"), "sin(t * pi / 2)", "1 - cos(t * pi / 2)", {}),
+    ("exponential", tr("pattern.exponential"), "t", "(exp(steep * t) - 1) / (exp(steep) - 1)", {"steep": 5.0}),
+    ("logarithmic", tr("pattern.logarithmic"), "t", "ln(1 + steep * t) / ln(1 + steep)", {"steep": 20.0}),
 ]
 SHAPE_NAMES = {sid: name for sid, name, _, _, _ in SHAPE_PRESETS}
 
@@ -330,7 +334,59 @@ def formed_paths(paths, sh):
     return paths
 
 
+def formed_path(path, holder):
+    """One path (a drawer stroke's, a funnel curve's) with the shape / pattern of holder (the stroke / curve dict)
+    on it. holder["rev"]: they run from the path's end (a funnel curve turned end to end)."""
+    if not (holder.get("shape") or holder.get("pattern")):
+        return path
+    if holder.get("rev"):
+        return formed_paths([path[::-1]], holder)[0][::-1]
+    return formed_paths([path], holder)[0]
+
+
+def has_formula(holder):
+    return bool(holder.get("shape") or holder.get("pattern"))
+
+
+def moved_formulas(holder, fn):
+    """After holder's points were all moved by fn(x, y) -> (x, y) (straight lines staying straight: moved,
+    stretched, flipped, turned, or into another box), its formulas' k / scale / mirror changed to match, so they
+    look the same on it (exactly, unless it was slanted). k: how many x one y is where they look round (for the
+    piano roll: beats per key on screen)."""
+    if not has_formula(holder):
+        return
+    o = np.asarray(fn(0.0, 0.0), float)
+    a = np.column_stack([np.asarray(fn(1.0, 0.0), float) - o, np.asarray(fn(0.0, 1.0), float) - o])
+    for layer in ("shape", "pattern"):
+        p = holder.get(layer)
+        if not p:
+            continue
+        b = a @ np.diag([p["k"], 1.0])  # from where it's round now to the new points
+        r1, r2 = math.hypot(*b[0]), math.hypot(*b[1])
+        if r1 < 1e-12 or r2 < 1e-12:
+            continue
+        k = r1 / r2
+        det = float(np.linalg.det(np.diag([1 / k, 1.0]) @ b))  # ... and on to where it's round there
+        new = dict(p, k=k, mirror=p["mirror"] != (det < 0))
+        if layer == "pattern":
+            new["scale"] = p["scale"] * math.sqrt(abs(det))
+        holder[layer] = new
+
+
 BAKE_TOLERANCE = 0.05  # how closely "Turn into plain curve" follows the pattern, in keys (as the piano roll looked)
+BAKE_SHARE = 0.001  # the same for a drawer stroke / funnel curve, as a share of its size
+
+
+def baked_path(holder, pts):
+    """A drawer stroke's / funnel curve's formulas made into ordinary anchors and handles: (pts, sharp)."""
+    from notes.bezier import fit, sample
+    path = formed_path(sample([tuple(q) for q in pts], 240), holder)
+    k = (holder.get("pattern") or holder["shape"])["k"]
+    a = np.asarray(path, float) / [k, 1.0]
+    size = max(1e-9, float(np.hypot(*(a.max(axis=0) - a.min(axis=0)))))
+    corners = []
+    got = fit([tuple(q) for q in a.tolist()], BAKE_SHARE * size, corners)
+    return [[x * k, y] for x, y in got], corners
 
 
 def baked(sh):

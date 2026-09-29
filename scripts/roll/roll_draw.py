@@ -8,7 +8,7 @@ import numpy as np
 from notes.custom import custom_note_count, gap_lines
 from notes.engine import cached_arrays, shape_notes
 from notes.joined import all_tumours
-from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count
+from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
 from notes.paths import KEYS
 from roll.roll_shared import (BLACK, DRAFT_COLOR, PIANO_88, PREVIEW_LIMIT, SELECTED_COLOR, SLOT_COLORS,
                               fade, note_name)
@@ -125,6 +125,10 @@ class RollDrawing:
                     and (i in app.sels or app.show_lines.get())):
                 self.draw_path(dict(sh, tumour=None, tumours=None, pattern=None, shape=None),
                                "#e89a9a" if i in app.sels else "#efc0c0", 1, dash=(6, 4))
+            if sh["kind"] == "funnel" and (i in app.sels or app.show_lines.get()):  # its curves' too
+                for path in funnel_origins(sh):
+                    self.create_line(*[v for b, p in path for v in (self.t2x(b), self.p2y(p))], width=1,
+                                     fill="#e89a9a" if i in app.sels else "#efc0c0", dash=(6, 4))
         if app.show_lines.get():
             for i, sh in enumerate(app.shapes):
                 if i not in app.sels:

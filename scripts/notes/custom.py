@@ -10,6 +10,7 @@ import numpy as np
 from files.lang import tr
 from notes.arc import arc_k, arc_points, ellipse_bezier
 from notes.bezier import sample
+from notes.pattern import clean_pattern, clean_shape_formula, formed_path, has_formula, moved_formulas
 from notes.smooth import clean_level, smooth_path
 from notes.paths import (TOP_KEY, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
@@ -48,7 +49,8 @@ def custom_settings(cd):
 # ---------------------------------------------------------------- custom shapes
 # A custom shape is a drawing from the drawer: strokes in its own box, u = 0..1 left to right, v = 0..1 bottom to
 # top. A stroke is {"kind": "poly", "pts": [[u, v], ...]}, {"kind": "curve", "pts": [anchor, handle, handle,
-# anchor, ...]} (bezier.py; optional "sharp" / "sym" like the roll's Curve shape), {"kind": "arc", "pts": [start,
+# anchor, ...]} (bezier.py; optional "sharp" / "sym" like the roll's Curve shape, "shape" / "pattern" formulas like its
+# too: pattern.py, their k = how many u one v is where they look round), {"kind": "arc", "pts": [start,
 # through, end], "k": ...} (arc.py; k = how many u one v is, for it to be round) or
 # {"kind": "ellipse", "box": [u0, v0, u1, v1]}.
 # On the roll, sh["pts"] = three corners of that box: [u=0 v=0, u=1 v=0, u=0 v=1]. Moving, flipping and turning
@@ -97,6 +99,11 @@ def clean_curve(st, pts):
         out["sharp"] = sharp
     if st.get("sym") in ("mirror", "turn") and last % 2 == 0:
         out["sym"] = st["sym"]
+    pat, form = clean_pattern(st.get("pattern")), clean_shape_formula(st.get("shape"))
+    if pat:
+        out["pattern"] = pat
+    if form:
+        out["shape"] = form
     return out
 
 
@@ -109,7 +116,7 @@ def stroke_points(st):
                for a in (2 * math.pi * i / ELLIPSE_STEPS for i in range(ELLIPSE_STEPS))]
         return pts + [pts[0]]
     if st["kind"] == "curve":
-        return sample([tuple(p) for p in st["pts"]], CURVE_STEPS)
+        return formed_path(sample([tuple(p) for p in st["pts"]], CURVE_STEPS), st)
     if st["kind"] == "arc":
         return arc_points(st["pts"], st.get("k", 1.0))
     if st.get("smooth"):  # a freehand stroke made perfect (its drawn points stay)
@@ -158,7 +165,7 @@ def join_paths(paths):
 
 def stroke_span(st):
     """A stroke's two ends [start, end], or None if it's closed (curves by their points: sampling is slow)."""
-    if st["kind"] == "curve":
+    if st["kind"] == "curve" and not has_formula(st):
         pts = st["pts"]
         closed = math.dist(pts[0], pts[-1]) < 1e-6
     else:
@@ -316,6 +323,8 @@ def normalize_strokes(strokes):
             new = dict(st, pts=[fix(u, v) for u, v in st["pts"]])
             if (st["kind"] == "arc" or st.get("free")) and w > 1e-9 and h > 1e-9:
                 new["k"] = st.get("k", 1.0) * h / w  # still round when stretched back to the drawn proportions
+            if w > 1e-9 and h > 1e-9:
+                moved_formulas(new, lambda u, v: (u / w, v / h))
             out.append(new)
     return out, (w / h if w > 1e-9 and h > 1e-9 else None)
 
@@ -363,6 +372,7 @@ def map_stroke(st, fn, su=1.0, sv=1.0):
     new = dict(st, pts=[list(fn(u, v)) for u, v in st["pts"]])
     if st["kind"] == "arc" or st.get("free"):  # (a freehand stroke's k works like an arc's)
         new["k"] = st.get("k", 1.0) * abs(su / sv)
+    moved_formulas(new, fn)  # (a curve's)
     return new
 
 
@@ -393,6 +403,9 @@ def stroke_ends(strokes):
     for st in strokes:
         if st["kind"] == "poly":
             out += st["pts"]
+        elif st["kind"] == "curve" and has_formula(st):
+            path = stroke_points(st)
+            out += [list(path[0]), list(path[-1])]
         elif st["kind"] in ("curve", "arc"):
             out += [st["pts"][0], st["pts"][-1]]
     return out

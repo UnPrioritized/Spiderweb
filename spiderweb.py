@@ -11,6 +11,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     panel_tumour.py  the panel's tumour line (summary + button)
     panel_pattern.py the panel's pattern numbers (a formula along a curve) + the Formula menu's actions
     pattern_dialog.py the Custom... windows for a curve's shape and pattern (presets, formulas, edited by hand)
+    formula_host.py  where formulas go (piano roll curves, drawer strokes, funnel curves) + the Formula menu
     tumour_window.py the tumour window: the tumour settings (bumps along lines)
     history.py       the History list (named undo steps; docked in the side panel or its own window)
     graph_window.py  a tumour setting's graph (the number changing along the line)
@@ -22,7 +23,6 @@ Files (the scripts live in scripts/, one subfolder per group):
     snap_picker.py   the Snap dropdown (note pictures) and the Customised snap window
     help_texts.py    every help text: tips, the Help window, tool tooltips, the side panel's help
     help.py          the tip popups and the Help window (F1, searchable)
-    curve_dialog.py  the custom curve formula window, saved formulas (curves.json)
     drawer.py        the custom shape drawer window and the shape library (shapes/*.json)
     velocity.py      the velocity pane under the piano roll
   roll/              the piano roll
