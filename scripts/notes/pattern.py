@@ -8,6 +8,8 @@ the piano roll looked then, like arcs), "mirror": the other side (flipping the s
 turning the shape (like tumours)}, and maybe "name" (a saved pattern's) and "loop" = the loop edited by hand as a
 curve {"pts": anchors + handles in (along 0 -> 1, sideways in keys), "sharp": corners} (bezier.py): it's used instead
 of the formula, which stays so the loop can go back to it.
+Both a pattern and a shape may have "sym" = symmetric halves picked by the user: "mirror" (the second half is the
+first half mirrored, like an arch) or "turn" (turned half-way round, like an S); only the formula's first half counts.
 
 Sideways = to the left of the way the curve goes, so on a curve going forward in time, up."""
 
@@ -32,13 +34,24 @@ PRESET_NAMES = {pid: name for pid, name, _, _ in PATTERN_PRESETS}
 LOOPS_DEFAULT = 4.0
 
 
+SYMS = ("mirror", "turn")  # a formula's symmetric halves (see the top)
+
+
+def keep_sym(new, old):
+    """new with old's symmetric halves (picking another preset keeps them)."""
+    if (old or {}).get("sym") in SYMS:
+        new["sym"] = old["sym"]
+    return new
+
+
 def new_pattern(preset, k, old=None):
-    """A pattern from a preset. k: beats per key on screen. old: the pattern it replaces (its loops and how it
-    runs over pieces stay)."""
+    """A pattern from a preset. k: beats per key on screen. old: the pattern it replaces (its loops, how it runs
+    over pieces and its symmetric halves stay)."""
     _, _, text, values = next(p for p in PATTERN_PRESETS if p[0] == preset)
     old = old or {}
-    return {"preset": preset, "formula": text, "vars": dict(values), "loops": old.get("loops", LOOPS_DEFAULT),
-            "each": old.get("each", False), "k": k, "mirror": False, "scale": 1.0}
+    return keep_sym({"preset": preset, "formula": text, "vars": dict(values),
+                     "loops": old.get("loops", LOOPS_DEFAULT), "each": old.get("each", False), "k": k,
+                     "mirror": False, "scale": 1.0}, old)
 
 
 def clean_loop(c):
@@ -85,7 +98,7 @@ def clean_pattern(p):
         out["name"] = str(p["name"])
     if loop:
         out["loop"] = loop
-    return out
+    return keep_sym(out, p)
 
 
 def pattern_name(p):
@@ -129,12 +142,13 @@ def loop_length(sh):
 
 
 @functools.lru_cache(maxsize=256)
-def _loop(text, values):
+def _loop(text, values, sym):
     fn = formula(text, named=True)
     vals = dict(values)
     u = np.linspace(0.0, 1.0, LOOP_SAMPLES + 1)
+    half = LOOP_SAMPLES // 2
     v = []
-    for x in u.tolist():
+    for x in u.tolist()[:half + 1] if sym else u.tolist():  # (symmetric: the first half makes the second)
         try:
             y = fn(x, vals)
         except (ValueError, ArithmeticError, TypeError, KeyError):
@@ -142,13 +156,18 @@ def _loop(text, values):
         if not math.isfinite(y):
             raise ValueError(tr("pattern.can_t_work_it_out_at", x=round(x, 3)))
         v.append(y)
-    return u, np.array(v)
+    v = np.array(v)
+    if sym == "mirror":  # across the up-and-down line through the middle
+        v = np.concatenate([v, v[-2::-1]])
+    elif sym == "turn":  # turned half-way round the middle point
+        v = np.concatenate([v, 2 * v[-1] - v[-2::-1]])
+    return u, v
 
 
 def formula_loop(p):
-    """One loop of the pattern's formula as (along 0 -> 1, sideways in keys) arrays (not mirrored / scaled).
-    ValueError if it can't be worked out."""
-    return _loop(p["formula"], tuple(sorted(p["vars"].items())))
+    """One loop of the pattern's formula as (along 0 -> 1, sideways in keys) arrays (not mirrored / scaled), with
+    its symmetric halves. ValueError if it can't be worked out."""
+    return _loop(p["formula"], tuple(sorted(p["vars"].items())), p.get("sym") if p.get("sym") in SYMS else None)
 
 
 def loop_points(p):
@@ -222,9 +241,10 @@ SHAPE_PRESETS = [
 SHAPE_NAMES = {sid: name for sid, name, _, _, _ in SHAPE_PRESETS}
 
 
-def new_shape(preset, k):
+def new_shape(preset, k, old=None):
+    """A shape from a preset (old: the one it replaces, its symmetric halves stay)."""
     _, _, x, y, values = next(p for p in SHAPE_PRESETS if p[0] == preset)
-    return {"preset": preset, "x": x, "y": y, "vars": dict(values), "k": k, "mirror": False}
+    return keep_sym({"preset": preset, "x": x, "y": y, "vars": dict(values), "k": k, "mirror": False}, old)
 
 
 def shape_names(text_x, text_y):
@@ -257,7 +277,7 @@ def clean_shape_formula(p):
         out["name"] = str(p["name"])
     if loop:
         out["loop"] = loop
-    return out
+    return keep_sym(out, p)
 
 
 def shape_name(p):
@@ -268,7 +288,7 @@ def shape_name(p):
 
 
 @functools.lru_cache(maxsize=256)
-def _shape(text_x, text_y, values):
+def _shape(text_x, text_y, values, sym):
     fx, fy = formula(text_x, named=True, var="t"), formula(text_y, named=True, var="t")
     vals = dict(values)
     pts = []
@@ -280,7 +300,38 @@ def _shape(text_x, text_y, values):
         if not (math.isfinite(x) and math.isfinite(y)):
             raise ValueError(tr("pattern.can_t_work_it_out_at_t", t=round(t, 3)))
         pts.append((x, y))
-    return fitted_shape(np.array(pts))
+    a = np.array(pts)
+    return symmetric_shape(a, sym) if sym else fitted_shape(a)
+
+
+def symmetric_shape(a, sym):
+    """A drawing (x, y rows, SHAPE_SAMPLES + 1 of them) with its second half made from its first (see the top),
+    fitted. A closed drawing stays closed: its first half is mirrored across the line from its start to its middle
+    point, or turned round the point halfway between them. An open one is fitted first (from A to B), then mirrored
+    across the up-and-down line through its middle point, or turned round that point, and fitted again."""
+    half = SHAPE_SAMPLES // 2
+    size = math.hypot(*(a.max(axis=0) - a.min(axis=0)))
+    if size > 1e-12 and math.dist(a[0], a[-1]) < 1e-6 * size:
+        first, (p, m) = a[:half + 1], (a[0], a[half])
+        if sym == "turn":
+            second = p + m - first[1:]
+        else:
+            d = m - p
+            ln = math.hypot(*d)
+            if ln < 1e-9 * size:  # (its middle is its start: nothing to mirror across)
+                return fitted_shape(a)
+            d = d / ln
+            q = first[half - 1::-1] - p
+            second = p + 2 * np.outer(q @ d, d) - q
+        return fitted_shape(np.vstack([first, second]))
+    u, v = fitted_shape(a)
+    u, v = u[:half + 1], v[:half + 1]
+    mu, mv = u[-1], v[-1]
+    if sym == "turn":
+        u2, v2 = 2 * mu - u[-2::-1], 2 * mv - v[-2::-1]
+    else:
+        u2, v2 = 2 * mu - u[-2::-1], v[-2::-1]
+    return fitted_shape(np.column_stack([np.concatenate([u, u2]), np.concatenate([v, v2])]))
 
 
 def fitted_shape(a):
@@ -305,7 +356,7 @@ def fitted_shape(a):
 
 def formula_shape(p):
     """The shape's formulas fitted (see fitted_shape), not mirrored. ValueError if it can't be worked out."""
-    return _shape(p["x"], p["y"], tuple(sorted(p["vars"].items())))
+    return _shape(p["x"], p["y"], tuple(sorted(p["vars"].items())), p.get("sym") if p.get("sym") in SYMS else None)
 
 
 def shape_points(p):

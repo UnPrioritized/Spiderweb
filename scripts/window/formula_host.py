@@ -29,6 +29,34 @@ def step_name(layer, name):
     return tr("panel_pattern.shape_step" if layer == "shape" else "panel_pattern.pattern_step", name=name)
 
 
+SYM_CHOICES = (("", "widgets.off"), ("mirror", "formula_host.mirrored"),
+               ("turn", "formula_host.turned"))  # a formula's symmetric halves (pattern.py)
+
+
+def sym_label(mode):
+    return tr(dict(SYM_CHOICES)[mode or ""])
+
+
+def set_loop_sym(loop, mode):
+    """A loop edited by hand (anchors + handles) with symmetric halves on / off; its first half stays. A closed
+    shape is mirrored across the line through its start ("flip", bezier.py)."""
+    from notes.bezier import set_symmetry
+    if mode == "mirror" and math.dist(loop["pts"][0], loop["pts"][-1]) < 1e-9:
+        mode = "flip"
+    set_symmetry(loop, mode, 0, lambda p: (p[0], p[1]))
+
+
+def sym_menu(m, host, layer, picks):
+    """"Symmetric halves ▸" for the holders' shape / pattern (greyed when the first has none)."""
+    p = (host.current() or {}).get(layer)
+    sub = tk.Menu(m, tearoff=0)
+    pick = picks[layer + "_sym"] = tk.StringVar(m, value=(p or {}).get("sym", ""))
+    for value, key in SYM_CHOICES:
+        sub.add_radiobutton(label=tr(key), value=value, variable=pick,
+                            command=lambda v=value: host.set_sym(layer, v or None))
+    m.add_cascade(label=tr("widgets.symmetric_halves"), menu=sub, state="normal" if p else "disabled")
+
+
 class FormulaHost:
     """What every host shares; the others fill in where they differ."""
     parent = None  # the window the Custom… window belongs to
@@ -96,7 +124,7 @@ class FormulaHost:
         from window.pattern_dialog import saved_pattern, saved_shape
         got = self.fresh(holder, layer)
         if layer == "shape":
-            return saved_shape(saved, got["k"]) if saved else new_shape(preset, got["k"])
+            return saved_shape(saved, got["k"]) if saved else new_shape(preset, got["k"], holder.get("shape"))
         old = holder.get("pattern")
         new = saved_pattern(saved, got["k"], old) if saved else new_pattern(preset, got["k"], old)
         new["scale"] = got.get("scale", 1.0)
@@ -123,6 +151,24 @@ class FormulaHost:
                 before = copy.deepcopy(h)
                 h[layer] = self.new_formula(h, layer, preset, saved)
                 self.placed(h, layer, before)
+        self.spread()
+        self.changed()
+
+    def set_sym(self, layer, mode):
+        """Symmetric halves of every holder's shape / pattern: "mirror", "turn" or None (off). One edited by hand
+        gets them too (its first half stays)."""
+        tgts = [h for h in self.targets() if h.get(layer) and h[layer].get("sym") != mode]
+        if not tgts:
+            return
+        self.begin(tr("pattern_dialog.symmetric_step", name=sym_label(mode)))
+        for h in tgts:
+            p = h[layer]
+            if mode:
+                p["sym"] = mode
+            else:
+                p.pop("sym", None)
+            if p.get("loop"):
+                set_loop_sym(p["loop"], mode)
         self.spread()
         self.changed()
 
@@ -189,6 +235,8 @@ def formula_menu(m, host, picks):
         for item in saved:
             menu.add_radiobutton(label=item["name"], value="saved:" + item["name"], variable=pick,
                                  command=lambda l=layer, it=item: host.set_formula(l, None, it))
+        menu.add_separator()
+        sym_menu(menu, host, layer, picks)
         sub.add_cascade(label=label, menu=menu)
     sub.add_separator()
     on = "normal" if host.with_formula() else "disabled"

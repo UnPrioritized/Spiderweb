@@ -21,9 +21,10 @@ from files.project import HERE
 from files.safefile import write_text
 from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_point, fit_symmetric, handle_lines,
                           keep_symmetric, nearest, pen_handles, sample)
-from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, SHAPE_PRESETS, clean_loop, formula_loop, formula_shape,
-                           new_pattern, new_shape, pattern_name, shape_name, shape_names)
+from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, SHAPE_PRESETS, clean_loop, formula_loop,
+                           formula_shape, keep_sym, new_pattern, new_shape, pattern_name, shape_name, shape_names)
 from roll.roll_shared import ALT
+from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
 from window.widgets import LocalUndo, Scrub, Tooltip
 
 PATTERNS_FILE = os.path.join(HERE, "patterns.json")
@@ -50,7 +51,7 @@ def load_patterns(layer="pattern"):
             loop = clean_loop(p["loop"]) if isinstance(p.get("loop"), dict) else None
             if loop:
                 item["loop"] = loop
-            out.append(item)
+            out.append(keep_sym(item, p))
         return out
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         return []
@@ -118,7 +119,7 @@ def saved_pattern(item, k, old=None):
            "scale": 1.0}
     if item.get("loop"):
         out["loop"] = copy.deepcopy(item["loop"])
-    return out
+    return keep_sym(out, item)
 
 
 def saved_shape(item, k):
@@ -127,7 +128,7 @@ def saved_shape(item, k):
            "mirror": False}
     if item.get("loop"):
         out["loop"] = copy.deepcopy(item["loop"])
-    return out
+    return keep_sym(out, item)
 
 
 class FormulaDialog(tk.Toplevel):
@@ -198,6 +199,19 @@ class FormulaDialog(tk.Toplevel):
         ttk.Label(right, text=tr("pattern_dialog.shape_help") if shape else tr(host.pattern_help),
                   foreground="#777", font=("Segoe UI", 8), wraplength=int(440 * s),
                   justify="left").grid(row=r, column=0, columnspan=2, sticky="w", pady=(3, 4))
+        row = ttk.Frame(right)  # symmetric halves: only the first half of the formula counts
+        row.grid(row=r + 1, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        lb = ttk.Label(row, text=tr("widgets.symmetric_halves"))
+        lb.pack(side="left")
+        self.sym = tk.StringVar()
+        names = [tr(key) for _, key in SYM_CHOICES]
+        cb = ttk.Combobox(row, textvariable=self.sym, values=names, state="readonly",
+                          width=max(len(n) for n in names))
+        cb.pack(side="left", padx=(5, 0))
+        cb.bind("<<ComboboxSelected>>", lambda e: self.on_sym())
+        for w in (lb, cb):
+            Tooltip(w, tr("pattern_dialog.sym_tip"))
+        r += 1
         self.numbers = ttk.Frame(right)  # (a pattern: Loops, then) a box per name in the formulas
         self.numbers.grid(row=r + 1, column=0, columnspan=2, sticky="w", pady=(0, 6))
         self.boxes = {}
@@ -307,11 +321,11 @@ class FormulaDialog(tk.Toplevel):
         if not sel:
             return
         kind, what, name = self.items[sel[0]]
-        if self.layer == "shape":
-            self.pat = new_shape(what, self.k) if kind == "preset" else saved_shape(what, self.k)
+        if self.layer == "shape":  # (a preset keeps the symmetric halves picked, a saved one has its own)
+            self.pat = new_shape(what, self.k, self.pat) if kind == "preset" else saved_shape(what, self.k)
         else:
             keep = {key: self.pat[key] for key in ("loops", "each")}
-            self.pat = new_pattern(what, self.k) if kind == "preset" else saved_pattern(what, self.k)
+            self.pat = new_pattern(what, self.k, self.pat) if kind == "preset" else saved_pattern(what, self.k)
             self.pat.update(keep)
         self._loading = True
         self.name.set(name)
@@ -338,6 +352,7 @@ class FormulaDialog(tk.Toplevel):
         item.update({key: self.pat[key] for key in self.texts})
         if self.pat.get("loop"):
             item["loop"] = copy.deepcopy(self.pat["loop"])
+        keep_sym(item, self.pat)
         try:
             save_patterns([p for p in self.saved if p["name"] != name] + [item], self.layer)
         except OSError as e:
@@ -403,6 +418,25 @@ class FormulaDialog(tk.Toplevel):
         """ValueError if p's formulas can't be worked out."""
         formula_shape(p) if self.layer == "shape" else formula_loop(p)
 
+    def on_sym(self):
+        """Symmetric halves picked: the formula's first half makes the second (one edited by hand too)."""
+        if self._loading:
+            return
+        mode = SYM_CHOICES[[tr(key) for _, key in SYM_CHOICES].index(self.sym.get())][0] or None
+        if mode == self.pat.get("sym"):
+            return
+        if mode:
+            self.pat["sym"] = mode
+        else:
+            self.pat.pop("sym", None)
+        if self.pat.get("loop"):
+            set_loop_sym(self.pat["loop"], mode)
+        self.pat.pop("name", None)  # (not the saved one any more)
+        self.pick_current()
+        self.own_view = False
+        self.refresh()
+        self.mark()
+
     def refresh(self):
         """Number boxes, the preview and the piano roll after a change."""
         names = (["loops"] if self.layer == "pattern" else []) + ([] if self.pat.get("loop") else
@@ -413,6 +447,7 @@ class FormulaDialog(tk.Toplevel):
         for name, (var, e) in self.boxes.items():
             var.set(fmt(self.pat["loops"] if name == "loops" else self.pat["vars"][name]))
             e.config(style="TEntry")
+        self.sym.set(sym_label(self.pat.get("sym")))
         self._loading = False
         self.ok = True
         if not self.pat.get("loop"):
@@ -541,8 +576,13 @@ class FormulaDialog(tk.Toplevel):
             u, v = formula_loop(self.pat)
             tol, length = LOOP_TOLERANCE, self.loop_len()
         corners = []  # (symmetric halves first: then dragging a point moves its partner in the other half too)
-        pts, sym = fit_symmetric([(a * length, b) for a, b in zip(u.tolist(), v.tolist())], tol, corners,
-                                 SYM_MODES if self.layer == "shape" else ("mirror", "turn"))
+        modes = SYM_MODES if self.layer == "shape" else ("mirror", "turn")
+        want = self.pat.get("sym")  # (the ones picked are tried first; a closed shape's mirror is "flip")
+        want = "flip" if want == "mirror" and self.layer == "shape" and math.dist(
+            (u[0], v[0]), (u[-1], v[-1])) < 1e-6 else want
+        if want in modes:
+            modes = (want,) + tuple(m for m in modes if m != want)
+        pts, sym = fit_symmetric([(a * length, b) for a, b in zip(u.tolist(), v.tolist())], tol, corners, modes)
         out = {"pts": [[x / length, y] for x, y in pts]}
         if corners:
             out["sharp"] = corners

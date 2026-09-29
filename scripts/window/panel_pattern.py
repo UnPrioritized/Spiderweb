@@ -9,7 +9,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.pattern import FORMULA_KINDS, formula_shape, loop_points
-from window.formula_host import RollHost, layer_name
+from window.formula_host import SYM_CHOICES, RollHost, layer_name, sym_label
 from window.widgets import Scrub, Tooltip
 
 LAYERS = ("shape", "pattern")  # (a curve's shape first: the pattern runs along it)
@@ -33,7 +33,20 @@ class PatternPanel:
             label.pack(side="left", padx=(5, 0))
             numbers = ttk.Frame(row)  # a box per name in the formula (a pattern: Loops first); rebuilt when they change
             numbers.pack(fill="x", pady=(2, 0))
-            self.formula_ui[layer] = {"row": row, "label": label, "numbers": numbers, "boxes": {}, "names": None}
+            sym_row = ttk.Frame(row)  # symmetric halves (only the formula's first half counts)
+            sym_row.pack(fill="x", pady=(2, 0))
+            lb = ttk.Label(sym_row, text=tr("widgets.symmetric_halves"))
+            lb.pack(side="left")
+            sym = tk.StringVar()
+            names = [tr(key) for _, key in SYM_CHOICES]
+            cb = ttk.Combobox(sym_row, textvariable=sym, values=names, state="readonly",
+                              width=max(len(n) for n in names))
+            cb.pack(side="left", padx=(5, 0))
+            cb.bind("<<ComboboxSelected>>", lambda e, l=layer: self.on_formula_sym(l))
+            for w in (lb, cb):
+                Tooltip(w, tr("pattern_dialog.sym_tip"))
+            self.formula_ui[layer] = {"row": row, "label": label, "numbers": numbers, "boxes": {}, "names": None,
+                                      "sym": sym}
         row = self.pattern_each_row = ttk.Frame(self.formula_ui["pattern"]["row"])
         self.pattern_each = tk.BooleanVar(value=False)
         for value, text, tip in ((False, tr("panel_pattern.across_all"), tr("panel_pattern.across_all_tip")),
@@ -104,6 +117,7 @@ class PatternPanel:
             for name, (var, e) in ui["boxes"].items():
                 var.set(fmt(p["loops"] if name == "loops" else p["vars"][name]))
                 e.config(style="TEntry")
+            ui["sym"].set(sym_label(p.get("sym")))
             self._loading = False
         pats = self.with_layer("pattern")
         if pats:
@@ -166,6 +180,13 @@ class PatternPanel:
             else:
                 sh[layer]["vars"][name] = value
         self.shapes_changed()
+
+    def on_formula_sym(self, layer):
+        if self._loading:
+            return
+        text = self.formula_ui[layer]["sym"].get()
+        mode = next(value for value, key in SYM_CHOICES if tr(key) == text) or None
+        RollHost(self).set_sym(layer, mode)
 
     def set_pattern_each(self, each):
         tgts = [sh for sh in self.with_layer("pattern") if sh["pattern"]["each"] != each]
