@@ -767,7 +767,9 @@
   "",
   "Each key the line crosses gets one note, starting where the line reaches that key, so a slope becomes a smooth staircase. Points snap to the grid (Snap at the top); hold Shift to place them freely.",
   "",
-  "Last note (panel): the last note ends on the line's end, or starts exactly on it."
+  "Last note (panel): the last note ends on the line's end, or starts exactly on it.",
+  "",
+  "Right-click it: Formula (a shape or a pattern along it, see Formulas)."
  ],
  "help.line.words": "straight draw two points",
  "help.poly.title": "Polyline (P)",
@@ -803,7 +805,7 @@
   "",
   "It's round as the piano roll looks while you draw it. Put the end on the start for a whole circle.",
   "",
-  "Selected: drag its round middle point (any tool) to bend it, its squares to move the ends."
+  "Selected: drag its round middle point (any tool) to bend it, its squares to move the ends. Right-click it: Formula (a shape or a pattern along it, see Formulas)."
  ],
  "help.arc.words": "circle round bend three points",
  "help.custom.title": "Custom shape (S)",
@@ -1103,9 +1105,9 @@
  ],
  "help.funnel_links.words": "link linked unlink mirror mirrored flipped same shape together follow group ctrl",
  "help.formulas.title": "Formulas: shapes and patterns",
- "help.formulas.tip": "Right-click a curve ▸ Formula: give it a shape (Circle, Spiral, Heart…) or a pattern along it (Wave, Zigzag, Bounce). Drawer curves and funnel curves have it too.",
+ "help.formulas.tip": "Right-click a curve, line or arc ▸ Formula: give it a shape (Circle, Spiral, Heart…) or a pattern along it (Wave, Zigzag, Bounce). Drawer curves and funnel curves have it too.",
  "help.formulas.text": [
-  "Right-click a curve ▸ Formula (a Curve tool curve, a curve stroke in the drawer, or highlighted funnel curves). It has two parts, and a curve can have both at once:",
+  "Right-click a curve ▸ Formula (a Curve tool curve, a line, an arc, a curve stroke in the drawer, or highlighted funnel curves). It has two parts, and a curve can have both at once. (On a line or an arc it works the same way: below, \"curve\" means them too.)",
   "",
   "Shape of the curve: the curve takes a shape. One that ends where it starts (Circle, Flower, Heart, Figure 8) is as wide as from the curve's start (A) to its end (B) and sits on that line; the others start at A and end at B. They're round as the piano roll looks when you pick them.",
   "[clip:formulas-shapes]",
@@ -1119,7 +1121,7 @@
   "",
   "Your own formula: tick Edit formula. A pattern is y of x for one loop (x goes from 0 to 1, y = how far to the side); a shape is x(t) and y(t), t going from 0 to 1 while it's drawn. Any other name in it (like height) gets its own number box. Works: numbers, + - * / ^ ( ), pi, e, sin cos tan asin acos atan sqrt exp ln log abs min max floor.",
   "",
-  "Remove formula takes them off (the curve you drew is left). Turn into plain curve makes what you see into ordinary anchors and handles.",
+  "Remove formula takes them off (the curve you drew is left). Turn into plain curve makes what you see into ordinary anchors and handles (a line or an arc becomes a curve).",
   "",
   "In the drawer, a pattern's sizes are hundredths of the board, so they grow and shrink with the placed shape. Funnel curves: a shape runs from the curve's start to its wall end inside the funnel (Slow start is x²); linked curves get the same formula; Back to the default curve resets it. Curve formulas saved in older versions (curves.json) are in the Shape list now.",
   "",

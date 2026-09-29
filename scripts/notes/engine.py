@@ -20,7 +20,7 @@ from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_stroke
 from notes.arc import arc_k, arc_points
 from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
-from notes.pattern import clean_pattern, clean_shape_formula, formed_paths
+from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
 from notes.smooth import clean_level, smooth_path
 from notes.text import clean_text
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
@@ -130,14 +130,15 @@ def clean_shape(sh):
         del c["kind"]
         out.update(c)
         clean_joined(sh, out)  # a joined curve's pieces / tumours (joined.py)
+        if is_joined(out):
+            out.pop("sym", None)
+    if out["kind"] in FORMULA_KINDS:
         pat = clean_pattern(sh.get("pattern"))
         if pat:  # a formula laid along it (pattern.py)
             out["pattern"] = pat
         form = clean_shape_formula(sh.get("shape"))
         if form:  # a formula giving it its shape (pattern.py)
             out["shape"] = form
-        if is_joined(out):
-            out.pop("sym", None)
     if out["kind"] == "funnel":
         try:
             starts = sh.get("starts")
@@ -159,12 +160,12 @@ def shape_path(sh):
     pts = [tuple(p) for p in sh["pts"]]
     if sh["kind"] == "curve":
         pts = sample(pts, 240)
-        if sh.get("shape") or sh.get("pattern"):  # a shape / pattern formula laid along the curve (pattern.py)
-            pts = formed_paths([pts], sh)[0]
     elif sh["kind"] == "arc":
         pts = arc_points(pts, sh.get("k", 1.0))
     elif sh["kind"] == "free" and sh.get("smooth"):  # straightened / a perfect shape (the drawn points stay)
         pts = smooth_path(pts, sh["smooth"], sh.get("k", 1.0))
+    if sh.get("shape") or sh.get("pattern"):  # a shape / pattern formula laid along it (pattern.py)
+        pts = formed_paths([pts], sh)[0]
     tm = sh.get("tumour")
     return tumour_path(pts, tm) if tm and tm["on"] else pts
 

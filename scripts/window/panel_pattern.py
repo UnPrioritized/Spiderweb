@@ -8,7 +8,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.pattern import formula_shape, loop_points
+from notes.pattern import FORMULA_KINDS, formula_shape, loop_points
 from window.formula_host import RollHost, layer_name
 from window.widgets import Scrub, Tooltip
 
@@ -44,8 +44,8 @@ class PatternPanel:
             Tooltip(b, tip)
 
     def pattern_targets(self):
-        """The selected curves (what the Formula menu changes)."""
-        return [self.shapes[i] for i in sorted(self.sels) if self.shapes[i]["kind"] == "curve"]
+        """The selected curves, lines and arcs (what the Formula menu changes)."""
+        return [self.shapes[i] for i in sorted(self.sels) if self.shapes[i]["kind"] in FORMULA_KINDS]
 
     def with_layer(self, layer):
         return [sh for sh in self.pattern_targets() if sh.get(layer)]

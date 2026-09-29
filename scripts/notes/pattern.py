@@ -95,16 +95,31 @@ def pattern_name(p):
     return tr("pattern.edited", name=name) if p.get("loop") else name
 
 
+FORMULA_KINDS = ("curve", "line", "arc")  # the piano roll's shapes that can have formulas
+
+
+def origin_paths(sh):
+    """A piano roll shape's path(s) before its formulas (the dashed origin path): a line's two points, an arc's
+    points, a curve's (a joined curve: one per piece)."""
+    from notes.bezier import anchor_count, sample
+    pts = [tuple(q) for q in sh["pts"]]
+    if sh["kind"] == "line":
+        return [pts]
+    if sh["kind"] == "arc":
+        from notes.arc import arc_points
+        return [arc_points(pts, sh.get("k", 1.0))]
+    paths, a0 = [], 0
+    for a1 in list(sh.get("gaps", [])) + [anchor_count(pts) - 1]:
+        paths.append(sample(pts[3 * a0:3 * a1 + 1], 240))
+        a0 = a1 + 1
+    return paths
+
+
 def loop_length(sh):
     """How long one loop of the curve's pattern is, in keys as the piano roll looked when it was put on (the first
     piece's, with Each piece), along its shape if it has one."""
-    from notes.bezier import anchor_count, sample
     p = sh["pattern"]
-    pts, gaps = sh["pts"], sh.get("gaps", [])
-    paths, a0 = [], 0
-    for a1 in list(gaps) + [anchor_count(pts) - 1]:
-        paths.append(sample([tuple(q) for q in pts[3 * a0:3 * a1 + 1]], 240))
-        a0 = a1 + 1
+    paths = origin_paths(sh)
     if sh.get("shape"):
         paths = shape_paths(paths, sh["shape"])
     lengths = [float(np.hypot(*np.diff(np.asarray(a, float) / [p["k"], 1.0], axis=0).T).sum()) for a in paths]
@@ -396,11 +411,10 @@ def baked(sh):
     from notes.bezier import anchor_count, fit
     from notes.joined import is_joined, joined_paths
     plain = dict(sh, tumour=None, tumours=None, splits=None)
-    if is_joined(plain):
+    if sh["kind"] == "curve" and is_joined(plain):
         paths = joined_paths(plain, None)
     else:
-        from notes.bezier import sample
-        paths = formed_paths([sample([tuple(q) for q in sh["pts"]], 240)], sh)
+        paths = formed_paths(origin_paths(dict(sh, gaps=[])), sh)
     k = (sh.get("pattern") or sh["shape"])["k"]
     pts, sharp, gaps = None, [], []
     for path in paths:

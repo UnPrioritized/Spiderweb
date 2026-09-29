@@ -232,8 +232,9 @@ class RollHost(FormulaHost):
         from notes.pattern import baked
         got = baked(sh)
         tm = shown_tumour(sh)
-        for key in ("shape", "pattern", "sym", "tumours", "splits", "gaps", "sharp"):
+        for key in ("shape", "pattern", "sym", "tumours", "splits", "gaps", "sharp", "k"):
             sh.pop(key, None)
+        sh["kind"] = "curve"  # (a line / an arc becomes a curve)
         sh["pts"] = got["pts"]
         if got["sharp"]:
             sh["sharp"] = got["sharp"]

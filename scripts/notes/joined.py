@@ -26,7 +26,7 @@ def to_bezier(sh, k):
     """The shape as (curve points, sharp anchors). k = beats per key on screen (for fitting freehand strokes)."""
     pts = [tuple(p) for p in sh["pts"]]
     kind = sh["kind"]
-    if kind == "curve" and (sh.get("shape") or sh.get("pattern")):  # its formulas become ordinary anchors
+    if sh.get("shape") or sh.get("pattern"):  # its formulas become ordinary anchors
         from notes.pattern import baked
         got = baked(sh)
         return got["pts"], got["sharp"]
