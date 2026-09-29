@@ -121,9 +121,9 @@ class RollDrawing:
                 self.create_rectangle(x0, y0, x1, y1, fill=NOTE_COLORS[color][0], outline=NOTE_COLORS[color][1])
         # a line with tumours / a curve with a pattern: the line as drawn (the origin path), faint and dashed under it
         for i, sh in enumerate(app.shapes):
-            if ((sh.get("pattern") or any(tm["on"] for tm in all_tumours(sh)))
+            if ((sh.get("pattern") or sh.get("shape") or any(tm["on"] for tm in all_tumours(sh)))
                     and (i in app.sels or app.show_lines.get())):
-                self.draw_path(dict(sh, tumour=None, tumours=None, pattern=None),
+                self.draw_path(dict(sh, tumour=None, tumours=None, pattern=None, shape=None),
                                "#e89a9a" if i in app.sels else "#efc0c0", 1, dash=(6, 4))
         if app.show_lines.get():
             for i, sh in enumerate(app.shapes):

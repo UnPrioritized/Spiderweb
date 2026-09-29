@@ -97,15 +97,17 @@ def pattern_name(p):
 
 def loop_length(sh):
     """How long one loop of the curve's pattern is, in keys as the piano roll looked when it was put on (the first
-    piece's, with Each piece)."""
+    piece's, with Each piece), along its shape if it has one."""
     from notes.bezier import anchor_count, sample
     p = sh["pattern"]
     pts, gaps = sh["pts"], sh.get("gaps", [])
-    lengths, a0 = [], 0
+    paths, a0 = [], 0
     for a1 in list(gaps) + [anchor_count(pts) - 1]:
-        a = np.asarray(sample([tuple(q) for q in pts[3 * a0:3 * a1 + 1]], 240), float) / [p["k"], 1.0]
-        lengths.append(float(np.hypot(*np.diff(a, axis=0).T).sum()))
+        paths.append(sample([tuple(q) for q in pts[3 * a0:3 * a1 + 1]], 240))
         a0 = a1 + 1
+    if sh.get("shape"):
+        paths = shape_paths(paths, sh["shape"])
+    lengths = [float(np.hypot(*np.diff(np.asarray(a, float) / [p["k"], 1.0], axis=0).T).sum()) for a in paths]
     return (lengths[0] if p["each"] else sum(lengths)) / p["loops"]
 
 
@@ -156,21 +158,183 @@ def _normals(pts):
 
 
 def _lay(pts, lengths, s, v):
-    """Points at distances s along the path (pts, with lengths = distance of each point), moved v to the side."""
+    """Points at distances s along the path (pts, with lengths = distance of each point), moved v to the side.
+    Before its start / past its end (a shape reaching further, like a spiral): straight on the way it goes there."""
     x = np.interp(s, lengths, pts[:, 0])
     y = np.interp(s, lengths, pts[:, 1])
     nrm = _normals(pts)
     nx, ny = np.interp(s, lengths, nrm[:, 0]), np.interp(s, lengths, nrm[:, 1])
     n = np.hypot(nx, ny)
     n = np.where(n > 1e-12, n, 1.0)
-    return np.column_stack([x + nx / n * v, y + ny / n * v])
+    nx, ny = nx / n, ny / n
+    for end, beyond in ((0, s < 0), (-1, s > lengths[-1])):
+        if beyond.any():
+            over = s[beyond] - lengths[end]
+            tx, ty = nrm[end, 1], -nrm[end, 0]  # (the way the path goes there)
+            x[beyond] += tx * over
+            y[beyond] += ty * over
+    return np.column_stack([x + nx * v, y + ny * v])
+
+
+# ---------------------------------------------------------------- shapes of the curve
+# sh["shape"] = {"preset", "x", "y": formulas of t (0 -> 1) drawing the shape, "vars", "k", "mirror", maybe "name"
+# and "loop" (edited by hand, like a pattern's)}. The drawing is fitted to the curve: an open shape (its ends apart)
+# is turned and sized so it starts at the curve's start and ends at its end; a closed one (like a circle) is as wide
+# as from the start to the end and sits centred on that line, starting at its leftmost point. Then it's laid along
+# the curve (the origin path) like a pattern, sizes measured along it: on a straight curve it's exact, bending the
+# curve bends it. A pattern then runs along the shape.
+
+SHAPE_SAMPLES = 1024  # points along a shape
+# (id, name, x(t), y(t), its numbers)
+SHAPE_PRESETS = [
+    ("circle", tr("pattern.circle"), "cos(t * 2 * pi)", "sin(t * 2 * pi)", {}),
+    ("spiral", tr("pattern.spiral"), "t * cos(t * turns * 2 * pi)", "t * sin(t * turns * 2 * pi)", {"turns": 3.0}),
+    ("flower", tr("pattern.flower"), "(1 + depth * cos(petals * t * 2 * pi)) * cos(t * 2 * pi)",
+     "(1 + depth * cos(petals * t * 2 * pi)) * sin(t * 2 * pi)", {"petals": 5.0, "depth": 0.3}),
+    ("heart", tr("pattern.heart"), "16 * sin(t * 2 * pi)^3",
+     "13 * cos(t * 2 * pi) - 5 * cos(4 * pi * t) - 2 * cos(6 * pi * t) - cos(8 * pi * t)", {}),
+    ("figure8", tr("pattern.figure8"), "sin(t * 2 * pi)", "sin(t * 2 * pi) * cos(t * 2 * pi)", {}),
+    ("slow", tr("pattern.slow_start"), "t", "t^2", {}),
+    ("fast", tr("pattern.fast_start"), "t", "1 - (1 - t)^2", {}),
+    ("scurve", tr("pattern.s_curve"), "t", "t * t * (3 - 2 * t)", {}),
+]
+SHAPE_NAMES = {sid: name for sid, name, _, _, _ in SHAPE_PRESETS}
+
+
+def new_shape(preset, k):
+    _, _, x, y, values = next(p for p in SHAPE_PRESETS if p[0] == preset)
+    return {"preset": preset, "x": x, "y": y, "vars": dict(values), "k": k, "mirror": False}
+
+
+def shape_names(text_x, text_y):
+    """The number names in a shape's two formulas (ValueError if one can't be read)."""
+    names = formula(text_x, named=True, var="t").names
+    return names + [n for n in formula(text_y, named=True, var="t").names if n not in names]
+
+
+def clean_shape_formula(p):
+    """A shape of the curve from a file made valid, or None."""
+    if not isinstance(p, dict):
+        return None
+    loop = clean_loop(p["loop"]) if isinstance(p.get("loop"), dict) else None
+    try:
+        values = {str(a): float(b) for a, b in dict(p.get("vars", {})).items()}
+        try:
+            tx, ty = str(p.get("x", "")), str(p.get("y", ""))
+            names = shape_names(tx, ty)
+        except ValueError:
+            if not loop:
+                return None
+            tx, ty, names = "", "", []
+        out = {"preset": str(p.get("preset", "")), "x": tx, "y": ty, "vars": {n: values.get(n, 1.0) for n in names},
+               "k": float(p.get("k", 1.0)), "mirror": bool(p.get("mirror"))}
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not out["k"] > 0:
+        return None
+    if p.get("name"):
+        out["name"] = str(p["name"])
+    if loop:
+        out["loop"] = loop
+    return out
+
+
+def shape_name(p):
+    if p.get("name"):
+        return p["name"]
+    name = SHAPE_NAMES.get(p.get("preset"), tr("pattern.custom"))
+    return tr("pattern.edited", name=name) if p.get("loop") else name
+
+
+@functools.lru_cache(maxsize=256)
+def _shape(text_x, text_y, values):
+    fx, fy = formula(text_x, named=True, var="t"), formula(text_y, named=True, var="t")
+    vals = dict(values)
+    pts = []
+    for t in np.linspace(0.0, 1.0, SHAPE_SAMPLES + 1).tolist():
+        try:
+            x, y = fx(t, vals), fy(t, vals)
+        except (ValueError, ArithmeticError, TypeError, KeyError):
+            raise ValueError(tr("pattern.can_t_work_it_out_at_t", t=round(t, 3)))
+        if not (math.isfinite(x) and math.isfinite(y)):
+            raise ValueError(tr("pattern.can_t_work_it_out_at_t", t=round(t, 3)))
+        pts.append((x, y))
+    return fitted_shape(np.array(pts))
+
+
+def fitted_shape(a):
+    """A drawing (x, y rows) fitted to a curve from (0, 0) to (1, 0) (see the top): (along, sideways) arrays."""
+    lo, hi = a.min(axis=0), a.max(axis=0)
+    size = math.hypot(*(hi - lo))
+    if size < 1e-12:
+        raise ValueError(tr("pattern.it_s_just_a_dot"))
+    if math.dist(a[0], a[-1]) < 1e-6 * size:  # closed: from its leftmost point, as wide as the curve is long
+        at = int(a[:-1, 0].argmin())
+        a = np.vstack([a[at:-1], a[:at + 1]])
+        width = hi[0] - lo[0]
+        if width < 1e-9 * size:
+            raise ValueError(tr("pattern.it_s_just_a_dot"))
+        return (a[:, 0] - lo[0]) / width, (a[:, 1] - (lo[1] + hi[1]) / 2) / width
+    d = a[-1] - a[0]  # open: turned and sized so it starts at (0, 0) and ends at (1, 0)
+    length = math.hypot(*d)
+    c, s = d / length / length
+    q = a - a[0]
+    return q[:, 0] * c + q[:, 1] * s, q[:, 1] * c - q[:, 0] * s
+
+
+def formula_shape(p):
+    """The shape's formulas fitted (see fitted_shape), not mirrored. ValueError if it can't be worked out."""
+    return _shape(p["x"], p["y"], tuple(sorted(p["vars"].items())))
+
+
+def shape_points(p):
+    """The shape as (along, sideways) arrays in the curve's length: edited by hand, else the formulas'."""
+    if p.get("loop"):
+        from notes.bezier import sample
+        a = np.asarray(sample([tuple(q) for q in p["loop"]["pts"]], 64), float)
+        u, v = a[:, 0], a[:, 1]
+    else:
+        u, v = formula_shape(p)
+    return u, -v if p["mirror"] else v
+
+
+def shape_paths(paths, p):
+    """The shape laid along each path (each piece of a joined curve gets it); unchanged if it can't be worked
+    out."""
+    try:
+        u, v = shape_points(p)
+    except ValueError:
+        return paths
+    k = p["k"]
+    out = []
+    for path in paths:
+        a = np.asarray(path, float).reshape(-1, 2) / [k, 1.0]
+        if len(a) < 2:
+            out.append(path)
+            continue
+        ln = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(a, axis=0).T))])
+        if ln[-1] <= 1e-12:
+            out.append(path)
+            continue
+        got = _lay(a, ln, u * ln[-1], v * ln[-1]) * [k, 1.0]
+        out.append([tuple(q) for q in got.tolist()])
+    return out
+
+
+def formed_paths(paths, sh):
+    """The curve's pieces (paths) with its shape, then its pattern, on them."""
+    if sh.get("shape"):
+        paths = shape_paths(paths, sh["shape"])
+    if sh.get("pattern"):
+        paths = pattern_paths(paths, sh["pattern"])
+    return paths
 
 
 BAKE_TOLERANCE = 0.05  # how closely "Turn into plain curve" follows the pattern, in keys (as the piano roll looked)
 
 
 def baked(sh):
-    """The curve's pattern made into ordinary anchors and handles: {"pts", "sharp", "gaps"} (tumours aren't
+    """The curve's shape / pattern made into ordinary anchors and handles: {"pts", "sharp", "gaps"} (tumours aren't
     baked in: they stay a setting of the curve)."""
     from notes.arc import line_bezier
     from notes.bezier import anchor_count, fit
@@ -180,8 +344,8 @@ def baked(sh):
         paths = joined_paths(plain, None)
     else:
         from notes.bezier import sample
-        paths = pattern_paths([sample([tuple(q) for q in sh["pts"]], 240)], sh["pattern"])
-    k = sh["pattern"]["k"]
+        paths = formed_paths([sample([tuple(q) for q in sh["pts"]], 240)], sh)
+    k = (sh.get("pattern") or sh["shape"])["k"]
     pts, sharp, gaps = None, [], []
     for path in paths:
         corners = []

@@ -910,8 +910,9 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Pa
             sh["pts"] = [[mid2 - b, p] if sideways else [b, mid2 - p] for b, p in sh["pts"]]
             for tm in all_tumours(sh):  # mirrored: the bumps swap sides too
                 tm["mirror"] = not tm["mirror"]
-            if sh.get("pattern"):  # and a pattern along a curve (pattern.py)
-                sh["pattern"]["mirror"] = not sh["pattern"]["mirror"]
+            for key in ("pattern", "shape"):  # and a curve's formulas (pattern.py)
+                if sh.get(key):
+                    sh[key]["mirror"] = not sh[key]["mirror"]
             if sideways:  # the velocities flip with it
                 if sh.get("vel_env"):
                     sh["vel_env"] = [[1 - u, v] for u, v in reversed(sh["vel_env"])]
@@ -949,6 +950,8 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Pa
             if pat:  # a pattern along a curve turns the same way (pattern.py)
                 pat["scale"] *= pat["k"] / r
                 pat["k"] = r * r / pat["k"]
+            if sh.get("shape"):  # (its sizes are shares of the curve's length: only the screen proportions)
+                sh["shape"]["k"] = r * r / sh["shape"]["k"]
         self.sync_panel()
         self.shapes_changed()
 

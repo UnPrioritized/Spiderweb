@@ -9,7 +9,7 @@ from window.pattern_dialog import load_patterns
 from notes.convert import originals
 from notes.joined import is_joined
 from notes.funnel import CURVE_PRESETS, inside_out, turned_curve
-from notes.pattern import PATTERN_PRESETS
+from notes.pattern import PATTERN_PRESETS, SHAPE_PRESETS
 from notes.tumour import LINE_KINDS
 from roll.roll_shared import SHIFT
 from window.widgets import symmetry_menu
@@ -151,37 +151,42 @@ class ShapeMenu:
             m.grab_release()
 
     def formula_menu(self, m):
-        """"Formula ▸" for the selected curves: a pattern along them (pattern.py), taking it off, or making it plain
-        anchors and handles. The dot shows the pattern of the curve right-clicked."""
+        """"Formula ▸" for the selected curves: the shape of the curve and the pattern along it (pattern.py), taking
+        them off, or making them plain anchors and handles. The dots show the curve right-clicked's."""
         app = self.app
         sh = app.selected()
-        pat = (sh.get("pattern") or {}) if sh and sh["kind"] == "curve" else {}
-        if not pat:
-            now = "none"
-        elif pat.get("name"):  # a saved one
-            now = "saved:" + pat["name"]
-        else:  # a preset (edited by hand: none of the list any more)
-            now = "" if pat.get("loop") else pat.get("preset", "")
         sub = tk.Menu(m, tearoff=0)
-        along = tk.Menu(sub, tearoff=0)
-        self._pattern_pick = tk.StringVar(self, value=now)  # (kept, so the dot shows)
-        along.add_command(label=tr("roll_menu.custom"), command=app.open_pattern_dialog)
-        along.add_separator()
-        along.add_radiobutton(label=tr("roll_menu.none"), value="none", variable=self._pattern_pick,
-                              command=lambda: app.set_pattern(None))
-        for pid, name, _, _ in PATTERN_PRESETS:
-            along.add_radiobutton(label=name, value=pid, variable=self._pattern_pick,
-                                  command=lambda p=pid: app.set_pattern(p))
-        saved = load_patterns()
-        if saved:
-            along.add_separator()
-        for item in saved:
-            along.add_radiobutton(label=item["name"], value="saved:" + item["name"], variable=self._pattern_pick,
-                                  command=lambda it=item: app.set_pattern(None, it))
-        sub.add_cascade(label=tr("roll_menu.pattern_along_the_curve"), menu=along)
+        self._formula_picks = {}  # (kept, so the dots show)
+        for layer, label, presets in (
+                ("shape", tr("roll_menu.shape_of_the_curve"), [(sid, name) for sid, name, _, _, _ in SHAPE_PRESETS]),
+                ("pattern", tr("roll_menu.pattern_along_the_curve"),
+                 [(pid, name) for pid, name, _, _ in PATTERN_PRESETS])):
+            pat = (sh.get(layer) or {}) if sh and sh["kind"] == "curve" else {}
+            if not pat:
+                now = "none"
+            elif pat.get("name"):  # a saved one
+                now = "saved:" + pat["name"]
+            else:  # a preset (edited by hand: none of the list any more)
+                now = "" if pat.get("loop") else pat.get("preset", "")
+            pick = self._formula_picks[layer] = tk.StringVar(self, value=now)
+            menu = tk.Menu(sub, tearoff=0)
+            menu.add_command(label=tr("roll_menu.custom"), command=lambda l=layer: app.open_formula_dialog(l))
+            menu.add_separator()
+            menu.add_radiobutton(label=tr("roll_menu.none"), value="none", variable=pick,
+                                 command=lambda l=layer: app.set_formula(l, None))
+            for pid, name in presets:
+                menu.add_radiobutton(label=name, value=pid, variable=pick,
+                                     command=lambda l=layer, p=pid: app.set_formula(l, p))
+            saved = load_patterns(layer)
+            if saved:
+                menu.add_separator()
+            for item in saved:
+                menu.add_radiobutton(label=item["name"], value="saved:" + item["name"], variable=pick,
+                                     command=lambda l=layer, it=item: app.set_formula(l, None, it))
+            sub.add_cascade(label=label, menu=menu)
         sub.add_separator()
         on = "normal" if app.patterned() else "disabled"
-        sub.add_command(label=tr("roll_menu.remove_formula"), command=lambda: app.set_pattern(None), state=on)
+        sub.add_command(label=tr("roll_menu.remove_formula"), command=app.remove_formulas, state=on)
         sub.add_command(label=tr("roll_menu.turn_into_plain_curve"), command=app.plain_curve, state=on)
         m.add_cascade(label=tr("roll_menu.formula"), menu=sub)
 

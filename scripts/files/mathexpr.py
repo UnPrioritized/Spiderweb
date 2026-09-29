@@ -48,10 +48,11 @@ FORMULA_FUNCS = {
 }
 
 
-def formula(text, named=False):
+def formula(text, named=False, var="x"):
     """A formula of x (like x^2 or sin(x*pi/2)) -> a function of x. Raises ValueError if it can't be read.
     Numbers, x, pi, e, + - * / % ^ ( ) and FORMULA_FUNCS. named: other names (like height) are numbers given
-    when it's worked out, fn(x, {"height": 6}); fn.names = them in the order they first appear."""
+    when it's worked out, fn(x, {"height": 6}); fn.names = them in the order they first appear. var: the name of
+    the position (t for shapes drawn by x(t) and y(t))."""
     text = text.strip().replace("×", "*").replace("^", "**")
     names = []
     if not text:
@@ -67,7 +68,7 @@ def formula(text, named=False):
         if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
             return
         if isinstance(node, ast.Name):
-            if node.id != "x" and node.id not in FORMULA_NAMES:
+            if node.id != var and node.id not in FORMULA_NAMES:
                 if not named or node.id in FORMULA_FUNCS:
                     raise ValueError(tr("mathexpr.unknown_name_use_x_for_the", id=node.id))
                 if node.id not in names:
@@ -93,7 +94,7 @@ def formula(text, named=False):
         if isinstance(node, ast.Constant):
             return node.value
         if isinstance(node, ast.Name):
-            return x if node.id == "x" else FORMULA_NAMES[node.id] if node.id in FORMULA_NAMES else values[node.id]
+            return x if node.id == var else FORMULA_NAMES[node.id] if node.id in FORMULA_NAMES else values[node.id]
         if isinstance(node, ast.BinOp):
             left, right = ev(node.left, x, values), ev(node.right, x, values)
             if isinstance(node.op, ast.Pow) and abs(right) > 64:

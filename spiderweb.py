@@ -10,7 +10,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     panel_funnel.py  the panel's funnel settings
     panel_tumour.py  the panel's tumour line (summary + button)
     panel_pattern.py the panel's pattern numbers (a formula along a curve) + the Formula menu's actions
-    pattern_dialog.py the Custom... pattern window (presets, formula, one loop edited by hand; patterns.json)
+    pattern_dialog.py the Custom... windows for a curve's shape and pattern (presets, formulas, edited by hand)
     tumour_window.py the tumour window: the tumour settings (bumps along lines)
     history.py       the History list (named undo steps; docked in the side panel or its own window)
     graph_window.py  a tumour setting's graph (the number changing along the line)
@@ -45,7 +45,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     bezier.py        Bezier curves (anchors + handles) for curves and funnel curves, symmetry, fitting to points
     arc.py           arcs: pieces of a perfect circle through three points
     tumour.py        tumours: bumps along lines
-    pattern.py       patterns along curves: a formula (wave, zigzag...) laid along the curve
+    pattern.py       a curve's formulas: its shape (circle, spiral...) and a pattern along it (wave...)
     joined.py        joining shapes into one curve (pieces, their tumours) and splitting shapes
     convert.py       Turn into live shape: shapes -> one custom shape (and back)
     envelope.py      velocity envelopes
