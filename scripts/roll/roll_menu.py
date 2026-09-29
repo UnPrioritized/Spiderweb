@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from files.lang import tr
 from window.curve_dialog import load_formulas
+from window.pattern_dialog import load_patterns
 from notes.convert import originals
 from notes.joined import is_joined
 from notes.funnel import CURVE_PRESETS, inside_out, turned_curve
@@ -154,15 +155,29 @@ class ShapeMenu:
         anchors and handles. The dot shows the pattern of the curve right-clicked."""
         app = self.app
         sh = app.selected()
-        now = (sh.get("pattern") or {}).get("preset", "") if sh and sh["kind"] == "curve" else ""
+        pat = (sh.get("pattern") or {}) if sh and sh["kind"] == "curve" else {}
+        if not pat:
+            now = "none"
+        elif pat.get("name"):  # a saved one
+            now = "saved:" + pat["name"]
+        else:  # a preset (edited by hand: none of the list any more)
+            now = "" if pat.get("loop") else pat.get("preset", "")
         sub = tk.Menu(m, tearoff=0)
         along = tk.Menu(sub, tearoff=0)
-        self._pattern_pick = tk.StringVar(self, value=now or "none")  # (kept, so the dot shows)
+        self._pattern_pick = tk.StringVar(self, value=now)  # (kept, so the dot shows)
+        along.add_command(label=tr("roll_menu.custom"), command=app.open_pattern_dialog)
+        along.add_separator()
         along.add_radiobutton(label=tr("roll_menu.none"), value="none", variable=self._pattern_pick,
                               command=lambda: app.set_pattern(None))
         for pid, name, _, _ in PATTERN_PRESETS:
             along.add_radiobutton(label=name, value=pid, variable=self._pattern_pick,
                                   command=lambda p=pid: app.set_pattern(p))
+        saved = load_patterns()
+        if saved:
+            along.add_separator()
+        for item in saved:
+            along.add_radiobutton(label=item["name"], value="saved:" + item["name"], variable=self._pattern_pick,
+                                  command=lambda it=item: app.set_pattern(None, it))
         sub.add_cascade(label=tr("roll_menu.pattern_along_the_curve"), menu=along)
         sub.add_separator()
         on = "normal" if app.patterned() else "disabled"

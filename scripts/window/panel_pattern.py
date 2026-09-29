@@ -10,6 +10,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.joined import shown_tumour
 from notes.pattern import baked, loop_points, new_pattern, pattern_name
+from window.pattern_dialog import PatternDialog, saved_pattern
 from window.widgets import Scrub, Tooltip
 
 LOOP_STEPS = (1, 10, 0.1)    # quick changes (widgets.Scrub): step, Shift step, Ctrl step
@@ -47,21 +48,28 @@ class PatternPanel:
         return [sh for sh in self.pattern_targets() if sh.get("pattern")]
 
     # ------------------------------------------------------------ the right-click menu's Formula items
-    def set_pattern(self, preset):
-        """A preset pattern (None: no pattern) on every selected curve."""
+    def set_pattern(self, preset, saved=None):
+        """A preset pattern (None: no pattern), or a saved one (pattern_dialog.load_patterns), on every selected
+        curve."""
         tgts = self.pattern_targets()
         if not tgts:
             return
-        self.push_undo(name=tr("panel_pattern.pattern_step", name=pattern_name({"preset": preset}))
-                       if preset else tr("panel_pattern.remove_formula"))
+        name = saved["name"] if saved else pattern_name({"preset": preset}) if preset else None
+        self.push_undo(name=tr("panel_pattern.pattern_step", name=name) if name else tr("panel_pattern.remove_formula"))
         k = self.roll.sy / self.roll.sx if self.roll.sx else 0.25  # sideways worked out as the roll looks now
         for sh in tgts:
-            if preset is None:
+            if saved:
+                sh["pattern"] = saved_pattern(saved, k, sh.get("pattern"))
+            elif preset is None:
                 sh.pop("pattern", None)
             else:
                 sh["pattern"] = new_pattern(preset, k, sh.get("pattern"))
         self.shapes_changed()
         self.sync_panel()
+
+    def open_pattern_dialog(self):
+        if self.pattern_targets():
+            PatternDialog(self)
 
     def plain_curve(self):
         """Turn into plain curve: the patterns become ordinary anchors and handles (tumours stay a setting)."""
@@ -92,12 +100,12 @@ class PatternPanel:
         if not tgts:
             return
         pat = tgts[0]["pattern"]
-        names = ["loops"] + list(pat["vars"])
+        names = ["loops"] + ([] if pat.get("loop") else list(pat["vars"]))  # (a loop edited by hand: just Loops)
         if names != self._pattern_names:
             self._build_pattern_boxes(names)
         self._loading = True
         text = pattern_name(pat)
-        if len({sh["pattern"]["preset"] for sh in tgts}) > 1:
+        if len({pattern_name(sh["pattern"]) for sh in tgts}) > 1:
             text += tr("panel_pattern.and_others")
         self.pattern_label.config(text=text)
         for name, (var, e) in self.pattern_boxes.items():
@@ -137,7 +145,8 @@ class PatternPanel:
         if self._loading or name not in self.pattern_boxes:
             return
         var, e = self.pattern_boxes[name]
-        tgts = [sh for sh in self.patterned() if name == "loops" or name in sh["pattern"]["vars"]]
+        tgts = [sh for sh in self.patterned() if name == "loops" or name in sh["pattern"]["vars"] and
+                not sh["pattern"].get("loop")]
         try:
             value = float(calc(var.get()))
             if not math.isfinite(value) or (name == "loops" and value <= 0):

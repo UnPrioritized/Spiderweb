@@ -5,7 +5,9 @@ sh["pattern"] = {"preset": which preset it came from ("" = typed by hand), "form
 height), "loops": how many times the loop repeats, "each": on a joined curve, every piece gets all the loops
 (else they run on across the pieces), "k": beats per key on screen when it was put on (sideways is worked out as
 the piano roll looked then, like arcs), "mirror": the other side (flipping the shape), "scale": sideways size after
-turning the shape (like tumours)}.
+turning the shape (like tumours)}, and maybe "name" (a saved pattern's) and "loop" = the loop edited by hand as a
+curve {"pts": anchors + handles in (along 0 -> 1, sideways in keys), "sharp": corners} (bezier.py): it's used instead
+of the formula, which stays so the loop can go back to it.
 
 Sideways = to the left of the way the curve goes, so on a curve going forward in time, up."""
 
@@ -39,26 +41,72 @@ def new_pattern(preset, k, old=None):
             "each": old.get("each", False), "k": k, "mirror": False, "scale": 1.0}
 
 
+def clean_loop(c):
+    """A loop edited by hand from a file made valid, or None."""
+    try:
+        pts = [[float(a), float(b)] for a, b in c["pts"]]
+        n = len(pts)
+        if n < 4 or (n - 1) % 3 or not all(math.isfinite(a) for q in pts for a in q):
+            return None
+        out = {"pts": pts}
+        sharp = sorted({int(a) for a in c.get("sharp", ()) if 0 < int(a) < (n - 1) // 3})
+        if sharp:
+            out["sharp"] = sharp
+        return out
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None
+
+
 def clean_pattern(p):
     """A pattern from a file made valid, or None."""
     if not isinstance(p, dict):
         return None
+    loop = clean_loop(p["loop"]) if isinstance(p.get("loop"), dict) else None
     try:
-        fn = formula(str(p["formula"]), named=True)
         values = {str(a): float(b) for a, b in dict(p.get("vars", {})).items()}
-        out = {"preset": str(p.get("preset", "")), "formula": str(p["formula"]),
-               "vars": {n: values.get(n, 1.0) for n in fn.names}, "loops": float(p.get("loops", LOOPS_DEFAULT)),
+        try:
+            text = str(p.get("formula", ""))
+            names = formula(text, named=True).names
+        except ValueError:
+            if not loop:
+                return None
+            text, names = "", []  # (a loop drawn by hand needs no formula)
+        out = {"preset": str(p.get("preset", "")), "formula": text,
+               "vars": {n: values.get(n, 1.0) for n in names}, "loops": float(p.get("loops", LOOPS_DEFAULT)),
                "each": bool(p.get("each", False)), "k": float(p.get("k", 1.0)), "mirror": bool(p.get("mirror")),
                "scale": float(p.get("scale", 1.0))}
     except (KeyError, TypeError, ValueError):
         return None
     if not (out["loops"] > 0 and out["k"] > 0 and math.isfinite(out["scale"])):
         return None
+    if p.get("name"):
+        out["name"] = str(p["name"])
+    if loop:
+        out["loop"] = loop
     return out
 
 
 def pattern_name(p):
-    return PRESET_NAMES.get(p.get("preset"), tr("pattern.custom"))
+    """A saved pattern's name (as it was saved, even drawn by hand), else the preset's, "(edited by hand)" once its
+    loop has been changed by hand."""
+    if p.get("name"):
+        return p["name"]
+    name = PRESET_NAMES.get(p.get("preset"), tr("pattern.custom"))
+    return tr("pattern.edited", name=name) if p.get("loop") else name
+
+
+def loop_length(sh):
+    """How long one loop of the curve's pattern is, in keys as the piano roll looked when it was put on (the first
+    piece's, with Each piece)."""
+    from notes.bezier import anchor_count, sample
+    p = sh["pattern"]
+    pts, gaps = sh["pts"], sh.get("gaps", [])
+    lengths, a0 = [], 0
+    for a1 in list(gaps) + [anchor_count(pts) - 1]:
+        a = np.asarray(sample([tuple(q) for q in pts[3 * a0:3 * a1 + 1]], 240), float) / [p["k"], 1.0]
+        lengths.append(float(np.hypot(*np.diff(a, axis=0).T).sum()))
+        a0 = a1 + 1
+    return (lengths[0] if p["each"] else sum(lengths)) / p["loops"]
 
 
 @functools.lru_cache(maxsize=256)
@@ -78,9 +126,21 @@ def _loop(text, values):
     return u, np.array(v)
 
 
+def formula_loop(p):
+    """One loop of the pattern's formula as (along 0 -> 1, sideways in keys) arrays (not mirrored / scaled).
+    ValueError if it can't be worked out."""
+    return _loop(p["formula"], tuple(sorted(p["vars"].items())))
+
+
 def loop_points(p):
-    """One loop as (along 0 -> 1, sideways in keys) arrays. ValueError if the formula can't be worked out."""
-    u, v = _loop(p["formula"], tuple(sorted(p["vars"].items())))
+    """One loop as (along 0 -> 1, sideways in keys) arrays: the loop edited by hand, else the formula's. ValueError
+    if the formula can't be worked out."""
+    if p.get("loop"):
+        from notes.bezier import sample
+        a = np.asarray(sample([tuple(q) for q in p["loop"]["pts"]], 64), float)
+        u, v = a[:, 0], a[:, 1]
+    else:
+        u, v = formula_loop(p)
     return u, v * (-p["scale"] if p["mirror"] else p["scale"])
 
 
