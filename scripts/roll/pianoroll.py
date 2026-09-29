@@ -14,14 +14,14 @@ from files.lang import tr
 from notes.custom import box_frame, fill_plan
 from notes.engine import make_shape
 from notes.joined import all_tumours
-from notes.funnel import funnel_contains, funnel_handles
+from notes.funnel import funnel_contains, funnel_handles, funnel_origins
 from roll.roll_curve import CurveEditing
 from roll.roll_custom import CustomBox
 from roll.roll_draw import RollDrawing
 from roll.roll_funnel import FunnelEditing
 from roll.roll_live import BOX_ASPECT, BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
-from roll.roll_shared import ALT, CTRL, SHIFT, cached_path, cached_strokes, mouse_trail, note_name
+from roll.roll_shared import ALT, CTRL, PICK, SHIFT, cached_path, cached_strokes, mouse_trail, note_name
 from roll.roll_text import TextTyping
 
 
@@ -164,7 +164,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         sh = self.app.selected()
         if not sh:
             return None
-        near = max(7, 8 * self.scale)
+        near = max(9, 10 * self.scale)
         for b, p, i, free in reversed(self.handles(sh)):
             if (free or any_handle) and abs(self.t2x(b) - x) <= near and abs(self.p2y(p) - y) <= near:
                 return i
@@ -188,18 +188,22 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         among: just these shape numbers (top first)."""
         order = range(len(self.app.shapes) - 1, -1, -1) if among is None else among
         for i in order:
-            strokes = cached_strokes(self.app.shapes[i])
-            if any(tm["on"] for tm in all_tumours(self.app.shapes[i])):  # the faint line as drawn counts too
-                strokes = strokes + cached_strokes(dict(self.app.shapes[i], tumour=None, tumours=None))
+            sh = self.app.shapes[i]
+            strokes = cached_strokes(sh)
+            # the faint dashed line as drawn (under tumours / a formula) counts too
+            if sh.get("pattern") or sh.get("shape") or any(tm["on"] for tm in all_tumours(sh)):
+                strokes = strokes + cached_strokes(dict(sh, tumour=None, tumours=None, pattern=None, shape=None))
+            if sh["kind"] == "funnel":  # its curves' too
+                strokes = strokes + funnel_origins(sh)
             for stroke in strokes:
                 pts = [(self.t2x(b), self.p2y(p)) for b, p in stroke]
-                if len(pts) == 1 and math.hypot(pts[0][0] - x, pts[0][1] - y) < 6:
+                if len(pts) == 1 and math.hypot(pts[0][0] - x, pts[0][1] - y) < PICK:
                     return i
                 for (ax, ay), (bx, by) in zip(pts, pts[1:]):
                     dx, dy = bx - ax, by - ay
                     ll = dx * dx + dy * dy
                     u = 0 if ll == 0 else max(0, min(1, ((x - ax) * dx + (y - ay) * dy) / ll))
-                    if math.hypot(x - ax - u * dx, y - ay - u * dy) < 6:
+                    if math.hypot(x - ax - u * dx, y - ay - u * dy) < PICK:
                         return i
         for i in order:
             sh = self.app.shapes[i]
@@ -220,7 +224,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         Only while the notes are shown. among: just these shapes."""
         if not self.app.show_notes.get() or not len(self.app.rendered):
             return None
-        ppq, near = self.app.ppq, 3 * self.scale
+        ppq, near = self.app.ppq, 5 * self.scale
         t, t_lo, t_hi = (self.x2t(v) * ppq for v in (x, x - near, x + near))
         ns = self.visible_notes(t_lo, t_hi)
         ns = ns[(ns[:, 2] == math.floor(self.y2p(y) + 0.5)) & (ns[:, 0] <= t_hi) & (ns[:, 1] >= t_lo)]
