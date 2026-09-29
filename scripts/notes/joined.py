@@ -35,8 +35,9 @@ def to_bezier(sh, k):
             pts = smooth_path(pts, sh["smooth"], sh.get("k", 1.0))
         if len(pts) < 2:
             pts = [pts[0], pts[0]]
-        got = fit([(b / k, p) for b, p in pts], FREE_TOLERANCE)
-        return [[b * k, p] for b, p in got], []
+        sharp = []
+        got = fit([(b / k, p) for b, p in pts], FREE_TOLERANCE, sharp)
+        return [[b * k, p] for b, p in got], sharp
     # line / polyline: straight pieces, corners at every point
     out = line_bezier(pts[0], pts[1])
     for a, b in zip(pts[1:], pts[2:]):

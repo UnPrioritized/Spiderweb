@@ -19,7 +19,8 @@ CORNER = math.radians(40)   # a stroke turning more than this within a short str
 MAX_POLYGON = 6             # a loop with more corners than this is no shape, just lines and curves
 LOOP = 0.1                  # a stroke ending this close to its start (part of its size) is a loop
 SHAPE_SAMPLES = 120         # points along a loop when fitting shapes to it
-PIECE_SAMPLES = 600         # points along a stroke when finding its corners and fitting lines / curves
+PIECE_SAMPLES = (600, 6000)  # points along a stroke when finding its corners and fitting lines / curves: at least,
+                             # at most (in between: as many as keep them within the tolerance's double)
 CORNER_COST = 0.012         # how much worse (part of the loop's size) a fit may be per extra corner / setting it saves
 
 
@@ -202,13 +203,14 @@ def _pieces(q, tol, closed):
     within tol of one, else curves within tol. closed: it ends where it starts."""
     if closed and math.dist(q[0], q[-1]) > 1e-12:
         q = q + [q[0]]
-    r = _resample(q, PIECE_SAMPLES)
+    count = max(PIECE_SAMPLES[0], min(PIECE_SAMPLES[1], math.ceil(_path_len(q) / max(tol * 2, 1e-12))))
+    r = _resample(q, count)
     corners = _corners(r, tol, closed)
     if closed and corners:  # start the loop at a corner, so it has no bend where it joins up
         c = corners[0]
         r = r[c:] + r[1:c + 1]
-        corners = [(i - c) % PIECE_SAMPLES for i in corners]
-    cut = sorted(set([0] + corners + [PIECE_SAMPLES]))
+        corners = [(i - c) % count for i in corners]
+    cut = sorted(set([0] + corners + [count]))
     step = math.dist(r[0], r[1])
     out = [r[0]]
     for a, b in zip(cut, cut[1:]):
@@ -216,7 +218,9 @@ def _pieces(q, tol, closed):
         if len(part) < 3 or max(_seg_dist(p, part[0], part[-1]) for p in part) <= tol:
             out.append(part[-1])
             continue
-        for seg in segments(fit(part, tol)):  # each curve piece: about as many points as the stroke had there
+        # each curve piece (kept within half the tolerance: the fitting makes pieces as long as it can, and the
+        # stroke's curves shouldn't drift far): about as many points as the stroke had there
+        for seg in segments(fit(part, tol / 2)):
             n = max(2, min(24, round(_path_len(seg) / max(step * 4, tol))))
             out += [tuple(seg_point(*seg, i / n)) for i in range(1, n + 1)]
     if closed:

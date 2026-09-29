@@ -8,6 +8,8 @@ out handle of the anchor before and the in handle of the anchor after."""
 
 import math
 
+import numpy as np
+
 
 def anchor_count(pts):
     return (len(pts) - 1) // 3 + 1
@@ -372,17 +374,70 @@ def difference(pts_a, pts_b):
 
 # ---------------------------------------------------------------- fitting (Philip Schneider's algorithm)
 
-def _unit(v):
-    d = math.hypot(*v)
-    return (v[0] / d, v[1] / d) if d else (0.0, 0.0)
+FIT_SAMPLES = (300, 20000)  # how many points the fitting looks at: at least, at most
 
 
-def _sub(a, b):
-    return a[0] - b[0], a[1] - b[1]
+def _fill_in(pts, tol):
+    """The points with more added between them where they're far apart (every given point kept, so sharp tips
+    stay): gaps no longer than tol * 2 when that stays under FIT_SAMPLES[1], and at least FIT_SAMPLES[0] points."""
+    gaps = np.hypot(*(pts[1:] - pts[:-1]).T)
+    total = gaps.sum()
+    step = max(min(tol * 2, total / FIT_SAMPLES[0]), total / FIT_SAMPLES[1])
+    cuts = np.maximum(1, np.ceil(gaps / step).astype(int))
+    if cuts.sum() + 1 > FIT_SAMPLES[1]:  # too many drawn points: spread them evenly instead
+        return np.array(resample([tuple(p) for p in pts], FIT_SAMPLES[1]), float)
+    t = np.concatenate([np.arange(c) / c for c in cuts])
+    at = np.repeat(np.arange(len(gaps)), cuts)
+    return np.vstack([pts[at] + (pts[at + 1] - pts[at]) * t[:, None], pts[-1:]])
 
 
-def fit(points, tol=0.003):
-    """A curve (flat list, see the top) through the first and last point that stays within tol of all points."""
+FIT_CORNER = math.radians(50)  # the points turning more than this within a short stretch are a sharp corner
+
+
+def _directions(pts, w):
+    """For every point, which way the path comes in and goes out, looking w along it (unit vectors)."""
+    s = np.concatenate([[0.0], np.cumsum(np.hypot(*(pts[1:] - pts[:-1]).T))])
+
+    def along(d):
+        t = np.clip(s + d, 0.0, s[-1])
+        return np.stack([np.interp(t, s, pts[:, 0]), np.interp(t, s, pts[:, 1])], 1)
+    come, go = _unit_rows(pts - along(-w)), _unit_rows(along(w) - pts)
+    come[0], go[-1] = go[0], come[-1]
+    return come, go
+
+
+def _corners(come, go, pts, w):
+    """Point numbers where the path turns sharply (the sharpest point of each turn)."""
+    turn = np.arccos(np.clip((come * go).sum(1), -1.0, 1.0))
+    s = np.concatenate([[0.0], np.cumsum(np.hypot(*(pts[1:] - pts[:-1]).T))])
+    out = []
+    for i in np.argsort(-turn):
+        if turn[i] <= FIT_CORNER:
+            break
+        if 0 < i < len(pts) - 1 and all(abs(s[i] - s[j]) > w for j in out):
+            out.append(int(i))
+    return sorted(out)
+
+
+def _fit_one(part, t_left, t_right, tol):
+    """One curve piece through the points (ends along the given directions): (piece, how far off it is)."""
+    u = _chord_params(part)
+    bez = _generate(part, u, t_left, t_right)
+    err, _ = _max_error(part, bez, u)
+    if tol < err < tol * 16:
+        for _ in range(8):
+            u = _newton(bez, part, u)
+            bez = _generate(part, u, t_left, t_right)
+            before, (err, _) = err, _max_error(part, bez, u)
+            if err <= tol or err > before * 0.9:  # fits, or not getting much closer
+                break
+    return bez, err
+
+
+def fit(points, tol=0.003, sharp=None):
+    """A curve (flat list, see the top) through the first and last point that stays within tol of all points, with
+    as few anchors as it can: each piece reaches as far along as it can, and sharp corners stay sharp (their
+    anchor numbers are added to the list sharp, if given)."""
     pts = [tuple(points[0])]
     for p in points[1:]:
         if math.dist(p, pts[-1]) > 1e-9:
@@ -390,92 +445,118 @@ def fit(points, tol=0.003):
     if len(pts) < 2:
         p = pts[0]
         return [list(p), list(p), list(p), list(p)]
-    pts = resample(pts, 300)
-    k = min(3, len(pts) - 1)
-    t_left, t_right = _unit(_sub(pts[k], pts[0])), _unit(_sub(pts[-1 - k], pts[-1]))
-    out = [list(pts[0])]
-    _fit(pts, t_left, t_right, tol, out, 0)
+    pts = _fill_in(np.array(pts, float), tol)
+    w = tol * 4
+    come, go = _directions(pts, w)
+    corners = _corners(come, go, pts, w)
+    ends = [0] + corners + [len(pts) - 1]
+    smooth = _unit_rows(come + go)
+    out = [pts[0].tolist()]
+    reach = 4  # how far the last piece reached (the next one likely reaches about as far)
+    for first, last in zip(ends, ends[1:]):
+        a = first
+        while a < last:
+            t_left = go[a] if a == first else smooth[a]
+
+            def attempt(b):
+                t_right = -(come[b] if b == last else smooth[b])
+                if b - a == 1:
+                    d = math.dist(pts[a], pts[b]) / 3
+                    return [pts[a], pts[a] + t_left * d, pts[b] + t_right * d, pts[b]], 0.0
+                return _fit_one(pts[a:b + 1], t_left, t_right, tol)
+            good, got, bad = a + 1, None, None
+            b = min(a + reach, last)
+            while True:  # from the last piece's reach: further while it fits, back while it doesn't
+                piece = attempt(b)
+                if piece[1] <= tol:
+                    good, got = b, piece
+                    if b == last or bad is not None:
+                        break
+                    b = min(a + (b - a) * 2, last)
+                else:
+                    bad = b
+                    if b - a <= 1 or good > a + 1:
+                        break
+                    b = a + max(1, (b - a) // 2)
+                    if b == a + 1:
+                        break
+            if got is None:
+                got = attempt(a + 1)
+            while bad is not None and bad - good > max(1, (good - a) // 10):  # then about the furthest that fits
+                b = (good + bad) // 2
+                piece = attempt(b)
+                if piece[1] <= tol:
+                    good, got = b, piece
+                else:
+                    bad = b
+            out += [np.asarray(got[0][1]).tolist(), np.asarray(got[0][2]).tolist(), pts[good].tolist()]
+            reach = max(2, good - a)
+            a = good
+        if last != len(pts) - 1 and sharp is not None:
+            sharp.append(anchor_count(out) - 1)
     return out
 
 
-def _fit(pts, t_left, t_right, tol, out, depth):
-    p0, p3 = pts[0], pts[-1]
-    if len(pts) == 2:
-        d = math.dist(p0, p3) / 3
-        out += [[p0[0] + t_left[0] * d, p0[1] + t_left[1] * d], [p3[0] + t_right[0] * d, p3[1] + t_right[1] * d],
-                list(p3)]
-        return
-    u = _chord_params(pts)
-    bez = _generate(pts, u, t_left, t_right)
-    err, at = _max_error(pts, bez, u)
-    if err > tol and err < tol * 16:
-        for _ in range(6):
-            u = [_newton(bez, p, t) for p, t in zip(pts, u)]
-            bez = _generate(pts, u, t_left, t_right)
-            err, at = _max_error(pts, bez, u)
-            if err <= tol:
-                break
-    if err <= tol or depth > 10 or len(pts) < 5:
-        out += [list(bez[1]), list(bez[2]), list(p3)]
-        return
-    t_mid = _unit(_sub(pts[at - 1], pts[at + 1]))
-    if t_mid == (0.0, 0.0):
-        t_mid = _unit(_sub(pts[at - 1], pts[at]))
-    _fit(pts[:at + 1], t_left, t_mid, tol, out, depth + 1)
-    _fit(pts[at:], (-t_mid[0], -t_mid[1]), t_right, tol, out, depth + 1)
+def _unit_rows(v):
+    n = np.hypot(*v.T)[:, None]
+    return np.where(n > 1e-12, v / np.where(n > 1e-12, n, 1.0), 0.0)
+
+
+def _unit(v):
+    d = math.hypot(v[0], v[1])
+    return v / d if d else np.zeros(2)
 
 
 def _chord_params(pts):
-    u = [0.0]
-    for a, b in zip(pts, pts[1:]):
-        u.append(u[-1] + math.dist(a, b))
-    return [x / u[-1] for x in u]
+    u = np.concatenate([[0.0], np.cumsum(np.hypot(*(pts[1:] - pts[:-1]).T))])
+    return u / u[-1]
+
+
+def _basis(u):
+    mt = 1 - u
+    return mt ** 3, 3 * mt * mt * u, 3 * mt * u * u, u ** 3
+
+
+def _at(bez, u):
+    b0, b1, b2, b3 = _basis(u)
+    return b0[:, None] * bez[0] + b1[:, None] * bez[1] + b2[:, None] * bez[2] + b3[:, None] * bez[3]
 
 
 def _generate(pts, u, t_left, t_right):
     """The best handles along the given end directions (least squares)."""
     p0, p3 = pts[0], pts[-1]
-    c00 = c01 = c11 = x0 = x1 = 0.0
-    for p, t in zip(pts, u):
-        mt = 1 - t
-        b0, b1, b2, b3 = mt ** 3, 3 * mt * mt * t, 3 * mt * t * t, t ** 3
-        a0 = (t_left[0] * b1, t_left[1] * b1)
-        a1 = (t_right[0] * b2, t_right[1] * b2)
-        c00 += a0[0] * a0[0] + a0[1] * a0[1]
-        c01 += a0[0] * a1[0] + a0[1] * a1[1]
-        c11 += a1[0] * a1[0] + a1[1] * a1[1]
-        tmp = (p[0] - (p0[0] * (b0 + b1) + p3[0] * (b2 + b3)), p[1] - (p0[1] * (b0 + b1) + p3[1] * (b2 + b3)))
-        x0 += a0[0] * tmp[0] + a0[1] * tmp[1]
-        x1 += a1[0] * tmp[0] + a1[1] * tmp[1]
+    b0, b1, b2, b3 = _basis(u)
+    a0, a1 = b1[:, None] * t_left, b2[:, None] * t_right
+    c00, c01, c11 = (a0 * a0).sum(), (a0 * a1).sum(), (a1 * a1).sum()
+    tmp = pts - ((b0 + b1)[:, None] * p0 + (b2 + b3)[:, None] * p3)
+    x0, x1 = (a0 * tmp).sum(), (a1 * tmp).sum()
     det = c00 * c11 - c01 * c01
     length = math.dist(p0, p3)
+    path = float(np.hypot(*(pts[1:] - pts[:-1]).T).sum())
     al = ar = 0.0
     if abs(det) > 1e-12:
         al, ar = (x0 * c11 - x1 * c01) / det, (c00 * x1 - c01 * x0) / det
-    if al < 1e-6 * length or ar < 1e-6 * length:
-        al = ar = length / 3
-    return [p0, (p0[0] + t_left[0] * al, p0[1] + t_left[1] * al), (p3[0] + t_right[0] * ar, p3[1] + t_right[1] * ar),
-            p3]
+    if al < 1e-6 * length or ar < 1e-6 * length or max(al, ar) > path:  # no handle longer than the stretch itself
+        al = ar = max(length, path / 2) / 3
+    return [p0, p0 + t_left * al, p3 + t_right * ar, p3]
 
 
 def _max_error(pts, bez, u):
-    worst, at = 0.0, len(pts) // 2
-    for i in range(1, len(pts) - 1):
-        d = math.dist(seg_point(*bez, u[i]), pts[i])
-        if d > worst:
-            worst, at = d, i
-    return worst, at
+    """The largest distance between the points and where the curve has them, and at which point (not the ends)."""
+    d = np.hypot(*(_at(bez, u) - pts).T)[1:-1]
+    at = int(d.argmax())
+    return float(d[at]), at + 1
 
 
-def _newton(bez, p, t):
-    """t moved closer to where the curve is nearest to p."""
-    p0, p1, p2, p3 = bez
-    q = seg_point(p0, p1, p2, p3, t)
-    mt = 1 - t
-    d1 = [3 * (mt * mt * (p1[k] - p0[k]) + 2 * mt * t * (p2[k] - p1[k]) + t * t * (p3[k] - p2[k])) for k in (0, 1)]
-    d2 = [6 * (mt * (p2[k] - 2 * p1[k] + p0[k]) + t * (p3[k] - 2 * p2[k] + p1[k])) for k in (0, 1)]
-    num = (q[0] - p[0]) * d1[0] + (q[1] - p[1]) * d1[1]
-    den = d1[0] ** 2 + d1[1] ** 2 + (q[0] - p[0]) * d2[0] + (q[1] - p[1]) * d2[1]
-    if den == 0:
-        return t
-    return min(1.0, max(0.0, t - num / den))
+def _newton(bez, pts, u):
+    """Each t moved closer to where the curve is nearest to its point."""
+    p0, p1, p2, p3 = (np.asarray(p) for p in bez)
+    q = _at(bez, u) - pts
+    mt = (1 - u)[:, None]
+    t = u[:, None]
+    d1 = 3 * (mt * mt * (p1 - p0) + 2 * mt * t * (p2 - p1) + t * t * (p3 - p2))
+    d2 = 6 * (mt * (p2 - 2 * p1 + p0) + t * (p3 - 2 * p2 + p1))
+    num = (q * d1).sum(1)
+    den = (d1 * d1).sum(1) + (q * d2).sum(1)
+    safe = np.where(den == 0, 1.0, den)
+    return np.clip(np.where(den == 0, u, u - num / safe), 0.0, 1.0)

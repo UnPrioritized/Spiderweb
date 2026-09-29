@@ -286,9 +286,10 @@ def preset_curve(formula_fn):
     """A curve (dict, no link) for a formula function (None = the default curve)."""
     if formula_fn is None:
         return new_curve()
-    pts = fit(formula_curve(formula_fn), FIT_TOLERANCE)
+    sharp = []
+    pts = fit(formula_curve(formula_fn), FIT_TOLERANCE, sharp)
     pts[0], pts[-1] = [0.0, 0.0], [1.0, 1.0]
-    return new_curve(pts)
+    return dict(new_curve(pts), sharp=sharp)
 
 
 def remove_funnel_parts(sh, lines, curves):
