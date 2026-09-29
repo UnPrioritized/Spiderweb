@@ -151,6 +151,8 @@ class FormulaDialog(tk.Toplevel):
                                                                                                           self.k)
         self.ok = True      # the formulas work
         self.view = None    # (pixels per unit, left x, middle y, loop length in units) while dragging
+        self.own_view = False  # zoomed / moved by hand (kept until Fit view or another pick in the list)
+        self.pan = None     # moving the view: (mouse x, mouse y, view then, moved yet)
         self.drag = None    # the point being dragged
         self._loading = False
         s = self.scale = self.app.scale
@@ -207,12 +209,18 @@ class FormulaDialog(tk.Toplevel):
         c.bind("<B1-Motion>", self.motion)
         c.bind("<ButtonRelease-1>", self.release)
         c.bind("<Button-3>", self.right_click)
-        c.bind("<Button-2>", self.add_point)
+        c.bind("<ButtonPress-2>", self.start_pan)
+        c.bind("<B2-Motion>", self.move_pan)
+        c.bind("<ButtonRelease-2>", self.middle_release)
+        c.bind("<MouseWheel>", self.wheel)
         c.bind("<Double-Button-1>", self.add_point)
         info = ttk.Frame(right)
         info.grid(row=r + 3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
-        self.info = ttk.Label(info, text="", font=("Segoe UI", 9), wraplength=int(340 * s), justify="left")
+        self.info = ttk.Label(info, text="", font=("Segoe UI", 9), wraplength=int(300 * s), justify="left")
         self.info.pack(side="left")
+        b = ttk.Button(info, text=tr("pattern_dialog.fit_view"), command=self.fit_again)
+        b.pack(side="right")
+        Tooltip(b, tr("pattern_dialog.fit_view_tip"))
         self.back = ttk.Button(info, text=tr("pattern_dialog.back_to_formula"), command=self.back_to_formula)
         Tooltip(self.back, tr("pattern_dialog.back_to_formula_tip"))
         btns = ttk.Frame(right)
@@ -281,6 +289,7 @@ class FormulaDialog(tk.Toplevel):
             var.set(self.pat[key])
         self._loading = False
         self.ok = True
+        self.own_view = False
         self.refresh()
 
     def save(self):
@@ -388,7 +397,7 @@ class FormulaDialog(tk.Toplevel):
             else:
                 self.set_info(tr("pattern_dialog.whole_shape") if self.layer == "shape" else
                               tr("pattern_dialog.one_loop"), "#555")
-        self.view = None
+        self.view = self.view[:3] + (self.loop_len(),) if self.own_view and self.view else None
         self.draw()
         self.show_on_roll()
 
@@ -542,6 +551,7 @@ class FormulaDialog(tk.Toplevel):
         if self.view is None:
             self.view = self.fit_view(loop)
         s, x0, ym, length = self.view
+        self.draw_grid()
         pts = loop["pts"]
         line = [self.to_xy(p) for p in sample([tuple(p) for p in pts], 32)]
         font = ("Segoe UI", 8)
@@ -594,15 +604,81 @@ class FormulaDialog(tk.Toplevel):
             self.pat["loop"] = copy.deepcopy(self.shown_loop())
         self.pat.pop("name", None)
 
+    # ------------------------------------------------------------ zooming and moving the view
+    def start_pan(self, e):
+        self.pan = (e.x, e.y, self.view, False) if self.view else None
+
+    def move_pan(self, e):
+        if not self.pan:
+            return
+        x, y, (s, x0, ym, length), moved = self.pan
+        if not moved and math.hypot(e.x - x, e.y - y) < 3 * self.scale:
+            return  # (a click, not a drag yet)
+        self.pan = (x, y, self.pan[2], True)
+        self.own_view = True
+        self.view = (s, x0 + e.x - x, ym + e.y - y, length)
+        self.draw()
+
+    def middle_release(self, e):
+        """Middle-click (not dragged): a new point there, like the piano roll."""
+        clicked = self.pan and not self.pan[3]
+        self.pan = None
+        if clicked:
+            self.add_point(e)
+
+    def wheel(self, e):
+        """The wheel zooms in and out around the mouse."""
+        if not self.view:
+            return
+        s, x0, ym, length = self.view
+        fit_s = self.fit_view(self.shown_loop())[0]
+        f = 1.2 ** (e.delta / 120)
+        f = max(fit_s / 20, min(fit_s * 200, s * f)) / s
+        self.own_view = True
+        self.view = (s * f, e.x - (e.x - x0) * f, e.y - (e.y - ym) * f, length)
+        self.draw()
+
+    def fit_again(self):
+        self.own_view = False
+        self.view = None
+        self.draw()
+
+    def draw_grid(self):
+        """Grid lines at round numbers (x as in the formula, 0 -> 1 along a loop; y in its sizes), a stronger line at
+        0 (and at the loop's end), their numbers along the left and bottom edges."""
+        c = self.canvas
+        s, x0, ym, length = self.view
+        font = ("Segoe UI", 7)
+        gap = 32 * self.scale  # at least this many pixels between lines
+        for axis, per in ((0, length * s), (1, s)):
+            raw = gap / max(per, 1e-12)
+            step = 10 ** math.floor(math.log10(raw))
+            step *= next(m for m in (1, 2, 5, 10) if step * m >= raw)
+            lo, hi = sorted([self.from_xy(0, 0)[axis], self.from_xy(self.w, self.h)[axis]])
+            for k in range(math.ceil(lo / step), math.floor(hi / step) + 1):
+                v = k * step
+                strong = abs(v) < step / 2 or (axis == 0 and self.layer == "pattern" and abs(v - 1) < step / 2)
+                color = "#d4d4d4" if strong else "#eeeeee"
+                if axis == 0:
+                    x = self.to_xy((v, 0))[0]
+                    c.create_line(x, 0, x, self.h, fill=color)
+                    c.create_text(x + 2, self.h - 1, text=fmt(v), anchor="sw", fill="#aaaaaa", font=font)
+                else:
+                    y = self.to_xy((0, v))[1]
+                    c.create_line(0, y, self.w, y, fill=color)
+                    c.create_text(2, y - 1, text=fmt(v), anchor="sw", fill="#aaaaaa", font=font)
+
     def press(self, e):
         self.drag = self.point_at(e.x, e.y)
+        if self.drag is None:  # empty space: moves the view
+            self.start_pan(e)
         pts = self.shown_loop()["pts"] if self.drag is not None else []
         if self.layer == "shape" and self.drag in (0, len(pts) - 1):
             self.drag = None  # a shape's ends stay on the curve's ends (drag their handles)
 
     def motion(self, e):
         if self.drag is None:
-            return
+            return self.move_pan(e)
         self.by_hand()
         c = self.pat["loop"]
         last = len(c["pts"]) - 1
@@ -627,9 +703,11 @@ class FormulaDialog(tk.Toplevel):
         self.show_on_roll()
 
     def release(self, e):
+        self.pan = None
         if self.drag is not None:
             self.drag = None
-            self.view = None
+            if not self.own_view:
+                self.view = None
             self.draw()
 
     def right_click(self, e):
