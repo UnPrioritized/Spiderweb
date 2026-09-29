@@ -466,15 +466,45 @@ def _keys(ps):
     return range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1)
 
 
-def funnel_key_spans(sh):
-    """{key: [[first beat, last beat], ...]} where each key plays (sorted, overlapping stretches merged)."""
+def funnel_sides(sh):
+    """[(half, main)]: a funnel with lines on both sides of the wall is two halves, each only its own lines (and
+    their curves) with its own note grid running to the wall. The first line's side is the main one: the wall's
+    own notes and the wall setting belong to it; the other side's notes just start (or end) on the wall."""
+    pts = sh["pts"]
+    lines = funnel_lines(sh)
+    if len(pts) < 4 or len(lines) < 2:
+        return [(sh, True)]
+    (wb0, wp0), (wb1, wp1) = pts[2], pts[3]
+
+    def side(line):
+        (b0, p0), (b1, p1) = line
+        return (wb1 - wb0) * ((p0 + p1) / 2 - wp0) - (wp1 - wp0) * ((b0 + b1) / 2 - wb0) > 0
+
+    main = side(lines[0])
+    out = []
+    for keep in (main, not main):
+        ns = [n for n, line in enumerate(lines) if side(line) == keep]
+        if not ns:
+            continue
+        number = {n: i for i, n in enumerate(ns)}
+        half = dict(sh, pts=[list(p) for p in lines[ns[0]]] + [list(p) for p in pts[2:4]]
+                    + [list(p) for n in ns[1:] for p in lines[n]],
+                    starts=[dict(st, line=number[st.get("line", 0)]) for st in sh.get("starts", ())
+                            if st.get("line", 0) in number])
+        out.append((half, keep == main))
+    return out
+
+
+def funnel_key_spans(sh, main=True):
+    """{key: [[first beat, last beat], ...]} where each key plays (sorted, overlapping stretches merged).
+    Not main (the other side of the wall, see funnel_sides): without the wall itself."""
     pieces = {}
-    for a, b in funnel_segments(sh):
+    for a, b in funnel_segments(sh) if main else funnel_lines(sh):
         for q in _keys((a[1], b[1])):
             s = line_band(a, b, q)
             if s:
                 pieces.setdefault(q, []).append(s)
-    for poly in funnel_polys(sh, sh.get("wall") == "past"):
+    for poly in funnel_polys(sh, main and sh.get("wall") == "past"):
         for q in _keys([p for _, p in poly]):
             pieces.setdefault(q, []).extend(tuple(s) for s in row_spans([poly], q))
     out = {}
@@ -510,10 +540,11 @@ def funnel_reversed(sh):
     return len(pts) >= 4 and (pts[2][0] + pts[3][0]) / 2 < pts[0][0] - 1e-9
 
 
-def funnel_layout(sh, ppq):
+def funnel_layout(sh, ppq, main=True):
     """Everything the notes come from: (spans in grid distance, wall ranges, grid, t0 tick, sign), where a grid
-    distance is ticks from the line start towards the wall. None if the funnel makes no notes."""
-    spans = funnel_key_spans(sh)
+    distance is ticks from the line start towards the wall. None if the funnel makes no notes.
+    Not main (the other side of the wall): nothing reaches past the wall."""
+    spans = funnel_key_spans(sh, main)
     if not spans:
         return None
     t0, sign, length = funnel_axis(sh, spans)
@@ -530,6 +561,16 @@ def funnel_layout(sh, ppq):
             s = line_band(w0, w1, q)
             if s:
                 walls[q] = sorted((dist(s[0]), dist(s[1])))
+    if not main:
+        for q in list(dspans):
+            if q in walls:
+                cut = [[a, min(b, walls[q][1])] for a, b in dspans[q] if a <= walls[q][1]]
+                if cut:
+                    dspans[q] = cut
+                else:
+                    del dspans[q]
+        if not dspans:
+            return None
     return dspans, walls, max(length * ppq, 1.0), t0, sign
 
 
@@ -596,14 +637,14 @@ def _nearest(xs, x):
     return i
 
 
-def funnel_cells(sh, ppq):
+def funnel_cells(sh, ppq, main=True):
     """Spam: (grid ticks, [(key, first grid line, last grid line)]), every key's notes running from grid
-    line to grid line. Long: (None, [(key, start tick, end tick)])."""
-    lay = funnel_layout(sh, ppq)
+    line to grid line. Long: (None, [(key, start tick, end tick)]). One side of the wall (funnel_sides)."""
+    lay = funnel_layout(sh, ppq, main)
     if not lay:
         return None, []
     dspans, walls, length, t0, sign = lay
-    past = sh["wall"] == "past"
+    past = main and sh["wall"] == "past"
     g1 = max(1, math.floor(sh["gate1"] * ppq + 0.5))
 
     def at_wall(q, d):
@@ -651,12 +692,18 @@ def funnel_cells(sh, ppq):
 
 
 def funnel_note_count(sh, ppq):
-    ticks, cells = funnel_cells(sh, ppq)
-    return len(cells) if ticks is None else sum(j - i for _, i, j in cells)
+    count = 0
+    for half, main in funnel_sides(sh):
+        ticks, cells = funnel_cells(half, ppq, main)
+        count += len(cells) if ticks is None else sum(j - i for _, i, j in cells)
+    return count
 
 
 def funnel_notes(sh, ppq):
-    ticks, cells = funnel_cells(sh, ppq)
+    return np.concatenate([_side_notes(*funnel_cells(half, ppq, main)) for half, main in funnel_sides(sh)])
+
+
+def _side_notes(ticks, cells):
     cells = np.asarray(cells, np.int64).reshape(-1, 3)
     if ticks is None:
         return cells[:, [1, 2, 0]]

@@ -843,7 +843,7 @@
   "",
   "Middle-click on the line (any tool) to start a curve there: curves go to both ends of the wall. Middle-click near a curve to add an anchor it goes through. The curves have anchors and handles (see Funnel curves).",
   "",
-  "With a funnel selected, a line drawn to (or from) its wall is added to it (two-line funnels).",
+  "With a funnel selected, a line drawn to (or from) its wall is added to it (two-line funnels). Lines on the other side of the wall make their own half, with its own notes running to the wall: they just start (or end) on the wall; the wall setting is for the first line's side.",
   "",
   "Panel: the wall (notes end on it, or start on it), the inside (spam or long notes) and the gate. Tick \"Different start and wall gate\" to let the gate change from the start to the wall."
  ],
