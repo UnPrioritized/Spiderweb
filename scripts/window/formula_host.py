@@ -164,8 +164,8 @@ def formula_menu(m, host, picks):
     h = host.current() or {}
     sub = tk.Menu(m, tearoff=0)
     for layer, label, presets in (
-            ("shape", tr("roll_menu.shape_of_the_curve"), [(sid, name) for sid, name, _, _, _ in SHAPE_PRESETS]),
-            ("pattern", tr("roll_menu.pattern_along_the_curve"),
+            ("shape", tr("roll_menu.shape_of_the_line"), [(sid, name) for sid, name, _, _, _ in SHAPE_PRESETS]),
+            ("pattern", tr("roll_menu.pattern_along_the_line"),
              [(pid, name) for pid, name, _, _ in PATTERN_PRESETS])):
         pat = h.get(layer) or {}
         if not pat:
