@@ -29,6 +29,16 @@ PATTERN_PRESETS = [
     ("wave", tr("pattern.wave"), "height * sin(x * 2 * pi)", {"height": 4.0}),
     ("zigzag", tr("pattern.zigzag"), "height * 2 / pi * asin(sin(x * 2 * pi))", {"height": 4.0}),
     ("bounce", tr("pattern.bounce"), "height * abs(sin(x * pi))", {"height": 4.0}),
+    ("square", tr("pattern.square_wave"), "height * max(-1, min(1, steep * sin(x * 2 * pi)))",
+     {"height": 4.0, "steep": 8.0}),
+    ("saw", tr("pattern.sawtooth"), "height * 2 * (x - floor(x + 0.5))", {"height": 4.0}),
+    ("teeth", tr("pattern.teeth"), "height * (1 - abs(2 * x - 1))", {"height": 4.0}),
+    ("spikes", tr("pattern.spikes"), "height * (1 - abs(2 * x - 1))^sharp", {"height": 4.0, "sharp": 3.0}),
+    ("bumps", tr("pattern.half_circles"), "height * sqrt(max(0, 1 - (2 * x - 1)^2))", {"height": 4.0}),
+    ("stairs", tr("pattern.stair_steps"), "height * min(steps, floor((1 - abs(2 * x - 1)) * (steps + 1))) / steps",
+     {"height": 4.0, "steps": 3.0}),
+    ("swell", tr("pattern.swell"), "height * sin(x * pi) * sin(x * waves * 2 * pi)", {"height": 4.0, "waves": 4.0}),
+    ("fade", tr("pattern.fading_wave"), "height * (1 - x) * sin(x * waves * 2 * pi)", {"height": 4.0, "waves": 4.0}),
 ]
 PRESET_NAMES = {pid: name for pid, name, _, _ in PATTERN_PRESETS}
 LOOPS_DEFAULT = 4.0
