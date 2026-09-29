@@ -23,6 +23,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     snap_picker.py   the Snap dropdown (note pictures) and the Customised snap window
     help_texts.py    every help text: tips, the Help window, tool tooltips, the side panel's help
     help.py          the tip popups and the Help window (F1, searchable)
+    updates.py       update checks: the "how often?" question, the update popup, What's new after an update
     drawer.py        the custom shape drawer window and the shape library (shapes/*.json)
     velocity.py      the velocity pane under the piano roll
     velocity_formula.py the velocity pane's Formula tool settings (pattern, loops, its numbers)
@@ -56,6 +57,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     safefile.py      saving without half-written files
     errors.py        errors.log and the "something went wrong" message
     about.py         version number, the program's folder
+    update_check.py  asking GitHub for newer versions (and their notes)
     midi_out.py      MIDI file writer
     domino_clip.py   Copy to / Paste from Domino (notes on the clipboard in Domino's own format)
     playback.py      playing through Windows MIDI out

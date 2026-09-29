@@ -47,6 +47,11 @@ Your autosave, saved shapes and exported MIDI go in the same folder as the
 .exe. To update to a new version, replace just Spiderweb.exe in that folder;
 everything else stays.
 
+Spiderweb can look on GitHub for a new version when it starts (it asks you
+once how often: every start, once a day, week or month, or never; change it
+later in Help > About). It only asks GitHub for the list of versions; nothing
+about you or your work is sent, and nothing is downloaded by itself.
+
 Getting started
 ---------------
 Pick a tool at the top and draw on the piano roll: every key a line crosses

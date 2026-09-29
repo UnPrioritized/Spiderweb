@@ -14,6 +14,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.about import BANNER, BANNER_HALF, HERE, LICENSE, VERSION, WEBSITE
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS, NEXT, SECTION_NAMES, SECTIONS, SEE, TOOL_TOPICS, TOPICS
+from window.updates import often_box
 
 TOOL_TIPS = set(TOOL_TOPICS.values()) | set(DRAWER_TOOL_TOPICS.values())
 CLIPS = os.path.join(getattr(sys, "_MEIPASS", HERE), "clips")  # (the .exe carries them inside)
@@ -445,7 +446,7 @@ class HelpWindow(tk.Toplevel):
         self.text.insert("end", "\n\n")
 
     def about_buttons(self):
-        """The About page's website link and buttons: the website, the license, Spiderweb's folder."""
+        """The About page's website link and buttons: the website, the license, Spiderweb's folder; update checks."""
         t = self.text
         at = t.search(WEBSITE, "1.0", "end")
         if at:
@@ -464,6 +465,20 @@ class HelpWindow(tk.Toplevel):
                    command=lambda: os.startfile(HERE)).pack(side="left", padx=(8, 0))
         self.text.insert("end", "\n\n")
         self.embed(row)
+        # updates: how often to look, and looking now (the answer shows next to the button)
+        updates = self.app.updates
+        box = ttk.Frame(self.text)
+        row = ttk.Frame(box)
+        row.pack(anchor="w")
+        ttk.Label(row, text=tr("updates.check_for_updates")).pack(side="left")
+        often_box(row, updates).pack(side="left", padx=(6, 8))
+        status = ttk.Label(box, text="", foreground="#777")  # (under the row, so a long answer isn't cut off)
+        status.pack(anchor="w", pady=(4, 0))
+        ttk.Button(row, text=tr("updates.check_now"), takefocus=False, command=lambda: (
+            status.config(text=tr("updates.checking")),
+            updates.check(report=lambda msg: status.winfo_exists() and status.config(text=msg)))).pack(side="left")
+        self.text.insert("end", "\n\n")
+        self.embed(box)
 
     def add_clip(self, name):
         """Put clips/<name>.gif (playing) or clips/<name>.png (a still picture) at the end of the text. False if

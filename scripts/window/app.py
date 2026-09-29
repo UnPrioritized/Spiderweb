@@ -16,6 +16,7 @@ import numpy as np
 from files.lang import tr
 from notes.custom import CUSTOM_DEFAULTS, custom_note_count, outline_apart
 from window.help import Tips, open_help
+from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, point_names, render, shape_notes_tracks,
                           slot_track_channel)
@@ -135,6 +136,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Pa
 
         self.tool = tk.StringVar(value="select")  # (each tool's tip shows when it's picked, see help.py)
         self.tips = Tips(self)
+        self.updates = Updates(self)
         self.help_window = None
         self.live = tk.BooleanVar(value=False)  # drawing tools draw into one custom shape (roll_live.py)
         self.draw_tool = "line"  # the drawing tool a double right-click goes back to
@@ -172,6 +174,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Pa
         self.load_autosave()
         self.sync_panel()
         self.after(800, lambda: self.tips.show("welcome"))  # the first time Spiderweb starts
+        self.updates.start()  # (What's new after an update; asks about / looks for updates)
 
         for v in self.pvar.values():
             v.trace_add("write", lambda *_: self.on_project_change())

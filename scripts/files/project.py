@@ -199,7 +199,7 @@ class ProjectFiles:
                               "midi_device": self.midi_device.get(), "live": self.live.get(),
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
                               "history_window": self.history_pos, "history_undocked": self.history_undocked,
-                              **self.tips.state()}
+                              **self.tips.state(), **self.updates.state()}
         write_text(path, project_json(data))
 
     def load_autosave(self):
@@ -249,6 +249,7 @@ class ProjectFiles:
                 with open(backup_path(self.autosave_path), encoding="utf-8") as f:
                     win = json.load(f).get("window") or {}
             self.tips.restore(win)
+            self.updates.restore(win)
             geo = win.get("geometry", "")
             if geo:
                 self.geometry(geo)

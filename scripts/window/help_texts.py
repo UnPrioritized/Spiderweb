@@ -26,6 +26,7 @@ SECTION_NAMES = {s: tr("help.section." + "_".join(re.findall(r"[a-z0-9]+", s.low
 TOPIC_LIST = [
     ("about", "Getting started"),
     ("welcome", "Getting started"),
+    ("whats_new", "Getting started"),
     ("select", "Tools"),
     ("line", "Tools"),
     ("poly", "Tools"),
@@ -86,6 +87,7 @@ NEXT = {"welcome": "view"}
 # related topics: the clickable "See also" line under a topic in the Help window
 SEE = {
     "welcome": ["select", "view", "shortcuts"],
+    "whats_new": ["about"],
     "select": ["selecting", "view", "shortcuts"],
     "line": ["poly", "tumours", "selecting"],
     "poly": ["line", "tumours"],
