@@ -793,7 +793,7 @@
  "help.curve.text": [
   "Drag from the start to the end, or click both. Then shape it (see Curves: anchors and handles): drag the blue dots to bend it, middle-click the curve to add an anchor.",
   "",
-  "Right-click it: Symmetric halves (one half follows the other), add an anchor, and the usual menu."
+  "Right-click it: Formula (a shape like a spiral or heart, a pattern like a wave along it: see Formulas), Symmetric halves (one half follows the other), add an anchor, and the usual menu."
  ],
  "help.curve.words": "bezier bend pen",
  "help.arc.title": "Arc (A)",
@@ -1078,7 +1078,7 @@
   "[clip:funnel_curves-highlight]",
   "",
   "With something highlighted:",
-  "Del = delete it. Right-click = curve shapes, your own formulas, and linking.",
+  "Del = delete it. Right-click = Formula (shapes and patterns, see Formulas), Back to the default curve, and linking.",
   "Ctrl+H / Ctrl+J = flip the curves (end to end / inside out). Ctrl+C / Ctrl+V = copy a curve's shape onto others. Esc = clear the highlight."
  ],
  "help.funnel_curves.words": "curve start anchor link mirror formula highlight",
@@ -1102,12 +1102,30 @@
   "Ctrl while drawing or dragging the wall keeps it centred on the line, so mirrored curves stay exact mirrors on the piano roll."
  ],
  "help.funnel_links.words": "link linked unlink mirror mirrored flipped same shape together follow group ctrl",
- "help.formulas.title": "Curve shapes and formulas",
- "help.formulas.tip": "Right-click highlighted funnel curves: preset shapes or your own formula (y of x).",
+ "help.formulas.title": "Formulas: shapes and patterns",
+ "help.formulas.tip": "Right-click a curve ▸ Formula: give it a shape (Circle, Spiral, Heart…) or a pattern along it (Wave, Zigzag, Bounce). Drawer curves and funnel curves have it too.",
  "help.formulas.text": [
-  "Right-click highlighted funnel curves → Curve shape (presets) or Custom formula. A formula is y of x: x goes from 0 at the curve's start to 1 at the wall end, y is how far open the funnel is, stretched to fit (so x^2 and 5*x^2 give the same curve). Numbers, x, + - * / ^ ( ), pi, e, sin cos tan asin acos atan sqrt exp ln log abs min max. The result becomes anchors and handles, so it can still be dragged."
+  "Right-click a curve ▸ Formula (a Curve tool curve, a curve stroke in the drawer, or highlighted funnel curves). It has two parts, and a curve can have both at once:",
+  "",
+  "Shape of the curve: the curve takes a shape. One that ends where it starts (Circle, Flower, Heart, Figure 8) is as wide as from the curve's start (A) to its end (B) and sits on that line; the others start at A and end at B. They're round as the piano roll looks when you pick them.",
+  "[clip:formulas-shapes]",
+  "",
+  "Pattern along the curve: a pattern repeats along the curve (along its shape, if it has one). Loops = how many times (4.5 works too). Its height is in keys.",
+  "[clip:formulas-patterns]",
+  "",
+  "The curve you drew stays as a dashed line with its anchors and handles: bend it and the shape and pattern follow. The side panel shows the selected curve's numbers (like turns, petals, height and Loops). On a joined curve, Across all runs the loops on from piece to piece and Each piece gives every piece all of them. Separate curves each get their own pattern: join them first to run one pattern across them.",
+  "",
+  "Custom… (at the top of each list) shows every shape or pattern with its formula and a box for each of its numbers. The preview shows one loop of a pattern, or the whole shape: drag its points to change it by hand, and every loop on the curve follows (Back to formula forgets it). Double-click the line to add a point, right-click a point to remove it, Alt+drag for a sharp corner. Save puts it in your list (patterns.json next to Spiderweb), and from then on it's in the Formula menu too.",
+  "",
+  "Your own formula: tick Edit formula. A pattern is y of x for one loop (x goes from 0 to 1, y = how far to the side); a shape is x(t) and y(t), t going from 0 to 1 while it's drawn. Any other name in it (like height) gets its own number box. Works: numbers, + - * / ^ ( ), pi, e, sin cos tan asin acos atan sqrt exp ln log abs min max floor.",
+  "",
+  "Remove formula takes them off (the curve you drew is left). Turn into plain curve makes what you see into ordinary anchors and handles.",
+  "",
+  "In the drawer, a pattern's sizes are hundredths of the board, so they grow and shrink with the placed shape. Funnel curves: a shape runs from the curve's start to its wall end inside the funnel (Slow start is x²); linked curves get the same formula; Back to the default curve resets it. Curve formulas saved in older versions (curves.json) are in the Shape list now.",
+  "",
+  "The velocity pane has a Formula tool too: a line with a pattern swinging around it (see Velocity pane)."
  ],
- "help.formulas.words": "formula math preset expression",
+ "help.formulas.words": "formula math preset expression shape pattern wave zigzag bounce spiral circle heart flower loop custom",
  "help.undo.title": "Undo and redo",
  "help.undo.tip": "Made a mistake? Ctrl+Z = undo, Ctrl+Y = redo. Tick History in the toolbar to see every change as a step and jump back to any of them.",
  "help.undo.text": [
@@ -1157,9 +1175,11 @@
  ],
  "help.view.words": "zoom scroll pan fit view snap grid quantize quantise triplet dotted custom",
  "help.velocity.title": "Velocity pane",
- "help.velocity.tip": "Draw velocities over the bars: Linear, Curve or Pencil. With a shape selected only its notes change.",
+ "help.velocity.tip": "Draw velocities over the bars: Linear, Curve, Pencil or Formula. With a shape selected only its notes change.",
  "help.velocity.text": [
-  "The pane under the piano roll shows every note's velocity. Draw over the bars with Linear, Curve or Pencil. With a shape selected, only its notes change (the others fade); with nothing selected, every note under the drag.",
+  "The pane under the piano roll shows every note's velocity. Draw over the bars with Linear, Curve, Pencil or Formula. With a shape selected, only its notes change (the others fade); with nothing selected, every note under the drag.",
+  "",
+  "Formula: drag it like Linear; a pattern (Wave, Zigzag, Bounce or one you saved) swings the velocity up and down around the line. Pick the pattern, its Loops and height (in velocity steps) next to the tool buttons: changing them changes the line you just drew, until Enter or a click elsewhere.",
   "",
   "Linear / Curve: drag it, then drag its end squares to move the ends (Ctrl = level with the other end) or a curve's round handle to bend it. Ctrl while drawing = flat. Hold Shift to snap the ends to the grid and, with a shape selected, onto its first / last note. Enter or a click outside the pane = done.",
   "",
@@ -1256,7 +1276,7 @@
  "help.drawer_curve.title": "Drawer: Curve",
  "help.drawer_curve.tip": "From start to end, then bend it with its blue handles. Middle-click it = new anchor.",
  "help.drawer_curve.text": [
-  "Drag (or click) from start to end. The new curve is selected: bend it with its handles like any curve (see Curves: anchors and handles); middle-click near it adds an anchor."
+  "Drag (or click) from start to end. The new curve is selected: bend it with its handles like any curve (see Curves: anchors and handles); middle-click near it adds an anchor. Right-click it: Formula (a shape or a pattern along it, see Formulas)."
  ],
  "help.drawer_arc.title": "Drawer: Arc",
  "help.drawer_arc.tip": "Click start, a point it passes through, end. Or drag start to end, then click to bend.",
