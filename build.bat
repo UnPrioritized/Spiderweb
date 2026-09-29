@@ -15,7 +15,7 @@ copy /y README.txt dist\ >nul
 if exist dist\clips rmdir /s /q dist\clips
 rem Source archive for sharing: spiderweb.py + the scripts and clips folders, launchers and license only (no autosave/shapes/output).
 if exist dist\Spiderweb-source.zip del dist\Spiderweb-source.zip
-"%SystemRoot%\System32\tar.exe" -a -cf dist\Spiderweb-source.zip --exclude=__pycache__ spiderweb.py scripts clips ^
+"%SystemRoot%\System32\tar.exe" -a -cf dist\Spiderweb-source.zip --exclude=__pycache__ --exclude=CLAUDE.md spiderweb.py scripts clips ^
   Spiderweb.bat build.bat build_version.py make_icon.py icon.svg LICENSE README.txt
 if errorlevel 1 (pause & exit /b 1)
 echo.
