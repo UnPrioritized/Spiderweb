@@ -635,6 +635,10 @@ def funnel_cells(sh, ppq):
             i, j = _nearest(ds, a), _nearest(ds, b)
             if past and at_wall(q, b):
                 j = min(j + 1, len(ds) - 1)  # on to one note past the wall (a key reached on the wall: just that)
+            elif at_wall(q, b) and j > 0:
+                # notes ending on the wall: the same steps as starting on it, one column earlier (a key reached
+                # on the wall: just the last note), so the keys near the wall don't all pile into the last column
+                i = max(min(i, j) - 1, 0)
             elif j <= i:  # shorter than a note: the note it's in (the one ending there, if it's on a grid line)
                 j = min(max(bisect.bisect_left(ds, (a + b) / 2 - 1e-9), 1), len(ds) - 1)
                 i = j - 1
