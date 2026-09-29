@@ -28,6 +28,10 @@ def line_strokes(sh, paths):
     """A line kind as strokes in beats / pitch (paths: its engine.cached_strokes, used for tumours: the bumps
     become points)."""
     kind = sh["kind"]
+    if kind == "curve" and sh.get("pattern") and not has_tumours(sh):  # the pattern as ordinary curves (pattern.py)
+        from notes.pattern import baked
+        sh = dict(sh, **baked(sh))
+        sh.pop("sym", None)
     if has_tumours(sh):
         return [{"kind": "poly", "pts": [list(p) for p in path]} for path in paths]
     if kind == "curve":

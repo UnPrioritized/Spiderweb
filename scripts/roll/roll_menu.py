@@ -8,6 +8,7 @@ from window.curve_dialog import load_formulas
 from notes.convert import originals
 from notes.joined import is_joined
 from notes.funnel import CURVE_PRESETS, inside_out, turned_curve
+from notes.pattern import PATTERN_PRESETS
 from notes.tumour import LINE_KINDS
 from roll.roll_shared import SHIFT
 from window.widgets import symmetry_menu
@@ -80,6 +81,8 @@ class ShapeMenu:
             item(tr("roll_menu.add_anchor_here"), "", lambda: self.curve_click(sh, at))
             if not is_joined(sh):  # one half follows the other; the half right-clicked keeps its shape
                 symmetry_menu(m, sh.get("sym"), lambda mode: self.set_symmetry(sh, mode, at))
+        if app.pattern_targets():
+            self.formula_menu(m)
         if sh.get("text") and len(app.sels) == 1:
             item(tr("roll_menu.edit_text"), "", lambda: self.edit_text(at))
         if sh["kind"] == "custom" and "notes" not in sh and len(app.sels) == 1:
@@ -145,6 +148,27 @@ class ShapeMenu:
             m.tk_popup(e.x_root, e.y_root)
         finally:
             m.grab_release()
+
+    def formula_menu(self, m):
+        """"Formula ▸" for the selected curves: a pattern along them (pattern.py), taking it off, or making it plain
+        anchors and handles. The dot shows the pattern of the curve right-clicked."""
+        app = self.app
+        sh = app.selected()
+        now = (sh.get("pattern") or {}).get("preset", "") if sh and sh["kind"] == "curve" else ""
+        sub = tk.Menu(m, tearoff=0)
+        along = tk.Menu(sub, tearoff=0)
+        self._pattern_pick = tk.StringVar(self, value=now or "none")  # (kept, so the dot shows)
+        along.add_radiobutton(label=tr("roll_menu.none"), value="none", variable=self._pattern_pick,
+                              command=lambda: app.set_pattern(None))
+        for pid, name, _, _ in PATTERN_PRESETS:
+            along.add_radiobutton(label=name, value=pid, variable=self._pattern_pick,
+                                  command=lambda p=pid: app.set_pattern(p))
+        sub.add_cascade(label=tr("roll_menu.pattern_along_the_curve"), menu=along)
+        sub.add_separator()
+        on = "normal" if app.patterned() else "disabled"
+        sub.add_command(label=tr("roll_menu.remove_formula"), command=lambda: app.set_pattern(None), state=on)
+        sub.add_command(label=tr("roll_menu.turn_into_plain_curve"), command=app.plain_curve, state=on)
+        m.add_cascade(label=tr("roll_menu.formula"), menu=sub)
 
     def link_menu(self, m, sh, curves, part):
         """"Link curves ▸" for the highlighted curves. The curve right-clicked keeps its shape, the others follow."""

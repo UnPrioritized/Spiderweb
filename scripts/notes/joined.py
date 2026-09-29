@@ -26,6 +26,10 @@ def to_bezier(sh, k):
     """The shape as (curve points, sharp anchors). k = beats per key on screen (for fitting freehand strokes)."""
     pts = [tuple(p) for p in sh["pts"]]
     kind = sh["kind"]
+    if kind == "curve" and sh.get("pattern"):  # the pattern becomes ordinary anchors (pattern.py)
+        from notes.pattern import baked
+        got = baked(sh)
+        return got["pts"], got["sharp"]
     if kind == "curve":
         return [list(p) for p in pts], list(sh.get("sharp", []))
     if kind == "arc":
@@ -162,6 +166,11 @@ def joined_paths(sh, tumour_path):
         pieces.append((a0, g))
         a0 = g + 1
     pieces.append((a0, anchor_count(pts) - 1))
+    if sh.get("pattern"):  # a formula laid along the pieces (pattern.py), then the tumours (one setting for all)
+        from notes.pattern import pattern_paths
+        paths = pattern_paths([sample(pts[3 * p0:3 * p1 + 1], 240) for p0, p1 in pieces], sh["pattern"])
+        tm = shown_tumour(sh)
+        return [tumour_path(path, tm) if tm and tm["on"] else path for path in paths]
     out, section = [], 0
     for p0, p1 in pieces:
         if tms is None:

@@ -48,10 +48,12 @@ FORMULA_FUNCS = {
 }
 
 
-def formula(text):
+def formula(text, named=False):
     """A formula of x (like x^2 or sin(x*pi/2)) -> a function of x. Raises ValueError if it can't be read.
-    Numbers, x, pi, e, + - * / % ^ ( ) and FORMULA_FUNCS."""
+    Numbers, x, pi, e, + - * / % ^ ( ) and FORMULA_FUNCS. named: other names (like height) are numbers given
+    when it's worked out, fn(x, {"height": 6}); fn.names = them in the order they first appear."""
     text = text.strip().replace("×", "*").replace("^", "**")
+    names = []
     if not text:
         raise ValueError(tr("mathexpr.type_a_formula"))
     try:
@@ -66,7 +68,10 @@ def formula(text):
             return
         if isinstance(node, ast.Name):
             if node.id != "x" and node.id not in FORMULA_NAMES:
-                raise ValueError(tr("mathexpr.unknown_name_use_x_for_the", id=node.id))
+                if not named or node.id in FORMULA_FUNCS:
+                    raise ValueError(tr("mathexpr.unknown_name_use_x_for_the", id=node.id))
+                if node.id not in names:
+                    names.append(node.id)
             return
         if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
             check(node.left)
@@ -84,26 +89,27 @@ def formula(text):
 
     check(tree)
 
-    def ev(node, x):
+    def ev(node, x, values):
         if isinstance(node, ast.Constant):
             return node.value
         if isinstance(node, ast.Name):
-            return x if node.id == "x" else FORMULA_NAMES[node.id]
+            return x if node.id == "x" else FORMULA_NAMES[node.id] if node.id in FORMULA_NAMES else values[node.id]
         if isinstance(node, ast.BinOp):
-            left, right = ev(node.left, x), ev(node.right, x)
+            left, right = ev(node.left, x, values), ev(node.right, x, values)
             if isinstance(node.op, ast.Pow) and abs(right) > 64:
                 raise ValueError(tr("mathexpr.exponent_too_large"))
             return _OPS[type(node.op)](left, right)
         if isinstance(node, ast.UnaryOp):
-            v = ev(node.operand, x)
+            v = ev(node.operand, x, values)
             return -v if isinstance(node.op, ast.USub) else v
-        return FORMULA_FUNCS[node.func.id](*(ev(a, x) for a in node.args))
+        return FORMULA_FUNCS[node.func.id](*(ev(a, x, values) for a in node.args))
 
-    def fn(x):
-        v = ev(tree.body, x)
+    def fn(x, values=None):
+        v = ev(tree.body, x, values or {})
         if isinstance(v, complex):
             raise ValueError(tr("mathexpr.not_a_real_number"))
         return float(v)
+    fn.names = names
     return fn
 
 

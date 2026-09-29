@@ -79,6 +79,8 @@ def short_shape(sh):
             return short_tumour(v)
         if k == "tumours":
             return [short_tumour(t) if t else None for t in v]
+        if k == "pattern":
+            return {a: {n: short_num(x) for n, x in b.items()} if a == "vars" else short_num(b) for a, b in v.items()}
         if k == "text":
             return {a: [short_num(x) for x in b] if a == "bbox" else short_num(b) for a, b in v.items()}
         return short_num(v) if k in ("gate", "gate0", "gate1", "k") else v

@@ -1,5 +1,6 @@
 """Main window: toolbar, side panel, shapes, playback and undo.
-Its other parts: panel_custom.py / panel_funnel.py / panel_tumour.py (+ tumour_window.py) / panel_text.py (those panel sections),
+Its other parts: panel_custom.py / panel_funnel.py / panel_tumour.py (+ tumour_window.py) / panel_text.py /
+panel_pattern.py (those panel sections),
 project.py (files, autosave, MIDI export), widgets.py (tooltips), font_dialog.py (picking a font)."""
 
 import copy
@@ -26,6 +27,7 @@ from files.mathexpr import calc, calc_int, fmt
 from window.panel_custom import GAP_COLOR, CustomPanel
 from window.panel_freehand import FreehandPanel
 from window.panel_funnel import FunnelPanel
+from window.panel_pattern import PatternPanel
 from window.panel_text import TextPanel
 from window.panel_tumour import TumourPanel
 from notes.joined import all_tumours, is_joined
@@ -76,8 +78,8 @@ SPLIT_TIP = (
 )
 
 
-class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, TextPanel, JoinSplit, HistoryPanel,
-          tk.Tk):
+class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit,
+          HistoryPanel, tk.Tk):
     def __init__(self, autosave=AUTOSAVE):
         super().__init__()
         errors.install(self)
@@ -111,8 +113,8 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.funnel_defaults = dict(FUNNEL_DEFAULTS)  # settings for new funnels
         self.free_smooth = SMOOTH_DEFAULT  # how much new freehand strokes are made perfect (smooth.py)
         self.text_defaults = dict(TEXT_DEFAULTS)  # settings for new text (the last ones used)
-        self._rows = {"last": True, "line_fill": False, "free": False, "tumour": False, "text": False, "custom": False,
-                      "funnel": False}  # optional panel parts
+        self._rows = {"last": True, "line_fill": False, "free": False, "tumour": False, "pattern": False, "text": False,
+                      "custom": False, "funnel": False}  # optional panel parts
         self.drawer = None
         self.rendered, self.slot_count = NO_NOTES, 0  # (start, end, pitch, velocity, slot, owner) rows
         self.note_counts = []  # notes per shape in rendered
@@ -489,6 +491,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self._build_line_fill()
         self._build_freehand()
         self._build_tumour()
+        self._build_pattern()
         self._build_text()
         self._build_custom()
         self._build_funnel()
@@ -559,6 +562,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
         self.build_points()
         self.sync_freehand()
         self.sync_tumour()
+        self.sync_pattern()
         self.sync_text()
         self.sync_custom()
         self.sync_funnel()
@@ -906,6 +910,8 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
             sh["pts"] = [[mid2 - b, p] if sideways else [b, mid2 - p] for b, p in sh["pts"]]
             for tm in all_tumours(sh):  # mirrored: the bumps swap sides too
                 tm["mirror"] = not tm["mirror"]
+            if sh.get("pattern"):  # and a pattern along a curve (pattern.py)
+                sh["pattern"]["mirror"] = not sh["pattern"]["mirror"]
             if sideways:  # the velocities flip with it
                 if sh.get("vel_env"):
                     sh["vel_env"] = [[1 - u, v] for u, v in reversed(sh["vel_env"])]
@@ -939,6 +945,10 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
                 tm["dist"] *= r / tm["k"]
                 tm["ease"] = tm.get("ease", 0.0) * r / tm["k"]
                 tm["k"] = r * r / tm["k"]
+            pat = sh.get("pattern")
+            if pat:  # a pattern along a curve turns the same way (pattern.py)
+                pat["scale"] *= pat["k"] / r
+                pat["k"] = r * r / pat["k"]
         self.sync_panel()
         self.shapes_changed()
 
@@ -968,7 +978,7 @@ class App(ProjectFiles, CustomPanel, FreehandPanel, FunnelPanel, TumourPanel, Te
     def layout_rows(self):
         """Show the panel's optional parts, always in the same order above the point boxes."""
         rows = ((self.last_row, "last"), (self.line_fill_row, "line_fill"), (self.free_box, "free"),
-                (self.tumour_box, "tumour"),
+                (self.tumour_box, "tumour"), (self.pattern_box, "pattern"),
                 (self.text_box, "text"), (self.custom_box, "custom"), (self.funnel_box, "funnel"))
         shown = [key for _, key in rows if self._rows[key]]
         if shown == getattr(self, "_rows_shown", None):
