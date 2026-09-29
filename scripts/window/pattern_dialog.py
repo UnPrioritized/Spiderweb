@@ -487,12 +487,13 @@ class FormulaDialog(tk.Toplevel):
     # ------------------------------------------------------------ the preview
     def loop_len(self):
         """A pattern: one loop's length in keys, on the first selected curve (so the preview looks like the piano
-        roll). A shape: 1 (its sizes are shares of the curve's length)."""
+        roll), always as if it had the default Loops (user: the Loops count never changes the preview). A shape: 1
+        (its sizes are shares of the curve's length)."""
         if self.layer == "shape":
             return 1.0
         h = self.targets[0]
         own = h.get("pattern") or self.host.fresh(h, "pattern")
-        got = self.host.loop_length(h, dict(self.pat, k=own["k"], scale=own.get("scale", 1.0)))
+        got = self.host.loop_length(h, dict(self.pat, loops=LOOPS_DEFAULT, k=own["k"], scale=own.get("scale", 1.0)))
         return got if got > 1e-6 else 8.0
 
     def shown_loop(self):
