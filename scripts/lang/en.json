@@ -851,7 +851,7 @@
   "Empty: just the outline, like lines (upright parts get 1-tick notes).",
   "Fill: one note per stretch of each key inside.",
   "Spam: back-to-back notes of the gate. Start: Auto = each key from its own left edge; Aligned = on the gate grid from the song's start (straight columns); Centred = what doesn't fit a whole gate is shared between both ends (peaks come out the same on both sides).",
-  "Ends: with a gate of 1 tick every key is filled exactly. With a longer gate, a key's stretch is seldom a whole number of gates, so something has to give at its ends: Ends picks what happens to the bit that doesn't fit a whole gate. The same goes for Outline spam. The pictures show the same triangle each time.",
+  "Ends: with a gate of 1 tick every key is filled exactly. With a longer gate, a key's stretch is rarely a whole number of gates, so something has to give at its ends: Ends picks what happens to the bit that doesn't fit a whole gate. The same goes for Outline spam. The pictures show the same triangle each time.",
   "",
   "Round to a gate (new shapes start with this one): a whole gate if it's at least half a gate, else dropped. Every key gets at least one gate, so the edge stays in whole gates.",
   "Start: Auto",
