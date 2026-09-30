@@ -1,6 +1,6 @@
 """The claw machine window (claw.py): changes the selected shapes' notes, shown live on the piano roll. Accept keeps
 the change (one undo step), X / Esc puts the notes back, Reset sets everything back to "does nothing". It keeps the
-piano roll to itself while it's open (only Space, to listen, still works there)."""
+main window waiting while it's open (only Space, to listen, still works there)."""
 
 import json
 import math
@@ -192,13 +192,14 @@ class ClawWindow(tk.Toplevel):
 
         self.undo = LocalUndo(self, lambda: json.dumps(self.claw, sort_keys=True), self.put_state)
         self.bind("<Control-Key>", lambda e: "break")  # (the piano roll's shortcuts wait until it's closed)
-        self.bind("<F1>", lambda e: "break")
+        self.bind("<F1>", lambda e: (app.open_help("claw"), "break")[1])
         self.bind("<Escape>", lambda e: self.cancel())
         self.bind("<Return>", lambda e: self.accept())
         self.bind("<Configure>", self.remember, add="+")
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.show()
-        self.grab_set()
+        app.attributes("-disabled", True)  # (the main window waits; Help and the tip still work)
+        self.after_idle(lambda: app.tips.show("claw", parent=self))  # (in this window: the roll is out of reach)
 
     def mode_box(self, box):
         """The settings of one mode (only the picked mode's show)."""
@@ -330,7 +331,7 @@ class ClawWindow(tk.Toplevel):
             self.app.claw_pos = f"+{self.winfo_x()}+{self.winfo_y()}"
 
     def close(self):
-        self.grab_release()
+        self.app.attributes("-disabled", False)
         self.app.claw_window = None
         self.destroy()
         self.app.roll.focus_set()
