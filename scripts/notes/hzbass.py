@@ -27,7 +27,9 @@ that is nothing but its tones (it goes when its last tone is deleted; the panel 
 Effects: hz["fx"] = {effect: [[beat, value], ...]}: one line through points over all the tones (beat counted like a
 tone's "t", from the shape's left edge; flat before the first point and after the last), value 0..1.
 hz["loop"] = {effect: beats}: that effect's points are one repeat of so many beats (from 0 to it), repeated from the
-shape's left edge on over and over (line_at; like an automation that repeats every beat). hz["off"] = [effects]
+shape's left edge on over and over (line_at; like an automation that repeats every beat). hz["amount"] = {effect:
+[[beat, value(, bend)], ...]}: for a repeating effect, a line over the notes (beats like "fx") saying how strong the
+repeat is: 1 = as drawn, 0 = as if the effect were off (NEUTRAL). hz["off"] = [effects]
 switched off (Bypass): their lines are kept but do nothing (live). They change the colour of the tone, not its pitch, by making the keys hit at different spots of the wave
 (how late a key is, in waves, is added up over the effects; a key starts that late, and a repeat pushed past its
 own tone's end is left out):
@@ -76,6 +78,7 @@ WAVES = {"sine": lambda p: (1.0 + np.cos(2.0 * np.pi * p)) / 2.0,  # the wavefor
          "triangle": lambda p: 1.0 - np.abs(2.0 * p - 1.0)}
 # the effects a Hz bass can have
 FX = ("slant", "groups", "offpitch", "noisy", "vibrato", "pitch") + VEL_FX + tuple(WAVES)
+NEUTRAL = {"volume": 1.0, "pitch": 0.5}  # the value where an effect does nothing (0 for the others)
 FLAT, RAMP, FULL = [[0.0, 0.5], [1.0, 0.5]], [[0.0, 0.0], [1.0, 1.0]], [[0.0, 1.0], [1.0, 1.0]]
 # the line an effect starts with, u = 0..1 over the tones (or what's in view when there are none)
 FX_START = dict({name: RAMP for name in FX}, offpitch=FLAT, tremolo=FLAT, vibrato=FLAT, volume=FULL, pitch=FLAT)
@@ -184,10 +187,12 @@ def live(hz):
     off = hz.get("off")
     if not off:
         return hz
-    out = {k: v for k, v in hz.items() if k not in ("fx", "loop", "off")}
+    out = {k: v for k, v in hz.items() if k not in ("fx", "loop", "off", "amount")}
     fx = {k: v for k, v in (hz.get("fx") or {}).items() if k not in off}
     loop = {k: v for k, v in (hz.get("loop") or {}).items() if k in fx}
-    return dict(out, **({"fx": fx} if fx else {}), **({"loop": loop} if loop else {}))
+    amount = {k: v for k, v in (hz.get("amount") or {}).items() if k in loop}
+    return dict(out, **({"fx": fx} if fx else {}), **({"loop": loop} if loop else {}),
+                **({"amount": amount} if amount else {}))
 
 
 def line_at(pts, beat, every=None):
@@ -210,11 +215,18 @@ def line_at(pts, beat, every=None):
 
 def fx_at(hz, name, beat):
     """The value of an effect at beat (an array, from the shape's left edge; 0 when there's no such line).
-    Before the first point and after the last one the line stays flat, unless it repeats (hz["loop"])."""
+    Before the first point and after the last one the line stays flat, unless it repeats (hz["loop"]); a repeating
+    one is made stronger or weaker by its amount line (hz["amount"])."""
     pts = (hz.get("fx") or {}).get(name)
     if not pts:
         return np.zeros(np.shape(beat))
-    return line_at(pts, beat, (hz.get("loop") or {}).get(name))
+    every = (hz.get("loop") or {}).get(name)
+    v = line_at(pts, beat, every)
+    amount = (hz.get("amount") or {}).get(name) if every else None
+    if amount:
+        still = NEUTRAL.get(name, 0.0)
+        v = still + (v - still) * line_at(amount, beat)
+    return v
 
 
 def loop_on(pts, every):
@@ -340,6 +352,10 @@ def clean_hz(hz):
         off = clean_off(hz.get("off"), fx)
         if off:
             out["off"] = off
+        amount = clean_fx(hz["amount"]) if isinstance(hz.get("amount"), dict) else {}
+        amount = {k: v for k, v in amount.items() if k in loop}
+        if amount:
+            out["amount"] = amount
     if tones:
         out["tones"] = tones
         for flag in ("grow", "own"):

@@ -1055,6 +1055,9 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
                     p[0] *= abs(kx)
             for name in hz.get("loop") or {}:
                 hz["loop"][name] *= abs(kx)
+            for pts in (hz.get("amount") or {}).values():
+                for p in pts:
+                    p[0] *= abs(kx)
         return new
 
     def shape_label(self, sh):

@@ -12,6 +12,10 @@ Ctrl+drag = a box that selects points (Ctrl+click one: in / out); dragging a sel
 deletes them, Ctrl+C / Ctrl+V copy them and paste them at the mouse (into the highlighted effect, or the ones they
 came from; the points already there are replaced). The small square before a name that's on switches the effect off
 and on again (Bypass: its line is kept).
+A repeating effect can have an amount line (right-click > Amount line): dotted, over the notes, how strong the
+repeat is. The window's lines are keyed "<effect>" and "<effect>:amount" (AMOUNT) in win.fxl.
+Pencil tool + an effect highlighted: a drag on empty space draws its line (snap on: a step in every grid cell, like
+drawing velocities; Shift or snap off: a smooth line); a plain click there still clears the highlight.
 Its top edge drags to make the pane taller or shorter (remembered)."""
 
 import copy
@@ -32,6 +36,14 @@ from roll.roll_shared import CTRL, SHIFT
 FX_COLOR = {"volume": "#9b2d5f", "slant": "#8a3ff0", "groups": "#0a8f8f", "offpitch": "#d0189a", "noisy": "#8a5a14",
             "vibrato": "#00a5d8", "pitch": "#4b0082", "sweep": "#7f8c00", "wah": "#2c3e6b", "tremolo": "#e0607a",
             "octave": "#1d6b3a", "sine": "#b060c0", "square": "#606060", "saw": "#c0a000", "triangle": "#c05a30"}
+
+
+AMOUNT = ":amount"  # (the window's key for an effect's amount line: effect + AMOUNT)
+
+
+def base(key):
+    """The effect a line belongs to ("volume:amount" -> "volume")."""
+    return key.split(":")[0]
 
 
 class _NoKeys:
@@ -155,9 +167,13 @@ class FxPane:
         """now(), kept (to go back to)."""
         return copy.deepcopy(self.now())
 
+    def names(self):
+        """The lines there are, in FX order (an effect's amount line right after it)."""
+        return [k for name in FX for k in (name, name + AMOUNT) if k in self.win.fxl]
+
     def grabbable(self):
-        """The effects whose lines can be grabbed: the highlighted one, or all when none is."""
-        return [name for name in FX if name in self.win.fxl and self.active in (None, name)]
+        """The lines that can be grabbed: the highlighted effect's, or all when none is highlighted."""
+        return [k for k in self.names() if self.active in (None, base(k))]
 
     def redraw(self):
         c, win, s = self.canvas, self.win, self.s
@@ -180,7 +196,7 @@ class FxPane:
         if not fx:
             c.create_text((kb + w) / 2, h / 2, text=tr("hz.fx_hint"), fill="#777", width=w - kb - 40 * s,
                           justify="center")
-        order = [name for name in FX if name in fx and name != self.active] + [self.active] * (self.active in fx)
+        order = sorted(self.names(), key=lambda k: base(k) == self.active)  # (the highlighted one on top)
         if self.active in win.loops and self.copies(self.active):  # where each repeat starts
             every, k0, k1 = self.copies(self.active)
             for k in range(k0, k1 + 1):
@@ -188,9 +204,9 @@ class FxPane:
                 if x > kb:
                     c.create_line(x, 0, x, h, fill="#dcdcdc", dash=(2, 3))
         for name in order:
-            lit = self.active in (None, name)
-            colour = FX_COLOR[name] if lit else faint(FX_COLOR[name])
-            off = name in win.off  # (switched off: dashed)
+            lit = self.active in (None, base(name))
+            colour = FX_COLOR[base(name)] if lit else faint(FX_COLOR[base(name)])
+            off = base(name) in win.off  # (switched off: dashed; an amount line: dotted)
             if name in win.loops and self.copies(name) is None:  # repeats too close together: a band
                 vs = [p[1] for p in fx[name]]
                 c.create_rectangle(kb, self.y_of(max(vs)), w, self.y_of(min(vs)) + 1, fill=colour, outline="",
@@ -198,7 +214,7 @@ class FxPane:
                 continue
             xy = self.line(name)
             c.create_line(*[v for p in xy for v in p], fill=colour, width=max(2, round(2 * s)) if lit else 1,
-                          dash=(6, 4) if off else ())
+                          dash=(6, 4) if off else (2, 3) if name.endswith(AMOUNT) else ())
             if lit:
                 r = 3.5 * s
                 for x, y, i, _ in self.points(name):
@@ -274,8 +290,11 @@ class FxPane:
             self.canvas.config(cursor="sb_v_double_arrow")
             return self.say("")
         name, hit = self.name_at(e.x, e.y), self.hit(e.x, e.y)
+        draws = (hit is None and e.x >= self.win.kb_w and self.active in self.win.fxl and
+                 self.win.tool.get() == "pencil" and not e.state & CTRL)
         self.canvas.config(cursor="hand2" if name else "fleur" if hit and hit[0] == "point" else
-                           "sb_v_double_arrow" if hit and hit[0] == "bend" else "crosshair" if hit else "")
+                           "sb_v_double_arrow" if hit and hit[0] == "bend" else "crosshair" if hit else
+                           self.win.pencil if draws else "")
         if name:
             every = self.win.loops.get(name)
             self.say(tr("hz.fx_%s_tip" % name) + (" " + tr("hz.fx_repeats", every=self.every_text(every))
@@ -291,6 +310,8 @@ class FxPane:
 
     @staticmethod
     def value_text(name, value):
+        if name.endswith(AMOUNT):
+            return tr("hz.fx_value_amount", name=tr("hz.fx_" + base(name)), value=f"{value * 100:.4g}")
         if name == "groups":
             n = int(group_count(value))
             return tr("hz.fx_value_groups" if n > 1 else "hz.fx_value_together", name=tr("hz.fx_" + name), n=n)
@@ -317,6 +338,12 @@ class FxPane:
         hit = self.hit(e.x, e.y)
         if e.state & CTRL and e.x >= win.kb_w and (hit is None or hit[0] == "line"):  # a box selecting points
             self.drag = {"kind": "box", "x0": e.x, "y0": e.y, "had": set(self.sel)}
+            return
+        if hit is None and e.x >= win.kb_w and self.active in win.fxl and win.tool.get() == "pencil":
+            every = win.loops.get(self.active)  # (a drag draws; a click still clears the highlight, on release)
+            self.drag = {"kind": "draw", "fx": self.active, "x0": e.x, "y0": e.y, "moved": False,
+                         "before": self.state(), "orig": copy.deepcopy(win.fxl[self.active]), "got": {},
+                         "k": math.floor(max(0.0, win.beat_at(e.x)) / every) if every else 0}
             return
         if hit is None:
             if e.x >= win.kb_w and (self.active is not None or self.sel):  # a click on nothing: nothing
@@ -369,6 +396,8 @@ class FxPane:
         if d and d["kind"] == "box":
             d["x1"], d["y1"] = e.x, e.y
             return self.redraw()
+        if d and d["kind"] == "draw":
+            return self.draw_at(d, e)
         if not d or d["kind"] != "point":
             return
         name, i = d["fx"], d["i"]
@@ -410,6 +439,14 @@ class FxPane:
             return
         if d["kind"] == "size":
             return win.app.schedule_autosave()
+        if d["kind"] == "draw":
+            if not d["moved"]:  # (a click on nothing: nothing highlighted or selected)
+                self.active, self.sel = None, set()
+                return win.redraw()
+            self.says = ""
+            if self.now() != d["before"]:
+                win.commit_fx(d["before"])
+            return
         if d["kind"] == "box":
             x0, x1, y0, y1 = sorted((d["x0"], e.x)) + sorted((d["y0"], e.y))
             self.sel = d["had"] | {(n, i) for n in self.grabbable() for x, y, i, _ in self.points(n)
@@ -477,10 +514,12 @@ class FxPane:
     def drop(self, name):
         """An effect's line, repeat and switch gone (no undo step)."""
         win = self.win
-        win.fxl.pop(name, None)
+        gone = {name} if name.endswith(AMOUNT) else {name, name + AMOUNT}
+        for k in gone:
+            win.fxl.pop(k, None)
         win.loops.pop(name, None)
         win.off = [n for n in win.off if n != name]
-        self.sel = {(n, i) for n, i in self.sel if n != name}
+        self.sel = {(n, i) for n, i in self.sel if n not in gone}
         if self.active == name:
             self.active = None
 
@@ -500,6 +539,66 @@ class FxPane:
         win.off = [n for n in win.off if n != name] if name in win.off else win.off + [name]
         win.commit_fx(before)
 
+    def amount_line(self, name):
+        """A repeating effect's amount line put on (100 % over all the notes) or taken off."""
+        win = self.win
+        before = self.state()
+        if win.fxl.pop(name + AMOUNT, None) is None:
+            a, b = self.span()
+            win.fxl[name + AMOUNT] = [[a, 1.0], [b, 1.0]]
+            self.active = name
+        win.commit_fx(before)
+
+    # ------------------------------------------------------------ drawing with the pencil
+
+    def draw_at(self, d, e):
+        """The pencil dragged over the pane: the highlighted effect's line becomes what's drawn, from where the
+        drawing started to where it is (snap on: one step in every grid cell; Shift or snap off: a smooth line)."""
+        win = self.win
+        if not d["moved"]:
+            if abs(e.x - d["x0"]) < 4 and abs(e.y - d["y0"]) < 4:
+                return
+            d["moved"] = True
+            self.on_drag_draw_point(d, d["x0"], d["y0"], e)
+        self.on_drag_draw_point(d, e.x, e.y, e)
+        name, every, got = d["fx"], win.loops.get(d["fx"]), d["got"]
+        step, hold = d["step"], d["hold"]
+        gs = sorted(got)
+        lo, hi = gs[0] * step, (gs[-1] + 1) * step if hold else gs[-1] * step
+        if every:
+            hi = min(hi, every)
+        orig = d["orig"]
+        kept = [p for p in orig if not lo - 1e-9 <= p[0] <= hi + 1e-9]
+        new = [[g * step, got[g], "hold"] if hold else [g * step, got[g]] for g in gs if not every or g * step < every]
+        if not new:  # (all past the end of the repeat)
+            return
+        # the line as it was up to where the drawing starts and on from where it ends (a step at both)
+        new = [[lo, float(line_at(orig, lo, every))]] + new + [[hi, float(line_at(orig, hi, every))]]
+        win.fxl[name] = sorted(kept + new, key=lambda p: p[0])
+        self.says = self.value_text(name, got[gs[-1]])
+        win.redraw()
+
+    def on_drag_draw_point(self, d, x, y, e):
+        """One spot of the pencil taken in (and the grid cells between it and the last one, in a straight line)."""
+        win = self.win
+        if "step" not in d:
+            snap = win.snap_beats()
+            d["hold"] = bool(snap) and not e.state & SHIFT
+            d["step"] = snap if d["hold"] else 4.0 / win.sx
+        every = win.loops.get(d["fx"])
+        beat = max(0.0, win.beat_at(x) - (d["k"] * every if every else 0.0))
+        g = int(math.floor(beat / d["step"] + (0 if d["hold"] else 0.5)))
+        v = self.value_at(y)
+        if d["fx"] == "pitch" and not e.state & SHIFT:  # (whole keys, like the points)
+            v = 0.5 + round((v - 0.5) * 2 * PITCH) / (2 * PITCH)
+        v = round(v, 4)
+        last = d.get("last")
+        if last is not None and abs(g - last[0]) > 1:  # (a fast mouse: the cells in between too)
+            for h in range(min(g, last[0]) + 1, max(g, last[0])):
+                d["got"][h] = round(last[1] + (v - last[1]) * (h - last[0]) / (g - last[0]), 4)
+        d["got"][g] = v
+        d["last"] = (g, v)
+
     # ------------------------------------------------------------ copy and paste
 
     def copy_points(self):
@@ -509,8 +608,8 @@ class FxPane:
         fx = self.win.fxl
         first = min(fx[n][i][0] for n, i in self.sel)
         self.clip = {}
-        for n, i in sorted(self.sel, key=lambda p: (FX.index(p[0]), p[1])):
-            self.clip.setdefault(n, []).append([fx[n][i][0] - first, *fx[n][i][1:]])
+        for n, i in sorted(self.sel, key=lambda p: (self.names().index(p[0]), p[1])):
+            self.clip.setdefault(n, []).append([fx[n][i][0] - first, *fx[n][i][1:]])  # (an amount line's too)
         return True
 
     def paste_points(self):
@@ -598,6 +697,7 @@ class FxPane:
             if old:
                 win.fxl[name] = loop_off(pts, old, *self.span())
                 del win.loops[name]
+                win.fxl.pop(name + AMOUNT, None)  # (only a repeat has one)
         else:
             win.fxl[name] = [[p[0] * every / old, *p[1:]] for p in pts] if old else loop_on(pts, every)
             win.loops[name] = every
@@ -631,7 +731,7 @@ class FxPane:
             menu.add_command(label=tr("hz.fx_straight"), command=lambda: self.set_bend(hit[1], seg, 0.0),
                              state="normal" if len(p) > 2 else "disabled")
             menu.add_separator()
-        target = name or (hit and hit[1]) or (self.active if e.x >= self.win.kb_w else None)
+        target = name or (hit and base(hit[1])) or (self.active if e.x >= self.win.kb_w else None)
         if target:  # repeating: how long one repeat is, and ready-made shapes for it
             every = self.win.loops.get(target)
             self.picked = tk.StringVar(self.win, value=self.every_text(every) if every else "off")
@@ -647,6 +747,10 @@ class FxPane:
             for kind in LOOP_SHAPES:
                 shapes.add_command(label=tr("hz.fx_shape_" + kind), command=lambda k=kind: self.set_shape(target, k))
             menu.add_cascade(label=tr("hz.fx_shape"), menu=shapes)
+            if target in self.win.loops:
+                self.has_amount = tk.BooleanVar(self.win, value=target + AMOUNT in self.win.fxl)
+                menu.add_checkbutton(label=tr("hz.fx_amount"), variable=self.has_amount,
+                                     command=lambda: self.amount_line(target))
             if target in self.win.fxl:
                 self.is_off = tk.BooleanVar(self.win, value=target in self.win.off)
                 menu.add_checkbutton(label=tr("hz.fx_bypass"), variable=self.is_off,

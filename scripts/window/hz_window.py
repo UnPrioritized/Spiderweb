@@ -33,7 +33,7 @@ from notes.hzbass import (AUTO, AUTO_MOST, FX, HZ_DEFAULTS, TUNE, auto_state, ca
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, SELECT_CURSOR, SELECTED_COLOR, SHIFT,
                               SLOT_COLORS, box_side, box_upright, grid_span, note_name)
 from roll.zoombar import add_zoom_bars
-from window.hz_effects import FxPane
+from window.hz_effects import AMOUNT, FxPane
 from window.hz_preview import Preview
 from window.preview_settings import open_preview_settings
 from window.snap_picker import SnapPicker
@@ -271,6 +271,7 @@ class HzWindow(tk.Toplevel):
         if sh is not None or self.fx_of is not None:  # (no Hz bass yet: the lines picked stay for the first note)
             self.fxl, self.fx_of = clean_fx(hz.get("fx") or {}), (id(sh) if sh is not None else None)
             self.loops = clean_loop(hz.get("loop"), self.fxl)
+            self.fxl.update({k + AMOUNT: v for k, v in clean_fx(hz.get("amount") or {}).items() if k in self.loops})
             self.off = clean_off(hz.get("off"), self.fxl)
         if sh is None:
             text = (tr("hz.hint_new", beat=fmt(self.app.hz_start + 1)) if self.app.hz_start is not None
@@ -1227,13 +1228,17 @@ class HzWindow(tk.Toplevel):
         self.tones.sort(key=lambda n: (n["t"], n["key"]))
         self.sel = {i for i, n in enumerate(self.tones) if any(n is p for p in picked)}
         tones = clean_tones(copy.deepcopy(self.tones))
-        fx = {"fx": clean_fx(self.fxl)} if self.fxl else {}
+        fx = {"fx": clean_fx(self.fxl)} if self.fxl else {}  # (amount lines: below)
         loops = clean_loop(self.loops, fx["fx"]) if fx else {}
         if loops:
             fx["loop"] = loops
         off = clean_off(self.off, fx["fx"]) if fx else []
         if off:
             fx["off"] = off
+        amount = clean_fx({k[:-len(AMOUNT)]: v for k, v in self.fxl.items() if k.endswith(AMOUNT)})
+        amount = {k: v for k, v in amount.items() if k in loops}
+        if amount:
+            fx["amount"] = amount
         sh = self.target()
         bpm = app.current_bpm()
         if sh is None:
@@ -1252,7 +1257,7 @@ class HzWindow(tk.Toplevel):
             app.add_shape(new)
         else:
             hz = dict(sh.get("hz") or dict(HZ_DEFAULTS, bpm=float(bpm or 120), **self.fixed()))
-            for k in ("tones", "grow", "fx", "loop", "off"):
+            for k in ("tones", "grow", "fx", "loop", "off", "amount"):
                 hz.pop(k, None)
             new = copy.deepcopy(sh)
             if tones:
