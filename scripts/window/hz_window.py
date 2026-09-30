@@ -23,7 +23,7 @@ from files.snap import snap_beats
 from notes.engine import slot_track_channel
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
 from notes.hzbass import HZ_DEFAULTS, clean_tones, fit_length, holds, hz_of, left_edge, tones_span, voices
-from roll.roll_shared import CTRL, SELECTED_COLOR, SHIFT, SLOT_COLORS, note_name
+from roll.roll_shared import ALT, CTRL, SELECTED_COLOR, SHIFT, SLOT_COLORS, note_name
 from window.snap_picker import SnapPicker
 from window.widgets import Tooltip
 
@@ -74,6 +74,7 @@ class HzWindow(tk.Toplevel):
         bar.pack(fill="x")
         ttk.Label(bar, text=tr("app.snap")).pack(side="left")
         SnapPicker(app, bar, app.hz_snap).button.pack(side="left", padx=(4, 10))
+        ttk.Button(bar, text=tr("app.fit_view"), command=self.fit_notes).pack(side="left", padx=(0, 10))
         self.what = ttk.Label(bar, text="", foreground="#555")
         self.what.pack(side="left")
         self.grow = tk.BooleanVar(value=True)
@@ -197,18 +198,41 @@ class HzWindow(tk.Toplevel):
         self.t0 = max(-0.25, self.t0)
 
     def on_wheel(self, e):
-        up = 1 if e.delta > 0 else -1
-        if e.state & CTRL:  # zoom both ways, around the mouse
-            b, k = self.beat_at(e.x), self.top - (e.y - self.ruler_h) / self.sy
-            f = 1.2 ** up
-            self.sx = min(2000.0 * self.s, max(4.0 * self.s, self.sx * f))
-            self.sy = min(40.0 * self.s, max(4.0 * self.s, self.sy * f))
+        """The same as on the main piano roll (PianoRoll.on_wheel): wheel = up / down 3 keys, Shift = sideways,
+        Ctrl = zoom both ways around the mouse, Ctrl+Shift = time only, Alt = keys only."""
+        up = e.delta > 0
+        f = 1.25 if up else 0.8
+        zoom_time = e.state & CTRL and not e.state & ALT
+        zoom_keys = (e.state & CTRL and not e.state & SHIFT) or e.state & ALT
+        if zoom_time:
+            b = self.beat_at(e.x)
+            self.sx = min(100000.0, max(0.05, self.sx * f))
             self.t0 = b - (e.x - self.kb_w) / self.sx
+        if zoom_keys:
+            k = self.top - (e.y - self.ruler_h) / self.sy
+            self.sy = min(60.0 * self.s, max(1.0, self.sy * f))
             self.top = k + (e.y - self.ruler_h) / self.sy
-        elif e.state & SHIFT:
-            self.t0 -= up * 60 * self.s / self.sx
-        else:
-            self.top += up * 3
+        if not (zoom_time or zoom_keys):
+            if e.state & SHIFT:
+                self.t0 += (-1 if up else 1) * 120 / self.sx
+            else:
+                self.top += 3 if up else -3
+        self.clamp_view()
+        self.redraw()
+
+    def fit_notes(self):
+        """The Fit view button: every note in sight (no notes: the first bars, the keys as they are)."""
+        w, h = self.canvas.winfo_width() - self.kb_w, self.canvas.winfo_height() - self.ruler_h
+        if w < 50 or h < 50:
+            return
+        lo, hi = (0.0, max(n["t"] + n["len"] for n in self.tones)) if self.tones else (0.0, 4.0 * self.app.beats)
+        span = max(hi - lo, 1.0)
+        self.sx, self.t0 = w / (span * 1.06), lo - span * 0.03
+        if self.tones:
+            keys = [n["key"] for n in self.tones]
+            rows = max(keys) - min(keys) + 1 + 4  # (two keys of room above and below)
+            self.sy = min(12.0 * self.s, max(1.0, h / rows))  # (a few notes: not huge rows)
+            self.top = (max(keys) + min(keys)) / 2 + h / self.sy / 2
         self.clamp_view()
         self.redraw()
 
@@ -238,6 +262,10 @@ class HzWindow(tk.Toplevel):
             c.create_line(kb, y + self.sy, w, y + self.sy, fill="#c9c9c9" if k % 12 == 0 else "#ececec")
         beats, sb = self.app.beats, self.snap_beats()
         step = sb if sb and sb * self.sx >= 8 else 1.0
+        if step * self.sx < 8:  # zoomed far out: bars, then every 2nd, 4th... bar
+            step = float(beats)
+            while step * self.sx < 8:
+                step *= 2
         n = math.floor(max(0.0, self.beat_at(kb)) / step)
         while n * step <= self.beat_at(w):  # columns
             b = n * step
@@ -271,18 +299,24 @@ class HzWindow(tk.Toplevel):
             y = self.y_of(k)
             if k % 12 in BLACK:
                 c.create_rectangle(0, y, kb * 0.6, y + self.sy, fill="#303030", outline="")
-            c.create_line(0, y + self.sy, kb, y + self.sy, fill="#d0d0d0")
+            if self.sy >= 4 * s:
+                c.create_line(0, y + self.sy, kb, y + self.sy, fill="#d0d0d0")
+        for k in range(k_lo, k_hi + 1):  # (the names after the keys, so small rows don't cover them)
+            y = self.y_of(k)
             if k % 12 == 0 or (self.sy >= 15 * s and k % 12 not in BLACK):
                 c.create_text(kb - 3, y + self.sy / 2, text=note_name(k), anchor="e", fill="#222",
                               font=("Segoe UI", 7, "bold" if k % 12 == 0 else "normal"))
         c.create_line(kb, 0, kb, h, fill="#707070")
         c.create_rectangle(0, 0, w, rh, fill="#f3f3f3", outline="")  # bar numbers
-        n = max(0, math.floor(self.beat_at(kb) / beats))
+        every = 1  # (zoomed far out: every 2nd, 4th... bar number, so they don't run into each other)
+        while every * beats * self.sx < 40 * s:
+            every *= 2
+        n = max(0, math.floor(self.beat_at(kb) / beats / every) * every)
         while n * beats <= self.beat_at(w):
             x = self.x_of(n * beats)
             if x >= kb:
                 c.create_text(x + 3, rh / 2, text=str(n + 1), anchor="w", fill="#333", font=("Segoe UI", 8))
-            n += 1
+            n += every
         c.create_line(0, rh, w, rh, fill="#707070")
         if not self.can_place():
             c.create_text((kb + w) / 2, (rh + h) / 2, text=tr("hz.hint_none"), fill="#777",
