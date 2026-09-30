@@ -3,14 +3,16 @@
 A custom shape with sh["hz"] (and a spam fill) gets its spam gates from a tone instead of the gate box:
   {"key": the key whose tone is wanted, "cents": pitch adjustment (100 = one key), "bpm": the BPM the gates are
    worked out for, "fixed": True = every gate rounded to a whole tick instead (the tone is a little off; the
-   higher PPQ x BPM, the less)}
+   higher PPQ x BPM, the less), "auto": cents (0..AUTO_MOST) = instead of "fixed": a tone held still gets fixed
+   gates when those are at most this far off its exact tone, else mixed ones; a slide is always mixed. A placed
+   tone may have its own "auto" (see threshold)}
 sh["gate"] is then one wave of that tone, gate = BPM / (60 x Hz) beats, NOT rounded to a whole tick: the notes sit
 on one grid counted from tick 0 (every key in step), note n starting at round(n x gate), so gates of two sizes are
 mixed and the tone comes out exact (custom.chop_even). The tone depends on the BPM, so a changed BPM leaves it off
 until it's updated (the panel warns); a changed PPQ keeps the tone.
 
 Placed notes (the Hz bass window): hz["tones"] = [{"t": start in beats from the shape's left edge, "len": beats,
-"key": its tone, "cents": its own tune, "id": its number (never reused in the shape), "to": its slides}, ...].
+"key": its tone, "cents": its own tune, "auto": its own Auto gates threshold (optional), "id": its number (never reused in the shape), "to": its slides}, ...].
 Each tone makes repeats one wave apart for as long as it lasts; tones sounding together are a chord. A slide is
 made by the user and belongs to two tones: "to" = [{"id": the tone slid to, "out": lead out, "in": lead in
 (beats)}, ...]: the tone glides from `out` before this tone's end to `in` after the start of the other one (which
@@ -58,6 +60,8 @@ import numpy as np
 HZ_DEFAULTS = {"key": 33, "cents": 0.0}
 MIN_LEN = 1 / 1024  # beats: a tone is never shorter
 TUNE = 50.0  # cents: how far a placed tone's own tune goes, up or down (half a key)
+AUTO = 3.0  # cents: Auto gates' threshold to start with
+AUTO_MOST = 50.0  # ... and the highest (past half a key, a fixed tone is nearer the next key than its own)
 VEL_FX = ("sweep", "wah", "tremolo", "octave")  # the effects that change the velocity
 WAVES = {"sine": lambda p: (1.0 + np.cos(2.0 * np.pi * p)) / 2.0,  # the waveforms: loudness over one wave (p 0..1)
          "square": lambda p: (p < 0.5).astype(float),
@@ -145,11 +149,13 @@ def clean_tones(tones):
                     "cents": max(-TUNE, min(TUNE, float(n.get("cents", 0.0))))}
             leads = (max(0.0, float(n.get("in", 0.0))), max(0.0, float(n.get("out", 0.0))))
             tone["id"] = int(n.get("id", 0))
+            if n.get("auto") is not None:
+                tone["auto"] = max(0.0, min(AUTO_MOST, float(n["auto"])))
             tone["to"] = [{"id": int(s["id"]), "out": max(0.0, float(s["out"])), "in": max(0.0, float(s["in"]))}
                           for s in n.get("to") or ()]
         except (KeyError, TypeError, ValueError, AttributeError):
             continue
-        ok = all(math.isfinite(v) for v in [tone["t"], tone["len"], tone["cents"], *leads]
+        ok = all(math.isfinite(v) for v in [tone["t"], tone["len"], tone["cents"], tone.get("auto", 0.0), *leads]
                  + [v for s in tone["to"] for v in (s["out"], s["in"])])
         if 0 <= tone["key"] <= 127 and ok:
             out.append(tone)
@@ -194,6 +200,13 @@ def clean_hz(hz):
         return None
     if hz.get("fixed") is True:
         out["fixed"] = True
+    else:
+        try:
+            auto = float(hz["auto"]) if hz.get("auto") is not None else None
+        except (TypeError, ValueError):
+            auto = None
+        if auto is not None and math.isfinite(auto):
+            out["auto"] = max(0.0, min(AUTO_MOST, auto))
     tones = clean_tones(hz.get("tones"))
     fx = clean_fx(hz["fx"]) if isinstance(hz.get("fx"), dict) else old_fx(hz.get("tones") or ())
     if fx:
@@ -245,10 +258,35 @@ def glide(a, b, s):
     return a["t"] + a["len"] - min(s["out"], a["len"]), b["t"] + min(s["in"], b["len"]), pitch(a), pitch(b)
 
 
-def wave(hz, ppq, key):
-    """The gate, in ticks, of one wave of key's tone (hz = the shape's settings: cents, bpm, fixed)."""
+def wave(hz, ppq, key, limit=None):
+    """The gate, in ticks, of one wave of key's tone (hz = the shape's settings: cents, bpm, fixed). limit = Auto
+    gates' threshold in cents for a tone held still: whole ticks when that's at most this far off."""
     gate = ppq * hz["bpm"] / 60.0 / hz_of(key, hz["cents"])
-    return max(1.0, math.floor(gate + 0.5) if hz.get("fixed") else gate)
+    whole = hz.get("fixed") or (limit is not None and off_cents(gate) <= limit + 1e-9)
+    return max(1.0, math.floor(gate + 0.5) if whole else gate)
+
+
+def off_cents(gate):
+    """How far, in cents, a gate rounded to a whole tick is off the tone of the exact gate (in ticks)."""
+    whole = max(1.0, math.floor(gate + 0.5))
+    return abs(1200.0 * math.log2(gate / whole))
+
+
+def threshold(hz, n=None):
+    """Auto gates' threshold in cents for tone n (its own, or the Hz bass's), or None when the gates aren't Auto."""
+    if hz.get("auto") is None:
+        return None
+    return (n or {}).get("auto", hz["auto"])
+
+
+def auto_state(hz, ppq, n):
+    """For tone n held still with Auto gates: (how far fixed gates would be off, in cents; the threshold; True when
+    it gets fixed gates). None when the gates aren't Auto."""
+    limit = threshold(hz, n)
+    if limit is None:
+        return None
+    off = off_cents(ppq * hz["bpm"] / 60.0 / hz_of(pitch(n), hz["cents"]))
+    return off, limit, off <= limit + 1e-9
 
 
 def tone_runs(hz, left, ppq):
@@ -264,7 +302,7 @@ def tone_runs(hz, left, ppq):
         a = n["t"] + min([min(s["in"], n["len"]) for _, b, s in ls if b is n], default=0.0)
         b = n["t"] + n["len"] - min([min(s["out"], n["len"]) for m, _, s in ls if m is n], default=0.0)
         if b > a:
-            s, e, gate = (left + a) * ppq, (left + b) * ppq, wave(hz, ppq, pitch(n))
+            s, e, gate = (left + a) * ppq, (left + b) * ppq, wave(hz, ppq, pitch(n), threshold(hz, n))
             starts = s + gate * np.arange(int(math.ceil((e - s) / gate)))
             out.append((starts, starts + gate, (n, None)))
             held[n["id"]] = (s, gate)

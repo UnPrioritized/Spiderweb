@@ -23,12 +23,12 @@ import numpy as np
 
 from files.about import ICONS
 from files.lang import tr
-from files.mathexpr import fmt
+from files.mathexpr import calc, fmt
 from files.snap import snap_beats
 from notes.engine import slot_track_channel
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
-from notes.hzbass import (FX, HZ_DEFAULTS, TUNE, can_slide, clean_fx, clean_tones, fit_length, glide, heard, hz_of, left_edge,
-                          links, next_id, pitch, tones_span)
+from notes.hzbass import (AUTO, AUTO_MOST, FX, HZ_DEFAULTS, TUNE, auto_state, can_slide, clean_fx, clean_tones,
+                          fit_length, glide, heard, hz_of, left_edge, links, next_id, pitch, tones_span)
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, SELECT_CURSOR, SELECTED_COLOR, SHIFT,
                               SLOT_COLORS, box_side, box_upright, grid_span, note_name)
 from roll.zoombar import add_zoom_bars
@@ -36,7 +36,7 @@ from window.hz_effects import FxPane
 from window.hz_preview import Preview
 from window.preview_settings import open_preview_settings
 from window.snap_picker import SnapPicker
-from window.widgets import Tooltip
+from window.widgets import Scrub, Tooltip
 
 BLACK = (1, 3, 6, 8, 10)
 RED = "#e02020"
@@ -45,6 +45,9 @@ GREY = "#8a8a8a"  # over what the preview hasn't made yet
 ORANGE = "#c06000"
 FAINT = "#f0a0a0"  # behind the red line: each repeat's own pitch
 GREEN = "#18a048"  # a note's exact tone (the middle of its row)
+# Auto gates: the threshold around a note's tone, (fill, edge) when it gets fixed / mixed gates
+BAND_FIXED, BAND_MIXED = ("#8ee0a4", "#18a048"), ("#ffc27a", "#c06000")
+GATE_MODES = ("mixed", "fixed", "auto")  # the Gates dropdown's choices, in order
 TUNE_ROW = 20  # px: rows at least this tall show the exact tone, and the red line can be dragged up / down
 POS = r"\d+x\d+\+-?\d+\+-?\d+"  # a remembered size and place
 try:  # how quick a second click has to be to make a double click (Windows' setting)
@@ -59,6 +62,29 @@ def open_hz(app):
     else:
         app.hz_window = HzWindow(app)
     app.hz_window.sync()
+
+
+def gate_mode(hz):
+    """A Hz bass's gates: "mixed", "fixed" or "auto"."""
+    hz = hz or {}
+    return "fixed" if hz.get("fixed") else "auto" if hz.get("auto") is not None else "mixed"
+
+
+def auto_box(app, parent, var, apply):
+    """The Auto gates threshold box ("within [3] cents"): a frame (not packed) with .entry. apply() on Enter,
+    leaving the box, and each step of the number."""
+    f = ttk.Frame(parent)
+    lb = ttk.Label(f, text=tr("hz.auto_within"))
+    lb.pack(side="left")
+    f.entry = ttk.Entry(f, textvariable=var, width=4)
+    f.entry.pack(side="left", padx=(4, 2))
+    ttk.Label(f, text=tr("panel_custom.hz_cents"), foreground="#777").pack(side="left", padx=(0, 4))
+    f.entry.bind("<Return>", lambda e: apply())
+    f.entry.bind("<FocusOut>", lambda e: apply())
+    Scrub(app, [(f.entry, var, apply)], (0.5, 5, 0.1), 0, AUTO_MOST, label=lb)
+    for w in (lb, f.entry):
+        Tooltip(w, tr("hz.auto_tip", most=f"{AUTO_MOST:g}"))
+    return f
 
 
 def hz_made(sh):
@@ -122,12 +148,14 @@ class HzWindow(tk.Toplevel):
         ttk.Button(f, text=tr("app.fit_view"), command=self.fit_notes).pack(side="left", padx=(0, 10))
         f = piece()
         ttk.Label(f, text=tr("hz.gates")).pack(side="left")
-        self.gates = ttk.Combobox(f, values=[tr("panel_custom.hz_mixed"), tr("panel_custom.hz_fixed")],
+        self.gates = ttk.Combobox(f, values=[tr("panel_custom.hz_" + m) for m in GATE_MODES],
                                   state="readonly", width=7)
         self.gates.current(0)
         self.gates.pack(side="left", padx=(4, 10))
         self.gates.bind("<<ComboboxSelected>>", self.on_gates)
         Tooltip(self.gates, tr("panel_custom.hz_gates_tip"))
+        self.auto_var = tk.StringVar(value=fmt(AUTO))
+        self.auto_row = auto_box(app, f, self.auto_var, self.on_auto)  # (shown with Auto gates)
         f = piece()
         ttk.Label(f, text=tr("app.ppq")).pack(side="left")  # the project's PPQ: the same box as under Project
         ppq = ttk.Combobox(f, textvariable=app.pvar["ppq"], values=app.ppq_box["values"], width=7,
@@ -242,8 +270,11 @@ class HzWindow(tk.Toplevel):
             text = tr("hz.shape", name=self.app.shape_label(sh))
             self.grow.set(bool(hz.get("grow")) if tones else hz_made(sh))
         if hz:  # (no Hz bass yet: the dropdown stays as picked, for the one the first note makes)
-            self.gates.current(1 if hz.get("fixed") else 0)
+            self.gates.current(GATE_MODES.index(gate_mode(hz)))
+            if hz.get("auto") is not None:
+                self.auto_var.set(fmt(hz["auto"]))
         self.gates.config(state="readonly" if self.can_place() else "disabled")
+        self.show_auto()
         self.what.config(text=text)
         self.after_idle(self.layout)  # (its width changed)
         self.grow_box.config(state="normal" if sh is not None else "disabled")
@@ -515,6 +546,14 @@ class HzWindow(tk.Toplevel):
         hz = dict((sh or {}).get("hz") or self.new_hz(bpm), tones=self.tones)
         left = left_edge(sh) if sh is not None else app.hz_start or 0.0
         lo, hi = self.beat_at(kb), self.beat_at(w)
+        for n in self.tones:  # Auto gates: the threshold around each note's tone, green = fixed, orange = mixed
+            got = auto_state(hz, app.ppq, n)
+            if got is None or n["t"] > hi or n["t"] + n["len"] < lo:
+                continue
+            y, half = self.pitch_y(pitch(n)), max(2.5 * self.s, got[1] / 100.0 * self.sy)  # (always seen)
+            fill, edge = BAND_FIXED if got[2] else BAND_MIXED
+            c.create_rectangle(self.x_of(n["t"]), y - half, self.x_of(n["t"] + n["len"]), y + half, fill=fill,
+                               outline=edge if half >= 3 * self.s else "")
         runs = []
         for a, b, keys, mean in heard(hz, left, app.ppq, bpm):
             see = (b >= lo) & (a <= hi)
@@ -594,6 +633,12 @@ class HzWindow(tk.Toplevel):
                                  hz=f"{hz_of(k, cents):.2f}")
         if self.drag and self.drag["kind"] == "tune":
             text += "     " + tr("hz.tune", cents=f"{self.tones[self.drag['i']]['cents']:+g}")
+        hit = self.hit(e.x, e.y) if e is not None and not self.drag else None
+        got = (auto_state(sh["hz"], self.app.ppq, self.tones[hit[1]])
+               if hit and hit[0] not in ("in", "out") and sh is not None and sh.get("hz") else None)
+        if got:  # Auto gates: what this note gets, and why
+            text += "     " + tr("hz.auto_fixed" if got[2] else "hz.auto_mixed", off=f"{got[0]:.2f}",
+                                 limit=f"{got[1]:g}")
         if self.fx.says:
             text = self.fx.says
         self.status.config(text=text)
@@ -966,6 +1011,16 @@ class HzWindow(tk.Toplevel):
         if hit and hit[0] not in ("in", "out"):
             menu.add_command(label=tr("hz.tune_type", cents=f"{self.tones[hit[1]]['cents']:+g}"),
                              command=lambda: self.type_tune(hit[1]))
+            hz = (self.target() or {}).get("hz") or {}
+            if hz.get("auto") is not None:  # Auto gates: the note's own threshold
+                n = self.tones[hit[1]]
+                menu.add_command(label=tr("hz.auto_own", cents=f"{n.get('auto', hz['auto']):g}"),
+                                 command=lambda: self.type_auto(hit[1]))
+                picked = self.sel if hit[1] in self.sel else {hit[1]}
+                if any("auto" in self.tones[j] for j in picked):
+                    menu.add_command(label=tr("hz.auto_shared", cents=f"{hz['auto']:g}"),
+                                     command=lambda: self.set_auto(hit[1], None))
+            menu.add_separator()
         if pairs and all(self.link(a, b) for a, b in pairs):
             menu.add_command(label=tr("hz.slide_remove"), command=lambda: self.set_slide(False))
         else:
@@ -984,6 +1039,31 @@ class HzWindow(tk.Toplevel):
             self.tones[j]["cents"] = float(cents)
         if self.tones != before:
             self.commit(tr("hz.step_tune"), before)
+
+    def type_auto(self, i):
+        """A note's own Auto gates threshold typed in cents (the selected notes get it too when it's one of them)."""
+        hz = (self.target() or {}).get("hz") or {}
+        if hz.get("auto") is None:
+            return
+        cents = simpledialog.askfloat(tr("hz.window_title"), tr("hz.auto_ask", most=f"{AUTO_MOST:g}"), parent=self,
+                                      initialvalue=self.tones[i].get("auto", hz["auto"]), minvalue=0.0,
+                                      maxvalue=AUTO_MOST)
+        if cents is not None:
+            self.set_auto(i, float(cents))
+
+    def set_auto(self, i, cents):
+        """Note i's own Auto gates threshold (the selected notes' too when it's one of them); None = back to the
+        Hz bass's."""
+        if i >= len(self.tones):
+            return
+        before = copy.deepcopy(self.tones)
+        for j in self.sel if i in self.sel else {i}:
+            if cents is None:
+                self.tones[j].pop("auto", None)
+            else:
+                self.tones[j]["auto"] = cents
+        if self.tones != before:
+            self.commit(tr("hz.step_auto"), before)
 
     def set_slide(self, on):
         """Slides between the selected notes (see pairs): each a quarter of its two notes long to start with (its
@@ -1015,22 +1095,62 @@ class HzWindow(tk.Toplevel):
             return self.redraw()
         self.commit(tr("hz.grow"), copy.deepcopy(self.tones))
 
+    def auto_limit(self):
+        """The threshold box's cents, or None when it doesn't hold a number from 0 to AUTO_MOST (it turns red)."""
+        try:
+            limit = float(calc(self.auto_var.get()))
+            if 0 <= limit <= AUTO_MOST:
+                self.auto_row.entry.config(style="TEntry")
+                return limit
+        except (ValueError, ZeroDivisionError):
+            pass
+        self.auto_row.entry.config(style="Bad.TEntry")
+        return None
+
     def fixed(self):
-        """{"fixed": True} when the dropdown says Fixed gates (else nothing): for a Hz bass that's still to be made."""
-        return {"fixed": True} if self.gates.current() == 1 else {}
+        """What the dropdown (and threshold box) say, as hz settings ({"fixed": True}, {"auto": cents} or nothing):
+        for a Hz bass that's still to be made."""
+        mode = GATE_MODES[self.gates.current()]
+        if mode == "auto":
+            limit = self.auto_limit()
+            return {"auto": AUTO if limit is None else limit}
+        return {"fixed": True} if mode == "fixed" else {}
 
     def new_hz(self, bpm):
         """The settings of a Hz bass that isn't there yet, as the first note would make it."""
         hz = dict(self.app.custom_defaults.get("hz") or HZ_DEFAULTS, bpm=float(bpm or 120))
         hz.pop("fixed", None)
+        hz.pop("auto", None)
         return dict(hz, **self.fixed())
 
+    def show_auto(self):
+        """The threshold box: there only with Auto gates."""
+        if GATE_MODES[self.gates.current()] == "auto":
+            self.auto_row.pack(side="left", padx=(0, 6))
+            self.auto_row.entry.config(state="normal" if self.can_place() else "disabled")
+        else:
+            self.auto_row.pack_forget()
+        self.after_idle(self.layout)
+
     def on_gates(self, e=None):
-        """The gates dropdown: Mixed or Fixed for the Hz bass shown (one undo step), or for the one to be made."""
+        """The gates dropdown: Mixed, Fixed or Auto for the Hz bass shown (one undo step), or for the one to be
+        made."""
         sh = self.target()
         if sh is not None and sh.get("hz"):
-            self.app.set_hz_fixed(self.gates.current() == 1)
+            mode = GATE_MODES[self.gates.current()]
+            self.app.set_hz_gates(mode, self.fixed().get("auto"))
+        self.show_auto()
         self.canvas.focus_set()
+        self.redraw()
+
+    def on_auto(self):
+        """The threshold box typed, stepped or dragged."""
+        limit = self.auto_limit()
+        if limit is None:
+            return
+        sh = self.target()
+        if sh is not None and sh.get("hz"):
+            self.app.set_hz_gates("auto", limit)
         self.redraw()
 
     def on_line(self):

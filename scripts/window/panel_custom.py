@@ -14,8 +14,8 @@ from window.panel_funnel import GATE_STEPS
 from files.mathexpr import calc, fmt
 from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
 from roll.roll_shared import NOTE_NAMES, note_name
-from notes.hzbass import shortest_gate, tones_span
-from window.hz_window import open_hz
+from notes.hzbass import AUTO, AUTO_MOST, off_cents, shortest_gate, threshold, tones_span
+from window.hz_window import GATE_MODES, auto_box, gate_mode, open_hz
 from window.widgets import Scrub, Tooltip
 
 GAP_COLOR = "#c06000"  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
@@ -128,12 +128,14 @@ class CustomPanel:
         h = self.hz_row2 = ttk.Frame(opts)
         h.pack(anchor="w", padx=(20, 0), pady=(1, 0))
         ttk.Label(h, text=tr("panel_custom.hz_gates")).pack(side="left")
-        self.hz_gates = ttk.Combobox(h, values=[tr("panel_custom.hz_mixed"), tr("panel_custom.hz_fixed")],
+        self.hz_gates = ttk.Combobox(h, values=[tr("panel_custom.hz_" + m) for m in GATE_MODES],
                                      state="readonly", width=7)
         self.hz_gates.pack(side="left", padx=4)
         self.hz_gates.bind("<<ComboboxSelected>>", lambda ev: (
-            self.set_hz_fixed(self.hz_gates.current() == 1), self.roll.focus_set()))
+            self.set_hz_gates(GATE_MODES[self.hz_gates.current()]), self.roll.focus_set()))
         Tooltip(self.hz_gates, tr("panel_custom.hz_gates_tip"))
+        self.hz_auto_var = tk.StringVar(value=fmt(AUTO))
+        self.hz_auto_row = auto_box(self, opts, self.hz_auto_var, self.on_hz_auto)  # (its own row: shown with Auto)
         self.hz_notes_btn = ttk.Button(h, text=tr("panel_custom.hz_notes"), command=lambda: open_hz(self))
         self.hz_notes_btn.pack(side="left", padx=(6, 0))
         Tooltip(self.hz_notes_btn, tr("panel_custom.hz_notes_tip"))
@@ -370,13 +372,21 @@ class CustomPanel:
         if hz or not self.hz_tone.get():
             self.hz_tone.set(note_name((hz or HZ_DEFAULTS)["key"]))
             self.hz_cents.set(fmt((hz or HZ_DEFAULTS)["cents"]))
-        self.hz_gates.current(1 if (hz or {}).get("fixed") else 0)
+        self.hz_gates.current(GATE_MODES.index(gate_mode(hz)))
+        if (hz or {}).get("auto") is not None:
+            self.hz_auto_var.set(fmt(hz["auto"]))
         self._loading = False
         on = bool(hz) and spam
         self.hz_check.config(state="normal" if spam else "disabled")
         self.hz_tone_entry.config(state="normal" if on and not tones else "disabled", style="TEntry")
         self.hz_cents_entry.config(state="normal" if on else "disabled", style="TEntry")
         self.hz_gates.config(state="readonly" if on else "disabled")
+        auto = on and gate_mode(hz) == "auto"
+        if auto:
+            self.hz_auto_row.pack(anchor="w", padx=(20, 0), pady=(1, 0), after=self.hz_row2)
+            self.hz_auto_row.entry.config(style="TEntry")
+        else:
+            self.hz_auto_row.pack_forget()
         bpm = self.current_bpm()
         stale = on and bpm is not None and any(t.get("hz") and abs(t["hz"]["bpm"] - bpm) > 1e-9 for t in tgts)
         for w in (self.hz_info, self.hz_stale):
@@ -388,10 +398,10 @@ class CustomPanel:
             if tones:
                 text = (tr("panel_custom.hz_info_one_tone", beats=fmt(tones_span(tones))) if len(tones) == 1 else
                         tr("panel_custom.hz_info_tones", n=len(tones), beats=fmt(tones_span(tones))))
-            elif hz.get("fixed"):
+            elif hz.get("fixed") or (threshold(hz) is not None and off_cents(gate) <= threshold(hz) + 1e-9):
                 whole = max(1, math.floor(gate + 0.5))
                 text = tr("panel_custom.hz_info_fixed", hz=tone, gate=whole,
-                          cents=f"{1200 * math.log2(gate / whole):+.0f}")
+                          cents=f"{1200 * math.log2(gate / whole):+.1f}")
             elif gate - low < 1e-9:
                 text = tr("panel_custom.hz_info_whole", hz=tone, gate=low)
             else:
@@ -400,7 +410,7 @@ class CustomPanel:
             if short:
                 text += tr("panel_custom.hz_short_fixed" if hz.get("fixed") else "panel_custom.hz_short")
             self.hz_info.config(text=text, foreground=GAP_COLOR if short else "#777")
-            self.hz_info.pack(anchor="w", padx=(20, 0), after=self.hz_row2)
+            self.hz_info.pack(anchor="w", padx=(20, 0), after=self.hz_auto_row if auto else self.hz_row2)
             if stale:
                 self.hz_stale.pack(anchor="w", padx=(20, 0), after=self.hz_info)
         return on
@@ -459,22 +469,44 @@ class CustomPanel:
         self.sync_custom()
         self.schedule_autosave()
 
-    def set_hz_fixed(self, fixed):
-        """The gates dropdown: mixed (exact tone) or fixed (every gate a whole tick)."""
-        tgts = [t for t in self.custom_targets() if t.get("hz") and bool(t["hz"].get("fixed")) != fixed]
+    def set_hz_gates(self, mode, limit=None):
+        """The gates dropdown: "mixed" (exact tone), "fixed" (every gate a whole tick) or "auto" (fixed for a tone
+        held still when that's at most limit cents off, else mixed; limit None = the threshold box's, or AUTO)."""
+        if mode == "auto" and limit is None:
+            try:
+                limit = max(0.0, min(AUTO_MOST, float(calc(self.hz_auto_var.get()))))
+            except (ValueError, ZeroDivisionError):
+                limit = AUTO
+        want = {"fixed": True} if mode == "fixed" else {"auto": float(limit)} if mode == "auto" else {}
+
+        def gates(hz):
+            return {k: hz[k] for k in ("fixed", "auto") if k in hz}
+
+        tgts = [t for t in self.custom_targets() if t.get("hz") and gates(t["hz"]) != want]
         if self._loading or not tgts:
             return
         if any(t is not self.custom_defaults for t in tgts):
             self.push_undo(name=tr("panel_custom.hz_gates_step"))
         for t in tgts:
-            t["hz"] = {k: v for k, v in t["hz"].items() if k != "fixed"}
-            if fixed:
-                t["hz"]["fixed"] = True
+            t["hz"] = dict({k: v for k, v in t["hz"].items() if k not in ("fixed", "auto")}, **want)
         self.shapes_changed()
         self.sync_custom()
         if self.hz_window:
             self.hz_window.sync()
         self.schedule_autosave()
+
+    def on_hz_auto(self):
+        """The Auto gates threshold box (cents): typed, stepped or dragged."""
+        if self._loading:
+            return
+        try:
+            limit = float(calc(self.hz_auto_var.get()))
+            if not 0 <= limit <= AUTO_MOST:
+                raise ValueError
+        except (ValueError, ZeroDivisionError):
+            self.hz_auto_row.entry.config(style="Bad.TEntry")
+            return
+        self.set_hz_gates("auto", limit)
 
     def update_hz(self):
         """The "Update Hz bass" button: every target's gate worked out again for the BPM now."""

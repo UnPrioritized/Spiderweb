@@ -16,7 +16,8 @@ from notes.polygon import side_paths
 from notes.smooth import clean_level, smooth_path
 from notes.paths import (TOP_KEY, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
-from notes.hzbass import HZ_DEFAULTS, KeyGrid, clean_hz, hz_gate, hz_of, squares  # (Hz bass: hzbass.py)
+from notes.hzbass import (HZ_DEFAULTS, KeyGrid, clean_hz, hz_gate, hz_of, off_cents, squares,  # (Hz bass: hzbass.py)
+                          threshold)
 from notes.text import text_polys, threshold_spans
 
 # Custom shapes: how the inside is filled, and the gate of "spam" in beats (1/64 = 60 ticks at PPQ 960).
@@ -620,7 +621,9 @@ def spam_gate(sh, ppq):
         if sh["hz"].get("tones"):
             return squares(sh, ppq)
         gate = max(1.0, float(sh["gate"] * ppq))
-        return float(math.floor(gate + 0.5)) if sh["hz"].get("fixed") else gate
+        limit = threshold(sh["hz"])
+        whole = sh["hz"].get("fixed") or (limit is not None and off_cents(gate) <= limit + 1e-9)
+        return float(math.floor(gate + 0.5)) if whole else gate
     return max(1, math.floor(sh["gate"] * ppq + 0.5))
 
 
