@@ -29,8 +29,8 @@ from notes.engine import slot_track_channel
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
 from notes.hzbass import (FX, HZ_DEFAULTS, TUNE, can_slide, clean_fx, clean_tones, fit_length, glide, heard, hz_of, left_edge,
                           links, next_id, pitch, tones_span)
-from roll.roll_shared import (ALT, BOX_STILL, CTRL, SELECT_CURSOR, SELECTED_COLOR, SHIFT, SLOT_COLORS, grid_span,
-                              note_name)
+from roll.roll_shared import (ALT, BOX_SCROLL_MS, BOX_STILL, CTRL, SELECT_CURSOR, SELECTED_COLOR, SHIFT,
+                              SLOT_COLORS, grid_span, note_name)
 from roll.zoombar import add_zoom_bars
 from window.hz_effects import FxPane
 from window.hz_preview import Preview
@@ -86,6 +86,7 @@ class HzWindow(tk.Toplevel):
         self.tones, self.sel = [], set()  # the notes shown (hzbass tones) and which are selected
         self.drag = None
         self.box_kept = None  # (box_area, selection) of the last Select box, shown after letting go
+        self.box_timer = None  # (box_scroll)
         self.pending = None  # (tone id, beat): the first middle click of a slide, waiting for the second
         self.sounding = None  # (channel, key) heard now: the note held with the mouse
         self.last_len = 1.0  # beats: how long a newly placed note is (the last length used)
@@ -630,6 +631,44 @@ class HzWindow(tk.Toplevel):
                               sorted((self.y_of(area[1]), self.y_of(area[3]))))
         return x0, y0, x1, y1
 
+    def box_to(self, d):
+        """The Select box's corner goes to the mouse (d["mouse"]), kept inside the piano roll, and the box selects
+        the notes it touches."""
+        x, y, state = d["mouse"]
+        d["to"] = (min(max(x, self.kb_w), self.canvas.winfo_width()),
+                   min(max(y, self.ruler_h), self.canvas.winfo_height()))
+        d["shift"] = bool(state & SHIFT)
+        box = self.box_area(d)
+        if box is None:  # (still a click)
+            self.sel = set(d["base"])
+            return self.redraw()
+        x0, y0, x1, y1 = self.box_rect(box)
+        self.sel = d["base"] | {i for i, n in enumerate(self.tones)
+                    if self.x_of(n["t"]) < x1 and self.x_of(n["t"] + n["len"]) > x0
+                    and self.y_of(n["key"]) < y1 and self.y_of(n["key"]) + self.sy > y0}
+        self.redraw()
+
+    def box_scroll(self):
+        """A Select box dragged past the edge: the view goes a bar that way (3 keys up / down) at once and then
+        every BOX_SCROLL_MS while the mouse stays out there, as on the main piano roll. The box's start goes along."""
+        self.box_timer = None
+        d = self.drag
+        if not d or d["kind"] != "box":
+            return
+        x, y, _ = d["mouse"]
+        dx = (x > self.canvas.winfo_width()) - (x < self.kb_w)
+        dy = (y > self.canvas.winfo_height()) - (y < self.ruler_h)
+        if not dx and not dy:
+            return
+        t0, top = self.t0, self.top
+        self.t0 += dx * self.app.beats
+        self.top -= dy * 3
+        self.clamp_view()
+        fx, fy = d["from"]
+        d["from"] = (fx - (self.t0 - t0) * self.sx, fy + (self.top - top) * self.sy)
+        self.box_to(d)
+        self.box_timer = self.after(BOX_SCROLL_MS, self.box_scroll)
+
     def kept_box(self):
         """The last Select box, still shown after letting go while what it selected is still the selection (a
         press or any other change of the selection drops it). None = not shown."""
@@ -731,16 +770,11 @@ class HzWindow(tk.Toplevel):
         if not d:
             return
         if d["kind"] == "box":
-            d["to"], d["shift"] = (max(e.x, self.kb_w), max(e.y, self.ruler_h)), bool(e.state & SHIFT)
-            box = self.box_area()
-            if box is None:  # (still a click)
-                self.sel = set(d["base"])
-                return self.redraw()
-            x0, y0, x1, y1 = self.box_rect(box)
-            self.sel = d["base"] | {i for i, n in enumerate(self.tones)
-                        if self.x_of(n["t"]) < x1 and self.x_of(n["t"] + n["len"]) > x0
-                        and self.y_of(n["key"]) < y1 and self.y_of(n["key"]) + self.sy > y0}
-            return self.redraw()
+            d["mouse"] = (e.x, e.y, e.state)
+            self.box_to(d)
+            if self.box_timer is None:
+                self.box_scroll()
+            return
         n = self.tones[d["i"]]
         beat, short = self.beat_at(e.x), self.shortest(e)
         if d["kind"] == "new":
@@ -797,6 +831,9 @@ class HzWindow(tk.Toplevel):
         if not d:
             return
         if d["kind"] == "box":
+            if self.box_timer:
+                self.after_cancel(self.box_timer)
+                self.box_timer = None
             if self.box_area(d):
                 self.box_kept = (self.box_area(d), set(self.sel))
             elif (not e.state & CTRL and self.tool.get() == "select"
