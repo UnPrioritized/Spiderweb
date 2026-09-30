@@ -15,9 +15,12 @@ import math
 import random
 import tkinter as tk
 
+import numpy as np
+
 from files.lang import tr
 from files.snap import SNAPS, snap_beats, snap_text
-from notes.hzbass import (FX, FX_START, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, group_count, line_at,
+from notes.hzbass import (BEND, FX, FX_START, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, bend_of, bent_part,
+                          group_count, line_at,
                           loop_off, loop_on, loop_shape, tones_span)
 from roll.roll_shared import CTRL, SHIFT
 
@@ -78,22 +81,59 @@ class FxPane:
         win, pts = self.win, self.win.fxl[name]
         got = self.copies(name)
         if got is None:
-            return [] if name in win.loops else [(win.x_of(b), self.y_of(v), i, 0) for i, (b, v) in enumerate(pts)]
+            return [] if name in win.loops else [(win.x_of(p[0]), self.y_of(p[1]), i, 0) for i, p in enumerate(pts)]
         every, k0, k1 = got
         if every * win.sx < 24 * self.s:
             return []
-        return [(win.x_of(k * every + b), self.y_of(v), i, k) for k in range(k0, k1 + 1) for i, (b, v) in enumerate(pts)]
+        return [(win.x_of(k * every + p[0]), self.y_of(p[1]), i, k) for k in range(k0, k1 + 1)
+                for i, p in enumerate(pts)]
+
+    def segments(self, name):
+        """[(from beat, value, to beat, value, bend, number of the point it starts at, number of the repeat)]: the
+        lines between an effect's points in view (a repeating one: every repeat's, the last one leading to the next
+        repeat's first point)."""
+        pts = self.win.fxl[name]
+        got = self.copies(name)
+        if got is None:
+            return [(a[0], a[1], b[0], b[1], bend_of(a), i, 0) for i, (a, b) in enumerate(zip(pts, pts[1:]))]
+        every, k0, k1 = got
+        out = []
+        for k in range(k0, k1 + 1):
+            for i, a in enumerate(pts):
+                b, kb = (pts[i + 1], k) if i + 1 < len(pts) else (pts[0], k + 1)
+                out.append((k * every + a[0], a[1], kb * every + b[0], b[1], bend_of(a), i, k))
+        return out
 
     def line(self, name):
-        """[(x, y)] of an effect's line: its points, and flat out to both sides of the pane (a repeating one: every
-        repeat in view)."""
+        """[(x, y)] of an effect's line: through its points, bent where they say, and flat out to both sides of the
+        pane (a repeating one: every repeat in view)."""
         win, pts = self.win, self.win.fxl[name]
-        got = self.copies(name)
-        if got is not None:
-            every, k0, k1 = got
-            return [(win.x_of(k * every + b), self.y_of(v)) for k in range(k0, k1 + 1) for b, v in pts]
-        xy = [(win.x_of(b), self.y_of(v)) for b, v in pts]
+        xy = []
+        for b0, v0, b1, v1, bend, _, _ in self.segments(name):
+            x0, x1 = win.x_of(b0), win.x_of(b1)
+            if math.isnan(bend):  # hold: flat, then a step
+                xy += [(x0, self.y_of(v0)), (x1, self.y_of(v0))]
+            elif bend and x1 - x0 > 2:
+                n = max(4, min(48, int((x1 - x0) / (3 * self.s))))
+                u = np.arange(n) / n
+                xy += [(x0 + (x1 - x0) * a, self.y_of(v0 + (v1 - v0) * g)) for a, g in zip(u, bent_part(u, bend))]
+            else:
+                xy.append((x0, self.y_of(v0)))
+        if name in win.loops:
+            return xy
+        xy.append((win.x_of(pts[-1][0]), self.y_of(pts[-1][1])))
         return [(min(win.kb_w, xy[0][0]), xy[0][1])] + xy + [(max(self.canvas.winfo_width(), xy[-1][0]), xy[-1][1])]
+
+    def handles(self, name):
+        """[(x, y, number of the point the line starts at, number of the repeat)]: the round handles in the middle of
+        the lines that can be bent (wide enough on screen, going up or down, not held)."""
+        win, out = self.win, []
+        if name in win.loops and not self.points(name):
+            return out
+        for b0, v0, b1, v1, bend, i, k in self.segments(name):
+            if (win.x_of(b1) - win.x_of(b0) >= 16 * self.s and abs(v1 - v0) > 0.005 and not math.isnan(bend)):
+                out.append((win.x_of((b0 + b1) / 2), self.y_of(v0 + (v1 - v0) * (1 + bend) / 2), i, k))
+        return out
 
     def state(self):
         """The lines and repeats as they are now (to go back to)."""
@@ -134,7 +174,7 @@ class FxPane:
             lit = self.active in (None, name)
             colour = FX_COLOR[name] if lit else faint(FX_COLOR[name])
             if name in win.loops and self.copies(name) is None:  # repeats too close together: a band
-                vs = [v for _, v in fx[name]]
+                vs = [p[1] for p in fx[name]]
                 c.create_rectangle(kb, self.y_of(max(vs)), w, self.y_of(min(vs)) + 1, fill=colour, outline="",
                                    stipple="gray25")
                 continue
@@ -145,6 +185,9 @@ class FxPane:
                 for x, y, _, _ in self.points(name):
                     c.create_rectangle(x - r, y - r, x + r, y + r, fill="white", outline=colour,
                                        width=max(1, round(1.5 * s)))
+                r = 3 * s
+                for x, y, _, _ in self.handles(name):
+                    c.create_oval(x - r, y - r, x + r, y + r, fill="white", outline=colour, width=1)
         c.create_rectangle(0, 0, kb, h, fill="#fafafa", outline="")  # the effects
         for i, name in enumerate(FX):
             y = 4 * s + i * self.row_h + self.row_h / 2
@@ -173,7 +216,8 @@ class FxPane:
         return FX[i] if x < self.win.kb_w and y >= 4 * self.s and 0 <= i < len(FX) else None
 
     def hit(self, x, y):
-        """("point", effect, number, number of the repeat) / ("line", effect) under the mouse, or None."""
+        """("point", effect, number, number of the repeat) / ("bend", effect, number of the point the line starts at,
+        number of the repeat) / ("line", effect) under the mouse, or None."""
         if x < self.win.kb_w:
             return None
         r = 6 * self.s
@@ -182,6 +226,10 @@ class FxPane:
             for px, py, i, k in self.points(name):
                 if abs(x - px) <= r and abs(y - py) <= r:
                     return "point", name, i, k
+        for name in names:
+            for px, py, i, k in self.handles(name):
+                if abs(x - px) <= r and abs(y - py) <= r:
+                    return "bend", name, i, k
         for name in names:
             if name in self.win.loops and not self.points(name):  # (too close together to grab)
                 continue
@@ -197,13 +245,15 @@ class FxPane:
             return self.say("")
         name, hit = self.name_at(e.x, e.y), self.hit(e.x, e.y)
         self.canvas.config(cursor="hand2" if name else "fleur" if hit and hit[0] == "point" else
-                           "crosshair" if hit else "")
+                           "sb_v_double_arrow" if hit and hit[0] == "bend" else "crosshair" if hit else "")
         if name:
             every = self.win.loops.get(name)
             self.say(tr("hz.fx_%s_tip" % name) + (" " + tr("hz.fx_repeats", every=self.every_text(every))
                                                   if every else ""))
         elif hit and hit[0] == "point":
             self.say(self.value_text(hit[1], self.win.fxl[hit[1]][hit[2]][1]))
+        elif hit and hit[0] == "bend":
+            self.say(tr("hz.fx_bend_tip"))
         else:
             self.say("")
 
@@ -240,6 +290,9 @@ class FxPane:
             return
         name = hit[1]
         before = self.state()
+        if hit[0] == "bend":
+            self.drag = {"kind": "bend", "fx": name, "i": hit[2], "before": before}
+            return
         every = win.loops.get(name)
         if hit[0] == "line":  # a new point where the line was pressed (a repeating one: in that repeat)
             beat = max(0.0, win.beat_at(e.x))
@@ -258,7 +311,8 @@ class FxPane:
         """A point put on a line at beat (the line keeps its shape; every = it repeats, beat is in one repeat); its
         number."""
         i = sum(1 for p in pts if p[0] <= beat)
-        pts.insert(i, [beat, float(line_at(pts, beat, every))])
+        on = pts[i - 1] if i else pts[-1] if every else pts[0]  # (the point the line it's put on starts at)
+        pts.insert(i, [beat, float(line_at(pts, beat, every)), *on[2:]])  # (both halves bent the same)
         return i
 
     def on_drag(self, e):
@@ -269,6 +323,8 @@ class FxPane:
             win.app.hz_fx_h = min(most, max(least, d["h"] - (e.y_root - d["y"])))
             self.canvas.config(height=win.app.hz_fx_h)
             return
+        if d and d["kind"] == "bend":
+            return self.drag_bend(d, e)
         if not d or d["kind"] != "point":
             return
         name, i = d["fx"], d["i"]
@@ -290,7 +346,7 @@ class FxPane:
             return
         if d["kind"] == "size":
             return win.app.schedule_autosave()
-        if d["kind"] == "point":
+        if d["kind"] in ("point", "bend"):
             self.says = ""
             if (win.fxl, win.loops) != d["before"]:
                 win.commit_fx(d["before"])
@@ -324,6 +380,8 @@ class FxPane:
         hit = self.hit(e.x, e.y)
         if hit and hit[0] == "point":
             self.delete_point(hit[1], hit[2])
+        elif hit and hit[0] == "bend":
+            self.set_bend(hit[1], hit[2], 0.0)
         else:
             self.on_press(e)
 
@@ -347,6 +405,36 @@ class FxPane:
         if self.active == name:
             self.active = None
         if win.fxl.pop(name, None) is not None:
+            win.commit_fx(before)
+
+    # ------------------------------------------------------------ bent lines
+
+    def segment_at(self, name, x):
+        """The number of the point where the line under x starts (None: before the first / after the last point)."""
+        for b0, _, b1, _, _, i, _ in self.segments(name):
+            if self.win.x_of(b0) <= x <= self.win.x_of(b1):
+                return i
+        return None
+
+    def drag_bend(self, d, e):
+        """A line's round handle dragged up / down: its middle follows the mouse (sticks to straight near it)."""
+        name, i = d["fx"], d["i"]
+        pts = self.win.fxl[name]
+        a, b = pts[i], (pts[i + 1] if i + 1 < len(pts) else pts[0])
+        if abs(b[1] - a[1]) < 1e-9:
+            return
+        bend = min(BEND, max(-BEND, 2.0 * (self.value_at(e.y) - a[1]) / (b[1] - a[1]) - 1.0))
+        bend = 0.0 if abs(bend) < 0.05 and not e.state & SHIFT else round(bend, 3)
+        pts[i][2:] = [bend] if bend else []
+        self.says = tr("hz.fx_bend_tip")
+        self.win.redraw()
+
+    def set_bend(self, name, i, bend):
+        """The line from point i: bent (0 = straight) or "hold"."""
+        win = self.win
+        before = self.state()
+        win.fxl[name][i][2:] = [bend] if bend else []
+        if (win.fxl, win.loops) != before:
             win.commit_fx(before)
 
     # ------------------------------------------------------------ repeating
@@ -378,7 +466,7 @@ class FxPane:
                 win.fxl[name] = loop_off(pts, old, *self.span())
                 del win.loops[name]
         else:
-            win.fxl[name] = [[u * every / old, v] for u, v in pts] if old else loop_on(pts, every)
+            win.fxl[name] = [[p[0] * every / old, *p[1:]] for p in pts] if old else loop_on(pts, every)
             win.loops[name] = every
         self.active = name
         if (win.fxl, win.loops) != before:
@@ -401,6 +489,15 @@ class FxPane:
         menu = tk.Menu(self.win, tearoff=0)
         if hit and hit[0] == "point":
             menu.add_command(label=tr("hz.fx_delete_point"), command=lambda: self.delete_point(hit[1], hit[2]))
+        seg = hit[2] if hit and hit[0] == "bend" else self.segment_at(hit[1], e.x) if hit and hit[0] == "line" else None
+        if seg is not None:  # the line under the mouse: held (a step) or bent
+            p = self.win.fxl[hit[1]][seg]
+            self.held = tk.BooleanVar(self.win, value=len(p) > 2 and p[2] == "hold")
+            menu.add_checkbutton(label=tr("hz.fx_hold"), variable=self.held,
+                                 command=lambda: self.set_bend(hit[1], seg, "hold" if self.held.get() else 0.0))
+            menu.add_command(label=tr("hz.fx_straight"), command=lambda: self.set_bend(hit[1], seg, 0.0),
+                             state="normal" if len(p) > 2 else "disabled")
+            menu.add_separator()
         target = name or (hit and hit[1]) or (self.active if e.x >= self.win.kb_w else None)
         if target:  # repeating: how long one repeat is, and ready-made shapes for it
             every = self.win.loops.get(target)

@@ -83,6 +83,7 @@ VIBRATO = 0.05  # "vibrato" at 1: the pitch goes this much (x the tone) up and d
 VIBRATO_RATE = 2.5  # ... times a beat
 WAH = 8.0  # "wah" at 1: this many loud stripes over the keys
 TREMOLO = 8.0  # "tremolo" at 1: this many times a beat
+BEND = 0.98  # how far a line between two points can be bent (1 = a step)
 LOOP = (1 / 256, 1024.0)  # beats: how short and how long one repeat of a repeating effect can be
 # ready-made shapes for one repeat (u 0..1 over it, value); "sine" and "steps" (random) are made in loop_shape
 LOOP_SHAPES = {"sine": None, "triangle": [(0, 0), (0.5, 1), (1, 0)], "saw_up": [(0, 0), (1, 1)],
@@ -108,19 +109,33 @@ def hz_gate(hz, bpm):
     return max(1e-6, float(f"{bpm / (60.0 * hz_of(hz['key'], hz['cents'])):.12g}"))  # (12 digits: as saved)
 
 
+def clean_point(p):
+    """A line's point checked: [beat, value] or [beat, value, bend of the line from it to the next] (bend -BEND..BEND,
+    or "hold"), None if it's no good."""
+    u, v = float(p[0]), float(p[1])
+    if not (math.isfinite(u) and math.isfinite(v)):
+        return None
+    out = [max(0.0, u), min(1.0, max(0.0, v))]
+    if len(p) > 2:
+        if p[2] == "hold":
+            out.append("hold")
+        elif math.isfinite(float(p[2])) and abs(float(p[2])) > 1e-9:
+            out.append(min(BEND, max(-BEND, float(p[2]))))
+    return out
+
+
 def clean_fx(fx):
-    """Effects checked: {effect: [[beat, value], ...]} in order, beats from 0, values 0..1. Effects with no points
-    are left out."""
+    """Effects checked: {effect: [[beat, value(, bend)], ...]} in order, beats from 0, values 0..1. Effects with no
+    points are left out."""
     out = {}
     for name in FX:
         try:
-            pts = [(float(u), float(v)) for u, v in fx.get(name) or ()]
-        except (TypeError, ValueError, AttributeError):
+            pts = [clean_point(p) for p in fx.get(name) or ()]
+        except (TypeError, ValueError, AttributeError, IndexError):
             continue
-        pts = sorted(((max(0.0, u), min(1.0, max(0.0, v))) for u, v in pts
-                      if math.isfinite(u) and math.isfinite(v)), key=lambda p: p[0])  # (two at one spot: a step)
+        pts = sorted((p for p in pts if p), key=lambda p: p[0])  # (two at one spot: a step)
         if pts:
-            out[name] = [list(p) for p in pts]
+            out[name] = pts
     return out
 
 
@@ -135,20 +150,43 @@ def clean_loop(loop, fx):
             continue
         if name in fx and math.isfinite(every) and LOOP[0] <= every <= LOOP[1]:
             out[name] = every
-            fx[name] = [[min(u, every), v] for u, v in fx[name]]
+            fx[name] = [[min(p[0], every), *p[1:]] for p in fx[name]]
     return out
 
 
+def bent_part(u, bend):
+    """How far along (0..1) the line from a point to the next has come at u (0..1 of the way) with that bend
+    (arrays; nan = hold: none of the way until the next point). Bend b puts the middle at (1 + b) / 2 of the way:
+    0 = straight, above 0 = bulging towards the next point's value early, below 0 = late."""
+    m = (1.0 + np.nan_to_num(bend)) / 2.0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        early = 1.0 - (1.0 - u) ** (np.log(1.0 - m) / np.log(0.5))
+        late = u ** (np.log(m) / np.log(0.5))
+    out = np.where(bend > 0, early, np.where(bend < 0, late, u))
+    return np.where(np.isnan(bend), (u >= 1.0).astype(float), out)
+
+
+def bend_of(p):
+    """A point's bend as a number (nan = hold)."""
+    return (math.nan if p[2] == "hold" else float(p[2])) if len(p) > 2 else 0.0
+
+
 def line_at(pts, beat, every=None):
-    """A line's value at beat (a number or an array): through its points, flat before the first and after the last;
-    every = the points are one repeat of that many beats, repeated from beat 0 (the last point leads on to the next
-    repeat's first)."""
-    xs, vs = [p[0] for p in pts], [p[1] for p in pts]
-    beat = np.asarray(beat, float)
+    """A line's value at beat (a number or an array): through its points (each line between two bent as the first
+    one says), flat before the first and after the last; every = the points are one repeat of that many beats,
+    repeated from beat 0 (the last point leads on to the next repeat's first)."""
     if every:
-        beat = np.mod(beat, every)
-        xs, vs = [xs[-1] - every] + xs + [xs[0] + every], [vs[-1]] + vs + [vs[0]]
-    return np.interp(beat, xs, vs)
+        pts = [[pts[-1][0] - every, *pts[-1][1:]]] + list(pts) + [[pts[0][0] + every, *pts[0][1:]]]
+        beat = np.mod(np.asarray(beat, float), every)
+    xs, vs = np.array([p[0] for p in pts], float), np.array([p[1] for p in pts], float)
+    beat = np.asarray(beat, float)
+    if len(xs) == 1:
+        return np.full(beat.shape, vs[0])
+    bends = np.array([bend_of(p) for p in pts])
+    j = np.clip(np.searchsorted(xs, beat, side="right") - 1, 0, len(xs) - 2)
+    w = xs[j + 1] - xs[j]
+    u = np.where(w > 0, np.clip((beat - xs[j]) / np.where(w > 0, w, 1.0), 0.0, 1.0), 1.0)
+    return vs[j] + (vs[j + 1] - vs[j]) * bent_part(u, bends[j])
 
 
 def fx_at(hz, name, beat):
@@ -165,25 +203,26 @@ def loop_on(pts, every):
     a, b = pts[0][0], pts[-1][0]
     if b - a < 1e-9:
         return [[0.0, pts[0][1]], [every, pts[0][1]]]
-    return [[(u - a) / (b - a) * every, v] for u, v in pts]
+    return [[(p[0] - a) / (b - a) * every, *p[1:]] for p in pts]
 
 
 def loop_off(pts, every, a, b):
     """One repeat's points stretched back into a line from beat a to b (what loop_on did, undone)."""
-    return [[a + u / every * (b - a), v] for u, v in pts]
+    return [[a + p[0] / every * (b - a), *p[1:]] for p in pts]
 
 
 def loop_shape(kind, every, seed=None):
     """A ready-made shape for one repeat of `every` beats (LOOP_SHAPES): its points."""
-    if kind == "sine":
-        pts = [(i / 16, 0.5 + 0.5 * math.sin(2 * math.pi * i / 16)) for i in range(17)]
+    if kind == "sine":  # (quarter waves as bent lines: the middle of each is at sin 45 degrees, 0.707 of the way)
+        b = math.sqrt(2.0) - 1.0
+        pts = [(0, 0.5, b), (0.25, 1, -b), (0.5, 0.5, b), (0.75, 0, -b), (1, 0.5, b)]
     elif kind == "steps":  # (two points at one spot: a step)
         pts = []
         for i, v in enumerate(np.random.default_rng(seed).random(8)):
             pts += [(i / 8, float(v)), ((i + 1) / 8, float(v))]
     else:
         pts = LOOP_SHAPES[kind]
-    return [[u * every, round(v, 4)] for u, v in pts]
+    return [[p[0] * every, round(p[1], 4), *p[2:]] for p in pts]
 
 
 def old_fx(tones):
@@ -195,7 +234,7 @@ def old_fx(tones):
         try:
             t, span = float(n["t"]), float(n["len"])
             for name, pts in clean_fx(n["fx"]).items():
-                out.setdefault(name, []).extend([t + min(1.0, u) * span, v] for u, v in pts)
+                out.setdefault(name, []).extend([t + min(1.0, p[0]) * span, *p[1:]] for p in pts)
         except (KeyError, TypeError, ValueError):
             continue
     return clean_fx(out)

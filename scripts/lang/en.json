@@ -298,6 +298,9 @@
  "hz.fx_value": "{name} {value} %",
  "hz.fx_delete_point": "Delete this point",
  "hz.fx_remove": "Take {name} off",
+ "hz.fx_bend_tip": "Drag up or down to bend this line. Double-click: straight again.",
+ "hz.fx_hold": "Hold (a step at the next point)",
+ "hz.fx_straight": "Straight line",
  "hz.fx_repeat_every": "Repeat every",
  "hz.fx_repeat_off": "Off (one line over all the notes)",
  "hz.fx_repeats": "It repeats every {every}.",
@@ -1148,7 +1151,7 @@
   "",
   "Effects, in the pane under the notes, change how the tone sounds (only Pitch and Vibrato move its pitch). Click an effect's name on the left to put it on. Hold the mouse over a name to see what it does, at the bottom of the window.",
   "",
-  "Each effect is one line over all the notes, in step with them: 0 % at the bottom, 100 % at the top, flat before its first point and after its last. Drag a point to move it, press on the line to add a point, double-click a point to delete it (deleting the last one takes the effect off). Right-click for more. Click a name that's on to highlight its line (the others go faint); click it again to see them all.",
+  "Each effect is one line over all the notes, in step with them: 0 % at the bottom, 100 % at the top, flat before its first point and after its last. Drag a point to move it, press on the line to add a point, double-click a point to delete it (deleting the last one takes the effect off). Drag the small round handle in the middle of a line up or down to bend it (double-click it: straight again); right-click a line > Hold makes it a step. Right-click for more. Click a name that's on to highlight its line (the others go faint); click it again to see them all.",
   "",
   "Lines that move sound more alive than flat ones. Very fast movement is hard to hear.",
   "",
@@ -1174,7 +1177,7 @@
   "",
   "Any custom shape with Spam or Outline spam can have Hz bass too: tick Hz bass in the panel for one tone, or press Notes… to place notes for it. The shape keeps its length (notes past its end aren't used) unless Shape length follows the notes is ticked in the window."
  ],
- "help.hz_bass.words": "hz bass tone pitch cents chord slide lead hypertone preview listen hear play synth soundfont sf2 sfz voices voice limit reverb chorus volume render effect effects slant groups off pitch noisy vibrato sweep wah tremolo octave below pitch bend wobble volume loudness silence gate waveform wave sine square saw triangle repeat repeats loop lfo automation pump sidechain",
+ "help.hz_bass.words": "hz bass tone pitch cents chord slide lead hypertone preview listen hear play synth soundfont sf2 sfz voices voice limit reverb chorus volume render effect effects slant groups off pitch noisy vibrato sweep wah tremolo octave below pitch bend wobble volume loudness silence gate waveform wave sine square saw triangle repeat repeats loop lfo automation pump sidechain curve bend tension hold step",
  "help.live.title": "Live shape (G)",
  "help.live.tip": "Lines, curves, arcs, freehand and boxes you draw now go into ONE custom shape. Close its outline to fill it. Right-click empty space to start the next one.",
  "help.live.text": [
