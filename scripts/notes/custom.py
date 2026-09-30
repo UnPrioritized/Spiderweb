@@ -16,6 +16,7 @@ from notes.polygon import side_paths
 from notes.smooth import clean_level, smooth_path
 from notes.paths import (TOP_KEY, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
+from notes.hzbass import HZ_DEFAULTS, clean_hz, hz_gate, hz_of, squares  # (Hz bass: hzbass.py)
 from notes.text import text_polys, threshold_spans
 
 # Custom shapes: how the inside is filled, and the gate of "spam" in beats (1/64 = 60 ticks at PPQ 960).
@@ -39,34 +40,6 @@ CUSTOM_DEFAULTS = {"fill": "empty", "gate": 0.0625, "align": "auto", "ends": "ro
 # overlaps cancel out, even-odd); "apart" = Fill / Spam "Outline": the outline's notes on a channel of their own
 # (with Multi channel), the inside's on another
 CUSTOM_FLAGS = ("union", "apart")
-
-
-# Hz bass: spam so fast that the repeats sound like a tone. sh["hz"] = {"key": the key whose tone is wanted,
-# "cents": pitch adjustment (100 = one key), "bpm": the BPM its gate was worked out for}. sh["gate"] is then one
-# wave of that tone, gate = BPM / (60 × Hz) beats, NOT rounded to a whole tick: the notes sit on one grid counted
-# from tick 0 (every key in step), note n starting at round(n × gate), so gates of two sizes are mixed and the
-# tone comes out exact (chop_even). Spam start and ends don't apply. The tone depends on the BPM, so a changed
-# BPM leaves it off until the gate is worked out again (the panel warns; a changed PPQ keeps the tone).
-HZ_DEFAULTS = {"key": 33, "cents": 0.0}
-
-
-def hz_of(key, cents=0.0):
-    """The tone of a key in Hz (key 69 = 440 Hz)."""
-    return 440.0 * 2.0 ** ((key - 69 + cents / 100.0) / 12.0)
-
-
-def hz_gate(hz, bpm):
-    """The spam gate, in beats, that sounds like hz's tone at this BPM."""
-    return max(1e-6, float(f"{bpm / (60.0 * hz_of(hz['key'], hz['cents'])):.12g}"))  # (12 digits: as saved)
-
-
-def clean_hz(hz):
-    """A saved "hz" checked, or None."""
-    try:
-        out = {"key": int(hz["key"]), "cents": float(hz.get("cents", 0.0)), "bpm": float(hz["bpm"])}
-    except (KeyError, TypeError, ValueError, AttributeError):
-        return None
-    return out if 0 <= out["key"] <= 255 and abs(out["cents"]) <= 1200 and out["bpm"] > 0 else None
 
 
 def custom_settings(cd):
@@ -601,9 +574,13 @@ def inside_spans(sh, ppq):
 
 
 def spam_gate(sh, ppq):
-    """The spam gate in ticks: a whole number, or for Hz bass the exact one as a float (chop_even)."""
+    """The spam gate in ticks: a whole number; for Hz bass the exact one as a float (chop_even), or with placed
+    tones the array of its repeats (chop_grid)."""
     if sh.get("hz"):
-        return max(1.0, float(sh["gate"] * ppq))
+        if sh["hz"].get("tones"):
+            return squares(sh, ppq)
+        gate = max(1.0, float(sh["gate"] * ppq))
+        return float(math.floor(gate + 0.5)) if sh["hz"].get("fixed") else gate
     return max(1, math.floor(sh["gate"] * ppq + 0.5))
 
 
@@ -627,10 +604,25 @@ def chop_even(stretches, g, count=False):
     return out
 
 
+def chop_grid(stretches, squares, count=False):
+    """chop for Hz bass with placed tones: squares = its repeats, (start, end) ticks in order (hzbass.squares).
+    A stretch gets the squares whose middle is inside it, whole."""
+    s0, e0, q = stretches[:, 0], stretches[:, 1], stretches[:, 2]
+    mids = squares[:, 0] + squares[:, 1]  # (twice the middle, so it stays whole numbers)
+    lo = np.searchsorted(mids, 2 * s0, "left")
+    n = np.maximum(np.searchsorted(mids, 2 * e0, "left") - lo, 0)
+    if count:
+        return n
+    k = np.repeat(lo, n) + np.arange(n.sum()) - np.repeat(np.cumsum(n) - n, n)
+    return np.column_stack([squares[k, 0], squares[k, 1], np.repeat(q, n)])
+
+
 def chop(sh, stretches, g, count=False):
     """stretches: NumPy array of (start, end, key) rows in ticks -> each filled with back-to-back notes of gate g,
     as an array of (start, end, key) rows in the same order. Where they start: ALIGNS; what happens to the bit that
     doesn't fit a whole gate: ENDS. count: just how many notes each stretch gets."""
+    if isinstance(g, np.ndarray):
+        return chop_grid(stretches, g, count)
     if isinstance(g, float):
         return chop_even(stretches, g, count)
     s0, e0, q = stretches[:, 0], stretches[:, 1], stretches[:, 2]

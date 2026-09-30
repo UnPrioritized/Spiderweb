@@ -147,6 +147,7 @@ class RollDrawing:
         if self.draft:
             self.draw_path(self.draft, "#0a8f0a", 2)
             self.draw_draft_points()
+        self.draw_hz_start()
         self.draw_keyboard(h)
         self.draw_ruler(w)
         self.draw_playhead()

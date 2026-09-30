@@ -1,6 +1,7 @@
 """The piano roll canvas: view (scroll/zoom), hit testing and mouse editing.
 Its other parts: roll_draw.py (painting), roll_custom.py (custom shape box), roll_curve.py (curve editing),
 roll_funnel.py (funnel editing), roll_live.py (live drawing, custom shape strokes), roll_menu.py (right-click menu), roll_text.py (the Text tool),
+roll_hz.py (the Hz bass tool),
 roll_shared.py (colours, keys, caches)."""
 
 import copy
@@ -19,13 +20,15 @@ from roll.roll_curve import CurveEditing
 from roll.roll_custom import CustomBox
 from roll.roll_draw import RollDrawing
 from roll.roll_funnel import FunnelEditing
+from roll.roll_hz import HzStart
 from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
 from roll.roll_shared import ALT, CTRL, PICK, SHIFT, cached_path, cached_strokes, mouse_trail, note_name
 from roll.roll_text import TextTyping
 
 
-class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, tk.Canvas):
+class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
+                tk.Canvas):
     def __init__(self, parent, app, scale):
         super().__init__(parent, bg="#ffffff", highlightthickness=0, cursor="crosshair")
         self.app = app
@@ -282,6 +285,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
         if tool == "text":
             self.text_click(e)
+            return
+        if tool == "hz":
+            self.hz_click(e)
             return
         if tool == "funnel" and self.draft and len(self.draft["pts"]) == 2:
             # the funnel's line is drawn, now its wall

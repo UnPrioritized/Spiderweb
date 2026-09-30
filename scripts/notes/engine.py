@@ -12,10 +12,11 @@ import numpy as np
 
 from files.lang import tr
 from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX_STROKE, block_notes, check_notes,
-                          clean_curve, clean_hz,
+                          clean_curve,
                           clean_strokes, custom_notes_groups, custom_strokes)
 from notes.envelope import env_values, velocity_env
 from notes.joined import clean_joined, is_joined, joined_paths
+from notes.hzbass import clean_hz
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
 from notes.claw import apply_claw, clean_claw

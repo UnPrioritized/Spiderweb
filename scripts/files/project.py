@@ -10,8 +10,9 @@ from tkinter import filedialog, messagebox
 import numpy as np
 
 from files.lang import tr
-from notes.custom import ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_hz, notes_shape
+from notes.custom import ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, notes_shape
 from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_shape
+from notes.hzbass import clean_hz
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
 from notes.paths import KEYS
 from notes.polygon import POLYGON_DEFAULTS, clean_polygon
@@ -116,6 +117,7 @@ class ProjectFiles:
             "keys": self.keys, "domino_start": self.domino_start(),
             "snap": self.snap.get(), "defaults": self.defaults,
             "custom_defaults": dict(self.custom_defaults, shape=self.custom_shape),
+            "hz_defaults": self.hz_defaults,
             "funnel_defaults": self.funnel_defaults, "text_defaults": self.text_defaults,
             "polygon_defaults": self.polygon_defaults,
             "free_smooth": self.free_smooth, "shapes": self.shapes,
@@ -148,6 +150,10 @@ class ProjectFiles:
         if "snap" in data:
             self.snap.set(clean_snap(data["snap"]))
         self.defaults = defaults
+        keys = data.get("hz_defaults")
+        if (isinstance(keys, dict) and all(isinstance(keys.get(k), int) for k in ("lo", "hi"))
+                and 0 <= keys["lo"] <= keys["hi"] <= 127):
+            self.hz_defaults = {"lo": keys["lo"], "hi": keys["hi"]}
         custom = data.get("custom_defaults") or {}
         if isinstance(custom, dict):
             if custom.get("fill") in FILLS:
@@ -208,7 +214,7 @@ class ProjectFiles:
                               "velocity_height": self.velocity_height() / self.scale,
                               "midi_device": self.midi_device.get(), "live": self.live.get(),
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
-                              "claw_window": self.claw_pos,
+                              "claw_window": self.claw_pos, "hz_window": self.hz_pos,
                               "history_window": self.history_pos, "history_undocked": self.history_undocked,
                               **self.tips.state(), **self.updates.state()}
         write_text(path, project_json(data))
@@ -277,6 +283,9 @@ class ProjectFiles:
                 pos = win.get(key)
                 if isinstance(pos, str) and re.fullmatch(r"\+-?\d+\+-?\d+", pos):
                     setattr(self, attr, pos)
+            pos = win.get("hz_window")
+            if isinstance(pos, str) and re.fullmatch(r"\d+x\d+\+-?\d+\+-?\d+", pos):
+                self.hz_pos = pos
             pos = win.get("history_window")
             if isinstance(pos, str) and re.fullmatch(r"(\d+x\d+)?\+-?\d+\+-?\d+", pos):
                 self.history_pos = pos

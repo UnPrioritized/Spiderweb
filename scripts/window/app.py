@@ -60,7 +60,7 @@ PPQS = [2, 4, 8, 16, 24, 48, 96, 120, 144, 192, 240, 384, 480, 768, 960, 1024, 1
 TOOLS = [("select", tr("app.select"), "v"), ("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"),
          ("free", tr("app.freehand"), "f"), ("curve", tr("app.curve"), "c"), ("arc", tr("app.arc"), "a"),
          ("custom", tr("app.custom_shape"), "s"),
-         ("funnel", tr("app.funnel"), "n"), ("text", tr("app.text"), "x")]
+         ("funnel", tr("app.funnel"), "n"), ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h")]
 # shown next to Custom shape while it (or one of them) is the tool; their keys work any time
 SHAPE_TOOLS = [("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q")]
 BIG = 1_000_000  # ask before making a custom shape / funnel with more notes than this
@@ -123,6 +123,10 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self.drawer = None
         self.claw_window = None
         self.claw_pos = ""  # where the claw machine window was last ("+x+y", remembered in the autosave)
+        self.hz_window = None  # the Hz bass window (hz_window.py)
+        self.hz_pos = ""  # its size and place ("WxH+x+y", remembered in the autosave)
+        self.hz_start = None  # the beat picked with the Hz bass tool for a new Hz bass (roll_hz.py)
+        self.hz_defaults = {"lo": 48, "hi": 58}  # the keys a new Hz bass repeats
         self.rendered, self.slot_count = NO_NOTES, 0  # (start, end, pitch, velocity, slot, owner) rows
         self.note_counts = []  # notes per shape in rendered
         self.ppq, self.beats = 960, 4
@@ -599,6 +603,8 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self.sync_line_fill()
         if self.claw_window:
             self.claw_window.sync()
+        if self.hz_window:
+            self.hz_window.sync()
         if self.sel is not None:
             self.listbox.see(self.sel)
         # the first time one is selected: how it's edited
@@ -1048,6 +1054,10 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
     def on_tool_change(self):
         if self.tool.get() != "select":
             self.draw_tool = self.tool.get()
+        if self.tool.get() != "hz":
+            self.hz_start = None
+        elif self.hz_window:
+            self.hz_window.sync()
         self.roll.cancel_draft()
         self.roll.config(cursor={"select": "arrow", "text": "xterm"}.get(self.tool.get(), "crosshair"))
         self.show_shape_tools()
@@ -1255,6 +1265,8 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self._edit_key = self._scrub = None
         self.sync_panel()
         self.shapes_changed()
+        if self.hz_window:
+            self.hz_window.sync()  # (its note count is of the notes just made)
 
     def velocity_height(self):
         if self.show_velocity.get() and self.vel_box.winfo_ismapped() and self.vel_box.winfo_height() > 1:

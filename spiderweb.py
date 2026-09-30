@@ -27,6 +27,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     updates.py       update checks: the "how often?" question, the update popup, What's new after an update
     drawer.py        the custom shape drawer window and the shape library (shapes/*.json)
     velocity.py      the velocity pane under the piano roll
+    hz_window.py     the Hz bass window: a small piano roll where its notes are placed
     velocity_formula.py the velocity pane's Formula tool settings (pattern, loops, its numbers)
   roll/              the piano roll
     pianoroll.py     the piano roll canvas: view, hit testing, mouse editing
@@ -37,12 +38,14 @@ Files (the scripts live in scripts/, one subfolder per group):
     roll_live.py     live drawing (strokes straight into one custom shape), picking / editing its strokes
     roll_menu.py     the right-click menu
     roll_text.py     the Text tool: typing on the roll, the caret
+    roll_hz.py       the Hz bass tool: picking where a Hz bass starts
     roll_shared.py   colours, key names, modifier keys, outline caches
   notes/             shapes -> notes
     engine.py        shapes -> notes, overlap handling, channel assignment
     paths.py         lines / polylines / freehand / curves -> notes
     custom.py        custom shapes: outlines, fill, spam, outline spam
     text.py          text: letters laid out in a font -> a custom shape, threshold, grow
+    hzbass.py        Hz bass: spam gates from tones (placed notes, slides, chords)
     fonts.py         letter outlines from the fonts installed in Windows
     funnel.py        funnels: curves, note grid, gates
     bezier.py        Bezier curves (anchors + handles) for curves and funnel curves, symmetry, fitting to points
