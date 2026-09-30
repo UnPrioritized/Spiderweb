@@ -1,7 +1,7 @@
 """The Hz bass window (hzbass.py): a small piano roll where the tones of a Hz bass are placed. Pressing the mouse
 places a note at once, and it follows the mouse (snapped; Shift = not) until the button is let go; a note that's
 there is moved the same way, either end changes its length, Ctrl+drag selects with a box, Delete removes the
-selected ones. The key of the note held with the mouse sounds on the MIDI-out device. The window has its own snap.
+selected ones, a double click removes the note under it. The key of the note held with the mouse sounds on the MIDI-out device. The window has its own snap.
 The red line is the tone travelling through the notes: it jumps at the next note unless its dots are dragged (lead
 out of one note, lead in of the next), then it slides.
 
@@ -84,6 +84,7 @@ class HzWindow(tk.Toplevel):
         c.pack(fill="both", expand=True)
         c.bind("<Configure>", lambda e: self.redraw())
         c.bind("<ButtonPress-1>", self.on_press)
+        c.bind("<Double-Button-1>", self.on_double)
         c.bind("<B1-Motion>", self.on_drag)
         c.bind("<ButtonRelease-1>", self.on_release)
         c.bind("<ButtonPress-2>", self.pan_start)
@@ -386,6 +387,14 @@ class HzWindow(tk.Toplevel):
                                   "out": tr("hz.step_lead")}.get(kind, tr("hz.step_length"))}
         self.redraw()
 
+    def on_double(self, e):
+        """A double click on a note deletes it, when the button is let go with nothing changed (so a click and then
+        a quick drag still moves it). Anywhere else, or with Ctrl, it's a press like any other."""
+        hit = self.hit(e.x, e.y)
+        self.on_press(e)
+        if self.drag and hit and hit[0] in ("note", "left", "right") and not e.state & CTRL:
+            self.drag["double"] = True
+
     def on_drag(self, e):
         d = self.drag
         if not d:
@@ -435,6 +444,9 @@ class HzWindow(tk.Toplevel):
             return
         if d["kind"] == "box":
             return self.redraw()
+        if d.get("double") and self.tones == d["before"]:
+            self.sel = {d["i"]}
+            return self.delete_selected()
         if d["kind"] == "note" and not d["moved"] and len(self.sel) > 1:
             self.sel = {d["i"]}  # one of several clicked without dragging: just that one
         if d["kind"] in ("left", "right"):
