@@ -218,6 +218,7 @@ def fillable(strokes):
 TOUCH_BEATS, TOUCH_KEYS = 1 / 64, 1.0  # loose ends at most this far apart count as touching (joined straight)
 FLAT_KEYS, FLAT_BEATS = 0.5, 1 / 64  # an open part never further than this from its closing line is left unfilled
 _plans = {}
+_spans = {}  # inside_spans, remembered
 
 
 def near_ends(p, q):
@@ -528,9 +529,11 @@ def row_spans(polys, q):
         return xa + (xb - xa) * (y - ya) / (yb - ya)
 
     spans = []
+    y0, y1 = np.array([e[0][1] for e in edges], float), np.array([e[1][1] for e in edges], float)
     for ya, yb in zip(levels, levels[1:]):
         mid = (ya + yb) / 2
-        cross = sorted((e for e in edges if (e[0][1] <= mid) != (e[1][1] <= mid)), key=lambda e: x_at(e, mid))
+        cross = sorted((edges[i] for i in np.flatnonzero((y0 <= mid) != (y1 <= mid)).tolist()),
+                       key=lambda e: x_at(e, mid))
         for left, right in zip(cross[::2], cross[1::2]):
             spans.append((min(x_at(left, ya), x_at(left, yb)), max(x_at(right, ya), x_at(right, yb))))
     spans.sort()
@@ -557,7 +560,18 @@ def union_spans(polys, q):
 
 def inside_spans(sh, ppq):
     """[(pitch, start tick, end tick)] for every stretch of every key inside the shape. Text: the nonzero rule and
-    its threshold (text.py). Gaps in the outline are closed with straight lines (fill_plan)."""
+    its threshold (text.py). Gaps in the outline are closed with straight lines (fill_plan). Remembered: a shape
+    with many corners takes a while, and it's asked for again and again (note counts, every change of the gate)."""
+    key = (json.dumps([sh["strokes"], sh["pts"], sh.get("text")]), bool(sh.get("union")), ppq)
+    got = _spans.get(key)
+    if got is None:
+        if len(_spans) > 100:
+            _spans.clear()
+        got = _spans[key] = tuple(find_spans(sh, ppq))
+    return got
+
+
+def find_spans(sh, ppq):
     tx = sh.get("text")
     polys = custom_strokes(sh) if tx else fill_plan(sh)["polys"]
     ps = [p for poly in polys for _, p in poly]
