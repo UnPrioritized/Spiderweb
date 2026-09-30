@@ -6,6 +6,7 @@ claw being tried out is kept as its own undo step (settle)."""
 import json
 import math
 import random
+import time
 import tkinter as tk
 from tkinter import ttk
 
@@ -128,6 +129,8 @@ class ClawWindow(tk.Toplevel):
         if app.claw_pos:
             self.geometry(app.claw_pos)
         self.claw = dict(CLAW_DEFAULTS)
+        self.shown_mode = None  # (show)
+        self.late, self.took = None, 0.0  # (preview)
         s = app.scale
 
         box = ttk.Frame(self, padding=10)
@@ -241,6 +244,7 @@ class ClawWindow(tk.Toplevel):
     def settle(self):
         """Something else is about to change in the main window: the claw tried so far is kept (its own undo step),
         and from now on X / Esc only puts back what changes after this."""
+        self.catch_up()
         if self.now != self.before and self.claws() == self.now:
             saved = self.saved
             self.saved, self.before = json.dumps(self.app.shapes), self.now
@@ -295,40 +299,51 @@ class ClawWindow(tk.Toplevel):
         self.menus[key] = (b, choices)
 
     def show(self):
-        """The window shows self.claw."""
+        """The window shows self.claw. Only what differs is changed: each change makes the window lay itself out
+        again, which made dragging a number slow."""
         c = self.claw
+
+        def config(w, **opts):
+            if any(str(w.cget(k)) != str(v) for k, v in opts.items()):
+                w.config(**opts)
+
         for key, (b, choices) in self.menus.items():
-            b.config(text=next((t for v, t in choices if v == c[key] and t != "-"), ""))
-        self.knob.set(c["dist"])
-        self.knob_text.config(text=f"{c['dist']:g}")
+            config(b, text=next((t for v, t in choices if v == c[key] and t != "-"), ""))
+        if self.knob.value != c["dist"]:
+            self.knob.set(c["dist"])
+        config(self.knob_text, text=f"{c['dist']:g}")
         for key, var in self.ticks.items():
-            var.set(c[key])
+            if var.get() != c[key]:
+                var.set(c[key])
         for key, var in self.vars.items():
-            var.set(fmt(c[key]))
-            self.entries[key].config(style="TEntry")
-        for mode, f in self.boxes.items():
-            if mode != c["mode"]:
-                f.grid_remove()
-        self.boxes[c["mode"]].grid()
-        if c["mode"] == "time":
-            self.cut_box.grid_remove()
-        else:
-            self.cut_box.grid()
-        self.entries["cut"].config(state="normal" if c["shorten"] else "disabled")
-        for u in self.units:
-            u.config(text=UNITS.get(c["mode"], ""))
+            if var.get() != fmt(c[key]):
+                var.set(fmt(c[key]))
+            config(self.entries[key], style="TEntry")
+        if c["mode"] != self.shown_mode:
+            self.shown_mode = c["mode"]
+            for mode, f in self.boxes.items():
+                if f is not self.boxes[c["mode"]]:
+                    f.grid_remove()
+            self.boxes[c["mode"]].grid()
+            if c["mode"] == "time":
+                self.cut_box.grid_remove()
+            else:
+                self.cut_box.grid()
+            for u in self.units:
+                u.config(text=UNITS.get(c["mode"], ""))
+        config(self.entries["cut"], state="normal" if c["shorten"] else "disabled")
 
     def put(self, key, value, done=True):
         """A setting changed: show it on the piano roll."""
         self.claw[key] = value
         self.show()
-        self.preview()
+        self.preview(done)
         self.undo.mark(None if done else key)
 
     def on_knob(self, value, done):
         self.claw["dist"] = value
         self.knob_text.config(text=f"{value:g}")
-        self.preview()
+        self.preview(done)
         self.undo.mark("dist")
         if done:
             self.undo.key = None
@@ -338,7 +353,16 @@ class ClawWindow(tk.Toplevel):
         self.show()
         self.preview()
 
-    def preview(self):
+    def preview(self, now=True):
+        """The piano roll shows the claw. While a number is dragged / the dial turned (not now) and that's slow
+        (lots of notes), only the window follows the mouse: the notes catch up when the mouse rests."""
+        if self.late:
+            self.after_cancel(self.late)
+            self.late = None
+        if not now and self.took > 0.15:
+            self.late = self.after(250, self.preview)
+            return
+        started = time.perf_counter()
         cl = clean_claw(self.claw)
         for i in self.targets:
             sh = self.app.shapes[i]
@@ -347,7 +371,14 @@ class ClawWindow(tk.Toplevel):
             else:
                 sh.pop("claw", None)
         self.now = self.claws()
-        self.app.shapes_changed()
+        self.app.shapes_changed(now=True)
+        self.app.update_idletasks()  # (the piano roll redrawn now, so the time counts it)
+        self.took = time.perf_counter() - started
+
+    def catch_up(self):
+        """A preview left for later (preview): now."""
+        if self.late:
+            self.preview()
 
     def reset(self):
         self.claw = dict(CLAW_DEFAULTS)
@@ -361,6 +392,9 @@ class ClawWindow(tk.Toplevel):
 
     def cancel(self):
         app = self.app
+        if self.late:
+            self.after_cancel(self.late)
+            self.late = None
         for i, c in self.before.items():
             app.shapes[i].pop("claw", None)
             if c:
@@ -373,6 +407,8 @@ class ClawWindow(tk.Toplevel):
             self.app.claw_pos = f"+{self.winfo_x()}+{self.winfo_y()}"
 
     def close(self):
+        if self.late:
+            self.after_cancel(self.late)
         self.app.claw_window = None
         self.destroy()
         self.app.roll.focus_set()

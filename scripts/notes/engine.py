@@ -257,11 +257,16 @@ def shape_notes_tracks(sh, ppq, keys=128):
     """shape_notes, and for pasted notes which track each note came from, for a custom shape made of other shapes
     which of them (one number per row; None for every other shape)."""
     notes, tracks = _notes_tracks(sh, ppq, keys)
-    if not sh.get("claw"):
+    return with_claw(notes, tracks, sh.get("claw"), ppq)
+
+
+def with_claw(notes, tracks, claw, ppq):
+    """shape_notes_tracks' notes and tracks after the shape's claw (claw.py; None = none)."""
+    if not claw:
         return notes, tracks
     if tracks is None:
-        return apply_claw(notes, sh["claw"], ppq), None
-    got = apply_claw(np.column_stack([notes, tracks]), sh["claw"], ppq)
+        return apply_claw(notes, claw, ppq), None
+    got = apply_claw(np.column_stack([notes, tracks]), claw, ppq)
     return got[:, :-1], got[:, -1]
 
 

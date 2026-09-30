@@ -18,7 +18,7 @@ from notes.custom import CUSTOM_DEFAULTS, custom_note_count, outline_apart
 from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
-from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, point_names, render, shape_notes_tracks,
+from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, point_names, render, shape_notes_tracks, with_claw,
                           slot_track_channel)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.paths import KEYS
@@ -722,12 +722,17 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         return self.notes_tracks(sh)[0]
 
     def notes_tracks(self, sh):
-        """shape_notes_tracks, remembered."""
+        """shape_notes_tracks, remembered. A claw goes on top of the notes remembered without it (trying claw
+        settings doesn't make the shape's notes again)."""
         key = (json.dumps(sh, sort_keys=True), self.ppq, self.keys)
         if key not in self._notes_cache:
             if len(self._notes_cache) > 500:
                 self._notes_cache.clear()
-            self._notes_cache[key] = shape_notes_tracks(sh, self.ppq, self.keys)
+            if sh.get("claw"):
+                notes, tracks = self.notes_tracks({k: v for k, v in sh.items() if k != "claw"})
+                self._notes_cache[key] = with_claw(notes, tracks, sh["claw"], self.ppq)
+            else:
+                self._notes_cache[key] = shape_notes_tracks(sh, self.ppq, self.keys)
             self._notes_worked += 1
         return self._notes_cache[key]
 
