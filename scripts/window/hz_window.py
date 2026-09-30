@@ -29,8 +29,8 @@ from notes.engine import slot_track_channel
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
 from notes.hzbass import (FX, HZ_DEFAULTS, TUNE, can_slide, clean_fx, clean_tones, fit_length, glide, heard, hz_of, left_edge,
                           links, next_id, pitch, tones_span)
-from roll.roll_shared import (ALT, BOX_SCROLL_MS, BOX_STILL, CTRL, SELECT_CURSOR, SELECTED_COLOR, SHIFT,
-                              SLOT_COLORS, grid_span, note_name)
+from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, SELECT_CURSOR, SELECTED_COLOR, SHIFT,
+                              SLOT_COLORS, box_side, box_upright, grid_span, note_name)
 from roll.zoombar import add_zoom_bars
 from window.hz_effects import FxPane
 from window.hz_preview import Preview
@@ -451,7 +451,7 @@ class HzWindow(tk.Toplevel):
         for x, y, *_ in self.dots():
             r = 3.5 * s
             c.create_oval(x - r, y - r, x + r, y + r, fill="white", outline=RED, width=max(1, round(1.5 * s)))
-        box = self.box_area() if self.drag and self.drag["kind"] == "box" else None if self.drag else self.kept_box()
+        box = self.box_area() if self.drag and self.drag["kind"] == "box" else self.kept_box()
         x0, y0, x1, y1 = self.box_rect(box) if box else (0, 0, 0, 0)
         if x1 > kb and y1 > rh:  # the Select box (or the last one, kept_box), when it's in view
             bw = max(2, round(2 * s))
@@ -671,6 +671,39 @@ class HzWindow(tk.Toplevel):
         self.redraw()
         self.box_timer = self.after(BOX_SCROLL_MS, self.box_scroll)
 
+    def stretch_to(self, d, e):
+        """The kept Select box's side / corner dragged: its side goes to the mouse (the grid line nearest it,
+        Shift = not snapped / the key row under it) and its notes stretch with it: sideways only their lengths
+        change (user: they stay where they start), up / down their keys spread out from the other side."""
+        (sx, sy), (b0, top, b1, bottom), orig = d["side"], d["area"], d["orig"]
+        new = [b0, top, b1, bottom]
+        f = 1.0
+        if sx:
+            anchor, edge = (b0, b1) if sx > 0 else (b1, b0)
+            short = self.shortest(e)
+            at = self.snap(self.beat_at(e.x), e)
+            at = max(at, anchor + short) if sx > 0 else max(0.0, min(at, anchor - short))
+            f = abs(at - anchor) / max(1e-12, abs(edge - anchor))
+            new[2 if sx > 0 else 0] = at
+        lo, hi = bottom + 1, top  # (the rows in the box)
+        k = min(127, max(0, self.key_at(e.y)))
+        anchor, g = lo, 1.0
+        if sy and hi > lo:
+            if sy < 0:
+                anchor, g = lo, (max(k, lo) - lo) / (hi - lo)
+                new[1] = max(k, lo)
+            else:
+                anchor, g = hi, (hi - min(k, hi)) / (hi - lo)
+                new[3] = min(k, hi) - 1
+        for i in self.sel:
+            n, n0 = self.tones[i], orig[i]
+            n["len"] = max(1 / self.app.ppq, n0["len"] * f)
+            n["key"] = min(127, max(0, anchor + round((n0["key"] - anchor) * g)))
+        d["box"] = tuple(new)
+        self.box_kept = (d["box"], set(self.sel))
+        self.redraw()
+        self.show_status(e)
+
     def kept_box(self):
         """The last Select box, still shown after letting go while what it selected is still the selection (a
         press or any other change of the selection drops it). None = not shown."""
@@ -703,12 +736,24 @@ class HzWindow(tk.Toplevel):
                         "tune" if on_line else "note"), i
         return None
 
+    def on_kept_box(self, kept, e, hit):
+        """Where the mouse is on the kept Select box (box_side; a slide's dot wins over its sides, a note over
+        its inside), or None."""
+        if not kept or not self.sel or e.state & CTRL or hit and hit[0] in ("in", "out"):
+            return None
+        side = box_side(self.box_rect(kept), e.x, e.y, 5 * self.s)
+        return None if side == (0, 0) and hit else side
+
     def on_motion(self, e):
         hit = self.hit(e.x, e.y)
         # a pencil where a press places a note (not on the keys or bar numbers, not with Ctrl: that's the box)
         inside = e.x >= self.kb_w and e.y >= self.ruler_h
         empty = (SELECT_CURSOR if inside and self.tool.get() == "select" else
                  self.pencil if inside and self.can_place() and not e.state & CTRL else "")
+        on_box = self.on_kept_box(self.kept_box(), e, hit)
+        if on_box:
+            self.canvas.config(cursor=BOX_CURSORS[on_box])
+            return self.show_status(e)
         self.canvas.config(cursor={"in": "sb_h_double_arrow", "out": "sb_h_double_arrow", "left": "sb_h_double_arrow",
                                    "right": "sb_h_double_arrow", "tune": "sb_v_double_arrow",
                                    "note": "fleur"}.get(hit and hit[0], empty))
@@ -720,10 +765,19 @@ class HzWindow(tk.Toplevel):
 
     def on_press(self, e):
         self.canvas.focus_set()
-        self.box_kept = None
+        kept, self.box_kept, sel0 = self.kept_box(), None, set(self.sel)
         self.drop_drag()
         hit = self.hit(e.x, e.y)
         before = copy.deepcopy(self.tones)
+        on_box = self.on_kept_box(kept, e, hit)
+        if on_box and on_box != (0, 0):  # the kept Select box's side / corner: its notes stretch
+            area = box_upright(kept)
+            self.box_kept = (area, set(self.sel))
+            self.drag = {"kind": "stretch", "side": on_box, "area": area, "box": area, "before": before,
+                         "orig": copy.deepcopy(self.tones), "name": tr("hz.step_stretch")}
+            return self.redraw()
+        if on_box:  # inside it: all it selected moves, held by the first note
+            hit = ("note", min(self.sel, key=lambda i: self.tones[i]["t"]))
         if hit is None:
             if e.x >= self.kb_w and e.y < self.ruler_h and self.preview_on.get():  # the bar numbers: the play line
                 return self.put_play_line(self.beat_at(e.x))
@@ -757,6 +811,9 @@ class HzWindow(tk.Toplevel):
                          "slide": hit[2] if len(hit) > 2 else None,
                          "name": {"note": tr("hz.step_move"), "in": tr("hz.step_lead"), "out": tr("hz.step_lead"),
                                   "tune": tr("hz.step_tune")}.get(kind, tr("hz.step_length"))}
+            if kind == "note" and kept and i in sel0:  # a note the kept box selected: the box goes along
+                self.drag.update(box=box_upright(kept), inside=bool(on_box))
+                self.box_kept = (box_upright(kept), set(self.sel))
         self.redraw()
 
     def on_double(self, e):
@@ -777,6 +834,8 @@ class HzWindow(tk.Toplevel):
             if self.box_timer is None:
                 self.box_scroll()
             return
+        if d["kind"] == "stretch":
+            return self.stretch_to(d, e)
         n = self.tones[d["i"]]
         beat, short = self.beat_at(e.x), self.shortest(e)
         if d["kind"] == "new":
@@ -813,6 +872,9 @@ class HzWindow(tk.Toplevel):
             dk = max(-min(orig[i]["key"] for i in self.sel), min(127 - max(orig[i]["key"] for i in self.sel), dk))
             for i in self.sel:
                 self.tones[i]["t"], self.tones[i]["key"] = orig[i]["t"] + dt, orig[i]["key"] + dk
+            if d.get("box"):
+                b0, top, b1, bottom = d["box"]
+                self.box_kept = ((b0 + dt, top + dk, b1 + dt, bottom + dk), set(self.sel))
             self.sound(n["key"])
         self.redraw()
         self.show_status(e)
@@ -845,14 +907,17 @@ class HzWindow(tk.Toplevel):
         if d.get("double") and self.tones == d["before"]:
             self.sel = {d["i"]}
             return self.delete_selected()
-        if d["kind"] == "note" and not d["moved"] and len(self.sel) > 1:
+        if d["kind"] == "note" and not d["moved"] and len(self.sel) > 1 and not d.get("inside"):
             self.sel = {d["i"]}  # one of several clicked without dragging: just that one
         if d["kind"] in ("left", "right"):
             self.last_len = self.tones[d["i"]]["len"]
+        box = (self.box_kept or (None,))[0] if d.get("box") and (d["kind"] == "stretch" or d.get("inside")
+                                                                  or d["moved"]) else None
         if self.tones != d["before"]:
             self.commit(d["name"], d["before"])
-        else:
-            self.redraw()
+        if box:  # (the notes were sorted: the same ones, numbered anew)
+            self.box_kept = (box, set(self.sel))
+        self.redraw()
 
     def on_middle(self, e):
         """A middle click (not a drag: that moves the view) on a note marks one end of a slide (a full red dot); a

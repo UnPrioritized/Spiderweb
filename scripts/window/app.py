@@ -21,6 +21,7 @@ from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, point_names, render, shape_notes_tracks, with_claw,
                           slot_track_channel)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
+from notes.pattern import moved_formulas
 from notes.paths import KEYS
 from notes.polygon import POLYGON_DEFAULTS
 from notes.smooth import SMOOTH_DEFAULT
@@ -1019,6 +1020,39 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
                 sh["shape"]["k"] = r * r / sh["shape"]["k"]
         self.sync_panel()
         self.shapes_changed()
+
+    @staticmethod
+    def stretched(sh, ab, kx, ap, ky):
+        """A copy of shape sh stretched kx times sideways from beat ab and ky times up / down from pitch ap (a
+        Select box's side dragged), still looking the same stretched: arcs / freehand as round, its tumours,
+        formulas and text along, a Hz bass's notes and effects' lines too."""
+        new = copy.deepcopy(sh)
+        fn = lambda b, p: (ab + (b - ab) * kx, ap + (p - ap) * ky)
+        new["pts"] = [list(fn(b, p)) for b, p in sh["pts"]]
+        r = abs(kx / ky)  # (k = beats per key where it looks round: see rotate)
+        if new["kind"] == "arc" or new["kind"] == "free" and "k" in new:
+            new["k"] = new.get("k", 1.0) * r
+        if new.get("text"):
+            new["text"]["k"] = new["text"].get("k", 1.0) * r
+        for tm in all_tumours(new):  # (size in keys, the rest in beats)
+            tm["k"] *= r
+            tm["size"] *= abs(ky)
+            tm["length"] *= abs(kx)
+            tm["dist"] *= abs(kx)
+            tm["ease"] = tm.get("ease", 0.0) * abs(kx)
+        moved_formulas(new, fn)
+        hz = new.get("hz")
+        if hz:  # its notes count in beats from the shape's left edge
+            for n in hz.get("tones") or ():
+                n["t"] *= abs(kx)
+                n["len"] *= abs(kx)
+                for s in n.get("to") or ():
+                    s["out"] *= abs(kx)
+                    s["in"] *= abs(kx)
+            for pts in (hz.get("fx") or {}).values():
+                for p in pts:
+                    p[0] *= abs(kx)
+        return new
 
     def shape_label(self, sh):
         if "notes" in sh:

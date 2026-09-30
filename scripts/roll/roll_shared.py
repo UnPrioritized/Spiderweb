@@ -87,6 +87,31 @@ def grid_span(a, b, step):
     return lo, max(hi, lo + step)
 
 
+def box_upright(area):
+    """A Select box's (time, pitch, time, pitch) corners in order: (left, top, right, bottom)."""
+    return min(area[0], area[2]), max(area[1], area[3]), max(area[0], area[2]), min(area[1], area[3])
+
+
+def box_side(rect, x, y, reach):
+    """Where (x, y) is on a Select box shown at rect (x0, y0, x1, y1): (sx, sy), sx -1 its left side / 1 its right
+    side / 0 neither, sy -1 its top / 1 its bottom / 0 neither ((0, 0) = inside), or None (not on it). reach: how
+    close to a side counts (px)."""
+    x0, y0, x1, y1 = rect
+    if not (x0 - reach <= x <= x1 + reach and y0 - reach <= y <= y1 + reach):
+        return None
+    sx = 0 if min(abs(x - x0), abs(x - x1)) > reach else -1 if abs(x - x0) < abs(x - x1) else 1
+    sy = 0 if min(abs(y - y0), abs(y - y1)) > reach else -1 if abs(y - y0) < abs(y - y1) else 1
+    if not sx and not sy and not (x0 <= x <= x1 and y0 <= y <= y1):
+        return None
+    return sx, sy
+
+
+# the pointer on a Select box's side / corner / inside (box_side)
+BOX_CURSORS = {(-1, 0): "sb_h_double_arrow", (1, 0): "sb_h_double_arrow", (0, -1): "sb_v_double_arrow",
+               (0, 1): "sb_v_double_arrow", (-1, -1): "size_nw_se", (1, 1): "size_nw_se", (1, -1): "size_ne_sw",
+               (-1, 1): "size_ne_sw", (0, 0): "fleur"}
+
+
 def fade(color, amount=0.72):
     """color mixed towards white"""
     r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))

@@ -243,6 +243,7 @@
  "hz.position": "beat {beat}   {key}   {hz} Hz",
  "hz.step_place": "Hz bass: place a note",
  "hz.step_move": "Hz bass: move notes",
+ "hz.step_stretch": "Hz bass: stretch notes",
  "hz.step_length": "Hz bass: note length",
  "hz.step_lead": "Hz bass: lead in / out",
  "hz.step_delete": "Hz bass: delete notes",
@@ -618,6 +619,7 @@
  "pianoroll.turn": "Turn",
  "pianoroll.skew": "Skew",
  "pianoroll.move": "Move",
+ "pianoroll.stretch": "Stretch",
  "pianoroll.pick_a_custom_shape_in_the": "Pick a custom shape in the panel first, or draw one with Drawer…",
  "pianoroll.new_funnel_notes": "{text}     new funnel: {note_count:,} notes",
  "pianoroll.turned": "turned {degrees:+.1f}°",
@@ -1105,7 +1107,7 @@
   "",
   "Drag up or down on the piano roll where it should start: the red mark shows the keys it will repeat (more keys = a thicker tone, not a different one). You can also click, move the mouse and click again. A window opens with a small piano roll of its own: the notes you place there are the tones you will hear, and the Hz bass on the main piano roll grows as you place them.",
   "",
-  "In the window: pressing the mouse places a note at once, and it follows the mouse until you let go. A note that is there moves the same way; drag either end to change its length. A new note is as long as the last one you clicked or resized. With Select (V) at the top of the window (Pencil (P) places notes), dragging on empty space draws a box that selects the notes it touches (Ctrl adds them); with Pencil, Ctrl+drag does it. The box snaps to the grid like on the piano roll. With the preview on, a click on empty space with Select moves the play line there. Double right-click switches between the two. Ctrl+click picks several, Ctrl+A all; Delete removes the selected notes. The window has its own Snap (Shift = no snap). While you hold a note, its key sounds on the MIDI-out device. The mouse wheel scrolls, Shift+wheel goes sideways, Ctrl+wheel zooms, the middle button drags the view.",
+  "In the window: pressing the mouse places a note at once, and it follows the mouse until you let go. A note that is there moves the same way; drag either end to change its length. A new note is as long as the last one you clicked or resized. With Select (V) at the top of the window (Pencil (P) places notes), dragging on empty space draws a box that selects the notes it touches (Ctrl adds them); with Pencil, Ctrl+drag does it. The box snaps to the grid like on the piano roll. Drag its left or right side to make its notes longer or shorter (they keep their starts), its top or bottom to spread their keys apart or closer, inside it to move them. With the preview on, a click on empty space with Select moves the play line there. Double right-click switches between the two. Ctrl+click picks several, Ctrl+A all; Delete removes the selected notes. The window has its own Snap (Shift = no snap). While you hold a note, its key sounds on the MIDI-out device. The mouse wheel scrolls, Shift+wheel goes sideways, Ctrl+wheel zooms, the middle button drags the view.",
   "",
   "Notes at the same time make a chord. Empty space between notes is silence.",
   "",
@@ -1488,6 +1490,8 @@
  "help.selecting.text": [
   "With Select, drag on empty space: the box selects every shape it touches (Ctrl+drag adds them). The box snaps to the grid, out to the next grid line as soon as the mouse crosses one (Shift = no snap). Ctrl+click selects more shapes (also in the Shapes list), Ctrl+A selects all.",
   "",
+  "The box stays after you let go. Drag its sides or corners to stretch the shapes it selected (the other side stays put), or drag inside it to move them. Dragged past the edge of the piano roll, the view scrolls.",
+  "",
   "Ctrl+C / Ctrl+V: copy / paste at the play line (snapped to the grid). Ctrl+D: duplicate. Del: delete.",
   "",
   "Ctrl+H / Ctrl+J: flip sideways / upside down (sideways also mirrors velocities).",
@@ -1498,7 +1502,7 @@
   "",
   "Settings in the panel (velocity, last note…) change every selected shape."
  ],
- "help.selecting.words": "box rectangle marquee area copy paste duplicate flip mirror rotate turn undo redo delete",
+ "help.selecting.words": "box rectangle marquee area stretch scale resize copy paste duplicate flip mirror rotate turn undo redo delete",
  "help.numbers.title": "Number boxes",
  "help.numbers.tip": "Drag a box's name sideways to change it, or press Up / Down in the box. Shift = big steps, Ctrl = small steps.",
  "help.numbers.text": [

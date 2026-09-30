@@ -181,7 +181,7 @@ class RollDrawing:
     def draw_select_box(self):
         """The dotted box being dragged with Select (or the last one, kept_box)."""
         self.delete("selbox")
-        box = self.box_area() if self.drag and self.drag[0] == "box" else None if self.drag else self.kept_box()
+        box = self.box_area() if self.drag and self.drag[0] == "box" else self.kept_box()
         x0, y0, x1, y1 = self.box_rect(box) if box else (0, 0, 0, 0)
         if x1 > self.kb_w and y1 > self.ruler_h:  # (in view)
             w = max(2, round(2 * self.scale))
