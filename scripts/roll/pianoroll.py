@@ -44,6 +44,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.note_img = None     # grid + notes as one picture when there are too many notes for canvas items
         self._note_pic = None    # what that picture shows (see redraw)
         self._note_index = None  # rendered notes sorted by start, to find the visible ones quickly
+        self._img = None         # that picture's pixels (NumPy), to move along when the view moves
+        self._exact = None       # timer: the picture painted whole again after it was moved along
+        self._carry = None       # the picture's parts while shapes are dragged (paint_carried)
         self._redraw_pending = False
         self._late_redraw = None  # request_redraw(delay)'s timer
         # a shape started with a click (no drag): the drag it would have been, following the mouse until the next
@@ -199,16 +202,16 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 strokes = strokes + cached_strokes(dict(sh, tumour=None, tumours=None, pattern=None, shape=None))
             if sh["kind"] == "funnel":  # its curves' too
                 strokes = strokes + funnel_origins(sh)
-            for stroke in strokes:
-                pts = [(self.t2x(b), self.p2y(p)) for b, p in stroke]
-                if len(pts) == 1 and math.hypot(pts[0][0] - x, pts[0][1] - y) < PICK:
+            for stroke in strokes:  # (every piece of the line at once: a line with a formula has thousands)
+                pts = np.asarray(stroke, float).reshape(-1, 2)
+                px, py = self.t2x(pts[:, 0]), self.p2y(pts[:, 1])
+                if len(pts) == 1 and math.hypot(px[0] - x, py[0] - y) < PICK:
                     return i
-                for (ax, ay), (bx, by) in zip(pts, pts[1:]):
-                    dx, dy = bx - ax, by - ay
-                    ll = dx * dx + dy * dy
-                    u = 0 if ll == 0 else max(0, min(1, ((x - ax) * dx + (y - ay) * dy) / ll))
-                    if math.hypot(x - ax - u * dx, y - ay - u * dy) < PICK:
-                        return i
+                ax, ay, dx, dy = px[:-1], py[:-1], np.diff(px), np.diff(py)
+                ll = dx * dx + dy * dy
+                u = np.clip(((x - ax) * dx + (y - ay) * dy) / np.where(ll == 0, 1, ll), 0, 1)
+                if (np.hypot(x - ax - u * dx, y - ay - u * dy) < PICK).any():
+                    return i
         for i in order:
             sh = self.app.shapes[i]
             if "notes" in sh and self.inside_strokes(cached_strokes(sh), self.x2t(x), self.y2p(y)):
@@ -416,7 +419,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.drag = ("move", start, orig, one, True, part)
             for j, pts in orig.items():
                 self.app.shapes[j]["pts"] = [[b + db, p + dp] for b, p in pts]
-            self.app.shape_edited()
+            self.app.shape_edited(moving=True)
         elif kind == "free":
             self.free_drag(e)
         elif kind in ("segment", "arcdrag"):  # a polyline's next point / an arc's end, at the mouse
@@ -796,7 +799,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if e.state & SHIFT:
                 self.view_t += (-1 if up else 1) * 120 / self.sx
             else:
-                self.view_top += 3 if up else -3
+                # (3 keys, as whole pixels: the picture of the notes can then be moved along, see roll_draw)
+                self.view_top += (1 if up else -1) * max(1, round(3 * self.sy)) / self.sy
         self.clamp_view()
         self.request_redraw()
 

@@ -406,11 +406,9 @@ def resolve_overlaps(notes):
     """
     if not len(notes):
         return notes
-    _, first, where = np.unique(notes[:, 4] * 256 + notes[:, 2], return_index=True, return_inverse=True)
-    group = np.argsort(np.argsort(first))[where]  # groups numbered in the order they first show up
-    # same start: the loudest comes last, so it's the one kept
-    order = np.lexsort((-notes[:, 1], notes[:, 3], notes[:, 0], group))
-    a, group = notes[order], group[order]
+    group = first_seen(notes[:, 4] * 256 + notes[:, 2])  # groups numbered in the order they first show up
+    order = overlap_order(notes, group)
+    a, group = np.take(notes, order, axis=0), group[order]  # (take: quicker than notes[order])
     s, e = a[:, 0], a[:, 1]
     run = running_max(e, group)  # everything before in the group sounds until here
     same = np.zeros(len(a), bool)
@@ -424,7 +422,45 @@ def resolve_overlaps(notes):
     last = np.ones(len(a), bool)
     last[:-1] = ~same[1:]
     a[:, 1] = end
-    return a[last | (end > s)]
+    keep = last | (end > s)
+    return a if keep.all() else a[keep]
+
+
+def first_seen(ids):
+    """Each id (whole numbers, not negative) as a number: 0 for the id that shows up first, 1 for the next new
+    one, and so on."""
+    top = int(ids.max()) + 1
+    if top > 4 * len(ids) + 65536:  # (too spread out for a table)
+        _, first, where = np.unique(ids, return_index=True, return_inverse=True)
+        return np.argsort(np.argsort(first))[where]
+    first = np.full(top, -1, np.int64)
+    first[ids[::-1]] = np.arange(len(ids) - 1, -1, -1)  # (a repeated index keeps the last one written: the first)
+    found = np.flatnonzero(first >= 0)
+    rank = np.empty(top, np.int64)
+    rank[found[np.argsort(first[found])]] = np.arange(len(found))
+    return rank[ids]
+
+
+def overlap_order(notes, group):
+    """The order resolve_overlaps works in: by group, then start; the same start: by velocity (the loudest comes
+    last, so it's the one kept), then the longest first. The same as
+    np.lexsort((-end, velocity, start, group)), but most notes come in nearly sorted already (each shape's notes
+    key by key, in time), which one sort by group and start makes good use of; only notes that share a start need
+    the rest."""
+    s = notes[:, 0]
+    if not len(s) or s.min() < 0 or s.max() >= 1 << 40 or group.max() >= 1 << 22:
+        return np.lexsort((-notes[:, 1], notes[:, 3], s, group))
+    key = (group << 40) | s
+    order = np.argsort(key, kind="stable")
+    key = key[order]
+    tie = np.zeros(len(key), bool)
+    tie[1:] = key[1:] == key[:-1]
+    tie[:-1] |= tie[1:]
+    at = np.flatnonzero(tie)
+    if len(at):
+        sub = order[at]
+        order[at] = sub[np.lexsort((-notes[sub, 1], notes[sub, 3], key[at]))]
+    return order
 
 
 CHANNEL_MODES = ("raw", "single", "auto")
@@ -461,9 +497,12 @@ def render(note_lists, mode, split="key", tracks=None, apart=None):
         count = int(unit_slots.max()) + 1 if len(units) else 0
     else:
         slot_of, count = [0] * len(note_lists), 1 if note_lists else 0
-    parts = [np.column_stack([lst, np.broadcast_to(slot_of[o], len(lst)), np.full(len(lst), o, np.int64)])
-             for o, lst in enumerate(note_lists)]
-    notes = np.concatenate(parts).astype(np.int64) if parts else NO_NOTES
+    notes = np.empty((sum(len(lst) for lst in note_lists), 6), np.int64)
+    at = 0
+    for o, lst in enumerate(note_lists):
+        part = notes[at:at + len(lst)]
+        part[:, :4], part[:, 4], part[:, 5] = lst, slot_of[o], o
+        at += len(lst)
     if mode != "raw":
         notes = resolve_overlaps(notes)
     return notes, count

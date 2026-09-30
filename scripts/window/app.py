@@ -129,6 +129,8 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self.hz_defaults = {"lo": 48, "hi": 58}  # the keys a new Hz bass repeats
         self.rendered, self.slot_count = NO_NOTES, 0  # (start, end, pitch, velocity, slot, owner) rows
         self.note_counts = []  # notes per shape in rendered
+        self.notes_late = False  # the notes are behind the shapes (a drag going on: see shapes_changed)
+        self.rendered_pts = []  # each shape's first point when rendered was made
         self.ppq, self.beats = 960, 4
         self.undo_stack, self.redo_stack = [], []
         self._redo_kept = None  # (push_undo)
@@ -747,17 +749,22 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
             self._notes_worked += 1
         return self._notes_cache[key]
 
-    def shapes_changed(self, now=False):
+    def shapes_changed(self, now=False, moving=False):
         """Recalculate every note (overlaps depend on all shapes together) and refresh the screen.
         While dragging, if that's slow (lots of notes), only the lines follow the mouse: the notes catch up when the
-        mouse rests or is let go (now: catch up)."""
+        mouse rests or is let go (now: catch up). moving: shapes are dragged to another place: the piano roll shows
+        their notes going along (roll_draw.paint_carried), and they catch up when the mouse is let go."""
         if self._late_notes:
             self.after_cancel(self._late_notes)
             self._late_notes = None
-        if not now and self.roll.drag and self._notes_time > 0.15:
-            self._late_notes = self.after(250, self._notes_rested)
+        if not now and self.roll.drag and self._notes_time > (0.03 if moving else 0.15):
+            self.notes_late = True
+            if not moving:
+                self._late_notes = self.after(250, self._notes_rested)
             self.roll.request_redraw()
             return
+        self.notes_late = False
+        self.rendered_pts = [list(sh["pts"][0]) for sh in self.shapes]  # (where each shape is in these notes)
         started, worked = time.perf_counter(), self._notes_worked
         self.channel_split = SPLIT_CHOICES[max(self.split_box.current(), 0)][0]
         self.split_box.config(state="readonly" if self.channel_mode.get() == "auto" else "disabled")
@@ -791,13 +798,13 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
 
     def catch_up_notes(self):
         """The notes left for later while dragging (shapes_changed): now."""
-        if self._late_notes:
+        if self._late_notes or self.notes_late:
             self.shapes_changed(now=True)
 
-    def shape_edited(self):
-        """The selected shape was changed with the mouse."""
+    def shape_edited(self, moving=False):
+        """The selected shape was changed with the mouse (moving: just dragged to another place)."""
         self.sync_points()
-        self.shapes_changed()
+        self.shapes_changed(moving=moving)
 
     def add_shape(self, sh, name=None):
         self.push_undo(name=name or tr("app.draw", shape_label=self.shape_label(sh)))

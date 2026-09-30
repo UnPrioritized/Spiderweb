@@ -101,6 +101,7 @@ class VelocityPane(tk.Canvas):
         self.scale = scale
         self.top = int(7 * scale)  # gap above velocity 127
         self.img = None
+        self._pic = None  # what that picture shows (see redraw)
         self.edit = None  # the drag in progress
         self.curve = None  # the last curve drawn, while its handle can still bend it
         app.vel_tool.trace_add("write", lambda *_: self.request_redraw())
@@ -427,7 +428,16 @@ class VelocityPane(tk.Canvas):
         kb = int(roll.kb_w)
         if roll.sx is None or w - kb < 2 or h < 2 * self.top + 4:
             return
-        self.paint(w, h, kb)
+        # the picture shows exactly this: when nothing here changed (the piano roll moved up or down, a shape is
+        # dragged and its notes catch up later), it's shown again as it is
+        pic = None if self.edit or roll.draft else (
+            self.app.rendered, (frozenset(self.app.sels), roll.sx, roll.view_t, roll.kb_w, w, h, self.top,
+                                tuple(roll.grid_cols(w))))
+        if pic and self.img is not None and self._pic and self._pic[0] is pic[0] and self._pic[1] == pic[1]:
+            self.create_image(kb, 0, image=self.img, anchor="nw")
+        else:
+            self.paint(w, h, kb)
+            self._pic = pic
         self.create_rectangle(0, 0, kb, h, fill="#f0f0f0", outline="")
         self.create_line(kb - 1, 0, kb - 1, h, fill="#808080")
         for v in LEVELS:

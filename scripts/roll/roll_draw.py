@@ -103,22 +103,40 @@ class RollDrawing:
         rows, cols = self.grid_parts(w, h)
         # the picture below shows exactly this: when nothing here changed (e.g. dragging a shape whose notes catch up
         # later), it's shown again as it is instead of being painted again
-        pic = (app.rendered, (frozenset(app.sels), self.sx, self.sy, self.view_t, self.view_top, self.kb_w,
-                              self.ruler_h, w, h, tuple(rows), tuple(cols)))
-        same = (self.note_img is not None and self._note_pic is not None and not self.draft
-                and app.show_notes.get() and self._note_pic[0] is pic[0] and self._note_pic[1] == pic[1])
-        rects = None if same or not app.show_notes.get() else self.note_rects(w, h)
-        if same:
+        fixed = (frozenset(app.sels), self.sx, self.sy, self.kb_w, self.ruler_h, w, h)
+        pic = (app.rendered, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols)))
+        old = None if self.draft or not app.show_notes.get() or self.note_img is None else self._note_pic
+        if self._exact:
+            self.after_cancel(self._exact)
+            self._exact = None
+        moved = self.pan_pixels(old, pic, w, h)
+        carried = self.carried()
+        if carried is None:
+            self._carry = None
+        if app.notes_late and not self.drag and not app._late_notes:  # (a drag called off: the notes catch up)
+            app._notes_rested()
+        if carried is not None and w > self.kb_w and h > self.ruler_h:
+            self.paint_carried(w, h, rows, cols, fixed, *carried)
+            self._note_pic = None
+        elif old is not None and old[0] is pic[0] and old[1] == pic[1]:
             self.create_image(int(self.kb_w), int(self.ruler_h), image=self.note_img, anchor="nw")
-        elif rects is not None and len(rects[0]) > w * h // 2000:
-            # Lots of notes: paint grid + notes as one picture (thousands of canvas items redraw slowly)
-            self.paint_image(w, h, rows, cols, rects)
-            self._note_pic = None if self.draft else pic
+        elif moved:
+            # only the view moved, by whole pixels: the picture is moved along and just the new edge is painted.
+            # (A pixel here and there can round the other way, so it's painted whole once the view rests.)
+            self.shift_image(w, h, rows, cols, *moved)
+            self._note_pic = pic
+            self._exact = self.after(300, self.paint_exact)
         else:
-            self.note_img = self._note_pic = None
-            self.draw_grid(w, h, rows, cols)
-            for x0, y0, x1, y1, color in zip(*(v.tolist() for v in rects or ())):
-                self.create_rectangle(x0, y0, x1, y1, fill=NOTE_COLORS[color][0], outline=NOTE_COLORS[color][1])
+            rects = self.note_rects(w, h) if app.show_notes.get() else None
+            if rects is not None and len(rects[0]) > w * h // 2000:
+                # Lots of notes: paint grid + notes as one picture (thousands of canvas items redraw slowly)
+                self.paint_image(w, h, rows, cols, rects)
+                self._note_pic = None if self.draft else pic
+            else:
+                self.note_img = self._note_pic = self._img = None
+                self.draw_grid(w, h, rows, cols)
+                for x0, y0, x1, y1, color in zip(*(v.tolist() for v in rects or ())):
+                    self.create_rectangle(x0, y0, x1, y1, fill=NOTE_COLORS[color][0], outline=NOTE_COLORS[color][1])
         # a line with tumours / a curve with a pattern: the line as drawn (the origin path), faint and dashed under it
         for i, sh in enumerate(app.shapes):
             if ((sh.get("pattern") or sh.get("shape") or any(tm["on"] for tm in all_tumours(sh)))
@@ -253,80 +271,214 @@ class RollDrawing:
         """The rendered notes sorted by start (kept until the notes change)."""
         rendered = self.app.rendered
         if self._note_index is None or self._note_index[0] is not rendered:
-            order = rendered[np.argsort(rendered[:, 0], kind="stable")]
-            self._note_index = (rendered, order, int((order[:, 1] - order[:, 0]).max()) if len(order) else 0)
+            order = np.take(rendered, np.argsort(np.ascontiguousarray(rendered[:, 0]), kind="stable"), axis=0)
+            self._note_index = (rendered, order, int((order[:, 1] - order[:, 0]).max()) if len(order) else 0,
+                                np.ascontiguousarray(order[:, 0]))
         return self._note_index[1]
 
     def visible_range(self, t_lo, t_hi):
         """(first, end): the sorted_notes() rows that can overlap ticks t_lo..t_hi."""
-        order, longest = self.sorted_notes(), self._note_index[2]
-        return (int(np.searchsorted(order[:, 0], t_lo - longest, "left")),
-                int(np.searchsorted(order[:, 0], t_hi, "right")))
+        self.sorted_notes()
+        longest, starts = self._note_index[2:]
+        return int(np.searchsorted(starts, t_lo - longest, "left")), int(np.searchsorted(starts, t_hi, "right"))
 
     def visible_notes(self, t_lo, t_hi):
         """Rendered notes (array rows) that can overlap ticks t_lo..t_hi."""
         lo, hi = self.visible_range(t_lo, t_hi)
         return self.sorted_notes()[lo:hi]
 
-    def note_rects(self, w, h):
+    def note_rects(self, w, h, clip=None, area=None, only=None):
         """On-screen notes as whole-pixel rectangles, skipping exact repeats: NumPy arrays (x0, y0, x1, y1, colour),
-        colour = a number in NOTE_COLORS. Painted in this order (selected shapes' notes, then the draft, on top)."""
+        colour = a number in NOTE_COLORS. Painted in this order (selected shapes' notes, then the draft, on top).
+        clip = (x0, y0, x1, y1): only the notes that touch this part of the screen (the same rectangles).
+        area = (x0, y0, x1, y1): as if the note area were there (it can reach past the screen).
+        only: True = just the selected shapes' notes, False = all but theirs (no draft either way)."""
         app, ppq = self.app, self.app.ppq
-        kb, top = self.kb_w, self.ruler_h
-        ax, bx = self.sx / ppq, kb - self.view_t * self.sx  # x = tick * ax + bx
-        ay, by = -self.sy, top + self.view_top * self.sy    # y = pitch * ay + by
+        ax, bx = self.sx / ppq, self.kb_w - self.view_t * self.sx  # x = tick * ax + bx
+        ay, by = -self.sy, self.ruler_h + self.view_top * self.sy  # y = pitch * ay + by
+        kb, top, w, h = area or (self.kb_w, self.ruler_h, w, h)
         keys = np.arange(app.keys)
         row0, row1 = np.round((keys + 0.5) * ay + by).astype(np.int64), np.round((keys - 0.5) * ay + by).astype(np.int64)
         shown = ~((row1 < top) | (row0 > h))  # each key's row on screen?
         row1 = np.maximum(row1, row0 + 1)
+        if clip:
+            shown &= ~((row1 < clip[1]) | (row0 >= clip[3]))
+            notes = self.visible_notes(self.x2t(clip[0] - 2) * ppq, self.x2t(clip[2] + 2) * ppq)
+            notes = notes[shown[np.clip(notes[:, 2], 0, app.keys - 1)]]
+        else:
+            notes = self.visible_notes(self.x2t(kb) * ppq, self.x2t(w) * ppq)
+        if only is not None and app.sels:
+            notes = notes[np.isin(notes[:, 5], list(app.sels)) == only]
+        sels = list(app.sels)
 
-        notes = self.visible_notes(self.x2t(kb) * ppq, self.x2t(w) * ppq)
-        owner = notes[:, 5]
-        if len(owner) and owner.min() != owner.max():  # shapes drawn later go on top (clicks pick that one too)
-            notes = notes[np.argsort(owner.astype(np.uint16) if 0 <= owner.min() and owner.max() < 65536 else owner, kind="stable")]
-        color = notes[:, 4] % len(SLOT_COLORS)
-        if app.sels:
-            mine = np.isin(notes[:, 5], list(app.sels))
-            if mine.any():  # selected shapes' notes go on top
-                order = np.concatenate([np.nonzero(~mine)[0], np.nonzero(mine)[0]])
-                notes, color = notes[order], np.where(mine[order], SELECTED, color[order])
-        parts = [(notes, color)]
+        def screen(notes, color, order):
+            """These notes' x0, x1, key and colour number, the ones on screen only. order: put in painting order
+            (shapes drawn later go on top, clicks pick that one too; then the selected shapes' notes on top)."""
+            key = notes[:, 2]
+            # (the same sums as one note at a time, so the same pixels)
+            x0, x1 = np.round(notes[:, 0] * ax + bx), np.round(notes[:, 1] * ax + bx)
+            on = ~((x1 < kb) | (x0 > w)) & shown[key]
+            if clip:
+                on &= ~((x1 < clip[0]) | (x0 >= clip[2]))
+            on = np.flatnonzero(on)
+            if order and len(on):
+                owner = notes[on, 5]
+                lo, hi = owner.min(), owner.max()
+                if lo != hi:
+                    on = on[np.argsort(owner.astype(np.uint16) if 0 <= lo and hi < 65536 else owner, kind="stable")]
+                    owner = notes[on, 5]
+                color = notes[on, 4] % len(SLOT_COLORS)
+                if sels:
+                    mine = np.isin(owner, sels)
+                    if mine.any():
+                        last = np.concatenate([np.nonzero(~mine)[0], np.nonzero(mine)[0]])
+                        on, color = on[last], np.where(mine[last], SELECTED, color[last])
+            elif order:
+                color = np.zeros(0, np.int64)
+            # low velocity = paler fill (outline stays); 32 shades is plenty
+            return (x0[on].astype(np.int64), x1[on].astype(np.int64), key[on],
+                    color * 32 + np.minimum(notes[on, 3], 127) // 4)
+
+        parts = [screen(notes, None, True)]
         big = False
         if self.draft and self.draft["kind"] == "custom":
             big = (custom_note_count(self.draft, ppq) or 0) > PREVIEW_LIMIT
         elif self.draft and self.draft["kind"] == "funnel":
             big = funnel_note_count(self.draft, ppq) > PREVIEW_LIMIT
-        if self.draft and not big:
-            d = shape_notes(self.draft, ppq, app.keys)
-            parts.append((d, np.full(len(d), DRAFT)))
-        s = np.concatenate([p[:, 0] for p, _ in parts])
-        e = np.concatenate([p[:, 1] for p, _ in parts])
-        key = np.concatenate([p[:, 2] for p, _ in parts])
-        vel = np.concatenate([p[:, 3] for p, _ in parts])
-        color = np.concatenate([c for _, c in parts])
-        # (the same sums as one note at a time, so the same pixels)
-        x0, x1 = np.round(s * ax + bx), np.round(e * ax + bx)
-        on = ~((x1 < kb) | (x0 > w)) & shown[key]
-        left, right = int(kb) - 2, w + 2
-        x0 = np.maximum(x0[on].astype(np.int64), left)
-        x1 = np.minimum(x1[on].astype(np.int64), right)
-        key = key[on]
-        # low velocity = paler fill (outline stays); 32 shades is plenty
-        color = color[on] * 32 + np.minimum(vel[on], 127) // 4
-        # zoomed out, lots of notes land on the very same pixels: keep the first
-        packed = ((((x0 - left) << 16) | (x1 - left)) << 8 | key) << 10 | color
-        _, first = np.unique(packed, return_index=True)
-        if len(first) < len(packed):
-            first.sort()
-            x0, x1, key, color = x0[first], x1[first], key[first], color[first]
+        if self.draft and not big and only is None:
+            parts.append(screen(shape_notes(self.draft, ppq, app.keys), DRAFT, False))
+        x0, x1, key, color = (np.concatenate(v) if len(v) > 1 else v[0] for v in zip(*parts))
+        left, right = int(kb) - 2, int(w) + 2
+        x0, x1 = np.maximum(x0, left), np.minimum(x1, right)
+        # zoomed out, lots of notes land on the very same pixels: only the last of them shows (it's painted over
+        # the others), so the others are left out. Found with a table, for notes up to 3 pixels long (the many).
+        n = len(x0)
+        if n > 1:
+            size = x1 - x0
+            small = np.flatnonzero((size < 4) & (size >= 0))
+            spot = ((x0[small] - left) * app.keys + key[small]) * 4 + size[small]
+            last = np.empty((right - left + 1) * app.keys * 4, np.int64)
+            last[spot] = small  # (a repeated index keeps the last one written)
+            keep = np.ones(n, bool)
+            keep[small] = last[spot] == small
+            if not keep.all():
+                x0, x1, key, color = x0[keep], x1[keep], key[keep], color[keep]
         return x0, row0[key], x1, row1[key], color
 
     def paint_image(self, w, h, rows, cols, rects):
         """Grid and notes as one picture over the note area."""
         kb, top = int(self.kb_w), int(self.ruler_h)
-        iw, ih = w - kb, h - top
-        if iw < 1 or ih < 1:
+        if w - kb < 1 or h - top < 1:
             return
+        self._img = self.paint_region(rows, cols, rects, (kb, top, w, h))
+        self.show_image()
+
+    def show_image(self, moved=None, strips=()):
+        """The picture's pixels go on screen. moved = (dx, dy) with strips: the picture shown is the same one moved
+        that far, but for these strips (x0, y0, x1, y1 inside the picture), so only they are sent."""
+        img = self._img
+        ih, iw = img.shape[:2]
+
+        def ppm(a):
+            return b"P6 %d %d 255\n" % (a.shape[1], a.shape[0]) + a.tobytes()
+
+        if self.note_img is None or (self.note_img.width(), self.note_img.height()) != (iw, ih):
+            self.note_img = tk.PhotoImage(master=self, width=iw, height=ih)
+            moved = None
+        name = self.note_img.name
+        if moved:
+            dx, dy = moved
+            self.tk.call(name, "copy", name, "-from", max(-dx, 0), max(-dy, 0), iw + min(-dx, 0), ih + min(-dy, 0),
+                         "-to", max(dx, 0), max(dy, 0))
+            for x0, y0, x1, y1 in strips:
+                self.tk.call(name, "put", ppm(img[y0:y1, x0:x1]), "-format", "ppm", "-to", x0, y0)
+        else:
+            self.note_img.configure(data=ppm(img), format="ppm")
+        self.create_image(int(self.kb_w), int(self.ruler_h), image=self.note_img, anchor="nw")
+
+    def pan_pixels(self, old, pic, w, h):
+        """(dx, dy): how far the picture painted for old has to move to show pic, if the view just moved by whole
+        pixels (less than half the picture) and nothing else changed; else None."""
+        if old is None or self._img is None or old[0] is not pic[0] or old[1][0] != pic[1][0]:
+            return None
+        dx, dy = (old[1][1] - pic[1][1]) * self.sx, (pic[1][2] - old[1][2]) * self.sy
+        if abs(dx - round(dx)) > 1e-6 or abs(dy - round(dy)) > 1e-6:
+            return None
+        dx, dy = round(dx), round(dy)
+        ih, iw = self._img.shape[:2]
+        if (dx, dy) == (0, 0) or abs(dx) > iw // 2 or abs(dy) > ih // 2:
+            return None
+        return dx, dy
+
+    def shift_image(self, w, h, rows, cols, dx, dy):
+        """The picture moved by (dx, dy) pixels; the strips that come into view are painted."""
+        kb, top = int(self.kb_w), int(self.ruler_h)
+        old = self._img
+        ih, iw = old.shape[:2]
+        img = np.empty_like(old)
+        img[max(dy, 0):ih + min(dy, 0), max(dx, 0):iw + min(dx, 0)] = (
+            old[max(-dy, 0):ih + min(-dy, 0), max(-dx, 0):iw + min(-dx, 0)])
+        strips = []
+        if dx:
+            strips.append((kb, top, kb + dx, h) if dx > 0 else (w + dx, top, w, h))
+        if dy:
+            strips.append((kb, top, w, top + dy) if dy > 0 else (kb, h + dy, w, h))
+        for x0, y0, x1, y1 in strips:
+            rects = self.note_rects(w, h, clip=(x0, y0, x1, y1))
+            img[y0 - top:y1 - top, x0 - kb:x1 - kb] = self.paint_region(rows, cols, rects, (x0, y0, x1, y1))
+        self._img = img
+        self.show_image((dx, dy), [(x0 - kb, y0 - top, x1 - kb, y1 - top) for x0, y0, x1, y1 in strips])
+
+    def carried(self):
+        """While shapes are dragged to another place and their notes are left for later (app.shapes_changed):
+        (dx, dy), how far they are from where the notes on screen have them, in pixels. Else None."""
+        app = self.app
+        if not (self.drag and self.drag[0] == "move" and app.notes_late and app.show_notes.get()) or self.draft:
+            return None
+        j = next(iter(self.drag[2]), None)
+        if j is None or j >= len(app.shapes) or j >= len(app.rendered_pts):
+            return None
+        (b, p), (b0, p0) = app.shapes[j]["pts"][0], app.rendered_pts[j]
+        return round((b - b0) * self.sx), round((p0 - p) * self.sy)
+
+    def paint_carried(self, w, h, rows, cols, fixed, dx, dy):
+        """The picture while shapes are dragged with lots of notes about: the other shapes' notes painted once, and
+        the dragged shapes' notes as they were, put over them (dx, dy) pixels further every time. (What they really
+        turn into at the new place, overlaps and all, is worked out when the mouse is let go.)"""
+        app = self.app
+        kb, top = int(self.kb_w), int(self.ruler_h)
+        iw, ih = w - kb, h - top
+        key = (fixed, self.view_t, self.view_top)
+        c = self._carry
+        if c is None or c["rendered"] is not app.rendered or c["key"] != key:
+            rects = self.note_rects(w, h, only=False)
+            c = self._carry = {"rendered": app.rendered, "key": key, "area": None,
+                               "base": self.paint_region(rows, cols, rects, (kb, top, w, h))}
+        a = c["area"]  # the dragged notes' pixels are kept for the part of the screen they come from, and around it
+        if a is None or a[0] > kb - dx or a[1] > top - dy or a[2] < w - dx or a[3] < h - dy:
+            a = c["area"] = (kb - dx - iw // 2, top - dy - ih // 2, w - dx + iw // 2, h - dy + ih // 2)
+            at, c["rgb"] = self.note_pixels(self.note_rects(w, h, area=a, only=True), a)
+            c["y"], c["x"] = np.divmod(at, a[2] - a[0])
+        x, y = c["x"] + (a[0] - kb + dx), c["y"] + (a[1] - top + dy)
+        on = (x >= 0) & (x < iw) & (y >= 0) & (y < ih)
+        img = c["base"].copy()
+        img[y[on], x[on]] = c["rgb"][on]
+        self._img = img
+        self.show_image()
+
+    def paint_exact(self):
+        """The picture painted whole again (after it was moved along with the view)."""
+        if self._exact:
+            self.after_cancel(self._exact)
+        self._exact = None
+        self._note_pic = None
+        self.request_redraw()
+
+    def paint_region(self, rows, cols, rects, region):
+        """Grid and notes of region = (x0, y0, x1, y1) of the screen (the ends not included) as an array of pixels
+        (rows, columns, RGB)."""
+        kb, top, w, h = region
+        iw, ih = w - kb, h - top
         rgb = {}
 
         def px(color):
@@ -350,7 +502,15 @@ class RollDrawing:
                     line[x * 3:x * 3 + 3] = px(c)
             patterns[color] = bytes(line)
         img = np.frombuffer(b"".join(patterns[c] for c in row_color), np.uint8).reshape(ih, iw, 3).copy()
+        at, colors = self.note_pixels(rects, region)
+        img.reshape(-1, 3)[at] = colors
+        return img
 
+    def note_pixels(self, rects, region):
+        """The pixels of note_rects' notes inside region = (x0, y0, x1, y1): (where, colours), where = row * the
+        region's width + column."""
+        kb, top, w, h = region
+        iw, ih = w - kb, h - top
         # Notes: which note is on top at every pixel (the last one painted), and whether that pixel is its outline.
         # Same pixels as a canvas rectangle with a 1-pixel outline: x0..x1 and y0..y1 inclusive.
         x0, y0, x1, y1, color = rects
@@ -360,7 +520,7 @@ class RollDrawing:
         seen = (n > 0) & (rh > 0)
         idx = np.nonzero(seen)[0]
         x0, y0, x1, y1, cx0, cx1, cy0, cy1, n, rh = (v[seen] for v in (x0, y0, x1, y1, cx0, cx1, cy0, cy1, n, rh))
-        solid = (n <= 2) | (y1 - y0 < 2)  # too small to have a fill: all outline
+        solid = (x1 - x0 < 2) | (y1 - y0 < 2)  # too small to have a fill: all outline
         top_px = np.full(ih * iw, -1, np.int64)  # note number * 2 + (1 = outline), the highest wins
         small = n * rh < 256
         # small notes: pixel by pixel
@@ -390,15 +550,9 @@ class RollDrawing:
                     np.maximum(grid[a:b, c], edge, out=grid[a:b, c])
                 if d == xb + 1:
                     np.maximum(grid[a:b, d - 1], edge, out=grid[a:b, d - 1])
-        on = top_px >= 0
-        k = top_px[on]
-        img.reshape(-1, 3)[on] = NOTE_RGB[color[idx][k >> 1], k & 1]
-
-        data = b"P6 %d %d 255\n" % (iw, ih) + img.tobytes()
-        if self.note_img is None or (self.note_img.width(), self.note_img.height()) != (iw, ih):
-            self.note_img = tk.PhotoImage(master=self, width=iw, height=ih)
-        self.note_img.configure(data=data, format="ppm")
-        self.create_image(kb, top, image=self.note_img, anchor="nw")
+        at = np.flatnonzero(top_px >= 0)
+        k = top_px[at]
+        return at, NOTE_RGB[color[idx][k >> 1], k & 1]
 
     def draw_path(self, sh, color, width, dash=None):
         if "notes" in sh:  # pasted notes: their box, thin and dashed (the notes are the shape)
