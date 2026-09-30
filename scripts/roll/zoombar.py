@@ -127,12 +127,13 @@ class ZoomBar(tk.Canvas):
         self.refresh()
 
 
-def add_zoom_bars(box, roll):
-    """The roll in its box with a scrollbar under it and one right of it, each ending in "-" and "+" buttons."""
+def add_zoom_bars(box, roll, widget=None):
+    """The roll in its box with a scrollbar under it and one right of it, each ending in "-" and "+" buttons.
+    roll has scale, bar_view, bar_move, bar_zoom and zoom_step, and gets bars; widget = what's shown (the roll)."""
     s = roll.scale
     box.rowconfigure(0, weight=1)
     box.columnconfigure(0, weight=1)
-    roll.grid(row=0, column=0, sticky="nsew")
+    (widget or roll).grid(row=0, column=0, sticky="nsew")
     bars = []
     for across in (True, False):
         row = tk.Frame(box, bg=TROUGH)

@@ -30,6 +30,7 @@ from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
 from notes.hzbass import (FX, HZ_DEFAULTS, TUNE, can_slide, clean_fx, clean_tones, fit_length, glide, heard, hz_of, left_edge,
                           links, next_id, pitch, tones_span)
 from roll.roll_shared import ALT, CTRL, SELECT_CURSOR, SELECTED_COLOR, SHIFT, SLOT_COLORS, note_name
+from roll.zoombar import add_zoom_bars
 from window.hz_effects import FxPane
 from window.snap_picker import SnapPicker
 from window.widgets import Tooltip
@@ -148,8 +149,11 @@ class HzWindow(tk.Toplevel):
         self.status = ttk.Label(self, text="", foreground="#555", padding=(8, 2, 8, 4))
         self.status.pack(side="bottom", fill="x")
         self.fx = FxPane(self)
-        c = self.canvas = tk.Canvas(self, background="white", highlightthickness=0, takefocus=True)
-        c.pack(fill="both", expand=True)
+        self.notes_box = tk.Frame(self)  # the notes with the main piano roll's scrollbars (zoombar.py)
+        self.notes_box.pack(fill="both", expand=True)
+        c = self.canvas = tk.Canvas(self.notes_box, background="white", highlightthickness=0, takefocus=True)
+        self.scale, self.bars = s, ()
+        add_zoom_bars(self.notes_box, self, c)
         self.on_fx()
         self.pencil = ("@" + os.path.join(ICONS, "pencil.cur").replace("\\", "/"),)  # its tip is the spot pointed at
         try:
@@ -280,13 +284,9 @@ class HzWindow(tk.Toplevel):
         zoom_time = e.state & CTRL and not e.state & ALT
         zoom_keys = (e.state & CTRL and not e.state & SHIFT) or e.state & ALT
         if zoom_time:
-            b = self.beat_at(e.x)
-            self.sx = min(100000.0, max(0.05, self.sx * f))
-            self.t0 = b - (e.x - self.kb_w) / self.sx
+            self.zoom_x(f, e.x)
         if zoom_keys:
-            k = self.top - (e.y - self.ruler_h) / self.sy
-            self.sy = min(60.0 * self.s, max(1.0, self.sy * f))
-            self.top = k + (e.y - self.ruler_h) / self.sy
+            self.zoom_y(f, e.y)
         if not (zoom_time or zoom_keys):
             if e.state & SHIFT:
                 self.t0 += (-1 if up else 1) * 120 / self.sx
@@ -311,6 +311,65 @@ class HzWindow(tk.Toplevel):
         self.clamp_view()
         self.redraw()
 
+    def zoom_x(self, f, x):
+        """Zoom time by f; the beat at canvas x stays where it is."""
+        b = self.beat_at(x)
+        self.sx = min(100000.0, max(0.05, self.sx * f))
+        self.t0 = b - (x - self.kb_w) / self.sx
+
+    def zoom_y(self, f, y):
+        """Zoom the keys by f; the key at canvas y stays where it is."""
+        k = self.top - (y - self.ruler_h) / self.sy
+        self.sy = min(60.0 * self.s, max(1.0, self.sy * f))
+        self.top = k + (y - self.ruler_h) / self.sy
+
+    # ------------------------------------------------------------ scrollbars (zoombar.py, like the main piano roll's)
+    # Across they count beats from the view's leftmost spot (-0.25), up and down keys from the top (127).
+
+    def bar_view(self, across):
+        """(start, end, total) of what's seen. The time bar reaches 8 bars past the last note (as on the main piano
+        roll); scrolled further with the mouse, the total grows to where the view ends."""
+        c = self.canvas
+        if across:
+            a, span = self.t0 + 0.25, max(1, c.winfo_width() - self.kb_w) / self.sx
+            end = (max(n["t"] + n["len"] for n in self.tones) if self.tones else 0.0) + 0.25 + 8 * self.app.beats
+            return a, a + span, max(end, a + span)
+        a, span = 127.0 - self.top, max(1, c.winfo_height() - self.ruler_h) / self.sy
+        return a, a + span, max(128.0, a + span)
+
+    def bar_move(self, across, a):
+        """A scrollbar was dragged to a (by whole pixels)."""
+        if across:
+            self.t0 = self.t0 + round((a - 0.25 - self.t0) * self.sx) / self.sx if a > 0 else -0.25
+        else:
+            self.top = self.top + round((127.0 - a - self.top) * self.sy) / self.sy if a > 0 else 127.0
+        self.clamp_view()
+        self.redraw()
+
+    def bar_zoom(self, across, a, b, which):
+        """A scrollbar's end was dragged (which: "start" / "end"): the view shows a..b, the other end stays."""
+        c = self.canvas
+        if across:
+            px = max(1, c.winfo_width() - self.kb_w)
+            self.sx = min(100000.0, max(0.05, px / (b - a)))
+            self.t0 = (a if which == "end" else b - px / self.sx) - 0.25
+        else:
+            px = max(1, c.winfo_height() - self.ruler_h)
+            self.sy = min(60.0 * self.s, max(1.0, px / (b - a)))
+            self.top = 127.0 - (a if which == "end" else b - px / self.sy)
+        self.clamp_view()
+        self.redraw()
+
+    def zoom_step(self, across, f):
+        """The "+" / "-" buttons: zoom around the middle of the view."""
+        c = self.canvas
+        if across:
+            self.zoom_x(f, (self.kb_w + c.winfo_width()) / 2)
+        else:
+            self.zoom_y(f, (self.ruler_h + c.winfo_height()) / 2)
+        self.clamp_view()
+        self.redraw()
+
     def pan_start(self, e):
         self.pan = (e.x, e.y, self.t0, self.top)
 
@@ -324,6 +383,8 @@ class HzWindow(tk.Toplevel):
 
     def redraw(self):
         c = self.canvas
+        for bar in self.bars:
+            bar.refresh()
         c.delete("all")
         w, h = c.winfo_width(), c.winfo_height()
         if w < 50 or h < 50:
@@ -819,7 +880,7 @@ class HzWindow(tk.Toplevel):
     def on_fx(self):
         """The Effects button: shows / hides the effects pane (off to start with, user)."""
         if self.app.hz_fx.get():
-            self.fx.canvas.pack(side="bottom", fill="x", before=self.canvas)
+            self.fx.canvas.pack(side="bottom", fill="x", before=self.notes_box)
         else:
             self.fx.drag = None
             self.fx.canvas.pack_forget()
