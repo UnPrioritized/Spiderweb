@@ -169,11 +169,22 @@ class ClawWindow(tk.Toplevel):
                            command=lambda: self.put("seed", random.randrange(1, 10 ** 9)))
         again.grid(row=1, column=1, columnspan=2, sticky="w", pady=(4, 0))
         Tooltip(again, tr("claw.tip_new_random"))
+        cut = self.cut_box = ttk.Frame(box)  # (every mode but By time)
+        cut.grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        var = self.ticks["shorten"] = tk.BooleanVar()
+        b = ttk.Checkbutton(cut, text=tr("claw.shorten_instead"), variable=var,
+                            command=lambda: self.put("shorten", self.ticks["shorten"].get()))
+        b.grid(row=0, column=0, columnspan=3, sticky="w")
+        Tooltip(b, tr("claw.tip_shorten"))
+        cut.columnconfigure(0, minsize=round(80 * s))
+        self.number_row(cut, 1, "cut", tr("claw.to"), tr("claw.tip_cut"), (1, 10, 0.1), 1, 99)
+        ttk.Label(cut, text=tr("claw.of_their_length"), foreground="#777").grid(row=1, column=2, sticky="w",
+                                                                                padx=(5, 0))
         self.update_idletasks()  # (as wide as the widest mode, so the window keeps its width)
-        box.columnconfigure(1, minsize=max(f.winfo_reqwidth() for f in self.boxes.values()) - round(80 * s))
+        box.columnconfigure(1, minsize=max(f.winfo_reqwidth() for f in (*self.boxes.values(), cut)) - round(80 * s))
 
         row = ttk.Frame(box)
-        row.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        row.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         reset = ttk.Button(row, text=tr("claw.reset"), command=self.reset)
         reset.pack(side="left")
         Tooltip(reset, tr("claw.tip_reset"))
@@ -210,16 +221,16 @@ class ClawWindow(tk.Toplevel):
 
     def on_entry(self, key, done=True):
         e, var = self.entries[key], self.vars[key]
-        lo, hi = {"keep": (1, MAX_COUNT), "skip": (0, MAX_COUNT), "pct": (0, 100)}[key]
+        lo, hi = {"keep": (1, MAX_COUNT), "skip": (0, MAX_COUNT), "pct": (0, 100), "cut": (1, 99)}[key]
         try:
             v = float(calc(var.get()))
-            if not lo <= v <= hi or key != "pct" and v != int(v):
+            if not lo <= v <= hi or key in ("keep", "skip") and v != int(v):
                 raise ValueError
         except (ValueError, ZeroDivisionError):
             e.config(style="Bad.TEntry")
             return
         e.config(style="TEntry")
-        v = v if key == "pct" else int(v)
+        v = int(v) if key in ("keep", "skip") else v
         if v != self.claw[key]:
             self.put(key, v, done)
 
@@ -253,6 +264,11 @@ class ClawWindow(tk.Toplevel):
             if mode != c["mode"]:
                 f.grid_remove()
         self.boxes[c["mode"]].grid()
+        if c["mode"] == "time":
+            self.cut_box.grid_remove()
+        else:
+            self.cut_box.grid()
+        self.entries["cut"].config(state="normal" if c["shorten"] else "disabled")
         for u in self.units:
             u.config(text=UNITS.get(c["mode"], ""))
 

@@ -11,7 +11,8 @@ removed (notes that were that short already stay).
 
 Counting modes: "notes" (in time order, low to high within a chord), "keys" (counted up from the shape's lowest
 key, so a key with no notes still counts), "chords" (notes starting together = one): keep "keep", throw away
-"skip", keep "keep", ... "random": keeps about "pct" % of the notes, picked by "seed" (the same pick every time)."""
+"skip", keep "keep", ... "random": keeps about "pct" % of the notes, picked by "seed" (the same pick every time).
+"shorten" (these modes): the notes picked to go stay, "cut" % of their length long (at least 1 tick)."""
 
 import numpy as np
 
@@ -22,9 +23,10 @@ SHORT = 1 / 24  # beats
 MODES = ("time", "notes", "keys", "chords", "random")
 COUNTS = ("notes", "keys", "chords")
 CLAW_DEFAULTS = {"mode": "time", "period": 1, "trash": None, "dist": 0.0, "stretch": False, "short": False,
-                 "keep": 1, "skip": 1, "pct": 50.0, "seed": 1}
-SETTINGS = {"time": ("period", "trash", "dist", "stretch", "short"), "notes": ("keep", "skip"),
-            "keys": ("keep", "skip"), "chords": ("keep", "skip"), "random": ("pct", "seed")}
+                 "keep": 1, "skip": 1, "pct": 50.0, "seed": 1, "shorten": False, "cut": 25.0}
+SETTINGS = {"time": ("period", "trash", "dist", "stretch", "short"),
+            "notes": ("keep", "skip", "shorten", "cut"), "keys": ("keep", "skip", "shorten", "cut"),
+            "chords": ("keep", "skip", "shorten", "cut"), "random": ("pct", "seed", "shorten", "cut")}
 MAX_COUNT = 1000
 
 
@@ -35,10 +37,11 @@ def clean_claw(c):
     out = dict(CLAW_DEFAULTS)
     if c.get("mode") in MODES:
         out["mode"] = c["mode"]
-    for key, lo, hi in (("keep", 1, MAX_COUNT), ("skip", 0, MAX_COUNT), ("pct", 0, 100), ("seed", 0, 10 ** 9)):
+    for key, lo, hi in (("keep", 1, MAX_COUNT), ("skip", 0, MAX_COUNT), ("pct", 0, 100), ("seed", 0, 10 ** 9),
+                         ("cut", 1, 99)):
         try:
             v = float(c.get(key, out[key]))
-            out[key] = max(lo, min(hi, v if key == "pct" else int(v)))
+            out[key] = max(lo, min(hi, v if key in ("pct", "cut") else int(v)))
         except (TypeError, ValueError, OverflowError):
             pass
     if c.get("period") in PERIODS:
@@ -52,6 +55,7 @@ def clean_claw(c):
         pass
     out["stretch"] = c.get("stretch") is True
     out["short"] = c.get("short") is True
+    out["shorten"] = c.get("shorten") is True
     mode = out["mode"]
     if (mode == "time" and out["trash"] is None and out["dist"] == 0 or mode in COUNTS and out["skip"] == 0 or
             mode == "random" and out["pct"] == 100):
@@ -73,7 +77,13 @@ def apply_claw(a, claw, ppq):
     if not len(a) or not claw:
         return a
     if claw["mode"] != "time":
-        return a[_picked(a, claw)]
+        keep = _picked(a, claw)
+        if not claw["shorten"]:
+            return a[keep]
+        a = a.copy()
+        go = ~keep
+        a[go, 1] = a[go, 0] + np.maximum(1, np.rint((a[go, 1] - a[go, 0]) * claw["cut"] / 100)).astype(np.int64)
+        return a
     s, e = a[:, 0].astype(float), a[:, 1].astype(float)
     t0 = s.min()
     period = claw["period"] * ppq
