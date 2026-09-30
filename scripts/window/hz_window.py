@@ -14,7 +14,9 @@ import math
 import os
 import re
 import tkinter as tk
-from tkinter import ttk
+from tkinter import simpledialog, ttk
+
+import numpy as np
 
 from files.about import ICONS
 from files.lang import tr
@@ -22,13 +24,17 @@ from files.mathexpr import fmt
 from files.snap import snap_beats
 from notes.engine import slot_track_channel
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
-from notes.hzbass import HZ_DEFAULTS, clean_tones, fit_length, holds, hz_of, left_edge, tones_span, voices
+from notes.hzbass import (HZ_DEFAULTS, TUNE, can_slide, clean_tones, fit_length, glide, heard, hz_of, left_edge,
+                          links, next_id, pitch, tones_span)
 from roll.roll_shared import ALT, CTRL, SELECTED_COLOR, SHIFT, SLOT_COLORS, note_name
 from window.snap_picker import SnapPicker
 from window.widgets import Tooltip
 
 BLACK = (1, 3, 6, 8, 10)
 RED = "#e02020"
+FAINT = "#f0a0a0"  # behind the red line: each repeat's own pitch
+GREEN = "#18a048"  # a note's exact tone (the middle of its row)
+TUNE_ROW = 20  # px: rows at least this tall show the exact tone, and the red line can be dragged up / down
 POS = r"\d+x\d+\+-?\d+\+-?\d+"  # a remembered size and place
 
 
@@ -64,6 +70,7 @@ class HzWindow(tk.Toplevel):
         self.minsize(round(420 * s), round(260 * s))
         self.tones, self.sel = [], set()  # the notes shown (hzbass tones) and which are selected
         self.drag = None
+        self.pending = None  # (tone id, beat): the first middle click of a slide, waiting for the second
         self.sounding = None  # (channel, key) heard now: the note held with the mouse
         self.last_len = 1.0  # beats: how long a newly placed note is (the last length used)
         self.kb_w, self.ruler_h = round(44 * s), round(18 * s)
@@ -75,6 +82,20 @@ class HzWindow(tk.Toplevel):
         ttk.Label(bar, text=tr("app.snap")).pack(side="left")
         SnapPicker(app, bar, app.hz_snap).button.pack(side="left", padx=(4, 10))
         ttk.Button(bar, text=tr("app.fit_view"), command=self.fit_notes).pack(side="left", padx=(0, 10))
+        ttk.Label(bar, text=tr("hz.gates")).pack(side="left")
+        self.gates = ttk.Combobox(bar, values=[tr("panel_custom.hz_mixed"), tr("panel_custom.hz_fixed")],
+                                  state="readonly", width=7)
+        self.gates.current(0)
+        self.gates.pack(side="left", padx=(4, 10))
+        self.gates.bind("<<ComboboxSelected>>", self.on_gates)
+        Tooltip(self.gates, tr("panel_custom.hz_gates_tip"))
+        ttk.Label(bar, text=tr("app.ppq")).pack(side="left")  # the project's PPQ: the same box as under Project
+        ppq = ttk.Combobox(bar, textvariable=app.pvar["ppq"], values=app.ppq_box["values"], width=7,
+                           height=12)
+        ppq.pack(side="left", padx=(4, 10))
+        Tooltip(ppq, tr("hz.ppq_tip"))
+        self.ppq_trace = app.pvar["ppq"].trace_add(
+            "write", lambda *a: self.after_idle(lambda: self.winfo_exists() and self.redraw()))
         self.what = ttk.Label(bar, text="", foreground="#555")
         self.what.pack(side="left")
         self.grow = tk.BooleanVar(value=True)
@@ -101,6 +122,8 @@ class HzWindow(tk.Toplevel):
         c.bind("<ButtonRelease-1>", self.on_release)
         c.bind("<ButtonPress-2>", self.pan_start)
         c.bind("<B2-Motion>", self.pan_move)
+        c.bind("<ButtonRelease-2>", self.on_middle)
+        c.bind("<ButtonPress-3>", self.on_menu)
         c.bind("<Motion>", self.on_motion)
         c.bind("<MouseWheel>", self.on_wheel)
         c.bind("<Delete>", lambda e: self.delete_selected() or "break")
@@ -139,6 +162,9 @@ class HzWindow(tk.Toplevel):
         else:
             text = tr("hz.shape", name=self.app.shape_label(sh))
             self.grow.set(bool(hz.get("grow")) if tones else hz_made(sh))
+        if hz:  # (no Hz bass yet: the dropdown stays as picked, for the one the first note makes)
+            self.gates.current(1 if hz.get("fixed") else 0)
+        self.gates.config(state="readonly" if self.can_place() else "disabled")
         self.what.config(text=text)
         self.grow_box.config(state="normal" if sh is not None else "disabled")
         if self.tones and not self.fitted:
@@ -283,13 +309,9 @@ class HzWindow(tk.Toplevel):
             x0, x1, y = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
             fill, edge = SELECTED_COLOR if i in self.sel else SLOT_COLORS[0]
             c.create_rectangle(x0, y + 1, max(x1, x0 + 2), y + self.sy - 1, fill=fill, outline=edge)
-        for line in voices(self.tones) if self.app.hz_line.get() else ():  # the tone's path
-            pts = []
-            for n, (a, b) in zip(line, holds(line)):
-                y = self.y_of(n["key"]) + self.sy / 2
-                pts += [self.x_of(a), y, self.x_of(b), y]
-            c.create_line(*pts, fill=RED, width=max(2, round(2 * s)))
-        for x, y, _, _ in self.dots():
+        if self.app.hz_line.get():
+            self.draw_line(w)
+        for x, y, *_ in self.dots():
             r = 3.5 * s
             c.create_oval(x - r, y - r, x + r, y + r, fill="white", outline=RED, width=max(1, round(1.5 * s)))
         if self.drag and self.drag["kind"] == "box":
@@ -323,24 +345,97 @@ class HzWindow(tk.Toplevel):
                           width=w - kb - 40 * s, justify="center")
         self.show_status()
 
+    def tune_rows(self):
+        """True when the rows are tall enough to see and change a note's tune."""
+        return self.sy >= TUNE_ROW * self.s
+
+    def pitch_y(self, key):
+        """Where a pitch (in keys, not whole) is: a key's exact tone is the middle of its row."""
+        return self.ruler_h + (self.top - key + 0.5) * self.sy
+
+    def draw_line(self, w):
+        """The red line: the tone that's really heard. Each repeat lasts a whole number of ticks, so the line sits
+        a little off the middle of the row (the exact tone), more at a low PPQ. It stops dead at a note's end; only
+        a slide goes on to the next note."""
+        c, app, kb = self.canvas, self.app, self.kb_w
+        width = max(2, round(2 * self.s))
+        for a, b, s in links(self.tones):  # a slide over a gap between two notes: no sound there
+            x0, x1 = a["t"] + a["len"], b["t"]
+            f0, f1, k0, k1 = glide(a, b, s)
+            if x1 - x0 > 1e-9:
+                c.create_line(self.x_of(x0), self.pitch_y(k0 + (k1 - k0) * (x0 - f0) / (f1 - f0)),
+                              self.x_of(x1), self.pitch_y(k0 + (k1 - k0) * (x1 - f0) / (f1 - f0)),
+                              fill=RED, dash=(3, 3))
+        sh = self.target()
+        bpm = float(app.current_bpm() or 120)
+        hz = dict((sh or {}).get("hz") or self.new_hz(bpm), tones=self.tones)
+        left = left_edge(sh) if sh is not None else app.hz_start or 0.0
+        lo, hi = self.beat_at(kb), self.beat_at(w)
+        runs = []
+        for a, b, keys, mean in heard(hz, left, app.ppq, bpm):
+            see = (b >= lo) & (a <= hi)
+            if see.any():
+                runs.append((self.x_of(a[see]), self.x_of(b[see]), self.pitch_y(keys[see]), self.pitch_y(mean[see])))
+        # faint: every repeat's own pitch (its whole-tick gate); over it, red: the average = the tone heard
+        for colour, wide, which in ((FAINT, 1, 2), (RED, width, 3)):
+            for run in runs:
+                x0, x1, y = run[0], run[1], run[which]
+                if (x1[-1] - x0[0]) >= 2 * len(x0):  # every repeat can be seen: steps
+                    c.create_line(*np.column_stack([x0, y, x1, y]).ravel().tolist(), fill=colour, width=wide)
+                    continue
+                # too many to draw each: a band from the lowest to the highest repeat at every pixel
+                col = np.floor(x0)
+                at = np.flatnonzero(np.concatenate([[True], col[1:] != col[:-1]]))
+                top, bottom = np.minimum.reduceat(y, at), np.maximum.reduceat(y, at)
+                xs = np.append(col[at], x1[-1])
+                top, bottom = np.append(top, top[-1]), np.append(bottom, bottom[-1])
+                pts = np.concatenate([np.column_stack([xs, top]), np.column_stack([xs, bottom])[::-1]])
+                c.create_polygon(*pts.ravel().tolist(), fill=colour, outline=colour, width=wide)
+        if self.pending:  # the first middle click of a slide: where it will start
+            n = next((n for n in self.tones if n["id"] == self.pending[0]), None)
+            if n is not None:
+                x, y, r = self.x_of(self.pending[1]), self.pitch_y(pitch(n)), 3.5 * self.s
+                c.create_oval(x - r, y - r, x + r, y + r, fill=RED, outline=RED)
+        if self.tune_rows():  # the exact tone of each note, over the red line: a line right on it shows green
+            for n in self.tones:
+                y = self.pitch_y(n["key"])
+                c.create_line(self.x_of(n["t"]), y, self.x_of(n["t"] + n["len"]), y, fill=GREEN)
+
     def dots(self):
-        """[(x, y, tone number, "in" / "out")]: the red line's dots. A dot with no lead sits just outside its note's
-        end (so the end itself stays free for changing the note's length). None while the red line is hidden."""
+        """[(x, y, tone number, "in" / "out", slide)]: the red line's dots, two for each slide made: "out" on the
+        note it leaves, "in" on the note it goes to (tone number = the note the dot is on). A dot with no lead sits
+        just outside its note's end (so the end itself stays free for changing the note's length). None while the
+        red line is hidden."""
         out = []
         if not self.app.hz_line.get():
             return out
         index = {id(n): i for i, n in enumerate(self.tones)}
         off = 6 * self.s
-        for line in voices(self.tones):
-            hs = holds(line)
-            for j, n in enumerate(line):
-                y = self.y_of(n["key"]) + self.sy / 2
-                a, b = hs[j]
-                if j:
-                    out.append((self.x_of(a) - (off if a <= n["t"] else 0), y, index[id(n)], "in"))
-                if j + 1 < len(line):
-                    out.append((self.x_of(b) + (off if b >= n["t"] + n["len"] else 0), y, index[id(n)], "out"))
+        for a, b, s in links(self.tones):
+            x0, x1, _, _ = glide(a, b, s)
+            out.append((self.x_of(x0) + (off if x0 >= a["t"] + a["len"] else 0), self.pitch_y(pitch(a)),
+                        index[id(a)], "out", s))
+            out.append((self.x_of(x1) - (off if x1 <= b["t"] else 0), self.pitch_y(pitch(b)), index[id(b)], "in", s))
         return out
+
+    def pairs(self):
+        """[(a, b)]: the slides that can go between the selected notes. Two notes: the earlier to the later. More:
+        the first one to each of the others, or (when they don't all start after its end) each of the others to
+        the last one. None when they don't follow each other like that."""
+        if len(self.sel) < 2 or max(self.sel) >= len(self.tones):
+            return []
+        ns = sorted((self.tones[i] for i in self.sel), key=lambda n: (n["t"], n["key"]))
+        if all(can_slide(ns[0], n) for n in ns[1:]):
+            return [(ns[0], n) for n in ns[1:]]
+        last = max(ns, key=lambda n: n["t"])
+        if all(can_slide(n, last) for n in ns if n is not last):
+            return [(n, last) for n in ns if n is not last]
+        return []
+
+    @staticmethod
+    def link(a, b):
+        """The slide from tone a to tone b, or None."""
+        return next((s for s in a["to"] if s["id"] == b["id"]), None)
 
     def show_status(self, e=None):
         n = len(self.tones)
@@ -353,6 +448,8 @@ class HzWindow(tk.Toplevel):
             cents = ((sh or {}).get("hz") or HZ_DEFAULTS)["cents"]
             text += "     " + tr("hz.position", beat=fmt(max(0.0, self.beat_at(e.x)) + 1), key=note_name(k),
                                  hz=f"{hz_of(k, cents):.2f}")
+        if self.drag and self.drag["kind"] == "tune":
+            text += "     " + tr("hz.tune", cents=f"{self.tones[self.drag['i']]['cents']:+g}")
         self.status.config(text=text)
 
     # ------------------------------------------------------------ mouse
@@ -372,12 +469,12 @@ class HzWindow(tk.Toplevel):
         return sb if sb and not e.state & SHIFT else 1 / self.app.ppq
 
     def hit(self, x, y):
-        """What's under the mouse: ("in" / "out", tone) a red dot, ("left" / "right", tone) a note's end,
-        ("note", tone), or None."""
+        """What's under the mouse: ("in" / "out", tone, slide) a red dot,("left" / "right", tone) a note's end,
+        ("tune", tone) the red line in a note (tall rows only), ("note", tone), or None."""
         r = 6 * self.s
-        for dx, dy, i, which in self.dots():
+        for dx, dy, i, which, s in self.dots():
             if abs(x - dx) <= r and abs(y - dy) <= r:
-                return which, i
+                return which, i, s
         if x < self.kb_w or y < self.ruler_h:
             return None
         for i in range(len(self.tones) - 1, -1, -1):
@@ -385,7 +482,10 @@ class HzWindow(tk.Toplevel):
             x0, x1, y0 = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
             if x0 - 1 <= x <= max(x1, x0 + 2) + 1 and y0 <= y < y0 + self.sy:
                 edge = min(5 * self.s, (x1 - x0) / 3)
-                return ("right" if x >= x1 - edge else "left" if x <= x0 + edge else "note"), i
+                on_line = (self.tune_rows() and self.app.hz_line.get()
+                           and abs(y - self.pitch_y(pitch(n))) <= 4 * self.s)
+                return ("right" if x >= x1 - edge else "left" if x <= x0 + edge else
+                        "tune" if on_line else "note"), i
         return None
 
     def on_motion(self, e):
@@ -394,7 +494,8 @@ class HzWindow(tk.Toplevel):
         empty = self.pencil if (self.can_place() and e.x >= self.kb_w and e.y >= self.ruler_h
                              and not e.state & CTRL) else ""
         self.canvas.config(cursor={"in": "sb_h_double_arrow", "out": "sb_h_double_arrow", "left": "sb_h_double_arrow",
-                                   "right": "sb_h_double_arrow", "note": "fleur"}.get(hit and hit[0], empty))
+                                   "right": "sb_h_double_arrow", "tune": "sb_v_double_arrow",
+                                   "note": "fleur"}.get(hit and hit[0], empty))
         self.show_status(e)
 
     def select(self, indices):
@@ -417,13 +518,13 @@ class HzWindow(tk.Toplevel):
                 return
             # a new note, there at once: it follows the mouse until the button is let go
             tone = {"t": self.snap(self.beat_at(e.x), e), "len": self.last_len, "key": self.key_at(e.y),
-                    "in": 0.0, "out": 0.0}
+                    "cents": 0.0, "id": next_id(self.tones), "to": []}
             self.tones.append(tone)
             self.sel = {len(self.tones) - 1}
             self.drag = {"kind": "new", "i": len(self.tones) - 1, "before": before, "name": tr("hz.step_place")}
             self.sound(tone["key"])
         else:
-            kind, i = hit
+            kind, i = hit[:2]
             if kind == "note" and e.state & CTRL:
                 return self.select(self.sel ^ {i})
             if i not in self.sel:
@@ -433,8 +534,9 @@ class HzWindow(tk.Toplevel):
                 self.sound(self.tones[i]["key"])
             self.drag = {"kind": kind, "i": i, "before": before, "beat": self.beat_at(e.x), "key": self.key_at(e.y),
                          "orig": copy.deepcopy(self.tones), "x": e.x, "y": e.y, "moved": False,
-                         "name": {"note": tr("hz.step_move"), "in": tr("hz.step_lead"),
-                                  "out": tr("hz.step_lead")}.get(kind, tr("hz.step_length"))}
+                         "slide": hit[2] if len(hit) > 2 else None,
+                         "name": {"note": tr("hz.step_move"), "in": tr("hz.step_lead"), "out": tr("hz.step_lead"),
+                                  "tune": tr("hz.step_tune")}.get(kind, tr("hz.step_length"))}
         self.redraw()
 
     def on_double(self, e):
@@ -442,7 +544,7 @@ class HzWindow(tk.Toplevel):
         a quick drag still moves it). Anywhere else, or with Ctrl, it's a press like any other."""
         hit = self.hit(e.x, e.y)
         self.on_press(e)
-        if self.drag and hit and hit[0] in ("note", "left", "right") and not e.state & CTRL:
+        if self.drag and hit and hit[0] in ("note", "tune", "left", "right") and not e.state & CTRL:
             self.drag["double"] = True
 
     def on_drag(self, e):
@@ -468,9 +570,16 @@ class HzWindow(tk.Toplevel):
             n["t"] = min(self.snap(beat, e), end - short)
             n["len"] = end - n["t"]
         elif d["kind"] == "out":
-            n["out"] = min(max(0.0, n["t"] + n["len"] - self.snap(beat, e)), n["len"] - min(n["in"], n["len"]))
+            d["slide"]["out"] = min(max(0.0, n["t"] + n["len"] - self.snap(beat, e)), n["len"])
         elif d["kind"] == "in":
-            n["in"] = min(max(0.0, self.snap(beat, e) - n["t"]), n["len"] - min(n["out"], n["len"]))
+            d["slide"]["in"] = min(max(0.0, self.snap(beat, e) - n["t"]), n["len"])
+        elif d["kind"] == "tune":  # the note's own tune: whole cents, and it sticks to the exact tone (Shift = free)
+            cents = d["orig"][d["i"]]["cents"] + (d["y"] - e.y) / self.sy * 100
+            if e.state & SHIFT:
+                cents = round(cents, 1)
+            else:
+                cents = 0.0 if abs(cents) * self.sy / 100 <= 5 * self.s else float(round(cents))
+            n["cents"] = max(-TUNE, min(TUNE, cents))
         else:  # move every selected note: the one held goes to the grid line nearest to where it's dragged
             if not d["moved"] and abs(e.x - d["x"]) < 4 and abs(e.y - d["y"]) < 4:
                 return
@@ -506,10 +615,89 @@ class HzWindow(tk.Toplevel):
         else:
             self.redraw()
 
+    def on_middle(self, e):
+        """A middle click (not a drag: that moves the view) on a note marks one end of a slide (a full red dot); a
+        second one on another note makes the slide between the two spots: it's theirs alone, whatever other notes
+        and slides there are. On a dot of a slide: that slide goes. Anywhere else: the mark goes."""
+        x, y = self.pan[:2]
+        if abs(e.x - x) >= 4 or abs(e.y - y) >= 4 or not self.app.hz_line.get():
+            return
+        hit = self.hit(e.x, e.y)
+        before = copy.deepcopy(self.tones)
+        first = next((n for n in self.tones if self.pending and n["id"] == self.pending[0]), None)
+        if hit and hit[0] in ("in", "out"):
+            for n in self.tones:
+                n["to"] = [s for s in n["to"] if s is not hit[2]]
+            self.pending = None
+        elif hit:
+            n = self.tones[hit[1]]
+            at = min(max(self.snap(self.beat_at(e.x), e), n["t"]), n["t"] + n["len"])
+            (a, xa), (b, xb) = sorted([(first or n, self.pending[1] if first else at), (n, at)],
+                                      key=lambda v: v[0]["t"])
+            if first is None or first is n or not can_slide(a, b):  # the first spot (or a new first spot)
+                self.pending = (n["id"], at)
+                return self.redraw()
+            s = self.link(a, b)
+            if s is None:
+                s = {"id": b["id"], "out": 0.0, "in": 0.0}
+                a["to"].append(s)
+            s["out"] = min(max(0.0, a["t"] + a["len"] - xa), a["len"])
+            s["in"] = min(max(0.0, xb - b["t"]), b["len"])
+            self.pending = None
+        else:
+            self.pending = None
+        if self.tones != before:
+            self.commit(tr("hz.step_lead"), before)
+        else:
+            self.redraw()
+
+    def on_menu(self, e):
+        """Right click: slides between the selected notes (see pairs), or take them away. On a note (its red
+        line): its tune, typed."""
+        pairs = self.pairs()
+        hit = self.hit(e.x, e.y)
+        menu = tk.Menu(self, tearoff=0)
+        if hit and hit[0] not in ("in", "out"):
+            menu.add_command(label=tr("hz.tune_type", cents=f"{self.tones[hit[1]]['cents']:+g}"),
+                             command=lambda: self.type_tune(hit[1]))
+        if pairs and all(self.link(a, b) for a, b in pairs):
+            menu.add_command(label=tr("hz.slide_remove"), command=lambda: self.set_slide(False))
+        else:
+            menu.add_command(label=tr("hz.slide_add"), command=lambda: self.set_slide(True),
+                             state="normal" if pairs else "disabled")
+        menu.tk_popup(e.x_root, e.y_root)
+
+    def type_tune(self, i):
+        """A note's own tune typed in cents (the selected notes get it too when it's one of them)."""
+        cents = simpledialog.askfloat(tr("hz.window_title"), tr("hz.tune_ask", most=f"{TUNE:g}"), parent=self,
+                                      initialvalue=self.tones[i]["cents"], minvalue=-TUNE, maxvalue=TUNE)
+        if cents is None or i >= len(self.tones):
+            return
+        before = copy.deepcopy(self.tones)
+        for j in self.sel if i in self.sel else {i}:
+            self.tones[j]["cents"] = float(cents)
+        if self.tones != before:
+            self.commit(tr("hz.step_tune"), before)
+
+    def set_slide(self, on):
+        """Slides between the selected notes (see pairs): each a quarter of its two notes long to start with (its
+        dots can then be dragged); slides that are there stay as they are. Off = those slides go."""
+        before = copy.deepcopy(self.tones)
+        for a, b in self.pairs():
+            if not on:
+                a["to"] = [s for s in a["to"] if s["id"] != b["id"]]
+            elif not self.link(a, b):
+                a["to"].append({"id": b["id"], "out": a["len"] / 4, "in": b["len"] / 4})
+        if self.tones != before:
+            self.commit(tr("hz.step_lead"), before)
+
     def delete_selected(self):
         if self.sel:
             before = copy.deepcopy(self.tones)
             self.tones = [n for i, n in enumerate(self.tones) if i not in self.sel]
+            left = {n["id"] for n in self.tones}
+            for n in self.tones:  # (the slides to the deleted notes go with them)
+                n["to"] = [s for s in n["to"] if s["id"] in left]
             self.sel = set()
             self.commit(tr("hz.step_delete"), before)
 
@@ -520,6 +708,24 @@ class HzWindow(tk.Toplevel):
         if not self.tones:  # (nothing placed yet: just how it'll be when there is)
             return self.redraw()
         self.commit(tr("hz.grow"), copy.deepcopy(self.tones))
+
+    def fixed(self):
+        """{"fixed": True} when the dropdown says Fixed gates (else nothing): for a Hz bass that's still to be made."""
+        return {"fixed": True} if self.gates.current() == 1 else {}
+
+    def new_hz(self, bpm):
+        """The settings of a Hz bass that isn't there yet, as the first note would make it."""
+        hz = dict(self.app.custom_defaults.get("hz") or HZ_DEFAULTS, bpm=float(bpm or 120))
+        hz.pop("fixed", None)
+        return dict(hz, **self.fixed())
+
+    def on_gates(self, e=None):
+        """The gates dropdown: Mixed or Fixed for the Hz bass shown (one undo step), or for the one to be made."""
+        sh = self.target()
+        if sh is not None and sh.get("hz"):
+            self.app.set_hz_fixed(self.gates.current() == 1)
+        self.canvas.focus_set()
+        self.redraw()
 
     def on_line(self):
         self.redraw()
@@ -544,15 +750,14 @@ class HzWindow(tk.Toplevel):
             new = dict(app.defaults, kind="custom", name=tr("hz.name"), strokes=[copy.deepcopy(BOX_STROKE)],
                        **custom_settings(app.custom_defaults))
             new.update(fill="spam", pts=box_frame(app.hz_start, lo, app.hz_start + tones_span(tones), hi),
-                       hz=dict(app.custom_defaults.get("hz") or HZ_DEFAULTS, bpm=float(bpm or 120),
-                               tones=copy.deepcopy(tones), grow=True, own=True))  # (its own copy)
+                       hz=dict(self.new_hz(bpm), tones=copy.deepcopy(tones), grow=True, own=True))  # (its own copy)
             if not app.confirm_big([new]):
                 return self.call_off(before)
             app.hz_start = None
             self.tones = tones  # (so the selection stays when the main window's selection changes to the new shape)
             app.add_shape(new)
         else:
-            hz = dict(sh.get("hz") or dict(HZ_DEFAULTS, bpm=float(bpm or 120)))
+            hz = dict(sh.get("hz") or dict(HZ_DEFAULTS, bpm=float(bpm or 120), **self.fixed()))
             hz.pop("tones", None)
             hz.pop("grow", None)
             new = copy.deepcopy(sh)
@@ -615,6 +820,7 @@ class HzWindow(tk.Toplevel):
 
     def close(self):
         self.sound(None)
+        self.app.pvar["ppq"].trace_remove("write", self.ppq_trace)
         self.app.hz_window = None
         self.destroy()
         self.app.roll.focus_set()

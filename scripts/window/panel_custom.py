@@ -472,6 +472,8 @@ class CustomPanel:
                 t["hz"]["fixed"] = True
         self.shapes_changed()
         self.sync_custom()
+        if self.hz_window:
+            self.hz_window.sync()
         self.schedule_autosave()
 
     def update_hz(self):

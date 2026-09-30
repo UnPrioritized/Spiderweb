@@ -10,12 +10,15 @@ mixed and the tone comes out exact (custom.chop_even). The tone depends on the B
 until it's updated (the panel warns); a changed PPQ keeps the tone.
 
 Placed notes (the Hz bass window): hz["tones"] = [{"t": start in beats from the shape's left edge, "len": beats,
-"key": its tone, "in": lead in, "out": lead out (beats)}, ...]. Tones sounding together are a chord: each gets its
-own line (voices), a line being tones one after the other. Along a line the tone jumps at the next tone's start;
-with a lead out / in it slides instead, from `out` before the end of one tone to `in` after the start of the next
-(the red line in the window). Each line makes repeats one wave apart (the wave getting shorter or longer along a
-slide); the lines' repeats together, each lasting until the next one starts, are the squares every key of the
-shape is chopped by (custom.chop_grid), so a chord takes one channel. Nothing sounds where no tone is.
+"key": its tone, "cents": its own tune, "id": its number (never reused in the shape), "to": its slides}, ...].
+Each tone makes repeats one wave apart for as long as it lasts; tones sounding together are a chord. A slide is
+made by the user and belongs to two tones: "to" = [{"id": the tone slid to, "out": lead out, "in": lead in
+(beats)}, ...]: the tone glides from `out` before this tone's end to `in` after the start of the other one (which
+must start at or after this one's end), the wave getting shorter or longer on the way. A tone can slide to several
+tones, and several can slide to one: each slide is a line of its own, next to the tone held (tone_runs). Without a
+slide the tone just stops at its end. The red line in the window is what is really heard (heard).
+All the repeats together, each lasting until the next one starts, are the squares every key of the shape is chopped
+by (custom.chop_grid), so a chord takes one channel. Nothing sounds where no tone is.
 hz["grow"] = the shape is kept as long as its tones (fit_length). hz["own"] = made with the Hz bass tool: a box
 that is nothing but its tones (it goes when its last tone is deleted; the panel shows the keys it repeats)."""
 
@@ -27,6 +30,7 @@ import numpy as np
 
 HZ_DEFAULTS = {"key": 33, "cents": 0.0}
 MIN_LEN = 1 / 1024  # beats: a tone is never shorter
+TUNE = 50.0  # cents: how far a placed tone's own tune goes, up or down (half a key)
 
 
 def hz_of(key, cents=0.0):
@@ -41,16 +45,50 @@ def hz_gate(hz, bpm):
 
 def clean_tones(tones):
     """Placed tones checked and put in order (by start, then key)."""
-    out = []
+    out, old = [], []
     for n in tones if isinstance(tones, list) else ():
         try:
             tone = {"t": max(0.0, float(n["t"])), "len": max(MIN_LEN, float(n["len"])), "key": int(n["key"]),
-                    "in": max(0.0, float(n.get("in", 0.0))), "out": max(0.0, float(n.get("out", 0.0)))}
+                    "cents": max(-TUNE, min(TUNE, float(n.get("cents", 0.0))))}
+            leads = (max(0.0, float(n.get("in", 0.0))), max(0.0, float(n.get("out", 0.0))))
+            tone["id"] = int(n.get("id", 0))
+            tone["to"] = [{"id": int(s["id"]), "out": max(0.0, float(s["out"])), "in": max(0.0, float(s["in"]))}
+                          for s in n.get("to") or ()]
         except (KeyError, TypeError, ValueError, AttributeError):
             continue
-        if 0 <= tone["key"] <= 127 and all(math.isfinite(v) for v in tone.values()):
+        ok = all(math.isfinite(v) for v in [tone["t"], tone["len"], tone["cents"], *leads]
+                 + [v for s in tone["to"] for v in (s["out"], s["in"])])
+        if 0 <= tone["key"] <= 127 and ok:
             out.append(tone)
-    return sorted(out, key=lambda n: (n["t"], n["key"]))
+            old.append(leads if "id" not in n else None)
+    order = sorted(range(len(out)), key=lambda i: (out[i]["t"], out[i]["key"]))
+    out, old = [out[i] for i in order], [old[i] for i in order]
+    seen = set()
+    for n in out:  # every tone its own number
+        if n["id"] <= 0 or n["id"] in seen:
+            n["id"] = max([m["id"] for m in out] + [0]) + 1
+        seen.add(n["id"])
+    # saved before slides were their own thing (a lead in / out on each tone): it slid to the next tone on its line
+    lines = []
+    for n, leads in zip(out, old):
+        if leads is None:
+            continue
+        for line in lines:
+            a, a_leads = line[-1]
+            if a["t"] + a["len"] <= n["t"] + 1e-9:
+                if a_leads[1] > 0 or leads[0] > 0:
+                    a["to"].append({"id": n["id"], "out": a_leads[1], "in": leads[0]})
+                line.append((n, leads))
+                break
+        else:
+            lines.append([(n, leads)])
+    for n in out:  # no slide to a tone that's gone, none twice
+        kept = {}
+        for s in n["to"]:
+            if s["id"] in seen and s["id"] != n["id"]:
+                kept.setdefault(s["id"], s)
+        n["to"] = list(kept.values())
+    return out
 
 
 def clean_hz(hz):
@@ -77,49 +115,38 @@ def tones_span(tones):
     return max((n["t"] + n["len"] for n in tones), default=0.0)
 
 
-def voices(tones):
-    """The tones as lines: each a list of tones one after the other (a tone goes on the first line that's free)."""
-    lines = []
-    for n in sorted(tones, key=lambda n: (n["t"], n["key"])):
-        for line in lines:
-            if line[-1]["t"] + line[-1]["len"] <= n["t"] + 1e-9:
-                line.append(n)
-                break
-        else:
-            lines.append([n])
-    return lines
+def next_id(tones):
+    """The number for a new tone."""
+    return max((n["id"] for n in tones), default=0) + 1
 
 
-def holds(line):
-    """[(a, b)] for each tone of a line: it holds its own tone from a to b (beats); before a it's still sliding in
-    from the tone before, after b it's sliding out to the next one."""
+def pitch(n):
+    """A placed tone's pitch in keys: its key moved by its own tune (n["cents"])."""
+    return n["key"] + n.get("cents", 0.0) / 100.0
+
+
+def can_slide(a, b):
+    """True when tone a can slide to tone b: b starts at or after a's end."""
+    return a is not b and b["t"] >= a["t"] + a["len"] - 1e-9
+
+
+def links(tones):
+    """[(a, b, s)]: the slides that count, tone a to tone b; s = the slide itself (in a["to"]: its leads). A slide
+    to a tone that starts before a's end (it was moved there) is kept but does nothing."""
+    by = {n["id"]: n for n in tones}
     out = []
-    for i, n in enumerate(line):
-        a = n["t"] + (min(n["in"], n["len"]) if i else 0.0)
-        b = n["t"] + n["len"] - (min(n["out"], n["t"] + n["len"] - a) if i + 1 < len(line) else 0.0)
-        out.append((a, b))
+    for a in tones:
+        for s in a["to"]:
+            b = by.get(s["id"])
+            if b is not None and can_slide(a, b):
+                out.append((a, b, s))
     return out
 
 
-def pieces(line):
-    """A line as [(start, end, key at the start, key at the end)] in beats: only where it sounds."""
-    hs = holds(line)
-
-    def slide(i, t):  # the tone at time t of the slide from tone i to the next
-        x0, x1 = hs[i][1], hs[i + 1][0]
-        k0, k1 = line[i]["key"], line[i + 1]["key"]
-        return k0 if x1 - x0 < 1e-12 else k0 + (k1 - k0) * (t - x0) / (x1 - x0)
-
-    out = []
-    for i, n in enumerate(line):
-        (a, b), start, end = hs[i], n["t"], n["t"] + n["len"]
-        if a > start:
-            out.append((start, a, slide(i - 1, start), float(n["key"])))
-        if b > a:
-            out.append((a, b, float(n["key"]), float(n["key"])))
-        if end > b:
-            out.append((b, end, float(n["key"]), slide(i, end)))
-    return out
+def glide(a, b, s):
+    """A slide as (start beat, end beat, pitch at the start, pitch at the end): it leaves a's tone `out` before
+    a's end and reaches b's tone `in` after b's start."""
+    return a["t"] + a["len"] - min(s["out"], a["len"]), b["t"] + min(s["in"], b["len"]), pitch(a), pitch(b)
 
 
 def wave(hz, ppq, key):
@@ -128,47 +155,100 @@ def wave(hz, ppq, key):
     return max(1.0, math.floor(gate + 0.5) if hz.get("fixed") else gate)
 
 
-def line_repeats(line, left, ppq, hz):
-    """One line's repeats as arrays (start tick, the tick its run of sound ends at)."""
-    ps = pieces(line)
-    starts, limits = [], []
-    t, run_end, limit = 0.0, None, 0
-    for j, (p0, p1, k0, k1) in enumerate(ps):
-        s, e = (left + p0) * ppq, (left + p1) * ppq
-        if run_end is None or abs(p0 - run_end) > 1e-9:  # after a silence: the waves start again here
-            t = s
-            k = j
-            while k + 1 < len(ps) and abs(ps[k + 1][0] - ps[k][1]) <= 1e-9:
-                k += 1
-            limit = math.floor((left + ps[k][1]) * ppq + 0.5)
-        run_end = p1
-        if t >= e:
+def tone_runs(hz, left, ppq):
+    """The repeats of the placed tones as unbroken stretches of tone: [(start ticks, the ticks their waves are over
+    = the next one's start)], not rounded. A tone held is one stretch, from where the first slide into it arrives
+    to where the last slide out of it leaves; every slide is one more (two when there's a gap between its tones:
+    nothing sounds there), its waves in step with the tone it leaves."""
+    tones = hz["tones"]
+    ls = links(tones)
+    out, held = [], {}
+    for n in tones:
+        a = n["t"] + min([min(s["in"], n["len"]) for _, b, s in ls if b is n], default=0.0)
+        b = n["t"] + n["len"] - min([min(s["out"], n["len"]) for m, _, s in ls if m is n], default=0.0)
+        if b > a:
+            s, e, gate = (left + a) * ppq, (left + b) * ppq, wave(hz, ppq, pitch(n))
+            starts = s + gate * np.arange(int(math.ceil((e - s) / gate)))
+            out.append((starts, starts + gate))
+            held[n["id"]] = (s, gate)
+    for a, b, link in ls:
+        x0, x1, k0, k1 = glide(a, b, link)
+        if x1 - x0 < 1e-12:
             continue
-        if k0 == k1:
-            gate = wave(hz, ppq, k0)
-            n = int(math.ceil((e - t) / gate))
-            starts.append(t + gate * np.arange(n))
-            t += n * gate
-        else:
-            part = []
-            while t < e:
+        s0, e0 = (left + x0) * ppq, (left + a["t"] + a["len"]) * ppq
+        s1, e1 = (left + b["t"]) * ppq, (left + x1) * ppq
+        t = s0
+        if a["id"] in held and s0 >= held[a["id"]][0]:  # in step with the tone it leaves
+            s, gate = held[a["id"]]
+            t = s + math.ceil((s0 - s) / gate - 1e-9) * gate
+        gap = s1 - e0 > 1e-6
+        for end in (e0, e1) if gap else (e1,):
+            part, after = [], []
+            while t < end:
                 part.append(t)
-                t += wave(hz, ppq, k0 + (k1 - k0) * (t - s) / (e - s))
-            starts.append(np.array(part))
-        limits.append(np.full(len(starts[-1]), limit, np.int64))
-    if not starts:
-        return np.zeros(0, np.int64), np.zeros(0, np.int64)
-    return np.floor(np.concatenate(starts) + 0.5).astype(np.int64), np.concatenate(limits)
+                t += wave(hz, ppq, k0 + (k1 - k0) * (t - s0) / (e1 - s0))
+                after.append(t)
+            if part:
+                out.append((np.array(part), np.array(after)))
+            t = max(t, s1)
+    return out
+
+
+def _limits(tones, left, ppq, starts):
+    """For each repeat (start ticks, not rounded): the tick the sound it's in ends at (the end of the tones that
+    touch or overlap around it)."""
+    spans = []
+    for n in sorted(tones, key=lambda n: n["t"]):
+        if spans and n["t"] <= spans[-1][1] + 1e-9:
+            spans[-1][1] = max(spans[-1][1], n["t"] + n["len"])
+        else:
+            spans.append([n["t"], n["t"] + n["len"]])
+    at = np.array([(left + a) * ppq for a, _ in spans]) - 1e-6
+    ends = np.array([math.floor((left + b) * ppq + 0.5) for _, b in spans], np.int64)
+    return ends[np.maximum(np.searchsorted(at, starts, "right") - 1, 0)]
+
+
+def _whole(v):
+    return np.floor(v + 0.5).astype(np.int64)
+
+
+@functools.lru_cache(maxsize=16)
+def _heard(hz_json, left, ppq, bpm):
+    hz = json.loads(hz_json)
+    out = []
+    for starts, nexts in tone_runs(hz, left, ppq):
+        limits = _limits(hz["tones"], left, ppq, starts)
+        mean = nexts - starts  # (the wave as made: with mixed gates the whole-tick ones come to this on average)
+        starts, nexts = _whole(starts), _whole(nexts)
+        gates = np.maximum(nexts - starts, 1)  # (whole ticks: what the PPQ lets the wave be)
+        keys, mean = (69.0 + 12.0 * np.log2(ppq * bpm / 60.0 / 440.0 / g) - hz["cents"] / 100.0
+                      for g in (gates, mean))
+        ends = np.minimum(nexts, limits)
+        keep = ends > starts
+        if keep.any():
+            out.append((starts[keep] / ppq - left, ends[keep] / ppq - left, keys[keep], mean[keep]))
+    return out
+
+
+def heard(hz, left, ppq, bpm):
+    """What the placed tones really sound like at this PPQ and BPM (the red line of the Hz bass window): for each
+    unbroken stretch of tone, arrays (start, end in beats from the left edge, pitch in keys, average pitch) of its
+    repeats. A repeat lasts a whole number of ticks, so its pitch is a little off the wanted one: the lower the
+    PPQ, the more. Mixed gates take turns so that the average is the wanted tone; fixed gates are all the same, so
+    there the average is each repeat's own pitch.
+    The pitch is counted from the shape's own tuning (hz["cents"]), so a key's exact tone is that key."""
+    return _heard(json.dumps(hz, sort_keys=True), left, ppq, float(bpm))
 
 
 @functools.lru_cache(maxsize=16)
 def _squares(hz_json, left, ppq):
     hz = json.loads(hz_json)
-    got = [line_repeats(line, left, ppq, hz) for line in voices(hz["tones"])]
-    starts = np.concatenate([s for s, _ in got]) if got else np.zeros(0, np.int64)
-    limits = np.concatenate([l for _, l in got]) if got else np.zeros(0, np.int64)
-    if not len(starts):
+    got = [s for s, _ in tone_runs(hz, left, ppq)]
+    if not got:
         return np.zeros((0, 2), np.int64)
+    starts = np.concatenate(got)
+    limits = _limits(hz["tones"], left, ppq, starts)
+    starts = _whole(starts)
     order = np.argsort(starts, kind="stable")
     starts, limits = starts[order], limits[order]
     first = np.concatenate([[True], starts[1:] != starts[:-1]])
@@ -204,4 +284,4 @@ def fit_length(sh):
 
 def shortest_gate(hz, ppq):
     """The shortest gate, in ticks, a shape's Hz bass uses (its highest tone)."""
-    return wave(hz, ppq, max((n["key"] for n in hz.get("tones") or ()), default=hz["key"]))
+    return wave(hz, ppq, max((pitch(n) for n in hz.get("tones") or ()), default=hz["key"]))
