@@ -33,6 +33,7 @@ from window.panel_pattern import PatternPanel
 from window.panel_polygon import PolygonPanel
 from window.panel_text import TextPanel
 from window.claw_window import open_claw
+from window.hz_preview import clean_settings as clean_preview
 from window.panel_tumour import TumourPanel
 from notes.joined import all_tumours, is_joined
 from window.join_split import JoinSplit
@@ -128,6 +129,8 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self.hz_pos = ""  # its size and place ("WxH+x+y", remembered in the autosave)
         self.hz_start = None  # the beat picked with the Hz bass tool for a new Hz bass (roll_hz.py)
         self.hz_defaults = {"lo": 48, "hi": 58}  # the keys a new Hz bass repeats
+        self.hz_preview = clean_preview({})  # the Hz bass preview's settings (hz_preview.py; with the window's)
+        self.synth = None  # the built-in synth (files/synth.py), started when the preview is first turned on
         self.rendered, self.slot_count = NO_NOTES, 0  # (start, end, pitch, velocity, slot, owner) rows
         self.note_counts = []  # notes per shape in rendered
         self.notes_late = False  # the notes are behind the shapes (a drag going on: see shapes_changed)

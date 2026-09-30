@@ -17,7 +17,7 @@ import os
 import re
 import tkinter as tk
 from tkinter import font as tkfont
-from tkinter import simpledialog, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import numpy as np
 
@@ -32,11 +32,15 @@ from notes.hzbass import (FX, HZ_DEFAULTS, TUNE, can_slide, clean_fx, clean_tone
 from roll.roll_shared import ALT, CTRL, SELECT_CURSOR, SELECTED_COLOR, SHIFT, SLOT_COLORS, note_name
 from roll.zoombar import add_zoom_bars
 from window.hz_effects import FxPane
+from window.hz_preview import Preview
 from window.snap_picker import SnapPicker
 from window.widgets import Tooltip
 
 BLACK = (1, 3, 6, 8, 10)
 RED = "#e02020"
+PLAY_LINE = "#0a50e0"  # (the main piano roll's)
+GREY = "#8a8a8a"  # over what the preview hasn't made yet
+ORANGE = "#c06000"
 FAINT = "#f0a0a0"  # behind the red line: each repeat's own pitch
 GREEN = "#18a048"  # a note's exact tone (the middle of its row)
 TUNE_ROW = 20  # px: rows at least this tall show the exact tone, and the red line can be dragged up / down
@@ -128,6 +132,14 @@ class HzWindow(tk.Toplevel):
         self.ppq_trace = app.pvar["ppq"].trace_add(
             "write", lambda *a: self.after_idle(lambda: self.winfo_exists() and self.redraw()))
         f = piece()
+        self.preview_on = tk.BooleanVar(value=False)
+        b = ttk.Checkbutton(f, text=tr("hz.preview"), variable=self.preview_on, command=self.on_preview,
+                            style="Toolbutton")
+        b.pack(side="left")
+        Tooltip(b, tr("hz.preview_tip"))
+        self.preview_says = ttk.Label(f, text="", foreground="#555")
+        self.preview_says.pack(side="left", padx=(6, 10))
+        f = piece()
         self.what = ttk.Label(f, text="", foreground="#555")
         self.what.pack(side="left", padx=(0, 10))
         f = piece("right")
@@ -176,6 +188,7 @@ class HzWindow(tk.Toplevel):
         c.bind("<MouseWheel>", self.on_wheel)
         c.bind("<Delete>", lambda e: self.delete_selected() or "break")
         c.bind("<Escape>", lambda e: self.select(()) or "break")
+        c.bind("<space>", self.on_space)
         for k in ("<Control-a>", "<Control-A>"):
             c.bind(k, lambda e: self.select(range(len(self.tones))) or "break")
         for k, tool in (("p", "pencil"), ("P", "pencil"), ("v", "select"), ("V", "select")):
@@ -183,6 +196,9 @@ class HzWindow(tk.Toplevel):
         self.bind("<Configure>", self.remember)
         self.protocol("WM_DELETE_WINDOW", self.close)
         c.focus_set()
+        self.preview = Preview(self)
+        if app.hz_preview["on"]:  # (on last time: on again, if its soundfont is still there)
+            self.after_idle(self.preview_again)
 
     # ------------------------------------------------------------ what it shows
 
@@ -426,7 +442,8 @@ class HzWindow(tk.Toplevel):
             c.create_oval(x - r, y - r, x + r, y + r, fill="white", outline=RED, width=max(1, round(1.5 * s)))
         if self.drag and self.drag["kind"] == "box":
             c.create_rectangle(*self.drag["from"], *self.drag["to"], outline="#000000", dash=(2, 2))
-        c.create_rectangle(0, 0, kb, h, fill="#fafafa", outline="")  # keys
+        c.create_rectangle(0, 0, kb, h, fill="#fafafa", outline="", tags="frame")  # keys (the preview's grey
+        # goes under this: draw_preview)
         for k in range(k_lo, k_hi + 1):
             y = self.y_of(k)
             if k % 12 in BLACK:
@@ -455,6 +472,8 @@ class HzWindow(tk.Toplevel):
                           width=w - kb - 40 * s, justify="center")
         self.show_status()
         self.fx.redraw()
+        self.preview.shown = None
+        self.draw_preview()
 
     def tune_rows(self):
         """True when the rows are tall enough to see and change a note's tune."""
@@ -622,6 +641,8 @@ class HzWindow(tk.Toplevel):
         hit = self.hit(e.x, e.y)
         before = copy.deepcopy(self.tones)
         if hit is None:
+            if e.x >= self.kb_w and e.y < self.ruler_h and self.preview_on.get():  # the bar numbers: the play line
+                return self.put_play_line(self.beat_at(e.x))
             if e.x < self.kb_w or e.y < self.ruler_h:
                 return
             if e.state & CTRL or self.tool.get() == "select":  # a box that selects the notes it touches
@@ -1014,7 +1035,110 @@ class HzWindow(tk.Toplevel):
         if e.widget is self:
             self.app.hz_pos = self.geometry()
 
+    # ------------------------------------------------------------ the preview (hz_preview.py)
+
+    def preview_again(self):
+        """At opening: the preview was on last time. On again if its soundfont is still there (nothing asked)."""
+        if self.winfo_exists() and os.path.isfile(self.app.hz_preview["font"]):
+            self.preview_on.set(True)
+            self.on_preview()
+
+    def on_preview(self):
+        """The Preview toggle. The first time (no soundfont yet, or it's gone) it asks for one."""
+        cfg = self.app.hz_preview
+        if not self.preview_on.get():
+            cfg["on"] = False
+            self.preview.stop()
+        else:
+            if not os.path.isfile(cfg["font"]):
+                path = filedialog.askopenfilename(
+                    parent=self, title=tr("hz.preview_pick_font"),
+                    filetypes=[(tr("hz.preview_fonts"), "*.sf2 *.sf3 *.sfz *.sf2pack"), (tr("hz.preview_all"), "*.*")])
+                if not path:
+                    self.preview_on.set(False)
+                    return
+                cfg["font"] = os.path.normpath(path)
+            err = self.preview.start()
+            if err:
+                self.preview_failed(err)
+                return
+            cfg["on"] = True
+        self.app.schedule_autosave()
+        self.redraw()
+
+    def preview_failed(self, err):
+        """The synth or the soundfont didn't work: the preview goes off and says why."""
+        self.preview_on.set(False)
+        self.app.hz_preview["on"] = False
+        self.preview.stop()
+        messagebox.showerror(tr("hz.window_title"), err, parent=self)
+
+    def on_space(self, e):
+        """Space: the preview plays / stops (preview off: the main window's playback, as anywhere else)."""
+        if not self.preview_on.get():
+            return None
+        if self.preview.playing():
+            self.preview.stop_play()
+        else:
+            if self.app.player.running:
+                self.app.stop_play()
+            err = self.preview.play()
+            if err:
+                messagebox.showerror(tr("hz.window_title"), err, parent=self)
+        self.draw_preview()
+        return "break"
+
+    def put_play_line(self, beat):
+        """A click on the bar numbers (preview on): the play line goes there (playing: plays on from there)."""
+        self.preview.put_line(max(0.0, beat))
+        self.draw_preview()
+
+    def draw_preview(self):
+        """The grey over what isn't made yet, the play line, and the words next to the toggle. The canvas is only
+        changed when what it shows changed."""
+        c, p = self.canvas, self.preview
+        on = self.preview_on.get()
+        grey = p.grey() if on else []
+        line = p.play_beat() if on and p.ev is not None else None
+        if line is not None and p.playing():  # (playing past the right edge: the next page)
+            x, w = self.x_of(line), c.winfo_width()
+            if x > w - 6 * self.s or x < self.kb_w:
+                self.t0 = line
+                self.clamp_view()
+                return self.redraw()
+        shown = (tuple((round(self.x_of(a)), round(self.x_of(b))) for a, b in grey),
+                 None if line is None else round(self.x_of(line)))
+        if shown != p.shown:
+            p.shown = shown
+            c.delete("preview")
+            w, h, rh = c.winfo_width(), c.winfo_height(), self.ruler_h
+            for a, b in shown[0]:
+                a, b = max(a, self.kb_w), min(b, w)
+                if b > a:
+                    c.create_rectangle(a, rh, b, h, fill=GREY, outline="", stipple="gray50", tags="preview")
+            if shown[1] is not None and self.kb_w <= shown[1] <= w:
+                c.create_line(shown[1], rh, shown[1], h, fill=PLAY_LINE, width=max(1, round(self.s)),
+                              tags="preview")
+            if c.find_withtag("frame"):
+                c.tag_lower("preview", "frame")
+        says, colour = "", "#555"
+        if on:
+            vo = tr("hz.preview_voices", used=f"{p.voices_used:,}", limit=f"{self.app.hz_preview['voices']:,}")
+            if p.loading():
+                says, colour = tr("hz.preview_loading"), ORANGE
+            elif p.just_loaded():
+                says, colour = tr("hz.preview_loaded"), GREEN
+            elif p.ev is None:
+                says = tr("hz.preview_nothing")
+            elif grey:
+                says = tr("hz.preview_making", speed=f"{p.speed:.1f}" if p.speed else "…", voices=vo)
+            else:
+                says = tr("hz.preview_ready", voices=vo)
+        if (self.preview_says.cget("text"), str(self.preview_says.cget("foreground"))) != (says, colour):
+            self.preview_says.config(text=says, foreground=colour)
+
     def close(self):
+        self.preview.stop()
         self.sound(None)
         self.app.pvar["ppq"].trace_remove("write", self.ppq_trace)
         self.app.hz_window = None

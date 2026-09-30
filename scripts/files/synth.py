@@ -76,6 +76,7 @@ def _load():
     for name, args, res in (("BASS_Init", [i, u, u, p, p], i), ("BASS_Free", [], i), ("BASS_ErrorGetCode", [], i),
                             ("BASS_StreamCreate", [u, u, u, _STREAMPROC, p], u), ("BASS_StreamFree", [u], i),
                             ("BASS_ChannelPlay", [u, i], i), ("BASS_ChannelStop", [u], i),
+                            ("BASS_ChannelIsActive", [u], u),
                             ("BASS_ChannelGetData", [u, p, u], i),
                             ("BASS_ChannelSetPosition", [u, ctypes.c_uint64, u], i),
                             ("BASS_ChannelGetPosition", [u, u], ctypes.c_uint64),
@@ -134,6 +135,16 @@ class Synth:
             old, self.font, self.font_path = self.font, font, path
         if old:
             self.midi.BASS_MIDI_FontFree(old)
+
+    def warm_up(self):
+        """Loads the soundfont's piano (program 0) now, so the first piece of sound doesn't wait for it."""
+        ev = events(np.array([[0, 1, 60, 1]]), 960, 120)
+        h = self.midi.BASS_MIDI_StreamCreateEvents(ev.ctypes.data, 960, _STREAM_DECODE | _SAMPLE_FLOAT, RATE)
+        if h:
+            font = _Font(self.font, -1, 0)
+            self.midi.BASS_MIDI_StreamSetFonts(h, ctypes.byref(font), 1)
+            self.midi.BASS_MIDI_StreamLoadSamples(h)
+            self.bass.BASS_StreamFree(h)
 
     def render(self, ev, ppq, start, frames, voices, nofx=False, cancel=None, progress=None, stats=None):
         """`frames` frames of sound from `start` (frames from the song's start) as float32 rows (left, right).
@@ -276,6 +287,10 @@ class Player:
             return None
         at, song, n = self.heard[0]
         return None if song is None else song + min(now - at, n)
+
+    def active(self):
+        """False once the end was played (or it was stopped)."""
+        return bool(self.handle) and self.synth.bass.BASS_ChannelIsActive(self.handle) != 0
 
     def stop(self):
         if self.handle:

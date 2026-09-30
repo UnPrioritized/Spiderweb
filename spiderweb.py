@@ -29,6 +29,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     velocity.py      the velocity pane under the piano roll
     hz_window.py     the Hz bass window: a small piano roll where its notes are placed
     hz_effects.py    the effects pane under the Hz bass window's notes (lines with points)
+    hz_preview.py    the Hz bass window's Preview: its sound made ahead (greyed until made) and played
     velocity_formula.py the velocity pane's Formula tool settings (pattern, loops, its numbers)
   roll/              the piano roll
     pianoroll.py     the piano roll canvas: view, hit testing, mouse editing

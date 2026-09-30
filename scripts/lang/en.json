@@ -1726,5 +1726,17 @@
  "synth.no_dll": "The built-in synth couldn't start (its BASS files are missing or don't fit this Python): {err}",
  "synth.bad_font": "Couldn't open the soundfont \"{name}\" (BASS error {err}). Is it a .sf2 or .sfz file?",
  "synth.no_font": "Pick a soundfont first.",
- "synth.failed": "The built-in synth couldn't make the sound (BASS error {err})."
+ "synth.failed": "The built-in synth couldn't make the sound (BASS error {err}).",
+ "hz.preview": "Preview",
+ "hz.preview_tip": "Hear this Hz bass alone through the built-in synth, with your soundfont.\nGrey over the notes = sound not made yet; it clears as it's made (about a minute ahead of the play line, or of the left edge of the view).\nSpace = play / stop. Click the bar numbers to move the play line.\nThe first time, it asks for a soundfont (.sf2 / .sfz).",
+ "hz.preview_pick_font": "Pick a soundfont for the preview",
+ "hz.preview_fonts": "Soundfonts",
+ "hz.preview_all": "All files",
+ "hz.preview_loading": "Loading soundfont…",
+ "hz.preview_loaded": "Soundfont loaded",
+ "hz.preview_nothing": "No notes to hear yet",
+ "hz.preview_making": "Making the sound… {speed}x real time, {voices}",
+ "hz.preview_ready": "Ready, {voices}",
+ "hz.preview_voices": "voices {used} / {limit}",
+ "synth.no_device": "There's no sound device to play through."
 }

@@ -220,7 +220,7 @@ class ProjectFiles:
                               "velocity_height": self.velocity_height() / self.scale,
                               "midi_device": self.midi_device.get(), "live": self.live.get(),
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
-                              "claw_window": self.claw_pos, "hz_window": self.hz_pos,
+                              "claw_window": self.claw_pos, "hz_window": self.hz_pos, "hz_preview": self.hz_preview,
                               "history_window": self.history_pos, "history_undocked": self.history_undocked,
                               **self.tips.state(), **self.updates.state()}
         write_text(path, project_json(data))
@@ -292,6 +292,8 @@ class ProjectFiles:
             pos = win.get("hz_window")
             if isinstance(pos, str) and re.fullmatch(r"\d+x\d+\+-?\d+\+-?\d+", pos):
                 self.hz_pos = pos
+            from window.hz_preview import clean_settings
+            self.hz_preview = clean_settings(win.get("hz_preview"))
             pos = win.get("history_window")
             if isinstance(pos, str) and re.fullmatch(r"(\d+x\d+)?\+-?\d+\+-?\d+", pos):
                 self.history_pos = pos
