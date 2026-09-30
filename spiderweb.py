@@ -68,6 +68,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     midi_out.py      MIDI file writer
     domino_clip.py   Copy to / Paste from Domino (notes on the clipboard in Domino's own format)
     playback.py      playing through Windows MIDI out
+    synth.py         the built-in synth (Hz bass preview): BASS + BASSMIDI DLLs in scripts/bass/
     mathexpr.py      math in number boxes (960*4 etc.)
     snap.py          the snap choices (bar, note lengths, custom ones) and their length in beats
 """

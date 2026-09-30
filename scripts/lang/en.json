@@ -1722,5 +1722,9 @@
  "claw.tip_dist": "Bends time inside each period.\nRight: long notes first, then faster and faster. Left: the other way round.\nDrag up / down (Shift = fine), mouse wheel or arrow keys; it stops at 0 for a moment on the way past.\nRight mouse button: points it at the mouse. Middle-click (press the wheel) = back to 0.",
  "claw.tip_stretch": "Stretches the result back to the shape's full length (the notes get longer too).",
  "claw.tip_short": "Removes notes the claw left very short (under 1/24 beat). Notes that were that short already stay.",
- "claw.tip_reset": "Everything back to the start (the claw then changes nothing)."
+ "claw.tip_reset": "Everything back to the start (the claw then changes nothing).",
+ "synth.no_dll": "The built-in synth couldn't start (its BASS files are missing or don't fit this Python): {err}",
+ "synth.bad_font": "Couldn't open the soundfont \"{name}\" (BASS error {err}). Is it a .sf2 or .sfz file?",
+ "synth.no_font": "Pick a soundfont first.",
+ "synth.failed": "The built-in synth couldn't make the sound (BASS error {err})."
 }
