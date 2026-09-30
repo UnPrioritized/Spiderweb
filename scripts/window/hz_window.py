@@ -69,7 +69,7 @@ class HzWindow(tk.Toplevel):
         self.title(tr("hz.window_title"))
         self.transient(app)
         s = self.s = app.scale
-        self.geometry(app.hz_pos if re.fullmatch(POS, app.hz_pos or "") else f"{round(820 * s)}x{round(590 * s)}")
+        self.geometry(app.hz_pos if re.fullmatch(POS, app.hz_pos or "") else f"{round(820 * s)}x{round(620 * s)}")
         self.minsize(round(420 * s), round(260 * s))
         self.tones, self.sel = [], set()  # the notes shown (hzbass tones) and which are selected
         self.drag = None

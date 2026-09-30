@@ -13,10 +13,11 @@ import copy
 import tkinter as tk
 
 from files.lang import tr
-from notes.hzbass import FX, FX_START, OFF_PITCH, group_count
+from notes.hzbass import FX, FX_START, OFF_PITCH, TREMOLO, group_count
 from roll.roll_shared import CTRL, SHIFT
 
-FX_COLOR = {"slant": "#8a3ff0", "groups": "#0a8f8f", "offpitch": "#d0189a", "noisy": "#8a5a14"}  # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
+FX_COLOR = {"slant": "#8a3ff0", "groups": "#0a8f8f", "offpitch": "#d0189a", "noisy": "#8a5a14",
+            "sweep": "#7f8c00", "wah": "#2c3e6b", "tremolo": "#e0607a", "octave": "#1d6b3a"}  # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
 
 
 def faint(colour, by=0.6):
@@ -32,7 +33,8 @@ class FxPane:
         self.drag = None
         self.says = ""  # for the window's status line
         self.row_h, self.pad = round(16 * self.s), round(9 * self.s)
-        c = self.canvas = tk.Canvas(win, background="white", highlightthickness=0, height=round(112 * self.s))
+        c = self.canvas = tk.Canvas(win, background="white", highlightthickness=0,
+                                    height=max(round(112 * self.s), round(8 * self.s) + len(FX) * self.row_h))
         c.bind("<Configure>", lambda e: self.redraw())
         c.bind("<ButtonPress-1>", self.on_press)
         c.bind("<Double-Button-1>", self.on_double)
@@ -176,6 +178,8 @@ class FxPane:
         if name == "groups":
             n = int(group_count(value))
             return tr("hz.fx_value_groups" if n > 1 else "hz.fx_value_together", name=tr("hz.fx_" + name), n=n)
+        if name == "tremolo":
+            return tr("hz.fx_value_beat", name=tr("hz.fx_" + name), n=f"{value * TREMOLO:.3g}")
         if name == "offpitch":  # how far apart the lowest and the highest key's tones are
             return tr("hz.fx_value", name=tr("hz.fx_" + name), value=f"{value * OFF_PITCH * 100:.3g}")
         return tr("hz.fx_value", name=tr("hz.fx_" + name), value=f"{value * 100:.4g}")

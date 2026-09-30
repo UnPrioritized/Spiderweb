@@ -32,7 +32,13 @@ Effects: a tone can have "fx" = {effect: [[u, value], ...]}: a line through poin
   "offpitch": every key repeats a little faster or slower than the tone, the lowest key the fastest, the highest
   the slowest: the keys drift apart and meet again by themselves. 1 = OFF_PITCH of the tone between them.
   "noisy": every repeat of every key is late by a random bit, up to the value of one wave.
-With effects every key has its own repeats (KeyGrid, custom.chop_keys); without any, nothing changes."""
+With effects every key has its own repeats (KeyGrid, custom.chop_keys); without any, nothing changes.
+Four more change how hard the keys hit instead (velocity_factor, used by engine._notes_tracks on top of the shape's
+own velocity; loudness goes with velocity squared):
+  "sweep": a bump of loudness over the keys; the value is where it is, 0 = the lowest key, 1 = the highest.
+  "wah": loud and quiet stripes over the keys, more of them the higher the value (0 = every key full).
+  "tremolo": every key louder and quieter in turn, value x TREMOLO times a beat (0 = steady).
+  "octave": every other repeat softer, down to velocity 1 at 1: the tone an octave below comes in."""
 
 import functools
 import json
@@ -43,9 +49,14 @@ import numpy as np
 HZ_DEFAULTS = {"key": 33, "cents": 0.0}
 MIN_LEN = 1 / 1024  # beats: a tone is never shorter
 TUNE = 50.0  # cents: how far a placed tone's own tune goes, up or down (half a key)
-FX = ("slant", "groups", "offpitch", "noisy")  # the effects a placed tone can have
+VEL_FX = ("sweep", "wah", "tremolo", "octave")  # the effects that change the velocity
+FX = ("slant", "groups", "offpitch", "noisy") + VEL_FX  # the effects a placed tone can have
 FX_START = {"slant": [[0.0, 0.0], [1.0, 1.0]], "groups": [[0.0, 0.0], [1.0, 1.0]],  # the line an effect starts with
-            "offpitch": [[0.0, 0.5], [1.0, 0.5]], "noisy": [[0.0, 0.0], [1.0, 1.0]]}
+            "offpitch": [[0.0, 0.5], [1.0, 0.5]], "noisy": [[0.0, 0.0], [1.0, 1.0]],
+            "sweep": [[0.0, 0.0], [1.0, 1.0]], "wah": [[0.0, 0.0], [1.0, 1.0]],
+            "tremolo": [[0.0, 0.5], [1.0, 0.5]], "octave": [[0.0, 0.0], [1.0, 1.0]]}
+WAH = 8.0  # "wah" at 1: this many loud stripes over the keys
+TREMOLO = 8.0  # "tremolo" at 1: this many times a beat
 GROUPS = 6  # "groups" at 1
 OFF_PITCH = 0.02  # "offpitch" at 1: the highest key's tone is this much (x the tone) below the lowest key's
 
@@ -374,6 +385,45 @@ def key_range(sh):
     ps = [p for _, p in sh["pts"]]
     ps.append(ps[1] + ps[2] - ps[0])
     return round(min(ps)), round(max(ps))
+
+
+def velocity_factor(sh, ppq, starts, keys):
+    """What the velocity effects make of the velocity of a shape's notes (arrays: start ticks, keys): a number
+    from 0 to 1 for each to multiply it by, or None when no tone has such an effect. A note gets the effects of
+    the first tone that sounds where it starts."""
+    hz = sh["hz"]
+    tones = [n for n in hz["tones"] if any(name in (n.get("fx") or ()) for name in VEL_FX)]
+    if not tones or not len(starts):
+        return None
+    left = left_edge(sh)
+    lo, hi = key_range(sh)
+    x = np.clip((keys - lo) / max(1, hi - lo), 0.0, 1.0)  # 0 = the lowest key, 1 = the highest
+    beat = starts / ppq - left
+    out = np.ones(len(starts))
+    free = np.ones(len(starts), bool)
+    for n in tones:
+        at = np.flatnonzero(free & (beat >= n["t"] - 1e-9) & (beat < n["t"] + n["len"]))
+        if not len(at):
+            continue
+        free[at] = False
+        fx, b, xk = n["fx"], beat[at], x[at]
+        loud = np.ones(len(at))
+        if "sweep" in fx:
+            loud *= 0.08 + 0.92 * np.clip(np.cos(np.pi * (xk - fx_at(n, "sweep", b))), 0.0, 1.0) ** 4
+        if "wah" in fx:
+            loud *= (1.0 + np.cos(2.0 * np.pi * WAH * fx_at(n, "wah", b) * (xk - 0.5))) / 2.0
+        if "tremolo" in fx:  # how often it has gone up and down so far: its speed added up along the tone
+            us = np.linspace(0.0, 1.0, 513)
+            speed = fx_at(n, "tremolo", n["t"] + us * n["len"]) * TREMOLO * n["len"]
+            turns = np.concatenate([[0.0], np.cumsum((speed[1:] + speed[:-1]) / 2.0) / 512.0])
+            loud *= 0.1 + 0.9 * (1.0 + np.cos(2.0 * np.pi * np.interp((b - n["t"]) / n["len"], us, turns))) / 2.0
+        factor = np.sqrt(loud)
+        if "octave" in fx:
+            # (which repeat of the tone: the starts are whole ticks, up to half a tick before their real spot)
+            number = np.floor((starts[at] + 0.5 - (left + n["t"]) * ppq) / wave(hz, ppq, pitch(n)) + 1e-6)
+            factor = np.where(number % 2 == 1, factor * (1.0 - fx_at(n, "octave", b)), factor)
+        out[at] = factor
+    return out
 
 
 def squares(sh, ppq):

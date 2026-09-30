@@ -16,7 +16,7 @@ from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX
                           clean_strokes, custom_notes_groups, custom_strokes)
 from notes.envelope import env_values, velocity_env
 from notes.joined import clean_joined, is_joined, joined_paths
-from notes.hzbass import clean_hz
+from notes.hzbass import clean_hz, velocity_factor
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
 from notes.claw import apply_claw, clean_claw
@@ -326,6 +326,10 @@ def _notes_tracks(sh, ppq, keys):
     else:
         frac = np.clip((raw[:, 0] - t_lo) / (t_hi - t_lo), 0, 1) if t_hi > t_lo else np.zeros(len(raw))
         vel = np.clip(np.round(env_values(env, frac)), 1, 127).astype(np.int64)  # (rounds halves to even, like round)
+    if sh["kind"] == "custom" and own is None and (sh.get("hz") or {}).get("tones"):  # Hz bass velocity effects
+        factor = velocity_factor(sh, ppq, raw[:, 0], raw[:, 2])
+        if factor is not None:
+            vel = np.clip(np.floor(vel * factor + 0.5), 1, 127).astype(np.int64)
     return np.column_stack([raw, vel]), tracks
 
 
