@@ -127,6 +127,7 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self.claw_pos = ""  # where the claw machine window was last ("+x+y", remembered in the autosave)
         self.hz_window = None  # the Hz bass window (hz_window.py)
         self.hz_pos = ""  # its size and place ("WxH+x+y", remembered in the autosave)
+        self.hz_fx_h = 0  # its effects pane's height in pixels, dragged by its top edge (0 = as it starts)
         self.hz_start = None  # the beat picked with the Hz bass tool for a new Hz bass (roll_hz.py)
         self.hz_defaults = {"lo": 48, "hi": 58}  # the keys a new Hz bass repeats
         self.hz_preview = clean_preview({})  # the Hz bass preview's settings (hz_preview.py; with the window's)

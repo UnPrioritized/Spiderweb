@@ -5,7 +5,8 @@ the notes, through points at beats, 0 % at the bottom, 100 % at the top (flat be
 last). Clicking a name that's on highlights it: its line is in full colour and the only one that can be grabbed, the
 others are faint; with none highlighted they're all in full colour and the nearest one is grabbed.
 Drag a point to move it, press on the line for a new point, double click a point to delete it (the last point
-takes the effect off). Every change is one undo step of the main window, made when the mouse is let go."""
+takes the effect off). Every change is one undo step of the main window, made when the mouse is let go.
+Its top edge drags to make the pane taller or shorter (remembered)."""
 
 import copy
 import tkinter as tk
@@ -32,8 +33,10 @@ class FxPane:
         self.drag = None
         self.says = ""  # for the window's status line
         self.row_h, self.pad = round(15 * self.s), round(9 * self.s)
+        self.edge = round(4 * self.s)  # the top edge: drag it = the pane's height
+        start_h = max(round(112 * self.s), round(8 * self.s) + len(FX) * self.row_h)
         c = self.canvas = tk.Canvas(win, background="white", highlightthickness=0,
-                                    height=max(round(112 * self.s), round(8 * self.s) + len(FX) * self.row_h))
+                                    height=win.app.hz_fx_h or start_h)
         c.bind("<Configure>", lambda e: self.redraw())
         c.bind("<ButtonPress-1>", self.on_press)
         c.bind("<Double-Button-1>", self.on_double)
@@ -140,6 +143,9 @@ class FxPane:
         return None
 
     def on_motion(self, e):
+        if e.y < self.edge:
+            self.canvas.config(cursor="sb_v_double_arrow")
+            return self.say("")
         name, hit = self.name_at(e.x, e.y), self.hit(e.x, e.y)
         self.canvas.config(cursor="hand2" if name else "fleur" if hit and hit[0] == "point" else
                            "crosshair" if hit else "")
@@ -166,6 +172,9 @@ class FxPane:
         win = self.win
         win.canvas.focus_set()
         self.drag = None
+        if e.y < self.edge:
+            self.drag = {"kind": "size", "y": e.y_root, "h": self.canvas.winfo_height()}
+            return
         name = self.name_at(e.x, e.y)
         if name:
             self.drag = {"kind": "name", "fx": name}
@@ -185,6 +194,7 @@ class FxPane:
         self.drag = {"kind": "point", "fx": name, "i": i, "before": before}
         if hit[0] == "line":
             self.on_drag(e)
+            self.canvas.config(cursor="fleur")  # (the new point is under the mouse: it moves)
         win.redraw()
 
     @staticmethod
@@ -198,6 +208,12 @@ class FxPane:
 
     def on_drag(self, e):
         d, win = self.drag, self.win
+        if d and d["kind"] == "size":  # the pane's height (the notes keep some room)
+            least = round(50 * self.s)
+            most = max(least, win.canvas.winfo_height() + self.canvas.winfo_height() - round(120 * self.s))
+            win.app.hz_fx_h = min(most, max(least, d["h"] - (e.y_root - d["y"])))
+            self.canvas.config(height=win.app.hz_fx_h)
+            return
         if not d or d["kind"] != "point":
             return
         name, i = d["fx"], d["i"]
@@ -213,6 +229,8 @@ class FxPane:
         self.drag = None
         if not d:
             return
+        if d["kind"] == "size":
+            return win.app.schedule_autosave()
         if d["kind"] == "point":
             self.says = ""
             if win.fxl != d["before"]:
