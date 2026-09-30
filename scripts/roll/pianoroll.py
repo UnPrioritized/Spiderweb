@@ -24,7 +24,8 @@ from roll.roll_hz import HzStart
 from window.hz_window import open_hz
 from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
-from roll.roll_shared import ALT, CTRL, PICK, SHIFT, cached_path, cached_strokes, mouse_trail, note_name
+from roll.roll_shared import (ALT, BOX_STILL, CTRL, PICK, SHIFT, cached_path, cached_strokes, grid_span, mouse_trail,
+                              note_name)
 from roll.roll_text import TextTyping
 
 
@@ -39,6 +40,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.view_t, self.view_top, self.sx, self.sy = 0.0, 127.5, None, None
         self.draft = None  # shape being drawn
         self.drag = None   # what the left mouse button is doing
+        self.box_shift = False   # the Select box was last moved with Shift (not snapped)
         self._pan = None
         self._saved_view = None
         self.note_img = None     # grid + notes as one picture when there are too many notes for canvas items
@@ -102,6 +104,21 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if snap and sb and not e.state & SHIFT:
             b, p = round(b / sb) * sb, round(p)
         return [max(0.0, b), min(max(p, 0), self.app.keys - 1)]
+
+    def box_rect(self, e=None):
+        """The Select box being dragged, on screen (x0, y0, x1, y1): out to whole snap steps and whole keys
+        (grid_span; Shift = as dragged). None while it's still a click."""
+        _, x, y, cx, cy = self.drag[:5]
+        if abs(cx - x) < BOX_STILL and abs(cy - y) < BOX_STILL:
+            return None
+        if e is not None:
+            self.box_shift = bool(e.state & SHIFT)
+        if self.box_shift:
+            return min(x, cx), min(y, cy), max(x, cx), max(y, cy)
+        b0, b1 = grid_span(self.x2t(x), self.x2t(cx), self.app.snap_beats())
+        top = self.app.keys - 1
+        p0, p1 = sorted(min(max(round(self.y2p(v)), 0), top) for v in (y, cy))
+        return self.t2x(b0), self.p2y(p1 + 0.5), self.t2x(b1), self.p2y(p0 - 0.5)
 
     def clamp_view(self):
         if self.sy is None:
@@ -498,8 +515,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         elif kind == "box":
             _, x, y, _, _, base, primary = self.drag
             self.drag = ("box", x, y, max(e.x, self.kb_w), max(e.y, self.ruler_h), base, primary)
-            (x0, x1), (y0, y1) = sorted((x, self.drag[3])), sorted((y, self.drag[4]))
-            found = self.shapes_in_box(x0, y0, x1, y1) - base
+            box = self.box_rect(e)
+            found = self.shapes_in_box(*box) - base if box else set()
             if base | found != self.app.sels:
                 self.app.select_many(base | found, max(found) if found else primary)
             self.draw_select_box()
@@ -631,7 +648,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return
         if kind == "seek" and self.drag[1]:
             self.app.start_play()  # it was playing: carry on from the new spot
-        elif kind == "box" and abs(e.x - self.drag[1]) < 4 and abs(e.y - self.drag[2]) < 4 and not e.state & CTRL:
+        elif (kind == "box" and abs(e.x - self.drag[1]) < BOX_STILL and abs(e.y - self.drag[2]) < BOX_STILL
+              and not e.state & CTRL):
             playing = self.app.player.running
             self.app.stop_play()
             self.app.set_playhead(self.event_pt(e)[0])

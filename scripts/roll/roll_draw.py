@@ -181,9 +181,11 @@ class RollDrawing:
     def draw_select_box(self):
         """The dotted box being dragged with Select."""
         self.delete("selbox")
-        if self.drag and self.drag[0] == "box":
-            x0, y0, x1, y1 = self.drag[1:5]
-            self.create_rectangle(x0, y0, x1, y1, outline="#000000", dash=(2, 2), tags="selbox")
+        box = self.box_rect() if self.drag and self.drag[0] == "box" else None
+        if box:
+            x0, y0, x1, y1 = box
+            self.create_rectangle(max(x0, self.kb_w), max(y0, self.ruler_h), x1, y1, outline="#000000",
+                                  dash=(2, 2), tags="selbox")
 
     def draw_playhead(self):
         self.delete("playhead")

@@ -29,7 +29,8 @@ from notes.engine import slot_track_channel
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
 from notes.hzbass import (FX, HZ_DEFAULTS, TUNE, can_slide, clean_fx, clean_tones, fit_length, glide, heard, hz_of, left_edge,
                           links, next_id, pitch, tones_span)
-from roll.roll_shared import ALT, CTRL, SELECT_CURSOR, SELECTED_COLOR, SHIFT, SLOT_COLORS, note_name
+from roll.roll_shared import (ALT, BOX_STILL, CTRL, SELECT_CURSOR, SELECTED_COLOR, SHIFT, SLOT_COLORS, grid_span,
+                              note_name)
 from roll.zoombar import add_zoom_bars
 from window.hz_effects import FxPane
 from window.hz_preview import Preview
@@ -448,8 +449,10 @@ class HzWindow(tk.Toplevel):
         for x, y, *_ in self.dots():
             r = 3.5 * s
             c.create_oval(x - r, y - r, x + r, y + r, fill="white", outline=RED, width=max(1, round(1.5 * s)))
-        if self.drag and self.drag["kind"] == "box":
-            c.create_rectangle(*self.drag["from"], *self.drag["to"], outline="#000000", dash=(2, 2))
+        box = self.box_rect() if self.drag and self.drag["kind"] == "box" else None
+        if box:
+            x0, y0, x1, y1 = box
+            c.create_rectangle(max(x0, kb), max(y0, rh), x1, y1, outline="#000000", dash=(2, 2))
         c.create_rectangle(0, 0, kb, h, fill="#fafafa", outline="", tags="frame")  # keys (the preview's grey
         # goes under this: draw_preview)
         for k in range(k_lo, k_hi + 1):
@@ -604,6 +607,19 @@ class HzWindow(tk.Toplevel):
     def snap_beats(self):
         return snap_beats(self.app.hz_snap.get(), self.app.beats)
 
+    def box_rect(self, d=None):
+        """The Select box being dragged (d: this box drag instead), on screen (x0, y0, x1, y1): out to whole snap
+        steps and whole keys (grid_span; Shift = as dragged). None while it's still a click."""
+        d = d or self.drag
+        (x, y), (cx, cy) = d["from"], d["to"]
+        if abs(cx - x) < BOX_STILL and abs(cy - y) < BOX_STILL:
+            return None
+        if d.get("shift"):
+            return min(x, cx), min(y, cy), max(x, cx), max(y, cy)
+        b0, b1 = grid_span(self.beat_at(x), self.beat_at(cx), self.snap_beats())
+        k0, k1 = sorted((self.key_at(y), self.key_at(cy)))
+        return self.x_of(b0), self.y_of(k1), self.x_of(b1), self.y_of(k0) + self.sy
+
     def shortest(self, e):
         sb = self.snap_beats()
         return sb if sb and not e.state & SHIFT else 1 / self.app.ppq
@@ -696,11 +712,15 @@ class HzWindow(tk.Toplevel):
         if not d:
             return
         if d["kind"] == "box":
-            d["to"] = (max(e.x, self.kb_w), max(e.y, self.ruler_h))
-            (x0, x1), (y0, y1) = (sorted(v) for v in zip(d["from"], d["to"]))
+            d["to"], d["shift"] = (max(e.x, self.kb_w), max(e.y, self.ruler_h)), bool(e.state & SHIFT)
+            box = self.box_rect()
+            if box is None:  # (still a click)
+                self.sel = set(d["base"])
+                return self.redraw()
+            x0, y0, x1, y1 = box
             self.sel = d["base"] | {i for i, n in enumerate(self.tones)
-                        if self.x_of(n["t"]) <= x1 and self.x_of(n["t"] + n["len"]) >= x0
-                        and self.y_of(n["key"]) <= y1 and self.y_of(n["key"]) + self.sy >= y0}
+                        if self.x_of(n["t"]) < x1 and self.x_of(n["t"] + n["len"]) > x0
+                        and self.y_of(n["key"]) < y1 and self.y_of(n["key"]) + self.sy > y0}
             return self.redraw()
         n = self.tones[d["i"]]
         beat, short = self.beat_at(e.x), self.shortest(e)
@@ -758,6 +778,9 @@ class HzWindow(tk.Toplevel):
         if not d:
             return
         if d["kind"] == "box":
+            if (self.box_rect(d) is None and not e.state & CTRL and self.tool.get() == "select"
+                    and self.preview_on.get()):  # a click, not a drag: the play line goes there
+                self.put_play_line(self.snap(self.beat_at(d["from"][0]), e))
             return self.redraw()
         if d.get("double") and self.tones == d["before"]:
             self.sel = {d["i"]}
