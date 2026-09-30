@@ -22,8 +22,8 @@ by (custom.chop_grid), so a chord takes one channel. Nothing sounds where no ton
 hz["grow"] = the shape is kept as long as its tones (fit_length). hz["own"] = made with the Hz bass tool: a box
 that is nothing but its tones (it goes when its last tone is deleted; the panel shows the keys it repeats).
 
-Effects: a tone can have "fx" = {effect: [[u, value], ...]}: a line through points, u = 0..1 along the tone, value
-0..1. They change the colour of the tone, not its pitch, by making the keys hit at different spots of the wave
+Effects: hz["fx"] = {effect: [[beat, value], ...]}: one line through points over all the tones (beat counted like a
+tone's "t", from the shape's left edge; flat before the first point and after the last), value 0..1. They change the colour of the tone, not its pitch, by making the keys hit at different spots of the wave
 (how late a key is, in waves, is added up over the effects; a key starts that late, and a repeat pushed past its
 own tone's end is left out):
   "slant": every key starts its repeats a bit later than the key below it; the value is how much of one wave the
@@ -63,9 +63,10 @@ WAVES = {"sine": lambda p: (1.0 + np.cos(2.0 * np.pi * p)) / 2.0,  # the wavefor
          "square": lambda p: (p < 0.5).astype(float),
          "saw": lambda p: 1.0 - p,
          "triangle": lambda p: 1.0 - np.abs(2.0 * p - 1.0)}
-FX = ("slant", "groups", "offpitch", "noisy", "vibrato") + VEL_FX + tuple(WAVES)  # the effects a placed tone can have
+FX = ("slant", "groups", "offpitch", "noisy", "vibrato") + VEL_FX + tuple(WAVES)  # the effects a Hz bass can have
 FLAT, RAMP = [[0.0, 0.5], [1.0, 0.5]], [[0.0, 0.0], [1.0, 1.0]]
-FX_START = dict({name: RAMP for name in FX}, offpitch=FLAT, tremolo=FLAT, vibrato=FLAT)  # the line an effect starts with
+# the line an effect starts with, u = 0..1 over the tones (or what's in view when there are none)
+FX_START = dict({name: RAMP for name in FX}, offpitch=FLAT, tremolo=FLAT, vibrato=FLAT)
 SUB = 16  # waveforms: hits in one wave
 SOFT = 0.003  # ... a hit with less than this much of the full loudness is left out (velocity 7 of 127)
 VIBRATO = 0.05  # "vibrato" at 1: the pitch goes this much (x the tone) up and down
@@ -92,32 +93,47 @@ def hz_gate(hz, bpm):
 
 
 def clean_fx(fx):
-    """A tone's effects checked: {effect: [[u, value], ...]} in order, both 0..1. Effects with no points are left
-    out."""
+    """Effects checked: {effect: [[beat, value], ...]} in order, beats from 0, values 0..1. Effects with no points
+    are left out."""
     out = {}
     for name in FX:
         try:
             pts = [(float(u), float(v)) for u, v in fx.get(name) or ()]
         except (TypeError, ValueError, AttributeError):
             continue
-        pts = sorted(((min(1.0, max(0.0, u)), min(1.0, max(0.0, v))) for u, v in pts
+        pts = sorted(((max(0.0, u), min(1.0, max(0.0, v))) for u, v in pts
                       if math.isfinite(u) and math.isfinite(v)), key=lambda p: p[0])  # (two at one spot: a step)
         if pts:
             out[name] = [list(p) for p in pts]
     return out
 
 
-def fx_at(n, name, beat):
-    """The value of a tone's effect at beat (an array, from the shape's left edge; 0 when it hasn't got it).
+def fx_at(hz, name, beat):
+    """The value of an effect at beat (an array, from the shape's left edge; 0 when there's no such line).
     Before the first point and after the last one the line stays flat."""
-    pts = (n.get("fx") or {}).get(name)
+    pts = (hz.get("fx") or {}).get(name)
     if not pts:
         return np.zeros(np.shape(beat))
-    return np.interp((np.asarray(beat) - n["t"]) / n["len"], [p[0] for p in pts], [p[1] for p in pts])
+    return np.interp(np.asarray(beat, float), [p[0] for p in pts], [p[1] for p in pts])
+
+
+def old_fx(tones):
+    """Effects saved on each tone (before they were one line over all of them): their points joined into one
+    line per effect, at beats."""
+    out = {}
+    for n in sorted((n for n in tones if isinstance(n, dict) and isinstance(n.get("fx"), dict)),
+                    key=lambda n: n.get("t", 0)):
+        try:
+            t, span = float(n["t"]), float(n["len"])
+            for name, pts in clean_fx(n["fx"]).items():
+                out.setdefault(name, []).extend([t + min(1.0, u) * span, v] for u, v in pts)
+        except (KeyError, TypeError, ValueError):
+            continue
+    return clean_fx(out)
 
 
 def has_fx(hz):
-    return any(n.get("fx") for n in hz.get("tones") or ())
+    return bool(hz.get("fx")) and bool(hz.get("tones"))
 
 
 def clean_tones(tones):
@@ -131,9 +147,6 @@ def clean_tones(tones):
             tone["id"] = int(n.get("id", 0))
             tone["to"] = [{"id": int(s["id"]), "out": max(0.0, float(s["out"])), "in": max(0.0, float(s["in"]))}
                           for s in n.get("to") or ()]
-            fx = clean_fx(n.get("fx"))
-            if fx:
-                tone["fx"] = fx
         except (KeyError, TypeError, ValueError, AttributeError):
             continue
         ok = all(math.isfinite(v) for v in [tone["t"], tone["len"], tone["cents"], *leads]
@@ -182,6 +195,9 @@ def clean_hz(hz):
     if hz.get("fixed") is True:
         out["fixed"] = True
     tones = clean_tones(hz.get("tones"))
+    fx = clean_fx(hz["fx"]) if isinstance(hz.get("fx"), dict) else old_fx(hz.get("tones") or ())
+    if fx:
+        out["fx"] = fx
     if tones:
         out["tones"] = tones
         for flag in ("grow", "own"):
@@ -351,7 +367,7 @@ def _grid(starts, limits):
 
 
 class KeyGrid:
-    """The repeats of a Hz bass whose tones have effects: every key has its own (squares(key)), and how much of
+    """The repeats of a Hz bass with effects: every key has its own (squares(key)), and how much of
     the shape's velocity each of them gets (factor)."""
 
     def __init__(self, hz, left, ppq, lo, n):
@@ -363,27 +379,17 @@ class KeyGrid:
                    "limits": _limits(hz["tones"], left, ppq, starts),
                    # (a repeat moved past its own tone's end is left out: the next tone may touch it)
                    "until": (left + whose[0]["t"] + whose[0]["len"]) * ppq if whose[1] is None else np.inf}
+            fx = hz.get("fx") or {}
             for name in FX:
-                run[name] = self.value(name, whose, beat)
-            run["swept"] = self.value("sweep", whose, beat, has=True)  # (sweep at 0 = the bump on the lowest key)
-            for name in WAVES:  # (a waveform at 0 = the plain tone; a note without any: the plain tone too)
-                run["has_" + name] = self.value(name, whose, beat, has=True)
+                run[name] = fx_at(hz, name, beat)
+            run["swept"] = np.full(len(beat), "sweep" in fx)  # (sweep at 0 = the bump on the lowest key)
+            for name in WAVES:  # (a waveform at 0 = the plain tone; without any: the plain tone too)
+                run["has_" + name] = np.full(len(beat), name in fx)
             run["groups"] = group_count(run["groups"])
             run["turns"] = np.concatenate([[0.0], np.cumsum(run["tremolo"] * TREMOLO * run["waves"] / ppq)[:-1]])
             self.runs.append(run)
         self.shaped = any(r["has_" + name].any() for r in self.runs for name in WAVES)
-        self.loud = self.shaped or any(name in (t.get("fx") or ()) for t in hz["tones"] for name in VEL_FX)
-
-    @staticmethod
-    def value(name, whose, beat, has=False):
-        """An effect's value at each repeat of a stretch of tone: its tone's line; on a slide the line of the tone
-        it leaves, then (from that one's start) the line of the tone it goes to. has: whether there's a line at
-        all, instead."""
-        def of(n):
-            return np.full(len(beat), name in (n.get("fx") or ())) if has else fx_at(n, name, beat)
-
-        a, b = whose
-        return of(a) if b is None else np.where(beat < b["t"], of(a), of(b))
+        self.loud = self.shaped or any(name in (hz.get("fx") or ()) for name in VEL_FX)
 
     @staticmethod
     def respaced(run, x):
@@ -482,7 +488,7 @@ def key_range(sh):
 
 def velocity_factor(sh, ppq, starts, keys):
     """What the effects make of the velocity of a shape's notes (arrays: start ticks, keys): a number from 0 to 1
-    for each to multiply it by, or None when no tone has an effect that changes it."""
+    for each to multiply it by, or None when there's no effect that changes it."""
     if not has_fx(sh["hz"]) or not len(starts):
         return None
     grid = squares(sh, ppq)
@@ -497,7 +503,7 @@ def velocity_factor(sh, ppq, starts, keys):
 
 def squares(sh, ppq):
     """The repeats of a shape with placed tones: an array of (start, end) ticks in order, none overlapping. When
-    its tones have effects: a KeyGrid (each key has its own)."""
+    it has effects: a KeyGrid (each key has its own)."""
     hz_json = json.dumps(sh["hz"], sort_keys=True)
     if has_fx(sh["hz"]):
         lo, hi = key_range(sh)
