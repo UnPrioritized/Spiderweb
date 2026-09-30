@@ -1,5 +1,5 @@
 """The Hz bass window (hzbass.py): a small piano roll where the tones of a Hz bass are placed. Pressing the mouse
-places a note at once, and it follows the mouse (snapped; Shift = not) until the button is let go; a note that's
+places a note at once, and it follows the mouse (snapped to the nearest grid line; Shift = not) until the button is let go; a note that's
 there is moved the same way, either end changes its length, Ctrl+drag selects with a box, Delete removes the
 selected ones, a double click removes the note under it. The key of the note held with the mouse sounds on the MIDI-out device. The window has its own snap.
 The red line is the tone travelling through the notes: it jumps at the next note unless its dots are dragged (lead
@@ -11,10 +11,12 @@ main window, made when the mouse is let go (the notes on the piano roll are made
 
 import copy
 import math
+import os
 import re
 import tkinter as tk
 from tkinter import ttk
 
+from files.about import ICONS
 from files.lang import tr
 from files.mathexpr import fmt
 from files.snap import snap_beats
@@ -78,10 +80,19 @@ class HzWindow(tk.Toplevel):
         self.grow_box = ttk.Checkbutton(bar, text=tr("hz.grow"), variable=self.grow, command=self.on_grow)
         self.grow_box.pack(side="right")
         Tooltip(self.grow_box, tr("hz.grow_tip"))
+        line_box = ttk.Checkbutton(bar, text=tr("hz.line"), variable=app.hz_line, command=self.on_line)
+        line_box.pack(side="right", padx=(0, 10))
+        Tooltip(line_box, tr("hz.line_tip"))
         self.status = ttk.Label(self, text="", foreground="#555", padding=(8, 2, 8, 4))
         self.status.pack(side="bottom", fill="x")
         c = self.canvas = tk.Canvas(self, background="white", highlightthickness=0, takefocus=True)
         c.pack(fill="both", expand=True)
+        self.pencil = ("@" + os.path.join(ICONS, "pencil.cur").replace("\\", "/"),)  # its tip is the spot pointed at
+        try:
+            c.config(cursor=self.pencil)
+        except tk.TclError:  # (the file can't be read: the built-in one)
+            self.pencil = "pencil"
+        c.config(cursor="")
         c.bind("<Configure>", lambda e: self.redraw())
         c.bind("<ButtonPress-1>", self.on_press)
         c.bind("<Double-Button-1>", self.on_double)
@@ -244,7 +255,7 @@ class HzWindow(tk.Toplevel):
             x0, x1, y = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
             fill, edge = SELECTED_COLOR if i in self.sel else SLOT_COLORS[0]
             c.create_rectangle(x0, y + 1, max(x1, x0 + 2), y + self.sy - 1, fill=fill, outline=edge)
-        for line in voices(self.tones):  # the tone's path
+        for line in voices(self.tones) if self.app.hz_line.get() else ():  # the tone's path
             pts = []
             for n, (a, b) in zip(line, holds(line)):
                 y = self.y_of(n["key"]) + self.sy / 2
@@ -280,8 +291,10 @@ class HzWindow(tk.Toplevel):
 
     def dots(self):
         """[(x, y, tone number, "in" / "out")]: the red line's dots. A dot with no lead sits just outside its note's
-        end (so the end itself stays free for changing the note's length)."""
+        end (so the end itself stays free for changing the note's length). None while the red line is hidden."""
         out = []
+        if not self.app.hz_line.get():
+            return out
         index = {id(n): i for i, n in enumerate(self.tones)}
         off = 6 * self.s
         for line in voices(self.tones):
@@ -310,12 +323,12 @@ class HzWindow(tk.Toplevel):
 
     # ------------------------------------------------------------ mouse
 
-    def snap(self, beat, e, down=False):
-        """beat on the snap grid (Shift = off; down = the line at or before it)."""
+    def snap(self, beat, e):
+        """beat on the snap grid: the nearest line (Shift = off)."""
         sb = self.snap_beats()
         if not sb or e.state & SHIFT:
             sb = 1 / self.app.ppq
-        return max(0.0, (math.floor(beat / sb + 1e-9) if down else round(beat / sb)) * sb)
+        return max(0.0, round(beat / sb) * sb)
 
     def snap_beats(self):
         return snap_beats(self.app.hz_snap.get(), self.app.beats)
@@ -343,8 +356,11 @@ class HzWindow(tk.Toplevel):
 
     def on_motion(self, e):
         hit = self.hit(e.x, e.y)
+        # a pencil where a press places a note (not on the keys or bar numbers, not with Ctrl: that's the box)
+        empty = self.pencil if (self.can_place() and e.x >= self.kb_w and e.y >= self.ruler_h
+                             and not e.state & CTRL) else ""
         self.canvas.config(cursor={"in": "sb_h_double_arrow", "out": "sb_h_double_arrow", "left": "sb_h_double_arrow",
-                                   "right": "sb_h_double_arrow", "note": "fleur"}.get(hit and hit[0], ""))
+                                   "right": "sb_h_double_arrow", "note": "fleur"}.get(hit and hit[0], empty))
         self.show_status(e)
 
     def select(self, indices):
@@ -366,7 +382,7 @@ class HzWindow(tk.Toplevel):
             if not self.can_place():
                 return
             # a new note, there at once: it follows the mouse until the button is let go
-            tone = {"t": self.snap(self.beat_at(e.x), e, down=True), "len": self.last_len, "key": self.key_at(e.y),
+            tone = {"t": self.snap(self.beat_at(e.x), e), "len": self.last_len, "key": self.key_at(e.y),
                     "in": 0.0, "out": 0.0}
             self.tones.append(tone)
             self.sel = {len(self.tones) - 1}
@@ -409,7 +425,7 @@ class HzWindow(tk.Toplevel):
         n = self.tones[d["i"]]
         beat, short = self.beat_at(e.x), self.shortest(e)
         if d["kind"] == "new":
-            n["t"], n["key"] = self.snap(beat, e, down=True), self.key_at(e.y)
+            n["t"], n["key"] = self.snap(beat, e), self.key_at(e.y)
             self.sound(n["key"])
         elif d["kind"] == "right":
             n["len"] = max(short, self.snap(beat, e) - n["t"])
@@ -470,6 +486,10 @@ class HzWindow(tk.Toplevel):
         if not self.tones:  # (nothing placed yet: just how it'll be when there is)
             return self.redraw()
         self.commit(tr("hz.grow"), copy.deepcopy(self.tones))
+
+    def on_line(self):
+        self.redraw()
+        self.app.schedule_autosave()
 
     # ------------------------------------------------------------ into the shape
 

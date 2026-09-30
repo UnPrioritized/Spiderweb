@@ -118,6 +118,7 @@ class ProjectFiles:
             "snap": self.snap.get(), "defaults": self.defaults,
             "custom_defaults": dict(self.custom_defaults, shape=self.custom_shape),
             "hz_defaults": self.hz_defaults, "hz_snap": self.hz_snap.get(),
+            "hz_line": bool(self.hz_line.get()),
             "funnel_defaults": self.funnel_defaults, "text_defaults": self.text_defaults,
             "polygon_defaults": self.polygon_defaults,
             "free_smooth": self.free_smooth, "shapes": self.shapes,
@@ -151,6 +152,7 @@ class ProjectFiles:
             self.snap.set(clean_snap(data["snap"]))
         if "hz_snap" in data:
             self.hz_snap.set(clean_snap(data["hz_snap"]))
+        self.hz_line.set(data.get("hz_line") is not False)
         self.defaults = defaults
         keys = data.get("hz_defaults")
         if (isinstance(keys, dict) and all(isinstance(keys.get(k), int) for k in ("lo", "hi"))

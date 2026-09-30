@@ -218,6 +218,8 @@
  "hz.name": "Hz bass",
  "hz.grow": "Shape length follows the notes",
  "hz.grow_tip": "Ticked: the shape on the piano roll is made as long as the notes here.\nNot ticked: the shape keeps its length, and notes past its end (the grey part) aren't used.",
+ "hz.line": "Red line",
+ "hz.line_tip": "Ticked: the red line shows how the tone travels through the notes, and its dots can be dragged to make the tone slide.\nNot ticked: the line and its dots are hidden. Slides that were made stay.",
  "hz.hint_none": "Select a custom shape to give it Hz bass notes, or pick the Hz bass tool (H) and drag on the piano roll where a new one should start.",
  "hz.hint_new": "New Hz bass starting at beat {beat}: click to place its first note.",
  "hz.shape": "{name}",
