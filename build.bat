@@ -8,7 +8,7 @@ if errorlevel 1 (pause & exit /b 1)
 python -m PyInstaller --noconfirm --clean --onefile --windowed --name Spiderweb ^
   --distpath dist --workpath build --specpath build --paths "%~dp0scripts" ^
   --version-file "%~dp0build\version.txt" --icon "%~dp0scripts\icons\icon.ico" ^
-  --add-data "%~dp0scripts\icons;icons" --add-data "%~dp0scripts\lang;lang" --add-data "%~dp0LICENSE;." --add-data "%~dp0clips;clips" spiderweb.py
+  --add-data "%~dp0scripts\icons;icons" --add-data "%~dp0scripts\lang;lang" --add-data "%~dp0LICENSE;." --add-data "%~dp0clips;clips" --add-binary "%~dp0scripts\bass\x64;bass\x64" spiderweb.py
 if errorlevel 1 (pause & exit /b 1)
 copy /y LICENSE dist\ >nul
 copy /y README.txt dist\ >nul

@@ -13,3 +13,10 @@ icon.png
 /*.json
 cliplist.txt
 CLAUDE.md
+# BASS download kits (only the DLLs in scripts/bass/ are shipped; the kits live in dev/sdk/)
+/bass/
+/bassmidi/
+scripts/bass/**/*.chm
+scripts/bass/**/*.txt
+scripts/bass/**/*.lib
+scripts/bass/**/*.h
