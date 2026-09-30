@@ -150,6 +150,7 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self.live = tk.BooleanVar(value=False)  # drawing tools draw into one custom shape (roll_live.py)
         self.draw_tool = "line"  # the drawing tool a double right-click goes back to
         self.snap = tk.StringVar(value=DEFAULT_SNAP)
+        self.hz_snap = tk.StringVar(value=DEFAULT_SNAP)  # the Hz bass window's own snap
         self.show_lines = tk.BooleanVar(value=True)
         self.show_notes = tk.BooleanVar(value=True)
         self.channel_mode = tk.StringVar(value="single")
@@ -196,6 +197,8 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
                                                   self.roll.request_redraw(),
                                                   self.live.get() and self.tips.show("live")))
         self.snap.trace_add("write", lambda *_: self.roll.request_redraw())
+        self.hz_snap.trace_add("write", lambda *_: (self.hz_window and self.hz_window.redraw(),
+                                                    self.schedule_autosave()))
         self.bind_all("<F1>", lambda e: None if self.in_drawer(e) else self.open_help())
         for key, fn in (("<Control-z>", self.undo), ("<Control-y>", self.redo), ("<Control-s>", self.save_project)):
             self.bind_all(key, lambda e, fn=fn: None if self.in_drawer(e) else fn())
@@ -1252,6 +1255,7 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
             self.claw_window.settle()  # (so Ctrl+Z here takes back the claw being tried out)
         if not src:
             return
+        hz_was = self.hz_window and self.hz_window.before_restore()
         self.roll.cancel_draft()
         state, name = src.pop()
         self._redo_kept = None
@@ -1266,7 +1270,7 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self.sync_panel()
         self.shapes_changed()
         if self.hz_window:
-            self.hz_window.sync()  # (its note count is of the notes just made)
+            self.hz_window.after_restore(hz_was)
 
     def velocity_height(self):
         if self.show_velocity.get() and self.vel_box.winfo_ismapped() and self.vel_box.winfo_height() > 1:

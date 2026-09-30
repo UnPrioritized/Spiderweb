@@ -117,7 +117,7 @@ class ProjectFiles:
             "keys": self.keys, "domino_start": self.domino_start(),
             "snap": self.snap.get(), "defaults": self.defaults,
             "custom_defaults": dict(self.custom_defaults, shape=self.custom_shape),
-            "hz_defaults": self.hz_defaults,
+            "hz_defaults": self.hz_defaults, "hz_snap": self.hz_snap.get(),
             "funnel_defaults": self.funnel_defaults, "text_defaults": self.text_defaults,
             "polygon_defaults": self.polygon_defaults,
             "free_smooth": self.free_smooth, "shapes": self.shapes,
@@ -149,10 +149,12 @@ class ProjectFiles:
             self.domino_box.current(starts.index(data["domino_start"]))
         if "snap" in data:
             self.snap.set(clean_snap(data["snap"]))
+        if "hz_snap" in data:
+            self.hz_snap.set(clean_snap(data["hz_snap"]))
         self.defaults = defaults
         keys = data.get("hz_defaults")
         if (isinstance(keys, dict) and all(isinstance(keys.get(k), int) for k in ("lo", "hi"))
-                and 0 <= keys["lo"] <= keys["hi"] <= 127):
+                and 0 <= keys["lo"] <= keys["hi"] <= 255):
             self.hz_defaults = {"lo": keys["lo"], "hi": keys["hi"]}
         custom = data.get("custom_defaults") or {}
         if isinstance(custom, dict):

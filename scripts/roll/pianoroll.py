@@ -21,6 +21,7 @@ from roll.roll_custom import CustomBox
 from roll.roll_draw import RollDrawing
 from roll.roll_funnel import FunnelEditing
 from roll.roll_hz import HzStart
+from window.hz_window import open_hz
 from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
 from roll.roll_shared import ALT, CTRL, PICK, SHIFT, cached_path, cached_strokes, mouse_trail, note_name
@@ -460,6 +461,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.app.selected()["pts"] = self.turn_custom(orig, angle)
             self.app.shape_edited()
             self.app.show_position(tr("pianoroll.turned", degrees=math.degrees(angle)))
+        elif kind == "hzkeys":
+            self.hz_drag(e)
         elif kind == "place":
             _, start, _, _, aspect = self.drag
             pt = self.event_pt(e)
@@ -502,10 +505,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         kind = self.drag[0]
         self.app.catch_up_notes()
         still = False  # let go where it was pressed
-        if kind in ("create", "place", "wall", "segment", "arcdrag"):
+        if kind in ("create", "place", "wall", "segment", "arcdrag", "hzkeys"):
             x, y = self.drag[2:4] if kind == "place" else self.drag[-2:]
             still = abs(e.x - x) < 4 and abs(e.y - y) < 4
-        if still and not second and kind in ("create", "place", "wall"):
+        if still and not second and kind in ("create", "place", "wall", "hzkeys"):
             # a click, not a drag: the shape follows the mouse until the next click
             self.follow, self.drag = self.drag, None
             if kind == "wall":
@@ -527,6 +530,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 self.app.set_stroke(part[1])
             else:
                 self.app.set_parts(self.part_group(self.app.selected(), part) if part else (), main=part)
+        elif kind == "hzkeys":
+            open_hz(self.app)
         elif kind == "create":
             funnel = self.draft["kind"] == "funnel"
             if still:  # clicked twice in the same spot: nothing

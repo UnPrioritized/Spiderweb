@@ -1,11 +1,15 @@
-"""Piano roll: the Hz bass tool. A click on a Hz bass selects it, a click anywhere else marks where a new one starts;
-either way the Hz bass window (window/hz_window.py) opens, where its notes are placed."""
+"""Piano roll: the Hz bass tool. A click on a Hz bass selects it and opens the Hz bass window (window/hz_window.py),
+where its notes are placed. Anywhere else: a drag (or click, move, click) up or down marks where a new one starts
+and the keys it repeats, then the window opens."""
 
+from files.lang import tr
+from roll.roll_shared import note_name
 from window.hz_window import RED, hz_made, open_hz
 
 
 class HzStart:
-    """Mixed into PianoRoll. app.hz_start = the beat a new Hz bass starts at (None: no spot picked)."""
+    """Mixed into PianoRoll. app.hz_start = the beat a new Hz bass starts at (None: no spot picked),
+    app.hz_defaults = the lowest and highest key it repeats."""
 
     def hz_at(self, x, y):
         """The Hz bass (made with this tool) whose box is under (x, y) on screen, or None."""
@@ -20,11 +24,23 @@ class HzStart:
     def hz_click(self, e):
         app = self.app
         i = self.hz_at(e.x, e.y)
-        if i is None:
-            app.hz_start = self.event_pt(e)[0]
         app.select(i)
-        open_hz(app)
+        if i is not None:
+            open_hz(app)
+            return
+        beat, key = self.event_pt(e)
+        key = int(round(key))
+        app.hz_start, app.hz_defaults = beat, {"lo": key, "hi": key}
+        self.drag = ("hzkeys", key, e.x, e.y)  # how tall it is follows the mouse
         self.request_redraw()
+
+    def hz_drag(self, e):
+        app = self.app
+        first, key = self.drag[1], int(round(self.event_pt(e)[1]))
+        app.hz_defaults = {"lo": min(first, key), "hi": max(first, key)}
+        self.request_redraw()
+        lo, hi = app.hz_defaults["lo"], app.hz_defaults["hi"]
+        app.show_position(tr("pianoroll.hz_keys", lo=note_name(lo), hi=note_name(hi), n=hi - lo + 1))
 
     def draw_hz_start(self):
         """The spot picked for a new Hz bass: a dashed red line over the keys it will repeat."""

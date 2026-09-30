@@ -1,7 +1,9 @@
-"""The Hz bass window (hzbass.py): a small piano roll where the tones of a Hz bass are placed. A click places a
-note, dragging a note moves it, dragging either end changes its length, Delete removes the selected ones. The red
-line is the tone travelling through the notes: it jumps at the next note unless its dots are dragged (lead out of
-one note, lead in of the next), then it slides.
+"""The Hz bass window (hzbass.py): a small piano roll where the tones of a Hz bass are placed. Pressing the mouse
+places a note at once, and it follows the mouse (snapped; Shift = not) until the button is let go; a note that's
+there is moved the same way, either end changes its length, Ctrl+drag selects with a box, Delete removes the
+selected ones. The key of the note held with the mouse sounds on the MIDI-out device. The window has its own snap.
+The red line is the tone travelling through the notes: it jumps at the next note unless its dots are dragged (lead
+out of one note, lead in of the next), then it slides.
 
 It follows the main window's selection: the selected custom shape's tones, or (Hz bass tool clicked on empty
 space) a new Hz bass that's made with the first note and grows with the notes. Every change is an undo step of the
@@ -15,9 +17,12 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import fmt
+from files.snap import snap_beats
+from notes.engine import slot_track_channel
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
 from notes.hzbass import HZ_DEFAULTS, clean_tones, fit_length, holds, hz_of, left_edge, tones_span, voices
 from roll.roll_shared import CTRL, SELECTED_COLOR, SHIFT, SLOT_COLORS, note_name
+from window.snap_picker import SnapPicker
 from window.widgets import Tooltip
 
 BLACK = (1, 3, 6, 8, 10)
@@ -57,6 +62,7 @@ class HzWindow(tk.Toplevel):
         self.minsize(round(420 * s), round(260 * s))
         self.tones, self.sel = [], set()  # the notes shown (hzbass tones) and which are selected
         self.drag = None
+        self.sounding = None  # (channel, key) heard now: the note held with the mouse
         self.last_len = 1.0  # beats: how long a newly placed note is (the last length used)
         self.kb_w, self.ruler_h = round(44 * s), round(18 * s)
         self.sx, self.sy, self.t0, self.top = 80.0 * s, 12.0 * s, -0.25, 64.0
@@ -64,6 +70,8 @@ class HzWindow(tk.Toplevel):
 
         bar = ttk.Frame(self, padding=(8, 6, 8, 4))
         bar.pack(fill="x")
+        ttk.Label(bar, text=tr("app.snap")).pack(side="left")
+        SnapPicker(app, bar, app.hz_snap).button.pack(side="left", padx=(4, 10))
         self.what = ttk.Label(bar, text="", foreground="#555")
         self.what.pack(side="left")
         self.grow = tk.BooleanVar(value=True)
@@ -110,6 +118,7 @@ class HzWindow(tk.Toplevel):
         tones = clean_tones(hz.get("tones"))
         if tones != self.tones:
             self.tones, self.sel = tones, set()
+            self.drop_drag()
         if sh is None:
             text = (tr("hz.hint_new", beat=fmt(self.app.hz_start + 1)) if self.app.hz_start is not None
                     else tr("hz.hint_none"))
@@ -122,6 +131,31 @@ class HzWindow(tk.Toplevel):
         if self.tones and not self.fitted:
             self.fit_view()
         self.redraw()
+
+    def before_restore(self):
+        """Undo / redo is about to change the shapes: what's shown now (for after_restore)."""
+        app, sh = self.app, self.target()
+        if sh is not None and hz_made(sh):
+            ps = [p for _, p in sh["pts"]]
+            ps.append(ps[1] + ps[2] - ps[0])
+            return "shape", left_edge(sh), {"lo": round(min(ps)), "hi": round(max(ps))}
+        if sh is None and app.hz_start is not None:
+            return "start", len(app.shapes)
+        return None
+
+    def after_restore(self, was):
+        """Undo / redo changed the shapes. The Hz bass shown was taken back whole: its start spot is back, so notes
+        can be placed again. A Hz bass came back on the start spot: it's the one shown again."""
+        app = self.app
+        if was and was[0] == "shape" and self.target() is None:
+            app.hz_start, app.hz_defaults = was[1], was[2]
+            app.roll.request_redraw()
+        elif was and was[0] == "start" and len(app.shapes) > was[1]:
+            last = app.shapes[-1]
+            if hz_made(last) and abs(left_edge(last) - app.hz_start) < 1e-9:
+                app.hz_start = None
+                app.select(len(app.shapes) - 1)
+        self.sync()
 
     def fit_view(self):
         """The view moved so the notes are in sight (the first time there are any)."""
@@ -190,7 +224,7 @@ class HzWindow(tk.Toplevel):
             if k % 12 in BLACK:
                 c.create_rectangle(kb, y, w, y + self.sy, fill="#eef1f8", outline="")
             c.create_line(kb, y + self.sy, w, y + self.sy, fill="#c9c9c9" if k % 12 == 0 else "#ececec")
-        beats, sb = self.app.beats, self.app.snap_beats()
+        beats, sb = self.app.beats, self.snap_beats()
         step = sb if sb and sb * self.sx >= 8 else 1.0
         n = math.floor(max(0.0, self.beat_at(kb)) / step)
         while n * step <= self.beat_at(w):  # columns
@@ -218,6 +252,8 @@ class HzWindow(tk.Toplevel):
         for x, y, _, _ in self.dots():
             r = 3.5 * s
             c.create_oval(x - r, y - r, x + r, y + r, fill="white", outline=RED, width=max(1, round(1.5 * s)))
+        if self.drag and self.drag["kind"] == "box":
+            c.create_rectangle(*self.drag["from"], *self.drag["to"], outline="#3060c0", dash=(3, 2))
         c.create_rectangle(0, 0, kb, h, fill="#fafafa", outline="")  # keys
         for k in range(k_lo, k_hi + 1):
             y = self.y_of(k)
@@ -274,14 +310,17 @@ class HzWindow(tk.Toplevel):
     # ------------------------------------------------------------ mouse
 
     def snap(self, beat, e, down=False):
-        """beat on the main window's snap grid (Shift = off; down = the line at or before it)."""
-        sb = self.app.snap_beats()
+        """beat on the snap grid (Shift = off; down = the line at or before it)."""
+        sb = self.snap_beats()
         if not sb or e.state & SHIFT:
             sb = 1 / self.app.ppq
         return max(0.0, (math.floor(beat / sb + 1e-9) if down else round(beat / sb)) * sb)
 
+    def snap_beats(self):
+        return snap_beats(self.app.hz_snap.get(), self.app.beats)
+
     def shortest(self, e):
-        sb = self.app.snap_beats()
+        sb = self.snap_beats()
         return sb if sb and not e.state & SHIFT else 1 / self.app.ppq
 
     def hit(self, x, y):
@@ -313,27 +352,36 @@ class HzWindow(tk.Toplevel):
 
     def on_press(self, e):
         self.canvas.focus_set()
-        self.drag = None
+        self.drop_drag()
         hit = self.hit(e.x, e.y)
         before = copy.deepcopy(self.tones)
         if hit is None:
-            if e.x < self.kb_w or e.y < self.ruler_h or not self.can_place():
+            if e.x < self.kb_w or e.y < self.ruler_h:
                 return
-            if e.state & CTRL:
-                return self.select(())
+            if e.state & CTRL:  # a box that selects the notes it touches
+                self.sel = set()
+                self.drag = {"kind": "box", "from": (e.x, e.y), "to": (e.x, e.y)}
+                return self.redraw()
+            if not self.can_place():
+                return
+            # a new note, there at once: it follows the mouse until the button is let go
             tone = {"t": self.snap(self.beat_at(e.x), e, down=True), "len": self.last_len, "key": self.key_at(e.y),
                     "in": 0.0, "out": 0.0}
             self.tones.append(tone)
             self.sel = {len(self.tones) - 1}
             self.drag = {"kind": "new", "i": len(self.tones) - 1, "before": before, "name": tr("hz.step_place")}
+            self.sound(tone["key"])
         else:
             kind, i = hit
             if kind == "note" and e.state & CTRL:
                 return self.select(self.sel ^ {i})
             if i not in self.sel:
                 self.sel = {i}
+            if kind == "note":  # (the next new note is as long as the one clicked)
+                self.last_len = self.tones[i]["len"]
+                self.sound(self.tones[i]["key"])
             self.drag = {"kind": kind, "i": i, "before": before, "beat": self.beat_at(e.x), "key": self.key_at(e.y),
-                         "orig": copy.deepcopy(self.tones),
+                         "orig": copy.deepcopy(self.tones), "x": e.x, "y": e.y, "moved": False,
                          "name": {"note": tr("hz.step_move"), "in": tr("hz.step_lead"),
                                   "out": tr("hz.step_lead")}.get(kind, tr("hz.step_length"))}
         self.redraw()
@@ -342,10 +390,18 @@ class HzWindow(tk.Toplevel):
         d = self.drag
         if not d:
             return
+        if d["kind"] == "box":
+            d["to"] = (max(e.x, self.kb_w), max(e.y, self.ruler_h))
+            (x0, x1), (y0, y1) = (sorted(v) for v in zip(d["from"], d["to"]))
+            self.sel = {i for i, n in enumerate(self.tones)
+                        if self.x_of(n["t"]) <= x1 and self.x_of(n["t"] + n["len"]) >= x0
+                        and self.y_of(n["key"]) <= y1 and self.y_of(n["key"]) + self.sy >= y0}
+            return self.redraw()
         n = self.tones[d["i"]]
         beat, short = self.beat_at(e.x), self.shortest(e)
         if d["kind"] == "new":
-            n["len"] = max(self.last_len if beat <= n["t"] + self.last_len else short, self.snap(beat, e) - n["t"])
+            n["t"], n["key"] = self.snap(beat, e, down=True), self.key_at(e.y)
+            self.sound(n["key"])
         elif d["kind"] == "right":
             n["len"] = max(short, self.snap(beat, e) - n["t"])
         elif d["kind"] == "left":
@@ -356,25 +412,37 @@ class HzWindow(tk.Toplevel):
             n["out"] = min(max(0.0, n["t"] + n["len"] - self.snap(beat, e)), n["len"] - min(n["in"], n["len"]))
         elif d["kind"] == "in":
             n["in"] = min(max(0.0, self.snap(beat, e) - n["t"]), n["len"] - min(n["out"], n["len"]))
-        else:  # move every selected note
+        else:  # move every selected note: the one held goes to the grid line nearest to where it's dragged
+            if not d["moved"] and abs(e.x - d["x"]) < 4 and abs(e.y - d["y"]) < 4:
+                return
+            d["moved"] = True
             orig = d["orig"]
-            dt = self.snap(abs(beat - d["beat"]), e) * (1 if beat >= d["beat"] else -1)
+            held = orig[d["i"]]
+            dt = 0.0 if abs(e.x - d["x"]) < 4 else self.snap(held["t"] + beat - d["beat"], e) - held["t"]
             dk = self.key_at(e.y) - d["key"]
             dt = max(dt, -min(orig[i]["t"] for i in self.sel))
             dk = max(-min(orig[i]["key"] for i in self.sel), min(127 - max(orig[i]["key"] for i in self.sel), dk))
             for i in self.sel:
                 self.tones[i]["t"], self.tones[i]["key"] = orig[i]["t"] + dt, orig[i]["key"] + dk
+            self.sound(n["key"])
         self.redraw()
         self.show_status(e)
 
     def on_release(self, e):
-        d, self.drag = self.drag, None
+        d = self.drag
+        self.drop_drag()
         if not d:
             return
-        if d["kind"] in ("new", "left", "right"):
+        if d["kind"] == "box":
+            return self.redraw()
+        if d["kind"] == "note" and not d["moved"] and len(self.sel) > 1:
+            self.sel = {d["i"]}  # one of several clicked without dragging: just that one
+        if d["kind"] in ("left", "right"):
             self.last_len = self.tones[d["i"]]["len"]
         if self.tones != d["before"]:
             self.commit(d["name"], d["before"])
+        else:
+            self.redraw()
 
     def delete_selected(self):
         if self.sel:
@@ -410,8 +478,8 @@ class HzWindow(tk.Toplevel):
             new = dict(app.defaults, kind="custom", name=tr("hz.name"), strokes=[copy.deepcopy(BOX_STROKE)],
                        **custom_settings(app.custom_defaults))
             new.update(fill="spam", pts=box_frame(app.hz_start, lo, app.hz_start + tones_span(tones), hi),
-                       hz=dict(app.custom_defaults.get("hz") or HZ_DEFAULTS, bpm=float(bpm or 120), tones=tones,
-                               grow=True, own=True))
+                       hz=dict(app.custom_defaults.get("hz") or HZ_DEFAULTS, bpm=float(bpm or 120),
+                               tones=copy.deepcopy(tones), grow=True, own=True))  # (its own copy)
             if not app.confirm_big([new]):
                 return self.call_off(before)
             app.hz_start = None
@@ -450,11 +518,37 @@ class HzWindow(tk.Toplevel):
         self.tones, self.sel = before, set()
         self.redraw()
 
+    # ------------------------------------------------------------ hearing the key held
+
+    def sound(self, key):
+        """The key of the note held with the mouse sounds on the MIDI-out device (None = let go: note off)."""
+        app = self.app
+        if self.sounding is not None and self.sounding[1] != key:
+            app.out.note(*self.sounding, 0)
+            self.sounding = None
+        if key is None or self.sounding is not None:
+            return
+        if not app.out.handle and app.out.open(app.midi_device.get()):
+            return  # (no device: silent)
+        sh, ch, vel = self.target(), 0, app.defaults["vel0"]
+        if sh is not None:  # the shape's own channel and velocity
+            vel = sh.get("vel0", vel)
+            mine = app.rendered[app.rendered[:, 5] == app.sel] if len(app.rendered) else ()
+            if len(mine):
+                ch = slot_track_channel(int(mine[0, 4]))[1]
+        self.sounding = (ch, key)
+        app.out.note(ch, key, max(1, min(127, int(vel))))
+
+    def drop_drag(self):
+        self.drag = None
+        self.sound(None)
+
     def remember(self, e):
         if e.widget is self:
             self.app.hz_pos = self.geometry()
 
     def close(self):
+        self.sound(None)
         self.app.hz_window = None
         self.destroy()
         self.app.roll.focus_set()
