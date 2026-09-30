@@ -268,6 +268,8 @@
  "hz.fx_offpitch_tip": "Off pitch: every key repeats a little slower or faster than the tone, so the keys drift apart and meet again by themselves. 100 % = 2 % between the lowest and the highest key. Click it to put it on.",
  "hz.fx_noisy": "Noisy",
  "hz.fx_noisy_tip": "Noisy: every repeat is late by a random bit. 100 % = up to one whole wave. Click it to put it on.",
+ "hz.fx_volume": "Volume",
+ "hz.fx_volume_tip": "Volume: how loud. 100 % = the shape's own velocity, 0 % = silence (no notes there). Right-click > Repeat every + Shape > Pump for a pumping bass. Click it to put it on.",
  "hz.fx_sweep": "Sweep",
  "hz.fx_sweep_tip": "Sweep: a bump of loudness that travels over the keys. 0 % = the lowest keys are loud, 100 % = the highest. Click it to put it on.",
  "hz.fx_wah": "Wah",
@@ -1151,7 +1153,7 @@
   "",
   "Slant: every key starts a little later than the key below it. Groups: the keys take turns in groups (20 % = 2 groups, up to 6). Off pitch: every key repeats a little faster or slower, so the keys drift apart and meet again. Noisy: every repeat is late by a random bit. Vibrato: the tone goes a little up and down.",
   "",
-  "Sweep: a bump of loudness travels over the keys. Wah: loud and quiet stripes over the keys (strongest together with Slant). Tremolo: louder and quieter in turn (the line is how fast). Octave below: every other repeat is softer, so the tone an octave below comes in.",
+  "Volume: how loud (0 % = silence, no notes there). Sweep: a bump of loudness travels over the keys. Wah: loud and quiet stripes over the keys (strongest together with Slant). Tremolo: louder and quieter in turn (the line is how fast). Octave below: every other repeat is softer, so the tone an octave below comes in.",
   "",
   "Sine, Square, Saw, Triangle: every key hits 16 times in each wave, loud and soft in the shape of that wave. Sine takes the overtones away (a soft, pure tone), Square and Triangle take every second one away (a hollow tone), Saw makes the high ones a little quieter. 0 % is the plain tone. They make many more notes, up to 16 times as many: the count is at the bottom of the window.",
   "",
@@ -1169,7 +1171,7 @@
   "",
   "Any custom shape with Spam or Outline spam can have Hz bass too: tick Hz bass in the panel for one tone, or press Notes… to place notes for it. The shape keeps its length (notes past its end aren't used) unless Shape length follows the notes is ticked in the window."
  ],
- "help.hz_bass.words": "hz bass tone pitch cents chord slide lead hypertone preview listen hear play synth soundfont sf2 sfz voices voice limit reverb chorus volume render effect effects slant groups off pitch noisy vibrato sweep wah tremolo octave below waveform wave sine square saw triangle repeat repeats loop lfo automation pump sidechain",
+ "help.hz_bass.words": "hz bass tone pitch cents chord slide lead hypertone preview listen hear play synth soundfont sf2 sfz voices voice limit reverb chorus volume render effect effects slant groups off pitch noisy vibrato sweep wah tremolo octave below volume loudness silence gate waveform wave sine square saw triangle repeat repeats loop lfo automation pump sidechain",
  "help.live.title": "Live shape (G)",
  "help.live.tip": "Lines, curves, arcs, freehand and boxes you draw now go into ONE custom shape. Close its outline to fill it. Right-click empty space to start the next one.",
  "help.live.text": [

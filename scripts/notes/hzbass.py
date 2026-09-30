@@ -41,8 +41,10 @@ own tone's end is left out):
   "vibrato": the tone itself goes up and down, VIBRATO_RATE times a beat, by value x VIBRATO of its pitch (every
   key the same; its waves made shorter and longer like off pitch's).
 With effects every key has its own repeats (KeyGrid, custom.chop_keys); without any, nothing changes.
-Four more change how hard the keys hit instead (KeyGrid.factor -> velocity_factor, used by engine._notes_tracks on
+Five more change how hard the keys hit instead (KeyGrid.factor -> velocity_factor, used by engine._notes_tracks on
 top of the shape's own velocity; loudness goes with velocity squared):
+  "volume": how loud, 1 = as the shape's velocity, 0 = silence (repeats softer than SOFT are left out, and the one
+  before them still ends where it would have).
   "sweep": a bump of loudness over the keys; the value is where it is, 0 = the lowest key, 1 = the highest.
   "wah": loud and quiet stripes over the keys, more of them the higher the value (0 = every key full).
   "tremolo": every key louder and quieter in turn, value x TREMOLO times a beat (0 = steady).
@@ -64,15 +66,15 @@ MIN_LEN = 1 / 1024  # beats: a tone is never shorter
 TUNE = 50.0  # cents: how far a placed tone's own tune goes, up or down (half a key)
 AUTO = 3.0  # cents: Auto gates' threshold to start with
 AUTO_MOST = 50.0  # ... and the highest (past half a key, a fixed tone is nearer the next key than its own)
-VEL_FX = ("sweep", "wah", "tremolo", "octave")  # the effects that change the velocity
+VEL_FX = ("volume", "sweep", "wah", "tremolo", "octave")  # the effects that change the velocity
 WAVES = {"sine": lambda p: (1.0 + np.cos(2.0 * np.pi * p)) / 2.0,  # the waveforms: loudness over one wave (p 0..1)
          "square": lambda p: (p < 0.5).astype(float),
          "saw": lambda p: 1.0 - p,
          "triangle": lambda p: 1.0 - np.abs(2.0 * p - 1.0)}
 FX = ("slant", "groups", "offpitch", "noisy", "vibrato") + VEL_FX + tuple(WAVES)  # the effects a Hz bass can have
-FLAT, RAMP = [[0.0, 0.5], [1.0, 0.5]], [[0.0, 0.0], [1.0, 1.0]]
+FLAT, RAMP, FULL = [[0.0, 0.5], [1.0, 0.5]], [[0.0, 0.0], [1.0, 1.0]], [[0.0, 1.0], [1.0, 1.0]]
 # the line an effect starts with, u = 0..1 over the tones (or what's in view when there are none)
-FX_START = dict({name: RAMP for name in FX}, offpitch=FLAT, tremolo=FLAT, vibrato=FLAT)
+FX_START = dict({name: RAMP for name in FX}, offpitch=FLAT, tremolo=FLAT, vibrato=FLAT, volume=FULL)
 SUB = 16  # waveforms: hits in one wave
 SOFT = 0.003  # ... a hit with less than this much of the full loudness is left out (velocity 7 of 127)
 VIBRATO = 0.05  # "vibrato" at 1: the pitch goes this much (x the tone) up and down
@@ -494,6 +496,7 @@ class KeyGrid:
             for name in FX:
                 run[name] = fx_at(hz, name, beat)
             run["swept"] = np.full(len(beat), "sweep" in fx)  # (sweep at 0 = the bump on the lowest key)
+            run["has_volume"] = np.full(len(beat), "volume" in fx)
             for name in WAVES:  # (a waveform at 0 = the plain tone; without any: the plain tone too)
                 run["has_" + name] = np.full(len(beat), name in fx)
             run["groups"] = group_count(run["groups"])
@@ -529,7 +532,7 @@ class KeyGrid:
         x = min(1.0, max(0.0, (key - self.lo) / self.n))  # where the key is among the shape's keys, 0 = the lowest
         xv = min(1.0, max(0.0, (key - self.lo) / max(1, self.n - 1)))  # (for loudness: 1 = the highest key)
         noise = np.random.default_rng(1000 + key)  # (the same every time: the key is the seed)
-        all_starts, all_limits, all_factors = [], [], []
+        all_starts, all_limits, all_factors, all_quiet = [], [], [], []
         for run in self.runs:
             run = self.respaced(run, x) or run
             late = run["slant"] * x + np.floor(x * run["groups"]) / run["groups"]
@@ -537,12 +540,14 @@ class KeyGrid:
                 late = late + run["noisy"] * noise.random(len(late))
             starts = run["starts"] + late * run["waves"]
             limits = run["limits"]
-            factor = np.ones(len(starts))
+            factor, quiet = np.ones(len(starts)), np.zeros(len(starts), bool)
             if self.loud:
                 loud = np.where(run["swept"], 0.08 + 0.92 * np.clip(np.cos(np.pi * (xv - run["sweep"])), 0.0, 1.0) ** 4,
                                 1.0)
                 loud = loud * (1.0 + np.cos(2.0 * np.pi * WAH * run["wah"] * (xv - 0.5))) / 2.0
                 loud = loud * (0.1 + 0.9 * (1.0 + np.cos(2.0 * np.pi * run["turns"])) / 2.0)
+                vol = np.where(run["has_volume"], run["volume"], 1.0)
+                loud = loud * vol
                 soft = np.where(run["number"] % 2 == 1, 1.0 - run["octave"], 1.0)  # (on the velocity itself)
                 if self.shaped:  # SUB hits in every wave, each as loud as the waveforms say there
                     part = np.arange(SUB) / SUB
@@ -557,15 +562,20 @@ class KeyGrid:
                     starts = (starts[:, None] + part[None, :] * run["waves"][:, None])[keep]
                     limits = limits[rows]
                     factor = np.sqrt(loud[rows] * mix[keep]) * soft[rows]
+                    quiet = vol[rows] < SOFT
                 else:
                     factor = np.sqrt(loud) * soft
+                    quiet = vol < SOFT
             keep = starts < min(run["until"], np.inf) - 1e-6
             all_starts.append(starts[keep])
             all_limits.append(limits[keep])
             all_factors.append(factor[keep])
+            all_quiet.append(quiet[keep])
         if all_starts:
             sq, which = _grid(np.concatenate(all_starts), np.concatenate(all_limits))
             factor = np.concatenate(all_factors)[which]
+            heard = ~np.concatenate(all_quiet)[which]  # (volume 0: left out once every repeat has its end)
+            sq, factor = sq[heard], factor[heard]
         else:
             sq, factor = np.zeros((0, 2), np.int64), np.zeros(0)
         factor.setflags(write=False)

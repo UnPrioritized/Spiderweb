@@ -21,7 +21,7 @@ from notes.hzbass import (FX, FX_START, LOOP_SHAPES, OFF_PITCH, TREMOLO, VIBRATO
                           loop_off, loop_on, loop_shape, tones_span)
 from roll.roll_shared import CTRL, SHIFT
 
-FX_COLOR = {"slant": "#8a3ff0", "groups": "#0a8f8f", "offpitch": "#d0189a", "noisy": "#8a5a14",
+FX_COLOR = {"volume": "#9b2d5f", "slant": "#8a3ff0", "groups": "#0a8f8f", "offpitch": "#d0189a", "noisy": "#8a5a14",
             "vibrato": "#00a5d8", "sweep": "#7f8c00", "wah": "#2c3e6b", "tremolo": "#e0607a", "octave": "#1d6b3a",
             "sine": "#b060c0", "square": "#606060", "saw": "#c0a000", "triangle": "#c05a30"}  # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
 
