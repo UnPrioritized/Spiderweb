@@ -153,7 +153,10 @@ class Preview:
         return ((self.shape[1] if self.shape else 0.0) + beat) * 60.0 / self.bpm * RATE
 
     def look(self):
-        """Takes in changed notes: only the stretch that changed is made again."""
+        """Takes in changed notes: only the stretch that changed is made again. Not while the main window leaves
+        the notes for later (a slow drag going on): the sound would be thrown away at the next step."""
+        if self.app.notes_late:
+            return
         sh = self.win.target()
         try:
             ppq, bpm, _ = self.app.read_project()

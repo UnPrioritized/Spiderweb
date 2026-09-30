@@ -136,6 +136,7 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self.rendered, self.slot_count = NO_NOTES, 0  # (start, end, pitch, velocity, slot, owner) rows
         self.note_counts = []  # notes per shape in rendered
         self.notes_late = False  # the notes are behind the shapes (a drag going on: see shapes_changed)
+        self.scrubbing = False  # a number box's label is being dragged (widgets.Scrub): slow notes wait too
         self.rendered_pts = []  # each shape's first point when rendered was made
         self.ppq, self.beats = 960, 4
         self.undo_stack, self.redo_stack = [], []
@@ -772,7 +773,7 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         # (other drags make the notes AND repaint them all at every step: the repaint counts too)
         slow = slow or not moving and self._notes_time + self.roll.paint_time > 0.15
         # (moving: also whenever the piano roll shows its notes as one picture, which it can carry along)
-        if not now and self.roll.drag and (slow or moving and (self._notes_time > 0.03 or self.roll._img is not None)):
+        if not now and (self.roll.drag or self.scrubbing) and (slow or moving and (self._notes_time > 0.03 or self.roll._img is not None)):
             self.notes_late = True
             if not (moving and slow):  # (quick enough to make: the real notes show whenever the mouse rests)
                 self._late_notes = self.after(120 if moving else 250, self._notes_rested)

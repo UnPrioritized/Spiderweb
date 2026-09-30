@@ -1148,7 +1148,7 @@
   "",
   "To change the keys it repeats later, drag the top or bottom side of its box on the main piano roll. Panel: Pitch moves every tone in cents (100 = one key). Gates: Mixed = gates of two sizes take turns so the tone is exact; Fixed = every gate is a whole number of ticks, a little off.",
   "",
-  "Auto gates: a note that holds still gets Fixed gates when they're off its tone by no more than the threshold (the number next to Gates, in cents), else Mixed ones. A slide is always Mixed. In the window a band around each note's tone shows the threshold: green = Fixed, orange = Mixed. Hold the mouse over a note to see how far off Fixed gates would be. Right-click a note and pick Own Auto threshold… to give it (and the other selected notes) a threshold of its own. About 5 cents is where most ears start to hear it; the highest is 50 (half a key).",
+  "Auto gates (what a new Hz bass starts with): a note that holds still gets Fixed gates when they're off its tone by no more than the threshold (the number next to Gates, in cents), else Mixed ones. A slide is always Mixed. In the window a band around each note's tone shows the threshold: green = Fixed, orange = Mixed. Hold the mouse over a note to see how far off Fixed gates would be. Right-click a note and pick Own Auto threshold… to give it (and the other selected notes) a threshold of its own. About 5 cents is where most ears start to hear it; the highest is 50 (half a key).",
   "",
   "With short gates the tone wobbles (Mixed) or is off (Fixed): the line in the panel turns orange. A higher PPQ fixes it. After the BPM changes, the tone is off: an orange line says so, and Update Hz bass makes it right again.",
   "",

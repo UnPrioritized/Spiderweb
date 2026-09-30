@@ -289,6 +289,16 @@ def auto_state(hz, ppq, n):
     return off, limit, off <= limit + 1e-9
 
 
+def auto_picks(hz, ppq):
+    """Which tones get fixed gates with Auto gates (True / False each; one for a Hz bass without placed tones), or
+    None when the gates aren't Auto. A threshold change that leaves these the same leaves the notes the same."""
+    if hz.get("auto") is None:
+        return None
+    if not hz.get("tones"):
+        return (off_cents(ppq * hz["bpm"] / 60.0 / hz_of(hz["key"], hz["cents"])) <= hz["auto"] + 1e-9,)
+    return tuple(auto_state(hz, ppq, n)[2] for n in hz["tones"])
+
+
 def tone_runs(hz, left, ppq):
     """The repeats of the placed tones as unbroken stretches of tone: [(start ticks, the ticks their waves are over
     = the next one's start, whose: (tone, None) or (tone slid from, tone slid to))], not rounded. A tone held is

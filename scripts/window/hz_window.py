@@ -150,7 +150,7 @@ class HzWindow(tk.Toplevel):
         ttk.Label(f, text=tr("hz.gates")).pack(side="left")
         self.gates = ttk.Combobox(f, values=[tr("panel_custom.hz_" + m) for m in GATE_MODES],
                                   state="readonly", width=7)
-        self.gates.current(0)
+        self.gates.current(GATE_MODES.index("auto"))  # (a new Hz bass: Auto, user)
         self.gates.pack(side="left", padx=(4, 10))
         self.gates.bind("<<ComboboxSelected>>", self.on_gates)
         Tooltip(self.gates, tr("panel_custom.hz_gates_tip"))

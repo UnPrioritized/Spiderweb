@@ -14,7 +14,7 @@ from window.panel_funnel import GATE_STEPS
 from files.mathexpr import calc, fmt
 from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
 from roll.roll_shared import NOTE_NAMES, note_name
-from notes.hzbass import AUTO, AUTO_MOST, off_cents, shortest_gate, threshold, tones_span
+from notes.hzbass import AUTO, AUTO_MOST, auto_picks, off_cents, shortest_gate, threshold, tones_span
 from window.hz_window import GATE_MODES, auto_box, gate_mode, open_hz
 from window.widgets import Scrub, Tooltip
 
@@ -436,7 +436,8 @@ class CustomPanel:
         return out
 
     def on_hz_entry(self):
-        if self._loading or str(self.hz_tone_entry.cget("state")) == "disabled":
+        if self._loading or str(self.hz_cents_entry.cget("state")) == "disabled":  # (the tone box is off when
+            # notes are placed; the pitch box still works then)
             return
         hz = self.typed_hz()
         if hz:
@@ -453,7 +454,8 @@ class CustomPanel:
             rest = {k: v for k, v in t.items() if k != "hz"}
             if not hz:
                 return rest
-            return dict(rest, hz=dict(t.get("hz") or {}, bpm=float(bpm), **hz), gate=hz_gate(hz, bpm))
+            # (a new one: Auto gates, user)
+            return dict(rest, hz=dict(t.get("hz") or {"auto": AUTO}, bpm=float(bpm), **hz), gate=hz_gate(hz, bpm))
 
         placed = [t for t in tgts if t is not self.custom_defaults]
         if (all(changed(t).get("hz") == t.get("hz") for t in tgts)
@@ -487,9 +489,13 @@ class CustomPanel:
             return
         if any(t is not self.custom_defaults for t in tgts):
             self.push_undo(name=tr("panel_custom.hz_gates_step"))
+        before = [auto_picks(t["hz"], self.ppq) for t in tgts]
         for t in tgts:
             t["hz"] = dict({k: v for k, v in t["hz"].items() if k not in ("fixed", "auto")}, **want)
-        self.shapes_changed()
+        # (a new threshold that gives every note the same gates as before leaves the notes as they are: nothing
+        # to make again, and the preview keeps its sound)
+        if None in before or before != [auto_picks(t["hz"], self.ppq) for t in tgts]:
+            self.shapes_changed()
         self.sync_custom()
         if self.hz_window:
             self.hz_window.sync()

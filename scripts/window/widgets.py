@@ -72,6 +72,7 @@ class Scrub:
 
     def press(self, e):
         self.drag = {"x": e.x_root, "n": 0, "job": None, "gesture": object(), "state": e.state}
+        self.app.scrubbing = True  # (slow notes are made when the mouse rests or is let go: App.shapes_changed)
 
     def motion(self, e):
         d = self.drag
@@ -101,6 +102,8 @@ class Scrub:
             self.app.after_cancel(self.drag["job"])
             self.flush()
         self.drag = None
+        self.app.scrubbing = False
+        self.app.catch_up_notes()
 
 
 class LocalUndo:
