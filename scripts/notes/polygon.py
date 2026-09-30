@@ -5,8 +5,9 @@ time after it's placed.
 sh["polygon"] = {"points": how many corners (3 = triangle) or star points, "style": "polygon" / "star" (outer and
 inner points take turns: "inner" = how far out the inner points are, in % of the outer ones) / "cross" (a star drawn
 by joining every "skip"-th corner, crossing itself: 5 skip 2 = a pentagram; when the two share a divisor it's
-several loops, 6 skip 2 = two triangles), maybe "pattern" (pattern.py) laid along every side: Each piece = every
-side gets all the loops, Across all = they run on round the whole outline}.
+several loops, 6 skip 2 = two triangles), maybe "shape" (pattern.py: every side becomes it, from its corner to the
+next) and "pattern" laid along every side (along the shape, if there is one): Each piece = every side gets all the
+loops, Across all = they run on round the whole outline}.
 
 A polygon sits with a flat side at the bottom (a square is a square, a triangle points up), a star with a point at
 the top, and the drawing fills its box (0..1 both ways, like every custom shape). The sides go clockwise, so a
@@ -14,7 +15,7 @@ pattern's "to the side" (to the left of the way it goes) points outward."""
 
 import math
 
-from notes.pattern import clean_pattern
+from notes.pattern import clean_pattern, clean_shape_formula
 
 STYLES = ("polygon", "star", "cross")
 POLYGON_DEFAULTS = {"points": 5, "style": "polygon", "inner": 50.0, "skip": 2}
@@ -32,9 +33,11 @@ def clean_polygon(d):
                "skip": max(1, int(d.get("skip", POLYGON_DEFAULTS["skip"])))}
     except (TypeError, ValueError):
         return None
-    pat = clean_pattern(d.get("pattern"))
+    pat, form = clean_pattern(d.get("pattern")), clean_shape_formula(d.get("shape"))
     if pat:
         out["pattern"] = pat
+    if form:
+        out["shape"] = form
     return out
 
 
@@ -74,7 +77,7 @@ def polygon_aspect(d):
 
 def polygon_strokes(d):
     """The custom shape strokes for polygon settings d: the loops stretched to fill the 0..1 box, each a closed
-    polyline with "sides" and d's pattern (custom.stroke_points lays it along each side)."""
+    polyline with "sides" and d's shape / pattern (custom.stroke_points lays them along each side)."""
     loops = polygon_loops(d)
     pts = [p for loop in loops for p in loop]
     xs, ys = [x for x, _ in pts], [y for _, y in pts]
@@ -85,8 +88,9 @@ def polygon_strokes(d):
         st = {"kind": "poly", "pts": [[round((x - x0) / w, 9), round((y - y0) / h, 9)] for x, y in loop],
               "sides": True}
         st["pts"][-1] = list(st["pts"][0])
-        if d.get("pattern"):
-            st["pattern"] = d["pattern"]
+        for layer in ("shape", "pattern"):
+            if d.get(layer):
+                st[layer] = d[layer]
         out.append(st)
     return out
 

@@ -1,5 +1,5 @@
 """Where curve formulas (pattern.py) can be put: the piano roll's curves, the drawer's curve strokes, a funnel's
-curves and a polygon's sides (only a pattern). Each kind of place is a "host": the right-click menu's Formula items and the Custom… window
+curves and a polygon's sides. Each kind of place is a "host": the right-click menu's Formula items and the Custom… window
 (pattern_dialog.py) work through it, so they look and work the same everywhere.
 
 A host's "holders" are the dicts that get "shape" / "pattern" (a curve shape, a drawer stroke, a funnel curve).
@@ -434,12 +434,12 @@ class FunnelHost(FormulaHost):
 # ---------------------------------------------------------------- a polygon's sides (polygon.py)
 
 class PolygonHost(FormulaHost):
-    """The selected polygons: the holders are their settings (sh["polygon"]), whose pattern is laid along every side
-    (their strokes are made again after each change). Sizes: hundredths of the polygon's height, so the pattern grows
-    with it; round as the piano roll looks when it's put on."""
+    """The selected polygons: the holders are their settings (sh["polygon"]), whose shape every side becomes (from its
+    corner to the next) and whose pattern is laid along every side (their strokes are made again after each change).
+    A pattern's sizes: hundredths of the polygon's height, so it grows with it; round as the piano roll looks when
+    it's put on."""
     pattern_help = "pattern_dialog.help_polygon"
     number_tip = "panel_pattern.number_tip_polygon"
-    layers = ("pattern",)
     plain_label = "roll_menu.turn_into_plain_lines"
 
     def __init__(self, app):
@@ -458,7 +458,7 @@ class PolygonHost(FormulaHost):
         return {"k": uv_k(sh["pts"], k) if sh else 1.0, "scale": DRAWER_SCALE}
 
     def placed(self, holder, layer, before):
-        if not before.get("pattern"):  # (every side gets all the loops, to start with)
+        if layer == "pattern" and not before.get("pattern"):  # (every side gets all the loops, to start with)
             holder["pattern"]["each"] = True
 
     def begin(self, name):
@@ -486,10 +486,12 @@ class PolygonHost(FormulaHost):
 
     def loop_length(self, holder, pat):
         """One loop along a side (Each piece) or round the whole outline (Across all), in hundredths."""
-        from notes.polygon import polygon_strokes
+        from notes.pattern import shape_paths
+        from notes.polygon import polygon_strokes, side_paths
         k, scale = pat.get("k", 1.0), pat.get("scale", 1.0)
-        sides = [math.hypot((b[0] - a[0]) / k, b[1] - a[1])
-                 for st in polygon_strokes(dict(holder, pattern=None)) for a, b in zip(st["pts"], st["pts"][1:])]
+        sides = [sum(math.hypot((b[0] - a[0]) / k, b[1] - a[1]) for a, b in zip(side, side[1:]))
+                 for st in polygon_strokes(dict(holder, pattern=None)) for side in
+                 (shape_paths(side_paths(st["pts"]), st["shape"]) if st.get("shape") else side_paths(st["pts"]))]
         if not sides or scale <= 0:
             return 0.0
         return (sides[0] if pat.get("each") else sum(sides)) / pat.get("loops", 1.0) / scale

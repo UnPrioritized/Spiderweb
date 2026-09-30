@@ -1,7 +1,7 @@
 """The side panel's polygon settings (polygon.py): how many points, the kind (polygon / star / crossing star), a
 star's inner size and a crossing star's skip. They change the selected polygons, and are what the next polygon drawn
-gets. The pattern along the sides is a formula (right-click ▸ Formula ▸ Pattern along the line: formula_host.py's
-PolygonHost; its numbers show in the formula part of the panel)."""
+gets. The shape of the sides and the pattern along them are formulas (right-click ▸ Formula: formula_host.py's
+PolygonHost; their numbers show in the formula part of the panel)."""
 
 import math
 import tkinter as tk

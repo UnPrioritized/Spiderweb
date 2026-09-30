@@ -74,7 +74,7 @@ class ShapeMenu:
                 symmetry_menu(m, sh.get("sym"), lambda mode: self.set_symmetry(sh, mode, at))
         if app.pattern_targets():
             self.formula_menu(m)
-        elif app.polygon_shapes():  # (a pattern along the sides)
+        elif app.polygon_shapes():  # (a shape / pattern on the sides)
             self.formula_menu(m, PolygonHost(app))
         if sh.get("text") and len(app.sels) == 1:
             item(tr("roll_menu.edit_text"), "", lambda: self.edit_text(at))
