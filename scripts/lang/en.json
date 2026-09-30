@@ -85,6 +85,8 @@
  "app.fit_view": "Fit view",
  "app.history": "History",
  "app.history_tip": "The History list: every change as a step; click one to go back to it.",
+ "app.undo": "Undo",
+ "app.redo": "Redo",
  "app.play_space": "▶ Play (Space)",
  "app.help_f1": "Help (F1)",
  "app.every_tip_searchable_opens_at_the": "Every tip, searchable. Opens at the tool you're using.",
