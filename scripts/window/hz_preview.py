@@ -23,7 +23,7 @@ from notes.hzbass import left_edge
 CHUNK = 2.0  # seconds of sound made in one piece
 AHEAD = 60.0  # seconds made ahead of the play line (or the view's left edge)
 BEHIND = 10.0  # seconds kept behind it (further back is thrown away, and greyed again)
-TAIL = 3.0  # seconds of ring after the last note
+TAIL = 30.0  # seconds of ring after the last note at most (it ends where the soundfont's sound has died away)
 TICK_MS = 100
 LOADED_SHOWN = 3.0  # seconds the green "soundfont loaded" stays
 WORKERS = max(1, min(6, (os.cpu_count() or 2) - 2))  # pieces made at once
@@ -55,6 +55,7 @@ class _Job:
         self.result = self.error = None
         self.finished = False
         self.took, self.voices = 0.0, 0
+        self.end = None  # the frame the ring after the last note died away at, if in this piece
 
 
 class Preview:
@@ -64,7 +65,9 @@ class Preview:
         self.notes = None  # the notes the sound is made of (the main window's remembered array: same = unchanged)
         self.shape = None  # (id of the shape, its left edge): where the window's beats start
         self.ev, self.ppq, self.bpm = None, 0, 0.0
-        self.span = (0, 0)  # frames with sound in them: first note .. last note's end + TAIL
+        self.span = (0, 0)  # frames with sound in them: first note .. where the ring after the last note ends
+        self.last = 0  # the frame the last note ends at
+        self.ends = {}  # piece -> the frame the ring died away at in it
         self.chunks, self.jobs, self.ver = {}, {}, {}  # made pieces, pieces being made, each piece's version
         self.took = []  # seconds the last few pieces with notes in them took (for the speed)
         self.voices_used = 0  # the most voices at once in the pieces made since the settings last changed
@@ -136,6 +139,7 @@ class Preview:
             if lo is None or (i + 1) * CHUNK * RATE > lo and i * CHUNK * RATE < hi:
                 self.ver[i] = self.ver.get(i, 0) + 1
                 self.chunks.pop(i, None)
+                self.ends.pop(i, None)
                 job = self.jobs.pop(i, None)
                 if job:
                     job.cancel.set()
@@ -169,26 +173,33 @@ class Preview:
         old, same_time = self.ev, (ppq, bpm) == (self.ppq, self.bpm)
         self.notes, self.ppq, self.bpm, self.shape = notes, ppq, bpm, shape
         if notes is None or not len(notes):
-            self.ev, self.span = None, (0, 0)
+            self.ev, self.span, self.last = None, (0, 0), 0
             self.clear()
             return
         self.ev = ev = events(notes, ppq, bpm)
         ticks = ev["tick"][2:-1]
-        self.span = (int(self.frames(int(ticks[0]))), int(self.frames(int(ticks[-1])) + TAIL * RATE))
+        self.last = int(self.frames(int(ticks[-1])))
+        self.span = (int(self.frames(int(ticks[0]))), self.last)
         if old is None or not same_time:
-            return self.clear()
+            self.clear()
+            return self.set_end()
         n = min(len(old), len(ev))  # the changed stretch: from the first event that differs to the last one
         a, b = old[:n], ev[:n]
         diff = np.flatnonzero((a["tick"] != b["tick"]) | (a["param"] != b["param"]))
         first = int(diff[0]) if len(diff) else n
         if first == len(old) == len(ev):
-            return
+            return self.set_end()
         a, b = old[::-1][:n], ev[::-1][:n]
         diff = np.flatnonzero((a["tick"] != b["tick"]) | (a["param"] != b["param"]))
         last = int(diff[0]) if len(diff) else n
         lo = min(int(old["tick"][min(first, len(old) - 1)]), int(ev["tick"][min(first, len(ev) - 1)]))
         hi = max(int(old["tick"][max(len(old) - 1 - last, 0)]), int(ev["tick"][max(len(ev) - 1 - last, 0)]))
         self.clear(self.frames(lo), self.frames(hi) + TAIL * RATE)
+        self.set_end()
+
+    def set_end(self):
+        """The sound ends where a piece found the ring died away, else TAIL after the last note (until it's made)."""
+        self.span = (self.span[0], int(min([self.last + TAIL * RATE] + list(self.ends.values()))))
 
     # ------------------------------------------------------------ making the sound
 
@@ -201,7 +212,7 @@ class Preview:
                                            lambda n: setattr(job, "done", n), stats)
         except SynthError as e:
             job.error = str(e)
-        job.took, job.voices = time.perf_counter() - started, stats.get("voices", 0)
+        job.took, job.voices, job.end = time.perf_counter() - started, stats.get("voices", 0), stats.get("end")
         job.finished = True
 
     def anchor(self):
@@ -236,7 +247,10 @@ class Preview:
                     return self.win.preview_failed(job.error)
                 elif job.result is not None and job.ver == self.ver.get(i, 0):
                     self.chunks[i] = job.result
-                    if job.voices:  # (a piece past the last note is silence: quick, says nothing)
+                    if job.end is not None:
+                        self.ends[i] = job.end
+                        self.set_end()
+                    if job.voices and i * CHUNK * RATE < self.last:  # (after the last note: only the ring, quick)
                         self.took = (self.took + [job.took])[-2 * WORKERS:]
                         self.voices_used = max(self.voices_used, job.voices)
         want = self.wanted()

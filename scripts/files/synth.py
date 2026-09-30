@@ -176,7 +176,8 @@ class Synth:
     def render(self, ev, ppq, start, frames, voices, nofx=False, cancel=None, progress=None, stats=None):
         """`frames` frames of sound from `start` (frames from the song's start) as float32 rows (left, right).
         cancel = a threading.Event (set = stop: returns None); progress(frames done) after every piece;
-        stats (a dict) gets "voices" = the most voices used at once."""
+        stats (a dict) gets "voices" = the most voices used at once, and "end" = the frame where all sound has died
+        away after the last note, if that's in this stretch."""
         if not self.font:
             raise SynthError("synth.no_font")
         bass = self.bass
@@ -190,22 +191,24 @@ class Synth:
             self.midi.BASS_MIDI_StreamSetFonts(h, ctypes.byref(font), 1)
             bass.BASS_ChannelSetAttribute(h, _ATTRIB_MIDI_VOICES, float(voices))
             self.midi.BASS_MIDI_StreamLoadSamples(h)
-            early = min(start, int(PREROLL * RATE))
+            # past the last note (the stream can't jump there): from PREROLL before the last note ends, so the
+            # ring after it is heard
+            length = bass.BASS_ChannelGetLength(h, _POS_BYTE) // 8
+            at = min(start - min(start, int(PREROLL * RATE)), max(0, length - int(PREROLL * RATE)))
+            early = start - at
             out = np.zeros((early + frames, 2), np.float32)
-            # past the last note: silence (the ring after it only comes in a stretch that starts before; a failed
-            # jump would start from the song's start instead)
-            if start >= bass.BASS_ChannelGetLength(h, _POS_BYTE) // 8:
-                return out[early:]
-            if start - early and not bass.BASS_ChannelSetPosition(h, (start - early) * 8, _POS_BYTE):
-                return out[early:]
+            if at and not bass.BASS_ChannelSetPosition(h, at * 8, _POS_BYTE):
+                return out[early:]  # (a failed jump would start from the song's start instead)
             done, most, used = 0, 0.0, ctypes.c_float()
             while done < len(out):
                 if cancel is not None and cancel.is_set():
                     return None
                 n = min(PIECE, len(out) - done)
                 got = bass.BASS_ChannelGetData(h, out[done:].ctypes.data, (n * 8) | _DATA_FLOAT)
-                if got <= 0:
-                    break  # (past the end: silence)
+                if got <= 0:  # (the ring after the last note has died away: silence from here)
+                    if stats is not None:
+                        stats["end"] = at + done
+                    break
                 done += got // 8
                 if stats is not None and bass.BASS_ChannelGetAttribute(h, _ATTRIB_MIDI_VOICES_ACTIVE,
                                                                        ctypes.byref(used)):
