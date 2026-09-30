@@ -17,12 +17,12 @@ import tkinter as tk
 
 from files.lang import tr
 from files.snap import SNAPS, snap_beats, snap_text
-from notes.hzbass import (FX, FX_START, LOOP_SHAPES, OFF_PITCH, TREMOLO, VIBRATO, group_count, line_at,
+from notes.hzbass import (FX, FX_START, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, group_count, line_at,
                           loop_off, loop_on, loop_shape, tones_span)
 from roll.roll_shared import CTRL, SHIFT
 
 FX_COLOR = {"volume": "#9b2d5f", "slant": "#8a3ff0", "groups": "#0a8f8f", "offpitch": "#d0189a", "noisy": "#8a5a14",
-            "vibrato": "#00a5d8", "sweep": "#7f8c00", "wah": "#2c3e6b", "tremolo": "#e0607a", "octave": "#1d6b3a",
+            "vibrato": "#00a5d8", "pitch": "#4b0082", "sweep": "#7f8c00", "wah": "#2c3e6b", "tremolo": "#e0607a", "octave": "#1d6b3a",
             "sine": "#b060c0", "square": "#606060", "saw": "#c0a000", "triangle": "#c05a30"}  # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
 
 
@@ -214,6 +214,8 @@ class FxPane:
             return tr("hz.fx_value_groups" if n > 1 else "hz.fx_value_together", name=tr("hz.fx_" + name), n=n)
         if name == "tremolo":
             return tr("hz.fx_value_beat", name=tr("hz.fx_" + name), n=f"{value * TREMOLO:.3g}")
+        if name == "pitch":
+            return tr("hz.fx_value_keys", name=tr("hz.fx_" + name), n=f"{(value - 0.5) * 2 * PITCH:+.3g}")
         if name in ("offpitch", "vibrato"):  # how far apart the lowest and the highest key's tones are / how far
             most = OFF_PITCH if name == "offpitch" else VIBRATO  # the pitch goes up and down
             return tr("hz.fx_value", name=tr("hz.fx_" + name), value=f"{value * most * 100:.3g}")
@@ -274,7 +276,10 @@ class FxPane:
         lo, hi = (pts[i - 1][0] if i else 0.0), (pts[i + 1][0] if i + 1 < len(pts) else every or float("inf"))
         at = win.snap(win.beat_at(e.x), e) - (d["k"] * every if every else 0.0)  # (a repeat: all of them move)
         pts[i][0] = min(hi, max(lo, at))
-        pts[i][1] = v = round(self.value_at(e.y), 3 if e.state & SHIFT else 2)
+        v = self.value_at(e.y)
+        if name == "pitch" and not e.state & SHIFT:  # (whole keys; Shift = in between)
+            v = 0.5 + round((v - 0.5) * 2 * PITCH) / (2 * PITCH)
+        pts[i][1] = v = round(v, 3 if e.state & SHIFT else 2 if name != "pitch" else 6)
         self.says = self.value_text(name, v)
         win.redraw()
 

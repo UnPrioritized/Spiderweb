@@ -40,6 +40,8 @@ own tone's end is left out):
   "noisy": every repeat of every key is late by a random bit, up to the value of one wave.
   "vibrato": the tone itself goes up and down, VIBRATO_RATE times a beat, by value x VIBRATO of its pitch (every
   key the same; its waves made shorter and longer like off pitch's).
+  "pitch": unlike the others it DOES change the pitch: the tone bent up or down by the line, 0.5 = as placed, 1 / 0 =
+  PITCH keys up / down (bent, in tone_runs, so the red line shows it and every key is in step).
 With effects every key has its own repeats (KeyGrid, custom.chop_keys); without any, nothing changes.
 Five more change how hard the keys hit instead (KeyGrid.factor -> velocity_factor, used by engine._notes_tracks on
 top of the shape's own velocity; loudness goes with velocity squared):
@@ -71,10 +73,10 @@ WAVES = {"sine": lambda p: (1.0 + np.cos(2.0 * np.pi * p)) / 2.0,  # the wavefor
          "square": lambda p: (p < 0.5).astype(float),
          "saw": lambda p: 1.0 - p,
          "triangle": lambda p: 1.0 - np.abs(2.0 * p - 1.0)}
-FX = ("slant", "groups", "offpitch", "noisy", "vibrato") + VEL_FX + tuple(WAVES)  # the effects a Hz bass can have
+FX = ("slant", "groups", "offpitch", "noisy", "vibrato", "pitch") + VEL_FX + tuple(WAVES)  # the effects a Hz bass can have
 FLAT, RAMP, FULL = [[0.0, 0.5], [1.0, 0.5]], [[0.0, 0.0], [1.0, 1.0]], [[0.0, 1.0], [1.0, 1.0]]
 # the line an effect starts with, u = 0..1 over the tones (or what's in view when there are none)
-FX_START = dict({name: RAMP for name in FX}, offpitch=FLAT, tremolo=FLAT, vibrato=FLAT, volume=FULL)
+FX_START = dict({name: RAMP for name in FX}, offpitch=FLAT, tremolo=FLAT, vibrato=FLAT, volume=FULL, pitch=FLAT)
 SUB = 16  # waveforms: hits in one wave
 SOFT = 0.003  # ... a hit with less than this much of the full loudness is left out (velocity 7 of 127)
 VIBRATO = 0.05  # "vibrato" at 1: the pitch goes this much (x the tone) up and down
@@ -87,6 +89,7 @@ LOOP_SHAPES = {"sine": None, "triangle": [(0, 0), (0.5, 1), (1, 0)], "saw_up": [
                "saw_down": [(0, 1), (1, 0)], "square": [(0, 1), (0.5, 1), (0.5, 0), (1, 0)],
                "pump": [(0, 0), (0.1, 0.35), (0.35, 0.85), (1, 1)], "steps": None}
 GROUPS = 6  # "groups" at 1
+PITCH = 12.0  # "pitch": keys up at 1 (and down at 0; 0.5 = the tone as placed)
 OFF_PITCH = 0.02  # "offpitch" at 1: the highest key's tone is this much (x the tone) below the lowest key's
 
 
@@ -401,7 +404,23 @@ def tone_runs(hz, left, ppq):
             if part:
                 out.append((np.array(part), np.array(after), (a, b)))
             t = max(t, s1)
+    if "pitch" in (hz.get("fx") or {}):
+        out = [bent(hz, left, ppq, starts, nexts) + (whose,) for starts, nexts, whose in out]
     return out
+
+
+def bent(hz, left, ppq, starts, nexts):
+    """A stretch of tone's repeats (start ticks, next ones' starts) moved by the "pitch" effect: the tone goes up or
+    down by the line (PITCH keys at 1 and 0), its waves shorter or longer. The repeats are spaced by adding up the
+    tone over time, so a big bend keeps its timing (a repeat is where the waves so far come to a whole number)."""
+    t = np.append(starts, nexts[-1])
+    f = 2.0 ** ((fx_at(hz, "pitch", t / ppq - left) - 0.5) * 2.0 * PITCH / 12.0)  # (how many times the tone)
+    phase = np.concatenate([[0.0], np.cumsum((f[:-1] + f[1:]) / 2.0)])  # (one wave as placed = 1 at f = 1)
+    n = max(1, int(math.ceil(phase[-1] - 1e-9)))
+    at = np.interp(np.arange(n + 1, dtype=float), phase, t)
+    past = np.arange(n + 1) > phase[-1]  # (the last one's end, past what was placed: its wave carries on)
+    at[past] = t[-1] + (np.arange(n + 1)[past] - phase[-1]) * (nexts[-1] - starts[-1]) / f[-1]
+    return at[:-1], at[1:]
 
 
 def _limits(tones, left, ppq, starts):
