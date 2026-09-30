@@ -25,7 +25,9 @@ hz["grow"] = the shape is kept as long as its tones (fit_length). hz["own"] = ma
 that is nothing but its tones (it goes when its last tone is deleted; the panel shows the keys it repeats).
 
 Effects: hz["fx"] = {effect: [[beat, value], ...]}: one line through points over all the tones (beat counted like a
-tone's "t", from the shape's left edge; flat before the first point and after the last), value 0..1. They change the colour of the tone, not its pitch, by making the keys hit at different spots of the wave
+tone's "t", from the shape's left edge; flat before the first point and after the last), value 0..1.
+hz["loop"] = {effect: beats}: that effect's points are one repeat of so many beats (from 0 to it), repeated from the
+shape's left edge on over and over (line_at; like an automation that repeats every beat). They change the colour of the tone, not its pitch, by making the keys hit at different spots of the wave
 (how late a key is, in waves, is added up over the effects; a key starts that late, and a repeat pushed past its
 own tone's end is left out):
   "slant": every key starts its repeats a bit later than the key below it; the value is how much of one wave the
@@ -77,6 +79,11 @@ VIBRATO = 0.05  # "vibrato" at 1: the pitch goes this much (x the tone) up and d
 VIBRATO_RATE = 2.5  # ... times a beat
 WAH = 8.0  # "wah" at 1: this many loud stripes over the keys
 TREMOLO = 8.0  # "tremolo" at 1: this many times a beat
+LOOP = (1 / 256, 1024.0)  # beats: how short and how long one repeat of a repeating effect can be
+# ready-made shapes for one repeat (u 0..1 over it, value); "sine" and "steps" (random) are made in loop_shape
+LOOP_SHAPES = {"sine": None, "triangle": [(0, 0), (0.5, 1), (1, 0)], "saw_up": [(0, 0), (1, 1)],
+               "saw_down": [(0, 1), (1, 0)], "square": [(0, 1), (0.5, 1), (0.5, 0), (1, 0)],
+               "pump": [(0, 0), (0.1, 0.35), (0.35, 0.85), (1, 1)], "steps": None}
 GROUPS = 6  # "groups" at 1
 OFF_PITCH = 0.02  # "offpitch" at 1: the highest key's tone is this much (x the tone) below the lowest key's
 
@@ -112,13 +119,66 @@ def clean_fx(fx):
     return out
 
 
+def clean_loop(loop, fx):
+    """Repeats checked: {effect: beats one repeat lasts} for the effects in fx only; a repeating effect's points
+    are put inside one repeat (fx is changed)."""
+    out = {}
+    for name, every in (loop.items() if isinstance(loop, dict) else ()):
+        try:
+            every = float(every)
+        except (TypeError, ValueError):
+            continue
+        if name in fx and math.isfinite(every) and LOOP[0] <= every <= LOOP[1]:
+            out[name] = every
+            fx[name] = [[min(u, every), v] for u, v in fx[name]]
+    return out
+
+
+def line_at(pts, beat, every=None):
+    """A line's value at beat (a number or an array): through its points, flat before the first and after the last;
+    every = the points are one repeat of that many beats, repeated from beat 0 (the last point leads on to the next
+    repeat's first)."""
+    xs, vs = [p[0] for p in pts], [p[1] for p in pts]
+    beat = np.asarray(beat, float)
+    if every:
+        beat = np.mod(beat, every)
+        xs, vs = [xs[-1] - every] + xs + [xs[0] + every], [vs[-1]] + vs + [vs[0]]
+    return np.interp(beat, xs, vs)
+
+
 def fx_at(hz, name, beat):
     """The value of an effect at beat (an array, from the shape's left edge; 0 when there's no such line).
-    Before the first point and after the last one the line stays flat."""
+    Before the first point and after the last one the line stays flat, unless it repeats (hz["loop"])."""
     pts = (hz.get("fx") or {}).get(name)
     if not pts:
         return np.zeros(np.shape(beat))
-    return np.interp(np.asarray(beat, float), [p[0] for p in pts], [p[1] for p in pts])
+    return line_at(pts, beat, (hz.get("loop") or {}).get(name))
+
+
+def loop_on(pts, every):
+    """A line turned into one repeat of `every` beats: its points squeezed in, first point at 0, last at the end."""
+    a, b = pts[0][0], pts[-1][0]
+    if b - a < 1e-9:
+        return [[0.0, pts[0][1]], [every, pts[0][1]]]
+    return [[(u - a) / (b - a) * every, v] for u, v in pts]
+
+
+def loop_off(pts, every, a, b):
+    """One repeat's points stretched back into a line from beat a to b (what loop_on did, undone)."""
+    return [[a + u / every * (b - a), v] for u, v in pts]
+
+
+def loop_shape(kind, every, seed=None):
+    """A ready-made shape for one repeat of `every` beats (LOOP_SHAPES): its points."""
+    if kind == "sine":
+        pts = [(i / 16, 0.5 + 0.5 * math.sin(2 * math.pi * i / 16)) for i in range(17)]
+    elif kind == "steps":  # (two points at one spot: a step)
+        pts = []
+        for i, v in enumerate(np.random.default_rng(seed).random(8)):
+            pts += [(i / 8, float(v)), ((i + 1) / 8, float(v))]
+    else:
+        pts = LOOP_SHAPES[kind]
+    return [[u * every, round(v, 4)] for u, v in pts]
 
 
 def old_fx(tones):
@@ -211,6 +271,9 @@ def clean_hz(hz):
     fx = clean_fx(hz["fx"]) if isinstance(hz.get("fx"), dict) else old_fx(hz.get("tones") or ())
     if fx:
         out["fx"] = fx
+        loop = clean_loop(hz.get("loop"), fx)
+        if loop:
+            out["loop"] = loop
     if tones:
         out["tones"] = tones
         for flag in ("grow", "own"):

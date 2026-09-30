@@ -27,8 +27,8 @@ from files.mathexpr import calc, fmt
 from files.snap import snap_beats
 from notes.engine import slot_track_channel
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
-from notes.hzbass import (AUTO, AUTO_MOST, FX, HZ_DEFAULTS, TUNE, auto_state, can_slide, clean_fx, clean_tones,
-                          fit_length, glide, heard, hz_of, left_edge, links, next_id, pitch, tones_span)
+from notes.hzbass import (AUTO, AUTO_MOST, FX, HZ_DEFAULTS, TUNE, auto_state, can_slide, clean_fx, clean_loop,
+                          clean_tones, fit_length, glide, heard, hz_of, left_edge, links, next_id, pitch, tones_span)
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, SELECT_CURSOR, SELECTED_COLOR, SHIFT,
                               SLOT_COLORS, box_side, box_upright, grid_span, note_name)
 from roll.zoombar import add_zoom_bars
@@ -117,6 +117,7 @@ class HzWindow(tk.Toplevel):
         self.sounding = None  # (channel, key) heard now: the note held with the mouse
         self.last_len = 1.0  # beats: how long a newly placed note is (the last length used)
         self.fxl, self.fx_of = {}, None  # the effects' lines (hz["fx"]) and whose they are (the shape, or None)
+        self.loops = {}  # the effects that repeat (hz["loop"])
         self.kb_w, self.ruler_h = round(44 * s), round(18 * s)
         names = tkfont.Font(family="Segoe UI", size=8, weight="bold")  # the keys column: wide enough for the
         self.kb_w = max(self.kb_w, round(20 * s) + max(names.measure(tr("hz.fx_" + n)) for n in FX))  # effects' names
@@ -262,6 +263,7 @@ class HzWindow(tk.Toplevel):
             self.drop_drag()
         if sh is not None or self.fx_of is not None:  # (no Hz bass yet: the lines picked stay for the first note)
             self.fxl, self.fx_of = clean_fx(hz.get("fx") or {}), (id(sh) if sh is not None else None)
+            self.loops = clean_loop(hz.get("loop"), self.fxl)
         if sh is None:
             text = (tr("hz.hint_new", beat=fmt(self.app.hz_start + 1)) if self.app.hz_start is not None
                     else tr("hz.hint_none"))
@@ -1202,7 +1204,7 @@ class HzWindow(tk.Toplevel):
     # ------------------------------------------------------------ into the shape
 
     def commit_fx(self, before):
-        """The effects' lines changed: one undo step. before = the lines to go back to if it's called off."""
+        """The effects' lines changed: one undo step. before = (lines, repeats) to go back to if it's called off."""
         self.commit(tr("hz.step_fx"), copy.deepcopy(self.tones), before)
 
     def commit(self, name, before, before_fx=None):
@@ -1214,6 +1216,9 @@ class HzWindow(tk.Toplevel):
         self.sel = {i for i, n in enumerate(self.tones) if any(n is p for p in picked)}
         tones = clean_tones(copy.deepcopy(self.tones))
         fx = {"fx": clean_fx(self.fxl)} if self.fxl else {}
+        loops = clean_loop(self.loops, fx["fx"]) if fx else {}
+        if loops:
+            fx["loop"] = loops
         sh = self.target()
         bpm = app.current_bpm()
         if sh is None:
@@ -1232,7 +1237,7 @@ class HzWindow(tk.Toplevel):
             app.add_shape(new)
         else:
             hz = dict(sh.get("hz") or dict(HZ_DEFAULTS, bpm=float(bpm or 120), **self.fixed()))
-            for k in ("tones", "grow", "fx"):
+            for k in ("tones", "grow", "fx", "loop"):
                 hz.pop(k, None)
             new = copy.deepcopy(sh)
             if tones:
@@ -1262,7 +1267,7 @@ class HzWindow(tk.Toplevel):
     def call_off(self, before, before_fx=None):
         self.tones, self.sel = before, set()
         if before_fx is not None:
-            self.fxl = before_fx
+            self.fxl, self.loops = before_fx
         self.redraw()
 
     # ------------------------------------------------------------ hearing the key held
