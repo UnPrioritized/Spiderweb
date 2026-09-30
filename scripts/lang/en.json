@@ -269,7 +269,7 @@
  "panel_funnel.notes_start_on_it": "Notes start on it",
  "panel_funnel.one_more_column_of_notes_on": "One more column of notes on the other side of the wall,\nas long as the wall gate.",
  "panel_funnel.steps": "Steps",
- "panel_funnel.the_gate_only_halves_or_doubles": "The gate only halves (or doubles): start gate, half of it, a quarter, ...\nso the funnel is made of sections of equal notes.",
+ "panel_funnel.the_gate_only_halves_or_doubles": "The gate only halves (or doubles): start gate, half of it, a quarter…\nso the funnel is made of sections of equal notes.",
  "panel_funnel.smooth": "Smooth",
  "panel_funnel.every_note_gets_its_own_gate": "Every note gets its own gate, sliding from the start gate to the wall gate.",
  "panel_funnel.evenly": "Evenly",
@@ -752,7 +752,7 @@
  "project.midi_output": "MIDI output",
  "project.midi_file": "MIDI file",
  "project.no_notes_yet_draw_something_inside": "No notes yet — draw something inside the 0–{keys} pitch range first.",
- "project.confirm_save_as": "Confirm Save As",
+ "project.confirm_save_as": "Confirm save as",
  "project.already_exists_do_you_want_to": "{basename} already exists.\nDo you want to replace it?",
  "project.ppq_many_midi_programs_can_t": "\n\nPPQ {ppq}: many MIDI programs can't open this file (it needs a PPQ below {PPQ_WARN}).",
  "project.it_has_keys_above_127_256": "\n\nIt has keys above 127 (256 keys): many MIDI programs can't read those.",
@@ -883,7 +883,7 @@
   "",
   "Drag empty space to scroll. Click empty space (no drag) to move the play line there.",
   "",
-  "Right-click a shape (or one of its notes) = its menu (delete, duplicate, copy, flip, turn, add a point...). Right-click empty space = deselect. Double right-click switches between Select and the last drawing tool.",
+  "Right-click a shape (or one of its notes) = its menu (delete, duplicate, copy, flip, turn, add a point…). Right-click empty space = deselect. Double right-click switches between Select and the last drawing tool.",
   "",
   "Blue curve handles can be dragged with any tool."
  ],
@@ -1354,13 +1354,13 @@
   "",
   "Ctrl+Z / Ctrl+Y: undo / redo. While something is half drawn, Ctrl+Z just drops that.",
   "",
-  "Settings in the panel (velocity, last note...) change every selected shape."
+  "Settings in the panel (velocity, last note…) change every selected shape."
  ],
  "help.selecting.words": "copy paste duplicate flip mirror rotate turn undo redo delete",
  "help.numbers.title": "Number boxes",
  "help.numbers.tip": "Drag a box's name sideways to change it, or press Up / Down in the box. Shift = big steps, Ctrl = small steps.",
  "help.numbers.text": [
-  "Every number box can be changed without typing: drag the name next to it sideways, or press Up / Down in it (the mouse wheel too, while you're typing in it). Shift = big steps, Ctrl = small steps. A name over two boxes (Velocity, Gate) changes both. Boxes also take math: 960*4, 1920/3..."
+  "Every number box can be changed without typing: drag the name next to it sideways, or press Up / Down in it (the mouse wheel too, while you're typing in it). Shift = big steps, Ctrl = small steps. A name over two boxes (Velocity, Gate) changes both. Boxes also take math: 960*4, 1920/3…"
  ],
  "help.numbers.words": "scrub drag value arrow wheel math",
  "help.view.title": "Scrolling and zooming",
