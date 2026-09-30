@@ -46,6 +46,7 @@ from files.domino_clip import DOMINO_STARTS
 from files.project import AUTOSAVE, OUTPUT_DIR, ProjectFiles
 from files.snap import DEFAULT_SNAP, snap_beats
 from roll.roll_shared import cached_path
+from roll.zoombar import add_zoom_bars
 from window.snap_picker import SnapPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
@@ -299,8 +300,10 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self.panes = tk.PanedWindow(self, orient="vertical", sashwidth=int(6 * s), sashrelief="raised",
                                     bd=0, bg="#c8c8c8", opaqueresize=True)
         self.panes.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=(0, 6))
-        self.roll = PianoRoll(self.panes, self, s)
-        self.panes.add(self.roll, stretch="always", minsize=int(120 * s))
+        roll_box = tk.Frame(self.panes)
+        self.roll = PianoRoll(roll_box, self, s)
+        add_zoom_bars(roll_box, self.roll)
+        self.panes.add(roll_box, stretch="always", minsize=int(120 * s))
         self.vel_box = ttk.Frame(self.panes)
         vbar = ttk.Frame(self.vel_box, padding=(2, 2))
         vbar.pack(fill="x")

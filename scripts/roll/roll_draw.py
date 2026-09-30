@@ -95,6 +95,8 @@ class RollDrawing:
 
     def redraw(self):
         self._redraw_pending = False
+        for bar in self.bars:
+            bar.refresh()
         self.delete("all")
         w, h = self.winfo_width(), self.winfo_height()
         if self.sx is None or w < 50:

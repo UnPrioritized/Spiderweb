@@ -1,7 +1,7 @@
 """The piano roll canvas: view (scroll/zoom), hit testing and mouse editing.
 Its other parts: roll_draw.py (painting), roll_custom.py (custom shape box), roll_curve.py (curve editing),
 roll_funnel.py (funnel editing), roll_live.py (live drawing, custom shape strokes), roll_menu.py (right-click menu), roll_text.py (the Text tool),
-roll_hz.py (the Hz bass tool),
+roll_hz.py (the Hz bass tool), zoombar.py (its scrollbars and zoom buttons),
 roll_shared.py (colours, keys, caches)."""
 
 import copy
@@ -57,6 +57,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.curve_clip = None   # a funnel curve's shape, copied with Ctrl+C
         self.typing = None       # the text being typed with the Text tool (roll_text.py)
         self._caret_job = None
+        self.bars = ()           # its scrollbars (zoombar.py)
+        self._end_of = self._end = None  # the last note's end, and the notes it was worked out for
 
         self.bind("<Configure>", self.on_configure)
         self.bind("<ButtonPress-1>", self.on_press)
@@ -151,6 +153,73 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         else:
             self.clamp_view()
             self.request_redraw()
+
+    # ------------------------------------------------------------ scrollbars and zoom buttons (zoombar.py)
+
+    def end_beat(self):
+        """Where the scrollbar under the roll ends: 8 bars after the last note (user's choice)."""
+        notes = self.app.rendered
+        if self._end_of is not notes:
+            self._end_of, self._end = notes, (float(notes[:, 1].max()) if len(notes) else 0.0)
+        return self._end / self.app.ppq + 8 * self.app.beats
+
+    def bar_view(self, across):
+        """(start, end, total) of what's seen, for a scrollbar: beats across, keys counted from the top down.
+        Scrolled past the end (mouse), the total grows to where the view ends."""
+        if self.sx is None:
+            return None
+        if across:
+            a, span = self.view_t, max(1, self.winfo_width() - self.kb_w) / self.sx
+            return a, a + span, max(self.end_beat(), a + span)
+        a, span = self.app.keys - 0.5 - self.view_top, max(1, self.winfo_height() - self.ruler_h) / self.sy
+        return a, a + span, max(self.app.keys, a + span)
+
+    def bar_move(self, across, a):
+        """A scrollbar was dragged to a. (By whole pixels: the picture of the notes can then be moved along.)"""
+        if across:
+            self.view_t = self.view_t + round((a - self.view_t) * self.sx) / self.sx if a > 0 else 0.0
+        elif a > 0:
+            self.view_top += round((self.app.keys - 0.5 - a - self.view_top) * self.sy) / self.sy
+        else:
+            self.view_top = self.app.keys - 0.5
+        self.clamp_view()
+        self.request_redraw()
+
+    def bar_zoom(self, across, a, b, which):
+        """A scrollbar's end was dragged (which: "start" / "end"): the view shows a..b, the other end stays."""
+        if across:
+            px = max(1, self.winfo_width() - self.kb_w)
+            self.sx = min(100000.0, max(0.05, px / (b - a)))
+            self.view_t = a if which == "end" else b - px / self.sx
+        else:
+            px = max(1, self.winfo_height() - self.ruler_h)
+            self.sy = min(60 * self.scale, max(1.0, px / (b - a)))
+            self.view_top = self.app.keys - 0.5 - (a if which == "end" else b - px / self.sy)
+        self.clamp_view()
+        self.request_redraw()
+
+    def zoom_x(self, f, x):
+        """Zoom time by f; the beat at canvas x stays where it is."""
+        b = self.x2t(x)
+        self.sx = min(100000.0, max(0.05, self.sx * f))
+        self.view_t = b - (x - self.kb_w) / self.sx
+
+    def zoom_y(self, f, y):
+        """Zoom the keys by f; the key at canvas y stays where it is."""
+        p = self.y2p(y)
+        self.sy = min(60 * self.scale, max(1.0, self.sy * f))
+        self.view_top = p + (y - self.ruler_h) / self.sy
+
+    def zoom_step(self, across, f):
+        """The "+" / "-" buttons: zoom around the middle of the view."""
+        if self.sx is None:
+            return
+        if across:
+            self.zoom_x(f, (self.kb_w + self.winfo_width()) / 2)
+        else:
+            self.zoom_y(f, (self.ruler_h + self.winfo_height()) / 2)
+        self.clamp_view()
+        self.request_redraw()
 
     # ------------------------------------------------------------ hit testing
 
@@ -789,13 +858,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         zoom_time = e.state & CTRL and not e.state & ALT
         zoom_pitch = (e.state & CTRL and not e.state & SHIFT) or e.state & ALT
         if zoom_time:
-            b = self.x2t(e.x)
-            self.sx = min(100000.0, max(0.05, self.sx * f))
-            self.view_t = b - (e.x - self.kb_w) / self.sx
+            self.zoom_x(f, e.x)
         if zoom_pitch:
-            p = self.y2p(e.y)
-            self.sy = min(60 * self.scale, max(1.0, self.sy * f))
-            self.view_top = p + (e.y - self.ruler_h) / self.sy
+            self.zoom_y(f, e.y)
         if not (zoom_time or zoom_pitch):
             if e.state & SHIFT:
                 self.view_t += (-1 if up else 1) * 120 / self.sx
