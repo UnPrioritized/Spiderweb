@@ -24,21 +24,30 @@ that is nothing but its tones (it goes when its last tone is deleted; the panel 
 
 Effects: a tone can have "fx" = {effect: [[u, value], ...]}: a line through points, u = 0..1 along the tone, value
 0..1. They change the colour of the tone, not its pitch, by making the keys hit at different spots of the wave
-(how late a key is, in waves, is added up over the effects; only the part after the comma counts):
+(how late a key is, in waves, is added up over the effects; a key starts that late, and a repeat pushed past its
+own tone's end is left out):
   "slant": every key starts its repeats a bit later than the key below it; the value is how much of one wave the
   shape's keys are spread over (0 = all together).
   "groups": the keys take turns in groups, evenly spread over the wave: 0 = all together, then 2, 3... up to
   GROUPS groups at 1 (group_count).
   "offpitch": every key repeats a little faster or slower than the tone, the lowest key the fastest, the highest
-  the slowest: the keys drift apart and meet again by themselves. 1 = OFF_PITCH of the tone between them.
+  the slowest: the keys drift apart and meet again by themselves. 1 = OFF_PITCH of the tone between them. (Its
+  waves are made that much longer or shorter, one after the other, so a key never skips or doubles a repeat.)
   "noisy": every repeat of every key is late by a random bit, up to the value of one wave.
+  "vibrato": the tone itself goes up and down, VIBRATO_RATE times a beat, by value x VIBRATO of its pitch (every
+  key the same; its waves made shorter and longer like off pitch's).
 With effects every key has its own repeats (KeyGrid, custom.chop_keys); without any, nothing changes.
-Four more change how hard the keys hit instead (velocity_factor, used by engine._notes_tracks on top of the shape's
-own velocity; loudness goes with velocity squared):
+Four more change how hard the keys hit instead (KeyGrid.factor -> velocity_factor, used by engine._notes_tracks on
+top of the shape's own velocity; loudness goes with velocity squared):
   "sweep": a bump of loudness over the keys; the value is where it is, 0 = the lowest key, 1 = the highest.
   "wah": loud and quiet stripes over the keys, more of them the higher the value (0 = every key full).
   "tremolo": every key louder and quieter in turn, value x TREMOLO times a beat (0 = steady).
-  "octave": every other repeat softer, down to velocity 1 at 1: the tone an octave below comes in."""
+  "octave": every other repeat softer, down to velocity 1 at 1: the tone an octave below comes in.
+Waveforms ("sine", "square", "saw", "triangle"): every key hits SUB times in each wave instead of once, and how
+hard each of those hits is follows the shape drawn over one wave (WAVES), which takes overtones out of the tone
+(measured: sine leaves almost only the lowest, square and triangle take out every second one, saw tilts them).
+The value goes from the plain tone (0: one hit a wave) to the whole shape (1); hits too soft to matter are left
+out, so the note count grows with the value, up to SUB times as many."""
 
 import functools
 import json
@@ -50,11 +59,17 @@ HZ_DEFAULTS = {"key": 33, "cents": 0.0}
 MIN_LEN = 1 / 1024  # beats: a tone is never shorter
 TUNE = 50.0  # cents: how far a placed tone's own tune goes, up or down (half a key)
 VEL_FX = ("sweep", "wah", "tremolo", "octave")  # the effects that change the velocity
-FX = ("slant", "groups", "offpitch", "noisy") + VEL_FX  # the effects a placed tone can have
-FX_START = {"slant": [[0.0, 0.0], [1.0, 1.0]], "groups": [[0.0, 0.0], [1.0, 1.0]],  # the line an effect starts with
-            "offpitch": [[0.0, 0.5], [1.0, 0.5]], "noisy": [[0.0, 0.0], [1.0, 1.0]],
-            "sweep": [[0.0, 0.0], [1.0, 1.0]], "wah": [[0.0, 0.0], [1.0, 1.0]],
-            "tremolo": [[0.0, 0.5], [1.0, 0.5]], "octave": [[0.0, 0.0], [1.0, 1.0]]}
+WAVES = {"sine": lambda p: (1.0 + np.cos(2.0 * np.pi * p)) / 2.0,  # the waveforms: loudness over one wave (p 0..1)
+         "square": lambda p: (p < 0.5).astype(float),
+         "saw": lambda p: 1.0 - p,
+         "triangle": lambda p: 1.0 - np.abs(2.0 * p - 1.0)}
+FX = ("slant", "groups", "offpitch", "noisy", "vibrato") + VEL_FX + tuple(WAVES)  # the effects a placed tone can have
+FLAT, RAMP = [[0.0, 0.5], [1.0, 0.5]], [[0.0, 0.0], [1.0, 1.0]]
+FX_START = dict({name: RAMP for name in FX}, offpitch=FLAT, tremolo=FLAT, vibrato=FLAT)  # the line an effect starts with
+SUB = 16  # waveforms: hits in one wave
+SOFT = 0.003  # ... a hit with less than this much of the full loudness is left out (velocity 7 of 127)
+VIBRATO = 0.05  # "vibrato" at 1: the pitch goes this much (x the tone) up and down
+VIBRATO_RATE = 2.5  # ... times a beat
 WAH = 8.0  # "wah" at 1: this many loud stripes over the keys
 TREMOLO = 8.0  # "tremolo" at 1: this many times a beat
 GROUPS = 6  # "groups" at 1
@@ -313,66 +328,144 @@ def _squares(hz_json, left, ppq):
     if not got:
         return np.zeros((0, 2), np.int64)
     starts = np.concatenate(got)
-    return _grid(starts, _limits(hz["tones"], left, ppq, starts))
+    return _grid(starts, _limits(hz["tones"], left, ppq, starts))[0]
 
 
 def _grid(starts, limits):
     """Repeats (start ticks, not rounded; the tick each one's sound ends at) -> (start, end) whole ticks in order,
-    each lasting until the next one starts."""
+    each lasting until the next one starts; and which repeat each of them is."""
+    if not len(starts):
+        return np.zeros((0, 2), np.int64), np.zeros(0, np.int64)
     starts = _whole(starts)
     order = np.argsort(starts, kind="stable")
     starts, limits = starts[order], limits[order]
     first = np.concatenate([[True], starts[1:] != starts[:-1]])
     at = np.flatnonzero(first)
+    order = order[at]
     starts, limits = starts[at], np.maximum.reduceat(limits, at)  # (repeats of two lines on one tick: one note)
     ends = np.minimum(np.concatenate([starts[1:], limits[-1:]]), limits)
-    out = np.column_stack([starts, ends])[ends > starts]
+    keep = ends > starts
+    out = np.column_stack([starts, ends])[keep]
     out.setflags(write=False)
-    return out
+    return out, order[keep]
 
 
 class KeyGrid:
-    """The repeats of a Hz bass whose tones have effects: every key has its own (squares(key))."""
+    """The repeats of a Hz bass whose tones have effects: every key has its own (squares(key)), and how much of
+    the shape's velocity each of them gets (factor)."""
 
     def __init__(self, hz, left, ppq, lo, n):
         self.lo, self.n, self.got = lo, max(1, n), {}
-        runs = tone_runs(hz, left, ppq)
-        self.starts = np.concatenate([s for s, _, _ in runs]) if runs else np.zeros(0)
-        if runs:
-            self.waves = np.concatenate([e - s for s, e, _ in runs])
-            fx = {name: [self.value(name, whose, s / ppq - left) for s, _, whose in runs] for name in FX}
-            self.slant, self.noisy = np.concatenate(fx["slant"]), np.concatenate(fx["noisy"])
-            self.groups = group_count(np.concatenate(fx["groups"]))
-            # off pitch: every repeat moves the key on by a bit of a wave, so it adds up along the stretch of tone
-            self.drift = np.concatenate([np.cumsum(v) * OFF_PITCH for v in fx["offpitch"]])
-            self.limits = _limits(hz["tones"], left, ppq, self.starts)
-            # a repeat moved past its own tone's end is left out (the next tone may touch it: not its sound)
-            self.until = np.concatenate([np.full(len(s), (left + a["t"] + a["len"]) * ppq if b is None else np.inf)
-                                         for s, _, (a, b) in runs])
+        self.runs = []
+        for starts, nexts, whose in tone_runs(hz, left, ppq):
+            beat = starts / ppq - left
+            run = {"starts": starts, "waves": nexts - starts, "number": np.arange(len(starts)), "beat": beat,
+                   "limits": _limits(hz["tones"], left, ppq, starts),
+                   # (a repeat moved past its own tone's end is left out: the next tone may touch it)
+                   "until": (left + whose[0]["t"] + whose[0]["len"]) * ppq if whose[1] is None else np.inf}
+            for name in FX:
+                run[name] = self.value(name, whose, beat)
+            run["swept"] = self.value("sweep", whose, beat, has=True)  # (sweep at 0 = the bump on the lowest key)
+            for name in WAVES:  # (a waveform at 0 = the plain tone; a note without any: the plain tone too)
+                run["has_" + name] = self.value(name, whose, beat, has=True)
+            run["groups"] = group_count(run["groups"])
+            run["turns"] = np.concatenate([[0.0], np.cumsum(run["tremolo"] * TREMOLO * run["waves"] / ppq)[:-1]])
+            self.runs.append(run)
+        self.shaped = any(r["has_" + name].any() for r in self.runs for name in WAVES)
+        self.loud = self.shaped or any(name in (t.get("fx") or ()) for t in hz["tones"] for name in VEL_FX)
 
     @staticmethod
-    def value(name, whose, beat):
+    def value(name, whose, beat, has=False):
         """An effect's value at each repeat of a stretch of tone: its tone's line; on a slide the line of the tone
-        it leaves, then (from that one's start) the line of the tone it goes to."""
+        it leaves, then (from that one's start) the line of the tone it goes to. has: whether there's a line at
+        all, instead."""
+        def of(n):
+            return np.full(len(beat), name in (n.get("fx") or ())) if has else fx_at(n, name, beat)
+
         a, b = whose
-        if b is None:
-            return fx_at(a, name, beat)
-        return np.where(beat < b["t"], fx_at(a, name, beat), fx_at(b, name, beat))
+        return of(a) if b is None else np.where(beat < b["t"], of(a), of(b))
+
+    @staticmethod
+    def respaced(run, x):
+        """A stretch of tone for the key at x: off pitch and vibrato make its waves longer or shorter one after the
+        other (every value of a repeat taken for the one with the same number; past the end, the last one's), so
+        it may take more or fewer repeats to fill the stretch. None when neither is on."""
+        off, vib = run["offpitch"], run["vibrato"]
+        if not (off.any() or vib.any()):
+            return None
+        stretch = (1.0 + OFF_PITCH * off * (x - 0.5)) * (
+            1.0 + VIBRATO * vib * np.sin(2.0 * np.pi * VIBRATO_RATE * (run["beat"] - run["beat"][0])))
+        n = len(off)
+        more = n // 10 + 3  # (enough: the waves are at most a few % shorter)
+        pick = np.minimum(np.arange(n + more), n - 1)
+        waves = run["waves"][pick] * stretch[pick]
+        out = {k: (v[pick] if isinstance(v, np.ndarray) else v) for k, v in run.items()}
+        out["starts"] = run["starts"][0] + np.concatenate([[0.0], np.cumsum(waves)[:-1]])
+        out["waves"], out["number"] = waves, np.arange(n + more)
+        return out
+
+    def made(self, key):
+        """A key's repeats, (start, end) ticks in order, none overlapping, and each one's part of the velocity."""
+        got = self.got.get(key)
+        if got is not None:
+            return got
+        x = min(1.0, max(0.0, (key - self.lo) / self.n))  # where the key is among the shape's keys, 0 = the lowest
+        xv = min(1.0, max(0.0, (key - self.lo) / max(1, self.n - 1)))  # (for loudness: 1 = the highest key)
+        noise = np.random.default_rng(1000 + key)  # (the same every time: the key is the seed)
+        all_starts, all_limits, all_factors = [], [], []
+        for run in self.runs:
+            run = self.respaced(run, x) or run
+            late = run["slant"] * x + np.floor(x * run["groups"]) / run["groups"]
+            if run["noisy"].any():
+                late = late + run["noisy"] * noise.random(len(late))
+            starts = run["starts"] + late * run["waves"]
+            limits = run["limits"]
+            factor = np.ones(len(starts))
+            if self.loud:
+                loud = np.where(run["swept"], 0.08 + 0.92 * np.clip(np.cos(np.pi * (xv - run["sweep"])), 0.0, 1.0) ** 4,
+                                1.0)
+                loud = loud * (1.0 + np.cos(2.0 * np.pi * WAH * run["wah"] * (xv - 0.5))) / 2.0
+                loud = loud * (0.1 + 0.9 * (1.0 + np.cos(2.0 * np.pi * run["turns"])) / 2.0)
+                soft = np.where(run["number"] % 2 == 1, 1.0 - run["octave"], 1.0)  # (on the velocity itself)
+                if self.shaped:  # SUB hits in every wave, each as loud as the waveforms say there
+                    part = np.arange(SUB) / SUB
+                    mix = np.ones((len(starts), SUB))
+                    for name in WAVES:  # (several on one note: multiplied)
+                        v, on = run[name][:, None], run["has_" + name][:, None]
+                        mix *= np.where(on, (1.0 - v) * (part == 0) + v * WAVES[name](part)[None, :], 1.0)
+                    plain = ~np.any([run["has_" + name] for name in WAVES], axis=0)
+                    mix[plain] = part == 0
+                    keep = mix >= SOFT
+                    rows = np.nonzero(keep)[0]
+                    starts = (starts[:, None] + part[None, :] * run["waves"][:, None])[keep]
+                    limits = limits[rows]
+                    factor = np.sqrt(loud[rows] * mix[keep]) * soft[rows]
+                else:
+                    factor = np.sqrt(loud) * soft
+            keep = starts < min(run["until"], np.inf) - 1e-6
+            all_starts.append(starts[keep])
+            all_limits.append(limits[keep])
+            all_factors.append(factor[keep])
+        if all_starts:
+            sq, which = _grid(np.concatenate(all_starts), np.concatenate(all_limits))
+            factor = np.concatenate(all_factors)[which]
+        else:
+            sq, factor = np.zeros((0, 2), np.int64), np.zeros(0)
+        factor.setflags(write=False)
+        got = self.got[key] = (sq, factor)
+        return got
 
     def squares(self, key):
         """A key's repeats: (start, end) ticks in order, none overlapping."""
-        if not len(self.starts):
-            return np.zeros((0, 2), np.int64)
-        x = min(1.0, max(0.0, (key - self.lo) / self.n))  # where the key is among the shape's keys, 0 = the lowest
-        sq = self.got.get(x)
-        if sq is None:
-            late = self.slant * x + np.floor(x * self.groups) / self.groups + self.drift * (x - 0.5)
-            if self.noisy.any():  # (the same every time: the key is the seed)
-                late = late + self.noisy * np.random.default_rng(1000 + key).random(len(late))
-            starts = self.starts + np.mod(late, 1.0) * self.waves
-            keep = starts < self.until - 1e-6
-            sq = self.got[x] = _grid(starts[keep], self.limits[keep])
-        return sq
+        return self.made(key)[0]
+
+    def factor(self, key, starts):
+        """What the effects make of the velocity of a key's notes (start ticks): 0..1 for each to multiply it by."""
+        sq, factor = self.made(key)
+        if not len(sq):
+            return np.ones(len(starts))
+        at = np.minimum(np.searchsorted(sq[:, 0], starts), len(sq) - 1)
+        return np.where(sq[at, 0] == starts, factor[at], 1.0)
 
 
 @functools.lru_cache(maxsize=16)
@@ -388,41 +481,17 @@ def key_range(sh):
 
 
 def velocity_factor(sh, ppq, starts, keys):
-    """What the velocity effects make of the velocity of a shape's notes (arrays: start ticks, keys): a number
-    from 0 to 1 for each to multiply it by, or None when no tone has such an effect. A note gets the effects of
-    the first tone that sounds where it starts."""
-    hz = sh["hz"]
-    tones = [n for n in hz["tones"] if any(name in (n.get("fx") or ()) for name in VEL_FX)]
-    if not tones or not len(starts):
+    """What the effects make of the velocity of a shape's notes (arrays: start ticks, keys): a number from 0 to 1
+    for each to multiply it by, or None when no tone has an effect that changes it."""
+    if not has_fx(sh["hz"]) or not len(starts):
         return None
-    left = left_edge(sh)
-    lo, hi = key_range(sh)
-    x = np.clip((keys - lo) / max(1, hi - lo), 0.0, 1.0)  # 0 = the lowest key, 1 = the highest
-    beat = starts / ppq - left
+    grid = squares(sh, ppq)
+    if not grid.loud:
+        return None
     out = np.ones(len(starts))
-    free = np.ones(len(starts), bool)
-    for n in tones:
-        at = np.flatnonzero(free & (beat >= n["t"] - 1e-9) & (beat < n["t"] + n["len"]))
-        if not len(at):
-            continue
-        free[at] = False
-        fx, b, xk = n["fx"], beat[at], x[at]
-        loud = np.ones(len(at))
-        if "sweep" in fx:
-            loud *= 0.08 + 0.92 * np.clip(np.cos(np.pi * (xk - fx_at(n, "sweep", b))), 0.0, 1.0) ** 4
-        if "wah" in fx:
-            loud *= (1.0 + np.cos(2.0 * np.pi * WAH * fx_at(n, "wah", b) * (xk - 0.5))) / 2.0
-        if "tremolo" in fx:  # how often it has gone up and down so far: its speed added up along the tone
-            us = np.linspace(0.0, 1.0, 513)
-            speed = fx_at(n, "tremolo", n["t"] + us * n["len"]) * TREMOLO * n["len"]
-            turns = np.concatenate([[0.0], np.cumsum((speed[1:] + speed[:-1]) / 2.0) / 512.0])
-            loud *= 0.1 + 0.9 * (1.0 + np.cos(2.0 * np.pi * np.interp((b - n["t"]) / n["len"], us, turns))) / 2.0
-        factor = np.sqrt(loud)
-        if "octave" in fx:
-            # (which repeat of the tone: the starts are whole ticks, up to half a tick before their real spot)
-            number = np.floor((starts[at] + 0.5 - (left + n["t"]) * ppq) / wave(hz, ppq, pitch(n)) + 1e-6)
-            factor = np.where(number % 2 == 1, factor * (1.0 - fx_at(n, "octave", b)), factor)
-        out[at] = factor
+    for key in np.unique(keys):
+        rows = np.flatnonzero(keys == key)
+        out[rows] = grid.factor(int(key), starts[rows])
     return out
 
 

@@ -13,11 +13,12 @@ import copy
 import tkinter as tk
 
 from files.lang import tr
-from notes.hzbass import FX, FX_START, OFF_PITCH, TREMOLO, group_count
+from notes.hzbass import FX, FX_START, OFF_PITCH, TREMOLO, VIBRATO, group_count
 from roll.roll_shared import CTRL, SHIFT
 
 FX_COLOR = {"slant": "#8a3ff0", "groups": "#0a8f8f", "offpitch": "#d0189a", "noisy": "#8a5a14",
-            "sweep": "#7f8c00", "wah": "#2c3e6b", "tremolo": "#e0607a", "octave": "#1d6b3a"}  # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
+            "vibrato": "#00a5d8", "sweep": "#7f8c00", "wah": "#2c3e6b", "tremolo": "#e0607a", "octave": "#1d6b3a",
+            "sine": "#b060c0", "square": "#606060", "saw": "#c0a000", "triangle": "#c05a30"}  # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
 
 
 def faint(colour, by=0.6):
@@ -32,7 +33,7 @@ class FxPane:
         self.active = None  # the effect highlighted
         self.drag = None
         self.says = ""  # for the window's status line
-        self.row_h, self.pad = round(16 * self.s), round(9 * self.s)
+        self.row_h, self.pad = round(15 * self.s), round(9 * self.s)
         c = self.canvas = tk.Canvas(win, background="white", highlightthickness=0,
                                     height=max(round(112 * self.s), round(8 * self.s) + len(FX) * self.row_h))
         c.bind("<Configure>", lambda e: self.redraw())
@@ -180,8 +181,9 @@ class FxPane:
             return tr("hz.fx_value_groups" if n > 1 else "hz.fx_value_together", name=tr("hz.fx_" + name), n=n)
         if name == "tremolo":
             return tr("hz.fx_value_beat", name=tr("hz.fx_" + name), n=f"{value * TREMOLO:.3g}")
-        if name == "offpitch":  # how far apart the lowest and the highest key's tones are
-            return tr("hz.fx_value", name=tr("hz.fx_" + name), value=f"{value * OFF_PITCH * 100:.3g}")
+        if name in ("offpitch", "vibrato"):  # how far apart the lowest and the highest key's tones are / how far
+            most = OFF_PITCH if name == "offpitch" else VIBRATO  # the pitch goes up and down
+            return tr("hz.fx_value", name=tr("hz.fx_" + name), value=f"{value * most * 100:.3g}")
         return tr("hz.fx_value", name=tr("hz.fx_" + name), value=f"{value * 100:.4g}")
 
     def on_press(self, e):
