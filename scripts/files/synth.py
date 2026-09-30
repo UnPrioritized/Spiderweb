@@ -282,24 +282,33 @@ class Player:
     def _fill(self, handle, buffer, length, user):
         n = length // 8
         out = np.frombuffer((ctypes.c_float * (n * 2)).from_address(buffer), np.float32).reshape(n, 2)
-        try:
-            got = self.pull(n)
-        except Exception:
-            from files.errors import write_log
-            write_log(*sys.exc_info(), "synth player")
-            got = np.zeros((0, 2), np.float32)
-        if got is None:
-            out[:] = 0
-            self.heard.append((self.written, None, n))
-            self.written += n
-            return length
-        m = len(got)
+        parts, m, end = [], 0, False  # (pull may hand over less than asked, e.g. up to the end of a piece: ask again)
+        while m < n:
+            try:
+                got = self.pull(n - m)
+            except Exception:
+                from files.errors import write_log
+                write_log(*sys.exc_info(), "synth player")
+                got = np.zeros((0, 2), np.float32)
+            if got is None:
+                break
+            if not len(got):
+                end = True
+                break
+            parts.append(np.asarray(got, np.float32))
+            m += len(got)
         if m:
-            out[:m] = self.limiter.process(np.asarray(got, np.float32)) * self.volume
+            out[:m] = self.limiter.process(np.concatenate(parts)) * self.volume
             self.heard.append((self.written, self.fed - Limiter.DELAY, m))
             self.written += m
             self.fed += m
-        return m * 8 if m == n else (m * 8) | _STREAMPROC_END
+        if end:
+            return (m * 8) | _STREAMPROC_END
+        if m < n:  # (not made yet: silence, and the song waits)
+            out[m:] = 0
+            self.heard.append((self.written, None, n - m))
+            self.written += n - m
+        return length
 
     def play(self, start=0):
         """Starts playing; start = the song frame pull() will be asked for first (only used by position)."""

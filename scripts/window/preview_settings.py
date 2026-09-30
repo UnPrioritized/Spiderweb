@@ -59,7 +59,7 @@ class PreviewSettings(tk.Toplevel):
         r += 1
 
         self.nofx = tk.BooleanVar(value=cfg["nofx"])
-        c = ttk.Checkbutton(box, text=tr("ps.nofx"), variable=self.nofx, command=self.on_nofx)
+        c = ttk.Checkbutton(box, text=tr("ps.nofx"), variable=self.nofx, command=self.on_nofx, takefocus=False)
         c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
         Tooltip(c, tr("ps.nofx_tip"))
         r += 1
@@ -86,6 +86,7 @@ class PreviewSettings(tk.Toplevel):
             row=r, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
         self.bind("<Escape>", lambda e: self.destroy())
+        self.bind("<space>", lambda e: self.win.on_space(e) if self.focus_get() is not self.voices_entry else None)
         self.on_volume()
         self.update_idletasks()  # (next to the Hz bass window's top right)
         x = win.winfo_rootx() + max(0, win.winfo_width() - self.winfo_reqwidth() - round(20 * s))

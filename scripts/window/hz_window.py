@@ -109,7 +109,8 @@ class HzWindow(tk.Toplevel):
         self.tool = tk.StringVar(value="pencil")
         f = piece()
         for key in ("select", "pencil"):
-            b = ttk.Radiobutton(f, text=tr("hz." + key), value=key, variable=self.tool, style="Toolbutton")
+            b = ttk.Radiobutton(f, text=tr("hz." + key), value=key, variable=self.tool, style="Toolbutton",
+                                takefocus=False)
             b.pack(side="left")
             Tooltip(b, tr(f"hz.{key}_tip"))
         f = piece()
@@ -135,10 +136,11 @@ class HzWindow(tk.Toplevel):
         f = piece()
         self.preview_on = tk.BooleanVar(value=False)
         b = ttk.Checkbutton(f, text=tr("hz.preview"), variable=self.preview_on, command=self.on_preview,
-                            style="Toolbutton")
+                            style="Toolbutton", takefocus=False)
         b.pack(side="left")
         Tooltip(b, tr("hz.preview_tip"))
-        b = ttk.Button(f, text=tr("hz.preview_settings"), command=lambda: open_preview_settings(self))
+        b = ttk.Button(f, text=tr("hz.preview_settings"), command=lambda: open_preview_settings(self),
+                       takefocus=False)
         b.pack(side="left", padx=(4, 0))
         Tooltip(b, tr("hz.preview_settings_tip"))
         self.preview_says = ttk.Label(f, text="", foreground="#555")
@@ -148,7 +150,8 @@ class HzWindow(tk.Toplevel):
         self.what = ttk.Label(f, text="", foreground="#555")
         self.what.pack(side="left", padx=(0, 10))
         f = piece("right")
-        fx_box = ttk.Checkbutton(f, text=tr("hz.fx"), variable=app.hz_fx, command=self.on_fx, style="Toolbutton")
+        fx_box = ttk.Checkbutton(f, text=tr("hz.fx"), variable=app.hz_fx, command=self.on_fx, style="Toolbutton",
+                                 takefocus=False)
         fx_box.pack(side="left", padx=(0, 10))
         Tooltip(fx_box, tr("hz.fx_tip"))
         line_box = ttk.Checkbutton(f, text=tr("hz.line"), variable=app.hz_line, command=self.on_line)
@@ -193,7 +196,7 @@ class HzWindow(tk.Toplevel):
         c.bind("<MouseWheel>", self.on_wheel)
         c.bind("<Delete>", lambda e: self.delete_selected() or "break")
         c.bind("<Escape>", lambda e: self.select(()) or "break")
-        c.bind("<space>", self.on_space)
+        self.bind("<space>", self.on_space)  # (anywhere in the window: the buttons don't take the keyboard)
         for k in ("<Control-a>", "<Control-A>"):
             c.bind(k, lambda e: self.select(range(len(self.tones))) or "break")
         for k, tool in (("p", "pencil"), ("P", "pencil"), ("v", "select"), ("V", "select")):
@@ -1070,6 +1073,7 @@ class HzWindow(tk.Toplevel):
             cfg["on"] = True
         self.app.schedule_autosave()
         self.redraw()
+        self.canvas.focus_set()  # (so Space plays)
 
     def preview_failed(self, err):
         """The synth or the soundfont didn't work: the preview goes off and says why."""
