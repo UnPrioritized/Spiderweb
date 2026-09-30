@@ -260,19 +260,55 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 return i
         return None
 
+    @staticmethod
+    def pick_strokes(sh):
+        """The lines a shape can be picked by: its own, the faint dashed line as drawn (under tumours / a formula)
+        and a funnel's curves."""
+        strokes = cached_strokes(sh)
+        if sh.get("pattern") or sh.get("shape") or any(tm["on"] for tm in all_tumours(sh)):
+            strokes = strokes + cached_strokes(dict(sh, tumour=None, tumours=None, pattern=None, shape=None))
+        if sh["kind"] == "funnel":
+            strokes = strokes + funnel_origins(sh)
+        return strokes
+
+    def shapes_in_box(self, x0, y0, x1, y1):
+        """The shapes a box on screen (x0 < x1, y0 < y1) touches: a piece of their line, or one of their notes
+        while the notes are shown."""
+        found = set()
+        for i, sh in enumerate(self.app.shapes):
+            for stroke in self.pick_strokes(sh):
+                pts = np.asarray(stroke, float).reshape(-1, 2)
+                px, py = self.t2x(pts[:, 0]), self.p2y(pts[:, 1])
+                if len(pts) == 1:
+                    hit = x0 <= px[0] <= x1 and y0 <= py[0] <= y1
+                else:  # each piece clipped to the box (Liang-Barsky): something is left = it touches
+                    ax, ay, dx, dy = px[:-1], py[:-1], np.diff(px), np.diff(py)
+                    t0, t1, out = np.zeros(len(ax)), np.ones(len(ax)), np.zeros(len(ax), bool)
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        for p, q in ((-dx, ax - x0), (dx, x1 - ax), (-dy, ay - y0), (dy, y1 - ay)):
+                            out |= (p == 0) & (q < 0)
+                            r = q / p
+                            t0 = np.where(p < 0, np.maximum(t0, r), t0)
+                            t1 = np.where(p > 0, np.minimum(t1, r), t1)
+                    hit = bool((~out & (t0 <= t1)).any())
+                if hit:
+                    found.add(i)
+                    break
+        if self.app.show_notes.get() and len(self.app.rendered):
+            ppq = self.app.ppq
+            t0, t1 = self.x2t(x0) * ppq, self.x2t(x1) * ppq
+            ns = self.visible_notes(t0, t1)
+            k0, k1 = math.floor(self.y2p(y1) + 0.5), math.floor(self.y2p(y0) + 0.5)
+            ns = ns[(ns[:, 2] >= k0) & (ns[:, 2] <= k1) & (ns[:, 0] <= t1) & (ns[:, 1] >= t0)]
+            found.update(int(v) for v in np.unique(ns[:, 5]) if 0 <= v < len(self.app.shapes))
+        return found
+
     def hit_shape(self, x, y, among=None):
         """The shape whose line is near x, y (the one on top first), else the one on top whose inside it is.
         among: just these shape numbers (top first)."""
         order = range(len(self.app.shapes) - 1, -1, -1) if among is None else among
         for i in order:
-            sh = self.app.shapes[i]
-            strokes = cached_strokes(sh)
-            # the faint dashed line as drawn (under tumours / a formula) counts too
-            if sh.get("pattern") or sh.get("shape") or any(tm["on"] for tm in all_tumours(sh)):
-                strokes = strokes + cached_strokes(dict(sh, tumour=None, tumours=None, pattern=None, shape=None))
-            if sh["kind"] == "funnel":  # its curves' too
-                strokes = strokes + funnel_origins(sh)
-            for stroke in strokes:  # (every piece of the line at once: a line with a formula has thousands)
+            for stroke in self.pick_strokes(self.app.shapes[i]):  # (every piece at once: a formula line has thousands)
                 pts = np.asarray(stroke, float).reshape(-1, 2)
                 px, py = self.t2x(pts[:, 0]), self.p2y(pts[:, 1])
                 if len(pts) == 1 and math.hypot(px[0] - x, py[0] - y) < PICK:
@@ -384,18 +420,15 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if part and e.state & CTRL:  # Ctrl+click: highlight just this one too (or not any more)
                 app.set_parts(app.parts ^ {part})
                 return
-            if e.state & CTRL:  # Ctrl+click adds or removes a shape
-                if i is not None:
-                    app.select(i, toggle=True)
-                if i is None or i not in app.sels:
-                    self.start_pan(e)
-                    self.drag = ("pan",)
-                    return
-            elif i is None:
-                app.select(None)
-                self.start_pan(e)
-                self.drag = ("pan", e.x, e.y)  # a click without dragging moves the play line here
+            if i is None:  # a box that selects the shapes it touches (Ctrl: adds them to the ones selected);
+                if not e.state & CTRL:  # a click without dragging moves the play line here
+                    app.select(None)
+                self.drag = ("box", e.x, e.y, e.x, e.y, set(app.sels), app.sel)
                 return
+            if e.state & CTRL:  # Ctrl+click adds or removes a shape
+                app.select(i, toggle=True)
+                if i not in app.sels:
+                    return
             elif i not in app.sels:
                 app.select(i)
             elif i != app.sel:
@@ -461,6 +494,14 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         kind = self.drag[0]
         if kind == "pan":
             self.pan_to(e)
+        elif kind == "box":
+            _, x, y, _, _, base, primary = self.drag
+            self.drag = ("box", x, y, max(e.x, self.kb_w), max(e.y, self.ruler_h), base, primary)
+            (x0, x1), (y0, y1) = sorted((x, self.drag[3])), sorted((y, self.drag[4]))
+            found = self.shapes_in_box(x0, y0, x1, y1) - base
+            if base | found != self.app.sels:
+                self.app.select_many(base | found, max(found) if found else primary)
+            self.draw_select_box()
         elif kind == "textsel":
             self.text_drag(e)
         elif kind == "seek":
@@ -589,7 +630,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return
         if kind == "seek" and self.drag[1]:
             self.app.start_play()  # it was playing: carry on from the new spot
-        elif kind == "pan" and len(self.drag) > 1 and abs(e.x - self.drag[1]) < 4 and abs(e.y - self.drag[2]) < 4:
+        elif kind == "box" and abs(e.x - self.drag[1]) < 4 and abs(e.y - self.drag[2]) < 4 and not e.state & CTRL:
             playing = self.app.player.running
             self.app.stop_play()
             self.app.set_playhead(self.event_pt(e)[0])
@@ -658,6 +699,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if kind in ("handle", "move"):
             self.app.sync_funnel()  # its note count
         self.drag = None
+        self.delete("selbox")
 
     def on_double(self, e):
         # Tk turns a quick second click into a double-click; only polylines use it, everything else gets a normal click

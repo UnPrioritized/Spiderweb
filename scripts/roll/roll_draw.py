@@ -168,11 +168,19 @@ class RollDrawing:
             self.draw_path(self.draft, "#0a8f0a", 2)
             self.draw_draft_points()
         self.draw_hz_start()
+        self.draw_select_box()
         self.draw_keyboard(h)
         self.draw_ruler(w)
         self.draw_playhead()
         if self.typing:
             self.show_caret()
+
+    def draw_select_box(self):
+        """The dotted box being dragged with Select."""
+        self.delete("selbox")
+        if self.drag and self.drag[0] == "box":
+            x0, y0, x1, y1 = self.drag[1:5]
+            self.create_rectangle(x0, y0, x1, y1, outline="#000000", dash=(2, 2), tags="selbox")
 
     def draw_playhead(self):
         self.delete("playhead")

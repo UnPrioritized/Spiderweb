@@ -5,7 +5,7 @@ import copy
 import math
 import tkinter as tk
 
-from roll.roll_shared import SHIFT
+from roll.roll_shared import SELECT_CURSOR, SHIFT
 
 
 class CustomBox:
@@ -95,7 +95,7 @@ class CustomBox:
             return self.arrow_cursor(bx - ax, by - ay)
         if kind == "inside" and self.app.tool.get() == "select":
             return "fleur"
-        return {"select": "arrow", "text": "xterm"}.get(self.app.tool.get(), "crosshair")
+        return {"select": SELECT_CURSOR, "text": "xterm"}.get(self.app.tool.get(), "crosshair")
 
     @staticmethod
     def arrow_cursor(dx, dy):
@@ -104,11 +104,12 @@ class CustomBox:
         return ("size_we", "size_ne_sw", "size_ns", "size_nw_se")[int((a + 22.5) // 45) % 4]
 
     def set_cursor(self, name):
-        if str(self.cget("cursor")) != name:
+        if getattr(self, "_cursor", None) != name:
+            self._cursor = name
             try:
                 self.config(cursor=name)
-            except tk.TclError:
-                self.config(cursor="fleur")
+            except tk.TclError:  # (the select pointer's file can't be read: an arrow)
+                self.config(cursor="arrow" if name == SELECT_CURSOR else "fleur")
 
     @staticmethod
     def grid_aligned(pts):

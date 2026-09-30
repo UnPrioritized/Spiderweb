@@ -2,6 +2,9 @@
 caches."""
 
 import ctypes
+import os
+
+from files.about import ICONS
 
 from notes.engine import cached_path, cached_strokes  # (used from here by the piano roll's parts)
 
@@ -65,6 +68,8 @@ SELECTED_COLOR = ("#ffb65c", "#9a4b00")
 DRAFT_COLOR = ("#9be39b", "#1d6b1d")
 
 SHIFT, CTRL, ALT = 0x1, 0x4, 0x20000
+# the Select tool's mouse pointer: a cross (its middle = the spot pointed at) with a small dotted box
+SELECT_CURSOR = "{@" + os.path.join(ICONS, "select.cur").replace("\\", "/") + "}"
 PIANO_88 = range(21, 109)  # A0 to C8, the keys of a real piano
 
 

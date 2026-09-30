@@ -1,6 +1,6 @@
 """The Hz bass window (hzbass.py): a small piano roll where the tones of a Hz bass are placed. Pressing the mouse
 places a note at once, and it follows the mouse (snapped to the nearest grid line; Shift = not) until the button is let go; a note that's
-there is moved the same way, either end changes its length, Ctrl+drag selects with a box, Delete removes the
+there is moved the same way, either end changes its length, Ctrl+drag (or a drag with Select) selects with a box, Delete removes the
 selected ones, a double click removes the note under it. The key of the note held with the mouse sounds on the MIDI-out device. The window has its own snap.
 Under the notes: the effects pane (hz_effects.py), showing the effect lines of the note clicked last.
 The red line is the tone travelling through the notes: it jumps at the next note unless its dots are dragged (lead
@@ -28,7 +28,7 @@ from notes.engine import slot_track_channel
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
 from notes.hzbass import (FX, HZ_DEFAULTS, TUNE, can_slide, clean_tones, fit_length, glide, heard, hz_of, left_edge,
                           links, next_id, pitch, tones_span)
-from roll.roll_shared import ALT, CTRL, SELECTED_COLOR, SHIFT, SLOT_COLORS, note_name
+from roll.roll_shared import ALT, CTRL, SELECT_CURSOR, SELECTED_COLOR, SHIFT, SLOT_COLORS, note_name
 from window.hz_effects import FX_COLOR, FxPane
 from window.snap_picker import SnapPicker
 from window.widgets import Tooltip
@@ -86,7 +86,12 @@ class HzWindow(tk.Toplevel):
 
         bar = ttk.Frame(self, padding=(8, 6, 8, 4))
         bar.pack(fill="x")
-        ttk.Label(bar, text=tr("app.snap")).pack(side="left")
+        self.tool = tk.StringVar(value="pencil")
+        for key in ("pencil", "select"):
+            b = ttk.Radiobutton(bar, text=tr("hz." + key), value=key, variable=self.tool, style="Toolbutton")
+            b.pack(side="left")
+            Tooltip(b, tr(f"hz.{key}_tip"))
+        ttk.Label(bar, text=tr("app.snap")).pack(side="left", padx=(10, 0))
         SnapPicker(app, bar, app.hz_snap).button.pack(side="left", padx=(4, 10))
         ttk.Button(bar, text=tr("app.fit_view"), command=self.fit_notes).pack(side="left", padx=(0, 10))
         ttk.Label(bar, text=tr("hz.gates")).pack(side="left")
@@ -139,6 +144,8 @@ class HzWindow(tk.Toplevel):
         c.bind("<Escape>", lambda e: self.select(()) or "break")
         for k in ("<Control-a>", "<Control-A>"):
             c.bind(k, lambda e: self.select(range(len(self.tones))) or "break")
+        for k, tool in (("p", "pencil"), ("P", "pencil"), ("v", "select"), ("V", "select")):
+            c.bind(f"<KeyPress-{k}>", lambda e, tool=tool: self.tool.set(tool) or self.on_motion(e) or "break")
         self.bind("<Configure>", self.remember)
         self.protocol("WM_DELETE_WINDOW", self.close)
         c.focus_set()
@@ -332,7 +339,7 @@ class HzWindow(tk.Toplevel):
             r = 3.5 * s
             c.create_oval(x - r, y - r, x + r, y + r, fill="white", outline=RED, width=max(1, round(1.5 * s)))
         if self.drag and self.drag["kind"] == "box":
-            c.create_rectangle(*self.drag["from"], *self.drag["to"], outline="#3060c0", dash=(3, 2))
+            c.create_rectangle(*self.drag["from"], *self.drag["to"], outline="#000000", dash=(2, 2))
         c.create_rectangle(0, 0, kb, h, fill="#fafafa", outline="")  # keys
         for k in range(k_lo, k_hi + 1):
             y = self.y_of(k)
@@ -511,8 +518,9 @@ class HzWindow(tk.Toplevel):
     def on_motion(self, e):
         hit = self.hit(e.x, e.y)
         # a pencil where a press places a note (not on the keys or bar numbers, not with Ctrl: that's the box)
-        empty = self.pencil if (self.can_place() and e.x >= self.kb_w and e.y >= self.ruler_h
-                             and not e.state & CTRL) else ""
+        inside = e.x >= self.kb_w and e.y >= self.ruler_h
+        empty = (SELECT_CURSOR if inside and self.tool.get() == "select" else
+                 self.pencil if inside and self.can_place() and not e.state & CTRL else "")
         self.canvas.config(cursor={"in": "sb_h_double_arrow", "out": "sb_h_double_arrow", "left": "sb_h_double_arrow",
                                    "right": "sb_h_double_arrow", "tune": "sb_v_double_arrow",
                                    "note": "fleur"}.get(hit and hit[0], empty))
@@ -530,9 +538,10 @@ class HzWindow(tk.Toplevel):
         if hit is None:
             if e.x < self.kb_w or e.y < self.ruler_h:
                 return
-            if e.state & CTRL:  # a box that selects the notes it touches
-                self.sel = set()
-                self.drag = {"kind": "box", "from": (e.x, e.y), "to": (e.x, e.y)}
+            if e.state & CTRL or self.tool.get() == "select":  # a box that selects the notes it touches
+                base = set(self.sel) if e.state & CTRL and self.tool.get() == "select" else set()
+                self.sel = set(base)
+                self.drag = {"kind": "box", "from": (e.x, e.y), "to": (e.x, e.y), "base": base}
                 return self.redraw()
             if not self.can_place():
                 return
@@ -576,7 +585,7 @@ class HzWindow(tk.Toplevel):
         if d["kind"] == "box":
             d["to"] = (max(e.x, self.kb_w), max(e.y, self.ruler_h))
             (x0, x1), (y0, y1) = (sorted(v) for v in zip(d["from"], d["to"]))
-            self.sel = {i for i, n in enumerate(self.tones)
+            self.sel = d["base"] | {i for i, n in enumerate(self.tones)
                         if self.x_of(n["t"]) <= x1 and self.x_of(n["t"] + n["len"]) >= x0
                         and self.y_of(n["key"]) <= y1 and self.y_of(n["key"]) + self.sy >= y0}
             return self.redraw()
