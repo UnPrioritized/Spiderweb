@@ -103,7 +103,9 @@ Double-click Spiderweb.bat. If NumPy
 isn't installed yet, Spiderweb offers to install it for you; or type
   pip install numpy
 in a command prompt.
-Playback uses Windows' built-in MIDI output.
+Playback uses Windows' built-in MIDI output. The Hz bass window's Preview
+uses the built-in synth instead (BASS, in scripts/bass; no MIDI device needed)
+with a soundfont you pick.
 
 Building the .exe yourself
 --------------------------
