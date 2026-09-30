@@ -7,6 +7,16 @@ from notes.engine import cached_path, cached_strokes  # (used from here by the p
 
 PREVIEW_LIMIT = 200_000  # a custom shape / funnel being drawn with more notes than this previews as its outline only
 PICK = 10  # how near (screen pixels) the mouse must be to a shape's line / stroke / funnel part to pick it
+LONG_STROKE = 64  # a stroke with more points than this (freehand) shows only some of them until it's picked
+
+
+def shown_points(n, picked):
+    """Point numbers a stroke of n points shows: all when picked or short, else evenly spread ones (at most
+    LONG_STROKE, both ends included), so every stroke has some to grab."""
+    if picked or n <= LONG_STROKE:
+        return range(n)
+    step = -(-(n - 1) // (LONG_STROKE - 1))
+    return sorted({*range(0, n, step), n - 1})
 
 
 class _MouseMovePoint(ctypes.Structure):

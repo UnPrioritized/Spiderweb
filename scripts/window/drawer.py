@@ -14,7 +14,7 @@ from notes.custom import clean_strokes, join_strokes, open_ends, open_paths, str
 from notes.pattern import has_formula, moved_formulas
 from files.about import HERE
 from files.safefile import write_text
-from roll.roll_shared import mouse_trail
+from roll.roll_shared import mouse_trail, shown_points
 from window.help import open_help
 from window.formula_host import DrawerHost, formula_menu
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
@@ -382,7 +382,7 @@ class Drawer(tk.Toplevel):
 
     def handles(self):
         """Draggable points: [(stroke index, point index or ellipse corner, u, v)], the selected stroke first.
-        Long strokes (freehand) only show their points when selected."""
+        Long strokes (freehand) show only some of their points until selected."""
         order = ([self.sel] if self.sel is not None else []) + [i for i in range(len(self.strokes) - 1, -1, -1)
                                                               if i != self.sel]
         out = []
@@ -393,8 +393,8 @@ class Drawer(tk.Toplevel):
                 out += [(i, k, u, v) for k, (u, v) in enumerate(((u0, v0), (u1, v0), (u1, v1), (u0, v1)))]
             elif st["kind"] == "curve":  # its anchors and handles only when selected (anchors on top)
                 out += [(i, j, *st["pts"][j]) for j, _ in reversed(pen_handles(st["pts"], i == self.sel))]
-            elif len(st["pts"]) <= 64 or i == self.sel:
-                out += [(i, j, u, v) for j, (u, v) in enumerate(st["pts"])]
+            else:
+                out += [(i, j, *st["pts"][j]) for j in shown_points(len(st["pts"]), i == self.sel)]
         return out
 
     def is_pen_point(self, i, j):

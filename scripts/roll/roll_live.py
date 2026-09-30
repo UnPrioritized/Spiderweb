@@ -15,11 +15,10 @@ from notes.custom import (add_stroke, box_frame, custom_settings, frame_to_bp, f
                           new_live_shape, refit, stroke_bp, stroke_ends)
 from notes.polygon import polygon_aspect, polygon_strokes
 from roll.roll_funnel import seg_dist
-from roll.roll_shared import ALT, PICK, cached_strokes
+from roll.roll_shared import ALT, PICK, cached_strokes, shown_points
 
 STROKE_TOOLS = ("line", "poly", "free", "curve", "arc", "circle", "polygon")
 BOX_TOOLS = ("circle", "polygon")  # always make custom shapes (their own, or strokes of the live one)
-LONG_STROKE = 64  # a stroke with more points than this (freehand) only shows them when picked, like the drawer
 
 
 class LiveDrawing:
@@ -161,14 +160,13 @@ class LiveDrawing:
 
     def point_strokes(self, sh):
         """The strokes of the selected custom shape whose points show (and drag with the Select tool): all of them
-        with Live shape on (long freehand strokes only when picked), else just the picked one. Not for text or
-        pasted notes."""
+        with Live shape on (long freehand strokes show some of theirs until picked, see stroke_handles), else just
+        the picked one. Not for text or pasted notes."""
         if sh.get("text") or "notes" in sh:
             return []
         k = self.picked_stroke(sh)
         if self.app.live.get() and len(self.app.sels) == 1:
-            return [i for i, st in enumerate(sh["strokes"]) if i == k or st["kind"] == "ellipse"
-                    or len(st["pts"]) <= LONG_STROKE]
+            return list(range(len(sh["strokes"])))
         return [] if k is None else [k]
 
     @staticmethod
@@ -190,8 +188,12 @@ class LiveDrawing:
         points (Select tool, see point_strokes); ("ctrl" / "anchor", point number) = the picked curve stroke's
         anchors and handles (any tool, on top)."""
         to_bp = frame_to_bp(sh["pts"])
-        out = [(*to_bp(*p), ("pt", k, j), False) for k in self.point_strokes(sh)
-               for j, p in self.stroke_spots(sh["strokes"][k])]
+        picked = self.picked_stroke(sh)
+        out = []
+        for k in self.point_strokes(sh):
+            spots = self.stroke_spots(sh["strokes"][k])
+            out += [(*to_bp(*spots[j][1]), ("pt", k, spots[j][0]), False)
+                    for j in shown_points(len(spots), k == picked)]
         st = self.stroke_curve(sh)
         if st:
             out += [(*to_bp(*st["pts"][j]), (kind, j), True) for j, kind in pen_handles(st["pts"]) if kind != "end"]
