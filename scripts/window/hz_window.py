@@ -15,6 +15,7 @@ import math
 import os
 import re
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import simpledialog, ttk
 
 import numpy as np
@@ -25,7 +26,7 @@ from files.mathexpr import fmt
 from files.snap import snap_beats
 from notes.engine import slot_track_channel
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
-from notes.hzbass import (HZ_DEFAULTS, TUNE, can_slide, clean_tones, fit_length, glide, heard, hz_of, left_edge,
+from notes.hzbass import (FX, HZ_DEFAULTS, TUNE, can_slide, clean_tones, fit_length, glide, heard, hz_of, left_edge,
                           links, next_id, pitch, tones_span)
 from roll.roll_shared import ALT, CTRL, SELECTED_COLOR, SHIFT, SLOT_COLORS, note_name
 from window.hz_effects import FX_COLOR, FxPane
@@ -78,6 +79,8 @@ class HzWindow(tk.Toplevel):
         self.last = None  # the id of the note clicked last: the effects pane shows its lines
         self.drop_hover, self.drop_colour = None, RED  # the note an effect is being dragged onto
         self.kb_w, self.ruler_h = round(44 * s), round(18 * s)
+        names = tkfont.Font(family="Segoe UI", size=8, weight="bold")  # the keys column: wide enough for the
+        self.kb_w = max(self.kb_w, round(20 * s) + max(names.measure(tr("hz.fx_" + n)) for n in FX))  # effects' names
         self.sx, self.sy, self.t0, self.top = 80.0 * s, 12.0 * s, -0.25, 64.0
         self.fitted = False
 
@@ -315,10 +318,12 @@ class HzWindow(tk.Toplevel):
             x0, x1, y = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
             fill, edge = SELECTED_COLOR if i in self.sel else SLOT_COLORS[0]
             c.create_rectangle(x0, y + 1, max(x1, x0 + 2), y + self.sy - 1, fill=fill, outline=edge)
-            for j, name in enumerate(n.get("fx") or ()):  # its effects: a strip of each one's colour at the bottom
+            names = [name for name in FX if name in (n.get("fx") or ())]
+            for j, name in enumerate(names):  # its effects: a strip along the bottom, a piece in each one's colour
                 if self.sy >= 6 * s:
-                    c.create_line(x0 + 1, y + self.sy - 2 - 2 * j, max(x1, x0 + 2), y + self.sy - 2 - 2 * j,
-                                  fill=FX_COLOR[name], width=2)
+                    a, b = (x0 + 1 + (max(x1, x0 + 2) - x0 - 1) * k / len(names) for k in (j, j + 1))
+                    c.create_rectangle(a, y + self.sy - 1 - max(2, round(3 * s)), b, y + self.sy - 1,
+                                       fill=FX_COLOR[name], outline="")
             if i == self.drop_hover:
                 c.create_rectangle(x0 - 1, y, max(x1, x0 + 2) + 1, y + self.sy, outline=self.drop_colour, width=2)
         if self.app.hz_line.get():

@@ -23,9 +23,16 @@ hz["grow"] = the shape is kept as long as its tones (fit_length). hz["own"] = ma
 that is nothing but its tones (it goes when its last tone is deleted; the panel shows the keys it repeats).
 
 Effects: a tone can have "fx" = {effect: [[u, value], ...]}: a line through points, u = 0..1 along the tone, value
-0..1. They change the colour of the tone, not its pitch. "slant": every key starts its repeats a bit later than the
-key below it; the value is how much of one wave the shape's keys are spread over (0 = all together). With effects
-every key has its own repeats (KeyGrid, custom.chop_keys); without any, nothing changes."""
+0..1. They change the colour of the tone, not its pitch, by making the keys hit at different spots of the wave
+(how late a key is, in waves, is added up over the effects; only the part after the comma counts):
+  "slant": every key starts its repeats a bit later than the key below it; the value is how much of one wave the
+  shape's keys are spread over (0 = all together).
+  "groups": the keys take turns in groups, evenly spread over the wave: 0 = all together, then 2, 3... up to
+  GROUPS groups at 1 (group_count).
+  "offpitch": every key repeats a little faster or slower than the tone, the lowest key the fastest, the highest
+  the slowest: the keys drift apart and meet again by themselves. 1 = OFF_PITCH of the tone between them.
+  "noisy": every repeat of every key is late by a random bit, up to the value of one wave.
+With effects every key has its own repeats (KeyGrid, custom.chop_keys); without any, nothing changes."""
 
 import functools
 import json
@@ -36,8 +43,16 @@ import numpy as np
 HZ_DEFAULTS = {"key": 33, "cents": 0.0}
 MIN_LEN = 1 / 1024  # beats: a tone is never shorter
 TUNE = 50.0  # cents: how far a placed tone's own tune goes, up or down (half a key)
-FX = ("slant",)  # the effects a placed tone can have
-FX_START = {"slant": [[0.0, 0.0], [1.0, 1.0]]}  # the line an effect starts with
+FX = ("slant", "groups", "offpitch", "noisy")  # the effects a placed tone can have
+FX_START = {"slant": [[0.0, 0.0], [1.0, 1.0]], "groups": [[0.0, 0.0], [1.0, 1.0]],  # the line an effect starts with
+            "offpitch": [[0.0, 0.5], [1.0, 0.5]], "noisy": [[0.0, 0.0], [1.0, 1.0]]}
+GROUPS = 6  # "groups" at 1
+OFF_PITCH = 0.02  # "offpitch" at 1: the highest key's tone is this much (x the tone) below the lowest key's
+
+
+def group_count(value):
+    """How many groups the keys take turns in at a "groups" value (an array or a number)."""
+    return 1 + np.floor(np.asarray(value) * (GROUPS - 1) + 0.5).astype(np.int64)
 
 
 def hz_of(key, cents=0.0):
@@ -314,7 +329,11 @@ class KeyGrid:
         self.starts = np.concatenate([s for s, _, _ in runs]) if runs else np.zeros(0)
         if runs:
             self.waves = np.concatenate([e - s for s, e, _ in runs])
-            self.slant = np.concatenate([self.value("slant", whose, s / ppq - left) for s, _, whose in runs])
+            fx = {name: [self.value(name, whose, s / ppq - left) for s, _, whose in runs] for name in FX}
+            self.slant, self.noisy = np.concatenate(fx["slant"]), np.concatenate(fx["noisy"])
+            self.groups = group_count(np.concatenate(fx["groups"]))
+            # off pitch: every repeat moves the key on by a bit of a wave, so it adds up along the stretch of tone
+            self.drift = np.concatenate([np.cumsum(v) * OFF_PITCH for v in fx["offpitch"]])
             self.limits = _limits(hz["tones"], left, ppq, self.starts)
             # a repeat moved past its own tone's end is left out (the next tone may touch it: not its sound)
             self.until = np.concatenate([np.full(len(s), (left + a["t"] + a["len"]) * ppq if b is None else np.inf)
@@ -336,7 +355,10 @@ class KeyGrid:
         x = min(1.0, max(0.0, (key - self.lo) / self.n))  # where the key is among the shape's keys, 0 = the lowest
         sq = self.got.get(x)
         if sq is None:
-            starts = self.starts + self.slant * x * self.waves
+            late = self.slant * x + np.floor(x * self.groups) / self.groups + self.drift * (x - 0.5)
+            if self.noisy.any():  # (the same every time: the key is the seed)
+                late = late + self.noisy * np.random.default_rng(1000 + key).random(len(late))
+            starts = self.starts + np.mod(late, 1.0) * self.waves
             keep = starts < self.until - 1e-6
             sq = self.got[x] = _grid(starts[keep], self.limits[keep])
         return sq

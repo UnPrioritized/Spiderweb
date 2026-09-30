@@ -13,13 +13,13 @@ import copy
 import tkinter as tk
 
 from files.lang import tr
-from notes.hzbass import FX, FX_START
+from notes.hzbass import FX, FX_START, OFF_PITCH, group_count
 from roll.roll_shared import CTRL, SHIFT
 
-FX_COLOR = {"slant": "#8a3ff0"}  # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
+FX_COLOR = {"slant": "#8a3ff0", "groups": "#0a8f8f", "offpitch": "#d0189a", "noisy": "#8a5a14"}  # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
 
 
-def faint(colour, by=0.72):
+def faint(colour, by=0.6):
     """colour mixed with white."""
     r, g, b = (int(colour[i:i + 2], 16) for i in (1, 3, 5))
     return "#%02x%02x%02x" % tuple(round(v + (255 - v) * by) for v in (r, g, b))
@@ -173,6 +173,11 @@ class FxPane:
 
     @staticmethod
     def value_text(name, value):
+        if name == "groups":
+            n = int(group_count(value))
+            return tr("hz.fx_value_groups" if n > 1 else "hz.fx_value_together", name=tr("hz.fx_" + name), n=n)
+        if name == "offpitch":  # how far apart the lowest and the highest key's tones are
+            return tr("hz.fx_value", name=tr("hz.fx_" + name), value=f"{value * OFF_PITCH * 100:.3g}")
         return tr("hz.fx_value", name=tr("hz.fx_" + name), value=f"{value * 100:.4g}")
 
     def on_press(self, e):
@@ -258,6 +263,7 @@ class FxPane:
         if not d:
             return
         if d["kind"] == "point":
+            self.says = ""
             if win.tones != d["before"]:
                 win.commit(tr("hz.step_fx"), d["before"])
             return
