@@ -155,6 +155,7 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self.snap = tk.StringVar(value=DEFAULT_SNAP)
         self.hz_snap = tk.StringVar(value=DEFAULT_SNAP)  # the Hz bass window's own snap
         self.hz_line = tk.BooleanVar(value=True)  # the Hz bass window shows its red line
+        self.hz_fx = tk.BooleanVar(value=False)  # the Hz bass window shows its effects pane
         self.show_lines = tk.BooleanVar(value=True)
         self.show_notes = tk.BooleanVar(value=True)
         self.channel_mode = tk.StringVar(value="single")

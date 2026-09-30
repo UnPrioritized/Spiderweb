@@ -88,45 +88,69 @@ class HzWindow(tk.Toplevel):
         self.sx, self.sy, self.t0, self.top = 80.0 * s, 12.0 * s, -0.25, 64.0
         self.fitted = False
 
-        bar = ttk.Frame(self, padding=(8, 6, 8, 4))
+        # The toolbar: pieces that stay together; when the window is too narrow for one row, they wrap to a second
+        # (layout)
+        bar = self.bar = ttk.Frame(self, padding=(8, 6, 8, 4))
         bar.pack(fill="x")
+        self.rows = [ttk.Frame(bar), ttk.Frame(bar)]
+        self.pieces = []  # (frame, side)
+
+        def piece(side="left"):
+            f = ttk.Frame(bar)
+            self.pieces.append((f, side))
+            return f
+
         self.tool = tk.StringVar(value="pencil")
+        f = piece()
         for key in ("select", "pencil"):
-            b = ttk.Radiobutton(bar, text=tr("hz." + key), value=key, variable=self.tool, style="Toolbutton")
+            b = ttk.Radiobutton(f, text=tr("hz." + key), value=key, variable=self.tool, style="Toolbutton")
             b.pack(side="left")
             Tooltip(b, tr(f"hz.{key}_tip"))
-        ttk.Label(bar, text=tr("app.snap")).pack(side="left", padx=(10, 0))
-        SnapPicker(app, bar, app.hz_snap).button.pack(side="left", padx=(4, 10))
-        ttk.Button(bar, text=tr("app.fit_view"), command=self.fit_notes).pack(side="left", padx=(0, 10))
-        ttk.Label(bar, text=tr("hz.gates")).pack(side="left")
-        self.gates = ttk.Combobox(bar, values=[tr("panel_custom.hz_mixed"), tr("panel_custom.hz_fixed")],
+        f = piece()
+        ttk.Label(f, text=tr("app.snap")).pack(side="left", padx=(10, 0))
+        SnapPicker(app, f, app.hz_snap).button.pack(side="left", padx=(4, 10))
+        ttk.Button(f, text=tr("app.fit_view"), command=self.fit_notes).pack(side="left", padx=(0, 10))
+        f = piece()
+        ttk.Label(f, text=tr("hz.gates")).pack(side="left")
+        self.gates = ttk.Combobox(f, values=[tr("panel_custom.hz_mixed"), tr("panel_custom.hz_fixed")],
                                   state="readonly", width=7)
         self.gates.current(0)
         self.gates.pack(side="left", padx=(4, 10))
         self.gates.bind("<<ComboboxSelected>>", self.on_gates)
         Tooltip(self.gates, tr("panel_custom.hz_gates_tip"))
-        ttk.Label(bar, text=tr("app.ppq")).pack(side="left")  # the project's PPQ: the same box as under Project
-        ppq = ttk.Combobox(bar, textvariable=app.pvar["ppq"], values=app.ppq_box["values"], width=7,
+        f = piece()
+        ttk.Label(f, text=tr("app.ppq")).pack(side="left")  # the project's PPQ: the same box as under Project
+        ppq = ttk.Combobox(f, textvariable=app.pvar["ppq"], values=app.ppq_box["values"], width=7,
                            height=12)
         ppq.pack(side="left", padx=(4, 10))
         Tooltip(ppq, tr("hz.ppq_tip"))
         self.ppq_trace = app.pvar["ppq"].trace_add(
             "write", lambda *a: self.after_idle(lambda: self.winfo_exists() and self.redraw()))
-        self.what = ttk.Label(bar, text="", foreground="#555")
-        self.what.pack(side="left")
-        self.grow = tk.BooleanVar(value=True)
-        self.grow_box = ttk.Checkbutton(bar, text=tr("hz.grow"), variable=self.grow, command=self.on_grow)
-        self.grow_box.pack(side="right")
-        Tooltip(self.grow_box, tr("hz.grow_tip"))
-        line_box = ttk.Checkbutton(bar, text=tr("hz.line"), variable=app.hz_line, command=self.on_line)
-        line_box.pack(side="right", padx=(0, 10))
+        f = piece()
+        self.what = ttk.Label(f, text="", foreground="#555")
+        self.what.pack(side="left", padx=(0, 10))
+        f = piece("right")
+        fx_box = ttk.Checkbutton(f, text=tr("hz.fx"), variable=app.hz_fx, command=self.on_fx, style="Toolbutton")
+        fx_box.pack(side="left", padx=(0, 10))
+        Tooltip(fx_box, tr("hz.fx_tip"))
+        line_box = ttk.Checkbutton(f, text=tr("hz.line"), variable=app.hz_line, command=self.on_line)
+        line_box.pack(side="left", padx=(0, 10))
         Tooltip(line_box, tr("hz.line_tip"))
+        self.grow = tk.BooleanVar(value=True)
+        self.grow_box = ttk.Checkbutton(f, text=tr("hz.grow"), variable=self.grow, command=self.on_grow)
+        self.grow_box.pack(side="left")
+        Tooltip(self.grow_box, tr("hz.grow_tip"))
+        self.laid = None  # which row each piece is in now
+        for f, side in self.pieces:
+            f.bind("<Configure>", lambda e: self.after_idle(self.layout))
+        bar.bind("<Configure>", lambda e: self.after_idle(self.layout))
+        self.layout()
         self.status = ttk.Label(self, text="", foreground="#555", padding=(8, 2, 8, 4))
         self.status.pack(side="bottom", fill="x")
         self.fx = FxPane(self)
-        self.fx.canvas.pack(side="bottom", fill="x")
         c = self.canvas = tk.Canvas(self, background="white", highlightthickness=0, takefocus=True)
         c.pack(fill="both", expand=True)
+        self.on_fx()
         self.pencil = ("@" + os.path.join(ICONS, "pencil.cur").replace("\\", "/"),)  # its tip is the spot pointed at
         try:
             c.config(cursor=self.pencil)
@@ -190,6 +214,7 @@ class HzWindow(tk.Toplevel):
             self.gates.current(1 if hz.get("fixed") else 0)
         self.gates.config(state="readonly" if self.can_place() else "disabled")
         self.what.config(text=text)
+        self.after_idle(self.layout)  # (its width changed)
         self.grow_box.config(state="normal" if sh is not None else "disabled")
         if self.tones and not self.fitted:
             self.fit_view()
@@ -790,6 +815,48 @@ class HzWindow(tk.Toplevel):
     def on_line(self):
         self.redraw()
         self.app.schedule_autosave()
+
+    def on_fx(self):
+        """The Effects button: shows / hides the effects pane (off to start with, user)."""
+        if self.app.hz_fx.get():
+            self.fx.canvas.pack(side="bottom", fill="x", before=self.canvas)
+        else:
+            self.fx.drag = None
+            self.fx.canvas.pack_forget()
+        self.app.schedule_autosave()
+
+    def layout(self):
+        """The toolbar in one row, or two when the window is too narrow: the pieces keep their order, the ones that
+        don't fit go to the second row (the right-hand piece stays at the right)."""
+        if not self.winfo_exists():
+            return
+        room = self.bar.winfo_width() - 16
+        left = [f for f, side in self.pieces if side == "left"]
+        right = [f for f, side in self.pieces if side == "right"]
+        widths = {f: f.winfo_reqwidth() for f, side in self.pieces}
+        if room <= 1 or sum(widths.values()) <= room:
+            laid = {f: 0 for f in widths}
+        else:
+            laid, used = {}, 0
+            for f in left:
+                used += widths[f]
+                laid[f] = 0 if used <= room and all(v == 0 for v in laid.values()) else 1
+            laid.update({f: 1 for f in right})
+        laid = tuple(laid[f] for f, side in self.pieces)
+        if laid == self.laid:
+            return
+        self.laid = laid
+        for f, side in self.pieces:
+            f.pack_forget()
+        for right_first in ("right", "left"):  # (packed first = gets its room first: the hint at the end is the one
+            for (f, side), row in zip(self.pieces, laid):  # cut off when even two rows are too narrow)
+                if side == right_first:
+                    f.pack(in_=self.rows[row], side=side)
+        self.rows[0].pack(fill="x")
+        if 1 in laid:
+            self.rows[1].pack(fill="x", pady=(4, 0))
+        else:
+            self.rows[1].pack_forget()
 
     # ------------------------------------------------------------ into the shape
 

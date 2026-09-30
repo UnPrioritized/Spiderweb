@@ -230,6 +230,8 @@
  "hz.select_tip": "Drag on empty space to select the notes the box touches (Ctrl: add to the selected ones).\nNotes can still be moved and resized. Double right-click switches between Select and Pencil.",
  "hz.gates": "Gates",
  "hz.ppq_tip": "The PPQ of the whole project (the same box as under Project).\nA higher PPQ brings the red line closer to the exact tone.",
+ "hz.fx": "Effects",
+ "hz.fx_tip": "Shows or hides the effects pane under the notes.\nEffects that are on keep working while it's hidden.",
  "hz.line": "Red line",
  "hz.line_tip": "Ticked: the red line shows the tone you hear (the middle of a row = the exact tone).\nThe faint line behind it is each repeat's own pitch.\nZoomed in, drag it up or down to tune a note. The dots of a slide can be dragged.\nNot ticked: the line and its dots are hidden. Slides and tunes that were made stay.",
  "hz.hint_none": "Select a custom shape to give it Hz bass notes, or pick the Hz bass tool (H) and drag on the piano roll where a new one should start.",
