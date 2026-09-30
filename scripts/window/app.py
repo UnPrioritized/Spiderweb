@@ -32,6 +32,7 @@ from window.panel_funnel import FunnelPanel
 from window.panel_pattern import PatternPanel
 from window.panel_polygon import PolygonPanel
 from window.panel_text import TextPanel
+from window.claw_window import open_claw
 from window.panel_tumour import TumourPanel
 from notes.joined import all_tumours, is_joined
 from window.join_split import JoinSplit
@@ -120,6 +121,8 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self._rows = {"last": True, "line_fill": False, "free": False, "tumour": False, "pattern": False, "text": False,
                       "custom": False, "funnel": False}  # optional panel parts
         self.drawer = None
+        self.claw_window = None
+        self.claw_pos = ""  # where the claw machine window was last ("+x+y", remembered in the autosave)
         self.rendered, self.slot_count = NO_NOTES, 0  # (start, end, pitch, velocity, slot, owner) rows
         self.note_counts = []  # notes per shape in rendered
         self.ppq, self.beats = 960, 4
@@ -198,6 +201,7 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
                          ("Control-g Control-G", self.join_selected),
                          ("Control-Shift-g Control-Shift-G", self.split_selected),
                          ("Control-l Control-L", self.turn_into_live),
+                         ("Control-k Control-K", lambda: open_claw(self)),
                          ("Control-v Control-V", self.paste), ("Control-h Control-H", lambda: self.flip(True)),
                          ("Control-j Control-J", lambda: self.flip(False)), ("Control-a Control-A", self.select_all),
                          ("Control-Left", lambda: self.rotate(False)), ("Control-Right", lambda: self.rotate(True))):

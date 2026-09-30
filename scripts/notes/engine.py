@@ -18,6 +18,7 @@ from notes.envelope import env_values, velocity_env
 from notes.joined import clean_joined, is_joined, joined_paths
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
+from notes.claw import apply_claw, clean_claw
 from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
@@ -84,6 +85,9 @@ def clean_shape(sh):
     env = sh.get("vel_env")
     if env:
         out["vel_env"] = [[float(u), max(1.0, min(127.0, float(v)))] for u, v in env]
+    cl = clean_claw(sh.get("claw"))
+    if cl:  # notes thinned out / moved after they're made (claw.py)
+        out["claw"] = cl
     tm = clean_tumour(sh.get("tumour")) if out["kind"] in LINE_KINDS else None
     if tm:
         out["tumour"] = tm
@@ -252,6 +256,16 @@ def shape_notes(sh, ppq, keys=128):
 def shape_notes_tracks(sh, ppq, keys=128):
     """shape_notes, and for pasted notes which track each note came from, for a custom shape made of other shapes
     which of them (one number per row; None for every other shape)."""
+    notes, tracks = _notes_tracks(sh, ppq, keys)
+    if not sh.get("claw"):
+        return notes, tracks
+    if tracks is None:
+        return apply_claw(notes, sh["claw"], ppq), None
+    got = apply_claw(np.column_stack([notes, tracks]), sh["claw"], ppq)
+    return got[:, :-1], got[:, -1]
+
+
+def _notes_tracks(sh, ppq, keys):
     end_dot = sh.get("end_dot", False)
     path = dedupe(np.concatenate(cached_arrays(sh)))  # (drawing the line uses the same points)
     if path[-1, 0] < path[0, 0]:
