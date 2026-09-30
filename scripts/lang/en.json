@@ -915,7 +915,7 @@
  "help.custom.text": [
   "Pick a shape in the panel, or draw your own with Drawer…. Then drag a box on the piano roll (or click two corners); the drawing stretches to fill it. Ctrl keeps its drawn proportions.",
   "",
-  "Its inside can be filled (see Inside fill). Square, Circle and Triangle (Q / O / T) show next to Custom shape while it's picked: they make that shape straight away (Ctrl = perfect, as it looks).",
+  "Its inside can be filled (see Inside fill). Circle and Polygon (O / Q) show next to Custom shape while it's picked: they make that shape straight away (Ctrl = perfect, as it looks).",
   "",
   "A placed shape keeps its own copy: changing the library shape later doesn't change it."
  ],
@@ -976,7 +976,7 @@
  "help.live.title": "Live shape (G)",
  "help.live.tip": "Lines, curves, arcs, freehand and boxes you draw now go into ONE custom shape. Close its outline to fill it. Right-click empty space to start the next one.",
  "help.live.text": [
-  "With Live shape on, Line, Polyline, Freehand, Curve, Arc, Square, Circle and Triangle draw into one custom shape (the selected one, or a new one) instead of making separate shapes. Outlines that meet end to end join up, so a closed drawing can be filled (see Inside fill). Points snap onto the drawing's ends; clicking a polyline's first point closes it; letting go of a freehand stroke near its start closes it. Right-click empty space (deselect) to start the next shape.",
+  "With Live shape on, Line, Polyline, Freehand, Curve, Arc, Circle and Polygon draw into one custom shape (the selected one, or a new one) instead of making separate shapes. Outlines that meet end to end join up, so a closed drawing can be filled (see Inside fill). Points snap onto the drawing's ends; clicking a polyline's first point closes it; letting go of a freehand stroke near its start closes it. Right-click empty space (deselect) to start the next shape.",
   "",
   "While it's on, the selected shape's points show (purple squares): drag them with Select. Points in the same spot move together, and a point dropped on another one joins it.",
   "",
@@ -1435,9 +1435,9 @@
  "help.shortcuts.title": "Keyboard and mouse shortcuts",
  "help.shortcuts.tip": "Every key and mouse shortcut in one list.",
  "help.shortcuts.text": [
-  "Tools: V Select, L Line, P Polyline, F Freehand, C Curve, A Arc, S Custom shape, Q Square, O Circle, T Triangle, N Funnel, X Text. G = Live shape on / off.",
+  "Tools: V Select, L Line, P Polyline, F Freehand, C Curve, A Arc, S Custom shape, O Circle, Q Polygon, N Funnel, X Text. G = Live shape on / off.",
   "",
-  "Drawing: Shift = don't snap. Ctrl = perfect (square, circle, triangle, proportions). Right-click or Esc = cancel what's half drawn. Enter / double-click = finish a polyline.",
+  "Drawing: Shift = don't snap. Ctrl = perfect (circle, equal-sided polygon or star, proportions). Right-click or Esc = cancel what's half drawn. Enter / double-click = finish a polyline.",
   "",
   "Mouse: right-click a shape = its menu, empty space = deselect. Double right-click = Select ↔ last tool. Right-drag = listen. Middle-click = add a point / anchor / funnel curve start. Middle-drag = scroll.",
   "",

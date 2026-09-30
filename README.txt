@@ -9,8 +9,8 @@ for black MIDI, where pictures drawn out of thousands of notes like this are
 called spiderwebs.
 
 What it can do:
-- Draw lines, polylines, freehand strokes, curves, arcs, squares, circles,
-  triangles, funnels, text, and shapes you draw yourself.
+- Draw lines, polylines, freehand strokes, curves, arcs, circles, polygons,
+  stars, funnels, text, and shapes you draw yourself.
 - Fill shapes with notes: one long note per key, or chopped into notes of
   any length (spam).
 - Add bumps along lines (tumours), shape the velocities, and put
