@@ -1,6 +1,7 @@
 """The claw machine window (claw.py): changes the selected shapes' notes, shown live on the piano roll. Accept keeps
-the change (one undo step), X / Esc puts the notes back, Reset sets everything back to "does nothing". It keeps the
-main window waiting while it's open (only Space, to listen, still works there)."""
+the change (one undo step), X / Esc puts the notes back, Reset sets everything back to "does nothing". The main
+window can be used while it's open: this window follows the selection, and before anything else changes there, the
+claw being tried out is kept as its own undo step (settle)."""
 
 import json
 import math
@@ -38,10 +39,12 @@ def open_claw(app):
 
 
 class Knob(tk.Canvas):
-    """A round dial from -100 to 100 (0 = straight up). Drag up / down (Shift = fine), the mouse wheel or the arrow
-    keys turn it; a double-click puts it back to 0. changed(value, done): done = the end of one turn."""
+    """A round dial from -100 to 100 (0 = straight up, all the way = straight down). Drag up / down (Shift = fine),
+    the mouse wheel or the arrow keys turn it; it sticks at 0 for a moment on the way past; the right mouse button
+    points it at the mouse; a middle-click puts it back to 0. changed(value, done): done = the end of one turn."""
 
-    TURN = 150  # degrees each way
+    TURN = 180  # degrees each way
+    STICK = 10  # pixels of dragging that stay at 0
 
     def __init__(self, parent, scale, changed):
         self.size = size = round(44 * scale)
@@ -51,10 +54,13 @@ class Knob(tk.Canvas):
         self.bind("<ButtonPress-1>", self.press)
         self.bind("<B1-Motion>", self.move)
         self.bind("<ButtonRelease-1>", lambda e: self.release())
-        self.bind("<Double-Button-1>", lambda e: self.turn_to(0, True))
-        self.bind("<MouseWheel>", lambda e: self.turn_to(self.value + (5 if e.delta > 0 else -5), True))
+        self.bind("<ButtonPress-2>", lambda e: self.turn_to(0, True))
+        self.bind("<ButtonPress-3>", self.point)
+        self.bind("<B3-Motion>", self.point)
+        self.bind("<ButtonRelease-3>", lambda e: self.changed(self.value, True))
+        self.bind("<MouseWheel>", lambda e: self.step(5 if e.delta > 0 else -5))
         for key, d in (("Up", 1), ("Right", 1), ("Down", -1), ("Left", -1)):
-            self.bind(f"<{key}>", lambda e, d=d: self.turn_to(self.value + d * (1 if e.state & 1 else 5), True))
+            self.bind(f"<{key}>", lambda e, d=d: self.step(d * (1 if e.state & 1 else 5)))
         self.bind("<FocusIn>", lambda e: self.draw())
         self.bind("<FocusOut>", lambda e: self.draw())
         self.draw()
@@ -76,14 +82,27 @@ class Knob(tk.Canvas):
         self.create_oval(c - r, c - r, c + r, c + r, fill="#555", outline="")
         self.create_line(c, c, c + r * math.cos(a), c - r * math.sin(a), fill="white", width=2)
 
+    def step(self, d):
+        v = self.value + d
+        self.turn_to(0 if v * self.value < 0 else v, True)  # (stops at 0 on the way past)
+
+    def point(self, e):
+        """Right mouse button: the dial points at the mouse."""
+        self.focus_set()
+        c = self.size / 2
+        if (e.x - c) ** 2 + (e.y - c) ** 2 > 4:  # (not right on the middle: no direction there)
+            self.turn_to(math.degrees(math.atan2(e.x - c, c - e.y)) / self.TURN * 100)
+
     def press(self, e):
         self.focus_set()
-        self.drag = (e.y, self.value)
+        self.drag = (e.y, self.value + math.copysign(self.STICK, self.value) if self.value else 0.0)
 
     def move(self, e):
-        if self.drag:
-            y, v = self.drag
-            self.turn_to(v + (y - e.y) * (0.2 if e.state & 1 else 1))
+        if self.drag:  # (the mouse moves a "raw" value that has STICK extra on each side of 0)
+            y, r = self.drag
+            r = max(-100.0 - self.STICK, min(100.0 + self.STICK, r + (y - e.y) * (0.2 if e.state & 1 else 1)))
+            self.drag = (e.y, r)
+            self.turn_to(0 if abs(r) <= self.STICK else r - math.copysign(self.STICK, r))
 
     def release(self):
         if self.drag:
@@ -108,19 +127,13 @@ class ClawWindow(tk.Toplevel):
         self.resizable(False, False)
         if app.claw_pos:
             self.geometry(app.claw_pos)
-        self.targets = sorted(app.sels)
-        self.saved = json.dumps(app.shapes)  # (for the undo step)
-        self.before = {i: app.shapes[i].get("claw") for i in self.targets}  # (put back by X / Esc)
-        shown = next((c for c in self.before.values() if c), None)
-        self.claw = dict(CLAW_DEFAULTS, **json.loads(json.dumps(shown or {})))
+        self.claw = dict(CLAW_DEFAULTS)
         s = app.scale
 
         box = ttk.Frame(self, padding=10)
         box.pack(fill="both", expand=True)
-        n = len(self.targets)
-        ttk.Label(box, text=tr("claw.shape", shape_label=app.shape_label(app.shapes[self.targets[0]]))
-                  if n == 1 else tr("claw.n_shapes", n=n), foreground="#777").grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        self.what = ttk.Label(box, text="", foreground="#777")
+        self.what.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
         self.menus, self.boxes, self.vars, self.entries = {}, {}, {}, {}
         self.menu_row(box, 1, "mode", tr("claw.mode"), MODES, tr("claw.tip_mode"))
         box.columnconfigure(0, minsize=round(80 * s))
@@ -197,9 +210,41 @@ class ClawWindow(tk.Toplevel):
         self.bind("<Return>", lambda e: self.accept())
         self.bind("<Configure>", self.remember, add="+")
         self.protocol("WM_DELETE_WINDOW", self.cancel)
+        self.retarget()
+        self.after_idle(lambda: app.tips.show("claw", parent=self))
+
+    def claws(self):
+        return {i: self.app.shapes[i].get("claw") for i in self.targets if i < len(self.app.shapes)}
+
+    def retarget(self):
+        """Work on the selected shapes, showing their claw (the first one's that has one)."""
+        app = self.app
+        self.targets = sorted(app.sels)
+        self.saved = json.dumps(app.shapes)  # (for the undo step)
+        self.before = self.now = self.claws()  # (before: put back by X / Esc; now: as this window last left them)
+        shown = next((c for c in self.before.values() if c), None)
+        self.claw = dict(CLAW_DEFAULTS, **json.loads(json.dumps(shown or {})))
+        n = len(self.targets)
+        self.what.config(text=tr("claw.nothing") if not n else tr("claw.n_shapes", n=n) if n > 1 else
+                         tr("claw.shape", shape_label=app.shape_label(app.shapes[self.targets[0]])))
         self.show()
-        app.attributes("-disabled", True)  # (the main window waits; Help and the tip still work)
-        self.after_idle(lambda: app.tips.show("claw", parent=self))  # (in this window: the roll is out of reach)
+        self.undo.reset()
+
+    def sync(self):
+        """The main window changed the selection or the shapes."""
+        if sorted(self.app.sels) != self.targets:
+            self.settle()
+        elif self.claws() == self.now:
+            return
+        self.retarget()
+
+    def settle(self):
+        """Something else is about to change in the main window: the claw tried so far is kept (its own undo step),
+        and from now on X / Esc only puts back what changes after this."""
+        if self.now != self.before and self.claws() == self.now:
+            saved = self.saved
+            self.saved, self.before = json.dumps(self.app.shapes), self.now
+            self.app.add_undo_step(saved, tr("claw.claw_machine"))
 
     def mode_box(self, box):
         """The settings of one mode (only the picked mode's show)."""
@@ -301,6 +346,7 @@ class ClawWindow(tk.Toplevel):
                 sh["claw"] = dict(cl)
             else:
                 sh.pop("claw", None)
+        self.now = self.claws()
         self.app.shapes_changed()
 
     def reset(self):
@@ -310,11 +356,7 @@ class ClawWindow(tk.Toplevel):
         self.undo.mark()
 
     def accept(self):
-        app = self.app
-        now = {i: app.shapes[i].get("claw") for i in self.targets}
-        if now != self.before:
-            app.push_undo(self.saved, tr("claw.claw_machine"))
-            app.sync_panel()
+        self.settle()
         self.close()
 
     def cancel(self):
@@ -331,7 +373,6 @@ class ClawWindow(tk.Toplevel):
             self.app.claw_pos = f"+{self.winfo_x()}+{self.winfo_y()}"
 
     def close(self):
-        self.app.attributes("-disabled", False)
         self.app.claw_window = None
         self.destroy()
         self.app.roll.focus_set()

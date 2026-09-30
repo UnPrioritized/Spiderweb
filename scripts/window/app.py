@@ -595,6 +595,8 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self.sync_list_selection()
         self.sync_join()
         self.sync_line_fill()
+        if self.claw_window:
+            self.claw_window.sync()
         if self.sel is not None:
             self.listbox.see(self.sel)
         # the first time one is selected: how it's edited
@@ -1178,6 +1180,8 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
     def push_undo(self, state=None, name=None):
         """Remember the shapes (or `state`, shapes saved earlier as JSON) for Ctrl+Z; name = what the step does
         (the History panel)."""
+        if self.claw_window:
+            self.claw_window.settle()  # (the claw being tried out is kept first, as its own step)
         sc = self._scrub
         if sc and sc["active"]:  # stepping a number box: only its first step takes an undo step
             if sc["pushed"]:
@@ -1185,7 +1189,10 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
             sc["pushed"] = True
         else:
             self._scrub = None
-        before = state or json.dumps(self.shapes)
+        self.add_undo_step(state or json.dumps(self.shapes), name)
+
+    def add_undo_step(self, before, name=None):
+        """push_undo without its checks (before: the shapes as JSON)."""
         self.drop_empty_step(before)
         self.undo_stack.append((before, name or tr("app.change")))
         del self.undo_stack[:-300]
@@ -1224,6 +1231,8 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self._restore(self.redo_stack, self.undo_stack)
 
     def _restore(self, src, dst):
+        if self.claw_window:
+            self.claw_window.settle()  # (so Ctrl+Z here takes back the claw being tried out)
         if not src:
             return
         self.roll.cancel_draft()
