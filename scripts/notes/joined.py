@@ -367,9 +367,21 @@ def join_velocity(new, olds, spans, new_span):
 def custom_groups(sh):
     """A custom shape's strokes in groups that touch each other (end on end or on a point), as lists of stroke
     numbers; one group = nothing to split."""
-    from notes.custom import stroke_points
     strokes = sh["strokes"]
-    pts = [[tuple(round(c, 6) for c in p) for p in stroke_points(st)] for st in strokes]
+    key = json.dumps(strokes)  # (asked after every change, also while dragging: the same strokes = the same answer)
+    if key not in _groups:
+        if len(_groups) > 32:
+            _groups.clear()
+        _groups[key] = stroke_groups(strokes)
+    return [list(g) for g in _groups[key]]
+
+
+_groups = {}
+
+
+def stroke_groups(strokes):
+    from notes.custom import stroke_points
+    pts =[[tuple(round(c, 6) for c in p) for p in stroke_points(st)] for st in strokes]
     ends = [set([p[0], p[-1]] if st["kind"] != "poly" else p) if p else set() for st, p in zip(strokes, pts)]
     group = list(range(len(strokes)))
 

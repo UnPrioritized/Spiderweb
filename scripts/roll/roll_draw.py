@@ -384,16 +384,26 @@ class RollDrawing:
 
         if self.note_img is None or (self.note_img.width(), self.note_img.height()) != (iw, ih):
             self.note_img = tk.PhotoImage(master=self, width=iw, height=ih)
-            moved = None
+            moved = self._shown = None
         name = self.note_img.name
         if moved:
             dx, dy = moved
             self.tk.call(name, "copy", name, "-from", max(-dx, 0), max(-dy, 0), iw + min(-dx, 0), ih + min(-dy, 0),
                          "-to", max(dx, 0), max(dy, 0))
-            for x0, y0, x1, y1 in strips:
-                self.tk.call(name, "put", ppm(img[y0:y1, x0:x1]), "-format", "ppm", "-to", x0, y0)
+        elif self._shown is not None and self._shown.shape == img.shape:
+            # only the part that differs from what's shown is sent (sending pixels is the slow part)
+            was = self._shown.reshape(ih, -1)
+            rows = np.flatnonzero((was != img.reshape(ih, -1)).any(axis=1))
+            strips = []
+            if len(rows):
+                y0, y1 = int(rows[0]), int(rows[-1]) + 1
+                cols = np.flatnonzero((was[y0:y1] != img.reshape(ih, -1)[y0:y1]).any(axis=0)) // 3
+                strips = [(int(cols[0]), y0, int(cols[-1]) + 1, y1)]
         else:
-            self.note_img.configure(data=ppm(img), format="ppm")
+            strips = [(0, 0, iw, ih)]
+        for x0, y0, x1, y1 in strips:
+            self.tk.call(name, "put", ppm(img[y0:y1, x0:x1]), "-format", "ppm", "-to", x0, y0)
+        self._shown = img
         self.create_image(int(self.kb_w), int(self.ruler_h), image=self.note_img, anchor="nw")
 
     def pan_pixels(self, old, pic, w, h):

@@ -753,14 +753,17 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         """Recalculate every note (overlaps depend on all shapes together) and refresh the screen.
         While dragging, if that's slow (lots of notes), only the lines follow the mouse: the notes catch up when the
         mouse rests or is let go (now: catch up). moving: shapes are dragged to another place: the piano roll shows
-        their notes going along (roll_draw.paint_carried), and they catch up when the mouse is let go."""
+        their notes going along (roll_draw.paint_carried), and they catch up when the mouse rests (if that's quick)
+        or is let go."""
         if self._late_notes:
             self.after_cancel(self._late_notes)
             self._late_notes = None
-        if not now and self.roll.drag and self._notes_time > (0.03 if moving else 0.15):
+        slow = self._notes_time > 0.15
+        # (moving: also whenever the piano roll shows its notes as one picture, which it can carry along)
+        if not now and self.roll.drag and (slow or moving and (self._notes_time > 0.03 or self.roll._img is not None)):
             self.notes_late = True
-            if not moving:
-                self._late_notes = self.after(250, self._notes_rested)
+            if not (moving and slow):  # (quick enough to make: the real notes show whenever the mouse rests)
+                self._late_notes = self.after(120 if moving else 250, self._notes_rested)
             self.roll.request_redraw()
             return
         self.notes_late = False

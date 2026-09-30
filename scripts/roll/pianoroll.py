@@ -46,7 +46,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self._note_index = None  # rendered notes sorted by start, to find the visible ones quickly
         self._img = None         # that picture's pixels (NumPy), to move along when the view moves
         self._exact = None       # timer: the picture painted whole again after it was moved along
-        self._carry = None       # the picture's parts while shapes are dragged (paint_carried)
+        self._shown = None       # the pixels the picture on screen has now (show_image sends only what differs)
+        self._carry = None      # the picture's parts while shapes are dragged (paint_carried)
         self._redraw_pending = False
         self._late_redraw = None  # request_redraw(delay)'s timer
         # a shape started with a click (no drag): the drag it would have been, following the mouse until the next
