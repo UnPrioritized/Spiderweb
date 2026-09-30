@@ -5,8 +5,7 @@ Spiderweb turns drawings into MIDI notes. Instead of placing notes one by
 one, you draw on a piano roll (it looks and works much like Domino's) and
 every key your drawing crosses gets a note: a slanted line becomes a smooth
 staircase of notes, a filled circle becomes a round block of notes. It's made
-for black MIDI, where pictures drawn out of thousands of notes like this are
-called spiderwebs.
+for black MIDI.
 
 What it can do:
 - Draw lines, polylines, freehand strokes, curves, arcs, circles, polygons,
