@@ -41,10 +41,40 @@ CUSTOM_DEFAULTS = {"fill": "empty", "gate": 0.0625, "align": "auto", "ends": "ro
 CUSTOM_FLAGS = ("union", "apart")
 
 
+# Hz bass: spam so fast that the repeats sound like a tone. sh["hz"] = {"key": the key whose tone is wanted,
+# "cents": pitch adjustment (100 = one key), "bpm": the BPM its gate was worked out for}. sh["gate"] is then one
+# wave of that tone, gate = BPM / (60 × Hz) beats, NOT rounded to a whole tick: the notes sit on one grid counted
+# from tick 0 (every key in step), note n starting at round(n × gate), so gates of two sizes are mixed and the
+# tone comes out exact (chop_even). Spam start and ends don't apply. The tone depends on the BPM, so a changed
+# BPM leaves it off until the gate is worked out again (the panel warns; a changed PPQ keeps the tone).
+HZ_DEFAULTS = {"key": 33, "cents": 0.0}
+
+
+def hz_of(key, cents=0.0):
+    """The tone of a key in Hz (key 69 = 440 Hz)."""
+    return 440.0 * 2.0 ** ((key - 69 + cents / 100.0) / 12.0)
+
+
+def hz_gate(hz, bpm):
+    """The spam gate, in beats, that sounds like hz's tone at this BPM."""
+    return max(1e-6, float(f"{bpm / (60.0 * hz_of(hz['key'], hz['cents'])):.12g}"))  # (12 digits: as saved)
+
+
+def clean_hz(hz):
+    """A saved "hz" checked, or None."""
+    try:
+        out = {"key": int(hz["key"]), "cents": float(hz.get("cents", 0.0)), "bpm": float(hz["bpm"])}
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None
+    return out if 0 <= out["key"] <= 255 and abs(out["cents"]) <= 1200 and out["bpm"] > 0 else None
+
+
 def custom_settings(cd):
     """The fill settings a new custom shape gets from cd (the settings for new ones)."""
     out = {k: cd[k] for k in ("fill", "gate", "align", "ends")}
     out.update({k: True for k in CUSTOM_FLAGS if cd.get(k)})
+    if cd.get("hz"):
+        out["hz"] = dict(cd["hz"])
     return out
 
 
@@ -571,13 +601,38 @@ def inside_spans(sh, ppq):
 
 
 def spam_gate(sh, ppq):
+    """The spam gate in ticks: a whole number, or for Hz bass the exact one as a float (chop_even)."""
+    if sh.get("hz"):
+        return max(1.0, float(sh["gate"] * ppq))
     return max(1, math.floor(sh["gate"] * ppq + 0.5))
+
+
+def chop_even(stretches, g, count=False):
+    """chop for Hz bass: g = the exact gate in ticks (a float, at least 1). One grid for every stretch, counted
+    from tick 0: square n runs from round(n × g) to round((n + 1) × g). A stretch gets the squares whose middle is
+    inside it; one too short for any stays one note as it is."""
+    s0, e0, q = stretches[:, 0], stretches[:, 1], stretches[:, 2]
+    lo = np.ceil(s0 / g - 0.5).astype(np.int64)
+    n = np.ceil(e0 / g - 0.5).astype(np.int64) - lo
+    short = n <= 0
+    n = np.where(short, 1, n)
+    if count:
+        return n
+    k = np.repeat(lo, n) + np.arange(n.sum()) - np.repeat(np.cumsum(n) - n, n)
+    out = np.column_stack([np.floor(k * g + 0.5).astype(np.int64), np.floor((k + 1) * g + 0.5).astype(np.int64),
+                           np.repeat(q, n)])
+    if short.any():
+        whole = np.repeat(short, n)
+        out[whole, 0], out[whole, 1] = s0[short], e0[short]
+    return out
 
 
 def chop(sh, stretches, g, count=False):
     """stretches: NumPy array of (start, end, key) rows in ticks -> each filled with back-to-back notes of gate g,
     as an array of (start, end, key) rows in the same order. Where they start: ALIGNS; what happens to the bit that
     doesn't fit a whole gate: ENDS. count: just how many notes each stretch gets."""
+    if isinstance(g, float):
+        return chop_even(stretches, g, count)
     s0, e0, q = stretches[:, 0], stretches[:, 1], stretches[:, 2]
     size = e0 - s0
     ends, align = sh.get("ends", "drop"), sh.get("align", "auto")

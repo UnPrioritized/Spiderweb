@@ -12,7 +12,7 @@ import numpy as np
 
 from files.lang import tr
 from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX_STROKE, block_notes, check_notes,
-                          clean_curve,
+                          clean_curve, clean_hz,
                           clean_strokes, custom_notes_groups, custom_strokes)
 from notes.envelope import env_values, velocity_env
 from notes.joined import clean_joined, is_joined, joined_paths
@@ -102,6 +102,9 @@ def clean_shape(sh):
         out["align"] = sh.get("align") if sh.get("align") in ALIGNS else "auto"
         out["ends"] = sh.get("ends") if sh.get("ends") in ENDS else "drop"
         out.update({k: True for k in CUSTOM_FLAGS if sh.get(k) is True})
+        hz = clean_hz(sh.get("hz"))
+        if hz:  # Hz bass (custom.py): the gate is one wave of a tone
+            out["hz"] = hz
         fr = sh.get("from")  # the shapes it was made of (convert.py)
         if isinstance(fr, dict) and isinstance(fr.get("shapes"), list) and fr["shapes"]:
             olds = [clean_shape(o) if isinstance(o, dict) else None for o in fr["shapes"]]

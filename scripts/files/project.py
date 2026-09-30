@@ -10,7 +10,7 @@ from tkinter import filedialog, messagebox
 import numpy as np
 
 from files.lang import tr
-from notes.custom import ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, notes_shape
+from notes.custom import ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_hz, notes_shape
 from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_shape
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
 from notes.paths import KEYS
@@ -162,6 +162,9 @@ class ProjectFiles:
                 self.custom_defaults["gate"] = max(1e-6, float(custom.get("gate", CUSTOM_DEFAULTS["gate"])))
             except (TypeError, ValueError):
                 pass
+            self.custom_defaults.pop("hz", None)
+            if clean_hz(custom.get("hz")):
+                self.custom_defaults["hz"] = clean_hz(custom["hz"])
             if custom.get("shape"):
                 self.custom_shape = str(custom["shape"])
         funnel = data.get("funnel_defaults")

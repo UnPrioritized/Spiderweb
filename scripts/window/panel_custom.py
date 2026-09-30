@@ -2,16 +2,18 @@
 
 import copy
 import math
+import re
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 
 from files.lang import tr
-from notes.custom import (CUSTOM_FLAGS, ENDS, SPAM_FILLS, box_frame, custom_settings, gap_lines, join_strokes, map_stroke,
-                          normalize_strokes, open_paths)
+from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, gap_lines, hz_gate,
+                          hz_of, join_strokes, map_stroke, normalize_strokes, open_paths)
 from window.drawer import Drawer, clean_name, library_names, load_shape, save_shape
 from window.panel_funnel import GATE_STEPS
 from files.mathexpr import calc, fmt
 from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
+from roll.roll_shared import NOTE_NAMES, note_name
 from window.widgets import Scrub, Tooltip
 
 GAP_COLOR = "#c06000"  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
@@ -35,6 +37,19 @@ ALIGN_CHOICES = [
     ("centred", tr("panel_custom.centred"), tr("panel_custom.centred_tip")),
 ]
 END_CHOICES = [(value, tr("panel_custom.ends_" + value)) for value in ENDS]
+HZ_SHORT = 40  # Hz bass: a gate under this many ticks wobbles between its two sizes (orange: a higher PPQ fixes it)
+
+
+def tone_key(text):
+    """'A1', 'c#2', 'Bb0' or a key number -> the key (C4 = 60). ValueError if it isn't one."""
+    m = re.fullmatch(r"([A-Ga-g])([#b]?)(-?\d+)", text.strip())
+    if m:
+        key = NOTE_NAMES.index(m[1].upper()) + {"#": 1, "b": -1, "": 0}[m[2]] + (int(m[3]) + 1) * 12
+    else:
+        key = int(text)
+    if not 0 <= key <= 127:
+        raise ValueError
+    return key
 
 
 class CustomPanel:
@@ -87,6 +102,32 @@ class CustomPanel:
         self.gate_entry.bind("<Return>", lambda e: self.on_gate())
         self.gate_entry.bind("<FocusOut>", lambda e: self.on_gate())
         Scrub(self, [(self.gate_entry, self.gate_var, self.on_gate)], GATE_STEPS, 1, 10 ** 7, label=lb)
+        # Hz bass: the gate is one wave of a tone (custom.py)
+        h = self.hz_row = ttk.Frame(opts)
+        h.pack(anchor="w", padx=(20, 0), pady=(1, 0))
+        self.hz_var, self.hz_tone, self.hz_cents = tk.BooleanVar(), tk.StringVar(), tk.StringVar(value="0")
+        self.hz_check = ttk.Checkbutton(h, text=tr("panel_custom.hz_bass"), variable=self.hz_var, command=self.on_hz)
+        self.hz_check.pack(side="left")
+        Tooltip(self.hz_check, tr("panel_custom.hz_tip"))
+        self.hz_tone_entry = ttk.Entry(h, textvariable=self.hz_tone, width=5)
+        self.hz_tone_entry.pack(side="left", padx=(4, 0))
+        Tooltip(self.hz_tone_entry, tr("panel_custom.hz_tone_tip"))
+        lb = ttk.Label(h, text=tr("panel_custom.hz_pitch"))
+        lb.pack(side="left", padx=(6, 0))
+        self.hz_cents_entry = ttk.Entry(h, textvariable=self.hz_cents, width=5)
+        self.hz_cents_entry.pack(side="left", padx=4)
+        Tooltip(self.hz_cents_entry, tr("panel_custom.hz_cents_tip"))
+        ttk.Label(h, text=tr("panel_custom.hz_cents"), foreground="#777").pack(side="left")
+        for entry in (self.hz_tone_entry, self.hz_cents_entry):
+            entry.bind("<Return>", lambda ev: self.on_hz_entry())
+            entry.bind("<FocusOut>", lambda ev: self.on_hz_entry())
+        Scrub(self, [(self.hz_cents_entry, self.hz_cents, self.on_hz_entry)], (1, 10, 0.1), -1200, 1200, label=lb)
+        self.hz_info = ttk.Label(opts, text="", foreground="#777", font=("Segoe UI", 8),
+                                 wraplength=int(270 * self.scale), justify="left")
+        self.hz_stale = ttk.Frame(opts)  # the BPM changed since: its tone is off until it's updated
+        ttk.Label(self.hz_stale, text=tr("panel_custom.hz_stale"), foreground=GAP_COLOR, font=("Segoe UI", 8),
+                  wraplength=int(270 * self.scale), justify="left").pack(anchor="w")
+        ttk.Button(self.hz_stale, text=tr("panel_custom.hz_update"), command=self.update_hz).pack(anchor="w", pady=(1, 2))
         e = ttk.Frame(opts)
         e.pack(anchor="w", padx=(20, 0), pady=(1, 0))
         ttk.Label(e, text=tr("panel_custom.ends")).pack(side="left")
@@ -199,10 +240,11 @@ class CustomPanel:
                 gap += tr("panel_custom.ends_that_nearly_touch_1_64")
             self.fill_tips[value].text = base + ("\n\n" + gap if gap and value in ("fill", "spam") else "")
         spam = fill in SPAM_FILLS
-        self.gate_entry.config(state="normal" if spam else "disabled")
-        self.ends_box.config(state="readonly" if spam else "disabled")
+        hz = self.sync_hz(tgts, spam)  # (Hz bass: its own gate and grid, so gate / ends / start are off)
+        self.gate_entry.config(state="normal" if spam and not hz else "disabled")
+        self.ends_box.config(state="readonly" if spam and not hz else "disabled")
         for b in self.align_buttons:  # (stretched gates fill each key exactly: where they start doesn't matter)
-            b.config(state="normal" if spam and ends != "stretch" else "disabled")
+            b.config(state="normal" if spam and not hz and ends != "stretch" else "disabled")
         self._loading = True
         self.cancel_var.set(not tgts[0].get("union"))
         apart = bool(tgts[0].get("apart"))
@@ -291,6 +333,110 @@ class CustomPanel:
             self.gate_entry.config(style="Bad.TEntry")
             return
         self.set_custom("gate", ticks / self.ppq)
+
+    # ---- Hz bass (custom.py): spam whose gate is one wave of a tone
+
+    def current_bpm(self):
+        """The project's BPM, or None while its box holds something else."""
+        try:
+            bpm = calc(self.pvar["bpm"].get())
+        except ValueError:
+            return None
+        return bpm if 4 <= bpm <= 100000 else None
+
+    def sync_hz(self, tgts, spam):
+        """The Hz bass row shows tgts' settings. Returns True if Hz bass is on (and the fill is a spam one)."""
+        hz = tgts[0].get("hz")
+        self._loading = True
+        self.hz_var.set(bool(hz))
+        if hz or not self.hz_tone.get():
+            self.hz_tone.set(note_name((hz or HZ_DEFAULTS)["key"]))
+            self.hz_cents.set(fmt((hz or HZ_DEFAULTS)["cents"]))
+        self._loading = False
+        on = bool(hz) and spam
+        self.hz_check.config(state="normal" if spam else "disabled")
+        for entry in (self.hz_tone_entry, self.hz_cents_entry):
+            entry.config(state="normal" if on else "disabled", style="TEntry")
+        bpm = self.current_bpm()
+        stale = on and bpm is not None and any(t.get("hz") and abs(t["hz"]["bpm"] - bpm) > 1e-9 for t in tgts)
+        self.hz_info.pack_forget()
+        self.hz_stale.pack_forget()
+        if on:
+            gate = max(1.0, tgts[0]["gate"] * self.ppq)
+            low = math.floor(gate)
+            text = (tr("panel_custom.hz_info_whole", hz=f"{hz_of(hz['key'], hz['cents']):.2f}", gate=low)
+                    if gate - low < 1e-9 else
+                    tr("panel_custom.hz_info", hz=f"{hz_of(hz['key'], hz['cents']):.2f}", gate=f"{gate:.3f}",
+                       low=low, high=low + 1))
+            short = gate < HZ_SHORT
+            self.hz_info.config(text=text + (tr("panel_custom.hz_short") if short else ""),
+                                foreground=GAP_COLOR if short else "#777")
+            self.hz_info.pack(anchor="w", padx=(20, 0), after=self.hz_row)
+            if stale:
+                self.hz_stale.pack(anchor="w", padx=(20, 0), after=self.hz_info)
+        return on
+
+    def on_hz(self):
+        """The Hz bass box ticked or cleared."""
+        if self._loading:
+            return
+        self.set_hz((self.typed_hz() or dict(HZ_DEFAULTS)) if self.hz_var.get() else None)
+
+    def typed_hz(self):
+        """The tone and pitch boxes as {"key", "cents"}, or None (the wrong box turns red)."""
+        out = {}
+        for name, entry, read in (("key", self.hz_tone_entry, lambda: tone_key(self.hz_tone.get())),
+                                  ("cents", self.hz_cents_entry, lambda: float(calc(self.hz_cents.get())))):
+            try:
+                out[name] = read()
+                if name == "cents" and abs(out[name]) > 1200:
+                    raise ValueError
+            except ValueError:
+                entry.config(style="Bad.TEntry")
+                return None
+        return out
+
+    def on_hz_entry(self):
+        if self._loading or str(self.hz_tone_entry.cget("state")) == "disabled":
+            return
+        hz = self.typed_hz()
+        if hz:
+            self.set_hz(hz)
+
+    def set_hz(self, hz):
+        """Hz bass on (hz = {"key", "cents"}: the gate is worked out for the BPM now) or off (None) for the custom
+        shape panel's targets."""
+        tgts, bpm = self.custom_targets(), self.current_bpm()
+        if hz and bpm is None:
+            return self.sync_custom()
+        new = {"hz": dict(hz, bpm=float(bpm)), "gate": hz_gate(hz, bpm)} if hz else {}
+        placed = [t for t in tgts if t is not self.custom_defaults]
+        if (all(t.get("hz") == new.get("hz") for t in tgts)
+                or not self.confirm_big([dict({k: v for k, v in t.items() if k != "hz"}, **new) for t in placed])):
+            return self.sync_custom()
+        if placed:
+            self.push_undo(name=tr("panel_custom.hz_bass"))
+        for t in tgts:
+            t.pop("hz", None)
+            t.update(copy.deepcopy(new))
+        self.shapes_changed()
+        self.sync_custom()
+        self.schedule_autosave()
+
+    def update_hz(self):
+        """The "Update Hz bass" button: every target's gate worked out again for the BPM now."""
+        bpm = self.current_bpm()
+        tgts = [t for t in self.custom_targets() if t.get("hz")]
+        if bpm is None or not tgts:
+            return
+        if any(t is not self.custom_defaults for t in tgts):
+            self.push_undo(name=tr("panel_custom.hz_update"))
+        for t in tgts:
+            t["hz"] = dict(t["hz"], bpm=float(bpm))
+            t["gate"] = hz_gate(t["hz"], bpm)
+        self.shapes_changed()
+        self.sync_custom()
+        self.schedule_autosave()
 
     def open_drawer(self):
         if self.drawer:
