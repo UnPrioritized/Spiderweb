@@ -512,50 +512,75 @@ def paths_outline(paths, ppq):
     return keep_longest(np.concatenate(raw) if raw else np.zeros((0, 3), np.int64))
 
 
-def row_spans(polys, q):
+def poly_edges(polys):
+    """The closed polygons' edges as arrays (x and y where each starts, x and y where it ends), without the level
+    ones (row_spans works on these)."""
+    parts = [np.asarray(poly, float).reshape(-1, 2) for poly in polys]
+    parts = [p for p in parts if len(p) > 1]
+    if not parts:
+        return (np.zeros(0),) * 4
+    a, b = np.concatenate([p[:-1] for p in parts]), np.concatenate([p[1:] for p in parts])
+    keep = a[:, 1] != b[:, 1]
+    return tuple(np.ascontiguousarray(v[keep]) for v in (a[:, 0], a[:, 1], b[:, 0], b[:, 1]))
+
+
+def row_spans(polys, q, edges=None):
     """Time ranges (in beats) where the closed polygons' inside (even-odd, so holes stay empty) touches pitch
-    row q anywhere between its bottom and top edge."""
+    row q anywhere between its bottom and top edge. edges: poly_edges(polys), when it's at hand (many rows)."""
     lo, hi = q - 0.5, q + 0.5
-    edges = [(a, b) for poly in polys for a, b in zip(poly, poly[1:])
-             if a[1] != b[1] and min(a[1], b[1]) < hi and max(a[1], b[1]) > lo]
-    if not edges:
+    xa, ya, xb, yb = poly_edges(polys) if edges is None else edges
+    here = np.flatnonzero((np.minimum(ya, yb) < hi) & (np.maximum(ya, yb) > lo))
+    if not len(here):
         return []
+    xa, ya, xb, yb = xa[here], ya[here], xb[here], yb[here]
     # Between two neighbouring levels no corner lies, so every edge is a straight piece and each pair of
     # crossings is a trapezoid: its time range is the widest of its two sides.
-    levels = sorted({lo, hi} | {p[1] for a, b in edges for p in (a, b) if lo < p[1] < hi})
+    ys = np.concatenate([ya, yb])
+    levels = np.unique(np.concatenate([[lo, hi], ys[(ys > lo) & (ys < hi)]]))
+    # every edge with every gap between two levels it runs through (edge by edge, so in each gap they keep their
+    # order)
+    first = np.searchsorted(levels, np.maximum(np.minimum(ya, yb), lo))
+    n = np.searchsorted(levels, np.minimum(np.maximum(ya, yb), hi)) - first
+    e = np.repeat(np.arange(len(here)), n)
+    gap = np.repeat(first, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
+    y0, y1 = levels[gap], levels[gap + 1]
+    mid = (y0 + y1) / 2
+    cross = (ya[e] <= mid) != (yb[e] <= mid)
+    if not cross.all():
+        e, gap, y0, y1, mid = e[cross], gap[cross], y0[cross], y1[cross], mid[cross]
+    xa, ya, xb, yb = xa[e], ya[e], xb[e], yb[e]
 
-    def x_at(edge, y):
-        (xa, ya), (xb, yb) = edge
+    def x_at(y):
         return xa + (xb - xa) * (y - ya) / (yb - ya)
 
-    spans = []
-    y0, y1 = np.array([e[0][1] for e in edges], float), np.array([e[1][1] for e in edges], float)
-    for ya, yb in zip(levels, levels[1:]):
-        mid = (ya + yb) / 2
-        cross = sorted((edges[i] for i in np.flatnonzero((y0 <= mid) != (y1 <= mid)).tolist()),
-                       key=lambda e: x_at(e, mid))
-        for left, right in zip(cross[::2], cross[1::2]):
-            spans.append((min(x_at(left, ya), x_at(left, yb)), max(x_at(right, ya), x_at(right, yb))))
-    spans.sort()
-    merged = []
-    for a, b in spans:
-        if merged and a <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], b)
-        else:
-            merged.append([a, b])
-    return merged
+    order = np.lexsort((x_at(mid), gap))  # in each gap from left to right (the same spot: in the edges' order)
+    gap = gap[order]
+    left, right = np.minimum(x_at(y0), x_at(y1))[order], np.maximum(x_at(y0), x_at(y1))[order]
+    new = np.ones(len(gap), bool)
+    new[1:] = gap[1:] != gap[:-1]
+    at = np.arange(len(gap))
+    rank = at - np.maximum.accumulate(np.where(new, at, 0))
+    pair = np.flatnonzero((rank % 2 == 0) & np.append(~new[1:], False))  # the 1st with the 2nd, the 3rd with ...
+    return merge_spans(left[pair], right[pair + 1])
 
 
-def union_spans(polys, q):
-    """row_spans, but inside ANY of the loops counts (where they overlap it's filled, holes too)."""
-    spans = sorted(s for poly in polys for s in row_spans([poly], q))
-    merged = []
-    for a, b in spans:
-        if merged and a <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], b)
-        else:
-            merged.append([a, b])
-    return merged
+def merge_spans(a, b):
+    """Ranges from a[i] to b[i] -> [[start, end]] in order, the ones that touch or overlap made one."""
+    if not len(a):
+        return []
+    order = np.lexsort((b, a))
+    a, b = a[order], b[order]
+    new = np.ones(len(a), bool)
+    new[1:] = a[1:] > np.maximum.accumulate(b)[:-1]
+    at = np.flatnonzero(new)
+    return np.column_stack([a[at], np.maximum.reduceat(b, at)]).tolist()
+
+
+def union_spans(polys, q, edges=None):
+    """row_spans, but inside ANY of the loops counts (where they overlap it's filled, holes too). edges:
+    poly_edges of each loop."""
+    spans = [s for i, poly in enumerate(polys) for s in row_spans([poly], q, edges and edges[i])]
+    return merge_spans(np.array([s[0] for s in spans]), np.array([s[1] for s in spans]))
 
 
 def inside_spans(sh, ppq):
@@ -578,10 +603,11 @@ def find_spans(sh, ppq):
     if not ps:
         return []
     union = sh.get("union") and not tx
+    edges = None if tx else [poly_edges([poly]) for poly in polys] if union else poly_edges(polys)
     out = []
     for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1):
         for a, b in (threshold_spans(polys, q, tx["threshold"]) if tx else
-                     union_spans(polys, q) if union else row_spans(polys, q)):
+                     union_spans(polys, q, edges) if union else row_spans(polys, q, edges)):
             s = math.floor(a * ppq + 0.5)
             out.append((q, s, max(math.floor(b * ppq + 0.5), s + 1)))
     return out
