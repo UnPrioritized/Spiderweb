@@ -179,13 +179,14 @@ class RollDrawing:
             self.show_caret()
 
     def draw_select_box(self):
-        """The dotted box being dragged with Select."""
+        """The dotted box being dragged with Select (or the last one, kept_box)."""
         self.delete("selbox")
-        box = self.box_rect() if self.drag and self.drag[0] == "box" else None
+        box = self.box_area() if self.drag and self.drag[0] == "box" else None if self.drag else self.kept_box()
         if box:
-            x0, y0, x1, y1 = box
-            self.create_rectangle(max(x0, self.kb_w), max(y0, self.ruler_h), x1, y1, outline="#000000",
-                                  dash=(2, 2), tags="selbox")
+            x0, y0, x1, y1 = self.box_rect(box)
+            w = max(2, round(2 * self.scale))
+            self.create_rectangle(max(x0, self.kb_w), max(y0, self.ruler_h), x1, y1, outline="#000000", width=w,
+                                  dash=(3 * w, 2 * w), tags="selbox")
 
     def draw_playhead(self):
         self.delete("playhead")

@@ -27,6 +27,7 @@ PREROLL = 1.0  # seconds rendered before a stretch and thrown away. Measured: jo
 # render by about -25 dB all through (partly reverb), no clicks where they meet; with no preroll the first 0.25 s
 # are 34 % off.
 PIECE = RATE // 20  # frames asked of BASS at a time (progress is told this often)
+FADE_MS = 60  # stopping fades out this long (a sudden stop clicks)
 
 # bass.h / bassmidi.h
 _DEVICE_NONE, _DEVICE_DEFAULT = 0, -1
@@ -35,6 +36,7 @@ _SAMPLE_FLOAT, _STREAM_DECODE, _UNICODE = 0x100, 0x200000, 0x80000000
 _DATA_FLOAT, _POS_BYTE, _STREAMPROC_END = 0x40000000, 0, 0x80000000
 _MIDI_DECAYEND, _MIDI_NOFX = 0x1000, 0x2000
 _ATTRIB_MIDI_VOICES, _ATTRIB_MIDI_VOICES_ACTIVE = 0x12003, 0x12004
+_ATTRIB_VOL = 2
 _EV_END, _EV_NOTE, _EV_PROGRAM, _EV_TEMPO = 0, 1, 2, 62
 
 EVENT = np.dtype([("event", "<u4"), ("param", "<u4"), ("chan", "<u4"), ("tick", "<u4"), ("pos", "<u4")])
@@ -82,6 +84,7 @@ def _load():
                             ("BASS_ChannelGetPosition", [u, u], ctypes.c_uint64),
                             ("BASS_ChannelGetLength", [u, u], ctypes.c_uint64),
                             ("BASS_ChannelSetAttribute", [u, u, f], i),
+                            ("BASS_ChannelSlideAttribute", [u, u, f, u], i),
                             ("BASS_ChannelGetAttribute", [u, u, ctypes.POINTER(f)], i)):
         fn = getattr(bass, name)
         fn.argtypes, fn.restype = args, res
@@ -282,6 +285,9 @@ class Player:
     def _fill(self, handle, buffer, length, user):
         n = length // 8
         out = np.frombuffer((ctypes.c_float * (n * 2)).from_address(buffer), np.float32).reshape(n, 2)
+        if not self.handle:  # (fading out after stop: nothing more from pull)
+            out[:] = 0
+            return length
         parts, m, end = [], 0, False  # (pull may hand over less than asked, e.g. up to the end of a piece: ask again)
         while m < n:
             try:
@@ -329,8 +335,17 @@ class Player:
         """False once the end was played (or it was stopped)."""
         return bool(self.handle) and self.synth.bass.BASS_ChannelIsActive(self.handle) != 0
 
-    def stop(self):
-        if self.handle:
-            self.synth.bass.BASS_ChannelStop(self.handle)
-            self.synth.bass.BASS_StreamFree(self.handle)
-            self.handle = 0
+    def stop(self, fade=True):
+        """Stops: a quick fade out (FADE_MS, so it doesn't click), then the stream is freed."""
+        h, self.handle = self.handle, 0
+        if not h:
+            return
+        bass = self.synth.bass
+        if fade and bass.BASS_ChannelIsActive(h) and bass.BASS_ChannelSlideAttribute(h, _ATTRIB_VOL, -1.0, FADE_MS):
+            # (-1 = stops when faded; the timer keeps this Player, so its _proc lives while BASS may still call it)
+            timer = threading.Timer(FADE_MS / 1000 + 0.1, lambda: (bass.BASS_StreamFree(h), self))
+            timer.daemon = True
+            timer.start()
+        else:
+            bass.BASS_ChannelStop(h)
+            bass.BASS_StreamFree(h)

@@ -41,6 +41,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.draft = None  # shape being drawn
         self.drag = None   # what the left mouse button is doing
         self.box_shift = False   # the Select box was last moved with Shift (not snapped)
+        self.box_kept = None     # (box_area, selection) of the last Select box, shown after letting go
         self._pan = None
         self._saved_view = None
         self.note_img = None     # grid + notes as one picture when there are too many notes for canvas items
@@ -105,20 +106,34 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             b, p = round(b / sb) * sb, round(p)
         return [max(0.0, b), min(max(p, 0), self.app.keys - 1)]
 
-    def box_rect(self, e=None):
-        """The Select box being dragged, on screen (x0, y0, x1, y1): out to whole snap steps and whole keys
-        (grid_span; Shift = as dragged). None while it's still a click."""
+    def box_area(self, e=None):
+        """The Select box being dragged as (beat, pitch, beat, pitch) corners: out to whole snap steps and whole
+        keys (grid_span; Shift = as dragged). None while it's still a click."""
         _, x, y, cx, cy = self.drag[:5]
         if abs(cx - x) < BOX_STILL and abs(cy - y) < BOX_STILL:
             return None
         if e is not None:
             self.box_shift = bool(e.state & SHIFT)
         if self.box_shift:
-            return min(x, cx), min(y, cy), max(x, cx), max(y, cy)
+            return self.x2t(x), self.y2p(y), self.x2t(cx), self.y2p(cy)
         b0, b1 = grid_span(self.x2t(x), self.x2t(cx), self.app.snap_beats())
         top = self.app.keys - 1
         p0, p1 = sorted(min(max(round(self.y2p(v)), 0), top) for v in (y, cy))
-        return self.t2x(b0), self.p2y(p1 + 0.5), self.t2x(b1), self.p2y(p0 - 0.5)
+        return b0, p1 + 0.5, b1, p0 - 0.5
+
+    def box_rect(self, area):
+        """A box_area on screen (x0, y0, x1, y1), x0 < x1, y0 < y1."""
+        (x0, x1), (y0, y1) = sorted((self.t2x(area[0]), self.t2x(area[2]))), sorted((self.p2y(area[1]),
+                                                                                      self.p2y(area[3])))
+        return x0, y0, x1, y1
+
+    def kept_box(self):
+        """The last Select box, still shown after letting go while what it selected is still the selection (a
+        press on the piano roll or any other change of the selection drops it). None = not shown."""
+        if self.box_kept and self.box_kept[1] == self.app.sels:
+            return self.box_kept[0]
+        self.box_kept = None
+        return None
 
     def clamp_view(self):
         if self.sy is None:
@@ -373,6 +388,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
     def on_press(self, e):
         self.focus_set()
+        self.box_kept = None
         if self.follow and self.sx is not None:  # a shape started with a click: this click finishes it
             self.drag, self.follow = self.follow, None
             self.on_drag(e)
@@ -515,8 +531,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         elif kind == "box":
             _, x, y, _, _, base, primary = self.drag
             self.drag = ("box", x, y, max(e.x, self.kb_w), max(e.y, self.ruler_h), base, primary)
-            box = self.box_rect(e)
-            found = self.shapes_in_box(*box) - base if box else set()
+            box = self.box_area(e)
+            found = self.shapes_in_box(*self.box_rect(box)) - base if box else set()
             if base | found != self.app.sels:
                 self.app.select_many(base | found, max(found) if found else primary)
             self.draw_select_box()
@@ -646,7 +662,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if kind == "wall":
                 self.app.sync_funnel()
             return
-        if kind == "seek" and self.drag[1]:
+        if kind == "box" and self.box_area():
+            self.box_kept = (self.box_area(), set(self.app.sels))
+        elif kind == "seek" and self.drag[1]:
             self.app.start_play()  # it was playing: carry on from the new spot
         elif (kind == "box" and abs(e.x - self.drag[1]) < BOX_STILL and abs(e.y - self.drag[2]) < BOX_STILL
               and not e.state & CTRL):
@@ -718,7 +736,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if kind in ("handle", "move"):
             self.app.sync_funnel()  # its note count
         self.drag = None
-        self.delete("selbox")
+        self.draw_select_box()  # (the box stays, see kept_box)
 
     def on_double(self, e):
         # Tk turns a quick second click into a double-click; only polylines use it, everything else gets a normal click

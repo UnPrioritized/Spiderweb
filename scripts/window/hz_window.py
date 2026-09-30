@@ -85,6 +85,7 @@ class HzWindow(tk.Toplevel):
         self.minsize(round(420 * s), round(260 * s))
         self.tones, self.sel = [], set()  # the notes shown (hzbass tones) and which are selected
         self.drag = None
+        self.box_kept = None  # (box_area, selection) of the last Select box, shown after letting go
         self.pending = None  # (tone id, beat): the first middle click of a slide, waiting for the second
         self.sounding = None  # (channel, key) heard now: the note held with the mouse
         self.last_len = 1.0  # beats: how long a newly placed note is (the last length used)
@@ -449,10 +450,11 @@ class HzWindow(tk.Toplevel):
         for x, y, *_ in self.dots():
             r = 3.5 * s
             c.create_oval(x - r, y - r, x + r, y + r, fill="white", outline=RED, width=max(1, round(1.5 * s)))
-        box = self.box_rect() if self.drag and self.drag["kind"] == "box" else None
-        if box:
-            x0, y0, x1, y1 = box
-            c.create_rectangle(max(x0, kb), max(y0, rh), x1, y1, outline="#000000", dash=(2, 2))
+        box = self.box_area() if self.drag and self.drag["kind"] == "box" else None if self.drag else self.kept_box()
+        if box:  # the Select box (or the last one, kept_box)
+            x0, y0, x1, y1 = self.box_rect(box)
+            bw = max(2, round(2 * s))
+            c.create_rectangle(max(x0, kb), max(y0, rh), x1, y1, outline="#000000", width=bw, dash=(3 * bw, 2 * bw))
         c.create_rectangle(0, 0, kb, h, fill="#fafafa", outline="", tags="frame")  # keys (the preview's grey
         # goes under this: draw_preview)
         for k in range(k_lo, k_hi + 1):
@@ -607,18 +609,34 @@ class HzWindow(tk.Toplevel):
     def snap_beats(self):
         return snap_beats(self.app.hz_snap.get(), self.app.beats)
 
-    def box_rect(self, d=None):
-        """The Select box being dragged (d: this box drag instead), on screen (x0, y0, x1, y1): out to whole snap
-        steps and whole keys (grid_span; Shift = as dragged). None while it's still a click."""
+    def box_area(self, d=None):
+        """The Select box being dragged (d: this box drag instead) as (beat, key, beat, key) corners, a key being
+        the top of its row (fractions: in between): out to whole snap steps and whole keys (grid_span; Shift = as
+        dragged). None while it's still a click."""
         d = d or self.drag
         (x, y), (cx, cy) = d["from"], d["to"]
         if abs(cx - x) < BOX_STILL and abs(cy - y) < BOX_STILL:
             return None
         if d.get("shift"):
-            return min(x, cx), min(y, cy), max(x, cx), max(y, cy)
+            return tuple(v for p in ((x, y), (cx, cy)) for v in (self.beat_at(p[0]),
+                                                                    self.top - (p[1] - self.ruler_h) / self.sy))
         b0, b1 = grid_span(self.beat_at(x), self.beat_at(cx), self.snap_beats())
         k0, k1 = sorted((self.key_at(y), self.key_at(cy)))
-        return self.x_of(b0), self.y_of(k1), self.x_of(b1), self.y_of(k0) + self.sy
+        return b0, k1, b1, k0 - 1
+
+    def box_rect(self, area):
+        """A box_area on screen (x0, y0, x1, y1), x0 < x1, y0 < y1."""
+        (x0, x1), (y0, y1) = (sorted((self.x_of(area[0]), self.x_of(area[2]))),
+                              sorted((self.y_of(area[1]), self.y_of(area[3]))))
+        return x0, y0, x1, y1
+
+    def kept_box(self):
+        """The last Select box, still shown after letting go while what it selected is still the selection (a
+        press or any other change of the selection drops it). None = not shown."""
+        if self.box_kept and self.box_kept[1] == self.sel:
+            return self.box_kept[0]
+        self.box_kept = None
+        return None
 
     def shortest(self, e):
         sb = self.snap_beats()
@@ -661,6 +679,7 @@ class HzWindow(tk.Toplevel):
 
     def on_press(self, e):
         self.canvas.focus_set()
+        self.box_kept = None
         self.drop_drag()
         hit = self.hit(e.x, e.y)
         before = copy.deepcopy(self.tones)
@@ -713,11 +732,11 @@ class HzWindow(tk.Toplevel):
             return
         if d["kind"] == "box":
             d["to"], d["shift"] = (max(e.x, self.kb_w), max(e.y, self.ruler_h)), bool(e.state & SHIFT)
-            box = self.box_rect()
+            box = self.box_area()
             if box is None:  # (still a click)
                 self.sel = set(d["base"])
                 return self.redraw()
-            x0, y0, x1, y1 = box
+            x0, y0, x1, y1 = self.box_rect(box)
             self.sel = d["base"] | {i for i, n in enumerate(self.tones)
                         if self.x_of(n["t"]) < x1 and self.x_of(n["t"] + n["len"]) > x0
                         and self.y_of(n["key"]) < y1 and self.y_of(n["key"]) + self.sy > y0}
@@ -778,7 +797,9 @@ class HzWindow(tk.Toplevel):
         if not d:
             return
         if d["kind"] == "box":
-            if (self.box_rect(d) is None and not e.state & CTRL and self.tool.get() == "select"
+            if self.box_area(d):
+                self.box_kept = (self.box_area(d), set(self.sel))
+            elif (not e.state & CTRL and self.tool.get() == "select"
                     and self.preview_on.get()):  # a click, not a drag: the play line goes there
                 self.put_play_line(self.snap(self.beat_at(d["from"][0]), e))
             return self.redraw()
