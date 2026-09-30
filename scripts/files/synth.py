@@ -121,6 +121,8 @@ class Synth:
         self.can_play = self._init(_DEVICE_DEFAULT) or self._init(_DEVICE_NONE)
         self.font, self.font_path = 0, None
         self._lock = threading.Lock()
+        self._users = {}  # font -> renders using it now (an old font is only closed when none are left)
+        self._old = set()  # fonts replaced, to close once unused
 
     def _init(self, device):
         return bool(self.bass.BASS_Init(device, RATE, 0, None, None)) or \
@@ -133,18 +135,40 @@ class Synth:
             raise SynthError("synth.bad_font", name=os.path.basename(path), err=self.bass.BASS_ErrorGetCode())
         with self._lock:
             old, self.font, self.font_path = self.font, font, path
-        if old:
-            self.midi.BASS_MIDI_FontFree(old)
+            if old:
+                self._old.add(old)
+        self._free_unused()
+
+    def _take(self):
+        """The font to use, counted as in use until _give."""
+        with self._lock:
+            font = self.font
+            self._users[font] = self._users.get(font, 0) + 1
+        return font
+
+    def _give(self, font):
+        with self._lock:
+            self._users[font] -= 1
+        self._free_unused()
+
+    def _free_unused(self):
+        with self._lock:
+            gone = [f for f in self._old if not self._users.get(f)]
+            self._old.difference_update(gone)
+        for f in gone:
+            self.midi.BASS_MIDI_FontFree(f)
 
     def warm_up(self):
         """Loads the soundfont's piano (program 0) now, so the first piece of sound doesn't wait for it."""
         ev = events(np.array([[0, 1, 60, 1]]), 960, 120)
         h = self.midi.BASS_MIDI_StreamCreateEvents(ev.ctypes.data, 960, _STREAM_DECODE | _SAMPLE_FLOAT, RATE)
         if h:
-            font = _Font(self.font, -1, 0)
+            used = self._take()
+            font = _Font(used, -1, 0)
             self.midi.BASS_MIDI_StreamSetFonts(h, ctypes.byref(font), 1)
             self.midi.BASS_MIDI_StreamLoadSamples(h)
             self.bass.BASS_StreamFree(h)
+            self._give(used)
 
     def render(self, ev, ppq, start, frames, voices, nofx=False, cancel=None, progress=None, stats=None):
         """`frames` frames of sound from `start` (frames from the song's start) as float32 rows (left, right).
@@ -157,8 +181,9 @@ class Synth:
         h = self.midi.BASS_MIDI_StreamCreateEvents(ev.ctypes.data, ppq, flags, RATE)
         if not h:
             raise SynthError("synth.failed", err=bass.BASS_ErrorGetCode())
+        sf = self._take()
         try:
-            font = _Font(self.font, -1, 0)
+            font = _Font(sf, -1, 0)
             self.midi.BASS_MIDI_StreamSetFonts(h, ctypes.byref(font), 1)
             bass.BASS_ChannelSetAttribute(h, _ATTRIB_MIDI_VOICES, float(voices))
             self.midi.BASS_MIDI_StreamLoadSamples(h)
@@ -189,11 +214,14 @@ class Synth:
             return out[early:]
         finally:
             bass.BASS_StreamFree(h)
+            self._give(sf)
 
     def close(self):
-        if self.font:
-            self.midi.BASS_MIDI_FontFree(self.font)
-            self.font = 0
+        """(After every render has finished.)"""
+        for f in self._old | ({self.font} if self.font else set()):
+            self.midi.BASS_MIDI_FontFree(f)
+        self._old.clear()
+        self.font = 0
         self.bass.BASS_Free()
 
 

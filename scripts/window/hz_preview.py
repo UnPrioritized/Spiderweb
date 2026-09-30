@@ -60,20 +60,24 @@ class _Job:
 class Preview:
     def __init__(self, win):
         self.win, self.app = win, win.app
-        self.cfg = self.app.hz_preview
         self.synth = None
         self.notes = None  # the notes the sound is made of (the main window's remembered array: same = unchanged)
         self.shape = None  # (id of the shape, its left edge): where the window's beats start
         self.ev, self.ppq, self.bpm = None, 0, 0.0
         self.span = (0, 0)  # frames with sound in them: first note .. last note's end + TAIL
         self.chunks, self.jobs, self.ver = {}, {}, {}  # made pieces, pieces being made, each piece's version
-        self.speed, self.voices_used = None, 0  # x real time (all the pieces at once), most voices seen
+        self.took = []  # seconds the last few pieces with notes in them took (for the speed)
+        self.voices_used = 0  # the most voices at once in the pieces made since the settings last changed
         self.player, self.play_at = None, 0  # the player, the song frame it asks for next
         self.line = None  # the play line (song beat); None = at the first note
         self.shown = None  # what the grey looks like now (only drawn again when it changes)
         self._tick = None
         self.load = None  # the thread opening the soundfont (it happens in the background)
         self.loaded_at = 0.0  # when it finished (the green "loaded" shows for a few seconds)
+
+    @property
+    def cfg(self):
+        return self.app.hz_preview
 
     # ------------------------------------------------------------ on / off
 
@@ -120,14 +124,11 @@ class Preview:
         self.notes, self.shown = None, None
         self.win.draw_preview()
 
-    def restart(self):
-        """The settings changed (soundfont, voices, no FX): everything is made again."""
-        was = self.playing()
-        self.stop_play()
-        err = self.start()
-        if was and not err:
-            self.play()
-        return err
+    def remake(self):
+        """The settings changed (soundfont, voice limit, no FX): everything is made again (greyed until then; playing
+        goes on, waiting at the grey). A new soundfont is opened first. Returns an error text, or None."""
+        self.took, self.voices_used = [], 0
+        return self.start()
 
     def clear(self, lo=None, hi=None):
         """Throws away the pieces between frames lo and hi (all without them) and stops making them."""
@@ -232,8 +233,9 @@ class Preview:
                     return self.win.preview_failed(job.error)
                 elif job.result is not None and job.ver == self.ver.get(i, 0):
                     self.chunks[i] = job.result
-                    self.speed = CHUNK / max(job.took, 1e-6) * WORKERS
-                    self.voices_used = job.voices
+                    if job.voices:  # (a piece past the last note is silence: quick, says nothing)
+                        self.took = (self.took + [job.took])[-2 * WORKERS:]
+                        self.voices_used = max(self.voices_used, job.voices)
         want = self.wanted()
         keep = set(want)
         at = self.anchor()
@@ -277,6 +279,11 @@ class Preview:
             else:
                 spans.append([a, b])
         return [(self.beat_of(a), self.beat_of(b)) for a, b in spans]
+
+    @property
+    def speed(self):
+        """How many times faster than real time the sound is made, all the pieces at once (None = not known)."""
+        return CHUNK * len(self.took) / max(sum(self.took), 1e-6) * WORKERS if self.took else None
 
     def busy(self):
         return bool(self.jobs)

@@ -33,6 +33,7 @@ from roll.roll_shared import ALT, CTRL, SELECT_CURSOR, SELECTED_COLOR, SHIFT, SL
 from roll.zoombar import add_zoom_bars
 from window.hz_effects import FxPane
 from window.hz_preview import Preview
+from window.preview_settings import open_preview_settings
 from window.snap_picker import SnapPicker
 from window.widgets import Tooltip
 
@@ -137,8 +138,12 @@ class HzWindow(tk.Toplevel):
                             style="Toolbutton")
         b.pack(side="left")
         Tooltip(b, tr("hz.preview_tip"))
+        b = ttk.Button(f, text=tr("hz.preview_settings"), command=lambda: open_preview_settings(self))
+        b.pack(side="left", padx=(4, 0))
+        Tooltip(b, tr("hz.preview_settings_tip"))
         self.preview_says = ttk.Label(f, text="", foreground="#555")
         self.preview_says.pack(side="left", padx=(6, 10))
+        self.settings_window = None  # Preview settings… (preview_settings.py)
         f = piece()
         self.what = ttk.Label(f, text="", foreground="#555")
         self.what.pack(side="left", padx=(0, 10))
@@ -1136,8 +1141,12 @@ class HzWindow(tk.Toplevel):
                 says = tr("hz.preview_ready", voices=vo)
         if (self.preview_says.cget("text"), str(self.preview_says.cget("foreground"))) != (says, colour):
             self.preview_says.config(text=says, foreground=colour)
+        if self.settings_window:
+            self.settings_window.refresh()
 
     def close(self):
+        if self.settings_window and self.settings_window.winfo_exists():
+            self.settings_window.destroy()
         self.preview.stop()
         self.sound(None)
         self.app.pvar["ppq"].trace_remove("write", self.ppq_trace)
