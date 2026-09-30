@@ -123,7 +123,7 @@ class ClawWindow(tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
-        self.title(tr("claw.claw_machine"))
+        self.title(tr("claw.window_title"))
         self.transient(app)
         self.resizable(False, False)
         if app.claw_pos:
@@ -295,8 +295,17 @@ class ClawWindow(tk.Toplevel):
             else:
                 m.add_command(label=text, command=lambda v=value: self.put(key, v))
         b["menu"] = m
+        b.bind("<MouseWheel>", lambda e: self.wheel_menu(key, 1 if e.delta < 0 else -1))
         Tooltip(b, tip)
         self.menus[key] = (b, choices)
+
+    def wheel_menu(self, key, d):
+        """The mouse wheel over a dropdown picks the next / previous choice (stops at the ends)."""
+        values = [v for v, t in self.menus[key][1] if t != "-"]
+        i = values.index(self.claw[key]) + d if self.claw[key] in values else 0
+        if 0 <= i < len(values) and values[i] != self.claw[key]:
+            self.put(key, values[i], False)  # (a run of wheel steps = one Ctrl+Z inside)
+        return "break"
 
     def show(self):
         """The window shows self.claw. Only what differs is changed: each change makes the window lay itself out
