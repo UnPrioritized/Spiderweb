@@ -952,6 +952,7 @@
   "Drag a box on the piano roll, or click two corners. Ctrl makes it perfect as it looks on screen (a circle, a square, an equal-sided triangle or star).",
   "",
   "Polygon: the panel sets how many Points it has (3 = triangle, 4 = square, 5 = pentagon…) and its Kind. Polygon has a flat side at the bottom. Star: outer and inner points take turns; Inner size is how far out the inner points are, in % of the outer ones (100 = a polygon with twice the points). Crossing star: joins every Skip-th point with straight lines that cross, like a pentagram (5 points, skip 2); when the two share a divisor it's several loops (6 points, skip 2 = two triangles). Change them any time with the polygon selected; the panel's numbers are also used for the next one you draw.",
+  "[clip:polygon]",
   "",
   "The sides can have a shape: right-click the polygon → Formula → Shape of the line (Quarter circle, S-curve, your own…). Every side becomes that shape, from its corner to the next one, so a square can become a flower of arches. A closed shape (like Circle) sits on each side as wide as the side, and the sides stay straight.",
   "",
