@@ -672,34 +672,14 @@ class HzWindow(tk.Toplevel):
         self.box_timer = self.after(BOX_SCROLL_MS, self.box_scroll)
 
     def stretch_to(self, d, e):
-        """The kept Select box's side / corner dragged: its side goes to the mouse (the grid line nearest it,
-        Shift = not snapped / the key row under it) and its notes stretch with it: sideways only their lengths
-        change (user: they stay where they start), up / down their keys spread out from the other side."""
-        (sx, sy), (b0, top, b1, bottom), orig = d["side"], d["area"], d["orig"]
-        new = [b0, top, b1, bottom]
-        f = 1.0
-        if sx:
-            anchor, edge = (b0, b1) if sx > 0 else (b1, b0)
-            short = self.shortest(e)
-            at = self.snap(self.beat_at(e.x), e)
-            at = max(at, anchor + short) if sx > 0 else max(0.0, min(at, anchor - short))
-            f = abs(at - anchor) / max(1e-12, abs(edge - anchor))
-            new[2 if sx > 0 else 0] = at
-        lo, hi = bottom + 1, top  # (the rows in the box)
-        k = min(127, max(0, self.key_at(e.y)))
-        anchor, g = lo, 1.0
-        if sy and hi > lo:
-            if sy < 0:
-                anchor, g = lo, (max(k, lo) - lo) / (hi - lo)
-                new[1] = max(k, lo)
-            else:
-                anchor, g = hi, (hi - min(k, hi)) / (hi - lo)
-                new[3] = min(k, hi) - 1
+        """The kept Select box's right side dragged: it goes to the mouse (the grid line nearest it, Shift = not
+        snapped) and every note it selected gets that much longer / shorter, the same for all (user, like Domino:
+        one grid step = one grid step on each note); starts and keys stay."""
+        (b0, top, b1, bottom), orig = d["area"], d["orig"]
+        at = max(self.snap(self.beat_at(e.x), e), b0 + self.shortest(e))
         for i in self.sel:
-            n, n0 = self.tones[i], orig[i]
-            n["len"] = max(1 / self.app.ppq, n0["len"] * f)
-            n["key"] = min(127, max(0, anchor + round((n0["key"] - anchor) * g)))
-        d["box"] = tuple(new)
+            self.tones[i]["len"] = max(1 / self.app.ppq, orig[i]["len"] + at - b1)
+        d["box"] = (b0, top, at, bottom)
         self.box_kept = (d["box"], set(self.sel))
         self.redraw()
         self.show_status(e)
@@ -737,12 +717,15 @@ class HzWindow(tk.Toplevel):
         return None
 
     def on_kept_box(self, kept, e, hit):
-        """Where the mouse is on the kept Select box (box_side; a slide's dot wins over its sides, a note over
-        its inside), or None."""
+        """Where the mouse is on the kept Select box: (1, 0) its right side (its corners too), (0, 0) inside (a
+        note there wins), or None. Its left side, top and bottom do nothing (user, like Domino); a slide's dot
+        wins over it all."""
         if not kept or not self.sel or e.state & CTRL or hit and hit[0] in ("in", "out"):
             return None
         side = box_side(self.box_rect(kept), e.x, e.y, 5 * self.s)
-        return None if side == (0, 0) and hit else side
+        if side and side[0] == 1:
+            return 1, 0
+        return (0, 0) if side == (0, 0) and not hit else None
 
     def on_motion(self, e):
         hit = self.hit(e.x, e.y)
