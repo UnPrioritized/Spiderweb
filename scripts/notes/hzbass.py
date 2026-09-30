@@ -20,7 +20,12 @@ slide the tone just stops at its end. The red line in the window is what is real
 All the repeats together, each lasting until the next one starts, are the squares every key of the shape is chopped
 by (custom.chop_grid), so a chord takes one channel. Nothing sounds where no tone is.
 hz["grow"] = the shape is kept as long as its tones (fit_length). hz["own"] = made with the Hz bass tool: a box
-that is nothing but its tones (it goes when its last tone is deleted; the panel shows the keys it repeats)."""
+that is nothing but its tones (it goes when its last tone is deleted; the panel shows the keys it repeats).
+
+Effects: a tone can have "fx" = {effect: [[u, value], ...]}: a line through points, u = 0..1 along the tone, value
+0..1. They change the colour of the tone, not its pitch. "slant": every key starts its repeats a bit later than the
+key below it; the value is how much of one wave the shape's keys are spread over (0 = all together). With effects
+every key has its own repeats (KeyGrid, custom.chop_keys); without any, nothing changes."""
 
 import functools
 import json
@@ -31,6 +36,8 @@ import numpy as np
 HZ_DEFAULTS = {"key": 33, "cents": 0.0}
 MIN_LEN = 1 / 1024  # beats: a tone is never shorter
 TUNE = 50.0  # cents: how far a placed tone's own tune goes, up or down (half a key)
+FX = ("slant",)  # the effects a placed tone can have
+FX_START = {"slant": [[0.0, 0.0], [1.0, 1.0]]}  # the line an effect starts with
 
 
 def hz_of(key, cents=0.0):
@@ -41,6 +48,35 @@ def hz_of(key, cents=0.0):
 def hz_gate(hz, bpm):
     """The spam gate, in beats, that sounds like hz's tone at this BPM."""
     return max(1e-6, float(f"{bpm / (60.0 * hz_of(hz['key'], hz['cents'])):.12g}"))  # (12 digits: as saved)
+
+
+def clean_fx(fx):
+    """A tone's effects checked: {effect: [[u, value], ...]} in order, both 0..1. Effects with no points are left
+    out."""
+    out = {}
+    for name in FX:
+        try:
+            pts = [(float(u), float(v)) for u, v in fx.get(name) or ()]
+        except (TypeError, ValueError, AttributeError):
+            continue
+        pts = sorted(((min(1.0, max(0.0, u)), min(1.0, max(0.0, v))) for u, v in pts
+                      if math.isfinite(u) and math.isfinite(v)), key=lambda p: p[0])  # (two at one spot: a step)
+        if pts:
+            out[name] = [list(p) for p in pts]
+    return out
+
+
+def fx_at(n, name, beat):
+    """The value of a tone's effect at beat (an array, from the shape's left edge; 0 when it hasn't got it).
+    Before the first point and after the last one the line stays flat."""
+    pts = (n.get("fx") or {}).get(name)
+    if not pts:
+        return np.zeros(np.shape(beat))
+    return np.interp((np.asarray(beat) - n["t"]) / n["len"], [p[0] for p in pts], [p[1] for p in pts])
+
+
+def has_fx(hz):
+    return any(n.get("fx") for n in hz.get("tones") or ())
 
 
 def clean_tones(tones):
@@ -54,6 +90,9 @@ def clean_tones(tones):
             tone["id"] = int(n.get("id", 0))
             tone["to"] = [{"id": int(s["id"]), "out": max(0.0, float(s["out"])), "in": max(0.0, float(s["in"]))}
                           for s in n.get("to") or ()]
+            fx = clean_fx(n.get("fx"))
+            if fx:
+                tone["fx"] = fx
         except (KeyError, TypeError, ValueError, AttributeError):
             continue
         ok = all(math.isfinite(v) for v in [tone["t"], tone["len"], tone["cents"], *leads]
@@ -157,9 +196,10 @@ def wave(hz, ppq, key):
 
 def tone_runs(hz, left, ppq):
     """The repeats of the placed tones as unbroken stretches of tone: [(start ticks, the ticks their waves are over
-    = the next one's start)], not rounded. A tone held is one stretch, from where the first slide into it arrives
-    to where the last slide out of it leaves; every slide is one more (two when there's a gap between its tones:
-    nothing sounds there), its waves in step with the tone it leaves."""
+    = the next one's start, whose: (tone, None) or (tone slid from, tone slid to))], not rounded. A tone held is
+    one stretch, from where the first slide into it arrives to where the last slide out of it leaves; every slide
+    is one more (two when there's a gap between its tones: nothing sounds there), its waves in step with the tone
+    it leaves."""
     tones = hz["tones"]
     ls = links(tones)
     out, held = [], {}
@@ -169,7 +209,7 @@ def tone_runs(hz, left, ppq):
         if b > a:
             s, e, gate = (left + a) * ppq, (left + b) * ppq, wave(hz, ppq, pitch(n))
             starts = s + gate * np.arange(int(math.ceil((e - s) / gate)))
-            out.append((starts, starts + gate))
+            out.append((starts, starts + gate, (n, None)))
             held[n["id"]] = (s, gate)
     for a, b, link in ls:
         x0, x1, k0, k1 = glide(a, b, link)
@@ -189,7 +229,7 @@ def tone_runs(hz, left, ppq):
                 t += wave(hz, ppq, k0 + (k1 - k0) * (t - s0) / (e1 - s0))
                 after.append(t)
             if part:
-                out.append((np.array(part), np.array(after)))
+                out.append((np.array(part), np.array(after), (a, b)))
             t = max(t, s1)
     return out
 
@@ -216,7 +256,7 @@ def _whole(v):
 def _heard(hz_json, left, ppq, bpm):
     hz = json.loads(hz_json)
     out = []
-    for starts, nexts in tone_runs(hz, left, ppq):
+    for starts, nexts, _ in tone_runs(hz, left, ppq):
         limits = _limits(hz["tones"], left, ppq, starts)
         mean = nexts - starts  # (the wave as made: with mixed gates the whole-tick ones come to this on average)
         starts, nexts = _whole(starts), _whole(nexts)
@@ -243,11 +283,16 @@ def heard(hz, left, ppq, bpm):
 @functools.lru_cache(maxsize=16)
 def _squares(hz_json, left, ppq):
     hz = json.loads(hz_json)
-    got = [s for s, _ in tone_runs(hz, left, ppq)]
+    got = [s for s, _, _ in tone_runs(hz, left, ppq)]
     if not got:
         return np.zeros((0, 2), np.int64)
     starts = np.concatenate(got)
-    limits = _limits(hz["tones"], left, ppq, starts)
+    return _grid(starts, _limits(hz["tones"], left, ppq, starts))
+
+
+def _grid(starts, limits):
+    """Repeats (start ticks, not rounded; the tick each one's sound ends at) -> (start, end) whole ticks in order,
+    each lasting until the next one starts."""
     starts = _whole(starts)
     order = np.argsort(starts, kind="stable")
     starts, limits = starts[order], limits[order]
@@ -260,9 +305,63 @@ def _squares(hz_json, left, ppq):
     return out
 
 
+class KeyGrid:
+    """The repeats of a Hz bass whose tones have effects: every key has its own (squares(key))."""
+
+    def __init__(self, hz, left, ppq, lo, n):
+        self.lo, self.n, self.got = lo, max(1, n), {}
+        runs = tone_runs(hz, left, ppq)
+        self.starts = np.concatenate([s for s, _, _ in runs]) if runs else np.zeros(0)
+        if runs:
+            self.waves = np.concatenate([e - s for s, e, _ in runs])
+            self.slant = np.concatenate([self.value("slant", whose, s / ppq - left) for s, _, whose in runs])
+            self.limits = _limits(hz["tones"], left, ppq, self.starts)
+            # a repeat moved past its own tone's end is left out (the next tone may touch it: not its sound)
+            self.until = np.concatenate([np.full(len(s), (left + a["t"] + a["len"]) * ppq if b is None else np.inf)
+                                         for s, _, (a, b) in runs])
+
+    @staticmethod
+    def value(name, whose, beat):
+        """An effect's value at each repeat of a stretch of tone: its tone's line; on a slide the line of the tone
+        it leaves, then (from that one's start) the line of the tone it goes to."""
+        a, b = whose
+        if b is None:
+            return fx_at(a, name, beat)
+        return np.where(beat < b["t"], fx_at(a, name, beat), fx_at(b, name, beat))
+
+    def squares(self, key):
+        """A key's repeats: (start, end) ticks in order, none overlapping."""
+        if not len(self.starts):
+            return np.zeros((0, 2), np.int64)
+        x = min(1.0, max(0.0, (key - self.lo) / self.n))  # where the key is among the shape's keys, 0 = the lowest
+        sq = self.got.get(x)
+        if sq is None:
+            starts = self.starts + self.slant * x * self.waves
+            keep = starts < self.until - 1e-6
+            sq = self.got[x] = _grid(starts[keep], self.limits[keep])
+        return sq
+
+
+@functools.lru_cache(maxsize=16)
+def _key_grid(hz_json, left, ppq, lo, n):
+    return KeyGrid(json.loads(hz_json), left, ppq, lo, n)
+
+
+def key_range(sh):
+    """The lowest and highest key of a custom shape's box."""
+    ps = [p for _, p in sh["pts"]]
+    ps.append(ps[1] + ps[2] - ps[0])
+    return round(min(ps)), round(max(ps))
+
+
 def squares(sh, ppq):
-    """The repeats of a shape with placed tones: an array of (start, end) ticks in order, none overlapping."""
-    return _squares(json.dumps(sh["hz"], sort_keys=True), left_edge(sh), ppq)
+    """The repeats of a shape with placed tones: an array of (start, end) ticks in order, none overlapping. When
+    its tones have effects: a KeyGrid (each key has its own)."""
+    hz_json = json.dumps(sh["hz"], sort_keys=True)
+    if has_fx(sh["hz"]):
+        lo, hi = key_range(sh)
+        return _key_grid(hz_json, left_edge(sh), ppq, lo, hi - lo + 1)
+    return _squares(hz_json, left_edge(sh), ppq)
 
 
 def left_edge(sh):

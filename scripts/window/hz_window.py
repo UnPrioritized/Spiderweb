@@ -2,6 +2,7 @@
 places a note at once, and it follows the mouse (snapped to the nearest grid line; Shift = not) until the button is let go; a note that's
 there is moved the same way, either end changes its length, Ctrl+drag selects with a box, Delete removes the
 selected ones, a double click removes the note under it. The key of the note held with the mouse sounds on the MIDI-out device. The window has its own snap.
+Under the notes: the effects pane (hz_effects.py), showing the effect lines of the note clicked last.
 The red line is the tone travelling through the notes: it jumps at the next note unless its dots are dragged (lead
 out of one note, lead in of the next), then it slides.
 
@@ -27,6 +28,7 @@ from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
 from notes.hzbass import (HZ_DEFAULTS, TUNE, can_slide, clean_tones, fit_length, glide, heard, hz_of, left_edge,
                           links, next_id, pitch, tones_span)
 from roll.roll_shared import ALT, CTRL, SELECTED_COLOR, SHIFT, SLOT_COLORS, note_name
+from window.hz_effects import FX_COLOR, FxPane
 from window.snap_picker import SnapPicker
 from window.widgets import Tooltip
 
@@ -66,13 +68,15 @@ class HzWindow(tk.Toplevel):
         self.title(tr("hz.window_title"))
         self.transient(app)
         s = self.s = app.scale
-        self.geometry(app.hz_pos if re.fullmatch(POS, app.hz_pos or "") else f"{round(820 * s)}x{round(480 * s)}")
+        self.geometry(app.hz_pos if re.fullmatch(POS, app.hz_pos or "") else f"{round(820 * s)}x{round(590 * s)}")
         self.minsize(round(420 * s), round(260 * s))
         self.tones, self.sel = [], set()  # the notes shown (hzbass tones) and which are selected
         self.drag = None
         self.pending = None  # (tone id, beat): the first middle click of a slide, waiting for the second
         self.sounding = None  # (channel, key) heard now: the note held with the mouse
         self.last_len = 1.0  # beats: how long a newly placed note is (the last length used)
+        self.last = None  # the id of the note clicked last: the effects pane shows its lines
+        self.drop_hover, self.drop_colour = None, RED  # the note an effect is being dragged onto
         self.kb_w, self.ruler_h = round(44 * s), round(18 * s)
         self.sx, self.sy, self.t0, self.top = 80.0 * s, 12.0 * s, -0.25, 64.0
         self.fitted = False
@@ -107,6 +111,8 @@ class HzWindow(tk.Toplevel):
         Tooltip(line_box, tr("hz.line_tip"))
         self.status = ttk.Label(self, text="", foreground="#555", padding=(8, 2, 8, 4))
         self.status.pack(side="bottom", fill="x")
+        self.fx = FxPane(self)
+        self.fx.canvas.pack(side="bottom", fill="x")
         c = self.canvas = tk.Canvas(self, background="white", highlightthickness=0, takefocus=True)
         c.pack(fill="both", expand=True)
         self.pencil = ("@" + os.path.join(ICONS, "pencil.cur").replace("\\", "/"),)  # its tip is the spot pointed at
@@ -309,6 +315,12 @@ class HzWindow(tk.Toplevel):
             x0, x1, y = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
             fill, edge = SELECTED_COLOR if i in self.sel else SLOT_COLORS[0]
             c.create_rectangle(x0, y + 1, max(x1, x0 + 2), y + self.sy - 1, fill=fill, outline=edge)
+            for j, name in enumerate(n.get("fx") or ()):  # its effects: a strip of each one's colour at the bottom
+                if self.sy >= 6 * s:
+                    c.create_line(x0 + 1, y + self.sy - 2 - 2 * j, max(x1, x0 + 2), y + self.sy - 2 - 2 * j,
+                                  fill=FX_COLOR[name], width=2)
+            if i == self.drop_hover:
+                c.create_rectangle(x0 - 1, y, max(x1, x0 + 2) + 1, y + self.sy, outline=self.drop_colour, width=2)
         if self.app.hz_line.get():
             self.draw_line(w)
         for x, y, *_ in self.dots():
@@ -344,6 +356,7 @@ class HzWindow(tk.Toplevel):
             c.create_text((kb + w) / 2, (rh + h) / 2, text=tr("hz.hint_none"), fill="#777",
                           width=w - kb - 40 * s, justify="center")
         self.show_status()
+        self.fx.redraw()
 
     def tune_rows(self):
         """True when the rows are tall enough to see and change a note's tune."""
@@ -450,6 +463,8 @@ class HzWindow(tk.Toplevel):
                                  hz=f"{hz_of(k, cents):.2f}")
         if self.drag and self.drag["kind"] == "tune":
             text += "     " + tr("hz.tune", cents=f"{self.tones[self.drag['i']]['cents']:+g}")
+        if self.fx.says:
+            text = self.fx.says
         self.status.config(text=text)
 
     # ------------------------------------------------------------ mouse
@@ -521,6 +536,7 @@ class HzWindow(tk.Toplevel):
                     "cents": 0.0, "id": next_id(self.tones), "to": []}
             self.tones.append(tone)
             self.sel = {len(self.tones) - 1}
+            self.last = tone["id"]
             self.drag = {"kind": "new", "i": len(self.tones) - 1, "before": before, "name": tr("hz.step_place")}
             self.sound(tone["key"])
         else:
@@ -529,6 +545,7 @@ class HzWindow(tk.Toplevel):
                 return self.select(self.sel ^ {i})
             if i not in self.sel:
                 self.sel = {i}
+            self.last = self.tones[i]["id"]
             if kind == "note":  # (the next new note is as long as the one clicked)
                 self.last_len = self.tones[i]["len"]
                 self.sound(self.tones[i]["key"])

@@ -16,7 +16,7 @@ from notes.polygon import side_paths
 from notes.smooth import clean_level, smooth_path
 from notes.paths import (TOP_KEY, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
-from notes.hzbass import HZ_DEFAULTS, clean_hz, hz_gate, hz_of, squares  # (Hz bass: hzbass.py)
+from notes.hzbass import HZ_DEFAULTS, KeyGrid, clean_hz, hz_gate, hz_of, squares  # (Hz bass: hzbass.py)
 from notes.text import text_polys, threshold_spans
 
 # Custom shapes: how the inside is filled, and the gate of "spam" in beats (1/64 = 60 ticks at PPQ 960).
@@ -615,7 +615,7 @@ def find_spans(sh, ppq):
 
 def spam_gate(sh, ppq):
     """The spam gate in ticks: a whole number; for Hz bass the exact one as a float (chop_even), or with placed
-    tones the array of its repeats (chop_grid)."""
+    tones the array of its repeats (chop_grid), or a KeyGrid when they have effects (chop_keys)."""
     if sh.get("hz"):
         if sh["hz"].get("tones"):
             return squares(sh, ppq)
@@ -657,10 +657,31 @@ def chop_grid(stretches, squares, count=False):
     return np.column_stack([squares[k, 0], squares[k, 1], np.repeat(q, n)])
 
 
+def chop_keys(stretches, grid, count=False):
+    """chop for Hz bass whose tones have effects: every key has its own repeats (hzbass.KeyGrid)."""
+    q = stretches[:, 2]
+    n = np.zeros(len(stretches), np.int64)
+    parts, owners = [], []
+    for key in np.unique(q):
+        rows = np.flatnonzero(q == key)
+        sq = grid.squares(int(key))
+        n[rows] = chop_grid(stretches[rows], sq, True)
+        if not count:
+            parts.append(chop_grid(stretches[rows], sq))
+            owners.append(np.repeat(rows, n[rows]))
+    if count:
+        return n
+    if not parts:
+        return np.zeros((0, 3), np.int64)
+    return np.concatenate(parts)[np.argsort(np.concatenate(owners), kind="stable")]
+
+
 def chop(sh, stretches, g, count=False):
     """stretches: NumPy array of (start, end, key) rows in ticks -> each filled with back-to-back notes of gate g,
     as an array of (start, end, key) rows in the same order. Where they start: ALIGNS; what happens to the bit that
     doesn't fit a whole gate: ENDS. count: just how many notes each stretch gets."""
+    if isinstance(g, KeyGrid):
+        return chop_keys(stretches, g, count)
     if isinstance(g, np.ndarray):
         return chop_grid(stretches, g, count)
     if isinstance(g, float):
