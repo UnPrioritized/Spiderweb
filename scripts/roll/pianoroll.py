@@ -142,8 +142,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.draw_select_box()
 
     def box_scroll(self):
-        """A Select box dragged past the piano roll's edge: the view goes a bar that way (3 keys up / down) at
-        once and then every BOX_SCROLL_MS while the mouse stays out there. The box's start goes along with it."""
+        """A Select box dragged past the piano roll's edge: the view goes a beat that way (3 keys up / down) at
+        once and then every BOX_SCROLL_MS while the mouse stays out there. The box stays where it is in the song
+        (left behind as the view moves) until the mouse moves again."""
         self.box_timer = None
         if not self.drag or self.drag[0] != "box" or self.sx is None:
             return
@@ -154,12 +155,12 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return
         t, top = self.view_t, self.view_top
         # (whole pixels: the picture of the notes can then be moved along, see roll_draw)
-        self.view_t += dx * round(self.app.beats * self.sx) / self.sx
+        self.view_t += dx * max(1, round(self.sx)) / self.sx
         self.view_top -= dy * max(1, round(3 * self.sy)) / self.sy
         self.clamp_view()
-        _, x, y, *rest = self.drag
-        self.drag = ("box", x - (self.view_t - t) * self.sx, y + (self.view_top - top) * self.sy, *rest)
-        self.box_to()
+        mx, my = (self.view_t - t) * self.sx, (self.view_top - top) * self.sy
+        _, x, y, cx, cy, *rest = self.drag
+        self.drag = ("box", x - mx, y + my, cx - mx, cy + my, *rest)
         self.request_redraw()
         self.box_timer = self.after(BOX_SCROLL_MS, self.box_scroll)
 

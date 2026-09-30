@@ -452,8 +452,8 @@ class HzWindow(tk.Toplevel):
             r = 3.5 * s
             c.create_oval(x - r, y - r, x + r, y + r, fill="white", outline=RED, width=max(1, round(1.5 * s)))
         box = self.box_area() if self.drag and self.drag["kind"] == "box" else None if self.drag else self.kept_box()
-        if box:  # the Select box (or the last one, kept_box)
-            x0, y0, x1, y1 = self.box_rect(box)
+        x0, y0, x1, y1 = self.box_rect(box) if box else (0, 0, 0, 0)
+        if x1 > kb and y1 > rh:  # the Select box (or the last one, kept_box), when it's in view
             bw = max(2, round(2 * s))
             c.create_rectangle(max(x0, kb), max(y0, rh), x1, y1, outline="#000000", width=bw, dash=(3 * bw, 2 * bw))
         c.create_rectangle(0, 0, kb, h, fill="#fafafa", outline="", tags="frame")  # keys (the preview's grey
@@ -649,8 +649,9 @@ class HzWindow(tk.Toplevel):
         self.redraw()
 
     def box_scroll(self):
-        """A Select box dragged past the edge: the view goes a bar that way (3 keys up / down) at once and then
-        every BOX_SCROLL_MS while the mouse stays out there, as on the main piano roll. The box's start goes along."""
+        """A Select box dragged past the edge: the view goes a beat that way (3 keys up / down) at once and then
+        every BOX_SCROLL_MS while the mouse stays out there, as on the main piano roll. The box stays where it is in
+        the song (left behind as the view moves) until the mouse moves again."""
         self.box_timer = None
         d = self.drag
         if not d or d["kind"] != "box":
@@ -661,12 +662,13 @@ class HzWindow(tk.Toplevel):
         if not dx and not dy:
             return
         t0, top = self.t0, self.top
-        self.t0 += dx * self.app.beats
+        self.t0 += dx
         self.top -= dy * 3
         self.clamp_view()
-        fx, fy = d["from"]
-        d["from"] = (fx - (self.t0 - t0) * self.sx, fy + (self.top - top) * self.sy)
-        self.box_to(d)
+        for end in ("from", "to"):
+            ex, ey = d[end]
+            d[end] = (ex - (self.t0 - t0) * self.sx, ey + (self.top - top) * self.sy)
+        self.redraw()
         self.box_timer = self.after(BOX_SCROLL_MS, self.box_scroll)
 
     def kept_box(self):

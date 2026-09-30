@@ -73,7 +73,7 @@ SHIFT, CTRL, ALT = 0x1, 0x4, 0x20000
 SELECT_CURSOR = "{@" + os.path.join(ICONS, "select.cur").replace("\\", "/") + "}"
 PIANO_88 = range(21, 109)  # A0 to C8, the keys of a real piano
 BOX_STILL = 4  # a Select box moved less than this many pixels from where it started is still a click
-BOX_SCROLL_MS = 250  # a Select box dragged past the edge scrolls the view a bar (3 keys up / down) this often
+BOX_SCROLL_MS = 250  # a Select box dragged past the edge scrolls the view a beat (3 keys up / down) this often
 
 
 def grid_span(a, b, step):
