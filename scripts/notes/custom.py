@@ -740,9 +740,13 @@ def custom_notes_groups(sh, ppq):
     return notes, None
 
 
-def outline_apart(sh):
-    """Fill / Spam with "Outline": the outline and the inside must get channels of their own."""
-    return bool(sh["kind"] == "custom" and sh.get("apart") and sh.get("fill") in ("fill", "spam") and "notes" not in sh)
+def tracks_apart(sh):
+    """True if the shape's tracks must get channels of their own with Multi channel: pasted notes (each copied
+    track keeps its own channel even when the tracks don't overlap), and Fill / Spam with "Outline" (the outline
+    and the inside)."""
+    if sh["kind"] != "custom":
+        return False
+    return "notes" in sh or bool(sh.get("apart") and sh.get("fill") in ("fill", "spam"))
 
 
 def merged_by_key(notes):
@@ -828,7 +832,7 @@ def cut_out(spans, others):
 # v = (row + 0.5) / K (T = the last note's end in ticks, K = keys from the lowest to the highest), so moving,
 # stretching, flipping and turning the box moves the notes with it. sh["own_vel"]: the notes keep their own
 # velocities (until the velocity is changed in Spiderweb). Each note also remembers its track (which copied track
-# it came from): with Multi channel every track counts as a shape of its own (engine.render).
+# it came from): with Multi channel every track gets a channel of its own (engine.render, tracks_apart).
 
 BOX_STROKE = {"kind": "poly", "pts": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]}
 TRACKS = "t:"  # packed notes starting with this have the track column (the first test version didn't)

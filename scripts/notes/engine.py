@@ -435,7 +435,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None):
     fixed, "auto" = overlapping shapes get their own channels (split: see assign_slots).
     tracks: per shape None, or the track of each of its notes (pasted notes, shape_notes_tracks): with "auto" each
     track of the shape gets channels as if it were a shape of its own.
-    apart: per shape True if its tracks must get different channels (Fill / Spam "Outline").
+    apart: per shape True if its tracks must get different channels (pasted notes, Fill / Spam "Outline").
     """
     tracks = tracks or [None] * len(note_lists)
     apart = apart or [False] * len(note_lists)

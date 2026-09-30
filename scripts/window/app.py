@@ -14,7 +14,7 @@ from tkinter import ttk, messagebox
 import numpy as np
 
 from files.lang import tr
-from notes.custom import CUSTOM_DEFAULTS, custom_note_count, outline_apart
+from notes.custom import CUSTOM_DEFAULTS, custom_note_count, tracks_apart
 from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
@@ -754,7 +754,7 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self.split_box.config(state="readonly" if self.channel_mode.get() == "auto" else "disabled")
         got = [self.notes_tracks(sh) for sh in self.shapes]
         self.rendered, self.slot_count = render([n for n, _ in got], self.channel_mode.get(), self.channel_split,
-                                                [t for _, t in got], [outline_apart(sh) for sh in self.shapes])
+                                                [t for _, t in got], [tracks_apart(sh) for sh in self.shapes])
         if self._notes_worked != worked:
             self._notes_time = time.perf_counter() - started
         counts = self.note_counts = np.bincount(self.rendered[:, 5], minlength=len(self.shapes)).tolist()
