@@ -4,14 +4,18 @@ piano roll to itself while it's open (only Space, to listen, still works there).
 
 import json
 import math
+import random
 import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
-from notes.claw import CLAW_DEFAULTS, PERIODS, TRASHES, clean_claw
-from window.widgets import LocalUndo, Tooltip
+from files.mathexpr import calc, fmt
+from notes.claw import CLAW_DEFAULTS, COUNTS, MAX_COUNT, PERIODS, TRASHES, clean_claw
+from window.widgets import LocalUndo, Scrub, Tooltip
 
-MODES = [("time", tr("claw.by_time"))]
+MODES = [("time", tr("claw.by_time")), ("notes", tr("claw.by_notes")), ("keys", tr("claw.by_keys")),
+         ("chords", tr("claw.by_chords")), ("random", tr("claw.random"))]
+UNITS = {"notes": tr("claw.unit_notes"), "keys": tr("claw.unit_keys"), "chords": tr("claw.unit_chords")}
 ORANGE = "#f5a623"
 
 
@@ -117,32 +121,59 @@ class ClawWindow(tk.Toplevel):
         ttk.Label(box, text=tr("claw.shape", shape_label=app.shape_label(app.shapes[self.targets[0]]))
                   if n == 1 else tr("claw.n_shapes", n=n), foreground="#777").grid(
             row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
-        self.menus = {}
-        self.menu_row(box, 1, "mode", tr("claw.mode"), [(v, t) for v, t in MODES], tr("claw.tip_mode"))
-        self.menu_row(box, 2, "period", tr("claw.period"), [(p, period_name(p)) for p in PERIODS],
+        self.menus, self.boxes, self.vars, self.entries = {}, {}, {}, {}
+        self.menu_row(box, 1, "mode", tr("claw.mode"), MODES, tr("claw.tip_mode"))
+        box.columnconfigure(0, minsize=round(80 * s))
+
+        time = self.boxes["time"] = self.mode_box(box)
+        self.menu_row(time, 0, "period", tr("claw.period"), [(p, period_name(p)) for p in PERIODS],
                       tr("claw.tip_period"))
-        self.menu_row(box, 3, "trash", tr("claw.trash_every"),
+        self.menu_row(time, 1, "trash", tr("claw.trash_every"),
                       [(list(t), trash_name(t)) if t else (None, "-") for t in TRASHES + (None,)] +
                       [(None, trash_name(None))],
                       tr("claw.tip_trash"))
-        ttk.Label(box, text=tr("claw.time_dist")).grid(row=4, column=0, sticky="e", padx=(0, 8), pady=4)
-        dial = ttk.Frame(box)
-        dial.grid(row=4, column=1, sticky="w", pady=4)
+        ttk.Label(time, text=tr("claw.time_dist")).grid(row=2, column=0, sticky="e", padx=(0, 8), pady=4)
+        dial = ttk.Frame(time)
+        dial.grid(row=2, column=1, sticky="w", pady=4)
         self.knob = Knob(dial, s, self.on_knob)
         self.knob.pack(side="left")
         self.knob_text = ttk.Label(dial, text="", width=5, foreground="#777")
         self.knob_text.pack(side="left", padx=(6, 0))
         Tooltip(self.knob, tr("claw.tip_dist"))
         self.ticks = {}
-        for r, key, text, tip in ((5, "stretch", tr("claw.stretch_to_compensate"), tr("claw.tip_stretch")),
-                                  (6, "short", tr("claw.remove_short_notes"), tr("claw.tip_short"))):
+        for r, key, text, tip in ((3, "stretch", tr("claw.stretch_to_compensate"), tr("claw.tip_stretch")),
+                                  (4, "short", tr("claw.remove_short_notes"), tr("claw.tip_short"))):
             var = self.ticks[key] = tk.BooleanVar()
-            b = ttk.Checkbutton(box, text=text, variable=var, command=lambda key=key: self.put(key,
-                                                                                               self.ticks[key].get()))
-            b.grid(row=r, column=0, columnspan=2, sticky="w", pady=(4 if r == 5 else 0, 0))
+            b = ttk.Checkbutton(time, text=text, variable=var, command=lambda key=key: self.put(key,
+                                                                                                self.ticks[key].get()))
+            b.grid(row=r, column=0, columnspan=2, sticky="w", pady=(4 if r == 3 else 0, 0))
             Tooltip(b, tip)
+
+        count = self.mode_box(box)
+        for mode in COUNTS:
+            self.boxes[mode] = count
+        self.units = []
+        for r, key, label, tip in ((0, "keep", tr("claw.keep"), tr("claw.tip_keep")),
+                                   (1, "skip", tr("claw.then_trash"), tr("claw.tip_skip"))):
+            self.number_row(count, r, key, label, tip, (1, 10, 1), 0 if key == "skip" else 1, MAX_COUNT)
+            u = ttk.Label(count, text="", foreground="#777")
+            u.grid(row=r, column=2, sticky="w", padx=(5, 0))
+            self.units.append(u)
+        ttk.Label(count, text=tr("claw.then_again"), foreground="#777").grid(row=2, column=1, columnspan=2,
+                                                                            sticky="w", pady=(2, 0))
+
+        rand = self.boxes["random"] = self.mode_box(box)
+        self.number_row(rand, 0, "pct", tr("claw.keep"), tr("claw.tip_pct"), (1, 10, 0.1), 0, 100)
+        ttk.Label(rand, text=tr("unit.percent"), foreground="#777").grid(row=0, column=2, sticky="w", padx=(5, 0))
+        again = ttk.Button(rand, text=tr("claw.new_random"),
+                           command=lambda: self.put("seed", random.randrange(1, 10 ** 9)))
+        again.grid(row=1, column=1, columnspan=2, sticky="w", pady=(4, 0))
+        Tooltip(again, tr("claw.tip_new_random"))
+        self.update_idletasks()  # (as wide as the widest mode, so the window keeps its width)
+        box.columnconfigure(1, minsize=max(f.winfo_reqwidth() for f in self.boxes.values()) - round(80 * s))
+
         row = ttk.Frame(box)
-        row.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        row.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         reset = ttk.Button(row, text=tr("claw.reset"), command=self.reset)
         reset.pack(side="left")
         Tooltip(reset, tr("claw.tip_reset"))
@@ -157,6 +188,40 @@ class ClawWindow(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.show()
         self.grab_set()
+
+    def mode_box(self, box):
+        """The settings of one mode (only the picked mode's show)."""
+        f = ttk.Frame(box)
+        f.grid(row=2, column=0, columnspan=2, sticky="nw")
+        f.columnconfigure(0, minsize=round(80 * self.app.scale))
+        return f
+
+    def number_row(self, box, r, key, label, tip, steps, lo, hi):
+        lb = ttk.Label(box, text=label)
+        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=2)
+        var = self.vars[key] = tk.StringVar()
+        e = self.entries[key] = ttk.Entry(box, textvariable=var, width=7)
+        e.grid(row=r, column=1, sticky="w", pady=2)
+        e.bind("<Return>", lambda ev: (self.on_entry(key), "break")[1])
+        e.bind("<FocusOut>", lambda ev: self.on_entry(key))
+        Scrub(self.app, [(e, var, lambda: self.on_entry(key, False))], steps, lo, hi, label=lb)
+        e.bind("<FocusIn>", lambda ev: self.app.tips.show("numbers", parent=self, wait=True))  # (not behind it)
+        Tooltip(e, tip)
+
+    def on_entry(self, key, done=True):
+        e, var = self.entries[key], self.vars[key]
+        lo, hi = {"keep": (1, MAX_COUNT), "skip": (0, MAX_COUNT), "pct": (0, 100)}[key]
+        try:
+            v = float(calc(var.get()))
+            if not lo <= v <= hi or key != "pct" and v != int(v):
+                raise ValueError
+        except (ValueError, ZeroDivisionError):
+            e.config(style="Bad.TEntry")
+            return
+        e.config(style="TEntry")
+        v = v if key == "pct" else int(v)
+        if v != self.claw[key]:
+            self.put(key, v, done)
 
     def menu_row(self, box, r, key, label, choices, tip):
         ttk.Label(box, text=label).grid(row=r, column=0, sticky="e", padx=(0, 8), pady=2)
@@ -181,6 +246,15 @@ class ClawWindow(tk.Toplevel):
         self.knob_text.config(text=f"{c['dist']:g}")
         for key, var in self.ticks.items():
             var.set(c[key])
+        for key, var in self.vars.items():
+            var.set(fmt(c[key]))
+            self.entries[key].config(style="TEntry")
+        for mode, f in self.boxes.items():
+            if mode != c["mode"]:
+                f.grid_remove()
+        self.boxes[c["mode"]].grid()
+        for u in self.units:
+            u.config(text=UNITS.get(c["mode"], ""))
 
     def put(self, key, value, done=True):
         """A setting changed: show it on the piano roll."""

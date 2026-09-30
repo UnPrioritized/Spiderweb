@@ -1,5 +1,5 @@
 """The claw machine: changes a shape's notes after they're made (the shape itself stays as drawn), like the claw
-machine of a well-known piano roll. sh["claw"] = {"mode", "period", "trash", "dist", "stretch", "short"}.
+machine of a well-known piano roll. sh["claw"] = {"mode", and that mode's settings}.
 
 By time ("time"): the notes' time is cut into periods ("period" beats, counted from the shape's first note), each
 period into n slices, and slice k is thrown away ("trash" = [k, n], or None): notes in it go, notes crossing its
@@ -7,7 +7,11 @@ edges are cut there, and the gap closes (later notes move earlier). "stretch": t
 shape's first length (the notes get longer too). "dist" (-100 .. 100) then bends time inside each period-long
 stretch of the new timeline: right (+) = long notes first, getting faster; left (-) = the other way round. A
 note's start and end are bent each in their own period. "short": notes the claw left shorter than SHORT beats are
-removed (notes that were that short already stay)."""
+removed (notes that were that short already stay).
+
+Counting modes: "notes" (in time order, low to high within a chord), "keys" (counted up from the shape's lowest
+key, so a key with no notes still counts), "chords" (notes starting together = one): keep "keep", throw away
+"skip", keep "keep", ... "random": keeps about "pct" % of the notes, picked by "seed" (the same pick every time)."""
 
 import numpy as np
 
@@ -15,7 +19,13 @@ PERIODS = (1, 2, 4, 8, 16)  # beats
 TRASHES = ((1, 4), (2, 4), (3, 4), (4, 4), None, (1, 3), (2, 3), (3, 3), None, (1, 2), (2, 2))  # None = a gap
 BEND = np.log(50.0)  # how much the dial bends time when turned all the way
 SHORT = 1 / 24  # beats
-CLAW_DEFAULTS = {"mode": "time", "period": 1, "trash": None, "dist": 0.0, "stretch": False, "short": False}
+MODES = ("time", "notes", "keys", "chords", "random")
+COUNTS = ("notes", "keys", "chords")
+CLAW_DEFAULTS = {"mode": "time", "period": 1, "trash": None, "dist": 0.0, "stretch": False, "short": False,
+                 "keep": 1, "skip": 1, "pct": 50.0, "seed": 1}
+SETTINGS = {"time": ("period", "trash", "dist", "stretch", "short"), "notes": ("keep", "skip"),
+            "keys": ("keep", "skip"), "chords": ("keep", "skip"), "random": ("pct", "seed")}
+MAX_COUNT = 1000
 
 
 def clean_claw(c):
@@ -23,6 +33,14 @@ def clean_claw(c):
     if not isinstance(c, dict):
         return None
     out = dict(CLAW_DEFAULTS)
+    if c.get("mode") in MODES:
+        out["mode"] = c["mode"]
+    for key, lo, hi in (("keep", 1, MAX_COUNT), ("skip", 0, MAX_COUNT), ("pct", 0, 100), ("seed", 0, 10 ** 9)):
+        try:
+            v = float(c.get(key, out[key]))
+            out[key] = max(lo, min(hi, v if key == "pct" else int(v)))
+        except (TypeError, ValueError, OverflowError):
+            pass
     if c.get("period") in PERIODS:
         out["period"] = c["period"]
     t = c.get("trash")
@@ -34,9 +52,11 @@ def clean_claw(c):
         pass
     out["stretch"] = c.get("stretch") is True
     out["short"] = c.get("short") is True
-    if out["trash"] is None and out["dist"] == 0:
+    mode = out["mode"]
+    if (mode == "time" and out["trash"] is None and out["dist"] == 0 or mode in COUNTS and out["skip"] == 0 or
+            mode == "random" and out["pct"] == 100):
         return None
-    return out
+    return {k: out[k] for k in ("mode",) + SETTINGS[mode]}
 
 
 def _bend(y, period, dist):
@@ -52,6 +72,8 @@ def apply_claw(a, claw, ppq):
     -> the notes after the claw."""
     if not len(a) or not claw:
         return a
+    if claw["mode"] != "time":
+        return a[_picked(a, claw)]
     s, e = a[:, 0].astype(float), a[:, 1].astype(float)
     t0 = s.min()
     period = claw["period"] * ppq
@@ -81,3 +103,21 @@ def apply_claw(a, claw, ppq):
     a[:, 0] = starts
     a[:, 1] = np.maximum(np.rint(xe[keep] + t0).astype(np.int64), starts + 1)
     return a
+
+
+def _picked(a, claw):
+    """Which notes a counting / random claw keeps."""
+    mode = claw["mode"]
+    if mode == "random":
+        order = np.lexsort((a[:, 2], a[:, 0]))  # (the same notes get the same pick whatever order they came in)
+        keep = np.empty(len(a), bool)
+        keep[order] = np.random.default_rng(claw["seed"]).random(len(a)) < claw["pct"] / 100
+        return keep
+    if mode == "notes":
+        n = np.empty(len(a), np.int64)
+        n[np.lexsort((a[:, 2], a[:, 0]))] = np.arange(len(a))
+    elif mode == "keys":
+        n = a[:, 2] - a[:, 2].min()
+    else:
+        n = np.unique(a[:, 0], return_inverse=True)[1].reshape(-1)
+    return n % (claw["keep"] + claw["skip"]) < claw["keep"]
