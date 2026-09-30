@@ -764,6 +764,8 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
             self.after_cancel(self._late_notes)
             self._late_notes = None
         slow = self._notes_time > 0.15
+        # (other drags make the notes AND repaint them all at every step: the repaint counts too)
+        slow = slow or not moving and self._notes_time + self.roll.paint_time > 0.15
         # (moving: also whenever the piano roll shows its notes as one picture, which it can carry along)
         if not now and self.roll.drag and (slow or moving and (self._notes_time > 0.03 or self.roll._img is not None)):
             self.notes_late = True

@@ -1,6 +1,7 @@
 """Piano roll: painting the grid, notes, shapes, handles, keyboard and ruler."""
 
 import math
+import time
 import tkinter as tk
 
 import numpy as np
@@ -129,6 +130,7 @@ class RollDrawing:
             self._note_pic = pic
             self._exact = self.after(300, self.paint_exact)
         else:
+            started = time.perf_counter()
             rects = self.note_rects(w, h) if app.show_notes.get() else None
             if rects is not None and len(rects[0]) > w * h // 2000:
                 # Lots of notes: paint grid + notes as one picture (thousands of canvas items redraw slowly)
@@ -139,6 +141,7 @@ class RollDrawing:
                 self.draw_grid(w, h, rows, cols)
                 for x0, y0, x1, y1, color in zip(*(v.tolist() for v in rects or ())):
                     self.create_rectangle(x0, y0, x1, y1, fill=NOTE_COLORS[color][0], outline=NOTE_COLORS[color][1])
+            self.paint_time = time.perf_counter() - started
         # a line with tumours / a curve with a pattern: the line as drawn (the origin path), faint and dashed under it
         for i, sh in enumerate(app.shapes):
             if ((sh.get("pattern") or sh.get("shape") or any(tm["on"] for tm in all_tumours(sh)))
