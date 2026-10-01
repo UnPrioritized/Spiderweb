@@ -239,7 +239,7 @@ class RollDrawing:
                     self.draw_path(sh, "#c0392b", 1)
         for i in app.sels:
             self.draw_path(app.shapes[i], "#ff1f1f", 2)
-        sel = app.selected()
+        sel = self.point_shape()
         if sel and app.parts:
             self.draw_parts()
         if sel and sel["kind"] == "custom":

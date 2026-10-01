@@ -358,8 +358,13 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             out += [(b, p, hid, True) for b, p, hid in funnel_handles(sh)]
         return out
 
+    def point_shape(self):
+        """The shape whose points / box show and can be dragged: the selected one, none with several selected
+        (user, 2026-10-02: the last drawn one's points showed)."""
+        return self.app.selected() if len(self.app.sels) == 1 else None
+
     def hit_handle(self, x, y, any_handle):
-        sh = self.app.selected()
+        sh = self.point_shape()
         if not sh:
             return None
         near = max(9, 10 * self.scale)
@@ -1036,7 +1041,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         """A middle click (without dragging) on a selected polyline adds a point there, snapped.
         On a selected funnel: a curve start (on its line) or an anchor, like a click with the Funnel tool.
         On a selected curve: an anchor there, like a click with the Curve tool."""
-        sh = self.app.selected()
+        sh = self.point_shape()
         if (not self._pan or abs(e.x - self._pan[0]) > 3 or abs(e.y - self._pan[1]) > 3 or self.draft
                 or not sh or sh["kind"] not in ("poly", "funnel", "curve", "custom") or e.x < self.kb_w
                 or e.y < self.ruler_h):

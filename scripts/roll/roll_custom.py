@@ -36,7 +36,7 @@ class CustomBox:
         """("corner", k) on a corner square of the selected custom shape, ("side", k) on side k (0 bottom,
         1 right, 2 top, 3 left as drawn), ("skew", k) just outside the middle of side k, ("turn", k) just outside
         a corner, ("inside",) inside its box, or None. Only with the Select and Custom shape tools."""
-        sh = self.app.selected()
+        sh = self.point_shape()
         if not sh or sh["kind"] != "custom" or self.draft or self.app.tool.get() not in ("select", "custom"):
             return None
         corners = [(self.t2x(b), self.p2y(p)) for b, p in self.custom_corners(sh)]

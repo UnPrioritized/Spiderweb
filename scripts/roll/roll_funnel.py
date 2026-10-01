@@ -238,7 +238,7 @@ class FunnelEditing:
     def add_funnel_line(self):
         """The line just drawn starts or ends on the selected funnel's wall: it becomes another line of that
         funnel (ending on the wall). True if it did."""
-        sh = self.app.selected()
+        sh = self.point_shape()
         a, b = self.draft["pts"]
         if not sh or sh["kind"] != "funnel" or len(sh["pts"]) < 4:
             return False

@@ -141,6 +141,11 @@ class ShapeMenu:
 
         m.add_command(label=tr("roll_menu.box_selected", n=len(app.sels)), state="disabled")
         m.add_separator()
+        n = len(app.sels)  # (user, 2026-10-02: shapes that all take a formula get Formula ▸, changing them all)
+        if len(app.pattern_targets()) == n:
+            self.formula_menu(m)
+        elif len(app.polygon_shapes()) == n:
+            self.formula_menu(m, PolygonHost(app))
         if app.tumour_targets():
             item(tr("roll_menu.tumours"), "", app.open_tumours)
         item(tr("roll_menu.claw_machine"), tr("roll_menu.alt_w"), lambda: open_claw(app))
