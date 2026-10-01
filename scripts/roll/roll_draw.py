@@ -19,10 +19,54 @@ STROKE_POINT_COLOR = "#7a1fe0"  # the points of a custom shape's strokes (purple
 PART_COLOR = "#7a1fe0"  # a highlighted funnel line / the curve clicked
 TWIN_COLOR = "#00a39a"  # the curves linked to it
 # Note colours: number = colour * 32 + velocity // 4 (low velocity = paler fill, the outline stays); colours = the
-# slot colours, then selected, then the shape being drawn
+# slot colours, then selected (unused: a selected shape's notes keep their colours, user; a red line goes round
+# them, draw_ring), then the shape being drawn
 SELECTED, DRAFT = len(SLOT_COLORS), len(SLOT_COLORS) + 1
 NOTE_COLORS = [(fade(f, 1 - level * 4 / 124), b) for f, b in SLOT_COLORS + [SELECTED_COLOR, DRAFT_COLOR]
                for level in range(32)]
+RING_COLOR = "#e00000"
+RING_GAP = 4  # px: notes in a row closer than this count as touching for the ring
+RING_MAX = 20000  # more ring pieces on screen than this: none drawn (canvas items are slow)
+
+
+def ring_parts(notes, gap):
+    """
+    The outline round the selected shapes' notes (start, end, key), small gaps in a row (< gap ticks) closed:
+    (sides, tops). sides = (tick, key0, key1, right): one side line over keys key0..key1. tops = (t0, t1, key, up):
+    the top (up = 1) or bottom (0) edge of a key row's notes where the row beside it has none.
+    """
+    s, e, k = (notes[:, i].astype(np.int64) for i in (0, 1, 2))
+    big = int(e.max()) + int(gap) + 2
+    order = np.lexsort((s, k))
+    s, e = s[order] + k[order] * big, e[order] + k[order] * big
+    reach = np.maximum.accumulate(e)
+    new = np.ones(len(s), bool)
+    new[1:] = s[1:] > reach[:-1] + gap
+    first = np.flatnonzero(new)
+    last = np.append(first[1:], len(s)) - 1
+    rk = s[first] // big
+    ra, rb = s[first] - rk * big, reach[last] - rk * big  # runs: key, start, end
+    # sides: one per run end, joined over neighbouring keys at the same tick
+    sides = []
+    for t, right in ((ra, 0), (rb, 1)):
+        o = np.lexsort((rk, t))
+        tt, kk = t[o], rk[o]
+        start = np.ones(len(tt), bool)
+        start[1:] = (tt[1:] != tt[:-1]) | (kk[1:] != kk[:-1] + 1)
+        f = np.flatnonzero(start)
+        l = np.append(f[1:], len(tt)) - 1
+        sides.append(np.column_stack([tt[f], kk[f], kk[l], np.full(len(f), right)]))
+    # tops / bottoms: a row's runs minus the next row's (events +1 / -1 for this row, +2 / -2 for the other)
+    tops = []
+    for up, dk in ((1, 1), (0, -1)):
+        kk = np.concatenate([rk, rk, rk - dk, rk - dk])
+        t = np.concatenate([ra, rb, ra, rb])
+        v = np.concatenate([np.ones_like(ra), -np.ones_like(ra), np.full_like(ra, 2), np.full_like(ra, -2)])
+        o = np.lexsort((t, kk))
+        kk, t, v = kk[o], t[o], np.cumsum(v[o])
+        on = np.flatnonzero((v[:-1] == 1) & (t[1:] > t[:-1]) & (kk[1:] == kk[:-1]))
+        tops.append(np.column_stack([t[on], t[on + 1], kk[on], np.full(len(on), up)]))
+    return np.concatenate(sides), np.concatenate(tops)
 NOTE_RGB = np.array([[[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in pair] for pair in NOTE_COLORS], np.uint8)
 
 
@@ -142,6 +186,8 @@ class RollDrawing:
                 for x0, y0, x1, y1, color in zip(*(v.tolist() for v in rects or ())):
                     self.create_rectangle(x0, y0, x1, y1, fill=NOTE_COLORS[color][0], outline=NOTE_COLORS[color][1])
             self.paint_time = time.perf_counter() - started
+        if carried is None:  # (while shapes are dragged their notes are stamped along: no ring)
+            self.draw_ring(w, h)
         # a line with tumours / a curve with a pattern: the line as drawn (the origin path), faint and dashed under it
         for i, sh in enumerate(app.shapes):
             if ((sh.get("pattern") or sh.get("shape") or any(tm["on"] for tm in all_tumours(sh)))
@@ -177,6 +223,43 @@ class RollDrawing:
         self.draw_playhead()
         if self.typing:
             self.show_caret()
+
+    def draw_ring(self, w, h):
+        """A red line round the outside of the selected shapes' notes (user: the notes keep their colours, even
+        with short gates): ring_parts, worked out once per selection / notes / zoom, then placed like the notes."""
+        app = self.app
+        if not app.sels or not app.show_notes.get() or not len(app.rendered):
+            return
+        ppq, ax = app.ppq, self.sx / app.ppq
+        key = (frozenset(app.sels), self.sx, ppq)
+        if self._ring is None or self._ring[0] is not app.rendered or self._ring[1] != key:
+            notes = app.rendered[np.isin(app.rendered[:, 5], list(app.sels))]
+            self._ring = (app.rendered, key, ring_parts(notes, RING_GAP / ax) if len(notes) else None)
+        if self._ring[2] is None:
+            return
+        sides, tops = self._ring[2]
+        bx = self.kb_w - self.view_t * self.sx
+        ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
+        kb, top = self.kb_w, self.ruler_h
+        width = max(1, round(self.scale))  # (user: 2 px was too thick)
+        d = width  # (the line just outside the notes)
+
+        def row(k, lower):  # a key row's top / bottom pixel, as note_rects has it
+            y0 = np.round((k + 0.5) * ay + by)
+            return np.maximum(np.round((k - 0.5) * ay + by), y0 + 1) if lower else y0
+
+        sx = np.round(sides[:, 0] * ax + bx) + np.where(sides[:, 3] == 1, d, -d)
+        sy0, sy1 = row(sides[:, 2], False) - d, row(sides[:, 1], True) + d + 1
+        tx0, tx1 = np.round(tops[:, 0] * ax + bx) - d, np.round(tops[:, 1] * ax + bx) + d + 1
+        ty = np.where(tops[:, 3] == 1, row(tops[:, 2], False) - d, row(tops[:, 2], True) + d)
+        on_s = ~((sx < kb) | (sx > w) | (sy1 < top) | (sy0 > h))
+        on_t = ~((tx1 < kb) | (tx0 > w) | (ty < top) | (ty > h))
+        if on_s.sum() + on_t.sum() > RING_MAX:
+            return
+        for x, y0, y1 in zip(*(v[on_s].tolist() for v in (sx, sy0, sy1))):
+            self.create_line(x, y0, x, y1, fill=RING_COLOR, width=width)
+        for x0, x1, y in zip(*(v[on_t].tolist() for v in (tx0, tx1, ty))):
+            self.create_line(x0, y, x1, y, fill=RING_COLOR, width=width)
 
     def draw_select_box(self):
         """The dotted box being dragged with Select (with the ones kept when Ctrl+drag adds it), or the last ones
@@ -349,7 +432,7 @@ class RollDrawing:
                     mine = np.isin(owner, sels)
                     if mine.any():
                         last = np.concatenate([np.nonzero(~mine)[0], np.nonzero(mine)[0]])
-                        on, color = on[last], np.where(mine[last], SELECTED, color[last])
+                        on, color = on[last], color[last]
             elif order:
                 color = np.zeros(0, np.int64)
             # low velocity = paler fill (outline stays); 32 shades is plenty

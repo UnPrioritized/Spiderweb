@@ -501,7 +501,7 @@ class VelocityPane(tk.Canvas):
             vel = np.where(drawn >= 0, drawn, vel)
         slot = notes[:, 4] % len(SLOT_COLORS)
         if sels:
-            layer = np.where(np.isin(notes[:, 5], list(sels)), SELECTED, slot)
+            layer = np.where(np.isin(notes[:, 5], list(sels)), NORMAL + slot, slot)  # (own colours, others faded)
         else:
             layer = NORMAL + slot
         s, e = notes[:, 0], notes[:, 1]
