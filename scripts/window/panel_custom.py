@@ -7,8 +7,8 @@ from tkinter import ttk, messagebox, simpledialog
 
 from files.lang import tr
 from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, gap_lines, hz_gate,
-                          join_strokes, map_stroke, normalize_strokes, open_paths)
-from window.drawer import Drawer, clean_name, library_names, load_shape, save_shape
+                          join_strokes, map_stroke, normalize_areas, normalize_strokes, open_paths)
+from window.drawer import Drawer, clean_name, library_names, load_drawing, save_shape
 from window.panel_funnel import GATE_STEPS
 from files.mathexpr import calc, fmt
 from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
@@ -178,13 +178,17 @@ class CustomPanel:
         self.custom_combo.config(values=library_names())
 
     def custom_template(self, name):
-        """A library shape ready to place: (strokes filling the 0..1 box, width/height as drawn), or None."""
-        strokes = load_shape(name) if name else None
-        return normalize_strokes(strokes) if strokes else None
+        """A library shape ready to place: (strokes filling the 0..1 box, width/height as drawn, its areas coloured
+        by hand moved the same way), or None."""
+        strokes, areas = load_drawing(name) if name else (None, [])
+        return normalize_strokes(strokes) + (normalize_areas(strokes, areas),) if strokes else None
 
-    def new_custom(self, strokes, b0, p0, b1, p1):
-        return dict(self.defaults, kind="custom", name=self.custom_shape, strokes=copy.deepcopy(strokes),
-                    **custom_settings(self.custom_defaults), pts=box_frame(b0, p0, b1, p1))
+    def new_custom(self, strokes, b0, p0, b1, p1, areas=()):
+        sh = dict(self.defaults, kind="custom", name=self.custom_shape, strokes=copy.deepcopy(strokes),
+                  **custom_settings(self.custom_defaults), pts=box_frame(b0, p0, b1, p1))
+        if areas:
+            sh["areas"] = copy.deepcopy(list(areas))
+        return sh
 
     def custom_targets(self):
         """What the custom shape panel changes: the selected custom shapes, or (with nothing selected) the
@@ -303,6 +307,11 @@ class CustomPanel:
             if gaps and fill in ("fill", "spam"):
                 info += (tr("panel_custom.one_gap_in_the_outline_filled") if gaps == 1 else
                          tr("panel_custom.gaps_in_the_outline_filled_as", gaps=gaps))
+            if any(t.get("areas") for t in tgts):  # (areas coloured in the drawer: areas.py)
+                if fill not in ("fill", "spam"):
+                    info += tr("panel_custom.areas_need_fill")
+                elif self.channel_mode.get() != "auto" and any(a[2] for t in tgts for a in t.get("areas", ())):
+                    info += tr("panel_custom.areas_need_multi")
         else:
             info = tr("panel_custom.drag_a_box_on_the_piano_2")
         if placed and tool != "text":
@@ -328,6 +337,9 @@ class CustomPanel:
             self.push_undo(name=tr("panel_custom.custom_shape"))
             for t in tgts:
                 t["name"], t["strokes"] = name, copy.deepcopy(tpl[0])
+                t.pop("areas", None)
+                if tpl[2]:
+                    t["areas"] = copy.deepcopy(tpl[2])
                 t.pop("polygon", None)  # (a polygon becomes that shape)
             self.shapes_changed()
         if self.tool.get() in BOX_TOOLS:  # Circle / Polygon: a library shape picked = back to Custom shape
@@ -547,9 +559,9 @@ class CustomPanel:
             return
         self.drawer = Drawer(self)
         name = self.custom_pick.get() or self.custom_shape
-        strokes = load_shape(name) if name else None
+        strokes, areas = load_drawing(name) if name else (None, [])
         if strokes:
-            self.drawer.open_shape(name, strokes)
+            self.drawer.open_shape(name, strokes, areas)
 
     def save_to_library(self, sh):
         """A custom shape's drawing (e.g. drawn live) into the shape library, under a name asked for. It keeps the
@@ -570,10 +582,11 @@ class CustomPanel:
         if w > 1e-9 and h > 1e-9:
             su, sv = (1.0, h / w) if w >= h else (w / h, 1.0)
             strokes = [map_stroke(st, lambda u, v: (u * su, v * sv), su, sv) for st in sh["strokes"]]
+            areas = [[u * su, v * sv, c] for u, v, c in sh.get("areas", ())]
         else:
-            strokes = copy.deepcopy(sh["strokes"])
+            strokes, areas = copy.deepcopy(sh["strokes"]), copy.deepcopy(sh.get("areas", []))
         try:
-            save_shape(name, join_strokes(strokes))
+            save_shape(name, join_strokes(strokes), areas)
         except OSError as e:
             messagebox.showerror(tr("panel_custom.spiderweb"), tr("panel_custom.couldn_t_save", e=e), parent=self)
             return

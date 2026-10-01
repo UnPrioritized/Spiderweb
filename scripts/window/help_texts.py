@@ -72,6 +72,7 @@ TOPIC_LIST = [
     ("drawer_square", "Custom shape drawer"),
     ("drawer_circle", "Custom shape drawer"),
     ("drawer_erase", "Custom shape drawer"),
+    ("drawer_areas", "Custom shape drawer"),
     ("shortcuts", "Reference"),
 ]
 TOPICS = []
@@ -126,7 +127,7 @@ SEE = {
     "channels": ["files", "domino", "playback"],
     "files": ["channels", "domino"],
     "domino": ["files", "channels"],
-    "drawer": ["drawer_select", "custom", "fill"],
+    "drawer": ["drawer_select", "drawer_areas", "custom", "fill"],
     "drawer_select": ["drawer", "curves_pen", "symmetric"],
     "drawer_line": ["drawer", "drawer_poly"],
     "drawer_poly": ["drawer", "drawer_line"],
@@ -136,6 +137,7 @@ SEE = {
     "drawer_square": ["drawer", "drawer_circle"],
     "drawer_circle": ["drawer", "drawer_square"],
     "drawer_erase": ["drawer", "drawer_select"],
+    "drawer_areas": ["drawer", "drawer_select", "fill", "channels"],
     "shortcuts": ["selecting", "view", "numbers", "curves_pen"],
 }
 # the tip for each tool (Circle / Polygon share one)
@@ -144,4 +146,5 @@ TOOL_TOPICS = {"select": "select", "line": "line", "poly": "poly", "free": "free
                "text": "text", "hz": "hz_bass"}
 DRAWER_TOOL_TOPICS = {"select": "drawer_select", "line": "drawer_line", "poly": "drawer_poly", "free": "drawer_free",
                       "curve": "drawer_curve", "arc": "drawer_arc", "square": "drawer_square",
-                      "circle": "drawer_circle", "erase": "drawer_erase"}
+                      "circle": "drawer_circle", "erase": "drawer_erase",
+                      "areas": "drawer_areas"}

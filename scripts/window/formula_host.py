@@ -326,7 +326,7 @@ class DrawerHost(FormulaHost):
         self.drawer.changed()
 
     def snapshot(self):
-        return json.dumps(self.drawer.strokes), super().snapshot()
+        return self.drawer.snap(), super().snapshot()
 
     def restore(self, snap):
         super().restore(snap[1])

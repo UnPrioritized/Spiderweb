@@ -372,6 +372,8 @@
  "panel_custom.drag_a_box_on_the_piano": "Drag a box on the piano roll, or click two corners (Ctrl = a perfect {tool} on screen).",
  "panel_custom.pick_a_shape_or_make_one": "Pick a shape, or make one with Drawer…",
  "panel_custom.one_gap_in_the_outline_filled": "  One gap in the outline: filled as if the dashed line closed it.",
+ "panel_custom.areas_need_fill": "  Its areas coloured in the drawer count only with Fill or Spam.",
+ "panel_custom.areas_need_multi": "  Its areas coloured in the drawer get channels of their own only with Multi channel (Project).",
  "panel_custom.gaps_in_the_outline_filled_as": "  {gaps} gaps in the outline: filled as if the dashed lines closed them.",
  "panel_custom.drag_a_box_on_the_piano_2": "Drag a box on the piano roll, or click two corners, to place it (Ctrl = keep its proportions).",
  "panel_custom.drag_a_corner_or_side_to_2": "  Drag a corner or side to resize, just outside a corner to turn it, just outside a side's middle to skew it.",
@@ -617,6 +619,12 @@
  "drawer.open_ends_red_dots_fill_and": "Open ends (red dots): Fill and Spam close each gap with a straight line.",
  "drawer.not_saved_yet": "\nNot saved yet.",
  "drawer.nothing_to_fill": "Only outline-only lines and fill lines: Fill and Spam have nothing to fill.",
+ "drawer.areas": "Areas",
+ "drawer.area_colour": "Colour for the areas you click:",
+ "drawer.area_empty": "Empty: no notes there",
+ "drawer.area_n": "Colour {n}",
+ "drawer.area_normal": "As normal: filled or not like Fill and Spam do it",
+ "drawer.area_outside": "That's outside the drawing: click an area inside it.",
  "drawer.role_both": "Outline and fill",
  "drawer.role_edge": "Outline only (not filled)",
  "drawer.role_cut": "Fill line (no notes)",
@@ -1774,6 +1782,18 @@
  "help.drawer_erase.text": [
   "Click a stroke to remove it. Ctrl+Z = undo."
  ],
+ "help.drawer_areas.title": "Drawer: Areas",
+ "help.drawer_areas.tip": "Click an area to give it the colour picked on the right (or Empty). Right-click = back to normal.",
+ "help.drawer_areas.text": [
+  "Areas are the pieces your lines cut the drawing into. Grey = what Fill and Spam fill as normal. Pick a colour on the right (or Empty), then click an area to give it that colour; right-click an area to put it back to normal. Each area keeps its colour when you move or change lines, and when the shape is placed and stretched.",
+  "",
+  "On the piano roll the colours count only with Fill or Spam. Each colour number gets a channel of its own with Multi channel, so it shows in a colour of its own there too (the piano roll picks those colours, so they can differ from the drawer's). Areas with the same number share a channel. Empty leaves an area without notes; a coloured hole gets filled.",
+  "",
+  "To split an area without adding notes, draw a fill line through it (right-click the stroke → Fill line). Lines that end a bit past an edge split best.",
+  "",
+  "Very thin slivers may take the colour of the area next to them."
+ ],
+ "help.drawer_areas.words": "drawer area colour color channel fill paint bucket zone track",
  "help.shortcuts.title": "Keyboard and mouse shortcuts",
  "help.shortcuts.tip": "Every key and mouse shortcut in one list.",
  "help.shortcuts.text": [

@@ -624,7 +624,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if not tpl:
                 app.status.config(text=tr("pianoroll.pick_a_custom_shape_in_the"))
                 return
-            self.draft = app.new_custom(tpl[0], *pt, *pt)
+            self.draft = app.new_custom(tpl[0], *pt, *pt, areas=tpl[2])
             self.drag = ("place", pt, e.x, e.y, tpl[1])
             self.request_redraw()
             return

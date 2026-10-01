@@ -9,6 +9,7 @@ import numpy as np
 
 from files.lang import tr
 from notes.arc import arc_k, arc_points, ellipse_bezier
+from notes.areas import _maps, area_map  # (areas coloured by hand)
 from notes.bezier import sample
 from notes.pattern import (clean_pattern, clean_shape_formula, formed_path, formed_paths, has_formula,
                            moved_formulas)
@@ -404,6 +405,18 @@ def normalize_strokes(strokes):
     return out, (w / h if w > 1e-9 and h > 1e-9 else None)
 
 
+def normalize_areas(strokes, areas):
+    """Areas (areas.py) moved like normalize_strokes moves the strokes."""
+    pts = [p for st in strokes for p in stroke_points(st)]
+    if not pts or not areas:
+        return []
+    us, vs = [u for u, _ in pts], [v for _, v in pts]
+    ul, vl = min(us), min(vs)
+    w, h = max(us) - ul, max(vs) - vl
+    return [[round((u - ul) / w, 6) if w > 1e-9 else 0.5, round((v - vl) / h, 6) if h > 1e-9 else 0.5, c]
+            for u, v, c in areas]
+
+
 # ---------------------------------------------------------------- live drawing (strokes drawn on the roll)
 # With "Live shape" on, lines / curves / arcs / squares / circles drawn on the roll become strokes of one custom shape.
 # A stroke drawn in beats / pitch is put into the shape's own box (u, v), then the box is fitted around the drawing.
@@ -470,6 +483,8 @@ def refit(sh):
     to_bp = frame_to_bp(sh["pts"])
     sh["pts"] = [list(to_bp(ul, vl)), list(to_bp(ul + w, vl)), list(to_bp(ul, vl + h))]
     sh["strokes"] = [map_stroke(st, lambda u, v: ((u - ul) / w, (v - vl) / h), 1 / w, 1 / h) for st in sh["strokes"]]
+    if sh.get("areas"):
+        sh["areas"] = [[(u - ul) / w, (v - vl) / h, c] for u, v, c in sh["areas"]]
 
 
 def stroke_ends(strokes):
@@ -668,6 +683,170 @@ def find_spans(sh, ppq):
             s = math.floor(a * ppq + 0.5)
             out.append((q, s, max(math.floor(b * ppq + 0.5), s + 1)))
     return out
+
+
+# ---------------------------------------------------------------- areas coloured by hand (areas.py)
+
+def has_areas(sh):
+    """Fill / Spam with areas given a colour of their own or emptied (sh["areas"]; not text or pasted notes)."""
+    return bool(sh.get("areas")) and sh.get("fill") in ("fill", "spam") and not sh.get("text") and "notes" not in sh
+
+
+def uv_points(pts, path):
+    """(beat, pitch) points -> (u, v) array in the box of frame pts (None if the box is flat)."""
+    (b0, p0), (b1, p1), (b2, p2) = pts
+    ub, up, vb, vp = b1 - b0, p1 - p0, b2 - b0, p2 - p0
+    det = ub * vp - up * vb
+    if abs(det) < 1e-12:
+        return None
+    a = np.asarray(path, float).reshape(-1, 2)
+    db, dp = a[:, 0] - b0, a[:, 1] - p0
+    return np.column_stack([(db * vp - dp * vb) / det, (ub * dp - up * db) / det])
+
+
+def shape_areas(sh):
+    """The AreaMap of a custom shape (its Fill / Spam loops and fill lines) in its own box's u, v, so it stays the
+    same wherever the shape is put (None if the box is flat)."""
+    plan = fill_plan(sh)
+    closers = [uv_points(sh["pts"], c) for c in plan["closers"]]
+    if any(c is None for c in closers) or uv_points(sh["pts"], [[0, 0]]) is None:
+        return None
+    key = (json.dumps(sh["strokes"]), json.dumps([np.round(c, 6).tolist() for c in closers]))
+    if key in _maps:
+        return _maps[key]
+    loops = [uv_points(sh["pts"], p) for p in plan["polys"]]
+    cuts = [stroke_points(st) for st in sh["strokes"] if role_of(st) == "cut"]
+    return area_map(loops, cuts, key)
+
+
+def area_spans(sh, ppq):
+    """has_areas shapes: (start, end, key, colour) ticks of every stretch filled, colour 0 = the shape's own.
+    Remembered like inside_spans."""
+    key = ("areas", json.dumps([sh["strokes"], sh["pts"], sh["areas"]]), bool(sh.get("union")), ppq)
+    got = _spans.get(key)
+    if got is None:
+        if len(_spans) > 100:
+            _spans.clear()
+        got = _spans[key] = find_area_spans(sh, ppq)
+        got.flags.writeable = False
+    return got
+
+
+def find_area_spans(sh, ppq):
+    none = np.zeros((0, 4), np.int64)
+    amap = shape_areas(sh)
+    polys = fill_plan(sh)["polys"]
+    cuts = role_paths(sh)["cut"]
+    ps = [p for path in polys + cuts for _, p in path]
+    if amap is None or not ps:
+        return none
+    paint = np.full(amap.count + 1, -1, np.int64)  # each area's colour (-1: as normal; the last: walls)
+    seeds = np.asarray([a[:2] for a in sh["areas"]], float)
+    for lab, a in zip(amap.at(seeds[:, 0], seeds[:, 1]).tolist(), sh["areas"]):
+        if lab >= 0:
+            paint[lab] = a[2]
+    parts = [(np.asarray(p, float).reshape(-1, 2), i) for i, p in enumerate(polys)]
+    parts += [(np.asarray(p, float).reshape(-1, 2), -1) for p in cuts]
+    parts = [(p, i) for p, i in parts if len(p) > 1]
+    a = np.concatenate([p[:-1] for p, _ in parts])
+    b = np.concatenate([p[1:] for p, _ in parts])
+    lid = np.concatenate([np.full(len(p) - 1, i) for p, i in parts])
+    keep = a[:, 1] != b[:, 1]
+    edges = (a[keep, 0], a[keep, 1], b[keep, 0], b[keep, 1], lid[keep])
+    frame = sh["pts"]
+
+    def colour(x, y):
+        uv = uv_points(frame, np.column_stack([x, y]))
+        return paint[amap.at(uv[:, 0], uv[:, 1])]
+
+    out = []
+    for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1):
+        for s, e, g in row_pieces(edges, q, bool(sh.get("union")), colour):
+            s = math.floor(s * ppq + 0.5)
+            out.append((s, max(math.floor(e * ppq + 0.5), s + 1), q, g))
+    return np.asarray(out, np.int64).reshape(-1, 4) if out else none
+
+
+def row_pieces(edges, q, union, colour):
+    """Like row_spans, but every line (fill lines too, loop number -1 in edges) cuts the row into pieces, and each
+    piece is filled as normal (even-odd / union) or as colour(x, y) says (-1: as normal, 0: empty, k: colour k).
+    [(start, end, colour)] in beats, merged per colour; colour 0 = the shape's own. Where two filled pieces meet,
+    they meet where the line between them crosses the middle of the row's slice; on the outside edge the piece
+    reaches as far as the line does in the slice (like row_spans, so with nothing coloured the notes are the
+    same)."""
+    lo, hi = q - 0.5, q + 0.5
+    xa, ya, xb, yb, lid = edges
+    here = np.flatnonzero((np.minimum(ya, yb) < hi) & (np.maximum(ya, yb) > lo))
+    if not len(here):
+        return []
+    xa, ya, xb, yb, lid = xa[here], ya[here], xb[here], yb[here], lid[here]
+    ys = np.concatenate([ya, yb])
+    levels = np.unique(np.concatenate([[lo, hi], ys[(ys > lo) & (ys < hi)]]))
+    first = np.searchsorted(levels, np.maximum(np.minimum(ya, yb), lo))
+    n = np.searchsorted(levels, np.minimum(np.maximum(ya, yb), hi)) - first
+    e = np.repeat(np.arange(len(here)), n)
+    gap = np.repeat(first, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
+    y0, y1 = levels[gap], levels[gap + 1]
+    mid = (y0 + y1) / 2
+    xa, ya, xb, yb, lid = xa[e], ya[e], xb[e], yb[e], lid[e]
+
+    def x_at(y):
+        return xa + (xb - xa) * (y - ya) / (yb - ya)
+
+    xm = x_at(mid)
+    order = np.lexsort((xm, gap))
+    gap, lid, mid, xm = gap[order], lid[order], mid[order], xm[order]
+    xl, xr = np.minimum(x_at(y0), x_at(y1))[order], np.maximum(x_at(y0), x_at(y1))[order]
+    m = len(gap)
+    at = np.arange(m)
+    start = np.ones(m, bool)
+    start[1:] = gap[1:] != gap[:-1]
+    fill = lid >= 0
+    if union:  # each loop on its own: its 1st crossing in the slice goes in, the 2nd out ...
+        o2 = np.lexsort((at, lid, gap))
+        new = np.ones(m, bool)
+        new[1:] = (gap[o2][1:] != gap[o2][:-1]) | (lid[o2][1:] != lid[o2][:-1])
+        rank = at - np.maximum.accumulate(np.where(new, at, 0))
+        step = np.zeros(m, np.int64)
+        step[o2] = np.where(rank % 2 == 0, 1, -1)
+        step[~fill] = 0
+    else:
+        step = fill.astype(np.int64)
+    run = np.cumsum(step)
+    begin = np.maximum.accumulate(np.where(start, at, 0))
+    depth = run - run[begin] + step[begin]  # (counted from the slice's left end, up to and with this crossing)
+    inside = depth > 0 if union else depth % 2 == 1
+    pi = np.flatnonzero(~np.append(start[1:], True))  # pieces: from crossing i to i + 1 in the same slice
+    if not len(pi):
+        return []
+    c = colour((xm[pi] + xm[pi + 1]) / 2, mid[pi])
+    filled = np.where(c >= 0, c > 0, inside[pi])
+    group = np.where(c > 0, c, 0)
+    joined = np.zeros(len(pi), bool)
+    joined[1:] = pi[1:] == pi[:-1] + 1  # (the piece before it is in the same slice)
+    left_full = np.zeros(len(pi), bool)
+    left_full[1:] = joined[1:] & filled[:-1]
+    right_full = np.zeros(len(pi), bool)
+    right_full[:-1] = joined[1:] & filled[1:]
+    left = np.where(left_full, xm[pi], xl[pi])
+    right = np.where(right_full, xm[pi + 1], xr[pi + 1])
+    out = []
+    for k in np.unique(group[filled]).tolist():
+        pick = filled & (group == k)
+        out += [(s, e, k) for s, e in merge_spans(left[pick], right[pick])]
+    out.sort()
+    for i in range(len(out) - 1):  # two colours overlapping a little (a slanted line between them): cut halfway
+        (a0, a1, ka), (b0, b1, kb) = out[i], out[i + 1]
+        if ka != kb and a0 < b0 < a1 <= b1:
+            h = (b0 + a1) / 2
+            out[i], out[i + 1] = (a0, h, ka), (h, b1, kb)
+    return out
+
+
+def merged_rows(spans):
+    """(start, end, key) stretches -> the same merged per key where they touch (whatever their colour)."""
+    ks, ss, es = merged_by_key(np.asarray(spans, np.int64).reshape(-1, 3))
+    return np.column_stack([ss, es, ks]).astype(np.int64).reshape(-1, 3)
 
 
 def spam_gate(sh, ppq):
@@ -972,10 +1151,13 @@ def custom_note_count(sh, ppq):
     if sh["fill"] == "empty" or not fillable(sh["strokes"]):
         return None
     flat = np.concatenate([flat_notes(sh, ppq), edge_notes(sh, ppq)])
+    if has_areas(sh):
+        spans = area_spans(sh, ppq)[:, :3]
+    else:
+        spans = np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]
     if sh["fill"] == "fill":
-        return len(inside_spans(sh, ppq)) + len(flat)
+        return len(spans) + len(flat)
     g = spam_gate(sh, ppq)
-    spans = np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]
     return chop_count(sh, spans, g) + chop_count(sh, flat, g)
 
 
@@ -1008,8 +1190,8 @@ def custom_notes_groups(sh, ppq):
     turn = cycle_turns(sh, notes, ppq)
     if groups is None:
         return notes, turn
-    if sh.get("apart") and sh["fill"] in ("fill", "spam"):  # (0 = the outline, 1 = the inside)
-        return notes, np.where(groups == 0, 0, 1 + turn).astype(np.int64)
+    if sh.get("apart") and sh["fill"] in ("fill", "spam"):  # (0 = the outline, 1 = the inside, 1 + k = colour k)
+        return notes, np.where(groups == 0, 0, 1 + (groups - 1) * n + turn).astype(np.int64)
     return notes, groups * n + turn
 
 
@@ -1046,34 +1228,55 @@ def _notes_groups(sh, ppq):
         return outline_groups(sh, ppq, spam=True)
     if sh["fill"] == "empty" or not fillable(sh["strokes"]):
         return outline_groups(sh, ppq)
-    spans = np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]  # (start, end, key)
+    area = None  # (areas coloured by hand: each stretch's colour, 0 = the shape's own)
+    if has_areas(sh):
+        got = area_spans(sh, ppq)
+        spans, area = got[:, :3], got[:, 3]
+        rows = merged_rows(spans)  # (what's filled, whatever its colour)
+    else:
+        spans = rows = np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]  # (start, end, key)
     flat = flat_notes(sh, ppq)  # (like Outline spam in Spam)
     lines = edge_notes(sh, ppq)  # (outline-only strokes: over what's filled, the outline's with "Outline")
     apart = sh.get("apart")
     g = edge_gate(sh, ppq) if apart else 0  # (the smallest outline gate)
+    zeros = np.zeros
     if sh["fill"] == "fill":
         notes = np.concatenate([spans, flat])
         if apart:  # the edge's notes, and the inside's long notes between them
             outline = edge_parts(notes)
             if g:
-                ks, ss, es = merged_by_key(thicker(sh, outline, spans, g, ppq))
+                ks, ss, es = merged_by_key(thicker(sh, outline, rows, g, ppq))
                 outline = np.column_stack([ss, es, ks]).astype(np.int64).reshape(-1, 3)
-            inside = cut_out(notes, outline)
+            if area is None:
+                inside = cut_out(notes, outline)
+                ids = np.ones(len(inside), np.int64)
+            else:  # (each colour's own stretches; 1 = the shape's own colour, 1 + k = colour k)
+                parts = [(cut_out(spans[area == k], outline), 1 + k) for k in np.unique(area).tolist()]
+                parts.append((cut_out(flat, outline), 1))
+                inside = np.concatenate([p for p, _ in parts])
+                ids = np.concatenate([np.full(len(p), k, np.int64) for p, k in parts])
             outline = np.concatenate([outline, lines])
-            return (np.concatenate([outline, inside]),
-                    np.concatenate([np.zeros(len(outline), np.int64), np.ones(len(inside), np.int64)]))
-        return np.concatenate([notes, lines]), None
-    notes = np.concatenate([chop(sh, spans, spam_gate(sh, ppq)), chop_outline(sh, flat, ppq)])
+            return np.concatenate([outline, inside]), np.concatenate([zeros(len(outline), np.int64), ids])
+        groups = None if area is None else np.concatenate([area, zeros(len(flat) + len(lines), np.int64)])
+        return np.concatenate([notes, lines]), groups
+    gate = spam_gate(sh, ppq)
+    notes = np.concatenate([chop(sh, spans, gate), chop_outline(sh, flat, ppq)])
+    ids = None
+    if area is not None:
+        ids = np.repeat(area, chop(sh, spans, gate, count=True)) if len(spans) else zeros(0, np.int64)
+        ids = np.concatenate([ids, zeros(len(notes) - len(ids), np.int64)])
     lines = chop_outline(sh, lines, ppq)
     if apart:  # the same spam; the notes on the edge of what's filled are the outline's
         if not g:
             edge = on_edge(notes)
         elif sh.get("edge_mode") == "sideways":
-            edge = on_edge(notes) | near_edge(notes, spans, g)
+            edge = on_edge(notes) | near_edge(notes, rows, g)
         else:  # (the even band: every note not wholly in the shrunk inside)
-            edge = on_edge(notes) | ~covered(notes, inner_ticks(sh, ppq, g, spans))
-        return np.concatenate([notes, lines]), np.where(np.append(edge, np.ones(len(lines), bool)), 0, 1).astype(np.int64)
-    return np.concatenate([notes, lines]), None
+            edge = on_edge(notes) | ~covered(notes, inner_ticks(sh, ppq, g, rows))
+        inner = 1 if ids is None else 1 + ids
+        return (np.concatenate([notes, lines]),
+                np.concatenate([np.where(edge, 0, inner), zeros(len(lines), np.int64)]).astype(np.int64))
+    return np.concatenate([notes, lines]), None if ids is None else np.concatenate([ids, zeros(len(lines), np.int64)])
 
 
 def tracks_apart(sh):
@@ -1082,7 +1285,8 @@ def tracks_apart(sh):
     and the inside) and "Colours" (each turn, any shape)."""
     if sh["kind"] != "custom":
         return cycling(sh)
-    return "notes" in sh or bool(sh.get("apart") and sh.get("fill") in ("fill", "spam")) or cycling(sh)
+    return ("notes" in sh or bool(sh.get("apart") and sh.get("fill") in ("fill", "spam")) or cycling(sh)
+            or has_areas(sh) and any(a[2] for a in sh["areas"]))
 
 
 def merged_by_key(notes):

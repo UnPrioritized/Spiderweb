@@ -10,8 +10,12 @@ from types import SimpleNamespace
 from files.lang import tr
 from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half_at, handle_lines, nearest, pen_handles,
                           set_symmetry)
-from notes.custom import (ROLES, clean_strokes, join_strokes, open_ends, open_paths, role_of, stroke_points,
-                          strokes_closed)
+import numpy as np
+
+from notes.areas import COLOURS, clean_areas, inside_loops
+from notes.custom import (ROLES, clean_strokes, fill_plan, join_strokes, open_ends, open_paths, role_of, shape_areas,
+                          stroke_points, strokes_closed, uv_points)
+from roll.roll_shared import SLOT_COLORS
 from notes.pattern import has_formula, moved_formulas
 from files.about import HERE
 from files.safefile import write_text
@@ -32,9 +36,22 @@ GRIDS = ["4", "8", "12", "16", "24", "32", "48", "64"]
 TOOLS = [("select", tr("drawer.select"), "v"), ("line", tr("drawer.line"), "l"), ("poly", tr("drawer.polyline"), "p"),
          ("free", tr("drawer.freehand"), "f"), ("curve", tr("drawer.curve"), "c"), ("arc", tr("drawer.arc"), "a"),
          ("square", tr("drawer.square"), "s"), ("circle", tr("drawer.circle"), "o"),
-         ("erase", tr("drawer.eraser"), "e")]
+         ("erase", tr("drawer.eraser"), "e"), ("areas", tr("drawer.areas"), "b")]
 SHIFT, CTRL, ALT = 0x1, 0x4, 0x20000
 ROLE_COLORS = {None: "#c0392b", "edge": "#8e44ad", "cut": "#c0392b"}  # (a stroke's role: custom.ROLES)
+# Areas (areas.py) on the board: what Fill / Spam fill as normal, an area emptied by hand, the outside, the board
+AREA_NORMAL, AREA_EMPTY, OFF_BOARD, BOARD = "#d4d4d4", "#fbe4e4", "#f4f4f4", "#ffffff"
+AREA_FRAME = 16  # the drawing's box as a custom shape 16 beats by 16 keys, for finding its areas (gaps close
+# like on the piano roll at that size)
+
+
+def rgb(color):
+    return [int(color[i:i + 2], 16) for i in (1, 3, 5)]
+
+
+def area_color(c):
+    """The colour shown for area colour c (1 .. COLOURS): the note colours in order."""
+    return SLOT_COLORS[(c - 1) % len(SLOT_COLORS)][0]
 BAD_CHARS = '<>:"/\\|?*'
 
 
@@ -65,20 +82,29 @@ def shape_file(name):
 
 def load_shape(name):
     """The strokes of a library shape, or None if it's missing or broken."""
+    return load_drawing(name)[0]
+
+
+def load_drawing(name):
+    """A library shape's strokes (None if it's missing or broken) and its areas coloured by hand (areas.py)."""
     try:
         with open(shape_file(name), encoding="utf-8") as f:
-            strokes = clean_strokes(json.load(f).get("strokes"))
+            got = json.load(f)
+        strokes, areas = clean_strokes(got.get("strokes")), clean_areas(got.get("areas"))
     except FileNotFoundError:
         b = built_in_name(name)
-        return clean_strokes(BUILT_IN[b]) if b else None
+        return (clean_strokes(BUILT_IN[b]) if b else None), []
     except (OSError, ValueError, AttributeError):
-        return None
-    return strokes or None
+        return None, []
+    return strokes or None, areas
 
 
-def save_shape(name, strokes):
+def save_shape(name, strokes, areas=()):
     os.makedirs(LIBRARY, exist_ok=True)
-    write_text(shape_file(name), '{"strokes": [\n  ' + ",\n  ".join(json.dumps(st) for st in strokes) + "\n]}\n")
+    text = '{"strokes": [\n  ' + ",\n  ".join(json.dumps(st) for st in strokes) + "\n]"
+    if areas:
+        text += ',\n "areas": ' + json.dumps([[round(u, 6), round(v, 6), c] for u, v, c in areas])
+    write_text(shape_file(name), text + "}\n")
 
 
 def clean_name(name):
@@ -137,6 +163,10 @@ class Drawer(tk.Toplevel):
         self.dirty = False     # changed since it was saved or opened
         self.saved_name = None  # the library shape this drawing was opened from / saved as
         self.sel = None        # index of the selected stroke (Select tool)
+        self.areas = []        # areas coloured by hand: [[u, v, colour]] (areas.py; colour 0 = empty)
+        self.area_pick = 1     # the colour the Areas tool gives (0 = empty)
+        self.hover = None      # the area under the mouse (Areas tool)
+        self._area_cache = self._area_px = self._area_img = None
         self.zoom = 1.0        # 1 = the whole board fits the window
         self.center = [0.5, 0.5]  # the board point in the middle of the window (0.5, 0.5 = the board's middle)
         self._pan = None
@@ -162,7 +192,135 @@ class Drawer(tk.Toplevel):
 
     def on_tool(self):
         self.update_side_help()
+        self.hover = None
+        if self.tool.get() == "areas":
+            if not self.area_bar.winfo_manager():
+                self.area_bar.pack(fill="x", pady=(8, 0), before=self.side_help)
+            self.draw_swatches()
+        elif self.area_bar.winfo_manager():
+            self.area_bar.pack_forget()
         self.app.tips.show(self.tool_topic(), parent=self)
+
+    # ------------------------------------------------------------ areas (coloured by hand: areas.py)
+
+    def draw_swatches(self):
+        c, k = self.swatches, self.swatch
+        c.delete("all")
+        for n in range(COLOURS + 1):
+            x, y = 2 + n * (k + 2), 2
+            on = n == self.area_pick
+            c.create_rectangle(x, y, x + k, y + k, fill=area_color(n) if n else AREA_EMPTY,
+                               outline="#000000" if on else "#909090", width=2 if on else 1)
+            if not n:  # Empty: a cross
+                c.create_line(x + 3, y + 3, x + k - 3, y + k - 3, fill="#c0392b")
+                c.create_line(x + k - 3, y + 3, x + 3, y + k - 3, fill="#c0392b")
+
+    def swatch_at(self, x):
+        n = int((x - 2) // (self.swatch + 2))
+        return n if 0 <= n <= COLOURS else None
+
+    def pick_swatch(self, e):
+        n = self.swatch_at(e.x)
+        if n is not None:
+            self.area_pick = n
+            self.draw_swatches()
+            self.swatch_tip(e)
+
+    def swatch_tip(self, e):
+        n = self.swatch_at(e.x)
+        if n is not None:
+            self.pos_label.config(text=tr("drawer.area_empty") if n == 0 else tr("drawer.area_n", n=n))
+
+    def area_info(self):
+        """(AreaMap of the drawing in board u, v, which areas Fill / Spam fill as normal), remembered."""
+        key = json.dumps(self.strokes)
+        if self._area_cache and self._area_cache[0] == key:
+            return self._area_cache[1:]
+        s = AREA_FRAME
+        sh = {"kind": "custom", "strokes": self.strokes, "pts": [[0.0, 0.0], [s, 0.0], [0.0, s]], "fill": "fill"}
+        amap = shape_areas(sh) if self.strokes else None
+        inside = None
+        if amap is not None:
+            loops = [uv_points(sh["pts"], p) for p in fill_plan(sh)["polys"]]
+            inside = inside_loops(amap.spots[:, 0], amap.spots[:, 1], loops)
+        self._area_cache = (key, amap, inside)
+        self._area_px = None
+        return amap, inside
+
+    def area_at(self, e):
+        """The area at the mouse, or None (outside the drawing, or nothing drawn)."""
+        amap, _ = self.area_info()
+        if amap is None:
+            return None
+        u, v = self.from_screen(e.x, e.y)
+        lab = int(amap.at([u], [v])[0])
+        return None if lab < 0 or lab == amap.outside() else lab
+
+    def area_paint(self, amap):
+        """Each area's colour as given by hand (-1: as normal, 0: empty, k: colour k)."""
+        paint = np.full(amap.count + 1, -1, np.int64)
+        if self.areas:
+            labs = amap.at([a[0] for a in self.areas], [a[1] for a in self.areas])
+            for lab, a in zip(labs.tolist(), self.areas):
+                if lab >= 0:
+                    paint[lab] = a[2]
+        return paint
+
+    def area_press(self, e):
+        lab = self.area_at(e)
+        if lab is None:
+            self.pos_label.config(text=tr("drawer.area_outside"))
+            return
+        self.set_area(lab, self.from_screen(e.x, e.y), self.area_pick)
+
+    def set_area(self, lab, spot, colour):
+        """Area lab gets colour (None: back to normal); spot = where it was clicked (u, v)."""
+        amap, _ = self.area_info()
+        labs = amap.at([a[0] for a in self.areas], [a[1] for a in self.areas]).tolist() if self.areas else []
+        keep = [a for a, k in zip(self.areas, labs) if k != lab]
+        new = keep + ([[round(spot[0], 5), round(spot[1], 5), colour]] if colour is not None else [])
+        if new == self.areas:
+            return
+        self.push_undo()
+        self.areas = new
+        self.changed()
+
+    def area_image(self, cw, ch):
+        """The board with the areas' colours, as a picture of the whole canvas (None: no areas to show)."""
+        amap, inside = self.area_info()
+        if amap is None or not (self.areas or self.tool.get() == "areas"):
+            return None
+        view = (cw, ch, self.zoom, tuple(self.center), id(amap))
+        if self._area_px is None or self._area_px[0] != view:
+            k = self.px()
+            u = self.center[0] + (np.arange(cw) + 0.5 - cw / 2) / k
+            v = self.center[1] - (np.arange(ch) + 0.5 - ch / 2) / k
+            cx = np.floor((u - amap.lo[0]) * amap.k[0]).astype(np.int64)
+            cy = np.floor((v - amap.lo[1]) * amap.k[1]).astype(np.int64)
+            okx, oky = (cx >= 0) & (cx < amap.w), (cy >= 0) & (cy < amap.h)
+            lab = amap.labels[np.clip(cy, 0, amap.h - 1)[:, None], np.clip(cx, 0, amap.w - 1)[None, :]]
+            lab = np.where(oky[:, None] & okx[None, :], lab, -1)
+            board = ((u >= 0) & (u <= 1))[None, :] & ((v >= 0) & (v <= 1))[:, None]
+            self._area_px = (view, lab, board)
+        _, lab, board = self._area_px
+        paint = self.area_paint(amap)[:-1]
+        lut = np.zeros((amap.count + 1, 3), np.uint8)  # (the last: walls and off the map = no colour)
+        tint = np.zeros(amap.count + 1, bool)
+        normal = inside & (paint < 0)
+        lut[:-1][normal], tint[:-1][normal] = rgb(AREA_NORMAL), True
+        lut[:-1][paint == 0], tint[:-1][paint == 0] = rgb(AREA_EMPTY), True
+        for c in range(1, COLOURS + 1):
+            lut[:-1][paint == c], tint[:-1][paint == c] = rgb(area_color(c)), True
+        if self.hover is not None and self.hover < amap.count:  # the area under the mouse: darker
+            h = self.hover
+            lut[h] = (lut[h] * 0.75).astype(np.uint8) if tint[h] else rgb("#e8eef8")
+            tint[h] = True
+        img = np.where(board[..., None], np.uint8(rgb(BOARD)), np.uint8(rgb(OFF_BOARD))).astype(np.uint8)
+        img = np.where(tint[lab][..., None], lut[lab], img).astype(np.uint8)
+        if self._area_img is None or (self._area_img.width(), self._area_img.height()) != (cw, ch):
+            self._area_img = tk.PhotoImage(master=self, width=cw, height=ch)
+        self.tk.call(self._area_img.name, "put", b"P6 %d %d 255\n" % (cw, ch) + img.tobytes(), "-format", "ppm")
+        return self._area_img
 
     def _build(self):
         bar = ttk.Frame(self, padding=(6, 4))
@@ -210,6 +368,17 @@ class Drawer(tk.Toplevel):
         self.pos_label.pack(fill="x", pady=(8, 0))
         self.state_label = ttk.Label(side, text="", wraplength=int(285 * self.scale), justify="left")
         self.state_label.pack(fill="x", pady=(8, 0))
+        # the Areas tool's colours (shown only with that tool): Empty, then 1 .. COLOURS
+        self.area_bar = ttk.Frame(side)
+        ttk.Label(self.area_bar, text=tr("drawer.area_colour")).pack(anchor="w")
+        k = self.swatch = max(14, round(16 * self.scale))
+        self.swatches = tk.Canvas(self.area_bar, width=(COLOURS + 1) * (k + 2) + 2, height=k + 4,
+                                  highlightthickness=0, background=ttk.Style().lookup("TFrame", "background")
+                                  or "SystemButtonFace", cursor="hand2")
+        self.swatches.pack(anchor="w", pady=(3, 0))
+        self.swatches.bind("<ButtonPress-1>", self.pick_swatch)
+        self.swatches.bind("<Motion>", self.swatch_tip)
+        self.swatches.bind("<Leave>", lambda e: self.pos_label.config(text=""))
         self.side_help = help_box(side, "")  # the current tool's help (update_side_help)
         self.side_help.pack(fill="both", expand=True, pady=(8, 0))
 
@@ -336,6 +505,8 @@ class Drawer(tk.Toplevel):
         pt = self.event_pt(e)
         if tool == "select":
             return self.select_press(e)
+        if tool == "areas":
+            return self.area_press(e)
         j = self.curve_handle_at(e.x, e.y) if self.draft is None else None
         if j is not None:  # the selected curve's anchors and handles work with any tool
             self.push_undo()
@@ -487,7 +658,7 @@ class Drawer(tk.Toplevel):
     def select_release(self):
         if self.drag[0] == "pan":
             return
-        if self.undo_stack and self.undo_stack[-1] == json.dumps(self.strokes):
+        if self.undo_stack and self.undo_stack[-1] == self.snap():
             self.undo_stack.pop()  # clicked without moving anything (the undone steps stay redoable)
             self.redo_stack = self.redo_kept
         else:
@@ -578,6 +749,8 @@ class Drawer(tk.Toplevel):
             self.strokes[i] = self.map_stroke(self.strokes[i], fn)
             if turned and self.strokes[i]["kind"] == "arc":  # still round (see arc.py)
                 self.strokes[i]["k"] = 1 / self.strokes[i].get("k", 1.0)
+        if len(idx) == len(self.strokes):  # the whole drawing: its coloured areas go along
+            self.areas = [[*(round(x, 5) for x in fn(u, v)), c] for u, v, c in self.areas]
         self.changed()
 
     def on_drag(self, e):
@@ -682,6 +855,15 @@ class Drawer(tk.Toplevel):
         elif self.draft and self.tool.get() in ("poly", "arc"):
             self.draft["pts"][1 if self.arc_bend else -1] = self.event_pt(e)
             self.redraw()
+        elif self.tool.get() == "areas":
+            lab = self.area_at(e)
+            if lab != self.hover:
+                self.hover = lab
+                self.redraw()
+            if lab is not None:
+                c = self.area_paint(self.area_info()[0])[lab]
+                self.pos_label.config(text=tr("drawer.area_normal") if c < 0 else tr("drawer.area_empty") if c == 0
+                                      else tr("drawer.area_n", n=int(c)))
 
     def on_key(self, e):
         k = e.keysym.lower()
@@ -705,6 +887,11 @@ class Drawer(tk.Toplevel):
             if self.draft and self.draft["kind"] == "poly" and self.tool.get() == "poly":
                 return self.finish_poly()
             return self.cancel_draft()
+        if self.tool.get() == "areas":  # an area back to how Fill / Spam fill it as normal
+            lab = self.area_at(e)
+            if lab is not None:
+                self.set_area(lab, None, None)
+            return
         j = self.curve_handle_at(e.x, e.y)
         if j is not None:
             st = self.strokes[self.sel]
@@ -770,7 +957,7 @@ class Drawer(tk.Toplevel):
         seg, t, d = nearest(st["pts"], self.to_xy, e.x, e.y)
         if near is not None and d > near:
             return
-        before = json.dumps(self.strokes)
+        before = self.snap()
         if add_anchor(st, seg, t, self.event_pt(e), self.to_xy, exact=True):
             self.push_undo(before)
             self.changed()
@@ -877,9 +1064,16 @@ class Drawer(tk.Toplevel):
         self.arc_bend = False
         self.redraw()
 
+    def snap(self):
+        """The drawing (strokes and areas) as JSON, for undo."""
+        return json.dumps([self.strokes, self.areas])
+
+    def load_snap(self, text):
+        self.strokes, self.areas = json.loads(text)
+
     def push_undo(self, before=None):
-        """A step to undo (before: the strokes as JSON, if they were already changed); drops the redo steps."""
-        self.undo_stack.append(before or json.dumps(self.strokes))
+        """A step to undo (before: snap() from before, if they were already changed); drops the redo steps."""
+        self.undo_stack.append(before or self.snap())
         del self.undo_stack[:-200]
         self.redo_kept, self.redo_stack = self.redo_stack, []
 
@@ -887,22 +1081,22 @@ class Drawer(tk.Toplevel):
         if self.draft:
             return self.cancel_draft()
         if self.undo_stack:
-            self.redo_stack.append(json.dumps(self.strokes))
-            self.strokes = json.loads(self.undo_stack.pop())
+            self.redo_stack.append(self.snap())
+            self.load_snap(self.undo_stack.pop())
             self.changed()
 
     def redo(self):
         if self.draft:
             return self.cancel_draft()
         if self.redo_stack:
-            self.undo_stack.append(json.dumps(self.strokes))
-            self.strokes = json.loads(self.redo_stack.pop())
+            self.undo_stack.append(self.snap())
+            self.load_snap(self.redo_stack.pop())
             self.changed()
 
     def clear(self):
-        if self.strokes:
+        if self.strokes or self.areas:
             self.push_undo()
-            self.strokes = []
+            self.strokes, self.areas = [], []
             self.changed()
 
     def changed(self):
@@ -937,14 +1131,15 @@ class Drawer(tk.Toplevel):
         name = self.picked()
         if not name or not self.keep_changes():
             return
-        strokes = load_shape(name)
+        strokes, areas = load_drawing(name)
         if strokes is None:
             messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_read_the_shape", name=name), parent=self)
             return
-        self.open_shape(name, strokes)
+        self.open_shape(name, strokes, areas)
 
-    def open_shape(self, name, strokes):
+    def open_shape(self, name, strokes, areas=()):
         self.strokes, self.undo_stack, self.draft, self.sel = strokes, [], None, None
+        self.areas = [list(a) for a in areas]
         self.redo_stack, self.redo_kept = [], []
         self.name.set(name)
         self.saved_name = name or None
@@ -953,7 +1148,7 @@ class Drawer(tk.Toplevel):
 
     def new(self):
         if self.keep_changes():
-            self.open_shape("", [])
+            self.open_shape("", [], [])
 
     def delete_selected(self):
         name = self.picked()
@@ -991,7 +1186,7 @@ class Drawer(tk.Toplevel):
         self.strokes = join_strokes(self.strokes)
         self.sel = None  # joining can change the order
         try:
-            save_shape(name, self.strokes)
+            save_shape(name, self.strokes, self.areas)
         except OSError as e:
             messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_save", e=e), parent=self)
             return None
@@ -1020,7 +1215,11 @@ class Drawer(tk.Toplevel):
         c.delete("all")
         cw, ch = c.winfo_width(), c.winfo_height()
         (x0, y0), (x1, y1) = self.to_screen(0, 1), self.to_screen(1, 0)
-        c.create_rectangle(x0, y0, x1, y1, fill="#ffffff", outline="")  # the board
+        img = self.area_image(cw, ch) if cw > 1 and ch > 1 else None
+        if img is not None:  # the board with the areas' colours
+            c.create_image(0, 0, image=img, anchor="nw")
+        else:
+            c.create_rectangle(x0, y0, x1, y1, fill="#ffffff", outline="")  # the board
         # Grid lines over the whole window (every line when they're far enough apart, else only the quarters)
         n = int(self.grid_n.get())
         k = self.px() / n  # pixels per grid square

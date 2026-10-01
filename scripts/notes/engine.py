@@ -19,6 +19,7 @@ from notes.joined import clean_joined, is_joined, joined_paths
 from notes.hzbass import clean_hz, velocity_factor
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
+from notes.areas import clean_areas
 from notes.claw import apply_claw, clean_claw
 from notes.strum import apply_strum, clean_strum
 from notes.bezier import anchor_count, sample
@@ -105,6 +106,9 @@ def clean_shape(sh):
             return None
         out["name"] = str(sh.get("name", ""))
         out["strokes"] = strokes
+        areas = clean_areas(sh.get("areas"))
+        if areas:  # areas coloured by hand (areas.py)
+            out["areas"] = areas
         out["fill"] = sh.get("fill") if sh.get("fill") in FILLS else "empty"
         out["gate"] = max(1e-6, float(sh.get("gate", CUSTOM_DEFAULTS["gate"])))
         out["align"] = sh.get("align") if sh.get("align") in ALIGNS else "auto"
