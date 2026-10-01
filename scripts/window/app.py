@@ -213,7 +213,8 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self.bind_all("<F1>", lambda e: None if self.in_drawer(e) else self.open_help())
         for key, fn in (("<Control-z>", self.undo), ("<Control-y>", self.redo), ("<Control-s>", self.save_project)):
             self.bind_all(key, lambda e, fn=fn: None if self.in_drawer(e) else fn())
-        for keys, fn in (("space", self.toggle_play), ("Control-c Control-C", self.copy_selected),
+        self.bind_all("<space>", self.hotkey(self.toggle_play, main_only=True))  # (pop-ups: not the main playback)
+        for keys, fn in (("Control-c Control-C", self.copy_selected),
                          ("Control-Shift-c Control-Shift-C", self.copy_to_domino),
                          ("Control-Shift-v Control-Shift-V", self.paste_from_domino),
                          ("Control-g Control-G", self.join_selected),
@@ -1157,11 +1158,14 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         """Keys pressed in the drawer window are the drawer's, not the piano roll's."""
         return bool(self.drawer) and str(e.widget).startswith(str(self.drawer))
 
-    def hotkey(self, fn):
-        """A window-wide shortcut that leaves typing boxes alone."""
+    def hotkey(self, fn, main_only=False):
+        """A window-wide shortcut that leaves typing boxes alone. main_only: only while the main window has the
+        keyboard (not in a pop-up)."""
         def handler(e):
             w = e.widget
             if self.in_drawer(e):
+                return None
+            if main_only and not (isinstance(w, tk.Misc) and w.winfo_toplevel() is self):
                 return None
             if isinstance(w, (tk.Entry, ttk.Entry)) and str(w.cget("state")) != "readonly":
                 return None

@@ -134,8 +134,9 @@ class Preview:
         return self.start()
 
     def clear(self, lo=None, hi=None):
-        """Throws away the pieces between frames lo and hi (all without them) and stops making them."""
-        for i in list(self.ver.keys() | self.chunks.keys() | self.jobs.keys()):
+        """Throws away the pieces between frames lo and hi (all without them) and stops making them. (ends too: a
+        piece thrown away for being far from the view keeps its end, and a stale end would cut the sound short.)"""
+        for i in list(self.ver.keys() | self.chunks.keys() | self.jobs.keys() | self.ends.keys()):
             if lo is None or (i + 1) * CHUNK * RATE > lo and i * CHUNK * RATE < hi:
                 self.ver[i] = self.ver.get(i, 0) + 1
                 self.chunks.pop(i, None)

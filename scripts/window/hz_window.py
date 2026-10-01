@@ -1359,9 +1359,10 @@ class HzWindow(tk.Toplevel):
         messagebox.showerror(tr("hz.window_title"), err, parent=self)
 
     def on_space(self, e):
-        """Space: the preview plays / stops (preview off: the main window's playback, as anywhere else)."""
+        """Space: the preview plays / stops (preview off: nothing; the main piano roll only plays from its own
+        window)."""
         if not self.preview_on.get():
-            return None
+            return "break"
         if self.preview.playing():
             self.preview.stop_play()
         else:
