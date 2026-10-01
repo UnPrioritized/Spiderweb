@@ -797,6 +797,7 @@ def row_pieces(edges, q, union, colour):
     if not len(here):
         return []
     xa, ya, xb, yb, lid = xa[here], ya[here], xb[here], yb[here], lid[here]
+    near = (xa, ya, xb, yb, lid)  # (for the row's middle line, centre_colours)
     ys = np.concatenate([ya, yb])
     levels = np.unique(np.concatenate([[lo, hi], ys[(ys > lo) & (ys < hi)]]))
     first = np.searchsorted(levels, np.maximum(np.minimum(ya, yb), lo))
@@ -858,16 +859,29 @@ def row_pieces(edges, q, union, colour):
     lo_, hi_, k, tall = left[filled], right[filled], group[filled], (y1 - y0)[order][pi][filled]
     if len(set(k.tolist())) <= 1:
         return [(s, e, int(k[0])) for s, e in merge_spans(lo_, hi_)] if len(k) else []
-    # colours overlapping in the row (pieces from different slices of it): each bit of time goes to the piece that
-    # fills the most of the row's height there, so a thin sliver by a line can't take the whole row
+    # colours overlapping in the row (pieces from different slices of it): each bit of time goes to the colour that
+    # fills the most of the row's height there, all its slices added up (so a thin sliver by a line can't take the
+    # whole row, and a sloping border switches where it crosses the row's middle)
     at = np.unique(np.concatenate([lo_, hi_]))
     a, b = at[:-1], at[1:]
     m = (a + b) / 2
     cover = (lo_[None, :] <= m[:, None]) & (hi_[None, :] >= m[:, None])
-    best = np.where(cover, tall[None, :], -1.0).argmax(1)
+    names, which = np.unique(k, return_inverse=True)
+    height = np.zeros((len(m), len(names)))
+    for j in range(len(names)):
+        height[:, j] = (cover[:, which.reshape(-1) == j] * tall[which.reshape(-1) == j]).sum(1)
+    best = names[height.argmax(1)]
+    # where two filled colours meet, the switch goes where the line crosses the row's middle (the slices only say
+    # how far the filling reaches): the colour of the piece of the middle line each bit is on
+    cx, cfill, cgroup = centre_colours(near, q, union, colour)
+    if len(cx) >= 2:
+        j = np.searchsorted(cx, m) - 1
+        ok = (j >= 0) & (j < len(cx) - 1)
+        ok[ok] &= cfill[j[ok]]
+        best = np.where(ok, cgroup[np.clip(j, 0, max(0, len(cgroup) - 1))], best)
     has = cover.any(1)
     out = []
-    for s, e, c in zip(a[has].tolist(), b[has].tolist(), k[best[has]].tolist()):
+    for s, e, c in zip(a[has].tolist(), b[has].tolist(), best[has].tolist()):
         if out and out[-1][2] == c and out[-1][1] >= s:
             out[-1] = (out[-1][0], e, c)
         else:
@@ -903,19 +917,45 @@ def border_parts(spans, colours):
     return np.concatenate(parts).astype(np.int64).reshape(-1, 3)
 
 
-def colour_edges(notes, colours):
-    """Spam "Outline between colours": which notes aren't wholly covered by notes of their own or a higher colour
-    number on the key above / below, just before or just after (one side of each border, like on_edge)."""
+def colour_edges(notes, colours, spans, areas):
+    """Spam "Outline between colours": which notes aren't wholly covered by the stretches (spans, of colour areas)
+    of their own or a higher colour number on the key above / below, just before or just after (one side of each
+    border, like on_edge). The stretches, not the notes: those are rounded to the spam grid and coloured by their
+    middle, which made the border's steps uneven."""
     out = np.zeros(len(notes), bool)
     for k in np.unique(colours).tolist():
         at = colours == k
-        mine, cover = notes[at], notes[colours >= k]
+        mine, cover = notes[at], spans[areas >= k]
         s, e = mine[:, 0:1], mine[:, 1:2]
         before = np.hstack([s - 1, s, mine[:, 2:3]])
         after = np.hstack([e, e + 1, mine[:, 2:3]])
         out[at] = ~(covered(mine, shifted(cover, -1)) & covered(mine, shifted(cover, 1)) &
                     covered(before, cover) & covered(after, cover))
     return out
+
+
+def centre_colours(edges, q, union, colour):
+    """Where the lines cross the middle of row q (x in order), and each piece between two of them: filled (like
+    row_pieces: by its colour or as normal) and its colour."""
+    xa, ya, xb, yb, lid = edges
+    c = (np.minimum(ya, yb) <= q) & (np.maximum(ya, yb) > q)
+    x = xa[c] + (xb[c] - xa[c]) * (q - ya[c]) / (yb[c] - ya[c])
+    o = np.argsort(x, kind="stable")
+    x, lid = x[o], lid[c][o]
+    if len(x) < 2:
+        return x, np.zeros(0, bool), np.zeros(0, np.int64)
+    if union:  # (inside any loop: count each loop's crossings on its own)
+        odd, inside = set(), []
+        for loop in lid[:-1].tolist():
+            if loop >= 0:
+                odd ^= {loop}
+            inside.append(bool(odd))
+        inside = np.array(inside)
+    else:
+        inside = np.cumsum(lid[:-1] >= 0) % 2 == 1
+    spots = [x[:-1] + (x[1:] - x[:-1]) * f for f in (0.5, 0.2, 0.8)]
+    paint = colour(np.column_stack(spots), np.full((len(x) - 1, 3), float(q)))
+    return x, np.where(paint >= 0, paint > 0, inside), np.where(paint > 0, paint, 0)
 
 
 def merged_rows(spans):
@@ -1382,7 +1422,7 @@ def _notes_groups(sh, ppq):
         else:  # (the even band: every note not wholly in the shrunk inside)
             edge = on_edge(notes) | ~covered(notes, inner_ticks(sh, ppq, g, rows))
         if area is not None and sh.get("borders"):
-            edge[:len(main)] |= colour_edges(main, ids[:len(main)])
+            edge[:len(main)] |= colour_edges(main, ids[:len(main)], spans, area)
         inner = 1 if ids is None else 1 + ids
         return (np.concatenate([notes, lines]),
                 np.concatenate([np.where(edge, 0, inner), np.where(lc > 0, 1 + lc, 0)]).astype(np.int64))
