@@ -850,6 +850,20 @@ def row_pieces(edges, q, union, colour):
     return out
 
 
+def colour_at(notes, spans, colours):
+    """For each (start, end, key) note, the colour of the (start, end, key) stretch on its key holding its middle
+    (none does: the nearest one before it, else 0)."""
+    if not len(notes) or not len(spans):
+        return np.zeros(len(notes), np.int64)
+    order = np.lexsort((spans[:, 0], spans[:, 2]))
+    sp, col = spans[order], colours[order]
+    big = np.int64(1) << 40
+    mid = (notes[:, 0] + notes[:, 1]) // 2
+    i = np.searchsorted(sp[:, 2] * big + sp[:, 0], notes[:, 2] * big + mid, "right") - 1
+    ok = (i >= 0) & (sp[np.maximum(i, 0), 2] == notes[:, 2])
+    return np.where(ok, col[np.maximum(i, 0)], 0).astype(np.int64)
+
+
 def merged_rows(spans):
     """(start, end, key) stretches -> the same merged per key where they touch (whatever their colour)."""
     ks, ss, es = merged_by_key(np.asarray(spans, np.int64).reshape(-1, 3))
@@ -1166,6 +1180,8 @@ def custom_note_count(sh, ppq):
     flat = np.concatenate([flat_notes(sh, ppq), edge_notes(sh, ppq)])
     if has_areas(sh):
         spans = area_spans(sh, ppq)[:, :3]
+        if sh["fill"] == "spam":  # (chopped as whole stretches, whatever their colours)
+            spans = merged_rows(spans)
     else:
         spans = np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]
     if sh["fill"] == "fill":
@@ -1293,11 +1309,13 @@ def _notes_groups(sh, ppq):
         own = zeros(len(spans), np.int64) if area is None else area
         return np.concatenate([notes, lines]), np.concatenate([own, zeros(len(flat), np.int64), lc])
     gate = spam_gate(sh, ppq)
-    notes = np.concatenate([chop(sh, spans, gate), chop_outline(sh, flat, ppq)])
+    # with coloured areas the whole filled stretch is chopped as one (like without them: no gaps where colours
+    # meet), then each note takes the colour where its middle is
+    main = chop(sh, rows, gate)
+    notes = np.concatenate([main, chop_outline(sh, flat, ppq)])
     ids = None
     if area is not None:
-        ids = np.repeat(area, chop(sh, spans, gate, count=True)) if len(spans) else zeros(0, np.int64)
-        ids = np.concatenate([ids, zeros(len(notes) - len(ids), np.int64)])
+        ids = np.concatenate([colour_at(main, spans, area), np.zeros(len(notes) - len(main), np.int64)])
     lc = np.repeat(lc, chop(sh, lines, gate, count=True)) if len(lines) else lc
     lines = chop_outline(sh, lines, ppq)
     if apart:  # the same spam; the notes on the edge of what's filled are the outline's
