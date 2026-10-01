@@ -807,7 +807,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         elif kind == "move" and not self.drag[4] and self.dup:  # Ctrl+click in the box: adds / takes out one
             if self.dup["click"] is not None:
                 self.app.select(self.dup["click"], toggle=True)
-        elif kind == "move" and not self.drag[4] and self.drag[3] is not None and len(self.app.sels) > 1:
+        elif (kind == "move" and not self.drag[4] and self.drag[3] is not None and len(self.app.sels) > 1
+              and not self.box_moving):  # (inside the kept Select box a click keeps the selection and box: user)
             self.app.select(self.drag[3])
         elif kind == "move" and not self.drag[4] and self.drag[5] is not False:
             part = self.drag[5]

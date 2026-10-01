@@ -17,7 +17,7 @@ import os
 import re
 import tkinter as tk
 from tkinter import font as tkfont
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, ttk
 
 import numpy as np
 
@@ -87,6 +87,66 @@ def auto_box(app, parent, var, apply):
     for w in (lb, f.entry):
         Tooltip(w, tr("hz.auto_tip", most=f"{AUTO_MOST:g}"))
     return f
+
+
+def ask_live(win, app, prompt, value, lo, hi, steps, on_change):
+    """A small window asking for a number (a note's tune / Auto threshold, in cents): its box can be typed in,
+    stepped (Up / Down, wheel) or dragged sideways, its label too (user). on_change(value) for every valid value
+    on the way, so it can be tried out. Returns the value (OK / Enter) or None (Cancel / Escape / closed)."""
+    top = tk.Toplevel(win)
+    top.title(tr("hz.window_title"))
+    top.transient(win)
+    top.resizable(False, False)
+    f = ttk.Frame(top, padding=10)
+    f.pack(fill="both")
+    ttk.Label(f, text=prompt, justify="left").pack(anchor="w")
+    row = ttk.Frame(f)
+    row.pack(anchor="w", pady=(8, 8))
+    var = tk.StringVar(value=fmt(value))
+    entry = ttk.Entry(row, textvariable=var, width=9)
+    entry.pack(side="left")
+    lb = ttk.Label(row, text=tr("panel_custom.hz_cents"), foreground="#777")
+    lb.pack(side="left", padx=(4, 0))
+    Scrub(app, [(entry, var, None)], steps, lo, hi, label=lb, drag_box=True)
+    got = {"value": None}
+
+    def read():
+        try:
+            v = float(calc(var.get()))
+        except (ValueError, ZeroDivisionError):
+            return None
+        return v if lo <= v <= hi else None
+
+    def changed(*_):
+        v = read()
+        entry.config(style="TEntry" if v is not None else "Bad.TEntry")
+        if v is not None:
+            on_change(v)
+
+    def ok(e=None):
+        v = read()
+        if v is None:
+            entry.config(style="Bad.TEntry")
+            return
+        on_change(v)
+        got["value"] = v
+        top.destroy()
+
+    var.trace_add("write", changed)
+    btns = ttk.Frame(f)
+    btns.pack(anchor="e")
+    ttk.Button(btns, text=tr("hz.live_ok"), command=ok).pack(side="left")
+    ttk.Button(btns, text=tr("hz.live_cancel"), command=top.destroy).pack(side="left", padx=(6, 0))
+    top.bind("<Return>", ok)
+    top.bind("<Escape>", lambda e: top.destroy())
+    for k in ("z", "Z", "y", "Y"):  # (the main undo would change the shape under the window)
+        top.bind(f"<Control-{k}>", lambda e: "break")
+    top.geometry(f"+{win.winfo_pointerx() - 40}+{win.winfo_pointery() - 40}")
+    entry.focus_set()
+    entry.select_range(0, "end")
+    top.grab_set()
+    top.wait_window()
+    return got["value"]
 
 
 def hz_made(sh):
@@ -901,8 +961,13 @@ class HzWindow(tk.Toplevel):
                                   "tune": tr("hz.step_tune")}.get(kind, tr("hz.step_length"))}
             if kind == "note" and kept and i in sel0:  # a note the kept box selected: the box goes along
                 boxes = boxes_upright(kept)[0]
-                self.drag.update(box=boxes, inside=bool(on_box))
+                # (inside the box a click without dragging keeps the selection and the box: user)
+                in_box = boxes_side([self.box_rect(a) for a in kept], e.x, e.y, 0) == (0, 0)
+                self.drag.update(box=boxes, inside=bool(on_box) or in_box)
                 self.box_kept = (boxes, set(self.sel))
+            elif kept and i in sel0:  # an end / the tune line of a note it selected: the box stays where it is
+                self.drag["keep_box"] = kept
+                self.box_kept = (kept, set(self.sel))
             if dup:
                 self.drag.update(dup=dup, name=tr("hz.step_duplicate"))
         self.redraw()
@@ -956,6 +1021,11 @@ class HzWindow(tk.Toplevel):
             else:
                 cents = 0.0 if abs(cents) * self.sy / 100 <= 5 * self.s else float(round(cents))
             n["cents"] = max(-TUNE, min(TUNE, cents))
+            # the other selected notes move by as much, each from where it was (user): one that would go past the
+            # end stops there, and comes back to its own distance as the drag comes back
+            moved = n["cents"] - d["orig"][d["i"]]["cents"]
+            for j in self.sel - {d["i"]}:
+                self.tones[j]["cents"] = max(-TUNE, min(TUNE, round(d["orig"][j]["cents"] + moved, 6)))
         else:  # move every selected note: the one held goes to the grid line nearest to where it's dragged
             if not d["moved"] and abs(e.x - d["x"]) < 4 and abs(e.y - d["y"]) < 4:
                 return
@@ -1074,6 +1144,8 @@ class HzWindow(tk.Toplevel):
             self.commit(d["name"], d["before"])
         if box:  # (the notes were sorted: the same ones, numbered anew)
             self.box_kept = (box, set(self.sel))
+        elif d.get("keep_box"):
+            self.box_kept = (d["keep_box"], set(self.sel))
         self.redraw()
 
     def on_middle(self, e):
@@ -1126,15 +1198,21 @@ class HzWindow(tk.Toplevel):
         line): its tune, typed. On empty space the menu waits for the double click time first (a double right
         click switches the tool), and there's none when there's nothing to pick."""
         hit = self.hit(e.x, e.y)
-        kept = self.kept_box() if len(self.sel) >= 2 and not (hit and hit[0] in ("in", "out")) else None
-        # inside the kept Select boxes: the menu for all they selected
+        kept = self.kept_box() if not (hit and hit[0] in ("in", "out")) else None
+        # inside the kept Select boxes: the menu for all they selected; just one note: its own menu, anywhere in
+        # the boxes (user, like the main piano roll)
         if kept and boxes_side([self.box_rect(a) for a in kept], e.x, e.y, 0) == (0, 0):
+            one = ("note", next(iter(self.sel))) if len(self.sel) == 1 else None
+            show = (lambda: self.show_menu(e, one)) if one else (lambda: self.show_box_menu(e))
             if hit:
-                return self.show_box_menu(e)
+                return show()
             if self.menu_wait:  # (empty space: a double right click still switches the tool)
                 self.after_cancel(self.menu_wait)
-            self.menu_wait = self.after(DOUBLE_MS, lambda: self.show_box_menu(e))
+            self.menu_wait = self.after(DOUBLE_MS, show)
             return
+        if kept:  # a right click outside the boxes drops them (user), the selection stays
+            self.box_kept = None
+            self.redraw()
         if not hit:
             if self.menu_wait:
                 self.after_cancel(self.menu_wait)
@@ -1193,28 +1271,50 @@ class HzWindow(tk.Toplevel):
                              state="normal" if pairs else "disabled")
         menu.tk_popup(e.x_root, e.y_root)
 
-    def type_tune(self, i):
-        """A note's own tune typed in cents (the selected notes get it too when it's one of them)."""
-        cents = simpledialog.askfloat(tr("hz.window_title"), tr("hz.tune_ask", most=f"{TUNE:g}"), parent=self,
-                                      initialvalue=self.tones[i]["cents"], minvalue=-TUNE, maxvalue=TUNE)
-        if cents is None or i >= len(self.tones):
+    def live_edit(self, i, prompt, get, put, lo, hi, steps, name):
+        """A number of note i (the selected notes' too when it's one of them) in a small window whose box can be
+        typed in or dragged (user): every valid value is tried out at once (the notes here, the shape, the
+        preview), one undo step in all; Cancel puts it back. The others move by as much as note i, each from its
+        own value, stopping at the ends (like dragging the tune)."""
+        if i >= len(self.tones):
             return
+        held = self.tones[i]["id"]
+        orig = {self.tones[j]["id"]: get(self.tones[j]) for j in (self.sel if i in self.sel else {i})}
         before = copy.deepcopy(self.tones)
-        for j in self.sel if i in self.sel else {i}:
-            self.tones[j]["cents"] = float(cents)
-        if self.tones != before:
-            self.commit(tr("hz.step_tune"), before)
+        state = {"pushed": False}
+
+        def apply(v):
+            moved = v - orig[held]
+            was = copy.deepcopy(self.tones)
+            for n in self.tones:
+                if n["id"] in orig:
+                    put(n, max(lo, min(hi, round(orig[n["id"]] + moved, 6))))
+            if self.tones != was:
+                self.commit(name, before, push=not state["pushed"])
+                state["pushed"] = True
+
+        got = ask_live(self, self.app, prompt, orig[held], lo, hi, steps, apply)
+        if got is None and state["pushed"]:  # Cancel: back as it was
+            self.app.undo()
+
+    def type_tune(self, i):
+        """A note's own tune in cents (live_edit)."""
+        def put(n, v):
+            n["cents"] = float(v)
+        self.live_edit(i, tr("hz.tune_ask", most=f"{TUNE:g}"), lambda n: n["cents"], put, -TUNE, TUNE,
+                       (1, 10, 0.1), tr("hz.step_tune"))
 
     def type_auto(self, i):
-        """A note's own Auto gates threshold typed in cents (the selected notes get it too when it's one of them)."""
+        """A note's own Auto gates threshold in cents (live_edit)."""
         hz = (self.target() or {}).get("hz") or {}
         if hz.get("auto") is None:
             return
-        cents = simpledialog.askfloat(tr("hz.window_title"), tr("hz.auto_ask", most=f"{AUTO_MOST:g}"), parent=self,
-                                      initialvalue=self.tones[i].get("auto", hz["auto"]), minvalue=0.0,
-                                      maxvalue=AUTO_MOST)
-        if cents is not None:
-            self.set_auto(i, float(cents))
+        shared = hz["auto"]
+
+        def put(n, v):
+            n["auto"] = float(v)
+        self.live_edit(i, tr("hz.auto_ask", most=f"{AUTO_MOST:g}"), lambda n: n.get("auto", shared), put, 0.0,
+                       AUTO_MOST, (1, 5, 0.1), tr("hz.step_auto"))
 
     def set_auto(self, i, cents):
         """Note i's own Auto gates threshold (the selected notes' too when it's one of them); None = back to the
@@ -1393,13 +1493,17 @@ class HzWindow(tk.Toplevel):
         called off."""
         self.commit(tr("hz.step_fx"), copy.deepcopy(self.tones), before)
 
-    def commit(self, name, before, before_fx=None):
-        """The notes (and effects' lines) here become the shape's: one undo step of the main window. before = the
-        tones (and before_fx the lines) to go back to if it's called off (too many notes)."""
+    def commit(self, name, before, before_fx=None, push=True):
+        """The notes (and effects' lines) here become the shape's: one undo step of the main window (push=False:
+        part of the step taken already, e.g. the Tune window trying values). before = the tones (and before_fx the
+        lines) to go back to if it's called off (too many notes)."""
         app = self.app
         picked = [self.tones[i] for i in self.sel if i < len(self.tones)]
+        boxed = self.box_kept is not None and self.box_kept[1] == self.sel
         self.tones.sort(key=lambda n: (n["t"], n["key"]))
         self.sel = {i for i, n in enumerate(self.tones) if any(n is p for p in picked)}
+        if boxed:  # (the same notes, numbered anew: the Select box stays, user)
+            self.box_kept = (self.box_kept[0], set(self.sel))
         tones = clean_tones(copy.deepcopy(self.tones))
         fx = {"fx": clean_fx(self.fxl)} if self.fxl else {}  # (amount lines: below)
         loops = clean_loop(self.loops, fx["fx"]) if fx else {}
@@ -1441,7 +1545,8 @@ class HzWindow(tk.Toplevel):
                     fit_length(new)
                 if not app.confirm_big([new]):
                     return self.call_off(before, before_fx)
-            app.push_undo(name=name)
+            if push:
+                app.push_undo(name=name)
             if tones or not hz_made(sh):
                 if not tones:  # the last note deleted from a shape of its own: back to its one tone
                     new["hz"] = hz
