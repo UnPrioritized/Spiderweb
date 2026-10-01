@@ -8,7 +8,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.pattern import PATTERN_PRESETS, formula_loop, new_pattern
+from notes.pattern import PATTERN_PRESETS, PRESET_ALONG, formula_loop, new_pattern
 from window.pattern_dialog import load_patterns, saved_pattern
 from window.widgets import Scrub, Tooltip
 
@@ -43,8 +43,9 @@ class VelocityFormulaBar(ttk.Frame):
         self.refresh()
 
     def fill_list(self):
-        self.items = [("preset", pid, name) for pid, name, _, _ in PATTERN_PRESETS]
-        self.items += [("saved", item, item["name"]) for item in load_patterns("pattern")]
+        # (not ones that move along: velocity can't go back in time)
+        self.items = [("preset", pid, name) for pid, name, _, _ in PATTERN_PRESETS if pid not in PRESET_ALONG]
+        self.items += [("saved", item, item["name"]) for item in load_patterns("pattern") if not item.get("along")]
         self.box.config(values=[name for _, _, name in self.items])
 
     def on_pick(self):

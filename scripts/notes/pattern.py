@@ -2,7 +2,8 @@
 
 sh["pattern"] = {"preset": which preset it came from ("" = typed by hand), "formula": y of x for ONE loop (x goes
 0 -> 1 along the loop, y = how far to the side, in keys), "vars": {name: number} for the other names in it (like
-height), "loops": how many times the loop repeats, "each": on a joined curve, every piece gets all the loops
+height), maybe "along": a formula of x moving the line forward / back along the curve, in loops (going back makes
+curls; none = 0), "loops": how many times the loop repeats, "each": on a joined curve, every piece gets all the loops
 (else they run on across the pieces), "k": beats per key on screen when it was put on (sideways is worked out as
 the piano roll looked then, like arcs), "mirror": the other side (flipping the shape), "scale": sideways size after
 turning the shape (like tumours)}, and maybe "name" (a saved pattern's) and "loop" = the loop edited by hand as a
@@ -39,8 +40,11 @@ PATTERN_PRESETS = [
      {"height": 4.0, "steps": 3.0}),
     ("swell", tr("pattern.swell"), "height * sin(x * pi) * sin(x * waves * 2 * pi)", {"height": 4.0, "waves": 4.0}),
     ("fade", tr("pattern.fading_wave"), "height * (1 - x) * sin(x * waves * 2 * pi)", {"height": 4.0, "waves": 4.0}),
+    ("curls", tr("pattern.curls"), "height * (1 - cos(x * 2 * pi)) / 2", {"height": 4.0, "curl": 2.0}),
 ]
 PRESET_NAMES = {pid: name for pid, name, _, _ in PATTERN_PRESETS}
+# presets that also move the line along the curve (p["along"]); over 1, "curl" makes it run back: loops
+PRESET_ALONG = {"curls": "curl * sin(x * 2 * pi) / (2 * pi)"}
 LOOPS_DEFAULT = 4.0
 
 
@@ -59,9 +63,19 @@ def new_pattern(preset, k, old=None):
     over pieces and its symmetric halves stay)."""
     _, _, text, values = next(p for p in PATTERN_PRESETS if p[0] == preset)
     old = old or {}
-    return keep_sym({"preset": preset, "formula": text, "vars": dict(values),
-                     "loops": old.get("loops", LOOPS_DEFAULT), "each": old.get("each", False), "k": k,
-                     "mirror": False, "scale": 1.0}, old)
+    out = {"preset": preset, "formula": text, "vars": dict(values), "loops": old.get("loops", LOOPS_DEFAULT),
+           "each": old.get("each", False), "k": k, "mirror": False, "scale": 1.0}
+    if preset in PRESET_ALONG:
+        out["along"] = PRESET_ALONG[preset]
+    return keep_sym(out, old)
+
+
+def pattern_names(text, along=""):
+    """The number names in a pattern's formula and its along formula (ValueError if one can't be read)."""
+    names = formula(text, named=True).names
+    if along.strip():
+        names = names + [n for n in formula(along, named=True).names if n not in names]
+    return names
 
 
 def clean_loop(c):
@@ -90,12 +104,12 @@ def clean_pattern(p):
     try:
         values = {str(a): float(b) for a, b in dict(p.get("vars", {})).items()}
         try:
-            text = str(p.get("formula", ""))
-            names = formula(text, named=True).names
+            text, along = str(p.get("formula", "")), str(p.get("along", ""))
+            names = pattern_names(text, along)
         except ValueError:
             if not loop:
                 return None
-            text, names = "", []  # (a loop drawn by hand needs no formula)
+            text, along, names = "", "", []  # (a loop drawn by hand needs no formula)
         out = {"preset": str(p.get("preset", "")), "formula": text,
                "vars": {n: values.get(n, 1.0) for n in names}, "loops": float(p.get("loops", LOOPS_DEFAULT)),
                "each": bool(p.get("each", False)), "k": float(p.get("k", 1.0)), "mirror": bool(p.get("mirror")),
@@ -104,6 +118,8 @@ def clean_pattern(p):
         return None
     if not (out["loops"] > 0 and out["k"] > 0 and math.isfinite(out["scale"])):
         return None
+    if along.strip():
+        out["along"] = along
     if p.get("name"):
         out["name"] = str(p["name"])
     if loop:
@@ -152,32 +168,42 @@ def loop_length(sh):
 
 
 @functools.lru_cache(maxsize=256)
-def _loop(text, values, sym):
-    fn = formula(text, named=True)
+def _loop(text, values, sym, along=""):
+    fns = [formula(text, named=True)] + ([formula(along, named=True)] if along.strip() else [])
     vals = dict(values)
     u = np.linspace(0.0, 1.0, LOOP_SAMPLES + 1)
     half = LOOP_SAMPLES // 2
-    v = []
-    for x in u.tolist()[:half + 1] if sym else u.tolist():  # (symmetric: the first half makes the second)
-        try:
-            y = fn(x, vals)
-        except (ValueError, ArithmeticError, TypeError, KeyError):
-            raise ValueError(tr("pattern.can_t_work_it_out_at", x=round(x, 3)))
-        if not math.isfinite(y):
-            raise ValueError(tr("pattern.can_t_work_it_out_at", x=round(x, 3)))
-        v.append(y)
-    v = np.array(v)
+    xs = u.tolist()[:half + 1] if sym else u.tolist()  # (symmetric: the first half makes the second)
+    got = []
+    for fn in fns:
+        out = []
+        for x in xs:
+            try:
+                y = fn(x, vals)
+            except (ValueError, ArithmeticError, TypeError, KeyError):
+                raise ValueError(tr("pattern.can_t_work_it_out_at", x=round(x, 3)))
+            if not math.isfinite(y):
+                raise ValueError(tr("pattern.can_t_work_it_out_at", x=round(x, 3)))
+            out.append(y)
+        got.append(np.array(out))
+    v = got[0]
     if sym == "mirror":  # across the up-and-down line through the middle
         v = np.concatenate([v, v[-2::-1]])
     elif sym == "turn":  # turned half-way round the middle point
         v = np.concatenate([v, 2 * v[-1] - v[-2::-1]])
+    if len(got) > 1:  # moved along: the second half runs the other way (both ways round the middle)
+        a = got[1]
+        if sym:
+            a = np.concatenate([a, -a[-2::-1]])
+        u = u + a
     return u, v
 
 
 def formula_loop(p):
     """One loop of the pattern's formula as (along 0 -> 1, sideways in keys) arrays (not mirrored / scaled), with
     its symmetric halves. ValueError if it can't be worked out."""
-    return _loop(p["formula"], tuple(sorted(p["vars"].items())), p.get("sym") if p.get("sym") in SYMS else None)
+    return _loop(p["formula"], tuple(sorted(p["vars"].items())), p.get("sym") if p.get("sym") in SYMS else None,
+                 p.get("along", ""))
 
 
 def loop_points(p):

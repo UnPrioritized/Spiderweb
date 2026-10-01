@@ -21,8 +21,9 @@ from files.project import HERE
 from files.safefile import write_text
 from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_point, fit_symmetric, handle_lines,
                           keep_symmetric, nearest, pen_handles, sample)
-from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, SHAPE_PRESETS, clean_loop, formula_loop,
-                           formula_shape, keep_sym, new_pattern, new_shape, pattern_name, shape_name, shape_names)
+from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, clean_loop, formula_loop,
+                           formula_shape, keep_sym, new_pattern, new_shape, pattern_name, pattern_names, shape_name,
+                           shape_names)
 from roll.roll_shared import ALT
 from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
 from window.widgets import LocalUndo, Scrub, Tooltip
@@ -46,8 +47,9 @@ def load_patterns(layer="pattern"):
         out = []
         for p in data.get(FILE_KEYS[layer], []):
             item = {"name": str(p["name"]), "vars": {str(a): float(b) for a, b in dict(p.get("vars", {})).items()}}
-            for key in (("x", "y") if layer == "shape" else ("formula",)):
-                item[key] = str(p.get(key, ""))
+            for key in (("x", "y") if layer == "shape" else ("formula", "along")):
+                if key != "along" or str(p.get(key, "")).strip():
+                    item[key] = str(p.get(key, ""))
             loop = clean_loop(p["loop"]) if isinstance(p.get("loop"), dict) else None
             if loop:
                 item["loop"] = loop
@@ -117,6 +119,8 @@ def saved_pattern(item, k, old=None):
     out = {"preset": "", "name": item["name"], "formula": item["formula"], "vars": dict(item["vars"]),
            "loops": old.get("loops", LOOPS_DEFAULT), "each": old.get("each", False), "k": k, "mirror": False,
            "scale": 1.0}
+    if item.get("along"):
+        out["along"] = item["along"]
     if item.get("loop"):
         out["loop"] = copy.deepcopy(item["loop"])
     return keep_sym(out, item)
@@ -177,19 +181,24 @@ class FormulaDialog(tk.Toplevel):
         self.name = tk.StringVar(value=self.pat.get("name") or self.preset_name())
         ttk.Label(right, text=tr("pattern_dialog.name")).grid(row=0, column=0, sticky="w")
         ttk.Entry(right, textvariable=self.name, width=30).grid(row=0, column=1, sticky="ew", padx=(5, 0), pady=1)
-        # the formula boxes: y = (a pattern) or x(t) = and y(t) = (a shape)
-        keys = ("x", "y") if shape else ("formula",)
-        labels = {"x": tr("pattern_dialog.xt"), "y": tr("pattern_dialog.yt"), "formula": tr("pattern_dialog.y")}
+        # the formula boxes: y = and along = (a pattern) or x(t) = and y(t) = (a shape)
+        keys = ("x", "y") if shape else ("formula", "along")
+        labels = {"x": tr("pattern_dialog.xt"), "y": tr("pattern_dialog.yt"), "formula": tr("pattern_dialog.y"),
+                  "along": tr("pattern_dialog.along")}
         self.texts, self.entries = {}, []
         self.editing = tk.BooleanVar(value=False)
         for r, key in enumerate(keys, start=1):
-            ttk.Label(right, text=labels[key]).grid(row=r, column=0, sticky="w")
+            lb = ttk.Label(right, text=labels[key])
+            lb.grid(row=r, column=0, sticky="w")
             row = ttk.Frame(right)
             row.grid(row=r, column=1, sticky="ew", padx=(5, 0), pady=1)
-            var = self.texts[key] = tk.StringVar(value=self.pat[key])
+            var = self.texts[key] = tk.StringVar(value=self.pat.get(key, ""))
             e = ttk.Entry(row, textvariable=var, width=34, font=("Consolas", 10), state="readonly")
             e.pack(side="left", fill="x", expand=True)
             self.entries.append(e)
+            if key == "along":
+                for w in (lb, e):
+                    Tooltip(w, tr("pattern_dialog.along_tip"))
             if r == 1:
                 b = ttk.Checkbutton(row, text=tr("pattern_dialog.edit_formula"), variable=self.editing,
                                     command=self.on_edit_mode)
@@ -264,7 +273,8 @@ class FormulaDialog(tk.Toplevel):
         """(id, name, formulas {key: text}, numbers) of the built-in ones."""
         if self.layer == "shape":
             return [(sid, name, {"x": x, "y": y}, values) for sid, name, x, y, values in SHAPE_PRESETS]
-        return [(pid, name, {"formula": text}, values) for pid, name, text, values in PATTERN_PRESETS]
+        return [(pid, name, {"formula": text, "along": PRESET_ALONG.get(pid, "")}, values)
+                for pid, name, text, values in PATTERN_PRESETS]
 
     def preset_name(self):
         return next((name for pid, name, _, _ in self.presets() if pid == self.pat.get("preset")), "")
@@ -287,7 +297,7 @@ class FormulaDialog(tk.Toplevel):
         self._loading = False
         self.pick_current()
         self.refresh()
-        if any(d["texts"][key] != self.pat[key] for key in self.texts):
+        if any(d["texts"][key] != self.pat.get(key, "") for key in self.texts):
             self.on_formula()  # (a formula that was being typed and doesn't work yet)
 
     def mark(self, key=None):
@@ -330,7 +340,7 @@ class FormulaDialog(tk.Toplevel):
         self._loading = True
         self.name.set(name)
         for key, var in self.texts.items():
-            var.set(self.pat[key])
+            var.set(self.pat.get(key, ""))
         self._loading = False
         self.ok = True
         self.own_view = False
@@ -349,7 +359,7 @@ class FormulaDialog(tk.Toplevel):
                 tr("pattern_dialog.spiderweb"), tr("pattern_dialog.replace", name=name), parent=self):
             return
         item = {"name": name, "vars": dict(self.pat["vars"])}
-        item.update({key: self.pat[key] for key in self.texts})
+        item.update({key: self.pat[key] for key in self.texts if key in self.pat})
         if self.pat.get("loop"):
             item["loop"] = copy.deepcopy(self.pat["loop"])
         keep_sym(item, self.pat)
@@ -397,7 +407,7 @@ class FormulaDialog(tk.Toplevel):
             if self.layer == "shape":
                 names = shape_names(texts["x"], texts["y"])
             else:
-                names = formula(texts["formula"], named=True).names
+                names = pattern_names(texts["formula"], texts["along"])
         except ValueError as e:
             self.ok = False
             typed = any(t.strip() for t in texts.values())
@@ -410,6 +420,8 @@ class FormulaDialog(tk.Toplevel):
             self.name.set("")
             self._loading = False
         self.pat.update(texts, vars={n: old.get(n, 1.0) for n in names}, preset="")
+        if not self.pat.get("along", "x").strip():
+            self.pat.pop("along")
         self.pat.pop("name", None)
         self.pat.pop("loop", None)
         self.refresh()
