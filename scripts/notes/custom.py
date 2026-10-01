@@ -568,16 +568,14 @@ def row_spans(polys, q, edges=None):
     ys = np.concatenate([ya, yb])
     levels = np.unique(np.concatenate([[lo, hi], ys[(ys > lo) & (ys < hi)]]))
     # every edge with every gap between two levels it runs through (edge by edge, so in each gap they keep their
-    # order)
+    # order). No "does it cross the middle" test: two levels a hair apart have a middle equal to one of them, and
+    # the test then lost an edge there, so the rest of the row swapped inside and outside.
     first = np.searchsorted(levels, np.maximum(np.minimum(ya, yb), lo))
     n = np.searchsorted(levels, np.minimum(np.maximum(ya, yb), hi)) - first
     e = np.repeat(np.arange(len(here)), n)
     gap = np.repeat(first, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
     y0, y1 = levels[gap], levels[gap + 1]
     mid = (y0 + y1) / 2
-    cross = (ya[e] <= mid) != (yb[e] <= mid)
-    if not cross.all():
-        e, gap, y0, y1, mid = e[cross], gap[cross], y0[cross], y1[cross], mid[cross]
     xa, ya, xb, yb = xa[e], ya[e], xb[e], yb[e]
 
     def x_at(y):
