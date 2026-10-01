@@ -329,12 +329,15 @@ class CustomPanel:
     def sync_hz(self, tgts, spam, placed):
         """The Hz bass row shows tgts' settings, and the warnings (short gates, BPM changed). Returns True if Hz
         bass is on (and the fill is a spam one)."""
-        hz = tgts[0].get("hz")
+        # (new shapes never start with Hz bass, custom_settings: for them the box is off, except for the Hz bass
+        # tool, whose new notes use these settings)
+        new_off = not placed and self.tool.get() != "hz"
+        hz = None if new_off else tgts[0].get("hz")
         self._loading = True
         self.hz_var.set(bool(hz))
         self._loading = False
         on = bool(hz) and spam
-        self.hz_check.config(state="normal" if spam else "disabled")
+        self.hz_check.config(state="normal" if spam and not new_off else "disabled")
         bpm = self.current_bpm()
         stale = on and bpm is not None and any(t.get("hz") and abs(t["hz"]["bpm"] - bpm) > 1e-9 for t in tgts)
         for w in (self.hz_info, self.hz_stale):

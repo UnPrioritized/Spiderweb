@@ -44,11 +44,10 @@ CUSTOM_FLAGS = ("union", "apart")
 
 
 def custom_settings(cd):
-    """The fill settings a new custom shape gets from cd (the settings for new ones)."""
+    """The fill settings a new custom shape gets from cd (the settings for new ones). Never Hz bass (user: new
+    shapes start without it; the Hz bass tool adds its own, from cd["hz"])."""
     out = {k: cd[k] for k in ("fill", "gate", "align", "ends")}
     out.update({k: True for k in CUSTOM_FLAGS if cd.get(k)})
-    if cd.get("hz"):
-        out["hz"] = dict(cd["hz"])
     return out
 
 
