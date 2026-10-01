@@ -1165,6 +1165,8 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
             w = e.widget
             if self.in_drawer(e):
                 return None
+            if self.hz_window and str(w).startswith(str(self.hz_window)):
+                return None  # (the Hz bass window: its own keys only, nothing done to the main piano roll behind)
             if main_only and not (isinstance(w, tk.Misc) and w.winfo_toplevel() is self):
                 return None
             if isinstance(w, (tk.Entry, ttk.Entry)) and str(w.cget("state")) != "readonly":
