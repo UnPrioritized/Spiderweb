@@ -802,7 +802,13 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.rendered_pts = [list(sh["pts"][0]) for sh in self.shapes]  # (where each shape is in these notes)
         started, worked = time.perf_counter(), self._notes_worked
         self.channel_split = SPLIT_CHOICES[max(self.split_box.current(), 0)][0]
-        self.split_box.config(state="readonly" if self.channel_mode.get() == "auto" else "disabled")
+        multi = self.channel_mode.get() == "auto"
+        self.split_box.config(state="readonly" if multi else "disabled")
+        if multi != bool(self.split_box.winfo_manager()):  # (only shown under Multi channel, user)
+            if multi:
+                self.split_box.pack(anchor="w", padx=(18, 0), pady=(1, 0))
+            else:
+                self.split_box.pack_forget()
         got = [self.notes_tracks(sh) for sh in self.shapes]
         self.rendered, self.slot_count = render([n for n, _ in got], self.channel_mode.get(), self.channel_split,
                                                 [t for _, t in got], [tracks_apart(sh) for sh in self.shapes])
