@@ -775,6 +775,16 @@ def area_edges(sh, amap):
         return seg
     filled, colour = area_state(sh, amap)
     a, b = uv_points(sh["pts"], seg[:, :2]), uv_points(sh["pts"], seg[:, 2:])
+    # long lines cut into pieces a few map cells long, each looked at on its own: what's beside a line changes
+    # where other lines cross it (one looked at in its middle only grew the band along all of it, user)
+    cells = np.hypot(*((b - a) * amap.k).T)
+    n = np.maximum(1, np.ceil(cells / 4).astype(np.int64))
+    i = np.repeat(np.arange(len(seg)), n)
+    t0 = (np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)) / np.repeat(n, n)
+    t1 = t0 + 1 / np.repeat(n, n)
+    seg = np.column_stack([seg[i, :2] + (seg[i, 2:] - seg[i, :2]) * t0[:, None],
+                           seg[i, :2] + (seg[i, 2:] - seg[i, :2]) * t1[:, None]])
+    a, b = a[i] + (b[i] - a[i]) * t0[:, None], a[i] + (b[i] - a[i]) * t1[:, None]
     d = (b - a) * amap.k  # (in map cells)
     ln = np.hypot(d[:, 0], d[:, 1])
     ok = ln > 1e-9
@@ -991,15 +1001,15 @@ def border_parts(spans, colours):
     return np.concatenate(parts).astype(np.int64).reshape(-1, 3)
 
 
-def colour_edges(notes, colours, spans, areas):
-    """Spam "Outline between colours": which notes aren't wholly covered by the stretches (spans, of colour areas)
-    of their own or a higher colour number on the key above / below, just before or just after (one side of each
-    border, like on_edge). The stretches, not the notes: those are rounded to the spam grid and coloured by their
-    middle, which made the border's steps uneven."""
+def colour_edges(notes, colours):
+    """Spam "Outline between colours": which notes aren't wholly covered by notes of their own or a higher colour
+    number on the key above / below, just before or just after (one side of each border, like on_edge). Notes, like
+    on_edge: the exact stretches end inside the spam grid's last notes, which put an extra note of every row's
+    outer edge in the outline too (user)."""
     out = np.zeros(len(notes), bool)
     for k in np.unique(colours).tolist():
         at = colours == k
-        mine, cover = notes[at], spans[areas >= k]
+        mine, cover = notes[at], notes[colours >= k]
         s, e = mine[:, 0:1], mine[:, 1:2]
         before = np.hstack([s - 1, s, mine[:, 2:3]])
         after = np.hstack([e, e + 1, mine[:, 2:3]])
@@ -1514,7 +1524,7 @@ def _notes_groups(sh, ppq):
         else:  # (the even band: every note not wholly in the shrunk inside)
             edge = on_edge(notes) | ~covered(notes, inner_ticks(sh, ppq, g, rows))
         if area is not None and sh.get("borders"):
-            edge[:len(main)] |= colour_edges(main, ids[:len(main)], spans, area)
+            edge[:len(main)] |= colour_edges(main, ids[:len(main)])
         inner = 1 if ids is None else 1 + ids
         return (np.concatenate([notes, lines]),
                 np.concatenate([np.where(edge, 0, inner), np.where(lc > 0, 1 + lc, 0)]).astype(np.int64))
