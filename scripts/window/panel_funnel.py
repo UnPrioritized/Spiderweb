@@ -48,12 +48,15 @@ class FunnelPanel:
         self.funnel_vars = {key: tk.StringVar() for key, _, _ in FUNNEL_CHOICES}
         self.funnel_entries = {}  # setting -> (variable, entry box)
         self.funnel_radios = {}   # setting -> [radio buttons]
+        self.funnel_grid = {}     # row name -> its widgets in the grid (hidden while they do nothing, user)
 
         def radios(r, key):
             label, choices = next((lb, ch) for k, lb, ch in FUNNEL_CHOICES if k == key)
-            ttk.Label(box, text=label).grid(row=r, column=0, sticky="w")
+            lb = ttk.Label(box, text=label)
+            lb.grid(row=r, column=0, sticky="w")
             row = ttk.Frame(box)
             row.grid(row=r, column=1, sticky="w", padx=(5, 0), pady=1)
+            self.funnel_grid[key] = (lb, row)
             self.funnel_radios[key] = []
             for value, text, tip in choices:
                 b = ttk.Radiobutton(row, text=text, value=value, variable=self.funnel_vars[key],
@@ -76,6 +79,7 @@ class FunnelPanel:
         lb.grid(row=3, column=0, sticky="w")
         row = ttk.Frame(box)
         row.grid(row=3, column=1, sticky="w", padx=(5, 0), pady=1)
+        self.funnel_grid["gate"] = (lb, row)
         entry(row, "gate0", 6)
         self.funnel_arrow = ttk.Label(row, text="→")
         self.funnel_arrow.pack(side="left", padx=(0, 4))
@@ -90,6 +94,7 @@ class FunnelPanel:
         vary = ttk.Checkbutton(box, text=tr("panel_funnel.different_start_and_wall_gate"), variable=self.funnel_vary,
                                command=lambda: self.set_funnel("vary", self.funnel_vary.get()))
         vary.grid(row=4, column=1, sticky="w", padx=(5, 0), pady=1)
+        self.funnel_grid["vary"] = (vary,)
         Tooltip(vary, tr("panel_funnel.off_one_gate_for_the_whole"))
         radios(5, "change")
         radios(6, "follow")
@@ -134,12 +139,21 @@ class FunnelPanel:
         wall_box = self.funnel_entries["gate1"][1]
         self.funnel_entries["gate0"][1].config(state="normal" if spam or (past and not vary) else "disabled")
         wall_box.config(state="normal" if vary and (spam or past) else "disabled")
-        if vary:  # the wall gate box shows only when the gates can differ
-            self.funnel_arrow.pack(side="left", padx=(0, 4), before=self.funnel_ticks)
-            wall_box.pack(side="left", padx=(0, 4), before=self.funnel_ticks)
-        else:
-            self.funnel_arrow.pack_forget()
-            wall_box.pack_forget()
+        # only what does something shows (user): long notes use one gate, and only past the wall (with "different"
+        # gates on, the wall one); the wall gate box only when the gates can differ
+        start_box = self.funnel_entries["gate0"][1]
+        boxes = [(start_box, spam or not vary), (self.funnel_arrow, spam and vary), (wall_box, vary)]
+        for w, _ in boxes:
+            w.pack_forget()
+        for w, on in boxes:
+            if on:
+                w.pack(side="left", padx=(0, 4), before=self.funnel_ticks)
+        for key, on in (("gate", spam or past), ("vary", spam), ("change", spam and vary), ("follow", spam and vary)):
+            for w in self.funnel_grid[key]:
+                if on:
+                    w.grid()
+                else:
+                    w.grid_remove()
         self.funnel_gate_tip.text = (tr("panel_funnel.spam_gate_at_the_start_at") if vary else
                                      tr("panel_funnel.spam_gate_with_long_notes_the"))
         for key in ("change", "follow"):
