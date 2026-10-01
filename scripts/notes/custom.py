@@ -763,9 +763,18 @@ def find_area_spans(sh, ppq):
     edges = (a[keep, 0], a[keep, 1], b[keep, 0], b[keep, 1], lid[keep])
     frame = sh["pts"]
 
-    def colour(x, y):
-        uv = uv_points(frame, np.column_stack([x, y]))
-        return paint[amap.at(uv[:, 0], uv[:, 1])]
+    def colour(x, y):  # (pieces, spots) spots inside each piece -> its colour: the area most of them are in
+        uv = uv_points(frame, np.column_stack([x.ravel(), y.ravel()]))
+        labs = amap.cell(uv[:, 0], uv[:, 1]).reshape(x.shape)
+        pick = np.full(len(x), -1, np.int64)
+        for i, row in enumerate(labs.tolist()):
+            row = [v for v in row if v >= 0]
+            if row:
+                pick[i] = max(set(row), key=row.count)
+        lost = pick < 0  # (every spot on a line: the free cell nearest the middle one)
+        if lost.any():
+            pick[lost] = amap.at(*uv_points(frame, np.column_stack([x[lost, 0], y[lost, 0]])).T)
+        return paint[pick]
 
     out = []
     for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1):
@@ -827,7 +836,15 @@ def row_pieces(edges, q, union, colour):
     pi = np.flatnonzero(~np.append(start[1:], True))  # pieces: from crossing i to i + 1 in the same slice
     if not len(pi):
         return []
-    c = colour((xm[pi] + xm[pi + 1]) / 2, mid[pi])
+    # spots spread over each piece (its slice between the two lines), so one near a line can't decide its area
+    xs, ys = [], []
+    for fy in (0.5, 0.2, 0.8):
+        y = y0 + (y1 - y0) * fy
+        xy = x_at(y)[order]
+        for fx in (0.5, 0.2, 0.8):
+            xs.append(xy[pi] + (xy[pi + 1] - xy[pi]) * fx)
+            ys.append(y[order][pi])
+    c = colour(np.column_stack(xs), np.column_stack(ys))
     filled = np.where(c >= 0, c > 0, inside[pi])
     group = np.where(c > 0, c, 0)
     joined = np.zeros(len(pi), bool)

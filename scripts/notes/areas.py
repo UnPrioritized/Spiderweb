@@ -122,6 +122,16 @@ class AreaMap:
         spots = np.column_stack([(s[one] + e[one]) / 2, rows[one] + 0.5]) / self.k + self.lo
         return out, len(roots), spots
 
+    def cell(self, u, v):
+        """The area number at each spot (u, v arrays), -1 on a wall or off the map."""
+        u, v = np.atleast_1d(np.asarray(u, float)), np.atleast_1d(np.asarray(v, float))
+        cx = np.floor((u - self.lo[0]) * self.k[0]).astype(np.int64)
+        cy = np.floor((v - self.lo[1]) * self.k[1]).astype(np.int64)
+        ok = (cx >= 0) & (cx < self.w) & (cy >= 0) & (cy < self.h)
+        out = np.full(u.shape, -1, np.int32)
+        out[ok] = self.labels[cy[ok], cx[ok]]
+        return out
+
     def at(self, u, v):
         """The area number at each spot (u, v arrays); a spot on a wall takes a free cell next to it (-1: none)."""
         u, v = np.atleast_1d(np.asarray(u, float)), np.atleast_1d(np.asarray(v, float))
@@ -131,12 +141,13 @@ class AreaMap:
         ok = (cx >= 0) & (cx < self.w) & (cy >= 0) & (cy < self.h)
         out[ok] = self.labels[cy[ok], cx[ok]]
         # on a wall: the nearest free cell, sideways first (a stretch of notes runs sideways)
-        sx = np.where(fx - cx < 0.5, -1, 1)
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1), (2, 0), (-2, 0), (1, 1), (-1, 1), (1, -1), (-1, -1)):
+        sx, sy = np.where(fx - cx < 0.5, -1, 1), np.where(fy - cy < 0.5, -1, 1)  # (the nearer side first)
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1), (2, 0), (-2, 0), (0, 2), (0, -2), (1, 1), (-1, 1), (1, -1),
+                       (-1, -1)):
             miss = out < 0
             if not miss.any():
                 break
-            x, y = cx[miss] + dx * sx[miss], cy[miss] + dy
+            x, y = cx[miss] + dx * sx[miss], cy[miss] + dy * sy[miss]
             good = (x >= 0) & (x < self.w) & (y >= 0) & (y < self.h)
             got = np.full(len(x), -1, np.int32)
             got[good] = self.labels[y[good], x[good]]
