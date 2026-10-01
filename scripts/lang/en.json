@@ -979,6 +979,8 @@
   "",
   "• Smoother with lots of notes: moving the view and dragging shapes.",
   "",
+  "• New pattern: Curls (right-click a line → Formula → Pattern along the line). The line loops back over itself in little curls; \"curl\" sets how tight they are. In Custom…, the new \"along =\" formula moves a pattern forward or back along the line.",
+  "",
   "Version 1.3.0",
   "",
   "• Polygon tool (Q), next to Circle, instead of Square and Triangle: pick how many points it has and its kind in the panel (polygon, star, or crossing star). Its sides can have a shape or a pattern (right-click → Formula).",
