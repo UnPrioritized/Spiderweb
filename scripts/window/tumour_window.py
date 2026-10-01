@@ -13,7 +13,7 @@ from notes.joined import shown_tumour, unify_tumours
 from notes.tumour import GRAPH_KEYS, TUMOUR_DEFAULTS, clean_graph
 from window.graph_window import GraphWindow
 from window.panel_custom import GAP_COLOR
-from window.widgets import Scrub, Tooltip
+from window.widgets import LocalUndo, Scrub, Tooltip
 
 SHAPE_CHOICES = [("triangle", tr("tumour_window.triangle")), ("square", tr("tumour_window.square")),
                  ("circle", tr("tumour_window.circle")), ("parabola", tr("tumour_window.parabola"))]
@@ -79,7 +79,7 @@ class TumourWindow(tk.Toplevel):
             var = self.vars[key] = tk.StringVar()
             e = ttk.Entry(box, textvariable=var, width=10)
             e.grid(row=r, column=1, sticky="w", padx=(5, 3), pady=1)
-            e.bind("<Return>", lambda ev, key=key: self.on_entry(key))
+            e.bind("<Return>", lambda ev, key=key: (self.on_entry(key), "break")[1])  # (not Accept)
             e.bind("<FocusOut>", lambda ev, key=key: self.on_entry(key))
             Scrub(app, [(e, var, lambda key=key: self.on_entry(key))], steps, lo, hi, label=lb)
             if key in GRAPH_KEYS:
@@ -109,7 +109,7 @@ class TumourWindow(tk.Toplevel):
             var = self.vars[key] = tk.StringVar()
             e = ttk.Entry(row, textvariable=var, width=5)
             e.pack(side="left", padx=(5 if not i else 0, 0))
-            e.bind("<Return>", lambda ev, key=key: self.on_entry(key))
+            e.bind("<Return>", lambda ev, key=key: (self.on_entry(key), "break")[1])  # (not Accept)
             e.bind("<FocusOut>", lambda ev, key=key: self.on_entry(key))
             Tooltip(e, TIPS["range"])
             self.widgets.append(e)
@@ -128,12 +128,22 @@ class TumourWindow(tk.Toplevel):
         self.info = ttk.Label(box, text="", foreground="#777", font=("Segoe UI", 8),
                               wraplength=int(300 * app.scale), justify="left")
         self.info.grid(row=10, column=0, columnspan=5, sticky="ew", pady=(4, 0))
-        ttk.Button(box, text=tr("tumour_window.close"), command=self.close).grid(row=11, column=0, columnspan=5,
-                                                                                 sticky="e", pady=(6, 0))
+        # like the claw / strum windows (user): changes show at once, Accept keeps them (one undo step), X / Esc puts
+        # them back
+        row = ttk.Frame(box)
+        row.grid(row=11, column=0, columnspan=5, sticky="ew", pady=(6, 0))
+        reset = ttk.Button(row, text=tr("tumour_window.reset"), command=self.reset)
+        reset.pack(side="left")
+        Tooltip(reset, tr("tumour_window.tip_reset"))
+        ttk.Button(row, text=tr("tumour_window.accept"), command=self.accept).pack(side="right")
 
-        self.bind("<Escape>", lambda e: self.close())
+        self.targets = sorted(app.sels)
+        self.undo = LocalUndo(self, self.state, self.put_state)
+        self.bind("<Escape>", lambda e: self.cancel())
+        self.bind("<Return>", lambda e: self.accept())
         self.bind("<Configure>", self.remember, add="+")
-        self.protocol("WM_DELETE_WINDOW", self.close)
+        self.protocol("WM_DELETE_WINDOW", self.cancel)
+        self.begin()
         self.sync()
 
     def combo(self, parent, key, choices, width, label, pad=10):
@@ -151,9 +161,82 @@ class TumourWindow(tk.Toplevel):
         if e.widget is self:
             self.app.tumour_pos = f"+{self.winfo_x()}+{self.winfo_y()}"
 
-    def close(self):
+    # ---- the change being tried: X / Esc puts the selected shapes back as they were (before), Accept keeps it
+
+    def state(self):
+        """The selected shapes as they are now."""
+        return json.dumps([self.app.shapes[i] for i in self.targets if i < len(self.app.shapes)])
+
+    def begin(self):
+        """Start from the selected shapes as they are now."""
+        self.targets = sorted(self.app.sels)
+        self.saved = json.dumps(self.app.shapes)  # (for the undo step)
+        self.before = self.now = self.state()  # (now: as this window last left them)
+        self.undo.reset()
+
+    def put_state(self, state):
+        """The selected shapes as they were (Ctrl+Z / Ctrl+Y in the window, or X / Esc)."""
+        app = self.app
+        for i, sh in zip(self.targets, json.loads(state)):
+            app.shapes[i].clear()  # (the same dicts: the graph window knows them)
+            app.shapes[i].update(sh)
+        self.now = self.state()
+        app.shapes_changed()
+        app.sync_tumour()
+
+    def changed(self, mark=None):
+        """The window changed the selected shapes (mark: changes with the same key in a row are one Ctrl+Z step)."""
+        self.now = self.state()
+        self.undo.mark(mark)
+        self.app.shapes_changed()
+        self.app.sync_tumour()
+
+    def settle(self):
+        """Something else is about to change in the main window: the tumours tried so far are kept (their own undo
+        step), and from now on X / Esc only puts back what changes after this."""
+        if self.graph_window and self.graph_window.job:
+            self.graph_window.after_cancel(self.graph_window.job)
+            self.graph_window.store()
+        if self.now != self.before and self.state() == self.now:
+            self.app.add_undo_step(self.saved, tr("tumour_window.tumours"))
+            self.saved, self.before = json.dumps(self.app.shapes), self.now
+
+    def reset(self):
+        """Every setting back to its default and no graphs; tumours stay on or off."""
+        app = self.app
+        k = app.roll.sy / app.roll.sx if app.roll.sx else 0.25
+        tgts = [t for t in app.tumour_targets() if shown_tumour(t)]
+        if not tgts:
+            return
+        for t in tgts:
+            on = bool(shown_tumour(t).get("on"))
+            unify_tumours(t)
+            t["tumour"] = dict(TUMOUR_DEFAULTS, on=on, k=k)
+        self.changed()
+
+    def accept(self):
         if self.graph_window:
             self.graph_window.ok()
+        self.settle()
+        self.close()
+
+    def cancel(self):
+        self.drop_graph()
+        if self.state() != self.before:
+            self.put_state(self.before)
+        self.close()
+
+    def drop_graph(self):
+        """The graph window closed without storing what it hasn't stored yet."""
+        g = self.graph_window
+        if g:
+            if g.job:
+                g.after_cancel(g.job)
+                g.job = None
+            g.close()
+
+    def close(self):
+        self.drop_graph()
         self.app.tumour_window = None
         self.destroy()
         self.app.roll.focus_set()
@@ -161,6 +244,11 @@ class TumourWindow(tk.Toplevel):
     def sync(self):
         """Show the first selected line's settings (everything greyed out when nothing fitting is selected)."""
         app = self.app
+        if sorted(app.sels) != self.targets:  # other shapes: the change tried on the last ones is kept
+            self.settle()
+            self.begin()
+        elif self.state() != self.now:  # changed from outside (the main window's undo)
+            self.begin()
         tgts = app.tumour_targets()
         if not tgts:
             self.what.config(text=NOTHING)
@@ -224,17 +312,13 @@ class TumourWindow(tk.Toplevel):
                          foreground=GAP_COLOR if own else "#777")
 
     def set(self, key, value, group=False):
-        """A tumour setting changed (group: one undo step while typing / quick-changing)."""
+        """A tumour setting changed (group: typing / quick-changing one box is one Ctrl+Z step in the window)."""
         app = self.app
         if self.loading:
             return
         tgts = app.tumour_targets()
         if not tgts:
             return
-        if group:
-            app.begin_edit(("tumour", tuple(sorted(app.sels)), key))
-        else:
-            app.push_undo(name=tr("tumour_window.tumours"))
         k = app.roll.sy / app.roll.sx if app.roll.sx else 0.25
         shown = app.shown_tumours()
         if self.mixed and key == "on" and value:  # (half ticked: the others get the settings shown)
@@ -250,11 +334,7 @@ class TumourWindow(tk.Toplevel):
             tm = t.setdefault("tumour", json.loads(json.dumps(shown or TUMOUR_DEFAULTS)))
             tm[key] = value
             tm["k"] = k  # sizes as the roll looks now
-        app.shapes_changed()
-        if not group:
-            app.sync_tumour()
-        else:
-            app.sync_tumour_summary()
+        self.changed(key if group else None)
         if key == "on" and value:
             app.tips.show("tumours")
 
@@ -310,5 +390,4 @@ class TumourWindow(tk.Toplevel):
             else:
                 tm.pop("graphs", None)
             tm["k"] = k  # sizes as the roll looks now
-        app.shapes_changed()
-        app.sync_tumour()
+        self.changed(("graph", key))

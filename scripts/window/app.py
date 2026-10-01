@@ -1292,9 +1292,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def push_undo(self, state=None, name=None):
         """Remember the shapes (or `state`, shapes saved earlier as JSON) for Ctrl+Z; name = what the step does
         (the History panel)."""
-        for w in (self.claw_window, self.strum_window):
+        for w in (self.claw_window, self.strum_window, self.tumour_window):
             if w:
-                w.settle()  # (the claw / strum being tried out is kept first, as its own step)
+                w.settle()  # (the claw / strum / tumours being tried out are kept first, as their own step)
         sc = self._scrub
         if sc and sc["active"]:  # stepping a number box: only its first step takes an undo step
             if sc["pushed"]:
@@ -1347,9 +1347,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self._restore(self.redo_stack, self.undo_stack)
 
     def _restore(self, src, dst):
-        for w in (self.claw_window, self.strum_window):
+        for w in (self.claw_window, self.strum_window, self.tumour_window):
             if w:
-                w.settle()  # (so Ctrl+Z here takes back the claw / strum being tried out)
+                w.settle()  # (so Ctrl+Z here takes back the claw / strum / tumours being tried out)
         if not src:
             return
         hz_was = self.hz_window and self.hz_window.before_restore()

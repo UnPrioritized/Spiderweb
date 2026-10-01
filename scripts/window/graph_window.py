@@ -50,7 +50,7 @@ class GraphWindow(tk.Toplevel):
         self.w, self.h = int(440 * s), int(220 * s)
         self.ml, self.mr, self.mt, self.mb = int(46 * s), int(12 * s), int(10 * s), int(22 * s)
         self.pts = [list(p) for p in FLAT]
-        self.drag = None  # {"i": point being dragged, "pushed": undo step taken}
+        self.drag = None  # {"i": point being dragged}
         self.job = None
         self.hover = None
 
@@ -160,7 +160,6 @@ class GraphWindow(tk.Toplevel):
     def set_points(self, pts):
         if not self.app.tumour_targets():
             return
-        self.push_undo()
         self.pts = [list(p) for p in pts]
         if not self.fits(self.view_range()):
             self.fit_view()
@@ -176,7 +175,6 @@ class GraphWindow(tk.Toplevel):
         self.drag = None
         if not self.app.tumour_targets():
             return
-        self.push_undo()
         self.pts = json.loads(state)
         if not self.fits(self.view_range()):
             self.fit_view()
@@ -208,7 +206,7 @@ class GraphWindow(tk.Toplevel):
         """Start again from the selected shapes' graphs as they are now (Cancel goes back to this)."""
         app = self.app
         tgts = app.tumour_targets()
-        self.session = {"tgts": tgts, "shapes": json.dumps(app.shapes), "step": None, "exact": True,
+        self.session = {"tgts": tgts,
                         "graphs": [json.loads(json.dumps(((shown_tumour(t) or {}).get("graphs") or {}).get(self.key)))
                                    for t in tgts]}
 
@@ -224,31 +222,22 @@ class GraphWindow(tk.Toplevel):
         if self.job:
             self.after_cancel(self.job)
             self.job = None
+        # (still part of the tumour window's change: its Accept / X decides whether it's kept)
         app, ses = self.app, self.session
-        if ses and ses["step"] is not None:
-            if ses["exact"] and len(app.undo_stack) == ses["step"]:  # nothing else changed: exactly as it was
-                app.undo_stack.pop()
-                app.shapes = json.loads(ses["shapes"])
-                app._edit_key = None
-                app.sync_panel()
-                app.shapes_changed()
-            else:  # other changes since then: just this graph goes back
-                if any(t is s for t in ses["tgts"] for s in app.shapes):
-                    app.push_undo(name=tr("graph_window.tumour_graph"))
-                    for t, g in zip(ses["tgts"], ses["graphs"]):
-                        tm = t.get("tumour") if any(t is s for s in app.shapes) else None
-                        if not tm:
-                            continue
-                        graphs = dict(tm.get("graphs") or {})
-                        graphs.pop(self.key, None)
-                        if g:
-                            graphs[self.key] = g
-                        if graphs:
-                            tm["graphs"] = graphs
-                        else:
-                            tm.pop("graphs", None)
-                    app.shapes_changed()
-                    app.sync_tumour()
+        if ses and any(t is s for t in ses["tgts"] for s in app.shapes):
+            for t, g in zip(ses["tgts"], ses["graphs"]):
+                tm = t.get("tumour") if any(t is s for s in app.shapes) else None
+                if not tm:
+                    continue
+                graphs = dict(tm.get("graphs") or {})
+                graphs.pop(self.key, None)
+                if g:
+                    graphs[self.key] = g
+                if graphs:
+                    tm["graphs"] = graphs
+                else:
+                    tm.pop("graphs", None)
+            self.tw.changed(("graph", self.key))
         self.close()
 
     def close(self):
@@ -408,7 +397,6 @@ class GraphWindow(tk.Toplevel):
         if not self.app.tumour_targets():
             return
         i = self.point_at(e.x, e.y)
-        pushed = False
         if i is None:  # a new point here
             u = self.x2u(e.x)
             if not e.state & 0x1:
@@ -417,11 +405,9 @@ class GraphWindow(tk.Toplevel):
                 return
             f = self.y2f(e.y) if e.state & 0x1 else self.snap_f(self.y2f(e.y))
             i = next(j for j, p in enumerate(self.pts) if p[0] > u)
-            self.push_undo()
-            pushed = True
             self.pts.insert(i, [u, f])
             self.schedule()
-        self.drag = {"i": i, "pushed": pushed}
+        self.drag = {"i": i}
         self.draw()
 
     def motion(self, e):
@@ -438,9 +424,6 @@ class GraphWindow(tk.Toplevel):
             u = min(max(u, self.pts[i - 1][0]), self.pts[i + 1][0])
         if [u, f] == self.pts[i]:
             return
-        if not d["pushed"]:
-            self.push_undo()
-            d["pushed"] = True
         self.pts[i] = [u, f]
         self.draw()
         self.schedule()
@@ -469,7 +452,6 @@ class GraphWindow(tk.Toplevel):
         """An end's neighbour becomes the new end (it moves to the line's start / end)."""
         if len(self.pts) <= 2 or not self.app.tumour_targets():
             return
-        self.push_undo()
         del self.pts[i]
         self.pts[0][0], self.pts[-1][0] = 0.0, 1.0
         self.draw()
@@ -480,23 +462,12 @@ class GraphWindow(tk.Toplevel):
         """Point i typed in (PointDialog)."""
         if [u, f] == self.pts[i] or not self.app.tumour_targets():
             return
-        self.push_undo()
         self.pts[i] = [u, f]
         if not self.fits(self.view_range()):
             self.fit_view()
         self.draw()
         self.store()
         self.hist.mark()
-
-    def push_undo(self):
-        """One undo step for everything done to the graph until OK (or other shapes are selected)."""
-        ses = self.session
-        if ses["step"] is None or len(self.app.undo_stack) != ses["step"]:
-            if ses["step"] is not None:  # (something else changed in between: Cancel can only put the graph back)
-                ses["exact"] = False
-            self.app.push_undo(name=tr("graph_window.tumour_graph"))
-            ses["step"] = len(self.app.undo_stack)
-        self.app._edit_key = None  # (typing in a box afterwards is its own undo step)
 
     def on_hover(self, e):
         """Under the mouse: the graph's value at that spot along the line."""
