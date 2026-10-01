@@ -1155,7 +1155,10 @@ class HzWindow(tk.Toplevel):
         x, y = self.pan[:2]
         if abs(e.x - x) >= 4 or abs(e.y - y) >= 4 or not self.app.hz_line.get():
             return
-        hit = self.hit(e.x, e.y)
+        self.slide_mark(e, self.hit(e.x, e.y))
+
+    def slide_mark(self, e, hit):
+        """One end of a slide at e on note hit (on_middle; the right-click menu's Start / End a slide here)."""
         before = copy.deepcopy(self.tones)
         first = next((n for n in self.tones if self.pending and n["id"] == self.pending[0]), None)
         if hit and hit[0] in ("in", "out"):
@@ -1263,6 +1266,15 @@ class HzWindow(tk.Toplevel):
                 if any("auto" in self.tones[j] for j in picked):
                     menu.add_command(label=tr("hz.auto_shared", cents=f"{hz['auto']:g}"),
                                      command=lambda: self.set_auto(hit[1], None))
+            if self.app.hz_line.get():  # a slide's dots, like two middle-clicks
+                n = self.tones[hit[1]]
+                first = next((m for m in self.tones if self.pending and m["id"] == self.pending[0]), None)
+                ends = first is not None and first is not n and (can_slide(first, n) or can_slide(n, first))
+                menu.add_command(label=tr("hz.slide_end" if ends else "hz.slide_start"),
+                                 command=lambda: self.slide_mark(e, hit))
+            menu.add_separator()
+        if hit and hit[0] in ("in", "out"):  # a slide's dot: that slide goes, both its dots
+            menu.add_command(label=tr("hz.slide_delete"), command=lambda: self.delete_slide(hit[2]))
             menu.add_separator()
         if pairs and all(self.link(a, b) for a, b in pairs):
             menu.add_command(label=tr("hz.slide_remove"), command=lambda: self.set_slide(False))
@@ -1270,6 +1282,14 @@ class HzWindow(tk.Toplevel):
             menu.add_command(label=tr("hz.slide_add"), command=lambda: self.set_slide(True),
                              state="normal" if pairs else "disabled")
         menu.tk_popup(e.x_root, e.y_root)
+
+    def delete_slide(self, s):
+        """Slide s goes (the dots on both its notes)."""
+        before = copy.deepcopy(self.tones)
+        for n in self.tones:
+            n["to"] = [t for t in n["to"] if t is not s]
+        if self.tones != before:
+            self.commit(tr("hz.step_lead"), before)
 
     def live_edit(self, i, prompt, get, put, lo, hi, steps, name):
         """A number of note i (the selected notes' too when it's one of them) in a small window whose box can be
