@@ -83,8 +83,11 @@ class CustomPanel:
                 drop.bind("<<ComboboxSelected>>", lambda e: (
                     self.set_custom("apart", self.apart_var.get() == APART_CHOICES[1]), self.roll.focus_set()))
                 self.apart_boxes[value], self.apart_tips[value] = drop, Tooltip(drop, APART_TIP)
-        g = ttk.Frame(opts)
-        g.pack(anchor="w", padx=(20, 0))
+        # the rows under the choices: only the ones that do something for the chosen Inside are shown, so the
+        # panel grows as options are picked (user; show_custom_rows)
+        self.custom_rows, self._custom_shown = [], None
+        g = self.gate_row = ttk.Frame(opts)
+        self.custom_rows.append((g, dict(anchor="w", padx=(20, 0))))
         lb = ttk.Label(g, text=tr("panel_custom.gate"))
         lb.pack(side="left")
         self.gate_entry = ttk.Entry(g, textvariable=self.gate_var, width=7)
@@ -96,7 +99,7 @@ class CustomPanel:
         # Hz bass: the gate is one wave of a tone (custom.py). Only the switch, Notes… and the warnings here (user);
         # the rest is in the Hz bass window
         h = self.hz_row = ttk.Frame(opts)
-        h.pack(anchor="w", padx=(20, 0), pady=(1, 0))
+        self.custom_rows.append((h, dict(anchor="w", padx=(20, 0), pady=(1, 0))))
         self.hz_var = tk.BooleanVar()
         self.hz_check = ttk.Checkbutton(h, text=tr("panel_custom.hz_bass"), variable=self.hz_var, command=self.on_hz)
         self.hz_check.pack(side="left")
@@ -110,8 +113,10 @@ class CustomPanel:
         ttk.Label(self.hz_stale, text=tr("panel_custom.hz_stale"), foreground=GAP_COLOR, font=("Segoe UI", 8),
                   wraplength=int(HZ_WRAP * self.scale), justify="left").pack(anchor="w")
         ttk.Button(self.hz_stale, text=tr("panel_custom.hz_update"), command=self.update_hz).pack(anchor="w", pady=(1, 2))
-        e = ttk.Frame(opts)
-        e.pack(anchor="w", padx=(20, 0), pady=(1, 0))
+        for w in (self.hz_info, self.hz_stale):
+            self.custom_rows.append((w, dict(anchor="w", padx=(20, 0))))
+        e = self.ends_row = ttk.Frame(opts)
+        self.custom_rows.append((e, dict(anchor="w", padx=(20, 0), pady=(1, 0))))
         ttk.Label(e, text=tr("panel_custom.ends")).pack(side="left")
         self.ends_var = tk.StringVar(value=END_CHOICES[0][1])
         self.ends_box = ttk.Combobox(e, textvariable=self.ends_var, values=[t for _, t in END_CHOICES],
@@ -120,8 +125,8 @@ class CustomPanel:
         self.ends_box.bind("<<ComboboxSelected>>", lambda ev: (
             self.set_custom("ends", ENDS[self.ends_box.current()]), self.roll.focus_set()))
         Tooltip(self.ends_box, tr("panel_custom.ends_tip"))
-        a = ttk.Frame(opts)
-        a.pack(anchor="w", padx=(20, 0), pady=(1, 0))
+        a = self.start_row = ttk.Frame(opts)
+        self.custom_rows.append((a, dict(anchor="w", padx=(20, 0), pady=(1, 0))))
         ttk.Label(a, text=tr("panel_custom.start")).pack(side="left")
         self.align_buttons = []
         for value, text, tip in ALIGN_CHOICES:
@@ -131,8 +136,8 @@ class CustomPanel:
             Tooltip(b, tip)
             self.align_buttons.append(b)
         # the smallest outline gate (custom.grow_inward): thin outline notes grow into the inside
-        o = ttk.Frame(opts)
-        o.pack(anchor="w", padx=(20, 0), pady=(1, 0))
+        o = self.edge_row = ttk.Frame(opts)
+        self.custom_rows.append((o, dict(anchor="w", padx=(20, 0), pady=(1, 0))))
         lb = ttk.Label(o, text=tr("panel_custom.edge"))
         lb.pack(side="left")
         self.edge_var = tk.StringVar()
@@ -141,8 +146,8 @@ class CustomPanel:
         ttk.Label(o, text=tr("panel_custom.edge_unit"), foreground="#777").pack(side="left")
         for w in (lb, self.edge_entry):
             Tooltip(w, tr("panel_custom.edge_tip"))
-        o = ttk.Frame(opts)
-        o.pack(anchor="w", padx=(40, 0), pady=(1, 0))
+        o = self.edge_mode_row = ttk.Frame(opts)
+        self.custom_rows.append((o, dict(anchor="w", padx=(40, 0), pady=(1, 0))))
         self.edge_mode_box = ttk.Combobox(o, values=[t for _, t in EDGE_CHOICES], state="readonly", width=15)
         self.edge_mode_box.pack(side="left")
         self.edge_mode_box.bind("<<ComboboxSelected>>", lambda e: (self.set_custom(
@@ -163,7 +168,7 @@ class CustomPanel:
         self.cancel_var = tk.BooleanVar(value=True)
         self.cancel_box = ttk.Checkbutton(opts, text=tr("panel_custom.overlaps_cancel_out"), variable=self.cancel_var,
                                           command=lambda: self.set_custom("union", not self.cancel_var.get()))
-        self.cancel_box.pack(anchor="w", pady=(2, 0))
+        self.custom_rows.append((self.cancel_box, dict(anchor="w", padx=(20, 0), pady=(2, 0))))
         Tooltip(self.cancel_box, CANCEL_TIP)
         self.custom_info = ttk.Label(box, text="", foreground="#777", font=("Segoe UI", 8),
                                      wraplength=int(300 * self.scale), justify="left")
@@ -268,6 +273,10 @@ class CustomPanel:
         for value, box in self.apart_boxes.items():
             box.config(state="readonly" if fill == value else "disabled",
                        style="Gap.TCombobox" if lonely and fill == value else "TCombobox")
+            if fill == value:  # (only next to the chosen one)
+                box.grid()
+            else:
+                box.grid_remove()
             self.apart_tips[value].text = APART_TIP + (APART_NEEDS if lonely else "")
         outline = fill in ("empty", "outline_spam") or apart  # (Fill / Spam: only with "Outline")
         self.edge_entry.config(state="normal" if outline else "disabled")
@@ -276,6 +285,12 @@ class CustomPanel:
         self._loading = False
         self.edge_mode_box.config(state="readonly" if outline and tgts[0].get("edge") else "disabled")
         self.cancel_box.config(state="normal" if fill in ("fill", "spam") and not text else "disabled")
+        rows = {self.gate_row: spam and not hz, self.hz_row: spam, self.hz_info: self.hz_short_on,
+                self.hz_stale: self.hz_stale_on, self.ends_row: spam and not hz,
+                self.start_row: spam and not hz and ends != "stretch", self.edge_row: outline,
+                self.edge_mode_row: outline and bool(tgts[0].get("edge")),
+                self.cancel_box: fill in ("fill", "spam") and not text}
+        self.show_custom_rows({w for w, on in rows.items() if on})
         if not placed and live:
             info = tr("panel_custom.live_shape_what_you_draw_goes")
         elif not placed and tool == "text":
@@ -410,16 +425,25 @@ class CustomPanel:
         on = bool(hz) and spam
         self.hz_check.config(state="normal" if spam and not new_off else "disabled")
         bpm = self.current_bpm()
-        stale = on and bpm is not None and any(t.get("hz") and abs(t["hz"]["bpm"] - bpm) > 1e-9 for t in tgts)
-        for w in (self.hz_info, self.hz_stale):
-            w.pack_forget()
-        if on and shortest_gate(dict(hz, bpm=bpm or hz["bpm"]), self.ppq) < HZ_SHORT:
+        self.hz_stale_on = on and bpm is not None and any(t.get("hz") and abs(t["hz"]["bpm"] - bpm) > 1e-9
+                                                          for t in tgts)
+        self.hz_short_on = on and shortest_gate(dict(hz, bpm=bpm or hz["bpm"]), self.ppq) < HZ_SHORT
+        if self.hz_short_on:
             text = tr("panel_custom.hz_short_fixed" if hz.get("fixed") else "panel_custom.hz_short").strip()
             self.hz_info.config(text=text)
-            self.hz_info.pack(anchor="w", padx=(20, 0), after=self.hz_row)
-        if stale:
-            self.hz_stale.pack(anchor="w", padx=(20, 0), after=self.hz_row)
         return on
+
+    def show_custom_rows(self, want):
+        """Shows only the rows under the Inside choices that are in want (in their own order)."""
+        shown = [w for w, _ in self.custom_rows if w in want]
+        if shown == self._custom_shown:
+            return
+        self._custom_shown = shown
+        for w, _ in self.custom_rows:
+            w.pack_forget()
+        for w, opts in self.custom_rows:
+            if w in want:
+                w.pack(**opts)
 
     def on_hz(self):
         """The Hz bass box ticked or cleared."""

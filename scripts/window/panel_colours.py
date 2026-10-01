@@ -28,13 +28,13 @@ class ColoursPanel:
         self.cycle_box.bind("<<ComboboxSelected>>", lambda ev: (self.on_cycle(), self.roll.focus_set()))
         self.cycle_tip = Tooltip(self.cycle_box, tr("colours.tip"))
         self.cycle_n_var = tk.StringVar()
-        lb = ttk.Label(c, text=tr("colours.channels"))
+        lb = self.cycle_n_label = ttk.Label(c, text=tr("colours.channels"))
         lb.pack(side="left")
         self.cycle_n_entry = ttk.Entry(c, textvariable=self.cycle_n_var, width=3)
         self.cycle_n_entry.pack(side="left", padx=(4, 0))
         Scrub(self, [(self.cycle_n_entry, self.cycle_n_var, self.on_cycle)], (1, 3, 1), 2, CYCLE_MAX, label=lb,
               drag_box=True)
-        c = ttk.Frame(box)
+        c = self.cycle_every_row = ttk.Frame(box)  # (channels + this row: only shown while Colours is on, user)
         c.pack(anchor="w", padx=(20, 0), pady=(1, 0))
         ttk.Label(c, text=tr("colours.every")).pack(side="left")
         self.cycle_vars = [tk.StringVar(), tk.StringVar()]  # steps / keys, or the note length's a / b
@@ -86,6 +86,14 @@ class ColoursPanel:
         self.cycle_tip.text = tr("colours.tip") + (tr("colours.needs") if lonely else "")
         for e in [self.cycle_n_entry] + self.cycle_entries:
             e.config(state="normal" if cy else "disabled", style="TEntry")
+        if bool(cy) != bool(self.cycle_every_row.winfo_manager()):
+            if cy:
+                self.cycle_n_label.pack(side="left")
+                self.cycle_n_entry.pack(side="left", padx=(4, 0))
+                self.cycle_every_row.pack(anchor="w", padx=(20, 0), pady=(1, 0))
+            else:
+                for w in (self.cycle_n_label, self.cycle_n_entry, self.cycle_every_row):
+                    w.pack_forget()
 
     def on_cycle(self):
         """The Colours dropdown, or one of its number boxes."""
