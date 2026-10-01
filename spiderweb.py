@@ -33,6 +33,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     hz_preview.py    the Hz bass window's Preview: its sound made ahead (greyed until made) and played
     preview_settings.py  its Preview settings window (soundfont, voice limit, reverb, volume, speed)
     velocity_formula.py the velocity pane's Formula tool settings (pattern, loops, its numbers)
+    claw_window.py   the Claw machine window (and its Knob dial)
   roll/              the piano roll
     pianoroll.py     the piano roll canvas: view, hit testing, mouse editing
     roll_draw.py     painting the grid, notes, handles, keyboard, ruler
@@ -62,6 +63,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     joined.py        joining shapes into one curve (pieces, their tumours) and splitting shapes
     convert.py       Turn into live shape: shapes -> one custom shape (and back)
     envelope.py      velocity envelopes
+    claw.py          the claw machine: a shape's notes thinned out / cut / bent after they're made
+    strum.py         strum: each chord's notes start one after another (and end, velocity), after the claw
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes
   files/             saving, MIDI, sound
     project.py       project files, autosave (+ its backup), MIDI export

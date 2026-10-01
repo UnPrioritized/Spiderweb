@@ -20,6 +20,7 @@ from notes.hzbass import clean_hz, velocity_factor
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
 from notes.claw import apply_claw, clean_claw
+from notes.strum import apply_strum, clean_strum
 from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
@@ -89,6 +90,9 @@ def clean_shape(sh):
     cl = clean_claw(sh.get("claw"))
     if cl:  # notes thinned out / moved after they're made (claw.py)
         out["claw"] = cl
+    sm = clean_strum(sh.get("strum"))
+    if sm:  # chords strummed after that (strum.py)
+        out["strum"] = sm
     cy = clean_cycle(sh.get("cycle"))
     if cy:  # "Colours" (custom.py)
         out["cycle"] = cy
@@ -271,17 +275,26 @@ def shape_notes(sh, ppq, keys=128):
 def shape_notes_tracks(sh, ppq, keys=128):
     """shape_notes, and for pasted notes which track each note came from, for a custom shape made of other shapes
     which of them (one number per row; None for every other shape)."""
-    notes, tracks = _notes_tracks(sh, ppq, keys)
-    return with_claw(notes, tracks, sh.get("claw"), ppq)
+    notes, tracks = with_claw(*_notes_tracks(sh, ppq, keys), sh.get("claw"), ppq)
+    return with_strum(notes, tracks, sh.get("strum"), ppq)
 
 
 def with_claw(notes, tracks, claw, ppq):
     """shape_notes_tracks' notes and tracks after the shape's claw (claw.py; None = none)."""
-    if not claw:
+    return _after(apply_claw, notes, tracks, claw, ppq)
+
+
+def with_strum(notes, tracks, strum, ppq):
+    """The same after the shape's strum (strum.py; it comes after the claw)."""
+    return _after(apply_strum, notes, tracks, strum, ppq)
+
+
+def _after(fn, notes, tracks, settings, ppq):
+    if not settings:
         return notes, tracks
     if tracks is None:
-        return apply_claw(notes, claw, ppq), None
-    got = apply_claw(np.column_stack([notes, tracks]), claw, ppq)
+        return fn(notes, settings, ppq), None
+    got = fn(np.column_stack([notes, tracks]), settings, ppq)
     return got[:, :-1], got[:, -1]
 
 
