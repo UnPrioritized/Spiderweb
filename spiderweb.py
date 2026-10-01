@@ -49,6 +49,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     engine.py        shapes -> notes, overlap handling, channel assignment
     paths.py         lines / polylines / freehand / curves -> notes
     custom.py        custom shapes: outlines, fill, spam, outline spam
+    shrink.py        the outline gate's even band: a custom shape shrunk inward
     text.py          text: letters laid out in a font -> a custom shape, threshold, grow
     hzbass.py        Hz bass: spam gates from tones (placed notes, slides, chords)
     fonts.py         letter outlines from the fonts installed in Windows
