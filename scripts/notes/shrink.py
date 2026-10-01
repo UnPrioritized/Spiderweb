@@ -58,41 +58,47 @@ def merge(spans):
     return out
 
 
-def near_at(seg, y, r):
-    """The stretches of the line at height y (all in the shape's proportions) closer than r to an edge: each
-    edge's round-ended band crosses it in one stretch. [(a, b)] merged."""
-    ax, ay, bx, by = seg[:, 0], seg[:, 1], seg[:, 2], seg[:, 3]
-    keep = (np.minimum(ay, by) - r < y) & (np.maximum(ay, by) + r > y)
-    if not keep.any():
-        return []
-    ax, ay, bx, by = ax[keep], ay[keep], bx[keep], by[keep]
-    lo, hi = np.full(len(ax), np.inf), np.full(len(ax), -np.inf)
-    for px, py in ((ax, ay), (bx, by)):  # the round ends
-        d = r * r - (y - py) ** 2
-        w = np.sqrt(np.maximum(d, 0))
-        lo = np.where(d > 0, np.minimum(lo, px - w), lo)
-        hi = np.where(d > 0, np.maximum(hi, px + w), hi)
-    dx, dy = bx - ax, by - ay
-    length = np.hypot(dx, dy)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        flat = np.abs(dy) < 1e-12
-        # the band along the edge: closer than r to its line and beside it (not past its ends)
-        c = ax + dx * (y - ay) / dy
-        w = r * length / np.abs(dy)
-        b_lo, b_hi = np.where(flat, np.minimum(ax, bx), c - w), np.where(flat, np.maximum(ax, bx), c + w)
-        ok = np.where(flat, np.abs(y - ay) < r, True)
-        upright = np.abs(dx) < 1e-12
-        t = (y - ay) * dy / np.where(length > 0, length * length, 1)
-        x0 = ax - (y - ay) * dy / dx  # where the edge's start is beside it
-        x1 = x0 + length * length / dx
-        p_lo, p_hi = np.where(upright, -np.inf, np.minimum(x0, x1)), np.where(upright, np.inf, np.maximum(x0, x1))
-        ok &= np.where(upright, (t >= 0) & (t <= 1), True)
-        b_lo, b_hi = np.maximum(b_lo, p_lo), np.minimum(b_hi, p_hi)
-        ok &= (b_hi > b_lo) & (length > 0)
-    lo = np.where(ok, np.minimum(lo, b_lo), lo)
-    hi = np.where(ok, np.maximum(hi, b_hi), hi)
-    got = hi > lo
-    return merge(list(zip(lo[got].tolist(), hi[got].tolist())))
+def near_rows(seg, ys, r):
+    """For each height y in ys (all in the shape's proportions): the stretches of the line at y closer than r to an
+    edge, [(a, b)] merged; each edge's round-ended band crosses it in one stretch. Worked out for many lines at once
+    (one at a time was most of an outline gate step's time)."""
+    out = []
+    step = max(1, 200000 // max(len(seg), 1))  # (lines worked out together: keeps the arrays small)
+    for i0 in range(0, len(ys), step):
+        y = np.asarray(ys[i0:i0 + step], float)[:, None]
+        ax, ay, bx, by = (seg[None, :, i] for i in range(4))
+        keep = (np.minimum(ay, by) - r < y) & (np.maximum(ay, by) + r > y)
+        lo, hi = np.full(keep.shape, np.inf), np.full(keep.shape, -np.inf)
+        for px, py in ((ax, ay), (bx, by)):  # the round ends
+            d = r * r - (y - py) ** 2
+            w = np.sqrt(np.maximum(d, 0))
+            lo = np.where((d > 0) & keep, np.minimum(lo, px - w), lo)
+            hi = np.where((d > 0) & keep, np.maximum(hi, px + w), hi)
+        dx, dy = bx - ax, by - ay
+        length = np.hypot(dx, dy)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            flat = np.abs(dy) < 1e-12
+            # the band along the edge: closer than r to its line and beside it (not past its ends)
+            c = ax + dx * (y - ay) / dy
+            w = r * length / np.abs(dy)
+            b_lo, b_hi = np.where(flat, np.minimum(ax, bx), c - w), np.where(flat, np.maximum(ax, bx), c + w)
+            ok = np.where(flat, np.abs(y - ay) < r, True) & keep
+            upright = np.abs(dx) < 1e-12
+            t = (y - ay) * dy / np.where(length > 0, length * length, 1)
+            x0 = ax - (y - ay) * dy / dx  # where the edge's start is beside it
+            x1 = x0 + length * length / dx
+            p_lo = np.where(upright, -np.inf, np.minimum(x0, x1))
+            p_hi = np.where(upright, np.inf, np.maximum(x0, x1))
+            ok &= np.where(upright, (t >= 0) & (t <= 1), True)
+            b_lo, b_hi = np.maximum(b_lo, p_lo), np.minimum(b_hi, p_hi)
+            ok &= (b_hi > b_lo) & (length > 0)
+        lo = np.where(ok, np.minimum(lo, b_lo), lo)
+        hi = np.where(ok, np.maximum(hi, b_hi), hi)
+        got = hi > lo
+        for row in range(len(y)):
+            g = got[row]
+            out.append(merge(list(zip(lo[row][g].tolist(), hi[row][g].tolist()))) if g.any() else [])
+    return out
 
 
 def minus(spans, cuts):
@@ -116,12 +122,15 @@ def inner_rows(polys, union, keys, r, ppq):
     k = proportion(polys)
     seg = segments(polys) * [1, k, 1, k]
     groups = [segments([p]) * [1, k, 1, k] for p in polys] if union else [seg]
+    keys = list(keys)
+    ys = [(q - 0.5 + (j + 0.5) / SAMPLES) * k for q in keys for j in range(SAMPLES)]
+    near = near_rows(seg, ys, r)
     out = []
-    for q in keys:
+    for n, q in enumerate(keys):
         got = []
         for j in range(SAMPLES):
-            y = (q - 0.5 + (j + 0.5) / SAMPLES) * k
-            got += minus(inside_at(groups, y), near_at(seg, y, r))
+            y = ys[n * SAMPLES + j]
+            got += minus(inside_at(groups, y), near[n * SAMPLES + j])
         for a, b in merge(got):
             s = math.floor(a * ppq + 0.5)
             e = math.floor(b * ppq + 0.5)

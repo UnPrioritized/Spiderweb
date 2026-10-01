@@ -30,6 +30,39 @@ RING_GAP = 4  # px: notes in a row closer than this count as touching for the ri
 RING_MAX = 20000  # more ring pieces on screen than this: none drawn (canvas items are slow)
 
 
+def piece_runs(x0, y0, x1, y1):
+    """Straight pieces (lists of their ends) joined where one's end is another's: runs of (piece, forward), each
+    run one line (a closed loop starts and ends on the same spot)."""
+    def spot(x, y):
+        return round(x, 3), round(y, 3)
+    at = {}
+    for i in range(len(x0)):
+        at.setdefault(spot(x0[i], y0[i]), []).append(i)
+        at.setdefault(spot(x1[i], y1[i]), []).append(i)
+    used = [False] * len(x0)
+
+    def follow(i, fwd):
+        """From piece i's far end onward (fwd: going from its start to its end)."""
+        out = []
+        while True:
+            end = spot(x1[i], y1[i]) if fwd else spot(x0[i], y0[i])
+            nxt = next((j for j in at[end] if not used[j]), None)
+            if nxt is None:
+                return out
+            used[nxt] = True
+            fwd = spot(x0[nxt], y0[nxt]) == end
+            out.append((nxt, fwd))
+            i = nxt
+    runs = []
+    for i in range(len(x0)):
+        if not used[i]:
+            used[i] = True
+            ahead = follow(i, True)
+            back = follow(i, False)
+            runs.append([(j, not f) for j, f in reversed(back)] + [(i, True)] + ahead)
+    return runs
+
+
 def ring_parts(notes, gap):
     """
     The outline round the selected shapes' notes (start, end, key), small gaps in a row (< gap ticks) closed:
@@ -276,10 +309,25 @@ class RollDrawing:
                 xi, yi = segs[:, 4] * self.sx + bx, segs[:, 5] * ay + by
                 flip = np.where(nx * (xi - (x0 + x1) / 2) + ny * (yi - (y0 + y1) / 2) < 0, -1, 1)
                 nx, ny = nx * flip, ny * flip
-                for xs in zip(*(v[on].tolist() for v in (x0 + nx, y0 + ny, x1 + nx, y1 + ny))):
-                    self.create_line(*xs, fill=PREVIEW_HALO, width=1)
-                for xs in zip(*(v[on].tolist() for v in (x0, y0, x1, y1))):
-                    self.create_line(*xs, fill=PREVIEW_COLOR, width=1, capstyle="round")
+                # (pieces joined end to end into a few long lines: one canvas item per piece made every step of
+                # the box slow)
+                x0, y0, x1, y1, nx, ny = (v[on].tolist() for v in (x0, y0, x1, y1, nx, ny))
+                for run in piece_runs(x0, y0, x1, y1):
+                    line, halo = [], []
+                    for n, (i, fwd) in enumerate(run):
+                        pts = [(x0[i], y0[i]), (x1[i], y1[i])][::1 if fwd else -1]
+                        if not n:
+                            line += pts[0]
+                            halo += (pts[0][0] + nx[i], pts[0][1] + ny[i])
+                        # (the halo's corner: the two pieces' sides averaged)
+                        j = run[n + 1][0] if n + 1 < len(run) else i
+                        hx, hy = nx[i] + nx[j], ny[i] + ny[j]
+                        d = math.hypot(hx, hy)
+                        hx, hy = (hx / d, hy / d) if d > 1e-6 else (nx[i], ny[i])
+                        line += pts[1]
+                        halo += (pts[1][0] + hx, pts[1][1] + hy)
+                    self.create_line(*halo, fill=PREVIEW_HALO, width=1)
+                    self.create_line(*line, fill=PREVIEW_COLOR, width=1, capstyle="round")
 
     def draw_ring_lines(self, parts, w, h, d, extra, **kw):
         """ring_parts' (sides, tops) as lines on screen, d pixels outside the notes' edge (extra: how far the
