@@ -243,10 +243,10 @@ class HzWindow(tk.Toplevel):
         c.bind("<MouseWheel>", self.on_wheel)
         c.bind("<Delete>", lambda e: (self.fx.delete_key() or self.delete_selected())
                or "break")  # (effect points selected: they go; none, the pane pressed last: the highlighted effect)
-        for k in ("<Control-c>", "<Control-C>"):  # (effect points selected: they're copied; else the main window's)
-            c.bind(k, lambda e: "break" if self.fx.copy_points() else None)
-        for k in ("<Control-v>", "<Control-V>"):
-            c.bind(k, lambda e: "break" if self.fx.paste_points() else None)
+        for k in ("<Control-c>", "<Control-C>"):  # (effect points selected: they're copied; else the notes)
+            c.bind(k, lambda e: self.copy_notes() or "break")
+        for k in ("<Control-v>", "<Control-V>"):  # (what was copied last: effect points, or notes at the play line)
+            c.bind(k, lambda e: (self.fx.paste_points() or self.paste_notes(self.play_line_beat()), "break")[1])
         c.bind("<Escape>", lambda e: self.select(()) or "break")
         self.bind("<space>", self.on_space)  # (anywhere in the window: the buttons don't take the keyboard)
         for k in ("<Control-a>", "<Control-A>"):
@@ -886,8 +886,13 @@ class HzWindow(tk.Toplevel):
 
     def on_double(self, e):
         """A double click on a note deletes it, when the button is let go with nothing changed (so a click and then
-        a quick drag still moves it). Anywhere else, or with Ctrl, it's a press like any other."""
+        a quick drag still moves it). With Select on empty space it pastes the copied notes there (user, like the
+        main piano roll). Anywhere else, or with Ctrl, it's a press like any other."""
         hit = self.hit(e.x, e.y)
+        if (self.tool.get() == "select" and hit is None and self.app.hz_clip and not e.state & CTRL
+                and e.x >= self.kb_w and e.y >= self.ruler_h and not self.on_kept_box(self.kept_box(), e, hit)):
+            self.drop_drag()
+            return self.paste_notes(self.snap(self.beat_at(e.x), e))
         self.on_press(e)
         if self.drag and hit and hit[0] in ("note", "tune", "left", "right") and not e.state & CTRL:
             self.drag["double"] = True
@@ -966,6 +971,44 @@ class HzWindow(tk.Toplevel):
         d["orig"] = copy.deepcopy(self.tones)
         d["copied"] = True
         self.sel = set(range(first, len(self.tones)))
+
+    def copy_notes(self):
+        """Ctrl+C: the effect points selected, else the notes selected (app.hz_clip, kept for any Hz bass). The
+        last one copied is what Ctrl+V pastes."""
+        if self.fx.copy_points():
+            self.app.hz_clip = None
+        elif self.sel:
+            self.app.hz_clip = copy.deepcopy([self.tones[i] for i in sorted(self.sel)])
+            self.fx.clip = None
+
+    def play_line_beat(self):
+        """Where Ctrl+V pastes notes: the preview's play line (preview on), else the main window's play line;
+        on the grid line nearest it."""
+        p = self.preview
+        if self.preview_on.get() and p.ev is not None:
+            beat = p.play_beat()
+        else:
+            sh = self.target()
+            beat = self.app.playhead - (left_edge(sh) if sh is not None else self.app.hz_start or 0.0)
+        sb = self.snap_beats()
+        return max(0.0, round(beat / sb) * sb if sb else beat)
+
+    def paste_notes(self, at):
+        """The copied notes added with the first one starting at beat `at` (keys stay; new ids, a slide between
+        two of them comes along) and selected: one undo step. False when there's nothing to paste."""
+        clip = self.app.hz_clip
+        if not clip or not self.can_place():
+            return False
+        before = copy.deepcopy(self.tones)
+        start, base, first = min(n["t"] for n in clip), next_id(self.tones), len(self.tones)
+        ids = {n["id"]: base + k for k, n in enumerate(clip)}
+        for n in copy.deepcopy(clip):
+            n["id"], n["t"] = ids[n["id"]], n["t"] + at - start
+            n["to"] = [dict(s, id=ids[s["id"]]) for s in n["to"] if s["id"] in ids]
+            self.tones.append(n)
+        self.sel = set(range(first, len(self.tones)))
+        self.commit(tr("hz.step_paste"), before)
+        return True
 
     def keep_leads(self, d):
         """A note's end dragged: the dots of its slides stay where they were (as far as the note reaches)."""
