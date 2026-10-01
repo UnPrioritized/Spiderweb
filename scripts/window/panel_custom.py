@@ -27,6 +27,7 @@ CUSTOM_NAMES = {"fill": tr("panel_custom.inside_fill"), "gate": tr("panel_custom
                 "align": tr("panel_custom.spam_start"), "ends": tr("panel_custom.spam_ends"),
                 "union": tr("panel_custom.overlaps_cancel_out"),
                 "apart": tr("panel_custom.normal_outline"), "edge": tr("panel_custom.edge_undo"),
+                "borders": tr("panel_custom.borders"),
                 "edge_mode": tr("panel_custom.edge_undo")}  # (History)
 APART_CHOICES = [tr("panel_custom.normal"), tr("panel_custom.outline")]
 APART_TIP = tr("panel_custom.normal_all_its_notes_together_outline")
@@ -86,6 +87,12 @@ class CustomPanel:
         # the rows under the choices: only the ones that do something for the chosen Inside are shown, so the
         # panel grows as options are picked (user; show_custom_rows)
         self.custom_rows, self._custom_shown = [], None
+        # with "Outline" and areas coloured in the drawer: where two colours meet is outline too
+        self.borders_var = tk.BooleanVar(value=False)
+        self.borders_box = ttk.Checkbutton(opts, text=tr("panel_custom.borders"), variable=self.borders_var,
+                                           command=lambda: self.set_custom("borders", self.borders_var.get()))
+        self.custom_rows.append((self.borders_box, dict(anchor="w", padx=(20, 0), pady=(1, 0))))
+        Tooltip(self.borders_box, tr("panel_custom.borders_tip"))
         g = self.gate_row = ttk.Frame(opts)
         self.custom_rows.append((g, dict(anchor="w", padx=(20, 0))))
         lb = ttk.Label(g, text=tr("panel_custom.gate"))
@@ -272,6 +279,7 @@ class CustomPanel:
         self.cancel_var.set(not tgts[0].get("union"))
         apart = bool(tgts[0].get("apart"))
         self.apart_var.set(APART_CHOICES[apart])
+        self.borders_var.set(bool(tgts[0].get("borders")))
         self._loading = False
         lonely = apart and self.channel_mode.get() != "auto"  # (Outline without Multi channel: all one channel)
         for value, box in self.apart_boxes.items():
@@ -290,7 +298,8 @@ class CustomPanel:
                 self.hz_stale: self.hz_stale_on, self.ends_row: spam and not hz,
                 self.start_row: spam and not hz and ends != "stretch", self.edge_row: outline,
                 self.edge_mode_row: outline and bool(tgts[0].get("edge")),
-                self.cancel_box: fill in ("fill", "spam") and not text}
+                self.cancel_box: fill in ("fill", "spam") and not text,
+                self.borders_box: fill in ("fill", "spam") and apart and self.coloured_areas(tgts, placed, name)}
         self.show_custom_rows({w for w, on in rows.items() if on})
         if not placed and live:
             info = tr("panel_custom.live_shape_what_you_draw_goes")
@@ -346,6 +355,13 @@ class CustomPanel:
             self.tool.set("custom")
         self.sync_custom()
         self.schedule_autosave()
+
+    def coloured_areas(self, tgts, placed, name):
+        """Some area of these shapes (or of the library shape new ones are made of) has a colour (areas.py)."""
+        if placed:
+            return any(a[2] for t in tgts for a in t.get("areas", ()))
+        tpl = self.custom_template(name) if self.tool.get() == "custom" else None
+        return bool(tpl and any(a[2] for a in tpl[2]))
 
     def set_custom(self, key, value):
         """A custom shape setting (fill / gate / align / the on-off CUSTOM_FLAGS) changed in the panel."""

@@ -38,11 +38,12 @@ ALIGNS = ("auto", "aligned", "centred")
 # stretch are stretched or squeezed so a whole number fits exactly (the spam start doesn't matter then)
 ENDS = ("round", "keep", "drop", "min", "stretch")
 CUSTOM_DEFAULTS = {"fill": "empty", "gate": 0.0625, "align": "auto", "ends": "round", "union": False,
-                   "apart": False}
+                   "apart": False, "borders": False}
 # on / off settings a custom shape only has when they're on: "union" = where outlines overlap it's filled too (off:
 # overlaps cancel out, even-odd); "apart" = Fill / Spam "Outline": the outline's notes on a channel of their own
-# (with Multi channel), the inside's on another
-CUSTOM_FLAGS = ("union", "apart")
+# (with Multi channel), the inside's on another; "borders" = with "Outline" and areas coloured by hand (areas.py),
+# where two colours meet is outline too (else only where the filled part ends)
+CUSTOM_FLAGS = ("union", "apart", "borders")
 # "Colours" (any shape but pasted notes): sh["cycle"] = {"by", "n", "every"} (only when on) = the notes take turns
 # over n channels (with Multi channel each turn gets a channel, so a colour, of its own). "step" = by the step the
 # note starts on (spam: its gate columns; others: each start time in turn), "key" = by key (rows), "time" = by a
@@ -864,6 +865,35 @@ def colour_at(notes, spans, colours):
     return np.where(ok, col[np.maximum(i, 0)], 0).astype(np.int64)
 
 
+def border_parts(spans, colours):
+    """Fill "Outline between colours": the parts of the (start, end, key) stretches where another colour (or
+    nothing) is next to them, on one side of each border (the higher colour number's), like edge_parts."""
+    parts = []
+    for k in np.unique(colours).tolist():
+        mine, cover = spans[colours == k], spans[colours >= k]
+        parts += [cut_out(mine, shifted(cover, -1)), cut_out(mine, shifted(cover, 1))]
+        ks, ss, es = merged_by_key(mine)
+        for at, side in ((ss, np.column_stack([ss - 1, ss, ks])), (es - 1, np.column_stack([es, es + 1, ks]))):
+            open_ = ~covered(side, cover)
+            parts.append(np.column_stack([at, at + 1, ks])[open_])
+    return np.concatenate(parts).astype(np.int64).reshape(-1, 3)
+
+
+def colour_edges(notes, colours):
+    """Spam "Outline between colours": which notes aren't wholly covered by notes of their own or a higher colour
+    number on the key above / below, just before or just after (one side of each border, like on_edge)."""
+    out = np.zeros(len(notes), bool)
+    for k in np.unique(colours).tolist():
+        at = colours == k
+        mine, cover = notes[at], notes[colours >= k]
+        s, e = mine[:, 0:1], mine[:, 1:2]
+        before = np.hstack([s - 1, s, mine[:, 2:3]])
+        after = np.hstack([e, e + 1, mine[:, 2:3]])
+        out[at] = ~(covered(mine, shifted(cover, -1)) & covered(mine, shifted(cover, 1)) &
+                    covered(before, cover) & covered(after, cover))
+    return out
+
+
 def merged_rows(spans):
     """(start, end, key) stretches -> the same merged per key where they touch (whatever their colour)."""
     ks, ss, es = merged_by_key(np.asarray(spans, np.int64).reshape(-1, 3))
@@ -1294,6 +1324,8 @@ def _notes_groups(sh, ppq):
             if g:
                 ks, ss, es = merged_by_key(thicker(sh, outline, rows, g, ppq))
                 outline = np.column_stack([ss, es, ks]).astype(np.int64).reshape(-1, 3)
+            if area is not None and sh.get("borders"):
+                outline = merged_rows(np.concatenate([outline, border_parts(spans, area)]))
             if area is None:
                 inside = cut_out(notes, outline)
                 ids = np.ones(len(inside), np.int64)
@@ -1325,6 +1357,8 @@ def _notes_groups(sh, ppq):
             edge = on_edge(notes) | near_edge(notes, rows, g)
         else:  # (the even band: every note not wholly in the shrunk inside)
             edge = on_edge(notes) | ~covered(notes, inner_ticks(sh, ppq, g, rows))
+        if area is not None and sh.get("borders"):
+            edge[:len(main)] |= colour_edges(main, ids[:len(main)])
         inner = 1 if ids is None else 1 + ids
         return (np.concatenate([notes, lines]),
                 np.concatenate([np.where(edge, 0, inner), np.where(lc > 0, 1 + lc, 0)]).astype(np.int64))
