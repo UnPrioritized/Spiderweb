@@ -276,22 +276,59 @@ class Drawer(tk.Toplevel):
         return paint
 
     def area_press(self, e):
-        lab = self.area_at(e)
-        if lab is None:
+        """Click = the area under the mouse gets the picked colour; dragging on colours every area it passes
+        (one undo step)."""
+        self.drag = ["areas", e.x, e.y, False]  # (the last spot, whether the undo step is pushed yet)
+        if self.area_at(e) is None:
             self.pos_label.config(text=tr("drawer.area_outside"))
-            return
-        self.set_area(lab, self.from_screen(e.x, e.y), self.area_pick)
+        self.paint_areas([(e.x, e.y)])
+
+    def area_drag(self, e):
+        _, lx, ly, _ = self.drag
+        n = max(1, int(math.hypot(e.x - lx, e.y - ly) // 3))  # every 3 px along the way (the mouse skips)
+        self.paint_areas([(lx + (e.x - lx) * i / n, ly + (e.y - ly) * i / n) for i in range(1, n + 1)])
+        self.drag[1:3] = e.x, e.y
+
+    def paint_areas(self, spots):
+        """The areas at these canvas spots get the picked colour."""
+        picks = {}
+        for x, y in spots:
+            lab = self.area_at(SimpleNamespace(x=x, y=y))
+            if lab is not None and lab not in picks:
+                picks[lab] = self.from_screen(x, y)
+        if picks and self.set_areas(picks, self.area_pick, undo=not self.drag[3]):
+            self.drag[3] = True
 
     def set_area(self, lab, spot, colour):
         """Area lab gets colour (None: back to normal); spot = where it was clicked (u, v)."""
+        self.set_areas({lab: spot}, colour)
+
+    def set_areas(self, picks, colour, undo=True):
+        """Areas {lab: (u, v) where it was clicked} get colour (None: back to normal). Returns whether anything
+        changed."""
         amap, _ = self.area_info()
+        paint = self.area_paint(amap)
+        picks = {k: s for k, s in picks.items() if paint[k] != (-1 if colour is None else colour)}
+        if not picks:
+            return False
         labs = amap.at([a[0] for a in self.areas], [a[1] for a in self.areas]).tolist() if self.areas else []
-        keep = [a for a, k in zip(self.areas, labs) if k != lab]
-        new = keep + ([[round(spot[0], 5), round(spot[1], 5), colour]] if colour is not None else [])
-        if new == self.areas:
+        keep = [a for a, k in zip(self.areas, labs) if k not in picks]
+        new = keep + ([[round(u, 5), round(v, 5), colour] for u, v in picks.values()] if colour is not None else [])
+        if undo:
+            self.push_undo()
+        self.areas = new
+        self.changed()
+        return True
+
+    def reset_areas(self):
+        """Every area back to how Fill / Spam fill it as normal (asks first)."""
+        if not self.areas:
+            self.pos_label.config(text=tr("drawer.areas_none_coloured"))
+            return
+        if not messagebox.askyesno(tr("drawer.spiderweb"), tr("drawer.areas_reset_ask"), icon="warning", parent=self):
             return
         self.push_undo()
-        self.areas = new
+        self.areas = []
         self.changed()
 
     def area_image(self, cw, ch):
@@ -388,6 +425,8 @@ class Drawer(tk.Toplevel):
         self.swatches.bind("<ButtonPress-1>", self.pick_swatch)
         self.swatches.bind("<Motion>", self.swatch_tip)
         self.swatches.bind("<Leave>", lambda e: self.pos_label.config(text=""))
+        ttk.Button(self.area_bar, text=tr("drawer.areas_reset"), command=self.reset_areas).pack(anchor="w",
+                                                                                              pady=(6, 0))
         self.side_help = help_box(side, "")  # the current tool's help (update_side_help)
         self.side_help.pack(fill="both", expand=True, pady=(8, 0))
 
@@ -766,6 +805,8 @@ class Drawer(tk.Toplevel):
         self.show_position(e)
         if not self.drag:
             return
+        if self.drag[0] == "areas":
+            return self.area_drag(e)
         if self.tool.get() == "select" or self.drag[0] in ("points", "pen"):
             return self.select_drag(e)
         if self.drag[0] == "free":  # also where Windows skipped the mouse while busy (see mouse_trail)
@@ -806,7 +847,7 @@ class Drawer(tk.Toplevel):
         if self.drag and (self.tool.get() == "select" or self.drag[0] in ("points", "pen")):
             self.select_release()
         drag, self.drag = self.drag, None
-        if not drag:
+        if not drag or drag[0] == "areas":
             return
         still = drag[0] in ("box", "segment", "arcdrag") and abs(e.x - drag[-2]) < 4 and abs(e.y - drag[-1]) < 4
         if still and drag[0] == "box":

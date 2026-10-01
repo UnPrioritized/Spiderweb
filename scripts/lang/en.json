@@ -628,6 +628,9 @@
  "drawer.area_n": "Colour {n}",
  "drawer.area_normal": "As normal: filled or not like Fill and Spam do it",
  "drawer.area_outside": "That's outside the drawing: click an area inside it.",
+ "drawer.areas_reset": "Reset all colours",
+ "drawer.areas_reset_ask": "Put every area back to normal (filled or not like Fill and Spam do it)? All the colours and Empty areas you gave are removed. You can undo this.",
+ "drawer.areas_none_coloured": "No area has a colour yet.",
  "drawer.outline_colour": "Outline colour",
  "drawer.colour_own": "The shape's own",
  "drawer.role_both": "Outline and fill",
@@ -1791,9 +1794,9 @@
   "Click a stroke to remove it. Ctrl+Z = undo."
  ],
  "help.drawer_areas.title": "Drawer: Areas",
- "help.drawer_areas.tip": "Click an area to give it the colour picked on the right (or Empty). Right-click = back to normal.",
+ "help.drawer_areas.tip": "Click an area to give it the colour picked on the right (or Empty), or drag across several. Right-click = back to normal.",
  "help.drawer_areas.text": [
-  "Areas are the pieces your lines cut the drawing into. Grey = what Fill and Spam fill as normal. Pick a colour on the right (or Empty), then click an area to give it that colour; right-click an area to put it back to normal. Each area keeps its colour when you move or change lines, and when the shape is placed and stretched.",
+  "Areas are the pieces your lines cut the drawing into. Grey = what Fill and Spam fill as normal. Pick a colour on the right (or Empty), then click an area to give it that colour, or hold the button and drag to colour every area you pass over. Right-click an area to put it back to normal; \"Reset all colours\" puts every area back. Each area keeps its colour when you move or change lines, and when the shape is placed and stretched.",
   "",
   "On the piano roll the colours count only with Fill or Spam. Each colour number gets a channel of its own with Multi channel, so it shows in a colour of its own there too (the piano roll picks those colours, so they can differ from the drawer's). Areas with the same number share a channel. Empty leaves an area without notes; a coloured hole gets filled.",
   "",
