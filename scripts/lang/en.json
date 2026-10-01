@@ -629,6 +629,8 @@
  "drawer.area_normal": "As normal: filled or not like Fill and Spam do it",
  "drawer.area_outside": "That's outside the drawing: click an area inside it.",
  "drawer.areas_reset": "Reset all colours",
+ "drawer.colours_used": "Colours used: {n} of {most} ({m} with \"Outline\" on). The shape's own colour counts too.",
+ "drawer.colours_too_many": "That's more than a shape can have: on the piano roll the extra colours share the last one.",
  "drawer.areas_reset_ask": "Put every area back to normal (filled or not like Fill and Spam do it)? All the colours and Empty areas you gave are removed. You can undo this.",
  "drawer.areas_none_coloured": "No area has a colour yet.",
  "drawer.outline_colour": "Outline colour",

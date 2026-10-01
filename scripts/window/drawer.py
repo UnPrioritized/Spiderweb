@@ -41,6 +41,7 @@ SHIFT, CTRL, ALT = 0x1, 0x4, 0x20000
 STROKE_COLOR = "#c0392b"  # (a stroke with an outline colour: that colour's dark shade)
 # Areas (areas.py) on the board: what Fill / Spam fill as normal, an area emptied by hand, the outside, the board
 AREA_NORMAL, AREA_EMPTY, OFF_BOARD, BOARD = "#d4d4d4", "#fbe4e4", "#f4f4f4", "#ffffff"
+WARN_COLOR = "#c06000"  # more colours than a shape can have (like the side panel's warning)
 AREA_FRAME = 16  # the drawing's box as a custom shape 16 beats by 16 keys, for finding its areas (gaps close
 # like on the piano roll at that size)
 
@@ -206,6 +207,7 @@ class Drawer(tk.Toplevel):
             if not self.area_bar.winfo_manager():
                 self.area_bar.pack(fill="x", pady=(8, 0), before=self.side_help)
             self.draw_swatches()
+            self.show_colours_count()
         elif self.area_bar.winfo_manager():
             self.area_bar.pack_forget()
         self.app.tips.show(self.tool_topic(), parent=self)
@@ -320,6 +322,27 @@ class Drawer(tk.Toplevel):
         self.changed()
         return True
 
+    def colours_count(self):
+        """How many colours the placed shape gets with Fill / Spam: (without "Outline", with it). The shape's own
+        colour counts where an area is filled as normal or an outline-only line has no colour of its own (other
+        lines are the edge of the fill beside them); "Outline" adds one."""
+        amap, inside = self.area_info()
+        paint = self.area_paint(amap)[:-1] if amap is not None else np.zeros(0, np.int64)
+        used = {int(c) for c in paint if c > 0} | {colour_of(st) for st in self.strokes if colour_of(st)}
+        own_fill = amap is not None and bool((inside & (paint < 0)).any())
+        own_line = any(not colour_of(st) and role_of(st) == "edge" for st in self.strokes)
+        return len(used) + (own_fill or own_line), len(used) + own_fill + 1
+
+    def show_colours_count(self):
+        if not self.area_bar.winfo_manager():
+            return
+        n, with_outline = self.colours_count() if self.strokes else (0, 0)
+        text = tr("drawer.colours_used", n=n, most=COLOURS, m=with_outline)
+        if with_outline > COLOURS:
+            text += " " + tr("drawer.colours_too_many", most=COLOURS)
+        if self.colours_used.cget("text") != text:
+            self.colours_used.config(text=text, foreground=WARN_COLOR if with_outline > COLOURS else "")
+
     def reset_areas(self):
         """Every area back to how Fill / Spam fill it as normal (asks first)."""
         if not self.areas:
@@ -425,6 +448,8 @@ class Drawer(tk.Toplevel):
         self.swatches.bind("<ButtonPress-1>", self.pick_swatch)
         self.swatches.bind("<Motion>", self.swatch_tip)
         self.swatches.bind("<Leave>", lambda e: self.pos_label.config(text=""))
+        self.colours_used = ttk.Label(self.area_bar, text="", wraplength=int(285 * self.scale), justify="left")
+        self.colours_used.pack(anchor="w", pady=(3, 0))
         ttk.Button(self.area_bar, text=tr("drawer.areas_reset"), command=self.reset_areas).pack(anchor="w",
                                                                                               pady=(6, 0))
         self.side_help = help_box(side, "")  # the current tool's help (update_side_help)
@@ -1276,6 +1301,7 @@ class Drawer(tk.Toplevel):
     # ------------------------------------------------------------ drawing
 
     def redraw(self):
+        self.show_colours_count()
         c = self.canvas
         c.delete("all")
         cw, ch = c.winfo_width(), c.winfo_height()
