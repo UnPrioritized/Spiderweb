@@ -1316,6 +1316,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def undo(self):
         if self.roll.draft:  # something half drawn (a funnel waiting for its wall, a polyline): just drop it
             return self.roll.cancel_draft()
+        if self.hz_window and self.hz_window.pending:  # a slide started in the Hz bass window: just drop its mark
+            self.hz_window.pending = None
+            return self.hz_window.redraw()
         self.drop_empty_step(json.dumps(self.shapes))  # (a click that changed nothing isn't a step)
         self._restore(self.undo_stack, self.redo_stack)
 
