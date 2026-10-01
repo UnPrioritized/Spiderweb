@@ -821,10 +821,18 @@ def area_inner(sh, ppq, g, keys):
             uv = uv_points(sh["pts"], np.column_stack([m, np.full(len(m), y)]))
             on = filled[amap.at(uv[:, 0], uv[:, 1])]
             got += shrink_minus(list(zip(x[:-1][on].tolist(), x[1:][on].tolist())), near[n * SAMPLES + j])
+        row = []
         for a, b in shrink_merge(got):
             s, e = math.floor(a * ppq + 0.5), math.floor(b * ppq + 0.5)
-            if e > s:
-                out.append((s, e, q))
+            if e <= s:
+                continue
+            # a gap narrower than the gate closed: at a sloping colour border (filled on both sides) the row's lines
+            # each leave their gap somewhere else, and what was left between them made 1-tick slivers (user)
+            if row and s - row[-1][1] < g:
+                row[-1] = (row[-1][0], max(row[-1][1], e), q)
+            else:
+                row.append((s, e, q))
+        out += row
     return np.asarray(out, np.int64).reshape(-1, 3)
 
 
@@ -1328,17 +1336,9 @@ def edge_inner(sh, ppq):
     if sh.get("edge_mode") == "sideways":
         return "rows", cut_out(spans, grow_inward(outline_notes(sh, ppq), spans, g))
     loops, union = edge_loops(sh)
-    if has_areas(sh):  # (what the coloured areas fill: its edges, and which spots are filled)
-        amap = shape_areas(sh)
-        if amap is None:
-            return None
-        filled, _ = area_state(sh, amap)
-
-        def inside(b, p):  # (beats, keys arrays -> filled)
-            uv = uv_points(sh["pts"], np.column_stack([b.ravel(), p.ravel()]))
-            return filled[amap.cell(uv[:, 0], uv[:, 1])].reshape(b.shape)
-        area = (json.dumps([sh["areas"], bool(sh.get("borders"))]), area_edges(sh, amap), inside)
-        return "lines", inner_lines(loops, union, g / ppq, area)
+    if has_areas(sh):  # (the inside left, exactly as the notes get it: a grid line over a whole shape is too coarse
+        # for hairline gaps between areas, user saw it zigzag)
+        return "rows", inner_ticks(sh, ppq, g, spans)
     return "lines", inner_lines(loops, union, g / ppq)
 
 
