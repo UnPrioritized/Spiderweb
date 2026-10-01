@@ -725,8 +725,14 @@ def shape_areas(sh):
     if key in _maps:
         return _maps[key]
     loops = [uv_points(sh["pts"], p) for p in plan["polys"]]
-    cuts = [stroke_points(st) for st in sh["strokes"] if role_of(st) == "cut"]
+    cuts = [uv_points(sh["pts"], p) for p in area_cuts(sh)]
     return area_map(loops, cuts, key)
+
+
+def area_cuts(sh):
+    """The lines that split areas without closing a loop, in beats / keys: fill lines, and outline lines too flat to
+    fill (fill_plan "flat": a box's side touching the rest only partway along its lines, user, was no wall)."""
+    return role_paths(sh)["cut"] + fill_plan(sh)["flat"]
 
 
 def area_spans(sh, ppq):
@@ -764,7 +770,7 @@ def area_state(sh, amap):
 def area_lines(sh):
     """Every line of a custom shape that cuts areas (Fill / Spam loops and fill lines), (ax, ay, bx, by) in beats /
     keys."""
-    return shrink_segments(fill_plan(sh)["polys"] + role_paths(sh)["cut"])
+    return shrink_segments(fill_plan(sh)["polys"] + area_cuts(sh))
 
 
 def area_edges(sh, amap, borders_only=False):
@@ -845,7 +851,7 @@ def area_filled_lines(sh, keys):
     if len(_inner) > 100:
         _inner.clear()
     got = _inner[key] = (ys, out, area_edges(sh, amap),
-                         shrink_proportion(fill_plan(sh)["polys"] + role_paths(sh)["cut"]))
+                         shrink_proportion(fill_plan(sh)["polys"] + area_cuts(sh)))
     return got
 
 
@@ -919,8 +925,8 @@ def find_area_spans(sh, ppq):
     none = np.zeros((0, 4), np.int64)
     amap = shape_areas(sh)
     polys = fill_plan(sh)["polys"]
-    cuts = role_paths(sh)["cut"]
-    ps = [p for path in polys + cuts for _, p in path]
+    cuts = area_cuts(sh)
+    ps =[p for path in polys + cuts for _, p in path]
     if amap is None or not ps:
         return none
     paint = area_paint(sh, amap)
