@@ -897,11 +897,13 @@ class FxPane:
                 self.is_off = tk.BooleanVar(self.win, value=target in self.win.off)
                 menu.add_checkbutton(label=tr("hz.fx_bypass"), variable=self.is_off,
                                      command=lambda: self.switch(target))
+        on = [fx for fx in ([target] if target else FX) if fx in self.win.fxl]  # (only the effects that are on; user)
+        if on and target:
             menu.add_separator()
-        for fx in [target] if target else FX:
-            menu.add_command(label=tr("hz.fx_remove", name=tr("hz.fx_" + fx)), command=lambda fx=fx: self.remove(fx),
-                             state="normal" if fx in self.win.fxl else "disabled")
-        menu.tk_popup(e.x_root, e.y_root)
+        for fx in on:
+            menu.add_command(label=tr("hz.fx_remove", name=tr("hz.fx_" + fx)), command=lambda fx=fx: self.remove(fx))
+        if menu.index("end") is not None:  # (nothing on and nothing under the mouse: no menu)
+            menu.tk_popup(e.x_root, e.y_root)
 
     def on_wheel(self, e):
         """The time of the notes above: wheel = sideways, Ctrl = zoom around the mouse."""
