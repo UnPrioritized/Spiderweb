@@ -41,6 +41,30 @@ CUSTOM_DEFAULTS = {"fill": "empty", "gate": 0.0625, "align": "auto", "ends": "ro
 # overlaps cancel out, even-odd); "apart" = Fill / Spam "Outline": the outline's notes on a channel of their own
 # (with Multi channel), the inside's on another
 CUSTOM_FLAGS = ("union", "apart")
+# "Colours" (any shape but pasted notes): sh["cycle"] = {"by", "n", "every"} (only when on) = the notes take turns
+# over n channels (with Multi channel each turn gets a channel, so a colour, of its own). "step" = by the step the
+# note starts on (spam: its gate columns; others: each start time in turn), "key" = by key (rows), "time" = by a
+# note length from tick 0. every = how many steps / keys one channel lasts; for "time" [a, b] = a/b of a whole note
+# (like the snap: 1/4 = a beat).
+CYCLES = ("step", "key", "time")
+CYCLE_MAX = 15  # (15 note colours)
+
+
+def clean_cycle(c):
+    """A saved sh["cycle"] -> a valid one, or None (off)."""
+    if not isinstance(c, dict) or c.get("by") not in CYCLES:
+        return None
+    try:
+        n = max(2, min(CYCLE_MAX, int(c.get("n", 2))))
+        every = c.get("every", 1)
+        if c["by"] == "time":
+            a, b = every if isinstance(every, (list, tuple)) and len(every) == 2 else (1, 4)
+            every = [max(1, min(10 ** 4, int(a))), max(1, min(10 ** 4, int(b)))]
+        else:
+            every = max(1, min(10 ** 4, int(every)))
+    except (TypeError, ValueError):
+        return None
+    return {"by": c["by"], "n": n, "every": every}
 
 
 def custom_settings(cd):
@@ -826,7 +850,47 @@ def custom_notes(sh, ppq):
 
 
 def custom_notes_groups(sh, ppq):
-    """custom_notes, and which group each note belongs to (None = all one: see outline_groups)."""
+    """custom_notes, and which group each note belongs to (None = all one: see outline_groups). "Colours"
+    (sh["cycle"]): every group split into its turns (cycle_turns); with "Outline" the outline stays one group."""
+    notes, groups = _notes_groups(sh, ppq)
+    if not cycling(sh) or not len(notes):
+        return notes, groups
+    n = sh["cycle"]["n"]
+    turn = cycle_turns(sh, notes, ppq)
+    if groups is None:
+        return notes, turn
+    if sh.get("apart") and sh["fill"] in ("fill", "spam"):  # (0 = the outline, 1 = the inside)
+        return notes, np.where(groups == 0, 0, 1 + turn).astype(np.int64)
+    return notes, groups * n + turn
+
+
+def cycling(sh):
+    """The shape's notes take turns over channels ("Colours"; not pasted notes, they keep their tracks)."""
+    return bool(sh.get("cycle")) and "notes" not in sh
+
+
+def cycle_turns(sh, notes, ppq):
+    """Which turn (0 .. n - 1) each (start, end, key) note gets (CYCLES). Spam steps are counted from the shape's
+    first note (with the "aligned" start from tick 0, so they keep to the gate grid), at the shape's gate (Hz bass:
+    its tone's gate), each note in the step it starts nearest to; other notes: each start time is a step."""
+    c = sh["cycle"]
+    s = notes[:, 0]
+    if c["by"] == "key":
+        k = notes[:, 2] - notes[:, 2].min()
+    elif c["by"] == "time":
+        a, b = c["every"]
+        k = np.floor(s * b / (4 * a * ppq) + 1e-9).astype(np.int64)
+        return k % c["n"]
+    elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS:
+        g = max(1.0, sh["gate"] * ppq)
+        x0 = 0 if sh.get("align") == "aligned" and not sh.get("hz") else int(s.min())
+        k = np.floor((s - x0) / g + 0.5).astype(np.int64)
+    else:
+        k = np.unique(s, return_inverse=True)[1].reshape(-1)
+    return (k // int(c["every"])) % c["n"]
+
+
+def _notes_groups(sh, ppq):
     if "notes" in sh:
         return block_notes(sh, ppq)[:, :3], None
     if sh["fill"] == "outline_spam":
@@ -852,11 +916,11 @@ def custom_notes_groups(sh, ppq):
 
 def tracks_apart(sh):
     """True if the shape's tracks must get channels of their own with Multi channel: pasted notes (each copied
-    track keeps its own channel even when the tracks don't overlap), and Fill / Spam with "Outline" (the outline
-    and the inside)."""
+    track keeps its own channel even when the tracks don't overlap), Fill / Spam with "Outline" (the outline
+    and the inside) and "Colours" (each turn, any shape)."""
     if sh["kind"] != "custom":
-        return False
-    return "notes" in sh or bool(sh.get("apart") and sh.get("fill") in ("fill", "spam"))
+        return cycling(sh)
+    return "notes" in sh or bool(sh.get("apart") and sh.get("fill") in ("fill", "spam")) or cycling(sh)
 
 
 def merged_by_key(notes):

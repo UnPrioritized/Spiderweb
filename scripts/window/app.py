@@ -27,6 +27,7 @@ from notes.polygon import POLYGON_DEFAULTS
 from notes.smooth import SMOOTH_DEFAULT
 from notes.text import TEXT_DEFAULTS
 from files.mathexpr import calc, calc_int, fmt
+from window.panel_colours import ColoursPanel
 from window.panel_custom import GAP_COLOR, CustomPanel
 from window.panel_freehand import FreehandPanel
 from window.panel_funnel import FunnelPanel
@@ -85,7 +86,7 @@ SPLIT_TIP = (
 )
 
 
-class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit,
+class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit,
           HistoryPanel, tk.Tk):
     def __init__(self, autosave=AUTOSAVE):
         super().__init__()
@@ -527,6 +528,7 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self.env_note = ttk.Label(self.settings, text=tr("app.velocity_drawn_in_the_velocity_pane"), foreground="#777",
                                   font=("Segoe UI", 8),
                                   wraplength=int(300 * self.scale), justify="left")
+        self._build_colours()
         last = self.last_row = ttk.Frame(self.settings)
         last.pack(fill="x", pady=(4, 0))
         ttk.Label(last, text=tr("app.last_note")).pack(side="left", anchor="n")
@@ -609,6 +611,7 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         else:
             self.env_note.pack_forget()
         self.build_points()
+        self.sync_colours()
         self.sync_freehand()
         self.sync_tumour()
         self.sync_pattern()
@@ -835,6 +838,7 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
     def on_channel_mode(self):
         self.shapes_changed()
         self.sync_custom()
+        self.sync_colours()
         if self.channel_mode.get() == "auto":
             self.tips.show("channels", wait=True)
 

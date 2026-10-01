@@ -10,7 +10,7 @@ from tkinter import filedialog, messagebox
 import numpy as np
 
 from files.lang import tr
-from notes.custom import ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, notes_shape
+from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape
 from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_shape
 from notes.hzbass import clean_hz
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
@@ -134,6 +134,9 @@ class ProjectFiles:
             defaults = dict(SHAPE_DEFAULTS)
             defaults.update({k: type(SHAPE_DEFAULTS[k])(v) for k, v in data.get("defaults", {}).items()
                              if k in SHAPE_DEFAULTS})
+            cycle = clean_cycle(data.get("defaults", {}).get("cycle"))
+            if cycle:  # "Colours" for new shapes (custom.py)
+                defaults["cycle"] = cycle
         except (OSError, ValueError, TypeError, AttributeError) as e:
             if not quiet:
                 messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_open_project", e=e))

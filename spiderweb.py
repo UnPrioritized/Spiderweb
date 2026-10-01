@@ -7,6 +7,7 @@ Files (the scripts live in scripts/, one subfolder per group):
   window/            the main window and its side panel
     app.py           main window: toolbar, side panel, shapes, playback, undo
     panel_custom.py  the panel's custom shape settings, opening the drawer
+    panel_colours.py the panel's Colours row (notes taking turns over channels)
     panel_funnel.py  the panel's funnel settings
     panel_tumour.py  the panel's tumour line (summary + button)
     panel_pattern.py the panel's pattern numbers (a formula along a curve) + the Formula menu's actions

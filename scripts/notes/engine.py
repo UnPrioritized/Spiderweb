@@ -12,8 +12,8 @@ import numpy as np
 
 from files.lang import tr
 from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX_STROKE, block_notes, check_notes,
-                          clean_curve,
-                          clean_strokes, custom_notes_groups, custom_strokes)
+                          clean_curve, clean_cycle,
+                          clean_strokes, custom_notes_groups, custom_strokes, cycle_turns, cycling)
 from notes.envelope import env_values, velocity_env
 from notes.joined import clean_joined, is_joined, joined_paths
 from notes.hzbass import clean_hz, velocity_factor
@@ -89,6 +89,9 @@ def clean_shape(sh):
     cl = clean_claw(sh.get("claw"))
     if cl:  # notes thinned out / moved after they're made (claw.py)
         out["claw"] = cl
+    cy = clean_cycle(sh.get("cycle"))
+    if cy:  # "Colours" (custom.py)
+        out["cycle"] = cy
     tm = clean_tumour(sh.get("tumour")) if out["kind"] in LINE_KINDS else None
     if tm:
         out["tumour"] = tm
@@ -321,6 +324,8 @@ def _notes_tracks(sh, ppq, keys):
         raw, tracks = got[:, :3], got[:, 3]
     else:
         raw = unique_rows(raw)
+        if cycling(sh) and len(raw):  # "Colours" on a line / funnel
+            tracks = cycle_turns(sh, raw, ppq)
     if len({v for _, v in env}) == 1:  # the same velocity everywhere
         vel = np.full(len(raw), max(1, min(127, round(env[0][1]))), np.int64)
     else:
