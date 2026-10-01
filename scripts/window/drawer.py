@@ -13,8 +13,8 @@ from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half
 import numpy as np
 
 from notes.areas import COLOURS, clean_areas, inside_loops
-from notes.custom import (ROLES, clean_strokes, fill_plan, join_strokes, open_ends, open_paths, role_of, shape_areas,
-                          stroke_points, strokes_closed, uv_points)
+from notes.custom import (ROLES, clean_strokes, colour_of, fill_plan, join_strokes, open_ends, open_paths, role_of,
+                          shape_areas, stroke_points, strokes_closed, uv_points)
 from roll.roll_shared import SLOT_COLORS
 from notes.pattern import has_formula, moved_formulas
 from files.about import HERE
@@ -38,7 +38,7 @@ TOOLS = [("select", tr("drawer.select"), "v"), ("line", tr("drawer.line"), "l"),
          ("square", tr("drawer.square"), "s"), ("circle", tr("drawer.circle"), "o"),
          ("erase", tr("drawer.eraser"), "e"), ("areas", tr("drawer.areas"), "b")]
 SHIFT, CTRL, ALT = 0x1, 0x4, 0x20000
-ROLE_COLORS = {None: "#c0392b", "edge": "#8e44ad", "cut": "#c0392b"}  # (a stroke's role: custom.ROLES)
+STROKE_COLOR = "#c0392b"  # (a stroke with an outline colour: that colour's dark shade)
 # Areas (areas.py) on the board: what Fill / Spam fill as normal, an area emptied by hand, the outside, the board
 AREA_NORMAL, AREA_EMPTY, OFF_BOARD, BOARD = "#d4d4d4", "#fbe4e4", "#f4f4f4", "#ffffff"
 AREA_FRAME = 16  # the drawing's box as a custom shape 16 beats by 16 keys, for finding its areas (gaps close
@@ -52,6 +52,15 @@ def rgb(color):
 def area_color(c):
     """The colour shown for area colour c (1 .. COLOURS): the note colours in order."""
     return SLOT_COLORS[(c - 1) % len(SLOT_COLORS)][0]
+
+
+def colour_menu(parent, var, pick):
+    """A menu of the shape's own colour and colours 1 .. COLOURS (a stroke's outline colour), var = the one on."""
+    m = tk.Menu(parent, tearoff=0)
+    m.add_radiobutton(label=tr("drawer.colour_own"), value=0, variable=var, command=lambda: pick(0))
+    for c in range(1, COLOURS + 1):
+        m.add_radiobutton(label=tr("drawer.area_n", n=c), value=c, variable=var, command=lambda c=c: pick(c))
+    return m
 BAD_CHARS = '<>:"/\\|?*'
 
 
@@ -928,6 +937,10 @@ class Drawer(tk.Toplevel):
         for role in ("both",) + ROLES:
             m.add_radiobutton(label=tr("drawer.role_" + role), value=role, variable=self._role_var,
                               command=lambda r=role: self.set_role(i, r))
+        self._colour_var = tk.IntVar(value=st.get("colour", 0))
+        m.add_cascade(label=tr("drawer.outline_colour"), menu=colour_menu(
+            m, self._colour_var, lambda c: self.set_stroke_colour(i, c)),
+            state="disabled" if role_of(st) == "cut" else "normal")
         m.add_separator()
         m.add_command(label=tr("drawer.delete_stroke"), accelerator=tr("drawer.del"),
                       command=lambda: self.delete_stroke(i))
@@ -998,6 +1011,17 @@ class Drawer(tk.Toplevel):
         st.pop("role", None)
         if role != "both":
             st["role"] = role
+        self.changed()
+
+    def set_stroke_colour(self, i, colour):
+        """The stroke's outline notes in colour (1 .. COLOURS, like the areas') or the shape's own (0)."""
+        st = self.strokes[i]
+        if st.get("colour", 0) == colour:
+            return
+        self.push_undo()
+        st.pop("colour", None)
+        if colour:
+            st["colour"] = colour
         self.changed()
 
     def delete_stroke(self, i):
@@ -1248,14 +1272,14 @@ class Drawer(tk.Toplevel):
             if st["kind"] == "curve" and has_formula(st):
                 self.draw_stroke(dict(st, shape=None, pattern=None), "#e89a9a" if i == self.sel else "#efc0c0", 1,
                                  dash=(6, 4))
-        for i, st in enumerate(self.strokes):  # outline only: purple; fill line: thin and dashed
+        for i, st in enumerate(self.strokes):  # outline only: dotted; fill line: thin dashes
             role = role_of(st)
-            color = "#ff8c1a" if i == self.sel else ROLE_COLORS[role]
+            color = ("#ff8c1a" if i == self.sel else SLOT_COLORS[(colour_of(st) - 1) % len(SLOT_COLORS)][1]
+                     if colour_of(st) else STROKE_COLOR)
             if role == "cut":
-                self.draw_stroke(st, color, max(1, round(1.5 * self.scale)) + (1 if i == self.sel else 0),
-                                 dash=(5, 4))
+                self.draw_stroke(st, color, max(1, round(self.scale)), dash=(6, 4))  # (thin: Windows dots thick ones)
             else:
-                self.draw_stroke(st, color, w + (1 if i == self.sel else 0))
+                self.draw_stroke(st, color, w + (1 if i == self.sel else 0), dash=(12, 4) if role else None)
         s = self.scale
         r, h = 4 * s, 3.5 * s
         sel = self.strokes[self.sel] if self.sel is not None else None

@@ -9,7 +9,7 @@ import numpy as np
 
 from files.lang import tr
 from notes.arc import arc_k, arc_points, ellipse_bezier
-from notes.areas import _maps, area_map  # (areas coloured by hand)
+from notes.areas import COLOURS, _maps, area_map  # (areas coloured by hand)
 from notes.bezier import sample
 from notes.pattern import (clean_pattern, clean_shape_formula, formed_path, formed_paths, has_formula,
                            moved_formulas)
@@ -104,6 +104,11 @@ def role_of(st):
     return st.get("role") if st.get("role") in ROLES else None
 
 
+def colour_of(st):
+    """A stroke's outline colour (1 .. COLOURS, the same numbers as the areas': areas.py), 0 = the shape's own."""
+    return st.get("colour", 0) if st.get("role") != "cut" else 0
+
+
 def clean_strokes(strokes):
     out = []
     for st in strokes or []:
@@ -135,6 +140,8 @@ def clean_strokes(strokes):
                 out[-1]["src"] = st["src"]
             if st.get("role") in ROLES and out:
                 out[-1]["role"] = st["role"]
+            if isinstance(st.get("colour"), int) and 1 <= st["colour"] <= COLOURS and out:
+                out[-1]["colour"] = st["colour"]
         except (AttributeError, KeyError, TypeError, ValueError):
             continue
     return out
@@ -995,11 +1002,17 @@ def chop_count(sh, stretches, g):
 
 def stroke_groups(sh):
     """{group: [stroke numbers]} of a custom shape whose strokes came from different shapes (convert.py: each
-    shape's strokes make their notes on their own, like the shapes did), or None if they're all one."""
+    shape's strokes make their notes on their own, like the shapes did) or have outline colours of their own
+    (colour_of), or None if they're all one."""
     groups = {}
     for k, st in enumerate(sh["strokes"]):
-        groups.setdefault(st.get("src", -1), []).append(k)
+        groups.setdefault((st.get("src", -1), colour_of(st)), []).append(k)
     return groups if len(groups) > 1 else None
+
+
+def coloured_strokes(sh):
+    """Some stroke has an outline colour of its own (its notes then go on a channel of their own)."""
+    return not sh.get("text") and "notes" not in sh and any(colour_of(st) for st in sh["strokes"])
 
 
 def outline_groups(sh, ppq, spam=False):
@@ -1169,8 +1182,23 @@ def flat_notes(sh, ppq):
 
 def edge_notes(sh, ppq):
     """The notes of a filled shape's outline-only strokes (drawn over what's filled)."""
-    paths = [] if sh.get("text") else role_paths(sh)["edge"]
-    return paths_outline(join_paths(paths), ppq) if paths else np.zeros((0, 3), np.int64)
+    return edge_lines(sh, ppq)[0]
+
+
+def edge_lines(sh, ppq):
+    """edge_notes, and each one's outline colour (colour_of; 0 = the shape's own)."""
+    if sh.get("text"):
+        return np.zeros((0, 3), np.int64), np.zeros(0, np.int64)
+    paths = custom_strokes(sh)
+    by = {}
+    for st, path in zip(sh["strokes"], paths):
+        if role_of(st) == "edge":
+            by.setdefault(colour_of(st), []).append(path)
+    parts = [(paths_outline(join_paths(ps), ppq), c) for c, ps in sorted(by.items())]
+    if not parts:
+        return np.zeros((0, 3), np.int64), np.zeros(0, np.int64)
+    return (np.concatenate([n for n, _ in parts]),
+            np.concatenate([np.full(len(n), c, np.int64) for n, c in parts]))
 
 
 def custom_notes(sh, ppq):
@@ -1236,7 +1264,10 @@ def _notes_groups(sh, ppq):
     else:
         spans = rows = np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]  # (start, end, key)
     flat = flat_notes(sh, ppq)  # (like Outline spam in Spam)
-    lines = edge_notes(sh, ppq)  # (outline-only strokes: over what's filled, the outline's with "Outline")
+    # outline-only strokes: over what's filled, the outline's with "Outline"; their colours (colour_of) are the same
+    # numbers as the areas'
+    lines, lc = edge_lines(sh, ppq)
+    coloured = area is not None or bool(lc.any())
     apart = sh.get("apart")
     g = edge_gate(sh, ppq) if apart else 0  # (the smallest outline gate)
     zeros = np.zeros
@@ -1255,16 +1286,19 @@ def _notes_groups(sh, ppq):
                 parts.append((cut_out(flat, outline), 1))
                 inside = np.concatenate([p for p, _ in parts])
                 ids = np.concatenate([np.full(len(p), k, np.int64) for p, k in parts])
-            outline = np.concatenate([outline, lines])
-            return np.concatenate([outline, inside]), np.concatenate([zeros(len(outline), np.int64), ids])
-        groups = None if area is None else np.concatenate([area, zeros(len(flat) + len(lines), np.int64)])
-        return np.concatenate([notes, lines]), groups
+            return (np.concatenate([outline, lines, inside]),
+                    np.concatenate([zeros(len(outline), np.int64), np.where(lc > 0, 1 + lc, 0), ids]))
+        if not coloured:
+            return np.concatenate([notes, lines]), None
+        own = zeros(len(spans), np.int64) if area is None else area
+        return np.concatenate([notes, lines]), np.concatenate([own, zeros(len(flat), np.int64), lc])
     gate = spam_gate(sh, ppq)
     notes = np.concatenate([chop(sh, spans, gate), chop_outline(sh, flat, ppq)])
     ids = None
     if area is not None:
         ids = np.repeat(area, chop(sh, spans, gate, count=True)) if len(spans) else zeros(0, np.int64)
         ids = np.concatenate([ids, zeros(len(notes) - len(ids), np.int64)])
+    lc = np.repeat(lc, chop(sh, lines, gate, count=True)) if len(lines) else lc
     lines = chop_outline(sh, lines, ppq)
     if apart:  # the same spam; the notes on the edge of what's filled are the outline's
         if not g:
@@ -1275,8 +1309,10 @@ def _notes_groups(sh, ppq):
             edge = on_edge(notes) | ~covered(notes, inner_ticks(sh, ppq, g, rows))
         inner = 1 if ids is None else 1 + ids
         return (np.concatenate([notes, lines]),
-                np.concatenate([np.where(edge, 0, inner), zeros(len(lines), np.int64)]).astype(np.int64))
-    return np.concatenate([notes, lines]), None if ids is None else np.concatenate([ids, zeros(len(lines), np.int64)])
+                np.concatenate([np.where(edge, 0, inner), np.where(lc > 0, 1 + lc, 0)]).astype(np.int64))
+    if not coloured:
+        return np.concatenate([notes, lines]), None
+    return np.concatenate([notes, lines]), np.concatenate([zeros(len(notes), np.int64) if ids is None else ids, lc])
 
 
 def tracks_apart(sh):
@@ -1286,7 +1322,7 @@ def tracks_apart(sh):
     if sh["kind"] != "custom":
         return cycling(sh)
     return ("notes" in sh or bool(sh.get("apart") and sh.get("fill") in ("fill", "spam")) or cycling(sh)
-            or has_areas(sh) and any(a[2] for a in sh["areas"]))
+            or has_areas(sh) and any(a[2] for a in sh["areas"]) or coloured_strokes(sh))
 
 
 def merged_by_key(notes):

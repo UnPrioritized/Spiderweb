@@ -313,6 +313,17 @@ class LiveDrawing:
             st["role"] = role
         self.app.shape_edited()
 
+    def set_stroke_colour(self, sh, k, colour):
+        """The stroke's outline notes in colour (1 .. 15, like the drawer's areas) or the shape's own (0)."""
+        st = sh["strokes"][k]
+        if st.get("colour", 0) == colour:
+            return
+        self.app.push_undo(name=tr("roll_live.stroke_colour"))
+        st.pop("colour", None)
+        if colour:
+            st["colour"] = colour
+        self.app.shape_edited()
+
     def delete_stroke(self, sh, k):
         """Stroke k out of the custom shape (the last one: the whole shape goes)."""
         app = self.app
