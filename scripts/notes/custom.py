@@ -794,33 +794,67 @@ def area_edges(sh, amap):
     differ = filled[one] != filled[two]
     if sh.get("borders"):
         differ |= filled[one] & filled[two] & (colour[one] != colour[two])
-    return seg[ok & differ]
+    keep = np.flatnonzero(ok & differ)
+    if not len(keep):
+        return seg[keep]
+    # pieces kept one after another on the same line: one piece again (fewer for the band's distances: quicker)
+    new = np.ones(len(keep), bool)
+    new[1:] = (i[keep][1:] != i[keep][:-1]) | (keep[1:] != keep[:-1] + 1)
+    first = keep[new]
+    last = keep[np.append(np.flatnonzero(new)[1:] - 1, len(keep) - 1)]
+    return np.column_stack([seg[first, :2], seg[last, 2:]])
+
+
+def area_inner_lines(sh, ppq, g, keys):
+    """What's filled (areas.py) shrunk by g ticks from area_edges, on SAMPLES lines across each of these keys:
+    (heights, [[(start, end)] in beats] per line)."""
+    ys, on, edges, k = area_filled_lines(sh, tuple(keys))
+    if edges is None:
+        return ys, [[] for _ in ys]
+    near = shrink_near(edges * [1, k, 1, k], [y * k for y in ys], g / ppq)
+    return ys, [shrink_merge(shrink_minus(spans, cut)) for spans, cut in zip(on, near)]
+
+
+def area_filled_lines(sh, keys):
+    """What the areas fill on SAMPLES lines across each of these keys ([(start, end)] in beats per line), with the
+    heights, area_edges and the shape's proportion (shrink.proportion). Remembered: the same for every outline gate
+    tried (working it out was most of a gate step's time)."""
+    key = ("filled", json.dumps([sh["strokes"], sh["pts"], sh["areas"]]), bool(sh.get("union")),
+           bool(sh.get("borders")), keys)
+    got = _inner.get(key)
+    if got is not None:
+        return got
+    ys = [(q - 0.5 + (j + 0.5) / SAMPLES) for q in keys for j in range(SAMPLES)]
+    amap = shape_areas(sh)
+    if amap is None:
+        return ys, None, None, 1.0
+    filled, _ = area_state(sh, amap)
+    lines = area_lines(sh)
+    ay, by = lines[:, 1], lines[:, 3]
+    out = []
+    for y in ys:
+        s = lines[(ay <= y) != (by <= y)]
+        x = np.sort(s[:, 0] + (s[:, 2] - s[:, 0]) * (y - s[:, 1]) / (s[:, 3] - s[:, 1]))
+        if len(x) < 2:
+            out.append([])
+            continue
+        m = (x[:-1] + x[1:]) / 2
+        uv = uv_points(sh["pts"], np.column_stack([m, np.full(len(m), y)]))
+        on = filled[amap.at(uv[:, 0], uv[:, 1])]
+        out.append(list(zip(x[:-1][on].tolist(), x[1:][on].tolist())))
+    if len(_inner) > 100:
+        _inner.clear()
+    got = _inner[key] = (ys, out, area_edges(sh, amap),
+                         shrink_proportion(fill_plan(sh)["polys"] + role_paths(sh)["cut"]))
+    return got
 
 
 def area_inner(sh, ppq, g, keys):
     """inner_ticks for coloured areas: what's filled (areas.py) shrunk by g ticks from area_edges."""
-    amap = shape_areas(sh)
-    if amap is None:
-        return np.zeros((0, 3), np.int64)
-    filled, _ = area_state(sh, amap)
-    lines = area_lines(sh)
-    k = shrink_proportion(fill_plan(sh)["polys"] + role_paths(sh)["cut"])
-    ys = [(q - 0.5 + (j + 0.5) / SAMPLES) for q in keys for j in range(SAMPLES)]
-    near = shrink_near(area_edges(sh, amap) * [1, k, 1, k], [y * k for y in ys], g / ppq)
-    ay, by = lines[:, 1], lines[:, 3]
+    _, per = area_inner_lines(sh, ppq, g, keys)
     out = []
     for n, q in enumerate(keys):
-        got = []
-        for j in range(SAMPLES):
-            y = ys[n * SAMPLES + j]
-            s = lines[(ay <= y) != (by <= y)]
-            x = np.sort(s[:, 0] + (s[:, 2] - s[:, 0]) * (y - s[:, 1]) / (s[:, 3] - s[:, 1]))
-            if len(x) < 2:
-                continue
-            m = (x[:-1] + x[1:]) / 2
-            uv = uv_points(sh["pts"], np.column_stack([m, np.full(len(m), y)]))
-            on = filled[amap.at(uv[:, 0], uv[:, 1])]
-            got += shrink_minus(list(zip(x[:-1][on].tolist(), x[1:][on].tolist())), near[n * SAMPLES + j])
+        got = [p for spans in per[n * SAMPLES:(n + 1) * SAMPLES] for p in spans]
         row = []
         for a, b in shrink_merge(got):
             s, e = math.floor(a * ppq + 0.5), math.floor(b * ppq + 0.5)
@@ -834,6 +868,51 @@ def area_inner(sh, ppq, g, keys):
                 row.append((s, e, q))
         out += row
     return np.asarray(out, np.int64).reshape(-1, 3)
+
+
+def outline_of_lines(ys, per, gap):
+    """The outline of what's on these lines (heights ys going up, [(start, end)] on each), joining each end to the
+    matching end on the next line: straight pieces (b0, k0, b1, k1, bi, ki), (bi, ki) a spot on the inner side.
+    Gaps narrower than gap are closed first."""
+    def close(spans):
+        out = []
+        for a, b in spans:
+            if out and a - out[-1][1] < gap:
+                out[-1] = (out[-1][0], max(out[-1][1], b))
+            else:
+                out.append((a, b))
+        return out
+
+    per = [close(p) for p in per]
+    dy = ys[1] - ys[0] if len(ys) > 1 else 1.0
+    e = dy * 0.25  # (how far the inner side's spot is from a piece)
+    segs = []
+    lines = [(ys[0] - dy, [])] + list(zip(ys, per)) + [(ys[-1] + dy, [])]
+    for (y0, below), (y1, above) in zip(lines, lines[1:]):
+        over_b = [[i for i, q in enumerate(above) if q[0] < p[1] and q[1] > p[0]] for p in below]
+        over_a = [[i for i, p in enumerate(below) if q[0] < p[1] and q[1] > p[0]] for q in above]
+        for i, (a, b) in enumerate(below):
+            o = over_b[i]
+            if not o:  # (ends between the lines: across at the lower one)
+                segs.append((a, y0, b, y0, (a + b) / 2, y0 - e))
+                continue
+            first, last = above[o[0]], above[o[-1]]
+            if over_a[o[0]][0] == i:
+                segs.append((a, y0, first[0], y1, (a + first[0]) / 2 + e, (y0 + y1) / 2))
+            if over_a[o[-1]][-1] == i:
+                segs.append((b, y0, last[1], y1, (b + last[1]) / 2 - e, (y0 + y1) / 2))
+            for q0, q1 in zip(o, o[1:]):  # (a gap opening above it)
+                x0, x1 = above[q0][1], above[q1][0]
+                segs.append((x0, y1, x1, y1, (x0 + x1) / 2, y1 - e))
+        for i, (a, b) in enumerate(above):
+            o = over_a[i]
+            if not o:  # (starts between the lines: across at the upper one)
+                segs.append((a, y1, b, y1, (a + b) / 2, y1 + e))
+                continue
+            for p0, p1 in zip(o, o[1:]):  # (a gap closing above it)
+                x0, x1 = below[p0][1], below[p1][0]
+                segs.append((x0, y0, x1, y0, (x0 + x1) / 2, y0 + e))
+    return np.asarray(segs, float).reshape(-1, 6)
 
 
 def find_area_spans(sh, ppq):
@@ -1336,9 +1415,17 @@ def edge_inner(sh, ppq):
     if sh.get("edge_mode") == "sideways":
         return "rows", cut_out(spans, grow_inward(outline_notes(sh, ppq), spans, g))
     loops, union = edge_loops(sh)
-    if has_areas(sh):  # (the inside left, exactly as the notes get it: a grid line over a whole shape is too coarse
-        # for hairline gaps between areas, user saw it zigzag)
-        return "rows", inner_ticks(sh, ppq, g, spans)
+    if has_areas(sh):  # (worked out exactly on the notes' lines across each key and joined up: the grid over the
+        # whole shape was too coarse for hairline gaps between areas, user saw it zigzag)
+        keys = list(range(int(spans[:, 2].min()), int(spans[:, 2].max()) + 1))
+        key = ("lines", json.dumps([sh["strokes"], sh["pts"], sh["areas"]]), bool(sh.get("union")),
+               bool(sh.get("borders")), ppq, g)
+        got = _inner.get(key)
+        if got is None:
+            if len(_inner) > 100:
+                _inner.clear()
+            got = _inner[key] = outline_of_lines(*area_inner_lines(sh, ppq, g, keys), g / ppq)
+        return "lines", got
     return "lines", inner_lines(loops, union, g / ppq)
 
 
