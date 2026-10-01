@@ -18,14 +18,20 @@ class Scrub:
     a label over several boxes steps them all together. steps: (step, Shift step, Ctrl step), or a function giving
     them. One scrub of a box is one undo step (App.scrub_step)."""
 
-    def __init__(self, app, boxes, steps, lo=None, hi=None, label=None):
+    def __init__(self, app, boxes, steps, lo=None, hi=None, label=None, drag_box=False):
+        """drag_box: each box can be dragged sideways itself too (a click without moving still types)."""
         self.app, self.boxes, self.steps, self.lo, self.hi = app, boxes, steps, lo, hi
-        self.drag = None  # label drag: {"x": where the last step was, "n": steps waiting, "job", "gesture"}
+        self.drag = None  # label drag: {"x": where the last step was, "n": steps waiting, "job", "gesture", "boxes"}
+        self.held = None  # drag_box: the box pressed, until the mouse has moved far enough to be a drag
         for entry, var, apply in boxes:
             entry._scrub = True  # the side panel's wheel scrolling leaves it alone
             for key in ("<Up>", "<Down>"):
                 entry.bind(key, lambda e, box=(entry, var, apply): self.key(e, box))
             entry.bind("<MouseWheel>", lambda e, box=(entry, var, apply): self.wheel(e, box))
+            if drag_box:
+                entry.bind("<ButtonPress-1>", lambda e, box=(entry, var, apply): self.box_press(e, box))
+                entry.bind("<B1-Motion>", self.box_motion)
+                entry.bind("<ButtonRelease-1>", self.box_release)
             # the first time one is clicked into: how else it can be changed
             entry.bind("<FocusIn>", lambda e: app.tips.show("numbers", wait=True), add="+")
         if label is not None:
@@ -70,8 +76,36 @@ class Scrub:
         self.change([box], 1 if e.delta > 0 else -1, e.state, box[0])
         return "break"
 
-    def press(self, e):
-        self.drag = {"x": e.x_root, "n": 0, "job": None, "gesture": object(), "state": e.state}
+    def box_press(self, e, box):
+        self.held = {"x": e.x_root, "box": box}  # (the box's own click still puts the text cursor there)
+
+    def box_motion(self, e):
+        """In the box: once the mouse has gone DRAG_PX sideways it's a scrub of that box, not a text selection."""
+        h = self.held
+        if not h:
+            return None
+        if not self.drag:
+            if abs(e.x_root - h["x"]) < DRAG_PX * self.app.scale:
+                return None
+            entry = h["box"][0]
+            entry.selection_clear()
+            entry.config(cursor="sb_h_double_arrow")
+            self.press(e, [h["box"]])
+            self.drag["x"] = h["x"]  # (the steps count from where it was pressed)
+        self.motion(e)
+        return "break"
+
+    def box_release(self, e):
+        h, self.held = self.held, None
+        if h and self.drag:
+            h["box"][0].config(cursor="")
+            self.release(e)
+            return "break"
+        return None
+
+    def press(self, e, boxes=None):
+        self.drag = {"x": e.x_root, "n": 0, "job": None, "gesture": object(), "state": e.state,
+                     "boxes": boxes or self.boxes}
         self.app.scrubbing = True  # (slow notes are made when the mouse rests or is let go: App.shapes_changed)
 
     def motion(self, e):
@@ -95,7 +129,7 @@ class Scrub:
         d["job"] = None
         n, d["n"] = d["n"], 0
         if n:
-            self.change(self.boxes, n, d["state"], d["gesture"])
+            self.change(d["boxes"], n, d["state"], d["gesture"])
 
     def release(self, e):
         if self.drag and self.drag["job"]:

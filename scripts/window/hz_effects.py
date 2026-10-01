@@ -779,7 +779,8 @@ class FxPane:
 
     def ask_repeat(self, name, x, y):
         """The Repeat every… window: how long one repeat of the effect is, as a note length [n] / [n] like the snap
-        (1 / 4 = one beat; user). Each number can be typed, dragged (the label: the first one), Up / Down, wheel.
+        (1 / 4 = one beat; user). Each number can be typed, dragged sideways (its box; the label: the first one), Up / Down,
+        wheel.
         While it's open the pane shows where each repeat would start (green lines). OK / Enter = set_loop, Cancel /
         Escape / the window's X = nothing."""
         if self.asking:
@@ -838,8 +839,8 @@ class FxPane:
         ok = ttk.Button(b, text=tr("hz.fx_repeat_ok"), command=lambda: done(True))
         ok.pack(side="left", padx=(0, 4))
         ttk.Button(b, text=tr("hz.fx_repeat_cancel"), command=lambda: done(False)).pack(side="left")
-        Scrub(win.app, [(top.entry, num, None)], (1, 4, 1), 1, REPEAT_MOST, label=lb)
-        Scrub(win.app, [(top.under, den, None)], (1, 4, 1), 1, REPEAT_MOST)
+        Scrub(win.app, [(top.entry, num, None)], (1, 4, 1), 1, REPEAT_MOST, label=lb, drag_box=True)
+        Scrub(win.app, [(top.under, den, None)], (1, 4, 1), 1, REPEAT_MOST, drag_box=True)
         num.trace_add("write", shown)
         den.trace_add("write", shown)
         top.bind("<Return>", lambda e: done(True) if value() else None)
