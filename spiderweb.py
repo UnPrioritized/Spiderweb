@@ -33,7 +33,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     hz_preview.py    the Hz bass window's Preview: its sound made ahead (greyed until made) and played
     preview_settings.py  its Preview settings window (soundfont, voice limit, reverb, volume, speed)
     velocity_formula.py the velocity pane's Formula tool settings (pattern, loops, its numbers)
-    claw_window.py   the Claw machine window (and its Knob dial)
+    tool_window.py   what the Claw machine and Strum windows share (live preview, undo, the Knob dial)
+    claw_window.py   the Claw machine window
   roll/              the piano roll
     pianoroll.py     the piano roll canvas: view, hit testing, mouse editing
     roll_draw.py     painting the grid, notes, handles, keyboard, ruler

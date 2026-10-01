@@ -1772,7 +1772,7 @@
  "app.joined": "{curve} (joined)",
  "panel_custom.n_notes": "{n:,} notes.",
  "engine.handle": "handle",
- "claw.claw_machine": "Claw machine",
+ "claw.step": "Claw machine",
  "claw.window_title": "Claw machine",
  "claw.shape": "Shape: {shape_label}",
  "claw.n_shapes": "{n} shapes (they all get the same settings)",
