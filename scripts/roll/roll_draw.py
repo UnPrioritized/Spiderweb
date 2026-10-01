@@ -25,6 +25,7 @@ SELECTED, DRAFT = len(SLOT_COLORS), len(SLOT_COLORS) + 1
 NOTE_COLORS = [(fade(f, 1 - level * 4 / 124), b) for f, b in SLOT_COLORS + [SELECTED_COLOR, DRAFT_COLOR]
                for level in range(32)]
 RING_COLOR = "#b40000"  # (user: #e00000 looked bright, almost pink)
+RING_RGB = np.frombuffer(bytes.fromhex(RING_COLOR[1:]), np.uint8)
 PREVIEW_COLOR, PREVIEW_HALO = "#ff1f1f", "#ffa8a8"  # the outline gate's preview line (draw_edge_preview)
 RING_GAP = 4  # px: notes in a row closer than this count as touching for the ring
 RING_MAX = 20000  # more ring pieces on screen than this: none drawn (canvas items are slow)
@@ -101,6 +102,63 @@ def ring_parts(notes, gap):
         on = np.flatnonzero((v[:-1] == 1) & (t[1:] > t[:-1]) & (kk[1:] == kk[:-1]))
         tops.append(np.column_stack([t[on], t[on + 1], kk[on], np.full(len(on), up)]))
     return np.concatenate(sides), np.concatenate(tops)
+
+
+def ring_chains(xa, ya, xb, yb, up, extra):
+    """Upright (up) / flat pieces from (xa, ya) to (xb, yb), both ends drawn, joined where an end is another
+    piece's end or one pixel diagonally beside it (an inner corner of a staircase; a one-pixel diagonal step draws
+    no pixel of its own): coordinate lists for create_line, the last point pushed on by extra (a line leaves out
+    its last pixel), so the same pixels as one line per piece reaching extra past its end."""
+    ends = {}
+    for i, (p, q) in enumerate(zip(zip(xa, ya), zip(xb, yb))):
+        ends.setdefault(p, []).append(i)
+        ends.setdefault(q, []).append(i)
+    used = [False] * len(xa)
+
+    def onward(at):  # an unused piece with an end at this point, else at a diagonal neighbour: (piece, its end)
+        for dx, dy in ((0, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)):
+            p = (at[0] + dx, at[1] + dy)
+            for j in ends.get(p, ()):
+                if not used[j]:
+                    return j, p
+        return None, None
+
+    def walk(i, at):  # [(piece, from, to)]: from piece i's end at, on while another piece goes on from where it ends
+        out = []
+        while True:
+            used[i] = True
+            p, q = (xa[i], ya[i]), (xb[i], yb[i])
+            nxt = q if at == p else p
+            out.append((i, at, nxt))
+            i, at = onward(nxt)
+            if i is None:
+                return out
+
+    lines = []
+    for i in range(len(xa)):
+        if used[i]:
+            continue
+        p = (xa[i], ya[i])
+        ahead = walk(i, p)
+        j, at = onward(p)
+        back = walk(j, at) if j is not None else []
+        pts = []
+        for _, a, b in reversed(back):
+            pts += (b, a)
+        for _, a, b in ahead:
+            pts += (a, b)
+        last, a, (lx, ly) = ahead[-1]
+        # the last piece's direction (a one-pixel piece: along its own kind)
+        dx, dy = (lx > a[0]) - (lx < a[0]), (ly > a[1]) - (ly < a[1])
+        if (dx, dy) == (0, 0):
+            dx, dy = (0, 1) if up[last] else (1, 0)
+        pts[-1] = (lx + dx * extra, ly + dy * extra)
+        # (points repeated where pieces meet: dropped)
+        pts = [pt for n, pt in enumerate(pts) if not n or pt != pts[n - 1]]
+        lines.append([v for pt in pts for v in pt])
+    return lines
+
+
 NOTE_RGB = np.array([[[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in pair] for pair in NOTE_COLORS], np.uint8)
 
 
@@ -259,22 +317,69 @@ class RollDrawing:
         if self.typing:
             self.show_caret()
 
-    def draw_ring(self, w, h):
-        """A red line round the selected shapes' notes, on their outer edge pixels (user: the notes keep their colours, even
-        with short gates): ring_parts, worked out once per selection / notes / zoom, then placed like the notes."""
+    def ring_now(self):
+        """The red line round the selected shapes' notes (user: the notes keep their colours, even with short
+        gates): ring_parts, worked out once per selection / notes / zoom, or None."""
         app = self.app
         if not app.sels or not app.show_notes.get() or not len(app.rendered):
-            return
+            return None
         ppq, ax = app.ppq, self.sx / app.ppq
         key = (frozenset(app.sels), self.sx, ppq)
         if self._ring is None or self._ring[0] is not app.rendered or self._ring[1] != key:
             notes = app.rendered[np.isin(app.rendered[:, 5], list(app.sels))]
             self._ring = (app.rendered, key, ring_parts(notes, RING_GAP / ax) if len(notes) else None)
-        if self._ring[2] is None:
+        return self._ring[2]
+
+    def draw_ring(self, w, h):
+        """The ring as lines on the canvas, when the notes are canvas rectangles (in the notes' picture it's painted
+        with them: ring_pixels)."""
+        parts = self.ring_now()
+        if parts is None or self.note_img is not None:
             return
-        width = max(1, round(self.scale))  # (user: 2 px was too thick)
-        # on the notes' edge pixels, growing inward (user)
-        self.draw_ring_lines(self._ring[2], w, h, -(width - 1) / 2, 1, fill=RING_COLOR, width=width)
+        # on the notes' edge pixels, growing inward (user); a wider line as 1 px lines side by side (joined lines
+        # are drawn with whole pixels only that way)
+        for d in range(max(1, round(self.scale))):  # (user: 2 px was too thick)
+            self.draw_ring_lines(parts, (self.kb_w, self.ruler_h, w, h), -d, 1, fill=RING_COLOR, width=1)
+
+    def ring_pixels(self, region):
+        """The ring's pixels inside region = (x0, y0, x1, y1) (ends not included): where = row * the region's width
+        + column, the same pixels draw_ring's lines cover. None if there's no ring."""
+        parts = self.ring_now()
+        if parts is None:
+            return None
+        kb, top, w, h = region
+        iw = w - kb
+        at = []
+        for d in range(max(1, round(self.scale))):
+            sx, sy0, sy1, tx0, tx1, ty = self.ring_screen(parts, -d, 0)  # (ends included)
+            for x0, x1, y0, y1 in ((sx, sx, np.maximum(sy0, top), np.minimum(sy1, h - 1)),
+                                   (np.maximum(tx0, kb), np.minimum(tx1, w - 1), ty, ty)):
+                on = (x1 >= x0) & (y1 >= y0) & (x0 >= kb) & (x1 < w) & (y0 >= top) & (y1 < h)
+                x0, x1, y0, y1 = (v[on].astype(np.int64) for v in (x0, x1, y0, y1))
+                n = (x1 - x0) + (y1 - y0) + 1  # (each piece is upright or flat)
+                step = np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
+                flat = np.repeat(x1 > x0, n)
+                x, y = np.repeat(x0, n) + step * flat, np.repeat(y0, n) + step * ~flat
+                at.append((y - top) * iw + (x - kb))
+        return np.concatenate(at)
+
+    def ring_screen(self, parts, d, extra):
+        """ring_parts' pieces on screen, d pixels outside the notes' edge: sides x, y0, y1 and tops x0, x1, y
+        (extra: how far past each corner)."""
+        sides, tops = parts
+        ax = self.sx / self.app.ppq
+        bx = self.kb_w - self.view_t * self.sx
+        ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
+
+        def row(k, lower):  # a key row's top / bottom pixel, as note_rects has it
+            y0 = np.round((k + 0.5) * ay + by)
+            return np.maximum(np.round((k - 0.5) * ay + by), y0 + 1) - 1 if lower else y0
+
+        sx = np.round(sides[:, 0] * ax + bx) + np.where(sides[:, 3] == 1, d - 1, -d)  # (a note's last pixel: end - 1)
+        sy0, sy1 = row(sides[:, 2], False) - d, row(sides[:, 1], True) + d + extra
+        tx0, tx1 = np.round(tops[:, 0] * ax + bx) - d, np.round(tops[:, 1] * ax + bx) - 1 + d + extra
+        ty = np.where(tops[:, 3] == 1, row(tops[:, 2], False) - d, row(tops[:, 2], True) + d)
+        return sx, sy0, sy1, tx0, tx1, ty
 
     def draw_edge_preview(self, w, h):
         """While the outline gate box is being used (app.edge_preview = its gate in beats): a red line where the
@@ -295,9 +400,9 @@ class RollDrawing:
                 # (user: red like a shape's line, a bit thicker than 1 px but never as thick as the selected
                 # shape's 2 px: a red pixel with a light red one beside it)
                 if got[0] == "rows":
-                    parts = ring_parts(got[1], 0)
-                    self.draw_ring_lines(parts, w, h, -1, 1, fill=PREVIEW_HALO, width=1)
-                    self.draw_ring_lines(parts, w, h, 0, 1, fill=PREVIEW_COLOR, width=1)
+                    parts, view = ring_parts(got[1], 0), (self.kb_w, self.ruler_h, w, h)
+                    self.draw_ring_lines(parts, view, -1, 1, fill=PREVIEW_HALO, width=1)
+                    self.draw_ring_lines(parts, view, 0, 1, fill=PREVIEW_COLOR, width=1)
                     continue
                 segs = got[1]
                 x0, y0 = segs[:, 0] * self.sx + bx, segs[:, 1] * ay + by
@@ -329,31 +434,25 @@ class RollDrawing:
                     self.create_line(*halo, fill=PREVIEW_HALO, width=1)
                     self.create_line(*line, fill=PREVIEW_COLOR, width=1, capstyle="round")
 
-    def draw_ring_lines(self, parts, w, h, d, extra, **kw):
+    def draw_ring_lines(self, parts, view, d, extra, **kw):
         """ring_parts' (sides, tops) as lines on screen, d pixels outside the notes' edge (extra: how far the
-        lines reach past each corner)."""
-        sides, tops = parts
-        ax = self.sx / self.app.ppq
-        bx = self.kb_w - self.view_t * self.sx
-        ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
-        kb, top = self.kb_w, self.ruler_h
-
-        def row(k, lower):  # a key row's top / bottom pixel, as note_rects has it
-            y0 = np.round((k + 0.5) * ay + by)
-            return np.maximum(np.round((k - 0.5) * ay + by), y0 + 1) - 1 if lower else y0
-
-        sx = np.round(sides[:, 0] * ax + bx) + np.where(sides[:, 3] == 1, d - 1, -d)  # (a note's last pixel: end - 1)
-        sy0, sy1 = row(sides[:, 2], False) - d, row(sides[:, 1], True) + d + extra
-        tx0, tx1 = np.round(tops[:, 0] * ax + bx) - d, np.round(tops[:, 1] * ax + bx) - 1 + d + extra
-        ty = np.where(tops[:, 3] == 1, row(tops[:, 2], False) - d, row(tops[:, 2], True) + d)
+        lines reach past each corner), those in view = (x0, y0, x1, y1)."""
+        kb, top, w, h = view
+        sx, sy0, sy1, tx0, tx1, ty = self.ring_screen(parts, d, extra)
         on_s = ~((sx < kb) | (sx > w) | (sy1 < top) | (sy0 > h))
         on_t = ~((tx1 < kb) | (tx0 > w) | (ty < top) | (ty > h))
         if on_s.sum() + on_t.sum() > RING_MAX:
             return
-        for x, y0, y1 in zip(*(v[on_s].tolist() for v in (sx, sy0, sy1))):
-            self.create_line(x, y0, x, y1, **kw)
-        for x0, x1, y in zip(*(v[on_t].tolist() for v in (tx0, tx1, ty))):
-            self.create_line(x0, y, x1, y, **kw)
+        # (pieces meeting at a corner joined into one line: one canvas item per piece made panning slow, ~3000
+        # pieces cost 90 ms a step)
+        on_t &= tx1 > tx0  # (a note under a pixel wide: nothing, as a line of no length)
+        xa = np.concatenate([sx[on_s], tx0[on_t]])
+        ya = np.concatenate([sy0[on_s], ty[on_t]])
+        up = np.arange(len(xa)) < on_s.sum()
+        xb = np.where(up, xa, np.concatenate([sx[on_s], tx1[on_t]]) - extra)
+        yb = np.where(up, np.concatenate([sy1[on_s], ty[on_t]]) - extra, ya)
+        for line in ring_chains(xa.tolist(), ya.tolist(), xb.tolist(), yb.tolist(), up.tolist(), extra):
+            self.create_line(*line, **kw)
 
     def draw_select_box(self):
         """The dotted box being dragged with Select (with the ones kept when Ctrl+drag adds it), or the last ones
@@ -658,7 +757,7 @@ class RollDrawing:
         if c is None or c["rendered"] is not app.rendered or c["key"] != key:
             rects = self.note_rects(w, h, only=False)
             c = self._carry = {"rendered": app.rendered, "key": key, "area": None,
-                               "base": self.paint_region(rows, cols, rects, (kb, top, w, h))}
+                               "base": self.paint_region(rows, cols, rects, (kb, top, w, h), ring=False)}
         a = c["area"]  # the dragged notes' pixels are kept for the part of the screen they come from, and around it
         if a is None or a[0] > kb - dx or a[1] > top - dy or a[2] < w - dx or a[3] < h - dy:
             a = c["area"] = (kb - dx - iw // 2, top - dy - ih // 2, w - dx + iw // 2, h - dy + ih // 2)
@@ -679,9 +778,10 @@ class RollDrawing:
         self._note_pic = None
         self.request_redraw()
 
-    def paint_region(self, rows, cols, rects, region):
+    def paint_region(self, rows, cols, rects, region, ring=True):
         """Grid and notes of region = (x0, y0, x1, y1) of the screen (the ends not included) as an array of pixels
-        (rows, columns, RGB)."""
+        (rows, columns, RGB), with the selected notes' red line over them (ring; draw_ring's lines were slow
+        canvas items: ~1000 of them took 25 ms of every step when panning)."""
         kb, top, w, h = region
         iw, ih = w - kb, h - top
         rgb = {}
@@ -709,6 +809,9 @@ class RollDrawing:
         img = np.frombuffer(b"".join(patterns[c] for c in row_color), np.uint8).reshape(ih, iw, 3).copy()
         at, colors = self.note_pixels(rects, region)
         img.reshape(-1, 3)[at] = colors
+        at = self.ring_pixels(region) if ring else None
+        if at is not None:
+            img.reshape(-1, 3)[at] = RING_RGB
         return img
 
     def note_pixels(self, rects, region):
