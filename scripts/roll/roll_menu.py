@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from files.lang import tr
 from window.formula_host import FunnelHost, PolygonHost, RollHost, formula_menu
 from notes.convert import originals
+from notes.custom import ROLES
 from notes.joined import is_joined
 from notes.funnel import inside_out, turned_curve
 from notes.tumour import LINE_KINDS
@@ -104,6 +105,11 @@ class ShapeMenu:
                         (tr("roll_menu.turn_90_right"), tr("roll_menu.ctrl_right"),
                          lambda: self.turn_stroke(sh, k, True))):
                     sub.add_command(label=label, accelerator=key, command=fn)
+                sub.add_separator()
+                self._role_var = tk.StringVar(value=sh["strokes"][k].get("role") or "both")  # (kept: the dot shows)
+                for role in ("both",) + ROLES:
+                    sub.add_radiobutton(label=tr("drawer.role_" + role), value=role, variable=self._role_var,
+                                        command=lambda r=role: self.set_stroke_role(sh, k, r))
                 m.add_cascade(label=tr("roll_menu.this_stroke"), menu=sub)
             item(tr("roll_menu.save_drawing_to_the_shape_library"), "", lambda: app.save_to_library(sh))
         if app.tumour_targets():

@@ -56,7 +56,7 @@ def short_env(env):
 
 def short_stroke(st):
     if st["kind"] == "ellipse":
-        return {"kind": "ellipse", "box": [short_num(a) for a in st["box"]]}
+        return dict(st, box=[short_num(a) for a in st["box"]])
     return dict(st, pts=[[short_num(a) for a in p] for p in st["pts"]])  # a curve keeps its corners / symmetry
 
 

@@ -302,6 +302,17 @@ class LiveDrawing:
         refit(sh)
         self.app.shape_edited()
 
+    def set_stroke_role(self, sh, k, role):
+        """Outline and fill ("both") / outline only ("edge") / fill line ("cut"), custom.ROLES."""
+        st = sh["strokes"][k]
+        if (st.get("role") or "both") == role:
+            return
+        self.app.push_undo(name=tr("roll_live.stroke_role"))
+        st.pop("role", None)
+        if role != "both":
+            st["role"] = role
+        self.app.shape_edited()
+
     def delete_stroke(self, sh, k):
         """Stroke k out of the custom shape (the last one: the whole shape goes)."""
         app = self.app

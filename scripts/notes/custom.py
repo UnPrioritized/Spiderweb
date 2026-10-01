@@ -93,6 +93,14 @@ def custom_settings(cd):
 
 ELLIPSE_STEPS = 360
 CURVE_STEPS = 240
+# A stroke's "role" (none = outline and fill: its notes, and it makes the inside like always): "edge" = outline
+# only (its notes, but Fill / Spam don't see it: no hole, no gap closed, drawn over what's filled), "cut" = fill
+# line (no notes of its own, and it doesn't change what's filled; it splits the inside into areas to colour)
+ROLES = ("edge", "cut")
+
+
+def role_of(st):
+    return st.get("role") if st.get("role") in ROLES else None
 
 
 def clean_strokes(strokes):
@@ -124,6 +132,8 @@ def clean_strokes(strokes):
                             out[-1]["shape"] = form
             if isinstance(st.get("src"), int) and out:  # which shape it came from (convert.py)
                 out[-1]["src"] = st["src"]
+            if st.get("role") in ROLES and out:
+                out[-1]["role"] = st["role"]
         except (AttributeError, KeyError, TypeError, ValueError):
             continue
     return out
@@ -223,8 +233,8 @@ def stroke_span(st):
 
 def open_paths(strokes):
     """The drawing's open outlines once touching strokes are joined: [[start, (joins), end]] in u, v. Each one
-    is a gap in the outline."""
-    spans = [s for s in map(stroke_span, strokes) if s]
+    is a gap in the outline (outline-only strokes and fill lines don't count: Fill / Spam don't close them)."""
+    spans = [s for s in map(stroke_span, (st for st in strokes if not role_of(st))) if s]
     return [path for path in join_paths(spans) if not path_closed(path)]
 
 
@@ -235,7 +245,7 @@ def open_ends(strokes):
 
 def strokes_closed(strokes):
     """Every outline ends where it starts."""
-    return bool(strokes) and not open_paths(strokes)
+    return any(not role_of(st) for st in strokes) and not open_paths(strokes)
 
 
 def fillable(strokes):
@@ -284,7 +294,7 @@ def fill_plan(sh):
         return got
     if len(_plans) > 300:
         _plans.clear()
-    paths = join_paths(custom_strokes(sh))
+    paths = join_paths(role_paths(sh)[None])
     polys = [p for p in paths if path_closed(p)]
     opens = [list(map(tuple, p)) for p in paths if not path_closed(p)]
     closers = []
@@ -333,10 +343,14 @@ def gap_lines(sh):
 
 def join_strokes(strokes):
     """Open lines that meet end to end become one line, so e.g. three lines drawn as a triangle make one
-    closed triangle. Curves and circles stay as they are (they still count as joined, see strokes_closed)."""
+    closed triangle (only lines with the same role). Curves and circles stay as they are (they still count as
+    joined, see strokes_closed)."""
     others = [st for st in strokes if st["kind"] != "poly" or stroke_closed(st)]
-    lines = [[list(p) for p in st["pts"]] for st in strokes if st["kind"] == "poly" and not stroke_closed(st)]
-    return others + [{"kind": "poly", "pts": pts} for pts in join_paths(lines)]
+    for role in (None,) + ROLES:
+        lines = [[list(p) for p in st["pts"]] for st in strokes
+                 if st["kind"] == "poly" and not stroke_closed(st) and role_of(st) == role]
+        others += [dict({"kind": "poly", "pts": pts}, **({"role": role} if role else {})) for pts in join_paths(lines)]
+    return others
 
 
 def custom_strokes(sh):
@@ -345,6 +359,18 @@ def custom_strokes(sh):
     (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
     ub, up, vb, vp = b1 - b0, p1 - p0, b2 - b0, p2 - p0
     return [[(b0 + u * ub + v * vb, p0 + u * up + v * vp) for u, v in stroke_points(st)] for st in sh["strokes"]]
+
+
+def role_paths(sh):
+    """custom_strokes by role: {None: outline and fill, "edge": outline only, "cut": fill lines} (text: all None)."""
+    paths = custom_strokes(sh)
+    out = {None: [], "edge": [], "cut": []}
+    if sh.get("text"):
+        out[None] = paths
+        return out
+    for st, path in zip(sh["strokes"], paths):
+        out[role_of(st)].append(path)
+    return out
 
 
 def box_frame(b0, p0, b1, p1):
@@ -367,7 +393,7 @@ def normalize_strokes(strokes):
     for st in strokes:
         if st["kind"] == "ellipse":
             u0, v0, u1, v1 = st["box"]
-            out.append({"kind": "ellipse", "box": fix(u0, v0) + fix(u1, v1)})
+            out.append(dict(st, box=fix(u0, v0) + fix(u1, v1)))
         else:
             new = dict(st, pts=[fix(u, v) for u, v in st["pts"]])
             if (st["kind"] == "arc" or st.get("free")) and w > 1e-9 and h > 1e-9:
@@ -417,7 +443,7 @@ def map_stroke(st, fn, su=1.0, sv=1.0):
     it (only for keeping arcs round and ellipse boxes the right way round)."""
     if st["kind"] == "ellipse":
         (a, b), (c, d) = fn(*st["box"][:2]), fn(*st["box"][2:])
-        return {"kind": "ellipse", "box": [min(a, c), min(b, d), max(a, c), max(b, d)]}
+        return dict(st, box=[min(a, c), min(b, d), max(a, c), max(b, d)])
     new = dict(st, pts=[list(fn(u, v)) for u, v in st["pts"]])
     if st["kind"] == "arc" or st.get("free"):  # (a freehand stroke's k works like an arc's)
         new["k"] = st.get("k", 1.0) * abs(su / sv)
@@ -477,7 +503,7 @@ def stroke_bp(sh, k):
     st = sh["strokes"][k]
     to_bp = frame_to_bp(sh["pts"])
     if st["kind"] == "ellipse" and not frame_upright(sh["pts"]):
-        st = {"kind": "curve", "pts": ellipse_bezier(st["box"])}
+        st = dict({k: v for k, v in st.items() if k != "box"}, kind="curve", pts=ellipse_bezier(st["box"]))
     new = map_stroke(st, to_bp)
     if "k" in st:
         new["k"] = bp_k(sh["pts"], st["k"])
@@ -490,7 +516,7 @@ def add_stroke(sh, st, at=None):
     outline counts as joined). at: its number (default: after the others). Returns the new stroke's number."""
     to_uv = frame_to_uv(sh["pts"])
     if st["kind"] == "ellipse" and not frame_upright(sh["pts"]):  # turned: an ellipse only fits as a curve
-        st = {"kind": "curve", "pts": ellipse_bezier(st["box"])}
+        st = dict({k: v for k, v in st.items() if k != "box"}, kind="curve", pts=ellipse_bezier(st["box"]))
     new = map_stroke(st, to_uv)
     if new.get("free") or new["kind"] == "arc":  # its k: beats per key on screen -> how many u one v is on screen
         new["k"] = uv_k(sh["pts"], st.get("k", 1.0))
@@ -517,9 +543,12 @@ def new_live_shape(defaults, custom_defaults):
 
 def outline_notes(sh, ppq, only=None):
     """(start, end, pitch) notes along every stroke of a custom shape (only: just these stroke numbers), like
-    lines."""
+    lines. Fill lines make none."""
     paths = custom_strokes(sh)
-    return paths_outline(join_paths(paths if only is None else [paths[k] for k in only]), ppq)
+    ks = range(len(paths)) if only is None else only
+    if not sh.get("text"):
+        ks = [k for k in ks if role_of(sh["strokes"][k]) != "cut"]
+    return paths_outline(join_paths([paths[k] for k in ks]), ppq)
 
 
 def paths_outline(paths, ppq):
@@ -942,7 +971,7 @@ def custom_note_count(sh, ppq):
         return chop_count(sh, outline_groups(sh, ppq)[0], spam_gate(sh, ppq))
     if sh["fill"] == "empty" or not fillable(sh["strokes"]):
         return None
-    flat = flat_notes(sh, ppq)
+    flat = np.concatenate([flat_notes(sh, ppq), edge_notes(sh, ppq)])
     if sh["fill"] == "fill":
         return len(inside_spans(sh, ppq)) + len(flat)
     g = spam_gate(sh, ppq)
@@ -954,6 +983,12 @@ def flat_notes(sh, ppq):
     """The outline notes of a filled shape's parts too flat to fill (fill_plan), so they don't vanish."""
     flat = [] if sh.get("text") else fill_plan(sh)["flat"]
     return paths_outline(flat, ppq) if flat else np.zeros((0, 3), np.int64)
+
+
+def edge_notes(sh, ppq):
+    """The notes of a filled shape's outline-only strokes (drawn over what's filled)."""
+    paths = [] if sh.get("text") else role_paths(sh)["edge"]
+    return paths_outline(join_paths(paths), ppq) if paths else np.zeros((0, 3), np.int64)
 
 
 def custom_notes(sh, ppq):
@@ -1013,6 +1048,7 @@ def _notes_groups(sh, ppq):
         return outline_groups(sh, ppq)
     spans = np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]  # (start, end, key)
     flat = flat_notes(sh, ppq)  # (like Outline spam in Spam)
+    lines = edge_notes(sh, ppq)  # (outline-only strokes: over what's filled, the outline's with "Outline")
     apart = sh.get("apart")
     g = edge_gate(sh, ppq) if apart else 0  # (the smallest outline gate)
     if sh["fill"] == "fill":
@@ -1023,10 +1059,12 @@ def _notes_groups(sh, ppq):
                 ks, ss, es = merged_by_key(thicker(sh, outline, spans, g, ppq))
                 outline = np.column_stack([ss, es, ks]).astype(np.int64).reshape(-1, 3)
             inside = cut_out(notes, outline)
+            outline = np.concatenate([outline, lines])
             return (np.concatenate([outline, inside]),
                     np.concatenate([np.zeros(len(outline), np.int64), np.ones(len(inside), np.int64)]))
-        return notes, None
+        return np.concatenate([notes, lines]), None
     notes = np.concatenate([chop(sh, spans, spam_gate(sh, ppq)), chop_outline(sh, flat, ppq)])
+    lines = chop_outline(sh, lines, ppq)
     if apart:  # the same spam; the notes on the edge of what's filled are the outline's
         if not g:
             edge = on_edge(notes)
@@ -1034,8 +1072,8 @@ def _notes_groups(sh, ppq):
             edge = on_edge(notes) | near_edge(notes, spans, g)
         else:  # (the even band: every note not wholly in the shrunk inside)
             edge = on_edge(notes) | ~covered(notes, inner_ticks(sh, ppq, g, spans))
-        return notes, np.where(edge, 0, 1).astype(np.int64)
-    return notes, None
+        return np.concatenate([notes, lines]), np.where(np.append(edge, np.ones(len(lines), bool)), 0, 1).astype(np.int64)
+    return np.concatenate([notes, lines]), None
 
 
 def tracks_apart(sh):

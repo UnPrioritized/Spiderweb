@@ -6,7 +6,7 @@ import tkinter as tk
 
 import numpy as np
 
-from notes.custom import custom_note_count, edge_inner, gap_lines
+from notes.custom import custom_note_count, edge_inner, gap_lines, role_of
 from notes.engine import cached_arrays, shape_notes
 from notes.joined import all_tumours
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
@@ -765,7 +765,13 @@ class RollDrawing:
         ax, bx = self.sx, self.kb_w - self.view_t * self.sx
         ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
         view = (self.kb_w - 20, self.ruler_h - 20, self.winfo_width() + 20, self.winfo_height() + 20)
-        for path in cached_arrays(sh):
+        cuts = ([role_of(st) == "cut" for st in sh["strokes"]] if sh["kind"] == "custom" and not sh.get("text")
+                else ())
+        for k, path in enumerate(cached_arrays(sh)):
+            if k < len(cuts) and cuts[k]:  # a fill line (no notes of its own): thin, dashed
+                for coords in screen_lines(path, ax, bx, ay, by, view):
+                    self.create_line(*coords, fill=color, width=1, dash=(2, 3))
+                continue
             for coords in screen_lines(path, ax, bx, ay, by, view):
                 if width == 1 or len(coords) < 2000:
                     self.create_line(*coords, fill=color, width=width, dash=dash)

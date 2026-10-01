@@ -10,7 +10,8 @@ from types import SimpleNamespace
 from files.lang import tr
 from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half_at, handle_lines, nearest, pen_handles,
                           set_symmetry)
-from notes.custom import clean_strokes, join_strokes, open_ends, open_paths, stroke_points, strokes_closed
+from notes.custom import (ROLES, clean_strokes, join_strokes, open_ends, open_paths, role_of, stroke_points,
+                          strokes_closed)
 from notes.pattern import has_formula, moved_formulas
 from files.about import HERE
 from files.safefile import write_text
@@ -33,6 +34,7 @@ TOOLS = [("select", tr("drawer.select"), "v"), ("line", tr("drawer.line"), "l"),
          ("square", tr("drawer.square"), "s"), ("circle", tr("drawer.circle"), "o"),
          ("erase", tr("drawer.eraser"), "e")]
 SHIFT, CTRL, ALT = 0x1, 0x4, 0x20000
+ROLE_COLORS = {None: "#c0392b", "edge": "#8e44ad", "cut": "#c0392b"}  # (a stroke's role: custom.ROLES)
 BAD_CHARS = '<>:"/\\|?*'
 
 
@@ -527,7 +529,7 @@ class Drawer(tk.Toplevel):
             return [round(c, 5) for c in fn(u, v)]
         if st["kind"] == "ellipse":
             (a, b), (c, d) = pt(*st["box"][:2]), pt(*st["box"][2:])
-            return {"kind": "ellipse", "box": [min(a, c), min(b, d), max(a, c), max(b, d)]}
+            return dict(st, box=[min(a, c), min(b, d), max(a, c), max(b, d)])
         new = dict(st, pts=[pt(u, v) for u, v in st["pts"]])  # a curve keeps its corners and symmetry
         moved_formulas(new, fn)  # (and its formulas look the same)
         return new
@@ -735,6 +737,11 @@ class Drawer(tk.Toplevel):
             formula_menu(m, DrawerHost(self), self._formula_picks)
         elif st["kind"] == "poly":
             m.add_command(label=tr("drawer.add_point_here"), command=lambda: self.add_poly_point(i, e))
+        self._role_var = tk.StringVar(value=role_of(st) or "both")  # (kept, so the dot shows)
+        for role in ("both",) + ROLES:
+            m.add_radiobutton(label=tr("drawer.role_" + role), value=role, variable=self._role_var,
+                              command=lambda r=role: self.set_role(i, r))
+        m.add_separator()
         m.add_command(label=tr("drawer.delete_stroke"), accelerator=tr("drawer.del"),
                       command=lambda: self.delete_stroke(i))
         m.add_command(label=tr("drawer.copy_stroke"), accelerator=tr("drawer.ctrl_c"), command=self.copy)
@@ -793,6 +800,17 @@ class Drawer(tk.Toplevel):
             return
         self.push_undo()
         set_symmetry(st, mode, half_at(st["pts"], self.to_xy, e.x, e.y), self.to_xy, exact=True)
+        self.changed()
+
+    def set_role(self, i, role):
+        """Outline and fill ("both") / outline only ("edge") / fill line ("cut")."""
+        st = self.strokes[i]
+        if (role_of(st) or "both") == role:
+            return
+        self.push_undo()
+        st.pop("role", None)
+        if role != "both":
+            st["role"] = role
         self.changed()
 
     def delete_stroke(self, i):
@@ -1031,8 +1049,14 @@ class Drawer(tk.Toplevel):
             if st["kind"] == "curve" and has_formula(st):
                 self.draw_stroke(dict(st, shape=None, pattern=None), "#e89a9a" if i == self.sel else "#efc0c0", 1,
                                  dash=(6, 4))
-        for i, st in enumerate(self.strokes):
-            self.draw_stroke(st, "#ff8c1a" if i == self.sel else "#c0392b", w + (1 if i == self.sel else 0))
+        for i, st in enumerate(self.strokes):  # outline only: purple; fill line: thin and dashed
+            role = role_of(st)
+            color = "#ff8c1a" if i == self.sel else ROLE_COLORS[role]
+            if role == "cut":
+                self.draw_stroke(st, color, max(1, round(1.5 * self.scale)) + (1 if i == self.sel else 0),
+                                 dash=(5, 4))
+            else:
+                self.draw_stroke(st, color, w + (1 if i == self.sel else 0))
         s = self.scale
         r, h = 4 * s, 3.5 * s
         sel = self.strokes[self.sel] if self.sel is not None else None
@@ -1066,6 +1090,8 @@ class Drawer(tk.Toplevel):
             self.draw_draft_points(r, h)
         if not self.strokes:
             text = tr("drawer.nothing_drawn_yet")
+        elif all(role_of(st) for st in self.strokes):
+            text = tr("drawer.nothing_to_fill")
         elif closed:
             text = tr("drawer.closed_shape_empty_fill_and_spam")
         elif len(open_paths(self.strokes)) == 1:
