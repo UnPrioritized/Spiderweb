@@ -139,12 +139,13 @@ def inner_rows(polys, union, keys, r, ppq):
     return np.asarray(out, np.int64).reshape(-1, 3)
 
 
-def field(polys, union, reach):
+def field(polys, union, reach, area=None):
     """The distance to the outline on a grid over the shape (in the shape's proportions), minus outside: (x0, y0,
     step, values[row, column], k). Only distances up to `reach` are exact (further ones count as 2 x reach), so
     each block of the grid looks only at the edges near it. Remembered (the same for every outline gate tried up
-    to reach)."""
-    key = (repr(polys), bool(union), reach)
+    to reach). area: (name, edges (ax, ay, bx, by) in beats / keys, inside(beats, keys) -> bool) for areas coloured
+    by hand (custom.area_edges): the distance to those edges, inside = what they fill."""
+    key = (repr(polys), bool(union), reach, area and area[0])
     got = _fields.get(key)
     if got is not None:
         return got
@@ -155,6 +156,8 @@ def field(polys, union, reach):
     groups = [segments([p]) * [1, k, 1, k] for p in polys] if union else [seg]
     x_lo, y_lo = seg[:, [0, 2]].min(), seg[:, [1, 3]].min()
     x_hi, y_hi = seg[:, [0, 2]].max(), seg[:, [1, 3]].max()
+    if area is not None:
+        seg = np.asarray(area[1], float).reshape(-1, 4) * [1, k, 1, k]
     step = max(x_hi - x_lo, y_hi - y_lo) / GRID or 1.0
     xs = np.arange(x_lo - step, x_hi + 2 * step, step)
     ys = np.arange(y_lo - step, y_hi + 2 * step, step)
@@ -177,6 +180,10 @@ def field(polys, union, reach):
             d = np.sqrt(((px - ax - t * dx) ** 2 + (py - ay - t * dy) ** 2).min(axis=1)).reshape(len(y), len(x))
             dist[j0:j0 + BLOCK, i0:i0 + BLOCK] = np.minimum(d, 2.0 * reach)
     inside = np.zeros(dist.shape, bool)
+    if area is not None:
+        gx, gy = np.meshgrid(xs, ys / k)
+        inside = area[2](gx, gy)
+        groups = []
     for g in groups:  # even-odd, a grid row at a time: the edges it crosses, then how many lie left of each spot
         for j, y in enumerate(ys):
             hit = (g[:, 1] <= y) != (g[:, 3] <= y)
@@ -188,10 +195,10 @@ def field(polys, union, reach):
     return got
 
 
-def inner_lines(polys, union, r):
+def inner_lines(polys, union, r, area=None):
     """The shrunk inside's outline for the preview: straight pieces (b0, k0, b1, k1, bi, ki) in beats / keys,
-    (bi, ki) a spot on its inner side."""
-    x0, y0, step, f, k = field(polys, union, 2.0 ** math.ceil(math.log2(max(r, 1e-6) * 1.25)))
+    (bi, ki) a spot on its inner side. area: see field."""
+    x0, y0, step, f, k = field(polys, union, 2.0 ** math.ceil(math.log2(max(r, 1e-6) * 1.25)), area)
     on = f >= r
     pieces = []
     # where the level is crossed on each grid line, by the values on either side

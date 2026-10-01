@@ -9,7 +9,7 @@ import numpy as np
 
 from files.lang import tr
 from notes.arc import arc_k, arc_points, ellipse_bezier
-from notes.areas import COLOURS, _maps, area_map  # (areas coloured by hand)
+from notes.areas import COLOURS, _maps, area_map, inside_loops  # (areas coloured by hand)
 from notes.bezier import sample
 from notes.pattern import (clean_pattern, clean_shape_formula, formed_path, formed_paths, has_formula,
                            moved_formulas)
@@ -19,7 +19,9 @@ from notes.paths import (TOP_KEY, dedupe, keep_longest, line_notes, loop_from_le
                          stretch_ends)
 from notes.hzbass import (HZ_DEFAULTS, KeyGrid, clean_hz, hz_gate, hz_of, off_cents, squares,  # (Hz bass: hzbass.py)
                           threshold)
-from notes.shrink import inner_lines, inner_rows  # (the outline gate's even band)
+from notes.shrink import (SAMPLES, inner_lines, inner_rows, merge as shrink_merge, minus as shrink_minus,
+                          near_rows as shrink_near, proportion as shrink_proportion,
+                          segments as shrink_segments)  # (the outline gate's even band)
 from notes.text import text_polys, threshold_spans
 
 # Custom shapes: how the inside is filled, and the gate of "spam" in beats (1/64 = 60 ticks at PPQ 960).
@@ -740,6 +742,82 @@ def area_spans(sh, ppq):
     return got
 
 
+def area_paint(sh, amap):
+    """Each area's colour as given by hand (-1: as normal, 0: empty, k: colour k); one more at the end for walls."""
+    paint = np.full(amap.count + 1, -1, np.int64)
+    seeds = np.asarray([a[:2] for a in sh["areas"]], float).reshape(-1, 2)
+    for lab, a in zip(amap.at(seeds[:, 0], seeds[:, 1]).tolist(), sh["areas"]):
+        if lab >= 0:
+            paint[lab] = a[2]
+    return paint
+
+
+def area_state(sh, amap):
+    """Each area's (filled, colour) as Fill / Spam make it (one more at the end for walls: not filled, -1)."""
+    paint = area_paint(sh, amap)
+    loops = [uv_points(sh["pts"], p) for p in fill_plan(sh)["polys"]]
+    inside = inside_loops(amap.spots[:, 0], amap.spots[:, 1], loops, bool(sh.get("union")))
+    filled = np.append(np.where(paint[:-1] >= 0, paint[:-1] > 0, inside), False)
+    return filled, np.append(np.where(paint[:-1] > 0, paint[:-1], 0), -1)
+
+
+def area_lines(sh):
+    """Every line of a custom shape that cuts areas (Fill / Spam loops and fill lines), (ax, ay, bx, by) in beats /
+    keys."""
+    return shrink_segments(fill_plan(sh)["polys"] + role_paths(sh)["cut"])
+
+
+def area_edges(sh, amap):
+    """The lines with a filled area on one side only ("Outline between colours": or two colours meeting), as
+    (ax, ay, bx, by) in beats / keys: where the outline gate's band grows in from."""
+    seg = area_lines(sh)
+    if not len(seg):
+        return seg
+    filled, colour = area_state(sh, amap)
+    a, b = uv_points(sh["pts"], seg[:, :2]), uv_points(sh["pts"], seg[:, 2:])
+    d = (b - a) * amap.k  # (in map cells)
+    ln = np.hypot(d[:, 0], d[:, 1])
+    ok = ln > 1e-9
+    n = np.column_stack([-d[:, 1], d[:, 0]]) / np.where(ok, ln, 1)[:, None] * 1.5 / amap.k
+    mid = (a + b) / 2
+    one, two = amap.at(*(mid + n).T), amap.at(*(mid - n).T)
+    differ = filled[one] != filled[two]
+    if sh.get("borders"):
+        differ |= filled[one] & filled[two] & (colour[one] != colour[two])
+    return seg[ok & differ]
+
+
+def area_inner(sh, ppq, g, keys):
+    """inner_ticks for coloured areas: what's filled (areas.py) shrunk by g ticks from area_edges."""
+    amap = shape_areas(sh)
+    if amap is None:
+        return np.zeros((0, 3), np.int64)
+    filled, _ = area_state(sh, amap)
+    lines = area_lines(sh)
+    k = shrink_proportion(fill_plan(sh)["polys"] + role_paths(sh)["cut"])
+    ys = [(q - 0.5 + (j + 0.5) / SAMPLES) for q in keys for j in range(SAMPLES)]
+    near = shrink_near(area_edges(sh, amap) * [1, k, 1, k], [y * k for y in ys], g / ppq)
+    ay, by = lines[:, 1], lines[:, 3]
+    out = []
+    for n, q in enumerate(keys):
+        got = []
+        for j in range(SAMPLES):
+            y = ys[n * SAMPLES + j]
+            s = lines[(ay <= y) != (by <= y)]
+            x = np.sort(s[:, 0] + (s[:, 2] - s[:, 0]) * (y - s[:, 1]) / (s[:, 3] - s[:, 1]))
+            if len(x) < 2:
+                continue
+            m = (x[:-1] + x[1:]) / 2
+            uv = uv_points(sh["pts"], np.column_stack([m, np.full(len(m), y)]))
+            on = filled[amap.at(uv[:, 0], uv[:, 1])]
+            got += shrink_minus(list(zip(x[:-1][on].tolist(), x[1:][on].tolist())), near[n * SAMPLES + j])
+        for a, b in shrink_merge(got):
+            s, e = math.floor(a * ppq + 0.5), math.floor(b * ppq + 0.5)
+            if e > s:
+                out.append((s, e, q))
+    return np.asarray(out, np.int64).reshape(-1, 3)
+
+
 def find_area_spans(sh, ppq):
     none = np.zeros((0, 4), np.int64)
     amap = shape_areas(sh)
@@ -748,11 +826,7 @@ def find_area_spans(sh, ppq):
     ps = [p for path in polys + cuts for _, p in path]
     if amap is None or not ps:
         return none
-    paint = np.full(amap.count + 1, -1, np.int64)  # each area's colour (-1: as normal; the last: walls)
-    seeds = np.asarray([a[:2] for a in sh["areas"]], float)
-    for lab, a in zip(amap.at(seeds[:, 0], seeds[:, 1]).tolist(), sh["areas"]):
-        if lab >= 0:
-            paint[lab] = a[2]
+    paint = area_paint(sh, amap)
     parts = [(np.asarray(p, float).reshape(-1, 2), i) for i, p in enumerate(polys)]
     parts += [(np.asarray(p, float).reshape(-1, 2), -1) for p in cuts]
     parts = [(p, i) for p, i in parts if len(p) > 1]
@@ -1153,6 +1227,8 @@ def inside_rows(sh, ppq):
     """The inside's stretches as (start, end, key) ticks (none when the shape can't be filled)."""
     if not fillable(sh["strokes"]):
         return np.zeros((0, 3), np.int64)
+    if has_areas(sh):
+        return merged_rows(area_spans(sh, ppq)[:, :3])
     return np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]
 
 
@@ -1208,12 +1284,17 @@ def inner_ticks(sh, ppq, g, spans):
     (shrink.inner_rows: a smaller copy of its own outline). Remembered."""
     keys = sorted(set(spans[:, 2].tolist()))
     key = (json.dumps([sh["strokes"], sh["pts"], sh.get("text")]), bool(sh.get("union")), ppq, g, keys[0], keys[-1])
+    if has_areas(sh):  # (what the coloured areas fill, shrunk from its own edge)
+        key += (json.dumps(sh["areas"]), bool(sh.get("borders")))
     got = _inner.get(key)
     if got is None:
         if len(_inner) > 100:
             _inner.clear()
-        loops, union = edge_loops(sh)
-        got = _inner[key] = inner_rows(loops, union, keys, g / ppq, ppq)
+        if has_areas(sh):
+            got = _inner[key] = area_inner(sh, ppq, g, keys)
+        else:
+            loops, union = edge_loops(sh)
+            got = _inner[key] = inner_rows(loops, union, keys, g / ppq, ppq)
     return got
 
 
@@ -1237,6 +1318,17 @@ def edge_inner(sh, ppq):
     if sh.get("edge_mode") == "sideways":
         return "rows", cut_out(spans, grow_inward(outline_notes(sh, ppq), spans, g))
     loops, union = edge_loops(sh)
+    if has_areas(sh):  # (what the coloured areas fill: its edges, and which spots are filled)
+        amap = shape_areas(sh)
+        if amap is None:
+            return None
+        filled, _ = area_state(sh, amap)
+
+        def inside(b, p):  # (beats, keys arrays -> filled)
+            uv = uv_points(sh["pts"], np.column_stack([b.ravel(), p.ravel()]))
+            return filled[amap.cell(uv[:, 0], uv[:, 1])].reshape(b.shape)
+        area = (json.dumps([sh["areas"], bool(sh.get("borders"))]), area_edges(sh, amap), inside)
+        return "lines", inner_lines(loops, union, g / ppq, area)
     return "lines", inner_lines(loops, union, g / ppq)
 
 
