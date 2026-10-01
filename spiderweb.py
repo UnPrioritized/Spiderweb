@@ -35,6 +35,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     velocity_formula.py the velocity pane's Formula tool settings (pattern, loops, its numbers)
     tool_window.py   what the Claw machine and Strum windows share (live preview, undo, the Knob dial)
     claw_window.py   the Claw machine window
+    strum_window.py  the Strum window (Start / End panels of knobs, each with its number box)
   roll/              the piano roll
     pianoroll.py     the piano roll canvas: view, hit testing, mouse editing
     roll_draw.py     painting the grid, notes, handles, keyboard, ruler

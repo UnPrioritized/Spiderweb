@@ -11,6 +11,7 @@ from notes.funnel import inside_out, turned_curve
 from notes.tumour import LINE_KINDS
 from roll.roll_shared import SHIFT
 from window.claw_window import open_claw
+from window.strum_window import open_strum
 from window.widgets import symmetry_menu
 
 
@@ -108,6 +109,7 @@ class ShapeMenu:
         if app.tumour_targets():
             item(tr("roll_menu.tumours"), "", app.open_tumours)
         item(tr("roll_menu.claw_machine"), tr("roll_menu.alt_w"), lambda: open_claw(app), keys=True)
+        item(tr("roll_menu.strum"), tr("roll_menu.alt_s"), lambda: open_strum(app), keys=True)
         if len(app.sels) >= 2:  # (greyed out, saying why, when something else is selected too)
             ok = app.can_join()
             item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
@@ -142,6 +144,7 @@ class ShapeMenu:
         if app.tumour_targets():
             item(tr("roll_menu.tumours"), "", app.open_tumours)
         item(tr("roll_menu.claw_machine"), tr("roll_menu.alt_w"), lambda: open_claw(app))
+        item(tr("roll_menu.strum"), tr("roll_menu.alt_s"), lambda: open_strum(app))
         ok = app.can_join()
         item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
              tr("roll_menu.ctrl_g"), app.join_selected, ok)

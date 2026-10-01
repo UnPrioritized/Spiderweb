@@ -35,6 +35,7 @@ from window.panel_pattern import PatternPanel
 from window.panel_polygon import PolygonPanel
 from window.panel_text import TextPanel
 from window.claw_window import open_claw
+from window.strum_window import open_strum
 from window.hz_preview import clean_settings as clean_preview
 from window.panel_tumour import TumourPanel
 from notes.joined import all_tumours, is_joined
@@ -127,6 +128,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.drawer = None
         self.claw_window = None
         self.claw_pos = ""  # where the claw machine window was last ("+x+y", remembered in the autosave)
+        self.strum_window = None
+        self.strum_pos = ""  # (the same for the strum window)
         self.hz_window = None  # the Hz bass window (hz_window.py)
         self.hz_clip = None  # notes copied in it (HzWindow.copy_notes)
         self.hz_pos = ""  # its size and place ("WxH+x+y", remembered in the autosave)
@@ -229,7 +232,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                          ("Control-g Control-G", self.join_selected),
                          ("Control-Shift-g Control-Shift-G", self.split_selected),
                          ("Control-l Control-L", self.turn_into_live),
-                         ("Alt-w Alt-W", lambda: open_claw(self)),
+                         ("Alt-w Alt-W", lambda: open_claw(self)), ("Alt-s Alt-S", lambda: open_strum(self)),
                          ("Control-v Control-V", self.paste), ("Control-h Control-H", lambda: self.flip(True)),
                          ("Control-j Control-J", lambda: self.flip(False)), ("Control-a Control-A", self.select_all),
                          ("Control-Left", lambda: self.rotate(False)), ("Control-Right", lambda: self.rotate(True))):
@@ -627,8 +630,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.sync_funnel()
         self.sync_list_selection()
         self.sync_line_fill()
-        if self.claw_window:
-            self.claw_window.sync()
+        for w in (self.claw_window, self.strum_window):
+            if w:
+                w.sync()
         if self.hz_window:
             self.hz_window.sync()
         if self.sel is not None:
@@ -1282,8 +1286,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def push_undo(self, state=None, name=None):
         """Remember the shapes (or `state`, shapes saved earlier as JSON) for Ctrl+Z; name = what the step does
         (the History panel)."""
-        if self.claw_window:
-            self.claw_window.settle()  # (the claw being tried out is kept first, as its own step)
+        for w in (self.claw_window, self.strum_window):
+            if w:
+                w.settle()  # (the claw / strum being tried out is kept first, as its own step)
         sc = self._scrub
         if sc and sc["active"]:  # stepping a number box: only its first step takes an undo step
             if sc["pushed"]:
@@ -1336,8 +1341,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self._restore(self.redo_stack, self.undo_stack)
 
     def _restore(self, src, dst):
-        if self.claw_window:
-            self.claw_window.settle()  # (so Ctrl+Z here takes back the claw being tried out)
+        for w in (self.claw_window, self.strum_window):
+            if w:
+                w.settle()  # (so Ctrl+Z here takes back the claw / strum being tried out)
         if not src:
             return
         hz_was = self.hz_window and self.hz_window.before_restore()
