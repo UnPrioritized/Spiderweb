@@ -1060,12 +1060,48 @@ class HzWindow(tk.Toplevel):
         line): its tune, typed. On empty space the menu waits for the double click time first (a double right
         click switches the tool), and there's none when there's nothing to pick."""
         hit = self.hit(e.x, e.y)
+        kept = self.kept_box() if len(self.sel) >= 2 and not (hit and hit[0] in ("in", "out")) else None
+        # inside the kept Select boxes: the menu for all they selected
+        if kept and boxes_side([self.box_rect(a) for a in kept], e.x, e.y, 0) == (0, 0):
+            if hit:
+                return self.show_box_menu(e)
+            if self.menu_wait:  # (empty space: a double right click still switches the tool)
+                self.after_cancel(self.menu_wait)
+            self.menu_wait = self.after(DOUBLE_MS, lambda: self.show_box_menu(e))
+            return
         if not hit:
             if self.menu_wait:
                 self.after_cancel(self.menu_wait)
             self.menu_wait = self.after(DOUBLE_MS, lambda: self.show_menu(e, None)) if self.pairs() else None
             return
         self.show_menu(e, hit)
+
+    def show_box_menu(self, e):
+        """Right-click inside the kept Select boxes with several notes selected: only what works on all of them at
+        once (user asked): tune, own Auto threshold, slides, delete."""
+        self.menu_wait = None
+        if len(self.sel) < 2:
+            return
+        first = min(self.sel)
+        hz = (self.target() or {}).get("hz") or {}
+        pairs = self.pairs()
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(label=tr("hz.box_selected", n=len(self.sel)), state="disabled")
+        menu.add_separator()
+        menu.add_command(label=tr("hz.box_tune"), command=lambda: self.type_tune(first))
+        if hz.get("auto") is not None:
+            menu.add_command(label=tr("hz.box_auto"), command=lambda: self.type_auto(first))
+            if any("auto" in self.tones[j] for j in self.sel):
+                menu.add_command(label=tr("hz.auto_shared", cents=f"{hz['auto']:g}"),
+                                 command=lambda: self.set_auto(first, None))
+        if pairs and all(self.link(a, b) for a, b in pairs):
+            menu.add_command(label=tr("hz.slide_remove"), command=lambda: self.set_slide(False))
+        else:
+            menu.add_command(label=tr("hz.slide_add"), command=lambda: self.set_slide(True),
+                             state="normal" if pairs else "disabled")
+        menu.add_separator()
+        menu.add_command(label=tr("hz.box_delete", n=len(self.sel)), accelerator="Del", command=self.delete_selected)
+        menu.tk_popup(e.x_root, e.y_root)
 
     def show_menu(self, e, hit):
         self.menu_wait = None

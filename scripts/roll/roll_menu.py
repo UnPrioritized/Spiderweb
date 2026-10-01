@@ -120,9 +120,44 @@ class ShapeMenu:
             label = (tr("roll_menu.split_back_into_the_shapes_it") if originals(sh) else
                      tr("roll_menu.split_into_separate_shapes"))
             item(label, tr("roll_menu.ctrl_shift_g"), lambda: app.split_pieces(i), keys=True)
+        # (with a stroke picked, the keys work on it)
+        self.group_items(m, item, keys, curve_keys, app.picked() is None)
+        try:
+            m.tk_popup(e.x_root, e.y_root)
+        finally:
+            m.grab_release()
+
+    def show_box_menu(self, e):
+        """Right-click inside the kept Select boxes with several shapes selected: only what works on all of them
+        at once (user asked; each shape's own options are left out)."""
+        app = self.app
+        m = tk.Menu(self, tearoff=0)
+
+        def item(label, key, fn, on=True, keys=True):
+            m.add_command(label=label, accelerator=key if keys else "", command=fn,
+                          state="normal" if on else "disabled")
+
+        m.add_command(label=tr("roll_menu.box_selected", n=len(app.sels)), state="disabled")
+        m.add_separator()
+        if app.tumour_targets():
+            item(tr("roll_menu.tumours"), "", app.open_tumours)
+        item(tr("roll_menu.claw_machine"), tr("roll_menu.ctrl_k"), lambda: open_claw(app))
+        ok = app.can_join()
+        item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
+             tr("roll_menu.ctrl_g"), app.join_selected, ok)
+        if app.live_problem() is None:
+            item(tr("roll_menu.turn_into_live_shape"), tr("roll_menu.ctrl_l"), app.turn_into_live)
+        self.group_items(m, item, True, True, True)
+        try:
+            m.tk_popup(e.x_root, e.y_root)
+        finally:
+            m.grab_release()
+
+    def group_items(self, m, item, keys, curve_keys, whole):
+        """The menu's part for everything selected: delete, duplicate, copy, paste, flip, turn."""
+        app = self.app
         n = len(app.sels)
         shapes = tr("roll_menu.shape") if n == 1 else tr("roll_menu.n_shapes", n=n)
-        whole = app.picked() is None  # (with a stroke picked, the keys work on it)
         item(tr("roll_menu.delete", shapes=shapes), tr("roll_menu.del"), app.delete_selected, keys=keys and whole)
         item(tr("roll_menu.duplicate", shapes=shapes), tr("roll_menu.ctrl_d"), app.duplicate, keys=True)
         item(tr("roll_menu.copy", shapes=shapes), tr("roll_menu.ctrl_c"), lambda: app.copy_selected(whole=True),
@@ -138,10 +173,6 @@ class ShapeMenu:
         item(tr("roll_menu.turn_90_left"), tr("roll_menu.ctrl_left"), lambda: app.rotate(False, whole=True), keys=whole)
         item(tr("roll_menu.turn_90_right"), tr("roll_menu.ctrl_right"), lambda: app.rotate(True, whole=True),
              keys=whole)
-        try:
-            m.tk_popup(e.x_root, e.y_root)
-        finally:
-            m.grab_release()
 
     def formula_menu(self, m, host=None):
         """"Formula ▸" for the selected curves (host: formula_host.py, default the piano roll's curves). The dots

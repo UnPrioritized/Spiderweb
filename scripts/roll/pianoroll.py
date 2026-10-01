@@ -988,7 +988,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return
         if sc["tick"] is None:
             i = None if self.draft else self.shape_at(sc["x"], sc["y"])  # (its notes count too)
-            if i is not None and sc["deselect"]:  # near a shape (or on its notes): its menu
+            kept = None if self.draft or len(self.app.sels) < 2 else self.kept_box()
+            if kept and sc["deselect"] and boxes_side([self.box_rect(a) for a in kept], sc["x"], sc["y"], 0) == (0, 0):
+                self.show_box_menu(e)  # inside the kept Select boxes: the menu for all they selected
+            elif i is not None and sc["deselect"]:  # near a shape (or on its notes): its menu
                 self.show_menu(e, i)
             elif sc["deselect"]:
                 self.cancel_draft()
