@@ -22,6 +22,7 @@ Its top edge drags to make the pane taller or shorter (remembered)."""
 
 import copy
 import math
+from fractions import Fraction
 import random
 import tkinter as tk
 from tkinter import ttk
@@ -29,7 +30,7 @@ from tkinter import ttk
 import numpy as np
 
 from files.lang import tr
-from files.mathexpr import calc, fmt
+from files.mathexpr import calc
 from files.snap import SNAPS, snap_beats, snap_text
 from notes.hzbass import (BEND, FX, FX_START, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, bend_of, bent_part,
                           group_count, line_at,
@@ -38,6 +39,7 @@ from roll.roll_shared import CTRL, SHIFT
 from window.widgets import Scrub
 
 # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
+REPEAT_MOST = 999  # Repeat every… [n] / [n]: the biggest number in either box
 REPEAT_LINE = "#18a048"  # where each repeat would start while the Repeat every… window is open
 FX_COLOR = {"volume": "#9b2d5f", "slant": "#8a3ff0", "groups": "#0a8f8f", "offpitch": "#d0189a", "noisy": "#8a5a14",
             "vibrato": "#00a5d8", "pitch": "#4b0082", "sweep": "#7f8c00", "wah": "#2c3e6b", "tremolo": "#e0607a",
@@ -776,44 +778,48 @@ class FxPane:
             win.redraw()
 
     def ask_repeat(self, name, x, y):
-        """The Repeat every… window: how long one repeat of the effect is, typed in beats (a sum like 1/3 too; drag
-        the label, Up / Down, wheel). While it's open the pane shows where each repeat would start (green lines).
-        OK / Enter = set_loop, Cancel / Escape = nothing."""
+        """The Repeat every… window: how long one repeat of the effect is, as a note length [n] / [n] like the snap
+        (1 / 4 = one beat; user). Each number can be typed, dragged (the label: the first one), Up / Down, wheel.
+        While it's open the pane shows where each repeat would start (green lines). OK / Enter = set_loop, Cancel /
+        Escape / the window's X = nothing."""
         if self.asking:
             self.asking.destroy()
         win = self.win
-        bar = float(win.app.beats)
-        most = 64 * bar
+        most = 64 * float(win.app.beats)
         top = self.asking = tk.Toplevel(win)
         top.title(tr("hz.fx_repeat_title", name=tr("hz.fx_" + name)))
         top.transient(win)
         top.resizable(False, False)
         f = ttk.Frame(top, padding=10)
         f.pack()
-        var = tk.StringVar(top, value=fmt(win.loops.get(name) or win.snap_beats() or 1.0))
+        now = Fraction((win.loops.get(name) or win.snap_beats() or 1.0) / 4).limit_denominator(REPEAT_MOST)
+        num = tk.StringVar(top, value=str(now.numerator))
+        den = tk.StringVar(top, value=str(now.denominator))
         row = ttk.Frame(f)
-        row.pack(anchor="w")
+        row.pack(anchor="w", pady=(0, 10))
         lb = ttk.Label(row, text=tr("hz.fx_repeat_every"))
         lb.pack(side="left")
-        entry = top.entry = ttk.Entry(row, textvariable=var, width=8)
-        entry.pack(side="left", padx=4)
-        ttk.Label(row, text=tr("hz.fx_repeat_unit"), foreground="#777").pack(side="left")
-        said = ttk.Label(f, foreground="#555")
-        said.pack(anchor="w", pady=(4, 8))
+        top.entry = ttk.Entry(row, textvariable=num, width=5, justify="center")
+        top.entry.pack(side="left", padx=(6, 4))
+        ttk.Label(row, text="/").pack(side="left")
+        top.under = ttk.Entry(row, textvariable=den, width=5, justify="center")
+        top.under.pack(side="left", padx=(4, 0))
         b = ttk.Frame(f)
         b.pack(anchor="e")
 
         def value():
+            """The length in beats, or None when the numbers aren't whole numbers 1.. or it's too long."""
             try:
-                v = float(calc(var.get()))
+                n, d = int(calc(num.get())), int(calc(den.get()))
             except Exception:  # (anything typed that isn't a number)
                 return None
-            return v if 1e-3 <= v <= most else None
+            v = 4.0 * n / d if 1 <= n <= REPEAT_MOST and 1 <= d <= REPEAT_MOST else None
+            return v if v and v <= most else None
 
         def shown(*_):
+            if not top.winfo_exists():
+                return
             v = self.trying = value()
-            said.config(text=tr("hz.fx_repeat_is", every=self.every_text(v), bars=f"{v / bar:.4g}") if v else
-                        tr("hz.fx_repeat_bad", most=f"{most:g}"))
             ok.config(state="normal" if v else "disabled")
             self.redraw()
 
@@ -826,14 +832,16 @@ class FxPane:
         def gone(e):
             if e.widget is top:
                 self.asking = self.trying = None
-                self.redraw()
+                if self.canvas.winfo_exists():  # (not when the Hz bass window itself is closing)
+                    self.redraw()
 
         ok = ttk.Button(b, text=tr("hz.fx_repeat_ok"), command=lambda: done(True))
         ok.pack(side="left", padx=(0, 4))
         ttk.Button(b, text=tr("hz.fx_repeat_cancel"), command=lambda: done(False)).pack(side="left")
-        grid = lambda: win.snap_beats() or 0.25
-        Scrub(win.app, [(entry, var, None)], lambda: (grid(), bar, grid() / 4), 1e-3, most, label=lb)
-        var.trace_add("write", shown)
+        Scrub(win.app, [(top.entry, num, None)], (1, 4, 1), 1, REPEAT_MOST, label=lb)
+        Scrub(win.app, [(top.under, den, None)], (1, 4, 1), 1, REPEAT_MOST)
+        num.trace_add("write", shown)
+        den.trace_add("write", shown)
         top.bind("<Return>", lambda e: done(True) if value() else None)
         top.bind("<Escape>", lambda e: done(False))
         top.bind("<Destroy>", gone)
@@ -842,8 +850,8 @@ class FxPane:
         top.protocol("WM_DELETE_WINDOW", lambda: done(False))
         shown()
         top.geometry(f"+{x}+{y}")
-        entry.focus_set()
-        entry.select_range(0, "end")
+        top.entry.focus_set()
+        top.entry.select_range(0, "end")
 
     def set_shape(self, name, kind):
         """A ready-made shape for one repeat of the effect (it starts repeating every beat if it didn't)."""

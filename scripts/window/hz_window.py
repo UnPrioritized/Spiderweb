@@ -1462,6 +1462,11 @@ class HzWindow(tk.Toplevel):
     def close(self):
         if self.settings_window and self.settings_window.winfo_exists():
             self.settings_window.destroy()
+        if self.fx.asking:  # (the Repeat every… window)
+            self.fx.asking.destroy()
+        for job in (self.box_timer, self.menu_wait):
+            if job:
+                self.after_cancel(job)
         self.preview.stop()
         self.sound(None)
         self.app.pvar["ppq"].trace_remove("write", self.ppq_trace)
