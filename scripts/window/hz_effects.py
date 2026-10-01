@@ -10,7 +10,7 @@ takes the effect off). Every change is one undo step of the main window, made wh
 Right-click > Repeat every…: a small window to type how long one repeat is (green lines in the pane show where
 each one would start while it's open); the effect's line becomes one repeat of that length, shown over and over
 (any copy grabbed changes them all; too close together to grab: a band); Shape: ready-made ones for a repeat.
-Ctrl+drag = a box that selects points (Ctrl+click one: in / out); dragging a selected point moves them all, Delete
+Ctrl+drag (with Select: a plain drag on empty space too) = a box that selects points (Ctrl+click one: in / out); dragging a selected point moves them all, Delete
 deletes them (none selected, the pane pressed last: the highlighted effect is taken off), Ctrl+C / Ctrl+V copy them and paste them at the mouse (into the highlighted effect, or the ones they
 came from; the points already there are replaced). The small square before a name that's on switches the effect off
 and on again (Bypass: its line is kept).
@@ -35,7 +35,7 @@ from files.snap import SNAPS, snap_beats, snap_text
 from notes.hzbass import (BEND, FX, FX_START, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, bend_of, bent_part,
                           group_count, line_at,
                           loop_off, loop_on, loop_shape, tones_span)
-from roll.roll_shared import CTRL, SHIFT
+from roll.roll_shared import BOX_STILL, CTRL, SELECT_CURSOR, SHIFT
 from window.widgets import Scrub
 
 # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
@@ -331,7 +331,8 @@ class FxPane:
                  self.win.tool.get() == "pencil" and not e.state & CTRL)
         self.canvas.config(cursor="hand2" if name else "fleur" if hit and hit[0] == "point" else
                            "sb_v_double_arrow" if hit and hit[0] == "bend" else "crosshair" if hit else
-                           self.win.pencil if draws else "")
+                           self.win.pencil if draws else
+                           SELECT_CURSOR if e.x >= self.win.kb_w and self.win.tool.get() == "select" else "")
         if name:
             every = self.win.loops.get(name)
             self.say(tr("hz.fx_%s_tip" % name) + (" " + tr("hz.fx_repeats", every=self.every_text(every))
@@ -377,6 +378,9 @@ class FxPane:
             self.drag = {"kind": "box", "x0": e.x, "y0": e.y, "had": set(self.sel)}
             return
         faint = self.on_faint(e.x, e.y) if hit is None else None
+        if hit is None and not faint and e.x >= win.kb_w and win.tool.get() == "select":  # Select: a box without
+            self.drag = {"kind": "box", "x0": e.x, "y0": e.y, "had": set(), "plain": True}  # Ctrl too (user: missed
+            return  # Ctrl+drag); it selects anew, a click without a drag selects / highlights nothing
         if hit is None and e.x >= win.kb_w and self.active in win.fxl and win.tool.get() == "pencil":
             every = win.loops.get(self.active)  # (a drag draws; a click clears the highlight on release, or on a
             self.drag = {"kind": "draw", "fx": self.active, "x0": e.x, "y0": e.y, "moved": False,  # faint line
@@ -507,6 +511,9 @@ class FxPane:
                 win.commit_fx(d["before"])
             return
         if d["kind"] == "box":
+            if d.get("plain") and max(abs(e.x - d["x0"]), abs(e.y - d["y0"])) < BOX_STILL:
+                self.active, self.sel = None, set()
+                return win.redraw()
             x0, x1, y0, y1 = sorted((d["x0"], e.x)) + sorted((d["y0"], e.y))
             self.sel = d["had"] | {(n, i) for n in self.grabbable() for x, y, i, _ in self.points(n)
                                    if x0 <= x <= x1 and y0 <= y <= y1}
