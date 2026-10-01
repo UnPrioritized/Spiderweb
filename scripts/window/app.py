@@ -212,7 +212,14 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.snap.trace_add("write", lambda *_: self.roll.request_redraw())
         self.hz_snap.trace_add("write", lambda *_: (self.hz_window and self.hz_window.redraw(),
                                                     self.schedule_autosave()))
-        self.bind_all("<F1>", lambda e: None if self.in_drawer(e) else self.open_help())
+        # Tk hands Alt (pressed alone, or with a key) and F10 to the Windows window menu, which then eats the next
+        # key or beeps (e.g. after an Alt-drag); only Alt+F4 (close) and Alt+Space (window menu) still go there
+        for seq in ("<Key-Alt_L>", "<KeyRelease-Alt_L>", "<Key-Alt_R>", "<KeyRelease-Alt_R>",
+                    "<Key-F10>", "<KeyRelease-F10>"):
+            self.tk.call("bind", "all", seq, "")
+        for seq in ("<Alt-Key>", "<Alt-KeyRelease>"):
+            self.tk.call("bind", "all", seq, 'if {"%K" in {F4 space}} {tk::WinMenuKey %W %N}')
+        self.bind_all("<F1>",lambda e: None if self.in_drawer(e) else self.open_help())
         for key, fn in (("<Control-z>", self.undo), ("<Control-y>", self.redo), ("<Control-s>", self.save_project)):
             self.bind_all(key, lambda e, fn=fn: None if self.in_drawer(e) else fn())
         self.bind_all("<space>", self.hotkey(self.toggle_play, main_only=True))  # (pop-ups: not the main playback)
@@ -222,7 +229,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                          ("Control-g Control-G", self.join_selected),
                          ("Control-Shift-g Control-Shift-G", self.split_selected),
                          ("Control-l Control-L", self.turn_into_live),
-                         ("Control-k Control-K", lambda: open_claw(self)),
+                         ("Alt-w Alt-W", lambda: open_claw(self)),
                          ("Control-v Control-V", self.paste), ("Control-h Control-H", lambda: self.flip(True)),
                          ("Control-j Control-J", lambda: self.flip(False)), ("Control-a Control-A", self.select_all),
                          ("Control-Left", lambda: self.rotate(False)), ("Control-Right", lambda: self.rotate(True))):

@@ -107,7 +107,7 @@ class ShapeMenu:
             item(tr("roll_menu.save_drawing_to_the_shape_library"), "", lambda: app.save_to_library(sh))
         if app.tumour_targets():
             item(tr("roll_menu.tumours"), "", app.open_tumours)
-        item(tr("roll_menu.claw_machine"), tr("roll_menu.ctrl_k"), lambda: open_claw(app), keys=True)
+        item(tr("roll_menu.claw_machine"), tr("roll_menu.alt_w"), lambda: open_claw(app), keys=True)
         if len(app.sels) >= 2:  # (greyed out, saying why, when something else is selected too)
             ok = app.can_join()
             item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
@@ -141,7 +141,7 @@ class ShapeMenu:
         m.add_separator()
         if app.tumour_targets():
             item(tr("roll_menu.tumours"), "", app.open_tumours)
-        item(tr("roll_menu.claw_machine"), tr("roll_menu.ctrl_k"), lambda: open_claw(app))
+        item(tr("roll_menu.claw_machine"), tr("roll_menu.alt_w"), lambda: open_claw(app))
         ok = app.can_join()
         item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
              tr("roll_menu.ctrl_g"), app.join_selected, ok)
