@@ -10,6 +10,15 @@ DRAG_PX = 4  # pixels of label dragging per step
 TIP_WIDTH = 560  # tooltips wrap longer lines at this width (at 100 % scaling), so a text needs no line breaks
 
 
+def grid_shown(w, on):
+    """Show / hide a gridded widget (where it was gridded before), only when that changes: placing a widget again
+    lays its window out again, which flashes while a number is stepped."""
+    if on and not w.winfo_manager():
+        w.grid()
+    elif not on and w.winfo_manager():
+        w.grid_remove()
+
+
 class Scrub:
     """Quick number changes for entry boxes: drag the label sideways, Up / Down in the box, or the
     mouse wheel over the box while it has the keyboard. Shift = big steps, Ctrl = fine steps.

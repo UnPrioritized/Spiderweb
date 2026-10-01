@@ -6,7 +6,7 @@ from tkinter import ttk
 from files.lang import tr
 from notes.funnel import funnel_reversed
 from files.mathexpr import calc, fmt
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, grid_shown
 
 # Funnel panel: (setting, label, [(value, text, tooltip)])
 FUNNEL_CHOICES = [
@@ -143,17 +143,15 @@ class FunnelPanel:
         # gates on, the wall one); the wall gate box only when the gates can differ
         start_box = self.funnel_entries["gate0"][1]
         boxes = [(start_box, spam or not vary), (self.funnel_arrow, spam and vary), (wall_box, vary)]
-        for w, _ in boxes:
-            w.pack_forget()
-        for w, on in boxes:
-            if on:
-                w.pack(side="left", padx=(0, 4), before=self.funnel_ticks)
+        if [on for _, on in boxes] != [bool(w.winfo_manager()) for w, _ in boxes]:  # (only when it changes: flashes)
+            for w, _ in boxes:
+                w.pack_forget()
+            for w, on in boxes:
+                if on:
+                    w.pack(side="left", padx=(0, 4), before=self.funnel_ticks)
         for key, on in (("gate", spam or past), ("vary", spam), ("change", spam and vary), ("follow", spam and vary)):
             for w in self.funnel_grid[key]:
-                if on:
-                    w.grid()
-                else:
-                    w.grid_remove()
+                grid_shown(w, on)
         self.funnel_gate_tip.text = (tr("panel_funnel.spam_gate_at_the_start_at") if vary else
                                      tr("panel_funnel.spam_gate_with_long_notes_the"))
         for key in ("change", "follow"):

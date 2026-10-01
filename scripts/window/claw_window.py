@@ -9,7 +9,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.claw import CLAW_DEFAULTS, COUNTS, MAX_COUNT, PERIODS, TRASHES, clean_claw
 from window.tool_window import Knob, ToolWindow
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, grid_shown
 
 MODES = [("time", tr("claw.by_time")), ("notes", tr("claw.by_notes")), ("keys", tr("claw.by_keys")),
          ("chords", tr("claw.by_chords")), ("random", tr("claw.random"))]
@@ -203,10 +203,7 @@ class ClawWindow(ToolWindow):
                 u.config(text=UNITS.get(c["mode"], ""))
         config(self.entries["cut"], state="normal" if c["shorten"] else "disabled")
         for w in self.cut_row:
-            if c["shorten"]:
-                w.grid()
-            else:
-                w.grid_remove()
+            grid_shown(w, c["shorten"])
 
     def on_knob(self, value, done):
         self.claw["dist"] = value

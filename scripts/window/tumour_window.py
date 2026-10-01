@@ -13,7 +13,7 @@ from notes.joined import shown_tumour, unify_tumours
 from notes.tumour import GRAPH_KEYS, TUMOUR_DEFAULTS, clean_graph
 from window.graph_window import GraphWindow
 from window.panel_custom import GAP_COLOR
-from window.widgets import LocalUndo, Scrub, Tooltip
+from window.widgets import LocalUndo, Scrub, Tooltip, grid_shown
 
 SHAPE_CHOICES = [("triangle", tr("tumour_window.triangle")), ("square", tr("tumour_window.square")),
                  ("circle", tr("tumour_window.circle")), ("parabola", tr("tumour_window.parabola"))]
@@ -287,10 +287,7 @@ class TumourWindow(tk.Toplevel):
         self.graph_btns["slant"].config(state="normal" if square else "disabled")
         # Slant only for square bumps, New random only for random sides (greyed while tumours are off, user)
         for w in self.slant_row:
-            if tm["shape"] == "square":
-                w.grid()
-            else:
-                w.grid_remove()
+            grid_shown(w, tm["shape"] == "square")
         if (tm["side"] == "random") != bool(self.reroll.winfo_manager()):
             if tm["side"] == "random":
                 self.reroll.pack(side="left", padx=(8, 0))

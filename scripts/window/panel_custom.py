@@ -14,7 +14,7 @@ from files.mathexpr import calc, fmt
 from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
 from notes.hzbass import AUTO, auto_picks, shortest_gate
 from window.hz_window import open_hz
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, grid_shown
 
 GAP_COLOR = "#c06000"  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
 FILL_CHOICES = [
@@ -273,10 +273,7 @@ class CustomPanel:
         for value, box in self.apart_boxes.items():
             box.config(state="readonly" if fill == value else "disabled",
                        style="Gap.TCombobox" if lonely and fill == value else "TCombobox")
-            if fill == value:  # (only next to the chosen one)
-                box.grid()
-            else:
-                box.grid_remove()
+            grid_shown(box, fill == value)  # (only next to the chosen one)
             self.apart_tips[value].text = APART_TIP + (APART_NEEDS if lonely else "")
         outline = fill in ("empty", "outline_spam") or apart  # (Fill / Spam: only with "Outline")
         self.edge_entry.config(state="normal" if outline else "disabled")
