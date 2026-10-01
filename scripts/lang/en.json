@@ -1,12 +1,6 @@
 {
  "join_split.lines_polylines_freehand_strokes_curves": "lines, polylines, freehand strokes, curves and arcs",
- "join_split.joins_the_selected_shapes_into_one": "Joins the selected shapes into one Curve shape (ends that touch become one line with a corner).\nShortcut: Ctrl+G",
- "join_split.splits_a_joined_curve_back_into": "Splits a joined curve back into its pieces, or a custom shape (like one drawn with Live shape)\ninto its separate drawings.\nShortcut: Ctrl+Shift+G",
- "join_split.to_cut_a_line_in_two": "To cut a line in two where you want: right-click it there → Split here.",
- "join_split.turns_the_selected_shapes_into_one": "Turns the selected shapes into one live shape (a custom shape), so it can be filled.\nCurves stay curves, arcs stay arcs, and the notes stay the same.\nSplit into separate shapes gives the old shapes back (until the drawing is changed).\nShortcut: Ctrl+L",
- "join_split.lines_can_t_be_filled_turn": "Lines can't be filled. Turn it into a live shape first (Ctrl+L, the button under the shape\nlist, or right-click → Turn into live shape): then Fill, Spam and Outline spam work.",
- "join_split.join_shapes_into_one_curve": "Join shapes into one curve",
- "join_split.split_into_separate_shapes": "Split into separate shapes",
+ "join_split.lines_can_t_be_filled_turn": "Lines can't be filled. Turn it into a live shape first (Ctrl+L, or right-click → Turn into live shape): then Fill, Spam and Outline spam work.",
  "join_split.turn_into_live_shape": "Turn into live shape",
  "join_split.inside": "Inside",
  "join_split.empty": "Empty",
@@ -1220,7 +1214,7 @@
  "help.turn_live.title": "Turn into live shape (Ctrl+L)",
  "help.turn_live.tip": "Select lines, curves, arcs (or custom shapes) and press Ctrl+L: they become one live shape, so they can be filled. Split into separate shapes (Ctrl+Shift+G) gives them back.",
  "help.turn_live.text": [
-  "Lines can't be filled, custom shapes can. Select one or more lines, polylines, freehand strokes, curves or arcs (custom shapes too) and press Ctrl+L, click Turn into live shape under the shape list, or right-click one → Turn into live shape. They become one live shape (a custom shape) with each of them as a stroke of its own kind: curves stay curves with their anchors, arcs stay arcs, a straightened freehand stroke stays straightened. Then Fill, Spam and Outline spam work (see Inside fill), and its strokes can be edited like any live shape's.",
+  "Lines can't be filled, custom shapes can. Select one or more lines, polylines, freehand strokes, curves or arcs (custom shapes too) and press Ctrl+L, or right-click one → Turn into live shape. They become one live shape (a custom shape) with each of them as a stroke of its own kind: curves stay curves with their anchors, arcs stay arcs, a straightened freehand stroke stays straightened. Then Fill, Spam and Outline spam work (see Inside fill), and its strokes can be edited like any live shape's.",
   "[clip:turn_live-fill]",
   "",
   "The notes stay the same, and so do the velocities (where shapes play at the same time, the first selected one's win). With Multi channel each stroke still remembers the shape it came from, so strokes that clash still get channels of their own; the shape list says how many channels a shape uses (orange above 15).",
@@ -1437,9 +1431,9 @@
  ],
  "help.symmetric.words": "mirror arch s-curve symmetry",
  "help.join.title": "Join and split",
- "help.join.tip": "Select several lines, polylines, freehand strokes, curves or arcs, then press Ctrl+G (or Join shapes into one curve under the shape list, or right-click). Right-click any of them → Split here cuts it in two.",
+ "help.join.tip": "Select several lines, polylines, freehand strokes, curves or arcs, then press Ctrl+G (or right-click). Right-click any of them → Split here cuts it in two.",
  "help.join.text": [
-  "Join: select two or more lines, polylines, freehand strokes, curves or arcs, then press Ctrl+G or click Join shapes into one curve under the shape list (or right-click one of them → Join shapes into one curve). They become one Curve shape: ends that touch are joined (with a corner there), and the curve's anchors and handles can be edited like any curve. Freehand strokes are turned into a smooth curve that follows them closely.",
+  "Join: select two or more lines, polylines, freehand strokes, curves or arcs, then press Ctrl+G (or right-click one of them → Join shapes into one curve). They become one Curve shape: ends that touch are joined (with a corner there), and the curve's anchors and handles can be edited like any curve. Freehand strokes are turned into a smooth curve that follows them closely.",
   "[clip:join-touching]",
   "",
   "Shapes that don't touch stay separate pieces of the same curve: nothing is drawn between them and they make no notes there, but they're selected, moved, flipped and copied together. Each piece works like a shape of its own (its own row of tumours, range, graphs and last note). The squares at a piece's ends can't be removed.",
@@ -1451,7 +1445,7 @@
   "Split here: right-click a line, polyline, freehand stroke, curve or arc where you want to cut it → Split here. On an anchor or a polyline point it's cut there; anywhere else a point is added there first. An arc becomes two arcs of the same circle; a freehand stroke is cut at its nearest drawn point (a straightened one is cut from the straightened line, and the halves are no longer straightened, so they look the same). Each half keeps the velocities it had, and its tumours stay where they were: each half gets its part of the Range and graphs (Fit is turned off, keeping the distance it had worked out). Only a bump across the cut is cut off, random sides are picked again and Lead in starts again at the cut.",
   "[clip:join-split-here]",
   "",
-  "Split into separate shapes (Ctrl+Shift+G, under the shape list, or right-click): a joined curve goes back to one curve per piece (and per shape that kept its own tumours). A custom shape, like one drawn with Live shape, splits into one shape per group of strokes that touch each other. Each part keeps the velocities it had.",
+  "Split into separate shapes (Ctrl+Shift+G, or right-click): a joined curve goes back to one curve per piece (and per shape that kept its own tumours). A custom shape, like one drawn with Live shape, splits into one shape per group of strokes that touch each other. Each part keeps the velocities it had.",
   "[clip:join-split-shapes]",
   "",
   "Notes: a joined curve plays like one curve, so where two lines meet it doesn't start a new note the way two separate lines would."

@@ -29,30 +29,11 @@ def span(sh):
 
 
 JOIN_KINDS = tr("join_split.lines_polylines_freehand_strokes_curves")
-JOIN_TIP = tr("join_split.joins_the_selected_shapes_into_one")
-SPLIT_TIP = tr("join_split.splits_a_joined_curve_back_into")
-SPLIT_HERE = tr("join_split.to_cut_a_line_in_two")
-LIVE_TIP = tr("join_split.turns_the_selected_shapes_into_one")
 LINE_FILL_TIP = tr("join_split.lines_can_t_be_filled_turn")
 
 
 class JoinSplit:
     """Mixed into App."""
-
-    def _build_join(self, box):
-        """The Shapes box's Join / Split buttons (also in the right-click menu)."""
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=(4, 0))
-        self.join_btn = ttk.Button(row, text=tr("join_split.join_shapes_into_one_curve"), command=self.join_selected)
-        self.join_btn.pack(side="left")
-        self.split_btn = ttk.Button(row, text=tr("join_split.split_into_separate_shapes"), command=self.split_selected)
-        self.split_btn.pack(side="left", padx=(4, 0))
-        self.join_tip, self.split_tip = Tooltip(self.join_btn, JOIN_TIP), Tooltip(self.split_btn, SPLIT_TIP)
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=(4, 0))
-        self.live_btn = ttk.Button(row, text=tr("join_split.turn_into_live_shape"), command=self.turn_into_live)
-        self.live_btn.pack(side="left")
-        self.live_tip = Tooltip(self.live_btn, LIVE_TIP)
 
     def _build_line_fill(self):
         """A greyed-out Inside row for lines: says how to fill them."""
@@ -136,18 +117,6 @@ class JoinSplit:
             return (tr("join_split.it_s_all_one_piece_nothing") if sh["kind"] in ("curve", "custom")
                     else tr("join_split.only_joined_curves_and_custom_shapes"))
         return None
-
-    def sync_join(self):
-        """Join / Split buttons greyed out (their tooltip says why) when they can't be used."""
-        for btn, tip, text, problem in ((self.join_btn, self.join_tip, JOIN_TIP, self.join_problem()),
-                                        (self.split_btn, self.split_tip, SPLIT_TIP, self.split_problem())):
-            btn.state(["disabled"] if problem else ["!disabled"])
-            tip.text = f"{text}\n\n{problem}" if problem else text
-            if btn is self.split_btn:
-                tip.text += "\n" + SPLIT_HERE
-        problem = self.live_problem()
-        self.live_btn.state(["disabled"] if problem else ["!disabled"])
-        self.live_tip.text = f"{LIVE_TIP}\n\n{problem}" if problem else LIVE_TIP
 
     def split_selected(self):
         problem = self.split_problem()

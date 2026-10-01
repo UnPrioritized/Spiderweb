@@ -508,7 +508,6 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         ttk.Button(btns, text=tr("app.duplicate"), command=self.duplicate).pack(side="left")
         ttk.Button(btns, text=tr("app.delete"), command=self.delete_selected).pack(side="left", padx=4)
         ttk.Button(btns, text=tr("app.delete_all"), command=self.delete_all).pack(side="left")
-        self._build_join(box)
 
     def _build_shape_settings(self, side):
         self.settings = ttk.LabelFrame(side, text=tr("app.new_shape_defaults"), padding=6)
@@ -617,7 +616,6 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self.sync_custom()
         self.sync_funnel()
         self.sync_list_selection()
-        self.sync_join()
         self.sync_line_fill()
         if self.claw_window:
             self.claw_window.sync()
@@ -806,7 +804,6 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
             if chans[i] > MANY_CHANNELS:  # (past this the note colours and channel numbers repeat)
                 self.listbox.itemconfig(i, foreground=GAP_COLOR, selectforeground="#ffd9b0")
         self.sync_list_selection()
-        self.sync_join()
         self.roll.request_redraw()
         self.update_status()
         self.schedule_autosave()
