@@ -14,7 +14,8 @@ from tkinter import ttk, messagebox
 import numpy as np
 
 from files.lang import tr
-from notes.custom import CUSTOM_DEFAULTS, custom_note_count, tracks_apart
+from notes.areas import COLOURS
+from notes.custom import CUSTOM_DEFAULTS, capped_colours, custom_note_count, tracks_apart
 from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
@@ -151,6 +152,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self._loading = False
         self._autosave_job = None
         self._notes_cache = {}
+        self.colours_wanted = []  # per shape, how many colours (tracks) its notes ask for (shapes_changed)
         self._notes_worked = 0  # shapes whose notes had to be worked out (not remembered)
         self._notes_time = 0.0  # how long that took the last time
         self._late_notes = None  # while dragging: notes left until the mouse rests
@@ -810,6 +812,13 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             else:
                 self.split_box.pack_forget()
         got = [self.notes_tracks(sh) for sh in self.shapes]
+        # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
+        # merged into the last (pasted notes keep their tracks)
+        wanted = [0 if t is None or "notes" in sh else len(np.unique(t)) for sh, (_, t) in zip(self.shapes, got)]
+        if wanted != self.colours_wanted:
+            self.colours_wanted = wanted
+            self.after_idle(self.sync_custom)  # (the panel's warning)
+        got = [(n, capped_colours(t) if w > COLOURS else t) for (n, t), w in zip(got, wanted)]
         self.rendered, self.slot_count = render([n for n, _ in got], self.channel_mode.get(), self.channel_split,
                                                 [t for _, t in got], [tracks_apart(sh) for sh in self.shapes])
         if self._notes_worked != worked:

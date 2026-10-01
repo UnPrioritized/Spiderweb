@@ -767,9 +767,10 @@ def area_lines(sh):
     return shrink_segments(fill_plan(sh)["polys"] + role_paths(sh)["cut"])
 
 
-def area_edges(sh, amap):
+def area_edges(sh, amap, borders_only=False):
     """The lines with a filled area on one side only ("Outline between colours": or two colours meeting), as
-    (ax, ay, bx, by) in beats / keys: where the outline gate's band grows in from."""
+    (ax, ay, bx, by) in beats / keys: where the outline gate's band grows in from. borders_only: just the lines
+    with two different colours on their sides."""
     seg = area_lines(sh)
     if not len(seg):
         return seg
@@ -791,9 +792,8 @@ def area_edges(sh, amap):
     n = np.column_stack([-d[:, 1], d[:, 0]]) / np.where(ok, ln, 1)[:, None] * 1.5 / amap.k
     mid = (a + b) / 2
     one, two = amap.at(*(mid + n).T), amap.at(*(mid - n).T)
-    differ = filled[one] != filled[two]
-    if sh.get("borders"):
-        differ |= filled[one] & filled[two] & (colour[one] != colour[two])
+    meet = filled[one] & filled[two] & (colour[one] != colour[two])
+    differ = meet if borders_only else (filled[one] != filled[two]) | (meet & bool(sh.get("borders")))
     keep = np.flatnonzero(ok & differ)
     if not len(keep):
         return seg[keep]
@@ -1074,35 +1074,43 @@ def colour_at(notes, spans, colours):
     return np.where(ok, col[np.maximum(i, 0)], 0).astype(np.int64)
 
 
-def border_parts(spans, colours):
-    """Fill "Outline between colours": the parts of the (start, end, key) stretches where another colour (or
-    nothing) is next to them, on one side of each border (the higher colour number's), like edge_parts."""
-    parts = []
-    for k in np.unique(colours).tolist():
-        mine, cover = spans[colours == k], spans[colours >= k]
-        parts += [cut_out(mine, shifted(cover, -1)), cut_out(mine, shifted(cover, 1))]
-        ks, ss, es = merged_by_key(mine)
-        for at, side in ((ss, np.column_stack([ss - 1, ss, ks])), (es - 1, np.column_stack([es, es + 1, ks]))):
-            open_ = ~covered(side, cover)
-            parts.append(np.column_stack([at, at + 1, ks])[open_])
-    return np.concatenate(parts).astype(np.int64).reshape(-1, 3)
+def border_lines(sh, ppq):
+    """"Outline between colours": the lines where two colours meet (area_edges) as notes, like a drawn line's: on
+    every key row it crosses, from where it comes into the row to where it leaves, (start, end, key) ticks. The
+    border is where its line is (user: going by colour number, the outline switched sides along a flat border
+    where the colours beside it changed)."""
+    amap = shape_areas(sh)
+    seg = area_edges(sh, amap, borders_only=True) if amap is not None else np.zeros((0, 4))
+    if not len(seg):
+        return np.zeros((0, 3), np.int64)
+    up = seg[:, 1] <= seg[:, 3]
+    xa, ya = np.where(up, seg[:, 0], seg[:, 2]), np.where(up, seg[:, 1], seg[:, 3])  # (a = the lower end)
+    xb, yb = np.where(up, seg[:, 2], seg[:, 0]), np.where(up, seg[:, 3], seg[:, 1])
+    q0, q1 = np.floor(ya + 0.5).astype(np.int64), np.floor(yb + 0.5).astype(np.int64)  # (rows it passes)
+    n = q1 - q0 + 1
+    i = np.repeat(np.arange(len(seg)), n)
+    q = q0[i] + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
+    flat = ya[i] == yb[i]
+    lo, hi = np.maximum(ya[i], q - 0.5), np.minimum(yb[i], q + 0.5)
+    keep = flat | (hi > lo)  # (in the row, not just touching its edge)
+    i, q, lo, hi, flat = i[keep], q[keep], lo[keep], hi[keep], flat[keep]
+    dy = np.where(flat, 1, yb[i] - ya[i])
+    x0 = np.where(flat, xa[i], xa[i] + (xb[i] - xa[i]) * (lo - ya[i]) / dy)
+    x1 = np.where(flat, xb[i], xa[i] + (xb[i] - xa[i]) * (hi - ya[i]) / dy)
+    s = np.floor(np.minimum(x0, x1) * ppq + 0.5).astype(np.int64)
+    e = np.maximum(np.floor(np.maximum(x0, x1) * ppq + 0.5).astype(np.int64), s + 1)
+    return merged_rows(np.column_stack([s, e, q]))
 
 
-def colour_edges(notes, colours):
-    """Spam "Outline between colours": which notes aren't wholly covered by notes of their own or a higher colour
-    number on the key above / below, just before or just after (one side of each border, like on_edge). Notes, like
-    on_edge: the exact stretches end inside the spam grid's last notes, which put an extra note of every row's
-    outer edge in the outline too (user)."""
-    out = np.zeros(len(notes), bool)
-    for k in np.unique(colours).tolist():
-        at = colours == k
-        mine, cover = notes[at], notes[colours >= k]
-        s, e = mine[:, 0:1], mine[:, 1:2]
-        before = np.hstack([s - 1, s, mine[:, 2:3]])
-        after = np.hstack([e, e + 1, mine[:, 2:3]])
-        out[at] = ~(covered(mine, shifted(cover, -1)) & covered(mine, shifted(cover, 1)) &
-                    covered(before, cover) & covered(after, cover))
-    return out
+def border_parts(spans, lines):
+    """Fill "Outline between colours": the parts of the filled (start, end, key) stretches the colour border lines
+    (border_lines) cross."""
+    return cut_out(spans, cut_out(spans, lines))
+
+
+def colour_edges(notes, lines):
+    """Spam "Outline between colours": which notes a colour border line (border_lines) crosses."""
+    return ~covered(notes, cut_out(notes, lines))
 
 
 def centre_colours(edges, q, union, colour):
@@ -1578,7 +1586,7 @@ def _notes_groups(sh, ppq):
                 ks, ss, es = merged_by_key(thicker(sh, outline, rows, g, ppq))
                 outline = np.column_stack([ss, es, ks]).astype(np.int64).reshape(-1, 3)
             if area is not None and sh.get("borders"):
-                outline = merged_rows(np.concatenate([outline, border_parts(spans, area)]))
+                outline = merged_rows(np.concatenate([outline, border_parts(spans, border_lines(sh, ppq))]))
             if area is None:
                 inside = cut_out(notes, outline)
                 ids = np.ones(len(inside), np.int64)
@@ -1611,7 +1619,7 @@ def _notes_groups(sh, ppq):
         else:  # (the even band: every note not wholly in the shrunk inside)
             edge = on_edge(notes) | ~covered(notes, inner_ticks(sh, ppq, g, rows))
         if area is not None and sh.get("borders"):
-            edge[:len(main)] |= colour_edges(main, ids[:len(main)])
+            edge[:len(main)] |= colour_edges(main, border_lines(sh, ppq))
         inner = 1 if ids is None else 1 + ids
         return (np.concatenate([notes, lines]),
                 np.concatenate([np.where(edge, 0, inner), np.where(lc > 0, 1 + lc, 0)]).astype(np.int64))
@@ -1628,6 +1636,14 @@ def tracks_apart(sh):
         return cycling(sh)
     return ("notes" in sh or bool(sh.get("apart") and sh.get("fill") in ("fill", "spam")) or cycling(sh)
             or has_areas(sh) and any(a[2] for a in sh["areas"]) or coloured_strokes(sh))
+
+
+def capped_colours(groups):
+    """A shape's groups (custom_notes_groups) kept to COLOURS colours (user: a shape never has more than 15, like a
+    MIDI player's colours; the outline and the shape's own fill count too): the groups past the 15th used are
+    merged into the 15th, so none wraps round onto another's colour."""
+    ids = np.unique(groups)
+    return groups if len(ids) <= COLOURS else np.minimum(groups, ids[COLOURS - 1])
 
 
 def merged_by_key(notes):

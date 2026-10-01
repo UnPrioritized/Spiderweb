@@ -173,6 +173,7 @@
  "panel_custom.overlaps_cancel_out": "Overlaps cancel out",
  "panel_custom.borders": "Outline between colours",
  "panel_custom.borders_tip": "Where two areas of different colours meet (coloured in the drawer's Areas tool), the notes there go to the outline too. Off: the outline is only where the filled part ends.",
+ "panel_custom.too_many_colours": "This shape needs {n} colours, but a shape can have at most {most} (the outline and the plain fill count too). The extra colours share the last one.",
  "panel_custom.normal_outline": "Normal / Outline",
  "panel_custom.normal": "Normal",
  "panel_custom.outline": "Outline",

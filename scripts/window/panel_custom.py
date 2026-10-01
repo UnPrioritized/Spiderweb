@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 
 from files.lang import tr
+from notes.areas import COLOURS
 from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, gap_lines, hz_gate,
                           join_strokes, map_stroke, normalize_areas, normalize_strokes, open_paths)
 from window.drawer import Drawer, clean_name, library_names, load_drawing, save_shape
@@ -93,6 +94,10 @@ class CustomPanel:
                                            command=lambda: self.set_custom("borders", self.borders_var.get()))
         self.custom_rows.append((self.borders_box, dict(anchor="w", padx=(20, 0), pady=(1, 0))))
         Tooltip(self.borders_box, tr("panel_custom.borders_tip"))
+        # more colours than a shape can have (outline and own fill count): the extra ones merged into the last
+        self.colours_warn = ttk.Label(opts, text="", foreground=GAP_COLOR, font=("Segoe UI", 8),
+                                      wraplength=int(HZ_WRAP * self.scale), justify="left")
+        self.custom_rows.append((self.colours_warn, dict(anchor="w", padx=(20, 0))))
         g = self.gate_row = ttk.Frame(opts)
         self.custom_rows.append((g, dict(anchor="w", padx=(20, 0))))
         lb = ttk.Label(g, text=tr("panel_custom.gate"))
@@ -294,7 +299,11 @@ class CustomPanel:
         self._loading = False
         self.edge_mode_box.config(state="readonly" if outline and tgts[0].get("edge") else "disabled")
         self.cancel_box.config(state="normal" if fill in ("fill", "spam") and not text else "disabled")
-        rows = {self.gate_row: spam and not hz, self.hz_row: spam, self.hz_info: self.hz_short_on,
+        wanted = max([self.colours_wanted[i] for i, s in enumerate(self.shapes) if any(s is t for t in tgts)
+                      and i < len(self.colours_wanted)] or [0])
+        if wanted > COLOURS:
+            self.colours_warn.config(text=tr("panel_custom.too_many_colours", n=wanted, most=COLOURS))
+        rows = {self.colours_warn: wanted > COLOURS, self.gate_row: spam and not hz, self.hz_row: spam, self.hz_info: self.hz_short_on,
                 self.hz_stale: self.hz_stale_on, self.ends_row: spam and not hz,
                 self.start_row: spam and not hz and ends != "stretch", self.edge_row: outline,
                 self.edge_mode_row: outline and bool(tgts[0].get("edge")),
