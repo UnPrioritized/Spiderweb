@@ -855,16 +855,23 @@ def row_pieces(edges, q, union, colour):
     right_full[:-1] = joined[1:] & filled[1:]
     left = np.where(left_full, xm[pi], xl[pi])
     right = np.where(right_full, xm[pi + 1], xr[pi + 1])
+    lo_, hi_, k, tall = left[filled], right[filled], group[filled], (y1 - y0)[order][pi][filled]
+    if len(set(k.tolist())) <= 1:
+        return [(s, e, int(k[0])) for s, e in merge_spans(lo_, hi_)] if len(k) else []
+    # colours overlapping in the row (pieces from different slices of it): each bit of time goes to the piece that
+    # fills the most of the row's height there, so a thin sliver by a line can't take the whole row
+    at = np.unique(np.concatenate([lo_, hi_]))
+    a, b = at[:-1], at[1:]
+    m = (a + b) / 2
+    cover = (lo_[None, :] <= m[:, None]) & (hi_[None, :] >= m[:, None])
+    best = np.where(cover, tall[None, :], -1.0).argmax(1)
+    has = cover.any(1)
     out = []
-    for k in np.unique(group[filled]).tolist():
-        pick = filled & (group == k)
-        out += [(s, e, k) for s, e in merge_spans(left[pick], right[pick])]
-    out.sort()
-    for i in range(len(out) - 1):  # two colours overlapping a little (a slanted line between them): cut halfway
-        (a0, a1, ka), (b0, b1, kb) = out[i], out[i + 1]
-        if ka != kb and a0 < b0 < a1 <= b1:
-            h = (b0 + a1) / 2
-            out[i], out[i + 1] = (a0, h, ka), (h, b1, kb)
+    for s, e, c in zip(a[has].tolist(), b[has].tolist(), k[best[has]].tolist()):
+        if out and out[-1][2] == c and out[-1][1] >= s:
+            out[-1] = (out[-1][0], e, c)
+        else:
+            out.append((s, e, c))
     return out
 
 
