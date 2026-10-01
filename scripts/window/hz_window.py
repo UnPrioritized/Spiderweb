@@ -48,7 +48,7 @@ FAINT = "#f0a0a0"  # behind the red line: each repeat's own pitch
 GREEN = "#18a048"  # a note's exact tone (the middle of its row)
 # Auto gates: the threshold around a note's tone, (fill, edge) when it gets fixed / mixed gates
 BAND_FIXED, BAND_MIXED = ("#8ee0a4", "#18a048"), ("#ffc27a", "#c06000")
-GATE_MODES = ("mixed", "fixed", "auto")  # the Gates dropdown's choices, in order
+GATE_MODES = ("auto", "mixed", "fixed")  # the Gates dropdown's choices, in order
 TUNE_ROW = 20  # px: rows at least this tall show the exact tone, and the red line can be dragged up / down
 POS = r"\d+x\d+\+-?\d+\+-?\d+"  # a remembered size and place
 try:  # how quick a second click has to be to make a double click (Windows' setting)
@@ -228,8 +228,8 @@ class HzWindow(tk.Toplevel):
         self.menu_wait = None  # a right click on empty space: its menu, waiting to see if it's a double click
         c.bind("<Motion>", self.on_motion)
         c.bind("<MouseWheel>", self.on_wheel)
-        c.bind("<Delete>", lambda e: (self.fx.delete_selected() if self.fx.sel else self.delete_selected())
-               or "break")  # (effect points selected: they go)
+        c.bind("<Delete>", lambda e: (self.fx.delete_key() or self.delete_selected())
+               or "break")  # (effect points selected: they go; none, the pane pressed last: the highlighted effect)
         for k in ("<Control-c>", "<Control-C>"):  # (effect points selected: they're copied; else the main window's)
             c.bind(k, lambda e: "break" if self.fx.copy_points() else None)
         for k in ("<Control-v>", "<Control-V>"):
@@ -804,6 +804,7 @@ class HzWindow(tk.Toplevel):
 
     def on_press(self, e):
         self.canvas.focus_set()
+        self.fx.pressed = False  # (Delete is for the notes now)
         if self.fx.sel:  # (the effect points selected aren't any more)
             self.fx.sel = set()
             self.fx.redraw()

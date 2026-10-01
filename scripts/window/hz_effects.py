@@ -3,13 +3,15 @@
 On the left the effects, each in its own colour. Clicking a name puts that effect on the Hz bass: one line over all
 the notes, through points at beats, 0 % at the bottom, 100 % at the top (flat before the first point and after the
 last). Clicking a name that's on highlights it: its line is in full colour and the only one that can be grabbed, the
-others are faint; with none highlighted they're all in full colour and the nearest one is grabbed.
+others are faint (a press on a faint line adds a point to the highlighted one); with none highlighted they're all
+in full colour and the nearest one is grabbed.
 Drag a point to move it, press on the line for a new point, double click a point to delete it (the last point
 takes the effect off). Every change is one undo step of the main window, made when the mouse is let go.
-Right-click > Repeat every: the effect's line becomes one repeat of that length, shown over and over (any copy
-grabbed changes them all; too close together to grab: a band); Shape: ready-made ones for a repeat.
+Right-click > Repeat every…: a small window to type how long one repeat is (green lines in the pane show where
+each one would start while it's open); the effect's line becomes one repeat of that length, shown over and over
+(any copy grabbed changes them all; too close together to grab: a band); Shape: ready-made ones for a repeat.
 Ctrl+drag = a box that selects points (Ctrl+click one: in / out); dragging a selected point moves them all, Delete
-deletes them, Ctrl+C / Ctrl+V copy them and paste them at the mouse (into the highlighted effect, or the ones they
+deletes them (none selected, the pane pressed last: the highlighted effect is taken off), Ctrl+C / Ctrl+V copy them and paste them at the mouse (into the highlighted effect, or the ones they
 came from; the points already there are replaced). The small square before a name that's on switches the effect off
 and on again (Bypass: its line is kept).
 A repeating effect can have an amount line (right-click > Amount line): dotted, over the notes, how strong the
@@ -22,17 +24,21 @@ import copy
 import math
 import random
 import tkinter as tk
+from tkinter import ttk
 
 import numpy as np
 
 from files.lang import tr
+from files.mathexpr import calc, fmt
 from files.snap import SNAPS, snap_beats, snap_text
 from notes.hzbass import (BEND, FX, FX_START, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, bend_of, bent_part,
                           group_count, line_at,
                           loop_off, loop_on, loop_shape, tones_span)
 from roll.roll_shared import CTRL, SHIFT
+from window.widgets import Scrub
 
 # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
+REPEAT_LINE = "#18a048"  # where each repeat would start while the Repeat every… window is open
 FX_COLOR = {"volume": "#9b2d5f", "slant": "#8a3ff0", "groups": "#0a8f8f", "offpitch": "#d0189a", "noisy": "#8a5a14",
             "vibrato": "#00a5d8", "pitch": "#4b0082", "sweep": "#7f8c00", "wah": "#2c3e6b", "tremolo": "#e0607a",
             "octave": "#1d6b3a", "sine": "#b060c0", "square": "#606060", "saw": "#c0a000", "triangle": "#c05a30"}
@@ -50,6 +56,13 @@ class _NoKeys:
     state = 0
 
 
+class _At:
+    """A mouse spot for on_drag (x, y, keys held)."""
+
+    def __init__(self, x, y, state):
+        self.x, self.y, self.state = x, y, state
+
+
 def faint(colour, by=0.6):
     """colour mixed with white."""
     r, g, b = (int(colour[i:i + 2], 16) for i in (1, 3, 5))
@@ -64,6 +77,9 @@ class FxPane:
         self.sel = set()  # the points selected: (effect, number)
         self.clip = None  # points copied: {effect: [[beats after the first one, value(, bend)], ...]}
         self.mouse_x = None  # where the mouse is over the pane (for pasting)
+        self.pressed = False  # the pane was pressed last (not the notes): Delete with no points selected = the effect
+        self.asking = None  # the Repeat every… window, while it's open
+        self.trying = None  # the length typed in it (beats), shown as green lines
         self.says = ""  # for the window's status line
         self.row_h, self.pad = round(15 * self.s), round(9 * self.s)
         self.edge = round(4 * self.s)  # the top edge: drag it = the pane's height
@@ -197,6 +213,11 @@ class FxPane:
             c.create_text((kb + w) / 2, h / 2, text=tr("hz.fx_hint"), fill="#777", width=w - kb - 40 * s,
                           justify="center")
         order = sorted(self.names(), key=lambda k: base(k) == self.active)  # (the highlighted one on top)
+        if self.trying and self.trying * win.sx >= 3 * s:  # Repeat every… being typed: where each would start
+            for k in range(math.floor(win.beat_at(kb) / self.trying), math.floor(win.beat_at(w) / self.trying) + 2):
+                x = win.x_of(k * self.trying)
+                if x > kb:
+                    c.create_line(x, 0, x, h, fill=REPEAT_LINE, width=max(1, round(1.5 * s)))
         if self.active in win.loops and self.copies(self.active):  # where each repeat starts
             every, k0, k1 = self.copies(self.active)
             for k in range(k0, k1 + 1):
@@ -276,13 +297,27 @@ class FxPane:
                 if abs(x - px) <= r and abs(y - py) <= r:
                     return "bend", name, i, k
         for name in names:
-            if name in self.win.loops and not self.points(name):  # (too close together to grab)
-                continue
-            xy = self.line(name)
-            for (x0, y0), (x1, y1) in zip(xy, xy[1:]):
-                if x0 <= x <= x1 and abs(y - (y0 if x1 - x0 < 1e-9 else y0 + (y1 - y0) * (x - x0) / (x1 - x0))) <= r:
-                    return "line", name
+            if self.on_line(name, x, y):
+                return "line", name
         return None
+
+    def on_line(self, name, x, y):
+        """True when (x, y) is on the effect's line (never on a repeating one too close together to grab)."""
+        if name in self.win.loops and not self.points(name):
+            return False
+        xy, r = self.line(name), 6 * self.s
+        for (x0, y0), (x1, y1) in zip(xy, xy[1:]):
+            if x0 <= x <= x1 and abs(y - (y0 if x1 - x0 < 1e-9 else y0 + (y1 - y0) * (x - x0) / (x1 - x0))) <= r:
+                return True
+        return False
+
+    def on_faint(self, x, y):
+        """The highlighted effect when (x, y) is on another effect's faint line (a press there adds a point to the
+        highlighted one, user), else None."""
+        name = self.active
+        if name not in self.win.fxl or x < self.win.kb_w or (name in self.win.loops and not self.points(name)):
+            return None
+        return name if any(self.on_line(k, x, y) for k in self.names() if base(k) != name) else None
 
     def on_motion(self, e):
         self.mouse_x = e.x
@@ -327,7 +362,7 @@ class FxPane:
     def on_press(self, e):
         win = self.win
         win.canvas.focus_set()
-        self.drag = None
+        self.drag, self.pressed = None, True
         if e.y < self.edge:
             self.drag = {"kind": "size", "y": e.y_root, "h": self.canvas.winfo_height()}
             return
@@ -339,12 +374,16 @@ class FxPane:
         if e.state & CTRL and e.x >= win.kb_w and (hit is None or hit[0] == "line"):  # a box selecting points
             self.drag = {"kind": "box", "x0": e.x, "y0": e.y, "had": set(self.sel)}
             return
+        faint = self.on_faint(e.x, e.y) if hit is None else None
         if hit is None and e.x >= win.kb_w and self.active in win.fxl and win.tool.get() == "pencil":
-            every = win.loops.get(self.active)  # (a drag draws; a click still clears the highlight, on release)
-            self.drag = {"kind": "draw", "fx": self.active, "x0": e.x, "y0": e.y, "moved": False,
+            every = win.loops.get(self.active)  # (a drag draws; a click clears the highlight on release, or on a
+            self.drag = {"kind": "draw", "fx": self.active, "x0": e.x, "y0": e.y, "moved": False,  # faint line
+                         "faint": faint,  # adds a point there)
                          "before": self.state(), "orig": copy.deepcopy(win.fxl[self.active]), "got": {},
                          "k": math.floor(max(0.0, win.beat_at(e.x)) / every) if every else 0}
             return
+        if faint:  # another effect's faint line: a new point on the highlighted one, at the mouse
+            hit = "line", faint
         if hit is None:
             if e.x >= win.kb_w and (self.active is not None or self.sel):  # a click on nothing: nothing
                 self.active, self.sel = None, set()  # highlighted or selected
@@ -373,6 +412,22 @@ class FxPane:
             self.on_drag(e)
             self.canvas.config(cursor="fleur")  # (the new point is under the mouse: it moves)
         win.redraw()
+
+    def click_point(self, name, x, y, e):
+        """A new point on the effect at (x, y), one undo step (the pencil's click on a faint line)."""
+        win = self.win
+        before = self.state()
+        every = win.loops.get(name)
+        beat = max(0.0, win.beat_at(x))
+        k = math.floor(beat / every) if every else 0
+        i = self.add_point(win.fxl[name], beat - k * every if every else beat, every)
+        self.sel = {(name, i)}
+        self.drag = {"kind": "point", "fx": name, "i": i, "k": k, "before": before,
+                     "orig": {(name, i): tuple(win.fxl[name][i][:2])}}
+        self.on_drag(_At(x, y, e.state))
+        self.drag = None
+        self.says = ""
+        win.commit_fx(before)
 
     @staticmethod
     def add_point(pts, beat, every=None):
@@ -440,6 +495,8 @@ class FxPane:
         if d["kind"] == "size":
             return win.app.schedule_autosave()
         if d["kind"] == "draw":
+            if not d["moved"] and d["faint"]:  # (a click on a faint line: a point there)
+                return self.click_point(d["fx"], d["x0"], d["y0"], e)
             if not d["moved"]:  # (a click on nothing: nothing highlighted or selected)
                 self.active, self.sel = None, set()
                 return win.redraw()
@@ -498,6 +555,17 @@ class FxPane:
 
     def delete_selected(self):
         self.delete_points(self.sel)
+
+    def delete_key(self):
+        """Delete in the window: the points selected, or (none, the pane pressed last) the highlighted effect taken
+        off. False when it's not for the pane (the notes' Delete then)."""
+        if self.sel:
+            self.delete_selected()
+            return True
+        if self.pressed and self.active in self.win.fxl and self.canvas.winfo_ismapped():
+            self.remove(self.active)
+            return True
+        return False
 
     def delete_points(self, which):
         """Points deleted (a set of (effect, number)); an effect left with none is taken off."""
@@ -707,6 +775,76 @@ class FxPane:
         else:
             win.redraw()
 
+    def ask_repeat(self, name, x, y):
+        """The Repeat every… window: how long one repeat of the effect is, typed in beats (a sum like 1/3 too; drag
+        the label, Up / Down, wheel). While it's open the pane shows where each repeat would start (green lines).
+        OK / Enter = set_loop, Cancel / Escape = nothing."""
+        if self.asking:
+            self.asking.destroy()
+        win = self.win
+        bar = float(win.app.beats)
+        most = 64 * bar
+        top = self.asking = tk.Toplevel(win)
+        top.title(tr("hz.fx_repeat_title", name=tr("hz.fx_" + name)))
+        top.transient(win)
+        top.resizable(False, False)
+        f = ttk.Frame(top, padding=10)
+        f.pack()
+        var = tk.StringVar(top, value=fmt(win.loops.get(name) or win.snap_beats() or 1.0))
+        row = ttk.Frame(f)
+        row.pack(anchor="w")
+        lb = ttk.Label(row, text=tr("hz.fx_repeat_every"))
+        lb.pack(side="left")
+        entry = top.entry = ttk.Entry(row, textvariable=var, width=8)
+        entry.pack(side="left", padx=4)
+        ttk.Label(row, text=tr("hz.fx_repeat_unit"), foreground="#777").pack(side="left")
+        said = ttk.Label(f, foreground="#555")
+        said.pack(anchor="w", pady=(4, 8))
+        b = ttk.Frame(f)
+        b.pack(anchor="e")
+
+        def value():
+            try:
+                v = float(calc(var.get()))
+            except Exception:  # (anything typed that isn't a number)
+                return None
+            return v if 1e-3 <= v <= most else None
+
+        def shown(*_):
+            v = self.trying = value()
+            said.config(text=tr("hz.fx_repeat_is", every=self.every_text(v), bars=f"{v / bar:.4g}") if v else
+                        tr("hz.fx_repeat_bad", most=f"{most:g}"))
+            ok.config(state="normal" if v else "disabled")
+            self.redraw()
+
+        def done(keep):
+            v = value() if keep else None
+            top.destroy()
+            if v:
+                self.set_loop(name, v)
+
+        def gone(e):
+            if e.widget is top:
+                self.asking = self.trying = None
+                self.redraw()
+
+        ok = ttk.Button(b, text=tr("hz.fx_repeat_ok"), command=lambda: done(True))
+        ok.pack(side="left", padx=(0, 4))
+        ttk.Button(b, text=tr("hz.fx_repeat_cancel"), command=lambda: done(False)).pack(side="left")
+        grid = lambda: win.snap_beats() or 0.25
+        Scrub(win.app, [(entry, var, None)], lambda: (grid(), bar, grid() / 4), 1e-3, most, label=lb)
+        var.trace_add("write", shown)
+        top.bind("<Return>", lambda e: done(True) if value() else None)
+        top.bind("<Escape>", lambda e: done(False))
+        top.bind("<Destroy>", gone)
+        for k in ("z", "Z", "y", "Y"):  # (the main window's undo would change the lines under it)
+            top.bind(f"<Control-{k}>", lambda e: "break")
+        top.protocol("WM_DELETE_WINDOW", lambda: done(False))
+        shown()
+        top.geometry(f"+{x}+{y}")
+        entry.focus_set()
+        entry.select_range(0, "end")
+
     def set_shape(self, name, kind):
         """A ready-made shape for one repeat of the effect (it starts repeating every beat if it didn't)."""
         win = self.win
@@ -734,15 +872,10 @@ class FxPane:
         target = name or (hit and base(hit[1])) or (self.active if e.x >= self.win.kb_w else None)
         if target:  # repeating: how long one repeat is, and ready-made shapes for it
             every = self.win.loops.get(target)
-            self.picked = tk.StringVar(self.win, value=self.every_text(every) if every else "off")
-            lengths = tk.Menu(menu, tearoff=0)
-            lengths.add_radiobutton(label=tr("hz.fx_repeat_off"), variable=self.picked, value="off",
-                                    command=lambda: self.set_loop(target, None))
-            lengths.add_separator()
-            for label, beats in self.lengths():
-                lengths.add_radiobutton(label=label, variable=self.picked, value=label,
-                                        command=lambda b=beats: self.set_loop(target, b))
-            menu.add_cascade(label=tr("hz.fx_repeat_every"), menu=lengths)
+            menu.add_command(label=tr("hz.fx_repeat_now", every=self.every_text(every)) if every else
+                             tr("hz.fx_repeat_ask"), command=lambda: self.ask_repeat(target, e.x_root, e.y_root))
+            if every:
+                menu.add_command(label=tr("hz.fx_repeat_off"), command=lambda: self.set_loop(target, None))
             shapes = tk.Menu(menu, tearoff=0)
             for kind in LOOP_SHAPES:
                 shapes.add_command(label=tr("hz.fx_shape_" + kind), command=lambda k=kind: self.set_shape(target, k))
