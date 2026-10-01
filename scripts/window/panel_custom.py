@@ -26,7 +26,8 @@ FILL_CHOICES = [
 CUSTOM_NAMES = {"fill": tr("panel_custom.inside_fill"), "gate": tr("panel_custom.spam_gate"),
                 "align": tr("panel_custom.spam_start"), "ends": tr("panel_custom.spam_ends"),
                 "union": tr("panel_custom.overlaps_cancel_out"),
-                "apart": tr("panel_custom.normal_outline")}  # (History)
+                "apart": tr("panel_custom.normal_outline"), "edge": tr("panel_custom.edge_undo"),
+                "edge_mode": tr("panel_custom.edge_undo")}  # (History)
 APART_CHOICES = [tr("panel_custom.normal"), tr("panel_custom.outline")]
 APART_TIP = tr("panel_custom.normal_all_its_notes_together_outline")
 APART_NEEDS = tr("panel_custom.channels_isn_t_multi_channel_now")
@@ -37,6 +38,7 @@ ALIGN_CHOICES = [
     ("centred", tr("panel_custom.centred"), tr("panel_custom.centred_tip")),
 ]
 END_CHOICES = [(value, tr("panel_custom.ends_" + value)) for value in ENDS]
+EDGE_CHOICES = [(None, tr("panel_custom.edge_band")), ("sideways", tr("panel_custom.edge_sideways"))]
 HZ_SHORT = 40  # Hz bass: a gate under this many ticks wobbles between its two sizes (orange: a higher PPQ fixes it)
 HZ_WRAP = 222  # its lines under the Hz bass row start further right than the panel's other notes: wrapped sooner
 
@@ -128,6 +130,36 @@ class CustomPanel:
             b.pack(side="left", padx=(4, 0))
             Tooltip(b, tip)
             self.align_buttons.append(b)
+        # the smallest outline gate (custom.grow_inward): thin outline notes grow into the inside
+        o = ttk.Frame(opts)
+        o.pack(anchor="w", padx=(20, 0), pady=(1, 0))
+        lb = ttk.Label(o, text=tr("panel_custom.edge"))
+        lb.pack(side="left")
+        self.edge_var = tk.StringVar()
+        self.edge_entry = ttk.Entry(o, textvariable=self.edge_var, width=7)
+        self.edge_entry.pack(side="left", padx=4)
+        ttk.Label(o, text=tr("panel_custom.edge_unit"), foreground="#777").pack(side="left")
+        for w in (lb, self.edge_entry):
+            Tooltip(w, tr("panel_custom.edge_tip"))
+        o = ttk.Frame(opts)
+        o.pack(anchor="w", padx=(40, 0), pady=(1, 0))
+        self.edge_mode_box = ttk.Combobox(o, values=[t for _, t in EDGE_CHOICES], state="readonly", width=15)
+        self.edge_mode_box.pack(side="left")
+        self.edge_mode_box.bind("<<ComboboxSelected>>", lambda e: (self.set_custom(
+            "edge_mode", EDGE_CHOICES[self.edge_mode_box.current()][0]), self.roll.focus_set()))
+        Tooltip(self.edge_mode_box, tr("panel_custom.edge_mode_tip"))
+        self.edge_entry.bind("<Return>", lambda e: self.on_edge())
+        self.edge_entry.bind("<FocusOut>", lambda e: self.on_edge())
+        Scrub(self, [(self.edge_entry, self.edge_var, self.on_edge)], GATE_STEPS, 0, 10 ** 7, label=lb)
+        # while the box is pointed at, has the keyboard or its label is dragged: a faint line on the piano roll
+        # where the outline would reach inside (roll_draw.draw_edge_preview; user)
+        self._edge_use = set()
+        for w, on, off in ((lb, "<Enter>", "<Leave>"), (self.edge_entry, "<Enter>", "<Leave>"),
+                           (self.edge_entry, "<FocusIn>", "<FocusOut>"), (lb, "<ButtonPress-1>", "<ButtonRelease-1>")):
+            why = (str(w), on)
+            w.bind(on, lambda e, why=why: self.edge_using(why, True), add="+")
+            w.bind(off, lambda e, why=why: self.edge_using(why, False), add="+")
+        self.edge_var.trace_add("write", lambda *_: self.edge_using(None, None))
         self.cancel_var = tk.BooleanVar(value=True)
         self.cancel_box = ttk.Checkbutton(opts, text=tr("panel_custom.overlaps_cancel_out"), variable=self.cancel_var,
                                           command=lambda: self.set_custom("union", not self.cancel_var.get()))
@@ -204,6 +236,8 @@ class CustomPanel:
         self.custom_pick.set(name)
         self.fill_var.set(fill)
         self.gate_var.set(fmt(round(gate * self.ppq, 3)))
+        self.edge_var.set(fmt(round(tgts[0].get("edge", 0) * self.ppq, 3)))
+        self.edge_entry.config(style="TEntry")
         self.align_var.set(tgts[0].get("align", "auto"))
         ends = tgts[0].get("ends", "drop")
         self.ends_box.current(ENDS.index(ends) if ends in ENDS else 0)
@@ -235,6 +269,12 @@ class CustomPanel:
             box.config(state="readonly" if fill == value else "disabled",
                        style="Gap.TCombobox" if lonely and fill == value else "TCombobox")
             self.apart_tips[value].text = APART_TIP + (APART_NEEDS if lonely else "")
+        outline = fill in ("empty", "outline_spam") or apart  # (Fill / Spam: only with "Outline")
+        self.edge_entry.config(state="normal" if outline else "disabled")
+        self._loading = True
+        self.edge_mode_box.current(1 if tgts[0].get("edge_mode") == "sideways" else 0)
+        self._loading = False
+        self.edge_mode_box.config(state="readonly" if outline and tgts[0].get("edge") else "disabled")
         self.cancel_box.config(state="normal" if fill in ("fill", "spam") and not text else "disabled")
         if not placed and live:
             info = tr("panel_custom.live_shape_what_you_draw_goes")
@@ -289,7 +329,8 @@ class CustomPanel:
             return
         tgts = self.custom_targets()
         placed = [t for t in tgts if t is not self.custom_defaults]
-        same = all(abs(t[key] - value) < 1e-12 if key == "gate" else bool(t.get(key)) == value if key in CUSTOM_FLAGS
+        same = all(abs(t[key] - value) < 1e-12 if key == "gate" else abs(t.get(key, 0) - value) < 1e-12
+                   if key == "edge" else bool(t.get(key)) == value if key in CUSTOM_FLAGS
                    else t.get(key) == value for t in tgts)
         if same or not self.confirm_big([dict(t, **{key: value}) for t in placed]):
             return self.sync_custom()
@@ -297,8 +338,8 @@ class CustomPanel:
             self.push_undo(name=CUSTOM_NAMES.get(key, key))
         for t in tgts:
             t[key] = value
-            if key in CUSTOM_FLAGS and not value and t is not self.custom_defaults:
-                del t[key]  # (shapes only have them when they're on)
+            if not value and (key in ("edge", "edge_mode") or key in CUSTOM_FLAGS and t is not self.custom_defaults):
+                t.pop(key, None)  # (shapes only have them when they're on)
         self.shapes_changed()
         self.sync_custom()
         if key == "fill" and value != "empty":
@@ -315,6 +356,36 @@ class CustomPanel:
             self.gate_entry.config(style="Bad.TEntry")
             return
         self.set_custom("gate", ticks / self.ppq)
+
+    def edge_using(self, why, on):
+        """The outline gate box started / stopped being used (why: which way; None = its number changed): the
+        preview line on the piano roll follows what's in the box while it's valid."""
+        if why is not None:
+            (self._edge_use.add if on else self._edge_use.discard)(why)
+        g = None
+        if self._edge_use and str(self.edge_entry.cget("state")) != "disabled":
+            try:
+                ticks = calc(self.edge_var.get())
+                if 0 < ticks <= 10 ** 7:
+                    g = ticks / self.ppq
+            except ValueError:
+                pass
+        if g != getattr(self, "edge_preview", None):
+            self.edge_preview = g
+            self.roll.request_redraw()
+
+    def on_edge(self):
+        """The smallest outline gate box (ticks; 0 = off)."""
+        if self._loading or str(self.edge_entry.cget("state")) == "disabled":
+            return
+        try:
+            ticks = calc(self.edge_var.get() or "0")
+            if not 0 <= ticks <= 10 ** 7:
+                raise ValueError
+        except ValueError:
+            self.edge_entry.config(style="Bad.TEntry")
+            return
+        self.set_custom("edge", ticks / self.ppq)
 
     # ---- Hz bass (custom.py): spam whose gate is one wave of a tone
 

@@ -6,7 +6,7 @@ import tkinter as tk
 
 import numpy as np
 
-from notes.custom import custom_note_count, gap_lines
+from notes.custom import custom_note_count, edge_inner, gap_lines
 from notes.engine import cached_arrays, shape_notes
 from notes.joined import all_tumours
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
@@ -25,6 +25,7 @@ SELECTED, DRAFT = len(SLOT_COLORS), len(SLOT_COLORS) + 1
 NOTE_COLORS = [(fade(f, 1 - level * 4 / 124), b) for f, b in SLOT_COLORS + [SELECTED_COLOR, DRAFT_COLOR]
                for level in range(32)]
 RING_COLOR = "#e00000"
+PREVIEW_COLOR, PREVIEW_HALO = "#ff1f1f", "#ffa8a8"  # the outline gate's preview line (draw_edge_preview)
 RING_GAP = 4  # px: notes in a row closer than this count as touching for the ring
 RING_MAX = 20000  # more ring pieces on screen than this: none drawn (canvas items are slow)
 
@@ -188,6 +189,7 @@ class RollDrawing:
             self.paint_time = time.perf_counter() - started
         if carried is None:  # (while shapes are dragged their notes are stamped along: no ring)
             self.draw_ring(w, h)
+            self.draw_edge_preview(w, h)
         # a line with tumours / a curve with a pattern: the line as drawn (the origin path), faint and dashed under it
         for i, sh in enumerate(app.shapes):
             if ((sh.get("pattern") or sh.get("shape") or any(tm["on"] for tm in all_tumours(sh)))
@@ -237,29 +239,72 @@ class RollDrawing:
             self._ring = (app.rendered, key, ring_parts(notes, RING_GAP / ax) if len(notes) else None)
         if self._ring[2] is None:
             return
-        sides, tops = self._ring[2]
+        width = max(1, round(self.scale))  # (user: 2 px was too thick)
+        self.draw_ring_lines(self._ring[2], w, h, width, width, fill=RING_COLOR, width=width)  # (just outside the notes)
+
+    def draw_edge_preview(self, w, h):
+        """While the outline gate box is being used (app.edge_preview = its gate in beats): a red line where the
+        selected shapes' outline would reach inside, worked out from what's typed (custom.edge_inner): with the
+        even band the shape shrunk inward, drawn like a shape's line."""
+        app = self.app
+        g = getattr(app, "edge_preview", None)
+        if not g:
+            return
+        bx = self.kb_w - self.view_t * self.sx  # (x = beat * sx + bx, y = key * ay + by)
+        ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
+        for i in app.sels:
+            sh = app.shapes[i] if i < len(app.shapes) else None
+            if sh and sh["kind"] == "custom" and "notes" not in sh:
+                got = edge_inner(dict(sh, edge=g), app.ppq)
+                if got is None or not len(got[1]):
+                    continue
+                # (user: red like a shape's line, a bit thicker than 1 px but never as thick as the selected
+                # shape's 2 px: a red pixel with a light red one beside it)
+                if got[0] == "rows":
+                    parts = ring_parts(got[1], 0)
+                    self.draw_ring_lines(parts, w, h, -1, 1, fill=PREVIEW_HALO, width=1)
+                    self.draw_ring_lines(parts, w, h, 0, 1, fill=PREVIEW_COLOR, width=1)
+                    continue
+                segs = got[1]
+                x0, y0 = segs[:, 0] * self.sx + bx, segs[:, 1] * ay + by
+                x1, y1 = segs[:, 2] * self.sx + bx, segs[:, 3] * ay + by
+                on = ~((np.maximum(x0, x1) < self.kb_w) | (np.minimum(x0, x1) > w) |
+                       (np.maximum(y0, y1) < self.ruler_h) | (np.minimum(y0, y1) > h))
+                ln = np.maximum(np.hypot(x1 - x0, y1 - y0), 1e-9)
+                nx, ny = -(y1 - y0) / ln, (x1 - x0) / ln  # (the halo one pixel to the side: the inner one)
+                xi, yi = segs[:, 4] * self.sx + bx, segs[:, 5] * ay + by
+                flip = np.where(nx * (xi - (x0 + x1) / 2) + ny * (yi - (y0 + y1) / 2) < 0, -1, 1)
+                nx, ny = nx * flip, ny * flip
+                for xs in zip(*(v[on].tolist() for v in (x0 + nx, y0 + ny, x1 + nx, y1 + ny))):
+                    self.create_line(*xs, fill=PREVIEW_HALO, width=1)
+                for xs in zip(*(v[on].tolist() for v in (x0, y0, x1, y1))):
+                    self.create_line(*xs, fill=PREVIEW_COLOR, width=1, capstyle="round")
+
+    def draw_ring_lines(self, parts, w, h, d, extra, **kw):
+        """ring_parts' (sides, tops) as lines on screen, d pixels outside the notes' edge (extra: how far the
+        lines reach past each corner)."""
+        sides, tops = parts
+        ax = self.sx / self.app.ppq
         bx = self.kb_w - self.view_t * self.sx
         ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
         kb, top = self.kb_w, self.ruler_h
-        width = max(1, round(self.scale))  # (user: 2 px was too thick)
-        d = width  # (the line just outside the notes)
 
         def row(k, lower):  # a key row's top / bottom pixel, as note_rects has it
             y0 = np.round((k + 0.5) * ay + by)
             return np.maximum(np.round((k - 0.5) * ay + by), y0 + 1) if lower else y0
 
         sx = np.round(sides[:, 0] * ax + bx) + np.where(sides[:, 3] == 1, d, -d)
-        sy0, sy1 = row(sides[:, 2], False) - d, row(sides[:, 1], True) + d + 1
-        tx0, tx1 = np.round(tops[:, 0] * ax + bx) - d, np.round(tops[:, 1] * ax + bx) + d + 1
+        sy0, sy1 = row(sides[:, 2], False) - d, row(sides[:, 1], True) + d + extra
+        tx0, tx1 = np.round(tops[:, 0] * ax + bx) - d, np.round(tops[:, 1] * ax + bx) + d + extra
         ty = np.where(tops[:, 3] == 1, row(tops[:, 2], False) - d, row(tops[:, 2], True) + d)
         on_s = ~((sx < kb) | (sx > w) | (sy1 < top) | (sy0 > h))
         on_t = ~((tx1 < kb) | (tx0 > w) | (ty < top) | (ty > h))
         if on_s.sum() + on_t.sum() > RING_MAX:
             return
         for x, y0, y1 in zip(*(v[on_s].tolist() for v in (sx, sy0, sy1))):
-            self.create_line(x, y0, x, y1, fill=RING_COLOR, width=width)
+            self.create_line(x, y0, x, y1, **kw)
         for x0, x1, y in zip(*(v[on_t].tolist() for v in (tx0, tx1, ty))):
-            self.create_line(x0, y, x1, y, fill=RING_COLOR, width=width)
+            self.create_line(x0, y, x1, y, **kw)
 
     def draw_select_box(self):
         """The dotted box being dragged with Select (with the ones kept when Ctrl+drag adds it), or the last ones

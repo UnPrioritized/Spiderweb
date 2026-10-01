@@ -18,6 +18,7 @@ from notes.paths import (TOP_KEY, dedupe, keep_longest, line_notes, loop_from_le
                          stretch_ends)
 from notes.hzbass import (HZ_DEFAULTS, KeyGrid, clean_hz, hz_gate, hz_of, off_cents, squares,  # (Hz bass: hzbass.py)
                           threshold)
+from notes.shrink import inner_lines, inner_rows  # (the outline gate's even band)
 from notes.text import text_polys, threshold_spans
 
 # Custom shapes: how the inside is filled, and the gate of "spam" in beats (1/64 = 60 ticks at PPQ 960).
@@ -72,6 +73,10 @@ def custom_settings(cd):
     shapes start without it; the Hz bass tool adds its own, from cd["hz"])."""
     out = {k: cd[k] for k in ("fill", "gate", "align", "ends")}
     out.update({k: True for k in CUSTOM_FLAGS if cd.get(k)})
+    if cd.get("edge"):
+        out["edge"] = cd["edge"]
+    if cd.get("edge_mode") == "sideways":
+        out["edge_mode"] = "sideways"
     return out
 
 
@@ -243,6 +248,7 @@ TOUCH_BEATS, TOUCH_KEYS = 1 / 64, 1.0  # loose ends at most this far apart count
 FLAT_KEYS, FLAT_BEATS = 0.5, 1 / 64  # an open part never further than this from its closing line is left unfilled
 _plans = {}
 _spans = {}  # inside_spans, remembered
+_inner = {}  # inner_ticks, remembered
 
 
 def near_ends(p, q):
@@ -794,17 +800,127 @@ def outline_groups(sh, ppq, spam=False):
     """The outline's notes (spam: chopped like Outline spam) and which stroke group each belongs to (None if the
     strokes are all one group, see stroke_groups)."""
     groups = stroke_groups(sh)
+    g = edge_gate(sh, ppq)
+    spans = inside_rows(sh, ppq) if g else None
     if groups is None:
-        notes = outline_notes(sh, ppq)
+        notes = thicker(sh, outline_notes(sh, ppq), spans, g, ppq)
         return (chop_outline(sh, notes, ppq) if spam else notes), None
     parts, ids = [], []
     for n, (_, strokes) in enumerate(sorted(groups.items())):
+        # (the even band goes with the first group: it's the whole shape's)
         notes = outline_notes(sh, ppq, strokes)
+        notes = thicker(sh, notes, spans, g, ppq) if n == 0 or sh.get("edge_mode") == "sideways" else notes
         if spam:
             notes = chop_outline(sh, notes, ppq)
         parts.append(notes)
         ids.append(np.full(len(notes), n, np.int64))
     return np.concatenate(parts), np.concatenate(ids)
+
+
+def edge_gate(sh, ppq):
+    """The shape's smallest outline gate in ticks (sh["edge"], in beats; 0 = off)."""
+    return max(1, int(round(sh["edge"] * ppq))) if sh.get("edge") else 0
+
+
+def inside_rows(sh, ppq):
+    """The inside's stretches as (start, end, key) ticks (none when the shape can't be filled)."""
+    if not fillable(sh["strokes"]):
+        return np.zeros((0, 3), np.int64)
+    return np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]
+
+
+def span_of(notes, spans):
+    """For each (start, end, key) note, the inside stretch on its key that holds its middle: (a, b, found)."""
+    n = len(notes)
+    if not n or spans is None or not len(spans):
+        return np.zeros(n, np.int64), np.zeros(n, np.int64), np.zeros(n, bool)
+    lo = int(min(notes[:, 0].min(), spans[:, 0].min()))
+    big = int(max(notes[:, 1].max(), spans[:, 1].max())) - lo + 2
+    sp = spans[np.lexsort((spans[:, 0], spans[:, 2]))]
+    mid = (notes[:, 0] + notes[:, 1]) // 2
+    i = np.searchsorted(sp[:, 2] * big + (sp[:, 0] - lo), notes[:, 2] * big + (mid - lo), "right") - 1
+    found = i >= 0
+    i = np.maximum(i, 0)
+    found &= (sp[i, 2] == notes[:, 2]) & (mid <= sp[i, 1])
+    return sp[i, 0], sp[i, 1], found
+
+
+def grow_inward(notes, spans, g):
+    """Outline notes shorter than g ticks made g long, growing into the inside (user: the shape's edge stays where
+    it is): a note in the left half of its key's inside grows right, one in the right half grows left, never past
+    the middle (so a gate too big for the shape is cut to what fits). Notes with no inside beside them (open
+    lines) stay as they are."""
+    if not g or not len(notes):
+        return notes
+    a, b, found = span_of(notes, spans)
+    s, e = notes[:, 0].copy(), notes[:, 1].copy()
+    m = (a + b) // 2
+    left = found & (s + e <= a + b)
+    right = found & ~left
+    e = np.where(left, np.maximum(e, np.minimum(s + g, m)), e)
+    s = np.where(right, np.minimum(s, np.maximum(e - g, m)), s)
+    return np.column_stack([s, e, notes[:, 2]]).astype(np.int64)
+
+
+def near_edge(notes, spans, g):
+    """Spam "Outline" with a smallest outline gate: the spam notes that start or end within g ticks of their
+    key's inside edge (so the outline is at least g thick, all of it when the shape is thinner)."""
+    a, b, found = span_of(notes, spans)
+    return found & ((notes[:, 0] - a < g) | (b - notes[:, 1] < g))
+
+
+def edge_loops(sh):
+    """The closed loops the inside is made of (fill_plan; text: its letters), and whether overlaps count as filled
+    (Overlaps cancel out off)."""
+    tx = sh.get("text")
+    return (custom_strokes(sh) if tx else fill_plan(sh)["polys"]), bool(sh.get("union") and not tx)
+
+
+def inner_ticks(sh, ppq, g, spans):
+    """The shape shrunk inward by the outline gate g (ticks) as (start, end, key) notes on the keys of its inside
+    (shrink.inner_rows: a smaller copy of its own outline). Remembered."""
+    keys = sorted(set(spans[:, 2].tolist()))
+    key = (json.dumps([sh["strokes"], sh["pts"], sh.get("text")]), bool(sh.get("union")), ppq, g, keys[0], keys[-1])
+    got = _inner.get(key)
+    if got is None:
+        if len(_inner) > 100:
+            _inner.clear()
+        loops, union = edge_loops(sh)
+        got = _inner[key] = inner_rows(loops, union, keys, g / ppq, ppq)
+    return got
+
+
+def with_band(notes, spans, inner):
+    """Outline notes and the band between the inside's edge and the inner shape, as notes merged per key."""
+    band = cut_out(spans, inner)
+    ks, ss, es = merged_by_key(np.concatenate([np.asarray(notes, np.int64).reshape(-1, 3), band]))
+    return np.column_stack([ss, es, ks]).astype(np.int64).reshape(-1, 3)
+
+
+def edge_inner(sh, ppq):
+    """How far in sh's outline gate reaches, for the piano roll's preview line: ("lines", pieces (b0, k0, b1, k1)
+    of the shrunk shape's outline) for the even band, ("rows", (start, end, key) notes of the inside left) for Grow
+    sideways, or None where the outline gate does nothing."""
+    if not (sh.get("fill") in ("empty", "outline_spam") or sh.get("apart") and sh.get("fill") in ("fill", "spam")):
+        return None
+    g = edge_gate(sh, ppq)
+    spans = inside_rows(sh, ppq) if g else ()
+    if not len(spans):
+        return None
+    if sh.get("edge_mode") == "sideways":
+        return "rows", cut_out(spans, grow_inward(outline_notes(sh, ppq), spans, g))
+    loops, union = edge_loops(sh)
+    return "lines", inner_lines(loops, union, g / ppq)
+
+
+def thicker(sh, notes, spans, g, ppq):
+    """Outline notes with the smallest outline gate: the even band (default: down to the shape shrunk inward) or
+    each note grown sideways (the first way, kept as a second option: sh["edge_mode"] = "sideways")."""
+    if not g or not len(spans):
+        return notes
+    if sh.get("edge_mode") == "sideways":
+        return grow_inward(notes, spans, g)
+    return with_band(notes, spans, inner_ticks(sh, ppq, g, spans))
 
 
 def chop_outline(sh, notes, ppq):
@@ -900,17 +1016,27 @@ def _notes_groups(sh, ppq):
     spans = np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]  # (start, end, key)
     flat = flat_notes(sh, ppq)  # (like Outline spam in Spam)
     apart = sh.get("apart")
+    g = edge_gate(sh, ppq) if apart else 0  # (the smallest outline gate)
     if sh["fill"] == "fill":
         notes = np.concatenate([spans, flat])
         if apart:  # the edge's notes, and the inside's long notes between them
             outline = edge_parts(notes)
+            if g:
+                ks, ss, es = merged_by_key(thicker(sh, outline, spans, g, ppq))
+                outline = np.column_stack([ss, es, ks]).astype(np.int64).reshape(-1, 3)
             inside = cut_out(notes, outline)
             return (np.concatenate([outline, inside]),
                     np.concatenate([np.zeros(len(outline), np.int64), np.ones(len(inside), np.int64)]))
         return notes, None
     notes = np.concatenate([chop(sh, spans, spam_gate(sh, ppq)), chop_outline(sh, flat, ppq)])
     if apart:  # the same spam; the notes on the edge of what's filled are the outline's
-        return notes, np.where(on_edge(notes), 0, 1).astype(np.int64)
+        if not g:
+            edge = on_edge(notes)
+        elif sh.get("edge_mode") == "sideways":
+            edge = on_edge(notes) | near_edge(notes, spans, g)
+        else:  # (the even band: every note not wholly in the shrunk inside)
+            edge = on_edge(notes) | ~covered(notes, inner_ticks(sh, ppq, g, spans))
+        return notes, np.where(edge, 0, 1).astype(np.int64)
     return notes, None
 
 

@@ -177,6 +177,15 @@ class ProjectFiles:
                 self.custom_defaults["gate"] = max(1e-6, float(custom.get("gate", CUSTOM_DEFAULTS["gate"])))
             except (TypeError, ValueError):
                 pass
+            self.custom_defaults.pop("edge", None)
+            try:  # the smallest outline gate (custom.grow_inward)
+                if float(custom.get("edge") or 0) > 0:
+                    self.custom_defaults["edge"] = float(custom["edge"])
+            except (TypeError, ValueError):
+                pass
+            self.custom_defaults.pop("edge_mode", None)
+            if custom.get("edge_mode") == "sideways":
+                self.custom_defaults["edge_mode"] = "sideways"
             self.custom_defaults.pop("hz", None)
             if clean_hz(custom.get("hz")):
                 self.custom_defaults["hz"] = clean_hz(custom["hz"])

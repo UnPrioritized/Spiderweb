@@ -106,6 +106,14 @@ def clean_shape(sh):
         out["align"] = sh.get("align") if sh.get("align") in ALIGNS else "auto"
         out["ends"] = sh.get("ends") if sh.get("ends") in ENDS else "drop"
         out.update({k: True for k in CUSTOM_FLAGS if sh.get(k) is True})
+        try:  # the smallest outline gate in beats (custom.grow_inward)
+            edge = float(sh.get("edge") or 0)
+        except (TypeError, ValueError):
+            edge = 0
+        if edge > 0:
+            out["edge"] = min(edge, 10 ** 4)
+        if sh.get("edge_mode") == "sideways":  # (the first way: each note grown sideways; default = even band)
+            out["edge_mode"] = "sideways"
         hz = clean_hz(sh.get("hz"))
         if hz:  # Hz bass (custom.py): the gate is one wave of a tone
             out["hz"] = hz
