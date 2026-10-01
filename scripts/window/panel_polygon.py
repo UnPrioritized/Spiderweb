@@ -23,13 +23,14 @@ class PolygonPanel:
 
     def _build_polygon(self):
         box = self.polygon_box = ttk.Frame(self.custom_box)  # (packed at the top of the custom part when shown)
-        self.polygon_vars, self.polygon_entries = {}, {}
-        row1, row2 = ttk.Frame(box), ttk.Frame(box)
+        self.polygon_vars, self.polygon_entries, self.polygon_cells = {}, {}, {}
+        row1 = ttk.Frame(box)
+        row2 = self.polygon_row2 = ttk.Frame(box)  # (only for a star / crossing star)
         row1.pack(fill="x")
-        row2.pack(fill="x", pady=(2, 0))
         for row, name in ((row1, "points"), (row2, "inner"), (row2, "skip")):
-            cell = ttk.Frame(row)
-            cell.pack(side="left", padx=(0, 10))
+            cell = self.polygon_cells[name] = ttk.Frame(row)
+            if row is row1:
+                cell.pack(side="left", padx=(0, 10))
             lb = ttk.Label(cell, text=tr("panel_polygon." + name))
             lb.pack(side="left")
             var = self.polygon_vars[name] = tk.StringVar()
@@ -79,6 +80,18 @@ class PolygonPanel:
         self._loading = False
         self.polygon_entries["inner"].config(state="normal" if d["style"] == "star" else "disabled")
         self.polygon_entries["skip"].config(state="normal" if d["style"] == "cross" else "disabled")
+        want = {"star": "inner", "cross": "skip"}.get(d["style"])  # (only the box the kind uses shows, user)
+        for name in ("inner", "skip"):
+            cell = self.polygon_cells[name]
+            if name == want and not cell.winfo_manager():
+                cell.pack(side="left", padx=(0, 10))
+            elif name != want and cell.winfo_manager():
+                cell.pack_forget()
+        if bool(want) != bool(self.polygon_row2.winfo_manager()):
+            if want:
+                self.polygon_row2.pack(fill="x", pady=(2, 0))
+            else:
+                self.polygon_row2.pack_forget()
 
     def set_polygon(self, key, value, edit_key=None):
         """A polygon setting changed: on the selected polygons (their strokes made again) and for new ones.
