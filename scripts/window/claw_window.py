@@ -100,6 +100,7 @@ class ClawWindow(ToolWindow):
         self.number_row(cut, 1, "cut", tr("claw.to"), tr("claw.tip_cut"), (1, 10, 0.1), 1, 99)
         ttk.Label(cut, text=tr("claw.of_their_length"), foreground="#777").grid(row=1, column=2, sticky="w",
                                                                                 padx=(5, 0))
+        self.cut_row = cut.grid_slaves(row=1)  # (only shown while "shorten" is ticked, user)
         self.update_idletasks()  # (as wide as the widest mode, so the window keeps its width)
         box.columnconfigure(1, minsize=max(f.winfo_reqwidth() for f in (*self.boxes.values(), cut)) - round(80 * s))
 
@@ -201,6 +202,11 @@ class ClawWindow(ToolWindow):
             for u in self.units:
                 u.config(text=UNITS.get(c["mode"], ""))
         config(self.entries["cut"], state="normal" if c["shorten"] else "disabled")
+        for w in self.cut_row:
+            if c["shorten"]:
+                w.grid()
+            else:
+                w.grid_remove()
 
     def on_knob(self, value, done):
         self.claw["dist"] = value
