@@ -116,7 +116,7 @@ class HzWindow(tk.Toplevel):
         self.box_kept = None  # ([box_area, ...], selection) of the last Select boxes, shown after letting go
         self.box_timer = None  # (box_scroll)
         self.pending = None  # (tone id, beat): the first middle click of a slide, waiting for the second
-        self.sounding = None  # (channel, key) heard now: the note held with the mouse
+        self.sounding = None  # (channel, keys) heard now: the notes held with the mouse
         self.last_len = 1.0  # beats: how long a newly placed note is (the last length used)
         self.fxl, self.fx_of = {}, None  # the effects' lines (hz["fx"]) and whose they are (the shape, or None)
         self.loops = {}  # the effects that repeat (hz["loop"])
@@ -870,7 +870,7 @@ class HzWindow(tk.Toplevel):
                 self.sel = {i}
             if kind == "note":  # (the next new note is as long as the one clicked)
                 self.last_len = self.tones[i]["len"]
-                self.sound(self.tones[i]["key"])
+                self.sound([self.tones[j]["key"] for j in self.sel])
             self.drag = {"kind": kind, "i": i, "before": before, "beat": self.beat_at(e.x), "key": self.key_at(e.y),
                          "orig": copy.deepcopy(self.tones), "x": e.x, "y": e.y, "moved": False,
                          "slide": hit[2] if len(hit) > 2 else None,
@@ -951,7 +951,7 @@ class HzWindow(tk.Toplevel):
             if d.get("box"):
                 self.box_kept = ([(b0 + dt, top + dk, b1 + dt, bottom + dk) for b0, top, b1, bottom in d["box"]],
                                  set(self.sel))
-            self.sound(n["key"])
+            self.sound([self.tones[j]["key"] for j in self.sel])
         self.redraw()
         self.show_status(e)
 
@@ -1442,13 +1442,16 @@ class HzWindow(tk.Toplevel):
 
     # ------------------------------------------------------------ hearing the key held
 
-    def sound(self, key):
-        """The key of the note held with the mouse sounds on the MIDI-out device (None = let go: note off)."""
+    def sound(self, keys):
+        """The keys of the notes held with the mouse (one key, or a list when several selected notes are moved)
+        sound on the MIDI-out device; when they change, all start again (None = let go: notes off)."""
         app = self.app
-        if self.sounding is not None and self.sounding[1] != key:
-            app.out.note(*self.sounding, 0)
+        keys = None if keys is None else tuple(sorted({keys} if isinstance(keys, int) else set(keys)))
+        if self.sounding is not None and self.sounding[1] != keys:
+            for k in self.sounding[1]:
+                app.out.note(self.sounding[0], k, 0)
             self.sounding = None
-        if key is None or self.sounding is not None:
+        if not keys or self.sounding is not None:
             return
         if not app.out.handle and app.out.open(app.midi_device.get()):
             return  # (no device: silent)
@@ -1458,8 +1461,9 @@ class HzWindow(tk.Toplevel):
             mine = app.rendered[app.rendered[:, 5] == app.sel] if len(app.rendered) else ()
             if len(mine):
                 ch = slot_track_channel(int(mine[0, 4]))[1]
-        self.sounding = (ch, key)
-        app.out.note(ch, key, max(1, min(127, int(vel))))
+        self.sounding = (ch, keys)
+        for k in keys:
+            app.out.note(ch, k, max(1, min(127, int(vel))))
 
     def drop_drag(self):
         self.drag = None
