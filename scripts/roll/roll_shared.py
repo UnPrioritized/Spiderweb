@@ -106,6 +106,63 @@ def box_side(rect, x, y, reach):
     return sx, sy
 
 
+def boxes_side(rects, x, y, reach):
+    """box_side for several Select boxes kept together (Ctrl+drag adds one): inside any of them = (0, 0); a side
+    counts only on the outside of them all (the box around them all), where one of them reaches."""
+    if len(rects) == 1:
+        return box_side(rects[0], x, y, reach)
+    if not any(box_side(r, x, y, reach) for r in rects):
+        return None
+    side = box_side(boxes_around(rects), x, y, reach)
+    if side and side != (0, 0):
+        return side
+    return (0, 0) if any(r[0] <= x <= r[2] and r[1] <= y <= r[3] for r in rects) else None
+
+
+def boxes_around(rects):
+    """The one box (x0, y0, x1, y1) around several (x0 < x1, y0 < y1 each)."""
+    return (min(r[0] for r in rects), min(r[1] for r in rects), max(r[2] for r in rects), max(r[3] for r in rects))
+
+
+def boxes_upright(areas):
+    """Several Select boxes' (time, pitch, time, pitch) corners as box_upright, and the one around them all."""
+    boxes = [box_upright(a) for a in areas]
+    return boxes, (min(b[0] for b in boxes), max(b[1] for b in boxes), max(b[2] for b in boxes),
+                   min(b[3] for b in boxes))
+
+
+def _cut(lo, hi, spans):
+    """The pieces of lo..hi left when the spans [(a, b)] are taken out of it."""
+    out = [(lo, hi)]
+    for a, b in spans:
+        out = [p for c, d in out for p in ((c, min(d, a)), (max(c, b), d)) if p[1] - p[0] > 1e-9]
+    return out
+
+
+def boxes_outline(rects):
+    """The outline of several Select boxes on screen as one shape (user: boxes that touch or overlap are joined,
+    the lines inside gone): [(x0, y0, x1, y1)] straight pieces."""
+    out = []
+    for i, (x0, y0, x1, y1) in enumerate(rects):
+        others = rects[:i] + rects[i + 1:]
+        for y, up in ((y0, True), (y1, False)):  # (a piece goes where another box covers the side just past it)
+            spans = [(r[0], r[2]) for r in others if (r[1] < y <= r[3] if up else r[1] <= y < r[3])]
+            out += [(a, y, b, y) for a, b in _cut(x0, x1, spans)]
+        for x, left in ((x0, True), (x1, False)):
+            spans = [(r[1], r[3]) for r in others if (r[0] < x <= r[2] if left else r[0] <= x < r[2])]
+            out += [(x, a, x, b) for a, b in _cut(y0, y1, spans)]
+    return out
+
+
+def draw_boxes(canvas, rects, left, top, width, **kw):
+    """The Select boxes' joined outline (boxes_outline), dashed, cut off left of x = left / above y = top."""
+    for x0, y0, x1, y1 in boxes_outline(rects):
+        if x1 < left or y1 < top:
+            continue
+        canvas.create_line(max(x0, left), max(y0, top), max(x1, left), max(y1, top), fill="#000000", width=width,
+                           dash=(3 * width, 2 * width), capstyle="projecting", **kw)
+
+
 # the pointer on a Select box's side / corner / inside (box_side)
 BOX_CURSORS = {(-1, 0): "sb_h_double_arrow", (1, 0): "sb_h_double_arrow", (0, -1): "sb_v_double_arrow",
                (0, 1): "sb_v_double_arrow", (-1, -1): "size_nw_se", (1, 1): "size_nw_se", (1, -1): "size_ne_sw",

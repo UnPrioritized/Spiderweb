@@ -12,7 +12,7 @@ from notes.joined import all_tumours
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
 from notes.paths import KEYS
 from roll.roll_shared import (BLACK, DRAFT_COLOR, PIANO_88, PREVIEW_LIMIT, SELECTED_COLOR, SLOT_COLORS,
-                              fade, note_name)
+                              draw_boxes, fade, note_name)
 
 HANDLE_COLOR = "#0050d0"
 STROKE_POINT_COLOR = "#7a1fe0"  # the points of a custom shape's strokes (purple, like a picked stroke)
@@ -179,14 +179,15 @@ class RollDrawing:
             self.show_caret()
 
     def draw_select_box(self):
-        """The dotted box being dragged with Select (or the last one, kept_box)."""
+        """The dotted box being dragged with Select (with the ones kept when Ctrl+drag adds it), or the last ones
+        (kept_box): one outline, boxes that touch or overlap joined."""
         self.delete("selbox")
-        box = self.box_area() if self.drag and self.drag[0] == "box" else self.kept_box()
-        x0, y0, x1, y1 = self.box_rect(box) if box else (0, 0, 0, 0)
-        if x1 > self.kb_w and y1 > self.ruler_h:  # (in view)
-            w = max(2, round(2 * self.scale))
-            self.create_rectangle(max(x0, self.kb_w), max(y0, self.ruler_h), x1, y1, outline="#000000", width=w,
-                                  dash=(3 * w, 2 * w), tags="selbox")
+        if self.drag and self.drag[0] == "box":
+            boxes = self.box_more + [b for b in (self.box_area(),) if b]
+        else:
+            boxes = self.kept_box() or []
+        draw_boxes(self, [self.box_rect(b) for b in boxes], self.kb_w, self.ruler_h, max(2, round(2 * self.scale)),
+                   tags="selbox")
 
     def draw_playhead(self):
         self.delete("playhead")

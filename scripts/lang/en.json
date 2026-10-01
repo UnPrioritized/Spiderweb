@@ -253,6 +253,7 @@
  "hz.step_place": "Hz bass: place a note",
  "hz.step_move": "Hz bass: move notes",
  "hz.step_stretch": "Hz bass: stretch notes",
+ "hz.step_duplicate": "Hz bass: copy notes",
  "hz.step_length": "Hz bass: note length",
  "hz.step_lead": "Hz bass: lead in / out",
  "hz.step_delete": "Hz bass: delete notes",
