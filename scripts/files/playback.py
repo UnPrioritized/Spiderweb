@@ -66,6 +66,14 @@ class MidiOut:
         if name not in names:
             return tr("playback.the_midi_device_isn_t_there", name=name)
         dev = MAPPER if name == DEFAULT_DEVICE else names.index(name) - 1
+        # The preview synth's BASS is loaded first: some MIDI-out devices run on BASS too and load theirs by name;
+        # loaded before ours, the preview can't make sound (measured with one, 2026-10-01). Loaded after, they
+        # share ours and both work.
+        from files.synth import SynthError, _load
+        try:
+            _load()
+        except SynthError:
+            pass
         h = wintypes.HANDLE()
         err = _winmm.midiOutOpen(ctypes.byref(h), dev, 0, 0, 0)
         if err:

@@ -116,7 +116,8 @@ class HzWindow(tk.Toplevel):
         self.box_kept = None  # ([box_area, ...], selection) of the last Select boxes, shown after letting go
         self.box_timer = None  # (box_scroll)
         self.pending = None  # (tone id, beat): the first middle click of a slide, waiting for the second
-        self.sounding = None  # (channel, keys) heard now: the notes held with the mouse
+        self.sounding = None  # (channel, what's played) heard now: the notes held with the mouse (see sound)
+        self.sound_jobs, self.sound_on = [], set()  # (the notes still to start / stop, the keys on now)
         self.last_len = 1.0  # beats: how long a newly placed note is (the last length used)
         self.fxl, self.fx_of = {}, None  # the effects' lines (hz["fx"]) and whose they are (the shape, or None)
         self.loops = {}  # the effects that repeat (hz["loop"])
@@ -870,7 +871,7 @@ class HzWindow(tk.Toplevel):
                 self.sel = {i}
             if kind == "note":  # (the next new note is as long as the one clicked)
                 self.last_len = self.tones[i]["len"]
-                self.sound([self.tones[j]["key"] for j in self.sel])
+                self.sound([(self.tones[j]["key"], self.tones[j]["t"], self.tones[j]["len"]) for j in self.sel])
             self.drag = {"kind": kind, "i": i, "before": before, "beat": self.beat_at(e.x), "key": self.key_at(e.y),
                          "orig": copy.deepcopy(self.tones), "x": e.x, "y": e.y, "moved": False,
                          "slide": hit[2] if len(hit) > 2 else None,
@@ -951,7 +952,7 @@ class HzWindow(tk.Toplevel):
             if d.get("box"):
                 self.box_kept = ([(b0 + dt, top + dk, b1 + dt, bottom + dk) for b0, top, b1, bottom in d["box"]],
                                  set(self.sel))
-            self.sound([self.tones[j]["key"] for j in self.sel])
+            self.sound([(self.tones[j]["key"], self.tones[j]["t"], self.tones[j]["len"]) for j in self.sel])
         self.redraw()
         self.show_status(e)
 
@@ -1442,16 +1443,22 @@ class HzWindow(tk.Toplevel):
 
     # ------------------------------------------------------------ hearing the key held
 
-    def sound(self, keys):
-        """The keys of the notes held with the mouse (one key, or a list when several selected notes are moved)
-        sound on the MIDI-out device; when they change, all start again (None = let go: notes off)."""
+    def sound(self, notes):
+        """The notes held with the mouse sound on the MIDI-out device. notes = one key (held until let go), or the
+        selected notes moved (user, 2026-10-01): played in time as in the song (one starting 1/4 beat later sounds
+        1/4 beat later), each stopping at its end. When what they'd play changes, it starts again (None = let go:
+        notes off)."""
         app = self.app
-        keys = None if keys is None else tuple(sorted({keys} if isinstance(keys, int) else set(keys)))
-        if self.sounding is not None and self.sounding[1] != keys:
-            for k in self.sounding[1]:
-                app.out.note(self.sounding[0], k, 0)
-            self.sounding = None
-        if not keys or self.sounding is not None:
+        if isinstance(notes, int):
+            notes = [(notes, 0.0, None)]
+        play = None
+        if notes:
+            t0 = min(t for _, t, _ in notes)
+            play = tuple(sorted((k, round(t - t0, 6), ln if len(notes) > 1 else None) for k, t, ln in notes))
+        if self.sounding is not None and self.sounding[1] == play:
+            return
+        self.hush()
+        if not play:
             return
         if not app.out.handle and app.out.open(app.midi_device.get()):
             return  # (no device: silent)
@@ -1461,9 +1468,39 @@ class HzWindow(tk.Toplevel):
             mine = app.rendered[app.rendered[:, 5] == app.sel] if len(app.rendered) else ()
             if len(mine):
                 ch = slot_track_channel(int(mine[0, 4]))[1]
-        self.sounding = (ch, keys)
-        for k in keys:
-            app.out.note(ch, k, max(1, min(127, int(vel))))
+        vel = max(1, min(127, int(vel)))
+        try:
+            ms = 60000.0 / app.read_project()[1]  # (one beat)
+        except ValueError:
+            ms = 500.0
+        self.sounding = (ch, play)
+        for k, t, ln in play:  # (sorted by key, then time: a note's end comes before the next one's start)
+            if t:
+                self.sound_jobs.append(self.after(int(round(t * ms)), self.sound_key, ch, k, vel))
+            else:
+                self.sound_key(ch, k, vel)
+            if ln:
+                self.sound_jobs.append(self.after(int(round((t + ln) * ms)), self.sound_key, ch, k, 0))
+
+    def sound_key(self, ch, key, vel):
+        """One note on (vel 0 = off) for sound()."""
+        out = self.app.out
+        if key in self.sound_on:
+            out.note(ch, key, 0)
+            self.sound_on.discard(key)
+        if vel:
+            out.note(ch, key, vel)
+            self.sound_on.add(key)
+
+    def hush(self):
+        """Everything sound() started stops."""
+        for job in self.sound_jobs:
+            self.after_cancel(job)
+        self.sound_jobs = []
+        if self.sounding is not None:
+            for k in self.sound_on:
+                self.app.out.note(self.sounding[0], k, 0)
+        self.sound_on, self.sounding = set(), None
 
     def drop_drag(self):
         self.drag = None
