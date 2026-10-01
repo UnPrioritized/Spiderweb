@@ -20,3 +20,4 @@ scripts/bass/**/*.chm
 scripts/bass/**/*.txt
 scripts/bass/**/*.lib
 scripts/bass/**/*.h
+.claude/
