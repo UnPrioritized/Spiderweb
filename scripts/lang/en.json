@@ -1023,6 +1023,14 @@
   "",
   "• Scrollbars on the piano roll: drag the bar to scroll, drag one of its ends to zoom, or use the − / + buttons.",
   "",
+  "• Coloured areas: in the drawer, the new Areas tool (B) gives each piece of a custom shape a colour of its own, or leaves it empty. Click an area or drag across several; \"Reset all colours\" puts them all back. A line under the colours counts them (a shape has at most 15). On the piano roll they count with Fill or Spam and Multi channel.",
+  "",
+  "• Stroke roles (right-click a stroke): Outline and fill (normal), Outline only (notes on top of the fill, cuts no hole), or Fill line (no notes, just splits the inside into areas to colour).",
+  "",
+  "• Outline colour (right-click a stroke): the stroke's notes in a colour of their own. \"Outline between colours\" (under Fill and Spam, with Outline on) puts the notes where two colours meet on the outline too.",
+  "",
+  "• Colours (side panel, under Velocity): any shape's notes take turns over several channels by step, key or time, so the colour keeps changing.",
+  "",
   "• Smoother with lots of notes: moving the view and dragging shapes.",
   "",
   "• New pattern: Curls (right-click a line → Formula → Pattern along the line). The line loops back over itself in little curls; \"curl\" sets how tight they are. In Custom…, the new \"along =\" formula moves a pattern forward or back along the line.",
@@ -1262,7 +1270,7 @@
   "",
   "While it's on, the selected shape's points show (purple squares): drag them with Select. Points in the same spot move together, and a point dropped on another one joins it.",
   "",
-  "Select tool: click a stroke of the selected shape to pick it: Del deletes it, a curve shows its handles, a freehand stroke can be straightened. Ctrl+C / Ctrl+V, Ctrl+H / Ctrl+J and Ctrl+Left / Ctrl+Right copy, paste, flip and turn just that stroke (Esc unpicks it: then they work on the whole shape again). A copied stroke is pasted into the selected custom shape, a grid step later and a key lower each time (nothing selected: into a new shape). Right-click a stroke = its menu, also: save the drawing to the shape library."
+  "Select tool: click a stroke of the selected shape to pick it: Del deletes it, a curve shows its handles, a freehand stroke can be straightened. Ctrl+C / Ctrl+V, Ctrl+H / Ctrl+J and Ctrl+Left / Ctrl+Right copy, paste, flip and turn just that stroke (Esc unpicks it: then they work on the whole shape again). A copied stroke is pasted into the selected custom shape, a grid step later and a key lower each time (nothing selected: into a new shape). Right-click a stroke = its menu, also: save the drawing to the shape library. Its \"This stroke\" part sets the stroke's role and outline colour, like the drawer's (see Drawer: Select and editing)."
  ],
  "help.live.words": "combine join merge strokes outline",
  "help.turn_live.title": "Turn into live shape (Ctrl+L)",
@@ -1337,13 +1345,15 @@
   "Normal / Outline (the box next to Fill and Spam): Outline puts the notes along the edge of what's filled on a channel of their own (with Overlaps cancel out ticked that's every edge, around every filled bit; unticked, only the outer edge) and the inside's on another, with the same gate so they line up (where both would play, the outline's note is kept). It needs Channels: Multi channel; with the others it's all one channel and the box turns orange.",
   "[clip:fill-outline]",
   "",
+  "Coloured areas: with Fill or Spam, the areas you coloured in the drawer (see Drawer: Areas) each get a colour of their own, and Empty ones get no notes. With Outline on, \"Outline between colours\" (under Fill and Spam) puts the notes where two colours meet on the outline too; unticked, the outline is only where the filled part ends. A shape has at most 15 colours (the outline and the plain fill count too): past that the extra colours share the 15th, and the panel says so in orange.",
+  "",
   "Overlaps cancel out (ticked unless you change it): where outlines overlap, the overlap stays empty, and a shape inside a shape makes a hole. Untick it to fill inside any outline, overlaps and holes too. (Text always fills its letters the way the font means them.)",
   "",
   "Lines, curves and arcs can't be filled: turn them into a live shape first (Ctrl+L, see Turn into live shape).",
   "",
   "Spiderweb asks before making more than a million notes."
  ],
- "help.fill.words": "spam gate empty inside outline gap hole overlap cancel union hz bass tone pitch cents",
+ "help.fill.words": "spam gate empty inside outline gap hole overlap cancel union hz bass tone pitch cents colour color area border",
  "help.custom_edit.title": "Custom shapes: resize, turn, skew",
  "help.custom_edit.tip": "Drag a corner or side to resize, just outside a corner to turn, just outside a side's middle to skew. Drag inside to move it.",
  "help.custom_edit.text": [
@@ -1692,9 +1702,11 @@
   "",
   "Multi channel: shapes whose notes clash go on different channels, each on its own track (channel 10, drums, is skipped). Split: Same key = only notes on the same key at the same time clash; Any notes = any notes at the same time. Shapes that follow one after another share a channel. Pasted notes (by track), live shapes made with Turn into live shape (by the shape each stroke came from) and Fill / Spam set to Outline (the outline and the inside) can spread over several channels: the shape list says how many, in orange above 15 (from there the colours and channel numbers repeat).",
   "",
-  "Every channel has its own note colour."
+  "Every channel has its own note colour.",
+  "",
+  "Colours (in the side panel, under Velocity): any shape's notes take turns over several channels, so its colour keeps changing. By step = each step the next channel (spam: each gate column; lines: each note in time), By key = each key, By time = every note length from the start of the song (1/4 = a beat, so it lines up with the bar lines). Channels = how many take turns, every = how long one lasts. It needs Multi channel. Which colours you see depends on the program showing the MIDI."
  ],
- "help.channels.words": "channel track overlap colour",
+ "help.channels.words": "channel track overlap colour color cycle take turns rainbow",
  "help.files.title": "Saving and MIDI export",
  "help.files.tip": "Your work saves itself. Generate MIDI writes the .mid file set under Project.",
  "help.files.text": [
@@ -1801,6 +1813,8 @@
   "Areas are the pieces your lines cut the drawing into. Grey = what Fill and Spam fill as normal. Pick a colour on the right (or Empty), then click an area to give it that colour, or hold the button and drag to colour every area you pass over. Right-click an area to put it back to normal; \"Reset all colours\" puts every area back. Each area keeps its colour when you move or change lines, and when the shape is placed and stretched.",
   "",
   "On the piano roll the colours count only with Fill or Spam. Each colour number gets a channel of its own with Multi channel, so it shows in a colour of its own there too (the piano roll picks those colours, so they can differ from the drawer's). Areas with the same number share a channel. Empty leaves an area without notes; a coloured hole gets filled.",
+  "",
+  "The line under the colours says how many colours the shape will use, with and without \"Outline\" on (the shape's own colour counts too, where an area is left as normal). A shape has at most 15: past that the line turns orange, and on the piano roll the extra colours share the last one.",
   "",
   "To split an area without adding notes, draw a fill line through it (right-click the stroke → Fill line). Lines that end a bit past an edge split best.",
   "",
