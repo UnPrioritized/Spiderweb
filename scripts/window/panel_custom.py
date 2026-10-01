@@ -441,6 +441,8 @@ class CustomPanel:
             t["gate"] = hz_gate(t["hz"], bpm)
         self.shapes_changed()
         self.sync_custom()
+        if self.hz_window:
+            self.hz_window.sync()
         self.schedule_autosave()
 
     def open_drawer(self):

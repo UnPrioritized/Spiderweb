@@ -721,6 +721,8 @@ class App(ProjectFiles, CustomPanel, PolygonPanel, FreehandPanel, FunnelPanel, T
         self.sync_points()
         self.shapes_changed()
         self.sync_custom()  # gates are shown in ticks
+        if self.hz_window:
+            self.hz_window.show_stale()  # (a BPM change)
         self.sync_funnel()
         self.sync_tumour()
         self.sync_text()

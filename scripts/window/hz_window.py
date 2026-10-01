@@ -197,6 +197,10 @@ class HzWindow(tk.Toplevel):
         f = piece()
         self.what = ttk.Label(f, text="", foreground="#555")
         self.what.pack(side="left", padx=(0, 10))
+        # the BPM changed since the Hz bass was made: said in red in the shape's place, with the button (user)
+        self.stale = ttk.Label(f, text=tr("hz.stale"), foreground=RED)
+        self.stale_btn = ttk.Button(f, text=tr("panel_custom.hz_update"), command=app.update_hz, takefocus=False)
+        self.stale_shown = False
         f = piece("right")
         fx_box = ttk.Checkbutton(f, text=tr("hz.fx"), variable=app.hz_fx, command=self.on_fx, style="Toolbutton",
                                  takefocus=False)
@@ -304,11 +308,29 @@ class HzWindow(tk.Toplevel):
         self.pitch_entry.config(state="normal" if self.can_place() else "disabled")
         self.show_auto()
         self.what.config(text=text)
+        self.show_stale()
         self.after_idle(self.layout)  # (its width changed)
         self.grow_box.config(state="normal" if sh is not None else "disabled")
         if self.tones and not self.fitted:
             self.fit_view()
         self.redraw()
+
+    def show_stale(self):
+        """The red "BPM changed" text and Update button instead of the shape's name, while the shape shown was made
+        for another BPM than the project's now (its tone is off: the red line shows it)."""
+        hz, bpm = ((self.target() or {}).get("hz") or {}), self.app.current_bpm()
+        stale = bool(hz) and bpm is not None and abs(hz["bpm"] - bpm) > 1e-9
+        if stale == self.stale_shown:
+            return
+        self.stale_shown = stale
+        for w in (self.what, self.stale, self.stale_btn):
+            w.pack_forget()
+        if stale:  # (the button packed first: when the bar is too narrow, the text is cut, not the button)
+            self.stale_btn.pack(side="right", padx=(0, 10))
+            self.stale.pack(side="left", padx=(0, 6))
+        else:
+            self.what.pack(side="left", padx=(0, 10))
+        self.after_idle(self.layout)
 
     def before_restore(self):
         """Undo / redo is about to change the shapes: what's shown now (for after_restore)."""
