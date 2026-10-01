@@ -24,7 +24,7 @@ TWIN_COLOR = "#00a39a"  # the curves linked to it
 SELECTED, DRAFT = len(SLOT_COLORS), len(SLOT_COLORS) + 1
 NOTE_COLORS = [(fade(f, 1 - level * 4 / 124), b) for f, b in SLOT_COLORS + [SELECTED_COLOR, DRAFT_COLOR]
                for level in range(32)]
-RING_COLOR = "#e00000"
+RING_COLOR = "#b40000"  # (user: #e00000 looked bright, almost pink)
 PREVIEW_COLOR, PREVIEW_HALO = "#ff1f1f", "#ffa8a8"  # the outline gate's preview line (draw_edge_preview)
 RING_GAP = 4  # px: notes in a row closer than this count as touching for the ring
 RING_MAX = 20000  # more ring pieces on screen than this: none drawn (canvas items are slow)
@@ -227,7 +227,7 @@ class RollDrawing:
             self.show_caret()
 
     def draw_ring(self, w, h):
-        """A red line round the outside of the selected shapes' notes (user: the notes keep their colours, even
+        """A red line round the selected shapes' notes, on their outer edge pixels (user: the notes keep their colours, even
         with short gates): ring_parts, worked out once per selection / notes / zoom, then placed like the notes."""
         app = self.app
         if not app.sels or not app.show_notes.get() or not len(app.rendered):
@@ -240,7 +240,8 @@ class RollDrawing:
         if self._ring[2] is None:
             return
         width = max(1, round(self.scale))  # (user: 2 px was too thick)
-        self.draw_ring_lines(self._ring[2], w, h, width, width, fill=RING_COLOR, width=width)  # (just outside the notes)
+        # on the notes' edge pixels, growing inward (user)
+        self.draw_ring_lines(self._ring[2], w, h, -(width - 1) / 2, 1, fill=RING_COLOR, width=width)
 
     def draw_edge_preview(self, w, h):
         """While the outline gate box is being used (app.edge_preview = its gate in beats): a red line where the
@@ -291,11 +292,11 @@ class RollDrawing:
 
         def row(k, lower):  # a key row's top / bottom pixel, as note_rects has it
             y0 = np.round((k + 0.5) * ay + by)
-            return np.maximum(np.round((k - 0.5) * ay + by), y0 + 1) if lower else y0
+            return np.maximum(np.round((k - 0.5) * ay + by), y0 + 1) - 1 if lower else y0
 
-        sx = np.round(sides[:, 0] * ax + bx) + np.where(sides[:, 3] == 1, d, -d)
+        sx = np.round(sides[:, 0] * ax + bx) + np.where(sides[:, 3] == 1, d - 1, -d)  # (a note's last pixel: end - 1)
         sy0, sy1 = row(sides[:, 2], False) - d, row(sides[:, 1], True) + d + extra
-        tx0, tx1 = np.round(tops[:, 0] * ax + bx) - d, np.round(tops[:, 1] * ax + bx) + d + extra
+        tx0, tx1 = np.round(tops[:, 0] * ax + bx) - d, np.round(tops[:, 1] * ax + bx) - 1 + d + extra
         ty = np.where(tops[:, 3] == 1, row(tops[:, 2], False) - d, row(tops[:, 2], True) + d)
         on_s = ~((sx < kb) | (sx > w) | (sy1 < top) | (sy0 > h))
         on_t = ~((tx1 < kb) | (tx0 > w) | (ty < top) | (ty > h))
@@ -508,7 +509,8 @@ class RollDrawing:
             keep[small] = last[spot] == small
             if not keep.all():
                 x0, x1, key, color = x0[keep], x1[keep], key[keep], color[keep]
-        return x0, row0[key], x1, row1[key], color
+        # the outline goes inside the note (user): its last pixel is the one before the note's end / next row
+        return x0, row0[key], np.maximum(x1 - 1, x0), row1[key] - 1, color
 
     def paint_image(self, w, h, rows, cols, rects):
         """Grid and notes as one picture over the note area."""
