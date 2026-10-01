@@ -94,6 +94,8 @@ class TumourWindow(tk.Toplevel):
             Tooltip(e, TIPS[key])
             self.widgets.append(e)
             self.entries[key] = e
+            if key == "slant":  # (only shown for square bumps, user)
+                self.slant_row = box.grid_slaves(row=r)
         row = ttk.Frame(box)
         row.grid(row=8, column=0, columnspan=5, sticky="w", pady=(1, 0))
         self.combo(row, "side", SIDE_CHOICES, 10, tr("tumour_window.side"), pad=0)
@@ -195,6 +197,17 @@ class TumourWindow(tk.Toplevel):
         square = on and tm["shape"] == "square"
         self.entries["slant"].config(state="normal" if square else "disabled")
         self.graph_btns["slant"].config(state="normal" if square else "disabled")
+        # Slant only for square bumps, New random only for random sides (greyed while tumours are off, user)
+        for w in self.slant_row:
+            if tm["shape"] == "square":
+                w.grid()
+            else:
+                w.grid_remove()
+        if (tm["side"] == "random") != bool(self.reroll.winfo_manager()):
+            if tm["side"] == "random":
+                self.reroll.pack(side="left", padx=(8, 0))
+            else:
+                self.reroll.pack_forget()
         # a number following a graph: blue, "× graph" after its unit
         graphs = tm.get("graphs") or {}
         for key, _, unit, *_ in NUMBERS:
