@@ -188,13 +188,30 @@ class LocalUndo:
 
 
 class Tooltip:
-    """Shows a small box of text while the mouse rests on a widget (none while the text is empty)."""
+    """Shows a small box of text while the mouse rests on a widget (none while the text is empty). Once the widget
+    is used (clicked, dragged, wheel, keys), the box stays away until the mouse leaves it with no button held."""
+
+    BUTTONS = 0x1f00  # (event.state: a mouse button is held)
 
     def __init__(self, widget, text):
-        self.widget, self.text, self.tip, self.job = widget, text, None, None
-        widget.bind("<Enter>", lambda e: self.schedule(), add="+")
-        widget.bind("<Leave>", lambda e: self.hide(), add="+")
-        widget.bind("<ButtonPress>", lambda e: self.hide(), add="+")
+        self.widget, self.text, self.tip, self.job, self.used = widget, text, None, None, False
+        widget.bind("<Enter>", self.enter, add="+")
+        widget.bind("<Leave>", self.leave, add="+")
+        for seq in ("<ButtonPress>", "<MouseWheel>", "<KeyPress>"):
+            widget.bind(seq, lambda e: self.use(), add="+")
+
+    def enter(self, e):
+        if not self.used and not e.state & self.BUTTONS:
+            self.schedule()
+
+    def leave(self, e):
+        self.hide()
+        if not e.state & self.BUTTONS:
+            self.used = False
+
+    def use(self):
+        self.used = True
+        self.hide()
 
     def schedule(self):
         self.hide()

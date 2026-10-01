@@ -21,7 +21,7 @@ class Knob(tk.Canvas):
     """A round dial from -100 to 100 (0 = straight up, all the way = straight down). Drag up / down (Shift = fine),
     the mouse wheel or the arrow keys turn it; it sticks at 0 for a moment on the way past; the right mouse button
     points it at the mouse; a middle-click puts it back to 0. changed(value, done): done = the end of one turn.
-    Greyed out (on(False)), it shows its value but can't be turned."""
+    Greyed out (on(False)), it shows its value and can't be turned, only put back to 0 by a middle-click."""
 
     TURN = 180  # degrees each way
     STICK = 10  # pixels of dragging that stay at 0
@@ -34,7 +34,7 @@ class Knob(tk.Canvas):
         self.bind("<ButtonPress-1>", self.press)
         self.bind("<B1-Motion>", self.move)
         self.bind("<ButtonRelease-1>", lambda e: self.release())
-        self.bind("<ButtonPress-2>", lambda e: self.enabled and self.turn_to(0, True))
+        self.bind("<ButtonPress-2>", lambda e: self.turn_to(0, True))  # (greyed out too)
         self.bind("<ButtonPress-3>", self.point)
         self.bind("<B3-Motion>", self.point)
         self.bind("<ButtonRelease-3>", lambda e: self.enabled and self.changed(self.value, True))
