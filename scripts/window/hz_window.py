@@ -150,6 +150,18 @@ class HzWindow(tk.Toplevel):
         ttk.Label(f, text=tr("app.snap")).pack(side="left", padx=(10, 0))
         SnapPicker(app, f, app.hz_snap).button.pack(side="left", padx=(4, 10))
         ttk.Button(f, text=tr("app.fit_view"), command=self.fit_notes).pack(side="left", padx=(0, 10))
+        f = piece()  # the whole Hz bass's pitch, in cents (moved here from the side panel, user)
+        lb = ttk.Label(f, text=tr("hz.pitch"))
+        lb.pack(side="left")
+        self.pitch_var = tk.StringVar(value="0")
+        self.pitch_entry = ttk.Entry(f, textvariable=self.pitch_var, width=5)
+        self.pitch_entry.pack(side="left", padx=4)
+        ttk.Label(f, text=tr("panel_custom.hz_cents"), foreground="#777").pack(side="left", padx=(0, 10))
+        for w in (lb, self.pitch_entry):
+            Tooltip(w, tr("panel_custom.hz_cents_tip"))
+        self.pitch_entry.bind("<Return>", lambda e: self.on_pitch())
+        self.pitch_entry.bind("<FocusOut>", lambda e: self.on_pitch())
+        Scrub(app, [(self.pitch_entry, self.pitch_var, self.on_pitch)], (1, 10, 0.1), -1200, 1200, label=lb)
         f = piece()
         ttk.Label(f, text=tr("hz.gates")).pack(side="left")
         self.gates = ttk.Combobox(f, values=[tr("panel_custom.hz_" + m) for m in GATE_MODES],
@@ -282,10 +294,13 @@ class HzWindow(tk.Toplevel):
             text = tr("hz.shape", name=self.app.shape_label(sh))
             self.grow.set(bool(hz.get("grow")) if tones else hz_made(sh))
         if hz:  # (no Hz bass yet: the dropdown stays as picked, for the one the first note makes)
+            self.pitch_var.set(fmt(hz["cents"]))
+            self.pitch_entry.config(style="TEntry")
             self.gates.current(GATE_MODES.index(gate_mode(hz)))
             if hz.get("auto") is not None:
                 self.auto_var.set(fmt(hz["auto"]))
         self.gates.config(state="readonly" if self.can_place() else "disabled")
+        self.pitch_entry.config(state="normal" if self.can_place() else "disabled")
         self.show_auto()
         self.what.config(text=text)
         self.after_idle(self.layout)  # (its width changed)
@@ -1169,7 +1184,8 @@ class HzWindow(tk.Toplevel):
         hz = dict(self.app.custom_defaults.get("hz") or HZ_DEFAULTS, bpm=float(bpm or 120))
         hz.pop("fixed", None)
         hz.pop("auto", None)
-        return dict(hz, **self.fixed())
+        cents = self.pitch()
+        return dict(hz, **self.fixed(), **({} if cents is None else {"cents": cents}))
 
     def show_auto(self):
         """The threshold box: there only with Auto gates."""
@@ -1199,6 +1215,27 @@ class HzWindow(tk.Toplevel):
         sh = self.target()
         if sh is not None and sh.get("hz"):
             self.app.set_hz_gates("auto", limit)
+        self.redraw()
+
+    def pitch(self):
+        """The Pitch box in cents, or None (it turns red) when it isn't a number from -1200 to 1200."""
+        try:
+            cents = float(calc(self.pitch_var.get()))
+            if abs(cents) > 1200:
+                raise ValueError
+        except (ValueError, ZeroDivisionError):
+            self.pitch_entry.config(style="Bad.TEntry")
+            return None
+        self.pitch_entry.config(style="TEntry")
+        return cents
+
+    def on_pitch(self):
+        """The Pitch box typed, stepped or dragged: the Hz bass shown moves by that many cents (one undo step); with
+        none yet, the one the first note makes gets it."""
+        cents = self.pitch()
+        sh = self.target()
+        if cents is not None and sh is not None and sh.get("hz"):
+            self.app.set_hz_cents(cents)
         self.redraw()
 
     def on_line(self):
