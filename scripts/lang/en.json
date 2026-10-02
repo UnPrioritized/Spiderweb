@@ -1873,7 +1873,7 @@
  "help.drawer_erase.title": "Drawer: Eraser",
  "help.drawer_erase.tip": "Click a stroke to remove it, or drag a box: every stroke it touches goes. Ctrl+Z = undo.",
  "help.drawer_erase.text": [
-  "Click a stroke to remove it, or drag a box: when you let go, every stroke it touches is removed. Ctrl+Z brings back everything one box removed."
+  "Click a stroke to remove it, or drag a box: when you let go, every stroke it touches is removed. Right-click or Esc while dragging drops the box without removing anything. Ctrl+Z brings back everything one box removed."
  ],
  "help.drawer_areas.title": "Drawer: Areas",
  "help.drawer_areas.tip": "Click an area to give it the colour picked on the right (or Empty), or drag across several. Right-click = back to normal.",

@@ -1070,6 +1070,8 @@ class Drawer(tk.Toplevel):
     def right_click(self, e):
         """Finishes a polyline being drawn. Otherwise, like on the piano roll: on the selected curve's anchor =
         remove it, on a handle dot = pull it back in; near a stroke = its menu; empty space = deselect."""
+        if self.erasing():  # an eraser box being dragged: dropped, nothing erased (like Esc)
+            return self.cancel_draft()
         if self.draft or self.follow:
             if self.draft and self.draft["kind"] == "poly" and self.tool.get() == "poly":
                 return self.finish_poly()
@@ -1320,7 +1322,13 @@ class Drawer(tk.Toplevel):
         del self.undo_stack[:-200]
         self.redo_kept, self.redo_stack = self.redo_stack, []
 
+    def erasing(self):
+        """An eraser box is being dragged."""
+        return bool(self.drag) and self.drag[0] == "erasebox"
+
     def undo(self):
+        if self.erasing():  # (nothing while an eraser box is held)
+            return
         if self.draft:
             return self.cancel_draft()
         if self.undo_stack:
@@ -1330,6 +1338,8 @@ class Drawer(tk.Toplevel):
             self.changed()
 
     def redo(self):
+        if self.erasing():
+            return
         if self.draft:
             return self.cancel_draft()
         if self.redo_stack:
