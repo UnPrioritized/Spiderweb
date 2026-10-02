@@ -1234,9 +1234,11 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
 
     def update_status(self):
         parts = [self._position] if self._position else []
-        parts.append(tr("app.shapes_notes", n=len(self.shapes), n2=len(self.rendered)))
+        parts.append(tr("app.one_shape_notes" if len(self.shapes) == 1 else "app.shapes_notes",
+                        n=len(self.shapes), n2=len(self.rendered)))
         if self.channel_mode.get() == "auto" and self.slot_count:
-            parts.append(tr("app.tracks_one_channel_each", slot_count=self.slot_count))
+            parts.append(tr("app.one_track") if self.slot_count == 1 else
+                         tr("app.tracks_one_channel_each", slot_count=self.slot_count))
         if self.sels:
             shapes = tr("app.shapes_2", n=len(self.sels)) if len(self.sels) > 1 else ""
             parts.append(tr("app.selected_notes", shapes=shapes,
