@@ -136,15 +136,15 @@ def pattern_name(p):
     return tr("pattern.edited", name=name) if p.get("loop") else name
 
 
-FORMULA_KINDS = ("curve", "line", "arc")  # the piano roll's shapes that can have formulas
+FORMULA_KINDS = ("curve", "line", "poly", "arc")  # the piano roll's shapes that can have formulas
 
 
 def origin_paths(sh):
-    """A piano roll shape's path(s) before its formulas (the dashed origin path): a line's two points, an arc's
-    points, a curve's (a joined curve: one per piece)."""
+    """A piano roll shape's path(s) before its formulas (the dashed origin path): a line's / polyline's points (one
+    path, round its corners), an arc's points, a curve's (a joined curve: one per piece)."""
     from notes.bezier import anchor_count, sample
     pts = [tuple(q) for q in sh["pts"]]
-    if sh["kind"] == "line":
+    if sh["kind"] in ("line", "poly"):
         return [pts]
     if sh["kind"] == "arc":
         from notes.arc import arc_points

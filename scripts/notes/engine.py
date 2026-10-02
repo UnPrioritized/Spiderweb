@@ -325,7 +325,8 @@ def _notes_tracks(sh, ppq, keys):
                 a = a[::-1]
             pieces.append(note_array(path_notes(a * [ppq, 1], end_dot), 3))
         raw = np.concatenate(pieces)
-    elif end_dot and sh["kind"] == "poly" and len(path) > 2:
+    elif end_dot and sh["kind"] == "poly" and len(path) > 2 and not (sh.get("shape") or sh.get("pattern")):
+        # (with a formula its points are the formula's, like a curve's)
         raw = dot_segment_notes(path)
     else:
         raw = path_notes(path, end_dot)
