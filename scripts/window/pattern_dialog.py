@@ -24,7 +24,7 @@ from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_
 from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, clean_loop, formula_loop,
                            formula_shape, keep_sym, new_pattern, new_shape, pattern_name, pattern_names, shape_name,
                            shape_names)
-from roll.roll_shared import ALT
+from roll.roll_shared import ALT, grab_while_panning
 from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
 from window.widgets import LocalUndo, Scrub, Tooltip
 
@@ -236,6 +236,7 @@ class FormulaDialog(tk.Toplevel):
         c.bind("<ButtonPress-2>", self.start_pan)
         c.bind("<B2-Motion>", self.move_pan)
         c.bind("<ButtonRelease-2>", self.middle_release)
+        grab_while_panning(c)
         c.bind("<MouseWheel>", self.wheel)
         c.bind("<Double-Button-1>", self.add_point)
         info = ttk.Frame(right)

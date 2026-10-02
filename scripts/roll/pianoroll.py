@@ -25,8 +25,8 @@ from window.hz_window import open_hz
 from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, PICK, SHIFT, boxes_side,
-                              boxes_upright, cached_path, cached_strokes, grid_span, line_touches_box, mouse_trail,
-                              note_name)
+                              boxes_upright, cached_path, cached_strokes, grab_while_panning, grid_span, line_touches_box,
+                              mouse_trail, note_name)
 from roll.roll_text import TextTyping
 
 
@@ -86,6 +86,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.bind("<ButtonPress-2>", self.start_pan)
         self.bind("<B2-Motion>", self.pan_to)
         self.bind("<ButtonRelease-2>", self.on_middle_release)
+        grab_while_panning(self)
         self.bind("<MouseWheel>", self.on_wheel)
         self.bind("<Key>", self.on_key)
 

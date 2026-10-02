@@ -13,7 +13,8 @@ from files.lang import tr
 from notes.engine import shape_notes
 from notes.envelope import env_at, env_values, paint_env, tidy_env, velocity_env
 from notes.pattern import loop_points
-from roll.roll_shared import CTRL, DRAFT_COLOR, SHIFT, SELECTED_COLOR, SLOT_COLORS, cached_path, fade
+from roll.roll_shared import (CTRL, DRAFT_COLOR, SHIFT, SELECTED_COLOR, SLOT_COLORS, cached_path, fade,
+                              grab_while_panning)
 
 LEVELS = (127, 96, 64, 32, 0)
 CURVE_STEPS = 48
@@ -117,6 +118,7 @@ class VelocityPane(tk.Canvas):
         self.bind("<ButtonPress-3>", self.on_right)
         self.bind("<ButtonPress-2>", self.start_pan)
         self.bind("<B2-Motion>", self.pan_to)
+        grab_while_panning(self)
         self.bind("<MouseWheel>", self.on_wheel)
 
     # ------------------------------------------------------------ coordinates

@@ -31,8 +31,8 @@ from notes.hzbass import (AUTO, AUTO_MOST, FX, HZ_DEFAULTS, TUNE, auto_state, ca
                           clean_off, clean_tones, fit_length, glide, heard, hz_of, left_edge, links, next_id, pitch,
                           tones_span)
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, SELECT_CURSOR, SELECTED_COLOR, SHIFT,
-                              SLOT_COLORS, boxes_side, boxes_upright, draw_boxes, grid_span,
-                              note_name)
+                              SLOT_COLORS, boxes_side, boxes_upright, draw_boxes, grab_while_panning,
+                              grid_span, note_name)
 from roll.zoombar import add_zoom_bars
 from window.hz_effects import AMOUNT, FxPane
 from window.hz_preview import Preview
@@ -301,6 +301,7 @@ class HzWindow(tk.Toplevel):
         c.bind("<ButtonPress-2>", self.pan_start)
         c.bind("<B2-Motion>", self.pan_move)
         c.bind("<ButtonRelease-2>", self.on_middle)
+        grab_while_panning(c)
         c.bind("<ButtonPress-3>", self.on_menu)
         c.bind("<Double-Button-3>", self.toggle_tool)
         self.menu_wait = None  # a right click on empty space: its menu, waiting to see if it's a double click

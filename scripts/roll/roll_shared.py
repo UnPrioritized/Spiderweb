@@ -73,6 +73,7 @@ DRAFT_COLOR = ("#9be39b", "#1d6b1d")
 SHIFT, CTRL, ALT = 0x1, 0x4, 0x20000
 # the Select tool's mouse pointer: a cross (its middle = the spot pointed at) with a small dotted box
 SELECT_CURSOR = "{@" + os.path.join(ICONS, "select.cur").replace("\\", "/") + "}"
+GRAB_CURSOR = "{@" + os.path.join(ICONS, "grab.cur").replace("\\", "/") + "}"  # a closed hand
 PIANO_88 = range(21, 109)  # A0 to C8, the keys of a real piano
 BOX_STILL = 4  # a Select box moved less than this many pixels from where it started is still a click
 BOX_SCROLL_MS = 100  # a Select box dragged past the edge scrolls the view a beat (3 keys up / down) this often
@@ -87,6 +88,21 @@ def grid_span(a, b, step):
         return lo, hi
     lo, hi = math.floor(lo / step + 1e-9) * step, math.ceil(hi / step - 1e-9) * step
     return lo, max(hi, lo + step)
+
+
+def grab_while_panning(widget):
+    """A closed hand while the middle button is held down on the widget (it scrolls the view), then the pointer
+    it had. Call after the widget's own middle button bindings."""
+    def press(e):
+        widget._before_grab = widget.cget("cursor")
+        widget.config(cursor=GRAB_CURSOR)
+
+    def release(e):
+        if getattr(widget, "_before_grab", None) is not None:
+            widget.config(cursor=widget._before_grab)
+            widget._before_grab = None
+    widget.bind("<ButtonPress-2>", press, add="+")
+    widget.bind("<ButtonRelease-2>", release, add="+")
 
 
 def line_touches_box(px, py, x0, y0, x1, y1):

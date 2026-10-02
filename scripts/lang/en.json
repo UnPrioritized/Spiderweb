@@ -617,6 +617,8 @@
  "drawer.delete_stroke": "Delete stroke",
  "drawer.del": "Del",
  "drawer.copy_stroke": "Copy stroke",
+ "drawer.delete_strokes": "Delete {n} strokes",
+ "drawer.copy_strokes": "Copy {n} strokes",
  "drawer.ctrl_c": "Ctrl+C",
  "drawer.paste": "Paste",
  "drawer.ctrl_v": "Ctrl+V",
@@ -1822,7 +1824,7 @@
  "help.drawer_select.title": "Drawer: Select and editing",
  "help.drawer_select.tip": "Drag a point (small squares) or a stroke. Drag on empty space = a box selecting several. Del = delete.",
  "help.drawer_select.text": [
-  "Select: drag a point (small squares; points in the same spot move together, so outlines stay closed), an ellipse's corners, or a whole stroke (moves in grid squares, Shift = free). Drag on empty space to draw a box: every stroke it touches is selected (Ctrl adds to what's already selected), and dragging one of them moves them all. A click on empty space deselects. Del deletes the selected strokes. Middle-drag scrolls.",
+  "Select: drag a point (small squares; points in the same spot move together, so outlines stay closed), an ellipse's corners, or a whole stroke (moves in grid squares, Shift = free). Drag on empty space to draw a box: every stroke it touches is selected, and the box stays until you click outside it. Ctrl+drag adds another box, Ctrl+click adds or removes one stroke. Dragging one of the selected strokes, or anywhere inside the box, moves them all; right-click inside the box (or on one of them) for what works on all of them at once. A click on empty space deselects. Del deletes the selected strokes. Middle-drag scrolls.",
   "",
   "Right-click a stroke = its menu (add point / anchor, symmetric curve halves, its role, delete, copy, paste, flip, turn); empty space = deselect; while drawing a polyline = finish it.",
   "",
@@ -1869,9 +1871,9 @@
   "Drag (or click) corner to corner of its box; Ctrl makes it a perfect circle."
  ],
  "help.drawer_erase.title": "Drawer: Eraser",
- "help.drawer_erase.tip": "Click a stroke to remove it, or drag across several. Ctrl+Z = undo.",
+ "help.drawer_erase.tip": "Click a stroke to remove it, or drag a box: every stroke it touches goes. Ctrl+Z = undo.",
  "help.drawer_erase.text": [
-  "Click a stroke to remove it, or hold the button and drag to remove every stroke you pass over. Ctrl+Z brings back everything one drag removed."
+  "Click a stroke to remove it, or drag a box: when you let go, every stroke it touches is removed. Ctrl+Z brings back everything one box removed."
  ],
  "help.drawer_areas.title": "Drawer: Areas",
  "help.drawer_areas.tip": "Click an area to give it the colour picked on the right (or Empty), or drag across several. Right-click = back to normal.",
