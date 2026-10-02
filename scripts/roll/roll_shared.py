@@ -5,6 +5,8 @@ import ctypes
 import math
 import os
 
+import numpy as np
+
 from files.about import ICONS
 
 from notes.engine import cached_path, cached_strokes  # (used from here by the piano roll's parts)
@@ -85,6 +87,22 @@ def grid_span(a, b, step):
         return lo, hi
     lo, hi = math.floor(lo / step + 1e-9) * step, math.ceil(hi / step - 1e-9) * step
     return lo, max(hi, lo + step)
+
+
+def line_touches_box(px, py, x0, y0, x1, y1):
+    """A line through the screen points (px, py: arrays) touches the box x0 < x1, y0 < y1 (one point: is in it)."""
+    if len(px) == 1:
+        return x0 <= px[0] <= x1 and y0 <= py[0] <= y1
+    # each piece clipped to the box (Liang-Barsky): something is left = it touches
+    ax, ay, dx, dy = px[:-1], py[:-1], np.diff(px), np.diff(py)
+    t0, t1, out = np.zeros(len(ax)), np.ones(len(ax)), np.zeros(len(ax), bool)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        for p, q in ((-dx, ax - x0), (dx, x1 - ax), (-dy, ay - y0), (dy, y1 - ay)):
+            out |= (p == 0) & (q < 0)
+            r = q / p
+            t0 = np.where(p < 0, np.maximum(t0, r), t0)
+            t1 = np.where(p > 0, np.minimum(t1, r), t1)
+    return bool((~out & (t0 <= t1)).any())
 
 
 def box_upright(area):

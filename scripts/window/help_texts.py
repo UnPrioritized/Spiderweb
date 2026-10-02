@@ -65,6 +65,7 @@ TOPIC_LIST = [
     ("domino", "Sound and MIDI"),
     ("drawer", "Custom shape drawer"),
     ("drawer_select", "Custom shape drawer"),
+    ("drawer_erase", "Custom shape drawer"),
     ("drawer_line", "Custom shape drawer"),
     ("drawer_poly", "Custom shape drawer"),
     ("drawer_free", "Custom shape drawer"),
@@ -72,7 +73,6 @@ TOPIC_LIST = [
     ("drawer_arc", "Custom shape drawer"),
     ("drawer_square", "Custom shape drawer"),
     ("drawer_circle", "Custom shape drawer"),
-    ("drawer_erase", "Custom shape drawer"),
     ("drawer_areas", "Custom shape drawer"),
     ("shortcuts", "Reference"),
 ]

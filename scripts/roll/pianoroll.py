@@ -25,7 +25,8 @@ from window.hz_window import open_hz
 from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, PICK, SHIFT, boxes_side,
-                              boxes_upright, cached_path, cached_strokes, grid_span, mouse_trail, note_name)
+                              boxes_upright, cached_path, cached_strokes, grid_span, line_touches_box, mouse_trail,
+                              note_name)
 from roll.roll_text import TextTyping
 
 
@@ -406,20 +407,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         for i, sh in enumerate(self.app.shapes):
             for stroke in self.pick_strokes(sh):
                 pts = np.asarray(stroke, float).reshape(-1, 2)
-                px, py = self.t2x(pts[:, 0]), self.p2y(pts[:, 1])
-                if len(pts) == 1:
-                    hit = x0 <= px[0] <= x1 and y0 <= py[0] <= y1
-                else:  # each piece clipped to the box (Liang-Barsky): something is left = it touches
-                    ax, ay, dx, dy = px[:-1], py[:-1], np.diff(px), np.diff(py)
-                    t0, t1, out = np.zeros(len(ax)), np.ones(len(ax)), np.zeros(len(ax), bool)
-                    with np.errstate(divide="ignore", invalid="ignore"):
-                        for p, q in ((-dx, ax - x0), (dx, x1 - ax), (-dy, ay - y0), (dy, y1 - ay)):
-                            out |= (p == 0) & (q < 0)
-                            r = q / p
-                            t0 = np.where(p < 0, np.maximum(t0, r), t0)
-                            t1 = np.where(p > 0, np.minimum(t1, r), t1)
-                    hit = bool((~out & (t0 <= t1)).any())
-                if hit:
+                if line_touches_box(self.t2x(pts[:, 0]), self.p2y(pts[:, 1]), x0, y0, x1, y1):
                     found.add(i)
                     break
         if self.app.show_notes.get() and len(self.app.rendered):

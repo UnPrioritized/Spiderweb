@@ -1808,7 +1808,7 @@
  "help.drawer.title": "The drawer",
  "help.drawer.tip": "Draw a shape for your library, Save it, then Use on the piano roll. Closed outlines can be filled.",
  "help.drawer.text": [
-  "The drawer (Custom shape → Drawer…) is where you draw shapes for your library. Its tools work like the piano roll's: Select (V), Line (L), Polyline (P), Freehand (F), Curve (C), Arc (A), Square (S), Circle (O) and Eraser (E). Areas (B) colours the areas inside (see Drawer: Areas). Points snap to the grid; Shift draws freely. Drag a stroke out, or click where it starts and click where it ends (right-click or Esc cancels).",
+  "The drawer (Custom shape → Drawer…) is where you draw shapes for your library. Its tools work like the piano roll's: Select (V), Eraser (E), Line (L), Polyline (P), Freehand (F), Curve (C), Arc (A), Square (S) and Circle (O). Areas (B) colours the areas inside (see Drawer: Areas). Points snap to the grid; Shift draws freely. Drag a stroke out, or click where it starts and click where it ends (right-click or Esc cancels).",
   "",
   "Save keeps it in the library (the shapes subfolder next to Spiderweb); Use on the piano roll picks it for the Custom shape tool. On the piano roll it stretches to the box you drag.",
   "",
@@ -1820,9 +1820,9 @@
  ],
  "help.drawer.words": "library draw custom shape board",
  "help.drawer_select.title": "Drawer: Select and editing",
- "help.drawer_select.tip": "Drag a point (small squares), a stroke, or empty space to scroll. Del = delete the stroke.",
+ "help.drawer_select.tip": "Drag a point (small squares) or a stroke. Drag on empty space = a box selecting several. Del = delete.",
  "help.drawer_select.text": [
-  "Select: drag a point (small squares; points in the same spot move together, so outlines stay closed), an ellipse's corners, or a whole stroke (moves in grid squares, Shift = free). Drag empty space to scroll. Del deletes the selected stroke.",
+  "Select: drag a point (small squares; points in the same spot move together, so outlines stay closed), an ellipse's corners, or a whole stroke (moves in grid squares, Shift = free). Drag on empty space to draw a box: every stroke it touches is selected (Ctrl adds to what's already selected), and dragging one of them moves them all. A click on empty space deselects. Del deletes the selected strokes. Middle-drag scrolls.",
   "",
   "Right-click a stroke = its menu (add point / anchor, symmetric curve halves, its role, delete, copy, paste, flip, turn); empty space = deselect; while drawing a polyline = finish it.",
   "",
@@ -1830,7 +1830,7 @@
   "",
   "Outline colour: the stroke's notes go in that colour (a channel of their own with Multi channel; the same numbers as the Areas tool's, so colour 2 here and an area in colour 2 share a channel). It counts where the stroke's own notes are: Empty and Outline spam, and Outline only strokes with Fill and Spam (the edge of a filled area is the fill's).",
   "",
-  "Ctrl+C / Ctrl+V = copy / paste (each paste lands one more grid square down and right), Ctrl+H / Ctrl+J = flip sideways / upside down, Ctrl+Left / Ctrl+Right = turn 90°. These work on the selected stroke, or the whole drawing when nothing is selected."
+  "Ctrl+C / Ctrl+V = copy / paste (each paste lands one more grid square down and right), Ctrl+H / Ctrl+J = flip sideways / upside down, Ctrl+Left / Ctrl+Right = turn 90°. These work on the selected strokes, or the whole drawing when nothing is selected. Pasted strokes come out selected, so they can be moved together."
  ],
  "help.drawer_select.words": "drawer edit move copy flip turn",
  "help.drawer_line.title": "Drawer: Line",
@@ -1869,9 +1869,9 @@
   "Drag (or click) corner to corner of its box; Ctrl makes it a perfect circle."
  ],
  "help.drawer_erase.title": "Drawer: Eraser",
- "help.drawer_erase.tip": "Click a stroke to remove it. Ctrl+Z = undo.",
+ "help.drawer_erase.tip": "Click a stroke to remove it, or drag across several. Ctrl+Z = undo.",
  "help.drawer_erase.text": [
-  "Click a stroke to remove it. Ctrl+Z = undo."
+  "Click a stroke to remove it, or hold the button and drag to remove every stroke you pass over. Ctrl+Z brings back everything one drag removed."
  ],
  "help.drawer_areas.title": "Drawer: Areas",
  "help.drawer_areas.tip": "Click an area to give it the colour picked on the right (or Empty), or drag across several. Right-click = back to normal.",

@@ -21,7 +21,7 @@ from files.about import HERE
 from files.safefile import write_text
 from files.clipboard import get_text, put_text
 from files.share import LONG_LINE,ShareError, drawing_line, read_drawing, unpack
-from roll.roll_shared import mouse_trail, shown_points
+from roll.roll_shared import BOX_STILL, line_touches_box, mouse_trail, shown_points
 from window.help import open_help
 from window.formula_host import DrawerHost, formula_menu
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
@@ -35,10 +35,10 @@ BUILT_IN = {
     "Triangle": [{"kind": "poly", "pts": [[0, 0], [1, 0], [0.5, 1], [0, 0]]}],
 }
 GRIDS = ["4", "8", "12", "16", "24", "32", "48", "64"]
-TOOLS = [("select", tr("drawer.select"), "v"), ("line", tr("drawer.line"), "l"), ("poly", tr("drawer.polyline"), "p"),
-         ("free", tr("drawer.freehand"), "f"), ("curve", tr("drawer.curve"), "c"), ("arc", tr("drawer.arc"), "a"),
-         ("square", tr("drawer.square"), "s"), ("circle", tr("drawer.circle"), "o"),
-         ("erase", tr("drawer.eraser"), "e"), ("areas", tr("drawer.areas"), "b")]
+TOOLS = [("select", tr("drawer.select"), "v"), ("erase", tr("drawer.eraser"), "e"), ("line", tr("drawer.line"), "l"),
+         ("poly", tr("drawer.polyline"), "p"), ("free", tr("drawer.freehand"), "f"), ("curve", tr("drawer.curve"), "c"),
+         ("arc", tr("drawer.arc"), "a"), ("square", tr("drawer.square"), "s"), ("circle", tr("drawer.circle"), "o"),
+         ("areas", tr("drawer.areas"), "b")]
 SHIFT, CTRL, ALT = 0x1, 0x4, 0x20000
 STROKE_COLOR = "#c0392b"  # (a stroke with an outline colour: that colour's dark shade)
 # Areas (areas.py) on the board: what Fill / Spam fill as normal, an area emptied by hand, the outside, the board
@@ -174,7 +174,8 @@ class Drawer(tk.Toplevel):
         self.arc_bend = False  # an arc dragged start -> end: its middle point follows the mouse until a click
         self.dirty = False     # changed since it was saved or opened
         self.saved_name = None  # the library shape this drawing was opened from / saved as
-        self.sel = None        # index of the selected stroke (Select tool)
+        self.sel = None        # index of the selected stroke (Select tool; a curve shows its handles)
+        self.picks = set()     # the other selected strokes (a select box can pick several)
         self.areas = []        # areas coloured by hand: [[u, v, colour]] (areas.py; colour 0 = empty)
         self.area_pick = 1     # the colour the Areas tool gives (0 = empty)
         self.hover = None      # the area under the mouse (Areas tool)
@@ -594,12 +595,9 @@ class Drawer(tk.Toplevel):
             self.push_undo()
             self.drag = ("pen", self.sel, j)
             return
-        if tool == "erase":
-            i = self.hit_stroke(e.x, e.y)
-            if i is not None:
-                self.push_undo()
-                del self.strokes[i]
-                self.changed()
+        if tool == "erase":  # every stroke the mouse passes over while held, one undo step
+            self.drag = ("erase", self.snap(), e.x, e.y)  # (the drawing before, until something is erased)
+            self.erase_at([(e.x, e.y)])
             return
         if tool == "poly":  # click its points, or drag each segment
             if self.draft is None:
@@ -633,7 +631,46 @@ class Drawer(tk.Toplevel):
             return
         self.drag = ("box", pt, e.x, e.y)
 
+    def erase_drag(self, e):
+        """The eraser held down: the spots between the last mouse position and this one (none skipped when fast)."""
+        _, before, lx, ly = self.drag
+        n = max(1, int(math.hypot(e.x - lx, e.y - ly) // 4))
+        self.drag = ("erase", before, e.x, e.y)
+        self.erase_at([(lx + (e.x - lx) * k / n, ly + (e.y - ly) * k / n) for k in range(1, n + 1)])
+
+    def erase_at(self, spots):
+        hit = {i for x, y in spots for i in [self.hit_stroke(x, y)] if i is not None}
+        if hit:
+            _, before, x, y = self.drag
+            if before is not None:  # the first stroke erased in this drag: the undo step
+                self.push_undo(before)
+                self.drag = ("erase", None, x, y)
+            self.remove_strokes(hit)
+            self.changed()
+
     # ------------------------------------------------------------ select tool
+
+    def chosen(self):
+        """The selected strokes' indexes, in order."""
+        return sorted(self.picks | ({self.sel} if self.sel is not None else set()))
+
+    def remove_strokes(self, idx):
+        """Deletes those strokes; the selection keeps pointing at the same strokes."""
+        keep = [i for i in range(len(self.strokes)) if i not in idx]
+        new = {old: k for k, old in enumerate(keep)}
+        self.strokes = [self.strokes[i] for i in keep]
+        self.sel = new.get(self.sel)
+        self.picks = {new[i] for i in self.picks if i in new}
+
+    def pick_box(self, x0, y0, x1, y1):
+        """The strokes a box on screen touches."""
+        x0, x1, y0, y1 = min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)
+        found = []
+        for i, st in enumerate(self.strokes):
+            pts = np.array([self.to_screen(u, v) for u, v in stroke_points(st)], float).reshape(-1, 2)
+            if len(pts) and line_touches_box(pts[:, 0], pts[:, 1], x0, y0, x1, y1):
+                found.append(i)
+        return found
 
     def handles(self):
         """Draggable points: [(stroke index, point index or ellipse corner, u, v)], the selected stroke first.
@@ -675,7 +712,7 @@ class Drawer(tk.Toplevel):
             x, y = self.to_screen(u, v)
             if abs(x - e.x) <= r and abs(y - e.y) <= r:
                 self.push_undo()
-                self.sel = i
+                self.select(i)
                 if self.strokes[i]["kind"] == "ellipse":
                     self.drag = ("corner", i, j, list(self.strokes[i]["box"]))
                 elif self.is_pen_point(i, j):
@@ -689,20 +726,25 @@ class Drawer(tk.Toplevel):
                 self.redraw()
                 return
         i = self.hit_stroke(e.x, e.y)
-        if i is not None:
+        if i is not None:  # the stroke moves, and the others selected with it
             self.push_undo()
-            self.sel = i
-            self.drag = ("stroke", i, self.event_pt(e, snap=False), json.dumps(self.strokes[i]))
-        else:
-            self.sel = None
-            self.start_pan(e)
-            self.drag = ("pan",)
+            self.select(i)
+            self.drag = ("stroke", self.event_pt(e, snap=False), {k: json.dumps(self.strokes[k])
+                                                                    for k in self.chosen()})
+        else:  # a select box (Ctrl = adds to what's selected); a click = deselect
+            self.drag = ("boxsel", e.x, e.y, e.x, e.y, bool(e.state & CTRL))
         self.redraw()
+
+    def select(self, i):
+        """Clicked stroke i: it's selected (the others selected stay so when it's one of them)."""
+        self.picks = set(self.chosen()) - {i} if i in self.chosen() else set()
+        self.sel = i
 
     def select_drag(self, e):
         kind = self.drag[0]
-        if kind == "pan":
-            return self.pan_to(e)
+        if kind == "boxsel":
+            self.drag = self.drag[:3] + (e.x, e.y) + self.drag[5:]
+            return self.redraw()
         old = self.areas and json.dumps(self.strokes)  # (coloured areas keep their colours: carry_areas)
         if kind == "points":
             pt = self.event_pt(e)
@@ -723,19 +765,20 @@ class Drawer(tk.Toplevel):
                 pt = self.perfect(opp, pt)
             self.strokes[i]["box"] = [min(opp[0], pt[0]), min(opp[1], pt[1]), max(opp[0], pt[0]), max(opp[1], pt[1])]
         elif kind == "stroke":
-            _, i, start, orig = self.drag
+            _, start, origs = self.drag
             cur = self.event_pt(e, snap=False)
             du, dv = cur[0] - start[0], cur[1] - start[1]
             if not e.state & SHIFT:  # move in whole grid squares
                 n = int(self.grid_n.get())
                 du, dv = round(du * n) / n, round(dv * n) / n
-            st = json.loads(orig)
-            if st["kind"] == "ellipse":
-                u0, v0, u1, v1 = st["box"]
-                st["box"] = [round(u0 + du, 5), round(v0 + dv, 5), round(u1 + du, 5), round(v1 + dv, 5)]
-            else:
-                st["pts"] = [[round(u + du, 5), round(v + dv, 5)] for u, v in st["pts"]]
-            self.strokes[i] = st
+            for i, orig in origs.items():
+                st = json.loads(orig)
+                if st["kind"] == "ellipse":
+                    u0, v0, u1, v1 = st["box"]
+                    st["box"] = [round(u0 + du, 5), round(v0 + dv, 5), round(u1 + du, 5), round(v1 + dv, 5)]
+                else:
+                    st["pts"] = [[round(u + du, 5), round(v + dv, 5)] for u, v in st["pts"]]
+                self.strokes[i] = st
         if old and old != json.dumps(self.strokes):
             frame = [[0.0, 0.0], [AREA_FRAME, 0.0], [0.0, AREA_FRAME]]
             self.areas = carry_areas({"strokes": json.loads(old), "pts": frame, "areas": self.areas},
@@ -743,8 +786,14 @@ class Drawer(tk.Toplevel):
         self.redraw()
 
     def select_release(self):
-        if self.drag[0] == "pan":
-            return
+        if self.drag[0] == "boxsel":
+            _, x0, y0, x1, y1, adding = self.drag
+            got = self.pick_box(x0, y0, x1, y1) if abs(x1 - x0) >= BOX_STILL or abs(y1 - y0) >= BOX_STILL else []
+            got = sorted(set(got) | set(self.chosen() if adding else []))
+            self.sel = got[-1] if got else None  # (the top one: its handles show if it's a curve)
+            self.picks = set(got[:-1])
+            self.drag = None
+            return self.redraw()
         if self.undo_stack and self.undo_stack[-1] == self.snap():
             self.undo_stack.pop()  # clicked without moving anything (the undone steps stay redoable)
             self.redo_stack = self.redo_kept
@@ -752,17 +801,16 @@ class Drawer(tk.Toplevel):
             self.changed()
 
     def delete_selected_stroke(self):
-        if self.sel is not None and self.tool.get() == "select":
+        if self.chosen() and self.tool.get() == "select":
             self.push_undo()
-            del self.strokes[self.sel]
-            self.sel = None
+            self.remove_strokes(self.chosen())
             self.changed()
 
     # ------------------------------------------------------------ copy / paste / flip / turn
 
     def targets(self):
-        """What copy / flip / turn work on: the selected stroke, or the whole drawing when nothing is selected."""
-        return [self.sel] if self.sel is not None else list(range(len(self.strokes)))
+        """What copy / flip / turn work on: the selected strokes, or the whole drawing when nothing is selected."""
+        return self.chosen() or list(range(len(self.strokes)))
 
     def copy(self):
         if self.strokes:
@@ -778,7 +826,8 @@ class Drawer(tk.Toplevel):
         new = [self.map_stroke(st, lambda u, v: (u + d, v - d)) for st in json.loads(self.clipboard)]
         self.push_undo()
         self.strokes += new
-        self.sel = len(self.strokes) - 1 if len(new) == 1 else None
+        self.sel = len(self.strokes) - 1  # the pasted strokes are selected, so they can be moved together
+        self.picks = set(range(len(self.strokes) - len(new), self.sel))
         self.changed()
 
     def map_stroke(self, st, fn):
@@ -846,6 +895,8 @@ class Drawer(tk.Toplevel):
             return
         if self.drag[0] == "areas":
             return self.area_drag(e)
+        if self.drag[0] == "erase":
+            return self.erase_drag(e)
         if self.tool.get() == "select" or self.drag[0] in ("points", "pen"):
             return self.select_drag(e)
         if self.drag[0] == "free":  # also where Windows skipped the mouse while busy (see mouse_trail)
@@ -886,7 +937,7 @@ class Drawer(tk.Toplevel):
         if self.drag and (self.tool.get() == "select" or self.drag[0] in ("points", "pen")):
             self.select_release()
         drag, self.drag = self.drag, None
-        if not drag or drag[0] == "areas":
+        if not drag or drag[0] in ("areas", "erase"):
             return
         still = drag[0] in ("box", "segment", "arcdrag") and abs(e.x - drag[-2]) < 4 and abs(e.y - drag[-1]) < 4
         if still and drag[0] == "box":
@@ -994,11 +1045,11 @@ class Drawer(tk.Toplevel):
                 return self.changed()
         i = self.hit_stroke(e.x, e.y)
         if i is None:
-            if self.sel is not None:
-                self.sel = None
+            if self.chosen():
+                self.sel, self.picks = None, set()
                 self.redraw()
             return
-        self.sel = i
+        self.select(i)  # (one of several selected: copy, delete, flip and turn work on all of them)
         self.redraw()
         self.show_menu(e, i)
 
@@ -1107,8 +1158,7 @@ class Drawer(tk.Toplevel):
 
     def delete_stroke(self, i):
         self.push_undo()
-        del self.strokes[i]
-        self.sel = None
+        self.remove_strokes(self.chosen() if i in self.chosen() else [i])
         self.changed()
 
     def poly_point(self, pt, e):
@@ -1159,7 +1209,7 @@ class Drawer(tk.Toplevel):
         self.push_undo()
         self.strokes.append(st)
         if st["kind"] == "curve":
-            self.sel = len(self.strokes) - 1  # selected, so its handles can be bent right away
+            self.sel, self.picks = len(self.strokes) - 1, set()  # selected, so its handles can be bent right away
         self.changed()
 
     def cancel_draft(self):
@@ -1208,6 +1258,7 @@ class Drawer(tk.Toplevel):
         self.dirty = True
         if self.sel is not None and self.sel >= len(self.strokes):
             self.sel = None
+        self.picks = {i for i in self.picks if i < len(self.strokes)}
         self.redraw()
 
     # ------------------------------------------------------------ library
@@ -1243,7 +1294,7 @@ class Drawer(tk.Toplevel):
         self.open_shape(name, strokes, areas)
 
     def open_shape(self, name, strokes, areas=()):
-        self.strokes, self.undo_stack, self.draft, self.sel = strokes, [], None, None
+        self.strokes, self.undo_stack, self.draft, self.sel, self.picks = strokes, [], None, None, set()
         self.areas = [list(a) for a in areas]
         self.redo_stack, self.redo_kept = [], []
         self.name.set(name)
@@ -1289,7 +1340,7 @@ class Drawer(tk.Toplevel):
                                        tr("drawer.is_already_in_the_library_replace", name=name), parent=self):
                 return None
         self.strokes = join_strokes(self.strokes)
-        self.sel = None  # joining can change the order
+        self.sel, self.picks = None, set()  # joining can change the order
         try:
             save_shape(name, self.strokes, self.areas)
         except OSError as e:
@@ -1398,17 +1449,18 @@ class Drawer(tk.Toplevel):
         c.create_rectangle(x0, y0, x1, y1, outline="#606060")
         w = max(2, round(2 * self.scale))
         closed = strokes_closed(self.strokes)
+        chosen = set(self.chosen())
         for i, st in enumerate(self.strokes):  # a stroke with formulas: the stroke as drawn (the origin path), dashed
             if st["kind"] != "ellipse" and has_formula(st):
-                self.draw_stroke(plain_stroke(st), "#e89a9a" if i == self.sel else "#efc0c0", 1, dash=(6, 4))
+                self.draw_stroke(plain_stroke(st), "#e89a9a" if i in chosen else "#efc0c0", 1, dash=(6, 4))
         for i, st in enumerate(self.strokes):  # outline only: dotted; fill line: thin dashes
             role = role_of(st)
-            color = ("#ff8c1a" if i == self.sel else SLOT_COLORS[(colour_of(st) - 1) % len(SLOT_COLORS)][1]
+            color = ("#ff8c1a" if i in chosen else SLOT_COLORS[(colour_of(st) - 1) % len(SLOT_COLORS)][1]
                      if colour_of(st) else STROKE_COLOR)
             if role == "cut":
                 self.draw_stroke(st, color, max(1, round(self.scale)), dash=(6, 4))  # (thin: Windows dots thick ones)
             else:
-                self.draw_stroke(st, color, w + (1 if i == self.sel else 0), dash=(12, 4) if role else None)
+                self.draw_stroke(st, color, w + (1 if i in chosen else 0), dash=(12, 4) if role else None)
         s = self.scale
         r, h = 4 * s, 3.5 * s
         sel = self.strokes[self.sel] if self.sel is not None else None
@@ -1422,7 +1474,7 @@ class Drawer(tk.Toplevel):
                 if not self.is_pen_point(i, j):
                     x, y = self.to_screen(u, v)
                     c.create_rectangle(x - h, y - h, x + h, y + h, fill="#ffffff",
-                                       outline="#c05a00" if i == self.sel else "#0050d0")
+                                       outline="#c05a00" if i in chosen else "#0050d0")
         if curve:  # its handle dots and anchors work with any tool
             for j, kind in pen_handles(curve["pts"]):
                 x, y = self.to_screen(*curve["pts"][j])
@@ -1440,6 +1492,8 @@ class Drawer(tk.Toplevel):
         if self.draft:
             self.draw_stroke(self.draft, "#0a8f0a", w)
             self.draw_draft_points(r, h)
+        if self.drag and self.drag[0] == "boxsel":  # the select box being dragged
+            c.create_rectangle(*self.drag[1:5], outline="#0050d0", width=max(1, round(s)), dash=(4, 2))
         if not self.strokes:
             text = tr("drawer.nothing_drawn_yet")
         elif all(role_of(st) for st in self.strokes):
