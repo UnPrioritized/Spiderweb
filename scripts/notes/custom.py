@@ -694,13 +694,6 @@ def merge_spans(a, b):
     return np.column_stack([a[at], np.maximum.reduceat(b, at)]).tolist()
 
 
-def union_spans(polys, q, edges=None):
-    """row_spans, but inside ANY of the loops counts (where they overlap it's filled, holes too). edges:
-    poly_edges of each loop."""
-    spans = [s for i, poly in enumerate(polys) for s in row_spans([poly], q, edges and edges[i])]
-    return merge_spans(np.array([s[0] for s in spans]), np.array([s[1] for s in spans]))
-
-
 def inside_spans(sh, ppq):
     """[(pitch, start tick, end tick)] for every stretch of every key inside the shape. Text: the nonzero rule and
     its threshold (text.py). Gaps in the outline are closed with straight lines (fill_plan). Remembered: a shape
@@ -720,12 +713,14 @@ def find_spans(sh, ppq):
     ps = [p for poly in polys for _, p in poly]
     if not ps:
         return []
-    union = sh.get("union") and not tx
-    edges = None if tx else [poly_edges([poly]) for poly in polys] if union else poly_edges(polys)
+    walled = enclosed_test(sh)
+    edges = None if tx else poly_edges(polys)
+    if walled:  # (every piece of a row between two lines: filled if it's walled in)
+        edges += (np.zeros(len(edges[0]), np.int64),)
     out = []
     for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1):
-        for a, b in (threshold_spans(polys, q, tx["threshold"]) if tx else
-                     union_spans(polys, q, edges) if union else row_spans(polys, q, edges)):
+        for a, b, *_ in (threshold_spans(polys, q, tx["threshold"]) if tx else
+                         row_pieces(edges, q, walled, as_normal) if walled else row_spans(polys, q, edges)):
             s = math.floor(a * ppq + 0.5)
             out.append((q, s, max(math.floor(b * ppq + 0.5), s + 1)))
     return out
@@ -763,6 +758,69 @@ def shape_areas(sh):
     loops = [uv_points(sh["pts"], p) for p in plan["polys"]]
     cuts = [uv_points(sh["pts"], p) for p in area_cuts(sh)]
     return area_map(loops, cuts, key)
+
+
+def enclosed_map(sh):
+    """Overlaps cancel out off: the AreaMap of only the lines that wall the inside in (Fill / Spam loops and outline
+    lines too flat to fill; not fill lines, they don't change what's filled), in the shape's own box. Every area
+    of it but the one around the drawing is filled (user: overlaps and holes too, also where ONE line crosses
+    itself; inside any loop on its own missed those). None if the box is flat."""
+    plan = fill_plan(sh)
+    closers = [uv_points(sh["pts"], c) for c in plan["closers"]]
+    if any(c is None for c in closers) or uv_points(sh["pts"], [[0, 0]]) is None:
+        return None
+    key = ("enclosed", json.dumps(sh["strokes"]), json.dumps([np.round(c, 6).tolist() for c in closers]))
+    if key in _maps:
+        return _maps[key]
+    return area_map([uv_points(sh["pts"], p) for p in plan["polys"] + plan["flat"]], [], key)
+
+
+def spot_area(amap, u, v):
+    """For each row of spots (u, v: (n, m) arrays, spread over one piece), the area most of them are in (every
+    spot on a line: the free cell nearest the first one)."""
+    labs = amap.cell(u.ravel(), v.ravel()).reshape(u.shape)
+    pick = np.full(len(u), -1, np.int64)
+    for i, row in enumerate(labs.tolist()):
+        row = [lab for lab in row if lab >= 0]
+        if row:
+            pick[i] = max(set(row), key=row.count)
+    lost = pick < 0
+    if lost.any():
+        pick[lost] = amap.at(u[lost, 0], v[lost, 0])
+    return pick
+
+
+def enclosed_uv(sh, u, v):
+    """enclosed_map: whether each row of spots (u, v: (n, m) arrays in the box) is walled in."""
+    amap = enclosed_map(sh)
+    if amap is None or not len(u):
+        return np.zeros(len(u), bool)
+    lab = spot_area(amap, u, v)
+    return (lab >= 0) & (lab != amap.outside())
+
+
+def enclosed_test(sh):
+    """Overlaps cancel out off (not text): test(x, y) = for each row of spots in beats / keys ((n, m) arrays, spread
+    over one piece of a key row), whether it's walled in (enclosed_map). None when they cancel out."""
+    if not sh.get("union") or sh.get("text"):
+        return None
+    frame = sh["pts"]
+
+    def test(x, y):
+        x, y = np.asarray(x, float), np.asarray(y, float)
+        if not x.size:
+            return np.zeros(len(x), bool)
+        x, y = x.reshape(len(x), -1), y.reshape(len(y), -1)
+        uv = uv_points(frame, np.column_stack([x.ravel(), y.ravel()]))
+        if uv is None:
+            return np.zeros(len(x), bool)
+        return enclosed_uv(sh, uv[:, 0].reshape(x.shape), uv[:, 1].reshape(x.shape))
+    return test
+
+
+def as_normal(x, y):
+    """row_pieces' colour when nothing is coloured: every piece filled as normal."""
+    return np.full(len(x), -1, np.int64)
 
 
 def carry_areas(old, new):
@@ -854,8 +912,11 @@ def area_paint(sh, amap):
 def area_state(sh, amap):
     """Each area's (filled, colour) as Fill / Spam make it (one more at the end for walls: not filled, -1)."""
     paint = area_paint(sh, amap)
-    loops = [uv_points(sh["pts"], p) for p in fill_plan(sh)["polys"]]
-    inside = inside_loops(amap.spots[:, 0], amap.spots[:, 1], loops, bool(sh.get("union")))
+    if enclosed_test(sh):
+        inside = enclosed_uv(sh, amap.spots[:, :1], amap.spots[:, 1:])
+    else:
+        loops = [uv_points(sh["pts"], p) for p in fill_plan(sh)["polys"]]
+        inside = inside_loops(amap.spots[:, 0], amap.spots[:, 1], loops)
     filled = np.append(np.where(paint[:-1] >= 0, paint[:-1] > 0, inside), False)
     return filled, np.append(np.where(paint[:-1] > 0, paint[:-1], 0), -1)
 
@@ -1035,28 +1096,21 @@ def find_area_spans(sh, ppq):
 
     def colour(x, y):  # (pieces, spots) spots inside each piece -> its colour: the area most of them are in
         uv = uv_points(frame, np.column_stack([x.ravel(), y.ravel()]))
-        labs = amap.cell(uv[:, 0], uv[:, 1]).reshape(x.shape)
-        pick = np.full(len(x), -1, np.int64)
-        for i, row in enumerate(labs.tolist()):
-            row = [v for v in row if v >= 0]
-            if row:
-                pick[i] = max(set(row), key=row.count)
-        lost = pick < 0  # (every spot on a line: the free cell nearest the middle one)
-        if lost.any():
-            pick[lost] = amap.at(*uv_points(frame, np.column_stack([x[lost, 0], y[lost, 0]])).T)
-        return paint[pick]
+        return paint[spot_area(amap, uv[:, 0].reshape(x.shape), uv[:, 1].reshape(x.shape))]
 
+    walled = enclosed_test(sh)
     out = []
     for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1):
-        for s, e, g in row_pieces(edges, q, bool(sh.get("union")), colour):
+        for s, e, g in row_pieces(edges, q, walled, colour):
             s = math.floor(s * ppq + 0.5)
             out.append((s, max(math.floor(e * ppq + 0.5), s + 1), q, g))
     return np.asarray(out, np.int64).reshape(-1, 4) if out else none
 
 
-def row_pieces(edges, q, union, colour):
+def row_pieces(edges, q, walled, colour):
     """Like row_spans, but every line (fill lines too, loop number -1 in edges) cuts the row into pieces, and each
-    piece is filled as normal (even-odd / union) or as colour(x, y) says (-1: as normal, 0: empty, k: colour k).
+    piece is filled as normal (even-odd; Overlaps cancel out off: walled(x, y) = enclosed_test) or as colour(x, y)
+    says (-1: as normal, 0: empty, k: colour k).
     [(start, end, colour)] in beats, merged per colour; colour 0 = the shape's own. Where two filled pieces meet,
     they meet where the line between them crosses the middle of the row's slice; on the outside edge the piece
     reaches as far as the line does in the slice (like row_spans, so with nothing coloured the notes are the
@@ -1089,21 +1143,10 @@ def row_pieces(edges, q, union, colour):
     at = np.arange(m)
     start = np.ones(m, bool)
     start[1:] = gap[1:] != gap[:-1]
-    fill = lid >= 0
-    if union:  # each loop on its own: its 1st crossing in the slice goes in, the 2nd out ...
-        o2 = np.lexsort((at, lid, gap))
-        new = np.ones(m, bool)
-        new[1:] = (gap[o2][1:] != gap[o2][:-1]) | (lid[o2][1:] != lid[o2][:-1])
-        rank = at - np.maximum.accumulate(np.where(new, at, 0))
-        step = np.zeros(m, np.int64)
-        step[o2] = np.where(rank % 2 == 0, 1, -1)
-        step[~fill] = 0
-    else:
-        step = fill.astype(np.int64)
+    step = (lid >= 0).astype(np.int64)
     run = np.cumsum(step)
     begin = np.maximum.accumulate(np.where(start, at, 0))
     depth = run - run[begin] + step[begin]  # (counted from the slice's left end, up to and with this crossing)
-    inside = depth > 0 if union else depth % 2 == 1
     pi = np.flatnonzero(~np.append(start[1:], True))  # pieces: from crossing i to i + 1 in the same slice
     if not len(pi):
         return []
@@ -1115,8 +1158,9 @@ def row_pieces(edges, q, union, colour):
         for fx in (0.5, 0.2, 0.8):
             xs.append(xy[pi] + (xy[pi + 1] - xy[pi]) * fx)
             ys.append(y[order][pi])
-    c = colour(np.column_stack(xs), np.column_stack(ys))
-    filled = np.where(c >= 0, c > 0, inside[pi])
+    xs, ys = np.column_stack(xs), np.column_stack(ys)
+    c = colour(xs, ys)
+    filled = np.where(c >= 0, c > 0, walled(xs, ys) if walled else depth[pi] % 2 == 1)
     group = np.where(c > 0, c, 0)
     joined = np.zeros(len(pi), bool)
     joined[1:] = pi[1:] == pi[:-1] + 1  # (the piece before it is in the same slice)
@@ -1143,7 +1187,7 @@ def row_pieces(edges, q, union, colour):
     best = names[height.argmax(1)]
     # where two filled colours meet, the switch goes where the line crosses the row's middle (the slices only say
     # how far the filling reaches): the colour of the piece of the middle line each bit is on
-    cx, cfill, cgroup = centre_colours(near, q, union, colour)
+    cx, cfill, cgroup = centre_colours(near, q, walled, colour)
     if len(cx) >= 2:
         j = np.searchsorted(cx, m) - 1
         ok = (j >= 0) & (j < len(cx) - 1)
@@ -1212,7 +1256,7 @@ def colour_edges(notes, lines):
     return ~covered(notes, cut_out(notes, lines))
 
 
-def centre_colours(edges, q, union, colour):
+def centre_colours(edges, q, walled, colour):
     """Where the lines cross the middle of row q (x in order), and each piece between two of them: filled (like
     row_pieces: by its colour or as normal) and its colour."""
     xa, ya, xb, yb, lid = edges
@@ -1222,17 +1266,10 @@ def centre_colours(edges, q, union, colour):
     x, lid = x[o], lid[c][o]
     if len(x) < 2:
         return x, np.zeros(0, bool), np.zeros(0, np.int64)
-    if union:  # (inside any loop: count each loop's crossings on its own)
-        odd, inside = set(), []
-        for loop in lid[:-1].tolist():
-            if loop >= 0:
-                odd ^= {loop}
-            inside.append(bool(odd))
-        inside = np.array(inside)
-    else:
-        inside = np.cumsum(lid[:-1] >= 0) % 2 == 1
-    spots = [x[:-1] + (x[1:] - x[:-1]) * f for f in (0.5, 0.2, 0.8)]
-    paint = colour(np.column_stack(spots), np.full((len(x) - 1, 3), float(q)))
+    spots = np.column_stack([x[:-1] + (x[1:] - x[:-1]) * f for f in (0.5, 0.2, 0.8)])
+    ys = np.full((len(x) - 1, 3), float(q))
+    inside = walled(spots, ys) if walled else np.cumsum(lid[:-1] >= 0) % 2 == 1
+    paint = colour(spots, ys)
     return x, np.where(paint >= 0, paint > 0, inside), np.where(paint > 0, paint, 0)
 
 
@@ -1477,10 +1514,10 @@ def near_edge(notes, spans, g):
 
 
 def edge_loops(sh):
-    """The closed loops the inside is made of (fill_plan; text: its letters), and whether overlaps count as filled
-    (Overlaps cancel out off)."""
+    """The closed loops the inside is made of (fill_plan; text: its letters), and with Overlaps cancel out off the
+    test for what's walled in (enclosed_test; None: even-odd)."""
     tx = sh.get("text")
-    return (custom_strokes(sh) if tx else fill_plan(sh)["polys"]), bool(sh.get("union") and not tx)
+    return (custom_strokes(sh) if tx else fill_plan(sh)["polys"]), enclosed_test(sh)
 
 
 def inner_ticks(sh, ppq, g, spans):
@@ -1497,8 +1534,8 @@ def inner_ticks(sh, ppq, g, spans):
         if has_areas(sh):
             got = _inner[key] = area_inner(sh, ppq, g, keys)
         else:
-            loops, union = edge_loops(sh)
-            got = _inner[key] = inner_rows(loops, union, keys, g / ppq, ppq)
+            loops, walled = edge_loops(sh)
+            got = _inner[key] = inner_rows(loops, walled, keys, g / ppq, ppq)
     return got
 
 
@@ -1521,7 +1558,7 @@ def edge_inner(sh, ppq):
         return None
     if sh.get("edge_mode") == "sideways":
         return "rows", cut_out(spans, grow_inward(outline_notes(sh, ppq), spans, g))
-    loops, union = edge_loops(sh)
+    loops, walled = edge_loops(sh)
     if has_areas(sh):  # (worked out exactly on the notes' lines across each key and joined up: the grid over the
         # whole shape was too coarse for hairline gaps between areas, user saw it zigzag)
         keys = list(range(int(spans[:, 2].min()), int(spans[:, 2].max()) + 1))
@@ -1533,7 +1570,7 @@ def edge_inner(sh, ppq):
                 _inner.clear()
             got = _inner[key] = outline_of_lines(*area_inner_lines(sh, ppq, g, keys), g / ppq)
         return "lines", got
-    return "lines", inner_lines(loops, union, g / ppq)
+    return "lines", inner_lines(loops, walled, g / ppq)
 
 
 def thicker(sh, notes, spans, g, ppq):

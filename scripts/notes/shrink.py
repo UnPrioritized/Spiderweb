@@ -33,19 +33,31 @@ def proportion(polys):
     return w / h if w > 0 and h > 0 else 1.0
 
 
-def inside_at(groups, y):
-    """Where the line at height y is inside: even-odd within each group of edges, any group counts (several
-    groups = Overlaps cancel out off). [(a, b)] sorted, merged."""
-    spans = []
-    for seg in groups:
-        ay, by = seg[:, 1], seg[:, 3]
-        hit = (ay <= y) != (by <= y)
-        if not hit.any():
-            continue
-        s = seg[hit]
-        x = np.sort(s[:, 0] + (s[:, 2] - s[:, 0]) * (y - s[:, 1]) / (s[:, 3] - s[:, 1]))
-        spans += list(zip(x[0::2].tolist(), x[1::2].tolist()))
-    return merge(spans)
+def crossings(seg, y):
+    """Where the edges cross the line at height y, in order."""
+    ay, by = seg[:, 1], seg[:, 3]
+    s = seg[(ay <= y) != (by <= y)]
+    return np.sort(s[:, 0] + (s[:, 2] - s[:, 0]) * (y - s[:, 1]) / (s[:, 3] - s[:, 1]))
+
+
+def walled_pieces(x, y, walled, k):
+    """Overlaps cancel out off: which pieces between the crossings x (on the line at height y, in the shape's
+    proportions) are walled in (walled = custom.enclosed_test, in beats / keys)."""
+    if len(x) < 2:
+        return np.zeros(0, bool)
+    a, b = x[:-1], x[1:]
+    spots = np.column_stack([a + (b - a) * f for f in (0.5, 0.2, 0.8)])
+    return walled(spots, np.full(spots.shape, y / k))
+
+
+def inside_at(seg, y, walled=None, k=1.0):
+    """Where the line at height y is inside: even-odd, or with walled (Overlaps cancel out off) every piece that's
+    walled in. [(a, b)] sorted, merged."""
+    x = crossings(seg, y)
+    if walled is None:
+        return merge(list(zip(x[0::2].tolist(), x[1::2].tolist())))
+    on = walled_pieces(x, y, walled, k)
+    return merge(list(zip(x[:-1][on].tolist(), x[1:][on].tolist())))
 
 
 def merge(spans):
@@ -130,11 +142,10 @@ def minus(spans, cuts):
     return out
 
 
-def inner_rows(polys, union, keys, r, ppq):
-    """The shrunk inside on each of these key rows as (start, end, key) ticks; r in beats."""
+def inner_rows(polys, walled, keys, r, ppq):
+    """The shrunk inside on each of these key rows as (start, end, key) ticks; r in beats. walled: see inside_at."""
     k = proportion(polys)
     seg = segments(polys) * [1, k, 1, k]
-    groups = [segments([p]) * [1, k, 1, k] for p in polys] if union else [seg]
     keys = list(keys)
     ys = [(q - 0.5 + (j + 0.5) / SAMPLES) * k for q in keys for j in range(SAMPLES)]
     near = near_rows(seg, ys, r)
@@ -143,7 +154,7 @@ def inner_rows(polys, union, keys, r, ppq):
         got = []
         for j in range(SAMPLES):
             y = ys[n * SAMPLES + j]
-            got += minus(inside_at(groups, y), near[n * SAMPLES + j])
+            got += minus(inside_at(seg, y, walled, k), near[n * SAMPLES + j])
         for a, b in merge(got):
             s = math.floor(a * ppq + 0.5)
             e = math.floor(b * ppq + 0.5)
@@ -152,12 +163,12 @@ def inner_rows(polys, union, keys, r, ppq):
     return np.asarray(out, np.int64).reshape(-1, 3)
 
 
-def field(polys, union, reach):
+def field(polys, walled, reach):
     """The distance to the outline on a grid over the shape (in the shape's proportions), minus outside: (x0, y0,
     step, values[row, column], k). Only distances up to `reach` are exact (further ones count as 2 x reach), so
     each block of the grid looks only at the edges near it. Remembered (the same for every outline gate tried up
-    to reach)."""
-    key = (repr(polys), bool(union), reach)
+    to reach). walled: see inside_at."""
+    key = (repr(polys), walled is not None, reach)
     got = _fields.get(key)
     if got is not None:
         return got
@@ -165,7 +176,6 @@ def field(polys, union, reach):
         _fields.clear()
     k = proportion(polys)
     seg = segments(polys) * [1, k, 1, k]
-    groups = [segments([p]) * [1, k, 1, k] for p in polys] if union else [seg]
     x_lo, y_lo = seg[:, [0, 2]].min(), seg[:, [1, 3]].min()
     x_hi, y_hi = seg[:, [0, 2]].max(), seg[:, [1, 3]].max()
     step = max(x_hi - x_lo, y_hi - y_lo) / GRID or 1.0
@@ -190,21 +200,23 @@ def field(polys, union, reach):
             d = np.sqrt(((px - ax - t * dx) ** 2 + (py - ay - t * dy) ** 2).min(axis=1)).reshape(len(y), len(x))
             dist[j0:j0 + BLOCK, i0:i0 + BLOCK] = np.minimum(d, 2.0 * reach)
     inside = np.zeros(dist.shape, bool)
-    for g in groups:  # even-odd, a grid row at a time: the edges it crosses, then how many lie left of each spot
-        for j, y in enumerate(ys):
-            hit = (g[:, 1] <= y) != (g[:, 3] <= y)
-            if hit.any():
-                s = g[hit]
-                xc = np.sort(s[:, 0] + (s[:, 2] - s[:, 0]) * (y - s[:, 1]) / (s[:, 3] - s[:, 1]))
-                inside[j] |= np.searchsorted(xc, xs) % 2 == 1
+    for j, y in enumerate(ys):  # a grid row at a time: the edges it crosses, then how many lie left of each spot
+        xc = crossings(seg, y)
+        if not len(xc):
+            continue
+        at = np.searchsorted(xc, xs)
+        if walled is None:
+            inside[j] = at % 2 == 1
+        else:  # (the piece each spot is in: walled in or not)
+            inside[j] = np.concatenate([[False], walled_pieces(xc, y, walled, k), [False]])[at]
     got = _fields[key] = (xs[0], ys[0], step, np.where(inside, dist, -dist), k)
     return got
 
 
-def inner_lines(polys, union, r):
+def inner_lines(polys, walled, r):
     """The shrunk inside's outline for the preview: straight pieces (b0, k0, b1, k1, bi, ki) in beats / keys,
     (bi, ki) a spot on its inner side."""
-    x0, y0, step, f, k = field(polys, union, 2.0 ** math.ceil(math.log2(max(r, 1e-6) * 1.25)))
+    x0, y0, step, f, k = field(polys, walled,2.0 ** math.ceil(math.log2(max(r, 1e-6) * 1.25)))
     on = f >= r
     pieces = []
     # where the level is crossed on each grid line, by the values on either side
