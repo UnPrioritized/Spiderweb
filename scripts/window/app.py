@@ -474,7 +474,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             Tooltip(b, tip)
         names = [name for _, name in SPLIT_CHOICES]
         self.split_box = ttk.Combobox(ch, state="readonly", values=names, width=max(map(len, names)))
-        self.split_box.pack(anchor="w", padx=(18, 0), pady=(1, 0))
+        # (not packed here: shapes_changed shows it under Multi channel; with no autosave it never runs at start)
         self.split_box.bind("<<ComboboxSelected>>", lambda e: self.shapes_changed())
         self.split_box.current(0)
         Tooltip(self.split_box, SPLIT_TIP)
