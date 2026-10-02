@@ -729,6 +729,63 @@ def shape_areas(sh):
     return area_map(loops, cuts, key)
 
 
+def carry_areas(old, new):
+    """new["areas"] after the lines moved (old: the shape before, its areas in the same order): each area's colour
+    stays with the area it was in. Each new area is paired with the old one most of it came from (surest first,
+    each used once; works for a big jump too, where overlap alone would hand a squeezed area's colour to the
+    neighbour that took most of it), so an area squeezed past its colour's spot keeps the colour (the spot moves
+    into it). A colour whose area found no pair (merged into another for now) keeps its spot, so it comes back when
+    the areas part again; paired ones go after those, so they win the merged area. Returns the new areas list."""
+    areas = new.get("areas") or []
+    a0, a1 = (shape_areas(old), shape_areas(new)) if areas else (None, None)
+    if a0 is None or a1 is None:
+        return areas
+
+    def grid(m):  # every fourth cell's middle, in the map's u, v
+        ys, xs = np.mgrid[0:m.h:4, 0:m.w:4]
+        return (np.column_stack([xs.ravel(), ys.ravel()]) + 0.5) / m.k + m.lo
+
+    def moved(uv, src, dst):  # u, v in shape src's box -> in dst's (through beats / keys)
+        (b0, p0), (b1, p1), (b2, p2) = src
+        u, v = uv[:, 0], uv[:, 1]
+        return uv_points(dst, np.column_stack([b0 + u * (b1 - b0) + v * (b2 - b0), p0 + u * (p1 - p0) + v * (p2 - p0)]))
+
+    g0, g1 = grid(a0), grid(a1)
+    at1 = np.concatenate([moved(g0, old["pts"], new["pts"]), g1])  # (the spots, in the new box)
+    l0 = np.concatenate([a0.cell(*g0.T, off=a0.outside()), a0.cell(*moved(g1, new["pts"], old["pts"]).T,
+                                                                   off=a0.outside())])
+    l1 = a1.cell(*at1.T, off=a1.outside())
+    ok = (l0 >= 0) & (l1 >= 0)
+    l0, l1, at1 = l0[ok], l1[ok], at1[ok]
+    n1 = a1.count
+    both = np.bincount(l0 * n1 + l1, minlength=a0.count * n1)
+    size1 = np.bincount(l1, minlength=n1)
+    pairs = np.flatnonzero(both)
+    i, j = pairs // n1, pairs % n1
+    share = both[pairs] / size1[j]  # (how much of the new area came from the old one)
+    match, taken = {}, set()
+    for k in np.argsort(-share, kind="stable"):
+        if i[k] not in match and j[k] not in taken:
+            match[int(i[k])] = int(j[k])
+            taken.add(int(j[k]))
+    old_labs = a0.at(*np.asarray([a[:2] for a in old["areas"]], float).reshape(-1, 2).T)
+    new_labs = a1.at(*np.asarray([a[:2] for a in areas], float).reshape(-1, 2).T)
+    source = both.reshape(a0.count, n1).argmax(0)  # (the old area most of each new one came from)
+    lost, out = [], []
+    for a, lab0, lab1 in zip(areas, old_labs.tolist(), new_labs.tolist()):
+        to = match.get(lab0) if lab0 >= 0 else None
+        if to is None:
+            lost.append(a)
+        elif to == lab1 or lab1 >= 0 and lab1 not in taken and source[lab1] == lab0:  # (or: a piece of its area)
+            out.append(a)
+        else:  # into its area: the spot there nearest the middle of it
+            pts = at1[l1 == to]
+            mid = np.median(pts, axis=0)
+            best = pts[np.argmin(np.hypot(*(pts - mid).T))]
+            out.append([round(float(best[0]), 6), round(float(best[1]), 6), a[2]])
+    return lost + out
+
+
 def area_cuts(sh):
     """The lines that split areas without closing a loop, in beats / keys: fill lines, and outline lines too flat to
     fill (fill_plan "flat": a box's side touching the rest only partway along its lines, user, was no wall)."""

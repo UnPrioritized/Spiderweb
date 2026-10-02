@@ -11,7 +11,7 @@ import math
 from files.lang import tr
 from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half_at, handle_lines, nearest, pen_handles,
                           set_symmetry)
-from notes.custom import (add_stroke, box_frame, custom_settings, frame_to_bp, frame_to_uv, map_stroke,
+from notes.custom import (add_stroke, box_frame, carry_areas, custom_settings, frame_to_bp, frame_to_uv, map_stroke,
                           new_live_shape, refit, stroke_bp, stroke_ends)
 from notes.polygon import polygon_aspect, polygon_strokes
 from roll.roll_funnel import seg_dist
@@ -250,15 +250,20 @@ class LiveDrawing:
 
     def drag_stroke(self, sh, hid, e):
         """Dragging a stroke's point (drag_stroke_point), or the picked curve stroke's anchor / handle (snapped
-        unless Shift; Alt like bezier.drag_point). Returns the hid to go on with."""
+        unless Shift; Alt like bezier.drag_point). Returns the hid to go on with. Coloured areas keep their colours
+        (custom.carry_areas)."""
+        old = sh.get("areas") and copy.deepcopy({k: sh[k] for k in ("strokes", "pts", "areas")})
         if hid[0] == "pt":
-            return self.drag_stroke_point(sh, hid, e)
-        st, to_uv = self.stroke_curve(sh), frame_to_uv(sh["pts"])
-        if st is None or to_uv is None:
-            return hid
-        to_xy, from_xy = self.stroke_maps(sh)
-        drag_point(st, hid[1], list(to_uv(*self.event_pt(e))), e.state & ALT, to_xy, from_xy)
-        refit(sh)
+            hid = self.drag_stroke_point(sh, hid, e)
+        else:
+            st, to_uv = self.stroke_curve(sh), frame_to_uv(sh["pts"])
+            if st is None or to_uv is None:
+                return hid
+            to_xy, from_xy = self.stroke_maps(sh)
+            drag_point(st, hid[1], list(to_uv(*self.event_pt(e))), e.state & ALT, to_xy, from_xy)
+            refit(sh)
+        if old:
+            sh["areas"] = carry_areas(old, sh)
         return hid
 
     def delete_stroke_handle(self, sh, hid):

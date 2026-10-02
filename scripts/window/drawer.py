@@ -13,7 +13,7 @@ from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half
 import numpy as np
 
 from notes.areas import COLOURS, clean_areas, inside_loops
-from notes.custom import (ROLES, clean_strokes, colour_of, fill_plan, join_strokes, open_ends, open_paths, role_of,
+from notes.custom import (ROLES, carry_areas, clean_strokes, colour_of, fill_plan, join_strokes, open_ends, open_paths, role_of,
                           shape_areas, stroke_points, strokes_closed, uv_points)
 from roll.roll_shared import SLOT_COLORS
 from notes.pattern import has_formula, moved_formulas
@@ -694,6 +694,7 @@ class Drawer(tk.Toplevel):
         kind = self.drag[0]
         if kind == "pan":
             return self.pan_to(e)
+        old = self.areas and json.dumps(self.strokes)  # (coloured areas keep their colours: carry_areas)
         if kind == "points":
             pt = self.event_pt(e)
             for a, b in self.drag[1]:
@@ -726,6 +727,10 @@ class Drawer(tk.Toplevel):
             else:
                 st["pts"] = [[round(u + du, 5), round(v + dv, 5)] for u, v in st["pts"]]
             self.strokes[i] = st
+        if old and old != json.dumps(self.strokes):
+            frame = [[0.0, 0.0], [AREA_FRAME, 0.0], [0.0, AREA_FRAME]]
+            self.areas = carry_areas({"strokes": json.loads(old), "pts": frame, "areas": self.areas},
+                                     {"strokes": self.strokes, "pts": frame, "areas": self.areas})
         self.redraw()
 
     def select_release(self):

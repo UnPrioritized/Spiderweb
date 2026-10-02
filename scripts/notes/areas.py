@@ -122,13 +122,13 @@ class AreaMap:
         spots = np.column_stack([(s[one] + e[one]) / 2, rows[one] + 0.5]) / self.k + self.lo
         return out, len(roots), spots
 
-    def cell(self, u, v):
-        """The area number at each spot (u, v arrays), -1 on a wall or off the map."""
+    def cell(self, u, v, off=-1):
+        """The area number at each spot (u, v arrays), -1 on a wall, off off the map."""
         u, v = np.atleast_1d(np.asarray(u, float)), np.atleast_1d(np.asarray(v, float))
         cx = np.floor((u - self.lo[0]) * self.k[0]).astype(np.int64)
         cy = np.floor((v - self.lo[1]) * self.k[1]).astype(np.int64)
         ok = (cx >= 0) & (cx < self.w) & (cy >= 0) & (cy < self.h)
-        out = np.full(u.shape, -1, np.int32)
+        out = np.full(u.shape, off, np.int32)
         out[ok] = self.labels[cy[ok], cx[ok]]
         return out
 
