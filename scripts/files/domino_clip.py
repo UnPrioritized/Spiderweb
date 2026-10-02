@@ -14,13 +14,12 @@ tracks together. The start dropdown (DOMINO_STARTS) picks whether the empty lead
 the bar line) comes along, both ways.
 """
 
-import ctypes
 import struct
 import zlib
-from ctypes import wintypes
 
 import numpy as np
 
+from files import clipboard
 from files.lang import tr
 
 FORMAT = "MidiPortalSequence"
@@ -90,70 +89,12 @@ def clip_data(notes, ppq, bar, start="bar"):
 
 def put_on_clipboard(raw):
     """raw bytes -> the clipboard as FORMAT (replaces what's there). Returns False if the clipboard was busy."""
-    user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
-    user32.RegisterClipboardFormatW.restype = wintypes.UINT
-    user32.SetClipboardData.argtypes = [wintypes.UINT, ctypes.c_void_p]
-    user32.SetClipboardData.restype = ctypes.c_void_p
-    kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
-    kernel32.GlobalAlloc.restype = ctypes.c_void_p
-    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
-    kernel32.GlobalLock.restype = ctypes.c_void_p
-    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
-    kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
-    fmt = user32.RegisterClipboardFormatW(FORMAT)
-    h = kernel32.GlobalAlloc(0x0002, len(raw))  # GMEM_MOVEABLE
-    if not h:
-        raise MemoryError(tr("domino_clip.not_enough_memory_for_the_clipboard"))
-    ctypes.memmove(kernel32.GlobalLock(h), raw, len(raw))
-    kernel32.GlobalUnlock(h)
-    for _ in range(10):  # another program may have it open for a moment
-        if user32.OpenClipboard(None):
-            break
-        kernel32.Sleep(20)
-    else:
-        kernel32.GlobalFree(h)
-        return False
-    try:
-        user32.EmptyClipboard()
-        if not user32.SetClipboardData(fmt, h):  # on success the clipboard owns h
-            kernel32.GlobalFree(h)
-            return False
-    finally:
-        user32.CloseClipboard()
-    return True
+    return clipboard.put(clipboard.registered(FORMAT), raw)
 
 
 def get_from_clipboard():
     """The clipboard's FORMAT bytes, b"" if it has none, or None if the clipboard was busy."""
-    user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
-    user32.RegisterClipboardFormatW.restype = wintypes.UINT
-    user32.GetClipboardData.argtypes = [wintypes.UINT]
-    user32.GetClipboardData.restype = ctypes.c_void_p
-    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
-    kernel32.GlobalLock.restype = ctypes.c_void_p
-    kernel32.GlobalSize.argtypes = [ctypes.c_void_p]
-    kernel32.GlobalSize.restype = ctypes.c_size_t
-    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
-    fmt = user32.RegisterClipboardFormatW(FORMAT)
-    for _ in range(10):  # another program may have it open for a moment
-        if user32.OpenClipboard(None):
-            break
-        kernel32.Sleep(20)
-    else:
-        return None
-    try:
-        h = user32.GetClipboardData(fmt)
-        if not h:
-            return b""
-        at = kernel32.GlobalLock(h)
-        if not at:
-            return b""
-        try:
-            return ctypes.string_at(at, kernel32.GlobalSize(h))
-        finally:
-            kernel32.GlobalUnlock(h)
-    finally:
-        user32.CloseClipboard()
+    return clipboard.get(clipboard.registered(FORMAT))
 
 
 def items(data, i=0):

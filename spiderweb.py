@@ -76,6 +76,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     update_check.py  asking GitHub for newer versions (and their notes)
     midi_out.py      MIDI file writer
     domino_clip.py   Copy to / Paste from Domino (notes on the clipboard in Domino's own format)
+    clipboard.py     the Windows clipboard (bytes in any format, and text)
+    share.py         shapes / drawings as one line of text to share (packed, checked when pasted back)
     playback.py      playing through Windows MIDI out
     synth.py         the built-in synth (Hz bass preview): BASS + BASSMIDI DLLs in scripts/bass/
     mathexpr.py      math in number boxes (960*4 etc.)
