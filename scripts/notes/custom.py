@@ -852,7 +852,8 @@ def shape_faces(sh):
 
 def spot_area(amap, u, v):
     """For each row of spots (u, v: (n, m) arrays, spread over one piece), the area most of them are in (every
-    spot on a line: the free cell nearest the first one)."""
+    spot on a line: the exact area at the first one; the free cell nearest it was often across the line, e.g. in
+    the thin tip where a curve touches a line, user)."""
     labs = amap.cell(u.ravel(), v.ravel()).reshape(u.shape)
     pick = np.full(len(u), -1, np.int64)
     for i, row in enumerate(labs.tolist()):
@@ -861,7 +862,7 @@ def spot_area(amap, u, v):
             pick[i] = max(set(row), key=row.count)
     lost = pick < 0
     if lost.any():
-        pick[lost] = amap.at(u[lost, 0], v[lost, 0])
+        pick[lost] = amap.fine_at(u[lost, 0], v[lost, 0])
     return pick
 
 
@@ -1087,7 +1088,7 @@ def area_filled_lines(sh, keys):
             continue
         m = (x[:-1] + x[1:]) / 2
         uv = uv_points(sh["pts"], np.column_stack([m, np.full(len(m), y)]))
-        on = filled[amap.at(uv[:, 0], uv[:, 1])]
+        on = filled[amap.fine_at(uv[:, 0], uv[:, 1])]  # (exact: a piece thinner than a cell is no free cell)
         out.append(list(zip(x[:-1][on].tolist(), x[1:][on].tolist())))
     if len(_inner) > 100:
         _inner.clear()
