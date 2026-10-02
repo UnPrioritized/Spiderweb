@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from files.lang import tr
-from notes.custom import box_frame, fill_plan
+from notes.custom import box_frame, fill_plan, fill_test
 from notes.engine import make_shape
 from notes.joined import all_tumours
 from notes.funnel import funnel_contains, funnel_handles, funnel_origins
@@ -451,10 +451,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if "notes" in sh and self.inside_strokes(cached_strokes(sh), self.x2t(x), self.y2p(y)):
                 return i  # pasted notes: anywhere in their box
             if sh["kind"] == "custom" and sh["fill"] in ("fill", "spam"):
-                polys = cached_strokes(sh) if sh.get("text") else fill_plan(sh)["polys"]
                 b, p = self.x2t(x), self.y2p(y)
-                if (any(self.inside_strokes([poly], b, p) for poly in polys) if sh.get("union") else
-                        self.inside_strokes(polys, b, p)):
+                test = fill_test(sh)
+                if (test([b], [p])[0] if test else
+                        self.inside_strokes(cached_strokes(sh) if sh.get("text") else fill_plan(sh)["polys"], b, p)):
                     return i  # filled shapes can be clicked anywhere inside
             if sh["kind"] == "funnel" and funnel_contains(sh, self.x2t(x), self.y2p(y)):
                 return i

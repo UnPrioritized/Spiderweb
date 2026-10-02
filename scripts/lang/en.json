@@ -1382,6 +1382,8 @@
   "Gaps: where the outline isn't closed (red dots in the drawer), Fill and Spam close it with straight lines, shown dashed, and the buttons turn orange. Loose ends that nearly touch (within 1/64 beat and 1 key) are joined to each other first; every open part left is closed from its end back to its start. An open part that's almost straight (never more than half a key or 1/64 beat from that closing line) has nothing inside, so it isn't filled: it just keeps its notes. Close the gaps yourself to decide exactly where the edge goes.",
   "[clip:fill-gap]",
   "",
+  "A line whose ends both land on a line (another one, or partway along itself) isn't a gap. It splits the area it crosses: both sides stay as they were (filled or empty), and the line keeps its own notes.",
+  "",
   "Normal / Outline (the box next to Fill and Spam): Outline puts the notes along the edge of what's filled on a channel of their own (with Overlaps cancel out ticked that's every edge, around every filled bit; unticked, only the outer edge) and the inside's on another, with the same gate so they line up (where both would play, the outline's note is kept). It needs Channels: Multi channel; with the others it's all one channel and the box turns orange.",
   "[clip:fill-outline]",
   "",
@@ -1812,7 +1814,7 @@
   "",
   "Export copies the whole drawing as a line of text to share; Import adds a shared drawing to your library (see Sharing shapes).",
   "",
-  "Lines and curves that meet end to end count as one outline. Closed: Empty, Fill and Spam all work. Gaps (red dots at the loose ends): Fill and Spam close each one with a straight line (see Inside fill).",
+  "Lines and curves that meet end to end count as one outline, and so does a line whose ends land on another line or on itself. Closed: Empty, Fill and Spam all work. Gaps (red dots at the loose ends): Fill and Spam close each one with a straight line (see Inside fill).",
   "",
   "Wheel = zoom, middle-drag = scroll, Reset view = back to the middle of the board."
  ],

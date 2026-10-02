@@ -41,8 +41,8 @@ def crossings(seg, y):
 
 
 def walled_pieces(x, y, walled, k):
-    """Overlaps cancel out off: which pieces between the crossings x (on the line at height y, in the shape's
-    proportions) are walled in (walled = custom.enclosed_test, in beats / keys)."""
+    """Which pieces between the crossings x (on the line at height y, in the shape's proportions) are filled
+    (walled = custom.fill_test, in beats / keys)."""
     if len(x) < 2:
         return np.zeros(0, bool)
     a, b = x[:-1], x[1:]
@@ -51,8 +51,8 @@ def walled_pieces(x, y, walled, k):
 
 
 def inside_at(seg, y, walled=None, k=1.0):
-    """Where the line at height y is inside: even-odd, or with walled (Overlaps cancel out off) every piece that's
-    walled in. [(a, b)] sorted, merged."""
+    """Where the line at height y is inside: even-odd, or with walled (custom.fill_test) every piece it fills.
+    [(a, b)] sorted, merged."""
     x = crossings(seg, y)
     if walled is None:
         return merge(list(zip(x[0::2].tolist(), x[1::2].tolist())))
@@ -168,7 +168,7 @@ def field(polys, walled, reach):
     step, values[row, column], k). Only distances up to `reach` are exact (further ones count as 2 x reach), so
     each block of the grid looks only at the edges near it. Remembered (the same for every outline gate tried up
     to reach). walled: see inside_at."""
-    key = (repr(polys), walled is not None, reach)
+    key = (repr(polys), getattr(walled, "mode", None), reach)
     got = _fields.get(key)
     if got is not None:
         return got

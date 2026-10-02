@@ -10,6 +10,7 @@ import numpy as np
 from files.lang import tr
 from notes.arc import arc_k, arc_points, ellipse_bezier
 from notes.areas import COLOURS, _maps, area_map, inside_loops  # (areas coloured by hand)
+from notes.faces import faces  # (what's filled when it isn't plain even-odd: fill_test)
 from notes.bezier import sample
 from notes.pattern import (baked_path, clean_pattern, clean_shape_formula, formed_path, formed_paths, has_formula,
                            moved_formulas)
@@ -274,9 +275,47 @@ def stroke_span(st):
 
 def open_paths(strokes):
     """The drawing's open outlines once touching strokes are joined: [[start, (joins), end]] in u, v. Each one
-    is a gap in the outline (outline-only strokes and fill lines don't count: Fill / Spam don't close them)."""
-    spans = [s for s in map(stroke_span, (st for st in strokes if not role_of(st))) if s]
-    return [path for path in join_paths(spans) if not path_closed(path)]
+    is a gap in the outline (outline-only strokes and fill lines don't count: Fill / Spam don't close them). One
+    whose ends both land on a line (another stroke's, or partway along its own) isn't (user: no red dots there)."""
+    plain = [st for st in strokes if not role_of(st)]
+    spans = [s for s in map(stroke_span, plain) if s]
+    paths = [path for path in join_paths(spans) if not path_closed(path)]
+    if not paths:
+        return paths
+    pts = [np.asarray(stroke_points(st), float).reshape(-1, 2) for st in plain]
+    pts = [p for p in pts if len(p) > 1]
+    if not pts:
+        return paths
+    every = np.concatenate(pts)
+    tol = max(np.ptp(every[:, 0]), np.ptp(every[:, 1]), 1e-12) * LAND_SHARE
+    seg = np.concatenate([np.column_stack([p[:-1], p[1:]]) for p in pts])
+    first = np.cumsum([0] + [len(p) - 1 for p in pts])
+
+    def lands(end):  # (the segment a stroke's own end is on doesn't count)
+        skip = np.zeros(len(seg), bool)
+        for k, p in enumerate(pts):
+            if not path_closed(p):
+                skip[first[k]] |= math.dist(p[0], end) < 1e-9
+                skip[first[k + 1] - 1] |= math.dist(p[-1], end) < 1e-9
+        return nearest_on(end, seg[~skip], (1.0, 1.0))[0] <= tol
+
+    return [path for path in paths if not (lands(path[0]) and lands(path[-1]))]
+
+
+def nearest_on(p, seg, scale):
+    """How far p is from the nearest of these segments ((m, 4): ax, ay, bx, by), counted in scale units (x, y), and
+    the spot there (None if there are none)."""
+    if not len(seg):
+        return math.inf, None
+    k = np.asarray(scale, float)
+    a, b, q = seg[:, :2] * k, seg[:, 2:] * k, np.asarray(p, float) * k
+    d = b - a
+    ll = (d * d).sum(1)
+    t = np.clip(((q - a) * d).sum(1) / np.where(ll == 0, 1, ll), 0, 1)
+    at = a + t[:, None] * d
+    dist = np.hypot(*(q - at).T)
+    i = int(np.argmin(dist))
+    return float(dist[i]), tuple((at[i] / k).tolist())
 
 
 def open_ends(strokes):
@@ -297,6 +336,8 @@ def fillable(strokes):
 # Gaps in the outline, for Fill / Spam (in beats / keys, not on screen, so zooming never changes the notes):
 TOUCH_BEATS, TOUCH_KEYS = 1 / 64, 1.0  # loose ends at most this far apart count as touching (joined straight)
 FLAT_KEYS, FLAT_BEATS = 0.5, 1 / 64  # an open part never further than this from its closing line is left unfilled
+LAND_SHARE = 1e-4  # in the drawer (u, v): an end this share of the drawing's size from a line lands on it
+ON_LINE = 0.01  # placed: an end landing this close (in TOUCH_BEATS / TOUCH_KEYS) needs no line closing it
 _plans = {}
 _spans = {}  # inside_spans, remembered
 _inner = {}  # inner_ticks, remembered
@@ -328,7 +369,10 @@ def fill_plan(sh):
     """How Fill / Spam see a custom shape's outline (beats / pitch), remembered:
     "polys": the closed loops that make the inside, "closers": the straight lines added to close gaps
     (loose ends that nearly touch are joined; every open part left is closed from its end back to its start),
-    "flat": open parts too flat to have an inside (they just keep their outline notes)."""
+    "flat": open parts too flat to have an inside (they just keep their outline notes), "attached": open parts
+    whose ends both land on a line (another one's, or partway along their own; user): not closed, they're walls
+    between areas and keep their outline notes (fill_test; an end landing near a line, not on it, gets a short
+    closer to it)."""
     key = (json.dumps(sh["strokes"]), json.dumps(sh["pts"]))
     got = _plans.get(key)
     if got is not None:
@@ -366,14 +410,31 @@ def fill_plan(sh):
         b = b if how in (1, 3) else b[::-1]
         opens[i] = a + b
         del opens[j]
-    flat = []
-    for path in opens:
-        if flat_path(path):
+    lines = [np.asarray(p, float).reshape(-1, 2) for p in polys + opens]
+    seg = np.concatenate([np.column_stack([p[:-1], p[1:]]) for p in lines if len(p) > 1] or [np.zeros((0, 4))])
+    first = np.cumsum([0] + [max(len(p) - 1, 0) for p in lines])
+    scale = (1 / TOUCH_BEATS, 1 / TOUCH_KEYS)
+    flat, attached, n_closed = [], [], len(polys)
+    for i, path in enumerate(opens):
+        k = n_closed + i
+        ends = []
+        for end, own in ((path[0], first[k]), (path[-1], first[k + 1] - 1)):  # (not the segment it ends)
+            keep = np.ones(len(seg), bool)
+            if first[k + 1] > first[k]:
+                keep[own] = False
+            ends.append(nearest_on(end, seg[keep], scale))
+        if all(d <= 1 for d, _ in ends):
+            (d0, p0), (d1, p1) = ends
+            for d, a, b in ((d0, p0, path[0]), (d1, path[-1], p1)):
+                if d > ON_LINE:
+                    closers.append([a, b])
+            attached.append(([p0] if d0 > ON_LINE else []) + path + ([p1] if d1 > ON_LINE else []))
+        elif flat_path(path):
             flat.append(path)
         else:
             polys.append(path + [path[0]])
             closers.append([path[-1], path[0]])
-    got = _plans[key] = {"polys": polys, "closers": closers, "flat": flat}
+    got = _plans[key] = {"polys": polys, "closers": closers, "flat": flat, "attached": attached}
     return got
 
 
@@ -709,13 +770,13 @@ def inside_spans(sh, ppq):
 
 def find_spans(sh, ppq):
     tx = sh.get("text")
-    polys = custom_strokes(sh) if tx else fill_plan(sh)["polys"]
+    walled = fill_test(sh)
+    polys = custom_strokes(sh) if tx else walls(sh) if walled else fill_plan(sh)["polys"]
     ps = [p for poly in polys for _, p in poly]
     if not ps:
         return []
-    walled = enclosed_test(sh)
     edges = None if tx else poly_edges(polys)
-    if walled:  # (every piece of a row between two lines: filled if it's walled in)
+    if walled:  # (every piece of a row between two lines: filled as fill_test says)
         edges += (np.zeros(len(edges[0]), np.int64),)
     out = []
     for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1):
@@ -755,24 +816,27 @@ def shape_areas(sh):
     key = (json.dumps(sh["strokes"]), json.dumps([np.round(c, 6).tolist() for c in closers]))
     if key in _maps:
         return _maps[key]
-    loops = [uv_points(sh["pts"], p) for p in plan["polys"]]
+    loops = [uv_points(sh["pts"], p) for p in plan["polys"] + plan["attached"]]
     cuts = [uv_points(sh["pts"], p) for p in area_cuts(sh)]
     return area_map(loops, cuts, key)
 
 
-def enclosed_map(sh):
-    """Overlaps cancel out off: the AreaMap of only the lines that wall the inside in (Fill / Spam loops and outline
-    lines too flat to fill; not fill lines, they don't change what's filled), in the shape's own box. Every area
-    of it but the one around the drawing is filled (user: overlaps and holes too, also where ONE line crosses
-    itself; inside any loop on its own missed those). None if the box is flat."""
+def walls(sh):
+    """Every line that walls areas in for Fill / Spam (not fill lines: they don't change what's filled), in beats /
+    keys: the loops, the lines ending on lines and the ones too flat to fill."""
+    plan = fill_plan(sh)
+    return plan["polys"] + plan["attached"] + plan["flat"]
+
+
+def shape_faces(sh):
+    """faces.Faces of walls(sh) in the shape's own box (u, v), so it stays the same wherever the shape is put (None
+    if the box is flat)."""
     plan = fill_plan(sh)
     closers = [uv_points(sh["pts"], c) for c in plan["closers"]]
     if any(c is None for c in closers) or uv_points(sh["pts"], [[0, 0]]) is None:
         return None
-    key = ("enclosed", json.dumps(sh["strokes"]), json.dumps([np.round(c, 6).tolist() for c in closers]))
-    if key in _maps:
-        return _maps[key]
-    return area_map([uv_points(sh["pts"], p) for p in plan["polys"] + plan["flat"]], [], key)
+    key = (json.dumps(sh["strokes"]), json.dumps([np.round(c, 6).tolist() for c in closers]))
+    return faces([uv_points(sh["pts"], p) for p in walls(sh)], key)
 
 
 def spot_area(amap, u, v):
@@ -790,19 +854,25 @@ def spot_area(amap, u, v):
     return pick
 
 
-def enclosed_uv(sh, u, v):
-    """enclosed_map: whether each row of spots (u, v: (n, m) arrays in the box) is walled in."""
-    amap = enclosed_map(sh)
-    if amap is None or not len(u):
-        return np.zeros(len(u), bool)
-    lab = spot_area(amap, u, v)
-    return (lab >= 0) & (lab != amap.outside())
+def filled_uv(sh, u, v):
+    """fill_test for spots in the shape's box (u, v arrays)."""
+    fc = shape_faces(sh)
+    if fc is None:
+        return np.zeros(np.size(u), bool)
+    d = fc.depth_at(u, v)
+    return d >= 1 if sh.get("union") else d % 2 == 1
 
 
-def enclosed_test(sh):
-    """Overlaps cancel out off (not text): test(x, y) = for each row of spots in beats / keys ((n, m) arrays, spread
-    over one piece of a key row), whether it's walled in (enclosed_map). None when they cancel out."""
-    if not sh.get("union") or sh.get("text"):
+def fill_test(sh):
+    """What Fill / Spam fill, when it isn't the plain even-odd of fill_plan's loops: test(x, y) = for each row of
+    spots in beats / keys ((n, m) arrays spread over one piece of a key row; the first one, its middle, decides)
+    whether it's filled. Overlaps cancel out off: every area closed in (user: overlaps and holes too, also where ONE
+    line crosses itself). On: areas an odd number of lines in (faces.py; the same as even-odd, but a line ending on
+    lines leaves both sides as they were, user). None: plain even-odd (text, or every line part of a loop)."""
+    if sh.get("text"):
+        return None
+    plan = fill_plan(sh)
+    if not (sh.get("union") or plan["attached"] or plan["flat"]):
         return None
     frame = sh["pts"]
 
@@ -810,11 +880,9 @@ def enclosed_test(sh):
         x, y = np.asarray(x, float), np.asarray(y, float)
         if not x.size:
             return np.zeros(len(x), bool)
-        x, y = x.reshape(len(x), -1), y.reshape(len(y), -1)
-        uv = uv_points(frame, np.column_stack([x.ravel(), y.ravel()]))
-        if uv is None:
-            return np.zeros(len(x), bool)
-        return enclosed_uv(sh, uv[:, 0].reshape(x.shape), uv[:, 1].reshape(x.shape))
+        uv = uv_points(frame, np.column_stack([x.reshape(len(x), -1)[:, 0], y.reshape(len(y), -1)[:, 0]]))
+        return np.zeros(len(x), bool) if uv is None else filled_uv(sh, uv[:, 0], uv[:, 1])
+    test.mode = "union" if sh.get("union") else "odd"  # (remembered results differ: shrink.field)
     return test
 
 
@@ -912,19 +980,22 @@ def area_paint(sh, amap):
 def area_state(sh, amap):
     """Each area's (filled, colour) as Fill / Spam make it (one more at the end for walls: not filled, -1)."""
     paint = area_paint(sh, amap)
-    if enclosed_test(sh):
-        inside = enclosed_uv(sh, amap.spots[:, :1], amap.spots[:, 1:])
-    else:
-        loops = [uv_points(sh["pts"], p) for p in fill_plan(sh)["polys"]]
-        inside = inside_loops(amap.spots[:, 0], amap.spots[:, 1], loops)
-    filled = np.append(np.where(paint[:-1] >= 0, paint[:-1] > 0, inside), False)
+    filled = np.append(np.where(paint[:-1] >= 0, paint[:-1] > 0, areas_filled(sh, amap)), False)
     return filled, np.append(np.where(paint[:-1] > 0, paint[:-1], 0), -1)
 
 
+def areas_filled(sh, amap):
+    """Which areas of AreaMap amap Fill / Spam fill as normal (nothing coloured)."""
+    if fill_test(sh):
+        return filled_uv(sh, amap.spots[:, 0], amap.spots[:, 1])
+    loops = [uv_points(sh["pts"], p) for p in fill_plan(sh)["polys"]]
+    return inside_loops(amap.spots[:, 0], amap.spots[:, 1], loops)
+
+
 def area_lines(sh):
-    """Every line of a custom shape that cuts areas (Fill / Spam loops and fill lines), (ax, ay, bx, by) in beats /
-    keys."""
-    return shrink_segments(fill_plan(sh)["polys"] + area_cuts(sh))
+    """Every line of a custom shape that cuts areas (Fill / Spam loops, lines ending on lines and fill lines), (ax,
+    ay, bx, by) in beats / keys."""
+    return shrink_segments(fill_plan(sh)["polys"] + fill_plan(sh)["attached"] + area_cuts(sh))
 
 
 def area_edges(sh, amap, borders_only=False):
@@ -1005,7 +1076,7 @@ def area_filled_lines(sh, keys):
     if len(_inner) > 100:
         _inner.clear()
     got = _inner[key] = (ys, out, area_edges(sh, amap),
-                         shrink_proportion(fill_plan(sh)["polys"] + area_cuts(sh)))
+                         shrink_proportion(fill_plan(sh)["polys"] + fill_plan(sh)["attached"] + area_cuts(sh)))
     return got
 
 
@@ -1078,9 +1149,9 @@ def outline_of_lines(ys, per, gap):
 def find_area_spans(sh, ppq):
     none = np.zeros((0, 4), np.int64)
     amap = shape_areas(sh)
-    polys = fill_plan(sh)["polys"]
+    polys = fill_plan(sh)["polys"] + fill_plan(sh)["attached"]
     cuts = area_cuts(sh)
-    ps =[p for path in polys + cuts for _, p in path]
+    ps = [p for path in polys + cuts for _, p in path]
     if amap is None or not ps:
         return none
     paint = area_paint(sh, amap)
@@ -1098,7 +1169,7 @@ def find_area_spans(sh, ppq):
         uv = uv_points(frame, np.column_stack([x.ravel(), y.ravel()]))
         return paint[spot_area(amap, uv[:, 0].reshape(x.shape), uv[:, 1].reshape(x.shape))]
 
-    walled = enclosed_test(sh)
+    walled = fill_test(sh)
     out = []
     for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1):
         for s, e, g in row_pieces(edges, q, walled, colour):
@@ -1109,7 +1180,7 @@ def find_area_spans(sh, ppq):
 
 def row_pieces(edges, q, walled, colour):
     """Like row_spans, but every line (fill lines too, loop number -1 in edges) cuts the row into pieces, and each
-    piece is filled as normal (even-odd; Overlaps cancel out off: walled(x, y) = enclosed_test) or as colour(x, y)
+    piece is filled as normal (even-odd, or as walled(x, y) = fill_test says) or as colour(x, y)
     says (-1: as normal, 0: empty, k: colour k).
     [(start, end, colour)] in beats, merged per colour; colour 0 = the shape's own. Where two filled pieces meet,
     they meet where the line between them crosses the middle of the row's slice; on the outside edge the piece
@@ -1514,10 +1585,11 @@ def near_edge(notes, spans, g):
 
 
 def edge_loops(sh):
-    """The closed loops the inside is made of (fill_plan; text: its letters), and with Overlaps cancel out off the
-    test for what's walled in (enclosed_test; None: even-odd)."""
+    """The lines the inside is made of (fill_plan's loops; text: its letters), and fill_test (None: even-odd; then
+    every line given is part of a loop, else it's walls(sh))."""
     tx = sh.get("text")
-    return (custom_strokes(sh) if tx else fill_plan(sh)["polys"]), enclosed_test(sh)
+    walled = fill_test(sh)
+    return (custom_strokes(sh) if tx else walls(sh) if walled else fill_plan(sh)["polys"]), walled
 
 
 def inner_ticks(sh, ppq, g, spans):
@@ -1618,8 +1690,9 @@ def custom_note_count(sh, ppq):
 
 
 def flat_notes(sh, ppq):
-    """The outline notes of a filled shape's parts too flat to fill (fill_plan), so they don't vanish."""
-    flat = [] if sh.get("text") else fill_plan(sh)["flat"]
+    """The outline notes of a filled shape's parts too flat to fill and lines ending on lines (fill_plan), so they
+    don't vanish (a line across a filled area: both sides stay filled, its notes show it, user)."""
+    flat = [] if sh.get("text") else fill_plan(sh)["flat"] + fill_plan(sh)["attached"]
     return paths_outline(flat, ppq) if flat else np.zeros((0, 3), np.int64)
 
 

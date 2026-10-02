@@ -12,9 +12,9 @@ from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half
                           set_symmetry)
 import numpy as np
 
-from notes.areas import COLOURS, clean_areas, inside_loops
-from notes.custom import (ROLES, carry_areas, clean_strokes, colour_of, fill_plan, join_strokes, open_ends, open_paths,
-                          plain_stroke, role_of, shape_areas, stroke_points, strokes_closed, takes_formula, uv_points)
+from notes.areas import COLOURS, clean_areas
+from notes.custom import (ROLES, areas_filled, carry_areas, clean_strokes, colour_of, join_strokes, open_ends,
+                          open_paths, plain_stroke, role_of, shape_areas, stroke_points, strokes_closed, takes_formula)
 from roll.roll_shared import SLOT_COLORS
 from notes.pattern import has_formula, moved_formulas
 from files.about import HERE
@@ -254,8 +254,7 @@ class Drawer(tk.Toplevel):
         amap = shape_areas(sh) if self.strokes else None
         inside = None
         if amap is not None:
-            loops = [uv_points(sh["pts"], p) for p in fill_plan(sh)["polys"]]
-            inside = inside_loops(amap.spots[:, 0], amap.spots[:, 1], loops)
+            inside = areas_filled(sh, amap)
         self._area_cache = (key, amap, inside)
         self._area_px = None
         return amap, inside
