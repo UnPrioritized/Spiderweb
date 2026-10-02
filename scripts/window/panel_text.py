@@ -1,12 +1,12 @@
 """The side panel's text settings (Text tool, or text shapes selected): font, size, weight, spacing, threshold."""
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.fonts import WEIGHTS
-from notes.text import TEXT_DEFAULTS, build, restyle, shown_size, text_axes, text_font
+from notes.text import TEXT_DEFAULTS, build, restyle, shown_size, text_axes, text_font, with_arial
 from window.font_dialog import FontDialog
 from window.widgets import Scrub, Tooltip
 
@@ -143,7 +143,7 @@ class TextPanel:
         self.font_btn.config(text=tr("panel_text.text_2", font=tx['font']))
         font = text_font(tx)
         if not font.found:
-            info = (tr("panel_text.isn_t_installed_on_this_pc", font=tx['font'], face=font.face))
+            info = tr("panel_text.isn_t_installed_on_this_pc", font=tx['font'])
         elif typing:
             info = tr("panel_text.typing_enter_new_line_esc_done")
         elif tool == "text":
@@ -154,24 +154,37 @@ class TextPanel:
             info += tr("panel_text.changes_go_to_all_selected_texts", n=len(shapes))
         self.text_info.config(text=info)
 
+    def missing_font_ok(self, txs):
+        """These placed texts are about to be redrawn: if a font of theirs isn't installed here, ask first (they're
+        redrawn in Arial, with_arial). True = go on."""
+        missing = sorted({tx["font"] for tx in txs if not text_font(tx).found})
+        return not missing or messagebox.askyesno(
+            tr("app.spiderweb_2"), tr("panel_text.font_missing_edit", fonts=", ".join(f"“{f}”" for f in missing)),
+            icon="warning", parent=self)
+
     def set_text_setting(self, changes, refocus=True):
         """A text setting changed in the panel: the text being typed or the selected texts get it (the first line
         stays where it starts), and new text will use it too. refocus: carry on typing on the roll."""
         if self._loading:
             return
-        self.text_defaults.update({k: v for k, v in changes.items() if k in TEXT_DEFAULTS})
         roll = self.roll
+        placed = ([roll.typing_state()[0]] if roll.typing["i"] is not None else []) if roll.typing else \
+            [sh["text"] for sh in self.text_shapes()]
+        if "font" not in changes and not self.missing_font_ok(placed):
+            self.sync_text()  # (the panel shows the old settings again)
+            return
+        self.text_defaults.update({k: v for k, v in changes.items() if k in TEXT_DEFAULTS})
         if roll.typing:
             tx, axes = roll.typing_state()
             if roll.typing["i"] is not None:
                 self.push_undo(name=tr("panel_text.text_setting"))
-            roll.retype(*restyle(tx, axes, changes))
+            roll.retype(*restyle(tx, axes, with_arial(tx, changes)))
         else:
             shapes = self.text_shapes()
             if shapes:
                 self.push_undo(name=tr("panel_text.text_setting"))
             for sh in shapes:
-                build(sh, *restyle(sh["text"], text_axes(sh), changes))
+                build(sh, *restyle(sh["text"], text_axes(sh), with_arial(sh["text"], changes)))
         self.shapes_changed()
         self.sync_text()
         self.sync_custom()

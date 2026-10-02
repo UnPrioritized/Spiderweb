@@ -3,7 +3,7 @@ retype it. The text is a custom shape with sh["text"] (notes/text.py); it's rebu
 
 from files.lang import tr
 from notes.custom import custom_settings
-from notes.text import build, from_roll, layout, new_axes, text_axes, text_font
+from notes.text import build, from_roll, layout, new_axes, restyle, text_axes, text_font, with_arial
 from roll.roll_shared import CTRL, SHIFT
 
 BLINK_MS = 530
@@ -182,6 +182,12 @@ class TextTyping:
         spaces are left)."""
         app, ty = self.app, self.typing
         tx, axes = self.typing_state()
+        if ty["i"] is not None and not text_font(tx).found:  # (a shared text whose font isn't installed here)
+            if not app.missing_font_ok([tx]):
+                self.end_typing()
+                app.sync_text()
+                return
+            tx, axes = restyle(tx, axes, with_arial(tx, {}))
         tx = dict(tx, text=text)
         ty["caret"] = ty["anchor"] = caret
         if ty["i"] is not None:

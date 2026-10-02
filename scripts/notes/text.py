@@ -51,6 +51,12 @@ def text_font(tx):
     return get_font(tx["font"], tx["weight"], tx["italic"])
 
 
+def with_arial(tx, changes):
+    """Setting changes for a text, plus the font Arial if its font isn't installed here: a shared text keeps its
+    letters until it's edited, then all of it is redrawn in Arial (the user is asked first, missing_font_ok)."""
+    return changes if "font" in changes or text_font(tx).found else dict(changes, font="Arial")
+
+
 def em_keys(tx, size=None):
     """How many keys one em is at this size (a number in the size box)."""
     size = tx["size"] if size is None else size
