@@ -13,8 +13,8 @@ from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half
 import numpy as np
 
 from notes.areas import COLOURS, clean_areas
-from notes.custom import (ROLES, areas_filled, carry_areas, clean_strokes, colour_of, join_strokes, open_ends,
-                          open_paths, plain_stroke, role_of, shape_areas, stroke_points, strokes_closed, takes_formula)
+from notes.custom import (ROLES, areas_filled, carry_areas, clean_strokes, colour_of, join_strokes,
+                          open_paths, plain_stroke, role_of, shape_areas, stroke_points, takes_formula)
 from roll.roll_shared import SLOT_COLORS
 from notes.pattern import has_formula, moved_formulas
 from files.about import HERE
@@ -180,7 +180,7 @@ class Drawer(tk.Toplevel):
         self.areas = []        # areas coloured by hand: [[u, v, colour]] (areas.py; colour 0 = empty)
         self.area_pick = 1     # the colour the Areas tool gives (0 = empty)
         self.hover = None      # the area under the mouse (Areas tool)
-        self._area_cache = self._area_px = self._area_img = None
+        self._area_cache = self._area_px = self._area_img = self._gap_cache = None
         self.zoom = 1.0        # 1 = the whole board fits the window
         self.center = [0.5, 0.5]  # the board point in the middle of the window (0.5, 0.5 = the board's middle)
         self._pan = None
@@ -260,6 +260,13 @@ class Drawer(tk.Toplevel):
         self._area_cache = (key, amap, inside)
         self._area_px = None
         return amap, inside
+
+    def gaps(self):
+        """The drawing's open outlines (custom.open_paths), remembered until the strokes change."""
+        key = json.dumps(self.strokes)
+        if self._gap_cache is None or self._gap_cache[0] != key:
+            self._gap_cache = (key, open_paths(self.strokes))
+        return self._gap_cache[1]
 
     def area_at(self, e):
         """The area at the mouse, or None (outside the drawing, or nothing drawn)."""
@@ -359,8 +366,10 @@ class Drawer(tk.Toplevel):
 
     def area_image(self, cw, ch):
         """The board with the areas' colours, as a picture of the whole canvas (None: no areas to show)."""
+        if not (self.areas or self.tool.get() == "areas"):  # (finding the areas is slow on big drawings)
+            return None
         amap, inside = self.area_info()
-        if amap is None or not (self.areas or self.tool.get() == "areas"):
+        if amap is None:
             return None
         view = (cw, ch, self.zoom, tuple(self.center), id(amap))
         if self._area_px is None or self._area_px[0] != view:
@@ -516,6 +525,13 @@ class Drawer(tk.Toplevel):
         k = self.px()
         return (self.canvas.winfo_width() / 2 + (u - self.center[0]) * k,
                 self.canvas.winfo_height() / 2 - (v - self.center[1]) * k)
+
+    def screen_points(self, pts):
+        """Many (u, v) points on screen at once: [x0, y0, x1, y1, ...] (to_screen asks the canvas its size each
+        time, too slow for big drawings)."""
+        k, w, h = self.px(), self.canvas.winfo_width() / 2, self.canvas.winfo_height() / 2
+        cu, cv = self.center
+        return [c for u, v in pts for c in (w + (u - cu) * k, h - (v - cv) * k)]
 
     def from_screen(self, x, y):
         k = self.px()
@@ -1278,7 +1294,8 @@ class Drawer(tk.Toplevel):
 
     def hit_stroke(self, x, y):
         for i in range(len(self.strokes) - 1, -1, -1):
-            pts = [self.to_screen(u, v) for u, v in stroke_points(self.strokes[i])]
+            xy = self.screen_points(stroke_points(self.strokes[i]))
+            pts = list(zip(xy[::2], xy[1::2]))
             if len(pts) == 1 and math.hypot(pts[0][0] - x, pts[0][1] - y) < 8:
                 return i
             for (ax, ay), (bx, by) in zip(pts, pts[1:]):
@@ -1551,7 +1568,8 @@ class Drawer(tk.Toplevel):
                     i += step
         c.create_rectangle(x0, y0, x1, y1, outline="#606060")
         w = max(2, round(2 * self.scale))
-        closed = strokes_closed(self.strokes)
+        gaps = self.gaps()
+        closed = any(not role_of(st) for st in self.strokes) and not gaps
         chosen = set(self.chosen())
         for i, st in enumerate(self.strokes):  # a stroke with formulas: the stroke as drawn (the origin path), dashed
             if st["kind"] != "ellipse" and has_formula(st):
@@ -1589,7 +1607,7 @@ class Drawer(tk.Toplevel):
                     q = r + 1.5 * s
                     c.create_oval(x - q, y - q, x + q, y + q, fill="#ffffff", outline="#0050d0",
                                   width=max(2, round(2 * s)))
-        for u, v in open_ends(self.strokes):  # open ends: red dots
+        for u, v in (end for path in gaps for end in (path[0], path[-1])):  # open ends: red dots
             x, y = self.to_screen(u, v)
             c.create_oval(x - r, y - r, x + r, y + r, fill="#ff2020", outline="#800000")
         if self.draft:
@@ -1607,7 +1625,7 @@ class Drawer(tk.Toplevel):
             text = tr("drawer.nothing_to_fill")
         elif closed:
             text = tr("drawer.closed_shape_empty_fill_and_spam")
-        elif len(open_paths(self.strokes)) == 1:
+        elif len(gaps) == 1:
             text = tr("drawer.one_gap_red_dots_fill_and")
         else:
             text = tr("drawer.open_ends_red_dots_fill_and")
@@ -1637,7 +1655,7 @@ class Drawer(tk.Toplevel):
                                    width=max(1, round(s)))
 
     def draw_stroke(self, st, color, width, dash=None):
-        coords = [c for u, v in stroke_points(st) for c in self.to_screen(u, v)]
+        coords = self.screen_points(stroke_points(st))
         if len(coords) >= 4:
             self.canvas.create_line(*coords, fill=color, width=width, capstyle="round", joinstyle="round", dash=dash)
         elif coords:

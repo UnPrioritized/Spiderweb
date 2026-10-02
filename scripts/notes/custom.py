@@ -241,10 +241,14 @@ def join_paths(paths):
     joined = True
     while joined:
         joined = False
+        heads = np.array([a[0] for a in lines], float).reshape(-1, 2)  # (all ends at once: big drawings)
+        tails = np.array([a[-1] for a in lines], float).reshape(-1, 2)
         for i, a in enumerate(lines):
-            for j, b in enumerate(lines):
-                if i == j:
-                    continue
+            can = ((np.hypot(*(heads - tails[i]).T) < 2e-6) | (np.hypot(*(tails - tails[i]).T) < 2e-6) |
+                   (np.hypot(*(heads - heads[i]).T) < 2e-6))
+            can[i] = False
+            for j in np.flatnonzero(can).tolist():  # (the first that really meets, as checked one by one)
+                b = lines[j]
                 if meet(a[-1], b[0]):
                     new = a + b[1:]
                 elif meet(a[-1], b[-1]):
@@ -290,14 +294,19 @@ def open_paths(strokes):
     tol = max(np.ptp(every[:, 0]), np.ptp(every[:, 1]), 1e-12) * LAND_SHARE
     seg = np.concatenate([np.column_stack([p[:-1], p[1:]]) for p in pts])
     first = np.cumsum([0] + [len(p) - 1 for p in pts])
+    loose = np.array([not path_closed(p) for p in pts])
+    starts, ends = np.array([p[0] for p in pts]), np.array([p[-1] for p in pts])
+    lo = np.minimum(seg[:, :2], seg[:, 2:]) - tol  # each segment's box, tol bigger (only those can be in reach)
+    hi = np.maximum(seg[:, :2], seg[:, 2:]) + tol
+    lox, loy, hix, hiy = (np.ascontiguousarray(a) for a in (lo[:, 0], lo[:, 1], hi[:, 0], hi[:, 1]))
 
     def lands(end):  # (the segment a stroke's own end is on doesn't count)
-        skip = np.zeros(len(seg), bool)
-        for k, p in enumerate(pts):
-            if not path_closed(p):
-                skip[first[k]] |= math.dist(p[0], end) < 1e-9
-                skip[first[k + 1] - 1] |= math.dist(p[-1], end) < 1e-9
-        return nearest_on(end, seg[~skip], (1.0, 1.0))[0] <= tol
+        e = np.asarray(end, float)
+        x, y = end
+        near = (lox <= x) & (hix >= x) & (loy <= y) & (hiy >= y)
+        near[first[:-1][loose & (np.hypot(*(starts - e).T) < 1e-9)]] = False
+        near[first[1:][loose & (np.hypot(*(ends - e).T) < 1e-9)] - 1] = False
+        return nearest_on(end, seg[near], (1.0, 1.0))[0] <= tol
 
     return [path for path in paths if not (lands(path[0]) and lands(path[-1]))]
 
