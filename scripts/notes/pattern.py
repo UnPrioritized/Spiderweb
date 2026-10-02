@@ -484,10 +484,11 @@ BAKE_SHARE = 0.001  # the same for a drawer stroke / funnel curve, as a share of
 BAKE_SYM = ("mirror", "turn")  # symmetric halves a baked curve gets when it has them (bezier.fit_symmetric)
 
 
-def baked_path(holder, pts, modes=BAKE_SYM):
-    """A drawer stroke's / funnel curve's formulas made into ordinary anchors and handles: (pts, sharp, sym)."""
+def baked_path(holder, pts, modes=BAKE_SYM, formed=None):
+    """A drawer stroke's / funnel curve's formulas made into ordinary anchors and handles: (pts, sharp, sym).
+    pts: its curve's points; or formed: the path it makes with them (a line / polyline / arc stroke)."""
     from notes.bezier import fit_symmetric, sample
-    path = formed_path(sample([tuple(q) for q in pts], 240), holder)
+    path = formed if formed is not None else formed_path(sample([tuple(q) for q in pts], 240), holder)
     k = (holder.get("pattern") or holder["shape"])["k"]
     a = np.asarray(path, float) / [k, 1.0]
     size = max(1e-9, float(np.hypot(*(a.max(axis=0) - a.min(axis=0)))))

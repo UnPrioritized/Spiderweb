@@ -13,8 +13,8 @@ from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half
 import numpy as np
 
 from notes.areas import COLOURS, clean_areas, inside_loops
-from notes.custom import (ROLES, carry_areas, clean_strokes, colour_of, fill_plan, join_strokes, open_ends, open_paths, role_of,
-                          shape_areas, stroke_points, strokes_closed, uv_points)
+from notes.custom import (ROLES, carry_areas, clean_strokes, colour_of, fill_plan, join_strokes, open_ends, open_paths,
+                          plain_stroke, role_of, shape_areas, stroke_points, strokes_closed, takes_formula, uv_points)
 from roll.roll_shared import SLOT_COLORS
 from notes.pattern import has_formula, moved_formulas
 from files.about import HERE
@@ -1010,10 +1010,11 @@ class Drawer(tk.Toplevel):
             m.add_command(label=tr("drawer.add_anchor_here"), command=lambda: self.add_curve_anchor(e))
             # one half follows the other; the half right-clicked keeps its shape
             symmetry_menu(m, st.get("sym"), lambda mode: self.set_curve_symmetry(i, mode, e))
-            self._formula_picks = {}  # (kept, so the dots show)
-            formula_menu(m, DrawerHost(self), self._formula_picks)
         elif st["kind"] == "poly":
             m.add_command(label=tr("drawer.add_point_here"), command=lambda: self.add_poly_point(i, e))
+        if takes_formula(st):
+            self._formula_picks = {}  # (kept, so the dots show)
+            formula_menu(m, DrawerHost(self), self._formula_picks)
         self._role_var = tk.StringVar(value=role_of(st) or "both")  # (kept, so the dot shows)
         for role in ("both",) + ROLES:
             m.add_radiobutton(label=tr("drawer.role_" + role), value=role, variable=self._role_var,
@@ -1398,10 +1399,9 @@ class Drawer(tk.Toplevel):
         c.create_rectangle(x0, y0, x1, y1, outline="#606060")
         w = max(2, round(2 * self.scale))
         closed = strokes_closed(self.strokes)
-        for i, st in enumerate(self.strokes):  # a curve with formulas: the curve as drawn (the origin path), dashed
-            if st["kind"] == "curve" and has_formula(st):
-                self.draw_stroke(dict(st, shape=None, pattern=None), "#e89a9a" if i == self.sel else "#efc0c0", 1,
-                                 dash=(6, 4))
+        for i, st in enumerate(self.strokes):  # a stroke with formulas: the stroke as drawn (the origin path), dashed
+            if st["kind"] != "ellipse" and has_formula(st):
+                self.draw_stroke(plain_stroke(st), "#e89a9a" if i == self.sel else "#efc0c0", 1, dash=(6, 4))
         for i, st in enumerate(self.strokes):  # outline only: dotted; fill line: thin dashes
             role = role_of(st)
             color = ("#ff8c1a" if i == self.sel else SLOT_COLORS[(colour_of(st) - 1) % len(SLOT_COLORS)][1]

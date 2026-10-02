@@ -1,5 +1,5 @@
-"""Where curve formulas (pattern.py) can be put: the piano roll's curves, the drawer's curve strokes, a funnel's
-curves and a polygon's sides. Each kind of place is a "host": the right-click menu's Formula items and the Custom… window
+"""Where curve formulas (pattern.py) can be put: the piano roll's lines / polylines / curves / arcs, a custom shape's
+strokes (in the drawer, or a live shape's on the piano roll), a funnel's curves and a polygon's sides. Each kind of place is a "host": the right-click menu's Formula items and the Custom… window
 (pattern_dialog.py) work through it, so they look and work the same everywhere.
 
 A host's "holders" are the dicts that get "shape" / "pattern" (a curve shape, a drawer stroke, a funnel curve).
@@ -14,6 +14,7 @@ import tkinter as tk
 
 from files.lang import tr
 from notes.bezier import anchor_count
+from notes.custom import baked_stroke, takes_formula
 from notes.pattern import (PATTERN_PRESETS, SHAPE_NAMES, SHAPE_PRESETS, baked_path, has_formula, loop_length,
                            new_pattern, new_shape, pattern_name, shape_name)
 
@@ -314,10 +315,15 @@ class DrawerHost(FormulaHost):
 
     def targets(self):
         d = self.drawer
-        return [d.strokes[d.sel]] if d.sel is not None and d.strokes[d.sel]["kind"] == "curve" else []
+        return [d.strokes[d.sel]] if d.sel is not None and takes_formula(d.strokes[d.sel]) else []
 
     def fresh(self, holder, layer):
         return {"k": 1.0, "scale": DRAWER_SCALE}  # (the board is square on screen)
+
+    def bake(self, holder):
+        new = baked_stroke(holder, self.sym_modes)  # (a line / polyline / arc becomes a curve)
+        holder.clear()
+        holder.update(new)
 
     def begin(self, name):
         self.drawer.push_undo()

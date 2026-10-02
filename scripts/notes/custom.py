@@ -11,7 +11,7 @@ from files.lang import tr
 from notes.arc import arc_k, arc_points, ellipse_bezier
 from notes.areas import COLOURS, _maps, area_map, inside_loops  # (areas coloured by hand)
 from notes.bezier import sample
-from notes.pattern import (clean_pattern, clean_shape_formula, formed_path, formed_paths, has_formula,
+from notes.pattern import (baked_path, clean_pattern, clean_shape_formula, formed_path, formed_paths, has_formula,
                            moved_formulas)
 from notes.polygon import side_paths
 from notes.smooth import clean_level, smooth_path
@@ -127,18 +127,15 @@ def clean_strokes(strokes):
                         out.append(clean_curve(st, pts[:len(pts) - (len(pts) - 1) % 3]))
                 elif st.get("kind") == "arc":
                     if len(pts) == 3:
-                        out.append({"kind": "arc", "pts": pts, "k": arc_k(st)})
+                        out.append(clean_formulas(st, {"kind": "arc", "pts": pts, "k": arc_k(st)}))
                 elif pts:
                     out.append({"kind": "poly", "pts": pts})
                     if st.get("free"):  # drawn freehand: can be made perfect (smooth.py)
                         out[-1].update(free=True, smooth=clean_level(st.get("smooth", 0)), k=arc_k(st))
-                    elif st.get("sides"):  # a polygon's (polygon.py), maybe with a shape / pattern on the sides
-                        out[-1]["sides"] = True
-                        pat, form = clean_pattern(st.get("pattern")), clean_shape_formula(st.get("shape"))
-                        if pat:
-                            out[-1]["pattern"] = pat
-                        if form:
-                            out[-1]["shape"] = form
+                    else:  # a line / polyline, or a polygon's (polygon.py: the shape / pattern on each side)
+                        if st.get("sides"):
+                            out[-1]["sides"] = True
+                        clean_formulas(st, out[-1])
             if isinstance(st.get("src"), int) and out:  # which shape it came from (convert.py)
                 out[-1]["src"] = st["src"]
             if st.get("role") in ROLES and out:
@@ -162,12 +159,23 @@ def clean_curve(st, pts):
         out["sharp"] = sharp
     if st.get("sym") in ("mirror", "turn") and last % 2 == 0:
         out["sym"] = st["sym"]
+    return clean_formulas(st, out)
+
+
+def clean_formulas(st, out):
+    """out (a stroke being read from a file) with st's shape / pattern formulas, checked (pattern.py)."""
     pat, form = clean_pattern(st.get("pattern")), clean_shape_formula(st.get("shape"))
     if pat:
         out["pattern"] = pat
     if form:
         out["shape"] = form
     return out
+
+
+def takes_formula(st):
+    """The strokes that can have formulas (like the piano roll's lines, polylines, curves and arcs): not freehand
+    ones or ellipses."""
+    return st["kind"] in ("curve", "arc") or st["kind"] == "poly" and not st.get("free")
 
 
 def stroke_points(st):
@@ -181,7 +189,7 @@ def stroke_points(st):
     if st["kind"] == "curve":
         return formed_path(sample([tuple(p) for p in st["pts"]], CURVE_STEPS), st)
     if st["kind"] == "arc":
-        return arc_points(st["pts"], st.get("k", 1.0))
+        return formed_path(arc_points(st["pts"], st.get("k", 1.0)), st)
     if st.get("smooth"):  # a freehand stroke made perfect (its drawn points stay)
         return smooth_path(st["pts"], st["smooth"], st.get("k", 1.0))
     if st.get("sides") and has_formula(st):  # a polygon's sides, each with the shape / pattern (polygon.py)
@@ -189,7 +197,29 @@ def stroke_points(st):
         for side in formed_paths(side_paths(st["pts"]), st):
             out += side[1:] if out else side
         return out
+    if not st.get("free") and has_formula(st):  # a line / polyline: along all of it, round its corners
+        return formed_path([tuple(p) for p in st["pts"]], st)
     return [tuple(p) for p in st["pts"]]
+
+
+def plain_stroke(st):
+    """The stroke without its formulas (the dashed origin path under them)."""
+    return {key: v for key, v in st.items() if key not in ("shape", "pattern", "rev")}
+
+
+def baked_stroke(st, modes):
+    """Turn into plain curve: the stroke as it looks with its formulas, as a curve stroke without them (a line /
+    polyline / arc becomes a curve; its role, colour and shape it came from stay). modes: the symmetric halves
+    it may get."""
+    pts, sharp, sym = baked_path(st, None, modes, stroke_points(st))
+    out = {key: v for key, v in st.items()
+           if key not in ("kind", "pts", "shape", "pattern", "sym", "rev", "k", "sides", "sharp")}
+    out.update(kind="curve", pts=pts)
+    if sharp:
+        out["sharp"] = sharp
+    if sym:
+        out["sym"] = sym
+    return out
 
 
 def path_closed(path):
@@ -355,11 +385,13 @@ def gap_lines(sh):
 def join_strokes(strokes):
     """Open lines that meet end to end become one line, so e.g. three lines drawn as a triangle make one
     closed triangle (only lines with the same role). Curves and circles stay as they are (they still count as
-    joined, see strokes_closed)."""
-    others = [st for st in strokes if st["kind"] != "poly" or stroke_closed(st)]
+    joined, see strokes_closed), and so do lines with a formula."""
+    def plain_line(st):
+        return st["kind"] == "poly" and not stroke_closed(st) and not has_formula(st)
+
+    others = [st for st in strokes if not plain_line(st)]
     for role in (None,) + ROLES:
-        lines = [[list(p) for p in st["pts"]] for st in strokes
-                 if st["kind"] == "poly" and not stroke_closed(st) and role_of(st) == role]
+        lines = [[list(p) for p in st["pts"]] for st in strokes if plain_line(st) and role_of(st) == role]
         others += [dict({"kind": "poly", "pts": pts}, **({"role": role} if role else {})) for pts in join_paths(lines)]
     return others
 
@@ -498,14 +530,15 @@ def refit(sh):
 
 
 def stroke_ends(strokes):
-    """Points other strokes can join onto: every polyline point, the ends of curves and arcs."""
+    """Points other strokes can join onto: every polyline point, the ends of curves and arcs (with a formula: the
+    ends it has then, as seen)."""
     out = []
     for st in strokes:
-        if st["kind"] == "poly":
-            out += st["pts"]
-        elif st["kind"] == "curve" and has_formula(st):
+        if st["kind"] != "ellipse" and has_formula(st) and not st.get("sides"):  # (a polygon's corners stay)
             path = stroke_points(st)
             out += [list(path[0]), list(path[-1])]
+        elif st["kind"] == "poly":
+            out += st["pts"]
         elif st["kind"] in ("curve", "arc"):
             out += [st["pts"][0], st["pts"][-1]]
     return out
