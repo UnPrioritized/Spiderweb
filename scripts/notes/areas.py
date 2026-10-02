@@ -269,11 +269,16 @@ def landed(lines, reach):
     end = st + n[pl[vi]] - 1
     shut = closed[pl[vi]]
     keep = dist > 1e-9  # (not one already on it)
+    off = (pp[vi] - at) / np.maximum(dist, 1e-12)[:, None]  # (which way is away from that line)
     for nb in (np.where(vi > st, vi - 1, np.where(shut, end, -1)), np.where(vi < end, vi + 1, np.where(shut, st, -1))):
         want = nb * nl + line
         j = np.minimum(np.searchsorted(pair, want), len(pair) - 1)
-        near = np.hypot(*(pp[vi] - pp[np.maximum(nb, 0)]).T) <= 1  # (a far one is a different place)
+        step = pp[np.maximum(nb, 0)] - pp[vi]
+        near = np.hypot(*step.T) <= 1  # (a far one is a different place)
         keep &= ~((nb >= 0) & near & (pair[j] == want) & (dist[j] < dist))
+        # nor where a step towards the next point comes nearer still (the thin tip where two lines meet: cut into
+        # slices, each its own colour, user)
+        keep &= ~((nb >= 0) & ((step * off).sum(1) < -1e-6 * np.hypot(*step.T)))
     if not keep.any():
         return lines
     first = np.concatenate([p[:m] for p, m in zip(lines, n)])  # (the points as they are, so the links start on them)
