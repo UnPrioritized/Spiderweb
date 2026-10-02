@@ -19,6 +19,8 @@ from roll.roll_shared import SLOT_COLORS
 from notes.pattern import has_formula, moved_formulas
 from files.about import HERE
 from files.safefile import write_text
+from files.clipboard import get_text, put_text
+from files.share import CHAT_LIMIT, ShareError, drawing_line, read_drawing, unpack
 from roll.roll_shared import mouse_trail, shown_points
 from window.help import open_help
 from window.formula_host import DrawerHost, formula_menu
@@ -433,6 +435,14 @@ class Drawer(tk.Toplevel):
         btns.pack(fill="x", pady=(4, 0))
         ttk.Button(btns, text=tr("drawer.save"), command=self.save).pack(side="left")
         ttk.Button(btns, text=tr("drawer.use_on_the_piano_roll"), command=self.use).pack(side="right")
+        btns = ttk.Frame(box)
+        btns.pack(fill="x", pady=(4, 0))
+        b = ttk.Button(btns, text=tr("drawer.export"), command=self.export)
+        b.pack(side="left")
+        Tooltip(b, tr("drawer.export_tip"))
+        b = ttk.Button(btns, text=tr("drawer.import"), command=self.import_shared)
+        b.pack(side="left", padx=4)
+        Tooltip(b, tr("drawer.import_tip"))
         self.pos_label = ttk.Label(side, text="", foreground="#555", font=("Segoe UI", 9))
         self.pos_label.pack(fill="x", pady=(8, 0))
         self.state_label = ttk.Label(side, text="", wraplength=int(285 * self.scale), justify="left")
@@ -1291,6 +1301,54 @@ class Drawer(tk.Toplevel):
         self.refresh_list(select=name)
         self.redraw()
         return name
+
+    def export(self):
+        """The whole drawing (with the name box's name) on the clipboard as a shared line (share.py)."""
+        name = clean_name(self.name.get())
+        if not self.strokes:
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.draw_something_first"), parent=self)
+            return
+        if not name:
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.give_the_shape_a_name_first"), parent=self)
+            return
+        line = drawing_line(name, self.strokes, self.areas)
+        if not put_text(line):
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.clipboard_busy"), parent=self)
+            return
+        self.app.remember_clip()  # (so Ctrl+V on the piano roll doesn't take it for new shapes)
+        messagebox.showinfo(tr("drawer.spiderweb"), tr("drawer.exported", name=name) +
+                            (tr("drawer.exported_long", chars=len(line)) if len(line) > CHAT_LIMIT else ""),
+                            parent=self)
+
+    def import_shared(self):
+        """A drawing shared as text -> a new shape in the library (a taken name gets " (2)", " (3)", ...).
+        The drawing being drawn isn't touched."""
+        text = get_text()
+        if text is None:
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.clipboard_busy"), parent=self)
+            return
+        try:
+            got = unpack(text)
+            if got["kind"] != "drawing":
+                messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.import_shapes"), parent=self)
+                return
+            old, strokes, areas = read_drawing(got)
+        except ShareError as e:
+            messagebox.showerror(tr("drawer.spiderweb"), tr(f"drawer.import_{e.why}"), parent=self)
+            return
+        old = clean_name(old) or tr("drawer.imported_shape")
+        taken = {n.lower() for n in library_names()}
+        name, k = old, 2
+        while name.lower() in taken:
+            name, k = f"{old} ({k})", k + 1
+        try:
+            save_shape(name, strokes, areas)
+        except OSError as e:
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_save", e=e), parent=self)
+            return
+        self.refresh_list(select=name)
+        messagebox.showinfo(tr("drawer.spiderweb"), tr("drawer.imported", name=name) if name == old else
+                            tr("drawer.imported_as", name=name, old=old), parent=self)
 
     def use(self):
         same = self.saved_name and clean_name(self.name.get()) == self.saved_name and not self.dirty
