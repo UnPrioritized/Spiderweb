@@ -198,19 +198,16 @@ class Faces:
             out[r] = self.lab[self.off[k] + left]
         return out
 
-    def samples(self):
-        """One spot inside each area but the outside (the middle of its biggest piece): x, y, area arrays."""
+    def pieces(self):
+        """Every piece of every area but the outside: its middle x, y, its size, its area (arrays)."""
         if self.depth is None:
-            return np.zeros(0), np.zeros(0), np.zeros(0, np.int64)
+            return np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0, np.int64)
         lv, e, sl = self.levels, self.edge, self.slab
         ym = (lv[sl] + lv[sl + 1]) / 2
         xm = self._x(e, ym)  # (in order across each slab)
         i = np.flatnonzero(sl[1:] == sl[:-1])  # (the pieces between two lines)
         piece = self.off[sl[i]] + (i - self.start[sl[i]]) + 1
-        x, y = (xm[i] + xm[i + 1]) / 2, ym[i]
         size = (xm[i + 1] - xm[i]) * (lv[sl[i] + 1] - lv[sl[i]])
         g = self.lab[piece]
-        o = np.lexsort((-size, g))
-        first = o[np.r_[True, g[o][1:] != g[o][:-1]]] if len(o) else o
-        first = first[g[first] != self.lab[self.out]]
-        return x[first], y[first], g[first]
+        keep = g != self.lab[self.out]
+        return (xm[i] + xm[i + 1])[keep] / 2, ym[i][keep], size[keep], g[keep]

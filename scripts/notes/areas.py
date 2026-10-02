@@ -15,7 +15,8 @@ from notes.faces import faces
 
 MAP_CELLS = 1024
 COLOURS = 15
-REACH = 3  # cells: a fill line's loose ends go this much further, so one ending right on a line still splits
+REACH = 3  # cells: a fill line's loose ends go this much further, so one ending right on a line still splits (and
+# for drawing the areas exact, a point this near a line is joined to it, see landed)
 _maps = {}
 
 
@@ -59,6 +60,8 @@ class AreaMap:
         self.k = n / np.maximum(hi - lo, 1e-9)  # cells per u, per v
         self.lo = lo - (REACH + 2) / self.k
         self.w = self.h = n + 2 * (REACH + 2) + 1
+        self.lines = landed([p for p in paths + cut_paths if len(p) >= 2], REACH / self.k)
+        self._exact = None
         for i, p in enumerate(cut_paths):  # loose ends reach a little further
             if len(p) >= 2 and math.dist(p[0], p[-1]) > 1e-9:
                 c = (p - self.lo) * self.k
@@ -86,19 +89,33 @@ class AreaMap:
                 c = np.floor((p[0] - self.lo) * self.k).astype(np.int64)
                 wall[min(max(c[1], 0), self.h - 1), min(max(c[0], 0), self.w - 1)] = True
         self.labels, self.count, self.spots = self._label(~wall)
-        self.lines = [p for p in paths + cut_paths if len(p) >= 2]
-        self._exact = None
 
     def exact(self):
         """The same areas found exactly on the lines, for drawing them smooth (the cells only say which area is
-        which): (faces.Faces of the lines, each of its areas' number here, a spot inside each: x, y, its area)."""
+        which): (faces.Faces of the lines, each of its areas' number here, a spot inside each: x, y, its area).
+        Each one takes the number most of it is in (by its pieces' middles; one spot right by a line may be in
+        the cells' next area)."""
         if self._exact is None:
             fc = faces(self.lines)
-            x, y, g = fc.samples()
+            x, y, size, g = fc.pieces()
             lab = np.full(len(fc.lab), self.outside(), np.int64)
-            got = self.at(x, y)
-            lab[g] = np.where(got >= 0, got, self.outside())
-            self._exact = (fc, lab, x, y, g)
+            c = self.cell(x, y).astype(np.int64)
+            ok = c >= 0
+            pair, at = np.unique(g[ok] * (self.count + 1) + c[ok], return_inverse=True)
+            w = np.bincount(at.ravel(), size[ok], len(pair))
+            pg, pc = pair // (self.count + 1), pair % (self.count + 1)
+            o = np.lexsort((-w, pg))
+            o = o[np.r_[True, pg[o][1:] != pg[o][:-1]]] if len(o) else o
+            lab[pg[o]] = pc[o]
+            o = np.lexsort((-size, g))  # (only on walls: as the biggest piece's spot says)
+            big = o[np.r_[True, g[o][1:] != g[o][:-1]]] if len(o) else o
+            lost = big[np.isin(g[big], pg, invert=True)]
+            got = self.at(x[lost], y[lost])
+            lab[g[lost]] = np.where(got >= 0, got, self.outside())
+            # a spot in each: its biggest piece the cells say is in its area
+            o = np.lexsort((-size, lab[g] != c, g))
+            spot = o[np.r_[True, g[o][1:] != g[o][:-1]]] if len(o) else o
+            self._exact = (fc, lab, x[spot], y[spot], g[spot])
         return self._exact
 
     def fine_at(self, u, v):
@@ -179,6 +196,73 @@ class AreaMap:
     def outside(self):
         """The area around the drawing (touching the map's edge)."""
         return int(self.labels[0, 0])
+
+
+def landed(lines, reach):
+    """The lines ((u, v) arrays) plus a short line from every point that sits just off another line (at most reach
+    away: u, v) to the nearest spot on it, so the exact areas are cut where the cells cut them (two lines passing
+    within a hair of each other, or a line ending just short of one, let two exact areas run together, user). Two
+    lines that come that close without crossing are nearest at a point of one of them, so the points are enough.
+    Points are rounded to a millionth of reach first (a line ending at 0.02 on a corner at 0.020000000000000018 left
+    a sliver between them that joined the areas on both sides)."""
+    k = 1 / np.asarray(reach, float)  # (counted in reaches)
+    lines = [np.round(p * k * 1e6) / (k * 1e6) for p in lines if len(p) >= 2]
+    if not lines:
+        return lines
+    pts = [p * k for p in lines]
+    along = [np.concatenate([[0], np.cumsum(np.hypot(*np.diff(p, axis=0).T))]) for p in pts]
+    closed = np.array([math.dist(p[0], p[-1]) <= 1e-12 for p in lines])
+    total = np.array([a[-1] for a in along])
+    # the points (a closed line's last one is its first), and the segments with where along their line they lie
+    n = np.array([len(p) - c for p, c in zip(pts, closed)])
+    pl, pa = np.repeat(np.arange(len(pts)), n), np.concatenate([a[:m] for a, m in zip(along, n)])
+    pp = np.concatenate([p[:m] for p, m in zip(pts, n)])
+    seg = np.concatenate([np.column_stack([p[:-1], p[1:]]) for p in pts])
+    sl = np.repeat(np.arange(len(pts)), [len(p) - 1 for p in pts])
+    s0, s1 = np.concatenate([a[:-1] for a in along]), np.concatenate([a[1:] for a in along])
+    # each segment in the squares (2 reaches wide) it passes; a spot within 1 of a point is in the 3 x 3 round it
+    a, b = seg[:, :2], seg[:, 2:]
+    m = np.ceil(np.abs(b - a).max(1) * 2).astype(np.int64) + 1  # (steps of half a reach or less)
+    si = np.repeat(np.arange(len(seg)), m)
+    t = (np.arange(int(m.sum())) - np.repeat(np.cumsum(m) - m, m)) / np.repeat(np.maximum(m - 1, 1), m)
+    sq = np.floor((a[si] + (b[si] - a[si]) * t[:, None]) / 2).astype(np.int64)
+    sq0 = sq.min(0) - 1
+    wide = int(sq[:, 1].max() - sq0[1]) + 2
+    pair = np.unique(((sq[:, 0] - sq0[0]) * wide + sq[:, 1] - sq0[1]) * len(seg) + si)
+    key, sid = pair // len(seg), pair % len(seg)
+    pq = np.floor(pp / 2).astype(np.int64) - sq0
+    vi, vs = [], []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            want = (pq[:, 0] + dx) * wide + pq[:, 1] + dy
+            lo, hi = np.searchsorted(key, want, "left"), np.searchsorted(key, want, "right")
+            cnt = hi - lo
+            vi.append(np.repeat(np.arange(len(pp)), cnt))
+            vs.append(sid[np.repeat(lo, cnt) + np.arange(int(cnt.sum())) - np.repeat(np.cumsum(cnt) - cnt, cnt)])
+    vi, vs = np.concatenate(vi), np.concatenate(vs)
+    # not its own line right by the point (along it, round a closed one)
+    own = sl[vs] == pl[vi]
+    x, lo_, hi_, tot = pa[vi], s0[vs], s1[vs], total[pl[vi]]
+    gap = np.maximum(0, np.maximum(lo_ - x, x - hi_))
+    for shift in (tot, -tot):
+        gap = np.where(closed[pl[vi]], np.minimum(gap, np.maximum(0, np.maximum(lo_ - x - shift, x + shift - hi_))),
+                       gap)
+    keep = ~own | (gap >= 2)
+    vi, vs = vi[keep], vs[keep]
+    a, d, q = seg[vs, :2], seg[vs, 2:] - seg[vs, :2], pp[vi]
+    ll = (d * d).sum(1)
+    t = np.clip(((q - a) * d).sum(1) / np.where(ll == 0, 1, ll), 0, 1)
+    at = a + t[:, None] * d
+    dist = np.hypot(*(q - at).T)
+    keep = (dist > 1e-9) & (dist <= 1)
+    vi, at, dist, line = vi[keep], at[keep], dist[keep], sl[vs[keep]]
+    o = np.lexsort((dist, line, vi))  # (the nearest spot on each line near a point)
+    o = o[np.r_[True, (vi[o][1:] != vi[o][:-1]) | (line[o][1:] != line[o][:-1])]] if len(o) else o
+    if not len(o):
+        return lines
+    first = np.concatenate([p[:m] for p, m in zip(lines, n)])  # (the points as they are, so the links start on them)
+    link = np.unique(np.column_stack([first[vi[o]], at[o] / k]), axis=0)
+    return lines + [r.reshape(2, 2) for r in link]
 
 
 def inside_loops(u, v, loops, union=False):
