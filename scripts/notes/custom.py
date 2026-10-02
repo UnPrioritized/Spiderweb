@@ -1290,9 +1290,9 @@ def row_pieces(edges, q, walled, colour):
     return out
 
 
-def colour_at(notes, spans, colours):
+def colour_at(notes, spans, colours, inside=False):
     """For each (start, end, key) note, the colour of the (start, end, key) stretch on its key holding its middle
-    (none does: the nearest one before it, else 0)."""
+    (none does: the nearest one before it, else 0; inside: 0)."""
     if not len(notes) or not len(spans):
         return np.zeros(len(notes), np.int64)
     order = np.lexsort((spans[:, 0], spans[:, 2]))
@@ -1301,6 +1301,8 @@ def colour_at(notes, spans, colours):
     mid = (notes[:, 0] + notes[:, 1]) // 2
     i = np.searchsorted(sp[:, 2] * big + sp[:, 0], notes[:, 2] * big + mid, "right") - 1
     ok = (i >= 0) & (sp[np.maximum(i, 0), 2] == notes[:, 2])
+    if inside:
+        ok &= sp[np.maximum(i, 0), 1] > mid
     return np.where(ok, col[np.maximum(i, 0)], 0).astype(np.int64)
 
 
@@ -1796,6 +1798,12 @@ def _notes_groups(sh, ppq):
     else:
         spans = rows = np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]  # (start, end, key)
     flat = flat_notes(sh, ppq)  # (like Outline spam in Spam)
+    # (with coloured areas the colour filled where each is, so they blend in as without colours; not the shape's
+    # own colour all along the line, showing between two colours like an outline, user)
+
+    def flat_area(n):
+        return colour_at(n, spans, area, inside=True)
+
     # outline-only strokes: over what's filled, the outline's with "Outline"; their colours (colour_of) are the same
     # numbers as the areas'
     lines, lc = edge_lines(sh, ppq)
@@ -1817,15 +1825,16 @@ def _notes_groups(sh, ppq):
                 ids = np.ones(len(inside), np.int64)
             else:  # (each colour's own stretches; 1 = the shape's own colour, 1 + k = colour k)
                 parts = [(cut_out(spans[area == k], outline), 1 + k) for k in np.unique(area).tolist()]
-                parts.append((cut_out(flat, outline), 1))
-                inside = np.concatenate([p for p, _ in parts])
-                ids = np.concatenate([np.full(len(p), k, np.int64) for p, k in parts])
+                fl = cut_out(flat, outline)
+                inside = np.concatenate([p for p, _ in parts] + [fl])
+                ids = np.concatenate([np.full(len(p), k, np.int64) for p, k in parts] + [1 + flat_area(fl)])
             return (np.concatenate([outline, lines, inside]),
                     np.concatenate([zeros(len(outline), np.int64), np.where(lc > 0, 1 + lc, 0), ids]))
         if not coloured:
             return np.concatenate([notes, lines]), None
         own = zeros(len(spans), np.int64) if area is None else area
-        return np.concatenate([notes, lines]), np.concatenate([own, zeros(len(flat), np.int64), lc])
+        return np.concatenate([notes, lines]), np.concatenate([own, zeros(len(flat), np.int64) if area is None
+                                                               else flat_area(flat), lc])
     gate = spam_gate(sh, ppq)
     # with coloured areas the whole filled stretch is chopped as one (like without them: no gaps where colours
     # meet), then each note takes the colour where its middle is
@@ -1833,7 +1842,7 @@ def _notes_groups(sh, ppq):
     notes = np.concatenate([main, chop_outline(sh, flat, ppq)])
     ids = None
     if area is not None:
-        ids = np.concatenate([colour_at(main, spans, area), np.zeros(len(notes) - len(main), np.int64)])
+        ids = np.concatenate([colour_at(main, spans, area), flat_area(notes[len(main):])])
     lc = np.repeat(lc, chop(sh, lines, gate, count=True)) if len(lines) else lc
     lines = chop_outline(sh, lines, ppq)
     if apart:  # the same spam; the notes on the edge of what's filled are the outline's
