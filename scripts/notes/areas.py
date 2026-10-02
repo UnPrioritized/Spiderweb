@@ -254,14 +254,30 @@ def landed(lines, reach):
     t = np.clip(((q - a) * d).sum(1) / np.where(ll == 0, 1, ll), 0, 1)
     at = a + t[:, None] * d
     dist = np.hypot(*(q - at).T)
-    keep = (dist > 1e-9) & (dist <= 1)
+    keep = dist <= 1
     vi, at, dist, line = vi[keep], at[keep], dist[keep], sl[vs[keep]]
     o = np.lexsort((dist, line, vi))  # (the nearest spot on each line near a point)
     o = o[np.r_[True, (vi[o][1:] != vi[o][:-1]) | (line[o][1:] != line[o][:-1])]] if len(o) else o
     if not len(o):
         return lines
+    vi, at, dist, line = vi[o], at[o], dist[o], line[o]
+    # only where the lines come closest: a point nearer that line than the points either side of it (joining every
+    # point along a stretch where two lines run close cut slivers off the areas there, coloured wrong, user)
+    nl = len(lines)
+    pair = vi * nl + line  # (in order)
+    st = np.concatenate([[0], np.cumsum(n)])[pl[vi]]
+    end = st + n[pl[vi]] - 1
+    shut = closed[pl[vi]]
+    keep = dist > 1e-9  # (not one already on it)
+    for nb in (np.where(vi > st, vi - 1, np.where(shut, end, -1)), np.where(vi < end, vi + 1, np.where(shut, st, -1))):
+        want = nb * nl + line
+        j = np.minimum(np.searchsorted(pair, want), len(pair) - 1)
+        near = np.hypot(*(pp[vi] - pp[np.maximum(nb, 0)]).T) <= 1  # (a far one is a different place)
+        keep &= ~((nb >= 0) & near & (pair[j] == want) & (dist[j] < dist))
+    if not keep.any():
+        return lines
     first = np.concatenate([p[:m] for p, m in zip(lines, n)])  # (the points as they are, so the links start on them)
-    link = np.unique(np.column_stack([first[vi[o]], at[o] / k]), axis=0)
+    link = np.unique(np.column_stack([first[vi[keep]], at[keep] / k]), axis=0)
     return lines + [r.reshape(2, 2) for r in link]
 
 
