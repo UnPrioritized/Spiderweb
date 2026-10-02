@@ -423,12 +423,15 @@ def fill_plan(sh):
     seg = np.concatenate([np.column_stack([p[:-1], p[1:]]) for p in lines if len(p) > 1] or [np.zeros((0, 4))])
     first = np.cumsum([0] + [max(len(p) - 1, 0) for p in lines])
     scale = (1 / TOUCH_BEATS, 1 / TOUCH_KEYS)
+    reach = np.array([TOUCH_BEATS, TOUCH_KEYS]) * (1 + 1e-9)  # (only segments whose box is this near can count)
+    lox, loy = (np.minimum(seg[:, :2], seg[:, 2:]) - reach).T
+    hix, hiy = (np.maximum(seg[:, :2], seg[:, 2:]) + reach).T
     flat, attached, n_closed = [], [], len(polys)
     for i, path in enumerate(opens):
         k = n_closed + i
         ends = []
         for end, own in ((path[0], first[k]), (path[-1], first[k + 1] - 1)):  # (not the segment it ends)
-            keep = np.ones(len(seg), bool)
+            keep = (lox <= end[0]) & (hix >= end[0]) & (loy <= end[1]) & (hiy >= end[1])
             if first[k + 1] > first[k]:
                 keep[own] = False
             ends.append(nearest_on(end, seg[keep], scale))
@@ -844,8 +847,7 @@ def shape_faces(sh):
     closers = [uv_points(sh["pts"], c) for c in plan["closers"]]
     if any(c is None for c in closers) or uv_points(sh["pts"], [[0, 0]]) is None:
         return None
-    key = (json.dumps(sh["strokes"]), json.dumps([np.round(c, 6).tolist() for c in closers]))
-    return faces([uv_points(sh["pts"], p) for p in walls(sh)], key)
+    return faces([uv_points(sh["pts"], p) for p in walls(sh)])
 
 
 def spot_area(amap, u, v):
@@ -995,10 +997,15 @@ def area_state(sh, amap):
 
 def areas_filled(sh, amap):
     """Which areas of AreaMap amap Fill / Spam fill as normal (nothing coloured)."""
+    return filled_spots(sh, amap.spots[:, 0], amap.spots[:, 1])
+
+
+def filled_spots(sh, u, v):
+    """Which spots (u, v arrays, in the shape's box) Fill / Spam fill as normal (nothing coloured)."""
     if fill_test(sh):
-        return filled_uv(sh, amap.spots[:, 0], amap.spots[:, 1])
+        return filled_uv(sh, u, v)
     loops = [uv_points(sh["pts"], p) for p in fill_plan(sh)["polys"]]
-    return inside_loops(amap.spots[:, 0], amap.spots[:, 1], loops)
+    return inside_loops(u, v, loops)
 
 
 def area_lines(sh):

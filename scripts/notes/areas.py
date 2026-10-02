@@ -4,11 +4,14 @@ left empty: sh["areas"] = [[u, v, colour]], a spot in the drawing's box (like th
 with them) and what the area there gets: 0 = empty, 1 .. COLOURS = that colour.
 
 Areas are found on a grid of MAP_CELLS x MAP_CELLS cells over the drawing: a sliver thinner than a cell may take
-its neighbour's colour. Which notes are filled when nothing is coloured stays exact (custom.row_pieces)."""
+its neighbour's colour. Which notes are filled when nothing is coloured stays exact (custom.row_pieces). The drawer
+draws them exact on the lines (AreaMap.exact: faces.py, each face given the cells' area number)."""
 
 import math
 
 import numpy as np
+
+from notes.faces import faces
 
 MAP_CELLS = 1024
 COLOURS = 15
@@ -83,6 +86,25 @@ class AreaMap:
                 c = np.floor((p[0] - self.lo) * self.k).astype(np.int64)
                 wall[min(max(c[1], 0), self.h - 1), min(max(c[0], 0), self.w - 1)] = True
         self.labels, self.count, self.spots = self._label(~wall)
+        self.lines = [p for p in paths + cut_paths if len(p) >= 2]
+        self._exact = None
+
+    def exact(self):
+        """The same areas found exactly on the lines, for drawing them smooth (the cells only say which area is
+        which): (faces.Faces of the lines, each of its areas' number here, a spot inside each: x, y, its area)."""
+        if self._exact is None:
+            fc = faces(self.lines)
+            x, y, g = fc.samples()
+            lab = np.full(len(fc.lab), self.outside(), np.int64)
+            got = self.at(x, y)
+            lab[g] = np.where(got >= 0, got, self.outside())
+            self._exact = (fc, lab, x, y, g)
+        return self._exact
+
+    def fine_at(self, u, v):
+        """The area number at each spot (u, v arrays), exact on the lines."""
+        fc, lab = self.exact()[:2]
+        return lab[fc.area_at(u, v)]
 
     def _label(self, free):
         """Every free cell's area number (walls: -1), how many areas, and one spot (u, v) inside each."""

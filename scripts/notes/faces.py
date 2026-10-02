@@ -8,20 +8,23 @@ crossing, each slab into pieces between the lines that run through it (no two cr
 touch across a slab's edge (not where a level line lies) are one area; two pieces side by side are one line
 apart. A spot is looked up by its slab and how many lines lie left of it."""
 
+import hashlib
+
 import numpy as np
 
 _cache = {}
 
 
-def faces(paths, key=None):
-    """Faces of these lines ((x, y) point lists), remembered by key."""
-    got = _cache.get(key) if key is not None else None
+def faces(paths):
+    """Faces of these lines ((x, y) point lists), remembered (the same lines from two places: made once)."""
+    parts = [np.ascontiguousarray(p, float).reshape(-1, 2) for p in paths]
+    key = hashlib.sha1(b"|".join(p.tobytes() for p in parts)).digest()
+    got = _cache.get(key)
     if got is None:
-        got = Faces(paths)
-        if key is not None:
-            if len(_cache) > 50:
-                _cache.clear()
-            _cache[key] = got
+        got = Faces(parts)
+        if len(_cache) > 50:
+            _cache.clear()
+        _cache[key] = got
     return got
 
 
@@ -67,7 +70,7 @@ class Faces:
         hy, hx0, hx1 = h[:, 1], np.minimum(h[:, 0], h[:, 2]), np.maximum(h[:, 0], h[:, 2])
         self.levels = np.unique(np.concatenate([self.y0, self.y1, hy]))
         if len(self.levels) < 2:
-            self.depth = None
+            self.depth, self.lab, self.out = None, np.zeros(1, np.int64), 0
             return
         size = max(np.ptp(seg[:, [0, 2]]), np.ptp(seg[:, [1, 3]]), 1e-12)
         eps = self.eps = size * 1e-9
@@ -95,7 +98,7 @@ class Faces:
         self.start = np.concatenate([[0], np.cumsum(count)])  # (each slab's lines: edge[start[s]:start[s + 1]])
         off = np.concatenate([[0], np.cumsum(count + 1)])  # (each slab's pieces: off[s] .. off[s] + count[s])
         self.off = off
-        out = int(off[-1])  # (the area around the drawing)
+        out = self.out = int(off[-1])  # (the area around the drawing)
         n = out + 1
         rank = np.arange(len(e)) - self.start[sl]
         ends = np.concatenate([off[:-1], off[:-1] + count])  # (each slab's leftmost and rightmost piece: outside)
@@ -158,8 +161,14 @@ class Faces:
 
     def depth_at(self, x, y):
         """How many lines each spot (x, y arrays) is in from outside (0 = outside)."""
+        if self.depth is None:
+            return np.zeros(np.size(x), np.int64)
+        return self.depth[self.area_at(x, y)]
+
+    def area_at(self, x, y):
+        """The area each spot (x, y arrays) is in (its number in self.lab; the outside: self.lab[self.out])."""
         x, y = np.asarray(x, float).ravel(), np.asarray(y, float).ravel()
-        out = np.zeros(len(x), np.int64)
+        out = np.full(len(x), self.lab[self.out], np.int64)
         if self.depth is None or not len(x):
             return out
         s = np.searchsorted(self.levels, y, "right") - 1
@@ -171,5 +180,37 @@ class Faces:
                 left = (self._x(e[None, :], y[q, None]) < x[q, None]).sum(1)
             else:
                 left = np.zeros(len(q), np.int64)
-            out[q] = self.depth[self.lab[self.off[k] + left]]
+            out[q] = self.lab[self.off[k] + left]
         return out
+
+    def area_grid(self, x, y):
+        """area_at for every spot of the grid x (columns) by y (rows): (len(y), len(x)), a row at a time (quick
+        for a picture of them)."""
+        x, y = np.asarray(x, float).ravel(), np.asarray(y, float).ravel()
+        out = np.full((len(y), len(x)), self.lab[self.out], np.int64)
+        if self.depth is None:
+            return out
+        s = np.searchsorted(self.levels, y, "right") - 1
+        for r in np.flatnonzero((s >= 0) & (s < len(self.levels) - 1)).tolist():
+            k = int(s[r])
+            e = self.edge[self.start[k]:self.start[k + 1]]
+            left = np.searchsorted(np.sort(self._x(e, y[r])), x, "left") if len(e) else 0
+            out[r] = self.lab[self.off[k] + left]
+        return out
+
+    def samples(self):
+        """One spot inside each area but the outside (the middle of its biggest piece): x, y, area arrays."""
+        if self.depth is None:
+            return np.zeros(0), np.zeros(0), np.zeros(0, np.int64)
+        lv, e, sl = self.levels, self.edge, self.slab
+        ym = (lv[sl] + lv[sl + 1]) / 2
+        xm = self._x(e, ym)  # (in order across each slab)
+        i = np.flatnonzero(sl[1:] == sl[:-1])  # (the pieces between two lines)
+        piece = self.off[sl[i]] + (i - self.start[sl[i]]) + 1
+        x, y = (xm[i] + xm[i + 1]) / 2, ym[i]
+        size = (xm[i + 1] - xm[i]) * (lv[sl[i] + 1] - lv[sl[i]])
+        g = self.lab[piece]
+        o = np.lexsort((-size, g))
+        first = o[np.r_[True, g[o][1:] != g[o][:-1]]] if len(o) else o
+        first = first[g[first] != self.lab[self.out]]
+        return x[first], y[first], g[first]

@@ -13,8 +13,8 @@ from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half
 import numpy as np
 
 from notes.areas import COLOURS, clean_areas
-from notes.custom import (ROLES, areas_filled, carry_areas, clean_strokes, colour_of, join_strokes,
-                          open_paths, plain_stroke, role_of, shape_areas, stroke_points, takes_formula)
+from notes.custom import (LAND_SHARE, ROLES, TOUCH_BEATS, TOUCH_KEYS, areas_filled, carry_areas, clean_strokes,
+                          colour_of, filled_spots, join_strokes, open_paths, plain_stroke, role_of, shape_areas, stroke_points, takes_formula)
 from roll.roll_shared import SLOT_COLORS
 from notes.pattern import has_formula, moved_formulas
 from files.about import HERE
@@ -44,8 +44,9 @@ STROKE_COLOR = "#c0392b"  # (a stroke with an outline colour: that colour's dark
 # Areas (areas.py) on the board: what Fill / Spam fill as normal, an area emptied by hand, the outside, the board
 AREA_NORMAL, AREA_EMPTY, OFF_BOARD, BOARD = "#d4d4d4", "#fbe4e4", "#f4f4f4", "#ffffff"
 WARN_COLOR = "#c06000"  # more colours than a shape can have (like the side panel's warning)
-AREA_FRAME = 16  # the drawing's box as a custom shape 16 beats by 16 keys, for finding its areas (gaps close
-# like on the piano roll at that size)
+# The drawing's box as a custom shape, for finding its areas: so big that ends count as touching or landing on a
+# line only as near as the red dots go by (custom.LAND_SHARE; a small box joined ends far apart, user)
+AREA_FRAME = [[0.0, 0.0], [TOUCH_BEATS / LAND_SHARE, 0.0], [0.0, TOUCH_KEYS / LAND_SHARE]]
 
 
 def rgb(color):
@@ -250,16 +251,26 @@ class Drawer(tk.Toplevel):
         """(AreaMap of the drawing in board u, v, which areas Fill / Spam fill as normal), remembered."""
         key = json.dumps(self.strokes)
         if self._area_cache and self._area_cache[0] == key:
-            return self._area_cache[1:]
-        s = AREA_FRAME
-        sh = {"kind": "custom", "strokes": self.strokes, "pts": [[0.0, 0.0], [s, 0.0], [0.0, s]], "fill": "fill"}
+            return self._area_cache[1:3]
+        sh = {"kind": "custom", "strokes": self.strokes, "pts": AREA_FRAME, "fill": "fill"}
         amap = shape_areas(sh) if self.strokes else None
         inside = None
         if amap is not None:
             inside = areas_filled(sh, amap)
-        self._area_cache = (key, amap, inside)
+        self._area_cache = (key, amap, inside, sh)
         self._area_px = None
         return amap, inside
+
+    def face_info(self):
+        """For drawing the areas smooth (AreaMap.exact): (faces, each one's area number, which ones Fill / Spam fill
+        as normal), remembered."""
+        amap, _ = self.area_info()
+        if len(self._area_cache) < 5:
+            fc, lab, x, y, g = amap.exact()
+            filled = np.zeros(len(lab), bool)
+            filled[g] = filled_spots(self._area_cache[3], x, y)
+            self._area_cache += ((fc, lab, filled),)
+        return self._area_cache[4]
 
     def gaps(self):
         """The drawing's open outlines (custom.open_paths), remembered until the strokes change."""
@@ -270,12 +281,25 @@ class Drawer(tk.Toplevel):
 
     def area_at(self, e):
         """The area at the mouse, or None (outside the drawing, or nothing drawn)."""
+        return self.area_spot(e.x, e.y)[0]
+
+    def area_spot(self, x, y):
+        """(The area at canvas spot x, y, exact on the lines; a spot (u, v) in it to keep its colour at), or (None,
+        None) outside the drawing / nothing drawn."""
         amap, _ = self.area_info()
         if amap is None:
-            return None
-        u, v = self.from_screen(e.x, e.y)
-        lab = int(amap.at([u], [v])[0])
-        return None if lab < 0 or lab == amap.outside() else lab
+            return None, None
+        u, v = self.from_screen(x, y)
+        fc, lab, _ = self.face_info()
+        f = int(fc.area_at([u], [v])[0])
+        a = int(lab[f])
+        if a < 0 or a == amap.outside():
+            return None, None
+        if int(amap.at([u], [v])[0]) != a:  # (right by a line, where the cells say the next area: its own spot)
+            _, _, sx, sy, g = amap.exact()
+            i = int(np.flatnonzero(g == f)[0])
+            u, v = float(sx[i]), float(sy[i])
+        return a, (u, v)
 
     def area_paint(self, amap):
         """Each area's colour as given by hand (-1: as normal, 0: empty, k: colour k)."""
@@ -305,9 +329,9 @@ class Drawer(tk.Toplevel):
         """The areas at these canvas spots get the picked colour."""
         picks = {}
         for x, y in spots:
-            lab = self.area_at(SimpleNamespace(x=x, y=y))
+            lab, spot = self.area_spot(x, y)
             if lab is not None and lab not in picks:
-                picks[lab] = self.from_screen(x, y)
+                picks[lab] = spot
         if picks and self.set_areas(picks, self.area_pick, undo=not self.drag[3]):
             self.drag[3] = True
 
@@ -368,36 +392,34 @@ class Drawer(tk.Toplevel):
         """The board with the areas' colours, as a picture of the whole canvas (None: no areas to show)."""
         if not (self.areas or self.tool.get() == "areas"):  # (finding the areas is slow on big drawings)
             return None
-        amap, inside = self.area_info()
+        amap, _ = self.area_info()
         if amap is None:
             return None
+        fc, area, filled = self.face_info()  # (each pixel looked up on the lines themselves: smooth edges)
         view = (cw, ch, self.zoom, tuple(self.center), id(amap))
         if self._area_px is None or self._area_px[0] != view:
             k = self.px()
             u = self.center[0] + (np.arange(cw) + 0.5 - cw / 2) / k
             v = self.center[1] - (np.arange(ch) + 0.5 - ch / 2) / k
-            cx = np.floor((u - amap.lo[0]) * amap.k[0]).astype(np.int64)
-            cy = np.floor((v - amap.lo[1]) * amap.k[1]).astype(np.int64)
-            okx, oky = (cx >= 0) & (cx < amap.w), (cy >= 0) & (cy < amap.h)
-            lab = amap.labels[np.clip(cy, 0, amap.h - 1)[:, None], np.clip(cx, 0, amap.w - 1)[None, :]]
-            lab = np.where(oky[:, None] & okx[None, :], lab, -1)
+            face = fc.area_grid(u, v)
             board = ((u >= 0) & (u <= 1))[None, :] & ((v >= 0) & (v <= 1))[:, None]
-            self._area_px = (view, lab, board)
-        _, lab, board = self._area_px
-        paint = self.area_paint(amap)[:-1]
-        lut = np.zeros((amap.count + 1, 3), np.uint8)  # (the last: walls and off the map = no colour)
-        tint = np.zeros(amap.count + 1, bool)
-        normal = inside & (paint < 0)
-        lut[:-1][normal], tint[:-1][normal] = rgb(AREA_NORMAL), True
-        lut[:-1][paint == 0], tint[:-1][paint == 0] = rgb(AREA_EMPTY), True
+            self._area_px = (view, face, board)
+        _, face, board = self._area_px
+        paint = self.area_paint(amap)[area]  # (each face's)
+        lut = np.zeros((len(area), 3), np.uint8)
+        tint = np.zeros(len(area), bool)
+        normal = filled & (paint < 0)
+        lut[normal], tint[normal] = rgb(AREA_NORMAL), True
+        lut[paint == 0], tint[paint == 0] = rgb(AREA_EMPTY), True
         for c in range(1, COLOURS + 1):
-            lut[:-1][paint == c], tint[:-1][paint == c] = rgb(area_color(c)), True
-        if self.hover is not None and self.hover < amap.count:  # the area under the mouse: darker
-            h = self.hover
-            lut[h] = (lut[h] * 0.75).astype(np.uint8) if tint[h] else rgb("#e8eef8")
+            lut[paint == c], tint[paint == c] = rgb(area_color(c)), True
+        if self.hover is not None:  # the area under the mouse: darker
+            h = area == self.hover
+            lut[h & tint] = (lut[h & tint] * 0.75).astype(np.uint8)
+            lut[h & ~tint] = rgb("#e8eef8")
             tint[h] = True
         img = np.where(board[..., None], np.uint8(rgb(BOARD)), np.uint8(rgb(OFF_BOARD))).astype(np.uint8)
-        img = np.where(tint[lab][..., None], lut[lab], img).astype(np.uint8)
+        img = np.where(tint[face][..., None], lut[face], img).astype(np.uint8)
         if self._area_img is None or (self._area_img.width(), self._area_img.height()) != (cw, ch):
             self._area_img = tk.PhotoImage(master=self, width=cw, height=ch)
         self.tk.call(self._area_img.name, "put", b"P6 %d %d 255\n" % (cw, ch) + img.tobytes(), "-format", "ppm")
@@ -826,7 +848,7 @@ class Drawer(tk.Toplevel):
                 self.strokes[i] = st
             self.boxes = [[u0 + du, v0 + dv, u1 + du, v1 + dv] for u0, v0, u1, v1 in json.loads(boxes)]
         if old and old != json.dumps(self.strokes):
-            frame = [[0.0, 0.0], [AREA_FRAME, 0.0], [0.0, AREA_FRAME]]
+            frame = AREA_FRAME
             self.areas = carry_areas({"strokes": json.loads(old), "pts": frame, "areas": self.areas},
                                      {"strokes": self.strokes, "pts": frame, "areas": self.areas})
         self.redraw()
