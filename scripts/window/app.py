@@ -49,7 +49,7 @@ from files.playback import DEFAULT_DEVICE, MidiOut, Player, devices
 from files.midi_out import PPQ_WARN
 from files.domino_clip import DOMINO_STARTS
 from files.clipboard import get_text, put_text
-from files.share import CHAT_LIMIT, FIND, ShareError, read_shapes, shapes_line, unpack
+from files.share import LONG_LINE,FIND, ShareError, read_shapes, shapes_line, unpack
 from files.project import AUTOSAVE, OUTPUT_DIR, ProjectFiles
 from files.snap import DEFAULT_SNAP, snap_beats
 from roll.roll_shared import cached_path
@@ -983,8 +983,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             msg = tr("app.copied_shape_s_ctrl_v_pastes", n=len(self.clipboard))
             if put_text(line):
                 self.seen_clip = line
-                if len(line) > CHAT_LIMIT:
-                    msg += tr("app.too_long_for_chat", chars=len(line))
+                if len(line) > LONG_LINE:
+                    msg += tr("app.too_long", chars=len(line))
             else:
                 self.remember_clip()
                 msg += tr("app.couldn_t_share")

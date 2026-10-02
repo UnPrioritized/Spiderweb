@@ -20,7 +20,7 @@ from notes.pattern import has_formula, moved_formulas
 from files.about import HERE
 from files.safefile import write_text
 from files.clipboard import get_text, put_text
-from files.share import CHAT_LIMIT, ShareError, drawing_line, read_drawing, unpack
+from files.share import LONG_LINE,ShareError, drawing_line, read_drawing, unpack
 from roll.roll_shared import mouse_trail, shown_points
 from window.help import open_help
 from window.formula_host import DrawerHost, formula_menu
@@ -1317,7 +1317,7 @@ class Drawer(tk.Toplevel):
             return
         self.app.remember_clip()  # (so Ctrl+V on the piano roll doesn't take it for new shapes)
         messagebox.showinfo(tr("drawer.spiderweb"), tr("drawer.exported", name=name) +
-                            (tr("drawer.exported_long", chars=len(line)) if len(line) > CHAT_LIMIT else ""),
+                            (tr("drawer.exported_long", chars=len(line)) if len(line) > LONG_LINE else ""),
                             parent=self)
 
     def import_shared(self):

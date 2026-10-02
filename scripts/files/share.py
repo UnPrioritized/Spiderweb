@@ -1,5 +1,5 @@
-"""Sharing shapes as text: copied shapes (piano roll) or a drawing (drawer) as one line that can be pasted into a
-chat and pasted back into Spiderweb on another PC.
+"""Sharing shapes as text: copied shapes (piano roll) or a drawing (drawer) as one line that can be pasted anywhere
+as text and pasted back into Spiderweb on another PC.
 
 The line is "SPIDERWEB1:" + base64(zlib(JSON)). The 1 is the format's version: a newer one is told apart before
 anything is unpacked. The JSON says what it holds: {"kind": "shapes", "shapes": [...]} (shapes as a project
@@ -21,7 +21,7 @@ from notes.engine import clean_shape
 
 VERSION = 1
 FIND = re.compile(r"SPIDERWEB(\d+):([A-Za-z0-9+/=]*)")
-CHAT_LIMIT = 2000  # characters in one message on common chat apps
+LONG_LINE = 2000  # past this many characters, some places may not take the whole line in one go
 
 
 class ShareError(ValueError):
