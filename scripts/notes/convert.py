@@ -26,14 +26,17 @@ def has_tumours(sh):
 
 def line_strokes(sh, paths):
     """A line kind as strokes in beats / pitch (paths: its engine.cached_strokes, used for tumours: the bumps
-    become points)."""
-    kind = sh["kind"]
-    if (sh.get("shape") or sh.get("pattern")) and not has_tumours(sh):  # its formulas as ordinary curves
-        from notes.pattern import baked  # (pattern.py)
-        sh = dict(sh, **baked(sh), kind="curve")  # (with symmetric halves if it has them)
-        kind = "curve"
+    become points). Its formulas stay on the stroke (user), except on a joined curve (laid across all its pieces:
+    made into ordinary curves)."""
     if has_tumours(sh):
         return [{"kind": "poly", "pts": [list(p) for p in path]} for path in paths]
+    if sh.get("shape") or sh.get("pattern"):
+        if is_joined(sh):
+            from notes.pattern import baked  # (pattern.py)
+            return line_strokes(dict(sh, **baked(sh), kind="curve", shape=None, pattern=None), paths)
+        formulas = {key: json.loads(json.dumps(sh[key])) for key in ("shape", "pattern") if sh.get(key)}
+        return [dict(st, **formulas) for st in line_strokes(dict(sh, shape=None, pattern=None), paths)]
+    kind = sh["kind"]
     if kind == "curve":
         pts, gaps = sh["pts"], sh.get("gaps", [])
         sharp = set(sh.get("sharp", []))
