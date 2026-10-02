@@ -14,6 +14,10 @@ What it can do:
   any length (spam).
 - Add bumps along lines (tumours), shape the velocities, and put
   overlapping shapes on different channels.
+- Hz bass: spam so fast it sounds like a tone, with effects and a
+  preview you can hear right away.
+- Strum and claw machine tools that change the notes of a shape.
+- Share shapes with others as one line of text.
 - Play it as you go, then write a .mid file, or copy the notes straight into
   Domino (and paste notes from Domino).
 
