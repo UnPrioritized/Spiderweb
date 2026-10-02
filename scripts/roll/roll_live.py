@@ -352,6 +352,7 @@ class LiveDrawing:
     def copy_stroke(self, sh, k):
         app = self.app
         app.stroke_clip, app.clip_kind, app.stroke_pastes = stroke_bp(sh, k), "stroke", 0
+        app.remember_clip()
         app.status.config(text=tr("roll_live.copied_the_stroke_ctrl_v_pastes"))
 
     def paste_stroke(self):

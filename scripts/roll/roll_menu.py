@@ -182,7 +182,7 @@ class ShapeMenu:
         item(tr("roll_menu.copy", shapes=shapes), tr("roll_menu.ctrl_c"), lambda: app.copy_selected(whole=True),
              keys=curve_keys and whole)
         item(tr("roll_menu.paste_at_the_play_line"), tr("roll_menu.ctrl_v"), lambda: app.paste(whole=True),
-             bool(app.clipboard),
+             bool(app.clipboard) or app.shared_clip() is not None,
              keys=curve_keys and app.clip_kind != "stroke")
         m.add_separator()
         item(tr("roll_menu.flip_sideways"), tr("roll_menu.ctrl_h"), lambda: app.flip(True, whole=True),

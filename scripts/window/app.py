@@ -48,6 +48,8 @@ from files.about import ICONS, VERSION
 from files.playback import DEFAULT_DEVICE, MidiOut, Player, devices
 from files.midi_out import PPQ_WARN
 from files.domino_clip import DOMINO_STARTS
+from files.clipboard import get_text, put_text
+from files.share import CHAT_LIMIT, FIND, ShareError, read_shapes, shapes_line, unpack
 from files.project import AUTOSAVE, OUTPUT_DIR, ProjectFiles
 from files.snap import DEFAULT_SNAP, snap_beats
 from roll.roll_shared import cached_path
@@ -111,6 +113,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.stroke = None  # the selected custom shape's picked stroke (roll_live.py)
         self.part_main = None  # the highlighted part that was clicked (the others are its linked curves)
         self.clipboard = None
+        self.seen_clip = None  # the Windows clipboard's text at Spiderweb's last copy (shared_clip)
         self.stroke_clip, self.clip_kind, self.stroke_pastes = None, None, 0  # a copied stroke (roll_live.py)
         self.playhead = 0.0  # beat of the play line
         self.out = MidiOut()
@@ -976,11 +979,63 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         if self.sels:
             self.clipboard = copy.deepcopy([self.shapes[i] for i in sorted(self.sels)])
             self.clip_kind = "shapes"
-            self.status.config(text=tr("app.copied_shape_s_ctrl_v_pastes", n=len(self.clipboard)))
+            line = shapes_line(self.clipboard)  # (also on the Windows clipboard as text, to share: share.py)
+            msg = tr("app.copied_shape_s_ctrl_v_pastes", n=len(self.clipboard))
+            if put_text(line):
+                self.seen_clip = line
+                if len(line) > CHAT_LIMIT:
+                    msg += tr("app.too_long_for_chat", chars=len(line))
+            else:
+                self.remember_clip()
+                msg += tr("app.couldn_t_share")
+            self.status.config(text=msg)
+
+    def remember_clip(self):
+        """Spiderweb copied something: what the Windows clipboard holds now is older than that copy."""
+        self.seen_clip = get_text()
+
+    def shared_clip(self, shapes_only=False):
+        """The Windows clipboard's text if it holds a shared line put there after Spiderweb's last copy (so it's
+        what was copied last), else None. shapes_only: only if it's shapes that can be pasted."""
+        text = get_text()
+        if not text or text == self.seen_clip or not FIND.search(text):
+            return None
+        if shapes_only:
+            try:
+                got = unpack(text)
+                if got["kind"] != "shapes":
+                    return None
+                read_shapes(got)
+            except ShareError:
+                return None
+        return text
+
+    def paste_shared(self, text, at=None):
+        """Paste shapes shared as text (share.py), like paste; they become Spiderweb's copied shapes."""
+        try:
+            got = unpack(text)
+            if got["kind"] == "drawing":
+                messagebox.showinfo(tr("app.spiderweb_2"), tr("app.shared_drawing"), parent=self)
+                return
+            shapes = read_shapes(got)
+        except ShareError as e:
+            messagebox.showerror(tr("app.spiderweb_2"), tr("app.shared_newer") if e.why == "newer" else
+                                 tr("app.shared_broken"), parent=self)
+            return
+        if not self.confirm_big(shapes):
+            return
+        self.seen_clip = text
+        self.clipboard, self.clip_kind = shapes, "shapes"
+        self.paste(whole=True, at=at)
+        self.status.config(text=tr("app.pasted_shared", n=len(shapes)))
 
     def paste(self, whole=False, at=None):
         """Paste the copied shapes so they start at the play line (snapped to the grid), or at beat `at` (a Select
-        double-click: the mouse, snapped already). With curves highlighted and a curve copied: its shape onto them."""
+        double-click: the mouse, snapped already). With curves highlighted and a curve copied: its shape onto them.
+        Shapes shared as text, copied after Spiderweb's last copy, come first (paste_shared)."""
+        text = self.shared_clip()
+        if text is not None:
+            return self.paste_shared(text, at)
         if not whole and self.roll.curve_parts() and self.roll.curve_clip:
             return self.roll.paste_curve()
         if not whole and self.clip_kind == "stroke":

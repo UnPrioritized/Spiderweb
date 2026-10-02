@@ -390,6 +390,7 @@ class FunnelEditing:
         if curves:
             k, end = min(curves)
             self.curve_clip = turned_curve(self.app.selected()["starts"][k]["ends"][end], False)
+            self.app.remember_clip()
             self.app.status.config(text=tr("roll_funnel.copied_the_curve_s_shape_highlight"))
 
     def paste_curve(self):
