@@ -1058,6 +1058,8 @@
   "",
   "• New pattern: Curls (right-click a line → Formula → Pattern along the line). The line loops back over itself in little curls; \"curl\" sets how tight they are. In Custom…, the new \"along =\" formula moves a pattern forward or back along the line.",
   "",
+  "• Formulas on more lines: polylines have them now, and so do the strokes of a live shape on the piano roll and the drawer's lines, polylines and arcs (right-click the stroke → Formula). Turn into live shape (Ctrl+L) keeps them.",
+  "",
   "Version 1.3.0",
   "",
   "• Polygon tool (Q), next to Circle, instead of Square and Triangle: pick how many points it has and its kind in the panel (polygon, star, or crossing star). Its sides can have a shape or a pattern (right-click → Formula).",
@@ -1144,7 +1146,9 @@
   "",
   "Selected polyline: drag its squares to move points; middle-click on it adds a point where it fits best.",
   "",
-  "Last note (panel) works at every point: each piece is its own line."
+  "Last note (panel) works at every point: each piece is its own line.",
+  "",
+  "Right-click it: Formula (a shape or a pattern along it, see Formulas)."
  ],
  "help.poly.words": "lines points segments corners",
  "help.free.title": "Freehand (F)",
@@ -1293,13 +1297,13 @@
   "",
   "While it's on, the selected shape's points show (purple squares): drag them with Select. Points in the same spot move together, and a point dropped on another one joins it.",
   "",
-  "Select tool: click a stroke of the selected shape to pick it: Del deletes it, a curve shows its handles, a freehand stroke can be straightened. Ctrl+C / Ctrl+V, Ctrl+H / Ctrl+J and Ctrl+Left / Ctrl+Right copy, paste, flip and turn just that stroke (Esc unpicks it: then they work on the whole shape again). A copied stroke is pasted into the selected custom shape, a grid step later and a key lower each time (nothing selected: into a new shape). Right-click a stroke = its menu, also: save the drawing to the shape library. Its \"This stroke\" part sets the stroke's role and outline colour, like the drawer's (see Drawer: Select and editing)."
+  "Select tool: click a stroke of the selected shape to pick it: Del deletes it, a curve shows its handles, a freehand stroke can be straightened. Ctrl+C / Ctrl+V, Ctrl+H / Ctrl+J and Ctrl+Left / Ctrl+Right copy, paste, flip and turn just that stroke (Esc unpicks it: then they work on the whole shape again). A copied stroke is pasted into the selected custom shape, a grid step later and a key lower each time (nothing selected: into a new shape). Right-click a stroke = its menu, also: Formula for a line, polyline, arc or curve stroke (see Formulas), and save the drawing to the shape library. Its \"This stroke\" part sets the stroke's role and outline colour, like the drawer's (see Drawer: Select and editing)."
  ],
  "help.live.words": "combine join merge strokes outline",
  "help.turn_live.title": "Turn into live shape (Ctrl+L)",
  "help.turn_live.tip": "Select lines, curves, arcs (or custom shapes) and press Ctrl+L: they become one live shape, so they can be filled. Split into separate shapes (Ctrl+Shift+G) gives them back.",
  "help.turn_live.text": [
-  "Lines can't be filled, custom shapes can. Select one or more lines, polylines, freehand strokes, curves or arcs (custom shapes too) and press Ctrl+L, or right-click one → Turn into live shape. They become one live shape (a custom shape) with each of them as a stroke of its own kind: curves stay curves with their anchors, arcs stay arcs, a straightened freehand stroke stays straightened. Then Fill, Spam and Outline spam work (see Inside fill), and its strokes can be edited like any live shape's.",
+  "Lines can't be filled, custom shapes can. Select one or more lines, polylines, freehand strokes, curves or arcs (custom shapes too) and press Ctrl+L, or right-click one → Turn into live shape. They become one live shape (a custom shape) with each of them as a stroke of its own kind: curves stay curves with their anchors, arcs stay arcs, a straightened freehand stroke stays straightened, formulas stay on (a joined curve's become a plain curve). Then Fill, Spam and Outline spam work (see Inside fill), and its strokes can be edited like any live shape's.",
   "[clip:turn_live-fill]",
   "",
   "The notes stay the same, and so do the velocities (where shapes play at the same time, the first selected one's win). With Multi channel each stroke still remembers the shape it came from, so strokes that clash still get channels of their own; the shape list says how many channels a shape uses (orange above 15).",
@@ -1612,9 +1616,9 @@
  ],
  "help.funnel_links.words": "link linked unlink mirror mirrored flipped same shape together follow group ctrl",
  "help.formulas.title": "Formulas: shapes and patterns",
- "help.formulas.tip": "Right-click a curve, line or arc ▸ Formula: give it a shape (Circle, Spiral, Heart…) or a pattern along it (Wave, Zigzag, Square wave, Spikes…). Drawer curves, funnel curves and polygon sides have it too.",
+ "help.formulas.tip": "Right-click a curve, line, polyline or arc ▸ Formula: give it a shape (Circle, Spiral, Heart…) or a pattern along it (Wave, Zigzag, Square wave, Spikes…). Live shape strokes, drawer strokes, funnel curves and polygon sides have it too.",
  "help.formulas.text": [
-  "Right-click a curve ▸ Formula (a Curve tool curve, a line, an arc, a curve stroke in the drawer, or highlighted funnel curves). It has two parts, and a curve can have both at once. (On a line or an arc it works the same way: below, \"curve\" means them too.)",
+  "Right-click a curve ▸ Formula (a Curve tool curve, a line, a polyline, an arc, a stroke of a live shape or of the drawer, or highlighted funnel curves). It has two parts, and a curve can have both at once. (On a line, polyline or arc it works the same way: below, \"curve\" means them too. On a polyline the pattern runs along all of it, round its corners.)",
   "",
   "Shape of the line: the line takes a shape. One that ends where it starts (Circle, Flower, Heart, Figure 8) is as wide as from the curve's start (A) to its end (B) and sits on that line; the others start at A and end at B. They're round as the piano roll looks when you pick them.",
   "[clip:formulas-shapes]",
@@ -1630,7 +1634,9 @@
   "",
   "Your own formula: tick Edit formula. A pattern is y of x for one loop (x goes from 0 to 1, y = how far to the side); a shape is x(t) and y(t), t going from 0 to 1 while it's drawn. Any other name in it (like height) gets its own number box. Works: numbers, + - * / ^ ( ), pi, e, sin cos tan asin acos atan sqrt exp ln log abs min max floor.",
   "",
-  "Remove formula takes them off (the curve you drew is left). Turn into plain curve makes what you see into ordinary anchors and handles (a line or an arc becomes a curve); if its two halves match, it gets Symmetric halves.",
+  "Remove formula takes them off (the curve you drew is left). Turn into plain curve makes what you see into ordinary anchors and handles (a line, polyline or arc becomes a curve); if its two halves match, it gets Symmetric halves.",
+  "",
+  "A stroke of a live shape (or of any placed drawing): right-click the stroke on the piano roll. Its sizes are in keys as the piano roll looks when you pick it, and grow and shrink with the shape after that. The fill follows what you see, and new strokes snap onto the ends you see.",
   "",
   "In the drawer, a pattern's sizes are hundredths of the board, so they grow and shrink with the placed shape. Funnel curves: a shape runs from the curve's start to its wall end inside the funnel (Slow start is x²); linked curves get the same formula; Back to the default curve resets it. Curve formulas saved in older versions (curves.json) are in the Shape list now.",
   "",
@@ -1813,12 +1819,12 @@
  "help.drawer_line.title": "Drawer: Line",
  "help.drawer_line.tip": "Drag from start to end, or click both.",
  "help.drawer_line.text": [
-  "Drag from start to end, or click the start and click the end."
+  "Drag from start to end, or click the start and click the end. Right-click it: Formula (a shape or a pattern along it, see Formulas)."
  ],
  "help.drawer_poly.title": "Drawer: Polyline",
  "help.drawer_poly.tip": "Click points (or drag each piece). Click the first point again to close it.",
  "help.drawer_poly.text": [
-  "Click points, or drag each piece. Click the first point again to close it; double-click or right-click stops."
+  "Click points, or drag each piece. Click the first point again to close it; double-click or right-click stops. Right-click it: Formula (a shape or a pattern along it, see Formulas)."
  ],
  "help.drawer_free.title": "Drawer: Freehand",
  "help.drawer_free.tip": "Drag to draw. Let go near the start to close it.",
@@ -1833,7 +1839,7 @@
  "help.drawer_arc.title": "Drawer: Arc",
  "help.drawer_arc.tip": "Click start, a point it passes through, end. Or drag start to end, then click to bend.",
  "help.drawer_arc.text": [
-  "Click its start, a point it passes through, then its end (or drag from start to end, then click to set the bend): a piece of a perfect circle. End on the start = a whole circle. Select: drag its three points."
+  "Click its start, a point it passes through, then its end (or drag from start to end, then click to set the bend): a piece of a perfect circle. End on the start = a whole circle. Select: drag its three points. Right-click it: Formula (a shape or a pattern along it, see Formulas)."
  ],
  "help.drawer_square.title": "Drawer: Square",
  "help.drawer_square.tip": "Corner to corner. Ctrl = a perfect square.",
