@@ -293,7 +293,7 @@ class HzWindow(tk.Toplevel):
         except tk.TclError:  # (the file can't be read: the built-in one)
             self.pencil = "pencil"
         c.config(cursor="")
-        c.bind("<Configure>", lambda e: self.redraw())
+        c.bind("<Configure>", self.on_resize)
         c.bind("<ButtonPress-1>", self.on_press)
         c.bind("<Double-Button-1>", self.on_double)
         c.bind("<B1-Motion>", self.on_drag)
@@ -419,11 +419,23 @@ class HzWindow(tk.Toplevel):
         self.sync()
 
     def fit_view(self):
-        """The view moved so the notes are in sight (the first time there are any)."""
+        """The view moved so the notes are in sight (the first time there are any). Not before the canvas has its
+        size (just opened): worked out for a 1 pixel canvas, the keys sat high up until the view moved (on_resize)."""
+        h = self.canvas.winfo_height()
+        if h < 50:
+            return
         self.fitted = True
         keys = [n["key"] for n in self.tones]
-        rows = max(1.0, (self.canvas.winfo_height() - self.ruler_h) / self.sy)
+        rows = max(1.0, (h - self.ruler_h) / self.sy)
         self.top = min(127.0, max(rows - 1, (max(keys) + min(keys)) / 2 + rows / 2))
+
+    def on_resize(self, e=None):
+        """The canvas got its size or changed size: the notes in sight the first time, no empty space past the
+        lowest / highest key."""
+        if self.tones and not self.fitted:
+            self.fit_view()
+        self.clamp_view()
+        self.redraw()
 
     # ------------------------------------------------------------ view
 
