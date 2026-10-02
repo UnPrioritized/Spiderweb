@@ -12,7 +12,8 @@ from files.lang import tr
 from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half_at, handle_lines, nearest, pen_handles,
                           set_symmetry)
 from notes.custom import (add_stroke, box_frame, carry_areas, custom_settings, frame_to_bp, frame_to_uv, map_stroke,
-                          new_live_shape, refit, stroke_bp, stroke_ends)
+                          new_live_shape, plain_stroke, refit, stroke_bp, stroke_ends, stroke_points)
+from notes.pattern import has_formula
 from notes.polygon import polygon_aspect, polygon_strokes
 from roll.roll_funnel import seg_dist
 from roll.roll_shared import ALT, PICK, cached_strokes, shown_points
@@ -133,10 +134,21 @@ class LiveDrawing:
 
     # ------------------------------------------------------------ one stroke of a custom shape
 
+    @staticmethod
+    def origin_strokes(sh):
+        """[(stroke number, path in beats / pitch)] of the custom shape's strokes with a formula, as drawn (the faint
+        dashed line under them). Not a polygon's sides (its formula is the polygon's)."""
+        if sh["kind"] != "custom" or sh.get("text") or "notes" in sh:
+            return []
+        to_bp = frame_to_bp(sh["pts"])
+        return [(k, [to_bp(*q) for q in stroke_points(plain_stroke(st))]) for k, st in enumerate(sh["strokes"])
+                if st["kind"] != "ellipse" and not st.get("sides") and has_formula(st)]
+
     def stroke_at(self, sh, x, y, near=PICK):
-        """The number of the custom shape's stroke under (x, y) on screen, or None."""
+        """The number of the custom shape's stroke under (x, y) on screen (its line, or the dashed line as drawn
+        under a formula), or None."""
         best = None
-        for k, path in enumerate(cached_strokes(sh)):
+        for k, path in list(enumerate(cached_strokes(sh))) + self.origin_strokes(sh):
             pts = [(self.t2x(b), self.p2y(p)) for b, p in path]
             d = min((seg_dist(x, y, a, b) for a, b in zip(pts, pts[1:])), default=math.inf)
             if d <= near and (best is None or d < best[0]):
@@ -223,7 +235,13 @@ class LiveDrawing:
         pt = self.event_pt(e)
         best, reach = None, 8 * self.scale  # onto another stroke's point (not one moving along)
         for i, other in enumerate(sh["strokes"]):
-            for n, p in self.stroke_spots(other) if other["kind"] != "ellipse" else ():
+            if other["kind"] == "ellipse":
+                continue
+            if has_formula(other) and not other.get("sides"):  # one with a formula: its ends as seen
+                spots = [] if i == k else [(None, q) for q in stroke_ends([other])]
+            else:
+                spots = self.stroke_spots(other)
+            for n, p in spots:
                 if (i, n) in joined:
                     continue
                 b, q = to_bp(*p)

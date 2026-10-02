@@ -287,8 +287,8 @@ class RollDrawing:
                     and (i in app.sels or app.show_lines.get())):
                 self.draw_path(dict(sh, tumour=None, tumours=None, pattern=None, shape=None),
                                "#e89a9a" if i in app.sels else "#efc0c0", 1, dash=(6, 4))
-            if sh["kind"] == "funnel" and (i in app.sels or app.show_lines.get()):  # its curves' too
-                for path in funnel_origins(sh):
+            if sh["kind"] in ("funnel", "custom") and (i in app.sels or app.show_lines.get()):  # its curves' / strokes'
+                for path in funnel_origins(sh) if sh["kind"] == "funnel" else (p for _, p in self.origin_strokes(sh)):
                     self.create_line(*[v for b, p in path for v in (self.t2x(b), self.p2y(p))], width=1,
                                      fill="#e89a9a" if i in app.sels else "#efc0c0", dash=(6, 4))
         if app.show_lines.get():

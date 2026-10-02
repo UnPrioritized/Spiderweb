@@ -4,7 +4,7 @@ import tkinter as tk
 from types import SimpleNamespace
 
 from files.lang import tr
-from window.formula_host import FunnelHost, PolygonHost, RollHost, formula_menu
+from window.formula_host import FunnelHost, PolygonHost, RollHost, StrokeHost, formula_menu
 from notes.convert import originals
 from notes.custom import ROLES
 from window.drawer import colour_menu
@@ -88,6 +88,8 @@ class ShapeMenu:
                 if sh["strokes"][k]["kind"] == "curve":
                     item(tr("roll_menu.add_anchor_here"), "", lambda: self.stroke_click(sh, at))
                     symmetry_menu(m, sh["strokes"][k].get("sym"), lambda mode: self.stroke_symmetry(sh, mode, at))
+                if StrokeHost(app).targets():  # (a line, polyline, arc or curve; not a polygon's: it has its own)
+                    self.formula_menu(m, StrokeHost(app))
                 item(tr("roll_menu.delete_this_stroke"), tr("roll_menu.del"), lambda: self.delete_stroke(sh, k),
                      keys=True)
                 item(tr("roll_menu.copy_this_stroke"), tr("roll_menu.ctrl_c"), lambda: self.copy_stroke(sh, k),

@@ -395,6 +395,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             strokes = strokes + cached_strokes(dict(sh, tumour=None, tumours=None, pattern=None, shape=None))
         if sh["kind"] == "funnel":
             strokes = strokes + funnel_origins(sh)
+        elif sh["kind"] == "custom":  # (its strokes' under a formula)
+            strokes = strokes + [p for _, p in PianoRoll.origin_strokes(sh)]
         return strokes
 
     def shapes_in_box(self, x0, y0, x1, y1):

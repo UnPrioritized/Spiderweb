@@ -342,6 +342,70 @@ class DrawerHost(FormulaHost):
         self.drawer.changed()
 
 
+# ---------------------------------------------------------------- the picked stroke of a custom shape on the roll
+
+class StrokeHost(FormulaHost):
+    """The picked stroke of the selected custom shape on the piano roll (a live shape's, or any drawing's): a line,
+    polyline, arc or curve. Its formulas live in the shape's box (u, v) like a drawer stroke's, but they're put on as
+    the piano roll looks (a pattern's sizes in keys at the time), and grow with the shape after that. Its box is
+    fitted round the stroke as it looks after each change."""
+
+    def __init__(self, app):
+        self.app = self.parent = app
+
+    def picked(self):
+        got = self.app.picked()
+        return got if got and takes_formula(got[0]["strokes"][got[1]]) and not got[0].get("polygon") else None
+
+    def targets(self):
+        got = self.picked()
+        return [got[0]["strokes"][got[1]]] if got else []
+
+    def fresh(self, holder, layer):
+        """As a curve on the piano roll would get it (round as it looks, sizes in keys), moved into the box."""
+        from notes.custom import frame_to_uv
+        from notes.pattern import moved_formulas
+        roll, got = self.app.roll, self.picked()
+        to_uv = got and frame_to_uv(got[0]["pts"])
+        p = {"k": roll.sy / roll.sx if roll.sx else 0.25, "scale": 1.0, "mirror": False}
+        if to_uv is None:
+            return p
+        holder = {"pattern": p}
+        moved_formulas(holder, to_uv)
+        return {"k": holder["pattern"]["k"], "scale": holder["pattern"]["scale"]}
+
+    def begin(self, name):
+        self.app.push_undo(name=name)
+
+    def changed(self, final=True):
+        from notes.custom import refit
+        got = self.picked()
+        if got:
+            refit(got[0])
+        self.app.shape_edited()
+        if final:
+            self.app.sync_panel()
+
+    def snapshot(self):
+        sh = self.app.selected()
+        return json.dumps(self.app.shapes), sh, copy.deepcopy(sh)
+
+    def restore(self, snap):
+        _, sh, old = snap
+        sh.clear()
+        sh.update(copy.deepcopy(old))
+        self.changed()
+
+    def commit(self, snap, name):
+        self.app.push_undo(snap[0], name)
+        self.app.sync_panel()
+
+    def bake(self, holder):
+        new = baked_stroke(holder, self.sym_modes)  # (a line / polyline / arc becomes a curve)
+        holder.clear()
+        holder.update(new)
+
+
 # ---------------------------------------------------------------- a funnel's curves (in their boxes: funnel.py)
 
 class FunnelHost(FormulaHost):

@@ -524,7 +524,10 @@ def refit(sh):
         return
     to_bp = frame_to_bp(sh["pts"])
     sh["pts"] = [list(to_bp(ul, vl)), list(to_bp(ul + w, vl)), list(to_bp(ul, vl + h))]
-    sh["strokes"] = [map_stroke(st, lambda u, v: ((u - ul) / w, (v - vl) / h), 1 / w, 1 / h) for st in sh["strokes"]]
+    for st in sh["strokes"]:  # (each stroke stays the same dict: a formula window may be holding it)
+        new = map_stroke(st, lambda u, v: ((u - ul) / w, (v - vl) / h), 1 / w, 1 / h)
+        st.clear()
+        st.update(new)
     if sh.get("areas"):
         sh["areas"] = [[(u - ul) / w, (v - vl) / h, c] for u, v, c in sh["areas"]]
 
