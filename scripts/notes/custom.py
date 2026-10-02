@@ -851,19 +851,11 @@ def shape_faces(sh):
 
 
 def spot_area(amap, u, v):
-    """For each row of spots (u, v: (n, m) arrays, spread over one piece), the area most of them are in (every
-    spot on a line: the exact area at the first one; the free cell nearest it was often across the line, e.g. in
-    the thin tip where a curve touches a line, user)."""
-    labs = amap.cell(u.ravel(), v.ravel()).reshape(u.shape)
-    pick = np.full(len(u), -1, np.int64)
-    for i, row in enumerate(labs.tolist()):
-        row = [lab for lab in row if lab >= 0]
-        if row:
-            pick[i] = max(set(row), key=row.count)
-    lost = pick < 0
-    if lost.any():
-        pick[lost] = amap.fine_at(u[lost, 0], v[lost, 0])
-    return pick
+    """For each row of spots (u, v: (n, m) arrays, spread over one piece), the area most of them are in, as the
+    exact areas say (as the drawer shows them: in a tip thinner than the cells, e.g. where a curve touches a line or
+    many lines start at one point, the cells are on lines or in little pockets with no colour, user)."""
+    labs = amap.fine_at(u.ravel(), v.ravel()).reshape(u.shape)
+    return np.asarray([max(set(row), key=row.count) for row in labs.tolist()], np.int64).reshape(-1)
 
 
 def filled_uv(sh, u, v):
@@ -1189,9 +1181,10 @@ def find_area_spans(sh, ppq):
     walled = fill_test(sh)
     out = []
     for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1):
-        for s, e, g in row_pieces(edges, q, walled, colour):
-            s = math.floor(s * ppq + 0.5)
-            out.append((s, max(math.floor(e * ppq + 0.5), s + 1), q, g))
+        row = [(math.floor(s * ppq + 0.5), math.floor(e * ppq + 0.5), g)
+               for s, e, g in row_pieces(edges, q, walled, colour)]
+        some = any(e > s for s, e, _ in row)  # (a bit under a tick, e.g. at a tip: only if the row has nothing else)
+        out += [(s, max(e, s + 1), q, g) for s, e, g in row if e > s or not some]
     return np.asarray(out, np.int64).reshape(-1, 4) if out else none
 
 
