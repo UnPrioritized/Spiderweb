@@ -1179,10 +1179,20 @@ def find_area_spans(sh, ppq):
         return paint[spot_area(amap, uv[:, 0].reshape(x.shape), uv[:, 1].reshape(x.shape))]
 
     walled = fill_test(sh)
+    rows = [(q, row_cut(edges, q)) for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1)]
+    rows = [(q, cut) for q, cut in rows if cut]
+    # (every row's spots asked at once: one row at a time, asking took most of the time)
+    asked = []
+    for i in (1, 2):  # the pieces' spots, the spots on the rows' middle lines
+        x = np.concatenate([cut[i][0] for _, cut in rows]) if rows else np.zeros((0, 3))
+        y = np.concatenate([cut[i][1] for _, cut in rows]) if rows else np.zeros((0, 3))
+        got = (colour(x, y), walled(x, y) if walled else None) if len(x) else (np.zeros(0, np.int64), None)
+        ends = np.cumsum([len(cut[i][0]) for _, cut in rows])[:-1]
+        asked.append([np.split(a, ends) if a is not None else [None] * len(rows) for a in got])
     out = []
-    for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1):
+    for j, (q, cut) in enumerate(rows):
         row = [(math.floor(s * ppq + 0.5), math.floor(e * ppq + 0.5), g)
-               for s, e, g in row_pieces(edges, q, walled, colour)]
+               for s, e, g in row_done(cut, asked[0][0][j], asked[0][1][j], asked[1][0][j], asked[1][1][j])]
         some = any(e > s for s, e, _ in row)  # (a bit under a tick, e.g. at a tip: only if the row has nothing else)
         out += [(s, max(e, s + 1), q, g) for s, e, g in row if e > s or not some]
     return np.asarray(out, np.int64).reshape(-1, 4) if out else none
@@ -1196,13 +1206,25 @@ def row_pieces(edges, q, walled, colour):
     they meet where the line between them crosses the middle of the row's slice; on the outside edge the piece
     reaches as far as the line does in the slice (like row_spans, so with nothing coloured the notes are the
     same)."""
+    cut = row_cut(edges, q)
+    if not cut:
+        return []
+    (xs, ys), (cxs, cys) = cut[1:3]
+    return row_done(cut, colour(xs, ys), walled(xs, ys) if walled else None,
+                    colour(cxs, cys) if len(cxs) else np.zeros(0, np.int64),
+                    walled(cxs, cys) if walled and len(cxs) else None)
+
+
+def row_cut(edges, q):
+    """row_pieces up to its questions: (pieces, (x, y) spots in each piece, (x, y) spots on the row's middle line
+    (centre_spots)), or None when the row has no pieces. The answers go to row_done."""
     lo, hi = q - 0.5, q + 0.5
     xa, ya, xb, yb, lid = edges
     here = np.flatnonzero((np.minimum(ya, yb) < hi) & (np.maximum(ya, yb) > lo))
     if not len(here):
-        return []
+        return None
     xa, ya, xb, yb, lid = xa[here], ya[here], xb[here], yb[here], lid[here]
-    near = (xa, ya, xb, yb, lid)  # (for the row's middle line, centre_colours)
+    near = (xa, ya, xb, yb, lid)  # (for the row's middle line, centre_spots)
     ys = np.concatenate([ya, yb])
     levels = np.unique(np.concatenate([[lo, hi], ys[(ys > lo) & (ys < hi)]]))
     first = np.searchsorted(levels, np.maximum(np.minimum(ya, yb), lo))
@@ -1230,7 +1252,7 @@ def row_pieces(edges, q, walled, colour):
     depth = run - run[begin] + step[begin]  # (counted from the slice's left end, up to and with this crossing)
     pi = np.flatnonzero(~np.append(start[1:], True))  # pieces: from crossing i to i + 1 in the same slice
     if not len(pi):
-        return []
+        return None
     # spots spread over each piece (its slice between the two lines), so one near a line can't decide its area
     xs, ys = [], []
     for fy in (0.5, 0.2, 0.8):
@@ -1239,9 +1261,16 @@ def row_pieces(edges, q, walled, colour):
         for fx in (0.5, 0.2, 0.8):
             xs.append(xy[pi] + (xy[pi + 1] - xy[pi]) * fx)
             ys.append(y[order][pi])
-    xs, ys = np.column_stack(xs), np.column_stack(ys)
-    c = colour(xs, ys)
-    filled = np.where(c >= 0, c > 0, walled(xs, ys) if walled else depth[pi] % 2 == 1)
+    cx, clid, cxs, cys = centre_spots(near, q)
+    pieces = (pi, depth, xm, xl, xr, (y1 - y0)[order], cx, clid)
+    return pieces, (np.column_stack(xs), np.column_stack(ys)), (cxs, cys)
+
+
+def row_done(cut, c, wall, cpaint, cwall):
+    """row_pieces from row_cut's cut and the answers: c = colour and wall = walled (None: even-odd) of the pieces'
+    spots, cpaint / cwall the same of the middle line's."""
+    pi, depth, xm, xl, xr, tall, cx, clid = cut[0]
+    filled = np.where(c >= 0, c > 0, wall if wall is not None else depth[pi] % 2 == 1)
     group = np.where(c > 0, c, 0)
     joined = np.zeros(len(pi), bool)
     joined[1:] = pi[1:] == pi[:-1] + 1  # (the piece before it is in the same slice)
@@ -1251,7 +1280,7 @@ def row_pieces(edges, q, walled, colour):
     right_full[:-1] = joined[1:] & filled[1:]
     left = np.where(left_full, xm[pi], xl[pi])
     right = np.where(right_full, xm[pi + 1], xr[pi + 1])
-    lo_, hi_, k, tall = left[filled], right[filled], group[filled], (y1 - y0)[order][pi][filled]
+    lo_, hi_, k, tall = left[filled], right[filled], group[filled], tall[pi][filled]
     if len(set(k.tolist())) <= 1:
         return [(s, e, int(k[0])) for s, e in merge_spans(lo_, hi_)] if len(k) else []
     # colours overlapping in the row (pieces from different slices of it): each bit of time goes to the colour that
@@ -1260,21 +1289,29 @@ def row_pieces(edges, q, walled, colour):
     at = np.unique(np.concatenate([lo_, hi_]))
     a, b = at[:-1], at[1:]
     m = (a + b) / 2
-    cover = (lo_[None, :] <= m[:, None]) & (hi_[None, :] >= m[:, None])
+    # (each piece covers the bits from its start to its end: added where it starts, taken off where it ends)
+    ia, ib = np.searchsorted(at, lo_), np.searchsorted(at, hi_)
+    on = ia < ib
     names, which = np.unique(k, return_inverse=True)
-    height = np.zeros((len(m), len(names)))
-    for j in range(len(names)):
-        height[:, j] = (cover[:, which.reshape(-1) == j] * tall[which.reshape(-1) == j]).sum(1)
+    which = which.reshape(-1)
+    step = np.zeros((len(at), len(names)))
+    np.add.at(step, (ia[on], which[on]), tall[on])
+    np.add.at(step, (ib[on], which[on]), -tall[on])
+    height = np.cumsum(step, 0)[:-1]
     best = names[height.argmax(1)]
+    count = np.zeros(len(at), np.int64)
+    np.add.at(count, ia[on], 1)
+    np.add.at(count, ib[on], -1)
+    has = np.cumsum(count)[:-1] > 0
     # where two filled colours meet, the switch goes where the line crosses the row's middle (the slices only say
     # how far the filling reaches): the colour of the piece of the middle line each bit is on
-    cx, cfill, cgroup = centre_colours(near, q, walled, colour)
     if len(cx) >= 2:
+        inside = cwall if cwall is not None else np.cumsum(clid[:-1] >= 0) % 2 == 1
+        cfill, cgroup = np.where(cpaint >= 0, cpaint > 0, inside), np.where(cpaint > 0, cpaint, 0)
         j = np.searchsorted(cx, m) - 1
         ok = (j >= 0) & (j < len(cx) - 1)
         ok[ok] &= cfill[j[ok]]
         best = np.where(ok, cgroup[np.clip(j, 0, max(0, len(cgroup) - 1))], best)
-    has = cover.any(1)
     out = []
     for s, e, c in zip(a[has].tolist(), b[has].tolist(), best[has].tolist()):
         if out and out[-1][2] == c and out[-1][1] >= s:
@@ -1366,21 +1403,18 @@ def colour_edges(notes, lines):
     return ~covered(notes, cut_out(notes, lines))
 
 
-def centre_colours(edges, q, walled, colour):
-    """Where the lines cross the middle of row q (x in order), and each piece between two of them: filled (like
-    row_pieces: by its colour or as normal) and its colour."""
+def centre_spots(edges, q):
+    """Where the lines cross the middle of row q (x in order), their loop numbers, and (x, y) spots on each piece
+    between two of them, whose colour says if it's filled and how (like row_pieces)."""
     xa, ya, xb, yb, lid = edges
     c = (np.minimum(ya, yb) <= q) & (np.maximum(ya, yb) > q)
     x = xa[c] + (xb[c] - xa[c]) * (q - ya[c]) / (yb[c] - ya[c])
     o = np.argsort(x, kind="stable")
     x, lid = x[o], lid[c][o]
     if len(x) < 2:
-        return x, np.zeros(0, bool), np.zeros(0, np.int64)
+        return x, lid, np.zeros((0, 3)), np.zeros((0, 3))
     spots = np.column_stack([x[:-1] + (x[1:] - x[:-1]) * f for f in (0.5, 0.2, 0.8)])
-    ys = np.full((len(x) - 1, 3), float(q))
-    inside = walled(spots, ys) if walled else np.cumsum(lid[:-1] >= 0) % 2 == 1
-    paint = colour(spots, ys)
-    return x, np.where(paint >= 0, paint > 0, inside), np.where(paint > 0, paint, 0)
+    return x, lid, spots, np.full((len(x) - 1, 3), float(q))
 
 
 def merged_rows(spans):

@@ -1,5 +1,6 @@
 """Piano roll: painting the grid, notes, shapes, handles, keyboard and ruler."""
 
+import json
 import math
 import time
 import tkinter as tk
@@ -7,7 +8,8 @@ import tkinter as tk
 import numpy as np
 
 from notes.custom import custom_note_count, edge_inner, gap_lines, role_of
-from notes.engine import cached_arrays, shape_notes
+from files.lang import tr
+from notes.engine import cached_arrays, shape_notes_tracks
 from notes.joined import all_tumours
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
 from notes.paths import KEYS
@@ -230,6 +232,66 @@ class RollDrawing:
         self._late_redraw = None
         self.request_redraw()
 
+    def draft_moved(self):
+        """The shape being drawn / placed changed with the mouse: redrawn. When making and painting its notes is slow,
+        only its lines follow the mouse (the other notes' picture stays): its notes show once the mouse rests."""
+        if self._draft_rest:
+            self.after_cancel(self._draft_rest)
+            self._draft_rest = None
+        self.draft_moving = self._draft_time + self.paint_time > 0.15  # (as for other drags: app.shapes_changed)
+        if self.draft_moving:
+            self._draft_rest = self.after(250, self._draft_rested)
+        self.request_redraw()
+
+    def _draft_rested(self):
+        self._draft_rest = None
+        self.draft_moving = False
+        self.request_redraw()
+        if self.draft and self.draft["kind"] == "custom":
+            self.after_idle(self.show_draft)  # (its note count)
+
+    def draft_notes(self):
+        """The notes of the shape being drawn / placed (made once for each spot it's at), or None: none, too many to
+        preview (only its lines show), or slow to make while the mouse moves (draft_moved)."""
+        d, app = self.draft, self.app
+        if not d or self.draft_moving:
+            return None
+        n = (custom_note_count(d, app.ppq) if d["kind"] == "custom" else
+             funnel_note_count(d, app.ppq) if d["kind"] == "funnel" else None)
+        if (n or 0) > PREVIEW_LIMIT:
+            return None
+        key = (json.dumps(d, sort_keys=True), app.ppq, app.keys)  # (app.notes_tracks' key: kept for it, keep_draft)
+        if not self._draft_made or self._draft_made[0] != key:
+            started = time.perf_counter()
+            self._draft_made = (key, shape_notes_tracks(d, app.ppq, app.keys))
+            self._draft_time = time.perf_counter() - started
+        return self._draft_made[1][0]
+
+    def draft_count(self):
+        """How many notes the shape being drawn / placed makes, or None while they're still to be made."""
+        d, ppq = self.draft, self.app.ppq
+        n = (custom_note_count(d, ppq) if d["kind"] == "custom" else
+             funnel_note_count(d, ppq) if d["kind"] == "funnel" else None)
+        if n is None:
+            notes = self.draft_notes()
+            n = None if notes is None else len(notes)
+        return n
+
+    def show_draft(self, text=None):
+        """The status line while placing: where the mouse is (text; None: as last time) and how many notes the new
+        shape makes, once they're known."""
+        text = self._draft_text = self._draft_text if text is None else text
+        n = self.draft_count() if self.draft else None
+        self.app.show_position(text if n is None else tr("pianoroll.new_shape_notes", text=text, note_count=n))
+
+    def keep_draft(self):
+        """The shape being drawn / placed is added: the app takes the notes already made for it."""
+        app = self.app
+        if self.draft and self._draft_made and self._draft_made[0] == (json.dumps(self.draft, sort_keys=True),
+                                                                       app.ppq, app.keys):
+            app._notes_cache[self._draft_made[0]] = self._draft_made[1]
+        self._draft_made = None
+
     def redraw(self):
         self._redraw_pending = False
         for bar in self.bars:
@@ -244,7 +306,9 @@ class RollDrawing:
         # later), it's shown again as it is instead of being painted again
         fixed = (frozenset(app.sels), self.sx, self.sy, self.kb_w, self.ruler_h, w, h)
         pic = (app.rendered, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols)))
-        old = None if self.draft or not app.show_notes.get() or self.note_img is None else self._note_pic
+        # (a shape being drawn / placed: its notes are in the picture, unless only its lines show)
+        drafted = self.draft_notes() is not None
+        old = None if drafted or not app.show_notes.get() or self.note_img is None else self._note_pic
         if self._exact:
             self.after_cancel(self._exact)
             self._exact = None
@@ -271,7 +335,7 @@ class RollDrawing:
             if rects is not None and len(rects[0]) > w * h // 2000:
                 # Lots of notes: paint grid + notes as one picture (thousands of canvas items redraw slowly)
                 self.paint_image(w, h, rows, cols, rects)
-                self._note_pic = None if self.draft else pic
+                self._note_pic = None if drafted else pic
             else:
                 self.note_img = self._note_pic = self._img = None
                 self.draw_grid(w, h, rows, cols)
@@ -633,13 +697,9 @@ class RollDrawing:
                     color * 32 + np.minimum(notes[on, 3], 127) // 4)
 
         parts = [screen(notes, None, True)]
-        big = False
-        if self.draft and self.draft["kind"] == "custom":
-            big = (custom_note_count(self.draft, ppq) or 0) > PREVIEW_LIMIT
-        elif self.draft and self.draft["kind"] == "funnel":
-            big = funnel_note_count(self.draft, ppq) > PREVIEW_LIMIT
-        if self.draft and not big and only is None:
-            parts.append(screen(shape_notes(self.draft, ppq, app.keys), DRAFT, False))
+        drafted = self.draft_notes() if only is None else None
+        if drafted is not None:
+            parts.append(screen(drafted, DRAFT, False))
         x0, x1, key, color = (np.concatenate(v) if len(v) > 1 else v[0] for v in zip(*parts))
         left, right = int(kb) - 2, int(w) + 2
         x0, x1 = np.maximum(x0, left), np.minimum(x1, right)

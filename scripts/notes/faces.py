@@ -172,15 +172,28 @@ class Faces:
         if self.depth is None or not len(x):
             return out
         s = np.searchsorted(self.levels, y, "right") - 1
-        ok = (s >= 0) & (s < len(self.levels) - 1)
-        for k in np.unique(s[ok]).tolist():
-            q = np.flatnonzero(s == k)
-            e = self.edge[self.start[k]:self.start[k + 1]]
-            if len(e):
-                left = (self._x(e[None, :], y[q, None]) < x[q, None]).sum(1)
-            else:
-                left = np.zeros(len(q), np.int64)
-            out[q] = self.lab[self.off[k] + left]
+        q = np.flatnonzero((s >= 0) & (s < len(self.levels) - 1))
+        k, xq, yq = s[q], x[q], y[q]
+        # a slab's lines are in order from left to right (none cross inside it): how many are left of each spot,
+        # found by halving its slab's lines over and over (all spots at once)
+        lo, hi = self.start[k], self.start[k + 1]
+        act = np.flatnonzero(lo < hi)
+        while len(act):
+            mid = (lo[act] + hi[act]) >> 1
+            left = self._x(self.edge[mid], yq[act]) < xq[act]
+            lo[act[left]] = mid[left] + 1
+            hi[act[~left]] = mid[~left]
+            act = act[lo[act] < hi[act]]
+        # a spot on a line, or right by one (lines too close to say which comes first): every line of its slab
+        # counted, as before the halving
+        first, end = self.start[k], self.start[k + 1]
+        margin = self.eps * (end - first + 1)
+        near = np.zeros(len(q), bool)
+        for side, has in ((lo - 1, lo > first), (lo, lo < end)):
+            near[has] |= np.abs(self._x(self.edge[side[has]], yq[has]) - xq[has]) <= margin[has]
+        for i in np.flatnonzero(near).tolist():
+            lo[i] = first[i] + int((self._x(self.edge[first[i]:end[i]], yq[i]) < xq[i]).sum())
+        out[q] = self.lab[self.off[k] + lo - first]
         return out
 
     def area_grid(self, x, y):

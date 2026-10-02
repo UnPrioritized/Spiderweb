@@ -62,6 +62,11 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.paint_time = 0.0    # seconds the last whole repaint of the notes took (app.shapes_changed: slow?)
         self._redraw_pending = False
         self._late_redraw = None  # request_redraw(delay)'s timer
+        self._draft_made = None  # the shape being drawn / placed: (notes_tracks key, its notes and tracks)
+        self._draft_time = 0.0   # seconds making them took the last time
+        self.draft_moving = False  # slow ones: only its lines follow the mouse (draft_moved)
+        self._draft_rest = None  # timer: the mouse rested, its notes show
+        self._draft_text = ""    # the status line's mouse spot while placing (show_draft)
         # a shape started with a click (no drag): the drag it would have been, following the mouse until the next
         # click finishes it
         self.follow = None
@@ -617,6 +622,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 return
             self.draft = app.new_custom(tpl[0], *pt, *pt, areas=tpl[2])
             self.drag = ("place", pt, e.x, e.y, tpl[1])
+            self._draft_time = 0.0  # (slow or not: found again for each new shape)
             self.request_redraw()
             return
         if tool == "free":
@@ -626,6 +632,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return
         self.draft = make_shape(tool, [pt, pt], app.new_defaults(tool))
         self.drag = ("create", pt, e.x, e.y)
+        self._draft_time = 0.0
         self.request_redraw()
 
     def on_drag(self, e):
@@ -689,7 +696,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 self.draft = self.box_draft(kind, self.drag[1], pt)
             else:
                 self.draft = make_shape(kind, [self.drag[1], pt], self.app.new_defaults(kind))
-            self.request_redraw()
+            self.draft_moved()
         elif kind == "wall":
             pt = self.event_pt(e)
             self.draft["pts"][3] = pt
@@ -728,10 +735,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if e.state & CTRL and aspect:
                 pt = self.keep_aspect(start, pt, aspect)
             self.draft["pts"] = box_frame(start[0], start[1], pt[0], pt[1])
-            self.request_redraw()
-            text = self.position_text(e) or ""
-            self.app.show_position(tr("pianoroll.new_shape_notes", text=text,
-                                      note_count=self.app.note_count(self.draft)))
+            self.draft_moved()
+            self.show_draft(self.position_text(e) or "")
 
     def copy_moved(self, orig):
         """Ctrl+drag inside the kept Select box, the first move: copies of the shapes are added and selected, and
@@ -858,7 +863,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         elif kind == "place":
             if still:
                 self.cancel_draft()
-            elif self.app.confirm_big([self.draft]):
+            elif self.keep_draft() or self.app.confirm_big([self.draft]):
                 self.commit_draft()
             else:
                 self.cancel_draft()
@@ -1014,6 +1019,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.app.scrub_end()
 
     def commit_draft(self):
+        self.keep_draft()
         sh, self.draft = self.draft, None
         if not self.live_commit(sh):  # a stroke of a live shape / a circle or polygon: done there
             self.app.add_shape(sh)

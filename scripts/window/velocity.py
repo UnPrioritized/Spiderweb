@@ -10,7 +10,6 @@ import tkinter as tk
 import numpy as np
 
 from files.lang import tr
-from notes.engine import shape_notes
 from notes.envelope import env_at, env_values, paint_env, tidy_env, velocity_env
 from notes.pattern import loop_points
 from roll.roll_shared import (CTRL, DRAFT_COLOR, SHIFT, SELECTED_COLOR, SLOT_COLORS, cached_path, fade,
@@ -432,7 +431,7 @@ class VelocityPane(tk.Canvas):
             return
         # the picture shows exactly this: when nothing here changed (the piano roll moved up or down, a shape is
         # dragged and its notes catch up later), it's shown again as it is
-        pic = None if self.edit or roll.draft else (
+        pic = None if self.edit or roll.draft_notes() is not None else (
             self.app.rendered, (frozenset(self.app.sels), roll.sx, roll.view_t, roll.kb_w, w, h, self.top,
                                 tuple(roll.grid_cols(w))))
         if pic and self.img is not None and self._pic and self._pic[0] is pic[0] and self._pic[1] == pic[1]:
@@ -507,8 +506,8 @@ class VelocityPane(tk.Canvas):
         else:
             layer = NORMAL + slot
         s, e = notes[:, 0], notes[:, 1]
-        if roll.draft:
-            d = shape_notes(roll.draft, ppq, self.app.keys)
+        d = roll.draft_notes()
+        if d is not None:
             s, e = np.concatenate([s, d[:, 0]]), np.concatenate([e, d[:, 1]])
             vel = np.concatenate([vel, d[:, 3]])
             layer = np.concatenate([layer, np.full(len(d), DRAFT)])
