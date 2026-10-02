@@ -1290,9 +1290,9 @@ def row_pieces(edges, q, walled, colour):
     return out
 
 
-def colour_at(notes, spans, colours, inside=False):
+def colour_at(notes, spans, colours, none=None):
     """For each (start, end, key) note, the colour of the (start, end, key) stretch on its key holding its middle
-    (none does: the nearest one before it, else 0; inside: 0)."""
+    (none does: the nearest one before it, else 0; or none if given)."""
     if not len(notes) or not len(spans):
         return np.zeros(len(notes), np.int64)
     order = np.lexsort((spans[:, 0], spans[:, 2]))
@@ -1301,9 +1301,19 @@ def colour_at(notes, spans, colours, inside=False):
     mid = (notes[:, 0] + notes[:, 1]) // 2
     i = np.searchsorted(sp[:, 2] * big + sp[:, 0], notes[:, 2] * big + mid, "right") - 1
     ok = (i >= 0) & (sp[np.maximum(i, 0), 2] == notes[:, 2])
-    if inside:
-        ok &= sp[np.maximum(i, 0), 1] > mid
-    return np.where(ok, col[np.maximum(i, 0)], 0).astype(np.int64)
+    if none is None:
+        return np.where(ok, col[np.maximum(i, 0)], 0).astype(np.int64)
+    ok &= sp[np.maximum(i, 0), 1] > mid
+    return np.where(ok, col[np.maximum(i, 0)], none).astype(np.int64)
+
+
+def between_colours(notes, spans, colours):
+    """Which (start, end, key) notes have one colour filled right before them and another right after (spans and
+    colours: area_spans')."""
+    s, e, k = notes[:, 0], notes[:, 1], notes[:, 2]
+    before = colour_at(np.column_stack([s - 1, s, k]), spans, colours, none=-1)
+    after = colour_at(np.column_stack([e, e + 1, k]), spans, colours, none=-1)
+    return (before >= 0) & (after >= 0) & (before != after)
 
 
 def border_lines(sh, ppq):
@@ -1709,9 +1719,17 @@ def custom_note_count(sh, ppq):
 
 def flat_notes(sh, ppq):
     """The outline notes of a filled shape's parts too flat to fill and lines ending on lines (fill_plan), so they
-    don't vanish (a line across a filled area: both sides stay filled, its notes show it, user)."""
+    don't vanish (a line across a filled area: both sides stay filled, its notes show it, user). With coloured
+    areas not where two colours meet: each colour fills up to the line as one note (they cut the colour beside them
+    in two, and in Spam covered "Outline between colours", user)."""
     flat = [] if sh.get("text") else fill_plan(sh)["flat"] + fill_plan(sh)["attached"]
-    return paths_outline(flat, ppq) if flat else np.zeros((0, 3), np.int64)
+    if not flat:
+        return np.zeros((0, 3), np.int64)
+    notes = paths_outline(flat, ppq)
+    if has_areas(sh) and len(notes):
+        got = area_spans(sh, ppq)
+        notes = notes[~between_colours(notes, got[:, :3], got[:, 3])]
+    return notes
 
 
 def edge_notes(sh, ppq):
@@ -1802,7 +1820,7 @@ def _notes_groups(sh, ppq):
     # own colour all along the line, showing between two colours like an outline, user)
 
     def flat_area(n):
-        return colour_at(n, spans, area, inside=True)
+        return colour_at(n, spans, area, none=0)
 
     # outline-only strokes: over what's filled, the outline's with "Outline"; their colours (colour_of) are the same
     # numbers as the areas'
