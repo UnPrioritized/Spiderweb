@@ -149,6 +149,8 @@ class ToolPicker:
         keys = GROUP if key in GROUP else (key,)  # (the group is pinned / unpinned together)
         if key in self.pins:
             self.pins = [k for k in self.pins if k not in keys]
+            if self.app.tool.get() in keys:  # the tool in use loses its own button: the main one shows it, lit
+                self.last = self.app.tool.get()
         else:
             self.pins += [k for k in keys if k not in self.pins]
         self.show()
