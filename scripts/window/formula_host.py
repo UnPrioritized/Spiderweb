@@ -335,6 +335,9 @@ class DrawerHost(FormulaHost):
         return self.drawer.snap(), super().snapshot()
 
     def restore(self, snap):
+        d = self.drawer  # (the coloured areas as they were too: changed() may have moved them while trying; they
+        # match the strokes put back, so nothing to settle)
+        d.areas, d._settled = json.loads(snap[0])[1], None
         super().restore(snap[1])
 
     def commit(self, snap, name):

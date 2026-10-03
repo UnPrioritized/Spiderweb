@@ -960,6 +960,51 @@ def carry_areas(old, new):
     return lost + out
 
 
+def settled_areas(old, new):
+    """new["areas"] after lines were drawn, erased or changed in one go (not dragged: carry_areas): each colour goes
+    to the new area most of its old area became, so a new line splitting a coloured area leaves the colour on the
+    bigger part and the new part starts as normal (user). A colour whose area is gone (its lines erased, or merged
+    into another coloured area that kept more of it) is forgotten: it doesn't come back on lines drawn there later
+    (user). old: the shape before, its areas in the same order. Returns the new areas list."""
+    areas = new.get("areas") or []
+    a0, a1 = (shape_areas(old), shape_areas(new)) if areas else (None, None)
+    if a0 is None or a1 is None:
+        return areas
+    ys, xs = np.mgrid[0:a1.h:2, 0:a1.w:2]  # (every other cell of the new map, in u, v)
+    pts = (np.column_stack([xs.ravel(), ys.ravel()]) + 0.5) / a1.k + a1.lo
+    (b0, p0), (b1, p1), (b2, p2) = new["pts"]
+    u, v = pts[:, 0], pts[:, 1]
+    back = uv_points(old["pts"], np.column_stack([b0 + u * (b1 - b0) + v * (b2 - b0),
+                                                  p0 + u * (p1 - p0) + v * (p2 - p0)]))
+    l0, l1 = a0.cell(*back.T), a1.cell(u, v)
+    ok = (l0 >= 0) & (l1 >= 0)
+    l0, l1, pts = l0[ok], l1[ok], pts[ok]
+    n1 = a1.count
+    both = np.bincount(l0 * n1 + l1, minlength=a0.count * n1).reshape(a0.count, n1)
+    labs = a0.at(*np.asarray([a[:2] for a in old["areas"]], float).reshape(-1, 2).T).tolist()
+    best = {}  # new area -> (how much of the old area went there, which spot)
+    for i, lab in enumerate(labs):
+        if lab < 0:  # (no free cell by it: left as it is)
+            best[("as is", i)] = (0, i)
+            continue
+        if lab == a0.outside() or not both[lab].any():
+            continue
+        to = int(both[lab].argmax())
+        if to != a1.outside() and (to not in best or both[lab, to] >= best[to][0]):
+            best[to] = (int(both[lab, to]), i)
+    out = []
+    for to, (_, i) in sorted(best.items(), key=lambda t: t[1][1]):
+        a = areas[i]
+        if isinstance(to, tuple) or int(a1.at([a[0]], [a[1]])[0]) == to:
+            out.append(a)
+            continue
+        here = pts[l1 == to]  # (into its area: the spot there nearest the middle of it)
+        mid = np.median(here, axis=0)
+        spot = here[np.argmin(np.hypot(*(here - mid).T))]
+        out.append([round(float(spot[0]), 6), round(float(spot[1]), 6), a[2]])
+    return out
+
+
 def area_cuts(sh):
     """The lines that split areas without closing a loop, in beats / keys: fill lines, and outline lines too flat to
     fill (fill_plan "flat": a box's side touching the rest only partway along its lines, user, was no wall)."""

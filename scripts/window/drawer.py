@@ -14,7 +14,8 @@ import numpy as np
 
 from notes.areas import COLOURS, clean_areas
 from notes.custom import (LAND_SHARE, ROLES, TOUCH_BEATS, TOUCH_KEYS, area_paint, areas_filled, carry_areas, clean_strokes,
-                          colour_of, filled_spots, join_strokes, open_paths, plain_stroke, role_of, shape_areas, stroke_points, takes_formula)
+                          colour_of, filled_spots, join_strokes, open_paths, plain_stroke, role_of, settled_areas,
+                          shape_areas, stroke_points, takes_formula)
 from roll.roll_shared import SLOT_COLORS
 from notes.pattern import has_formula, moved_formulas
 from files.about import HERE
@@ -182,6 +183,7 @@ class Drawer(tk.Toplevel):
         self.area_pick = 1     # the colour the Areas tool gives (0 = empty)
         self.hover = None      # the area under the mouse (Areas tool)
         self._area_cache = self._area_px = self._area_img = self._gap_cache = None
+        self._settled = "[]"   # the strokes as JSON when the areas last matched them (changed)
         self.zoom = 1.0        # 1 = the whole board fits the window
         self.center = [0.5, 0.5]  # the board point in the middle of the window (0.5, 0.5 = the board's middle)
         self._pan = None
@@ -356,6 +358,11 @@ class Drawer(tk.Toplevel):
         lines are the edge of the fill beside them); "Outline" adds one."""
         amap, inside = self.area_info()
         paint = self.area_paint(amap)[:-1] if amap is not None else np.zeros(0, np.int64)
+        if amap is not None:  # (only the areas shown: where many lines meet at a point, the map's cells leave
+            # little pockets no note is ever in, which counted the shape's own colour with every area coloured)
+            _, lab, _ = self.face_info()
+            shown = np.unique(lab[amap.exact()[4]])  # (each shown area's number, by a spot in it)
+            paint, inside = paint[shown], inside[shown]
         used = {int(c) for c in paint if c > 0} | {colour_of(st) for st in self.strokes if colour_of(st)}
         own_fill = amap is not None and bool((inside & (paint < 0)).any())
         own_line = any(not colour_of(st) and role_of(st) == "edge" for st in self.strokes)
@@ -868,7 +875,7 @@ class Drawer(tk.Toplevel):
             self.undo_stack.pop()  # clicked without moving anything (the undone steps stay redoable)
             self.redo_stack = self.redo_kept
         else:
-            self.changed()
+            self.changed(settle=False)  # (the drag took the colours along: carry_areas)
 
     def delete_selected_stroke(self):
         if self.chosen() and self.tool.get() == "select":
@@ -951,18 +958,41 @@ class Drawer(tk.Toplevel):
 
     def transform(self, idx, fn, turned=False):
         self.push_undo()
+        going = self.carried_areas(idx)
         for i in idx:
             self.strokes[i] = self.map_stroke(self.strokes[i], fn)
             if turned and self.strokes[i]["kind"] == "arc":  # still round (see arc.py)
                 self.strokes[i]["k"] = 1 / self.strokes[i].get("k", 1.0)
-        if len(idx) == len(self.strokes):  # the whole drawing: its coloured areas go along
-            self.areas = [[*(round(x, 5) for x in fn(u, v)), c] for u, v, c in self.areas]
+        self.areas = [[*(round(x, 5) for x in fn(u, v)), c] if go else [u, v, c]
+                      for (u, v, c), go in zip(self.areas, going)]
         boxes = []
         for u0, v0, u1, v1 in self.boxes:  # the select boxes go along
             us, vs = zip(*(fn(u, v) for u, v in ((u0, v0), (u1, v1))))
             boxes.append([min(us), min(vs), max(us), max(vs)])
         self.boxes = boxes
-        self.changed()
+        self.changed(settle=False)
+
+    def carried_areas(self, idx):
+        """For each coloured area: whether it goes along when strokes idx are flipped / turned (all of them: the whole
+        drawing). It does when those strokes close it in more tightly than the others do (a bar turned inside a box:
+        the bar's colour, not the box's)."""
+        if len(idx) == len(self.strokes) or not self.areas:
+            return [len(idx) == len(self.strokes)] * len(self.areas)
+        u, v = [a[0] for a in self.areas], [a[1] for a in self.areas]
+
+        def sizes(strokes):  # how big the area each spot is in is (u x v), with these strokes only (outside: inf)
+            amap = shape_areas({"strokes": strokes, "pts": AREA_FRAME}) if strokes else None
+            if amap is None:
+                return np.full(len(u), np.inf)
+            labs = amap.at(u, v)
+            cells = np.bincount(amap.labels[amap.labels >= 0].ravel(), minlength=amap.count + 1)
+            size = cells[np.maximum(labs, 0)] / (amap.k[0] * amap.k[1])
+            return np.where((labs < 0) | (labs == amap.outside()), np.inf, size)
+
+        picked = set(idx)
+        mine = sizes([st for i, st in enumerate(self.strokes) if i in picked])
+        rest = sizes([st for i, st in enumerate(self.strokes) if i not in picked])
+        return (np.isfinite(mine) & (mine < rest)).tolist()
 
     def on_drag(self, e):
         self.show_position(e)
@@ -1368,7 +1398,7 @@ class Drawer(tk.Toplevel):
             self.redo_stack.append(self.snap())
             self.load_snap(self.undo_stack.pop())
             self.boxes = []  # (the strokes may have moved away from them)
-            self.changed()
+            self.changed(settle=False)
 
     def redo(self):
         if self.erasing():
@@ -1379,7 +1409,7 @@ class Drawer(tk.Toplevel):
             self.undo_stack.append(self.snap())
             self.load_snap(self.redo_stack.pop())
             self.boxes = []
-            self.changed()
+            self.changed(settle=False)
 
     def clear(self):
         if self.strokes or self.areas:
@@ -1387,7 +1417,16 @@ class Drawer(tk.Toplevel):
             self.strokes, self.areas = [], []
             self.changed()
 
-    def changed(self):
+    def changed(self, settle=True):
+        """After any change. settle: lines drawn, erased or changed in one go: coloured areas go where most of each
+        went (custom.settled_areas); not after drags (carry_areas did it), undo / redo, or moves that took the
+        colours along themselves."""
+        now = json.dumps(self.strokes)
+        if settle and self.areas and self._settled is not None and self._settled != now:
+            frame = AREA_FRAME
+            self.areas = settled_areas({"strokes": json.loads(self._settled), "pts": frame, "areas": self.areas},
+                                       {"strokes": self.strokes, "pts": frame, "areas": self.areas})
+        self._settled = now
         self.dirty = True
         if self.sel is not None and self.sel >= len(self.strokes):
             self.sel = None
@@ -1432,6 +1471,7 @@ class Drawer(tk.Toplevel):
         self.strokes, self.undo_stack, self.draft = strokes, [], None
         self.deselect()
         self.areas = [list(a) for a in areas]
+        self._settled = json.dumps(self.strokes)
         self.redo_stack, self.redo_kept = [], []
         self.name.set(name)
         self.saved_name = name or None
@@ -1476,6 +1516,7 @@ class Drawer(tk.Toplevel):
                                        tr("drawer.is_already_in_the_library_replace", name=name), parent=self):
                 return None
         self.strokes = join_strokes(self.strokes)
+        self._settled = json.dumps(self.strokes)  # (the same lines)
         self.deselect()  # joining can change the order
         try:
             save_shape(name, self.strokes, self.areas)
