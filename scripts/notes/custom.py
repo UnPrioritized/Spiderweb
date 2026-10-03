@@ -346,6 +346,9 @@ def fillable(strokes):
 TOUCH_BEATS, TOUCH_KEYS = 1 / 64, 1.0  # loose ends at most this far apart count as touching (joined straight)
 FLAT_KEYS, FLAT_BEATS = 0.5, 1 / 64  # an open part never further than this from its closing line is left unfilled
 LAND_SHARE = 1e-4  # in the drawer (u, v): an end this share of the drawing's size from a line lands on it
+# The drawing's box as the drawer sees it, for finding its areas: so big that ends count as touching or landing on
+# a line only as near as the red dots go by (LAND_SHARE; a small box joined ends far apart, user)
+DRAWN_FRAME = [[0.0, 0.0], [TOUCH_BEATS / LAND_SHARE, 0.0], [0.0, TOUCH_KEYS / LAND_SHARE]]
 ON_LINE = 0.01  # placed: an end landing this close (in TOUCH_BEATS / TOUCH_KEYS) needs no line closing it
 _plans = {}
 _spans = {}  # inside_spans, remembered
@@ -858,12 +861,13 @@ def shape_faces(sh):
     return faces([uv_points(sh["pts"], p) for p in walls(sh)])
 
 
-def spot_area(amap, u, v):
-    """For each row of spots (u, v: (n, m) arrays, spread over one piece), the area most of them are in, as the
-    exact areas say (as the drawer shows them: in a tip thinner than the cells, e.g. where a curve touches a line or
-    many lines start at one point, the cells are on lines or in little pockets with no colour, user)."""
-    labs = amap.fine_at(u.ravel(), v.ravel()).reshape(u.shape)
-    return np.asarray([max(set(row), key=row.count) for row in labs.tolist()], np.int64).reshape(-1)
+def spot_colour(sh, u, v):
+    """For each row of spots (u, v: (n, m) arrays, spread over one piece), the colour given by hand (spot_paint)
+    most of them are in, as the exact areas say (as the drawer shows them: in a tip thinner than the cells, e.g.
+    where a curve touches a line or many lines start at one point, the cells are on lines or in little pockets with
+    no colour, user)."""
+    got = spot_paint(sh, u.ravel(), v.ravel()).reshape(u.shape)
+    return np.asarray([max(set(row), key=row.count) for row in got.tolist()], np.int64).reshape(-1)
 
 
 def filled_uv(sh, u, v):
@@ -1060,11 +1064,25 @@ def area_paint(sh, amap):
     return paint
 
 
-def area_state(sh, amap):
-    """Each area's (filled, colour) as Fill / Spam make it (one more at the end for walls: not filled, -1)."""
-    paint = area_paint(sh, amap)
-    filled = np.append(np.where(paint[:-1] >= 0, paint[:-1] > 0, areas_filled(sh, amap)), False)
-    return filled, np.append(np.where(paint[:-1] > 0, paint[:-1], 0), -1)
+def spot_paint(sh, u, v):
+    """The colour given by hand at each spot (u, v arrays in the shape's box), as the drawer shows the areas (-1: as
+    normal, 0: empty, k: colour k). Placed, ends up to TOUCH_BEATS / TOUCH_KEYS apart count as touching, so a small
+    shape can have walls the drawer doesn't show (it goes by LAND_SHARE): every part keeps the colour clicked in the
+    drawer (user). What's filled as normal stays as the placed shape's lines say."""
+    drawn = shape_areas({"strokes": sh["strokes"], "pts": DRAWN_FRAME})
+    if drawn is None:
+        return np.full(len(u), -1, np.int64)
+    return area_paint(sh, drawn)[drawn.fine_at(u, v)]
+
+
+def spot_state(sh, amap, u, v, exact=True):
+    """At each spot (u, v arrays in the shape's box): (filled, colour) as Fill / Spam make it, colour 0 = the shape's
+    own. The colours as the drawer shows them (spot_paint), what's filled as normal by the placed shape's areas
+    (amap; exact: as faces.py finds them, else the map's cells, walls: not filled)."""
+    lab = amap.fine_at(u, v) if exact else amap.at(u, v)
+    paint = spot_paint(sh, u, v)
+    filled = np.where(paint >= 0, paint > 0, np.append(areas_filled(sh, amap), False)[lab]) & (lab >= 0)
+    return filled, np.where(filled & (paint > 0), paint, 0)
 
 
 def areas_filled(sh, amap):
@@ -1093,7 +1111,6 @@ def area_edges(sh, amap, borders_only=False):
     seg = area_lines(sh)
     if not len(seg):
         return seg
-    filled, colour = area_state(sh, amap)
     a, b = uv_points(sh["pts"], seg[:, :2]), uv_points(sh["pts"], seg[:, 2:])
     # long lines cut into pieces a few map cells long, each looked at on its own: what's beside a line changes
     # where other lines cross it (one looked at in its middle only grew the band along all of it, user)
@@ -1110,9 +1127,10 @@ def area_edges(sh, amap, borders_only=False):
     ok = ln > 1e-9
     n = np.column_stack([-d[:, 1], d[:, 0]]) / np.where(ok, ln, 1)[:, None] * 1.5 / amap.k
     mid = (a + b) / 2
-    one, two = amap.at(*(mid + n).T), amap.at(*(mid - n).T)
-    meet = filled[one] & filled[two] & (colour[one] != colour[two])
-    differ = meet if borders_only else (filled[one] != filled[two]) | (meet & bool(sh.get("borders")))
+    f1, c1 = spot_state(sh, amap, *(mid + n).T, exact=False)
+    f2, c2 = spot_state(sh, amap, *(mid - n).T, exact=False)
+    meet = f1 & f2 & (c1 != c2)
+    differ = meet if borders_only else (f1 != f2) | (meet & bool(sh.get("borders")))
     keep = np.flatnonzero(ok & differ)
     if not len(keep):
         return seg[keep]
@@ -1147,20 +1165,21 @@ def area_filled_lines(sh, keys):
     amap = shape_areas(sh)
     if amap is None:
         return ys, None, None, 1.0
-    filled, _ = area_state(sh, amap)
     lines = area_lines(sh)
     ay, by = lines[:, 1], lines[:, 3]
-    out = []
+    xs = []
     for y in ys:
         s = lines[(ay <= y) != (by <= y)]
-        x = np.sort(s[:, 0] + (s[:, 2] - s[:, 0]) * (y - s[:, 1]) / (s[:, 3] - s[:, 1]))
-        if len(x) < 2:
-            out.append([])
-            continue
-        m = (x[:-1] + x[1:]) / 2
-        uv = uv_points(sh["pts"], np.column_stack([m, np.full(len(m), y)]))
-        on = filled[amap.fine_at(uv[:, 0], uv[:, 1])]  # (exact: a piece thinner than a cell is no free cell)
-        out.append(list(zip(x[:-1][on].tolist(), x[1:][on].tolist())))
+        xs.append(np.sort(s[:, 0] + (s[:, 2] - s[:, 0]) * (y - s[:, 1]) / (s[:, 3] - s[:, 1])))
+    # (every line's pieces asked at once; exact: a piece thinner than a cell is no free cell)
+    mids = [np.column_stack([(x[:-1] + x[1:]) / 2, np.full(max(len(x) - 1, 0), y)]) for x, y in zip(xs, ys)]
+    every = np.concatenate(mids) if mids else np.zeros((0, 2))
+    on = np.zeros(0, bool)
+    if len(every):
+        uv = uv_points(sh["pts"], every)
+        on = spot_state(sh, amap, uv[:, 0], uv[:, 1])[0]
+    on = np.split(on, np.cumsum([len(m) for m in mids])[:-1])
+    out = [list(zip(x[:-1][o].tolist(), x[1:][o].tolist())) for x, o in zip(xs, on)]
     if len(_inner) > 100:
         _inner.clear()
     got = _inner[key] = (ys, out, area_edges(sh, amap),
@@ -1242,7 +1261,6 @@ def find_area_spans(sh, ppq):
     ps = [p for path in polys + cuts for _, p in path]
     if amap is None or not ps:
         return none
-    paint = area_paint(sh, amap)
     parts = [(np.asarray(p, float).reshape(-1, 2), i) for i, p in enumerate(polys)]
     parts += [(np.asarray(p, float).reshape(-1, 2), -1) for p in cuts]
     parts = [(p, i) for p, i in parts if len(p) > 1]
@@ -1253,9 +1271,9 @@ def find_area_spans(sh, ppq):
     edges = (a[keep, 0], a[keep, 1], b[keep, 0], b[keep, 1], lid[keep])
     frame = sh["pts"]
 
-    def colour(x, y):  # (pieces, spots) spots inside each piece -> its colour: the area most of them are in
+    def colour(x, y):  # (pieces, spots) spots inside each piece -> its colour: the one most of them are in
         uv = uv_points(frame, np.column_stack([x.ravel(), y.ravel()]))
-        return paint[spot_area(amap, uv[:, 0].reshape(x.shape), uv[:, 1].reshape(x.shape))]
+        return spot_colour(sh, uv[:, 0].reshape(x.shape), uv[:, 1].reshape(x.shape))
 
     walled = fill_test(sh)
     rows = [(q, row_cut(edges, q)) for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1)]

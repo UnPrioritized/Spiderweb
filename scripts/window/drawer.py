@@ -13,7 +13,7 @@ from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half
 import numpy as np
 
 from notes.areas import COLOURS, clean_areas
-from notes.custom import (LAND_SHARE, ROLES, TOUCH_BEATS, TOUCH_KEYS, area_paint, areas_filled, carry_areas, carried_spots,
+from notes.custom import (DRAWN_FRAME, ROLES, area_paint, areas_filled, carry_areas, carried_spots,
                           clean_strokes, colour_of, filled_spots, join_strokes, open_paths, plain_stroke, role_of, settled_areas,
                           shape_areas, stroke_points, takes_formula)
 from roll.roll_shared import SLOT_COLORS
@@ -45,9 +45,7 @@ STROKE_COLOR = "#c0392b"  # (a stroke with an outline colour: that colour's dark
 # Areas (areas.py) on the board: what Fill / Spam fill as normal, an area emptied by hand, the outside, the board
 AREA_NORMAL, AREA_EMPTY, OFF_BOARD, BOARD = "#d4d4d4", "#fbe4e4", "#f4f4f4", "#ffffff"
 WARN_COLOR = "#c06000"  # more colours than a shape can have (like the side panel's warning)
-# The drawing's box as a custom shape, for finding its areas: so big that ends count as touching or landing on a
-# line only as near as the red dots go by (custom.LAND_SHARE; a small box joined ends far apart, user)
-AREA_FRAME = [[0.0, 0.0], [TOUCH_BEATS / LAND_SHARE, 0.0], [0.0, TOUCH_KEYS / LAND_SHARE]]
+AREA_FRAME = DRAWN_FRAME  # (the drawing's box as a custom shape, for finding its areas)
 
 
 def rgb(color):
