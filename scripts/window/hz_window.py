@@ -1031,14 +1031,16 @@ class HzWindow(tk.Toplevel):
         if d["kind"] == "new":
             n["t"], n["key"] = self.snap(beat, e), self.key_at(e.y)
             self.sound(n["key"])
-        elif d["kind"] == "right":
-            n["len"] = max(short, self.snap(beat, e) - n["t"])
-            self.keep_leads(d["i"], d["orig"])
-        elif d["kind"] == "left":  # (a note shorter than a snap step: one step long from where it starts, user)
-            was = d["orig"][d["i"]]
-            end = max(was["t"] + was["len"], was["t"] + short)
-            n["t"] = min(self.snap(beat, e), end - short)
-            n["len"] = end - n["t"]
+        elif d["kind"] in ("left", "right"):  # the other end stays; the grid lines short of it, and where the end
+            was = d["orig"][d["i"]]  # dragged started (off the grid, or a note shorter than a step: user)
+            end = was["t"] + was["len"]
+            if d["kind"] == "right":
+                at = max(self.snap(beat, e), (math.floor(was["t"] / short + 1e-9) + 1) * short)
+                n["len"] = (end if abs(beat - end) <= abs(beat - at) else at) - was["t"]
+            else:
+                at = min(self.snap(beat, e), (math.ceil(end / short - 1e-9) - 1) * short)
+                n["t"] = was["t"] if at < 0 or abs(beat - was["t"]) <= abs(beat - at) else at
+                n["len"] = end - n["t"]
             self.keep_leads(d["i"], d["orig"])
         elif d["kind"] == "out":
             d["slide"]["out"] = min(max(0.0, n["t"] + n["len"] - self.snap(beat, e)), n["len"])
