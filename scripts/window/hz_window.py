@@ -743,18 +743,24 @@ class HzWindow(tk.Toplevel):
         return out
 
     def pairs(self):
-        """[(a, b)]: the slides that can go between the selected notes. Two notes: the earlier to the later. More:
-        the first one to each of the others, or (when they don't all start after its end) each of the others to
-        the last one. None when they don't follow each other like that."""
+        """[(a, b)]: the slides that can go between the selected notes: each one to the next of them, a chain (user:
+        not the first to all the others). The next = the selected notes starting first at or after its end, all of
+        them when they start together (one to several); several can lead to the same one. Several to several (a
+        chord to a chord): none there, it would cross every note with every note."""
         if len(self.sel) < 2 or max(self.sel) >= len(self.tones):
             return []
         ns = sorted((self.tones[i] for i in self.sel), key=lambda n: (n["t"], n["key"]))
-        if all(can_slide(ns[0], n) for n in ns[1:]):
-            return [(ns[0], n) for n in ns[1:]]
-        last = max(ns, key=lambda n: n["t"])
-        if all(can_slide(n, last) for n in ns if n is not last):
-            return [(n, last) for n in ns if n is not last]
-        return []
+        nexts = []
+        for a in ns:
+            after = [b for b in ns if can_slide(a, b)]
+            if after:
+                first = min(b["t"] for b in after)
+                nexts.append((a, [b for b in after if b["t"] <= first + 1e-9]))
+        leads = {}  # (how many notes lead to each next group)
+        for _, bs in nexts:
+            key = tuple(id(b) for b in bs)
+            leads[key] = leads.get(key, 0) + 1
+        return [(a, b) for a, bs in nexts if len(bs) == 1 or leads[tuple(id(b) for b in bs)] == 1 for b in bs]
 
     @staticmethod
     def link(a, b):
@@ -1323,17 +1329,20 @@ class HzWindow(tk.Toplevel):
                 ends = first is not None and first is not n and (can_slide(first, n) or can_slide(n, first))
                 menu.add_command(label=tr("hz.slide_end" if ends else "hz.slide_start"),
                                  command=lambda: self.slide_mark(e, hit))
-            if menu.type("end") != "separator":  # (the gates' group ends with one)
-                menu.add_separator()
         if hit and hit[0] in ("in", "out"):  # a slide's dot: that slide goes, both its dots
             menu.add_command(label=tr("hz.slide_delete"), command=lambda: self.delete_slide(hit[2]))
-            menu.add_separator()
-        if pairs and all(self.link(a, b) for a, b in pairs):
-            menu.add_command(label=tr("hz.slide_remove"), command=lambda: self.set_slide(False))
-        else:
-            menu.add_command(label=tr("hz.slide_add"), command=lambda: self.set_slide(True),
-                             state="normal" if pairs else "disabled")
-        menu.tk_popup(e.x_root, e.y_root)
+        if len(self.sel) >= 2:  # (only with two or more selected, user)
+            if menu.index("end") is not None and menu.type("end") != "separator":
+                menu.add_separator()
+            if pairs and all(self.link(a, b) for a, b in pairs):
+                menu.add_command(label=tr("hz.slide_remove"), command=lambda: self.set_slide(False))
+            else:
+                menu.add_command(label=tr("hz.slide_add"), command=lambda: self.set_slide(True),
+                                 state="normal" if pairs else "disabled")
+        if menu.index("end") is not None and menu.type("end") == "separator":  # (the gates' group ends with one)
+            menu.delete("end")
+        if menu.index("end") is not None:
+            menu.tk_popup(e.x_root, e.y_root)
 
     def delete_slide(self, s):
         """Slide s goes (the dots on both its notes)."""
