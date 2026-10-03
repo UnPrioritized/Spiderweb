@@ -457,15 +457,20 @@ def gap_lines(sh):
 
 def join_strokes(strokes):
     """Open lines that meet end to end become one line, so e.g. three lines drawn as a triangle make one
-    closed triangle (only lines with the same role). Curves and circles stay as they are (they still count as
-    joined, see strokes_closed), and so do lines with a formula."""
+    closed triangle (only lines with the same role and outline colour, which they keep). Curves and circles stay as
+    they are (they still count as joined, see strokes_closed), and so do lines with a formula."""
     def plain_line(st):
         return st["kind"] == "poly" and not stroke_closed(st) and not has_formula(st)
 
     others = [st for st in strokes if not plain_line(st)]
-    for role in (None,) + ROLES:
-        lines = [[list(p) for p in st["pts"]] for st in strokes if plain_line(st) and role_of(st) == role]
-        others += [dict({"kind": "poly", "pts": pts}, **({"role": role} if role else {})) for pts in join_paths(lines)]
+    order = ("",) + ROLES
+    kinds = sorted({(role_of(st) or "", colour_of(st)) for st in strokes if plain_line(st)},
+                   key=lambda k: (order.index(k[0]), k[1]))
+    for role, colour in kinds:
+        lines = [[list(p) for p in st["pts"]] for st in strokes
+                 if plain_line(st) and (role_of(st) or "") == role and colour_of(st) == colour]
+        keep = dict(({"role": role} if role else {}), **({"colour": colour} if colour else {}))
+        others += [dict({"kind": "poly", "pts": pts}, **keep) for pts in join_paths(lines)]
     return others
 
 
@@ -792,10 +797,13 @@ def find_spans(sh, ppq):
         edges += (np.zeros(len(edges[0]), np.int64),)
     out = []
     for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1):
-        for a, b, *_ in (threshold_spans(polys, q, tx["threshold"]) if tx else
-                         row_pieces(edges, q, walled, as_normal) if walled else row_spans(polys, q, edges)):
-            s = math.floor(a * ppq + 0.5)
-            out.append((q, s, max(math.floor(b * ppq + 0.5), s + 1)))
+        row = [(math.floor(a * ppq + 0.5), math.floor(b * ppq + 0.5)) for a, b, *_ in (
+            threshold_spans(polys, q, tx["threshold"]) if tx else
+            row_pieces(edges, q, walled, as_normal) if walled else row_spans(polys, q, edges))]
+        # a bit under a tick only if the row has nothing else (like find_area_spans): two shapes sharing a stretch
+        # of the same side made a column of 1-tick notes along it where they overlap
+        some = any(e > s for s, e in row)
+        out += [(q, s, max(e, s + 1)) for s, e in row if e > s or not some]
     return out
 
 
@@ -972,11 +980,14 @@ def area_spans(sh, ppq):
 
 
 def area_paint(sh, amap):
-    """Each area's colour as given by hand (-1: as normal, 0: empty, k: colour k); one more at the end for walls."""
+    """Each area's colour as given by hand (-1: as normal, 0: empty, k: colour k); one more at the end for walls.
+    The area around the drawing never takes one (a coloured area whose lines were erased: its spot is out there,
+    and coloured the gaps between the drawing's parts)."""
     paint = np.full(amap.count + 1, -1, np.int64)
     seeds = np.asarray([a[:2] for a in sh["areas"]], float).reshape(-1, 2)
+    out = amap.outside()
     for lab, a in zip(amap.at(seeds[:, 0], seeds[:, 1]).tolist(), sh["areas"]):
-        if lab >= 0:
+        if lab >= 0 and lab != out:
             paint[lab] = a[2]
     return paint
 
@@ -1377,6 +1388,8 @@ def touching_parts(spans, colours, lines):
     out, side by side on a key or one over the other (where a line runs too near another for the map's cells, no
     border is found, e.g. a curve touching a side), the touching part of the shorter stretch, as (start, end, key)
     notes: the outline never lets two colours touch (user)."""
+    if not len(spans):  # (nothing filled: every area emptied, or the shape is above the top key)
+        return np.zeros((0, 3), np.int64)
     parts = [cut_out(spans[colours == k], lines) for k in np.unique(colours).tolist()]
     col = np.concatenate([np.full(len(p), k, np.int64) for p, k in zip(parts, np.unique(colours).tolist())])
     n = np.concatenate(parts) if parts else np.zeros((0, 3), np.int64)

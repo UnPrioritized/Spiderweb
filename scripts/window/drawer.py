@@ -13,7 +13,7 @@ from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half
 import numpy as np
 
 from notes.areas import COLOURS, clean_areas
-from notes.custom import (LAND_SHARE, ROLES, TOUCH_BEATS, TOUCH_KEYS, areas_filled, carry_areas, clean_strokes,
+from notes.custom import (LAND_SHARE, ROLES, TOUCH_BEATS, TOUCH_KEYS, area_paint, areas_filled, carry_areas, clean_strokes,
                           colour_of, filled_spots, join_strokes, open_paths, plain_stroke, role_of, shape_areas, stroke_points, takes_formula)
 from roll.roll_shared import SLOT_COLORS
 from notes.pattern import has_formula, moved_formulas
@@ -303,13 +303,7 @@ class Drawer(tk.Toplevel):
 
     def area_paint(self, amap):
         """Each area's colour as given by hand (-1: as normal, 0: empty, k: colour k)."""
-        paint = np.full(amap.count + 1, -1, np.int64)
-        if self.areas:
-            labs = amap.at([a[0] for a in self.areas], [a[1] for a in self.areas])
-            for lab, a in zip(labs.tolist(), self.areas):
-                if lab >= 0:
-                    paint[lab] = a[2]
-        return paint
+        return area_paint({"areas": self.areas}, amap)
 
     def area_press(self, e):
         """Click = the area under the mouse gets the picked colour; dragging on colours every area it passes
