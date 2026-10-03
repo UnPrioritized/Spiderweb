@@ -41,7 +41,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.view_t, self.view_top, self.sx, self.sy = 0.0, 127.5, None, None
         self.draft = None  # shape being drawn
         self.drag = None   # what the left mouse button is doing
-        self.box_shift = False   # the Select box was last moved with Shift (not snapped)
+        self.box_shift = False   # the Select box was last moved with Shift (its mouse corner not snapped)
+        self.box_shift0 = False  # ... pressed with Shift (its first corner not snapped)
         self.box_kept = None     # ([box_area, ...], selection) of the last Select boxes, shown after letting go
         self.box_more = []       # the boxes kept when a Ctrl+drag started a new one (it's added to them)
         self.box_mouse = None    # (x, y, state) of the mouse while a Select box is dragged (box_scroll)
@@ -138,8 +139,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         _, x, y, cx, cy = self.drag[:5]
         if abs(cx - x) < BOX_STILL and abs(cy - y) < BOX_STILL:
             return None
-        step = None if self.box_shift else self.app.snap_beats()
-        b0, b1 = grid_span(self.x2t(x), self.x2t(cx), step or 1 / self.app.ppq)
+        tick, step = 1 / self.app.ppq, self.app.snap_beats()
+        b0, b1 = grid_span(self.x2t(x), self.x2t(cx), tick if self.box_shift0 else step or tick,
+                           tick if self.box_shift else step or tick)
         top = self.app.keys - 1
         p0, p1 = sorted(min(max(round(self.y2p(v)), 0), top) for v in (y, cy))
         return b0, p1 + 0.5, b1, p0 - 0.5
@@ -236,6 +238,19 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return self.box_kept[0]
         self.box_kept = None
         return None
+
+    def move_kept_box(self, fn):
+        """The shapes in the kept Select boxes were turned / flipped: the boxes go along, each corner by fn(beat,
+        key) -> (beat, key), the keys out to whole rows."""
+        kept = self.kept_box()
+        if not kept:
+            return
+        new = []
+        for b0, top, b1, bottom in kept:
+            pts = [fn(b, p) for b in (b0, b1) for p in (top, bottom)]
+            bs, ps = [b for b, _ in pts], [p for _, p in pts]
+            new.append((min(bs), math.ceil(max(ps) - 0.5 - 1e-9) + 0.5, max(bs), math.floor(min(ps) + 0.5 + 1e-9) - 0.5))
+        self.box_kept = (new, set(self.app.sels))
 
     def clamp_view(self):
         if self.sy is None:
@@ -590,6 +605,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 if not e.state & CTRL:  # a click without dragging moves the play line here
                     app.select(None)
                 self.drag = ("box", e.x, e.y, e.x, e.y, set(app.sels), app.sel)
+                self.box_shift0 = bool(e.state & SHIFT)
                 return
             if e.state & CTRL:  # Ctrl+click adds or removes a shape
                 app.select(i, toggle=True)

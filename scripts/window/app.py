@@ -1100,6 +1100,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 sh["glue"] = glue_flipped(sh["glue"], sideways)
             if sh.get("range"):  # (a spam gate range runs the other way)
                 sh["range"] = flipped_range(sh["range"], sideways)
+        self.roll.move_kept_box(lambda b, p: (mid2 - b, p) if sideways else (b, mid2 - p))  # (flips too)
         self.sync_panel()
         self.shapes_changed()
 
@@ -1139,6 +1140,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 sh["glue"] = glue_turned(sh["glue"], clockwise)
             if sh.get("range"):
                 sh["range"] = turned_range(sh["range"], clockwise)
+        self.roll.move_kept_box(lambda b, p: (cb + sign * (p - cp) * r, cp - sign * (b - cb) / r))  # (turns too)
         self.sync_panel()
         self.shapes_changed()
 
@@ -1416,9 +1418,11 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
 
     def sel_state(self):
         """The selection as an undo step keeps it: (selected shape numbers, the main one, the kept Select boxes or
-        None, the Hz bass window's HzWindow.sel_state() or None)."""
+        None, the Hz bass window's HzWindow.sel_state() or None, the picked stroke, the funnel's highlighted parts,
+        the one of them clicked)."""
         boxes = self.roll.kept_box()
-        return sorted(self.sels), self.sel, boxes and list(boxes), self.hz_window and self.hz_window.sel_state()
+        return (sorted(self.sels), self.sel, boxes and list(boxes), self.hz_window and self.hz_window.sel_state(),
+                self.stroke, list(self.parts), self.part_main)
 
     def scrub_step(self, gesture, run):
         """run() steps a number box (widgets.Scrub). The steps of one gesture (a label drag, or arrows / wheel on the
@@ -1468,8 +1472,12 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.stroke = None
         if self.sel not in self.sels:
             self.sel = max(self.sels, default=None)
-        # the Select boxes come back where they were (only while they still hold the same selection)
-        self.roll.box_kept = (picked[2], set(self.sels)) if picked[2] and self.sels == set(picked[0]) else None
+        # the Select boxes, the picked stroke and the funnel's highlighted parts come back as they were (only while
+        # they still go with the same selection)
+        same = self.sels == set(picked[0])
+        self.roll.box_kept = (picked[2], set(self.sels)) if picked[2] and same else None
+        if same:
+            self.stroke, self.parts, self.part_main = picked[4], set(picked[5]), picked[6]
         self._edit_key = self._scrub = None
         self.sync_panel()
         self.shapes_changed()

@@ -82,10 +82,12 @@ def built_in_name(name):
 
 
 def library_names():
+    """The built-in shapes first, in their own order (user: always on top; a saved one by that name takes its
+    place), then the saved shapes A-Z."""
     names = saved_names()
-    taken = {n.lower() for n in names}
-    names += [b for b in BUILT_IN if b.lower() not in taken]
-    return sorted(names, key=str.lower)
+    by_lower = {n.lower(): n for n in names}
+    top = [by_lower.get(b.lower(), b) for b in BUILT_IN]
+    return top + sorted((n for n in names if not built_in_name(n)), key=str.lower)
 
 
 def shape_file(name):
@@ -770,8 +772,8 @@ class Drawer(tk.Toplevel):
         for i, j, u, v in self.handles():
             x, y = self.to_screen(u, v)
             if abs(x - e.x) <= r and abs(y - e.y) <= r and not ctrl:
-                self.push_undo()
                 self.select(i)
+                self.push_undo()  # (after: undo leaves the stroke grabbed selected, like the piano roll)
                 if self.strokes[i]["kind"] == "ellipse":
                     self.drag = ("corner", i, j, list(self.strokes[i]["box"]))
                 elif self.is_pen_point(i, j):
@@ -794,9 +796,9 @@ class Drawer(tk.Toplevel):
                 self.sel = i
         elif i is not None or (self.chosen() and self.in_boxes(e.x, e.y)):
             # the stroke moves, and the others selected with it (inside the select box: all of them)
-            self.push_undo()
             if i is not None:
                 self.select(i)
+            self.push_undo()
             self.drag = ("stroke", self.event_pt(e, snap=False),
                          {k: json.dumps(self.strokes[k]) for k in self.chosen()}, json.dumps(self.boxes))
         else:  # a select box (Ctrl = adds another to what's selected); a click = deselect
@@ -874,7 +876,7 @@ class Drawer(tk.Toplevel):
             self.sel = got[-1] if got else None  # (the top one: its handles show if it's a curve)
             self.picks = set(got[:-1])
             return self.redraw()
-        if self.undo_stack and self.undo_stack[-1] == self.snap():
+        if self.undo_stack and self.undo_stack[-1][0] == self.snap():
             self.undo_stack.pop()  # clicked without moving anything (the undone steps stay redoable)
             self.redo_stack = self.redo_kept
         else:
@@ -1367,36 +1369,54 @@ class Drawer(tk.Toplevel):
         self.strokes, self.areas = json.loads(text)
 
     def push_undo(self, before=None):
-        """A step to undo (before: snap() from before, if they were already changed); drops the redo steps."""
-        self.undo_stack.append(before or self.snap())
+        """A step to undo (before: snap() from before, if they were already changed); drops the redo steps. The
+        selection is kept with it: undo puts it back with the strokes."""
+        self.undo_stack.append((before or self.snap(), self.sel_state()))
         del self.undo_stack[:-200]
         self.redo_kept, self.redo_stack = self.redo_stack, []
+
+    def sel_state(self):
+        """The selection as an undo step keeps it: (the selected stroke, the others selected, the select boxes)."""
+        return self.sel, sorted(self.picks), json.loads(json.dumps(self.boxes))
 
     def erasing(self):
         """An eraser box is being dragged."""
         return bool(self.drag) and self.drag[0] == "erasebox"
+
+    def drop_drag(self):
+        """Ctrl+Z / Ctrl+Y while the mouse holds something (like the piano roll): the drag ends first, and a press
+        that hasn't moved anything yet leaves no step."""
+        drag, self.drag = self.drag, None
+        if (drag and drag[0] in ("pen", "corner", "points", "stroke") and self.undo_stack
+                and self.undo_stack[-1][0] == self.snap()):
+            self.undo_stack.pop()
+            self.redo_stack = self.redo_kept
 
     def undo(self):
         if self.erasing():  # (nothing while an eraser box is held)
             return
         if self.draft:
             return self.cancel_draft()
-        if self.undo_stack:
-            self.redo_stack.append(self.snap())
-            self.load_snap(self.undo_stack.pop())
-            self.boxes = []  # (the strokes may have moved away from them)
-            self.changed(settle=False)
+        self.drop_drag()
+        self.restore(self.undo_stack, self.redo_stack)
 
     def redo(self):
         if self.erasing():
             return
         if self.draft:
             return self.cancel_draft()
-        if self.redo_stack:
-            self.undo_stack.append(self.snap())
-            self.load_snap(self.redo_stack.pop())
-            self.boxes = []
-            self.changed(settle=False)
+        self.drop_drag()
+        self.restore(self.redo_stack, self.undo_stack)
+
+    def restore(self, src, dst):
+        """Undo / redo: the strokes and the selection as they were."""
+        if not src:
+            return self.redraw()  # (a dropped select box goes)
+        dst.append((self.snap(), self.sel_state()))
+        snap, (self.sel, picks, self.boxes) = src.pop()
+        self.load_snap(snap)
+        self.picks = set(picks)
+        self.changed(settle=False)
 
     def clear(self):
         if self.strokes or self.areas:

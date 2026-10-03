@@ -79,15 +79,21 @@ BOX_STILL = 4  # a Select box moved less than this many pixels from where it sta
 BOX_SCROLL_MS = 100  # a Select box dragged past the edge scrolls the view a beat (3 keys up / down) this often
 
 
-def grid_span(a, b, step):
+def grid_span(a, b, step, step_b=None):
     """The beats a Select box covers, from a to b (either order), on the snap grid: out to the grid line before
     the lower one and after the higher one, so it jumps a whole grid step as soon as the mouse crosses a line
-    (the pencil goes to the NEAREST line instead). step 0 / None = not snapped."""
-    lo, hi = min(a, b), max(a, b)
-    if not step:
+    (the pencil goes to the NEAREST line instead). step 0 / None = not snapped. step_b = b's own step (the box's
+    corner at the mouse; a = where it was pressed: user, Shift pressed or let go while dragging changes only the
+    mouse's corner, the first one stays as Shift was at the press)."""
+    step_b = step if step_b is None else step_b
+    (lo, s_lo), (hi, s_hi) = sorted(((a, step), (b, step_b)), key=lambda c: c[0])
+    if not s_lo and not s_hi:
         return lo, hi
-    lo, hi = math.floor(lo / step + 1e-9) * step, math.ceil(hi / step - 1e-9) * step
-    return lo, max(hi, lo + step)
+    if s_lo:
+        lo = math.floor(lo / s_lo + 1e-9) * s_lo
+    if s_hi:
+        hi = math.ceil(hi / s_hi - 1e-9) * s_hi
+    return lo, max(hi, lo + min(s for s in (s_lo, s_hi) if s))
 
 
 def grab_while_panning(widget):

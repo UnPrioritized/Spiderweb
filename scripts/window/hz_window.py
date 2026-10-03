@@ -65,6 +65,8 @@ def open_hz(app):
     else:
         app.hz_window = HzWindow(app)
     app.hz_window.sync()
+    w = app.hz_window  # it takes the keyboard (user: keys pressed right after went to the piano roll behind)
+    w.after_idle(lambda: w.winfo_exists() and w.canvas.focus_force())
 
 
 def gate_mode(hz):
@@ -814,8 +816,9 @@ class HzWindow(tk.Toplevel):
         (x, y), (cx, cy) = d["from"], d["to"]
         if abs(cx - x) < BOX_STILL and abs(cy - y) < BOX_STILL:
             return None
-        step = None if d.get("shift") else self.snap_beats()
-        b0, b1 = grid_span(self.beat_at(x), self.beat_at(cx), step or 1 / self.app.ppq)
+        tick, step = 1 / self.app.ppq, self.snap_beats()
+        b0, b1 = grid_span(self.beat_at(x), self.beat_at(cx), tick if d.get("shift0") else step or tick,
+                           tick if d.get("shift") else step or tick)
         k0, k1 = sorted((self.key_at(y), self.key_at(cy)))
         return b0, k1, b1, k0 - 1
 
@@ -997,7 +1000,7 @@ class HzWindow(tk.Toplevel):
                 base = set(self.sel) if add else set()  # boxes kept)
                 self.sel = set(base)
                 self.drag = {"kind": "box", "from": (e.x, e.y), "to": (e.x, e.y), "base": base,
-                             "more": list(kept or []) if add else []}
+                             "more": list(kept or []) if add else [], "shift0": bool(e.state & SHIFT)}
                 return self.redraw()
             if not self.can_place():
                 return
@@ -1382,6 +1385,7 @@ class HzWindow(tk.Toplevel):
         orig = {self.tones[j]["id"]: get(self.tones[j]) for j in (self.sel if i in self.sel else {i})}
         before = copy.deepcopy(self.tones)
         state = {"pushed": False}
+        redo = self.app.redo_stack[:]  # (Cancel leaves no step behind, not even one to redo)
 
         def apply(v):
             moved = v - orig[held]
@@ -1396,6 +1400,8 @@ class HzWindow(tk.Toplevel):
         got = ask_live(self, self.app, prompt, orig[held], lo, hi, steps, apply)
         if got is None and state["pushed"]:  # Cancel: back as it was
             self.app.undo()
+            self.app.redo_stack[:] = redo
+            self.app.sync_history()
 
     def type_tune(self, i):
         """A note's own tune in cents (live_edit)."""
