@@ -11,8 +11,9 @@ import math
 from files.lang import tr
 from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half_at, handle_lines, nearest, pen_handles,
                           set_symmetry)
-from notes.custom import (add_stroke, box_frame, carry_areas, custom_settings, frame_to_bp, frame_to_uv, map_stroke,
-                          new_live_shape, plain_stroke, refit, stroke_bp, stroke_ends, stroke_points)
+from notes.custom import (add_stroke, box_frame, carried_spots, carry_areas, custom_settings, frame_to_bp, frame_to_uv,
+                          map_stroke, new_live_shape, plain_stroke, refit, settled_areas, stroke_bp, stroke_ends,
+                          stroke_points)
 from notes.pattern import has_formula
 from notes.polygon import polygon_aspect, polygon_strokes
 from roll.roll_funnel import seg_dist
@@ -125,12 +126,28 @@ class LiveDrawing:
             app.add_shape(target)
         else:
             app.push_undo(name=tr("roll_live.draw_into_the_live_shape"))
+            old = self.before_edit(target)
             for st in sts:
                 k = add_stroke(target, st)
+            self.settle(target, old)
             app.shapes_changed()
         # a new curve is picked, so its anchors and handles can be bent right away
         app.set_stroke(k if target["strokes"][k]["kind"] == "curve" else None)
         return True
+
+    @staticmethod
+    def before_edit(sh):
+        """The custom shape's strokes, box and coloured areas as they are (for settle / carry_areas), or None when it
+        has no coloured areas."""
+        return copy.deepcopy({k: sh[k] for k in ("strokes", "pts", "areas")}) if sh.get("areas") else None
+
+    @staticmethod
+    def settle(sh, old):
+        """After lines drawn, erased or changed in one go (not drags: carry_areas), like the drawer: each colour goes
+        to the area most of its old one became (custom.settled_areas; a new line splitting a coloured area leaves
+        the colour on the bigger part, an area gone forgets its colour). old: before_edit."""
+        if old:
+            sh["areas"] = settled_areas(old, sh)
 
     # ------------------------------------------------------------ one stroke of a custom shape
 
@@ -270,7 +287,7 @@ class LiveDrawing:
         """Dragging a stroke's point (drag_stroke_point), or the picked curve stroke's anchor / handle (snapped
         unless Shift; Alt like bezier.drag_point). Returns the hid to go on with. Coloured areas keep their colours
         (custom.carry_areas)."""
-        old = sh.get("areas") and copy.deepcopy({k: sh[k] for k in ("strokes", "pts", "areas")})
+        old = self.before_edit(sh)
         if hid[0] == "pt":
             hid = self.drag_stroke_point(sh, hid, e)
         else:
@@ -292,8 +309,10 @@ class LiveDrawing:
             self.app.status.config(text=tr("roll_live.the_middle_anchor_of_a_symmetric"))
         elif what:
             self.app.push_undo(name=tr("roll_live.remove_a_point"))
+            old = self.before_edit(sh)
             delete_point(st, hid[1], self.stroke_maps(sh)[0])
             refit(sh)
+            self.settle(sh, old)
             self.app.shape_edited()
 
     def stroke_click(self, sh, e, near=None):
@@ -306,10 +325,11 @@ class LiveDrawing:
         seg, t, d = nearest(st["pts"], to_xy, e.x, e.y)
         if near is not None and d > near:
             return False
-        before = json.dumps(self.app.shapes)
+        before, old = json.dumps(self.app.shapes), self.before_edit(sh)
         if not add_anchor(st, seg, t, list(to_uv(*self.event_pt(e))), to_xy):
             return False
         refit(sh)
+        self.settle(sh, old)
         self.app.push_undo(before, tr("roll_live.add_an_anchor"))
         self.app.shape_edited()
         return True
@@ -321,8 +341,10 @@ class LiveDrawing:
             return
         to_xy = self.stroke_maps(sh)[0]
         self.app.push_undo(name=tr("roll_live.symmetric_halves"))
+        old = self.before_edit(sh)
         set_symmetry(st, mode, half_at(st["pts"], to_xy, at.x, at.y), to_xy)
         refit(sh)
+        self.settle(sh, old)
         self.app.shape_edited()
 
     def set_stroke_role(self, sh, k, role):
@@ -331,9 +353,11 @@ class LiveDrawing:
         if (st.get("role") or "both") == role:
             return
         self.app.push_undo(name=tr("roll_live.stroke_role"))
+        old = self.before_edit(sh)
         st.pop("role", None)
         if role != "both":
             st["role"] = role
+        self.settle(sh, old)
         self.app.shape_edited()
 
     def set_stroke_colour(self, sh, k, colour):
@@ -353,8 +377,10 @@ class LiveDrawing:
         if len(sh["strokes"]) <= 1:
             return app.delete_selected()
         app.push_undo(name=tr("roll_live.delete_a_stroke"))
+        old = self.before_edit(sh)
         del sh["strokes"][k]
         refit(sh)
+        self.settle(sh, old)
         app.set_stroke(None)
         app.shape_edited()
         app.sync_custom()
@@ -388,21 +414,33 @@ class LiveDrawing:
             app.add_shape(host, tr("roll_live.paste_a_stroke"))
         else:
             app.push_undo(name=tr("roll_live.paste_a_stroke"))
+            old = self.before_edit(host)
             k = add_stroke(host, st)
+            self.settle(host, old)
             app.shapes_changed()
         app.set_stroke(k)
         app.sync_custom()
 
     def change_stroke(self, sh, k, fn, turn=None, name=tr("roll_live.change_a_stroke")):
-        """Stroke k moved point by point by fn(beat, pitch) (turn: beats per key on screen, when it's turned 90°)."""
+        """Stroke k moved point by point by fn(beat, pitch) (turn: beats per key on screen, when it's turned 90°).
+        A coloured area's colour goes along when the stroke closes it in more tightly than the rest do, like the
+        drawer's (custom.carried_spots)."""
         st = stroke_bp(sh, k)
         new = map_stroke(st, fn)
         if turn and "k" in st:  # still round (arcs, straightened freehand), like turning a shape
             new["k"] = turn * turn / st["k"]
         app = self.app
         app.push_undo(name=name)
+        areas = sh.get("areas") or []
+        going = carried_spots(sh["strokes"], [k], areas, sh["pts"])
+        to_bp = frame_to_bp(sh["pts"])
+        moved = [fn(*to_bp(u, v)) for u, v, _ in areas]  # (in beats / pitch: the box is fitted again)
         del sh["strokes"][k]
         add_stroke(sh, new, at=k)
+        to_uv = frame_to_uv(sh["pts"])
+        if any(going) and to_uv:
+            sh["areas"] = [[*(round(x, 6) for x in to_uv(*m)), a[2]] if go else a
+                           for a, m, go in zip(sh["areas"], moved, going)]
         app.shape_edited()
         app.set_stroke(k)
 

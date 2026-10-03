@@ -13,8 +13,8 @@ from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half
 import numpy as np
 
 from notes.areas import COLOURS, clean_areas
-from notes.custom import (LAND_SHARE, ROLES, TOUCH_BEATS, TOUCH_KEYS, area_paint, areas_filled, carry_areas, clean_strokes,
-                          colour_of, filled_spots, join_strokes, open_paths, plain_stroke, role_of, settled_areas,
+from notes.custom import (LAND_SHARE, ROLES, TOUCH_BEATS, TOUCH_KEYS, area_paint, areas_filled, carry_areas, carried_spots,
+                          clean_strokes, colour_of, filled_spots, join_strokes, open_paths, plain_stroke, role_of, settled_areas,
                           shape_areas, stroke_points, takes_formula)
 from roll.roll_shared import SLOT_COLORS
 from notes.pattern import has_formula, moved_formulas
@@ -976,23 +976,7 @@ class Drawer(tk.Toplevel):
         """For each coloured area: whether it goes along when strokes idx are flipped / turned (all of them: the whole
         drawing). It does when those strokes close it in more tightly than the others do (a bar turned inside a box:
         the bar's colour, not the box's)."""
-        if len(idx) == len(self.strokes) or not self.areas:
-            return [len(idx) == len(self.strokes)] * len(self.areas)
-        u, v = [a[0] for a in self.areas], [a[1] for a in self.areas]
-
-        def sizes(strokes):  # how big the area each spot is in is (u x v), with these strokes only (outside: inf)
-            amap = shape_areas({"strokes": strokes, "pts": AREA_FRAME}) if strokes else None
-            if amap is None:
-                return np.full(len(u), np.inf)
-            labs = amap.at(u, v)
-            cells = np.bincount(amap.labels[amap.labels >= 0].ravel(), minlength=amap.count + 1)
-            size = cells[np.maximum(labs, 0)] / (amap.k[0] * amap.k[1])
-            return np.where((labs < 0) | (labs == amap.outside()), np.inf, size)
-
-        picked = set(idx)
-        mine = sizes([st for i, st in enumerate(self.strokes) if i in picked])
-        rest = sizes([st for i, st in enumerate(self.strokes) if i not in picked])
-        return (np.isfinite(mine) & (mine < rest)).tolist()
+        return carried_spots(self.strokes, idx, self.areas, AREA_FRAME)
 
     def on_drag(self, e):
         self.show_position(e)

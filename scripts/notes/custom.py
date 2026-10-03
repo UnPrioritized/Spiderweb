@@ -1005,6 +1005,29 @@ def settled_areas(old, new):
     return out
 
 
+def carried_spots(strokes, idx, areas, frame):
+    """For each coloured area's spot: whether it goes along when strokes idx are flipped / turned (all of them: the
+    whole drawing). It does when those strokes close its area in more tightly than the others do (a bar turned
+    inside a box: the bar's colour, not the box's). frame: the strokes' box (pts)."""
+    if len(idx) == len(strokes) or not areas:
+        return [len(idx) == len(strokes)] * len(areas)
+    u, v = [a[0] for a in areas], [a[1] for a in areas]
+
+    def sizes(some):  # how big the area each spot is in is (u x v), with these strokes only (outside: inf)
+        amap = shape_areas({"strokes": some, "pts": frame}) if some else None
+        if amap is None:
+            return np.full(len(u), np.inf)
+        labs = amap.at(u, v)
+        cells = np.bincount(amap.labels[amap.labels >= 0].ravel(), minlength=amap.count + 1)
+        size = cells[np.maximum(labs, 0)] / (amap.k[0] * amap.k[1])
+        return np.where((labs < 0) | (labs == amap.outside()), np.inf, size)
+
+    picked = set(idx)
+    mine = sizes([st for i, st in enumerate(strokes) if i in picked])
+    rest = sizes([st for i, st in enumerate(strokes) if i not in picked])
+    return (np.isfinite(mine) & (mine < rest)).tolist()
+
+
 def area_cuts(sh):
     """The lines that split areas without closing a loop, in beats / keys: fill lines, and outline lines too flat to
     fill (fill_plan "flat": a box's side touching the rest only partway along its lines, user, was no wall)."""
