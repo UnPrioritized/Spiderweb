@@ -61,7 +61,7 @@ class AreaMap:
         self.lo = lo - (REACH + 2) / self.k
         self.w = self.h = n + 2 * (REACH + 2) + 1
         self.lines = landed([p for p in paths + cut_paths if len(p) >= 2], REACH / self.k)
-        self._exact = None
+        self._exact = self._sizes = None
         for i, p in enumerate(cut_paths):  # loose ends reach a little further
             if len(p) >= 2 and math.dist(p[0], p[-1]) > 1e-9:
                 c = (p - self.lo) * self.k
@@ -122,6 +122,14 @@ class AreaMap:
         """The area number at each spot (u, v arrays), exact on the lines."""
         fc, lab = self.exact()[:2]
         return lab[fc.area_at(u, v)]
+
+    def sizes(self):
+        """How big each area is, exact (u x v), by area number."""
+        if self._sizes is None:
+            fc, lab = self.exact()[:2]
+            size, g = fc.pieces()[2:]
+            self._sizes = np.bincount(lab[g], size, self.count + 1)
+        return self._sizes
 
     def _label(self, free):
         """Every free cell's area number (walls: -1), how many areas, and one spot (u, v) inside each."""

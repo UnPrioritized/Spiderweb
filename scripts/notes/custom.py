@@ -350,6 +350,7 @@ LAND_SHARE = 1e-4  # in the drawer (u, v): an end this share of the drawing's si
 # a line only as near as the red dots go by (LAND_SHARE; a small box joined ends far apart, user)
 DRAWN_FRAME = [[0.0, 0.0], [TOUCH_BEATS / LAND_SHARE, 0.0], [0.0, TOUCH_KEYS / LAND_SHARE]]
 ON_LINE = 0.01  # placed: an end landing this close (in TOUCH_BEATS / TOUCH_KEYS) needs no line closing it
+SAME_SIZE = 0.98  # two coloured areas this close in size count as equally big (row_done: they meet in the middle)
 _plans = {}
 _spans = {}  # inside_spans, remembered
 _inner = {}  # inner_ticks, remembered
@@ -861,13 +862,22 @@ def shape_faces(sh):
     return faces([uv_points(sh["pts"], p) for p in walls(sh)])
 
 
-def spot_colour(sh, u, v):
+def spot_colour(sh, u, v, sizes=False):
     """For each row of spots (u, v: (n, m) arrays, spread over one piece), the colour given by hand (spot_paint)
     most of them are in, as the exact areas say (as the drawer shows them: in a tip thinner than the cells, e.g.
     where a curve touches a line or many lines start at one point, the cells are on lines or in little pockets with
-    no colour, user)."""
-    got = spot_paint(sh, u.ravel(), v.ravel()).reshape(u.shape)
-    return np.asarray([max(set(row), key=row.count) for row in got.tolist()], np.int64).reshape(-1)
+    no colour, user). sizes: also how big the area most of them are in is (row_done)."""
+    drawn = shape_areas({"strokes": sh["strokes"], "pts": DRAWN_FRAME})
+    if drawn is None:
+        got = np.full(u.shape, -1, np.int64)
+        return (got[:, 0], np.ones(len(got))) if sizes else got[:, 0]
+    lab = drawn.fine_at(u.ravel(), v.ravel())
+    got = area_paint(sh, drawn)[lab].reshape(u.shape)
+    out = np.asarray([max(set(row), key=row.count) for row in got.tolist()], np.int64).reshape(-1)
+    if not sizes:
+        return out
+    most = [max(set(row), key=row.count) for row in lab.reshape(u.shape).tolist()]
+    return out, drawn.sizes()[np.asarray(most, np.int64)]
 
 
 def filled_uv(sh, u, v):
@@ -1271,25 +1281,29 @@ def find_area_spans(sh, ppq):
     edges = (a[keep, 0], a[keep, 1], b[keep, 0], b[keep, 1], lid[keep])
     frame = sh["pts"]
 
-    def colour(x, y):  # (pieces, spots) spots inside each piece -> its colour: the one most of them are in
+    def colour(x, y, sizes=False):  # (pieces, spots) spots inside each piece -> its colour: the one most are in
         uv = uv_points(frame, np.column_stack([x.ravel(), y.ravel()]))
-        return spot_colour(sh, uv[:, 0].reshape(x.shape), uv[:, 1].reshape(x.shape))
+        return spot_colour(sh, uv[:, 0].reshape(x.shape), uv[:, 1].reshape(x.shape), sizes)
 
     walled = fill_test(sh)
     rows = [(q, row_cut(edges, q)) for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1)]
     rows = [(q, cut) for q, cut in rows if cut]
     # (every row's spots asked at once: one row at a time, asking took most of the time)
     asked = []
-    for i in (1, 2):  # the pieces' spots, the spots on the rows' middle lines
+    for i in (1, 2):  # the pieces' spots (+ their areas' sizes), the spots on the rows' middle lines
         x = np.concatenate([cut[i][0] for _, cut in rows]) if rows else np.zeros((0, 3))
         y = np.concatenate([cut[i][1] for _, cut in rows]) if rows else np.zeros((0, 3))
-        got = (colour(x, y), walled(x, y) if walled else None) if len(x) else (np.zeros(0, np.int64), None)
+        got = (np.zeros(0, np.int64), None, None)
+        if len(x):
+            c, size = colour(x, y, True) if i == 1 else (colour(x, y), None)
+            got = (c, walled(x, y) if walled else None, size)
         ends = np.cumsum([len(cut[i][0]) for _, cut in rows])[:-1]
         asked.append([np.split(a, ends) if a is not None else [None] * len(rows) for a in got])
     out = []
     for j, (q, cut) in enumerate(rows):
         row = [(math.floor(s * ppq + 0.5), math.floor(e * ppq + 0.5), g)
-               for s, e, g in row_done(cut, asked[0][0][j], asked[0][1][j], asked[1][0][j], asked[1][1][j])]
+               for s, e, g in row_done(cut, asked[0][0][j], asked[0][1][j], asked[1][0][j], asked[1][1][j],
+                                       asked[0][2][j])]
         some = any(e > s for s, e, _ in row)  # (a bit under a tick, e.g. at a tip: only if the row has nothing else)
         out += [(s, max(e, s + 1), q, g) for s, e, g in row if e > s or not some]
     return np.asarray(out, np.int64).reshape(-1, 4) if out else none
@@ -1363,12 +1377,16 @@ def row_cut(edges, q):
     return pieces, (np.column_stack(xs), np.column_stack(ys)), (cxs, cys)
 
 
-def row_done(cut, c, wall, cpaint, cwall):
+def row_done(cut, c, wall, cpaint, cwall, size=None):
     """row_pieces from row_cut's cut and the answers: c = colour and wall = walled (None: even-odd) of the pieces'
-    spots, cpaint / cwall the same of the middle line's."""
+    spots, cpaint / cwall the same of the middle line's, size: how big each piece's area is (None: all alike).
+    Where two colours meet, the SMALLER area's notes cover the line like on an outside edge and the bigger one fills
+    up to it (user: every line looks the same, a small area like its shape drawn alone); about as big: they meet
+    where the line crosses the row's middle."""
     pi, depth, xm, xl, xr, tall, cx, clid = cut[0]
     filled = np.where(c >= 0, c > 0, wall if wall is not None else depth[pi] % 2 == 1)
     group = np.where(c > 0, c, 0)
+    size = np.ones(len(pi)) if size is None else np.asarray(size, float)
     joined = np.zeros(len(pi), bool)
     joined[1:] = pi[1:] == pi[:-1] + 1  # (the piece before it is in the same slice)
     left_full = np.zeros(len(pi), bool)
@@ -1377,7 +1395,13 @@ def row_done(cut, c, wall, cpaint, cwall):
     right_full[:-1] = joined[1:] & filled[1:]
     left = np.where(left_full, xm[pi], xl[pi])
     right = np.where(right_full, xm[pi + 1], xr[pi + 1])
-    lo_, hi_, k, tall = left[filled], right[filled], group[filled], tall[pi][filled]
+    b = np.flatnonzero(left_full & filled & np.r_[False, group[1:] != group[:-1]])  # (a colour border on the left)
+    if len(b):
+        mine, theirs = size[b], size[b - 1]
+        line = np.where(mine < theirs * SAME_SIZE, xl[pi[b]], np.where(theirs < mine * SAME_SIZE, xr[pi[b]],
+                                                                       xm[pi[b]]))
+        left[b], right[b - 1] = line, line
+    lo_, hi_, k, tall, size = left[filled], right[filled], group[filled], tall[pi][filled], size[filled]
     if len(set(k.tolist())) <= 1:
         return [(s, e, int(k[0])) for s, e in merge_spans(lo_, hi_)] if len(k) else []
     # colours overlapping in the row (pieces from different slices of it): each bit of time goes to the colour that
@@ -1409,6 +1433,14 @@ def row_done(cut, c, wall, cpaint, cwall):
         ok = (j >= 0) & (j < len(cx) - 1)
         ok[ok] &= cfill[j[ok]]
         best = np.where(ok, cgroup[np.clip(j, 0, max(0, len(cgroup) - 1))], best)
+    # the smaller area wins every bit it reaches (its pieces reach as far as the line does in the row)
+    cover = (lo_[None, :] <= m[:, None]) & (hi_[None, :] > m[:, None])
+    small = np.column_stack([np.where(cover[:, which == g], size[which == g], np.inf).min(1)
+                             for g in range(len(names))])
+    if len(names) > 1:
+        two = np.sort(small, 1)[:, :2]
+        win = np.isfinite(two[:, 0]) & (two[:, 0] < two[:, 1] * SAME_SIZE)
+        best = np.where(win, names[small.argmin(1)], best)
     out = []
     for s, e, c in zip(a[has].tolist(), b[has].tolist(), best[has].tolist()):
         if out and out[-1][2] == c and out[-1][1] >= s:
