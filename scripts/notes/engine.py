@@ -22,6 +22,7 @@ from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
 from notes.chop import apply_chop, clean_chop
 from notes.claw import apply_claw, clean_claw
+from notes.gaterange import clean_range
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum, clean_strum
 from notes.bezier import anchor_count, sample
@@ -130,6 +131,9 @@ def clean_shape(sh):
             out["edge"] = min(edge, 10 ** 4)
         if sh.get("edge_mode") == "sideways":  # (the first way: each note grown sideways; default = even band)
             out["edge_mode"] = "sideways"
+        rg = clean_range(sh.get("range"))
+        if rg:  # the spam gate going from one to another across the shape (gaterange.py)
+            out["range"] = rg
         hz = clean_hz(sh.get("hz"))
         if hz:  # Hz bass (custom.py): the gate is one wave of a tone
             out["hz"] = hz

@@ -22,6 +22,7 @@ from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, cached_arrays, point_names, render, shape_notes_tracks,
                           with_chop, with_claw, slot_track_channel, with_glue, with_strum)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
+from notes.gaterange import flipped_range, turned_range
 from notes.glue import added as glue_added, flipped as glue_flipped, glue_box, to_shares as glue_shares, \
     turned as glue_turned
 from notes.pattern import moved_formulas
@@ -1120,6 +1121,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 sh["vel0"], sh["vel1"] = sh["vel1"], sh["vel0"]
             if sh.get("glue"):  # (its boxes are shares of the shape's box)
                 sh["glue"] = glue_flipped(sh["glue"], sideways)
+            if sh.get("range"):  # (a spam gate range runs the other way)
+                sh["range"] = flipped_range(sh["range"], sideways)
         self.sync_panel()
         self.shapes_changed()
 
@@ -1157,6 +1160,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 sh["shape"]["k"] = r * r / sh["shape"]["k"]
             if sh.get("glue"):
                 sh["glue"] = glue_turned(sh["glue"], clockwise)
+            if sh.get("range"):
+                sh["range"] = turned_range(sh["range"], clockwise)
         self.sync_panel()
         self.shapes_changed()
 

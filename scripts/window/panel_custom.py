@@ -1,6 +1,7 @@
 """The side panel's custom shape settings (which shape, how it's filled) and the drawer window."""
 
 import copy
+import json
 import math
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
@@ -13,8 +14,10 @@ from window.drawer import Drawer, clean_name, library_names, load_drawing, save_
 from window.panel_funnel import GATE_STEPS
 from files.mathexpr import calc, fmt
 from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
+from notes.gaterange import DIRS as RANGE_DIRS, STRAIGHT, clean_range
 from notes.hzbass import AUTO, auto_picks, shortest_gate
 from window.hz_window import open_hz
+from window.range_window import open_range_graph
 from window.widgets import Scrub, Tooltip, grid_shown
 
 GAP_COLOR = "#c06000"  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
@@ -108,6 +111,35 @@ class CustomPanel:
         self.gate_entry.bind("<Return>", lambda e: self.on_gate())
         self.gate_entry.bind("<FocusOut>", lambda e: self.on_gate())
         Scrub(self, [(self.gate_entry, self.gate_var, self.on_gate)], GATE_STEPS, 1, 10 ** 7, label=lb)
+        # Range (gaterange.py): the gate goes from this one to a second one across the shape, along a graph
+        self.range_var = tk.BooleanVar()
+        self.range_check = ttk.Checkbutton(g, text=tr("panel_custom.range"), variable=self.range_var,
+                                           command=self.on_range)
+        self.range_check.pack(side="left", padx=(8, 0))
+        Tooltip(self.range_check, tr("panel_custom.range_tip"))
+        r = self.range_row = ttk.Frame(opts)
+        self.custom_rows.append((r, dict(anchor="w", padx=(40, 0), pady=(1, 0))))
+        lb = ttk.Label(r, text=tr("panel_custom.range_to"))
+        lb.pack(side="left")
+        self.range_to_var = tk.StringVar()
+        self.range_to_entry = ttk.Entry(r, textvariable=self.range_to_var, width=7)
+        self.range_to_entry.pack(side="left", padx=4)
+        ttk.Label(r, text=tr("panel_custom.ticks_enter_to_apply"), foreground="#777").pack(side="left")
+        self.range_to_entry.bind("<Return>", lambda e: self.on_range_to())
+        self.range_to_entry.bind("<FocusOut>", lambda e: self.on_range_to())
+        Scrub(self, [(self.range_to_entry, self.range_to_var, self.on_range_to)], GATE_STEPS, 1, 10 ** 7, label=lb)
+        Tooltip(self.range_to_entry, tr("panel_custom.range_to_tip"))
+        b = ttk.Button(r, text=tr("panel_custom.range_graph"), command=lambda: open_range_graph(self))
+        b.pack(side="left", padx=(6, 0))
+        Tooltip(b, tr("panel_custom.range_graph_tip"))
+        r = self.range_dir_row = ttk.Frame(opts)
+        self.custom_rows.append((r, dict(anchor="w", padx=(40, 0), pady=(1, 0))))
+        self.range_dir_box = ttk.Combobox(r, values=[tr("panel_custom.range_time"), tr("panel_custom.range_keys")],
+                                          state="readonly", width=24)
+        self.range_dir_box.pack(side="left")
+        self.range_dir_box.bind("<<ComboboxSelected>>", lambda e: (self.set_range(
+            dir=RANGE_DIRS[self.range_dir_box.current()]), self.roll.focus_set()))
+        Tooltip(self.range_dir_box, tr("panel_custom.range_dir_tip"))
         # Hz bass: the gate is one wave of a tone (custom.py). Only the switch, Notes… and the warnings here (user);
         # the rest is in the Hz bass window
         h = self.hz_row = ttk.Frame(opts)
@@ -263,6 +295,12 @@ class CustomPanel:
         ends = tgts[0].get("ends", "drop")
         self.ends_box.current(ENDS.index(ends) if ends in ENDS else 0)
         self.gate_entry.config(style="TEntry")
+        rg = tgts[0].get("range")
+        self.range_var.set(bool(rg))
+        if rg:
+            self.range_to_var.set(fmt(round(rg["to"] * self.ppq, 3)))
+            self.range_dir_box.current(RANGE_DIRS.index(rg["dir"]))
+        self.range_to_entry.config(style="TEntry")
         self._loading = False
         for value, b in self.fill_buttons.items():
             b.config(style="Gap.TRadiobutton" if gaps and value in ("fill", "spam") else "TRadiobutton")
@@ -278,6 +316,8 @@ class CustomPanel:
         hz = self.sync_hz(tgts, spam, placed)  # (Hz bass: its own gate and grid, so gate / ends / start are off)
         self.gate_entry.config(state="normal" if spam and not hz else "disabled")
         self.ends_box.config(state="readonly" if spam and not hz else "disabled")
+        self.range_check.config(state="normal" if spam and not hz else "disabled")
+        ranged = spam and not hz and bool(rg)  # (Range: its own grid from the shape's left edge, so no ends / start)
         for b in self.align_buttons:  # (stretched gates fill each key exactly: where they start doesn't matter)
             b.config(state="normal" if spam and not hz and ends != "stretch" else "disabled")
         self._loading = True
@@ -304,8 +344,9 @@ class CustomPanel:
         if wanted > COLOURS:
             self.colours_warn.config(text=tr("panel_custom.too_many_colours", n=wanted, most=COLOURS))
         rows = {self.colours_warn: wanted > COLOURS, self.gate_row: spam and not hz, self.hz_row: spam, self.hz_info: self.hz_short_on,
-                self.hz_stale: self.hz_stale_on, self.ends_row: spam and not hz,
-                self.start_row: spam and not hz and ends != "stretch", self.edge_row: outline,
+                self.hz_stale: self.hz_stale_on, self.ends_row: spam and not hz and not ranged,
+                self.start_row: spam and not hz and ends != "stretch" and not ranged,
+                self.range_row: ranged, self.range_dir_row: ranged, self.edge_row: outline,
                 self.edge_mode_row: outline and bool(tgts[0].get("edge")),
                 self.cancel_box: fill in ("fill", "spam") and not text,
                 self.borders_box: fill in ("fill", "spam") and apart and self.coloured_areas(tgts, placed, name)}
@@ -393,6 +434,55 @@ class CustomPanel:
         self.sync_custom()
         if key == "fill" and value != "empty":
             self.tips.show("fill", wait=True)
+
+    def on_range(self):
+        """The Range box ticked or cleared: the second gate starts at 4 times the first, a straight graph."""
+        if self._loading:
+            return
+        if self.range_var.get():
+            tgts = self.custom_targets()
+            self.set_range(to=(tgts[0]["gate"] * 4) if tgts else 0.25)
+        else:
+            self.set_range(off=True)
+
+    def on_range_to(self):
+        if self._loading or str(self.range_to_entry.cget("state")) == "disabled":
+            return
+        try:
+            ticks = calc(self.range_to_var.get())
+            if not 1 <= ticks <= 10 ** 7:
+                raise ValueError
+        except (ValueError, ZeroDivisionError):
+            self.range_to_entry.config(style="Bad.TEntry")
+            return
+        self.set_range(to=ticks / self.ppq)
+
+    def set_range(self, off=False, undo=True, **changes):
+        """The spam gate range of the panel's targets: changes (to / graph / dir) put on it (made if missing), or
+        off. undo: its own undo step (the graph window takes one for all its changes)."""
+        if self._loading:
+            return
+        tgts = self.custom_targets()
+        new = []
+        for t in tgts:
+            if off:
+                new.append(None)
+            else:
+                r = dict(t.get("range") or {"to": t["gate"] * 4, "graph": STRAIGHT, "dir": "time"}, **changes)
+                new.append(clean_range(json.loads(json.dumps(r))))
+        if all(t.get("range") == r for t, r in zip(tgts, new)):
+            return self.sync_custom()
+        placed = [(t, r) for t, r in zip(tgts, new) if t is not self.custom_defaults]
+        if not self.confirm_big([dict(t, range=r) if r else t for t, r in placed]):
+            return self.sync_custom()
+        if placed and undo:
+            self.push_undo(name=tr("panel_custom.range_step"))
+        for t, r in zip(tgts, new):
+            t.pop("range", None)
+            if r:
+                t["range"] = r
+        self.shapes_changed()
+        self.sync_custom()
 
     def on_gate(self):
         if self._loading or str(self.gate_entry.cget("state")) == "disabled":

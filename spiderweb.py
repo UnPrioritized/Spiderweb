@@ -36,6 +36,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     tool_window.py   what the Claw machine and Strum windows share (live preview, undo, the Knob dial)
     claw_window.py   the Claw machine window
     strum_window.py  the Strum window (Start / End panels of knobs, each with its number box)
+    range_window.py  the spam gate Range's graph window
     chop_window.py   the Chop window (rhythm list, a strip to draw rhythms, saved rhythms) + quick chop (Ctrl+U)
   roll/              the piano roll
     pianoroll.py     the piano roll canvas: view, hit testing, mouse editing
@@ -67,6 +68,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     joined.py        joining shapes into one curve (pieces, their tumours) and splitting shapes
     convert.py       Turn into live shape: shapes -> one custom shape (and back)
     envelope.py      velocity envelopes
+    gaterange.py     spam gate Range: the gate going from one to another across a shape, along a graph
     chop.py          chop: notes cut into a repeating rhythm (after the glue, before the claw)
     glue.py          glue: touching notes on a key made one long note (all of a shape or in boxes), first
     claw.py          the claw machine: a shape's notes thinned out / cut / bent after they're made

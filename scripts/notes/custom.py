@@ -11,6 +11,7 @@ from files.lang import tr
 from notes.arc import arc_k, arc_points, ellipse_bezier
 from notes.areas import COLOURS, _maps, area_map, inside_loops  # (areas coloured by hand)
 from notes.faces import faces  # (what's filled when it isn't plain even-odd: fill_test)
+from notes.gaterange import RangeKeys, clean_range, range_grid  # (a spam gate going from one to another)
 from notes.bezier import sample
 from notes.pattern import (baked_path, clean_pattern, clean_shape_formula, formed_path, formed_paths, has_formula,
                            moved_formulas)
@@ -82,6 +83,9 @@ def custom_settings(cd):
         out["edge"] = cd["edge"]
     if cd.get("edge_mode") == "sideways":
         out["edge_mode"] = "sideways"
+    rg = clean_range(cd.get("range"))
+    if rg:
+        out["range"] = rg
     return out
 
 
@@ -1568,6 +1572,8 @@ def spam_gate(sh, ppq):
         limit = threshold(sh["hz"])
         whole = sh["hz"].get("fixed") or (limit is not None and off_cents(gate) <= limit + 1e-9)
         return float(math.floor(gate + 0.5)) if whole else gate
+    if sh.get("range"):  # the gate goes from one to another across the shape (gaterange.py)
+        return range_grid(sh, ppq)
     return max(1, math.floor(sh["gate"] * ppq + 0.5))
 
 
@@ -1627,7 +1633,7 @@ def chop(sh, stretches, g, count=False):
     """stretches: NumPy array of (start, end, key) rows in ticks -> each filled with back-to-back notes of gate g,
     as an array of (start, end, key) rows in the same order. Where they start: ALIGNS; what happens to the bit that
     doesn't fit a whole gate: ENDS. count: just how many notes each stretch gets."""
-    if isinstance(g, KeyGrid):
+    if isinstance(g, (KeyGrid, RangeKeys)):
         return chop_keys(stretches, g, count)
     if isinstance(g, np.ndarray):
         return chop_grid(stretches, g, count)
