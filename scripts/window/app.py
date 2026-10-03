@@ -19,9 +19,11 @@ from notes.custom import CUSTOM_DEFAULTS, capped_colours, custom_note_count, tra
 from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
-from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, point_names, render, shape_notes_tracks, with_claw,
-                          slot_track_channel, with_strum)
+from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, cached_arrays, point_names, render, shape_notes_tracks,
+                          with_claw, slot_track_channel, with_glue, with_strum)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
+from notes.glue import added as glue_added, flipped as glue_flipped, glue_box, to_shares as glue_shares, \
+    turned as glue_turned
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
 from notes.polygon import POLYGON_DEFAULTS
@@ -779,6 +781,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             elif sh.get("claw"):
                 notes, tracks = self.notes_tracks({k: v for k, v in sh.items() if k != "claw"})
                 self._notes_cache[key] = with_claw(notes, tracks, sh["claw"], self.ppq)
+            elif sh.get("glue"):
+                notes, tracks = self.notes_tracks({k: v for k, v in sh.items() if k != "glue"})
+                self._notes_cache[key] = with_glue(notes, tracks, sh, self.ppq)
             else:
                 self._notes_cache[key] = shape_notes_tracks(sh, self.ppq, self.keys)
             self._notes_worked += 1
@@ -964,6 +969,38 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.select_many(range(first, len(self.shapes)), len(self.shapes) - 1)
         self.shapes_changed()
 
+    def glue_selected(self):
+        """Right-click → Glue notes: touching notes on a key in the selected shapes become one (glue.py), inside the
+        kept Select boxes if there are any, else all their notes. The shapes remember it."""
+        if not self.sels:
+            return
+        areas = self.roll.kept_box()
+        shapes = [self.shapes[i] for i in sorted(self.sels)]
+        before = sum(len(self.notes_of(sh)) for sh in shapes)
+        self.push_undo(name=tr("app.glue"))
+        for sh in shapes:
+            if not areas:
+                sh["glue"] = True
+                continue
+            box = glue_box(np.concatenate(cached_arrays(sh)))
+            for area in areas:
+                shares = glue_shares(area, box)
+                if shares:
+                    sh["glue"] = glue_added(sh.get("glue"), shares)
+        after = sum(len(self.notes_of(sh)) for sh in shapes)
+        self.shapes_changed()
+        self.status.config(text=tr("app.glued", before=before, after=after))
+
+    def unglue_selected(self):
+        """Right-click → Remove glue: the selected shapes' notes as they were before any glue."""
+        shapes = [self.shapes[i] for i in sorted(self.sels) if self.shapes[i].get("glue")]
+        if not shapes:
+            return
+        self.push_undo(name=tr("app.remove_glue"))
+        for sh in shapes:
+            del sh["glue"]
+        self.shapes_changed()
+
     def picked(self):
         """(shape, stroke number) of the picked stroke of the selected custom shape, or None."""
         sh = self.selected()
@@ -1074,6 +1111,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 if sh.get("vel_env"):
                     sh["vel_env"] = [[1 - u, v] for u, v in reversed(sh["vel_env"])]
                 sh["vel0"], sh["vel1"] = sh["vel1"], sh["vel0"]
+            if sh.get("glue"):  # (its boxes are shares of the shape's box)
+                sh["glue"] = glue_flipped(sh["glue"], sideways)
         self.sync_panel()
         self.shapes_changed()
 
@@ -1109,6 +1148,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 pat["k"] = r * r / pat["k"]
             if sh.get("shape"):  # (its sizes are shares of the curve's length: only the screen proportions)
                 sh["shape"]["k"] = r * r / sh["shape"]["k"]
+            if sh.get("glue"):
+                sh["glue"] = glue_turned(sh["glue"], clockwise)
         self.sync_panel()
         self.shapes_changed()
 

@@ -21,6 +21,7 @@ from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_stroke
 from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
 from notes.claw import apply_claw, clean_claw
+from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum, clean_strum
 from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
@@ -88,6 +89,9 @@ def clean_shape(sh):
     env = sh.get("vel_env")
     if env:
         out["vel_env"] = [[float(u), max(1.0, min(127.0, float(v)))] for u, v in env]
+    gl = clean_glue(sh.get("glue"))
+    if gl:  # touching notes on a key made one (glue.py)
+        out["glue"] = gl
     cl = clean_claw(sh.get("claw"))
     if cl:  # notes thinned out / moved after they're made (claw.py)
         out["claw"] = cl
@@ -279,8 +283,21 @@ def shape_notes(sh, ppq, keys=128):
 def shape_notes_tracks(sh, ppq, keys=128):
     """shape_notes, and for pasted notes which track each note came from, for a custom shape made of other shapes
     which of them (one number per row; None for every other shape)."""
-    notes, tracks = with_claw(*_notes_tracks(sh, ppq, keys), sh.get("claw"), ppq)
+    notes, tracks = with_glue(*_notes_tracks(sh, ppq, keys), sh, ppq)
+    notes, tracks = with_claw(notes, tracks, sh.get("claw"), ppq)
     return with_strum(notes, tracks, sh.get("strum"), ppq)
+
+
+def with_glue(notes, tracks, sh, ppq):
+    """shape_notes_tracks' notes and tracks after the shape's glue (glue.py; it comes first, before the claw)."""
+    glue = sh.get("glue")
+    if not glue or not len(notes):
+        return notes, tracks
+    box = glue_box(np.concatenate(cached_arrays(sh)))
+    if tracks is None:
+        return apply_glue(notes, glue, box, ppq, False), None
+    got = apply_glue(np.column_stack([notes, tracks]), glue, box, ppq, True)
+    return got[:, :-1], got[:, -1]
 
 
 def with_claw(notes, tracks, claw, ppq):

@@ -66,6 +66,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     joined.py        joining shapes into one curve (pieces, their tumours) and splitting shapes
     convert.py       Turn into live shape: shapes -> one custom shape (and back)
     envelope.py      velocity envelopes
+    glue.py          glue: touching notes on a key made one long note (all of a shape or in boxes), first
     claw.py          the claw machine: a shape's notes thinned out / cut / bent after they're made
     strum.py         strum: each chord's notes start one after another (and end, velocity), after the claw
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes

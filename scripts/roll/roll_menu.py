@@ -123,6 +123,7 @@ class ShapeMenu:
             item(tr("roll_menu.tumours"), "", app.open_tumours)
         item(tr("roll_menu.claw_machine"), tr("roll_menu.alt_w"), lambda: open_claw(app), keys=True)
         item(tr("roll_menu.strum"), tr("roll_menu.alt_s"), lambda: open_strum(app), keys=True)
+        self.glue_items(item)
         if len(app.sels) >= 2:  # (greyed out, saying why, when something else is selected too)
             ok = app.can_join()
             item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
@@ -163,6 +164,7 @@ class ShapeMenu:
             item(tr("roll_menu.tumours"), "", app.open_tumours)
         item(tr("roll_menu.claw_machine"), tr("roll_menu.alt_w"), lambda: open_claw(app))
         item(tr("roll_menu.strum"), tr("roll_menu.alt_s"), lambda: open_strum(app))
+        self.glue_items(item)
         ok = app.can_join()
         item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
              tr("roll_menu.ctrl_g"), app.join_selected, ok)
@@ -173,6 +175,13 @@ class ShapeMenu:
             m.tk_popup(e.x_root, e.y_root)
         finally:
             m.grab_release()
+
+    def glue_items(self, item):
+        """Glue (glue.py): in the kept Select boxes if there are any, else all the selected shapes' notes."""
+        app = self.app
+        item(tr("roll_menu.glue_in_box") if self.kept_box() else tr("roll_menu.glue"), "", app.glue_selected)
+        if any(app.shapes[i].get("glue") for i in app.sels):
+            item(tr("roll_menu.remove_glue"), "", app.unglue_selected)
 
     def group_items(self, m, item, keys, curve_keys, whole):
         """The menu's part for everything selected: delete, duplicate, copy, paste, flip, turn."""
