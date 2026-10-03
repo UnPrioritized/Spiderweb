@@ -68,6 +68,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     joined.py        joining shapes into one curve (pieces, their tumours) and splitting shapes
     convert.py       Turn into live shape: shapes -> one custom shape (and back)
     envelope.py      velocity envelopes
+    slice.py         Slice tool maths: where a line crosses shapes, a custom shape cut in two halves
     gaterange.py     spam gate Range: the gate going from one to another across a shape, along a graph
     chop.py          chop: notes cut into a repeating rhythm (after the glue, before the claw)
     glue.py          glue: touching notes on a key made one long note (all of a shape or in boxes), first

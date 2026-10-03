@@ -375,6 +375,7 @@ class RollDrawing:
             self.draw_draft_points()
         self.draw_hz_start()
         self.draw_select_box()
+        self.draw_slice()
         self.draw_keyboard(h)
         self.draw_ruler(w)
         self.draw_playhead()
@@ -528,6 +529,18 @@ class RollDrawing:
             boxes = self.kept_box() or []
         draw_boxes(self, [self.box_rect(b) for b in boxes], self.kb_w, self.ruler_h, max(2, round(2 * self.scale)),
                    tags="selbox")
+
+    def draw_slice(self):
+        """The Slice tool's line while it's dragged: dashed, a dot at each end."""
+        self.delete("slice")
+        if not (self.drag and self.drag[0] == "slice"):
+            return
+        (xa, ya), (xb, yb) = (self.to_xy(p) for p in self.drag[1:3])
+        s = self.scale
+        self.create_line(xa, ya, xb, yb, fill="#d00000", width=max(1, round(2 * s)), dash=(6, 3), tags="slice")
+        r = 3 * s
+        for x, y in ((xa, ya), (xb, yb)):
+            self.create_oval(x - r, y - r, x + r, y + r, fill="#d00000", outline="", tags="slice")
 
     def draw_playhead(self):
         self.delete("playhead")

@@ -5,6 +5,7 @@ maths is in notes/joined.py."""
 import copy
 import math
 from tkinter import messagebox, ttk
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -12,7 +13,8 @@ from files.lang import tr
 from notes.arc import arc_circle, arc_points
 from notes.convert import CAN_TURN, losses, originals, to_live
 from notes.bezier import anchor_count, nearest, split
-from notes.engine import shape_path
+from notes.engine import cached_arrays, shape_path
+from notes.slice import clip_segment, crossings, slice_custom
 from notes.smooth import smooth_path
 from notes.joined import (custom_groups, join_shapes, join_velocity, piece_velocity, sections, split_at, split_custom,
                           split_pieces)
@@ -202,7 +204,16 @@ class JoinSplit:
     def split_here(self, i, at):
         """Cut a line kind in two where it was right-clicked (at: x, y on screen; near an anchor or
         polyline point: there)."""
-        sh = self.shapes[i]
+        got = self.cut_at(self.shapes[i], at)
+        if not got:
+            self.status.config(text=tr("join_split.can_t_split_there_that_s"))
+            return
+        self.replace_shape(i, list(got), name=tr("join_split.split_here"))
+        self.status.config(text=tr("join_split.split_in_two"))
+        self.tips.show("join", wait=True)
+
+    def cut_at(self, sh, at):
+        """A line kind cut in two at the spot at (x, y on screen) -> its two halves, or None (too near an end)."""
         roll = self.roll
         if sh["kind"] == "curve":
             c = copy.deepcopy(sh)
@@ -221,12 +232,76 @@ class JoinSplit:
             got = self.split_arc(sh, at)
         else:
             got = self.split_line(sh, at)
-        if not got:
-            self.status.config(text=tr("join_split.can_t_split_there_that_s"))
+        return list(got) if got else None
+
+    def slice_along(self, a, b):
+        """The Slice tool's line from a to b (beat, key) let go: every line kind it crosses cut there, every custom
+        shape it goes all the way across cut in two (slice.py). With Select boxes kept: only the shapes they
+        selected, and only inside the boxes. One undo step; the pieces end up selected."""
+        roll = self.roll
+        boxes = roll.kept_box()
+        segs = [(a, b)] if not boxes else [s for s in (clip_segment(a, b, box) for box in boxes) if s]
+        targets = sorted(self.sels) if boxes else range(len(self.shapes))
+        done, out, skipped = {}, {}, 0
+        for i in targets:
+            sh = self.shapes[i]
+            if sh["kind"] == "custom":
+                if "notes" in sh or sh.get("text") or sh.get("hz"):
+                    continue
+                pieces = [sh]
+                for sa, sb in segs:
+                    nxt = []
+                    for p in pieces:
+                        got = slice_custom(p, sa, sb)
+                        nxt += got if got else [p]
+                    pieces = nxt
+                if len(pieces) == 1 and any(crossings(np.concatenate(cached_arrays(sh)), sa, sb) for sa, sb in segs):
+                    skipped += 1  # (crossed, but not all the way across)
+            elif sh["kind"] in LINE_KINDS:
+                pieces = [sh]
+                for sa, sb in segs:
+                    for pt, _ in crossings(cached_path(sh), sa, sb):
+                        at = SimpleNamespace(x=roll.t2x(pt[0]), y=roll.p2y(pt[1]), state=0)
+                        # (the piece the crossing is on)
+                        k = min(range(len(pieces)), key=lambda j: self.path_dist(pieces[j], at))
+                        got = self.cut_at(pieces[k], at)
+                        if got:
+                            pieces[k:k + 1] = got
+            else:
+                continue
+            if len(pieces) > 1:
+                done[i] = pieces
+        if not done:
+            self.status.config(text=tr("join_split.slice_nothing") if not skipped else tr("join_split.slice_partly"))
             return
-        self.replace_shape(i, list(got), name=tr("join_split.split_here"))
-        self.status.config(text=tr("join_split.split_in_two"))
-        self.tips.show("join", wait=True)
+        self.roll.cancel_draft()
+        self.push_undo(name=tr("join_split.slice"))
+        new, picked = [], []
+        for i, sh in enumerate(self.shapes):
+            parts = done.get(i, [sh])
+            whole = span(sh)
+            for p in parts if i in done else ():
+                piece_velocity(p, sh, span(p), whole)
+            if i in done:
+                picked += range(len(new), len(new) + len(parts))
+            new += parts
+        self.shapes[:] = new
+        self.select_many(picked, picked[0])
+        self.shapes_changed()
+        n = sum(len(p) for p in done.values())
+        self.status.config(text=tr("join_split.sliced", shapes=len(done), n=n) +
+                           (tr("join_split.slice_partly_too", n=skipped) if skipped else ""))
+
+    def path_dist(self, sh, at):
+        """How far (on screen) the shape's line passes from at."""
+        p = np.asarray(cached_path(sh), float).reshape(-1, 2)
+        x, y = self.roll.t2x(p[:, 0]), self.roll.p2y(p[:, 1])
+        if len(p) < 2:
+            return float(np.hypot(x - at.x, y - at.y).min())
+        ax, ay, bx, by = x[:-1], y[:-1], x[1:] - x[:-1], y[1:] - y[:-1]
+        L = bx * bx + by * by
+        u = np.clip(((at.x - ax) * bx + (at.y - ay) * by) / np.where(L > 0, L, 1), 0, 1)
+        return float(np.hypot(ax + bx * u - at.x, ay + by * u - at.y).min())
 
     def anchor_near(self, pts, seg, at):
         """The segment's anchor the right-click was on (near), or None."""

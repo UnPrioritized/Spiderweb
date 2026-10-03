@@ -120,6 +120,15 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             b, p = round(b / sb) * sb, round(p)
         return [max(0.0, b), min(max(p, 0), self.app.keys - 1)]
 
+    def slice_pt(self, e):
+        """The Slice tool's line end at the mouse: time on the snap grid, keys on the lines between key rows (so a
+        flat cut runs between two keys); Shift = exactly there."""
+        b, p = self.event_pt(e, snap=False)
+        sb = self.app.snap_beats()
+        if not e.state & SHIFT:
+            b, p = (round(b / sb) * sb if sb else b), math.floor(p) + 0.5
+        return [b, p]
+
     def box_area(self):
         """The Select box being dragged as (beat, pitch, beat, pitch) corners: out to whole snap steps and whole
         keys (grid_span; Shift = as dragged). None while it's still a click."""
@@ -527,6 +536,13 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.box_moving = boxes_upright(kept)[0]
             self.box_kept = (self.box_moving, set(app.sels))
 
+        if tool == "slice":  # (the kept Select boxes stay: only what's in them is cut)
+            if kept:
+                self.box_kept = (kept, set(app.sels))
+            pt = self.slice_pt(e)
+            self.drag = ("slice", pt, pt, e.x, e.y)
+            self.draw_slice()
+            return
         if tool == "text":
             self.text_click(e)
             return
@@ -647,6 +663,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.box_to()
             if self.box_timer is None:
                 self.box_scroll()
+        elif kind == "slice":
+            self.drag = ("slice", self.drag[1], self.slice_pt(e), *self.drag[3:])
+            self.draw_slice()
         elif kind == "textsel":
             self.text_drag(e)
         elif kind == "seek":
@@ -780,6 +799,13 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.after_idle(self.app.settle_history)  # (a click that changed nothing isn't a step)
         kind = self.drag[0]
         self.app.catch_up_notes()
+        if kind == "slice":  # (a click without dragging cuts nothing)
+            _, a, b, x, y = self.drag
+            self.drag = None
+            self.draw_slice()
+            if abs(e.x - x) >= 4 or abs(e.y - y) >= 4:
+                self.app.slice_along(a, b)
+            return
         still = False  # let go where it was pressed
         if kind in ("create", "place", "wall", "segment", "arcdrag", "hzkeys"):
             x, y = self.drag[2:4] if kind == "place" else self.drag[-2:]

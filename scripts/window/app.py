@@ -72,7 +72,8 @@ PPQS = [2, 4, 8, 16, 24, 48, 96, 120, 144, 192, 240, 384, 480, 768, 960, 1024, 1
 TOOLS = [("select", tr("app.select"), "v"), ("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"),
          ("free", tr("app.freehand"), "f"), ("curve", tr("app.curve"), "c"), ("arc", tr("app.arc"), "a"),
          ("custom", tr("app.custom_shape"), "s"),
-         ("funnel", tr("app.funnel"), "n"), ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h")]
+         ("funnel", tr("app.funnel"), "n"), ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h"),
+         ("slice", tr("app.slice"), "k")]
 # shown next to Custom shape while it (or one of them) is the tool; their keys work any time
 SHAPE_TOOLS = [("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q")]
 BIG = 1_000_000  # ask before making a custom shape / funnel with more notes than this
