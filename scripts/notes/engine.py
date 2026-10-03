@@ -20,6 +20,7 @@ from notes.hzbass import clean_hz, velocity_factor
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
+from notes.chop import apply_chop, clean_chop
 from notes.claw import apply_claw, clean_claw
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum, clean_strum
@@ -92,6 +93,9 @@ def clean_shape(sh):
     gl = clean_glue(sh.get("glue"))
     if gl:  # touching notes on a key made one (glue.py)
         out["glue"] = gl
+    ch = clean_chop(sh.get("chop"))
+    if ch:  # notes cut into a rhythm (chop.py)
+        out["chop"] = ch
     cl = clean_claw(sh.get("claw"))
     if cl:  # notes thinned out / moved after they're made (claw.py)
         out["claw"] = cl
@@ -284,6 +288,7 @@ def shape_notes_tracks(sh, ppq, keys=128):
     """shape_notes, and for pasted notes which track each note came from, for a custom shape made of other shapes
     which of them (one number per row; None for every other shape)."""
     notes, tracks = with_glue(*_notes_tracks(sh, ppq, keys), sh, ppq)
+    notes, tracks = with_chop(notes, tracks, sh.get("chop"), ppq)
     notes, tracks = with_claw(notes, tracks, sh.get("claw"), ppq)
     return with_strum(notes, tracks, sh.get("strum"), ppq)
 
@@ -298,6 +303,11 @@ def with_glue(notes, tracks, sh, ppq):
         return apply_glue(notes, glue, box, ppq, False), None
     got = apply_glue(np.column_stack([notes, tracks]), glue, box, ppq, True)
     return got[:, :-1], got[:, -1]
+
+
+def with_chop(notes, tracks, chop, ppq):
+    """The same after the shape's chop (chop.py; after the glue, before the claw)."""
+    return _after(apply_chop, notes, tracks, chop, ppq)
 
 
 def with_claw(notes, tracks, claw, ppq):

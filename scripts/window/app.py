@@ -20,7 +20,7 @@ from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, cached_arrays, point_names, render, shape_notes_tracks,
-                          with_claw, slot_track_channel, with_glue, with_strum)
+                          with_chop, with_claw, slot_track_channel, with_glue, with_strum)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.glue import added as glue_added, flipped as glue_flipped, glue_box, to_shares as glue_shares, \
     turned as glue_turned
@@ -39,6 +39,7 @@ from window.panel_polygon import PolygonPanel
 from window.panel_text import TextPanel
 from window.claw_window import open_claw
 from window.strum_window import open_strum
+from window.chop_window import open_chop, quick_chop
 from window.hz_preview import clean_settings as clean_preview
 from window.panel_tumour import TumourPanel
 from notes.joined import all_tumours, is_joined
@@ -136,6 +137,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.claw_pos = ""  # where the claw machine window was last ("+x+y", remembered in the autosave)
         self.strum_window = None
         self.strum_pos = ""  # (the same for the strum window)
+        self.chop_window = None
+        self.chop_pos = ""  # (and the chop window)
         self.hz_window = None  # the Hz bass window (hz_window.py)
         self.hz_clip = None  # notes copied in it (HzWindow.copy_notes)
         self.hz_pos = ""  # its size and place ("WxH+x+y", remembered in the autosave)
@@ -240,6 +243,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                          ("Control-Shift-g Control-Shift-G", self.split_selected),
                          ("Control-l Control-L", self.turn_into_live),
                          ("Alt-w Alt-W", lambda: open_claw(self)), ("Alt-s Alt-S", lambda: open_strum(self)),
+                         ("Alt-u Alt-U", lambda: open_chop(self)), ("Control-u Control-U", lambda: quick_chop(self)),
                          ("Control-v Control-V", self.paste), ("Control-h Control-H", lambda: self.flip(True)),
                          ("Control-j Control-J", lambda: self.flip(False)), ("Control-a Control-A", self.select_all),
                          ("Control-Left", lambda: self.rotate(False)), ("Control-Right", lambda: self.rotate(True))):
@@ -637,7 +641,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.sync_funnel()
         self.sync_list_selection()
         self.sync_line_fill()
-        for w in (self.claw_window, self.strum_window):
+        for w in (self.claw_window, self.strum_window, self.chop_window):
             if w:
                 w.sync()
         if self.hz_window:
@@ -781,6 +785,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             elif sh.get("claw"):
                 notes, tracks = self.notes_tracks({k: v for k, v in sh.items() if k != "claw"})
                 self._notes_cache[key] = with_claw(notes, tracks, sh["claw"], self.ppq)
+            elif sh.get("chop"):
+                notes, tracks = self.notes_tracks({k: v for k, v in sh.items() if k != "chop"})
+                self._notes_cache[key] = with_chop(notes, tracks, sh["chop"], self.ppq)
             elif sh.get("glue"):
                 notes, tracks = self.notes_tracks({k: v for k, v in sh.items() if k != "glue"})
                 self._notes_cache[key] = with_glue(notes, tracks, sh, self.ppq)
@@ -1399,7 +1406,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def push_undo(self, state=None, name=None):
         """Remember the shapes (or `state`, shapes saved earlier as JSON) for Ctrl+Z; name = what the step does
         (the History panel)."""
-        for w in (self.claw_window, self.strum_window, self.tumour_window):
+        for w in (self.claw_window, self.strum_window, self.chop_window, self.tumour_window):
             if w:
                 w.settle()  # (the claw / strum / tumours being tried out are kept first, as their own step)
         sc = self._scrub
@@ -1454,7 +1461,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self._restore(self.redo_stack, self.undo_stack)
 
     def _restore(self, src, dst):
-        for w in (self.claw_window, self.strum_window, self.tumour_window):
+        for w in (self.claw_window, self.strum_window, self.chop_window, self.tumour_window):
             if w:
                 w.settle()  # (so Ctrl+Z here takes back the claw / strum / tumours being tried out)
         if not src:

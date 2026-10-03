@@ -232,7 +232,7 @@ class ProjectFiles:
                               "velocity_height": self.velocity_height() / self.scale,
                               "midi_device": self.midi_device.get(), "live": self.live.get(),
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
-                              "claw_window": self.claw_pos, "strum_window": self.strum_pos, "hz_window": self.hz_pos, "hz_fx_height": self.hz_fx_h, "hz_preview": self.hz_preview,
+                              "claw_window": self.claw_pos, "strum_window": self.strum_pos, "chop_window": self.chop_pos, "hz_window": self.hz_pos, "hz_fx_height": self.hz_fx_h, "hz_preview": self.hz_preview,
                               "history_window": self.history_pos, "history_undocked": self.history_undocked,
                               **self.tips.state(), **self.updates.state()}
         write_text(path, project_json(data))
@@ -297,7 +297,7 @@ class ProjectFiles:
                 self.midi_device.set(str(win["midi_device"]))
             self.live.set(win.get("live") is True)
             for key, attr in (("tumour_window", "tumour_pos"), ("graph_window", "graph_pos"),
-                              ("claw_window", "claw_pos"), ("strum_window", "strum_pos")):
+                              ("claw_window", "claw_pos"), ("strum_window", "strum_pos"), ("chop_window", "chop_pos")):
                 pos = win.get(key)
                 if isinstance(pos, str) and re.fullmatch(r"\+-?\d+\+-?\d+", pos):
                     setattr(self, attr, pos)
