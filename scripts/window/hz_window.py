@@ -1323,7 +1323,8 @@ class HzWindow(tk.Toplevel):
                 ends = first is not None and first is not n and (can_slide(first, n) or can_slide(n, first))
                 menu.add_command(label=tr("hz.slide_end" if ends else "hz.slide_start"),
                                  command=lambda: self.slide_mark(e, hit))
-            menu.add_separator()
+            if menu.type("end") != "separator":  # (the gates' group ends with one)
+                menu.add_separator()
         if hit and hit[0] in ("in", "out"):  # a slide's dot: that slide goes, both its dots
             menu.add_command(label=tr("hz.slide_delete"), command=lambda: self.delete_slide(hit[2]))
             menu.add_separator()
@@ -1411,6 +1412,7 @@ class HzWindow(tk.Toplevel):
         hz = sh["hz"]
         picked = [self.tones[j] for j in (self.sel if i in self.sel else {i})]
         now = {held_fixed(hz, self.app.ppq, n) for n in picked}
+        menu.add_separator()  # (a group of their own, user)
         for fixed in (True, False):
             if now != {fixed}:
                 mode = "fixed" if fixed else "mixed"
@@ -1418,6 +1420,7 @@ class HzWindow(tk.Toplevel):
         if any("gate" in n for n in picked):
             menu.add_command(label=tr("hz.gate_shared", mode=tr("panel_custom.hz_" + gate_mode(hz))),
                              command=lambda: self.set_gate(i, None))
+        menu.add_separator()
 
     def set_gate(self, i, mode):
         """Note i's own gates while held, "fixed" / "mixed" (the selected notes' too when it's one of them); None =
