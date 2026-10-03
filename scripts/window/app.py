@@ -1442,9 +1442,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
 
     def sel_state(self):
         """The selection as an undo step keeps it: (selected shape numbers, the main one, the kept Select boxes or
-        None)."""
+        None, the Hz bass window's HzWindow.sel_state() or None)."""
         boxes = self.roll.kept_box()
-        return sorted(self.sels), self.sel, boxes and list(boxes)
+        return sorted(self.sels), self.sel, boxes and list(boxes), self.hz_window and self.hz_window.sel_state()
 
     def scrub_step(self, gesture, run):
         """run() steps a number box (widgets.Scrub). The steps of one gesture (a label drag, or arrows / wheel on the
@@ -1501,6 +1501,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.shapes_changed()
         if self.hz_window:
             self.hz_window.after_restore(hz_was)
+            if self.sels == set(picked[0]):
+                self.hz_window.restore_sel(picked[3])
 
     def velocity_height(self):
         if self.show_velocity.get() and self.vel_box.winfo_ismapped() and self.vel_box.winfo_height() > 1:

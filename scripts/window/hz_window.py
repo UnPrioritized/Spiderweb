@@ -188,6 +188,8 @@ class HzWindow(tk.Toplevel):
         self.tones, self.sel = [], set()  # the notes shown (hzbass tones) and which are selected
         self.drag = None
         self.box_kept = None  # ([box_area, ...], selection) of the last Select boxes, shown after letting go
+        self.sel_before = None  # (tones before an edit, sel_state() from then): what its undo step keeps (commit)
+        self.pushing = None  # (the sel_state() of the undo step being made, commit)
         self.box_timer = None  # (box_scroll)
         self.pending = None  # (tone id, beat): the first middle click of a slide, waiting for the second
         self.shown = None  # id() of the shape shown (another one: the pending mark goes)
@@ -878,6 +880,23 @@ class HzWindow(tk.Toplevel):
         self.redraw()
         self.show_status(e)
 
+    def sel_state(self):
+        """The selected notes as the main window's undo step keeps them (App.sel_state): (their numbers, the kept
+        Select boxes or None, how many notes there are), or None (no Hz bass shown)."""
+        if self.pushing:
+            return self.pushing
+        if self.target() is None:
+            return None
+        boxes = self.kept_box()
+        return sorted(self.sel), boxes and list(boxes), len(self.tones)
+
+    def restore_sel(self, state):
+        """Undo / redo put the shapes back (after_restore): the notes selected then and their Select boxes too."""
+        if state and self.target() is not None and len(self.tones) == state[2]:
+            self.sel = set(state[0])
+            self.box_kept = (state[1], set(self.sel)) if state[1] else None
+            self.redraw()
+
     def kept_box(self):
         """The last Select boxes [box_area, ...] (Ctrl+drag adds one), still shown after letting go while what they
         selected is still the selection (a press or any other change of the selection drops them). None = not
@@ -955,6 +974,7 @@ class HzWindow(tk.Toplevel):
         self.drop_drag()
         hit = None if place else self.hit(e.x, e.y)
         before = copy.deepcopy(self.tones)
+        self.sel_before = (before, (sorted(sel0), kept and list(kept), len(before)))  # (as before the press)
         on_box = None if place else self.on_kept_box(kept, e, hit)
         if on_box and on_box != (0, 0):  # the kept Select box's side / corner: its notes stretch
             boxes, area = boxes_upright(kept)
@@ -1143,6 +1163,7 @@ class HzWindow(tk.Toplevel):
         if not clip or not self.can_place():
             return False
         before = copy.deepcopy(self.tones)
+        self.sel_before = (before, self.sel_state())
         start, base, first = min(n["t"] for n in clip), next_id(self.tones), len(self.tones)
         ids = {n["id"]: base + k for k, n in enumerate(clip)}
         for n in copy.deepcopy(clip):
@@ -1460,6 +1481,7 @@ class HzWindow(tk.Toplevel):
     def delete_selected(self):
         if self.sel:
             before = copy.deepcopy(self.tones)
+            self.sel_before = (before, self.sel_state())
             self.tones = [n for i, n in enumerate(self.tones) if i not in self.sel]
             left = {n["id"] for n in self.tones}
             for n in self.tones:  # (the slides to the deleted notes go with them)
@@ -1613,6 +1635,9 @@ class HzWindow(tk.Toplevel):
         part of the step taken already, e.g. the Tune window trying values). before = the tones (and before_fx the
         lines) to go back to if it's called off (too many notes)."""
         app = self.app
+        # the undo step keeps the selection from before the edit (the notes are still numbered as in `before`)
+        was = self.sel_before[1] if self.sel_before and self.sel_before[0] is before else self.sel_state()
+        self.sel_before = None
         picked = [self.tones[i] for i in self.sel if i < len(self.tones)]
         boxed = self.box_kept is not None and self.box_kept[1] == self.sel
         self.tones.sort(key=lambda n: (n["t"], n["key"]))
@@ -1661,7 +1686,11 @@ class HzWindow(tk.Toplevel):
                 if not app.confirm_big([new]):
                     return self.call_off(before, before_fx)
             if push:
-                app.push_undo(name=name)
+                self.pushing = was
+                try:
+                    app.push_undo(name=name)
+                finally:
+                    self.pushing = None
             if tones or not hz_made(sh):
                 if not tones:  # the last note deleted from a shape of its own: back to its one tone
                     new["hz"] = hz
