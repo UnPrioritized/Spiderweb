@@ -1423,10 +1423,12 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self._scrub = None
         self.add_undo_step(state or json.dumps(self.shapes), name)
 
-    def add_undo_step(self, before, name=None):
-        """push_undo without its checks (before: the shapes as JSON)."""
+    def add_undo_step(self, before, name=None, sel=None):
+        """push_undo without its checks (before: the shapes as JSON). The selection is kept with it (sel: the one
+        from when `before` was saved, sel_state(); default: now): undo puts it back with the shapes (shapes are
+        picked by number, which can point at another shape after undo)."""
         self.drop_empty_step(before)
-        self.undo_stack.append((before, name or tr("app.change")))
+        self.undo_stack.append((before, name or tr("app.change"), sel or self.sel_state()))
         del self.undo_stack[:-300]
         # the undone steps are kept aside until this step turns out to change something (a click on a shape that
         # doesn't drag it mustn't throw them away: drop_empty_step brings them back)
@@ -1434,6 +1436,10 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.redo_stack.clear()
         self._edit_key = None
         self.sync_history()
+
+    def sel_state(self):
+        """The selection as an undo step keeps it: (selected shape numbers, the main one)."""
+        return sorted(self.sels), self.sel
 
     def scrub_step(self, gesture, run):
         """run() steps a number box (widgets.Scrub). The steps of one gesture (a label drag, or arrows / wheel on the
@@ -1473,10 +1479,11 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             return
         hz_was = self.hz_window and self.hz_window.before_restore()
         self.roll.cancel_draft()
-        state, name = src.pop()
+        state, name, picked = src.pop()
         self._redo_kept = None
-        dst.append((json.dumps(self.shapes), name))
+        dst.append((json.dumps(self.shapes), name, self.sel_state()))
         self.shapes = json.loads(state)
+        self.sels, self.sel = set(picked[0]), picked[1]
         self.sels = {i for i in self.sels if i < len(self.shapes)}
         self.parts = set()
         self.stroke = None

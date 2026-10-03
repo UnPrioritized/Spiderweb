@@ -172,7 +172,7 @@ class ToolWindow(tk.Toplevel):
         """Work on the selected shapes, showing their setting (the first one's that has one)."""
         app = self.app
         self.targets = sorted(app.sels)
-        self.saved = json.dumps(app.shapes)  # (for the undo step)
+        self.saved, self.saved_sel = json.dumps(app.shapes), app.sel_state()  # (for the undo step)
         self.before = self.now = self.settings()  # (before: put back by X / Esc; now: as this window last left them)
         shown = next((c for c in self.before.values() if c), None)
         self.cfg = dict(self.DEFAULTS, **json.loads(json.dumps(shown or {})))
@@ -195,9 +195,9 @@ class ToolWindow(tk.Toplevel):
         step), and from now on X / Esc only puts back what changes after this."""
         self.catch_up()
         if self.now != self.before and self.settings() == self.now:
-            saved = self.saved
-            self.saved, self.before = json.dumps(self.app.shapes), self.now
-            self.app.add_undo_step(saved, tr(f"{self.KEY}.step"))
+            saved, sel = self.saved, self.saved_sel
+            self.saved, self.saved_sel, self.before = json.dumps(self.app.shapes), self.app.sel_state(), self.now
+            self.app.add_undo_step(saved, tr(f"{self.KEY}.step"), sel)
 
     def put(self, key, value, done=True):
         """A setting changed: show it on the piano roll."""

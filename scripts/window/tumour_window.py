@@ -170,7 +170,7 @@ class TumourWindow(tk.Toplevel):
     def begin(self):
         """Start from the selected shapes as they are now."""
         self.targets = sorted(self.app.sels)
-        self.saved = json.dumps(self.app.shapes)  # (for the undo step)
+        self.saved, self.saved_sel = json.dumps(self.app.shapes), self.app.sel_state()  # (for the undo step)
         self.before = self.now = self.state()  # (now: as this window last left them)
         self.undo.reset()
 
@@ -198,8 +198,8 @@ class TumourWindow(tk.Toplevel):
             self.graph_window.after_cancel(self.graph_window.job)
             self.graph_window.store()
         if self.now != self.before and self.state() == self.now:
-            self.app.add_undo_step(self.saved, tr("tumour_window.tumours"))
-            self.saved, self.before = json.dumps(self.app.shapes), self.now
+            self.app.add_undo_step(self.saved, tr("tumour_window.tumours"), self.saved_sel)
+            self.saved, self.saved_sel, self.before = json.dumps(self.app.shapes), self.app.sel_state(), self.now
 
     def reset(self):
         """Every setting back to its default and no graphs; tumours stay on or off."""
