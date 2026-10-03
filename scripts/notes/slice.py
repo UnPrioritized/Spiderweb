@@ -8,6 +8,7 @@ import copy
 import numpy as np
 
 from notes.custom import frame_to_uv, refit, stroke_points
+from notes.gaterange import part_range
 
 EPS = 1e-9
 
@@ -95,9 +96,9 @@ def inside(polys, pt):
     return n % 2 == 1
 
 
-def slice_custom(sh, a, b):
+def slice_custom(sh, a, b, ppq):
     """A custom shape cut along the segment a-b (beats, keys) -> its two halves, or None when the segment doesn't
-    go all the way across it (or misses it)."""
+    go all the way across it (or misses it). A spam gate Range is shared out: each half gets its part of it."""
     to_uv = frame_to_uv(sh["pts"])
     if to_uv is None:
         return None
@@ -144,6 +145,8 @@ def slice_custom(sh, a, b):
         if areas:
             new["areas"] = areas
         refit(new)
+        if sh.get("range"):
+            new["gate"], new["range"] = part_range(sh, new, ppq)
         out.append(new)
     return out
 

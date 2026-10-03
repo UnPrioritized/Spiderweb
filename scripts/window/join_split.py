@@ -252,7 +252,7 @@ class JoinSplit:
                 for sa, sb in segs:
                     nxt = []
                     for p in pieces:
-                        got = slice_custom(p, sa, sb)
+                        got = slice_custom(p, sa, sb, self.ppq)
                         nxt += got if got else [p]
                     pieces = nxt
                 if len(pieces) == 1 and any(crossings(np.concatenate(cached_arrays(sh)), sa, sb) for sa, sb in segs):

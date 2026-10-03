@@ -1587,7 +1587,7 @@
   "",
   "Pick Slice (K) and drag a straight line across shapes. When you let go, every line, polyline, freehand stroke, curve and arc it crosses is cut in two there (more pieces if it crosses more than once). The pieces stay where they were and end up selected.",
   "",
-  "Custom shapes (filled ones too) are cut in two when the line goes all the way across them: each half keeps its side of the drawing and gets the cut as a new edge, so a filled shape becomes two filled shapes. Areas coloured by hand stay with the half they're in. A line that only goes part of the way in leaves the shape whole.",
+  "Custom shapes (filled ones too) are cut in two when the line goes all the way across them: each half keeps its side of the drawing and gets the cut as a new edge, so a filled shape becomes two filled shapes. Areas coloured by hand stay with the half they're in. A spam gate Range is shared out: each half gets the part of it that was there, so the gates stay where they were. A line that only goes part of the way in leaves the shape whole.",
   "",
   "Only some shapes or part of them: draw a Select box (or several, with Ctrl) first, then pick Slice. Only the shapes the boxes selected are cut, and only where the slice line is inside a box.",
   "",

@@ -136,6 +136,38 @@ def frame_span(sh):
     return min(bs), max(bs), min(ps), max(ps)
 
 
+def _span(sh, r, ppq):
+    """Where the range runs over (the same ends range_grid uses): ticks for time, keys for keys."""
+    lo, hi, k0, k1 = frame_span(sh)
+    return (round(k0), round(k1)) if r["dir"] == "keys" else (math.floor(lo * ppq), math.ceil(hi * ppq))
+
+
+def part_range(whole, part, ppq):
+    """A piece cut off a ranged shape (Slice) -> its (gate in beats, range): the part of the whole's range over the
+    piece's own stretch, so each spot keeps the gate it had (the graph cut there; the gates between its lowest and
+    highest, each the same stretch of y as before)."""
+    r = whole["range"]
+    a = max(1, math.floor(whole["gate"] * ppq + 0.5))
+    b = max(1, math.floor(r["to"] * ppq + 0.5))
+    n = abs(b - a) + 1
+    w0, w1 = _span(whole, r, ppq)
+    p0, p1 = _span(part, r, ppq)
+    span = max(w1 - w0, 1)
+    u0, u1 = (min(1.0, max(0.0, (p - w0) / span)) for p in (p0, p1))
+    us, ys = [p[0] for p in r["graph"]], [p[1] for p in r["graph"]]
+    pts = [[u0, float(np.interp(u0, us, ys))]] + [[u, y] for u, y in r["graph"] if u0 < u < u1]
+    pts.append([u1, float(np.interp(u1, us, ys))])
+    band = [min(n - 1, int(y * n)) for _, y in pts]  # (the gates at the graph's points, counted from a)
+    j0, j1 = min(band), max(band)
+    m = j1 - j0 + 1
+    width = u1 - u0
+    graph = [[(u - u0) / width if width > 1e-12 else (0.0 if k == 0 else 1.0),
+              min(1.0, max(0.0, (y * n - j0) / m))] for k, (u, y) in enumerate(pts)]
+    graph[0][0], graph[-1][0] = 0.0, 1.0
+    sign = 1 if b >= a else -1
+    return (a + sign * j0) / ppq, dict(r, to=(a + sign * j1) / ppq, graph=graph)
+
+
 def range_grid(sh, ppq):
     """What custom.chop cuts the stretches with for a shape with a Range: squares (time) or a RangeKeys (keys)."""
     r = sh["range"]
