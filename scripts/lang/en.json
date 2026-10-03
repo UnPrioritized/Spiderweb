@@ -1974,7 +1974,7 @@
  "help.shortcuts.title": "Keyboard and mouse shortcuts",
  "help.shortcuts.tip": "Every key and mouse shortcut in one list.",
  "help.shortcuts.text": [
-  "Tools: V Select, L Line, P Polyline, F Freehand, C Curve, A Arc, S Custom shape, O Circle, Q Polygon, N Funnel, X Text, H Hz bass, K Slice. G = Live shape on / off.",
+  "Tools: V Select, K Slice, L Line, P Polyline, F Freehand, C Curve, A Arc, S Custom shape, O Circle, Q Polygon, N Funnel, X Text, H Hz bass. G = Live shape on / off.",
   "",
   "Drawing: Shift = don't snap. Ctrl = perfect (circle, equal-sided polygon or star, proportions). Right-click or Esc = cancel what's half drawn. Enter / double-click = finish a polyline.",
   "",
