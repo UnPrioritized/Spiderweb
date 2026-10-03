@@ -185,6 +185,7 @@ class Drawer(tk.Toplevel):
         self.zoom = 1.0        # 1 = the whole board fits the window
         self.center = [0.5, 0.5]  # the board point in the middle of the window (0.5, 0.5 = the board's middle)
         self._pan = None
+        self._panned = False  # the middle button moved further than a click's 3 px (pan_to)
         self.tool = tk.StringVar(value="poly")
         self.grid_n = tk.StringVar(value="16")
         self.name = tk.StringVar()
@@ -595,18 +596,22 @@ class Drawer(tk.Toplevel):
 
     def start_pan(self, e):
         self._pan = (e.x, e.y, list(self.center))
+        self._panned = False
 
     def pan_to(self, e):
         if not self._pan:
             return
         x, y, (cu, cv) = self._pan
+        if abs(e.x - x) > 3 or abs(e.y - y) > 3:
+            self._panned = True  # (once it went further than 3 px it's a pan, not a click, even if it comes back)
         k = self.px()
         self.center = [cu - (e.x - x) / k, cv + (e.y - y) / k]
         self.redraw()
 
     def on_middle_release(self, e):
         """A middle click (without dragging) near the selected curve: a new anchor there (any tool)."""
-        if self._pan and abs(e.x - self._pan[0]) <= 3 and abs(e.y - self._pan[1]) <= 3 and not self.draft:
+        if (self._pan and not self._panned and abs(e.x - self._pan[0]) <= 3 and abs(e.y - self._pan[1]) <= 3
+                and not self.draft):
             self.add_curve_anchor(e, near=12 * self.scale)
 
     def show_position(self, e):
