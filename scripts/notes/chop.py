@@ -113,10 +113,16 @@ def run_starts(a):
     return out
 
 
+def step_ticks(chop, ppq):
+    """One step of the rhythm in ticks (at least 1): snap "off" = 1 tick at any PPQ (its "len" was worked out at the
+    PPQ of the time)."""
+    return 1.0 if chop.get("snap") == "off" else max(chop["len"] * ppq, 1.0)
+
+
 def _repeats(a, chop, ppq):
     """The rhythm's pieces (array), their starts / ends in ticks, one repeat's length, where each note's repeats
     count from, the first repeat that can reach each note and how many do."""
-    step = max(chop["len"] * ppq, 1.0)  # ticks (at least 1)
+    step = step_ticks(chop, ppq)
     cycle = chop["steps"] * step
     pieces = np.array(chop["pieces"], float)
     ps, pe = pieces[:, 0] * step, (pieces[:, 0] + pieces[:, 1]) * step

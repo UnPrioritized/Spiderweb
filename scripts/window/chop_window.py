@@ -15,8 +15,8 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from files.safefile import write_text
 from files.snap import snap_beats, snap_text
-from notes.chop import (CHOP_DEFAULTS, MAX_STEPS, RHYTHMS, clean_chop, clean_pieces, rhythm, switched, too_many,
-                        top)
+from notes.chop import (CHOP_DEFAULTS, MAX_STEPS, RHYTHMS, clean_chop, clean_pieces, rhythm, step_ticks, switched,
+                        too_many, top)
 from window.snap_picker import SnapPicker
 from window.tool_window import ORANGE, ToolWindow
 from window.widgets import Scrub, Tooltip
@@ -431,7 +431,7 @@ class ChopWindow(ToolWindow):
                 entry.config(style="TEntry")
         if c["snap"] and self.snap.get() != c["snap"]:
             self.snap.set(c["snap"])
-        self.ticks_text.config(text=tr("chop.ticks", ticks=fmt(round(max(c["len"] * self.app.ppq, 1), 2))))
+        self.ticks_text.config(text=tr("chop.ticks", ticks=fmt(round(step_ticks(c, self.app.ppq), 2))))
 
     def preview(self, now=True):
         super().preview(now)
