@@ -236,7 +236,7 @@ class TextTyping:
         else:
             name = tr("roll_text.erase", text=ty["was"])
         if name != step[1]:
-            ty["step"] = app.undo_stack[-1] = (step[0], name, step[2])
+            ty["step"] = app.undo_stack[-1] = (step[0], name) + step[2:]
             app.sync_history()
 
     def retype(self, tx, axes):

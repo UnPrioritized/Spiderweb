@@ -235,8 +235,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         for seq in ("<Alt-Key>", "<Alt-KeyRelease>"):
             self.tk.call("bind", "all", seq, 'if {"%K" in {F4 space}} {tk::WinMenuKey %W %N}')
         self.bind_all("<F1>",lambda e: None if self.in_drawer(e) else self.open_help())
-        for key, fn in (("<Control-z>", self.undo), ("<Control-y>", self.redo), ("<Control-s>", self.save_project)):
-            self.bind_all(key, lambda e, fn=fn: None if self.in_drawer(e) else fn())
+        for key, fn in (("<Control-z>", lambda e: self.key_undo(e)), ("<Control-y>", lambda e: self.key_undo(e, True)),
+                        ("<Control-s>", lambda e: self.save_project())):
+            self.bind_all(key, lambda e, fn=fn: None if self.in_drawer(e) else fn(e))
         self.bind_all("<space>", self.hotkey(self.toggle_play, main_only=True))  # (pop-ups: not the main playback)
         for keys, fn in (("Control-c Control-C", self.copy_selected),
                          ("Control-Shift-c Control-Shift-C", self.copy_to_domino),
@@ -1400,14 +1401,14 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             sc["pushed"] = True
         else:
             self._scrub = None
-        self.add_undo_step(state or json.dumps(self.shapes), name)
+        self.add_undo_step(state or json.dumps(self.shapes), name, hz=self.in_hz())
 
-    def add_undo_step(self, before, name=None, sel=None):
+    def add_undo_step(self, before, name=None, sel=None, hz=False):
         """push_undo without its checks (before: the shapes as JSON). The selection is kept with it (sel: the one
         from when `before` was saved, sel_state(); default: now): undo puts it back with the shapes (shapes are
-        picked by number, which can point at another shape after undo)."""
+        picked by number, which can point at another shape after undo). hz: made in the Hz bass window (key_undo)."""
         self.drop_empty_step(before)
-        self.undo_stack.append((before, name or tr("app.change"), sel or self.sel_state()))
+        self.undo_stack.append((before, name or tr("app.change"), sel or self.sel_state(), hz))
         del self.undo_stack[:-300]
         # the undone steps are kept aside until this step turns out to change something (a click on a shape that
         # doesn't drag it mustn't throw them away: drop_empty_step brings them back)
@@ -1454,6 +1455,34 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def redo(self):
         self._restore(self.redo_stack, self.undo_stack)
 
+    def in_hz(self, widget=None):
+        """The Hz bass window (or a window of its own) has the keyboard (widget: the one a key was pressed in)."""
+        if not self.hz_window:
+            return False
+        if widget is None:
+            try:
+                widget = self.focus_get()
+            except (KeyError, tk.TclError):  # (a dropdown's list has it)
+                return False
+        return widget is not None and str(widget).startswith(str(self.hz_window))
+
+    def key_undo(self, e, redo=False):
+        """Ctrl+Z / Ctrl+Y. In the Hz bass window only its own changes (user: the piano roll behind stays as it
+        is): a step made elsewhere is next = a ding and a word in its status line."""
+        hz = self.hz_window
+        if not self.in_hz(e.widget):
+            return self.redo() if redo else self.undo()
+        if not redo and hz.pending:  # a slide started: just drop its mark
+            hz.pending = None
+            return hz.redraw()
+        if not redo:
+            self.drop_empty_step(json.dumps(self.shapes))
+        src = self.redo_stack if redo else self.undo_stack
+        if src and not src[-1][3]:
+            hz.bell()
+            return hz.status.config(text=tr("hz.redo_elsewhere" if redo else "hz.undo_elsewhere"))
+        self._restore(src, self.undo_stack if redo else self.redo_stack)
+
     def _restore(self, src, dst):
         for w in (self.claw_window, self.strum_window, self.chop_window, self.tumour_window):
             if w:
@@ -1462,9 +1491,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             return
         hz_was = self.hz_window and self.hz_window.before_restore()
         self.roll.cancel_draft()
-        state, name, picked = src.pop()
+        state, name, picked, hz = src.pop()
         self._redo_kept = None
-        dst.append((json.dumps(self.shapes), name, self.sel_state()))
+        dst.append((json.dumps(self.shapes), name, self.sel_state(), hz))
         self.shapes = json.loads(state)
         self.sels, self.sel = set(picked[0]), picked[1]
         self.sels = {i for i in self.sels if i < len(self.shapes)}

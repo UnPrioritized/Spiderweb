@@ -285,6 +285,8 @@
  "hz.shape": "{name}",
  "hz.stale": "BPM changed: this Hz bass is out of tune.",
  "hz.one_note": "1 note",
+ "hz.undo_elsewhere": "The last change was made on the piano roll: undo it there.",
+ "hz.redo_elsewhere": "The next change to redo was made on the piano roll: redo it there.",
  "hz.n_notes": "{n} notes",
  "hz.repeats": "{n} notes on the piano roll",
  "hz.position": "beat {beat}   {key}   {hz} Hz",
