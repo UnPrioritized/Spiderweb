@@ -2118,6 +2118,8 @@
  "chop.delete": "Delete",
  "chop.save_title": "Save rhythm",
  "chop.save_prompt": "Name for this rhythm:",
+ "chop.no_pieces": "No pieces in the rhythm: the notes aren't chopped.",
+ "chop.name_taken": "\"{name}\" is a built-in rhythm's name. Pick another name:",
  "chop.tip_strip": "One repeat of the rhythm. Press on empty space to put a piece there, as loud as the mouse is high; drag to make it longer or change its velocity. Drag a piece up or down to make it louder or quieter (in %, the dotted line = the note's own velocity). Right-click (or right-drag) to delete pieces. Empty space = a gap in the notes.",
  "chop.grid": "Grid",
  "chop.tip_grid": "How many grid cells each step has in the strip above (3 for triplets). Only for drawing.",

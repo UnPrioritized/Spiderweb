@@ -199,6 +199,7 @@ class ChopWindow(ToolWindow):
 
     def build(self, box):
         s = self.app.scale
+        self.long = None  # (the pieces before Steps was made smaller: back when it's made bigger again)
         box.columnconfigure(0, minsize=round(90 * s))
         self.on = tk.BooleanVar()
         b = ttk.Checkbutton(box, text=tr("chop.on"), variable=self.on, command=lambda: self.put("on", self.on.get()))
@@ -301,11 +302,13 @@ class ChopWindow(ToolWindow):
                 m.add_command(label=r["name"], command=lambda r=r: self.pick_saved(r))
 
     def pick(self, name):
+        self.long = None
         steps, pieces = rhythm(name)  # (ours are in %: turned to fixed velocities when that's picked)
         self.cfg.update(name=name, steps=steps, pieces=switched(pieces, True) if self.cfg["fixed"] else pieces)
         self.put("on", True)
 
     def pick_saved(self, r):
+        self.long = None
         self.cfg.update(name=r["name"], steps=r["steps"], pieces=[list(p) for p in r["pieces"]], fixed=r["fixed"])
         self.put("on", True)
 
@@ -316,11 +319,17 @@ class ChopWindow(ToolWindow):
         return name or tr("chop.drawn")
 
     def save_rhythm(self):
-        name = simpledialog.askstring(tr("chop.save_title"), tr("chop.save_prompt"), parent=self,
-                                      initialvalue="" if self.cfg["name"] in RHYTHMS else self.cfg["name"])
-        if not name or not name.strip():
-            return
-        name = name.strip()
+        """Save the rhythm under a name (asked; a built-in rhythm's name is asked again: it couldn't be told apart)."""
+        taken = {n.casefold() for n in RHYTHMS} | {tr(f"chop.rhythm_{n}").casefold() for n in RHYTHMS}
+        prompt, name = tr("chop.save_prompt"), "" if self.cfg["name"] in RHYTHMS else self.cfg["name"]
+        while True:
+            name = simpledialog.askstring(tr("chop.save_title"), prompt, parent=self, initialvalue=name)
+            if not name or not name.strip():
+                return
+            name = name.strip()
+            if name.casefold() not in taken:
+                break
+            prompt = tr("chop.name_taken", name=name)
         items = [r for r in load_rhythms() if r["name"] != name]
         items.append({"name": name, "steps": self.cfg["steps"], "pieces": self.cfg["pieces"],
                       "fixed": self.cfg["fixed"]})
@@ -335,6 +344,7 @@ class ChopWindow(ToolWindow):
     # ---- the numbers
 
     def on_strip(self, pieces, done):
+        self.long = None
         self.cfg["pieces"] = [list(p) for p in pieces]
         self.cfg["name"] = ""
         self.put("on", True, done)
@@ -353,7 +363,9 @@ class ChopWindow(ToolWindow):
             return
         self.steps_entry.config(style="TEntry")
         if v != self.cfg["steps"]:
-            self.cfg["pieces"] = clean_pieces(self.cfg["pieces"], v, self.cfg["fixed"])
+            if self.long is None:  # (pieces past the new end stay in memory while the window is open)
+                self.long = [list(p) for p in self.cfg["pieces"]]
+            self.cfg["pieces"] = clean_pieces(self.long, v, self.cfg["fixed"])
             self.cfg["name"] = ""
             self.put("steps", v, done)
 
@@ -369,6 +381,8 @@ class ChopWindow(ToolWindow):
         self.mode_box.selection_clear()
         if fixed != self.cfg["fixed"]:
             self.cfg["pieces"] = switched(self.cfg["pieces"], fixed)
+            if self.long is not None:
+                self.long = switched(self.long, fixed)
             self.put("fixed", fixed)
 
     def on_vel(self, done=True):
@@ -383,6 +397,18 @@ class ChopWindow(ToolWindow):
         if v != self.cfg["vel"]:
             self.put("vel", v, done)
 
+    def retarget(self):
+        self.long = None
+        super().retarget()
+
+    def put_state(self, state):
+        self.long = None
+        super().put_state(state)
+
+    def reset(self):
+        self.long = None
+        super().reset()
+
     def show(self):
         c = self.cfg
         if self.on.get() != c["on"]:
@@ -390,7 +416,7 @@ class ChopWindow(ToolWindow):
         if self.abs.get() != c["abs"]:
             self.abs.set(c["abs"])
         self.rhythm_button.config(text=self.rhythm_name())
-        saved = c["name"] and c["name"] not in RHYTHMS and any(r["name"] == c["name"] for r in load_rhythms())
+        saved = c["name"] and any(r["name"] == c["name"] for r in load_rhythms())
         self.delete_button.state(["!disabled"] if saved else ["disabled"])
         if self.mode_box.current() != int(c["fixed"]):
             self.mode_box.current(int(c["fixed"]))
@@ -418,8 +444,9 @@ class ChopWindow(ToolWindow):
         before = sum(len(n) for n in plain)
         cl = self.clean(self.cfg)
         stuck = any(too_many(n, cl, app.ppq) for n in plain)
-        self.info.config(text=tr("chop.too_many") if stuck else tr("chop.count", before=before, after=after),
-                         foreground="#d00000" if stuck else "#777")
+        empty = self.cfg["on"] and not self.cfg["pieces"]
+        self.info.config(text=tr("chop.no_pieces") if empty else tr("chop.too_many") if stuck else
+                         tr("chop.count", before=before, after=after), foreground="#d00000" if stuck or empty else "#777")
 
 
 open_chop = ChopWindow.open
