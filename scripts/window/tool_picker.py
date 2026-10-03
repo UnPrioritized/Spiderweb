@@ -29,6 +29,11 @@ def _arrow_inside(x, y):
     return 5.5 <= y <= 10.5 and abs(x - 8) <= (10.5 - y) * 0.9
 
 
+def _let_go_on(e):
+    """The mouse was let go over the widget it was pressed on."""
+    return e.widget.winfo_containing(e.x_root, e.y_root) is e.widget
+
+
 def _picture(size, rgb, inside=_pin_inside):
     return tk.PhotoImage(data=base64.b64encode(_png(inside, size, rgb)), format="png")
 
@@ -79,8 +84,15 @@ class ToolPicker:
     # ------------------------------------------------------------ the buttons
 
     def show(self):
+        free = [k for k, _, _ in self.tools if k not in self.pins]
+        if self.last not in free and free:  # the button moves on to a tool that has no button of its own
+            self.last = free[0]
         self.main.config(text=self.label[self.last], value=self.last)
         self.main_tip.text = BY_ID[TOOL_TOPICS[self.last]]["tip"]
+        if not free:  # every tool pinned: only the arrow is left (user)
+            self.main.pack_forget()
+        elif not self.main.winfo_manager():
+            self.main.pack(side="left", before=self.arrow)
         if self.pinned:  # (a new frame: an emptied one keeps its old width, holding Live shape off to the right)
             self.pinned.destroy()
         self.pinned = ttk.Frame(self.frame)
@@ -139,8 +151,6 @@ class ToolPicker:
             self.pins = [k for k in self.pins if k not in keys]
         else:
             self.pins += [k for k in keys if k not in self.pins]
-            if self.last in keys:  # the button moves on to a tool that has no button of its own
-                self.last = next((k for k, _, _ in self.tools if k not in self.pins), self.last)
         self.show()
         self.fill_list()
         self.app.schedule_autosave()
@@ -156,7 +166,8 @@ class ToolPicker:
         self.list_box = tk.Frame(p, background=ROW_BG, relief="solid", borderwidth=1)
         self.list_box.pack()
         self.fill_list()
-        p.geometry(f"+{self.main.winfo_rootx()}+{self.main.winfo_rooty() + self.main.winfo_height()}")
+        b = self.main if self.main.winfo_manager() else self.arrow
+        p.geometry(f"+{b.winfo_rootx()}+{b.winfo_rooty() + b.winfo_height()}")
         p.bind("<Escape>", lambda e: self.close())
         # (no grab: it would keep the window's X from closing Spiderweb while the list is open)
         p.bind("<FocusOut>", lambda e: p.after_idle(self.focus_left))
@@ -193,8 +204,9 @@ class ToolPicker:
             for w in (name, pin):
                 w.bind("<Enter>", lambda e, ws=(name, pin): [x.config(background=HOVER_BG) for x in ws], add="+")
                 w.bind("<Leave>", lambda e, ws=(name, pin), bg=bg: [x.config(background=bg) for x in ws], add="+")
-            name.bind("<ButtonRelease-1>", lambda e, k=key: self.pick(k))
-            pin.bind("<ButtonRelease-1>", lambda e, k=key: self.toggle_pin(k))
+            # (let go somewhere else = nothing, like a menu)
+            name.bind("<ButtonRelease-1>", lambda e, k=key: _let_go_on(e) and self.pick(k))
+            pin.bind("<ButtonRelease-1>", lambda e, k=key: _let_go_on(e) and self.toggle_pin(k))
             RestTip(name, BY_ID[TOOL_TOPICS[key]]["tip"], self.list_box)
             RestTip(pin, tr("app.pin_tip"), self.list_box)
 
@@ -232,7 +244,8 @@ class ToolPicker:
     # ------------------------------------------------------------ autosave
 
     def state(self):
-        return {"draw_tool_shown": self.last, "draw_tool_pins": list(self.pins)}
+        return {"draw_tool_shown": self.last, "draw_tool_pins": list(self.pins), "tool": self.app.tool.get(),
+                "draw_tool": self.app.draw_tool}
 
     def restore(self, win):
         if isinstance(win.get("draw_tool_shown"), str) and win["draw_tool_shown"] in self.label:
@@ -242,6 +255,12 @@ class ToolPicker:
             self.pins = [k for k in dict.fromkeys(pins) if isinstance(k, str) and k in self.label]
             if any(k in self.pins for k in GROUP):
                 self.pins += [k for k in GROUP if k not in self.pins]
-            if self.last in self.pins:
-                self.last = next((k for k, _, _ in self.tools if k not in self.pins), self.last)
+        # the tool in use, and the one a double right-click goes back to (the tool's own effects: App.__init__)
+        tool = win.get("tool")
+        if tool in self.label or tool in ("select", "slice"):
+            self.app.tool.set(tool)
+        if win.get("draw_tool") in self.label:
+            self.app.draw_tool = win["draw_tool"]
+        elif "draw_tool_shown" in win:  # (saved before this was remembered)
+            self.app.draw_tool = self.last
         self.show()

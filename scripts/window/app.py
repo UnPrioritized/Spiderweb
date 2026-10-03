@@ -220,6 +220,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             v.trace_add("write", lambda *_, k=k: self.on_field(k))
         self.end_dot.trace_add("write", lambda *_: self.on_end_dot())
         self.tool.trace_add("write", lambda *_: self.on_tool_change())
+        if self.tool.get() != "select":  # the tool from last time (restore_window)
+            self.on_tool_change()
         # (Live shape also shows the selected custom shape's stroke points)
         self.live.trace_add("write", lambda *_: (self.sync_custom(), self.schedule_autosave(),
                                                   self.roll.request_redraw(),
@@ -1239,7 +1241,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.tool.set(self.draw_tool if self.tool.get() == "select" else "select")
 
     def on_tool_change(self):
-        if self.tool.get() != "select":
+        if self.tool.get() not in ("select", "slice"):  # (Slice isn't one to go back to, user)
             self.draw_tool = self.tool.get()
         if self.tool.get() != "hz":
             self.hz_start = None
