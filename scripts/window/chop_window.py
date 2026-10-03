@@ -1,6 +1,6 @@
 """The Chop window (chop.py): the selected shapes' notes cut into a rhythm, shown live on the piano roll (the shared
 part: tool_window.py). A rhythm list (our own rhythms + ones saved by the user in spiderweb/rhythms.json), a strip
-showing one repeat of the rhythm where pieces can be drawn (drag), deleted (right-click) and made louder / quieter
+showing one repeat of the rhythm where pieces can be drawn (drag), deleted (right-click / right-drag) and made louder / quieter
 (drag a piece up / down), the rhythm's length in steps, one step's length (picked like the snap), the pieces'
 velocities as % of each note or fixed 1..127 and how much they count, and Absolute (the rhythm follows the song's
 grid)."""
@@ -53,20 +53,23 @@ def piece_beats(snap, app):
 
 class RhythmStrip(tk.Canvas):
     """One repeat of the rhythm. Press on empty space = a new piece there, as loud as the mouse is high; dragging
-    makes it longer (sideways, on the grid; pieces it covers are cut back) and louder / quieter (up / down). Drag a
-    piece up / down = its velocity (% sticks at 100, Shift = no sticking; fixed doesn't stick), its number shown
-    while dragging. Right-click a piece = delete it. changed(pieces, done)."""
+    makes it longer (sideways, a grid cell joins as soon as the mouse is in it; pieces it covers are cut back) and
+    louder / quieter (up / down). Drag a piece up / down = its velocity (% sticks at 100, Shift = no sticking; fixed
+    doesn't stick), its number shown while dragging. Right-click / right-drag = delete the pieces the mouse passes
+    over. changed(pieces, done)."""
 
     def __init__(self, parent, scale, changed):
         self.w, self.h = round(360 * scale), round(90 * scale)
         super().__init__(parent, width=self.w, height=self.h, background="white", highlightthickness=1,
                          highlightbackground="#bbb", cursor="crosshair")
         self.changed, self.steps, self.pieces, self.cells, self.drag = changed, 1, [], 4, None
-        self.fixed = False  # (velocities 1..127 instead of % of the note)
+        self.fixed, self.erased = False, False  # (velocities 1..127 instead of % of the note)
         self.bind("<ButtonPress-1>", self.press)
         self.bind("<B1-Motion>", self.move)
         self.bind("<ButtonRelease-1>", self.release)
-        self.bind("<ButtonPress-3>", self.delete_at)
+        self.bind("<ButtonPress-3>", self.erase_press)
+        self.bind("<B3-Motion>", self.erase)
+        self.bind("<ButtonRelease-3>", self.erase_release)
 
     def show(self, steps, pieces, fixed):
         self.steps, self.pieces, self.fixed = steps, [list(p) for p in pieces], fixed
@@ -114,10 +117,9 @@ class RhythmStrip(tk.Canvas):
         s = self.step_at(x)
         return next((i for i, (a, ln, _) in enumerate(self.pieces) if a <= s < a + ln), None)
 
-    def snapped(self, x, nearest=False):
-        """The grid line before x (nearest: the nearest one)."""
-        c = self.step_at(x) * self.cells
-        return min(float(self.steps), (round(c) if nearest else int(c)) / self.cells)
+    def snapped(self, x):
+        """The grid line before x."""
+        return min(float(self.steps), int(self.step_at(x) * self.cells) / self.cells)
 
     def press(self, e):
         i = self.piece_at(e.x)
@@ -141,9 +143,8 @@ class RhythmStrip(tk.Canvas):
             self.changed(self.pieces, False)
             return
         a, cell = self.drag[1], 1 / self.cells  # (a = the start of the cell pressed: it's always in the piece)
-        b = self.snapped(e.x, nearest=True)
-        lo, hi = (b, a + cell) if b < a else (a, max(b, a + cell))
-        hi = min(float(self.steps), hi)
+        b = self.snapped(e.x)  # (the cell under the mouse joins as soon as the mouse is in it)
+        lo, hi = min(a, b), min(float(self.steps), max(a, b) + cell)
         lo = min(lo, hi - cell)
         self.draw()
         self.create_rectangle(self.x(lo) + 1, self.vel_y(v), self.x(hi) - 1, self.h - 1, fill="",
@@ -167,11 +168,21 @@ class RhythmStrip(tk.Canvas):
         self.draw()
         self.changed(self.pieces, True)
 
-    def delete_at(self, e):
+    def erase_press(self, e):
+        self.erased = False
+        self.erase(e)
+
+    def erase(self, e):
         i = self.piece_at(e.x)
         if i is not None:
             del self.pieces[i]
+            self.erased = True
             self.draw()
+            self.changed(self.pieces, False)
+
+    def erase_release(self, e):
+        if self.erased:  # (one undo step for the whole drag)
+            self.erased = False
             self.changed(self.pieces, True)
 
 
