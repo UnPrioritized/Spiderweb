@@ -3,7 +3,8 @@ shape, each as strokes of its own kind (a curve stays a curve, an arc an arc), s
 
 The notes stay the same: every stroke remembers which shape it came from ("src"), and each shape's strokes make
 their outline notes on their own (custom.outline_groups), so with Multi channel the old shapes still get channels
-of their own. Tumours become plain points (the bumps as drawn), "Last note: starts on it" is dropped.
+of their own. Tumours become plain points (the bumps as drawn), "Last note: starts on it" is dropped. Glue, chop,
+claw and strum stay when the shapes all have the same (shared_settings), else they're dropped (the warning says).
 
 The old shapes are kept in the new one (sh["from"]), so Split into separate shapes can give them back as long as the
 drawing wasn't changed (moving the whole shape is fine; resizing, turning, flipping or editing strokes isn't)."""
@@ -66,7 +67,27 @@ def losses(shapes):
         out.append(tr("convert.tumours_become_fixed_points_they_can"))
     if any(sh["kind"] in LINE_KINDS and sh.get("end_dot") for sh in shapes):
         out.append(tr("convert.last_note_starts_on_it_is"))
-    return out
+    return out + shared_settings(shapes)[1]
+
+
+NOTE_SETTINGS = (("glue", "convert.glue"), ("chop", "chop.window_title"), ("claw", "claw.window_title"),
+                 ("strum", "strum.window_title"))
+
+
+def shared_settings(shapes):
+    """The note settings (glue, chop, claw, strum) a shape made of these keeps: the ones they all have alike (glue
+    only on whole shapes: boxes are shares of each shape's own box), and the sentence saying which are dropped
+    (a list with one sentence, or empty)."""
+    keep, lost = {}, []
+    for key, name in NOTE_SETTINGS:
+        vals = [sh.get(key) or None for sh in shapes]
+        if not any(vals):
+            continue
+        if all(v == vals[0] for v in vals) and (key != "glue" or vals[0] is True):
+            keep[key] = json.loads(json.dumps(vals[0]))
+        else:
+            lost.append(tr(name))
+    return keep, [tr("convert.settings_dropped", names=", ".join(lost))] if lost else []
 
 
 def to_live(shapes, paths, defaults, custom_defaults):
@@ -98,6 +119,7 @@ def to_live(shapes, paths, defaults, custom_defaults):
     spans = [(min(b for p in ps for b, _ in p), max(b for p in ps for b, _ in p)) for ps in paths]
     mine = [b for p in custom_strokes(new) for b, _ in p]
     join_velocity(new, shapes, spans, (min(mine), max(mine)))  # (each keeps its velocities)
+    new.update(shared_settings(shapes)[0])
     new["from"] = {"shapes": json.loads(json.dumps(shapes)), "strokes": json.loads(json.dumps(new["strokes"])),
                    "pts": [list(p) for p in new["pts"]]}
     return new

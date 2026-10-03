@@ -11,7 +11,7 @@ import numpy as np
 
 from files.lang import tr
 from notes.arc import arc_circle, arc_points
-from notes.convert import CAN_TURN, losses, originals, to_live
+from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live
 from notes.bezier import anchor_count, nearest, split
 from notes.engine import cached_arrays, shape_path
 from notes.slice import clip_segment, crossings, slice_custom
@@ -147,6 +147,12 @@ class JoinSplit:
         new = join_shapes(olds, roll.sy / roll.sx, touch)
         if new is None:
             return
+        kept, lost = shared_settings(olds)  # (glue / chop / claw / strum: kept when they all have the same)
+        if lost and not messagebox.askokcancel(
+                tr("join_split.spiderweb"), tr("join_split.joining_these_changes") + lost[0] +
+                tr("join_split.ctrl_z_gives_them_back"), icon="warning", parent=self):
+            return
+        new.update(kept)
         join_velocity(new, olds, [span(sh) for sh in olds], span(new))  # (each keeps its velocities)
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.join"))
