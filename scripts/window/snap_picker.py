@@ -117,7 +117,11 @@ class SnapPicker:
                                   variable=self.pick, value="custom", command=self.open_custom)
         self.button.config(menu=self.menu)
         Tooltip(self.button, tr("snap.tip"))
-        var.trace_add("write", lambda *_: self.show())
+        # (watches the snap only while the button is there: one left behind by a closed Hz bass window
+        # configured its gone button, an error on the next snap change / project opened)
+        trace = var.trace_add("write", lambda *_: self.show())
+        self.button.bind("<Destroy>", lambda e: var.trace_remove("write", trace) if e.widget is self.button else None,
+                         add="+")
         self.show()
 
     def show(self):
