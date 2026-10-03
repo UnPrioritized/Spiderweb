@@ -527,6 +527,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
         on_box = self.on_kept_box(kept, e) if tool == "select" and not self.draft else None
         if on_box and on_box != (0, 0):  # the kept Select box's side / corner: what's in it stretches
+            self.box_kept = (kept, set(app.sels))  # (kept with the undo step: undo puts the box back)
             app.push_undo(name=tr("pianoroll.stretch"))
             boxes, around = boxes_upright(kept)
             self.box_kept = (boxes, set(app.sels))

@@ -1,7 +1,7 @@
 """The History panel: every undo step by name, oldest at the top; click one to go back (or forward) to it. The
 toolbar's History box shows / hides it (off on a fresh start). It sits in the side panel between Project and Shapes;
 Undock puts it in a window of its own (Dock, or closing that window, puts it back). The steps themselves are
-App.undo_stack / redo_stack: (shapes as JSON, name, (selected shape numbers, main one)) steps."""
+App.undo_stack / redo_stack: (shapes as JSON, name, (selected shape numbers, main one, kept Select boxes)) steps."""
 
 import json
 import tkinter as tk

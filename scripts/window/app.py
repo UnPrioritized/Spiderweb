@@ -1438,8 +1438,10 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.sync_history()
 
     def sel_state(self):
-        """The selection as an undo step keeps it: (selected shape numbers, the main one)."""
-        return sorted(self.sels), self.sel
+        """The selection as an undo step keeps it: (selected shape numbers, the main one, the kept Select boxes or
+        None)."""
+        boxes = self.roll.kept_box()
+        return sorted(self.sels), self.sel, boxes and list(boxes)
 
     def scrub_step(self, gesture, run):
         """run() steps a number box (widgets.Scrub). The steps of one gesture (a label drag, or arrows / wheel on the
@@ -1489,6 +1491,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.stroke = None
         if self.sel not in self.sels:
             self.sel = max(self.sels, default=None)
+        # the Select boxes come back where they were (only while they still hold the same selection)
+        self.roll.box_kept = (picked[2], set(self.sels)) if picked[2] and self.sels == set(picked[0]) else None
         self._edit_key = self._scrub = None
         self.sync_panel()
         self.shapes_changed()
