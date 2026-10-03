@@ -28,8 +28,8 @@ from files.snap import snap_beats
 from notes.engine import slot_track_channel
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
 from notes.hzbass import (AUTO, AUTO_MOST, FX, HZ_DEFAULTS, TUNE, auto_state, can_slide, clean_fx, clean_loop,
-                          clean_off, clean_tones, fit_length, glide, heard, hz_of, left_edge, links, next_id, pitch,
-                          tones_span)
+                          clean_off, clean_tones, fit_length, glide, heard, held_fixed, hz_of, left_edge, links, next_id,
+                          pitch, tones_span)
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, SELECT_CURSOR, SELECTED_COLOR, SHIFT,
                               SLOT_COLORS, boxes_side, boxes_upright, draw_boxes, grab_while_panning,
                               grid_span, note_name)
@@ -51,6 +51,7 @@ GREEN = "#18a048"  # a note's exact tone (the middle of its row)
 BAND_FIXED, BAND_MIXED = ("#8ee0a4", "#18a048"), ("#ffc27a", "#c06000")
 GATE_MODES = ("auto", "mixed", "fixed")  # the Gates dropdown's choices, in order
 TUNE_ROW = 20  # px: rows at least this tall show the exact tone, and the red line can be dragged up / down
+TUNE_STICK = 3.0  # cents: a dragged tune this near the exact tone sticks to it (at any zoom; was 5 px, user)
 POS = r"\d+x\d+\+-?\d+\+-?\d+"  # a remembered size and place
 try:  # how quick a second click has to be to make a double click (Windows' setting)
     DOUBLE_MS = int(ctypes.windll.user32.GetDoubleClickTime())
@@ -161,6 +162,13 @@ def hz_made(sh):
     return bool(hz.get("own") and hz.get("tones"))
 
 
+def hz_keys(sh):
+    """The lowest and highest key a custom shape's box covers, as app.hz_defaults ({"lo", "hi"})."""
+    ps = [p for _, p in sh["pts"]]
+    ps.append(ps[1] + ps[2] - ps[0])
+    return {"lo": round(min(ps)), "hi": round(max(ps))}
+
+
 def shape_length(sh):
     """How long a custom shape's box is, in beats."""
     (b0, _), (b1, _), (b2, _) = sh["pts"]
@@ -182,6 +190,7 @@ class HzWindow(tk.Toplevel):
         self.box_kept = None  # ([box_area, ...], selection) of the last Select boxes, shown after letting go
         self.box_timer = None  # (box_scroll)
         self.pending = None  # (tone id, beat): the first middle click of a slide, waiting for the second
+        self.shown = None  # id() of the shape shown (another one: the pending mark goes)
         self.sounding = None  # (channel, what's played) heard now: the notes held with the mouse (see sound)
         self.sound_jobs, self.sound_on = [], set()  # (the notes still to start / stop, the keys on now)
         self.last_len = 1.0  # beats: how long a newly placed note is (the last length used)
@@ -352,6 +361,8 @@ class HzWindow(tk.Toplevel):
         sh = self.target()
         hz = (sh or {}).get("hz") or {}
         tones = clean_tones(hz.get("tones"))
+        if (id(sh) if sh is not None else None) != self.shown:  # another Hz bass: a slide's first mark goes (user)
+            self.shown, self.pending = (id(sh) if sh is not None else None), None
         if tones != self.tones:
             self.tones, self.sel = tones, set()
             self.drop_drag()
@@ -405,18 +416,19 @@ class HzWindow(tk.Toplevel):
         """Undo / redo is about to change the shapes: what's shown now (for after_restore)."""
         app, sh = self.app, self.target()
         if sh is not None and hz_made(sh):
-            ps = [p for _, p in sh["pts"]]
-            ps.append(ps[1] + ps[2] - ps[0])
-            return "shape", left_edge(sh), {"lo": round(min(ps)), "hi": round(max(ps))}
+            return "shape", left_edge(sh), hz_keys(sh)
         if sh is None and app.hz_start is not None:
             return "start", len(app.shapes)
         return None
 
     def after_restore(self, was):
         """Undo / redo changed the shapes. The Hz bass shown was taken back whole: its start spot is back, so notes
-        can be placed again. A Hz bass came back on the start spot: it's the one shown again."""
+        can be placed again. A Hz bass came back on the start spot: it's the one shown again. (Gone = no Hz bass
+        there any more, not "not selected": the selection is kept by number, so when undo puts a shape back in front
+        of it, another shape is selected.)"""
         app = self.app
-        if was and was[0] == "shape" and self.target() is None:
+        if was and was[0] == "shape" and self.target() is None and not any(
+                hz_made(s) and abs(left_edge(s) - was[1]) < 1e-9 and hz_keys(s) == was[2] for s in app.shapes):
             app.hz_start, app.hz_defaults = was[1], was[2]
             app.roll.request_redraw()
         elif was and was[0] == "start" and len(app.shapes) > was[1]:
@@ -675,11 +687,11 @@ class HzWindow(tk.Toplevel):
         hz = dict((sh or {}).get("hz") or self.new_hz(bpm), tones=self.tones)
         left = left_edge(sh) if sh is not None else app.hz_start or 0.0
         lo, hi = self.beat_at(kb), self.beat_at(w)
-        for n in self.tones:  # Auto gates: the threshold around each note's tone, green = fixed, orange = mixed
-            got = auto_state(hz, app.ppq, n)
+        for n in self.tones:  # Auto gates: the threshold around each note's tone, green = fixed, orange = mixed (a
+            got = auto_state(hz, app.ppq, n)  # note's own gates: the thinnest band)
             if got is None or n["t"] > hi or n["t"] + n["len"] < lo:
                 continue
-            y, half = self.pitch_y(pitch(n)), max(2.5 * self.s, got[1] / 100.0 * self.sy)  # (always seen)
+            y, half = self.pitch_y(pitch(n)), max(2.5 * self.s, (got[1] or 0.0) / 100.0 * self.sy)  # (always seen)
             fill, edge = BAND_FIXED if got[2] else BAND_MIXED
             c.create_rectangle(self.x_of(n["t"]), y - half, self.x_of(n["t"] + n["len"]), y + half, fill=fill,
                                outline=edge if half >= 3 * self.s else "")
@@ -765,7 +777,9 @@ class HzWindow(tk.Toplevel):
         hit = self.hit(e.x, e.y) if e is not None and not self.drag else None
         got = (auto_state(sh["hz"], self.app.ppq, self.tones[hit[1]])
                if hit and hit[0] not in ("in", "out") and sh is not None and sh.get("hz") else None)
-        if got:  # Auto gates: what this note gets, and why
+        if got and got[1] is None:  # the note's own gates
+            text += "     " + tr("hz.own_fixed" if got[2] else "hz.own_mixed", off=f"{got[0]:.2f}")
+        elif got:  # Auto gates: what this note gets, and why
             text += "     " + tr("hz.auto_fixed" if got[2] else "hz.auto_mixed", off=f"{got[0]:.2f}",
                                  limit=f"{got[1]:g}")
         if self.fx.says:
@@ -1046,12 +1060,12 @@ class HzWindow(tk.Toplevel):
             d["slide"]["out"] = min(max(0.0, n["t"] + n["len"] - self.snap(beat, e)), n["len"])
         elif d["kind"] == "in":
             d["slide"]["in"] = min(max(0.0, self.snap(beat, e) - n["t"]), n["len"])
-        elif d["kind"] == "tune":  # the note's own tune: whole cents, and it sticks to the exact tone (Shift = free)
-            cents = d["orig"][d["i"]]["cents"] + (d["y"] - e.y) / self.sy * 100
+        elif d["kind"] == "tune":  # the note's own tune: whole cents, and it sticks to the exact tone within
+            cents = d["orig"][d["i"]]["cents"] + (d["y"] - e.y) / self.sy * 100  # TUNE_STICK cents (Shift = free)
             if e.state & SHIFT:
                 cents = round(cents, 1)
             else:
-                cents = 0.0 if abs(cents) * self.sy / 100 <= 5 * self.s else float(round(cents))
+                cents = 0.0 if abs(cents) <= TUNE_STICK else float(round(cents))
             n["cents"] = max(-TUNE, min(TUNE, cents))
             # the other selected notes move by as much, each from where it was (user): one that would go past the
             # end stops there, and comes back to its own distance as the drag comes back
@@ -1276,6 +1290,7 @@ class HzWindow(tk.Toplevel):
             if any("auto" in self.tones[j] for j in self.sel):
                 menu.add_command(label=tr("hz.auto_shared", cents=f"{hz['auto']:g}"),
                                  command=lambda: self.set_auto(first, None))
+        self.gate_items(menu, first)
         if pairs and all(self.link(a, b) for a, b in pairs):
             menu.add_command(label=tr("hz.slide_remove"), command=lambda: self.set_slide(False))
         else:
@@ -1301,6 +1316,7 @@ class HzWindow(tk.Toplevel):
                 if any("auto" in self.tones[j] for j in picked):
                     menu.add_command(label=tr("hz.auto_shared", cents=f"{hz['auto']:g}"),
                                      command=lambda: self.set_auto(hit[1], None))
+            self.gate_items(menu, hit[1])
             if self.app.hz_line.get():  # a slide's dots, like two middle-clicks
                 n = self.tones[hit[1]]
                 first = next((m for m in self.tones if self.pending and m["id"] == self.pending[0]), None)
@@ -1385,6 +1401,40 @@ class HzWindow(tk.Toplevel):
         if self.tones != before:
             self.commit(tr("hz.step_auto"), before)
 
+    def gate_items(self, menu, i):
+        """The menu's own-gates items for note i (the selected notes when it's one of them): the other gates than
+        the ones they get now; both when they get different ones (either one then goes to all, user); and back to
+        the Hz bass's when some have their own."""
+        sh = self.target()
+        if sh is None or not sh.get("hz") or i >= len(self.tones):
+            return
+        hz = sh["hz"]
+        picked = [self.tones[j] for j in (self.sel if i in self.sel else {i})]
+        now = {held_fixed(hz, self.app.ppq, n) for n in picked}
+        for fixed in (True, False):
+            if now != {fixed}:
+                mode = "fixed" if fixed else "mixed"
+                menu.add_command(label=tr("hz.gate_" + mode), command=lambda mode=mode: self.set_gate(i, mode))
+        if any("gate" in n for n in picked):
+            menu.add_command(label=tr("hz.gate_shared", mode=tr("panel_custom.hz_" + gate_mode(hz))),
+                             command=lambda: self.set_gate(i, None))
+
+    def set_gate(self, i, mode):
+        """Note i's own gates while held, "fixed" / "mixed" (the selected notes' too when it's one of them); None =
+        back to the Hz bass's. With the Hz bass's own Mixed / Fixed the same as picked, a note just follows it."""
+        if i >= len(self.tones):
+            return
+        hz = (self.target() or {}).get("hz") or {}
+        same = mode is not None and hz.get("auto") is None and mode == gate_mode(hz)
+        before = copy.deepcopy(self.tones)
+        for j in self.sel if i in self.sel else {i}:
+            if mode is None or same:
+                self.tones[j].pop("gate", None)
+            else:
+                self.tones[j]["gate"] = mode
+        if self.tones != before:
+            self.commit(tr("hz.step_gate"), before)
+
     def set_slide(self, on):
         """Slides between the selected notes (see pairs): each a quarter of its two notes long to start with (its
         dots can then be dragged); slides that are there stay as they are. Off = those slides go."""
@@ -1459,7 +1509,7 @@ class HzWindow(tk.Toplevel):
         sh = self.target()
         if sh is not None and sh.get("hz"):
             mode = GATE_MODES[self.gates.current()]
-            self.app.set_hz_gates(mode, self.fixed().get("auto"))
+            self.app.set_hz_gates(mode, self.fixed().get("auto"), every=True)  # (the notes' own gates go: user)
         self.show_auto()
         self.canvas.focus_set()
         self.redraw()
@@ -1607,8 +1657,8 @@ class HzWindow(tk.Toplevel):
                     new["hz"] = hz
                 sh.clear()
                 sh.update(new)
-            else:  # ... from a Hz bass made here: it goes, a new one can start at the same spot
-                app.hz_start = left_edge(sh)
+            else:  # ... from a Hz bass made here: it goes, a new one can start at the same spot, same keys
+                app.hz_start, app.hz_defaults = left_edge(sh), hz_keys(sh)
                 del app.shapes[app.sel]
                 self.tones = []
                 app.select(None)

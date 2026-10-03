@@ -12,7 +12,8 @@ mixed and the tone comes out exact (custom.chop_even). The tone depends on the B
 until it's updated (the panel warns); a changed PPQ keeps the tone.
 
 Placed notes (the Hz bass window): hz["tones"] = [{"t": start in beats from the shape's left edge, "len": beats,
-"key": its tone, "cents": its own tune, "auto": its own Auto gates threshold (optional), "id": its number (never reused in the shape), "to": its slides}, ...].
+"key": its tone, "cents": its own tune, "auto": its own Auto gates threshold (optional), "gate": "fixed" / "mixed" =
+its own gates while held, whatever the Hz bass's (optional, see own_gate), "id": its number (never reused in the shape), "to": its slides}, ...].
 Each tone makes repeats one wave apart for as long as it lasts; tones sounding together are a chord. A slide is
 made by the user and belongs to two tones: "to" = [{"id": the tone slid to, "out": lead out, "in": lead in
 (beats)}, ...]: the tone glides from `out` before this tone's end to `in` after the start of the other one (which
@@ -67,7 +68,7 @@ import math
 import numpy as np
 
 HZ_DEFAULTS = {"key": 33, "cents": 0.0}
-MIN_LEN = 1 / 1024  # beats: a tone is never shorter
+MIN_LEN = 1 / 65536  # beats: a tone is never shorter (under a tick at the highest PPQ: one tick is always possible)
 TUNE = 50.0  # cents: how far a placed tone's own tune goes, up or down (half a key)
 AUTO = 3.0  # cents: Auto gates' threshold to start with
 AUTO_MOST = 50.0  # ... and the highest (past half a key, a fixed tone is nearer the next key than its own)
@@ -286,6 +287,8 @@ def clean_tones(tones):
             tone["id"] = int(n.get("id", 0))
             if n.get("auto") is not None:
                 tone["auto"] = max(0.0, min(AUTO_MOST, float(n["auto"])))
+            if n.get("gate") in ("fixed", "mixed"):
+                tone["gate"] = n["gate"]
             tone["to"] = [{"id": int(s["id"]), "out": max(0.0, float(s["out"])), "in": max(0.0, float(s["in"]))}
                           for s in n.get("to") or ()]
         except (KeyError, TypeError, ValueError, AttributeError):
@@ -403,11 +406,13 @@ def glide(a, b, s):
     return a["t"] + a["len"] - min(s["out"], a["len"]), b["t"] + min(s["in"], b["len"]), pitch(a), pitch(b)
 
 
-def wave(hz, ppq, key, limit=None):
+def wave(hz, ppq, key, limit=None, whole=None):
     """The gate, in ticks, of one wave of key's tone (hz = the shape's settings: cents, bpm, fixed). limit = Auto
-    gates' threshold in cents for a tone held still: whole ticks when that's at most this far off."""
+    gates' threshold in cents for a tone held still: whole ticks when that's at most this far off. whole = True /
+    False: whole ticks or not, whatever the rest says (a tone's own gates, own_gate)."""
     gate = ppq * hz["bpm"] / 60.0 / hz_of(key, hz["cents"])
-    whole = hz.get("fixed") or (limit is not None and off_cents(gate) <= limit + 1e-9)
+    if whole is None:
+        whole = hz.get("fixed") or (limit is not None and off_cents(gate) <= limit + 1e-9)
     return max(1.0, math.floor(gate + 0.5) if whole else gate)
 
 
@@ -415,6 +420,21 @@ def off_cents(gate):
     """How far, in cents, a gate rounded to a whole tick is off the tone of the exact gate (in ticks)."""
     whole = max(1.0, math.floor(gate + 0.5))
     return abs(1200.0 * math.log2(gate / whole))
+
+
+def own_gate(n):
+    """A placed tone's own gates while held (n["gate"], set in the Hz bass window): True = fixed, False = mixed,
+    None = the Hz bass's."""
+    return {"fixed": True, "mixed": False}.get((n or {}).get("gate"))
+
+
+def held_fixed(hz, ppq, n):
+    """True when tone n held still gets fixed gates (its own, the Hz bass's Fixed, or Auto's pick)."""
+    own = own_gate(n)
+    if own is not None:
+        return own
+    got = auto_state(hz, ppq, n)
+    return bool(hz.get("fixed")) if got is None else got[2]
 
 
 def threshold(hz, n=None):
@@ -425,13 +445,15 @@ def threshold(hz, n=None):
 
 
 def auto_state(hz, ppq, n):
-    """For tone n held still with Auto gates: (how far fixed gates would be off, in cents; the threshold; True when
-    it gets fixed gates). None when the gates aren't Auto."""
-    limit = threshold(hz, n)
-    if limit is None:
+    """For tone n held still with Auto gates or gates of its own: (how far fixed gates would be off, in cents; the
+    threshold, None for its own gates; True when it gets fixed gates). None when neither."""
+    limit, own = threshold(hz, n), own_gate(n)
+    if own is not None:
+        limit = None
+    elif limit is None:
         return None
     off = off_cents(ppq * hz["bpm"] / 60.0 / hz_of(pitch(n), hz["cents"]))
-    return off, limit, off <= limit + 1e-9
+    return off, limit, own if own is not None else off <= limit + 1e-9
 
 
 def auto_picks(hz, ppq):
@@ -457,7 +479,7 @@ def tone_runs(hz, left, ppq):
         a = n["t"] + min([min(s["in"], n["len"]) for _, b, s in ls if b is n], default=0.0)
         b = n["t"] + n["len"] - min([min(s["out"], n["len"]) for m, _, s in ls if m is n], default=0.0)
         if b > a:
-            s, e, gate = (left + a) * ppq, (left + b) * ppq, wave(hz, ppq, pitch(n), threshold(hz, n))
+            s, e, gate = (left + a) * ppq, (left + b) * ppq, wave(hz, ppq, pitch(n), threshold(hz, n), own_gate(n))
             starts = s + gate * np.arange(int(math.ceil((e - s) / gate)))
             out.append((starts, starts + gate, (n, None)))
             held[n["id"]] = (s, gate)

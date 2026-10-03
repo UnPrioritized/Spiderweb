@@ -550,9 +550,10 @@ class CustomPanel:
         self.sync_custom()
         self.schedule_autosave()
 
-    def set_hz_gates(self, mode, limit=None):
+    def set_hz_gates(self, mode, limit=None, every=False):
         """The gates dropdown: "mixed" (exact tone), "fixed" (every gate a whole tick) or "auto" (fixed for a tone
-        held still when that's at most limit cents off, else mixed; limit None = the threshold box's, or AUTO)."""
+        held still when that's at most limit cents off, else mixed; limit None = the threshold box's, or AUTO).
+        every: the notes' own gates go too, so all of them get these (the Hz bass window's dropdown, user)."""
         if mode == "auto" and limit is None:
             limit = AUTO
         want = {"fixed": True} if mode == "fixed" else {"auto": float(limit)} if mode == "auto" else {}
@@ -560,7 +561,10 @@ class CustomPanel:
         def gates(hz):
             return {k: hz[k] for k in ("fixed", "auto") if k in hz}
 
-        tgts = [t for t in self.custom_targets() if t.get("hz") and gates(t["hz"]) != want]
+        def own(hz):
+            return every and any("gate" in n for n in hz.get("tones") or ())
+
+        tgts = [t for t in self.custom_targets() if t.get("hz") and (gates(t["hz"]) != want or own(t["hz"]))]
         if self._loading or not tgts:
             return
         if any(t is not self.custom_defaults for t in tgts):
@@ -568,6 +572,8 @@ class CustomPanel:
         before = [auto_picks(t["hz"], self.ppq) for t in tgts]
         for t in tgts:
             t["hz"] = dict({k: v for k, v in t["hz"].items() if k not in ("fixed", "auto")}, **want)
+            if own(t["hz"]):
+                t["hz"]["tones"] = [{k: v for k, v in n.items() if k != "gate"} for n in t["hz"]["tones"]]
         # (a new threshold that gives every note the same gates as before leaves the notes as they are: nothing
         # to make again, and the preview keeps its sound)
         if None in before or before != [auto_picks(t["hz"], self.ppq) for t in tgts]:
