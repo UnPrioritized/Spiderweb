@@ -1,8 +1,9 @@
 """The Chop window (chop.py): the selected shapes' notes cut into a rhythm, shown live on the piano roll (the shared
 part: tool_window.py). A rhythm list (our own rhythms + ones saved by the user in spiderweb/rhythms.json), a strip
 showing one repeat of the rhythm where pieces can be drawn (drag), deleted (right-click) and made louder / quieter
-(drag a piece up / down), the rhythm's length in steps, one step's length (picked like the snap), how much the
-pieces' velocities count, and Absolute (the rhythm follows the song's grid)."""
+(drag a piece up / down), the rhythm's length in steps, one step's length (picked like the snap), the pieces'
+velocities as % of each note or fixed 1..127 and how much they count, and Absolute (the rhythm follows the song's
+grid)."""
 
 import json
 import os
@@ -14,7 +15,8 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from files.safefile import write_text
 from files.snap import snap_beats, snap_text
-from notes.chop import CHOP_DEFAULTS, MAX_STEPS, MAX_VEL, RHYTHMS, clean_chop, clean_pieces, rhythm, too_many
+from notes.chop import (CHOP_DEFAULTS, MAX_STEPS, RHYTHMS, clean_chop, clean_pieces, rhythm, switched, too_many,
+                        top)
 from window.snap_picker import SnapPicker
 from window.tool_window import ORANGE, ToolWindow
 from window.widgets import Scrub, Tooltip
@@ -24,16 +26,17 @@ CELLS = (1, 2, 3, 4, 6, 8)  # the strip's grid: cells per step
 
 
 def load_rhythms():
-    """The user's saved rhythms [{"name", "steps", "pieces"}]."""
+    """The user's saved rhythms [{"name", "steps", "pieces", "fixed"}]."""
     try:
         with open(RHYTHMS_FILE, encoding="utf-8") as f:
             data = json.load(f)
         out = []
         for r in data.get("rhythms", []):
             steps = max(1, min(MAX_STEPS, int(r["steps"])))
-            pieces = clean_pieces(r["pieces"], steps)
+            fixed = r.get("fixed") is True
+            pieces = clean_pieces(r["pieces"], steps, fixed)
             if pieces:
-                out.append({"name": str(r["name"]), "steps": steps, "pieces": pieces})
+                out.append({"name": str(r["name"]), "steps": steps, "pieces": pieces, "fixed": fixed})
         return out
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         return []
@@ -49,21 +52,24 @@ def piece_beats(snap, app):
 
 
 class RhythmStrip(tk.Canvas):
-    """One repeat of the rhythm. Drag on empty space = a new piece (on the grid; pieces it covers are cut back),
-    drag a piece up / down = its velocity, right-click a piece = delete it. changed(pieces, done)."""
+    """One repeat of the rhythm. Press on empty space = a new piece there, as loud as the mouse is high; dragging
+    makes it longer (sideways, on the grid; pieces it covers are cut back) and louder / quieter (up / down). Drag a
+    piece up / down = its velocity (% sticks at 100, Shift = no sticking; fixed doesn't stick), its number shown
+    while dragging. Right-click a piece = delete it. changed(pieces, done)."""
 
     def __init__(self, parent, scale, changed):
         self.w, self.h = round(360 * scale), round(90 * scale)
         super().__init__(parent, width=self.w, height=self.h, background="white", highlightthickness=1,
                          highlightbackground="#bbb", cursor="crosshair")
         self.changed, self.steps, self.pieces, self.cells, self.drag = changed, 1, [], 4, None
+        self.fixed = False  # (velocities 1..127 instead of % of the note)
         self.bind("<ButtonPress-1>", self.press)
         self.bind("<B1-Motion>", self.move)
         self.bind("<ButtonRelease-1>", self.release)
         self.bind("<ButtonPress-3>", self.delete_at)
 
-    def show(self, steps, pieces):
-        self.steps, self.pieces = steps, [list(p) for p in pieces]
+    def show(self, steps, pieces, fixed):
+        self.steps, self.pieces, self.fixed = steps, [list(p) for p in pieces], fixed
         self.draw()
 
     def x(self, step):
@@ -73,7 +79,15 @@ class RhythmStrip(tk.Canvas):
         return max(0.0, min(float(self.steps), x / self.w * self.steps))
 
     def vel_y(self, v):
-        return self.h - 2 - (self.h - 4) * v / MAX_VEL
+        return self.h - 2 - (self.h - 4) * v / top(self.fixed)
+
+    def y_vel(self, e):
+        """The velocity at the mouse's height."""
+        hi = top(self.fixed)
+        v = max(1.0, min(float(hi), round((self.h - 2 - e.y) / (self.h - 4) * hi)))
+        if not self.fixed and abs(v - 100) < 6 and not e.state & 1:  # (% sticks at 100; Shift = no sticking)
+            v = 100.0
+        return v
 
     def draw(self):
         self.delete("all")
@@ -82,11 +96,19 @@ class RhythmStrip(tk.Canvas):
             x = self.x(i / self.cells)
             strong = i % self.cells == 0
             self.create_line(x, 0, x, self.h, fill="#bbb" if strong else "#e8e8e8")
-        y = self.vel_y(100)
-        self.create_line(0, y, self.w, y, fill="#ddd", dash=(2, 3))
+        if not self.fixed:  # (the note's own velocity)
+            y = self.vel_y(100)
+            self.create_line(0, y, self.w, y, fill="#ddd", dash=(2, 3))
         for s, ln, v in self.pieces:
             self.create_rectangle(self.x(s) + 1, self.vel_y(v), self.x(s + ln) - 1, self.h - 1, fill=ORANGE,
                                   outline="#b06d00")
+
+    def number(self, lo, hi, v):
+        """The velocity being dragged, written over its piece (inside it near the top when there's no room)."""
+        x, y = (self.x(lo) + self.x(hi)) / 2, self.vel_y(v)
+        text = fmt(v) if self.fixed else tr("chop.percent", v=fmt(v))
+        room = y > 14
+        self.create_text(x, y - 1 if room else y + 2, text=text, anchor="s" if room else "n", fill="#333")
 
     def piece_at(self, x):
         s = self.step_at(x)
@@ -110,12 +132,12 @@ class RhythmStrip(tk.Canvas):
     def move(self, e):
         if not self.drag:
             return
+        v = self.y_vel(e)
         if self.drag[0] == "vel":
-            v = max(1.0, min(float(MAX_VEL), round((self.h - 2 - e.y) / (self.h - 4) * MAX_VEL)))
-            if abs(v - 100) < 6 and not e.state & 1:  # (sticks at 100 %; Shift = no sticking)
-                v = 100.0
-            self.pieces[self.drag[1]][2] = v
+            s, ln, _ = p = self.pieces[self.drag[1]]
+            p[2] = v
             self.draw()
+            self.number(s, s + ln, v)
             self.changed(self.pieces, False)
             return
         a, cell = self.drag[1], 1 / self.cells  # (a = the start of the cell pressed: it's always in the piece)
@@ -124,23 +146,24 @@ class RhythmStrip(tk.Canvas):
         hi = min(float(self.steps), hi)
         lo = min(lo, hi - cell)
         self.draw()
-        self.create_rectangle(self.x(lo) + 1, self.vel_y(100), self.x(hi) - 1, self.h - 1, fill="",
+        self.create_rectangle(self.x(lo) + 1, self.vel_y(v), self.x(hi) - 1, self.h - 1, fill="",
                               outline="#b06d00", dash=(3, 2))
-        self.drag = ("new", a, lo, hi)
+        self.number(lo, hi, v)
+        self.drag = ("new", a, lo, hi, v)
 
     def release(self, e):
         d, self.drag = self.drag, None
         if not d:
             return
-        if d[0] == "new" and len(d) == 4:
-            _, _, lo, hi = d
+        if d[0] == "new" and len(d) == 5:
+            _, _, lo, hi, v0 = d
             kept = []
             for s, ln, v in self.pieces:  # (pieces under the new one are cut back to what's outside it)
                 if s < lo:
                     kept.append([s, min(s + ln, lo) - s, v])
                 if s + ln > hi:
                     kept.append([max(s, hi), s + ln - max(s, hi), v])
-            self.pieces = sorted(kept + [[lo, hi - lo, 100.0]])
+            self.pieces = sorted(kept + [[lo, hi - lo, v0]])
         self.draw()
         self.changed(self.pieces, True)
 
@@ -222,6 +245,12 @@ class ChopWindow(ToolWindow):
         lb.grid(row=7, column=0, sticky="e", padx=(0, 8), pady=2)
         row = ttk.Frame(box)
         row.grid(row=7, column=1, sticky="w", pady=2)
+        self.mode_box = ttk.Combobox(row, values=[tr("chop.mode_share"), tr("chop.mode_fixed")], state="readonly",
+                                     width=max(len(tr("chop.mode_share")), len(tr("chop.mode_fixed"))))
+        self.mode_box.pack(side="left", padx=(0, 8))
+        self.mode_box.bind("<<ComboboxSelected>>", lambda e: self.on_mode())
+        Tooltip(self.mode_box, tr("chop.tip_mode"))
+        ttk.Label(row, text=tr("chop.amount")).pack(side="left", padx=(0, 4))
         self.vel_var = tk.StringVar()
         self.vel_entry = ttk.Entry(row, textvariable=self.vel_var, width=6)
         self.vel_entry.pack(side="left")
@@ -261,12 +290,12 @@ class ChopWindow(ToolWindow):
                 m.add_command(label=r["name"], command=lambda r=r: self.pick_saved(r))
 
     def pick(self, name):
-        steps, pieces = rhythm(name)
-        self.cfg.update(name=name, steps=steps, pieces=pieces)
+        steps, pieces = rhythm(name)  # (ours are in %: turned to fixed velocities when that's picked)
+        self.cfg.update(name=name, steps=steps, pieces=switched(pieces, True) if self.cfg["fixed"] else pieces)
         self.put("on", True)
 
     def pick_saved(self, r):
-        self.cfg.update(name=r["name"], steps=r["steps"], pieces=[list(p) for p in r["pieces"]])
+        self.cfg.update(name=r["name"], steps=r["steps"], pieces=[list(p) for p in r["pieces"]], fixed=r["fixed"])
         self.put("on", True)
 
     def rhythm_name(self):
@@ -282,7 +311,8 @@ class ChopWindow(ToolWindow):
             return
         name = name.strip()
         items = [r for r in load_rhythms() if r["name"] != name]
-        items.append({"name": name, "steps": self.cfg["steps"], "pieces": self.cfg["pieces"]})
+        items.append({"name": name, "steps": self.cfg["steps"], "pieces": self.cfg["pieces"],
+                      "fixed": self.cfg["fixed"]})
         save_rhythms(items)
         self.put("name", name)
 
@@ -312,7 +342,7 @@ class ChopWindow(ToolWindow):
             return
         self.steps_entry.config(style="TEntry")
         if v != self.cfg["steps"]:
-            self.cfg["pieces"] = clean_pieces(self.cfg["pieces"], v)
+            self.cfg["pieces"] = clean_pieces(self.cfg["pieces"], v, self.cfg["fixed"])
             self.cfg["name"] = ""
             self.put("steps", v, done)
 
@@ -321,6 +351,14 @@ class ChopWindow(ToolWindow):
         if snap != self.cfg["snap"]:
             self.cfg["len"] = piece_beats(snap, self.app)
             self.put("snap", snap)
+
+    def on_mode(self):
+        """% of each note <-> fixed velocities: the pieces are turned over so they stay about as loud."""
+        fixed = self.mode_box.current() == 1
+        self.mode_box.selection_clear()
+        if fixed != self.cfg["fixed"]:
+            self.cfg["pieces"] = switched(self.cfg["pieces"], fixed)
+            self.put("fixed", fixed)
 
     def on_vel(self, done=True):
         try:
@@ -343,8 +381,11 @@ class ChopWindow(ToolWindow):
         self.rhythm_button.config(text=self.rhythm_name())
         saved = c["name"] and c["name"] not in RHYTHMS and any(r["name"] == c["name"] for r in load_rhythms())
         self.delete_button.state(["!disabled"] if saved else ["disabled"])
-        if (self.strip.steps, self.strip.pieces) != (c["steps"], c["pieces"]) and not self.strip.drag:
-            self.strip.show(c["steps"], c["pieces"])
+        if self.mode_box.current() != int(c["fixed"]):
+            self.mode_box.current(int(c["fixed"]))
+        if ((self.strip.steps, self.strip.pieces, self.strip.fixed) != (c["steps"], c["pieces"], c["fixed"])
+                and not self.strip.drag):
+            self.strip.show(c["steps"], c["pieces"], c["fixed"])
         for var, entry, text in ((self.steps_var, self.steps_entry, str(c["steps"])),
                                  (self.vel_var, self.vel_entry, fmt(c["vel"]))):
             if var.get() != text:

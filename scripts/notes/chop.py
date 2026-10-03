@@ -2,13 +2,15 @@
 its output; rhythm only, the keys never change). The shape stays as drawn; sh["chop"] = the settings:
 
 "len": one step of the rhythm, in beats (the "snap" text it was picked as is kept for the window; "off" = 1 tick).
-"steps" + "pieces": the rhythm, one repeat "steps" steps long, its pieces [start, length, velocity %] in steps.
+"steps" + "pieces": the rhythm, one repeat "steps" steps long, its pieces [start, length, velocity] in steps.
 The rhythm REPEATS along each note (it isn't stretched to fit), from the note's own start (a Fill shape's notes
-touching on a key count as one: "runs", run_starts), or with "abs" from the song's start (tick 0), so the first piece can be cut short. A rest in the rhythm = a hole in the note; a piece
-running past the note's end is cut there. "vel" (0..100): how much the pieces' velocity % counts (0 = every piece
-keeps the note's own velocity, 100 = the rhythm's share of it). "name": the rhythm it was picked as ("" = drawn).
+touching on a key count as one: "runs", run_starts), or with "abs" from the song's start (tick 0), so the first
+piece can be cut short. A rest in the rhythm = a hole in the note; a piece running past the note's end is cut there.
+A piece's velocity: a % of its note's own (1..200, the default, like the other piano roll), or with "fixed" the
+velocity itself (1..127, our own). "vel" (0..100): how much the pieces' velocities count (0 = every piece keeps the
+note's own velocity, 100 = the rhythm's fully). "name": the rhythm it was picked as ("" = drawn).
 
-Ctrl+U (quick chop) = the "even" rhythm at the snap's length."""
+Ctrl+U (quick chop) = the "even" rhythm at the snap's length (100 %: velocities never change)."""
 
 import math
 
@@ -30,7 +32,18 @@ MAX_PIECES = 256
 MAX_VEL = 200  # % (a piece can be louder than its note, up to 127)
 TOO_MANY = 5 * 10 ** 7  # pieces to work out: past that the notes stay unchopped
 CHOP_DEFAULTS = {"on": True, "name": "even", "steps": 1, "pieces": [[0, 1, 100]], "len": 0.25, "snap": "1/16",
-                 "abs": False, "vel": 100.0}
+                 "abs": False, "vel": 100.0, "fixed": False}
+
+
+def top(fixed):
+    """The highest velocity a piece can have: 127 (fixed) or MAX_VEL %."""
+    return 127 if fixed else MAX_VEL
+
+
+def switched(pieces, fixed):
+    """Pieces turned to fixed velocities (fixed) or back to %: 100 % = 127, about as loud (capped at 127)."""
+    k = 1.27 if fixed else 1 / 1.27
+    return [[s, n, max(1.0, min(float(top(fixed)), round(v * k)))] for s, n, v in pieces]
 
 
 def rhythm(name):
@@ -39,7 +52,7 @@ def rhythm(name):
     return steps, [list(p) for p in pieces]
 
 
-def clean_pieces(pieces, steps):
+def clean_pieces(pieces, steps, fixed=False):
     """Pieces from a file / the window -> valid ones inside one repeat, sorted, at most MAX_PIECES."""
     out = []
     for p in pieces if isinstance(pieces, list) else ():
@@ -51,7 +64,7 @@ def clean_pieces(pieces, steps):
             continue
         s, e = max(0.0, s), min(float(steps), s + n)
         if e - s > 1e-9:
-            out.append([s, e - s, max(1.0, min(float(MAX_VEL), v))])
+            out.append([s, e - s, max(1.0, min(float(top(fixed)), v))])
     return sorted(out)[:MAX_PIECES]
 
 
@@ -69,7 +82,8 @@ def clean_chop(c):
     except (TypeError, ValueError, OverflowError):
         pass
     out["len"] = min(out["len"], 10 ** 4)
-    out["pieces"] = clean_pieces(c.get("pieces", out["pieces"]), out["steps"])
+    out["fixed"] = c.get("fixed") is True
+    out["pieces"] = clean_pieces(c.get("pieces", out["pieces"]), out["steps"], out["fixed"])
     if not out["pieces"]:
         return None
     out["snap"] = c["snap"] if isinstance(c.get("snap"), str) else ""
@@ -140,7 +154,9 @@ def apply_chop(a, chop, ppq):
     out = a[note[keep]].copy()
     out[:, 0], out[:, 1] = lo[keep], hi[keep]
     amt = chop["vel"] / 100
-    if amt:
+    if amt and chop.get("fixed"):  # (the drawn velocity itself, mixed with the note's own by amt)
+        out[:, 3] = np.clip(np.rint((1 - amt) * out[:, 3] + amt * pieces[which[keep], 2]), 1, 127).astype(np.int64)
+    elif amt:
         share = 1 - amt + amt * pieces[which[keep], 2] / 100
         out[:, 3] = np.clip(np.rint(out[:, 3] * share), 1, 127).astype(np.int64)
     return out
