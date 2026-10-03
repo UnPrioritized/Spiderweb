@@ -1,8 +1,9 @@
 """The spam gate Range window (the side panel's Range… button next to the gate; gaterange.py). Everything about the
 Range is set here, not in the panel (user: room for more options later): on / off, the first and second gate (From
-= the shape's spam gate, To = where the graph reaches the top), across time or keys, and the graph: across the shape
-(left to right, or low to high keys) from the first gate to the second. Drag points, click to add one, right-click
-one to delete it; presets. The pale steps behind the line = the whole-tick gates the notes really get.
+= the shape's spam gate, To = where the graph reaches the top), across time or keys (low to high or top to bottom),
+Fit to the shape's edges, and the graph: across the shape from the first gate to the second. Drag points, click to add one, right-click
+one to delete it; presets. The pale steps behind the line = the whole-tick gates the notes really get. Beside it:
+how many notes get each gate (counted from the picked shapes' real notes; red = a gate no note gets).
 
 Opening it puts the Range on (the button is how it's put on). Changes show on the piano roll at once; OK keeps them
 as one undo step, Cancel / Esc puts everything back. Ctrl+Z / Ctrl+Y step through the changes made in the window."""
@@ -16,6 +17,7 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
+from notes.custom import SPAM_FILLS, range_gates
 from notes.gaterange import DIRS, STRAIGHT, clean_range, gate_steps
 from window.panel_funnel import GATE_STEPS
 from window.widgets import LocalUndo, Scrub, Tooltip
@@ -30,6 +32,8 @@ PRESETS = [("range_window.straight", STRAIGHT), ("range_window.short_longer", _p
            ("range_window.valley", [[0, 1], [0.5, 0], [1, 1]])]
 U_SNAP, Y_SNAP = 1 / 40, 1 / 20  # dragging moves points in these steps (Shift = free)
 OFF_COLOR = "#b0b0b0"  # the graph while the Range is off
+BAR, BAR_HOT, NONE = "#4a90e2", "#1f5fb0", "#e0503c"  # notes per gate: bars, the one pointed at, gates with none
+BAR_PX = 3  # bars at least this wide: more gates than fit share a bar
 
 
 class RangeGraph(tk.Toplevel):
@@ -40,7 +44,7 @@ class RangeGraph(tk.Toplevel):
         self.transient(app)
         self.resizable(False, False)
         s = self.s = app.scale
-        self.w, self.h = int(440 * s), int(220 * s)
+        self.w, self.h, self.cw = int(440 * s), int(220 * s), int(300 * s)
         self.ml, self.mr, self.mt, self.mb = int(56 * s), int(12 * s), int(10 * s), int(22 * s)
         self.tgts = app.custom_targets()
         self.before = json.dumps(app.shapes)
@@ -50,7 +54,7 @@ class RangeGraph(tk.Toplevel):
                                                        {"to": t["gate"] * 4, "graph": STRAIGHT, "dir": "time"})))
                      for t in self.tgts]
         self.closed = False
-        self.drag, self.hover = None, None
+        self.drag, self.hover, self.bar_hover, self.counts = None, None, None, None
         box = ttk.Frame(self, padding=8)
         box.pack(fill="both", expand=True)
         self.on_var = tk.BooleanVar(value=True)
@@ -74,16 +78,27 @@ class RangeGraph(tk.Toplevel):
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(4, 0))
         ttk.Label(row, text=tr("range_window.across")).pack(side="left")
-        self.dir_box = ttk.Combobox(row, values=[tr("range_window.time"), tr("range_window.keys")],
-                                    state="readonly", width=24)
+        self.dir_box = ttk.Combobox(row, values=[tr(f"range_window.{d}") for d in DIRS], state="readonly", width=24)
         self.dir_box.pack(side="left", padx=4)
         self.dir_box.bind("<<ComboboxSelected>>", lambda e: self.change("dir", DIRS[self.dir_box.current()]))
         Tooltip(self.dir_box, tr("range_window.dir_tip"))
+        self.fit_var = tk.BooleanVar()
+        self.fit_check = ttk.Checkbutton(box, text=tr("range_window.fit"), variable=self.fit_var,
+                                         command=lambda: self.change("fit", self.fit_var.get()))
+        self.fit_check.pack(anchor="w", pady=(4, 0))
+        Tooltip(self.fit_check, tr("range_window.fit_tip"))
         self.info = ttk.Label(box, text="")
         self.info.pack(anchor="w", pady=(6, 0))
-        cv = self.canvas = tk.Canvas(box, width=self.w, height=self.h, bg="#ffffff", highlightthickness=1,
+        row = ttk.Frame(box)
+        row.pack(anchor="w", pady=4)
+        cv = self.canvas = tk.Canvas(row, width=self.w, height=self.h, bg="#ffffff", highlightthickness=1,
                                      highlightbackground="#a0a0a0", cursor="crosshair")
-        cv.pack(pady=4)
+        cv.pack(side="left")
+        ch = self.chart = tk.Canvas(row, width=self.cw, height=self.h, bg="#ffffff", highlightthickness=1,
+                                    highlightbackground="#a0a0a0")
+        ch.pack(side="left", padx=(6, 0))
+        ch.bind("<Motion>", lambda e: self.on_bar_hover(e.x))
+        ch.bind("<Leave>", lambda e: self.on_bar_hover(None))
         row = ttk.Frame(box)
         row.pack(fill="x")
         self.preset_btns = []
@@ -92,7 +107,7 @@ class RangeGraph(tk.Toplevel):
             b.pack(side="left", padx=(0, 4))
             self.preset_btns.append(b)
         ttk.Label(box, text=tr("range_window.hint"), foreground="#777", font=("Segoe UI", 8), justify="left",
-                  wraplength=self.w).pack(anchor="w", pady=(6, 0))
+                  wraplength=self.w + self.cw).pack(anchor="w", pady=(6, 0))
         row = ttk.Frame(box)
         row.pack(anchor="e", pady=(6, 0))
         ttk.Button(row, text=tr("range_window.ok"), command=self.ok).pack(side="left")
@@ -144,8 +159,29 @@ class RangeGraph(tk.Toplevel):
                 t["range"] = json.loads(json.dumps(m))
         self.app.shapes_changed()
         self.count = sum(self.app.note_count(t) or 0 for t in self.tgts if t is not self.app.custom_defaults)
+        self.counts = self.spread()
         self.show_boxes()
         self.draw()
+        self.draw_chart()
+
+    def spread(self):
+        """How many notes get each gate from From to To (the first shape's; others' gates outside left out), or None
+        while the Range is off. Counted without Strum / Claw (they move notes, not their gates)."""
+        if not self.on_var.get():
+            return None
+        a, b = self.gates()
+        n = abs(b - a) + 1
+        out = np.zeros(n, np.int64)
+        for t in self.tgts:
+            if t is self.app.custom_defaults or not t.get("range") or t.get("fill") not in SPAM_FILLS:
+                continue
+            bare = {k: v for k, v in t.items() if k not in ("strum", "claw")}
+            notes = self.app.notes_of(bare)
+            if not len(notes):
+                continue
+            j = (range_gates(bare, notes, self.app.ppq) - a) * (1 if b >= a else -1)
+            out += np.bincount(j[(j >= 0) & (j < n)], minlength=n)
+        return out
 
     def change(self, key, value=None, mark=True):
         """key (to / dir / graph) set on every shape's range (None: only on / off changed)."""
@@ -167,6 +203,8 @@ class RangeGraph(tk.Toplevel):
             self.gate_boxes[key].config(style="TEntry", state="normal" if on else "disabled")
         self.dir_box.current(DIRS.index(self.memo[0]["dir"]))
         self.dir_box.config(state="readonly" if on else "disabled")
+        self.fit_var.set(self.memo[0]["fit"])
+        self.fit_check.config(state="normal" if on else "disabled")
         for btn in self.preset_btns:
             btn.config(state="normal" if on else "disabled")
         self.info.config(text=tr("range_window.info", a=a, b=b) +
@@ -256,11 +294,11 @@ class RangeGraph(tk.Toplevel):
             cv.create_text(x0 - 4 * s, self.y2c(y), text=tr("range_window.ticks", n=g), anchor="e", fill="#333",
                            font=("Segoe UI", 7))
         cv.create_rectangle(x0, top, x1, bot, outline="#808080")
-        keys = self.memo[0]["dir"] == "keys"
-        cv.create_text(x0, bot + 4 * s, text=tr("range_window.low" if keys else "range_window.left"), anchor="nw",
-                       fill="#333", font=("Segoe UI", 7))
-        cv.create_text(x1, bot + 4 * s, text=tr("range_window.high" if keys else "range_window.right"), anchor="ne",
-                       fill="#333", font=("Segoe UI", 7))
+        ends = {"time": ("left", "right"), "keys": ("low", "high"), "keys_down": ("high", "low")}[self.memo[0]["dir"]]
+        cv.create_text(x0, bot + 4 * s, text=tr(f"range_window.{ends[0]}"), anchor="nw", fill="#333",
+                       font=("Segoe UI", 7))
+        cv.create_text(x1, bot + 4 * s, text=tr(f"range_window.{ends[1]}"), anchor="ne", fill="#333",
+                       font=("Segoe UI", 7))
         # the whole-tick gates the notes get (pale steps)
         span = (b - a) or 1
         steps = gate_steps(self.pts, a, b)
@@ -284,6 +322,66 @@ class RangeGraph(tk.Toplevel):
             g = a + (1 if b >= a else -1) * min(n - 1, int(float(at[1]) * n))
             cv.create_text(x1 - 4 * s, top + 4 * s, text=tr("range_window.at", at=fmt(round(at[0] * 100, 1)), n=g),
                            anchor="ne", fill="#0a50e0", font=("Segoe UI", 8))
+
+    def chart_bins(self):
+        """(gates per bar, notes in each bar, plot left, plot width)."""
+        s = self.s
+        left, width = int(40 * s), self.cw - int(40 * s) - int(8 * s)
+        per = max(1, math.ceil(len(self.counts) * BAR_PX * s / width))
+        bins = np.add.reduceat(self.counts, np.arange(0, len(self.counts), per))
+        return per, bins, left, width
+
+    def draw_chart(self):
+        """Notes per gate: a bar for each gate from From (left) to To (right); red marks for gates no note gets."""
+        ch, s = self.chart, self.s
+        ch.delete("all")
+        top, bot = int(22 * s), self.h - self.mb
+        ch.create_text(int(6 * s), int(4 * s), text=tr("range_window.spread"), anchor="nw", fill="#333",
+                       font=("Segoe UI", 8))
+        if self.counts is None:
+            ch.create_rectangle(int(40 * s), top, self.cw - int(8 * s), bot, outline=OFF_COLOR)
+            return
+        a, b = self.gates()
+        sign = 1 if b >= a else -1
+        per, bins, left, width = self.chart_bins()
+        most = max(1, int(bins.max()))
+        for v in sorted({0, most, most // 2} if most >= 2 else {0, most}):
+            y = bot - v / most * (bot - top)
+            ch.create_line(left, y, left + width, y, fill="#e4e4e4")
+            ch.create_text(left - 4 * s, y, text=str(v), anchor="e", fill="#333", font=("Segoe UI", 7))
+        bw = width / len(bins)
+        gap = 1 if bw >= 4 else 0
+        for i, v in enumerate(bins.tolist()):
+            x0 = left + i * bw
+            hot = i == self.bar_hover
+            if v:
+                ch.create_rectangle(x0, bot - v / most * (bot - top), x0 + bw - gap, bot, width=0,
+                                    fill=BAR_HOT if hot else BAR)
+            else:
+                ch.create_rectangle(x0, bot - max(2, round(3 * s)), x0 + bw - gap, bot, width=0,
+                                    fill=BAR_HOT if hot else NONE)
+        ch.create_line(left, bot, left + width, bot, fill="#808080")
+        marks = min(len(bins), 5)  # gate numbers under a few bars, both ends included
+        for k in range(marks):
+            i = round(k * (len(bins) - 1) / max(1, marks - 1))
+            anchor = "nw" if k == 0 and marks > 1 else "ne" if k == marks - 1 and marks > 1 else "n"
+            x = left + i * bw + (0 if anchor == "nw" else bw if anchor == "ne" else bw / 2)
+            ch.create_text(x, bot + 4 * s, text=str(a + sign * i * per), anchor=anchor, fill="#333",
+                           font=("Segoe UI", 7))
+        if self.bar_hover is not None and self.bar_hover < len(bins):
+            i = self.bar_hover
+            g0, g1 = a + sign * i * per, a + sign * min(len(self.counts) - 1, (i + 1) * per - 1)
+            text = (tr("range_window.spread_at", g=g0, n=int(bins[i])) if g0 == g1 else
+                    tr("range_window.spread_at_many", g0=g0, g1=g1, n=int(bins[i])))
+            ch.create_text(self.cw - 6 * s, int(4 * s), text=text, anchor="ne", fill="#0a50e0", font=("Segoe UI", 8))
+
+    def on_bar_hover(self, x):
+        self.bar_hover = None
+        if x is not None and self.counts is not None:
+            per, bins, left, width = self.chart_bins()
+            i = math.floor((x - left) / width * len(bins))
+            self.bar_hover = i if 0 <= i < len(bins) else None
+        self.draw_chart()
 
     # ---- mouse
 

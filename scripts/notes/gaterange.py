@@ -1,19 +1,23 @@
 """Spam gate Range: the gate goes from the spam gate (sh["gate"]) to a second one across the shape, instead of one
-gate for every note. sh["range"] = {"to": the second gate in beats, "graph": [[u, y], ...], "dir": "time" / "keys"}.
+gate for every note. sh["range"] = {"to": the second gate in beats, "graph": [[u, y], ...], "dir": "time" / "keys" /
+"keys_down", "fit": bool}.
 
-The graph: u = 0..1 across the shape (left to right in time, or bottom to top in keys), y = 0..1 from the first gate
+The graph: u = 0..1 across the shape (left to right in time, bottom to top in keys, top to bottom in keys_down), y =
+0..1 from the first gate
 to the second, straight lines between the points. Every whole-tick gate between the two gets an equal stretch of y
 (the gate distribution rule: with the straight default graph each gate gets an equal share of the time, so short
 gates make most of the notes).
 
 Time: one row of back-to-back notes for the whole shape, from its left edge (every key cut at the same places),
-each note as long as the gate where it starts. Keys: each key row has its own gate, even all along the row."""
+each note as long as the gate where it starts. Keys: each key row has its own gate, even all along the row.
+Fit: each stretch's first note starts and its last note ends right at the stretch's edges (stretched over the blank
+left there, or trimmed where it sticks out; custom.chop_grid)."""
 
 import math
 
 import numpy as np
 
-DIRS = ("time", "keys")
+DIRS = ("time", "keys", "keys_down")
 STRAIGHT = [[0.0, 0.0], [1.0, 1.0]]
 
 
@@ -41,11 +45,16 @@ def clean_range(r):
     if not math.isfinite(to) or to <= 0:
         return None
     return {"to": min(to, 10 ** 4), "graph": clean_graph(r.get("graph")) or [list(p) for p in STRAIGHT],
-            "dir": r["dir"] if r.get("dir") in DIRS else "time"}
+            "dir": r["dir"] if r.get("dir") in DIRS else "time", "fit": bool(r.get("fit"))}
 
 
 def reversed_graph(graph):
     return [[1 - u, y] for u, y in reversed(graph)]
+
+
+def keys_up(r):
+    """keys_down as keys with the graph the other way (the same gates), so only time / keys need handling."""
+    return dict(r, dir="keys", graph=reversed_graph(r["graph"])) if r["dir"] == "keys_down" else r
 
 
 def flipped_range(r, sideways):
@@ -59,6 +68,7 @@ def turned_range(r, clockwise):
     """Turned 90 degrees with the shape: time becomes keys and keys time (clockwise: higher keys = later)."""
     if not r:
         return r
+    r = keys_up(r)
     to_keys = r["dir"] == "time"
     back = to_keys == clockwise  # (clockwise: time runs top to bottom, keys left to right)
     return dict(r, dir="keys" if to_keys else "time", graph=reversed_graph(r["graph"]) if back else r["graph"])
@@ -139,14 +149,15 @@ def frame_span(sh):
 def _span(sh, r, ppq):
     """Where the range runs over (the same ends range_grid uses): ticks for time, keys for keys."""
     lo, hi, k0, k1 = frame_span(sh)
-    return (round(k0), round(k1)) if r["dir"] == "keys" else (math.floor(lo * ppq), math.ceil(hi * ppq))
+    return (round(k0), round(k1)) if r["dir"] != "time" else (math.floor(lo * ppq), math.ceil(hi * ppq))
 
 
 def part_range(whole, part, ppq):
     """A piece cut off a ranged shape (Slice) -> its (gate in beats, range): the part of the whole's range over the
     piece's own stretch, so each spot keeps the gate it had (the graph cut there; the gates between its lowest and
     highest, each the same stretch of y as before)."""
-    r = whole["range"]
+    down = whole["range"]["dir"] == "keys_down"
+    r = keys_up(whole["range"])
     a = max(1, math.floor(whole["gate"] * ppq + 0.5))
     b = max(1, math.floor(r["to"] * ppq + 0.5))
     n = abs(b - a) + 1
@@ -165,12 +176,14 @@ def part_range(whole, part, ppq):
               min(1.0, max(0.0, (y * n - j0) / m))] for k, (u, y) in enumerate(pts)]
     graph[0][0], graph[-1][0] = 0.0, 1.0
     sign = 1 if b >= a else -1
-    return (a + sign * j0) / ppq, dict(r, to=(a + sign * j1) / ppq, graph=graph)
+    if down:
+        graph = reversed_graph(graph)
+    return (a + sign * j0) / ppq, dict(r, to=(a + sign * j1) / ppq, graph=graph, dir=whole["range"]["dir"])
 
 
 def range_grid(sh, ppq):
     """What custom.chop cuts the stretches with for a shape with a Range: squares (time) or a RangeKeys (keys)."""
-    r = sh["range"]
+    r = keys_up(sh["range"])
     a = max(1, math.floor(sh["gate"] * ppq + 0.5))
     b = max(1, math.floor(r["to"] * ppq + 0.5))
     lo, hi, k0, k1 = frame_span(sh)
