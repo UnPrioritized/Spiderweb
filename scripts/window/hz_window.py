@@ -1901,5 +1901,8 @@ class HzWindow(tk.Toplevel):
         self.sound(None)
         self.app.pvar["ppq"].trace_remove("write", self.ppq_trace)
         self.app.hz_window = None
+        if self.target() is None and self.app.hz_start is not None:  # closed with no notes: the start mark goes
+            self.app.hz_start = None  # (no undo step: picking the spot wasn't one either, user)
+            self.app.roll.request_redraw()
         self.destroy()
         self.app.roll.focus_set()
