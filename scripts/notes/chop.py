@@ -30,7 +30,8 @@ RHYTHMS = {
 MAX_STEPS = 64
 MAX_PIECES = 256
 MAX_VEL = 200  # % (a piece can be louder than its note, up to 127)
-TOO_MANY = 5 * 10 ** 7  # pieces to work out: past that the notes stay unchopped
+TOO_MANY = 2 * 10 ** 7  # pieces to work out: past that the notes stay unchopped (20 M notes: ~6 GB in all, measured)
+BATCH = 10 ** 6  # pieces worked out at once (apply_chop)
 CHOP_DEFAULTS = {"on": True, "name": "even", "steps": 1, "pieces": [[0, 1, 100]], "len": 0.25, "snap": "1/16",
                  "abs": False, "vel": 100.0, "fixed": False}
 
@@ -140,8 +141,23 @@ def apply_chop(a, chop, ppq):
     if not len(a) or not chop:
         return a
     pieces, ps, pe, cycle, origin, k0, reps = _repeats(a, chop, ppq)
-    if reps.sum() * len(pieces) > TOO_MANY:
+    ends = np.cumsum(reps * len(pieces))  # (pieces to work out up to each note)
+    if not len(ends) or ends[-1] > TOO_MANY:
         return a  # (left unchopped: the window says why)
+    out = np.empty((int(ends[-1]), a.shape[1]), np.int64)
+    n = start = 0
+    while start < len(a):  # (in batches of notes, so the working out takes little memory besides the pieces)
+        done = ends[start - 1] if start else 0
+        stop = max(start + 1, int(np.searchsorted(ends, done + BATCH, side="right")))
+        part = slice(start, stop)
+        got = _pieces(a[part], chop, pieces, ps, pe, cycle, origin[part], k0[part], reps[part])
+        out[n:n + len(got)] = got
+        n, start = n + len(got), stop
+    return out[:n]
+
+
+def _pieces(a, chop, pieces, ps, pe, cycle, origin, k0, reps):
+    """apply_chop for some of the notes."""
     s, e = a[:, 0].astype(float), a[:, 1].astype(float)
     nk = np.repeat(np.arange(len(a)), reps)  # one row per note and repeat of the rhythm
     k = k0[nk] + (np.arange(len(nk)) - np.repeat(np.cumsum(reps) - reps, reps))
