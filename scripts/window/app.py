@@ -59,6 +59,7 @@ from files.snap import DEFAULT_SNAP, snap_beats
 from roll.roll_shared import cached_path
 from roll.zoombar import add_zoom_bars
 from window.snap_picker import SnapPicker
+from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.widgets import Scrub, Tooltip
@@ -69,12 +70,12 @@ VEL_KEYS = ("vel0", "vel1")
 PPQS = [2, 4, 8, 16, 24, 48, 96, 120, 144, 192, 240, 384, 480, 768, 960, 1024, 1440, 1920, 2048, 2880,
         3840, 4096, 5760, 7680, 8192, 11520, 12288, 15360, 16384, 23040, 24576, 30720, 32768, 36864,
         46080, 49152, 65535]
-TOOLS = [("select", tr("app.select"), "v"), ("slice", tr("app.slice"), "k"), ("line", tr("app.line"), "l"),
-         ("poly", tr("app.polyline"), "p"), ("free", tr("app.freehand"), "f"), ("curve", tr("app.curve"), "c"),
-         ("arc", tr("app.arc"), "a"), ("custom", tr("app.custom_shape"), "s"),
-         ("funnel", tr("app.funnel"), "n"), ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h")]
-# shown next to Custom shape while it (or one of them) is the tool; their keys work any time
-SHAPE_TOOLS = [("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q")]
+TOOLS = [("select", tr("app.select"), "v"), ("slice", tr("app.slice"), "k")]
+# in the drawing tools' list (tool_picker.py), in this order
+DRAW_TOOLS = [("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"), ("free", tr("app.freehand"), "f"),
+              ("curve", tr("app.curve"), "c"), ("arc", tr("app.arc"), "a"), ("custom", tr("app.custom_shape"), "s"),
+              ("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q"), ("funnel", tr("app.funnel"), "n"),
+              ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h")]
 BIG = 1_000_000  # ask before making a custom shape / funnel with more notes than this
 MANY_CHANNELS = 15  # a shape spread over more channels than this is shown orange in the shape list
 CHANNEL_CHOICES = [
@@ -267,29 +268,14 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         top.pack(fill="x")
         top.columnconfigure(1, weight=1)
         bar = self.tool_bar = ttk.Frame(top)
-        # Custom shape stays lit while Circle / Polygon (they make custom shapes) is the tool, so it has
-        # its own on/off (set in show_shape_tools) instead of lighting up only for its own value
-        self.custom_lit = tk.BooleanVar(value=False)
         for key, label, hot in TOOLS:
-            if key == "custom":
-                b = ttk.Checkbutton(bar, text=f"{label} ({hot.upper()})", variable=self.custom_lit,
-                                    style="Toolbutton", command=lambda: self.tool.set("custom"))
-            else:
-                b = ttk.Radiobutton(bar, text=f"{label} ({hot.upper()})", value=key, variable=self.tool,
-                                    style="Toolbutton")
-            b.pack(side="left", padx=1)
-            Tooltip(b, BY_ID[TOOL_TOPICS[key]]["tip"])
-            if key == "custom":
-                self.custom_tool_btn = b
-        # Circle / Polygon: only while one of them or Custom shape is the tool
-        self.shape_tool_bar = ttk.Frame(bar)
-        ttk.Separator(self.shape_tool_bar, orient="vertical").pack(side="left", fill="y", padx=(2, 3), pady=2)
-        for key, label, hot in SHAPE_TOOLS:
-            b = ttk.Radiobutton(self.shape_tool_bar, text=f"{label} ({hot.upper()})", value=key, variable=self.tool,
+            b = ttk.Radiobutton(bar, text=f"{label} ({hot.upper()})", value=key, variable=self.tool,
                                 style="Toolbutton")
             b.pack(side="left", padx=1)
             Tooltip(b, BY_ID[TOOL_TOPICS[key]]["tip"])
-        ttk.Separator(self.shape_tool_bar, orient="vertical").pack(side="left", fill="y", padx=(3, 2), pady=2)
+        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=(3, 3), pady=2)
+        self.tool_picker = ToolPicker(self, bar, DRAW_TOOLS)  # the drawing tool picked last + the list
+        self.tool_picker.frame.pack(side="left", padx=1)
         live = ttk.Checkbutton(bar, text=tr("app.live_shape_g"), variable=self.live)
         live.pack(side="left", padx=(12, 0))
         Tooltip(live, BY_ID["live"]["tip"])
@@ -316,7 +302,6 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         help_btn = ttk.Button(bar, text=tr("app.help_f1"), command=self.open_help, takefocus=False)
         help_btn.pack(side="left", padx=(12, 0))
         Tooltip(help_btn, tr("app.every_tip_searchable_opens_at_the"))
-        self.show_shape_tools()
 
         self.status = ttk.Label(self, text="", padding=(6, 2), font=("Segoe UI", 9))
         self.status.pack(side="bottom", fill="x")
@@ -360,17 +345,6 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.vel_formula_bar.pack(side="left", before=self.vel_hint)
         else:
             self.vel_formula_bar.pack_forget()
-
-    def show_shape_tools(self):
-        """Circle / Polygon next to Custom shape, only while one of those is the tool."""
-        show = self.tool.get() in ("custom",) + tuple(key for key, _, _ in SHAPE_TOOLS)
-        if show != bool(self.shape_tool_bar.winfo_manager()):
-            if show:
-                self.shape_tool_bar.pack(side="left", after=self.custom_tool_btn)
-            else:
-                self.shape_tool_bar.pack_forget()
-        self.custom_lit.set(show)  # (Custom shape stays lit with them: they make custom shapes)
-        self.after_idle(self.fit_toolbar)
 
     def fit_toolbar(self):
         """The view settings and buttons: right of the tools when both fit in the window's width, else below them."""
@@ -1253,7 +1227,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         return max(1, round(sb * self.ppq)) if sb else 1
 
     def tool_hotkey(self, key):
-        for tool, _, hot in TOOLS + SHAPE_TOOLS:
+        for tool, _, hot in TOOLS + DRAW_TOOLS:
             if key == hot:
                 self.tool.set(tool)
 
@@ -1270,7 +1244,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.hz_window.sync()
         self.roll.cancel_draft()
         self.roll.config(cursor={"select": "arrow", "text": "xterm"}.get(self.tool.get(), "crosshair"))
-        self.show_shape_tools()
+        self.tool_picker.tool_changed()
         self.sync_freehand()
         self.sync_text()
         self.sync_custom()

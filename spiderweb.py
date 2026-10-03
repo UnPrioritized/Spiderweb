@@ -23,6 +23,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     font_dialog.py   the font window (type a font's name or pick one)
     widgets.py       tooltips
     snap_picker.py   the Snap dropdown (note pictures) and the Customised snap window
+    tool_picker.py   the drawing tools' button: the tool picked last, its list and pinned tools
     help_texts.py    every help text: tips, the Help window, tool tooltips, the side panel's help
     help.py          the tip popups and the Help window (F1, searchable)
     updates.py       update checks: the "how often?" question, the update popup, What's new after an update

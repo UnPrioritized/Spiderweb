@@ -73,15 +73,15 @@ def _wrench_inside(x, y):
     return jaw or _segment(x, y, 3.2, 12.8, 10.0, 6.0, 2.4)
 
 
-def _png(inside, size):
-    """The picture as PNG bytes: black, its edges smoothed (4 x 4 samples per pixel), see-through around it."""
+def _png(inside, size, rgb=(0, 0, 0)):
+    """The picture as PNG bytes: black (or rgb), its edges smoothed (4 x 4 samples per pixel), see-through around it."""
     rows = []
     k = SIZE / size
     for py in range(size):
         row = bytearray(b"\0")
         for px in range(size):
             hits = sum(inside((px + (i + 0.5) / 4) * k, (py + (j + 0.5) / 4) * k) for i in range(4) for j in range(4))
-            row += bytes((0, 0, 0, round(255 * hits / 16)))
+            row += bytes((*rgb, round(255 * hits / 16)))
         rows.append(bytes(row))
 
     def chunk(kind, data):

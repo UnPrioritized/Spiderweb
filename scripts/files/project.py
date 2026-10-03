@@ -234,7 +234,7 @@ class ProjectFiles:
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
                               "claw_window": self.claw_pos, "strum_window": self.strum_pos, "chop_window": self.chop_pos, "hz_window": self.hz_pos, "hz_fx_height": self.hz_fx_h, "hz_preview": self.hz_preview,
                               "history_window": self.history_pos, "history_undocked": self.history_undocked,
-                              **self.tips.state(), **self.updates.state()}
+                              **self.tips.state(), **self.updates.state(), **self.tool_picker.state()}
         write_text(path, project_json(data))
 
     def load_autosave(self):
@@ -285,6 +285,7 @@ class ProjectFiles:
                     win = json.load(f).get("window") or {}
             self.tips.restore(win)
             self.updates.restore(win)
+            self.tool_picker.restore(win)
             geo = win.get("geometry", "")
             if geo:
                 self.geometry(geo)

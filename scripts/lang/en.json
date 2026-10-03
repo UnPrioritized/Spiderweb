@@ -50,6 +50,8 @@
  "app.slice": "Slice (beta)",
  "app.circle": "Circle",
  "app.polygon": "Polygon",
+ "app.tools_list_tip": "Every drawing tool. Pick one and this button shows it, so one click picks it again. The pin on a tool's right gives it its own button here.",
+ "app.pin_tip": "Pin: give this tool its own button in the toolbar. Click again to take the button away.",
  "app.as_drawn": "As drawn",
  "app.keeps_overlaps_every_note_exactly_as": "Keeps overlaps.\nEvery note exactly as the shapes make it, all on one channel.\nNotes on the same key can overlap or start on the same tick.",
  "app.single_channel": "Single channel",
@@ -1042,7 +1044,7 @@
  "help.welcome.text": [
   "Draw lines, curves and shapes on the piano roll; every key they cross gets notes, like drawing notes by hand but in one stroke.",
   "",
-  "1. Pick a tool at the top (Line, Polyline, Freehand, Curve, Arc, Custom shape, Funnel, Text) and draw.",
+  "1. Pick a tool at the top and draw. The arrow next to Line opens every drawing tool (Polyline, Freehand, Curve, Arc, Custom shape, Funnel, Text...); the pin next to one gives it its own button.",
   "",
   "2. Select a shape to change it: drag its points, or change its settings in the panel on the right.",
   "",
@@ -1222,7 +1224,7 @@
  "help.custom.text": [
   "Pick a shape in the panel, or draw your own with Drawer…. Then drag a box on the piano roll (or click two corners); the drawing stretches to fill it. Ctrl keeps its drawn proportions.",
   "",
-  "Its inside can be filled (see Inside fill). Circle and Polygon (O / Q) show next to Custom shape while it's picked: they make that shape straight away (Ctrl = perfect, as it looks).",
+  "Its inside can be filled (see Inside fill). Circle and Polygon (O / Q), in the drawing tools' list (the arrow next to Line), make that shape straight away (Ctrl = perfect, as it looks).",
   "",
   "A placed shape keeps its own copy: changing the library shape later doesn't change it."
  ],
