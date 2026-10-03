@@ -938,14 +938,17 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             primary = max(added) if added else self.sel if self.sel in cur else max(cur, default=None)
             self.select_many(cur, primary)
 
-    def delete_selected(self):
-        if not self.sels:
+    def delete_selected(self, only=None):
+        """Delete the selected shapes, or `only` these (Delete while dragging them): the rest stay selected."""
+        gone = set(self.sels if only is None else only)
+        if not gone:
             return
         self.roll.end_typing()  # first: it refreshes the panel, which must still see the old shapes
         self.push_undo(name=tr("app.delete"))
-        for i in sorted(self.sels, reverse=True):
+        for i in sorted(gone, reverse=True):
             del self.shapes[i]
-        self.select(None)
+        rest = [i - sum(j < i for j in gone) for i in sorted(self.sels - gone)]  # (numbers after the gone ones drop)
+        self.select_many(rest, max(rest, default=None))
         self.shapes_changed()
 
     def delete_all(self):

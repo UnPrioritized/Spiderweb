@@ -806,16 +806,14 @@ class HzWindow(tk.Toplevel):
 
     def box_area(self, d=None):
         """The Select box being dragged (d: this box drag instead) as (beat, key, beat, key) corners, a key being
-        the top of its row (fractions: in between): out to whole snap steps and whole keys (grid_span; Shift = as
-        dragged). None while it's still a click."""
+        the top of its row: out to whole snap steps and whole keys (grid_span; Shift / snap off = whole ticks, keys
+        still whole: user), so it's never thinner than one step and one key. None while it's still a click."""
         d = d or self.drag
         (x, y), (cx, cy) = d["from"], d["to"]
         if abs(cx - x) < BOX_STILL and abs(cy - y) < BOX_STILL:
             return None
-        if d.get("shift"):
-            return tuple(v for p in ((x, y), (cx, cy)) for v in (self.beat_at(p[0]),
-                                                                    self.top - (p[1] - self.ruler_h) / self.sy))
-        b0, b1 = grid_span(self.beat_at(x), self.beat_at(cx), self.snap_beats())
+        step = None if d.get("shift") else self.snap_beats()
+        b0, b1 = grid_span(self.beat_at(x), self.beat_at(cx), step or 1 / self.app.ppq)
         k0, k1 = sorted((self.key_at(y), self.key_at(cy)))
         return b0, k1, b1, k0 - 1
 

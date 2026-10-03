@@ -49,7 +49,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.box_moving = None   # the kept Select boxes (box_upright) when a move started: they go along
         self.dup = None          # Ctrl+press in the kept boxes: {"click": shape under the mouse}; the copies are
         #                          made at the first move ("done" then)
+        self.grabbed = None      # the shape a move drag was started on (None: all selected, the kept boxes moved)
         self._pan = None
+        self._panned = False     # the middle button moved further than a click's 3 px (pan_to)
         self._saved_view = None
         self.note_img = None     # grid + notes as one picture when there are too many notes for canvas items
         self._note_pic = None    # what that picture shows (see redraw)
@@ -131,13 +133,13 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
     def box_area(self):
         """The Select box being dragged as (beat, pitch, beat, pitch) corners: out to whole snap steps and whole
-        keys (grid_span; Shift = as dragged). None while it's still a click."""
+        keys (grid_span; Shift / snap off = whole ticks, keys still whole: user), so it's never thinner than one
+        step and one key. None while it's still a click."""
         _, x, y, cx, cy = self.drag[:5]
         if abs(cx - x) < BOX_STILL and abs(cy - y) < BOX_STILL:
             return None
-        if self.box_shift:
-            return self.x2t(x), self.y2p(y), self.x2t(cx), self.y2p(cy)
-        b0, b1 = grid_span(self.x2t(x), self.x2t(cx), self.app.snap_beats())
+        step = None if self.box_shift else self.app.snap_beats()
+        b0, b1 = grid_span(self.x2t(x), self.x2t(cx), step or 1 / self.app.ppq)
         top = self.app.keys - 1
         p0, p1 = sorted(min(max(round(self.y2p(v)), 0), top) for v in (y, cy))
         return b0, p1 + 0.5, b1, p0 - 0.5
@@ -195,28 +197,24 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
     def stretch_to(self, e):
         """The kept Select box's side / corner dragged: its side goes to the mouse (the grid line / key row
-        nearest it; Shift = not snapped) and the shapes it selected stretch with it, from the other side."""
+        nearest it; Shift / snap off = the tick nearest it, keys still whole: user) and the shapes it selected
+        stretch with it, from the other side."""
         app = self.app
         _, (sx, sy), area, orig, boxes = self.drag
         b0, top, b1, bottom = area
         at_b, at_p = self.event_pt(e, snap=False)
-        free = e.state & SHIFT
         ab, kx, ap, ky, new = b0, 1.0, bottom, 1.0, list(area)
         if sx:
             ab, edge = (b0, b1) if sx > 0 else (b1, b0)
-            sb = app.snap_beats()
-            least = sb if sb and not free else 1 / app.ppq
-            if sb and not free:
-                at_b = round(at_b / sb) * sb
-            at_b = max(at_b, ab + least) if sx > 0 else min(at_b, ab - least)
+            step = (None if e.state & SHIFT else app.snap_beats()) or 1 / app.ppq
+            at_b = round(at_b / step) * step
+            at_b = max(at_b, ab + step) if sx > 0 else min(at_b, ab - step)
             kx = (at_b - ab) / (edge - ab)
             new[2 if sx > 0 else 0] = at_b
         if sy:
             ap, edge = (bottom, top) if sy < 0 else (top, bottom)
-            least = 0.1 if free else 1.0
-            if not free:  # (the sides run between key rows: the row under the mouse is in)
-                at_p = round(at_p) + (0.5 if sy < 0 else -0.5)
-            at_p = max(at_p, ap + least) if sy < 0 else min(at_p, ap - least)
+            at_p = round(at_p) + (0.5 if sy < 0 else -0.5)  # (the sides run between key rows: the row under the
+            at_p = max(at_p, ap + 1.0) if sy < 0 else min(at_p, ap - 1.0)  # mouse is in)
             ky = (at_p - ap) / (edge - ap)
             new[1 if sy < 0 else 3] = at_p
         for j, sh in orig.items():
@@ -417,12 +415,14 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
     def shapes_in_box(self, x0, y0, x1, y1):
         """The shapes a box on screen (x0 < x1, y0 < y1) touches: a piece of their line, or one of their notes
-        while the notes are shown."""
+        while the notes are shown. A line has to go into the box: one that only reaches its edge doesn't count (user:
+        a shape ending on the grid line where the box starts isn't picked)."""
         found = set()
+        e = 1e-6  # (a line ending on the edge is exactly there on screen too)
         for i, sh in enumerate(self.app.shapes):
             for stroke in self.pick_strokes(sh):
                 pts = np.asarray(stroke, float).reshape(-1, 2)
-                if line_touches_box(self.t2x(pts[:, 0]), self.p2y(pts[:, 1]), x0, y0, x1, y1):
+                if line_touches_box(self.t2x(pts[:, 0]), self.p2y(pts[:, 1]), x0 + e, y0 + e, x1 - e, y1 - e):
                     found.add(i)
                     break
         if self.app.show_notes.get() and len(self.app.rendered):
@@ -487,6 +487,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def on_press(self, e):
         self.focus_set()
         kept, self.box_kept, self.box_moving, self.dup = self.kept_box(), None, None, None
+        self.grabbed = None
         if self.follow and self.sx is not None:  # a shape started with a click: this click finishes it
             self.drag, self.follow = self.follow, None
             self.on_drag(e)
@@ -561,6 +562,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             i = self.shape_at(e.x, e.y, prefer_selected=not e.state & CTRL)
             if i is None and hit and not e.state & CTRL:
                 i = app.sel  # anywhere inside the selected custom shape's box moves it
+            if i is not None and i not in app.sels and not e.state & CTRL:
+                self.box_moving = None  # a shape it didn't select, grabbed inside the box: the box goes (user)
             if on_box and e.state & CTRL:  # Ctrl inside the kept Select box: a drag moves a COPY of all it selected
                 app.push_undo(name=tr("app.duplicate"))  # (user; let go without moving = a Ctrl+click)
                 self.dup = {"click": i}
@@ -597,6 +600,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             elif i != app.sel:
                 app.select_many(app.sels, i)
             app.push_undo(name=tr("pianoroll.move"))
+            self.grabbed = i
             orig = {j: copy.deepcopy(app.shapes[j]["pts"]) for j in app.sels}
             # clicking one shape of several without dragging selects just that one; clicking the selected funnel
             # without dragging highlights the part under the mouse (none: clears it)
@@ -985,7 +989,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.finish_poly()
             if self.draft and self.draft["kind"] == "arc":
                 self.cancel_draft()  # an arc needs all three points
-        hid = None if self.draft or self.sx is None else self.hit_handle(e.x, e.y, True)
+        # (a click that finished / dropped a shape being drawn does only that: not a point of the shape behind it)
+        hid = None if self.draft or finished or self.sx is None else self.hit_handle(e.x, e.y, True)
         if isinstance(hid, tuple) and hid[0] == "pt":
             hid = None  # a stroke's point: right-click works as on the stroke (its menu)
         if isinstance(hid, tuple) and self.app.selected()["kind"] == "custom":  # a picked curve stroke's point
@@ -1067,7 +1072,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         On a selected funnel: a curve start (on its line) or an anchor, like a click with the Funnel tool.
         On a selected curve: an anchor there, like a click with the Curve tool."""
         sh = self.point_shape()
-        if (not self._pan or abs(e.x - self._pan[0]) > 3 or abs(e.y - self._pan[1]) > 3 or self.draft
+        if (not self._pan or self._panned or abs(e.x - self._pan[0]) > 3 or abs(e.y - self._pan[1]) > 3 or self.draft
                 or not sh or sh["kind"] not in ("poly", "funnel", "curve", "custom") or e.x < self.kb_w
                 or e.y < self.ruler_h):
             return
@@ -1107,11 +1112,14 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
     def start_pan(self, e):
         self._pan = (e.x, e.y, self.view_t, self.view_top)
+        self._panned = False
 
     def pan_to(self, e):
         if not self._pan or self.sx is None:
             return
         x, y, t, top = self._pan
+        if abs(e.x - x) > 3 or abs(e.y - y) > 3:
+            self._panned = True  # (once it went further than 3 px it's a pan, not a click, even if it comes back)
         self.view_t = t - (e.x - x) / self.sx
         self.view_top = top + (e.y - y) / self.sy
         self.clamp_view()
@@ -1150,7 +1158,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 self.finish_poly()
         elif k == "delete":
             sh = self.app.selected()
-            if self.funnel_parts():
+            if self.drag:
+                self.delete_dragged()
+            elif self.funnel_parts():
                 self.delete_parts()
             elif self.picked_stroke(sh) is not None and len(self.app.sels) == 1:
                 self.delete_stroke(sh, self.app.stroke)
@@ -1162,6 +1172,23 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.app.duplicate()
         elif not e.state & CTRL:
             self.app.tool_hotkey(k)
+
+    def delete_dragged(self):
+        """Delete while the mouse is dragging: only the shape being dragged goes (user: the one grabbed, even when
+        others move along; all the kept Select boxes hold when they were grabbed on empty space / stretched), the
+        rest of the selection stays, and the drag ends. A drag that holds no shape (Select box, play line, Slice
+        line, a shape being drawn) ignores it."""
+        app, kind = self.app, self.drag[0]
+        if kind == "move":
+            gone = list(self.drag[2]) if self.grabbed is None or self.dup else [self.grabbed]
+        elif kind == "stretch":
+            gone = list(self.drag[3])
+        elif kind in ("handle", "resize", "turn", "skew"):
+            gone = [app.sel]
+        else:
+            return
+        self.drag = self.box_moving = self.dup = None
+        app.delete_selected(only=gone)
 
     def time_text(self, x):
         """bar:beat:tick at canvas x (the velocity pane shares the roll's x axis)"""
