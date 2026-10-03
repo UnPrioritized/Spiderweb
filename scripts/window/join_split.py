@@ -14,6 +14,7 @@ from notes.arc import arc_circle, arc_points
 from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live
 from notes.bezier import anchor_count, nearest, split
 from notes.engine import cached_arrays, shape_path
+from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom
 from notes.smooth import smooth_path
 from notes.joined import (custom_groups, join_shapes, join_velocity, piece_velocity, sections, split_at, split_custom,
@@ -28,6 +29,17 @@ TOUCH_PX = 8  # ends closer than this on screen (times the display scaling) coun
 def span(sh):
     bs = [b for b, _ in cached_path(sh)]
     return min(bs), max(bs)
+
+
+def part_glue(part, whole):
+    """A piece cut from whole keeps the glue boxes where they were in the song (only what's inside it)."""
+    if isinstance(whole.get("glue"), list):
+        got = glue_for_part(whole["glue"], glue_box(np.concatenate(cached_arrays(whole))),
+                            glue_box(np.concatenate(cached_arrays(part))))
+        if got:
+            part["glue"] = got
+        else:
+            part.pop("glue", None)
 
 
 JOIN_KINDS = tr("join_split.lines_polylines_freehand_strokes_curves")
@@ -186,6 +198,7 @@ class JoinSplit:
         whole = span(old)
         for p in parts if velocity else ():
             piece_velocity(p, old, span(p), whole)
+            part_glue(p, old)
         self.shapes[i:i + 1] = parts
         self.select_many(range(i, i + len(parts)), i)
         self.shapes_changed()
@@ -288,6 +301,7 @@ class JoinSplit:
             whole = span(sh)
             for p in parts if i in done else ():
                 piece_velocity(p, sh, span(p), whole)
+                part_glue(p, sh)
             if i in done:
                 picked += range(len(new), len(new) + len(parts))
             new += parts

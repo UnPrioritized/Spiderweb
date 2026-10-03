@@ -98,7 +98,8 @@ def inside(polys, pt):
 
 def slice_custom(sh, a, b, ppq):
     """A custom shape cut along the segment a-b (beats, keys) -> its two halves, or None when the segment doesn't
-    go all the way across it (or misses it). A spam gate Range is shared out: each half gets its part of it."""
+    go all the way across it (or misses it). A spam gate Range is shared out: each half gets its part of it. Glue
+    boxes are left as they were: the caller moves them (glue.for_part)."""
     to_uv = frame_to_uv(sh["pts"])
     if to_uv is None:
         return None
@@ -136,11 +137,9 @@ def slice_custom(sh, a, b, ppq):
     out = []
     for k in (1, -1):
         new = copy.deepcopy({key: v for key, v in sh.items()
-                             if key not in ("strokes", "areas", "polygon", "from", "glue", "name")})
+                             if key not in ("strokes", "areas", "polygon", "from", "name")})
         new["name"] = sh.get("name", "")
         new["strokes"] = halves[k] + [{"kind": "poly", "pts": [list(p) for p in line]} for line in cut_lines]
-        if sh.get("glue") is True:
-            new["glue"] = True
         areas = [list(ar) for ar in sh.get("areas", ()) if side([ar[:2]], a, b) == k]
         if areas:
             new["areas"] = areas

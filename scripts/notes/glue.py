@@ -48,6 +48,21 @@ def to_shares(area, box):
     return [(lo_b - b0) / w, (lo_p - p0) / h, (hi_b - b0) / w, (hi_p - p0) / h]
 
 
+def for_part(glue, whole, part):
+    """A cut shape's glue for one of its parts (whole, part: their glue_box): its boxes stay where they were in the
+    song, only what's inside the part (None: none of them is)."""
+    if not isinstance(glue, list):
+        return glue
+    b0, p0, b1, p1 = whole
+    out = []
+    for u0, v0, u1, v1 in glue:
+        area = (b0 + u0 * (b1 - b0), p0 + v0 * (p1 - p0), b0 + u1 * (b1 - b0), p0 + v1 * (p1 - p0))
+        shares = to_shares(area, part)
+        if shares:
+            out.append(shares)
+    return out or None
+
+
 def added(glue, shares):
     """The shape's glue with one more box (True stays True: it already glues everything)."""
     if glue is True or shares is True:
