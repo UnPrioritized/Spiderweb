@@ -1967,10 +1967,29 @@ def cycling(sh):
     return bool(sh.get("cycle")) and "notes" not in sh
 
 
+def range_steps(sh, notes, ppq):
+    """Spam steps of a shape with a gate Range: which of its gates each note starts nearest to (time: the same for
+    every key, so columns line up; keys: counted along each key's own row)."""
+    grid = range_grid(sh, ppq)
+
+    def nearest(starts, s):
+        return np.searchsorted((starts[:-1] + starts[1:]) / 2, s, "right")
+
+    s = notes[:, 0]
+    if not isinstance(grid, RangeKeys):
+        return nearest(grid[:, 0], s)
+    k = np.zeros(len(notes), np.int64)
+    for key in np.unique(notes[:, 2]).tolist():
+        rows = notes[:, 2] == key
+        k[rows] = nearest(grid.squares(key)[:, 0], s[rows])
+    return k
+
+
 def cycle_turns(sh, notes, ppq):
     """Which turn (0 .. n - 1) each (start, end, key) note gets (CYCLES). Spam steps are counted from the shape's
     first note (with the "aligned" start from tick 0, so they keep to the gate grid), at the shape's gate (Hz bass:
-    its tone's gate), each note in the step it starts nearest to; other notes: each start time is a step."""
+    its tone's gate; a gate Range: its own gates, range_steps), each note in the step it starts nearest to; other
+    notes: each start time is a step."""
     c = sh["cycle"]
     s = notes[:, 0]
     if c["by"] == "key":
@@ -1979,6 +1998,8 @@ def cycle_turns(sh, notes, ppq):
         a, b = c["every"]
         k = np.floor(s * b / (4 * a * ppq) + 1e-9).astype(np.int64)
         return k % c["n"]
+    elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS and sh.get("range") and not sh.get("hz"):
+        k = range_steps(sh, notes, ppq)
     elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS:
         g = max(1.0, sh["gate"] * ppq)
         x0 = 0 if sh.get("align") == "aligned" and not sh.get("hz") else int(s.min())
