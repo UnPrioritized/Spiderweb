@@ -292,7 +292,7 @@ def shape_notes_tracks(sh, ppq, keys=128):
     """shape_notes, and for pasted notes which track each note came from, for a custom shape made of other shapes
     which of them (one number per row; None for every other shape)."""
     notes, tracks = with_glue(*_notes_tracks(sh, ppq, keys), sh, ppq)
-    notes, tracks = with_chop(notes, tracks, sh.get("chop"), ppq)
+    notes, tracks = with_chop(notes, tracks, sh, ppq)
     notes, tracks = with_claw(notes, tracks, sh.get("claw"), ppq)
     return with_strum(notes, tracks, sh.get("strum"), ppq)
 
@@ -309,8 +309,12 @@ def with_glue(notes, tracks, sh, ppq):
     return got[:, :-1], got[:, -1]
 
 
-def with_chop(notes, tracks, chop, ppq):
-    """The same after the shape's chop (chop.py; after the glue, before the claw)."""
+def with_chop(notes, tracks, sh, ppq):
+    """The same after the shape's chop (chop.py; after the glue, before the claw). A Fill shape's touching notes on
+    a key (its outline notes, colour borders) follow one rhythm; spam notes and others each start their own."""
+    chop = sh.get("chop")
+    if chop and sh["kind"] == "custom" and sh.get("fill") == "fill" and "notes" not in sh:
+        chop = dict(chop, runs=True)
     return _after(apply_chop, notes, tracks, chop, ppq)
 
 

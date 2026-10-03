@@ -3,8 +3,8 @@ its output; rhythm only, the keys never change). The shape stays as drawn; sh["c
 
 "len": one step of the rhythm, in beats (the "snap" text it was picked as is kept for the window; "off" = 1 tick).
 "steps" + "pieces": the rhythm, one repeat "steps" steps long, its pieces [start, length, velocity %] in steps.
-The rhythm REPEATS along each note (it isn't stretched to fit), from the note's own start (notes touching on a key
-count as one: run_starts), or with "abs" from the song's start (tick 0), so the first piece can be cut short. A rest in the rhythm = a hole in the note; a piece
+The rhythm REPEATS along each note (it isn't stretched to fit), from the note's own start (a Fill shape's notes
+touching on a key count as one: "runs", run_starts), or with "abs" from the song's start (tick 0), so the first piece can be cut short. A rest in the rhythm = a hole in the note; a piece
 running past the note's end is cut there. "vel" (0..100): how much the pieces' velocity % counts (0 = every piece
 keeps the note's own velocity, 100 = the rhythm's share of it). "name": the rhythm it was picked as ("" = drawn).
 
@@ -81,7 +81,7 @@ def clean_chop(c):
 
 def run_starts(a):
     """Where each note's run starts: notes on one key that touch or overlap count as one long note, so a fill's
-    1-tick outline notes and the fill note after them (or spam notes back to back) follow one rhythm."""
+    1-tick outline notes and the fill note after them follow one rhythm."""
     order = np.lexsort((a[:, 1], a[:, 0], a[:, 2]))
     s, e, p = a[order, 0], a[order, 1], a[order, 2]
     seg = np.ones(len(order), bool)
@@ -106,7 +106,7 @@ def _repeats(a, chop, ppq):
     pieces = np.array(chop["pieces"], float)
     ps, pe = pieces[:, 0] * step, (pieces[:, 0] + pieces[:, 1]) * step
     s, e = a[:, 0].astype(float), a[:, 1].astype(float)
-    origin = np.zeros(len(a)) if chop["abs"] else run_starts(a).astype(float)
+    origin = np.zeros(len(a)) if chop["abs"] else run_starts(a).astype(float) if chop.get("runs") else s
     k0 = np.floor((s - origin - pe.max()) / cycle).astype(np.int64)  # the first repeat that can reach the note
     k1 = np.ceil((e - origin - ps.min()) / cycle).astype(np.int64)  # (past the last one that can)
     return pieces, ps, pe, cycle, origin, k0, np.maximum(k1 - k0, 0)

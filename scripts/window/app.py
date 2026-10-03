@@ -788,7 +788,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 self._notes_cache[key] = with_claw(notes, tracks, sh["claw"], self.ppq)
             elif sh.get("chop"):
                 notes, tracks = self.notes_tracks({k: v for k, v in sh.items() if k != "chop"})
-                self._notes_cache[key] = with_chop(notes, tracks, sh["chop"], self.ppq)
+                self._notes_cache[key] = with_chop(notes, tracks, sh, self.ppq)
             elif sh.get("glue"):
                 notes, tracks = self.notes_tracks({k: v for k, v in sh.items() if k != "glue"})
                 self._notes_cache[key] = with_glue(notes, tracks, sh, self.ppq)

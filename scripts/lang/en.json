@@ -1573,7 +1573,7 @@
   "",
   "Velocity: how much the rhythm's louder and quieter pieces count. 0 = every piece keeps its note's velocity.",
   "",
-  "Follow the song's grid (Absolute): on, the rhythm lines up with the song's beats, so a note that starts between them gets a short first piece. Off, the rhythm starts again at each note's start. Notes that touch on one key count as one long note here, so a fill's outline notes and spam notes back to back follow one rhythm.",
+  "Follow the song's grid (Absolute): on, the rhythm lines up with the song's beats, so a note that starts between them gets a short first piece. Off, the rhythm starts again at each note's start. In a shape with Fill, the notes that touch on one key (its outline notes, colour borders) count as one long note here, so the whole row follows one rhythm; spam notes each start their own.",
   "",
   "Like the Claw machine, you can keep working in the main window while it's open, and the chop is kept with the shape: moving or reshaping it chops the new notes the same way. Open the window again to change it, or untick Chop the notes + Accept to take it off.",
   "",
