@@ -1432,10 +1432,11 @@ def touching_parts(spans, colours, lines):
     """"Outline between colours": where two colours still touch with the outline (lines, (start, end, key)) taken
     out, side by side on a key or one over the other (where a line runs too near another for the map's cells, no
     border is found, e.g. a curve touching a side), the touching part of the shorter stretch, as (start, end, key)
-    notes: the outline never lets two colours touch (user)."""
+    notes: the outline never lets two colours touch (user). spans may overlap (the notes of lines ending on lines,
+    in the colour where each is)."""
     if not len(spans):  # (nothing filled: every area emptied, or the shape is above the top key)
         return np.zeros((0, 3), np.int64)
-    parts = [cut_out(spans[colours == k], lines) for k in np.unique(colours).tolist()]
+    parts = [merged_rows(cut_out(spans[colours == k], lines)) for k in np.unique(colours).tolist()]
     col = np.concatenate([np.full(len(p), k, np.int64) for p, k in zip(parts, np.unique(colours).tolist())])
     n = np.concatenate(parts) if parts else np.zeros((0, 3), np.int64)
     by = {}
@@ -1444,10 +1445,13 @@ def touching_parts(spans, colours, lines):
     out = []
     for k, row in by.items():
         row.sort()
-        for a, b in zip(row, row[1:]):  # (side by side)
-            if a[2] != b[2] and b[0] <= a[1]:
-                s, e, _ = min(a, b, key=lambda r: r[1] - r[0])
-                out.append((s, e, k))
+        for i, a in enumerate(row):  # (side by side, or over each other)
+            for b in row[i + 1:]:
+                if b[0] > a[1]:
+                    break
+                if a[2] != b[2]:
+                    s, e, _ = min(a, b, key=lambda r: r[1] - r[0])
+                    out.append((s, e, k))
         for a in row:  # (over the next key's)
             for b in by.get(k + 1, ()):
                 s, e = max(a[0], b[0]), min(a[1], b[1])
@@ -1942,7 +1946,13 @@ def _notes_groups(sh, ppq):
                 outline = np.column_stack([ss, es, ks]).astype(np.int64).reshape(-1, 3)
             if area is not None and sh.get("borders"):
                 outline = merged_rows(np.concatenate([outline, border_parts(spans, border_lines(sh, ppq))]))
-                outline = merged_rows(np.concatenate([outline, touching_parts(spans, area, outline)]))
+                while True:  # (the lines' notes too: each piece left takes the colour where it is, so again)
+                    fl = cut_out(flat, outline)
+                    more = touching_parts(np.concatenate([spans, fl]), np.concatenate([area, flat_area(fl)]),
+                                          outline)
+                    if not len(more):
+                        break
+                    outline = merged_rows(np.concatenate([outline, more]))
             if area is None:
                 inside = cut_out(notes, outline)
                 ids = np.ones(len(inside), np.int64)
@@ -1977,7 +1987,8 @@ def _notes_groups(sh, ppq):
             edge = on_edge(notes) | ~covered(notes, inner_ticks(sh, ppq, g, rows))
         if area is not None and sh.get("borders"):
             border = border_lines(sh, ppq)
-            edge |= colour_edges(notes, np.concatenate([border, touching_parts(spans, area, border)]))
+            both = np.concatenate([spans, notes[len(main):]]), np.concatenate([area, ids[len(main):]])
+            edge |= colour_edges(notes, np.concatenate([border, touching_parts(*both, border)]))
         inner = 1 if ids is None else 1 + ids
         return (np.concatenate([notes, lines]),
                 np.concatenate([np.where(edge, 0, inner), np.where(lc > 0, 1 + lc, 0)]).astype(np.int64))
