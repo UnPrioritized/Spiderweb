@@ -134,6 +134,41 @@ def check_numpy():
     root.destroy()
     return ok
 
+
+_lock = None  # the open "Spiderweb is running" handle, kept until the program ends
+
+
+def first_instance():
+    """Only one Spiderweb per folder (they'd share the autosave and settings): True when none is open yet. Otherwise
+    the open one's window is brought to the front and False. Copies in other folders don't count."""
+    global _lock
+    import hashlib
+    import re
+    from ctypes import wintypes
+    from files.about import HERE
+    k, u = ctypes.WinDLL("kernel32", use_last_error=True), ctypes.windll.user32
+    k.CreateMutexW.restype = wintypes.HANDLE
+    folder = hashlib.md5(os.path.normcase(os.path.abspath(HERE)).encode("utf-8")).hexdigest()
+    _lock = k.CreateMutexW(None, False, "Local\\Spiderweb-" + folder)
+    if not _lock or ctypes.get_last_error() != 183:  # ERROR_ALREADY_EXISTS
+        return True
+    found = []
+
+    def look(h, _):
+        name, title = ctypes.create_unicode_buffer(64), ctypes.create_unicode_buffer(256)
+        u.GetClassNameW(h, name, 64)
+        u.GetWindowTextW(h, title, 256)
+        if name.value == "TkTopLevel" and u.IsWindowVisible(h) and re.fullmatch(r"Spiderweb [\d.]+", title.value):
+            found.append(h)
+        return not found
+    u.EnumWindows(ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)(look), 0)
+    if found:
+        if u.IsIconic(found[0]):
+            u.ShowWindow(found[0], 9)  # SW_RESTORE
+        u.SetForegroundWindow(found[0])
+    return False
+
+
 if __name__ == "__main__":
     # Tell Windows we handle display scaling ourselves, so the window isn't stretched (blurry)
     try:
@@ -144,6 +179,11 @@ if __name__ == "__main__":
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Spiderweb")
     except (AttributeError, OSError):
+        pass
+    try:
+        if not first_instance():
+            sys.exit(0)
+    except (AttributeError, OSError):  # not Windows: no lock
         pass
     if not check_numpy():
         sys.exit(1)
