@@ -72,6 +72,12 @@ def gate_mode(hz):
     return "fixed" if hz.get("fixed") else "auto" if hz.get("auto") is not None else "mixed"
 
 
+def no_spaces(var):
+    """A box's spaces taken out (Space types one there, user; numbers have none) when the box is left."""
+    if " " in var.get():
+        var.set(var.get().replace(" ", ""))
+
+
 def auto_box(app, parent, var, apply):
     """The Auto gates threshold box ("within [3] cents"): a frame (not packed) with .entry. apply() on Enter,
     leaving the box, and each step of the number."""
@@ -82,7 +88,7 @@ def auto_box(app, parent, var, apply):
     f.entry.pack(side="left", padx=(4, 2))
     ttk.Label(f, text=tr("panel_custom.hz_cents"), foreground="#777").pack(side="left", padx=(0, 4))
     f.entry.bind("<Return>", lambda e: apply())
-    f.entry.bind("<FocusOut>", lambda e: apply())
+    f.entry.bind("<FocusOut>", lambda e: no_spaces(var) or apply())
     Scrub(app, [(f.entry, var, apply)], (0.5, 5, 0.1), 0, AUTO_MOST, label=lb)
     for w in (lb, f.entry):
         Tooltip(w, tr("hz.auto_tip", most=f"{AUTO_MOST:g}"))
@@ -179,6 +185,7 @@ class HzWindow(tk.Toplevel):
         self.sounding = None  # (channel, what's played) heard now: the notes held with the mouse (see sound)
         self.sound_jobs, self.sound_on = [], set()  # (the notes still to start / stop, the keys on now)
         self.last_len = 1.0  # beats: how long a newly placed note is (the last length used)
+        self.placed = None  # the id of the note the last click placed (a double click there places one more)
         self.fxl, self.fx_of = {}, None  # the effects' lines (hz["fx"]) and whose they are (the shape, or None)
         self.loops = {}  # the effects that repeat (hz["loop"])
         self.off = []  # the effects switched off (hz["off"])
@@ -221,7 +228,7 @@ class HzWindow(tk.Toplevel):
         for w in (lb, self.pitch_entry):
             Tooltip(w, tr("panel_custom.hz_cents_tip"))
         self.pitch_entry.bind("<Return>", lambda e: self.on_pitch())
-        self.pitch_entry.bind("<FocusOut>", lambda e: self.on_pitch())
+        self.pitch_entry.bind("<FocusOut>", lambda e: no_spaces(self.pitch_var) or self.on_pitch())
         Scrub(app, [(self.pitch_entry, self.pitch_var, self.on_pitch)], (1, 10, 0.1), -1200, 1200, label=lb)
         f = piece()
         ttk.Label(f, text=tr("hz.gates")).pack(side="left")
@@ -238,6 +245,7 @@ class HzWindow(tk.Toplevel):
         ppq = ttk.Combobox(f, textvariable=app.pvar["ppq"], values=app.ppq_box["values"], width=7,
                            height=12)
         ppq.pack(side="left", padx=(4, 10))
+        ppq.bind("<FocusOut>", lambda e: no_spaces(app.pvar["ppq"]))
         Tooltip(ppq, tr("hz.ppq_tip"))
         self.ppq_trace = app.pvar["ppq"].trace_add(
             "write", lambda *a: self.after_idle(lambda: self.winfo_exists() and self.redraw()))
@@ -845,6 +853,8 @@ class HzWindow(tk.Toplevel):
         at = max(self.snap(self.beat_at(e.x), e), b0 + self.shortest(e))
         for i in self.sel:
             self.tones[i]["len"] = max(1 / self.app.ppq, orig[i]["len"] + at - b1)
+        for i in self.sel:  # (the slides' dots stay where they are, as when one note's end is dragged: user)
+            self.keep_leads(i, orig)
         d["box"] = [(a, t, max(a + 1 / self.app.ppq, z + at - b1), u) for a, t, z, u in d["boxes"]]  # (each one's
         self.box_kept = (d["box"], set(self.sel))  # right side the same amount, like the notes)
         self.redraw()
@@ -915,17 +925,19 @@ class HzWindow(tk.Toplevel):
         self.sel = set(indices)
         self.redraw()
 
-    def on_press(self, e):
+    def on_press(self, e, place=False):
+        """place: a new note even if there's one under the mouse (see on_double)."""
         self.canvas.focus_set()
+        self.placed = None
         self.fx.pressed = False  # (Delete is for the notes now)
         if self.fx.sel:  # (the effect points selected aren't any more)
             self.fx.sel = set()
             self.fx.redraw()
         kept, self.box_kept, sel0 = self.kept_box(), None, set(self.sel)
         self.drop_drag()
-        hit = self.hit(e.x, e.y)
+        hit = None if place else self.hit(e.x, e.y)
         before = copy.deepcopy(self.tones)
-        on_box = self.on_kept_box(kept, e, hit)
+        on_box = None if place else self.on_kept_box(kept, e, hit)
         if on_box and on_box != (0, 0):  # the kept Select box's side / corner: its notes stretch
             boxes, area = boxes_upright(kept)
             self.box_kept = (boxes, set(self.sel))
@@ -988,8 +1000,12 @@ class HzWindow(tk.Toplevel):
     def on_double(self, e):
         """A double click on a note deletes it, when the button is let go with nothing changed (so a click and then
         a quick drag still moves it). With Select on empty space it pastes the copied notes there (user, like the
-        main piano roll). Anywhere else, or with Ctrl, it's a press like any other."""
+        main piano roll). On the note the first click just placed: one more note (every click places one, user).
+        Anywhere else, or with Ctrl, it's a press like any other."""
         hit = self.hit(e.x, e.y)
+        if (hit and hit[0] in ("note", "tune", "left", "right") and self.tones[hit[1]]["id"] == self.placed
+                and not e.state & CTRL and self.tool.get() == "pencil"):
+            return self.on_press(e, place=True)
         if (self.tool.get() == "select" and hit is None and self.app.hz_clip and not e.state & CTRL
                 and e.x >= self.kb_w and e.y >= self.ruler_h and not self.on_kept_box(self.kept_box(), e, hit)):
             self.drop_drag()
@@ -1017,12 +1033,13 @@ class HzWindow(tk.Toplevel):
             self.sound(n["key"])
         elif d["kind"] == "right":
             n["len"] = max(short, self.snap(beat, e) - n["t"])
-            self.keep_leads(d)
-        elif d["kind"] == "left":
-            end = n["t"] + n["len"]
+            self.keep_leads(d["i"], d["orig"])
+        elif d["kind"] == "left":  # (a note shorter than a snap step: one step long from where it starts, user)
+            was = d["orig"][d["i"]]
+            end = max(was["t"] + was["len"], was["t"] + short)
             n["t"] = min(self.snap(beat, e), end - short)
             n["len"] = end - n["t"]
-            self.keep_leads(d)
+            self.keep_leads(d["i"], d["orig"])
         elif d["kind"] == "out":
             d["slide"]["out"] = min(max(0.0, n["t"] + n["len"] - self.snap(beat, e)), n["len"])
         elif d["kind"] == "in":
@@ -1116,12 +1133,13 @@ class HzWindow(tk.Toplevel):
         self.commit(tr("hz.step_paste"), before)
         return True
 
-    def keep_leads(self, d):
-        """A note's end dragged: the dots of its slides stay where they were (as far as the note reaches)."""
-        n, was = self.tones[d["i"]], d["orig"][d["i"]]
+    def keep_leads(self, i, orig):
+        """Note i's end dragged (orig = the notes before the drag): the dots of its slides stay where they were (as
+        far as the note reaches)."""
+        n, was = self.tones[i], orig[i]
         for s, s0 in zip(n["to"], was["to"]):  # lead out: counted back from the note's end
             s["out"] = min(max(0.0, s0["out"] + (n["t"] + n["len"]) - (was["t"] + was["len"])), n["len"])
-        for m, m0 in zip(self.tones, d["orig"]):  # lead in: counted from the note's start
+        for m, m0 in zip(self.tones, orig):  # lead in: counted from the note's start
             for s, s0 in zip(m["to"], m0["to"]):
                 if s["id"] == n["id"]:
                     s["in"] = min(max(0.0, s0["in"] - (n["t"] - was["t"])), n["len"])
@@ -1151,10 +1169,12 @@ class HzWindow(tk.Toplevel):
             self.sel = {d["i"]}  # one of several clicked without dragging: just that one
         if d["kind"] in ("left", "right"):
             self.last_len = self.tones[d["i"]]["len"]
+        placed = self.tones[d["i"]]["id"] if d["kind"] == "new" else None
         box = (self.box_kept or (None,))[0] if d.get("box") and (d["kind"] == "stretch" or d.get("inside")
                                                                   or d["moved"]) else None
         if self.tones != d["before"]:
             self.commit(d["name"], d["before"])
+        self.placed = placed
         if box:  # (the notes were sorted: the same ones, numbered anew)
             self.box_kept = (box, set(self.sel))
         elif d.get("keep_box"):
@@ -1566,7 +1586,7 @@ class HzWindow(tk.Toplevel):
             self.tones = tones  # (so the selection stays when the main window's selection changes to the new shape)
             app.add_shape(new)
         else:
-            hz = dict(sh.get("hz") or dict(HZ_DEFAULTS, bpm=float(bpm or 120), **self.fixed()))
+            hz = dict(sh.get("hz") or self.new_hz(bpm))  # (none yet: the window's Gates and Pitch boxes)
             for k in ("tones", "grow", "fx", "loop", "off", "amount"):
                 hz.pop(k, None)
             new = copy.deepcopy(sh)
@@ -1711,7 +1731,9 @@ class HzWindow(tk.Toplevel):
 
     def on_space(self, e):
         """Space: the preview plays / stops (preview off: nothing; the main piano roll only plays from its own
-        window)."""
+        window). In a text box it's just a space (no_spaces takes it out when the box is left)."""
+        if isinstance(e.widget, (tk.Entry, ttk.Entry)):  # (ttk.Combobox is one too)
+            return None
         if not self.preview_on.get():
             return "break"
         if self.preview.playing():
