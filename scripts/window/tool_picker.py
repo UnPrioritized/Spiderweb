@@ -14,6 +14,8 @@ from window.widgets import Tooltip
 FIRST = "line"  # the tool the button shows on the very first start
 ROW_BG, HOVER_BG, PICKED_BG = "#ffffff", "#e5f3ff", "#cce4f7"
 LIST_OPEN = "ToolListOpen"  # a bind tag put first on every other widget while the list is open (see open)
+# pinned together (user): one Custom shape button, with Circle / Polygon opening beside it while one of them is the tool
+GROUP = ("custom", "circle", "polygon")
 
 
 def _pin_inside(x, y):
@@ -64,6 +66,7 @@ class ToolPicker:
         self.arrow.pack(side="left")
         Tooltip(self.arrow, tr("app.tools_list_tip"))
         self.pinned = None  # the pinned tools' own buttons (a frame, made again in show)
+        self.group_box, self.group_lit = None, tk.BooleanVar(value=False)  # (the pinned group, see show_group)
         # a click anywhere else in Spiderweb only closes the list (the click itself does nothing else)
         self.tagged, self.held = [], False
         app.bind_class(LIST_OPEN, "<ButtonPress>", self.press)
@@ -83,12 +86,39 @@ class ToolPicker:
         self.pinned = ttk.Frame(self.frame)
         if self.pins:
             self.pinned.pack(side="left")
+        self.group_box = None
         for key, _, _ in self.tools:
-            if key in self.pins:
+            if key not in self.pins or key in GROUP[1:]:
+                continue
+            if key == GROUP[0]:  # (lit while any of the group is the tool: they all make custom shapes)
+                b = ttk.Checkbutton(self.pinned, text=self.label[key], variable=self.group_lit, style="Toolbutton",
+                                    command=lambda: self.app.tool.set(GROUP[0]))
+            else:
                 b = ttk.Radiobutton(self.pinned, text=self.label[key], value=key, variable=self.app.tool,
                                     style="Toolbutton")
-                b.pack(side="left", padx=(2, 0))
-                Tooltip(b, BY_ID[TOOL_TOPICS[key]]["tip"])
+            b.pack(side="left", padx=(2, 0))
+            Tooltip(b, BY_ID[TOOL_TOPICS[key]]["tip"])
+            if key == GROUP[0]:  # the rest of the group opens beside it while one of them is the tool
+                g = self.group_box = ttk.Frame(self.pinned)
+                self.group_after = b
+                ttk.Separator(g, orient="vertical").pack(side="left", fill="y", padx=(2, 1), pady=2)
+                for k in GROUP[1:]:
+                    b = ttk.Radiobutton(g, text=self.label[k], value=k, variable=self.app.tool, style="Toolbutton")
+                    b.pack(side="left", padx=(2, 0))
+                    Tooltip(b, BY_ID[TOOL_TOPICS[k]]["tip"])
+                ttk.Separator(g, orient="vertical").pack(side="left", fill="y", padx=(3, 0), pady=2)
+        self.show_group()
+
+    def show_group(self):
+        """The pinned group: Circle / Polygon beside Custom shape only while one of the three is the tool."""
+        on = self.app.tool.get() in GROUP
+        self.group_lit.set(on)
+        g = self.group_box
+        if g and on != bool(g.winfo_manager()):
+            if on:
+                g.pack(side="left", after=self.group_after)
+            else:
+                g.pack_forget()
         self.app.after_idle(self.app.fit_toolbar)
 
     def tool_changed(self):
@@ -98,16 +128,19 @@ class ToolPicker:
             self.last = tool
             self.show()
             self.app.schedule_autosave()
+        else:
+            self.show_group()
         if self.popup:
             self.close()
 
     def toggle_pin(self, key):
+        keys = GROUP if key in GROUP else (key,)  # (the group is pinned / unpinned together)
         if key in self.pins:
-            self.pins.remove(key)
+            self.pins = [k for k in self.pins if k not in keys]
         else:
-            self.pins.append(key)
-            if key == self.last:  # the button moves on to a tool that has no button of its own
-                self.last = next((k for k, _, _ in self.tools if k not in self.pins), key)
+            self.pins += [k for k in keys if k not in self.pins]
+            if self.last in keys:  # the button moves on to a tool that has no button of its own
+                self.last = next((k for k, _, _ in self.tools if k not in self.pins), self.last)
         self.show()
         self.fill_list()
         self.app.schedule_autosave()
@@ -207,4 +240,8 @@ class ToolPicker:
         pins = win.get("draw_tool_pins")
         if isinstance(pins, list):
             self.pins = [k for k in dict.fromkeys(pins) if isinstance(k, str) and k in self.label]
+            if any(k in self.pins for k in GROUP):
+                self.pins += [k for k in GROUP if k not in self.pins]
+            if self.last in self.pins:
+                self.last = next((k for k, _, _ in self.tools if k not in self.pins), self.last)
         self.show()
