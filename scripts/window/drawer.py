@@ -26,6 +26,7 @@ from roll.roll_shared import BOX_STILL, grab_while_panning, line_touches_box, mo
 from window.help import open_help
 from window.formula_host import DrawerHost, formula_menu
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
+from window.sticky import REACH, Targets, key_points
 from window.widgets import Tooltip, symmetry_menu
 
 LIBRARY = os.path.join(HERE, "shapes")
@@ -46,6 +47,9 @@ STROKE_COLOR = "#c0392b"  # (a stroke with an outline colour: that colour's dark
 AREA_NORMAL, AREA_EMPTY, OFF_BOARD, BOARD = "#d4d4d4", "#fbe4e4", "#f4f4f4", "#ffffff"
 WARN_COLOR = "#c06000"  # more colours than a shape can have (like the side panel's warning)
 AREA_FRAME = DRAWN_FRAME  # (the drawing's box as a custom shape, for finding its areas)
+STICK_RANK = {"point": 2, "cross": 1, "line": 0}
+STICK_COLOR = "#d000d0"  # the mark where a point sticks
+DRAW_TOOLS = ("line", "poly", "curve", "arc", "square", "circle")  # (the ones whose points stick)
 
 
 def rgb(color):
@@ -184,6 +188,8 @@ class Drawer(tk.Toplevel):
         self.hover = None      # the area under the mouse (Areas tool)
         self._area_cache = self._area_px = self._area_img = self._gap_cache = None
         self._settled = "[]"   # the strokes as JSON when the areas last matched them (changed)
+        self.stuck = None      # where the last point stuck (sticky.py): (kind, (u, v), pixels away), shown as a mark
+        self._stick_cache = None
         self.zoom = 1.0        # 1 = the whole board fits the window
         self.center = [0.5, 0.5]  # the board point in the middle of the window (0.5, 0.5 = the board's middle)
         self._pan = None
@@ -508,6 +514,7 @@ class Drawer(tk.Toplevel):
         c.bind("<ButtonRelease-1>", self.on_release)
         c.bind("<Double-Button-1>", self.on_double)
         c.bind("<Motion>", self.on_motion)
+        c.bind("<Leave>", lambda e: self.stuck and not self.drag and (setattr(self, "stuck", None), self.redraw()))
         c.bind("<ButtonPress-3>", self.right_click)
         c.bind("<ButtonPress-2>", self.start_pan)
         c.bind("<B2-Motion>", self.pan_to)
@@ -569,11 +576,70 @@ class Drawer(tk.Toplevel):
         return list(self.from_screen(x, y))
 
     def event_pt(self, e, snap=True):
+        """The board point at the mouse: stuck to a stroke near it (sticky.py; not rounded, so it stays exactly on
+        that line), else on the grid; Shift = free."""
         u, v = self.from_screen(e.x, e.y)
+        self.stuck = None
         if snap and not e.state & SHIFT:
+            self.stuck = self.stick_at(e.x, e.y)
+            if self.stuck:
+                return list(self.stuck[1])
             n = int(self.grid_n.get())
             u, v = round(u * n) / n, round(v * n) / n
         return [round(u, 5), round(v, 5)]
+
+    def stick_view(self):
+        """(k, ox, oy) for sticky.py: on screen x = ox + u * k, y = oy - v * k."""
+        k = self.px()
+        return (k, self.canvas.winfo_width() / 2 - self.center[0] * k,
+                self.canvas.winfo_height() / 2 + self.center[1] * k)
+
+    def stick_targets(self, skip=frozenset(), skip_pts=frozenset()):
+        """sticky.Targets of the strokes (but skip / skip_pts), remembered until they change."""
+        key = (json.dumps(self.strokes), skip, skip_pts)
+        if self._stick_cache is None or self._stick_cache[0] != key:
+            self._stick_cache = (key, Targets(self.strokes, skip, skip_pts))
+        return self._stick_cache[1]
+
+    def stick_at(self, x, y):
+        """Where screen spot (x, y) sticks, or None. Leaves out what's being changed: the dragged points (a
+        polyline's: that point and the pieces beside it; other strokes: the whole stroke), and of the stroke being
+        drawn all but a polyline's points and pieces before the last one placed / an arc's start (closing it)."""
+        skip, skip_pts, extra_pts, extra_lines = set(), set(), [], []
+        drag = self.drag
+        if drag and drag[0] == "points":
+            for a, b in drag[1]:
+                st = self.strokes[a]
+                if st["kind"] == "poly" and not has_formula(st) and not st.get("smooth"):
+                    skip_pts.add((a, b))
+                else:
+                    skip.add(a)
+        elif drag and drag[0] in ("pen", "corner"):
+            skip.add(drag[1])
+        draft = self.draft
+        if draft and draft["kind"] == "poly" and self.tool.get() == "poly":
+            extra_pts = draft["pts"][:-2]
+            extra_lines = [extra_pts] if len(extra_pts) > 1 else []
+        elif draft and draft["kind"] == "arc" and len(draft["pts"]) == 3 and not self.arc_bend:
+            extra_pts = draft["pts"][:1]
+        return self.stick_targets(frozenset(skip), frozenset(skip_pts)).find(
+            x, y, self.stick_view(), REACH * self.scale, extra_pts, extra_lines)
+
+    def stick_move(self, i, st, du, dv):
+        """Stroke i (st = as it was when grabbed) moved by du, dv: (du, dv) changed so its point nearest to
+        something to stick to lands on it, or None (nothing in reach)."""
+        targets, view, best = self.stick_targets(frozenset([i])), self.stick_view(), None
+        k, ox, oy = view
+        for _, (u, v) in key_points(st, stroke_points(st)):
+            got = targets.find(ox + (u + du) * k, oy - (v + dv) * k, view, REACH * self.scale)
+            rank = got and (STICK_RANK[got[0]], -got[2])  # (a point first, then a crossing, then a line; nearest)
+            if got and (best is None or rank > best[2]):
+                best = got, (u, v), rank
+        if best is None:
+            return None
+        self.stuck = best[0]
+        (tu, tv), (u, v) = best[0][1], best[1]
+        return tu - u, tv - v
 
     def perfect(self, start, pt):
         """pt moved so the box from start is square."""
@@ -631,7 +697,6 @@ class Drawer(tk.Toplevel):
             self.on_release(e, second=True)
             return
         tool = self.tool.get()
-        pt = self.event_pt(e)
         if tool == "select":
             return self.select_press(e)
         if tool == "areas":
@@ -644,6 +709,7 @@ class Drawer(tk.Toplevel):
         if tool == "erase":  # a click = the stroke there; a drag = a box, every stroke it touches when let go
             self.drag = ("erasebox", e.x, e.y, e.x, e.y)
             return
+        pt = self.event_pt(e) if tool != "free" else None
         if tool == "poly":  # click its points, or drag each segment
             if self.draft is None:
                 self.draft = {"kind": "poly", "pts": [pt, list(pt)]}
@@ -841,16 +907,22 @@ class Drawer(tk.Toplevel):
             _, start, origs, boxes = self.drag
             cur = self.event_pt(e, snap=False)
             du, dv = cur[0] - start[0], cur[1] - start[1]
-            if not e.state & SHIFT:  # move in whole grid squares
-                n = int(self.grid_n.get())
-                du, dv = round(du * n) / n, round(dv * n) / n
+            self.stuck = None
+            if not e.state & SHIFT:  # one stroke: its point nearest to a line sticks to it; else whole grid squares
+                got = len(origs) == 1 and self.stick_move(*next((i, json.loads(o)) for i, o in origs.items()), du, dv)
+                if got:
+                    du, dv = got
+                else:
+                    n = int(self.grid_n.get())
+                    du, dv = round(du * n) / n, round(dv * n) / n
+            exact = (lambda c: c) if self.stuck else (lambda c: round(c, 5))  # (stuck: exactly on that line)
             for i, orig in origs.items():
                 st = json.loads(orig)
                 if st["kind"] == "ellipse":
                     u0, v0, u1, v1 = st["box"]
-                    st["box"] = [round(u0 + du, 5), round(v0 + dv, 5), round(u1 + du, 5), round(v1 + dv, 5)]
+                    st["box"] = [exact(u0 + du), exact(v0 + dv), exact(u1 + du), exact(v1 + dv)]
                 else:
-                    st["pts"] = [[round(u + du, 5), round(v + dv, 5)] for u, v in st["pts"]]
+                    st["pts"] = [[exact(u + du), exact(v + dv)] for u, v in st["pts"]]
                 self.strokes[i] = st
             self.boxes = [[u0 + du, v0 + dv, u1 + du, v1 + dv] for u0, v0, u1, v1 in json.loads(boxes)]
         if old and old != json.dumps(self.strokes):
@@ -1029,6 +1101,7 @@ class Drawer(tk.Toplevel):
 
     def on_release(self, e, second=False):
         """second: the click that finishes a stroke started with a click (see follow)."""
+        self.stuck = None  # (the mark goes; hovering shows it again)
         if self.drag and (self.tool.get() == "select" or self.drag[0] in ("points", "pen")):
             self.select_release()
         drag, self.drag = self.drag, None
@@ -1093,7 +1166,15 @@ class Drawer(tk.Toplevel):
         elif self.draft and self.tool.get() in ("poly", "arc"):
             self.draft["pts"][1 if self.arc_bend else -1] = self.event_pt(e)
             self.redraw()
-        elif self.tool.get() == "areas":
+        elif self.tool.get() in DRAW_TOOLS and self.draft is None:  # where a press would stick: the mark
+            was = self.stuck
+            self.event_pt(e)
+            if self.stuck != was:
+                self.redraw()
+        elif self.stuck:
+            self.stuck = None
+            self.redraw()
+        if self.tool.get() == "areas":
             lab = self.area_at(e)
             if lab != self.hover:
                 self.hover = lab
@@ -1683,6 +1764,17 @@ class Drawer(tk.Toplevel):
         if self.drag and self.drag[0] in ("boxsel", "erasebox"):  # a select / eraser box being dragged
             c.create_rectangle(*self.drag[1:5], outline="#0050d0" if self.drag[0] == "boxsel" else "#d02020",
                                width=max(1, round(s)), dash=(4, 2))
+        if self.stuck:  # where the point sticks: a square on a point, an X on a crossing, a diamond on a line
+            kind, (u, v), _ = self.stuck
+            x, y = self.to_screen(u, v)
+            q, lw = 6 * s, max(2, round(2 * s))
+            if kind == "point":
+                c.create_rectangle(x - q, y - q, x + q, y + q, outline=STICK_COLOR, width=lw)
+            elif kind == "cross":
+                c.create_line(x - q, y - q, x + q, y + q, fill=STICK_COLOR, width=lw)
+                c.create_line(x - q, y + q, x + q, y - q, fill=STICK_COLOR, width=lw)
+            else:
+                c.create_polygon(x, y - q, x + q, y, x, y + q, x - q, y, fill="", outline=STICK_COLOR, width=lw)
         if not self.strokes:
             text = tr("drawer.nothing_drawn_yet")
         elif all(role_of(st) for st in self.strokes):

@@ -1902,7 +1902,7 @@
  "help.drawer.title": "The drawer",
  "help.drawer.tip": "Draw a shape for your library, Save it, then Use on the piano roll. Closed outlines can be filled.",
  "help.drawer.text": [
-  "The drawer (Custom shape → Drawer…) is where you draw shapes for your library. Its tools work like the piano roll's: Select (V), Eraser (E), Line (L), Polyline (P), Freehand (F), Curve (C), Arc (A), Square (S) and Circle (O). Areas (B) colours the areas inside (see Drawer: Areas). Points snap to the grid; Shift draws freely. Drag a stroke out, or click where it starts and click where it ends (right-click or Esc cancels).",
+  "The drawer (Custom shape → Drawer…) is where you draw shapes for your library. Its tools work like the piano roll's: Select (V), Eraser (E), Line (L), Polyline (P), Freehand (F), Curve (C), Arc (A), Square (S) and Circle (O). Areas (B) colours the areas inside (see Drawer: Areas). Points stick to other strokes when the mouse is near them: to their points first, then to where two lines cross, then anywhere along a line (a purple mark shows where). A point stuck to a line is exactly on it, so the outline counts as closed there. Away from lines, points snap to the grid. Shift draws freely. Drag a stroke out, or click where it starts and click where it ends (right-click or Esc cancels).",
   "",
   "Save keeps it in the library (the shapes subfolder next to Spiderweb); Use on the piano roll picks it for the Custom shape tool. On the piano roll it stretches to the box you drag.",
   "",
@@ -1916,7 +1916,7 @@
  "help.drawer_select.title": "Drawer: Select and editing",
  "help.drawer_select.tip": "Drag a point (small squares) or a stroke. Drag on empty space = a box selecting several. Del = delete.",
  "help.drawer_select.text": [
-  "Select: drag a point (small squares; points in the same spot move together, so outlines stay closed), an ellipse's corners, or a whole stroke (moves in grid squares, Shift = free). Drag on empty space to draw a box: every stroke it touches is selected, and the box stays until you click outside it. Ctrl+drag adds another box, Ctrl+click adds or removes one stroke. Dragging one of the selected strokes, or anywhere inside the box, moves them all; right-click inside the box (or on one of them) for what works on all of them at once. A click on empty space deselects. Del deletes the selected strokes. Middle-drag scrolls.",
+  "Select: drag a point (small squares; points in the same spot move together, so outlines stay closed), an ellipse's corners, or a whole stroke (moves in grid squares, Shift = free). Dragged points stick to other strokes like new ones; one stroke moved on its own sticks by its point nearest to another stroke. Drag on empty space to draw a box: every stroke it touches is selected, and the box stays until you click outside it. Ctrl+drag adds another box, Ctrl+click adds or removes one stroke. Dragging one of the selected strokes, or anywhere inside the box, moves them all; right-click inside the box (or on one of them) for what works on all of them at once. A click on empty space deselects. Del deletes the selected strokes. Middle-drag scrolls.",
   "",
   "Right-click a stroke = its menu (add point / anchor, symmetric curve halves, its role, delete, copy, paste, flip, turn); empty space = deselect; while drawing a polyline = finish it.",
   "",
