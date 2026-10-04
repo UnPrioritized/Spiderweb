@@ -645,7 +645,7 @@ class Drawer(tk.Toplevel):
         c.bind("<ButtonRelease-1>", self.on_release)
         c.bind("<Double-Button-1>", self.on_double)
         c.bind("<Motion>", self.on_motion)
-        c.bind("<Leave>", lambda e: self.stuck and not self.drag and (setattr(self, "stuck", None), self.redraw()))
+        c.bind("<Leave>", self.on_leave)
         c.bind("<ButtonPress-3>", self.right_click)
         c.bind("<ButtonPress-2>", self.start_pan)
         c.bind("<B2-Motion>", self.pan_to)
@@ -1384,6 +1384,17 @@ class Drawer(tk.Toplevel):
                 c = self.area_paint(self.area_info()[0])[lab]
                 self.pos_label.config(text=tr("drawer.area_normal") if c < 0 else tr("drawer.area_empty") if c == 0
                                       else tr("drawer.area_n", n=int(c)))
+
+    def on_leave(self, e):
+        """The mouse left the board: no sticking mark, no area darkened under it (user: it stayed dark)."""
+        stuck, hover = self.stuck and not self.drag, self.hover is not None
+        if stuck:
+            self.stuck = None
+        if hover:
+            self.hover = None
+            self.pos_label.config(text="")
+        if stuck or hover:
+            self.redraw()
 
     def on_key(self, e):
         k = e.keysym.lower()

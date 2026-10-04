@@ -613,6 +613,7 @@ class ProjectFiles:
         if text is None:
             self.config(cursor="")
             self.update_status()
+            self.status.release()  # (the busy text isn't a message to keep up)
             return
         self.status.config(text=text)
         self.config(cursor="watch")

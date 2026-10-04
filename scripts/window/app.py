@@ -63,7 +63,7 @@ from window.snap_picker import SnapPicker
 from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, StatusLine, Tooltip
 
 
 VEL_KEYS = ("vel0", "vel1")
@@ -309,7 +309,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         help_btn.pack(side="left", padx=(12, 0))
         Tooltip(help_btn, tr("app.every_tip_searchable_opens_at_the"))
 
-        self.status = ttk.Label(self, text="", padding=(6, 2), font=("Segoe UI", 9))
+        self.status = StatusLine(self, text="", padding=(6, 2), font=("Segoe UI", 9))
         self.status.pack(side="bottom", fill="x")
 
         side = self._build_side()
@@ -1300,7 +1300,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             shapes = tr("app.shapes_2", n=len(self.sels)) if len(self.sels) > 1 else ""
             parts.append(tr("app.selected_notes", shapes=shapes,
                             value=sum(self.note_counts[i] for i in self.sels if i < len(self.note_counts))))
-        self.status.config(text="     ".join(parts))
+        self.status.show("     ".join(parts))
 
     def in_drawer(self, e):
         """Keys pressed in the drawer window are the drawer's, not the piano roll's."""

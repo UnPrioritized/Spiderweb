@@ -1,6 +1,7 @@
 """Small Tk helpers shared by the windows."""
 
 import tkinter as tk
+from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
@@ -17,6 +18,46 @@ def grid_shown(w, on):
         w.grid()
     elif not on and w.winfo_manager():
         w.grid_remove()
+
+
+class StatusLine(ttk.Label):
+    """The main window's status line. Text put in with config(text=...) is a message: it stays HOLD_MS (user: the
+    mouse position wrote over it at once), then the line goes back to what show() gave last (position, counts)."""
+    HOLD_MS = 4000
+
+    def __init__(self, master, **kw):
+        super().__init__(master, **kw)
+        self._normal = ""
+        self._job = None
+
+    def configure(self, cnf=None, **kw):
+        if "text" in kw or (isinstance(cnf, dict) and "text" in cnf):
+            if self._job:
+                self.after_cancel(self._job)
+            self._job = self.after(self.HOLD_MS, self.release)
+        return super().configure(cnf, **kw)
+
+    config = configure
+
+    def show(self, text):
+        """The line's usual text: shown now, or when the message on it is done."""
+        self._normal = text
+        if not self._job:
+            super().configure(text=text)
+
+    def release(self):
+        """The message is done (its time is up, or e.g. a busy "Copying…" ended): the usual text back."""
+        if self._job:
+            self.after_cancel(self._job)
+            self._job = None
+        if self.winfo_exists():
+            super().configure(text=self._normal)
+
+    def destroy(self):
+        if self._job:
+            self.after_cancel(self._job)
+            self._job = None
+        super().destroy()
 
 
 class Scrub:
