@@ -49,6 +49,7 @@ WARN_COLOR = "#c06000"  # more colours than a shape can have (like the side pane
 AREA_FRAME = DRAWN_FRAME  # (the drawing's box as a custom shape, for finding its areas)
 STICK_RANK = {"point": 2, "cross": 1, "line": 0}
 STICK_COLOR = "#d000d0"  # the mark where a point sticks
+STICK_LINE = "#c070e0"  # the parts ending at that point (lighter, so the mark stands out on them)
 DRAW_TOOLS = ("line", "poly", "curve", "arc", "square", "circle")  # (the ones whose points stick)
 
 
@@ -624,6 +625,39 @@ class Drawer(tk.Toplevel):
             extra_pts = draft["pts"][:1]
         return self.stick_targets(frozenset(skip), frozenset(skip_pts)).find(
             x, y, self.stick_view(), REACH * self.scale, extra_pts, extra_lines)
+
+    def stuck_pieces(self):
+        """The parts of what's being drawn / dragged that end at the stuck point (user: shown purple), as lists of
+        (u, v): a polyline's piece being drawn, a square's two sides at the mouse's corner (also with Ctrl, where the
+        corner may land off the mark: the mark stays at the mouse, user), the pieces beside a dragged polyline
+        point; curves, arcs, circles and moved strokes whole."""
+        st, drag = self.draft, self.drag
+        if st:
+            if st["kind"] == "poly" and self.tool.get() == "poly":
+                return [st["pts"][-2:]]
+            if st["kind"] == "poly" and self.tool.get() == "square":
+                return [st["pts"][1:4]]
+            return [stroke_points(st)]
+        if not drag:
+            return []
+        if drag[0] == "points":
+            out = []
+            for a, b in drag[1]:
+                s = self.strokes[a]
+                plain = s["kind"] == "poly" and not has_formula(s) and not s.get("smooth")
+                out.append(s["pts"][max(b - 1, 0):b + 2] if plain else stroke_points(s))
+            return out
+        if drag[0] in ("pen", "corner"):
+            return [stroke_points(self.strokes[drag[1]])]
+        if drag[0] == "stroke" and len(drag[2]) == 1:
+            return [stroke_points(self.strokes[i]) for i in drag[2]]
+        return []
+
+    def draw_pieces(self, pieces, width):
+        for pts in pieces:
+            coords = self.screen_points(pts)
+            if len(coords) >= 4:
+                self.canvas.create_line(*coords, fill=STICK_LINE, width=width, capstyle="round", joinstyle="round")
 
     def stick_move(self, i, st, du, dv):
         """Stroke i (st = as it was when grabbed) moved by du, dv: (du, dv) changed so its point nearest to
@@ -1755,6 +1789,9 @@ class Drawer(tk.Toplevel):
                 self.draw_stroke(st, color, max(1, round(self.scale)), dash=(6, 4))  # (thin: Windows dots thick ones)
             else:
                 self.draw_stroke(st, color, w + (1 if i in chosen else 0), dash=(12, 4) if role else None)
+        pieces = self.stuck_pieces() if self.stuck else []
+        if not self.draft:
+            self.draw_pieces(pieces, w + 1)
         s = self.scale
         r, h = 4 * s, 3.5 * s
         sel = self.strokes[self.sel] if self.sel is not None else None
@@ -1785,6 +1822,7 @@ class Drawer(tk.Toplevel):
             c.create_oval(x - r, y - r, x + r, y + r, fill="#ff2020", outline="#800000")
         if self.draft:
             self.draw_stroke(self.draft, "#0a8f0a", w)
+            self.draw_pieces(pieces, w + 1)
             self.draw_draft_points(r, h)
         if self.chosen() and self.tool.get() == "select":  # the kept select boxes
             for box in self.screen_boxes():
