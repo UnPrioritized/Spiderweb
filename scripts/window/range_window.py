@@ -18,7 +18,7 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import SPAM_FILLS, range_gates
-from notes.gaterange import DIRS, STRAIGHT, clean_range, gate_steps
+from notes.gaterange import DIRS, STRAIGHT, clean_range, gate_steps, steps_of
 from window.panel_funnel import GATE_STEPS
 from window.widgets import LocalUndo, Scrub, Tooltip
 
@@ -301,10 +301,9 @@ class RangeGraph(tk.Toplevel):
                        font=("Segoe UI", 7))
         # the whole-tick gates the notes get (pale steps)
         span = (b - a) or 1
-        steps = gate_steps(self.pts, a, b)
-        if on and len(steps) <= 2000:
+        if on and len(steps_of(self.pts, a, b)[0]) <= 2000:
             line = []
-            for u0, u1, g in steps:
+            for u0, u1, g in gate_steps(self.pts, a, b):
                 y = self.y2c((g - a) / span if b != a else 0)
                 line += [self.u2x(u0), y, self.u2x(u1), y]
             if len(line) >= 4:

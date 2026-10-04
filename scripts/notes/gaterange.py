@@ -13,6 +13,7 @@ each note as long as the gate where it starts. Keys: each key row has its own ga
 Fit: each stretch's first note starts and its last note ends right at the stretch's edges (stretched over the blank
 left there, or trimmed where it sticks out; custom.chop_grid)."""
 
+import functools
 import math
 
 import numpy as np
@@ -81,44 +82,57 @@ def gate_at(graph, a, b, u):
     return a + (1 if b >= a else -1) * min(n - 1, int(y * n))
 
 
-def gate_steps(graph, a, b):
-    """[(u0, u1, gate)]: where along the shape each gate holds (in order, next to each other)."""
+@functools.lru_cache(maxsize=16)
+def _steps(graph, a, b):
+    """gate_steps as arrays (u0s, u1s, gates), worked out all at once: a To of millions of ticks has millions of
+    steps (one loop turn each took seconds). graph: a tuple of (u, y) pairs (kept: the window redraws often)."""
     n = abs(b - a) + 1
-    cuts = {0.0, 1.0}
+    cuts = [np.array([0.0, 1.0])]
     for (u0, y0), (u1, y1) in zip(graph, graph[1:]):
-        cuts.add(u0)
+        cuts.append(np.array([u0]))
         if y1 != y0 and u1 > u0:
             lo, hi = sorted((y0, y1))
-            for k in range(math.ceil(lo * n), math.floor(hi * n) + 1):
-                u = u0 + (k / n - y0) * (u1 - u0) / (y1 - y0)
-                if u0 < u < u1:
-                    cuts.add(u)
-    cuts = sorted(cuts)
-    out = []
-    for p, q in zip(cuts, cuts[1:]):
-        if q - p < 1e-12:
-            continue
-        g = gate_at(graph, a, b, (p + q) / 2)
-        if out and out[-1][2] == g:
-            out[-1] = (out[-1][0], q, g)
-        else:
-            out.append((p, q, g))
-    return out
+            k = np.arange(math.ceil(lo * n), math.floor(hi * n) + 1)
+            u = u0 + (k / n - y0) * (u1 - u0) / (y1 - y0)
+            cuts.append(u[(u0 < u) & (u < u1)])
+    cuts = np.unique(np.concatenate(cuts))
+    p, q = cuts[:-1], cuts[1:]
+    wide = q - p >= 1e-12
+    p, q = p[wide], q[wide]
+    y = np.interp((p + q) / 2, [pt[0] for pt in graph], [pt[1] for pt in graph])
+    g = a + (1 if b >= a else -1) * np.minimum(n - 1, (y * n).astype(np.int64))
+    first = np.flatnonzero(np.r_[True, g[1:] != g[:-1]])  # (next to each other with the same gate = one step)
+    last = np.r_[first[1:], len(g)] - 1
+    return p[first], q[last], g[first]
+
+
+def steps_of(graph, a, b):
+    """gate_steps as arrays (u0s, u1s, gates)."""
+    return _steps(tuple(map(tuple, graph)), a, b)
+
+
+def gate_steps(graph, a, b):
+    """[(u0, u1, gate)]: where along the shape each gate holds (in order, next to each other)."""
+    u0, u1, g = steps_of(graph, a, b)
+    return list(zip(u0.tolist(), u1.tolist(), g.tolist()))
 
 
 def range_squares(t0, t1, a, b, graph):
     """The notes' (start, end) ticks from t0 past t1, back to back, each as long as the gate where it starts."""
     span = max(t1 - t0, 1)
     t, parts = t0, []
-    steps = gate_steps(graph, a, b)
-    for u0, u1, g in steps:
-        tb = t0 + u1 * span
-        if t >= tb:
-            continue
-        n = math.ceil((tb - t) / g)
+    _, u1s, gs = steps_of(graph, a, b)
+    ends = t0 + u1s * span
+    i = 0
+    while True:  # (each turn: the step the next note starts in; steps it jumps over cost nothing)
+        i += int(np.searchsorted(ends[i:], t, "right"))
+        if i >= len(ends):
+            break
+        g = int(gs[i])
+        n = math.ceil((float(ends[i]) - t) / g)
         parts.append(t + g * np.arange(n + 1, dtype=np.int64))
         t += n * g
-    g = steps[-1][2]
+    g = int(gs[-1])
     parts.append(t + g * np.arange(1, 3, dtype=np.int64))  # (a little past the end)
     edges = np.unique(np.concatenate(parts))
     return np.column_stack([edges[:-1], edges[1:]])
