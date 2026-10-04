@@ -21,7 +21,7 @@ from notes.pattern import has_formula, moved_formulas
 from files.about import HERE
 from files.safefile import write_text
 from files.clipboard import get_text, put_text
-from files.share import LONG_LINE,ShareError, drawing_line, read_drawing, unpack
+from files.share import LONG_LINE, ShareError, drawing_line, made_by, read_drawing, unpack
 from roll.roll_shared import BOX_STILL, grab_while_panning, line_touches_box, mouse_trail, shown_points
 from window.help import open_help
 from window.formula_host import DrawerHost, formula_menu
@@ -70,6 +70,8 @@ def colour_menu(parent, var, pick):
         m.add_radiobutton(label=tr("drawer.area_n", n=c), value=c, variable=var, command=lambda c=c: pick(c))
     return m
 BAD_CHARS = '<>:"/\\|?*'
+NAME_MAX = 100  # (longer names: the file's full path can get too long for Windows)
+DEVICES = {"CON", "PRN", "AUX", "NUL", *(f"{d}{n}" for d in ("COM", "LPT") for n in range(1, 10))}
 
 
 # ---------------------------------------------------------------- library
@@ -127,7 +129,12 @@ def save_shape(name, strokes, areas=()):
 
 
 def clean_name(name):
-    return "".join(c for c in name if c not in BAD_CHARS).strip().rstrip(".")
+    """A shape's name as it can be a file name on Windows: no characters it refuses (or hidden ones like Tab), at
+    most NAME_MAX letters, and not one of its device names ("CON" -> "CON (shape)")."""
+    name = "".join(c for c in name if c not in BAD_CHARS and c >= " ").strip().rstrip(".")
+    name = name[:NAME_MAX].strip().rstrip(".")
+    base, dot, rest = name.partition(".")
+    return f"{base} (shape){dot}{rest}" if base.strip().upper() in DEVICES else name
 
 
 def help_box(parent, text):
@@ -1736,8 +1743,10 @@ class Drawer(tk.Toplevel):
             messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_save", e=e), parent=self)
             return
         self.refresh_list(select=name)
-        messagebox.showinfo(tr("drawer.spiderweb"), tr("drawer.imported", name=name) if name == old else
-                            tr("drawer.imported_as", name=name, old=old), parent=self)
+        made = made_by(got)  # (made by another Spiderweb version: a heads-up)
+        messagebox.showinfo(tr("drawer.spiderweb"), (tr("drawer.imported", name=name) if name == old else
+                            tr("drawer.imported_as", name=name, old=old)) +
+                            ("\n\n" + tr(f"share.made_{made[0]}", version=made[1]) if made else ""), parent=self)
 
     def use(self):
         same = self.saved_name and clean_name(self.name.get()) == self.saved_name and not self.dirty

@@ -24,7 +24,18 @@ def _api():
     kernel32.GlobalSize.restype = ctypes.c_size_t
     kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
     kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
+    user32.GetClipboardSequenceNumber.restype = wintypes.DWORD
     return user32, kernel32
+
+
+def count():
+    """A number Windows raises every time anything is put on the clipboard, by any program."""
+    return _api()[0].GetClipboardSequenceNumber()
+
+
+def copy_count():
+    """count(), looked up when called (tests put a pretend one in its place, like put / get)."""
+    return count()
 
 
 def registered(name):

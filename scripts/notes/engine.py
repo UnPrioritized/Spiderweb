@@ -91,9 +91,28 @@ def clean_basics(sh):
     return out
 
 
+FAR = 1e12  # no number in a shape is ever this big (a beat that far is long past what a MIDI file can reach)
+
+
+def sane(x):
+    """True if every number in x (a shape or strokes as read from a file: nested dicts and lists) is a real number
+    no further than FAR from 0 (a hand-changed Infinity / NaN / 1e300 broke the drawing)."""
+    todo = [x]
+    while todo:  # (no recursion: a deeply nested file can't run out of stack)
+        x = todo.pop()
+        if isinstance(x, dict):
+            todo.extend(x.values())
+        elif isinstance(x, list):
+            todo.extend(x)
+        elif isinstance(x, (int, float)) and not -FAR <= x <= FAR:  # (NaN is never between)
+            return False
+    return True
+
+
 def clean_shape(sh):
-    """Shape loaded from a file -> valid shape, or None if it's a kind we no longer support."""
-    if sh.get("kind") not in KINDS or len(sh.get("pts", [])) < 1:
+    """Shape loaded from a file -> valid shape, or None if it's a kind we no longer support or has a number that
+    can't be used."""
+    if sh.get("kind") not in KINDS or len(sh.get("pts", [])) < 1 or not sane(sh):
         return None
     out = clean_basics(sh)
     out["kind"] = sh["kind"]
