@@ -1,5 +1,5 @@
-"""The Hz bass window's live keys (Preview on): press a key on the window's keyboard (the keys on the left) and hold
-it to hear the Hz bass of that key, as a note placed there would sound; let go and the falls of the sustain points
+"""The Hz bass live keys (Preview on): press a key on the synth window's keyboard (hz_synth.py; user: not the Hz bass
+window's keys on the left) and hold it to hear the Hz bass of that key, as a note placed there would sound; let go and the falls of the sustain points
 play (hzbass "sustain"). Dragging onto another key plays that one instead (the one before stops there, no fall: a
 note starting cuts it, as with placed notes).
 
@@ -83,9 +83,9 @@ class LiveKeys:
         if self.app.synth is not None and self.app.synth.font_path:
             quick_sound(self.app).prepare()
 
-    def press(self, key):
-        """A key pressed on the window's keyboard (or the mouse dragged onto it): its note starts. Returns why it
-        can't, or None."""
+    def press(self, key, parent=None):
+        """A key pressed on the synth window's keyboard (or the mouse dragged onto it): its note starts (parent: the
+        window the warning tip shows over). Returns why it can't, or None."""
         why = self.ready()
         if why:
             return why
@@ -107,7 +107,7 @@ class LiveKeys:
                 self.starts, self.recs, self.gains, self.i = np.zeros(0, np.int64), [], np.zeros(0, np.float32), 0
             self.player.play(0)
         if "hz_live" not in self.app.tips.seen:  # the warning: once, even with tips off (user: a big warning)
-            self.app.tips.show("hz_live", parent=self.win, force=True)
+            self.app.tips.show("hz_live", parent=parent or self.win, force=True)
         with self.lock:
             self.gen += 1
             self.key, self.p0, self.made, self.extending = key, self.at + int(LEAD * RATE), FIRST, False

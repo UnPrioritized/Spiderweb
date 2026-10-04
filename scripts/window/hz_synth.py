@@ -1,0 +1,290 @@
+"""The Hz bass synth window (Hz bass window → Synth…), like a synth's own window (user): the effects' lines big, for
+one note, and a piano keyboard along the bottom to hear the Hz bass live (hz_live.py: the quick sound, NOT the MIDI;
+the warning stays at the top).
+
+The lines are the Hz bass window's own (the same pane, hz_effects.FxPane, on this window's timeline): editing them
+here is editing them there, one undo step of the main window each. The timeline is one note of each key pressed,
+from beat 0: held for the longest line counted from each note (so its whole shape shows), then the falls after the
+sustain points, all fitted to the window. Lines that play all the way from the shape's start are shown from the
+note's start too (a key pressed plays them from there). While a key sounds, a dot runs along every line."""
+
+import tkinter as tk
+from tkinter import ttk
+
+from files.lang import tr
+from notes.hzbass import FX, line_at, sound_span
+from roll.roll_shared import note_name
+from window.hz_effects import AMOUNT, FxPane
+
+BLACK = (1, 3, 6, 8, 10)
+KEY_HELD = "#7aa7f0"
+WARN = "#c06000"
+
+
+class SynthPane(FxPane):
+    """The effects pane on the synth window's one note (see the top)."""
+
+    def __init__(self, win, hz):
+        self.hz = hz
+        super().__init__(win)
+        self.edge = -1  # (no top edge to drag: the pane fills the window)
+
+    def play_x(self):
+        return None  # (no song here: no play line)
+
+    def span(self):
+        return self.hz.fx.span()  # (a new line goes over all the real notes, as in the Hz bass window)
+
+    def on_wheel(self, e):
+        pass  # (always fitted to the window)
+
+    def live_spot(self, name, u, gone):
+        """As FxPane's; lines playing all the way from the shape's start: u beats in (while it's in view)."""
+        win = self.win
+        if win.froms.get(name) or name.endswith(AMOUNT):
+            return super().live_spot(name, u, gone)
+        x = win.x_of(u)
+        if x > self.canvas.winfo_width():
+            return None
+        v = line_at(win.fxl[name], u, win.loops.get(name))
+        return x, self.y_of(float(v))
+
+    def redraw(self):
+        super().redraw()
+        c, win, s = self.canvas, self.win, self.s
+        if c.winfo_width() < 50:
+            return
+        h, end = c.winfo_height(), win.note_len()  # where the key is held, and let go
+        font = ("Segoe UI", 7)
+        c.create_text(win.x_of(0.0) + 3 * s, h - 4 * s, text=tr("hz.synth_held"), anchor="sw", fill="#6a86c8",
+                      font=font, )
+        c.create_text(win.x_of(end) + 3 * s, h - 4 * s, text=tr("hz.synth_let_go"), anchor="sw", fill="#999",
+                      font=font)
+
+
+class SynthWindow(tk.Toplevel):
+    """The window (one per Hz bass window: hz.synth_win). The pane's `win`: its lines are the Hz bass window's."""
+
+    def __init__(self, hz):
+        super().__init__(hz)
+        self.hz, self.app, self.s = hz, hz.app, hz.s
+        s = self.s
+        self.title(tr("hz.synth_title"))
+        names_h = round(8 * s) + len(FX) * round(15 * s)  # (the pane tall enough for all the effects' names)
+        self.geometry(f"{round(900 * s)}x{names_h + round(160 * s)}")
+        self.minsize(round(400 * s), round(260 * s))
+        self.kb_w = hz.kb_w
+        self.sx, self.t0 = 100.0, 0.0
+        self.tool, self.pencil, self.live = hz.tool, hz.pencil, hz.live
+        self.held = None  # the key held with the mouse
+        self.shown = None  # what the pane was drawn for (refresh)
+        self.warn = ttk.Label(self, text=tr("hz.synth_warning"), foreground=WARN, font=("Segoe UI", 9, "bold"),
+                              padding=(8, 6, 8, 4))
+        self.warn.pack(fill="x")
+        self.warn.bind("<Configure>", lambda e: self.warn.config(wraplength=max(100, e.width - round(16 * s))))
+        bottom = ttk.Frame(self, padding=(8, 2, 8, 4))
+        bottom.pack(side="bottom", fill="x")
+        self.says = ttk.Label(bottom, text="", foreground="#555")
+        self.says.pack(side="right", padx=(10, 0))
+        self.status = ttk.Label(bottom, text="", foreground="#555")
+        self.status.pack(side="left", fill="x")
+        self.piano = tk.Canvas(self, background="#707070", highlightthickness=0, height=round(70 * s))
+        self.piano.pack(side="bottom", fill="x")
+        self.fx = SynthPane(self, hz)
+        self.canvas = self.fx.canvas
+        self.canvas.config(takefocus=True)
+        self.canvas.pack(fill="both", expand=True)
+        self.canvas.bind("<Configure>", lambda e: self.redraw())
+        k = self.piano
+        k.bind("<Configure>", lambda e: self.draw_keys())
+        k.bind("<ButtonPress-1>", self.on_key_press)
+        k.bind("<B1-Motion>", self.on_key_drag)
+        k.bind("<ButtonRelease-1>", self.on_key_release)
+        k.bind("<Motion>", lambda e: self.show_status())
+        c = self.canvas
+        c.bind("<Delete>", lambda e: (self.fx.delete_key(), "break")[1])
+        for key in ("<Control-c>", "<Control-C>"):
+            c.bind(key, lambda e: (self.fx.copy_points() and setattr(self.app, "hz_clip", None), "break")[1])
+        for key in ("<Control-v>", "<Control-V>"):
+            c.bind(key, lambda e: (self.fx.paste_points(), "break")[1])
+        self.protocol("WM_DELETE_WINDOW", self.close)
+        self.show_status()
+
+    # ------------------------------------------------------------ the Hz bass window's lines (the pane works on these)
+
+    fxl = property(lambda self: self.hz.fxl, lambda self, v: setattr(self.hz, "fxl", v))
+    loops = property(lambda self: self.hz.loops, lambda self, v: setattr(self.hz, "loops", v))
+    froms = property(lambda self: self.hz.froms, lambda self, v: setattr(self.hz, "froms", v))
+    fits = property(lambda self: self.hz.fits, lambda self, v: setattr(self.hz, "fits", v))
+    sustains = property(lambda self: self.hz.sustains, lambda self, v: setattr(self.hz, "sustains", v))
+    off = property(lambda self: self.hz.off, lambda self, v: setattr(self.hz, "off", v))
+
+    def snap(self, beat, e):
+        return self.hz.snap(beat, e)
+
+    def snap_beats(self):
+        return self.hz.snap_beats()
+
+    def commit_fx(self, before):
+        self.hz.commit_fx(before)  # (the Hz bass window redraws, and this one with it: refresh)
+
+    # ------------------------------------------------------------ the timeline: one note
+
+    def note_len(self):
+        """How long the note shown is held (beats): the longest line counted from each note, past its sustain point
+        by at least a quarter of it (so the wait there shows); a beat without any."""
+        every = [self.loops[n] for n in self.froms if n in self.loops]
+        most = max(every, default=1.0)
+        held = [self.sustains[n] + most / 4 for n in self.sustains if n in self.loops]
+        return max([most] + held)
+
+    @property
+    def tones(self):
+        return [{"t": 0.0, "len": self.note_len(), "key": 60, "cents": 0.0, "id": 1, "to": []}]
+
+    def x_of(self, beat):
+        return self.kb_w + (beat - self.t0) * self.sx
+
+    def beat_at(self, x):
+        return self.t0 + (x - self.kb_w) / self.sx
+
+    def clamp_view(self):
+        pass
+
+    def fit(self):
+        """The note and its falls fill the pane (not while a point is dragged: it would move under the mouse)."""
+        if self.fx.drag:
+            return False
+        w = self.canvas.winfo_width()
+        end = max(sound_span(self.fx.hz_now()), self.note_len()) * 1.08
+        self.sx = max(1.0, (w - self.kb_w - 30 * self.s) / end)
+        self.t0 = -12 * self.s / self.sx
+        return True
+
+    def redraw(self):
+        """The pane drawn again (and the Hz bass window's pane: the same lines, e.g. while a point is dragged)."""
+        if not self.winfo_exists():
+            return
+        self.draw_pane()
+        if self.hz.fx.canvas.winfo_ismapped():
+            self.hz.fx.redraw()
+
+    def draw_pane(self):
+        fitted = self.fit()
+        self.fx.redraw()
+        self.shown = self.drawn_for() if fitted else None  # (not fitted: fitted at the next refresh)
+
+    def drawn_for(self):
+        return repr(self.fx.now()), self.canvas.winfo_width(), self.canvas.winfo_height()
+
+    def refresh(self):
+        """The Hz bass window drew itself: this pane too when the lines changed there (an edit, undo)."""
+        if self.winfo_exists() and self.drawn_for() != self.shown:
+            self.draw_pane()
+
+    def show_status(self, e=None):
+        self.status.config(text=self.fx.says or tr("hz.synth_hint"))
+
+    def draw_live(self):
+        """(Every tick of the live keys / the preview) the moving dots and the words at the top right."""
+        if not self.winfo_exists():
+            return
+        self.fx.draw_dots()
+        says, colour = self.live.says() if self.live.active() else (self.live.ready() or "", "#555")
+        if (self.says.cget("text"), str(self.says.cget("foreground"))) != (says, colour):
+            self.says.config(text=says, foreground=colour)
+        if self.held is None and self.live.key is None and self.piano.find_withtag("lit"):
+            self.draw_keys()
+
+    # ------------------------------------------------------------ the keyboard
+
+    def key_spots(self):
+        """[(key, x0, x1, black)] of every key, white ones first (black ones are drawn over them)."""
+        w = self.piano.winfo_width()
+        whites = [k for k in range(128) if k % 12 not in BLACK]
+        ww = w / len(whites)
+        out, x = [], {}
+        for i, k in enumerate(whites):
+            out.append((k, i * ww, (i + 1) * ww, False))
+            x[k] = (i + 1) * ww
+        bw = ww * 0.6
+        for k in range(128):
+            if k % 12 in BLACK:
+                out.append((k, x[k - 1] - bw / 2, x[k - 1] + bw / 2, True))
+        return out
+
+    def draw_keys(self):
+        c, s = self.piano, self.s
+        c.delete("all")
+        w, h = c.winfo_width(), c.winfo_height()
+        if w < 50:
+            return
+        lit = self.held if self.held is not None else self.live.key
+        bh = h * 0.6
+        for k, x0, x1, black in self.key_spots():
+            on = k == lit
+            fill = KEY_HELD if on else "#202020" if black else "white"
+            c.create_rectangle(x0, 0, x1, bh if black else h, fill=fill, outline="#707070",
+                               tags="lit" if on else "")
+            if not black and k % 12 == 0 and x1 - x0 >= 9 * s:
+                c.create_text((x0 + x1) / 2, h - 3 * s, text=note_name(k), anchor="s", fill="#777",
+                              font=("Segoe UI", 6))
+
+    def key_at(self, x, y):
+        bh = self.piano.winfo_height() * 0.6
+        keys = self.key_spots()
+        for k, x0, x1, black in reversed(keys):  # (black ones first: they're on top)
+            if x0 <= x < x1 and (not black or y < bh):
+                return k
+        return None
+
+    def on_key_press(self, e):
+        k = self.key_at(e.x, e.y)
+        if k is None:
+            return
+        why = self.live.press(k, parent=self)
+        if why:
+            self.status.config(text=why)
+            return
+        self.held = k
+        self.show_status()
+        self.draw_keys()
+
+    def on_key_drag(self, e):
+        if self.held is None:
+            return
+        k = self.key_at(min(max(e.x, 0), self.piano.winfo_width() - 1), min(max(e.y, 0), self.piano.winfo_height() - 1))
+        if k is not None and k != self.held:  # (onto another key: that one plays)
+            self.live.press(k, parent=self)
+            self.held = k
+            self.draw_keys()
+
+    def on_key_release(self, e):
+        if self.held is None:
+            return
+        self.held = None
+        self.live.release()
+        self.draw_keys()
+
+    def close(self):
+        if self.held is not None:
+            self.held = None
+            self.live.release()
+        if self.fx.asking:  # (the Repeat every… window)
+            self.fx.asking.destroy()
+        self.hz.synth_win = None
+        self.destroy()
+
+
+def open_synth(hz):
+    """Hz bass window → Synth…: the window opened (or brought up); the preview turned on, as the keys need it."""
+    if hz.synth_win is not None and hz.synth_win.winfo_exists():
+        hz.synth_win.deiconify()
+        hz.synth_win.lift()
+        return hz.synth_win
+    hz.synth_win = SynthWindow(hz)
+    if not hz.preview_on.get():
+        hz.preview_on.set(True)
+        hz.on_preview()
+    hz.synth_win.focus_set()
+    return hz.synth_win

@@ -483,11 +483,10 @@ class FxPane:
         w, h, kb = c.winfo_width(), c.winfo_height(), win.kb_w
         lit = [k for k in self.names() if self.active in (None, base(k)) and base(k) not in win.off]
         got = []
-        if win.preview.playing():  # the play line, and where it crosses each line
-            x = win.x_of(win.preview.play_beat())
-            if kb <= x <= w:
-                got.append(("line", round(x)))
-                got += [(k, round(x), round(y)) for k in lit for y in [self.y_on(k, x)] if y is not None]
+        x = self.play_x()
+        if x is not None and kb <= x <= w:  # the play line, and where it crosses each line
+            got.append(("line", round(x)))
+            got += [(k, round(x), round(y)) for k in lit for y in [self.y_on(k, x)] if y is not None]
         pos = win.live.position()  # (beats since the live note started, beats it was let go at / None)
         if pos is not None:
             for name in lit:
@@ -505,6 +504,11 @@ class FxPane:
             else:
                 c.create_oval(g[1] - r, g[2] - r, g[1] + r, g[2] + r, fill=FX_COLOR[base(g[0])], outline="white",
                               width=max(1, round(1.5 * s)), tags="dot")
+
+    def play_x(self):
+        """x of the preview's play line while it plays, else None."""
+        p = self.win.preview
+        return self.win.x_of(p.play_beat()) if p.playing() else None
 
     def live_spot(self, name, u, gone):
         """Where the live note is on an effect counted from each note: (x, y) on the first note in view, u beats

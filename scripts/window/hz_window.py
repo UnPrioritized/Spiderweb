@@ -39,6 +39,7 @@ from roll.zoombar import add_zoom_bars
 from window.hz_effects import AMOUNT, FxPane
 from window.hz_live import LiveKeys
 from window.hz_preview import Preview
+from window.hz_synth import open_synth
 from window.preview_settings import open_preview_settings
 from window.snap_picker import SnapPicker
 from window.widgets import Scrub, Tooltip
@@ -284,7 +285,11 @@ class HzWindow(tk.Toplevel):
         Tooltip(b, tr("hz.preview_settings_tip"))
         self.preview_says = ttk.Label(f, text="", foreground="#555")
         self.preview_says.pack(side="left", padx=(6, 10))
+        b = ttk.Button(f, text=tr("hz.synth"), command=lambda: open_synth(self), takefocus=False)
+        b.pack(side="left", padx=(0, 10))
+        Tooltip(b, tr("hz.synth_tip"))
         self.settings_window = None  # Preview settings… (preview_settings.py)
+        self.synth_win = None  # the synth window (hz_synth.py)
         f = piece()
         self.what = ttk.Label(f, text="", foreground="#555")
         self.what.pack(side="left", padx=(0, 10))
@@ -685,6 +690,8 @@ class HzWindow(tk.Toplevel):
                           width=w - kb - 40 * s, justify="center")
         self.show_status()
         self.fx.redraw()
+        if self.synth_win:  # (the same lines there)
+            self.synth_win.refresh()
         self.preview.shown = None
         self.draw_preview()
 
@@ -815,8 +822,6 @@ class HzWindow(tk.Toplevel):
         elif got:  # Auto gates: what this note gets, and why
             text += "     " + tr("hz.auto_fixed" if got[2] else "hz.auto_mixed", off=f"{got[0]:.2f}",
                                  limit=f"{got[1]:g}")
-        if e is not None and e.x < self.kb_w and e.y >= self.ruler_h and self.preview_on.get():
-            text += "     " + tr("hz.live_hover")
         if self.fx.says:
             text = self.fx.says
         self.status.config(text=text)
@@ -1024,13 +1029,6 @@ class HzWindow(tk.Toplevel):
         if hit is None:
             if e.x >= self.kb_w and e.y < self.ruler_h and self.preview_on.get():  # the bar numbers: the play line
                 return self.put_play_line(self.beat_at(e.x))
-            if e.x < self.kb_w and e.y >= self.ruler_h:  # the keyboard: a live key, held while the mouse is
-                why = self.live.press(self.key_at(e.y))
-                if why:
-                    self.status.config(text=why)
-                else:
-                    self.drag = {"kind": "live"}
-                return
             if e.x < self.kb_w or e.y < self.ruler_h:
                 return
             if e.state & CTRL or self.tool.get() == "select":  # a box that selects the notes it touches
@@ -1099,9 +1097,6 @@ class HzWindow(tk.Toplevel):
     def on_drag(self, e):
         d = self.drag
         if not d:
-            return
-        if d["kind"] == "live":  # (onto another key: that one plays)
-            self.live.press(self.key_at(e.y))
             return
         if d["kind"] == "box":
             d["mouse"] = (e.x, e.y, e.state)
@@ -1235,7 +1230,7 @@ class HzWindow(tk.Toplevel):
     def on_release(self, e):
         d = self.drag
         self.drop_drag()
-        if not d or d["kind"] == "live":  # (a live key: let go in drop_drag)
+        if not d:
             return
         if d["kind"] == "box":
             if self.box_timer:
@@ -1920,8 +1915,6 @@ class HzWindow(tk.Toplevel):
         self.sound_on, self.sounding = set(), None
 
     def drop_drag(self):
-        if self.drag and self.drag["kind"] == "live":
-            self.live.release()
         self.drag = None
         self.sound(None)
 
@@ -2079,6 +2072,8 @@ class HzWindow(tk.Toplevel):
         if (self.preview_says.cget("text"), str(self.preview_says.cget("foreground"))) != (says, colour):
             self.preview_says.config(text=says, foreground=colour)
         self.fx.draw_dots()  # (the moving dots on the effects' lines)
+        if self.synth_win:
+            self.synth_win.draw_live()
         if self.settings_window:
             self.settings_window.refresh()
 
@@ -2087,6 +2082,8 @@ class HzWindow(tk.Toplevel):
             self.settings_window.destroy()
         if self.fx.asking:  # (the Repeat every… window)
             self.fx.asking.destroy()
+        if self.synth_win:
+            self.synth_win.close()
         for job in (self.box_timer, self.menu_wait):
             if job:
                 self.after_cancel(job)
