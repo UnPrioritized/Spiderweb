@@ -8,10 +8,17 @@ import time
 
 def write_bytes(path, data):
     tmp = path + ".tmp"
-    with open(tmp, "wb") as f:
-        f.write(data)
-        f.flush()
-        os.fsync(f.fileno())
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+    except BaseException:  # (a full disk: the half-written temp file would go on taking the space)
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     for attempt in range(20):
         try:
             os.replace(tmp, path)

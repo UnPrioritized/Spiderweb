@@ -8,6 +8,7 @@ from files.safefile import write_bytes
 from notes.engine import slot_track_channel
 
 PPQ_WARN = 32767  # a PPQ this high or higher: many MIDI programs can't open the file; still written
+MAX_DELTA = (1 << 28) - 1  # the longest wait between two events a MIDI file can hold (4 bytes)
 
 
 def vlq(value):
@@ -30,9 +31,20 @@ def track_data(notes, ch):
     key = np.repeat(notes[:, 2], 2)[order]
     vel = np.repeat(notes[:, 3], 2)[order] * on
     delta = np.diff(tick, prepend=0)
+    status = np.where(on == 1, 0x90 | ch, 0x80 | ch)
+    if len(delta) and delta.max() > MAX_DELTA:
+        # a silence too long for one step: empty text events (FF 01 00, 3 bytes like a note's) every MAX_DELTA
+        fill = np.maximum(delta - 1, 0) // MAX_DELTA  # (fillers before each event)
+        last = np.cumsum(fill + 1) - 1  # where each real event lands
+        delta, status, key, vel = (np.repeat(a, fill + 1) for a in (delta, status, key, vel))
+        filler = np.ones(len(delta), bool)
+        filler[last] = False
+        delta[filler] = MAX_DELTA
+        delta[last] -= fill * MAX_DELTA
+        status[filler], key[filler], vel[filler] = 0xFF, 0x01, 0x00
     # variable-length delta times: 7 bits per byte, every byte but the last with the top bit set
-    size = np.ones(2 * n, np.int64)
-    for bits in (7, 14, 21, 28):
+    size = np.ones(len(delta), np.int64)
+    for bits in (7, 14, 21):
         size += delta >= 1 << bits
     at = np.cumsum(size + 3) - (size + 3)  # where each event starts
     out = np.zeros(int((size + 3).sum()), np.uint8)
@@ -40,10 +52,23 @@ def track_data(notes, ch):
         has = size > k
         left = size[has] - 1 - k  # 7-bit groups still to come after this byte
         out[at[has] + k] = (delta[has] >> (7 * left)) & 0x7F | np.where(left > 0, 0x80, 0)
-    out[at + size] = np.where(on == 1, 0x90 | ch, 0x80 | ch)
+    out[at + size] = status
     out[at + size + 1] = key
     out[at + size + 2] = vel
     return out.tobytes() + vlq(0) + b"\xFF\x2F\x00"
+
+
+def long_silences(notes):
+    """True if some track has a silence too long for one step (written with empty events in between)."""
+    notes = np.asarray(notes, np.int64).reshape(-1, 6)
+    if not len(notes) or notes[:, 1].max() <= MAX_DELTA:  # (the whole song is shorter than one step)
+        return False
+    for slot in np.unique(notes[:, 4]):
+        own = notes[notes[:, 4] == slot]
+        tick = np.sort(np.concatenate([own[:, 0], own[:, 1]]))
+        if tick[0] > MAX_DELTA or np.diff(tick).max(initial=0) > MAX_DELTA:
+            return True
+    return False
 
 
 def _chunk(data):

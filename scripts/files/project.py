@@ -1,5 +1,6 @@
 """Project files: saving / opening projects, the autosave, and writing the MIDI file."""
 
+import errno
 import json
 import math
 import os
@@ -20,7 +21,7 @@ from notes.polygon import POLYGON_DEFAULTS, clean_polygon
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.text import TEXT_DEFAULTS, clean_text
 from files.domino_clip import DOMINO_STARTS, clip_data, get_from_clipboard, put_on_clipboard, read_notes
-from files.midi_out import PPQ_WARN, write_midi
+from files.midi_out import MAX_DELTA, PPQ_WARN, long_silences, write_midi
 from files.about import HERE, VERSION
 from files.safefile import write_bytes, write_text
 from files.snap import clean_snap
@@ -58,6 +59,35 @@ def keep_aside(path, name, move=False):
         with open(path, "rb") as f:
             write_bytes(kept, f.read())
     return kept
+
+
+def couldnt_save(e):
+    """Why a file couldn't be saved: in plain words when the reason is a common one, then Windows' own message."""
+    win = getattr(e, "winerror", None)
+    if isinstance(e, PermissionError):
+        why = "project.save_locked"
+    elif win in (123, 161, 267) or e.errno == errno.EINVAL:
+        why = "project.save_bad_name"
+    elif win in (39, 112) or e.errno == errno.ENOSPC:
+        why = "project.save_disk_full"
+    elif win in (3, 15, 21) or isinstance(e, FileNotFoundError):
+        why = "project.save_no_folder"
+    else:
+        return tr("project.couldn_t_save", e=e)
+    return tr("project.couldn_t_save_why", why=tr(why), e=e)
+
+
+def output_path(typed):
+    """The MIDI file the Output file box means, as a full path: empty = spiderweb.mid in Spiderweb's output folder;
+    a name or path without a drive counts from that folder too (not from wherever Windows started Spiderweb); a
+    folder = spiderweb.mid inside it; .mid added when it has no .mid / .midi ending."""
+    path = typed.strip() or "spiderweb.mid"
+    if not os.path.isabs(path):
+        path = os.path.join(OUTPUT_DIR, path)
+    if path.endswith(("/", "\\")) or os.path.isdir(path):
+        path = os.path.join(path, "spiderweb.mid")
+    path = os.path.normpath(path)
+    return path if path.lower().endswith((".mid", ".midi")) else path + ".mid"
 
 
 def short_num(x, digits=12):
@@ -479,7 +509,7 @@ class ProjectFiles:
         try:
             self.write_json(path)
         except OSError as e:
-            messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_save", e=e))
+            messagebox.showerror(tr("project.spiderweb"), couldnt_save(e))
             return False
         self._saved_shapes = json.dumps(self.shapes)
         return True
@@ -502,20 +532,27 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"),
                                  tr("project.no_notes_yet_draw_something_inside", keys=self.keys - 1))
             return
-        path = self.pvar["output"].get().strip() or os.path.join(OUTPUT_DIR, "spiderweb.mid")
-        if not path.lower().endswith((".mid", ".midi")):
-            path += ".mid"
+        path = output_path(self.pvar["output"].get())
         if os.path.exists(path) and not messagebox.askyesno(  # (asked like the Output file dialog does)
                 tr("project.confirm_save_as"), tr("project.already_exists_do_you_want_to",
                                                   basename=os.path.basename(path)),
                 icon="warning", default="no"):
             return
+        if long_silences(self.rendered) and not messagebox.askokcancel(
+                tr("project.spiderweb"), tr("project.long_silences", ppq=ppq, beats=MAX_DELTA // ppq), icon="warning"):
+            return
+        self.status.config(text=tr("project.saving_midi"))  # (millions of notes take a few seconds)
+        self.config(cursor="watch")
+        self.update_idletasks()
         try:
-            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
             write_midi(path, ppq, bpm, beats, self.rendered)
         except OSError as e:
-            messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_save", e=e))
+            messagebox.showerror(tr("project.spiderweb"), couldnt_save(e))
             return
+        finally:
+            self.config(cursor="")
+            self.update_status()
         channels = self.slot_count if self.channel_mode.get() == "auto" else 1
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
                 if ppq >= PPQ_WARN else "")
