@@ -196,7 +196,8 @@ class HzWindow(tk.Toplevel):
         self.sel_before = None  # (tones before an edit, sel_state() from then): what its undo step keeps (commit)
         self.pushing = None  # (the sel_state() of the undo step being made, commit)
         self.box_timer = None  # (box_scroll)
-        self.pending = None  # (tone id, beat): the first middle click of a slide, waiting for the second
+        self.pending = None  # (tone id, beats from its start): the first middle click of a slide, waiting for the
+        # second (it moves with its note, user; mark_beat)
         self.shown = None  # id() of the shape shown (another one: the pending mark goes)
         self.sounding = None  # (channel, what's played) heard now: the notes held with the mouse (see sound)
         self.sound_jobs, self.sound_on = [], set()  # (the notes still to start / stop, the keys on now)
@@ -725,7 +726,7 @@ class HzWindow(tk.Toplevel):
         if self.pending:  # the first middle click of a slide: where it will start
             n = next((n for n in self.tones if n["id"] == self.pending[0]), None)
             if n is not None:
-                x, y, r = self.x_of(self.pending[1]), self.pitch_y(pitch(n)), 3.5 * self.s
+                x, y, r = self.x_of(self.mark_beat(n)), self.pitch_y(pitch(n)), 3.5 * self.s
                 c.create_oval(x - r, y - r, x + r, y + r, fill=RED, outline=RED)
         if self.tune_rows():  # the exact tone of each note, over the red line: a line right on it shows green
             for n in self.tones:
@@ -1250,10 +1251,10 @@ class HzWindow(tk.Toplevel):
         elif hit:
             n = self.tones[hit[1]]
             at = min(max(self.snap(self.beat_at(e.x), e), n["t"]), n["t"] + n["len"])
-            (a, xa), (b, xb) = sorted([(first or n, self.pending[1] if first else at), (n, at)],
+            (a, xa), (b, xb) = sorted([(first or n, self.mark_beat(first) if first else at), (n, at)],
                                       key=lambda v: v[0]["t"])
             if first is None or first is n or not can_slide(a, b):  # the first spot (or a new first spot)
-                self.pending = (n["id"], at)
+                self.pending = (n["id"], at - n["t"])
                 return self.redraw()
             s = self.link(a, b)
             if s is None:
@@ -1268,6 +1269,11 @@ class HzWindow(tk.Toplevel):
             self.commit(tr("hz.step_lead"), before)
         else:
             self.redraw()
+
+    def mark_beat(self, n):
+        """Where a slide's first mark (self.pending) on note n is: as far into the note as it was put, or the
+        note's end when the note got shorter."""
+        return n["t"] + min(self.pending[1], n["len"])
 
     def toggle_tool(self, e=None):
         """Double right click: Select <-> Pencil."""
