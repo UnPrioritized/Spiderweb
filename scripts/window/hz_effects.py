@@ -37,7 +37,7 @@ from files.mathexpr import calc
 from files.snap import SNAPS, snap_beats, snap_text
 from notes.hzbass import (BEND, ENVELOPES, FROM_MODES, FX, FX_START, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, bend_of, bent_part,
                           chains, group_count, line_at,
-                          loop_off, loop_on, loop_shape, tones_span)
+                          loop_off, loop_on, loop_shape, sound_span, sustained, tones_span)
 from roll.roll_shared import BOX_STILL, CTRL, SELECT_CURSOR, SHIFT
 from window.widgets import Scrub
 
@@ -112,15 +112,59 @@ class FxPane:
         h = self.canvas.winfo_height()
         return min(1.0, max(0.0, 1.0 - (y - self.pad) / max(1, h - 2 * self.pad)))
 
-    def note_starts(self, every, fit):
-        """[(beat, how many times one repeat is stretched)] where each note (chain of slides) starts, in order, for
-        an effect counted from each note (hz["from"]); fit = stretched over each note. No notes: from beat 0."""
+    def note_spans(self):
+        """[(start, end)] beats of each note (chain of slides; chains starting together: the longest), in order."""
         spans = {}
         for s, e in chains(self.win.tones).values():
             spans[s] = max(spans.get(s, e), e)
+        return sorted(spans.items())
+
+    def note_starts(self, every, fit):
+        """[(beat, how many times one repeat is stretched)] where each note (chain of slides) starts, in order, for
+        an effect counted from each note (hz["from"]); fit = stretched over each note. No notes: from beat 0."""
+        spans = self.note_spans()
         if not spans:
             return [(0.0, 1.0)]
-        return [(s, max(spans[s] - s, 1e-9) / every if fit else 1.0) for s in sorted(spans)]
+        return [(s, max(e - s, 1e-9) / every if fit else 1.0) for s, e in spans]
+
+    def sustain(self, name):
+        """The effect's sustain point (beats into its repeat, hz["sustain"]), or None."""
+        return self.win.sustains.get(name) if self.win.froms.get(name) == "note" else None
+
+    def release(self, name, k):
+        """For copy k of an effect with a sustain point: (beat its note ends at, beat its fall starts at: the note's
+        end, or where it reaches the sustain point if that's later, as it's drawn); None without one."""
+        at = self.sustain(name)
+        if at is None or not isinstance(k, tuple):
+            return None
+        spans = self.note_spans()
+        if not spans:
+            return math.inf, math.inf
+        s, e = spans[min(k[0], len(spans) - 1)]
+        return e, max(e, s + at)
+
+    def to_beat(self, name, k, p):
+        """Where a point p beats into repeat k is drawn: from the copy's start, or (past a sustain point) from where
+        its fall starts."""
+        o, sc = self.place(name, k)
+        rel, at = self.release(name, k), self.sustain(name)
+        if rel is not None and p > at + 1e-12:
+            return rel[1] + p - at
+        return o + p * sc
+
+    def from_beat(self, name, k, beat, fall=None):
+        """beat as beats into repeat k (to_beat undone), within the repeat; fall = True / False: on the part after
+        the sustain point or before it (None: whichever beat is on; between them: the sustain point)."""
+        o, sc = self.place(name, k)
+        every, rel, at = self.win.loops[name], self.release(name, k), self.sustain(name)
+        if rel is not None:
+            if fall is None:
+                if o + at < beat < rel[1]:
+                    return at
+                fall = beat >= rel[1]
+            if fall:
+                return min(every, at + max(0.0, beat - rel[1]))
+        return min(every, max(0.0, (beat - o) / sc))
 
     def copies_of(self, every, mode=None, fit=False):
         """The repeats in view of a line repeating every `every` beats: [(number of the repeat, beat it starts at,
@@ -182,8 +226,7 @@ class FxPane:
 
     def local(self, name, beat, k):
         """beat as beats into repeat k of a repeating effect (its points' beats), within the repeat."""
-        o, sc = self.place(name, k)
-        return min(self.win.loops[name], max(0.0, (beat - o) / sc))
+        return self.from_beat(name, k, beat)
 
     def wrap(self, name):
         """The `every` for line_at: the repeat's length when the last point leads on to the next repeat's first
@@ -198,8 +241,14 @@ class FxPane:
         if got is None:
             return [] if name in win.loops else [(win.x_of(p[0]), self.y_of(p[1]), i, 0) for i, p in enumerate(pts)]
         every = win.loops[name]
-        return [(win.x_of(o + p[0] * sc), self.y_of(p[1]), i, k) for k, o, sc, until in got
-                if every * sc * win.sx >= 24 * self.s for i, p in enumerate(pts) if o + p[0] * sc <= until + 1e-9]
+        out = []
+        for k, o, sc, until in got:
+            if every * sc * win.sx >= 24 * self.s:
+                for i, p in enumerate(pts):
+                    b = self.to_beat(name, k, p[0])
+                    if b <= until + 1e-9:
+                        out.append((win.x_of(b), self.y_of(p[1]), i, k))
+        return out
 
     def segments(self, name):
         """[(from beat, value, to beat, value, bend, number of the point it starts at, number of the repeat)]: the
@@ -218,7 +267,11 @@ class FxPane:
                     b, ob = pts[0], o + every * sc
                 else:
                     continue
-                b0, b1 = o + a[0] * sc, ob + b[0] * sc
+                b0 = self.to_beat(name, k, a[0])
+                b1 = self.to_beat(name, k, b[0]) if ob == o else ob + b[0] * sc
+                rel = self.release(name, k)
+                if rel is not None and abs(a[0] - self.sustain(name)) < 1e-9:  # (from the sustain point: the
+                    b0 = rel[1]  # fall, after the note)
                 if b1 <= until + 1e-9 or not self.win.froms.get(name):
                     out.append((b0, a[1], b1, b[1], bend_of(a), i, k))
         return out
@@ -238,6 +291,17 @@ class FxPane:
                 x = win.x_of(o + p[0] * sc)
                 if x0 <= x <= x1:
                     xs |= {x, max(x0, x - 0.01)}
+            rel = self.release(name, k)
+            if rel is not None:  # (with a sustain point: as it plays, the note's length known; its points past
+                for p in pts:  # the sustain point from where the fall starts)
+                    x = win.x_of(self.to_beat(name, k, p[0]))
+                    if x0 <= x <= x1:
+                        xs |= {x, max(x0, x - 0.01)}
+                xs = sorted(xs)
+                vs = sustained(pts, win.loops[name], self.sustain(name),
+                               np.array([win.beat_at(x) for x in xs]) - o, rel[0] - o)
+                xy += [(x, self.y_of(v)) for x, v in zip(xs, vs.tolist())]
+                continue
             xs = sorted(xs)
             u = np.maximum(0.0, (np.array([win.beat_at(x) for x in xs]) - o) / sc)
             xy += [(x, self.y_of(v)) for x, v in zip(xs, line_at(pts, np.minimum(u, win.loops[name] - 1e-12)
@@ -280,9 +344,23 @@ class FxPane:
         return out
 
     def now(self):
-        """The lines, repeats, effects switched off, those counted from each note and those stretched, as they are
-        now."""
-        return self.win.fxl, self.win.loops, self.win.off, self.win.froms, self.win.fits
+        """The lines, repeats, effects switched off, those counted from each note, those stretched and their sustain
+        points, as they are now."""
+        return self.win.fxl, self.win.loops, self.win.off, self.win.froms, self.win.fits, self.win.sustains
+
+    def hz_now(self):
+        """The notes and effects here as a Hz bass's settings (enough for the hzbass functions)."""
+        win = self.win
+        return {"tones": win.tones, "fx": {k: v for k, v in win.fxl.items() if k in FX}, "loop": win.loops,
+                "off": win.off, "from": win.froms, "fit": win.fits, "sustain": win.sustains}
+
+    def tidy(self):
+        """A sustain point always sits on a point of its line: one put back where it is when its point went (drawn
+        over with the pencil)."""
+        for name, at in list(self.win.sustains.items()):
+            pts = self.win.fxl.get(name)
+            if pts and not any(abs(p[0] - at) < 1e-9 for p in pts):
+                self.add_point(pts, at)
 
     def state(self):
         """now(), kept (to go back to)."""
@@ -306,8 +384,8 @@ class FxPane:
         self.sel = {(n, i) for n, i in self.sel if n in fx and i < len(fx[n])}
         for v in (0.0, 0.5, 1.0):
             c.create_line(kb, self.y_of(v), w, self.y_of(v), fill="#e4e4e4")
-        if win.tones:  # before and after the notes: grey
-            x0, x1 = max(kb, win.x_of(0.0)), max(kb, win.x_of(tones_span(win.tones)))
+        if win.tones:  # before and after the notes (and the falls after them): grey
+            x0, x1 = max(kb, win.x_of(0.0)), max(kb, win.x_of(sound_span(self.hz_now())))
             for a, b in ((kb, x0), (x1, w)):
                 if b > a:
                     c.create_rectangle(a, 0, b, h, fill="#f1f1f1", outline="")
@@ -327,6 +405,11 @@ class FxPane:
             x = win.x_of(o)  # repeat starts
             if x > kb:
                 c.create_line(x, 0, x, h, fill="#dcdcdc", dash=(2, 3))
+        if self.sustain(self.active) is not None:  # where each note ends: its fall starts there
+            for k, _, _, _ in self.copies(self.active) or ():
+                x = win.x_of(self.release(self.active, k)[1])
+                if kb < x < w:
+                    c.create_line(x, 0, x, h, fill=faint(FX_COLOR[self.active], 0.3), dash=(4, 3))
         for name in order:
             lit = self.active in (None, base(name))
             colour = FX_COLOR[base(name)] if lit else faint(FX_COLOR[base(name)])
@@ -341,9 +424,16 @@ class FxPane:
                           dash=(6, 4) if off else (2, 3) if name.endswith(AMOUNT) else ())
             if lit:
                 r = 3.5 * s
+                at = self.sustain(name)
                 for x, y, i, _ in self.points(name):
-                    c.create_rectangle(x - r, y - r, x + r, y + r, fill=colour if (name, i) in self.sel else "white",
-                                       outline=colour, width=max(1, round(1.5 * s)))
+                    fill = colour if (name, i) in self.sel else "white"
+                    if at is not None and abs(fx[name][i][0] - at) < 1e-9:  # the sustain point: a diamond
+                        q = r * 1.5
+                        c.create_polygon(x, y - q, x + q, y, x, y + q, x - q, y, fill=fill, outline=colour,
+                                         width=max(1, round(1.5 * s)))
+                        continue
+                    c.create_rectangle(x - r, y - r, x + r, y + r, fill=fill, outline=colour,
+                                       width=max(1, round(1.5 * s)))
                 r = 3 * s
                 for x, y, _, _ in self.handles(name):
                     c.create_oval(x - r, y - r, x + r, y + r, fill="white", outline=colour, width=1)
@@ -440,7 +530,9 @@ class FxPane:
                      (" " + tr("hz.fx_is_off") if name in self.win.off else
                       " " + tr("hz.fx_box_tip") if name in self.win.fxl and self.on_box(e.x) else ""))
         elif hit and hit[0] == "point":
-            self.say(self.value_text(hit[1], self.win.fxl[hit[1]][hit[2]][1]))
+            p, at = self.win.fxl[hit[1]][hit[2]], self.sustain(hit[1])
+            self.say(self.value_text(hit[1], p[1]) + (" " + tr("hz.fx_sustain_tip")
+                                                       if at is not None and abs(p[0] - at) < 1e-9 else ""))
         elif hit and hit[0] == "bend":
             self.say(tr("hz.fx_bend_tip"))
         else:
@@ -564,11 +656,16 @@ class FxPane:
         name, i = d["fx"], d["i"]
         every = win.loops.get(name)
         at = win.snap(win.beat_at(e.x), e)
+        d.setdefault("sustains", dict(win.sustains))
         if every:  # (a repeat: all of them move)
             o, sc = self.place(name, d["k"])
-            if win.froms.get(name):  # (counted from each note: the grid from the note's start)
-                at = win.snap(win.beat_at(e.x) - o, e) + o
-            at = (at - o) / sc
+            rel, sus = self.release(name, d["k"]), d["sustains"].get(name)
+            if rel is not None and d["orig"][(name, i)][0] > sus + 1e-12:  # (past the sustain point: the grid
+                at = sus + win.snap(win.beat_at(e.x) - rel[1], e)  # from where the fall starts)
+            else:
+                if win.froms.get(name):  # (counted from each note: the grid from the note's start)
+                    at = win.snap(win.beat_at(e.x) - o, e) + o
+                at = (at - o) / sc
         v = self.value_at(e.y)
         if name == "pitch" and not e.state & SHIFT:  # (whole keys; Shift = in between)
             v = 0.5 + round((v - 0.5) * 2 * PITCH) / (2 * PITCH)
@@ -577,6 +674,9 @@ class FxPane:
         db, dv = self.limited(d["orig"], at - b0, v - v0)
         for (n, j), (b, u) in d["orig"].items():
             win.fxl[n][j][0], win.fxl[n][j][1] = b + db, round(u + dv, 6)
+            was = d["sustains"].get(n)
+            if was is not None and abs(b - was) < 1e-9:  # (the sustain point goes with its point)
+                win.sustains[n] = b + db
         self.says = self.value_text(name, v0 + dv)
         win.redraw()
 
@@ -686,6 +786,8 @@ class FxPane:
         win = self.win
         before = self.state()
         for n, j in sorted(which, reverse=True):
+            if abs(win.fxl[n][j][0] - win.sustains.get(n, math.nan)) < 1e-9:  # (its sustain point goes too)
+                del win.sustains[n]
             del win.fxl[n][j]
         for n in {n for n, _ in which}:
             if not win.fxl[n]:
@@ -702,6 +804,7 @@ class FxPane:
         if not name.endswith(AMOUNT):
             win.loops.pop(name, None)
             win.froms.pop(name, None)
+            win.sustains.pop(name, None)
             win.fits = [n for n in win.fits if n != name]
         win.off = [n for n in win.off if n != name]
         self.sel = {(n, i) for n, i in self.sel if n not in gone}
@@ -773,8 +876,7 @@ class FxPane:
             d["step"] = snap if d["hold"] else 4.0 / win.sx
         beat = win.beat_at(x)
         if win.loops.get(d["fx"]):
-            o, sc = self.place(d["fx"], d["k"])
-            beat = (beat - o) / sc
+            beat = self.from_beat(d["fx"], d["k"], beat)
         beat = max(0.0, beat)
         g = int(math.floor(beat / d["step"] + (0 if d["hold"] else 0.5)))
         v = self.value_at(y)
@@ -882,7 +984,9 @@ class FxPane:
             key += "_" + mode + ("_fit" if name in win.fits else "")
         elif key == "hz.fx_repeat":
             key = "hz.fx_repeat_now"
-        return tr(key, every=self.every_text(win.loops[name]))
+        sustained = key.startswith("hz.fx_repeats") and self.sustain(name) is not None
+        more = " " + tr("hz.fx_repeats_sustain") if sustained else ""
+        return tr(key, every=self.every_text(win.loops[name])) + more
 
     def set_loop(self, name, every, mode=None, fit=False):
         """The effect repeats every `every` beats (None = not any more). Its line is squeezed into one repeat (the
@@ -896,6 +1000,9 @@ class FxPane:
         old, pts = win.loops.get(name), win.fxl[name]
         win.froms.pop(name, None)
         win.fits = [n for n in win.fits if n != name]
+        at = win.sustains.pop(name, None)
+        if at is not None and every and old and mode == "note" and not fit:  # (still once per note: it stays)
+            win.sustains[name] = at * every / old
         if every is None:
             if old:
                 win.fxl[name] = loop_off(pts, old, *self.span())
@@ -1026,6 +1133,17 @@ class FxPane:
         top.entry.focus_set()
         top.entry.select_range(0, "end")
 
+    def set_sustain(self, name, beat):
+        """The effect's sustain point put on its point at beat (beats into its repeat), or taken off (None)."""
+        win = self.win
+        before = self.state()
+        if beat is None:
+            win.sustains.pop(name, None)
+        else:
+            win.sustains[name] = beat
+        if self.now() != before:
+            win.commit_fx(before)
+
     def set_shape(self, name, kind):
         """A ready-made shape for one repeat of the effect (it starts repeating every beat if it didn't; an envelope:
         once per note, half a beat, unless it repeats already)."""
@@ -1037,6 +1155,7 @@ class FxPane:
         every = every or 1.0
         win.fxl[name] = loop_shape(kind, every, random.randrange(1 << 30), name)
         win.loops[name] = every
+        win.sustains.pop(name, None)  # (a new line: its points are others)
         self.active = name
         win.commit_fx(before)
 
@@ -1045,6 +1164,14 @@ class FxPane:
         menu = tk.Menu(self.win, tearoff=0)
         if hit and hit[0] == "point":
             menu.add_command(label=tr("hz.fx_delete_point"), command=lambda: self.delete_point(hit[1], hit[2]))
+            name_p, beat = hit[1], self.win.fxl[hit[1]][hit[2]][0]
+            if name_p in self.win.loops:  # (a sustain point: only once per note, not stretched)
+                can = self.win.froms.get(name_p) == "note" and name_p not in self.win.fits
+                self.sustained = tk.BooleanVar(self.win, value=can and abs(self.win.sustains.get(name_p, math.nan)
+                                                                           - beat) < 1e-9)
+                menu.add_checkbutton(label=tr("hz.fx_sustain" if can else "hz.fx_sustain_needs"),
+                                     variable=self.sustained, state="normal" if can else "disabled",
+                                     command=lambda: self.set_sustain(name_p, beat if self.sustained.get() else None))
         seg = hit[2] if hit and hit[0] == "bend" else self.segment_at(hit[1], e.x) if hit and hit[0] == "line" else None
         if seg is not None:  # the line under the mouse: held (a step) or bent
             p = self.win.fxl[hit[1]][seg]

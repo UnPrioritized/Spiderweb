@@ -36,7 +36,12 @@ one repeat plays once from each note's start, then stays on its last value; "res
 at each note. "pitch" counts from each note's own start (a note starting while others sound bends alone); the
 others from the latest note start of all (they work on every key, so a note starting starts them over for all). A
 note reached by a slide never starts it over (note_beats). hz["fit"] = [effects]: such an effect's repeat is
-stretched over each note (and the notes it slides on to) instead of lasting its own beats. hz["off"] = [effects]
+stretched over each note (and the notes it slides on to) instead of lasting its own beats. hz["sustain"] = {effect:
+beat in its repeat}: for one played once per note (not stretched), like a synth's envelope: the line plays up to
+that beat, stays there while the note (its chain of slides) lasts, and the rest of it (the fall) plays after the
+note ends (a note ending before the sustain point falls from where it got to; sustained). The sound of the tones a
+chain ends with then goes on that long after them, the longest fall of all, cut where the next note starts
+(tails). hz["off"] = [effects]
 switched off (Bypass): their lines are kept but do nothing (live). They change the colour of the tone, not its pitch, by making the keys hit at different spots of the wave
 (how late a key is, in waves, is added up over the effects; a key starts that late, and a repeat pushed past its
 own tone's end is left out):
@@ -182,6 +187,20 @@ def clean_fit(fit, froms):
     return [name for name in FX if name in froms and name in fit]
 
 
+def clean_sustain(sustain, loop, froms, fit):
+    """Sustain points checked: {effect: beat in its repeat (0..its length)} for effects played once per note, not
+    stretched."""
+    out = {}
+    for name, b in (sustain.items() if isinstance(sustain, dict) else ()):
+        try:
+            b = float(b)
+        except (TypeError, ValueError):
+            continue
+        if froms.get(name) == "note" and name not in fit and math.isfinite(b):
+            out[name] = min(loop[name], max(0.0, b))
+    return {name: out[name] for name in FX if name in out}
+
+
 def bent_part(u, bend):
     """How far along (0..1) the line from a point to the next has come at u (0..1 of the way) with that bend
     (arrays; nan = hold: none of the way until the next point). Bend b puts the middle at (1 + b) / 2 of the way:
@@ -210,15 +229,16 @@ def live(hz):
     off = hz.get("off")
     if not off:
         return hz
-    out = {k: v for k, v in hz.items() if k not in ("fx", "loop", "off", "amount", "from", "fit")}
+    out = {k: v for k, v in hz.items() if k not in ("fx", "loop", "off", "amount", "from", "fit", "sustain")}
     fx = {k: v for k, v in (hz.get("fx") or {}).items() if k not in off}
     loop = {k: v for k, v in (hz.get("loop") or {}).items() if k in fx}
     amount = {k: v for k, v in (hz.get("amount") or {}).items() if k in loop}
     froms = {k: v for k, v in (hz.get("from") or {}).items() if k in loop}
     fit = [k for k in hz.get("fit") or () if k in froms]
+    sustain = {k: v for k, v in (hz.get("sustain") or {}).items() if k in froms}
     return dict(out, **({"fx": fx} if fx else {}), **({"loop": loop} if loop else {}),
                 **({"amount": amount} if amount else {}), **({"from": froms} if froms else {}),
-                **({"fit": fit} if fit else {}))
+                **({"fit": fit} if fit else {}), **({"sustain": sustain} if sustain else {}))
 
 
 def line_at(pts, beat, every=None):
@@ -265,41 +285,98 @@ def chains(tones):
     return {i: (by[h["id"]]["t"], ends[h["id"]]) for i, h in heads.items()}
 
 
-def note_beats(hz, name, beat, tone=None):
-    """Beats into an effect counted from each note (hz["from"]) at beat (an array, from the shape's left edge):
-    from the start of tone's chain of slides, or (tone None) from the latest chain start of all; stretched so a
-    chain lasts one repeat when the effect is in hz["fit"]."""
-    beat = np.asarray(beat, float)
+def note_span(hz, beat, tone=None):
+    """(start, end) beats of the note (chain of slides) an effect counted from each note is in at beat (an array,
+    from the shape's left edge): tone's chain, or (tone None) the latest chain to start (chains starting together:
+    the longest). None when there are no tones."""
     got = chains(hz.get("tones") or ())
     if not got:
-        return beat
+        return None
     if tone is not None and tone.get("id") in got:
-        s0, end = got[tone["id"]]
-    else:
-        spans = {}
-        for s, e in got.values():  # (chains starting together: the longest)
-            spans[s] = max(spans.get(s, e), e)
-        starts = np.array(sorted(spans))
-        ends = np.array([spans[s] for s in starts])
-        i = np.clip(np.searchsorted(starts, beat, side="right") - 1, 0, len(starts) - 1)
-        s0, end = starts[i], ends[i]
+        return got[tone["id"]]
+    spans = {}
+    for s, e in got.values():
+        spans[s] = max(spans.get(s, e), e)
+    starts = np.array(sorted(spans))
+    ends = np.array([spans[s] for s in starts])
+    i = np.clip(np.searchsorted(starts, beat, side="right") - 1, 0, len(starts) - 1)
+    return starts[i], ends[i]
+
+
+def note_beats(hz, name, beat, tone=None):
+    """Beats into an effect counted from each note (hz["from"]) at beat (an array, from the shape's left edge):
+    from the start of its note (note_span); stretched so a chain lasts one repeat when the effect is in hz["fit"]."""
+    beat = np.asarray(beat, float)
+    span = note_span(hz, beat, tone)
+    if span is None:
+        return beat
+    s0, end = span
     u = np.maximum(0.0, beat - s0)
     if name in (hz.get("fit") or ()):
         u = u * hz["loop"][name] / np.maximum(end - s0, MIN_LEN)
     return u
 
 
+def sustained(pts, every, at, u, held):
+    """A line played once per note with a sustain point at `at` beats (hz["sustain"]): its value u beats after the
+    note's start (arrays) for a note held `held` beats. Up to `at` as drawn, then staying there until the note ends;
+    after that the rest (the fall), from where it was when the note ended (a note ending early: the fall starts from
+    there and comes round to the line by the fall's end), then its last value."""
+    u = np.maximum(0.0, np.asarray(u, float))
+    held = np.broadcast_to(np.asarray(held, float), u.shape)
+    d = u - held  # (beats since the note ended)
+    fall = every - at
+    top = float(line_at(pts, at))
+    gone = np.clip(d / fall, 0.0, 1.0) if fall > 1e-12 else np.ones(u.shape)
+    after = line_at(pts, at + np.clip(d, 0.0, max(fall, 0.0))) + (line_at(pts, np.minimum(held, at)) - top) * (1 - gone)
+    return np.where(d < 0, line_at(pts, np.minimum(u, at)), after)
+
+
+def tails(hz):
+    """{tone id: beats its sound goes on after its end}: with sustain points (hz["sustain"], effects switched off
+    don't count) the falls play after a note ends, so the tones a chain of slides ends with sound on for the
+    longest fall, cut where the next note starts."""
+    hz = live(hz)
+    fall = max((hz["loop"][name] - at for name, at in (hz.get("sustain") or {}).items()), default=0.0)
+    tones = hz.get("tones") or ()
+    if fall <= 1e-12 or not tones:
+        return {}
+    got = chains(tones)
+    starts = sorted({s for s, _ in got.values()})
+    leaving = {a["id"] for a, _, _ in links(tones)}
+    out = {}
+    for n in tones:
+        end = n["t"] + n["len"]
+        if n["id"] in leaving or end < got[n["id"]][1] - 1e-9:  # (not where its chain ends)
+            continue
+        nxt = next((s for s in starts if s >= end - 1e-9), math.inf)
+        if min(fall, nxt - end) > 1e-9:
+            out[n["id"]] = min(fall, nxt - end)
+    return out
+
+
+def sound_span(hz):
+    """How long the tones sound together, in beats (tones_span and the falls after them, tails)."""
+    got = tails(hz)
+    return max((n["t"] + n["len"] + got.get(n["id"], 0.0) for n in hz.get("tones") or ()), default=0.0)
+
+
 def fx_at(hz, name, beat, tone=None):
     """The value of an effect at beat (an array, from the shape's left edge; 0 when there's no such line).
     Before the first point and after the last one the line stays flat, unless it repeats (hz["loop"]); a repeating
     one is made stronger or weaker by its amount line (hz["amount"]). One counted from each note (hz["from"]):
-    tone = the tone it's for ("pitch"), else from the latest note start (note_beats)."""
+    tone = the tone it's for ("pitch"), else from the latest note start (note_beats); with a sustain point: sustained."""
     pts = (hz.get("fx") or {}).get(name)
     if not pts:
         return np.zeros(np.shape(beat))
     every = (hz.get("loop") or {}).get(name)
     mode = (hz.get("from") or {}).get(name) if every else None
-    if mode:
+    at = (hz.get("sustain") or {}).get(name) if mode == "note" else None
+    span = note_span(hz, np.asarray(beat, float), tone) if at is not None else None
+    if span is not None:
+        s0, end = span
+        v = sustained(pts, every, at, np.asarray(beat, float) - s0, np.asarray(end) - s0)
+    elif mode:
         v = line_at(pts, note_beats(hz, name, beat, tone), every if mode == "restart" else None)
     else:
         v = line_at(pts, beat, every)
@@ -454,6 +531,9 @@ def clean_hz(hz):
         fit = clean_fit(hz.get("fit"), froms)
         if fit:
             out["fit"] = fit
+        sustain = clean_sustain(hz.get("sustain"), loop, froms, fit)
+        if sustain:
+            out["sustain"] = sustain
     if tones:
         out["tones"] = tones
         for flag in ("grow", "own"):
@@ -566,13 +646,15 @@ def tone_runs(hz, left, ppq):
     = the next one's start, whose: (tone, None) or (tone slid from, tone slid to))], not rounded. A tone held is
     one stretch, from where the first slide into it arrives to where the last slide out of it leaves; every slide
     is one more (two when there's a gap between its tones: nothing sounds there), its waves in step with the tone
-    it leaves."""
+    it leaves. A tone a chain ends with goes on for its fall (tails)."""
     tones = hz["tones"]
     ls = links(tones)
+    tail = tails(hz)
     out, held = [], {}
     for n in tones:
         a = n["t"] + min([min(s["in"], n["len"]) for _, b, s in ls if b is n], default=0.0)
         b = n["t"] + n["len"] - min([min(s["out"], n["len"]) for m, _, s in ls if m is n], default=0.0)
+        b += tail.get(n["id"], 0.0)
         if b > a:
             s, e, gate = (left + a) * ppq, (left + b) * ppq, wave(hz, ppq, pitch(n), threshold(hz, n), own_gate(n))
             starts = s + gate * np.arange(int(math.ceil((e - s) / gate)))
@@ -618,15 +700,16 @@ def bent(hz, left, ppq, starts, nexts, tone=None):
     return at[:-1], at[1:]
 
 
-def _limits(tones, left, ppq, starts):
+def _limits(hz, left, ppq, starts):
     """For each repeat (start ticks, not rounded): the tick the sound it's in ends at (the end of the tones that
-    touch or overlap around it)."""
-    spans = []
-    for n in sorted(tones, key=lambda n: n["t"]):
+    touch or overlap around it, their falls included: tails)."""
+    spans, tail = [], tails(hz)
+    for n in sorted(hz["tones"], key=lambda n: n["t"]):
+        end = n["t"] + n["len"] + tail.get(n["id"], 0.0)
         if spans and n["t"] <= spans[-1][1] + 1e-9:
-            spans[-1][1] = max(spans[-1][1], n["t"] + n["len"])
+            spans[-1][1] = max(spans[-1][1], end)
         else:
-            spans.append([n["t"], n["t"] + n["len"]])
+            spans.append([n["t"], end])
     at = np.array([(left + a) * ppq for a, _ in spans]) - 1e-6
     ends = np.array([math.floor((left + b) * ppq + 0.5) for _, b in spans], np.int64)
     return ends[np.maximum(np.searchsorted(at, starts, "right") - 1, 0)]
@@ -641,7 +724,7 @@ def _heard(hz_json, left, ppq, bpm):
     hz = json.loads(hz_json)
     out = []
     for starts, nexts, _ in tone_runs(hz, left, ppq):
-        limits = _limits(hz["tones"], left, ppq, starts)
+        limits = _limits(hz, left, ppq, starts)
         mean = nexts - starts  # (the wave as made: with mixed gates the whole-tick ones come to this on average)
         starts, nexts = _whole(starts), _whole(nexts)
         gates = np.maximum(nexts - starts, 1)  # (whole ticks: what the PPQ lets the wave be)
@@ -671,7 +754,7 @@ def _squares(hz_json, left, ppq):
     if not got:
         return np.zeros((0, 2), np.int64)
     starts = np.concatenate(got)
-    return _grid(starts, _limits(hz["tones"], left, ppq, starts))[0]
+    return _grid(starts, _limits(hz, left, ppq, starts))[0]
 
 
 def _grid(starts, limits):
@@ -700,12 +783,16 @@ class KeyGrid:
     def __init__(self, hz, left, ppq, lo, n):
         self.lo, self.n, self.got = lo, max(1, n), {}
         self.runs = []
+        tail = tails(hz)
         for starts, nexts, whose in tone_runs(hz, left, ppq):
             beat = starts / ppq - left
+            n0 = whose[0]
             run = {"starts": starts, "waves": nexts - starts, "number": np.arange(len(starts)), "beat": beat,
-                   "limits": _limits(hz["tones"], left, ppq, starts),
-                   # (a repeat moved past its own tone's end is left out: the next tone may touch it)
-                   "until": (left + whose[0]["t"] + whose[0]["len"]) * ppq if whose[1] is None else np.inf}
+                   "limits": _limits(hz, left, ppq, starts),
+                   # (a repeat moved past its own tone's end, its fall included, is left out: the next tone may
+                   # touch it)
+                   "until": (left + n0["t"] + n0["len"] + tail.get(n0["id"], 0.0)) * ppq if whose[1] is None
+                   else np.inf}
             fx = hz.get("fx") or {}
             for name in FX:
                 run[name] = fx_at(hz, name, beat)
@@ -854,8 +941,8 @@ def left_edge(sh):
 
 
 def fit_length(sh):
-    """hz["grow"]: the shape made as long as its tones (stretched from its left edge)."""
-    span = max(tones_span(sh["hz"]["tones"]), MIN_LEN)
+    """hz["grow"]: the shape made as long as its tones and the falls after them (stretched from its left edge)."""
+    span = max(sound_span(sh["hz"]), MIN_LEN)
     (b0, _), (b1, _), (b2, _) = sh["pts"]
     bs = (b0, b1, b2, b1 + b2 - b0)
     left, width = min(bs), max(bs) - min(bs)
