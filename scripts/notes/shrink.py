@@ -1,9 +1,12 @@
 """The outline gate's even band (custom.thicker): the shape shrunk inward, a smaller copy of its own outline (user:
 "a shape shrinking", one with several insides shrinks each). The inside that's left is every spot inside the shape
-at least r away from its outline, measured round in the proportions the shape was first drawn in (custom.drawn_k:
-so a circle shrinks into a circle and an arc into a smaller arc, even when the screen is zoomed differently now; an
-old shape without them: its width counted the same as its height). The outline band is the inside minus
-that.
+at least r away from its outline, measured round in the VIEW the shape was first drawn in (custom.drawn_view: so a
+circle shrinks into a smaller circle and an arc into a smaller arc, however it was turned, skewed or stretched since
+and however the screen is zoomed now; an old shape without it: its width counted the same as its height). The
+outline band is the inside minus that.
+
+A view (a, c): spot (b, p) on the roll is at (b + a p, c p) there (beats; a = how slanted, c = beats per key), so a
+line across a key row stays a straight line, one beat long per beat (warp).
 
 Worked out exactly on lines across each key row (inner_rows), and on a grid for the piano roll's preview line
 (inner_lines: marching squares on the distance to the outline)."""
@@ -34,6 +37,20 @@ def proportion(polys):
     return w / h if w > 0 and h > 0 else 1.0
 
 
+def warp(seg, view):
+    """Edges (ax, ay, bx, by in beats / keys) as they are in the view (a, c)."""
+    a, c = view
+    seg = np.asarray(seg, float).reshape(-1, 4)
+    return np.column_stack([seg[:, 0] + a * seg[:, 1], seg[:, 1] * c, seg[:, 2] + a * seg[:, 3], seg[:, 3] * c])
+
+
+def near_lines(seg, ys, r, view):
+    """near_rows for the lines at these keys ys, edges seg and stretches in beats / keys."""
+    a, c = view
+    near = near_rows(warp(seg, view), [y * c for y in ys], r)
+    return [[[lo - a * y, hi - a * y] for lo, hi in spans] for spans, y in zip(near, ys)]
+
+
 def crossings(seg, y):
     """Where the edges cross the line at height y, in order."""
     ay, by = seg[:, 1], seg[:, 3]
@@ -41,23 +58,24 @@ def crossings(seg, y):
     return np.sort(s[:, 0] + (s[:, 2] - s[:, 0]) * (y - s[:, 1]) / (s[:, 3] - s[:, 1]))
 
 
-def walled_pieces(x, y, walled, k):
-    """Which pieces between the crossings x (on the line at height y, in the shape's proportions) are filled
-    (walled = custom.fill_test, in beats / keys)."""
+def walled_pieces(x, y, walled, view):
+    """Which pieces between the crossings x (on the line at height y, in the view) are filled (walled =
+    custom.fill_test, in beats / keys)."""
     if len(x) < 2:
         return np.zeros(0, bool)
     a, b = x[:-1], x[1:]
     spots = np.column_stack([a + (b - a) * f for f in (0.5, 0.2, 0.8)])
-    return walled(spots, np.full(spots.shape, y / k))
+    p = y / view[1]
+    return walled(spots - view[0] * p, np.full(spots.shape, p))
 
 
-def inside_at(seg, y, walled=None, k=1.0):
-    """Where the line at height y is inside: even-odd, or with walled (custom.fill_test) every piece it fills.
-    [(a, b)] sorted, merged."""
+def inside_at(seg, y, walled=None, view=(0.0, 1.0)):
+    """Where the line at height y (seg and y in the view) is inside: even-odd, or with walled (custom.fill_test)
+    every piece it fills. [(a, b)] sorted, merged."""
     x = crossings(seg, y)
     if walled is None:
         return merge(list(zip(x[0::2].tolist(), x[1::2].tolist())))
-    on = walled_pieces(x, y, walled, k)
+    on = walled_pieces(x, y, walled, view)
     return merge(list(zip(x[:-1][on].tolist(), x[1:][on].tolist())))
 
 
@@ -143,20 +161,21 @@ def minus(spans, cuts):
     return out
 
 
-def inner_rows(polys, walled, keys, r, ppq, k=None):
+def inner_rows(polys, walled, keys, r, ppq, view=None):
     """The shrunk inside on each of these key rows as (start, end, key) ticks; r in beats. walled: see inside_at.
-    k: beats per key the shape was drawn in (custom.drawn_k; None: as wide as it's tall, proportion)."""
-    k = k or proportion(polys)
-    seg = segments(polys) * [1, k, 1, k]
+    view: the one the shape was drawn in (custom.drawn_view; None: as wide as it's tall, proportion)."""
+    va, vc = view = view or (0.0, proportion(polys))
+    seg = warp(segments(polys), view)
     keys = list(keys)
-    ys = [(q - 0.5 + (j + 0.5) / SAMPLES) * k for q in keys for j in range(SAMPLES)]
+    ys = [(q - 0.5 + (j + 0.5) / SAMPLES) * vc for q in keys for j in range(SAMPLES)]
     near = near_rows(seg, ys, r)
     out = []
     for n, q in enumerate(keys):
         got = []
         for j in range(SAMPLES):
             y = ys[n * SAMPLES + j]
-            got += minus(inside_at(seg, y, walled, k), near[n * SAMPLES + j])
+            shift = va * y / vc  # (the view's line back in beats)
+            got += [(s - shift, e - shift) for s, e in minus(inside_at(seg, y, walled, view), near[n * SAMPLES + j])]
         for a, b in merge(got):
             s = math.floor(a * ppq + 0.5)
             e = math.floor(b * ppq + 0.5)
@@ -165,19 +184,19 @@ def inner_rows(polys, walled, keys, r, ppq, k=None):
     return np.asarray(out, np.int64).reshape(-1, 3)
 
 
-def field(polys, walled, reach, k=None):
-    """The distance to the outline on a grid over the shape (in the shape's proportions), minus outside: (x0, y0,
-    step, values[row, column], k). Only distances up to `reach` are exact (further ones count as 2 x reach), so
+def field(polys, walled, reach, view=None):
+    """The distance to the outline on a grid over the shape (in the view, see inner_rows), minus outside: (x0, y0,
+    step, values[row, column], view). Only distances up to `reach` are exact (further ones count as 2 x reach), so
     each block of the grid looks only at the edges near it. Remembered (the same for every outline gate tried up
     to reach). walled: see inside_at."""
-    key = (repr(polys), getattr(walled, "mode", None), reach, k)
+    key = (repr(polys), getattr(walled, "mode", None), reach, view)
     got = _fields.get(key)
     if got is not None:
         return got
     if len(_fields) > 30:
         _fields.clear()
-    k = k or proportion(polys)
-    seg = segments(polys) * [1, k, 1, k]
+    view = view or (0.0, proportion(polys))
+    seg = warp(segments(polys), view)
     x_lo, y_lo = seg[:, [0, 2]].min(), seg[:, [1, 3]].min()
     x_hi, y_hi = seg[:, [0, 2]].max(), seg[:, [1, 3]].max()
     step = max(x_hi - x_lo, y_hi - y_lo) / GRID or 1.0
@@ -210,15 +229,15 @@ def field(polys, walled, reach, k=None):
         if walled is None:
             inside[j] = at % 2 == 1
         else:  # (the piece each spot is in: walled in or not)
-            inside[j] = np.concatenate([[False], walled_pieces(xc, y, walled, k), [False]])[at]
-    got = _fields[key] = (xs[0], ys[0], step, np.where(inside, dist, -dist), k)
+            inside[j] = np.concatenate([[False], walled_pieces(xc, y, walled, view), [False]])[at]
+    got = _fields[key] = (xs[0], ys[0], step, np.where(inside, dist, -dist), view)
     return got
 
 
-def inner_lines(polys, walled, r, k=None):
+def inner_lines(polys, walled, r, view=None):
     """The shrunk inside's outline for the preview: straight pieces (b0, k0, b1, k1, bi, ki) in beats / keys,
     (bi, ki) a spot on its inner side."""
-    x0, y0, step, f, k = field(polys, walled, 2.0 ** math.ceil(math.log2(max(r, 1e-6) * 1.25)), k)
+    x0, y0, step, f, (va, vc) = field(polys, walled, 2.0 ** math.ceil(math.log2(max(r, 1e-6) * 1.25)), view)
     on = f >= r
     pieces = []
     # where the level is crossed on each grid line, by the values on either side
@@ -256,6 +275,8 @@ def inner_lines(polys, walled, r, k=None):
     if not pieces:
         return np.zeros((0, 6))
     s = np.concatenate(pieces)
-    return np.column_stack([x0 + s[:, 0] * step, (y0 + s[:, 1] * step) / k,
-                            x0 + s[:, 2] * step, (y0 + s[:, 3] * step) / k,
-                            x0 + s[:, 4] * step, (y0 + s[:, 5] * step) / k])
+    out = []
+    for i in (0, 2, 4):  # (back from the view: keys = y / c, beats = x - a keys)
+        p = (y0 + s[:, i + 1] * step) / vc
+        out += [x0 + s[:, i] * step - va * p, p]
+    return np.column_stack(out)

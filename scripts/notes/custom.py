@@ -22,7 +22,7 @@ from notes.paths import (TOP_KEY, dedupe, keep_longest, line_notes, loop_from_le
 from notes.hzbass import (HZ_DEFAULTS, KeyGrid, clean_hz, hz_gate, hz_of, off_cents, squares,  # (Hz bass: hzbass.py)
                           threshold)
 from notes.shrink import (SAMPLES, inner_lines, inner_rows, merge as shrink_merge, minus as shrink_minus,
-                          near_rows as shrink_near, proportion as shrink_proportion,
+                          near_lines as shrink_near, proportion as shrink_proportion,
                           segments as shrink_segments)  # (the outline gate's even band)
 from notes.text import text_polys, threshold_spans
 
@@ -616,8 +616,9 @@ def refit(sh):
         st.update(new)
     if sh.get("areas"):
         sh["areas"] = [[(u - ul) / w, (v - vl) / h, c] for u, v, c in sh["areas"]]
-    if sh.get("round"):  # (still the proportions it was drawn in, like an arc's k)
-        sh["round"] *= h / w
+    r = sh.get("round")
+    if r:  # (still the view it was drawn in, like an arc's k: drawn_view)
+        sh["round"] = r * h / w if isinstance(r, (int, float)) else [x * h / w for x in r]
 
 
 def stroke_ends(strokes):
@@ -646,21 +647,36 @@ def bp_k(pts, k):
     return 1 / math.sqrt(x) if x > 1e-18 else 1.0
 
 
-def drawn_k(sh):
-    """Beats per key a custom shape was first drawn in (round as it looked then): the outline gate shrinks it in
-    those proportions (user: "first drawn proportion"; zoomed differently it may look off, but it's right for the
-    shape). sh["round"] = how many u one v of its box was then, like an arc stroke's k, so moving, stretching,
-    flipping and turning the box carry it along (refit keeps it). Text: its own k. An older shape without it: its
-    first arc / freehand stroke's k (the same thing), else None (as wide as it's tall, shrink.proportion)."""
+def drawn_view(sh):
+    """The view a custom shape was first drawn in, as shrink.py's (a, c): the outline gate shrinks it there (user:
+    "first drawn proportion", at any angle: a circle shrinks into a smaller circle however it was turned, skewed or
+    stretched since; zoomed differently it may look off, but it's right for the shape). sh["round"] = that view in
+    its box: one v was `round` u, at right angles to it (or [m, n]: (u, v) -> (u + m v, n v), when a turned shape
+    gave it to a new box: Turn into live shape). Like an arc stroke's k, so moving, stretching, flipping, turning
+    and skewing the box carry it along; refit keeps it. Text: its letters' own box (em units, as typed). An older
+    shape without it: its first arc / freehand stroke's k (the same thing), else None (as wide as it's tall,
+    shrink.proportion). Scaled so one beat along time stays one beat (an upright box: a = 0, c = beats per key)."""
     if sh.get("text"):
-        return float(sh["text"].get("k", 1.0)) or None
-    r = sh.get("round")
-    if r is None:
-        r = next((st["k"] for st in sh["strokes"] if "k" in st and (st["kind"] == "arc" or st.get("free"))), None)
+        x0, y0, x1, y1 = sh["text"]["bbox"]
+        r = (y1 - y0) / (x1 - x0) if x1 > x0 and y1 > y0 else None
+    else:
+        r = sh.get("round")
+        if r is None:
+            r = next((st["k"] for st in sh["strokes"] if "k" in st and (st["kind"] == "arc" or st.get("free"))), None)
     if not r:
         return None
-    k = bp_k(sh["pts"], r)
-    return k if abs(uv_k(sh["pts"], k) - r) <= 1e-6 * r else None  # (bp_k gives 1 when there's no answer)
+    m, n = (0.0, float(r)) if isinstance(r, (int, float)) else (float(r[0]), float(r[1]))
+    (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
+    ub, up, vb, vp = b1 - b0, p1 - p0, b2 - b0, p2 - p0
+    det = ub * vp - up * vb
+    if abs(det) < 1e-12 or n <= 0:
+        return None
+    # one beat and one key in the box (u, v), then in the view
+    (eu, ev), (fu, fv) = (vp / det, -up / det), (-vb / det, ub / det)
+    e, f = (eu + m * ev, n * ev), (fu + m * fv, n * fv)
+    s2 = 1 / (e[0] * e[0] + e[1] * e[1])
+    a, c = s2 * (e[0] * f[0] + e[1] * f[1]), s2 * abs(e[0] * f[1] - e[1] * f[0])
+    return (round(a, 12), round(c, 12)) if c > 1e-15 else None
 
 
 def stroke_bp(sh, k):
@@ -703,9 +719,11 @@ def add_stroke(sh, st, at=None):
 
 def new_live_shape(defaults, custom_defaults, k=None):
     """An empty custom shape to draw into (its box: 1 beat by 1 key at 0, fitted once something is drawn). k: beats
-    per key on screen now (the proportions it's drawn in: drawn_k; in this box one v is k u)."""
+    per key on screen now (the view it's drawn in: drawn_view; in this box one v is k u), or a drawn_view (a, c)."""
     sh = dict(defaults, kind="custom", name=tr("custom.live_drawing"), strokes=[], **custom_settings(custom_defaults),
               pts=[[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    if isinstance(k, (tuple, list)):  # (this box = beats / keys, so the view is its "round" as it is)
+        k = k[1] if abs(k[0]) < 1e-12 else [k[0], k[1]]
     if k:
         sh["round"] = k
     return sh
@@ -1182,26 +1200,26 @@ def area_edges(sh, amap, borders_only=False):
 def area_inner_lines(sh, ppq, g, keys):
     """What's filled (areas.py) shrunk by g ticks from area_edges, on SAMPLES lines across each of these keys:
     (heights, [[(start, end)] in beats] per line)."""
-    ys, on, edges, k = area_filled_lines(sh, tuple(keys))
+    ys, on, edges, view = area_filled_lines(sh, tuple(keys))
     if edges is None:
         return ys, [[] for _ in ys]
-    near = shrink_near(edges * [1, k, 1, k], [y * k for y in ys], g / ppq)
+    near = shrink_near(edges, ys, g / ppq, view)
     return ys, [shrink_merge(shrink_minus(spans, cut)) for spans, cut in zip(on, near)]
 
 
 def area_filled_lines(sh, keys):
     """What the areas fill on SAMPLES lines across each of these keys ([(start, end)] in beats per line), with the
-    heights, area_edges and the shape's proportion (shrink.proportion). Remembered: the same for every outline gate
-    tried (working it out was most of a gate step's time)."""
+    heights, area_edges and the view to shrink in (drawn_view, else shrink.proportion). Remembered: the same for
+    every outline gate tried (working it out was most of a gate step's time)."""
     key = ("filled", json.dumps([sh["strokes"], sh["pts"], sh["areas"]]), bool(sh.get("union")),
-           bool(sh.get("borders")), keys, drawn_k(sh))
+           bool(sh.get("borders")), keys, drawn_view(sh))
     got = _inner.get(key)
     if got is not None:
         return got
     ys = [(q - 0.5 + (j + 0.5) / SAMPLES) for q in keys for j in range(SAMPLES)]
     amap = shape_areas(sh)
     if amap is None:
-        return ys, None, None, 1.0
+        return ys, None, None, (0.0, 1.0)
     lines = area_lines(sh)
     ay, by = lines[:, 1], lines[:, 3]
     xs = []
@@ -1219,8 +1237,8 @@ def area_filled_lines(sh, keys):
     out = [list(zip(x[:-1][o].tolist(), x[1:][o].tolist())) for x, o in zip(xs, on)]
     if len(_inner) > 100:
         _inner.clear()
-    got = _inner[key] = (ys, out, area_edges(sh, amap), drawn_k(sh) or
-                         shrink_proportion(fill_plan(sh)["polys"] + fill_plan(sh)["attached"] + area_cuts(sh)))
+    got = _inner[key] = (ys, out, area_edges(sh, amap), drawn_view(sh) or
+                         (0.0, shrink_proportion(fill_plan(sh)["polys"] + fill_plan(sh)["attached"] + area_cuts(sh))))
     return got
 
 
@@ -1850,7 +1868,7 @@ def inner_ticks(sh, ppq, g, spans):
     (shrink.inner_rows: a smaller copy of its own outline). Remembered."""
     keys = sorted(set(spans[:, 2].tolist()))
     key = (json.dumps([sh["strokes"], sh["pts"], sh.get("text")]), bool(sh.get("union")), ppq, g, keys[0], keys[-1],
-           drawn_k(sh))
+           drawn_view(sh))
     if has_areas(sh):  # (what the coloured areas fill, shrunk from its own edge)
         key += (json.dumps(sh["areas"]), bool(sh.get("borders")))
     got = _inner.get(key)
@@ -1861,7 +1879,7 @@ def inner_ticks(sh, ppq, g, spans):
             got = _inner[key] = area_inner(sh, ppq, g, keys)
         else:
             loops, walled = edge_loops(sh)
-            got = _inner[key] = inner_rows(loops, walled, keys, g / ppq, ppq, drawn_k(sh))
+            got = _inner[key] = inner_rows(loops, walled, keys, g / ppq, ppq, drawn_view(sh))
     return got
 
 
@@ -1889,14 +1907,14 @@ def edge_inner(sh, ppq):
         # whole shape was too coarse for hairline gaps between areas, user saw it zigzag)
         keys = list(range(int(spans[:, 2].min()), int(spans[:, 2].max()) + 1))
         key = ("lines", json.dumps([sh["strokes"], sh["pts"], sh["areas"]]), bool(sh.get("union")),
-               bool(sh.get("borders")), ppq, g, drawn_k(sh))
+               bool(sh.get("borders")), ppq, g, drawn_view(sh))
         got = _inner.get(key)
         if got is None:
             if len(_inner) > 100:
                 _inner.clear()
             got = _inner[key] = outline_of_lines(*area_inner_lines(sh, ppq, g, keys), g / ppq)
         return "lines", got
-    return "lines", inner_lines(loops, walled, g / ppq, drawn_k(sh))
+    return "lines", inner_lines(loops, walled, g / ppq, drawn_view(sh))
 
 
 def thicker(sh, notes, spans, g, ppq):

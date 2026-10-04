@@ -75,7 +75,7 @@ class LiveDrawing:
         pts = box_frame(a[0], a[1], b[0], b[1])
         return dict(app.defaults, kind="custom", name=tool.title(), strokes=strokes, **extra,
                     **custom_settings(app.custom_defaults), pts=pts, draw=tool,
-                    round=uv_k(pts, self.sy / self.sx))  # (drawn as it looks now: custom.drawn_k)
+                    round=uv_k(pts, self.sy / self.sx))  # (drawn as it looks now: custom.drawn_view)
 
     @staticmethod
     def draft_strokes(sh):

@@ -14,7 +14,7 @@ import math
 
 from files.lang import tr
 from notes.bezier import anchor_count
-from notes.custom import add_stroke, custom_strokes, drawn_k, new_live_shape, stroke_bp
+from notes.custom import add_stroke, custom_strokes, drawn_view, new_live_shape, stroke_bp
 from notes.joined import is_joined, join_velocity
 from notes.tumour import LINE_KINDS
 
@@ -92,10 +92,10 @@ def shared_settings(shapes):
 
 def to_live(shapes, paths, defaults, custom_defaults, k=None):
     """shapes (with paths[i] = engine.cached_strokes(shapes[i])) as one new custom shape. The first custom shape
-    among them gives its name and fill settings. Its drawn proportions (custom.drawn_k): the first shape's that
+    among them gives its name and fill settings. Its drawn proportions (custom.drawn_view): the first shape's that
     has them (a custom shape, an arc, freehand), else k (beats per key on screen now)."""
     first = next((sh for sh in shapes if sh["kind"] == "custom"), None)
-    drawn = [drawn_k(sh) if sh["kind"] == "custom" else sh.get("k") if sh["kind"] in ("arc", "free") else None
+    drawn = [drawn_view(sh) if sh["kind"] == "custom" else sh.get("k") if sh["kind"] in ("arc", "free") else None
              for sh in shapes]
     new = new_live_shape(defaults, custom_defaults, next((d for d in drawn if d), k))
     if first:

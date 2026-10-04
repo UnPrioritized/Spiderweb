@@ -131,11 +131,15 @@ def clean_shape(sh):
             out["edge"] = min(edge, 10 ** 4)
         if sh.get("edge_mode") == "sideways":  # (the first way: each note grown sideways; default = even band)
             out["edge_mode"] = "sideways"
-        try:  # the proportions it was first drawn in (custom.drawn_k)
-            rd = float(sh.get("round") or 0)
+        try:  # the view it was first drawn in (custom.drawn_view): a number, or [m, n]
+            rd = sh.get("round") or 0
+            rd = [float(x) for x in rd] if isinstance(rd, list) else float(rd)
         except (TypeError, ValueError):
             rd = 0
-        if math.isfinite(rd) and rd > 0:
+        if isinstance(rd, list):
+            if len(rd) == 2 and all(map(math.isfinite, rd)) and rd[1] > 0:
+                out["round"] = rd
+        elif math.isfinite(rd) and rd > 0:
             out["round"] = rd
         rg = clean_range(sh.get("range"))
         if rg:  # the spam gate going from one to another across the shape (gaterange.py)
