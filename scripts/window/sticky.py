@@ -94,6 +94,59 @@ class Targets:
         u, v = a + t[i] * (b - a)  # (the same share along as on screen: the board's scale is the same both ways)
         return "line", (float(u), float(v)), float(dist[i])
 
+    def touch_circle(self, a, d, view, reach):
+        """A circle being drawn (its box from corner a to a + d, u / v) whose LINE sticks (user: not the box's
+        corner): (kind "point" / "line", (u, v) where it touches, pixels away, s) or None; the box from a to
+        a + s * d then touches exactly: its short pieces (as stroke_points makes them) pass through a stroke's point,
+        or one of its corners lies on a stroke's line with the whole circle on one side (it rests on it). Points
+        first, then lines; the nearest within reach pixels."""
+        k = view[0]
+        a, d = np.asarray(a, float), np.asarray(d, float)
+        if abs(d[0]) * k < 1 or abs(d[1]) * k < 1:
+            return None
+        ang = 2 * np.pi * np.arange(ELLIPSE_STEPS) / ELLIPSE_STEPS
+        w = d / 2 + np.column_stack([-abs(d[0]) / 2 * np.cos(ang), abs(d[1]) / 2 * np.sin(ang)])  # (corner = a + s w)
+        lo, hi = np.minimum(a, a + d) - 2 * reach / k, np.maximum(a, a + d) + 2 * reach / k  # (near it only)
+        pts = self.pts[np.all((self.pts >= lo) & (self.pts <= hi), axis=1)] if len(self.pts) else self.pts
+        if len(pts):  # a point on the ray from a: on the circle where the ray crosses its pieces, scaled to reach it
+            q = pts - a
+            e = np.roll(w, -1, axis=0) - w
+            cw = q[:, :1] * w[None, :, 1] - q[:, 1:] * w[None, :, 0]
+            ce = q[:, :1] * e[None, :, 1] - q[:, 1:] * e[None, :, 0]
+            t = -cw / np.where(ce == 0, np.nan, ce)
+            hit = w[None] + t[..., None] * e[None]
+            ok = (t >= 0) & (t <= 1) & ((hit * q[:, None]).sum(2) > 0)
+            far = np.hypot(*hit.transpose(2, 0, 1))
+            near = np.hypot(*q.T)[:, None]
+            gap = np.where(ok, np.abs(near - far) * k, np.inf)
+            i, j = np.unravel_index(np.argmin(gap), gap.shape)
+            if gap[i, j] <= reach:
+                return "point", (float(pts[i, 0]), float(pts[i, 1])), float(gap[i, j]), float(near[i, 0] / far[i, j])
+        seg = self.seg
+        if len(seg):
+            keep = np.all((np.maximum(seg[:, :2], seg[:, 2:]) >= lo) & (np.minimum(seg[:, :2], seg[:, 2:]) <= hi), 1)
+            seg = seg[keep]
+        if not len(seg):
+            return None
+        p0, r = seg[:, :2], seg[:, 2:] - seg[:, :2]
+        ln = np.hypot(*r.T)
+        seg, p0, r, ln = seg[ln > 0], p0[ln > 0], r[ln > 0], ln[ln > 0]
+        n = np.column_stack([-r[:, 1], r[:, 0]]) / ln[:, None]
+        g = ((a - p0) * n).sum(1)  # (the corner's side of each line, and how far)
+        m = n @ w.T
+        side = np.sign(g + n @ (d / 2))  # (the circle rests on the side its middle is on)
+        kk = np.where(side >= 0, np.argmin(m, 1), np.argmax(m, 1))
+        mk = m[np.arange(len(m)), kk]
+        s = -g / np.where(mk == 0, np.nan, mk)
+        touch = a + s[:, None] * w[kk]
+        t = ((touch - p0) * r).sum(1) / ln ** 2
+        gap = np.abs(g + mk) * k  # (how far its nearest corner is from the line now)
+        gap = np.where((s > 0) & (t >= 0) & (t <= 1) & np.isfinite(s), gap, np.inf)
+        i = int(np.argmin(gap))
+        if gap[i] > reach:
+            return None
+        return "line", (float(touch[i, 0]), float(touch[i, 1])), float(gap[i]), float(s[i])
+
     @staticmethod
     def crossing(seg, owner, index, x, y, view, reach):
         """The nearest spot within reach where two of these pieces cross (pieces of different strokes, or of one

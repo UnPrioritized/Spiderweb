@@ -576,13 +576,13 @@ class Drawer(tk.Toplevel):
     def from_xy(self, x, y):
         return list(self.from_screen(x, y))
 
-    def event_pt(self, e, snap=True):
+    def event_pt(self, e, snap=True, stick=True):
         """The board point at the mouse: stuck to a stroke near it (sticky.py; not rounded, so it stays exactly on
-        that line), else on the grid; Shift = free."""
+        that line; stick=False: grid only), else on the grid; Shift = free."""
         u, v = self.from_screen(e.x, e.y)
         self.stuck = None
         if snap and not e.state & SHIFT:
-            self.stuck = self.stick_at(e.x, e.y)
+            self.stuck = self.stick_at(e.x, e.y) if stick else None
             if self.stuck:
                 return list(self.stuck[1])
             n = int(self.grid_n.get())
@@ -1144,9 +1144,20 @@ class Drawer(tk.Toplevel):
             self.draft["pts"][-1] = self.event_pt(e)
             self.redraw()
             return
-        start, pt, tool = self.drag[1], self.event_pt(e), self.tool.get()
+        tool = self.tool.get()
+        start, pt = self.drag[1], self.event_pt(e, stick=tool != "circle")
         if tool in ("square", "circle") and e.state & CTRL:
             pt = self.perfect(start, pt)
+        if tool == "circle" and not e.state & SHIFT:  # its line sticks, not the dragged corner (user; the pressed
+            # corner sticks like any point): the circle to the mouse, grown / shrunk from that corner until it touches
+            raw = self.from_xy(e.x, e.y)
+            if e.state & CTRL:
+                raw = self.perfect(start, raw)
+            got = self.stick_targets().touch_circle(start, (raw[0] - start[0], raw[1] - start[1]), self.stick_view(),
+                                                    REACH * self.scale)
+            if got:
+                self.stuck, s = got[:3], got[3]
+                pt = [start[0] + s * (raw[0] - start[0]), start[1] + s * (raw[1] - start[1])]
         (u0, v0), (u1, v1) = start, pt
         if tool == "line":
             self.draft = {"kind": "poly", "pts": [start, pt]}
