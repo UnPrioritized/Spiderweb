@@ -37,6 +37,7 @@ _DATA_FLOAT, _POS_BYTE, _STREAMPROC_END = 0x40000000, 0, 0x80000000
 _MIDI_DECAYEND, _MIDI_NOFX = 0x1000, 0x2000
 _ATTRIB_MIDI_VOICES, _ATTRIB_MIDI_VOICES_ACTIVE = 0x12003, 0x12004
 _ATTRIB_VOL, _ATTRIB_BUFFER = 2, 13
+_CONFIG_UPDATEPERIOD = 1
 _EV_END, _EV_NOTE, _EV_PROGRAM, _EV_TEMPO = 0, 1, 2, 62
 
 EVENT = np.dtype([("event", "<u4"), ("param", "<u4"), ("chan", "<u4"), ("tick", "<u4"), ("pos", "<u4")])
@@ -85,7 +86,8 @@ def _load():
                             ("BASS_ChannelGetLength", [u, u], ctypes.c_uint64),
                             ("BASS_ChannelSetAttribute", [u, u, f], i),
                             ("BASS_ChannelSlideAttribute", [u, u, f, u], i),
-                            ("BASS_ChannelGetAttribute", [u, u, ctypes.POINTER(f)], i)):
+                            ("BASS_ChannelGetAttribute", [u, u, ctypes.POINTER(f)], i),
+                            ("BASS_SetConfig", [u, u], i), ("BASS_GetConfig", [u], u)):
         fn = getattr(bass, name)
         fn.argtypes, fn.restype = args, res
     for name, args, res in (("BASS_MIDI_FontInit", [ctypes.c_wchar_p, u], u), ("BASS_MIDI_FontFree", [u], i),
@@ -287,6 +289,11 @@ class Player:
             raise SynthError("synth.failed", err=synth.bass.BASS_ErrorGetCode())
         if buffer is not None:
             synth.bass.BASS_ChannelSetAttribute(self.handle, _ATTRIB_BUFFER, float(buffer))
+            # BASS refills every "update period" (100 ms to start): one longer than the buffer plays it, then
+            # silence till the next refill (measured: 0.06 s buffer = 60 % of the sound, a 10-a-second stutter)
+            ms = max(5, int(buffer * 1000 / 4))
+            if synth.bass.BASS_GetConfig(_CONFIG_UPDATEPERIOD) > ms:
+                synth.bass.BASS_SetConfig(_CONFIG_UPDATEPERIOD, ms)
 
     def _fill(self, handle, buffer, length, user):
         n = length // 8
