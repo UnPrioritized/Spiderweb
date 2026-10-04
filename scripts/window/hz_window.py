@@ -330,8 +330,7 @@ class HzWindow(tk.Toplevel):
         self.menu_wait = None  # a right click on empty space: its menu, waiting to see if it's a double click
         c.bind("<Motion>", self.on_motion)
         c.bind("<MouseWheel>", self.on_wheel)
-        c.bind("<Delete>", lambda e: (self.fx.delete_key() or self.delete_selected())
-               or "break")  # (effect points selected: they go; none, the pane pressed last: the highlighted effect)
+        c.bind("<Delete>", lambda e: self.on_delete())
         for k in ("<Control-c>", "<Control-C>"):  # (effect points selected: they're copied; else the notes)
             c.bind(k, lambda e: self.copy_notes() or "break")
         for k in ("<Control-v>", "<Control-V>"):  # (what was copied last: effect points, or notes at the play line;
@@ -992,6 +991,7 @@ class HzWindow(tk.Toplevel):
         dup = None
         if on_box and e.state & CTRL:  # Ctrl inside: a drag moves a COPY of all it selected (user); let go without
             dup = {"click": hit[1] if hit and hit[0] in ("note", "tune", "left", "right") else None}  # moving =
+        whole = bool(on_box) and hit is None  # (grabbed on the box's empty space: Delete takes all it holds)
         if on_box:  # inside it: all it selected moves, held by the first note                    # a Ctrl+click
             hit = ("note", min(self.sel, key=lambda i: self.tones[i]["t"]))
         if hit is None:
@@ -1026,7 +1026,7 @@ class HzWindow(tk.Toplevel):
                 self.sound([(self.tones[j]["key"], self.tones[j]["t"], self.tones[j]["len"]) for j in self.sel])
             self.drag = {"kind": kind, "i": i, "before": before, "beat": self.beat_at(e.x), "key": self.key_at(e.y),
                          "orig": copy.deepcopy(self.tones), "x": e.x, "y": e.y, "moved": False,
-                         "slide": hit[2] if len(hit) > 2 else None,
+                         "slide": hit[2] if len(hit) > 2 else None, "whole": whole,
                          "name": {"note": tr("hz.step_move"), "in": tr("hz.step_lead"), "out": tr("hz.step_lead"),
                                   "tune": tr("hz.step_tune")}.get(kind, tr("hz.step_length"))}
             if kind == "note" and kept and i in sel0:  # a note the kept box selected: the box goes along
@@ -1493,15 +1493,52 @@ class HzWindow(tk.Toplevel):
         if self.tones != before:
             self.commit(tr("hz.step_lead"), before)
 
+    def on_delete(self):
+        """Delete: what the mouse holds (delete_dragged); else the effect points selected, or with none and the
+        effects pane pressed last its highlighted effect; else the selected notes."""
+        if self.drag:
+            self.delete_dragged()
+        elif not self.fx.delete_key():
+            self.delete_selected()
+        return "break"
+
+    def delete_dragged(self):
+        """Delete while the mouse is held (like the main piano roll): the note grabbed goes, or all the selected
+        notes when the Select box is being drawn (user), grabbed on its empty space or stretched, or copies are
+        moved; a slide's dot: that slide. The other notes stay as they are now; the drag ends (one undo step) and
+        the pointer is the one for where the mouse is. A note still being placed just goes (no step)."""
+        d = self.drag
+        if d["kind"] == "new":
+            return self.cancel_drag()
+        self.end_drag()
+        if d["kind"] in ("in", "out"):
+            for n in self.tones:
+                n["to"] = [s for s in n["to"] if s is not d["slide"]]
+            name = tr("hz.step_lead")
+        else:
+            whole = d["kind"] in ("box", "stretch") or d.get("dup") or d.get("whole")
+            self.remove_notes(set(self.sel) if whole else {d["i"]})
+            name = tr("hz.step_delete")
+        if self.tones != d["before"]:
+            self.commit(name, d["before"])
+        else:
+            self.redraw()
+        self.point_again()
+
+    def remove_notes(self, gone):
+        """The notes numbered `gone` taken out, the slides to them too; the other selected notes stay selected."""
+        keep = [n for i, n in enumerate(self.tones) if i in self.sel and i not in gone]
+        self.tones = [n for i, n in enumerate(self.tones) if i not in gone]
+        left = {n["id"] for n in self.tones}
+        for n in self.tones:
+            n["to"] = [s for s in n["to"] if s["id"] in left]
+        self.sel = {i for i, n in enumerate(self.tones) if any(n is k for k in keep)}
+
     def delete_selected(self):
         if self.sel:
             before = copy.deepcopy(self.tones)
             self.sel_before = (before, self.sel_state())
-            self.tones = [n for i, n in enumerate(self.tones) if i not in self.sel]
-            left = {n["id"] for n in self.tones}
-            for n in self.tones:  # (the slides to the deleted notes go with them)
-                n["to"] = [s for s in n["to"] if s["id"] in left]
-            self.sel = set()
+            self.remove_notes(set(self.sel))
             self.commit(tr("hz.step_delete"), before)
 
     def on_grow(self):
