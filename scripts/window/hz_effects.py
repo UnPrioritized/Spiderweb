@@ -10,6 +10,9 @@ takes the effect off). Every change is one undo step of the main window, made wh
 Right-click > Repeat every…: a small window to type how long one repeat is (green lines in the pane show where
 each one would start while it's open); the effect's line becomes one repeat of that length, shown over and over
 (any copy grabbed changes them all; too close together to grab: a band); Shape: ready-made ones for a repeat.
+Its Plays dropdown: All the way (from the shape's start) / Once per note / Restart at each note (hz["from"]), and
+Stretch to each note (hz["fit"]): such a line is drawn from each note's start, cut where the next note starts
+(copies_of; a copy's number is then (note start's number, repeat after it)).
 Ctrl+drag (with Select: a plain drag on empty space too) = a box that selects points (Ctrl+click one: in / out); dragging a selected point moves them all, Delete
 deletes them (none selected, the pane pressed last: the highlighted effect is taken off), Ctrl+C / Ctrl+V copy them and paste them at the mouse (into the highlighted effect, or the ones they
 came from; the points already there are replaced). The small square before a name that's on switches the effect off
