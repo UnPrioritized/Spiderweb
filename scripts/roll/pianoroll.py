@@ -48,6 +48,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.box_mouse = None    # (x, y, state) of the mouse while a Select box is dragged (box_scroll)
         self.box_timer = None
         self.box_moving = None   # the kept Select boxes (box_upright) when a move started: they go along
+        self.box_in = False      # ... and that move was pressed inside them
         self.dup = None          # Ctrl+press in the kept boxes: {"click": shape under the mouse}; the copies are
         #                          made at the first move ("done" then)
         self.grabbed = None      # the shape a move drag was started on (None: all selected, the kept boxes moved)
@@ -516,6 +517,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.focus_set()
         kept, self.box_kept, self.box_moving, self.dup = self.kept_box(), None, None, None
         self.grabbed = None
+        self.box_in = False
         if self.follow and self.sx is not None:  # a shape started with a click: this click finishes it
             self.drag, self.follow = self.follow, None
             self.on_drag(e)
@@ -538,6 +540,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if not self.draft:  # first: a picked curve stroke's handles can be near its custom shape's box
             i = self.hit_handle(e.x, e.y, tool == "select")
             if i is not None:
+                if kept:  # (editing the one shape: the Select box stays where it is, user)
+                    self.box_kept = (kept, set(app.sels))
                 app.push_undo(name=tr("pianoroll.drag_a_point"))
                 self.drag = ("handle", i)
                 return
@@ -545,6 +549,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         hit = self.custom_hit(e.x, e.y)
         if hit and hit[0] != "inside":  # the selected custom shape's corner / side: resize, just outside: turn / skew
             orig = copy.deepcopy(app.selected()["pts"])
+            if kept:  # (the Select box stays where it is, user: like changing a note's length in a box)
+                self.box_kept = (kept, set(app.sels))
             app.push_undo(name={"turn": tr("pianoroll.turn"), "skew": tr("pianoroll.skew")}.get(hit[0], "Resize"))
             if hit[0] == "turn":
                 self.drag = ("turn", orig, self.screen_angle(orig, e.x, e.y))
@@ -563,6 +569,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.drag = ("stretch", on_box, around, {j: copy.deepcopy(app.shapes[j]) for j in app.sels}, boxes)
             return
         if on_box:  # inside it: moving the shapes takes it along
+            self.box_in = True
             self.box_moving = boxes_upright(kept)[0]
             self.box_kept = (self.box_moving, set(app.sels))
 
@@ -592,6 +599,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 i = app.sel  # anywhere inside the selected custom shape's box moves it
             if i is not None and i not in app.sels and not e.state & CTRL:
                 self.box_moving = None  # a shape it didn't select, grabbed inside the box: the box goes (user)
+            elif kept and not on_box and i in app.sels and not e.state & CTRL:
+                self.box_moving = boxes_upright(kept)[0]  # one it selected, grabbed outside it: it goes along too
+                self.box_kept = (self.box_moving, set(app.sels))  # (user; a click there still picks just that one)
             if on_box and e.state & CTRL:  # Ctrl inside the kept Select box: a drag moves a COPY of all it selected
                 app.push_undo(name=tr("app.duplicate"))  # (user; let go without moving = a Ctrl+click)
                 self.dup = {"click": i}
@@ -869,7 +879,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if self.dup["click"] is not None:
                 self.app.select(self.dup["click"], toggle=True)
         elif (kind == "move" and not self.drag[4] and self.drag[3] is not None and len(self.app.sels) > 1
-              and not self.box_moving):  # (inside the kept Select box a click keeps the selection and box: user)
+              and not (self.box_moving and self.box_in)):  # (inside the kept Select box a click keeps the
+            #                                                selection and box: user)
             self.app.select(self.drag[3])
         elif kind == "move" and not self.drag[4] and self.drag[5] is not False:
             part = self.drag[5]
