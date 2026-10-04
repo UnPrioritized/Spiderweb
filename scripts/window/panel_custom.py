@@ -63,6 +63,9 @@ class CustomPanel:
         self.custom_combo.pack(side="left", padx=(5, 0))
         self.custom_combo.bind("<<ComboboxSelected>>", lambda e: self.on_custom_pick())
         ttk.Button(row, text=tr("panel_custom.drawer"), command=self.open_drawer).pack(side="left", padx=(4, 0))
+        # under the Shape box while a placed shape's library shape was renamed or deleted (not_in_library)
+        self.missing_note = ttk.Label(box, text=tr("panel_custom.not_in_library"), foreground=GAP_COLOR,
+                                      font=("Segoe UI", 8), wraplength=int(300 * self.scale), justify="left")
         row = self.custom_fill_row = ttk.Frame(box)
         row.pack(fill="x", pady=(4, 0))
         ttk.Label(row, text=tr("panel_custom.inside")).pack(side="left", anchor="n")
@@ -272,6 +275,7 @@ class CustomPanel:
             self.custom_shape_row.pack(fill="x", before=self.custom_fill_row)
             self.custom_fill_row.pack_configure(pady=(4, 0))
         if pasted:
+            self.missing_note.pack_forget()
             self.custom_fill_row.pack_forget()
             own = all(t.get("own_vel") for t in tgts)
             self.custom_info.config(text=(
@@ -291,6 +295,10 @@ class CustomPanel:
         fill, gate = tgts[0]["fill"], tgts[0]["gate"]
         missing = placed and self.not_in_library(tgts[0])
         self.custom_combo.config(style="Missing.TCombobox" if missing else "TCombobox")
+        if missing and not self.missing_note.winfo_manager():
+            self.missing_note.pack(fill="x", pady=(2, 0), after=self.custom_shape_row)
+        elif not missing and self.missing_note.winfo_manager():
+            self.missing_note.pack_forget()
         self._loading = True
         self.custom_pick.set(MISSING_MARK + name if missing else name)
         self.fill_var.set(fill)
@@ -371,8 +379,6 @@ class CustomPanel:
             info = tr("panel_custom.pick_a_shape_or_make_one")
         elif placed:
             info = tr("panel_custom.n_notes", n=sum(self.note_count(t) for t in tgts))
-            if missing:
-                info += tr("panel_custom.not_in_library")
             if gaps and fill in ("fill", "spam"):
                 info += (tr("panel_custom.one_gap_in_the_outline_filled") if gaps == 1 else
                          tr("panel_custom.gaps_in_the_outline_filled_as", gaps=gaps))
