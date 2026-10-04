@@ -438,7 +438,7 @@ class RangeGraph(tk.Toplevel):
 
     def delete_at(self, e):
         i = self.point_at(e.x, e.y)
-        if not self.on_var.get() or i is None or len(self.pts) <= 2:
+        if not self.on_var.get() or i is None or len(self.pts) <= 2 or self.drag is not None:  # (not mid-drag)
             return
         pts = [list(p) for p in self.pts]
         del pts[i]
