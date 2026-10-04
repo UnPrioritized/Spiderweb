@@ -54,6 +54,9 @@ class RangeGraph(tk.Toplevel):
         self.memo = [clean_range(json.loads(json.dumps(t.get("range") or t.get("range_kept") or
                                                        {"to": t["gate"] * 4, "graph": STRAIGHT, "dir": "time"})))
                      for t in self.tgts]
+        for i, t in enumerate(self.tgts[1:], 1):  # (shapes without a Range on take the one shown: the first's)
+            if not t.get("range"):
+                self.memo[i] = json.loads(json.dumps(self.memo[0]))
         self.closed = False
         self.drag, self.hover, self.bar_hover, self.counts = None, None, None, None
         self.held, self.drag_from = False, None  # (a drag's graph that would make too many notes: not used yet)
