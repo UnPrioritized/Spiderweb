@@ -21,7 +21,10 @@ A repeating effect can have an amount line (right-click > Amount line): dotted, 
 repeat is. The window's lines are keyed "<effect>" and "<effect>:amount" (AMOUNT) in win.fxl.
 Pencil tool + an effect highlighted: a drag on empty space draws its line (snap on: a step in every grid cell, like
 drawing velocities; Shift or snap off: a smooth line); a plain click there still clears the highlight.
-Its top edge drags to make the pane taller or shorter (remembered)."""
+Its top edge drags to make the pane taller or shorter (remembered).
+Moving dots (draw_dots, like a synth's envelope view): while the preview plays, a dot on each line where the play
+line crosses it; while a live key sounds (hz_live.py), a dot on each line counted from each note, on the first
+note in view: from its start, stopping at the sustain point while the key is held, down the fall once let go."""
 
 import copy
 import math
@@ -44,6 +47,7 @@ from window.widgets import Scrub
 # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
 REPEAT_MOST = 999  # Repeat every… [n] / [n]: the biggest number in either box
 REPEAT_LINE = "#18a048"  # where each repeat would start while the Repeat every… window is open
+PLAY_LINE = "#0a50e0"  # the preview's play line (as in the notes above)
 FX_COLOR = {"volume": "#9b2d5f", "slant": "#8a3ff0", "groups": "#0a8f8f", "offpitch": "#d0189a", "noisy": "#8a5a14",
             "vibrato": "#00a5d8", "pitch": "#4b0082", "sweep": "#7f8c00", "wah": "#2c3e6b", "tremolo": "#e0607a",
             "octave": "#1d6b3a", "sine": "#b060c0", "square": "#606060", "saw": "#c0a000", "triangle": "#c05a30"}
@@ -87,6 +91,8 @@ class FxPane:
         self.trying = None  # the length typed in it (beats), shown as green lines
         self.trying_how = (None, False)  # ... and how it's picked to play there (hz["from"] mode, stretched)
         self.says = ""  # for the window's status line
+        self.drawn = {}  # each line's [(x, y)] as last drawn (the moving dots sit on them)
+        self.dots = None  # the moving dots as drawn
         self.row_h, self.pad = round(15 * self.s), round(9 * self.s)
         self.edge = round(4 * self.s)  # the top edge: drag it = the pane's height
         start_h = max(round(112 * self.s), round(8 * self.s) + len(FX) * self.row_h)
@@ -377,6 +383,7 @@ class FxPane:
     def redraw(self):
         c, win, s = self.canvas, self.win, self.s
         c.delete("all")
+        self.drawn = {}
         w, h, kb = c.winfo_width(), c.winfo_height(), win.kb_w
         if w < 50 or h < 20:
             return
@@ -420,6 +427,7 @@ class FxPane:
                                    stipple="gray25")
                 continue
             xy = self.line(name)
+            self.drawn[name] = xy
             c.create_line(*[v for p in xy for v in p], fill=colour, width=max(2, round(2 * s)) if lit else 1,
                           dash=(6, 4) if off else (2, 3) if name.endswith(AMOUNT) else ())
             if lit:
@@ -457,6 +465,75 @@ class FxPane:
         d = self.drag
         if d and d["kind"] == "box" and "x1" in d:
             c.create_rectangle(d["x0"], d["y0"], d["x1"], d["y1"], outline="#555", dash=(3, 3))
+        self.dots = None
+        self.draw_dots()
+
+    def y_on(self, name, x):
+        """The height of a line as drawn at x (None: not drawn there)."""
+        xy = self.drawn.get(name)
+        if not xy or not xy[0][0] <= x <= xy[-1][0]:
+            return None
+        return float(np.interp(x, [p[0] for p in xy], [p[1] for p in xy]))
+
+    def draw_dots(self):
+        """The moving dots (see the top): drawn again only when they moved."""
+        c, win, s = self.canvas, self.win, self.s
+        if not c.winfo_ismapped():
+            return
+        w, h, kb = c.winfo_width(), c.winfo_height(), win.kb_w
+        lit = [k for k in self.names() if self.active in (None, base(k)) and base(k) not in win.off]
+        got = []
+        if win.preview.playing():  # the play line, and where it crosses each line
+            x = win.x_of(win.preview.play_beat())
+            if kb <= x <= w:
+                got.append(("line", round(x)))
+                got += [(k, round(x), round(y)) for k in lit for y in [self.y_on(k, x)] if y is not None]
+        pos = win.live.position()  # (beats since the live note started, beats it was let go at / None)
+        if pos is not None:
+            for name in lit:
+                at = self.live_spot(name, *pos)
+                if at is not None and kb <= at[0] <= w:
+                    got.append((name, round(at[0]), round(at[1])))
+        if got == self.dots:
+            return
+        self.dots = got
+        c.delete("dot")
+        r = 4 * s
+        for g in got:
+            if g[0] == "line":
+                c.create_line(g[1], 0, g[1], h, fill=PLAY_LINE, width=max(1, round(s)), tags="dot")
+            else:
+                c.create_oval(g[1] - r, g[2] - r, g[1] + r, g[2] + r, fill=FX_COLOR[base(g[0])], outline="white",
+                              width=max(1, round(1.5 * s)), tags="dot")
+
+    def live_spot(self, name, u, gone):
+        """Where the live note is on an effect counted from each note: (x, y) on the first note in view, u beats
+        after its start, let go at `gone` beats (None: still held); None for other lines."""
+        win = self.win
+        every, mode = win.loops.get(name), win.froms.get(name)
+        if not every or not mode or name.endswith(AMOUNT):
+            return None
+        at = self.sustain(name)
+        if mode == "restart":
+            p = u % every
+        elif at is not None and gone is None:  # (held: up to the sustain point, then it waits there)
+            p = min(u, at)
+        elif at is not None:  # (let go: the fall, from the sustain point)
+            p = min(every, at + max(0.0, u - gone))
+        else:
+            p = min(u, every)
+        got = self.copies(name) or []
+        first = next(((k, o) for k, o, _, _ in got if win.x_of(o) >= win.kb_w), got[0][:2] if got else None)
+        if first is None:
+            return None
+        k = first[0]
+        if at is not None and gone is not None and p > at:  # (on the fall part of that copy)
+            x = win.x_of(self.to_beat(name, k, p))
+        else:
+            o, sc = self.place(name, k)
+            x = win.x_of(o + p * sc)
+        v = line_at(win.fxl[name], p, every if mode == "restart" else None)
+        return x, self.y_of(float(v))
 
     def say(self, text):
         if text != self.says:

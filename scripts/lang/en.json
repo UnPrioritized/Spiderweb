@@ -1916,7 +1916,7 @@
  "help.hz_live.title": "Live keys (Hz bass)",
  "help.hz_live.tip": "This sound is NOT your MIDI. The live keys play a quick copy that Spiderweb makes from your soundfont's own notes, so you can try a Hz bass before placing it. Only notes you place in the Hz bass window go into your MIDI. It can sound a little different from a real render, most with soundfonts that change their sound at random.",
  "help.hz_live.text": [
-  "With Preview on, click and hold a key on the left of the Hz bass window to hear the Hz bass of that key, as a note placed there would sound: its keys, gates and effects. Let go, and the falls after the sustain points play. Drag up or down to play other keys.",
+  "With Preview on, click and hold a key on the left of the Hz bass window to hear the Hz bass of that key, as a note placed there would sound: its keys, gates and effects. Let go, and the falls after the sustain points play. Drag up or down to play other keys. With the effects shown, a dot on each line counted from each note shows where the sound is: it stops at the sustain point while you hold the key and runs down the fall when you let go. While the preview plays, a dot shows where the play line crosses each line.",
   "",
   "What you hear is NOT your MIDI. It's a quick copy made by Spiderweb: each different note is played once by the preview's synth with your soundfont, and copies of it are laid where the notes start. That's fast enough to play even a 128-key Hz bass live. It sounds very close to the real thing with most soundfonts; a soundfont that changes its sound at random can't be copied exactly. Only notes you place in the Hz bass window go into your MIDI.",
   "",

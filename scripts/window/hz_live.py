@@ -61,6 +61,7 @@ class LiveKeys:
         self.cut = math.inf  # no notes of the list from this frame on (a new list for there is being made)
         self.waits = False  # pull waited for a recording last time
         self.bpm = 120.0
+        self.gone = None  # the frame the note sounding was let go at (None: held)
         self._tick = None
 
     # ------------------------------------------------------------ pressing and letting go
@@ -110,6 +111,7 @@ class LiveKeys:
         with self.lock:
             self.gen += 1
             self.key, self.p0, self.made, self.extending = key, self.at + int(LEAD * RATE), FIRST, False
+            self.gone = None
             self.cut = self.p0  # (what sounds now stops where this one starts)
         self.ask(FIRST, self.gen, self.p0, ppq)
         if not self._tick:
@@ -128,7 +130,7 @@ class LiveKeys:
         with self.lock:
             self.gen += 1
             end = self.at + int(LEAD * RATE)
-            self.cut = end
+            self.cut, self.gone = end, end
             self.key, key = None, self.key
         self.ask(max(MIN_LEN, (end - self.p0) / RATE * self.bpm / 60.0), self.gen, self.p0, ppq, key, end)
 
@@ -146,6 +148,17 @@ class LiveKeys:
 
     def active(self):
         return self.player is not None
+
+    def position(self):
+        """For what's heard now: (beats since the note sounding started, beats after its start it was let go at, or
+        None while held); None when no live note is heard."""
+        if self.player is None:
+            return None
+        f = self.player.position()
+        if f is None or f < self.p0:
+            return None
+        beats = self.bpm / 60.0 / RATE
+        return (f - self.p0) * beats, None if self.gone is None else (self.gone - self.p0) * beats
 
     # ------------------------------------------------------------ the notes
 

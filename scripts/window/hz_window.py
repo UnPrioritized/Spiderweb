@@ -2078,6 +2078,7 @@ class HzWindow(tk.Toplevel):
                 self.live.warm()
         if (self.preview_says.cget("text"), str(self.preview_says.cget("foreground"))) != (says, colour):
             self.preview_says.config(text=says, foreground=colour)
+        self.fx.draw_dots()  # (the moving dots on the effects' lines)
         if self.settings_window:
             self.settings_window.refresh()
 
