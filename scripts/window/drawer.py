@@ -864,9 +864,9 @@ class Drawer(tk.Toplevel):
             # the stroke moves, and the others selected with it (inside the select box: all of them)
             if i is not None:
                 self.select(i)
-            self.push_undo()
+            self.push_undo()  # (the last item: the stroke grabbed, None = the select box's empty space)
             self.drag = ("stroke", self.event_pt(e, snap=False),
-                         {k: json.dumps(self.strokes[k]) for k in self.chosen()}, json.dumps(self.boxes))
+                         {k: json.dumps(self.strokes[k]) for k in self.chosen()}, json.dumps(self.boxes), i)
         else:  # a select box (Ctrl = adds another to what's selected); a click = deselect
             self.drag = ("boxsel", e.x, e.y, e.x, e.y, bool(ctrl))
         self.redraw()
@@ -904,7 +904,7 @@ class Drawer(tk.Toplevel):
                 pt = self.perfect(opp, pt)
             self.strokes[i]["box"] = [min(opp[0], pt[0]), min(opp[1], pt[1]), max(opp[0], pt[0]), max(opp[1], pt[1])]
         elif kind == "stroke":
-            _, start, origs, boxes = self.drag
+            _, start, origs, boxes, _ = self.drag
             cur = self.event_pt(e, snap=False)
             du, dv = cur[0] - start[0], cur[1] - start[1]
             self.stuck = None
@@ -954,7 +954,33 @@ class Drawer(tk.Toplevel):
         else:
             self.changed(settle=False)  # (the drag took the colours along: carry_areas)
 
+    def holding(self):
+        """The mouse holds a stroke, points, a curve handle or an ellipse corner (a drag that changes strokes)."""
+        return bool(self.drag) and self.drag[0] in ("stroke", "points", "pen", "corner")
+
+    def let_go(self):
+        """A held drag ends as if the mouse was let go there (Esc, a tool key, Delete): what it moved is one
+        step (undo, "not saved yet")."""
+        if self.holding():
+            self.select_release()
+        self.drag = self.stuck = None
+
+    def delete_dragged(self):
+        """Delete while the mouse holds something (like the piano roll): the drag ends where it is, then only the
+        stroke grabbed goes (grabbed by the select box's empty space: all it holds); the rest stay selected."""
+        kind = self.drag[0]
+        if kind == "stroke":
+            gone = list(self.drag[2]) if self.drag[4] is None else [self.drag[4]]
+        else:
+            gone = [self.drag[1] if kind in ("pen", "corner") else self.sel]
+        self.let_go()
+        self.push_undo()
+        self.remove_strokes(gone)
+        self.changed()
+
     def delete_selected_stroke(self):
+        if self.holding():
+            return self.delete_dragged()
         if self.chosen() and self.tool.get() == "select":
             self.push_undo()
             self.remove_strokes(self.chosen())
@@ -1202,6 +1228,8 @@ class Drawer(tk.Toplevel):
     def right_click(self, e):
         """Finishes a polyline being drawn. Otherwise, like on the piano roll: on the selected curve's anchor =
         remove it, on a handle dot = pull it back in; near a stroke = its menu; empty space = deselect."""
+        if self.holding():  # (the left button holds a stroke: nothing, its menu would work on it mid-move)
+            return
         if self.erasing():  # an eraser box being dragged: dropped, nothing erased (like Esc)
             return self.cancel_draft()
         if self.draft or self.follow:
@@ -1436,8 +1464,8 @@ class Drawer(tk.Toplevel):
         self.changed()
 
     def cancel_draft(self):
+        self.let_go()  # (a stroke held by Esc / a tool key: moved is moved, like letting go)
         self.draft = None
-        self.drag = None
         self.follow = None
         self.arc_bend = False
         self.redraw()
@@ -1778,7 +1806,9 @@ class Drawer(tk.Toplevel):
         if not self.strokes:
             text = tr("drawer.nothing_drawn_yet")
         elif all(role_of(st) for st in self.strokes):
-            text = tr("drawer.nothing_to_fill")
+            amap = self.area_info()[0] if self.areas else None  # (an area coloured by hand is filled anyway)
+            closed = amap is not None and bool((self.area_paint(amap) > 0).any())
+            text = tr("drawer.only_coloured_filled" if closed else "drawer.nothing_to_fill")
         elif closed:
             text = tr("drawer.closed_shape_empty_fill_and_spam")
         elif len(gaps) == 1:

@@ -672,6 +672,7 @@
  "drawer.open_ends_red_dots_fill_and": "Open ends (red dots): Fill and Spam close each gap with a straight line.",
  "drawer.not_saved_yet": "\nNot saved yet.",
  "drawer.nothing_to_fill": "Only outline-only lines and fill lines: Fill and Spam have nothing to fill.",
+ "drawer.only_coloured_filled": "Only outline-only lines and fill lines: Fill and Spam fill only the coloured areas.",
  "drawer.areas": "Areas",
  "drawer.area_colour": "Colour for the areas you click:",
  "drawer.area_empty": "Empty: no notes there",
