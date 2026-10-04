@@ -146,27 +146,41 @@ def check_numpy():
 _lock = None  # the open "Spiderweb is running" handle, kept until the program ends
 
 
+def folder_tag():
+    """This folder's name for the lock and the main window's label. The folder's true full path (links, subst
+    drives and short names like BLACKM~1 all lead to the same one), so one folder always gets one name."""
+    import hashlib
+    from files.about import HERE
+    return "Spiderweb-" + hashlib.md5(os.path.normcase(os.path.realpath(HERE)).encode("utf-8")).hexdigest()
+
+
+def label_window(app):
+    """Puts this folder's label on the main window, so a second start finds this window (not another folder's,
+    whatever the title says)."""
+    try:
+        app.update_idletasks()
+        ctypes.windll.user32.SetPropW(ctypes.c_void_p(int(app.wm_frame(), 16)), folder_tag(), ctypes.c_void_p(1))
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
 def first_instance():
     """Only one Spiderweb per folder (they'd share the autosave and settings): True when none is open yet. Otherwise
     the open one's window is brought to the front and False. Copies in other folders don't count."""
     global _lock
-    import hashlib
-    import re
     from ctypes import wintypes
-    from files.about import HERE
     k, u = ctypes.WinDLL("kernel32", use_last_error=True), ctypes.windll.user32
     k.CreateMutexW.restype = wintypes.HANDLE
-    folder = hashlib.md5(os.path.normcase(os.path.abspath(HERE)).encode("utf-8")).hexdigest()
-    _lock = k.CreateMutexW(None, False, "Local\\Spiderweb-" + folder)
+    u.GetPropW.restype = wintypes.HANDLE
+    u.GetPropW.argtypes = [wintypes.HWND, wintypes.LPCWSTR]
+    tag = folder_tag()
+    _lock = k.CreateMutexW(None, False, "Local\\" + tag)
     if not _lock or ctypes.get_last_error() != 183:  # ERROR_ALREADY_EXISTS
         return True
     found = []
 
     def look(h, _):
-        name, title = ctypes.create_unicode_buffer(64), ctypes.create_unicode_buffer(256)
-        u.GetClassNameW(h, name, 64)
-        u.GetWindowTextW(h, title, 256)
-        if name.value == "TkTopLevel" and u.IsWindowVisible(h) and re.fullmatch(r"Spiderweb [\d.]+", title.value):
+        if u.IsWindowVisible(h) and u.GetPropW(h, tag):
             found.append(h)
         return not found
     u.EnumWindows(ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)(look), 0)
@@ -197,6 +211,8 @@ if __name__ == "__main__":
         sys.exit(1)
     try:
         from window.app import App
-        App().mainloop()
+        app = App()
+        label_window(app)
+        app.mainloop()
     except Exception:  # couldn't start (errors inside the running window are caught by errors.install)
         errors.report(*sys.exc_info(), "(starting up)", fatal=True)
