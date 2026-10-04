@@ -178,8 +178,9 @@ class FxPane:
         return out
 
     def now(self):
-        """The lines, repeats and effects switched off as they are now."""
-        return self.win.fxl, self.win.loops, self.win.off
+        """The lines, repeats, effects switched off, those counted from each note and those stretched, as they are
+        now."""
+        return self.win.fxl, self.win.loops, self.win.off, self.win.froms, self.win.fits
 
     def state(self):
         """now(), kept (to go back to)."""
@@ -594,7 +595,10 @@ class FxPane:
         gone = {name} if name.endswith(AMOUNT) else {name, name + AMOUNT}
         for k in gone:
             win.fxl.pop(k, None)
-        win.loops.pop(name, None)
+        if not name.endswith(AMOUNT):
+            win.loops.pop(name, None)
+            win.froms.pop(name, None)
+            win.fits = [n for n in win.fits if n != name]
         win.off = [n for n in win.off if n != name]
         self.sel = {(n, i) for n, i in self.sel if n not in gone}
         if self.active == name:

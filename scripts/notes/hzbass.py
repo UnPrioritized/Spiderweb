@@ -30,7 +30,13 @@ tone's "t", from the shape's left edge; flat before the first point and after th
 hz["loop"] = {effect: beats}: that effect's points are one repeat of so many beats (from 0 to it), repeated from the
 shape's left edge on over and over (line_at; like an automation that repeats every beat). hz["amount"] = {effect:
 [[beat, value(, bend)], ...]}: for a repeating effect, a line over the notes (beats like "fx") saying how strong the
-repeat is: 1 = as drawn, 0 = as if the effect were off (NEUTRAL). hz["off"] = [effects]
+repeat is: 1 = as drawn, 0 = as if the effect were off (NEUTRAL). hz["from"] = {effect: "note" / "restart"}: a
+repeating effect counted from each note's start instead of the shape's left edge (like an envelope): "note" = its
+one repeat plays once from each note's start, then stays on its last value; "restart" = it repeats, starting over
+at each note. "pitch" counts from each note's own start (a note starting while others sound bends alone); the
+others from the latest note start of all (they work on every key, so a note starting starts them over for all). A
+note reached by a slide never starts it over (note_beats). hz["fit"] = [effects]: such an effect's repeat is
+stretched over each note (and the notes it slides on to) instead of lasting its own beats. hz["off"] = [effects]
 switched off (Bypass): their lines are kept but do nothing (live). They change the colour of the tone, not its pitch, by making the keys hit at different spots of the wave
 (how late a key is, in waves, is added up over the effects; a key starts that late, and a repeat pushed past its
 own tone's end is left out):
@@ -91,6 +97,7 @@ WAH = 8.0  # "wah" at 1: this many loud stripes over the keys
 TREMOLO = 8.0  # "tremolo" at 1: this many times a beat
 BEND = 0.98  # how far a line between two points can be bent (1 = a step)
 LOOP = (1 / 256, 1024.0)  # beats: how short and how long one repeat of a repeating effect can be
+FROM_MODES = ("note", "restart")  # hz["from"]: once from each note's start / repeating, starting over at each note
 # ready-made shapes for one repeat (u 0..1 over it, value); "sine" and "steps" (random) are made in loop_shape
 LOOP_SHAPES = {"sine": None, "triangle": [(0, 0), (0.5, 1), (1, 0)], "saw_up": [(0, 0), (1, 1)],
                "saw_down": [(0, 1), (1, 0)], "square": [(0, 1), (0.5, 1), (0.5, 0), (1, 0)],
@@ -160,6 +167,18 @@ def clean_loop(loop, fx):
     return out
 
 
+def clean_from(froms, loop):
+    """Effects counted from each note checked: {effect: "note" / "restart"} for repeating effects only."""
+    froms = froms if isinstance(froms, dict) else {}
+    return {name: froms[name] for name in FX if name in loop and froms.get(name) in FROM_MODES}
+
+
+def clean_fit(fit, froms):
+    """Effects stretched over each note checked: those counted from each note, in FX order."""
+    fit = fit if isinstance(fit, list) else ()
+    return [name for name in FX if name in froms and name in fit]
+
+
 def bent_part(u, bend):
     """How far along (0..1) the line from a point to the next has come at u (0..1 of the way) with that bend
     (arrays; nan = hold: none of the way until the next point). Bend b puts the middle at (1 + b) / 2 of the way:
@@ -188,12 +207,15 @@ def live(hz):
     off = hz.get("off")
     if not off:
         return hz
-    out = {k: v for k, v in hz.items() if k not in ("fx", "loop", "off", "amount")}
+    out = {k: v for k, v in hz.items() if k not in ("fx", "loop", "off", "amount", "from", "fit")}
     fx = {k: v for k, v in (hz.get("fx") or {}).items() if k not in off}
     loop = {k: v for k, v in (hz.get("loop") or {}).items() if k in fx}
     amount = {k: v for k, v in (hz.get("amount") or {}).items() if k in loop}
+    froms = {k: v for k, v in (hz.get("from") or {}).items() if k in loop}
+    fit = [k for k in hz.get("fit") or () if k in froms]
     return dict(out, **({"fx": fx} if fx else {}), **({"loop": loop} if loop else {}),
-                **({"amount": amount} if amount else {}))
+                **({"amount": amount} if amount else {}), **({"from": froms} if froms else {}),
+                **({"fit": fit} if fit else {}))
 
 
 def line_at(pts, beat, every=None):
@@ -214,15 +236,70 @@ def line_at(pts, beat, every=None):
     return vs[j] + (vs[j + 1] - vs[j]) * bent_part(u, bends[j])
 
 
-def fx_at(hz, name, beat):
+def chains(tones):
+    """{tone id: (beat its chain of slides starts at, beat the chain ends at)}: a tone reached by a slide belongs to
+    the chain of the (earliest) tone sliding into it."""
+    by = {n["id"]: n for n in tones}
+    came = {}
+    for a, b, _ in links(tones):
+        if b["id"] not in came or a["t"] < came[b["id"]]["t"]:
+            came[b["id"]] = a
+    heads = {}
+
+    def head(n):
+        seen = set()
+        while n["id"] in came and n["id"] not in seen:  # (slides only go forward in time: no loops, but be safe)
+            seen.add(n["id"])
+            n = came[n["id"]]
+        return n
+
+    for n in tones:
+        heads[n["id"]] = head(n)
+    ends = {}
+    for n in tones:
+        h = heads[n["id"]]["id"]
+        ends[h] = max(ends.get(h, 0.0), n["t"] + n["len"])
+    return {i: (by[h["id"]]["t"], ends[h["id"]]) for i, h in heads.items()}
+
+
+def note_beats(hz, name, beat, tone=None):
+    """Beats into an effect counted from each note (hz["from"]) at beat (an array, from the shape's left edge):
+    from the start of tone's chain of slides, or (tone None) from the latest chain start of all; stretched so a
+    chain lasts one repeat when the effect is in hz["fit"]."""
+    beat = np.asarray(beat, float)
+    got = chains(hz.get("tones") or ())
+    if not got:
+        return beat
+    if tone is not None and tone.get("id") in got:
+        s0, end = got[tone["id"]]
+    else:
+        spans = {}
+        for s, e in got.values():  # (chains starting together: the longest)
+            spans[s] = max(spans.get(s, e), e)
+        starts = np.array(sorted(spans))
+        ends = np.array([spans[s] for s in starts])
+        i = np.clip(np.searchsorted(starts, beat, side="right") - 1, 0, len(starts) - 1)
+        s0, end = starts[i], ends[i]
+    u = np.maximum(0.0, beat - s0)
+    if name in (hz.get("fit") or ()):
+        u = u * hz["loop"][name] / np.maximum(end - s0, MIN_LEN)
+    return u
+
+
+def fx_at(hz, name, beat, tone=None):
     """The value of an effect at beat (an array, from the shape's left edge; 0 when there's no such line).
     Before the first point and after the last one the line stays flat, unless it repeats (hz["loop"]); a repeating
-    one is made stronger or weaker by its amount line (hz["amount"])."""
+    one is made stronger or weaker by its amount line (hz["amount"]). One counted from each note (hz["from"]):
+    tone = the tone it's for ("pitch"), else from the latest note start (note_beats)."""
     pts = (hz.get("fx") or {}).get(name)
     if not pts:
         return np.zeros(np.shape(beat))
     every = (hz.get("loop") or {}).get(name)
-    v = line_at(pts, beat, every)
+    mode = (hz.get("from") or {}).get(name) if every else None
+    if mode:
+        v = line_at(pts, note_beats(hz, name, beat, tone), every if mode == "restart" else None)
+    else:
+        v = line_at(pts, beat, every)
     amount = (hz.get("amount") or {}).get(name) if every else None
     if amount:
         still = NEUTRAL.get(name, 0.0)
@@ -359,6 +436,12 @@ def clean_hz(hz):
         amount = {k: v for k, v in amount.items() if k in loop}
         if amount:
             out["amount"] = amount
+        froms = clean_from(hz.get("from"), loop)
+        if froms:
+            out["from"] = froms
+        fit = clean_fit(hz.get("fit"), froms)
+        if fit:
+            out["fit"] = fit
     if tones:
         out["tones"] = tones
         for flag in ("grow", "own"):
@@ -504,16 +587,17 @@ def tone_runs(hz, left, ppq):
                 out.append((np.array(part), np.array(after), (a, b)))
             t = max(t, s1)
     if "pitch" in (hz.get("fx") or {}):
-        out = [bent(hz, left, ppq, starts, nexts) + (whose,) for starts, nexts, whose in out]
+        out = [bent(hz, left, ppq, starts, nexts, whose[0]) + (whose,) for starts, nexts, whose in out]
     return out
 
 
-def bent(hz, left, ppq, starts, nexts):
+def bent(hz, left, ppq, starts, nexts, tone=None):
     """A stretch of tone's repeats (start ticks, next ones' starts) moved by the "pitch" effect: the tone goes up or
     down by the line (PITCH keys at 1 and 0), its waves shorter or longer. The repeats are spaced by adding up the
-    tone over time, so a big bend keeps its timing (a repeat is where the waves so far come to a whole number)."""
+    tone over time, so a big bend keeps its timing (a repeat is where the waves so far come to a whole number).
+    tone = the tone the stretch belongs to (a slide: the one it leaves), for a line counted from each note."""
     t = np.append(starts, nexts[-1])
-    f = 2.0 ** ((fx_at(hz, "pitch", t / ppq - left) - 0.5) * 2.0 * PITCH / 12.0)  # (how many times the tone)
+    f = 2.0 ** ((fx_at(hz, "pitch", t / ppq - left, tone) - 0.5) * 2.0 * PITCH / 12.0)  # (how many times the tone)
     phase = np.concatenate([[0.0], np.cumsum((f[:-1] + f[1:]) / 2.0)])  # (one wave as placed = 1 at f = 1)
     n = max(1, int(math.ceil(phase[-1] - 1e-9)))
     at = np.interp(np.arange(n + 1, dtype=float), phase, t)
@@ -769,5 +853,10 @@ def fit_length(sh):
 
 
 def shortest_gate(hz, ppq):
-    """The shortest gate, in ticks, a shape's Hz bass uses (its highest tone)."""
-    return wave(hz, ppq, max((pitch(n) for n in hz.get("tones") or ()), default=hz["key"]))
+    """The shortest gate, in ticks, a shape's Hz bass uses (its highest tone, bent up by the "pitch" effect's
+    highest point)."""
+    top = max((pitch(n) for n in hz.get("tones") or ()), default=hz["key"])
+    pts = (live(hz).get("fx") or {}).get("pitch") if hz.get("tones") else None
+    if pts:  # (the amount line only ever weakens it)
+        top += max(0.0, (max(p[1] for p in pts) - 0.5) * 2.0 * PITCH)
+    return wave(hz, ppq, top)
