@@ -1235,8 +1235,10 @@ class HzWindow(tk.Toplevel):
         if d["kind"] in ("left", "right"):
             self.last_len = self.tones[d["i"]]["len"]
         placed = self.tones[d["i"]]["id"] if d["kind"] == "new" else None
-        box = (self.box_kept or (None,))[0] if d.get("box") and (d["kind"] == "stretch" or d.get("inside")
-                                                                  or d["moved"]) else None
+        if d["kind"] == "stretch":  # the box goes back to its size, the notes stay longer / shorter (user)
+            box = d["boxes"]
+        else:
+            box = (self.box_kept or (None,))[0] if d.get("box") and (d.get("inside") or d["moved"]) else None
         if self.tones != d["before"]:
             self.commit(d["name"], d["before"])
         self.placed = placed

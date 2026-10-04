@@ -80,20 +80,19 @@ BOX_SCROLL_MS = 100  # a Select box dragged past the edge scrolls the view a bea
 
 
 def grid_span(a, b, step, step_b=None):
-    """The beats a Select box covers, from a to b (either order), on the snap grid: out to the grid line before
-    the lower one and after the higher one, so it jumps a whole grid step as soon as the mouse crosses a line
-    (the pencil goes to the NEAREST line instead). step 0 / None = not snapped. step_b = b's own step (the box's
-    corner at the mouse; a = where it was pressed: user, Shift pressed or let go while dragging changes only the
-    mouse's corner, the first one stays as Shift was at the press)."""
+    """The beats (lo, hi) a Select box covers, pressed at a and dragged to b, on the snap grid. The pressed corner
+    is the grid line before a, whichever way the box goes (user: it jumped a step when dragged leftwards); the
+    mouse's corner goes out to the grid line after b (right of it) / before b (left of it), so it jumps a whole
+    grid step as soon as the mouse crosses a line (the pencil goes to the NEAREST line instead). step 0 / None =
+    not snapped. step_b = b's own step (user, Shift pressed or let go while dragging changes only the mouse's
+    corner, the first one stays as Shift was at the press)."""
     step_b = step if step_b is None else step_b
-    (lo, s_lo), (hi, s_hi) = sorted(((a, step), (b, step_b)), key=lambda c: c[0])
-    if not s_lo and not s_hi:
-        return lo, hi
-    if s_lo:
-        lo = math.floor(lo / s_lo + 1e-9) * s_lo
-    if s_hi:
-        hi = math.ceil(hi / s_hi - 1e-9) * s_hi
-    return lo, max(hi, lo + min(s for s in (s_lo, s_hi) if s))
+    if step:
+        a = math.floor(a / step + 1e-9) * step
+    least = step_b or step or 0  # (never thinner than a step)
+    if b < a:
+        return min(math.floor(b / step_b + 1e-9) * step_b if step_b else b, a - least), a
+    return a, max(math.ceil(b / step_b - 1e-9) * step_b if step_b else b, a + least)
 
 
 def grab_while_panning(widget):
@@ -195,14 +194,14 @@ def boxes_outline(rects):
 
 
 def draw_boxes(canvas, rects, left, top, scale, **kw):
-    """The Select boxes' joined outline (boxes_outline), dashed, cut off left of x = left / above y = top. 3 px
-    at 100% (user: 2 was hard to see on dense shapes)."""
+    """The Select boxes' joined outline (boxes_outline), a solid black line centred on the box's edges (user), cut
+    off left of x = left / above y = top. 3 px at 100% (user: 2 was hard to see on dense shapes)."""
     width = max(3, round(3 * scale))
     for x0, y0, x1, y1 in boxes_outline(rects):
         if x1 < left or y1 < top:
             continue
         canvas.create_line(max(x0, left), max(y0, top), max(x1, left), max(y1, top), fill="#000000", width=width,
-                           dash=(3 * width, 2 * width), capstyle="projecting", **kw)
+                           capstyle="projecting", **kw)
 
 
 # the pointer on a Select box's side / corner / inside (box_side)

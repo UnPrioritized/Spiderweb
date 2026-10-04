@@ -922,7 +922,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 self.cancel_draft()
         elif kind in ("resize", "turn", "skew") or kind == "handle" and self.app.selected()["kind"] == "custom":
             self.app.sync_custom()  # (a stroke's point dragged: its gaps may have closed)
-        elif kind == "stretch":
+        elif kind == "stretch":  # the box goes back to its size, the shapes stay stretched (user)
+            self.box_kept = (self.drag[4], set(self.app.sels))
             self.app.sync_panel()
         if kind in ("handle", "move", "stretch"):
             self.app.sync_funnel()  # its note count

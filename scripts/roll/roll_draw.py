@@ -520,7 +520,7 @@ class RollDrawing:
             self.create_line(*line, **kw)
 
     def draw_select_box(self):
-        """The dotted box being dragged with Select (with the ones kept when Ctrl+drag adds it), or the last ones
+        """The box being dragged with Select (with the ones kept when Ctrl+drag adds it), or the last ones
         (kept_box): one outline, boxes that touch or overlap joined."""
         self.delete("selbox")
         if self.drag and self.drag[0] == "box":
