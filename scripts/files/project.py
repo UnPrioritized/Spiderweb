@@ -639,6 +639,9 @@ class ProjectFiles:
         except ValueError as e:
             messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_read_the_notes_on", e=e))
             return
+        except MemoryError:
+            messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))
+            return
         finally:
             self.busy(None)
         if raw is None:

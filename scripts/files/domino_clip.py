@@ -24,6 +24,7 @@ from files.lang import tr
 
 FORMAT = "MidiPortalSequence"
 MAGIC = b"PortalSequenceData"
+LONGEST = 2 ** 31 - 1  # pasted notes are saved as 32-bit ticks (custom.pack_notes): a note ending later = damaged data
 
 SONG_START = bytes.fromhex("e80300000000e90300000000")  # 1000 (empty), 1001 = copyright text (empty)
 SONG_REST = bytes.fromhex(  # after 1002 = PPQ
@@ -162,6 +163,8 @@ def read_notes(raw):
                                             np.full(len(r), k)]).astype(np.int64) for r, k in runs]
                           + [np.array(odd, np.int64).reshape(-1, 5)])
     rows = rows[rows[:, 2] <= 127]
+    if len(rows) and int((rows[:, 0] + rows[:, 1]).max()) > LONGEST:
+        raise ValueError(tr("domino_clip.domino_s_data_is_damaged"))
     rows[:, 1] = np.maximum(rows[:, 1], 1)
     rows[:, 3] = np.clip(rows[:, 3], 1, 127)
     return rows, ppq
