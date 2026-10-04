@@ -32,8 +32,8 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc
 from files.snap import SNAPS, snap_beats, snap_text
-from notes.hzbass import (BEND, FX, FX_START, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, bend_of, bent_part,
-                          group_count, line_at,
+from notes.hzbass import (BEND, FROM_MODES, FX, FX_START, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, bend_of, bent_part,
+                          chains, group_count, line_at,
                           loop_off, loop_on, loop_shape, tones_span)
 from roll.roll_shared import BOX_STILL, CTRL, SELECT_CURSOR, SHIFT
 from window.widgets import Scrub
@@ -82,6 +82,7 @@ class FxPane:
         self.pressed = False  # the pane was pressed last (not the notes): Delete with no points selected = the effect
         self.asking = None  # the Repeat every… window, while it's open
         self.trying = None  # the length typed in it (beats), shown as green lines
+        self.trying_how = (None, False)  # ... and how it's picked to play there (hz["from"] mode, stretched)
         self.says = ""  # for the window's status line
         self.row_h, self.pad = round(15 * self.s), round(9 * self.s)
         self.edge = round(4 * self.s)  # the top edge: drag it = the pane's height
@@ -108,14 +109,83 @@ class FxPane:
         h = self.canvas.winfo_height()
         return min(1.0, max(0.0, 1.0 - (y - self.pad) / max(1, h - 2 * self.pad)))
 
-    def copies(self, name):
-        """The repeats of a repeating effect in view: (beats one lasts, first, last number), or None when it doesn't
-        repeat or they're too close together to show one by one (drawn as a band then, not grabbable)."""
-        win, every = self.win, self.win.loops.get(name)
-        if not every or every * win.sx < 4 * self.s:
+    def note_starts(self, every, fit):
+        """[(beat, how many times one repeat is stretched)] where each note (chain of slides) starts, in order, for
+        an effect counted from each note (hz["from"]); fit = stretched over each note. No notes: from beat 0."""
+        spans = {}
+        for s, e in chains(self.win.tones).values():
+            spans[s] = max(spans.get(s, e), e)
+        if not spans:
+            return [(0.0, 1.0)]
+        return [(s, max(spans[s] - s, 1e-9) / every if fit else 1.0) for s in sorted(spans)]
+
+    def copies_of(self, every, mode=None, fit=False):
+        """The repeats in view of a line repeating every `every` beats: [(number of the repeat, beat it starts at,
+        times stretched, beat it's cut at)], mode / fit like hz["from"] / hz["fit"] (each note's own repeats,
+        starting at each note; the last point stays until the next note). None when they're too close together to
+        show one by one (drawn as a band then, not grabbable)."""
+        win = self.win
+        a, b = win.beat_at(win.kb_w), win.beat_at(self.canvas.winfo_width())
+        if not mode:
+            if every * win.sx < 4 * self.s:
+                return None
+            return [(k, k * every, 1.0, (k + 1) * every) for k in range(math.floor(a / every) - 1,
+                                                                        math.floor(b / every) + 2)]
+        st = self.note_starts(every, fit)
+        if min(every * sc for _, sc in st) * win.sx < 4 * self.s:
             return None
-        return (every, math.floor(win.beat_at(win.kb_w) / every) - 1,
-                math.floor(win.beat_at(self.canvas.winfo_width()) / every) + 1)
+        out = []
+        for i, (s, sc) in enumerate(st):
+            nxt = st[i + 1][0] if i + 1 < len(st) else math.inf
+            if nxt < a or s > b:
+                continue
+            if mode == "note":
+                out.append(((i, 0), s, sc, nxt))
+                continue
+            w = every * sc
+            for j in range(max(0, math.floor((a - s) / w)), math.floor((min(b, nxt) - s) / w) + 1):
+                if s + j * w < nxt:
+                    out.append(((i, j), s + j * w, sc, min(s + (j + 1) * w, nxt)))
+            if len(out) > 4000:
+                return None
+        return out
+
+    def copies(self, name):
+        """copies_of the effect as it repeats now, or None when it doesn't repeat (or they're too close together)."""
+        every = self.win.loops.get(name)
+        if not every:
+            return None
+        return self.copies_of(every, self.win.froms.get(name), name in self.win.fits)
+
+    def place(self, name, k):
+        """(beat, times stretched) where repeat k of a repeating effect starts."""
+        every = self.win.loops[name]
+        if isinstance(k, tuple):  # (counted from each note: (note start's number, repeat after it))
+            st = self.note_starts(every, name in self.win.fits)
+            s, sc = st[min(k[0], len(st) - 1)]
+            return s + k[1] * every * sc, sc
+        return k * every, 1.0
+
+    def copy_at(self, name, beat):
+        """The number of the repeat of a repeating effect that beat is in."""
+        win, every = self.win, self.win.loops[name]
+        mode = win.froms.get(name)
+        if not mode:
+            return math.floor(beat / every)
+        st = self.note_starts(every, name in win.fits)
+        i = max(0, sum(1 for s, _ in st if s <= beat + 1e-9) - 1)
+        s, sc = st[i]
+        return i, (math.floor(max(0.0, beat - s) / (every * sc)) if mode == "restart" else 0)
+
+    def local(self, name, beat, k):
+        """beat as beats into repeat k of a repeating effect (its points' beats), within the repeat."""
+        o, sc = self.place(name, k)
+        return min(self.win.loops[name], max(0.0, (beat - o) / sc))
+
+    def wrap(self, name):
+        """The `every` for line_at: the repeat's length when the last point leads on to the next repeat's first
+        (not once per note: it stays on its last value)."""
+        return None if self.win.froms.get(name) == "note" else self.win.loops.get(name)
 
     def points(self, name):
         """[(x, y, number of the point, number of the repeat)] of an effect's points on screen (a repeating one's in
@@ -124,32 +194,61 @@ class FxPane:
         got = self.copies(name)
         if got is None:
             return [] if name in win.loops else [(win.x_of(p[0]), self.y_of(p[1]), i, 0) for i, p in enumerate(pts)]
-        every, k0, k1 = got
-        if every * win.sx < 24 * self.s:
-            return []
-        return [(win.x_of(k * every + p[0]), self.y_of(p[1]), i, k) for k in range(k0, k1 + 1)
-                for i, p in enumerate(pts)]
+        every = win.loops[name]
+        return [(win.x_of(o + p[0] * sc), self.y_of(p[1]), i, k) for k, o, sc, until in got
+                if every * sc * win.sx >= 24 * self.s for i, p in enumerate(pts) if o + p[0] * sc <= until + 1e-9]
 
     def segments(self, name):
         """[(from beat, value, to beat, value, bend, number of the point it starts at, number of the repeat)]: the
         lines between an effect's points in view (a repeating one: every repeat's, the last one leading to the next
-        repeat's first point)."""
+        repeat's first point; counted from each note: only the whole ones before the next note)."""
         pts = self.win.fxl[name]
         got = self.copies(name)
         if got is None:
             return [(a[0], a[1], b[0], b[1], bend_of(a), i, 0) for i, (a, b) in enumerate(zip(pts, pts[1:]))]
-        every, k0, k1 = got
-        out = []
-        for k in range(k0, k1 + 1):
+        every, wrap, out = self.win.loops[name], self.wrap(name), []
+        for k, o, sc, until in got:
             for i, a in enumerate(pts):
-                b, kb = (pts[i + 1], k) if i + 1 < len(pts) else (pts[0], k + 1)
-                out.append((k * every + a[0], a[1], kb * every + b[0], b[1], bend_of(a), i, k))
+                if i + 1 < len(pts):
+                    b, ob = pts[i + 1], o
+                elif wrap:
+                    b, ob = pts[0], o + every * sc
+                else:
+                    continue
+                b0, b1 = o + a[0] * sc, ob + b[0] * sc
+                if b1 <= until + 1e-9 or not self.win.froms.get(name):
+                    out.append((b0, a[1], b1, b[1], bend_of(a), i, k))
         return out
+
+    def sampled(self, name, got):
+        """[(x, y)] of a line counted from each note (hz["from"]): worked out every few pixels in each repeat (and
+        at each point), so it's cut where the next note starts."""
+        win, pts, wrap = self.win, self.win.fxl[name], self.wrap(name)
+        w, step, xy = self.canvas.winfo_width(), 2 * self.s, []
+        for n, (k, o, sc, until) in enumerate(got):
+            x0 = win.x_of(o) if n else min(win.kb_w, win.x_of(o))
+            x1 = min(w, win.x_of(until)) if until < math.inf else w
+            if x1 <= x0:
+                continue
+            xs = set(np.arange(x0, x1, step).tolist()) | {x1}
+            for p in pts:
+                x = win.x_of(o + p[0] * sc)
+                if x0 <= x <= x1:
+                    xs |= {x, max(x0, x - 0.01)}
+            xs = sorted(xs)
+            u = np.maximum(0.0, (np.array([win.beat_at(x) for x in xs]) - o) / sc)
+            xy += [(x, self.y_of(v)) for x, v in zip(xs, line_at(pts, np.minimum(u, win.loops[name] - 1e-12)
+                                                                 if wrap else u, wrap).tolist())]
+        return xy
 
     def line(self, name):
         """[(x, y)] of an effect's line: through its points, bent where they say, and flat out to both sides of the
         pane (a repeating one: every repeat in view)."""
         win, pts = self.win, self.win.fxl[name]
+        if win.froms.get(name):
+            got = self.copies(name)
+            if got:
+                return self.sampled(name, got)
         xy = []
         for b0, v0, b1, v1, bend, _, _ in self.segments(name):
             x0, x1 = win.x_of(b0), win.x_of(b1)
@@ -216,17 +315,15 @@ class FxPane:
             c.create_text((kb + w) / 2, h / 2, text=tr("hz.fx_hint"), fill="#777", width=w - kb - 40 * s,
                           justify="center")
         order = sorted(self.names(), key=lambda k: base(k) == self.active)  # (the highlighted one on top)
-        if self.trying and self.trying * win.sx >= 3 * s:  # Repeat every… being typed: where each would start
-            for k in range(math.floor(win.beat_at(kb) / self.trying), math.floor(win.beat_at(w) / self.trying) + 2):
-                x = win.x_of(k * self.trying)
-                if x > kb:
-                    c.create_line(x, 0, x, h, fill=REPEAT_LINE, width=max(1, round(1.5 * s)))
-        if self.active in win.loops and self.copies(self.active):  # where each repeat starts
-            every, k0, k1 = self.copies(self.active)
-            for k in range(k0, k1 + 1):
-                x = win.x_of(k * every)
-                if x > kb:
-                    c.create_line(x, 0, x, h, fill="#dcdcdc", dash=(2, 3))
+        trying = self.copies_of(self.trying, *self.trying_how) if self.trying else None
+        for _, o, _, _ in trying or ():  # Repeat every… being typed: where each would start
+            x = win.x_of(o)
+            if x > kb:
+                c.create_line(x, 0, x, h, fill=REPEAT_LINE, width=max(1, round(1.5 * s)))
+        for _, o, _, _ in (self.copies(self.active) or () if self.active in win.loops else ()):  # where each
+            x = win.x_of(o)  # repeat starts
+            if x > kb:
+                c.create_line(x, 0, x, h, fill="#dcdcdc", dash=(2, 3))
         for name in order:
             lit = self.active in (None, base(name))
             colour = FX_COLOR[base(name)] if lit else faint(FX_COLOR[base(name)])
@@ -336,8 +433,7 @@ class FxPane:
                            SELECT_CURSOR if e.x >= self.win.kb_w and self.win.tool.get() == "select" else "")
         if name:
             every = self.win.loops.get(name)
-            self.say(tr("hz.fx_%s_tip" % name) + (" " + tr("hz.fx_repeats", every=self.every_text(every))
-                                                  if every else "") +
+            self.say(tr("hz.fx_%s_tip" % name) + (" " + self.repeat_text(name, "hz.fx_repeats") if every else "") +
                      (" " + tr("hz.fx_is_off") if name in self.win.off else
                       " " + tr("hz.fx_box_tip") if name in self.win.fxl and self.on_box(e.x) else ""))
         elif hit and hit[0] == "point":
@@ -387,7 +483,7 @@ class FxPane:
             self.drag = {"kind": "draw", "fx": self.active, "x0": e.x, "y0": e.y, "moved": False,  # faint line
                          "faint": faint,  # adds a point there)
                          "before": self.state(), "orig": copy.deepcopy(win.fxl[self.active]), "got": {},
-                         "k": math.floor(max(0.0, win.beat_at(e.x)) / every) if every else 0}
+                         "k": self.copy_at(self.active, max(0.0, win.beat_at(e.x))) if every else 0}
             return
         if faint:  # another effect's faint line: a new point on the highlighted one, at the mouse
             hit = "line", faint
@@ -407,8 +503,8 @@ class FxPane:
         every = win.loops.get(name)
         if hit[0] == "line":  # a new point where the line was pressed (a repeating one: in that repeat)
             beat = max(0.0, win.beat_at(e.x))
-            k = math.floor(beat / every) if every else 0
-            i = self.add_point(win.fxl[name], beat - k * every if every else beat, every)
+            k = self.copy_at(name, beat) if every else 0
+            i = self.add_point(win.fxl[name], self.local(name, beat, k) if every else beat, self.wrap(name))
         else:
             i, k = hit[2], hit[3]
         if hit[0] == "line" or (name, i) not in self.sel:
@@ -426,8 +522,8 @@ class FxPane:
         before = self.state()
         every = win.loops.get(name)
         beat = max(0.0, win.beat_at(x))
-        k = math.floor(beat / every) if every else 0
-        i = self.add_point(win.fxl[name], beat - k * every if every else beat, every)
+        k = self.copy_at(name, beat) if every else 0
+        i = self.add_point(win.fxl[name], self.local(name, beat, k) if every else beat, self.wrap(name))
         self.sel = {(name, i)}
         self.drag = {"kind": "point", "fx": name, "i": i, "k": k, "before": before,
                      "orig": {(name, i): tuple(win.fxl[name][i][:2])}}
@@ -464,7 +560,12 @@ class FxPane:
             return
         name, i = d["fx"], d["i"]
         every = win.loops.get(name)
-        at = win.snap(win.beat_at(e.x), e) - (d["k"] * every if every else 0.0)  # (a repeat: all of them move)
+        at = win.snap(win.beat_at(e.x), e)
+        if every:  # (a repeat: all of them move)
+            o, sc = self.place(name, d["k"])
+            if win.froms.get(name):  # (counted from each note: the grid from the note's start)
+                at = win.snap(win.beat_at(e.x) - o, e) + o
+            at = (at - o) / sc
         v = self.value_at(e.y)
         if name == "pitch" and not e.state & SHIFT:  # (whole keys; Shift = in between)
             v = 0.5 + round((v - 0.5) * 2 * PITCH) / (2 * PITCH)
@@ -654,7 +755,8 @@ class FxPane:
         if not new:  # (all past the end of the repeat)
             return
         # the line as it was up to where the drawing starts and on from where it ends (a step at both)
-        new = [[lo, float(line_at(orig, lo, every))]] + new + [[hi, float(line_at(orig, hi, every))]]
+        wrap = self.wrap(name)
+        new = [[lo, float(line_at(orig, lo, wrap))]] + new + [[hi, float(line_at(orig, hi, wrap))]]
         win.fxl[name] = sorted(kept + new, key=lambda p: p[0])
         self.says = self.value_text(name, got[gs[-1]])
         win.redraw()
@@ -666,8 +768,11 @@ class FxPane:
             snap = win.snap_beats()
             d["hold"] = bool(snap) and not e.state & SHIFT
             d["step"] = snap if d["hold"] else 4.0 / win.sx
-        every = win.loops.get(d["fx"])
-        beat = max(0.0, win.beat_at(x) - (d["k"] * every if every else 0.0))
+        beat = win.beat_at(x)
+        if win.loops.get(d["fx"]):
+            o, sc = self.place(d["fx"], d["k"])
+            beat = (beat - o) / sc
+        beat = max(0.0, beat)
         g = int(math.floor(beat / d["step"] + (0 if d["hold"] else 0.5)))
         v = self.value_at(y)
         if d["fx"] == "pitch" and not e.state & SHIFT:  # (whole keys, like the points)
@@ -708,7 +813,7 @@ class FxPane:
         self.sel = set()
         for n, pts in clip.items():
             every = win.loops.get(n)
-            a = at % every if every else at
+            a = self.local(n, at, self.copy_at(n, at)) if every else at
             new = [[a + p[0], *p[1:]] for p in pts if not every or a + p[0] <= every]
             if not new:
                 continue
@@ -765,15 +870,29 @@ class FxPane:
         out = [(tr("hz.fx_bars", n=n), n * bar) for n in (4, 2)]
         return out + [(snap_text(s), snap_beats(s, bar)) for s in SNAPS if s != "off"]
 
-    def set_loop(self, name, every):
+    def repeat_text(self, name, key):
+        """A text about how an effect repeats (key "hz.fx_repeat" for the menu, "hz.fx_repeats" for the status
+        line), saying whether it counts from each note and is stretched."""
+        win = self.win
+        mode = win.froms.get(name)
+        if mode:
+            key += "_" + mode + ("_fit" if name in win.fits else "")
+        elif key == "hz.fx_repeat":
+            key = "hz.fx_repeat_now"
+        return tr(key, every=self.every_text(win.loops[name]))
+
+    def set_loop(self, name, every, mode=None, fit=False):
         """The effect repeats every `every` beats (None = not any more). Its line is squeezed into one repeat (the
-        points keep their shape), stretched back over the notes when it stops, or made longer / shorter."""
+        points keep their shape), stretched back over the notes when it stops, or made longer / shorter.
+        mode = None (from the shape's left edge) / "note" / "restart" (hz["from"]); fit = stretched over each note."""
         win = self.win
         before = self.state()
         if name not in win.fxl:
             a, b = self.span()
             win.fxl[name] = [[a + u * (b - a), v] for u, v in FX_START[name]]
         old, pts = win.loops.get(name), win.fxl[name]
+        win.froms.pop(name, None)
+        win.fits = [n for n in win.fits if n != name]
         if every is None:
             if old:
                 win.fxl[name] = loop_off(pts, old, *self.span())
@@ -782,6 +901,10 @@ class FxPane:
         else:
             win.fxl[name] = [[p[0] * every / old, *p[1:]] for p in pts] if old else loop_on(pts, every)
             win.loops[name] = every
+            if mode:
+                win.froms[name] = mode
+                if fit:
+                    win.fits = [n for n in FX if n in win.fits or n == name]
         self.active = name
         if self.now() != before:
             win.commit_fx(before)
@@ -789,9 +912,10 @@ class FxPane:
             win.redraw()
 
     def ask_repeat(self, name, x, y):
-        """The Repeat every… window: how long one repeat of the effect is, as a note length [n] / [n] like the snap
-        (1 / 4 = one beat; user). Each number can be typed, dragged sideways (its box; the label: the first one), Up / Down,
-        wheel.
+        """The Repeat every… window: how it plays (all the way from the shape's start / once per note / restart at
+        each note, hz["from"]), how long one repeat is, as a note length [n] / [n] like the snap (1 / 4 = one beat;
+        user), and Stretch to each note (then the length boxes are greyed: the note decides). Each number can be
+        typed, dragged sideways (its box; the label: the first one), Up / Down, wheel.
         While it's open the pane shows where each repeat would start (green lines). OK / Enter = set_loop, Cancel /
         Escape / the window's X = nothing."""
         if self.asking:
@@ -804,11 +928,23 @@ class FxPane:
         top.resizable(False, False)
         f = ttk.Frame(top, padding=10)
         f.pack()
+        modes = (None,) + FROM_MODES
+        texts = [tr("hz.fx_from_" + (m or "left")) for m in modes]
+        was = win.froms.get(name) if name in win.loops else None
+        how = tk.StringVar(top, value=texts[modes.index(was)])
+        fit = tk.BooleanVar(top, value=name in win.fits)
+        row = ttk.Frame(f)
+        row.pack(anchor="w", pady=(0, 6))
+        ttk.Label(row, text=tr("hz.fx_plays")).pack(side="left")
+        pick = ttk.Combobox(row, textvariable=how, values=texts, state="readonly",
+                            width=max(len(t) for t in texts) + 1)
+        pick.pack(side="left", padx=(6, 0))
         now = Fraction((win.loops.get(name) or win.snap_beats() or 1.0) / 4).limit_denominator(REPEAT_MOST)
         num = tk.StringVar(top, value=str(now.numerator))
         den = tk.StringVar(top, value=str(now.denominator))
+        start = (num.get(), den.get())
         row = ttk.Frame(f)
-        row.pack(anchor="w", pady=(0, 10))
+        row.pack(anchor="w", pady=(0, 6))
         lb = ttk.Label(row, text=tr("hz.fx_repeat_every"))
         lb.pack(side="left")
         top.entry = ttk.Entry(row, textvariable=num, width=5, justify="center")
@@ -816,8 +952,27 @@ class FxPane:
         ttk.Label(row, text="/").pack(side="left")
         top.under = ttk.Entry(row, textvariable=den, width=5, justify="center")
         top.under.pack(side="left", padx=(4, 0))
+        stretch = ttk.Checkbutton(f, text=tr("hz.fx_fit"), variable=fit)
+        stretch.pack(anchor="w", pady=(0, 10))
         b = ttk.Frame(f)
         b.pack(anchor="e")
+
+        def mode():
+            return modes[texts.index(how.get())] if how.get() in texts else None
+
+        def switched(*_):
+            """The boxes follow the choice: Lasts / Repeat every; greyed while stretched; a new envelope starts at
+            half a beat (the shortest heard, user) unless something was typed."""
+            m = mode()
+            if m and name not in win.loops and (num.get(), den.get()) == start:
+                num.set("1")
+                den.set("8")
+            lb.config(text=tr("hz.fx_lasts" if m == "note" else "hz.fx_repeat_every"))
+            stretch.config(state="normal" if m else "disabled")
+            on = "disabled" if m and fit.get() else "normal"
+            for w in (top.entry, top.under):
+                w.config(state=on)
+            shown()
 
         def value():
             """The length in beats, or None when the numbers aren't whole numbers 1.. or it's too long."""
@@ -832,14 +987,15 @@ class FxPane:
             if not top.winfo_exists():
                 return
             v = self.trying = value()
+            self.trying_how = (mode(), fit.get() and mode() is not None)
             ok.config(state="normal" if v else "disabled")
             self.redraw()
 
         def done(keep):
-            v = value() if keep else None
+            v, m, stretched = (value(), mode(), fit.get()) if keep else (None, None, False)
             top.destroy()
             if v:
-                self.set_loop(name, v)
+                self.set_loop(name, v, m, stretched and m is not None)
 
         def gone(e):
             if e.widget is top:
@@ -854,13 +1010,15 @@ class FxPane:
         Scrub(win.app, [(top.under, den, None)], (1, 4, 1), 1, REPEAT_MOST, drag_box=True)
         num.trace_add("write", shown)
         den.trace_add("write", shown)
+        how.trace_add("write", switched)
+        fit.trace_add("write", switched)
         top.bind("<Return>", lambda e: done(True) if value() else None)
         top.bind("<Escape>", lambda e: done(False))
         top.bind("<Destroy>", gone)
         for k in ("z", "Z", "y", "Y"):  # (the main window's undo would change the lines under it)
             top.bind(f"<Control-{k}>", lambda e: "break")
         top.protocol("WM_DELETE_WINDOW", lambda: done(False))
-        shown()
+        switched()
         top.geometry(f"+{x}+{y}")
         top.entry.focus_set()
         top.entry.select_range(0, "end")
@@ -892,7 +1050,7 @@ class FxPane:
         target = name or (hit and base(hit[1])) or (self.active if e.x >= self.win.kb_w else None)
         if target:  # repeating: how long one repeat is, and ready-made shapes for it
             every = self.win.loops.get(target)
-            menu.add_command(label=tr("hz.fx_repeat_now", every=self.every_text(every)) if every else
+            menu.add_command(label=self.repeat_text(target, "hz.fx_repeat") if every else
                              tr("hz.fx_repeat_ask"), command=lambda: self.ask_repeat(target, e.x_root, e.y_root))
             if every:
                 menu.add_command(label=tr("hz.fx_repeat_off"), command=lambda: self.set_loop(target, None))
