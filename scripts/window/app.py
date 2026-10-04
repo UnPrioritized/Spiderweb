@@ -289,7 +289,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         top.bind("<Configure>", lambda e: self.fit_toolbar())
         ttk.Label(bar, text=tr("app.snap")).pack(side="left", padx=(0, 4))
         SnapPicker(self, bar, self.snap).button.pack(side="left")
-        redraw = lambda: self.roll.request_redraw()
+        redraw = lambda: (self.roll.request_redraw(), self.schedule_autosave())
         ttk.Checkbutton(bar, text=tr("app.show_lines"), variable=self.show_lines,
                         command=redraw).pack(side="left", padx=(12, 0))
         ttk.Checkbutton(bar, text=tr("app.show_notes"), variable=self.show_notes,

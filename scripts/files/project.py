@@ -314,6 +314,7 @@ class ProjectFiles:
             data["window"] = {"geometry": self._normal_geometry or self.wm_geometry(),
                               "maximized": self.wm_state() == "zoomed",
                               "velocity": self.show_velocity.get(), "history": self.show_history.get(),
+                              "show_lines": self.show_lines.get(), "show_notes": self.show_notes.get(),
                               "velocity_height": self.velocity_height() / self.scale,
                               "midi_device": self.midi_device.get(), "live": self.live.get(),
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
@@ -382,6 +383,8 @@ class ProjectFiles:
             if win.get("midi_device"):
                 self.midi_device.set(str(win["midi_device"]))
             self.live.set(win.get("live") is True)
+            self.show_lines.set(win.get("show_lines") is not False)
+            self.show_notes.set(win.get("show_notes") is not False)
             for key, attr in (("tumour_window", "tumour_pos"), ("graph_window", "graph_pos"),
                               ("claw_window", "claw_pos"), ("strum_window", "strum_pos"), ("chop_window", "chop_pos")):
                 pos = win.get(key)
