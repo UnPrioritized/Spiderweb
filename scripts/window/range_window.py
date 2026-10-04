@@ -37,7 +37,7 @@ BAR_PX = 3  # bars at least this wide: more gates than fit share a bar
 
 
 class RangeGraph(tk.Toplevel):
-    def __init__(self, app):
+    def __init__(self, app, tgts=None):
         super().__init__(app)
         self.app = app
         self.title(tr("range_window.title"))
@@ -46,7 +46,7 @@ class RangeGraph(tk.Toplevel):
         s = self.s = app.scale
         self.w, self.h, self.cw = int(440 * s), int(220 * s), int(300 * s)
         self.ml, self.mr, self.mt, self.mb = int(56 * s), int(12 * s), int(10 * s), int(22 * s)
-        self.tgts = app.custom_targets()
+        self.tgts = tgts or app.custom_targets()
         self.before = json.dumps(app.shapes)
         self.old = [json.loads(json.dumps({k: t.get(k) for k in ("gate", "range", "range_kept")})) for t in self.tgts]
         # each shape's range, kept while it's switched off so switching on brings it back (sh["range_kept"] while
@@ -498,5 +498,6 @@ class RangeGraph(tk.Toplevel):
 
 
 def open_range_graph(app):
-    if app.custom_targets():
-        RangeGraph(app)
+    tgts = app.skip_hz(app.custom_targets())  # (a Hz bass picked too: left out, after a warning)
+    if tgts:
+        RangeGraph(app, tgts)

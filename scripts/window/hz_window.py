@@ -1766,6 +1766,7 @@ class HzWindow(tk.Toplevel):
             new.update(fill="spam", pts=box_frame(app.hz_start, lo, app.hz_start + tones_span(tones), hi),
                        hz=dict(self.new_hz(bpm), tones=copy.deepcopy(tones), grow=True, own=True,
                                **copy.deepcopy(fx)))  # (its own copy)
+            new.pop("range", None)  # (no gate Range with Hz bass, user)
             if not app.confirm_big([new]):
                 return self.call_off(before, before_fx)
             app.hz_start = None
@@ -1780,6 +1781,11 @@ class HzWindow(tk.Toplevel):
                 new["hz"] = dict(hz, tones=tones, **({"grow": True} if self.grow.get() else {}), **copy.deepcopy(fx))
                 if new["fill"] not in SPAM_FILLS:
                     new["fill"] = "spam"
+                if not sh.get("hz"):  # (a spam shape's first notes: its gate and Range come back if Hz bass is
+                    new["before_hz"] = {"gate": sh["gate"]}  # unticked; no Range with Hz bass, user)
+                    if new.get("range"):
+                        new["range_kept"] = new.pop("range")
+                        new["before_hz"]["range"] = True
                 if self.grow.get():
                     fit_length(new)
                 if not app.confirm_big([new]):

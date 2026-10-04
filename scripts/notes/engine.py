@@ -140,6 +140,13 @@ def clean_shape(sh):
         hz = clean_hz(sh.get("hz"))
         if hz:  # Hz bass (custom.py): the gate is one wave of a tone
             out["hz"] = hz
+            was = sh.get("before_hz")  # (the spam gate it had before Hz bass was ticked: back when it's unticked)
+            try:
+                gate = float(was["gate"])
+                if math.isfinite(gate) and gate > 0:
+                    out["before_hz"] = {"gate": gate, **({"range": True} if was.get("range") else {})}
+            except (TypeError, KeyError, ValueError, AttributeError):
+                pass
         fr = sh.get("from")  # the shapes it was made of (convert.py)
         if isinstance(fr, dict) and isinstance(fr.get("shapes"), list) and fr["shapes"]:
             olds = [clean_shape(o) if isinstance(o, dict) else None for o in fr["shapes"]]

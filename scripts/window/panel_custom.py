@@ -291,6 +291,11 @@ class CustomPanel:
         self.gate_entry.config(state="normal" if spam and not hz else "disabled")
         self.ends_box.config(state="readonly" if spam and not hz else "disabled")
         self.range_btn.config(state="normal" if spam and not hz else "disabled")
+        for value, _, base in FILL_CHOICES:  # (Hz bass needs a spam fill: Fill / Empty only after unticking it)
+            if value not in SPAM_FILLS:
+                self.fill_buttons[value].config(state="disabled" if hz else "normal")
+                if hz:
+                    self.fill_tips[value].text = base + "\n\n" + tr("panel_custom.hz_no_fill")
         ranged = spam and not hz and bool(rg)  # (Range: its own grid from the shape's left edge, so no ends / start)
         for b in self.align_buttons:  # (stretched gates fill each key exactly: where they start doesn't matter)
             b.config(state="normal" if spam and not hz and ends != "stretch" else "disabled")
@@ -392,6 +397,10 @@ class CustomPanel:
         if self._loading:
             return
         tgts = self.custom_targets()
+        if key == "gate" or key == "fill" and value not in SPAM_FILLS:  # (a Hz bass's gate is its tone's)
+            tgts = self.skip_hz(tgts)
+            if not tgts:
+                return self.sync_custom()
         placed = [t for t in tgts if t is not self.custom_defaults]
         same = all(abs(t[key] - value) < 1e-12 if key == "gate" else abs(t.get(key, 0) - value) < 1e-12
                    if key == "edge" else bool(t.get(key)) == value if key in CUSTOM_FLAGS
@@ -410,6 +419,16 @@ class CustomPanel:
         self.sync_custom()
         if key == "fill" and value != "empty":
             self.tips.show("fill", wait=True)
+
+    def skip_hz(self, tgts):
+        """Spam shapes and a Hz bass picked together: a gate / Range / Fill or Empty change leaves the Hz bass as it
+        is (user: they don't mix), after an OK / Cancel warning. [] = Cancel (or only Hz bass)."""
+        rest = [t for t in tgts if not t.get("hz")]
+        if len(rest) == len(tgts) or not rest:
+            return rest
+        ok = messagebox.askokcancel(tr("panel_custom.spiderweb"), tr("panel_custom.hz_skipped"), icon="warning",
+                                    parent=self)
+        return rest if ok else []
 
     def on_gate(self):
         if self._loading or str(self.gate_entry.cget("state")) == "disabled":
@@ -530,15 +549,31 @@ class CustomPanel:
             return self.sync_custom()
 
         def changed(t):
-            rest = {k: v for k, v in t.items() if k != "hz"}
-            if not hz:
+            if not hz:  # (off: the spam gate and Range it had before come back, user)
+                rest = {k: v for k, v in t.items() if k not in ("hz", "before_hz")}
+                was = t.get("before_hz") if t.get("hz") else None
+                if was:
+                    rest["gate"] = was["gate"]
+                    if was.get("range") and rest.get("range_kept"):
+                        rest["range"] = rest.pop("range_kept")
                 return rest
+            rest = {k: v for k, v in t.items() if k != "hz"}
             # (a new one: Auto gates, user)
-            return dict(rest, hz=dict(t.get("hz") or {"auto": AUTO}, bpm=float(bpm), **hz), gate=hz_gate(hz, bpm))
+            new = dict(rest, hz=dict(t.get("hz") or {"auto": AUTO}, bpm=float(bpm), **hz), gate=hz_gate(hz, bpm))
+            if not t.get("hz"):  # (switched on: what it had is kept; a Range doesn't work with Hz bass, user)
+                new["before_hz"] = {"gate": t["gate"]}
+                if new.get("range"):
+                    new["range_kept"] = new.pop("range")
+                    new["before_hz"]["range"] = True
+            return new
 
         placed = [t for t in tgts if t is not self.custom_defaults]
-        if (all(changed(t).get("hz") == t.get("hz") for t in tgts)
-                or not self.confirm_big([changed(t) for t in placed])):
+        if all(changed(t).get("hz") == t.get("hz") for t in tgts):
+            return self.sync_custom()
+        if hz and any(t.get("range") and not t.get("hz") for t in placed) and not messagebox.askokcancel(
+                tr("panel_custom.spiderweb"), tr("panel_custom.hz_range_off"), icon="warning", parent=self):
+            return self.sync_custom()
+        if not self.confirm_big([changed(t) for t in placed]):
             return self.sync_custom()
         if placed:
             self.push_undo(name=tr("panel_custom.hz_bass"))
