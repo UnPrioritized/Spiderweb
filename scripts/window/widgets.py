@@ -23,7 +23,7 @@ def grid_shown(w, on):
 class StatusLine(ttk.Label):
     """The main window's status line. Text put in with config(text=...) is a message: it stays HOLD_MS (user: the
     mouse position wrote over it at once), then the line goes back to what show() gave last (position, counts)."""
-    HOLD_MS = 4000
+    HOLD_MS = 3000
 
     def __init__(self, master, **kw):
         super().__init__(master, **kw)
