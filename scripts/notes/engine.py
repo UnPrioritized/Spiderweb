@@ -79,13 +79,23 @@ def make_shape(kind, pts, defaults):
     return sh
 
 
+def clean_basics(sh):
+    """vel0 / vel1 / end_dot from a file (a shape, or the defaults for new shapes), made valid: a broken one = its
+    default."""
+    out = dict(SHAPE_DEFAULTS)
+    for k in ("vel0", "vel1"):
+        v = sh.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+            out[k] = max(1, min(127, v))
+    out["end_dot"] = bool(sh.get("end_dot", False))
+    return out
+
+
 def clean_shape(sh):
     """Shape loaded from a file -> valid shape, or None if it's a kind we no longer support."""
     if sh.get("kind") not in KINDS or len(sh.get("pts", [])) < 1:
         return None
-    out = dict(SHAPE_DEFAULTS)
-    out.update({k: sh[k] for k in SHAPE_DEFAULTS if k in sh})
-    out["end_dot"] = bool(out["end_dot"])
+    out = clean_basics(sh)
     out["kind"] = sh["kind"]
     out["pts"] = [[float(b), float(p)] for b, p in sh["pts"]]
     env = sh.get("vel_env")

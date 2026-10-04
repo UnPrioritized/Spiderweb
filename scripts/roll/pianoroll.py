@@ -293,6 +293,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         """Zoom and scroll position from a saved project (applied once the canvas has a size)."""
         try:
             v = {k: float(v[k]) for k in ("t", "top", "sx", "sy")}
+            if not all(map(math.isfinite, v.values())):
+                v = None
         except (TypeError, KeyError, ValueError):
             v = None
         self._saved_view = v

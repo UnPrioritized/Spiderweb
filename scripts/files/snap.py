@@ -67,6 +67,8 @@ def snap_beats(snap, beats_per_bar):
 def clean_snap(snap):
     """A snap read from a file, made valid. Older versions had 1/64 and 1/128 in the list: they become custom ones;
     "Off" was written with a capital."""
+    if not isinstance(snap, str):
+        return DEFAULT_SNAP
     if snap in SNAPS or custom_parts(snap):
         return snap
     old = {"Off": "off", "1/64": custom_snap("", 64, 1), "1/128": custom_snap("", 128, 1)}

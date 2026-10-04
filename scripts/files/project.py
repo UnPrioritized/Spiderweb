@@ -1,6 +1,7 @@
 """Project files: saving / opening projects, the autosave, and writing the MIDI file."""
 
 import json
+import math
 import os
 import re
 import time
@@ -11,7 +12,7 @@ import numpy as np
 
 from files.lang import tr
 from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape
-from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_shape
+from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_shape
 from notes.hzbass import clean_hz
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
 from notes.paths import KEYS
@@ -31,6 +32,31 @@ OUTPUT_DIR = os.path.join(HERE, "output")
 def backup_path(autosave):
     """autosave.json -> autosave-backup.json (an ordinary project file, so Open project can open it too)."""
     return os.path.splitext(autosave)[0] + "-backup.json"
+
+
+def read_json(path):
+    """A project file's contents (a BOM, which some text editors put at the start, is skipped)."""
+    with open(path, encoding="utf-8-sig") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(tr("project.not_a_spiderweb_project"))
+    return data
+
+
+def keep_aside(path, name, move=False):
+    """A copy of the file (or the file itself, moved) as <name>-<date>-<time>.json in its folder, never replacing an
+    earlier one. Returns its path."""
+    stamp, n = time.strftime(f"{name}-%Y%m%d-%H%M%S"), 1
+    kept = os.path.join(os.path.dirname(path), stamp + ".json")
+    while os.path.exists(kept):
+        n += 1
+        kept = os.path.join(os.path.dirname(path), f"{stamp}-{n}.json")
+    if move:
+        os.replace(path, kept)
+    else:
+        with open(path, "rb") as f:
+            write_bytes(kept, f.read())
+    return kept
 
 
 def short_num(x, digits=12):
@@ -127,31 +153,71 @@ class ProjectFiles:
         }
 
     def load_file(self, path, quiet=False):
+        """Opens a project. Everything in it is read and checked before anything changes: a file that can't be
+        used leaves the project as it was; a broken setting keeps the one there is now; a shape that can't be read
+        is left out and self.load_notes says so (tell_load_notes)."""
+        self.load_notes = []
         try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-            shapes = [s for s in (clean_shape(sh) for sh in data.get("shapes", [])) if s]
-            defaults = dict(SHAPE_DEFAULTS)
-            defaults.update({k: type(SHAPE_DEFAULTS[k])(v) for k, v in data.get("defaults", {}).items()
-                             if k in SHAPE_DEFAULTS})
-            cycle = clean_cycle(data.get("defaults", {}).get("cycle"))
-            if cycle:  # "Colours" for new shapes (custom.py)
-                defaults["cycle"] = cycle
-        except (OSError, ValueError, TypeError, AttributeError) as e:
+            data = read_json(path)
+            if not isinstance(data.get("shapes", []), list):
+                raise ValueError(tr("project.not_a_spiderweb_project"))
+        except (OSError, ValueError) as e:
             if not quiet:
                 messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_open_project", e=e))
             return False
-        for key in ("ppq", "bpm", "beats", "output"):
-            if key in data:
-                self.pvar[key].set(str(data[key]))
-        mode = data.get("channel_mode", "auto" if data.get("auto_channels") else "single")
+        shapes = []
+        for sh in data.get("shapes", []):
+            try:
+                sh = clean_shape(sh) if isinstance(sh, dict) else None
+            except Exception:  # (damaged, or written in a way this Spiderweb doesn't know)
+                sh = None
+            if sh:
+                shapes.append(sh)
+        lost = len(data.get("shapes", [])) - len(shapes)
+        if lost:
+            self.load_notes.append(tr("project.shapes_left_out", n=lost))
+
+        def get(fn):  # one setting read from the file: None if it's broken
+            try:
+                return fn()
+            except Exception:
+                return None
+
+        def text(key):  # (a setting that's always text: anything else counts as missing)
+            return data[key] if isinstance(data.get(key), str) else None
+
+        def table(key):
+            return data[key] if isinstance(data.get(key), dict) else {}
+
+        boxes = {key: str(data[key]) for key in ("ppq", "bpm", "beats") if isinstance(data.get(key), (int, float, str))
+                 and not isinstance(data[key], bool)}
+        if text("output") is not None:
+            boxes["output"] = data["output"]
+        defaults = clean_basics(table("defaults"))
+        cycle = get(lambda: clean_cycle(table("defaults").get("cycle")))
+        if cycle:  # "Colours" for new shapes (custom.py)
+            defaults["cycle"] = cycle
+        mode = text("channel_mode") or ("auto" if data.get("auto_channels") else "single")
+        split = text("channel_split")
+        starts = [v for v, _ in DOMINO_STARTS]
+        start = text("domino_start")
+        keys = table("hz_defaults")
+        hz_keys = ({"lo": keys["lo"], "hi": keys["hi"]} if all(type(keys.get(k)) is int for k in ("lo", "hi"))
+                   and 0 <= keys["lo"] <= keys["hi"] <= 255 else None)
+        custom = get(lambda: self.read_custom_defaults(table("custom_defaults")))
+        funnel = get(lambda: {k: v for k, v in clean_funnel(table("funnel_defaults")).items() if k in FUNNEL_DEFAULTS}
+                     if table("funnel_defaults") else None)
+        tx = get(lambda: clean_text(dict(table("text_defaults"), bbox=[0, 0, 1, 1])) if table("text_defaults") else None)
+        pg = get(lambda: clean_polygon(data.get("polygon_defaults")))
+        playhead = get(lambda: float(data.get("playhead", 0)))
+
+        for key, value in boxes.items():
+            self.pvar[key].set(value)
         self.channel_mode.set(mode if mode in CHANNEL_MODES else "single")
         self.keys_var.set(str(KEYS[1] if data.get("keys") == KEYS[1] else KEYS[0]))
-        split = data.get("channel_split")
         self.split_box.current(SPLITS.index(split) if split in SPLITS else 0)
-        starts = [v for v, _ in DOMINO_STARTS]
-        if data.get("domino_start") in starts:
-            self.domino_box.current(starts.index(data["domino_start"]))
+        if start in starts:
+            self.domino_box.current(starts.index(start))
         if "snap" in data:
             self.snap.set(clean_snap(data["snap"]))
         if "hz_snap" in data:
@@ -159,60 +225,24 @@ class ProjectFiles:
         self.hz_line.set(data.get("hz_line") is not False)
         self.hz_fx.set(data.get("hz_fx") is True)
         self.defaults = defaults
-        keys = data.get("hz_defaults")
-        if (isinstance(keys, dict) and all(isinstance(keys.get(k), int) for k in ("lo", "hi"))
-                and 0 <= keys["lo"] <= keys["hi"] <= 255):
-            self.hz_defaults = {"lo": keys["lo"], "hi": keys["hi"]}
-        custom = data.get("custom_defaults") or {}
-        if isinstance(custom, dict):
-            if custom.get("fill") in FILLS:
-                self.custom_defaults["fill"] = custom["fill"]
-            if custom.get("align") in ALIGNS:
-                self.custom_defaults["align"] = custom["align"]
-            if custom.get("ends") in ENDS:
-                self.custom_defaults["ends"] = custom["ends"]
-            for key in CUSTOM_FLAGS:
-                self.custom_defaults[key] = bool(custom.get(key))
-            try:
-                self.custom_defaults["gate"] = max(1e-6, float(custom.get("gate", CUSTOM_DEFAULTS["gate"])))
-            except (TypeError, ValueError):
-                pass
-            self.custom_defaults.pop("edge", None)
-            try:  # the smallest outline gate (custom.grow_inward)
-                if float(custom.get("edge") or 0) > 0:
-                    self.custom_defaults["edge"] = float(custom["edge"])
-            except (TypeError, ValueError):
-                pass
-            self.custom_defaults.pop("edge_mode", None)
-            if custom.get("edge_mode") == "sideways":
-                self.custom_defaults["edge_mode"] = "sideways"
-            self.custom_defaults.pop("hz", None)
-            if clean_hz(custom.get("hz")):
-                self.custom_defaults["hz"] = clean_hz(custom["hz"])
-            if custom.get("shape"):
-                self.custom_shape = str(custom["shape"])
-        funnel = data.get("funnel_defaults")
-        if isinstance(funnel, dict):
-            try:
-                self.funnel_defaults = {k: v for k, v in clean_funnel(funnel).items() if k in FUNNEL_DEFAULTS}
-            except (TypeError, ValueError):
-                pass
-        text = clean_text(dict(data.get("text_defaults") or {}, bbox=[0, 0, 1, 1])) if isinstance(
-            data.get("text_defaults"), dict) else None
-        if text:
-            self.text_defaults = {k: text[k] for k in TEXT_DEFAULTS}
-        self.free_smooth = clean_level(data.get("free_smooth", SMOOTH_DEFAULT))
-        pg = clean_polygon(data.get("polygon_defaults"))
+        if hz_keys:
+            self.hz_defaults = hz_keys
+        if custom:
+            self.custom_defaults.clear()
+            self.custom_defaults.update(custom[0])
+            self.custom_shape = custom[1]
+        if funnel:
+            self.funnel_defaults = funnel
+        if tx:
+            self.text_defaults = {k: tx[k] for k in TEXT_DEFAULTS}
+        self.free_smooth = get(lambda: clean_level(data.get("free_smooth", SMOOTH_DEFAULT))) or SMOOTH_DEFAULT
         if pg:
             self.polygon_defaults = {k: pg[k] for k in POLYGON_DEFAULTS}
         self.roll.cancel_draft()
         self.shapes = shapes
         self.roll.set_view(data.get("view"))
         self.stop_play()
-        try:
-            self.playhead = max(0.0, float(data.get("playhead", 0)))
-        except (TypeError, ValueError):
-            self.playhead = 0.0
+        self.playhead = max(0.0, playhead) if playhead is not None and math.isfinite(playhead) else 0.0
         self.sel = None
         self.sels = set()
         self.parts = set()
@@ -222,6 +252,47 @@ class ProjectFiles:
         self._redo_kept = None
         self.on_project_change()
         return True
+
+    def read_custom_defaults(self, custom):
+        """custom_defaults from a file -> (new custom_defaults, custom shape name); a broken one keeps what's
+        there now."""
+        out, name = dict(self.custom_defaults), self.custom_shape
+        if custom.get("fill") in FILLS:
+            out["fill"] = custom["fill"]
+        if custom.get("align") in ALIGNS:
+            out["align"] = custom["align"]
+        if custom.get("ends") in ENDS:
+            out["ends"] = custom["ends"]
+        for key in CUSTOM_FLAGS:
+            out[key] = bool(custom.get(key))
+        try:
+            gate = float(custom.get("gate", CUSTOM_DEFAULTS["gate"]))
+            if math.isfinite(gate):
+                out["gate"] = max(1e-6, gate)
+        except (TypeError, ValueError):
+            pass
+        out.pop("edge", None)
+        try:  # the smallest outline gate (custom.grow_inward)
+            edge = float(custom.get("edge") or 0)
+            if math.isfinite(edge) and edge > 0:
+                out["edge"] = edge
+        except (TypeError, ValueError):
+            pass
+        out.pop("edge_mode", None)
+        if custom.get("edge_mode") == "sideways":
+            out["edge_mode"] = "sideways"
+        out.pop("hz", None)
+        if clean_hz(custom.get("hz")):
+            out["hz"] = clean_hz(custom["hz"])
+        if isinstance(custom.get("shape"), str) and custom["shape"]:
+            name = custom["shape"]
+        return out, name
+
+    def tell_load_notes(self, intro="", outro=""):
+        """What load_file had to leave out or change, in a message (nothing when all went well)."""
+        if self.load_notes:
+            messagebox.showwarning(tr("project.spiderweb"), intro + "\n\n".join(self.load_notes) + outro,
+                                   parent=self)
 
     def write_json(self, path, window=False):
         data = self.project_data()
@@ -250,25 +321,27 @@ class ProjectFiles:
         if not os.path.exists(path):
             return
         if opens(path):
-            try:  # this start's autosave becomes the backup
+            kept = ""
+            try:
                 with open(path, "rb") as f:
-                    write_bytes(backup, f.read())
+                    raw = f.read()
+                if self.load_notes:  # something was left out: the file as it was is kept aside, never overwritten
+                    kept = keep_aside(path, "autosave-kept")
+                    kept = tr("project.the_autosave_as_it_was_is_kept", kept=kept)
+                write_bytes(backup, raw)  # this start's autosave becomes the backup
             except OSError:
                 pass
+            if self.load_notes:
+                self.after(300, lambda: self.tell_load_notes(tr("project.opening_your_last_session"), kept))
             return
-        stamp, n = time.strftime("autosave-broken-%Y%m%d-%H%M%S"), 1
-        broken = os.path.join(os.path.dirname(path), stamp + ".json")
-        while os.path.exists(broken):  # never replace an earlier damaged one
-            n += 1
-            broken = os.path.join(os.path.dirname(path), f"{stamp}-{n}.json")
         try:
-            os.replace(path, broken)
-            kept = tr("project.it_was_kept_as", broken=broken)
+            kept = tr("project.it_was_kept_as", broken=keep_aside(path, "autosave-broken", move=True))
         except OSError:
             kept = ""
         if os.path.exists(backup) and opens(backup):
             what = (tr("project.opened_the_backup_instead_your_work",
                        strftime=time.strftime('%Y-%m-%d %H:%M', time.localtime(os.path.getmtime(backup)))))
+            what += "".join("\n\n" + note for note in self.load_notes)
         else:
             what = tr("project.there_s_no_usable_backup_either")
         self.after(300, lambda: messagebox.showwarning(
@@ -278,11 +351,9 @@ class ProjectFiles:
     def restore_window(self):
         try:
             try:
-                with open(self.autosave_path, encoding="utf-8") as f:
-                    win = json.load(f).get("window") or {}
+                win = read_json(self.autosave_path).get("window") or {}
             except (OSError, ValueError):  # damaged: load_autosave opens the backup, so take its window
-                with open(backup_path(self.autosave_path), encoding="utf-8") as f:
-                    win = json.load(f).get("window") or {}
+                win = read_json(backup_path(self.autosave_path)).get("window") or {}
             self.tips.restore(win)
             self.updates.restore(win)
             self.tool_picker.restore(win)
@@ -341,6 +412,7 @@ class ProjectFiles:
                                                      (tr("project.all_files"), "*.*")])
         if path and self.load_file(path):
             self.sync_panel()
+            self.tell_load_notes()
 
     def save_project(self):
         os.makedirs(OUTPUT_DIR, exist_ok=True)
