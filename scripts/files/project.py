@@ -544,9 +544,7 @@ class ProjectFiles:
         if long_silences(self.rendered) and not messagebox.askokcancel(
                 tr("project.spiderweb"), tr("project.long_silences", ppq=ppq, beats=MAX_DELTA // ppq), icon="warning"):
             return
-        self.status.config(text=tr("project.saving_midi"))  # (millions of notes take a few seconds)
-        self.config(cursor="watch")
-        self.update_idletasks()
+        self.busy(tr("project.saving_midi"))  # (millions of notes take a few seconds)
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             write_midi(path, ppq, bpm, beats, self.rendered)
@@ -557,9 +555,8 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))
             return
         finally:
-            self.config(cursor="")
-            self.update_status()
-        channels = self.slot_count if self.channel_mode.get() == "auto" else 1
+            self.busy(None)
+        channels =self.slot_count if self.channel_mode.get() == "auto" else 1
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
                 if ppq >= PPQ_WARN else "")
         if (self.rendered[:, 2] > 127).any():
@@ -588,12 +585,16 @@ class ProjectFiles:
             return
         if not ask_big(self, "domino", len(notes)):
             return
+        self.busy(tr("project.copying_for_domino"))  # (millions of notes take a few seconds)
         try:
             raw = clip_data(notes, ppq, beats * ppq, self.domino_start())
+            copied = put_on_clipboard(raw)
         except MemoryError:
             messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))
             return
-        if not put_on_clipboard(raw):
+        finally:
+            self.busy(None)
+        if not copied:
             messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_use_the_clipboard_another"))
             return
         what = ((tr("project.one_note") if len(notes) == 1 else tr("project.n_notes", n=len(notes))) if self.sels else
@@ -606,6 +607,16 @@ class ProjectFiles:
                                 + (tr("project.notes_above_key_127_left_out", high=high) if high else ""))
         self.tips.show("domino", wait=True)
 
+    def busy(self, text):
+        """text: the status line says it and the busy cursor shows until busy(None) (the status line back)."""
+        if text is None:
+            self.config(cursor="")
+            self.update_status()
+            return
+        self.status.config(text=text)
+        self.config(cursor="watch")
+        self.update_idletasks()
+
     def domino_start(self):
         """The start dropdown above the Domino buttons: "note" (first note at tick 0) or "bar" (from the bar line)."""
         return DOMINO_STARTS[max(self.domino_box.current(), 0)][0]
@@ -615,31 +626,39 @@ class ProjectFiles:
         pastes: the start of what was copied (or its first note, see domino_start) on the play line (snapped to the
         grid). Every track's notes go into
         the one shape; controllers and other events are left out. Ticks are taken as they are (same PPQ)."""
-        raw = get_from_clipboard()
-        if raw is None:
-            messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_use_the_clipboard_another"))
-            return
+        self.busy(tr("project.pasting_from_domino"))  # (millions of notes take a few seconds)
         try:
+            raw = get_from_clipboard()
             notes, their_ppq = read_notes(raw) if raw else (None, None)
+            if notes is not None and len(notes):
+                if self.domino_start() == "note":  # the first note on the play line, without the copy's empty lead
+                    notes[:, 0] -= notes[:, 0].min()
+                sh = clean_shape({**SHAPE_DEFAULTS, **self.defaults,
+                                  **notes_shape(notes, self.ppq, tr("project.pasted_notes"))})
         except ValueError as e:
             messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_read_the_notes_on", e=e))
+            return
+        finally:
+            self.busy(None)
+        if raw is None:
+            messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_use_the_clipboard_another"))
             return
         if notes is None or not len(notes):
             messagebox.showerror(tr("project.spiderweb"),
                                  tr("project.no_notes_from_domino_on_the") if notes is None else
                                  tr("project.what_was_copied_in_domino_has"))
             return
-        if self.domino_start() == "note":  # the first note on the play line, without the copy's empty lead
-            notes[:, 0] -= notes[:, 0].min()
-        sh = clean_shape({**SHAPE_DEFAULTS, **self.defaults,
-                          **notes_shape(notes, self.ppq, tr("project.pasted_notes"))})
         if not self.confirm_big([sh]):
             return
         at, sb = self.playhead, self.snap_beats()
         if sb:
             at = round(at / sb) * sb
         self.roll.cancel_draft()
-        self.add_copies([sh], at, tr("project.paste_from_domino"))
+        self.busy(tr("project.pasting_from_domino"))
+        try:
+            self.add_copies([sh], at, tr("project.paste_from_domino"))
+        finally:
+            self.busy(None)
         n = len(notes)
         note = (tr("project.they_were_copied_at_ppq_ticks", their_ppq=their_ppq) if their_ppq and their_ppq != self.ppq
                 else "")
