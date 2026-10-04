@@ -1,5 +1,6 @@
 """The custom shape drawer (its own window) and the shape library: built-in shapes plus the user's own in spiderweb/shapes/*.json."""
 
+import ctypes
 import json
 import math
 import os
@@ -50,6 +51,11 @@ AREA_FRAME = DRAWN_FRAME  # (the drawing's box as a custom shape, for finding it
 STICK_RANK = {"point": 2, "cross": 1, "line": 0}
 STICK_COLOR = "#d000d0"  # the mark where a point sticks
 STICK_LINE = "#c070e0"  # the parts ending at that point (lighter, so the mark stands out on them)
+LIST_AWAY = "#d9d9d9"  # the shape picked in the library list while the keyboard is elsewhere (blue when it's there)
+try:
+    DOUBLE_CLICK_MS = ctypes.windll.user32.GetDoubleClickTime()  # (Windows' own setting)
+except (AttributeError, OSError):
+    DOUBLE_CLICK_MS = 500
 DRAW_TOOLS = ("line", "poly", "curve", "arc", "square", "circle")  # (the ones whose points stick)
 
 
@@ -568,12 +574,30 @@ class Drawer(tk.Toplevel):
         self.listbox.config(yscrollcommand=sb.set)
         self.listbox.pack(side="left", fill="x", expand=True)
         sb.pack(side="left", fill="y")
-        self.listbox.bind("<Double-Button-1>", lambda e: self.open_selected())
+        lb = self.listbox
+        lb.bind("<Double-Button-1>", lambda e: (self.stop_slow_click(), self.open_selected()))
+        lb.bind("<ButtonPress-1>", self.list_press)
+        # Keys while the list has the keyboard work on the list (the drawing's own keys: click the board). Blue =
+        # the list has the keyboard, grey = the board has it (user, like Windows' file lists).
+        lb.bind("<Delete>", lambda e: (self.delete_selected(), "break")[1])
+        lb.bind("<BackSpace>", lambda e: "break")
+        lb.bind("<Return>", lambda e: (self.open_selected(), "break")[1])
+        lb.bind("<F2>", lambda e: (self.start_rename(), "break")[1])
+        lb.bind("<FocusIn>", lambda e: lb.config(selectbackground="SystemHighlight",
+                                                 selectforeground="SystemHighlightText"))
+        lb.bind("<FocusOut>", lambda e: lb.config(selectbackground=LIST_AWAY, selectforeground="black"))
+        lb.config(selectbackground=LIST_AWAY, selectforeground="black")
+        self.renaming = None  # the box a name is typed into while renaming (start_rename)
+        self._slow_click = None
         btns = ttk.Frame(box)
         btns.pack(fill="x", pady=(4, 0))
-        ttk.Button(btns, text=tr("drawer.open"), command=self.open_selected).pack(side="left")
-        ttk.Button(btns, text=tr("drawer.delete"), command=self.delete_selected).pack(side="left", padx=4)
-        ttk.Button(btns, text=tr("drawer.new"), command=self.new).pack(side="left")
+        for i, (key, cmd) in enumerate((("open", self.open_selected), ("delete", self.delete_selected),
+                                        ("rename", self.start_rename), ("new", self.new))):
+            b = ttk.Button(btns, text=tr("drawer." + key), command=cmd, width=1)  # (4 equal widths: grid below)
+            b.grid(row=0, column=i, sticky="ew", padx=(4 if i else 0, 0))
+            btns.columnconfigure(i, weight=1, uniform="lib")
+            if key == "rename":
+                Tooltip(b, tr("drawer.rename_tip"))
         name = ttk.Frame(box)
         name.pack(fill="x", pady=(8, 0))
         ttk.Label(name, text=tr("drawer.name")).pack(side="left")
@@ -1379,6 +1403,7 @@ class Drawer(tk.Toplevel):
     def right_click(self, e):
         """Finishes a polyline being drawn. Otherwise, like on the piano roll: on the selected curve's anchor =
         remove it, on a handle dot = pull it back in; near a stroke = its menu; empty space = deselect."""
+        self.canvas.focus_set()  # (keys go to the drawing now, not the shape list)
         if self.holding():  # (the left button holds a stroke: nothing, its menu would work on it mid-move)
             return
         if self.erasing():  # an eraser box being dragged: dropped, nothing erased (like Esc)
@@ -1705,6 +1730,7 @@ class Drawer(tk.Toplevel):
     # ------------------------------------------------------------ library
 
     def refresh_list(self, select=None):
+        self.end_rename(False)
         names = library_names()
         self.listbox.delete(0, "end")
         for n in names:
@@ -1718,6 +1744,82 @@ class Drawer(tk.Toplevel):
     def picked(self):
         cur = self.listbox.curselection()
         return self.listbox.get(cur[0]) if cur else None
+
+    def list_press(self, e):
+        """A click on the name already picked, while the list has the keyboard: renamed after the double-click time
+        if no second click comes (like Windows' file lists)."""
+        self.stop_slow_click()
+        lb = self.listbox
+        i = lb.nearest(e.y)
+        box = lb.bbox(i)
+        if (box and box[1] <= e.y < box[1] + box[3] and lb.curselection() == (i,)
+                and self.focus_get() is lb):
+            self._slow_click = self.after(DOUBLE_CLICK_MS, self.start_rename)
+
+    def stop_slow_click(self):
+        if self._slow_click:
+            self.after_cancel(self._slow_click)
+            self._slow_click = None
+
+    def start_rename(self):
+        """A box over the picked name in the list to type its new name: Enter or a click elsewhere = renamed,
+        Esc = not."""
+        self._slow_click = None
+        name = self.picked()
+        if not name or self.renaming:
+            return
+        if not shape_path(name):
+            messagebox.showinfo(tr("drawer.spiderweb"), tr("drawer.is_built_in_rename", name=name), parent=self)
+            return
+        lb = self.listbox
+        i = lb.curselection()[0]
+        lb.see(i)
+        lb.update_idletasks()
+        x, y, w, h = lb.bbox(i)
+        box = self.renaming = ttk.Entry(lb)
+        box.old = name
+        box.insert(0, name)
+        box.select_range(0, "end")
+        box.icursor("end")
+        box.place(x=0, y=y - 3, relwidth=1, height=h + 6)
+        box.focus_set()
+        box.bind("<Return>", lambda e: (self.end_rename(True), lb.focus_set(), "break")[2])
+        box.bind("<Escape>", lambda e: (self.end_rename(False), lb.focus_set(), "break")[2])
+        box.bind("<FocusOut>", lambda e: self.end_rename(True))
+
+    def end_rename(self, keep):
+        """The rename box goes; keep = the name typed is used."""
+        box, self.renaming = self.renaming, None
+        if not box:
+            return
+        old, new = box.old, clean_name(box.get())
+        box.destroy()
+        if not keep or not new or new == old:
+            return
+        if new.lower() != old.lower() and new.lower() in (n.lower() for n in library_names()):
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.rename_taken", name=new), parent=self)
+            return
+        here = (self.saved_name or "").lower() == old.lower()  # (the drawing open here)
+        fresh = here and not self.changed_elsewhere()
+        try:
+            rename_shape(old, new)
+        except ValueError:
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_read_the_shape", name=old), parent=self)
+            return
+        except OSError as e:
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_rename", e=e), parent=self)
+            return
+        if here:
+            self.saved_name = new
+            self.saved_stamp = shape_stamp(new) if fresh else None
+            if clean_name(self.name.get()).lower() == old.lower():
+                self.name.set(new)
+        app = self.app
+        if app.custom_shape.lower() == old.lower():  # (the Custom shape tool's shape: renamed there too)
+            app.custom_shape = new
+            app.sync_custom()
+            app.schedule_autosave()
+        self.refresh_list(select=new)
 
     def keep_changes(self):
         """True if it's fine to throw away the drawing (nothing unsaved, or the user said so)."""

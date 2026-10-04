@@ -1949,6 +1949,8 @@
   "",
   "Save keeps it in the library (the shapes subfolder next to Spiderweb); Use on the piano roll picks it for the Custom shape tool. On the piano roll it stretches to the box you drag.",
   "",
+  "Rename (or F2, or click the picked name again) changes a saved shape's name; Delete removes it. While the list has the keyboard (its picked name is blue), Delete and Enter work on the list; click the board to give the keyboard back to the drawing (the picked name turns grey).",
+  "",
   "Export copies the whole drawing as a line of text to share; Import adds a shared drawing to your library (see Sharing shapes).",
   "",
   "Lines and curves that meet end to end count as one outline, and so does a line whose ends land on another line or on itself. Closed: Empty, Fill and Spam all work. Gaps (red dots at the loose ends): Fill and Spam close each one with a straight line (see Inside fill).",
