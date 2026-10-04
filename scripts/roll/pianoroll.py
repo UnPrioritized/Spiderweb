@@ -136,7 +136,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         """The Select box being dragged as (beat, pitch, beat, pitch) corners: out to whole snap steps and whole
         keys (grid_span; Shift / snap off = whole ticks, keys still whole: user), so it's never thinner than one
         step and one key. None while it's still a click."""
-        _, x, y, cx, cy = self.drag[:5]
+        x, y = self.box_from()
+        cx, cy = self.drag[3:5]
         if abs(cx - x) < BOX_STILL and abs(cy - y) < BOX_STILL:
             return None
         tick, step = 1 / self.app.ppq, self.app.snap_beats()
@@ -145,6 +146,11 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         top = self.app.keys - 1
         p0, p1 = sorted(min(max(round(self.y2p(v)), 0), top) for v in (y, cy))
         return b0, p1 + 0.5, b1, p0 - 0.5
+
+    def box_from(self):
+        """Where the Select box being dragged was pressed, on screen now. It's kept as (beat, pitch): the wheel,
+        panning, page turns and scrolling past the edge leave it where it is in the song (user)."""
+        return self.t2x(self.drag[1]), self.p2y(self.drag[2])
 
     def box_rect(self, area):
         """A box_area on screen (x0, y0, x1, y1), x0 < x1, y0 < y1."""
@@ -155,9 +161,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def box_to(self):
         """The Select box's corner goes to the mouse (box_mouse), kept inside the piano roll. Nothing is selected
         before it's let go (box_pick; user: like Domino)."""
-        _, x, y, _, _, base, primary = self.drag
+        _, b, p, _, _, base, primary = self.drag
         mx, my, state = self.box_mouse
-        self.drag = ("box", x, y, min(max(mx, self.kb_w), self.winfo_width()),
+        self.drag = ("box", b, p, min(max(mx, self.kb_w), self.winfo_width()),
                      min(max(my, self.ruler_h), self.winfo_height()), base, primary)
         self.box_shift = bool(state & SHIFT)
         self.draw_select_box()
@@ -189,8 +195,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.view_top -= dy * max(1, round(3 * self.sy)) / self.sy
         self.clamp_view()
         mx, my = (self.view_t - t) * self.sx, (self.view_top - top) * self.sy
-        _, x, y, cx, cy, *rest = self.drag
-        self.drag = ("box", x - mx, y + my, cx - mx, cy + my, *rest)
+        _, b, p, cx, cy, *rest = self.drag
+        self.drag = ("box", b, p, cx - mx, cy + my, *rest)
         self.request_redraw()
         self.box_timer = self.after(BOX_SCROLL_MS, self.box_scroll)
 
@@ -436,7 +442,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def shapes_in_box(self, x0, y0, x1, y1):
         """The shapes a box on screen (x0 < x1, y0 < y1) touches: a piece of their line, or one of their notes
         while the notes are shown. A line has to go into the box: one that only reaches its edge doesn't count (user:
-        a shape ending on the grid line where the box starts isn't picked)."""
+        a shape ending on the grid line where the box starts isn't picked). A note too: one ending where the box starts
+        (or starting where it ends) doesn't count, nor one on the key row just past its top / bottom (user)."""
         found = set()
         e = 1e-6  # (a line ending on the edge is exactly there on screen too)
         for i, sh in enumerate(self.app.shapes):
@@ -449,8 +456,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             ppq = self.app.ppq
             t0, t1 = self.x2t(x0) * ppq, self.x2t(x1) * ppq
             ns = self.visible_notes(t0, t1)
-            k0, k1 = math.floor(self.y2p(y1) + 0.5), math.floor(self.y2p(y0) + 0.5)
-            ns = ns[(ns[:, 2] >= k0) & (ns[:, 2] <= k1) & (ns[:, 0] <= t1) & (ns[:, 1] >= t0)]
+            # (the keys whose row's middle is in the box; e: screen pixels turned back into ticks aren't exact)
+            k0, k1 = math.ceil(self.y2p(y1) - e), math.floor(self.y2p(y0) + e)
+            ns = ns[(ns[:, 2] >= k0) & (ns[:, 2] <= k1) & (ns[:, 0] < t1 - e) & (ns[:, 1] > t0 + e)]
             found.update(int(v) for v in np.unique(ns[:, 5]) if 0 <= v < len(self.app.shapes))
         return found
 
@@ -609,7 +617,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 self.box_more = list(kept or []) if e.state & CTRL else []  # the box to the boxes kept);
                 if not e.state & CTRL:  # a click without dragging moves the play line here
                     app.select(None)
-                self.drag = ("box", e.x, e.y, e.x, e.y, set(app.sels), app.sel)
+                self.drag = ("box", self.x2t(e.x), self.y2p(e.y), e.x, e.y, set(app.sels), app.sel)
                 self.box_shift0 = bool(e.state & SHIFT)
                 return
             if e.state & CTRL:  # Ctrl+click adds or removes a shape
@@ -851,8 +859,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                              set(self.app.sels))
         elif kind == "seek" and self.drag[1]:
             self.app.start_play()  # it was playing: carry on from the new spot
-        elif (kind == "box" and abs(e.x - self.drag[1]) < BOX_STILL and abs(e.y - self.drag[2]) < BOX_STILL
-              and not e.state & CTRL):
+        elif kind == "box" and not self.box_area() and not e.state & CTRL:
             playing = self.app.player.running
             self.app.stop_play()
             self.app.set_playhead(self.event_pt(e)[0])
@@ -1171,6 +1178,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def on_key(self, e):
         if self.typing:
             return self.type_key(e)
+        if self.app.box_drawn():  # (Esc, tool keys, Delete...: nothing until the Select box is let go, user)
+            return "break"
         k = e.keysym.lower()
         if k == "escape":
             self.cancel_draft()

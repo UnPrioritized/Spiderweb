@@ -829,7 +829,7 @@ class HzWindow(tk.Toplevel):
         the top of its row: out to whole snap steps and whole keys (grid_span; Shift / snap off = whole ticks, keys
         still whole: user), so it's never thinner than one step and one key. None while it's still a click."""
         d = d or self.drag
-        (x, y), (cx, cy) = d["from"], d["to"]
+        (x, y), (cx, cy) = self.box_from(d), d["to"]
         if abs(cx - x) < BOX_STILL and abs(cy - y) < BOX_STILL:
             return None
         tick, step = 1 / self.app.ppq, self.snap_beats()
@@ -837,6 +837,12 @@ class HzWindow(tk.Toplevel):
                            tick if d.get("shift") else step or tick)
         k0, k1 = sorted((self.key_at(y), self.key_at(cy)))
         return b0, k1, b1, k0 - 1
+
+    def box_from(self, d):
+        """Where the Select box being dragged was pressed, on screen now. It's kept as (beat, key) (d["from"]): the
+        wheel, panning and scrolling past the edge leave it where it is in the song (user)."""
+        b, k = d["from"]
+        return self.x_of(b), self.ruler_h + (self.top - k) * self.sy
 
     def box_rect(self, area):
         """A box_area on screen (x0, y0, x1, y1), x0 < x1, y0 < y1."""
@@ -877,9 +883,8 @@ class HzWindow(tk.Toplevel):
         self.t0 += dx
         self.top -= dy * 3
         self.clamp_view()
-        for end in ("from", "to"):
-            ex, ey = d[end]
-            d[end] = (ex - (self.t0 - t0) * self.sx, ey + (self.top - top) * self.sy)
+        ex, ey = d["to"]
+        d["to"] = (ex - (self.t0 - t0) * self.sx, ey + (self.top - top) * self.sy)
         self.redraw()
         self.box_timer = self.after(BOX_SCROLL_MS, self.box_scroll)
 
@@ -1016,7 +1021,8 @@ class HzWindow(tk.Toplevel):
                 add = e.state & CTRL and self.tool.get() == "select"  # (Ctrl: added to the selection and the
                 base = set(self.sel) if add else set()  # boxes kept)
                 self.sel = set(base)
-                self.drag = {"kind": "box", "from": (e.x, e.y), "to": (e.x, e.y), "base": base, "before": before,
+                self.drag = {"kind": "box", "from": (self.beat_at(e.x), self.top - (e.y - self.ruler_h) / self.sy),
+                             "to": (e.x, e.y), "base": base, "before": before,
                              "more": list(kept or []) if add else [], "shift0": bool(e.state & SHIFT)}
                 return self.redraw()
             if not self.can_place():
@@ -1222,7 +1228,7 @@ class HzWindow(tk.Toplevel):
                 self.box_kept = (d["more"] + [self.box_area(d)] if self.box_area(d) else d["more"], set(self.sel))
             elif (not e.state & CTRL and self.tool.get() == "select"
                     and self.preview_on.get()):  # a click, not a drag: the play line goes there
-                self.put_play_line(self.snap(self.beat_at(d["from"][0]), e))
+                self.put_play_line(self.snap(d["from"][0], e))
             return self.redraw()
         if d.get("dup") and not d["moved"] and d["dup"]["click"] is not None:  # a Ctrl+click: in / out
             self.sel = set(self.sel) ^ {d["dup"]["click"]}
