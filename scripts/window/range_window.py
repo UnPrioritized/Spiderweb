@@ -256,9 +256,9 @@ class RangeGraph(tk.Toplevel):
             ticks = calc(self.gate_vars[key].get())
             if not 1 <= ticks <= 10 ** 7:
                 raise ValueError
-        except (ValueError, ZeroDivisionError):
-            self.gate_boxes[key].config(style="Bad.TEntry")
-            return
+        except (ValueError, ZeroDivisionError):  # (not a number, or out of range: the box goes back, user)
+            now = self.tgts[0]["gate"] if key == "from" else self.memo[0]["to"]
+            return self.gate_vars[key].set(fmt(round(now * self.app.ppq, 3)))
         beats = ticks / self.app.ppq
         now = self.tgts[0]["gate"] if key == "from" else self.memo[0]["to"]
         if abs(beats - now) < 1e-12:
