@@ -1,7 +1,8 @@
 """The outline gate's even band (custom.thicker): the shape shrunk inward, a smaller copy of its own outline (user:
 "a shape shrinking", one with several insides shrinks each). The inside that's left is every spot inside the shape
-at least r away from its outline, measured round in the shape's own proportions (its width counted the same as
-its height, so a circle shrinks into a circle and a square into a square). The outline band is the inside minus
+at least r away from its outline, measured round in the proportions the shape was first drawn in (custom.drawn_k:
+so a circle shrinks into a circle and an arc into a smaller arc, even when the screen is zoomed differently now; an
+old shape without them: its width counted the same as its height). The outline band is the inside minus
 that.
 
 Worked out exactly on lines across each key row (inner_rows), and on a grid for the piano roll's preview line
@@ -142,9 +143,10 @@ def minus(spans, cuts):
     return out
 
 
-def inner_rows(polys, walled, keys, r, ppq):
-    """The shrunk inside on each of these key rows as (start, end, key) ticks; r in beats. walled: see inside_at."""
-    k = proportion(polys)
+def inner_rows(polys, walled, keys, r, ppq, k=None):
+    """The shrunk inside on each of these key rows as (start, end, key) ticks; r in beats. walled: see inside_at.
+    k: beats per key the shape was drawn in (custom.drawn_k; None: as wide as it's tall, proportion)."""
+    k = k or proportion(polys)
     seg = segments(polys) * [1, k, 1, k]
     keys = list(keys)
     ys = [(q - 0.5 + (j + 0.5) / SAMPLES) * k for q in keys for j in range(SAMPLES)]
@@ -163,18 +165,18 @@ def inner_rows(polys, walled, keys, r, ppq):
     return np.asarray(out, np.int64).reshape(-1, 3)
 
 
-def field(polys, walled, reach):
+def field(polys, walled, reach, k=None):
     """The distance to the outline on a grid over the shape (in the shape's proportions), minus outside: (x0, y0,
     step, values[row, column], k). Only distances up to `reach` are exact (further ones count as 2 x reach), so
     each block of the grid looks only at the edges near it. Remembered (the same for every outline gate tried up
     to reach). walled: see inside_at."""
-    key = (repr(polys), getattr(walled, "mode", None), reach)
+    key = (repr(polys), getattr(walled, "mode", None), reach, k)
     got = _fields.get(key)
     if got is not None:
         return got
     if len(_fields) > 30:
         _fields.clear()
-    k = proportion(polys)
+    k = k or proportion(polys)
     seg = segments(polys) * [1, k, 1, k]
     x_lo, y_lo = seg[:, [0, 2]].min(), seg[:, [1, 3]].min()
     x_hi, y_hi = seg[:, [0, 2]].max(), seg[:, [1, 3]].max()
@@ -213,10 +215,10 @@ def field(polys, walled, reach):
     return got
 
 
-def inner_lines(polys, walled, r):
+def inner_lines(polys, walled, r, k=None):
     """The shrunk inside's outline for the preview: straight pieces (b0, k0, b1, k1, bi, ki) in beats / keys,
     (bi, ki) a spot on its inner side."""
-    x0, y0, step, f, k = field(polys, walled,2.0 ** math.ceil(math.log2(max(r, 1e-6) * 1.25)))
+    x0, y0, step, f, k = field(polys, walled, 2.0 ** math.ceil(math.log2(max(r, 1e-6) * 1.25)), k)
     on = f >= r
     pieces = []
     # where the level is crossed on each grid line, by the values on either side

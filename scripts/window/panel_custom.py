@@ -204,9 +204,13 @@ class CustomPanel:
         strokes, areas = load_drawing(name) if name else (None, [])
         return normalize_strokes(strokes) + (normalize_areas(strokes, areas),) if strokes else None
 
-    def new_custom(self, strokes, b0, p0, b1, p1, areas=()):
+    def new_custom(self, strokes, b0, p0, b1, p1, areas=(), drawn=None):
+        """A library shape placed in a box. drawn: its width / height as drawn (custom_template), the proportions it
+        keeps (custom.drawn_k: in its 0..1 box one v was 1 / drawn u)."""
         sh = dict(self.defaults, kind="custom", name=self.custom_shape, strokes=copy.deepcopy(strokes),
                   **custom_settings(self.custom_defaults), pts=box_frame(b0, p0, b1, p1))
+        if drawn:
+            sh["round"] = 1 / drawn
         if areas:
             sh["areas"] = copy.deepcopy(list(areas))
         return sh

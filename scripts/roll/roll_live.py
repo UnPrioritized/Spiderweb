@@ -13,7 +13,7 @@ from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half
                           set_symmetry)
 from notes.custom import (add_stroke, box_frame, carried_spots, carry_areas, custom_settings, frame_to_bp, frame_to_uv,
                           map_stroke, new_live_shape, plain_stroke, refit, settled_areas, stroke_bp, stroke_ends,
-                          stroke_points)
+                          stroke_points, uv_k)
 from notes.pattern import has_formula
 from notes.polygon import polygon_aspect, polygon_strokes
 from roll.roll_funnel import seg_dist
@@ -72,8 +72,10 @@ class LiveDrawing:
             strokes = polygon_strokes(extra["polygon"])
         else:
             strokes = [{"kind": "ellipse", "box": [0, 0, 1, 1]}]
+        pts = box_frame(a[0], a[1], b[0], b[1])
         return dict(app.defaults, kind="custom", name=tool.title(), strokes=strokes, **extra,
-                    **custom_settings(app.custom_defaults), pts=box_frame(a[0], a[1], b[0], b[1]), draw=tool)
+                    **custom_settings(app.custom_defaults), pts=pts, draw=tool,
+                    round=uv_k(pts, self.sy / self.sx))  # (drawn as it looks now: custom.drawn_k)
 
     @staticmethod
     def draft_strokes(sh):
@@ -120,7 +122,7 @@ class LiveDrawing:
             app.add_shape(new)
             return True
         if target is None:
-            target = new_live_shape(app.defaults, app.custom_defaults)
+            target = new_live_shape(app.defaults, app.custom_defaults, self.sy / self.sx)  # (drawn as it looks now)
             for st in sts:
                 k = add_stroke(target, st)
             app.add_shape(target)
@@ -409,7 +411,7 @@ class LiveDrawing:
         st = map_stroke(copy.deepcopy(app.stroke_clip), lambda b, p: (b + db, p + dp))
         host = self.stroke_host()
         if host is None:
-            host = new_live_shape(app.defaults, app.custom_defaults)
+            host = new_live_shape(app.defaults, app.custom_defaults, self.sy / self.sx)
             k = add_stroke(host, st)
             app.add_shape(host, tr("roll_live.paste_a_stroke"))
         else:

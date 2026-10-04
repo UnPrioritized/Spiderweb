@@ -93,7 +93,8 @@ class JoinSplit:
                 tr("join_split.spiderweb"), tr("join_split.turning_these_into_a_live_shape") + "\n• ".join(lost) +
                 tr("join_split.split_into_separate_shapes_or_ctrl"), icon="warning", parent=self):
             return
-        new = to_live(olds, [cached_strokes(sh) for sh in olds], self.defaults, self.custom_defaults)
+        new = to_live(olds, [cached_strokes(sh) for sh in olds], self.defaults, self.custom_defaults,
+                      self.roll.sy / self.roll.sx if self.roll.sx else None)
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.turn_into_live_shape"))
         at = order[0]
