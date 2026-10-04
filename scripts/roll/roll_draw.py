@@ -527,7 +527,7 @@ class RollDrawing:
             boxes = self.box_more + [b for b in (self.box_area(),) if b]
         else:
             boxes = self.kept_box() or []
-        draw_boxes(self, [self.box_rect(b) for b in boxes], self.kb_w, self.ruler_h, max(2, round(2 * self.scale)),
+        draw_boxes(self, [self.box_rect(b) for b in boxes], self.kb_w, self.ruler_h, self.scale,
                    tags="selbox")
 
     def draw_slice(self):

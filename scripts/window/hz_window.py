@@ -647,7 +647,7 @@ class HzWindow(tk.Toplevel):
             c.create_oval(x - r, y - r, x + r, y + r, fill="white", outline=RED, width=max(1, round(1.5 * s)))
         d = self.drag  # the Select box (with the ones kept when Ctrl+drag adds it), or the last ones (kept_box)
         boxes = d["more"] + [b for b in (self.box_area(),) if b] if d and d["kind"] == "box" else self.kept_box() or []
-        draw_boxes(c, [self.box_rect(b) for b in boxes], kb, rh, max(2, round(2 * s)))
+        draw_boxes(c, [self.box_rect(b) for b in boxes], kb, rh, s)
         c.create_rectangle(0, 0, kb, h, fill="#fafafa", outline="", tags="frame")  # keys (the preview's grey
         # goes under this: draw_preview)
         for k in range(k_lo, k_hi + 1):

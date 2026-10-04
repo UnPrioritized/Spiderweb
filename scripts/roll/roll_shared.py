@@ -194,8 +194,10 @@ def boxes_outline(rects):
     return out
 
 
-def draw_boxes(canvas, rects, left, top, width, **kw):
-    """The Select boxes' joined outline (boxes_outline), dashed, cut off left of x = left / above y = top."""
+def draw_boxes(canvas, rects, left, top, scale, **kw):
+    """The Select boxes' joined outline (boxes_outline), dashed, cut off left of x = left / above y = top. 3 px
+    at 100% (user: 2 was hard to see on dense shapes)."""
+    width = max(3, round(3 * scale))
     for x0, y0, x1, y1 in boxes_outline(rects):
         if x1 < left or y1 < top:
             continue
