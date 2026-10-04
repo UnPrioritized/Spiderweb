@@ -26,7 +26,7 @@ from files.about import HERE, VERSION
 from files.safefile import write_bytes, write_text
 from files.snap import clean_snap
 from files.update_check import version_tuple
-from window.big_ask import ask as ask_big
+from window.big_ask import ask as ask_big, ask_drums
 
 AUTOSAVE = os.path.join(HERE, "autosave.json")
 OUTPUT_DIR = os.path.join(HERE, "output")
@@ -584,7 +584,8 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"), tr("project.no_notes_to_copy_draw_something")
                                  if not self.sels or high else tr("project.the_selected_shapes_have_no_notes"))
             return
-        if not ask_big(self, "domino", len(notes)):
+        tracks = len(np.unique(notes[:, 4]))
+        if not ask_big(self, "domino", len(notes)) or not ask_drums(self, tracks):
             return
         self.busy(tr("project.copying_for_domino"))  # (millions of notes take a few seconds)
         try:
@@ -600,7 +601,6 @@ class ProjectFiles:
             return
         what = ((tr("project.one_note") if len(notes) == 1 else tr("project.n_notes", n=len(notes))) if self.sels else
                 tr("project.all_notes", n=len(notes)))
-        tracks = len(np.unique(notes[:, 4]))
         where = tr("project.the_track") if tracks == 1 else tr("project.the_first_of_tracks", tracks=tracks)
         how = (tr("project.paste_at_the_cursor") if self.domino_start() == "note" else
                tr("project.double_click_a_bar_line_to"))

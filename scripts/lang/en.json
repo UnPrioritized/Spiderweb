@@ -175,6 +175,7 @@
  "big_ask.memory": "It needs about {need} GB of memory ({free} GB free now).",
  "big_ask.wont_fit": "It needs about {need} GB of memory, but only {free} GB is free now: it will likely fail, or make this PC very slow. Closing other programs frees memory.",
  "big_ask.go": "Go ahead?",
+ "big_ask.drums": "This copies {tracks} tracks. In Domino they go into the track you pick and the ones below it, so the 10th one lands 9 tracks below it. If that track plays on channel 10, most players play its notes as drums.\n\nCopy anyway?",
  "big_ask.dont_ask": "Don't ask again until Spiderweb is closed",
  "big_ask.yes": "Yes",
  "big_ask.no": "No",

@@ -2,7 +2,8 @@
 Yes / No + "Don't ask again until Spiderweb is closed", remembered PER ACTION (App.big_skip, forgotten at a
 restart). Something that won't fit in the free memory at all is always asked, ticked or not.
 Actions: "notes" = making a shape with more than BIG notes (App.confirm_big, Range window), "midi" = Generate
-MIDI (memory only), "domino" = Copy to Domino (more than BIG notes: the program it's pasted into gets slow)."""
+MIDI (memory only), "domino" = Copy to Domino (more than BIG notes: the program it's pasted into gets slow).
+The same window warns before Copy to Domino fills a 10th track (ask_drums, "drums")."""
 
 import ctypes
 import tkinter as tk
@@ -14,6 +15,7 @@ BIG = 1_000_000  # notes: asked past this (making shapes, Copy to Domino)
 # memory each note takes while it's done (measured: 20 M notes in the window ~6 GB in all, saving a MIDI file
 # 1.4 GB more, copying 4 M notes 0.57 GB)
 PER_NOTE = {"notes": 300, "midi": 70, "domino": 150}
+DRUM_TRACK = 10  # Copy to Domino: asked when the copy fills this many tracks (ask_drums)
 
 
 class _MemoryStatus(ctypes.Structure):
@@ -61,6 +63,18 @@ def ask(app, action, notes, parent=None):
     go, skip = dialog(parent or app, tr("big_ask.title"), "\n\n".join(lines + [tr("big_ask.go")]), strong)
     if go and skip:
         app.big_skip.add(action)
+    return go
+
+
+def ask_drums(app, tracks):
+    """Copy to Domino with DRUM_TRACK tracks or more (user, 2026-10-04): they fill the highlighted track and the
+    ones below it, so the 10th may be one on channel 10, which most players play as drums (Generate MIDI skips that
+    channel, but which track the user pastes into is up to them). True = go ahead."""
+    if tracks < DRUM_TRACK or "drums" in app.big_skip:
+        return True
+    go, skip = dialog(app, tr("big_ask.title"), tr("big_ask.drums", tracks=tracks), False)
+    if go and skip:
+        app.big_skip.add("drums")
     return go
 
 
