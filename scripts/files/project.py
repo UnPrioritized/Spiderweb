@@ -24,6 +24,7 @@ from files.midi_out import PPQ_WARN, write_midi
 from files.about import HERE, VERSION
 from files.safefile import write_bytes, write_text
 from files.snap import clean_snap
+from files.update_check import version_tuple
 
 AUTOSAVE = os.path.join(HERE, "autosave.json")
 OUTPUT_DIR = os.path.join(HERE, "output")
@@ -173,9 +174,15 @@ class ProjectFiles:
                 sh = None
             if sh:
                 shapes.append(sh)
+        made = version_tuple(data.get("app_version")) if isinstance(data.get("app_version"), str) else None
+        newer = made and made > version_tuple(VERSION) or type(data.get("version")) is int and data["version"] > 2
+        if newer:  # (what that version added is left out)
+            self.load_notes.append(tr("project.made_by_a_newer_spiderweb", made=data.get("app_version") or "?",
+                                      VERSION=VERSION))
         lost = len(data.get("shapes", [])) - len(shapes)
         if lost:
             self.load_notes.append(tr("project.shapes_left_out", n=lost))
+        self.load_lost = bool(newer or lost)  # (the autosave as it was is worth keeping aside)
 
         def get(fn):  # one setting read from the file: None if it's broken
             try:
@@ -191,8 +198,15 @@ class ProjectFiles:
 
         boxes = {key: str(data[key]) for key in ("ppq", "bpm", "beats") if isinstance(data.get(key), (int, float, str))
                  and not isinstance(data[key], bool)}
-        if text("output") is not None:
-            boxes["output"] = data["output"]
+        out = text("output")
+        if out is not None and out.strip():
+            folder = os.path.dirname(os.path.abspath(out))
+            if not os.path.isdir(folder) and os.path.normcase(folder) != os.path.normcase(os.path.abspath(OUTPUT_DIR)):
+                # (made on another PC, or the folder is gone): Spiderweb's own output folder, same file name
+                out = os.path.join(OUTPUT_DIR, os.path.basename(out) or "spiderweb.mid")
+                self.load_notes.append(tr("project.output_folder_missing", folder=folder, path=out))
+        if out is not None:
+            boxes["output"] = out
         defaults = clean_basics(table("defaults"))
         cycle = get(lambda: clean_cycle(table("defaults").get("cycle")))
         if cycle:  # "Colours" for new shapes (custom.py)
@@ -325,7 +339,7 @@ class ProjectFiles:
             try:
                 with open(path, "rb") as f:
                     raw = f.read()
-                if self.load_notes:  # something was left out: the file as it was is kept aside, never overwritten
+                if self.load_lost:  # something was left out: the file as it was is kept aside, never overwritten
                     kept = keep_aside(path, "autosave-kept")
                     kept = tr("project.the_autosave_as_it_was_is_kept", kept=kept)
                 write_bytes(backup, raw)  # this start's autosave becomes the backup
