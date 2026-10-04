@@ -66,6 +66,7 @@ def open_hz(app):
         app.hz_window.lift()
     else:
         app.hz_window = HzWindow(app)
+    app.hz_window.chosen = app.selected()  # (opened for it: its notes can be placed even before it's a Hz bass)
     app.hz_window.sync()
     w = app.hz_window  # it takes the keyboard (user: keys pressed right after went to the piano roll behind)
     w.after_idle(lambda: w.winfo_exists() and w.canvas.focus_force())
@@ -191,6 +192,8 @@ class HzWindow(tk.Toplevel):
         self.minsize(round(420 * s), round(260 * s))
         self.tones, self.sel = [], set()  # the notes shown (hzbass tones) and which are selected
         self.drag = None
+        self.chosen = None  # the shape the window was opened for (open_hz), until another one is selected
+        self.chosen_at = None  # (its number while undo / redo puts the shapes back: before_restore)
         self.press_was = (set(), None)  # (the selection, the kept Select boxes) at the last press
         self.box_kept = None  # ([box_area, ...], selection) of the last Select boxes, shown after letting go
         self.sel_before = None  # (tones before an edit, sel_state() from then): what its undo step keeps (commit)
@@ -354,10 +357,13 @@ class HzWindow(tk.Toplevel):
     # ------------------------------------------------------------ what it shows
 
     def target(self):
-        """The shape whose tones are shown: the one selected custom shape (not text or pasted notes), or None."""
+        """The shape whose tones are shown: the one selected custom shape (not text or pasted notes) when it's a Hz
+        bass, or the one the window was opened for (a spam shape's Notes… button: self.chosen), or None. Any other
+        custom shape is left alone (user: one stray click turned it into a Hz bass)."""
         app = self.app
         sh = app.selected()
-        if sh and len(app.sels) == 1 and sh["kind"] == "custom" and not sh.get("text") and "notes" not in sh:
+        if (sh and len(app.sels) == 1 and sh["kind"] == "custom" and not sh.get("text") and "notes" not in sh
+                and (sh.get("hz") or sh is self.chosen)):
             return sh
         return None
 
@@ -366,6 +372,10 @@ class HzWindow(tk.Toplevel):
 
     def sync(self):
         """The main window's selection or shapes changed (undo too): show what's there now."""
+        picked = self.app.selected()
+        if self.chosen is not None and picked is not self.chosen:  # another shape selected: no longer opened for it
+            # (undo / redo put the same shape back as a new copy: still the one)
+            self.chosen = picked if self.chosen_at is not None and self.app.sel == self.chosen_at else None
         sh = self.target()
         hz = (sh or {}).get("hz") or {}
         tones = clean_tones(hz.get("tones"))
@@ -423,6 +433,7 @@ class HzWindow(tk.Toplevel):
     def before_restore(self):
         """Undo / redo is about to change the shapes: what's shown now (for after_restore)."""
         app, sh = self.app, self.target()
+        self.chosen_at = app.sel if self.chosen is not None and self.chosen is app.selected() else None
         if sh is not None and hz_made(sh):
             return "shape", left_edge(sh), hz_keys(sh)
         if sh is None and app.hz_start is not None:
@@ -445,6 +456,7 @@ class HzWindow(tk.Toplevel):
                 app.hz_start = None
                 app.select(len(app.shapes) - 1)
         self.sync()
+        self.chosen_at = None
 
     def fit_view(self):
         """The view moved so the notes are in sight (the first time there are any). Not before the canvas has its

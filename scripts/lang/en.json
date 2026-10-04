@@ -280,7 +280,7 @@
  "hz.fx_tip": "Shows or hides the effects pane under the notes.\nEffects that are on keep working while it's hidden.",
  "hz.line": "Red line",
  "hz.line_tip": "Ticked: the red line shows the tone you hear (the middle of a row = the exact tone).\nThe faint line behind it is each repeat's own pitch.\nZoomed in, drag it up or down to tune a note (double-click: back to 0). The dots of a slide can be dragged.\nNot ticked: the line and its dots are hidden. Slides and tunes that were made stay.",
- "hz.hint_none": "Select a custom shape to give it Hz bass notes, or pick the Hz bass tool (H) and drag on the piano roll where a new one should start.",
+ "hz.hint_none": "Select a Hz bass to change its notes, or pick the Hz bass tool (H) and drag on the piano roll where a new one should start. To give a spam shape Hz bass notes, select it and press Notes… in the side panel.",
  "hz.hint_new": "New Hz bass starting at beat {beat}: click to place its first note.",
  "hz.shape": "{name}",
  "hz.stale": "BPM changed: this Hz bass is out of tune.",
