@@ -19,6 +19,8 @@ from window.range_window import open_range_graph
 from window.widgets import Scrub, Tooltip, grid_shown
 
 GAP_COLOR = "#c06000"  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
+MISSING_MARK = "✕ "  # in the Shape box: a placed shape whose library shape was renamed or deleted (user, 2026-10-05)
+MISSING_COLOR = "#808080"
 FILL_CHOICES = [
     ("empty", tr("panel_custom.empty"), tr("panel_custom.just_the_outline_like_lines")),
     ("fill", tr("panel_custom.fill"), tr("panel_custom.one_long_note_per_key_inside")),
@@ -70,6 +72,7 @@ class CustomPanel:
         self.fill_tips = {}  # (Fill / Spam also say why they're orange (one gap) or greyed out (more))
         ttk.Style(self).configure("Gap.TRadiobutton", foreground=GAP_COLOR)
         ttk.Style(self).configure("Gap.TCombobox", foreground=GAP_COLOR)
+        ttk.Style(self).configure("Missing.TCombobox", foreground=MISSING_COLOR)
         self.apart_var = tk.StringVar(value=APART_CHOICES[0])
         self.apart_boxes, self.apart_tips = {}, {}  # Fill / Spam: Normal, or Outline (on a channel of its own)
         rows = ttk.Frame(opts)  # (a grid, so the Fill and Spam dropdowns line up)
@@ -215,6 +218,15 @@ class CustomPanel:
         self._templates[name.lower()] = (now, tpl)
         return tpl
 
+    def not_in_library(self, sh):
+        """A placed shape picked from the library whose library shape has been renamed or deleted since (it keeps
+        its own drawing, the name is only where it came from). Shapes drawn on the roll go by the tool's name."""
+        name = sh.get("name", "")
+        made = {t.title() for t in STROKE_TOOLS} | {tr("custom.live_drawing"), tr("hz.name")}
+        if sh.get("polygon") or sh.get("text") or "notes" in sh or name in made:
+            return False
+        return name.lower() not in {n.lower() for n in library_names()}
+
     def new_custom(self, strokes, b0, p0, b1, p1, areas=(), drawn=None):
         """A library shape placed in a box. drawn: its width / height as drawn (custom_template), the proportions it
         keeps (custom.drawn_view: in its 0..1 box one v was 1 / drawn u)."""
@@ -277,8 +289,10 @@ class CustomPanel:
             name, tpl = self.custom_shape, self.custom_template(self.custom_shape)
             gaps = len(open_paths(tpl[0])) if tpl else 0
         fill, gate = tgts[0]["fill"], tgts[0]["gate"]
+        missing = placed and self.not_in_library(tgts[0])
+        self.custom_combo.config(style="Missing.TCombobox" if missing else "TCombobox")
         self._loading = True
-        self.custom_pick.set(name)
+        self.custom_pick.set(MISSING_MARK + name if missing else name)
         self.fill_var.set(fill)
         self.gate_var.set(fmt(round(gate * self.ppq, 3)))
         self.edge_var.set(fmt(round(tgts[0].get("edge", 0) * self.ppq, 3)))
@@ -357,6 +371,8 @@ class CustomPanel:
             info = tr("panel_custom.pick_a_shape_or_make_one")
         elif placed:
             info = tr("panel_custom.n_notes", n=sum(self.note_count(t) for t in tgts))
+            if missing:
+                info += tr("panel_custom.not_in_library")
             if gaps and fill in ("fill", "spam"):
                 info += (tr("panel_custom.one_gap_in_the_outline_filled") if gaps == 1 else
                          tr("panel_custom.gaps_in_the_outline_filled_as", gaps=gaps))
@@ -656,7 +672,7 @@ class CustomPanel:
             self.drawer.lift()
             return
         self.drawer = Drawer(self)
-        name = self.custom_pick.get() or self.custom_shape
+        name = self.custom_pick.get().removeprefix(MISSING_MARK) or self.custom_shape
         strokes, areas = load_drawing(name) if name else (None, [])
         if strokes:
             self.drawer.open_shape(name, strokes, areas)
