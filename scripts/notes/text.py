@@ -51,6 +51,12 @@ def text_font(tx):
     return get_font(tx["font"], tx["weight"], tx["italic"])
 
 
+def missing_letters(tx):
+    """The letters of the text that no installed font has (fonts.py: they show as boxes or "?"), as one string."""
+    font = text_font(tx)
+    return "".join(sorted({ch for ch in tx["text"] if font.missing(ch)}))
+
+
 def with_arial(tx, changes):
     """Setting changes for a text, plus the font Arial if its font isn't installed here: a shared text keeps its
     letters until it's edited, then all of it is redrawn in Arial (the user is asked first, missing_font_ok)."""

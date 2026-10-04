@@ -735,6 +735,7 @@
  "engine.line_2": "Line {k} {end}",
  "roll_text.type": "Type: {text}",
  "roll_text.erase": "Erase text: {text}",
+ "roll_text.no_font_has": "No font on this PC has {letters}: they show as boxes or \"?\"",
  "roll_funnel.funnel_curve": "Funnel curve",
  "roll_funnel.add_a_funnel_line": "Add a funnel line",
  "roll_funnel.remove_a_funnel_point": "Remove a funnel point",

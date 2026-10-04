@@ -3,7 +3,7 @@ retype it. The text is a custom shape with sh["text"] (notes/text.py); it's rebu
 
 from files.lang import tr
 from notes.custom import custom_settings
-from notes.text import build, from_roll, layout, new_axes, restyle, text_axes, text_font, with_arial
+from notes.text import build, from_roll, layout, missing_letters, new_axes, restyle, text_axes, text_font, with_arial
 from roll.roll_shared import CTRL, SHIFT
 
 BLINK_MS = 530
@@ -228,6 +228,13 @@ class TextTyping:
         self.name_typing_step()
         app.sync_title()
         app.sync_custom()
+        self.tell_missing(tx)
+
+    def tell_missing(self, tx):
+        """The status line names the letters no installed font has (they show as boxes or "?")."""
+        gone = missing_letters(tx)
+        if gone:
+            self.app.status.config(text=tr("roll_text.no_font_has", letters=gone[:20]))
 
     def name_typing_step(self):
         """The History name of this typing's undo step follows the text (it was named after the first letter)."""
@@ -256,6 +263,7 @@ class TextTyping:
         else:
             build(self.app.shapes[ty["i"]], tx, axes)
             ty["undo"] = False  # the panel took its own undo step: the next key starts a new one
+            self.tell_missing(tx)
         self.show_caret()
 
     # ------------------------------------------------------------ caret
