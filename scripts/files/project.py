@@ -574,6 +574,7 @@ class ProjectFiles:
         except ValueError as e:
             messagebox.showerror(tr("project.spiderweb"), str(e))
             return
+        self.catch_up_notes()  # (a shape dragged in a big project: its notes wait for the mouse to rest)
         notes = self.rendered
         if self.sels:
             notes = notes[np.isin(notes[:, 5], sorted(self.sels))]
