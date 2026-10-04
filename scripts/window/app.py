@@ -1293,6 +1293,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 return None
             if self.hz_window and str(w).startswith(str(self.hz_window)):
                 return None  # (the Hz bass window: its own keys only, nothing done to the main piano roll behind)
+            if self.grabbed_elsewhere():
+                return None  # (a window like Range… is working on the picked shapes: nothing changes behind it)
             if main_only and not (isinstance(w, tk.Misc) and w.winfo_toplevel() is self):
                 return None
             if isinstance(w, (tk.Entry, ttk.Entry)) and str(w.cget("state")) != "readonly":
@@ -1302,6 +1304,14 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             fn()
             return "break"
         return handler
+
+    def grabbed_elsewhere(self):
+        """A pop-up holds the mouse and keyboard (grab_set: Range…, formula Custom…, tumour graph, snap picker)."""
+        try:
+            g = self.grab_current()
+        except (KeyError, tk.TclError):  # (a grab on a window tkinter doesn't know, e.g. a message box)
+            return True
+        return g is not None and g.winfo_toplevel() is not self
 
     # ------------------------------------------------------------ playback
 
@@ -1479,6 +1489,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         """Ctrl+Z / Ctrl+Y. In the Hz bass window only its own changes (user: the piano roll behind stays as it
         is): a step made elsewhere is next = a ding and a word in its status line."""
         hz = self.hz_window
+        if self.grabbed_elsewhere():
+            return None  # (a pop-up without its own undo: the shapes it works on stay as they are)
         if not self.in_hz(e.widget):
             return "break" if self.box_drawn() else self.redo() if redo else self.undo()
         if hz.drag:  # the mouse held there: Ctrl+Z only puts back what's being dragged (no step), Ctrl+Y nothing
