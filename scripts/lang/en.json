@@ -989,7 +989,8 @@
  "roll_menu.default_curve": "Back to the default curve",
  "project.spiderweb": "Spiderweb",
  "project.couldn_t_open_project": "Couldn't open project:\n{e}",
- "project.not_a_spiderweb_project": "It isn't a Spiderweb project.",
+ "project.save_before_open": "Opening \"{name}\" replaces what's on the piano roll now, and Undo can't bring it back.\n\nSave your current work first?",
+ "project.not_a_spiderweb_project":"It isn't a Spiderweb project.",
  "project.shapes_left_out": "{n} shape(s) in it couldn't be read, so they were left out (the file is damaged, or it was made by a newer Spiderweb).",
  "project.opening_your_last_session": "Your last session (the autosave):\n\n",
  "project.the_autosave_as_it_was_is_kept": "\n\nThe autosave as it was is kept as:\n{kept}",
@@ -1873,7 +1874,7 @@
  "help.files.title": "Saving and MIDI export",
  "help.files.tip": "Your work saves itself. Generate MIDI writes the .mid file set under Project.",
  "help.files.text": [
-  "Everything is saved on its own (autosave.json next to Spiderweb) and comes back next time; each time Spiderweb starts, the previous session is kept as autosave-backup.json. Save… / Open… keep and open project files (.json). Shapes are stored in beats, so changing PPQ doesn't move them.",
+  "Everything is saved on its own (autosave.json next to Spiderweb) and comes back next time; each time Spiderweb starts, the previous session is kept as autosave-backup.json. Save… / Open… keep and open project files (.json). Opening one replaces what's on the piano roll (Undo can't bring it back), so if your shapes aren't saved in a project file, Spiderweb asks to save them first. Shapes are stored in beats, so changing PPQ doesn't move them.",
   "",
   "Generate MIDI writes the file set under Output file, with the PPQ, BPM and beats per bar from Project. PPQ 32767 or higher: many MIDI programs can't open the file (the box turns red).",
   "",

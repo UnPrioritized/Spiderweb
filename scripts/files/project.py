@@ -410,21 +410,37 @@ class ProjectFiles:
         path = filedialog.askopenfilename(title=tr("project.open_project"), initialdir=OUTPUT_DIR,
                                           filetypes=[(tr("project.spiderweb_project"), "*.json"),
                                                      (tr("project.all_files"), "*.*")])
-        if path and self.load_file(path):
+        if not path or not self.may_replace(os.path.basename(path)):
+            return
+        if self.load_file(path):
+            self._saved_shapes = json.dumps(self.shapes)
             self.sync_panel()
             self.tell_load_notes()
 
+    def may_replace(self, name):
+        """Before Open project replaces the shapes (Undo can't bring them back): if they aren't saved in a project
+        file as they are, asks to save them first. False = don't open."""
+        if not self.shapes or json.dumps(self.shapes) == self._saved_shapes:
+            return True
+        answer = messagebox.askyesnocancel(tr("project.open_project"), tr("project.save_before_open", name=name),
+                                           icon="warning", default="yes", parent=self)
+        return answer is False or answer is True and self.save_project()
+
     def save_project(self):
+        """True if it was saved."""
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         path = filedialog.asksaveasfilename(title=tr("project.save_project"), initialdir=OUTPUT_DIR,
                                             defaultextension=".json",
                                             filetypes=[(tr("project.spiderweb_project"), "*.json")])
         if not path:
-            return
+            return False
         try:
             self.write_json(path)
         except OSError as e:
             messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_save", e=e))
+            return False
+        self._saved_shapes = json.dumps(self.shapes)
+        return True
 
     def browse_output(self):
         cur = self.pvar["output"].get()

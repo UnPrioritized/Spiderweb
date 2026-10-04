@@ -161,6 +161,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self._scrub = None  # the number box being stepped (scrub_step)
         self._loading = False
         self._autosave_job = None
+        self._autosave_failed = False  # (told once until it works again: ProjectFiles.autosave)
+        self._saved_shapes = None  # the shapes as last saved in / opened from a project file (json)
         self._notes_cache = {}
         self.colours_wanted = []  # per shape, how many colours (tracks) its notes ask for (shapes_changed)
         self._notes_worked = 0  # shapes whose notes had to be worked out (not remembered)
