@@ -11,7 +11,7 @@ as one undo step, Cancel / Esc puts everything back. Ctrl+Z / Ctrl+Y step throug
 import json
 import math
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 import numpy as np
 
@@ -55,6 +55,9 @@ class RangeGraph(tk.Toplevel):
                      for t in self.tgts]
         self.closed = False
         self.drag, self.hover, self.bar_hover, self.counts = None, None, None, None
+        self.held, self.drag_from = False, None  # (a drag's graph that would make too many notes: not used yet)
+        # notes already said yes to: what the shapes make now (asked again only past that and the usual limit)
+        self.big_ok = sum(app.note_count(t) or 0 for t in self.tgts if t is not app.custom_defaults)
         box = ttk.Frame(self, padding=8)
         box.pack(fill="both", expand=True)
         self.on_var = tk.BooleanVar(value=True)
@@ -121,7 +124,9 @@ class RangeGraph(tk.Toplevel):
         self.bind("<Escape>", lambda e: self.cancel())
         self.bind("<Return>", lambda e: self.ok())
         self.protocol("WM_DELETE_WINDOW", self.cancel)
-        self.store()  # (on at once)
+        if not self.fits():  # (on at once, unless that's too many notes for the user)
+            self.on_var.set(False)
+        self.store()
         self.hist = LocalUndo(self, self.state, self.put_state)
         self.update_idletasks()
         self.geometry(f"+{app.winfo_rootx() + 120}+{app.winfo_rooty() + 120}")
@@ -143,7 +148,7 @@ class RangeGraph(tk.Toplevel):
         return json.dumps([self.on_var.get(), self.memo, [t["gate"] for t in self.tgts]])
 
     def put_state(self, state):
-        self.drag = None
+        self.drag, self.held = None, False
         on, self.memo, gates = json.loads(state)
         self.on_var.set(on)
         for t, g in zip(self.tgts, gates):
@@ -183,11 +188,40 @@ class RangeGraph(tk.Toplevel):
             out += np.bincount(j[(j >= 0) & (j < n)], minlength=n)
         return out
 
+    def fits(self, trial=None, ask=True):
+        """The picked shapes (trial: these instead, as they'd be) make few enough notes, or the user says go on
+        (the same question as a typed gate; asked again only for more notes than they already said yes to)."""
+        from window.app import BIG
+        if trial is None:
+            on = self.on_var.get()
+            trial = [dict({k: v for k, v in t.items() if k != "range"}, **({"range": m} if on else {}))
+                     for t, m in zip(self.tgts, self.memo) if t is not self.app.custom_defaults]
+        total = sum(self.app.note_count(t) for t in trial)
+        if total <= max(BIG, self.big_ok):
+            return True
+        if ask and messagebox.askyesno(tr("app.spiderweb_2"), tr("app.this_makes_about_notes_which_can", total=total),
+                                       icon="warning", parent=self):
+            self.big_ok = total
+            return True
+        return False
+
     def change(self, key, value=None, mark=True):
-        """key (to / dir / graph) set on every shape's range (None: only on / off changed)."""
+        """key (to / dir / graph) set on every shape's range (None: only on / off changed). Too many notes: asked
+        first (while a point is dragged: when it's let go, the graph alone moves till then)."""
+        old = json.loads(json.dumps(self.memo))
         if key:
             for m in self.memo:
                 m[key] = json.loads(json.dumps(value))
+        if self.drag is not None and not self.fits(ask=False):
+            self.held = True
+            return self.draw()
+        if self.drag is None and not self.fits():
+            self.memo = old
+            if key is None:
+                self.on_var.set(not self.on_var.get())
+            self.show_boxes()
+            return self.draw()
+        self.held = False
         self.store()
         if mark:
             self.hist.mark()
@@ -230,7 +264,7 @@ class RangeGraph(tk.Toplevel):
             trial = [dict(t, gate=beats, range=m) for t, m in placed]
         else:
             trial = [dict(t, range=dict(m, to=beats)) for t, m in placed]
-        if not self.app.confirm_big(trial):
+        if not self.fits(trial):
             return self.show_boxes()
         if key == "from":
             for t in self.tgts:
@@ -403,6 +437,7 @@ class RangeGraph(tk.Toplevel):
         if not self.on_var.get():
             return
         i = self.point_at(e.x, e.y)
+        self.drag_from = json.loads(json.dumps(self.memo))  # (put back if the notes it makes are too many)
         if i is None:
             u, y = self.snapped(e)
             if u <= 1e-9 or u >= 1 - 1e-9:
@@ -410,6 +445,7 @@ class RangeGraph(tk.Toplevel):
             pts = [list(p) for p in self.pts]
             i = next(j for j, p in enumerate(pts) if p[0] > u)
             pts.insert(i, [u, y])
+            self.drag = i
             self.change("graph", pts, mark=False)
         self.drag = i
         self.draw()
@@ -432,6 +468,11 @@ class RangeGraph(tk.Toplevel):
         if self.drag is None:
             return
         self.drag = None
+        if self.held:  # (the graph moved further than the notes: asked now)
+            if not self.fits():
+                self.memo = self.drag_from
+            self.held = False
+            self.store()
         self.draw()
         self.hist.mark()
 
