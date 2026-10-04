@@ -48,9 +48,10 @@ class RangeGraph(tk.Toplevel):
         self.ml, self.mr, self.mt, self.mb = int(56 * s), int(12 * s), int(10 * s), int(22 * s)
         self.tgts = app.custom_targets()
         self.before = json.dumps(app.shapes)
-        self.old = [(t["gate"], json.loads(json.dumps(t.get("range")))) for t in self.tgts]
-        # each shape's range, kept while it's switched off so switching on brings it back (new: 4 times the gate)
-        self.memo = [clean_range(json.loads(json.dumps(t.get("range") or
+        self.old = [json.loads(json.dumps({k: t.get(k) for k in ("gate", "range", "range_kept")})) for t in self.tgts]
+        # each shape's range, kept while it's switched off so switching on brings it back (sh["range_kept"] while
+        # it's off; new: 4 times the gate)
+        self.memo = [clean_range(json.loads(json.dumps(t.get("range") or t.get("range_kept") or
                                                        {"to": t["gate"] * 4, "graph": STRAIGHT, "dir": "time"})))
                      for t in self.tgts]
         self.closed = False
@@ -160,8 +161,8 @@ class RangeGraph(tk.Toplevel):
         on = self.on_var.get()
         for t, m in zip(self.tgts, self.memo):
             t.pop("range", None)
-            if on:
-                t["range"] = json.loads(json.dumps(m))
+            t.pop("range_kept", None)
+            t["range" if on else "range_kept"] = json.loads(json.dumps(m))
         self.app.shapes_changed()
         self.count = sum(self.app.note_count(t) or 0 for t in self.tgts if t is not self.app.custom_defaults)
         self.counts = self.spread()
@@ -285,11 +286,11 @@ class RangeGraph(tk.Toplevel):
 
     def cancel(self):
         self.closed = True
-        for t, (g, r) in zip(self.tgts, self.old):
-            t["gate"] = g
-            t.pop("range", None)
-            if r:
-                t["range"] = r
+        for t, old in zip(self.tgts, self.old):
+            t.update({k: v for k, v in old.items() if v is not None})
+            for k in ("range", "range_kept"):
+                if old[k] is None:
+                    t.pop(k, None)
         self.app.shapes_changed()
         self.close()
 

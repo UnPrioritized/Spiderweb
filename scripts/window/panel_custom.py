@@ -402,8 +402,8 @@ class CustomPanel:
             self.push_undo(name=CUSTOM_NAMES.get(key, key))
         for t in tgts:
             t[key] = value
-            if key == "gate":
-                t.pop("range", None)  # (a new gate typed in the panel = one flat gate again, user)
+            if key == "gate" and t.get("range"):  # (a new gate typed in the panel = one flat gate again, user;
+                t["range_kept"] = t.pop("range")  # kept for the Range window to bring back)
             if not value and (key in ("edge", "edge_mode") or key in CUSTOM_FLAGS and t is not self.custom_defaults):
                 t.pop(key, None)  # (shapes only have them when they're on)
         self.shapes_changed()

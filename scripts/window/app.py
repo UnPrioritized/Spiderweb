@@ -1101,8 +1101,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 sh["vel0"], sh["vel1"] = sh["vel1"], sh["vel0"]
             if sh.get("glue"):  # (its boxes are shares of the shape's box)
                 sh["glue"] = glue_flipped(sh["glue"], sideways)
-            if sh.get("range"):  # (a spam gate range runs the other way)
-                sh["range"] = flipped_range(sh["range"], sideways)
+            for k in ("range", "range_kept"):  # (a spam gate range runs the other way, the one kept while off too)
+                if sh.get(k):
+                    sh[k] = flipped_range(sh[k], sideways)
         self.roll.move_kept_box(lambda b, p: (mid2 - b, p) if sideways else (b, mid2 - p))  # (flips too)
         self.sync_panel()
         self.shapes_changed()
@@ -1141,8 +1142,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 sh["shape"]["k"] = r * r / sh["shape"]["k"]
             if sh.get("glue"):
                 sh["glue"] = glue_turned(sh["glue"], clockwise)
-            if sh.get("range"):
-                sh["range"] = turned_range(sh["range"], clockwise)
+            for k in ("range", "range_kept"):
+                if sh.get(k):
+                    sh[k] = turned_range(sh[k], clockwise)
         self.roll.move_kept_box(lambda b, p: (cb + sign * (p - cp) * r, cp - sign * (b - cb) / r))  # (turns too)
         self.sync_panel()
         self.shapes_changed()

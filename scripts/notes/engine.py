@@ -134,6 +134,9 @@ def clean_shape(sh):
         rg = clean_range(sh.get("range"))
         if rg:  # the spam gate going from one to another across the shape (gaterange.py)
             out["range"] = rg
+        rg = clean_range(sh.get("range_kept"))
+        if rg:  # (one switched off: the Range window brings it back when it's switched on)
+            out["range_kept"] = rg
         hz = clean_hz(sh.get("hz"))
         if hz:  # Hz bass (custom.py): the gate is one wave of a tone
             out["hz"] = hz
