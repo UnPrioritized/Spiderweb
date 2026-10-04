@@ -91,6 +91,12 @@ class TextTyping:
         self.app.tool.set("text")
         self.text_click(e)
 
+    def typing_empty(self):
+        """A new text with nothing to see yet (or typed and erased again): its undo step changes nothing, so Ctrl+Z
+        only takes the caret away (it took back an older step)."""
+        ty = self.typing
+        return bool(ty) and ty["i"] is None and (not ty["undo"] or bool(ty.get("new")))
+
     def end_typing(self):
         if not self.typing:
             return
@@ -112,6 +118,8 @@ class TextTyping:
         s0, s1 = self.text_selection()
         if e.state & CTRL:
             low = k.lower()
+            if low == "z" and self.typing_empty():  # (only the caret goes, like Ctrl+Z mid-draw)
+                return self.end_typing() or "break"
             if low in ("z", "y"):
                 self.end_typing()
                 app.undo() if low == "z" else app.redo()

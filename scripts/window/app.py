@@ -1480,8 +1480,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self._edit_key = key
 
     def undo(self):
-        if self.roll.draft:  # something half drawn (a funnel waiting for its wall, a polyline): just drop it
-            return self.roll.cancel_draft()
+        if self.roll.draft or self.roll.typing_empty():  # something half drawn (a funnel waiting for its wall, a
+            return self.roll.cancel_draft()                # polyline, a text caret with nothing typed): just drop it
         if self.hz_window and self.hz_window.pending:  # a slide started in the Hz bass window: just drop its mark
             self.hz_window.pending = None
             return self.hz_window.redraw()

@@ -1011,6 +1011,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def finish_poly(self):
         if not (self.draft and self.draft["kind"] == "poly"):
             return
+        if self.drag and self.drag[0] == "segment":  # (right-click / Enter while a point is dragged: the drag ends
+            self.drag = None                          # too, letting go does nothing)
         pts = []
         for p in self.draft["pts"][:-1]:  # the last point is the one following the mouse
             if not pts or p != pts[-1]:
@@ -1167,6 +1169,17 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.view_top = top + (e.y - y) / self.sy
         self.clamp_view()
         self.request_redraw()
+        self.draft_to_mouse(e)
+
+    def draft_to_mouse(self, e):
+        """The view moved under the mouse (wheel, middle-drag) while a new shape is drawn: its end goes to the mouse
+        at once (it stayed on the old spot in the song until the mouse moved, and letting go put it there)."""
+        if self.sx is None or not (self.draft or self.follow):
+            return
+        if self.drag and self.drag[0] in ("create", "place", "segment", "arcdrag", "wall"):
+            self.on_drag(e)
+        elif not self.drag:
+            self.on_motion(e)
 
     def on_wheel(self, e):
         if self.sx is None:
@@ -1187,6 +1200,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 self.view_top += (1 if up else -1) * max(1, round(3 * self.sy)) / self.sy
         self.clamp_view()
         self.request_redraw()
+        self.draft_to_mouse(e)
 
     def on_key(self, e):
         if self.typing:
