@@ -1913,6 +1913,16 @@
   "The velocities move and stretch with the shape. Typing a start / end velocity in the panel goes back to a straight ramp. Drag the bar above the pane to resize it; Velocity pane (top) hides it."
  ],
  "help.velocity.words": "velocity loudness volume dynamics ramp",
+ "help.hz_live.title": "Live keys (Hz bass)",
+ "help.hz_live.tip": "This sound is NOT your MIDI. The live keys play a quick copy that Spiderweb makes from your soundfont's own notes, so you can try a Hz bass before placing it. Only notes you place in the Hz bass window go into your MIDI. It can sound a little different from a real render, most with soundfonts that change their sound at random.",
+ "help.hz_live.text": [
+  "With Preview on, click and hold a key on the left of the Hz bass window to hear the Hz bass of that key, as a note placed there would sound: its keys, gates and effects. Let go, and the falls after the sustain points play. Drag up or down to play other keys.",
+  "",
+  "What you hear is NOT your MIDI. It's a quick copy made by Spiderweb: each different note is played once by the preview's synth with your soundfont, and copies of it are laid where the notes start. That's fast enough to play even a 128-key Hz bass live. It sounds very close to the real thing with most soundfonts; a soundfont that changes its sound at random can't be copied exactly. Only notes you place in the Hz bass window go into your MIDI.",
+  "",
+  "The first press after a change (another soundfont, new effects) waits a moment while the notes are recorded. The recordings are kept while Spiderweb is open; Preview settings… → Memory for live keys says how much memory they may take. When it's full, the ones used least are thrown away and recorded again when needed."
+ ],
+ "help.hz_live.words": "live keys keyboard play hold preview quick sound fake copy synth soundfont memory sustain fall release",
  "help.playback.title": "Playing and listening",
  "help.playback.tip": "Space = play / stop. Right-drag = listen to the notes under the mouse.",
  "help.playback.text": [
@@ -2287,5 +2297,12 @@
  "ps.speed": "Speed: {speed}x real time ({n} pieces at once)",
  "ps.speed_none": "Speed: …",
  "ps.slow": "slower than playing: playing waits at the grey",
- "ps.limiter": "A limiter always keeps the sound from getting too loud, however many keys play at once."
+ "ps.limiter": "A limiter always keeps the sound from getting too loud, however many keys play at once.",
+ "ps.live_mb": "Memory for live keys (MB)",
+ "ps.live_mb_tip": "How much memory the live keys may keep for the notes they record from the soundfont. When it's full, the ones used least are thrown away and recorded again when needed (a short wait).",
+ "ps.live_used": "Live keys: {used} MB of {limit} MB kept",
+ "hz.live_needs_preview": "Turn Preview on to play the keys on the left live.",
+ "hz.live_hover": "Click and hold a key to hear it live (a quick copy made from your soundfont, not your MIDI).",
+ "hz.live_recording": "Live keys: recording notes from the soundfont…",
+ "hz.live_playing": "Live keys: a quick copy, not your MIDI ({mb} MB kept)"
 }

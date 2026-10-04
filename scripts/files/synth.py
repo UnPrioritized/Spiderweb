@@ -36,7 +36,7 @@ _SAMPLE_FLOAT, _STREAM_DECODE, _UNICODE = 0x100, 0x200000, 0x80000000
 _DATA_FLOAT, _POS_BYTE, _STREAMPROC_END = 0x40000000, 0, 0x80000000
 _MIDI_DECAYEND, _MIDI_NOFX = 0x1000, 0x2000
 _ATTRIB_MIDI_VOICES, _ATTRIB_MIDI_VOICES_ACTIVE = 0x12003, 0x12004
-_ATTRIB_VOL = 2
+_ATTRIB_VOL, _ATTRIB_BUFFER = 2, 13
 _EV_END, _EV_NOTE, _EV_PROGRAM, _EV_TEMPO = 0, 1, 2, 62
 
 EVENT = np.dtype([("event", "<u4"), ("param", "<u4"), ("chan", "<u4"), ("tick", "<u4"), ("pos", "<u4")])
@@ -272,9 +272,10 @@ class Limiter:
 class Player:
     """Plays sound through the default sound device. pull(n) is asked for up to n frames (float32 rows) at a
     time, from BASS's own thread: rows = play them, None = not ready yet (silence; the song waits there), an empty
-    array = the end. Limiter + volume (0..1) on the way out. position() = the frame of pull's sound heard now."""
+    array = the end. Limiter + volume (0..1) on the way out. position() = the frame of pull's sound heard now.
+    buffer = seconds of sound BASS keeps ready (None: its own half second; the live keys want a short one)."""
 
-    def __init__(self, synth, pull, volume=0.8):
+    def __init__(self, synth, pull, volume=0.8, buffer=None):
         self.synth, self.pull, self.volume = synth, pull, volume
         self.limiter = Limiter()
         self.heard = deque()  # (stream frame, song frame or None = silence, count): what was handed to BASS
@@ -284,6 +285,8 @@ class Player:
         self.handle = synth.bass.BASS_StreamCreate(RATE, 2, _SAMPLE_FLOAT, self._proc, None)
         if not self.handle:
             raise SynthError("synth.failed", err=synth.bass.BASS_ErrorGetCode())
+        if buffer is not None:
+            synth.bass.BASS_ChannelSetAttribute(self.handle, _ATTRIB_BUFFER, float(buffer))
 
     def _fill(self, handle, buffer, length, user):
         n = length // 8

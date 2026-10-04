@@ -37,6 +37,7 @@ from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, 
                               grid_span, note_name)
 from roll.zoombar import add_zoom_bars
 from window.hz_effects import AMOUNT, FxPane
+from window.hz_live import LiveKeys
 from window.hz_preview import Preview
 from window.preview_settings import open_preview_settings
 from window.snap_picker import SnapPicker
@@ -353,6 +354,7 @@ class HzWindow(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.close)
         c.focus_set()
         self.preview = Preview(self)
+        self.live = LiveKeys(self)
         if app.hz_preview["on"]:  # (on last time: on again, if its soundfont is still there)
             self.after_idle(self.preview_again)
 
@@ -813,6 +815,8 @@ class HzWindow(tk.Toplevel):
         elif got:  # Auto gates: what this note gets, and why
             text += "     " + tr("hz.auto_fixed" if got[2] else "hz.auto_mixed", off=f"{got[0]:.2f}",
                                  limit=f"{got[1]:g}")
+        if e is not None and e.x < self.kb_w and e.y >= self.ruler_h and self.preview_on.get():
+            text += "     " + tr("hz.live_hover")
         if self.fx.says:
             text = self.fx.says
         self.status.config(text=text)
@@ -1020,6 +1024,13 @@ class HzWindow(tk.Toplevel):
         if hit is None:
             if e.x >= self.kb_w and e.y < self.ruler_h and self.preview_on.get():  # the bar numbers: the play line
                 return self.put_play_line(self.beat_at(e.x))
+            if e.x < self.kb_w and e.y >= self.ruler_h:  # the keyboard: a live key, held while the mouse is
+                why = self.live.press(self.key_at(e.y))
+                if why:
+                    self.status.config(text=why)
+                else:
+                    self.drag = {"kind": "live"}
+                return
             if e.x < self.kb_w or e.y < self.ruler_h:
                 return
             if e.state & CTRL or self.tool.get() == "select":  # a box that selects the notes it touches
@@ -1088,6 +1099,9 @@ class HzWindow(tk.Toplevel):
     def on_drag(self, e):
         d = self.drag
         if not d:
+            return
+        if d["kind"] == "live":  # (onto another key: that one plays)
+            self.live.press(self.key_at(e.y))
             return
         if d["kind"] == "box":
             d["mouse"] = (e.x, e.y, e.state)
@@ -1221,7 +1235,7 @@ class HzWindow(tk.Toplevel):
     def on_release(self, e):
         d = self.drag
         self.drop_drag()
-        if not d:
+        if not d or d["kind"] == "live":  # (a live key: let go in drop_drag)
             return
         if d["kind"] == "box":
             if self.box_timer:
@@ -1741,21 +1755,9 @@ class HzWindow(tk.Toplevel):
         self.fx.tidy()
         self.commit(tr("hz.step_fx"), copy.deepcopy(self.tones), before)
 
-    def commit(self, name, before, before_fx=None, push=True):
-        """The notes (and effects' lines) here become the shape's: one undo step of the main window (push=False:
-        part of the step taken already, e.g. the Tune window trying values). before = the tones (and before_fx the
-        lines) to go back to if it's called off (too many notes)."""
-        app = self.app
-        # the undo step keeps the selection from before the edit (the notes are still numbered as in `before`)
-        was = self.sel_before[1] if self.sel_before and self.sel_before[0] is before else self.sel_state()
-        self.sel_before = None
-        picked = [self.tones[i] for i in self.sel if i < len(self.tones)]
-        boxed = self.box_kept is not None and self.box_kept[1] == self.sel
-        self.tones.sort(key=lambda n: (n["t"], n["key"]))
-        self.sel = {i for i, n in enumerate(self.tones) if any(n is p for p in picked)}
-        if boxed:  # (the same notes, numbered anew: the Select box stays, user)
-            self.box_kept = (self.box_kept[0], set(self.sel))
-        tones = clean_tones(copy.deepcopy(self.tones))
+    def fx_settings(self):
+        """The effects' lines here as a Hz bass's settings (hz["fx"], "loop", "off", "amount", "from", "fit",
+        "sustain"), checked; {} without any."""
         fx = {"fx": clean_fx(self.fxl)} if self.fxl else {}  # (amount lines: below)
         loops = clean_loop(self.loops, fx["fx"]) if fx else {}
         if loops:
@@ -1776,6 +1778,24 @@ class HzWindow(tk.Toplevel):
         sustain = clean_sustain(self.sustains, loops, froms, fits)
         if sustain:
             fx["sustain"] = sustain
+        return fx
+
+    def commit(self, name, before, before_fx=None, push=True):
+        """The notes (and effects' lines) here become the shape's: one undo step of the main window (push=False:
+        part of the step taken already, e.g. the Tune window trying values). before = the tones (and before_fx the
+        lines) to go back to if it's called off (too many notes)."""
+        app = self.app
+        # the undo step keeps the selection from before the edit (the notes are still numbered as in `before`)
+        was = self.sel_before[1] if self.sel_before and self.sel_before[0] is before else self.sel_state()
+        self.sel_before = None
+        picked = [self.tones[i] for i in self.sel if i < len(self.tones)]
+        boxed = self.box_kept is not None and self.box_kept[1] == self.sel
+        self.tones.sort(key=lambda n: (n["t"], n["key"]))
+        self.sel = {i for i, n in enumerate(self.tones) if any(n is p for p in picked)}
+        if boxed:  # (the same notes, numbered anew: the Select box stays, user)
+            self.box_kept = (self.box_kept[0], set(self.sel))
+        tones = clean_tones(copy.deepcopy(self.tones))
+        fx = self.fx_settings()
         sh = self.target()
         bpm = app.current_bpm()
         if sh is None:
@@ -1900,6 +1920,8 @@ class HzWindow(tk.Toplevel):
         self.sound_on, self.sounding = set(), None
 
     def drop_drag(self):
+        if self.drag and self.drag["kind"] == "live":
+            self.live.release()
         self.drag = None
         self.sound(None)
 
@@ -1959,6 +1981,7 @@ class HzWindow(tk.Toplevel):
         if not self.preview_on.get():
             cfg["on"] = False
             self.preview.stop()
+            self.live.stop()
         else:
             if not os.path.isfile(cfg["font"]):
                 path = filedialog.askopenfilename(
@@ -1982,6 +2005,7 @@ class HzWindow(tk.Toplevel):
         self.preview_on.set(False)
         self.app.hz_preview["on"] = False
         self.preview.stop()
+        self.live.stop()
         messagebox.showerror(tr("hz.window_title"), err, parent=self)
 
     def on_space(self, e):
@@ -2048,6 +2072,10 @@ class HzWindow(tk.Toplevel):
                 says = tr("hz.preview_making", speed=f"{p.speed:.1f}" if p.speed else "…", voices=vo)
             else:
                 says = tr("hz.preview_ready", voices=vo)
+            if self.live.active():
+                says, colour = self.live.says()
+            elif not p.loading():
+                self.live.warm()
         if (self.preview_says.cget("text"), str(self.preview_says.cget("foreground"))) != (says, colour):
             self.preview_says.config(text=says, foreground=colour)
         if self.settings_window:
@@ -2062,6 +2090,7 @@ class HzWindow(tk.Toplevel):
             if job:
                 self.after_cancel(job)
         self.preview.stop()
+        self.live.stop()
         self.sound(None)
         self.app.pvar["ppq"].trace_remove("write", self.ppq_trace)
         self.app.hz_window = None

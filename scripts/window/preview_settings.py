@@ -1,7 +1,8 @@
 """The Hz bass window's "Preview settings…" window (hz_preview.py): soundfont, voice limit, no reverb / chorus,
-volume, and what the preview is doing (voices in use against the limit, how fast the sound is made), updated
-while it works so a changed voice limit shows its effect at once. These are program settings, not the project's:
-no undo, kept with the window settings in the autosave."""
+volume, the live keys' memory (hz_live.py), and what the preview is doing (voices in use against the limit, how
+fast the sound is made, the live keys' recordings kept), updated while it works so a changed voice limit shows its
+effect at once. These are program settings, not the project's: no undo, kept with the window settings in the
+autosave."""
 
 import os
 import tkinter as tk
@@ -9,7 +10,7 @@ from tkinter import filedialog, ttk
 
 from files.lang import tr
 from files.mathexpr import calc
-from window.hz_preview import VOICES, WORKERS
+from window.hz_preview import LIVE_MB, VOICES, WORKERS
 from window.widgets import Scrub, Tooltip
 
 ORANGE = "#c06000"
@@ -74,6 +75,18 @@ class PreviewSettings(tk.Toplevel):
         self.volume_says.grid(row=r, column=2, sticky="w", padx=(8, 0))
         r += 1
 
+        lb = ttk.Label(box, text=tr("ps.live_mb"))
+        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        self.live_mb = tk.StringVar(value=str(cfg["live_mb"]))
+        e = self.live_entry = ttk.Entry(box, textvariable=self.live_mb, width=8)
+        e.grid(row=r, column=1, sticky="w", pady=3)
+        e.bind("<Return>", lambda ev: (self.on_live_mb(), "break")[1])
+        e.bind("<FocusOut>", lambda ev: self.on_live_mb())
+        Scrub(self.app, [(e, self.live_mb, self.on_live_mb)], (100, 1000, 10), *LIVE_MB, label=lb)
+        Tooltip(e, tr("ps.live_mb_tip"))
+        Tooltip(lb, tr("ps.live_mb_tip"))
+        r += 1
+
         ttk.Separator(box).grid(row=r, column=0, columnspan=3, sticky="ew", pady=8)
         r += 1
         self.used = ttk.Label(box, text="")
@@ -81,6 +94,9 @@ class PreviewSettings(tk.Toplevel):
         r += 1
         self.speed = ttk.Label(box, text="")
         self.speed.grid(row=r, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        r += 1
+        self.live_used = ttk.Label(box, text="")
+        self.live_used.grid(row=r, column=0, columnspan=3, sticky="w", pady=(2, 0))
         r += 1
         ttk.Label(box, text=tr("ps.limiter"), foreground="#666", wraplength=round(380 * s)).grid(
             row=r, column=0, columnspan=3, sticky="w", pady=(8, 0))
@@ -119,6 +135,12 @@ class PreviewSettings(tk.Toplevel):
         sc = ORANGE if speed and p.speed and p.speed < 1.0 else "#222"
         if (self.speed.cget("text"), str(self.speed.cget("foreground"))) != (speed, sc):
             self.speed.config(text=speed, foreground=sc)
+        qs = getattr(self.app, "quick", None)  # the live keys' recordings (orange: full, old ones thrown away)
+        used = qs.used_mb() if qs is not None else 0.0
+        live = tr("ps.live_used", used=f"{used:,.0f}", limit=f"{cfg['live_mb']:,}")
+        lc = ORANGE if used >= cfg["live_mb"] * 0.98 else "#222"
+        if (self.live_used.cget("text"), str(self.live_used.cget("foreground"))) != (live, lc):
+            self.live_used.config(text=live, foreground=lc)
 
     def pick_font(self):
         cfg = self.app.hz_preview
@@ -148,6 +170,25 @@ class PreviewSettings(tk.Toplevel):
             cfg["voices"] = v
             self.app.schedule_autosave()
             self.remake()
+
+    def on_live_mb(self):
+        try:
+            v = int(round(float(calc(self.live_mb.get()))))
+            if not LIVE_MB[0] <= v <= LIVE_MB[1]:
+                raise ValueError
+        except (ValueError, ZeroDivisionError):
+            self.live_entry.config(style="Bad.TEntry")
+            return
+        self.live_entry.config(style="TEntry")
+        if str(v) != self.live_mb.get():
+            self.live_mb.set(str(v))
+        cfg = self.app.hz_preview
+        if v != cfg["live_mb"]:
+            cfg["live_mb"] = v
+            self.app.schedule_autosave()
+            if getattr(self.app, "quick", None) is not None:
+                self.app.quick.set_budget(v)
+            self.refresh()
 
     def on_nofx(self):
         self.app.hz_preview["nofx"] = bool(self.nofx.get())

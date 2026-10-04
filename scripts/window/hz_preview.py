@@ -27,8 +27,9 @@ TAIL = 30.0  # seconds of ring after the last note at most (it ends where the so
 TICK_MS = 100
 LOADED_SHOWN = 3.0  # seconds the green "soundfont loaded" stays
 WORKERS = max(1, min(6, (os.cpu_count() or 2) - 2))  # pieces made at once
-DEFAULTS = {"on": False, "font": "", "voices": 1000, "nofx": False, "volume": 0.8}
+DEFAULTS = {"on": False, "font": "", "voices": 1000, "nofx": False, "volume": 0.8, "live_mb": 1000}
 VOICES = (1, 100000)  # the voice limit's range
+LIVE_MB = (100, 65536)  # the live keys' memory limit's range (MB)
 
 
 def clean_settings(d):
@@ -39,6 +40,8 @@ def clean_settings(d):
         got["font"] = d["font"]
     if isinstance(d.get("voices"), int) and VOICES[0] <= d["voices"] <= VOICES[1]:
         got["voices"] = d["voices"]
+    if isinstance(d.get("live_mb"), int) and LIVE_MB[0] <= d["live_mb"] <= LIVE_MB[1]:
+        got["live_mb"] = d["live_mb"]
     if isinstance(d.get("volume"), (int, float)) and 0 <= d["volume"] <= 1:
         got["volume"] = float(d["volume"])
     got["on"], got["nofx"] = d.get("on") is True, d.get("nofx") is True

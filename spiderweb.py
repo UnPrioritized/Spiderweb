@@ -33,7 +33,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     hz_window.py     the Hz bass window: a small piano roll where its notes are placed
     hz_effects.py    the effects pane under the Hz bass window's notes (lines with points)
     hz_preview.py    the Hz bass window's Preview: its sound made ahead (greyed until made) and played
-    preview_settings.py  its Preview settings window (soundfont, voice limit, reverb, volume, speed)
+    hz_live.py       the Hz bass window's live keys: a key held = its Hz bass, played with the quick sound
+    preview_settings.py  its Preview settings window (soundfont, voice limit, reverb, volume, live keys' memory)
     velocity_formula.py the velocity pane's Formula tool settings (pattern, loops, its numbers)
     tool_window.py   what the Claw machine and Strum windows share (live preview, undo, the Knob dial)
     claw_window.py   the Claw machine window
@@ -89,6 +90,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     share.py         shapes / drawings as one line of text to share (packed, checked when pasted back)
     playback.py      playing through Windows MIDI out
     synth.py         the built-in synth (Hz bass preview): BASS + BASSMIDI DLLs in scripts/bass/
+    quicksound.py    the quick sound: single soundfont notes recorded once, copies laid at each note (live keys)
     mathexpr.py      math in number boxes (960*4 etc.)
     snap.py          the snap choices (bar, note lengths, custom ones) and their length in beats
 """
