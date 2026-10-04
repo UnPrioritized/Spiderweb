@@ -16,6 +16,7 @@ import numpy as np
 from files.lang import tr
 from notes.areas import COLOURS
 from notes.custom import CUSTOM_DEFAULTS, capped_colours, custom_note_count, tracks_apart
+from window import big_ask
 from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
@@ -76,7 +77,6 @@ DRAW_TOOLS = [("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"), 
               ("curve", tr("app.curve"), "c"), ("arc", tr("app.arc"), "a"), ("custom", tr("app.custom_shape"), "s"),
               ("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q"), ("funnel", tr("app.funnel"), "n"),
               ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h")]
-BIG = 1_000_000  # ask before making a custom shape / funnel with more notes than this
 MANY_CHANNELS = 15  # a shape spread over more channels than this is shown orange in the shape list
 CHANNEL_CHOICES = [
     ("raw", tr("app.as_drawn"),
@@ -163,6 +163,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self._autosave_job = None
         self._autosave_failed = False  # (told once until it works again: ProjectFiles.autosave)
         self._saved_shapes = None  # the shapes as last saved in / opened from a project file (json)
+        self.big_skip = set()  # big_ask actions ticked "Don't ask again until Spiderweb is closed"
         self._notes_cache = {}
         self.colours_wanted = []  # per shape, how many colours (tracks) its notes ask for (shapes_changed)
         self._notes_worked = 0  # shapes whose notes had to be worked out (not remembered)
@@ -1207,10 +1208,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         return len(self.notes_of(sh)) if n is None else n
 
     def confirm_big(self, shapes):
-        total = sum(self.note_count(sh) for sh in shapes)
-        return total <= BIG or messagebox.askyesno(
-            tr("app.spiderweb_2"), tr("app.this_makes_about_notes_which_can", total=total),
-            icon="warning", parent=self)
+        return big_ask.ask(self, "notes", sum(self.note_count(sh) for sh in shapes))
 
     def layout_rows(self):
         """Show the panel's optional parts, always in the same order above the point boxes."""

@@ -18,6 +18,7 @@ MAX_LOG = 1_000_000  # bytes
 
 _app = None  # the window, once there is one
 _told = False
+_told_memory = False  # (out of memory said once too, apart from other errors)
 _seen = {}  # error text -> times it happened this session (an error on every mouse move would flood the log)
 
 
@@ -47,14 +48,21 @@ def write_log(exc_type, exc, tb, where):
         return False
 
 
-def tell_user(saved, fatal=False):
-    global _told
-    if _told:
+def tell_user(saved, fatal=False, memory=False):
+    global _told, _told_memory
+    if memory and not fatal:  # (out of memory: said in plain words, once, apart from other errors)
+        if _told_memory:
+            return
+        _told_memory = True
+    elif _told:
         return
-    _told = True
+    else:
+        _told = True
     where = (tr("errors.the_details_were_saved_to", LOG=LOG) if saved else
              tr("errors.the_details_couldn_t_be_saved", LOG=LOG))
-    if fatal:
+    if memory and not fatal:
+        msg = tr("big_ask.out_of_memory_somewhere")
+    elif fatal:
         msg = tr("errors.spiderweb_couldn_t_start_because_of", where=where)
     else:
         msg = (tr("errors.something_went_wrong_in_spiderweb_you", where=where))
@@ -73,13 +81,14 @@ def tell_user(saved, fatal=False):
 
 def report(exc_type, exc, tb, where="", fatal=False):
     saved = write_log(exc_type, exc, tb, where)
+    memory = isinstance(exc_type, type) and issubclass(exc_type, MemoryError)
     if threading.current_thread() is not threading.main_thread() and _app is not None:
         try:
-            _app.after(0, lambda: tell_user(saved))  # Tk windows belong to the main thread
+            _app.after(0, lambda: tell_user(saved, memory=memory))  # Tk windows belong to the main thread
         except Exception:
             pass
         return
-    tell_user(saved, fatal)
+    tell_user(saved, fatal, memory)
 
 
 def install(app):

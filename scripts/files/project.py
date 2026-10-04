@@ -26,6 +26,7 @@ from files.about import HERE, VERSION
 from files.safefile import write_bytes, write_text
 from files.snap import clean_snap
 from files.update_check import version_tuple
+from window.big_ask import ask as ask_big
 
 AUTOSAVE = os.path.join(HERE, "autosave.json")
 OUTPUT_DIR = os.path.join(HERE, "output")
@@ -532,6 +533,8 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"),
                                  tr("project.no_notes_yet_draw_something_inside", keys=self.keys - 1))
             return
+        if not ask_big(self, "midi", len(self.rendered)):
+            return
         path = output_path(self.pvar["output"].get())
         if os.path.exists(path) and not messagebox.askyesno(  # (asked like the Output file dialog does)
                 tr("project.confirm_save_as"), tr("project.already_exists_do_you_want_to",
@@ -549,6 +552,9 @@ class ProjectFiles:
             write_midi(path, ppq, bpm, beats, self.rendered)
         except OSError as e:
             messagebox.showerror(tr("project.spiderweb"), couldnt_save(e))
+            return
+        except MemoryError:
+            messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))
             return
         finally:
             self.config(cursor="")
@@ -580,7 +586,14 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"), tr("project.no_notes_to_copy_draw_something")
                                  if not self.sels or high else tr("project.the_selected_shapes_have_no_notes"))
             return
-        if not put_on_clipboard(clip_data(notes, ppq, beats * ppq, self.domino_start())):
+        if not ask_big(self, "domino", len(notes)):
+            return
+        try:
+            raw = clip_data(notes, ppq, beats * ppq, self.domino_start())
+        except MemoryError:
+            messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))
+            return
+        if not put_on_clipboard(raw):
             messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_use_the_clipboard_another"))
             return
         what = ((tr("project.one_note") if len(notes) == 1 else tr("project.n_notes", n=len(notes))) if self.sels else

@@ -11,7 +11,7 @@ as one undo step, Cancel / Esc puts everything back. Ctrl+Z / Ctrl+Y step throug
 import json
 import math
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import ttk
 
 import numpy as np
 
@@ -19,6 +19,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import SPAM_FILLS, range_gates
 from notes.gaterange import DIRS, STRAIGHT, clean_range, gate_steps, steps_of
+from window import big_ask
 from window.panel_funnel import GATE_STEPS
 from window.widgets import LocalUndo, Scrub, Tooltip
 
@@ -195,16 +196,14 @@ class RangeGraph(tk.Toplevel):
     def fits(self, trial=None, ask=True):
         """The picked shapes (trial: these instead, as they'd be) make few enough notes, or the user says go on
         (the same question as a typed gate; asked again only for more notes than they already said yes to)."""
-        from window.app import BIG
         if trial is None:
             on = self.on_var.get()
             trial = [dict({k: v for k, v in t.items() if k != "range"}, **({"range": m} if on else {}))
                      for t, m in zip(self.tgts, self.memo) if t is not self.app.custom_defaults]
         total = sum(self.app.note_count(t) for t in trial)
-        if total <= max(BIG, self.big_ok):
+        if total <= self.big_ok or not big_ask.trouble(self.app, "notes", total)[0]:
             return True
-        if ask and messagebox.askyesno(tr("app.spiderweb_2"), tr("app.this_makes_about_notes_which_can", total=total),
-                                       icon="warning", parent=self):
+        if ask and big_ask.ask(self.app, "notes", total, parent=self):
             self.big_ok = total
             return True
         return False
