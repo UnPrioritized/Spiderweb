@@ -32,7 +32,7 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc
 from files.snap import SNAPS, snap_beats, snap_text
-from notes.hzbass import (BEND, FROM_MODES, FX, FX_START, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, bend_of, bent_part,
+from notes.hzbass import (BEND, ENVELOPES, FROM_MODES, FX, FX_START, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, bend_of, bent_part,
                           chains, group_count, line_at,
                           loop_off, loop_on, loop_shape, tones_span)
 from roll.roll_shared import BOX_STILL, CTRL, SELECT_CURSOR, SHIFT
@@ -1024,11 +1024,15 @@ class FxPane:
         top.entry.select_range(0, "end")
 
     def set_shape(self, name, kind):
-        """A ready-made shape for one repeat of the effect (it starts repeating every beat if it didn't)."""
+        """A ready-made shape for one repeat of the effect (it starts repeating every beat if it didn't; an envelope:
+        once per note, half a beat, unless it repeats already)."""
         win = self.win
         before = self.state()
-        every = win.loops.get(name) or 1.0
-        win.fxl[name] = loop_shape(kind, every, random.randrange(1 << 30))
+        every = win.loops.get(name)
+        if not every and kind in ENVELOPES:
+            every, win.froms[name] = 0.5, "note"
+        every = every or 1.0
+        win.fxl[name] = loop_shape(kind, every, random.randrange(1 << 30), name)
         win.loops[name] = every
         self.active = name
         win.commit_fx(before)
@@ -1057,6 +1061,10 @@ class FxPane:
             shapes = tk.Menu(menu, tearoff=0)
             for kind in LOOP_SHAPES:
                 shapes.add_command(label=tr("hz.fx_shape_" + kind), command=lambda k=kind: self.set_shape(target, k))
+            shapes.add_separator()
+            for kind in ENVELOPES:
+                shapes.add_command(label=tr("hz.fx_shape_%s%s" % (kind, "_pitch" if target == "pitch" else "")),
+                                   command=lambda k=kind: self.set_shape(target, k))
             menu.add_cascade(label=tr("hz.fx_shape"), menu=shapes)
             if target in self.win.loops:
                 self.has_amount = tk.BooleanVar(self.win, value=target + AMOUNT in self.win.fxl)

@@ -102,6 +102,9 @@ FROM_MODES = ("note", "restart")  # hz["from"]: once from each note's start / re
 LOOP_SHAPES = {"sine": None, "triangle": [(0, 0), (0.5, 1), (1, 0)], "saw_up": [(0, 0), (1, 1)],
                "saw_down": [(0, 1), (1, 0)], "square": [(0, 1), (0.5, 1), (0.5, 0), (1, 0)],
                "pump": [(0, 0), (0.1, 0.35), (0.35, 0.85), (1, 1)], "steps": None}
+# ... and for one per note (envelopes, made in loop_shape: they depend on the effect); picking one plays it once per note
+ENVELOPES = ("drop", "rise", "pluck")
+FAST = 0.5  # their bend: fast first, then settling ((1 - u)^2, the drop the user heard best)
 GROUPS = 6  # "groups" at 1
 PITCH = 12.0  # "pitch": keys up at 1 (and down at 0; 0.5 = the tone as placed)
 OFF_PITCH = 0.02  # "offpitch" at 1: the highest key's tone is this much (x the tone) below the lowest key's
@@ -320,9 +323,18 @@ def loop_off(pts, every, a, b):
     return [[a + p[0] / every * (b - a), *p[1:]] for p in pts]
 
 
-def loop_shape(kind, every, seed=None):
-    """A ready-made shape for one repeat of `every` beats (LOOP_SHAPES): its points."""
-    if kind == "sine":  # (quarter waves as bent lines: the middle of each is at sin 45 degrees, 0.707 of the way)
+def loop_shape(kind, every, seed=None, name=None):
+    """A ready-made shape for one repeat of `every` beats (LOOP_SHAPES, or ENVELOPES for the effect `name`): its
+    points. Envelopes end where the effect does nothing: pitch from 12 keys up / down to the tone, the others from
+    full to 0. Volume rises late (the top half sounds about the same: it reaches the limiter, user)."""
+    top, still = (1.0, 0.5) if name == "pitch" else (1.0, 0.0)
+    if kind == "drop":
+        pts = [(0, top, FAST), (1, still)]
+    elif kind == "rise":
+        pts = [(0, 0.0, -FAST if name == "volume" else FAST), (1, still if name == "pitch" else top)]
+    elif kind == "pluck":
+        pts = [(0, still), (0.15, 0.8 if name == "pitch" else top, FAST), (1, still)]
+    elif kind == "sine":  # (quarter waves as bent lines: the middle of each is at sin 45 degrees, 0.707 of the way)
         b = math.sqrt(2.0) - 1.0
         pts = [(0, 0.5, b), (0.25, 1, -b), (0.5, 0.5, b), (0.75, 0, -b), (1, 0.5, b)]
     elif kind == "steps":  # (two points at one spot: a step)
