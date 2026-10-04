@@ -1053,6 +1053,8 @@ class HzWindow(tk.Toplevel):
         if (hit and hit[0] in ("note", "tune", "left", "right") and self.tones[hit[1]]["id"] == self.placed
                 and not e.state & CTRL and self.tool.get() == "pencil"):
             return self.on_press(e, place=True)
+        if hit and hit[0] == "tune" and not e.state & CTRL:  # the red line (tall rows): its tune back to 0 (user)
+            return self.reset_tune(hit[1])
         if (self.tool.get() == "select" and hit is None and self.app.hz_clip and not e.state & CTRL
                 and e.x >= self.kb_w and e.y >= self.ruler_h and not self.on_kept_box(self.kept_box(), e, hit)):
             self.drop_drag()
@@ -1436,6 +1438,16 @@ class HzWindow(tk.Toplevel):
             n["cents"] = float(v)
         self.live_edit(i, tr("hz.tune_ask", most=f"{TUNE:g}"), lambda n: n["cents"], put, -TUNE, TUNE,
                        (1, 10, 0.1), tr("hz.step_tune"))
+
+    def reset_tune(self, i):
+        """A double click on note i's red line: its tune back to 0 cents, the selected notes' too when it's one of
+        them (as Tune… does). One undo step."""
+        self.drop_drag()
+        before = copy.deepcopy(self.tones)
+        for j in self.sel if i in self.sel else {i}:
+            self.tones[j]["cents"] = 0.0
+        if self.tones != before:
+            self.commit(tr("hz.step_tune"), before)
 
     def type_auto(self, i):
         """A note's own Auto gates threshold in cents (live_edit)."""
