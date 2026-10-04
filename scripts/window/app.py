@@ -1474,6 +1474,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         hz = self.hz_window
         if not self.in_hz(e.widget):
             return self.redo() if redo else self.undo()
+        if hz.drag:  # the mouse held there: Ctrl+Z only puts back what's being dragged (no step), Ctrl+Y nothing
+            return None if redo else hz.cancel_drag()
         if not redo and hz.pending:  # a slide started: just drop its mark
             hz.pending = None
             return hz.redraw()

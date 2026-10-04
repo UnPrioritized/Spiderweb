@@ -16,6 +16,7 @@ import math
 import os
 import re
 import tkinter as tk
+from types import SimpleNamespace
 from tkinter import font as tkfont
 from tkinter import filedialog, messagebox, ttk
 
@@ -189,6 +190,7 @@ class HzWindow(tk.Toplevel):
         self.minsize(round(420 * s), round(260 * s))
         self.tones, self.sel = [], set()  # the notes shown (hzbass tones) and which are selected
         self.drag = None
+        self.press_was = (set(), None)  # (the selection, the kept Select boxes) at the last press
         self.box_kept = None  # ([box_area, ...], selection) of the last Select boxes, shown after letting go
         self.sel_before = None  # (tones before an edit, sel_state() from then): what its undo step keeps (commit)
         self.pushing = None  # (the sel_state() of the undo step being made, commit)
@@ -332,12 +334,13 @@ class HzWindow(tk.Toplevel):
                or "break")  # (effect points selected: they go; none, the pane pressed last: the highlighted effect)
         for k in ("<Control-c>", "<Control-C>"):  # (effect points selected: they're copied; else the notes)
             c.bind(k, lambda e: self.copy_notes() or "break")
-        for k in ("<Control-v>", "<Control-V>"):  # (what was copied last: effect points, or notes at the play line)
-            c.bind(k, lambda e: (self.fx.paste_points() or self.paste_notes(self.play_line_beat()), "break")[1])
-        c.bind("<Escape>", lambda e: self.select(()) or "break")
+        for k in ("<Control-v>", "<Control-V>"):  # (what was copied last: effect points, or notes at the play line;
+            c.bind(k, lambda e: (self.drag or self.fx.paste_points()  # nothing while the mouse is held)
+                                 or self.paste_notes(self.play_line_beat()), "break")[1])
+        c.bind("<Escape>", lambda e: self.on_escape())
         self.bind("<space>", self.on_space)  # (anywhere in the window: the buttons don't take the keyboard)
         for k in ("<Control-a>", "<Control-A>"):
-            c.bind(k, lambda e: self.select(range(len(self.tones))) or "break")
+            c.bind(k, lambda e: (self.drag or self.select(range(len(self.tones))), "break")[1])
         for k, tool in (("p", "pencil"), ("P", "pencil"), ("v", "select"), ("V", "select")):
             c.bind(f"<KeyPress-{k}>", lambda e, tool=tool: self.tool.set(tool) or self.on_motion(e) or "break")
         self.bind("<Configure>", self.remember)
@@ -974,6 +977,7 @@ class HzWindow(tk.Toplevel):
             self.fx.sel = set()
             self.fx.redraw()
         kept, self.box_kept, sel0 = self.kept_box(), None, set(self.sel)
+        self.press_was = (sel0, kept)  # (what Esc / Ctrl+Z while the mouse is held go back to: cancel_drag)
         self.drop_drag()
         hit = None if place else self.hit(e.x, e.y)
         before = copy.deepcopy(self.tones)
@@ -999,7 +1003,7 @@ class HzWindow(tk.Toplevel):
                 add = e.state & CTRL and self.tool.get() == "select"  # (Ctrl: added to the selection and the
                 base = set(self.sel) if add else set()  # boxes kept)
                 self.sel = set(base)
-                self.drag = {"kind": "box", "from": (e.x, e.y), "to": (e.x, e.y), "base": base,
+                self.drag = {"kind": "box", "from": (e.x, e.y), "to": (e.x, e.y), "base": base, "before": before,
                              "more": list(kept or []) if add else [], "shift0": bool(e.state & SHIFT)}
                 return self.redraw()
             if not self.can_place():
@@ -1266,6 +1270,8 @@ class HzWindow(tk.Toplevel):
 
     def toggle_tool(self, e=None):
         """Double right click: Select <-> Pencil."""
+        if e is not None and self.drag:  # (the left button held: right clicks do nothing)
+            return
         if self.menu_wait:
             self.after_cancel(self.menu_wait)
             self.menu_wait = None
@@ -1276,7 +1282,10 @@ class HzWindow(tk.Toplevel):
     def on_menu(self, e):
         """Right click: slides between the selected notes (see pairs), or take them away. On a note (its red
         line): its tune, typed. On empty space the menu waits for the double click time first (a double right
-        click switches the tool), and there's none when there's nothing to pick."""
+        click switches the tool), and there's none when there's nothing to pick. None while the left button is held
+        (user: the menu took its let-go, and the window and the piano roll no longer agreed)."""
+        if self.drag:
+            return
         hit = self.hit(e.x, e.y)
         kept = self.kept_box() if not (hit and hit[0] in ("in", "out")) else None
         # inside the kept Select boxes: the menu for all they selected; just one note: its own menu, anywhere in
@@ -1782,6 +1791,41 @@ class HzWindow(tk.Toplevel):
     def drop_drag(self):
         self.drag = None
         self.sound(None)
+
+    def end_drag(self):
+        """The drag ends now, though the mouse is still held (a key pressed): its let-go will do nothing."""
+        if self.box_timer:
+            self.after_cancel(self.box_timer)
+            self.box_timer = None
+        self.drop_drag()
+
+    def cancel_drag(self):
+        """Esc / Ctrl+Z while the mouse is held: the drag is called off. The notes, the selection and the Select
+        boxes go back to how they were at the press (user); no undo step. False when there's no drag."""
+        d = self.drag
+        if not d:
+            return False
+        self.end_drag()
+        self.tones = copy.deepcopy(d["before"])
+        sel, kept = self.press_was
+        self.sel = set(sel)
+        self.box_kept = (kept, set(sel)) if kept else None
+        self.sel_before = None
+        self.redraw()
+        self.point_again()
+        return True
+
+    def on_escape(self):
+        """Esc: a drag going on is called off (cancel_drag), else nothing is selected any more."""
+        if not self.cancel_drag():
+            self.select(())
+        return "break"
+
+    def point_again(self):
+        """The mouse pointer as it should be where the mouse is now (a key ended a drag: no move tells it)."""
+        c = self.canvas
+        self.on_motion(SimpleNamespace(x=c.winfo_pointerx() - c.winfo_rootx(),
+                                       y=c.winfo_pointery() - c.winfo_rooty(), state=0))
 
     def remember(self, e):
         if e.widget is self:
