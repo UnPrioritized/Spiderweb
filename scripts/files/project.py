@@ -403,8 +403,33 @@ class ProjectFiles:
         self._autosave_job = None
         try:
             self.write_json(self.autosave_path, window=True)
-        except OSError:
-            pass
+            self._autosave_failed = False
+        except OSError as e:
+            if not self._autosave_failed:  # (told once, again only if it worked in between)
+                self._autosave_failed = True
+                self.after_idle(lambda e=e: self.tell_autosave_failed(e))
+
+    def tell_autosave_failed(self, e):
+        if self.roll.drag:  # (not in the middle of a drag)
+            self.after(500, lambda: self.tell_autosave_failed(e))
+            return
+        messagebox.showwarning(tr("project.spiderweb"), tr("project.autosave_failed", path=self.autosave_path, e=e),
+                               parent=self)
+
+    def close_autosave(self):
+        """The last autosave, as the window closes. False = don't close: it couldn't be saved and the user chose to
+        stay (or to save it as a project file, then cancelled that)."""
+        if self._autosave_job:
+            self.after_cancel(self._autosave_job)
+            self._autosave_job = None
+        try:
+            self.write_json(self.autosave_path, window=True)
+            return True
+        except OSError as e:
+            answer = messagebox.askyesnocancel(tr("project.spiderweb"),
+                                               tr("project.autosave_failed_closing", path=self.autosave_path, e=e),
+                                               icon="warning", default="yes", parent=self)
+        return answer is False or answer is True and self.save_project()
 
     def open_project(self):
         path = filedialog.askopenfilename(title=tr("project.open_project"), initialdir=OUTPUT_DIR,

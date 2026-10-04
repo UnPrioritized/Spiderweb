@@ -1568,7 +1568,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self._normal_geometry = self.wm_geometry()
 
     def on_close(self):
+        if not self.close_autosave():
+            return
         self.stop_play()
         self.out.close()
-        self.autosave()
         self.destroy()
