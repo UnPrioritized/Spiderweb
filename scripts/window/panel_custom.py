@@ -9,7 +9,7 @@ from files.lang import tr
 from notes.areas import COLOURS
 from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, gap_lines, hz_gate,
                           join_strokes, map_stroke, normalize_areas, normalize_strokes, open_paths)
-from window.drawer import Drawer, clean_name, library_names, load_drawing, save_shape
+from window.drawer import Drawer, clean_name, library_names, load_drawing, save_shape, shape_stamp
 from window.panel_funnel import GATE_STEPS
 from files.mathexpr import calc, fmt
 from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
@@ -51,6 +51,7 @@ class CustomPanel:
 
     def _build_custom(self):
         """Custom shape settings: which library shape, and how the inside is filled."""
+        self._templates = {}  # custom_template's library shapes read: {name in lower case: (shape_stamp, template)}
         box = self.custom_box = ttk.Frame(self.settings)
         row = self.custom_shape_row = ttk.Frame(box)
         row.pack(fill="x")
@@ -201,8 +202,18 @@ class CustomPanel:
     def custom_template(self, name):
         """A library shape ready to place: (strokes filling the 0..1 box, width/height as drawn, its areas coloured
         by hand moved the same way), or None."""
-        strokes, areas = load_drawing(name) if name else (None, [])
-        return normalize_strokes(strokes) + (normalize_areas(strokes, areas),) if strokes else None
+        if not name:
+            return None
+        now = shape_stamp(name)  # (kept until its file changes: a big shape took 0.7 s to read, on every click)
+        kept = self._templates.get(name.lower())
+        if kept and kept[0] == now:
+            return kept[1]
+        strokes, areas = load_drawing(name)
+        tpl = normalize_strokes(strokes) + (normalize_areas(strokes, areas),) if strokes else None
+        if len(self._templates) >= 8:
+            self._templates.clear()
+        self._templates[name.lower()] = (now, tpl)
+        return tpl
 
     def new_custom(self, strokes, b0, p0, b1, p1, areas=(), drawn=None):
         """A library shape placed in a box. drawn: its width / height as drawn (custom_template), the proportions it

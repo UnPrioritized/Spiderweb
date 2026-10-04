@@ -75,12 +75,74 @@ DEVICES = {"CON", "PRN", "AUX", "NUL", *(f"{d}{n}" for d in ("COM", "LPT") for n
 
 
 # ---------------------------------------------------------------- library
+# A saved shape's name is inside its file ({"name": ..., on the first line); the file is named after it with the
+# characters Windows refuses made "_" (user: names may have any character). Files without a name inside (made
+# before 1.5) go by their file name.
+
+_names = {}  # file path -> ((modified time, size), the name inside)
+
+
+def stamp(path):
+    """(modified time, size) of a file, or None if it's gone: tells whether it changed since it was read."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return st.st_mtime_ns, st.st_size
+
+
+def _name_in(path, stem):
+    """The name a saved shape's file holds (its first line; files made by hand: read whole), else its file name."""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            line = f.readline().strip()
+            if line.startswith('{"name": ') and line.endswith(","):
+                got = json.loads(line[:-1] + "}")
+            elif line.startswith('{"strokes"'):  # (made before names were kept inside)
+                return stem
+            else:
+                f.seek(0)
+                got = json.load(f)
+        name = clean_name(got["name"]) if isinstance(got, dict) and isinstance(got.get("name"), str) else ""
+    except (OSError, ValueError):
+        return stem
+    return name or stem
+
+
+def _saved():
+    """The saved shapes: {name in lower case: (name, file path)}."""
+    try:
+        files = sorted(f for f in os.listdir(LIBRARY) if f.lower().endswith(".json"))
+    except OSError:
+        return {}
+    out = {}
+    for f in files:
+        path = os.path.join(LIBRARY, f)
+        now = stamp(path)
+        if now is None:
+            continue
+        known = _names.get(path)
+        if not known or known[0] != now:
+            known = _names[path] = (now, _name_in(path, f[:-5]))
+        out.setdefault(known[1].lower(), (known[1], path))
+    return out
+
 
 def saved_names():
-    try:
-        return [f[:-5] for f in os.listdir(LIBRARY) if f.lower().endswith(".json")]
-    except OSError:
-        return []
+    return [n for n, _ in _saved().values()]
+
+
+def shape_path(name):
+    """The file of the saved shape called `name` (any upper/lower case), or None."""
+    got = _saved().get(name.lower())
+    return got[1] if got else None
+
+
+def shape_stamp(name):
+    """What a library shape is right now: its file and (modified time, size), or the built-in it falls back to.
+    Equal stamps = the same drawing (panel_custom keeps the shape read until it changes)."""
+    path = shape_path(name)
+    return (path, stamp(path)) if path else ("built-in", built_in_name(name))
 
 
 def built_in_name(name):
@@ -97,44 +159,80 @@ def library_names():
     return top + sorted((n for n in names if not built_in_name(n)), key=str.lower)
 
 
-def shape_file(name):
-    return os.path.join(LIBRARY, name + ".json")
-
-
 def load_shape(name):
     """The strokes of a library shape, or None if it's missing or broken."""
     return load_drawing(name)[0]
 
 
 def load_drawing(name):
-    """A library shape's strokes (None if it's missing or broken) and its areas coloured by hand (areas.py)."""
-    try:
-        with open(shape_file(name), encoding="utf-8") as f:
-            got = json.load(f)
-        strokes, areas = clean_strokes(got.get("strokes")), clean_areas(got.get("areas"))
-    except FileNotFoundError:
-        b = built_in_name(name)
-        return (clean_strokes(BUILT_IN[b]) if b else None), []
-    except (OSError, ValueError, AttributeError):
-        return None, []
-    return strokes or None, areas
+    """A library shape's strokes (None if it's missing or broken) and its areas coloured by hand (areas.py). A
+    broken file named like a built-in shape gives the built-in one."""
+    path, b = shape_path(name), built_in_name(name)
+    strokes, areas = None, []
+    if path:
+        try:
+            with open(path, encoding="utf-8-sig") as f:
+                got = json.load(f)
+            strokes, areas = clean_strokes(got.get("strokes")) or None, clean_areas(got.get("areas"))
+        except (OSError, ValueError, AttributeError):
+            pass
+    if strokes is None and b:
+        return clean_strokes(BUILT_IN[b]), []
+    return strokes, (areas if strokes else [])
+
+
+def file_stem(name):
+    """A shape's name as a file name Windows takes: the characters it refuses -> "_", no dot / space at the end,
+    not one of its device names ("CON" -> "CON (shape)")."""
+    stem = "".join("_" if c in BAD_CHARS or c < " " else c for c in name).strip().rstrip(". ")
+    base, dot, rest = stem.partition(".")
+    if base.strip().upper() in DEVICES:
+        stem = f"{base} (shape){dot}{rest}"
+    return stem or "shape"
+
+
+def free_path(name, keep=None):
+    """A file for a shape called `name` that no other shape uses ("x (2).json" if "x.json" is taken). keep: the
+    shape's own file now (it may stay that one, e.g. only upper / lower case changed)."""
+    stem, k = file_stem(name), 2
+    path = os.path.join(LIBRARY, stem + ".json")
+    while os.path.exists(path) and os.path.normcase(path) != os.path.normcase(keep or ""):
+        path, k = os.path.join(LIBRARY, f"{stem} ({k}).json"), k + 1
+    return path
+
+
+def shape_text(name, strokes, areas=()):
+    text = '{"name": ' + json.dumps(name) + ',\n "strokes": [\n  ' + ",\n  ".join(json.dumps(st) for st in strokes)
+    text += "\n]"
+    if areas:
+        text += ',\n "areas": ' + json.dumps([[round(u, 6), round(v, 6), c] for u, v, c in areas])
+    return text + "}\n"
 
 
 def save_shape(name, strokes, areas=()):
+    """Saves a library shape (over the one with that name, if any). Returns its file."""
     os.makedirs(LIBRARY, exist_ok=True)
-    text = '{"strokes": [\n  ' + ",\n  ".join(json.dumps(st) for st in strokes) + "\n]"
-    if areas:
-        text += ',\n "areas": ' + json.dumps([[round(u, 6), round(v, 6), c] for u, v, c in areas])
-    write_text(shape_file(name), text + "}\n")
+    path = shape_path(name) or free_path(name)
+    write_text(path, shape_text(name, strokes, areas))
+    return path
+
+
+def rename_shape(old, new):
+    """A saved shape gets a new name (its file too, when it can). Raises OSError; ValueError if it can't be read."""
+    path = shape_path(old)
+    strokes, areas = load_drawing(old)
+    if not path or strokes is None:
+        raise ValueError(old)
+    to = free_path(new, keep=path)
+    write_text(to, shape_text(new, strokes, areas))
+    if os.path.normcase(to) != os.path.normcase(path):
+        os.remove(path)
 
 
 def clean_name(name):
-    """A shape's name as it can be a file name on Windows: no characters it refuses (or hidden ones like Tab), at
-    most NAME_MAX letters, and not one of its device names ("CON" -> "CON (shape)")."""
-    name = "".join(c for c in name if c not in BAD_CHARS and c >= " ").strip().rstrip(".")
-    name = name[:NAME_MAX].strip().rstrip(".")
-    base, dot, rest = name.partition(".")
-    return f"{base} (shape){dot}{rest}" if base.strip().upper() in DEVICES else name
+    """A shape's name: no hidden characters (like Tab or line breaks), no spaces around it, at most NAME_MAX
+    letters. Any other character is fine (the file name is made safe by file_stem)."""
+    return "".join(c for c in name if c >= " ").strip()[:NAME_MAX].strip()
 
 
 def help_box(parent, text):
@@ -188,6 +286,7 @@ class Drawer(tk.Toplevel):
         self.arc_bend = False  # an arc dragged start -> end: its middle point follows the mouse until a click
         self.dirty = False     # changed since it was saved or opened
         self.saved_name = None  # the library shape this drawing was opened from / saved as
+        self.saved_stamp = None  # its file then (shape_stamp): changed since = saved somewhere else
         self.sel = None        # index of the selected stroke (Select tool; a curve shows its handles)
         self.picks = set()     # the other selected strokes (a select box or Ctrl+click can pick several)
         self.boxes = []        # the select boxes kept after letting go: [[u0, v0, u1, v1]], until a click outside
@@ -1643,6 +1742,7 @@ class Drawer(tk.Toplevel):
         self.redo_stack, self.redo_kept = [], []
         self.name.set(name)
         self.saved_name = name or None
+        self.saved_stamp = shape_stamp(name) if name else None
         self.dirty = False
         self.redraw()
 
@@ -1664,9 +1764,20 @@ class Drawer(tk.Toplevel):
                                            name=name) + back, icon="warning", parent=self):
             return
         try:
-            os.remove(shape_file(name))
+            os.remove(shape_path(name))
         except OSError as e:
             messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_delete", e=e), parent=self)
+            return self.refresh_list()
+        if name.lower() == (self.saved_name or "").lower():  # the drawing open here: not saved any more
+            self.saved_name = self.saved_stamp = None
+            self.dirty = True
+            self.redraw()
+        app = self.app
+        if app.custom_shape.lower() == name.lower() and not app.custom_template(app.custom_shape):
+            app.custom_shape = "Circle"  # (the Custom shape tool used it: back to Circle, user)
+            app.sync_custom()
+            app.schedule_autosave()
+            app.status.config(text=tr("drawer.deleted_in_use", name=name))
         self.refresh_list()
 
     def save(self):
@@ -1683,6 +1794,10 @@ class Drawer(tk.Toplevel):
             if not messagebox.askyesno(tr("drawer.spiderweb"),
                                        tr("drawer.is_already_in_the_library_replace", name=name), parent=self):
                 return None
+        elif taken and self.changed_elsewhere():  # (e.g. the piano roll's "Save drawing to the shape library")
+            if not messagebox.askyesno(tr("drawer.spiderweb"), tr("drawer.changed_elsewhere", name=name),
+                                       icon="warning", parent=self):
+                return None
         self.strokes = join_strokes(self.strokes)
         self._settled = json.dumps(self.strokes)  # (the same lines)
         self.deselect()  # joining can change the order
@@ -1693,6 +1808,7 @@ class Drawer(tk.Toplevel):
             return None
         self.name.set(name)
         self.saved_name = name
+        self.saved_stamp = shape_stamp(name)
         self.dirty = False
         self.refresh_list(select=name)
         self.redraw()
@@ -1748,8 +1864,13 @@ class Drawer(tk.Toplevel):
                             tr("drawer.imported_as", name=name, old=old)) +
                             ("\n\n" + tr(f"share.made_{made[0]}", version=made[1]) if made else ""), parent=self)
 
+    def changed_elsewhere(self):
+        """The shape open here was saved since it was opened / saved here (its file changed or went)."""
+        return bool(self.saved_name) and shape_stamp(self.saved_name) != self.saved_stamp
+
     def use(self):
-        same = self.saved_name and clean_name(self.name.get()) == self.saved_name and not self.dirty
+        same = (self.saved_name and clean_name(self.name.get()) == self.saved_name and not self.dirty
+                and not self.changed_elsewhere())
         name = self.saved_name if same else self.save()
         if name:
             self.app.use_custom(name)
