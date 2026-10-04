@@ -1297,6 +1297,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 return None
             if isinstance(w, (tk.Entry, ttk.Entry)) and str(w.cget("state")) != "readonly":
                 return None
+            if self.box_drawn():
+                return "break"
             fn()
             return "break"
         return handler
@@ -1468,12 +1470,17 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 return False
         return widget is not None and str(widget).startswith(str(self.hz_window))
 
+    def box_drawn(self):
+        """A Select box being drawn on the main piano roll: shortcuts do nothing until it's let go (user: like
+        Domino)."""
+        return bool(self.roll.drag) and self.roll.drag[0] == "box"
+
     def key_undo(self, e, redo=False):
         """Ctrl+Z / Ctrl+Y. In the Hz bass window only its own changes (user: the piano roll behind stays as it
         is): a step made elsewhere is next = a ding and a word in its status line."""
         hz = self.hz_window
         if not self.in_hz(e.widget):
-            return self.redo() if redo else self.undo()
+            return "break" if self.box_drawn() else self.redo() if redo else self.undo()
         if hz.drag:  # the mouse held there: Ctrl+Z only puts back what's being dragged (no step), Ctrl+Y nothing
             return None if redo else hz.cancel_drag()
         if not redo and hz.pending:  # a slide started: just drop its mark

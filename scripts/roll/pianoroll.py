@@ -153,18 +153,23 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         return x0, y0, x1, y1
 
     def box_to(self):
-        """The Select box's corner goes to the mouse (box_mouse), kept inside the piano roll, and the box picks
-        what it touches."""
+        """The Select box's corner goes to the mouse (box_mouse), kept inside the piano roll. Nothing is selected
+        before it's let go (box_pick; user: like Domino)."""
         _, x, y, _, _, base, primary = self.drag
         mx, my, state = self.box_mouse
         self.drag = ("box", x, y, min(max(mx, self.kb_w), self.winfo_width()),
                      min(max(my, self.ruler_h), self.winfo_height()), base, primary)
         self.box_shift = bool(state & SHIFT)
+        self.draw_select_box()
+
+    def box_pick(self):
+        """The Select box let go: it selects the shapes it touches (Ctrl: added to the ones selected at the
+        press)."""
+        _, _, _, _, _, base, primary = self.drag
         box = self.box_area()
         found = self.shapes_in_box(*self.box_rect(box)) - base if box else set()
         if base | found != self.app.sels:
             self.app.select_many(base | found, max(found) if found else primary)
-        self.draw_select_box()
 
     def box_scroll(self):
         """A Select box dragged past the piano roll's edge: the view goes a beat that way (3 keys up / down) at
@@ -841,6 +846,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.after_cancel(self.box_timer)
             self.box_timer = None
         if kind == "box" and (self.box_area() or self.box_more and e.state & CTRL):
+            self.box_pick()
             self.box_kept = (self.box_more + [self.box_area()] if self.box_area() else self.box_more,
                              set(self.app.sels))
         elif kind == "seek" and self.drag[1]:

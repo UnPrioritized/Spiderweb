@@ -845,21 +845,20 @@ class HzWindow(tk.Toplevel):
         return x0, y0, x1, y1
 
     def box_to(self, d):
-        """The Select box's corner goes to the mouse (d["mouse"]), kept inside the piano roll, and the box selects
-        the notes it touches."""
+        """The Select box's corner goes to the mouse (d["mouse"]), kept inside the piano roll. Nothing is selected
+        before it's let go (box_pick; user: like Domino)."""
         x, y, state = d["mouse"]
         d["to"] = (min(max(x, self.kb_w), self.canvas.winfo_width()),
                    min(max(y, self.ruler_h), self.canvas.winfo_height()))
         d["shift"] = bool(state & SHIFT)
-        box = self.box_area(d)
-        if box is None:  # (still a click)
-            self.sel = set(d["base"])
-            return self.redraw()
-        x0, y0, x1, y1 = self.box_rect(box)
+        self.redraw()
+
+    def box_pick(self, d):
+        """The Select box let go: it selects the notes it touches (Ctrl: added to the ones selected at the press)."""
+        x0, y0, x1, y1 = self.box_rect(self.box_area(d))
         self.sel = d["base"] | {i for i, n in enumerate(self.tones)
                     if self.x_of(n["t"]) < x1 and self.x_of(n["t"] + n["len"]) > x0
                     and self.y_of(n["key"]) < y1 and self.y_of(n["key"]) + self.sy > y0}
-        self.redraw()
 
     def box_scroll(self):
         """A Select box dragged past the edge: the view goes a beat that way (3 keys up / down) at once and then
@@ -1217,6 +1216,8 @@ class HzWindow(tk.Toplevel):
             if self.box_timer:
                 self.after_cancel(self.box_timer)
                 self.box_timer = None
+            if self.box_area(d):
+                self.box_pick(d)
             if self.box_area(d) or d["more"] and e.state & CTRL:
                 self.box_kept = (d["more"] + [self.box_area(d)] if self.box_area(d) else d["more"], set(self.sel))
             elif (not e.state & CTRL and self.tool.get() == "select"
@@ -1546,10 +1547,12 @@ class HzWindow(tk.Toplevel):
 
     def delete_dragged(self):
         """Delete while the mouse is held (like the main piano roll): the note grabbed goes, or all the selected
-        notes when the Select box is being drawn (user), grabbed on its empty space or stretched, or copies are
-        moved; a slide's dot: that slide. The other notes stay as they are now; the drag ends (one undo step) and
+        notes when the Select box is grabbed on its empty space or stretched, or copies are moved; a slide's dot:
+        that slide. A Select box being drawn: nothing (user, like Domino). The other notes stay as they are now; the drag ends (one undo step) and
         the pointer is the one for where the mouse is. A note still being placed just goes (no step)."""
         d = self.drag
+        if d["kind"] == "box":  # (nothing selected by it yet: user, like Domino)
+            return
         if d["kind"] == "new":
             return self.cancel_drag()
         self.end_drag()
@@ -1880,10 +1883,13 @@ class HzWindow(tk.Toplevel):
 
     def cancel_drag(self):
         """Esc / Ctrl+Z while the mouse is held: the drag is called off. The notes, the selection and the Select
-        boxes go back to how they were at the press (user); no undo step. False when there's no drag."""
+        boxes go back to how they were at the press (user); no undo step. False when there's no drag. A Select box
+        being drawn: nothing (user, like Domino)."""
         d = self.drag
         if not d:
             return False
+        if d["kind"] == "box":
+            return True
         self.end_drag()
         self.tones = copy.deepcopy(d["before"])
         sel, kept = self.press_was
