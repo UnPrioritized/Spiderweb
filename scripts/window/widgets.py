@@ -72,11 +72,11 @@ def unchanged(e):
     return box_text(e) == getattr(e, "shown_text", None)
 
 
-def varies_tip(w):
+def mixed_tip(w):
     """The widget's own tooltip for the shared "different settings" sentence (made the first time)."""
-    if not hasattr(w, "varies_tip"):
-        w.varies_tip = Tooltip(w, "")
-    return w.varies_tip
+    if not hasattr(w, "mixed_tip"):
+        w.mixed_tip = Tooltip(w, "")
+    return w.mixed_tip
 
 
 def same_or_blank(e, var, values):
@@ -84,20 +84,20 @@ def same_or_blank(e, var, values):
     left empty with the shared tip (user: the box showed the first one's). Typing a number sets it on all of them;
     stepping it starts from the first one's (Scrub). True when they differ."""
     values = [str(v) for v in values]
-    varies = len(set(values)) > 1
-    var.set("" if varies else values[0] if values else "")
-    e.blank_from = values[0] if varies else None
-    varies_tip(e).text = tr("widgets.varies_tip") if varies else ""
-    return varies
+    mixed = len(set(values)) > 1
+    var.set("" if mixed else values[0] if values else "")
+    e.blank_from = values[0] if mixed else None
+    mixed_tip(e).text = tr("widgets.mixed_tip") if mixed else ""
+    return mixed
 
 
-def show_varies(box, varies, tip=None, text=""):
+def show_mixed(box, mixed, tip=None, text=""):
     """A dropdown for several shapes with different choices: shows the shared word (it isn't one of its choices);
     tip: its tooltip, which then starts with the shared sentence (text = its usual text)."""
-    if varies:
-        box.set(tr("widgets.varies"))
+    if mixed:
+        box.set(tr("widgets.mixed"))
     if tip is not None:
-        tip.text = (tr("widgets.varies_tip") + "\n\n" + text if text else tr("widgets.varies_tip")) if varies else text
+        tip.text = (tr("widgets.mixed_tip") + "\n\n" + text if text else tr("widgets.mixed_tip")) if mixed else text
 
 
 def remember_good(root):

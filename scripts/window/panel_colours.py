@@ -6,7 +6,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc
 from notes.custom import CYCLE_MAX, CYCLES
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_varies, unchanged, varies_tip
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged, mixed_tip
 
 CYCLE_CHOICES = [(None, tr("colours.off"))] + [(v, tr("colours." + v)) for v in CYCLES]
 EVERY_MAX = 10 ** 4
@@ -66,7 +66,7 @@ class ColoursPanel:
         return kinds.pop() if len(kinds) == 1 else None
 
     def sync_colours(self):
-        """Several shapes with different settings: the dropdown says Varies, a number box is left empty (shared
+        """Several shapes with different settings: the dropdown says Mixed, a number box is left empty (shared
         widgets.same_or_blank). The every row only works when all the ones with Colours count the same way."""
         tgts = self.colour_targets()
         on = [t["cycle"] for t in tgts if t.get("cycle")]
@@ -80,7 +80,7 @@ class ColoursPanel:
         for e, var, values in zip(self.cycle_entries, self.cycle_vars, parts):
             same_or_blank(e, var, values)
             if on and not by:
-                varies_tip(e).text = tr("colours.every_varies")
+                mixed_tip(e).text = tr("colours.every_mixed")
         self._loading = False
         time = by == "time"
         if time != bool(self.cycle_slash.winfo_manager()):  # By time: a second box, "a / b note"
@@ -95,7 +95,7 @@ class ColoursPanel:
         self.cycle_box.config(state="readonly" if tgts else "disabled",
                               style="Gap.TCombobox" if lonely else "TCombobox")
         kinds = {t["cycle"]["by"] if t.get("cycle") else None for t in tgts}  # (Off too)
-        show_varies(self.cycle_box, len(kinds) > 1, self.cycle_tip,
+        show_mixed(self.cycle_box, len(kinds) > 1, self.cycle_tip,
                     tr("colours.tip") + (tr("colours.needs") if lonely else ""))
         for e in [self.cycle_n_entry] + self.cycle_entries:
             e.config(state="normal" if cy and (by or e is self.cycle_n_entry) else "disabled", style="TEntry")
@@ -118,7 +118,7 @@ class ColoursPanel:
             return
         by = CYCLE_CHOICES[max(self.cycle_box.current(), 0)][0]
 
-        def number(e, var, lo, hi):  # (a wrong one: back to its last good value; still empty (Varies): None)
+        def number(e, var, lo, hi):  # (a wrong one: back to its last good value; still empty (Mixed): None)
             if not var.get().strip() and getattr(e, "blank_from", None):
                 return None
             for _ in range(2):
