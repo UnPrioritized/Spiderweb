@@ -6,7 +6,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc
 from notes.custom import CYCLE_MAX, CYCLES
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, bad, good
 
 CYCLE_CHOICES = [(None, tr("colours.off"))] + [(v, tr("colours." + v)) for v in CYCLES]
 EVERY_MAX = 10 ** 4
@@ -105,14 +105,20 @@ class ColoursPanel:
             boxes = [(self.cycle_n_entry, self.cycle_n_var, 2, CYCLE_MAX)]
             boxes += [(e, v, 1, EVERY_MAX) for e, v in zip(self.cycle_entries, self.cycle_vars)][:2 if by == "time" else 1]
             got = []
-            for e, var, lo, hi in boxes:
+            def number(var, lo, hi):
                 try:
                     v = calc(var.get())
-                    ok = lo <= v <= hi and v == int(v)
+                    return int(v) if lo <= v <= hi and v == int(v) else None
                 except ValueError:
-                    ok = False
-                e.config(style="TEntry" if ok else "Bad.TEntry")
-                got.append(int(v) if ok else None)
+                    return None
+            for e, var, lo, hi in boxes:
+                v = number(var, lo, hi)
+                if v is None:  # (back to its last good value)
+                    bad(e)
+                    v = number(var, lo, hi)
+                if v is not None:
+                    good(e)
+                got.append(v)
             if None in got:
                 return
             new = {"by": by, "n": got[0], "every": got[1:] if by == "time" else got[1]}

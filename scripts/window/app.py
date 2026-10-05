@@ -63,7 +63,7 @@ from window.snap_picker import SnapPicker
 from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
-from window.widgets import Scrub, StatusLine, Tooltip
+from window.widgets import Scrub, StatusLine, Tooltip, bad, good, remember_good, watch_bad
 
 
 VEL_KEYS = ("vel0", "vel1")
@@ -206,10 +206,12 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.align_var = tk.StringVar(value="auto")
         self.gate_var = tk.StringVar()
         self.fentries = {}
+        self.project_entries = {}  # BPM, Beats per bar
         self.point_rows = []
 
         ttk.Style(self).configure("Bad.TEntry", foreground="#d00000")
         ttk.Style(self).configure("Bad.TCombobox", foreground="#d00000")
+        remember_good(self)  # (a wrong value typed in a number box goes back to its last good one)
         self._build()
         self.restore_window()
         self.load_autosave()
@@ -421,6 +423,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 row.grid(row=r, column=1, sticky="w", padx=5)
                 self.ppq_box = ttk.Combobox(row, textvariable=self.pvar[key], values=PPQS, width=7, height=12)
                 self.ppq_box.pack(side="left")
+                for seq in ("<Return>", "<FocusOut>"):  # a wrong PPQ: back to the last good one (user)
+                    self.ppq_box.bind(seq, lambda e: self.ppq_ok() or self.pvar["ppq"].set(str(self.ppq)), add="+")
                 # Many MIDI programs can't open a file with a PPQ of 32767 or more (above that it's SMPTE timing anyway)
                 self.ppq_warning = ttk.Label(row, text=tr("app.many_programs_can_t_open_this"), foreground="#d00000",
                                              font=("Segoe UI", 8))
@@ -428,8 +432,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             else:
                 cell = ttk.Frame(box)
                 cell.grid(row=r, column=1, sticky="w", padx=5)
-                e = ttk.Entry(cell, textvariable=self.pvar[key], width=6)
+                e = self.project_entries[key] = ttk.Entry(cell, textvariable=self.pvar[key], width=6)
                 e.pack(fill="both", expand=True)
+                watch_bad(e)
                 boxes.append(e)
                 Scrub(self, [(e, self.pvar[key], None)], (1, 10, 0.1) if key == "bpm" else (1, 1, 1),
                       *((4, 100000) if key == "bpm" else (1, 32)), label=lb)
@@ -524,6 +529,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 ttk.Label(v, text="→").pack(side="left", padx=3)
             self.fentries[key] = ttk.Entry(v, textvariable=self.fvars[key], width=5)
             self.fentries[key].pack(side="left", padx=(5 if not i else 0, 0))
+            watch_bad(self.fentries[key])
         # dragging "Velocity" moves both ends together
         Scrub(self, [(self.fentries[k], self.fvars[k], None) for k in ("vel0", "vel1")], (1, 10, 1), 1, 127, label=lb)
         ttk.Label(v, text=tr("app.start_end"), foreground="#777").pack(side="left", padx=(5, 0))
@@ -570,6 +576,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             pe = ttk.Entry(self.points_box, textvariable=pv, width=7)
             pe.grid(row=i + 1, column=2, sticky="w")
             self.point_rows.append((tv, pv, te, pe))
+            watch_bad(te)
+            watch_bad(pe)
             # ticks: a snap step (Ctrl = one tick), pitch: a key (Shift = an octave)
             Scrub(self, [(te, tv, None)], lambda: (self.snap_ticks(), 4 * self.snap_ticks(), 1), 0)
             Scrub(self, [(pe, pv, None)], (1, 12, 0.1), 0, 127)
@@ -659,9 +667,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         try:
             value = calc_int(self.fvars[key].get(), 1, 127)
         except ValueError:
-            self.fentries[key].config(style="Bad.TEntry")
+            bad(self.fentries[key], typing=True)  # (red; back to its good value on Enter / leaving it)
             return
-        self.fentries[key].config(style="TEntry")
+        good(self.fentries[key])
         tgts = self.targets()
         if all(t[key] == value and not t.get("vel_env") for t in tgts):
             return
@@ -694,9 +702,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         for var, entry in ((tv, te), (pv, pe)):
             try:
                 values.append(float(calc(var.get())))
-                entry.config(style="TEntry")
+                good(entry)
             except ValueError:
-                entry.config(style="Bad.TEntry")
+                bad(entry, typing=True)
         if len(values) < 2:
             return
         sh = self.selected()
@@ -708,12 +716,27 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 self.sync_points()  # the other half followed
             self.shapes_changed()
 
+    def ppq_ok(self):
+        try:
+            return calc_int(self.pvar["ppq"].get(), 1, 65535) > 0
+        except ValueError:
+            return False
+
     def on_project_change(self):
         for key, lo, hi in (("ppq", 1, 65535), ("beats", 1, 32)):
             try:
                 setattr(self, key, calc_int(self.pvar[key].get(), lo, hi))
+                if key in self.project_entries:
+                    good(self.project_entries[key])
             except ValueError:
-                pass
+                if key in self.project_entries:  # (red; back to its good value on Enter / leaving it)
+                    bad(self.project_entries[key], typing=True)
+        if "bpm" in self.project_entries:
+            try:
+                ok = 4 <= calc(self.pvar["bpm"].get()) <= 100000
+            except ValueError:
+                ok = False
+            (good if ok else lambda e: bad(e, typing=True))(self.project_entries["bpm"])
         self.keys = KEYS[1] if self.keys_var.get() == str(KEYS[1]) else KEYS[0]
         self.roll.clamp_view()
         warn = self.ppq >= PPQ_WARN

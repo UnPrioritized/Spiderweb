@@ -9,7 +9,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.claw import CLAW_DEFAULTS, COUNTS, MAX_COUNT, PERIODS, TRASHES, clean_claw
 from window.tool_window import Knob, ToolWindow
-from window.widgets import Scrub, Tooltip, grid_shown
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown
 
 MODES = [("time", tr("claw.by_time")), ("notes", tr("claw.by_notes")), ("keys", tr("claw.by_keys")),
          ("chords", tr("claw.by_chords")), ("random", tr("claw.random"))]
@@ -138,9 +138,9 @@ class ClawWindow(ToolWindow):
             if not lo <= v <= hi or key in ("keep", "skip") and v != int(v):
                 raise ValueError
         except (ValueError, ZeroDivisionError):
-            e.config(style="Bad.TEntry")
+            bad(e)
             return
-        e.config(style="TEntry")
+        good(e)
         v = int(v) if key in ("keep", "skip") else v
         if v != self.claw[key]:
             self.put(key, v, done)

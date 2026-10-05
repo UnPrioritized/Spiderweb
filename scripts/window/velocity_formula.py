@@ -10,7 +10,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.pattern import PATTERN_PRESETS, PRESET_ALONG, formula_loop, new_pattern
 from window.pattern_dialog import load_patterns, saved_pattern
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, bad, good
 
 VEL_HEIGHT = 20.0  # a preset's height to start with, in velocity steps (on the piano roll it's 4 keys)
 VEL_LOOPS = 4.0
@@ -103,9 +103,9 @@ class VelocityFormulaBar(ttk.Frame):
             if name != "loops":
                 formula_loop(dict(p, vars=dict(p["vars"], **{name: value})))
         except (ValueError, ZeroDivisionError):
-            e.config(style="Bad.TEntry")
+            bad(e)
             return
-        e.config(style="TEntry")
+        good(e)
         if (p["loops"] if name == "loops" else p["vars"][name]) == value:
             return
         if name == "loops":

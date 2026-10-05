@@ -13,7 +13,7 @@ from notes.joined import shown_tumour, unify_tumours
 from notes.tumour import GRAPH_KEYS, TUMOUR_DEFAULTS, clean_graph
 from window.graph_window import GraphWindow
 from window.panel_custom import GAP_COLOR
-from window.widgets import LocalUndo, Scrub, Tooltip, grid_shown
+from window.widgets import LocalUndo, Scrub, Tooltip, bad, good, grid_shown
 
 SHAPE_CHOICES = [("triangle", tr("tumour_window.triangle")), ("square", tr("tumour_window.square")),
                  ("circle", tr("tumour_window.circle")), ("parabola", tr("tumour_window.parabola"))]
@@ -347,9 +347,9 @@ class TumourWindow(tk.Toplevel):
             if value is None:
                 raise ValueError
         except ValueError:
-            e.config(style="Bad.TEntry")
+            bad(e)
             return
-        e.config(style="TEntry")
+        good(e)
         tgts = self.app.tumour_targets()
         if tgts and all(abs((shown_tumour(t) or TUMOUR_DEFAULTS).get(key, 0.0) - value) < 1e-12 and
                         "tumours" not in t for t in tgts):

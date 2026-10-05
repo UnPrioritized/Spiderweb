@@ -12,7 +12,7 @@ from files.mathexpr import calc, fmt
 from notes.pattern import FORMULA_KINDS, formula_shape, loop_points
 from notes.polygon import update_polygon
 from window.formula_host import SYM_CHOICES, RollHost, layer_name, set_loop_sym, sym_label
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, bad, good
 
 LAYERS = ("shape", "pattern")  # (a curve's shape first: the pattern runs along it)
 LOOP_STEPS = (1, 10, 0.1)    # quick changes (widgets.Scrub): step, Shift step, Ctrl step
@@ -182,9 +182,9 @@ class PatternPanel:
                 trial = dict(p, vars=dict(p["vars"], **({} if name == "loops" else {name: value})))
                 formula_shape(trial) if layer == "shape" else loop_points(trial)
         except (ValueError, ZeroDivisionError):
-            e.config(style="Bad.TEntry")
+            bad(e)
             return
-        e.config(style="TEntry")
+        good(e)
         tgts = [sh for sh in tgts if (sh[layer]["loops"] if name == "loops" else sh[layer]["vars"][name]) != value]
         if not tgts:
             return

@@ -42,7 +42,7 @@ from window.hz_preview import Preview
 from window.hz_synth import open_synth
 from window.preview_settings import open_preview_settings
 from window.snap_picker import SnapPicker
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, bad, good
 
 BLACK = (1, 3, 6, 8, 10)
 RED = "#e02020"
@@ -133,14 +133,16 @@ def ask_live(win, app, prompt, value, lo, hi, steps, on_change):
 
     def changed(*_):
         v = read()
-        entry.config(style="TEntry" if v is not None else "Bad.TEntry")
-        if v is not None:
+        if v is None:
+            bad(entry, typing=True)
+        else:
+            good(entry)
             on_change(v)
 
     def ok(e=None):
         v = read()
-        if v is None:
-            entry.config(style="Bad.TEntry")
+        if v is None:  # (back to its last good value: tried at once, OK again closes it)
+            bad(entry)
             return
         on_change(v)
         got["value"] = v
@@ -1613,15 +1615,17 @@ class HzWindow(tk.Toplevel):
         self.commit(tr("hz.grow"), copy.deepcopy(self.tones))
 
     def auto_limit(self):
-        """The threshold box's cents, or None when it doesn't hold a number from 0 to AUTO_MOST (it turns red)."""
-        try:
-            limit = float(calc(self.auto_var.get()))
-            if 0 <= limit <= AUTO_MOST:
-                self.auto_row.entry.config(style="TEntry")
-                return limit
-        except (ValueError, ZeroDivisionError):
-            pass
-        self.auto_row.entry.config(style="Bad.TEntry")
+        """The threshold box's cents (a wrong value: back to its last good one), or None when there's none."""
+        for again in (False, True):
+            try:
+                limit = float(calc(self.auto_var.get()))
+                if 0 <= limit <= AUTO_MOST:
+                    good(self.auto_row.entry)
+                    return limit
+            except (ValueError, ZeroDivisionError):
+                pass
+            if not again:
+                bad(self.auto_row.entry)
         return None
 
     def fixed(self):
@@ -1672,16 +1676,18 @@ class HzWindow(tk.Toplevel):
         self.redraw()
 
     def pitch(self):
-        """The Pitch box in cents, or None (it turns red) when it isn't a number from -1200 to 1200."""
-        try:
-            cents = float(calc(self.pitch_var.get()))
-            if abs(cents) > 1200:
-                raise ValueError
-        except (ValueError, ZeroDivisionError):
-            self.pitch_entry.config(style="Bad.TEntry")
-            return None
-        self.pitch_entry.config(style="TEntry")
-        return cents
+        """The Pitch box in cents (a wrong value, not -1200 to 1200: back to its last good one), or None."""
+        for again in (False, True):
+            try:
+                cents = float(calc(self.pitch_var.get()))
+                if abs(cents) <= 1200:
+                    good(self.pitch_entry)
+                    return cents
+            except (ValueError, ZeroDivisionError):
+                pass
+            if not again:
+                bad(self.pitch_entry)
+        return None
 
     def on_pitch(self):
         """The Pitch box typed, stepped or dragged: the Hz bass shown moves by that many cents (one undo step); with

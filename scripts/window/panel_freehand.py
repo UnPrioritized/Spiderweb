@@ -6,7 +6,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import refit, uv_k
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, bad, good
 
 TIP = tr("panel_freehand.makes_the_freehand_stroke_perfect_0")
 
@@ -58,9 +58,9 @@ class FreehandPanel:
             if not 0 <= value <= 100:
                 raise ValueError
         except ValueError:
-            self.free_entry.config(style="Bad.TEntry")
+            bad(self.free_entry)
             return
-        self.free_entry.config(style="TEntry")
+        good(self.free_entry)
         value = int(round(value))
         self.free_smooth = value  # new strokes get it too
         tgts = [(d, owner) for d, owner in self.free_targets() if d.get("smooth", 0) != value]

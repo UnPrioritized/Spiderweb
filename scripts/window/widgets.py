@@ -20,6 +20,48 @@ def grid_shown(w, on):
         w.grid_remove()
 
 
+def box_text(e):
+    """What a box holds (from its variable: while that's being set, the box itself still shows the old text)."""
+    name = str(e.cget("textvariable"))
+    return str(e.getvar(name)) if name else e.get()
+
+
+def good(e):
+    """A number box's value taken: kept as its last good value (bad() goes back to it), shown as normal."""
+    e.good_text = box_text(e)
+    e.config(style="TEntry")
+
+
+def bad(e, typing=False):
+    """A wrong value in a number box (not a number, out of range): back to its last good value (user 2026-10-05: not
+    left red). typing = checked at every key: red until it's right, put back on Enter / leaving it (watch_bad)."""
+    text = getattr(e, "good_text", None)
+    if typing or text is None:  # (none known: red, as it can't go back)
+        return e.config(style="Bad.TEntry")
+    e.config(style="TEntry")
+    if e.get() != text:
+        e.delete(0, "end")
+        e.insert(0, text)
+
+
+def watch_bad(e):
+    """A box checked at every key (bad(typing=True)): still red on Enter / when it's left = back to its good value."""
+    def check(ev):
+        if str(e.cget("style")) == "Bad.TEntry":
+            bad(e)
+    e.bind("<Return>", check, add="+")
+    e.bind("<FocusOut>", check, add="+")
+
+
+def remember_good(root):
+    """Every number box's last good value starts as what it shows when it gets the keyboard (then good())."""
+    def got(ev):
+        w = ev.widget
+        if isinstance(w, ttk.Entry) and str(w.cget("style")) != "Bad.TEntry":
+            w.good_text = w.get()
+    root.bind_class("TEntry", "<FocusIn>", got, add="+")
+
+
 class StatusLine(ttk.Label):
     """The main window's status line. Text put in with config(text=...) is a message: it stays HOLD_MS (user: the
     mouse position wrote over it at once), then the line goes back to what show() gave last (position, counts)."""

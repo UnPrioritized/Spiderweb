@@ -19,7 +19,7 @@ from notes.chop import (CHOP_DEFAULTS, MAX_STEPS, RHYTHMS, clean_chop, clean_pie
                         too_many, top)
 from window.snap_picker import SnapPicker
 from window.tool_window import ORANGE, ToolWindow
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, bad, good
 
 RHYTHMS_FILE = os.path.join(HERE, "rhythms.json")
 CELLS = (1, 2, 3, 4, 6, 8)  # the strip's grid: cells per step
@@ -359,9 +359,9 @@ class ChopWindow(ToolWindow):
             if not 1 <= v <= MAX_STEPS:
                 raise ValueError
         except (ValueError, ZeroDivisionError):
-            self.steps_entry.config(style="Bad.TEntry")
+            bad(self.steps_entry)
             return
-        self.steps_entry.config(style="TEntry")
+        good(self.steps_entry)
         if v != self.cfg["steps"]:
             if self.long is None:  # (pieces past the new end stay in memory while the window is open)
                 self.long = [list(p) for p in self.cfg["pieces"]]
@@ -391,9 +391,9 @@ class ChopWindow(ToolWindow):
             if not 0 <= v <= 100:
                 raise ValueError
         except (ValueError, ZeroDivisionError):
-            self.vel_entry.config(style="Bad.TEntry")
+            bad(self.vel_entry)
             return
-        self.vel_entry.config(style="TEntry")
+        good(self.vel_entry)
         if v != self.cfg["vel"]:
             self.put("vel", v, done)
 

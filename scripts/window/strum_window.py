@@ -12,7 +12,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.strum import END_KNOB, LIMITS, STRUM_DEFAULTS, TIME_KNOB, VEL_KNOB, clean_strum
 from window.tool_window import GREEN, ORANGE, Knob, ToolWindow
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, bad, good
 
 TIMES = ("time", "end_time")  # kept in beats, shown in ticks
 TENSIONS = ("tension", "vel_tension", "end_tension")
@@ -125,9 +125,9 @@ class StrumWindow(ToolWindow):
             if not lo <= v <= hi:
                 raise ValueError
         except (ValueError, ZeroDivisionError):
-            e.config(style="Bad.TEntry")
+            bad(e)
             return
-        e.config(style="TEntry")
+        good(e)
         if abs(v - self.shown(key)) > 1e-9:
             self.put_shown(key, v)
             self.put(key, self.cfg[key], done)

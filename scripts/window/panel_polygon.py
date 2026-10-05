@@ -10,7 +10,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.polygon import MAX_POINTS, STYLES, update_polygon
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, bad, good
 
 STYLE_NAMES = [tr("panel_polygon.style_" + s) for s in STYLES]
 # name: (lowest, highest, steps (step, Shift step, Ctrl step), whole numbers only)
@@ -121,9 +121,9 @@ class PolygonPanel:
             if not math.isfinite(value) or not lo <= value <= hi or whole and value != int(value):
                 raise ValueError
         except (ValueError, ZeroDivisionError):
-            e.config(style="Bad.TEntry")
+            bad(e)
             return
-        e.config(style="TEntry")
+        good(e)
         self.set_polygon(name, int(value) if whole else value, ("polygon", tuple(sorted(self.sels)), name))
 
     def on_polygon_style(self):

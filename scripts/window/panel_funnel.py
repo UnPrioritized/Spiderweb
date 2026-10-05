@@ -6,7 +6,7 @@ from tkinter import ttk
 from files.lang import tr
 from notes.funnel import funnel_reversed
 from files.mathexpr import calc, fmt
-from window.widgets import Scrub, Tooltip, grid_shown
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown
 
 # Funnel panel: (setting, label, [(value, text, tooltip)])
 FUNNEL_CHOICES = [
@@ -199,7 +199,7 @@ class FunnelPanel:
                 raise ValueError
             value = ticks / self.ppq
         except ValueError:
-            e.config(style="Bad.TEntry")
+            bad(e)
             return
-        e.config(style="TEntry")
+        good(e)
         self.set_funnel(key, value)

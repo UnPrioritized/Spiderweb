@@ -26,7 +26,7 @@ from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_P
                            shape_names)
 from roll.roll_shared import ALT, grab_while_panning
 from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
-from window.widgets import LocalUndo, Scrub, Tooltip
+from window.widgets import LocalUndo, Scrub, Tooltip, bad, good
 
 PATTERNS_FILE = os.path.join(HERE, "patterns.json")
 OLD_CURVES_FILE = os.path.join(HERE, "curves.json")  # the funnel's saved curve formulas (before shapes of curves)
@@ -516,8 +516,9 @@ class FormulaDialog(tk.Toplevel):
             if name != "loops":
                 self.works(dict(self.pat, vars=dict(self.pat["vars"], **{name: value})))
         except (ValueError, ZeroDivisionError):
-            e.config(style="Bad.TEntry")
+            bad(e)
             return
+        good(e)
         if name == "loops":
             self.pat["loops"] = value
         else:

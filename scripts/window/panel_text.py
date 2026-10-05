@@ -8,7 +8,7 @@ from files.mathexpr import calc, fmt
 from notes.fonts import WEIGHTS
 from notes.text import TEXT_DEFAULTS, build, restyle, shown_size, text_axes, text_font, with_arial
 from window.font_dialog import FontDialog
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, bad, good
 
 # number boxes: setting -> (label, unit, smallest, largest)
 ENTRIES = {"size": (tr("panel_text.size"), "", 0.01, 2000),
@@ -203,9 +203,9 @@ class TextPanel:
             if not lo <= value <= hi:
                 raise ValueError
         except ValueError:
-            entry.config(style="Bad.TEntry")
+            bad(entry)
             return
-        entry.config(style="TEntry")
+        good(entry)
         self.set_text_setting({key: value}, refocus=back)
 
     def open_font_dialog(self):

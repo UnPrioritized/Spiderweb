@@ -11,7 +11,7 @@ from tkinter import filedialog, ttk
 from files.lang import tr
 from files.mathexpr import calc
 from window.hz_preview import LIVE_MB, VOICES, WORKERS
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, bad, good
 
 ORANGE = "#c06000"
 
@@ -160,9 +160,9 @@ class PreviewSettings(tk.Toplevel):
             if not VOICES[0] <= v <= VOICES[1]:
                 raise ValueError
         except (ValueError, ZeroDivisionError):
-            self.voices_entry.config(style="Bad.TEntry")
+            bad(self.voices_entry)
             return
-        self.voices_entry.config(style="TEntry")
+        good(self.voices_entry)
         if str(v) != self.voices.get():
             self.voices.set(str(v))
         cfg = self.app.hz_preview
@@ -177,9 +177,9 @@ class PreviewSettings(tk.Toplevel):
             if not LIVE_MB[0] <= v <= LIVE_MB[1]:
                 raise ValueError
         except (ValueError, ZeroDivisionError):
-            self.live_entry.config(style="Bad.TEntry")
+            bad(self.live_entry)
             return
-        self.live_entry.config(style="TEntry")
+        good(self.live_entry)
         if str(v) != self.live_mb.get():
             self.live_mb.set(str(v))
         cfg = self.app.hz_preview

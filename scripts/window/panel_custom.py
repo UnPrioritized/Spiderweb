@@ -16,7 +16,7 @@ from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
 from notes.hzbass import AUTO, auto_picks, shortest_gate
 from window.hz_window import open_hz
 from window.range_window import open_range_graph
-from window.widgets import Scrub, Tooltip, grid_shown
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown
 
 GAP_COLOR = "#c06000"  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
 MISSING_MARK = "✕ "  # in the Shape box: a placed shape whose library shape was renamed or deleted (user, 2026-10-05)
@@ -475,8 +475,9 @@ class CustomPanel:
             if not 1 <= ticks <= 10 ** 7:
                 raise ValueError
         except ValueError:
-            self.gate_entry.config(style="Bad.TEntry")
+            bad(self.gate_entry)
             return
+        good(self.gate_entry)
         self.set_custom("gate", ticks / self.ppq)
 
     def edge_using(self, why, on):
@@ -505,8 +506,9 @@ class CustomPanel:
             if not 0 <= ticks <= 10 ** 7:
                 raise ValueError
         except ValueError:
-            self.edge_entry.config(style="Bad.TEntry")
+            bad(self.edge_entry)
             return
+        good(self.edge_entry)
         self.set_custom("edge", ticks / self.ppq)
 
     # ---- Hz bass (custom.py): spam whose gate is one wave of a tone
