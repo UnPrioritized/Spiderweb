@@ -109,6 +109,7 @@ class PresetBar:
 
     def build_presets(self, row):
         self.preset = None  # the preset picked last: (key, its name, its sound as fx_settings, in JSON)
+        self.preset_mark = None  # ... picked for: (the shape's number, the undo step it's picked after)
         self.preset_canon = {}  # a preset's key -> its sound as fx_settings would have it (JSON)
         self.yours = load_presets()  # (read again when the list opens)
         ttk.Label(row, text=tr("hz.preset")).pack(side="left", padx=(0, 4))
@@ -160,10 +161,14 @@ class PresetBar:
         hz = self.hz
         before = self.fx.state()
         hz.set_fx(copy.deepcopy(sound))
-        self.preset = (key, name, self.canon(key, sound))
+        picked = (key, name, self.canon(key, sound))
+        self.preset, self.preset_mark = picked, None  # (none while it's being put in: nothing shown changes it)
         if self.fx.now() != before:
             hz.fx.tidy()
             hz.commit(tr("hz.step_preset", name=name), copy.deepcopy(hz.tones), before)
+        called_off = json.dumps(hz.fx_settings(), sort_keys=True) != picked[2]  # (too many notes: No)
+        self.preset = None if called_off else picked
+        self.mark_preset()
         self.redraw()
         self.show_knobs()
 
@@ -194,7 +199,25 @@ class PresetBar:
         key = ("yours", name)
         self.preset_canon.pop(key, None)
         self.preset = (key, name, self.canon(key, sound))
+        self.mark_preset()
         self.show_preset()
+
+    def mark_preset(self):
+        """The preset shown is for this shape's sound as it is after the last undo step (see show_preset)."""
+        stack = self.hz.app.undo_stack
+        self.preset_mark = (self.shape_number(), stack[-1] if stack else None)
+
+    def shape_number(self):
+        sh = self.hz.target()
+        return next((i for i, s in enumerate(self.hz.app.shapes) if s is sh), None)
+
+    def preset_holds(self):
+        """The preset picked still names this sound (changed or not): the same shape (by number: undo makes it anew),
+        and not undone past the step it was picked after."""
+        if self.preset_mark is None:  # (being picked)
+            return True
+        where, step = self.preset_mark
+        return where == self.shape_number() and (step is None or any(s is step for s in self.hz.app.undo_stack))
 
     def delete_preset(self):
         if not self.preset or self.preset[0][0] != "yours":
@@ -212,10 +235,13 @@ class PresetBar:
         """The name shown: the preset picked (a * once the sound has changed), else one the sound is the same as,
         else none."""
         now = json.dumps(self.hz.fx_settings(), sort_keys=True)
+        if self.preset is not None and not self.preset_holds():  # (another shape, or undone past picking it: its
+            self.preset = None  # name would say this sound came from it, user)
         if self.preset is None or self.preset[2] != now:
             same = next(((k, n, s) for k, n, s in self.presets() if self.canon(k, s) == now), None)
             if same:
                 self.preset = (same[0], same[1], now)
+                self.mark_preset()
         if self.preset is None:
             text = tr("hz.preset_none")
         else:

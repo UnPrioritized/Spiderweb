@@ -10,6 +10,7 @@ from beat 0: held for the longest line counted from each note (so its whole shap
 sustain points, all fitted to the window. Lines that play all the way from the shape's start are shown from the
 note's start too (a key pressed plays them from there). While a key sounds, a dot runs along every line."""
 
+import sys
 import tkinter as tk
 from tkinter import ttk
 
@@ -24,6 +25,11 @@ from window.tool_window import Knob
 
 BLACK = (1, 3, 6, 8, 10)
 KEY_HELD = "#7aa7f0"
+OUT_WHITE, OUT_BLACK = "#d6d6d6", "#4a4a4a"  # keys the letters don't reach now: greyed (user)
+# the computer keyboard's letters playing the keys from C up (like many music programs: the middle row = white keys,
+# the row above = black ones); Z / X = an octave down / up
+LETTERS = ("a", "w", "s", "e", "d", "f", "t", "g", "y", "h", "u", "j", "k", "o", "l", "p", "semicolon")
+NO_LETTERS = 0x4 | (0x20000 if sys.platform == "win32" else 0x8)  # (Ctrl or Alt held: a shortcut, not a key)
 WARN = "#c06000"
 
 
@@ -96,7 +102,10 @@ class SynthWindow(PresetBar, SynthKnobs, tk.Toplevel):
         self.kb_w = hz.kb_w
         self.sx, self.t0 = 100.0, 0.0
         self.tool, self.pencil, self.live = hz.tool, hz.pencil, hz.live
-        self.held = None  # the key held with the mouse
+        self.held = None  # the key held with the mouse or a letter
+        self.held_by = None  # ... "mouse", or the letter (keysym)
+        self.letter_up = None  # a letter let go: its key stops a moment later unless it's pressed again (repeating)
+        self.kb_base = getattr(self.app, "hz_kb_base", 24)  # the key the letter A plays (C1; Hz bass is low)
         self.shown = None  # what the pane was drawn for (refresh)
         self.warn = ttk.Label(self, text=tr("hz.synth_warning"), foreground=WARN, font=("Segoe UI", 9, "bold"),
                               padding=(8, 6, 8, 4))
@@ -139,6 +148,9 @@ class SynthWindow(PresetBar, SynthKnobs, tk.Toplevel):
         k.bind("<B1-Motion>", self.on_key_drag)
         k.bind("<ButtonRelease-1>", self.on_key_release)
         k.bind("<Motion>", lambda e: self.show_status())
+        self.bind("<KeyPress>", self.on_letter)
+        self.bind("<KeyRelease>", self.on_letter_up)
+        self.bind("<FocusOut>", lambda e: self.after(1, self.letters_lost))
         c = self.canvas
         c.bind("<Delete>", lambda e: (self.fx.delete_key(), "break")[1])
         for key in ("<Control-c>", "<Control-C>"):
@@ -263,7 +275,9 @@ class SynthWindow(PresetBar, SynthKnobs, tk.Toplevel):
 
     def show_status(self, e=None):
         knobs = self.page.get() == "knobs"
-        self.status.config(text=tr("hz.synth_hint_knobs") if knobs else self.fx.says or tr("hz.synth_hint"))
+        letters = tr("hz.synth_letters", lo=note_name(self.kb_base), hi=note_name(min(127, self.kb_base + 16)))
+        hint = tr("hz.synth_hint_knobs") if knobs else self.fx.says or tr("hz.synth_hint")
+        self.status.config(text=hint if self.fx.says and not knobs else f"{hint}  {letters}")
 
     def draw_live(self):
         """(Every tick of the live keys / the preview) the moving dots and the words at the top right."""
@@ -304,7 +318,8 @@ class SynthWindow(PresetBar, SynthKnobs, tk.Toplevel):
         bh = h * 0.6
         for k, x0, x1, black in self.key_spots():
             on = k == lit
-            fill = KEY_HELD if on else "#202020" if black else "white"
+            reach = self.kb_base <= k <= self.kb_base + len(LETTERS) - 1
+            fill = KEY_HELD if on else ("#202020" if reach else OUT_BLACK) if black else "white" if reach else OUT_WHITE
             c.create_rectangle(x0, 0, x1, bh if black else h, fill=fill, outline="#707070",
                                tags="lit" if on else "")
             if not black and k % 12 == 0 and x1 - x0 >= 9 * s:
@@ -327,12 +342,12 @@ class SynthWindow(PresetBar, SynthKnobs, tk.Toplevel):
         if why:
             self.status.config(text=why)
             return
-        self.held = k
+        self.held, self.held_by = k, "mouse"  # (a letter held: the mouse takes over)
         self.show_status()
         self.draw_keys()
 
     def on_key_drag(self, e):
-        if self.held is None:
+        if self.held is None or self.held_by != "mouse":
             return
         k = self.key_at(min(max(e.x, 0), self.piano.winfo_width() - 1), min(max(e.y, 0), self.piano.winfo_height() - 1))
         if k is not None and k != self.held:  # (onto another key: that one plays)
@@ -341,15 +356,70 @@ class SynthWindow(PresetBar, SynthKnobs, tk.Toplevel):
             self.draw_keys()
 
     def on_key_release(self, e):
-        if self.held is None:
-            return
-        self.held = None
+        if self.held is not None and self.held_by == "mouse":
+            self.let_go()
+
+    def let_go(self):
+        self.held = self.held_by = None
         self.live.release()
         self.draw_keys()
 
+    # ------------------------------------------------------------ the computer keyboard's letters
+
+    def on_letter(self, e):
+        """A letter pressed (not in a box, no Ctrl / Alt): its key plays, held until it's let go; Z / X move them."""
+        if isinstance(e.widget, (tk.Entry, ttk.Entry)) or e.state & NO_LETTERS:
+            return None
+        k = e.keysym.lower()
+        if k in ("z", "x"):
+            self.kb_base = self.app.hz_kb_base = min(120, max(0, self.kb_base + (12 if k == "x" else -12)))
+            self.show_status()
+            self.draw_keys()
+            return "break"
+        if k not in LETTERS:
+            return None
+        if self.letter_up and self.held_by == k:  # (the key repeating: let go and pressed at once = still held)
+            self.after_cancel(self.letter_up)
+            self.letter_up = None
+        if self.held_by == k:
+            return "break"
+        key = self.kb_base + LETTERS.index(k)
+        if key > 127:
+            return "break"
+        why = self.live.press(key, parent=self)
+        if why:
+            self.status.config(text=why)
+            return "break"
+        self.held, self.held_by = key, k
+        self.draw_keys()
+        return "break"
+
+    def on_letter_up(self, e):
+        k = e.keysym.lower()
+        if k == self.held_by and not self.letter_up:
+            self.letter_up = self.after(40, self.letter_gone)
+
+    def letter_gone(self):
+        self.letter_up = None
+        if self.held_by not in (None, "mouse"):
+            self.let_go()
+
+    def letters_lost(self):
+        """The window lost the keyboard (another window clicked): a letter held stops (its let-go won't come)."""
+        if not self.winfo_exists() or self.held_by in (None, "mouse"):
+            return
+        try:
+            w = self.focus_get()
+        except (KeyError, tk.TclError):
+            w = None
+        if w is None or w.winfo_toplevel() is not self:
+            self.let_go()
+
     def close(self):
+        if self.letter_up:
+            self.after_cancel(self.letter_up)
         if self.held is not None:
-            self.held = None
+            self.held = self.held_by = None
             self.live.release()
         if self.fx.asking:  # (the Repeat every… window)
             self.fx.asking.destroy()
