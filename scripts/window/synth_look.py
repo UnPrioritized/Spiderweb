@@ -168,17 +168,19 @@ class BigTab(tk.Frame):
 
     def __init__(self, parent, s, text, pick):
         super().__init__(parent, background=TAB, highlightthickness=1, highlightbackground=EDGE, cursor="hand2")
-        self.lamp = Light(self, s, TAB)
-        self.lamp.pack(pady=(round(6 * s), round(2 * s)))
-        self.label = tk.Label(self, text=text.upper(), background=TAB, foreground=DIM,
-                              font=("Segoe UI Semibold", 10), padx=round(16 * s))
-        self.label.pack(pady=(0, round(6 * s)))
-        for w in (self, self.lamp, self.label):
+        self.inner = tk.Frame(self, background=TAB)  # (the light and name kept together in the middle of the tab)
+        self.inner.pack(expand=True)
+        self.lamp = Light(self.inner, s, TAB)  # (more room over the light: the name's letters leave room under them)
+        self.lamp.pack(pady=(round(8 * s), round(2 * s)))
+        self.label = tk.Label(self.inner, text=text.upper(), background=TAB, foreground=DIM,
+                              font=("Segoe UI Semibold", 10), padx=round(16 * s), pady=0)
+        self.label.pack(pady=(0, round(3 * s)))
+        for w in (self, self.inner, self.lamp, self.label):
             w.bind("<ButtonPress-1>", lambda e: pick())
 
     def picked(self, on):
         bg = PANEL if on else TAB
-        for w in (self, self.lamp, self.label):
+        for w in (self, self.inner, self.lamp, self.label):
             w.config(background=bg)
         self.label.config(foreground=TEXT if on else DIM)
         self.lamp.light(on)
