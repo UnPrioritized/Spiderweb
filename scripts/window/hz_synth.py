@@ -89,7 +89,6 @@ class SynthWindow(SynthKnobs, tk.Toplevel):
         s = self.s
         self.title(tr("hz.synth_title"))
         names_h = round(8 * s) + len(FX) * round(15 * s)  # (the pane tall enough for all the effects' names)
-        self.geometry(f"{round(1000 * s)}x{names_h + round(230 * s)}")  # (the knobs need a bit more)
         self.minsize(round(400 * s), round(260 * s))
         self.kb_w = hz.kb_w
         self.sx, self.t0 = 100.0, 0.0
@@ -134,6 +133,8 @@ class SynthWindow(SynthKnobs, tk.Toplevel):
             c.bind(key, lambda e: (self.fx.paste_points(), "break")[1])
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.show_page()
+        self.update_idletasks()  # (as tall as the knobs need, at least enough for the effects' names)
+        self.geometry(f"{round(1000 * s)}x{max(self.winfo_reqheight(), names_h + round(160 * s))}")
 
     def show_page(self):
         """The Knobs or the Lines tab shown."""
@@ -150,6 +151,7 @@ class SynthWindow(SynthKnobs, tk.Toplevel):
     froms = property(lambda self: self.hz.froms, lambda self, v: setattr(self.hz, "froms", v))
     fits = property(lambda self: self.hz.fits, lambda self, v: setattr(self.hz, "fits", v))
     sustains = property(lambda self: self.hz.sustains, lambda self, v: setattr(self.hz, "sustains", v))
+    lfo = property(lambda self: self.hz.lfo, lambda self, v: setattr(self.hz, "lfo", v))
     off = property(lambda self: self.hz.off, lambda self, v: setattr(self.hz, "off", v))
 
     def snap(self, beat, e):

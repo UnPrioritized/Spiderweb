@@ -30,7 +30,7 @@ from files.snap import snap_beats
 from notes.engine import slot_track_channel
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
 from notes.hzbass import (AUTO, AUTO_MOST, FX, HZ_DEFAULTS, TUNE, auto_state, can_slide, clean_fit, clean_from,
-                          clean_fx, clean_loop, clean_off, clean_sustain, clean_tones, fit_length, glide, heard, held_fixed, hz_of, left_edge, links, next_id,
+                          clean_fx, clean_lfo, clean_loop, clean_off, clean_sustain, clean_tones, fit_length, glide, heard, held_fixed, hz_of, left_edge, links, next_id,
                           pitch, sound_span)
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, SELECT_CURSOR, SELECTED_COLOR, SHIFT,
                               SLOT_COLORS, boxes_side, boxes_upright, draw_boxes, grab_while_panning,
@@ -213,6 +213,7 @@ class HzWindow(tk.Toplevel):
         self.off = []  # the effects switched off (hz["off"])
         self.froms, self.fits = {}, []  # repeating effects counted from each note (hz["from"]), stretched (hz["fit"])
         self.sustains = {}  # ... their sustain points (hz["sustain"])
+        self.lfo = {}  # the synth window's settings for vibrato / tremolo (hz["lfo"])
         self.kb_w, self.ruler_h = round(44 * s), round(18 * s)
         names = tkfont.Font(family="Segoe UI", size=8, weight="bold")  # the keys column: wide enough for the
         self.kb_w = max(self.kb_w, round(20 * s) + max(names.measure(tr("hz.fx_" + n)) for n in FX))  # effects' names
@@ -401,6 +402,7 @@ class HzWindow(tk.Toplevel):
             self.froms = clean_from(hz.get("from"), self.loops)
             self.fits = clean_fit(hz.get("fit"), self.froms)
             self.sustains = clean_sustain(hz.get("sustain"), self.loops, self.froms, self.fits)
+            self.lfo = clean_lfo(hz.get("lfo") or {})
         if sh is None:
             text = (tr("hz.hint_new", beat=fmt(self.app.hz_start + 1)) if self.app.hz_start is not None
                     else tr("hz.hint_none"))
@@ -1773,6 +1775,9 @@ class HzWindow(tk.Toplevel):
         sustain = clean_sustain(self.sustains, loops, froms, fits)
         if sustain:
             fx["sustain"] = sustain
+        lfo = clean_lfo(self.lfo)
+        if lfo:
+            fx["lfo"] = lfo
         return fx
 
     def commit(self, name, before, before_fx=None, push=True):
@@ -1810,7 +1815,7 @@ class HzWindow(tk.Toplevel):
             app.add_shape(new)
         else:
             hz = dict(sh.get("hz") or self.new_hz(bpm))  # (none yet: the window's Gates and Pitch boxes)
-            for k in ("tones", "grow", "fx", "loop", "off", "amount", "from", "fit", "sustain"):
+            for k in ("tones", "grow", "fx", "loop", "off", "amount", "from", "fit", "sustain", "lfo"):
                 hz.pop(k, None)
             new = copy.deepcopy(sh)
             if tones:
@@ -1850,7 +1855,7 @@ class HzWindow(tk.Toplevel):
     def call_off(self, before, before_fx=None):
         self.tones, self.sel = before, set()
         if before_fx is not None:
-            self.fxl, self.loops, self.off, self.froms, self.fits, self.sustains = before_fx
+            self.fxl, self.loops, self.off, self.froms, self.fits, self.sustains, self.lfo = before_fx
         self.redraw()
 
     # ------------------------------------------------------------ hearing the key held

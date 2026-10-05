@@ -31,7 +31,7 @@ BUFFER = 0.06  # seconds of sound the sound device keeps ready (short: a press i
 AHEAD = 1.0  # seconds of notes whose recordings are asked for ahead
 FIRST = 8.0  # beats of a held note made at first (doubled when it's held near the end of them)
 TICK_MS = 40
-HZ_KEYS = ("tones", "fx", "loop", "off", "amount", "from", "fit", "sustain", "grow", "own")
+HZ_KEYS = ("tones", "fx", "loop", "off", "amount", "from", "fit", "sustain", "lfo", "grow", "own")
 
 
 def quick_sound(app):

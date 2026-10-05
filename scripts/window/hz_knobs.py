@@ -4,7 +4,10 @@ made shows them about where it is (with a note); turning one makes new lines fro
   Volume: Attack, Decay, Sustain, Release = the Volume line once per note, with its sustain point and fall.
   Wave: one waveform (or the plain tone) at a Shape amount, and Octave below: those lines, flat.
   Pitch: Amount (keys) and Time = the Pitch line once per note, from Amount keys off to the note's tone.
-Each box has a picture: the envelope (with a dot while a key sounds), one wave's hits (the notes), the pitch."""
+  Vibrato (LFO 1): Rate (hz["lfo"]), Depth = the Vibrato line, Delay = it comes in over that long, once per note.
+  Tremolo (LFO 2): Rate = the Tremolo line (its value is how fast), Depth (hz["lfo"]).
+Each box has a picture: the envelope (with a dot while a key sounds), one wave's hits (the notes), the pitch, the
+wobbles over two beats."""
 
 import math
 import tkinter as tk
@@ -14,7 +17,7 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.hzbass import FAST, LOOP, PITCH, SOFT, SUB, WAVES, line_at
+from notes.hzbass import FAST, LOOP, PITCH, SOFT, SUB, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE, WAVES, line_at
 from window.hz_effects import AMOUNT, FX_COLOR
 from window.tool_window import Knob
 from window.widgets import Scrub, Tooltip
@@ -22,17 +25,26 @@ from window.widgets import Scrub, Tooltip
 WARN = "#c06000"
 TIME_KNOB = 4.0  # beats a time knob goes to (along a curve: fine near 0)
 TIME_MOST = 64.0  # ... and a typed one
-# what a knob's value is: (unit text, lowest, highest typed, the box's steps (Shift, Ctrl))
-KINDS = {"time": ("hz.synth_beats", 0.0, TIME_MOST, (0.05, 0.25, 0.01)),
-         "percent": ("hz.synth_percent", 0.0, 100.0, (1, 10, 0.1)),
-         "keys": ("hz.synth_keys", -PITCH, PITCH, (1, 3, 0.1))}
-# the boxes and their knobs: (knob, kind, value at the start / a middle-click)
+# what a knob's value is: (unit text, lowest, highest typed, the box's steps (Shift, Ctrl), where the knob goes
+# to along a curve (fine near 0; None: straight, percent / keys))
+KINDS = {"time": ("hz.synth_beats", 0.0, TIME_MOST, (0.05, 0.25, 0.01), TIME_KNOB),
+         "percent": ("hz.synth_percent", 0.0, 100.0, (1, 10, 0.1), None),
+         "keys": ("hz.synth_keys", -PITCH, PITCH, (1, 3, 0.1), None),
+         "vib_rate": ("hz.synth_a_beat", 0.0, 64.0, (0.1, 1, 0.01), 10.0),
+         "trem_rate": ("hz.synth_a_beat", 0.0, TREMOLO, (0.1, 1, 0.01), TREMOLO)}
+# the boxes and their knobs: (knob, kind, value at the start / a middle-click); rows of boxes
 BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain", "percent", 1.0),
                     ("release", "time", 0.0)),
          "wave": (("shape", "percent", 1.0), ("octave", "percent", 0.0)),
-         "pitch": (("amount", "keys", 0.0), ("time", "time", 0.25))}
+         "pitch": (("amount", "keys", 0.0), ("time", "time", 0.25)),
+         "vibrato": (("vibrato_rate", "vib_rate", VIBRATO_RATE), ("vibrato_depth", "percent", 0.0),
+                     ("vibrato_delay", "time", 0.0)),
+         "tremolo": (("tremolo_rate", "trem_rate", 0.0), ("tremolo_depth", "percent", TREMOLO_DEPTH))}
+ROWS = (("volume", "wave", "pitch"), ("vibrato", "tremolo"))
 KNOBS = {key: (box, kind, start) for box, knobs in BOXES.items() for key, kind, start in knobs}
-COLOURS = {"volume": FX_COLOR["volume"], "wave": FX_COLOR["sine"], "pitch": FX_COLOR["pitch"]}
+COLOURS = {"volume": FX_COLOR["volume"], "wave": FX_COLOR["sine"], "pitch": FX_COLOR["pitch"],
+           "vibrato": FX_COLOR["vibrato"], "tremolo": FX_COLOR["tremolo"]}
+PICTURES = {"volume": (260, 90), "wave": (200, 90), "pitch": (150, 90), "vibrato": (230, 60), "tremolo": (150, 60)}
 WAVE_NAMES = ("none",) + tuple(WAVES)
 
 
@@ -120,7 +132,41 @@ def read_pitch(win, was):
     return got, bool(made)
 
 
-READ = {"volume": read_volume, "wave": read_wave, "pitch": read_pitch}
+def vibrato_line(depth, delay):
+    """The Vibrato line: (points, length; None = all along): coming in over `delay` beats from each note's start."""
+    if delay <= 0:
+        return [[0.0, depth]], None
+    return [[0.0, 0.0], [delay, depth]], max(LOOP[0], delay)
+
+
+def read_vibrato(win, was):
+    """The Vibrato box: ({vibrato_rate, vibrato_depth, vibrato_delay}, made) as read_volume (no Vibrato line: Delay
+    kept as it was)."""
+    rate = win.lfo.get("vibrato_rate", VIBRATO_RATE)
+    pts = win.fxl.get("vibrato")
+    if not pts:
+        return {"vibrato_rate": rate, "vibrato_depth": 0.0, "vibrato_delay": was["vibrato_delay"]}, True
+    every = win.loops.get("vibrato")
+    got = {"vibrato_rate": rate, "vibrato_depth": max(p[1] for p in pts),
+           "vibrato_delay": every if every and win.froms.get("vibrato") == "note" else 0.0}
+    want, length = vibrato_line(got["vibrato_depth"], got["vibrato_delay"])
+    made = (same_line(want, pts) and "vibrato" not in win.fits and "vibrato" not in win.sustains
+            and "vibrato:amount" not in win.fxl and (length is None) == (every is None))
+    return got, made
+
+
+def read_tremolo(win, was):
+    """The Tremolo box: ({tremolo_rate, tremolo_depth}, made) as read_volume (no Tremolo line: Rate 0, steady)."""
+    got = {"tremolo_rate": 0.0, "tremolo_depth": win.lfo.get("tremolo_depth", TREMOLO_DEPTH)}
+    if "tremolo" not in win.fxl:
+        return got, True
+    v = flat(win, "tremolo")
+    got["tremolo_rate"] = TREMOLO * (v if v is not None else max(p[1] for p in win.fxl["tremolo"]))
+    return got, v is not None
+
+
+READ = {"volume": read_volume, "wave": read_wave, "pitch": read_pitch, "vibrato": read_vibrato,
+        "tremolo": read_tremolo}
 
 
 class Dial(Knob):
@@ -179,8 +225,9 @@ class Dial(Knob):
 
 def knob_of(kind, v):
     """Where a knob points for a value."""
-    if kind == "time":
-        return min(100.0, 100 * math.sqrt(v / TIME_KNOB))
+    most = KINDS[kind][4]
+    if most:
+        return min(100.0, 100 * math.sqrt(max(0.0, v) / most))
     if kind == "keys":
         return max(-100.0, min(100.0, 100 * v / PITCH))
     return 100 * v
@@ -188,8 +235,9 @@ def knob_of(kind, v):
 
 def value_of(kind, k):
     """A knob's value where it points (keys: whole keys)."""
-    if kind == "time":
-        return round(TIME_KNOB * (k / 100) ** 2, 3)
+    most = KINDS[kind][4]
+    if most:
+        return round(most * (k / 100) ** 2, 3)
     if kind == "keys":
         return float(round(PITCH * k / 100))
     return k / 100
@@ -210,8 +258,12 @@ class SynthKnobs:
         self.dials, self.dial_vars, self.dial_boxes, self.box_says, self.pics = {}, {}, {}, {}, {}
         self.pic_for = {}  # what each picture was drawn for
         self.dot_at = None  # where the envelope picture's moving dot is drawn
+        rows = [ttk.Frame(page) for _ in ROWS]
+        for i, row in enumerate(rows):
+            row.pack(fill="x", anchor="w", pady=(0, 8) if i < len(rows) - 1 else 0)
+        where = {name: rows[i] for i, names in enumerate(ROWS) for name in names}
         for name, knobs in BOXES.items():
-            box = ttk.Labelframe(page, text=tr(f"hz.synth_{name}"), padding=(10, 4, 10, 8))
+            box = ttk.Labelframe(where[name], text=tr(f"hz.synth_{name}"), padding=(10, 4, 10, 8))
             box.pack(side="left", anchor="n", padx=(0, 10))
             col = 0
             if name == "wave":
@@ -229,7 +281,7 @@ class SynthKnobs:
             for key, kind, start in knobs:
                 self.dial_cell(box, col, key, kind, start, COLOURS[name])
                 col += 1
-            size = {"volume": (260, 90), "wave": (200, 90), "pitch": (150, 90)}[name]
+            size = PICTURES[name]
             pic = self.pics[name] = tk.Canvas(box, width=round(size[0] * s), height=round(size[1] * s),
                                               background="white", highlightthickness=1, highlightbackground="#ccc")
             pic.grid(row=1, column=0, columnspan=col, sticky="ew", pady=(8, 0))
@@ -254,7 +306,7 @@ class SynthKnobs:
         var = self.dial_vars[key] = tk.StringVar()
         e = self.dial_boxes[key] = ttk.Entry(row, textvariable=var, width=5, justify="center")
         e.pack(side="left")
-        unit, lo, hi, steps = KINDS[kind]
+        unit, lo, hi, steps, _ = KINDS[kind]
         ttk.Label(row, text=tr(unit), foreground="#777").pack(side="left", padx=(2, 0))
         e.bind("<Return>", lambda ev: (self.on_box(key), "break")[1])
         e.bind("<FocusOut>", lambda ev: self.on_box(key))
@@ -279,7 +331,7 @@ class SynthKnobs:
         """A value typed (or stepped) in the box under a knob."""
         e, var = self.dial_boxes[key], self.dial_vars[key]
         box, kind, _ = KNOBS[key]
-        _, lo, hi, _ = KINDS[kind]
+        lo, hi = KINDS[kind][1:3]
         try:
             v = float(calc(var.get()))
             if not lo <= v <= hi:
@@ -319,14 +371,34 @@ class SynthKnobs:
             fx.drop("octave")
             if v["octave"] > 0:
                 self.fxl["octave"] = [[0.0, v["octave"]]]
-        else:
+        elif box == "pitch":
             fx.drop("pitch")
             if v["amount"] and v["time"] > 0:
                 pts, every = pitch_line(v["amount"], v["time"])
                 self.fxl["pitch"] = pts
                 self.loops["pitch"], self.froms["pitch"] = every, "note"
+        elif box == "vibrato":
+            fx.drop("vibrato")
+            if v["vibrato_depth"] > 0:
+                pts, every = vibrato_line(v["vibrato_depth"], v["vibrato_delay"])
+                self.fxl["vibrato"] = pts
+                if every:
+                    self.loops["vibrato"], self.froms["vibrato"] = every, "note"
+            self.set_lfo("vibrato_rate", v["vibrato_rate"], VIBRATO_RATE)
+        else:
+            fx.drop("tremolo")
+            if v["tremolo_rate"] > 0:
+                self.fxl["tremolo"] = [[0.0, min(1.0, v["tremolo_rate"] / TREMOLO)]]
+            self.set_lfo("tremolo_depth", v["tremolo_depth"], TREMOLO_DEPTH)
         self.redraw()
         self.show_knobs()
+
+    def set_lfo(self, key, value, plain):
+        """A setting of hz["lfo"] (left out when it's what the Hz bass does without one)."""
+        if abs(value - plain) < 1e-9:
+            self.lfo.pop(key, None)
+        else:
+            self.lfo[key] = value
 
     # ------------------------------------------------------------ showing them
 
@@ -459,6 +531,39 @@ class SynthKnobs:
         x0 = pad + 14 * s
         xy = [(x0 + u / total * (w - x0 - pad), mid - (y - 0.5) * 2 * (mid - pad)) for u, y in zip(b, ys)]
         c.create_line(*[q for p in xy for q in p], fill=COLOURS["pitch"], width=max(2, round(2 * s)))
+
+    def wobble(self, c, values, colour, mid):
+        """A picture's line over two beats: values at evenly spread spots (mid: -1..1 around the middle, else 0..1
+        of the height)."""
+        s = self.s
+        w, h, pad = c.winfo_width(), c.winfo_height(), 6 * s
+        n = len(values)
+        top, bottom = pad, h - pad
+        if mid:
+            y0 = (top + bottom) / 2
+            c.create_line(pad, y0, w - pad, y0, fill="#ddd")
+            ys = y0 - values * (y0 - top)
+        else:
+            ys = bottom - values * (bottom - top)
+        c.create_line(w / 2, top, w / 2, bottom, fill="#e4e4e4", dash=(3, 3))  # (one beat in)
+        xy = [(pad + i / (n - 1) * (w - 2 * pad), y) for i, y in enumerate(ys)]
+        c.create_line(*[q for p in xy for q in p], fill=colour, width=max(2, round(2 * s)))
+
+    def draw_vibrato(self, c):
+        """The tone going up and down over two beats from a note's start (coming in over Delay)."""
+        v = self.vals
+        b = np.linspace(0.0, 2.0, 400)
+        come = np.clip(b / v["vibrato_delay"], 0.0, 1.0) if v["vibrato_delay"] > 0 else np.ones(len(b))
+        self.wobble(c, v["vibrato_depth"] * come * np.sin(2 * np.pi * v["vibrato_rate"] * b), COLOURS["vibrato"],
+                    True)
+
+    def draw_tremolo(self, c):
+        """The loudness over two beats: down to 1 - Depth, Rate times a beat."""
+        v = self.vals
+        b = np.linspace(0.0, 2.0, 400)
+        d = v["tremolo_depth"] if v["tremolo_rate"] > 0 else 0.0
+        self.wobble(c, (1 - d) + d * (1 + np.cos(2 * np.pi * v["tremolo_rate"] * b)) / 2, COLOURS["tremolo"],
+                    False)
 
     def draw_adsr_dot(self):
         """While a key sounds: a dot on the envelope's picture, waiting at the sustain point while it's held, down

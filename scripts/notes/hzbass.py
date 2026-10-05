@@ -53,8 +53,9 @@ own tone's end is left out):
   the slowest: the keys drift apart and meet again by themselves. 1 = OFF_PITCH of the tone between them. (Its
   waves are made that much longer or shorter, one after the other, so a key never skips or doubles a repeat.)
   "noisy": every repeat of every key is late by a random bit, up to the value of one wave.
-  "vibrato": the tone itself goes up and down, VIBRATO_RATE times a beat, by value x VIBRATO of its pitch (every
-  key the same; its waves made shorter and longer like off pitch's).
+  "vibrato": the tone itself goes up and down, VIBRATO_RATE times a beat (or hz["lfo"]["vibrato_rate"], set by the
+  synth window's knobs), by value x VIBRATO of its pitch (every key the same; its waves made shorter and longer like
+  off pitch's).
   "pitch": unlike the others it DOES change the pitch: the tone bent up or down by the line, 0.5 = as placed, 1 / 0 =
   PITCH keys up / down (bent, in tone_runs, so the red line shows it and every key is in step).
 With effects every key has its own repeats (KeyGrid, custom.chop_keys); without any, nothing changes.
@@ -64,7 +65,8 @@ top of the shape's own velocity; loudness goes with velocity squared):
   before them still ends where it would have).
   "sweep": a bump of loudness over the keys; the value is where it is, 0 = the lowest key, 1 = the highest.
   "wah": loud and quiet stripes over the keys, more of them the higher the value (0 = every key full).
-  "tremolo": every key louder and quieter in turn, value x TREMOLO times a beat (0 = steady).
+  "tremolo": every key louder and quieter in turn, value x TREMOLO times a beat (0 = steady), down to 1 -
+  TREMOLO_DEPTH of its loudness (or 1 - hz["lfo"]["tremolo_depth"], set by the synth window's knobs).
   "octave": every other repeat softer, down to velocity 1 at 1: the tone an octave below comes in.
 Waveforms ("sine", "square", "saw", "triangle"): every key hits SUB times in each wave instead of once, and how
 hard each of those hits is follows the shape drawn over one wave (WAVES), which takes overtones out of the tone
@@ -97,9 +99,11 @@ FX_START = dict({name: RAMP for name in FX}, offpitch=FLAT, tremolo=FLAT, vibrat
 SUB = 16  # waveforms: hits in one wave
 SOFT = 0.003  # ... a hit with less than this much of the full loudness is left out (velocity 7 of 127)
 VIBRATO = 0.05  # "vibrato" at 1: the pitch goes this much (x the tone) up and down
-VIBRATO_RATE = 2.5  # ... times a beat
+VIBRATO_RATE = 2.5  # ... times a beat (unless hz["lfo"]["vibrato_rate"])
 WAH = 8.0  # "wah" at 1: this many loud stripes over the keys
 TREMOLO = 8.0  # "tremolo" at 1: this many times a beat
+TREMOLO_DEPTH = 0.9  # ... how much quieter it gets (unless hz["lfo"]["tremolo_depth"])
+LFO = {"vibrato_rate": (0.0, 64.0), "tremolo_depth": (0.0, 1.0)}  # hz["lfo"]: what each can be
 BEND = 0.98  # how far a line between two points can be bent (1 = a step)
 LOOP = (1 / 256, 1024.0)  # beats: how short and how long one repeat of a repeating effect can be
 FROM_MODES = ("note", "restart")  # hz["from"]: once from each note's start / repeating, starting over at each note
@@ -185,6 +189,19 @@ def clean_fit(fit, froms):
     """Effects stretched over each note checked: those counted from each note, in FX order."""
     fit = fit if isinstance(fit, list) else ()
     return [name for name in FX if name in froms and name in fit]
+
+
+def clean_lfo(lfo):
+    """The synth window's settings for the wobbling effects checked (hz["lfo"], see LFO): the good ones."""
+    out = {}
+    for key, (lo, hi) in LFO.items():
+        try:
+            v = float(lfo[key])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(v):
+            out[key] = min(hi, max(lo, v))
+    return out
 
 
 def clean_sustain(sustain, loop, froms, fit):
@@ -534,6 +551,9 @@ def clean_hz(hz):
         sustain = clean_sustain(hz.get("sustain"), loop, froms, fit)
         if sustain:
             out["sustain"] = sustain
+    lfo = clean_lfo(hz.get("lfo") or {}) if isinstance(hz.get("lfo") or {}, dict) else {}
+    if lfo:
+        out["lfo"] = lfo
     if tones:
         out["tones"] = tones
         for flag in ("grow", "own"):
@@ -802,6 +822,10 @@ class KeyGrid:
                 run["has_" + name] = np.full(len(beat), name in fx)
             run["groups"] = group_count(run["groups"])
             run["turns"] = np.concatenate([[0.0], np.cumsum(run["tremolo"] * TREMOLO * run["waves"] / ppq)[:-1]])
+            lfo = hz.get("lfo") or {}
+            run["vib_rate"] = lfo.get("vibrato_rate", VIBRATO_RATE)
+            depth = lfo.get("tremolo_depth")  # (as it was without one: the very same numbers)
+            run["trem"] = (0.1, TREMOLO_DEPTH) if depth is None else (1.0 - depth, depth)
             self.runs.append(run)
         self.shaped = any(r["has_" + name].any() for r in self.runs for name in WAVES)
         self.loud = self.shaped or any(name in (hz.get("fx") or ()) for name in VEL_FX)
@@ -815,7 +839,7 @@ class KeyGrid:
         if not (off.any() or vib.any()):
             return None
         stretch = (1.0 + OFF_PITCH * off * (x - 0.5)) * (
-            1.0 + VIBRATO * vib * np.sin(2.0 * np.pi * VIBRATO_RATE * (run["beat"] - run["beat"][0])))
+            1.0 + VIBRATO * vib * np.sin(2.0 * np.pi * run["vib_rate"] * (run["beat"] - run["beat"][0])))
         n = len(off)
         more = n // 10 + 3  # (enough: the waves are at most a few % shorter)
         pick = np.minimum(np.arange(n + more), n - 1)
@@ -846,7 +870,7 @@ class KeyGrid:
                 loud = np.where(run["swept"], 0.08 + 0.92 * np.clip(np.cos(np.pi * (xv - run["sweep"])), 0.0, 1.0) ** 4,
                                 1.0)
                 loud = loud * (1.0 + np.cos(2.0 * np.pi * WAH * run["wah"] * (xv - 0.5))) / 2.0
-                loud = loud * (0.1 + 0.9 * (1.0 + np.cos(2.0 * np.pi * run["turns"])) / 2.0)
+                loud = loud * (run["trem"][0] + run["trem"][1] * (1.0 + np.cos(2.0 * np.pi * run["turns"])) / 2.0)
                 vol = np.where(run["has_volume"], run["volume"], 1.0)
                 loud = loud * vol
                 soft = np.where(run["number"] % 2 == 1, 1.0 - run["octave"], 1.0)  # (on the velocity itself)
