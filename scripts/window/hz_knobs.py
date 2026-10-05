@@ -17,7 +17,7 @@ wobbles over two beats, which keys are loud over time, the keys' notes over four
 
 import math
 import tkinter as tk
-from tkinter import ttk
+from tkinter import font as tkfont, ttk
 
 import numpy as np
 
@@ -964,7 +964,10 @@ class SynthKnobs:
                 c.create_text((x0 + x1) / 2, 2 * s, text=text, anchor="n", fill=DIM, font=font)
         x = x_of(at) + held
         c.create_line(x, 0, x, h, fill=MID, dash=(3, 3))
-        c.create_text(x + 3 * s, h - 2 * s, text=tr("hz.synth_let_go"), anchor="sw", fill=DIM, font=font)
+        text = tr("hz.synth_let_go")  # (left of its line when there's no room right of it)
+        right = x + 3 * s + tkfont.Font(font=font).measure(text) <= c.winfo_width()
+        c.create_text(x + 3 * s if right else x - 3 * s, h - 2 * s, text=text, anchor="sw" if right else "se", fill=DIM,
+                      font=font)
         c.create_line(*[v for p in xy for v in p], fill=colour, width=max(2, round(2 * s)))
 
     def wave_hits(self):
@@ -1003,8 +1006,9 @@ class SynthKnobs:
                                outline="")
         c.create_line(pad, h - pad, w - pad, h - pad, fill=MID)
         per = len([1 for p, _ in hits if p < 1]), len([1 for p, _ in hits if p >= 1])
-        c.create_text(w - 3 * s, 2 * s, text=tr("hz.synth_wave_notes", n=fmt(sum(per) / 2)), anchor="ne",
-                      fill=DIM, font=("Segoe UI", 7))
+        n = sum(per) / 2
+        text = tr("hz.synth_wave_note" if n == 1 else "hz.synth_wave_notes", n=fmt(n))
+        c.create_text(w - 3 * s, 2 * s, text=text, anchor="ne", fill=DIM, font=("Segoe UI", 7))
 
     def draw_pitch(self, c):
         """The pitch over the start of a note: from Amount keys off to the tone (the middle line)."""

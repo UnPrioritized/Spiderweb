@@ -1916,7 +1916,7 @@
  "help.hz_live.title": "Live keys (Hz bass)",
  "help.hz_live.tip": "This sound is NOT your MIDI. The live keys play a quick copy that Spiderweb makes from your soundfont's own notes, so you can try a Hz bass before placing it. Only notes you place in the Hz bass window go into your MIDI. It can sound a little different from a real render, most with soundfonts that change their sound at random.",
  "help.hz_live.text": [
-  "In the Hz bass window, press Synth… (it turns Preview on). The synth window has three tabs (the big buttons at the top left): Knobs, Effects and the effects' Lines for one note, and a keyboard along the bottom. Click and hold a key to hear the Hz bass of that key, as a note placed there would sound: its keys, gates and effects. Let go, and the falls after the sustain points play. Drag sideways to play other keys.",
+  "In the Hz bass window, press Synth… (it turns Preview on). The synth window has three tabs (the big buttons at the top left): OSC (the knobs), FX (the effects) and Draw (the effects' lines for one note, big), and a keyboard along the bottom. Click and hold a key to hear the Hz bass of that key, as a note placed there would sound: its keys, gates and effects. Let go, and the falls after the sustain points play. Drag sideways to play other keys.",
   "",
   "You can play with your computer's keyboard too, like a small piano: the middle row of letters A S D F G H J K are the white keys from C up, W E T Y U above them the black keys, and O L P ; go on past the next C. Z and X move them an octave down or up; the keys they don't reach are greyed on the keyboard, and the line at the bottom says which they play. Hold a letter and turn a knob with the mouse to hear the change. The letters don't play while you type in a box.",
   "",
@@ -2336,6 +2336,7 @@
  "hz.synth_shape": "Shape",
  "hz.synth_octave": "Octave below",
  "hz.synth_wave_notes": "{n} notes a wave",
+ "hz.synth_wave_note": "{n} note a wave",
  "hz.synth_pitch": "Pitch",
  "hz.synth_amount": "Amount",
  "hz.synth_time": "Time",
