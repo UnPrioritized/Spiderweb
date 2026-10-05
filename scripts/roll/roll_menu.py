@@ -134,7 +134,7 @@ class ShapeMenu:
         if len(app.sels) == 1 and sh["kind"] in LINE_KINDS:
             item(tr("roll_menu.split_here"), "", lambda: app.split_here(i, at))
         if app.live_problem() is None:
-            item(tr("roll_menu.turn_into_live_shape"), tr("roll_menu.ctrl_l"), app.turn_into_live, keys=True)
+            item(tr("roll_menu.turn_into_live_shape"), tr("roll_menu.ctrl_r"), app.turn_into_live, keys=True)
         if len(app.sels) == 1 and app.can_split_pieces(sh):
             label = (tr("roll_menu.split_back_into_the_shapes_it") if originals(sh) else
                      tr("roll_menu.split_into_separate_shapes"))
@@ -174,7 +174,7 @@ class ShapeMenu:
         item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
              tr("roll_menu.ctrl_g"), app.join_selected, ok)
         if app.live_problem() is None:
-            item(tr("roll_menu.turn_into_live_shape"), tr("roll_menu.ctrl_l"), app.turn_into_live)
+            item(tr("roll_menu.turn_into_live_shape"), tr("roll_menu.ctrl_r"), app.turn_into_live)
         self.group_items(m, item, True, True, True)
         try:
             m.tk_popup(e.x_root, e.y_root)

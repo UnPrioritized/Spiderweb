@@ -251,7 +251,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                          ("Control-Shift-v Control-Shift-V", self.paste_from_domino),
                          ("Control-g Control-G", self.join_selected),
                          ("Control-Shift-g Control-Shift-G", self.split_selected),
-                         ("Control-l Control-L", self.turn_into_live),
+                         ("Control-r Control-R", self.turn_into_live),
                          ("Alt-w Alt-W", lambda: open_claw(self)), ("Alt-s Alt-S", lambda: open_strum(self)),
                          ("Alt-u Alt-U", lambda: open_chop(self)), ("Control-u Control-U", lambda: quick_chop(self)),
                          ("Control-v Control-V", self.paste), ("Control-h Control-H", lambda: self.flip(True)),
