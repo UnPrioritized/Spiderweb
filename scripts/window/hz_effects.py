@@ -79,6 +79,11 @@ def faint(colour, by=0.6):
 
 
 class FxPane:
+    # the pane's colours (the synth window's dark look has its own: hz_synth.LOOK)
+    LOOK = {"bg": "white", "grid": "#e4e4e4", "outside": "#f1f1f1", "notes": "#c8d6f5", "hint": "#777",
+            "repeat": "#dcdcdc", "names": "#fafafa", "names_dim": 0.5, "text": "#999", "edge": "#707070",
+            "box": "#555", "point": "white"}
+
     def __init__(self, win):
         self.win, self.s = win, win.s
         self.active = None  # the effect highlighted
@@ -96,7 +101,7 @@ class FxPane:
         self.row_h, self.pad = round(15 * self.s), round(9 * self.s)
         self.edge = round(4 * self.s)  # the top edge: drag it = the pane's height
         start_h = max(round(112 * self.s), round(8 * self.s) + len(FX) * self.row_h)
-        c = self.canvas = tk.Canvas(win, background="white", highlightthickness=0,
+        c = self.canvas = tk.Canvas(win, background=self.LOOK["bg"], highlightthickness=0,
                                     height=win.app.hz_fx_h or start_h)
         c.bind("<Configure>", lambda e: self.redraw())
         c.bind("<ButtonPress-1>", self.on_press)
@@ -381,8 +386,16 @@ class FxPane:
         """The lines that can be grabbed: the highlighted effect's, or all when none is highlighted."""
         return [k for k in self.names() if self.active in (None, base(k))]
 
+    def colour(self, name):
+        """An effect's colour on this pane."""
+        return FX_COLOR[name]
+
+    def faint(self, colour, by=0.6):
+        """A colour paled toward the pane's background."""
+        return faint(colour, by)
+
     def redraw(self):
-        c, win, s = self.canvas, self.win, self.s
+        c, win, s, look = self.canvas, self.win, self.s, self.LOOK
         c.delete("all")
         self.drawn = {}
         w, h, kb = c.winfo_width(), c.winfo_height(), win.kb_w
@@ -391,17 +404,17 @@ class FxPane:
         fx = win.fxl
         self.sel = {(n, i) for n, i in self.sel if n in fx and i < len(fx[n])}
         for v in (0.0, 0.5, 1.0):
-            c.create_line(kb, self.y_of(v), w, self.y_of(v), fill="#e4e4e4")
+            c.create_line(kb, self.y_of(v), w, self.y_of(v), fill=look["grid"])
         if win.tones:  # before and after the notes (and the falls after them): grey
             x0, x1 = max(kb, win.x_of(0.0)), max(kb, win.x_of(sound_span(self.hz_now())))
             for a, b in ((kb, x0), (x1, w)):
                 if b > a:
-                    c.create_rectangle(a, 0, b, h, fill="#f1f1f1", outline="")
+                    c.create_rectangle(a, 0, b, h, fill=look["outside"], outline="")
         for n in win.tones:  # where the notes are, faintly
             c.create_rectangle(max(kb, win.x_of(n["t"])), h - 3 * s, max(kb, win.x_of(n["t"] + n["len"])), h,
-                               fill="#c8d6f5", outline="")
+                               fill=look["notes"], outline="")
         if not fx:
-            c.create_text((kb + w) / 2, h / 2, text=tr("hz.fx_hint"), fill="#777", width=w - kb - 40 * s,
+            c.create_text((kb + w) / 2, h / 2, text=tr("hz.fx_hint"), fill=look["hint"], width=w - kb - 40 * s,
                           justify="center")
         order = sorted(self.names(), key=lambda k: base(k) == self.active)  # (the highlighted one on top)
         trying = self.copies_of(self.trying, *self.trying_how) if self.trying else None
@@ -412,15 +425,15 @@ class FxPane:
         for _, o, _, _ in (self.copies(self.active) or () if self.active in win.loops else ()):  # where each
             x = win.x_of(o)  # repeat starts
             if x > kb:
-                c.create_line(x, 0, x, h, fill="#dcdcdc", dash=(2, 3))
+                c.create_line(x, 0, x, h, fill=look["repeat"], dash=(2, 3))
         if self.sustain(self.active) is not None:  # where each note ends: its fall starts there
             for k, _, _, _ in self.copies(self.active) or ():
                 x = win.x_of(self.release(self.active, k)[1])
                 if kb < x < w:
-                    c.create_line(x, 0, x, h, fill=faint(FX_COLOR[self.active], 0.3), dash=(4, 3))
+                    c.create_line(x, 0, x, h, fill=self.faint(self.colour(self.active), 0.3), dash=(4, 3))
         for name in order:
             lit = self.active in (None, base(name))
-            colour = FX_COLOR[base(name)] if lit else faint(FX_COLOR[base(name)])
+            colour = self.colour(base(name)) if lit else self.faint(self.colour(base(name)))
             off = base(name) in win.off  # (switched off: dashed; an amount line: dotted)
             if name in win.loops and self.copies(name) is None:  # repeats too close together: a band
                 vs = [p[1] for p in fx[name]]
@@ -435,7 +448,7 @@ class FxPane:
                 r = 3.5 * s
                 at = self.sustain(name)
                 for x, y, i, _ in self.points(name):
-                    fill = colour if (name, i) in self.sel else "white"
+                    fill = colour if (name, i) in self.sel else look["point"]
                     if at is not None and abs(fx[name][i][0] - at) < 1e-9:  # the sustain point: a diamond
                         q = r * 1.5
                         c.create_polygon(x, y - q, x + q, y, x, y + q, x - q, y, fill=fill, outline=colour,
@@ -445,12 +458,12 @@ class FxPane:
                                        width=max(1, round(1.5 * s)))
                 r = 3 * s
                 for x, y, _, _ in self.handles(name):
-                    c.create_oval(x - r, y - r, x + r, y + r, fill="white", outline=colour, width=1)
-        c.create_rectangle(0, 0, kb, h, fill="#fafafa", outline="")  # the effects
+                    c.create_oval(x - r, y - r, x + r, y + r, fill=look["point"], outline=colour, width=1)
+        c.create_rectangle(0, 0, kb, h, fill=look["names"], outline="")  # the effects
         for i, name in enumerate(FX):
             y = 4 * s + i * self.row_h + self.row_h / 2
             lit = self.active in (None, name)
-            colour = FX_COLOR[name] if lit else faint(FX_COLOR[name], 0.5)
+            colour = self.colour(name) if lit else self.faint(self.colour(name), look["names_dim"])
             r = 3 * s
             on = name in fx and name not in win.off
             c.create_rectangle(4 * s, y - r, 4 * s + 2 * r, y + r, outline=colour, fill=colour if on else "")
@@ -459,13 +472,13 @@ class FxPane:
             c.create_text(8 * s + 2 * r, y, text=tr("hz.fx_" + name), anchor="w", fill=colour,
                           font=("Segoe UI", 8, "bold" if self.active == name else "normal"))
         for v in (0.0, 0.5, 1.0):  # what the heights mean
-            c.create_text(w - 4 * s, self.y_of(v), text=f"{v * 100:.0f} %", anchor="e", fill="#999",
+            c.create_text(w - 4 * s, self.y_of(v), text=f"{v * 100:.0f} %", anchor="e", fill=look["text"],
                           font=("Segoe UI", 7))
-        c.create_line(kb, 0, kb, h, fill="#707070")
-        c.create_line(0, 0, w, 0, fill="#707070")
+        c.create_line(kb, 0, kb, h, fill=look["edge"])
+        c.create_line(0, 0, w, 0, fill=look["edge"])
         d = self.drag
         if d and d["kind"] == "box" and "x1" in d:
-            c.create_rectangle(d["x0"], d["y0"], d["x1"], d["y1"], outline="#555", dash=(3, 3))
+            c.create_rectangle(d["x0"], d["y0"], d["x1"], d["y1"], outline=look["box"], dash=(3, 3))
         self.dots = None
         self.draw_dots()
 
@@ -503,7 +516,7 @@ class FxPane:
             if g[0] == "line":
                 c.create_line(g[1], 0, g[1], h, fill=PLAY_LINE, width=max(1, round(s)), tags="dot")
             else:
-                c.create_oval(g[1] - r, g[2] - r, g[1] + r, g[2] + r, fill=FX_COLOR[base(g[0])], outline="white",
+                c.create_oval(g[1] - r, g[2] - r, g[1] + r, g[2] + r, fill=self.colour(base(g[0])), outline=self.LOOK["point"],
                               width=max(1, round(1.5 * s)), tags="dot")
 
     def play_x(self):

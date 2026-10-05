@@ -112,21 +112,27 @@ class PresetBar:
         self.preset_mark = None  # ... picked for: (the shape's number, the undo step it's picked after)
         self.preset_canon = {}  # a preset's key -> its sound as fx_settings would have it (JSON)
         self.yours = load_presets()  # (read again when the list opens)
-        ttk.Label(row, text=tr("hz.preset")).pack(side="left", padx=(0, 4))
+        top = ttk.Frame(row, style="Synth.TFrame")  # (the name and ◀ ▶ on top, Save… and Delete under them)
+        top.pack(fill="x")
+        under = ttk.Frame(row, style="Synth.TFrame")
+        under.pack(fill="x", pady=(4, 0))
         self.preset_var = tk.StringVar()
-        mb = ttk.Menubutton(row, textvariable=self.preset_var, width=22)
-        mb.pack(side="left")
+        mb = ttk.Menubutton(top, textvariable=self.preset_var, width=26, style="Synth.TMenubutton")
+        mb.pack(side="left", fill="x", expand=True)
         self.preset_menu = tk.Menu(mb, tearoff=0, postcommand=self.fill_presets)
         mb["menu"] = self.preset_menu
         Tooltip(mb, tr("hz.preset_tip"))
         for text, d, tip in (("◀", -1, "hz.preset_prev"), ("▶", 1, "hz.preset_next")):
-            b = ttk.Button(row, text=text, width=3, command=lambda d=d: self.step_preset(d), takefocus=False)
-            b.pack(side="left", padx=(4 if d < 0 else 0, 0))
+            b = ttk.Button(top, text=text, width=3, command=lambda d=d: self.step_preset(d), takefocus=False,
+                           style="Synth.TButton")
+            b.pack(side="left", padx=(4 if d < 0 else 2, 0))
             Tooltip(b, tr(tip))
-        b = ttk.Button(row, text=tr("hz.preset_save"), command=self.save_preset, takefocus=False)
-        b.pack(side="left", padx=(8, 0))
+        b = ttk.Button(under, text=tr("hz.preset_save"), command=self.save_preset, takefocus=False,
+                       style="Synth.TButton")
+        b.pack(side="left")
         Tooltip(b, tr("hz.preset_save_tip"))
-        self.preset_del = ttk.Button(row, text=tr("hz.preset_delete"), command=self.delete_preset, takefocus=False)
+        self.preset_del = ttk.Button(under, text=tr("hz.preset_delete"), command=self.delete_preset, takefocus=False,
+                                     style="Synth.TButton")
         self.preset_del.pack(side="left", padx=(4, 0))
         Tooltip(self.preset_del, tr("hz.preset_delete_tip"))
 

@@ -26,10 +26,11 @@ from notes.hzbass import (ARP, ARP_PATTERNS, CHORDS, CRUSH, DETUNE, FAST, GROUPS
                           RACK, SOFT, SUB, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE, VOICES, WAH, WAVES, arpeggiated,
                           clean_arp, clean_extra, clean_mode, clean_voice, copies, group_count, line_at, wave_hits)
 from window.hz_effects import AMOUNT, FX_COLOR
+from window.synth_look import (DIM, EDGE, ENTRY, GRID, MID, PANEL, PIC, TEXT, Box, bright, dark_list, mix)
 from window.tool_window import Knob
 from window.widgets import Scrub, Tooltip, grid_shown
 
-WARN = "#c06000"
+KNOB_BODY, KNOB_RIM, KNOB_TRACK, KNOB_FOCUS = "#474d57", "#5c636e", "#1a1d22", "#9aa3ae"
 TIME_KNOB = 4.0  # beats a time knob goes to (along a curve: fine near 0)
 TIME_MOST = 64.0  # ... and a typed one
 # what a knob's value is: (unit text (None: no unit), lowest, highest typed, the box's steps (Shift, Ctrl), where the
@@ -84,9 +85,14 @@ RACK_KNOBS = {"chorus": (("chorus_depth", "cents"), ("chorus_rate", "vib_rate"))
 KNOBS = {key: (box, kind, start) for box, knobs in BOXES.items() for key, kind, start in knobs}
 KNOBS.update({key: (fx, kind, RACK[fx][key.split("_", 1)[1]][2]) for fx, knobs in RACK_KNOBS.items()
               for key, kind in knobs})
-COLOURS = {"volume": FX_COLOR["volume"], "wave": FX_COLOR["sine"], "pitch": FX_COLOR["pitch"],
-           "vibrato": FX_COLOR["vibrato"], "tremolo": FX_COLOR["tremolo"], "tone": FX_COLOR["sweep"],
-           "character": FX_COLOR["slant"], "voice": "#3a6ee0", "arp": "#c0398a"}
+COLOURS = {k: bright(v) for k, v in {
+    "volume": FX_COLOR["volume"], "wave": FX_COLOR["sine"], "pitch": FX_COLOR["pitch"], "vibrato": FX_COLOR["vibrato"],
+    "tremolo": FX_COLOR["tremolo"], "tone": FX_COLOR["sweep"], "character": FX_COLOR["slant"], "voice": "#3a6ee0",
+    "arp": "#c0398a"}.items()}
+# the lines each box writes (its header light is lit while one of them changes the sound) and its own setting
+BOX_LINES = {"volume": ("volume",), "wave": tuple(WAVES) + ("octave",), "pitch": ("pitch",), "vibrato": ("vibrato",),
+             "tremolo": ("tremolo",), "tone": ("sweep", "wah"), "character": ("slant", "offpitch", "noisy", "groups")}
+BOX_EXTRA = {"wave": "mode", "voice": "voice", "arp": "arp"}
 PICTURES = {"volume": (260, 90), "wave": (200, 90), "pitch": (150, 90), "vibrato": (230, 60), "tremolo": (150, 60),
             "tone": (200, 90), "character": (220, 60), "voice": (230, 60), "arp": (260, 60)}
 CHARACTER = ("slant", "offpitch", "noisy")  # (the Character box's lines that are just their value; Groups is counted)
@@ -303,30 +309,52 @@ READ = {"volume": read_volume, "wave": read_wave, "pitch": read_pitch, "vibrato"
         "arp": read_arp}
 
 
+def paint_knob(k, start, turn, arc_from, arc):
+    """A knob in the dark look: a dark track round it (`turn` degrees from `start`), the value's arc in its colour
+    (`arc` degrees from `arc_from`), a grey body with a light pointer."""
+    k.delete("all")
+    s, m = k.size, max(3, k.size // 9)
+    w = max(2, m // 2 + 1)
+    k.create_arc(m, m, s - m, s - m, start=start, extent=-turn, style="arc", width=w, outline=KNOB_TRACK)
+    if arc:
+        k.create_arc(m, m, s - m, s - m, start=arc_from, extent=-arc, style="arc", width=w,
+                     outline=k.color if k.enabled else MID)
+    c, r = s / 2, s / 2 - m * 1.9
+    a = math.radians(arc_from - arc)
+    k.create_oval(c - r, c - r, c + r, c + r, fill=KNOB_BODY, width=max(1, m // 3),
+                  outline=KNOB_FOCUS if k.focus_get() is k else KNOB_RIM)
+    k.create_line(c + r * 0.25 * math.cos(a), c - r * 0.25 * math.sin(a), c + r * math.cos(a), c - r * math.sin(a),
+                  fill="#f2f4f7" if k.enabled else DIM, width=2, capstyle="round")
+
+
+class UpDown(Knob):
+    """The up / down knob (Pitch Amount: 0 in the middle) in the dark look, turning 135 degrees each way like the
+    others."""
+
+    TURN = 135
+
+    def __init__(self, parent, scale, changed, color, size=44):
+        super().__init__(parent, scale, changed, color=color, size=size)
+        self.config(background=PANEL)
+
+    def draw(self):
+        paint_knob(self, 225, 2 * self.TURN, 90, self.value / 100 * self.TURN)
+
+
 class Dial(Knob):
     """A synth's knob: 0 (pointing down left) to 100 (down right), turning 270 degrees. As Knob otherwise, without
-    sticking anywhere; a middle-click puts it back to `start`."""
+    sticking anywhere; a middle-click puts it back to `start`. In the dark look."""
 
     TURN = 270
 
     def __init__(self, parent, scale, changed, color, size=44, start=0.0):
         super().__init__(parent, scale, changed, color=color, size=size)
+        self.config(background=PANEL)
         self.start = start
         self.bind("<ButtonPress-2>", lambda e: self.turn_to(self.start, True))
 
     def draw(self):
-        self.delete("all")
-        s, m = self.size, max(3, self.size // 9)
-        w = max(2, m // 2)
-        self.create_arc(m, m, s - m, s - m, start=225, extent=-self.TURN, style="arc", width=w,
-                        outline="#888" if self.focus_get() is self else "#ccc")
-        if self.value:
-            self.create_arc(m, m, s - m, s - m, start=225, extent=-self.value / 100 * self.TURN, style="arc",
-                            outline=self.color if self.enabled else "#ccc", width=w)
-        c, r = s / 2, s / 2 - m * 1.8
-        a = math.radians(225 - self.value / 100 * self.TURN)
-        self.create_oval(c - r, c - r, c + r, c + r, fill="#555" if self.enabled else "#aaa", outline="")
-        self.create_line(c, c, c + r * math.cos(a), c - r * math.sin(a), fill="white", width=2)
+        paint_knob(self, 225, self.TURN, 225, self.value / 100 * self.TURN)
 
     def step(self, d):
         if self.enabled:
@@ -403,31 +431,35 @@ class SynthKnobs:
         self.pic_for = {}  # what each picture was drawn for
         self.box_text = {}  # what each knob's box was last given to show (different = typed there)
         self.dot_at = None  # where the envelope picture's moving dot is drawn
-        self.lines = [ttk.Frame(page) for _ in BOXES]  # (made before the boxes, so the boxes show on top of them)
-        self.boxes, self.laid = {}, None
+        self.lines = [ttk.Frame(page, style="Synth.TFrame") for _ in BOXES]  # (made before the boxes, so the boxes
+        self.boxes, self.laid = {}, None  # show on top of them)
         for name, knobs in BOXES.items():
-            box = self.boxes[name] = ttk.Labelframe(page, text=tr(f"hz.synth_{name}"), padding=(10, 4, 10, 8))
+            outer = self.boxes[name] = Box(page, s, tr(f"hz.synth_{name}"), COLOURS[name])
+            Tooltip(outer.lamp, tr("hz.synth_tip_arp_on" if name == "arp" else "hz.synth_tip_lamp"))
+            box = outer.body
             col = 0
             if name == "wave":
-                cell = ttk.Frame(box)
+                cell = ttk.Frame(box, style="Synth.Box.TFrame")
                 cell.grid(row=0, column=0, padx=6, sticky="n")
-                ttk.Label(cell, text=tr("hz.synth_wave_kind")).pack()
+                ttk.Label(cell, text=tr("hz.synth_wave_kind"), style="Synth.Box.TLabel").pack()
                 self.wave_names = [tr("hz.synth_wave_none")] + [tr("hz.fx_" + n) for n in WAVES]
                 self.wave_var = tk.StringVar(value=self.wave_names[0])
                 cb = self.wave_pick = ttk.Combobox(cell, textvariable=self.wave_var, values=self.wave_names,
-                                                   state="readonly", width=9)
+                                                   state="readonly", width=9, style="Synth.TCombobox")
+                dark_list(cb)
                 cb.pack(pady=(12, 0))
                 cb.bind("<<ComboboxSelected>>", lambda e: (self.on_wave(), self.keyboard_back(e.widget)))
                 Tooltip(cb, tr("hz.synth_tip_wave"))
                 col = 1
             if name == "arp":
-                col = self.arp_cells(box)
+                col = self.arp_cells(outer)
             if name == "tone":
-                cell = ttk.Frame(box)
+                cell = ttk.Frame(box, style="Synth.Box.TFrame")
                 cell.grid(row=0, column=0, padx=6, sticky="n")
-                ttk.Label(cell, text=tr("hz.synth_sweep")).pack()
+                ttk.Label(cell, text=tr("hz.synth_sweep"), style="Synth.Box.TLabel").pack()
                 self.sweep_var = tk.BooleanVar(value=False)
                 cb = ttk.Checkbutton(cell, text=tr("hz.synth_sweep_on"), variable=self.sweep_var,
+                                     style="Synth.Box.TCheckbutton",
                                      command=lambda: self.change("tone", "sweep", self.sweep_var.get()))
                 cb.pack(pady=(14, 0))
                 Tooltip(cb, tr("hz.synth_tip_sweep"))
@@ -454,9 +486,10 @@ class SynthKnobs:
                 col += 1
             size = PICTURES[name]
             pic = self.pics[name] = tk.Canvas(box, width=round(size[0] * s), height=round(size[1] * s),
-                                              background="white", highlightthickness=1, highlightbackground="#ccc")
+                                              background=PIC, highlightthickness=1, highlightbackground=EDGE)
             pic.grid(row=1, column=0, columnspan=col, sticky="ew", pady=(8, 0))
-            says = self.box_says[name] = ttk.Label(box, text="", foreground=WARN, wraplength=round(size[0] * s))
+            says = self.box_says[name] = ttk.Label(box, text="", style="Synth.Box.Warn.TLabel",
+                                                   wraplength=round(size[0] * s))
             says.grid(row=2, column=0, columnspan=col, sticky="w", pady=(6, 0))
             pic.bind("<Configure>", lambda e, says=says: (says.config(wraplength=e.width), self.draw_pics()))
         self.lay_boxes(math.inf)  # (as wide as they need: the window's size is set from that; then as wide as it is)
@@ -486,46 +519,49 @@ class SynthKnobs:
 
     def voice_cell(self, box, col, after):
         """The Voice box's Voices on dropdown (after Detune) or its Only notes that touch tick box (after Glide)."""
-        cell = ttk.Frame(box)
+        cell = ttk.Frame(box, style="Synth.Box.TFrame")
         cell.grid(row=0, column=col, padx=6, sticky="n")
         if after == "detune":
-            ttk.Label(cell, text=tr("hz.synth_voices_on")).pack()
+            ttk.Label(cell, text=tr("hz.synth_voices_on"), style="Synth.Box.TLabel").pack()
             self.same_names = [tr("hz.synth_voices_split"), tr("hz.synth_voices_same")]
             self.same_var = tk.StringVar(value=self.same_names[0])
-            cb = ttk.Combobox(cell, textvariable=self.same_var, values=self.same_names, state="readonly", width=10)
+            cb = ttk.Combobox(cell, textvariable=self.same_var, values=self.same_names, state="readonly", width=10,
+                              style="Synth.TCombobox")
+            dark_list(cb)
             cb.pack(pady=(12, 0))
             cb.bind("<<ComboboxSelected>>", lambda e: (
                 self.change("voice", "same", self.same_names.index(self.same_var.get()) == 1),
                 self.keyboard_back(e.widget)))
             Tooltip(cb, tr("hz.synth_tip_voices_on"))
         else:
-            ttk.Label(cell, text="").pack()
+            ttk.Label(cell, text="", style="Synth.Box.TLabel").pack()
             self.touching_var = tk.BooleanVar(value=False)
             cb = ttk.Checkbutton(cell, text=tr("hz.synth_touching"), variable=self.touching_var,
+                                 style="Synth.Box.TCheckbutton",
                                  command=lambda: self.change("voice", "touching", self.touching_var.get()))
             cb.pack(pady=(14, 0))
             Tooltip(cb, tr("hz.synth_tip_touching"))
 
     def dial_cell(self, box, col, key, kind, start, colour):
         """A knob with its name over it and its value's box under it."""
-        cell = ttk.Frame(box)
+        cell = ttk.Frame(box, style="Synth.Box.TFrame")
         cell.grid(row=0, column=col, padx=6)
-        ttk.Label(cell, text=tr(f"hz.synth_{key}")).pack()
+        ttk.Label(cell, text=tr(f"hz.synth_{key}"), style="Synth.Box.TLabel").pack()
         changed = lambda v, done: self.on_dial(key, v, done)
         if kind == "keys":  # (up or down: 0 in the middle)
-            k = Knob(cell, self.s, changed, color=colour, size=46)
+            k = UpDown(cell, self.s, changed, colour, size=46)
         else:
             k = Dial(cell, self.s, changed, colour, size=46, start=knob_of(kind, start))
         self.dials[key] = k
         k.pack()
-        row = ttk.Frame(cell)
+        row = ttk.Frame(cell, style="Synth.Box.TFrame")
         row.pack(pady=(2, 0))
         var = self.dial_vars[key] = tk.StringVar()
-        e = self.dial_boxes[key] = ttk.Entry(row, textvariable=var, width=5, justify="center")
+        e = self.dial_boxes[key] = ttk.Entry(row, textvariable=var, width=5, justify="center", style=ENTRY)
         e.pack(side="left")
         unit, lo, hi, steps, _ = KINDS[kind]
         if unit:
-            ttk.Label(row, text=tr(unit), foreground="#777").pack(side="left", padx=(2, 0))
+            ttk.Label(row, text=tr(unit), style="Synth.Box.Dim.TLabel").pack(side="left", padx=(2, 0))
         e.bind("<Return>", lambda ev: (self.on_box(key), self.keyboard_back(e), "break")[2])
         e.bind("<FocusOut>", lambda ev: self.on_box(key))
         Scrub(self.app, [(e, var, lambda: self.on_box(key))], steps, lo, hi, drag_box=True)
@@ -535,12 +571,14 @@ class SynthKnobs:
 
     def mode_cell(self, box, col):
         """The Wave box's Mode dropdown (Off, FM, Pulse width, Sync, Growl, Bitcrush)."""
-        cell = ttk.Frame(box)
+        cell = ttk.Frame(box, style="Synth.Box.TFrame")
         cell.grid(row=0, column=col, padx=6, sticky="n")
-        ttk.Label(cell, text=tr("hz.synth_mode")).pack()
+        ttk.Label(cell, text=tr("hz.synth_mode"), style="Synth.Box.TLabel").pack()
         self.mode_names = [tr(f"hz.synth_mode_{m}") for m in MODE_NAMES]
         self.mode_var = tk.StringVar(value=self.mode_names[0])
-        cb = ttk.Combobox(cell, textvariable=self.mode_var, values=self.mode_names, state="readonly", width=11)
+        cb = ttk.Combobox(cell, textvariable=self.mode_var, values=self.mode_names, state="readonly", width=11,
+                          style="Synth.TCombobox")
+        dark_list(cb)
         cb.pack(pady=(12, 0))
         cb.bind("<<ComboboxSelected>>", lambda e: (
             self.change("wave", "mode", MODE_NAMES[self.mode_names.index(self.mode_var.get())]),
@@ -585,16 +623,16 @@ class SynthKnobs:
         box, kind, _ = KNOBS[key]
         lo, hi = KINDS[kind][1:3]
         if var.get() == self.box_text.get(key):  # (nothing typed: the box shows the sound as it is)
-            return e.config(style="TEntry")
+            return e.config(style=ENTRY)
         try:
             v = float(calc(var.get()))
             if not lo <= v <= hi:
                 raise ValueError
         except (ValueError, ZeroDivisionError):  # (not a number, or out of range: back to the last good value, user)
             var.set(self.box_text.get(key, ""))
-            e.config(style="TEntry")
+            e.config(style=ENTRY)
             return
-        e.config(style="TEntry")
+        e.config(style=ENTRY)
         self.box_text[key] = var.get()  # (taken: from now on the box shows the sound again)
         v = v / 100 if kind in PERCENTS else float(round(v)) if kind in COUNTS else v
         if abs(v - self.vals[key]) > 1e-9:
@@ -611,28 +649,30 @@ class SynthKnobs:
         if key.startswith("arp_"):
             self.vals["arp_on"] = True
 
-    def arp_cells(self, box):
-        """The Arpeggio box's On tick box and Pattern dropdown (columns 0 and 1): the next free column."""
-        cell = ttk.Frame(box)
-        cell.grid(row=0, column=0, padx=6, sticky="n")
-        ttk.Label(cell, text="").pack()
+    def arp_cells(self, outer):
+        """The Arpeggio box's On (the light on its header, or its name: a click switches it) and Pattern dropdown
+        (column 0): the next free column."""
         self.arp_var = tk.BooleanVar(value=False)
-        cb = ttk.Checkbutton(cell, text=tr("hz.synth_sweep_on"), variable=self.arp_var,
-                             command=lambda: self.change("arp", "arp_on", self.arp_var.get()))
-        cb.pack(pady=(14, 0))
-        Tooltip(cb, tr("hz.synth_tip_arp_on"))
-        self.arp_choice(box, 1, "pattern", ARP_PATTERNS)
-        return 2
+
+        def switch(e):
+            self.arp_var.set(not self.arp_var.get())
+            self.change("arp", "arp_on", self.arp_var.get())
+        for w in (outer.lamp, outer.title):
+            w.config(cursor="hand2")
+            w.bind("<ButtonPress-1>", switch)
+        self.arp_choice(outer.body, 0, "pattern", ARP_PATTERNS)
+        return 1
 
     def arp_choice(self, box, col, what, ids):
         """One of the Arpeggio box's dropdowns (Pattern / Chord): picking one puts the arpeggio on."""
-        cell = ttk.Frame(box)
+        cell = ttk.Frame(box, style="Synth.Box.TFrame")
         cell.grid(row=0, column=col, padx=6, sticky="n")
-        ttk.Label(cell, text=tr(f"hz.synth_arp_{what}")).pack()
+        ttk.Label(cell, text=tr(f"hz.synth_arp_{what}"), style="Synth.Box.TLabel").pack()
         names = [tr(f"hz.synth_arp_{what}_{i}") for i in ids]
         var = tk.StringVar(value=names[0])
         cb = ttk.Combobox(cell, textvariable=var, values=names, state="readonly",
-                          width=max(len(n) for n in names) + 1)
+                          width=max(len(n) for n in names) + 1, style="Synth.TCombobox")
+        dark_list(cb)
         cb.pack(pady=(12, 0))
         cb.bind("<<ComboboxSelected>>", lambda e: (self.sweep_on("arp_"), self.change(
             "arp", f"arp_{what}", ids[names.index(var.get())]), self.keyboard_back(e.widget)))
@@ -751,7 +791,7 @@ class SynthKnobs:
             typing = self.focus_get() is e and var.get() != self.box_text.get(key)  # (left as typed)
             if var.get() != text and not typing:
                 var.set(text)
-                e.config(style="TEntry")
+                e.config(style=ENTRY)
             if not typing:
                 self.box_text[key] = text
         name = self.wave_names[WAVE_NAMES.index(self.vals["wave"])]
@@ -780,9 +820,19 @@ class SynthKnobs:
             self.same_var.set(name)
         if self.touching_var.get() != self.vals["touching"]:
             self.touching_var.set(self.vals["touching"])
+        self.light_boxes()
         self.draw_pics()
         self.show_rack()
         self.show_preset()
+        self.meter_later()
+
+    def light_boxes(self):
+        """Each box's header light: lit while the box changes the sound (Arpeggio: while it's on)."""
+        for name, outer in self.boxes.items():
+            lines = [n for n in BOX_LINES.get(name, ()) if n in self.fxl and n not in self.off]
+            if lines == ["volume"] and flat(self, "volume") == 1.0:  # (the Volume line full all along)
+                lines = []
+            outer.lamp.light(bool(lines) or BOX_EXTRA.get(name) in self.extra)
 
     def draw_pics(self):
         """Each box's picture drawn again when its values (or size) changed."""
@@ -832,15 +882,15 @@ class SynthKnobs:
         xy = [(x_of(b), y_of(v)) for b, v in zip(before, line_at(pts, before))]
         xy += [(x_of(at) + held, y_of(top))]
         xy += [(x_of(b, True), y_of(v)) for b, v in zip(after, line_at(pts, after))]
-        c.create_rectangle(x_of(at), 0, x_of(at) + held, h, fill="#eef3fc", outline="")
+        c.create_rectangle(x_of(at), 0, x_of(at) + held, h, fill=mix(COLOURS["volume"], PIC, 0.88), outline="")
         font = ("Segoe UI", 7)
         for text, x0, x1 in (("A", x_of(0.0), x_of(self.vals["attack"])), ("D", x_of(self.vals["attack"]), x_of(at)),
                              ("S", x_of(at), x_of(at) + held), ("R", x_of(at) + held, x_of(every, True))):
             if x1 - x0 >= 8 * s:
-                c.create_text((x0 + x1) / 2, 2 * s, text=text, anchor="n", fill="#999", font=font)
+                c.create_text((x0 + x1) / 2, 2 * s, text=text, anchor="n", fill=DIM, font=font)
         x = x_of(at) + held
-        c.create_line(x, 0, x, h, fill="#bbb", dash=(3, 3))
-        c.create_text(x + 3 * s, h - 2 * s, text=tr("hz.synth_let_go"), anchor="sw", fill="#999", font=font)
+        c.create_line(x, 0, x, h, fill=MID, dash=(3, 3))
+        c.create_text(x + 3 * s, h - 2 * s, text=tr("hz.synth_let_go"), anchor="sw", fill=DIM, font=font)
         c.create_line(*[v for p in xy for v in p], fill=COLOURS["volume"], width=max(2, round(2 * s)))
 
     def wave_hits(self):
@@ -869,16 +919,16 @@ class SynthKnobs:
         w, h, pad = c.winfo_width(), c.winfo_height(), 8 * s
         hits = self.wave_hits()
         bw = (w - 2 * pad) / (2 * SUB)
-        colour = FX_COLOR.get(self.vals["wave"], "#777")
-        c.create_line(pad + (w - 2 * pad) / 2, pad, pad + (w - 2 * pad) / 2, h - pad, fill="#ddd", dash=(3, 3))
+        colour = bright(FX_COLOR[self.vals["wave"]]) if self.vals["wave"] in FX_COLOR else DIM
+        c.create_line(pad + (w - 2 * pad) / 2, pad, pad + (w - 2 * pad) / 2, h - pad, fill=MID, dash=(3, 3))
         for p, x in hits:
             x0 = pad + p * SUB * bw
             c.create_rectangle(x0 + bw * 0.15, h - pad - x * (h - 3 * pad), x0 + bw * 0.85, h - pad, fill=colour,
                                outline="")
-        c.create_line(pad, h - pad, w - pad, h - pad, fill="#bbb")
+        c.create_line(pad, h - pad, w - pad, h - pad, fill=MID)
         per = len([1 for p, _ in hits if p < 1]), len([1 for p, _ in hits if p >= 1])
         c.create_text(w - 3 * s, 2 * s, text=tr("hz.synth_wave_notes", n=fmt(sum(per) / 2)), anchor="ne",
-                      fill="#777", font=("Segoe UI", 7))
+                      fill=DIM, font=("Segoe UI", 7))
 
     def draw_pitch(self, c):
         """The pitch over the start of a note: from Amount keys off to the tone (the middle line)."""
@@ -886,11 +936,11 @@ class SynthKnobs:
         w, h, pad = c.winfo_width(), c.winfo_height(), 10 * self.s
         v = self.vals
         mid = h / 2
-        c.create_line(pad, mid, w - pad, mid, fill="#ddd")
+        c.create_line(pad, mid, w - pad, mid, fill=MID)
         font = ("Segoe UI", 7)
-        c.create_text(w - 3 * s, mid - 2 * s, text=tr("hz.synth_pitch_tone"), anchor="se", fill="#999", font=font)
+        c.create_text(w - 3 * s, mid - 2 * s, text=tr("hz.synth_pitch_tone"), anchor="se", fill=DIM, font=font)
         for k, y in ((PITCH, pad), (-PITCH, h - pad)):
-            c.create_text(3 * s, y, text=f"{k:+.0f}", anchor="w", fill="#bbb", font=font)
+            c.create_text(3 * s, y, text=f"{k:+.0f}", anchor="w", fill=DIM, font=font)
         time = max(v["time"], 1e-9)
         total = time * 1.4  # (a bit of the tone after it)
         pts, _ = pitch_line(v["amount"], v["time"]) if v["amount"] else ([[0.0, 0.5]], 0)
@@ -909,11 +959,11 @@ class SynthKnobs:
         top, bottom = pad, h - pad
         if mid:
             y0 = (top + bottom) / 2
-            c.create_line(pad, y0, w - pad, y0, fill="#ddd")
+            c.create_line(pad, y0, w - pad, y0, fill=MID)
             ys = y0 - values * (y0 - top)
         else:
             ys = bottom - values * (bottom - top)
-        c.create_line(w / 2, top, w / 2, bottom, fill="#e4e4e4", dash=(3, 3))  # (one beat in)
+        c.create_line(w / 2, top, w / 2, bottom, fill=GRID, dash=(3, 3))  # (one beat in)
         xy = [(pad + i / (n - 1) * (w - 2 * pad), y) for i, y in enumerate(ys)]
         c.create_line(*[q for p in xy for q in p], fill=colour, width=max(2, round(2 * s)))
 
@@ -949,16 +999,17 @@ class SynthKnobs:
             loud = 0.08 + 0.92 * np.clip(np.cos(np.pi * (x[:, None] - where[None, :])), 0.0, 1.0) ** 4
         loud = loud * ((1.0 + np.cos(2.0 * np.pi * WAH * v["wah"] * (x - 0.5))) / 2.0)[:, None]
         rgb = [int(COLOURS["tone"][i:i + 2], 16) for i in (1, 3, 5)]
+        dark = [int(PIC[i:i + 2], 16) for i in (1, 3, 5)]
         cw, rh = (w - 2 * pad) / cols, (h - 2 * pad) / rows
         for r in range(rows):
             y = h - pad - (r + 1) * rh
             for i in range(cols):
                 f = loud[r, i]
-                colour = "#%02x%02x%02x" % tuple(round(255 + (q - 255) * f) for q in rgb)
+                colour = "#%02x%02x%02x" % tuple(round(d + (q - d) * f * 0.7) for q, d in zip(rgb, dark))
                 c.create_rectangle(pad + i * cw, y, pad + (i + 1) * cw + 1, y + rh + 1, fill=colour, outline="")
         if v["sweep"] and every:
             xt = pad + v["sweep_time"] / total * (w - 2 * pad)
-            c.create_line(xt, pad, xt, h - pad, fill="#999", dash=(3, 3))
+            c.create_line(xt, pad, xt, h - pad, fill=DIM, dash=(3, 3))
 
     def draw_character(self, c):
         """Eight of the shape's keys (the highest at the top) and their notes over four waves: when each key hits
@@ -969,7 +1020,7 @@ class SynthKnobs:
         sx, rh = (w - 2 * pad) / waves, (h - 2 * pad) / keys
         groups = int(v["groups"])
         for k in range(1, waves):
-            c.create_line(pad + k * sx, pad, pad + k * sx, h - pad, fill="#e4e4e4", dash=(3, 3))
+            c.create_line(pad + k * sx, pad, pad + k * sx, h - pad, fill=GRID, dash=(3, 3))
         for i in range(keys):
             x = i / keys
             noise = np.random.default_rng(1000 + i)
@@ -996,29 +1047,29 @@ class SynthKnobs:
 
         def x_of(c_):  # (a copy's tone: the note's own in the middle, half the most Detune each way)
             return pad + (split - 2 * pad) * (0.5 + c_ / DETUNE)
-        c.create_line(x_of(0.0), pad, x_of(0.0), h - pad, fill="#e4e4e4", dash=(3, 3))
+        c.create_line(x_of(0.0), pad, x_of(0.0), h - pad, fill=GRID, dash=(3, 3))
         for c_ in cents:
-            c.create_line(x_of(c_), pad, x_of(c_), h - pad, fill="#d6def6")
+            c.create_line(x_of(c_), pad, x_of(c_), h - pad, fill=mix(colour, PIC, 0.7))
         r = max(2.0, min(rh * 0.35, 4 * s))
         for i in range(keys):
             y = h - pad - (i + 0.5) * rh
             for c_ in (cents if v["same"] else [cents[i % len(cents)]]):
                 c.create_rectangle(x_of(c_) - r, y - r, x_of(c_) + r, y + r, fill=colour, outline="")
         says = (tr("hz.synth_voice_notes", n=n) if v["same"] else tr("hz.synth_voice_no_extra")) if n > 1 else ""
-        c.create_text(split - 3 * s, 1 * s, text=says, anchor="ne", fill="#777", font=font)
-        c.create_line(split, pad, split, h - pad, fill="#ddd")
+        c.create_text(split - 3 * s, 1 * s, text=says, anchor="ne", fill=DIM, font=font)
+        c.create_line(split, pad, split, h - pad, fill=MID)
         # the glide: a note a beat long, then one 5 keys up, touching
         x0, x1 = split + pad, w - pad
         lo, hi = h - pad - (h - 2 * pad) * 0.2, pad + (h - 2 * pad) * 0.2
         mid = (x0 + x1) / 2
         for a, b, y in ((x0, mid, lo), (mid, x1, hi)):
-            c.create_rectangle(a + 1, y - 2 * s, b - 1, y + 2 * s, fill="#eeeeee", outline="")
+            c.create_rectangle(a + 1, y - 2 * s, b - 1, y + 2 * s, fill="#2f353e", outline="")
         g = min(v["glide"], 1.0)
         u = np.linspace(0.0, 1.0, 40)
         xy = [(x0, lo), (mid, lo)] + [(mid + q * g * (x1 - mid), hi + (lo - hi) * (1 - q) ** 2) for q in u]
         xy.append((x1, hi))
         c.create_line(*[q for p in xy for q in p], fill=colour, width=max(2, round(2 * s)))
-        c.create_text(x1, 1 * s, text=tr("hz.synth_glide"), anchor="ne", fill="#999", font=font)
+        c.create_text(x1, 1 * s, text=tr("hz.synth_glide"), anchor="ne", fill=DIM, font=font)
 
     def draw_arp(self, c):
         """Two beats of what it plays (a small piano roll): for a chord of A1, C2 and E2 placed together, or (with a
@@ -1032,8 +1083,8 @@ class SynthKnobs:
         lo, hi = min(n["key"] for n in got), max(n["key"] for n in got)
         top = 12 * s  # (room for the words at the top)
         rh = (h - pad - top) / max(6, hi - lo + 1)
-        colour = COLOURS["arp"] if v["arp_on"] else "#bbb"
-        c.create_line(w / 2, pad, w / 2, h - pad, fill="#e4e4e4", dash=(3, 3))  # (one beat in)
+        colour = COLOURS["arp"] if v["arp_on"] else MID
+        c.create_line(w / 2, pad, w / 2, h - pad, fill=GRID, dash=(3, 3))  # (one beat in)
         for n in got:
             x0 = pad + n["t"] / 2 * (w - 2 * pad)
             x1 = max(x0 + 2, pad + (n["t"] + n["len"]) / 2 * (w - 2 * pad) - 1)
@@ -1041,7 +1092,7 @@ class SynthKnobs:
             c.create_rectangle(x0, y + 1, x1, y + rh - 1, fill=colour, outline="")
         if v["arp_on"]:
             c.create_text(w - 3 * s, 2 * s, text=tr("hz.synth_arp_notes", n=fmt(arp["speed"])), anchor="ne",
-                          fill="#777", font=("Segoe UI", 7))
+                          fill=DIM, font=("Segoe UI", 7))
 
     def draw_adsr_dot(self):
         """While a key sounds: a dot on the envelope's picture, waiting at the sustain point while it's held, down
@@ -1060,5 +1111,5 @@ class SynthKnobs:
         r = 4 * self.s
         c.delete("dot")
         if got:
-            c.create_oval(got[0] - r, got[1] - r, got[0] + r, got[1] + r, fill=COLOURS["volume"], outline="white",
+            c.create_oval(got[0] - r, got[1] - r, got[0] + r, got[1] + r, fill=COLOURS["volume"], outline=TEXT,
                           width=max(1, round(1.5 * self.s)), tags="dot")

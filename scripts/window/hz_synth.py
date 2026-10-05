@@ -11,11 +11,16 @@ from beat 0: held for the longest line counted from each note (so its whole shap
 sustain points, all fitted to the window. Lines that play all the way from the shape's start are shown from the
 note's start too (a key pressed plays them from there). While a key sounds, a dot runs along every line."""
 
+import json
+import math
 import sys
 import tkinter as tk
 from tkinter import ttk
 
+import numpy as np
+
 from files.lang import tr
+from notes.engine import shape_notes_tracks
 from notes.hzbass import ENVELOPES, FX, FX_START, line_at, sound_span
 from roll.roll_shared import note_name
 from window.hz_effects import AMOUNT, FxPane
@@ -23,25 +28,41 @@ from window.hz_knobs import SynthKnobs
 from window.hz_live import free_sound_later, keep_sound
 from window.hz_presets import PresetBar
 from window.hz_rack import SynthRack
+from window.synth_look import (BG, DIM, EDGE, GRID, MID, PANEL, PIC, TEXT, WARN, BigTab, bright, dark_title, mix,
+                               styles)
 from window.tool_window import Knob
+from window.widgets import Tooltip
 
 BLACK = (1, 3, 6, 8, 10)
 KEY_HELD = "#7aa7f0"
-OUT_WHITE, OUT_BLACK = "#d6d6d6", "#4a4a4a"  # keys the letters don't reach now: greyed (user)
+KEY_WHITE, KEY_BLACK = "#e8eaee", "#101215"
+OUT_WHITE, OUT_BLACK = "#9a9fa6", "#30343a"  # keys the letters don't reach now: greyed (user)
+METER_KEY, METER_BEATS = 33, 4.0  # the note meter: notes a second while an A1 is held (the first 4 beats)
+METER_MS = 250  # ... counted this long after the sound last changed
+METER_TOP = 6  # ... its bar goes to 10^6 notes a second (along a log scale)
+LOOK = {"bg": PIC, "grid": GRID, "outside": "#1b1f24", "notes": "#34507e", "hint": DIM, "repeat": MID,
+        "names": "#1f2328", "names_dim": 0.6, "text": DIM, "edge": EDGE, "box": DIM, "point": PIC}
 # the computer keyboard's letters playing the keys from C up (like many music programs: the middle row = white keys,
 # the row above = black ones); Z / X = an octave down / up
 LETTERS = ("a", "w", "s", "e", "d", "f", "t", "g", "y", "h", "u", "j", "k", "o", "l", "p", "semicolon")
 NO_LETTERS = 0x4 | (0x20000 if sys.platform == "win32" else 0x8)  # (Ctrl or Alt held: a shortcut, not a key)
-WARN = "#c06000"
 
 
 class SynthPane(FxPane):
-    """The effects pane on the synth window's one note (see the top)."""
+    """The effects pane on the synth window's one note (see the top), in the dark look."""
+
+    LOOK = LOOK
 
     def __init__(self, win, hz):
         self.hz = hz
         super().__init__(win)
         self.edge = -1  # (no top edge to drag: the pane fills the window)
+
+    def colour(self, name):
+        return bright(super().colour(name))
+
+    def faint(self, colour, by=0.6):
+        return mix(colour, PIC, by)
 
     def play_x(self):
         return None  # (no song here: no play line)
@@ -85,9 +106,9 @@ class SynthPane(FxPane):
             return
         h, end = c.winfo_height(), win.note_len()  # where the key is held, and let go
         font = ("Segoe UI", 7)
-        c.create_text(win.x_of(0.0) + 3 * s, h - 4 * s, text=tr("hz.synth_held"), anchor="sw", fill="#6a86c8",
-                      font=font, )
-        c.create_text(win.x_of(end) + 3 * s, h - 4 * s, text=tr("hz.synth_let_go"), anchor="sw", fill="#999",
+        c.create_text(win.x_of(0.0) + 3 * s, h - 4 * s, text=tr("hz.synth_held"), anchor="sw", fill="#7f9ee0",
+                      font=font)
+        c.create_text(win.x_of(end) + 3 * s, h - 4 * s, text=tr("hz.synth_let_go"), anchor="sw", fill=DIM,
                       font=font)
 
 
@@ -109,39 +130,50 @@ class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
         self.letter_up = None  # a letter let go: its key stops a moment later unless it's pressed again (repeating)
         self.kb_base = getattr(self.app, "hz_kb_base", 24)  # the key the letter A plays (C1; Hz bass is low)
         self.shown = None  # what the pane was drawn for (refresh)
-        self.warn = ttk.Label(self, text=tr("hz.synth_warning"), foreground=WARN, font=("Segoe UI", 9, "bold"),
-                              padding=(8, 6, 8, 4))
+        self.meter_job, self.meter_for = None, None  # the note meter: waiting to be counted, counted for
+        styles(self)
+        self.configure(background=BG)
+        top = tk.Frame(self, background=BG)  # the big tabs, the preset bar, the note meter
+        top.pack(fill="x", padx=round(8 * s), pady=(round(8 * s), 0))
+        self.page = tk.StringVar(value="knobs")
+        self.tab_buttons = {}
+        for key in ("knobs", "effects", "lines"):
+            b = self.tab_buttons[key] = BigTab(top, s, tr(f"hz.synth_{key}"), lambda key=key: self.pick_page(key))
+            b.pack(side="left", fill="y")
+            Tooltip(b, tr(f"hz.synth_tab_{key}_tip"))
+        self.meter = tk.Canvas(top, width=round(180 * s), height=round(50 * s), background=BG, highlightthickness=0)
+        self.meter.pack(side="right")
+        self.meter.bind("<Configure>", lambda e: self.draw_meter())
+        Tooltip(self.meter, tr("hz.synth_meter_tip", key=note_name(METER_KEY)))
+        bar = ttk.Frame(top, style="Synth.TFrame")
+        bar.pack(side="left", fill="x", expand=True, padx=(round(12 * s), round(12 * s)))
+        self.build_presets(bar)
+        self.warn = ttk.Label(self, text=tr("hz.synth_warning"), style="Synth.Warn.TLabel", font=("Segoe UI", 8),
+                              padding=(10, 4, 10, 2))
         self.warn.pack(fill="x")
         self.warn.bind("<Configure>", lambda e: self.warn.config(wraplength=max(100, e.width - round(16 * s))))
-        bottom = ttk.Frame(self, padding=(8, 2, 8, 4))
+        bottom = ttk.Frame(self, padding=(8, 2, 8, 4), style="Synth.TFrame")
         bottom.pack(side="bottom", fill="x")
-        self.says = ttk.Label(bottom, text="", foreground="#555")
+        self.says = ttk.Label(bottom, text="", style="Synth.Dim.TLabel")
         self.says.pack(side="right", padx=(10, 0))
-        self.status = ttk.Label(bottom, text="", foreground="#555")
+        self.status = ttk.Label(bottom, text="", style="Synth.Dim.TLabel")
         self.status.pack(side="left", fill="x")
-        self.piano = tk.Canvas(self, background="#707070", highlightthickness=0, height=round(70 * s))
-        self.piano.pack(side="bottom", fill="x")
-        tabs = ttk.Frame(self, padding=(8, 0, 8, 4))
-        tabs.pack(fill="x")
-        self.page = tk.StringVar(value="knobs")
-        for key in ("lines", "effects", "knobs"):  # (from the right)
-            ttk.Radiobutton(tabs, text=tr(f"hz.synth_{key}"), variable=self.page, value=key, style="Toolbutton",
-                            command=self.show_page, takefocus=False).pack(side="right")
-        self.build_presets(tabs)
-        self.knobs_box = ttk.Frame(self)  # (the Knobs tab: scrolls when the boxes don't fit, e.g. a small screen)
-        kc = self.knobs_canvas = tk.Canvas(self.knobs_box, highlightthickness=0, bd=0,
-                                           bg=ttk.Style().lookup("TFrame", "background") or "SystemButtonFace")
-        self.knobs_bar = ttk.Scrollbar(self.knobs_box, orient="vertical", command=kc.yview)
+        self.piano = tk.Canvas(self, background=BG, highlightthickness=0, height=round(70 * s))
+        self.piano.pack(side="bottom", fill="x", padx=round(8 * s), pady=(round(4 * s), 0))
+        self.knobs_box = ttk.Frame(self, style="Synth.TFrame")  # (the Knobs tab: scrolls when the boxes don't fit,
+        kc = self.knobs_canvas = tk.Canvas(self.knobs_box, highlightthickness=0, bd=0, bg=BG)  # e.g. a small screen)
+        self.knobs_bar = ttk.Scrollbar(self.knobs_box, orient="vertical", command=kc.yview,
+                                       style="Synth.Vertical.TScrollbar")
         kc.configure(yscrollcommand=self.knobs_bar.set)
         kc.pack(side="left", fill="both", expand=True)
-        self.knobs = ttk.Frame(kc, padding=(10, 4, 10, 8))
+        self.knobs = ttk.Frame(kc, padding=(10, 4, 10, 8), style="Synth.TFrame")
         self.knobs_win = kc.create_window(0, 0, window=self.knobs, anchor="nw")
         kc.bind("<Configure>", lambda e: self.fit_knobs())
         self.knobs.bind("<Configure>", lambda e: self.after_idle(self.fit_knobs))
         self.bind("<MouseWheel>", self.knobs_wheel, add="+")
         self.fx = SynthPane(self, hz)
         self.build_knobs(self.knobs)
-        self.rack_box = ttk.Frame(self, padding=(10, 4, 10, 8))  # (the Effects tab)
+        self.rack_box = ttk.Frame(self, padding=(10, 4, 10, 8), style="Synth.TFrame")  # (the Effects tab)
         self.build_rack(self.rack_box)
         self.canvas = self.fx.canvas
         self.canvas.config(takefocus=True)
@@ -170,11 +202,18 @@ class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
         need = self.winfo_reqheight() - kc.winfo_reqheight() + self.knobs.winfo_reqheight()
         h = min(max(need, names_h + round(160 * s)), self.winfo_screenheight() - 80)
         self.geometry(f"{w}x{h}")
+        dark_title(self)
+
+    def pick_page(self, key):
+        """A big tab clicked."""
+        self.page.set(key)
+        self.show_page()
 
     def show_page(self):
-        """The Knobs or the Lines tab shown."""
+        """The Knobs, the Effects or the Lines tab shown (its big tab lit)."""
         pages = {"knobs": self.knobs_box, "effects": self.rack_box, "lines": self.canvas}
         for key, w in pages.items():
+            self.tab_buttons[key].picked(key == self.page.get())
             if key != self.page.get():
                 w.pack_forget()
         pages[self.page.get()].pack(fill="both", expand=True)
@@ -198,10 +237,12 @@ class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
             c.yview_moveto(0)
 
     def knobs_wheel(self, e):
-        """The mouse wheel over the Knobs tab scrolls it when it's too tall (not over a knob or a box: they turn)."""
-        if (str(e.widget).startswith(str(self.knobs_canvas)) and self.knobs_bar.winfo_ismapped()
-                and not isinstance(e.widget, (Knob, tk.Entry, ttk.Entry))):
-            self.knobs_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
+        """The mouse wheel over the Knobs or the Effects tab scrolls it when it's too tall (not over a knob or a box:
+        they turn)."""
+        for c, bar in ((self.knobs_canvas, self.knobs_bar), (self.rack_canvas, self.rack_bar)):
+            if (str(e.widget).startswith(str(c)) and bar.winfo_ismapped()
+                    and not isinstance(e.widget, (Knob, tk.Entry, ttk.Entry))):
+                c.yview_scroll(-1 if e.delta > 0 else 1, "units")
 
     # ------------------------------------------------------------ the Hz bass window's lines (the pane works on these)
 
@@ -293,10 +334,67 @@ class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
         self.fx.draw_dots()
         self.draw_adsr_dot()
         says, colour = self.live.says() if self.live.active() else (self.live.ready() or "", "#555")
+        colour = DIM if colour == "#555" else WARN  # (the Hz bass window's colours, for the dark look)
         if (self.says.cget("text"), str(self.says.cget("foreground"))) != (says, colour):
             self.says.config(text=says, foreground=colour)
         if self.held is None and self.live.key is None and self.piano.find_withtag("lit"):
             self.draw_keys()
+
+    # ------------------------------------------------------------ the note meter
+
+    def meter_later(self):
+        """The sound may have changed: the note meter counted again once it rests for METER_MS."""
+        if self.meter_job:
+            self.after_cancel(self.meter_job)
+        self.meter_job = self.after(METER_MS, self.count_notes)
+
+    def count_notes(self):
+        """The note meter: the notes a second this sound makes while one A1 is held (its first METER_BEATS: the
+        engine's own notes, as the live keys make them)."""
+        self.meter_job = None
+        if not self.winfo_exists():
+            return
+        try:
+            ppq, bpm, _ = self.app.read_project()
+        except ValueError:
+            return
+        sh = self.live.held_shape(METER_KEY, METER_BEATS)
+        sig = json.dumps([sh, ppq], sort_keys=True, default=str)
+        if sig == (self.meter_for or (None,))[0]:
+            return
+        try:
+            notes, _ = shape_notes_tracks(sh, ppq, 128)
+        except Exception:
+            from files.errors import write_log
+            write_log(*sys.exc_info(), "note meter")
+            return
+        starts = np.asarray(notes)[:, 0] if len(notes) else np.zeros(0)
+        n = int(np.count_nonzero(starts < METER_BEATS * ppq))
+        self.meter_for = (sig, n / (METER_BEATS * 60.0 / bpm))
+        self.draw_meter()
+
+    def draw_meter(self):
+        """Top right: "Notes a second", the number, and a bar of lights (log scale; green, then orange, then red)."""
+        c, s = self.meter, self.s
+        c.delete("all")
+        w, h = c.winfo_width(), c.winfo_height()
+        if w < 50:
+            return
+        rate = self.meter_for[1] if self.meter_for else None
+        pad = 4 * s
+        c.create_rectangle(1, 1, w - 1, h - 1, fill=PANEL, outline=EDGE)
+        c.create_text(pad + 2 * s, pad + 1 * s, text=tr("hz.synth_meter").upper(), anchor="nw", fill=DIM,
+                      font=("Segoe UI Semibold", 7))
+        c.create_text(w - pad - 2 * s, pad - 1 * s, text="…" if rate is None else f"{rate:,.0f}", anchor="ne",
+                      fill=TEXT, font=("Segoe UI Semibold", 11))
+        lights = 24
+        lit = 0 if not rate else round(lights * min(1.0, max(0.0, math.log10(max(rate, 1.0)) / METER_TOP)))
+        x0, x1, y0, y1 = pad + 2 * s, w - pad - 2 * s, h - pad - 12 * s, h - pad - 2 * s
+        lw = (x1 - x0) / lights
+        for i in range(lights):
+            colour = "#62d36a" if i < lights * 0.7 else "#f0a040" if i < lights * 0.88 else "#f05050"
+            c.create_rectangle(x0 + i * lw + 1, y0, x0 + (i + 1) * lw - 1, y1,
+                               fill=colour if i < lit else mix(colour, PANEL, 0.82), outline="")
 
     # ------------------------------------------------------------ the keyboard
 
@@ -326,8 +424,8 @@ class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
         for k, x0, x1, black in self.key_spots():
             on = k == lit
             reach = self.kb_base <= k <= self.kb_base + len(LETTERS) - 1
-            fill = KEY_HELD if on else ("#202020" if reach else OUT_BLACK) if black else "white" if reach else OUT_WHITE
-            c.create_rectangle(x0, 0, x1, bh if black else h, fill=fill, outline="#707070",
+            fill = KEY_HELD if on else (KEY_BLACK if reach else OUT_BLACK) if black else KEY_WHITE if reach else OUT_WHITE
+            c.create_rectangle(x0, 0, x1, bh if black else h, fill=fill, outline=BG,
                                tags="lit" if on else "")
             if not black and k % 12 == 0 and x1 - x0 >= 9 * s:
                 c.create_text((x0 + x1) / 2, h - 3 * s, text=note_name(k), anchor="s", fill="#777",
@@ -424,6 +522,8 @@ class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
             self.let_go()
 
     def close(self):
+        if self.meter_job:
+            self.after_cancel(self.meter_job)
         if self.letter_up:
             self.after_cancel(self.letter_up)
         if self.held is not None:
