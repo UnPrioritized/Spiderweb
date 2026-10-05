@@ -341,7 +341,7 @@ class SynthKnobs:
                 cb = self.wave_pick = ttk.Combobox(cell, textvariable=self.wave_var, values=self.wave_names,
                                                    state="readonly", width=9)
                 cb.pack(pady=(12, 0))
-                cb.bind("<<ComboboxSelected>>", lambda e: self.on_wave())
+                cb.bind("<<ComboboxSelected>>", lambda e: (self.on_wave(), self.keyboard_back(e.widget)))
                 Tooltip(cb, tr("hz.synth_tip_wave"))
                 col = 1
             if name == "tone":
@@ -409,7 +409,7 @@ class SynthKnobs:
         unit, lo, hi, steps, _ = KINDS[kind]
         if unit:
             ttk.Label(row, text=tr(unit), foreground="#777").pack(side="left", padx=(2, 0))
-        e.bind("<Return>", lambda ev: (self.on_box(key), "break")[1])
+        e.bind("<Return>", lambda ev: (self.on_box(key), self.keyboard_back(e), "break")[2])
         e.bind("<FocusOut>", lambda ev: self.on_box(key))
         Scrub(self.app, [(e, var, lambda: self.on_box(key))], steps, lo, hi, drag_box=True)
         for w in (k, e):
@@ -428,6 +428,13 @@ class SynthKnobs:
             before, self.turning = self.turning, None
             if self.fx.now() != before:
                 self.commit_fx(before)
+
+    def keyboard_back(self, w):
+        """A wave picked / a value typed with Enter: the keyboard back to the window (no blue box left), so the
+        letters play the keys again (user). A value typed wrong keeps it, to be put right."""
+        if str(w.cget("style")) != "Bad.TEntry":
+            w.selection_clear()
+            self.focus_set()
 
     def cancel_turn(self):
         """Ctrl+Z while a knob is held: it goes back to where it was at the press, no undo step (the mouse still

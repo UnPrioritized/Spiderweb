@@ -368,7 +368,8 @@ class SynthWindow(PresetBar, SynthKnobs, tk.Toplevel):
 
     def on_letter(self, e):
         """A letter pressed (not in a box, no Ctrl / Alt): its key plays, held until it's let go; Z / X move them."""
-        if isinstance(e.widget, (tk.Entry, ttk.Entry)) or e.state & NO_LETTERS:
+        typing = isinstance(e.widget, (tk.Entry, ttk.Entry)) and str(e.widget.cget("state")) != "readonly"
+        if typing or e.state & NO_LETTERS:  # (a dropdown with the keyboard: they play, user)
             return None
         k = e.keysym.lower()
         if k in ("z", "x"):
