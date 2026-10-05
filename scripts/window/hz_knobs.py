@@ -106,6 +106,13 @@ def read_volume(win, was):
     every, at = win.loops.get("volume"), win.sustains.get("volume")
     if not every or win.froms.get("volume") != "note" or at is None or "volume" in win.fits:
         return plain, False
+    # as the knobs make it: a rise from 0 first = Attack up to the next point; a fall = up to the last point
+    attack = pts[1][0] if len(pts) > 1 and pts[0][1] == 0.0 and pts[0][2:] == [-FAST] else 0.0
+    attack = min(max(0.0, attack), at)
+    got = {"attack": attack, "decay": at - attack, "sustain": float(line_at(pts, at)),
+           "release": pts[-1][0] - at if pts[-1][0] > at + 1e-9 else 0.0}
+    if same_line(adsr_line(**got)[0], pts) and "volume:amount" not in win.fxl:
+        return got, True
     top = max((p for p in pts if p[0] <= at + 1e-9), key=lambda p: p[1], default=pts[0])  # (the first highest)
     got = {"attack": max(0.0, top[0]), "decay": max(0.0, at - top[0]), "sustain": float(line_at(pts, at)),
            "release": max(0.0, every - at)}
@@ -132,10 +139,11 @@ def read_wave(win, was):
 
 
 def read_pitch(win, was):
-    """The Pitch box: ({amount, time}, made) as read_volume (no Pitch line: Time kept as it was)."""
+    """The Pitch box: ({amount, time}, made) as read_volume (no Pitch line: Time kept as it was, and Amount too while
+    Time is 0: no line then either)."""
     pts = win.fxl.get("pitch")
     if not pts:
-        return {"amount": 0.0, "time": was["time"]}, True
+        return {"amount": was["amount"] if was["time"] <= 0 else 0.0, "time": was["time"]}, True
     every = win.loops.get("pitch")
     got = {"amount": (pts[0][1] - 0.5) * 2 * PITCH, "time": every or was["time"]}
     made = (every and win.froms.get("pitch") == "note" and "pitch" not in win.fits and "pitch" not in win.sustains
@@ -317,14 +325,12 @@ class SynthKnobs:
         self.vals["wave"], self.vals["sweep"] = "none", False
         self.dials, self.dial_vars, self.dial_boxes, self.box_says, self.pics = {}, {}, {}, {}, {}
         self.pic_for = {}  # what each picture was drawn for
+        self.box_text = {}  # what each knob's box was last given to show (different = typed there)
         self.dot_at = None  # where the envelope picture's moving dot is drawn
-        rows = [ttk.Frame(page) for _ in ROWS]
-        for i, row in enumerate(rows):
-            row.pack(fill="x", anchor="w", pady=(0, 8) if i < len(rows) - 1 else 0)
-        where = {name: rows[i] for i, names in enumerate(ROWS) for name in names}
+        self.lines = [ttk.Frame(page) for _ in BOXES]  # (made before the boxes, so the boxes show on top of them)
+        self.boxes, self.laid = {}, None
         for name, knobs in BOXES.items():
-            box = ttk.Labelframe(where[name], text=tr(f"hz.synth_{name}"), padding=(10, 4, 10, 8))
-            box.pack(side="left", anchor="n", padx=(0, 10))
+            box = self.boxes[name] = ttk.Labelframe(page, text=tr(f"hz.synth_{name}"), padding=(10, 4, 10, 8))
             col = 0
             if name == "wave":
                 cell = ttk.Frame(box)
@@ -358,6 +364,30 @@ class SynthKnobs:
             says = self.box_says[name] = ttk.Label(box, text="", foreground=WARN, wraplength=round(size[0] * s))
             says.grid(row=2, column=0, columnspan=col, sticky="w", pady=(6, 0))
             pic.bind("<Configure>", lambda e, says=says: (says.config(wraplength=e.width), self.draw_pics()))
+        self.lay_boxes(math.inf)  # (as wide as they need: the window's size is set from that; then as wide as it is)
+
+    def lay_boxes(self, room):
+        """The boxes in their rows (ROWS); a row too wide for the window goes on in a new row below (user)."""
+        laid = []
+        for names in ROWS:
+            line, used = [], 0
+            for name in names:
+                w = self.boxes[name].winfo_reqwidth() + 10
+                if line and used + w > room:
+                    laid.append(line)
+                    line, used = [], 0
+                line.append(name)
+                used += w
+            laid.append(line)
+        if laid == self.laid:  # (only when it changes: no flashing)
+            return
+        self.laid = laid
+        for f in self.lines + list(self.boxes.values()):  # (all again: each in its row's order)
+            f.pack_forget()
+        for i, names in enumerate(laid):
+            self.lines[i].pack(fill="x", anchor="w", pady=(0, 8) if i < len(laid) - 1 else 0)
+            for name in names:
+                self.boxes[name].pack(in_=self.lines[i], side="left", anchor="n", padx=(0, 10))
 
     def dial_cell(self, box, col, key, kind, start, colour):
         """A knob with its name over it and its value's box under it."""
@@ -390,7 +420,7 @@ class SynthKnobs:
     def on_dial(self, key, k, done):
         """A knob turned (done: let go / one step of the wheel or the keys = one undo step)."""
         if self.turning is None:
-            self.turning = self.fx.state()
+            self.turning, self.turn_vals = self.fx.state(), dict(self.vals)
         self.vals[key] = value_of(KNOBS[key][1], k)
         self.sweep_on(key)
         self.write(KNOBS[key][0])
@@ -399,11 +429,25 @@ class SynthKnobs:
             if self.fx.now() != before:
                 self.commit_fx(before)
 
+    def cancel_turn(self):
+        """Ctrl+Z while a knob is held: it goes back to where it was at the press, no undo step (the mouse still
+        held turns nothing)."""
+        hz = self.hz
+        hz.fxl, hz.loops, hz.off, hz.froms, hz.fits, hz.sustains, hz.lfo = self.turning
+        self.vals, self.turning = self.turn_vals, None
+        for dial in self.dials.values():
+            dial.drag = None
+        self.redraw()
+        self.show_knobs()
+        return True
+
     def on_box(self, key):
         """A value typed (or stepped) in the box under a knob."""
         e, var = self.dial_boxes[key], self.dial_vars[key]
         box, kind, _ = KNOBS[key]
         lo, hi = KINDS[kind][1:3]
+        if var.get() == self.box_text.get(key):  # (nothing typed: the box shows the sound as it is)
+            return e.config(style="TEntry")
         try:
             v = float(calc(var.get()))
             if not lo <= v <= hi:
@@ -412,12 +456,14 @@ class SynthKnobs:
             e.config(style="Bad.TEntry")
             return
         e.config(style="TEntry")
+        self.box_text[key] = var.get()  # (taken: from now on the box shows the sound again)
         v = v / 100 if kind == "percent" else float(round(v)) if kind == "groups" else v
         if abs(v - self.vals[key]) > 1e-9:
             self.sweep_on(key)
             self.change(box, key, v)
         else:  # (as the knob has it: rounded to whole groups)
             var.set(fmt(shown(kind, v)))
+            self.box_text[key] = var.get()
 
     def sweep_on(self, key):
         """Turning one of Sweep's knobs puts it on (its On box ticked)."""
@@ -516,10 +562,13 @@ class SynthKnobs:
             if not self.dials[key].drag and abs(self.dials[key].value - k) > 0.05:
                 self.dials[key].set(k)
             text = fmt(shown(kind, v))
-            e = self.dial_boxes[key]
-            if self.dial_vars[key].get() != text and self.focus_get() is not e:
-                self.dial_vars[key].set(text)
+            e, var = self.dial_boxes[key], self.dial_vars[key]
+            typing = self.focus_get() is e and var.get() != self.box_text.get(key)  # (left as typed)
+            if var.get() != text and not typing:
+                var.set(text)
                 e.config(style="TEntry")
+            if not typing:
+                self.box_text[key] = text
         name = self.wave_names[WAVE_NAMES.index(self.vals["wave"])]
         if self.wave_var.get() != name:
             self.wave_var.set(name)

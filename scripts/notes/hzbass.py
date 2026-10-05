@@ -346,6 +346,7 @@ def sustained(pts, every, at, u, held):
     top = float(line_at(pts, at))
     gone = np.clip(d / fall, 0.0, 1.0) if fall > 1e-12 else np.ones(u.shape)
     after = line_at(pts, at + np.clip(d, 0.0, max(fall, 0.0))) + (line_at(pts, np.minimum(held, at)) - top) * (1 - gone)
+    after = np.clip(after, 0.0, 1.0)  # (a fast fall from high above where the note got to would go under 0)
     return np.where(d < 0, line_at(pts, np.minimum(u, at)), after)
 
 

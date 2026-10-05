@@ -2374,6 +2374,8 @@
  "hz.preset_delete_tip": "Delete this preset of yours (the ones that come with Spiderweb can't be deleted).",
  "hz.preset_delete_title": "Delete preset",
  "hz.preset_delete_ask": "Delete the preset \"{name}\"? The sound you have now stays as it is.",
+ "hz.preset_file_broken": "The file with your presets couldn't be read (it's damaged), so a new one is started. The old one was kept as:\n{path}",
+ "hz.preset_save_failed": "Your presets couldn't be saved, so nothing was changed:\n{path}\n{e}",
  "hz.step_preset": "Preset: {name}",
  "hz.preset_init": "Init (plain)",
  "hz.preset_pluck": "Pluck",

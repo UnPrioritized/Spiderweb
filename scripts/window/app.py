@@ -1517,6 +1517,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             return "break" if self.box_drawn() else self.redo() if redo else self.undo()
         if hz.drag:  # the mouse held there: Ctrl+Z only puts back what's being dragged (no step), Ctrl+Y nothing
             return None if redo else hz.cancel_drag()
+        held = hz.held_fx()  # (the same for an effect's points and the synth window's knobs)
+        if held:
+            return None if redo else held()
         if not redo and hz.pending:  # a slide started: just drop its mark
             hz.pending = None
             return hz.redraw()

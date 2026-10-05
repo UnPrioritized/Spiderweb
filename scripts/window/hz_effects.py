@@ -780,6 +780,19 @@ class FxPane:
         vs = [u for _, u in orig.values()]
         return min(hi, max(lo, db)), min(1.0 - max(vs), max(-min(vs), dv))
 
+    def cancel_drag(self):
+        """Ctrl+Z while the mouse is held here: what's dragged (points, a bend, a line drawn with the pencil) goes
+        back to how it was at the press, no undo step; anything else held: nothing (like the notes' Select box)."""
+        d, win = self.drag, self.win
+        if not d or "before" not in d:
+            return True
+        self.drag, self.says = None, ""
+        win.fxl, win.loops, win.off, win.froms, win.fits, win.sustains, win.lfo = d["before"]
+        self.sel = {(n, i) for n, i in self.sel if n in win.fxl and i < len(win.fxl[n])}
+        self.canvas.config(cursor="")
+        win.redraw()
+        return True
+
     def on_release(self, e):
         d, win = self.drag, self.win
         self.drag = None

@@ -1935,6 +1935,17 @@ class HzWindow(tk.Toplevel):
             self.box_timer = None
         self.drop_drag()
 
+    def held_fx(self):
+        """(Ctrl+Z) What puts back what the mouse holds in an effects pane (here or the synth window's) or on a synth
+        knob; None when nothing is held there."""
+        syn = self.synth_win
+        for pane in (self.fx, syn.fx if syn else None):
+            if pane is not None and pane.drag:
+                return pane.cancel_drag
+        if syn and syn.turning is not None:
+            return syn.cancel_turn
+        return None
+
     def cancel_drag(self):
         """Esc / Ctrl+Z while the mouse is held: the drag is called off. The notes, the selection and the Select
         boxes go back to how they were at the press (user); no undo step. False when there's no drag. A Select box

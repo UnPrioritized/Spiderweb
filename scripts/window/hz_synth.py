@@ -20,6 +20,7 @@ from window.hz_effects import AMOUNT, FxPane
 from window.hz_knobs import SynthKnobs
 from window.hz_live import free_sound_later, keep_sound
 from window.hz_presets import PresetBar
+from window.tool_window import Knob
 
 BLACK = (1, 3, 6, 8, 10)
 KEY_HELD = "#7aa7f0"
@@ -116,7 +117,17 @@ class SynthWindow(PresetBar, SynthKnobs, tk.Toplevel):
             ttk.Radiobutton(tabs, text=tr(f"hz.synth_{key}"), variable=self.page, value=key, style="Toolbutton",
                             command=self.show_page, takefocus=False).pack(side="right")
         self.build_presets(tabs)
-        self.knobs = ttk.Frame(self, padding=(10, 4, 10, 8))
+        self.knobs_box = ttk.Frame(self)  # (the Knobs tab: scrolls when the boxes don't fit, e.g. a small screen)
+        kc = self.knobs_canvas = tk.Canvas(self.knobs_box, highlightthickness=0, bd=0,
+                                           bg=ttk.Style().lookup("TFrame", "background") or "SystemButtonFace")
+        self.knobs_bar = ttk.Scrollbar(self.knobs_box, orient="vertical", command=kc.yview)
+        kc.configure(yscrollcommand=self.knobs_bar.set)
+        kc.pack(side="left", fill="both", expand=True)
+        self.knobs = ttk.Frame(kc, padding=(10, 4, 10, 8))
+        self.knobs_win = kc.create_window(0, 0, window=self.knobs, anchor="nw")
+        kc.bind("<Configure>", lambda e: self.fit_knobs())
+        self.knobs.bind("<Configure>", lambda e: self.after_idle(self.fit_knobs))
+        self.bind("<MouseWheel>", self.knobs_wheel, add="+")
         self.fx = SynthPane(self, hz)
         self.build_knobs(self.knobs)
         self.canvas = self.fx.canvas
@@ -136,17 +147,43 @@ class SynthWindow(PresetBar, SynthKnobs, tk.Toplevel):
             c.bind(key, lambda e: (self.fx.paste_points(), "break")[1])
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.show_page()
-        self.update_idletasks()  # (as wide and tall as the knobs need, at least enough for the effects' names)
-        self.geometry(f"{max(round(1000 * s), self.knobs.winfo_reqwidth())}x"
-                      f"{max(self.winfo_reqheight(), names_h + round(160 * s))}")
+        self.update_idletasks()  # (as wide and tall as the knobs need, at least enough for the effects' names; a
+        w = min(max(round(1000 * s), self.knobs.winfo_reqwidth()), self.winfo_screenwidth() - 40)  # small screen:
+        self.lay_boxes(w - 20)  # as wide as it is, the boxes in more rows, and the Knobs tab scrolls)
+        self.update_idletasks()
+        need = self.winfo_reqheight() - kc.winfo_reqheight() + self.knobs.winfo_reqheight()
+        h = min(max(need, names_h + round(160 * s)), self.winfo_screenheight() - 80)
+        self.geometry(f"{w}x{h}")
 
     def show_page(self):
         """The Knobs or the Lines tab shown."""
         knobs = self.page.get() == "knobs"
-        (self.canvas if knobs else self.knobs).pack_forget()
-        (self.knobs if knobs else self.canvas).pack(fill="both", expand=True)
+        (self.canvas if knobs else self.knobs_box).pack_forget()
+        (self.knobs_box if knobs else self.canvas).pack(fill="both", expand=True)
         self.show_status()
         self.show_knobs()
+
+    def fit_knobs(self):
+        """The Knobs tab: the boxes in rows as wide as the window, a scrollbar when they're taller than it."""
+        c = self.knobs_canvas
+        if not self.winfo_exists() or c.winfo_width() < 50:
+            return
+        self.lay_boxes(c.winfo_width() - 20)
+        need, have = self.knobs.winfo_reqheight(), c.winfo_height()
+        c.itemconfigure(self.knobs_win, width=c.winfo_width(), height=max(need, have))
+        c.configure(scrollregion=(0, 0, c.winfo_width(), max(need, have)))
+        if need > have + 1:
+            if not self.knobs_bar.winfo_ismapped():
+                self.knobs_bar.pack(side="right", fill="y", before=c)
+        elif self.knobs_bar.winfo_ismapped():
+            self.knobs_bar.pack_forget()
+            c.yview_moveto(0)
+
+    def knobs_wheel(self, e):
+        """The mouse wheel over the Knobs tab scrolls it when it's too tall (not over a knob or a box: they turn)."""
+        if (str(e.widget).startswith(str(self.knobs_canvas)) and self.knobs_bar.winfo_ismapped()
+                and not isinstance(e.widget, (Knob, tk.Entry, ttk.Entry))):
+            self.knobs_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
 
     # ------------------------------------------------------------ the Hz bass window's lines (the pane works on these)
 

@@ -55,19 +55,53 @@ OURS = {  # our own presets: id -> the sound (made as the knobs make it)
 }
 
 
-def load_presets():
-    """The user's saved presets [{"name", "sound"}] (a broken file or entry: left out)."""
+def read_file():
+    """The file's entries as they are ([] without a file), None when it can't be read (broken)."""
+    if not os.path.exists(PRESETS_FILE):
+        return []
     try:
         with open(PRESETS_FILE, encoding="utf-8") as f:
-            data = json.load(f)
-        return [{"name": str(p["name"]), "sound": dict(p["sound"])} for p in data.get("presets", [])
-                if isinstance(p, dict) and str(p.get("name", "")).strip() and isinstance(p.get("sound"), dict)]
-    except (OSError, ValueError, TypeError, KeyError, AttributeError):
-        return []
+            items = json.load(f).get("presets", [])
+        return items if isinstance(items, list) else None
+    except (OSError, ValueError, AttributeError):
+        return None
 
 
-def save_presets(items):
-    write_text(PRESETS_FILE, json.dumps({"presets": items}, indent=1))
+def good(p):
+    return isinstance(p, dict) and str(p.get("name", "")).strip() and isinstance(p.get("sound"), dict)
+
+
+def load_presets():
+    """The user's saved presets [{"name", "sound"}] (a broken file or entry: left out)."""
+    return [{"name": str(p["name"]), "sound": dict(p["sound"])} for p in read_file() or () if good(p)]
+
+
+def same_name(p, name):
+    """A file entry with this name (capitals or not: one preset)."""
+    return isinstance(p, dict) and str(p.get("name", "")).strip().casefold() == name.casefold()
+
+
+def change_presets(name, sound, parent):
+    """The user's preset `name` replaced by `sound` (None: deleted), every other entry in the file kept as it is. A
+    file that can't be read is kept aside first (hz_presets-broken.json, said), so nothing in it is lost. False (and
+    said) when the file can't be written."""
+    items = read_file()
+    try:
+        if items is None:
+            broken = os.path.splitext(PRESETS_FILE)[0] + "-broken.json"
+            os.replace(PRESETS_FILE, broken)
+            messagebox.showwarning(tr("hz.preset_save_title"), tr("hz.preset_file_broken", path=broken),
+                                   parent=parent)
+            items = []
+        items = [p for p in items if not same_name(p, name)]
+        if sound is not None:
+            items.append({"name": name, "sound": sound})
+        write_text(PRESETS_FILE, json.dumps({"presets": items}, indent=1))
+    except OSError as e:
+        messagebox.showerror(tr("hz.preset_save_title"), tr("hz.preset_save_failed", path=PRESETS_FILE, e=e),
+                             parent=parent)
+        return False
+    return True
 
 
 class PresetBar:
@@ -154,10 +188,9 @@ class PresetBar:
                 break
             prompt = tr("hz.preset_name_taken", name=name)
         sound = self.hz.fx_settings()
-        items = [p for p in load_presets() if p["name"] != name]
-        items.append({"name": name, "sound": sound})
-        save_presets(items)
-        self.yours = items
+        if not change_presets(name, sound, self):
+            return
+        self.yours = load_presets()
         key = ("yours", name)
         self.preset_canon.pop(key, None)
         self.preset = (key, name, self.canon(key, sound))
@@ -169,8 +202,9 @@ class PresetBar:
         name = self.preset[1]
         if not messagebox.askyesno(tr("hz.preset_delete_title"), tr("hz.preset_delete_ask", name=name), parent=self):
             return
-        self.yours = [p for p in load_presets() if p["name"] != name]
-        save_presets(self.yours)
+        if not change_presets(name, None, self):
+            return
+        self.yours = load_presets()
         self.preset = None
         self.show_preset()
 
