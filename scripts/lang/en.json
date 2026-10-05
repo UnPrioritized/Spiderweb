@@ -254,7 +254,6 @@
  "colours.unit_step": "steps",
  "colours.unit_key": "keys",
  "colours.unit_time": "note",
- "colours.every_mixed": "The selected shapes change colour in different ways (by step, key or time). Pick one way in the Colours box to set this.",
  "colours.tip": "The notes take turns over several channels, so the colour changes with each turn (which colours you see depends on the program showing the MIDI).\nBy step: each step the next channel (spam: each gate column; lines: each note in time).\nBy key: each key the next channel (rows).\nBy time: a note length from the start of the song, like the snap (1/4 = a beat), so it lines up with the bar lines.\nChannels: how many take turns. Every: how long one channel lasts.\nNeeds Channels: Multi channel.",
  "colours.needs": "\n\nChannels isn't Multi channel now: all its notes are in one channel, so the colour doesn't change.",
  "panel_custom.hz_bass": "Hz bass",

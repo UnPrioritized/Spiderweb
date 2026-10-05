@@ -6,7 +6,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc
 from notes.custom import CYCLE_MAX, CYCLES
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged, mixed_tip
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
 
 CYCLE_CHOICES = [(None, tr("colours.off"))] + [(v, tr("colours." + v)) for v in CYCLES]
 EVERY_MAX = 10 ** 4
@@ -65,22 +65,27 @@ class ColoursPanel:
         kinds = {t["cycle"]["by"] for t in tgts if t.get("cycle")}
         return kinds.pop() if len(kinds) == 1 else None
 
+    def mixed_kinds(self, tgts):
+        """Do the targets count differently (Off counts too)? Then only the dropdown works (user: the channels box
+        changed only the ones with Colours on)."""
+        return len({t["cycle"]["by"] if t.get("cycle") else None for t in tgts}) > 1
+
     def sync_colours(self):
         """Several shapes with different settings: the dropdown says Mixed, a number box is left empty (shared
-        widgets.same_or_blank). The every row only works when all the ones with Colours count the same way."""
+        widgets.same_or_blank). Different kinds (or some Off): the channels box greyed and empty, no every row,
+        until a kind is picked for all of them (user)."""
         tgts = self.colour_targets()
         on = [t["cycle"] for t in tgts if t.get("cycle")]
         cy = on[0] if on else None
         by = self.cycle_kind(tgts)
+        mixed = self.mixed_kinds(tgts)
         self._loading = True
         self.cycle_box.current(1 + CYCLES.index(cy["by"]) if cy else 0)
-        same_or_blank(self.cycle_n_entry, self.cycle_n_var, [c["n"] for c in on] or [4])
-        every = [c["every"] for c in on if c["by"] == by] or ([] if on else [1])
+        same_or_blank(self.cycle_n_entry, self.cycle_n_var, [] if mixed else [c["n"] for c in on] or [4])
+        every = [c["every"] for c in on if c["by"] == by] or [1]
         parts = [[x[0] for x in every], [x[1] for x in every]] if by == "time" else [every, [4]]
         for e, var, values in zip(self.cycle_entries, self.cycle_vars, parts):
             same_or_blank(e, var, values)
-            if on and not by:
-                mixed_tip(e).text = tr("colours.every_mixed")
         self._loading = False
         time = by == "time"
         if time != bool(self.cycle_slash.winfo_manager()):  # By time: a second box, "a / b note"
@@ -94,19 +99,22 @@ class ColoursPanel:
         lonely = bool(cy) and self.channel_mode.get() != "auto"
         self.cycle_box.config(state="readonly" if tgts else "disabled",
                               style="Gap.TCombobox" if lonely else "TCombobox")
-        kinds = {t["cycle"]["by"] if t.get("cycle") else None for t in tgts}  # (Off too)
-        show_mixed(self.cycle_box, len(kinds) > 1, self.cycle_tip,
-                    tr("colours.tip") + (tr("colours.needs") if lonely else ""))
+        show_mixed(self.cycle_box, mixed, self.cycle_tip, tr("colours.tip") + (tr("colours.needs") if lonely else ""))
         for e in [self.cycle_n_entry] + self.cycle_entries:
-            e.config(state="normal" if cy and (by or e is self.cycle_n_entry) else "disabled", style="TEntry")
-        if bool(cy) != bool(self.cycle_every_row.winfo_manager()):
+            e.config(state="normal" if cy and not mixed else "disabled", style="TEntry")
+        if bool(cy) != bool(self.cycle_n_entry.winfo_manager()):
             if cy:
                 self.cycle_n_label.pack(side="left")
                 self.cycle_n_entry.pack(side="left", padx=(4, 0))
+            else:
+                for w in (self.cycle_n_label, self.cycle_n_entry):
+                    w.pack_forget()
+        row = bool(cy) and not mixed
+        if row != bool(self.cycle_every_row.winfo_manager()):
+            if row:
                 self.cycle_every_row.pack(anchor="w", padx=(20, 0), pady=(1, 0))
             else:
-                for w in (self.cycle_n_label, self.cycle_n_entry, self.cycle_every_row):
-                    w.pack_forget()
+                self.cycle_every_row.pack_forget()
 
     def on_cycle(self, what, left=None):
         """The Colours dropdown (what = "by") or one of its number boxes ("n" = channels, "every"). Only what was
@@ -115,6 +123,8 @@ class ColoursPanel:
         that was left (or the selection is about to change, App.commit_typing): nothing unless its number changed."""
         if (self._loading or str(self.cycle_box.cget("state")) == "disabled"
                 or left is not None and unchanged(left)):
+            return
+        if what != "by" and self.mixed_kinds(self.colour_targets()):  # (only the dropdown then, user)
             return
         by = CYCLE_CHOICES[max(self.cycle_box.current(), 0)][0]
 
