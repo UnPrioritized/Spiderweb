@@ -205,6 +205,7 @@ class SynthWindow(PresetBar, SynthKnobs, tk.Toplevel):
     fits = property(lambda self: self.hz.fits, lambda self, v: setattr(self.hz, "fits", v))
     sustains = property(lambda self: self.hz.sustains, lambda self, v: setattr(self.hz, "sustains", v))
     lfo = property(lambda self: self.hz.lfo, lambda self, v: setattr(self.hz, "lfo", v))
+    voice = property(lambda self: self.hz.voice, lambda self, v: setattr(self.hz, "voice", v))
     off = property(lambda self: self.hz.off, lambda self, v: setattr(self.hz, "off", v))
 
     def snap(self, beat, e):

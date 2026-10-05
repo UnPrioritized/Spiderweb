@@ -351,15 +351,15 @@ class FxPane:
 
     def now(self):
         """The lines, repeats, effects switched off, those counted from each note, those stretched, their sustain
-        points and the synth window's vibrato / tremolo settings, as they are now."""
+        points and the synth window's vibrato / tremolo and Voice settings, as they are now."""
         return (self.win.fxl, self.win.loops, self.win.off, self.win.froms, self.win.fits, self.win.sustains,
-                self.win.lfo)
+                self.win.lfo, self.win.voice)
 
     def hz_now(self):
         """The notes and effects here as a Hz bass's settings (enough for the hzbass functions)."""
         win = self.win
         return {"tones": win.tones, "fx": {k: v for k, v in win.fxl.items() if k in FX}, "loop": win.loops,
-                "off": win.off, "from": win.froms, "fit": win.fits, "sustain": win.sustains, "lfo": win.lfo}
+                "off": win.off, "from": win.froms, "fit": win.fits, "sustain": win.sustains, "lfo": win.lfo, "voice": win.voice}
 
     def tidy(self):
         """A sustain point always sits on a point of its line: one put back where it is when its point went (drawn
@@ -787,7 +787,7 @@ class FxPane:
         if not d or "before" not in d:
             return True
         self.drag, self.says = None, ""
-        win.fxl, win.loops, win.off, win.froms, win.fits, win.sustains, win.lfo = d["before"]
+        win.fxl, win.loops, win.off, win.froms, win.fits, win.sustains, win.lfo, win.voice = d["before"]
         self.sel = {(n, i) for n, i in self.sel if n in win.fxl and i < len(win.fxl[n])}
         self.canvas.config(cursor="")
         win.redraw()

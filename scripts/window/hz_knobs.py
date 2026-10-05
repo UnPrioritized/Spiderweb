@@ -8,8 +8,9 @@ made shows them about where it is (with a note); turning one makes new lines fro
   Tremolo (LFO 2): Rate = the Tremolo line (its value is how fast), Depth (hz["lfo"]).
   Tone: Sweep (on / off) from Start to End in Time = the Sweep line once per note; Wah = its line, flat.
   Character: Slant, Groups, Off pitch, Noisy = their lines, flat.
+  Voice: Voices, Detune, Voices on (split / same keys), Glide, Only notes that touch = hz["voice"] (not lines).
 Each box has a picture: the envelope (with a dot while a key sounds), one wave's hits (the notes), the pitch, the
-wobbles over two beats, which keys are loud over time, the keys' notes over four waves."""
+wobbles over two beats, which keys are loud over time, the keys' notes over four waves, the copies' tones and a glide."""
 
 import math
 import tkinter as tk
@@ -19,8 +20,8 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.hzbass import (FAST, GROUPS, LOOP, OFF_PITCH, PITCH, SOFT, SUB, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE, WAH,
-                          WAVES, group_count, line_at)
+from notes.hzbass import (DETUNE, FAST, GROUPS, LOOP, OFF_PITCH, PITCH, SOFT, SUB, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE,
+                          VOICES, WAH, WAVES, clean_voice, copies, group_count, line_at)
 from window.hz_effects import AMOUNT, FX_COLOR
 from window.tool_window import Knob
 from window.widgets import Scrub, Tooltip
@@ -35,7 +36,9 @@ KINDS = {"time": ("hz.synth_beats", 0.0, TIME_MOST, (0.05, 0.25, 0.01), TIME_KNO
          "keys": ("hz.synth_keys", -PITCH, PITCH, (1, 3, 0.1), None),
          "vib_rate": ("hz.synth_a_beat", 0.0, 64.0, (0.1, 1, 0.01), 10.0),
          "trem_rate": ("hz.synth_a_beat", 0.0, TREMOLO, (0.1, 1, 0.01), TREMOLO),
-         "groups": (None, 1.0, float(GROUPS), (1, 1, 1), None)}
+         "groups": (None, 1.0, float(GROUPS), (1, 1, 1), None),
+         "voices": (None, 1.0, float(VOICES), (1, 1, 1), None),
+         "cents": ("hz.synth_cents", 0.0, DETUNE, (1, 10, 0.1), None)}
 # the boxes and their knobs: (knob, kind, value at the start / a middle-click); rows of boxes
 BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain", "percent", 1.0),
                     ("release", "time", 0.0)),
@@ -47,14 +50,15 @@ BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain",
          "tone": (("sweep_start", "percent", 1.0), ("sweep_end", "percent", 0.0), ("sweep_time", "time", 1.0),
                   ("wah", "percent", 0.0)),
          "character": (("slant", "percent", 0.0), ("groups", "groups", 1.0), ("offpitch", "percent", 0.0),
-                       ("noisy", "percent", 0.0))}
-ROWS = (("volume", "wave", "pitch", "tone"), ("vibrato", "tremolo", "character"))
+                       ("noisy", "percent", 0.0)),
+         "voice": (("voices", "voices", 1.0), ("detune", "cents", 20.0), ("glide", "time", 0.0))}
+ROWS = (("volume", "wave", "pitch", "tone"), ("vibrato", "tremolo", "character", "voice"))
 KNOBS = {key: (box, kind, start) for box, knobs in BOXES.items() for key, kind, start in knobs}
 COLOURS = {"volume": FX_COLOR["volume"], "wave": FX_COLOR["sine"], "pitch": FX_COLOR["pitch"],
            "vibrato": FX_COLOR["vibrato"], "tremolo": FX_COLOR["tremolo"], "tone": FX_COLOR["sweep"],
-           "character": FX_COLOR["slant"]}
+           "character": FX_COLOR["slant"], "voice": "#3a6ee0"}
 PICTURES = {"volume": (260, 90), "wave": (200, 90), "pitch": (150, 90), "vibrato": (230, 60), "tremolo": (150, 60),
-            "tone": (200, 90), "character": (220, 60)}
+            "tone": (200, 90), "character": (220, 60), "voice": (230, 60)}
 CHARACTER = ("slant", "offpitch", "noisy")  # (the Character box's lines that are just their value; Groups is counted)
 WAVE_NAMES = ("none",) + tuple(WAVES)
 
@@ -229,8 +233,19 @@ def read_character(win, was):
     return got, made
 
 
+def read_voice(win, was):
+    """The Voice box: ({voices, detune, same, glide, touching}, True): its own settings, not lines (one voice:
+    Detune and Voices on kept as they were; no glide: Only notes that touch too)."""
+    v = win.voice
+    n = v.get("voices", 1)
+    got = {"voices": float(n), "detune": v["detune"] if n > 1 else was["detune"],
+           "same": bool(v.get("same")) if n > 1 else was["same"], "glide": v.get("glide", 0.0),
+           "touching": bool(v.get("touching")) if v.get("glide") else was["touching"]}
+    return got, True
+
+
 READ = {"volume": read_volume, "wave": read_wave, "pitch": read_pitch, "vibrato": read_vibrato,
-        "tremolo": read_tremolo, "tone": read_tone, "character": read_character}
+        "tremolo": read_tremolo, "tone": read_tone, "character": read_character, "voice": read_voice}
 
 
 class Dial(Knob):
@@ -294,8 +309,10 @@ def knob_of(kind, v):
         return min(100.0, 100 * math.sqrt(max(0.0, v) / most))
     if kind == "keys":
         return max(-100.0, min(100.0, 100 * v / PITCH))
-    if kind == "groups":
-        return 100 * (v - 1) / (GROUPS - 1)
+    if kind in ("groups", "voices"):
+        return 100 * (v - 1) / (KINDS[kind][2] - 1)
+    if kind == "cents":
+        return 100 * v / DETUNE
     return 100 * v
 
 
@@ -306,8 +323,10 @@ def value_of(kind, k):
         return round(most * (k / 100) ** 2, 3)
     if kind == "keys":
         return float(round(PITCH * k / 100))
-    if kind == "groups":
-        return float(round(1 + (GROUPS - 1) * k / 100))
+    if kind in ("groups", "voices"):
+        return float(round(1 + (KINDS[kind][2] - 1) * k / 100))
+    if kind == "cents":
+        return round(DETUNE * k / 100, 1)
     return k / 100
 
 
@@ -323,6 +342,7 @@ class SynthKnobs:
         self.turning = None  # while a knob is turned: the lines from before (FxPane.state)
         self.vals = {key: start for key, (_, _, start) in KNOBS.items()}
         self.vals["wave"], self.vals["sweep"] = "none", False
+        self.vals["same"], self.vals["touching"] = False, False
         self.dials, self.dial_vars, self.dial_boxes, self.box_says, self.pics = {}, {}, {}, {}, {}
         self.pic_for = {}  # what each picture was drawn for
         self.box_text = {}  # what each knob's box was last given to show (different = typed there)
@@ -357,6 +377,9 @@ class SynthKnobs:
             for key, kind, start in knobs:
                 self.dial_cell(box, col, key, kind, start, COLOURS[name])
                 col += 1
+                if key in ("detune", "glide"):  # (Voices on after the copies' knobs, the tick box after Glide)
+                    self.voice_cell(box, col, key)
+                    col += 1
             size = PICTURES[name]
             pic = self.pics[name] = tk.Canvas(box, width=round(size[0] * s), height=round(size[1] * s),
                                               background="white", highlightthickness=1, highlightbackground="#ccc")
@@ -388,6 +411,28 @@ class SynthKnobs:
             self.lines[i].pack(fill="x", anchor="w", pady=(0, 8) if i < len(laid) - 1 else 0)
             for name in names:
                 self.boxes[name].pack(in_=self.lines[i], side="left", anchor="n", padx=(0, 10))
+
+    def voice_cell(self, box, col, after):
+        """The Voice box's Voices on dropdown (after Detune) or its Only notes that touch tick box (after Glide)."""
+        cell = ttk.Frame(box)
+        cell.grid(row=0, column=col, padx=6, sticky="n")
+        if after == "detune":
+            ttk.Label(cell, text=tr("hz.synth_voices_on")).pack()
+            self.same_names = [tr("hz.synth_voices_split"), tr("hz.synth_voices_same")]
+            self.same_var = tk.StringVar(value=self.same_names[0])
+            cb = ttk.Combobox(cell, textvariable=self.same_var, values=self.same_names, state="readonly", width=10)
+            cb.pack(pady=(12, 0))
+            cb.bind("<<ComboboxSelected>>", lambda e: (
+                self.change("voice", "same", self.same_names.index(self.same_var.get()) == 1),
+                self.keyboard_back(e.widget)))
+            Tooltip(cb, tr("hz.synth_tip_voices_on"))
+        else:
+            ttk.Label(cell, text="").pack()
+            self.touching_var = tk.BooleanVar(value=False)
+            cb = ttk.Checkbutton(cell, text=tr("hz.synth_touching"), variable=self.touching_var,
+                                 command=lambda: self.change("voice", "touching", self.touching_var.get()))
+            cb.pack(pady=(14, 0))
+            Tooltip(cb, tr("hz.synth_tip_touching"))
 
     def dial_cell(self, box, col, key, kind, start, colour):
         """A knob with its name over it and its value's box under it."""
@@ -439,7 +484,7 @@ class SynthKnobs:
         """Ctrl+Z while a knob is held: it goes back to where it was at the press, no undo step (the mouse still
         held turns nothing)."""
         hz = self.hz
-        hz.fxl, hz.loops, hz.off, hz.froms, hz.fits, hz.sustains, hz.lfo = self.turning
+        hz.fxl, hz.loops, hz.off, hz.froms, hz.fits, hz.sustains, hz.lfo, hz.voice = self.turning
         self.vals, self.turning = self.turn_vals, None
         for dial in self.dials.values():
             dial.drag = None
@@ -464,7 +509,7 @@ class SynthKnobs:
             return
         e.config(style="TEntry")
         self.box_text[key] = var.get()  # (taken: from now on the box shows the sound again)
-        v = v / 100 if kind == "percent" else float(round(v)) if kind == "groups" else v
+        v = v / 100 if kind == "percent" else float(round(v)) if kind in ("groups", "voices") else v
         if abs(v - self.vals[key]) > 1e-9:
             self.sweep_on(key)
             self.change(box, key, v)
@@ -518,6 +563,9 @@ class SynthKnobs:
                 if every:
                     self.loops["vibrato"], self.froms["vibrato"] = every, "note"
             self.set_lfo("vibrato_rate", v["vibrato_rate"], VIBRATO_RATE)
+        elif box == "voice":
+            self.voice = clean_voice({"voices": int(v["voices"]), "detune": v["detune"], "same": v["same"],
+                                      "glide": v["glide"], "touching": v["touching"]})
         elif box == "tremolo":
             fx.drop("tremolo")
             if v["tremolo_rate"] > 0:
@@ -581,6 +629,11 @@ class SynthKnobs:
             self.wave_var.set(name)
         if self.sweep_var.get() != self.vals["sweep"]:
             self.sweep_var.set(self.vals["sweep"])
+        name = self.same_names[int(self.vals["same"])]
+        if self.same_var.get() != name:
+            self.same_var.set(name)
+        if self.touching_var.get() != self.vals["touching"]:
+            self.touching_var.set(self.vals["touching"])
         self.draw_pics()
         self.show_preset()
 
@@ -589,7 +642,9 @@ class SynthKnobs:
         for box, knobs in BOXES.items():
             c = self.pics[box]
             key = (tuple(self.vals[k] for k, _, _ in knobs), self.vals["wave"] if box == "wave" else None,
-                   self.vals["sweep"] if box == "tone" else None, c.winfo_width(), c.winfo_height())
+                   self.vals["sweep"] if box == "tone" else None,
+                   (self.vals["same"], self.vals["touching"]) if box == "voice" else None, c.winfo_width(),
+                   c.winfo_height())
             if c.winfo_width() < 50 or self.pic_for.get(box) == key:
                 continue
             self.pic_for[box] = key
@@ -771,6 +826,43 @@ class SynthKnobs:
                 if b > a:
                     c.create_rectangle(pad + a * sx, y + rh * 0.15, pad + b * sx, y + rh * 0.85,
                                        fill=COLOURS["character"], outline="")
+
+    def draw_voice(self, c):
+        """Left: eight of the shape's keys (the highest at the top) and the copies they play, each copy at its tone
+        (the middle line = the note's own); right: a note gliding in from a lower one before it (Glide)."""
+        s, v = self.s, self.vals
+        w, h, pad = c.winfo_width(), c.winfo_height(), 6 * s
+        colour, font = COLOURS["voice"], ("Segoe UI", 7)
+        split = w * 0.45
+        n = int(v["voices"])
+        cents = copies({"voice": clean_voice({"voices": n, "detune": v["detune"]})})
+        keys, rh = 8, (h - 2 * pad) / 8
+
+        def x_of(c_):  # (a copy's tone: the note's own in the middle, half the most Detune each way)
+            return pad + (split - 2 * pad) * (0.5 + c_ / DETUNE)
+        c.create_line(x_of(0.0), pad, x_of(0.0), h - pad, fill="#e4e4e4", dash=(3, 3))
+        for c_ in cents:
+            c.create_line(x_of(c_), pad, x_of(c_), h - pad, fill="#d6def6")
+        r = max(2.0, min(rh * 0.35, 4 * s))
+        for i in range(keys):
+            y = h - pad - (i + 0.5) * rh
+            for c_ in (cents if v["same"] else [cents[i % len(cents)]]):
+                c.create_rectangle(x_of(c_) - r, y - r, x_of(c_) + r, y + r, fill=colour, outline="")
+        says = (tr("hz.synth_voice_notes", n=n) if v["same"] else tr("hz.synth_voice_no_extra")) if n > 1 else ""
+        c.create_text(split - 3 * s, 1 * s, text=says, anchor="ne", fill="#777", font=font)
+        c.create_line(split, pad, split, h - pad, fill="#ddd")
+        # the glide: a note a beat long, then one 5 keys up, touching
+        x0, x1 = split + pad, w - pad
+        lo, hi = h - pad - (h - 2 * pad) * 0.2, pad + (h - 2 * pad) * 0.2
+        mid = (x0 + x1) / 2
+        for a, b, y in ((x0, mid, lo), (mid, x1, hi)):
+            c.create_rectangle(a + 1, y - 2 * s, b - 1, y + 2 * s, fill="#eeeeee", outline="")
+        g = min(v["glide"], 1.0)
+        u = np.linspace(0.0, 1.0, 40)
+        xy = [(x0, lo), (mid, lo)] + [(mid + q * g * (x1 - mid), hi + (lo - hi) * (1 - q) ** 2) for q in u]
+        xy.append((x1, hi))
+        c.create_line(*[q for p in xy for q in p], fill=colour, width=max(2, round(2 * s)))
+        c.create_text(x1, 1 * s, text=tr("hz.synth_glide"), anchor="ne", fill="#999", font=font)
 
     def draw_adsr_dot(self):
         """While a key sounds: a dot on the envelope's picture, waiting at the sustain point while it's held, down

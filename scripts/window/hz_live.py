@@ -35,7 +35,7 @@ AHEAD = 1.0  # seconds of notes whose recordings are asked for ahead
 FIRST = 8.0  # beats of a held note made at first (doubled when it's held near the end of them)
 TICK_MS = 40
 FREE_MS = 60000  # the recordings are freed this long after the synth window closes (user)
-HZ_KEYS = ("tones", "fx", "loop", "off", "amount", "from", "fit", "sustain", "lfo", "grow", "own")
+HZ_KEYS = ("tones", "fx", "loop", "off", "amount", "from", "fit", "sustain", "lfo", "voice", "grow", "own")
 
 
 def quick_sound(app):

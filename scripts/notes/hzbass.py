@@ -72,8 +72,14 @@ Waveforms ("sine", "square", "saw", "triangle"): every key hits SUB times in eac
 hard each of those hits is follows the shape drawn over one wave (WAVES), which takes overtones out of the tone
 (measured: sine leaves almost only the lowest, square and triangle take out every second one, saw tilts them).
 The value goes from the plain tone (0: one hit a wave) to the whole shape (1); hits too soft to matter are left
-out, so the note count grows with the value, up to SUB times as many."""
+out, so the note count grows with the value, up to SUB times as many.
+hz["voice"] = the synth window's Voice box (not lines; clean_voice): {"voices": copies of the sound (2..VOICES),
+"detune": cents between the lowest and the highest copy, their tones spread evenly between, "same": True = every key
+plays every copy (as many times the notes) instead of each key one copy in turn (no extra notes), "glide": beats a
+note takes to glide in from the tone of the note before it (glides), "touching": True = only from a note that ends
+where it starts}. Glide only bends the tone: each note still starts its effects over, like a synth's voices."""
 
+import bisect
 import functools
 import json
 import math
@@ -117,6 +123,9 @@ FAST = 0.5  # their bend: fast first, then settling ((1 - u)^2, the drop the use
 GROUPS = 6  # "groups" at 1
 PITCH = 12.0  # "pitch": keys up at 1 (and down at 0; 0.5 = the tone as placed)
 OFF_PITCH = 0.02  # "offpitch" at 1: the highest key's tone is this much (x the tone) below the lowest key's
+VOICES = 8  # hz["voice"]: the most copies
+DETUNE = 100.0  # ... the most cents between the lowest and the highest copy
+GLIDE = 64.0  # ... the longest glide, in beats
 
 
 def group_count(value):
@@ -202,6 +211,40 @@ def clean_lfo(lfo):
         if math.isfinite(v):
             out[key] = min(hi, max(lo, v))
     return out
+
+
+def clean_voice(voice):
+    """The Voice box's settings checked (hz["voice"], see the docstring): only what does something (one copy: no
+    detune; no glide: no "touching")."""
+    voice = voice if isinstance(voice, dict) else {}
+    out = {}
+
+    def num(key, plain):  # (one that's no good: as if it weren't there)
+        try:
+            v = float(voice.get(key, plain))
+        except (TypeError, ValueError):
+            return plain
+        return v if math.isfinite(v) else plain
+    n, detune, glide = int(num("voices", 1.0)), num("detune", 0.0), num("glide", 0.0)
+    if n >= 2:
+        out["voices"] = min(VOICES, n)
+        out["detune"] = min(DETUNE, max(0.0, detune))
+        if voice.get("same") is True:
+            out["same"] = True
+    if glide > 0:
+        out["glide"] = min(GLIDE, glide)
+        if voice.get("touching") is True:
+            out["touching"] = True
+    return out
+
+
+def copies(hz):
+    """The tones of the Voice box's copies, in cents from the note's (one copy: [0])."""
+    v = hz.get("voice") or {}
+    n = v.get("voices", 1)
+    if n < 2:
+        return [0.0]
+    return [v["detune"] * (i / (n - 1) - 0.5) for i in range(n)]
 
 
 def clean_sustain(sustain, loop, froms, fit):
@@ -461,7 +504,8 @@ def old_fx(tones):
 
 
 def has_fx(hz):
-    return bool(hz.get("fx")) and bool(hz.get("tones"))
+    """True when every key needs its own repeats (KeyGrid): placed tones with effects, or several copies (Voice)."""
+    return (bool(hz.get("fx")) or len(copies(hz)) > 1) and bool(hz.get("tones"))
 
 
 def clean_tones(tones):
@@ -559,6 +603,9 @@ def clean_hz(hz):
     lfo = clean_lfo(hz.get("lfo") or {}) if isinstance(hz.get("lfo") or {}, dict) else {}
     if lfo:
         out["lfo"] = lfo
+    voice = clean_voice(hz.get("voice"))
+    if voice:
+        out["voice"] = voice
     if tones:
         out["tones"] = tones
         for flag in ("grow", "own"):
@@ -604,6 +651,42 @@ def glide(a, b, s):
     """A slide as (start beat, end beat, pitch at the start, pitch at the end): it leaves a's tone `out` before
     a's end and reaches b's tone `in` after b's start."""
     return a["t"] + a["len"] - min(s["out"], a["len"]), b["t"] + min(s["in"], b["len"]), pitch(a), pitch(b)
+
+
+def glides(hz):
+    """{tone id: [pitch it glides in from, ...]} with Glide on (hz["voice"]): a note glides in from the note(s)
+    that ended last before it starts ("touching": only when they end right where it starts), like the slides made
+    by hand: one to a chord, several to one, chord to chord none. Not into a note a slide reaches, nor from the same
+    pitch."""
+    voice = hz.get("voice") or {}
+    tones = hz.get("tones") or ()
+    if not voice.get("glide") or len(tones) < 2:
+        return {}
+    slid = {b["id"] for _, b, _ in links(tones)}
+    ended = sorted(tones, key=lambda n: n["t"] + n["len"])
+    ends = [n["t"] + n["len"] for n in ended]
+    out, i = {}, 0
+    order = sorted(tones, key=lambda n: n["t"])
+    while i < len(order):
+        t = order[i]["t"]
+        j = i
+        while j < len(order) and order[j]["t"] <= t + 1e-9:
+            j += 1
+        chord, i = order[i:j], j
+        k = bisect.bisect_right(ends, t + 1e-9)
+        if not k or (voice.get("touching") and ends[k - 1] < t - 1e-9):
+            continue
+        last, before = ends[k - 1], []
+        while k and ends[k - 1] >= last - 1e-9:
+            before.append(ended[k - 1])
+            k -= 1
+        if len(before) > 1 and len(chord) > 1:
+            continue
+        for b in chord:
+            got = [pitch(a) for a in before if abs(pitch(a) - pitch(b)) > 1e-9]
+            if got and b["id"] not in slid:
+                out[b["id"]] = got
+    return out
 
 
 def wave(hz, ppq, key, limit=None, whole=None):
@@ -671,13 +754,25 @@ def tone_runs(hz, left, ppq):
     = the next one's start, whose: (tone, None) or (tone slid from, tone slid to))], not rounded. A tone held is
     one stretch, from where the first slide into it arrives to where the last slide out of it leaves; every slide
     is one more (two when there's a gap between its tones: nothing sounds there), its waves in step with the tone
-    it leaves. A tone a chain ends with goes on for its fall (tails)."""
+    it leaves. A tone a chain ends with goes on for its fall (tails). Glide (glides): a tone's start is one more
+    stretch from each tone it glides in from, fast first, then the tone held (whose: (tone, None) for both)."""
     tones = hz["tones"]
     ls = links(tones)
     tail = tails(hz)
+    gl = glides(hz)
     out, held = [], {}
     for n in tones:
         a = n["t"] + min([min(s["in"], n["len"]) for _, b, s in ls if b is n], default=0.0)
+        if n["id"] in gl:
+            s, e = (left + n["t"]) * ppq, (left + n["t"] + min(hz["voice"]["glide"], n["len"])) * ppq
+            a = max(a, n["t"] + min(hz["voice"]["glide"], n["len"]))
+            for k0 in gl[n["id"]]:
+                part, after, t = [], [], s
+                while t < e:
+                    part.append(t)
+                    t += wave(hz, ppq, pitch(n) + (k0 - pitch(n)) * (1.0 - (t - s) / (e - s)) ** 2)
+                    after.append(t)
+                out.append((np.array(part), np.array(after), (n, None)))
         b = n["t"] + n["len"] - min([min(s["out"], n["len"]) for m, _, s in ls if m is n], default=0.0)
         b += tail.get(n["id"], 0.0)
         if b > a:
@@ -807,6 +902,7 @@ class KeyGrid:
 
     def __init__(self, hz, left, ppq, lo, n):
         self.lo, self.n, self.got = lo, max(1, n), {}
+        self.copies, self.same = copies(hz), bool((hz.get("voice") or {}).get("same"))
         self.runs = []
         tail = tails(hz)
         for starts, nexts, whose in tone_runs(hz, left, ppq):
@@ -836,14 +932,15 @@ class KeyGrid:
         self.loud = self.shaped or any(name in (hz.get("fx") or ()) for name in VEL_FX)
 
     @staticmethod
-    def respaced(run, x):
+    def respaced(run, x, scale=1.0):
         """A stretch of tone for the key at x: off pitch and vibrato make its waves longer or shorter one after the
         other (every value of a repeat taken for the one with the same number; past the end, the last one's), so
-        it may take more or fewer repeats to fill the stretch. None when neither is on."""
+        it may take more or fewer repeats to fill the stretch; scale = every wave that many times as long (a Voice
+        copy's own tone: none past the stretch's end). None when none of them is on."""
         off, vib = run["offpitch"], run["vibrato"]
-        if not (off.any() or vib.any()):
+        if not (off.any() or vib.any()) and scale == 1.0:
             return None
-        stretch = (1.0 + OFF_PITCH * off * (x - 0.5)) * (
+        stretch = scale * (1.0 + OFF_PITCH * off * (x - 0.5)) * (
             1.0 + VIBRATO * vib * np.sin(2.0 * np.pi * run["vib_rate"] * (run["beat"] - run["beat"][0])))
         n = len(off)
         more = n // 10 + 3  # (enough: the waves are at most a few % shorter)
@@ -852,6 +949,9 @@ class KeyGrid:
         out = {k: (v[pick] if isinstance(v, np.ndarray) else v) for k, v in run.items()}
         out["starts"] = run["starts"][0] + np.concatenate([[0.0], np.cumsum(waves)[:-1]])
         out["waves"], out["number"] = waves, np.arange(n + more)
+        if scale != 1.0:
+            keep = out["starts"] < run["starts"][-1] + run["waves"][-1] - 1e-6
+            out = {k: (v[keep] if isinstance(v, np.ndarray) else v) for k, v in out.items()}
         return out
 
     def made(self, key):
@@ -863,9 +963,10 @@ class KeyGrid:
         xv = min(1.0, max(0.0, (key - self.lo) / max(1, self.n - 1)))  # (for loudness: 1 = the highest key)
         noise = np.random.default_rng(1000 + key)  # (the same every time: the key is the seed)
         all_starts, all_limits, all_factors, all_quiet = [], [], [], []
-        for run in self.runs:
-            run = self.respaced(run, x) or run
-            late = run["slant"] * x + np.floor(x * run["groups"]) / run["groups"]
+        cents = self.copies if self.same else [self.copies[(key - self.lo) % len(self.copies)]]  # (Voice copies)
+        for run, c in ((run, c) for run in self.runs for c in cents):
+            run = self.respaced(run, x, 2.0 ** (-c / 1200.0)) or run
+            late =run["slant"] * x + np.floor(x * run["groups"]) / run["groups"]
             if run["noisy"].any():
                 late = late + run["noisy"] * noise.random(len(late))
             starts = run["starts"] + late * run["waves"]
