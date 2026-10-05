@@ -22,9 +22,11 @@ def grid_shown(w, on):
 
 
 def box_text(e):
-    """What a box holds (from its variable: while that's being set, the box itself still shows the old text)."""
+    """What a box holds (from its variable: while that's being set, the box itself still shows the old text).
+    globalgetvar: typing in a box sets its variable from inside Tk's own key code, where a plain getvar looks for
+    the name there and fails ("can't read PY_VAR17")."""
     name = str(e.cget("textvariable"))
-    return str(e.getvar(name)) if name else e.get()
+    return str(e.tk.globalgetvar(name)) if name else e.get()
 
 
 def good(e):
