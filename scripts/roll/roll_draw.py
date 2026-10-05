@@ -374,6 +374,7 @@ class RollDrawing:
             self.draw_path(self.draft, "#0a8f0a", 2)
             self.draw_draft_points()
         self.draw_hz_start()
+        self.draw_above_marks()
         self.draw_select_box()
         self.draw_slice()
         self.draw_keyboard(h)
@@ -518,6 +519,14 @@ class RollDrawing:
         yb = np.where(up, np.concatenate([sy1[on_s], ty[on_t]]) - extra, ya)
         for line in ring_chains(xa.tolist(), ya.tolist(), xb.tolist(), yb.tolist(), up.tolist(), extra):
             self.create_line(*line, **kw)
+
+    def draw_above_marks(self):
+        """A small arrow pointing up at the top of the piano roll for each shape put away above its highest key
+        (pianoroll.above_marks; user: one, in the middle of the shape). Selected: red like its line."""
+        s, y = self.scale, self.ruler_h + 3 * self.scale
+        for i, x in self.above_marks():
+            self.create_polygon(x, y, x + 6 * s, y + 9 * s, x - 6 * s, y + 9 * s, outline="#ffffff",
+                                fill="#ff1f1f" if i in self.app.sels else "#c0392b")
 
     def draw_select_box(self):
         """The box being dragged with Select (with the ones kept when Ctrl+drag adds it), or the last ones

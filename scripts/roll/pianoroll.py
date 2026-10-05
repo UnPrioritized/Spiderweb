@@ -15,6 +15,7 @@ from files.lang import tr
 from notes.custom import box_frame, fill_plan, fill_test
 from notes.engine import cached_arrays, make_shape
 from notes.joined import all_tumours
+from notes.paths import KEYS
 from notes.funnel import funnel_contains, funnel_handles, funnel_origins
 from roll.roll_curve import CurveEditing
 from roll.roll_custom import CustomBox
@@ -52,7 +53,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.dup = None          # Ctrl+press in the kept boxes: {"click": shape under the mouse}; the copies are
         #                          made at the first move ("done" then)
         self.grabbed = None      # the shape a move drag was started on (None: all selected, the kept boxes moved)
-        self.room = None         # how far the shapes being moved can go (move_room)
+        self.room = None         # how far each shape being moved can go: {shape number: move_room}
         self.limit = None        # how far the shapes being edited may reach (limits)
         self._pan = None
         self._panned = False     # the middle button moved further than a click's 3 px (pan_to)
@@ -115,16 +116,20 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def y2p(self, y):
         return self.view_top - (y - self.ruler_h) / self.sy
 
-    def event_pt(self, e, snap=True):
+    def event_pt(self, e, snap=True, above=False):
         """The mouse as (beat, pitch), kept inside the visible roll and the MIDI key range (dragging past the
-        edge of the window stays on the edge, like the velocity pane)."""
+        edge of the window stays on the edge, like the velocity pane). above: shapes being moved: past the top of
+        the piano roll (the view as high as it goes) the keys go on up to the 256 keys' highest, also at 128 keys
+        (user: shapes can be put away up there, an arrow shows them: above_marks)."""
         x = min(max(e.x, self.kb_w), self.winfo_width())
         y = min(max(e.y, self.ruler_h), self.winfo_height())
+        if above and e.y < self.ruler_h and self.view_top >= self.app.keys - 0.5 - 1e-9:
+            y = e.y
         b, p = self.x2t(x), self.y2p(y)
         sb = self.app.snap_beats()
         if snap and sb and not e.state & SHIFT:
             b, p = round(b / sb) * sb, round(p)
-        return [max(0.0, b), min(max(p, 0), self.app.keys - 1)]
+        return [max(0.0, b), min(max(p, 0), (KEYS[1] if above else self.app.keys) - 1)]
 
     def slice_pt(self, e):
         """The Slice tool's line end at the mouse: time on the snap grid, keys on the lines between key rows (so a
@@ -253,31 +258,32 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
     @staticmethod
     def reach(shapes):
-        """(first beat, lowest key, highest key) the shapes' lines reach, or None (nothing drawn)."""
+        """(first beat, lowest key, highest key, last beat) the shapes' lines reach, or None (nothing drawn)."""
         arrays = [a for sh in shapes for a in cached_arrays(sh) if len(a)]
         if not arrays:
             return None
         a = np.concatenate(arrays)
-        return float(a[:, 0].min()), float(a[:, 1].min()), float(a[:, 1].max())
+        return float(a[:, 0].min()), float(a[:, 1].min()), float(a[:, 1].max()), float(a[:, 0].max())
 
-    def limits(self, shapes):
-        """How far these shapes may go: beat 0 and the lowest / highest key, or as far past them as they already
-        are (user: a shape past an edge, e.g. from 256 keys, isn't pushed back; it just can't go further). None:
+    def limits(self, shapes, top=None):
+        """How far these shapes may go: beat 0 and the lowest / highest key (top: another highest), or as far past
+        them as they already are (user: a shape past an edge isn't pushed back; it just can't go further). None:
         no limits (nothing drawn)."""
         r = self.reach(shapes)
-        return r and (min(0.0, r[0]), min(0.0, r[1]), max(self.app.keys - 1.0, r[2]))
+        return r and (min(0.0, r[0]), min(0.0, r[1]), max(self.app.keys - 1.0 if top is None else top, r[2]))
 
-    def move_room(self, shapes):
-        """How far shapes can be moved (beats left, keys down, keys up) before they pass the limits."""
-        r, lim = self.reach(shapes), self.limits(shapes)
+    def move_room(self, sh):
+        """How far a shape can be moved (beats left, keys down, keys up) before it passes the limits: up to the
+        256 keys' highest even at 128 keys (user: put away up there; it isn't played or saved in the MIDI)."""
+        r, lim = self.reach([sh]), self.limits([sh], KEYS[1] - 1)
         return r and (r[0] - lim[0], r[1] - lim[1], lim[2] - r[2])
 
-    def in_room(self, db, dp, e):
-        """A move by (db beats, dp keys) cut short where the shapes would pass the limits (move_room): in whole grid
-        steps / keys like the move, unless Shift is held."""
-        if not self.room:
+    def in_room(self, db, dp, e, room):
+        """A move by (db beats, dp keys) cut short where a shape would pass the limits (room: move_room): in whole
+        grid steps / keys like the move, unless Shift is held."""
+        if not room:
             return db, dp
-        left, down, up = self.room
+        left, down, up = room
         sb = self.app.snap_beats()
         if sb and not e.state & SHIFT:
             left, down, up = math.floor(left / sb + 1e-9) * sb, math.floor(down + 1e-9), math.floor(up + 1e-9)
@@ -493,11 +499,36 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         shape can be dragged from where another one lies over it); then lines (drawn over every note), the one on
         top first; then insides / notes, again the one on top (drawn later = on top)."""
         sels = sorted(self.app.sels, reverse=True) if prefer_selected else []
+        mark = self.above_mark_at(x, y)
+        if mark is not None:
+            return mark
         for among in ([sels] if sels else []) + [None]:
             i = self.hit_shape(x, y, among)
             if i is None:
                 i = self.note_owner(x, y, among)
             if i is not None:
+                return i
+        return None
+
+    def above_marks(self):
+        """[(shape number, x)]: shapes put away above the piano roll's highest key (128 keys: up to 255, user) get
+        a small arrow at the top of the piano roll, in the middle of their time, to see and grab them by."""
+        top, w = self.app.keys - 0.5, self.winfo_width()
+        out = []
+        for i, sh in enumerate(self.app.shapes):
+            r = self.reach([sh])
+            if r and r[1] > top:
+                x = self.t2x((r[0] + r[3]) / 2)
+                if self.kb_w <= x <= w:
+                    out.append((i, x))
+        return out
+
+    def above_mark_at(self, x, y):
+        """The shape whose arrow (above_marks) is at x, y, the one on top first; None."""
+        if y > self.ruler_h + 16 * self.scale:
+            return None
+        for i, mx in reversed(self.above_marks()):
+            if abs(mx - x) <= 8 * self.scale:
                 return i
         return None
 
@@ -809,19 +840,19 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if self.stayed_inside(step):
                 self.app.shape_edited()
         elif kind == "move":
-            pt = self.event_pt(e)
+            pt = self.event_pt(e, above=True)
             _, start, orig, one, _, part = self.drag
             db, dp = pt[0] - start[0], pt[1] - start[1]
             if not (db or dp) and not self.drag[4]:
                 return
-            if self.room is None:  # (they stop at beat 0 and the lowest / highest key, user)
-                self.room = self.move_room([self.app.shapes[j] for j in orig])
-            db, dp = self.in_room(db, dp, e)
             if self.dup and self.dup != "done":
                 orig = self.copy_moved(orig)
+            if self.room is None:  # (each shape stops at beat 0 and the lowest / highest key on its own, the Select
+                self.room = {j: self.move_room(self.app.shapes[j]) for j in orig}  # box and the rest go on: user)
             self.drag = ("move", start, orig, one, True, part)
             for j, pts in orig.items():
-                self.app.shapes[j]["pts"] = [[b + db, p + dp] for b, p in pts]
+                bj, pj = self.in_room(db, dp, e, self.room[j])
+                self.app.shapes[j]["pts"] = [[b + bj, p + pj] for b, p in pts]
             if self.box_moving:
                 self.box_kept = ([(b0 + db, top + dp, b1 + db, bottom + dp) for b0, top, b1, bottom in self.box_moving],
                                  set(self.app.sels))
