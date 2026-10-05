@@ -1097,6 +1097,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.app.show_position(self.position_text(e))
         if not self.drag:
             over = not self.draft and self.hit_handle(e.x, e.y, self.app.tool.get() == "select") is not None
+            # (the arrow of a shape put away above the top key can be grabbed: the move pointer shows it, user)
+            over = over or (not self.draft and self.app.tool.get() == "select"
+                            and self.above_mark_at(e.x, e.y) is not None)
             hit = None if over else self.custom_hit(e.x, e.y)
             on_box = (self.on_kept_box(self.kept_box(), e) if not over and not (hit and hit[0] != "inside")
                       and self.app.tool.get() == "select" and not self.draft else None)
