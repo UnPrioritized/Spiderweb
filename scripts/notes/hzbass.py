@@ -77,7 +77,9 @@ hz["voice"] = the synth window's Voice box (not lines; clean_voice): {"voices": 
 "detune": cents between the lowest and the highest copy, their tones spread evenly between, "same": True = every key
 plays every copy (as many times the notes) instead of each key one copy in turn (no extra notes), "glide": beats a
 note takes to glide in from the tone of the note before it (glides), "touching": True = only from a note that ends
-where it starts}. Glide only bends the tone: each note still starts its effects over, like a synth's voices.
+where it starts, "legato": True = a note that starts right where another ends carries on its effects (no new attack,
+no fall after the first: legato_links)}. Glide only bends the tone: each note still starts its effects over, like a
+synth's voices (unless Legato joins them).
 hz["mode"] = the Wave box's Mode (MODES, clean_mode): FM, Pulse width or Sync change the hits in each wave
 (wave_hits), Growl and Bitcrush when each one lands."""
 
@@ -267,6 +269,8 @@ def clean_voice(voice):
         out["glide"] = min(GLIDE, glide)
         if voice.get("touching") is True:
             out["touching"] = True
+    if voice.get("legato") is True:
+        out["legato"] = True
     return out
 
 
@@ -478,12 +482,13 @@ def cached(hz, key, make):
     return memo[key]
 
 
-def chains(tones):
+def chains(tones, joined=()):
     """{tone id: (beat its chain of slides starts at, beat the chain ends at)}: a tone reached by a slide belongs to
-    the chain of the (earliest) tone sliding into it."""
+    the chain of the (earliest) tone sliding into it; joined = more (a, b) pairs counted like slides (Legato:
+    legato_links)."""
     by = {n["id"]: n for n in tones}
     came = {}
-    for a, b, _ in links(tones):
+    for a, b in [(a, b) for a, b, _ in links(tones)] + list(joined):
         if b["id"] not in came or a["t"] < came[b["id"]]["t"]:
             came[b["id"]] = a
     heads = {}
@@ -508,7 +513,8 @@ def note_span(hz, beat, tone=None):
     """(start, end) beats of the note (chain of slides) an effect counted from each note is in at beat (an array,
     from the shape's left edge): tone's chain, or (tone None) the latest chain to start (chains starting together:
     the longest). None when there are no tones."""
-    got = cached(hz, "chains", lambda: chains(hz.get("tones") or ()))
+    tones = hz.get("tones") or ()
+    got = cached(hz, "chains", lambda: chains(tones, legato_links(hz.get("voice"), tones)))
     if not got:
         return None
     if tone is not None and tone.get("id") in got:
@@ -562,11 +568,12 @@ def tails(hz):
     tones = hz.get("tones") or ()
     if fall <= 1e-12 or not tones:
         return {}
-    got = chains(tones)
+    joined = legato_links(hz.get("voice"), tones)
+    got = chains(tones, joined)
     starts = {}
     for n in tones:
         starts.setdefault(pitch(n), []).append(n["t"])
-    leaving = {a["id"] for a, _, _ in links(tones)}
+    leaving = {a["id"] for a, _, _ in links(tones)} | {a["id"] for a, _ in joined}
     out = {}
     for n in tones:
         end = n["t"] + n["len"]
@@ -813,6 +820,29 @@ def glide(a, b, s):
     """A slide as (start beat, end beat, pitch at the start, pitch at the end): it leaves a's tone `out` before
     a's end and reaches b's tone `in` after b's start."""
     return a["t"] + a["len"] - min(s["out"], a["len"]), b["t"] + min(s["in"], b["len"]), pitch(a), pitch(b)
+
+
+def legato_links(voice, tones):
+    """[(a, b)] with Legato on (hz["voice"]["legato"], the Voice box): tone b starts right where tone a ends, so b
+    carries on a's effects counted from each note (no new attack; a's fall doesn't play), as a slide made by hand
+    does, like a synth's legato. Paired as Glide pairs them (one to a chord, several to one, chord to chord none);
+    the same pitch too (an arpeggio of one note held: one envelope)."""
+    if not (voice or {}).get("legato") or len(tones) < 2:
+        return []
+    ended = sorted(tones, key=lambda n: n["t"] + n["len"])
+    ends = [n["t"] + n["len"] for n in ended]
+    out, i = [], 0
+    order = sorted(tones, key=lambda n: n["t"])
+    while i < len(order):
+        t = order[i]["t"]
+        j = i
+        while j < len(order) and order[j]["t"] <= t + 1e-9:
+            j += 1
+        chord, i = order[i:j], j
+        before = ended[bisect.bisect_left(ends, t - 1e-9):bisect.bisect_right(ends, t + 1e-9)]
+        if before and not (len(before) > 1 and len(chord) > 1):
+            out += [(a, b) for b in chord for a in before if a is not b]
+    return out
 
 
 def glides(hz):
@@ -1143,7 +1173,8 @@ class KeyGrid:
             run["vib_rate"] = lfo.get("vibrato_rate", VIBRATO_RATE)
             depth = lfo.get("tremolo_depth")  # (as it was without one: the very same numbers)
             run["trem"] = (0.1, TREMOLO_DEPTH) if depth is None else (1.0 - depth, depth)
-            run["since"] = beat - n0["t"]  # (beats from its note's start: the wave modes)
+            span = note_span(hz, beat, n0)  # (beats from its note's start, a chain's: the wave modes)
+            run["since"] = beat - (n0["t"] if span is None else span[0])
             run["tone"], run["held"] = n0, whose[1] is None
             self.runs.append(run)
         if self.reverb:
@@ -1161,7 +1192,7 @@ class KeyGrid:
         if r["level"] ** 2 <= SOFT:
             return []
         quiet = 1.0 - (SOFT / r["level"] ** 2) ** (1 / 3)  # (0..1 of the way: from here on too soft, left out)
-        leaving = {a["id"] for a, _, _ in links(tones)}
+        leaving = {a["id"] for a, _, _ in links(tones)} | {a["id"] for a, _ in legato_links(hz.get("voice"), tones)}
         last, starts = {}, {}
         for run in self.runs:  # (each tone's held stretch that goes on longest)
             n = run["tone"]

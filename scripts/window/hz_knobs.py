@@ -9,7 +9,8 @@ made shows them about where it is (with a note); turning one makes new lines fro
   Tremolo (LFO 2): Rate = the Tremolo line (its value is how fast), Depth (hz["lfo"]).
   Tone: Sweep (on / off) from Start to End in Time = the Sweep line once per note; Wah = its line, flat.
   Character: Slant, Groups, Off pitch, Noisy = their lines, flat.
-  Voice: Voices, Detune, Voices on (split / same keys), Glide, Only notes that touch = hz["voice"] (not lines).
+  Voice: Voices, Detune, Voices on (split / same keys), Glide, Only notes that touch, Legato = hz["voice"] (not
+  lines).
   Arpeggio (third row): On, Pattern, Speed, Octaves, Gate, Chord = hz["arp"] (not lines; there only while on).
 Each box has a picture: the envelope (with a dot while a key sounds), one wave's hits (the notes), the pitch, the
 wobbles over two beats, which keys are loud over time, the keys' notes over four waves, the copies' tones and a glide."""
@@ -274,13 +275,14 @@ def read_character(win, was):
 
 
 def read_voice(win, was):
-    """The Voice box: ({voices, detune, same, glide, touching}, True): its own settings, not lines (one voice:
-    Detune and Voices on kept as they were; no glide: Only notes that touch too)."""
+    """The Voice box: ({voices, detune, same, glide, touching, legato}, True): its own settings, not lines (one
+    voice: Detune and Voices on kept as they were; no glide: Only notes that touch too)."""
     v = win.extra.get("voice", {})
     n = v.get("voices", 1)
     got = {"voices": float(n), "detune": v["detune"] if n > 1 else was["detune"],
            "same": bool(v.get("same")) if n > 1 else was["same"], "glide": v.get("glide", 0.0),
-           "touching": bool(v.get("touching")) if v.get("glide") else was["touching"]}
+           "touching": bool(v.get("touching")) if v.get("glide") else was["touching"],
+           "legato": bool(v.get("legato"))}
     return got, True
 
 
@@ -423,7 +425,7 @@ class SynthKnobs:
         self.turning = None  # while a knob is turned: the lines from before (FxPane.state)
         self.vals = {key: start for key, (_, _, start) in KNOBS.items()}
         self.vals["wave"], self.vals["sweep"] = "none", False
-        self.vals["same"], self.vals["touching"], self.vals["mode"] = False, False, "off"
+        self.vals["same"], self.vals["touching"], self.vals["legato"], self.vals["mode"] = False, False, False, "off"
         self.vals["rack"], self.vals["rack_off"] = (), ()
         self.vals.update(arp_on=False, arp_pattern="up", arp_chord="placed")  # (the Effects tab's effects in order, those switched off)
         self.mode_cells = {}  # the Wave box's mode -> its knobs' cells (only the picked mode's shown)
@@ -518,7 +520,8 @@ class SynthKnobs:
                 self.boxes[name].pack(in_=self.lines[i], side="left", anchor="n", padx=(0, 10))
 
     def voice_cell(self, box, col, after):
-        """The Voice box's Voices on dropdown (after Detune) or its Only notes that touch tick box (after Glide)."""
+        """The Voice box's Voices on dropdown (after Detune) or its Only notes that touch and Legato tick boxes
+        (after Glide)."""
         cell = ttk.Frame(box, style="Synth.Box.TFrame")
         cell.grid(row=0, column=col, padx=6, sticky="n")
         if after == "detune":
@@ -539,8 +542,14 @@ class SynthKnobs:
             cb = ttk.Checkbutton(cell, text=tr("hz.synth_touching"), variable=self.touching_var,
                                  style="Synth.Box.TCheckbutton",
                                  command=lambda: self.change("voice", "touching", self.touching_var.get()))
-            cb.pack(pady=(14, 0))
+            cb.pack(pady=(14, 0), anchor="w")
             Tooltip(cb, tr("hz.synth_tip_touching"))
+            self.legato_var = tk.BooleanVar(value=False)
+            cb = ttk.Checkbutton(cell, text=tr("hz.synth_legato"), variable=self.legato_var,
+                                 style="Synth.Box.TCheckbutton",
+                                 command=lambda: self.change("voice", "legato", self.legato_var.get()))
+            cb.pack(pady=(4, 0), anchor="w")
+            Tooltip(cb, tr("hz.synth_tip_legato"))
 
     def dial_cell(self, box, col, key, kind, start, colour):
         """A knob with its name over it and its value's box under it."""
@@ -724,7 +733,7 @@ class SynthKnobs:
             self.set_lfo("vibrato_rate", v["vibrato_rate"], VIBRATO_RATE)
         elif box == "voice":
             self.set_extra("voice", {"voices": int(v["voices"]), "detune": v["detune"], "same": v["same"],
-                                      "glide": v["glide"], "touching": v["touching"]})
+                                      "glide": v["glide"], "touching": v["touching"], "legato": v["legato"]})
         elif box == "tremolo":
             fx.drop("tremolo")
             if v["tremolo_rate"] > 0:
@@ -820,6 +829,8 @@ class SynthKnobs:
             self.same_var.set(name)
         if self.touching_var.get() != self.vals["touching"]:
             self.touching_var.set(self.vals["touching"])
+        if self.legato_var.get() != self.vals["legato"]:
+            self.legato_var.set(self.vals["legato"])
         self.light_boxes()
         self.draw_pics()
         self.show_rack()

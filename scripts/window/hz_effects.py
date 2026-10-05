@@ -39,7 +39,7 @@ from files.lang import tr
 from files.mathexpr import calc
 from files.snap import SNAPS, snap_beats, snap_text
 from notes.hzbass import (BEND, ENVELOPES, FROM_MODES, FX, FX_START, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, bend_of, bent_part,
-                          chains, group_count, line_at,
+                          chains, group_count, legato_links, line_at,
                           loop_off, loop_on, loop_shape, sound_span, sustained, tones_span)
 from roll.roll_shared import BOX_STILL, CTRL, SELECT_CURSOR, SHIFT
 from window.widgets import Scrub
@@ -126,7 +126,8 @@ class FxPane:
     def note_spans(self):
         """[(start, end)] beats of each note (chain of slides; chains starting together: the longest), in order."""
         spans = {}
-        for s, e in chains(self.win.tones).values():
+        tones = self.win.tones
+        for s, e in chains(tones, legato_links(self.win.extra.get("voice"), tones)).values():
             spans[s] = max(spans.get(s, e), e)
         return sorted(spans.items())
 
