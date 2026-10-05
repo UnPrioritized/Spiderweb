@@ -6,8 +6,10 @@ made shows them about where it is (with a note); turning one makes new lines fro
   Pitch: Amount (keys) and Time = the Pitch line once per note, from Amount keys off to the note's tone.
   Vibrato (LFO 1): Rate (hz["lfo"]), Depth = the Vibrato line, Delay = it comes in over that long, once per note.
   Tremolo (LFO 2): Rate = the Tremolo line (its value is how fast), Depth (hz["lfo"]).
+  Tone: Sweep (on / off) from Start to End in Time = the Sweep line once per note; Wah = its line, flat.
+  Character: Slant, Groups, Off pitch, Noisy = their lines, flat.
 Each box has a picture: the envelope (with a dot while a key sounds), one wave's hits (the notes), the pitch, the
-wobbles over two beats."""
+wobbles over two beats, which keys are loud over time, the keys' notes over four waves."""
 
 import math
 import tkinter as tk
@@ -17,7 +19,8 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.hzbass import FAST, LOOP, PITCH, SOFT, SUB, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE, WAVES, line_at
+from notes.hzbass import (FAST, GROUPS, LOOP, OFF_PITCH, PITCH, SOFT, SUB, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE, WAH,
+                          WAVES, group_count, line_at)
 from window.hz_effects import AMOUNT, FX_COLOR
 from window.tool_window import Knob
 from window.widgets import Scrub, Tooltip
@@ -25,13 +28,14 @@ from window.widgets import Scrub, Tooltip
 WARN = "#c06000"
 TIME_KNOB = 4.0  # beats a time knob goes to (along a curve: fine near 0)
 TIME_MOST = 64.0  # ... and a typed one
-# what a knob's value is: (unit text, lowest, highest typed, the box's steps (Shift, Ctrl), where the knob goes
-# to along a curve (fine near 0; None: straight, percent / keys))
+# what a knob's value is: (unit text (None: no unit), lowest, highest typed, the box's steps (Shift, Ctrl), where the
+# knob goes to along a curve (fine near 0; None: straight, percent / keys / groups))
 KINDS = {"time": ("hz.synth_beats", 0.0, TIME_MOST, (0.05, 0.25, 0.01), TIME_KNOB),
          "percent": ("hz.synth_percent", 0.0, 100.0, (1, 10, 0.1), None),
          "keys": ("hz.synth_keys", -PITCH, PITCH, (1, 3, 0.1), None),
          "vib_rate": ("hz.synth_a_beat", 0.0, 64.0, (0.1, 1, 0.01), 10.0),
-         "trem_rate": ("hz.synth_a_beat", 0.0, TREMOLO, (0.1, 1, 0.01), TREMOLO)}
+         "trem_rate": ("hz.synth_a_beat", 0.0, TREMOLO, (0.1, 1, 0.01), TREMOLO),
+         "groups": (None, 1.0, float(GROUPS), (1, 1, 1), None)}
 # the boxes and their knobs: (knob, kind, value at the start / a middle-click); rows of boxes
 BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain", "percent", 1.0),
                     ("release", "time", 0.0)),
@@ -39,12 +43,19 @@ BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain",
          "pitch": (("amount", "keys", 0.0), ("time", "time", 0.25)),
          "vibrato": (("vibrato_rate", "vib_rate", VIBRATO_RATE), ("vibrato_depth", "percent", 0.0),
                      ("vibrato_delay", "time", 0.0)),
-         "tremolo": (("tremolo_rate", "trem_rate", 0.0), ("tremolo_depth", "percent", TREMOLO_DEPTH))}
-ROWS = (("volume", "wave", "pitch"), ("vibrato", "tremolo"))
+         "tremolo": (("tremolo_rate", "trem_rate", 0.0), ("tremolo_depth", "percent", TREMOLO_DEPTH)),
+         "tone": (("sweep_start", "percent", 1.0), ("sweep_end", "percent", 0.0), ("sweep_time", "time", 1.0),
+                  ("wah", "percent", 0.0)),
+         "character": (("slant", "percent", 0.0), ("groups", "groups", 1.0), ("offpitch", "percent", 0.0),
+                       ("noisy", "percent", 0.0))}
+ROWS = (("volume", "wave", "pitch", "tone"), ("vibrato", "tremolo", "character"))
 KNOBS = {key: (box, kind, start) for box, knobs in BOXES.items() for key, kind, start in knobs}
 COLOURS = {"volume": FX_COLOR["volume"], "wave": FX_COLOR["sine"], "pitch": FX_COLOR["pitch"],
-           "vibrato": FX_COLOR["vibrato"], "tremolo": FX_COLOR["tremolo"]}
-PICTURES = {"volume": (260, 90), "wave": (200, 90), "pitch": (150, 90), "vibrato": (230, 60), "tremolo": (150, 60)}
+           "vibrato": FX_COLOR["vibrato"], "tremolo": FX_COLOR["tremolo"], "tone": FX_COLOR["sweep"],
+           "character": FX_COLOR["slant"]}
+PICTURES = {"volume": (260, 90), "wave": (200, 90), "pitch": (150, 90), "vibrato": (230, 60), "tremolo": (150, 60),
+            "tone": (200, 90), "character": (220, 60)}
+CHARACTER = ("slant", "offpitch", "noisy")  # (the Character box's lines that are just their value; Groups is counted)
 WAVE_NAMES = ("none",) + tuple(WAVES)
 
 
@@ -165,8 +176,53 @@ def read_tremolo(win, was):
     return got, v is not None
 
 
+def sweep_line(start, end, time):
+    """The Sweep line: (points, length; None = all along): from Start to End in `time` beats from each note's start,
+    fast first like the envelopes (or staying at Start)."""
+    if time <= 0 or abs(start - end) < 1e-9:
+        return [[0.0, start]], None
+    return [[0.0, start, FAST], [time, end]], max(LOOP[0], time)
+
+
+def read_tone(win, was):
+    """The Tone box: ({sweep, sweep_start, sweep_end, sweep_time, wah}, made) as read_volume (no Sweep line: off,
+    its knobs kept as they were)."""
+    got = {"sweep": False, "sweep_start": was["sweep_start"], "sweep_end": was["sweep_end"],
+           "sweep_time": was["sweep_time"], "wah": 0.0}
+    made = True
+    pts = win.fxl.get("sweep")
+    if pts:
+        got["sweep"] = True
+        v = flat(win, "sweep")
+        if v is not None:
+            got["sweep_start"] = got["sweep_end"] = v
+        else:
+            got.update(sweep_start=pts[0][1], sweep_end=pts[-1][1], sweep_time=pts[-1][0])
+            want, every = sweep_line(got["sweep_start"], got["sweep_end"], got["sweep_time"])
+            made = (same_line(want, pts) and every is not None and win.loops.get("sweep") == every
+                    and win.froms.get("sweep") == "note" and "sweep" not in win.fits and "sweep" not in win.sustains
+                    and "sweep:amount" not in win.fxl)
+    if "wah" in win.fxl:
+        v = flat(win, "wah")
+        made = made and v is not None
+        got["wah"] = v if v is not None else max(p[1] for p in win.fxl["wah"])
+    return got, made
+
+
+def read_character(win, was):
+    """The Character box: ({slant, groups (how many), offpitch, noisy}, made) as read_volume."""
+    got, made = {"slant": 0.0, "groups": 1.0, "offpitch": 0.0, "noisy": 0.0}, True
+    for name in CHARACTER + ("groups",):
+        if name in win.fxl:
+            v = flat(win, name)
+            made = made and v is not None
+            got[name] = v if v is not None else max(p[1] for p in win.fxl[name])
+    got["groups"] = float(group_count(got["groups"])) if "groups" in win.fxl else 1.0
+    return got, made
+
+
 READ = {"volume": read_volume, "wave": read_wave, "pitch": read_pitch, "vibrato": read_vibrato,
-        "tremolo": read_tremolo}
+        "tremolo": read_tremolo, "tone": read_tone, "character": read_character}
 
 
 class Dial(Knob):
@@ -230,6 +286,8 @@ def knob_of(kind, v):
         return min(100.0, 100 * math.sqrt(max(0.0, v) / most))
     if kind == "keys":
         return max(-100.0, min(100.0, 100 * v / PITCH))
+    if kind == "groups":
+        return 100 * (v - 1) / (GROUPS - 1)
     return 100 * v
 
 
@@ -240,6 +298,8 @@ def value_of(kind, k):
         return round(most * (k / 100) ** 2, 3)
     if kind == "keys":
         return float(round(PITCH * k / 100))
+    if kind == "groups":
+        return float(round(1 + (GROUPS - 1) * k / 100))
     return k / 100
 
 
@@ -254,7 +314,7 @@ class SynthKnobs:
         s = self.s
         self.turning = None  # while a knob is turned: the lines from before (FxPane.state)
         self.vals = {key: start for key, (_, _, start) in KNOBS.items()}
-        self.vals["wave"] = "none"
+        self.vals["wave"], self.vals["sweep"] = "none", False
         self.dials, self.dial_vars, self.dial_boxes, self.box_says, self.pics = {}, {}, {}, {}, {}
         self.pic_for = {}  # what each picture was drawn for
         self.dot_at = None  # where the envelope picture's moving dot is drawn
@@ -277,6 +337,16 @@ class SynthKnobs:
                 cb.pack(pady=(12, 0))
                 cb.bind("<<ComboboxSelected>>", lambda e: self.on_wave())
                 Tooltip(cb, tr("hz.synth_tip_wave"))
+                col = 1
+            if name == "tone":
+                cell = ttk.Frame(box)
+                cell.grid(row=0, column=0, padx=6, sticky="n")
+                ttk.Label(cell, text=tr("hz.synth_sweep")).pack()
+                self.sweep_var = tk.BooleanVar(value=False)
+                cb = ttk.Checkbutton(cell, text=tr("hz.synth_sweep_on"), variable=self.sweep_var,
+                                     command=lambda: self.change("tone", "sweep", self.sweep_var.get()))
+                cb.pack(pady=(14, 0))
+                Tooltip(cb, tr("hz.synth_tip_sweep"))
                 col = 1
             for key, kind, start in knobs:
                 self.dial_cell(box, col, key, kind, start, COLOURS[name])
@@ -307,7 +377,8 @@ class SynthKnobs:
         e = self.dial_boxes[key] = ttk.Entry(row, textvariable=var, width=5, justify="center")
         e.pack(side="left")
         unit, lo, hi, steps, _ = KINDS[kind]
-        ttk.Label(row, text=tr(unit), foreground="#777").pack(side="left", padx=(2, 0))
+        if unit:
+            ttk.Label(row, text=tr(unit), foreground="#777").pack(side="left", padx=(2, 0))
         e.bind("<Return>", lambda ev: (self.on_box(key), "break")[1])
         e.bind("<FocusOut>", lambda ev: self.on_box(key))
         Scrub(self.app, [(e, var, lambda: self.on_box(key))], steps, lo, hi, drag_box=True)
@@ -321,6 +392,7 @@ class SynthKnobs:
         if self.turning is None:
             self.turning = self.fx.state()
         self.vals[key] = value_of(KNOBS[key][1], k)
+        self.sweep_on(key)
         self.write(KNOBS[key][0])
         if done:
             before, self.turning = self.turning, None
@@ -340,9 +412,17 @@ class SynthKnobs:
             e.config(style="Bad.TEntry")
             return
         e.config(style="TEntry")
-        v = v / 100 if kind == "percent" else v
+        v = v / 100 if kind == "percent" else float(round(v)) if kind == "groups" else v
         if abs(v - self.vals[key]) > 1e-9:
+            self.sweep_on(key)
             self.change(box, key, v)
+        else:  # (as the knob has it: rounded to whole groups)
+            var.set(fmt(shown(kind, v)))
+
+    def sweep_on(self, key):
+        """Turning one of Sweep's knobs puts it on (its On box ticked)."""
+        if key.startswith("sweep_"):
+            self.vals["sweep"] = True
 
     def on_wave(self):
         self.change("wave", "wave", WAVE_NAMES[self.wave_names.index(self.wave_var.get())])
@@ -385,11 +465,29 @@ class SynthKnobs:
                 if every:
                     self.loops["vibrato"], self.froms["vibrato"] = every, "note"
             self.set_lfo("vibrato_rate", v["vibrato_rate"], VIBRATO_RATE)
-        else:
+        elif box == "tremolo":
             fx.drop("tremolo")
             if v["tremolo_rate"] > 0:
                 self.fxl["tremolo"] = [[0.0, min(1.0, v["tremolo_rate"] / TREMOLO)]]
             self.set_lfo("tremolo_depth", v["tremolo_depth"], TREMOLO_DEPTH)
+        elif box == "tone":
+            fx.drop("sweep")
+            if v["sweep"]:
+                pts, every = sweep_line(v["sweep_start"], v["sweep_end"], v["sweep_time"])
+                self.fxl["sweep"] = pts
+                if every:
+                    self.loops["sweep"], self.froms["sweep"] = every, "note"
+            fx.drop("wah")
+            if v["wah"] > 0:
+                self.fxl["wah"] = [[0.0, v["wah"]]]
+        else:
+            for name in CHARACTER:
+                fx.drop(name)
+                if v[name] > 0:
+                    self.fxl[name] = [[0.0, v[name]]]
+            fx.drop("groups")
+            if v["groups"] > 1:
+                self.fxl["groups"] = [[0.0, (v["groups"] - 1) / (GROUPS - 1)]]
         self.redraw()
         self.show_knobs()
 
@@ -425,6 +523,8 @@ class SynthKnobs:
         name = self.wave_names[WAVE_NAMES.index(self.vals["wave"])]
         if self.wave_var.get() != name:
             self.wave_var.set(name)
+        if self.sweep_var.get() != self.vals["sweep"]:
+            self.sweep_var.set(self.vals["sweep"])
         self.draw_pics()
 
     def draw_pics(self):
@@ -432,7 +532,7 @@ class SynthKnobs:
         for box, knobs in BOXES.items():
             c = self.pics[box]
             key = (tuple(self.vals[k] for k, _, _ in knobs), self.vals["wave"] if box == "wave" else None,
-                   c.winfo_width(), c.winfo_height())
+                   self.vals["sweep"] if box == "tone" else None, c.winfo_width(), c.winfo_height())
             if c.winfo_width() < 50 or self.pic_for.get(box) == key:
                 continue
             self.pic_for[box] = key
@@ -564,6 +664,56 @@ class SynthKnobs:
         d = v["tremolo_depth"] if v["tremolo_rate"] > 0 else 0.0
         self.wobble(c, (1 - d) + d * (1 + np.cos(2 * np.pi * v["tremolo_rate"] * b)) / 2, COLOURS["tremolo"],
                     False)
+
+    def draw_tone(self, c):
+        """Which of the shape's keys are loud (the darker, the louder; the highest keys at the top) over a note's
+        start: the Sweep moving from Start to End (dashed line: Time), Wah's stripes."""
+        v = self.vals
+        w, h, pad = c.winfo_width(), c.winfo_height(), 6 * self.s
+        pts, every = sweep_line(v["sweep_start"], v["sweep_end"], v["sweep_time"])
+        total = max(1.0, 1.5 * v["sweep_time"]) if every else 1.0
+        cols, rows = 48, 24
+        b = (np.arange(cols) + 0.5) / cols * total
+        x = (np.arange(rows) + 0.5) / rows
+        loud = np.ones((rows, cols))
+        if v["sweep"]:
+            where = line_at(pts, b)
+            loud = 0.08 + 0.92 * np.clip(np.cos(np.pi * (x[:, None] - where[None, :])), 0.0, 1.0) ** 4
+        loud = loud * ((1.0 + np.cos(2.0 * np.pi * WAH * v["wah"] * (x - 0.5))) / 2.0)[:, None]
+        rgb = [int(COLOURS["tone"][i:i + 2], 16) for i in (1, 3, 5)]
+        cw, rh = (w - 2 * pad) / cols, (h - 2 * pad) / rows
+        for r in range(rows):
+            y = h - pad - (r + 1) * rh
+            for i in range(cols):
+                f = loud[r, i]
+                colour = "#%02x%02x%02x" % tuple(round(255 + (q - 255) * f) for q in rgb)
+                c.create_rectangle(pad + i * cw, y, pad + (i + 1) * cw + 1, y + rh + 1, fill=colour, outline="")
+        if v["sweep"] and every:
+            xt = pad + v["sweep_time"] / total * (w - 2 * pad)
+            c.create_line(xt, pad, xt, h - pad, fill="#999", dash=(3, 3))
+
+    def draw_character(self, c):
+        """Eight of the shape's keys (the highest at the top) and their notes over four waves: when each key hits
+        (Slant, Groups, Noisy late; Off pitch drifting)."""
+        v = self.vals
+        w, h, pad = c.winfo_width(), c.winfo_height(), 6 * self.s
+        keys, waves = 8, 4
+        sx, rh = (w - 2 * pad) / waves, (h - 2 * pad) / keys
+        groups = int(v["groups"])
+        for k in range(1, waves):
+            c.create_line(pad + k * sx, pad, pad + k * sx, h - pad, fill="#e4e4e4", dash=(3, 3))
+        for i in range(keys):
+            x = i / keys
+            noise = np.random.default_rng(1000 + i)
+            stretch = 1.0 + OFF_PITCH * v["offpitch"] * (x - 0.5)
+            y = h - pad - (i + 1) * rh
+            for n in range(-1, waves + 1):
+                late = v["slant"] * x + math.floor(x * groups) / groups + v["noisy"] * noise.random()
+                a, b = (n + late) * stretch, (n + 1 + late) * stretch - 0.12
+                a, b = max(0.0, a), min(float(waves), b)
+                if b > a:
+                    c.create_rectangle(pad + a * sx, y + rh * 0.15, pad + b * sx, y + rh * 0.85,
+                                       fill=COLOURS["character"], outline="")
 
     def draw_adsr_dot(self):
         """While a key sounds: a dot on the envelope's picture, waiting at the sustain point while it's held, down

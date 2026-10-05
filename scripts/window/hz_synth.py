@@ -133,8 +133,9 @@ class SynthWindow(SynthKnobs, tk.Toplevel):
             c.bind(key, lambda e: (self.fx.paste_points(), "break")[1])
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.show_page()
-        self.update_idletasks()  # (as tall as the knobs need, at least enough for the effects' names)
-        self.geometry(f"{round(1000 * s)}x{max(self.winfo_reqheight(), names_h + round(160 * s))}")
+        self.update_idletasks()  # (as wide and tall as the knobs need, at least enough for the effects' names)
+        self.geometry(f"{max(round(1000 * s), self.knobs.winfo_reqwidth())}x"
+                      f"{max(self.winfo_reqheight(), names_h + round(160 * s))}")
 
     def show_page(self):
         """The Knobs or the Lines tab shown."""
