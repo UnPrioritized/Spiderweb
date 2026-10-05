@@ -105,6 +105,12 @@ def dark_list(cb):
         pass
 
 
+def dark_menu(m):
+    """A menu (a dropdown list of choices) dark too."""
+    m.config(background=FIELD, foreground=TEXT, activebackground="#3d5a8a", activeforeground=TEXT,
+             disabledforeground=DIM, selectcolor=TEXT, relief="flat", bd=1)
+
+
 def dark_title(win):
     """The window's title bar dark too (Windows 10 / 11 only: elsewhere left as it is)."""
     if sys.platform != "win32":

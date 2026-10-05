@@ -94,6 +94,9 @@ COLOURS = {k: bright(v) for k, v in {
 BOX_LINES = {"volume": ("volume",), "wave": tuple(WAVES) + ("octave",), "pitch": ("pitch",), "vibrato": ("vibrato",),
              "tremolo": ("tremolo",), "tone": ("sweep", "wah"), "character": ("slant", "offpitch", "noisy", "groups")}
 BOX_EXTRA = {"wave": "mode", "voice": "voice", "arp": "arp"}
+# the boxes a click on the light / name switches off and on (Bypass: the lines in hz["off"], the own setting moved to
+# hz["bypass"]; the Arpeggio's click is its On instead)
+BYPASS = ("volume", "wave", "pitch", "vibrato", "tremolo", "tone", "character", "voice")
 PICTURES = {"volume": (260, 90), "wave": (200, 90), "pitch": (150, 90), "vibrato": (230, 60), "tremolo": (150, 60),
             "tone": (200, 90), "character": (220, 60), "voice": (230, 60), "arp": (260, 60)}
 CHARACTER = ("slant", "offpitch", "noisy")  # (the Character box's lines that are just their value; Groups is counted)
@@ -176,7 +179,7 @@ def read_wave(win, was):
         v = flat(win, "octave")
         made = made and v is not None
         got["octave"] = v if v is not None else max(p[1] for p in win.fxl["octave"])
-    mode = win.extra.get("mode")  # (no mode: its knobs kept as they were)
+    mode = win.extra.get("mode") or win.extra.get("bypass", {}).get("mode")  # (no mode: its knobs kept as they were)
     got["mode"] = mode["kind"] if mode else "off"
     for key, _ in MODE_KNOBS.get(got["mode"], ()):
         got[key] = mode[key.split("_", 1)[1]]
@@ -277,7 +280,7 @@ def read_character(win, was):
 def read_voice(win, was):
     """The Voice box: ({voices, detune, same, glide, touching, legato}, True): its own settings, not lines (one
     voice: Detune and Voices on kept as they were; no glide: Only notes that touch too)."""
-    v = win.extra.get("voice", {})
+    v = win.extra.get("voice") or win.extra.get("bypass", {}).get("voice", {})
     n = v.get("voices", 1)
     got = {"voices": float(n), "detune": v["detune"] if n > 1 else was["detune"],
            "same": bool(v.get("same")) if n > 1 else was["same"], "glide": v.get("glide", 0.0),
@@ -438,6 +441,10 @@ class SynthKnobs:
         for name, knobs in BOXES.items():
             outer = self.boxes[name] = Box(page, s, tr(f"hz.synth_{name}"), COLOURS[name])
             Tooltip(outer.lamp, tr("hz.synth_tip_arp_on" if name == "arp" else "hz.synth_tip_lamp"))
+            if name in BYPASS:
+                for w in (outer.lamp, outer.title):
+                    w.config(cursor="hand2")
+                    w.bind("<ButtonPress-1>", lambda e, name=name: self.bypass_click(name))
             box = outer.body
             col = 0
             if name == "wave":
@@ -700,8 +707,11 @@ class SynthKnobs:
             self.commit_fx(before)
 
     def write(self, box):
-        """The lines made from a box's knobs."""
+        """The lines made from a box's knobs (a box switched off stays off: its knobs turn while it's silent)."""
         v, fx = self.vals, self.fx
+        was_off = box in BYPASS and self.box_off(box)
+        if was_off and box in BOX_EXTRA:  # (its kept setting is written anew below)
+            self.set_extra("bypass", {k: s for k, s in self.extra.get("bypass", {}).items() if k != BOX_EXTRA[box]})
         if box == "volume":
             pts, at, every = adsr_line(v["attack"], v["decay"], v["sustain"], v["release"])
             fx.drop("volume")
@@ -761,8 +771,51 @@ class SynthKnobs:
             fx.drop("groups")
             if v["groups"] > 1:
                 self.fxl["groups"] = [[0.0, (v["groups"] - 1) / (GROUPS - 1)]]
+        if was_off:
+            self.switch_box(box, True)
         self.redraw()
         self.show_knobs()
+
+    def box_parts(self, name):
+        """A box's lines that are there (the Volume line full all along doesn't count) and its own setting's name."""
+        lines = [n for n in BOX_LINES.get(name, ()) if n in self.fxl]
+        if lines == ["volume"] and flat(self, "volume") == 1.0:
+            lines = []
+        return lines, BOX_EXTRA.get(name)
+
+    def box_off(self, name):
+        """The box is switched off (Bypass): it has something, and all of it is off."""
+        lines, extra = self.box_parts(name)
+        if extra in self.extra or any(n not in self.off for n in lines):
+            return False
+        return bool(lines) or extra in self.extra.get("bypass", {})
+
+    def switch_box(self, name, off):
+        """A box switched off / on: its lines in / out of hz["off"], its own setting moved to / from hz["bypass"]."""
+        lines, extra = self.box_parts(name)
+        self.off = [n for n in self.off if n not in lines] + (lines if off else [])
+        if extra:
+            now, kept = dict(self.extra), dict(self.extra.get("bypass", {}))
+            if off and extra in now:
+                kept[extra] = now.pop(extra)
+            elif not off and extra in kept:
+                now[extra] = kept.pop(extra)
+            now["bypass"] = kept
+            self.extra = clean_extra(now)
+
+    def bypass_click(self, name):
+        """A box's light or name clicked: the box switched off (kept, silent) or back on, one undo step; a box that
+        does nothing has nothing to switch (a ding)."""
+        off = self.box_off(name)
+        lines, extra = self.box_parts(name)
+        if not off and not lines and extra not in self.extra:
+            return self.bell()
+        before = self.fx.state()
+        self.switch_box(name, not off)
+        self.redraw()
+        self.show_knobs()
+        if self.fx.now() != before:
+            self.commit_fx(before)
 
     def set_extra(self, name, value):
         """One of the Hz bass's own settings (hzbass.EXTRAS) set, checked (left out when it does nothing)."""
@@ -838,12 +891,20 @@ class SynthKnobs:
         self.meter_later()
 
     def light_boxes(self):
-        """Each box's header light: lit while the box changes the sound (Arpeggio: while it's on)."""
+        """Each box's header light: lit while the box changes the sound (Arpeggio: while it's on); a box switched off
+        has a grey name."""
         for name, outer in self.boxes.items():
             lines = [n for n in BOX_LINES.get(name, ()) if n in self.fxl and n not in self.off]
             if lines == ["volume"] and flat(self, "volume") == 1.0:  # (the Volume line full all along)
                 lines = []
             outer.lamp.light(bool(lines) or BOX_EXTRA.get(name) in self.extra)
+            colour = DIM if name in BYPASS and self.box_off(name) else COLOURS[name]
+            if outer.title.cget("foreground") != colour:
+                outer.title.config(foreground=colour)
+
+    def pic_colour(self, name):
+        """A box's colour in its picture: grey while the box is switched off."""
+        return MID if name in BYPASS and self.box_off(name) else COLOURS[name]
 
     def draw_pics(self):
         """Each box's picture drawn again when its values (or size) changed."""
@@ -854,6 +915,7 @@ class SynthKnobs:
                    self.vals["sweep"] if box == "tone" else None,
                    (self.vals["same"], self.vals["touching"]) if box == "voice" else None,
                    (self.vals["arp_on"], self.vals["arp_pattern"], self.vals["arp_chord"]) if box == "arp" else None,
+                   self.pic_colour(box) if box in BYPASS else None,
                    c.winfo_width(),
                    c.winfo_height())
             if c.winfo_width() < 50 or self.pic_for.get(box) == key:
@@ -893,7 +955,8 @@ class SynthKnobs:
         xy = [(x_of(b), y_of(v)) for b, v in zip(before, line_at(pts, before))]
         xy += [(x_of(at) + held, y_of(top))]
         xy += [(x_of(b, True), y_of(v)) for b, v in zip(after, line_at(pts, after))]
-        c.create_rectangle(x_of(at), 0, x_of(at) + held, h, fill=mix(COLOURS["volume"], PIC, 0.88), outline="")
+        colour = self.pic_colour("volume")
+        c.create_rectangle(x_of(at), 0, x_of(at) + held, h, fill=mix(colour, PIC, 0.88), outline="")
         font = ("Segoe UI", 7)
         for text, x0, x1 in (("A", x_of(0.0), x_of(self.vals["attack"])), ("D", x_of(self.vals["attack"]), x_of(at)),
                              ("S", x_of(at), x_of(at) + held), ("R", x_of(at) + held, x_of(every, True))):
@@ -902,7 +965,7 @@ class SynthKnobs:
         x = x_of(at) + held
         c.create_line(x, 0, x, h, fill=MID, dash=(3, 3))
         c.create_text(x + 3 * s, h - 2 * s, text=tr("hz.synth_let_go"), anchor="sw", fill=DIM, font=font)
-        c.create_line(*[v for p in xy for v in p], fill=COLOURS["volume"], width=max(2, round(2 * s)))
+        c.create_line(*[v for p in xy for v in p], fill=colour, width=max(2, round(2 * s)))
 
     def wave_hits(self):
         """Two waves' hits at a note's start as the notes come out (hzbass.wave_hits, as KeyGrid makes them; Growl
@@ -931,6 +994,8 @@ class SynthKnobs:
         hits = self.wave_hits()
         bw = (w - 2 * pad) / (2 * SUB)
         colour = bright(FX_COLOR[self.vals["wave"]]) if self.vals["wave"] in FX_COLOR else DIM
+        if self.box_off("wave"):
+            colour = MID
         c.create_line(pad + (w - 2 * pad) / 2, pad, pad + (w - 2 * pad) / 2, h - pad, fill=MID, dash=(3, 3))
         for p, x in hits:
             x0 = pad + p * SUB * bw
@@ -959,7 +1024,7 @@ class SynthKnobs:
         ys = line_at(pts, b)
         x0 = pad + 14 * s
         xy = [(x0 + u / total * (w - x0 - pad), mid - (y - 0.5) * 2 * (mid - pad)) for u, y in zip(b, ys)]
-        c.create_line(*[q for p in xy for q in p], fill=COLOURS["pitch"], width=max(2, round(2 * s)))
+        c.create_line(*[q for p in xy for q in p], fill=self.pic_colour("pitch"), width=max(2, round(2 * s)))
 
     def wobble(self, c, values, colour, mid):
         """A picture's line over two beats: values at evenly spread spots (mid: -1..1 around the middle, else 0..1
@@ -983,15 +1048,15 @@ class SynthKnobs:
         v = self.vals
         b = np.linspace(0.0, 2.0, 400)
         come = np.clip(b / v["vibrato_delay"], 0.0, 1.0) if v["vibrato_delay"] > 0 else np.ones(len(b))
-        self.wobble(c, v["vibrato_depth"] * come * np.sin(2 * np.pi * v["vibrato_rate"] * b), COLOURS["vibrato"],
-                    True)
+        self.wobble(c, v["vibrato_depth"] * come * np.sin(2 * np.pi * v["vibrato_rate"] * b),
+                    self.pic_colour("vibrato"), True)
 
     def draw_tremolo(self, c):
         """The loudness over two beats: down to 1 - Depth, Rate times a beat."""
         v = self.vals
         b = np.linspace(0.0, 2.0, 400)
         d = v["tremolo_depth"] if v["tremolo_rate"] > 0 else 0.0
-        self.wobble(c, (1 - d) + d * (1 + np.cos(2 * np.pi * v["tremolo_rate"] * b)) / 2, COLOURS["tremolo"],
+        self.wobble(c, (1 - d) + d * (1 + np.cos(2 * np.pi * v["tremolo_rate"] * b)) / 2, self.pic_colour("tremolo"),
                     False)
 
     def draw_tone(self, c):
@@ -1009,7 +1074,7 @@ class SynthKnobs:
             where = line_at(pts, b)
             loud = 0.08 + 0.92 * np.clip(np.cos(np.pi * (x[:, None] - where[None, :])), 0.0, 1.0) ** 4
         loud = loud * ((1.0 + np.cos(2.0 * np.pi * WAH * v["wah"] * (x - 0.5))) / 2.0)[:, None]
-        rgb = [int(COLOURS["tone"][i:i + 2], 16) for i in (1, 3, 5)]
+        rgb = [int(self.pic_colour("tone")[i:i + 2], 16) for i in (1, 3, 5)]
         dark = [int(PIC[i:i + 2], 16) for i in (1, 3, 5)]
         cw, rh = (w - 2 * pad) / cols, (h - 2 * pad) / rows
         for r in range(rows):
@@ -1029,6 +1094,7 @@ class SynthKnobs:
         w, h, pad = c.winfo_width(), c.winfo_height(), 6 * self.s
         keys, waves = 8, 4
         sx, rh = (w - 2 * pad) / waves, (h - 2 * pad) / keys
+        colour = self.pic_colour("character")
         groups = int(v["groups"])
         for k in range(1, waves):
             c.create_line(pad + k * sx, pad, pad + k * sx, h - pad, fill=GRID, dash=(3, 3))
@@ -1043,14 +1109,14 @@ class SynthKnobs:
                 a, b = max(0.0, a), min(float(waves), b)
                 if b > a:
                     c.create_rectangle(pad + a * sx, y + rh * 0.15, pad + b * sx, y + rh * 0.85,
-                                       fill=COLOURS["character"], outline="")
+                                       fill=colour, outline="")
 
     def draw_voice(self, c):
         """Left: eight of the shape's keys (the highest at the top) and the copies they play, each copy at its tone
         (the middle line = the note's own); right: a note gliding in from a lower one before it (Glide)."""
         s, v = self.s, self.vals
         w, h, pad = c.winfo_width(), c.winfo_height(), 6 * s
-        colour, font = COLOURS["voice"], ("Segoe UI", 7)
+        colour, font = self.pic_colour("voice"), ("Segoe UI", 7)
         split = w * 0.45
         n = int(v["voices"])
         cents = copies({"voice": clean_voice({"voices": n, "detune": v["detune"]})})
@@ -1090,7 +1156,7 @@ class SynthKnobs:
         arp = clean_arp({k: v[f"arp_{k}"] for k in ("pattern", "chord", *ARP)})
         keys = (33, 36, 40) if arp["chord"] == "placed" else (33,)
         tones = [{"t": 0.0, "len": 2.0, "key": k, "cents": 0.0, "id": i + 1, "to": []} for i, k in enumerate(keys)]
-        got = arpeggiated(tones, arp) if v["arp_on"] else tones
+        got = arpeggiated(tones, arp)  # (off: the same run, greyed)
         lo, hi = min(n["key"] for n in got), max(n["key"] for n in got)
         top = 12 * s  # (room for the words at the top)
         rh = (h - pad - top) / max(6, hi - lo + 1)
@@ -1101,9 +1167,8 @@ class SynthKnobs:
             x1 = max(x0 + 2, pad + (n["t"] + n["len"]) / 2 * (w - 2 * pad) - 1)
             y = h - pad - (n["key"] - lo + 1) * rh
             c.create_rectangle(x0, y + 1, x1, y + rh - 1, fill=colour, outline="")
-        if v["arp_on"]:
-            c.create_text(w - 3 * s, 2 * s, text=tr("hz.synth_arp_notes", n=fmt(arp["speed"])), anchor="ne",
-                          fill=DIM, font=("Segoe UI", 7))
+        c.create_text(w - 3 * s, 2 * s, text=tr("hz.synth_arp_notes", n=fmt(arp["speed"])), anchor="ne",
+                      fill=DIM, font=("Segoe UI", 7))
 
     def draw_adsr_dot(self):
         """While a key sounds: a dot on the envelope's picture, waiting at the sustain point while it's held, down

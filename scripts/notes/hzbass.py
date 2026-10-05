@@ -81,7 +81,8 @@ where it starts, "legato": True = a note that starts right where another ends ca
 no fall after the first: legato_links)}. Glide only bends the tone: each note still starts its effects over, like a
 synth's voices (unless Legato joins them).
 hz["mode"] = the Wave box's Mode (MODES, clean_mode): FM, Pulse width or Sync change the hits in each wave
-(wave_hits), Growl and Bitcrush when each one lands."""
+(wave_hits), Growl and Bitcrush when each one lands. A synth window box switched off (Bypass) puts its lines in
+hz["off"] and moves its own setting (mode / voice) to hz["bypass"] (clean_bypass)."""
 
 import bisect
 import functools
@@ -391,7 +392,19 @@ def copies(hz):
     return [v["detune"] * (i / (n - 1) - 0.5) for i in range(n)]
 
 
-CLEAN_EXTRA = {"voice": clean_voice, "mode": clean_mode, "rack": clean_rack, "arp": clean_arp}
+def clean_bypass(kept):
+    """The settings of the synth window's boxes switched off (Bypass) checked: hz["bypass"] = {"mode": as hz["mode"],
+    "voice": as hz["voice"]}, kept here while off, where nothing that makes the notes reads them."""
+    kept = kept if isinstance(kept, dict) else {}
+    out = {}
+    for name, clean in (("mode", clean_mode), ("voice", clean_voice)):
+        got = clean(kept.get(name))
+        if got:
+            out[name] = got
+    return out
+
+
+CLEAN_EXTRA = {"voice": clean_voice, "mode": clean_mode, "rack": clean_rack, "arp": clean_arp, "bypass": clean_bypass}
 EXTRAS = tuple(CLEAN_EXTRA)  # the synth window's own settings (not lines), each checked by its CLEAN_EXTRA
 
 

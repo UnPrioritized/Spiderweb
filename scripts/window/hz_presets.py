@@ -14,6 +14,7 @@ from files.about import HERE
 from files.lang import tr
 from files.safefile import write_text
 from window.hz_knobs import adsr_line, pitch_line, sweep_line, vibrato_line
+from window.synth_look import dark_menu
 from window.widgets import Tooltip
 
 PRESETS_FILE = os.path.join(HERE, "hz_presets.json")
@@ -120,6 +121,7 @@ class PresetBar:
         mb = ttk.Menubutton(top, textvariable=self.preset_var, width=26, style="Synth.TMenubutton")
         mb.pack(side="left", fill="x", expand=True)
         self.preset_menu = tk.Menu(mb, tearoff=0, postcommand=self.fill_presets)
+        dark_menu(self.preset_menu)
         mb["menu"] = self.preset_menu
         Tooltip(mb, tr("hz.preset_tip"))
         for text, d, tip in (("◀", -1, "hz.preset_prev"), ("▶", 1, "hz.preset_next")):
