@@ -1196,6 +1196,30 @@ class KeyGrid:
                        or self.mode.get("kind") in ("fm", "pulse", "sync"))
         self.loud = (self.shaped or any(name in (hz.get("fx") or ()) for name in VEL_FX)
                      or bool(self.echo or self.reverb))
+        self.pack()
+
+    def pack(self):
+        """Every run's numbers end to end (self.flat: one array each, each repeat's value), and each run's own in
+        self.each, so made() works out all of a key's repeats at once instead of run by run (an arpeggio makes
+        hundreds of runs; one by one, 128 keys took seconds)."""
+        runs = self.runs
+        n = np.array([len(r["starts"]) for r in runs], np.int64)
+        names = ["starts", "waves", "beat", "limits", "since", "turns", "swept", "has_volume", "groups", *FX,
+                 *("has_" + name for name in WAVES)]
+        self.flat = {k: np.concatenate([np.broadcast_to(np.asarray(r[k]), (len(r["starts"]),)) for r in runs])
+                     if runs else np.zeros(0) for k in names}
+        self.flat["tail_u"] = np.concatenate([r["tail_u"] if "tail_u" in r else np.zeros(len(r["starts"]))
+                                              for r in runs]) if runs else np.zeros(0)
+        offsets = np.concatenate([[0], np.cumsum(n)[:-1]]).astype(np.int64)
+        last = np.maximum(offsets + n - 1, 0)
+        f = self.flat
+        self.each = {"n": n, "offsets": offsets,
+                     "beat0": f["beat"][offsets] if len(f["beat"]) else np.zeros(len(runs)),
+                     "end": (f["starts"][last] + f["waves"][last]) if len(f["starts"]) else np.zeros(len(runs)),
+                     "moves": np.array([bool(r["offpitch"].any() or r["vibrato"].any()) for r in runs], bool),
+                     "until": np.array([r["until"] for r in runs], float),
+                     "tail": np.array(["tail_u" in r for r in runs], bool),
+                     "vib_rate": np.array([r["vib_rate"] for r in runs], float)}
 
     def reverb_runs(self, hz, left, ppq):
         """The Effects tab's reverb: after each note a chain of slides ends with, its tone goes on for the reverb's
@@ -1242,103 +1266,121 @@ class KeyGrid:
             out.append(run)
         return out
 
-    @staticmethod
-    def respaced(run, x, scale=1.0):
-        """A stretch of tone for the key at x: off pitch and vibrato make its waves longer or shorter one after the
-        other (every value of a repeat taken for the one with the same number; past the end, the last one's), so
-        it may take more or fewer repeats to fill the stretch; scale = every wave that many times as long (a Voice
-        copy's own tone: none past the stretch's end). None when none of them is on."""
-        off, vib = run["offpitch"], run["vibrato"]
-        scaled = np.any(np.asarray(scale) != 1.0)
-        if not (off.any() or vib.any() or scaled):
-            return None
-        stretch = scale * (1.0 + OFF_PITCH * off * (x - 0.5)) * (
-            1.0 + VIBRATO * vib * np.sin(2.0 * np.pi * run["vib_rate"] * (run["beat"] - run["beat"][0])))
-        n = len(off)
-        more = n // 10 + 3  # (enough: the waves are at most a few % shorter)
-        pick = np.minimum(np.arange(n + more), n - 1)
-        waves = run["waves"][pick] * stretch[pick]
-        out = {k: (v[pick] if isinstance(v, np.ndarray) else v) for k, v in run.items()}
-        out["starts"] = run["starts"][0] + np.concatenate([[0.0], np.cumsum(waves)[:-1]])
-        out["waves"], out["number"] = waves, np.arange(n + more)
-        if scaled:
-            keep = out["starts"] < run["starts"][-1] + run["waves"][-1] - 1e-6
-            out = {k: (v[keep] if isinstance(v, np.ndarray) else v) for k, v in out.items()}
-        return out
-
     def made(self, key):
-        """A key's repeats, (start, end) ticks in order, none overlapping, and each one's part of the velocity."""
+        """A key's repeats, (start, end) ticks in order, none overlapping, and each one's part of the velocity.
+        Every run x Voice copy is a "part" (in that order); all parts are worked out together, in one set of arrays
+        (pack)."""
         got = self.got.get(key)
         if got is not None:
             return got
         x = min(1.0, max(0.0, (key - self.lo) / self.n))  # where the key is among the shape's keys, 0 = the lowest
         xv = min(1.0, max(0.0, (key - self.lo) / max(1, self.n - 1)))  # (for loudness: 1 = the highest key)
         noise = np.random.default_rng(1000 + key)  # (the same every time: the key is the seed)
-        all_starts, all_limits, all_factors, all_quiet = [], [], [], []
         cents = self.copies if self.same else [self.copies[(key - self.lo) % len(self.copies)]]  # (Voice copies)
         chorus = self.chorus if (key - self.lo) % 2 == 1 else None  # (every other key)
-        for run, c in ((run, c) for run in self.runs for c in cents):
-            scale = 2.0 ** (-c / 1200.0)
-            if chorus:  # (up to depth cents and back, counted from the shape's start: it runs on over the notes)
-                scale = scale * 2.0 ** (-chorus["depth"] * (1.0 - np.cos(2.0 * np.pi * chorus["rate"] * run["beat"]))
-                                        / 2.0 / 1200.0)
-            run = self.respaced(run, x, scale) or run
-            late = run["slant"] * x + np.floor(x * run["groups"]) / run["groups"]
-            if run["noisy"].any():
-                late = late + run["noisy"] * noise.random(len(late))
-            if self.mode.get("kind") == "growl":  # (late by turns: 0 .. amount over `every` waves)
-                every = int(self.mode["every"])
-                late = late + GROWL * self.mode["amount"] * (run["number"] % every) / (every - 1)
-            tail = run.get("tail_u")  # (the reverb's: more and more scattered)
-            if tail is not None:
-                late = late + self.reverb["scatter"] * 0.5 * tail * noise.random(len(tail))
-            starts = run["starts"] + late * run["waves"]
-            limits = run["limits"]
-            factor, quiet = np.ones(len(starts)), np.zeros(len(starts), bool)
-            if self.loud:
-                loud = np.where(run["swept"], 0.08 + 0.92 * np.clip(np.cos(np.pi * (xv - run["sweep"])), 0.0, 1.0) ** 4,
-                                1.0)
-                loud = loud * (1.0 + np.cos(2.0 * np.pi * WAH * run["wah"] * (xv - 0.5))) / 2.0
-                loud = loud * (run["trem"][0] + run["trem"][1] * (1.0 + np.cos(2.0 * np.pi * run["turns"])) / 2.0)
-                vol = np.where(run["has_volume"], run["volume"], 1.0)
-                loud = loud * vol
-                if tail is not None:  # (the reverb: starting at its level, fading)
-                    loud = loud * self.reverb["level"] ** 2 * (1.0 - tail) ** 3
-                soft = np.where(run["number"] % 2 == 1, 1.0 - run["octave"], 1.0)  # (on the velocity itself)
-                if self.shaped:  # SUB hits in every wave, each as loud as the waveforms say there (wave_hits)
-                    plain = ~np.any([run["has_" + name] for name in WAVES], axis=0)
-                    where, mix = wave_hits([(WAVES[name], run[name], run["has_" + name]) for name in WAVES], plain,
-                                           run["number"], run["since"], self.mode)
-                    keep = mix >= SOFT
-                    rows = np.nonzero(keep)[0]
-                    starts = (starts[:, None] + where * run["waves"][:, None])[keep]
-                    limits = limits[rows]
-                    factor = np.sqrt(loud[rows] * mix[keep]) * soft[rows]
-                    quiet = vol[rows] < SOFT
-                else:
-                    factor = np.sqrt(loud) * soft
-                    quiet = vol < SOFT
-            if self.mode.get("kind") == "crush" and self.mode["amount"] > 0:  # (onto a coarse grid of ticks)
-                grid = self.mode["amount"] ** 2 * CRUSH * self.ppq
-                starts = np.floor(starts / grid + 0.5) * grid
-            keep = starts < min(run["until"], np.inf) - 1e-6
-            all_starts.append(starts[keep])
-            all_limits.append(limits[keep])
-            all_factors.append(factor[keep])
-            all_quiet.append(quiet[keep])
-        if self.echo and all_starts:  # (the whole sound again, later and quieter: one more line of notes each)
-            made = list(zip(all_starts, all_limits, all_factors, all_quiet))
+        f, each = self.flat, self.each
+        run = np.repeat(np.arange(len(self.runs)), len(cents))  # each part's run
+        scale = np.tile(np.array([2.0 ** (-c / 1200.0) for c in cents]), len(self.runs))
+        n = each["n"][run]
+        # A stretch of tone: off pitch and vibrato make its waves longer or shorter one after the other (every value
+        # of a repeat taken for the one with the same number; past the end, the last one's), so it may take more or
+        # fewer repeats to fill the stretch; scale = every wave that many times as long (a Voice copy's own tone, or
+        # the chorus: none past the stretch's end)
+        first = np.concatenate([[0], np.cumsum(n)[:-1]]).astype(np.int64)  # (each part's first repeat as it was)
+        part = np.repeat(np.arange(len(run)), n)
+        src = each["offsets"][run][part] + np.arange(len(part)) - first[part]
+        wide = np.repeat(scale, n)
+        if chorus:  # (up to depth cents and back, counted from the shape's start: it runs on over the notes)
+            wide = wide * 2.0 ** (-chorus["depth"] * (1.0 - np.cos(2.0 * np.pi * chorus["rate"] * f["beat"][src]))
+                                  / 2.0 / 1200.0)
+        scaled = np.bincount(part, wide != 1.0, len(run)) > 0
+        moves = (each["moves"][run] | scaled) & (n > 0)
+        stretch = wide * (1.0 + OFF_PITCH * f["offpitch"][src] * (x - 0.5)) * (
+            1.0 + VIBRATO * f["vibrato"][src] * np.sin(2.0 * np.pi * each["vib_rate"][run][part]
+                                                       * (f["beat"][src] - each["beat0"][run][part])))
+        size = np.where(moves, n + n // 10 + 3, n)
+        start = np.concatenate([[0], np.cumsum(size)[:-1]]).astype(np.int64)
+        part = np.repeat(np.arange(len(run)), size)
+        number = np.arange(len(part)) - start[part]
+        at = np.minimum(number, n[part] - 1)
+        src = each["offsets"][run][part] + at
+        moved = moves[part]
+        waves = np.where(moved, f["waves"][src] * stretch[np.minimum(first[part] + at, len(stretch) - 1)],
+                         f["waves"][src]) if len(part) else np.zeros(0)
+        starts = f["starts"][src].copy()
+        for size_k in np.unique(size[moves]):  # (summed wave by wave, as each part on its own would be)
+            rows = np.flatnonzero(moves & (size == size_k))
+            idx = start[rows][:, None] + np.arange(size_k)
+            sums = np.cumsum(waves[idx], axis=1)
+            starts[idx[:, 1:]] = starts[idx[:, :1]] + sums[:, :-1]
+        keep = ~(moved & scaled[part]) | (starts < each["end"][run][part] - 1e-6)
+        part, number, src, waves, starts = part[keep], number[keep], src[keep], waves[keep], starts[keep]
+        late = f["slant"][src] * x + np.floor(x * f["groups"][src]) / f["groups"][src]
+        # the random numbers each part takes, in order: its Noisy ones (if it has any), then the reverb's
+        count = np.bincount(part, minlength=len(run))
+        noisy = np.bincount(part, f["noisy"][src] != 0, len(run)) > 0
+        tail = each["tail"][run]
+        took = count * noisy + count * tail
+        base = np.concatenate([[0], np.cumsum(took)[:-1]]).astype(np.int64)
+        drawn = noise.random(int(took.sum()))
+        place = base[part] + np.arange(len(part)) - np.concatenate([[0], np.cumsum(count)[:-1]]).astype(np.int64)[part]
+        if noisy.any():
+            on = noisy[part]
+            late = np.where(on, late + f["noisy"][src] * drawn[np.where(on, place, 0)], late)
+        if self.mode.get("kind") == "growl":  # (late by turns: 0 .. amount over `every` waves)
+            every = int(self.mode["every"])
+            late = late + GROWL * self.mode["amount"] * (number % every) / (every - 1)
+        tailed = tail[part]
+        tail_u = f["tail_u"][src]  # (the reverb's: more and more scattered)
+        if tailed.any():
+            later = place + (count * noisy)[part]
+            late = np.where(tailed, late + self.reverb["scatter"] * 0.5 * tail_u * drawn[np.where(tailed, later, 0)],
+                            late)
+        starts = starts + late * waves
+        limits = f["limits"][src]
+        until = each["until"][run][part]
+        factor, quiet = np.ones(len(starts)), np.zeros(len(starts), bool)
+        if self.loud:
+            trem = self.runs[0]["trem"]
+            swept = 0.08 + 0.92 * np.clip(np.cos(np.pi * (xv - f["sweep"][src])), 0.0, 1.0) ** 4
+            loud = np.where(f["swept"][src], swept, 1.0)
+            loud = loud * (1.0 + np.cos(2.0 * np.pi * WAH * f["wah"][src] * (xv - 0.5))) / 2.0
+            loud = loud * (trem[0] + trem[1] * (1.0 + np.cos(2.0 * np.pi * f["turns"][src])) / 2.0)
+            vol = np.where(f["has_volume"][src], f["volume"][src], 1.0)
+            loud = loud * vol
+            if tailed.any():  # (the reverb: starting at its level, fading)
+                loud = np.where(tailed, loud * self.reverb["level"] ** 2 * (1.0 - tail_u) ** 3, loud)
+            soft = np.where(number % 2 == 1, 1.0 - f["octave"][src], 1.0)  # (on the velocity itself)
+            if self.shaped:  # SUB hits in every wave, each as loud as the waveforms say there (wave_hits)
+                plain = ~np.any([f["has_" + name][src] for name in WAVES], axis=0)
+                where, mix = wave_hits([(WAVES[name], f[name][src], f["has_" + name][src]) for name in WAVES], plain,
+                                       number, f["since"][src], self.mode)
+                keep = mix >= SOFT
+                rows = np.nonzero(keep)[0]
+                starts = (starts[:, None] + where * waves[:, None])[keep]
+                limits, until = limits[rows], until[rows]
+                factor = np.sqrt(loud[rows] * mix[keep]) * soft[rows]
+                quiet = vol[rows] < SOFT
+            else:
+                factor = np.sqrt(loud) * soft
+                quiet = vol < SOFT
+        if self.mode.get("kind") == "crush" and self.mode["amount"] > 0:  # (onto a coarse grid of ticks)
+            grid = self.mode["amount"] ** 2 * CRUSH * self.ppq
+            starts = np.floor(starts / grid + 0.5) * grid
+        keep = starts < until - 1e-6
+        all_starts, all_limits, all_factors, all_quiet = [starts[keep]], [limits[keep]], [factor[keep]], [quiet[keep]]
+        if self.echo and len(run):  # (the whole sound again, later and quieter: one more line of notes each)
+            made = all_starts[0], all_limits[0], all_factors[0], all_quiet[0]
             for i in range(1, int(self.echo["repeats"]) + 1):
                 gain = self.echo["fade"] ** (i / 2.0)  # (loudness goes with the velocity squared)
                 if gain * gain < SOFT:
                     break
                 shift = i * self.echo["time"] * self.ppq
-                for starts, limits, factor, quiet in made:
-                    all_starts.append(starts + shift)
-                    all_limits.append(limits + int(math.floor(shift + 0.5)))
-                    all_factors.append(factor * gain)
-                    all_quiet.append(quiet)
-        if all_starts:
+                all_starts.append(made[0] + shift)
+                all_limits.append(made[1] + int(math.floor(shift + 0.5)))
+                all_factors.append(made[2] * gain)
+                all_quiet.append(made[3])
+        if len(run):
             sq, which = _grid(np.concatenate(all_starts), np.concatenate(all_limits))
             factor = np.concatenate(all_factors)[which]
             heard = ~np.concatenate(all_quiet)[which]  # (volume 0: left out once every repeat has its end)
