@@ -6,7 +6,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc
 from notes.custom import CYCLE_MAX, CYCLES
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_varies, unchanged, varies_tip
 
 CYCLE_CHOICES = [(None, tr("colours.off"))] + [(v, tr("colours." + v)) for v in CYCLES]
 EVERY_MAX = 10 ** 4
@@ -60,17 +60,27 @@ class ColoursPanel:
         tgts = [t for t in self.targets() if "notes" not in t]
         return tgts if self.sels else [self.defaults]
 
+    def cycle_kind(self, tgts):
+        """The one kind (By step / key / time) every target with Colours on has, or None (none on, or different)."""
+        kinds = {t["cycle"]["by"] for t in tgts if t.get("cycle")}
+        return kinds.pop() if len(kinds) == 1 else None
+
     def sync_colours(self):
+        """Several shapes with different settings: the dropdown says Varies, a number box is left empty (shared
+        widgets.same_or_blank). The every row only works when all the ones with Colours count the same way."""
         tgts = self.colour_targets()
-        cy = tgts[0].get("cycle") if tgts else None
-        by = cy["by"] if cy else None
-        every = cy["every"] if cy else None
+        on = [t["cycle"] for t in tgts if t.get("cycle")]
+        cy = on[0] if on else None
+        by = self.cycle_kind(tgts)
         self._loading = True
-        self.cycle_box.current(1 + CYCLES.index(by) if cy else 0)
-        self.cycle_n_var.set(str(cy["n"]) if cy else "4")
-        a, b = every if by == "time" else (every or 1, 4)
-        self.cycle_vars[0].set(str(a))
-        self.cycle_vars[1].set(str(b))
+        self.cycle_box.current(1 + CYCLES.index(cy["by"]) if cy else 0)
+        same_or_blank(self.cycle_n_entry, self.cycle_n_var, [c["n"] for c in on] or [4])
+        every = [c["every"] for c in on if c["by"] == by] or ([] if on else [1])
+        parts = [[x[0] for x in every], [x[1] for x in every]] if by == "time" else [every, [4]]
+        for e, var, values in zip(self.cycle_entries, self.cycle_vars, parts):
+            same_or_blank(e, var, values)
+            if on and not by:
+                varies_tip(e).text = tr("colours.every_varies")
         self._loading = False
         time = by == "time"
         if time != bool(self.cycle_slash.winfo_manager()):  # By time: a second box, "a / b note"
@@ -80,13 +90,15 @@ class ColoursPanel:
                 self.cycle_slash.pack(side="left")
                 self.cycle_entries[1].pack(side="left", padx=4)
             self.cycle_unit.pack(side="left")
-        self.cycle_unit.config(text=tr("colours.unit_" + (by or "step")))
+        self.cycle_unit.config(text=tr("colours.unit_" + (by or "step")) if by or not on else "")
         lonely = bool(cy) and self.channel_mode.get() != "auto"
         self.cycle_box.config(state="readonly" if tgts else "disabled",
                               style="Gap.TCombobox" if lonely else "TCombobox")
-        self.cycle_tip.text = tr("colours.tip") + (tr("colours.needs") if lonely else "")
+        kinds = {t["cycle"]["by"] if t.get("cycle") else None for t in tgts}  # (Off too)
+        show_varies(self.cycle_box, len(kinds) > 1, self.cycle_tip,
+                    tr("colours.tip") + (tr("colours.needs") if lonely else ""))
         for e in [self.cycle_n_entry] + self.cycle_entries:
-            e.config(state="normal" if cy else "disabled", style="TEntry")
+            e.config(state="normal" if cy and (by or e is self.cycle_n_entry) else "disabled", style="TEntry")
         if bool(cy) != bool(self.cycle_every_row.winfo_manager()):
             if cy:
                 self.cycle_n_label.pack(side="left")
@@ -106,7 +118,9 @@ class ColoursPanel:
             return
         by = CYCLE_CHOICES[max(self.cycle_box.current(), 0)][0]
 
-        def number(e, var, lo, hi):  # (a wrong one: back to its last good value)
+        def number(e, var, lo, hi):  # (a wrong one: back to its last good value; still empty (Varies): None)
+            if not var.get().strip() and getattr(e, "blank_from", None):
+                return None
             for _ in range(2):
                 try:
                     v = calc(var.get())
@@ -121,13 +135,14 @@ class ColoursPanel:
         tgts = self.colour_targets()
         if what == "n":
             value = number(self.cycle_n_entry, self.cycle_n_var, 2, CYCLE_MAX)
-        elif what == "every":
+        elif what == "every":  # (only the kind they all have; an empty box (different numbers): each keeps its own)
+            kind = self.cycle_kind(tgts)
             got = [number(e, v, 1, EVERY_MAX) for e, v in zip(self.cycle_entries, self.cycle_vars)]
-            value = got if by == "time" else got[:1]
-            value = None if None in value else value if by == "time" else value[0]
+            value = None if not kind else got if kind == "time" and got != [None, None] else got[0]
         else:
             value = by
-            n = self.cycle_n_var.get()
+            on = [t["cycle"]["n"] for t in tgts if t.get("cycle")]
+            n = self.cycle_n_var.get() or str(on[0] if on else 4)
         if what != "by" and value is None:
             return
 
@@ -139,9 +154,11 @@ class ColoursPanel:
                     return old
                 kept = old["n"] if old else (int(n) if n.isdigit() and 2 <= int(n) <= CYCLE_MAX else 4)
                 return {"by": by, "n": kept, "every": [1, 4] if by == "time" else 1}
-            if not old or what == "every" and old["by"] != by:  # (every steps / keys / note lengths: same kind only)
+            if not old:
                 return old
-            return dict(old, **{what: list(value) if isinstance(value, list) else value})
+            if isinstance(value, list):
+                return dict(old, every=[v if v is not None else o for v, o in zip(value, old["every"])])
+            return dict(old, **{what: value})
 
         new = [changed(t.get("cycle")) for t in tgts]
         if all(t.get("cycle") == c for t, c in zip(tgts, new)):

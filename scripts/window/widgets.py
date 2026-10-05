@@ -72,6 +72,34 @@ def unchanged(e):
     return box_text(e) == getattr(e, "shown_text", None)
 
 
+def varies_tip(w):
+    """The widget's own tooltip for the shared "different settings" sentence (made the first time)."""
+    if not hasattr(w, "varies_tip"):
+        w.varies_tip = Tooltip(w, "")
+    return w.varies_tip
+
+
+def same_or_blank(e, var, values):
+    """A number box for several shapes (call it while app._loading): their number when they all have the same, else
+    left empty with the shared tip (user: the box showed the first one's). Typing a number sets it on all of them;
+    stepping it starts from the first one's (Scrub). True when they differ."""
+    values = [str(v) for v in values]
+    varies = len(set(values)) > 1
+    var.set("" if varies else values[0] if values else "")
+    e.blank_from = values[0] if varies else None
+    varies_tip(e).text = tr("widgets.varies_tip") if varies else ""
+    return varies
+
+
+def show_varies(box, varies, tip=None, text=""):
+    """A dropdown for several shapes with different choices: shows the shared word (it isn't one of its choices);
+    tip: its tooltip, which then starts with the shared sentence (text = its usual text)."""
+    if varies:
+        box.set(tr("widgets.varies"))
+    if tip is not None:
+        tip.text = (tr("widgets.varies_tip") + "\n\n" + text if text else tr("widgets.varies_tip")) if varies else text
+
+
 def remember_good(root):
     """Every number box's last good value starts as what it shows when it gets the keyboard (then good())."""
     def got(ev):
@@ -163,8 +191,8 @@ class Scrub:
             for entry, var, apply in boxes:
                 if str(entry.cget("state")) == "disabled":
                     continue
-                try:
-                    value = float(calc(var.get()))
+                try:  # (an empty box for shapes with different numbers: from the first one's, same_or_blank)
+                    value = float(calc(var.get() or getattr(entry, "blank_from", None) or ""))
                 except (ValueError, ZeroDivisionError):
                     continue
                 value = round(value + d, 6)
