@@ -1167,6 +1167,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         cb, cp = (min(bs) + max(bs)) / 2, (min(ps) + max(ps)) / 2
         r = self.roll.sy / self.roll.sx  # beats per key on screen
         sign = 1 if clockwise else -1
+        limit = self.roll.limits(shapes)  # (turned past an edge: pushed back inside, user)
         self.push_undo(name=tr("app.turn_90"))
         for sh in shapes:
             sh["pts"] = [[cb + sign * (p - cp) * r, cp - sign * (b - cb) / r] for b, p in sh["pts"]]
@@ -1191,7 +1192,11 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             for k in ("range", "range_kept"):
                 if sh.get(k):
                     sh[k] = turned_range(sh[k], clockwise)
-        self.roll.move_kept_box(lambda b, p: (cb + sign * (p - cp) * r, cp - sign * (b - cb) / r))  # (turns too)
+        db, dp = self.roll.push_in(self.roll.reach(shapes), limit)
+        if db or dp:
+            for sh in shapes:
+                sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
+        self.roll.move_kept_box(lambda b, p: (cb + sign * (p - cp) * r + db, cp - sign * (b - cb) / r + dp))  # (too)
         self.sync_panel()
         self.shapes_changed()
 
