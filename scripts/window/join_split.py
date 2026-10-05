@@ -16,7 +16,7 @@ from notes.bezier import anchor_count, nearest, split
 from notes.engine import cached_arrays, shape_path
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom
-from notes.sliced import cut_in_two, keep_velocity, moved_by, rejoined
+from notes.sliced import cut_in_two, keep_velocity, moved_by, rejoined, slice_in_two
 from notes.smooth import smooth_path
 from notes.joined import (custom_groups, join_shapes, join_velocity, piece_velocity, sections, split_at, split_custom,
                           split_pieces)
@@ -304,6 +304,8 @@ class JoinSplit:
                     nxt = []
                     for p in pieces:
                         got = slice_custom(p, sa, sb, self.ppq)
+                        if got:  # (pieces keeping the notes on their side, sliced.py)
+                            slice_in_two(p, got, sa, sb)
                         nxt += got if got else [p]
                     pieces = nxt
                 if len(pieces) == 1 and any(crossings(np.concatenate(cached_arrays(sh)), sa, sb) for sa, sb in segs):

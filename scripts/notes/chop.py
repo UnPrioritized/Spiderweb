@@ -127,7 +127,10 @@ def _repeats(a, chop, ppq):
     pieces = np.array(chop["pieces"], float)
     ps, pe = pieces[:, 0] * step, (pieces[:, 0] + pieces[:, 1]) * step
     s, e = a[:, 0].astype(float), a[:, 1].astype(float)
-    origin = np.zeros(len(a)) if chop["abs"] else run_starts(a).astype(float) if chop.get("runs") else s
+    if chop.get("origins") is not None:  # (a sliced Fill piece: the runs as they started in the whole, sliced.py)
+        origin = np.asarray(chop["origins"], float)
+    else:
+        origin = np.zeros(len(a)) if chop["abs"] else run_starts(a).astype(float) if chop.get("runs") else s
     k0 = np.floor((s - origin - pe.max()) / cycle).astype(np.int64)  # the first repeat that can reach the note
     k1 = np.ceil((e - origin - ps.min()) / cycle).astype(np.int64)  # (past the last one that can)
     return pieces, ps, pe, cycle, origin, k0, np.maximum(k1 - k0, 0)

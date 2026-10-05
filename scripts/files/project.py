@@ -18,6 +18,7 @@ from notes.hzbass import clean_hz
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
 from notes.paths import KEYS
 from notes.polygon import POLYGON_DEFAULTS, clean_polygon
+from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.text import TEXT_DEFAULTS, clean_text
 from files.domino_clip import DOMINO_STARTS, clip_data, get_from_clipboard, put_on_clipboard, read_notes
@@ -127,6 +128,9 @@ def short_shape(sh):
     def short(k, v):
         if k == "vel_env":
             return short_env(v)
+        if k == "cut":  # (what a piece remembers of itself, trimmed as it is: still the same after loading)
+            return {a: {n: short(n, x) for n, x in b.items()} if a in ("was", "vel", "gate") and b else b
+                    for a, b in v.items()}
         if k == "pts":
             return [[short_num(a) for a in p] for p in v]
         if k == "strokes":
@@ -155,8 +159,11 @@ def project_json(data):
     lines = []
     for k, v in data.items():
         if k == "shapes":
+            v, wholes = pack_wholes(v)  # (sliced pieces: one copy of the shape they were cut from)
             body = ",\n  ".join(short_shape(sh) for sh in v)
             lines.append(f'"shapes": [\n  {body}\n ]' if v else '"shapes": []')
+            if wholes:
+                lines.append('"wholes": [\n  ' + ",\n  ".join(short_shape(w) for w in wholes) + "\n ]")
         else:
             if isinstance(v, dict):
                 v = {a: short_num(b, 6) for a, b in v.items()}
@@ -198,9 +205,10 @@ class ProjectFiles:
                 messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_open_project", e=e))
             return False
         shapes = []
+        wholes = data["wholes"] if isinstance(data.get("wholes"), list) else []
         for sh in data.get("shapes", []):
             try:
-                sh = clean_shape(sh) if isinstance(sh, dict) else None
+                sh = clean_shape(unpack_wholes(sh, wholes)) if isinstance(sh, dict) else None
             except Exception:  # (damaged, or written in a way this Spiderweb doesn't know)
                 sh = None
             if sh:

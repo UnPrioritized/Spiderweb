@@ -13,7 +13,7 @@ from notes.engine import cached_arrays, shape_notes_tracks
 from notes.joined import all_tumours
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
 from notes.paths import KEYS
-from notes.sliced import moved_by
+from notes.sliced import moved_by, moved_mark
 from roll.roll_shared import (BLACK, DRAFT_COLOR, PIANO_88, PREVIEW_LIMIT, SELECTED_COLOR, SLOT_COLORS,
                               draw_boxes, fade, note_name)
 
@@ -546,7 +546,8 @@ class RollDrawing:
             if d is None:
                 continue
             for m in sh["cut"]["marks"]:
-                spots.setdefault(m["id"], []).append((i, m, self.t2x(m["at"][0] + d[0]), self.p2y(m["at"][1] + d[1])))
+                m = moved_mark(m, d)
+                spots.setdefault(m["id"], []).append((i, m, self.t2x(m["at"][0]), self.p2y(m["at"][1])))
         s = self.scale
         for pair in spots.values():
             for i, m, x, y in pair:
@@ -555,7 +556,12 @@ class RollDrawing:
                 for j, _, x2, y2 in pair:
                     if j != i and math.hypot(x2 - x, y2 - y) > 3 * s:
                         self.create_line(x, y, x2, y2, fill=FAINT_CUT, width=1, dash=(2, 4))
-                if m["kind"] == "slice":
+                if m.get("segs"):  # (a custom shape's: along its cut edge, over its solid line there)
+                    for (b0, k0), (b1, k1) in m["segs"]:
+                        xy = self.t2x(b0), self.p2y(k0), self.t2x(b1), self.p2y(k1)
+                        self.create_line(*xy, fill="#ffffff", width=max(1, round(2 * s)) + 1)
+                        self.create_line(*xy, fill="#d00000", width=max(1, round(2 * s)), dash=(6, 3))
+                elif m["kind"] == "slice":
                     dx, dy = m.get("dir", (0, 1))
                     dx, dy = dx * self.sx, -dy * self.sy
                     ln = math.hypot(dx, dy) or 1

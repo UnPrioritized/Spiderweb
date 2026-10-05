@@ -29,7 +29,7 @@ from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
 from notes.polygon import clean_polygon, polygon_strokes
-from notes.sliced import clean_cut, in_part, source, spotted_notes
+from notes.sliced import clean_cut, in_part, piece_notes, run_origins, source, spotted_notes
 from notes.smooth import clean_level, smooth_path
 from notes.text import clean_text
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
@@ -139,7 +139,7 @@ def clean_shape(sh):
     tm = clean_tumour(sh.get("tumour")) if out["kind"] in LINE_KINDS else None
     if tm:
         out["tumour"] = tm
-    cut = clean_cut(sh["cut"]) if out["kind"] in LINE_KINDS and isinstance(sh.get("cut"), dict) else None
+    cut = clean_cut(sh["cut"]) if isinstance(sh.get("cut"), dict) else None
     if cut:  # a piece cut from another shape, keeping its notes (sliced.py)
         out["cut"] = cut
     if out["kind"] == "custom":
@@ -372,6 +372,8 @@ def with_chop(notes, tracks, sh, ppq):
     chop = sh.get("chop")
     if chop and sh["kind"] == "custom" and sh.get("fill") == "fill" and "notes" not in sh:
         chop = dict(chop, runs=True)
+        if sh.get("cut") and len(notes) and not chop.get("abs"):  # (a sliced piece: the rhythm goes on across the cut)
+            chop["origins"] = run_origins(sh, notes, ppq)
     return _after(apply_chop, notes, tracks, chop, ppq)
 
 
@@ -395,6 +397,10 @@ def _after(fn, notes, tracks, settings, ppq):
 
 
 def _notes_tracks(sh, ppq, keys):
+    if sh["kind"] == "custom" and sh.get("cut"):  # cut by the Slice tool: the whole's notes on its side (sliced.py)
+        got = piece_notes(sh, ppq, keys, _notes_tracks)
+        if got is not None:
+            return got
     end_dot = sh.get("end_dot", False)
     piece = source(sh) if sh["kind"] in LINE_KINDS and sh.get("cut") else None
     vel_sh = sh  # (whose velocities, over whose time)
