@@ -32,11 +32,15 @@ def calc(text):
         raise ValueError("unsupported")
 
     try:
-        return ev(ast.parse(text, mode="eval"))
+        value = ev(ast.parse(text, mode="eval"))
+        finite = math.isfinite(value)
     except ZeroDivisionError:
         raise ValueError(tr("mathexpr.division_by_zero"))
     except (SyntaxError, ValueError, TypeError, OverflowError):
         raise ValueError(tr("mathexpr.can_t_read", text=text))
+    if not finite:  # (1e400, 1e308*10: endless numbers crashed the boxes)
+        raise ValueError(tr("mathexpr.out_of_range"))
+    return value
 
 
 FORMULA_NAMES = {"pi": math.pi, "e": math.e}

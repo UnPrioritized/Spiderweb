@@ -553,7 +553,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             orig = copy.deepcopy(app.selected()["pts"])
             if kept:  # (the Select box stays where it is, user: like changing a note's length in a box)
                 self.box_kept = (kept, set(app.sels))
-            app.push_undo(name={"turn": tr("pianoroll.turn"), "skew": tr("pianoroll.skew")}.get(hit[0], "Resize"))
+            app.push_undo(name=tr({"turn": "pianoroll.turn", "skew": "pianoroll.skew"}.get(hit[0], "pianoroll.resize")))
             if hit[0] == "turn":
                 self.drag = ("turn", orig, self.screen_angle(orig, e.x, e.y))
             elif hit[0] == "skew":
