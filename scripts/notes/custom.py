@@ -1730,7 +1730,8 @@ def chop(sh, stretches, g, count=False):
     if align == "aligned":
         s = -(-s0 // g) * g  # the first gate line at or after s0
     else:
-        s = s0 + size % g // 2 if align == "centred" else s0
+        # (centred: a stretch shorter than one gate stays one note, user; it was cut in two halves with "keep")
+        s = np.where(size < g, s0, s0 + size % g // 2) if align == "centred" else s0
     n = np.maximum(0, (e0 - s) // g)
     if ends == "keep":  # a shorter note before the first whole gate (aligned / centred) and after the last
         head_end = np.minimum(s, e0)

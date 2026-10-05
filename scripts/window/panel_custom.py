@@ -616,7 +616,9 @@ class CustomPanel:
         if placed:
             self.push_undo(name=tr("panel_custom.hz_bass"))
         for t, h in zip(tgts, new):
-            t["hz"], t["gate"] = h, hz_gate(h, h["bpm"])
+            t["hz"] = h
+            if t is not self.custom_defaults:  # (new spam shapes keep their own gate)
+                t["gate"] = hz_gate(h, h["bpm"])
         self.shapes_changed()
         self.sync_custom()
         if self.hz_window:
@@ -631,6 +633,9 @@ class CustomPanel:
             return self.sync_custom()
 
         def changed(t):
+            if t is self.custom_defaults:  # (shared with the Hz bass tool: new spam shapes keep their own gate and
+                rest = {k: v for k, v in t.items() if k not in ("hz", "before_hz")}  # Range, user)
+                return dict(rest, hz=dict(t.get("hz") or {"auto": AUTO}, bpm=float(bpm), **hz)) if hz else rest
             if not hz:  # (off: the spam gate and Range it had before come back, user)
                 rest = {k: v for k, v in t.items() if k not in ("hz", "before_hz")}
                 was = t.get("before_hz") if t.get("hz") else None
@@ -710,7 +715,8 @@ class CustomPanel:
             self.push_undo(name=tr("panel_custom.hz_update"))
         for t in tgts:
             t["hz"] = dict(t["hz"], bpm=float(bpm))
-            t["gate"] = hz_gate(t["hz"], bpm)
+            if t is not self.custom_defaults:
+                t["gate"] = hz_gate(t["hz"], bpm)
         self.shapes_changed()
         self.sync_custom()
         if self.hz_window:

@@ -329,6 +329,14 @@ class ProjectFiles:
         out.pop("hz", None)
         if clean_hz(custom.get("hz")):
             out["hz"] = clean_hz(custom["hz"])
+        out.pop("before_hz", None)
+        was = custom.get("before_hz")  # (older versions gave new spam shapes the Hz bass tool's gate: theirs back)
+        try:
+            gate = float(was["gate"]) if isinstance(was, dict) and out.get("hz") else math.nan
+            if math.isfinite(gate):
+                out["gate"] = max(1e-6, gate)
+        except (KeyError, TypeError, ValueError):
+            pass
         if isinstance(custom.get("shape"), str) and custom["shape"]:
             name = custom["shape"]
         return out, name
