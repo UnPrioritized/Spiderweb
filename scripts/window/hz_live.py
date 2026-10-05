@@ -5,6 +5,7 @@ note starting cuts it, as with placed notes).
 
 The notes are the engine's own: a copy of the Hz bass holding just that one note (its keys, effects, gates), made
 FIRST beats long and longer while it's held, and made again with its real length when it's let go (for the fall).
+The sound changed while it's held (a knob turned): made again from the notes not heard yet (remake).
 The sound is the quick sound (files/quicksound.py), NOT the synth: a quick copy made from the soundfont's own notes,
 and not the MIDI (the user wanted a big warning: the Help tip "hz_live" the first time, and the words by the
 Preview toggle while it plays).
@@ -94,6 +95,8 @@ class LiveKeys:
         self.gone = None  # the frame the note sounding was let go at (None: held)
         self.band = 1  # keys a band in the rough copy of the note sounding (1 = exact)
         self.bands = {}  # the Hz bass's settings -> the band its last note needed (the next press starts there)
+        self.asked_fx = None  # the effects' settings the notes asked for last were made with (JSON)
+        self.job = None  # the notes being made (a future)
         self._tick = None
 
     # ------------------------------------------------------------ pressing and letting go
@@ -218,9 +221,30 @@ class LiveKeys:
     def ask(self, beats, gen, p0, ppq, key=None, cut=None):
         """The notes of the held note made `beats` long (in the background), put in from frame `cut` on (None:
         from where the list was cut / where the sound has got to)."""
+        self.asked_fx = self.fx_now()
         sh = self.held_shape(self.key if key is None else key, beats)
         qs = quick_sound(self.app)
-        self.jobs.submit(self._make, sh, ppq, self.bpm, gen, p0, cut, qs)
+        self.job = self.jobs.submit(self._make, sh, ppq, self.bpm, gen, p0, cut, qs)
+
+    def fx_now(self):
+        return json.dumps(self.win.fx_settings(), sort_keys=True)
+
+    def remake(self):
+        """(While a key is held) the sound changed (a knob turned, a line moved): the held note made again with it,
+        from the first of its notes not heard yet (the ones heard ring on), so the change is heard at once (user).
+        One at a time: a change while one is being made waits for it."""
+        if self.job is not None and not self.job.done():
+            return
+        with self.lock:
+            if self.key is None:
+                return
+            self.gen += 1  # (one being made longer with the old sound: thrown away, this one is as long)
+            gen, made = self.gen, self.made
+        try:
+            ppq = self.app.read_project()[0]
+        except ValueError:
+            ppq = self.app.ppq
+        self.ask(made, gen, self.p0, ppq)
 
     def _make(self, sh, ppq, bpm, gen, p0, cut, qs):
         try:
@@ -323,6 +347,8 @@ class LiveKeys:
             except ValueError:
                 ppq = self.app.ppq
             self.ask(self.made, self.gen, self.p0, ppq)
+        elif held and self.fx_now() != self.asked_fx:
+            self.remake()
         self.want()
         if not held and self.finished():
             self.player.stop()
