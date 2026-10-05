@@ -8,7 +8,8 @@ Each piece remembers the shape it was cut from, sh["cut"]:
   marks  its cut ends, drawn while it's selected: {id, at (beat, key, where it was then), u (spot), kind "split" /
          "slice", dir (the Slice line's (beats, keys) direction)}; the other piece at that cut has the same id
 A piece makes its notes as the whole did and keeps the ones starting on its part, so the pieces' notes together are
-the whole's exactly (a note across a cut stays whole, in the piece it starts in); Colours count as in the whole.
+the whole's exactly, except the note sounding at a cut: it's cut in two there, so the next piece starts with a note
+right at the cut (user; cut_through); Colours count as in the whole.
 Moving it (or a copy) keeps that; changing its outline (points, size, turn, flip, Straighten, tumours, a formula,
 Last note) makes it a shape of its own (App.shapes_changed drops "cut"), and so does "Turn into a complete shape".
 """
@@ -186,6 +187,32 @@ def run_origins(sh, notes, ppq):
 def in_part(u, part):
     a, b = part
     return (u >= a) & (u < b) if b is not None else u >= a
+
+
+def cut_through(whole, raw, spots, tracks, part, ppq):
+    """A line piece's notes (the whole's, before its part is kept): the note sounding at each of the piece's cuts is
+    cut in two there (user: slicing adds a note at the cut), the second half starting on the cut's spot, so the piece
+    before keeps the first half and the piece after starts with the second (same key and colour)."""
+    paths = paths_of(whole)
+    for c in sorted(u for u in part if u):
+        k = int(c // BIG)
+        if k >= len(paths) or len(paths[k]) < 2:
+            continue
+        a = paths[k]
+        r = c - k * BIG
+        i = max(0, min(int(r), len(a) - 2))
+        beat, key = a[i] + (a[i + 1] - a[i]) * (r - i)
+        t = int(round(float(beat) * ppq))
+        hit = (spots < c) & (raw[:, 0] < t) & (raw[:, 1] > t) & (np.abs(raw[:, 2] - key) <= 1)
+        if not hit.any():
+            continue
+        j = int(np.flatnonzero(hit)[np.argmax(spots[hit])])  # (the one started last along the path)
+        raw = np.concatenate([raw, np.array([[t, raw[j, 1], raw[j, 2]]], raw.dtype)])
+        raw[j, 1] = t
+        spots = np.append(spots, c)
+        if tracks is not None:
+            tracks = np.append(tracks, tracks[j])
+    return raw, spots, tracks
 
 
 def spot_of(sh, at, scale, part=None):

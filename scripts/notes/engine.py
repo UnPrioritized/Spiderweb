@@ -29,7 +29,7 @@ from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
 from notes.polygon import clean_polygon, polygon_strokes
-from notes.sliced import clean_cut, in_part, piece_notes, run_origins, source, spotted_notes
+from notes.sliced import clean_cut, cut_through, in_part, piece_notes, run_origins, source, spotted_notes
 from notes.smooth import clean_level, smooth_path
 from notes.text import clean_text
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
@@ -452,6 +452,7 @@ def _notes_tracks(sh, ppq, keys):
         raw, spots = raw[keep], spots[keep]
         if cycling(sh) and len(raw):
             tracks = cycle_turns(sh, raw, ppq)
+        raw, spots, tracks = cut_through(sh, raw, spots, tracks, part, ppq)
         mine = in_part(spots, part)
         raw, tracks = raw[mine], tracks[mine] if tracks is not None else None
     if own is not None:
