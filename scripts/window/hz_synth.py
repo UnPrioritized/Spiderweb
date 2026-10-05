@@ -18,6 +18,7 @@ from notes.hzbass import ENVELOPES, FX, FX_START, line_at, sound_span
 from roll.roll_shared import note_name
 from window.hz_effects import AMOUNT, FxPane
 from window.hz_knobs import SynthKnobs
+from window.hz_live import free_sound_later, keep_sound
 
 BLACK = (1, 3, 6, 8, 10)
 KEY_HELD = "#7aa7f0"
@@ -315,6 +316,7 @@ class SynthWindow(SynthKnobs, tk.Toplevel):
             self.fx.asking.destroy()
         self.hz.synth_win = None
         self.destroy()
+        free_sound_later(self.app)
 
 
 def open_synth(hz):
@@ -323,6 +325,7 @@ def open_synth(hz):
         hz.synth_win.deiconify()
         hz.synth_win.lift()
         return hz.synth_win
+    keep_sound(hz.app)
     hz.synth_win = SynthWindow(hz)
     if not hz.preview_on.get():
         hz.preview_on.set(True)

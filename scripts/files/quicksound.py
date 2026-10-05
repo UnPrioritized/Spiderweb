@@ -203,6 +203,12 @@ class QuickSound:
                 _, old = self.kept.popitem(last=False)
                 self.size -= old[0].nbytes
 
+    def forget(self):
+        """Every recording thrown away (the loudness curve kept)."""
+        with self.lock:
+            self.kept.clear()
+            self.size = 0
+
     def used_mb(self):
         return self.size / 1e6
 

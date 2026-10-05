@@ -2303,7 +2303,7 @@
  "ps.slow": "slower than playing: playing waits at the grey",
  "ps.limiter": "A limiter always keeps the sound from getting too loud, however many keys play at once.",
  "ps.live_mb": "Memory for live keys (MB)",
- "ps.live_mb_tip": "How much memory the live keys may keep for the notes they record from the soundfont. When it's full, the ones used least are thrown away and recorded again when needed (a short wait).",
+ "ps.live_mb_tip": "How much memory the live keys may keep for the notes they record from the soundfont. When it's full, the ones used least are thrown away and recorded again when needed (a short wait). All of them are freed a minute after the synth window closes.",
  "ps.live_used": "Live keys: {used} MB of {limit} MB kept",
  "hz.live_needs_preview": "Turn Preview on in the Hz bass window to play the keys live.",
  "hz.synth": "Synth…",

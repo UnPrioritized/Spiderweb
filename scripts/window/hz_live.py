@@ -33,16 +33,45 @@ BUFFER = 0.06  # seconds of sound the sound device keeps ready (short: a press i
 AHEAD = 1.0  # seconds of notes whose recordings are asked for ahead
 FIRST = 8.0  # beats of a held note made at first (doubled when it's held near the end of them)
 TICK_MS = 40
+FREE_MS = 60000  # the recordings are freed this long after the synth window closes (user)
 HZ_KEYS = ("tones", "fx", "loop", "off", "amount", "from", "fit", "sustain", "lfo", "grow", "own")
 
 
 def quick_sound(app):
-    """The quick sound's recordings, kept for as long as Spiderweb is open (app.quick)."""
+    """The quick sound's recordings (app.quick), kept while the synth window is open and FREE_MS after it closes
+    (keep_sound / free_sound_later)."""
     cfg = app.hz_preview
     q = getattr(app, "quick", None)
     if q is None or q.synth is not app.synth or q.nofx != cfg["nofx"]:  # (No reverb or chorus changed: made anew)
         app.quick = QuickSound(app.synth, cfg["live_mb"], cfg["nofx"])
     return app.quick
+
+
+def keep_sound(app):
+    """The synth window opened: its recordings stay (a wait to free them called off)."""
+    job = getattr(app, "quick_free", None)
+    if job:
+        app.after_cancel(job)
+    app.quick_free = None
+
+
+def free_sound_later(app):
+    """The synth window closed: its recordings are freed FREE_MS later (user: reopened before that, they're kept)."""
+    keep_sound(app)
+    app.quick_free = app.after(FREE_MS, lambda: free_sound(app))
+
+
+def free_sound(app):
+    """The live keys' recordings thrown away (the memory goes back to Windows; the soundfont's loudness curve stays),
+    unless a live note still sounds."""
+    app.quick_free = None
+    hz = app.hz_window
+    if hz is not None and hz.live.active():  # (its fall still playing: a bit later)
+        app.quick_free = app.after(1000, lambda: free_sound(app))
+        return
+    q = getattr(app, "quick", None)
+    if q is not None:
+        q.forget()
 
 
 class LiveKeys:
