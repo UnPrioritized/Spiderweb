@@ -139,6 +139,14 @@ MODES = {"fm": {"depth": (0.0, 1.0, 0.4), "ratio": (0.25, 16.0, 1.0), "time": (0
 FM_INDEX = 5.0
 GROWL = 0.5
 CRUSH = 1 / 40
+# hz["rack"] (the Effects tab, in the order added; "off": True = switched off, kept): kind -> its settings (lowest,
+# highest, where its knob starts). chorus: every other key's tone goes up to `depth` cents and back `rate` times a
+# beat (no extra notes); echo: the whole sound again `repeats` times, `time` beats apart, each `fade` as loud as the
+# one before; reverb: each note's tone rings on `length` beats after it ends, starting `level` as loud and fading,
+# its waves landing more and more scattered (up to `scatter` x half a wave)
+RACK = {"chorus": {"depth": (0.0, 100.0, 15.0), "rate": (0.0, 64.0, 0.5)},
+        "echo": {"time": (1 / 64, 64.0, 0.75), "repeats": (1.0, 8.0, 3.0), "fade": (0.0, 1.0, 0.5)},
+        "reverb": {"length": (1 / 16, 64.0, 2.0), "scatter": (0.0, 1.0, 0.5), "level": (0.0, 1.0, 0.5)}}
 VOICES = 8  # hz["voice"]: the most copies
 DETUNE = 100.0  # ... the most cents between the lowest and the highest copy
 GLIDE = 64.0  # ... the longest glide, in beats
@@ -259,15 +267,44 @@ def clean_mode(mode):
     where its knob starts)}, or {} (no mode)."""
     if not isinstance(mode, dict) or mode.get("kind") not in MODES:
         return {}
-    out = {"kind": mode["kind"]}
-    for key, (lo, hi, start) in MODES[mode["kind"]].items():
+    return {"kind": mode["kind"], **clean_settings(mode, MODES[mode["kind"]])}
+
+
+def clean_settings(got, table):
+    """Settings checked against their (lowest, highest, start) table: each within its range (missing / no good = its
+    start); counts whole."""
+    out = {}
+    for key, (lo, hi, start) in table.items():
         try:
-            v = float(mode.get(key, start))
+            v = float(got.get(key, start))
         except (TypeError, ValueError):
             v = start
         v = min(hi, max(lo, v if math.isfinite(v) else start))
-        out[key] = float(round(v)) if key == "every" else v
+        out[key] = float(round(v)) if key in ("every", "repeats") else v
     return out
+
+
+def clean_rack(rack):
+    """The Effects tab checked (hz["rack"], see RACK): [{"kind", its settings, "off": True when switched off}] in
+    order, each kind once."""
+    out, seen = [], set()
+    for e in rack if isinstance(rack, list) else ():
+        if isinstance(e, dict) and e.get("kind") in RACK and e["kind"] not in seen:
+            seen.add(e["kind"])
+            out.append({"kind": e["kind"], **clean_settings(e, RACK[e["kind"]]),
+                        **({"off": True} if e.get("off") is True else {})})
+    return out
+
+
+def rack_on(hz, kind):
+    """The Effects tab's `kind` when it's there and on, else None."""
+    return next((e for e in hz.get("rack") or () if e["kind"] == kind and not e.get("off")), None)
+
+
+def rack_tail(hz):
+    """Beats the Effects tab's echo and reverb make the sound go on for after the notes."""
+    echo, reverb = rack_on(hz, "echo"), rack_on(hz, "reverb")
+    return (echo["repeats"] * echo["time"] if echo else 0.0) + (reverb["length"] if reverb else 0.0)
 
 
 def clean_extra(hz):
@@ -290,7 +327,7 @@ def copies(hz):
     return [v["detune"] * (i / (n - 1) - 0.5) for i in range(n)]
 
 
-CLEAN_EXTRA = {"voice": clean_voice, "mode": clean_mode}
+CLEAN_EXTRA = {"voice": clean_voice, "mode": clean_mode, "rack": clean_rack}
 EXTRAS = tuple(CLEAN_EXTRA)  # the synth window's own settings (not lines), each checked by its CLEAN_EXTRA
 
 
@@ -467,9 +504,11 @@ def tails(hz):
 
 
 def sound_span(hz):
-    """How long the tones sound together, in beats (tones_span and the falls after them, tails)."""
-    got = tails(hz)
-    return max((n["t"] + n["len"] + got.get(n["id"], 0.0) for n in hz.get("tones") or ()), default=0.0)
+    """How long the tones sound together, in beats (tones_span and the falls after them, tails; the Effects tab's
+    echo and reverb after that, rack_tail)."""
+    got, tones = tails(hz), hz.get("tones") or ()
+    end = max((n["t"] + n["len"] + got.get(n["id"], 0.0) for n in tones), default=0.0)
+    return end + rack_tail(hz) if tones else end
 
 
 def fx_at(hz, name, beat, tone=None):
@@ -553,7 +592,8 @@ def old_fx(tones):
 def has_fx(hz):
     """True when every key needs its own repeats (KeyGrid): placed tones with effects, several copies (Voice) or a
     wave mode."""
-    return (bool(hz.get("fx")) or len(copies(hz)) > 1 or bool(hz.get("mode"))) and bool(hz.get("tones"))
+    return ((bool(hz.get("fx")) or len(copies(hz)) > 1 or bool(hz.get("mode"))
+             or any(not e.get("off") for e in hz.get("rack") or ())) and bool(hz.get("tones")))
 
 
 def clean_tones(tones):
@@ -995,6 +1035,7 @@ class KeyGrid:
         self.lo, self.n, self.got = lo, max(1, n), {}
         self.copies, self.same = copies(hz), bool((hz.get("voice") or {}).get("same"))
         self.mode, self.ppq = hz.get("mode") or {}, ppq
+        self.chorus, self.echo, self.reverb = (rack_on(hz, k) for k in ("chorus", "echo", "reverb"))
         self.runs = []
         tail = tails(hz)
         for starts, nexts, whose in tone_runs(hz, left, ppq):
@@ -1020,10 +1061,49 @@ class KeyGrid:
             depth = lfo.get("tremolo_depth")  # (as it was without one: the very same numbers)
             run["trem"] = (0.1, TREMOLO_DEPTH) if depth is None else (1.0 - depth, depth)
             run["since"] = beat - n0["t"]  # (beats from its note's start: the wave modes)
+            run["tone"], run["held"] = n0, whose[1] is None
             self.runs.append(run)
+        if self.reverb:
+            self.runs += self.reverb_runs(hz, left, ppq)
         self.shaped = (any(r["has_" + name].any() for r in self.runs for name in WAVES)
                        or self.mode.get("kind") in ("fm", "pulse", "sync"))
-        self.loud = self.shaped or any(name in (hz.get("fx") or ()) for name in VEL_FX)
+        self.loud = (self.shaped or any(name in (hz.get("fx") or ()) for name in VEL_FX)
+                     or bool(self.echo or self.reverb))
+
+    def reverb_runs(self, hz, left, ppq):
+        """The Effects tab's reverb: after each note a chain of slides ends with, its tone goes on for the reverb's
+        length (cut where a note of the same pitch starts, as the falls are), with everything as it was when the note
+        ended; made quieter and scattered in made() ("tail_u" = 0..1 of the way through it)."""
+        r, tones = self.reverb, hz["tones"]
+        if r["level"] ** 2 <= SOFT:
+            return []
+        quiet = 1.0 - (SOFT / r["level"] ** 2) ** (1 / 3)  # (0..1 of the way: from here on too soft, left out)
+        leaving = {a["id"] for a, _, _ in links(tones)}
+        out = []
+        for n in tones:
+            src = [run for run in self.runs if run["tone"] is n and run["held"] and len(run["starts"])]
+            if n["id"] in leaving or not src:
+                continue
+            src = max(src, key=lambda run: run["starts"][-1])
+            end = n["t"] + n["len"]
+            nxt = min((m["t"] for m in tones if abs(pitch(m) - pitch(n)) < 1e-9 and m["t"] >= end - 1e-9),
+                      default=math.inf)
+            length = min(r["length"], nxt - end)
+            if length <= 1e-9:
+                continue
+            i = max(0, int(np.searchsorted(src["beat"], end, "right")) - 1)
+            gate, at = float(src["waves"][i]), (left + end) * ppq
+            count = int(math.ceil(quiet * length * ppq / gate))
+            run = {k: (np.full(count, v[i]) if isinstance(v, np.ndarray) else v) for k, v in src.items()}
+            run["starts"] = at + gate * np.arange(count)
+            run["waves"], run["number"] = np.full(count, gate), np.arange(count)
+            run["beat"] = run["starts"] / ppq - left
+            run["since"] = src["since"][i] + (run["starts"] - src["starts"][i]) / ppq
+            run["limits"] = np.full(count, math.floor(at + length * ppq + 0.5), np.int64)
+            run["until"], run["held"] = np.inf, False
+            run["tail_u"] = np.arange(count) * gate / (length * ppq)
+            out.append(run)
+        return out
 
     @staticmethod
     def respaced(run, x, scale=1.0):
@@ -1032,7 +1112,8 @@ class KeyGrid:
         it may take more or fewer repeats to fill the stretch; scale = every wave that many times as long (a Voice
         copy's own tone: none past the stretch's end). None when none of them is on."""
         off, vib = run["offpitch"], run["vibrato"]
-        if not (off.any() or vib.any()) and scale == 1.0:
+        scaled = np.any(np.asarray(scale) != 1.0)
+        if not (off.any() or vib.any() or scaled):
             return None
         stretch = scale * (1.0 + OFF_PITCH * off * (x - 0.5)) * (
             1.0 + VIBRATO * vib * np.sin(2.0 * np.pi * run["vib_rate"] * (run["beat"] - run["beat"][0])))
@@ -1043,7 +1124,7 @@ class KeyGrid:
         out = {k: (v[pick] if isinstance(v, np.ndarray) else v) for k, v in run.items()}
         out["starts"] = run["starts"][0] + np.concatenate([[0.0], np.cumsum(waves)[:-1]])
         out["waves"], out["number"] = waves, np.arange(n + more)
-        if scale != 1.0:
+        if scaled:
             keep = out["starts"] < run["starts"][-1] + run["waves"][-1] - 1e-6
             out = {k: (v[keep] if isinstance(v, np.ndarray) else v) for k, v in out.items()}
         return out
@@ -1058,14 +1139,22 @@ class KeyGrid:
         noise = np.random.default_rng(1000 + key)  # (the same every time: the key is the seed)
         all_starts, all_limits, all_factors, all_quiet = [], [], [], []
         cents = self.copies if self.same else [self.copies[(key - self.lo) % len(self.copies)]]  # (Voice copies)
+        chorus = self.chorus if (key - self.lo) % 2 == 1 else None  # (every other key)
         for run, c in ((run, c) for run in self.runs for c in cents):
-            run = self.respaced(run, x, 2.0 ** (-c / 1200.0)) or run
+            scale = 2.0 ** (-c / 1200.0)
+            if chorus:  # (up to depth cents and back, counted from the shape's start: it runs on over the notes)
+                scale = scale * 2.0 ** (-chorus["depth"] * (1.0 - np.cos(2.0 * np.pi * chorus["rate"] * run["beat"]))
+                                        / 2.0 / 1200.0)
+            run = self.respaced(run, x, scale) or run
             late = run["slant"] * x + np.floor(x * run["groups"]) / run["groups"]
             if run["noisy"].any():
                 late = late + run["noisy"] * noise.random(len(late))
             if self.mode.get("kind") == "growl":  # (late by turns: 0 .. amount over `every` waves)
                 every = int(self.mode["every"])
                 late = late + GROWL * self.mode["amount"] * (run["number"] % every) / (every - 1)
+            tail = run.get("tail_u")  # (the reverb's: more and more scattered)
+            if tail is not None:
+                late = late + self.reverb["scatter"] * 0.5 * tail * noise.random(len(tail))
             starts = run["starts"] + late * run["waves"]
             limits = run["limits"]
             factor, quiet = np.ones(len(starts)), np.zeros(len(starts), bool)
@@ -1076,6 +1165,8 @@ class KeyGrid:
                 loud = loud * (run["trem"][0] + run["trem"][1] * (1.0 + np.cos(2.0 * np.pi * run["turns"])) / 2.0)
                 vol = np.where(run["has_volume"], run["volume"], 1.0)
                 loud = loud * vol
+                if tail is not None:  # (the reverb: starting at its level, fading)
+                    loud = loud * self.reverb["level"] ** 2 * (1.0 - tail) ** 3
                 soft = np.where(run["number"] % 2 == 1, 1.0 - run["octave"], 1.0)  # (on the velocity itself)
                 if self.shaped:  # SUB hits in every wave, each as loud as the waveforms say there (wave_hits)
                     plain = ~np.any([run["has_" + name] for name in WAVES], axis=0)
@@ -1098,6 +1189,18 @@ class KeyGrid:
             all_limits.append(limits[keep])
             all_factors.append(factor[keep])
             all_quiet.append(quiet[keep])
+        if self.echo and all_starts:  # (the whole sound again, later and quieter: one more line of notes each)
+            made = list(zip(all_starts, all_limits, all_factors, all_quiet))
+            for i in range(1, int(self.echo["repeats"]) + 1):
+                gain = self.echo["fade"] ** (i / 2.0)  # (loudness goes with the velocity squared)
+                if gain * gain < SOFT:
+                    break
+                shift = i * self.echo["time"] * self.ppq
+                for starts, limits, factor, quiet in made:
+                    all_starts.append(starts + shift)
+                    all_limits.append(limits + int(math.floor(shift + 0.5)))
+                    all_factors.append(factor * gain)
+                    all_quiet.append(quiet)
         if all_starts:
             sq, which = _grid(np.concatenate(all_starts), np.concatenate(all_limits))
             factor = np.concatenate(all_factors)[which]

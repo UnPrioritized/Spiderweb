@@ -21,7 +21,7 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.hzbass import (CRUSH, DETUNE, FAST, GROUPS, GROWL, LOOP, MODES, OFF_PITCH, PITCH, SOFT, SUB, TREMOLO,
+from notes.hzbass import (CRUSH, DETUNE, FAST, GROUPS, GROWL, LOOP, MODES, OFF_PITCH, PITCH, RACK, SOFT, SUB, TREMOLO,
                           TREMOLO_DEPTH, VIBRATO_RATE, VOICES, WAH, WAVES, clean_extra, clean_mode, clean_voice, copies,
                           group_count, line_at, wave_hits)
 from window.hz_effects import AMOUNT, FX_COLOR
@@ -46,9 +46,10 @@ KINDS = {"time": ("hz.synth_beats", 0.0, TIME_MOST, (0.05, 0.25, 0.01), TIME_KNO
          "ratio": ("hz.synth_times", MODES["fm"]["ratio"][0], MODES["fm"]["ratio"][1], (0.25, 1, 0.01),
                    MODES["fm"]["ratio"][1]),
          "sync": ("hz.synth_times", MODES["sync"]["amount"][0], MODES["sync"]["amount"][1], (0.1, 1, 0.01), None),
-         "every": (None, MODES["growl"]["every"][0], MODES["growl"]["every"][1], (1, 1, 1), None)}
+         "every": (None, MODES["growl"]["every"][0], MODES["growl"]["every"][1], (1, 1, 1), None),
+         "repeats": (None, RACK["echo"]["repeats"][0], RACK["echo"]["repeats"][1], (1, 1, 1), None)}
 PERCENTS = ("percent", "width")  # (kept 0..1, shown and typed in %)
-COUNTS = ("groups", "voices", "every")  # (whole numbers)
+COUNTS = ("groups", "voices", "every", "repeats")  # (whole numbers)
 # the Wave box's modes (hzbass.MODES): their knobs (knob = mode_setting) and kinds; only the picked mode's are shown
 MODE_KNOBS = {"fm": (("fm_depth", "percent"), ("fm_ratio", "ratio"), ("fm_time", "time")),
               "pulse": (("pulse_width", "width"), ("pulse_rate", "vib_rate")),
@@ -71,7 +72,13 @@ BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain",
                        ("noisy", "percent", 0.0)),
          "voice": (("voices", "voices", 1.0), ("detune", "cents", 20.0), ("glide", "time", 0.0))}
 ROWS = (("volume", "wave", "pitch", "tone"), ("vibrato", "tremolo", "character", "voice"))
+# the Effects tab's effects (hzbass.RACK, window/hz_rack.py): their knobs (knob = effect_setting) and kinds
+RACK_KNOBS = {"chorus": (("chorus_depth", "cents"), ("chorus_rate", "vib_rate")),
+              "echo": (("echo_time", "time"), ("echo_repeats", "repeats"), ("echo_fade", "percent")),
+              "reverb": (("reverb_length", "time"), ("reverb_scatter", "percent"), ("reverb_level", "percent"))}
 KNOBS = {key: (box, kind, start) for box, knobs in BOXES.items() for key, kind, start in knobs}
+KNOBS.update({key: (fx, kind, RACK[fx][key.split("_", 1)[1]][2]) for fx, knobs in RACK_KNOBS.items()
+              for key, kind in knobs})
 COLOURS = {"volume": FX_COLOR["volume"], "wave": FX_COLOR["sine"], "pitch": FX_COLOR["pitch"],
            "vibrato": FX_COLOR["vibrato"], "tremolo": FX_COLOR["tremolo"], "tone": FX_COLOR["sweep"],
            "character": FX_COLOR["slant"], "voice": "#3a6ee0"}
@@ -266,6 +273,17 @@ def read_voice(win, was):
     return got, True
 
 
+def read_rack(win, was):
+    """The Effects tab: {rack: its effects in order, rack_off: those switched off, each one's knobs} (an effect not
+    there: its knobs kept as they were)."""
+    rack = win.extra.get("rack", ())
+    got = {"rack": tuple(e["kind"] for e in rack), "rack_off": tuple(e["kind"] for e in rack if e.get("off"))}
+    for e in rack:
+        for key, _ in RACK_KNOBS[e["kind"]]:
+            got[key] = e[key.split("_", 1)[1]]
+    return got
+
+
 READ = {"volume": read_volume, "wave": read_wave, "pitch": read_pitch, "vibrato": read_vibrato,
         "tremolo": read_tremolo, "tone": read_tone, "character": read_character, "voice": read_voice}
 
@@ -363,6 +381,7 @@ class SynthKnobs:
         self.vals = {key: start for key, (_, _, start) in KNOBS.items()}
         self.vals["wave"], self.vals["sweep"] = "none", False
         self.vals["same"], self.vals["touching"], self.vals["mode"] = False, False, "off"
+        self.vals["rack"], self.vals["rack_off"] = (), ()  # (the Effects tab's effects in order, those switched off)
         self.mode_cells = {}  # the Wave box's mode -> its knobs' cells (only the picked mode's shown)
         self.dials, self.dial_vars, self.dial_boxes, self.box_says, self.pics = {}, {}, {}, {}, {}
         self.pic_for = {}  # what each picture was drawn for
@@ -630,6 +649,8 @@ class SynthKnobs:
             fx.drop("wah")
             if v["wah"] > 0:
                 self.fxl["wah"] = [[0.0, v["wah"]]]
+        elif box in RACK:
+            self.write_rack()
         else:
             for name in CHARACTER:
                 fx.drop(name)
@@ -666,6 +687,7 @@ class SynthKnobs:
                 says = "" if made else tr("hz.synth_drawn")
                 if self.box_says[box].cget("text") != says:
                     self.box_says[box].config(text=says)
+            self.vals.update(read_rack(self, self.vals))
         for key, (box, kind, _) in KNOBS.items():
             v = self.vals[key]
             k = knob_of(kind, v)
@@ -699,6 +721,7 @@ class SynthKnobs:
         if self.touching_var.get() != self.vals["touching"]:
             self.touching_var.set(self.vals["touching"])
         self.draw_pics()
+        self.show_rack()
         self.show_preset()
 
     def draw_pics(self):

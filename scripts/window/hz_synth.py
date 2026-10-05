@@ -1,5 +1,6 @@
 """The Hz bass synth window (Hz bass window → Synth…), like a synth's own window (user): a Knobs tab (boxes of knobs,
-like a synth's, writing the effects' lines: hz_knobs.py), a Lines tab (the effects' lines big, for one note), and a
+like a synth's, writing the effects' lines: hz_knobs.py), an Effects tab (a rack: chorus, echo, reverb look-alike:
+hz_rack.py), a Lines tab (the effects' lines big, for one note), and a
 piano keyboard along the bottom to hear the Hz bass live (hz_live.py: the quick sound, NOT the MIDI; the warning stays
 at the top).
 
@@ -21,6 +22,7 @@ from window.hz_effects import AMOUNT, FxPane
 from window.hz_knobs import SynthKnobs
 from window.hz_live import free_sound_later, keep_sound
 from window.hz_presets import PresetBar
+from window.hz_rack import SynthRack
 from window.tool_window import Knob
 
 BLACK = (1, 3, 6, 8, 10)
@@ -89,7 +91,7 @@ class SynthPane(FxPane):
                       font=font)
 
 
-class SynthWindow(PresetBar, SynthKnobs, tk.Toplevel):
+class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
     """The window (one per Hz bass window: hz.synth_win). The pane's `win`: its lines are the Hz bass window's."""
 
     def __init__(self, hz):
@@ -122,7 +124,7 @@ class SynthWindow(PresetBar, SynthKnobs, tk.Toplevel):
         tabs = ttk.Frame(self, padding=(8, 0, 8, 4))
         tabs.pack(fill="x")
         self.page = tk.StringVar(value="knobs")
-        for key in ("lines", "knobs"):  # (from the right)
+        for key in ("lines", "effects", "knobs"):  # (from the right)
             ttk.Radiobutton(tabs, text=tr(f"hz.synth_{key}"), variable=self.page, value=key, style="Toolbutton",
                             command=self.show_page, takefocus=False).pack(side="right")
         self.build_presets(tabs)
@@ -139,6 +141,8 @@ class SynthWindow(PresetBar, SynthKnobs, tk.Toplevel):
         self.bind("<MouseWheel>", self.knobs_wheel, add="+")
         self.fx = SynthPane(self, hz)
         self.build_knobs(self.knobs)
+        self.rack_box = ttk.Frame(self, padding=(10, 4, 10, 8))  # (the Effects tab)
+        self.build_rack(self.rack_box)
         self.canvas = self.fx.canvas
         self.canvas.config(takefocus=True)
         self.canvas.bind("<Configure>", lambda e: self.redraw())
@@ -169,9 +173,11 @@ class SynthWindow(PresetBar, SynthKnobs, tk.Toplevel):
 
     def show_page(self):
         """The Knobs or the Lines tab shown."""
-        knobs = self.page.get() == "knobs"
-        (self.canvas if knobs else self.knobs_box).pack_forget()
-        (self.knobs_box if knobs else self.canvas).pack(fill="both", expand=True)
+        pages = {"knobs": self.knobs_box, "effects": self.rack_box, "lines": self.canvas}
+        for key, w in pages.items():
+            if key != self.page.get():
+                w.pack_forget()
+        pages[self.page.get()].pack(fill="both", expand=True)
         self.show_status()
         self.show_knobs()
 
@@ -275,7 +281,7 @@ class SynthWindow(PresetBar, SynthKnobs, tk.Toplevel):
         self.show_knobs()
 
     def show_status(self, e=None):
-        knobs = self.page.get() == "knobs"
+        knobs = self.page.get() != "lines"  # (the Effects tab has knobs too)
         letters = tr("hz.synth_letters", lo=note_name(self.kb_base), hi=note_name(min(127, self.kb_base + 16)))
         hint = tr("hz.synth_hint_knobs") if knobs else self.fx.says or tr("hz.synth_hint")
         self.status.config(text=hint if self.fx.says and not knobs else f"{hint}  {letters}")
