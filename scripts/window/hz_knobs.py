@@ -1,0 +1,481 @@
+"""The synth window's Knobs tab (window/hz_synth.py): boxes of knobs, like a synth's (user), each writing the effects'
+lines the Hz bass already has, so everything they do is in the MIDI. A line drawn by hand that the knobs can't have
+made shows them about where it is (with a note); turning one makes new lines from the knobs.
+  Volume: Attack, Decay, Sustain, Release = the Volume line once per note, with its sustain point and fall.
+  Wave: one waveform (or the plain tone) at a Shape amount, and Octave below: those lines, flat.
+  Pitch: Amount (keys) and Time = the Pitch line once per note, from Amount keys off to the note's tone.
+Each box has a picture: the envelope (with a dot while a key sounds), one wave's hits (the notes), the pitch."""
+
+import math
+import tkinter as tk
+from tkinter import ttk
+
+import numpy as np
+
+from files.lang import tr
+from files.mathexpr import calc, fmt
+from notes.hzbass import FAST, LOOP, PITCH, SOFT, SUB, WAVES, line_at
+from window.hz_effects import AMOUNT, FX_COLOR
+from window.tool_window import Knob
+from window.widgets import Scrub, Tooltip
+
+WARN = "#c06000"
+TIME_KNOB = 4.0  # beats a time knob goes to (along a curve: fine near 0)
+TIME_MOST = 64.0  # ... and a typed one
+# what a knob's value is: (unit text, lowest, highest typed, the box's steps (Shift, Ctrl))
+KINDS = {"time": ("hz.synth_beats", 0.0, TIME_MOST, (0.05, 0.25, 0.01)),
+         "percent": ("hz.synth_percent", 0.0, 100.0, (1, 10, 0.1)),
+         "keys": ("hz.synth_keys", -PITCH, PITCH, (1, 3, 0.1))}
+# the boxes and their knobs: (knob, kind, value at the start / a middle-click)
+BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain", "percent", 1.0),
+                    ("release", "time", 0.0)),
+         "wave": (("shape", "percent", 1.0), ("octave", "percent", 0.0)),
+         "pitch": (("amount", "keys", 0.0), ("time", "time", 0.25))}
+KNOBS = {key: (box, kind, start) for box, knobs in BOXES.items() for key, kind, start in knobs}
+COLOURS = {"volume": FX_COLOR["volume"], "wave": FX_COLOR["sine"], "pitch": FX_COLOR["pitch"]}
+WAVE_NAMES = ("none",) + tuple(WAVES)
+
+
+def adsr_line(attack, decay, sustain, release):
+    """The Volume line of an ADSR envelope (beats; sustain 0..1): (points, its sustain point, its length). The rise
+    comes late and the drops fast first, as the ready-made envelopes do (the top half sounds about the same)."""
+    pts = [[0.0, 0.0, -FAST]] if attack > 0 else []
+    if decay > 0:
+        pts.append([attack, 1.0, FAST])
+    at = attack + decay
+    pts.append([at, sustain, FAST] if release > 0 else [at, sustain])
+    if release > 0:
+        pts.append([at + release, 0.0])
+    return pts, at, max(LOOP[0], at + release)
+
+
+def pitch_line(amount, time):
+    """The Pitch line from `amount` keys off (up or down) to the note's tone in `time` beats, fast first (like the
+    ready-made Drop): (points, length)."""
+    start = 0.5 + amount / (2 * PITCH)
+    if time <= 0:
+        return [[0.0, 0.5]], LOOP[0]
+    return [[0.0, start, FAST], [time, 0.5]], max(LOOP[0], time)
+
+
+def same_line(a, b):
+    """Two lines' points the same (to a millionth)."""
+    def same(x, y):
+        return x == y if isinstance(x, str) or isinstance(y, str) else abs(x - y) < 1e-6
+    return len(a) == len(b) and all(len(p) == len(q) and all(map(same, p, q)) for p, q in zip(a, b))
+
+
+def flat(win, name):
+    """An effect's line the same all along (no amount line changing it): its value, else None."""
+    pts = win.fxl.get(name)
+    if not pts or name + AMOUNT in win.fxl or max(p[1] for p in pts) - min(p[1] for p in pts) > 1e-9:
+        return None
+    return pts[0][1]
+
+
+def read_volume(win, was):
+    """The Volume box for the lines: ({attack, decay, sustain, release}, True) when the knobs could have made them
+    (or there's no Volume line: full all along), else (about where they are, False)."""
+    plain = {"attack": 0.0, "decay": 0.0, "sustain": 1.0, "release": 0.0}
+    pts = win.fxl.get("volume")
+    if not pts:
+        return plain, True
+    every, at = win.loops.get("volume"), win.sustains.get("volume")
+    if not every or win.froms.get("volume") != "note" or at is None or "volume" in win.fits:
+        return plain, False
+    top = max((p for p in pts if p[0] <= at + 1e-9), key=lambda p: p[1], default=pts[0])  # (the first highest)
+    got = {"attack": max(0.0, top[0]), "decay": max(0.0, at - top[0]), "sustain": float(line_at(pts, at)),
+           "release": max(0.0, every - at)}
+    if got["release"] <= LOOP[0] + 1e-9 and pts[-1][0] <= at + 1e-9:  # (no fall)
+        got["release"] = 0.0
+    return got, same_line(adsr_line(**got)[0], pts) and "volume:amount" not in win.fxl
+
+
+def read_wave(win, was):
+    """The Wave box: ({wave, shape, octave}, made) as read_volume. No waveform = the plain tone (Shape kept as it
+    was); several, or one changing, = drawn by hand."""
+    names = [n for n in WAVES if n in win.fxl]
+    got = {"wave": names[0] if names else "none", "shape": was["shape"], "octave": 0.0}
+    made = len(names) <= 1
+    if names:
+        v = flat(win, names[0])
+        made = made and v is not None
+        got["shape"] = v if v is not None else max(p[1] for p in win.fxl[names[0]])
+    if "octave" in win.fxl:
+        v = flat(win, "octave")
+        made = made and v is not None
+        got["octave"] = v if v is not None else max(p[1] for p in win.fxl["octave"])
+    return got, made
+
+
+def read_pitch(win, was):
+    """The Pitch box: ({amount, time}, made) as read_volume (no Pitch line: Time kept as it was)."""
+    pts = win.fxl.get("pitch")
+    if not pts:
+        return {"amount": 0.0, "time": was["time"]}, True
+    every = win.loops.get("pitch")
+    got = {"amount": (pts[0][1] - 0.5) * 2 * PITCH, "time": every or was["time"]}
+    made = (every and win.froms.get("pitch") == "note" and "pitch" not in win.fits and "pitch" not in win.sustains
+            and "pitch:amount" not in win.fxl and same_line(pitch_line(**got)[0], pts))
+    return got, bool(made)
+
+
+READ = {"volume": read_volume, "wave": read_wave, "pitch": read_pitch}
+
+
+class Dial(Knob):
+    """A synth's knob: 0 (pointing down left) to 100 (down right), turning 270 degrees. As Knob otherwise, without
+    sticking anywhere; a middle-click puts it back to `start`."""
+
+    TURN = 270
+
+    def __init__(self, parent, scale, changed, color, size=44, start=0.0):
+        super().__init__(parent, scale, changed, color=color, size=size)
+        self.start = start
+        self.bind("<ButtonPress-2>", lambda e: self.turn_to(self.start, True))
+
+    def draw(self):
+        self.delete("all")
+        s, m = self.size, max(3, self.size // 9)
+        w = max(2, m // 2)
+        self.create_arc(m, m, s - m, s - m, start=225, extent=-self.TURN, style="arc", width=w,
+                        outline="#888" if self.focus_get() is self else "#ccc")
+        if self.value:
+            self.create_arc(m, m, s - m, s - m, start=225, extent=-self.value / 100 * self.TURN, style="arc",
+                            outline=self.color if self.enabled else "#ccc", width=w)
+        c, r = s / 2, s / 2 - m * 1.8
+        a = math.radians(225 - self.value / 100 * self.TURN)
+        self.create_oval(c - r, c - r, c + r, c + r, fill="#555" if self.enabled else "#aaa", outline="")
+        self.create_line(c, c, c + r * math.cos(a), c - r * math.sin(a), fill="white", width=2)
+
+    def step(self, d):
+        if self.enabled:
+            self.turn_to(self.value + d, True)
+
+    def point(self, e):
+        if not self.enabled:
+            return
+        self.focus_set()
+        c = self.size / 2
+        if (e.x - c) ** 2 + (e.y - c) ** 2 > 4:
+            a = (225 - math.degrees(math.atan2(c - e.y, e.x - c))) % 360  # (from the left end, clockwise)
+            self.turn_to(a / self.TURN * 100 if a <= self.TURN else 100 if a < (self.TURN + 360) / 2 else 0)
+
+    def press(self, e):
+        if self.enabled:
+            self.focus_set()
+            self.drag = (e.y, self.value)
+
+    def move(self, e):
+        if self.drag:
+            y, r = self.drag
+            r = max(0.0, min(100.0, r + (y - e.y) * (0.1 if e.state & 1 else 0.5)))
+            self.drag = (e.y, r)
+            self.turn_to(r)
+
+    def turn_to(self, value, done=False):
+        super().turn_to(max(0.0, min(100.0, value)), done)
+
+
+def knob_of(kind, v):
+    """Where a knob points for a value."""
+    if kind == "time":
+        return min(100.0, 100 * math.sqrt(v / TIME_KNOB))
+    if kind == "keys":
+        return max(-100.0, min(100.0, 100 * v / PITCH))
+    return 100 * v
+
+
+def value_of(kind, k):
+    """A knob's value where it points (keys: whole keys)."""
+    if kind == "time":
+        return round(TIME_KNOB * (k / 100) ** 2, 3)
+    if kind == "keys":
+        return float(round(PITCH * k / 100))
+    return k / 100
+
+
+def shown(kind, v):
+    return 100 * v if kind == "percent" else v
+
+
+class SynthKnobs:
+    """The Knobs tab of SynthWindow (needs its fx pane, fxl / loops / ..., redraw, commit_fx, live, page)."""
+
+    def build_knobs(self, page):
+        s = self.s
+        self.turning = None  # while a knob is turned: the lines from before (FxPane.state)
+        self.vals = {key: start for key, (_, _, start) in KNOBS.items()}
+        self.vals["wave"] = "none"
+        self.dials, self.dial_vars, self.dial_boxes, self.box_says, self.pics = {}, {}, {}, {}, {}
+        self.pic_for = {}  # what each picture was drawn for
+        self.dot_at = None  # where the envelope picture's moving dot is drawn
+        for name, knobs in BOXES.items():
+            box = ttk.Labelframe(page, text=tr(f"hz.synth_{name}"), padding=(10, 4, 10, 8))
+            box.pack(side="left", anchor="n", padx=(0, 10))
+            col = 0
+            if name == "wave":
+                cell = ttk.Frame(box)
+                cell.grid(row=0, column=0, padx=6, sticky="n")
+                ttk.Label(cell, text=tr("hz.synth_wave_kind")).pack()
+                self.wave_names = [tr("hz.synth_wave_none")] + [tr("hz.fx_" + n) for n in WAVES]
+                self.wave_var = tk.StringVar(value=self.wave_names[0])
+                cb = self.wave_pick = ttk.Combobox(cell, textvariable=self.wave_var, values=self.wave_names,
+                                                   state="readonly", width=9)
+                cb.pack(pady=(12, 0))
+                cb.bind("<<ComboboxSelected>>", lambda e: self.on_wave())
+                Tooltip(cb, tr("hz.synth_tip_wave"))
+                col = 1
+            for key, kind, start in knobs:
+                self.dial_cell(box, col, key, kind, start, COLOURS[name])
+                col += 1
+            size = {"volume": (260, 90), "wave": (200, 90), "pitch": (150, 90)}[name]
+            pic = self.pics[name] = tk.Canvas(box, width=round(size[0] * s), height=round(size[1] * s),
+                                              background="white", highlightthickness=1, highlightbackground="#ccc")
+            pic.grid(row=1, column=0, columnspan=col, sticky="ew", pady=(8, 0))
+            says = self.box_says[name] = ttk.Label(box, text="", foreground=WARN, wraplength=round(size[0] * s))
+            says.grid(row=2, column=0, columnspan=col, sticky="w", pady=(6, 0))
+            pic.bind("<Configure>", lambda e, says=says: (says.config(wraplength=e.width), self.draw_pics()))
+
+    def dial_cell(self, box, col, key, kind, start, colour):
+        """A knob with its name over it and its value's box under it."""
+        cell = ttk.Frame(box)
+        cell.grid(row=0, column=col, padx=6)
+        ttk.Label(cell, text=tr(f"hz.synth_{key}")).pack()
+        changed = lambda v, done: self.on_dial(key, v, done)
+        if kind == "keys":  # (up or down: 0 in the middle)
+            k = Knob(cell, self.s, changed, color=colour, size=46)
+        else:
+            k = Dial(cell, self.s, changed, colour, size=46, start=knob_of(kind, start))
+        self.dials[key] = k
+        k.pack()
+        row = ttk.Frame(cell)
+        row.pack(pady=(2, 0))
+        var = self.dial_vars[key] = tk.StringVar()
+        e = self.dial_boxes[key] = ttk.Entry(row, textvariable=var, width=5, justify="center")
+        e.pack(side="left")
+        unit, lo, hi, steps = KINDS[kind]
+        ttk.Label(row, text=tr(unit), foreground="#777").pack(side="left", padx=(2, 0))
+        e.bind("<Return>", lambda ev: (self.on_box(key), "break")[1])
+        e.bind("<FocusOut>", lambda ev: self.on_box(key))
+        Scrub(self.app, [(e, var, lambda: self.on_box(key))], steps, lo, hi, drag_box=True)
+        for w in (k, e):
+            Tooltip(w, tr(f"hz.synth_tip_{key}") + "\n" + tr("hz.synth_tip_knob"))
+
+    # ------------------------------------------------------------ changes
+
+    def on_dial(self, key, k, done):
+        """A knob turned (done: let go / one step of the wheel or the keys = one undo step)."""
+        if self.turning is None:
+            self.turning = self.fx.state()
+        self.vals[key] = value_of(KNOBS[key][1], k)
+        self.write(KNOBS[key][0])
+        if done:
+            before, self.turning = self.turning, None
+            if self.fx.now() != before:
+                self.commit_fx(before)
+
+    def on_box(self, key):
+        """A value typed (or stepped) in the box under a knob."""
+        e, var = self.dial_boxes[key], self.dial_vars[key]
+        box, kind, _ = KNOBS[key]
+        _, lo, hi, _ = KINDS[kind]
+        try:
+            v = float(calc(var.get()))
+            if not lo <= v <= hi:
+                raise ValueError
+        except (ValueError, ZeroDivisionError):
+            e.config(style="Bad.TEntry")
+            return
+        e.config(style="TEntry")
+        v = v / 100 if kind == "percent" else v
+        if abs(v - self.vals[key]) > 1e-9:
+            self.change(box, key, v)
+
+    def on_wave(self):
+        self.change("wave", "wave", WAVE_NAMES[self.wave_names.index(self.wave_var.get())])
+
+    def change(self, box, key, value):
+        """One knob's value set: one undo step."""
+        before = self.fx.state()
+        self.vals[key] = value
+        self.write(box)
+        if self.fx.now() != before:
+            self.commit_fx(before)
+
+    def write(self, box):
+        """The lines made from a box's knobs."""
+        v, fx = self.vals, self.fx
+        if box == "volume":
+            pts, at, every = adsr_line(v["attack"], v["decay"], v["sustain"], v["release"])
+            fx.drop("volume")
+            self.fxl["volume"] = pts
+            self.loops["volume"], self.froms["volume"], self.sustains["volume"] = every, "note", at
+        elif box == "wave":
+            for name in WAVES:
+                fx.drop(name)
+            if v["wave"] != "none":
+                self.fxl[v["wave"]] = [[0.0, v["shape"]]]
+            fx.drop("octave")
+            if v["octave"] > 0:
+                self.fxl["octave"] = [[0.0, v["octave"]]]
+        else:
+            fx.drop("pitch")
+            if v["amount"] and v["time"] > 0:
+                pts, every = pitch_line(v["amount"], v["time"])
+                self.fxl["pitch"] = pts
+                self.loops["pitch"], self.froms["pitch"] = every, "note"
+        self.redraw()
+        self.show_knobs()
+
+    # ------------------------------------------------------------ showing them
+
+    def show_knobs(self):
+        """The knobs, their boxes and the pictures show the lines (not while a knob is turned: it shows what's
+        turned)."""
+        if self.turning is None:
+            for box, read in READ.items():
+                got, made = read(self, self.vals)
+                self.vals.update(got)
+                says = "" if made else tr("hz.synth_drawn")
+                if self.box_says[box].cget("text") != says:
+                    self.box_says[box].config(text=says)
+        for key, (box, kind, _) in KNOBS.items():
+            v = self.vals[key]
+            k = knob_of(kind, v)
+            if not self.dials[key].drag and abs(self.dials[key].value - k) > 0.05:
+                self.dials[key].set(k)
+            text = fmt(shown(kind, v))
+            e = self.dial_boxes[key]
+            if self.dial_vars[key].get() != text and self.focus_get() is not e:
+                self.dial_vars[key].set(text)
+                e.config(style="TEntry")
+        name = self.wave_names[WAVE_NAMES.index(self.vals["wave"])]
+        if self.wave_var.get() != name:
+            self.wave_var.set(name)
+        self.draw_pics()
+
+    def draw_pics(self):
+        """Each box's picture drawn again when its values (or size) changed."""
+        for box, knobs in BOXES.items():
+            c = self.pics[box]
+            key = (tuple(self.vals[k] for k, _, _ in knobs), self.vals["wave"] if box == "wave" else None,
+                   c.winfo_width(), c.winfo_height())
+            if c.winfo_width() < 50 or self.pic_for.get(box) == key:
+                continue
+            self.pic_for[box] = key
+            c.delete("all")
+            getattr(self, "draw_" + box)(c)
+            if box == "volume":
+                self.dot_at = None
+
+    def adsr_spots(self):
+        """The envelope's picture: (its points, sustain point, length, x of a beat, y of a value, the held part's
+        width)."""
+        v = self.vals
+        pts, at, _ = adsr_line(v["attack"], v["decay"], v["sustain"], v["release"])
+        every = at + v["release"]
+        c = self.pics["volume"]
+        w, h, pad = c.winfo_width(), c.winfo_height(), 10 * self.s
+        held = every / 3 if every > 0 else 1.0  # (drawn a third as long as the rest)
+        sx = (w - 2 * pad) / (every + held)
+
+        def x_of(b, after=False):  # (after the sustain point: past the held part)
+            return pad + (b + (held if after else 0.0)) * sx
+
+        def y_of(value):
+            return h - pad - value * (h - 2.5 * pad)
+        return pts, at, every, x_of, y_of, held * sx
+
+    def draw_volume(self, c):
+        """The envelope: its rise and drop, the part while the key is held (Sustain), the fall after the key is let
+        go (Release)."""
+        s = self.s
+        pts, at, every, x_of, y_of, held = self.adsr_spots()
+        h = c.winfo_height()
+        top = float(line_at(pts, at))
+        before, after = np.linspace(0.0, at, 40), np.linspace(at, every, 40)
+        xy = [(x_of(b), y_of(v)) for b, v in zip(before, line_at(pts, before))]
+        xy += [(x_of(at) + held, y_of(top))]
+        xy += [(x_of(b, True), y_of(v)) for b, v in zip(after, line_at(pts, after))]
+        c.create_rectangle(x_of(at), 0, x_of(at) + held, h, fill="#eef3fc", outline="")
+        font = ("Segoe UI", 7)
+        for text, x0, x1 in (("A", x_of(0.0), x_of(self.vals["attack"])), ("D", x_of(self.vals["attack"]), x_of(at)),
+                             ("S", x_of(at), x_of(at) + held), ("R", x_of(at) + held, x_of(every, True))):
+            if x1 - x0 >= 8 * s:
+                c.create_text((x0 + x1) / 2, 2 * s, text=text, anchor="n", fill="#999", font=font)
+        x = x_of(at) + held
+        c.create_line(x, 0, x, h, fill="#bbb", dash=(3, 3))
+        c.create_text(x + 3 * s, h - 2 * s, text=tr("hz.synth_let_go"), anchor="sw", fill="#999", font=font)
+        c.create_line(*[v for p in xy for v in p], fill=COLOURS["volume"], width=max(2, round(2 * s)))
+
+    def wave_hits(self):
+        """Two waves' hits as the notes come out (hzbass.KeyGrid): [(place 0..2, how hard 0..1)], the soft ones left
+        out."""
+        v = self.vals
+        part = np.arange(SUB) / SUB
+        one = (part == 0).astype(float)
+        if v["wave"] != "none":
+            one = (1.0 - v["shape"]) * one + v["shape"] * WAVES[v["wave"]](part)
+        out = []
+        for n in (0, 1):  # (every other wave softer: the octave below)
+            hard = one * (1.0 - v["octave"] if n % 2 else 1.0)
+            out += [(n + p, float(x)) for p, x in zip(part, hard) if x >= SOFT]
+        return out
+
+    def draw_wave(self, c):
+        """Two waves' notes, one bar each, as tall as it hits (and how many notes a wave takes)."""
+        s = self.s
+        w, h, pad = c.winfo_width(), c.winfo_height(), 8 * s
+        hits = self.wave_hits()
+        bw = (w - 2 * pad) / (2 * SUB)
+        colour = FX_COLOR.get(self.vals["wave"], "#777")
+        c.create_line(pad + (w - 2 * pad) / 2, pad, pad + (w - 2 * pad) / 2, h - pad, fill="#ddd", dash=(3, 3))
+        for p, x in hits:
+            x0 = pad + p * SUB * bw
+            c.create_rectangle(x0 + bw * 0.15, h - pad - x * (h - 3 * pad), x0 + bw * 0.85, h - pad, fill=colour,
+                               outline="")
+        c.create_line(pad, h - pad, w - pad, h - pad, fill="#bbb")
+        per = len([1 for p, _ in hits if p < 1]), len([1 for p, _ in hits if p >= 1])
+        c.create_text(w - 3 * s, 2 * s, text=tr("hz.synth_wave_notes", n=fmt(sum(per) / 2)), anchor="ne",
+                      fill="#777", font=("Segoe UI", 7))
+
+    def draw_pitch(self, c):
+        """The pitch over the start of a note: from Amount keys off to the tone (the middle line)."""
+        s = self.s
+        w, h, pad = c.winfo_width(), c.winfo_height(), 10 * self.s
+        v = self.vals
+        mid = h / 2
+        c.create_line(pad, mid, w - pad, mid, fill="#ddd")
+        font = ("Segoe UI", 7)
+        c.create_text(w - 3 * s, mid - 2 * s, text=tr("hz.synth_pitch_tone"), anchor="se", fill="#999", font=font)
+        for k, y in ((PITCH, pad), (-PITCH, h - pad)):
+            c.create_text(3 * s, y, text=f"{k:+.0f}", anchor="w", fill="#bbb", font=font)
+        time = max(v["time"], 1e-9)
+        total = time * 1.4  # (a bit of the tone after it)
+        pts, _ = pitch_line(v["amount"], v["time"]) if v["amount"] else ([[0.0, 0.5]], 0)
+        b = np.linspace(0.0, total, 60)
+        ys = line_at(pts, b)
+        x0 = pad + 14 * s
+        xy = [(x0 + u / total * (w - x0 - pad), mid - (y - 0.5) * 2 * (mid - pad)) for u, y in zip(b, ys)]
+        c.create_line(*[q for p in xy for q in p], fill=COLOURS["pitch"], width=max(2, round(2 * s)))
+
+    def draw_adsr_dot(self):
+        """While a key sounds: a dot on the envelope's picture, waiting at the sustain point while it's held, down
+        the fall after it's let go."""
+        pos = self.live.position() if self.live.active() and self.page.get() == "knobs" else None
+        c = self.pics["volume"]
+        got = None
+        if pos is not None and c.winfo_width() >= 50:
+            u, gone = pos
+            pts, at, every, x_of, y_of, held = self.adsr_spots()
+            b = min(u, at) if gone is None else min(every, at + max(0.0, u - gone))
+            got = round(x_of(b, gone is not None)), round(y_of(float(line_at(pts, b))))
+        if got == self.dot_at:
+            return
+        self.dot_at = got
+        r = 4 * self.s
+        c.delete("dot")
+        if got:
+            c.create_oval(got[0] - r, got[1] - r, got[0] + r, got[1] + r, fill=COLOURS["volume"], outline="white",
+                          width=max(1, round(1.5 * self.s)), tags="dot")
