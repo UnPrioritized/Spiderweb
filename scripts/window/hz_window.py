@@ -260,8 +260,8 @@ class HzWindow(tk.Toplevel):
         Scrub(app, [(self.pitch_entry, self.pitch_var, self.on_pitch)], (1, 10, 0.1), -1200, 1200, label=lb)
         f = piece()
         ttk.Label(f, text=tr("hz.gates")).pack(side="left")
-        self.gates = ttk.Combobox(f, values=[tr("panel_custom.hz_" + m) for m in GATE_MODES],
-                                  state="readonly", width=7)
+        names = [tr("panel_custom.hz_" + m) for m in GATE_MODES]
+        self.gates = ttk.Combobox(f, values=names, state="readonly", width=max(map(len, names)))
         self.gates.current(GATE_MODES.index("auto"))  # (a new Hz bass: Auto, user)
         self.gates.pack(side="left", padx=(4, 10))
         self.gates.bind("<<ComboboxSelected>>", self.on_gates)
@@ -1531,7 +1531,7 @@ class HzWindow(tk.Toplevel):
 
     def set_gate(self, i, mode):
         """Note i's own gates while held, "fixed" / "mixed" (the selected notes' too when it's one of them); None =
-        back to the Hz bass's. With the Hz bass's own Exact / Fixed the same as picked, a note just follows it."""
+        back to the Hz bass's. With the Hz bass's own Alternating / Fixed the same as picked, a note just follows it."""
         if i >= len(self.tones):
             return
         hz = (self.target() or {}).get("hz") or {}
@@ -1656,7 +1656,7 @@ class HzWindow(tk.Toplevel):
         self.after_idle(self.layout)
 
     def on_gates(self, e=None):
-        """The gates dropdown: Exact ("mixed"), Fixed or Auto for the Hz bass shown (one undo step), or for the one to be
+        """The gates dropdown: Alternating ("mixed"), Fixed or Auto for the Hz bass shown (one undo step), or for the one to be
         made."""
         sh = self.target()
         if sh is not None and sh.get("hz"):

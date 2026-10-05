@@ -1072,7 +1072,7 @@ def heard(hz, left, ppq, bpm):
     """What the placed tones really sound like at this PPQ and BPM (the red line of the Hz bass window): for each
     unbroken stretch of tone, arrays (start, end in beats from the left edge, pitch in keys, average pitch) of its
     repeats. A repeat lasts a whole number of ticks, so its pitch is a little off the wanted one: the lower the
-    PPQ, the more. Exact ("mixed") gates take turns so that the average is the wanted tone; fixed gates are all the same, so
+    PPQ, the more. Alternating ("mixed") gates take turns so that the average is the wanted tone; fixed gates are all the same, so
     there the average is each repeat's own pitch.
     The pitch is counted from the shape's own tuning (hz["cents"]), so a key's exact tone is that key."""
     return _heard(json.dumps(live(hz), sort_keys=True), left, ppq, float(bpm))
