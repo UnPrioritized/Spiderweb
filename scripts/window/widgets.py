@@ -9,6 +9,7 @@ from files.mathexpr import calc, fmt
 SHIFT, CTRL = 0x1, 0x4
 DRAG_PX = 4  # pixels of label dragging per step
 TIP_WIDTH = 560  # tooltips wrap longer lines at this width (at 100 % scaling), so a text needs no line breaks
+TALL = 120  # px: a widget taller than this gets its tooltip under the mouse instead of under itself
 
 
 def grid_shown(w, on):
@@ -319,10 +320,15 @@ class Tooltip:
         tk.Label(self.tip, text=self.text, justify="left", background="#ffffe8", relief="solid",
                  borderwidth=1, padx=6, pady=4, wraplength=round(TIP_WIDTH * w.winfo_fpixels("1i") / 96)).pack()
         self.tip.update_idletasks()
-        # keep it inside the window (the panel sits at its right edge)
+        # under the widget, or under the mouse for a tall one (a list as tall as the window: not at its bottom);
+        # kept inside the window (the panel sits at its right edge)
         top = w.winfo_toplevel()
-        x = min(w.winfo_rootx() + 12, top.winfo_rootx() + top.winfo_width() - self.tip.winfo_reqwidth() - 4)
-        self.tip.wm_geometry(f"+{x}+{w.winfo_rooty() + w.winfo_height() + 4}")
+        if w.winfo_height() > TALL:
+            x, y = w.winfo_pointerx(), w.winfo_pointery() + 20
+        else:
+            x, y = w.winfo_rootx() + 12, w.winfo_rooty() + w.winfo_height() + 4
+        x = min(x, top.winfo_rootx() + top.winfo_width() - self.tip.winfo_reqwidth() - 4)
+        self.tip.wm_geometry(f"+{x}+{y}")
 
     def hide(self):
         if self.job:
