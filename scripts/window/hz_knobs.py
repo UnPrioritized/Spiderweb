@@ -431,10 +431,9 @@ class SynthKnobs:
 
     def keyboard_back(self, w):
         """A wave picked / a value typed with Enter: the keyboard back to the window (no blue box left), so the
-        letters play the keys again (user). A value typed wrong keeps it, to be put right."""
-        if str(w.cget("style")) != "Bad.TEntry":
-            w.selection_clear()
-            self.focus_set()
+        letters play the keys again (user)."""
+        w.selection_clear()
+        self.focus_set()
 
     def cancel_turn(self):
         """Ctrl+Z while a knob is held: it goes back to where it was at the press, no undo step (the mouse still
@@ -459,8 +458,9 @@ class SynthKnobs:
             v = float(calc(var.get()))
             if not lo <= v <= hi:
                 raise ValueError
-        except (ValueError, ZeroDivisionError):
-            e.config(style="Bad.TEntry")
+        except (ValueError, ZeroDivisionError):  # (not a number, or out of range: back to the last good value, user)
+            var.set(self.box_text.get(key, ""))
+            e.config(style="TEntry")
             return
         e.config(style="TEntry")
         self.box_text[key] = var.get()  # (taken: from now on the box shows the sound again)
