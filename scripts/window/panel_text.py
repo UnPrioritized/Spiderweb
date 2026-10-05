@@ -8,7 +8,7 @@ from files.mathexpr import calc, fmt
 from notes.fonts import WEIGHTS
 from notes.text import TEXT_DEFAULTS, build, restyle, shown_size, text_axes, text_font, with_arial
 from window.font_dialog import FontDialog
-from window.widgets import Scrub, Tooltip, bad, good
+from window.widgets import Scrub, Tooltip, bad, good, leave_box
 
 # number boxes: setting -> (label, unit, smallest, largest)
 ENTRIES = {"size": (tr("panel_text.size"), "", 0.01, 2000),
@@ -64,7 +64,7 @@ class TextPanel:
             e = self.text_entries[key] = ttk.Entry(row, textvariable=self.text_vars[key], width=7)
             e.pack(side="left")
             e.bind("<Return>", lambda ev, key=key: self.on_text_entry(key, back=True))
-            e.bind("<FocusOut>", lambda ev, key=key: self.on_text_entry(key))
+            leave_box(self, e, self.text_vars[key], lambda left, key=key: self.on_text_entry(key))
             Scrub(self, [(e, self.text_vars[key], lambda key=key: self.on_text_entry(key))], STEPS[key], lo, hi,
                   label=lb)
             if unit:

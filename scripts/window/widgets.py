@@ -56,6 +56,22 @@ def watch_bad(e):
     e.bind("<FocusOut>", check, add="+")
 
 
+def leave_box(app, e, var, fn):
+    """A side panel box that takes its number on Enter or when it's left. fn(left=True) is called when the box is
+    left, and before the selection changes with a number typed but not entered (App.commit_typing: it goes to the
+    shapes it was typed for, user). With left it must do nothing while unchanged(e): the box still shows what the
+    panel put there (several shapes with different numbers all got the first one's, user)."""
+    var.trace_add("write", lambda *_: setattr(e, "shown_text", var.get()) if app._loading else None)
+    e.bind("<FocusOut>", lambda ev: fn(left=True))
+    app.leave_boxes[e] = lambda: fn(left=True)
+    e.bind("<Destroy>", lambda ev: app.leave_boxes.pop(e, None), add="+")
+
+
+def unchanged(e):
+    """The box still shows what the panel put in it (leave_box)."""
+    return box_text(e) == getattr(e, "shown_text", None)
+
+
 def remember_good(root):
     """Every number box's last good value starts as what it shows when it gets the keyboard (then good())."""
     def got(ev):

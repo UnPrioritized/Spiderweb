@@ -6,7 +6,7 @@ from tkinter import ttk
 from files.lang import tr
 from notes.funnel import funnel_reversed
 from files.mathexpr import calc, fmt
-from window.widgets import Scrub, Tooltip, bad, good, grid_shown
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown, leave_box, unchanged
 
 # Funnel panel: (setting, label, [(value, text, tooltip)])
 FUNNEL_CHOICES = [
@@ -70,8 +70,8 @@ class FunnelPanel:
             e = ttk.Entry(row, textvariable=var, width=width)
             e.pack(side="left", padx=(0, 4))
             e.bind("<Return>", lambda ev: self.on_funnel_entry(key))
-            e.bind("<FocusOut>", lambda ev: self.on_funnel_entry(key))
             self.funnel_entries[key] = (var, e)
+            leave_box(self, e, var, lambda left: self.on_funnel_entry(key, left))
 
         radios(1, "wall")
         radios(2, "fill")
@@ -189,9 +189,10 @@ class FunnelPanel:
         self.shapes_changed()
         self.sync_funnel()
 
-    def on_funnel_entry(self, key):
+    def on_funnel_entry(self, key, left=False):
+        """A gate box (Enter, stepped, or left: widgets.leave_box)."""
         var, e = self.funnel_entries[key]
-        if self._loading or str(e.cget("state")) == "disabled":
+        if self._loading or str(e.cget("state")) == "disabled" or left and unchanged(e):
             return
         try:
             ticks = calc(var.get())

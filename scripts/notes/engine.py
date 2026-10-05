@@ -458,36 +458,25 @@ def assign_slots(note_lists, split="key", apart=()):
     apart: groups of note list numbers that always get different slots (a custom shape's outline and inside).
     """
     n = len(note_lists)
-    by_pitch = {}
-    for owner, notes in enumerate(note_lists):
-        # Each shape's notes on a key joined into stretches first (back-to-back spam = one stretch): anything with
-        # a length that overlaps a stretch overlaps one of its notes. Notes without a length stay on their own.
-        flat = notes[:, 1] <= notes[:, 0]
-        for s, e, p in notes[flat, :3].tolist():
-            by_pitch.setdefault(p if split == "key" else 0, []).append((s, e, owner))
-        a = notes[~flat]
-        if not len(a):
-            continue
-        key = a[:, 2] if split == "key" else np.zeros(len(a), np.int64)
-        order = np.lexsort((a[:, 0], key))
-        s, e, k = a[order, 0], a[order, 1], key[order]
-        run = running_max(e, k)
-        new = np.ones(len(s), bool)
-        new[1:] = (k[1:] != k[:-1]) | (s[1:] > run[:-1])
-        at = np.nonzero(new)[0]
-        for p, s0, e0 in zip(k[at].tolist(), s[at].tolist(), np.maximum.reduceat(e, at).tolist()):
-            by_pitch.setdefault(p, []).append((s0, e0, owner))
+    busy = range(n)
+    group = list(range(n))
+    for g in apart:
+        for a in g:
+            group[a] = min(g)
+    if group != list(range(n)):
+        # a group's own lists get slots apart anyway (a shape's colours take turns note by note: lots of stretches):
+        # only lists whose group, joined, clashes with another group can clash with anything
+        whole = {}
+        for i, notes in enumerate(note_lists):
+            whole.setdefault(group[i], []).append(notes)
+        joined = [stretches(np.concatenate(ls), g, split) for g, ls in whole.items()]
+        clashing = {g for pair in clash_pairs(np.concatenate(joined)) for g in pair}
+        busy = [i for i in range(n) if group[i] in clashing]
+    parts = [stretches(note_lists[i], i, split) for i in busy]
     clashes = [set() for _ in range(n)]
-    for items in by_pitch.values():
-        items.sort()
-        active = []
-        for s, e, o in items:
-            active = [a for a in active if a[0] > s]
-            for _, ao in active:
-                if ao != o:
-                    clashes[o].add(ao)
-                    clashes[ao].add(o)
-            active.append((e, o))
+    for a, b in clash_pairs(np.concatenate(parts) if parts else np.zeros((0, 4), np.int64)):
+        clashes[a].add(b)
+        clashes[b].add(a)
     for group in apart:
         for a in group:
             clashes[a] |= set(group) - {a}
@@ -503,6 +492,55 @@ def assign_slots(note_lists, split="key", apart=()):
         slots[i] = k
         done.add(i)
     return slots
+
+
+def stretches(notes, owner, split="key"):
+    """One list's notes as (key, start, end, owner) rows, its notes on a key joined into stretches (back-to-back spam
+    = one stretch): anything with a length that overlaps a stretch overlaps one of its notes. Notes without a length
+    stay on their own. split="time": every note counts as key 0."""
+    flat = notes[:, 1] <= notes[:, 0]
+    key = notes[:, 2] if split == "key" else np.zeros(len(notes), np.int64)
+    out = [np.column_stack([key[flat], notes[flat, 0], notes[flat, 1], np.full(int(flat.sum()), owner, np.int64)])]
+    a, key = notes[~flat], key[~flat]
+    if len(a):
+        order = np.lexsort((a[:, 0], key))
+        s, e, k = a[order, 0], a[order, 1], key[order]
+        run = running_max(e, k)
+        new = np.ones(len(s), bool)
+        new[1:] = (k[1:] != k[:-1]) | (s[1:] > run[:-1])
+        at = np.nonzero(new)[0]
+        out.append(np.column_stack([k[at], s[at], np.maximum.reduceat(e, at), np.full(len(at), owner, np.int64)]))
+    return np.concatenate(out).astype(np.int64).reshape(-1, 4)
+
+
+def clash_pairs(items, chunk=1 << 22):
+    """(key, start, end, owner) stretches -> the set of (a, b) owner pairs (a < b) that clash: on the same key, one
+    starting before the other ends (in start, end, owner order; one starting where the other ends doesn't clash, nor
+    does a stretch without a length). Worked out in chunks of about `chunk` pairs at a time."""
+    if not len(items):
+        return set()
+    order = np.lexsort((items[:, 3], items[:, 2], items[:, 1], items[:, 0]))
+    k, s, e, o = (items[order, c] for c in range(4))
+    vals, rank = np.unique(np.concatenate([s, e]), return_inverse=True)  # (ticks as ranks: no overflow)
+    rank = rank.ravel()
+    row = (k - k.min()) * len(vals)
+    ps, pe = row + rank[:len(s)], row + rank[len(s):]
+    cnt = np.maximum(np.searchsorted(ps, pe, "left") - np.arange(len(ps)) - 1, 0)  # later ones starting before its end
+    total = np.cumsum(cnt)
+    n = int(o.max()) + 1
+    out, start = set(), 0
+    while start < len(ps):
+        stop = max(start + 1, int(np.searchsorted(total, (total[start - 1] if start else 0) + chunk, "right")))
+        c = cnt[start:stop]
+        if c.any():
+            i = np.repeat(np.arange(start, stop), c)
+            j = i + 1 + np.arange(len(i)) - np.repeat(np.cumsum(c) - c, c)
+            a, b = o[i], o[j]
+            m = a != b
+            code = np.unique(np.minimum(a[m], b[m]) * n + np.maximum(a[m], b[m]))
+            out.update(zip((code // n).tolist(), (code % n).tolist()))
+        start = stop
+    return out
 
 
 def running_max(values, groups):

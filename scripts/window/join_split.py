@@ -160,7 +160,7 @@ class JoinSplit:
         new = join_shapes(olds, roll.sy / roll.sx, touch)
         if new is None:
             return
-        kept, lost = shared_settings(olds)  # (glue / chop / claw / strum: kept when they all have the same)
+        kept, lost = shared_settings(olds)  # (glue / chop / claw / strum / Colours: kept when they all have the same)
         if lost and not messagebox.askokcancel(
                 tr("join_split.spiderweb"), tr("join_split.joining_these_changes") + lost[0] +
                 tr("join_split.ctrl_z_gives_them_back"), icon="warning", parent=self):

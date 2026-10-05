@@ -16,7 +16,7 @@ from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
 from notes.hzbass import AUTO, auto_picks, shortest_gate
 from window.hz_window import open_hz
 from window.range_window import open_range_graph
-from window.widgets import Scrub, Tooltip, bad, good, grid_shown
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown, leave_box, unchanged
 
 GAP_COLOR = "#c06000"  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
 MISSING_MARK = "✕ "  # in the Shape box: a placed shape whose library shape was renamed or deleted (user, 2026-10-05)
@@ -120,8 +120,7 @@ class CustomPanel:
         self.gate_entry.pack(side="left", padx=4)
         ttk.Label(g, text=tr("panel_custom.ticks_enter_to_apply"), foreground="#777").pack(side="left")
         self.gate_entry.bind("<Return>", lambda e: self.on_gate())
-        self.gate_entry.bind("<FocusOut>", lambda e: self.on_gate(left=True))
-        self._shown = {}  # what sync_custom put in the Gate / Outline gate boxes (leaving one unchanged does nothing)
+        leave_box(self, self.gate_entry, self.gate_var, self.on_gate)
         self._hz_ok = None  # the shapes skip_hz was OK'd for (not asked again while they stay selected)
         Scrub(self, [(self.gate_entry, self.gate_var, self.on_gate)], GATE_STEPS, 1, 10 ** 7, label=lb)
         # with a Range on, the gate box is orange: it's the Range's first gate, and a new number here takes it off
@@ -190,7 +189,7 @@ class CustomPanel:
             "edge_mode", EDGE_CHOICES[self.edge_mode_box.current()][0]), self.roll.focus_set()))
         Tooltip(self.edge_mode_box, tr("panel_custom.edge_mode_tip"))
         self.edge_entry.bind("<Return>", lambda e: self.on_edge())
-        self.edge_entry.bind("<FocusOut>", lambda e: self.on_edge(left=True))
+        leave_box(self, self.edge_entry, self.edge_var, self.on_edge)
         Scrub(self, [(self.edge_entry, self.edge_var, self.on_edge)], GATE_STEPS, 0, 10 ** 7, label=lb)
         # while the box is pointed at, has the keyboard or its label is dragged: a faint line on the piano roll
         # where the outline would reach inside (roll_draw.draw_edge_preview; user)
@@ -313,7 +312,6 @@ class CustomPanel:
         self.fill_var.set(fill)
         self.gate_var.set(fmt(gate_ticks(gate, self.ppq)))  # (the whole ticks the notes use, never a fraction)
         self.edge_var.set(fmt(edge_gate(tgts[0], self.ppq)))
-        self._shown = {"gate": self.gate_var.get(), "edge": self.edge_var.get()}
         self.edge_entry.config(style="TEntry")
         self.align_var.set(tgts[0].get("align", "auto"))
         ends = tgts[0].get("ends", "drop")
@@ -498,7 +496,7 @@ class CustomPanel:
         """The Gate box entered (whole ticks: a fraction is rounded, user). left: the box was only left, so nothing
         happens unless its number was changed (several shapes with different gates all got the first one's)."""
         if (self._loading or str(self.gate_entry.cget("state")) == "disabled"
-                or left and self.gate_var.get() == self._shown.get("gate")):
+                or left and unchanged(self.gate_entry)):
             return
         try:
             ticks = calc(self.gate_var.get())
@@ -511,16 +509,14 @@ class CustomPanel:
         good(self.gate_entry)  # (after: the box shows the whole ticks now)
 
     def commit_typing(self):
-        """A number typed in the Gate / Outline gate box but not entered goes to the shapes it was typed for, before
-        the selection changes (user: a click on the piano roll lost it, or gave it to new shapes)."""
+        """A number typed in a side panel box but not entered goes to the shapes it was typed for, before the
+        selection changes (user: a click on the piano roll lost it, or gave it to new shapes; widgets.leave_box)."""
         try:
             w = self.focus_get()
         except KeyError:  # (a dropdown's list has the keyboard)
             return
-        if w is self.gate_entry:
-            self.on_gate(left=True)
-        elif w is self.edge_entry:
-            self.on_edge(left=True)
+        if w in self.leave_boxes:
+            self.leave_boxes[w]()
 
     def edge_using(self, why, on):
         """The outline gate box started / stopped being used (why: which way; None = its number changed): the
@@ -542,7 +538,7 @@ class CustomPanel:
     def on_edge(self, left=False):
         """The smallest outline gate box (whole ticks; 0 = off). left: like on_gate's."""
         if (self._loading or str(self.edge_entry.cget("state")) == "disabled"
-                or left and self.edge_var.get() == self._shown.get("edge")):
+                or left and unchanged(self.edge_entry)):
             return
         try:
             ticks = calc(self.edge_var.get() or "0")

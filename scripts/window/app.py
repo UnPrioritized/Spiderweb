@@ -166,6 +166,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.big_skip = set()  # big_ask actions ticked "Don't ask again until Spiderweb is closed"
         self._notes_cache = {}
         self.colours_wanted = []  # per shape, how many colours (tracks) its notes ask for (shapes_changed)
+        self.leave_boxes = {}  # side panel box -> what takes its number when it's left (widgets.leave_box)
         self._notes_worked = 0  # shapes whose notes had to be worked out (not remembered)
         self._notes_time = 0.0  # how long that took the last time
         self._late_notes = None  # while dragging: notes left until the mouse rests

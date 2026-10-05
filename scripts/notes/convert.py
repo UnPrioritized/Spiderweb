@@ -4,7 +4,8 @@ shape, each as strokes of its own kind (a curve stays a curve, an arc an arc), s
 The notes stay the same: every stroke remembers which shape it came from ("src"), and each shape's strokes make
 their outline notes on their own (custom.outline_groups), so with Multi channel the old shapes still get channels
 of their own. Tumours become plain points (the bumps as drawn), "Last note: starts on it" is dropped. Glue, chop,
-claw and strum stay when the shapes all have the same (shared_settings), else they're dropped (the warning says).
+claw, strum and Colours stay when the shapes all have the same (shared_settings), else they're dropped (the warning
+says).
 
 The old shapes are kept in the new one (sh["from"]), so Split into separate shapes can give them back as long as the
 drawing wasn't changed (moving the whole shape is fine; resizing, turning, flipping or editing strokes isn't)."""
@@ -71,11 +72,11 @@ def losses(shapes):
 
 
 NOTE_SETTINGS = (("glue", "convert.glue"), ("chop", "chop.window_title"), ("claw", "claw.window_title"),
-                 ("strum", "strum.window_title"))
+                 ("strum", "strum.window_title"), ("cycle", "colours.colours"))
 
 
 def shared_settings(shapes):
-    """The note settings (glue, chop, claw, strum) a shape made of these keeps: the ones they all have alike (glue
+    """The note settings (glue, chop, claw, strum, Colours) a shape made of these keeps: the ones they all have alike (glue
     only on whole shapes: boxes are shares of each shape's own box), and the sentence saying which are dropped
     (a list with one sentence, or empty)."""
     keep, lost = {}, []
@@ -98,6 +99,7 @@ def to_live(shapes, paths, defaults, custom_defaults, k=None):
     drawn = [drawn_view(sh) if sh["kind"] == "custom" else sh.get("k") if sh["kind"] in ("arc", "free") else None
              for sh in shapes]
     new = new_live_shape(defaults, custom_defaults, next((d for d in drawn if d), k))
+    new.pop("cycle", None)  # (Colours: the shapes' own, below, not the one for new shapes)
     if first:
         new.update(name=first.get("name") or new["name"], fill=first["fill"], gate=first["gate"],
                    align=first.get("align", "auto"), ends=first.get("ends", "drop"))

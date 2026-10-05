@@ -2069,9 +2069,9 @@ def range_gates(sh, notes, ppq):
 
 def cycle_turns(sh, notes, ppq):
     """Which turn (0 .. n - 1) each (start, end, key) note gets (CYCLES). Spam steps are counted from the shape's
-    first note (with the "aligned" start from tick 0, so they keep to the gate grid), at the shape's gate (Hz bass:
-    its tone's gate; a gate Range: its own gates, range_steps), each note in the step it starts nearest to; other
-    notes: each start time is a step."""
+    first note (with the "aligned" start from tick 0, so they keep to the gate grid), at the shape's gate (a gate
+    Range: its own gates, range_steps; Hz bass with placed tones: its repeats, hz_steps), each note in the step it
+    starts nearest to; other notes: each start time is a step."""
     c = sh["cycle"]
     s = notes[:, 0]
     if c["by"] == "key":
@@ -2080,6 +2080,8 @@ def cycle_turns(sh, notes, ppq):
         a, b = c["every"]
         k = np.floor(s * b / (4 * a * ppq) + 1e-9).astype(np.int64)
         return k % c["n"]
+    elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS and (sh.get("hz") or {}).get("tones"):
+        k = hz_steps(sh, notes, ppq)
     elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS and sh.get("range") and not sh.get("hz"):
         k = range_steps(sh, notes, ppq)
     elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS:
@@ -2089,6 +2091,20 @@ def cycle_turns(sh, notes, ppq):
     else:
         k = np.unique(s, return_inverse=True)[1].reshape(-1)
     return (k // int(c["every"])) % c["n"]
+
+
+def hz_steps(sh, notes, ppq):
+    """Spam steps of a Hz bass with placed tones: which of its repeats (hzbass.squares) each note starts in, counted
+    over all its tones in time (with effects every key has its own repeats, counted along each key)."""
+    grid = squares(sh, ppq)
+    s = notes[:, 0]
+    if not isinstance(grid, KeyGrid):
+        return np.maximum(np.searchsorted(grid[:, 0], s, "right") - 1, 0)
+    k = np.zeros(len(notes), np.int64)
+    for key in np.unique(notes[:, 2]).tolist():
+        rows = notes[:, 2] == key
+        k[rows] = np.maximum(np.searchsorted(grid.squares(key)[:, 0], s[rows], "right") - 1, 0)
+    return k
 
 
 def _notes_groups(sh, ppq):

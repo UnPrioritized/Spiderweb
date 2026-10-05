@@ -12,7 +12,7 @@ from files.mathexpr import calc, fmt
 from notes.pattern import FORMULA_KINDS, formula_shape, loop_points
 from notes.polygon import update_polygon
 from window.formula_host import SYM_CHOICES, RollHost, layer_name, set_loop_sym, sym_label
-from window.widgets import Scrub, Tooltip, bad, good
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
 
 LAYERS = ("shape", "pattern")  # (a curve's shape first: the pattern runs along it)
 LOOP_STEPS = (1, 10, 0.1)    # quick changes (widgets.Scrub): step, Shift step, Ctrl step
@@ -155,7 +155,7 @@ class PatternPanel:
             e = ttk.Entry(cell, textvariable=var, width=5)
             e.pack(side="left", padx=(4, 0))
             e.bind("<Return>", lambda ev, n=name: self.on_formula_entry(layer, n))
-            e.bind("<FocusOut>", lambda ev, n=name: self.on_formula_entry(layer, n))
+            leave_box(self, e, var, lambda left, n=name: self.on_formula_entry(layer, n, left))
             loops = name == "loops"
             Scrub(self, [(e, var, lambda n=name: self.on_formula_entry(layer, n))],
                   LOOP_STEPS if loops else NUMBER_STEPS, 0.01 if loops else None, None, label=lb)
@@ -166,11 +166,14 @@ class PatternPanel:
                 Tooltip(w, tip)
             ui["boxes"][name] = (var, e)
 
-    def on_formula_entry(self, layer, name):
+    def on_formula_entry(self, layer, name, left=False):
+        """A formula number box (Enter, stepped, or left: widgets.leave_box)."""
         ui = self.formula_ui[layer]
         if self._loading or name not in ui["boxes"]:
             return
         var, e = ui["boxes"][name]
+        if left and unchanged(e):
+            return
         tgts = [sh for sh in self.with_layer(layer) if name == "loops" or name in sh[layer]["vars"] and
                 not sh[layer].get("loop")]
         try:

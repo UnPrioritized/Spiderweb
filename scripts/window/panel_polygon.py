@@ -10,7 +10,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.polygon import MAX_POINTS, STYLES, update_polygon
-from window.widgets import Scrub, Tooltip, bad, good
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
 
 STYLE_NAMES = [tr("panel_polygon.style_" + s) for s in STYLES]
 # name: (lowest, highest, steps (step, Shift step, Ctrl step), whole numbers only)
@@ -37,7 +37,7 @@ class PolygonPanel:
             e = self.polygon_entries[name] = ttk.Entry(cell, textvariable=var, width=5)
             e.pack(side="left", padx=(4, 0))
             e.bind("<Return>", lambda ev, n=name: self.on_polygon_number(n))
-            e.bind("<FocusOut>", lambda ev, n=name: self.on_polygon_number(n))
+            leave_box(self, e, var, lambda left, n=name: self.on_polygon_number(n, left))
             lo, hi, steps, _ = NUMBERS[name]
             Scrub(self, [(e, var, lambda n=name: self.on_polygon_number(n))], steps, lo, hi, label=lb)
             for w in (lb, e):
@@ -111,11 +111,12 @@ class PolygonPanel:
         self.sync_polygon()
         self.schedule_autosave()
 
-    def on_polygon_number(self, name):
-        if self._loading or str(self.polygon_entries[name].cget("state")) == "disabled":
+    def on_polygon_number(self, name, left=False):
+        """A number box (Enter, stepped, or left: widgets.leave_box)."""
+        e = self.polygon_entries[name]
+        if self._loading or str(e.cget("state")) == "disabled" or left and unchanged(e):
             return
         lo, hi, _, whole = NUMBERS[name]
-        e = self.polygon_entries[name]
         try:
             value = float(calc(self.polygon_vars[name].get()))
             if not math.isfinite(value) or not lo <= value <= hi or whole and value != int(value):
