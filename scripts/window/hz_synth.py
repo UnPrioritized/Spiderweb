@@ -3,7 +3,8 @@ one note, and a piano keyboard along the bottom to hear the Hz bass live (hz_liv
 the warning stays at the top).
 
 The lines are the Hz bass window's own (the same pane, hz_effects.FxPane, on this window's timeline): editing them
-here is editing them there, one undo step of the main window each. The timeline is one note of each key pressed,
+here is editing them there, one undo step of the main window each. Effects put on here go with each note (user: as in
+a synth): once per note, a repeating shape restarting at each note. The timeline is one note of each key pressed,
 from beat 0: held for the longest line counted from each note (so its whole shape shows), then the falls after the
 sustain points, all fitted to the window. Lines that play all the way from the shape's start are shown from the
 note's start too (a key pressed plays them from there). While a key sounds, a dot runs along every line."""
@@ -12,7 +13,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
-from notes.hzbass import FX, line_at, sound_span
+from notes.hzbass import ENVELOPES, FX, FX_START, line_at, sound_span
 from roll.roll_shared import note_name
 from window.hz_effects import AMOUNT, FxPane
 
@@ -37,6 +38,21 @@ class SynthPane(FxPane):
 
     def on_wheel(self, e):
         pass  # (always fitted to the window)
+
+    def new_from(self, kind):
+        """(user: a synth's lines go with each note) an envelope once per note, a repeating shape restarting at each
+        note."""
+        return "note" if kind in ENVELOPES else "restart"
+
+    def put(self, name):
+        """An effect put on here: once per note, lasting the note shown (user: a synth's lines go with each note)."""
+        win = self.win
+        before = self.state()
+        every = win.note_len()
+        win.fxl[name] = [[u * every, v] for u, v in FX_START[name]]
+        win.loops[name], win.froms[name] = every, "note"
+        self.active = name
+        win.commit_fx(before)
 
     def live_spot(self, name, u, gone):
         """As FxPane's; lines playing all the way from the shape's start: u beats in (while it's in view)."""

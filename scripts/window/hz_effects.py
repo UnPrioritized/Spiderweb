@@ -1121,7 +1121,7 @@ class FxPane:
         f.pack()
         modes = (None,) + FROM_MODES
         texts = [tr("hz.fx_from_" + (m or "left")) for m in modes]
-        was = win.froms.get(name) if name in win.loops else None
+        was = win.froms.get(name) if name in win.loops else self.new_from(None)
         how = tk.StringVar(top, value=texts[modes.index(was)])
         fit = tk.BooleanVar(top, value=name in win.fits)
         row = ttk.Frame(f)
@@ -1225,14 +1225,23 @@ class FxPane:
         if self.now() != before:
             win.commit_fx(before)
 
+    def new_from(self, kind):
+        """How a line that didn't repeat plays once it's given a shape of `kind` (None: Repeat every…): an
+        envelope once per note, the rest all the way (hz["from"])."""
+        return "note" if kind in ENVELOPES else None
+
     def set_shape(self, name, kind):
         """A ready-made shape for one repeat of the effect (it starts repeating every beat if it didn't; an envelope:
         once per note, half a beat, unless it repeats already)."""
         win = self.win
         before = self.state()
         every = win.loops.get(name)
-        if not every and kind in ENVELOPES:
-            every, win.froms[name] = 0.5, "note"
+        if not every:
+            mode = self.new_from(kind)
+            if mode:
+                win.froms[name] = mode
+            if kind in ENVELOPES:
+                every = 0.5
         every = every or 1.0
         win.fxl[name] = loop_shape(kind, every, random.randrange(1 << 30), name)
         win.loops[name] = every
