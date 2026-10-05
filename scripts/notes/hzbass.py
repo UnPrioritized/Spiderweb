@@ -33,15 +33,15 @@ shape's left edge on over and over (line_at; like an automation that repeats eve
 repeat is: 1 = as drawn, 0 = as if the effect were off (NEUTRAL). hz["from"] = {effect: "note" / "restart"}: a
 repeating effect counted from each note's start instead of the shape's left edge (like an envelope): "note" = its
 one repeat plays once from each note's start, then stays on its last value; "restart" = it repeats, starting over
-at each note. "pitch" counts from each note's own start (a note starting while others sound bends alone); the
-others from the latest note start of all (they work on every key, so a note starting starts them over for all). A
+at each note. Each note has its own, like the voices of a synth: counted from its own start (a note starting
+while others sound starts over alone; KeyGrid works it out for each tone's repeats). A
 note reached by a slide never starts it over (note_beats). hz["fit"] = [effects]: such an effect's repeat is
 stretched over each note (and the notes it slides on to) instead of lasting its own beats. hz["sustain"] = {effect:
 beat in its repeat}: for one played once per note (not stretched), like a synth's envelope: the line plays up to
 that beat, stays there while the note (its chain of slides) lasts, and the rest of it (the fall) plays after the
 note ends (a note ending before the sustain point falls from where it got to; sustained). The sound of the tones a
-chain ends with then goes on that long after them, the longest fall of all, cut where the next note starts
-(tails). hz["off"] = [effects]
+chain ends with then goes on that long after them, the longest fall of all, under the notes after it (both sound
+there, like a chord), cut only where a note of the same tone starts (tails). hz["off"] = [effects]
 switched off (Bypass): their lines are kept but do nothing (live). They change the colour of the tone, not its pitch, by making the keys hit at different spots of the wave
 (how late a key is, in waves, is added up over the effects; a key starts that late, and a repeat pushed past its
 own tone's end is left out):
@@ -352,21 +352,24 @@ def sustained(pts, every, at, u, held):
 def tails(hz):
     """{tone id: beats its sound goes on after its end}: with sustain points (hz["sustain"], effects switched off
     don't count) the falls play after a note ends, so the tones a chain of slides ends with sound on for the
-    longest fall, cut where the next note starts."""
+    longest fall, also under the notes after them (like a synth's voices), cut only where a tone of the same pitch
+    starts (both there would make their repeats twice as many: a higher tone)."""
     hz = live(hz)
     fall = max((hz["loop"][name] - at for name, at in (hz.get("sustain") or {}).items()), default=0.0)
     tones = hz.get("tones") or ()
     if fall <= 1e-12 or not tones:
         return {}
     got = chains(tones)
-    starts = sorted({s for s, _ in got.values()})
+    starts = {}
+    for n in tones:
+        starts.setdefault(pitch(n), []).append(n["t"])
     leaving = {a["id"] for a, _, _ in links(tones)}
     out = {}
     for n in tones:
         end = n["t"] + n["len"]
         if n["id"] in leaving or end < got[n["id"]][1] - 1e-9:  # (not where its chain ends)
             continue
-        nxt = next((s for s in starts if s >= end - 1e-9), math.inf)
+        nxt = min((s for s in starts[pitch(n)] if s >= end - 1e-9), default=math.inf)
         if min(fall, nxt - end) > 1e-9:
             out[n["id"]] = min(fall, nxt - end)
     return out
@@ -382,7 +385,8 @@ def fx_at(hz, name, beat, tone=None):
     """The value of an effect at beat (an array, from the shape's left edge; 0 when there's no such line).
     Before the first point and after the last one the line stays flat, unless it repeats (hz["loop"]); a repeating
     one is made stronger or weaker by its amount line (hz["amount"]). One counted from each note (hz["from"]):
-    tone = the tone it's for ("pitch"), else from the latest note start (note_beats); with a sustain point: sustained."""
+    tone = the tone it's for (each note has its own), else from the latest note start (note_beats); with a sustain
+    point: sustained."""
     pts = (hz.get("fx") or {}).get(name)
     if not pts:
         return np.zeros(np.shape(beat))
@@ -815,7 +819,7 @@ class KeyGrid:
                    else np.inf}
             fx = hz.get("fx") or {}
             for name in FX:
-                run[name] = fx_at(hz, name, beat)
+                run[name] = fx_at(hz, name, beat, n0)  # (each tone counts from its own start, like a synth's voice)
             run["swept"] = np.full(len(beat), "sweep" in fx)  # (sweep at 0 = the bump on the lowest key)
             run["has_volume"] = np.full(len(beat), "volume" in fx)
             for name in WAVES:  # (a waveform at 0 = the plain tone; without any: the plain tone too)
