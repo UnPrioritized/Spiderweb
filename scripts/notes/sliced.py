@@ -103,9 +103,10 @@ def spotted_notes(sh, ppq, end_dot):
 
 
 def piece_notes(sh, ppq, keys, make):
-    """A custom piece's (notes, tracks): the whole's (make = engine._notes_tracks), those on its side of every cut
-    (rows of Fill cut there, other notes by where they start: spam keeps the whole's grid, an Empty shape's cut side
-    makes no notes, user); velocities over its own time when they were changed. None: not a piece any more."""
+    """A custom piece's (notes, tracks): the whole's (make = engine._notes_tracks), cut at every cut like a knife went
+    through them (user: a spam note across it leaves a sliver; spam keeps the whole's grid, an Empty shape's cut side
+    makes no notes), the parts on its side kept; velocities over its own time when they were changed. None: not a
+    piece any more."""
     got = source(sh)
     if got is None:
         return None
@@ -116,9 +117,8 @@ def piece_notes(sh, ppq, keys, make):
             _wholes.clear()
         _wholes[key] = make(src, ppq, keys)
     notes, tracks = _wholes[key]
-    s, k = notes[:, 0].astype(float), notes[:, 2].astype(float)
-    lo, hi = s.copy(), notes[:, 1].astype(float)
-    split = src.get("fill") == "fill"
+    k = notes[:, 2].astype(float)
+    lo, hi = notes[:, 0].astype(float), notes[:, 1].astype(float)
     keep = np.ones(len(notes), bool)
     mb, mk = moved_by(sh)  # (the cuts went along with it)
     for b0, k0, db, dk, sd in halves:
@@ -130,18 +130,13 @@ def piece_notes(sh, ppq, keys, make):
         if abs(slope) < 1e-15:  # (a flat cut: whole rows on one side)
             keep &= (c0 >= 0) if sd > 0 else (c0 < 0)
             continue
-        if split:
-            x = -c0 / slope  # the tick where the cut crosses the row's middle
-            if (slope > 0) == (sd > 0):
-                lo = np.maximum(lo, x)
-            else:
-                hi = np.minimum(hi, x)
+        x = -c0 / slope  # the tick where the cut crosses the row's middle
+        if (slope > 0) == (sd > 0):
+            lo = np.maximum(lo, x)
         else:
-            c = c0 + slope * s
-            keep &= (c >= 0) if sd > 0 else (c < 0)
-    if split:
-        lo, hi = np.round(lo), np.round(hi)
-        keep &= hi > lo
+            hi = np.minimum(hi, x)
+    lo, hi = np.round(lo), np.round(hi)
+    keep &= hi > lo
     notes = notes[keep].copy()
     notes[:, 0], notes[:, 1] = lo[keep], hi[keep]
     tracks = None if tracks is None else np.asarray(tracks)[keep]
