@@ -1531,7 +1531,7 @@ class HzWindow(tk.Toplevel):
 
     def set_gate(self, i, mode):
         """Note i's own gates while held, "fixed" / "mixed" (the selected notes' too when it's one of them); None =
-        back to the Hz bass's. With the Hz bass's own Mixed / Fixed the same as picked, a note just follows it."""
+        back to the Hz bass's. With the Hz bass's own Exact / Fixed the same as picked, a note just follows it."""
         if i >= len(self.tones):
             return
         hz = (self.target() or {}).get("hz") or {}
@@ -1656,7 +1656,7 @@ class HzWindow(tk.Toplevel):
         self.after_idle(self.layout)
 
     def on_gates(self, e=None):
-        """The gates dropdown: Mixed, Fixed or Auto for the Hz bass shown (one undo step), or for the one to be
+        """The gates dropdown: Exact ("mixed"), Fixed or Auto for the Hz bass shown (one undo step), or for the one to be
         made."""
         sh = self.target()
         if sh is not None and sh.get("hz"):
