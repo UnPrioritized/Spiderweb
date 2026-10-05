@@ -1615,7 +1615,12 @@ def spam_gate(sh, ppq):
         return float(math.floor(gate + 0.5)) if whole else gate
     if sh.get("range"):  # the gate goes from one to another across the shape (gaterange.py)
         return range_grid(sh, ppq)
-    return max(1, math.floor(sh["gate"] * ppq + 0.5))
+    return gate_ticks(sh["gate"], ppq)
+
+
+def gate_ticks(beats, ppq):
+    """A spam gate in beats -> the whole ticks its notes use (what the boxes show, user: never a fraction)."""
+    return max(1, math.floor(beats * ppq + 0.5))
 
 
 def chop_even(stretches, g, count=False):

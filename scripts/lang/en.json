@@ -257,7 +257,6 @@
  "panel_custom.hz_tip": "Spam so fast that the repeats sound like a tone.\nThe gate is worked out from the tone, the BPM and the PPQ, and gates of two sizes\n(like 34 and 35 ticks) are mixed so the tone comes out exact. Every key is in step.\nBest heard after the MIDI is rendered to an audio file.",
  "panel_custom.hz_skipped": "Some of the selected shapes are Hz bass. A Hz bass gets its gate from its tone, so it stays as it is: only the other shapes change.",
  "panel_custom.hz_range_off": "A gate Range doesn't work together with Hz bass, so it's switched off. Unticking Hz bass brings it back, with the gate it had.",
- "panel_custom.hz_no_fill": "Hz bass needs Spam or Outline spam: untick Hz bass first.",
  "panel_custom.hz_cents": "cents",
  "panel_custom.hz_cents_tip": "Pitch adjustment: 100 cents = one key up, -100 = one key down.",
  "panel_custom.hz_short": " The gates are short, so the tone wobbles: a higher PPQ fixes it.",

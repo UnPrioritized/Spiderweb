@@ -619,6 +619,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     # ------------------------------------------------------------ mouse
 
     def on_press(self, e):
+        self.app.commit_typing()  # (a number typed in a panel box goes to the shapes picked now, before this click)
         self.focus_set()
         kept, self.box_kept, self.box_moving, self.dup = self.kept_box(), None, None, None
         self.grabbed = None

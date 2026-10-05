@@ -7,8 +7,8 @@ from tkinter import ttk, messagebox, simpledialog
 
 from files.lang import tr
 from notes.areas import COLOURS
-from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, gap_lines, hz_gate,
-                          join_strokes, map_stroke, normalize_areas, normalize_strokes, open_paths)
+from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, edge_gate, gap_lines,
+                          gate_ticks, hz_gate, join_strokes, map_stroke, normalize_areas, normalize_strokes, open_paths)
 from window.drawer import Drawer, clean_name, library_names, load_drawing, save_shape, shape_stamp
 from window.panel_funnel import GATE_STEPS
 from files.mathexpr import calc, fmt
@@ -46,6 +46,12 @@ END_CHOICES = [(value, tr("panel_custom.ends_" + value)) for value in ENDS]
 EDGE_CHOICES = [(None, tr("panel_custom.edge_band")), ("sideways", tr("panel_custom.edge_sideways"))]
 HZ_SHORT = 40  # Hz bass: a gate under this many ticks wobbles between its two sizes (orange: a higher PPQ fixes it)
 HZ_WRAP = 222  # its lines under the Hz bass row start further right than the panel's other notes: wrapped sooner
+
+
+def hz_tool(sh):
+    """A Hz bass made with the Hz bass tool (hz["own"]): a musical tool, not a shape (user): no library shape to
+    pick and no "Overlaps cancel out" for it."""
+    return bool((sh.get("hz") or {}).get("own"))
 
 
 class CustomPanel:
@@ -114,7 +120,9 @@ class CustomPanel:
         self.gate_entry.pack(side="left", padx=4)
         ttk.Label(g, text=tr("panel_custom.ticks_enter_to_apply"), foreground="#777").pack(side="left")
         self.gate_entry.bind("<Return>", lambda e: self.on_gate())
-        self.gate_entry.bind("<FocusOut>", lambda e: self.on_gate())
+        self.gate_entry.bind("<FocusOut>", lambda e: self.on_gate(left=True))
+        self._shown = {}  # what sync_custom put in the Gate / Outline gate boxes (leaving one unchanged does nothing)
+        self._hz_ok = None  # the shapes skip_hz was OK'd for (not asked again while they stay selected)
         Scrub(self, [(self.gate_entry, self.gate_var, self.on_gate)], GATE_STEPS, 1, 10 ** 7, label=lb)
         # with a Range on, the gate box is orange: it's the Range's first gate, and a new number here takes it off
         ttk.Style(self).configure("Gap.TEntry", foreground=GAP_COLOR)
@@ -182,7 +190,7 @@ class CustomPanel:
             "edge_mode", EDGE_CHOICES[self.edge_mode_box.current()][0]), self.roll.focus_set()))
         Tooltip(self.edge_mode_box, tr("panel_custom.edge_mode_tip"))
         self.edge_entry.bind("<Return>", lambda e: self.on_edge())
-        self.edge_entry.bind("<FocusOut>", lambda e: self.on_edge())
+        self.edge_entry.bind("<FocusOut>", lambda e: self.on_edge(left=True))
         Scrub(self, [(self.edge_entry, self.edge_var, self.on_edge)], GATE_STEPS, 0, 10 ** 7, label=lb)
         # while the box is pointed at, has the keyboard or its label is dragged: a faint line on the piano roll
         # where the outline would reach inside (roll_draw.draw_edge_preview; user)
@@ -262,8 +270,9 @@ class CustomPanel:
         if not self._rows["custom"]:
             return
         self.sync_polygon()
-        # text: no library shape to pick (its letters are the shape)
-        text = all(t.get("text") or "notes" in t for t in tgts) if placed else tool in ("text", "hz")
+        # text: no library shape to pick (its letters are the shape; a Hz bass made with the Hz bass tool is a
+        # musical tool, not a shape, user: its box is only its notes)
+        text = all(t.get("text") or "notes" in t or hz_tool(t) for t in tgts) if placed else tool in ("text", "hz")
         # pasted notes: nothing to fill either (the notes are the shape)
         pasted = placed and all("notes" in t for t in tgts)
         if not self.custom_fill_row.winfo_manager():
@@ -302,16 +311,17 @@ class CustomPanel:
         self._loading = True
         self.custom_pick.set(MISSING_MARK + name if missing else name)
         self.fill_var.set(fill)
-        self.gate_var.set(fmt(round(gate * self.ppq, 3)))
-        self.edge_var.set(fmt(round(tgts[0].get("edge", 0) * self.ppq, 3)))
+        self.gate_var.set(fmt(gate_ticks(gate, self.ppq)))  # (the whole ticks the notes use, never a fraction)
+        self.edge_var.set(fmt(edge_gate(tgts[0], self.ppq)))
+        self._shown = {"gate": self.gate_var.get(), "edge": self.edge_var.get()}
         self.edge_entry.config(style="TEntry")
         self.align_var.set(tgts[0].get("align", "auto"))
         ends = tgts[0].get("ends", "drop")
         self.ends_box.current(ENDS.index(ends) if ends in ENDS else 0)
         rg = tgts[0].get("range")
         self.gate_entry.config(style="Gap.TEntry" if rg else "TEntry")
-        self.gate_tip.text = tr("panel_custom.gate_ranged_tip", a=fmt(round(gate * self.ppq, 3)),
-                                b=fmt(round(rg["to"] * self.ppq, 3))) if rg else ""
+        self.gate_tip.text = tr("panel_custom.gate_ranged_tip", a=gate_ticks(gate, self.ppq),
+                                b=gate_ticks(rg["to"], self.ppq)) if rg else ""
         self._loading = False
         for value, b in self.fill_buttons.items():
             b.config(style="Gap.TRadiobutton" if gaps and value in ("fill", "spam") else "TRadiobutton")
@@ -328,11 +338,9 @@ class CustomPanel:
         self.gate_entry.config(state="normal" if spam and not hz else "disabled")
         self.ends_box.config(state="readonly" if spam and not hz else "disabled")
         self.range_btn.config(state="normal" if spam and not hz else "disabled")
-        for value, _, base in FILL_CHOICES:  # (Hz bass needs a spam fill: Fill / Empty only after unticking it)
+        for value in self.fill_buttons:  # (Hz bass needs a spam fill: Empty / Fill hidden until it's unticked, user)
             if value not in SPAM_FILLS:
-                self.fill_buttons[value].config(state="disabled" if hz else "normal")
-                if hz:
-                    self.fill_tips[value].text = base + "\n\n" + tr("panel_custom.hz_no_fill")
+                grid_shown(self.fill_buttons[value], not hz)
         ranged = spam and not hz and bool(rg)  # (Range: its own grid from the shape's left edge, so no ends / start)
         for b in self.align_buttons:  # (stretched gates fill each key exactly: where they start doesn't matter)
             b.config(state="normal" if spam and not hz and ends != "stretch" else "disabled")
@@ -407,7 +415,7 @@ class CustomPanel:
             return self.sync_custom()
         self.custom_shape = name
         tgts = [t for t in self.custom_targets()
-                if t is not self.custom_defaults and not t.get("text") and "notes" not in t]
+                if t is not self.custom_defaults and not t.get("text") and "notes" not in t and not hz_tool(t)]
         if tgts:
             self.push_undo(name=tr("panel_custom.custom_shape"))
             for t in tgts:
@@ -415,6 +423,9 @@ class CustomPanel:
                 t.pop("areas", None)
                 if tpl[2]:
                     t["areas"] = copy.deepcopy(tpl[2])
+                t.pop("round", None)  # (the proportions it was drawn in come along, like new_custom: outline gate)
+                if tpl[1]:
+                    t["round"] = 1 / tpl[1]
                 t.pop("polygon", None)  # (a polygon becomes that shape)
             self.shapes_changed()
         if self.tool.get() in BOX_TOOLS:  # Circle / Polygon: a library shape picked = back to Custom shape
@@ -434,15 +445,20 @@ class CustomPanel:
         if self._loading:
             return
         tgts = self.custom_targets()
+
+        def same(ts):
+            return all(abs(t[key] - value) < 1e-12 if key == "gate" else abs(t.get(key, 0) - value) < 1e-12
+                       if key == "edge" else bool(t.get(key)) == value if key in CUSTOM_FLAGS
+                       else t.get(key) == value for t in ts)
+
+        if same(tgts):  # (nothing to change: no Hz bass warning either)
+            return self.sync_custom()
         if key == "gate" or key == "fill" and value not in SPAM_FILLS:  # (a Hz bass's gate is its tone's)
             tgts = self.skip_hz(tgts)
-            if not tgts:
+            if not tgts or same(tgts):
                 return self.sync_custom()
         placed = [t for t in tgts if t is not self.custom_defaults]
-        same = all(abs(t[key] - value) < 1e-12 if key == "gate" else abs(t.get(key, 0) - value) < 1e-12
-                   if key == "edge" else bool(t.get(key)) == value if key in CUSTOM_FLAGS
-                   else t.get(key) == value for t in tgts)
-        if same or not self.confirm_big([dict(t, **{key: value}) for t in placed]):
+        if not self.confirm_big([dict(t, **{key: value}) for t in placed]):
             return self.sync_custom()
         if placed:
             self.push_undo(name=CUSTOM_NAMES.get(key, key))
@@ -459,26 +475,52 @@ class CustomPanel:
 
     def skip_hz(self, tgts):
         """Spam shapes and a Hz bass picked together: a gate / Range / Fill or Empty change leaves the Hz bass as it
-        is (user: they don't mix), after an OK / Cancel warning. [] = Cancel (or only Hz bass)."""
+        is (user: they don't mix), after an OK / Cancel warning. [] = Cancel (or only Hz bass). Asked once (user: it
+        came at every step of a gate drag): OK holds while the same shapes stay selected, Cancel for the rest of
+        that drag / arrow-key stepping."""
         rest = [t for t in tgts if not t.get("hz")]
         if len(rest) == len(tgts) or not rest:
             return rest
+        picked = {id(t) for t in tgts}
+        if self._hz_ok == picked:
+            return rest
+        sc = self._scrub
+        if sc and sc.get("hz_no"):
+            return []
         ok = messagebox.askokcancel(tr("panel_custom.spiderweb"), tr("panel_custom.hz_skipped"), icon="warning",
                                     parent=self)
+        self._hz_ok = picked if ok else None
+        if sc and not ok:
+            sc["hz_no"] = True
         return rest if ok else []
 
-    def on_gate(self):
-        if self._loading or str(self.gate_entry.cget("state")) == "disabled":
+    def on_gate(self, left=False):
+        """The Gate box entered (whole ticks: a fraction is rounded, user). left: the box was only left, so nothing
+        happens unless its number was changed (several shapes with different gates all got the first one's)."""
+        if (self._loading or str(self.gate_entry.cget("state")) == "disabled"
+                or left and self.gate_var.get() == self._shown.get("gate")):
             return
         try:
             ticks = calc(self.gate_var.get())
-            if not 1 <= ticks <= 10 ** 7:
+            if not 0.5 <= ticks <= 10 ** 7:
                 raise ValueError
-        except ValueError:
+        except (ValueError, ZeroDivisionError):
             bad(self.gate_entry)
             return
-        good(self.gate_entry)
-        self.set_custom("gate", ticks / self.ppq)
+        self.set_custom("gate", math.floor(ticks + 0.5) / self.ppq)
+        good(self.gate_entry)  # (after: the box shows the whole ticks now)
+
+    def commit_typing(self):
+        """A number typed in the Gate / Outline gate box but not entered goes to the shapes it was typed for, before
+        the selection changes (user: a click on the piano roll lost it, or gave it to new shapes)."""
+        try:
+            w = self.focus_get()
+        except KeyError:  # (a dropdown's list has the keyboard)
+            return
+        if w is self.gate_entry:
+            self.on_gate(left=True)
+        elif w is self.edge_entry:
+            self.on_edge(left=True)
 
     def edge_using(self, why, on):
         """The outline gate box started / stopped being used (why: which way; None = its number changed): the
@@ -489,27 +531,28 @@ class CustomPanel:
         if self._edge_use and str(self.edge_entry.cget("state")) != "disabled":
             try:
                 ticks = calc(self.edge_var.get())
-                if 0 < ticks <= 10 ** 7:
-                    g = ticks / self.ppq
-            except ValueError:
+                if 0.5 <= ticks <= 10 ** 7:
+                    g = math.floor(ticks + 0.5) / self.ppq
+            except (ValueError, ZeroDivisionError):
                 pass
         if g != getattr(self, "edge_preview", None):
             self.edge_preview = g
             self.roll.request_redraw()
 
-    def on_edge(self):
-        """The smallest outline gate box (ticks; 0 = off)."""
-        if self._loading or str(self.edge_entry.cget("state")) == "disabled":
+    def on_edge(self, left=False):
+        """The smallest outline gate box (whole ticks; 0 = off). left: like on_gate's."""
+        if (self._loading or str(self.edge_entry.cget("state")) == "disabled"
+                or left and self.edge_var.get() == self._shown.get("edge")):
             return
         try:
             ticks = calc(self.edge_var.get() or "0")
             if not 0 <= ticks <= 10 ** 7:
                 raise ValueError
-        except ValueError:
+        except (ValueError, ZeroDivisionError):
             bad(self.edge_entry)
             return
+        self.set_custom("edge", math.floor(ticks + 0.5) / self.ppq)
         good(self.edge_entry)
-        self.set_custom("edge", ticks / self.ppq)
 
     # ---- Hz bass (custom.py): spam whose gate is one wave of a tone
 

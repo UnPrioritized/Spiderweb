@@ -905,6 +905,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.select_many(self.sels | {i}, i)
 
     def select_many(self, indices, primary):
+        self.commit_typing()  # (first: it belongs to the shapes picked until now)
+        self._hz_ok = None
         ty = self.roll.typing
         self.sels = set(indices)  # first: ending the typing refreshes the panel, which reads the selection
         self.sel = primary

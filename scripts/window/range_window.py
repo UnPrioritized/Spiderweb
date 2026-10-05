@@ -17,7 +17,7 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.custom import SPAM_FILLS, range_gates
+from notes.custom import SPAM_FILLS, gate_ticks, range_gates
 from notes.gaterange import DIRS, STRAIGHT, clean_range, gate_steps, steps_of
 from window import big_ask
 from window.panel_funnel import GATE_STEPS
@@ -235,8 +235,8 @@ class RangeGraph(tk.Toplevel):
     def show_boxes(self):
         on = self.on_var.get()
         a, b = self.gates()
-        for key, ticks in (("from", self.tgts[0]["gate"] * self.app.ppq), ("to", self.memo[0]["to"] * self.app.ppq)):
-            self.gate_vars[key].set(fmt(round(ticks, 3)))
+        for key, beats in (("from", self.tgts[0]["gate"]), ("to", self.memo[0]["to"])):
+            self.gate_vars[key].set(fmt(gate_ticks(beats, self.app.ppq)))  # (whole ticks, as the notes use)
             self.gate_boxes[key].config(style="TEntry", state="normal" if on else "disabled")
         self.dir_box.current(DIRS.index(self.memo[0]["dir"]))
         self.dir_box.config(state="readonly" if on else "disabled")
@@ -251,17 +251,18 @@ class RangeGraph(tk.Toplevel):
         """From (the spam gate itself) or To typed / stepped."""
         if self.closed or str(self.gate_boxes[key].cget("state")) == "disabled":
             return
+        now = self.tgts[0]["gate"] if key == "from" else self.memo[0]["to"]
         try:
             ticks = calc(self.gate_vars[key].get())
-            if not 1 <= ticks <= 10 ** 7:
+            if not 0.5 <= ticks <= 10 ** 7:
                 raise ValueError
         except (ValueError, ZeroDivisionError):  # (not a number, or out of range: the box goes back, user)
-            now = self.tgts[0]["gate"] if key == "from" else self.memo[0]["to"]
-            return self.gate_vars[key].set(fmt(round(now * self.app.ppq, 3)))
-        beats = ticks / self.app.ppq
-        now = self.tgts[0]["gate"] if key == "from" else self.memo[0]["to"]
-        if abs(beats - now) < 1e-12:
+            return self.gate_vars[key].set(fmt(gate_ticks(now, self.app.ppq)))
+        ticks = math.floor(ticks + 0.5)  # (whole ticks, user)
+        self.gate_vars[key].set(fmt(ticks))
+        if ticks == gate_ticks(now, self.app.ppq):  # (the same whole ticks: kept as it is, in beats)
             return
+        beats = ticks / self.app.ppq
         placed = [(t, m) for t, m in zip(self.tgts, self.memo) if t is not self.app.custom_defaults]
         if key == "from":
             trial = [dict(t, gate=beats, range=m) for t, m in placed]
