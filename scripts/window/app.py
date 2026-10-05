@@ -580,7 +580,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             watch_bad(pe)
             # ticks: a snap step (Ctrl = one tick), pitch: a key (Shift = an octave)
             Scrub(self, [(te, tv, None)], lambda: (self.snap_ticks(), 4 * self.snap_ticks(), 1), 0)
-            Scrub(self, [(pe, pv, None)], (1, 12, 0.1), 0, 127)
+            Scrub(self, [(pe, pv, None)], (1, 12, 0.1), 0, KEYS[1] - 1)
         self.sync_points()
         for i, (tv, pv, _, _) in enumerate(self.point_rows):
             tv.trace_add("write", lambda *_, i=i: self.on_point(i))
@@ -699,9 +699,13 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             return
         tv, pv, te, pe = self.point_rows[i]
         values = []
-        for var, entry in ((tv, te), (pv, pe)):
+        # (tick 0 on, pitch 0-255 at 128 keys too: user)
+        for var, entry, hi in ((tv, te, math.inf), (pv, pe, KEYS[1] - 1)):
             try:
-                values.append(float(calc(var.get())))
+                value = float(calc(var.get()))
+                if not 0 <= value <= hi:
+                    raise ValueError
+                values.append(value)
                 good(entry)
             except ValueError:
                 bad(entry, typing=True)
