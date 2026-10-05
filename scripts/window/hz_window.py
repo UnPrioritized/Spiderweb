@@ -395,14 +395,8 @@ class HzWindow(tk.Toplevel):
             self.tones, self.sel = tones, set()
             self.drop_drag()
         if sh is not None or self.fx_of is not None:  # (no Hz bass yet: the lines picked stay for the first note)
-            self.fxl, self.fx_of = clean_fx(hz.get("fx") or {}), (id(sh) if sh is not None else None)
-            self.loops = clean_loop(hz.get("loop"), self.fxl)
-            self.fxl.update({k + AMOUNT: v for k, v in clean_fx(hz.get("amount") or {}).items() if k in self.loops})
-            self.off = clean_off(hz.get("off"), self.fxl)
-            self.froms = clean_from(hz.get("from"), self.loops)
-            self.fits = clean_fit(hz.get("fit"), self.froms)
-            self.sustains = clean_sustain(hz.get("sustain"), self.loops, self.froms, self.fits)
-            self.lfo = clean_lfo(hz.get("lfo") or {})
+            self.set_fx(hz)
+            self.fx_of = id(sh) if sh is not None else None
         if sh is None:
             text = (tr("hz.hint_new", beat=fmt(self.app.hz_start + 1)) if self.app.hz_start is not None
                     else tr("hz.hint_none"))
@@ -1751,6 +1745,17 @@ class HzWindow(tk.Toplevel):
         called off."""
         self.fx.tidy()
         self.commit(tr("hz.step_fx"), copy.deepcopy(self.tones), before)
+
+    def set_fx(self, hz):
+        """The effects' lines here from a Hz bass's settings (fx_settings' own, checked; a preset's too)."""
+        self.fxl = clean_fx(hz.get("fx") or {})
+        self.loops = clean_loop(hz.get("loop"), self.fxl)
+        self.fxl.update({k + AMOUNT: v for k, v in clean_fx(hz.get("amount") or {}).items() if k in self.loops})
+        self.off = clean_off(hz.get("off"), self.fxl)
+        self.froms = clean_from(hz.get("from"), self.loops)
+        self.fits = clean_fit(hz.get("fit"), self.froms)
+        self.sustains = clean_sustain(hz.get("sustain"), self.loops, self.froms, self.fits)
+        self.lfo = clean_lfo(hz.get("lfo") or {})
 
     def fx_settings(self):
         """The effects' lines here as a Hz bass's settings (hz["fx"], "loop", "off", "amount", "from", "fit",

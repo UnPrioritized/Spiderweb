@@ -19,6 +19,7 @@ from roll.roll_shared import note_name
 from window.hz_effects import AMOUNT, FxPane
 from window.hz_knobs import SynthKnobs
 from window.hz_live import free_sound_later, keep_sound
+from window.hz_presets import PresetBar
 
 BLACK = (1, 3, 6, 8, 10)
 KEY_HELD = "#7aa7f0"
@@ -81,7 +82,7 @@ class SynthPane(FxPane):
                       font=font)
 
 
-class SynthWindow(SynthKnobs, tk.Toplevel):
+class SynthWindow(PresetBar, SynthKnobs, tk.Toplevel):
     """The window (one per Hz bass window: hz.synth_win). The pane's `win`: its lines are the Hz bass window's."""
 
     def __init__(self, hz):
@@ -114,6 +115,7 @@ class SynthWindow(SynthKnobs, tk.Toplevel):
         for key in ("lines", "knobs"):  # (from the right)
             ttk.Radiobutton(tabs, text=tr(f"hz.synth_{key}"), variable=self.page, value=key, style="Toolbutton",
                             command=self.show_page, takefocus=False).pack(side="right")
+        self.build_presets(tabs)
         self.knobs = ttk.Frame(self, padding=(10, 4, 10, 8))
         self.fx = SynthPane(self, hz)
         self.build_knobs(self.knobs)

@@ -526,6 +526,7 @@ class SynthKnobs:
         if self.sweep_var.get() != self.vals["sweep"]:
             self.sweep_var.set(self.vals["sweep"])
         self.draw_pics()
+        self.show_preset()
 
     def draw_pics(self):
         """Each box's picture drawn again when its values (or size) changed."""
