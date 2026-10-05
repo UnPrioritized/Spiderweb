@@ -20,7 +20,7 @@ import threading
 import numpy as np
 
 from files.lang import tr
-from files.quicksound import QuickSound
+from files.quicksound import Mixer, QuickSound
 from files.synth import RATE, Player, SynthError
 from notes.custom import BOX_STROKE, box_frame, custom_settings
 from notes.engine import shape_notes_tracks
@@ -55,8 +55,7 @@ class LiveKeys:
         self.made = 0.0  # beats of the held note made
         self.extending = False
         self.at = 0  # frames handed to the sound device
-        self.acc, self.acc0 = np.zeros((0, 2), np.float32), 0  # sound mixed ahead, from frame acc0
-        self.acc_end = 0  # the frame the sound mixed so far ends at
+        self.mix = Mixer()  # the chords laid so far, added up
         self.starts, self.recs, self.gains, self.i = np.zeros(0, np.int64), [], np.zeros(0, np.float32), 0
         self.cut = math.inf  # no notes of the list from this frame on (a new list for there is being made)
         self.waits = False  # pull waited for a recording last time
@@ -103,7 +102,7 @@ class LiveKeys:
             except SynthError as e:
                 return str(e)
             with self.lock:
-                self.at, self.acc, self.acc0, self.acc_end = 0, np.zeros((0, 2), np.float32), 0, 0
+                self.at, self.mix = 0, Mixer()
                 self.starts, self.recs, self.gains, self.i = np.zeros(0, np.int64), [], np.zeros(0, np.float32), 0
             self.player.play(0)
         if "hz_live" not in self.app.tips.seen:  # the warning: once, even with tips off (user: a big warning)
@@ -246,39 +245,27 @@ class LiveKeys:
             at, end = self.at, self.at + n
             end = min(end, max(at, self.cut)) if math.isfinite(self.cut) else end
             self.waits = False
-            while self.i < len(self.starts) and self.starts[self.i] < end:
-                rec = qs.get(self.recs[self.i])
-                if rec is None:  # (not recorded yet: up to this note only, then wait)
-                    end, self.waits = max(at, int(self.starts[self.i])), True
+            got, j = {}, self.i
+            while j < len(self.starts) and self.starts[j] < end:
+                chord = self.recs[j]
+                if chord not in got:
+                    got[chord] = qs.get(chord)
+                if got[chord] is None:  # (not recorded yet: up to this note only, then wait)
+                    end, self.waits = max(at, int(self.starts[j])), True
                     break
-                self._add(int(self.starts[self.i]), rec, self.gains[self.i])
-                self.i += 1
+                j += 1
+            self.mix.lay(self.starts[self.i:j], self.recs[self.i:j], self.gains[self.i:j], got)
+            self.i = j
             if end <= at:
                 return None
-            a = at - self.acc0
-            out = np.zeros((end - at, 2), np.float32)
-            got = self.acc[a:a + (end - at)]
-            out[:len(got)] = got
             self.at = end
-            if self.at - self.acc0 > 2 * RATE:  # (what's been played goes)
-                self.acc, self.acc0 = self.acc[self.at - self.acc0:].copy(), self.at
-            return out
-
-    def _add(self, start, rec, gain):
-        a = start - self.acc0
-        need = a + len(rec)
-        if need > len(self.acc):
-            grown = np.zeros((max(need, 2 * len(self.acc), RATE), 2), np.float32)
-            grown[:len(self.acc)] = self.acc
-            self.acc = grown
-        self.acc[a:need] += np.multiply(rec, gain, dtype=np.float32)
-        self.acc_end = max(self.acc_end, start + len(rec))
+            return self.mix.take(at, end)
 
     def finished(self):
         """True once the last fall has died away (nothing held, nothing coming)."""
         with self.lock:
             return (self.key is None and self.cut == math.inf and self.i >= len(self.starts) and
-                    self.at >= self.acc_end)
+                    self.at >= self.mix.end)
 
     def tick(self):
         """Every TICK_MS while a note sounds: recordings asked for ahead, a held note made longer, the words by the

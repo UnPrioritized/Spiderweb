@@ -9,12 +9,14 @@ one where the same key hit again cuts the old note isn't either.
 Loudness: STEPS levels are recorded, evenly spaced in how loud they sound (the soundfont's own curve, measured once
 on CURVE_KEY), and a note takes the nearest one turned up or down to its own loudness (the user heard it as natural
 as 64 plain steps). Lengths are rounded to GATE_STEP apart (a note still starts exactly where it should, so its
-pitch is exact; only its end moves, by a fraction of a millisecond in a Hz bass). Kept at half precision (-76 dB of
-hiss).
+pitch is exact; only its end moves, by a fraction of a millisecond in a Hz bass). Kept as the spectra the Mixer
+uses (below).
 Chords: notes starting together with the same step, length and loudness (every key of a Hz bass wave, mostly) are
 recorded together, the synth playing them all at once ("chord"), and laid as one: a 128-key Hz bass then costs one
 recording per kind of wave (not 128) and one copy a wave to mix. Past the memory limit the ones used least recently
-are thrown away (recorded again when needed)."""
+are thrown away (recorded again when needed).
+Mixing (Mixer): the copies are added up in the frequency domain, block by block (a high key lays thousands of waves a
+second, each ringing seconds: added one by one, the sound device got a quarter of the sound at key 100)."""
 
 import collections
 import concurrent.futures
@@ -32,6 +34,7 @@ RING = 8.0  # seconds a recording may ring after its note at most (it ends where
 CURVE_KEY = 60
 WORKERS = max(1, min(6, (os.cpu_count() or 2) - 2))
 VOICES = 100000  # (one note: never cut)
+PART = 2048  # frames in a block of the mixing
 
 
 class QuickSound:
@@ -107,18 +110,29 @@ class QuickSound:
         """For notes (arrays in start order: start frame, key, velocity 1..127, length in frames): the chords to lay
         ([(start frame, (keys, step velocity, gate), gain)]: notes starting together with the same step, length and
         loudness are one). Needs ready()."""
+        if not len(starts):
+            return []
         steps, gains = self.curve
         vels = np.clip(vels, 1, 127)
-        out, group, last = [], [], None
-        for s, k, v, g in zip(starts.tolist(), keys.tolist(), vels.tolist(), gates.tolist()):
-            what = (s, int(steps[v]), self.gate_of(g), float(gains[v]))
-            if what != last and group:
-                out.append((last[0], (tuple(group), last[1], last[2]), last[3]))
-                group = []
-            group.append(int(k))
-            last = what
-        if group:
-            out.append((last[0], (tuple(group), last[1], last[2]), last[3]))
+        step, gain = steps[vels], gains[vels]
+        frames = np.maximum(1.0, gates)
+        gate = np.maximum(1, np.rint(GATE_STEP ** np.rint(np.log(frames) / math.log(GATE_STEP)))).astype(np.int64)
+        new = np.zeros(len(starts), bool)  # (a group starts where any of them changes)
+        new[0] = True
+        for a in (starts, step, gate, gain):
+            new[1:] |= a[1:] != a[:-1]
+        firsts = np.flatnonzero(new)
+        ends = np.append(firsts[1:], len(starts))
+        keys = np.asarray(keys, np.int64)
+        same = {}  # (the same keys again: one tuple)
+        out = []
+        for i, j, s, v, g, n in zip(firsts.tolist(), ends.tolist(), starts[firsts].tolist(), step[firsts].tolist(),
+                                    gate[firsts].tolist(), gain[firsts].tolist()):
+            raw = keys[i:j].tobytes()
+            group = same.get(raw)
+            if group is None:
+                group = same[raw] = tuple(keys[i:j].tolist())
+            out.append((s, (group, int(v), g), float(n)))
         return out
 
     def _keep(self, key, got):
@@ -127,13 +141,13 @@ class QuickSound:
             if got is None or key in self.kept:
                 return
             self.kept[key] = got
-            self.size += got.nbytes
+            self.size += got[0].nbytes
             while self.size > self.budget and len(self.kept) > 1:
                 _, old = self.kept.popitem(last=False)
-                self.size -= old.nbytes
+                self.size -= old[0].nbytes
 
     def get(self, chord):
-        """A chord's sound (float16 rows), or None when it isn't recorded yet."""
+        """A chord's sound as the Mixer wants it ((spectra, frames)), or None when it isn't recorded yet."""
         with self.lock:
             got = self.kept.get(chord)
             if got is not None:
@@ -156,7 +170,7 @@ class QuickSound:
 
     def _record(self, chord, font):
         try:
-            got = self._play(*chord).astype(np.float16)
+            got = spectra(self._play(*chord))
         except SynthError as e:
             self.error = str(e)
             got = None
@@ -167,10 +181,99 @@ class QuickSound:
             self.budget = mb * 1e6
             while self.size > self.budget and self.kept:
                 _, old = self.kept.popitem(last=False)
-                self.size -= old.nbytes
+                self.size -= old[0].nbytes
 
     def used_mb(self):
         return self.size / 1e6
 
     def busy(self):
         return bool(self.asked) or bool(self.measuring and self.measuring.is_alive())
+
+
+def spectra(rec):
+    """A recording (rows) as the Mixer uses it: (its parts' spectra (frequency, part, channel), its length in frames)."""
+    k = max(1, -(-len(rec) // PART))
+    parts = np.zeros((k * PART, 2), np.float32)
+    parts[:len(rec)] = rec
+    spec = np.fft.rfft(parts.reshape(k, PART, 2), 2 * PART, axis=1)
+    return np.ascontiguousarray(spec.transpose(1, 0, 2), np.complex64), len(rec)
+
+
+class Mixer:
+    """Adds up the chords laid at their starts (the live keys' sound), block by block (PART frames) in the
+    frequency domain: a block's sound = the starts in it and in the blocks before, times the matching parts of the
+    recordings. The same sum as adding a copy of each recording at each start, but its cost doesn't grow with how
+    many start or how long they ring. Starts may come late (while their block is being handed over): their sound
+    is added then."""
+
+    def __init__(self):
+        self.kinds = {}  # chord -> [spectra, the last blocks' starts' spectra (ring of K), the last block with a start]
+        self.fresh = {}  # (chord, block) -> the starts in a block not worked out yet (PART gains)
+        self.done = -1  # the last block worked out
+        self.out, self.out0 = np.zeros((0, 2), np.float32), 0  # the sound worked out, from frame out0
+        self.end = 0  # the frame the sound laid so far has died away at
+
+    def lay(self, starts, chords, gains, got):
+        """Chords (got: chord -> QuickSound.get) laid at frames `starts` (in order, none before what's handed over)."""
+        groups = {}
+        for at, chord, gain in zip(starts.tolist(), chords, gains.tolist()):
+            b = at // PART
+            groups.setdefault((chord, b), []).append((at - b * PART, gain))
+            self.end = max(self.end, at + got[chord][1])
+        for (chord, b), laid in groups.items():
+            x = np.zeros(PART, np.float32)
+            np.add.at(x, [o for o, _ in laid], [g for _, g in laid])
+            spec = got[chord][0]
+            kind = self.kinds.get(chord)
+            if kind is None:
+                kind = self.kinds[chord] = [spec, np.zeros((spec.shape[1], spec.shape[0]), np.complex64), b]
+            if b > self.done:
+                old = self.fresh.get((chord, b))
+                self.fresh[(chord, b)] = x if old is None else old + x
+                continue
+            ring = kind[1]  # (late: its block is out already) its sound added now, and to the blocks after
+            xs = np.fft.rfft(x, 2 * PART)
+            ring[b % len(ring)] += xs
+            kind[2] = max(kind[2], b)
+            self._put(b, np.fft.irfft(xs[:, None] * spec[:, 0, :], 2 * PART, axis=0))
+
+    def _work(self, m):
+        """Block m's sound (and the start of what rings into the next one)."""
+        total = np.zeros((PART + 1, 2), np.complex64)
+        for chord, kind in list(self.kinds.items()):
+            spec, ring, last = kind
+            k = len(ring)
+            x = self.fresh.pop((chord, m), None)
+            if x is not None:
+                ring[m % k], kind[2] = np.fft.rfft(x, 2 * PART), m
+            else:
+                ring[m % k] = 0
+                if m < last:  # (laid ahead only: nothing sounding yet)
+                    continue
+                if m - last >= k:  # (died away)
+                    del self.kinds[chord]
+                    continue
+            total += np.matmul(ring[(m - np.arange(k)) % k].T[:, None, :], spec)[:, 0]
+        self._put(m, np.fft.irfft(total, 2 * PART, axis=0))
+        self.done = m
+
+    def _put(self, b, y):
+        a = b * PART - self.out0
+        if a + len(y) > len(self.out):
+            grown = np.zeros((max(a + len(y), 2 * len(self.out)), 2), np.float32)
+            grown[:len(self.out)] = self.out
+            self.out = grown
+        self.out[a:a + len(y)] += y
+
+    def take(self, at, end):
+        """The sound of frames at..end (everything laid before end)."""
+        for m in range(self.done + 1, (end - 1) // PART + 1):
+            self._work(m)
+        a = at - self.out0
+        got = np.zeros((end - at, 2), np.float32)
+        part = self.out[a:a + (end - at)]
+        got[:len(part)] = part
+        keep = self.done * PART  # (what's been played goes; a late start may still add to the last block)
+        if keep - self.out0 > RATE:
+            self.out, self.out0 = self.out[keep - self.out0:].copy(), keep
+        return got
