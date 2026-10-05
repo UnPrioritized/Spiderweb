@@ -46,6 +46,20 @@ LOOK = {"bg": PIC, "grid": GRID, "outside": "#1b1f24", "notes": "#34507e", "hint
 # the row above = black ones); Z / X = an octave down / up
 LETTERS = ("a", "w", "s", "e", "d", "f", "t", "g", "y", "h", "u", "j", "k", "o", "l", "p", "semicolon")
 NO_LETTERS = 0x4 | (0x20000 if sys.platform == "win32" else 0x8)  # (Ctrl or Alt held: a shortcut, not a key)
+LETTER_CHECK_MS = 100  # while a letter is held: how often we ask if it's still down (its let-go can get lost)
+
+
+def key_down(code):
+    """Whether the key with this key code (a key event's keycode) is still held down, asked of the keyboard itself:
+    True / False, or None when we can't tell (not Windows). Its let-go never reaches us while the window is being
+    moved (Windows keeps it)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        return bool(ctypes.windll.user32.GetAsyncKeyState(int(code)) & 0x8000)
+    except (AttributeError, OSError, ValueError):
+        return None
 
 
 class SynthPane(FxPane):
@@ -497,8 +511,19 @@ class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
             self.status.config(text=why)
             return "break"
         self.held, self.held_by = key, k
+        self.held_code = e.keycode
         self.draw_keys()
+        self.after(LETTER_CHECK_MS, lambda: self.letter_check(k))
         return "break"
+
+    def letter_check(self, k):
+        """A letter still held? Its key let go without telling us (the window was moved meanwhile): let go now."""
+        if not self.winfo_exists() or self.held_by != k:
+            return
+        if key_down(self.held_code) is False:
+            self.let_go()
+            return
+        self.after(LETTER_CHECK_MS, lambda: self.letter_check(k))
 
     def on_letter_up(self, e):
         k = e.keysym.lower()

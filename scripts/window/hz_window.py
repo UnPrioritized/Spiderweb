@@ -2095,9 +2095,7 @@ class HzWindow(tk.Toplevel):
                 says = tr("hz.preview_making", speed=f"{p.speed:.1f}" if p.speed else "…", voices=vo)
             else:
                 says = tr("hz.preview_ready", voices=vo)
-            if self.live.active():
-                says, colour = self.live.says()
-            elif not p.loading():
+            if not self.live.active() and not p.loading():  # (the live keys' words: in the synth window only)
                 self.live.warm()
         if (self.preview_says.cget("text"), str(self.preview_says.cget("foreground"))) != (says, colour):
             self.preview_says.config(text=says, foreground=colour)
