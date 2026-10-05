@@ -242,6 +242,11 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.box_kept = (new, set(app.sels))
         app.shape_edited()
 
+    def holding(self):
+        """The left button holds a shape, its point / handle / box, or the kept Select box's side: shortcuts wait
+        (user)."""
+        return bool(self.drag) and self.drag[0] in ("move", "handle", "resize", "skew", "turn", "stretch")
+
     def kept_box(self):
         """The last Select boxes [box_area, ...] (Ctrl+drag adds one), still shown after letting go while what they
         selected is still the selection (a press on the piano roll or any other change of the selection drops
@@ -702,6 +707,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if not self.drag:
             return
         kind = self.drag[0]
+        if e.state & 0x200 and kind != "pan":  # (the middle button held too: Tk gives the moves to the left button's
+            self.pan_view(e)                     # drag, so the view moves here; what's held follows the mouse)
         if kind == "pan":
             self.pan_to(e)
         elif kind == "box":
@@ -1115,11 +1122,12 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def on_middle_release(self, e):
         """A middle click (without dragging) on a selected polyline adds a point there, snapped.
         On a selected funnel: a curve start (on its line) or an anchor, like a click with the Funnel tool.
-        On a selected curve: an anchor there, like a click with the Curve tool."""
+        On a selected curve: an anchor there, like a click with the Curve tool. Not while the left button holds
+        something (a held point's number would change)."""
         sh = self.point_shape()
         if (not self._pan or self._panned or abs(e.x - self._pan[0]) > 3 or abs(e.y - self._pan[1]) > 3 or self.draft
-                or not sh or sh["kind"] not in ("poly", "funnel", "curve", "custom") or e.x < self.kb_w
-                or e.y < self.ruler_h):
+                or self.drag or not sh or sh["kind"] not in ("poly", "funnel", "curve", "custom")
+                or e.x < self.kb_w or e.y < self.ruler_h):
             return
         if sh["kind"] == "custom":  # its picked curve stroke: an anchor there
             self.stroke_click(sh, e, near=12 * self.scale)
@@ -1160,8 +1168,13 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self._panned = False
 
     def pan_to(self, e):
+        if self.pan_view(e):
+            self.draft_to_mouse(e)
+
+    def pan_view(self, e):
+        """The middle button dragged: the view moves with the mouse. False if it isn't panning."""
         if not self._pan or self.sx is None:
-            return
+            return False
         x, y, t, top = self._pan
         if abs(e.x - x) > 3 or abs(e.y - y) > 3:
             self._panned = True  # (once it went further than 3 px it's a pan, not a click, even if it comes back)
@@ -1169,11 +1182,14 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.view_top = top + (e.y - y) / self.sy
         self.clamp_view()
         self.request_redraw()
-        self.draft_to_mouse(e)
+        return True
 
     def draft_to_mouse(self, e):
-        """The view moved under the mouse (wheel, middle-drag) while a new shape is drawn: its end goes to the mouse
-        at once (it stayed on the old spot in the song until the mouse moved, and letting go put it there)."""
+        """The view moved under the mouse (wheel, middle-drag) while a new shape is drawn or a shape / point is held:
+        it goes to the mouse at once (it stayed on the old spot in the song until the mouse moved, and letting go put
+        it there)."""
+        if self.sx is not None and self.holding():
+            return self.on_drag(e)
         if self.sx is None or not (self.draft or self.follow):
             return
         if self.drag and self.drag[0] in ("create", "place", "segment", "arcdrag", "wall"):
@@ -1228,7 +1244,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         elif k == "g" and not e.state & CTRL:
             self.app.live.set(not self.app.live.get())
         elif k == "d" and e.state & CTRL:
-            self.app.duplicate()
+            if not self.holding():
+                self.app.duplicate()
         elif not e.state & CTRL:
             self.app.tool_hotkey(k)
 

@@ -245,7 +245,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         for key, fn in (("<Control-z>", lambda e: self.key_undo(e)), ("<Control-y>", lambda e: self.key_undo(e, True)),
                         ("<Control-s>", lambda e: self.save_project())):
             self.bind_all(key, lambda e, fn=fn: None if self.in_drawer(e) else fn(e))
-        self.bind_all("<space>", self.hotkey(self.toggle_play, main_only=True))  # (pop-ups: not the main playback)
+        self.bind_all("<space>", self.hotkey(self.toggle_play, main_only=True, while_held=True))  # (pop-ups: not the main playback)
         for keys, fn in (("Control-c Control-C", self.copy_selected),
                          ("Control-Shift-c Control-Shift-C", self.copy_to_domino),
                          ("Control-Shift-v Control-Shift-V", self.paste_from_domino),
@@ -1329,9 +1329,10 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         """Keys pressed in the drawer window are the drawer's, not the piano roll's."""
         return bool(self.drawer) and str(e.widget).startswith(str(self.drawer))
 
-    def hotkey(self, fn, main_only=False):
+    def hotkey(self, fn, main_only=False, while_held=False):
         """A window-wide shortcut that leaves typing boxes alone. main_only: only while the main window has the
-        keyboard (not in a pop-up)."""
+        keyboard (not in a pop-up). while_held: it works while the mouse holds a shape on the piano roll too (the
+        others do nothing then, user: a flip was undone by the next mouse move, a join broken)."""
         def handler(e):
             w = e.widget
             if self.in_drawer(e):
@@ -1344,7 +1345,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 return None
             if isinstance(w, (tk.Entry, ttk.Entry)) and str(w.cget("state")) != "readonly":
                 return None
-            if self.box_drawn():
+            if self.box_drawn() or not while_held and self.roll.holding():
                 return "break"
             fn()
             return "break"
