@@ -10,10 +10,12 @@ and not the MIDI (the user wanted a big warning: the Help tip "hz_live" the firs
 Preview toggle while it plays).
 Timing: the sound is mixed when the sound device asks for it (pull, BASS's own thread). A note starts LEAD after
 the press (the sound already handed over plays first), a let-go's fall LEAD after the let-go. Until the notes and the
-recordings they need are made, the sound waits (silence) rather than skip notes."""
+recordings they need are made, the sound waits (silence) rather than skip notes. Effects that make every key
+different: a rough copy (keys in bands, quicksound.plan_rough), as coarse as the press's roughest so far."""
 
 import concurrent.futures
 import copy
+import json
 import math
 import threading
 
@@ -61,6 +63,8 @@ class LiveKeys:
         self.waits = False  # pull waited for a recording last time
         self.bpm = 120.0
         self.gone = None  # the frame the note sounding was let go at (None: held)
+        self.band = 1  # keys a band in the rough copy of the note sounding (1 = exact)
+        self.bands = {}  # the Hz bass's settings -> the band its last note needed (the next press starts there)
         self._tick = None
 
     # ------------------------------------------------------------ pressing and letting go
@@ -110,7 +114,7 @@ class LiveKeys:
         with self.lock:
             self.gen += 1
             self.key, self.p0, self.made, self.extending = key, self.at + int(LEAD * RATE), FIRST, False
-            self.gone = None
+            self.gone, self.band = None, 1
             self.cut = self.p0  # (what sounds now stops where this one starts)
         self.ask(FIRST, self.gen, self.p0, ppq)
         if not self._tick:
@@ -203,7 +207,9 @@ class LiveKeys:
                 qs.measuring.join()
             if not qs.ready():
                 return
-            laid = qs.plan(starts, keys, vels, gates)  # (chords: the keys of a wave together)
+            sig = json.dumps([{k: v for k, v in sh["hz"].items() if k != "tones"}, key_range(sh)], sort_keys=True)
+            laid, band = qs.plan_rough(starts, keys, vels, gates, max(self.band, self.bands.get(sig, 1)))
+            # (chords: the keys of a wave together)
             starts = np.array([s for s, _, _ in laid], np.int64)
             recs = [c for _, c, _ in laid]
             gains = np.array([g for _, _, g in laid], np.float32)
@@ -215,6 +221,10 @@ class LiveKeys:
         with self.lock:
             if gen != self.gen:
                 return
+            self.band = max(self.band, band)  # (made longer or let go: never finer than before)
+            if len(self.bands) > 50:
+                self.bands.clear()
+            self.bands[sig] = band
             frm = self.cut if cut is None else cut
             if not math.isfinite(frm):  # (a longer held note: from the first note not mixed yet)
                 frm = int(self.starts[self.i]) if self.i < len(self.starts) else self.at
@@ -298,4 +308,6 @@ class LiveKeys:
         qs = self.app.quick
         if qs is None or not qs.ready() or self.waits:
             return tr("hz.live_recording"), "#c06000"
+        if self.band > 1:
+            return tr("hz.live_rough", n=self.band, mb=f"{qs.used_mb():,.0f}"), "#555"
         return tr("hz.live_playing", mb=f"{qs.used_mb():,.0f}"), "#555"

@@ -15,6 +15,11 @@ Chords: notes starting together with the same step, length and loudness (every k
 recorded together, the synth playing them all at once ("chord"), and laid as one: a 128-key Hz bass then costs one
 recording per kind of wave (not 128) and one copy a wave to mix. Past the memory limit the ones used least recently
 are thrown away (recorded again when needed).
+Rough copy (user 2026-10-05): effects that make every key different (Sweep, Wah: its own loudness; Slant, Off pitch,
+Noisy: its own timing) break the chords up, thousands of kinds (measured: Noisy 8 000 for one held note, ~2 MB each),
+past the memory and what the Mixer can add up in time (about 100 kinds sounding at once). Then neighbouring keys
+are played together in bands, each as its middle key does (plan_rough: 2, 4, 8... keys a band, the finest that
+needs at most MOST_KINDS); anything that fits stays exact.
 Mixing (Mixer): the copies are added up in the frequency domain, block by block (a high key lays thousands of waves a
 second, each ringing seconds: added one by one, the sound device got a quarter of the sound at key 100)."""
 
@@ -35,6 +40,7 @@ CURVE_KEY = 60
 WORKERS = max(1, min(6, (os.cpu_count() or 2) - 2))
 VOICES = 100000  # (one note: never cut)
 PART = 2048  # frames in a block of the mixing
+MOST_KINDS = 100  # different recordings a made stretch of live notes may need before its keys go in bands
 
 
 class QuickSound:
@@ -106,10 +112,10 @@ class QuickSound:
         """A note's length rounded to GATE_STEP apart (frames)."""
         return max(1, int(round(GATE_STEP ** round(math.log(max(1.0, frames)) / math.log(GATE_STEP)))))
 
-    def plan(self, starts, keys, vels, gates):
+    def plan(self, starts, keys, vels, gates, most=None):
         """For notes (arrays in start order: start frame, key, velocity 1..127, length in frames): the chords to lay
         ([(start frame, (keys, step velocity, gate), gain)]: notes starting together with the same step, length and
-        loudness are one). Needs ready()."""
+        loudness are one); None when they'd need more than `most` different ones. Needs ready()."""
         if not len(starts):
             return []
         steps, gains = self.curve
@@ -125,7 +131,7 @@ class QuickSound:
         ends = np.append(firsts[1:], len(starts))
         keys = np.asarray(keys, np.int64)
         same = {}  # (the same keys again: one tuple)
-        out = []
+        out, kinds = [], set()
         for i, j, s, v, g, n in zip(firsts.tolist(), ends.tolist(), starts[firsts].tolist(), step[firsts].tolist(),
                                     gate[firsts].tolist(), gain[firsts].tolist()):
             raw = keys[i:j].tobytes()
@@ -133,7 +139,21 @@ class QuickSound:
             if group is None:
                 group = same[raw] = tuple(keys[i:j].tolist())
             out.append((s, (group, int(v), g), float(n)))
+            if most is not None:
+                kinds.add(out[-1][1])
+                if len(kinds) > most:
+                    return None
         return out
+
+    def plan_rough(self, starts, keys, vels, gates, band=1):
+        """plan, with neighbouring keys played together in bands of `band` keys or more (as few as needed so that at
+        most MOST_KINDS different recordings are needed; band 1 = every key as it is): (chords, keys a band)."""
+        many = len(np.unique(keys))
+        while True:
+            got = self.plan(*banded(starts, keys, vels, gates, band), most=None if band >= many else MOST_KINDS)
+            if got is not None:
+                return got, band
+            band *= 2
 
     def _keep(self, key, got):
         with self.lock:
@@ -188,6 +208,22 @@ class QuickSound:
 
     def busy(self):
         return bool(self.asked) or bool(self.measuring and self.measuring.is_alive())
+
+
+def banded(starts, keys, vels, gates, band):
+    """Notes (arrays in start order) with neighbouring keys in bands of `band` (counted among the keys there are):
+    every key of a band plays the notes of its middle key (the others' are left out)."""
+    keys = np.asarray(keys, np.int64)
+    if band <= 1 or not len(keys):
+        return starts, keys, vels, gates
+    have = np.unique(keys)
+    first = np.searchsorted(have, keys) // band * band
+    size = np.minimum(band, len(have) - first)
+    keep = keys == have[first + size // 2]
+    first, size = first[keep], size[keep]
+    pick = np.repeat(np.arange(len(first)), size)  # (each kept note once for every key of its band)
+    nth = np.arange(len(pick)) - np.repeat(np.cumsum(size) - size, size)
+    return starts[keep][pick], have[first[pick] + nth], vels[keep][pick], gates[keep][pick]
 
 
 def spectra(rec):

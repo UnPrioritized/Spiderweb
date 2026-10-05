@@ -2380,5 +2380,6 @@
  "hz.synth_tip_knob": "Drag up / down (Shift = fine), mouse wheel or arrow keys. Right mouse button: points it at the mouse. Middle-click = back to the start. Or type a value in the box under it.",
  "hz.synth_drawn": "Its lines were drawn by hand (Lines tab), so the knobs only show about where they are. Turning one makes new lines from the knobs.",
  "hz.live_recording": "Live keys: recording notes from the soundfont…",
- "hz.live_playing": "Live keys: a quick copy, not your MIDI ({mb} MB kept)"
+ "hz.live_playing": "Live keys: a quick copy, not your MIDI ({mb} MB kept)",
+ "hz.live_rough": "Live keys: a rough copy, not your MIDI: too many different notes, so every {n} keys play together ({mb} MB kept)"
 }
