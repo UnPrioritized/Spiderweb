@@ -2,7 +2,8 @@
 lines the Hz bass already has, so everything they do is in the MIDI. A line drawn by hand that the knobs can't have
 made shows them about where it is (with a note); turning one makes new lines from the knobs.
   Volume: Attack, Decay, Sustain, Release = the Volume line once per note, with its sustain point and fall.
-  Wave: one waveform (or the plain tone) at a Shape amount, and Octave below: those lines, flat.
+  Wave: one waveform (or the plain tone) at a Shape amount, and Octave below: those lines, flat; Mode (FM, Pulse width,
+  Sync, Growl, Bitcrush) and its knobs (only the picked mode's shown) = hz["mode"] (not lines).
   Pitch: Amount (keys) and Time = the Pitch line once per note, from Amount keys off to the note's tone.
   Vibrato (LFO 1): Rate (hz["lfo"]), Depth = the Vibrato line, Delay = it comes in over that long, once per note.
   Tremolo (LFO 2): Rate = the Tremolo line (its value is how fast), Depth (hz["lfo"]).
@@ -20,11 +21,12 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.hzbass import (DETUNE, FAST, GROUPS, LOOP, OFF_PITCH, PITCH, SOFT, SUB, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE,
-                          VOICES, WAH, WAVES, clean_voice, copies, group_count, line_at)
+from notes.hzbass import (CRUSH, DETUNE, FAST, GROUPS, GROWL, LOOP, MODES, OFF_PITCH, PITCH, SOFT, SUB, TREMOLO,
+                          TREMOLO_DEPTH, VIBRATO_RATE, VOICES, WAH, WAVES, clean_extra, clean_mode, clean_voice, copies,
+                          group_count, line_at, wave_hits)
 from window.hz_effects import AMOUNT, FX_COLOR
 from window.tool_window import Knob
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, grid_shown
 
 WARN = "#c06000"
 TIME_KNOB = 4.0  # beats a time knob goes to (along a curve: fine near 0)
@@ -38,11 +40,27 @@ KINDS = {"time": ("hz.synth_beats", 0.0, TIME_MOST, (0.05, 0.25, 0.01), TIME_KNO
          "trem_rate": ("hz.synth_a_beat", 0.0, TREMOLO, (0.1, 1, 0.01), TREMOLO),
          "groups": (None, 1.0, float(GROUPS), (1, 1, 1), None),
          "voices": (None, 1.0, float(VOICES), (1, 1, 1), None),
-         "cents": ("hz.synth_cents", 0.0, DETUNE, (1, 10, 0.1), None)}
+         "cents": ("hz.synth_cents", 0.0, DETUNE, (1, 10, 0.1), None),
+         "width": ("hz.synth_percent", 100 * MODES["pulse"]["width"][0], 100 * MODES["pulse"]["width"][1],
+                   (1, 10, 0.1), None),
+         "ratio": ("hz.synth_times", MODES["fm"]["ratio"][0], MODES["fm"]["ratio"][1], (0.25, 1, 0.01),
+                   MODES["fm"]["ratio"][1]),
+         "sync": ("hz.synth_times", MODES["sync"]["amount"][0], MODES["sync"]["amount"][1], (0.1, 1, 0.01), None),
+         "every": (None, MODES["growl"]["every"][0], MODES["growl"]["every"][1], (1, 1, 1), None)}
+PERCENTS = ("percent", "width")  # (kept 0..1, shown and typed in %)
+COUNTS = ("groups", "voices", "every")  # (whole numbers)
+# the Wave box's modes (hzbass.MODES): their knobs (knob = mode_setting) and kinds; only the picked mode's are shown
+MODE_KNOBS = {"fm": (("fm_depth", "percent"), ("fm_ratio", "ratio"), ("fm_time", "time")),
+              "pulse": (("pulse_width", "width"), ("pulse_rate", "vib_rate")),
+              "sync": (("sync_amount", "sync"), ("sync_time", "time")),
+              "growl": (("growl_amount", "percent"), ("growl_every", "every")),
+              "crush": (("crush_amount", "percent"),)}
+MODE_NAMES = ("off",) + tuple(MODE_KNOBS)
 # the boxes and their knobs: (knob, kind, value at the start / a middle-click); rows of boxes
 BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain", "percent", 1.0),
                     ("release", "time", 0.0)),
-         "wave": (("shape", "percent", 1.0), ("octave", "percent", 0.0)),
+         "wave": (("shape", "percent", 1.0), ("octave", "percent", 0.0))
+         + tuple((key, kind, MODES[m][key.split("_", 1)[1]][2]) for m, knobs in MODE_KNOBS.items() for key, kind in knobs),
          "pitch": (("amount", "keys", 0.0), ("time", "time", 0.25)),
          "vibrato": (("vibrato_rate", "vib_rate", VIBRATO_RATE), ("vibrato_depth", "percent", 0.0),
                      ("vibrato_delay", "time", 0.0)),
@@ -139,6 +157,10 @@ def read_wave(win, was):
         v = flat(win, "octave")
         made = made and v is not None
         got["octave"] = v if v is not None else max(p[1] for p in win.fxl["octave"])
+    mode = win.extra.get("mode")  # (no mode: its knobs kept as they were)
+    got["mode"] = mode["kind"] if mode else "off"
+    for key, _ in MODE_KNOBS.get(got["mode"], ()):
+        got[key] = mode[key.split("_", 1)[1]]
     return got, made
 
 
@@ -236,7 +258,7 @@ def read_character(win, was):
 def read_voice(win, was):
     """The Voice box: ({voices, detune, same, glide, touching}, True): its own settings, not lines (one voice:
     Detune and Voices on kept as they were; no glide: Only notes that touch too)."""
-    v = win.voice
+    v = win.extra.get("voice", {})
     n = v.get("voices", 1)
     got = {"voices": float(n), "detune": v["detune"] if n > 1 else was["detune"],
            "same": bool(v.get("same")) if n > 1 else was["same"], "glide": v.get("glide", 0.0),
@@ -309,29 +331,27 @@ def knob_of(kind, v):
         return min(100.0, 100 * math.sqrt(max(0.0, v) / most))
     if kind == "keys":
         return max(-100.0, min(100.0, 100 * v / PITCH))
-    if kind in ("groups", "voices"):
-        return 100 * (v - 1) / (KINDS[kind][2] - 1)
-    if kind == "cents":
-        return 100 * v / DETUNE
-    return 100 * v
+    lo, hi = KINDS[kind][1:3]
+    return max(0.0, min(100.0, 100 * (shown(kind, v) - lo) / (hi - lo)))
 
 
 def value_of(kind, k):
     """A knob's value where it points (keys: whole keys)."""
-    most = KINDS[kind][4]
+    unit, lo, hi, _, most = KINDS[kind]
     if most:
-        return round(most * (k / 100) ** 2, 3)
+        return max(lo, round(most * (k / 100) ** 2, 3))
     if kind == "keys":
         return float(round(PITCH * k / 100))
-    if kind in ("groups", "voices"):
-        return float(round(1 + (KINDS[kind][2] - 1) * k / 100))
-    if kind == "cents":
-        return round(DETUNE * k / 100, 1)
-    return k / 100
+    if kind == "percent":
+        return k / 100
+    x = lo + (hi - lo) * k / 100
+    if kind in COUNTS:
+        return float(round(x))
+    return x / 100 if kind in PERCENTS else round(x, 2)
 
 
 def shown(kind, v):
-    return 100 * v if kind == "percent" else v
+    return 100 * v if kind in PERCENTS else v
 
 
 class SynthKnobs:
@@ -342,7 +362,8 @@ class SynthKnobs:
         self.turning = None  # while a knob is turned: the lines from before (FxPane.state)
         self.vals = {key: start for key, (_, _, start) in KNOBS.items()}
         self.vals["wave"], self.vals["sweep"] = "none", False
-        self.vals["same"], self.vals["touching"] = False, False
+        self.vals["same"], self.vals["touching"], self.vals["mode"] = False, False, "off"
+        self.mode_cells = {}  # the Wave box's mode -> its knobs' cells (only the picked mode's shown)
         self.dials, self.dial_vars, self.dial_boxes, self.box_says, self.pics = {}, {}, {}, {}, {}
         self.pic_for = {}  # what each picture was drawn for
         self.box_text = {}  # what each knob's box was last given to show (different = typed there)
@@ -375,6 +396,17 @@ class SynthKnobs:
                 Tooltip(cb, tr("hz.synth_tip_sweep"))
                 col = 1
             for key, kind, start in knobs:
+                mode = key.split("_")[0]
+                if name == "wave" and mode in MODE_KNOBS:  # (Mode after Octave below, then the picked mode's knobs)
+                    if not self.mode_cells:
+                        self.mode_cell(box, col)
+                        self.mode_col = col + 1
+                    at = self.mode_col + [k for k, _ in MODE_KNOBS[mode]].index(key)
+                    cell = self.dial_cell(box, at, key, kind, start, COLOURS[name])
+                    cell.grid_remove()
+                    self.mode_cells.setdefault(mode, []).append(cell)
+                    col = max(col, at + 1)
+                    continue
                 self.dial_cell(box, col, key, kind, start, COLOURS[name])
                 col += 1
                 if key in ("detune", "glide"):  # (Voices on after the copies' knobs, the tick box after Glide)
@@ -459,6 +491,21 @@ class SynthKnobs:
         Scrub(self.app, [(e, var, lambda: self.on_box(key))], steps, lo, hi, drag_box=True)
         for w in (k, e):
             Tooltip(w, tr(f"hz.synth_tip_{key}") + "\n" + tr("hz.synth_tip_knob"))
+        return cell
+
+    def mode_cell(self, box, col):
+        """The Wave box's Mode dropdown (Off, FM, Pulse width, Sync, Growl, Bitcrush)."""
+        cell = ttk.Frame(box)
+        cell.grid(row=0, column=col, padx=6, sticky="n")
+        ttk.Label(cell, text=tr("hz.synth_mode")).pack()
+        self.mode_names = [tr(f"hz.synth_mode_{m}") for m in MODE_NAMES]
+        self.mode_var = tk.StringVar(value=self.mode_names[0])
+        cb = ttk.Combobox(cell, textvariable=self.mode_var, values=self.mode_names, state="readonly", width=11)
+        cb.pack(pady=(12, 0))
+        cb.bind("<<ComboboxSelected>>", lambda e: (
+            self.change("wave", "mode", MODE_NAMES[self.mode_names.index(self.mode_var.get())]),
+            self.keyboard_back(e.widget)))
+        Tooltip(cb, tr("hz.synth_tip_mode"))
 
     # ------------------------------------------------------------ changes
 
@@ -484,7 +531,7 @@ class SynthKnobs:
         """Ctrl+Z while a knob is held: it goes back to where it was at the press, no undo step (the mouse still
         held turns nothing)."""
         hz = self.hz
-        hz.fxl, hz.loops, hz.off, hz.froms, hz.fits, hz.sustains, hz.lfo, hz.voice = self.turning
+        hz.fxl, hz.loops, hz.off, hz.froms, hz.fits, hz.sustains, hz.lfo, hz.extra = self.turning
         self.vals, self.turning = self.turn_vals, None
         for dial in self.dials.values():
             dial.drag = None
@@ -509,7 +556,7 @@ class SynthKnobs:
             return
         e.config(style="TEntry")
         self.box_text[key] = var.get()  # (taken: from now on the box shows the sound again)
-        v = v / 100 if kind == "percent" else float(round(v)) if kind in ("groups", "voices") else v
+        v = v / 100 if kind in PERCENTS else float(round(v)) if kind in COUNTS else v
         if abs(v - self.vals[key]) > 1e-9:
             self.sweep_on(key)
             self.change(box, key, v)
@@ -549,6 +596,8 @@ class SynthKnobs:
             fx.drop("octave")
             if v["octave"] > 0:
                 self.fxl["octave"] = [[0.0, v["octave"]]]
+            m = v["mode"]
+            self.set_extra("mode", {"kind": m, **{key.split("_", 1)[1]: v[key] for key, _ in MODE_KNOBS.get(m, ())}})
         elif box == "pitch":
             fx.drop("pitch")
             if v["amount"] and v["time"] > 0:
@@ -564,7 +613,7 @@ class SynthKnobs:
                     self.loops["vibrato"], self.froms["vibrato"] = every, "note"
             self.set_lfo("vibrato_rate", v["vibrato_rate"], VIBRATO_RATE)
         elif box == "voice":
-            self.voice = clean_voice({"voices": int(v["voices"]), "detune": v["detune"], "same": v["same"],
+            self.set_extra("voice", {"voices": int(v["voices"]), "detune": v["detune"], "same": v["same"],
                                       "glide": v["glide"], "touching": v["touching"]})
         elif box == "tremolo":
             fx.drop("tremolo")
@@ -591,6 +640,12 @@ class SynthKnobs:
                 self.fxl["groups"] = [[0.0, (v["groups"] - 1) / (GROUPS - 1)]]
         self.redraw()
         self.show_knobs()
+
+    def set_extra(self, name, value):
+        """One of the Hz bass's own settings (hzbass.EXTRAS) set, checked (left out when it does nothing)."""
+        extra = dict(self.extra)
+        extra[name] = value
+        self.extra = clean_extra(extra)
 
     def set_lfo(self, key, value, plain):
         """A setting of hz["lfo"] (left out when it's what the Hz bass does without one)."""
@@ -629,6 +684,15 @@ class SynthKnobs:
             self.wave_var.set(name)
         if self.sweep_var.get() != self.vals["sweep"]:
             self.sweep_var.set(self.vals["sweep"])
+        name = self.mode_names[MODE_NAMES.index(self.vals["mode"])]
+        if self.mode_var.get() != name:
+            self.mode_var.set(name)
+        if getattr(self, "mode_shown", None) != self.vals["mode"]:  # (the Wave box changes width: rows laid again)
+            self.mode_shown = self.vals["mode"]
+            for mode, cells in self.mode_cells.items():
+                for cell in cells:
+                    grid_shown(cell, mode == self.vals["mode"])
+            self.after_idle(self.fit_knobs)
         name = self.same_names[int(self.vals["same"])]
         if self.same_var.get() != name:
             self.same_var.set(name)
@@ -641,7 +705,8 @@ class SynthKnobs:
         """Each box's picture drawn again when its values (or size) changed."""
         for box, knobs in BOXES.items():
             c = self.pics[box]
-            key = (tuple(self.vals[k] for k, _, _ in knobs), self.vals["wave"] if box == "wave" else None,
+            key = (tuple(self.vals[k] for k, _, _ in knobs),
+                   (self.vals["wave"], self.vals["mode"]) if box == "wave" else None,
                    self.vals["sweep"] if box == "tone" else None,
                    (self.vals["same"], self.vals["touching"]) if box == "voice" else None, c.winfo_width(),
                    c.winfo_height())
@@ -694,18 +759,24 @@ class SynthKnobs:
         c.create_line(*[v for p in xy for v in p], fill=COLOURS["volume"], width=max(2, round(2 * s)))
 
     def wave_hits(self):
-        """Two waves' hits as the notes come out (hzbass.KeyGrid): [(place 0..2, how hard 0..1)], the soft ones left
-        out."""
+        """Two waves' hits at a note's start as the notes come out (hzbass.wave_hits, as KeyGrid makes them; Growl
+        and Bitcrush for an A1): [(place 0..2, how hard 0..1)], the soft ones left out."""
         v = self.vals
-        part = np.arange(SUB) / SUB
-        one = (part == 0).astype(float)
-        if v["wave"] != "none":
-            one = (1.0 - v["shape"]) * one + v["shape"] * WAVES[v["wave"]](part)
-        out = []
-        for n in (0, 1):  # (every other wave softer: the octave below)
-            hard = one * (1.0 - v["octave"] if n % 2 else 1.0)
-            out += [(n + p, float(x)) for p, x in zip(part, hard) if x >= SOFT]
-        return out
+        mode = clean_mode({"kind": v["mode"], **{key.split("_", 1)[1]: v[key] for key, _ in MODE_KNOBS.get(v["mode"], ())}})
+        number, since = np.arange(2), np.zeros(2)
+        wave = v["wave"] != "none"
+        shapes = [(WAVES[v["wave"]], np.full(2, v["shape"]), np.ones(2, bool))] if wave else []
+        where, mix = wave_hits(shapes, np.full(2, not wave), number, since, mode)
+        mix = mix * np.where(number % 2 == 1, 1.0 - v["octave"], 1.0)[:, None]  # (every other wave softer)
+        at = number[:, None] + where
+        if mode.get("kind") == "growl":
+            at = at + GROWL * mode["amount"] * (number % mode["every"] / (mode["every"] - 1))[:, None]
+        if mode.get("kind") == "crush" and mode["amount"] > 0:  # (an A1's wave at the Hz bass's BPM)
+            bpm = float(((self.hz.target() or {}).get("hz") or {}).get("bpm", 120.0))
+            grid = mode["amount"] ** 2 * CRUSH * 55.0 * 60.0 / bpm
+            at = np.floor(at / grid + 0.5) * grid
+        keep = (mix >= SOFT) & (at < 2.0)
+        return [(float(a), float(x)) for a, x in zip(at[keep], mix[keep])]
 
     def draw_wave(self, c):
         """Two waves' notes, one bar each, as tall as it hits (and how many notes a wave takes)."""

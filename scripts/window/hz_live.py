@@ -27,7 +27,7 @@ from files.quicksound import Mixer, QuickSound
 from files.synth import RATE, Player, SynthError
 from notes.custom import BOX_STROKE, box_frame, custom_settings
 from notes.engine import shape_notes_tracks
-from notes.hzbass import MIN_LEN, key_range, sound_span
+from notes.hzbass import EXTRAS, MIN_LEN, key_range, sound_span
 
 LEAD = 0.05  # seconds from a press / let-go to its sound (time for its notes to be made)
 BUFFER = 0.06  # seconds of sound the sound device keeps ready (short: a press is heard soon)
@@ -35,7 +35,7 @@ AHEAD = 1.0  # seconds of notes whose recordings are asked for ahead
 FIRST = 8.0  # beats of a held note made at first (doubled when it's held near the end of them)
 TICK_MS = 40
 FREE_MS = 60000  # the recordings are freed this long after the synth window closes (user)
-HZ_KEYS = ("tones", "fx", "loop", "off", "amount", "from", "fit", "sustain", "lfo", "voice", "grow", "own")
+HZ_KEYS = ("tones", "fx", "loop", "off", "amount", "from", "fit", "sustain", "lfo", "grow", "own") + EXTRAS
 
 
 def quick_sound(app):

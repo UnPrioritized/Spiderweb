@@ -77,7 +77,9 @@ hz["voice"] = the synth window's Voice box (not lines; clean_voice): {"voices": 
 "detune": cents between the lowest and the highest copy, their tones spread evenly between, "same": True = every key
 plays every copy (as many times the notes) instead of each key one copy in turn (no extra notes), "glide": beats a
 note takes to glide in from the tone of the note before it (glides), "touching": True = only from a note that ends
-where it starts}. Glide only bends the tone: each note still starts its effects over, like a synth's voices."""
+where it starts}. Glide only bends the tone: each note still starts its effects over, like a synth's voices.
+hz["mode"] = the Wave box's Mode (MODES, clean_mode): FM, Pulse width or Sync change the hits in each wave
+(wave_hits), Growl and Bitcrush when each one lands."""
 
 import bisect
 import functools
@@ -123,6 +125,20 @@ FAST = 0.5  # their bend: fast first, then settling ((1 - u)^2, the drop the use
 GROUPS = 6  # "groups" at 1
 PITCH = 12.0  # "pitch": keys up at 1 (and down at 0; 0.5 = the tone as placed)
 OFF_PITCH = 0.02  # "offpitch" at 1: the highest key's tone is this much (x the tone) below the lowest key's
+# hz["mode"] (the Wave box's Mode): kind -> its settings (lowest, highest, where its knob starts). fm: the wave's
+# place pushed back and forth by a wobble `ratio` x the tone, `depth` (x FM_INDEX) falling to 0 over `time` beats
+# from each note's start (0: stays); pulse: only the first `width` of each wave, widening to half and back `rate`
+# times a beat; sync: the wave started over `amount` times as fast inside each wave of the tone (rising from 1x over
+# `time` beats); growl: every repeat late by turns over `every` waves, up to `amount` x GROWL of a wave (a lower
+# tone under it); crush: every note moved onto a grid of `amount`^2 x CRUSH beats (uneven waves, gritty).
+MODES = {"fm": {"depth": (0.0, 1.0, 0.4), "ratio": (0.25, 16.0, 1.0), "time": (0.0, 64.0, 0.0)},
+         "pulse": {"width": (0.02, 0.5, 0.25), "rate": (0.0, 64.0, 0.0)},
+         "sync": {"amount": (1.0, 8.0, 3.0), "time": (0.0, 64.0, 0.0)},
+         "growl": {"amount": (0.0, 1.0, 0.5), "every": (2.0, 8.0, 2.0)},
+         "crush": {"amount": (0.0, 1.0, 0.5)}}
+FM_INDEX = 5.0
+GROWL = 0.5
+CRUSH = 1 / 40
 VOICES = 8  # hz["voice"]: the most copies
 DETUNE = 100.0  # ... the most cents between the lowest and the highest copy
 GLIDE = 64.0  # ... the longest glide, in beats
@@ -238,6 +254,33 @@ def clean_voice(voice):
     return out
 
 
+def clean_mode(mode):
+    """The Wave box's mode checked (hz["mode"], see MODES): {"kind", its settings (each within its range; missing =
+    where its knob starts)}, or {} (no mode)."""
+    if not isinstance(mode, dict) or mode.get("kind") not in MODES:
+        return {}
+    out = {"kind": mode["kind"]}
+    for key, (lo, hi, start) in MODES[mode["kind"]].items():
+        try:
+            v = float(mode.get(key, start))
+        except (TypeError, ValueError):
+            v = start
+        v = min(hi, max(lo, v if math.isfinite(v) else start))
+        out[key] = float(round(v)) if key == "every" else v
+    return out
+
+
+def clean_extra(hz):
+    """The synth window's own settings of a Hz bass (EXTRAS, not lines) checked: {name: its settings} for those that
+    do something."""
+    out = {}
+    for name in EXTRAS:
+        got = CLEAN_EXTRA[name](hz.get(name))
+        if got:
+            out[name] = got
+    return out
+
+
 def copies(hz):
     """The tones of the Voice box's copies, in cents from the note's (one copy: [0])."""
     v = hz.get("voice") or {}
@@ -245,6 +288,10 @@ def copies(hz):
     if n < 2:
         return [0.0]
     return [v["detune"] * (i / (n - 1) - 0.5) for i in range(n)]
+
+
+CLEAN_EXTRA = {"voice": clean_voice, "mode": clean_mode}
+EXTRAS = tuple(CLEAN_EXTRA)  # the synth window's own settings (not lines), each checked by its CLEAN_EXTRA
 
 
 def clean_sustain(sustain, loop, froms, fit):
@@ -504,8 +551,9 @@ def old_fx(tones):
 
 
 def has_fx(hz):
-    """True when every key needs its own repeats (KeyGrid): placed tones with effects, or several copies (Voice)."""
-    return (bool(hz.get("fx")) or len(copies(hz)) > 1) and bool(hz.get("tones"))
+    """True when every key needs its own repeats (KeyGrid): placed tones with effects, several copies (Voice) or a
+    wave mode."""
+    return (bool(hz.get("fx")) or len(copies(hz)) > 1 or bool(hz.get("mode"))) and bool(hz.get("tones"))
 
 
 def clean_tones(tones):
@@ -603,9 +651,7 @@ def clean_hz(hz):
     lfo = clean_lfo(hz.get("lfo") or {}) if isinstance(hz.get("lfo") or {}, dict) else {}
     if lfo:
         out["lfo"] = lfo
-    voice = clean_voice(hz.get("voice"))
-    if voice:
-        out["voice"] = voice
+    out.update(clean_extra(hz))
     if tones:
         out["tones"] = tones
         for flag in ("grow", "own"):
@@ -896,6 +942,51 @@ def _grid(starts, limits):
     return out, order[keep]
 
 
+def fall_off(since, time):
+    """1 at a note's start, falling to 0 over `time` beats, fast first (time 0: stays 1). since = beats (array)."""
+    since = np.asarray(since, float)
+    if time <= 0:
+        return np.ones(since.shape)
+    return (1.0 - np.clip(since / time, 0.0, 1.0)) ** 2
+
+
+def wave_hits(shapes, plain, number, since, mode):
+    """The hits in each wave (repeat) of a stretch with a waveform or a wave mode (FM, Pulse width, Sync): (where,
+    0..1 of the wave; loudness 0..1), arrays (repeats x hits). shapes = [(waveform function, its value for each repeat,
+    on for each repeat)]; plain = the repeats with no waveform on (one hit a wave; FM makes them a sine, Pulse width
+    full hits); number = each repeat's number in its stretch; since = beats from its note's start; mode = hz["mode"]
+    ({} = none)."""
+    part = np.arange(SUB) / SUB
+    rows, kind = len(plain), mode.get("kind")
+    p = np.broadcast_to(part, (rows, SUB))
+    if kind == "fm":  # (the place in the wave pushed back and forth; counted over the stretch so it runs on)
+        depth = FM_INDEX * mode["depth"] * fall_off(since, mode["time"])
+        at = np.asarray(number, float)[:, None] + part[None, :]
+        p = np.mod(at + depth[:, None] / (2.0 * np.pi) * np.sin(2.0 * np.pi * mode["ratio"] * at), 1.0)
+    mix = np.ones((rows, SUB))
+    for fn, v, on in shapes:  # (several on one note: multiplied)
+        mix *= np.where(on[:, None], (1.0 - v[:, None]) * (part == 0) + v[:, None] * fn(p), 1.0)
+    if kind == "fm":
+        mix[plain] = WAVES["sine"](p[plain])
+    elif kind == "pulse":
+        mix[plain] = 1.0
+    else:
+        mix[plain] = part == 0
+    if kind == "pulse":
+        width = mode["width"] + (0.5 - mode["width"]) * (1.0 - np.cos(2.0 * np.pi * mode["rate"] * since)) / 2.0
+        mix = mix * (part[None, :] < width[:, None])
+    where = np.broadcast_to(part, (rows, SUB))
+    if kind == "sync" and rows:  # (the wave's hits squeezed into 1 / r of it, over and over until the wave ends)
+        r = mode["amount"] if mode["time"] <= 0 else 1.0 + (mode["amount"] - 1.0) * np.clip(since / mode["time"], 0, 1)
+        r = np.broadcast_to(np.asarray(r, float), (rows,))
+        cols = np.flatnonzero((mix >= SOFT).any(axis=0))
+        k = int(math.ceil(r.max() - 1e-9))
+        where = (np.arange(k)[None, :, None] + part[cols][None, None, :]) / r[:, None, None]
+        mix = mix[:, None, cols] * (where < 1.0 - 1e-9)
+        where, mix = where.reshape(rows, -1), mix.reshape(rows, -1)
+    return where, mix
+
+
 class KeyGrid:
     """The repeats of a Hz bass with effects: every key has its own (squares(key)), and how much of
     the shape's velocity each of them gets (factor)."""
@@ -903,6 +994,7 @@ class KeyGrid:
     def __init__(self, hz, left, ppq, lo, n):
         self.lo, self.n, self.got = lo, max(1, n), {}
         self.copies, self.same = copies(hz), bool((hz.get("voice") or {}).get("same"))
+        self.mode, self.ppq = hz.get("mode") or {}, ppq
         self.runs = []
         tail = tails(hz)
         for starts, nexts, whose in tone_runs(hz, left, ppq):
@@ -927,8 +1019,10 @@ class KeyGrid:
             run["vib_rate"] = lfo.get("vibrato_rate", VIBRATO_RATE)
             depth = lfo.get("tremolo_depth")  # (as it was without one: the very same numbers)
             run["trem"] = (0.1, TREMOLO_DEPTH) if depth is None else (1.0 - depth, depth)
+            run["since"] = beat - n0["t"]  # (beats from its note's start: the wave modes)
             self.runs.append(run)
-        self.shaped = any(r["has_" + name].any() for r in self.runs for name in WAVES)
+        self.shaped = (any(r["has_" + name].any() for r in self.runs for name in WAVES)
+                       or self.mode.get("kind") in ("fm", "pulse", "sync"))
         self.loud = self.shaped or any(name in (hz.get("fx") or ()) for name in VEL_FX)
 
     @staticmethod
@@ -966,9 +1060,12 @@ class KeyGrid:
         cents = self.copies if self.same else [self.copies[(key - self.lo) % len(self.copies)]]  # (Voice copies)
         for run, c in ((run, c) for run in self.runs for c in cents):
             run = self.respaced(run, x, 2.0 ** (-c / 1200.0)) or run
-            late =run["slant"] * x + np.floor(x * run["groups"]) / run["groups"]
+            late = run["slant"] * x + np.floor(x * run["groups"]) / run["groups"]
             if run["noisy"].any():
                 late = late + run["noisy"] * noise.random(len(late))
+            if self.mode.get("kind") == "growl":  # (late by turns: 0 .. amount over `every` waves)
+                every = int(self.mode["every"])
+                late = late + GROWL * self.mode["amount"] * (run["number"] % every) / (every - 1)
             starts = run["starts"] + late * run["waves"]
             limits = run["limits"]
             factor, quiet = np.ones(len(starts)), np.zeros(len(starts), bool)
@@ -980,23 +1077,22 @@ class KeyGrid:
                 vol = np.where(run["has_volume"], run["volume"], 1.0)
                 loud = loud * vol
                 soft = np.where(run["number"] % 2 == 1, 1.0 - run["octave"], 1.0)  # (on the velocity itself)
-                if self.shaped:  # SUB hits in every wave, each as loud as the waveforms say there
-                    part = np.arange(SUB) / SUB
-                    mix = np.ones((len(starts), SUB))
-                    for name in WAVES:  # (several on one note: multiplied)
-                        v, on = run[name][:, None], run["has_" + name][:, None]
-                        mix *= np.where(on, (1.0 - v) * (part == 0) + v * WAVES[name](part)[None, :], 1.0)
+                if self.shaped:  # SUB hits in every wave, each as loud as the waveforms say there (wave_hits)
                     plain = ~np.any([run["has_" + name] for name in WAVES], axis=0)
-                    mix[plain] = part == 0
+                    where, mix = wave_hits([(WAVES[name], run[name], run["has_" + name]) for name in WAVES], plain,
+                                           run["number"], run["since"], self.mode)
                     keep = mix >= SOFT
                     rows = np.nonzero(keep)[0]
-                    starts = (starts[:, None] + part[None, :] * run["waves"][:, None])[keep]
+                    starts = (starts[:, None] + where * run["waves"][:, None])[keep]
                     limits = limits[rows]
                     factor = np.sqrt(loud[rows] * mix[keep]) * soft[rows]
                     quiet = vol[rows] < SOFT
                 else:
                     factor = np.sqrt(loud) * soft
                     quiet = vol < SOFT
+            if self.mode.get("kind") == "crush" and self.mode["amount"] > 0:  # (onto a coarse grid of ticks)
+                grid = self.mode["amount"] ** 2 * CRUSH * self.ppq
+                starts = np.floor(starts / grid + 0.5) * grid
             keep = starts < min(run["until"], np.inf) - 1e-6
             all_starts.append(starts[keep])
             all_limits.append(limits[keep])
