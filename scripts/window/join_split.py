@@ -16,6 +16,7 @@ from notes.bezier import anchor_count, nearest, split
 from notes.engine import cached_arrays, shape_path
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom
+from notes.sliced import cut_in_two, keep_velocity, moved_by, rejoined
 from notes.smooth import smooth_path
 from notes.joined import (custom_groups, join_shapes, join_velocity, piece_velocity, sections, split_at, split_custom,
                           split_pieces)
@@ -167,6 +168,7 @@ class JoinSplit:
             return
         new.update(kept)
         join_velocity(new, olds, [span(sh) for sh in olds], span(new))  # (each keeps its velocities)
+        new = rejoined(olds, new) or new  # (pieces of one shape: it again, or a bigger piece of it)
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.join"))
         at = order[0]
@@ -179,6 +181,24 @@ class JoinSplit:
         self.status.config(text=tr("join_split.joined_shapes_into_one_curve", n=len(order)) +
                            (tr("join_split.pieces_some_ends_didn_t_touch", pieces=pieces) if pieces > 1 else ""))
         self.tips.show("join", wait=True)
+
+    def pieces(self):
+        """The selected shapes that are pieces cut from another shape, keeping their notes (sliced.py)."""
+        return [i for i in sorted(self.sels) if i < len(self.shapes) and self.shapes[i].get("cut")
+                and moved_by(self.shapes[i]) is not None]
+
+    def make_complete(self):
+        """Right-click → Turn into a complete shape (user): the selected pieces forget the shape they were cut from,
+        their notes follow their own lines from now on (Ctrl+Z: pieces again)."""
+        got = self.pieces()
+        if not got:
+            return
+        self.push_undo(name=tr("join_split.make_complete"))
+        for i in got:
+            del self.shapes[i]["cut"]
+        self.shapes_changed()
+        self.status.config(text=tr("join_split.made_complete") if len(got) == 1 else
+                           tr("join_split.made_complete_n", n=len(got)))
 
     def can_split_pieces(self, sh):
         """A joined curve with more than one piece / shape in it, a live shape that can go back to the shapes it was
@@ -200,6 +220,7 @@ class JoinSplit:
         for p in parts if velocity else ():
             piece_velocity(p, old, span(p), whole)
             part_glue(p, old)
+            keep_velocity(p)
         self.shapes[i:i + 1] = parts
         self.select_many(range(i, i + len(parts)), i)
         self.shapes_changed()
@@ -232,8 +253,18 @@ class JoinSplit:
         self.status.config(text=tr("join_split.split_in_two"))
         self.tips.show("join", wait=True)
 
-    def cut_at(self, sh, at):
-        """A line kind cut in two at the spot at (x, y on screen) -> its two halves, or None (too near an end)."""
+    def cut_at(self, sh, at, mark=None):
+        """A line kind cut in two at the spot at (x, y on screen) -> its two halves, or None (too near an end).
+        They're pieces that keep their notes (sliced.py); mark: the cut's mark ({"kind": "slice", "dir": ...}; default
+        Split here's scissors)."""
+        got = self._cut_at(sh, at)
+        if got:
+            roll = self.roll
+            scale = (abs(roll.t2x(1) - roll.t2x(0)), abs(roll.p2y(0) - roll.p2y(1)))
+            cut_in_two(sh, got, got[0]["pts"][-1], scale, mark or {"kind": "split"})
+        return got
+
+    def _cut_at(self, sh, at):
         roll = self.roll
         if sh["kind"] == "curve":
             c = copy.deepcopy(sh)
@@ -284,7 +315,7 @@ class JoinSplit:
                         at = SimpleNamespace(x=roll.t2x(pt[0]), y=roll.p2y(pt[1]), state=0)
                         # (the piece the crossing is on)
                         k = min(range(len(pieces)), key=lambda j: self.path_dist(pieces[j], at))
-                        got = self.cut_at(pieces[k], at)
+                        got = self.cut_at(pieces[k], at, {"kind": "slice", "dir": [sb[0] - sa[0], sb[1] - sa[1]]})
                         if got:
                             pieces[k:k + 1] = got
             else:
@@ -303,6 +334,7 @@ class JoinSplit:
             for p in parts if i in done else ():
                 piece_velocity(p, sh, span(p), whole)
                 part_glue(p, sh)
+                keep_velocity(p)
             if i in done:
                 picked += range(len(new), len(new) + len(parts))
             new += parts

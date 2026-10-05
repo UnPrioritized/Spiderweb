@@ -29,6 +29,7 @@ from notes.glue import added as glue_added, flipped as glue_flipped, glue_box, t
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
 from notes.polygon import POLYGON_DEFAULTS
+from notes.sliced import fresh_marks, moved_by
 from notes.smooth import SMOOTH_DEFAULT
 from notes.text import TEXT_DEFAULTS
 from files.mathexpr import calc, calc_int, fmt
@@ -835,6 +836,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 self.split_box.pack(anchor="w", padx=(18, 0), pady=(1, 0))
             else:
                 self.split_box.pack_forget()
+        for sh in self.shapes:  # a piece whose outline was changed is a shape of its own now (sliced.py)
+            if "cut" in sh and moved_by(sh) is None:
+                del sh["cut"]
         got = [self.notes_tracks(sh) for sh in self.shapes]
         # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
         # merged into the last (pasted notes keep their tracks)
@@ -987,6 +991,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             new = copy.deepcopy(sh)
             new["pts"] = [[b + shift, p] for b, p in new["pts"]]
             self.shapes.append(new)
+        fresh_marks(self.shapes[first:])
         self.select_many(range(first, len(self.shapes)), len(self.shapes) - 1)
         self.shapes_changed()
 

@@ -29,6 +29,7 @@ from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
 from notes.polygon import clean_polygon, polygon_strokes
+from notes.sliced import clean_cut, in_part, source, spotted_notes
 from notes.smooth import clean_level, smooth_path
 from notes.text import clean_text
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
@@ -138,6 +139,9 @@ def clean_shape(sh):
     tm = clean_tumour(sh.get("tumour")) if out["kind"] in LINE_KINDS else None
     if tm:
         out["tumour"] = tm
+    cut = clean_cut(sh["cut"]) if out["kind"] in LINE_KINDS and isinstance(sh.get("cut"), dict) else None
+    if cut:  # a piece cut from another shape, keeping its notes (sliced.py)
+        out["cut"] = cut
     if out["kind"] == "custom":
         strokes = clean_strokes(sh.get("strokes"))
         if len(out["pts"]) != 3 or not strokes:
@@ -320,15 +324,19 @@ def note_array(notes, columns):
 
 def unique_rows(a):
     """a without rows that repeat an earlier row (order kept)."""
+    keep = unique_index(a)
+    return a if len(keep) == len(a) else a[keep]
+
+
+def unique_index(a):
+    """The rows unique_rows keeps."""
     if len(a) < 2:
-        return a
+        return np.arange(len(a))
     order = np.lexsort(a.T[::-1])  # stable: within repeats the earliest comes first
     b = a[order]
     new = np.ones(len(a), bool)
     new[1:] = (b[1:] != b[:-1]).any(axis=1)
-    if new.all():
-        return a
-    return a[np.sort(order[new])]
+    return np.arange(len(a)) if new.all() else np.sort(order[new])
 
 
 def shape_notes(sh, ppq, keys=128):
@@ -388,13 +396,23 @@ def _after(fn, notes, tracks, settings, ppq):
 
 def _notes_tracks(sh, ppq, keys):
     end_dot = sh.get("end_dot", False)
-    path = dedupe(np.concatenate(cached_arrays(sh)))  # (drawing the line uses the same points)
+    piece = source(sh) if sh["kind"] in LINE_KINDS and sh.get("cut") else None
+    vel_sh = sh  # (whose velocities, over whose time)
+    if piece:  # cut from another shape (sliced.py): its notes are made as that one's, then its own part kept
+        whole, part, same_vel = piece
+        if same_vel:
+            vel_sh = whole
+        sh = whole
+    path = dedupe(np.concatenate(cached_arrays(vel_sh)))  # (drawing the line uses the same points)
     if path[-1, 0] < path[0, 0]:
         path = path[::-1]  # drawn right to left: the "last point" is the later end in time, same as left to right
     path = path * [ppq, 1]  # beats -> ticks
     own = None  # pasted notes' own velocities and tracks
     groups = None  # a custom shape made of other shapes (convert.py): which of them each note came from
-    if sh["kind"] == "custom" and "notes" in sh:
+    spots = None  # a piece's: where on the whole's path each note starts
+    if piece:
+        raw, spots = spotted_notes(sh, ppq, end_dot)
+    elif sh["kind"] == "custom" and "notes" in sh:
         raw = block_notes(sh, ppq)
         raw, own = raw[:, :3], raw[:, 3:5]
     elif sh["kind"] == "custom":
@@ -416,12 +434,20 @@ def _notes_tracks(sh, ppq, keys):
         raw = path_notes(path, end_dot)
     t_lo = float(path[:, 0].min())
     t_hi = float(path[:, 0].max())
-    env = velocity_env(sh)
+    env = velocity_env(vel_sh)
     raw = note_array(raw, 3)
     keep = (raw[:, 2] >= 0) & (raw[:, 2] < keys) & (raw[:, 1] > 0)
     raw = raw[keep]
     raw[:, 0] = np.maximum(raw[:, 0], 0)
     tracks = None
+    if spots is not None:  # (Colours count over the whole's notes, then the piece keeps its own)
+        spots = spots[keep]
+        keep = unique_index(raw)
+        raw, spots = raw[keep], spots[keep]
+        if cycling(sh) and len(raw):
+            tracks = cycle_turns(sh, raw, ppq)
+        mine = in_part(spots, part)
+        raw, tracks = raw[mine], tracks[mine] if tracks is not None else None
     if own is not None:
         own = own[keep]
         if sh.get("own_vel"):  # (the same note in two tracks stays twice: they can go to different channels)
@@ -432,7 +458,7 @@ def _notes_tracks(sh, ppq, keys):
     elif groups is not None:  # (the same note from two of them stays twice, like two shapes)
         got = unique_rows(np.column_stack([raw, np.asarray(groups, np.int64)[keep]]))
         raw, tracks = got[:, :3], got[:, 3]
-    else:
+    elif spots is None:
         raw = unique_rows(raw)
         if cycling(sh) and len(raw):  # "Colours" on a line / funnel
             tracks = cycle_turns(sh, raw, ppq)

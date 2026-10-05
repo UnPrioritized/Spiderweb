@@ -89,26 +89,36 @@ def stretch_ends(path, end_dot=False):
     return pts
 
 
-def keep_longest(raw):
+def keep_longest(raw, u=None):
     """The same key starting on the same tick twice (where pieces meet): keep the longest (in the order the
-    first of them came). Notes ending before tick 0 are dropped."""
-    raw = raw[raw[:, 1] >= 0]
+    first of them came). Notes ending before tick 0 are dropped. u: each note's spot on the path (path_notes
+    where=True), kept with it -> (notes, u)."""
+    ok = raw[:, 1] >= 0
+    raw = raw[ok]
+    if u is not None:
+        u = u[ok]
     if len(raw) < 2:
-        return raw
+        return raw if u is None else (raw, u)
     order = np.lexsort((np.arange(len(raw)), raw[:, 2], raw[:, 0]))
     b = raw[order]
     new = np.ones(len(b), bool)
     new[1:] = (b[1:, 0] != b[:-1, 0]) | (b[1:, 2] != b[:-1, 2])
     at = np.nonzero(new)[0]
     first = np.argsort(order[at])
-    return np.column_stack([b[at, 0], np.maximum.reduceat(b[:, 1], at), b[at, 2]])[first]
+    notes = np.column_stack([b[at, 0], np.maximum.reduceat(b[:, 1], at), b[at, 2]])[first]
+    return notes if u is None else (notes, u[order[at]][first])
+
+
+def loop_start(path):
+    """Where loop_from_left restarts a closed loop (its leftmost point)."""
+    return int(np.lexsort((path[:-1, 1], path[:-1, 0]))[0])
 
 
 def loop_from_left(path):
     """A closed loop (first point = last) restarted at its leftmost point, so it splits into pieces running left to
     right (starting mid-slope would leave a join there)."""
+    i = loop_start(path)
     path = path[:-1]
-    i = int(np.lexsort((path[:, 1], path[:, 0]))[0])
     return np.concatenate([path[i:], path[:i + 1]])
 
 
@@ -120,29 +130,41 @@ def ends_forward(path):
     return not len(moved) or bool(dt[moved[-1]] > 0)
 
 
-def path_notes(path, end_dot=False):
+def path_notes(path, end_dot=False, where=False):
     """A line / curve / arc path (beat points scaled to ticks, first to last point) -> (start, end, pitch) notes.
-    A closed loop (a whole circle) has no ends: nothing is stretched, like custom shape outlines."""
+    A closed loop (a whole circle) has no ends: nothing is stretched, like custom shape outlines.
+    where: also each note's spot on the path, where it starts (point i = i, halfway to the next = i + 0.5), so a
+    piece cut from it can take the notes that start on its part (sliced.py) -> (notes, spots)."""
+    at = np.arange(len(path), dtype=float) if where else None
     if len(path) > 3 and (path[0] == path[-1]).all():
+        loop = len(path) - 1
+        if where:
+            at += loop_start(path)  # (counted on past the end; back round below)
         path = loop_from_left(path)
         end_dot = False
     else:
+        loop = None
         end_dot = end_dot and ends_forward(path)
         path = stretch_ends(path, end_dot)
-    return keep_longest(line_notes(path, end_dot))
+    if not where:
+        return keep_longest(line_notes(path, end_dot))
+    notes, u = keep_longest(*line_notes(path, end_dot, at))
+    return notes, (u % loop if loop else u)
 
 
-def line_notes(pts, tail=False):
+def line_notes(pts, tail=False, at=None):
     """
     (tick, pitch) points -> (start, end, pitch) notes, before keep_longest. The path is split wherever it turns
     back in time (every piece runs left to right) and straight-up parts become their own parts, so their notes
     stay 1 tick instead of sharing the length of the flat part next to them (the sides of a square).
     tail: the last part of a piece ending on the path's last point has its last note start on it.
+    at: each point's spot on the path: then -> (notes, each note's spot) (path_notes where).
     """
     n = len(pts)
     cuts = direction_changes(pts[:, 0])
     lo, hi = np.append(0, cuts), np.append(cuts, n - 1)
-    q = pts[spans(lo, hi, pts[hi, 0] < pts[lo, 0])]  # every piece left to right, one after another
+    iq = spans(lo, hi, pts[hi, 0] < pts[lo, 0])
+    q = pts[iq]  # every piece left to right, one after another
     size = hi - lo + 1
     piece_end = np.cumsum(size) - 1
     same = np.ones(len(q) - 1, bool)  # q[i] -> q[i + 1] is a segment (not a jump to the next piece)
@@ -155,15 +177,17 @@ def line_notes(pts, tail=False):
     if tail:
         tails = np.isin(last, piece_end) & (q[last] == pts[-1]).all(axis=1)
     size = last - first + 1
-    return parts_notes(q[spans(first, last)], np.cumsum(size) - size, tails)
+    ir = spans(first, last)
+    return parts_notes(q[ir], np.cumsum(size) - size, tails, spot=None if at is None else at[iq][ir])
 
 
-def parts_notes(r, first, tails, counts=False):
+def parts_notes(r, first, tails, counts=False, spot=None):
     """
     Parts running left to right -> (start, end, pitch) notes, one per pitch crossed. Part k = r[first[k]] up to
     the next part's first point, (tick, pitch) rows.
     tails[k]: part k's last note starts on its last point; it gets the same gate as the note before it.
-    counts: also return how many notes each part made.
+    counts: also return how many notes each part made. spot: each point's spot on the path: also each note's
+    (where it starts) -> (notes, [counts,] spots).
     """
     t, y = r[:, 0], r[:, 1]
     p = np.floor(y + 0.5).astype(np.int64)
@@ -214,13 +238,19 @@ def parts_notes(r, first, tails, counts=False):
     tl = tl[starts[tl] == end_tick[tails & (per >= 2)]]
     ends[tl] = starts[tl] + np.maximum(1, ends[tl - 1] - starts[tl - 1])
     notes = np.column_stack([starts, ends, ep])
-    return (notes, per) if counts else notes
+    out = (notes, per) if counts else (notes,)
+    if spot is not None:
+        eu = np.empty(m)
+        eu[off] = spot[first]
+        eu[pos] = spot[jj] + (spot[jj + 1] - spot[jj]) * (yy - ya) / (yb - ya)
+        out += (eu,)
+    return out if len(out) > 1 else notes
 
 
-def dot_segment_notes(path):
+def dot_segment_notes(path, where=False):
     """
     Polyline with "starts exactly on the last point": every segment works like its own line,
-    so the note of every dot starts exactly on that dot's tick.
+    so the note of every dot starts exactly on that dot's tick. where: as path_notes.
     """
     a, b = path[:-1], path[1:]
     swap = (a[:, 0] > b[:, 0]) | ((a[:, 0] == b[:, 0]) & (a[:, 1] > b[:, 1]))  # every segment left to right
@@ -237,10 +267,13 @@ def dot_segment_notes(path):
     pts = np.stack([np.column_stack([a[:, 0], np.where(moved, y0, ys)]),
                     np.column_stack([b[:, 0], np.where(moved, y1, ye)])], axis=1).reshape(-1, 2)
     n = len(a)
-    raw, per = parts_notes(pts, np.arange(n) * 2, np.ones(n, bool), counts=True)
+    i = np.arange(n, dtype=float)
+    spot = np.column_stack([np.where(swap, i + 1, i), np.where(swap, i, i + 1)]).reshape(-1)
+    raw, per, u = parts_notes(pts, np.arange(n) * 2, np.ones(n, bool), counts=True, spot=spot)
     # A dot shared by two segments: keep the next segment's note, not the previous segment's tail
     # (a segment's tail = its last note when it has two or more; notes are compared by value)
     row = np.unique(raw, axis=0, return_inverse=True)[1].ravel()
     in_tails = np.isin(row, row[(np.cumsum(per) - 1)[per >= 2]])
     at = np.unique(raw[:, [0, 2]], axis=0, return_inverse=True)[1].ravel()
-    return raw[~(in_tails & np.isin(at, at[~in_tails]))]
+    keep = ~(in_tails & np.isin(at, at[~in_tails]))
+    return (raw[keep], u[keep]) if where else raw[keep]

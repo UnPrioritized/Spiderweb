@@ -133,6 +133,8 @@ class ShapeMenu:
                  tr("roll_menu.ctrl_g"), app.join_selected, ok, keys=True)
         if len(app.sels) == 1 and sh["kind"] in LINE_KINDS:
             item(tr("roll_menu.split_here"), "", lambda: app.split_here(i, at))
+        if app.pieces():  # (cut by Split here / Slice: its notes follow the shape it was cut from, sliced.py)
+            item(tr("roll_menu.make_complete"), "", app.make_complete)
         if app.live_problem() is None:
             item(tr("roll_menu.turn_into_live_shape"), tr("roll_menu.ctrl_r"), app.turn_into_live, keys=True)
         if len(app.sels) == 1 and app.can_split_pieces(sh):
@@ -175,6 +177,8 @@ class ShapeMenu:
              tr("roll_menu.ctrl_g"), app.join_selected, ok)
         if app.live_problem() is None:
             item(tr("roll_menu.turn_into_live_shape"), tr("roll_menu.ctrl_r"), app.turn_into_live)
+        if app.pieces():
+            item(tr("roll_menu.make_complete"), "", app.make_complete)
         self.group_items(m, item, True, True, True)
         try:
             m.tk_popup(e.x_root, e.y_root)

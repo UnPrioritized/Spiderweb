@@ -13,6 +13,7 @@ from notes.engine import cached_arrays, shape_notes_tracks
 from notes.joined import all_tumours
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
 from notes.paths import KEYS
+from notes.sliced import moved_by
 from roll.roll_shared import (BLACK, DRAFT_COLOR, PIANO_88, PREVIEW_LIMIT, SELECTED_COLOR, SLOT_COLORS,
                               draw_boxes, fade, note_name)
 
@@ -31,6 +32,8 @@ RING_RGB = np.frombuffer(bytes.fromhex(RING_COLOR[1:]), np.uint8)
 PREVIEW_COLOR, PREVIEW_HALO = "#ff1f1f", "#ffa8a8"  # the outline gate's preview line (draw_edge_preview)
 RING_GAP = 4  # px: notes in a row closer than this count as touching for the ring
 RING_MAX = 20000  # more ring pieces on screen than this: none drawn (canvas items are slow)
+CUT_MARK = 12  # px each side of a sliced piece's cut end: its stretch of the Slice line (draw_cut_marks)
+FAINT_CUT = "#f0c8c8"  # the really faint line from a piece's cut end to the other piece's (user)
 
 
 def piece_runs(x0, y0, x1, y1):
@@ -361,6 +364,7 @@ class RollDrawing:
                     self.draw_path(sh, "#c0392b", 1)
         for i in app.sels:
             self.draw_path(app.shapes[i], "#ff1f1f", 2)
+        self.draw_cut_marks()
         sel = self.point_shape()
         if sel and app.parts:
             self.draw_parts()
@@ -527,6 +531,48 @@ class RollDrawing:
         for i, x in self.above_marks():
             self.create_polygon(x, y, x + 6 * s, y + 9 * s, x - 6 * s, y + 9 * s, outline="#ffffff",
                                 fill="#ff1f1f" if i in self.app.sels else "#c0392b")
+
+    def draw_cut_marks(self):
+        """A selected piece's cut ends (notes/sliced.py; user, 2026-10-06): a Slice cut = a short stretch of the Slice
+        tool's dashed line, the way it was drawn; a Split here cut = small scissors beside it. From each, a really
+        faint line to where the other piece's end is now (none while they touch, or once that piece is gone; a copy's
+        marks pair only with the pieces copied with it)."""
+        app = self.app
+        if not app.sels:
+            return
+        spots = {}  # mark id -> [(shape, mark, x, y)]
+        for i, sh in enumerate(app.shapes):
+            d = moved_by(sh) if sh.get("cut") else None
+            if d is None:
+                continue
+            for m in sh["cut"]["marks"]:
+                spots.setdefault(m["id"], []).append((i, m, self.t2x(m["at"][0] + d[0]), self.p2y(m["at"][1] + d[1])))
+        s = self.scale
+        for pair in spots.values():
+            for i, m, x, y in pair:
+                if i not in app.sels:
+                    continue
+                for j, _, x2, y2 in pair:
+                    if j != i and math.hypot(x2 - x, y2 - y) > 3 * s:
+                        self.create_line(x, y, x2, y2, fill=FAINT_CUT, width=1, dash=(2, 4))
+                if m["kind"] == "slice":
+                    dx, dy = m.get("dir", (0, 1))
+                    dx, dy = dx * self.sx, -dy * self.sy
+                    ln = math.hypot(dx, dy) or 1
+                    dx, dy = dx / ln * CUT_MARK * s, dy / ln * CUT_MARK * s
+                    self.create_line(x - dx, y - dy, x + dx, y + dy, fill="#d00000", width=max(1, round(2 * s)),
+                                     dash=(6, 3))
+                else:
+                    self.draw_scissors(x + 9 * s, y - 9 * s, s)
+
+    def draw_scissors(self, x, y, s):
+        """Small scissors (two rings, two crossed blades) centred on x, y, drawn with lines so every system shows
+        them."""
+        r, w = 2.5 * s, max(1, round(1.5 * s))
+        for side in (-1, 1):
+            cx, cy = x + side * 3 * s, y + 4.5 * s
+            self.create_oval(cx - r, cy - r, cx + r, cy + r, outline="#d00000", width=w)
+            self.create_line(cx - side * 1 * s, cy - r, x - side * 3 * s, y - 6 * s, fill="#d00000", width=w)
 
     def draw_select_box(self):
         """The box being dragged with Select (with the ones kept when Ctrl+drag adds it), or the last ones
