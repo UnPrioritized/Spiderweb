@@ -1208,7 +1208,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def stretched(sh, ab, kx, ap, ky):
         """A copy of shape sh stretched kx times sideways from beat ab and ky times up / down from pitch ap (a
         Select box's side dragged), still looking the same stretched: arcs / freehand as round, its tumours,
-        formulas and text along, a Hz bass's notes and effects' lines too."""
+        formulas and text along. Not a Hz bass's notes (user, like its box's corners)."""
         new = copy.deepcopy(sh)
         fn = lambda b, p: (ab + (b - ab) * kx, ap + (p - ap) * ky)
         new["pts"] = [list(fn(b, p)) for b, p in sh["pts"]]
@@ -1224,23 +1224,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             tm["dist"] *= abs(kx)
             tm["ease"] = tm.get("ease", 0.0) * abs(kx)
         moved_formulas(new, fn)
-        hz = new.get("hz")
-        if hz:  # its notes count in beats from the shape's left edge
-            for n in hz.get("tones") or ():
-                n["t"] *= abs(kx)
-                n["len"] *= abs(kx)
-                for s in n.get("to") or ():
-                    s["out"] *= abs(kx)
-                    s["in"] *= abs(kx)
-            for pts in (hz.get("fx") or {}).values():
-                for p in pts:
-                    p[0] *= abs(kx)
-            for name in hz.get("loop") or {}:
-                hz["loop"][name] *= abs(kx)
-            for pts in (hz.get("amount") or {}).values():
-                for p in pts:
-                    p[0] *= abs(kx)
-        return new
+        return new  # (a Hz bass's notes keep their lengths: its box only limits where they sound, user)
 
     def shape_label(self, sh):
         if "notes" in sh:
