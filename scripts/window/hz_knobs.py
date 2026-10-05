@@ -10,6 +10,7 @@ made shows them about where it is (with a note); turning one makes new lines fro
   Tone: Sweep (on / off) from Start to End in Time = the Sweep line once per note; Wah = its line, flat.
   Character: Slant, Groups, Off pitch, Noisy = their lines, flat.
   Voice: Voices, Detune, Voices on (split / same keys), Glide, Only notes that touch = hz["voice"] (not lines).
+  Arpeggio (third row): On, Pattern, Speed, Octaves, Gate, Chord = hz["arp"] (not lines; there only while on).
 Each box has a picture: the envelope (with a dot while a key sounds), one wave's hits (the notes), the pitch, the
 wobbles over two beats, which keys are loud over time, the keys' notes over four waves, the copies' tones and a glide."""
 
@@ -21,9 +22,9 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.hzbass import (CRUSH, DETUNE, FAST, GROUPS, GROWL, LOOP, MODES, OFF_PITCH, PITCH, RACK, SOFT, SUB, TREMOLO,
-                          TREMOLO_DEPTH, VIBRATO_RATE, VOICES, WAH, WAVES, clean_extra, clean_mode, clean_voice, copies,
-                          group_count, line_at, wave_hits)
+from notes.hzbass import (ARP, ARP_PATTERNS, CHORDS, CRUSH, DETUNE, FAST, GROUPS, GROWL, LOOP, MODES, OFF_PITCH, PITCH,
+                          RACK, SOFT, SUB, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE, VOICES, WAH, WAVES, arpeggiated,
+                          clean_arp, clean_extra, clean_mode, clean_voice, copies, group_count, line_at, wave_hits)
 from window.hz_effects import AMOUNT, FX_COLOR
 from window.tool_window import Knob
 from window.widgets import Scrub, Tooltip, grid_shown
@@ -47,9 +48,12 @@ KINDS = {"time": ("hz.synth_beats", 0.0, TIME_MOST, (0.05, 0.25, 0.01), TIME_KNO
                    MODES["fm"]["ratio"][1]),
          "sync": ("hz.synth_times", MODES["sync"]["amount"][0], MODES["sync"]["amount"][1], (0.1, 1, 0.01), None),
          "every": (None, MODES["growl"]["every"][0], MODES["growl"]["every"][1], (1, 1, 1), None),
-         "repeats": (None, RACK["echo"]["repeats"][0], RACK["echo"]["repeats"][1], (1, 1, 1), None)}
-PERCENTS = ("percent", "width")  # (kept 0..1, shown and typed in %)
-COUNTS = ("groups", "voices", "every", "repeats")  # (whole numbers)
+         "repeats": (None, RACK["echo"]["repeats"][0], RACK["echo"]["repeats"][1], (1, 1, 1), None),
+         "speed": ("hz.synth_a_beat", ARP["speed"][0], ARP["speed"][1], (0.25, 1, 0.01), ARP["speed"][1]),
+         "octaves": (None, ARP["octaves"][0], ARP["octaves"][1], (1, 1, 1), None),
+         "gate": ("hz.synth_percent", 100 * ARP["gate"][0], 100 * ARP["gate"][1], (1, 10, 0.1), None)}
+PERCENTS = ("percent", "width", "gate")  # (kept 0..1, shown and typed in %)
+COUNTS = ("groups", "voices", "every", "repeats", "octaves")  # (whole numbers)
 # the Wave box's modes (hzbass.MODES): their knobs (knob = mode_setting) and kinds; only the picked mode's are shown
 MODE_KNOBS = {"fm": (("fm_depth", "percent"), ("fm_ratio", "ratio"), ("fm_time", "time")),
               "pulse": (("pulse_width", "width"), ("pulse_rate", "vib_rate")),
@@ -70,8 +74,9 @@ BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain",
                   ("wah", "percent", 0.0)),
          "character": (("slant", "percent", 0.0), ("groups", "groups", 1.0), ("offpitch", "percent", 0.0),
                        ("noisy", "percent", 0.0)),
-         "voice": (("voices", "voices", 1.0), ("detune", "cents", 20.0), ("glide", "time", 0.0))}
-ROWS = (("volume", "wave", "pitch", "tone"), ("vibrato", "tremolo", "character", "voice"))
+         "voice": (("voices", "voices", 1.0), ("detune", "cents", 20.0), ("glide", "time", 0.0)),
+         "arp": tuple((f"arp_{k}", k, start) for k, (_, _, start) in ARP.items())}
+ROWS = (("volume", "wave", "pitch", "tone"), ("vibrato", "tremolo", "character", "voice"), ("arp",))
 # the Effects tab's effects (hzbass.RACK, window/hz_rack.py): their knobs (knob = effect_setting) and kinds
 RACK_KNOBS = {"chorus": (("chorus_depth", "cents"), ("chorus_rate", "vib_rate")),
               "echo": (("echo_time", "time"), ("echo_repeats", "repeats"), ("echo_fade", "percent")),
@@ -81,9 +86,9 @@ KNOBS.update({key: (fx, kind, RACK[fx][key.split("_", 1)[1]][2]) for fx, knobs i
               for key, kind in knobs})
 COLOURS = {"volume": FX_COLOR["volume"], "wave": FX_COLOR["sine"], "pitch": FX_COLOR["pitch"],
            "vibrato": FX_COLOR["vibrato"], "tremolo": FX_COLOR["tremolo"], "tone": FX_COLOR["sweep"],
-           "character": FX_COLOR["slant"], "voice": "#3a6ee0"}
+           "character": FX_COLOR["slant"], "voice": "#3a6ee0", "arp": "#c0398a"}
 PICTURES = {"volume": (260, 90), "wave": (200, 90), "pitch": (150, 90), "vibrato": (230, 60), "tremolo": (150, 60),
-            "tone": (200, 90), "character": (220, 60), "voice": (230, 60)}
+            "tone": (200, 90), "character": (220, 60), "voice": (230, 60), "arp": (260, 60)}
 CHARACTER = ("slant", "offpitch", "noisy")  # (the Character box's lines that are just their value; Groups is counted)
 WAVE_NAMES = ("none",) + tuple(WAVES)
 
@@ -273,6 +278,15 @@ def read_voice(win, was):
     return got, True
 
 
+def read_arp(win, was):
+    """The Arpeggio box: ({arp_on, arp_pattern, arp_chord, arp_speed, arp_octaves, arp_gate}, True) (off: its
+    settings kept as they were)."""
+    arp = win.extra.get("arp")
+    if not arp:
+        return {"arp_on": False}, True
+    return {"arp_on": True, **{f"arp_{k}": v for k, v in arp.items()}}, True
+
+
 def read_rack(win, was):
     """The Effects tab: {rack: its effects in order, rack_off: those switched off, each one's knobs} (an effect not
     there: its knobs kept as they were)."""
@@ -285,7 +299,8 @@ def read_rack(win, was):
 
 
 READ = {"volume": read_volume, "wave": read_wave, "pitch": read_pitch, "vibrato": read_vibrato,
-        "tremolo": read_tremolo, "tone": read_tone, "character": read_character, "voice": read_voice}
+        "tremolo": read_tremolo, "tone": read_tone, "character": read_character, "voice": read_voice,
+        "arp": read_arp}
 
 
 class Dial(Knob):
@@ -381,7 +396,8 @@ class SynthKnobs:
         self.vals = {key: start for key, (_, _, start) in KNOBS.items()}
         self.vals["wave"], self.vals["sweep"] = "none", False
         self.vals["same"], self.vals["touching"], self.vals["mode"] = False, False, "off"
-        self.vals["rack"], self.vals["rack_off"] = (), ()  # (the Effects tab's effects in order, those switched off)
+        self.vals["rack"], self.vals["rack_off"] = (), ()
+        self.vals.update(arp_on=False, arp_pattern="up", arp_chord="placed")  # (the Effects tab's effects in order, those switched off)
         self.mode_cells = {}  # the Wave box's mode -> its knobs' cells (only the picked mode's shown)
         self.dials, self.dial_vars, self.dial_boxes, self.box_says, self.pics = {}, {}, {}, {}, {}
         self.pic_for = {}  # what each picture was drawn for
@@ -404,6 +420,8 @@ class SynthKnobs:
                 cb.bind("<<ComboboxSelected>>", lambda e: (self.on_wave(), self.keyboard_back(e.widget)))
                 Tooltip(cb, tr("hz.synth_tip_wave"))
                 col = 1
+            if name == "arp":
+                col = self.arp_cells(box)
             if name == "tone":
                 cell = ttk.Frame(box)
                 cell.grid(row=0, column=0, padx=6, sticky="n")
@@ -431,6 +449,9 @@ class SynthKnobs:
                 if key in ("detune", "glide"):  # (Voices on after the copies' knobs, the tick box after Glide)
                     self.voice_cell(box, col, key)
                     col += 1
+            if name == "arp":
+                self.arp_choice(box, col, "chord", tuple(CHORDS))
+                col += 1
             size = PICTURES[name]
             pic = self.pics[name] = tk.Canvas(box, width=round(size[0] * s), height=round(size[1] * s),
                                               background="white", highlightthickness=1, highlightbackground="#ccc")
@@ -584,9 +605,39 @@ class SynthKnobs:
             self.box_text[key] = var.get()
 
     def sweep_on(self, key):
-        """Turning one of Sweep's knobs puts it on (its On box ticked)."""
+        """Turning one of Sweep's knobs puts it on (its On box ticked); the Arpeggio's the same."""
         if key.startswith("sweep_"):
             self.vals["sweep"] = True
+        if key.startswith("arp_"):
+            self.vals["arp_on"] = True
+
+    def arp_cells(self, box):
+        """The Arpeggio box's On tick box and Pattern dropdown (columns 0 and 1): the next free column."""
+        cell = ttk.Frame(box)
+        cell.grid(row=0, column=0, padx=6, sticky="n")
+        ttk.Label(cell, text="").pack()
+        self.arp_var = tk.BooleanVar(value=False)
+        cb = ttk.Checkbutton(cell, text=tr("hz.synth_sweep_on"), variable=self.arp_var,
+                             command=lambda: self.change("arp", "arp_on", self.arp_var.get()))
+        cb.pack(pady=(14, 0))
+        Tooltip(cb, tr("hz.synth_tip_arp_on"))
+        self.arp_choice(box, 1, "pattern", ARP_PATTERNS)
+        return 2
+
+    def arp_choice(self, box, col, what, ids):
+        """One of the Arpeggio box's dropdowns (Pattern / Chord): picking one puts the arpeggio on."""
+        cell = ttk.Frame(box)
+        cell.grid(row=0, column=col, padx=6, sticky="n")
+        ttk.Label(cell, text=tr(f"hz.synth_arp_{what}")).pack()
+        names = [tr(f"hz.synth_arp_{what}_{i}") for i in ids]
+        var = tk.StringVar(value=names[0])
+        cb = ttk.Combobox(cell, textvariable=var, values=names, state="readonly",
+                          width=max(len(n) for n in names) + 1)
+        cb.pack(pady=(12, 0))
+        cb.bind("<<ComboboxSelected>>", lambda e: (self.sweep_on("arp_"), self.change(
+            "arp", f"arp_{what}", ids[names.index(var.get())]), self.keyboard_back(e.widget)))
+        Tooltip(cb, tr(f"hz.synth_tip_arp_{what}"))
+        setattr(self, f"arp_{what}_pick", (var, names, ids))
 
     def on_wave(self):
         self.change("wave", "wave", WAVE_NAMES[self.wave_names.index(self.wave_var.get())])
@@ -649,6 +700,8 @@ class SynthKnobs:
             fx.drop("wah")
             if v["wah"] > 0:
                 self.fxl["wah"] = [[0.0, v["wah"]]]
+        elif box == "arp":
+            self.set_extra("arp", {k: v[f"arp_{k}"] for k in ("pattern", "chord", *ARP)} if v["arp_on"] else None)
         elif box in RACK:
             self.write_rack()
         else:
@@ -706,6 +759,13 @@ class SynthKnobs:
             self.wave_var.set(name)
         if self.sweep_var.get() != self.vals["sweep"]:
             self.sweep_var.set(self.vals["sweep"])
+        if self.arp_var.get() != self.vals["arp_on"]:
+            self.arp_var.set(self.vals["arp_on"])
+        for what in ("pattern", "chord"):
+            var, names, ids = getattr(self, f"arp_{what}_pick")
+            name = names[ids.index(self.vals[f"arp_{what}"])]
+            if var.get() != name:
+                var.set(name)
         name = self.mode_names[MODE_NAMES.index(self.vals["mode"])]
         if self.mode_var.get() != name:
             self.mode_var.set(name)
@@ -731,7 +791,9 @@ class SynthKnobs:
             key = (tuple(self.vals[k] for k, _, _ in knobs),
                    (self.vals["wave"], self.vals["mode"]) if box == "wave" else None,
                    self.vals["sweep"] if box == "tone" else None,
-                   (self.vals["same"], self.vals["touching"]) if box == "voice" else None, c.winfo_width(),
+                   (self.vals["same"], self.vals["touching"]) if box == "voice" else None,
+                   (self.vals["arp_on"], self.vals["arp_pattern"], self.vals["arp_chord"]) if box == "arp" else None,
+                   c.winfo_width(),
                    c.winfo_height())
             if c.winfo_width() < 50 or self.pic_for.get(box) == key:
                 continue
@@ -957,6 +1019,29 @@ class SynthKnobs:
         xy.append((x1, hi))
         c.create_line(*[q for p in xy for q in p], fill=colour, width=max(2, round(2 * s)))
         c.create_text(x1, 1 * s, text=tr("hz.synth_glide"), anchor="ne", fill="#999", font=font)
+
+    def draw_arp(self, c):
+        """Two beats of what it plays (a small piano roll): for a chord of A1, C2 and E2 placed together, or (with a
+        chord shape) one A1; greyed while it's off."""
+        s, v = self.s, self.vals
+        w, h, pad = c.winfo_width(), c.winfo_height(), 6 * s
+        arp = clean_arp({k: v[f"arp_{k}"] for k in ("pattern", "chord", *ARP)})
+        keys = (33, 36, 40) if arp["chord"] == "placed" else (33,)
+        tones = [{"t": 0.0, "len": 2.0, "key": k, "cents": 0.0, "id": i + 1, "to": []} for i, k in enumerate(keys)]
+        got = arpeggiated(tones, arp) if v["arp_on"] else tones
+        lo, hi = min(n["key"] for n in got), max(n["key"] for n in got)
+        top = 12 * s  # (room for the words at the top)
+        rh = (h - pad - top) / max(6, hi - lo + 1)
+        colour = COLOURS["arp"] if v["arp_on"] else "#bbb"
+        c.create_line(w / 2, pad, w / 2, h - pad, fill="#e4e4e4", dash=(3, 3))  # (one beat in)
+        for n in got:
+            x0 = pad + n["t"] / 2 * (w - 2 * pad)
+            x1 = max(x0 + 2, pad + (n["t"] + n["len"]) / 2 * (w - 2 * pad) - 1)
+            y = h - pad - (n["key"] - lo + 1) * rh
+            c.create_rectangle(x0, y + 1, x1, y + rh - 1, fill=colour, outline="")
+        if v["arp_on"]:
+            c.create_text(w - 3 * s, 2 * s, text=tr("hz.synth_arp_notes", n=fmt(arp["speed"])), anchor="ne",
+                          fill="#777", font=("Segoe UI", 7))
 
     def draw_adsr_dot(self):
         """While a key sounds: a dot on the envelope's picture, waiting at the sustain point while it's held, down

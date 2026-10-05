@@ -147,6 +147,14 @@ CRUSH = 1 / 40
 RACK = {"chorus": {"depth": (0.0, 100.0, 15.0), "rate": (0.0, 64.0, 0.5)},
         "echo": {"time": (1 / 64, 64.0, 0.75), "repeats": (1.0, 8.0, 3.0), "fade": (0.0, 1.0, 0.5)},
         "reverb": {"length": (1 / 16, 64.0, 2.0), "scatter": (0.0, 1.0, 0.5), "level": (0.0, 1.0, 0.5)}}
+# hz["arp"] (the Arpeggio box; there only while it's on): every note (or the notes placed together, a chord) becomes a
+# fast run through its pitches: `chord` = "placed" (the notes placed together) or a chord's steps in keys on each
+# note; `octaves` = the same again 1, 2... octaves up; `pattern` = the order; `speed` = notes a beat, each `gate` of
+# its step long (1 = touching)
+ARP = {"speed": (0.25, 32.0, 4.0), "octaves": (1.0, 4.0, 1.0), "gate": (0.05, 1.0, 1.0)}
+ARP_PATTERNS = ("up", "down", "updown", "random")
+CHORDS = {"placed": (0,), "octave": (0, 12), "fifth": (0, 7), "major": (0, 4, 7), "minor": (0, 3, 7),
+          "seventh": (0, 4, 7, 10), "sus4": (0, 5, 7)}
 VOICES = 8  # hz["voice"]: the most copies
 DETUNE = 100.0  # ... the most cents between the lowest and the highest copy
 GLIDE = 64.0  # ... the longest glide, in beats
@@ -280,8 +288,60 @@ def clean_settings(got, table):
         except (TypeError, ValueError):
             v = start
         v = min(hi, max(lo, v if math.isfinite(v) else start))
-        out[key] = float(round(v)) if key in ("every", "repeats") else v
+        out[key] = float(round(v)) if key in ("every", "repeats", "octaves") else v
     return out
+
+
+def clean_arp(arp):
+    """The Arpeggio box checked (hz["arp"], see ARP): {pattern, chord, speed, octaves, gate}, or {} (off)."""
+    if not isinstance(arp, dict):
+        return {}
+    return {"pattern": arp.get("pattern") if arp.get("pattern") in ARP_PATTERNS else "up",
+            "chord": arp.get("chord") if arp.get("chord") in CHORDS else "placed", **clean_settings(arp, ARP)}
+
+
+def arpeggiated(tones, arp):
+    """The tones as the Arpeggio box plays them: from each start (the notes starting together = one chord) a run of
+    short tones, one every 1 / speed beats while any of them is held, through their pitches (with the chord's steps
+    and octaves) in the pattern's order; a note let go drops out of the run. Each keeps its note's tune and gates;
+    slides made by hand are left out (the run's notes are new ones)."""
+    step = 1.0 / arp["speed"]
+    out = []
+    order = sorted(tones, key=lambda n: n["t"])
+    i = 0
+    while i < len(order):
+        t0 = order[i]["t"]
+        j = i
+        while j < len(order) and order[j]["t"] <= t0 + 1e-9:
+            j += 1
+        chord, i = order[i:j], j
+        pitches = {}  # (key, tune) -> the note it's from (one pitch from two notes: the one held longest)
+        for n in sorted(chord, key=lambda n: n["len"]):
+            for k in CHORDS[arp["chord"]]:
+                for o in range(int(arp["octaves"])):
+                    pitches[(n["key"] + k + 12 * o, n["cents"])] = n
+        items = sorted(pitches.items(), key=lambda kv: kv[0][0] + kv[0][1] / 100)
+        end = max(n["t"] + n["len"] for n in chord)
+        rng = np.random.default_rng(int(round(t0 * 1000)) % (2 ** 32))
+        k = 0
+        while True:
+            t = t0 + k * step
+            if t >= end - 1e-9:
+                break
+            held = [(key, n) for key, n in items if n["t"] + n["len"] > t + 1e-9]
+            if held:
+                seq = held if arp["pattern"] != "down" else held[::-1]
+                if arp["pattern"] == "updown" and len(held) > 2:
+                    seq = held + held[-2:0:-1]
+                pick = seq[int(rng.integers(len(seq)))] if arp["pattern"] == "random" else seq[k % len(seq)]
+                (key, cents), n = pick
+                if 0 <= key <= 127:
+                    tone = {"t": t, "len": max(MIN_LEN, min(step * arp["gate"], n["t"] + n["len"] - t)), "key": key,
+                            "cents": cents, "id": len(out) + 1, "to": []}
+                    tone.update({f: n[f] for f in ("auto", "gate") if f in n})
+                    out.append(tone)
+            k += 1
+    return sorted(out, key=lambda n: (n["t"], n["key"]))
 
 
 def clean_rack(rack):
@@ -327,7 +387,7 @@ def copies(hz):
     return [v["detune"] * (i / (n - 1) - 0.5) for i in range(n)]
 
 
-CLEAN_EXTRA = {"voice": clean_voice, "mode": clean_mode, "rack": clean_rack}
+CLEAN_EXTRA = {"voice": clean_voice, "mode": clean_mode, "rack": clean_rack, "arp": clean_arp}
 EXTRAS = tuple(CLEAN_EXTRA)  # the synth window's own settings (not lines), each checked by its CLEAN_EXTRA
 
 
@@ -369,7 +429,11 @@ def clean_off(off, fx):
 
 
 def live(hz):
-    """hz as it's heard: without the effects switched off (Bypass)."""
+    """hz as it's heard: without the effects switched off (Bypass), its tones as the Arpeggio box plays them."""
+    if hz.get("arp") and hz.get("tones"):  # (taken out once played, so live of live is the same)
+        arp = hz["arp"]
+        hz = {k: v for k, v in hz.items() if k not in ("arp", "_memo")}  # (other tones: nothing cached holds)
+        hz["tones"] = arpeggiated(hz["tones"], arp)
     off = hz.get("off")
     if not off:
         return hz
@@ -403,6 +467,17 @@ def line_at(pts, beat, every=None):
     return vs[j] + (vs[j + 1] - vs[j]) * bent_part(u, bends[j])
 
 
+def cached(hz, key, make):
+    """make() worked out once for this hz while its notes are being made (hz["_memo"]: only on the private copies
+    the note making works on; without it, every time)."""
+    memo = hz.get("_memo")
+    if memo is None:
+        return make()
+    if key not in memo:
+        memo[key] = make()
+    return memo[key]
+
+
 def chains(tones):
     """{tone id: (beat its chain of slides starts at, beat the chain ends at)}: a tone reached by a slide belongs to
     the chain of the (earliest) tone sliding into it."""
@@ -433,7 +508,7 @@ def note_span(hz, beat, tone=None):
     """(start, end) beats of the note (chain of slides) an effect counted from each note is in at beat (an array,
     from the shape's left edge): tone's chain, or (tone None) the latest chain to start (chains starting together:
     the longest). None when there are no tones."""
-    got = chains(hz.get("tones") or ())
+    got = cached(hz, "chains", lambda: chains(hz.get("tones") or ()))
     if not got:
         return None
     if tone is not None and tone.get("id") in got:
@@ -506,6 +581,7 @@ def tails(hz):
 def sound_span(hz):
     """How long the tones sound together, in beats (tones_span and the falls after them, tails; the Effects tab's
     echo and reverb after that, rack_tail)."""
+    hz = live(hz)  # (as played: the Arpeggio box's tones)
     got, tones = tails(hz), hz.get("tones") or ()
     end = max((n["t"] + n["len"] + got.get(n["id"], 0.0) for n in tones), default=0.0)
     return end + rack_tail(hz) if tones else end
@@ -909,6 +985,13 @@ def bent(hz, left, ppq, starts, nexts, tone=None):
 def _limits(hz, left, ppq, starts):
     """For each repeat (start ticks, not rounded): the tick the sound it's in ends at (the end of the tones that
     touch or overlap around it, their falls included: tails)."""
+    at, ends = cached(hz, ("limits", left, ppq), lambda: _spans(hz, left, ppq))
+    return ends[np.maximum(np.searchsorted(at, starts, "right") - 1, 0)]
+
+
+def _spans(hz, left, ppq):
+    """The stretches the tones sound in together (touching or overlapping, falls included): (start ticks, a hair
+    early; end ticks)."""
     spans, tail = [], tails(hz)
     for n in sorted(hz["tones"], key=lambda n: n["t"]):
         end = n["t"] + n["len"] + tail.get(n["id"], 0.0)
@@ -917,8 +1000,7 @@ def _limits(hz, left, ppq, starts):
         else:
             spans.append([n["t"], end])
     at = np.array([(left + a) * ppq for a, _ in spans]) - 1e-6
-    ends = np.array([math.floor((left + b) * ppq + 0.5) for _, b in spans], np.int64)
-    return ends[np.maximum(np.searchsorted(at, starts, "right") - 1, 0)]
+    return at, np.array([math.floor((left + b) * ppq + 0.5) for _, b in spans], np.int64)
 
 
 def _whole(v):
@@ -927,7 +1009,7 @@ def _whole(v):
 
 @functools.lru_cache(maxsize=16)
 def _heard(hz_json, left, ppq, bpm):
-    hz = json.loads(hz_json)
+    hz = dict(json.loads(hz_json), _memo={})
     out = []
     for starts, nexts, _ in tone_runs(hz, left, ppq):
         limits = _limits(hz, left, ppq, starts)
@@ -955,7 +1037,7 @@ def heard(hz, left, ppq, bpm):
 
 @functools.lru_cache(maxsize=16)
 def _squares(hz_json, left, ppq):
-    hz = json.loads(hz_json)
+    hz = dict(json.loads(hz_json), _memo={})
     got = [s for s, _, _ in tone_runs(hz, left, ppq)]
     if not got:
         return np.zeros((0, 2), np.int64)
@@ -1032,6 +1114,7 @@ class KeyGrid:
     the shape's velocity each of them gets (factor)."""
 
     def __init__(self, hz, left, ppq, lo, n):
+        hz = dict(hz, _memo={})  # (its own: what's worked out once for all the notes, cached)
         self.lo, self.n, self.got = lo, max(1, n), {}
         self.copies, self.same = copies(hz), bool((hz.get("voice") or {}).get("same"))
         self.mode, self.ppq = hz.get("mode") or {}, ppq
@@ -1079,15 +1162,25 @@ class KeyGrid:
             return []
         quiet = 1.0 - (SOFT / r["level"] ** 2) ** (1 / 3)  # (0..1 of the way: from here on too soft, left out)
         leaving = {a["id"] for a, _, _ in links(tones)}
+        last, starts = {}, {}
+        for run in self.runs:  # (each tone's held stretch that goes on longest)
+            n = run["tone"]
+            if run["held"] and len(run["starts"]) and (n["id"] not in last
+                                                      or run["starts"][-1] > last[n["id"]]["starts"][-1]):
+                last[n["id"]] = run
+        for m in tones:
+            starts.setdefault(pitch(m), []).append(m["t"])
+        for s in starts.values():
+            s.sort()
         out = []
         for n in tones:
-            src = [run for run in self.runs if run["tone"] is n and run["held"] and len(run["starts"])]
-            if n["id"] in leaving or not src:
+            src = last.get(n["id"])
+            if n["id"] in leaving or src is None:
                 continue
-            src = max(src, key=lambda run: run["starts"][-1])
             end = n["t"] + n["len"]
-            nxt = min((m["t"] for m in tones if abs(pitch(m) - pitch(n)) < 1e-9 and m["t"] >= end - 1e-9),
-                      default=math.inf)
+            same = starts[pitch(n)]
+            k = bisect.bisect_left(same, end - 1e-9)
+            nxt = same[k] if k < len(same) else math.inf
             length = min(r["length"], nxt - end)
             if length <= 1e-9:
                 continue
@@ -1283,8 +1376,9 @@ def fit_length(sh):
 def shortest_gate(hz, ppq):
     """The shortest gate, in ticks, a shape's Hz bass uses (its highest tone, bent up by the "pitch" effect's
     highest point)."""
-    top = max((pitch(n) for n in hz.get("tones") or ()), default=hz["key"])
-    pts = (live(hz).get("fx") or {}).get("pitch") if hz.get("tones") else None
+    played = live(hz)  # (the Arpeggio box's octaves go higher)
+    top = max((pitch(n) for n in played.get("tones") or ()), default=hz["key"])
+    pts = (played.get("fx") or {}).get("pitch") if hz.get("tones") else None
     if pts:  # (the amount line only ever weakens it)
         top += max(0.0, (max(p[1] for p in pts) - 0.5) * 2.0 * PITCH)
     return wave(hz, ppq, top)
