@@ -454,12 +454,12 @@ open_chop = ChopWindow.open
 
 def quick_chop(app):
     """Ctrl+U: the selected shapes' notes cut into even pieces of the snap's length (off = 1 tick), one undo step."""
-    if not app.sels:
+    if not app.note_tool_sels():  # (pictures take no note tools)
         return
     snap = app.snap.get()
     chop = clean_chop(dict(CHOP_DEFAULTS, len=piece_beats(snap, app), snap=snap))
     app.push_undo(name=tr("chop.quick_step"))
-    for i in app.sels:
+    for i in app.note_tool_sels():
         app.shapes[i]["chop"] = dict(chop)
     app.shapes_changed()
     app.status.config(text=tr("chop.quick_done", snap=snap_text(snap)))

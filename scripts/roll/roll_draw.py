@@ -165,6 +165,31 @@ def ring_chains(xa, ya, xb, yb, up, extra):
 
 
 NOTE_RGB = np.array([[[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in pair] for pair in NOTE_COLORS], np.uint8)
+# placed pictures' notes: 16 more colour groups after these, the picture's own colours (no paler shades: the colour IS
+# the picture; the outline a darker shade of it). note_tables() adds them for the colours in use.
+PICTURE_GROUP = len(NOTE_COLORS) // 32
+_tables = {}
+
+
+def note_tables(pal):
+    """(NOTE_COLORS, NOTE_RGB) with the picture colours pal ("RRGGBB" list or None) added as groups
+    PICTURE_GROUP.. (grey where there's none)."""
+    key = tuple(pal or ())
+    got = _tables.get(key)
+    if got is None:
+        extra = []
+        for k in range(16):
+            h = pal[k] if pal and k < len(pal) else "C0C0C0"
+            rgb = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+            dark = "#%02x%02x%02x" % tuple(int(c * 0.6) for c in rgb)
+            extra += [("#" + h.lower(), dark)] * 32
+        colors = NOTE_COLORS + extra
+        rgb = np.concatenate([NOTE_RGB, np.array([[[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in pair]
+                                                  for pair in extra], np.uint8)])
+        got = _tables[key] = (colors, rgb)
+        if len(_tables) > 20:
+            _tables.pop(next(iter(_tables)))
+    return got
 
 
 def screen_lines(path, ax, bx, ay, by, view):
@@ -342,8 +367,9 @@ class RollDrawing:
             else:
                 self.note_img = self._note_pic = self._img = None
                 self.draw_grid(w, h, rows, cols)
+                colors = note_tables(app.picture_pal)[0]
                 for x0, y0, x1, y1, color in zip(*(v.tolist() for v in rects or ())):
-                    self.create_rectangle(x0, y0, x1, y1, fill=NOTE_COLORS[color][0], outline=NOTE_COLORS[color][1])
+                    self.create_rectangle(x0, y0, x1, y1, fill=colors[color][0], outline=colors[color][1])
             self.paint_time = time.perf_counter() - started
         if carried is None:  # (while shapes are dragged their notes are stamped along: no ring)
             self.draw_ring(w, h)
@@ -364,6 +390,9 @@ class RollDrawing:
                     self.draw_path(sh, "#c0392b", 1)
         for i in app.sels:
             self.draw_path(app.shapes[i], "#ff1f1f", 2)
+        for i in app.sels:
+            if i < len(app.shapes) and "picture" in app.shapes[i]:
+                self.draw_picture_label(app.shapes[i])
         self.draw_cut_marks()
         sel = self.point_shape()
         if sel and app.parts:
@@ -386,6 +415,21 @@ class RollDrawing:
         self.draw_playhead()
         if self.typing:
             self.show_caret()
+
+    def draw_picture_label(self, sh):
+        """A selected placed picture: its name, keys and colours above its box's top left corner (only while
+        selected, user)."""
+        (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
+        xs = [self.t2x(b) for b in (b0, b1, b2, b1 + b2 - b0)]
+        ys = [self.p2y(p) for p in (p0, p1, p2, p1 + p2 - p0)]
+        p = sh["picture"]
+        text = tr("image.label", name=sh.get("name") or "?", keys=p["grid"][1], colours=len(p["set"].get("pal", ())))
+        x, y = min(xs), min(ys) - 4
+        t = self.create_text(x + 5, y - 9, text=text, anchor="w", font=("TkDefaultFont", 9))
+        bx = self.bbox(t)
+        if bx:
+            r = self.create_rectangle(bx[0] - 4, bx[1] - 2, bx[2] + 4, bx[3] + 2, fill="#fffbe6", outline="#c9b26b")
+            self.tag_lower(r, t)
 
     def ring_now(self):
         """The red line round the selected shapes' notes (user: the notes keep their colours, even with short
@@ -759,6 +803,10 @@ class RollDrawing:
                     on = on[np.argsort(owner.astype(np.uint16) if 0 <= lo and hi < 65536 else owner, kind="stable")]
                     owner = notes[on, 5]
                 color = notes[on, 4] % len(SLOT_COLORS)
+                pics = getattr(app, "picture_owners", ())
+                if len(pics) and pics.any():  # a placed picture's notes: its own colours (PICTURE_GROUP on)
+                    mine = pics[np.clip(owner, 0, len(pics) - 1)]
+                    color = np.where(mine, PICTURE_GROUP + np.minimum(notes[on, 4], 15), color)
                 if sels:
                     mine = np.isin(owner, sels)
                     if mine.any():
@@ -994,7 +1042,8 @@ class RollDrawing:
                     np.maximum(grid[a:b, d - 1], edge, out=grid[a:b, d - 1])
         at = np.flatnonzero(top_px >= 0)
         k = top_px[at]
-        return at, NOTE_RGB[color[idx][k >> 1], k & 1]
+        pal = getattr(getattr(self, "app", None), "picture_pal", None)  # (the Hz window shares this, no pictures)
+        return at, note_tables(pal)[1][color[idx][k >> 1], k & 1]
 
     def draw_path(self, sh, color, width, dash=None):
         if "notes" in sh:  # pasted notes: their box, thin and dashed (the notes are the shape)

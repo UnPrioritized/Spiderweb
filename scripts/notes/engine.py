@@ -28,7 +28,8 @@ from notes.strum import apply_strum, clean_strum
 from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
-from notes.picture import clean_picture
+from notes.custom import frame_upright
+from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
 from notes.sliced import clean_cut, cut_through, in_part, piece_notes, run_origins, source, spotted_notes
 from notes.smooth import clean_level, smooth_path
@@ -216,7 +217,8 @@ def clean_shape(sh):
             pic = clean_picture(sh.get("picture"))
             if pic:  # a picture made into notes (picture.py): the notes are its finished colours, track = slot
                 out["picture"] = pic
-                out.pop("own_vel", None)
+                for k in ("own_vel", "glue", "chop", "claw", "strum"):  # (no note tools on a picture, user)
+                    out.pop(k, None)
     if out["kind"] == "arc":  # start, a point it passes through, end; k = beats per key on screen (arc.py)
         if len(out["pts"]) != 3:
             return None
@@ -353,6 +355,8 @@ def shape_notes(sh, ppq, keys=128):
 def shape_notes_tracks(sh, ppq, keys=128):
     """shape_notes, and for pasted notes which track each note came from, for a custom shape made of other shapes
     which of them (one number per row; None for every other shape)."""
+    if "picture" in sh:  # (no glue / chop / claw / strum on a picture: its notes are its picture, user)
+        return _notes_tracks(sh, ppq, keys)
     notes, tracks = with_glue(*_notes_tracks(sh, ppq, keys), sh, ppq)
     notes, tracks = with_chop(notes, tracks, sh, ppq)
     notes, tracks = with_claw(notes, tracks, sh.get("claw"), ppq)
@@ -424,7 +428,8 @@ def _notes_tracks(sh, ppq, keys):
     if piece:
         raw, spots = spotted_notes(sh, ppq, end_dot)
     elif sh["kind"] == "custom" and "notes" in sh:
-        raw = block_notes(sh, ppq)
+        # (a turned / skewed picture: each key row sampled across the picture, not its notes tilted)
+        raw = turned_notes(sh, ppq) if "picture" in sh and not frame_upright(sh["pts"]) else block_notes(sh, ppq)
         raw, own = raw[:, :3], raw[:, 3:5]
     elif sh["kind"] == "custom":
         raw, groups = custom_notes_groups(sh, ppq)

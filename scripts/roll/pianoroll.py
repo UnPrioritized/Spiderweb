@@ -1083,12 +1083,19 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.finish_poly()
         elif self.app.tool.get() == "select" and self.text_at(e.x, e.y) is not None:
             self.edit_text(e)  # double-click a text: type in it
+        elif self.app.tool.get() == "select" and self.picture_at(e) is not None:
+            self.app.edit_picture(self.picture_at(e))  # double-click a picture: its look in the image window
         elif self.paste_spot(e):  # (user, like Domino: Select double-click on empty space pastes there)
             self.app.paste(whole=True, at=self.event_pt(e)[0])
         elif self.app.tool.get() == "text":
             self.text_double(e)  # the word there gets selected
         else:
             self.on_press(e)
+
+    def picture_at(self, e):
+        """The placed picture under the mouse (its number), or None."""
+        i = self.shape_at(e.x, e.y, prefer_selected=True)
+        return i if i is not None and "picture" in self.app.shapes[i] else None
 
     def paste_spot(self, e):
         """A Select double-click here pastes the copied shapes (their start at the mouse's beat, snapped; keys

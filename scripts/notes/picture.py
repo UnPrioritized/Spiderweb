@@ -22,6 +22,7 @@ SUGGESTED = {  # the "Back to suggested" values (user: only a suggestion; every 
     "empty": True,  # see-through parts make no notes (False: they keep the colour under them)
     "step": 1 / 48,  # one grid step, in beats
     "look": "flat", "outline": 1, "shade": True, "join": True,  # how a player draws it (join also makes the notes)
+    "by": "channel", "fmt": "",  # the colour list: {n} = channel number / order; the format's name ("" = first)
 }
 
 
@@ -234,7 +235,7 @@ def detail(cl):
     return np.minimum(g / m, 3.0) if m > 0 else np.ones_like(g)
 
 
-def fit_palette(pictures, k, locked=(), tries=4, seed=1, samples=12000, init="spread", pick="look"):
+def fit_palette(pictures, k, locked=(), tries=4, seed=1, samples=12000, init="spread", pick="look", start=()):
     """pictures: [(cells, alpha or None, share, focus)] -> k linear colours fitted to all of them together.
     share = how much this picture counts (1 = normal); focus 0..1 = how much details (faces, eyes) count more
     than big flat areas. locked: [(slot, linear colour)] kept as they are (the others fit around them).
@@ -272,13 +273,19 @@ def fit_palette(pictures, k, locked=(), tries=4, seed=1, samples=12000, init="sp
     fixed = {s: oklab(c[None])[0] for s, c in locked}
     free = [s for s in range(k) if s not in fixed]
     p = wt / wt.sum()
+    first = {s: oklab(np.asarray(c, float)[None])[0] for s, c in start if s in free}  # (pasted "starting point")
     best, best_err = None, None
-    for _ in range(max(1, tries)):
+    for t in range(max(1, tries)):
         cen = np.zeros((k, 3))
         for s, c in fixed.items():
             cen[s] = c
-        have = list(fixed.values())
+        if t == 0:
+            for s, c in first.items():
+                cen[s] = c
+        have = list(fixed.values()) + (list(first.values()) if t == 0 else [])
         for s in free:  # first guesses far from the ones already taken
+            if t == 0 and s in first:
+                continue
             if have and init == "spread":
                 d = ((lab[:, None] - np.array(have)[None]) ** 2).sum(2).min(1) * wt
                 d = d / d.sum() if d.sum() > 0 else p
@@ -387,7 +394,8 @@ def _spread(cl, pal, pal_lab, strength, free):
 _RANGES = {"keys": (1, 256), "steps": (1, 8), "colours": (2, 16), "focus": (0, 1), "strength": (0, 1),
            "keep": (0, 1), "sharpen": (0, 1), "brightness": (-1, 1), "contrast": (-1, 1), "saturation": (-1, 1),
            "share": (0.1, 10), "step": (1 / 65536, 64), "outline": (0, 8)}
-_CHOICES = {"view": ("fall", "roll"), "blend": ("spread", "pattern", "none"), "look": ("flat", "outlined")}
+_CHOICES = {"view": ("fall", "roll"), "blend": ("spread", "pattern", "none"), "look": ("flat", "outlined"),
+            "by": ("channel", "order")}
 _FLAGS = ("empty", "shade", "join")
 
 
@@ -404,6 +412,8 @@ def clean_settings(s):
         elif k in _RANGES and isinstance(v, (int, float)) and not isinstance(v, bool) and np.isfinite(v):
             lo, hi = _RANGES[k]
             out[k] = max(lo, min(hi, int(v) if isinstance(SUGGESTED.get(k), int) else float(v)))
+    if isinstance(s.get("fmt"), str):
+        out["fmt"] = s["fmt"][:100]
     pal = s.get("pal")
     if isinstance(pal, list) and 0 < len(pal) <= 16 and all(
             isinstance(h, str) and len(h) == 6 and all(c in "0123456789ABCDEFabcdef" for c in h) for h in pal):
@@ -461,6 +471,60 @@ def picture_shape(grid, info, b0, k0, step_beats, vel=127):
     return dict(kind="custom", name=name, strokes=[dict(BOX_STROKE)], fill="empty", notes=pack_notes(rows),
                 picture=dict(info, grid=[steps, keys]), vel0=vel, vel1=vel,
                 pts=box_frame(b0, k0 - 0.5, b0 + steps * step_beats, k0 - 0.5 + keys))
+
+
+def stored_grid(sh):
+    """A placed picture's colour grid back from its notes: keys x steps (key row 0 = lowest), -1 = empty."""
+    from notes.custom import unpack_notes
+    steps, keys = sh["picture"]["grid"]
+    rows = unpack_notes(sh["notes"])
+    out = np.full((keys, steps), -1, np.int64)
+    s, e = np.clip(rows[:, 0], 0, steps), np.clip(rows[:, 1], 0, steps)
+    n = np.maximum(e - s, 0)
+    if n.sum():
+        at = np.repeat(np.cumsum(n) - n, n)
+        ts = np.arange(n.sum()) - at + np.repeat(s, n)
+        ks = np.repeat(np.clip(rows[:, 2], 0, keys - 1), n)
+        out[ks, ts] = np.repeat(rows[:, 4], n)
+    return out
+
+
+def turned_notes(sh, ppq):
+    """A turned / skewed placed picture's notes: (start, end, pitch, velocity, slot) rows. Every key row crossing
+    its box is sampled across the picture one grid step (the picture's own step length) at a time, so the notes
+    stay flat rows the picture shows through (tilting its notes would make staircases)."""
+    grid = stored_grid(sh)
+    keys, steps = grid.shape
+    (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
+    ub, up, vb, vp = b1 - b0, p1 - p0, b2 - b0, p2 - p0
+    det = ub * vp - up * vb
+    if abs(det) < 1e-12:
+        return np.zeros((0, 5), np.int64)
+    cb, cp = [b0, b1, b2, b1 + b2 - b0], [p0, p1, p2, p1 + p2 - p0]
+    step = sh["picture"]["set"]["step"]
+    lo_k, hi_k = int(np.ceil(min(cp))), int(np.floor(max(cp)))
+    t0, n = min(cb), int(np.ceil((max(cb) - min(cb)) / step))
+    if hi_k < lo_k or n < 1 or (hi_k - lo_k + 1) * n > 20_000_000:
+        return np.zeros((0, 5), np.int64)
+    kk = np.arange(lo_k, hi_k + 1, dtype=float)[:, None]
+    bb = t0 + (np.arange(n) + 0.5)[None, :] * step
+    u = ((bb - b0) * vp - (kk - p0) * vb) / det
+    v = (ub * (kk - p0) - up * (bb - b0)) / det
+    inside = (u >= 0) & (u < 1) & (v >= 0) & (v < 1)
+    col = np.clip((u * steps).astype(np.int64), 0, steps - 1)
+    row = np.clip((v * keys).astype(np.int64), 0, keys - 1)
+    a = np.where(inside, grid[row, col], -1)  # key rows x time steps
+    change = np.ones(a.shape, bool)
+    change[:, 1:] = a[:, 1:] != a[:, :-1]
+    ks, ts = np.nonzero(change)
+    ends = np.full(len(ts), n)
+    ends[:-1] = np.where(ks[1:] == ks[:-1], ts[1:], n)
+    val = a[ks, ts]
+    on = val >= 0
+    start = np.round((t0 + ts * step) * ppq).astype(np.int64)
+    end = np.round((t0 + ends * step) * ppq).astype(np.int64)
+    out = np.column_stack([start, end, ks + lo_k, np.full(len(ts), 100), val])[on]
+    return out[out[:, 1] > out[:, 0]]
 
 
 def make(pic, s, pal=None):

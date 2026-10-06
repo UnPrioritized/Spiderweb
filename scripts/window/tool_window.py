@@ -120,7 +120,7 @@ class ToolWindow(tk.Toplevel):
 
     @classmethod
     def open(cls, app):
-        if not app.sels:
+        if not app.note_tool_sels():  # (pictures take no note tools)
             return
         w = getattr(app, cls.ATTR)
         if w:
@@ -171,7 +171,7 @@ class ToolWindow(tk.Toplevel):
     def retarget(self):
         """Work on the selected shapes, showing their setting (the first one's that has one)."""
         app = self.app
-        self.targets = sorted(app.sels)
+        self.targets = sorted(app.note_tool_sels())  # (not pictures)
         self.saved, self.saved_sel = json.dumps(app.shapes), app.sel_state()  # (for the undo step)
         self.before = self.now = self.settings()  # (before: put back by X / Esc; now: as this window last left them)
         shown = next((c for c in self.before.values() if c), None)
@@ -184,7 +184,7 @@ class ToolWindow(tk.Toplevel):
 
     def sync(self):
         """The main window changed the selection or the shapes."""
-        if sorted(self.app.sels) != self.targets:
+        if sorted(self.app.note_tool_sels()) != self.targets:
             self.settle()
         elif self.settings() == self.now:
             return

@@ -82,6 +82,12 @@ class ShapeMenu:
             self.formula_menu(m, PolygonHost(app))
         if sh.get("text") and len(app.sels) == 1:
             item(tr("roll_menu.edit_text"), "", lambda: self.edit_text(at))
+        if "picture" in sh and len(app.sels) == 1:  # a placed picture (picture.py, image_window.py)
+            item(tr("image.menu_look"), tr("image.menu_double"), lambda: app.edit_picture(i), keys=True)
+            item(tr("image.menu_other"), "", lambda: app.replace_picture(i))
+            m.add_separator()
+            item(tr("image.menu_unturn"), "", lambda: app.unturn_picture(i))
+            item(tr("image.menu_own_shape"), "", lambda: app.picture_own_shape(i))
         if sh["kind"] == "custom" and "notes" not in sh and len(app.sels) == 1:
             k = None if sh.get("text") else self.stroke_at(sh, e.x, e.y)
             if k is not None:  # the stroke right-clicked gets picked
@@ -122,11 +128,12 @@ class ShapeMenu:
             item(tr("roll_menu.save_drawing_to_the_shape_library"), "", lambda: app.save_to_library(sh))
         if app.tumour_targets():
             item(tr("roll_menu.tumours"), "", app.open_tumours)
-        item(tr("roll_menu.claw_machine"), tr("roll_menu.alt_w"), lambda: open_claw(app), keys=True)
-        item(tr("roll_menu.strum"), tr("roll_menu.alt_s"), lambda: open_strum(app), keys=True)
-        item(tr("roll_menu.chop"), tr("roll_menu.alt_u"), lambda: open_chop(app), keys=True)
-        item(tr("roll_menu.quick_chop"), tr("roll_menu.ctrl_u"), lambda: quick_chop(app), keys=True)
-        self.glue_items(item)
+        if app.note_tool_sels():  # (pictures take no note tools, user)
+            item(tr("roll_menu.claw_machine"), tr("roll_menu.alt_w"), lambda: open_claw(app), keys=True)
+            item(tr("roll_menu.strum"), tr("roll_menu.alt_s"), lambda: open_strum(app), keys=True)
+            item(tr("roll_menu.chop"), tr("roll_menu.alt_u"), lambda: open_chop(app), keys=True)
+            item(tr("roll_menu.quick_chop"), tr("roll_menu.ctrl_u"), lambda: quick_chop(app), keys=True)
+            self.glue_items(item)
         if len(app.sels) >= 2:  # (greyed out, saying why, when something else is selected too)
             ok = app.can_join()
             item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
@@ -167,11 +174,12 @@ class ShapeMenu:
             self.formula_menu(m, PolygonHost(app))
         if app.tumour_targets():
             item(tr("roll_menu.tumours"), "", app.open_tumours)
-        item(tr("roll_menu.claw_machine"), tr("roll_menu.alt_w"), lambda: open_claw(app))
-        item(tr("roll_menu.strum"), tr("roll_menu.alt_s"), lambda: open_strum(app))
-        item(tr("roll_menu.chop"), tr("roll_menu.alt_u"), lambda: open_chop(app))
-        item(tr("roll_menu.quick_chop"), tr("roll_menu.ctrl_u"), lambda: quick_chop(app))
-        self.glue_items(item)
+        if app.note_tool_sels():  # (pictures take no note tools, user)
+            item(tr("roll_menu.claw_machine"), tr("roll_menu.alt_w"), lambda: open_claw(app))
+            item(tr("roll_menu.strum"), tr("roll_menu.alt_s"), lambda: open_strum(app))
+            item(tr("roll_menu.chop"), tr("roll_menu.alt_u"), lambda: open_chop(app))
+            item(tr("roll_menu.quick_chop"), tr("roll_menu.ctrl_u"), lambda: quick_chop(app))
+            self.glue_items(item)
         ok = app.can_join()
         item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
              tr("roll_menu.ctrl_g"), app.join_selected, ok)

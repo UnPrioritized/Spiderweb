@@ -148,6 +148,8 @@ class ImageWindow(tk.Toplevel):
         self.handle.bind("<B1-Motion>", self.drag_move)
         self.handle.bind("<ButtonRelease-1>", self.drag_end)
         ttk.Button(info, text=tr("image.place"), command=self.place_at_play_line).pack(side="right", padx=8)
+        self.apply_btn = ttk.Button(info, text=tr("image.apply"), command=self.apply)  # (packed while editing)
+        self.editing = None  # the placed picture this window changes (its shape number), or None
 
         side = ttk.Frame(body, padding=(10, 0, 0, 0))
         side.pack(side="right", fill="y")
@@ -527,6 +529,61 @@ class ImageWindow(tk.Toplevel):
         spot = self.roll_spot(e)
         if spot is not None:
             self.place(*spot)
+
+    # ------------------------------------------------------------ a placed picture
+
+    def edit(self, i):
+        """The placed picture i: its picture and settings here, "Apply to the placed picture" puts changes on it."""
+        sh = self.app.shapes[i]
+        p = sh["picture"]
+        self.editing = (i, sh.get("name"))
+        self.s = P.clean_settings(p["set"])
+        pal = p["set"].get("pal") or []
+        self.locked = {k: P.lin_of(pal[k]) for k in p["set"].get("locked", []) if k < len(pal)}
+        self.show_settings()
+        if not self.apply_btn.winfo_manager():
+            self.apply_btn.pack(side="right", padx=(0, 8))
+        pic = self.app.picture_for(p)
+        if pic is not None:
+            self.pic = pic
+            self.made_for = (None, None)
+            self.name.config(text=os.path.basename(p["file"]), foreground="#2a7")
+            self.remake()
+        else:
+            self.name.config(text=tr("image.missing", name=os.path.basename(p["file"])), foreground="#c60")
+
+    def edited(self):
+        """The placed picture being changed, if it's still there (shape number), else None."""
+        if not self.editing:
+            return None
+        i, name = self.editing
+        shapes = self.app.shapes
+        if i < len(shapes) and "picture" in shapes[i] and shapes[i].get("name") == name:
+            return i
+        self.editing = None
+        self.apply_btn.pack_forget()
+        return None
+
+    def apply(self):
+        """The window's picture and settings put on the placed picture (where it is now: its box's middle stays),
+        one undo step."""
+        i = self.edited()
+        if i is None or self.grid is None:
+            return
+        app = self.app
+        old = app.shapes[i]
+        (b0, k0), (b1, k1), (b2, k2) = old["pts"]
+        new = self.placed_shape((b1 + b2) / 2, (k1 + k2) / 2)
+        if new is None:
+            return
+        app.push_undo(name=tr("image.apply_step"))
+        new["vel0"], new["vel1"] = old.get("vel0", new["vel0"]), old.get("vel1", new["vel1"])
+        if old.get("vel_env"):
+            new["vel_env"] = old["vel_env"]
+        app.shapes[i] = new
+        self.editing = (i, new.get("name"))
+        app.shapes_changed()
+        app.status.config(text=tr("image.applied", name=new["name"]))
 
     # ------------------------------------------------------------ closing
 

@@ -286,6 +286,9 @@ class CustomPanel:
             self.missing_note.pack_forget()
             self.custom_fill_row.pack_forget()
             own = all(t.get("own_vel") for t in tgts)
+            if all("picture" in t for t in tgts):  # placed pictures (image_window.py)
+                self.custom_info.config(text=tr("image.panel", value=sum(self.note_count(t) for t in tgts)))
+                return
             self.custom_info.config(text=(
                 tr("panel_custom.pasted_notes", value=sum(self.note_count(t) for t in tgts))
                 + (tr("panel_custom.they_keep_their_own_velocities_until")

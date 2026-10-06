@@ -146,6 +146,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.image_window = None  # image to notes (image_window.py; opened by the Picture tool)
         self.image_pos = ""  # its size and place
         self.image_last = None  # (picture file, settings) last used there, so it opens with them again
+        self._pictures = {}  # placed pictures' files read: (path, mtime, size) -> picture.Picture (picture_for)
+        self.picture_owners, self.picture_pal = np.zeros(0, bool), None  # (shapes_changed: for the piano roll)
         self.hz_clip = None  # notes copied in it (HzWindow.copy_notes)
         self.hz_pos = ""  # its size and place ("WxH+x+y", remembered in the autosave)
         self.hz_fx_h = 0  # its effects pane's height in pixels, dragged by its top edge (0 = as it starts)
@@ -792,7 +794,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         if key not in self._notes_cache:
             if len(self._notes_cache) > 500:
                 self._notes_cache.clear()
-            if sh.get("strum"):
+            if "picture" in sh:  # (no note tools on a picture)
+                self._notes_cache[key] = shape_notes_tracks(sh, self.ppq, self.keys)
+            elif sh.get("strum"):
                 notes, tracks = self.notes_tracks({k: v for k, v in sh.items() if k != "strum"})
                 self._notes_cache[key] = with_strum(notes, tracks, sh["strum"], self.ppq)
             elif sh.get("claw"):
@@ -829,6 +833,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.roll.request_redraw()
             return
         self.notes_late = False
+        if not self.roll.drag:
+            self.remake_pictures()
         self.rendered_pts = [list(sh["pts"][0]) for sh in self.shapes]  # (where each shape is in these notes)
         started, worked = time.perf_counter(), self._notes_worked
         self.channel_split = SPLIT_CHOICES[max(self.split_box.current(), 0)][0]
@@ -853,6 +859,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.rendered, self.slot_count = render([n for n, _ in got], self.channel_mode.get(), self.channel_split,
                                                 [t for _, t in got], [tracks_apart(sh) for sh in self.shapes],
                                                 ["picture" in sh for sh in self.shapes])
+        # placed pictures: their notes are drawn in the picture's own colours (the first picture's: they share them)
+        self.picture_owners = np.array(["picture" in sh for sh in self.shapes], bool)
+        self.picture_pal = next((sh["picture"]["set"].get("pal") for sh in self.shapes if "picture" in sh), None)
         if self._notes_worked != worked:
             self._notes_time = time.perf_counter() - started
         counts = self.note_counts = np.bincount(self.rendered[:, 5], minlength=len(self.shapes)).tolist()
@@ -1002,10 +1011,10 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def glue_selected(self):
         """Right-click → Glue notes: touching notes on a key in the selected shapes become one (glue.py), inside the
         kept Select boxes if there are any, else all their notes. The shapes remember it."""
-        if not self.sels:
+        if not self.note_tool_sels():  # (pictures take no note tools)
             return
         areas = self.roll.kept_box()
-        shapes = [self.shapes[i] for i in sorted(self.sels)]
+        shapes = [self.shapes[i] for i in sorted(self.note_tool_sels())]
         before = sum(len(self.notes_of(sh)) for sh in shapes)
         self.push_undo(name=tr("app.glue"))
         for sh in shapes:
@@ -1239,6 +1248,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         return new  # (a Hz bass's notes keep their lengths: its box only limits where they sound, user)
 
     def shape_label(self, sh):
+        if "picture" in sh:  # (the picture's file name, user)
+            return sh.get("name") or "?"
         if "notes" in sh:
             return tr("app.pasted_notes")
         if sh.get("text"):
@@ -1320,6 +1331,102 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.select(len(self.shapes) - 1)
         self.shapes_changed()
         self.status.config(text=tr("image.placed", name=sh["name"]))
+
+    def edit_picture(self, i):
+        """Double-click / "Change its look..." on a placed picture: the image window with its picture and settings,
+        changes going to it."""
+        if 0 <= i < len(self.shapes) and "picture" in self.shapes[i]:
+            self.open_image().edit(i)
+
+    def picture_for(self, info):
+        """The placed picture's own picture file, read (kept while it's unchanged), or None if it's missing or its
+        fingerprint isn't the one it was made from."""
+        from notes import picture as P
+        path = info["file"]
+        try:
+            st = os.stat(path)
+        except OSError:
+            return None
+        key = (path, st.st_mtime_ns, st.st_size)
+        got = self._pictures.get(key)
+        if got is None:
+            try:
+                got = P.load(path, self)
+            except Exception:  # (unreadable now)
+                return None
+            self._pictures = {k: v for k, v in self._pictures.items() if k[0] != path}
+            self._pictures[key] = got
+        return got if not info["sig"] or got.sig == info["sig"] else None
+
+    def remake_pictures(self):
+        """Placed pictures resized (box not turned): their notes made again from the ORIGINAL picture at the new
+        size, so they stay sharp (user); the box snaps to whole keys and grid steps. Without the picture file they
+        keep their notes, stretched."""
+        from notes import picture as P
+        from notes.custom import box_frame, frame_upright, pack_notes
+        for sh in self.shapes:
+            p = sh.get("picture")
+            if not p or "pal" not in p["set"] or not frame_upright(sh["pts"]):
+                continue
+            s, (steps0, keys0) = p["set"], p["grid"]
+            (b0, k0), (b1, _), (_, k2) = sh["pts"]
+            width, height = b1 - b0, k2 - k0
+            keys, steps = max(1, round(abs(height))), max(1, round(abs(width) / s["step"]))
+            if (steps, keys) == (steps0, keys0) or keys > 256:
+                continue
+            pic = self.picture_for(p)
+            if pic is None:
+                continue
+            rows, cols = (steps, keys) if s["view"] == "fall" else (keys, steps)
+            if rows * cols > 4_000_000:  # (a box dragged huge: kept stretched)
+                continue
+            cl, al = P.cells(pic, rows, cols)
+            cl = P.adjust(cl, s["brightness"], s["contrast"], s["saturation"], s["sharpen"])
+            pal = np.array([P.lin_of(h) for h in s["pal"]])
+            grid = P.quantise(cl, pal, s["blend"], s["strength"], s["keep"], al, s["empty"])
+            got, t, k = P.grid_notes(grid, s["view"], s["join"])
+            if not len(got):
+                continue
+            sh["notes"] = pack_notes(got)
+            p["grid"] = [t, k]
+            s["keys"] = keys
+            sgn_b, sgn_k = (1 if width >= 0 else -1), (1 if height >= 0 else -1)
+            sh["pts"] = [[b0, k0], [b0 + sgn_b * t * s["step"], k0], [b0, k0 + sgn_k * k]]
+
+    def replace_picture(self, i):
+        """Right-click → Use another picture...: the image window for this picture, asking for the new file."""
+        if 0 <= i < len(self.shapes) and "picture" in self.shapes[i]:
+            w = self.open_image()
+            w.edit(i)
+            w.ask_file()
+
+    def picture_box(self, i, own_shape=False):
+        """The placed picture upright again: its grid's own size, centred where it is (own_shape: as wide as the
+        picture's own shape for its keys, its bottom left kept). One undo step; the notes are made again."""
+        sh = self.shapes[i]
+        p = sh["picture"]
+        s, (steps, keys) = p["set"], p["grid"]
+        (b0, k0), (b1, k1), (b2, k2) = sh["pts"]
+        if own_shape:
+            w, h = p["size"]
+            steps = max(1, round(keys * h / w if s["view"] == "fall" else keys * w / h)) * s["steps"]
+            left, low = min(b0, b1, b2, b1 + b2 - b0), min(k0, k1, k2, k1 + k2 - k0)
+        else:
+            left = (b1 + b2) / 2 - steps * s["step"] / 2
+            low = (k1 + k2) / 2 - keys / 2
+        self.push_undo(name=tr("image.menu_own_shape") if own_shape else tr("image.menu_unturn"))
+        sh["pts"] = [[left, low], [left + steps * s["step"], low], [left, low + keys]]
+        self.shapes_changed()  # (remake_pictures makes its notes for the new size, if its picture file is there)
+
+    def unturn_picture(self, i):
+        self.picture_box(i)
+
+    def picture_own_shape(self, i):
+        self.picture_box(i, own_shape=True)
+
+    def note_tool_sels(self):
+        """The selected shapes that take note tools (claw, strum, chop, glue): not pictures (user)."""
+        return {i for i in self.sels if i < len(self.shapes) and "picture" not in self.shapes[i]}
 
     def tool_topic(self):
         return TOOL_TOPICS.get(self.tool.get(), "select")
