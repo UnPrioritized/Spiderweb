@@ -1197,7 +1197,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
     def on_right(self, e):
         """Right-click: finish a polyline being drawn, otherwise deselect (any tool).
-        A right-drag listens to the notes under the mouse instead (any tool)."""
+        A right-drag listens to the notes under the mouse instead (any tool). Nothing while the left button holds
+        something (a point removed under a held one: wrong point / error)."""
+        if self.holding():
+            return
         finished = bool(self.draft and self.draft["kind"] in ("poly", "arc"))
         if self.follow:  # a shape started with a click, not finished: dropped
             self.cancel_draft()
