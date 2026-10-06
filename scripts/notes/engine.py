@@ -551,7 +551,8 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
 
 
 def _notes_tracks(sh, ppq, keys):
-    if sh["kind"] == "custom" and sh.get("cut"):  # cut by the Slice tool: the whole's notes on its side (sliced.py)
+    # cut by the Slice tool: the whole's notes on its side (sliced.py; a line too when cut from a piece as it was)
+    if sh.get("cut") and (sh["kind"] == "custom" or (sh["cut"].get("whole") or {}).get("cut")):
         got = piece_notes(sh, ppq, keys, shape_notes_tracks)  # (the whole's glue / pages done first)
         if got is not None:
             return got

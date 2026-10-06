@@ -52,12 +52,20 @@ def tools(sh):
     return velocity(sh, WHOLE_TOOLS)
 
 
+def inner(sh):
+    """A whole that is a piece itself (a piece with its own pages sliced again, knife_in_two): its cut, else {}."""
+    return {"cut": json.loads(json.dumps(sh["cut"]))} if sh.get("cut") else {}
+
+
 def completed(sh):
     """A piece that's becoming a shape of its own (its outline changed, Turn into a complete shape): it takes the
     whole's glue (the boxes inside it) and note tool pages, before its own, so they now work on its own notes.
     Changes sh; its "cut" is dropped."""
     cut = sh.pop("cut", None)
     whole = (cut or {}).get("whole") or {}
+    if whole.get("cut"):  # (cut from a piece: its own whole's pages / glue first, then its own)
+        whole = json.loads(json.dumps(whole))
+        completed(whole)
     if whole.get("fx"):
         sh["fx"] = json.loads(json.dumps(whole["fx"])) + (sh.get("fx") or [])
     gl = whole.get("glue")
@@ -138,6 +146,7 @@ def source(sh):
     src = {k: v for k, v in sh.items() if k not in own and k != "cut"}
     src.update(outline(moved(cut["whole"], d)))
     src.update(tools(cut["whole"]))
+    src.update(inner(cut["whole"]))  # (cut from a piece: that one's own cut; moved along with it)
     src.update(velocity(cut["whole"] if same_vel else sh))
     if sh["kind"] == "custom":
         same_gate = cut.get("gate") is not None and close(velocity(sh, GATE), cut["gate"])
@@ -170,11 +179,13 @@ def piece_notes(sh, ppq, keys, make):
     """A custom piece's (notes, tracks): the whole's (make = engine._notes_tracks), cut at every cut like a knife went
     through them (user: a spam note across it leaves a sliver; spam keeps the whole's grid, an Empty shape's cut side
     makes no notes), the parts on its side kept; velocities over its own time when they were changed. None: not a
-    piece any more."""
+    piece any more. (Also a line piece cut from a piece with pages of its own: its whole's notes, its knife cuts.)"""
     got = source(sh)
     if got is None:
         return None
     src, halves, same_vel = got
+    if sh["kind"] != "custom":
+        halves = sh["cut"].get("knife") or []
     key = (json.dumps(src, sort_keys=True), ppq, keys)
     if key not in _wholes:
         if len(_wholes) > 8:
@@ -283,7 +294,19 @@ def knife_in_two(sh, halves, a, b, segs):
     import uuid
     custom = sh["kind"] == "custom"
     got = source(sh)
-    if got:
+    if sh.get("cut") and (sh.get("fx") or sh.get("glue") or not got):
+        # a piece with pages / glue of its own (or flipped / turned with steps): the halves are cut from it as it is,
+        # its notes after them (user, 2026-10-07: cut before them, the halves' notes changed)
+        d = moved_by(sh)
+        marks = [moved_mark(m, d) for m in sh["cut"].get("marks", [])] if d else []
+        part, knives, own = [0.0, None], [], False
+        whole = dict(outline(sh), **velocity(sh), **tools(sh), cut=json.loads(json.dumps(sh["cut"])))
+        if custom:
+            whole.update(velocity(sh, GATE))
+        for h in halves:
+            for k in WHOLE_TOOLS:
+                h.pop(k, None)
+    elif got:
         src, part, same_vel = got
         cut = sh["cut"]
         d = moved_by(sh)
@@ -291,7 +314,7 @@ def knife_in_two(sh, halves, a, b, segs):
         knives = [[b0 + d[0], k0 + d[1], db, dk, sd] for b0, k0, db, dk, sd in (part if custom else
                                                                                cut.get("knife", []))]
         own = cut.get("own_vel") or cut.get("vel") is not None and not same_vel
-        whole = dict(outline(src), **velocity(cut["whole"]), **tools(cut["whole"]))
+        whole = dict(outline(src), **velocity(cut["whole"]), **tools(cut["whole"]), **inner(src))
         if custom:
             whole.update(velocity(src, GATE))
     else:
@@ -421,7 +444,7 @@ def cut_in_two(sh, halves, at, scale, mark):
         marks = [moved_mark(m, d) for m in cut.get("marks", [])]
         # (its velocities changed since it was cut: the halves keep their own, cut from its)
         own = cut.get("own_vel") or cut.get("vel") is not None and not same_vel
-        whole = dict(outline(src), **velocity(cut["whole"]), **tools(cut["whole"]))
+        whole = dict(outline(src), **velocity(cut["whole"]), **tools(cut["whole"]), **inner(src))
         # (cut through its notes by the Slice tool before: both halves keep that cut)
         knives = [[b0 + d[0], k0 + d[1], db, dk, sd] for b0, k0, db, dk, sd in cut.get("knife", [])]
     else:
@@ -603,7 +626,7 @@ def slice_in_two(sh, halves, a, b):
         part = [[b0 + d[0], k0 + d[1], db, dk, sd] for b0, k0, db, dk, sd in part]  # (where its cuts are now)
         own = cut.get("own_vel") or cut.get("vel") is not None and not same_vel
         whole = dict(outline(src), **velocity(cut["whole"]), **velocity(src, GATE),  # (its gate as it makes notes)
-                     **tools(cut["whole"]))
+                     **tools(cut["whole"]), **inner(src))
     else:
         part, marks, own = [], [], False
         whole = dict(outline(sh), **velocity(sh), **velocity(sh, GATE), **tools(sh))
@@ -679,7 +702,8 @@ def clean_cut(c):
         return [float(p[0]), float(p[1])]
     try:
         whole, was = clean_shape(dict(c["whole"])), clean_shape(dict(c["was"]))
-        if not whole or not was or whole["kind"] != was["kind"] or not (
+        # (a line kind's piece can be another line kind: a polyline's last two points are a line)
+        if not whole or not was or (whole["kind"] == "custom") != (was["kind"] == "custom") or not (
                 whole["kind"] in LINE_KINDS or whole["kind"] == "custom" and "notes" not in whole):
             return None
         if whole["kind"] == "custom":
@@ -707,7 +731,7 @@ def clean_cut(c):
     except (KeyError, TypeError, ValueError, IndexError, AttributeError):
         return None
     out = {"whole": dict(outline(whole), **velocity(whole), **(velocity(whole, GATE) if whole["kind"] == "custom"
-                                                               else {}), **tools(whole)),
+                                                               else {}), **tools(whole), **inner(whole)),
            "was": outline(was), "part": part, "vel": snaps["vel"], "marks": marks}
     if whole["kind"] == "custom":
         out["gate"] = snaps["gate"]
