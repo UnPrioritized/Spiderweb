@@ -38,6 +38,7 @@ TOPIC_LIST = [
     ("funnel", "Tools"),
     ("text", "Tools"),
     ("hz_bass", "Tools"),
+    ("picture", "Tools"),
     ("slice", "Tools"),
     ("live", "Shapes and settings"),
     ("turn_live", "Shapes and settings"),
@@ -109,6 +110,7 @@ SEE = {
     "text": ["fill", "custom_edit"],
     "hz_bass": ["hz_live", "fill", "custom_edit"],
     "hz_live": ["hz_bass", "playback"],
+    "picture": ["channels", "files", "selecting"],
     "slice": ["join", "selecting", "fill"],
     "live": ["turn_live", "fill", "curves_pen", "straighten", "drawer", "join"],
     "turn_live": ["live", "fill", "join", "channels"],
@@ -153,7 +155,7 @@ SEE = {
 # the tip for each tool (Circle / Polygon share one)
 TOOL_TOPICS = {"select": "select", "line": "line", "poly": "poly", "free": "free", "curve": "curve", "arc": "arc",
                "custom": "custom", "circle": "box", "polygon": "box", "funnel": "funnel",
-               "text": "text", "hz": "hz_bass", "slice": "slice"}
+               "text": "text", "hz": "hz_bass", "slice": "slice", "picture": "picture"}
 DRAWER_TOOL_TOPICS = {"select": "drawer_select", "line": "drawer_line", "poly": "drawer_poly", "free": "drawer_free",
                       "curve": "drawer_curve", "arc": "drawer_arc", "square": "drawer_square",
                       "circle": "drawer_circle", "erase": "drawer_erase",

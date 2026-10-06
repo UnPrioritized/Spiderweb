@@ -77,7 +77,7 @@ TOOLS = [("select", tr("app.select"), "v"), ("slice", tr("app.slice"), "k")]
 DRAW_TOOLS = [("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"), ("free", tr("app.freehand"), "f"),
               ("curve", tr("app.curve"), "c"), ("arc", tr("app.arc"), "a"), ("custom", tr("app.custom_shape"), "s"),
               ("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q"), ("funnel", tr("app.funnel"), "n"),
-              ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h")]
+              ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h"), ("picture", tr("app.picture"), "i")]
 MANY_CHANNELS = 15  # a shape spread over more channels than this is shown orange in the shape list
 CHANNEL_CHOICES = [
     ("raw", tr("app.as_drawn"),
@@ -143,6 +143,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.chop_window = None
         self.chop_pos = ""  # (and the chop window)
         self.hz_window = None  # the Hz bass window (hz_window.py)
+        self.image_window = None  # image to notes (image_window.py; opened by the Picture tool)
+        self.image_pos = ""  # its size and place
+        self.image_last = None  # (picture file, settings) last used there, so it opens with them again
         self.hz_clip = None  # notes copied in it (HzWindow.copy_notes)
         self.hz_pos = ""  # its size and place ("WxH+x+y", remembered in the autosave)
         self.hz_fx_h = 0  # its effects pane's height in pixels, dragged by its top edge (0 = as it starts)
@@ -1301,7 +1304,22 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.sync_text()
         self.sync_custom()
         self.sync_funnel()
+        if self.tool.get() == "picture":
+            self.after_idle(self.open_image)
         self.tips.show(TOOL_TOPICS.get(self.tool.get()))
+
+    def open_image(self):
+        """The image window (Picture tool)."""
+        from window.image_window import ImageWindow
+        return ImageWindow.open(self)
+
+    def add_picture(self, sh):
+        """A picture placed from the image window: a new shape, selected, one undo step."""
+        self.push_undo(name=tr("image.step_name"))
+        self.shapes.append(sh)
+        self.select(len(self.shapes) - 1)
+        self.shapes_changed()
+        self.status.config(text=tr("image.placed", name=sh["name"]))
 
     def tool_topic(self):
         return TOOL_TOPICS.get(self.tool.get(), "select")

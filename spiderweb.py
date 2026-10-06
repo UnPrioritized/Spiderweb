@@ -45,6 +45,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     claw_window.py   the Claw machine window
     strum_window.py  the Strum window (Start / End panels of knobs, each with its number box)
     range_window.py  the spam gate Range's graph window
+    image_window.py  image to notes: the picture, its sliders, the player-look preview, placing it
     chop_window.py   the Chop window (rhythm list, a strip to draw rhythms, saved rhythms) + quick chop (Ctrl+U)
   roll/              the piano roll
     pianoroll.py     the piano roll canvas: view, hit testing, mouse editing

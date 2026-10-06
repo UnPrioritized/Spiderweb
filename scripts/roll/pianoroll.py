@@ -693,6 +693,11 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if tool == "hz":
             self.hz_click(e)
             return
+        if tool == "picture":  # the image window's picture, centred where clicked
+            w = app.image_window or app.open_image()
+            if w.grid is not None:
+                w.place(*self.event_pt(e, snap=False))
+            return
         if tool == "funnel" and self.draft and len(self.draft["pts"]) == 2:
             # the funnel's line is drawn, now its wall
             self.draft["pts"] += [list(pt), list(pt)]

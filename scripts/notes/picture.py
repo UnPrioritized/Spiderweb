@@ -19,6 +19,9 @@ MAX_SIDE = 2400  # bigger pictures are averaged down first (memory; detail past 
 SUGGESTED = {  # the "Back to suggested" values (user: only a suggestion; every one is a slider)
     "keys": 128, "steps": 3, "view": "fall", "colours": 15, "focus": 1.0, "blend": "spread", "strength": 1.0,
     "keep": 0.6, "sharpen": 0.0, "brightness": 0.0, "contrast": 0.0, "saturation": 0.0,
+    "empty": True,  # see-through parts make no notes (False: they keep the colour under them)
+    "step": 1 / 48,  # one grid step, in beats
+    "look": "flat", "outline": 1, "shade": True, "join": True,  # how a player draws it (join also makes the notes)
 }
 
 
@@ -383,19 +386,31 @@ def _spread(cl, pal, pal_lab, strength, free):
 
 _RANGES = {"keys": (1, 256), "steps": (1, 8), "colours": (2, 16), "focus": (0, 1), "strength": (0, 1),
            "keep": (0, 1), "sharpen": (0, 1), "brightness": (-1, 1), "contrast": (-1, 1), "saturation": (-1, 1),
-           "share": (0.1, 10)}
-_CHOICES = {"view": ("fall", "roll"), "blend": ("spread", "pattern", "none")}
+           "share": (0.1, 10), "step": (1 / 65536, 64), "outline": (0, 8)}
+_CHOICES = {"view": ("fall", "roll"), "blend": ("spread", "pattern", "none"), "look": ("flat", "outlined")}
+_FLAGS = ("empty", "shade", "join")
 
 
 def clean_settings(s):
-    """Settings from a file -> every one of SUGGESTED's (+ share), a broken one = its suggested value."""
+    """Settings from a file -> every one of SUGGESTED's (+ share, and the colours "pal" / "locked" when there),
+    a broken one = its suggested value."""
     out = dict(SUGGESTED, share=1.0)
-    for k, v in (s if isinstance(s, dict) else {}).items():
+    s = s if isinstance(s, dict) else {}
+    for k, v in s.items():
         if k in _CHOICES and v in _CHOICES[k]:
+            out[k] = v
+        elif k in _FLAGS and isinstance(v, bool):
             out[k] = v
         elif k in _RANGES and isinstance(v, (int, float)) and not isinstance(v, bool) and np.isfinite(v):
             lo, hi = _RANGES[k]
             out[k] = max(lo, min(hi, int(v) if isinstance(SUGGESTED.get(k), int) else float(v)))
+    pal = s.get("pal")
+    if isinstance(pal, list) and 0 < len(pal) <= 16 and all(
+            isinstance(h, str) and len(h) == 6 and all(c in "0123456789ABCDEFabcdef" for c in h) for h in pal):
+        out["pal"] = [h.upper() for h in pal]
+        lk = s.get("locked")
+        if isinstance(lk, list):
+            out["locked"] = sorted({k for k in lk if type(k) is int and 0 <= k < len(pal)})
     return out
 
 
@@ -415,14 +430,16 @@ def clean_picture(p):
     return {"file": p["file"], "sig": sig, "size": [w, h], "grid": [steps, keys], "set": clean_settings(p.get("set"))}
 
 
-def grid_notes(grid, view):
+def grid_notes(grid, view, join=True):
     """A colour grid -> (rows, steps, keys): rows = (start, end, key row, velocity, slot) notes in grid steps, one
-    per run of the same colour on a key. Falling: keys across the picture, its bottom row first; piano roll: keys
-    up the picture (bottom row = lowest key), its left column first. Empty cells (-1) make no note."""
+    per run of the same colour on a key (join=False: one per cell). Falling: keys across the picture, its bottom
+    row first; piano roll: keys up the picture (bottom row = lowest key), its left column first. Empty cells (-1)
+    make no note."""
     a = grid[::-1].T if view == "fall" else grid[::-1]  # keys x steps
     keys, steps = a.shape
     change = np.ones(a.shape, bool)
-    change[:, 1:] = a[:, 1:] != a[:, :-1]
+    if join:
+        change[:, 1:] = a[:, 1:] != a[:, :-1]
     ks, ts = np.nonzero(change)  # (key by key, in time order)
     ends = np.full(len(ts), steps)
     same = ks[1:] == ks[:-1]
@@ -437,7 +454,7 @@ def picture_shape(grid, info, b0, k0, step_beats, vel=127):
     """A new placed picture: its box from beat b0 and key k0 (lowest key) up, one grid step = step_beats beats.
     info = sh["picture"] without "grid" (file, sig, size, set). None if the grid has no colour at all."""
     from notes.custom import BOX_STROKE, box_frame, pack_notes
-    rows, steps, keys = grid_notes(grid, info["set"]["view"])
+    rows, steps, keys = grid_notes(grid, info["set"]["view"], info["set"]["join"])
     if not len(rows):
         return None
     name = os.path.basename(info["file"])
