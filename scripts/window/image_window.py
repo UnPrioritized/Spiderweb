@@ -5,6 +5,7 @@ place. Then it's dragged into the piano roll (held by its middle), placed at the
 the Picture tool. The maths: notes/picture.py."""
 
 import os
+import threading
 import time
 import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, ttk
@@ -24,6 +25,9 @@ SWATCH = 20
 BOXES = {"keys": (2, 256), "step": (1, 99999), "outline": (0, 8), "player_w": (100, 20000), "player_h": (100, 20000),
          "player_keys": (1, 256)}  # the number boxes: lowest, highest (keys: the piano roll's keys at most)
 LOOK_ONLY = ("look", "outline", "shade", "join", "player_w", "player_h", "player_keys")  # (only the preview changes)
+THREAD_CELLS = 100_000  # a grid with more cells is made in the background (progress bar + Cancel); ~0.4 s
+BIG_CELLS = 1_000_000  # ... and with more than this asked first (user's soft limit: ~4 s, up to that many notes)
+POLL_MS = 50
 
 
 def _photo(master, rgb):
@@ -90,6 +94,46 @@ def look_picture(grid, pal_srgb, view, width, height, look="flat", outline=1, sh
     return np.clip(out, 0, 1)
 
 
+class Making:
+    """One picture being made: cells -> colours -> grid, from what it was given (in the background when it's big:
+    it touches no window). cells / pal: already made ones to reuse, or None. Cancel: cancel = True (the next tick
+    stops it)."""
+
+    def __init__(self, pic, s, size, cells_key, pal_key, cells, pal, others, locked, start, editing):
+        self.pic, self.s, self.size, self.cells_key, self.pal_key = pic, s, size, cells_key, pal_key
+        self.cells, self.pal, self.others, self.locked, self.start = cells, pal, others, locked, start
+        self.editing = editing
+        self.grid, self.cancel, self.done, self.progress, self.error, self.seconds = None, False, False, 0.0, None, 0.0
+
+    def tick(self, f):
+        if self.cancel:
+            raise P.Cancelled
+        self.progress = f
+
+    def run(self):
+        s, started = self.s, time.perf_counter()
+        try:
+            if self.cells is None:
+                cl, al = P.cells(self.pic, *self.size)
+                self.cells = (P.adjust(cl, s["brightness"], s["contrast"], s["saturation"], s["sharpen"]), al)
+            self.tick(0.05)
+            cl, al = self.cells
+            if self.pal is None:
+                self.pal = P.fit_palette(
+                    [(cl, al if s["empty"] else None, s["share"] if self.others else 1.0, s["focus"])] + self.others,
+                    s["colours"], locked=self.locked, start=self.start, tick=lambda f: self.tick(0.05 + 0.6 * f))
+            a = self.progress
+            self.grid = P.quantise(cl, self.pal, s["blend"], s["strength"], s["keep"], al, s["empty"],
+                                   tick=lambda f: self.tick(a + (1 - a) * f))
+            self.seconds = time.perf_counter() - started
+        except P.Cancelled:
+            self.cancel = True
+        except Exception as e:  # (shown / raised by the window: ImageWindow.finished)
+            self.error = e
+        finally:
+            self.done = True
+
+
 class ImageWindow(tk.Toplevel):
     """One per Spiderweb (app.image_window)."""
 
@@ -121,6 +165,10 @@ class ImageWindow(tk.Toplevel):
         self.drag_mark = None
         self.sliding = None  # (slider key, its value at the press) while the mouse holds a slider
         self._other_cells = {}  # the other placed pictures' cells (others_cells)
+        self.made = None  # (picture, settings, editing) the shown grid / colours were made from
+        self.making = None  # the Making in the background, if any
+        self.after_made = None  # what to do once the picture being made is done (not when it's cancelled)
+        self.big_yes = None  # (picture fingerprint, rows, cols) said Yes to (big_ok)
         self.build()
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<Configure>", self.on_configure, add="+")
@@ -157,9 +205,16 @@ class ImageWindow(tk.Toplevel):
         self.cv.bind("<ButtonPress-1>", lambda e: self.hold(True))
         self.cv.bind("<ButtonRelease-1>", lambda e: self.hold(False))
         info = ttk.Frame(left)
-        info.pack(fill="x", pady=(8, 0))
+        info.pack(side="bottom", fill="x", pady=(8, 0), before=self.cv)  # (a short window shrinks the preview)
         self.info = ttk.Label(info, text="", foreground="#555")
         self.info.pack(side="left")
+        self.prog = ttk.Frame(left)  # (its own row above, while a big picture is made: show_bar)
+        self.cancel_btn = ttk.Button(self.prog, text=tr("image.cancel"), command=self.cancel_making)
+        self.cancel_btn.pack(side="right")  # (first: always shown; the bar takes what's left)
+        self.prog_text = ttk.Label(self.prog, text="", foreground="#555")
+        self.prog_text.pack(side="left")
+        self.bar = ttk.Progressbar(self.prog, length=60, maximum=100)
+        self.bar.pack(side="left", fill="x", expand=True, padx=8)
         self.handle = tk.Label(info, text=tr("image.drag"), background="#dfe8f5", relief="ridge", padx=10, pady=6,
                                cursor="fleur")
         self.handle.pack(side="right")
@@ -611,7 +666,8 @@ class ImageWindow(tk.Toplevel):
         if path:
             self.load(path)
 
-    def load(self, path, quiet=False):
+    def load(self, path, quiet=False, then=None):
+        """Opens a picture file and makes it (then: done once it's made). False if it couldn't be read."""
         try:
             pic = P.load(path, self)
         except (tk.TclError, OSError, ValueError) as e:
@@ -624,40 +680,145 @@ class ImageWindow(tk.Toplevel):
             self.locked = self.project_locks()
         self.made_for = (None, None)
         self.name.config(text=os.path.basename(path), foreground="#2a7")
-        self.app.image_last = (path, dict(self.s))
-        self.remake()
+        self.remake()  # (app.image_last: once it's made)
+        self.after_made = then  # (set after remake: it drops one left from before)
+        if then and not self.making and self.made and self.made[0] is pic:  # (made right away)
+            self.after_made = None
+            then()
         return True
 
     def remake(self):
-        """Cells -> colours -> grid, each only when something it depends on changed."""
+        """Cells -> colours -> grid, each only when something it depends on changed. A big one is made in the
+        background with a progress bar and Cancel (user); past BIG_CELLS cells it's asked first."""
         self.late = None
+        self.stop_making()
+        self.after_made = None  # (meant for the picture being made before)
         if not self.pic:
             self.redraw()
             return
-        self.info.config(text=tr("image.working"))
-        self.update_idletasks()
-        s = self.s
+        s = dict(self.s)
+        rows, cols = P.grid_size(self.pic, s["keys"], s["steps"], s["view"])
+        if rows * cols > BIG_CELLS and not self.big_ok(rows, cols):
+            self.back_to_made()
+            return
         cells_key = (s["keys"], s["steps"], s["view"], s["brightness"], s["contrast"], s["saturation"],
                      s["sharpen"])
-        if self.made_for[0] != cells_key:
-            rows, cols = P.grid_size(self.pic, s["keys"], s["steps"], s["view"])
-            cl, al = P.cells(self.pic, rows, cols)
-            self.cl, self.al = P.adjust(cl, s["brightness"], s["contrast"], s["saturation"], s["sharpen"]), al
         others, others_key = self.others_cells()
         pal_key = (cells_key, s["colours"], s["focus"], s["empty"], s["share"], others_key, tuple(sorted(
             (k, tuple(np.round(v, 6))) for k, v in self.locked.items())))
-        if self.made_for[1] != pal_key:
-            al = self.al if s["empty"] else None
-            self.pal = P.fit_palette([(self.cl, al, s["share"] if others else 1.0, s["focus"])] + others,
-                                     s["colours"],
-                                     locked=[(k, v) for k, v in self.locked.items() if k < s["colours"]],
-                                     start=[(k, v) for k, v in self.start.items() if k < s["colours"]])
-        self.made_for = (cells_key, pal_key)
-        self.grid = P.quantise(self.cl, self.pal, s["blend"], s["strength"], s["keep"], self.al, s["empty"])
-        self.app.image_last = (self.pic.path, dict(s))
+        job = Making(self.pic, s, (rows, cols), cells_key, pal_key,
+                     (self.cl, self.al) if self.made_for[0] == cells_key else None,
+                     self.pal if self.made_for[1] == pal_key else None, others,
+                     [(k, v) for k, v in self.locked.items() if k < s["colours"]],
+                     [(k, v) for k, v in self.start.items() if k < s["colours"]], self.editing)
+        if rows * cols <= THREAD_CELLS:  # (quick: made right here)
+            self.info.config(text=tr("image.working"))
+            self.update_idletasks()
+            job.run()
+            self.finished(job)
+            return
+        self.making = job
+        self.show_bar(True)
+        threading.Thread(target=job.run, daemon=True).start()
+        self.after(POLL_MS, self.poll, job)
+
+    def big_ok(self, rows, cols):
+        """More than BIG_CELLS cells: may it be made? (asked once for this picture and size; user's soft limit)"""
+        key = (self.pic.sig, rows, cols)
+        if key == self.big_yes or "image" in self.app.big_skip:
+            return True
+        from window import big_ask
+        secs = rows * cols * self.app.image_rate
+        go, skip = big_ask.dialog(self, tr("big_ask.title"), tr("image.big", rows=rows, cols=cols, cells=rows * cols,
+                                                                 secs=max(1, round(secs))), False)
+        if go:
+            self.big_yes = key
+            if skip:
+                self.app.big_skip.add("image")
+        return go
+
+    def poll(self, job):
+        """The picture made in the background: its progress shown, then the picture when it's done."""
+        if job is not self.making or not self.winfo_exists():
+            return
+        if not job.done:
+            self.bar.config(value=job.progress * 100)
+            self.prog_text.config(text=tr("image.making", pct=int(job.progress * 100)))
+            self.after(POLL_MS, self.poll, job)
+            return
+        self.making = None
+        self.show_bar(False)
+        self.finished(job)
+
+    def finished(self, job):
+        """A picture made: shown (an error: back to what was shown before)."""
+        if job.cancel:
+            return
+        if job.error is not None:
+            if not isinstance(job.error, MemoryError):
+                raise job.error
+            messagebox.showerror(tr("image.window_title"), tr("image.no_memory"), parent=self)
+            self.back_to_made()
+            return
+        self.cl, self.al = job.cells
+        self.pal, self.grid = job.pal, job.grid
+        self.made_for = (job.cells_key, job.pal_key)
+        self.made = (job.pic, job.s, job.editing)
+        if job.size[0] * job.size[1] > THREAD_CELLS:  # (how long a cell takes on this PC, for the question)
+            self.app.image_rate = job.seconds / (job.size[0] * job.size[1])
+        self.app.image_last = (job.pic.path, dict(self.s))
         self.show_swatches()
         self.show_gives()
         self.redraw()
+        then, self.after_made = self.after_made, None
+        if then:
+            then()
+
+    def busy(self):
+        """Still making the picture: says so (nothing can be placed / applied until it's done)."""
+        if self.making:
+            self.app.status.config(text=tr("image.still_making"))
+        return bool(self.making)
+
+    def stop_making(self):
+        if self.making:
+            self.making.cancel = True
+            self.making = None
+            self.show_bar(False)
+
+    def cancel_making(self):
+        """Cancel: the picture being made is dropped; the settings / picture go back to what's shown."""
+        if self.making:
+            self.stop_making()
+            self.back_to_made()
+            self.app.status.config(text=tr("image.cancelled"))
+
+    def back_to_made(self):
+        """The picture and settings back to the ones the preview was made from (a big one turned down, cancelled
+        or out of memory); look settings stay as they are."""
+        self.after_made = None
+        if self.made is None:
+            self.pic, self.grid = None, None
+            self.name.config(text=tr("image.no_picture", kinds=_kinds()), foreground="#777")
+        else:
+            pic, s, editing = self.made
+            self.pic = pic
+            self.s = dict(s, **{k: self.s[k] for k in LOOK_ONLY + ("fmt", "by")})
+            self.name.config(text=os.path.basename(pic.path), foreground="#2a7")
+            if (editing or (0, 0, None))[2] != (self.editing or (0, 0, None))[2]:  # (another one was opened)
+                self.editing = None
+                self.apply_btn.pack_forget()
+        self.show_settings()
+        self.redraw()
+
+    def show_bar(self, on):
+        """The progress bar + Cancel under the preview while a picture is made in the background."""
+        if on and not self.prog.winfo_manager():
+            self.bar.config(value=0)
+            self.prog_text.config(text=tr("image.making", pct=0))
+            self.prog.pack(side="bottom", fill="x", pady=(6, 0), before=self.cv)
+        elif not on and self.prog.winfo_manager():
+            self.prog.pack_forget()
 
     def show_swatches(self):
         for w in self.swatches.winfo_children():
@@ -696,12 +857,13 @@ class ImageWindow(tk.Toplevel):
             self.held = on
             self.redraw()
 
-    def fit(self):
+    def fit(self, pic=None, view=None):
         """Where the picture goes in the canvas: (x, y, width, height), keyboard space left out."""
         cw, ch = self.view_size
-        fall = self.s["view"] == "fall"
+        fall = (view or self.s["view"]) == "fall"
         aw, ah = (cw - 8, ch - KB - 8) if fall else (cw - KB - 8, ch - 8)
-        asp = self.pic.aspect if self.pic else 16 / 9
+        pic = pic or self.pic
+        asp = pic.aspect if pic else 16 / 9
         w = min(aw, ah * asp)
         h = w / asp
         w, h = max(8, int(w)), max(8, int(h))
@@ -712,43 +874,45 @@ class ImageWindow(tk.Toplevel):
     def redraw(self):
         cv = self.cv
         cv.delete("all")
-        if not self.pic or self.grid is None:
-            cv.create_text(self.view_size[0] // 2, self.view_size[1] // 2,
-                           text=tr("image.no_picture", kinds=_kinds()), fill="#aaa")
-            self.info.config(text="")
+        if not self.pic or self.grid is None or self.made is None:
+            cv.create_text(self.view_size[0] // 2, self.view_size[1] // 2, fill="#aaa",
+                           text=tr("image.making_first") if self.making else tr("image.no_picture", kinds=_kinds()))
+            if not self.making:
+                self.info.config(text="")
             return
-        x, y, w, h = self.fit()
+        pic, made, _ = self.made  # (what the shown grid was made from; the look settings: the window's own)
+        view = made["view"]
+        x, y, w, h = self.fit(pic, view)
         s = self.s
         if self.held:
-            rgb = P.to_srgb(P.cells(self.pic, h, w)[0])
+            rgb = P.to_srgb(P.cells(pic, h, w)[0])
             self.what.config(text=tr("image.original_title"))
         else:
-            rgb = look_picture(self.grid, P.to_srgb(self.pal), s["view"], w, h, s["look"], self.outline_px(w, h),
+            rgb = look_picture(self.grid, P.to_srgb(self.pal), view, w, h, s["look"], self.outline_px(w, h, view),
                                s["shade"], s["join"])
             self.what.config(text=tr("image.preview_title"))
         self.photo = _photo(self, rgb)
         cv.create_image(x, y, image=self.photo, anchor="nw")
-        self.draw_keys(x, y, w, h)
-        rows, steps, keys = P.grid_notes(self.grid, s["view"])
-        if not s["join"]:
-            steps = steps
+        self.draw_keys(x, y, w, h, view)
+        rows, steps, keys = P.grid_notes(self.grid, view)
         notes = len(rows) if s["join"] else int((self.grid >= 0).sum())
         self.info.config(text=tr("image.info", keys=keys, steps=steps, notes=f"{notes:,}",
                                  used=len(np.unique(self.grid[self.grid >= 0])), colours=len(self.pal)))
 
-    def outline_px(self, w, h):
+    def outline_px(self, w, h, view=None):
         """The outline's width in the preview (w x h px): as wide next to a key as in the player's window (its
         outline px; its keys shown across its width / up its height), the preview's keys being wider / narrower."""
         s = self.s
-        fall = s["view"] == "fall"
+        fall = (view or s["view"]) == "fall"
         keys = self.grid.shape[1 if fall else 0]
         player_key = (s["player_w"] if fall else s["player_h"]) / s["player_keys"]
         return s["outline"] * ((w if fall else h) / keys) / player_key
 
-    def draw_keys(self, x, y, w, h):
+    def draw_keys(self, x, y, w, h, view):
         """A keyboard under (falling) / left of (piano roll) the picture, one key per grid key."""
-        cv, keys = self.cv, self.s["keys"]
-        if self.s["view"] == "fall":
+        fall = view == "fall"
+        cv, keys = self.cv, self.grid.shape[1 if fall else 0]
+        if fall:
             top, kw = y + h + 2, w / keys
             cv.create_rectangle(x, top, x + w, top + KB - 4, fill="#e8e8e8", outline="")
             for k in range(keys):
@@ -795,6 +959,8 @@ class ImageWindow(tk.Toplevel):
 
     def place(self, beat, key, snap=False):
         """The picture placed held by its middle at (beat, key) (box_at)."""
+        if self.busy():
+            return False
         sh = self.placed_shape(*self.box_at(beat, key, snap)[:2]) if self.grid is not None else None
         if sh is None:
             self.app.status.config(text=tr("image.nothing_to_place"))
@@ -804,6 +970,8 @@ class ImageWindow(tk.Toplevel):
 
     def place_at_play_line(self):
         self.take_typed()
+        if self.busy():
+            return
         if self.grid is None:
             self.app.status.config(text=tr("image.nothing_to_place"))
             return
@@ -832,7 +1000,7 @@ class ImageWindow(tk.Toplevel):
         roll = self.app.roll
         roll.delete("picdrag")
         spot = self.roll_spot(e)
-        if spot is None:
+        if spot is None or self.making:
             return
         b0, k0, length, keys = self.box_at(*spot)
         roll.create_rectangle(roll.t2x(b0), roll.p2y(k0 - 0.5 + keys), roll.t2x(b0 + length), roll.p2y(k0 - 0.5),
@@ -878,8 +1046,7 @@ class ImageWindow(tk.Toplevel):
         self.name.config(text=tr("image.changed", name=os.path.basename(p["file"])), foreground="#c60")
         if ask and messagebox.askyesno(tr("image.window_title"), tr("image.changed_ask", path=p["file"]), parent=self):
             self.app._pictures = {k: v for k, v in self.app._pictures.items() if k[0] != p["file"]}
-            if self.load(p["file"]):
-                self.apply()
+            self.load(p["file"], then=self.apply)
 
     def edited(self):
         """The placed picture being changed, if it's still there (shape number), else None."""
@@ -903,7 +1070,7 @@ class ImageWindow(tk.Toplevel):
         settings: it keeps its box (turned, stretched...); else its box's middle stays."""
         self.take_typed()
         i = self.edited()
-        if i is None or self.grid is None:
+        if i is None or self.grid is None or self.busy():
             return
         app = self.app
         old = app.shapes[i]
@@ -942,6 +1109,7 @@ class ImageWindow(tk.Toplevel):
     def close(self):
         if self.late:
             self.after_cancel(self.late)
+        self.stop_making()
         self.app.image_window = None
         self.app.roll.delete("picdrag")  # (closed while the handle was dragged)
         self.destroy()

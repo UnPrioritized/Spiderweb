@@ -293,13 +293,16 @@ def detail(cl):
     return np.minimum(g / m, 3.0) if m > 0 else np.ones_like(g)
 
 
-def fit_palette(pictures, k, locked=(), tries=4, seed=1, samples=12000, init="spread", pick="look", start=()):
+def fit_palette(pictures, k, locked=(), tries=4, seed=1, samples=12000, init="spread", pick="look", start=(),
+                tick=None):
     """pictures: [(cells, alpha or None, share, focus)] -> k linear colours fitted to all of them together.
     share = how much this picture counts (1 = normal); focus 0..1 = how much details (faces, eyes) count more
     than big flat areas. locked: [(slot, linear colour)] kept as they are (the others fit around them).
     Several starts spread from dark to light; kept: the one whose picture LOOKS closest (pick "look"; the
     smallest group error, "error", picked worse colours: dev/scratch/picture_diff.py). Each colour = the plain
-    average of every cell it stands for (weighted by detail it drifted to outline tones)."""
+    average of every cell it stands for (weighted by detail it drifted to outline tones). tick(0..1): told how far
+    it is now and then (it may raise Cancelled)."""
+    tick = tick or (lambda f: None)
     labs, lins, wts = [], [], []
     for cl, al, share, focus in pictures:
         lab = oklab(cl).reshape(-1, 3)
@@ -319,6 +322,7 @@ def fit_palette(pictures, k, locked=(), tries=4, seed=1, samples=12000, init="sp
         for s, c in locked:
             pal[s] = c
         return pal
+    tick(0.05)
     lab, lin, wt = np.concatenate(labs), np.concatenate(lins), np.concatenate(wts)
     rng = np.random.default_rng(seed)
     look = None
@@ -334,6 +338,7 @@ def fit_palette(pictures, k, locked=(), tries=4, seed=1, samples=12000, init="sp
     first = {s: oklab(np.asarray(c, float)[None])[0] for s, c in start if s in free}  # (pasted "starting point")
     best, best_err = None, None
     for t in range(max(1, tries)):
+        tick(0.1 + 0.7 * t / max(1, tries))
         cen = np.zeros((k, 3))
         for s, c in fixed.items():
             cen[s] = c
@@ -372,12 +377,13 @@ def fit_palette(pictures, k, locked=(), tries=4, seed=1, samples=12000, init="sp
         else:
             err = 0.0
             for L, Lb, _a in look:
+                tick(0.1 + 0.7 * (t + 0.5) / max(1, tries))
                 g_ = _nearest(L, cen)
                 err += float(np.sqrt(((blur(cen[g_], 2) - Lb) ** 2).sum(-1)).mean())
         if best_err is None or err < best_err:
             best, best_err = (cen.copy(), grp), err
     cen = best[0]
-    grp = np.concatenate([_nearest(lab_all[i:i + 50000], cen) for i in range(0, len(lab_all), 50000)])
+    grp = _nearest(lab_all, cen, lambda f: tick(0.8 + 0.2 * f))
     pal = np.zeros((k, 3))
     for s in range(k):  # each free colour = the plain average (in light) of every cell it stands for
         if s in fixed:
@@ -397,18 +403,29 @@ def _dist2(lab, cen):
     return d
 
 
-def _nearest(lab, pal_lab):
-    return ((lab[..., None, :] - pal_lab) ** 2).sum(-1).argmin(-1)
+def _nearest(lab, pal_lab, tick=None):
+    """Each colour's nearest palette colour, a piece at a time (a huge grid all at once took GBs)."""
+    flat = lab.reshape(-1, 3)
+    out = np.empty(len(flat), np.int64)
+    for i in range(0, len(flat), 65536):
+        if tick:
+            tick(i / len(flat))
+        out[i:i + 65536] = _dist2(flat[i:i + 65536], pal_lab).argmin(1)
+    return out.reshape(lab.shape[:-1])
+
+
+class Cancelled(Exception):
+    """Making a picture was cancelled (a tick saw it)."""
 
 
 _BAYER = (np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]) + 0.5) / 16 - 0.5
 
 
-def quantise(cl, pal, blend="spread", strength=1.0, keep=0.6, alpha=None, empty=True):
+def quantise(cl, pal, blend="spread", strength=1.0, keep=0.6, alpha=None, empty=True, tick=None):
     """Every cell -> a palette slot. blend: "spread" (error passed on, Floyd-Steinberg weights, many cells at
     once along slanted lines), "pattern" (a fixed 4x4 pattern) or "none". strength 0..1; keep 0..1 = how
     readily small details keep their own colour (no error in or out). alpha + empty: cells at least half
-    see-through -> -1."""
+    see-through -> -1. tick(0..1): told how far it is now and then (it may raise Cancelled)."""
     rows, cols = cl.shape[:2]
     pal_lab = oklab(pal)
     if blend == "pattern" and strength > 0:
@@ -416,7 +433,7 @@ def quantise(cl, pal, blend="spread", strength=1.0, keep=0.6, alpha=None, empty=
         b = _BAYER[np.arange(rows)[:, None] % 4, np.arange(cols)[None] % 4][..., None]
         step = np.sort(to_srgb(pal), 0)
         spread = float(np.median(np.diff(step, axis=0).max(1))) if len(pal) > 1 else 0.2
-        idx = _nearest(oklab(to_lin(np.clip(c + b * strength * max(spread, 0.05), 0, 1))), pal_lab)
+        idx = _nearest(oklab(to_lin(np.clip(c + b * strength * max(spread, 0.05), 0, 1))), pal_lab, tick)
     elif blend == "spread" and strength > 0:
         free = np.ones((rows, cols))
         if keep > 0:
@@ -424,23 +441,25 @@ def quantise(cl, pal, blend="spread", strength=1.0, keep=0.6, alpha=None, empty=
             free = 1 - np.clip((d - 0.075 * (1 - keep)) / 0.05, 0, 1)
         if alpha is not None and empty:
             free = free * (alpha >= 0.5)
-        idx = _spread(cl, pal, pal_lab, strength, free)
+        idx = _spread(cl, pal, pal_lab, strength, free, tick)
     else:
-        idx = _nearest(oklab(cl), pal_lab)
+        idx = _nearest(oklab(cl), pal_lab, tick)
     if alpha is not None and empty:
         idx = np.where(alpha >= 0.5, idx, -1)
     return idx
 
 
-def _spread(cl, pal, pal_lab, strength, free):
+def _spread(cl, pal, pal_lab, strength, free, tick=None):
     """Error spreading, left to right, top to bottom. A cell needs its left neighbour and the three above it
     done, so every cell on one slanted line (x + 2y the same) can go at once."""
     rows, cols = cl.shape[:2]
     a = cl.astype(float).copy()
     idx = np.zeros((rows, cols), int)
-    ys_all = np.arange(rows)
-    for line in range(cols + 2 * (rows - 1)):
-        ys = ys_all[(line - 2 * ys_all >= 0) & (line - 2 * ys_all < cols)]
+    lines = cols + 2 * (rows - 1)
+    for line in range(lines):
+        if tick and not line % 64:
+            tick(line / lines)
+        ys = np.arange(max(0, (line - cols + 2) // 2), min(rows - 1, line // 2) + 1)  # (0 <= line - 2y < cols)
         if not len(ys):
             continue
         xs = line - 2 * ys

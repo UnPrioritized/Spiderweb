@@ -3,7 +3,8 @@ Yes / No + "Don't ask again until Spiderweb is closed", remembered PER ACTION (A
 restart). Something that won't fit in the free memory at all is always asked, ticked or not.
 Actions: "notes" = making a shape with more than BIG notes (App.confirm_big, Range window), "midi" = Generate
 MIDI (memory only), "domino" = Copy to Domino (more than BIG notes: the program it's pasted into gets slow).
-The same window warns before Copy to Domino fills a 10th track (ask_drums, "drums")."""
+The same window warns before Copy to Domino fills a 10th track (ask_drums, "drums") and before an image with more
+than a million grid cells is made (image_window.big_ok, "image")."""
 
 import ctypes
 import tkinter as tk

@@ -145,6 +145,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.image_window = None  # image to notes (image_window.py; opened by the Picture tool)
         self.image_pos = ""  # its size and place
         self.image_last = None  # (picture file, settings) last used there, so it opens with them again
+        self.image_rate = 4e-6  # seconds a grid cell takes to make there (measured on each big one: its question)
         self._pictures = {}  # placed pictures' files read: (path, mtime, size) -> picture.Picture (picture_for)
         self.picture_owners, self.picture_pal = np.zeros(0, bool), None  # (shapes_changed: for the piano roll)
         self.picture_use10 = False  # (shapes_changed: pictures use channel 10 too)
