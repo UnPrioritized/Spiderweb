@@ -16,8 +16,8 @@ from notes.bezier import anchor_count, nearest, split
 from notes.engine import cached_arrays, shape_path
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom
-from notes.sliced import (completed, cut_in_two, keep_velocity, knife_in_two, moved_by, notes_across, rejoined,
-                          slice_in_two, tooled)
+from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_in_two, moved_by, notes_across,
+                          rejoined, slice_in_two, tooled)
 from notes.smooth import smooth_path
 from notes.joined import (custom_groups, join_shapes, join_velocity, piece_velocity, sections, split_at, split_custom,
                           split_pieces)
@@ -160,19 +160,28 @@ class JoinSplit:
         def touch(p, q):
             return math.hypot(roll.t2x(p[0]) - roll.t2x(q[0]), roll.p2y(p[1]) - roll.p2y(q[1])) <= TOUCH_PX * self.scale
 
+        def joined(shapes):
+            new = join_shapes(shapes, roll.sy / roll.sx, touch)
+            if new is not None:
+                new.update(shared_settings(shapes)[0])  # (glue / chop / claw / strum / Colours: kept when all alike)
+                join_velocity(new, shapes, [span(sh) for sh in shapes], span(new))  # (each keeps its velocities)
+            return new
+
         order = sorted(self.sels)
         olds = [self.shapes[i] for i in order]
-        new = join_shapes(olds, roll.sy / roll.sx, touch)
+        new = joined(olds)
         if new is None:
             return
-        kept, lost = shared_settings(olds)  # (glue / chop / claw / strum / Colours: kept when they all have the same)
+        again = rejoined(olds, new, joined)  # (pieces of one shape: it again, or a bigger piece of it)
+        if again == CANT:
+            self.status.config(text=tr("join_split.cant_rejoin"))
+            return
+        lost = shared_settings(olds)[1]
         if lost and not messagebox.askokcancel(
                 tr("join_split.spiderweb"), tr("join_split.joining_these_changes") + lost[0] +
                 tr("join_split.ctrl_z_gives_them_back"), icon="warning", parent=self):
             return
-        new.update(kept)
-        join_velocity(new, olds, [span(sh) for sh in olds], span(new))  # (each keeps its velocities)
-        new = rejoined(olds, new) or new  # (pieces of one shape: it again, or a bigger piece of it)
+        new = again or new
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.join"))
         at = order[0]

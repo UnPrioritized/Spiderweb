@@ -17,6 +17,7 @@ Last note) makes it a shape of its own (App.shapes_changed drops "cut"), and so 
 """
 
 import json
+import math
 
 import numpy as np
 
@@ -413,23 +414,33 @@ def cut_in_two(sh, halves, at, scale, mark):
             h["cut"]["own_vel"] = True
 
 
-def rejoined(olds, new):
-    """Join of pieces of one shape that follow on from each other (and were moved together, if at all): all of them
-    = that shape back as it was (with new's other settings: the join's), else new (the joined curve) made one bigger
-    piece. None: not such pieces (a normal join)."""
+CANT = "can't"  # rejoined: pieces cut through their notes that can't become one piece
+
+
+def rejoined(olds, new, join=None):
+    """Join of pieces of one shape that follow on from each other, or lie on both sides of a Slice cut through its
+    notes (and were moved together, if at all): all of them = that shape back as it was (with new's other settings:
+    the join's), else one bigger piece (its drawing: new, the joined curve; join(shapes) joins some of them when
+    others lie on top of them). None: not such pieces (a normal join); CANT: pieces cut through their notes that
+    don't make one piece (a normal join would draw the drawing twice and lose their notes)."""
     got = [source(sh) for sh in olds]
-    if not all(got) or any(sh["cut"].get("knife") for sh in olds):  # (cut through their notes: a normal join)
-        return None
-    wholes = [json.dumps(dict(outline(g[0]), **tools(g[0])), sort_keys=True) for g in got]
+    fail = CANT if any((sh.get("cut") or {}).get("knife") for sh in olds) else None
+    if not all(got):
+        return fail
+    wholes = [json.dumps(dict(outline(g[0]), **tools(g[0]), cut=g[0].get("cut")), sort_keys=True) for g in got]
     if len(set(wholes)) > 1:
-        return None
-    order = sorted(range(len(olds)), key=lambda i: got[i][1][0])
-    parts = [got[i][1] for i in order]
-    if any(p[1] is None or abs(p[1] - q[0]) > 1e-9 for p, q in zip(parts, parts[1:])):
-        return None
+        return fail
+    items = []
+    for sh, g in zip(olds, got):
+        d = moved_by(sh)
+        items.append([g[1], [[b0 + d[0], k0 + d[1], db, dk, sd] for b0, k0, db, dk, sd in sh["cut"].get("knife", [])]])
+    items = merged_parts(items)
+    if len(items) > 1:
+        return fail
+    part, knives = items[0]
     same_vel = all(g[2] for g in got)
     src = got[0][0]
-    if parts[0][0] == 0 and parts[-1][1] is None:  # all of it: the shape it was
+    if part[0] == 0 and part[1] is None and not knives:  # all of it: the shape it was
         out = {k: v for k, v in new.items() if k not in OUTLINE and k != "cut" and not (same_vel and k in VELOCITY)}
         out.update(outline(src))
         if same_vel:
@@ -438,21 +449,98 @@ def rejoined(olds, new):
             out["fx"] = json.loads(json.dumps(src["fx"])) + (out.get("fx") or [])
         if src.get("glue"):
             out["glue"] = json.loads(json.dumps(src["glue"]))
+        if src.get("cut"):  # (a piece itself: the one these were cut from)
+            out["cut"] = json.loads(json.dumps(src["cut"]))
         return out
-    ids = [m["id"] for sh in olds for m in sh["cut"].get("marks", [])]
-    marks = []
+    drawings = {}  # (pieces cut through their notes keep the same drawing: once)
     for sh in olds:
+        drawings.setdefault(json.dumps(outline(sh), sort_keys=True), sh)
+    if len(drawings) == 1:
+        base = next(iter(drawings.values()))
+        new = dict({k: v for k, v in new.items() if k not in OUTLINE and k not in VELOCITY}, **outline(base),
+                   **velocity(base))
+    elif len(drawings) < len(olds):
+        new = join(list(drawings.values())) if join else None
+        if new is None:
+            return fail
+    marks = {}
+    for sh in olds:  # (the cuts joined up again are gone)
         d = moved_by(sh)
-        marks += [dict(m, at=[m["at"][0] + d[0], m["at"][1] + d[1]]) for m in sh["cut"].get("marks", [])
-                  if ids.count(m["id"]) == 1]  # (the cuts joined up again are gone)
+        for m in sh["cut"].get("marks", []):
+            m = moved_mark(m, d)
+            if m["id"] not in marks and (any(on_knife(m, k) for k in knives) if m.get("segs") else
+                                         any(e is not None and abs(m["u"] - e) <= 1e-9 for e in part)):
+                marks[m["id"]] = m
     whole = dict(outline(src), **velocity(olds[0]["cut"]["whole"]), **tools(olds[0]["cut"]["whole"]))
-    out = dict(new, cut={"whole": whole, "was": outline(new), "part": [parts[0][0], parts[-1][1]], "vel": None,
-                         "marks": marks})
+    if src.get("cut"):
+        whole["cut"] = json.loads(json.dumps(src["cut"]))
+    out = dict(new, cut={"whole": whole, "was": outline(new), "part": list(part), "vel": None,
+                         "marks": list(marks.values())})
+    if knives:
+        out["cut"]["knife"] = knives
     if same_vel:
         out["cut"]["vel"] = velocity(new)
     else:
         out["cut"]["own_vel"] = True
     return out
+
+
+def merged_parts(items):
+    """Pieces of one shape, [part, knives] each (knives where they are now), joined as far as they go: two pieces
+    next to each other on the path with the same cuts through their notes, or the two sides of one such cut with
+    the same part, become one."""
+    items = [[list(p), list(k)] for p, k in items]
+    again = True
+    while again:
+        again = False
+        for i in range(len(items)):
+            for j in range(len(items)):
+                got = i != j and _merged(items[i], items[j])
+                if got:
+                    items[i] = got
+                    del items[j]
+                    again = True
+                    break
+            if again:
+                break
+    return items
+
+
+def _merged(x, y):
+    (pa, ka), (pb, kb) = x, y
+    if pa[1] is not None and abs(pa[1] - pb[0]) <= 1e-9 and _same_knives(ka, kb):
+        return [[pa[0], pb[1]], ka]
+    if abs(pa[0] - pb[0]) > 1e-9 or (pa[1] is None) != (pb[1] is None) or (
+            pa[1] is not None and abs(pa[1] - pb[1]) > 1e-9):
+        return None
+    for i, k in enumerate(ka):
+        for j, q in enumerate(kb):
+            if _same_line(k, q) and k[4] != q[4] and _same_knives(ka[:i] + ka[i + 1:], kb[:j] + kb[j + 1:]):
+                return [pa, ka[:i] + ka[i + 1:]]
+    return None
+
+
+def _same_line(k, q):
+    return all(abs(a - b) <= 1e-6 for a, b in zip(k[:4], q[:4]))
+
+
+def _same_knives(a, b):
+    left = list(b)
+    for k in a:
+        m = next((q for q in left if _same_line(k, q) and k[4] == q[4]), None)
+        if m is None:
+            return False
+        left.remove(m)
+    return not left
+
+
+def on_knife(m, k):
+    """Is the mark m (where it is now) the mark of the cut through the notes k?"""
+    b0, k0, db, dk, _ = k
+    n = math.hypot(db, dk) or 1
+    dx, dy = m.get("dir") or (db, dk)
+    return (abs(db * (m["at"][1] - k0) - dk * (m["at"][0] - b0)) / n <= 1e-6 and
+            abs(db * dy - dk * dx) <= 1e-6 * n * (math.hypot(dx, dy) or 1))
 
 
 def fresh_marks(copies):
