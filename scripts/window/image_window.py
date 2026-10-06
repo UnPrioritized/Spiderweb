@@ -15,6 +15,7 @@ from files import speed
 from files.lang import tr
 from files.speed import Photo
 from notes import picture as P
+from window.widgets import Tooltip
 
 PREVIEW_W, PREVIEW_H = 900, 520  # the preview's size to start with (it grows with the window)
 KB = 36  # the keyboard drawn beside the preview, in pixels
@@ -161,9 +162,20 @@ class ImageWindow(tk.Toplevel):
         self.apply_btn = ttk.Button(info, text=tr("image.apply"), command=self.apply)  # (packed while editing)
         self.editing = None  # the placed picture this window changes (its shape number), or None
 
-        side = ttk.Frame(body, padding=(10, 0, 0, 0))
-        side.pack(side="right", fill="y")
-        tabs = ttk.Notebook(side)
+        # the settings: scroll (scrollbar, mouse wheel) when the window is too short for them (user)
+        box = ttk.Frame(body, padding=(10, 0, 0, 0))
+        box.pack(side="right", fill="y", before=left)  # (first: a narrow window shrinks the preview, not these)
+        c = self.side_canvas = tk.Canvas(box, highlightthickness=0, bd=0, width=1, height=1,
+                                         bg=ttk.Style().lookup("TFrame", "background") or "SystemButtonFace")
+        self.side_bar = ttk.Scrollbar(box, orient="vertical", command=c.yview)
+        c.configure(yscrollcommand=self.side_bar.set)
+        c.pack(side="left", fill="y")
+        side = self.side = ttk.Frame(c)
+        self._side_win = c.create_window(0, 0, window=side, anchor="nw")
+        c.bind("<Configure>", lambda e: self.fit_side())
+        side.bind("<Configure>", lambda e: self.after_idle(self.fit_side))
+        self.bind("<MouseWheel>", self.side_wheel, add="+")
+        tabs = self.tabs = ttk.Notebook(side)
         tabs.pack(fill="both", expand=True)
         t1, t2 = ttk.Frame(tabs, padding=6), ttk.Frame(tabs, padding=6)
         tabs.add(t1, text=tr("image.tab_picture"))
@@ -212,6 +224,11 @@ class ImageWindow(tk.Toplevel):
 
         f = self.section(t1, "image.colours")
         self.slider(f, "colours", 2, 15, lambda v: str(round(v)), whole=True, label="image.how_many")
+        self.vars["use10"] = tk.BooleanVar(value=self.s["use10"])
+        use10 = ttk.Checkbutton(f, text=tr("image.use10"), variable=self.vars["use10"],  # (user: here, not Player look)
+                                command=lambda: self.set_use10(self.vars["use10"].get()))
+        use10.pack(anchor="w", pady=(2, 0))
+        Tooltip(use10, tr("image.use10_tip"))
         self.swatches = ttk.Frame(f)
         self.swatches.pack(anchor="w", pady=3)
         self.slider(f, "focus", 0, 1, None, ends=(tr("image.whole"), tr("image.details")))
@@ -277,9 +294,6 @@ class ImageWindow(tk.Toplevel):
         self.by_box.pack(side="left")
         self.by_box.bind("<<ComboboxSelected>>", lambda e: self.set_by(bys[self.by_box.current()][0]))
         self.bys = bys
-        self.vars["use10"] = tk.BooleanVar(value=self.s["use10"])
-        ttk.Checkbutton(f, text=tr("image.use10"), variable=self.vars["use10"],
-                        command=lambda: self.set_use10(self.vars["use10"].get())).pack(anchor="w", pady=(2, 0))
         r = ttk.Frame(f)
         r.pack(fill="x", pady=(4, 2))
         ttk.Button(r, text=tr("image.copy"), command=self.copy_colours).pack(side="left")
@@ -291,6 +305,30 @@ class ImageWindow(tk.Toplevel):
         self.gives.bind("<ButtonPress-1>", lambda e: self.gives.focus_set(), add="+")  # (so Ctrl+C copies its text)
         self.gives.tag_config("bad", foreground="white", background="#d33")
         self.start = {}  # pasted colours that are only a starting point: slot -> linear colour
+
+    def fit_side(self):
+        """Like the main window's side panel (App.fit_side): as wide as the settings, as tall as the window; the
+        scrollbar only while they don't fit."""
+        if not self.winfo_exists():
+            return
+        c, side = self.side_canvas, self.side
+        need, have = side.winfo_reqheight(), c.winfo_height()
+        if int(c.cget("width")) != side.winfo_reqwidth():
+            c.config(width=side.winfo_reqwidth())
+        c.itemconfigure(self._side_win, width=side.winfo_reqwidth(), height=have if need < have else 0)
+        c.configure(scrollregion=(0, 0, side.winfo_reqwidth(), max(need, have)))
+        if need > have + 1:
+            if not self.side_bar.winfo_ismapped():
+                self.side_bar.pack(side="right", fill="y", before=c)
+        elif self.side_bar.winfo_ismapped():
+            self.side_bar.pack_forget()
+            c.yview_moveto(0)
+
+    def side_wheel(self, e):
+        """The mouse wheel over the settings scrolls them (boxes and lists that scroll themselves keep it)."""
+        if (str(e.widget).startswith(str(self.side_canvas)) and self.side_bar.winfo_ismapped()
+                and not isinstance(e.widget, (tk.Listbox, tk.Text, ttk.Combobox, ttk.Spinbox))):
+            self.side_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
 
     def section(self, parent, key):
         f = ttk.LabelFrame(parent, text=tr(key), padding=(6, 2, 6, 4))
@@ -585,7 +623,6 @@ class ImageWindow(tk.Toplevel):
                 cv.create_polygon(0, 0, 8, 0, 0, 8, fill="white", outline="black")
             cv.bind("<ButtonRelease-1>", lambda e, k=k: self.pick_colour(k))
             cv.bind("<ButtonRelease-3>", lambda e, k=k: self.free_colour(k))
-        from window.widgets import Tooltip
         Tooltip(self.swatches, tr("image.swatch_tip"))
 
     def pick_colour(self, k):
