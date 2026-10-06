@@ -78,9 +78,17 @@ def made_by(got):
 
 
 def shapes_line(shapes):
-    """Shapes (as saved in a project) -> the shared line."""
-    return pack(f'{{"kind": "shapes", "app": "{APP}", "shapes": [' + ", ".join(short_shape(sh) for sh in shapes)
-                + "]}")
+    """Shapes (as saved in a project) -> the shared line. A placed picture keeps only its file's name (its folders
+    would show the user's name on this PC; on another PC the file isn't there anyway, its notes play as they are)."""
+    return pack(f'{{"kind": "shapes", "app": "{APP}", "shapes": [' + ", ".join(short_shape(_file_name_only(sh))
+                                                                          for sh in shapes) + "]}")
+
+
+def _file_name_only(sh):
+    p = sh.get("picture")
+    if isinstance(p, dict) and isinstance(p.get("file"), str):
+        return dict(sh, picture=dict(p, file=re.split(r"[\\/]", p["file"])[-1]))
+    return sh
 
 
 def read_shapes(got):

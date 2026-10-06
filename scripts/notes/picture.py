@@ -476,7 +476,8 @@ def clean_settings(s):
 
 def clean_picture(p):
     """sh["picture"] from a file -> valid, or None. file = the picture's path (relative to the project when near
-    it), sig = its fingerprint, size = its own width / height, grid = [steps, keys] of the notes, set = settings."""
+    it), sig = its fingerprint, size = its own width / height, grid = [steps, keys] of the notes, set = settings,
+    id = a name of its own (copies share it)."""
     if not isinstance(p, dict) or not isinstance(p.get("file"), str) or not p["file"] or len(p["file"]) > 4096:
         return None
     try:
@@ -487,7 +488,10 @@ def clean_picture(p):
     if not (0 < steps <= 10 ** 7 and 0 < keys <= 256 and w > 0 and h > 0):
         return None
     sig = p.get("sig") if isinstance(p.get("sig"), str) and len(p.get("sig")) <= 64 else ""
-    return {"file": p["file"], "sig": sig, "size": [w, h], "grid": [steps, keys], "set": clean_settings(p.get("set"))}
+    out = {"file": p["file"], "sig": sig, "size": [w, h], "grid": [steps, keys], "set": clean_settings(p.get("set"))}
+    if isinstance(p.get("id"), str) and 0 < len(p["id"]) <= 32:  # (which placed picture the image window changes)
+        out["id"] = p["id"]
+    return out
 
 
 def paths_for_file(shapes, folder, relative):

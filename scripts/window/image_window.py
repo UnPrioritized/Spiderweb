@@ -160,7 +160,7 @@ class ImageWindow(tk.Toplevel):
         self.handle.bind("<ButtonRelease-1>", self.drag_end)
         ttk.Button(info, text=tr("image.place"), command=self.place_at_play_line).pack(side="right", padx=8)
         self.apply_btn = ttk.Button(info, text=tr("image.apply"), command=self.apply)  # (packed while editing)
-        self.editing = None  # the placed picture this window changes (its shape number), or None
+        self.editing = None  # the placed picture this window changes: (its shape, number, picture id), or None
 
         # the settings: scroll (scrollbar, mouse wheel) when the window is too short for them (user)
         box = ttk.Frame(body, padding=(10, 0, 0, 0))
@@ -231,6 +231,7 @@ class ImageWindow(tk.Toplevel):
         Tooltip(use10, tr("image.use10_tip"))
         self.swatches = ttk.Frame(f)
         self.swatches.pack(anchor="w", pady=3)
+        Tooltip(self.swatches, tr("image.swatch_tip"))
         self.slider(f, "focus", 0, 1, None, ends=(tr("image.whole"), tr("image.details")))
         self.slider(f, "share", 0.25, 4, lambda v: "%.1f×" % v)  # (only matters with other pictures placed)
         self.share_note = ttk.Label(f, text="", foreground="#777", wraplength=330, justify="left")
@@ -541,6 +542,23 @@ class ImageWindow(tk.Toplevel):
             self.put(key, max(0, min(8, n)))
         self.show_settings()
 
+    def take_typed(self):
+        """Before placing / applying: numbers typed in the Keys / One step / Outline boxes without Enter are taken,
+        and a picture still waiting to be made again (a slider just moved) is made now."""
+        try:
+            box = self.focus_get()
+        except (KeyError, tk.TclError):  # (the keyboard in a pop-up menu / another program)
+            box = None
+        if isinstance(box, ttk.Spinbox):  # (a box takes its number when it loses the keyboard: only this one can wait)
+            key = next((k for k in ("keys", "step", "outline") if str(box.cget("textvariable")) == str(self.vars[k])),
+                       None)
+            shown = key and (str(self.step_ticks()) if key == "step" else str(self.s[key]))
+            if key and self.vars[key].get().strip() != shown:
+                self.typed(key)
+        if self.late:
+            self.after_cancel(self.late)
+            self.remake()
+
     def put(self, key, value, later=False):
         """A setting changed: the picture is made again (a slider: once it rests)."""
         self.s[key] = value
@@ -572,7 +590,8 @@ class ImageWindow(tk.Toplevel):
                                      parent=self)
             return False
         self.pic = pic
-        self.locked, self.start = (self.project_locks() if self.editing is None else self.locked), {}
+        if not self.locked and self.editing is None:  # (colours pasted / picked before are kept)
+            self.locked = self.project_locks()
         self.made_for = (None, None)
         self.name.config(text=os.path.basename(path), foreground="#2a7")
         self.app.image_last = (path, dict(self.s))
@@ -623,7 +642,6 @@ class ImageWindow(tk.Toplevel):
                 cv.create_polygon(0, 0, 8, 0, 0, 8, fill="white", outline="black")
             cv.bind("<ButtonRelease-1>", lambda e, k=k: self.pick_colour(k))
             cv.bind("<ButtonRelease-3>", lambda e, k=k: self.free_colour(k))
-        Tooltip(self.swatches, tr("image.swatch_tip"))
 
     def pick_colour(self, k):
         got = colorchooser.askcolor(color="#" + P.hex_of(self.pal[k]), parent=self, title=tr("image.pick_colour"))
@@ -713,18 +731,22 @@ class ImageWindow(tk.Toplevel):
         coloured)."""
         if not self.pic or self.grid is None:
             return None
-        s = self.s
-        info = {"file": self.pic.path, "sig": self.pic.sig, "size": list(self.pic.size),
+        s = dict(self.s, step=self.step_beats())
+        info = {"file": self.pic.path, "sig": self.pic.sig, "size": list(self.pic.size), "id": os.urandom(6).hex(),
                 "set": dict(P.clean_settings(s), pal=[P.hex_of(c) for c in self.pal], locked=sorted(self.locked))}
         vel = self.app.defaults.get("vel0", 127)
         return P.picture_shape(self.grid, info, b0, k0, s["step"], vel)
+
+    def step_beats(self):
+        """One grid step in beats, never shorter than a tick (a shorter one lost notes at a low PPQ)."""
+        return max(self.s["step"], 1 / self.app.ppq)
 
     def box_at(self, beat, key, snap=True):
         """The picture held by its middle at (beat, key) -> (start beat, lowest key, length in beats, keys): its
         start on the grid (snap), not before beat 0, every key inside the piano roll's key range (user: a picture
         placed half off the keys lost its bottom key)."""
         _, steps, keys = P.grid_notes(self.grid, self.s["view"])
-        length = steps * self.s["step"]
+        length = steps * self.step_beats()
         b0 = beat - length / 2
         sb = self.app.snap_beats()
         if snap and sb:
@@ -742,6 +764,7 @@ class ImageWindow(tk.Toplevel):
         return True
 
     def place_at_play_line(self):
+        self.take_typed()
         if self.grid is None:
             self.app.status.config(text=tr("image.nothing_to_place"))
             return
@@ -751,14 +774,18 @@ class ImageWindow(tk.Toplevel):
 
     def drag_start(self, e):
         self.drag_mark = None
+        self.take_typed()
 
     def roll_spot(self, e):
         """Where on the main piano roll the mouse is (beat, key, snap: Shift = off the grid), or None when it's not
-        over it."""
+        over it (nor over this window, which covers the piano roll there)."""
         from roll.roll_shared import SHIFT
         roll = self.app.roll
         x, y = e.x_root - roll.winfo_rootx(), e.y_root - roll.winfo_rooty()
         if self.grid is None or not (0 <= x < roll.winfo_width() and 0 <= y < roll.winfo_height() and x > roll.kb_w):
+            return None
+        wx, wy = e.x_root - self.winfo_rootx(), e.y_root - self.winfo_rooty()
+        if 0 <= wx < self.winfo_width() and 0 <= wy < self.winfo_height():
             return None
         return roll.x2t(x), roll.y2p(y), not e.state & SHIFT
 
@@ -780,11 +807,13 @@ class ImageWindow(tk.Toplevel):
 
     # ------------------------------------------------------------ a placed picture
 
-    def edit(self, i):
-        """The placed picture i: its picture and settings here, "Apply to the placed picture" puts changes on it."""
+    def edit(self, i, ask=True):
+        """The placed picture i: its picture and settings here, "Apply to the placed picture" puts changes on it.
+        ask: a missing / changed picture file asks what to do (not when another file is picked next anyway)."""
         sh = self.app.shapes[i]
         p = sh["picture"]
-        self.editing = (i, sh.get("name"))
+        p.setdefault("id", os.urandom(6).hex())  # (older pictures: found again by it, edited)
+        self.editing = (sh, i, p["id"])
         self.s = P.clean_settings(p["set"])
         pal = p["set"].get("pal") or []
         self.locked = {k: P.lin_of(pal[k]) for k in p["set"].get("locked", []) if k < len(pal)}
@@ -802,12 +831,13 @@ class ImageWindow(tk.Toplevel):
         self.redraw()
         if state == "missing":  # (user: warn + a file picker)
             self.name.config(text=tr("image.missing", name=os.path.basename(p["file"])), foreground="#c60")
-            if messagebox.askyesno(tr("image.window_title"), tr("image.missing_ask", path=p["file"]), parent=self):
+            if ask and messagebox.askyesno(tr("image.window_title"), tr("image.missing_ask", path=p["file"]),
+                                           parent=self):
                 self.ask_file()
             return
         # changed since it was placed (user: "Use the new version / Keep the current one")
         self.name.config(text=tr("image.changed", name=os.path.basename(p["file"])), foreground="#c60")
-        if messagebox.askyesno(tr("image.window_title"), tr("image.changed_ask", path=p["file"]), parent=self):
+        if ask and messagebox.askyesno(tr("image.window_title"), tr("image.changed_ask", path=p["file"]), parent=self):
             self.app._pictures = {k: v for k, v in self.app._pictures.items() if k[0] != p["file"]}
             if self.load(p["file"]):
                 self.apply()
@@ -816,17 +846,23 @@ class ImageWindow(tk.Toplevel):
         """The placed picture being changed, if it's still there (shape number), else None."""
         if not self.editing:
             return None
-        i, name = self.editing
+        sh, i, pid = self.editing
         shapes = self.app.shapes
-        if i < len(shapes) and "picture" in shapes[i] and shapes[i].get("name") == name:
-            return i
-        self.editing = None
-        self.apply_btn.pack_forget()
-        return None
+        found = next((j for j, t in enumerate(shapes) if t is sh), None)
+        if found is None:  # (undo / redo / Open made the shapes anew: the one with its id, the same place first)
+            same = [j for j, t in enumerate(shapes) if t.get("picture", {}).get("id") == pid]
+            found = i if i in same else (same[0] if same else None)
+        if found is None:
+            self.editing = None
+            self.apply_btn.pack_forget()
+            return None
+        self.editing = (shapes[found], found, pid)
+        return found
 
     def apply(self):
-        """The window's picture and settings put on the placed picture (where it is now: its box's middle stays),
-        one undo step."""
+        """The window's picture and settings put on the placed picture, one undo step. Same picture shape and size
+        settings: it keeps its box (turned, stretched...); else its box's middle stays."""
+        self.take_typed()
         i = self.edited()
         if i is None or self.grid is None:
             return
@@ -834,22 +870,25 @@ class ImageWindow(tk.Toplevel):
         old = app.shapes[i]
         (b0, k0), (b1, k1), (b2, k2) = old["pts"]
         _, steps, keys = P.grid_notes(self.grid, self.s["view"])
-        new = self.placed_shape((b1 + b2 - steps * self.s["step"]) / 2, round((k1 + k2 - keys + 1) / 2))
+        new = self.placed_shape((b1 + b2 - steps * self.step_beats()) / 2, round((k1 + k2 - keys + 1) / 2))
         if new is None:
             return
         w0, h0 = old["picture"]["size"]
         w1, h1 = new["picture"]["size"]
-        stretch = False
+        s0 = old["picture"]["set"]
+        keep = all(s0.get(k) == self.s[k] for k in ("keys", "steps", "view")) and abs(
+            s0.get("step", 0) - new["picture"]["set"]["step"]) < 1e-9
         if abs(w0 / h0 - w1 / h1) > 0.01 * (w0 / h0):  # another shape of picture (user: ask only then)
-            stretch = not messagebox.askyesno(tr("image.window_title"), tr("image.shape_ask"), parent=self)
+            keep = not messagebox.askyesno(tr("image.window_title"), tr("image.shape_ask"), parent=self)
         app.push_undo(name=tr("image.apply_step"))
         new["vel0"], new["vel1"] = old.get("vel0", new["vel0"]), old.get("vel1", new["vel1"])
         if old.get("vel_env"):
             new["vel_env"] = old["vel_env"]
-        if stretch:  # (to the placed box: remake_pictures makes its notes for it)
+        new["picture"]["id"] = old["picture"].get("id", new["picture"]["id"])
+        if keep:  # (its placed box: remake_pictures makes its notes for it, turned_notes when it's turned)
             new["pts"] = [list(pt) for pt in old["pts"]]
         app.shapes[i] = new
-        self.editing = (i, new.get("name"))
+        self.editing = (new, i, new["picture"]["id"])
         missing = app.sync_pictures(new["picture"]["set"], i)
         app.shapes_changed()
         app.status.config(text=tr("image.applied", name=new["name"]) +
@@ -865,5 +904,6 @@ class ImageWindow(tk.Toplevel):
         if self.late:
             self.after_cancel(self.late)
         self.app.image_window = None
+        self.app.roll.delete("picdrag")  # (closed while the handle was dragged)
         self.destroy()
         self.app.roll.focus_set()

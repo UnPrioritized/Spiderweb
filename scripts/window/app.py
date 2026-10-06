@@ -1408,7 +1408,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         """Right-click → Use another picture...: the image window for this picture, asking for the new file."""
         if 0 <= i < len(self.shapes) and "picture" in self.shapes[i]:
             w = self.open_image()
-            w.edit(i)
+            w.edit(i, ask=False)  # (one file picker, even when its file is missing / changed)
             w.ask_file()
 
     def picture_box(self, i, own_shape=False):
