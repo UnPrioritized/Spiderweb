@@ -95,7 +95,6 @@ def load(path, tk_root):
     they're shown); without: PNG / GIF through Tk. Raises tk.TclError / OSError / ValueError if it can't be read."""
     if speed.pillow():
         rgb, alpha = _pillow_pixels(path)
-        h, w = rgb.shape[:2]
     else:
         import tkinter as tk
         img = tk.PhotoImage(master=tk_root, file=path)
@@ -107,14 +106,28 @@ def load(path, tk_root):
                 alpha = _alpha(img, tk_root, w, h)
         finally:
             img = None
-    lin = to_lin(rgb.astype(np.float32) / 255)
+    h, w = rgb.shape[:2]
+    # a side longer than MAX_SIDE: blocks of k x k pixels averaged, a side thinner than k not more than it has (a
+    # 1-pixel-wide strip stays 1 wide); the picture keeps its own shape through its size
     k = max(1, -(-max(w, h) // MAX_SIDE))
-    if k > 1:  # average k x k blocks (cuts the edge rows / columns that don't fill a block)
-        hh, ww = h // k * k, w // k * k
-        lin = lin[:hh, :ww].reshape(hh // k, k, ww // k, k, 3).mean(axis=(1, 3))
-        if alpha is not None:
-            alpha = alpha[:hh, :ww].reshape(hh // k, k, ww // k, k).mean(axis=(1, 3))
-    return Picture(np.ascontiguousarray(lin, np.float32), alpha, (w, h), path, fingerprint(path))
+    ky, kx = min(k, h), min(k, w)
+    lin = _shrink(rgb, ky, kx, to_lin(np.arange(256) / 255).astype(np.float32))
+    if alpha is not None:
+        alpha = _shrink(alpha, ky, kx)
+    return Picture(lin, alpha, (w, h), path, fingerprint(path))
+
+
+def _shrink(a, ky, kx, lut=None):
+    """rows x cols (x 3) -> float32 averages of ky x kx blocks (edge rows / columns that don't fill a block are
+    cut), a strip at a time (a big photo turned into floats all at once took GBs). lut: uint8 -> linear light first."""
+    h, w = a.shape[0] // ky * ky, a.shape[1] // kx * kx
+    out = np.empty((h // ky, w // kx) + a.shape[2:], np.float32)
+    band = max(1, (1 << 22) // (w * ky))  # (rows made at once: about 4 M values)
+    for r in range(0, h // ky, band):
+        part = a[r * ky:(r + band) * ky, :w]
+        part = lut[part] if lut is not None else part.astype(np.float32)
+        out[r:r + band] = part.reshape((-1, ky, w // kx, kx) + a.shape[2:]).mean(axis=(1, 3))
+    return out
 
 
 def _pillow_pixels(path):
@@ -125,16 +138,20 @@ def _pillow_pixels(path):
         with Image.open(path) as im:
             kind = im.format
             im = ImageOps.exif_transpose(im)  # (a photo taken sideways: turned the way it's shown)
+            if im.mode.startswith("I") or im.mode == "F":  # (16-bit / 32-bit greys)
+                raw = np.asarray(im)
+                g = raw.astype(np.float64)
+                g = np.clip(g // 256 if g.max() > 255 else g, 0, 255).astype(np.uint8)
+                alpha, see = None, im.info.get("transparency")
+                if isinstance(see, int) and (raw == see).any():  # (one grey that's see-through)
+                    alpha = (raw != see).astype(np.float32)
+                return np.repeat(g[..., None], 3, axis=2), alpha
             if im.mode in ("RGBA", "LA", "PA") or "transparency" in im.info:
                 a = np.array(im.convert("RGBA"))
                 alpha = a[..., 3].astype(np.float32) / 255
                 if kind == "GIF":  # (a GIF's see-through colour: black under it, as Tk gave)
                     a[a[..., 3] == 0, :3] = 0
                 return np.ascontiguousarray(a[..., :3]), (alpha if alpha.min() < 1 else None)
-            if im.mode.startswith("I") or im.mode == "F":  # (16-bit / 32-bit greys)
-                g = np.asarray(im, np.float64)
-                g = np.clip(g // 256 if g.max() > 255 else g, 0, 255).astype(np.uint8)
-                return np.repeat(g[..., None], 3, axis=2), None
             return np.asarray(im.convert("RGB")), None
     except Image.DecompressionBombError as e:  # (far too big: Pillow refuses it)
         raise OSError(str(e))
