@@ -11,6 +11,7 @@ import math
 import numpy as np
 
 from files.lang import tr
+from files.speed import loops
 from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX_STROKE, block_notes, check_notes,
                           clean_curve, clean_cycle,
                           clean_strokes, custom_notes_groups, custom_strokes, cycle_turns, cycling)
@@ -608,6 +609,11 @@ def resolve_overlaps(notes):
         return notes
     group = first_seen(notes[:, 4] * 256 + notes[:, 2])  # groups numbered in the order they first show up
     order = overlap_order(notes, group)
+    fast = loops()
+    if fast:  # (the compiled loop: the same notes)
+        out, m = fast.overlap_sweep(np.ascontiguousarray(notes, np.int64), np.ascontiguousarray(order, np.int64),
+                                    np.ascontiguousarray(group, np.int64))
+        return out if m == len(out) else out[:m].copy()
     a, group = np.take(notes, order, axis=0), group[order]  # (take: quicker than notes[order])
     s, e = a[:, 0], a[:, 1]
     run = running_max(e, group)  # everything before in the group sounds until here

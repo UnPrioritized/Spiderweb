@@ -49,7 +49,7 @@ from notes.joined import all_tumours, is_joined
 from window.join_split import JoinSplit
 from window.history import HistoryPanel, edit_name
 from roll.pianoroll import PianoRoll
-from files import errors
+from files import errors, speed
 from files.about import ICONS, VERSION
 from files.playback import DEFAULT_DEVICE, MidiOut, Player, devices
 from files.midi_out import PPQ_WARN
@@ -226,6 +226,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.sync_panel()
         self.after(800, lambda: self.tips.show("welcome"))  # the first time Spiderweb starts
         self.updates.start()  # (What's new after an update; asks about / looks for updates)
+        speed.start()  # (the compiled loops for lots of notes, if Numba is there: loaded in the background)
 
         for v in self.pvar.values():
             v.trace_add("write", lambda *_: self.on_project_change())

@@ -9,6 +9,7 @@ import numpy as np
 
 from notes.custom import custom_note_count, edge_inner, gap_lines, role_of
 from files.lang import tr
+from files.speed import Photo, loops
 from notes.engine import cached_arrays, shape_notes_tracks
 from notes.joined import all_tumours
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
@@ -818,12 +819,17 @@ class RollDrawing:
             return (x0[on].astype(np.int64), x1[on].astype(np.int64), key[on],
                     color * 32 + np.minimum(notes[on, 3], 127) // 4)
 
-        parts = [screen(notes, None, True)]
+        fast = loops()
+        main = self.fast_screen(fast, notes, ax, bx, kb, w, shown, clip) if fast else None
+        parts = [screen(notes, None, True) if main is None else main]
         drafted = self.draft_notes() if only is None else None
         if drafted is not None:
             parts.append(screen(drafted, DRAFT, False))
         x0, x1, key, color = (np.concatenate(v) if len(v) > 1 else v[0] for v in zip(*parts))
         left, right = int(kb) - 2, int(w) + 2
+        if fast and (not len(key) or (key.min() >= 0 and key.max() < app.keys)):
+            return fast.last_on_pixels(*(np.ascontiguousarray(v, np.int64) for v in (x0, x1, key, color)),
+                                       left, right, app.keys, row0, row1)
         x0, x1 = np.maximum(x0, left), np.minimum(x1, right)
         # zoomed out, lots of notes land on the very same pixels: only the last of them shows (it's painted over
         # the others), so the others are left out. Found with a table, for notes up to 3 pixels long (the many).
@@ -841,6 +847,28 @@ class RollDrawing:
         # the outline goes inside the note (user): its last pixel is the one before the note's end / next row
         return x0, row0[key], np.maximum(x1 - 1, x0), row1[key] - 1, color
 
+    def fast_screen(self, fast, notes, ax, bx, kb, w, shown, clip):
+        """note_rects' screen(notes, None, True) by the compiled loop, or None when it can't be used here (keys or
+        owners outside the tables: the NumPy way then)."""
+        app = self.app
+        if len(notes):
+            key, owner = notes[:, 2], notes[:, 5]
+            if key.min() < 0 or key.max() >= len(shown) or owner.min() < 0:
+                return None
+            owners = int(owner.max()) + 1
+        else:
+            owners = 1
+        sel = np.zeros(owners, bool)
+        sel[[s for s in app.sels if 0 <= s < owners]] = True
+        rank = np.empty(owners, np.int64)  # painting order: shapes in their order, the selected ones last
+        rank[~sel] = np.arange(owners - int(sel.sum()))
+        rank[sel] = np.arange(owners - int(sel.sum()), owners)
+        pics = np.asarray(getattr(app, "picture_owners", ()), bool)
+        return fast.screen_notes(np.ascontiguousarray(notes, np.int64), float(ax), float(bx), float(kb), float(w),
+                                 np.ascontiguousarray(shown, bool), bool(clip),
+                                 float(clip[0]) if clip else 0.0, float(clip[2]) if clip else 0.0, rank, owners,
+                                 pics if pics.any() else np.zeros(0, bool), len(SLOT_COLORS), PICTURE_GROUP)
+
     def paint_image(self, w, h, rows, cols, rects):
         """Grid and notes as one picture over the note area."""
         kb, top = int(self.kb_w), int(self.ruler_h)
@@ -854,12 +882,9 @@ class RollDrawing:
         that far, but for these strips (x0, y0, x1, y1 inside the picture), so only they are sent."""
         img = self._img
         ih, iw = img.shape[:2]
-
-        def ppm(a):
-            return b"P6 %d %d 255\n" % (a.shape[1], a.shape[0]) + a.tobytes()
-
         if self.note_img is None or (self.note_img.width(), self.note_img.height()) != (iw, ih):
-            self.note_img = tk.PhotoImage(master=self, width=iw, height=ih)
+            self._photo = Photo(self, iw, ih)
+            self.note_img = self._photo.photo
             moved = self._shown = None
         name = self.note_img.name
         if moved:
@@ -878,7 +903,7 @@ class RollDrawing:
         else:
             strips = [(0, 0, iw, ih)]
         for x0, y0, x1, y1 in strips:
-            self.tk.call(name, "put", ppm(img[y0:y1, x0:x1]), "-format", "ppm", "-to", x0, y0)
+            self._photo.put(img[y0:y1, x0:x1], x0, y0)
         self._shown = img
         self.create_image(int(self.kb_w), int(self.ruler_h), image=self.note_img, anchor="nw")
 
@@ -989,8 +1014,14 @@ class RollDrawing:
                     line[x * 3:x * 3 + 3] = px(c)
             patterns[color] = bytes(line)
         img = np.frombuffer(b"".join(patterns[c] for c in row_color), np.uint8).reshape(ih, iw, 3).copy()
-        at, colors = self.note_pixels(rects, region)
-        img.reshape(-1, 3)[at] = colors
+        fast = loops()
+        if fast:  # (the compiled loops: the colours go straight in, no list of pixels in between)
+            pal = getattr(getattr(self, "app", None), "picture_pal", None)
+            fast.colour_in(img.reshape(-1, 3), self.top_pixels(fast, rects, region),
+                           np.ascontiguousarray(rects[4], np.int64), note_tables(pal)[1])
+        else:
+            at, colors = self.note_pixels(rects, region)
+            img.reshape(-1, 3)[at] = colors
         at = self.ring_pixels(region) if ring else None
         if at is not None:
             img.reshape(-1, 3)[at] = RING_RGB
@@ -1001,7 +1032,30 @@ class RollDrawing:
         region's width + column."""
         kb, top, w, h = region
         iw, ih = w - kb, h - top
-        # Notes: which note is on top at every pixel (the last one painted), and whether that pixel is its outline.
+        fast = loops()
+        if fast:
+            top_px = self.top_pixels(fast, rects, region)
+            idx = np.arange(len(rects[0]))
+        else:
+            top_px, idx = self.top_pixels_numpy(rects, region)
+        at = np.flatnonzero(top_px >= 0)
+        k = top_px[at]
+        pal = getattr(getattr(self, "app", None), "picture_pal", None)  # (the Hz window shares this, no pictures)
+        return at, note_tables(pal)[1][rects[4][idx][k >> 1], k & 1]
+
+    @staticmethod
+    def top_pixels(fast, rects, region):
+        """note_pixels' top_px by the compiled loop (every note numbered, also the ones off the region)."""
+        kb, top, w, h = (int(v) for v in region)
+        top_px = np.full((h - top) * (w - kb), -1, np.int64)
+        fast.note_top(top_px, kb, top, w, h, *(np.ascontiguousarray(v, np.int64) for v in rects[:4]))
+        return top_px
+
+    def top_pixels_numpy(self, rects, region):
+        """(top_px, idx): which note is on top at every pixel of region (the last one painted) as its number in
+        idx (the notes that reach the region) * 2 + 1 if that pixel is its outline; -1 = no note."""
+        kb, top, w, h = region
+        iw, ih = w - kb, h - top
         # Same pixels as a canvas rectangle with a 1-pixel outline: x0..x1 and y0..y1 inclusive.
         x0, y0, x1, y1, color = rects
         cx0, cx1 = np.maximum(x0, kb), np.minimum(x1 + 1, w)
@@ -1040,10 +1094,7 @@ class RollDrawing:
                     np.maximum(grid[a:b, c], edge, out=grid[a:b, c])
                 if d == xb + 1:
                     np.maximum(grid[a:b, d - 1], edge, out=grid[a:b, d - 1])
-        at = np.flatnonzero(top_px >= 0)
-        k = top_px[at]
-        pal = getattr(getattr(self, "app", None), "picture_pal", None)  # (the Hz window shares this, no pictures)
-        return at, note_tables(pal)[1][color[idx][k >> 1], k & 1]
+        return top_px, idx
 
     def draw_path(self, sh, color, width, dash=None):
         if "notes" in sh:  # pasted notes: their box, thin and dashed (the notes are the shape)
