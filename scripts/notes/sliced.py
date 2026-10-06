@@ -28,6 +28,8 @@ CUSTOM_OUTLINE = ("kind", "pts", "strokes", "areas", "round")  # a custom shape'
 VELOCITY = ("vel0", "vel1", "vel_env")
 GATE = ("gate", "range")  # a custom piece's spam gate: the whole's until it's changed (slice shares out a Range)
 BIG = 1 << 30  # a joined curve's piece k has the spots k * BIG + ...
+WHOLE_TOOLS = ("glue", "fx")  # the whole's glue and note tool pages: done on the whole, then the pieces cut (user:
+# slicing keeps the look; the piece's own glue / pages added later go on its part)
 
 
 def keys_of(sh):
@@ -40,6 +42,29 @@ def outline(sh):
 
 def velocity(sh, keys=VELOCITY):
     return {k: json.loads(json.dumps(sh[k])) for k in keys if k in sh}
+
+
+def tools(sh):
+    """sh's glue and note tool pages (for a whole: done before its pieces are cut)."""
+    return velocity(sh, WHOLE_TOOLS)
+
+
+def completed(sh):
+    """A piece that's becoming a shape of its own (its outline changed, Turn into a complete shape): it takes the
+    whole's glue (the boxes inside it) and note tool pages, before its own, so they now work on its own notes.
+    Changes sh; its "cut" is dropped."""
+    cut = sh.pop("cut", None)
+    whole = (cut or {}).get("whole") or {}
+    if whole.get("fx"):
+        sh["fx"] = json.loads(json.dumps(whole["fx"])) + (sh.get("fx") or [])
+    gl = whole.get("glue")
+    if gl and sh.get("glue") is not True:  # (the boxes inside it as it was when cut, as shares of its own box)
+        from notes.engine import cached_arrays
+        from notes.glue import added, for_part, glue_box
+        part = for_part(gl, glue_box(np.concatenate(cached_arrays(whole))),
+                        glue_box(np.concatenate(cached_arrays(cut["was"]))))
+        for b in ([True] if part is True else part or ()):
+            sh["glue"] = added(sh.get("glue"), b)
 
 
 def moved_by(sh):
@@ -64,16 +89,18 @@ def moved(sh, d):
 
 
 def source(sh):
-    """A sliced piece -> (the shape its notes are made from: the whole, moved as far as the piece was, with the
-    piece's other settings; its part; whether its velocities are the whole's), else None."""
+    """A sliced piece -> (the shape its notes are made from: the whole, moved as far as the piece was, with its
+    glue and note tool pages and the piece's other settings; its part; whether its velocities are the whole's), else
+    None. (The piece's own glue / pages go on its part afterwards.)"""
     d = moved_by(sh)
     if d is None:
         return None
     cut = sh["cut"]
     same_vel = cut.get("vel") is not None and velocity(sh) == cut["vel"]
-    own = keys_of(sh) + VELOCITY + (GATE if sh["kind"] == "custom" else ())
+    own = keys_of(sh) + VELOCITY + (GATE if sh["kind"] == "custom" else ()) + WHOLE_TOOLS
     src = {k: v for k, v in sh.items() if k not in own and k != "cut"}
     src.update(outline(moved(cut["whole"], d)))
+    src.update(tools(cut["whole"]))
     src.update(velocity(cut["whole"] if same_vel else sh))
     if sh["kind"] == "custom":
         same_gate = cut.get("gate") is not None and velocity(sh, GATE) == cut["gate"]
@@ -202,7 +229,9 @@ def cut_through(whole, raw, spots, tracks, part, ppq):
         if not hit.any():
             continue
         j = int(np.flatnonzero(hit)[np.argmax(spots[hit])])  # (the one started last along the path)
-        raw = np.concatenate([raw, np.array([[t, raw[j, 1], raw[j, 2]]], raw.dtype)])
+        second = raw[j:j + 1].copy()  # (any other columns, a velocity, go along)
+        second[0, 0] = t
+        raw = np.concatenate([raw, second])
         raw[j, 1] = t
         spots = np.append(spots, c)
         if tracks is not None:
@@ -250,10 +279,13 @@ def cut_in_two(sh, halves, at, scale, mark):
         marks = [moved_mark(m, d) for m in cut.get("marks", [])]
         # (its velocities changed since it was cut: the halves keep their own, cut from its)
         own = cut.get("own_vel") or cut.get("vel") is not None and not same_vel
-        whole = dict(outline(src), **velocity(cut["whole"]))
+        whole = dict(outline(src), **velocity(cut["whole"]), **tools(cut["whole"]))
     else:
         src, part, marks, own = sh, [0.0, None], [], False
-        whole = dict(outline(sh), **velocity(sh))
+        whole = dict(outline(sh), **velocity(sh), **tools(sh))
+        for h in halves:  # (the whole's glue / pages are done before the cut now)
+            for k in WHOLE_TOOLS:
+                h.pop(k, None)
     uc = spot_of(src, at, scale, part)
     mids = []
     for h in halves:
@@ -276,7 +308,7 @@ def rejoined(olds, new):
     got = [source(sh) for sh in olds]
     if not all(got):
         return None
-    wholes = [json.dumps(outline(g[0]), sort_keys=True) for g in got]
+    wholes = [json.dumps(dict(outline(g[0]), **tools(g[0])), sort_keys=True) for g in got]
     if len(set(wholes)) > 1:
         return None
     order = sorted(range(len(olds)), key=lambda i: got[i][1][0])
@@ -290,6 +322,10 @@ def rejoined(olds, new):
         out.update(outline(src))
         if same_vel:
             out.update(velocity(src))
+        if src.get("fx"):  # (its pages first, then the ones the pieces had alike)
+            out["fx"] = json.loads(json.dumps(src["fx"])) + (out.get("fx") or [])
+        if src.get("glue"):
+            out["glue"] = json.loads(json.dumps(src["glue"]))
         return out
     ids = [m["id"] for sh in olds for m in sh["cut"].get("marks", [])]
     marks = []
@@ -297,7 +333,7 @@ def rejoined(olds, new):
         d = moved_by(sh)
         marks += [dict(m, at=[m["at"][0] + d[0], m["at"][1] + d[1]]) for m in sh["cut"].get("marks", [])
                   if ids.count(m["id"]) == 1]  # (the cuts joined up again are gone)
-    whole = dict(outline(src), **velocity(olds[0]["cut"]["whole"]))
+    whole = dict(outline(src), **velocity(olds[0]["cut"]["whole"]), **tools(olds[0]["cut"]["whole"]))
     out = dict(new, cut={"whole": whole, "was": outline(new), "part": [parts[0][0], parts[-1][1]], "vel": None,
                          "marks": marks})
     if same_vel:
@@ -332,10 +368,14 @@ def slice_in_two(sh, halves, a, b):
         marks = [moved_mark(m, d) for m in cut.get("marks", [])]
         part = [[b0 + d[0], k0 + d[1], db, dk, sd] for b0, k0, db, dk, sd in part]  # (where its cuts are now)
         own = cut.get("own_vel") or cut.get("vel") is not None and not same_vel
-        whole = dict(outline(src), **velocity(cut["whole"]), **velocity(src, GATE))  # (its gate as it makes notes)
+        whole = dict(outline(src), **velocity(cut["whole"]), **velocity(src, GATE),  # (its gate as it makes notes)
+                     **tools(cut["whole"]))
     else:
         part, marks, own = [], [], False
-        whole = dict(outline(sh), **velocity(sh), **velocity(sh, GATE))
+        whole = dict(outline(sh), **velocity(sh), **velocity(sh, GATE), **tools(sh))
+        for h in halves:  # (the whole's glue / pages are done before the cut now)
+            for k in WHOLE_TOOLS:
+                h.pop(k, None)
     polys = [np.asarray(st, float) for st in cached_strokes(sh)]
     ss = sorted({round(s, 9) for p in polys for _, s in crossings(p, a, b, whole_line=True)})
     a, b = np.asarray(a, float), np.asarray(b, float)
@@ -430,7 +470,7 @@ def clean_cut(c):
     except (KeyError, TypeError, ValueError, IndexError, AttributeError):
         return None
     out = {"whole": dict(outline(whole), **velocity(whole), **(velocity(whole, GATE) if whole["kind"] == "custom"
-                                                               else {})),
+                                                               else {}), **tools(whole)),
            "was": outline(was), "part": part, "vel": snaps["vel"], "marks": marks}
     if whole["kind"] == "custom":
         out["gate"] = snaps["gate"]

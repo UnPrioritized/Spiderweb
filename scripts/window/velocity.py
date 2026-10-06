@@ -11,6 +11,7 @@ import numpy as np
 
 from files.lang import tr
 from notes.envelope import env_at, env_values, paint_env, tidy_env, velocity_env
+from notes.fx import with_velocity
 from notes.pattern import loop_points
 from roll.roll_shared import (CTRL, DRAFT_COLOR, SHIFT, SELECTED_COLOR, SLOT_COLORS, cached_path, fade,
                               grab_while_panning)
@@ -301,8 +302,10 @@ class VelocityPane(tk.Canvas):
             self.request_redraw()
 
     def commit(self, drawn, owners, cv=None):
-        """Write the drawn velocities into each owner shape. Returns {shape: (dict, envelope, before, span)};
-        bending a curve again (cv) starts over from the velocities it had before the curve."""
+        """Write the drawn velocities into each owner shape. Returns {shape: (dict, envelope, before, span, its note
+        tool pages before)}; bending a curve again (cv) starts over from the velocities it had before the curve. A
+        shape with note tool pages also gets them as a step after its pages (they replace the pages' velocities
+        there, fx.py)."""
         app = self.app
         bases = cv["done"] if cv else None
         dus = [p[0] for p in drawn]
@@ -310,6 +313,7 @@ class VelocityPane(tk.Canvas):
         for i in owners:
             sh = app.shapes[i]
             base = bases[i][2] if bases else velocity_env(sh)
+            fx = bases[i][4] if bases else sh.get("fx")
             bs = [b for b, _ in cached_path(sh)]
             lo, hi = min(bs), max(bs)
             if hi > lo:
@@ -317,11 +321,14 @@ class VelocityPane(tk.Canvas):
                 env = tidy_env(paint_env(base, pts))
             else:
                 env = [[0.0, float(max(1, min(127, round(env_at(drawn, dus, lo)))))]]  # every note is at the start
+                pts = [[0.0, env[0][1]], [1.0, env[0][1]]]
             sh["vel_env"] = env
             sh.pop("own_vel", None)  # pasted notes: their own velocities are replaced
             us = [u for u, _ in env]
             sh["vel0"], sh["vel1"] = (max(1, min(127, round(env_at(env, us, u)))) for u in (0.0, 1.0))
-            done[i] = (sh, env, base, (lo, hi))
+            if fx:
+                sh["fx"] = with_velocity(fx, pts)
+            done[i] = (sh, env, base, (lo, hi), fx)
         if cv is not None:
             cv["done"] = done
         app.shapes_changed()
@@ -334,7 +341,7 @@ class VelocityPane(tk.Canvas):
         if cv is None or self.app.vel_tool.get() != cv["kind"]:
             return None
         shapes = self.app.shapes
-        for i, (sh, env, _, span) in cv["done"].items():
+        for i, (sh, env, _, span, _) in cv["done"].items():
             if i >= len(shapes) or shapes[i] is not sh or sh.get("vel_env") is not env:
                 break
             bs = [b for b, _ in cached_path(sh)]

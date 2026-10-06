@@ -21,11 +21,12 @@ from notes.hzbass import clean_hz, velocity_factor
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
-from notes.chop import apply_chop, clean_chop
-from notes.claw import apply_claw, clean_claw
+from notes.chop import apply_chop
+from notes.claw import apply_claw
+from notes.fx import clean_fx, mirrored, notes_box, toggled, velocities
 from notes.gaterange import clean_range
 from notes.glue import apply_glue, clean_glue, glue_box
-from notes.strum import apply_strum, clean_strum
+from notes.strum import apply_strum
 from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
@@ -127,15 +128,9 @@ def clean_shape(sh):
     gl = clean_glue(sh.get("glue"))
     if gl:  # touching notes on a key made one (glue.py)
         out["glue"] = gl
-    ch = clean_chop(sh.get("chop"))
-    if ch:  # notes cut into a rhythm (chop.py)
-        out["chop"] = ch
-    cl = clean_claw(sh.get("claw"))
-    if cl:  # notes thinned out / moved after they're made (claw.py)
-        out["claw"] = cl
-    sm = clean_strum(sh.get("strum"))
-    if sm:  # chords strummed after that (strum.py)
-        out["strum"] = sm
+    fx = clean_fx(sh)
+    if fx:  # Chop / Claw machine / Strum pages, flips and velocities after them (fx.py)
+        out["fx"] = fx
     cy = clean_cycle(sh.get("cycle"))
     if cy:  # "Colours" (custom.py)
         out["cycle"] = cy
@@ -218,7 +213,7 @@ def clean_shape(sh):
             pic = clean_picture(sh.get("picture"))
             if pic:  # a picture made into notes (picture.py): the notes are its finished colours, track = slot
                 out["picture"] = pic
-                for k in ("own_vel", "glue", "chop", "claw", "strum"):  # (no note tools on a picture, user)
+                for k in ("own_vel", "glue", "fx"):  # (no note tools on a picture, user)
                     out.pop(k, None)
     if out["kind"] == "arc":  # start, a point it passes through, end; k = beats per key on screen (arc.py)
         if len(out["pts"]) != 3:
@@ -356,16 +351,63 @@ def shape_notes(sh, ppq, keys=128):
 def shape_notes_tracks(sh, ppq, keys=128):
     """shape_notes, and for pasted notes which track each note came from, for a custom shape made of other shapes
     which of them (one number per row; None for every other shape)."""
+    done = {}
+
+    def get(s):
+        key = json.dumps(s, sort_keys=True)
+        if key not in done:
+            done[key] = fx_notes(s, ppq, keys, get)
+        return done[key]
+    return get(sh)
+
+
+def fx_notes(sh, ppq, keys, get):
+    """shape_notes_tracks' work: the notes, then its glue, then its note tool pages one after another (fx.py).
+    get(shape) = another shape's notes and tracks (remembered by the caller: the steps before the last one, the
+    notes flipped back). A hidden "_m" = the notes made flipped along those axes (the steps before a flip)."""
     if "picture" in sh:  # (no glue / chop / claw / strum on a picture: its notes are its picture, user)
         return _notes_tracks(sh, ppq, keys)
-    notes, tracks = with_glue(*_notes_tracks(sh, ppq, keys), sh, ppq)
-    notes, tracks = with_chop(notes, tracks, sh, ppq)
-    notes, tracks = with_claw(notes, tracks, sh.get("claw"), ppq)
-    return with_strum(notes, tracks, sh.get("strum"), ppq)
+    fx = sh.get("fx")
+    if fx:
+        last = fx[-1]
+        rest = dict(sh, fx=fx[:-1]) if len(fx) > 1 else {k: v for k, v in sh.items() if k != "fx"}
+        if last["tool"] == "flip":
+            rest["_m"] = toggled(sh.get("_m"), last["axis"])
+            if not rest["_m"]:
+                del rest["_m"]
+            notes, tracks = get(rest)  # (flipped within their own box: they stay where they were)
+            return mirrored(notes, [last["axis"]], notes_box(notes)), tracks
+        return fx_step(*get(rest), last, sh, ppq)
+    if sh.get("_m"):
+        notes, tracks = get(bare_of(sh))
+        return mirrored(notes, sh["_m"], notes_box(notes)), tracks
+    return with_glue(*_notes_tracks(sh, ppq, keys), sh, ppq)
+
+
+def bare_of(sh):
+    """sh without its note tool pages (its notes and glue only)."""
+    return {k: v for k, v in sh.items() if k not in ("fx", "_m")}
+
+
+def fx_step(notes, tracks, step, sh, ppq):
+    """The notes after one step of sh["fx"] (fx.py)."""
+    if step.get("off"):
+        return notes, tracks
+    tool = step["tool"]
+    if tool == "chop":
+        return with_chop(notes, tracks, dict(sh, chop=step["cfg"]), ppq)
+    if tool == "claw":
+        return with_claw(notes, tracks, step["cfg"], ppq)
+    if tool == "strum":
+        return with_strum(notes, tracks, step["cfg"], ppq)
+    if tool == "vel":  # (over the shape's time, like its velocity line)
+        t = np.concatenate(cached_arrays(sh))[:, 0] * ppq
+        return velocities(notes, step["pts"], float(t.min()), float(t.max())), tracks
+    return notes, tracks
 
 
 def with_glue(notes, tracks, sh, ppq):
-    """shape_notes_tracks' notes and tracks after the shape's glue (glue.py; it comes first, before the claw)."""
+    """shape_notes_tracks' notes and tracks after the shape's glue (glue.py; it comes first, before any page)."""
     glue = sh.get("glue")
     if not glue or not len(notes):
         return notes, tracks
@@ -377,7 +419,7 @@ def with_glue(notes, tracks, sh, ppq):
 
 
 def with_chop(notes, tracks, sh, ppq):
-    """The same after the shape's chop (chop.py; after the glue, before the claw). A Fill shape's touching notes on
+    """The same after a Chop page (chop.py; sh["chop"] = its settings). A Fill shape's touching notes on
     a key (its outline notes, colour borders) follow one rhythm; spam notes and others each start their own."""
     chop = sh.get("chop")
     if chop and sh["kind"] == "custom" and sh.get("fill") == "fill" and "notes" not in sh:
@@ -388,12 +430,12 @@ def with_chop(notes, tracks, sh, ppq):
 
 
 def with_claw(notes, tracks, claw, ppq):
-    """shape_notes_tracks' notes and tracks after the shape's claw (claw.py; None = none)."""
+    """shape_notes_tracks' notes and tracks after a Claw page (claw.py; None = none)."""
     return _after(apply_claw, notes, tracks, claw, ppq)
 
 
 def with_strum(notes, tracks, strum, ppq):
-    """The same after the shape's strum (strum.py; it comes after the claw)."""
+    """The same after a Strum page (strum.py)."""
     return _after(apply_strum, notes, tracks, strum, ppq)
 
 
@@ -406,9 +448,42 @@ def _after(fn, notes, tracks, settings, ppq):
     return got[:, :-1], got[:, -1]
 
 
+def env_velocities(env, starts, t_lo, t_hi):
+    """Velocities of notes starting at starts (ticks) from a velocity line env over t_lo .. t_hi."""
+    if len({v for _, v in env}) == 1:  # the same velocity everywhere
+        return np.full(len(starts), max(1, min(127, round(env[0][1]))), np.int64)
+    frac = np.clip((starts - t_lo) / (t_hi - t_lo), 0, 1) if t_hi > t_lo else np.zeros(len(starts))
+    return np.clip(np.round(env_values(env, frac)), 1, 127).astype(np.int64)  # (rounds halves to even, like round)
+
+
+def whole_tools(whole, raw, spots, tracks, ppq):
+    """A line piece's whole's notes (raw (start, end, key), each one's spot, tracks) with its velocities, after its
+    glue and note tool pages: (start, end, key, velocity) rows, their spots, tracks."""
+    t = dedupe(np.concatenate(cached_arrays(whole)))[:, 0] * ppq
+    vel = env_velocities(velocity_env(whole), raw[:, 0], float(t.min()), float(t.max()))
+    who = tracks if tracks is not None else np.zeros(len(raw), np.int64)
+    a = np.column_stack([raw, vel, np.arange(len(raw)), who]).astype(np.int64)  # (spots ride along as row numbers)
+    if whole.get("glue") and len(a):
+        a = apply_glue(a, whole["glue"], glue_box(np.concatenate(cached_arrays(whole))), ppq, True)
+    a = run_steps(a, whole.get("fx") or [], whole, ppq)
+    return a[:, :4], spots[a[:, 4]], a[:, 5] if tracks is not None else None
+
+
+def run_steps(a, fx, sh, ppq, m=()):
+    """Notes a (start, end, key, velocity, then columns riding along) after the steps fx of sh (as fx_notes does them;
+    m: a's flipped along these axes first)."""
+    if not fx:
+        return mirrored(a, m, notes_box(a)) if m else a
+    last = fx[-1]
+    if last["tool"] == "flip":
+        got = run_steps(a, fx[:-1], sh, ppq, toggled(m, last["axis"]))
+        return mirrored(got, [last["axis"]], notes_box(got))
+    return fx_step(run_steps(a, fx[:-1], sh, ppq, m), None, last, sh, ppq)[0]
+
+
 def _notes_tracks(sh, ppq, keys):
     if sh["kind"] == "custom" and sh.get("cut"):  # cut by the Slice tool: the whole's notes on its side (sliced.py)
-        got = piece_notes(sh, ppq, keys, _notes_tracks)
+        got = piece_notes(sh, ppq, keys, shape_notes_tracks)  # (the whole's glue / pages done first)
         if got is not None:
             return got
     end_dot = sh.get("end_dot", False)
@@ -463,9 +538,15 @@ def _notes_tracks(sh, ppq, keys):
         raw, spots = raw[keep], spots[keep]
         if cycling(sh) and len(raw):
             tracks = cycle_turns(sh, raw, ppq)
+        if sh.get("glue") or sh.get("fx"):  # the whole's glue / note tool pages first, on all its notes (sliced.py)
+            raw, spots, tracks = whole_tools(sh, raw, spots, tracks, ppq)
         raw, spots, tracks = cut_through(sh, raw, spots, tracks, part, ppq)
         mine = in_part(spots, part)
         raw, tracks = raw[mine], tracks[mine] if tracks is not None else None
+        if raw.shape[1] == 4:  # (velocities made by the whole's pages: kept, unless the piece has its own)
+            if same_vel:
+                return raw, tracks
+            raw = raw[:, :3]
     if own is not None:
         own = own[keep]
         if sh.get("own_vel"):  # (the same note in two tracks stays twice: they can go to different channels)
@@ -480,11 +561,7 @@ def _notes_tracks(sh, ppq, keys):
         raw = unique_rows(raw)
         if cycling(sh) and len(raw):  # "Colours" on a line / funnel
             tracks = cycle_turns(sh, raw, ppq)
-    if len({v for _, v in env}) == 1:  # the same velocity everywhere
-        vel = np.full(len(raw), max(1, min(127, round(env[0][1]))), np.int64)
-    else:
-        frac = np.clip((raw[:, 0] - t_lo) / (t_hi - t_lo), 0, 1) if t_hi > t_lo else np.zeros(len(raw))
-        vel = np.clip(np.round(env_values(env, frac)), 1, 127).astype(np.int64)  # (rounds halves to even, like round)
+    vel = env_velocities(env, raw[:, 0], t_lo, t_hi)
     if sh["kind"] == "custom" and own is None and (sh.get("hz") or {}).get("tones"):  # Hz bass velocity effects
         factor = velocity_factor(sh, ppq, raw[:, 0], raw[:, 2])
         if factor is not None:

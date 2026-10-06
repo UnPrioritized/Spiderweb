@@ -81,10 +81,11 @@ Files (the scripts live in scripts/, one subfolder per group):
     envelope.py      velocity envelopes
     slice.py         Slice tool maths: where a line crosses shapes, a custom shape cut in two halves
     gaterange.py     spam gate Range: the gate going from one to another across a shape, along a graph
-    chop.py          chop: notes cut into a repeating rhythm (after the glue, before the claw)
+    chop.py          chop: notes cut into a repeating rhythm
     glue.py          glue: touching notes on a key made one long note (all of a shape or in boxes), first
     claw.py          the claw machine: a shape's notes thinned out / cut / bent after they're made
-    strum.py         strum: each chord's notes start one after another (and end, velocity), after the claw
+    strum.py         strum: each chord's notes start one after another (and end, velocity)
+    fx.py            a shape's Claw machine / Strum / Chop pages in order, flips and velocities after them
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes
     picture.py       image to notes: a picture file -> a grid of up to 16 colours (picking, blending, details)
   files/            saving, MIDI, sound

@@ -20,16 +20,17 @@ from window import big_ask
 from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
-from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, cached_arrays, point_names, render, shape_notes_tracks,
-                          with_chop, with_claw, slot_track_channel, with_glue, with_strum)
+from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, cached_arrays, fx_notes, point_names, render,
+                          slot_track_channel)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
+from notes.fx import flipped as fx_flipped, with_velocity
 from notes.gaterange import flipped_range, turned_range
 from notes.glue import added as glue_added, flipped as glue_flipped, glue_box, to_shares as glue_shares, \
     turned as glue_turned
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
 from notes.polygon import POLYGON_DEFAULTS
-from notes.sliced import fresh_marks, moved_by
+from notes.sliced import completed, fresh_marks, moved_by
 from notes.smooth import SMOOTH_DEFAULT
 from notes.text import TEXT_DEFAULTS
 from files.mathexpr import calc, calc_int, fmt
@@ -688,6 +689,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             t[key] = value
             t.pop("vel_env", None)
             t.pop("own_vel", None)  # pasted notes: their own velocities are replaced
+            if t.get("fx"):  # (and those of its note tool pages, fx.py)
+                t["fx"] = with_velocity(t["fx"], [[0.0, t["vel0"]], [1.0, t["vel1"]]])
         self.env_note.pack_forget()
         self.shapes_changed()
 
@@ -790,28 +793,14 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         return self.notes_tracks(sh)[0]
 
     def notes_tracks(self, sh):
-        """shape_notes_tracks, remembered. A strum / claw goes on top of the notes remembered without it (trying
-        their settings doesn't make the shape's notes again)."""
+        """shape_notes_tracks, remembered. Each note tool page goes on top of the notes remembered without it
+        (trying a page's settings doesn't make the notes before it again)."""
         key = (json.dumps(sh, sort_keys=True), self.ppq, self.keys)
         if key not in self._notes_cache:
+            got = fx_notes(sh, self.ppq, self.keys, self.notes_tracks)
             if len(self._notes_cache) > 500:
                 self._notes_cache.clear()
-            if "picture" in sh:  # (no note tools on a picture)
-                self._notes_cache[key] = shape_notes_tracks(sh, self.ppq, self.keys)
-            elif sh.get("strum"):
-                notes, tracks = self.notes_tracks({k: v for k, v in sh.items() if k != "strum"})
-                self._notes_cache[key] = with_strum(notes, tracks, sh["strum"], self.ppq)
-            elif sh.get("claw"):
-                notes, tracks = self.notes_tracks({k: v for k, v in sh.items() if k != "claw"})
-                self._notes_cache[key] = with_claw(notes, tracks, sh["claw"], self.ppq)
-            elif sh.get("chop"):
-                notes, tracks = self.notes_tracks({k: v for k, v in sh.items() if k != "chop"})
-                self._notes_cache[key] = with_chop(notes, tracks, sh, self.ppq)
-            elif sh.get("glue"):
-                notes, tracks = self.notes_tracks({k: v for k, v in sh.items() if k != "glue"})
-                self._notes_cache[key] = with_glue(notes, tracks, sh, self.ppq)
-            else:
-                self._notes_cache[key] = shape_notes_tracks(sh, self.ppq, self.keys)
+            self._notes_cache[key] = got
             self._notes_worked += 1
         return self._notes_cache[key]
 
@@ -849,7 +838,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 self.split_box.pack_forget()
         for sh in self.shapes:  # a piece whose outline was changed is a shape of its own now (sliced.py)
             if "cut" in sh and moved_by(sh) is None:
-                del sh["cut"]
+                completed(sh)  # (with the whole's glue / note tool pages)
         got = [self.notes_tracks(sh) for sh in self.shapes]
         # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
         # merged into the last (pasted notes keep their tracks)
@@ -1177,6 +1166,12 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 sh["vel0"], sh["vel1"] = sh["vel1"], sh["vel0"]
             if sh.get("glue"):  # (its boxes are shares of the shape's box)
                 sh["glue"] = glue_flipped(sh["glue"], sideways)
+            if sh.get("fx"):  # (its note tool pages' result is flipped too, fx.py)
+                fx = fx_flipped(sh["fx"], "time" if sideways else "keys")
+                if fx:
+                    sh["fx"] = fx
+                else:
+                    del sh["fx"]
             for k in ("range", "range_kept"):  # (a spam gate range runs the other way, the one kept while off too)
                 if sh.get(k):
                     sh[k] = flipped_range(sh[k], sideways)

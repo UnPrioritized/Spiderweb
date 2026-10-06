@@ -1,6 +1,6 @@
 """Strum: the notes of each chord (notes starting on the same tick) start one after another, like a hand strumming
 strings, the way the strum tool of a well-known piano roll does it (measured from its output). The shape stays as
-drawn; sh["strum"] = the settings (STRUM_DEFAULTS).
+drawn; a page's settings (fx.py) = STRUM_DEFAULTS' keys.
 
 One rule for start times, end times and velocities: one note of the chord stays as it is (the anchor), the k-th
 note away from it changes by g + g*r + ... + g*r^(k-1), g = the strength, r from the tension t (-100 .. 100):

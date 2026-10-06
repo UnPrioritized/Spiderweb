@@ -212,7 +212,7 @@ class LiveKeys:
             new["fill"] = "spam"
             hz = win.new_hz(self.bpm)
             lo, hi = app.hz_defaults["lo"], app.hz_defaults["hi"]
-        for k in ("strum", "claw", "chop", "glue", "range"):
+        for k in ("fx", "glue", "range"):
             new.pop(k, None)
         new["hz"] = dict(hz, tones=[tone], **copy.deepcopy(win.fx_settings()))
         new["pts"] = box_frame(0.0, lo, max(MIN_LEN, sound_span(new["hz"])), hi)

@@ -176,7 +176,7 @@ class RangeGraph(tk.Toplevel):
 
     def spread(self):
         """How many notes get each gate from From to To (the first shape's; others' gates outside left out), or None
-        while the Range is off. Counted without Strum / Claw (they move notes, not their gates)."""
+        while the Range is off. Counted without Strum / Claw pages (they move notes, not their gates)."""
         if not self.on_var.get():
             return None
         a, b = self.gates()
@@ -185,7 +185,10 @@ class RangeGraph(tk.Toplevel):
         for t in self.tgts:
             if t is self.app.custom_defaults or not t.get("range") or t.get("fill") not in SPAM_FILLS:
                 continue
-            bare = {k: v for k, v in t.items() if k not in ("strum", "claw")}
+            bare = {k: v for k, v in t.items() if k != "fx"}
+            fx = [st for st in t.get("fx") or () if st["tool"] not in ("strum", "claw")]
+            if any(st["tool"] == "chop" for st in fx):
+                bare["fx"] = fx
             notes = self.app.notes_of(bare)
             if not len(notes):
                 continue

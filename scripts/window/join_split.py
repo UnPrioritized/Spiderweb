@@ -16,7 +16,7 @@ from notes.bezier import anchor_count, nearest, split
 from notes.engine import cached_arrays, shape_path
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom
-from notes.sliced import cut_in_two, keep_velocity, moved_by, rejoined, slice_in_two
+from notes.sliced import completed, cut_in_two, keep_velocity, moved_by, rejoined, slice_in_two
 from notes.smooth import smooth_path
 from notes.joined import (custom_groups, join_shapes, join_velocity, piece_velocity, sections, split_at, split_custom,
                           split_pieces)
@@ -33,7 +33,10 @@ def span(sh):
 
 
 def part_glue(part, whole):
-    """A piece cut from whole keeps the glue boxes where they were in the song (only what's inside it)."""
+    """A piece cut from whole keeps the glue boxes where they were in the song (only what's inside it). (A sliced
+    piece of a whole shape: none, the whole's glue is done before the cut, sliced.py.)"""
+    if part.get("cut") and not whole.get("cut"):
+        return
     if isinstance(whole.get("glue"), list):
         got = glue_for_part(whole["glue"], glue_box(np.concatenate(cached_arrays(whole))),
                             glue_box(np.concatenate(cached_arrays(part))))
@@ -195,7 +198,7 @@ class JoinSplit:
             return
         self.push_undo(name=tr("join_split.make_complete"))
         for i in got:
-            del self.shapes[i]["cut"]
+            completed(self.shapes[i])
         self.shapes_changed()
         self.status.config(text=tr("join_split.made_complete") if len(got) == 1 else
                            tr("join_split.made_complete_n", n=len(got)))

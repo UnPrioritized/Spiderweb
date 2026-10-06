@@ -71,12 +71,11 @@ def losses(shapes):
     return out + shared_settings(shapes)[1]
 
 
-NOTE_SETTINGS = (("glue", "convert.glue"), ("chop", "chop.window_title"), ("claw", "claw.window_title"),
-                 ("strum", "strum.window_title"), ("cycle", "colours.colours"))
+NOTE_SETTINGS = (("glue", "convert.glue"), ("fx", "convert.fx"), ("cycle", "colours.colours"))
 
 
 def shared_settings(shapes):
-    """The note settings (glue, chop, claw, strum, Colours) a shape made of these keeps: the ones they all have alike (glue
+    """The note settings (glue, note tool pages, Colours) a shape made of these keeps: the ones they all have alike (glue
     only on whole shapes: boxes are shares of each shape's own box), and the sentence saying which are dropped
     (a list with one sentence, or empty)."""
     keep, lost = {}, []

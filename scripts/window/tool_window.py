@@ -1,8 +1,10 @@
-"""What the Claw machine and Strum windows share: a window that changes the selected shapes' notes through one
-setting of theirs (sh[KEY]), shown live on the piano roll. Accept keeps the change (one undo step), X / Esc puts the
-notes back, Reset sets everything back to "does nothing". The main window can be used while it's open: the window
-follows the selection, and before anything else changes there, the setting being tried out is kept as its own undo
-step (settle). Also the round Knob both use."""
+"""What the Claw machine, Strum and Chop windows share: a window that changes the selected shapes' notes through
+pages of theirs (sh["fx"], notes/fx.py), shown live on the piano roll. A row on top: one tab per page of this tool
+(numbered by its place among all the shape's pages) and "+", picked when the window opens: a new page, added as
+soon as a setting changes (user, 2026-10-06). Accept keeps the change (one undo step), X / Esc puts the notes back,
+Reset sets the page back to "does nothing". The main window can be used while it's open: the window follows the
+selection, and before anything else changes there, the change being tried out is kept as its own undo step
+(settle). Also the round Knob both use."""
 
 import json
 import math
@@ -11,7 +13,15 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
-from window.widgets import LocalUndo
+from notes.fx import copied, is_page, pages
+from window.widgets import LocalUndo, Tooltip
+
+NEW = "new"  # the "+" tab
+
+
+def num(n):
+    """A page's number as shown on its tab: ① .. ⑳, then (21) ..."""
+    return chr(0x2460 + n - 1) if 1 <= n <= 20 else f"({n})"
 
 ORANGE = "#f5a623"
 GREEN = "#7cc21b"
@@ -110,11 +120,11 @@ class Knob(tk.Canvas):
 
 
 class ToolWindow(tk.Toplevel):
-    """The shared part. Each window sets KEY (the shape setting; also the start of its text keys: KEY.window_title,
-    KEY.nothing, KEY.shape, KEY.n_shapes, and KEY.step = the undo step's name), DEFAULTS, ATTR (the app's
-    attribute holding the open window), POS (the app's attribute remembering where it was), and has
-    clean(settings) -> the setting a shape keeps (None = changes nothing), build(box) (its widgets; row 0 is taken)
-    and show() (the widgets show self.cfg). put(key, value, done) = a setting changed."""
+    """The shared part. Each window sets KEY (the tool: a page's "tool"; also the start of its text keys:
+    KEY.window_title, KEY.nothing, KEY.shape, KEY.n_shapes, KEY.tab (a page's tab), and KEY.step = the undo step's
+    name), DEFAULTS, ATTR (the app's attribute holding the open window), POS (the app's attribute remembering where
+    it was), and has clean(settings) -> the page's settings (None = changes nothing), build(box) (its widgets; row 0
+    is taken) and show() (the widgets show self.cfg). put(key, value, done) = a setting changed."""
 
     KEY, ATTR, POS, DEFAULTS = "", "", "", {}
 
@@ -139,13 +149,18 @@ class ToolWindow(tk.Toplevel):
         if getattr(app, self.POS):
             self.geometry(getattr(app, self.POS))
         self.cfg = dict(self.DEFAULTS)
+        self.at = None  # the page shown: {shape number: its place in the shape's fx}, None = "+" (a new page)
         self.late, self.took = None, 0.0  # (preview)
         box = ttk.Frame(self, padding=10)
         box.pack(fill="both", expand=True)
-        self.what = ttk.Label(box, text="", foreground="#777")
-        self.what.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        top = ttk.Frame(box)
+        top.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        self.what = ttk.Label(top, text="", foreground="#777")
+        self.what.pack(anchor="w")
+        self.build_tabs(top)
         self.build(box)
-        self.undo = LocalUndo(self, lambda: json.dumps(self.cfg, sort_keys=True), self.put_state)
+        self.targets = []
+        self.undo = LocalUndo(self, self.undo_state, self.put_state)
         self.bind("<Control-Key>", lambda e: "break")  # (the piano roll's shortcuts wait until it's closed)
         self.bind("<F1>", lambda e: (app.open_help(self.KEY), "break")[1])
         self.bind("<Escape>", lambda e: self.cancel())
@@ -164,23 +179,211 @@ class ToolWindow(tk.Toplevel):
     def clean(self, cfg):
         raise NotImplementedError
 
+    # ---- the pages
+
+    def build_tabs(self, parent):
+        row = ttk.Frame(parent)
+        row.pack(fill="x", pady=(6, 0))
+        self.tabs = ttk.Frame(row)
+        self.tabs.pack(side="left")
+        self.tab = tk.StringVar(value=NEW)
+        self.differ = ttk.Label(row, text=tr("tool_window.differ"), foreground="#777")
+        self.remove_button = ttk.Button(row, text=tr("tool_window.remove"), command=self.remove_page)
+        self.remove_button.pack(side="right")
+        Tooltip(self.remove_button, tr("tool_window.tip_remove"))
+        self.on = tk.BooleanVar(value=True)
+        self.on_box = ttk.Checkbutton(row, text=tr("tool_window.on"), variable=self.on, command=self.on_off)
+        self.on_box.pack(side="right", padx=(0, 6))
+        Tooltip(self.on_box, tr("tool_window.tip_on"))
+        self.shown_tabs = None
+
+    def first_fx(self):
+        """The first selected shape's steps (its pages are the tabs)."""
+        return (self.app.shapes[self.targets[0]].get("fx") or []) if self.targets else []
+
+    def same(self):
+        """Do the selected shapes all have the same steps? (Then their pages can be picked; else only "+".)"""
+        fx = [json.dumps(self.app.shapes[i].get("fx") or []) for i in self.targets]
+        return len(set(fx)) <= 1
+
+    def order_text(self, fx):
+        """Every step of a shape in order, for the tabs' tooltip."""
+        parts, n = [], 0
+        for st in fx:
+            if is_page(st):
+                n += 1
+                parts.append(tr(f"{st['tool']}.tab", n=num(n)) + (tr("tool_window.off_mark") if st.get("off") else ""))
+            else:
+                parts.append(tr(f"tool_window.{st['tool']}" + (f"_{st['axis']}" if st["tool"] == "flip" else "")))
+        return tr("tool_window.order", steps=" → ".join(parts))
+
+    def sync_tabs(self):
+        """The tab row shows the first shape's pages of this tool (only when the selected shapes have the same)."""
+        fx = self.first_fx() if self.same() else []
+        tabs = []
+        n = 0
+        for k, st in enumerate(fx):
+            if is_page(st):
+                n += 1
+                if st["tool"] == self.KEY:
+                    tabs.append((k, tr(f"{self.KEY}.tab", n=num(n)), st.get("off", False)))
+        if self.at is None:
+            self.tab.set(NEW)
+        else:
+            self.tab.set(str(self.at[self.targets[0]]))
+        shown = (tabs, self.order_text(fx), self.same())
+        if shown != self.shown_tabs:
+            self.shown_tabs = shown
+            for w in self.tabs.winfo_children():
+                w.destroy()
+            for k, text, off in tabs:
+                b = ttk.Radiobutton(self.tabs, text=text + (tr("tool_window.off_mark") if off else ""),
+                                    variable=self.tab, value=str(k), style="Toolbutton",
+                                    command=lambda k=k: self.pick_page(k))
+                b.pack(side="left", padx=(0, 2))
+                b.bind("<ButtonPress-3>", lambda e, k=k: self.page_menu(e, k))
+                Tooltip(b, shown[1])
+            b = ttk.Radiobutton(self.tabs, text="+", variable=self.tab, value=NEW, style="Toolbutton", width=3,
+                                command=self.new_page)
+            b.pack(side="left")
+            Tooltip(b, tr("tool_window.tip_new") + ("\n\n" + shown[1] if fx else ""))
+            if self.same():
+                self.differ.pack_forget()
+            else:
+                self.differ.pack(side="left", padx=(8, 0))
+        page = self.page_step()
+        self.on_box.state(["!disabled"] if page else ["disabled"])
+        self.remove_button.state(["!disabled"] if page else ["disabled"])
+        if self.on.get() != (not (page or {}).get("off", False)):
+            self.on.set(not (page or {}).get("off", False))
+
+    def page_step(self, i=None):
+        """The page shown, on shape i (default: the first), or None ("+")."""
+        if self.at is None or not self.targets:
+            return None
+        i = self.targets[0] if i is None else i
+        fx = self.app.shapes[i].get("fx") or []
+        k = self.at.get(i)
+        return fx[k] if k is not None and k < len(fx) else None
+
+    def pick_page(self, k):
+        """A tab clicked: its page's settings show and change from now on (the same page on every selected shape)."""
+        self.catch_up()
+        self.at = {i: k for i in self.targets}
+        st = self.page_step()
+        self.cfg = dict(self.DEFAULTS, **copied(st.get("cfg") or {}))
+        self.show()
+        self.sync_tabs()
+        self.keep_page()
+
+    def new_page(self):
+        """"+": the settings start from the defaults; a page is added once one changes."""
+        self.catch_up()
+        self.at = None
+        self.cfg = dict(self.DEFAULTS)
+        self.show()
+        self.sync_tabs()
+        self.keep_page()
+
+    def keep_page(self):
+        """Ctrl+Z inside goes back from the page picked now (not from the one shown when the last change was made):
+        picking isn't a step of its own."""
+        u = self.undo
+        if json.loads(u.states[u.at])["fx"] == json.loads(self.undo_state())["fx"]:
+            u.states[u.at] = self.undo_state()
+
+    def page_menu(self, e, k):
+        self.pick_page(k)
+        m = tk.Menu(self, tearoff=0)
+        off = self.page_step().get("off", False)
+        m.add_command(label=tr("tool_window.turn_on") if off else tr("tool_window.turn_off"), command=self.flip_on)
+        m.add_command(label=tr("tool_window.remove"), command=self.remove_page)
+        m.tk_popup(e.x_root, e.y_root)
+
+    def flip_on(self):
+        self.on.set(not self.on.get())
+        self.on_off()
+
+    def on_off(self):
+        """The On tick: the page shown switched on / off (kept, doing nothing while off)."""
+        if self.at is None:
+            return
+        self.change_steps(lambda fx, k: fx[:k] + [dict({a: b for a, b in fx[k].items() if a != "off"},
+                                                       **({} if self.on.get() else {"off": True}))] + fx[k + 1:])
+        self.undo.mark()
+
+    def remove_page(self):
+        """Remove: the page shown taken off the selected shapes; "+" is picked."""
+        if self.at is None:
+            return
+        self.change_steps(lambda fx, k: fx[:k] + fx[k + 1:])
+        self.at = None
+        self.cfg = dict(self.DEFAULTS)
+        self.show()
+        self.sync_tabs()
+        self.undo.mark()
+
+    def change_steps(self, fn):
+        """Each selected shape's steps -> fn(its steps, the page shown's place) (tidied), shown on the piano roll."""
+        for i in self.targets:
+            sh = self.app.shapes[i]
+            fx = fn(copied(sh.get("fx") or []), self.at[i])
+            self.put_fx(sh, fx)
+        self.now = self.settings()
+        self.app.shapes_changed(now=True)
+        self.sync_tabs()
+
+    @staticmethod
+    def put_fx(sh, fx):
+        """sh's steps set to fx (flips / velocities with no page before them dropped; none left: no "fx")."""
+        while fx and not is_page(fx[0]):
+            fx = fx[1:]
+        if fx:
+            sh["fx"] = fx
+        else:
+            sh.pop("fx", None)
+
     def settings(self):
-        """The selected shapes' setting, by shape number."""
-        return {i: self.app.shapes[i].get(self.KEY) for i in self.targets if i < len(self.app.shapes)}
+        """The selected shapes' steps, by shape number."""
+        return {i: self.app.shapes[i].get("fx") for i in self.targets if i < len(self.app.shapes)}
+
+    def undo_state(self):
+        """For Ctrl+Z inside: the page shown, its settings and every selected shape's steps."""
+        return json.dumps({"at": self.at, "cfg": self.cfg, "fx": self.settings()}, sort_keys=True)
+
+    def put_state(self, state):
+        s = json.loads(state)
+        self.at = {int(i): k for i, k in s["at"].items()} if s["at"] is not None else None
+        self.cfg = s["cfg"]
+        for i, fx in s["fx"].items():
+            sh = self.app.shapes[int(i)]
+            if fx:
+                sh["fx"] = fx
+            else:
+                sh.pop("fx", None)
+        self.now = self.settings()
+        self.show()
+        self.sync_tabs()
+        self.app.shapes_changed(now=True)
 
     def retarget(self):
-        """Work on the selected shapes, showing their setting (the first one's that has one)."""
+        """Work on the selected shapes, on a new page ("+")."""
         app = self.app
         self.targets = sorted(app.note_tool_sels())  # (not pictures)
         self.saved, self.saved_sel = json.dumps(app.shapes), app.sel_state()  # (for the undo step)
         self.before = self.now = self.settings()  # (before: put back by X / Esc; now: as this window last left them)
-        shown = next((c for c in self.before.values() if c), None)
-        self.cfg = dict(self.DEFAULTS, **json.loads(json.dumps(shown or {})))
+        self.at = None
+        self.cfg = dict(self.DEFAULTS)
         n = len(self.targets)
         self.what.config(text=tr(f"{self.KEY}.nothing") if not n else tr(f"{self.KEY}.n_shapes", n=n) if n > 1
                          else tr(f"{self.KEY}.shape", shape_label=app.shape_label(app.shapes[self.targets[0]])))
         self.show()
+        self.sync_tabs()
         self.undo.reset()
+
+    def has_pages(self):
+        """Do the selected shapes have pages of this tool already?"""
+        return any(st["tool"] == self.KEY for i in self.targets for st in pages(self.app.shapes[i].get("fx")))
 
     def sync(self):
         """The main window changed the selection or the shapes."""
@@ -191,7 +394,7 @@ class ToolWindow(tk.Toplevel):
         self.retarget()
 
     def settle(self):
-        """Something else is about to change in the main window: the setting tried so far is kept (its own undo
+        """Something else is about to change in the main window: the change tried so far is kept (its own undo
         step), and from now on X / Esc only puts back what changes after this."""
         self.catch_up()
         if self.now != self.before and self.settings() == self.now:
@@ -206,14 +409,10 @@ class ToolWindow(tk.Toplevel):
         self.preview(done)
         self.undo.mark(None if done else key)
 
-    def put_state(self, state):
-        self.cfg = json.loads(state)
-        self.show()
-        self.preview()
-
     def preview(self, now=True):
-        """The piano roll shows the setting. While a number is dragged / a dial turned (not now) and that's slow
-        (lots of notes), only the window follows the mouse: the notes catch up when the mouse rests."""
+        """The piano roll shows the settings (on "+": as a new page, added to each selected shape). While a number
+        is dragged / a dial turned (not now) and that's slow (lots of notes), only the window follows the mouse: the
+        notes catch up when the mouse rests."""
         if self.late:
             self.after_cancel(self.late)
             self.late = None
@@ -222,13 +421,25 @@ class ToolWindow(tk.Toplevel):
             return
         started = time.perf_counter()
         cl = self.clean(self.cfg)
-        for i in self.targets:
-            sh = self.app.shapes[i]
-            if cl:
-                sh[self.KEY] = dict(cl)
-            else:
-                sh.pop(self.KEY, None)
+        cl = dict(cl) if cl else None
+        if self.at is None:
+            if cl is None or not self.targets:  # (a new page that would change nothing isn't added)
+                return
+            self.at = {}
+            for i in self.targets:
+                sh = self.app.shapes[i]
+                fx = copied(sh.get("fx") or [])
+                self.at[i] = len(fx)
+                sh["fx"] = fx + [{"tool": self.KEY, "cfg": cl}]
+        else:
+            for i in self.targets:
+                sh = self.app.shapes[i]
+                fx = copied(sh.get("fx") or [])
+                k = self.at[i]
+                fx[k] = dict(fx[k], cfg=cl)  # (None = changes nothing for now: dropped when the window closes)
+                sh["fx"] = fx
         self.now = self.settings()
+        self.sync_tabs()
         self.app.shapes_changed(now=True)
         self.app.update_idletasks()  # (the piano roll redrawn now, so the time counts it)
         self.took = time.perf_counter() - started
@@ -238,6 +449,16 @@ class ToolWindow(tk.Toplevel):
         if self.late:
             self.preview()
 
+    def tidy(self):
+        """Pages left doing nothing are dropped (the selected shapes' notes stay the same)."""
+        for i in self.targets:
+            if i < len(self.app.shapes):
+                sh = self.app.shapes[i]
+                fx = sh.get("fx") or []
+                if any(is_page(st) and not st.get("cfg") for st in fx):
+                    self.put_fx(sh, [st for st in fx if not is_page(st) or st.get("cfg")])
+        self.now = self.settings()
+
     def reset(self):
         self.cfg = dict(self.DEFAULTS)
         self.show()
@@ -245,6 +466,8 @@ class ToolWindow(tk.Toplevel):
         self.undo.mark()
 
     def accept(self):
+        self.catch_up()
+        self.tidy()
         self.settle()
         self.close()
 
@@ -253,10 +476,11 @@ class ToolWindow(tk.Toplevel):
         if self.late:
             self.after_cancel(self.late)
             self.late = None
-        for i, c in self.before.items():
-            app.shapes[i].pop(self.KEY, None)
-            if c:
-                app.shapes[i][self.KEY] = c
+        for i, fx in self.before.items():
+            if fx:
+                app.shapes[i]["fx"] = fx
+            else:
+                app.shapes[i].pop("fx", None)
         app.shapes_changed()
         self.close()
 

@@ -1,5 +1,5 @@
 """The claw machine: changes a shape's notes after they're made (the shape itself stays as drawn), like the claw
-machine of a well-known piano roll. sh["claw"] = {"mode", and that mode's settings}.
+machine of a well-known piano roll. A page's settings (fx.py) = {"mode", and that mode's settings}.
 
 By time ("time"): the notes' time is cut into periods ("period" beats, counted from the shape's first note), each
 period into n slices, and slice k is thrown away ("trash" = [k, n], or None): notes in it go, notes crossing its

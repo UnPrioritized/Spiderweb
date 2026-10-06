@@ -1,5 +1,5 @@
 """Chop: every note of a shape cut into pieces by a rhythm, like the chopper of a well-known piano roll (measured from
-its output; rhythm only, the keys never change). The shape stays as drawn; sh["chop"] = the settings:
+its output; rhythm only, the keys never change). The shape stays as drawn; a Chop page's settings (fx.py):
 
 "len": one step of the rhythm, in beats (the "snap" text it was picked as is kept for the window; "off" = 1 tick).
 "steps" + "pieces": the rhythm, one repeat "steps" steps long, its pieces [start, length, velocity] in steps.

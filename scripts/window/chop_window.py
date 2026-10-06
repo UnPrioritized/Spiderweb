@@ -191,7 +191,7 @@ class ChopWindow(ToolWindow):
 
     def __init__(self, app):
         super().__init__(app)
-        if not any(self.before.values()):  # (opened on unchopped shapes: they show chopped straight away)
+        if not self.has_pages():  # (opened on unchopped shapes: they show chopped straight away)
             self.preview()
 
     def clean(self, cfg):
@@ -201,10 +201,6 @@ class ChopWindow(ToolWindow):
         s = self.app.scale
         self.long = None  # (the pieces before Steps was made smaller: back when it's made bigger again)
         box.columnconfigure(0, minsize=round(90 * s))
-        self.on = tk.BooleanVar()
-        b = ttk.Checkbutton(box, text=tr("chop.on"), variable=self.on, command=lambda: self.put("on", self.on.get()))
-        b.grid(row=1, column=0, columnspan=2, sticky="w")
-        Tooltip(b, tr("chop.tip_on"))
 
         ttk.Label(box, text=tr("chop.rhythm")).grid(row=2, column=0, sticky="e", padx=(0, 8), pady=(6, 2))
         row = ttk.Frame(box)
@@ -411,8 +407,6 @@ class ChopWindow(ToolWindow):
 
     def show(self):
         c = self.cfg
-        if self.on.get() != c["on"]:
-            self.on.set(c["on"])
         if self.abs.get() != c["abs"]:
             self.abs.set(c["abs"])
         self.rhythm_button.config(text=self.rhythm_name())
@@ -440,11 +434,17 @@ class ChopWindow(ToolWindow):
         app = self.app
         shapes = [app.shapes[i] for i in self.targets if i < len(app.shapes)]
         after = sum(len(app.notes_of(sh)) for sh in shapes)
-        plain = [app.notes_of({k: v for k, v in sh.items() if k != "chop"}) for sh in shapes]
+
+        def before_page(i):  # (the shape's notes as this page gets them)
+            sh = app.shapes[i]
+            fx = sh.get("fx") or []
+            k = len(fx) if self.at is None else self.at[i]
+            return dict(sh, fx=fx[:k]) if k else {a: b for a, b in sh.items() if a != "fx"}
+        plain = [app.notes_of(before_page(i)) for i in self.targets if i < len(app.shapes)]
         before = sum(len(n) for n in plain)
         cl = self.clean(self.cfg)
         stuck = any(too_many(n, cl, app.ppq) for n in plain)
-        empty = self.cfg["on"] and not self.cfg["pieces"]
+        empty = not self.cfg["pieces"]
         self.info.config(text=tr("chop.no_pieces") if empty else tr("chop.too_many") if stuck else
                          tr("chop.count", before=before, after=after), foreground="#d00000" if stuck or empty else "#777")
 
@@ -453,13 +453,15 @@ open_chop = ChopWindow.open
 
 
 def quick_chop(app):
-    """Ctrl+U: the selected shapes' notes cut into even pieces of the snap's length (off = 1 tick), one undo step."""
+    """Ctrl+U: the selected shapes' notes cut into even pieces of the snap's length (off = 1 tick), one undo step: a
+    new Chop page on each."""
     if not app.note_tool_sels():  # (pictures take no note tools)
         return
     snap = app.snap.get()
     chop = clean_chop(dict(CHOP_DEFAULTS, len=piece_beats(snap, app), snap=snap))
     app.push_undo(name=tr("chop.quick_step"))
     for i in app.note_tool_sels():
-        app.shapes[i]["chop"] = dict(chop)
+        sh = app.shapes[i]
+        sh["fx"] = (sh.get("fx") or []) + [{"tool": "chop", "cfg": dict(chop)}]
     app.shapes_changed()
     app.status.config(text=tr("chop.quick_done", snap=snap_text(snap)))
