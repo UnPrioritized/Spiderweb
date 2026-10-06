@@ -114,6 +114,9 @@ It offers to install them once; to do it yourself later, type
   pip install numba pillow
 The first start with Numba takes a second longer in the background while it
 prepares its fast code (kept for the next starts).
+Tested with Python 3.14.7, NumPy 2.5.3, Numba 0.68.0 and Pillow 12.3.0. If
+something misbehaves with other versions, these are known to work, e.g.
+  pip install numpy==2.5.3 numba==0.68.0 pillow==12.3.0
 Playback uses Windows' built-in MIDI output. The Hz bass window's Preview
 uses the built-in synth instead (BASS, in scripts/bass; no MIDI device needed)
 with a soundfont you pick.
