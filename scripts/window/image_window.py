@@ -175,7 +175,7 @@ class ImageWindow(tk.Toplevel):
         self.bind("<KeyPress-space>", lambda e: (self.hold(True), "break")[1])
         self.bind("<KeyRelease-space>", lambda e: (self.hold(False), "break")[1])
         self.bind("<F1>", lambda e: (app.open_help("picture"), "break")[1])
-        self.bind("<Escape>", lambda e: self.close())
+        self.bind("<Escape>", lambda e: self.cancel_making() if self.making else self.close())
         self.show_settings()
         if last and os.path.isfile(last[0]):
             self.load(last[0], quiet=True)
@@ -208,13 +208,13 @@ class ImageWindow(tk.Toplevel):
         info.pack(side="bottom", fill="x", pady=(8, 0), before=self.cv)  # (a short window shrinks the preview)
         self.info = ttk.Label(info, text="", foreground="#555")
         self.info.pack(side="left")
-        self.prog = ttk.Frame(left)  # (its own row above, while a big picture is made: show_bar)
+        self.prog = ttk.Frame(left, padding=8, borderwidth=1, relief="solid")  # (on the preview while a big picture is made:
+        self.prog_text = ttk.Label(self.prog, text="")             # show_bar; nothing moves, user)
+        self.prog_text.pack(anchor="w")
         self.cancel_btn = ttk.Button(self.prog, text=tr("image.cancel"), command=self.cancel_making)
-        self.cancel_btn.pack(side="right")  # (first: always shown; the bar takes what's left)
-        self.prog_text = ttk.Label(self.prog, text="", foreground="#555")
-        self.prog_text.pack(side="left")
-        self.bar = ttk.Progressbar(self.prog, length=60, maximum=100)
-        self.bar.pack(side="left", fill="x", expand=True, padx=8)
+        self.cancel_btn.pack(side="right", pady=(6, 0))
+        self.bar = ttk.Progressbar(self.prog, length=90, maximum=100)
+        self.bar.pack(side="left", fill="x", expand=True, padx=(0, 8), pady=(6, 0))
         self.handle = tk.Label(info, text=tr("image.drag"), background="#dfe8f5", relief="ridge", padx=10, pady=6,
                                cursor="fleur")
         self.handle.pack(side="right")
@@ -812,13 +812,16 @@ class ImageWindow(tk.Toplevel):
         self.redraw()
 
     def show_bar(self, on):
-        """The progress bar + Cancel under the preview while a picture is made in the background."""
+        """The progress bar + Cancel in the middle of the preview (the picture dimmed behind it) while a picture is
+        made in the background."""
         if on and not self.prog.winfo_manager():
             self.bar.config(value=0)
             self.prog_text.config(text=tr("image.making", pct=0))
-            self.prog.pack(side="bottom", fill="x", pady=(6, 0), before=self.cv)
+            self.prog.place(in_=self.cv, relx=0.5, rely=0.5, anchor="center")
+            self.redraw()
         elif not on and self.prog.winfo_manager():
-            self.prog.pack_forget()
+            self.prog.place_forget()
+            self.redraw()
 
     def show_swatches(self):
         for w in self.swatches.winfo_children():
@@ -875,9 +878,9 @@ class ImageWindow(tk.Toplevel):
         cv = self.cv
         cv.delete("all")
         if not self.pic or self.grid is None or self.made is None:
-            cv.create_text(self.view_size[0] // 2, self.view_size[1] // 2, fill="#aaa",
-                           text=tr("image.making_first") if self.making else tr("image.no_picture", kinds=_kinds()))
-            if not self.making:
+            if not self.making:  # (making: the progress box says so)
+                cv.create_text(self.view_size[0] // 2, self.view_size[1] // 2, fill="#aaa",
+                               text=tr("image.no_picture", kinds=_kinds()))
                 self.info.config(text="")
             return
         pic, made, _ = self.made  # (what the shown grid was made from; the look settings: the window's own)
@@ -891,6 +894,8 @@ class ImageWindow(tk.Toplevel):
             rgb = look_picture(self.grid, P.to_srgb(self.pal), view, w, h, s["look"], self.outline_px(w, h, view),
                                s["shade"], s["join"])
             self.what.config(text=tr("image.preview_title"))
+        if self.making:  # (dimmed behind the progress box)
+            rgb = rgb * 0.35
         self.photo = _photo(self, rgb)
         cv.create_image(x, y, image=self.photo, anchor="nw")
         self.draw_keys(x, y, w, h, view)
