@@ -607,13 +607,17 @@ def resolve_overlaps(notes):
     """
     if not len(notes):
         return notes
+    fast = loops()
+    if fast:  # (the compiled loops: the same notes)
+        notes = np.ascontiguousarray(notes, np.int64)
+        group, order = fast.overlap_order(notes)
+        if not len(order):
+            group = first_seen(notes[:, 4] * 256 + notes[:, 2])
+            order = np.ascontiguousarray(overlap_order(notes, group), np.int64)
+        out, m = fast.overlap_sweep(notes, order, group)
+        return out if m == len(out) else out[:m].copy()
     group = first_seen(notes[:, 4] * 256 + notes[:, 2])  # groups numbered in the order they first show up
     order = overlap_order(notes, group)
-    fast = loops()
-    if fast:  # (the compiled loop: the same notes)
-        out, m = fast.overlap_sweep(np.ascontiguousarray(notes, np.int64), np.ascontiguousarray(order, np.int64),
-                                    np.ascontiguousarray(group, np.int64))
-        return out if m == len(out) else out[:m].copy()
     a, group = np.take(notes, order, axis=0), group[order]  # (take: quicker than notes[order])
     s, e = a[:, 0], a[:, 1]
     run = running_max(e, group)  # everything before in the group sounds until here

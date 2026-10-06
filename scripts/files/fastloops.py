@@ -7,6 +7,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   last_on_pixels roll_draw.note_rects' end: notes on the very same pixels (only the last shows) left out
   note_top       roll_draw.note_pixels: which note is on top at every pixel (and whether it's its outline)
   paint_notes    roll_draw.paint_region: the notes' colours straight into the picture (the last painted wins)
+  overlap_order  engine.resolve_overlaps' groups and sort (first_seen + overlap_order)
   overlap_sweep  engine.resolve_overlaps after its sort: cut / stretch / merge the notes on one key and slot
 The first start compiles them (about a second, in the background); the result is kept in __pycache__ for the next
 starts (not in the exe: its files can't be kept, so it compiles each start)."""
@@ -225,6 +226,113 @@ def paint_notes(img, kb, top, w, h, x0, y0, x1, y1, color, rgb):
 
 
 @njit(cache=CACHE)
+def _merge_runs(notes, order, a, b):
+    """order[a:b] sorted by start (notes[:, 0]), stable: its runs already in order merged two by two."""
+    n = b - a
+    idx = order[a:b].copy()
+    s = np.empty(n, np.int64)
+    for q in range(n):
+        s[q] = notes[idx[q], 0]
+    bounds = [0]
+    for q in range(1, n):
+        if s[q] < s[q - 1]:
+            bounds.append(q)
+    bounds.append(n)
+    idx2, s2 = np.empty(n, np.int64), np.empty(n, np.int64)
+    while len(bounds) > 2:
+        new = [0]
+        for r in range(0, len(bounds) - 1, 2):
+            lo = bounds[r]
+            if r + 2 >= len(bounds):  # (an odd run out: copied as it is)
+                hi = bounds[r + 1]
+                idx2[lo:hi], s2[lo:hi] = idx[lo:hi], s[lo:hi]
+                new.append(hi)
+                continue
+            mid, hi = bounds[r + 1], bounds[r + 2]
+            i, j, o = lo, mid, lo
+            while i < mid and j < hi:
+                if s[j] < s[i]:  # (equal: the earlier run's first)
+                    idx2[o], s2[o] = idx[j], s[j]
+                    j += 1
+                else:
+                    idx2[o], s2[o] = idx[i], s[i]
+                    i += 1
+                o += 1
+            while i < mid:
+                idx2[o], s2[o] = idx[i], s[i]
+                i += 1
+                o += 1
+            while j < hi:
+                idx2[o], s2[o] = idx[j], s[j]
+                j += 1
+                o += 1
+            new.append(hi)
+        bounds = new
+        idx, idx2 = idx2, idx
+        s, s2 = s2, s
+    order[a:b] = idx
+
+
+@njit(cache=CACHE)
+def overlap_order(notes):
+    """engine.first_seen of slot * 256 + key and engine.overlap_order in one: (group, order), or two empty arrays
+    when the ids are too spread out for a table (the NumPy way then)."""
+    n = len(notes)
+    lo, hi = 0, 0
+    for i in range(n):
+        g = notes[i, 4] * 256 + notes[i, 2]
+        if i == 0 or g < lo:
+            lo = g
+        if i == 0 or g > hi:
+            hi = g
+    if n == 0 or lo < 0 or hi + 1 > 4 * n + 65536:
+        return np.zeros(0, np.int64), np.zeros(0, np.int64)
+    seen = np.full(hi + 1, -1, np.int64)
+    group = np.empty(n, np.int64)
+    first = np.zeros(n + 1, np.int64)
+    groups = 0
+    for i in range(n):  # groups numbered in the order they first show up, counted
+        g = notes[i, 4] * 256 + notes[i, 2]
+        if seen[g] < 0:
+            seen[g] = groups
+            groups += 1
+        group[i] = seen[g]
+        first[seen[g] + 1] += 1
+    for g in range(groups):
+        first[g + 1] += first[g]
+    at = first[:groups].copy()
+    order = np.empty(n, np.int64)
+    for i in range(n):  # by group, keeping the order inside each
+        g = group[i]
+        order[at[g]] = i
+        at[g] += 1
+    for g in range(groups):
+        a, b = first[g], first[g + 1]
+        for j in range(a + 1, b):  # by start inside each (stable; most come in sorted already)
+            if notes[order[j], 0] < notes[order[j - 1], 0]:
+                _merge_runs(notes, order, a, b)
+                break
+        j = a
+        while j < b:  # the same start: the quietest first, then the longest first (stable)
+            k = j + 1
+            while k < b and notes[order[k], 0] == notes[order[j], 0]:
+                k += 1
+            for p in range(j + 1, k):
+                v = order[p]
+                q = p - 1
+                while q >= j:
+                    u = order[q]
+                    if notes[u, 3] > notes[v, 3] or (notes[u, 3] == notes[v, 3] and notes[u, 1] < notes[v, 1]):
+                        order[q + 1] = u
+                        q -= 1
+                    else:
+                        break
+                order[q + 1] = v
+            j = k
+    return group, order
+
+
+@njit(cache=CACHE)
 def overlap_sweep(notes, order, group):
     """resolve_overlaps' work once sorted (order: by group, start, velocity, longest first): a note starting while
     earlier ones of its group still sound is stretched to where they would have ended and the one before it is
@@ -269,3 +377,4 @@ def warm():
     note_top(np.full(1, -1, np.int64), 0, 0, 1, 1, i1, i1, i1, i1)
     paint_notes(np.zeros((1, 3), np.uint8), 0, 0, 1, 1, i1, i1, i1, i1, i1, np.zeros((1, 2, 3), np.uint8))
     overlap_sweep(np.zeros((1, 6), np.int64), i1, i1)
+    overlap_order(np.zeros((1, 6), np.int64))

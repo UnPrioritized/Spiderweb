@@ -441,7 +441,13 @@ class RollDrawing:
         ppq, ax = app.ppq, self.sx / app.ppq
         key = (frozenset(app.sels), self.sx, ppq)
         if self._ring is None or self._ring[0] is not app.rendered or self._ring[1] != key:
-            notes = app.rendered[np.isin(app.rendered[:, 5], list(app.sels))]
+            fast = loops()
+            kept = self.paint_order(fast) if fast else None
+            if kept is not None:  # (the selected shapes' notes are already together there, last)
+                (s, e, k, _, first, _), others = kept
+                notes = np.column_stack([s[first[others]:], e[first[others]:], k[first[others]:]])
+            else:
+                notes = app.rendered[np.isin(app.rendered[:, 5], list(app.sels))]
             self._ring = (app.rendered, key, ring_parts(notes, RING_GAP / ax) if len(notes) else None)
         return self._ring[2]
 
