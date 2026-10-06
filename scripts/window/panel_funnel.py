@@ -108,9 +108,16 @@ class FunnelPanel:
 
     def funnel_targets(self):
         """What the funnel panel changes: the selected funnels, or (with nothing selected) the settings for
-        new ones."""
+        new ones. A funnel being drawn: the settings for new ones (it takes them too, see set_funnel)."""
+        if self.funnel_draft():
+            return [self.funnel_defaults]
         funnels = [self.shapes[i] for i in sorted(self.sels) if self.shapes[i]["kind"] == "funnel"]
         return funnels or ([] if self.sels else [self.funnel_defaults])
+
+    def funnel_draft(self):
+        """The funnel being drawn (its line drawn, waiting for the wall), or None."""
+        draft = self.roll.draft
+        return draft if draft and draft["kind"] == "funnel" and len(draft["pts"]) == 2 else None
 
     def sync_funnel(self, note=None):
         tgts = self.funnel_targets()
@@ -184,7 +191,7 @@ class FunnelPanel:
             return self.sync_funnel()
         if placed:
             self.push_undo(name=tr("panel_funnel.funnel_setting"))
-        for t in tgts:
+        for t in tgts + [d for d in (self.funnel_draft(),) if d]:  # (the funnel being drawn too: user)
             t.update(changed_funnel(t, key, value))
         self.shapes_changed()
         self.sync_funnel()
