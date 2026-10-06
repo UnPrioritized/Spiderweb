@@ -322,6 +322,7 @@
  "app.ends_on_the_last_point": "ends on the last point",
  "app.starts_exactly_on_the_last_point": "starts exactly on the last point",
  "app.point": "Point",
+ "app.too_many_points": "Too many points to list ({n}): drag them on the piano roll.",
  "app.tick": "Tick",
  "app.pitch": "Pitch",
  "app.shape": "Shape {sel}: {shape_label}",

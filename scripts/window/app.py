@@ -77,6 +77,7 @@ DRAW_TOOLS = [("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"), 
               ("curve", tr("app.curve"), "c"), ("arc", tr("app.arc"), "a"), ("custom", tr("app.custom_shape"), "s"),
               ("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q"), ("funnel", tr("app.funnel"), "n"),
               ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h"), ("picture", tr("app.picture"), "i")]
+MAX_POINT_BOXES = 40  # a curve with more points than this lists none in the panel (a line saying so instead)
 MANY_CHANNELS = 15  # a shape spread over more channels than this is shown orange in the shape list
 CHANNEL_CHOICES = [
     ("raw", tr("app.as_drawn"),
@@ -574,6 +575,10 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         sh = self.selected()
         names = point_names(sh) if sh and len(self.sels) == 1 else None
         if not names:
+            return
+        if len(names) > MAX_POINT_BOXES:  # (a box pair per point took ~0.02 s: a fitted curve's hundreds froze it)
+            ttk.Label(self.points_box, text=tr("app.too_many_points", n=f"{len(names):,}"), foreground="#777",
+                      wraplength=int(300 * self.scale), justify="left").grid(row=0, column=0, sticky="w")
             return
         for col, text in enumerate((tr("app.point"), tr("app.tick"), tr("app.pitch"))):
             ttk.Label(self.points_box, text=text, foreground="#777").grid(row=0, column=col, sticky="w", padx=(0, 5))
