@@ -75,8 +75,9 @@ def _chunk(data):
     return b"MTrk" + struct.pack(">I", len(data)) + bytes(data)
 
 
-def write_midi(path, ppq, bpm, beats, notes):
-    """notes: [start, end, pitch, velocity, slot, ...]. Every slot gets its own track with a single channel."""
+def write_midi(path, ppq, bpm, beats, notes, use10=False):
+    """notes: [start, end, pitch, velocity, slot, ...]. Every slot gets its own track with a single channel
+    (use10: pictures use channel 10 too, slot_track_channel)."""
     head = bytearray()
     head += vlq(0) + b"\xFF\x51\x03" + round(60_000_000 / bpm).to_bytes(3, "big")
     head += vlq(0) + bytes([0xFF, 0x58, 4, beats, 2, 24, 8])
@@ -85,6 +86,6 @@ def write_midi(path, ppq, bpm, beats, notes):
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
     chunks = [_chunk(head)]
     for track in range(int(notes[:, 4].max()) + 1 if len(notes) else 0):
-        chunks.append(_chunk(track_data(notes[notes[:, 4] == track], slot_track_channel(track)[1])))
+        chunks.append(_chunk(track_data(notes[notes[:, 4] == track], slot_track_channel(track, use10)[1])))
 
     write_bytes(path, b"MThd" + struct.pack(">IHHH", 6, 1, len(chunks), ppq) + b"".join(chunks))

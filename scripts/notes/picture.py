@@ -23,6 +23,7 @@ SUGGESTED = {  # the "Back to suggested" values (user: only a suggestion; every 
     "step": 1 / 48,  # one grid step, in beats
     "look": "flat", "outline": 1, "shade": True, "join": True,  # how a player draws it (join also makes the notes)
     "by": "channel", "fmt": "",  # the colour list: {n} = channel number / order; the format's name ("" = first)
+    "use10": False,  # colour 10 on channel 10 (16 colours; pictures only, shapes never use it; user)
 }
 
 
@@ -396,7 +397,7 @@ _RANGES = {"keys": (1, 256), "steps": (1, 8), "colours": (2, 16), "focus": (0, 1
            "share": (0.1, 10), "step": (1 / 65536, 64), "outline": (0, 8)}
 _CHOICES = {"view": ("fall", "roll"), "blend": ("spread", "pattern", "none"), "look": ("flat", "outlined"),
             "by": ("channel", "order")}
-_FLAGS = ("empty", "shade", "join")
+_FLAGS = ("empty", "shade", "join", "use10")
 
 
 def clean_settings(s):
@@ -438,6 +439,30 @@ def clean_picture(p):
         return None
     sig = p.get("sig") if isinstance(p.get("sig"), str) and len(p.get("sig")) <= 64 else ""
     return {"file": p["file"], "sig": sig, "size": [w, h], "grid": [steps, keys], "set": clean_settings(p.get("set"))}
+
+
+def paths_for_file(shapes, folder, relative):
+    """The shapes with their pictures' file paths made relative to `folder` (relative=True: only pictures in it or
+    in a folder inside it, so a project and its pictures can move together), or relative ones made whole again
+    from it (False). The shapes given are left as they are (changed ones are copies)."""
+    out = []
+    for sh in shapes:
+        p = sh.get("picture") if isinstance(sh, dict) else None
+        if not p or not isinstance(p.get("file"), str):
+            out.append(sh)
+            continue
+        f = p["file"]
+        if relative and os.path.isabs(f):
+            try:
+                rel = os.path.relpath(f, folder)
+            except ValueError:  # (another drive)
+                rel = None
+            if rel and not rel.startswith(".."):
+                f = rel
+        elif not relative and not os.path.isabs(f):
+            f = os.path.normpath(os.path.join(folder, f))
+        out.append(dict(sh, picture=dict(p, file=f)) if f != p["file"] else sh)
+    return out
 
 
 def grid_notes(grid, view, join=True):

@@ -1898,7 +1898,7 @@ class HzWindow(tk.Toplevel):
             vel = sh.get("vel0", vel)
             mine = app.rendered[app.rendered[:, 5] == app.sel] if len(app.rendered) else ()
             if len(mine):
-                ch = slot_track_channel(int(mine[0, 4]))[1]
+                ch = slot_track_channel(int(mine[0, 4]), app.picture_use10)[1]
         vel = max(1, min(127, int(vel)))
         try:
             ms = 60000.0 / app.read_project()[1]  # (one beat)

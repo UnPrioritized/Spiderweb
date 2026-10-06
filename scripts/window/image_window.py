@@ -102,6 +102,7 @@ class ImageWindow(tk.Toplevel):
         self.made_for = (None, None)  # what the cells / palette were made for (only redo what changed)
         self.late, self.photo, self.held, self.view_size = None, None, False, (PREVIEW_W, PREVIEW_H)
         self.drag_mark = None
+        self._other_cells = {}  # the other placed pictures' cells (others_cells)
         self.build()
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<Configure>", self.on_configure, add="+")
@@ -158,7 +159,7 @@ class ImageWindow(tk.Toplevel):
         t1, t2 = ttk.Frame(tabs, padding=6), ttk.Frame(tabs, padding=6)
         tabs.add(t1, text=tr("image.tab_picture"))
         tabs.add(t2, text=tr("image.tab_player"))
-        self.vars = {}
+        self.vars, self.scales = {}, {}
 
         f = self.section(t1, "image.picture")
         r = ttk.Frame(f)
@@ -205,6 +206,9 @@ class ImageWindow(tk.Toplevel):
         self.swatches = ttk.Frame(f)
         self.swatches.pack(anchor="w", pady=3)
         self.slider(f, "focus", 0, 1, None, ends=(tr("image.whole"), tr("image.details")))
+        self.slider(f, "share", 0.25, 4, lambda v: "%.1f×" % v)  # (only matters with other pictures placed)
+        self.share_note = ttk.Label(f, text="", foreground="#777", wraplength=330, justify="left")
+        self.share_note.pack(anchor="w")
 
         f = self.section(t1, "image.blending")
         r = ttk.Frame(f)
@@ -263,6 +267,9 @@ class ImageWindow(tk.Toplevel):
         self.by_box.pack(side="left")
         self.by_box.bind("<<ComboboxSelected>>", lambda e: self.set_by(bys[self.by_box.current()][0]))
         self.bys = bys
+        self.vars["use10"] = tk.BooleanVar(value=self.s["use10"])
+        ttk.Checkbutton(f, text=tr("image.use10"), variable=self.vars["use10"],
+                        command=lambda: self.set_use10(self.vars["use10"].get())).pack(anchor="w", pady=(2, 0))
         r = ttk.Frame(f)
         r.pack(fill="x", pady=(4, 2))
         ttk.Button(r, text=tr("image.copy"), command=self.copy_colours).pack(side="left")
@@ -295,8 +302,9 @@ class ImageWindow(tk.Toplevel):
             if v != self.s[key]:
                 self.put(key, v, later=True)
 
-        ttk.Scale(r, from_=lo, to=hi, variable=var, length=150 if not ends else 110, command=moved).pack(
-            side="left", padx=3)
+        scale = ttk.Scale(r, from_=lo, to=hi, variable=var, length=150 if not ends else 110, command=moved)
+        scale.pack(side="left", padx=3)
+        self.scales[key] = scale
         if ends:
             ttk.Label(r, text=ends[1], foreground="#777").pack(side="left")
         else:
@@ -323,8 +331,49 @@ class ImageWindow(tk.Toplevel):
         self.by_box.current([k for k, _ in self.bys].index(s["by"]))
         self.fmt_box.config(values=[f["name"] for f in self.formats()])
         self.fmt_box.set(self.format()["name"])
+        self.scales["colours"].config(to=16 if s["use10"] else 15)
+        n = len(self.others())
+        self.share_note.config(text=tr("image.share_note", n=n) if n else tr("image.share_alone"))
 
     # ------------------------------------------------------------ the colour list
+
+    # ------------------------------------------------------------ other placed pictures (they share the colours)
+
+    def others(self):
+        """The other placed pictures' shape numbers (one set of colours for all of them, user)."""
+        skip = self.edited()
+        return [i for i, sh in enumerate(self.app.shapes) if "picture" in sh and i != skip]
+
+    def others_cells(self):
+        """[(cells, alpha, share, focus)] of the other placed pictures whose files are there, and a key that changes
+        when any of them does."""
+        out, key = [], []
+        for i in self.others():
+            p = self.app.shapes[i]["picture"]
+            s = p["set"]
+            pic = self.app.picture_for(p)
+            if pic is None:
+                continue
+            steps, keys = p["grid"]
+            rows, cols = (steps, keys) if s["view"] == "fall" else (keys, steps)
+            k = (p["file"], p["sig"], rows, cols, s["brightness"], s["contrast"], s["saturation"], s["sharpen"],
+                 s["empty"])
+            got = self._other_cells.get(k)
+            if got is None:
+                cl, al = P.cells(pic, rows, cols)
+                cl = P.adjust(cl, s["brightness"], s["contrast"], s["saturation"], s["sharpen"])
+                got = self._other_cells[k] = (cl, al if s["empty"] else None)
+            out.append((got[0], got[1], s.get("share", 1.0), s["focus"]))
+            key.append((k, s.get("share", 1.0), s["focus"]))
+        return out, tuple(key)
+
+    def project_locks(self):
+        """The colours picked by hand for the placed pictures (they share them): slot -> linear colour."""
+        for i in self.others():
+            s = self.app.shapes[i]["picture"]["set"]
+            pal = s.get("pal") or []
+            return {k: P.lin_of(pal[k]) for k in s.get("locked", []) if k < len(pal)}
+        return {}
 
     def formats(self):
         from files import colour_list as CL
@@ -352,13 +401,22 @@ class ImageWindow(tk.Toplevel):
         t = self.gives
         t.config(state="normal")
         t.delete("1.0", "end")
-        for text, ok in CL.write(self.format(), self.colours_hex(), self.s["by"]):
+        for text, ok in CL.write(self.format(), self.colours_hex(), self.s["by"], self.s["use10"]):
             t.insert("end", text, () if ok else ("bad",))
         t.config(state="disabled")
 
+    def set_use10(self, on):
+        self.s["use10"] = on
+        if not on and self.s["colours"] > 15:
+            self.s["colours"] = 15
+        self.show_settings()
+        self.show_gives()
+        self.put("use10", on)
+
     def copy_colours(self):
         from window.format_window import copy_colours
-        if self.pal is not None and copy_colours(self, self.format(), self.colours_hex(), self.s["by"], False):
+        if self.pal is not None and copy_colours(self, self.format(), self.colours_hex(), self.s["by"],
+                                                 self.s["use10"]):
             self.app.status.config(text=tr("image.copied", name=self.format()["name"]))
 
     def edit_formats(self):
@@ -370,15 +428,16 @@ class ImageWindow(tk.Toplevel):
             self.show_settings()
             self.show_gives()
 
-        FormatWindow(self, self.colours_hex, lambda: self.s["by"], lambda: False, self.format()["name"], done)
+        FormatWindow(self, self.colours_hex, lambda: self.s["by"], lambda: self.s["use10"], self.format()["name"],
+                     done)
 
     def paste_colours(self):
         from window.paste_window import PasteWindow
-        PasteWindow(self, self.s["by"], False, self.s["colours"], self.pasted)
+        PasteWindow(self, self.s["by"], self.s["use10"], self.s["colours"], self.pasted)
 
     def pasted(self, slots, lock, alpha):
         """Paste colours' "Use these colours": the picture takes them (locked, or as a starting point)."""
-        n = max(2, min(15, max(slots) + 1))
+        n = max(2, min(16 if self.s["use10"] else 15, max(slots) + 1))
         self.s["colours"] = n
         cols = {k: P.lin_of(h) for k, h in slots.items() if k < n}
         if lock:
@@ -437,7 +496,7 @@ class ImageWindow(tk.Toplevel):
                 messagebox.showerror(tr("image.window_title"), tr("image.cant_open", e=e), parent=self)
             return False
         self.pic = pic
-        self.locked, self.start = {}, {}
+        self.locked, self.start = (self.project_locks() if self.editing is None else self.locked), {}
         self.made_for = (None, None)
         self.name.config(text=os.path.basename(path), foreground="#2a7")
         self.app.image_last = (path, dict(self.s))
@@ -459,11 +518,13 @@ class ImageWindow(tk.Toplevel):
             rows, cols = P.grid_size(self.pic, s["keys"], s["steps"], s["view"])
             cl, al = P.cells(self.pic, rows, cols)
             self.cl, self.al = P.adjust(cl, s["brightness"], s["contrast"], s["saturation"], s["sharpen"]), al
-        pal_key = (cells_key, s["colours"], s["focus"], s["empty"], tuple(sorted(
+        others, others_key = self.others_cells()
+        pal_key = (cells_key, s["colours"], s["focus"], s["empty"], s["share"], others_key, tuple(sorted(
             (k, tuple(np.round(v, 6))) for k, v in self.locked.items())))
         if self.made_for[1] != pal_key:
             al = self.al if s["empty"] else None
-            self.pal = P.fit_palette([(self.cl, al, 1.0, s["focus"])], s["colours"],
+            self.pal = P.fit_palette([(self.cl, al, s["share"] if others else 1.0, s["focus"])] + others,
+                                     s["colours"],
                                      locked=[(k, v) for k, v in self.locked.items() if k < s["colours"]],
                                      start=[(k, v) for k, v in self.start.items() if k < s["colours"]])
         self.made_for = (cells_key, pal_key)
@@ -641,14 +702,26 @@ class ImageWindow(tk.Toplevel):
         self.show_settings()
         if not self.apply_btn.winfo_manager():
             self.apply_btn.pack(side="right", padx=(0, 8))
-        pic = self.app.picture_for(p)
-        if pic is not None:
-            self.pic = pic
+        state = self.app.picture_state(p)
+        if state == "ok":
+            self.pic = self.app.picture_for(p)
             self.made_for = (None, None)
             self.name.config(text=os.path.basename(p["file"]), foreground="#2a7")
             self.remake()
-        else:
+            return
+        self.pic, self.grid = None, None
+        self.redraw()
+        if state == "missing":  # (user: warn + a file picker)
             self.name.config(text=tr("image.missing", name=os.path.basename(p["file"])), foreground="#c60")
+            if messagebox.askyesno(tr("image.window_title"), tr("image.missing_ask", path=p["file"]), parent=self):
+                self.ask_file()
+            return
+        # changed since it was placed (user: "Use the new version / Keep the current one")
+        self.name.config(text=tr("image.changed", name=os.path.basename(p["file"])), foreground="#c60")
+        if messagebox.askyesno(tr("image.window_title"), tr("image.changed_ask", path=p["file"]), parent=self):
+            self.app._pictures = {k: v for k, v in self.app._pictures.items() if k[0] != p["file"]}
+            if self.load(p["file"]):
+                self.apply()
 
     def edited(self):
         """The placed picture being changed, if it's still there (shape number), else None."""
@@ -674,14 +747,23 @@ class ImageWindow(tk.Toplevel):
         new = self.placed_shape((b1 + b2) / 2, (k1 + k2) / 2)
         if new is None:
             return
+        w0, h0 = old["picture"]["size"]
+        w1, h1 = new["picture"]["size"]
+        stretch = False
+        if abs(w0 / h0 - w1 / h1) > 0.01 * (w0 / h0):  # another shape of picture (user: ask only then)
+            stretch = not messagebox.askyesno(tr("image.window_title"), tr("image.shape_ask"), parent=self)
         app.push_undo(name=tr("image.apply_step"))
         new["vel0"], new["vel1"] = old.get("vel0", new["vel0"]), old.get("vel1", new["vel1"])
         if old.get("vel_env"):
             new["vel_env"] = old["vel_env"]
+        if stretch:  # (to the placed box: remake_pictures makes its notes for it)
+            new["pts"] = [list(pt) for pt in old["pts"]]
         app.shapes[i] = new
         self.editing = (i, new.get("name"))
+        missing = app.sync_pictures(new["picture"]["set"], i)
         app.shapes_changed()
-        app.status.config(text=tr("image.applied", name=new["name"]))
+        app.status.config(text=tr("image.applied", name=new["name"]) +
+                          (tr("image.others_missing", n=missing) if missing else ""))
 
     # ------------------------------------------------------------ closing
 

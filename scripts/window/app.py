@@ -148,6 +148,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.image_last = None  # (picture file, settings) last used there, so it opens with them again
         self._pictures = {}  # placed pictures' files read: (path, mtime, size) -> picture.Picture (picture_for)
         self.picture_owners, self.picture_pal = np.zeros(0, bool), None  # (shapes_changed: for the piano roll)
+        self.picture_use10 = False  # (shapes_changed: pictures use channel 10 too)
         self.hz_clip = None  # notes copied in it (HzWindow.copy_notes)
         self.hz_pos = ""  # its size and place ("WxH+x+y", remembered in the autosave)
         self.hz_fx_h = 0  # its effects pane's height in pixels, dragged by its top edge (0 = as it starts)
@@ -856,9 +857,12 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.colours_wanted = wanted
             self.after_idle(self.sync_custom)  # (the panel's warning)
         got = [(n, capped_colours(t) if w > COLOURS else t) for (n, t), w in zip(got, wanted)]
+        # (pictures using channel 10 too: one setting for the project, kept with every picture)
+        self.picture_use10 = next((sh["picture"]["set"].get("use10", False) for sh in self.shapes
+                                   if "picture" in sh), False)
         self.rendered, self.slot_count = render([n for n, _ in got], self.channel_mode.get(), self.channel_split,
                                                 [t for _, t in got], [tracks_apart(sh) for sh in self.shapes],
-                                                ["picture" in sh for sh in self.shapes])
+                                                ["picture" in sh for sh in self.shapes], self.picture_use10)
         # placed pictures: their notes are drawn in the picture's own colours (the first picture's: they share them)
         self.picture_owners = np.array(["picture" in sh for sh in self.shapes], bool)
         self.picture_pal = next((sh["picture"]["set"].get("pal") for sh in self.shapes if "picture" in sh), None)
@@ -1328,9 +1332,49 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         """A picture placed from the image window: a new shape, selected, one undo step."""
         self.push_undo(name=tr("image.step_name"))
         self.shapes.append(sh)
+        missing = self.sync_pictures(sh["picture"]["set"], len(self.shapes) - 1)
         self.select(len(self.shapes) - 1)
         self.shapes_changed()
-        self.status.config(text=tr("image.placed", name=sh["name"]))
+        self.status.config(text=tr("image.placed", name=sh["name"]) +
+                           (tr("image.others_missing", n=missing) if missing else ""))
+
+    def sync_pictures(self, s, skip):
+        """Every other placed picture takes the colours in settings s (one set for all, user): their notes made
+        again with them (from their own picture files; a missing file keeps its notes, whose colours then shift).
+        Returns how many files were missing."""
+        from notes import picture as P
+        from notes.custom import pack_notes
+        pal = np.array([P.lin_of(h) for h in s["pal"]])
+        missing = 0
+        for j, sh in enumerate(self.shapes):
+            if j == skip or "picture" not in sh:
+                continue
+            p = sh["picture"]
+            t = p["set"]
+            if (t.get("pal"), t.get("locked", []), t.get("use10", False)) == (s["pal"], s.get("locked", []),
+                                                                              s.get("use10", False)):
+                continue
+            t.update(pal=list(s["pal"]), locked=list(s.get("locked", [])), use10=s.get("use10", False),
+                     colours=len(s["pal"]))
+            pic = self.picture_for(p)
+            if pic is None:
+                missing += 1
+                continue
+            steps, keys = p["grid"]
+            rows, cols = (steps, keys) if t["view"] == "fall" else (keys, steps)
+            cl, al = P.cells(pic, rows, cols)
+            cl = P.adjust(cl, t["brightness"], t["contrast"], t["saturation"], t["sharpen"])
+            got, _, _ = P.grid_notes(P.quantise(cl, pal, t["blend"], t["strength"], t["keep"], al, t["empty"]),
+                                     t["view"], t["join"])
+            if len(got):
+                sh["notes"] = pack_notes(got)
+        return missing
+
+    def picture_state(self, info):
+        """"ok", "missing" (no file there) or "changed" (its fingerprint isn't the one it was made from)."""
+        if not os.path.isfile(info["file"]):
+            return "missing"
+        return "ok" if self.picture_for(info) is not None else "changed"
 
     def edit_picture(self, i):
         """Double-click / "Change its look..." on a placed picture: the image window with its picture and settings,
@@ -1552,7 +1596,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         near = self.roll.visible_notes(lo, hi)
         s_, e_ = near[:, 0], near[:, 1]
         for s, e, p, v, slot, _ in near[((lo <= s_) & (s_ <= hi)) | ((s_ <= t_to) & (t_to < e_))].tolist():
-            k = (slot_track_channel(slot)[1], p)
+            k = (slot_track_channel(slot, self.picture_use10)[1], p)
             if k not in now or s > now[k][0]:
                 now[k] = (s, v)
         held = self._scrub_held

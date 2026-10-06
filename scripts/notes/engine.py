@@ -667,7 +667,7 @@ CHANNEL_MODES = ("raw", "single", "auto")
 SPLITS = ("key", "time")
 
 
-def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None):
+def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -678,6 +678,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None):
     apart: per shape True if its tracks must get different channels (pasted notes, Fill / Spam "Outline").
     fixed: per shape True if its tracks ARE its slots, whatever the mode (a picture's colours: slot k = the k-th
     colour of the project's picture colours, so its channel never changes).
+    use10: the pictures use channel 10 too (slot k = channel k, slot_track_channel): the other shapes' slots skip
+    every slot that would be channel 10 (shapes never use it, user).
     """
     tracks = tracks or [None] * len(note_lists)
     apart = apart or [False] * len(note_lists)
@@ -701,6 +703,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None):
                 forced.append(range(len(units), len(units) + len(ids)))
             units += [lst[which == k] for k in range(len(ids))]
         unit_slots = np.array(assign_slots(units, split, forced), np.int64)
+        if use10:  # (0..8, 10..24, 26..40...: never a slot that is channel 10)
+            unit_slots = unit_slots + (unit_slots + 6) // 15
         slot_of = [pin if u is None else unit_slots[u] for u, pin in zip(unit_of, pinned)]
         count = int(unit_slots.max()) + 1 if len(units) else 0
     else:
@@ -718,6 +722,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None):
     return notes, count
 
 
-def slot_track_channel(slot):
-    """Slot number -> (track index, MIDI channel 0-15), one channel per track, skipping the drum channel."""
-    return slot, CHANNELS[slot % len(CHANNELS)]
+def slot_track_channel(slot, use10=False):
+    """Slot number -> (track index, MIDI channel 0-15), one channel per track, skipping the drum channel (use10:
+    not skipping it: slot k = channel k; render keeps the other shapes off those slots)."""
+    return slot, slot % 16 if use10 else CHANNELS[slot % len(CHANNELS)]

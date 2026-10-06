@@ -17,6 +17,7 @@ from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, cl
 from notes.hzbass import clean_hz
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
 from notes.paths import KEYS
+from notes.picture import paths_for_file
 from notes.polygon import POLYGON_DEFAULTS, clean_polygon
 from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
@@ -213,6 +214,7 @@ class ProjectFiles:
                 sh = None
             if sh:
                 shapes.append(sh)
+        shapes = paths_for_file(shapes, os.path.dirname(os.path.abspath(path)), False)  # (pictures' files)
         made = version_tuple(data.get("app_version")) if isinstance(data.get("app_version"), str) else None
         newer = made and made > version_tuple(VERSION) or type(data.get("version")) is int and data["version"] > 2
         if newer:  # (what that version added is left out)
@@ -368,6 +370,8 @@ class ProjectFiles:
                               "claw_window": self.claw_pos, "strum_window": self.strum_pos, "chop_window": self.chop_pos, "hz_window": self.hz_pos, "hz_fx_height": self.hz_fx_h, "hz_preview": self.hz_preview,
                               "history_window": self.history_pos, "history_undocked": self.history_undocked,
                               **self.tips.state(), **self.updates.state(), **self.tool_picker.state()}
+        # pictures in the project's folder (or one inside it) are saved relative to it: they move together
+        data["shapes"] = paths_for_file(data["shapes"], os.path.dirname(os.path.abspath(path)), True)
         write_text(path, project_json(data))
 
     def load_autosave(self):
@@ -563,7 +567,7 @@ class ProjectFiles:
         self.busy(tr("project.saving_midi"))  # (millions of notes take a few seconds)
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            write_midi(path, ppq, bpm, beats, self.rendered)
+            write_midi(path, ppq, bpm, beats, self.rendered, self.picture_use10)
         except OSError as e:
             messagebox.showerror(tr("project.spiderweb"), couldnt_save(e))
             return
