@@ -15,6 +15,7 @@ import json
 import math
 import sys
 import tkinter as tk
+from concurrent.futures import ThreadPoolExecutor
 from tkinter import ttk
 
 import numpy as np
@@ -40,6 +41,17 @@ OUT_WHITE, OUT_BLACK = "#9a9fa6", "#30343a"  # keys the letters don't reach now:
 METER_KEY, METER_BEATS = 33, 4.0  # the note meter: notes a second while an A1 is held (the first 4 beats)
 METER_MS = 250  # ... counted this long after the sound last changed
 METER_TOP = 6  # ... its bar goes to 10^6 notes a second (along a log scale)
+METER_POLL_MS, METER_SLOW = 50, 3  # ... the count (in the background) looked for this often; "…" after this many looks
+METER_JOBS = ThreadPoolExecutor(max_workers=1)
+
+
+def meter_count(sh, ppq, wanted):
+    """(In the background) the notes the meter's shape starts in its first METER_BEATS (0 when no longer wanted)."""
+    if not wanted():
+        return 0
+    notes, _ = shape_notes_tracks(sh, ppq, 128)
+    starts = np.asarray(notes)[:, 0] if len(notes) else np.zeros(0)
+    return int(np.count_nonzero(starts < METER_BEATS * ppq))
 LOOK = {"bg": PIC, "grid": GRID, "outside": "#1b1f24", "notes": "#34507e", "hint": DIM, "repeat": MID,
         "names": "#1f2328", "names_dim": 0.6, "text": DIM, "edge": EDGE, "box": DIM, "point": PIC}
 # the computer keyboard's letters playing the keys from C up (like many music programs: the middle row = white keys,
@@ -145,6 +157,7 @@ class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
         self.kb_base = getattr(self.app, "hz_kb_base", 24)  # the key the letter A plays (C1; Hz bass is low)
         self.shown = None  # what the pane was drawn for (refresh)
         self.meter_job, self.meter_for = None, None  # the note meter: waiting to be counted, counted for
+        self.meter_asked, self.meter_poll = None, None  # ... being counted for (in the background), looking for it
         styles(self)
         self.configure(background=BG)
         top = tk.Frame(self, background=BG)  # the big tabs, the preset bar, the note meter
@@ -213,6 +226,10 @@ class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
         w = min(max(round(1000 * s), self.knobs.winfo_reqwidth()), self.winfo_screenwidth() - 40)  # small screen:
         self.lay_boxes(w - 20)  # as wide as it is, the boxes in more rows, and the Knobs tab scrolls)
         self.update_idletasks()
+        tw, th = (max(f(b) for b in self.tab_buttons.values()) for f in (tk.Misc.winfo_reqwidth, tk.Misc.winfo_reqheight))
+        for b in self.tab_buttons.values():  # (the big tabs all one size: the biggest one's, user)
+            b.config(width=tw, height=th)
+            b.pack_propagate(False)
         need = self.winfo_reqheight() - kc.winfo_reqheight() + self.knobs.winfo_reqheight()
         h = min(max(need, names_h + round(160 * s)), self.winfo_screenheight() - 80)
         self.geometry(f"{w}x{h}")
@@ -364,7 +381,8 @@ class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
 
     def count_notes(self):
         """The note meter: the notes a second this sound makes while one A1 is held (its first METER_BEATS: the
-        engine's own notes, as the live keys make them)."""
+        engine's own notes, as the live keys make them), counted in the background (a big sound on 128 keys took
+        seconds: the window stood still after every knob)."""
         self.meter_job = None
         if not self.winfo_exists():
             return
@@ -374,16 +392,30 @@ class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
             return
         sh = self.live.held_shape(METER_KEY, METER_BEATS)
         sig = json.dumps([sh, ppq], sort_keys=True, default=str)
-        if sig == (self.meter_for or (None,))[0]:
+        if sig in ((self.meter_for or (None,))[0], self.meter_asked):
             return
+        self.meter_asked = sig
+        wanted = lambda: self.meter_asked == sig  # (asked again meanwhile: not counted)
+        self.meter_wait(METER_JOBS.submit(meter_count, sh, ppq, wanted), sig, bpm, 0)
+
+    def meter_wait(self, job, sig, bpm, polls):
+        """The count looked for every METER_POLL_MS; "…" shown once it takes a while."""
+        self.meter_poll = None
+        if not self.winfo_exists() or self.meter_asked != sig:
+            return
+        if not job.done():
+            if polls == METER_SLOW and self.meter_for:
+                self.meter_for = None
+                self.draw_meter()
+            self.meter_poll = self.after(METER_POLL_MS, lambda: self.meter_wait(job, sig, bpm, polls + 1))
+            return
+        self.meter_asked = None
         try:
-            notes, _ = shape_notes_tracks(sh, ppq, 128)
+            n = job.result()
         except Exception:
             from files.errors import write_log
             write_log(*sys.exc_info(), "note meter")
             return
-        starts = np.asarray(notes)[:, 0] if len(notes) else np.zeros(0)
-        n = int(np.count_nonzero(starts < METER_BEATS * ppq))
         self.meter_for = (sig, n / (METER_BEATS * 60.0 / bpm))
         self.draw_meter()
 
@@ -547,8 +579,10 @@ class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
             self.let_go()
 
     def close(self):
-        if self.meter_job:
-            self.after_cancel(self.meter_job)
+        for job in (self.meter_job, self.meter_poll):
+            if job:
+                self.after_cancel(job)
+        self.meter_asked = None
         if self.letter_up:
             self.after_cancel(self.letter_up)
         if self.held is not None:
