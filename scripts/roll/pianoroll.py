@@ -61,6 +61,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.note_img = None     # grid + notes as one picture when there are too many notes for canvas items
         self._note_pic = None    # what that picture shows (see redraw)
         self._note_index = None  # rendered notes sorted by start, to find the visible ones quickly
+        self._start_order = None  # their row numbers in that order
+        self._paint_order = None  # the compiled loops' notes in painting order (roll_draw.paint_order)
         self._img = None         # that picture's pixels (NumPy), to move along when the view moves
         self._exact = None       # timer: the picture painted whole again after it was moved along
         self._shown = None       # the pixels the picture on screen has now (show_image sends only what differs)

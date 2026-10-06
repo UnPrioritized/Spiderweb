@@ -743,11 +743,19 @@ class RollDrawing:
         for x, color in cols:
             self.create_line(x, top, x, h, fill=color)
 
+    def start_order(self):
+        """The rendered notes' row numbers by start (stable: the same start keeps their order), kept until the
+        notes change."""
+        rendered = self.app.rendered
+        if self._start_order is None or self._start_order[0] is not rendered:
+            self._start_order = (rendered, np.argsort(np.ascontiguousarray(rendered[:, 0]), kind="stable"))
+        return self._start_order[1]
+
     def sorted_notes(self):
         """The rendered notes sorted by start (kept until the notes change)."""
         rendered = self.app.rendered
         if self._note_index is None or self._note_index[0] is not rendered:
-            order = np.take(rendered, np.argsort(np.ascontiguousarray(rendered[:, 0]), kind="stable"), axis=0)
+            order = np.take(rendered, self.start_order(), axis=0)
             self._note_index = (rendered, order, int((order[:, 1] - order[:, 0]).max()) if len(order) else 0,
                                 np.ascontiguousarray(order[:, 0]))
         return self._note_index[1]
@@ -756,7 +764,35 @@ class RollDrawing:
         """(first, end): the sorted_notes() rows that can overlap ticks t_lo..t_hi."""
         self.sorted_notes()
         longest, starts = self._note_index[2:]
-        return int(np.searchsorted(starts, t_lo - longest, "left")), int(np.searchsorted(starts, t_hi, "right"))
+        # (whole ticks looked for: a fraction made NumPy turn every start into a fraction first, the same rows)
+        lo, hi = (min(max(v, -1 << 62), 1 << 62) for v in (math.ceil(t_lo - longest), math.floor(t_hi)))
+        return int(np.searchsorted(starts, lo, "left")), int(np.searchsorted(starts, hi, "right"))
+
+    def paint_order(self, fast):
+        """The compiled loops' painting order of the notes (fastloops.paint_order: s, e, key, colour, first,
+        longest) + the number of unselected owners, kept until the notes, selection or picture colours change; None
+        when there are no notes or keys / owners outside the tables (the other way then)."""
+        app = self.app
+        rendered = app.rendered
+        pics = np.asarray(getattr(app, "picture_owners", ()), bool)
+        key = (frozenset(app.sels), pics.tobytes(), len(pics))
+        got = self._paint_order
+        if got is not None and got[0] is rendered and got[1] == key:
+            return got[2]
+        made = None
+        if len(rendered) and rendered[:, 2].min() >= 0 and rendered[:, 2].max() < app.keys and rendered[:, 5].min() >= 0:
+            owners = int(rendered[:, 5].max()) + 1
+            sel = np.zeros(owners, bool)
+            sel[[s for s in app.sels if 0 <= s < owners]] = True
+            rank = np.empty(owners, np.int64)  # shapes in their order, the selected ones last
+            others = owners - int(sel.sum())
+            rank[~sel] = np.arange(others)
+            rank[sel] = np.arange(others, owners)
+            made = fast.paint_order(np.ascontiguousarray(rendered, np.int64), self.start_order(), rank, owners,
+                                    pics if pics.any() else np.zeros(0, bool), len(SLOT_COLORS), PICTURE_GROUP)
+            made = (made, others)
+        self._paint_order = (rendered, key, made)
+        return made
 
     def visible_notes(self, t_lo, t_hi):
         """Rendered notes (array rows) that can overlap ticks t_lo..t_hi."""
@@ -779,12 +815,25 @@ class RollDrawing:
         row1 = np.maximum(row1, row0 + 1)
         if clip:
             shown &= ~((row1 < clip[1]) | (row0 >= clip[3]))
-            notes = self.visible_notes(self.x2t(clip[0] - 2) * ppq, self.x2t(clip[2] + 2) * ppq)
-            notes = notes[shown[np.clip(notes[:, 2], 0, app.keys - 1)]]
-        else:
-            notes = self.visible_notes(self.x2t(kb) * ppq, self.x2t(w) * ppq)
-        if only is not None and app.sels:
-            notes = notes[np.isin(notes[:, 5], list(app.sels)) == only]
+        t_lo, t_hi = (self.x2t(clip[0] - 2) * ppq, self.x2t(clip[2] + 2) * ppq) if clip else (self.x2t(kb) * ppq,
+                                                                                               self.x2t(w) * ppq)
+        fast = loops()
+        drafted = self.draft_notes() if only is None else None
+        kept = self.paint_order(fast) if fast else None
+        main = None
+        if kept is not None:  # (the compiled loops, the notes kept in painting order: the same notes)
+            (s, e, k, c, first, longest), others = kept
+            b0, b1 = 0, len(first) - 1
+            if only is not None and app.sels:
+                b0, b1 = (others, b1) if only else (0, others)
+            # (the same notes as visible_notes(t_lo, t_hi) gives, then screen())
+            args = (s, e, k, c, first, b0, b1, t_lo - longest, float(t_hi), float(ax), float(bx), float(kb), float(w),
+                    np.ascontiguousarray(shown, bool), bool(clip), float(clip[0]) if clip else 0.0,
+                    float(clip[2]) if clip else 0.0)
+            if drafted is None:
+                left, right = int(kb) - 2, int(w) + 2
+                return fast.order_rects(*args, left, right, app.keys, row0, row1)
+            main = fast.order_screen(*args)
         sels = list(app.sels)
 
         def screen(notes, color, order):
@@ -819,10 +868,14 @@ class RollDrawing:
             return (x0[on].astype(np.int64), x1[on].astype(np.int64), key[on],
                     color * 32 + np.minimum(notes[on, 3], 127) // 4)
 
-        fast = loops()
-        main = self.fast_screen(fast, notes, ax, bx, kb, w, shown, clip) if fast else None
-        parts = [screen(notes, None, True) if main is None else main]
-        drafted = self.draft_notes() if only is None else None
+        if main is None:
+            notes = self.visible_notes(t_lo, t_hi)
+            if clip:
+                notes = notes[shown[np.clip(notes[:, 2], 0, app.keys - 1)]]
+            if only is not None and app.sels:
+                notes = notes[np.isin(notes[:, 5], list(app.sels)) == only]
+            main = screen(notes, None, True)
+        parts = [main]
         if drafted is not None:
             parts.append(screen(drafted, DRAFT, False))
         x0, x1, key, color = (np.concatenate(v) if len(v) > 1 else v[0] for v in zip(*parts))
@@ -846,28 +899,6 @@ class RollDrawing:
                 x0, x1, key, color = x0[keep], x1[keep], key[keep], color[keep]
         # the outline goes inside the note (user): its last pixel is the one before the note's end / next row
         return x0, row0[key], np.maximum(x1 - 1, x0), row1[key] - 1, color
-
-    def fast_screen(self, fast, notes, ax, bx, kb, w, shown, clip):
-        """note_rects' screen(notes, None, True) by the compiled loop, or None when it can't be used here (keys or
-        owners outside the tables: the NumPy way then)."""
-        app = self.app
-        if len(notes):
-            key, owner = notes[:, 2], notes[:, 5]
-            if key.min() < 0 or key.max() >= len(shown) or owner.min() < 0:
-                return None
-            owners = int(owner.max()) + 1
-        else:
-            owners = 1
-        sel = np.zeros(owners, bool)
-        sel[[s for s in app.sels if 0 <= s < owners]] = True
-        rank = np.empty(owners, np.int64)  # painting order: shapes in their order, the selected ones last
-        rank[~sel] = np.arange(owners - int(sel.sum()))
-        rank[sel] = np.arange(owners - int(sel.sum()), owners)
-        pics = np.asarray(getattr(app, "picture_owners", ()), bool)
-        return fast.screen_notes(np.ascontiguousarray(notes, np.int64), float(ax), float(bx), float(kb), float(w),
-                                 np.ascontiguousarray(shown, bool), bool(clip),
-                                 float(clip[0]) if clip else 0.0, float(clip[2]) if clip else 0.0, rank, owners,
-                                 pics if pics.any() else np.zeros(0, bool), len(SLOT_COLORS), PICTURE_GROUP)
 
     def paint_image(self, w, h, rows, cols, rects):
         """Grid and notes as one picture over the note area."""
