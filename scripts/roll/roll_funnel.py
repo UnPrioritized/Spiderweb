@@ -317,14 +317,15 @@ class FunnelEditing:
         return {part}
 
     def funnel_parts(self):
-        """(the funnel, {line numbers}, {(start, wall end)}) highlighted, or None."""
+        """(the funnel, {line numbers}, {(start, wall end)}) highlighted, or None. Curves with no room (their start
+        where the line meets the wall) are left out while they can't be seen."""
         app = self.app
         sh = app.selected()
         if not app.parts or not sh or sh["kind"] != "funnel" or len(app.sels) != 1:
             return None
         lines = {p[1] for p in app.parts if p[0] == "line" and p[1] < len(funnel_lines(sh))}
         curves = {p[1:] for p in app.parts if p[0] == "curve" and p[1] < len(sh["starts"])
-                  and sh["starts"][p[1]]["ends"][p[2]]}
+                  and self.curve_at(sh, p[1], p[2])[1]}
         return (sh, lines, curves) if lines or curves else None
 
     def curve_parts(self):
