@@ -28,6 +28,7 @@ from notes.strum import apply_strum, clean_strum
 from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
+from notes.picture import clean_picture
 from notes.polygon import clean_polygon, polygon_strokes
 from notes.sliced import clean_cut, cut_through, in_part, piece_notes, run_origins, source, spotted_notes
 from notes.smooth import clean_level, smooth_path
@@ -212,6 +213,10 @@ def clean_shape(sh):
             out.update(notes=sh["notes"], strokes=[dict(BOX_STROKE)], fill="empty")
             if sh.get("own_vel"):
                 out["own_vel"] = True
+            pic = clean_picture(sh.get("picture"))
+            if pic:  # a picture made into notes (picture.py): the notes are its finished colours, track = slot
+                out["picture"] = pic
+                out.pop("own_vel", None)
     if out["kind"] == "arc":  # start, a point it passes through, end; k = beats per key on screen (arc.py)
         if len(out["pts"]) != 3:
             return None
@@ -657,7 +662,7 @@ CHANNEL_MODES = ("raw", "single", "auto")
 SPLITS = ("key", "time")
 
 
-def render(note_lists, mode, split="key", tracks=None, apart=None):
+def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -666,12 +671,20 @@ def render(note_lists, mode, split="key", tracks=None, apart=None):
     tracks: per shape None, or the track of each of its notes (pasted notes, shape_notes_tracks): with "auto" each
     track of the shape gets channels as if it were a shape of its own.
     apart: per shape True if its tracks must get different channels (pasted notes, Fill / Spam "Outline").
+    fixed: per shape True if its tracks ARE its slots, whatever the mode (a picture's colours: slot k = the k-th
+    colour of the project's picture colours, so its channel never changes).
     """
     tracks = tracks or [None] * len(note_lists)
     apart = apart or [False] * len(note_lists)
+    fixed = fixed or [False] * len(note_lists)
+    pinned = [np.asarray(tr, np.int64) if fx and tr is not None else None for tr, fx in zip(tracks, fixed)]
+    top = max([int(p.max()) + 1 for p in pinned if p is not None and len(p)] or [0])
     if mode == "auto":
         units, unit_of, forced = [], [], []  # the shapes, pasted notes split up by track; unit_of = each note's unit
-        for lst, tr, sep in zip(note_lists, tracks, apart):
+        for lst, tr, sep, pin in zip(note_lists, tracks, apart, pinned):
+            if pin is not None:
+                unit_of.append(None)
+                continue
             if tr is None or not len(lst):
                 unit_of.append(len(units))
                 units.append(lst)
@@ -683,10 +696,12 @@ def render(note_lists, mode, split="key", tracks=None, apart=None):
                 forced.append(range(len(units), len(units) + len(ids)))
             units += [lst[which == k] for k in range(len(ids))]
         unit_slots = np.array(assign_slots(units, split, forced), np.int64)
-        slot_of = [unit_slots[u] for u in unit_of]
+        slot_of = [pin if u is None else unit_slots[u] for u, pin in zip(unit_of, pinned)]
         count = int(unit_slots.max()) + 1 if len(units) else 0
     else:
-        slot_of, count = [0] * len(note_lists), 1 if note_lists else 0
+        slot_of = [0 if pin is None else pin for pin in pinned]
+        count = 1 if any(p is None for p in pinned) else 0
+    count = max(count, top)
     notes = np.empty((sum(len(lst) for lst in note_lists), 6), np.int64)
     at = 0
     for o, lst in enumerate(note_lists):

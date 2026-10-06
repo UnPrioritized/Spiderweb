@@ -2354,6 +2354,8 @@ def block_notes(sh, ppq):
     (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
     ub, up, vb, vp = b1 - b0, p1 - p0, b2 - b0, p2 - p0
     t_all, k_all = float(rows[:, 1].max()), float(rows[:, 2].max() + 1)
+    if "picture" in sh:  # (a picture's box is its whole grid, even where its edges are see-through)
+        t_all, k_all = (float(n) for n in sh["picture"]["grid"])
     v = (rows[:, 2] + 0.5) / k_all
     ends = []
     for u in (rows[:, 0] / t_all, rows[:, 1] / t_all):

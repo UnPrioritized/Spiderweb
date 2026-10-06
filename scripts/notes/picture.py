@@ -376,6 +376,76 @@ def _spread(cl, pal, pal_lab, strength, free):
     return idx
 
 
+# ------------------------------------------------------------------ the placed picture (a custom shape)
+# A placed picture is a custom shape holding notes like pasted notes do (custom.py "notes": packed rows of
+# (start, end, key row, velocity, track) in grid steps; track = colour slot), plus sh["picture"]: where it came
+# from and how it was made, so it always opens and plays even if the file is gone, and can be made again.
+
+_RANGES = {"keys": (1, 256), "steps": (1, 8), "colours": (2, 16), "focus": (0, 1), "strength": (0, 1),
+           "keep": (0, 1), "sharpen": (0, 1), "brightness": (-1, 1), "contrast": (-1, 1), "saturation": (-1, 1),
+           "share": (0.1, 10)}
+_CHOICES = {"view": ("fall", "roll"), "blend": ("spread", "pattern", "none")}
+
+
+def clean_settings(s):
+    """Settings from a file -> every one of SUGGESTED's (+ share), a broken one = its suggested value."""
+    out = dict(SUGGESTED, share=1.0)
+    for k, v in (s if isinstance(s, dict) else {}).items():
+        if k in _CHOICES and v in _CHOICES[k]:
+            out[k] = v
+        elif k in _RANGES and isinstance(v, (int, float)) and not isinstance(v, bool) and np.isfinite(v):
+            lo, hi = _RANGES[k]
+            out[k] = max(lo, min(hi, int(v) if isinstance(SUGGESTED.get(k), int) else float(v)))
+    return out
+
+
+def clean_picture(p):
+    """sh["picture"] from a file -> valid, or None. file = the picture's path (relative to the project when near
+    it), sig = its fingerprint, size = its own width / height, grid = [steps, keys] of the notes, set = settings."""
+    if not isinstance(p, dict) or not isinstance(p.get("file"), str) or not p["file"] or len(p["file"]) > 4096:
+        return None
+    try:
+        steps, keys = (int(n) for n in p["grid"])
+        w, h = (int(n) for n in p["size"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (0 < steps <= 10 ** 7 and 0 < keys <= 256 and w > 0 and h > 0):
+        return None
+    sig = p.get("sig") if isinstance(p.get("sig"), str) and len(p.get("sig")) <= 64 else ""
+    return {"file": p["file"], "sig": sig, "size": [w, h], "grid": [steps, keys], "set": clean_settings(p.get("set"))}
+
+
+def grid_notes(grid, view):
+    """A colour grid -> (rows, steps, keys): rows = (start, end, key row, velocity, slot) notes in grid steps, one
+    per run of the same colour on a key. Falling: keys across the picture, its bottom row first; piano roll: keys
+    up the picture (bottom row = lowest key), its left column first. Empty cells (-1) make no note."""
+    a = grid[::-1].T if view == "fall" else grid[::-1]  # keys x steps
+    keys, steps = a.shape
+    change = np.ones(a.shape, bool)
+    change[:, 1:] = a[:, 1:] != a[:, :-1]
+    ks, ts = np.nonzero(change)  # (key by key, in time order)
+    ends = np.full(len(ts), steps)
+    same = ks[1:] == ks[:-1]
+    ends[:-1] = np.where(same, ts[1:], steps)
+    val = a[ks, ts]
+    on = val >= 0
+    rows = np.column_stack([ts, ends, ks, np.full(len(ts), 100), val])[on].astype(np.int64)
+    return rows, steps, keys
+
+
+def picture_shape(grid, info, b0, k0, step_beats, vel=127):
+    """A new placed picture: its box from beat b0 and key k0 (lowest key) up, one grid step = step_beats beats.
+    info = sh["picture"] without "grid" (file, sig, size, set). None if the grid has no colour at all."""
+    from notes.custom import BOX_STROKE, box_frame, pack_notes
+    rows, steps, keys = grid_notes(grid, info["set"]["view"])
+    if not len(rows):
+        return None
+    name = os.path.basename(info["file"])
+    return dict(kind="custom", name=name, strokes=[dict(BOX_STROKE)], fill="empty", notes=pack_notes(rows),
+                picture=dict(info, grid=[steps, keys]), vel0=vel, vel1=vel,
+                pts=box_frame(b0, k0 - 0.5, b0 + steps * step_beats, k0 - 0.5 + keys))
+
+
 def make(pic, s, pal=None):
     """The whole way for one picture with settings s (SUGGESTED's keys) -> (grid, palette, cells). pal: the
     project's shared colours (None = fit them to this picture alone)."""

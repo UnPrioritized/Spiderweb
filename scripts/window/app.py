@@ -848,7 +848,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.after_idle(self.sync_custom)  # (the panel's warning)
         got = [(n, capped_colours(t) if w > COLOURS else t) for (n, t), w in zip(got, wanted)]
         self.rendered, self.slot_count = render([n for n, _ in got], self.channel_mode.get(), self.channel_split,
-                                                [t for _, t in got], [tracks_apart(sh) for sh in self.shapes])
+                                                [t for _, t in got], [tracks_apart(sh) for sh in self.shapes],
+                                                ["picture" in sh for sh in self.shapes])
         if self._notes_worked != worked:
             self._notes_time = time.perf_counter() - started
         counts = self.note_counts = np.bincount(self.rendered[:, 5], minlength=len(self.shapes)).tolist()
