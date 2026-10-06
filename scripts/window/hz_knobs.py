@@ -644,7 +644,7 @@ class SynthKnobs:
         hz.fxl, hz.loops, hz.off, hz.froms, hz.fits, hz.sustains, hz.lfo, hz.extra = self.turning
         self.vals, self.turning = self.turn_vals, None
         for dial in self.dials.values():
-            dial.drag = None
+            dial.drag, dial.pointing = None, False
         self.redraw()
         self.show_knobs()
         return True

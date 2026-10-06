@@ -42,9 +42,10 @@ class Knob(tk.Canvas):
         self.bind("<B1-Motion>", self.move)
         self.bind("<ButtonRelease-1>", lambda e: self.release())
         self.bind("<ButtonPress-2>", lambda e: self.turn_to(0, True))  # (greyed out too)
-        self.bind("<ButtonPress-3>", self.point)
-        self.bind("<B3-Motion>", self.point)
-        self.bind("<ButtonRelease-3>", lambda e: self.enabled and self.changed(self.value, True))
+        self.pointing = False  # the right mouse button turning it (False again: called off, e.g. Ctrl+Z)
+        self.bind("<ButtonPress-3>", self.point_press)
+        self.bind("<B3-Motion>", lambda e: self.pointing and self.point(e))
+        self.bind("<ButtonRelease-3>", lambda e: self.point_release())
         self.bind("<MouseWheel>", lambda e: self.step(5 if e.delta > 0 else -5))
         for key, d in (("Up", 1), ("Right", 1), ("Down", -1), ("Left", -1)):
             self.bind(f"<{key}>", lambda e, d=d: self.step(d * (1 if e.state & 1 else 5)))
@@ -88,6 +89,15 @@ class Knob(tk.Canvas):
         c = self.size / 2
         if (e.x - c) ** 2 + (e.y - c) ** 2 > 4:  # (not right on the middle: no direction there)
             self.turn_to(math.degrees(math.atan2(e.x - c, c - e.y)) / self.TURN * 100)
+
+    def point_press(self, e):
+        self.pointing = self.enabled
+        self.point(e)
+
+    def point_release(self):
+        if self.pointing:
+            self.pointing = False
+            self.changed(self.value, True)
 
     def press(self, e):
         if not self.enabled:
