@@ -245,7 +245,34 @@ class ImageWindow(tk.Toplevel):
             ttk.Checkbutton(f, text=tr("image." + k), variable=self.vars[k],
                             command=lambda k=k: self.put(k, self.vars[k].get())).pack(anchor="w", pady=1)
         ttk.Label(t2, text=tr("image.look_note"), foreground="#777", wraplength=330, justify="left").pack(
-            anchor="w", pady=(6, 0))
+            anchor="w", pady=(0, 6))
+
+        f = ttk.LabelFrame(t2, text=tr("image.colour_list"), padding=(6, 2, 6, 4))
+        f.pack(fill="x", pady=(0, 5))
+        r = ttk.Frame(f)
+        r.pack(fill="x", pady=1)
+        ttk.Label(r, text=tr("image.format"), width=15).pack(side="left")
+        self.fmt_box = ttk.Combobox(r, width=24, state="readonly")
+        self.fmt_box.pack(side="left")
+        self.fmt_box.bind("<<ComboboxSelected>>", lambda e: self.set_fmt(self.fmt_box.get()))
+        r = ttk.Frame(f)
+        r.pack(fill="x", pady=1)
+        ttk.Label(r, text=tr("image.by"), width=15).pack(side="left")
+        bys = [("channel", tr("image.by_channel")), ("order", tr("image.by_order"))]
+        self.by_box = ttk.Combobox(r, values=[t for _, t in bys], width=24, state="readonly")
+        self.by_box.pack(side="left")
+        self.by_box.bind("<<ComboboxSelected>>", lambda e: self.set_by(bys[self.by_box.current()][0]))
+        self.bys = bys
+        r = ttk.Frame(f)
+        r.pack(fill="x", pady=(4, 2))
+        ttk.Button(r, text=tr("image.copy"), command=self.copy_colours).pack(side="left")
+        ttk.Button(r, text=tr("image.paste"), command=self.paste_colours).pack(side="left", padx=4)
+        ttk.Button(r, text=tr("image.edit_formats"), command=self.edit_formats).pack(side="left")
+        ttk.Label(f, text=tr("image.copy_gives"), foreground="#555").pack(anchor="w", pady=(4, 0))
+        self.gives = tk.Text(f, width=40, height=7, font=("Consolas", 9), background="#fafafa", wrap="none")
+        self.gives.pack(fill="x")
+        self.gives.tag_config("bad", foreground="white", background="#d33")
+        self.start = {}  # pasted colours that are only a starting point: slot -> linear colour
 
     def section(self, parent, key):
         f = ttk.LabelFrame(parent, text=tr(key), padding=(6, 2, 6, 4))
@@ -293,6 +320,75 @@ class ImageWindow(tk.Toplevel):
         self.view.set(s["view"])
         self.kind_box.current([k for k, _ in self.kinds].index(s["blend"]))
         self.look_box.current([k for k, _ in self.looks].index(s["look"]))
+        self.by_box.current([k for k, _ in self.bys].index(s["by"]))
+        self.fmt_box.config(values=[f["name"] for f in self.formats()])
+        self.fmt_box.set(self.format()["name"])
+
+    # ------------------------------------------------------------ the colour list
+
+    def formats(self):
+        from files import colour_list as CL
+        return CL.built_in() + CL.load_formats()
+
+    def format(self):
+        """The format picked (the first built-in one if its name isn't there any more)."""
+        all_ = self.formats()
+        return next((f for f in all_ if f["name"] == self.s.get("fmt")), all_[0])
+
+    def colours_hex(self):
+        return [P.hex_of(c) for c in self.pal] if self.pal is not None else []
+
+    def set_fmt(self, name):
+        self.s["fmt"] = name
+        self.show_gives()
+
+    def set_by(self, by):
+        self.s["by"] = by
+        self.show_gives()
+
+    def show_gives(self):
+        """The "What Copy gives" box."""
+        from files import colour_list as CL
+        t = self.gives
+        t.config(state="normal")
+        t.delete("1.0", "end")
+        for text, ok in CL.write(self.format(), self.colours_hex(), self.s["by"]):
+            t.insert("end", text, () if ok else ("bad",))
+        t.config(state="disabled")
+
+    def copy_colours(self):
+        from window.format_window import copy_colours
+        if self.pal is not None and copy_colours(self, self.format(), self.colours_hex(), self.s["by"], False):
+            self.app.status.config(text=tr("image.copied", name=self.format()["name"]))
+
+    def edit_formats(self):
+        from window.format_window import FormatWindow
+
+        def done(name):
+            if name:
+                self.s["fmt"] = name
+            self.show_settings()
+            self.show_gives()
+
+        FormatWindow(self, self.colours_hex, lambda: self.s["by"], lambda: False, self.format()["name"], done)
+
+    def paste_colours(self):
+        from window.paste_window import PasteWindow
+        PasteWindow(self, self.s["by"], False, self.s["colours"], self.pasted)
+
+    def pasted(self, slots, lock, alpha):
+        """Paste colours' "Use these colours": the picture takes them (locked, or as a starting point)."""
+        n = max(2, min(15, max(slots) + 1))
+        self.s["colours"] = n
+        cols = {k: P.lin_of(h) for k, h in slots.items() if k < n}
+        if lock:
+            self.locked, self.start = cols, {}
+        else:
+            self.locked, self.start = {}, cols
+        self.show_settings()
+        self.made_for = (self.made_for[0], None)
+        self.remake()
+        self.app.status.config(text=tr("image.pasted", n=len(cols)))
 
     def step_ticks(self):
         return max(1, round(self.s["step"] * self.app.ppq))
@@ -321,7 +417,7 @@ class ImageWindow(tk.Toplevel):
     def suggested(self):
         keep = {k: self.s[k] for k in ("view", "look", "outline", "shade", "join", "step")}
         self.s = dict(P.SUGGESTED, share=1.0, **keep)
-        self.locked = {}
+        self.locked, self.start = {}, {}
         self.show_settings()
         self.remake()
 
@@ -341,7 +437,7 @@ class ImageWindow(tk.Toplevel):
                 messagebox.showerror(tr("image.window_title"), tr("image.cant_open", e=e), parent=self)
             return False
         self.pic = pic
-        self.locked = {}
+        self.locked, self.start = {}, {}
         self.made_for = (None, None)
         self.name.config(text=os.path.basename(path), foreground="#2a7")
         self.app.image_last = (path, dict(self.s))
@@ -368,11 +464,13 @@ class ImageWindow(tk.Toplevel):
         if self.made_for[1] != pal_key:
             al = self.al if s["empty"] else None
             self.pal = P.fit_palette([(self.cl, al, 1.0, s["focus"])], s["colours"],
-                                     locked=[(k, v) for k, v in self.locked.items() if k < s["colours"]])
+                                     locked=[(k, v) for k, v in self.locked.items() if k < s["colours"]],
+                                     start=[(k, v) for k, v in self.start.items() if k < s["colours"]])
         self.made_for = (cells_key, pal_key)
         self.grid = P.quantise(self.cl, self.pal, s["blend"], s["strength"], s["keep"], self.al, s["empty"])
         self.app.image_last = (self.pic.path, dict(s))
         self.show_swatches()
+        self.show_gives()
         self.redraw()
 
     def show_swatches(self):

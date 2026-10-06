@@ -46,6 +46,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     strum_window.py  the Strum window (Start / End panels of knobs, each with its number box)
     range_window.py  the spam gate Range's graph window
     image_window.py  image to notes: the picture, its sliders, the player-look preview, placing it
+    format_window.py the colour list format editor (live output, tags, codes, the user's formats)
+    paste_window.py  Paste colours: colours read out of a player's settings text into the picture
     chop_window.py   the Chop window (rhythm list, a strip to draw rhythms, saved rhythms) + quick chop (Ctrl+U)
   roll/              the piano roll
     pianoroll.py     the piano roll canvas: view, hit testing, mouse editing
@@ -95,6 +97,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     domino_clip.py   Copy to / Paste from Domino (notes on the clipboard in Domino's own format)
     clipboard.py     the Windows clipboard (bytes in any format, and text)
     share.py         shapes / drawings as one line of text to share (packed, checked when pasted back)
+    colour_list.py   picture colours as text for a player's settings (formats), and colours read out of any text
     playback.py      playing through Windows MIDI out
     synth.py         the built-in synth (Hz bass preview): BASS + BASSMIDI DLLs in scripts/bass/
     quicksound.py    the quick sound: single soundfont notes recorded once, copies laid at each note (live keys)
