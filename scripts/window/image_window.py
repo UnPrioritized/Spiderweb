@@ -5,6 +5,7 @@ place. Then it's dragged into the piano roll (held by its middle), placed at the
 the Picture tool. The maths: notes/picture.py."""
 
 import os
+import sys
 import threading
 import time
 import tkinter as tk
@@ -1046,6 +1047,13 @@ class ImageWindow(tk.Toplevel):
             if ask and messagebox.askyesno(tr("image.window_title"), tr("image.missing_ask", path=p["file"]),
                                            parent=self):
                 self.ask_file()
+            return
+        if state == "unreadable":  # (e.g. a JPG placed where Pillow was installed: not "changed")
+            self.name.config(text=tr("image.needs_pillow", name=os.path.basename(p["file"])), foreground="#c60")
+            if ask:
+                command = f'"{sys.executable.replace("pythonw", "python")}" -m pip install pillow'
+                messagebox.showinfo(tr("image.window_title"),
+                                    tr("image.needs_pillow_info", path=p["file"], command=command), parent=self)
             return
         # changed since it was placed (user: "Use the new version / Keep the current one")
         self.name.config(text=tr("image.changed", name=os.path.basename(p["file"])), foreground="#c60")

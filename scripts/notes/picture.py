@@ -74,6 +74,19 @@ def _ppm_pixels(data):
     return raw.reshape(h, w, 3)
 
 
+def readable(path):
+    """Can load() read this kind of picture file here? Without Pillow only PNG and GIF (a file that can't be opened
+    at all counts as readable: load() tells why)."""
+    if speed.pillow():
+        return True
+    try:
+        with open(path, "rb") as f:
+            head = f.read(8)
+    except OSError:
+        return True
+    return head == b"\x89PNG\r\n\x1a\n" or head[:3] == b"GIF"
+
+
 def _has_alpha(path):
     """PNG with an alpha channel or a tRNS chunk, or a GIF (may have a see-through colour)."""
     try:

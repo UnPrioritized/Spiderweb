@@ -1339,9 +1339,13 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         return missing
 
     def picture_state(self, info):
-        """"ok", "missing" (no file there) or "changed" (its fingerprint isn't the one it was made from)."""
+        """"ok", "missing" (no file there), "unreadable" (a kind only Pillow reads, and it isn't installed) or
+        "changed" (its fingerprint isn't the one it was made from)."""
+        from notes import picture as P
         if not os.path.isfile(info["file"]):
             return "missing"
+        if not P.readable(info["file"]):
+            return "unreadable"
         return "ok" if self.picture_for(info) is not None else "changed"
 
     def edit_picture(self, i):
