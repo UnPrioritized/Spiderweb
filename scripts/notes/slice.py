@@ -1,14 +1,17 @@
 """Slice: cutting shapes along a straight line drawn with the Slice tool. Lines, curves and arcs are cut where it
 crosses them (the window does that, like Split here); a custom shape is cut in two filled halves when the line goes
-all the way across it: each half keeps its side's strokes (as polylines) and gets the cut line's pieces inside the
+all the way across it: each half keeps its side's strokes (curves, arcs and polylines cut as themselves; with
+formulas, ellipses, freehand made perfect: as polylines) and gets the cut line's pieces inside the
 shape as a new edge, so its fill closes there. Areas coloured by hand stay with the half their spot is in."""
 
 import copy
 
 import numpy as np
 
-from notes.custom import frame_to_uv, refit, stroke_points
+from notes.bezier import anchor_count, sample, seg_point, segments, split
+from notes.custom import CURVE_STEPS, frame_to_uv, refit, stroke_points
 from notes.gaterange import part_range
+from notes.pattern import has_formula
 
 EPS = 1e-9
 
@@ -16,6 +19,11 @@ EPS = 1e-9
 def crossings(path, a, b, whole_line=False):
     """Where the polyline path ((N, 2) points) crosses the segment a-b, in path order: [(point, s along a-b)].
     whole_line: the infinite line through a and b instead (s may then be outside 0..1)."""
+    return [(pt, s) for pt, s, _, _ in _crossings(path, a, b, whole_line)]
+
+
+def _crossings(path, a, b, whole_line):
+    """crossings, each with the piece of the path it's on and how far along that piece: (point, s, piece, t)."""
     p = np.asarray(path, float).reshape(-1, 2)
     if len(p) < 2:
         return []
@@ -36,7 +44,7 @@ def crossings(path, a, b, whole_line=False):
         pt = q[j] + r[j] * min(1.0, max(0.0, t[j]))
         if not out or np.hypot(*(pt - out[-1][0])) > 1e-7:
             out.append((pt, float(s[j]), int(j), float(t[j])))
-    return [(pt, s) for pt, s, _, _ in out]
+    return out
 
 
 def cut_pieces(path, a, b):
@@ -70,6 +78,83 @@ def cut_pieces(path, a, b):
     if len(cur) >= 2:
         pieces.append(cur)
     return pieces
+
+
+def exact(st):
+    """Is the stroke cut as itself (a curve into curves, an arc into arcs, a polyline into polylines) rather than
+    as the points it's drawn with? Not with formulas (they're laid along the whole stroke), not an ellipse or a
+    freehand stroke made perfect."""
+    return st["kind"] in ("curve", "arc", "poly") and not has_formula(st) and not st.get("smooth")
+
+
+def curve_cuts(pts, a, b):
+    """Where a curve stroke (bezier.py points) crosses the line through a-b, found on the points it's drawn with,
+    then exactly on the curve: [(u = segment + how far along it, point, s along a-b)]."""
+    d = np.asarray(b, float) - np.asarray(a, float)
+    a = np.asarray(a, float)
+    segs = segments(pts)
+
+    def f(sg, t):  # (which side of the line, and how far)
+        x, y = seg_point(*segs[sg], t)
+        return d[0] * (y - a[1]) - d[1] * (x - a[0])
+    out = []
+    for _, _, j, t in _crossings(sample(pts, CURVE_STEPS), a, a + d, True):
+        sg, i = divmod(j, CURVE_STEPS)
+        lo, hi = i / CURVE_STEPS, (i + 1) / CURVE_STEPS
+        flo, fhi = f(sg, lo), f(sg, hi)
+        if flo == 0 or fhi == 0 or flo * fhi > 0:  # (right on a drawn point, or only touching it): there
+            lo = hi = lo if flo == 0 else hi if fhi == 0 else lo + (hi - lo) * min(1.0, max(0.0, t))
+        for _ in range(60):
+            if hi - lo < 1e-14:
+                break
+            mid = (lo + hi) / 2
+            if (f(sg, mid) > 0) == (flo > 0):
+                lo = mid
+            else:
+                hi = mid
+        u = (lo + hi) / 2
+        pt = np.asarray(seg_point(*segs[sg], u))
+        out.append((sg + u, pt, float(np.dot(pt - a, d) / np.dot(d, d))))
+    return out
+
+
+def curve_pieces(st, us):
+    """A curve stroke cut at these spots along it (u = segment + how far along it) -> its pieces, each a curve of
+    the same shape (bezier.split), corners kept."""
+    nseg = len(segments(st["pts"]))
+    us = sorted({round(u, 12) for u in us if 1e-9 < u < nseg - 1e-9})
+    at_anchor = [u for u in us if abs(u - round(u)) < 1e-9]
+    splits = [u for u in us if u not in at_anchor]
+    pts = [list(p) for p in st["pts"]]
+    done = {}
+    for u in reversed(splits):  # (the last first: the earlier segments stay as they were)
+        sg = int(u)
+        pts = split(pts, sg, (u - sg) / done.get(sg, 1.0))
+        done[sg] = u - sg
+
+    def anchor(u):  # (an anchor's number once split: one there already, or the new one)
+        return round(u) + sum(x < u for x in splits) if u not in splits else int(u) + 1 + sum(x < u for x in splits)
+    ends = [0] + [anchor(u) for u in us] + [anchor_count(pts) - 1]
+    sharp = [anchor(m) for m in st.get("sharp", ())]
+    out = []
+    for x, y in zip(ends, ends[1:]):
+        piece = {"kind": "curve", "pts": pts[3 * x:3 * y + 1]}
+        if any(x < m < y for m in sharp):
+            piece["sharp"] = [m - x for m in sharp if x < m < y]
+        out.append(piece)
+    return out
+
+
+def joined_curve(c0, c1):
+    """Two curve pieces where c0 ends and c1 starts (a closed curve's last and first pieces) made one; that anchor a
+    corner unless its handles lie on a line through it."""
+    n = anchor_count(c0["pts"]) - 1
+    pts = c0["pts"] + c1["pts"][1:]
+    p, h0, h1 = (np.asarray(pts[k], float) for k in (3 * n, 3 * n - 1, 3 * n + 1))
+    a, b = h0 - p, h1 - p
+    smooth = abs(float(a[0] * b[1] - a[1] * b[0])) <= 1e-9 * (np.hypot(*a) * np.hypot(*b) or 1) and np.dot(a, b) <= 0
+    sharp = c0.get("sharp", []) + ([] if smooth else [n]) + [m + n for m in c1.get("sharp", [])]
+    return dict({"kind": "curve", "pts": pts}, **({"sharp": sharp} if sharp else {}))
 
 
 def side(pts, a, b):
@@ -107,12 +192,15 @@ def slice_custom(sh, a, b, ppq):
     if np.hypot(*(b - a)) < EPS:
         return None
     polys = [stroke_points(st) for st in sh["strokes"]]
-    ss = []
-    for poly in polys:
-        for _, s in crossings(poly, a, b, whole_line=True):
-            if s < -1e-6 or s > 1 + 1e-6:
-                return None  # (the line crosses the shape past the segment's end: not all the way across)
-            ss.append(s)
+    ss, cuts = [], {}
+    for n, (st, poly) in enumerate(zip(sh["strokes"], polys)):
+        got = crossings(poly, a, b, whole_line=True)
+        if any(s < -1e-6 or s > 1 + 1e-6 for _, s in got):
+            return None  # (the line crosses the shape past the segment's end: not all the way across)
+        if st["kind"] == "curve" and exact(st):  # (where it really crosses: the halves keep the curve)
+            cuts[n] = curve_cuts(st["pts"], a, b)
+            got = [(pt, s) for _, pt, s in cuts[n]]
+        ss += [s for _, s in got]
     if len(ss) < 2:
         return None
     ss = sorted(set(round(s, 9) for s in ss))
@@ -122,16 +210,28 @@ def slice_custom(sh, a, b, ppq):
         if s1 - s0 > 1e-9 and inside(polys, mid):
             cut_lines.append([list(a + (b - a) * s0), list(a + (b - a) * s1)])
     halves = {1: [], -1: []}
-    for st, poly in zip(sh["strokes"], polys):
-        pieces = cut_pieces(poly, a, b)
+    for n, (st, poly) in enumerate(zip(sh["strokes"], polys)):
         closed = len(poly) > 2 and np.hypot(*(np.asarray(poly[0]) - np.asarray(poly[-1]))) < 1e-9
-        if closed and len(pieces) > 1 and side([poly[0]], a, b):  # (closed: its last and first pieces are one)
-            pieces = [pieces[-1] + pieces[0][1:]] + pieces[1:-1]
+        joins = closed and side([poly[0]], a, b)  # (closed: its last and first pieces are one)
+        if n in cuts:
+            pieces = curve_pieces(st, [u for u, _, _ in cuts[n]])
+            if joins and len(pieces) > 1:
+                pieces = [joined_curve(pieces[-1], pieces[0])] + pieces[1:-1]
+        else:
+            pieces = cut_pieces(st["pts"] if st["kind"] == "poly" and exact(st) else poly, a, b)
+            if joins and len(pieces) > 1:
+                pieces = [pieces[-1] + pieces[0][1:]] + pieces[1:-1]
+            if st["kind"] == "arc" and exact(st):  # (an arc's piece is an arc: its ends and a point between)
+                pieces = [{"kind": "arc", "pts": [list(p[0]), list(p[len(p) // 2]), list(p[-1])], "k": st.get("k", 1.0)}
+                          if len(p) > 2 else {"kind": "poly", "pts": [list(pt) for pt in p]} for p in pieces]
+            else:
+                keep = {k: st[k] for k in ("free", "k") if k in st and st["kind"] == "poly" and exact(st)}
+                pieces = [dict(keep, kind="poly", pts=[list(pt) for pt in p]) for p in pieces]
         keep = {k: st[k] for k in ("role", "colour") if k in st}
         for piece in pieces:
-            k = side(piece, a, b)
+            k = side(stroke_points(piece), a, b)
             if k:
-                halves[k].append(dict(keep, kind="poly", pts=[list(pt) for pt in piece]))
+                halves[k].append(dict(keep, **piece))
     if not halves[1] or not halves[-1] or not cut_lines:
         return None
     out = []
