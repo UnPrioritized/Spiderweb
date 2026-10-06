@@ -23,7 +23,7 @@ from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
 from notes.chop import apply_chop
 from notes.claw import apply_claw
-from notes.fx import clean_fx, mirrored, notes_box, toggled, velocities
+from notes.fx import clean_fx, mirrored, notes_box, swapped, toggled, turn_notes, turn_shape, velocities
 from notes.gaterange import clean_range
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
@@ -378,11 +378,26 @@ def fx_notes(sh, ppq, keys, get):
                 del rest["_m"]
             notes, tracks = get(rest)  # (flipped within their own box: they stay where they were)
             return mirrored(notes, [last["axis"]], notes_box(notes)), tracks
+        if last["tool"] == "turn":  # (the steps before it: on the drawing turned back; turned within their own box)
+            notes, tracks = get(turned_back(rest, last))
+            notes, idx = turn_notes(notes, last["cw"], last["r"] * ppq, keys)
+            return notes, None if tracks is None else np.asarray(tracks)[idx]
         return fx_step(*get(rest), last, sh, ppq)
     if sh.get("_m"):
         notes, tracks = get(bare_of(sh))
         return mirrored(notes, sh["_m"], notes_box(notes)), tracks
     return with_glue(*_notes_tracks(sh, ppq, keys), sh, ppq)
+
+
+def turned_back(sh, step):
+    """sh's drawing turned back from a turn step (around its own middle), its flips seen the other way round."""
+    back = json.loads(json.dumps(sh))
+    a = np.concatenate(cached_arrays(sh))
+    turn_shape(back, not step["cw"], step["r"], (a[:, 0].min() + a[:, 0].max()) / 2,
+               (a[:, 1].min() + a[:, 1].max()) / 2)
+    if back.get("_m"):
+        back["_m"] = swapped(back["_m"])
+    return back
 
 
 def bare_of(sh):
@@ -470,16 +485,23 @@ def whole_tools(whole, raw, spots, tracks, ppq):
     return a[:, :4], spots[a[:, 4]], a[:, 5] if tracks is not None else None
 
 
-def run_steps(a, fx, sh, ppq, m=()):
+def run_steps(a, fx, sh, ppq, m=(), pre=()):
     """Notes a (start, end, key, velocity, then columns riding along) after the steps fx of sh (as fx_notes does them;
-    m: a's flipped along these axes first)."""
+    first a's turned back by each of pre ((clockwise?, ticks per key)), then flipped along the axes m). A turn step
+    turns the notes back, not the drawing (close, not exact)."""
     if not fx:
+        for cw, ticks in pre:
+            a = turn_notes(a, cw, ticks, 256)[0]
         return mirrored(a, m, notes_box(a)) if m else a
     last = fx[-1]
     if last["tool"] == "flip":
-        got = run_steps(a, fx[:-1], sh, ppq, toggled(m, last["axis"]))
+        got = run_steps(a, fx[:-1], sh, ppq, toggled(m, last["axis"]), pre)
         return mirrored(got, [last["axis"]], notes_box(got))
-    return fx_step(run_steps(a, fx[:-1], sh, ppq, m), None, last, sh, ppq)[0]
+    if last["tool"] == "turn":
+        ticks = last["r"] * ppq
+        got = run_steps(a, fx[:-1], sh, ppq, swapped(m), tuple(pre) + ((not last["cw"], ticks),))
+        return turn_notes(got, last["cw"], ticks, 256)[0]
+    return fx_step(run_steps(a, fx[:-1], sh, ppq, m, pre), None, last, sh, ppq)[0]
 
 
 def _notes_tracks(sh, ppq, keys):

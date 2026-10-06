@@ -297,7 +297,9 @@ class ToolWindow(tk.Toplevel):
                 n += 1
                 parts.append(tr(f"{st['tool']}.tab", n=n) + (tr("tool_window.off_mark") if st.get("off") else ""))
             else:
-                parts.append(tr(f"tool_window.{st['tool']}" + (f"_{st['axis']}" if st["tool"] == "flip" else "")))
+                parts.append(tr(f"tool_window.{st['tool']}" + (f"_{st['axis']}" if st["tool"] == "flip" else
+                                                               ("_cw" if st["cw"] else "_ccw") if st["tool"] == "turn"
+                                                               else "")))
         return tr("tool_window.order", steps=" → ".join(parts))
 
     def sync_tabs(self):

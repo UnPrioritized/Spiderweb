@@ -7,6 +7,10 @@ after its glue), in the order they were added. The drawing stays editable: every
   {"tool": "flip", "axis": "time" / "keys"}
       the shape was flipped after the steps before it: they run on the notes flipped back, and their result is
       flipped (each flip within the box of the notes it gets: they stay where they were)
+  {"tool": "turn", "cw": clockwise?, "r": beats per key on screen then}
+      the shape was turned 90 degrees after the steps before it (user, 2026-10-06): they run on its drawing turned
+      back, their result is turned within its own box (each note a column of short notes, one per key row: close,
+      not exact). Turning back right after cancels it out
   {"tool": "vel", "pts": [[u, velocity], ...]}
       velocities drawn after the steps before it: they replace those steps' velocities (only between the first and
       last u: 0..1 across the shape's time, as its velocity line)
@@ -56,6 +60,8 @@ def clean_fx(sh):
             continue  # (a flip / velocities before any page change nothing)
         elif tool == "flip" and st.get("axis") in AXES:
             out.append({"tool": "flip", "axis": st["axis"]})
+        elif tool == "turn" and isinstance(st.get("r"), (int, float)) and 1e-9 < st["r"] < 1e9:
+            out.append({"tool": "turn", "cw": bool(st.get("cw")), "r": float(st["r"])})
         elif tool == "vel":
             pts = clean_pts(st.get("pts"))
             if pts:
@@ -87,6 +93,17 @@ def flipped(fx, axis):
     if fx[-1] == {"tool": "flip", "axis": axis}:
         return fx[:-1] or None
     return fx + [{"tool": "flip", "axis": axis}]
+
+
+def with_turn(fx, cw, r):
+    """The steps after the shape is turned 90 degrees (r: beats per key on screen): a turn step added (turning back
+    right after one cancels it out), or nothing when there's no page (turning the drawing is enough)."""
+    if not pages(fx):
+        return fx
+    last = fx[-1]
+    if last["tool"] == "turn" and last["cw"] != cw and abs(last["r"] - r) <= 1e-9 * max(r, 1e-9):
+        return fx[:-1] or None
+    return fx + [{"tool": "turn", "cw": cw, "r": r}]
 
 
 def with_velocity(fx, pts):
@@ -136,3 +153,69 @@ def velocities(notes, pts, t_lo, t_hi):
     out = notes.copy()
     out[on, 3] = np.clip(np.round(env_values(pts, frac[on])), 1, 127).astype(np.int64)
     return out
+
+
+def swapped(axes):
+    """Flip axes seen after a quarter turn: time <-> keys."""
+    return sorted({"keys" if a == "time" else "time" for a in axes or ()})
+
+
+def turn_notes(a, cw, ticks, keys):
+    """Notes a (start, end, key, then any columns riding along) turned 90 degrees within their own box, clockwise as
+    seen on screen when cw; ticks = ticks per key on screen. Each note becomes a column: one note per key row it then
+    covers (at least one), each one key's worth of ticks long. -> (the notes, which row of a each came from)."""
+    if not len(a):
+        return a, np.zeros(0, np.int64)
+    s = 1 if cw else -1
+    ct = (a[:, 0].min() + a[:, 1].max()) / 2
+    ck = (a[:, 2].min() + a[:, 2].max()) / 2
+    k0, k1 = ck - s * (a[:, 0] - ct) / ticks, ck - s * (a[:, 1] - ct) / ticks
+    lo, hi = np.minimum(k0, k1), np.maximum(k0, k1)
+    t0, t1 = ct + s * (a[:, 2] - 0.5 - ck) * ticks, ct + s * (a[:, 2] + 0.5 - ck) * ticks
+    start = np.round(np.minimum(t0, t1)).astype(np.int64)
+    end = np.maximum(np.round(np.maximum(t0, t1)).astype(np.int64), start + 1)
+    first, last = np.ceil(lo - 1e-9), np.ceil(hi - 1e-9) - 1  # (the key rows whose middle it covers)
+    none = last < first
+    first[none] = last[none] = np.round((lo[none] + hi[none]) / 2)
+    first, last = np.clip(first, 0, keys - 1).astype(np.int64), np.clip(last, 0, keys - 1).astype(np.int64)
+    counts = np.where((hi < -0.5) | (lo > keys - 0.5), 0, last - first + 1)
+    idx = np.repeat(np.arange(len(a)), counts)
+    step = np.arange(len(idx)) - np.repeat(np.cumsum(counts) - counts, counts)
+    out = a[idx].copy()
+    out[:, 0], out[:, 1], out[:, 2] = start[idx], end[idx], first[idx] + step
+    out[:, 0] = np.maximum(out[:, 0], 0)  # (none before the song's start)
+    keep = out[:, 1] > out[:, 0]
+    return out[keep], idx[keep]
+
+
+def turn_shape(sh, clockwise, r, cb, cp):
+    """sh turned 90 degrees around (cb, cp) (beats, keys) as it looks on screen, r = beats per key there (so how
+    many beats one key becomes): its points, and its roundness, tumours, formulas, text, glue and gate range along.
+    Changes sh."""
+    from notes.gaterange import turned_range
+    from notes.glue import turned as glue_turned
+    from notes.joined import all_tumours
+    sign = 1 if clockwise else -1
+    sh["pts"] = [[cb + sign * (p - cp) * r, cp - sign * (b - cb) / r] for b, p in sh["pts"]]
+    if sh["kind"] == "arc" or sh["kind"] == "free" and "k" in sh:  # still round (arc.py, smooth.py)
+        sh["k"] = r * r / sh.get("k", 1.0)
+    if sh.get("text"):  # its size / grow are measured the same way (see text.py)
+        sh["text"]["k"] = r * r / sh["text"]["k"]
+    for tm in all_tumours(sh):  # the bumps turn with it (sizes as they look on screen, see tumour.py)
+        tm["size"] *= tm["k"] / r
+        tm["length"] *= r / tm["k"]
+        tm["dist"] *= r / tm["k"]
+        tm["ease"] = tm.get("ease", 0.0) * r / tm["k"]
+        tm["k"] = r * r / tm["k"]
+    pat = sh.get("pattern")
+    if pat:  # a pattern along a curve turns the same way (pattern.py)
+        pat["scale"] *= pat["k"] / r
+        pat["k"] = r * r / pat["k"]
+    if sh.get("shape"):  # (its sizes are shares of the curve's length: only the screen proportions)
+        sh["shape"]["k"] = r * r / sh["shape"]["k"]
+    if sh.get("glue"):
+        sh["glue"] = glue_turned(sh["glue"], clockwise)
+    for k in ("range", "range_kept"):
+        if sh.get(k):
+            sh[k] = turned_range(sh[k], clockwise)
+    return sh

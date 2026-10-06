@@ -23,10 +23,9 @@ from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, cached_arrays, fx_notes, point_names, render,
                           slot_track_channel)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
-from notes.fx import flipped as fx_flipped, with_velocity
-from notes.gaterange import flipped_range, turned_range
-from notes.glue import added as glue_added, flipped as glue_flipped, glue_box, to_shares as glue_shares, \
-    turned as glue_turned
+from notes.fx import flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
+from notes.gaterange import flipped_range
+from notes.glue import added as glue_added, flipped as glue_flipped, glue_box, to_shares as glue_shares
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
 from notes.polygon import POLYGON_DEFAULTS
@@ -1195,28 +1194,13 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         limit = self.roll.limits(shapes)  # (turned past an edge: pushed back inside, user)
         self.push_undo(name=tr("app.turn_90"))
         for sh in shapes:
-            sh["pts"] = [[cb + sign * (p - cp) * r, cp - sign * (b - cb) / r] for b, p in sh["pts"]]
-            if sh["kind"] == "arc" or sh["kind"] == "free" and "k" in sh:  # still round (arc.py, smooth.py)
-                sh["k"] = r * r / sh.get("k", 1.0)
-            if sh.get("text"):  # its size / grow are measured the same way (see text.py)
-                sh["text"]["k"] = r * r / sh["text"]["k"]
-            for tm in all_tumours(sh):  # the bumps turn with it (sizes as they look on screen, see tumour.py)
-                tm["size"] *= tm["k"] / r
-                tm["length"] *= r / tm["k"]
-                tm["dist"] *= r / tm["k"]
-                tm["ease"] = tm.get("ease", 0.0) * r / tm["k"]
-                tm["k"] = r * r / tm["k"]
-            pat = sh.get("pattern")
-            if pat:  # a pattern along a curve turns the same way (pattern.py)
-                pat["scale"] *= pat["k"] / r
-                pat["k"] = r * r / pat["k"]
-            if sh.get("shape"):  # (its sizes are shares of the curve's length: only the screen proportions)
-                sh["shape"]["k"] = r * r / sh["shape"]["k"]
-            if sh.get("glue"):
-                sh["glue"] = glue_turned(sh["glue"], clockwise)
-            for k in ("range", "range_kept"):
-                if sh.get(k):
-                    sh[k] = turned_range(sh[k], clockwise)
+            turn_shape(sh, clockwise, r, cb, cp)
+            if sh.get("fx"):  # (its note tool pages' result is turned too, fx.py)
+                fx = fx_turned(sh["fx"], clockwise, r)
+                if fx:
+                    sh["fx"] = fx
+                else:
+                    del sh["fx"]
         db, dp = self.roll.push_in(self.roll.reach(shapes), limit)
         if db or dp:
             for sh in shapes:
