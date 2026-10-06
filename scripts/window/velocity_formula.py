@@ -9,11 +9,13 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.pattern import PATTERN_PRESETS, PRESET_ALONG, formula_loop, new_pattern
+from window.panel_custom import GAP_COLOR
 from window.pattern_dialog import load_patterns, saved_pattern
 from window.widgets import Scrub, Tooltip, bad, good
 
 VEL_HEIGHT = 20.0  # a preset's height to start with, in velocity steps (on the piano roll it's 4 keys)
 VEL_LOOPS = 4.0
+VEL_MOST_LOOPS = 10000.0  # (user: more had no limit and could freeze the program; the box stops there)
 
 
 def vel_pattern(preset=None, saved=None):
@@ -37,6 +39,8 @@ class VelocityFormulaBar(ttk.Frame):
         Tooltip(self.box, tr("velocity_formula.pattern_tip"))
         self.numbers = ttk.Frame(self)
         self.numbers.pack(side="left")
+        self.most = ttk.Label(self, text=tr("velocity_formula.loops_most", most=fmt(VEL_MOST_LOOPS)),
+                              foreground=GAP_COLOR)  # (only while Loops is at the most, user)
         self.boxes, self._names, self._loading = {}, None, False
         self.fill_list()
         self.pick.set(self.items[0][2])
@@ -90,6 +94,14 @@ class VelocityFormulaBar(ttk.Frame):
             var.set(fmt(p["loops"] if name == "loops" else p["vars"][name]))
             e.config(style="TEntry")
         self._loading = False
+        self.show_most()
+
+    def show_most(self):
+        at_most = self.app.vel_pattern["loops"] >= VEL_MOST_LOOPS
+        if at_most and not self.most.winfo_manager():
+            self.most.pack(side="left", padx=(0, 6))
+        elif not at_most and self.most.winfo_manager():
+            self.most.pack_forget()
 
     def on_number(self, name):
         if self._loading or name not in self.boxes:
@@ -106,10 +118,14 @@ class VelocityFormulaBar(ttk.Frame):
             bad(e)
             return
         good(e)
+        if name == "loops" and value > VEL_MOST_LOOPS:  # (the box stops at the most)
+            value = VEL_MOST_LOOPS
+            var.set(fmt(value))
         if (p["loops"] if name == "loops" else p["vars"][name]) == value:
             return
         if name == "loops":
             p["loops"] = value
+            self.show_most()
         else:
             p["vars"][name] = value
         self.app.vel.formula_changed()

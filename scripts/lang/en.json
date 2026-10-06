@@ -270,6 +270,7 @@
  "app.formula_tip": "Drag a line like Linear: a pattern (Wave, Zigzag, Bounce or one you saved) swings the velocity up and down around it. Its settings show next to the tool buttons; changing them changes the line you just drew.",
  "velocity_formula.pattern_tip": "The pattern along the line. Your saved patterns (Formula → Pattern along the line → Custom…) are in the list too.",
  "velocity_formula.loops_tip": "How many times the pattern repeats between the line's two ends. Parts of a loop work too (4.5).",
+ "velocity_formula.loops_most": "{most} loops is the most here.",
  "velocity_formula.number_tip": "\"{name}\" in the pattern's formula, in velocity steps (a Wave of height 20 goes up to 20 above the line and 20 below it).",
  "app.ctrl_flat_shift_snap_enter_done": "Ctrl = flat · Shift = snap · Enter = done · select a shape to edit only its notes",
  "app.project": "Project",

@@ -199,7 +199,12 @@ def screen_lines(path, ax, bx, ay, by, view):
     Only what can show goes to the canvas, which paints tens of thousands of points very slowly (a line with
     tumours a tick apart has that many): parts outside view = (x0, y0, x1, y1) are left out (the line is split
     there), and of the points in one pixel column only the first, lowest, highest and last are kept (a dense
-    zigzag looks just the same).
+    zigzag looks just the same). Returns (coords, how many points the piece had before repeats were dropped).
+    The points are whole pixels where the canvas would round them so anyway (it does: round to nearest, before
+    drawing), then a point on the same pixel as the one before is left out: the same pixels, much less to send
+    (user's example: 3x quicker). Kept as they are: a point within a hair of half a pixel (the canvas rounds those
+    by where it's repainting) and pieces reaching past the canvas's own cut-off box (-1000 .. 31000 px: it cuts
+    the line there from the exact points).
     """
     x0, y0, x1, y1 = view
     pts = np.asarray(path, float).reshape(-1, 2)
@@ -227,12 +232,19 @@ def screen_lines(path, ax, bx, ay, by, view):
     for pick in (np.minimum, np.maximum):  # the first lowest and first highest point of each run
         best = pick.reduceat(y, at)
         keep[np.minimum.reduceat(np.where(y == best[group], n, len(idx)), at)] = True
-    counts = np.bincount(piece[keep], minlength=len(first)) * 2
-    coords = np.column_stack([x, y])[keep].ravel().tolist()
+    x, y, piece = x[keep], y[keep], piece[keep]
+    sizes = np.bincount(piece, minlength=len(first))
+    far = np.bincount(piece, (x < -999) | (x > 30999) | (y < -999) | (y > 30999), len(first))[piece] > 0
+    rx, ry = (np.where(far | (np.abs(np.abs(v - np.trunc(v)) - 0.5) < 1e-6), v, np.round(v)) for v in (x, y))
+    same = np.zeros(len(rx), bool)
+    same[1:] = (rx[1:] == rx[:-1]) & (ry[1:] == ry[:-1]) & (piece[1:] == piece[:-1])
+    same[np.cumsum(sizes) - 1] = False  # (a piece's last point stays: at least 2 points)
+    counts = np.bincount(piece[~same], minlength=len(first)) * 2
+    coords = np.column_stack([rx, ry])[~same].ravel().tolist()
     out, k = [], 0
-    for c in counts.tolist():
-        if c >= 4:
-            out.append(coords[k:k + c])
+    for c, size in zip(counts.tolist(), sizes.tolist()):
+        if size >= 2:
+            out.append((coords[k:k + c], size))
         k += c
     return out
 
@@ -1147,11 +1159,11 @@ class RollDrawing:
                 else ())
         for k, path in enumerate(cached_arrays(sh)):
             if k < len(cuts) and cuts[k]:  # a fill line (no notes of its own): thin, dashed
-                for coords in screen_lines(path, ax, bx, ay, by, view):
+                for coords, _ in screen_lines(path, ax, bx, ay, by, view):
                     self.create_line(*coords, fill=color, width=1, dash=(2, 3))
                 continue
-            for coords in screen_lines(path, ax, bx, ay, by, view):
-                if width == 1 or len(coords) < 2000:
+            for coords, size in screen_lines(path, ax, bx, ay, by, view):
+                if width == 1 or size < 1000:
                     self.create_line(*coords, fill=color, width=width, dash=dash)
                     continue
                 # a long thick line: Windows paints thick lines with thousands of points very slowly (seconds),
