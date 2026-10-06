@@ -24,6 +24,8 @@ from files.mathexpr import formula
 
 LOOP_SAMPLES = 256  # points per loop (a multiple of 4, so a zigzag's tips are exact)
 MAX_POINTS = 400000  # the most points a pattern makes (so a huge loop count can't hang the program)
+MAX_LOOPS = MAX_POINTS // 8  # the most loops (8 points a loop at least, so each keeps its shape; user: the Loops
+                             # box stops there, more used to stop the line short of its end)
 
 # (id, name, formula, its numbers)
 PATTERN_PRESETS = [
@@ -111,7 +113,7 @@ def clean_pattern(p):
                 return None
             text, along, names = "", "", []  # (a loop drawn by hand needs no formula)
         out = {"preset": str(p.get("preset", "")), "formula": text,
-               "vars": {n: values.get(n, 1.0) for n in names}, "loops": float(p.get("loops", LOOPS_DEFAULT)),
+               "vars": {n: values.get(n, 1.0) for n in names}, "loops": min(float(p.get("loops", LOOPS_DEFAULT)), MAX_LOOPS),
                "each": bool(p.get("each", False)), "k": float(p.get("k", 1.0)), "mirror": bool(p.get("mirror")),
                "scale": float(p.get("scale", 1.0))}
     except (KeyError, TypeError, ValueError):
@@ -557,8 +559,8 @@ def pattern_paths(paths, p):
         t = np.linspace(0.0, 1.0, per + 1)
         uu, vv = np.interp(t, np.linspace(0.0, 1.0, len(u)), u), np.interp(t, np.linspace(0.0, 1.0, len(v)), v)
         count = last - first
-        if count * per > MAX_POINTS:
-            count = MAX_POINTS // per
+        if count * per > MAX_POINTS + per:  # (a piece can touch one loop more than its share)
+            count = MAX_POINTS // per + 1
         loop_no = np.repeat(np.arange(first, first + count), per)
         along = np.tile(uu[:-1], count) + loop_no
         side = np.tile(vv[:-1], count)

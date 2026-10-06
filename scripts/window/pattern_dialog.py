@@ -21,11 +21,12 @@ from files.project import HERE
 from files.safefile import write_text
 from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_point, fit_symmetric, handle_lines,
                           keep_symmetric, nearest, pen_handles, sample)
-from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, clean_loop, formula_loop,
-                           formula_shape, keep_sym, new_pattern, new_shape, pattern_name, pattern_names, shape_name,
-                           shape_names)
+from notes.pattern import (LOOPS_DEFAULT, MAX_LOOPS, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, clean_loop,
+                           formula_loop, formula_shape, keep_sym, new_pattern, new_shape, pattern_name, pattern_names,
+                           shape_name, shape_names)
 from roll.roll_shared import ALT, grab_while_panning
 from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
+from window.panel_custom import GAP_COLOR
 from window.widgets import LocalUndo, Scrub, Tooltip, bad, good
 
 PATTERNS_FILE = os.path.join(HERE, "patterns.json")
@@ -476,6 +477,9 @@ class FormulaDialog(tk.Toplevel):
             else:
                 self.set_info(tr("pattern_dialog.whole_shape") if self.layer == "shape" else
                               tr("pattern_dialog.one_loop"), "#555")
+            if self.layer == "pattern" and self.pat["loops"] >= MAX_LOOPS:  # (only then, user)
+                self.set_info(tr("panel_pattern.loops_most", most=fmt(MAX_LOOPS)), GAP_COLOR,
+                              back=bool(self.pat.get("loop")))
         self.view = self.view[:3] + (self.loop_len(),) if self.own_view and self.view else None
         self.draw()
         self.show_on_roll()
@@ -520,7 +524,7 @@ class FormulaDialog(tk.Toplevel):
             return
         good(e)
         if name == "loops":
-            self.pat["loops"] = value
+            self.pat["loops"] = min(value, MAX_LOOPS)
         else:
             self.pat["vars"][name] = value
         self.refresh()

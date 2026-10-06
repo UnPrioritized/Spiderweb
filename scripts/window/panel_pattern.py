@@ -9,9 +9,10 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.pattern import FORMULA_KINDS, formula_shape, loop_points
+from notes.pattern import FORMULA_KINDS, MAX_LOOPS, formula_shape, loop_points
 from notes.polygon import update_polygon
 from window.formula_host import SYM_CHOICES, RollHost, layer_name, set_loop_sym, sym_label
+from window.panel_custom import GAP_COLOR
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
 
 LAYERS = ("shape", "pattern")  # (a curve's shape first: the pattern runs along it)
@@ -47,8 +48,11 @@ class PatternPanel:
             cb.bind("<<ComboboxSelected>>", lambda e, l=layer: self.on_formula_sym(l))
             for w in (lb, cb):
                 Tooltip(w, tr("pattern_dialog.sym_tip"))
+            # (only while the Loops box is at the most, user)
+            most = ttk.Label(row, text=tr("panel_pattern.loops_most", most=fmt(MAX_LOOPS)), foreground=GAP_COLOR,
+                             font=("Segoe UI", 8), wraplength=int(300 * self.scale), justify="left")
             self.formula_ui[layer] = {"row": row, "label": label, "numbers": numbers, "boxes": {}, "names": None,
-                                      "sym": sym}
+                                      "sym": sym, "most": most}
         row = self.pattern_each_row = ttk.Frame(self.formula_ui["pattern"]["row"])
         self.pattern_each = tk.BooleanVar(value=False)
         for value, text, tip in ((False, tr("panel_pattern.across_all"), tr("panel_pattern.across_all_tip")),
@@ -133,6 +137,7 @@ class PatternPanel:
                 e.config(style="TEntry")
             ui["sym"].set(sym_label(p.get("sym")))
             self._loading = False
+        self.show_loops_most()
         pats = self.with_layer("pattern")
         if pats:
             self.pattern_each.set(pats[0]["pattern"]["each"])
@@ -188,6 +193,9 @@ class PatternPanel:
             bad(e)
             return
         good(e)
+        if name == "loops" and value > MAX_LOOPS:  # (the box stops at the most)
+            value = MAX_LOOPS
+            var.set(fmt(value))
         tgts = [sh for sh in tgts if (sh[layer]["loops"] if name == "loops" else sh[layer]["vars"][name]) != value]
         if not tgts:
             return
@@ -198,6 +206,16 @@ class PatternPanel:
             else:
                 sh[layer]["vars"][name] = value
         self.formulas_edited()
+        self.show_loops_most()
+
+    def show_loops_most(self):
+        """The note under the Loops box: only while it's at the most (user)."""
+        ui = self.formula_ui["pattern"]
+        at_most = any(sh["pattern"]["loops"] >= MAX_LOOPS for sh in self.with_layer("pattern"))
+        if at_most and not ui["most"].winfo_manager():
+            ui["most"].pack(anchor="w", after=ui["numbers"])
+        elif not at_most and ui["most"].winfo_manager():
+            ui["most"].pack_forget()
 
     def on_formula_sym(self, layer):
         if self._loading:

@@ -250,6 +250,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         else:
             new = [tuple(new)]
         self.box_kept = (new, set(app.sels))
+        if self.unmoved(step):
+            return
         if self.stayed_inside(step):
             app.shape_edited()
 
@@ -298,6 +300,17 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if self.limit is None:
             self.limit = self.limits(before.values())
         return before, self.drag, self.box_kept
+
+    def unmoved(self, step):
+        """After a drag step (held_step): True if it changed nothing (the mouse moved, but the point snapped to
+        where it already was): then there's nothing to make again or repaint (user: that made dragging choppy)."""
+        before, drag, kept = step
+        if self.drag != drag or self.box_kept != kept:
+            return False
+        try:
+            return all(self.app.shapes[j] == sh for j, sh in before.items())
+        except ValueError:  # (a NumPy array inside can't say)
+            return False
 
     def stayed_inside(self, step):
         """After a drag step: True if its shapes keep to the limits, else the step is taken back (the shape stops
@@ -843,6 +856,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                     mid = self.crossing(sh["pts"][:2], (sh["pts"][5 - i], pt))
                     if mid:
                         sh["pts"][5 - i] = [2 * mid[0] - pt[0], 2 * mid[1] - pt[1]]
+            if self.unmoved(step):
+                return
             if self.stayed_inside(step):
                 self.app.shape_edited()
         elif kind == "move":
@@ -856,13 +871,18 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if self.room is None:  # (each shape stops at beat 0 and the lowest / highest key on its own, the Select
                 self.room = {j: self.move_room(self.app.shapes[j]) for j in orig}  # box and the rest go on: user)
             self.drag = ("move", start, orig, one, True, part)
+            kept = self.box_kept
+            moved = False
             for j, pts in orig.items():
                 bj, pj = self.in_room(db, dp, e, self.room[j])
-                self.app.shapes[j]["pts"] = [[b + bj, p + pj] for b, p in pts]
+                new = [[b + bj, p + pj] for b, p in pts]
+                moved = moved or new != self.app.shapes[j]["pts"]
+                self.app.shapes[j]["pts"] = new
             if self.box_moving:
                 self.box_kept = ([(b0 + db, top + dp, b1 + db, bottom + dp) for b0, top, b1, bottom in self.box_moving],
                                  set(self.app.sels))
-            self.app.shape_edited(moving=True)
+            if moved or self.box_kept != kept:  # (snapped to where they already were: nothing to redo)
+                self.app.shape_edited(moving=True)
         elif kind == "stretch":
             self.stretch_to(e)
         elif kind == "free":
@@ -895,12 +915,16 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             pt = self.resize_point(orig, k, side, start, e)
             step = self.held_step([self.app.sel])
             self.app.selected()["pts"] = self.resize_custom(orig, k, pt, e.state & CTRL, side)
+            if self.unmoved(step):
+                return
             if self.stayed_inside(step):
                 self.app.shape_edited()
         elif kind == "skew":  # slides in whole grid steps / keys, wherever it was grabbed
             _, k, orig, start = self.drag
             step = self.held_step([self.app.sel])
             self.app.selected()["pts"] = self.skew_custom(orig, k, *self.drag_steps(start, e))
+            if self.unmoved(step):
+                return
             if self.stayed_inside(step):
                 self.app.shape_edited()
         elif kind == "turn":
@@ -913,11 +937,13 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             sh = self.app.selected()
             if self.limit is None:
                 self.limit = self.limits([sh])
+            was = sh["pts"]
             sh["pts"] = self.turn_custom(orig, angle)
             db, dp = self.push_in(self.reach([sh]), self.limit)  # (pushed back inside the piano roll, user)
             if db or dp:
                 sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
-            self.app.shape_edited()
+            if sh["pts"] != was:  # (snapped to the same angle: nothing to redo)
+                self.app.shape_edited()
             self.app.show_position(tr("pianoroll.turned", degrees=math.degrees(angle)))
         elif kind == "hzkeys":
             self.hz_drag(e)

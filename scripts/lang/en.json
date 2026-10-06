@@ -1021,6 +1021,7 @@
  "panel_pattern.and_others": " and others",
  "panel_pattern.loops": "Loops",
  "panel_pattern.loops_tip": "How many times the pattern repeats along the line. Parts of a loop work too (4.5).",
+ "panel_pattern.loops_most": "{most} loops is the most a line can have.",
  "panel_pattern.number_tip": "\"{name}\" in the pattern's formula. Sizes to the side are in keys.",
  "panel_pattern.number_tip_polygon": "\"{name}\" in the pattern's formula. Sizes to the side are in hundredths of the polygon's height.",
  "panel_pattern.number_tip_drawer": "\"{name}\" in the pattern's formula. Sizes to the side are in hundredths of the board.",
