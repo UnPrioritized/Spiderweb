@@ -1490,8 +1490,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 return None
             if isinstance(w, (tk.Entry, ttk.Entry)) and str(w.cget("state")) != "readonly":
                 return None
-            if self.box_drawn() or not while_held and self.roll.holding():
-                return "break"
+            if self.box_drawn() or not while_held and (self.roll.holding() or self.vel.edit):
+                return "break"  # (a velocity line held: its shapes mustn't change under it either)
             fn()
             return "break"
         return handler
@@ -1682,6 +1682,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         hz = self.hz_window
         if self.grabbed_elsewhere():
             return None  # (a pop-up without its own undo: the shapes it works on stay as they are)
+        if self.vel.edit:  # a velocity line held: Ctrl+Z throws it away (no step), Ctrl+Y does nothing
+            return "break" if redo else (self.vel.drop(), "break")[1]
         if not self.in_hz(e.widget):
             return "break" if self.box_drawn() else self.redo() if redo else self.undo()
         if hz.drag:  # the mouse held there: Ctrl+Z only puts back what's being dragged (no step), Ctrl+Y nothing

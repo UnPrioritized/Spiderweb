@@ -53,17 +53,24 @@ class VelocityFormulaBar(ttk.Frame):
         self.box.config(values=[name for _, _, name in self.items])
 
     def on_pick(self):
-        for kind, what, name in self.items:
-            if name == self.pick.get():
-                old = self.app.vel_pattern
-                p = vel_pattern(what, None) if kind == "preset" else vel_pattern(saved=what)
-                p["loops"] = old["loops"]
-                if kind == "preset":  # (a preset's numbers stay as they were set, like its height)
-                    p["vars"].update({n: v for n, v in old["vars"].items() if n in p["vars"]})
-                self.app.vel_pattern = p
-                break
+        i = self.box.current()  # (by place: a saved pattern may have a preset's name)
+        if 0 <= i < len(self.items):
+            kind, what, _ = self.items[i]
+            old = self.app.vel_pattern
+            p = vel_pattern(what, None) if kind == "preset" else vel_pattern(saved=what)
+            p["loops"] = old["loops"]
+            if kind == "preset":  # (a preset's numbers stay as they were set, like its height)
+                p["vars"].update({n: v for n, v in old["vars"].items() if n in p["vars"]})
+            self.app.vel_pattern = p
         self.refresh()
         self.app.vel.formula_changed()
+
+    def take_typing(self):
+        """Numbers typed without Enter are taken now (before the line drawn last is done, or a new one starts)."""
+        p = self.app.vel_pattern
+        for name, (var, _) in list(self.boxes.items()):
+            if var.get() != fmt(p["loops"] if name == "loops" else p["vars"][name]):  # (shown as it is: left alone)
+                self.on_number(name)
 
     def refresh(self):
         p = self.app.vel_pattern

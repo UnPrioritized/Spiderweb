@@ -1353,6 +1353,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         """The view moved under the mouse (wheel, middle-drag) while a new shape is drawn or a shape / point is held:
         it goes to the mouse at once (it stayed on the old spot in the song until the mouse moved, and letting go put
         it there)."""
+        if self.app.vel.edit:  # (a velocity line held: its end goes to the mouse)
+            return self.app.vel.follow_mouse()
         if self.sx is not None and self.holding():
             return self.on_drag(e)
         if self.sx is None or not (self.draft or self.follow):
@@ -1384,12 +1386,18 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.draft_to_mouse(e)
 
     def on_key(self, e):
+        if self.app.vel.edit:  # a velocity line held: Esc throws it away, other keys wait (its shapes stay put)
+            if e.keysym.lower() == "escape":
+                self.app.vel.drop()
+            return None if e.state & CTRL else "break"  # (Ctrl+Z / Ctrl+Y and shortcuts: their own rules)
         if self.typing:
             return self.type_key(e)
         if self.app.box_drawn():  # (Esc, tool keys, Delete...: nothing until the Select box is let go, user)
             return "break"
         k = e.keysym.lower()
         if k == "escape":
+            if self.app.vel.confirm():  # (done with a velocity line / curve, like Enter)
+                return
             self.cancel_draft()
             self.app.set_parts(())
             self.app.set_stroke(None)

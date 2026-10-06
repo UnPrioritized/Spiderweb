@@ -6,6 +6,7 @@ pattern (pattern.py: Wave, Zigzag, ...) swinging up and down around it (velocity
 """
 
 import tkinter as tk
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -18,7 +19,8 @@ from roll.roll_shared import (CTRL, DRAFT_COLOR, SHIFT, SELECTED_COLOR, SLOT_COL
 
 LEVELS = (127, 96, 64, 32, 0)
 CURVE_STEPS = 48
-FORMULA_POINTS = 4000  # the most points a Formula line has
+FORMULA_POINTS = 4000  # the most points a Formula line has, up to FORMULA_POINTS / FEWEST_PER_LOOP loops
+FEWEST_PER_LOOP = 4  # (user: a little rougher is fine; 8 made 60,000 points at 10,000 loops, 2.5 MB per undo step)
 
 
 # Bar colours, lowest first (higher ones are drawn on top): faded slots, normal slots, selected shape, shape being drawn
@@ -51,10 +53,11 @@ def curve_env(a, b, c, pad):
     return [[a[0] - pad, a[1]]] + pts + [[b[0] + pad, b[1]]]
 
 
-def formula_env(a, b, pat, pad):
+def formula_env(a, b, pat, pad, ppq=None):
     """The straight line from a to b (beat, velocity) with the pattern pat on it (its sizes in velocity steps, its
     loops between a and b), as envelope points reaching pad beats past both ends. Just the line if pat can't be
-    worked out."""
+    worked out. Many loops: at least FEWEST_PER_LOOP points each, and (ppq given) no more points than the line has
+    ticks (notes only start on whole ticks: more can't change one)."""
     if a[0] > b[0]:
         a, b = b, a
     if a[0] == b[0]:
@@ -65,7 +68,9 @@ def formula_env(a, b, pat, pad):
         return segment(a, b, pad)
     loops = pat["loops"]
     count = max(1, int(np.ceil(loops - 1e-9)))
-    per = max(8, min(len(u) - 1, FORMULA_POINTS // count))
+    per = max(FEWEST_PER_LOOP, min(len(u) - 1, FORMULA_POINTS // count))
+    if ppq:  # (a loop only a few ticks long: rougher)
+        per = max(2, min(per, int((b[0] - a[0]) * ppq // count)))
     t = np.linspace(0.0, 1.0, per + 1)
     uu, vv = np.interp(t, np.linspace(0.0, 1.0, len(u)), u), np.interp(t, np.linspace(0.0, 1.0, len(v)), v)
     along = np.concatenate([np.tile(uu[:-1], count) + np.repeat(np.arange(count), per), [count - 1 + uu[-1]]])
@@ -105,6 +110,7 @@ class VelocityPane(tk.Canvas):
         self._pic = None  # what that picture shows (see redraw)
         self.edit = None  # the drag in progress
         self.curve = None  # the last curve drawn, while its handle can still bend it
+        self.mouse = None  # (x, y, key state) of the drag's last mouse move: follow_mouse
         app.vel_tool.trace_add("write", lambda *_: self.request_redraw())
         self._pan = None
         self._redraw_pending = False
@@ -139,8 +145,8 @@ class VelocityPane(tk.Canvas):
         return [self.app.roll.x2t(e.x), self.y2v(e.y)]
 
     def trail_pt(self, e):
-        """The mouse position for the red drag line, kept inside the velocity range."""
-        return (e.x, min(max(e.y, self.v2y(127)), self.v2y(1)))
+        """The mouse position for the red drag line (beat, y), kept inside the velocity range."""
+        return (self.app.roll.x2t(e.x), min(max(e.y, self.v2y(127)), self.v2y(1)))
 
     # ------------------------------------------------------------ editing
 
@@ -173,8 +179,10 @@ class VelocityPane(tk.Canvas):
         roll = self.app.roll
         if roll.sx is None or e.x < roll.kb_w:
             return
+        self.app.vel_formula_bar.take_typing()  # (a Formula number typed without Enter: for the line drawn last)
         roll.cancel_draft()
         roll.focus_set()  # so Space / Ctrl+C etc. keep working
+        self.mouse = (e.x, e.y, e.state)
         pt = self.event_pt(e)
         cv = self.live_curve()
         which = self.near_handle(cv, e) if cv else None
@@ -195,10 +203,14 @@ class VelocityPane(tk.Canvas):
             self.draw_curve(pt, pt, pt)
 
     def on_drag(self, e):
+        if e.state & 0x200 and self._pan:  # (the middle button too: Tk sends both-button moves here) pans
+            self.mouse = (e.x, e.y, e.state & ~0x200)
+            return self.pan_to(e)
         self.on_motion(e)
         ed = self.edit
         if not ed:
             return
+        self.mouse = (e.x, e.y, e.state)
         pt = self.event_pt(e)
         if "handle" in ed:
             cv = ed["handle"]
@@ -215,7 +227,7 @@ class VelocityPane(tk.Canvas):
                 a, b = (pt, b) if ed["which"] == "a" else (a, pt)
                 if cv["kind"] != "curve":
                     c = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
-            self.draw_curve(a, b, c, only=cv["done"])
+            self.draw_curve(a, b, c)  # (an end moved over other shapes takes them too, user)
         elif ed["kind"] == "pencil":
             ed["trail"].append(self.trail_pt(e))
             self.extend(pt)
@@ -266,7 +278,7 @@ class VelocityPane(tk.Canvas):
     def shape_env(self, kind, a, b, c, pad):
         """The envelope of a line / curve / formula line from a to b."""
         if kind == "formula":
-            return formula_env(a, b, self.app.vel_pattern, pad)
+            return formula_env(a, b, self.app.vel_pattern, pad, self.app.ppq)
         return curve_env(a, b, c, pad)
 
     def draw_curve(self, a, b, c, only=None):
@@ -288,7 +300,8 @@ class VelocityPane(tk.Canvas):
             cv = ed["handle"]
             if self.live_curve() is cv:
                 cv["a"], cv["b"], cv["c"] = ed["curve"]
-                self.commit(ed["drawn"], cv["done"], cv)  # same undo step as the curve itself
+                # same undo step as the curve itself (shapes it no longer reaches get back what they had)
+                self.commit(ed["drawn"], {**cv["done"], **ed["owners"]}, cv)
             return
         if not ed["owners"]:
             self.request_redraw()
@@ -312,8 +325,9 @@ class VelocityPane(tk.Canvas):
         done = {}
         for i in owners:
             sh = app.shapes[i]
-            base = bases[i][2] if bases else velocity_env(sh)
-            fx = bases[i][4] if bases else sh.get("fx")
+            had = bases.get(i) if bases else None  # (a shape the end was moved over: from what it has now)
+            base = had[2] if had else velocity_env(sh)
+            fx = had[4] if had else sh.get("fx")
             bs = [b for b, _ in cached_path(sh)]
             lo, hi = min(bs), max(bs)
             if hi > lo:
@@ -356,17 +370,33 @@ class VelocityPane(tk.Canvas):
         """The Formula tool's settings changed: the last formula line drawn (while it can still be changed) takes
         them, in the same undo step."""
         cv = self.live_curve()
-        if cv and cv["kind"] == "formula":
-            self.commit(formula_env(cv["a"], cv["b"], self.app.vel_pattern, self.pad()), cv["done"], cv)
+        if cv and cv["kind"] == "formula" and not self.edit:
+            self.commit(formula_env(cv["a"], cv["b"], self.app.vel_pattern, self.pad(), self.app.ppq), cv["done"], cv)
             self.request_redraw()
 
     def confirm(self):
         """Done with the last line / curve: its handles go away. True if there was one."""
         if self.curve is None:
             return False
+        self.app.vel_formula_bar.take_typing()  # (a number typed without Enter is still for this line)
         self.curve = None
         self.request_redraw()
         return True
+
+    def drop(self):
+        """The line being dragged is thrown away (Ctrl+Z / Esc while the mouse holds it): nothing changes. Moving a
+        handle: the line stays as it was before the press."""
+        if not self.edit:
+            return
+        self.edit = None
+        self.config(cursor="crosshair")
+        self.request_redraw()
+
+    def follow_mouse(self):
+        """The view moved under the held mouse (wheel, middle-drag): the line's end goes to the mouse at once."""
+        if self.edit and self.mouse and self.app.roll.sx is not None:
+            x, y, state = self.mouse
+            self.on_drag(SimpleNamespace(x=x, y=y, state=state))
 
     def near_handle(self, cv, e):
         """Which of the curve's handles the mouse is on: "mid" (the bend), "a" / "b" (its ends), or None."""
@@ -403,6 +433,7 @@ class VelocityPane(tk.Canvas):
             roll.view_t = self._pan[1] - (e.x - self._pan[0]) / roll.sx
             roll.clamp_view()
             roll.request_redraw()
+            self.follow_mouse()
 
     def on_wheel(self, e):
         """Wheel scrolls sideways, Ctrl+wheel zooms time (same as the piano roll)."""
@@ -418,6 +449,7 @@ class VelocityPane(tk.Canvas):
             roll.view_t += (-1 if up else 1) * 120 / roll.sx
         roll.clamp_view()
         roll.request_redraw()
+        self.follow_mouse()
 
     # ------------------------------------------------------------ drawing
 
@@ -457,7 +489,7 @@ class VelocityPane(tk.Canvas):
         if cv:
             self.draw_curve_line(*cv, lw, kind=self.kind())
         elif ed and len(ed["trail"]) >= 2:
-            self.create_line(*[c for p in ed["trail"] for c in p], fill="#d00000", width=lw)
+            self.create_line(*[c for b, y in ed["trail"] for c in (roll.t2x(b), y)], fill="#d00000", width=lw)
         cv = None if ed else self.live_curve()
         if cv:
             self.draw_curve_line(cv["a"], cv["b"], cv["c"], lw, kind=cv["kind"])
