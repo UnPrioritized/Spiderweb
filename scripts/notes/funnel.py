@@ -462,6 +462,23 @@ def line_band(a, b, q):
     return tuple(sorted((ta + (tb - ta) * u0, ta + (tb - ta) * u1)))
 
 
+def to_wall(sh, a, b):
+    """The part of line a -> b on its start's side of the (endless) wall: a line drawn on past the wall stays as
+    drawn, but makes no notes there (user)."""
+    pts = sh["pts"]
+    if len(pts) < 4:
+        return a, b
+    (wb0, wp0), (wb1, wp1) = pts[2], pts[3]
+
+    def side(p):
+        return (wb1 - wb0) * (p[1] - wp0) - (wp1 - wp0) * (p[0] - wb0)
+    sa, sb = side(a), side(b)
+    if sa * sb >= 0:  # (doesn't cross it)
+        return a, b
+    t = sa / (sa - sb)
+    return a, (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+
+
 def _keys(ps):
     return range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1)
 
@@ -499,7 +516,10 @@ def funnel_key_spans(sh, main=True):
     """{key: [[first beat, last beat], ...]} where each key plays (sorted, overlapping stretches merged).
     Not main (the other side of the wall, see funnel_sides): without the wall itself."""
     pieces = {}
-    for a, b in funnel_segments(sh) if main else funnel_lines(sh):
+    segs = [to_wall(sh, a, b) for a, b in funnel_lines(sh)]
+    if main and len(sh["pts"]) >= 4:
+        segs.append(tuple(tuple(p) for p in sh["pts"][2:4]))
+    for a, b in segs:
         for q in _keys((a[1], b[1])):
             s = line_band(a, b, q)
             if s:
