@@ -185,6 +185,7 @@ class FunnelEditing:
         if hit is not None:
             st = new_start(sh, hit[1], hit[0])
             if not st:
+                self.app.status.config(text=tr("roll_funnel.no_room"))
                 return False
             self.app.push_undo(name=tr("roll_funnel.funnel_curve"))
             sh["starts"].append(st)

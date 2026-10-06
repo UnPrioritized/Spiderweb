@@ -9,7 +9,7 @@ from notes.convert import originals
 from notes.custom import ROLES
 from window.drawer import colour_menu
 from notes.joined import is_joined
-from notes.funnel import inside_out, turned_curve
+from notes.funnel import inside_out, new_start, turned_curve
 from notes.tumour import LINE_KINDS
 from roll.roll_shared import SHIFT
 from window.claw_window import open_claw
@@ -67,10 +67,10 @@ class ShapeMenu:
                           state="normal" if on else "disabled")
 
         if sh["kind"] == "funnel" and len(sh["pts"]) >= 4 and len(app.sels) == 1:
-            on_line = self.on_funnel_line(sh, at) is not None
-            item(tr("roll_menu.add_curve_start_here") if on_line else tr("roll_menu.add_anchor_here"), "",
+            hit = self.on_funnel_line(sh, at)
+            item(tr("roll_menu.add_curve_start_here") if hit else tr("roll_menu.add_anchor_here"), "",
                  lambda: self.funnel_click(sh, at),
-                 on_line or bool(sh["starts"]))
+                 new_start(sh, hit[1], hit[0]) is not None if hit else bool(sh["starts"]))  # (greyed: no room)
         if sh["kind"] == "poly" and len(app.sels) == 1:
             item(tr("roll_menu.add_point_here"), "", lambda: self.insert_poly_point(sh, at))
         if sh["kind"] == "curve" and len(app.sels) == 1:

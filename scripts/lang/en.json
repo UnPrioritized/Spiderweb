@@ -940,6 +940,7 @@
  "roll_text.erase": "Erase text: {text}",
  "roll_text.no_font_has": "No font on this PC has {letters}: they show as boxes or \"?\"",
  "roll_funnel.funnel_curve": "Funnel curve",
+ "roll_funnel.no_room": "No room for curves here: the line meets the wall at this spot",
  "roll_funnel.add_a_funnel_line": "Add a funnel line",
  "roll_funnel.remove_a_funnel_point": "Remove a funnel point",
  "roll_funnel.1_curve": "1 curve",
