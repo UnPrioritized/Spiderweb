@@ -290,10 +290,51 @@ def notes_across(notes, a, b, ppq):
     return [[list(a + (b - a) * s0), list(a + (b - a) * s1)]], True
 
 
-def knife_in_two(sh, halves, a, b, segs):
+def knife_hits(notes, a, b, ppq):
+    """Where the knife a-b goes across a line's notes (beats, keys): the middle of each run of key rows next to each
+    other where it goes through a note, none: the row where it passes nearest one (a flat knife: where the notes of the
+    rows beside it meet). Its marks go there, short like a cut line's (user, 2026-10-07: the stretch over every row it
+    passed between notes reached far past them)."""
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    db, dk = b - a
+    if not len(notes) or abs(db) + abs(dk) < 1e-12:
+        return []
+    t0, t1 = notes[:, 0] / ppq, notes[:, 1] / ppq
+    if abs(dk) < 1e-12:
+        lo, hi = sorted((a[0], b[0]))
+        near = (np.abs(notes[:, 2] - a[1]) <= 1) & (t1 > lo) & (t0 < hi)
+        below, above = near & (notes[:, 2] < a[1]), near & (notes[:, 2] > a[1])
+        if not below.any() or not above.any():
+            return []
+        ends = np.r_[t0[below], t1[below]]
+        other = np.sort(np.r_[t0[above], t1[above]])
+        j = np.clip(np.searchsorted(other, ends), 1, len(other) - 1)
+        pick = np.where(np.abs(other[j] - ends) < np.abs(other[j - 1] - ends), other[j], other[j - 1])
+        n = int(np.argmin(np.abs(pick - ends)))
+        x = min(max((ends[n] + pick[n]) / 2, lo), hi)
+        return [[float(x), float(a[1])]]
+    keys, at = np.unique(notes[:, 2], return_inverse=True)
+    s = (keys - a[1]) / dk
+    x = a[0] + db * s
+    on = (s >= -1e-9) & (s <= 1 + 1e-9)
+    far = np.full(len(keys), np.inf)  # (how far it passes from the row's nearest note, in beats; 0 = through one)
+    np.minimum.at(far, at, np.maximum(np.maximum(t0 - x[at], x[at] - t1), 0))
+    far[~on] = np.inf
+    if not np.isfinite(far).any():
+        return []
+    hit = far <= 1e-9
+    if not hit.any():
+        hit = far == far.min()
+    rows = np.flatnonzero(hit)
+    runs = np.split(rows, np.flatnonzero(np.diff(keys[rows]) > 1) + 1)
+    return [[float(a[0] + db * s[r].mean()), float(a[1] + dk * s[r].mean())] for r in runs]
+
+
+def knife_in_two(sh, halves, a, b, segs, hits=()):
     """sh (a line kind or custom shape with pages / glue, maybe a piece already) cut by the Slice tool through its
     NOTES along a-b: halves = two copies of it, each made a piece keeping the whole's notes on its side; their drawing
-    stays the whole's. segs: the knife's stretch over the notes (the mark)."""
+    stays the whole's. segs: the knife's stretch over the notes (the mark; a line's: drawn short at each of hits,
+    knife_hits)."""
     import uuid
     custom = sh["kind"] == "custom"
     got = source(sh)
@@ -332,6 +373,8 @@ def knife_in_two(sh, halves, a, b, segs):
     mid = np.mean([np.mean(sg, axis=0) for sg in segs], axis=0)
     new = {"id": uuid.uuid4().hex[:12], "kind": "slice", "at": [float(mid[0]), float(mid[1])], "u": 0.0,
            "dir": [float(b[0] - a[0]), float(b[1] - a[1])], "segs": segs}
+    if hits and not custom:
+        new.update(at=list(hits[0]), hits=[list(p) for p in hits])
     for h, sd in zip(halves, (1, -1)):
         mine = [m for m in marks if knife_side(m["at"], a, b) in (0, sd)]
         knife = knives + [[float(a[0]), float(a[1]), float(b[0] - a[0]), float(b[1] - a[1]), sd]]
@@ -661,6 +704,8 @@ def moved_mark(m, d):
     out = dict(m, at=[m["at"][0] + d[0], m["at"][1] + d[1]])
     if m.get("segs"):
         out["segs"] = [[[x + d[0], y + d[1]] for x, y in sg] for sg in m["segs"]]
+    if m.get("hits"):
+        out["hits"] = [[x + d[0], y + d[1]] for x, y in m["hits"]]
     return out
 
 
@@ -726,6 +771,8 @@ def clean_cut(c):
                 mk["dir"] = pt(m["dir"])
             if m.get("segs"):
                 mk["segs"] = [[pt(a), pt(b)] for a, b in m["segs"]]
+            if m.get("hits"):
+                mk["hits"] = [pt(p) for p in m["hits"]]
             marks.append(mk)
         snaps = {}
         for key, keys in (("vel", VELOCITY), ("gate", GATE)):  # (as the piece's own would come out of a file)

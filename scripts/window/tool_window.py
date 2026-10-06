@@ -14,6 +14,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from notes.fx import copied, is_page, pages
+from notes.sliced import steps_kept
 from window.widgets import LocalUndo, Tooltip
 
 NEW = "new"  # the "+" tab
@@ -439,8 +440,9 @@ class ToolWindow(tk.Toplevel):
 
     @staticmethod
     def put_fx(sh, fx):
-        """sh's steps set to fx (flips / velocities with no page before them dropped; none left: no "fx")."""
-        while fx and not is_page(fx[0]):
+        """sh's steps set to fx (flips / velocities with no page before them dropped, but not on a piece whose notes
+        come from its whole's pages: they're its own flips / turns, user 2026-10-07; none left: no "fx")."""
+        while fx and not is_page(fx[0]) and not steps_kept(sh):
             fx = fx[1:]
         if fx:
             sh["fx"] = fx
@@ -491,11 +493,18 @@ class ToolWindow(tk.Toplevel):
 
     def sync(self):
         """The main window changed the selection or the shapes."""
+        at, now = self.at, self.now
         if sorted(self.app.note_tool_sels()) != self.targets:
             self.settle()
+            at = None
         elif self.settings() == self.now:
             return
         self.retarget()
+        k = next(iter(at.values())) if at and len(set(at.values())) == 1 else None
+        if k is not None and self.same() and all(
+                i in at and (now.get(i) or [])[k:k + 1] == (self.app.shapes[i].get("fx") or [])[k:k + 1] != []
+                for i in self.targets):
+            self.pick_page(k)  # (the page shown is still there, the same: it stays picked, user)
 
     def settle(self):
         """Something else is about to change in the main window: the change tried so far is kept (its own undo

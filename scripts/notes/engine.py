@@ -7,6 +7,7 @@ The maths for each kind lives in its own file: paths.py (lines, polylines, freeh
 
 import json
 import math
+import threading
 
 import numpy as np
 
@@ -23,7 +24,7 @@ from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
 from notes.chop import apply_chop
 from notes.claw import apply_claw
-from notes.fx import (clean_fx, flip_shape, groups, mirrored, notes_box, swapped, toggled, turn_notes, turn_pts,
+from notes.fx import (clean_fx, flip_shape, groups, idle, mirrored, notes_box, swapped, toggled, turn_notes, turn_pts,
                       turn_shape, velocities)
 from notes.gaterange import clean_range
 from notes.glue import apply_glue, clean_glue, glue_box
@@ -363,6 +364,10 @@ def shape_notes_tracks(sh, ppq, keys=128):
     return get(sh)
 
 
+DEEP = 50  # steps: more, and fx_notes makes the notes before each one first (see there)
+_warming = threading.local()
+
+
 def fx_notes(sh, ppq, keys, get):
     """shape_notes_tracks' work: the notes, then its glue, then its note tool pages one after another (fx.py).
     get(shape) = another shape's notes and tracks (remembered by the caller: the steps before the last one, the
@@ -371,20 +376,30 @@ def fx_notes(sh, ppq, keys, get):
         return _notes_tracks(sh, ppq, keys)
     fx = sh.get("fx")
     if fx:
-        last = fx[-1]
-        rest = dict(sh, fx=fx[:-1]) if len(fx) > 1 else {k: v for k, v in sh.items() if k != "fx"}
-        if last["tool"] == "flip":
-            rest["_m"] = toggled(sh.get("_m"), last["axis"])
-            if not rest["_m"]:
-                del rest["_m"]
-            notes, tracks = get(rest)  # (flipped within their own box: they stay where they were)
+        if len(fx) > DEEP and not getattr(_warming, "on", False):
+            # (a long list: the notes before each step made first, from the first step up, so making them never goes
+            # a step deeper than one: hundreds of steps went past Python's limit)
+            chain, s = [], sh
+            while s.get("fx"):
+                s = before_step(s)[0]
+                chain.append(s)
+            _warming.on = True
+            try:
+                for s in reversed(chain):
+                    get(s)
+            finally:
+                _warming.on = False
+        rest, last = before_step(sh)
+        notes, tracks = get(rest)
+        if last is None:
+            return notes, tracks
+        if last["tool"] == "flip":  # (flipped within their own box: they stay where they were)
             return mirrored(notes, [last["axis"]], notes_box(notes)), tracks
         if last["tool"] == "turn":  # (the steps before it: on the drawing turned back; turned within their own box)
-            notes, tracks = get(turned_back(rest, last))
             same = groups(np.column_stack([notes[:, 3:], tracks if tracks is not None else np.zeros(len(notes))]))
             notes, idx = turn_notes(notes, last["deg"], last["r"] * ppq, keys, same)
             return notes, None if tracks is None else np.asarray(tracks)[idx]
-        return fx_step(*get(rest), last, sh, ppq)
+        return fx_step(notes, tracks, last, sh, ppq)
     if sh.get("_m"):
         if sh.get("cut"):  # (a sliced piece: its notes as it was, before the flips; sliced.steps_kept)
             return get(unflipped(sh))
@@ -403,19 +418,29 @@ def unflipped(sh):
     return out
 
 
+def before_step(sh):
+    """(sh without its last step, as the notes that step works on are made: flipped / turned back before a flip /
+    turn step; that step, or None when it does nothing: a flip / turn with no page switched on before it leaves the
+    drawing's own notes, user 2026-10-07, they came out jagged. Not on a piece whose notes come from its whole's
+    pages: sliced.steps_kept)."""
+    fx, last = sh["fx"], sh["fx"][-1]
+    rest = dict(sh, fx=fx[:-1]) if len(fx) > 1 else {k: v for k, v in sh.items() if k != "fx"}
+    if last["tool"] in ("flip", "turn") and idle(fx[:-1]) and not (sh.get("cut") and whole_made(sh["cut"])):
+        return rest, None
+    if last["tool"] == "flip":
+        rest["_m"] = toggled(sh.get("_m"), last["axis"])
+        if not rest["_m"]:
+            del rest["_m"]
+    elif last["tool"] == "turn":
+        rest = turned_back(rest, last)
+    return rest, last
+
+
 def as_made(sh):
     """sh's drawing as its notes are made from it: before its flip / turn steps (a sliced piece flipped or turned
     as a shape with pages is still that piece: sliced.moved_by(as_made(sh)))."""
     while sh.get("fx"):
-        fx, last = sh["fx"], sh["fx"][-1]
-        rest = dict(sh, fx=fx[:-1]) if len(fx) > 1 else {k: v for k, v in sh.items() if k != "fx"}
-        if last["tool"] == "flip":
-            rest["_m"] = toggled(sh.get("_m"), last["axis"])
-            if not rest["_m"]:
-                del rest["_m"]
-        elif last["tool"] == "turn":
-            rest = turned_back(rest, last)
-        sh = rest
+        sh = before_step(sh)[0]
     return unflipped(sh) if sh.get("_m") else bare_of(sh)
 
 
@@ -533,21 +558,31 @@ def whole_tools(whole, raw, spots, tracks, ppq):
 def run_steps(a, fx, sh, ppq, m=(), pre=()):
     """Notes a (start, end, key, velocity, then columns riding along) after the steps fx of sh (as fx_notes does them;
     first a's put back by each of pre in order (("m", flip axes) / ("t", degrees, ticks per key): turned), then
-    flipped along the axes m). A turn step turns the notes back, not the drawing (close, not exact)."""
-    if not fx:
-        for op in pre:
-            a = mirrored(a, op[1], notes_box(a)) if op[0] == "m" else turn_notes(a, op[1], op[2], 256, groups(a[:, 3::2]))[0]
-        return mirrored(a, m, notes_box(a)) if m else a
-    last = fx[-1]
-    if last["tool"] == "flip":
-        got = run_steps(a, fx[:-1], sh, ppq, toggled(m, last["axis"]), pre)
-        return mirrored(got, [last["axis"]], notes_box(got))
-    if last["tool"] == "turn":
-        ticks = last["r"] * ppq
-        back = tuple(pre) + ((("m", m),) if m else ()) + (("t", -last["deg"], ticks),)
-        got = run_steps(a, fx[:-1], sh, ppq, (), back)
-        return turn_notes(got, last["deg"], ticks, 256, groups(got[:, 3::2]))[0]  # (velocity, track: not spot)
-    return fx_step(run_steps(a, fx[:-1], sh, ppq, m, pre), None, last, sh, ppq)[0]
+    flipped along the axes m). A turn step turns the notes back, not the drawing (close, not exact). A flip / turn with
+    no page switched on before it does nothing (before_step)."""
+    up = []  # (the steps, last first: from the end down to the notes, then back up; no recursion: lists can be long)
+    while fx:
+        last, fx = fx[-1], fx[:-1]
+        if last["tool"] in ("flip", "turn") and idle(fx):
+            continue
+        up.append(last)
+        if last["tool"] == "flip":
+            m = toggled(m, last["axis"])
+        elif last["tool"] == "turn":
+            pre = tuple(pre) + ((("m", m),) if m else ()) + (("t", -last["deg"], last["r"] * ppq),)
+            m = ()
+    for op in pre:
+        a = mirrored(a, op[1], notes_box(a)) if op[0] == "m" else turn_notes(a, op[1], op[2], 256, groups(a[:, 3::2]))[0]
+    if m:
+        a = mirrored(a, m, notes_box(a))
+    for last in reversed(up):
+        if last["tool"] == "flip":
+            a = mirrored(a, [last["axis"]], notes_box(a))
+        elif last["tool"] == "turn":  # (velocity, track: not spot)
+            a = turn_notes(a, last["deg"], last["r"] * ppq, 256, groups(a[:, 3::2]))[0]
+        else:
+            a = fx_step(a, None, last, sh, ppq)[0]
+    return a
 
 
 def _notes_tracks(sh, ppq, keys):

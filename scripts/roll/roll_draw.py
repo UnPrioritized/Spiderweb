@@ -619,18 +619,20 @@ class RollDrawing:
                 for j, _, x2, y2 in pair:
                     if j != i and math.hypot(x2 - x, y2 - y) > 3 * s:
                         self.create_line(x, y, x2, y2, fill=FAINT_CUT, width=1, dash=(2, 4))
-                if m.get("segs"):  # (a custom shape's: along its cut edge, over its solid line there)
+                if m.get("segs") and not m.get("hits"):  # (a custom shape's: along its cut edge, over its line there)
                     for (b0, k0), (b1, k1) in m["segs"]:
                         xy = self.t2x(b0), self.p2y(k0), self.t2x(b1), self.p2y(k1)
                         self.create_line(*xy, fill="#ffffff", width=max(1, round(2 * s)) + 1)
                         self.create_line(*xy, fill="#d00000", width=max(1, round(2 * s)), dash=(6, 3))
-                elif m["kind"] == "slice":
+                elif m["kind"] == "slice":  # (a line's cut through its notes: one where it crosses each run, user)
                     dx, dy = m.get("dir", (0, 1))
                     dx, dy = dx * self.sx, -dy * self.sy
                     ln = math.hypot(dx, dy) or 1
                     dx, dy = dx / ln * CUT_MARK * s, dy / ln * CUT_MARK * s
-                    self.create_line(x - dx, y - dy, x + dx, y + dy, fill="#d00000", width=max(1, round(2 * s)),
-                                     dash=(6, 3))
+                    for hx, hy in ([(self.t2x(b), self.p2y(k)) for b, k in m["hits"]] if m.get("hits") else
+                                   [(x, y)]):
+                        self.create_line(hx - dx, hy - dy, hx + dx, hy + dy, fill="#d00000",
+                                         width=max(1, round(2 * s)), dash=(6, 3))
                 else:
                     self.draw_scissors(x + 9 * s, y - 9 * s, s)
 

@@ -31,7 +31,7 @@ from notes.strum import clean_strum
 TOOLS = ("chop", "claw", "strum")  # (old files' order)
 CLEAN = {"chop": clean_chop, "claw": clean_claw, "strum": clean_strum}
 AXES = ("time", "keys")
-MAX_STEPS = 200
+MAX_STEPS = 2000  # (a file's list is cut there: a broken one; flips in a row make one step each way, see flipped)
 
 
 def is_page(step):
@@ -41,6 +41,11 @@ def is_page(step):
 def pages(fx):
     """The tool pages of a step list."""
     return [st for st in fx or () if is_page(st)]
+
+
+def idle(fx):
+    """Is no page of a step list switched on? (Then a flip / turn after them does nothing: engine.before_step.)"""
+    return not any(is_page(st) and not st.get("off") for st in fx or ())
 
 
 def clean_fx(sh, steps=False):
@@ -90,15 +95,18 @@ def copied(fx):
 
 
 def flipped(fx, axis, always=False):
-    """The steps after the shape is flipped: a flip step added (two of the same in a row cancel out), or nothing
-    when there's no page (flipping the drawing is enough). always: a step even so (a sliced piece whose notes come
-    from the shape it was cut from's pages, sliced.steps_kept)."""
+    """The steps after the shape is flipped: a flip step added, or nothing when there's no page (flipping the drawing
+    is enough). Flips in a row make at most one step each way (the same one twice cancels out; sideways, upside
+    down, sideways = upside down: long lists of them made files too long to open whole). always: a step even so (a
+    sliced piece whose notes come from the shape it was cut from's pages, sliced.steps_kept)."""
     if not pages(fx) and not always:
         return fx
-    fx = fx or []
-    if fx and fx[-1] == {"tool": "flip", "axis": axis}:
-        return fx[:-1] or None
-    return fx + [{"tool": "flip", "axis": axis}]
+    fx = list(fx or [])
+    axes = {axis}
+    while fx and fx[-1]["tool"] == "flip":  # (flips within one box: the order they're done in doesn't matter)
+        axes ^= {fx.pop()["axis"]}
+    fx += [{"tool": "flip", "axis": a} for a in sorted(axes)]
+    return fx or None
 
 
 def flip_shape(sh, sideways, mid2):

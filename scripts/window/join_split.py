@@ -16,7 +16,7 @@ from notes.bezier import anchor_count, nearest, split
 from notes.engine import as_made, cached_arrays, shape_path
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom
-from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_in_two, moved_by, notes_across,
+from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
                           rejoined, slice_in_two, split_here_ok, tooled)
 from notes.smooth import smooth_path
 from notes.joined import (custom_groups, join_shapes, join_velocity, piece_velocity, sections, split_at, split_custom,
@@ -325,7 +325,8 @@ class JoinSplit:
                         crossed |= hit
                         if stretch:
                             got = [copy.deepcopy(p), copy.deepcopy(p)]
-                            knife_in_two(p, got, sa, sb, stretch)
+                            hits = knife_hits(self.notes_of(p), sa, sb, self.ppq) if sh["kind"] != "custom" else ()
+                            knife_in_two(p, got, sa, sb, stretch, hits)
                         nxt += got if stretch else [p]
                     pieces = nxt
                 if len(pieces) == 1 and crossed:
