@@ -1945,14 +1945,16 @@ class HzWindow(tk.Toplevel):
         self.drop_drag()
 
     def held_fx(self):
-        """(Ctrl+Z) What puts back what the mouse holds in an effects pane (here or the synth window's) or on a synth
-        knob; None when nothing is held there."""
+        """(Ctrl+Z) What puts back what the mouse holds in an effects pane (here or the synth window's), on a synth
+        knob or in its Effects list; None when nothing is held there."""
         syn = self.synth_win
         for pane in (self.fx, syn.fx if syn else None):
             if pane is not None and pane.drag:
                 return pane.cancel_drag
         if syn and syn.turning is not None:
             return syn.cancel_turn
+        if syn and syn.list_held:  # (an effect held in the Effects tab's list)
+            return syn.cancel_list
         return None
 
     def cancel_drag(self):

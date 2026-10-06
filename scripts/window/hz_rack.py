@@ -115,19 +115,28 @@ class SynthRack:
             self.draw_rack_list()
 
     def list_release(self, e):
-        """A click: the effect put in / taken out; a drag: moved there."""
+        """A click: the effect put in / taken out (let go off its row: nothing, like a menu); a drag: moved there."""
         h, self.list_held = self.list_held, None
         if not h:
             return
         kind = h["kind"]
         if h["moved"]:
-            if h["to"] is not None:
+            if h["to"] is not None and kind in self.vals["rack"]:
                 self.rack_move(kind, h["to"])
             self.draw_rack_list()
+        elif not 0 <= e.x < self.rack_list.winfo_width() or self.list_row(e.y) != kind:
+            return
         elif kind in self.vals["rack"]:
             self.rack_remove(kind)
         else:
             self.rack_add(kind)
+
+    def cancel_list(self):
+        """Ctrl+Z while an effect in the list is held: the drag is called off (its let-go does nothing), no undo
+        step."""
+        self.list_held = None
+        self.draw_rack_list()
+        return True
 
     def draw_rack_list(self):
         c, s = self.rack_list, self.s
@@ -258,10 +267,9 @@ class SynthRack:
         w, h, pad = c.winfo_width(), c.winfo_height(), 6 * s
         n = int(v["echo_repeats"])
         heard = [i for i in range(n + 1) if v["echo_fade"] ** i >= SOFT]
-        span = (n + 1) * v["echo_time"]
         bw = max(3.0, (w - 2 * pad) / (n + 1) * 0.6)
-        for i in heard:
-            x = pad + i * v["echo_time"] / span * (w - 2 * pad)
+        for i in heard:  # (spread by the repeats only: Time 0 while the knob is turned all the way down)
+            x = pad + i / (n + 1) * (w - 2 * pad)
             top = h - pad - v["echo_fade"] ** i * (h - 3 * pad)
             c.create_rectangle(x, top, x + bw, h - pad, fill=colour if i else "#6b737e", outline="")
         c.create_line(pad, h - pad, w - pad, h - pad, fill=MID)
