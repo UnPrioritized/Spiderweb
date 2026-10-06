@@ -70,6 +70,7 @@ class Photo:
                 self._pil = got[1].PhotoImage("RGB", (width, height), master=master)
                 self.photo = self._pil._PhotoImage__photo  # (Pillow keeps its tk.PhotoImage here)
                 self._fast = isinstance(self.photo, tk.PhotoImage)
+                self.photo.pillow_keep = self._pil  # (Pillow deletes the picture when its own goes: kept along)
             except Exception:
                 self._fast = False
         if not self._fast:

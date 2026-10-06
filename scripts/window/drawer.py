@@ -23,6 +23,7 @@ from files.about import HERE
 from files.safefile import write_text
 from files.clipboard import get_text, put_text
 from files.share import LONG_LINE, ShareError, drawing_line, made_by, read_drawing, unpack
+from files.speed import Photo
 from roll.roll_shared import BOX_STILL, grab_while_panning, line_touches_box, mouse_trail, shown_points
 from window.help import open_help
 from window.formula_host import DrawerHost, formula_menu
@@ -542,8 +543,9 @@ class Drawer(tk.Toplevel):
         img = np.where(board[..., None], np.uint8(rgb(BOARD)), np.uint8(rgb(OFF_BOARD))).astype(np.uint8)
         img = np.where(tint[face][..., None], lut[face], img).astype(np.uint8)
         if self._area_img is None or (self._area_img.width(), self._area_img.height()) != (cw, ch):
-            self._area_img = tk.PhotoImage(master=self, width=cw, height=ch)
-        self.tk.call(self._area_img.name, "put", b"P6 %d %d 255\n" % (cw, ch) + img.tobytes(), "-format", "ppm")
+            self._area_pic = Photo(self, cw, ch)
+            self._area_img = self._area_pic.photo
+        self._area_pic.put(img)
         return self._area_img
 
     def _build(self):

@@ -11,7 +11,9 @@ from tkinter import colorchooser, filedialog, messagebox, ttk
 
 import numpy as np
 
+from files import speed
 from files.lang import tr
+from files.speed import Photo
 from notes import picture as P
 
 PREVIEW_W, PREVIEW_H = 900, 520  # the preview's size to start with (it grows with the window)
@@ -23,8 +25,14 @@ SWATCH = 20
 def _photo(master, rgb):
     """rows x cols x 3 floats 0..1 (sRGB) -> a Tk picture."""
     a = (np.clip(rgb, 0, 1) * 255 + 0.5).astype(np.uint8)
-    return tk.PhotoImage(master=master, data=b"P6 %d %d 255\n" % (a.shape[1], a.shape[0]) + a.tobytes(),
-                         format="ppm")
+    pic = Photo(master, a.shape[1], a.shape[0])
+    pic.put(a)
+    return pic.photo
+
+
+def _kinds():
+    """The picture kinds this Spiderweb reads, in words."""
+    return tr("image.kinds_all") if speed.pillow() else tr("image.kinds_basic")
 
 
 def _edges(n, size):
@@ -166,7 +174,7 @@ class ImageWindow(tk.Toplevel):
         r = ttk.Frame(f)
         r.pack(fill="x")
         ttk.Button(r, text=tr("image.open"), command=self.ask_file).pack(side="left")
-        self.name = ttk.Label(r, text=tr("image.no_picture"), foreground="#777")
+        self.name = ttk.Label(r, text=tr("image.no_picture", kinds=_kinds()), foreground="#777")
         self.name.pack(side="left", padx=6)
         r = ttk.Frame(f)
         r.pack(fill="x", pady=(3, 0))
@@ -513,7 +521,7 @@ class ImageWindow(tk.Toplevel):
 
     def ask_file(self):
         path = filedialog.askopenfilename(parent=self, title=tr("image.open_title"), filetypes=[
-            (tr("image.files"), "*.png *.gif"), (tr("image.all_files"), "*.*")])
+            (tr("image.files"), P.file_patterns()), (tr("image.all_files"), "*.*")])
         if path:
             self.load(path)
 
@@ -522,7 +530,8 @@ class ImageWindow(tk.Toplevel):
             pic = P.load(path, self)
         except (tk.TclError, OSError, ValueError) as e:
             if not quiet:
-                messagebox.showerror(tr("image.window_title"), tr("image.cant_open", e=e), parent=self)
+                messagebox.showerror(tr("image.window_title"), tr("image.cant_open", e=e, kinds=_kinds()),
+                                     parent=self)
             return False
         self.pic = pic
         self.locked, self.start = (self.project_locks() if self.editing is None else self.locked), {}
@@ -619,8 +628,8 @@ class ImageWindow(tk.Toplevel):
         cv = self.cv
         cv.delete("all")
         if not self.pic or self.grid is None:
-            cv.create_text(self.view_size[0] // 2, self.view_size[1] // 2, text=tr("image.no_picture"),
-                           fill="#aaa")
+            cv.create_text(self.view_size[0] // 2, self.view_size[1] // 2,
+                           text=tr("image.no_picture", kinds=_kinds()), fill="#aaa")
             self.info.config(text="")
             return
         x, y, w, h = self.fit()

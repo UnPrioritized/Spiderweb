@@ -1,6 +1,6 @@
 """Pictures -> a grid of colour slots (the maths behind "image to notes"; no window, no notes yet).
 
-load() reads a picture file through Tk (PNG / GIF; Tk has no JPG) into linear-light colours + how see-through
+load() reads a picture file (Pillow: PNG, JPG, WebP...; without it Tk: PNG / GIF) into linear-light colours + how see-through
 each pixel is. cells() averages it down to the note grid (keys x steps), adjust() is brightness / contrast /
 saturation, fit_palette() picks up to 16 colours for one or more pictures (several starts, detail-weighted,
 locked colours kept), quantise() gives every cell a slot: spread blending (the error of each cell passed on to
@@ -13,6 +13,8 @@ import hashlib
 import os
 
 import numpy as np
+
+from files import speed
 
 MAX_SIDE = 2400  # bigger pictures are averaged down first (memory; detail past the note grid is lost anyway)
 
@@ -81,18 +83,30 @@ def _has_alpha(path):
     return head[:3] == b"GIF"
 
 
+def file_patterns():
+    """The picture files load() reads, for a file picker: Pillow's kinds when it's there, else Tk's own."""
+    if speed.pillow():
+        return "*.png *.jpg *.jpeg *.gif *.webp *.bmp *.tif *.tiff"
+    return "*.png *.gif"
+
+
 def load(path, tk_root):
-    """Reads the picture file (PNG / GIF) -> Picture. Raises tk.TclError / OSError if it can't be read."""
-    import tkinter as tk
-    img = tk.PhotoImage(master=tk_root, file=path)
-    try:
-        w, h = img.width(), img.height()
-        rgb = _ppm_pixels(tk_root.tk.call(img, "data", "-format", "ppm"))
-        alpha = None
-        if _has_alpha(path):
-            alpha = _alpha(img, tk_root, w, h)
-    finally:
-        img = None
+    """Reads the picture file -> Picture. With Pillow: PNG, JPG, GIF, WebP, BMP, TIFF... (photos turned the way
+    they're shown); without: PNG / GIF through Tk. Raises tk.TclError / OSError / ValueError if it can't be read."""
+    if speed.pillow():
+        rgb, alpha = _pillow_pixels(path)
+        h, w = rgb.shape[:2]
+    else:
+        import tkinter as tk
+        img = tk.PhotoImage(master=tk_root, file=path)
+        try:
+            w, h = img.width(), img.height()
+            rgb = _ppm_pixels(tk_root.tk.call(img, "data", "-format", "ppm"))
+            alpha = None
+            if _has_alpha(path):
+                alpha = _alpha(img, tk_root, w, h)
+        finally:
+            img = None
     lin = to_lin(rgb.astype(np.float32) / 255)
     k = max(1, -(-max(w, h) // MAX_SIDE))
     if k > 1:  # average k x k blocks (cuts the edge rows / columns that don't fill a block)
@@ -101,6 +115,29 @@ def load(path, tk_root):
         if alpha is not None:
             alpha = alpha[:hh, :ww].reshape(hh // k, k, ww // k, k).mean(axis=(1, 3))
     return Picture(np.ascontiguousarray(lin, np.float32), alpha, (w, h), path, fingerprint(path))
+
+
+def _pillow_pixels(path):
+    """(rows x cols x 3 uint8, alpha 0..1 or None) of the picture's first frame, read by Pillow. 16-bit greys
+    keep their top 8 bits (as Tk does)."""
+    from PIL import Image, ImageOps
+    try:
+        with Image.open(path) as im:
+            kind = im.format
+            im = ImageOps.exif_transpose(im)  # (a photo taken sideways: turned the way it's shown)
+            if im.mode in ("RGBA", "LA", "PA") or "transparency" in im.info:
+                a = np.array(im.convert("RGBA"))
+                alpha = a[..., 3].astype(np.float32) / 255
+                if kind == "GIF":  # (a GIF's see-through colour: black under it, as Tk gave)
+                    a[a[..., 3] == 0, :3] = 0
+                return np.ascontiguousarray(a[..., :3]), (alpha if alpha.min() < 1 else None)
+            if im.mode.startswith("I") or im.mode == "F":  # (16-bit / 32-bit greys)
+                g = np.asarray(im, np.float64)
+                g = np.clip(g // 256 if g.max() > 255 else g, 0, 255).astype(np.uint8)
+                return np.repeat(g[..., None], 3, axis=2), None
+            return np.asarray(im.convert("RGB")), None
+    except Image.DecompressionBombError as e:  # (far too big: Pillow refuses it)
+        raise OSError(str(e))
 
 
 def _alpha(img, tk_root, w, h):
