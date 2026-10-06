@@ -83,7 +83,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     claw.py          the claw machine: a shape's notes thinned out / cut / bent after they're made
     strum.py         strum: each chord's notes start one after another (and end, velocity), after the claw
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes
-  files/             saving, MIDI, sound
+    picture.py       image to notes: a picture file -> a grid of up to 16 colours (picking, blending, details)
+  files/            saving, MIDI, sound
     project.py       project files, autosave (+ its backup), MIDI export
     safefile.py      saving without half-written files
     errors.py        errors.log and the "something went wrong" message
