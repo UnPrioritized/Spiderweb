@@ -23,8 +23,9 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.hzbass import (ARP, ARP_PATTERNS, CHORDS, CRUSH, DETUNE, FAST, GROUPS, GROWL, LOOP, MODES, OFF_PITCH, PITCH,
-                          RACK, SOFT, SUB, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE, VOICES, WAH, WAVES, arpeggiated,
+from notes.hzbass import (ARP, ARP_PATTERNS, CHORDS, CRUSH, DETUNE, FAST, GROUPS, GROWL, LOOP, MODES, OFF_BOXES,
+                          OFF_PITCH, PITCH, RACK, SOFT, SUB, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE, VOICES, WAH, WAVES,
+                          arpeggiated,
                           clean_arp, clean_extra, clean_mode, clean_voice, copies, group_count, line_at, wave_hits)
 from window.hz_effects import AMOUNT, FX_COLOR
 from window.synth_look import (DIM, EDGE, ENTRY, GRID, MID, PANEL, PIC, TEXT, Box, bright, dark_list, mix)
@@ -96,7 +97,7 @@ BOX_LINES = {"volume": ("volume",), "wave": tuple(WAVES) + ("octave",), "pitch":
 BOX_EXTRA = {"wave": "mode", "voice": "voice", "arp": "arp"}
 # the boxes a click on the light / name switches off and on (Bypass: the lines in hz["off"], the own setting moved to
 # hz["bypass"]; the Arpeggio's click is its On instead)
-BYPASS = ("volume", "wave", "pitch", "vibrato", "tremolo", "tone", "character", "voice")
+BYPASS = OFF_BOXES
 PICTURES = {"volume": (260, 90), "wave": (200, 90), "pitch": (150, 90), "vibrato": (230, 60), "tremolo": (150, 60),
             "tone": (200, 90), "character": (220, 60), "voice": (230, 60), "arp": (260, 60)}
 CHARACTER = ("slant", "offpitch", "noisy")  # (the Character box's lines that are just their value; Groups is counted)
@@ -773,6 +774,10 @@ class SynthKnobs:
                 self.fxl["groups"] = [[0.0, (v["groups"] - 1) / (GROUPS - 1)]]
         if was_off:
             self.switch_box(box, True)
+        elif box in self.extra.get("bypass", {}).get("boxes", ()):  # (switched on elsewhere, e.g. its lines on the
+            kept = dict(self.extra["bypass"])  # Lines tab: no longer named as off)
+            kept["boxes"] = [b for b in kept["boxes"] if b != box]
+            self.set_extra("bypass", kept)
         self.redraw()
         self.show_knobs()
 
@@ -784,24 +789,27 @@ class SynthKnobs:
         return lines, BOX_EXTRA.get(name)
 
     def box_off(self, name):
-        """The box is switched off (Bypass): it has something, and all of it is off."""
+        """The box is switched off (Bypass): all it has is off, or it has nothing and was switched off (it stays off
+        while its knobs do nothing, user)."""
         lines, extra = self.box_parts(name)
         if extra in self.extra or any(n not in self.off for n in lines):
             return False
-        return bool(lines) or extra in self.extra.get("bypass", {})
+        kept = self.extra.get("bypass", {})
+        return bool(lines) or extra in kept or name in kept.get("boxes", ())
 
     def switch_box(self, name, off):
-        """A box switched off / on: its lines in / out of hz["off"], its own setting moved to / from hz["bypass"]."""
+        """A box switched off / on: its lines in / out of hz["off"], its own setting moved to / from hz["bypass"],
+        its name in / out of the boxes switched off there."""
         lines, extra = self.box_parts(name)
         self.off = [n for n in self.off if n not in lines] + (lines if off else [])
-        if extra:
-            now, kept = dict(self.extra), dict(self.extra.get("bypass", {}))
-            if off and extra in now:
-                kept[extra] = now.pop(extra)
-            elif not off and extra in kept:
-                now[extra] = kept.pop(extra)
-            now["bypass"] = kept
-            self.extra = clean_extra(now)
+        now, kept = dict(self.extra), dict(self.extra.get("bypass", {}))
+        if extra and off and extra in now:
+            kept[extra] = now.pop(extra)
+        elif extra and not off and extra in kept:
+            now[extra] = kept.pop(extra)
+        kept["boxes"] = [b for b in kept.get("boxes", ()) if b != name] + ([name] if off else [])
+        now["bypass"] = kept
+        self.extra = clean_extra(now)
 
     def bypass_click(self, name):
         """A box's light or name clicked: the box switched off (kept, silent) or back on, one undo step; a box that

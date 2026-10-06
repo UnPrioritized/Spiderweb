@@ -82,7 +82,7 @@ no fall after the first: legato_links)}. Glide only bends the tone: each note st
 synth's voices (unless Legato joins them).
 hz["mode"] = the Wave box's Mode (MODES, clean_mode): FM, Pulse width or Sync change the hits in each wave
 (wave_hits), Growl and Bitcrush when each one lands. A synth window box switched off (Bypass) puts its lines in
-hz["off"] and moves its own setting (mode / voice) to hz["bypass"] (clean_bypass)."""
+hz["off"] and moves its own setting (mode / voice) to hz["bypass"], which also names it (clean_bypass)."""
 
 import bisect
 import functools
@@ -158,6 +158,7 @@ ARP = {"speed": (0.25, 32.0, 4.0), "octaves": (1.0, 4.0, 1.0), "gate": (0.05, 1.
 ARP_PATTERNS = ("up", "down", "updown", "random")
 CHORDS = {"placed": (0,), "octave": (0, 12), "fifth": (0, 7), "major": (0, 4, 7), "minor": (0, 3, 7),
           "seventh": (0, 4, 7, 10), "sus4": (0, 5, 7)}
+OFF_BOXES = ("volume", "wave", "pitch", "vibrato", "tremolo", "tone", "character", "voice")  # boxes that switch off
 VOICES = 8  # hz["voice"]: the most copies
 DETUNE = 100.0  # ... the most cents between the lowest and the highest copy
 GLIDE = 64.0  # ... the longest glide, in beats
@@ -394,13 +395,18 @@ def copies(hz):
 
 def clean_bypass(kept):
     """The settings of the synth window's boxes switched off (Bypass) checked: hz["bypass"] = {"mode": as hz["mode"],
-    "voice": as hz["voice"]}, kept here while off, where nothing that makes the notes reads them."""
+    "voice": as hz["voice"], "boxes": the boxes switched off (OFF_BOXES; so a box stays off while its knobs do
+    nothing)}, kept here while off, where nothing that makes the notes reads them."""
     kept = kept if isinstance(kept, dict) else {}
     out = {}
     for name, clean in (("mode", clean_mode), ("voice", clean_voice)):
         got = clean(kept.get(name))
         if got:
             out[name] = got
+    boxes = kept.get("boxes") if isinstance(kept.get("boxes"), list) else ()
+    boxes = [b for b in OFF_BOXES if b in boxes]
+    if boxes:
+        out["boxes"] = boxes
     return out
 
 
