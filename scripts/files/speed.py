@@ -31,12 +31,24 @@ def start():
 
 def _load():
     global _loops
+    import importlib.util
+    import sys
+    import time
+    began = time.perf_counter()
     try:
         from files import fastloops
         fastloops.warm()
+        _loops = fastloops
+        how = "compiled loops ready in %.1f s" % (time.perf_counter() - began)
     except Exception:  # no Numba (or it can't compile here): the NumPy code is used
-        return
-    _loops = fastloops
+        how = "compiled loops off: " + repr(sys.exc_info()[1])
+        if importlib.util.find_spec("numba") is not None:  # (there but not working: worth a line in errors.log)
+            from files import errors
+            errors.write_log(*sys.exc_info(), "(loading the compiled loops; the slower code is used)")
+    report = os.environ.get("SPIDERWEB_SPEED_REPORT")  # (the exe test asks how it went)
+    if report:
+        with open(report, "w", encoding="utf-8") as f:
+            f.write(how + "\nPillow: " + ("yes" if pillow() else "no") + "\n")
 
 
 def loops():
