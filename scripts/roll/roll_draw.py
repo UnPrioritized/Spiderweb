@@ -680,11 +680,13 @@ class RollDrawing:
 
     def show_playhead(self, start=False):
         """Move the play line; while playing, turn the page when it gets near the right edge
-        (start: also jump to it if it's off screen)."""
+        (start: also jump to it if it's off screen). Not while the mouse holds something or a shape is being drawn
+        (user: what's held jumped a page): the line goes on off screen, the page turns once it's let go."""
         if self.sx is None:
             return
         x, w = self.t2x(self.app.playhead), self.winfo_width()
-        if self.app.player.running and (x > w - 6 * self.scale or (start and x < self.kb_w)):
+        busy = self.drag or self.draft or self.follow or self.app.vel.edit
+        if self.app.player.running and not busy and (x > w - 6 * self.scale or (start and x < self.kb_w)):
             self.view_t = self.app.playhead
             self.clamp_view()
             self.request_redraw()  # the full redraw puts the line back too

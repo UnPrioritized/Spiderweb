@@ -2063,7 +2063,8 @@ class HzWindow(tk.Toplevel):
         on = self.preview_on.get()
         grey = p.grey() if on else []
         line = p.play_beat() if on and p.ev is not None else None
-        if line is not None and p.playing():  # (playing past the right edge: the next page)
+        if line is not None and p.playing() and not self.drag:  # (playing past the right edge: the next page; not
+            # while the mouse holds a note / box: it would jump a page, user)
             x, w = self.x_of(line), c.winfo_width()
             if x > w - 6 * self.s or x < self.kb_w:
                 self.t0 = line

@@ -1,6 +1,7 @@
 """Playback through a Windows MIDI-OUT device (winmm.dll via ctypes, nothing to install)."""
 
 import ctypes
+import heapq
 import sys
 import threading
 import time
@@ -97,85 +98,165 @@ class MidiOut:
         self.handle = self.name = None
 
 
-def batches(events, size=4096):
-    """The event rows as Python tuples, a batch at a time (turning millions into Python numbers at once takes long)."""
-    for i in range(0, len(events), size):
-        yield from map(tuple, events[i:i + size].tolist())
+class _Ons:
+    """The notes to play, in the order they start: only the order is worked out (the notes stay where they are, so
+    millions take little memory), and they're turned into Python numbers a batch at a time as they're played."""
+
+    def __init__(self, notes, t0, t1, use10):
+        s = notes[:, 0]
+        keep = np.flatnonzero((s >= t0) & (s < t1) & (notes[:, 2] <= 127))  # (a synth has 128 keys)
+        starts = s[keep]
+        if len(starts) > 1 and not (starts[1:] >= starts[:-1]).all():
+            order = np.argsort(starts, kind="stable")
+            keep, starts = keep[order], starts[order]
+            del order
+        self.notes, self.keep, self.starts, self.use10 = notes, keep, starts, use10
+
+    def __len__(self):
+        return len(self.keep)
+
+    def first_after(self, tick):
+        """Index of the first note starting after tick."""
+        return int(np.searchsorted(self.starts, tick, "right"))
+
+    def batch(self, i, size=4096):
+        """Notes i.. as (start, end, channel | key << 8, velocity) tuples."""
+        part = self.notes[self.keep[i:i + size]]
+        slot = part[:, 4]
+        ch = slot % 16 if self.use10 else np.array(CHANNELS, np.int64)[slot % len(CHANNELS)]  # (slot_track_channel)
+        return list(zip(part[:, 0].tolist(), part[:, 1].tolist(), (ch | part[:, 2] << 8).tolist(),
+                        part[:, 3].tolist()))
 
 
 class Player:
-    """Plays notes on a background thread so the window stays responsive; position() says where it is."""
+    """Plays notes on a background thread so the window stays responsive; position() says where it is. The notes
+    and tempo can change while it plays (update): it plays on with the new ones from where it is."""
 
     def __init__(self, out):
         self.out = out
         self.thread = None
         self._stop = threading.Event()
         self._switch = sys.getswitchinterval()
-        self.held = set()  # (channel, key) sounding right now
+        self.held = {}  # (channel | key << 8) -> how many notes on it are sounding right now
+        self._clock = None
+        self._swap = None  # new notes ready for the playing thread (_Ons)
+        self._wanted = None  # new notes waiting to be put in order (notes, use10)
+        self._sorting = None  # the thread putting them in order
+        self._gen = 0  # one for each start (a sort left from an earlier play is thrown away)
 
     @property
     def running(self):
         return self.thread is not None and self.thread.is_alive()
 
-    def start(self, notes, ppq, bpm, start_beat, stop_beat):
-        """Play from start_beat until stop_beat (notes: rendered [start, end, pitch, vel, slot, ...] in ticks)."""
+    def start(self, notes, ppq, bpm, start_beat, stop_beat, use10=False):
+        """Play from start_beat until stop_beat (notes: rendered [start, end, pitch, vel, slot, ...] in ticks, never
+        changed in place; use10: the slots use channel 10 too, engine.slot_track_channel)."""
         self.stop()
-        t0, t1 = start_beat * ppq, stop_beat * ppq
-        notes = notes[(notes[:, 0] >= t0) & (notes[:, 0] < t1) & (notes[:, 2] <= 127)]  # (a synth has 128 keys)
-        s, e, p, v = notes[:, 0], notes[:, 1], notes[:, 2], notes[:, 3]
-        ch = np.array(CHANNELS, np.int64)[notes[:, 4] % len(CHANNELS)]
-        off = e < t1
-        tick = np.concatenate([s, e[off]])
-        on = np.concatenate([np.ones(len(s), np.int64), np.zeros(int(off.sum()), np.int64)])
-        msg = np.concatenate([0x90 | ch | p << 8 | v << 16, (0x80 | ch | p << 8)[off]])
-        order = np.lexsort((msg, on, tick))  # note-offs before note-ons on the same tick
-        events = np.column_stack([tick[order], on[order], msg[order]])  # (tick, 1 = on, message) rows
-        self.start_beat, self.stop_beat = start_beat, stop_beat
-        self.beats_per_sec = bpm / 60
-        self.sec_per_tick = 60 / bpm / ppq
+        self.ppq, self.start_beat, self.stop_beat = ppq, start_beat, stop_beat
+        self.spt = 60 / bpm / ppq  # seconds a tick
+        self._clock = None  # (the line waits at the start while the notes are put in order)
+        self._gen += 1
+        self._swap = self._wanted = None
         self._stop.clear()
         sys.setswitchinterval(0.001)  # hand the thread the processor quickly while the window redraws
-        self.t_start = time.perf_counter()
-        self.thread = threading.Thread(target=self._run, args=(events, t0), daemon=True)
+        self.thread = threading.Thread(target=self._run, args=(notes, use10), daemon=True)
         self.thread.start()
+
+    def update(self, notes, bpm, stop_beat, use10=False):
+        """The notes / tempo changed while playing (same PPQ): play on with them. Notes already sounding end where
+        they would have; new notes starting before the line aren't played (like a start from the line)."""
+        if not self.running:
+            return
+        self.stop_beat = stop_beat
+        spt = 60 / bpm / self.ppq
+        clock = self._clock
+        if spt != self.spt and clock is not None:  # (the same spot in the song now, at the new speed)
+            now = time.perf_counter()
+            self._clock = (now, clock[1] + (now - clock[0]) / clock[2], spt)
+        self.spt = spt
+        self._wanted = (self._gen, notes, use10)
+        if self._sorting is None or not self._sorting.is_alive():
+            self._sorting = threading.Thread(target=self._sort, daemon=True)
+            self._sorting.start()
+
+    def _sort(self):
+        while self._wanted is not None:
+            (gen, notes, use10), self._wanted = self._wanted, None
+            ons = _Ons(notes, self.start_beat * self.ppq, self.stop_beat * self.ppq, use10)
+            if self._wanted is None and gen == self._gen:  # (changed again meanwhile: those first)
+                self._swap = ons
 
     def position(self):
         """Current beat."""
-        return min(self.stop_beat, self.start_beat + (time.perf_counter() - self.t_start) * self.beats_per_sec)
+        clock = self._clock
+        if clock is None:
+            return self.start_beat
+        t, tick, spt = clock
+        return min(self.stop_beat, (tick + (time.perf_counter() - t) / spt) / self.ppq)
 
-    def _run(self, events, t0):
+    def _run(self, notes, use10):
         clock, sleep, stop = time.perf_counter, time.sleep, self._stop
         send = self.out.send
-        held = self.held = set()
-        t_start, spt = self.t_start, self.sec_per_tick
-        for tick, on, msg in batches(events):
-            due = t_start + (tick - t0) * spt
-            while True:
-                if stop.is_set():
-                    return
-                wait = due - clock()
+        t0 = self.start_beat * self.ppq
+        ons = _Ons(notes, t0, self.stop_beat * self.ppq, use10)
+        del notes
+        self._clock = (clock(), t0, self.spt)
+        held = self.held = {}
+        offs = []  # (end tick, channel | key << 8) of the notes sounding
+        batch, k, i = [], 0, 0
+        done = t0 - 1  # the last tick played
+        while True:
+            if stop.is_set():
+                return
+            if self._swap is not None:
+                ons, self._swap = self._swap, None
+                batch, k, i = [], 0, ons.first_after(done)
+            if k == len(batch) and i < len(ons):
+                batch, k = ons.batch(i), 0
+                i += len(batch)
+            on = batch[k] if k < len(batch) else None
+            off = bool(offs) and (on is None or offs[0][0] <= on[0])  # (note-offs before note-ons on the same tick)
+            tick = offs[0][0] if off else on[0] if on is not None else None
+            t_now, tick_now, spt = self._clock
+            t1 = self.stop_beat * self.ppq
+            if tick is None or tick >= t1:  # nothing more to play: wait for the end
+                wait = t_now + (t1 - tick_now) * spt - clock()
                 if wait <= 0:
-                    break
+                    return
                 sleep(min(wait, 0.01))
-            if on and clock() - due > 0.1:
+                continue
+            wait = t_now + (tick - tick_now) * spt - clock()
+            if wait > 0:
+                sleep(min(wait, 0.01))
+                continue  # (stopped, new notes or a new tempo meanwhile: looked at again)
+            done = tick
+            if off:
+                key = heapq.heappop(offs)[1]
+                send(0x80 | key)
+                n = held.get(key, 0) - 1
+                if n > 0:
+                    held[key] = n
+                else:
+                    held.pop(key, None)
+                continue
+            k += 1
+            if wait < -0.1:
                 continue  # far behind (too many notes at once): skip late notes instead of smearing them
-            send(msg)
-            key = (msg & 0x0F, msg >> 8 & 0x7F)
-            if on:
-                held.add(key)
-            else:
-                held.discard(key)
-        end = t_start + (self.stop_beat - self.start_beat) / self.beats_per_sec
-        while not stop.is_set() and clock() < end:
-            sleep(min(end - clock(), 0.01))
+            s, e, key, vel = on
+            send(0x90 | key | vel << 16)
+            held[key] = held.get(key, 0) + 1
+            heapq.heappush(offs, (e, key))
 
     def stop(self):
         if self.thread is not None:
             self._stop.set()
             self.thread.join()
             self.thread = None
-            # ordinary note-offs for what's still sounding, so the synth plays its release (a reset cuts it off)
-            for ch, p in self.held:
-                self.out.send(0x80 | ch | p << 8)
-            self.held = set()
+            # ordinary note-offs for what's still sounding, so the synth plays its release (a reset cuts it off);
+            # one for each note on a key (overlapping notes there each got a note-on)
+            for key, n in self.held.items():
+                for _ in range(n):
+                    self.out.send(0x80 | key)
+            self.held = {}
+            self._swap = self._wanted = None
             sys.setswitchinterval(self._switch)

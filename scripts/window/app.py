@@ -852,6 +852,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.rendered, self.slot_count = render([n for n, _ in got], self.channel_mode.get(), self.channel_split,
                                                 [t for _, t in got], [tracks_apart(sh) for sh in self.shapes],
                                                 ["picture" in sh for sh in self.shapes], self.picture_use10)
+        self.play_changed()
         # placed pictures: their notes are drawn in the picture's own colours (the first picture's: they share them)
         self.picture_owners = np.array(["picture" in sh for sh in self.shapes], bool)
         self.picture_pal = next((sh["picture"]["set"].get("pal") for sh in self.shapes if "picture" in sh), None)
@@ -1523,15 +1524,38 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         if err:
             messagebox.showerror(tr("app.spiderweb_2"), err)
             return
-        # Stops a quarter bar after the last note ends (or after the play line if already past it), rounded up to
-        # the next quarter-bar line
-        quarter = beats / 4
-        last = (int(self.rendered[:, 1].max()) if len(self.rendered) else 0) / ppq
-        stop = math.ceil((max(last, self.playhead) + quarter) / quarter - 1e-9) * quarter
-        self.player.start(self.rendered, ppq, bpm, self.playhead, stop)
+        if self.hz_window:  # (one thing plays at a time, user)
+            self.hz_window.preview.stop_play()
+            self.hz_window.draw_preview()
+        self.player.start(self.rendered, ppq, bpm, self.playhead, self.play_end(ppq, beats, self.playhead),
+                          self.picture_use10)
         self.play_btn.config(text=tr("app.stop_space"))
         self.roll.show_playhead(start=True)
         self._play_job = self.after(15, self._play_tick)
+
+    def play_end(self, ppq, beats, start):
+        """Where playing stops: a quarter bar after the last note ends (or after the play line if already past
+        it), rounded up to the next quarter-bar line."""
+        quarter = beats / 4
+        last = (int(self.rendered[:, 1].max()) if len(self.rendered) else 0) / ppq
+        return math.ceil((max(last, start) + quarter) / quarter - 1e-9) * quarter
+
+    def play_changed(self):
+        """The notes or the project's numbers changed while playing: it plays on with them from where it is (a new
+        PPQ: started again from there)."""
+        if not self.player.running:
+            return
+        try:
+            ppq, bpm, beats = self.read_project()
+        except ValueError:
+            return  # (a number being typed: plays on as it was)
+        if ppq != self.player.ppq or ppq != self.ppq:
+            self.stop_play()
+            if ppq == self.ppq:
+                self.start_play()
+            return
+        # (the end: never before where it is, so a note deleted at the end doesn't stop it at once)
+        self.player.update(self.rendered, bpm, self.play_end(ppq, beats, self.player.position()), self.picture_use10)
 
     def _play_tick(self):
         self._play_job = None
