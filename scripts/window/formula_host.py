@@ -458,26 +458,17 @@ class FunnelHost(FormulaHost):
             holder["sharp"] = []
 
     def spread(self):
-        """Linked curves that aren't highlighted take the formulas too."""
-        from notes.funnel import partners
+        """Linked curves that aren't highlighted become the same too (formulas, and the points: a shape's straight
+        origin, Turn into plain curve)."""
+        from notes.funnel import partners, set_shape, turned_curve
         sh, curves = self.found()
         if not sh:
             return
         for k, end in curves:
             c = sh["starts"][k]["ends"][end]
             for k2, e2, flip in partners(sh, k, end):
-                if (k2, e2) in curves:
-                    continue
-                c2 = sh["starts"][k2]["ends"][e2]
-                for key in ("shape", "pattern"):
-                    if c.get(key):
-                        c2[key] = copy.deepcopy(c[key])
-                    else:
-                        c2.pop(key, None)
-                if has_formula(c):
-                    c2["rev"] = c.get("rev", False) != flip
-                else:
-                    c2.pop("rev", None)
+                if (k2, e2) not in curves:
+                    set_shape(sh["starts"][k2]["ends"][e2], turned_curve(c, flip))
 
     def begin(self, name):
         self.app.push_undo(name=name)

@@ -363,8 +363,9 @@ class FunnelEditing:
         app.sync_funnel()
 
     def set_curves(self, shape_of, undo=True):
-        """Give every highlighted curve a new shape: shape_of(curve) -> a curve (pts + sharp). Highlighted curves
-        linked to each other get it the way their link says (the same, or turned end to end)."""
+        """Give every highlighted curve a new shape: shape_of(curve) -> a curve (pts + sharp). The curves linked to
+        it get it the way their link says (the same, or turned end to end), highlighted or not (user: Unlink is
+        there for a curve of its own)."""
         got = self.funnel_parts()
         if not got or not got[2]:
             return
@@ -380,7 +381,7 @@ class FunnelEditing:
             set_shape(c, new)
             done.add((k, end))
             for k2, e2, flip in partners(sh, k, end):
-                if (k2, e2) in curves and (k2, e2) not in done:
+                if (k2, e2) not in done:
                     set_shape(sh["starts"][k2]["ends"][e2], turned_curve(new, flip))
                     done.add((k2, e2))
         self.app.shape_edited()
