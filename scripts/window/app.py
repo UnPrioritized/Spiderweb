@@ -1196,7 +1196,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         for sh in shapes:
             turn_shape(sh, clockwise, r, cb, cp)
             if sh.get("fx"):  # (its note tool pages' result is turned too, fx.py)
-                fx = fx_turned(sh["fx"], clockwise, r)
+                fx = fx_turned(sh["fx"], 90 if clockwise else -90, r)
                 if fx:
                     sh["fx"] = fx
                 else:

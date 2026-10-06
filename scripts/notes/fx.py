@@ -7,10 +7,11 @@ after its glue), in the order they were added. The drawing stays editable: every
   {"tool": "flip", "axis": "time" / "keys"}
       the shape was flipped after the steps before it: they run on the notes flipped back, and their result is
       flipped (each flip within the box of the notes it gets: they stay where they were)
-  {"tool": "turn", "cw": clockwise?, "r": beats per key on screen then}
-      the shape was turned 90 degrees after the steps before it (user, 2026-10-06): they run on its drawing turned
-      back, their result is turned within its own box (each note a column of short notes, one per key row: close,
-      not exact). Turning back right after cancels it out
+  {"tool": "turn", "deg": degrees (clockwise on screen, -180..180, not 0), "r": beats per key on screen then}
+      the shape was turned after the steps before it (Turn 90 or a custom shape's corner dragged; user, 2026-10-06):
+      they run on its drawing turned back, their result is turned within its own box (each note becomes the short
+      notes of the key rows it then crosses: close, not exact). Turns in a row at the same zoom add up (turning
+      back right after cancels it out)
   {"tool": "vel", "pts": [[u, velocity], ...]}
       velocities drawn after the steps before it: they replace those steps' velocities (only between the first and
       last u: 0..1 across the shape's time, as its velocity line)
@@ -61,7 +62,9 @@ def clean_fx(sh):
         elif tool == "flip" and st.get("axis") in AXES:
             out.append({"tool": "flip", "axis": st["axis"]})
         elif tool == "turn" and isinstance(st.get("r"), (int, float)) and 1e-9 < st["r"] < 1e9:
-            out.append({"tool": "turn", "cw": bool(st.get("cw")), "r": float(st["r"])})
+            deg = st.get("deg", (90 if st["cw"] else -90) if "cw" in st else None)  # (first tries: "cw")
+            if isinstance(deg, (int, float)) and math.isfinite(deg) and abs(norm_deg(deg)) > 1e-9:
+                out.append({"tool": "turn", "deg": norm_deg(deg), "r": float(st["r"])})
         elif tool == "vel":
             pts = clean_pts(st.get("pts"))
             if pts:
@@ -95,15 +98,25 @@ def flipped(fx, axis):
     return fx + [{"tool": "flip", "axis": axis}]
 
 
-def with_turn(fx, cw, r):
-    """The steps after the shape is turned 90 degrees (r: beats per key on screen): a turn step added (turning back
-    right after one cancels it out), or nothing when there's no page (turning the drawing is enough)."""
+def with_turn(fx, deg, r):
+    """The steps after the shape is turned deg degrees clockwise on screen (r: beats per key there): a turn step
+    added, or added to the last one if that was a turn at the same zoom (turning back right after cancels it out),
+    or nothing when there's no page (turning the drawing is enough)."""
     if not pages(fx):
         return fx
     last = fx[-1]
-    if last["tool"] == "turn" and last["cw"] != cw and abs(last["r"] - r) <= 1e-9 * max(r, 1e-9):
-        return fx[:-1] or None
-    return fx + [{"tool": "turn", "cw": cw, "r": r}]
+    if last["tool"] == "turn" and abs(last["r"] - r) <= 1e-9 * max(r, 1e-9):
+        deg, fx = deg + last["deg"], fx[:-1]
+    deg = norm_deg(deg)
+    if abs(deg) <= 1e-9:
+        return fx or None
+    return fx + [{"tool": "turn", "deg": deg, "r": r}]
+
+
+def norm_deg(deg):
+    """deg as -180 < deg <= 180 (rounded a little, so turns that add up to a whole turn come out 0)."""
+    deg = round(float(deg), 9) % 360
+    return deg - 360 if deg > 180 else deg + 0.0
 
 
 def with_velocity(fx, pts):
@@ -160,32 +173,58 @@ def swapped(axes):
     return sorted({"keys" if a == "time" else "time" for a in axes or ()})
 
 
-def turn_notes(a, cw, ticks, keys):
-    """Notes a (start, end, key, then any columns riding along) turned 90 degrees within their own box, clockwise as
-    seen on screen when cw; ticks = ticks per key on screen. Each note becomes a column: one note per key row it then
-    covers (at least one), each one key's worth of ticks long. -> (the notes, which row of a each came from)."""
+def turn_notes(a, deg, ticks, keys):
+    """Notes a (start, end, key, then any columns riding along) turned deg degrees within their own box, clockwise as
+    seen on screen; ticks = ticks per key on screen. Each note (a bar one key tall) becomes one note per key row whose
+    middle it then crosses (at least one), as long as it is on that row's middle line: turned 90 degrees, a column of
+    notes one key's worth of ticks long. -> (the notes, which row of a each came from)."""
     if not len(a):
         return a, np.zeros(0, np.int64)
-    s = 1 if cw else -1
-    ct = (a[:, 0].min() + a[:, 1].max()) / 2
-    ck = (a[:, 2].min() + a[:, 2].max()) / 2
-    k0, k1 = ck - s * (a[:, 0] - ct) / ticks, ck - s * (a[:, 1] - ct) / ticks
-    lo, hi = np.minimum(k0, k1), np.maximum(k0, k1)
-    t0, t1 = ct + s * (a[:, 2] - 0.5 - ck) * ticks, ct + s * (a[:, 2] + 0.5 - ck) * ticks
-    start = np.round(np.minimum(t0, t1)).astype(np.int64)
-    end = np.maximum(np.round(np.maximum(t0, t1)).astype(np.int64), start + 1)
+    c, s = math.cos(-math.radians(deg)), math.sin(-math.radians(deg))  # (pitch goes up, screen y down)
+    if abs(deg / 90 - round(deg / 90)) < 1e-12:
+        c, s = round(c), round(s)  # (a quarter turn: exact)
+    x0, x1, k = a[:, 0] / ticks, a[:, 1] / ticks, a[:, 2].astype(float)
+    xc, kc = (x0.min() + x1.max()) / 2, (k.min() + k.max()) / 2
+    mx, my = (x0 + x1) / 2 - xc, k - kc
+    cx, cy = xc + mx * c - my * s, kc + mx * s + my * c  # each note's middle, turned
+    h = (x1 - x0) / 2
+    reach = h * abs(s) + 0.5 * abs(c)  # (how far up / down it reaches from its middle, turned)
+    lo, hi = cy - reach, cy + reach
     first, last = np.ceil(lo - 1e-9), np.ceil(hi - 1e-9) - 1  # (the key rows whose middle it covers)
     none = last < first
-    first[none] = last[none] = np.round((lo[none] + hi[none]) / 2)
+    first[none] = last[none] = np.round(cy[none])
     first, last = np.clip(first, 0, keys - 1).astype(np.int64), np.clip(last, 0, keys - 1).astype(np.int64)
     counts = np.where((hi < -0.5) | (lo > keys - 0.5), 0, last - first + 1)
     idx = np.repeat(np.arange(len(a)), counts)
-    step = np.arange(len(idx)) - np.repeat(np.cumsum(counts) - counts, counts)
+    rows = first[idx] + np.arange(len(idx)) - np.repeat(np.cumsum(counts) - counts, counts)
+    dy, hh = rows - cy[idx], h[idx]
+    # on the row's middle line, x - cx = d: along the note |d c + dy s| <= h, across it |dy c - d s| <= 1/2
+    far = np.full(len(idx), 1e18)
+    if c:
+        u0, u1 = (-hh - dy * s) / c, (hh - dy * s) / c
+        u0, u1 = np.minimum(u0, u1), np.maximum(u0, u1)
+    else:
+        u0, u1 = -far, far
+    if s:
+        v0, v1 = (dy * c - 0.5) / s, (dy * c + 0.5) / s
+        v0, v1 = np.minimum(v0, v1), np.maximum(v0, v1)
+    else:
+        v0, v1 = -far, far
+    d0, d1 = np.maximum(u0, v0), np.minimum(u1, v1)
+    miss = d0 > d1  # (a row it doesn't quite reach: a short note where it's nearest)
+    d0[miss] = d1[miss] = (d0[miss] + d1[miss]) / 2
+    start = np.round((cx[idx] + d0) * ticks).astype(np.int64)
+    end = np.maximum(np.round((cx[idx] + d1) * ticks).astype(np.int64), start + 1)
     out = a[idx].copy()
-    out[:, 0], out[:, 1], out[:, 2] = start[idx], end[idx], first[idx] + step
-    out[:, 0] = np.maximum(out[:, 0], 0)  # (none before the song's start)
+    out[:, 0], out[:, 1], out[:, 2] = np.maximum(start, 0), end, rows  # (none before the song's start)
     keep = out[:, 1] > out[:, 0]
     return out[keep], idx[keep]
+
+
+def turn_pts(pts, deg, r, cb, cp):
+    """Points (beats, keys) turned deg degrees clockwise around (cb, cp) as they look on screen (r = beats per key)."""
+    c, s = math.cos(-math.radians(deg)), math.sin(-math.radians(deg))
+    return [[cb + ((b - cb) / r * c - (p - cp) * s) * r, cp + (b - cb) / r * s + (p - cp) * c] for b, p in pts]
 
 
 def turn_shape(sh, clockwise, r, cb, cp):

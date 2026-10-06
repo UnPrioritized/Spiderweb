@@ -296,10 +296,11 @@ class ToolWindow(tk.Toplevel):
             if is_page(st):
                 n += 1
                 parts.append(tr(f"{st['tool']}.tab", n=n) + (tr("tool_window.off_mark") if st.get("off") else ""))
+            elif st["tool"] == "turn":
+                parts.append(tr("tool_window.turn_cw" if st["deg"] > 0 else "tool_window.turn_ccw",
+                                deg=f"{round(abs(st['deg']), 1):g}"))
             else:
-                parts.append(tr(f"tool_window.{st['tool']}" + (f"_{st['axis']}" if st["tool"] == "flip" else
-                                                               ("_cw" if st["cw"] else "_ccw") if st["tool"] == "turn"
-                                                               else "")))
+                parts.append(tr(f"tool_window.{st['tool']}" + (f"_{st['axis']}" if st["tool"] == "flip" else "")))
         return tr("tool_window.order", steps=" → ".join(parts))
 
     def sync_tabs(self):
