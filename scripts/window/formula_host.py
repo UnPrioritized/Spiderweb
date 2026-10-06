@@ -194,10 +194,14 @@ class FormulaHost:
         if not tgts:
             return
         self.begin(tr("panel_pattern.turn_into_plain_curve"))
-        for h in tgts:
-            self.bake(h)
-        self.spread()
-        self.changed()
+        self.app.busy(tr("panel_pattern.baking"))  # (thousands of loops take seconds)
+        try:
+            for h in tgts:
+                self.bake(h)
+            self.spread()
+            self.changed()
+        finally:
+            self.app.busy(None)
 
     def open_dialog(self, layer):
         from window.pattern_dialog import FormulaDialog

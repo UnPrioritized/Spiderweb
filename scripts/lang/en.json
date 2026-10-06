@@ -1050,6 +1050,7 @@
  "panel_pattern.pattern_step": "Pattern: {name}",
  "panel_pattern.remove_formula": "Remove formula",
  "panel_pattern.turn_into_plain_curve": "Turn into plain curve",
+ "panel_pattern.baking": "Turning it into a plain curve…",
  "pattern.wave": "Wave",
  "pattern.zigzag": "Zigzag",
  "pattern.bounce": "Bounce",

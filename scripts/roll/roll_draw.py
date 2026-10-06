@@ -1215,12 +1215,19 @@ class RollDrawing:
                  if sh["kind"] == "funnel" else
                  [(a, h, HANDLE_COLOR) for a, h in self.stroke_handle_lines(sh)] if sh["kind"] == "custom" else [])
         lines.sort(key=lambda line: line[2] != HANDLE_COLOR)  # the coloured ones on top
+        # only what can show (a plain curve made from a pattern has tens of thousands of anchors: seconds a redraw)
+        x0, y0 = self.kb_w - 20 * s, self.ruler_h - 20 * s
+        x1, y1 = self.winfo_width() + 20 * s, self.winfo_height() + 20 * s
+        shown = []
+        for a, h, color in lines:
+            ax, ay, hx, hy = self.t2x(a[0]), self.p2y(a[1]), self.t2x(h[0]), self.p2y(h[1])
+            if not (ax < x0 and hx < x0 or ax > x1 and hx > x1 or ay < y0 and hy < y0 or ay > y1 and hy > y1):
+                shown.append((ax, ay, hx, hy, color))
         for width, edge in ((max(3, round(3.5 * s)), True), (max(1, round(1.5 * s)), False)):
-            for a, h, color in lines:
-                self.create_line(self.t2x(a[0]), self.p2y(a[1]), self.t2x(h[0]), self.p2y(h[1]),
-                                 fill="#ffffff" if edge else color, width=width)
+            for ax, ay, hx, hy, color in shown:
+                self.create_line(ax, ay, hx, hy, fill="#ffffff" if edge else color, width=width)
         r = 4 * s
-        handles = self.handles(sh)
+        handles = [hd for hd in self.handles(sh) if x0 <= self.t2x(hd[0]) <= x1 and y0 <= self.p2y(hd[1]) <= y1]
         if colors:
             handles.sort(key=lambda hd: isinstance(hd[2], tuple) and hd[2][0] != "start" and hd[2][1:3] in colors)
         for b, p, i, free in handles:

@@ -384,18 +384,19 @@ def difference(pts_a, pts_b):
 
 # ---------------------------------------------------------------- fitting (Philip Schneider's algorithm)
 
-FIT_SAMPLES = (300, 20000)  # how many points the fitting looks at: at least, at most
+FIT_SAMPLES = (300, 20000)  # how many points the fitting looks at: at least; points added up to about this many
 
 
 def _fill_in(pts, tol):
     """The points with more added between them where they're far apart (every given point kept, so sharp tips
-    stay): gaps no longer than tol * 2 when that stays under FIT_SAMPLES[1], and at least FIT_SAMPLES[0] points."""
+    stay): gaps no longer than tol * 2 when that stays under about FIT_SAMPLES[1], and at least FIT_SAMPLES[0]
+    points. As many given points or more: just them (spreading them evenly lost a pattern's many loops)."""
+    if len(pts) >= FIT_SAMPLES[1]:
+        return pts
     gaps = np.hypot(*(pts[1:] - pts[:-1]).T)
     total = gaps.sum()
     step = max(min(tol * 2, total / FIT_SAMPLES[0]), total / FIT_SAMPLES[1])
     cuts = np.maximum(1, np.ceil(gaps / step).astype(int))
-    if cuts.sum() + 1 > FIT_SAMPLES[1]:  # too many drawn points: spread them evenly instead
-        return np.array(resample([tuple(p) for p in pts], FIT_SAMPLES[1]), float)
     t = np.concatenate([np.arange(c) / c for c in cuts])
     at = np.repeat(np.arange(len(gaps)), cuts)
     return np.vstack([pts[at] + (pts[at + 1] - pts[at]) * t[:, None], pts[-1:]])
@@ -421,11 +422,13 @@ def _corners(come, go, pts, w):
     turn = np.arccos(np.clip((come * go).sum(1), -1.0, 1.0))
     s = np.concatenate([[0.0], np.cumsum(np.hypot(*(pts[1:] - pts[:-1]).T))])
     out = []
-    for i in np.argsort(-turn):
+    taken = np.zeros(len(pts), bool)  # (within w of a corner already found: thousands of corners, one check each)
+    for i in np.argsort(-turn, kind="stable"):
         if turn[i] <= FIT_CORNER:
             break
-        if 0 < i < len(pts) - 1 and all(abs(s[i] - s[j]) > w for j in out):
+        if 0 < i < len(pts) - 1 and not taken[i]:
             out.append(int(i))
+            taken[np.searchsorted(s, s[i] - w, "left"):np.searchsorted(s, s[i] + w, "right")] = True
     return sorted(out)
 
 
@@ -515,9 +518,14 @@ SYM_MODES = ("mirror", "turn", "flip")
 def symmetry_of(points, tol, modes=SYM_MODES):
     """Which symmetric halves the points have, within tol (see Symmetry; mirror: across the up-and-down line through
     the middle, so the ends must be level): the first of modes that fits, or None."""
-    a = np.array(resample([tuple(p) for p in points], 400), float)
-    if len(a) < 3:
+    a = np.asarray(points, float).reshape(-1, 2)
+    s = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(a, axis=0).T))])
+    if len(a) < 2 or s[-1] <= 0:
         return None
+    # evenly along it, at least as finely as its own points (400 points saw a pattern of many loops all at one spot
+    # of each loop: a lopsided one looked symmetric)
+    at = np.linspace(0.0, s[-1], max(401, min(len(a), 400001)))
+    a = np.column_stack([np.interp(at, s, a[:, 0]), np.interp(at, s, a[:, 1])])
     b, (ax, ay), (bx, by) = a[::-1], a[0], a[-1]
     closed = math.hypot(bx - ax, by - ay) <= tol
     for mode in modes:
