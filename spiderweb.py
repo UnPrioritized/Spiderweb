@@ -157,6 +157,66 @@ def check_numpy():
     return ok
 
 
+EXTRAS = (("numba", "numba", "extras.numba"), ("PIL", "pillow", "extras.pillow"))  # (module, pip name, text)
+
+
+def offer_extras():
+    """Numba (compiled loops: much faster with lots of notes) and Pillow (pictures to the screen faster, more
+    picture kinds) are optional: Spiderweb works without them, slower. Run from source with one missing: offer to
+    install it, once (a "No" or a failed install is remembered in packages.json; the exe has them inside)."""
+    if getattr(sys, "frozen", False):
+        return
+    import importlib
+    import importlib.util
+    import json
+    from files.about import HERE
+    path = os.path.join(HERE, "packages.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            declined = list(json.load(f).get("declined", []))
+    except (OSError, ValueError, AttributeError):
+        declined = []
+    missing = [(pip, text) for module, pip, text in EXTRAS
+               if pip not in declined and importlib.util.find_spec(module) is None]
+    if not missing:
+        return
+    import subprocess
+    import tkinter as tk
+    from tkinter import messagebox
+    from files.lang import tr
+    from files.safefile import write_text
+    root = tk.Tk()
+    root.withdraw()
+    names = " ".join(pip for pip, _ in missing)
+    command = f'"{sys.executable.replace("pythonw", "python")}" -m pip install {names}'
+    failed = []
+    if messagebox.askyesno("Spiderweb", tr("extras.ask", list="\n".join("• " + tr(text) for _, text in missing))):
+        root.config(cursor="watch")
+        root.update()
+        output = ""
+        for pip, _ in missing:  # (one at a time: one that can't be installed here doesn't stop the other)
+            try:
+                done = subprocess.run([sys.executable, "-m", "pip", "install", pip], capture_output=True, text=True,
+                                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                if done.returncode != 0:
+                    failed.append(pip)
+                    output += (done.stdout + done.stderr).strip()[-400:] + "\n"
+            except OSError as e:
+                failed.append(pip)
+                output += str(e) + "\n"
+        importlib.invalidate_caches()
+        if failed:
+            messagebox.showerror("Spiderweb", tr("extras.failed", output=output.strip(), command=command))
+    else:
+        failed = [pip for pip, _ in missing]
+    if failed:
+        try:
+            write_text(path, json.dumps({"declined": sorted(set(declined + failed))}) + "\n")
+        except OSError:
+            pass
+    root.destroy()
+
+
 _lock = None  # the open "Spiderweb is running" handle, kept until the program ends
 
 
@@ -223,6 +283,10 @@ if __name__ == "__main__":
         pass
     if not check_numpy():
         sys.exit(1)
+    try:
+        offer_extras()
+    except Exception:  # (only an offer: never stops Spiderweb from starting)
+        pass
     try:
         from window.app import App
         app = App()

@@ -107,6 +107,13 @@ Double-click Spiderweb.bat. If NumPy
 isn't installed yet, Spiderweb offers to install it for you; or type
   pip install numpy
 in a command prompt.
+Two more packages are optional: Numba (much faster with lots of notes) and
+Pillow (pictures shown faster; the Picture tool opens JPG, WebP, BMP and
+TIFF too, not just PNG and GIF). Spiderweb works without them, just slower.
+It offers to install them once; to do it yourself later, type
+  pip install numba pillow
+The first start with Numba takes a second longer in the background while it
+prepares its fast code (kept for the next starts).
 Playback uses Windows' built-in MIDI output. The Hz bass window's Preview
 uses the built-in synth instead (BASS, in scripts/bass; no MIDI device needed)
 with a soundfont you pick.
