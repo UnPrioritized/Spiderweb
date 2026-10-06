@@ -1593,7 +1593,7 @@
   "",
   "Hold the mouse button on the preview, or hold Space, to see the original image in its place.",
   "",
-  "Every slider is only a suggestion: try them and judge by eye. \"Back to suggested\" puts them back.",
+  "Every slider is only a suggestion: try them and judge by eye. Double-click a slider to put it back to its suggested value; \"Back to suggested\" puts them all back.",
   "",
   "Size: Keys = how many keys tall (or wide) the image is. Steps per key = how much finer than a key the image is the other way (time costs nothing, so more steps = more detail). One step = how long one step lasts: more ticks = a taller image in the player.",
   "",

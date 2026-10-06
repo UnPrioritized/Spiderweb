@@ -19,7 +19,8 @@ from files import speed
 MAX_SIDE = 2400  # bigger pictures are averaged down first (memory; detail past the note grid is lost anyway)
 
 SUGGESTED = {  # the "Back to suggested" values (user: only a suggestion; every one is a slider)
-    "keys": 128, "steps": 3, "view": "fall", "colours": 15, "focus": 1.0, "blend": "spread", "strength": 1.0,
+    "keys": 128, "steps": 8,  # (steps: the most detail, user)
+    "view": "fall", "colours": 15, "focus": 1.0, "blend": "spread", "strength": 1.0,
     "keep": 0.6, "sharpen": 0.0, "brightness": 0.0, "contrast": 0.0, "saturation": 0.0,
     "empty": True,  # see-through parts make no notes (False: they keep the colour under them)
     "step": 1 / 48,  # one grid step, in beats

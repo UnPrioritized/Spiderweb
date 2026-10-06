@@ -376,10 +376,17 @@ class ImageWindow(tk.Toplevel):
                 if self.s[key] != was:
                     self.put(key, self.s[key])
 
+        def reset(e):  # (double-click: back to its suggested value, user)
+            self.sliding = None
+            var.set(P.SUGGESTED.get(key, 1.0))
+            moved(var.get())
+            return "break"
+
         scale = ttk.Scale(r, from_=lo, to=hi, variable=var, length=150 if not ends else 110, command=moved)
         scale.pack(side="left", padx=3)
         scale.bind("<ButtonPress-1>", press)
         scale.bind("<ButtonRelease-1>", release, add="+")
+        scale.bind("<Double-Button-1>", reset)
         self.scales[key] = scale
         if ends:
             ttk.Label(r, text=ends[1], foreground="#777").pack(side="left")
