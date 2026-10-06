@@ -102,6 +102,7 @@ class ImageWindow(tk.Toplevel):
         self.made_for = (None, None)  # what the cells / palette were made for (only redo what changed)
         self.late, self.photo, self.held, self.view_size = None, None, False, (PREVIEW_W, PREVIEW_H)
         self.drag_mark = None
+        self.sliding = None  # (slider key, its value at the press) while the mouse holds a slider
         self._other_cells = {}  # the other placed pictures' cells (others_cells)
         self.build()
         self.protocol("WM_DELETE_WINDOW", self.close)
@@ -243,6 +244,7 @@ class ImageWindow(tk.Toplevel):
                          command=lambda: self.typed("outline"))
         sb.pack(side="left")
         sb.bind("<Return>", lambda e: self.typed("outline"))
+        sb.bind("<FocusOut>", lambda e: self.typed("outline"))
         ttk.Label(r, text=tr("image.px")).pack(side="left", padx=3)
         for k in ("shade", "join"):
             self.vars[k] = tk.BooleanVar(value=self.s[k])
@@ -278,6 +280,7 @@ class ImageWindow(tk.Toplevel):
         ttk.Label(f, text=tr("image.copy_gives"), foreground="#555").pack(anchor="w", pady=(4, 0))
         self.gives = tk.Text(f, width=40, height=7, font=("Consolas", 9), background="#fafafa", wrap="none")
         self.gives.pack(fill="x")
+        self.gives.bind("<ButtonPress-1>", lambda e: self.gives.focus_set(), add="+")  # (so Ctrl+C copies its text)
         self.gives.tag_config("bad", foreground="white", background="#d33")
         self.start = {}  # pasted colours that are only a starting point: slot -> linear colour
 
@@ -300,10 +303,36 @@ class ImageWindow(tk.Toplevel):
             if label is not None:
                 label.config(text=shown(v))
             if v != self.s[key]:
-                self.put(key, v, later=True)
+                if self.sliding:  # (held by the mouse: made again when let go, user found it laggy)
+                    self.s[key] = v
+                else:
+                    self.put(key, v, later=True)
+
+        def press(e):
+            self.sliding = (key, self.s[key])
+            if "slider" in str(scale.identify(e.x, e.y)):
+                return None
+            # beside the knob: it jumps to the mouse and follows it from there (not a step at a time)
+            var.set(scale.get(e.x, e.y))
+            moved(var.get())
+            try:
+                self.tk.eval("set ::ttk::scale::State(dragging) 1; set ::ttk::scale::State(xoffset) 0;"
+                             " set ::ttk::scale::State(yoffset) 0")
+            except tk.TclError:
+                return None
+            return "break"
+
+        def release(e):
+            if self.sliding and self.sliding[0] == key:
+                was = self.sliding[1]
+                self.sliding = None
+                if self.s[key] != was:
+                    self.put(key, self.s[key])
 
         scale = ttk.Scale(r, from_=lo, to=hi, variable=var, length=150 if not ends else 110, command=moved)
         scale.pack(side="left", padx=3)
+        scale.bind("<ButtonPress-1>", press)
+        scale.bind("<ButtonRelease-1>", release, add="+")
         self.scales[key] = scale
         if ends:
             ttk.Label(r, text=ends[1], foreground="#777").pack(side="left")
@@ -633,20 +662,33 @@ class ImageWindow(tk.Toplevel):
 
     # ------------------------------------------------------------ placing
 
-    def placed_shape(self, beat, key):
-        """The picture as a new shape centred on (beat, key), or None (no picture / nothing coloured)."""
+    def placed_shape(self, b0, k0):
+        """The picture as a new shape from beat b0 and key k0 (its lowest) up, or None (no picture / nothing
+        coloured)."""
         if not self.pic or self.grid is None:
             return None
         s = self.s
         info = {"file": self.pic.path, "sig": self.pic.sig, "size": list(self.pic.size),
                 "set": dict(P.clean_settings(s), pal=[P.hex_of(c) for c in self.pal], locked=sorted(self.locked))}
-        _, steps, keys = P.grid_notes(self.grid, s["view"])
         vel = self.app.defaults.get("vel0", 127)
-        return P.picture_shape(self.grid, info, beat - steps * s["step"] / 2, round(key - (keys - 1) / 2),
-                               s["step"], vel)
+        return P.picture_shape(self.grid, info, b0, k0, s["step"], vel)
 
-    def place(self, beat, key):
-        sh = self.placed_shape(beat, key)
+    def box_at(self, beat, key, snap=True):
+        """The picture held by its middle at (beat, key) -> (start beat, lowest key, length in beats, keys): its
+        start on the grid (snap), not before beat 0, every key inside the piano roll's key range (user: a picture
+        placed half off the keys lost its bottom key)."""
+        _, steps, keys = P.grid_notes(self.grid, self.s["view"])
+        length = steps * self.s["step"]
+        b0 = beat - length / 2
+        sb = self.app.snap_beats()
+        if snap and sb:
+            b0 = round(b0 / sb) * sb
+        k0 = max(0, min(self.app.keys - keys, round(key - (keys - 1) / 2)))
+        return max(0.0, b0), k0, length, keys
+
+    def place(self, beat, key, snap=False):
+        """The picture placed held by its middle at (beat, key) (box_at)."""
+        sh = self.placed_shape(*self.box_at(beat, key, snap)[:2]) if self.grid is not None else None
         if sh is None:
             self.app.status.config(text=tr("image.nothing_to_place"))
             return False
@@ -654,34 +696,35 @@ class ImageWindow(tk.Toplevel):
         return True
 
     def place_at_play_line(self):
-        app = self.app
-        roll = app.roll
-        mid_key = roll.y2p(roll.winfo_height() / 2)
-        _, steps, _ = P.grid_notes(self.grid, self.s["view"]) if self.grid is not None else (0, 0, 0)
-        self.place(app.playhead + steps * self.s["step"] / 2, mid_key)
+        if self.grid is None:
+            self.app.status.config(text=tr("image.nothing_to_place"))
+            return
+        roll = self.app.roll
+        length = self.box_at(0, 0, snap=False)[2]
+        self.place(self.app.playhead + length / 2, roll.y2p(roll.winfo_height() / 2))
 
     def drag_start(self, e):
         self.drag_mark = None
 
     def roll_spot(self, e):
-        """Where on the main piano roll the mouse is (beat, key), or None when it's not over it."""
+        """Where on the main piano roll the mouse is (beat, key, snap: Shift = off the grid), or None when it's not
+        over it."""
+        from roll.roll_shared import SHIFT
         roll = self.app.roll
         x, y = e.x_root - roll.winfo_rootx(), e.y_root - roll.winfo_rooty()
-        if 0 <= x < roll.winfo_width() and 0 <= y < roll.winfo_height() and x > roll.kb_w:
-            return roll.x2t(x), roll.y2p(y)
-        return None
+        if self.grid is None or not (0 <= x < roll.winfo_width() and 0 <= y < roll.winfo_height() and x > roll.kb_w):
+            return None
+        return roll.x2t(x), roll.y2p(y), not e.state & SHIFT
 
     def drag_move(self, e):
         roll = self.app.roll
         roll.delete("picdrag")
         spot = self.roll_spot(e)
-        if spot is None or self.grid is None:
+        if spot is None:
             return
-        _, steps, keys = P.grid_notes(self.grid, self.s["view"])
-        b, k = spot
-        half_b, half_k = steps * self.s["step"] / 2, keys / 2
-        roll.create_rectangle(roll.t2x(b - half_b), roll.p2y(k + half_k), roll.t2x(b + half_b),
-                              roll.p2y(k - half_k), outline="#e02020", dash=(4, 3), width=2, tags="picdrag")
+        b0, k0, length, keys = self.box_at(*spot)
+        roll.create_rectangle(roll.t2x(b0), roll.p2y(k0 - 0.5 + keys), roll.t2x(b0 + length), roll.p2y(k0 - 0.5),
+                              outline="#e02020", dash=(4, 3), width=2, tags="picdrag")
 
     def drag_end(self, e):
         self.app.roll.delete("picdrag")
@@ -744,7 +787,8 @@ class ImageWindow(tk.Toplevel):
         app = self.app
         old = app.shapes[i]
         (b0, k0), (b1, k1), (b2, k2) = old["pts"]
-        new = self.placed_shape((b1 + b2) / 2, (k1 + k2) / 2)
+        _, steps, keys = P.grid_notes(self.grid, self.s["view"])
+        new = self.placed_shape((b1 + b2 - steps * self.s["step"]) / 2, round((k1 + k2 - keys + 1) / 2))
         if new is None:
             return
         w0, h0 = old["picture"]["size"]

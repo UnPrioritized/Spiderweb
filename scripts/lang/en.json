@@ -1574,9 +1574,9 @@
   "Sine, Square, Saw, Triangle: every key hits 16 times in each wave, loud and soft in the shape of that wave. Sine takes the overtones away (a soft, pure tone), Square and Triangle take every second one away (a hollow tone), Saw makes the high ones a little quieter. 0 % is the plain tone. They make many more notes, up to 16 times as many: the count is at the bottom of the window."
  ],
  "help.picture.title": "Picture (I)",
- "help.picture.tip": "Turns a picture (PNG or GIF) into notes in up to 15 colours. Set it up in the window that opens, then drag it into the piano roll, or click the piano roll with this tool.",
+ "help.picture.tip": "Turns a picture (PNG or GIF) into notes in up to 15 colours. Set it up in the window that opens, then drag it into the piano roll.",
  "help.picture.text": [
-  "The Picture tool opens the image window. Open a picture there (PNG or GIF), set it up, then drag the handle at the bottom right into the piano roll (you hold the picture by its middle), press \"Place at the play line\", or click the piano roll while Picture is the tool.",
+  "The Picture tool opens the image window. Open a picture there (PNG or GIF), set it up, then drag the handle at the bottom right into the piano roll (you hold the picture by its middle; its start snaps to the grid, hold Shift to place it exactly) or press \"Place at the play line\". A placed picture always stays inside the piano roll's keys.",
   "",
   "Made for: Falling notes = the keys run across the picture (players with the keyboard at the bottom). Piano roll = the keys run up the picture (players and editors with the keys on the left). A picture shows the right way up in one of them only. Piano roll gives a wide picture about three times the detail, because the keys go along its short side.",
   "",

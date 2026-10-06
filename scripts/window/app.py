@@ -1510,6 +1510,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 return None
             if self.hz_window and str(w).startswith(str(self.hz_window)):
                 return None  # (the Hz bass window: its own keys only, nothing done to the main piano roll behind)
+            if self.image_window and str(w).startswith(str(self.image_window)):
+                return None  # (the image window and its pop-ups: Ctrl+C there copies their text, not the shapes)
             if self.grabbed_elsewhere():
                 return None  # (a window like Range… is working on the picked shapes: nothing changes behind it)
             if main_only and not (isinstance(w, tk.Misc) and w.winfo_toplevel() is self):

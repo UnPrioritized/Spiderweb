@@ -284,28 +284,32 @@ def fit_palette(pictures, k, locked=(), tries=4, seed=1, samples=12000, init="sp
             for s, c in first.items():
                 cen[s] = c
         have = list(fixed.values()) + (list(first.values()) if t == 0 else [])
+        near = _dist2(lab, np.array(have)).min(1) if have else None  # (each cell to its nearest one taken)
         for s in free:  # first guesses far from the ones already taken
             if t == 0 and s in first:
                 continue
-            if have and init == "spread":
-                d = ((lab[:, None] - np.array(have)[None]) ** 2).sum(2).min(1) * wt
+            if near is not None and init == "spread":
+                d = near * wt
                 d = d / d.sum() if d.sum() > 0 else p
             else:
                 d = p
             cen[s] = lab[rng.choice(len(lab), p=d)]
             have.append(cen[s])
+            new = _dist2(lab, cen[s][None])[:, 0]
+            near = new if near is None else np.minimum(near, new)
+        free_a = np.array(free, int)
         for _ in range(25):
-            grp = ((lab[:, None] - cen[None]) ** 2).sum(2).argmin(1)
-            moved = 0.0
-            for s in free:
-                m = grp == s
-                if m.any():
-                    new = np.average(lab[m], 0, wt[m])
-                    moved = max(moved, float(np.abs(new - cen[s]).max()))
-                    cen[s] = new
+            grp = _dist2(lab, cen).argmin(1)
+            tot = np.bincount(grp, wt, k)[free_a]
+            has = tot > 0
+            if not has.any():
+                break
+            new = np.column_stack([np.bincount(grp, wt * lab[:, c], k)[free_a] for c in range(3)])[has] / tot[has, None]
+            moved = float(np.abs(new - cen[free_a[has]]).max())
+            cen[free_a[has]] = new
             if moved < 1e-4:
                 break
-        grp = ((lab[:, None] - cen[None]) ** 2).sum(2).argmin(1)
+        grp = _dist2(lab, cen).argmin(1)
         if look is None:
             err = (((lab - cen[grp]) ** 2).sum(1) * wt).sum()
         else:
@@ -326,6 +330,14 @@ def fit_palette(pictures, k, locked=(), tries=4, seed=1, samples=12000, init="sp
         else:
             pal[s] = lin_all[rng.integers(len(lin_all))]
     return pal
+
+
+def _dist2(lab, cen):
+    """n x 3 colours, k x 3 centres -> n x k squared distances (channel by channel: no n x k x 3 array)."""
+    d = (lab[:, 0, None] - cen[None, :, 0]) ** 2
+    for c in (1, 2):
+        d += (lab[:, c, None] - cen[None, :, c]) ** 2
+    return d
 
 
 def _nearest(lab, pal_lab):
