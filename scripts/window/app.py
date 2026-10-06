@@ -20,16 +20,15 @@ from window import big_ask
 from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
-from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, cached_arrays, fx_notes, point_names, render,
+from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, fx_notes, point_names, render,
                           slot_track_channel)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
-from notes.fx import flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
-from notes.gaterange import flipped_range
-from notes.glue import added as glue_added, flipped as glue_flipped, glue_box, to_shares as glue_shares
+from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
+from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
 from notes.polygon import POLYGON_DEFAULTS
-from notes.sliced import completed, fresh_marks, moved_by
+from notes.sliced import completed, fresh_marks, moved_by, steps_kept
 from notes.smooth import SMOOTH_DEFAULT
 from notes.text import TEXT_DEFAULTS
 from files.mathexpr import calc, calc_int, fmt
@@ -836,7 +835,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             else:
                 self.split_box.pack_forget()
         for sh in self.shapes:  # a piece whose outline was changed is a shape of its own now (sliced.py)
-            if "cut" in sh and moved_by(sh) is None:
+            if "cut" in sh and moved_by(as_made(sh)) is None:
                 completed(sh)  # (with the whole's glue / note tool pages)
         got = [self.notes_tracks(sh) for sh in self.shapes]
         # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
@@ -1153,27 +1152,14 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         mid2 = min(vals) + max(vals)  # twice the middle
         self.push_undo(name=tr("app.flip_sideways") if sideways else tr("app.flip_upside_down"))
         for sh in shapes:
-            sh["pts"] = [[mid2 - b, p] if sideways else [b, mid2 - p] for b, p in sh["pts"]]
-            for tm in all_tumours(sh):  # mirrored: the bumps swap sides too
-                tm["mirror"] = not tm["mirror"]
-            for key in ("pattern", "shape"):  # and a curve's formulas (pattern.py)
-                if sh.get(key):
-                    sh[key]["mirror"] = not sh[key]["mirror"]
-            if sideways:  # the velocities flip with it
-                if sh.get("vel_env"):
-                    sh["vel_env"] = [[1 - u, v] for u, v in reversed(sh["vel_env"])]
-                sh["vel0"], sh["vel1"] = sh["vel1"], sh["vel0"]
-            if sh.get("glue"):  # (its boxes are shares of the shape's box)
-                sh["glue"] = glue_flipped(sh["glue"], sideways)
-            if sh.get("fx"):  # (its note tool pages' result is flipped too, fx.py)
-                fx = fx_flipped(sh["fx"], "time" if sideways else "keys")
+            steps = steps_kept(sh)  # (a piece of a shape with pages: a flip step too, it stays a piece)
+            flip_shape(sh, sideways, mid2)
+            if sh.get("fx") or steps:  # (its note tool pages' result is flipped too, fx.py)
+                fx = fx_flipped(sh.get("fx"), "time" if sideways else "keys", steps)
                 if fx:
                     sh["fx"] = fx
                 else:
-                    del sh["fx"]
-            for k in ("range", "range_kept"):  # (a spam gate range runs the other way, the one kept while off too)
-                if sh.get(k):
-                    sh[k] = flipped_range(sh[k], sideways)
+                    sh.pop("fx", None)
         self.roll.move_kept_box(lambda b, p: (mid2 - b, p) if sideways else (b, mid2 - p))  # (flips too)
         self.sync_panel()
         self.shapes_changed()
@@ -1194,13 +1180,14 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         limit = self.roll.limits(shapes)  # (turned past an edge: pushed back inside, user)
         self.push_undo(name=tr("app.turn_90"))
         for sh in shapes:
+            steps = steps_kept(sh)  # (a piece of a shape with pages: a turn step too, it stays a piece)
             turn_shape(sh, clockwise, r, cb, cp)
-            if sh.get("fx"):  # (its note tool pages' result is turned too, fx.py)
-                fx = fx_turned(sh["fx"], 90 if clockwise else -90, r)
+            if sh.get("fx") or steps:  # (its note tool pages' result is turned too, fx.py)
+                fx = fx_turned(sh.get("fx"), 90 if clockwise else -90, r, steps)
                 if fx:
                     sh["fx"] = fx
                 else:
-                    del sh["fx"]
+                    sh.pop("fx", None)
         db, dp = self.roll.push_in(self.roll.reach(shapes), limit)
         if db or dp:
             for sh in shapes:

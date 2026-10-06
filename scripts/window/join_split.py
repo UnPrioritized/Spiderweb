@@ -13,11 +13,11 @@ from files.lang import tr
 from notes.arc import arc_circle, arc_points
 from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live
 from notes.bezier import anchor_count, nearest, split
-from notes.engine import cached_arrays, shape_path
+from notes.engine import as_made, cached_arrays, shape_path
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_in_two, moved_by, notes_across,
-                          rejoined, slice_in_two, tooled)
+                          rejoined, slice_in_two, split_here_ok, tooled)
 from notes.smooth import smooth_path
 from notes.joined import (custom_groups, join_shapes, join_velocity, piece_velocity, sections, split_at, split_custom,
                           split_pieces)
@@ -198,7 +198,7 @@ class JoinSplit:
     def pieces(self):
         """The selected shapes that are pieces cut from another shape, keeping their notes (sliced.py)."""
         return [i for i in sorted(self.sels) if i < len(self.shapes) and self.shapes[i].get("cut")
-                and moved_by(self.shapes[i]) is not None]
+                and moved_by(as_made(self.shapes[i])) is not None]
 
     def make_complete(self):
         """Right-click → Turn into a complete shape (user): the selected pieces forget the shape they were cut from,
@@ -258,6 +258,9 @@ class JoinSplit:
     def split_here(self, i, at):
         """Cut a line kind in two where it was right-clicked (at: x, y on screen; near an anchor or
         polyline point: there)."""
+        if not split_here_ok(self.shapes[i]):
+            self.status.config(text=tr("join_split.split_here_use_slice"))
+            return
         got = self.cut_at(self.shapes[i], at)
         if not got:
             self.status.config(text=tr("join_split.can_t_split_there_that_s"))

@@ -23,8 +23,8 @@ from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
 from notes.chop import apply_chop
 from notes.claw import apply_claw
-from notes.fx import (clean_fx, groups, mirrored, notes_box, swapped, toggled, turn_notes, turn_pts, turn_shape,
-                      velocities)
+from notes.fx import (clean_fx, flip_shape, groups, mirrored, notes_box, swapped, toggled, turn_notes, turn_pts,
+                      turn_shape, velocities)
 from notes.gaterange import clean_range
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
@@ -35,7 +35,7 @@ from notes.custom import frame_upright
 from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
 from notes.sliced import (clean_cut, cut_through, in_part, knife_cut, moved_by, piece_notes, run_origins, source,
-                          spotted_notes)
+                          spotted_notes, whole_made)
 from notes.smooth import clean_level, smooth_path
 from notes.text import clean_text
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
@@ -130,7 +130,10 @@ def clean_shape(sh):
     gl = clean_glue(sh.get("glue"))
     if gl:  # touching notes on a key made one (glue.py)
         out["glue"] = gl
-    fx = clean_fx(sh)
+    cut = clean_cut(sh["cut"]) if isinstance(sh.get("cut"), dict) else None
+    if cut:  # a piece cut from another shape, keeping its notes (sliced.py)
+        out["cut"] = cut
+    fx = clean_fx(sh, steps=bool(cut) and whole_made(cut))
     if fx:  # Chop / Claw machine / Strum pages, flips and velocities after them (fx.py)
         out["fx"] = fx
     cy = clean_cycle(sh.get("cycle"))
@@ -139,9 +142,6 @@ def clean_shape(sh):
     tm = clean_tumour(sh.get("tumour")) if out["kind"] in LINE_KINDS else None
     if tm:
         out["tumour"] = tm
-    cut = clean_cut(sh["cut"]) if isinstance(sh.get("cut"), dict) else None
-    if cut:  # a piece cut from another shape, keeping its notes (sliced.py)
-        out["cut"] = cut
     if out["kind"] == "custom":
         strokes = clean_strokes(sh.get("strokes"))
         if len(out["pts"]) != 3 or not strokes:
@@ -386,9 +386,37 @@ def fx_notes(sh, ppq, keys, get):
             return notes, None if tracks is None else np.asarray(tracks)[idx]
         return fx_step(*get(rest), last, sh, ppq)
     if sh.get("_m"):
+        if sh.get("cut"):  # (a sliced piece: its notes as it was, before the flips; sliced.steps_kept)
+            return get(unflipped(sh))
         notes, tracks = get(bare_of(sh))
         return mirrored(notes, sh["_m"], notes_box(notes)), tracks
     return with_glue(*_notes_tracks(sh, ppq, keys), sh, ppq)
+
+
+def unflipped(sh):
+    """sh (without its pages) with its drawing flipped back along its hidden "_m" axes, each within its own box."""
+    out = json.loads(json.dumps(bare_of(sh)))
+    for axis in sh["_m"]:
+        k = 0 if axis == "time" else 1
+        vals = [pt[k] for pt in cached_path(out)]
+        flip_shape(out, axis == "time", min(vals) + max(vals))
+    return out
+
+
+def as_made(sh):
+    """sh's drawing as its notes are made from it: before its flip / turn steps (a sliced piece flipped or turned
+    as a shape with pages is still that piece: sliced.moved_by(as_made(sh)))."""
+    while sh.get("fx"):
+        fx, last = sh["fx"], sh["fx"][-1]
+        rest = dict(sh, fx=fx[:-1]) if len(fx) > 1 else {k: v for k, v in sh.items() if k != "fx"}
+        if last["tool"] == "flip":
+            rest["_m"] = toggled(sh.get("_m"), last["axis"])
+            if not rest["_m"]:
+                del rest["_m"]
+        elif last["tool"] == "turn":
+            rest = turned_back(rest, last)
+        sh = rest
+    return unflipped(sh) if sh.get("_m") else bare_of(sh)
 
 
 def turned_back(sh, step):

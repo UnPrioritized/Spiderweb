@@ -27,6 +27,7 @@
  "join_split.only_joined_curves_and_custom_shapes": "Only joined curves and custom shapes split into separate shapes.",
  "join_split.join": "Join",
  "join_split.joined_shapes_into_one_curve": "Joined {n} shapes into one curve",
+ "join_split.split_here_use_slice": "This piece was flipped, turned or sliced through its notes after its own pages: Split here can't tell which notes go where. Use the Slice tool (K) across its notes",
  "join_split.cant_rejoin": "Pieces sliced through their notes only join with the pieces beside them, cut from the same shape (moved together, if at all)",
  "join_split.pieces_some_ends_didn_t_touch": " ({pieces} pieces: some ends didn't touch)",
  "join_split.split": "Split",

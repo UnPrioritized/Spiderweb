@@ -18,6 +18,7 @@ from notes.joined import all_tumours
 from notes.paths import KEYS
 from notes.funnel import funnel_contains, funnel_handles, funnel_origins
 from notes.fx import copied as fx_copied, with_turn as fx_turned
+from notes.sliced import steps_kept
 from roll.roll_curve import CurveEditing
 from roll.roll_custom import CustomBox
 from roll.roll_draw import RollDrawing
@@ -676,7 +677,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 self.box_kept = (kept, set(app.sels))
             app.push_undo(name=tr({"turn": "pianoroll.turn", "skew": "pianoroll.skew"}.get(hit[0], "pianoroll.resize")))
             if hit[0] == "turn":
-                self.drag = ("turn", orig, self.screen_angle(orig, e.x, e.y), fx_copied(app.selected().get("fx")))
+                self.drag = ("turn", orig, self.screen_angle(orig, e.x, e.y), fx_copied(app.selected().get("fx")),
+                             steps_kept(app.selected()))  # (a piece of a shape with pages: a turn step too)
             elif hit[0] == "skew":
                 self.drag = ("skew", hit[1], orig, self.event_pt(e, snap=False))
             else:
@@ -929,7 +931,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if self.stayed_inside(step):
                 self.app.shape_edited()
         elif kind == "turn":
-            _, orig, a0, fx0 = self.drag
+            _, orig, a0, fx0, steps = self.drag
             angle = self.screen_angle(orig, e.x, e.y) - a0
             angle = (angle + math.pi) % (2 * math.pi) - math.pi
             if not e.state & SHIFT:
@@ -940,8 +942,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 self.limit = self.limits([sh])
             was = sh["pts"]
             sh["pts"] = self.turn_custom(orig, angle)
-            if fx0:  # (its note tool pages' result is turned too, fx.py)
-                fx = fx_turned(fx_copied(fx0), math.degrees(angle), self.sy / self.sx)
+            if fx0 or steps:  # (its note tool pages' result is turned too, fx.py)
+                fx = fx_turned(fx_copied(fx0), math.degrees(angle), self.sy / self.sx, steps)
                 if fx:
                     sh["fx"] = fx
                 else:

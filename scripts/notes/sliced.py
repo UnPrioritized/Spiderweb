@@ -70,15 +70,49 @@ def completed(sh):
             sh["glue"] = added(sh.get("glue"), b)
 
 
+def whole_made(cut):
+    """Do a piece's notes come from the glue / note tool pages of the shape it was cut from (or that one is a piece
+    itself)?"""
+    whole = cut.get("whole") or {}
+    return bool(whole.get("fx") or whole.get("glue") or whole.get("cut"))
+
+
+def steps_kept(sh):
+    """sh is a piece whose notes come from its whole's glue / pages: flipping / turning it is a flip / turn step on
+    its notes, like on a shape with pages (user, 2026-10-07: it became a shape of its own, all the whole's notes
+    back), and it stays a piece (its notes are made from its drawing turned / flipped back: engine.as_made)."""
+    return bool(sh.get("cut")) and whole_made(sh["cut"])
+
+
+def split_here_ok(sh):
+    """Can Split here cut sh? Not a piece flipped / turned as a shape with pages, or one cut through its notes after
+    its own pages (its notes don't follow a spot on the drawing any more: the Slice tool cuts it)."""
+    cut = sh.get("cut")
+    return not cut or moved_by(sh) is not None and not (cut.get("whole") or {}).get("cut")
+
+
+def close(a, b):
+    """a == b, numbers within a little (a drawing turned / flipped back isn't exact to the last digit)."""
+    if isinstance(a, bool) or isinstance(b, bool) or a is None or b is None:
+        return a == b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return abs(a - b) <= 1e-9 * max(1.0, abs(a), abs(b))
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(close(a[k], b[k]) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(close(x, y) for x, y in zip(a, b))
+    return a == b
+
+
 def moved_by(sh):
     """How far a sliced piece was moved since it was cut, (beats, keys); None when it isn't a piece any more (its
-    outline changed) or never was."""
+    outline changed) or never was. (Flipped / turned with steps: moved_by(engine.as_made(sh)).)"""
     cut = sh.get("cut")
     if not cut:
         return None
     was = cut["was"]
     if (len(sh["pts"]) != len(was["pts"]) or was.get("kind") != sh["kind"]
-            or any(sh.get(k) != was.get(k) for k in keys_of(sh) if k != "pts")):
+            or any(not close(sh.get(k), was.get(k)) for k in keys_of(sh) if k != "pts")):
         return None
     d = np.asarray(sh["pts"], float) - np.asarray(was["pts"], float)
     if not len(d) or np.abs(d - d[0]).max() > 1e-6:  # (a save file trims the last digits)
@@ -99,14 +133,14 @@ def source(sh):
     if d is None:
         return None
     cut = sh["cut"]
-    same_vel = cut.get("vel") is not None and velocity(sh) == cut["vel"]
+    same_vel = cut.get("vel") is not None and close(velocity(sh), cut["vel"])
     own = keys_of(sh) + VELOCITY + (GATE if sh["kind"] == "custom" else ()) + WHOLE_TOOLS
     src = {k: v for k, v in sh.items() if k not in own and k != "cut"}
     src.update(outline(moved(cut["whole"], d)))
     src.update(tools(cut["whole"]))
     src.update(velocity(cut["whole"] if same_vel else sh))
     if sh["kind"] == "custom":
-        same_gate = cut.get("gate") is not None and velocity(sh, GATE) == cut["gate"]
+        same_gate = cut.get("gate") is not None and close(velocity(sh, GATE), cut["gate"])
         src.update(velocity(cut["whole"] if same_gate else sh, GATE))
     return src, cut["part"], same_vel
 

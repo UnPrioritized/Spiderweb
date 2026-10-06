@@ -43,8 +43,9 @@ def pages(fx):
     return [st for st in fx or () if is_page(st)]
 
 
-def clean_fx(sh):
-    """sh["fx"] from a file -> a valid step list, or None. Without one: the old chop / claw / strum as pages."""
+def clean_fx(sh, steps=False):
+    """sh["fx"] from a file -> a valid step list, or None. Without one: the old chop / claw / strum as pages.
+    steps: flips / turns / velocities before any page count too (a sliced piece's, see flipped)."""
     fx = sh.get("fx")
     if not isinstance(fx, list):
         fx = [{"tool": k, "cfg": sh[k]} for k in TOOLS if sh.get(k)]
@@ -57,7 +58,7 @@ def clean_fx(sh):
             cfg = CLEAN[tool](st.get("cfg"))
             if cfg:
                 out.append({"tool": tool, "cfg": cfg, **({"off": True} if st.get("off") is True else {})})
-        elif not pages(out):
+        elif not pages(out) and not steps:
             continue  # (a flip / velocities before any page change nothing)
         elif tool == "flip" and st.get("axis") in AXES:
             out.append({"tool": "flip", "axis": st["axis"]})
@@ -88,23 +89,51 @@ def copied(fx):
     return json.loads(json.dumps(fx))
 
 
-def flipped(fx, axis):
+def flipped(fx, axis, always=False):
     """The steps after the shape is flipped: a flip step added (two of the same in a row cancel out), or nothing
-    when there's no page (flipping the drawing is enough)."""
-    if not pages(fx):
+    when there's no page (flipping the drawing is enough). always: a step even so (a sliced piece whose notes come
+    from the shape it was cut from's pages, sliced.steps_kept)."""
+    if not pages(fx) and not always:
         return fx
-    if fx[-1] == {"tool": "flip", "axis": axis}:
+    fx = fx or []
+    if fx and fx[-1] == {"tool": "flip", "axis": axis}:
         return fx[:-1] or None
     return fx + [{"tool": "flip", "axis": axis}]
 
 
-def with_turn(fx, deg, r):
+def flip_shape(sh, sideways, mid2):
+    """sh's drawing flipped sideways (time) or upside down (keys) around mid2 / 2 (beats or keys): its points, and
+    its tumours, formulas, velocities (sideways), glue and gate range along (not its pages: flipped). Changes sh."""
+    from notes.gaterange import flipped_range
+    from notes.glue import flipped as glue_flipped
+    from notes.joined import all_tumours
+    sh["pts"] = [[mid2 - b, p] if sideways else [b, mid2 - p] for b, p in sh["pts"]]
+    for tm in all_tumours(sh):  # mirrored: the bumps swap sides too
+        tm["mirror"] = not tm["mirror"]
+    for key in ("pattern", "shape"):  # and a curve's formulas (pattern.py)
+        if sh.get(key):
+            sh[key]["mirror"] = not sh[key]["mirror"]
+    if sideways:  # the velocities flip with it
+        if sh.get("vel_env"):
+            sh["vel_env"] = [[1 - u, v] for u, v in reversed(sh["vel_env"])]
+        if "vel0" in sh and "vel1" in sh:
+            sh["vel0"], sh["vel1"] = sh["vel1"], sh["vel0"]
+    if sh.get("glue"):  # (its boxes are shares of the shape's box)
+        sh["glue"] = glue_flipped(sh["glue"], sideways)
+    for k in ("range", "range_kept"):  # (a spam gate range runs the other way, the one kept while off too)
+        if sh.get(k):
+            sh[k] = flipped_range(sh[k], sideways)
+    return sh
+
+
+def with_turn(fx, deg, r, always=False):
     """The steps after the shape is turned deg degrees clockwise on screen (r: beats per key there): a turn step
     added, or added to the last one if that was a turn at the same zoom (turning back right after cancels it out),
-    or nothing when there's no page (turning the drawing is enough)."""
-    if not pages(fx):
+    or nothing when there's no page (turning the drawing is enough). always: a step even so (see flipped)."""
+    if not pages(fx) and not always:
         return fx
-    last = fx[-1]
+    fx = fx or []
+    last = fx[-1] if fx else {"tool": None}
     if last["tool"] == "turn" and abs(last["r"] - r) <= 1e-9 * max(r, 1e-9):
         deg, fx = deg + last["deg"], fx[:-1]
     deg = norm_deg(deg)
