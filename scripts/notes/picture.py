@@ -25,6 +25,8 @@ SUGGESTED = {  # the "Back to suggested" values (user: only a suggestion; every 
     "empty": True,  # see-through parts make no notes (False: they keep the colour under them)
     "step": 1 / 48,  # one grid step, in beats
     "look": "flat", "outline": 1, "shade": True, "join": True,  # how a player draws it (join also makes the notes)
+    # the player's window and how many keys it shows: its outline px look thicker / thinner in the preview (user)
+    "player_w": 1920, "player_h": 1080, "player_keys": 128,
     "by": "channel", "fmt": "",  # the colour list: {n} = channel number / order; the format's name ("" = first)
     "use10": False,  # colour 10 on channel 10 (16 colours; pictures only, shapes never use it; user)
 }
@@ -461,7 +463,8 @@ def _spread(cl, pal, pal_lab, strength, free):
 
 _RANGES = {"keys": (1, 256), "steps": (1, 8), "colours": (2, 16), "focus": (0, 1), "strength": (0, 1),
            "keep": (0, 1), "sharpen": (0, 1), "brightness": (-1, 1), "contrast": (-1, 1), "saturation": (-1, 1),
-           "share": (0.1, 10), "step": (1 / 65536, 64), "outline": (0, 8)}
+           "share": (0.1, 10), "step": (1 / 65536, 64), "outline": (0, 8), "player_w": (100, 20000),
+           "player_h": (100, 20000), "player_keys": (1, 256)}
 _CHOICES = {"view": ("fall", "roll"), "blend": ("spread", "pattern", "none"), "look": ("flat", "outlined"),
             "by": ("channel", "order")}
 _FLAGS = ("empty", "shade", "join", "use10")

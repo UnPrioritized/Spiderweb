@@ -21,6 +21,9 @@ PREVIEW_W, PREVIEW_H = 900, 520  # the preview's size to start with (it grows wi
 KB = 36  # the keyboard drawn beside the preview, in pixels
 WAIT_MS = 150  # a slider moved: the picture is made again once it rests this long
 SWATCH = 20
+BOXES = {"keys": (2, 256), "step": (1, 99999), "outline": (0, 8), "player_w": (100, 20000), "player_h": (100, 20000),
+         "player_keys": (1, 256)}  # the number boxes: lowest, highest (keys: the piano roll's keys at most)
+LOOK_ONLY = ("look", "outline", "shade", "join", "player_w", "player_h", "player_keys")  # (only the preview changes)
 
 
 def _photo(master, rgb):
@@ -47,7 +50,8 @@ def _edges(n, size):
 def look_picture(grid, pal_srgb, view, width, height, look="flat", outline=1, shade=True, join=True):
     """The notes as a player would draw them: width x height x 3 sRGB. Falling notes: keys are the columns, a note
     runs up a column; piano roll: keys are the rows, a note runs along a row. "outlined": a dark edge round every
-    note (and between touching notes when they aren't joined) + shading across the key (bright to dark)."""
+    note (and between touching notes when they aren't joined) + shading across the key (bright to dark). outline =
+    its width in this picture's pixels (any fraction: the last pixel only partly dark)."""
     rows, cols = grid.shape
     ry, dy0, dy1 = _edges(rows, height)
     cx, dx0, dx1 = _edges(cols, width)
@@ -58,27 +62,31 @@ def look_picture(grid, pal_srgb, view, width, height, look="flat", outline=1, sh
     if look != "outlined":
         return out
     fall = view == "fall"
+
+    def dark(d):  # how much of the pixel d pixels in from an edge the outline covers
+        return np.clip(outline - d, 0, 1)
+
     # across the key: the key's own edges always; along time: where the note starts / ends
     if fall:
-        across = (dx0[None, :] < outline) | (dx1[None, :] < outline)
+        across = np.maximum(dark(dx0), dark(dx1))[None, :]
         top = np.ones(grid.shape, bool)
         top[1:] = ~join | (grid[1:] != grid[:-1])
         bot = np.ones(grid.shape, bool)
         bot[:-1] = ~join | (grid[:-1] != grid[1:])
-        along = ((dy0[:, None] < outline) & top[ry][:, cx]) | ((dy1[:, None] < outline) & bot[ry][:, cx])
+        along = np.maximum(dark(dy0)[:, None] * top[ry][:, cx], dark(dy1)[:, None] * bot[ry][:, cx])
         frac = (dx0 / np.maximum(dx0 + dx1, 1))[None, :, None]
     else:
-        across = (dy0[:, None] < outline) | (dy1[:, None] < outline)
+        across = np.maximum(dark(dy0), dark(dy1))[:, None]
         lef = np.ones(grid.shape, bool)
         lef[:, 1:] = ~join | (grid[:, 1:] != grid[:, :-1])
         rig = np.ones(grid.shape, bool)
         rig[:, :-1] = ~join | (grid[:, :-1] != grid[:, 1:])
-        along = ((dx0[None, :] < outline) & lef[ry][:, cx]) | ((dx1[None, :] < outline) & rig[ry][:, cx])
+        along = np.maximum(dark(dx0)[None, :] * lef[ry][:, cx], dark(dx1)[None, :] * rig[ry][:, cx])
         frac = (dy0 / np.maximum(dy0 + dy1, 1))[:, None, None]
     if shade:
         out = out * (1.15 - 0.4 * frac)
-    edge = (across | along) & on if outline > 0 else np.zeros_like(on)
-    out[edge] = out[edge] * 0.3
+    edge = np.maximum(across, along) * on
+    out = out * (1 - 0.7 * edge)[..., None]
     return np.clip(out, 0, 1)
 
 
@@ -204,22 +212,12 @@ class ImageWindow(tk.Toplevel):
         r = ttk.Frame(f)
         r.pack(fill="x", pady=1)
         ttk.Label(r, text=tr("image.keys"), width=15).pack(side="left")
-        self.vars["keys"] = tk.StringVar(value=str(self.s["keys"]))
-        sb = ttk.Spinbox(r, from_=2, to=256, width=6, textvariable=self.vars["keys"],
-                         command=lambda: self.typed("keys"))
-        sb.pack(side="left")
-        sb.bind("<Return>", lambda e: self.typed("keys"))
-        sb.bind("<FocusOut>", lambda e: self.typed("keys"))
+        self.number_box(r, "keys")
         self.slider(f, "steps", 1, 8, lambda v: "%d×" % round(v), whole=True)
         r = ttk.Frame(f)
         r.pack(fill="x", pady=1)
         ttk.Label(r, text=tr("image.step"), width=15).pack(side="left")  # (one grid step's length)
-        self.vars["step"] = tk.StringVar(value=str(self.step_ticks()))
-        sb = ttk.Spinbox(r, from_=1, to=99999, width=6, textvariable=self.vars["step"],
-                         command=lambda: self.typed("step"))
-        sb.pack(side="left")
-        sb.bind("<Return>", lambda e: self.typed("step"))
-        sb.bind("<FocusOut>", lambda e: self.typed("step"))
+        self.number_box(r, "step")
         ttk.Label(r, text=tr("image.ticks")).pack(side="left", padx=3)
 
         f = self.section(t1, "image.colours")
@@ -265,13 +263,22 @@ class ImageWindow(tk.Toplevel):
         r = ttk.Frame(f)
         r.pack(fill="x", pady=1)
         ttk.Label(r, text=tr("image.outline"), width=15).pack(side="left")
-        self.vars["outline"] = tk.StringVar(value=str(self.s["outline"]))
-        sb = ttk.Spinbox(r, from_=0, to=8, width=6, textvariable=self.vars["outline"],
-                         command=lambda: self.typed("outline"))
-        sb.pack(side="left")
-        sb.bind("<Return>", lambda e: self.typed("outline"))
-        sb.bind("<FocusOut>", lambda e: self.typed("outline"))
+        self.number_box(r, "outline")
         ttk.Label(r, text=tr("image.px")).pack(side="left", padx=3)
+        # the player's window: an outline of so many px looks thinner in a smaller preview (user)
+        r = ttk.Frame(f)
+        r.pack(fill="x", pady=1)
+        Tooltip(ttk.Label(r, text=tr("image.player_window"), width=15), tr("image.player_tip")).widget.pack(
+            side="left")
+        self.number_box(r, "player_w")
+        ttk.Label(r, text="×").pack(side="left", padx=2)
+        self.number_box(r, "player_h")
+        ttk.Label(r, text=tr("image.px")).pack(side="left", padx=3)
+        r = ttk.Frame(f)
+        r.pack(fill="x", pady=1)
+        Tooltip(ttk.Label(r, text=tr("image.player_keys"), width=15), tr("image.player_tip")).widget.pack(
+            side="left")
+        self.number_box(r, "player_keys")
         for k in ("shade", "join"):
             self.vars[k] = tk.BooleanVar(value=self.s[k])
             ttk.Checkbutton(f, text=tr("image." + k), variable=self.vars[k],
@@ -330,6 +337,17 @@ class ImageWindow(tk.Toplevel):
         if (str(e.widget).startswith(str(self.side_canvas)) and self.side_bar.winfo_ismapped()
                 and not isinstance(e.widget, (tk.Listbox, tk.Text, ttk.Combobox, ttk.Spinbox))):
             self.side_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
+
+    def number_box(self, parent, key):
+        """A box for a whole number (BOXES: its limits), taken on Enter / the arrows / leaving it."""
+        lo, hi = BOXES[key]
+        self.vars[key] = tk.StringVar(value=str(self.step_ticks() if key == "step" else self.s[key]))
+        sb = ttk.Spinbox(parent, from_=lo, to=hi, width=6, textvariable=self.vars[key],
+                         command=lambda: self.typed(key))
+        sb.pack(side="left")
+        sb.bind("<Return>", lambda e: self.typed(key))
+        sb.bind("<FocusOut>", lambda e: self.typed(key))
+        return sb
 
     def section(self, parent, key):
         f = ttk.LabelFrame(parent, text=tr(key), padding=(6, 2, 6, 4))
@@ -541,12 +559,13 @@ class ImageWindow(tk.Toplevel):
         except ValueError:
             self.show_settings()
             return
+        lo, hi = BOXES[key]
+        n = max(lo, min(self.app.keys if key == "keys" else hi, n))
         if key == "step":
-            self.put("step", max(1, n) / self.app.ppq)
-        elif key == "keys":
-            self.put("keys", max(2, min(self.app.keys, n)))
-        else:
-            self.put(key, max(0, min(8, n)))
+            if n != self.step_ticks():
+                self.put("step", n / self.app.ppq)
+        elif n != self.s[key]:
+            self.put(key, n)
         self.show_settings()
 
     def take_typed(self):
@@ -557,8 +576,7 @@ class ImageWindow(tk.Toplevel):
         except (KeyError, tk.TclError):  # (the keyboard in a pop-up menu / another program)
             box = None
         if isinstance(box, ttk.Spinbox):  # (a box takes its number when it loses the keyboard: only this one can wait)
-            key = next((k for k in ("keys", "step", "outline") if str(box.cget("textvariable")) == str(self.vars[k])),
-                       None)
+            key = next((k for k in BOXES if str(box.cget("textvariable")) == str(self.vars[k])), None)
             shown = key and (str(self.step_ticks()) if key == "step" else str(self.s[key]))
             if key and self.vars[key].get().strip() != shown:
                 self.typed(key)
@@ -567,14 +585,19 @@ class ImageWindow(tk.Toplevel):
             self.remake()
 
     def put(self, key, value, later=False):
-        """A setting changed: the picture is made again (a slider: once it rests)."""
+        """A setting changed: the picture is made again (a slider: once it rests); a look setting: drawn again."""
         self.s[key] = value
+        if key in LOOK_ONLY:
+            if self.pic:
+                self.app.image_last = (self.pic.path, dict(self.s))
+            self.redraw()
+            return
         if self.late:
             self.after_cancel(self.late)
         self.late = self.after(WAIT_MS if later else 1, self.remake)
 
     def suggested(self):
-        keep = {k: self.s[k] for k in ("view", "look", "outline", "shade", "join", "step")}
+        keep = {k: self.s[k] for k in ("view", "step") + LOOK_ONLY}
         self.s = dict(P.SUGGESTED, share=1.0, **keep)
         self.locked, self.start = {}, {}
         self.show_settings()
@@ -700,7 +723,7 @@ class ImageWindow(tk.Toplevel):
             rgb = P.to_srgb(P.cells(self.pic, h, w)[0])
             self.what.config(text=tr("image.original_title"))
         else:
-            rgb = look_picture(self.grid, P.to_srgb(self.pal), s["view"], w, h, s["look"], s["outline"],
+            rgb = look_picture(self.grid, P.to_srgb(self.pal), s["view"], w, h, s["look"], self.outline_px(w, h),
                                s["shade"], s["join"])
             self.what.config(text=tr("image.preview_title"))
         self.photo = _photo(self, rgb)
@@ -712,6 +735,15 @@ class ImageWindow(tk.Toplevel):
         notes = len(rows) if s["join"] else int((self.grid >= 0).sum())
         self.info.config(text=tr("image.info", keys=keys, steps=steps, notes=f"{notes:,}",
                                  used=len(np.unique(self.grid[self.grid >= 0])), colours=len(self.pal)))
+
+    def outline_px(self, w, h):
+        """The outline's width in the preview (w x h px): as wide next to a key as in the player's window (its
+        outline px; its keys shown across its width / up its height), the preview's keys being wider / narrower."""
+        s = self.s
+        fall = s["view"] == "fall"
+        keys = self.grid.shape[1 if fall else 0]
+        player_key = (s["player_w"] if fall else s["player_h"]) / s["player_keys"]
+        return s["outline"] * ((w if fall else h) / keys) / player_key
 
     def draw_keys(self, x, y, w, h):
         """A keyboard under (falling) / left of (piano roll) the picture, one key per grid key."""
