@@ -52,7 +52,8 @@ class ShapeMenu:
                 m.add_command(label=tr("roll_menu.paste_curve_shape"), accelerator=tr("roll_menu.ctrl_v"),
                               command=self.paste_curve,
                               state="normal" if self.curve_clip else "disabled")
-            what = tr("roll_menu.lines_and_curves") if lines and curves else "lines" if lines else "curves"
+            what = tr("roll_menu.lines_and_curves" if lines and curves else "roll_menu.lines" if lines
+                      else "roll_menu.curves")
             m.add_command(label=tr("roll_menu.delete_highlighted", what=what), accelerator=tr("roll_menu.del"),
                           command=self.delete_parts)
             m.add_command(label=tr("roll_menu.clear_highlight"), accelerator=tr("roll_menu.esc"),

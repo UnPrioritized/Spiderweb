@@ -1160,6 +1160,8 @@
  "roll_menu.paste_curve_shape": "Paste curve shape",
  "roll_menu.ctrl_v": "Ctrl+V",
  "roll_menu.lines_and_curves": "lines and curves",
+ "roll_menu.lines": "lines",
+ "roll_menu.curves": "curves",
  "roll_menu.delete_highlighted": "Delete highlighted {what}",
  "roll_menu.del": "Del",
  "roll_menu.clear_highlight": "Clear highlight",
