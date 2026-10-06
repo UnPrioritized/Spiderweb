@@ -387,8 +387,10 @@ def cut_in_two(sh, halves, at, scale, mark):
         # (its velocities changed since it was cut: the halves keep their own, cut from its)
         own = cut.get("own_vel") or cut.get("vel") is not None and not same_vel
         whole = dict(outline(src), **velocity(cut["whole"]), **tools(cut["whole"]))
+        # (cut through its notes by the Slice tool before: both halves keep that cut)
+        knives = [[b0 + d[0], k0 + d[1], db, dk, sd] for b0, k0, db, dk, sd in cut.get("knife", [])]
     else:
-        src, part, marks, own = sh, [0.0, None], [], False
+        src, part, marks, own, knives = sh, [0.0, None], [], False, []
         whole = dict(outline(sh), **velocity(sh), **tools(sh))
         for h in halves:  # (the whole's glue / pages are done before the cut now)
             for k in WHOLE_TOOLS:
@@ -402,8 +404,11 @@ def cut_in_two(sh, halves, at, scale, mark):
     order = sorted(range(2), key=lambda i: mids[i])
     for i, (a, b) in zip(order, ((part[0], uc), (uc, part[1]))):
         h = halves[i]
-        mine = [m for m in marks if m["u"] >= a - 1e-9 and (b is None or m["u"] <= b + 1e-9)]
+        # (a cut through the notes, its stretch over them: both halves have notes along it)
+        mine = [m for m in marks if m.get("segs") or m["u"] >= a - 1e-9 and (b is None or m["u"] <= b + 1e-9)]
         h["cut"] = {"whole": whole, "was": outline(h), "part": [a, b], "vel": None, "marks": mine + [new]}
+        if knives:
+            h["cut"]["knife"] = json.loads(json.dumps(knives))
         if own:
             h["cut"]["own_vel"] = True
 
