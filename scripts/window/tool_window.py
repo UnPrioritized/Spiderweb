@@ -217,16 +217,13 @@ class ToolWindow(tk.Toplevel):
     # ---- the pages
 
     def build_tabs(self, parent, head):
-        """The tab row (its own row, the whole window wide), On and Remove page on head (the shape's name's row). The
-        tabs scroll sideways (a thin scrollbar under them) once they don't fit, so the window never grows with them
-        (user)."""
+        """The tab row (its own row, the whole window wide), On on head (the shape's name's row). Each page's tab has
+        a small × beside it that removes the page (user: in place of a Remove page button). The tabs scroll sideways
+        (a thin scrollbar under them) once they don't fit, so the window never grows with them (user)."""
         ttk.Style().configure(TAB_STYLE, anchor="center")
-        self.remove_button = ttk.Button(head, text=tr("tool_window.remove"), command=self.remove_page)
-        self.remove_button.pack(side="right")
-        Tooltip(self.remove_button, tr("tool_window.tip_remove"))
         self.on = tk.BooleanVar(value=True)
         self.on_box = ttk.Checkbutton(head, text=tr("tool_window.on"), variable=self.on, command=self.on_off)
-        self.on_box.pack(side="right", padx=(8, 6))
+        self.on_box.pack(side="right")
         Tooltip(self.on_box, tr("tool_window.tip_on"))
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=(6, 0))
@@ -245,6 +242,7 @@ class ToolWindow(tk.Toplevel):
         self.tab = tk.StringVar(value=NEW)
         self.differ = ttk.Label(row, text=tr("tool_window.differ"), foreground="#777")
         self.shown_tabs = None
+        self.tab_buttons = []
 
     def wheel(self, w):
         """The mouse wheel over the tabs scrolls them sideways."""
@@ -268,13 +266,15 @@ class ToolWindow(tk.Toplevel):
         """The picked tab scrolled into view."""
         if not self.winfo_exists():
             return
-        b = next((w for w in self.tabs.winfo_children() if str(w.cget("value")) == self.tab.get()), None)
+        b = next((w for w in self.tab_buttons if str(w.cget("value")) == self.tab.get()), None)
         whole = self.tabs.winfo_reqwidth()
         if b is None or whole <= 0:
             return
         v = self.tab_view
         left, room = v.canvasx(0), v.winfo_width()
-        x0, x1 = b.winfo_x(), b.winfo_x() + b.winfo_width()
+        row = self.tabs.winfo_children()
+        end = row[row.index(b) + 1] if b is not row[-1] else b  # (its ×)
+        x0, x1 = b.winfo_x(), end.winfo_x() + end.winfo_width()
         if x0 < left:
             v.xview_moveto(x0 / whole)
         elif x1 > left + room:
@@ -322,17 +322,27 @@ class ToolWindow(tk.Toplevel):
             self.shown_tabs = shown
             for w in self.tabs.winfo_children():
                 w.destroy()
+            self.tab_buttons = []  # (the tabs alone, without their ×)
             for k, text, off in tabs:
                 b = ttk.Radiobutton(self.tabs, text=text + (tr("tool_window.off_mark") if off else ""),
                                     variable=self.tab, value=str(k), style=TAB_STYLE,
                                     command=lambda k=k: self.pick_page(k))
-                b.pack(side="left", padx=(0, 2))
+                b.pack(side="left")
                 b.bind("<ButtonPress-3>", lambda e, k=k: self.page_menu(e, k))
                 Tooltip(b, shown[1])
                 self.wheel(b)
+                self.tab_buttons.append(b)
+                x = ttk.Label(self.tabs, text="×", foreground="#888", cursor="hand2", padding=(2, 0, 6, 0))
+                x.pack(side="left")
+                x.bind("<Enter>", lambda e, x=x: x.config(foreground="#d00"))
+                x.bind("<Leave>", lambda e, x=x: x.config(foreground="#888"))
+                x.bind("<ButtonRelease-1>", lambda e, k=k: self.remove_tab(e, k))
+                Tooltip(x, tr("tool_window.tip_remove"))
+                self.wheel(x)
             b = ttk.Radiobutton(self.tabs, text="+", variable=self.tab, value=NEW, style=TAB_STYLE, width=3,
                                 command=self.new_page)
             b.pack(side="left")
+            self.tab_buttons.append(b)
             Tooltip(b, tr("tool_window.tip_new") + ("\n\n" + shown[1] if fx else ""))
             self.wheel(b)
             if self.same():
@@ -342,7 +352,6 @@ class ToolWindow(tk.Toplevel):
         self.after_idle(lambda: (self.fit_tabs(), self.see_tab()) if self.winfo_exists() else None)
         page = self.page_step()
         self.on_box.state(["!disabled"] if page else ["disabled"])
-        self.remove_button.state(["!disabled"] if page else ["disabled"])
         if self.on.get() != (not (page or {}).get("off", False)):
             self.on.set(not (page or {}).get("off", False))
 
@@ -400,6 +409,12 @@ class ToolWindow(tk.Toplevel):
         self.change_steps(lambda fx, k: fx[:k] + [dict({a: b for a, b in fx[k].items() if a != "off"},
                                                        **({} if self.on.get() else {"off": True}))] + fx[k + 1:])
         self.undo.mark()
+
+    def remove_tab(self, e, k):
+        """A tab's × clicked (let go on it, like a button): that page goes."""
+        if 0 <= e.x < e.widget.winfo_width() and 0 <= e.y < e.widget.winfo_height():
+            self.pick_page(k)
+            self.remove_page()
 
     def remove_page(self):
         """Remove: the page shown taken off the selected shapes; "+" is picked."""
