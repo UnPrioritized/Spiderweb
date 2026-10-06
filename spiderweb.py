@@ -124,7 +124,6 @@ def check_numpy():
         return True
     except ImportError:
         pass
-    import subprocess
     import tkinter as tk
     from tkinter import messagebox
     root = tk.Tk()
@@ -136,14 +135,8 @@ def check_numpy():
         messagebox.showinfo("Spiderweb", "To install it yourself, open a command prompt and type:\n\n" + command)
         root.destroy()
         return False
-    root.config(cursor="watch")
-    root.update()
-    try:
-        done = subprocess.run([sys.executable, "-m", "pip", "install", "numpy"], capture_output=True, text=True,
-                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        ok, output = done.returncode == 0, (done.stdout + done.stderr).strip()
-    except OSError as e:
-        ok, output = False, str(e)
+    failed, output = run_pip(root, [("numpy", "NumPy")])
+    ok = not failed
     if ok:
         import importlib
         importlib.invalidate_caches()
@@ -158,7 +151,64 @@ def check_numpy():
     return ok
 
 
+def run_pip(root, packages):
+    """pip installs each of packages = [(pip name, shown name)], one at a time (one that can't be installed here
+    doesn't stop the next), while root shows a small window saying so: it can take minutes, and with nothing on
+    screen a second start did nothing (the first one holds the lock) and looked broken. That window carries this
+    folder's label, so a second start brings it to the front. -> (pip names that failed, their output's ends)."""
+    import subprocess
+    import threading
+    import time
+    from tkinter import ttk
+    from files.lang import tr
+    root.title("Spiderweb")
+    try:
+        root.iconbitmap(os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "icons", "icon.ico"))
+    except Exception:  # (no icon there / not Windows: Tk's own)
+        pass
+    root.resizable(False, False)
+    root.protocol("WM_DELETE_WINDOW", lambda: None)  # (pip stopped halfway can leave a package broken)
+    frame = ttk.Frame(root, padding=16)
+    frame.pack(fill="both", expand=True)
+    text = ttk.Label(frame, wraplength=380, justify="left")
+    text.pack(anchor="w")
+    bar = ttk.Progressbar(frame, mode="indeterminate", length=380)
+    bar.pack(fill="x", pady=(12, 0))
+    root.deiconify()
+    root.update_idletasks()
+    root.geometry("+%d+%d" % ((root.winfo_screenwidth() - root.winfo_reqwidth()) // 2,
+                              (root.winfo_screenheight() - root.winfo_reqheight()) // 3))
+    label_window(root)
+    bar.start(15)
+    failed, output = [], ""
+    for pip, shown in packages:
+        text.config(text=tr("extras.installing", name=shown))
+        got = {}
+
+        def work():
+            try:
+                done = subprocess.run([sys.executable, "-m", "pip", "install", pip], capture_output=True, text=True,
+                                      errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                got["ok"], got["out"] = done.returncode == 0, ((done.stdout or "") + (done.stderr or "")).strip()
+            except Exception as e:  # (no pip, can't start it...)
+                got["ok"], got["out"] = False, str(e)
+        worker = threading.Thread(target=work, daemon=True)
+        worker.start()
+        while worker.is_alive():
+            root.update()
+            time.sleep(0.03)
+        if not got.get("ok"):
+            failed.append(pip)
+            output += got.get("out", "")[-400:] + "\n"
+    bar.stop()
+    for child in root.winfo_children():
+        child.destroy()
+    root.withdraw()
+    return failed, output.strip()
+
+
 EXTRAS = (("numba", "numba", "extras.numba"), ("PIL", "pillow", "extras.pillow"))  # (module, pip name, text)
+SHOWN = {"numba": "Numba", "pillow": "Pillow"}  # (their names while they're installed)
 
 
 def offer_extras():
@@ -181,7 +231,6 @@ def offer_extras():
                if pip not in declined and importlib.util.find_spec(module) is None]
     if not missing:
         return
-    import subprocess
     import tkinter as tk
     from tkinter import messagebox
     from files.lang import tr
@@ -192,22 +241,10 @@ def offer_extras():
     command = f'"{sys.executable.replace("pythonw", "python")}" -m pip install {names}'
     failed = []
     if messagebox.askyesno("Spiderweb", tr("extras.ask", list="\n".join("• " + tr(text) for _, text in missing))):
-        root.config(cursor="watch")
-        root.update()
-        output = ""
-        for pip, _ in missing:  # (one at a time: one that can't be installed here doesn't stop the other)
-            try:
-                done = subprocess.run([sys.executable, "-m", "pip", "install", pip], capture_output=True, text=True,
-                                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-                if done.returncode != 0:
-                    failed.append(pip)
-                    output += (done.stdout + done.stderr).strip()[-400:] + "\n"
-            except OSError as e:
-                failed.append(pip)
-                output += str(e) + "\n"
+        failed, output = run_pip(root, [(pip, SHOWN[pip]) for pip, _ in missing])
         importlib.invalidate_caches()
         if failed:
-            messagebox.showerror("Spiderweb", tr("extras.failed", output=output.strip(), command=command))
+            messagebox.showerror("Spiderweb", tr("extras.failed", output=output, command=command))
     else:
         failed = [pip for pip, _ in missing]
     if failed:
