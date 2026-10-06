@@ -1,11 +1,12 @@
 """The side panel's funnel settings (wall, inside, gates)."""
 
+import math
 import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
-from notes.funnel import funnel_reversed
-from files.mathexpr import calc, fmt
+from notes.funnel import funnel_reversed, gate_ticks
+from files.mathexpr import calc
 from window.widgets import Scrub, Tooltip, bad, good, grid_shown, leave_box, unchanged
 
 # Funnel panel: (setting, label, [(value, text, tooltip)])
@@ -131,7 +132,7 @@ class FunnelPanel:
         for key, var in self.funnel_vars.items():
             var.set(t[key])
         for key, (var, e) in self.funnel_entries.items():
-            var.set(fmt(round(t[key] * self.ppq, 3)))
+            var.set(str(gate_ticks(t[key], self.ppq)))  # (the ticks used)
             e.config(style="TEntry")
         self.funnel_vary.set(t["vary"])
         self._loading = False
@@ -197,17 +198,17 @@ class FunnelPanel:
         self.sync_funnel()
 
     def on_funnel_entry(self, key, left=False):
-        """A gate box (Enter, stepped, or left: widgets.leave_box)."""
+        """A gate box (Enter, stepped, or left: widgets.leave_box). Whole ticks: a fraction is rounded (user)."""
         var, e = self.funnel_entries[key]
         if self._loading or str(e.cget("state")) == "disabled" or left and unchanged(e):
             return
         try:
             ticks = calc(var.get())
-            if not 1 <= ticks <= 10 ** 7:
+            if not 0.5 <= ticks <= 10 ** 7:
                 raise ValueError
-            value = ticks / self.ppq
-        except ValueError:
+            value = math.floor(ticks + 0.5) / self.ppq
+        except (ValueError, ZeroDivisionError):
             bad(e)
             return
-        good(e)
         self.set_funnel(key, value)
+        good(e)  # (after: the box shows the whole ticks now)

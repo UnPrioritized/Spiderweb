@@ -623,10 +623,15 @@ def funnel_gate(sh, g0, g1, w):
     return max(g, 1.0)
 
 
+def gate_ticks(gate, ppq):
+    """A start / wall gate (beats) in whole ticks (user: like the spam gate; after a PPQ change too)."""
+    return max(1, math.floor(gate * ppq + 0.5))
+
+
 def funnel_grid(sh, ppq, dspans, length):
     """The note grid every key of a spam funnel shares, as grid distances: from the line start to the wall
     (a leftover under half a gate joins the last note), then on past everything plus one more note."""
-    g0, g1 = sh["gate0"] * ppq, sh["gate1"] * ppq
+    g0, g1 = gate_ticks(sh["gate0"], ppq), gate_ticks(sh["gate1"], ppq)  # (the gates between them can be fractions)
     opened = funnel_openness(dspans) if sh["follow"] == "curve" else None
 
     def gate(d):
@@ -665,7 +670,7 @@ def funnel_cells(sh, ppq, main=True):
         return None, []
     dspans, walls, length, t0, sign = lay
     past = main and sh["wall"] == "past"
-    g1 = max(1, math.floor(sh["gate1"] * ppq + 0.5))
+    g1 = gate_ticks(sh["gate1"], ppq)
 
     def at_wall(q, d):
         w = walls.get(q)
