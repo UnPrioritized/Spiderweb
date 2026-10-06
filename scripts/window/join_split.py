@@ -16,7 +16,8 @@ from notes.bezier import anchor_count, nearest, split
 from notes.engine import cached_arrays, shape_path
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom
-from notes.sliced import completed, cut_in_two, keep_velocity, moved_by, rejoined, slice_in_two
+from notes.sliced import (completed, cut_in_two, keep_velocity, knife_in_two, moved_by, notes_across, rejoined,
+                          slice_in_two, tooled)
 from notes.smooth import smooth_path
 from notes.joined import (custom_groups, join_shapes, join_velocity, piece_velocity, sections, split_at, split_custom,
                           split_pieces)
@@ -290,7 +291,8 @@ class JoinSplit:
 
     def slice_along(self, a, b):
         """The Slice tool's line from a to b (beat, key) let go: every line kind it crosses cut there, every custom
-        shape it goes all the way across cut in two (slice.py). With Select boxes kept: only the shapes they
+        shape it goes all the way across cut in two (slice.py); a shape with note tool pages / glue: its notes, where
+        it goes all the way across them (sliced.knife_in_two). With Select boxes kept: only the shapes they
         selected, and only inside the boxes. One undo step; the pieces end up selected."""
         roll = self.roll
         boxes = roll.kept_box()
@@ -299,9 +301,24 @@ class JoinSplit:
         done, out, skipped = {}, {}, 0
         for i in targets:
             sh = self.shapes[i]
-            if sh["kind"] == "custom":
-                if "notes" in sh or sh.get("text") or sh.get("hz"):
-                    continue
+            if sh["kind"] == "custom" and ("notes" in sh or sh.get("text") or sh.get("hz")):
+                continue
+            if (sh["kind"] == "custom" or sh["kind"] in LINE_KINDS) and tooled(sh):
+                # (pages / glue: its notes are cut, wherever they are; both pieces keep the drawing, user)
+                pieces, crossed = [sh], False
+                for sa, sb in segs:
+                    nxt = []
+                    for p in pieces:
+                        stretch, hit = notes_across(self.notes_of(p), sa, sb, self.ppq)
+                        crossed |= hit
+                        if stretch:
+                            got = [copy.deepcopy(p), copy.deepcopy(p)]
+                            knife_in_two(p, got, sa, sb, stretch)
+                        nxt += got if stretch else [p]
+                    pieces = nxt
+                if len(pieces) == 1 and crossed:
+                    skipped += 1
+            elif sh["kind"] == "custom":
                 pieces = [sh]
                 for sa, sb in segs:
                     nxt = []

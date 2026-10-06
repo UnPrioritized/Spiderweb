@@ -33,7 +33,8 @@ from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, for
 from notes.custom import frame_upright
 from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
-from notes.sliced import clean_cut, cut_through, in_part, piece_notes, run_origins, source, spotted_notes
+from notes.sliced import (clean_cut, cut_through, in_part, knife_cut, moved_by, piece_notes, run_origins, source,
+                          spotted_notes)
 from notes.smooth import clean_level, smooth_path
 from notes.text import clean_text
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
@@ -491,6 +492,7 @@ def _notes_tracks(sh, ppq, keys):
     vel_sh = sh  # (whose velocities, over whose time)
     if piece:  # cut from another shape (sliced.py): its notes are made as that one's, then its own part kept
         whole, part, same_vel = piece
+        knife, knife_d = sh["cut"].get("knife"), moved_by(sh)  # (cut through its notes by the Slice tool)
         if same_vel:
             vel_sh = whole
         sh = whole
@@ -543,6 +545,8 @@ def _notes_tracks(sh, ppq, keys):
         raw, spots, tracks = cut_through(sh, raw, spots, tracks, part, ppq)
         mine = in_part(spots, part)
         raw, tracks = raw[mine], tracks[mine] if tracks is not None else None
+        if knife:
+            raw, tracks = knife_cut(raw, tracks, knife, knife_d, ppq)
         if raw.shape[1] == 4:  # (velocities made by the whole's pages: kept, unless the piece has its own)
             if same_vel:
                 return raw, tracks

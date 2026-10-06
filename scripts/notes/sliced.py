@@ -4,6 +4,8 @@ Each piece remembers the shape it was cut from, sh["cut"]:
   whole  the shape it was cut from (its outline keys + velocities), where it was when this piece was made
   was    the piece's own outline keys then (moved since = all its points moved by the same amount)
   part   [from, to]: the spots on the whole's path (path_notes where) its notes start on; to None = the end
+         (a custom shape's: the Slice cuts [beat, key, d beats, d keys, side], its side of each kept)
+  knife  a line kind's Slice cuts through its notes (a shape with pages / glue: knife_in_two), like a custom part
   vel    the piece's velocities then (unchanged: the whole's velocities are used, so they're exact), or None = its own
   marks  its cut ends, drawn while it's selected: {id, at (beat, key, where it was then), u (spot), kind "split" /
          "slice", dir (the Slice line's (beats, keys) direction)}; the other piece at that cut has the same id
@@ -143,11 +145,31 @@ def piece_notes(sh, ppq, keys, make):
         if len(_wholes) > 8:
             _wholes.clear()
         _wholes[key] = make(src, ppq, keys)
-    notes, tracks = _wholes[key]
+    notes, tracks = knife_cut(*_wholes[key], halves, moved_by(sh), ppq)  # (the cuts went along with it)
+    if not same_vel and len(notes):  # (its own velocities: over its own time, as a shape of its own)
+        from notes.engine import cached_arrays
+        from notes.envelope import env_values, velocity_env
+        t = np.concatenate(cached_arrays(sh))[:, 0] * ppq
+        env = velocity_env(sh)
+        if len({v for _, v in env}) == 1:
+            notes[:, 3] = max(1, min(127, round(env[0][1])))
+        else:
+            frac = np.clip((notes[:, 0] - t.min()) / max(t.max() - t.min(), 1e-9), 0, 1)
+            notes[:, 3] = np.clip(np.round(env_values(env, frac)), 1, 127).astype(np.int64)
+    return notes, tracks
+
+
+_wholes = {}  # the whole shape's notes, shared by its pieces
+
+
+def knife_cut(notes, tracks, halves, d, ppq):
+    """Notes (start, end, key, any other columns) and tracks cut like a knife went through them: each half
+    [b0, k0, db, dk, side] keeps what's on its side of the line through (b0, k0) going (db, dk) (beats, keys; moved
+    by d since), a note across it cut in two there."""
     k = notes[:, 2].astype(float)
     lo, hi = notes[:, 0].astype(float), notes[:, 1].astype(float)
     keep = np.ones(len(notes), bool)
-    mb, mk = moved_by(sh)  # (the cuts went along with it)
+    mb, mk = d
     for b0, k0, db, dk, sd in halves:
         b0, k0 = b0 + mb, k0 + mk
         # which side of the cut (beat, key) is on: db * (key - k0) - dk * (beat - b0) >= 0 is side 1, < 0 side -1
@@ -166,21 +188,106 @@ def piece_notes(sh, ppq, keys, make):
     keep &= hi > lo
     notes = notes[keep].copy()
     notes[:, 0], notes[:, 1] = lo[keep], hi[keep]
-    tracks = None if tracks is None else np.asarray(tracks)[keep]
-    if not same_vel and len(notes):  # (its own velocities: over its own time, as a shape of its own)
-        from notes.engine import cached_arrays
-        from notes.envelope import env_values, velocity_env
-        t = np.concatenate(cached_arrays(sh))[:, 0] * ppq
-        env = velocity_env(sh)
-        if len({v for _, v in env}) == 1:
-            notes[:, 3] = max(1, min(127, round(env[0][1])))
+    return notes, None if tracks is None else np.asarray(tracks)[keep]
+
+
+def tooled(sh):
+    """Do sh's notes come from glue / note tool pages (its own, or its whole's for a piece)? Then the Slice tool cuts
+    its notes, not its drawing (user, 2026-10-06: they can sit far off the drawing)."""
+    if sh.get("fx") or sh.get("glue"):
+        return True
+    got = source(sh) if sh.get("cut") else None
+    return bool(got and (got[0].get("fx") or got[0].get("glue")))
+
+
+def notes_across(notes, a, b, ppq):
+    """Does the knife a-b (beats, keys) go all the way across the notes (on each key row the line through it passes
+    between the row's first note's start and last note's end, inside a-b), leaving notes on both sides? -> the
+    stretch of it over the notes [[a', b']] (its mark), else None. "crossed": it passed through some notes (if not
+    all the way)."""
+    if not len(notes):
+        return None, False
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    db, dk = b - a
+    rows = notes[:, 2]
+    keys, at = np.unique(rows, return_inverse=True)
+    first = np.full(len(keys), np.inf)
+    last = np.full(len(keys), -np.inf)
+    np.minimum.at(first, at, notes[:, 0] / ppq)
+    np.maximum.at(last, at, notes[:, 1] / ppq)
+    if abs(dk) < 1e-12:  # (flat: between key rows, it has to go past the notes of the rows beside it)
+        if abs(db) < 1e-12:
+            return None, False
+        near = np.abs(keys - a[1]) <= 1
+        lo, hi = (first[near].min(), last[near].max()) if near.any() else (first.min(), last.max())
+        s0, s1 = sorted(((lo - a[0]) / db, (hi - a[0]) / db))
+        crossed = s1 > 0 and s0 < 1 and (keys.min() < a[1] < keys.max())
+        if s0 < -1e-9 or s1 > 1 + 1e-9:
+            return None, crossed
+    else:
+        s = (keys - a[1]) / dk  # (where along a-b it crosses each row's middle)
+        x = a[0] + db * s
+        inside = (x > first) & (x < last)
+        if not inside.any():
+            return None, False
+        s = s[inside]
+        crossed = bool(((s >= 0) & (s <= 1)).any())
+        if s.min() < -1e-9 or s.max() > 1 + 1e-9:
+            return None, crossed
+        half = 0.5 / abs(dk)  # (half a key row either side)
+        s0, s1 = max(0.0, s.min() - half), min(1.0, s.max() + half)
+    if not all(len(knife_cut(notes, None, [[a[0], a[1], db, dk, sd]], (0, 0), ppq)[0]) for sd in (1, -1)):
+        return None, crossed
+    return [[list(a + (b - a) * s0), list(a + (b - a) * s1)]], True
+
+
+def knife_in_two(sh, halves, a, b, segs):
+    """sh (a line kind or custom shape with pages / glue, maybe a piece already) cut by the Slice tool through its
+    NOTES along a-b: halves = two copies of it, each made a piece keeping the whole's notes on its side; their drawing
+    stays the whole's. segs: the knife's stretch over the notes (the mark)."""
+    import uuid
+    custom = sh["kind"] == "custom"
+    got = source(sh)
+    if got:
+        src, part, same_vel = got
+        cut = sh["cut"]
+        d = moved_by(sh)
+        marks = [moved_mark(m, d) for m in cut.get("marks", [])]
+        knives = [[b0 + d[0], k0 + d[1], db, dk, sd] for b0, k0, db, dk, sd in (part if custom else
+                                                                               cut.get("knife", []))]
+        own = cut.get("own_vel") or cut.get("vel") is not None and not same_vel
+        whole = dict(outline(src), **velocity(cut["whole"]), **tools(cut["whole"]))
+        if custom:
+            whole.update(velocity(src, GATE))
+    else:
+        part, marks, knives, own = [0.0, None], [], [], False
+        whole = dict(outline(sh), **velocity(sh), **tools(sh))
+        if custom:
+            whole.update(velocity(sh, GATE))
+        for h in halves:  # (the whole's glue / pages are done before the cut now)
+            for k in WHOLE_TOOLS:
+                h.pop(k, None)
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    mid = np.mean([np.mean(sg, axis=0) for sg in segs], axis=0)
+    new = {"id": uuid.uuid4().hex[:12], "kind": "slice", "at": [float(mid[0]), float(mid[1])], "u": 0.0,
+           "dir": [float(b[0] - a[0]), float(b[1] - a[1])], "segs": segs}
+    for h, sd in zip(halves, (1, -1)):
+        mine = [m for m in marks if knife_side(m["at"], a, b) in (0, sd)]
+        knife = knives + [[float(a[0]), float(a[1]), float(b[0] - a[0]), float(b[1] - a[1]), sd]]
+        h["cut"] = {"whole": whole, "was": outline(h), "part": knife if custom else part, "vel": None,
+                    "marks": mine + [new]}
+        if custom:
+            h["cut"]["gate"] = velocity(h, GATE)
         else:
-            frac = np.clip((notes[:, 0] - t.min()) / max(t.max() - t.min(), 1e-9), 0, 1)
-            notes[:, 3] = np.clip(np.round(env_values(env, frac)), 1, 127).astype(np.int64)
-    return notes, tracks
+            h["cut"]["knife"] = knife
+        if own:
+            h["cut"]["own_vel"] = True
 
 
-_wholes = {}  # the whole shape's notes, shared by its pieces
+def knife_side(pt, a, b):
+    """Which side of the knife a-b a spot is on, as knife_cut counts it (+1 / -1; 0 = on it)."""
+    c = (b[0] - a[0]) * (pt[1] - a[1]) - (b[1] - a[1]) * (pt[0] - a[0])
+    return 0 if abs(c) < 1e-9 else (1 if c > 0 else -1)
 
 
 def run_origins(sh, notes, ppq):
@@ -306,7 +413,7 @@ def rejoined(olds, new):
     = that shape back as it was (with new's other settings: the join's), else new (the joined curve) made one bigger
     piece. None: not such pieces (a normal join)."""
     got = [source(sh) for sh in olds]
-    if not all(got):
+    if not all(got) or any(sh["cut"].get("knife") for sh in olds):  # (cut through their notes: a normal join)
         return None
     wholes = [json.dumps(dict(outline(g[0]), **tools(g[0])), sort_keys=True) for g in got]
     if len(set(wholes)) > 1:
@@ -454,6 +561,9 @@ def clean_cut(c):
                 return None
         else:
             part = [float(c["part"][0]), None if c["part"][1] is None else float(c["part"][1])]
+            knife = [[float(x) for x in h[:4]] + [1 if h[4] > 0 else -1] for h in c.get("knife") or []]
+            if any(len(h) != 5 for h in c.get("knife") or []):
+                return None
         marks = []
         for m in c.get("marks") or []:
             mk = {"id": str(m["id"]), "at": pt(m["at"]), "u": float(m.get("u", 0)),
@@ -474,6 +584,8 @@ def clean_cut(c):
            "was": outline(was), "part": part, "vel": snaps["vel"], "marks": marks}
     if whole["kind"] == "custom":
         out["gate"] = snaps["gate"]
+    elif knife:
+        out["knife"] = knife
     if c.get("own_vel"):
         out["own_vel"] = True
     return out
