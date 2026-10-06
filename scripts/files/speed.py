@@ -70,7 +70,9 @@ def pillow():
 class Photo:
     """A Tk picture filled from NumPy arrays (rows x columns x 3, uint8 RGB). photo = the plain tk.PhotoImage (for
     the canvas, "copy", reading pixels). A whole picture goes in through Pillow when it's there (about half the
-    time of PPM bytes at a piano roll's size), parts as PPM bytes."""
+    time of PPM bytes at a piano roll's size), parts as PPM bytes. Keep the Photo while its photo is shown: with
+    Pillow the Tk picture is deleted when the Photo goes (at once: an old picture held on to by the Tk one, a loop
+    only Python's clean-up pass freed, piled up ~200 MB while the window was resized)."""
 
     def __init__(self, master, width, height):
         self.size = (width, height)
@@ -82,7 +84,6 @@ class Photo:
                 self._pil = got[1].PhotoImage("RGB", (width, height), master=master)
                 self.photo = self._pil._PhotoImage__photo  # (Pillow keeps its tk.PhotoImage here)
                 self._fast = isinstance(self.photo, tk.PhotoImage)
-                self.photo.pillow_keep = self._pil  # (Pillow deletes the picture when its own goes: kept along)
             except Exception:
                 self._fast = False
         if not self._fast:

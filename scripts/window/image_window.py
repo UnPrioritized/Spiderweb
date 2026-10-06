@@ -31,11 +31,11 @@ POLL_MS = 50
 
 
 def _photo(master, rgb):
-    """rows x cols x 3 floats 0..1 (sRGB) -> a Tk picture."""
+    """rows x cols x 3 floats 0..1 (sRGB) -> a speed.Photo (keep it while its .photo is shown)."""
     a = (np.clip(rgb, 0, 1) * 255 + 0.5).astype(np.uint8)
     pic = Photo(master, a.shape[1], a.shape[0])
     pic.put(a)
-    return pic.photo
+    return pic
 
 
 def _kinds():
@@ -897,7 +897,7 @@ class ImageWindow(tk.Toplevel):
         if self.making:  # (dimmed behind the progress box)
             rgb = rgb * 0.35
         self.photo = _photo(self, rgb)
-        cv.create_image(x, y, image=self.photo, anchor="nw")
+        cv.create_image(x, y, image=self.photo.photo, anchor="nw")
         self.draw_keys(x, y, w, h, view)
         rows, steps, keys = P.grid_notes(self.grid, view)
         notes = len(rows) if s["join"] else int((self.grid >= 0).sum())
