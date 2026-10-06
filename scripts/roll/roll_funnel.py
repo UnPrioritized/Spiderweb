@@ -5,8 +5,8 @@ import math
 
 from files.lang import tr
 from notes.bezier import anchor_count, difference, handle_anchor, nearest, remove_anchor, segments, split
-from notes.funnel import (box_point, box_uf, curve_box, funnel_curves, funnel_lines, line_index, new_start,
-                          new_curve, next_link, partners, remove_funnel_parts, set_shape, turned, turned_curve)
+from notes.funnel import (box_point, box_uf, curve_box, funnel_curves, funnel_handles, funnel_lines, line_index,
+                          new_start, new_curve, next_link, partners, remove_funnel_parts, set_shape, turned, turned_curve)
 from roll.roll_shared import ALT, CTRL, PICK
 
 
@@ -174,8 +174,12 @@ class FunnelEditing:
     def funnel_click(self, sh, e):
         """A click on the selected funnel: on one of its lines = a new curve start there, elsewhere near the
         funnel = a new anchor on the nearest curve, moved to where you clicked (so the curve goes through there).
-        Linked curves get the anchor too, unless Ctrl is held. True if something was added."""
+        Linked curves get the anchor too, unless Ctrl is held. True if something was added. Nothing on a curve
+        start / anchor / handle point already there (a second one on top of it, user)."""
         if sh["kind"] != "funnel" or len(sh["pts"]) < 4:
+            return False
+        near = max(9, 10 * self.scale)  # (as hit_handle)
+        if any(abs(self.t2x(b) - e.x) <= near and abs(self.p2y(p) - e.y) <= near for b, p, _ in funnel_handles(sh)):
             return False
         hit = self.on_funnel_line(sh, e)
         if hit is not None:
