@@ -1731,6 +1731,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             if w:
                 w.settle()  # (so Ctrl+Z here takes back the claw / strum / tumours being tried out)
         if not src:
+            if self.roll.holding():  # (nothing to take back: still lets go, or the rest of the drag had no step)
+                self.roll.cancel_draft()
             return
         hz_was = self.hz_window and self.hz_window.before_restore()
         self.roll.cancel_draft()
