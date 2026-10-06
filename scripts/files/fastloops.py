@@ -6,7 +6,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   order_rects    order_screen + last_on_pixels in one (the notes in between never made)
   last_on_pixels roll_draw.note_rects' end: notes on the very same pixels (only the last shows) left out
   note_top       roll_draw.note_pixels: which note is on top at every pixel (and whether it's its outline)
-  colour_in      the notes' colours straight into the picture
+  paint_notes    roll_draw.paint_region: the notes' colours straight into the picture (the last painted wins)
   overlap_sweep  engine.resolve_overlaps after its sort: cut / stretch / merge the notes on one key and slot
 The first start compiles them (about a second, in the background); the result is kept in __pycache__ for the next
 starts (not in the exe: its files can't be kept, so it compiles each start)."""
@@ -197,13 +197,31 @@ def note_top(top_px, kb, top, w, h, x0, y0, x1, y1):
 
 
 @njit(cache=CACHE)
-def colour_in(img, top_px, color, rgb):
-    """img (pixels x 3) gets each note pixel's colour: rgb[colour number, outline?]."""
-    for p in range(len(top_px)):
-        k = top_px[p]
-        if k >= 0:
-            c = rgb[color[k >> 1], k & 1]
-            img[p, 0], img[p, 1], img[p, 2] = c[0], c[1], c[2]
+def paint_notes(img, kb, top, w, h, x0, y0, x1, y1, color, rgb):
+    """Each note's colours painted straight into img (pixels x 3), the last painted winning: the same pixels as
+    note_top's notes on top coloured in, without that list."""
+    iw = w - kb
+    for k in range(len(x0)):
+        a, b = max(y0[k], top), min(y1[k] + 1, h)
+        c, d = max(x0[k], kb), min(x1[k] + 1, w)
+        if b <= a or d <= c:
+            continue
+        solid = x1[k] - x0[k] < 2 or y1[k] - y0[k] < 2
+        left, right = c == x0[k], d == x1[k] + 1
+        f0, f1, f2 = rgb[color[k], 0, 0], rgb[color[k], 0, 1], rgb[color[k], 0, 2]
+        e0, e1, e2 = rgb[color[k], 1, 0], rgb[color[k], 1, 1], rgb[color[k], 1, 2]
+        for y in range(a, b):
+            row = (y - top) * iw - kb
+            if solid or y == y0[k] or y == y1[k]:
+                for x in range(c, d):
+                    img[row + x, 0], img[row + x, 1], img[row + x, 2] = e0, e1, e2
+            else:
+                for x in range(c, d):
+                    img[row + x, 0], img[row + x, 1], img[row + x, 2] = f0, f1, f2
+                if left:
+                    img[row + c, 0], img[row + c, 1], img[row + c, 2] = e0, e1, e2
+                if right:
+                    img[row + d - 1, 0], img[row + d - 1, 1], img[row + d - 1, 2] = e0, e1, e2
 
 
 @njit(cache=CACHE)
@@ -249,5 +267,5 @@ def warm():
     order_rects(s, e, key, color, first, 0, 1, f, f, f, f, f, f, b, False, f, f, 0, 0, 1, i1, i1)
     last_on_pixels(i1.copy(), i1.copy(), i1.copy(), i1.copy(), 0, 0, 1, i1, i1)
     note_top(np.full(1, -1, np.int64), 0, 0, 1, 1, i1, i1, i1, i1)
-    colour_in(np.zeros((1, 3), np.uint8), np.full(1, -1, np.int64), i1, np.zeros((1, 2, 3), np.uint8))
+    paint_notes(np.zeros((1, 3), np.uint8), 0, 0, 1, 1, i1, i1, i1, i1, i1, np.zeros((1, 2, 3), np.uint8))
     overlap_sweep(np.zeros((1, 6), np.int64), i1, i1)

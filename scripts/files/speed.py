@@ -88,6 +88,11 @@ class Photo:
         if not self._fast:
             self.photo = tk.PhotoImage(master=master, width=width, height=height)
 
+    def whole_is_quicker(self, pixels):
+        """Is sending the whole picture quicker than that many pixels as a part? (Measured at a piano roll's size:
+        the whole one through Pillow ~4 ms, a part ~20 ns a pixel.)"""
+        return self._fast and pixels * 7 > self.size[0] * self.size[1]
+
     def put(self, a, x=0, y=0):
         """a's pixels at (x, y) of the picture."""
         if self._fast and x == 0 and y == 0 and (a.shape[1], a.shape[0]) == self.size:

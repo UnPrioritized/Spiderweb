@@ -918,6 +918,8 @@ class RollDrawing:
             self.note_img = self._photo.photo
             moved = self._shown = None
         name = self.note_img.name
+        if moved and self._photo.whole_is_quicker(sum((x1 - x0) * (y1 - y0) for x0, y0, x1, y1 in strips)):
+            moved = self._shown = None  # (the whole picture goes, no copy needed)
         if moved:
             dx, dy = moved
             self.tk.call(name, "copy", name, "-from", max(-dx, 0), max(-dy, 0), iw + min(-dx, 0), ih + min(-dy, 0),
@@ -932,6 +934,8 @@ class RollDrawing:
                 cols = np.flatnonzero((was[y0:y1] != img.reshape(ih, -1)[y0:y1]).any(axis=0)) // 3
                 strips = [(int(cols[0]), y0, int(cols[-1]) + 1, y1)]
         else:
+            strips = [(0, 0, iw, ih)]
+        if self._photo.whole_is_quicker(sum((x1 - x0) * (y1 - y0) for x0, y0, x1, y1 in strips)):
             strips = [(0, 0, iw, ih)]
         for x0, y0, x1, y1 in strips:
             self._photo.put(img[y0:y1, x0:x1], x0, y0)
@@ -1048,8 +1052,8 @@ class RollDrawing:
         fast = loops()
         if fast:  # (the compiled loops: the colours go straight in, no list of pixels in between)
             pal = getattr(getattr(self, "app", None), "picture_pal", None)
-            fast.colour_in(img.reshape(-1, 3), self.top_pixels(fast, rects, region),
-                           np.ascontiguousarray(rects[4], np.int64), note_tables(pal)[1])
+            fast.paint_notes(img.reshape(-1, 3), *(int(v) for v in region),
+                             *(np.ascontiguousarray(v, np.int64) for v in rects), note_tables(pal)[1])
         else:
             at, colors = self.note_pixels(rects, region)
             img.reshape(-1, 3)[at] = colors
