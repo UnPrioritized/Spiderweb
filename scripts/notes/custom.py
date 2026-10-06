@@ -438,10 +438,16 @@ def fill_plan(sh):
     for i, path in enumerate(opens):
         k = n_closed + i
         ends = []
-        for end, own in ((path[0], first[k]), (path[-1], first[k + 1] - 1)):  # (not the segment it ends)
+        far = np.hypot(*((np.asarray(path, float) - path[0]) * scale).T) > 1 + 1e-9
+        out0 = int(np.argmax(far)) if far.any() else len(path) - 1  # (the first point out of an end's reach)
+        far = np.hypot(*((np.asarray(path, float) - path[-1]) * scale).T) > 1 + 1e-9
+        out1 = len(path) - 1 - int(np.argmax(far[::-1])) if far.any() else -1
+        # not its own line near that end, up to where it leaves the end's reach (user: a small U's end "landed" on its
+        # own next short pieces, a big one's didn't); a line coming back to touch itself (a "6") still lands
+        for end, own in ((path[0], range(first[k], first[k] + out0)),
+                         (path[-1], range(first[k] + max(out1, 0), first[k + 1]))):
             keep = (lox <= end[0]) & (hix >= end[0]) & (loy <= end[1]) & (hiy >= end[1])
-            if first[k + 1] > first[k]:
-                keep[own] = False
+            keep[list(own)] = False
             ends.append(nearest_on(end, seg[keep], scale))
         if all(d <= 1 for d, _ in ends):
             (d0, p0), (d1, p1) = ends

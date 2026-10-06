@@ -247,10 +247,11 @@ def tooled(sh):
 
 
 def notes_across(notes, a, b, ppq):
-    """Does the knife a-b (beats, keys) go all the way across the notes (on each key row the line through it passes
-    between the row's first note's start and last note's end, inside a-b), leaving notes on both sides? -> the
-    stretch of it over the notes [[a', b']] (its mark), else None. "crossed": it passed through some notes (if not
-    all the way)."""
+    """Does the knife a-b (beats, keys) cut the notes: it touches them (on some key row inside a-b it goes through a
+    note or between the row's notes), every note the endless line through it goes through is inside a-b (user: only
+    the notes it really cuts; a row it passes between notes elsewhere just ends up on its side), and notes are left on
+    both sides? -> the stretch of it over the notes it touches [[a', b']] (its mark), else None. "crossed": it
+    touched some notes (if it didn't cut)."""
     if not len(notes):
         return None, False
     a, b = np.asarray(a, float), np.asarray(b, float)
@@ -273,13 +274,15 @@ def notes_across(notes, a, b, ppq):
     else:
         s = (keys - a[1]) / dk  # (where along a-b it crosses each row's middle)
         x = a[0] + db * s
-        inside = (x > first) & (x < last)
-        if not inside.any():
-            return None, False
-        s = s[inside]
-        crossed = bool(((s >= 0) & (s <= 1)).any())
-        if s.min() < -1e-9 or s.max() > 1 + 1e-9:
+        on = (s >= -1e-9) & (s <= 1 + 1e-9)
+        between = (x > first) & (x < last)  # (notes of the row on both sides)
+        tick = np.round(x * ppq)[at]
+        through = np.zeros(len(keys), bool)  # (rows where it goes through a note: knife_cut cuts it in two)
+        through[at[(notes[:, 0] < tick) & (notes[:, 1] > tick)]] = True
+        crossed = bool((between & on).any())
+        if not crossed or (through & ~on).any():
             return None, crossed
+        s = s[between & on]
         half = 0.5 / abs(dk)  # (half a key row either side)
         s0, s1 = max(0.0, s.min() - half), min(1.0, s.max() + half)
     if not all(len(knife_cut(notes, None, [[a[0], a[1], db, dk, sd]], (0, 0), ppq)[0]) for sd in (1, -1)):
