@@ -17,11 +17,7 @@ from notes.fx import copied, is_page, pages
 from window.widgets import LocalUndo, Tooltip
 
 NEW = "new"  # the "+" tab
-
-
-def num(n):
-    """A page's number as shown on its tab: ① .. ⑳, then (21) ..."""
-    return chr(0x2460 + n - 1) if 1 <= n <= 20 else f"({n})"
+TAB_STYLE = "ToolTab.Toolbutton"  # (text in the middle: "+" sat at the left of its button)
 
 ORANGE = "#f5a623"
 GREEN = "#7cc21b"
@@ -119,6 +115,43 @@ class Knob(tk.Canvas):
             self.changed(value, True)
 
 
+class ThinBar(tk.Canvas):
+    """A thin sideways scrollbar (the tab row's): drag the grey bar, or click beside it for a page. scroll = the
+    scrolled widget's xview; the widget's xscrollcommand = set."""
+
+    def __init__(self, parent, scroll, scale):
+        super().__init__(parent, width=1, height=max(5, round(6 * scale)), highlightthickness=0, borderwidth=0,
+                         background="#e2e2e2")
+        self.scroll, self.lo, self.hi, self.drag = scroll, 0.0, 1.0, None
+        self.bind("<ButtonPress-1>", self.press)
+        self.bind("<B1-Motion>", self.move)
+        self.bind("<ButtonRelease-1>", lambda e: (setattr(self, "drag", None), self.draw()))
+        self.bind("<Configure>", lambda e: self.draw())
+
+    def set(self, lo, hi):
+        self.lo, self.hi = float(lo), float(hi)
+        self.draw()
+
+    def draw(self):
+        self.delete("all")
+        w, h = self.winfo_width(), self.winfo_height()
+        self.create_rectangle(self.lo * w, 0, self.hi * w, h, outline="",
+                              fill="#7a7a7a" if self.drag else "#a6a6a6")
+
+    def press(self, e):
+        f = e.x / max(1, self.winfo_width())
+        if self.lo <= f <= self.hi:
+            self.drag = (e.x, self.lo)
+            self.draw()
+        else:
+            self.scroll("scroll", -1 if f < self.lo else 1, "pages")
+
+    def move(self, e):
+        if self.drag:
+            x, lo = self.drag
+            self.scroll("moveto", lo + (e.x - x) / max(1, self.winfo_width()))
+
+
 class ToolWindow(tk.Toplevel):
     """The shared part. Each window sets KEY (the tool: a page's "tool"; also the start of its text keys:
     KEY.window_title, KEY.nothing, KEY.shape, KEY.n_shapes, KEY.tab (a page's tab), and KEY.step = the undo step's
@@ -155,9 +188,11 @@ class ToolWindow(tk.Toplevel):
         box.pack(fill="both", expand=True)
         top = ttk.Frame(box)
         top.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        self.what = ttk.Label(top, text="", foreground="#777")
-        self.what.pack(anchor="w")
-        self.build_tabs(top)
+        head = ttk.Frame(top)
+        head.pack(fill="x")
+        self.what = ttk.Label(head, text="", foreground="#777")
+        self.what.pack(side="left")
+        self.build_tabs(top, head)
         self.build(box)
         self.targets = []
         self.undo = LocalUndo(self, self.undo_state, self.put_state)
@@ -181,21 +216,69 @@ class ToolWindow(tk.Toplevel):
 
     # ---- the pages
 
-    def build_tabs(self, parent):
-        row = ttk.Frame(parent)
-        row.pack(fill="x", pady=(6, 0))
-        self.tabs = ttk.Frame(row)
-        self.tabs.pack(side="left")
-        self.tab = tk.StringVar(value=NEW)
-        self.differ = ttk.Label(row, text=tr("tool_window.differ"), foreground="#777")
-        self.remove_button = ttk.Button(row, text=tr("tool_window.remove"), command=self.remove_page)
+    def build_tabs(self, parent, head):
+        """The tab row (its own row, the whole window wide), On and Remove page on head (the shape's name's row). The
+        tabs scroll sideways (a thin scrollbar under them) once they don't fit, so the window never grows with them
+        (user)."""
+        ttk.Style().configure(TAB_STYLE, anchor="center")
+        self.remove_button = ttk.Button(head, text=tr("tool_window.remove"), command=self.remove_page)
         self.remove_button.pack(side="right")
         Tooltip(self.remove_button, tr("tool_window.tip_remove"))
         self.on = tk.BooleanVar(value=True)
-        self.on_box = ttk.Checkbutton(row, text=tr("tool_window.on"), variable=self.on, command=self.on_off)
-        self.on_box.pack(side="right", padx=(0, 6))
+        self.on_box = ttk.Checkbutton(head, text=tr("tool_window.on"), variable=self.on, command=self.on_off)
+        self.on_box.pack(side="right", padx=(8, 6))
         Tooltip(self.on_box, tr("tool_window.tip_on"))
+        row = ttk.Frame(parent)
+        row.pack(fill="x", pady=(6, 0))
+        self.strip = ttk.Frame(row)
+        self.strip.pack(side="left", fill="x", expand=True)
+        self.tab_view = tk.Canvas(self.strip, width=1, height=1, highlightthickness=0, borderwidth=0,
+                                  background=ttk.Style().lookup("TFrame", "background") or "#f0f0f0")
+        self.tab_view.pack(fill="x")
+        self.tab_bar = ThinBar(self.strip, self.tab_view.xview, self.app.scale)
+        self.tab_view.config(xscrollcommand=self.tab_bar.set)
+        self.tabs = ttk.Frame(self.tab_view)
+        self.tab_view.create_window(0, 0, window=self.tabs, anchor="nw")
+        for w in (self.tabs, self.tab_view):
+            w.bind("<Configure>", lambda e: self.fit_tabs())
+            self.wheel(w)
+        self.tab = tk.StringVar(value=NEW)
+        self.differ = ttk.Label(row, text=tr("tool_window.differ"), foreground="#777")
         self.shown_tabs = None
+
+    def wheel(self, w):
+        """The mouse wheel over the tabs scrolls them sideways."""
+        w.bind("<MouseWheel>", lambda e: self.tab_view.xview_scroll(-1 if e.delta > 0 else 1, "units"))
+
+    def fit_tabs(self):
+        """The scrollbar shows only while the tabs are wider than their room."""
+        v = self.tab_view
+        w, h = self.tabs.winfo_reqwidth(), self.tabs.winfo_reqheight()
+        if int(v.cget("height")) != h:
+            v.config(height=h)
+        v.config(scrollregion=(0, 0, w, h))
+        if w > v.winfo_width() > 1:
+            if not self.tab_bar.winfo_manager():
+                self.tab_bar.pack(fill="x", pady=(2, 0))
+        elif self.tab_bar.winfo_manager():
+            self.tab_bar.pack_forget()
+            v.xview_moveto(0)
+
+    def see_tab(self):
+        """The picked tab scrolled into view."""
+        if not self.winfo_exists():
+            return
+        b = next((w for w in self.tabs.winfo_children() if str(w.cget("value")) == self.tab.get()), None)
+        whole = self.tabs.winfo_reqwidth()
+        if b is None or whole <= 0:
+            return
+        v = self.tab_view
+        left, room = v.canvasx(0), v.winfo_width()
+        x0, x1 = b.winfo_x(), b.winfo_x() + b.winfo_width()
+        if x0 < left:
+            v.xview_moveto(x0 / whole)
+        elif x1 > left + room:
+            v.xview_moveto((x1 - room) / whole)
 
     def first_fx(self):
         """The first selected shape's steps (its pages are the tabs)."""
@@ -212,7 +295,7 @@ class ToolWindow(tk.Toplevel):
         for st in fx:
             if is_page(st):
                 n += 1
-                parts.append(tr(f"{st['tool']}.tab", n=num(n)) + (tr("tool_window.off_mark") if st.get("off") else ""))
+                parts.append(tr(f"{st['tool']}.tab", n=n) + (tr("tool_window.off_mark") if st.get("off") else ""))
             else:
                 parts.append(tr(f"tool_window.{st['tool']}" + (f"_{st['axis']}" if st["tool"] == "flip" else "")))
         return tr("tool_window.order", steps=" → ".join(parts))
@@ -226,7 +309,7 @@ class ToolWindow(tk.Toplevel):
             if is_page(st):
                 n += 1
                 if st["tool"] == self.KEY:
-                    tabs.append((k, tr(f"{self.KEY}.tab", n=num(n)), st.get("off", False)))
+                    tabs.append((k, tr(f"{self.KEY}.tab", n=n), st.get("off", False)))
         if self.at is None:
             self.tab.set(NEW)
         else:
@@ -238,19 +321,22 @@ class ToolWindow(tk.Toplevel):
                 w.destroy()
             for k, text, off in tabs:
                 b = ttk.Radiobutton(self.tabs, text=text + (tr("tool_window.off_mark") if off else ""),
-                                    variable=self.tab, value=str(k), style="Toolbutton",
+                                    variable=self.tab, value=str(k), style=TAB_STYLE,
                                     command=lambda k=k: self.pick_page(k))
                 b.pack(side="left", padx=(0, 2))
                 b.bind("<ButtonPress-3>", lambda e, k=k: self.page_menu(e, k))
                 Tooltip(b, shown[1])
-            b = ttk.Radiobutton(self.tabs, text="+", variable=self.tab, value=NEW, style="Toolbutton", width=3,
+                self.wheel(b)
+            b = ttk.Radiobutton(self.tabs, text="+", variable=self.tab, value=NEW, style=TAB_STYLE, width=3,
                                 command=self.new_page)
             b.pack(side="left")
             Tooltip(b, tr("tool_window.tip_new") + ("\n\n" + shown[1] if fx else ""))
+            self.wheel(b)
             if self.same():
                 self.differ.pack_forget()
             else:
-                self.differ.pack(side="left", padx=(8, 0))
+                self.differ.pack(side="left", after=self.strip)
+        self.after_idle(lambda: (self.fit_tabs(), self.see_tab()) if self.winfo_exists() else None)
         page = self.page_step()
         self.on_box.state(["!disabled"] if page else ["disabled"])
         self.remove_button.state(["!disabled"] if page else ["disabled"])
