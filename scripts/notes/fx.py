@@ -173,11 +173,13 @@ def swapped(axes):
     return sorted({"keys" if a == "time" else "time" for a in axes or ()})
 
 
-def turn_notes(a, deg, ticks, keys):
+def turn_notes(a, deg, ticks, keys, same=None):
     """Notes a (start, end, key, then any columns riding along) turned deg degrees within their own box, clockwise as
     seen on screen; ticks = ticks per key on screen. Each note (a bar one key tall) becomes one note per key row whose
-    middle it then crosses (at least one), as long as it is on that row's middle line: turned 90 degrees, a column of
-    notes one key's worth of ticks long. -> (the notes, which row of a each came from)."""
+    middle it then crosses (at least one), as long as it is on that row's middle line. Pieces that touch on a row
+    and came from notes on different keys join (a filled area stays filled: user, 2026-10-06; notes that followed
+    each other on one key stay apart) when same (one number per note of a; default: the columns after the key) is
+    the same. -> (the notes, which row of a each came from: the first piece's)."""
     if not len(a):
         return a, np.zeros(0, np.int64)
     c, s = math.cos(-math.radians(deg)), math.sin(-math.radians(deg))  # (pitch goes up, screen y down)
@@ -218,7 +220,32 @@ def turn_notes(a, deg, ticks, keys):
     out = a[idx].copy()
     out[:, 0], out[:, 1], out[:, 2] = np.maximum(start, 0), end, rows  # (none before the song's start)
     keep = out[:, 1] > out[:, 0]
-    return out[keep], idx[keep]
+    return joined_pieces(out[keep], idx[keep], a[:, 2], same if same is not None else groups(a[:, 3:]))
+
+
+def groups(cols):
+    """One number per row of cols: the same for the same values."""
+    if not cols.shape[1]:
+        return np.zeros(len(cols), np.int64)
+    return np.unique(cols, axis=0, return_inverse=True)[1].ravel()
+
+
+def joined_pieces(out, idx, keys_was, same):
+    """Turned pieces out (from rows idx) joined where they touch on a row, came from notes on different keys
+    (keys_was) and have the same `same` (see turn_notes)."""
+    if len(out) < 2:
+        return out, idx
+    g, k = same[idx], keys_was[idx]
+    order = np.lexsort((out[:, 0], g, out[:, 2]))
+    out, idx, g, k = out[order], idx[order], g[order], k[order]
+    part = np.r_[0, np.cumsum((out[1:, 2] != out[:-1, 2]) | (g[1:] != g[:-1]))]  # (one row, one kind)
+    big = int(out[:, 1].max()) + 2
+    reach = np.maximum.accumulate(out[:, 1] + part * big) - part * big  # (the furthest end so far there)
+    new = np.r_[True, (part[1:] != part[:-1]) | (out[1:, 0] > reach[:-1] + 1) | (k[1:] == k[:-1])]
+    first = np.flatnonzero(new)
+    joined = out[first].copy()
+    joined[:, 1] = np.maximum.reduceat(out[:, 1], first)
+    return joined, idx[first]
 
 
 def turn_pts(pts, deg, r, cb, cp):

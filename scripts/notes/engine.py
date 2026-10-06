@@ -23,7 +23,8 @@ from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
 from notes.chop import apply_chop
 from notes.claw import apply_claw
-from notes.fx import clean_fx, mirrored, notes_box, swapped, toggled, turn_notes, turn_pts, turn_shape, velocities
+from notes.fx import (clean_fx, groups, mirrored, notes_box, swapped, toggled, turn_notes, turn_pts, turn_shape,
+                      velocities)
 from notes.gaterange import clean_range
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
@@ -380,7 +381,8 @@ def fx_notes(sh, ppq, keys, get):
             return mirrored(notes, [last["axis"]], notes_box(notes)), tracks
         if last["tool"] == "turn":  # (the steps before it: on the drawing turned back; turned within their own box)
             notes, tracks = get(turned_back(rest, last))
-            notes, idx = turn_notes(notes, last["deg"], last["r"] * ppq, keys)
+            same = groups(np.column_stack([notes[:, 3:], tracks if tracks is not None else np.zeros(len(notes))]))
+            notes, idx = turn_notes(notes, last["deg"], last["r"] * ppq, keys, same)
             return notes, None if tracks is None else np.asarray(tracks)[idx]
         return fx_step(*get(rest), last, sh, ppq)
     if sh.get("_m"):
@@ -506,7 +508,7 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
     flipped along the axes m). A turn step turns the notes back, not the drawing (close, not exact)."""
     if not fx:
         for op in pre:
-            a = mirrored(a, op[1], notes_box(a)) if op[0] == "m" else turn_notes(a, op[1], op[2], 256)[0]
+            a = mirrored(a, op[1], notes_box(a)) if op[0] == "m" else turn_notes(a, op[1], op[2], 256, groups(a[:, 3::2]))[0]
         return mirrored(a, m, notes_box(a)) if m else a
     last = fx[-1]
     if last["tool"] == "flip":
@@ -515,7 +517,8 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
     if last["tool"] == "turn":
         ticks = last["r"] * ppq
         back = tuple(pre) + ((("m", m),) if m else ()) + (("t", -last["deg"], ticks),)
-        return turn_notes(run_steps(a, fx[:-1], sh, ppq, (), back), last["deg"], ticks, 256)[0]
+        got = run_steps(a, fx[:-1], sh, ppq, (), back)
+        return turn_notes(got, last["deg"], ticks, 256, groups(got[:, 3::2]))[0]  # (velocity, track: not spot)
     return fx_step(run_steps(a, fx[:-1], sh, ppq, m, pre), None, last, sh, ppq)[0]
 
 
