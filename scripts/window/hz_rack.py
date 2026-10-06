@@ -172,6 +172,7 @@ class SynthRack:
         before = self.fx.state()
         self.vals["rack"], self.vals["rack_off"] = tuple(order), tuple(off)
         self.write_rack()
+        self.keep_vals()  # (an effect taken out: its knobs kept)
         self.redraw()
         self.show_knobs()
         if self.fx.now() != before:

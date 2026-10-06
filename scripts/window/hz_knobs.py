@@ -102,6 +102,25 @@ PICTURES = {"volume": (260, 90), "wave": (200, 90), "pitch": (150, 90), "vibrato
             "tone": (200, 90), "character": (220, 60), "voice": (230, 60), "arp": (260, 60)}
 CHARACTER = ("slant", "offpitch", "noisy")  # (the Character box's lines that are just their value; Groups is counted)
 WAVE_NAMES = ("none",) + tuple(WAVES)
+# every knob and choice where it starts; those that do nothing right now are kept in hz["kept"] (hzbass.clean_kept)
+START = dict({key: start for key, (_, _, start) in KNOBS.items()}, wave="none", sweep=False, same=False,
+             touching=False, legato=False, mode="off", rack=(), rack_off=(), arp_on=False, arp_pattern="up",
+             arp_chord="placed")
+KEEP = tuple(KNOBS) + ("same", "touching", "arp_pattern", "arp_chord")
+CHOICES = {"arp_pattern": ARP_PATTERNS, "arp_chord": tuple(CHORDS)}
+
+
+def kept_value(key, v):
+    """A kept knob's value checked against its knob (None: no good)."""
+    if key in CHOICES:
+        return v if v in CHOICES[key] else None
+    if key in ("same", "touching"):
+        return v if isinstance(v, bool) else None
+    if isinstance(v, bool) or not isinstance(v, float):
+        return None
+    kind = KNOBS[key][1]
+    lo, hi = KINDS[kind][1:3]
+    return v if lo - 1e-9 <= shown(kind, v) <= hi + 1e-9 else None
 
 
 def adsr_line(attack, decay, sustain, release):
@@ -427,11 +446,7 @@ class SynthKnobs:
     def build_knobs(self, page):
         s = self.s
         self.turning = None  # while a knob is turned: the lines from before (FxPane.state)
-        self.vals = {key: start for key, (_, _, start) in KNOBS.items()}
-        self.vals["wave"], self.vals["sweep"] = "none", False
-        self.vals["same"], self.vals["touching"], self.vals["legato"], self.vals["mode"] = False, False, False, "off"
-        self.vals["rack"], self.vals["rack_off"] = (), ()
-        self.vals.update(arp_on=False, arp_pattern="up", arp_chord="placed")  # (the Effects tab's effects in order, those switched off)
+        self.vals = dict(START)  # (rack / rack_off: the Effects tab's effects in order, those switched off)
         self.mode_cells = {}  # the Wave box's mode -> its knobs' cells (only the picked mode's shown)
         self.dials, self.dial_vars, self.dial_boxes, self.box_says, self.pics = {}, {}, {}, {}, {}
         self.pic_for = {}  # what each picture was drawn for
@@ -778,8 +793,28 @@ class SynthKnobs:
             kept = dict(self.extra["bypass"])  # Lines tab: no longer named as off)
             kept["boxes"] = [b for b in kept["boxes"] if b != box]
             self.set_extra("bypass", kept)
+        self.keep_vals()
         self.redraw()
         self.show_knobs()
+
+    def keep_vals(self):
+        """The knobs that do nothing right now (the sound as it is doesn't show them) kept in hz["kept"], so they're
+        there again after the window is closed, in a saved project and a preset (user: as in a synth)."""
+        got = dict(START)
+        for read in READ.values():
+            got.update(read(self, START)[0])
+        got.update(read_rack(self, START))
+        v = self.vals
+        self.set_extra("kept", {k: v[k] for k in KEEP if v[k] != got[k]
+                                and not (isinstance(v[k], float) and abs(v[k] - got[k]) < 1e-9)})
+
+    def kept_vals(self):
+        """Every knob and choice as the sound keeps them: where it starts, or as kept in hz["kept"]."""
+        out = dict(START)
+        for k, v in self.extra.get("kept", {}).items():
+            if k in KEEP and kept_value(k, v) is not None:
+                out[k] = v
+        return out
 
     def box_parts(self, name):
         """A box's lines that are there (the Volume line full all along doesn't count) and its own setting's name."""
@@ -844,13 +879,15 @@ class SynthKnobs:
         """The knobs, their boxes and the pictures show the lines (not while a knob is turned: it shows what's
         turned)."""
         if self.turning is None:
+            was = self.kept_vals()  # (the knobs the sound doesn't show: as kept, else where they start)
+            self.vals.update({k: was[k] for k in KEEP})
             for box, read in READ.items():
-                got, made = read(self, self.vals)
+                got, made = read(self, was)
                 self.vals.update(got)
                 says = "" if made else tr("hz.synth_drawn")
                 if self.box_says[box].cget("text") != says:
                     self.box_says[box].config(text=says)
-            self.vals.update(read_rack(self, self.vals))
+            self.vals.update(read_rack(self, was))
         for key, (box, kind, _) in KNOBS.items():
             v = self.vals[key]
             k = knob_of(kind, v)

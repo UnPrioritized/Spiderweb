@@ -82,7 +82,8 @@ no fall after the first: legato_links)}. Glide only bends the tone: each note st
 synth's voices (unless Legato joins them).
 hz["mode"] = the Wave box's Mode (MODES, clean_mode): FM, Pulse width or Sync change the hits in each wave
 (wave_hits), Growl and Bitcrush when each one lands. A synth window box switched off (Bypass) puts its lines in
-hz["off"] and moves its own setting (mode / voice) to hz["bypass"], which also names it (clean_bypass)."""
+hz["off"] and moves its own setting (mode / voice) to hz["bypass"], which also names it (clean_bypass). Its knobs
+that do nothing right now are kept in hz["kept"] (clean_kept)."""
 
 import bisect
 import functools
@@ -410,7 +411,23 @@ def clean_bypass(kept):
     return out
 
 
-CLEAN_EXTRA = {"voice": clean_voice, "mode": clean_mode, "rack": clean_rack, "arp": clean_arp, "bypass": clean_bypass}
+def clean_kept(kept):
+    """The synth window's knobs that do nothing right now (an Arpeggio off, Sweep unticked, Detune with one voice...)
+    checked: hz["kept"] = {knob: its value (a number, True / False or a short name)}, so they're there again later, as
+    in a synth (user); nothing that makes the notes reads them (the window checks each against its knob)."""
+    out = {}
+    for k, v in (kept.items() if isinstance(kept, dict) else ()):
+        if not isinstance(k, str) or len(k) > 40 or len(out) >= 200:
+            continue
+        if isinstance(v, bool) or isinstance(v, str) and len(v) <= 40:
+            out[k] = v
+        elif isinstance(v, (int, float)) and math.isfinite(v):
+            out[k] = float(v)
+    return out
+
+
+CLEAN_EXTRA = {"voice": clean_voice, "mode": clean_mode, "rack": clean_rack, "arp": clean_arp, "bypass": clean_bypass,
+               "kept": clean_kept}
 EXTRAS = tuple(CLEAN_EXTRA)  # the synth window's own settings (not lines), each checked by its CLEAN_EXTRA
 
 
