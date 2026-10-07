@@ -59,7 +59,9 @@ class _Font(ctypes.Structure):
     _fields_ = [("font", ctypes.c_uint), ("preset", ctypes.c_int), ("bank", ctypes.c_int)]
 
 
-_STREAMPROC = ctypes.WINFUNCTYPE(ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p)
+# (WINFUNCTYPE is Windows-only: elsewhere BASS uses the plain C way of calling)
+_STREAMPROC = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)(ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p,
+                                                               ctypes.c_uint, ctypes.c_void_p)
 _dlls = None
 
 
