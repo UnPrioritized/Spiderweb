@@ -52,8 +52,8 @@ CUSTOM_FLAGS = ("union", "apart", "borders")
 # over n channels (with Multi channel each turn gets a channel, so a colour, of its own). "step" = by the step the
 # note starts on (spam: its gate columns; others: each start time in turn), "key" = by key (rows), "time" = by a
 # note length from tick 0. every = how many steps / keys one channel lasts; for "time" [a, b] = a/b of a whole note
-# (like the snap: 1/4 = a beat). "rows": True = "Restart each key row" (step / time only): each part of a key row
-# starts again at the first channel (row_restart).
+# (like the snap: 1/4 = a beat). "rows" (step / time only, "Each key row"): True = each part of a key row starts
+# again at the first channel from its first note, "end" = counted back from its last note (row_restart).
 CYCLES = ("step", "key", "time")
 CYCLE_MAX = 15  # (15 note colours)
 
@@ -74,7 +74,7 @@ def clean_cycle(c):
         return None
     out = {"by": c["by"], "n": n, "every": every}
     if c.get("rows"):
-        out["rows"] = True
+        out["rows"] = "end" if c["rows"] == "end" else True
     return out
 
 
@@ -2198,19 +2198,20 @@ def cycle_turns(sh, notes, ppq):
     """Which turn (0 .. n - 1) each (start, end, key) note gets (CYCLES). Spam steps are counted from the shape's
     first note (with the "aligned" start from tick 0, so they keep to the gate grid), at the shape's gate (a gate
     Range: its own gates, range_steps; Hz bass with placed tones: its repeats, hz_steps), each note in the step it
-    starts nearest to; other notes: each start time is a step. "Restart each key row": counted again from each part of a key
-    row (row_restart; other notes: each start time in the part)."""
+    starts nearest to; other notes: each start time is a step. "Each key row": counted again from each part of a key
+    row, from its first note or back from its last (row_restart; other notes: each start time in the part)."""
     c = sh["cycle"]
     s = notes[:, 0]
     rows = bool(c.get("rows")) and c["by"] != "key"
+    back = c.get("rows") == "end"
     if c["by"] == "key":
         k = notes[:, 2] - notes[:, 2].min()
     elif c["by"] == "time":
         a, b = c["every"]
         k = np.floor(s * b / (4 * a * ppq) + 1e-9).astype(np.int64)
-        return (row_restart(notes, k) if rows else k) % c["n"]
+        return (row_restart(notes, k, back) if rows else k) % c["n"]
     elif rows and not (sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS):
-        k = row_restart(notes, None)
+        k = row_restart(notes, None, back)
     elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS and (sh.get("hz") or {}).get("tones"):
         k = hz_steps(sh, notes, ppq)
     elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS and sh.get("range") and not sh.get("hz"):
@@ -2222,14 +2223,15 @@ def cycle_turns(sh, notes, ppq):
     else:
         k = np.unique(s, return_inverse=True)[1].reshape(-1)
     if rows and sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS:
-        k = row_restart(notes, k)
+        k = row_restart(notes, k, back)
     return (k // int(c["every"])) % c["n"]
 
 
-def row_restart(notes, k):
-    """Colours' "Restart each key row": each note's step k counted again from the first step of its part of a key
-    row (the notes on one key touching or overlapping each other; a gap starts a new part, user: a ring's right side
-    starts over too). k None: each start time in the part is a step (lines: the row's own notes)."""
+def row_restart(notes, k, back=False):
+    """Colours' "Each key row": each note's step k counted again from the first step of its part of a key row (the
+    notes on one key touching or overlapping each other; a gap starts a new part, user: a ring's right side starts
+    over too). back: counted back from the part's last step instead (the colours follow the shape's right edge).
+    k None: each start time in the part is a step (lines: the row's own notes)."""
     o = np.lexsort((notes[:, 0], notes[:, 2]))
     key = notes[o, 2].astype(np.int64)
     s, e = notes[o, 0].astype(np.int64), notes[o, 1].astype(np.int64)
@@ -2241,11 +2243,11 @@ def row_restart(notes, k):
     if k is None:
         new = first.copy()
         new[1:] |= s[1:] != s[:-1]
-        c = np.cumsum(new)
-        got = c - c[first][part]
+        ks = np.cumsum(new)
     else:
         ks = np.asarray(k, np.int64)[o]
-        got = ks - np.minimum.reduceat(ks, np.flatnonzero(first))[part]
+    at = np.flatnonzero(first)
+    got = np.maximum.reduceat(ks, at)[part] - ks if back else ks - np.minimum.reduceat(ks, at)[part]
     out = np.empty(len(o), np.int64)
     out[o] = got
     return out

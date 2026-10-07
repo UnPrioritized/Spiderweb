@@ -9,6 +9,8 @@ from notes.custom import CYCLE_MAX, CYCLES
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
 
 CYCLE_CHOICES = [(None, tr("colours.off"))] + [(v, tr("colours." + v)) for v in CYCLES]
+# "Each key row" (cycle["rows"]): off, counted from each row's first note, back from its last
+ROW_CHOICES = [(None, tr("colours.rows_off")), (True, tr("colours.rows_start")), ("end", tr("colours.rows_end"))]
 EVERY_MAX = 10 ** 4
 
 
@@ -51,12 +53,14 @@ class ColoursPanel:
             self.cycle_entries.append(e)
         self.cycle_unit = ttk.Label(c, text="")
         self.cycle_unit.pack(side="left")
-        # "Restart each key row" (not By key: every row would be one colour)
-        self.cycle_rows_var = tk.StringVar(value="0")
-        self.cycle_rows_box = ttk.Checkbutton(rows, text=tr("colours.rows"), variable=self.cycle_rows_var,
-                                              onvalue="1", offvalue="0",
-                                              command=lambda: (self.on_cycle("rows"), self.roll.focus_set()))
-        self.cycle_rows_box.pack(anchor="w", pady=(1, 0))
+        # "Each key row" (not By key: every row would be one colour)
+        c = self.cycle_rows_row = ttk.Frame(rows)
+        c.pack(anchor="w", pady=(1, 0))
+        ttk.Label(c, text=tr("colours.rows")).pack(side="left")
+        self.cycle_rows_box = ttk.Combobox(c, values=[t for _, t in ROW_CHOICES], state="readonly",
+                                           width=max(len(t) for _, t in ROW_CHOICES))
+        self.cycle_rows_box.pack(side="left", padx=4)
+        self.cycle_rows_box.bind("<<ComboboxSelected>>", lambda ev: (self.on_cycle("rows"), self.roll.focus_set()))
         self.cycle_rows_tip = Tooltip(self.cycle_rows_box, tr("colours.rows_tip"))
         for e, var, what in ([(self.cycle_n_entry, self.cycle_n_var, "n")] +
                              [(e, v, "every") for e, v in zip(self.cycle_entries, self.cycle_vars)]):
@@ -95,16 +99,15 @@ class ColoursPanel:
         parts = [[x[0] for x in every], [x[1] for x in every]] if by == "time" else [every, [4]]
         for e, var, values in zip(self.cycle_entries, self.cycle_vars, parts):
             same_or_blank(e, var, values)
-        restart = {bool(c.get("rows")) for c in on}
-        self.cycle_rows_var.set("1" if restart == {True} else "0")
-        mixed_tip = tr("widgets.mixed_tip") + "\n\n" if len(restart) > 1 else ""
-        self.cycle_rows_tip.text = mixed_tip + tr("colours.rows_tip")
+        restart = {c.get("rows") for c in on}
+        self.cycle_rows_box.current([v for v, _ in ROW_CHOICES].index(next(iter(restart))) if len(restart) == 1 else 0)
+        show_mixed(self.cycle_rows_box, len(restart) > 1, self.cycle_rows_tip, tr("colours.rows_tip"))
         self._loading = False
-        if (by != "key") != bool(self.cycle_rows_box.winfo_manager()):
+        if (by != "key") != bool(self.cycle_rows_row.winfo_manager()):
             if by != "key":
-                self.cycle_rows_box.pack(anchor="w", pady=(1, 0))
+                self.cycle_rows_row.pack(anchor="w", pady=(1, 0))
             else:
-                self.cycle_rows_box.pack_forget()
+                self.cycle_rows_row.pack_forget()
         time = by == "time"
         if time != bool(self.cycle_slash.winfo_manager()):  # By time: a second box, "a / b note"
             for w in (self.cycle_slash, self.cycle_entries[1], self.cycle_unit):
@@ -120,9 +123,7 @@ class ColoursPanel:
         show_mixed(self.cycle_box, mixed, self.cycle_tip, tr("colours.tip") + (tr("colours.needs") if lonely else ""))
         for e in [self.cycle_n_entry] + self.cycle_entries:
             e.config(state="normal" if cy and not mixed else "disabled", style="TEntry")
-        self.cycle_rows_box.config(state="normal" if cy and not mixed else "disabled")
-        # (half-ticked = Mixed; after the var's set and config(state): both clear it)
-        self.cycle_rows_box.state(["alternate"] if len(restart) > 1 else ["!alternate"])
+        self.cycle_rows_box.config(state="readonly" if cy and not mixed else "disabled")
         if bool(cy) != bool(self.cycle_n_entry.winfo_manager()):
             if cy:
                 self.cycle_n_label.pack(side="left")
@@ -165,7 +166,9 @@ class ColoursPanel:
 
         tgts = self.colour_targets()
         if what == "rows":
-            value = self.cycle_rows_var.get() == "1"
+            if self.cycle_rows_box.current() < 0:  # (still Mixed: nothing picked)
+                return
+            value = ROW_CHOICES[self.cycle_rows_box.current()][0]
         elif what == "n":
             value = number(self.cycle_n_entry, self.cycle_n_var, 2, CYCLE_MAX)
         elif what == "every":  # (only the kind they all have; an empty box (different numbers): each keeps its own)
@@ -176,7 +179,7 @@ class ColoursPanel:
             value = by
             on = [t["cycle"]["n"] for t in tgts if t.get("cycle")]
             n = self.cycle_n_var.get() or str(on[0] if on else 4)
-        if what != "by" and value is None:
+        if what not in ("by", "rows") and value is None:
             return
 
         def changed(old):
@@ -187,11 +190,11 @@ class ColoursPanel:
                     return old
                 kept = old["n"] if old else (int(n) if n.isdigit() and 2 <= int(n) <= CYCLE_MAX else 4)
                 new = {"by": by, "n": kept, "every": [1, 4] if by == "time" else 1}
-                return dict(new, rows=True) if old and old.get("rows") else new  # (the tick stays with a new kind)
+                return dict(new, rows=old["rows"]) if old and old.get("rows") else new  # (kept with a new kind)
             if not old:
                 return old
             if what == "rows":
-                return dict(old, rows=True) if value else {k: v for k, v in old.items() if k != "rows"}
+                return dict(old, rows=value) if value else {k: v for k, v in old.items() if k != "rows"}
             if isinstance(value, list):
                 return dict(old, every=[v if v is not None else o for v, o in zip(value, old["every"])])
             return dict(old, **{what: value})
