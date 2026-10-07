@@ -15,7 +15,7 @@ from tkinter import ttk
 from files.lang import tr
 from notes.fx import copied, is_page, pages
 from notes.sliced import steps_kept
-from window.widgets import LocalUndo, Tooltip
+from window.widgets import LocalUndo, Tooltip, placed
 
 NEW = "new"  # the "+" tab
 TAB_STYLE = "ToolTab.Toolbutton"  # (text in the middle: "+" sat at the left of its button)
@@ -27,17 +27,20 @@ GREEN = "#7cc21b"
 class Knob(tk.Canvas):
     """A round dial from -100 to 100 (0 = straight up, all the way = straight down). Drag up / down (Shift = fine),
     the mouse wheel or the arrow keys turn it; it sticks at 0 for a moment on the way past; the right mouse button
-    points it at the mouse; a middle-click puts it back to 0. changed(value, done): done = the end of one turn.
-    Greyed out (on(False)), it shows its value and can't be turned, only put back to 0 by a middle-click."""
+    points it at the mouse; a middle-click puts it back to 0. changed(value, done): done = the end of one turn (False
+    while dragged, and for wheel / arrow steps: steps in a row are one Ctrl+Z). pressed(knob): a drag / right button
+    turn starts (call_off() ends it as if never pressed). Greyed out (on(False)), it shows its value and can't be
+    turned, only put back to 0 by a middle-click."""
 
     TURN = 180  # degrees each way
     STICK = 10  # pixels of dragging that stay at 0
 
-    def __init__(self, parent, scale, changed, color=ORANGE, size=44):
+    def __init__(self, parent, scale, changed, color=ORANGE, size=44, pressed=None):
         self.size = size = round(size * scale)
         super().__init__(parent, width=size, height=size, highlightthickness=0, takefocus=True,
                          background=ttk.Style().lookup("TFrame", "background") or "#f0f0f0")
         self.value, self.changed, self.drag, self.color, self.enabled = 0.0, changed, None, color, True
+        self.pressed = pressed
         self.bind("<ButtonPress-1>", self.press)
         self.bind("<B1-Motion>", self.move)
         self.bind("<ButtonRelease-1>", lambda e: self.release())
@@ -76,10 +79,18 @@ class Knob(tk.Canvas):
         self.create_oval(c - r, c - r, c + r, c + r, fill="#555" if self.enabled else "#aaa", outline="")
         self.create_line(c, c, c + r * math.cos(a), c - r * math.sin(a), fill="white", width=2)
 
+    def held(self):
+        """Is the mouse turning it (left or right button)?"""
+        return bool(self.drag or self.pointing)
+
+    def call_off(self):
+        """The turn going on ends: the mouse still held turns nothing (Ctrl+Z while held)."""
+        self.drag, self.pointing = None, False
+
     def step(self, d):
         if self.enabled:
             v = self.value + d
-            self.turn_to(0 if v * self.value < 0 else v, True)  # (stops at 0 on the way past)
+            self.turn_to(0 if v * self.value < 0 else v)  # (stops at 0 on the way past)
 
     def point(self, e):
         """Right mouse button: the dial points at the mouse."""
@@ -91,6 +102,8 @@ class Knob(tk.Canvas):
             self.turn_to(math.degrees(math.atan2(e.x - c, c - e.y)) / self.TURN * 100)
 
     def point_press(self, e):
+        if self.enabled and self.pressed and not self.held():
+            self.pressed(self)
         self.pointing = self.enabled
         self.point(e)
 
@@ -103,7 +116,9 @@ class Knob(tk.Canvas):
         if not self.enabled:
             return
         self.focus_set()
-        self.drag = (e.y, self.value + math.copysign(self.STICK, self.value) if self.value else 0.0)
+        if self.pressed and not self.held():
+            self.pressed(self)
+        self.drag = (e.y,self.value + math.copysign(self.STICK, self.value) if self.value else 0.0)
 
     def move(self, e):
         if self.drag:  # (the mouse moves a "raw" value that has STICK extra on each side of 0)
@@ -190,8 +205,8 @@ class ToolWindow(tk.Toplevel):
         self.title(tr(f"{self.KEY}.window_title"))
         self.transient(app)
         self.resizable(False, False)
-        if getattr(app, self.POS):
-            self.geometry(getattr(app, self.POS))
+        if placed(self, getattr(app, self.POS)):  # (not off every screen)
+            self.geometry(placed(self, getattr(app, self.POS)))
         self.cfg = dict(self.DEFAULTS)
         self.at = None  # the page shown: {shape number: its place in the shape's fx}, None = "+" (a new page)
         self.late, self.took = None, 0.0  # (preview)
@@ -207,6 +222,9 @@ class ToolWindow(tk.Toplevel):
         self.build(box)
         self.targets = []
         self.undo = LocalUndo(self, self.undo_state, self.put_state)
+        self.turning = None  # a knob held: (it, how it was at the press, the inside undo steps then)
+        for k in ("z", "Z", "y", "Y"):  # (in place of LocalUndo's: a knob held first)
+            self.bind(f"<Control-{k}>", lambda e, d=-1 if k in "zZ" else 1: (self.undo_key(d), "break")[1])
         self.bind("<Control-Key>", lambda e: "break")  # (the piano roll's shortcuts wait until it's closed)
         self.bind("<F1>", lambda e: (app.open_help(self.KEY), "break")[1])
         self.bind("<Escape>", lambda e: self.cancel())
@@ -215,6 +233,34 @@ class ToolWindow(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.retarget()
         self.after_idle(lambda: app.tips.show(self.KEY, parent=self))
+
+    def knob_pressed(self, knob):
+        """A knob's turn starts (Knob pressed): remembered for Ctrl+Z while it's held."""
+        self.catch_up()
+        self.undo.key = None  # (the turn is a step of its own, not part of wheel steps before it)
+        self.turning = (knob, self.undo_state(), list(self.undo.states), self.undo.at)
+
+    def undo_key(self, d):
+        """Ctrl+Z (d -1) / Ctrl+Y (1) inside. While a knob is held, Ctrl+Z puts everything back as it was at the
+        press, with no step (the mouse still held turns nothing), and Ctrl+Y does nothing (like the Hz synth's)."""
+        t, self.turning = self.turning, None
+        if t and t[0].held():
+            if d < 0:
+                knob, state, states, at = t
+                knob.call_off()
+                if self.late:
+                    self.after_cancel(self.late)
+                    self.late = None
+                self.undo.states, self.undo.at, self.undo.key = states, at, None
+                self.put_state(state)
+            else:
+                self.turning = t
+            return
+        self.undo.step(d)
+
+    def ppq_changed(self):
+        """The project's PPQ changed: numbers shown in ticks show the new ones."""
+        self.show()
 
     def build(self, box):
         raise NotImplementedError

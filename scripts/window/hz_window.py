@@ -42,7 +42,7 @@ from window.hz_preview import Preview
 from window.hz_synth import open_synth
 from window.preview_settings import open_preview_settings
 from window.snap_picker import SnapPicker
-from window.widgets import Scrub, Tooltip, bad, good
+from window.widgets import Scrub, Tooltip, bad, good, placed
 
 BLACK = (1, 3, 6, 8, 10)
 RED = "#e02020"
@@ -192,7 +192,7 @@ class HzWindow(tk.Toplevel):
         self.title(tr("hz.window_title"))
         self.transient(app)
         s = self.s = app.scale
-        self.geometry(app.hz_pos if re.fullmatch(POS, app.hz_pos or "") else f"{round(820 * s)}x{round(700 * s)}")
+        self.geometry(placed(self, app.hz_pos) if re.fullmatch(POS, app.hz_pos or "") else f"{round(820 * s)}x{round(700 * s)}")
         self.minsize(round(420 * s), round(260 * s))
         self.tones, self.sel = [], set()  # the notes shown (hzbass tones) and which are selected
         self.drag = None

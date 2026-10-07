@@ -55,7 +55,7 @@ class ClawWindow(ToolWindow):
         ttk.Label(time, text=tr("claw.time_dist")).grid(row=2, column=0, sticky="e", padx=(0, 8), pady=4)
         dial = ttk.Frame(time)
         dial.grid(row=2, column=1, sticky="w", pady=4)
-        self.knob = Knob(dial, s, self.on_knob)
+        self.knob = Knob(dial, s, self.on_knob, pressed=self.knob_pressed)
         self.knob.pack(side="left")
         self.knob_text = ttk.Label(dial, text="", width=5, foreground="#777")
         self.knob_text.pack(side="left", padx=(6, 0))

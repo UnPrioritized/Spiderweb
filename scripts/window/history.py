@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
-from window.widgets import Tooltip
+from window.widgets import Tooltip, placed
 
 START = tr("history.start")  # the first row: the oldest state still kept
 FUTURE = "#a0a0a0"  # steps undone (Ctrl+Y / clicking them brings them back; a new change drops them)
@@ -160,7 +160,7 @@ class HistoryPanel:
         win.title(tr("history.history"))
         win.transient(self)
         win.minsize(int(200 * self.scale), int(160 * self.scale))
-        win.geometry(self.history_pos or f"{int(260 * self.scale)}x{int(360 * self.scale)}")
+        win.geometry(placed(win, self.history_pos) or f"{int(260 * self.scale)}x{int(360 * self.scale)}")
         self.history_frame = self._history_list(win, 16)
         self.history_frame.pack(fill="both", expand=True, padx=6, pady=6)
         win.protocol("WM_DELETE_WINDOW", self.toggle_history_dock)

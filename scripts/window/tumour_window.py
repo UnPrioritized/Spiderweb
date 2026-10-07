@@ -13,7 +13,7 @@ from notes.joined import shown_tumour, unify_tumours
 from notes.tumour import GRAPH_KEYS, TUMOUR_DEFAULTS, clean_graph
 from window.graph_window import GraphWindow
 from window.panel_custom import GAP_COLOR
-from window.widgets import LocalUndo, Scrub, Tooltip, bad, good, grid_shown, unchanged
+from window.widgets import LocalUndo, Scrub, Tooltip, bad, good, grid_shown, placed, unchanged
 
 SHAPE_CHOICES = [("triangle", tr("tumour_window.triangle")), ("square", tr("tumour_window.square")),
                  ("circle", tr("tumour_window.circle")), ("parabola", tr("tumour_window.parabola"))]
@@ -52,8 +52,8 @@ class TumourWindow(tk.Toplevel):
         self.title(tr("tumour_window.tumours"))
         self.transient(app)
         self.resizable(False, False)
-        if app.tumour_pos:
-            self.geometry(app.tumour_pos)
+        if placed(self, app.tumour_pos):
+            self.geometry(placed(self, app.tumour_pos))
         self.loading = False
         self.vars = {}     # setting -> StringVar of its entry / combobox
         self.entries = {}  # setting -> its entry box

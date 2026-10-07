@@ -15,7 +15,7 @@ from files.mathexpr import calc, formula, fmt
 from notes.joined import shown_tumour
 from notes.tumour import GRAPH_LIMIT, TUMOUR_DEFAULTS
 from window.panel_custom import GAP_COLOR
-from window.widgets import LocalUndo, Scrub
+from window.widgets import LocalUndo, Scrub, placed
 
 FLAT = [[0.0, 1.0], [1.0, 1.0]]
 PRESETS = [(tr("graph_window.flat_off"), FLAT), (tr("graph_window.rise"), [[0.0, 0.0], [1.0, 1.0]]),
@@ -122,7 +122,7 @@ class GraphWindow(tk.Toplevel):
         self.sync(fit_view=True)
         # where it was last time, else beside the tumour window
         self.update_idletasks()
-        self.geometry(self.app.graph_pos or f"+{tw.winfo_rootx() + tw.winfo_width() + int(8 * s)}+{tw.winfo_rooty()}")
+        self.geometry(placed(self, self.app.graph_pos) or f"+{tw.winfo_rootx() + tw.winfo_width() + int(8 * s)}+{tw.winfo_rooty()}")
         self.bind("<Configure>", self.remember, add="+")
 
     # ------------------------------------------------------------ the shapes' graph

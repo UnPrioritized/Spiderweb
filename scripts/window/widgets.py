@@ -1,5 +1,7 @@
 """Small Tk helpers shared by the windows."""
 
+import re
+import sys
 import tkinter as tk
 from tkinter import ttk
 
@@ -10,6 +12,31 @@ SHIFT, CTRL = 0x1, 0x4
 DRAG_PX = 4  # pixels of label dragging per step
 TIP_WIDTH = 560  # tooltips wrap longer lines at this width (at 100 % scaling), so a text needs no line breaks
 TALL = 120  # px: a widget taller than this gets its tooltip under the mouse instead of under itself
+
+
+def on_screen(widget, x, y):
+    """Is the point (x, y) (screen pixels) on one of the screens? (Windows: any monitor; elsewhere the screen Tk
+    knows, which on Linux spans them all.)"""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            find = ctypes.WINFUNCTYPE(ctypes.c_void_p, wintypes.POINT, wintypes.DWORD)(
+                ("MonitorFromPoint", ctypes.windll.user32))
+            return bool(find(wintypes.POINT(x, y), 0))  # (0: no monitor there = none)
+        except (OSError, AttributeError):
+            pass
+    return 0 <= x < widget.winfo_screenwidth() and 0 <= y < widget.winfo_screenheight()
+
+
+def placed(widget, geo):
+    """A window's saved geometry ("WxH+X+Y" / "+X+Y") without its place when its title bar would be off every screen
+    (a screen unplugged / made smaller since, user 2026-10-07): it opens where it would the first time. "" = nothing
+    left to use."""
+    m = re.fullmatch(r"(\d+x\d+)?\+(-?\d+)\+(-?\d+)", geo or "")
+    if m and not on_screen(widget, int(m[2]) + 60, int(m[3]) + 15):
+        return m[1] or ""
+    return geo or ""
 
 
 def grid_shown(w, on):
@@ -178,6 +205,18 @@ class Scrub:
             label.bind("<ButtonPress-1>", self.press)
             label.bind("<B1-Motion>", self.motion)
             label.bind("<ButtonRelease-1>", self.release)
+        for w in [label] + [entry for entry, _, _ in boxes] if drag_box else [label]:
+            if w is not None:  # (its window closed mid-drag, e.g. Esc: the let-go never comes)
+                w.bind("<Destroy>", lambda e: self.gone(), add="+")
+
+    def gone(self):
+        """A box / label being dragged went away: the drag ends there (no more steps)."""
+        if self.drag:
+            if self.drag["job"]:
+                self.app.after_cancel(self.drag["job"])
+            self.drag = self.held = None
+            self.app.scrubbing = False
+            self.app.after_idle(self.app.catch_up_notes)
 
     def step_size(self, state):
         step, big, fine = self.steps() if callable(self.steps) else self.steps

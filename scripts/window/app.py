@@ -774,6 +774,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.sync_funnel()
         self.sync_tumour()
         self.sync_text()
+        for w in (self.claw_window, self.strum_window, self.chop_window):
+            if w:
+                w.ppq_changed()  # (numbers shown in ticks)
 
     def read_project(self):
         try:

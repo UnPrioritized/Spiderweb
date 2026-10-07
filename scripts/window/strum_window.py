@@ -28,7 +28,7 @@ class StrumWindow(ToolWindow):
         return clean_strum(cfg)
 
     def build(self, box):
-        self.knobs, self.vars, self.entries, self.ticks, self.checks = {}, {}, {}, {}, {}
+        self.knobs, self.vars, self.entries, self.ticks, self.checks, self.scrubs = {}, {}, {}, {}, {}, {}
         panels = {}
         for col, (key, rows) in enumerate((("start", (("time", "tension", tr("strum.time")),
                                                       ("vel", "vel_tension", tr("strum.velocity")))),
@@ -70,7 +70,7 @@ class StrumWindow(ToolWindow):
         cell = ttk.Frame(parent)
         cell.grid(row=r, column=c, padx=4, pady=2)
         k = self.knobs[key] = Knob(cell, self.app.scale, lambda v, done: self.on_knob(key, v, done),
-                                   color=GREEN if key in TENSIONS else ORANGE, size=40)
+                                   color=GREEN if key in TENSIONS else ORANGE, size=40, pressed=self.knob_pressed)
         k.pack()
         var = self.vars[key] = tk.StringVar()
         e = self.entries[key] = ttk.Entry(cell, textvariable=var, width=6, justify="center")
@@ -78,8 +78,8 @@ class StrumWindow(ToolWindow):
         e.bind("<Return>", lambda ev: (self.on_entry(key), "break")[1])
         e.bind("<FocusOut>", lambda ev: self.on_entry(key))
         lo, hi = self.limits(key)
-        Scrub(self.app, [(e, var, lambda: self.on_entry(key, False))], STEPS.get(key, TENSION_STEPS), lo, hi,
-              drag_box=True)
+        self.scrubs[key] = Scrub(self.app, [(e, var, lambda: self.on_entry(key, False))],
+                                 STEPS.get(key, TENSION_STEPS), lo, hi, drag_box=True)
         for w in (k, e):
             Tooltip(w, tr(f"strum.tip_{key}") + "\n" + tr("strum.tip_knob"))
 
@@ -102,6 +102,12 @@ class StrumWindow(ToolWindow):
         if key in TENSIONS:
             return v
         return math.copysign(min(100.0, 100 * math.sqrt(abs(v) / self.knob_max(key))), v) if v else 0.0
+
+    def ppq_changed(self):
+        """The boxes show ticks at the new PPQ (the times are kept in beats)."""
+        for key in TIMES:
+            self.scrubs[key].lo, self.scrubs[key].hi = self.limits(key)
+        self.show()
 
     def put_shown(self, key, v):
         self.cfg[key] = v / self.app.ppq if key in TIMES else v

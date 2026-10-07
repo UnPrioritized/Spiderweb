@@ -423,7 +423,8 @@ class ProjectFiles:
             self.tips.restore(win)
             self.updates.restore(win)
             self.tool_picker.restore(win)
-            geo = win.get("geometry", "")
+            from window.widgets import placed
+            geo = placed(self, win.get("geometry", "") if isinstance(win.get("geometry"), str) else "")
             if geo:
                 self.geometry(geo)
             if win.get("maximized"):
