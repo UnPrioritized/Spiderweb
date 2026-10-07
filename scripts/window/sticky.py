@@ -13,6 +13,9 @@ from notes.pattern import has_formula
 
 REACH = 10  # pixels (times the window's scale)
 MOST_NEAR = 300  # crossings are looked for among at most this many pieces near the mouse (nearest first)
+BEND = np.cos(np.radians(20))  # a stroke turning more than this between two pieces = a corner (rest_on)
+PAST = 1  # pixels: a shape resting on a curve may touch this far past the end of one of its short pieces (where
+# the curve bulges toward it, a corner of the curve touches the shape: never exactly on one piece)
 
 
 def key_points(st, line):
@@ -32,30 +35,37 @@ def key_points(st, line):
     return [(j, tuple(p)) for j, p in enumerate(line)]
 
 
-def rest_scales(a, dirs, seg):
-    """For circles drawn from corner a with boxes a + s * dirs[n]: the s at which each rests on each line piece
-    (as Targets.touch_circle: its short pieces' nearest corner on the line, the circle on its middle's side, the
-    touch within the piece), NaN where it can't; and where it touches. seg: (M, 4), or (N, M, 4) = each box its
-    own pieces. Shapes (N, M), (N, M, 2)."""
-    dirs = np.asarray(dirs, float)
-    seg = np.broadcast_to(seg, (len(dirs),) + np.shape(seg)[-2:])
-    ang = 2 * np.pi * np.arange(ELLIPSE_STEPS) / ELLIPSE_STEPS
-    w = dirs[:, None] / 2 + np.stack([-np.abs(dirs[:, :1]) / 2 * np.cos(ang),
-                                      np.abs(dirs[:, 1:]) / 2 * np.sin(ang)], 2)  # (N, K, 2)
-    p0, r = seg[..., :2], seg[..., 2:] - seg[..., :2]
-    ln = np.hypot(r[..., 0], r[..., 1])
-    nrm = np.stack([-r[..., 1], r[..., 0]], -1) / ln[..., None]
-    g = ((a - p0) * nrm).sum(-1)  # (N, M)
-    m = np.einsum("nmc,nkc->nmk", nrm, w)
-    side = np.sign(g + (dirs[:, None] * nrm).sum(-1) / 2)
-    kk = np.where(side >= 0, np.argmin(m, 2), np.argmax(m, 2))
-    mk = np.take_along_axis(m, kk[..., None], 2)[..., 0]
-    with np.errstate(divide="ignore", invalid="ignore"):
-        s = -g / mk
-    touch = a + s[..., None] * w[np.arange(len(w))[:, None], kk]
-    t = ((touch - p0) * r).sum(-1) / ln ** 2
-    ok = np.isfinite(s) & (s > 0) & (t >= 0) & (t <= 1)
-    return np.where(ok, s, np.nan), touch
+def hull_idx(pts):
+    """The numbers of pts on their outline's convex hull (only those can be a shape's point nearest a line)."""
+    p = [tuple(q) for q in np.asarray(pts, float).reshape(-1, 2).tolist()]
+    order = sorted(range(len(p)), key=lambda i: p[i])
+
+    def half(seq):
+        h = []
+        for i in seq:
+            while len(h) >= 2:
+                (ax, ay), (bx, by), (cx, cy) = p[h[-2]], p[h[-1]], p[i]
+                if (bx - ax) * (cy - ay) - (by - ay) * (cx - ax) > 0:
+                    break
+                h.pop()
+            h.append(i)
+        return h
+
+    lower, upper = half(order), half(order[::-1])
+    return np.asarray(lower[:-1] + upper[:-1] or order[:1], int)  # (counter-clockwise)
+
+
+def furthest(H, m):
+    """For a convex outline H ((K, 2), counter-clockwise, as hull_idx) and directions m (M, 2): the number of its
+    point furthest along each (found by its sides' angles: quick for big K)."""
+    if len(H) <= 8:
+        return np.argmax(m @ H.T, 1)
+    e = np.roll(H, -1, 0) - H
+    ea = np.unwrap(np.arctan2(e[:, 1], e[:, 0]))
+    want = np.arctan2(m[:, 1], m[:, 0]) + np.pi / 2  # (the side turning past this angle: its start is furthest)
+    i = np.searchsorted(ea, ea[0] + (want - ea[0]) % (2 * np.pi))
+    near = (i[:, None] + np.arange(-2, 3)) % len(H)  # (and the next ones, against rounding)
+    return near[np.arange(len(m)), np.argmax((H[near] * m[:, None]).sum(2), 1)]
 
 
 class Targets:
@@ -172,7 +182,8 @@ class Targets:
         touch = a + s[:, None] * w[kk]
         t = ((touch - p0) * r).sum(1) / ln ** 2
         gap = np.abs(g + mk) * k  # (how far its nearest corner is from the line now)
-        gap = np.where((s > 0) & (t >= 0) & (t <= 1) & np.isfinite(s), gap, np.inf)
+        past = PAST / (k * ln)
+        gap = np.where((s > 0) & (t >= -past) & (t <= 1 + past) & np.isfinite(s), gap, np.inf)
         i = int(np.argmin(gap))
         if gap[i] > reach:
             return None
@@ -182,65 +193,30 @@ class Targets:
         """A circle being drawn (box from corner a; the mouse at a + d) resting on TWO strokes' lines at once (user):
         its box's width and height both change, so it's an oval as a rule. (corner (u, v) to draw the box to, pixels
         from the mouse, [(u, v) where it touches, the stroke touched] x 2) or None: the nearest within reach pixels.
-        Lines near the circle only, two that aren't parallel; boxes from 1:5 to 5:1."""
+        Curves count too (rest_on); boxes from 1:5 to 5:1."""
         k = view[0]
         a, d = np.asarray(a, float), np.asarray(d, float)
-        size = np.hypot(*d)
-        if abs(d[0]) * k < 1 or abs(d[1]) * k < 1 or not len(self.seg):
+        if abs(d[0]) * k < 1 or abs(d[1]) * k < 1:
             return None
-        lo, hi = np.minimum(a, a + d) - 3 * reach / k, np.maximum(a, a + d) + 3 * reach / k
-        seg = self.seg
-        keep = np.all((np.maximum(seg[:, :2], seg[:, 2:]) >= lo) & (np.minimum(seg[:, :2], seg[:, 2:]) <= hi), 1)
-        keep &= np.hypot(seg[:, 2] - seg[:, 0], seg[:, 3] - seg[:, 1]) > 0
-        seg, owner = seg[keep], self.owner[keep]
-        if len(seg) < 2:
+        b = a + d
+        C = np.asarray(stroke_points({"kind": "ellipse", "box": [*np.minimum(a, b), *np.maximum(a, b)]}), float)
+
+        def valid(D):
+            nd = d + D
+            return bool(np.all(np.sign(nd) == np.sign(d)) and np.all(np.abs(nd) * k >= 1)
+                        and 0.2 <= abs(nd[1] / nd[0]) <= 5)
+
+        got = self.rest_on(C, (C - a) / d, view, reach, valid, two=True)  # (its points: a + their share of the box)
+        if not got:
             return None
-        sign = np.sign(d)
-        ray = lambda th: size * np.column_stack([sign[0] * np.cos(th), sign[1] * np.sin(th)])
-        s, _ = rest_scales(a, d[None], seg)  # (now: the lines near sticking first, at most 12)
-        near = np.flatnonzero(np.isfinite(s[0]) & (np.abs(s[0] - 1) * size * k <= 4 * reach))
-        near = near[np.argsort(np.abs(s[0, near] - 1))][:12]
-        if len(near) < 2:
-            return None
-        seg, owner = seg[near], owner[near]
-        th = np.linspace(np.arctan(0.2), np.arctan(5), 120)
-        s, _ = rest_scales(a, ray(th), seg)
-        r = seg[:, 2:] - seg[:, :2]
-        r = r / np.hypot(*r.T)[:, None]
-        pi, pj = np.triu_indices(len(seg), 1)
-        keep = np.abs(r[pi, 0] * r[pj, 1] - r[pi, 1] * r[pj, 0]) >= 0.1  # (about parallel: no single spot)
-        pi, pj = pi[keep], pj[keep]
-        f = s[:, pi] - s[:, pj]  # (angle, pair)
-        n, p = np.nonzero(np.sign(f[:-1]) * np.sign(f[1:]) < 0)  # (where it changes sign: a spot between)
-        if not len(n):
-            return None
-        pi, pj, lo_t, hi_t, f_lo = pi[p], pj[p], th[n], th[n + 1], f[n, p]
-        pair = np.stack([seg[pi], seg[pj]], 1)  # (each spot its own two lines)
-        for _ in range(40):  # (halving, all at once: the same s for both lines, as exactly as floats go)
-            mid = (lo_t + hi_t) / 2
-            sm, _ = rest_scales(a, ray(mid), pair)
-            fm = sm[:, 0] - sm[:, 1]
-            same = np.sign(fm) == np.sign(f_lo)
-            lo_t, f_lo = np.where(same, mid, lo_t), np.where(same, fm, f_lo)
-            hi_t = np.where(same, hi_t, mid)
-        dd = ray(lo_t)
-        sm, touch = rest_scales(a, dd, pair)
-        si, sj, ti, tj = sm[:, 0], sm[:, 1], touch[:, 0], touch[:, 1]
-        ok = np.isfinite(si) & np.isfinite(sj) & (np.abs(si - sj) <= 1e-9 * np.maximum(si, 1))
-        ok &= np.hypot(*(ti - tj).T) * k >= 3  # (not one spot where the two lines meet)
-        corner = a + si[:, None] * dd
-        far = np.where(ok, np.hypot(*(corner - (a + d)).T) * k, np.inf)
-        b = int(np.argmin(far))
-        if far[b] > reach:
-            return None
-        return (tuple(map(float, corner[b])), float(far[b]),
-                [(tuple(map(float, ti[b])), int(owner[pi[b]])), (tuple(map(float, tj[b])), int(owner[pj[b]]))])
+        D, far, touch, _, owner = got
+        return (float(b[0] + D[0]), float(b[1] + D[1])), far, [(touch[0], owner[0]), (touch[1], owner[1])]
 
     def touch_line(self, line, view, reach):
         """A stroke being moved (line = its stroke_points where it is now) whose LINE sticks (user: not only its
         points), each the nearest within reach pixels: [(kind, (u, v) where it touches, pixels away, (du, dv) to move
-        it by more)], kind "on" = a stroke's point comes onto its pieces, "rest" = its corner nearest a stroke's line
-        comes onto it with the moved stroke on one side (the side its middle is on: it rests on the line)."""
+        it by more)], kind "on" = a stroke's point comes onto its pieces, "rest" = it rests against a stroke's line
+        (rest_on: its corner on it with the moved stroke on its middle's side, or a closed one's side on a point)."""
         k = view[0]
         line = np.asarray(line, float).reshape(-1, 2)
         if len(line) < 2:
@@ -259,129 +235,199 @@ class Targets:
             if far[i, j] <= reach:
                 out.append(("on", (float(pts[i, 0]), float(pts[i, 1])), float(far[i, j]),
                             (float(gap[i, j, 0]), float(gap[i, j, 1]))))
-        p0, r, ln, n, kk, gk, _ = self.rests(line, lo, hi)
-        if len(p0):
-            touch = line[kk] - gk[:, None] * n
-            t = ((touch - p0) * r).sum(1) / ln ** 2
-            far = np.where((t >= 0) & (t <= 1), np.abs(gk) * k, np.inf)
-            i = int(np.argmin(far))
-            if far[i] <= reach:
-                out.append(("rest", (float(touch[i, 0]), float(touch[i, 1])), float(far[i]),
-                            (float(-gk[i] * n[i, 0]), float(-gk[i] * n[i, 1]))))
+        got = self.rest_on(line, np.ones_like(line), view, reach)
+        if got:
+            out.append(("rest", got[2][0], got[1], got[0]))
         return out
-
-    def rests(self, line, lo, hi):
-        """For a stroke being moved (line as in touch_line), each line piece in the box lo..hi: the piece (p0, r,
-        its length, normal n), the moved stroke's corner nearest it with the stroke on the side its middle is on (kk),
-        how far that corner is along n (gk: moving it by -gk n rests it on the line) and the piece's stroke."""
-        seg, owner = self.seg, self.owner
-        if len(seg):
-            keep = np.all((np.maximum(seg[:, :2], seg[:, 2:]) >= lo) & (np.minimum(seg[:, :2], seg[:, 2:]) <= hi), 1)
-            keep &= np.hypot(seg[:, 2] - seg[:, 0], seg[:, 3] - seg[:, 1]) > 0
-            seg, owner = seg[keep], owner[keep]
-        p0, r = seg[:, :2], seg[:, 2:] - seg[:, :2]
-        ln = np.hypot(r[:, 0], r[:, 1])
-        n = np.column_stack([-r[:, 1], r[:, 0]]) / np.where(ln == 0, 1, ln)[:, None]
-        g = np.einsum("mkc,mc->mk", line[None] - p0[:, None], n)  # (each corner's side of each line, how far)
-        side = np.sign((((line.min(0) + line.max(0)) / 2 - p0) * n).sum(1))  # (its middle's side of each line)
-        kk = np.where(side >= 0, np.argmin(g, 1), np.argmax(g, 1)) if len(g) else np.zeros(0, int)
-        gk = g[np.arange(len(g)), kk]
-        return p0, r, ln, n, kk, gk, owner
 
     def rest_two(self, line, view, reach):
         """A stroke being moved (line as in touch_line) resting on TWO lines at once (user: between two slanted
         lines it jumped from resting on one to resting on the other): ((du, dv) to move it by more, pixels, [(u, v)
-        where it touches] x 2) or None; the smallest move within reach pixels. Two pieces not about parallel (of one
-        stroke: 30 degrees apart or more, so a curve's next pieces don't count), touching 3 pixels apart or more."""
-        k = view[0]
+        where it touches] x 2) or None: the smallest move within reach pixels (rest_on)."""
         line = np.asarray(line, float).reshape(-1, 2)
-        if len(line) < 2:
-            return None
-        lo, hi = line.min(0) - 2 * reach / k, line.max(0) + 2 * reach / k
-        p0, r, ln, n, kk, gk, owner = self.rests(line, lo, hi)
-        near = np.flatnonzero(np.abs(gk) * k <= reach)  # (the move along n is gk: never more than the whole move)
-        near = near[np.argsort(np.abs(gk[near]))][:12]
-        if len(near) < 2:
-            return None
-        p0, r, ln, n, kk, gk, owner = (x[near] for x in (p0, r, ln, n, kk, gk, owner))
-        i, j = np.triu_indices(len(near), 1)
-        det = n[i, 0] * n[j, 1] - n[i, 1] * n[j, 0]
-        ok = np.abs(det) >= np.where(owner[i] == owner[j], 0.5, 0.1)
-        i, j, det = i[ok], j[ok], det[ok]
-        if not len(i):
-            return None
-        bi, bj = -gk[i], -gk[j]  # (the move: D . n_i = -gk_i and D . n_j = -gk_j)
-        d = np.column_stack([(bi * n[j, 1] - bj * n[i, 1]) / det, (bj * n[i, 0] - bi * n[j, 0]) / det])
-        ti, tj = line[kk[i]] + d, line[kk[j]] + d
-        a = ((ti - p0[i]) * r[i]).sum(1) / ln[i] ** 2
-        b = ((tj - p0[j]) * r[j]).sum(1) / ln[j] ** 2
-        far = np.hypot(d[:, 0], d[:, 1]) * k
-        ok = (a >= 0) & (a <= 1) & (b >= 0) & (b <= 1) & (np.hypot(*(ti - tj).T) * k >= 3) & (far <= reach)
-        if not ok.any():
-            return None
-        m = int(np.argmin(np.where(ok, far, np.inf)))
-        return ((float(d[m, 0]), float(d[m, 1])), float(far[m]),
-                [(float(ti[m, 0]), float(ti[m, 1])), (float(tj[m, 0]), float(tj[m, 1]))])
+        got = self.rest_on(line, np.ones_like(line), view, reach, two=True)
+        return got and got[:3]
 
     def rest_box(self, a, b, view, reach):
-        """A square being drawn (corner a pressed, b at the mouse; its sides straight across / up) resting on a
-        stroke's line (user), as a moved stroke rests (touch_line / rest_two): [(kind "rest" / "two", (du, dv) to move
-        b by, pixels, [(u, v) where it touches], [its corners touching])], each the nearest: one line within reach
-        pixels, two within half of it. Corners: 1 = (b's u, a's v), 2 = b, 3 = (a's u, b's v); resting by corner 1
-        moves only b's u, by 3 only its v. Lines through a are left out (it would always rest on them)."""
+        """A square being drawn (corner a pressed, b at the mouse; its sides straight across / up) resting against a
+        stroke's line (user), as a moved stroke rests (rest_on): [(kind "rest" / "two", (du, dv) to move b by,
+        pixels, [(u, v) where it touches], [its sides touching or beside a touching corner: 0 = a to (b's u, a's v),
+        1, 2, 3 = back to a])], each the nearest: one line within reach pixels, two within half of it. The sides
+        through a can't move, so a line through a never counts."""
         k = view[0]
         a, b = np.asarray(a, float), np.asarray(b, float)
         if abs(b[0] - a[0]) * k < 1 or abs(b[1] - a[1]) * k < 1:
             return []
         box = np.array([a, [b[0], a[1]], b, [a[0], b[1]]])
-        lo, hi = box.min(0) - 2 * reach / k, box.max(0) + 2 * reach / k
-        p0, r, ln, n, kk, gk, owner = self.rests(box, lo, hi)
-        if not len(p0):
-            return []
-        t = np.clip(((a - p0) * r).sum(1) / ln ** 2, 0, 1)
-        through = np.hypot(*(p0 + t[:, None] * r - a).T) * k < 1
-        near = np.flatnonzero((kk > 0) & ~through & (np.abs(gk) * k <= reach))
-        near = near[np.argsort(np.abs(gk[near]))][:12]
-        if not len(near):
-            return []
-        p0, r, ln, n, kk, gk, owner = (x[near] for x in (p0, r, ln, n, kk, gk, owner))
-        free = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], float)[kk]  # (which of b's u / v moves each corner)
-        A = n * free  # (moving b by D: corner kk is on its line when A . D = -gk)
+        free = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], float)  # (which of b's u / v moves each corner)
 
-        def fits(d, touch, i):  # (each touch within its piece, the box not turned over or flat)
-            ok = np.ones(len(d), bool)
-            for tp, m in zip(touch, i):
-                s = ((tp - p0[m]) * r[m]).sum(1) / ln[m] ** 2
-                ok &= (s >= 0) & (s <= 1)
-            nb = b + d
-            return ok & np.all(np.sign(nb - a) == np.sign(b - a), 1) & np.all(np.abs(nb - a) * k >= 1, 1)
+        def valid(d):  # (the box not turned over or flat)
+            nb = b + np.asarray(d)
+            return bool(np.all(np.sign(nb - a) == np.sign(b - a)) and np.all(np.abs(nb - a) * k >= 1))
 
         out = []
-        aa = (A * A).sum(1)
-        d = -gk[:, None] * A / np.where(aa == 0, np.inf, aa)[:, None]  # (the smallest move)
-        far = np.hypot(*d.T) * k
-        ok = fits(d, [box[kk] + d * free], [np.arange(len(d))]) & (aa > 0) & (far <= reach)
-        if ok.any():
-            m = int(np.argmin(np.where(ok, far, np.inf)))
-            tp = box[kk[m]] + d[m] * free[m]
-            out.append(("rest", (float(d[m, 0]), float(d[m, 1])), float(far[m]), [(float(tp[0]), float(tp[1]))],
-                        [int(kk[m])]))
-        i, j = np.triu_indices(len(near), 1)
-        det = A[i, 0] * A[j, 1] - A[i, 1] * A[j, 0]
-        ok = np.abs(det) >= np.sqrt(aa[i] * aa[j]) * np.where(owner[i] == owner[j], 0.5, 0.1)
-        i, j, det = i[ok], j[ok], det[ok]
-        if len(i):
-            bi, bj = -gk[i], -gk[j]
-            d = np.column_stack([(bi * A[j, 1] - bj * A[i, 1]) / det, (bj * A[i, 0] - bi * A[j, 0]) / det])
-            ti, tj = box[kk[i]] + d * free[i], box[kk[j]] + d * free[j]
-            far = np.hypot(*d.T) * k
-            ok = fits(d, [ti, tj], [i, j]) & (np.hypot(*(ti - tj).T) * k >= 3) & (far <= reach / 2)
-            if ok.any():
-                m = int(np.argmin(np.where(ok, far, np.inf)))
-                out.append(("two", (float(d[m, 0]), float(d[m, 1])), float(far[m]),
-                            [(float(ti[m, 0]), float(ti[m, 1])), (float(tj[m, 0]), float(tj[m, 1]))],
-                            sorted({int(kk[i[m]]), int(kk[j[m]])})))
+        for kind, most in (("rest", reach), ("two", reach / 2)):
+            got = self.rest_on(box, free, view, most, valid, two=kind == "two", closed=True)
+            if got:
+                d, far, touch, where, _ = got
+                sides = set()
+                for w in where:
+                    sides |= {(w[1] - 1) % 4, w[1]} if w[0] == "corner" else {w[1] if (w[2] - w[1]) % 4 == 1 else w[2]}
+                out.append((kind, d, far, touch, sorted(sides)))
         return out
+
+    def rest_on(self, C, F, view, reach, valid=None, two=False, closed=None):
+        """A shape resting against strokes' lines (user), as it changes with one moving point (D = (du, dv) from
+        now): its points C + F * D (C, F: (K, 2); a moved stroke F = 1, a square or circle being drawn each point's
+        share of its box). It touches without crossing: by its corner on a stroke's piece (the shape on its middle's
+        side), or (closed shapes: closed=None = when C ends where it starts) by its side on a stroke's point (a curve
+        bulging toward it). Curves count (user): from each spot along a stroke where it nearly rests, it's followed
+        to where it does (Newton's way, a few steps). two: on two lines at once (not about parallel, touching 3
+        pixels apart or more). (D, pixels, [(u, v) where it touches], [("corner", point number) / ("side", point
+        numbers at its ends)], [strokes]) or None: the smallest D within reach pixels; valid(D): more checks."""
+        k = view[0]
+        C, F = np.asarray(C, float).reshape(-1, 2), np.asarray(F, float).reshape(-1, 2)
+        if closed is None:
+            closed = len(C) > 3 and np.array_equal(C[0], C[-1])
+            if closed:
+                C, F = C[:-1], F[:-1]
+        if len(C) < 2 or not len(self.seg):
+            return None
+        h = hull_idx(C)  # (only its outline can touch from outside; moving with F keeps it the outline)
+        if len(h) < 2:
+            return None
+        H, Fh = C[h], F[h]
+        step = np.abs(np.roll(h, -1) - h)
+        real = ((step == 1) | (step == len(C) - 1)) if closed else None  # (outline sides that are its own lines)
+        lo, hi = H.min(0) - 2 * reach / k, H.max(0) + 2 * reach / k
+        seg = self.seg
+        keep = np.all((np.maximum(seg[:, :2], seg[:, 2:]) >= lo) & (np.minimum(seg[:, :2], seg[:, 2:]) <= hi), 1)
+        keep &= np.hypot(seg[:, 2] - seg[:, 0], seg[:, 3] - seg[:, 1]) > 0
+        idx = np.flatnonzero(keep)
+        if not len(idx):
+            return None
+        r = seg[idx, 2:] - seg[idx, :2]
+        ln = np.hypot(r[:, 0], r[:, 1])
+        bend = (r[:-1] * r[1:]).sum(1) < BEND * ln[:-1] * ln[1:]
+        cut = np.flatnonzero((np.diff(idx) != 1) | (np.diff(self.owner[idx]) != 0) | (np.diff(self.index[idx]) != 1)
+                            | bend)
+        starts, ends = np.concatenate([[0], cut + 1]), np.concatenate([cut + 1, [len(idx)]])
+        run = np.repeat(np.arange(len(starts)), ends - starts)  # (each stretch: one stroke's pieces one after another,
+        arc = np.cumsum(ln)  # up to a sharp corner: a polyline's each piece, a curve's anchor with handles not in line)
+        span = 4 * reach / k
+
+        def near(c):  # (the pieces along its stroke within span of piece c)
+            r0, r1 = starts[run[c]], ends[run[c]]
+            return np.arange(r0 + np.searchsorted(arc[r0:r1], arc[c] - span),
+                             r0 + np.searchsorted(arc[r0:r1], arc[c] + span, "right"))
+
+        sep = self.contacts(idx, H, Fh, real, k)[0]
+        seeds = []  # (each dip in how near it is along a stroke: where it nearly rests)
+        for r0, r1 in zip(starts, ends):
+            s = sep[r0:r1]
+            o = np.concatenate([[np.inf], s, [np.inf]])
+            dip = np.flatnonzero(np.isfinite(s) & (o[1:-1] <= o[:-2]) & (o[1:-1] < o[2:]))
+            seeds += [r0 + j for j in dip if abs(s[j]) * k <= 1.5 * reach]
+        seeds = sorted(seeds, key=lambda c: abs(sep[c]))[:6]
+        tries = [(x, y) for i, x in enumerate(seeds) for y in seeds[i + 1:]] if two else [(x,) for x in seeds]
+        best = None
+        for start in tries:
+            got = self.follow(idx, near, start, H, Fh, real, k, reach)
+            if got and (best is None or got[1] < best[1]) and (valid is None or valid(got[0])):
+                best = got
+        if best is None:
+            return None
+        D, far, touch, where, owner = best
+        where = [("corner", int(h[w])) if w >= 0 else ("side", int(h[-1 - w]), int(h[-w % len(h)])) for w in where]
+        return D, far, touch, where, owner
+
+    def contacts(self, P, H, F, real, k):
+        """For pieces P (numbers in self.seg) and a shape's convex outline H (counter-clockwise, F as in rest_on;
+        real: which of its sides H[m] -> H[m + 1] are its own lines, None = none): how near the shape is to each
+        piece (sep, u units; below 0 = crossing; inf = not touching it within the piece / side), A (moving by D
+        changes sep by about A . D), where they'd touch and which part of the shape (its corner number, or for a
+        side -1 - its first corner). The corner nearest the piece's line touches it, or the piece's start point
+        touches a side, whichever is nearer."""
+        seg = self.seg[P]
+        p0, r = seg[:, :2], seg[:, 2:] - seg[:, :2]
+        ln = np.hypot(r[:, 0], r[:, 1])
+        n = np.column_stack([-r[:, 1], r[:, 0]]) / ln[:, None]
+        n *= np.where((((H.min(0) + H.max(0)) / 2 - p0) * n).sum(1) >= 0, 1.0, -1.0)[:, None]  # (toward its middle)
+        kk = furthest(H, -n)
+        sep = ((H[kk] - p0) * n).sum(1)
+        A = n * F[kk]
+        aa = (A * A).sum(1)
+        touch = H[kk] - (sep / np.where(aa == 0, np.inf, aa))[:, None] * A * F[kk]  # (after the smallest move)
+        t, past = ((touch - p0) * r).sum(1) / ln, PAST / k
+        sep = np.where((aa > 0) & (t >= -past) & (t <= ln + past), sep, np.inf)
+        where = kk.copy()
+        if real is not None:  # (a closed shape: the piece's start on one of its sides near that corner)
+            K, rows = len(H), np.arange(len(P))
+            e = np.roll(H, -1, 0) - H
+            el = np.hypot(e[:, 0], e[:, 1])
+            nu = np.column_stack([e[:, 1], -e[:, 0]]) / np.where(el == 0, 1, el)[:, None]  # (outward)
+            m = (kk[:, None] + np.arange(-3, 3)) % K
+            dm = ((p0[:, None] - H[m]) * nu[m]).sum(2)
+            m = m[rows, np.argmax(dm, 1)]
+            sb = ((p0 - H[m]) * nu[m]).sum(1)
+            tau = ((p0 - H[m]) * e[m]).sum(1) / np.where(el[m] == 0, np.inf, el[m] ** 2)
+            slack = past / np.where(el[m] == 0, np.inf, el[m])
+            fp = F[m] * (1 - tau)[:, None] + F[(m + 1) % K] * tau[:, None]  # (how its spot on the side moves)
+            ab = -nu[m] * fp
+            on = real[m] & (el[m] > 0) & (tau >= -slack) & (tau <= 1 + slack) & (sb < sep) & ((ab * ab).sum(1) > 0)
+            sep = np.where(on, sb, sep)
+            A = np.where(on[:, None], ab, A)
+            touch = np.where(on[:, None], p0, touch)
+            where = np.where(on, -1 - m, where)
+        return sep, A, touch, where
+
+    def follow(self, idx, near, start, H, F, real, k, reach):
+        """rest_on from pieces idx[start] (one or two): each step, along each one's stroke the dip in how near the
+        shape is (nearest the last one), then the move making it touch (both at once: their two lines); until it
+        stays, touching exactly and crossing nothing near. (D, pixels, [touch], [part of the shape], [strokes])."""
+        D, cur = np.zeros(2), list(start)
+        for _ in range(30):
+            Hs, pick, rows = H + F * D, [], []
+            for c in cur:
+                w = near(c)
+                sep, A, _, _ = self.contacts(idx[w], Hs, F, real, k)
+                o = np.concatenate([[np.inf], sep, [np.inf]])
+                dip = np.flatnonzero(np.isfinite(sep) & (o[1:-1] <= o[:-2]) & (o[1:-1] <= o[2:]))
+                if not len(dip):
+                    return None
+                b = dip[np.argmin(np.abs(w[dip] - c))]
+                pick.append(int(w[b]))
+                rows.append((sep[b], A[b]))
+            if len(rows) == 1:
+                (g, ai), = rows
+                step = -g * ai / (ai @ ai)
+            else:
+                (gi, ai), (gj, aj) = rows
+                det = ai[0] * aj[1] - ai[1] * aj[0]
+                if abs(det) < 0.1 * np.hypot(*ai) * np.hypot(*aj):  # (about parallel: no single spot)
+                    return None
+                step = np.array([(-gi * aj[1] + gj * ai[1]) / det, (-gj * ai[0] + gi * aj[0]) / det])
+            D = D + step
+            if np.hypot(*D) * k > 3 * reach:
+                return None
+            if pick == cur and np.hypot(*step) * k < 1e-7:
+                break
+            cur = pick
+        else:
+            return None
+        Hs, touch, where = H + F * D, [], []
+        for c in cur:
+            w = near(c)
+            sep, _, tp, wh = self.contacts(idx[w], Hs, F, real, k)
+            b = int(np.flatnonzero(w == c)[0])
+            if abs(sep[b]) * k > 1e-6 or sep[np.isfinite(sep)].min() * k < -1e-6:
+                return None
+            touch.append((float(tp[b, 0]), float(tp[b, 1])))
+            where.append(int(wh[b]))
+        far = float(np.hypot(*D) * k)
+        if far > reach or (len(cur) == 2 and np.hypot(touch[0][0] - touch[1][0], touch[0][1] - touch[1][1]) * k < 3):
+            return None
+        return (float(D[0]), float(D[1])), far, touch, where, [int(self.owner[idx[c]]) for c in cur]
 
     @staticmethod
     def crossing(seg, owner, index, x, y, view, reach):
