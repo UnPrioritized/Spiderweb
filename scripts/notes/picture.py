@@ -440,7 +440,6 @@ class Cancelled(Exception):
     """Making a picture was cancelled (a tick saw it)."""
 
 
-SURE = 1e-9  # (compiled spreading: two colours nearer each other than this, in squared OKLab, are picked by NumPy)
 _BAYER = (np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]) + 0.5) / 16 - 0.5
 
 
@@ -477,21 +476,21 @@ def _spread(cl, pal, pal_lab, strength, free, tick=None):
     done, so every cell on one slanted line (x + 2y the same) can go at once."""
     rows, cols = cl.shape[:2]
     fast = speed.loops()
-    if fast:  # (the compiled loop, cell by cell: the same picks)
+    lines = cols + 2 * (rows - 1)
+    if fast:  # (the compiled loop, the same lines: the same sums and picks, each line's OKLab still NumPy's)
         a0, free = np.ascontiguousarray(cl, float), np.ascontiguousarray(free, float)
         pal, pal_lab = np.ascontiguousarray(pal, float), np.ascontiguousarray(pal_lab, float)
-        idx, err, cur = np.zeros((rows, cols), np.int64), np.zeros((rows, cols, 3)), np.zeros(3)
-        y, x, forced = 0, 0, -1
-        while True:
-            if tick:
-                tick(y / rows)
-            y, x = fast.spread(a0, free, pal, pal_lab, _M1, _M2, float(strength), idx, err, cur, y, x, forced, SURE)
-            if y < 0:
-                return idx
-            forced = int(_nearest(oklab(np.clip(cur, 0, 1)[None]), pal_lab)[0])  # (too close to call: as below)
+        idx, err = np.zeros((rows, cols), np.int64), np.zeros((rows, cols, 3))
+        vals, clipped = np.zeros((min(rows, cols // 2 + 1), 3)), np.zeros((min(rows, cols // 2 + 1), 3))
+        lab = np.zeros((0, 3))
+        for line in range(lines + 1):  # (one more: the last line finished)
+            if tick and not line % 64:
+                tick(line / lines)
+            n = fast.spread_line(a0, free, pal, pal_lab, float(strength), idx, err, line, lab, vals, clipped)
+            lab = oklab(clipped[:n])
+        return idx
     a = cl.astype(float).copy()
     idx = np.zeros((rows, cols), int)
-    lines = cols + 2 * (rows - 1)
     for line in range(lines):
         if tick and not line % 64:
             tick(line / lines)

@@ -12,7 +12,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   midi_events    midi_out.track_data: one track's note-ons / offs as MIDI file bytes
   note_stretches engine.stretches (Multi channel): one shape's notes on a key joined into stretches
   nearest        picture._dist2(...).argmin(1) (Image to notes): each colour's nearest palette colour
-  spread         picture._spread: the error spreading (colours too close to call are picked by NumPy)
+  spread_line    picture._spread: the error spreading, one slanted line at a time (its OKLab left to NumPy)
 The first start compiles them (about a second, in the background); the result is kept in __pycache__ for the next
 starts (not in the exe: its files can't be kept, so it compiles each start)."""
 
@@ -424,56 +424,51 @@ def nearest(lab, cen):
 
 
 @njit(cache=CACHE, nogil=True)
-def spread(a0, free, pal, pal_lab, m1, m2, strength, idx, err, cur, y0, x0, forced, sure):
-    """picture._spread from cell (y0, x0) on, row by row (its slanted lines give every cell the same sums in the same
-    order: from up-left, up, left, up-right). err = each cell's error passed on. The colour is picked with this
-    loop's own OKLab sums, which may differ from NumPy's in the last bits: when the two nearest palette colours are
-    closer than `sure`, it stops there -> (y, x), the cell's colour in cur, for NumPy to pick (called again with
-    forced = that pick); done -> (-1, -1)."""
+def spread_line(a0, free, pal, pal_lab, strength, idx, err, line, lab, vals, clipped):
+    """One step of picture._spread: finishes slanted line `line - 1` (lab = NumPy's OKLab of its colours, vals = the
+    colours themselves: nearest palette colour like nearest(), error kept in err), then works out line `line`'s
+    colours (each cell the same sums in the same order as the NumPy code: up-left, up, left, up-right) into vals and
+    clipped (0..1, for NumPy's OKLab) -> how many cells it has. The OKLab is left to NumPy: its matrix product goes
+    to BLAS, whose last bits a loop can't promise to match."""
     rows, cols = idx.shape
-    k = len(pal)
-    v = np.empty(3)
-    for y in range(y0, rows):
-        for x in range(x0 if y == y0 else 0, cols):
-            ft = free[y, x]
-            for c in range(3):
-                t = a0[y, x, c]
-                if y > 0 and x > 0:
-                    t += err[y - 1, x - 1, c] * (1 / 16) * ft
-                if y > 0:
-                    t += err[y - 1, x, c] * (5 / 16) * ft
-                if x > 0:
-                    t += err[y, x - 1, c] * (7 / 16) * ft
-                if y > 0 and x + 1 < cols:
-                    t += err[y - 1, x + 1, c] * (3 / 16) * ft
-                v[c] = t
-            if forced >= 0 and y == y0 and x == x0:
-                best = forced
-            else:
-                c0, c1, c2 = min(max(v[0], 0.0), 1.0), min(max(v[1], 0.0), 1.0), min(max(v[2], 0.0), 1.0)
-                l0 = np.cbrt(c0 * m1[0, 0] + c1 * m1[0, 1] + c2 * m1[0, 2])
-                l1 = np.cbrt(c0 * m1[1, 0] + c1 * m1[1, 1] + c2 * m1[1, 2])
-                l2 = np.cbrt(c0 * m1[2, 0] + c1 * m1[2, 1] + c2 * m1[2, 2])
-                L0 = l0 * m2[0, 0] + l1 * m2[0, 1] + l2 * m2[0, 2]
-                L1 = l0 * m2[1, 0] + l1 * m2[1, 1] + l2 * m2[1, 2]
-                L2 = l0 * m2[2, 0] + l1 * m2[2, 1] + l2 * m2[2, 2]
-                best, bd = 0, 0.0
-                for j in range(k):
-                    d = (L0 - pal_lab[j, 0]) ** 2 + (L1 - pal_lab[j, 1]) ** 2 + (L2 - pal_lab[j, 2]) ** 2
-                    if j == 0 or d < bd:
-                        best, bd = j, d
-                for j in range(k):  # (the nearest other colour: too close = NumPy picks; a copy of it can't be)
-                    if (pal_lab[j, 0] != pal_lab[best, 0] or pal_lab[j, 1] != pal_lab[best, 1]
-                            or pal_lab[j, 2] != pal_lab[best, 2]):
-                        d = (L0 - pal_lab[j, 0]) ** 2 + (L1 - pal_lab[j, 1]) ** 2 + (L2 - pal_lab[j, 2]) ** 2
-                        if d - bd < sure:
-                            cur[:] = v
-                            return y, x
+    if line > 0:
+        y0 = max(0, (line - 1 - cols + 2) // 2)
+        for n in range(len(lab)):
+            y = y0 + n
+            x = line - 1 - 2 * y
+            best, bd = 0, 0.0
+            for j in range(len(pal_lab)):
+                d0, d1, d2 = lab[n, 0] - pal_lab[j, 0], lab[n, 1] - pal_lab[j, 1], lab[n, 2] - pal_lab[j, 2]
+                d = d0 * d0
+                d += d1 * d1
+                d += d2 * d2
+                if d != d:
+                    best = j
+                    break
+                if j == 0 or d < bd:
+                    best, bd = j, d
             idx[y, x] = best
             fs = strength * free[y, x]
             for c in range(3):
-                err[y, x, c] = (v[c] - pal[best, c]) * fs
-    return -1, -1
+                err[y, x, c] = (vals[n, c] - pal[best, c]) * fs
+    y0, y1 = max(0, (line - cols + 2) // 2), min(rows - 1, line // 2)
+    for n in range(max(0, y1 - y0 + 1)):
+        y = y0 + n
+        x = line - 2 * y
+        ft = free[y, x]
+        for c in range(3):
+            t = a0[y, x, c]
+            if y > 0 and x > 0:
+                t += err[y - 1, x - 1, c] * (1 / 16) * ft
+            if y > 0:
+                t += err[y - 1, x, c] * (5 / 16) * ft
+            if x > 0:
+                t += err[y, x - 1, c] * (7 / 16) * ft
+            if y > 0 and x + 1 < cols:
+                t += err[y - 1, x + 1, c] * (3 / 16) * ft
+            vals[n, c] = t
+            clipped[n, c] = min(max(t, 0.0), 1.0)
+    return max(0, y1 - y0 + 1)
 
 
 @njit(cache=CACHE, nogil=True)
@@ -534,6 +529,6 @@ def warm():
     midi_events(np.zeros((1, 6), np.int64), np.zeros(2, np.int64), 0, 1)
     note_stretches(np.zeros((1, 4), np.int64), True, 0, np.zeros(0, np.int64))
     nearest(np.zeros((1, 3)), np.zeros((1, 3)))
-    m = np.zeros((3, 3))
-    spread(np.zeros((1, 1, 3)), np.zeros((1, 1)), m, m, m, m, 1.0, np.zeros((1, 1), np.int64), np.zeros((1, 1, 3)),
-           np.zeros(3), 0, 0, -1, 0.0)
+    m = np.zeros((1, 3))
+    spread_line(np.zeros((1, 1, 3)), np.zeros((1, 1)), m, m, 1.0, np.zeros((1, 1), np.int64), np.zeros((1, 1, 3)), 0,
+                m[:0], m, m.copy())
