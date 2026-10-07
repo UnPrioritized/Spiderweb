@@ -1065,6 +1065,7 @@
  "pattern.curls": "Curls",
  "pattern.custom": "Custom",
  "pattern.can_t_work_it_out_at": "it can't be worked out at x = {x}",
+ "pattern.loops_taken": "\"loops\" is the Loops box: give that number another name",
  "pattern.edited": "{name} (edited by hand)",
  "pattern.circle": "Circle",
  "pattern.spiral": "Spiral",

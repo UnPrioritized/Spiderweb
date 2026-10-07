@@ -77,6 +77,8 @@ def pattern_names(text, along=""):
     names = formula(text, named=True).names
     if along.strip():
         names = names + [n for n in formula(along, named=True).names if n not in names]
+    if "loops" in names:  # (its box would be the Loops box: that number could never be changed)
+        raise ValueError(tr("pattern.loops_taken"))
     return names
 
 
