@@ -147,9 +147,30 @@ def clean_strokes(strokes):
                 out[-1]["role"] = st["role"]
             if isinstance(st.get("colour"), int) and 1 <= st["colour"] <= COLOURS and out:
                 out[-1]["colour"] = st["colour"]
+            layer = clean_layer(st.get("layer"))
+            if layer and out:
+                out[-1]["layer"] = layer
         except (AttributeError, KeyError, TypeError, ValueError):
             continue
     return out
+
+
+def clean_layer(layer):
+    """A drawer stroke's place in the drawer's layers list, from a file: {"name": its own name, "hidden": True,
+    "lock": True, "group": its group's name} (each only when set), or None."""
+    if not isinstance(layer, dict):
+        return None
+    out = {}
+    for key in ("name", "group"):
+        text = layer.get(key)
+        if isinstance(text, str):
+            text = "".join(c for c in text if c >= " ").strip()[:100].strip()
+            if text:
+                out[key] = text
+    for key in ("hidden", "lock"):
+        if layer.get(key) is True:
+            out[key] = True
+    return out or None
 
 
 def clean_curve(st, pts):

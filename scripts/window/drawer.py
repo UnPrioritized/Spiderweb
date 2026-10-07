@@ -29,6 +29,7 @@ from window import look
 from window.help import open_help
 from window.formula_host import DrawerHost, formula_menu
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
+from window.layers import DrawerLayers
 from window.sticky import REACH, Targets, key_points
 from window.widgets import Tooltip, symmetry_menu
 
@@ -187,9 +188,24 @@ def load_shape(name):
     return load_drawing(name)[0]
 
 
-def load_drawing(name):
+def placed_strokes(strokes):
+    """A drawing's strokes as a placed shape gets them: hidden ones left out (layers list), lines that meet end to
+    end joined (custom.join_strokes), no layer data. None if nothing is left."""
+    out = [{k: v for k, v in st.items() if k != "layer"} for st in strokes or []
+           if not (st.get("layer") or {}).get("hidden")]
+    return join_strokes(out) if out else None
+
+
+def load_drawing(name, layers=False):
     """A library shape's strokes (None if it's missing or broken) and its areas coloured by hand (areas.py). A
-    broken file named like a built-in shape gives the built-in one."""
+    broken file named like a built-in shape gives the built-in one. layers: as drawn, for the drawer (every stroke,
+    with its layer data); else as placed (placed_strokes)."""
+    strokes, areas = load_layers(name)
+    return (strokes if layers else placed_strokes(strokes)), areas
+
+
+def load_layers(name):
+    """load_drawing as drawn."""
     path, b = shape_path(name), built_in_name(name)
     strokes, areas = None, []
     if path:
@@ -243,7 +259,7 @@ def save_shape(name, strokes, areas=()):
 def rename_shape(old, new):
     """A saved shape gets a new name (its file too, when it can). Raises OSError; ValueError if it can't be read."""
     path = shape_path(old)
-    strokes, areas = load_drawing(old)
+    strokes, areas = load_drawing(old, layers=True)
     if not path or strokes is None:
         raise ValueError(old)
     to = free_path(new, keep=path)
@@ -258,38 +274,9 @@ def clean_name(name):
     return "".join(c for c in name if c >= " ").strip()[:NAME_MAX].strip()
 
 
-def help_box(parent, text):
-    """Grey help text that fills the rest of the panel; a scrollbar shows up when it doesn't fit.
-    frame.set_text(text) changes it."""
-    frame = ttk.Frame(parent)
-    t = tk.Text(frame, wrap="word", font=look.font(8), foreground=look.SOFT_TEXT, relief="flat", borderwidth=0,
-                highlightthickness=0, height=1, padx=0, pady=0, cursor="arrow", takefocus=0,
-                background=ttk.Style().lookup("TFrame", "background") or "SystemButtonFace")
-    sb = ttk.Scrollbar(frame, orient="vertical", command=t.yview)
-
-    def scrolled(first, last):
-        sb.set(first, last)
-        if float(first) <= 0 and float(last) >= 1:
-            sb.pack_forget()
-        elif not sb.winfo_ismapped():
-            sb.pack(side="right", fill="y", before=t)
-
-    def set_text(new):
-        t.config(state="normal")
-        t.delete("1.0", "end")
-        t.insert("1.0", new)
-        t.config(state="disabled")
-
-    t.config(yscrollcommand=scrolled)
-    set_text(text)
-    t.pack(side="left", fill="both", expand=True)
-    frame.set_text = set_text
-    return frame
-
-
 # ---------------------------------------------------------------- window
 
-class Drawer(tk.Toplevel):
+class Drawer(DrawerLayers, tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
@@ -334,24 +321,16 @@ class Drawer(tk.Toplevel):
         self.grid_n.trace_add("write", lambda *_: self.redraw())
         self.mirror.trace_add("write", lambda *_: self.redraw())
         self.protocol("WM_DELETE_WINDOW", self.close)
-        self.update_side_help()
         self.after(500, lambda: app.tips.show("drawer", parent=self))  # the first time it opens
 
     def tool_topic(self):
         return DRAWER_TOOL_TOPICS.get(self.tool.get(), "drawer")
 
-    def update_side_help(self):
-        """The side panel's help: the current tool's, then the drawer's (everything: Help, F1)."""
-        t, d = BY_ID[self.tool_topic()], BY_ID["drawer"]
-        self.side_help.set_text(tr("drawer.help_f1_every_tip_searchable", title=t['title'], text=t['text'],
-                                   text2=d['text']))
-
     def on_tool(self):
-        self.update_side_help()
         self.hover = None
         if self.tool.get() == "areas":
             if not self.area_bar.winfo_manager():
-                self.area_bar.pack(fill="x", pady=(8, 0), before=self.side_help)
+                self.area_bar.pack(fill="x", pady=(8, 0), before=self.layers_box)
             self.draw_swatches()
             self.show_colours_count()
         elif self.area_bar.winfo_manager():
@@ -390,11 +369,12 @@ class Drawer(tk.Toplevel):
 
     def area_info(self):
         """(AreaMap of the drawing in board u, v, which areas Fill / Spam fill as normal), remembered."""
-        key = json.dumps(self.strokes)
+        shown = self.shown()  # (hidden strokes are left out of the shape)
+        key = json.dumps(shown)
         if self._area_cache and self._area_cache[0] == key:
             return self._area_cache[1:3]
-        sh = {"kind": "custom", "strokes": self.strokes, "pts": AREA_FRAME, "fill": "fill"}
-        amap = shape_areas(sh) if self.strokes else None
+        sh = {"kind": "custom", "strokes": shown, "pts": AREA_FRAME, "fill": "fill"}
+        amap = shape_areas(sh) if shown else None
         inside = None
         if amap is not None:
             inside = areas_filled(sh, amap)
@@ -415,9 +395,10 @@ class Drawer(tk.Toplevel):
 
     def gaps(self):
         """The drawing's open outlines (custom.open_paths), remembered until the strokes change."""
-        key = json.dumps(self.strokes)
+        shown = self.shown()
+        key = json.dumps(shown)
         if self._gap_cache is None or self._gap_cache[0] != key:
-            self._gap_cache = (key, open_paths(self.strokes))
+            self._gap_cache = (key, open_paths(shown))
         return self._gap_cache[1]
 
     def area_at(self, e):
@@ -502,15 +483,16 @@ class Drawer(tk.Toplevel):
             _, lab, _ = self.face_info()
             shown = np.unique(lab[amap.exact()[4]])  # (each shown area's number, by a spot in it)
             paint, inside = paint[shown], inside[shown]
-        used = {int(c) for c in paint if c > 0} | {colour_of(st) for st in self.strokes if colour_of(st)}
+        shown = self.shown()
+        used = {int(c) for c in paint if c > 0} | {colour_of(st) for st in shown if colour_of(st)}
         own_fill = amap is not None and bool((inside & (paint < 0)).any())
-        own_line = any(not colour_of(st) and role_of(st) == "edge" for st in self.strokes)
+        own_line = any(not colour_of(st) and role_of(st) == "edge" for st in shown)
         return len(used) + (own_fill or own_line), len(used) + own_fill + 1
 
     def show_colours_count(self):
         if not self.area_bar.winfo_manager():
             return
-        n, with_outline = self.colours_count() if self.strokes else (0, 0)
+        n, with_outline = self.colours_count() if self.shown_idx() else (0, 0)
         text = tr("drawer.colours_used", n=n, most=COLOURS, m=with_outline)
         if with_outline > COLOURS:
             text += " " + tr("drawer.colours_too_many", most=COLOURS)
@@ -662,8 +644,7 @@ class Drawer(tk.Toplevel):
         self.colours_used.pack(anchor="w", pady=(3, 0))
         ttk.Button(self.area_bar, text=tr("drawer.areas_reset"), command=self.reset_areas).pack(anchor="w",
                                                                                               pady=(6, 0))
-        self.side_help = help_box(side, "")  # the current tool's help (update_side_help)
-        self.side_help.pack(fill="both", expand=True, pady=(8, 0))
+        self.build_layers(side)  # (where the tool's help was: that's behind Help now, user)
 
         self.canvas = tk.Canvas(self, bg=OFF_BOARD, highlightthickness=0, cursor="crosshair")
         self.canvas.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=(0, 6))
@@ -755,7 +736,8 @@ class Drawer(tk.Toplevel):
                 self.canvas.winfo_height() / 2 + self.center[1] * k)
 
     def stick_targets(self, skip=frozenset(), skip_pts=frozenset()):
-        """sticky.Targets of the strokes (but skip / skip_pts), remembered until they change."""
+        """sticky.Targets of the strokes (but skip / skip_pts, and hidden ones), remembered until they change."""
+        skip = skip | frozenset(i for i in range(len(self.strokes)) if self.is_hidden(i))
         key = (json.dumps(self.strokes), skip, skip_pts)
         if self._stick_cache is None or self._stick_cache[0] != key:
             self._stick_cache = (key, Targets(self.strokes, skip, skip_pts))
@@ -987,6 +969,8 @@ class Drawer(tk.Toplevel):
         x0, x1, y0, y1 = min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)
         found = []
         for i, st in enumerate(self.strokes):
+            if not self.pickable(i):
+                continue
             pts = np.array([self.to_screen(u, v) for u, v in stroke_points(st)], float).reshape(-1, 2)
             if len(pts) and line_touches_box(pts[:, 0], pts[:, 1], x0, y0, x1, y1):
                 found.append(i)
@@ -1000,6 +984,8 @@ class Drawer(tk.Toplevel):
         out = []
         for i in order:
             st = self.strokes[i]
+            if not self.pickable(i):
+                continue
             if st["kind"] == "ellipse":
                 u0, v0, u1, v1 = st["box"]
                 out += [(i, k, u, v) for k, (u, v) in enumerate(((u0, v0), (u1, v0), (u1, v1), (u0, v1)))]
@@ -1016,7 +1002,7 @@ class Drawer(tk.Toplevel):
 
     def curve_handle_at(self, x, y):
         """The point number of the selected curve's anchor / handle point at (x, y) (not its ends), or None."""
-        if self.sel is None or self.strokes[self.sel]["kind"] != "curve":
+        if self.sel is None or self.strokes[self.sel]["kind"] != "curve" or not self.pickable(self.sel):
             return None
         pts = self.strokes[self.sel]["pts"]
         r = max(7, 8 * self.scale)
@@ -1040,7 +1026,7 @@ class Drawer(tk.Toplevel):
                     self.drag = ("pen", i, j)
                 else:
                     # points in the same spot move together (a closed outline's ends, lines that meet)
-                    group = [(a, b) for a, st in enumerate(self.strokes) if st["kind"] != "ellipse"
+                    group = [(a, b) for a, st in enumerate(self.strokes) if st["kind"] != "ellipse" and self.pickable(a)
                              for b, p in enumerate(st["pts"])
                              if not self.is_pen_point(a, b) and math.dist(p, (u, v)) < 1e-6]
                     self.drag = ("points", group)
@@ -1060,7 +1046,7 @@ class Drawer(tk.Toplevel):
                 self.select(i)
             self.push_undo()  # (the last item: the stroke grabbed, None = the select box's empty space)
             self.drag = ("stroke", self.event_pt(e, snap=False),
-                         {k: json.dumps(self.strokes[k]) for k in self.chosen()}, json.dumps(self.boxes), i)
+                         {k: json.dumps(self.strokes[k]) for k in self.movable()}, json.dumps(self.boxes), i)
         else:  # a select box (Ctrl = adds another to what's selected); a click = deselect
             self.drag = ("boxsel", e.x, e.y, e.x, e.y, bool(ctrl))
         self.redraw()
@@ -1078,7 +1064,7 @@ class Drawer(tk.Toplevel):
         if kind == "boxsel":
             self.drag = self.drag[:3] + (e.x, e.y) + self.drag[5:]
             return self.redraw()
-        old = self.areas and json.dumps(self.strokes)  # (coloured areas keep their colours: carry_areas)
+        old = self.areas and json.dumps(self.shown())  # (coloured areas keep their colours: carry_areas)
         if kind == "points":
             pt = self.event_pt(e)
             for a, b in self.drag[1]:
@@ -1119,10 +1105,10 @@ class Drawer(tk.Toplevel):
                     st["pts"] = [[exact(u + du), exact(v + dv)] for u, v in st["pts"]]
                 self.strokes[i] = st
             self.boxes = [[u0 + du, v0 + dv, u1 + du, v1 + dv] for u0, v0, u1, v1 in json.loads(boxes)]
-        if old and old != json.dumps(self.strokes):
+        if old and old != json.dumps(self.shown()):
             frame = AREA_FRAME
             self.areas = carry_areas({"strokes": json.loads(old), "pts": frame, "areas": self.areas},
-                                     {"strokes": self.strokes, "pts": frame, "areas": self.areas})
+                                     {"strokes": self.shown(), "pts": frame, "areas": self.areas})
         self.redraw()
 
     def select_release(self):
@@ -1175,16 +1161,17 @@ class Drawer(tk.Toplevel):
     def delete_selected_stroke(self):
         if self.holding():
             return self.delete_dragged()
-        if self.chosen() and self.tool.get() == "select":
+        if self.movable() and self.tool.get() == "select":  # (locked / hidden ones stay: Del in the list)
             self.push_undo()
-            self.remove_strokes(self.chosen())
+            self.remove_strokes(self.movable())
             self.changed()
 
     # ------------------------------------------------------------ copy / paste / flip / turn
 
     def targets(self):
-        """What copy / flip / turn work on: the selected strokes, or the whole drawing when nothing is selected."""
-        return self.chosen() or list(range(len(self.strokes)))
+        """What copy / flip / turn work on: the selected strokes, or the whole drawing when nothing is selected
+        (not hidden or locked ones)."""
+        return self.movable() if self.chosen() else [i for i in range(len(self.strokes)) if self.pickable(i)]
 
     def copy(self):
         if self.strokes:
@@ -1273,7 +1260,8 @@ class Drawer(tk.Toplevel):
         """For each coloured area: whether it goes along when strokes idx are flipped / turned (all of them: the whole
         drawing). It does when those strokes close it in more tightly than the others do (a bar turned inside a box:
         the bar's colour, not the box's)."""
-        return carried_spots(self.strokes, idx, self.areas, AREA_FRAME)
+        shown = self.shown_idx()  # (as the shape is: hidden strokes left out)
+        return carried_spots(self.shown(), [shown.index(i) for i in idx if i in shown], self.areas, AREA_FRAME)
 
     def on_drag(self, e):
         self.show_position(e)
@@ -1655,6 +1643,8 @@ class Drawer(tk.Toplevel):
 
     def hit_stroke(self, x, y):
         for i in range(len(self.strokes) - 1, -1, -1):
+            if not self.pickable(i):
+                continue
             xy = self.screen_points(stroke_points(self.strokes[i]))
             pts = list(zip(xy[::2], xy[1::2]))
             if len(pts) == 1 and math.hypot(pts[0][0] - x, pts[0][1] - y) < 8:
@@ -1786,11 +1776,12 @@ class Drawer(tk.Toplevel):
         """After any change. settle: lines drawn, erased or changed in one go: coloured areas go where most of each
         went (custom.settled_areas); not after drags (carry_areas did it), undo / redo, or moves that took the
         colours along themselves."""
-        now = json.dumps(self.strokes)
+        shown = self.shown()
+        now = json.dumps(shown)
         if settle and self.areas and self._settled is not None and self._settled != now:
             frame = AREA_FRAME
             self.areas = settled_areas({"strokes": json.loads(self._settled), "pts": frame, "areas": self.areas},
-                                       {"strokes": self.strokes, "pts": frame, "areas": self.areas})
+                                       {"strokes": shown, "pts": frame, "areas": self.areas})
         self._settled = now
         self.dirty = True
         if self.sel is not None and self.sel >= len(self.strokes):
@@ -1913,7 +1904,7 @@ class Drawer(tk.Toplevel):
         self.strokes, self.undo_stack, self.draft = strokes, [], None
         self.deselect()
         self.areas = [list(a) for a in areas]
-        self._settled = json.dumps(self.strokes)
+        self._settled = json.dumps(self.shown())
         self.redo_stack, self.redo_kept = [], []
         self.name.set(name)
         self.saved_name = name or None
@@ -1973,10 +1964,7 @@ class Drawer(tk.Toplevel):
             if not messagebox.askyesno(tr("drawer.spiderweb"), tr("drawer.changed_elsewhere", name=name),
                                        icon="warning", parent=self):
                 return None
-        self.strokes = join_strokes(self.strokes)
-        self._settled = json.dumps(self.strokes)  # (the same lines)
-        self.deselect()  # joining can change the order
-        try:
+        try:  # (as drawn, layers and all: lines meeting end to end are joined when the shape is placed)
             save_shape(name, self.strokes, self.areas)
         except OSError as e:
             messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_save", e=e), parent=self)
@@ -2044,7 +2032,10 @@ class Drawer(tk.Toplevel):
         return bool(self.saved_name) and shape_stamp(self.saved_name) != self.saved_stamp
 
     def use(self):
-        same = (self.saved_name and clean_name(self.name.get()) == self.saved_name and not self.dirty
+        if self.strokes and not self.shown_idx():
+            messagebox.showerror(tr("drawer.spiderweb"), tr("layers.all_hidden"), parent=self)
+            return
+        same =(self.saved_name and clean_name(self.name.get()) == self.saved_name and not self.dirty
                 and not self.changed_elsewhere())
         name = self.saved_name if same else self.save()
         if name:
@@ -2102,12 +2093,15 @@ class Drawer(tk.Toplevel):
                 c.create_line(*coords, fill=look.MIRROR_LINE, width=max(2, round(2 * self.scale)))
         w = max(2, round(2 * self.scale))
         gaps = self.gaps()
-        closed = any(not role_of(st) for st in self.strokes) and not gaps
+        shown_idx = self.shown_idx()  # (hidden strokes aren't drawn)
+        closed = any(not role_of(self.strokes[i]) for i in shown_idx) and not gaps
         chosen = set(self.chosen())
-        for i, st in enumerate(self.strokes):  # a stroke with formulas: the stroke as drawn (the origin path), dashed
+        for i in shown_idx:  # a stroke with formulas: the stroke as drawn (the origin path), dashed
+            st = self.strokes[i]
             if st["kind"] != "ellipse" and has_formula(st):
                 self.draw_stroke(plain_stroke(st), look.ORIGIN_PICKED if i in chosen else look.ORIGIN, 1, dash=(6, 4))
-        for i, st in enumerate(self.strokes):  # outline only: dotted; fill line: thin dashes
+        for i in shown_idx:  # outline only: dotted; fill line: thin dashes
+            st = self.strokes[i]
             role = role_of(st)
             color = (look.STROKE_PICKED if i in chosen else
                      look.readable(SLOT_COLORS[(colour_of(st) - 1) % len(SLOT_COLORS)][1])
@@ -2121,7 +2115,7 @@ class Drawer(tk.Toplevel):
             self.draw_pieces(pieces, w + 1)
         s = self.scale
         r, h = 4 * s, 3.5 * s
-        sel = self.strokes[self.sel] if self.sel is not None else None
+        sel = self.strokes[self.sel] if self.sel is not None and self.pickable(self.sel) else None
         curve = sel if sel and sel["kind"] == "curve" else None
         if curve:  # handle lines: blue on a white edge
             for width, color in ((max(3, round(3.5 * s)), look.HANDLE_FILL), (max(1, round(1.5 * s)), look.HANDLE)):
@@ -2169,9 +2163,12 @@ class Drawer(tk.Toplevel):
                 c.create_line(x - q, y + q, x + q, y - q, fill=STICK_COLOR, width=lw)
             else:
                 c.create_polygon(x, y - q, x + q, y, x, y + q, x - q, y, fill="", outline=STICK_COLOR, width=lw)
+        hidden = len(self.strokes) - len(shown_idx)
         if not self.strokes:
             text = tr("drawer.nothing_drawn_yet")
-        elif all(role_of(st) for st in self.strokes):
+        elif not shown_idx:
+            text = tr("layers.all_hidden_state")
+        elif all(role_of(self.strokes[i]) for i in shown_idx):
             amap = self.area_info()[0] if self.areas else None  # (an area coloured by hand is filled anyway)
             closed = amap is not None and bool((self.area_paint(amap) > 0).any())
             text = tr("drawer.only_coloured_filled" if closed else "drawer.nothing_to_fill")
@@ -2181,9 +2178,13 @@ class Drawer(tk.Toplevel):
             text = tr("drawer.one_gap_red_dots_fill_and")
         else:
             text = tr("drawer.open_ends_red_dots_fill_and")
+        if hidden and shown_idx:  # (user: warn that hidden strokes are left out)
+            text += "\n" + tr("layers.hidden_warn", n=hidden)
+            closed = False
         if self.dirty and self.strokes:
             text += tr("drawer.not_saved_yet")
         self.state_label.config(text=text, foreground=look.GOOD if closed else look.WARN_DARK)
+        self.sync_layers()
 
     def draw_draft_points(self, r, h):
         """The points of the stroke being drawn: its ends, a polyline's / square's corners, an arc's three points

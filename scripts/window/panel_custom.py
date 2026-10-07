@@ -732,7 +732,7 @@ class CustomPanel:
             return
         self.drawer = Drawer(self)
         name = self.custom_pick.get().removeprefix(MISSING_MARK) or self.custom_shape
-        strokes, areas = load_drawing(name) if name else (None, [])
+        strokes, areas = load_drawing(name, layers=True) if name else (None, [])
         if strokes:
             self.drawer.open_shape(name, strokes, areas)
 
