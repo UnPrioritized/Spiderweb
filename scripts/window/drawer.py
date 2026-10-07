@@ -23,13 +23,13 @@ from files.safefile import write_text
 from files.clipboard import get_text, put_text
 from files.share import LONG_LINE, ShareError, drawing_line, made_by, read_drawing, unpack
 from files.speed import Photo
-from files.system import double_click_ms
+from files.system import ALT, double_click_ms
 from roll.roll_shared import BOX_STILL, grab_while_panning, line_touches_box, mouse_trail, shown_points
 from window import look
 from window.help import open_help
 from window.formula_host import DrawerHost, formula_menu
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
-from window.layers import DrawerLayers, without_group
+from window.layers import DrawerLayers, pasted
 from window.sticky import REACH, Targets, key_points
 from window.widgets import Tooltip, symmetry_menu
 
@@ -45,7 +45,7 @@ TOOLS = [("select", tr("drawer.select"), "v"), ("erase", tr("drawer.eraser"), "e
          ("poly", tr("drawer.polyline"), "p"), ("free", tr("drawer.freehand"), "f"), ("curve", tr("drawer.curve"), "c"),
          ("arc", tr("drawer.arc"), "a"), ("square", tr("drawer.square"), "s"), ("circle", tr("drawer.circle"), "o"),
          ("areas", tr("drawer.areas"), "b")]
-SHIFT, CTRL, ALT = 0x1, 0x4, 0x20000
+SHIFT, CTRL = 0x1, 0x4
 STROKE_COLOR = look.SHAPE_LINE  # (a stroke with an outline colour: that colour's dark shade)
 # Areas (areas.py) on the board: what Fill / Spam fill as normal, an area emptied by hand, the outside, the board
 AREA_NORMAL, AREA_EMPTY, OFF_BOARD, BOARD = look.AREA_NORMAL, look.AREA_EMPTY, look.DRAWER_BG, look.BOARD
@@ -83,8 +83,28 @@ def same_stroke(a, b):
     if a["kind"] == "ellipse":
         return all(abs(p - q) < 1e-6 for p, q in zip(a["box"], b["box"]))
     pa, pb = a["pts"], b["pts"]
-    return len(pa) == len(pb) and any(all(math.dist(p, q) < 1e-6 for p, q in zip(pa, side))
-                                      for side in (pb, pb[::-1]))
+    if len(pa) != len(pb):
+        return False
+
+    def near(p, q):
+        return math.dist(p, q) < 1e-6
+
+    def same(side):
+        return all(near(p, q) for p, q in zip(pa, side))
+    if same(pb) or same(pb[::-1]):
+        return True
+    if len(pa) < 3 or not (near(pa[0], pa[-1]) and near(pb[0], pb[-1])):
+        return False
+    if a["kind"] == "arc":  # a whole circle: the same one from the other end of its line across
+        return near(pa[0], pb[1]) and near(pa[1], pb[0])
+    step = 3 if a["kind"] == "curve" else 1  # closed: the same outline from any of its points (a curve's anchors)
+    for side in (pb, pb[::-1]):
+        ring = side[:-1]
+        for s in range(step, len(ring), step):
+            turned = ring[s:] + ring[:s]
+            if same(turned + turned[:1]):
+                return True
+    return False
 
 
 def rgb(color):
@@ -576,13 +596,16 @@ class Drawer(DrawerLayers, tk.Toplevel):
         bar = ttk.Frame(self, padding=(6, 0, 6, 4))
         bar.pack(fill="x")
         ttk.Label(bar, text=tr("drawer.grid")).pack(side="left", padx=(0, 4))
-        ttk.Combobox(bar, textvariable=self.grid_n, values=GRIDS, width=4, state="readonly").pack(side="left")
+        grid = ttk.Combobox(bar, textvariable=self.grid_n, values=GRIDS, width=4, state="readonly")
+        grid.pack(side="left")
         ttk.Label(bar, text=tr("drawer.mirror")).pack(side="left", padx=(12, 4))
         names = [tr("drawer.mirror_" + m) for m in MIRRORS]
         b = ttk.Combobox(bar, textvariable=self.mirror, values=names, width=max(map(len, names)) + 1,
                          state="readonly")
         b.pack(side="left")
         Tooltip(b, tr("drawer.mirror_tip"))
+        for box in (grid, b):  # a choice picked: the keys go to the drawing again (Enter, Esc, tool keys)
+            box.bind("<<ComboboxSelected>>", lambda e: self.canvas.focus_set(), add="+")
         ttk.Button(bar, text=tr("drawer.clear"), command=self.clear).pack(side="left", padx=(12, 0))
         ttk.Button(bar, text=tr("drawer.reset_view"), command=self.reset_view).pack(side="left", padx=(12, 0))
         ttk.Button(bar, text=tr("drawer.help_f1"), command=self.open_help).pack(side="left", padx=(12, 0))
@@ -678,18 +701,14 @@ class Drawer(DrawerLayers, tk.Toplevel):
         c.bind("<MouseWheel>", self.on_wheel)
         self.bind("<Key>", self.on_key)
         self.bind("<F1>", lambda e: self.open_help())
-        for k in ("z", "Z"):
-            self.bind(f"<Control-{k}>", lambda e: (self.undo(), "break")[1])
-        for k in ("y", "Y"):
-            self.bind(f"<Control-{k}>", lambda e: (self.redo(), "break")[1])
-        for keys, fn in (("c C", self.copy), ("v V", self.paste), ("h H", lambda: self.flip(True)),
+        for keys, fn in (("z Z", self.undo), ("y Y", self.redo), ("c C", self.copy), ("v V", self.paste), ("h H", lambda: self.flip(True)),
                          ("j J", lambda: self.flip(False)), ("Left", lambda: self.turn(False)),
                          ("Right", lambda: self.turn(True))):
             for k in keys.split():
                 self.bind(f"<Control-{k}>", self.hotkey(fn))
 
     def hotkey(self, fn):
-        """A drawer shortcut that leaves the name box alone."""
+        """A drawer shortcut that leaves text boxes alone (the name box, a layer being renamed)."""
         def handler(e):
             if isinstance(e.widget, (tk.Entry, ttk.Entry)):
                 return None
@@ -947,7 +966,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
             self.redraw()
             return
         if tool == "free":
-            self.draft = {"kind": "poly", "pts": [self.event_pt(e, snap=False)]}
+            self.draft = {"kind": "poly", "pts": [self.mirror_end(self.event_pt(e, snap=False), e.state)]}
             trail = mouse_trail(e.x_root, e.y_root, None)
             self.drag = ("free", e.x, e.y, trail[-1][2] if trail else None)
             return
@@ -1238,7 +1257,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
             return
         self.pastes += 1
         d = self.pastes / int(self.grid_n.get())
-        new = [without_group(self.map_stroke(st, lambda u, v: (u + d, v - d))) for st in json.loads(self.clipboard)]
+        new = [pasted(self.map_stroke(st, lambda u, v: (u + d, v - d))) for st in json.loads(self.clipboard)]
         self.push_undo()
         self.strokes += new
         self.sel = len(self.strokes) - 1  # the pasted strokes are selected, so they can be moved together
@@ -1447,6 +1466,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
             fx, fy = self.to_screen(*pts[0])
             if len(pts) >= 3 and math.hypot(e.x - fx, e.y - fy) < 12 * self.scale:
                 pts.append(list(pts[0]))  # let go near the start: closed
+            else:
+                pts[-1] = self.mirror_end(pts[-1], e.state)
             return self.commit(pts)
         if st["kind"] == "ellipse":
             u0, v0, u1, v1 = st["box"]
@@ -1571,8 +1592,9 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self.show_menu(e, i)
 
     def show_group_menu(self, e):
-        """The menu for several selected strokes: what works on all of them at once."""
-        idx = self.chosen()
+        """The menu for several selected strokes: what works on all of them at once (roles, colour, delete: only
+        the ones the board can change, like Del; the layer items: all of them)."""
+        picked, idx = self.chosen(), self.movable()
         m = tk.Menu(self, tearoff=0)
         roles = {role_of(self.strokes[i]) or "both" for i in idx}
         self._role_var = tk.StringVar(value=roles.pop() if len(roles) == 1 else "")  # (kept, so the dot shows)
@@ -1586,12 +1608,13 @@ class Drawer(DrawerLayers, tk.Toplevel):
             state="normal" if colours else "disabled")
         m.add_separator()
         m.add_command(label=tr("drawer.delete_strokes", n=len(idx)), accelerator=tr("drawer.del"),
-                      command=lambda: self.delete_stroke(idx[0]))
-        m.add_command(label=tr("drawer.copy_strokes", n=len(idx)), accelerator=tr("drawer.ctrl_c"), command=self.copy)
+                      command=lambda: self.delete_stroke(idx[0]), state="normal" if idx else "disabled")
+        m.add_command(label=tr("drawer.copy_strokes", n=len(idx)), accelerator=tr("drawer.ctrl_c"), command=self.copy,
+                      state="normal" if idx else "disabled")
         m.add_command(label=tr("drawer.paste"), accelerator=tr("drawer.ctrl_v"), command=self.paste,
                       state="normal" if self.clipboard else "disabled")
         m.add_separator()
-        self.layer_menu_items(m, idx)
+        self.layer_menu_items(m, picked)
         self.add_flip_turn(m)
         try:
             m.tk_popup(e.x_root, e.y_root)
@@ -1646,8 +1669,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
     def add_curve_anchor(self, e, near=None):
         """A new anchor on the selected curve where it's nearest to the mouse, moved to the mouse (snapped unless
         Shift). near: only if the curve is that close (pixels)."""
-        if self.sel is None or self.strokes[self.sel]["kind"] != "curve":
-            return
+        if self.sel is None or self.strokes[self.sel]["kind"] != "curve" or not self.pickable(self.sel):
+            return  # (a locked / hidden curve picked in the layers list stays as it is)
         st = self.strokes[self.sel]
         seg, t, d = nearest(st["pts"], self.to_xy, e.x, e.y)
         if near is not None and d > near:
@@ -1711,8 +1734,12 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self.changed()
 
     def delete_stroke(self, i):
+        """Menu > Delete on stroke i: it, or the picked ones it's among (locked / hidden ones stay, like Del)."""
+        gone = [k for k in (self.chosen() if i in self.chosen() else [i]) if self.pickable(k)]
+        if not gone:
+            return
         self.push_undo()
-        self.remove_strokes(self.chosen() if i in self.chosen() else [i])
+        self.remove_strokes(gone)
         self.changed()
 
     def poly_point(self, pt, e):
@@ -1797,6 +1824,18 @@ class Drawer(DrawerLayers, tk.Toplevel):
         return ([[[0.5, -far], [0.5, far]]] if mode in ("h", "both") else []) + \
                ([[[-far, 0.5], [far, 0.5]]] if mode in ("v", "both") else [])
 
+    def mirror_end(self, pt, state):
+        """A freehand stroke's first / last point near a mirror line: on it, so its halves join (Shift = free)."""
+        if state & SHIFT:
+            return pt
+        mode, k = self.mirror_mode(), self.px()
+        u, v = pt
+        if mode in ("h", "both") and abs(u - 0.5) * k < REACH:
+            u = 0.5
+        if mode in ("v", "both") and abs(v - 0.5) * k < REACH:
+            v = 0.5
+        return [u, v]
+
     def mirror_side(self, u, v):
         """Where the board shows the mirrored side (faint grey): [u, v] -> bool (numpy arrays work too)."""
         mode = self.mirror_mode()
@@ -1877,12 +1916,12 @@ class Drawer(DrawerLayers, tk.Toplevel):
         """After any change. settle: lines drawn, erased or changed in one go: coloured areas go where most of each
         went (custom.settled_areas); not after drags (carry_areas did it), undo / redo, or moves that took the
         colours along themselves."""
-        shown = self.shown()
-        now = json.dumps(shown)
+        bare = self.bare()  # (hidden strokes too: hiding one for a while doesn't merge the areas it splits)
+        now = json.dumps(bare)
         if settle and self.areas and self._settled is not None and self._settled != now:
             frame = AREA_FRAME
             self.areas = settled_areas({"strokes": json.loads(self._settled), "pts": frame, "areas": self.areas},
-                                       {"strokes": shown, "pts": frame, "areas": self.areas})
+                                       {"strokes": bare, "pts": frame, "areas": self.areas})
         self._settled = now
         self.dirty = True
         if self.sel is not None and self.sel >= len(self.strokes):
@@ -2005,7 +2044,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         name = self.picked()
         if not name or not self.keep_changes():
             return
-        strokes, areas = load_drawing(name)
+        strokes, areas = load_drawing(name, layers=True)  # (as drawn: hidden strokes, names, locks, groups)
         if strokes is None:
             messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_read_the_shape", name=name), parent=self)
             return
@@ -2015,7 +2054,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self.strokes, self.undo_stack, self.draft = strokes, [], None
         self.deselect()
         self.areas = [list(a) for a in areas]
-        self._settled = json.dumps(self.shown())
+        self._settled = json.dumps(self.bare())
         self.redo_stack, self.redo_kept = [], []
         self.name.set(name)
         self.saved_name = name or None

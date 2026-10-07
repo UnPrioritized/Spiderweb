@@ -10,9 +10,10 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
+from files.system import ALT
 from window import look
 
-SHIFT, CTRL, ALT = 0x1, 0x4, 0x20000
+SHIFT, CTRL = 0x1, 0x4
 EYE, LOCK = "👁", "🔒"
 DRAG_PX = 4  # a press moving further than this drags rows
 GROUP = "g:"  # a group row's id: GROUP + its name (a stroke row's: "s" + its number)
@@ -45,6 +46,19 @@ def without_group(st):
     return dict(st, layer=lay) if lay else st
 
 
+def pasted(st):
+    """A pasted copy of the stroke: out of its group, and a kind-and-number name ("Line 2", kept once the order
+    changed) left off, so the copy counts on from the highest number ("Line 4"); other names stay."""
+    st = without_group(st)
+    lay = st.get("layer") or {}
+    word, _, num = (lay.get("name") or "").rpartition(" ")
+    if word == tr(kind_key(st)) and num.isdigit():
+        lay = {k: v for k, v in lay.items() if k != "name"}
+        st = {k: v for k, v in st.items() if k != "layer"}
+        return dict(st, layer=lay) if lay else st
+    return st
+
+
 class DrawerLayers:
     # ------------------------------------------------------------ what's shown / pickable
 
@@ -74,6 +88,10 @@ class DrawerLayers:
         """The strokes the shape is made of (hidden ones left out), without their layer data (so renaming or
         locking doesn't make the areas be worked out again)."""
         return [{k: v for k, v in self.strokes[i].items() if k != "layer"} for i in self.shown_idx()]
+
+    def bare(self):
+        """Every stroke, hidden ones too, without its layer data."""
+        return [{k: v for k, v in st.items() if k != "layer"} for st in self.strokes]
 
     def movable(self):
         """The picked strokes the board can change (moving, flipping, deleting with Del on the board)."""

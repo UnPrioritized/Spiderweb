@@ -5,6 +5,7 @@ import ctypes
 import sys
 
 WINDOWS = sys.platform == "win32"
+ALT = 0x20000 if WINDOWS else 0x8  # Alt held, in a Tk event's state (Linux: Mod1)
 
 
 def double_click_ms():

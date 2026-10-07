@@ -8,6 +8,7 @@ import os
 import numpy as np
 
 from files.about import ICONS
+from files.system import ALT  # (used from here by the piano roll's parts)
 
 from notes.engine import cached_path, cached_strokes  # (used from here by the piano roll's parts)
 from window import look
@@ -71,7 +72,7 @@ SLOT_COLORS = [("#7ea6f5", "#1f3a93"), ("#f58e8e", "#8f1f1f"), ("#8fd68f", "#1f6
 SELECTED_COLOR = ("#ffb65c", "#9a4b00")
 DRAFT_COLOR = ("#9be39b", "#1d6b1d")
 
-SHIFT, CTRL, ALT = 0x1, 0x4, 0x20000
+SHIFT, CTRL = 0x1, 0x4
 # the Select tool's mouse pointer: a cross (its middle = the spot pointed at) with a small dotted box
 SELECT_CURSOR = "{@" + os.path.join(ICONS, "select.cur").replace("\\", "/") + "}"
 GRAB_CURSOR = "{@" + os.path.join(ICONS, "grab.cur").replace("\\", "/") + "}"  # a closed hand
