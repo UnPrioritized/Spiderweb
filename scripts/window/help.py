@@ -33,8 +33,9 @@ def look_box(parent):
         how = next(k for k, n in names.items() if n == var.get())
         try:
             look.save_look(how)
-        except OSError as err:
-            messagebox.showerror(tr("look.title"), tr("look.not_saved", error=err), parent=box.winfo_toplevel())
+        except OSError:
+            messagebox.showerror(tr("look.title"), tr("look.not_saved"), parent=box.winfo_toplevel())
+            var.set(names.get(look.read_look(), names["light"]))  # (back to the pick that's saved)
             return
         if look.is_dark(how) != look.DARK:
             messagebox.showinfo(tr("look.title"), tr("look.restart"), parent=box.winfo_toplevel())

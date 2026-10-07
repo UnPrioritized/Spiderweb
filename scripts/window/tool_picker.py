@@ -62,12 +62,12 @@ class ToolPicker:
         self.label = {key: f"{label} ({hot.upper()})" for key, label, hot in tools}
         self.last, self.pins, self.popup = FIRST, [], None
         size = max(SIZE, round(SIZE * app.scale))
-        self.pin_on, self.pin_off = _picture(size, (0, 0, 0)), _picture(size, (176, 176, 176))
+        self.pin_on, self.pin_off = _picture(size, look.rgb(look.ICON)), _picture(size, look.rgb(look.ICON_OFF))
         box = self.frame = ttk.Frame(parent)
         self.main = ttk.Radiobutton(box, variable=app.tool, style="Toolbutton")
         self.main.pack(side="left")
         self.main_tip = Tooltip(self.main, "")
-        self.arrow_pic = _picture(size, (0, 0, 0), _arrow_inside)  # (drawn, so it sits right in the middle)
+        self.arrow_pic = _picture(size, look.rgb(look.ICON), _arrow_inside)  # (drawn, so it sits right in the middle)
         self.arrow = ttk.Button(box, image=self.arrow_pic, style="Toolbutton", command=self.open, takefocus=False)
         self.arrow.pack(side="left")
         Tooltip(self.arrow, tr("app.tools_list_tip"))

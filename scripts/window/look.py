@@ -11,7 +11,7 @@ import os
 
 from files.about import HERE
 from files.safefile import write_text
-from files.system import dark_system
+from files.system import WINDOWS, dark_system
 
 LOOKS = ("light", "dark", "windows")  # (saved as these; windows = follow the system's setting)
 LOOK_FILE = os.path.join(HERE, "look.json")
@@ -89,6 +89,10 @@ FUTURE, FUTURE_PICKED = pick("#a0a0a0", "#77777b"), pick("#ffffff")  # History: 
 MISSING_SHAPE = pick("#808080", "#8a8a8e")  # a placed shape's name the library no longer has
 LIST_AWAY = pick("#d9d9d9", "#55555a")  # a picked list row while the keyboard is elsewhere
 LIST_AWAY_TEXT = pick("black", "#e2e2e4")
+LIST_HERE = pick("SystemHighlight" if WINDOWS else "#3874d8", "#2f6fd0")  # ... while it has the keyboard
+LIST_HERE_TEXT = pick("SystemHighlightText" if WINDOWS else "#ffffff", "#ffffff")
+ICON = pick("#000000", "#e2e2e4")  # small drawn pictures on buttons (snap notes, ▾, a pinned tool's pin)
+ICON_OFF = pick("#b0b0b0", "#6c6c70")  # an unpinned tool's pin
 SEARCH_HIT = pick("#fff08a", "#6b6420")  # Help: the words searched for
 OUTLINE_SOFT = pick("#555", "#8a8a8e")  # a thin edge round a small colour box
 
@@ -223,6 +227,14 @@ BUTTON_BG, BUTTON_HOT, BUTTON_DOWN = "#4a4a4d", "#57575a", "#424245"
 EDGE, PICK_BG = "#5c5c5f", "#2f6fd0"
 
 
+TITLED = set()  # the open windows whose title bar was made dark (apply)
+
+
+def rgb(colour):
+    """"#rrggbb" as (r, g, b) 0-255 (for pictures drawn pixel by pixel)."""
+    return tuple(int(colour[i:i + 2], 16) for i in (1, 3, 5))
+
+
 def readable(colour):
     """A colour made for a white background, light enough to see on the dark one (its hue kept): the light look
     keeps it as it is."""
@@ -265,6 +277,9 @@ def apply(root):
                      lowerbordercolor=EDGE)
         st.map(name, background=[("active", "#424245")], indicatorbackground=[("pressed", BUTTON_BG),
                                                                                ("disabled", WINDOW_BG)])
+    # (half ticked = a filled blue square: clam's own half tick shows as a full ✕ with these colours)
+    st.map("TCheckbutton", indicatorbackground=[("alternate", PICK_BG), ("pressed", BUTTON_BG),
+                                                ("disabled", WINDOW_BG)], indicatorforeground=[("alternate", PICK_BG)])
     for name in ("TEntry", "TSpinbox", "TCombobox"):
         st.configure(name, lightcolor=FIELD_BG, darkcolor=FIELD_BG)
         st.map(name, fieldbackground=[("disabled", WINDOW_BG), ("readonly", FIELD_BG)],
@@ -295,12 +310,12 @@ def apply(root):
         root.option_add(key, value)
     root.configure(background=WINDOW_BG)  # (made before the defaults above: shows round the panes)
     from window.synth_look import dark_title
-    darkened = set()
 
     def title(e):
         w = e.widget
-        if w not in darkened:  # (a moment after it shows: set at once, some windows kept a light title bar)
-            darkened.add(w)
+        if w not in TITLED and not w.wm_overrideredirect():  # (no title bar: tooltips, the tools list)
+            TITLED.add(w)  # (a moment after it shows: set at once, some windows kept a light title bar)
+            w.bind("<Destroy>", lambda e: TITLED.discard(w) if e.widget is w else None, add="+")
             w.after(20, lambda: w.winfo_exists() and dark_title(w))
     for cls in (root.winfo_class(), "Toplevel"):  # (the main window's class is the program's name)
         root.bind_class(cls, "<Map>", title, add="+")

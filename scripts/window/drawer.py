@@ -629,8 +629,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
         lb.bind("<BackSpace>", lambda e: "break")
         lb.bind("<Return>", lambda e: (self.open_selected(), "break")[1])
         lb.bind("<F2>", lambda e: (self.start_rename(), "break")[1])
-        lb.bind("<FocusIn>", lambda e: lb.config(selectbackground="SystemHighlight",
-                                                 selectforeground="SystemHighlightText"))
+        lb.bind("<FocusIn>", lambda e: lb.config(selectbackground=look.LIST_HERE,
+                                                 selectforeground=look.LIST_HERE_TEXT))
         lb.bind("<FocusOut>", lambda e: lb.config(selectbackground=LIST_AWAY, selectforeground=look.LIST_AWAY_TEXT))
         lb.config(selectbackground=LIST_AWAY, selectforeground=look.LIST_AWAY_TEXT)
         self.renaming = None  # the box a name is typed into while renaming (start_rename)

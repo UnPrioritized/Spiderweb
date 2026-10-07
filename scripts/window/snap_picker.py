@@ -74,8 +74,10 @@ def _wrench_inside(x, y):
     return jaw or _segment(x, y, 3.2, 12.8, 10.0, 6.0, 2.4)
 
 
-def _png(inside, size, rgb=(0, 0, 0)):
-    """The picture as PNG bytes: black (or rgb), its edges smoothed (4 x 4 samples per pixel), see-through around it."""
+def _png(inside, size, rgb=None):
+    """The picture as PNG bytes in the look's picture colour (or rgb), its edges smoothed (4 x 4 samples per pixel),
+    see-through around it."""
+    rgb = rgb or look.rgb(look.ICON)
     rows = []
     k = SIZE / size
     for py in range(size):

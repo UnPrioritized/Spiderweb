@@ -797,7 +797,7 @@
  "look.dark": "Dark",
  "look.windows": "Follow Windows",
  "look.restart": "Restart Spiderweb to see the new look.",
- "look.not_saved": "The look couldn't be saved: {error}",
+ "look.not_saved": "The look couldn't be saved: Spiderweb's folder can't be written to.",
  "updates.checking": "Checking…",
  "updates.no_connection": "Couldn't reach GitHub. Check your internet connection.",
  "updates.found": "Version {version} is out.",
