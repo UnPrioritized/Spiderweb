@@ -307,7 +307,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self._area_cache = self._area_px = self._area_img = self._gap_cache = None
         self._settled = "[]"   # the strokes as JSON when the areas last matched them (changed)
         self.stuck = None      # where the last point stuck (sticky.py): (kind, (u, v), pixels away), shown as a mark
-        self.guide = None      # a circle not yet in reach of sticking: where to point the mouse for it to touch ((u, v), the pressed corner)
+        self.guide = None      # a circle not yet in reach of sticking: where to point the mouse for it to touch ((u, v), the touched stroke's points moved through it)
         self._stick_cache = None
         self.zoom = 1.0        # 1 = the whole board fits the window
         self.center = [0.5, 0.5]  # the board point in the middle of the window (0.5, 0.5 = the board's middle)
@@ -1320,8 +1320,10 @@ class Drawer(DrawerLayers, tk.Toplevel):
                 pt = [start[0] + s * d[0], start[1] + s * d[1]]
             else:  # not in reach yet: where to point the mouse for it to touch, a dotted purple point (user)
                 near = targets.touch_circle(start, d, view, GUIDE_REACH * self.scale)
-                if near:
-                    self.guide = (start[0] + near[3] * d[0], start[1] + near[3] * d[1]), tuple(start)
+                if near:  # (and the touched stroke's shape moved to pass through it: faint, dotted)
+                    gu, gv = start[0] + near[3] * d[0], start[1] + near[3] * d[1]
+                    du, dv = gu - near[1][0], gv - near[1][1]
+                    self.guide = (gu, gv), [(u + du, v + dv) for u, v in stroke_points(self.strokes[near[4]])]
         (u0, v0), (u1, v1) = start, pt
         if tool == "line":
             self.draft = {"kind": "poly", "pts": [start, pt]}
@@ -2168,15 +2170,13 @@ class Drawer(DrawerLayers, tk.Toplevel):
                 self.draw_stroke(st, look.DRAFT_LINE, w)
             self.draw_pieces(pieces, w + 1)
             self.draw_draft_points(r, h)
-        if self.draft and self.guide:  # a dotted ring with a dot inside, a faint dotted line to it from the pressed
-            # corner (thin: Windows draws thick dotted lines solid)
+        if self.draft and self.guide:  # a dotted ring with a dot inside on the touched stroke's faint dotted copy
+            # (thin: Windows draws thick dotted lines solid)
             x, y = self.to_screen(*self.guide[0])
             q, p = 7 * s, 2 * s
-            sx, sy = self.to_screen(*self.guide[1])
-            far = math.hypot(x - sx, y - sy)
-            if far > q:  # (stops at the ring)
-                c.create_line(sx, sy, x - (x - sx) * q / far, y - (y - sy) * q / far, fill=look.STICK_GUIDE,
-                              width=max(1, round(s)), dash=(2, 4))
+            coords = self.screen_points(self.guide[1])
+            if len(coords) >= 4:
+                c.create_line(*coords, fill=look.STICK_GUIDE, width=max(1, round(s)), dash=(2, 4))
             c.create_oval(x - q, y - q, x + q, y + q, outline=STICK_COLOR, width=max(1, round(s)), dash=(2, 3))
             c.create_oval(x - p, y - p, x + p, y + p, fill=STICK_COLOR, outline="")
         if self.chosen() and self.tool.get() == "select":  # the kept select boxes

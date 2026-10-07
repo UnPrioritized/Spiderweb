@@ -37,13 +37,15 @@ class Targets:
     {(stroke, point number)} of polylines only that point and the two pieces beside it."""
 
     def __init__(self, strokes, skip=frozenset(), skip_pts=frozenset()):
-        pts, segs, owner, index = [], [], [], []
+        pts, pt_owner, segs, owner, index = [], [], [], [], []
         for i, st in enumerate(strokes):
             if i in skip:
                 continue
             line = np.asarray(stroke_points(st), float).reshape(-1, 2)
             gone = {j for a, j in skip_pts if a == i}
-            pts += [p for j, p in key_points(st, line) if j is None or j not in gone]
+            mine = [p for j, p in key_points(st, line) if j is None or j not in gone]
+            pts += mine
+            pt_owner += [i] * len(mine)
             if len(line) > 1:
                 keep = np.ones(len(line) - 1, bool)
                 for j in gone:
@@ -52,6 +54,7 @@ class Targets:
                 owner.append(np.full(int(keep.sum()), i))
                 index.append(np.flatnonzero(keep))
         self.pts = np.asarray(pts, float).reshape(-1, 2)
+        self.pt_owner = np.asarray(pt_owner, int)
         self.seg = np.concatenate(segs) if segs else np.zeros((0, 4))
         self.owner = np.concatenate(owner) if owner else np.zeros(0, int)
         self.index = np.concatenate(index) if index else np.zeros(0, int)
@@ -96,7 +99,7 @@ class Targets:
 
     def touch_circle(self, a, d, view, reach):
         """A circle being drawn (its box from corner a to a + d, u / v) whose LINE sticks (user: not the box's
-        corner): (kind "point" / "line", (u, v) where it touches, pixels away, s) or None; the box from a to
+        corner): (kind "point" / "line", (u, v) where it touches, pixels away, s, the stroke touched) or None; the box from a to
         a + s * d then touches exactly: its short pieces (as stroke_points makes them) pass through a stroke's point,
         or one of its corners lies on a stroke's line with the whole circle on one side (it rests on it). Points
         first, then lines; the nearest within reach pixels."""
@@ -107,7 +110,8 @@ class Targets:
         ang = 2 * np.pi * np.arange(ELLIPSE_STEPS) / ELLIPSE_STEPS
         w = d / 2 + np.column_stack([-abs(d[0]) / 2 * np.cos(ang), abs(d[1]) / 2 * np.sin(ang)])  # (corner = a + s w)
         lo, hi = np.minimum(a, a + d) - 2 * reach / k, np.maximum(a, a + d) + 2 * reach / k  # (near it only)
-        pts = self.pts[np.all((self.pts >= lo) & (self.pts <= hi), axis=1)] if len(self.pts) else self.pts
+        inside = np.all((self.pts >= lo) & (self.pts <= hi), axis=1) if len(self.pts) else np.zeros(0, bool)
+        pts, pt_owner = self.pts[inside], self.pt_owner[inside]
         if len(pts):  # a point on the ray from a: on the circle where the ray crosses its pieces, scaled to reach it
             q = pts - a
             e = np.roll(w, -1, axis=0) - w
@@ -121,16 +125,17 @@ class Targets:
             gap = np.where(ok, np.abs(near - far) * k, np.inf)
             i, j = np.unravel_index(np.argmin(gap), gap.shape)
             if gap[i, j] <= reach:
-                return "point", (float(pts[i, 0]), float(pts[i, 1])), float(gap[i, j]), float(near[i, 0] / far[i, j])
-        seg = self.seg
+                return ("point", (float(pts[i, 0]), float(pts[i, 1])), float(gap[i, j]), float(near[i, 0] / far[i, j]),
+                        int(pt_owner[i]))
+        seg, owner = self.seg, self.owner
         if len(seg):
             keep = np.all((np.maximum(seg[:, :2], seg[:, 2:]) >= lo) & (np.minimum(seg[:, :2], seg[:, 2:]) <= hi), 1)
-            seg = seg[keep]
+            seg, owner = seg[keep], owner[keep]
         if not len(seg):
             return None
         p0, r = seg[:, :2], seg[:, 2:] - seg[:, :2]
         ln = np.hypot(*r.T)
-        seg, p0, r, ln = seg[ln > 0], p0[ln > 0], r[ln > 0], ln[ln > 0]
+        seg, owner, p0, r, ln = seg[ln > 0], owner[ln > 0], p0[ln > 0], r[ln > 0], ln[ln > 0]
         n = np.column_stack([-r[:, 1], r[:, 0]]) / ln[:, None]
         g = ((a - p0) * n).sum(1)  # (the corner's side of each line, and how far)
         m = n @ w.T
@@ -145,7 +150,7 @@ class Targets:
         i = int(np.argmin(gap))
         if gap[i] > reach:
             return None
-        return "line", (float(touch[i, 0]), float(touch[i, 1])), float(gap[i]), float(s[i])
+        return "line", (float(touch[i, 0]), float(touch[i, 1])), float(gap[i]), float(s[i]), int(owner[i])
 
     @staticmethod
     def crossing(seg, owner, index, x, y, view, reach):

@@ -2326,7 +2326,7 @@
  "help.drawer_circle.title": "Drawer: Circle",
  "help.drawer_circle.tip": "Corner to corner. Ctrl = a perfect circle.",
  "help.drawer_circle.text": [
-  "Drag (or click) corner to corner of its box; Ctrl makes it a perfect circle. While you drag, the circle's own line sticks: near another stroke's line or point it grows or shrinks until it touches exactly (Shift = free). A little further away, a dotted purple point shows where to point the mouse for it to touch."
+  "Drag (or click) corner to corner of its box; Ctrl makes it a perfect circle. While you drag, the circle's own line sticks: near another stroke's line or point it grows or shrinks until it touches exactly (Shift = free). A little further away, a dotted purple point shows where to point the mouse for it to touch, on a faint dotted copy of the line it would touch."
  ],
  "help.drawer_erase.title": "Drawer: Eraser",
  "help.drawer_erase.tip": "Click a stroke to remove it, or drag a box: every stroke it touches goes. Ctrl+Z = undo.",
