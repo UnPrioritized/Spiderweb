@@ -1,11 +1,42 @@
 """The program's colours and fonts, all in one place (user, 2026-10-07: for dark mode and the planned Look settings
 window). Each colour is pick(light, dark): the light one is the look as it always was; dark None = not picked yet
-(the light one is used). DARK is fixed before any window is made (changing it needs a restart, user).
+(the light one is used). DARK is fixed as this file is first read, before any window is made: the look picked in
+Help → About is saved in look.json and put on at the next start (user).
 
 Not here: the note colours (roll_shared.SLOT_COLORS: the same in both looks), colours a user picks, and the synth
 window, which has its own dark look (synth_look.py, user: keep it as it is)."""
 
-DARK = False
+import json
+import os
+
+from files.about import HERE
+from files.safefile import write_text
+from files.system import dark_system
+
+LOOKS = ("light", "dark", "windows")  # (saved as these; windows = follow the system's setting)
+LOOK_FILE = os.path.join(HERE, "look.json")
+
+
+def read_look():
+    """The look picked in Help → About ("light" when none was, or the file won't read)."""
+    try:
+        with open(LOOK_FILE, encoding="utf-8") as f:
+            how = json.load(f).get("look")
+    except (OSError, ValueError, AttributeError):
+        how = None
+    return how if how in LOOKS else "light"
+
+
+def save_look(how):
+    write_text(LOOK_FILE, json.dumps({"look": how}) + "\n")
+
+
+def is_dark(how):
+    return how == "dark" or (how == "windows" and dark_system())
+
+
+# (SPIDERWEB_LOOK in the environment wins: the saved tests run in the light look whatever the user picked)
+DARK = is_dark(os.environ.get("SPIDERWEB_LOOK") or read_look())
 
 
 def pick(light, dark=None):

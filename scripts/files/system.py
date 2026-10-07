@@ -44,6 +44,20 @@ def free_memory():
     return None
 
 
+def dark_system():
+    """True when the system's apps are set to dark (Windows: Settings → Colours); False when light or unknown (the
+    other systems for now)."""
+    if WINDOWS:
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
+                return winreg.QueryValueEx(key, "AppsUseLightTheme")[0] == 0
+        except OSError:
+            pass
+    return False
+
+
 def error_box(title, msg):
     """An error message that works without a Spiderweb window (e.g. it couldn't start). Nothing if it can't show."""
     if WINDOWS:
