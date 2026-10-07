@@ -259,19 +259,8 @@ class Targets:
             if far[i, j] <= reach:
                 out.append(("on", (float(pts[i, 0]), float(pts[i, 1])), float(far[i, j]),
                             (float(gap[i, j, 0]), float(gap[i, j, 1]))))
-        seg = self.seg
-        if len(seg):
-            keep = np.all((np.maximum(seg[:, :2], seg[:, 2:]) >= lo) & (np.minimum(seg[:, :2], seg[:, 2:]) <= hi), 1)
-            seg = seg[keep]
-            seg = seg[np.hypot(seg[:, 2] - seg[:, 0], seg[:, 3] - seg[:, 1]) > 0]
-        if len(seg):
-            p0, r = seg[:, :2], seg[:, 2:] - seg[:, :2]
-            ln = np.hypot(r[:, 0], r[:, 1])
-            n = np.column_stack([-r[:, 1], r[:, 0]]) / ln[:, None]
-            g = np.einsum("mkc,mc->mk", line[None] - p0[:, None], n)  # (each corner's side of each line, how far)
-            side = np.sign((((line.min(0) + line.max(0)) / 2 - p0) * n).sum(1))  # (its middle's side of each line)
-            kk = np.where(side >= 0, np.argmin(g, 1), np.argmax(g, 1))
-            gk = g[np.arange(len(g)), kk]
+        p0, r, ln, n, kk, gk, _ = self.rests(line, lo, hi)
+        if len(p0):
             touch = line[kk] - gk[:, None] * n
             t = ((touch - p0) * r).sum(1) / ln ** 2
             far = np.where((t >= 0) & (t <= 1), np.abs(gk) * k, np.inf)
@@ -280,6 +269,59 @@ class Targets:
                 out.append(("rest", (float(touch[i, 0]), float(touch[i, 1])), float(far[i]),
                             (float(-gk[i] * n[i, 0]), float(-gk[i] * n[i, 1]))))
         return out
+
+    def rests(self, line, lo, hi):
+        """For a stroke being moved (line as in touch_line), each line piece in the box lo..hi: the piece (p0, r,
+        its length, normal n), the moved stroke's corner nearest it with the stroke on the side its middle is on (kk),
+        how far that corner is along n (gk: moving it by -gk n rests it on the line) and the piece's stroke."""
+        seg, owner = self.seg, self.owner
+        if len(seg):
+            keep = np.all((np.maximum(seg[:, :2], seg[:, 2:]) >= lo) & (np.minimum(seg[:, :2], seg[:, 2:]) <= hi), 1)
+            keep &= np.hypot(seg[:, 2] - seg[:, 0], seg[:, 3] - seg[:, 1]) > 0
+            seg, owner = seg[keep], owner[keep]
+        p0, r = seg[:, :2], seg[:, 2:] - seg[:, :2]
+        ln = np.hypot(r[:, 0], r[:, 1])
+        n = np.column_stack([-r[:, 1], r[:, 0]]) / np.where(ln == 0, 1, ln)[:, None]
+        g = np.einsum("mkc,mc->mk", line[None] - p0[:, None], n)  # (each corner's side of each line, how far)
+        side = np.sign((((line.min(0) + line.max(0)) / 2 - p0) * n).sum(1))  # (its middle's side of each line)
+        kk = np.where(side >= 0, np.argmin(g, 1), np.argmax(g, 1)) if len(g) else np.zeros(0, int)
+        gk = g[np.arange(len(g)), kk]
+        return p0, r, ln, n, kk, gk, owner
+
+    def rest_two(self, line, view, reach):
+        """A stroke being moved (line as in touch_line) resting on TWO lines at once (user: between two slanted
+        lines it jumped from resting on one to resting on the other): ((du, dv) to move it by more, pixels, [(u, v)
+        where it touches] x 2) or None; the smallest move within reach pixels. Two pieces not about parallel (of one
+        stroke: 30 degrees apart or more, so a curve's next pieces don't count), touching 3 pixels apart or more."""
+        k = view[0]
+        line = np.asarray(line, float).reshape(-1, 2)
+        if len(line) < 2:
+            return None
+        lo, hi = line.min(0) - 2 * reach / k, line.max(0) + 2 * reach / k
+        p0, r, ln, n, kk, gk, owner = self.rests(line, lo, hi)
+        near = np.flatnonzero(np.abs(gk) * k <= reach)  # (the move along n is gk: never more than the whole move)
+        near = near[np.argsort(np.abs(gk[near]))][:12]
+        if len(near) < 2:
+            return None
+        p0, r, ln, n, kk, gk, owner = (x[near] for x in (p0, r, ln, n, kk, gk, owner))
+        i, j = np.triu_indices(len(near), 1)
+        det = n[i, 0] * n[j, 1] - n[i, 1] * n[j, 0]
+        ok = np.abs(det) >= np.where(owner[i] == owner[j], 0.5, 0.1)
+        i, j, det = i[ok], j[ok], det[ok]
+        if not len(i):
+            return None
+        bi, bj = -gk[i], -gk[j]  # (the move: D . n_i = -gk_i and D . n_j = -gk_j)
+        d = np.column_stack([(bi * n[j, 1] - bj * n[i, 1]) / det, (bj * n[i, 0] - bi * n[j, 0]) / det])
+        ti, tj = line[kk[i]] + d, line[kk[j]] + d
+        a = ((ti - p0[i]) * r[i]).sum(1) / ln[i] ** 2
+        b = ((tj - p0[j]) * r[j]).sum(1) / ln[j] ** 2
+        far = np.hypot(d[:, 0], d[:, 1]) * k
+        ok = (a >= 0) & (a <= 1) & (b >= 0) & (b <= 1) & (np.hypot(*(ti - tj).T) * k >= 3) & (far <= reach)
+        if not ok.any():
+            return None
+        m = int(np.argmin(np.where(ok, far, np.inf)))
+        return ((float(d[m, 0]), float(d[m, 1])), float(far[m]),
+                [(float(ti[m, 0]), float(ti[m, 1])), (float(tj[m, 0]), float(tj[m, 1]))])
 
     @staticmethod
     def crossing(seg, owner, index, x, y, view, reach):

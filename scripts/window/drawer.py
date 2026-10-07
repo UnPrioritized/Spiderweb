@@ -51,7 +51,8 @@ STROKE_COLOR = look.SHAPE_LINE  # (a stroke with an outline colour: that colour'
 AREA_NORMAL, AREA_EMPTY, OFF_BOARD, BOARD = look.AREA_NORMAL, look.AREA_EMPTY, look.DRAWER_BG, look.BOARD
 WARN_COLOR = look.WARN  # more colours than a shape can have (like the side panel's warning)
 AREA_FRAME = DRAWN_FRAME  # (the drawing's box as a custom shape, for finding its areas)
-STICK_RANK = {"point": 4, "cross": 3, "on": 2, "rest": 1, "line": 0}  # (moving a stroke: on / rest = its line)
+STICK_RANK = {"point": 5, "cross": 4, "two": 3, "on": 2, "rest": 1, "line": 0}  # (moving a stroke: on / two / rest
+# = its line)
 STICK_COLOR = look.STICK
 STICK_LINE = look.STICK_LINE
 GUIDE_REACH = 6 * REACH  # pixels: a circle this near to sticking shows where it would touch (dotted)
@@ -844,11 +845,16 @@ class Drawer(DrawerLayers, tk.Toplevel):
             rank = got and (STICK_RANK[got[0]], -got[2])  # (a point first, then a crossing, then a line; nearest)
             if got and (best is None or rank > best[2]):
                 best = got, (got[1][0] - u, got[1][1] - v), rank
-        for kind, at, far, (su, sv) in targets.touch_line([(u + du, v + dv) for u, v in line], view,
-                                                          REACH * self.scale):
+        moved = [(u + du, v + dv) for u, v in line]
+        for kind, at, far, (su, sv) in targets.touch_line(moved, view, REACH * self.scale):
             rank = STICK_RANK[kind], -far
             if best is None or rank > best[2]:
                 best = ("point" if kind == "on" else "line", at, far), (du + su, dv + sv), rank
+        two = targets.rest_two(moved, view, REACH * self.scale / 2)  # (resting on two lines: a smaller reach, user)
+        if two and (best is None or (STICK_RANK["two"], -two[1]) > best[2]):
+            (su, sv), far, (t1, t2) = two
+            self.stuck2 = "line", t2, far
+            best = ("line", t1, far), (du + su, dv + sv), None
         if best is None:
             return None
         self.stuck = best[0]
@@ -1126,7 +1132,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
             _, start, origs, boxes, _ = self.drag
             cur = self.event_pt(e, snap=False)
             du, dv = cur[0] - start[0], cur[1] - start[1]
-            self.stuck = None
+            self.stuck = self.stuck2 = None
             if not e.state & SHIFT:  # one stroke: its point nearest to a line sticks to it; else whole grid squares
                 got = len(origs) == 1 and self.stick_move(*next((i, json.loads(o)) for i, o in origs.items()), du, dv)
                 if got:
@@ -1182,7 +1188,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         step (undo, "not saved yet")."""
         if self.holding():
             self.select_release()
-        self.drag = self.stuck = None
+        self.drag = self.stuck = self.stuck2 = None
 
     def delete_dragged(self):
         """Delete while the mouse holds something (like the piano roll): the drag ends where it is, then only the
