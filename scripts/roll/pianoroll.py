@@ -1220,6 +1220,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return
         finished = bool(self.draft and self.draft["kind"] in ("poly", "arc"))
         if self.follow:  # a shape started with a click, not finished: dropped
+            self.drop_hz_keys()  # a new Hz bass's start mark goes too
             self.cancel_draft()
             finished = True
         elif finished:
