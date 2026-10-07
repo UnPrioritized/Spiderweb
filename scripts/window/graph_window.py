@@ -14,6 +14,7 @@ from files.lang import tr
 from files.mathexpr import calc, formula, fmt
 from notes.joined import shown_tumour
 from notes.tumour import GRAPH_LIMIT, TUMOUR_DEFAULTS
+from window.panel_custom import GAP_COLOR
 from window.widgets import LocalUndo, Scrub
 
 FLAT = [[0.0, 1.0], [1.0, 1.0]]
@@ -58,6 +59,9 @@ class GraphWindow(tk.Toplevel):
         box.pack(fill="both", expand=True)
         self.info = ttk.Label(box, text="")
         self.info.pack(anchor="w")
+        # the box's number is 0: the graph multiplies it, so it changes nothing (shown only then, user)
+        self.zero_note = ttk.Label(box, text=tr("graph_window.box_is_zero", label=label), foreground=GAP_COLOR,
+                                   wraplength=int(640 * s), justify="left")
         self.canvas = tk.Canvas(box, width=self.w, height=self.h, bg="#ffffff", highlightthickness=1,
                                 highlightbackground="#a0a0a0", cursor="crosshair")
         self.canvas.pack(pady=(4, 4))
@@ -381,6 +385,12 @@ class GraphWindow(tk.Toplevel):
         self.info.config(text=tr("graph_window.along_the_line_100_the_box", label=self.label,
                                  split=self.value_text(1).split('= ')[1])
                          if self.app.tumour_targets() else tr("graph_window.select_a_line_with_tumours_to", name=name))
+        zero = bool(self.app.tumour_targets()) and abs(self.box_number()) < 1e-12
+        if zero != bool(self.zero_note.winfo_manager()):
+            if zero:
+                self.zero_note.pack(anchor="w", after=self.info)
+            else:
+                self.zero_note.pack_forget()
 
     # ------------------------------------------------------------ mouse
 

@@ -727,6 +727,7 @@
  "graph_window.at_of_the_line": "at {at} % of the line: {value_text}",
  "graph_window.along_the_line_100_the_box": "{label} along the line: 100 % = the box's {split}.",
  "graph_window.select_a_line_with_tumours_to": "Select a line with tumours to give its {name} a graph.",
+ "graph_window.box_is_zero": "{label} is 0 in the tumour window, so this graph changes nothing. Type a number there first.",
  "graph_window.custom_view": "Custom",
  "graph_window.from": "From",
  "graph_window.to_box": "to",
