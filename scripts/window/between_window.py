@@ -205,6 +205,7 @@ class BetweenWindow(tk.Toplevel):
             self.set["steps"] = n
             self.apply()
             self.hist.mark("steps")
+            return True
 
     def on_colours(self):
         self.colours_touched = True
@@ -227,11 +228,14 @@ class BetweenWindow(tk.Toplevel):
             self.set["colours"] = self.kept_turns = n
             self.apply()
             self.hist.mark("turns")
+            return True
 
     def ok(self):
-        self.on_steps()  # (a number typed without Enter counts too)
-        self.on_turns()
+        changed = self.on_steps()  # (a number typed without Enter counts too)
+        changed = self.on_turns() or changed
         self.closed = True
+        if changed:  # (a long wait just now: Windows' "not responding" copy of the window must go before it's
+            self.update()  # destroyed, or Tk crashes)
         if json.dumps(self.app.shapes) != self.before:
             self.app.add_undo_step(self.before, self.name, sel=self.app.sel_state())
         self.close()
