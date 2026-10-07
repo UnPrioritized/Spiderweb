@@ -1,6 +1,5 @@
 """The custom shape drawer (its own window) and the shape library: built-in shapes plus the user's own in spiderweb/shapes/*.json."""
 
-import ctypes
 import json
 import math
 import os
@@ -24,6 +23,7 @@ from files.safefile import write_text
 from files.clipboard import get_text, put_text
 from files.share import LONG_LINE, ShareError, drawing_line, made_by, read_drawing, unpack
 from files.speed import Photo
+from files.system import double_click_ms
 from roll.roll_shared import BOX_STILL, grab_while_panning, line_touches_box, mouse_trail, shown_points
 from window.help import open_help
 from window.formula_host import DrawerHost, formula_menu
@@ -53,10 +53,7 @@ STICK_RANK = {"point": 2, "cross": 1, "line": 0}
 STICK_COLOR = "#d000d0"  # the mark where a point sticks
 STICK_LINE = "#c070e0"  # the parts ending at that point (lighter, so the mark stands out on them)
 LIST_AWAY = "#d9d9d9"  # the shape picked in the library list while the keyboard is elsewhere (blue when it's there)
-try:
-    DOUBLE_CLICK_MS = ctypes.windll.user32.GetDoubleClickTime()  # (Windows' own setting)
-except (AttributeError, OSError):
-    DOUBLE_CLICK_MS = 500
+DOUBLE_CLICK_MS = double_click_ms()  # (the system's own setting)
 DRAW_TOOLS = ("line", "poly", "curve", "arc", "square", "circle")  # (the ones whose points stick)
 
 

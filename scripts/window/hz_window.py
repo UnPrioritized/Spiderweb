@@ -11,7 +11,6 @@ space) a new Hz bass that's made with the first note and grows with the notes. E
 main window, made when the mouse is let go (the notes on the piano roll are made again then, not while dragging)."""
 
 import copy
-import ctypes
 import json
 import math
 import os
@@ -28,6 +27,7 @@ from files.about import ICONS
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from files.snap import snap_beats
+from files.system import double_click_ms
 from notes.engine import slot_track_channel
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
 from notes.hzbass import (AUTO, AUTO_MOST, EXTRAS, FX, HZ_DEFAULTS, TUNE, auto_state, can_slide, clean_fit, clean_from,
@@ -58,10 +58,7 @@ GATE_MODES = ("auto", "mixed", "fixed")  # the Gates dropdown's choices, in orde
 TUNE_ROW = 20  # px: rows at least this tall show the exact tone, and the red line can be dragged up / down
 TUNE_STICK = 3.0  # cents: a dragged tune this near the exact tone sticks to it (at any zoom; was 5 px, user)
 POS = r"\d+x\d+\+-?\d+\+-?\d+"  # a remembered size and place
-try:  # how quick a second click has to be to make a double click (Windows' setting)
-    DOUBLE_MS = int(ctypes.windll.user32.GetDoubleClickTime())
-except (AttributeError, OSError):
-    DOUBLE_MS = 500
+DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
 
 
 def open_hz(app):

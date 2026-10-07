@@ -1,7 +1,6 @@
 """Errors: the details go to errors.log (next to spiderweb.py / Spiderweb.exe) and the user is told once per session.
 The .exe and pythonw have no console, so without this an error would just be invisible."""
 
-import ctypes
 import os
 import platform
 import sys
@@ -11,6 +10,7 @@ import traceback
 
 from files.lang import tr
 from files.about import HERE, VERSION
+from files.system import error_box
 
 LOG = os.path.join(HERE, "errors.log")
 OLD_LOG = os.path.join(HERE, "errors-old.log")  # errors.log moves here when it gets big
@@ -73,10 +73,7 @@ def tell_user(saved, fatal=False, memory=False):
             return
         except Exception:
             pass
-    try:
-        ctypes.windll.user32.MessageBoxW(None, msg, tr("errors.spiderweb"), 0x10)  # works without a Tk window
-    except (AttributeError, OSError):
-        pass
+    error_box(tr("errors.spiderweb"), msg)  # (works without a Spiderweb window)
 
 
 def report(exc_type, exc, tb, where="", fatal=False):

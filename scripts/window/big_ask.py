@@ -6,35 +6,17 @@ MIDI (memory only), "domino" = Copy to Domino (more than BIG notes: the program 
 The same window warns before Copy to Domino fills a 10th track (ask_drums, "drums") and before an image with more
 than a million grid cells is made (image_window.big_ok, "image")."""
 
-import ctypes
 import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
+from files.system import free_memory
 
 BIG = 1_000_000  # notes: asked past this (making shapes, Copy to Domino)
 # memory each note takes while it's done (measured: 20 M notes in the window ~6 GB in all, saving a MIDI file
 # 1.4 GB more, copying 4 M notes 0.57 GB)
 PER_NOTE = {"notes": 300, "midi": 70, "domino": 150}
 DRUM_TRACK = 10  # Copy to Domino: asked when the copy fills this many tracks (ask_drums)
-
-
-class _MemoryStatus(ctypes.Structure):
-    _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
-                ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
-                ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
-                ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
-                ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
-
-
-def free_memory():
-    """Bytes of memory free on this PC right now, or None if Windows won't say."""
-    st = _MemoryStatus()
-    st.dwLength = ctypes.sizeof(st)
-    try:
-        return st.ullAvailPhys if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)) else None
-    except (AttributeError, OSError):
-        return None
 
 
 def gb(n):

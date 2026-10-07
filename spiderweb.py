@@ -93,6 +93,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     safefile.py      saving without half-written files
     errors.py        errors.log and the "something went wrong" message
     about.py         version number, the program's folder
+    system.py        what's asked of Windows / Linux (double-click speed, free memory, an error box)
     update_check.py  asking GitHub for newer versions (and their notes)
     midi_out.py      MIDI file writer
     domino_clip.py   Copy to / Paste from Domino (notes on the clipboard in Domino's own format)
