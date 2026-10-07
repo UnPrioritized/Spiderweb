@@ -15,12 +15,15 @@ import math
 
 from files.lang import tr
 from notes.bezier import anchor_count
-from notes.custom import add_stroke, custom_strokes, drawn_view, new_live_shape, stroke_bp
+from notes.custom import (CUSTOM_FLAGS, add_stroke, custom_strokes, drawn_view, frame_to_bp, frame_to_uv,
+                          new_live_shape, stroke_bp)
 from notes.hzbass import left_edge, shifted_hz
 from notes.joined import is_joined, join_velocity
 from notes.tumour import LINE_KINDS
 
 CAN_TURN = LINE_KINDS + ("custom",)
+# a custom shape's own inside settings the live shape made of it keeps (besides fill / gate / align / ends)
+OWN_SETTINGS = CUSTOM_FLAGS + ("edge", "edge_mode", "range", "range_kept", "before_hz")
 
 
 def has_tumours(sh):
@@ -93,7 +96,7 @@ def shared_settings(shapes):
 
 def to_live(shapes, paths, defaults, custom_defaults, k=None):
     """shapes (with paths[i] = engine.cached_strokes(shapes[i])) as one new custom shape. The first custom shape
-    among them gives its name and fill settings. Its drawn proportions (custom.drawn_view): the first shape's that
+    among them gives its name, inside settings and Hz bass; every custom shape's coloured areas stay on their spots. Its drawn proportions (custom.drawn_view): the first shape's that
     has them (a custom shape, an arc, freehand), else k (beats per key on screen now)."""
     first = next((sh for sh in shapes if sh["kind"] == "custom"), None)
     drawn = [drawn_view(sh) if sh["kind"] == "custom" else sh.get("k") if sh["kind"] in ("arc", "free") else None
@@ -123,8 +126,20 @@ def to_live(shapes, paths, defaults, custom_defaults, k=None):
     mine = [b for p in custom_strokes(new) for b, _ in p]
     join_velocity(new, shapes, spans, (min(mine), max(mine)))  # (each keeps its velocities)
     new.update(shared_settings(shapes)[0])
+    if first:  # (its own inside settings, not the ones for new shapes)
+        for key in OWN_SETTINGS:
+            new.pop(key, None)
+            if first.get(key):
+                new[key] = json.loads(json.dumps(first[key]))
     if first and first.get("hz"):  # (its tones count from the box's left edge: they stay where they were)
         new["hz"] = shifted_hz(json.loads(json.dumps(first["hz"])), left_edge(first) - left_edge(new))
+    areas, to_uv = [], frame_to_uv(new["pts"])
+    for sh in shapes:  # coloured areas: on the same spots
+        to_bp = frame_to_bp(sh["pts"]) if sh["kind"] == "custom" and to_uv else None
+        areas += [[*(round(x, 6) for x in to_uv(*to_bp(u, v))), c] for u, v, c in (sh.get("areas") or ())
+                  if to_bp]
+    if areas:
+        new["areas"] = areas
     new["from"] = {"shapes": json.loads(json.dumps(shapes)), "strokes": json.loads(json.dumps(new["strokes"])),
                    "pts": [list(p) for p in new["pts"]]}
     return new
