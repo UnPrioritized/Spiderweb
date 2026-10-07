@@ -816,11 +816,9 @@ class FormulaDialog(tk.Toplevel):
 
     def right_click(self, e):
         i = self.point_at(e.x, e.y)
-        if i is None:
-            return
+        if i is None or can_delete(self.shown_loop(), i) in (None, "middle"):
+            return  # (an end / a symmetric middle anchor stays: and it isn't "edited by hand" for nothing)
         self.by_hand()
-        if can_delete(self.pat["loop"], i) is None:
-            return
         delete_point(self.pat["loop"], i, self.to_xy)
         self.refresh()
         self.mark()
@@ -830,8 +828,8 @@ class FormulaDialog(tk.Toplevel):
             return
         loop = self.shown_loop()
         seg, t, d = nearest(loop["pts"], self.to_xy, e.x, e.y)
-        if d > 3 * GRAB * self.scale:
-            return
+        if d > 3 * GRAB * self.scale or t in (0, 1):
+            return  # (on an anchor already: nothing added, so not edited by hand either)
         self.by_hand()
         if add_anchor(self.pat["loop"], seg, t, self.from_xy(e.x, e.y), self.to_xy):
             self.refresh()
