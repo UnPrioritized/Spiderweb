@@ -9,7 +9,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.pattern import FORMULA_KINDS, MAX_LOOPS, formula_shape, loop_points
+from notes.pattern import FORMULA_KINDS, MAX_LOOPS, formula_shape, loop_points, most_loops
 from notes.polygon import update_polygon
 from window.formula_host import SYM_CHOICES, RollHost, layer_name, set_loop_sym, sym_label
 from window.panel_custom import GAP_COLOR
@@ -193,16 +193,17 @@ class PatternPanel:
             bad(e)
             return
         good(e)
-        if name == "loops" and value > MAX_LOOPS:  # (the box stops at the most)
-            value = MAX_LOOPS
-            var.set(fmt(value))
-        tgts = [sh for sh in tgts if (sh[layer]["loops"] if name == "loops" else sh[layer]["vars"][name]) != value]
+        wanted = {id(sh): min(value, most_loops(sh)) if name == "loops" else value for sh in tgts}
+        if name == "loops" and tgts and wanted[id(tgts[0])] != value:  # (the box stops at the most)
+            var.set(fmt(wanted[id(tgts[0])]))
+        tgts = [sh for sh in tgts if (sh[layer]["loops"] if name == "loops" else sh[layer]["vars"][name]) !=
+                wanted[id(sh)]]
         if not tgts:
             return
         self.begin_edit((layer, tuple(sorted(self.sels)), name))
         for sh in tgts:
             if name == "loops":
-                sh[layer]["loops"] = value
+                sh[layer]["loops"] = wanted[id(sh)]
             else:
                 sh[layer]["vars"][name] = value
         self.formulas_edited()
@@ -211,10 +212,12 @@ class PatternPanel:
     def show_loops_most(self):
         """The note under the Loops box: only while it's at the most (user)."""
         ui = self.formula_ui["pattern"]
-        at_most = any(sh["pattern"]["loops"] >= MAX_LOOPS for sh in self.with_layer("pattern"))
-        if at_most and not ui["most"].winfo_manager():
+        most = [most_loops(sh) for sh in self.with_layer("pattern") if sh["pattern"]["loops"] >= most_loops(sh)]
+        if most:  # (with Each piece the pieces share MAX_LOOPS)
+            ui["most"].config(text=tr("panel_pattern.loops_most", most=fmt(most[0])))
+        if most and not ui["most"].winfo_manager():
             ui["most"].pack(anchor="w", after=ui["numbers"])
-        elif not at_most and ui["most"].winfo_manager():
+        elif not most and ui["most"].winfo_manager():
             ui["most"].pack_forget()
 
     def on_formula_sym(self, layer):
@@ -244,4 +247,5 @@ class PatternPanel:
         self.push_undo(name=tr("panel_pattern.each_piece") if each else tr("panel_pattern.across_all"))
         for sh in tgts:
             sh["pattern"]["each"] = each
+            sh["pattern"]["loops"] = min(sh["pattern"]["loops"], most_loops(sh))  # (the pieces share the most)
         self.formulas_edited()

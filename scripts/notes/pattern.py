@@ -140,6 +140,23 @@ def pattern_name(p):
     return tr("pattern.edited", name=name) if p.get("loop") else name
 
 
+def loop_pieces(holder):
+    """How many pieces a pattern on holder runs along: a polygon's sides (holder = its settings, polygon.py), a
+    joined curve's pieces, else 1."""
+    if "points" in holder and "style" in holder:
+        from notes.polygon import polygon_strokes, side_paths
+        return sum(len(side_paths(st["pts"])) for st in polygon_strokes(dict(holder, pattern=None, shape=None)))
+    return len(holder.get("gaps") or ()) + 1
+
+
+def most_loops(holder, each=None):
+    """The most Loops a pattern on holder can have: MAX_LOOPS in all, so with Each piece shared by the pieces (each
+    piece gets all the loops: 50,000 on 200 sides made 80 million points)."""
+    if each is None:
+        each = (holder.get("pattern") or {}).get("each", False)
+    return MAX_LOOPS if not each else max(1, MAX_LOOPS // loop_pieces(holder))
+
+
 FORMULA_KINDS = ("curve", "line", "poly", "arc")  # the piano roll's shapes that can have formulas
 
 
@@ -540,12 +557,16 @@ def pattern_paths(paths, p):
     screens = [np.asarray(path, float).reshape(-1, 2) / [k, 1.0] for path in paths]
     lengths = [np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(a, axis=0).T))]) if len(a) > 1 else np.zeros(1)
                for a in screens]
-    if p["each"]:
-        spans = [(0.0, ln[-1], p["loops"]) for ln in lengths]
+    if p["each"]:  # (MAX_LOOPS shared by the pieces, see most_loops: from a file / pieces added since)
+        loops = min(p["loops"], max(1, MAX_LOOPS // max(1, len(paths))))
+        spans = [(0.0, ln[-1], loops) for ln in lengths]
     else:
         total = sum(ln[-1] for ln in lengths)
         starts = np.concatenate([[0.0], np.cumsum([ln[-1] for ln in lengths])])
         spans = [(starts[j], total, p["loops"]) for j in range(len(lengths))]
+    # MAX_POINTS shared by every piece: the loops they all touch (each piece had MAX_POINTS of its own)
+    touched = sum(math.ceil((o + ln[-1]) / t * n) - math.floor(o / t * n)
+                  for ln, (o, t, n) in zip(lengths, spans) if t > 1e-12)
     out = []
     for a, ln, (offset, total, loops) in zip(screens, lengths, spans):
         size = ln[-1]
@@ -557,7 +578,7 @@ def pattern_paths(paths, p):
         last = math.ceil((offset + size) / total * loops)
         need = len(a) / max(1e-9, loops * size / total)  # the path's own points per loop
         per = max(LOOP_SAMPLES, math.ceil(need / LOOP_SAMPLES) * LOOP_SAMPLES)
-        per = min(per, max(8, MAX_POINTS // max(1, last - first)))
+        per = min(per, max(8, MAX_POINTS // max(1, touched)))
         t = np.linspace(0.0, 1.0, per + 1)
         uu, vv = np.interp(t, np.linspace(0.0, 1.0, len(u)), u), np.interp(t, np.linspace(0.0, 1.0, len(v)), v)
         count = last - first

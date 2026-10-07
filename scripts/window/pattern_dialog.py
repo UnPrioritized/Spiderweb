@@ -21,8 +21,8 @@ from files.project import HERE
 from files.safefile import write_text
 from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_point, fit_symmetric, handle_lines,
                           held_axis, keep_symmetric, nearest, pen_handles, sample)
-from notes.pattern import (LOOPS_DEFAULT, MAX_LOOPS, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, clean_loop,
-                           formula_loop, formula_shape, keep_sym, new_pattern, new_shape, pattern_name, pattern_names,
+from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, clean_loop, formula_loop,
+                           formula_shape, keep_sym, most_loops, new_pattern, new_shape, pattern_name, pattern_names,
                            shape_name, shape_names)
 from roll.roll_shared import ALT, grab_while_panning
 from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
@@ -479,8 +479,8 @@ class FormulaDialog(tk.Toplevel):
             else:
                 self.set_info(tr("pattern_dialog.whole_shape") if self.layer == "shape" else
                               tr("pattern_dialog.one_loop"), "#555")
-            if self.layer == "pattern" and self.pat["loops"] >= MAX_LOOPS:  # (only then, user)
-                self.set_info(tr("panel_pattern.loops_most", most=fmt(MAX_LOOPS)), GAP_COLOR,
+            if self.layer == "pattern" and self.pat["loops"] >= self.most_loops():  # (only then, user)
+                self.set_info(tr("panel_pattern.loops_most", most=fmt(self.most_loops())), GAP_COLOR,
                               back=bool(self.pat.get("loop")))
         self.view = self.view[:3] + (self.loop_len(),) if self.own_view and self.view else None
         self.draw()
@@ -526,11 +526,15 @@ class FormulaDialog(tk.Toplevel):
             return
         good(e)
         if name == "loops":
-            self.pat["loops"] = min(value, MAX_LOOPS)
+            self.pat["loops"] = min(value, self.most_loops())
         else:
             self.pat["vars"][name] = value
         self.refresh()
         self.mark(("num", name))
+
+    def most_loops(self):
+        """The most Loops: the least any of the curves can take (Each piece: their pieces share it)."""
+        return min(most_loops(h, self.pat["each"]) for h in self.targets)
 
     def set_info(self, text, color, back=False):
         self.info.config(text=text, foreground=color)
