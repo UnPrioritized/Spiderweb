@@ -368,6 +368,7 @@ class ProjectFiles:
                               "show_lines": self.show_lines.get(), "show_notes": self.show_notes.get(),
                               "velocity_height": self.velocity_height() / self.scale,
                               "midi_device": self.midi_device.get(), "play_voices": self.play_voices,
+                              "play_voice_guard": self.play_guard.get(),
                               "live": self.live.get(),
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
                               "claw_window": self.claw_pos, "strum_window": self.strum_pos, "chop_window": self.chop_pos, "hz_window": self.hz_pos, "hz_fx_height": self.hz_fx_h, "hz_preview": self.hz_preview,
@@ -457,6 +458,7 @@ class ProjectFiles:
             if isinstance(v, int) and not isinstance(v, bool) and VOICES[0] <= v <= VOICES[1]:
                 self.play_voices = v
                 self.voices_var.set(str(v))
+            self.play_guard.set(win.get("play_voice_guard") is True)
             self.sync_builtin()
             pos = win.get("history_window")
             if isinstance(pos, str) and re.fullmatch(r"(\d+x\d+)?\+-?\d+\+-?\d+", pos):

@@ -44,6 +44,7 @@ from window.claw_window import open_claw
 from window.strum_window import open_strum
 from window.chop_window import open_chop, quick_chop
 from window.hz_preview import VOICES, clean_settings as clean_preview
+from window.builtin_settings import Overload, open_builtin_settings
 from window.panel_tumour import TumourPanel
 from notes.joined import all_tumours, is_joined
 from window.join_split import JoinSplit
@@ -68,7 +69,7 @@ from window.snap_picker import SnapPicker
 from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
-from window.widgets import Scrub, StatusLine, Tooltip, bad, good, grid_shown, leave_box, remember_good, watch_bad
+from window.widgets import Scrub, StatusLine, Tooltip, bad, good, grid_shown, remember_good, watch_bad
 
 
 VEL_KEYS = ("vel0", "vel1")
@@ -146,6 +147,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.out = MidiOut(self.make_live)
         self.player = Player(self.out)
         self.play_voices = 1000  # Built-in BASSMIDI's voice limit (user; with the window settings)
+        self.play_guard = tk.BooleanVar(self, value=False)  # lowered by itself while overloaded (user: off to start)
+        self.overload, self.overload_text = Overload(), ""  # (red next to the Settings button while it plays)
+        self.builtin_window = self.voices_entry = None  # (window/builtin_settings.py)
         self._play_job = None
         self._scrub_held = {}
         self.defaults = dict(SHAPE_DEFAULTS)
@@ -510,23 +514,18 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         dev.configure(postcommand=lambda: dev.configure(values=devices()))  # re-list when it opens
         dev.grid(row=r, column=1, sticky="ew", padx=5, pady=(3, 0))
         r += 1
-        # Built-in BASSMIDI's own row (shown only while it's picked, sync_builtin): voice limit + soundfont
-        lb = ttk.Label(box, text=tr("app.voices"))
-        lb.grid(row=r, column=0, sticky="w", pady=(3, 0))
+        # Built-in BASSMIDI's own row (shown only while it's picked, sync_builtin): its Settings… window + the red
+        # "Overloaded" while it can't keep up (user)
         cell = ttk.Frame(box)
         cell.grid(row=r, column=1, sticky="ew", padx=5, pady=(3, 0))
         self.voices_var = tk.StringVar(value=str(self.play_voices))
-        e = self.voices_entry = ttk.Entry(cell, textvariable=self.voices_var, width=7)
-        e.pack(side="left")
-        e.bind("<Return>", lambda ev: self.on_play_voices())
-        leave_box(self, e, self.voices_var, lambda left: self.on_play_voices())
-        Scrub(self, [(e, self.voices_var, self.on_play_voices)], (50, 500, 1), *VOICES, label=lb)
-        Tooltip(e, tr("app.voices_tip"))
-        Tooltip(lb, tr("app.voices_tip"))
-        self.font_btn_play = ttk.Button(cell, text=tr("app.soundfont"), command=self.pick_soundfont)
-        self.font_btn_play.pack(side="left", padx=(4, 0))
-        self.font_tip_play = Tooltip(self.font_btn_play, "")  # (says the soundfont's name: sync_builtin)
-        self.builtin_row = (lb, cell)
+        self.builtin_btn = ttk.Button(cell, text=tr("app.builtin_settings"),
+                                      command=lambda: open_builtin_settings(self))
+        self.builtin_btn.pack(side="left")
+        Tooltip(self.builtin_btn, tr("app.builtin_settings_tip"))
+        self.overload_label = ttk.Label(cell, text="", foreground=look.ERROR)
+        self.overload_label.pack(side="left", padx=(6, 0))
+        self.builtin_row = (cell,)
         self.sync_builtin()
         r += 1
         names = [name for _, name in DOMINO_STARTS]
@@ -1671,6 +1670,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.hz_window.draw_preview()
         self.player.start(self.rendered, ppq, bpm, self.playhead, self.play_end(ppq, beats, self.playhead),
                           self.picture_use10)
+        if self.out.name == BUILTIN:
+            self.overload.start(self.out.handle, self.play_voices, self.play_guard.get())
         self.play_btn.config(text=tr("app.stop_space"))
         self.roll.show_playhead(start=True)
         self._play_job = self.after(15, self._play_tick)
@@ -1706,6 +1707,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.stop_play()
             return
         self.roll.show_playhead()
+        self.show_overload()
         self._play_job = self.after(15, self._play_tick)
 
     def stop_play(self):
@@ -1717,7 +1719,19 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.player.stop()
             self.roll.show_playhead()
             self.schedule_autosave()
+        self.overload.stop()
+        self.show_overload()
         self.play_btn.config(text=tr("app.play_space"))
+
+    def show_overload(self):
+        """The red text next to Built-in BASSMIDI's Settings button (and in its window): "Overloaded", with the
+        voices playing when the limit was lowered by itself."""
+        text = self.overload.text()
+        if text != self.overload_text:
+            self.overload_text = text
+            self.overload_label.config(text=text)
+            if self.builtin_window is not None:
+                self.builtin_window.refresh()
 
     # ------------------------------------------------------------ Built-in BASSMIDI (MIDI out)
 
@@ -1738,13 +1752,13 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.busy(None)
 
     def sync_builtin(self):
-        """Built-in BASSMIDI's row (voices + soundfont) shows only while it's the MIDI out."""
+        """Built-in BASSMIDI's row (its Settings button) shows only while it's the MIDI out."""
         if not hasattr(self, "builtin_row"):
             return
         for w in self.builtin_row:
             grid_shown(w, self.midi_device.get() == BUILTIN)
-        font = self.hz_preview["font"]
-        self.font_tip_play.text = tr("app.soundfont_tip", name=os.path.basename(font) if font else tr("ps.no_font"))
+        if self.builtin_window is not None:
+            self.builtin_window.refresh()  # (the soundfont's name)
 
     def pick_soundfont(self):
         """Pick the soundfont (shared by Built-in BASSMIDI and the Hz bass preview). True = one was picked."""
@@ -1778,22 +1792,29 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.sync_builtin()
 
     def on_play_voices(self, left=False):
-        e = self.voices_entry
+        e = self.voices_entry  # (in Built-in BASSMIDI's Settings window)
         try:
             v = int(round(float(calc(self.voices_var.get()))))
             if not VOICES[0] <= v <= VOICES[1]:
                 raise ValueError
         except (ValueError, ZeroDivisionError):
-            bad(e)
+            if e is not None and e.winfo_exists():
+                bad(e)
             return
-        good(e)
+        if e is not None and e.winfo_exists():
+            good(e)
         if str(v) != self.voices_var.get():
             self.voices_var.set(str(v))
         if v != self.play_voices:
             self.play_voices = v
             if self.out.name == BUILTIN and self.out.handle:
                 self.out.handle.set_voices(v)  # (heard at once, while playing too)
+                self.overload.set_limit(v)
             self.schedule_autosave()
+
+    def on_play_guard(self):
+        self.overload.set_guard(self.play_guard.get())
+        self.schedule_autosave()
 
     def set_playhead(self, beat):
         self.playhead = max(0.0, beat)
