@@ -187,11 +187,12 @@ def piece_notes(sh, ppq, keys, make):
     if sh["kind"] != "custom":
         halves = sh["cut"].get("knife") or []
     key = (json.dumps(src, sort_keys=True), ppq, keys)
-    if key not in _wholes:
+    whole = _wholes.get(key)  # (got once: the notes may be made in a background thread too, see App.notes_made)
+    if whole is None:
         if len(_wholes) > 8:
             _wholes.clear()
-        _wholes[key] = make(src, ppq, keys)
-    notes, tracks = knife_cut(*_wholes[key], halves, moved_by(sh), ppq)  # (the cuts went along with it)
+        whole = _wholes[key] = make(src, ppq, keys)
+    notes, tracks = knife_cut(*whole, halves, moved_by(sh), ppq)  # (the cuts went along with it)
     if not same_vel and len(notes):  # (its own velocities: over its own time, as a shape of its own)
         from notes.engine import cached_arrays
         from notes.envelope import env_values, velocity_env

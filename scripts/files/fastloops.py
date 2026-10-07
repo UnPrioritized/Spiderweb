@@ -20,7 +20,7 @@ from numba import njit
 CACHE = not getattr(sys, "frozen", False)
 
 
-@njit(cache=CACHE)
+@njit(cache=CACHE, nogil=True)
 def last_on_pixels(x0, x1, key, color, left, right, keys, row0, row1):
     """The notes' rectangles (x0, y0, x1, y1, colour) with x clamped to left..right; of notes up to 3 pixels long
     on the very same pixels only the last is kept (the others are painted over)."""
@@ -48,7 +48,7 @@ def last_on_pixels(x0, x1, key, color, left, right, keys, row0, row1):
     return ra[:m].copy(), rb[:m].copy(), rc[:m].copy(), rd[:m].copy(), re[:m].copy()
 
 
-@njit(cache=CACHE)
+@njit(cache=CACHE, nogil=True)
 def paint_order(notes, by_start, rank, nranks, pics, nslots, picgroup):
     """The notes kept in painting order between pictures (redone when the notes or the selection change): by owner
     rank, each owner's in by_start's order (np.argsort of the starts, stable). -> start, end, key, colour (as
@@ -79,7 +79,7 @@ def paint_order(notes, by_start, rank, nranks, pics, nslots, picgroup):
     return s, e, key, color, first, longest
 
 
-@njit(cache=CACHE)
+@njit(cache=CACHE, nogil=True)
 def _block_range(s, lo, hi, t_lo, t_hi):
     """In s[lo:hi] (sorted): the first with s >= t_lo, the first with s > t_hi (np.searchsorted left / right)."""
     a, b = lo, hi
@@ -99,7 +99,7 @@ def _block_range(s, lo, hi, t_lo, t_hi):
     return a, c
 
 
-@njit(cache=CACHE)
+@njit(cache=CACHE, nogil=True)
 def order_screen(s, e, key, color, first, b0, b1, t_lo, t_hi, ax, bx, kb, w, shown, clip, c0, c2):
     """note_rects' screen() from paint_order's notes (ranks b0 .. b1, starts t_lo .. t_hi): x0, x1, key, colour of the ones
     on screen, already in painting order."""
@@ -126,7 +126,7 @@ def order_screen(s, e, key, color, first, b0, b1, t_lo, t_hi, ax, bx, kb, w, sho
     return x0[:m], x1[:m], k[:m], c[:m]
 
 
-@njit(cache=CACHE)
+@njit(cache=CACHE, nogil=True)
 def order_rects(s, e, key, color, first, b0, b1, t_lo, t_hi, ax, bx, kb, w, shown, clip, c0, c2, left, right, keys,
                 row0, row1):
     """order_screen and last_on_pixels in one: the rectangles, without the notes in between."""
@@ -172,7 +172,7 @@ def order_rects(s, e, key, color, first, b0, b1, t_lo, t_hi, ax, bx, kb, w, show
     return ra[:m].copy(), rb[:m].copy(), rc[:m].copy(), rd[:m].copy(), re[:m].copy()
 
 
-@njit(cache=CACHE)
+@njit(cache=CACHE, nogil=True)
 def note_top(top_px, kb, top, w, h, x0, y0, x1, y1):
     """top_px (the region's pixels, row by row, -1 filled) = note number * 2 + (1 = outline) of the note painted
     last on each pixel. Same pixels as a canvas rectangle with a 1-pixel outline: x0..x1 and y0..y1 inclusive."""
@@ -197,7 +197,7 @@ def note_top(top_px, kb, top, w, h, x0, y0, x1, y1):
                     top_px[row + d - 1] = edge
 
 
-@njit(cache=CACHE)
+@njit(cache=CACHE, nogil=True)
 def paint_notes(img, kb, top, w, h, x0, y0, x1, y1, color, rgb):
     """Each note's colours painted straight into img (pixels x 3), the last painted winning: the same pixels as
     note_top's notes on top coloured in, without that list."""
@@ -225,7 +225,7 @@ def paint_notes(img, kb, top, w, h, x0, y0, x1, y1, color, rgb):
                     img[row + d - 1, 0], img[row + d - 1, 1], img[row + d - 1, 2] = e0, e1, e2
 
 
-@njit(cache=CACHE)
+@njit(cache=CACHE, nogil=True)
 def _merge_runs(notes, order, a, b):
     """order[a:b] sorted by start (notes[:, 0]), stable: its runs already in order merged two by two."""
     n = b - a
@@ -273,7 +273,7 @@ def _merge_runs(notes, order, a, b):
     order[a:b] = idx
 
 
-@njit(cache=CACHE)
+@njit(cache=CACHE, nogil=True)
 def overlap_order(notes):
     """engine.first_seen of slot * 256 + key and engine.overlap_order in one: (group, order), or two empty arrays
     when the ids are too spread out for a table (the NumPy way then)."""
@@ -332,7 +332,7 @@ def overlap_order(notes):
     return group, order
 
 
-@njit(cache=CACHE)
+@njit(cache=CACHE, nogil=True)
 def overlap_sweep(notes, order, group):
     """resolve_overlaps' work once sorted (order: by group, start, velocity, longest first): a note starting while
     earlier ones of its group still sound is stretched to where they would have ended and the one before it is

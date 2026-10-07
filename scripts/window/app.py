@@ -7,6 +7,7 @@ import copy
 import json
 import math
 import os
+import threading
 import time
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
@@ -50,6 +51,7 @@ from window.between_window import BetweenGroups
 from notes.between import copied as between_copied, sync_groups, turns as between_turns
 from window.history import HistoryPanel, edit_name
 from roll.pianoroll import PianoRoll
+from roll.roll_draw import painting_order
 from files import errors, speed
 from files.about import ICONS, VERSION
 from files.playback import BUILTIN, DEFAULT_DEVICE, MidiOut, Player, devices
@@ -97,6 +99,21 @@ SPLIT_CHOICES = [
 SPLIT_TIP = (
     tr("app.same_key_shapes_only_get_split")
 )
+
+
+def all_notes(shapes, ppq, keys, mode, split, notes_tracks):
+    """Every shape's notes together, overlaps / channels worked out: (colours each shape asks for, channel 10 for
+    pictures, rendered, slot count). Touches no Tk: also made in a background thread (App.notes_rested)."""
+    got = [notes_tracks(sh) for sh in shapes]
+    # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
+    # merged into the last (pasted notes keep their tracks)
+    wanted = [0 if t is None or "notes" in sh else len(np.unique(t)) for sh, (_, t) in zip(shapes, got)]
+    got = [(n, capped_colours(t) if w > COLOURS else t) for (n, t), w in zip(got, wanted)]
+    # (pictures using channel 10 too: one setting for the project, kept with every picture)
+    use10 = next((sh["picture"]["set"].get("use10", False) for sh in shapes if "picture" in sh), False)
+    rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
+                             ["picture" in sh for sh in shapes], use10, between_turns(shapes))
+    return wanted, use10, rendered, slots
 
 
 class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
@@ -183,6 +200,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self._notes_worked = 0  # shapes whose notes had to be worked out (not remembered)
         self._notes_time = 0.0  # how long that took the last time
         self._late_notes = None  # while dragging: notes left until the mouse rests
+        self._coming = None  # notes being made in the background while a drag rests (notes_rested)
         self._position = None
         self._normal_geometry = None
 
@@ -858,8 +876,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         # (moving: also whenever the piano roll shows its notes as one picture, which it can carry along)
         if not now and (self.roll.drag or self.scrubbing) and (slow or moving and (self._notes_time > 0.03 or self.roll._img is not None)):
             self.notes_late = True
-            if not (moving and slow):  # (quick enough to make: the real notes show whenever the mouse rests)
-                self._late_notes = self.after(120 if moving else 250, self._notes_rested)
+            # the notes are made in the background once the mouse rests: quick enough to paint = the real notes
+            # show then, else they wait for the mouse to be let go (and are ready by then)
+            self._late_notes = self.after(120 if moving else 250, self.notes_rested, not (moving and slow))
             self.roll.request_redraw()
             return
         self.notes_late = False
@@ -875,30 +894,23 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 self.split_box.pack(anchor="w", padx=(18, 0), pady=(1, 0))
             else:
                 self.split_box.pack_forget()
+        made = self.notes_made()
         for sh in self.shapes:  # a piece whose outline was changed is a shape of its own now (sliced.py)
             if "cut" in sh and moved_by(as_made(sh)) is None:
                 completed(sh)  # (with the whole's glue / note tool pages)
-        got = [self.notes_tracks(sh) for sh in self.shapes]
-        # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
-        # merged into the last (pasted notes keep their tracks)
-        wanted = [0 if t is None or "notes" in sh else len(np.unique(t)) for sh, (_, t) in zip(self.shapes, got)]
+        if made is None:
+            made = all_notes(self.shapes, self.ppq, self.keys, self.channel_mode.get(), self.channel_split,
+                             self.notes_tracks)
+            if self._notes_worked != worked:
+                self._notes_time = time.perf_counter() - started
+        wanted, self.picture_use10, self.rendered, self.slot_count = made
         if wanted != self.colours_wanted:
             self.colours_wanted = wanted
             self.after_idle(self.sync_custom)  # (the panel's warning)
-        got = [(n, capped_colours(t) if w > COLOURS else t) for (n, t), w in zip(got, wanted)]
-        # (pictures using channel 10 too: one setting for the project, kept with every picture)
-        self.picture_use10 = next((sh["picture"]["set"].get("use10", False) for sh in self.shapes
-                                   if "picture" in sh), False)
-        self.rendered, self.slot_count = render([n for n, _ in got], self.channel_mode.get(), self.channel_split,
-                                                [t for _, t in got], [tracks_apart(sh) for sh in self.shapes],
-                                                ["picture" in sh for sh in self.shapes], self.picture_use10,
-                                                between_turns(self.shapes))
         self.play_changed()
         # placed pictures: their notes are drawn in the picture's own colours (the first picture's: they share them)
         self.picture_owners = np.array(["picture" in sh for sh in self.shapes], bool)
         self.picture_pal = next((sh["picture"]["set"].get("pal") for sh in self.shapes if "picture" in sh), None)
-        if self._notes_worked != worked:
-            self._notes_time = time.perf_counter() - started
         counts = self.note_counts = np.bincount(self.rendered[:, 5], minlength=len(self.shapes)).tolist()
         chans = [1] * len(self.shapes)  # Multi channel: how many channels each shape spreads over
         if self.channel_mode.get() == "auto" and len(self.rendered):
@@ -911,9 +923,97 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.schedule_autosave()
         self.sync_history()
 
-    def _notes_rested(self):
-        # after the mouse moves still waiting to be handled (a slow redraw can make the timer run out first)
-        self._late_notes = self.after_idle(lambda: self.shapes_changed(now=True))
+    def notes_rested(self, show=True):
+        """The mouse rests mid-drag: the notes are made in a background thread (the window keeps answering the mouse;
+        moved again = thrown away). show: put on screen once made (else kept for when the mouse is let go)."""
+        # (after the mouse moves still waiting to be handled: a slow redraw can make the timer run out first)
+        self._late_notes = self.after_idle(self._make_coming, show)
+
+    def notes_key(self):
+        """Everything the notes are made from (shapes_changed): a background result is used only for exactly this."""
+        return (tuple(json.dumps(sh, sort_keys=True) for sh in self.shapes), self.ppq, self.keys,
+                self.channel_mode.get(), SPLIT_CHOICES[max(self.split_box.current(), 0)][0])
+
+    def _make_coming(self, show):
+        self._late_notes = None
+        show = show or not (self.roll.drag or self.scrubbing)  # (the drag called off: no let go to wait for)
+        job = self._coming
+        if job and not job["done"]:  # (one at a time: the shapes as they are then are made after it)
+            job["again"] = show if job.get("again") is None else job["again"] or show
+            return
+        key = self.notes_key()
+        if job and job["key"] == key and job["got"] is not None:  # (made already, e.g. moved and back)
+            if show:
+                self.shapes_changed(now=True)
+            return
+        shapes = [json.loads(s) for s in key[0]]  # (the thread's own copy: the drag goes on with the real ones)
+        for sh in shapes:
+            if "cut" in sh and moved_by(as_made(sh)) is None:
+                completed(sh)
+        job = self._coming = {"key": key, "show": show, "done": False, "got": None, "own": {}}
+        known = self._notes_cache  # (only read in the thread; its own new notes go to job["own"])
+        sels, fast = frozenset(self.sels), speed.loops()
+
+        def notes_tracks(sh):
+            k = (json.dumps(sh, sort_keys=True), key[1], key[2])
+            got = known.get(k) or job["own"].get(k)
+            if got is None:
+                got = job["own"][k] = fx_notes(sh, key[1], key[2], notes_tracks)
+            return got
+
+        def work():
+            started = time.perf_counter()
+            try:
+                got = all_notes(shapes, *key[1:], notes_tracks)
+                # (the piano roll's orders for painting them too: roll_draw.start_order / paint_order)
+                rendered, order = got[2], None
+                start = np.argsort(np.ascontiguousarray(rendered[:, 0]), kind="stable")
+                if fast:
+                    pics = np.array(["picture" in sh for sh in shapes], bool)
+                    order = ((sels, pics.tobytes(), len(pics)),
+                             painting_order(fast, rendered, start, sels, pics, key[2]))
+                job["drawn"] = (start, order)
+                job["got"] = got
+            except Exception:  # (MemoryError too: made again the normal way, which tells about it)
+                job["got"] = None
+            job["time"] = time.perf_counter() - started
+            job["done"] = True
+        job["thread"] = threading.Thread(target=work, daemon=True, name="notes")
+        job["thread"].start()
+        self.after(15, self._coming_check, job)
+
+    def _coming_check(self, job):
+        if job is not self._coming:  # (the notes were made the normal way meanwhile)
+            return
+        if not job["done"]:
+            self.after(15, self._coming_check, job)
+            return
+        again = job.get("again")
+        show = job["show"] or again or not (self.roll.drag or self.scrubbing)
+        if again is None and not show or not self.notes_late:
+            return
+        if job["got"] is not None and self.notes_key() == job["key"]:
+            if show:
+                self.shapes_changed(now=True)
+        elif again is not None:  # (the mouse rested again while these were made: those shapes now)
+            self._make_coming(again)
+
+    def notes_made(self):
+        """The notes made in the background for the shapes exactly as they are now (waited for if still being made),
+        else None. Called by shapes_changed, which then makes them itself."""
+        job, self._coming = self._coming, None
+        if job is None or job["key"] != self.notes_key():
+            return None
+        job["thread"].join()
+        if job["got"] is None:
+            return None
+        if len(self._notes_cache) + len(job["own"]) > 500:
+            self._notes_cache.clear()
+        self._notes_cache.update(job["own"])
+        if job["own"]:
+            self._notes_time = job["time"]
+        self.roll.ready_order(job["got"][2], *job["drawn"])
+        return job["got"]
 
     def catch_up_notes(self):
         """The notes left for later while dragging (shapes_changed): now."""

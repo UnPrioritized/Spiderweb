@@ -409,11 +409,12 @@ def custom_groups(sh):
     numbers; one group = nothing to split."""
     strokes = sh["strokes"]
     key = json.dumps(strokes)  # (asked after every change, also while dragging: the same strokes = the same answer)
-    if key not in _groups:
+    got = _groups.get(key)  # (got once: the notes may be made in a background thread too, see App.notes_made)
+    if got is None:
         if len(_groups) > 32:
             _groups.clear()
-        _groups[key] = stroke_groups(strokes)
-    return [list(g) for g in _groups[key]]
+        got = _groups[key] = stroke_groups(strokes)
+    return [list(g) for g in got]
 
 
 _groups = {}

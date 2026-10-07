@@ -250,6 +250,23 @@ def screen_lines(path, ax, bx, ay, by, view):
     return out
 
 
+def painting_order(fast, rendered, start, sels, pics, keys):
+    """RollDrawing.paint_order's work (start = the notes' rows by start). Touches no Tk: also done in a background
+    thread for notes made there (App.notes_rested)."""
+    if not (len(rendered) and rendered[:, 2].min() >= 0 and rendered[:, 2].max() < keys and rendered[:, 5].min() >= 0):
+        return None
+    owners = int(rendered[:, 5].max()) + 1
+    sel = np.zeros(owners, bool)
+    sel[[s for s in sels if 0 <= s < owners]] = True
+    rank = np.empty(owners, np.int64)  # shapes in their order, the selected ones last
+    others = owners - int(sel.sum())
+    rank[~sel] = np.arange(others)
+    rank[sel] = np.arange(others, owners)
+    made = fast.paint_order(np.ascontiguousarray(rendered, np.int64), start, rank, owners,
+                            pics if pics.any() else np.zeros(0, bool), len(SLOT_COLORS), PICTURE_GROUP)
+    return made, others
+
+
 class RollDrawing:
     """Mixed into PianoRoll."""
 
@@ -359,7 +376,7 @@ class RollDrawing:
         if carried is None:
             self._carry = None
         if app.notes_late and not self.drag and not app._late_notes:  # (a drag called off: the notes catch up)
-            app._notes_rested()
+            app.notes_rested()
         if carried is not None and w > self.kb_w and h > self.ruler_h:
             self.paint_carried(w, h, rows, cols, fixed, *carried)
             self._note_pic = None
@@ -802,20 +819,16 @@ class RollDrawing:
         got = self._paint_order
         if got is not None and got[0] is rendered and got[1] == key:
             return got[2]
-        made = None
-        if len(rendered) and rendered[:, 2].min() >= 0 and rendered[:, 2].max() < app.keys and rendered[:, 5].min() >= 0:
-            owners = int(rendered[:, 5].max()) + 1
-            sel = np.zeros(owners, bool)
-            sel[[s for s in app.sels if 0 <= s < owners]] = True
-            rank = np.empty(owners, np.int64)  # shapes in their order, the selected ones last
-            others = owners - int(sel.sum())
-            rank[~sel] = np.arange(others)
-            rank[sel] = np.arange(others, owners)
-            made = fast.paint_order(np.ascontiguousarray(rendered, np.int64), self.start_order(), rank, owners,
-                                    pics if pics.any() else np.zeros(0, bool), len(SLOT_COLORS), PICTURE_GROUP)
-            made = (made, others)
+        made = painting_order(fast, rendered, self.start_order(), app.sels, pics, app.keys)
         self._paint_order = (rendered, key, made)
         return made
+
+    def ready_order(self, rendered, start, order):
+        """Notes made in the background (App.notes_made) came with their start order and painting order (made for
+        the selection and pictures then): kept, so painting them doesn't work them out again."""
+        self._start_order = (rendered, start)
+        if order is not None:
+            self._paint_order = (rendered,) + order
 
     def visible_notes(self, t_lo, t_hi):
         """Rendered notes (array rows) that can overlap ticks t_lo..t_hi."""
