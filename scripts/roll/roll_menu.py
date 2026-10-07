@@ -135,6 +135,7 @@ class ShapeMenu:
             item(tr("roll_menu.chop"), tr("roll_menu.alt_u"), lambda: open_chop(app), keys=True)
             item(tr("roll_menu.quick_chop"), tr("roll_menu.ctrl_u"), lambda: quick_chop(app), keys=True)
             self.glue_items(item)
+        self.between_items(item, i)
         if len(app.sels) >= 2:  # (greyed out, saying why, when something else is selected too)
             ok = app.can_join()
             item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
@@ -181,6 +182,8 @@ class ShapeMenu:
             item(tr("roll_menu.chop"), tr("roll_menu.alt_u"), lambda: open_chop(app))
             item(tr("roll_menu.quick_chop"), tr("roll_menu.ctrl_u"), lambda: quick_chop(app))
             self.glue_items(item)
+        if app.between_pair():
+            item(tr("between.menu_add"), "", app.add_between)
         ok = app.can_join()
         item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
              tr("roll_menu.ctrl_g"), app.join_selected, ok)
@@ -193,6 +196,20 @@ class ShapeMenu:
             m.tk_popup(e.x_root, e.y_root)
         finally:
             m.grab_release()
+
+    def between_items(self, item, i):
+        """Add between (between.py): two open lines selected = start one; a group's shape = its own items."""
+        app = self.app
+        if app.between_pair():
+            item(tr("between.menu_add"), "", app.add_between)
+        b = app.shapes[i].get("between")
+        if not b:
+            return
+        item(tr("between.menu_edit"), tr("between.menu_double"), lambda: app.edit_between(i), keys=True)
+        item(tr("between.menu_select"), "", lambda: app.select_group(i))
+        if b["role"] == "key":
+            item(tr("between.menu_unkey"), "", lambda: app.unkey(i))
+        item(tr("between.menu_unlink"), "", lambda: app.unlink_between(i))
 
     def glue_items(self, item):
         """Glue (glue.py): in the kept Select boxes if there are any, else all the selected shapes' notes."""

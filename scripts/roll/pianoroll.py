@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from files.lang import tr
+from notes.between import copied as between_copied, group_of
 from notes.custom import box_frame, fill_plan, fill_test
 from notes.engine import cached_arrays, make_shape
 from notes.joined import all_tumours
@@ -976,6 +977,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         app = self.app
         first = len(app.shapes)
         app.shapes += [copy.deepcopy(app.shapes[j]) for j in sorted(orig)]
+        between_copied(app.shapes[first:])  # (a whole Add between group: a new group; parts of one: plain shapes)
         new = {first + k: orig[j] for k, j in enumerate(sorted(orig))}
         app.select_many(new, max(new))
         app.shapes_changed(now=True)  # (the copies' notes are there before they're carried along)
@@ -1125,6 +1127,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.edit_text(e)  # double-click a text: type in it
         elif self.app.tool.get() == "select" and self.picture_at(e) is not None:
             self.app.edit_picture(self.picture_at(e))  # double-click a picture: its look in the image window
+        elif self.app.tool.get() == "select" and self.group_at(e) is not None:
+            self.app.edit_between(self.group_at(e))  # double-click an Add between group: its window
         elif self.paste_spot(e):  # (user, like Domino: Select double-click on empty space pastes there)
             self.app.paste(whole=True, at=self.event_pt(e)[0])
         elif self.app.tool.get() == "text":
@@ -1136,6 +1140,11 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         """The placed picture under the mouse (its number), or None."""
         i = self.shape_at(e.x, e.y, prefer_selected=True)
         return i if i is not None and "picture" in self.app.shapes[i] else None
+
+    def group_at(self, e):
+        """The shape of an Add between group under the mouse (its number), or None."""
+        i = self.shape_at(e.x, e.y, prefer_selected=True)
+        return i if i is not None and group_of(self.app.shapes[i]) else None
 
     def paste_spot(self, e):
         """A Select double-click here pastes the copied shapes (their start at the mouse's beat, snapped; keys

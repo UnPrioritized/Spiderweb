@@ -45,6 +45,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     claw_window.py   the Claw machine window
     strum_window.py  the Strum window (Start / End panels of knobs, each with its number box)
     range_window.py  the spam gate Range's graph window
+    between_window.py  the Add between window (preview, steps, graph) + a group in the main window (list row, menu)
     image_window.py  image to notes: the picture, its sliders, the player-look preview, placing it
     format_window.py the colour list format editor (live output, tags, codes, the user's formats)
     paste_window.py  Paste colours: colours read out of a player's settings text into the picture
@@ -78,6 +79,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     pattern.py       a curve's formulas: its shape (circle, spiral...) and a pattern along it (wave...)
     polygon.py       polygons and stars made by the Polygon tool (a pattern along every side)
     joined.py        joining shapes into one curve (pieces, their tumours) and splitting shapes
+    between.py       Add between: in-between shapes changing step by step from one line into another, groups
     convert.py       Turn into live shape: shapes -> one custom shape (and back)
     envelope.py      velocity envelopes
     slice.py         Slice tool maths: where a line crosses shapes, a custom shape cut in two halves

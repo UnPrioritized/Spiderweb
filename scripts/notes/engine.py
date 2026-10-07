@@ -872,7 +872,7 @@ CHANNEL_MODES = ("raw", "single", "auto")
 SPLITS = ("key", "time")
 
 
-def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False):
+def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -885,17 +885,32 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     colour of the project's picture colours, so its channel never changes).
     use10: the pictures use channel 10 too (slot k = channel k, slot_track_channel): the other shapes' slots skip
     every slot that would be channel 10 (shapes never use it, user).
+    teams: per shape None, or (group, turn) for an Add between group giving each shape its own colour (between.py):
+    with "auto" the group's shapes of one turn share a channel, and every turn of a group gets a different one (its
+    shapes' own tracks are left out).
     """
     tracks = tracks or [None] * len(note_lists)
     apart = apart or [False] * len(note_lists)
     fixed = fixed or [False] * len(note_lists)
+    teams = teams or [None] * len(note_lists)
     pinned = [np.asarray(tr, np.int64) if fx and tr is not None else None for tr, fx in zip(tracks, fixed)]
     top = max([int(p.max()) + 1 for p in pinned if p is not None and len(p)] or [0])
     if mode == "auto":
         units, unit_of, forced = [], [], []  # the shapes, pasted notes split up by track; unit_of = each note's unit
-        for lst, tr, sep, pin in zip(note_lists, tracks, apart, pinned):
+        team_unit, team_units = {}, {}  # (group, turn) -> its unit; group -> its units
+        for lst, tr, sep, pin, team in zip(note_lists, tracks, apart, pinned, teams):
             if pin is not None:
                 unit_of.append(None)
+                continue
+            if team is not None:
+                u = team_unit.get(team)
+                if u is None:
+                    u = team_unit[team] = len(units)
+                    units.append(lst)
+                    team_units.setdefault(team[0], []).append(u)
+                else:
+                    units[u] = np.concatenate([units[u], lst])
+                unit_of.append(u)
                 continue
             if tr is None or not len(lst):
                 unit_of.append(len(units))
@@ -907,6 +922,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
             if sep:
                 forced.append(range(len(units), len(units) + len(ids)))
             units += [lst[which == k] for k in range(len(ids))]
+        forced += [us for us in team_units.values() if len(us) > 1]
         unit_slots = np.array(assign_slots(units, split, forced), np.int64)
         if use10:  # (0..8, 10..24, 26..40...: never a slot that is channel 10)
             unit_slots = unit_slots + (unit_slots + 6) // 15

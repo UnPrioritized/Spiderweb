@@ -494,7 +494,7 @@ def rebuild(shapes, gid, s):
             "between": {"id": gid, "role": "step", "at": u}} for i, u in enumerate(slots(n), 1) if i not in taken]
     out[at:at] = new
     sync_groups(out)
-    return out, members(out, gid)
+    return out, ordered(out, gid)
 
 
 def start_group(shapes, i, j):

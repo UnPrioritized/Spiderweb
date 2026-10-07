@@ -46,6 +46,8 @@ from window.hz_preview import VOICES, clean_settings as clean_preview
 from window.panel_tumour import TumourPanel
 from notes.joined import all_tumours, is_joined
 from window.join_split import JoinSplit
+from window.between_window import BetweenGroups
+from notes.between import copied as between_copied, sync_groups, turns as between_turns
 from window.history import HistoryPanel, edit_name
 from roll.pianoroll import PianoRoll
 from files import errors, speed
@@ -97,7 +99,7 @@ SPLIT_TIP = (
 )
 
 
-class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit,
+class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
           HistoryPanel, tk.Tk):
     def __init__(self, autosave=AUTOSAVE):
         super().__init__()
@@ -640,6 +642,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         sh = self.selected()
         title = tr("app.shape", sel=self.sel + 1,
                    shape_label=self.shape_label(sh)) if sh else tr("app.new_shape_defaults")
+        part = self.between_part(sh) if sh else None
+        if part:
+            title += part
         if len(self.sels) > 1:
             title += tr("app.more_selected", n=len(self.sels) - 1)
         self.settings.config(text=title)
@@ -672,8 +677,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 w.sync()
         if self.hz_window:
             self.hz_window.sync()
-        if self.sel is not None:
-            self.listbox.see(self.sel)
+        if self.sel is not None and self.row_of(self.sel) is not None:
+            self.listbox.see(self.row_of(self.sel))
         # the first time one is selected: how it's edited
         kinds = {self.shapes[i]["kind"] for i in self.sels}
         for kind, topic in (("custom", "custom_edit"), ("funnel", "funnel_curves"), ("free", "straighten")):
@@ -683,8 +688,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
 
     def sync_list_selection(self):
         self.listbox.selection_clear(0, "end")
-        for i in self.sels:
-            self.listbox.selection_set(i)
+        for r, row in enumerate(self.shape_rows()):
+            if self.sels.intersection(row):
+                self.listbox.selection_set(r)
 
     def sync_points(self):
         sh = self.selected()
@@ -844,6 +850,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         if self._late_notes:
             self.after_cancel(self._late_notes)
             self._late_notes = None
+        if sync_groups(self.shapes):  # Add between: the steps follow their first / last shape (between.py)
+            self.after_idle(self.sync_title)  # (a step changed by hand is a key now)
         slow = self._notes_time > 0.15
         # (other drags make the notes AND repaint them all at every step: the repaint counts too)
         slow = slow or not moving and self._notes_time + self.roll.paint_time > 0.15
@@ -883,7 +891,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                                    if "picture" in sh), False)
         self.rendered, self.slot_count = render([n for n, _ in got], self.channel_mode.get(), self.channel_split,
                                                 [t for _, t in got], [tracks_apart(sh) for sh in self.shapes],
-                                                ["picture" in sh for sh in self.shapes], self.picture_use10)
+                                                ["picture" in sh for sh in self.shapes], self.picture_use10,
+                                                between_turns(self.shapes))
         self.play_changed()
         # placed pictures: their notes are drawn in the picture's own colours (the first picture's: they share them)
         self.picture_owners = np.array(["picture" in sh for sh in self.shapes], bool)
@@ -895,13 +904,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         if self.channel_mode.get() == "auto" and len(self.rendered):
             pairs = np.unique(self.rendered[:, 5] * (self.slot_count + 1) + self.rendered[:, 4])
             chans = np.bincount(pairs // (self.slot_count + 1), minlength=len(self.shapes)).tolist()
-        self.listbox.delete(0, "end")
-        for i, sh in enumerate(self.shapes):
-            uses = tr("app.channels_2", chans=chans[i]) if chans[i] > 1 else ""
-            self.listbox.insert("end",
-                                tr("app.notes", i=i + 1, shape_label=self.shape_label(sh), counts=counts[i], uses=uses))
-            if chans[i] > MANY_CHANNELS:  # (past this the note colours and channel numbers repeat)
-                self.listbox.itemconfig(i, foreground=GAP_COLOR, selectforeground=look.GAP_PICKED)
+        self.fill_shape_list(counts, chans, MANY_CHANNELS)  # (an Add between group is one row: between_window.py)
         self.sync_list_selection()
         self.roll.request_redraw()
         self.update_status()
@@ -985,11 +988,15 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.select_many(range(len(self.shapes)), self.sel if self.sel is not None else len(self.shapes) - 1)
 
     def on_list_select(self, _):
+        rows = self.shape_rows()  # (an Add between group is one row: all its shapes)
         cur = set(self.listbox.curselection())
-        if cur != self.sels:
-            added = cur - self.sels
-            primary = max(added) if added else self.sel if self.sel in cur else max(cur, default=None)
-            self.select_many(cur, primary)
+        shown = {r for r, row in enumerate(rows) if self.sels.intersection(row)}
+        if cur != shown:
+            added = cur - shown
+            picked = {i for r in cur if r < len(rows) for i in rows[r]}
+            primary = (rows[max(added)][0] if added else self.sel if self.sel in picked else
+                       max(picked, default=None))
+            self.select_many(picked, primary)
 
     def delete_selected(self, only=None):
         """Delete the selected shapes, or `only` these (Delete while dragging them): the rest stay selected."""
@@ -1031,6 +1038,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             new["pts"] = [[b + shift, p] for b, p in new["pts"]]
             self.shapes.append(new)
         fresh_marks(self.shapes[first:])
+        between_copied(self.shapes[first:])  # (a whole Add between group: a new group; parts of one: plain shapes)
         self.select_many(range(first, len(self.shapes)), len(self.shapes) - 1)
         self.shapes_changed()
 

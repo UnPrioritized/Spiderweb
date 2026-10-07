@@ -109,6 +109,7 @@ class JoinSplit:
                       self.roll.sy / self.roll.sx if self.roll.sx else None)
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.turn_into_live_shape"))
+        self.unlink_groups(order)  # (an Add between group: plain shapes first, user)
         at = order[0]
         for i in reversed(order):
             del self.shapes[i]
@@ -194,6 +195,7 @@ class JoinSplit:
         new = again or new
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.join"))
+        self.unlink_groups(order)
         at = order[0]
         for i in reversed(order):
             del self.shapes[i]
@@ -239,6 +241,9 @@ class JoinSplit:
         old = self.shapes[i]
         self.roll.cancel_draft()
         self.push_undo(name=name)
+        self.unlink_groups([i])
+        for p in parts:
+            p.pop("between", None)
         whole = span(old)
         for p in parts if velocity else ():
             piece_velocity(p, old, span(p), whole)
@@ -376,6 +381,10 @@ class JoinSplit:
             return
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.slice"))
+        self.unlink_groups(done)
+        for parts in done.values():
+            for p in parts:
+                p.pop("between", None)
         new, picked = [], []
         for i, sh in enumerate(self.shapes):
             parts = done.get(i, [sh])
