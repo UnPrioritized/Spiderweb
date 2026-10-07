@@ -17,8 +17,8 @@ import re
 from files.about import VERSION, WEBSITE
 from files.lang import texts, tr
 
-SECTIONS = ["Getting started", "Tools", "Shapes and settings", "Editing", "Sound and MIDI", "Custom shape drawer",
-            "Reference"]  # (their shown names: help.section.* in the language files)
+SECTIONS = ["Getting started", "Tools", "Shapes and settings", "Editing", "Sound and MIDI", "Hz bass",
+            "Custom shape drawer", "Reference"]  # (their shown names: help.section.* in the language files)
 SECTION_NAMES = {s: tr("help.section." + "_".join(re.findall(r"[a-z0-9]+", s.lower()))) for s in SECTIONS}
 
 # (topic id, section), in the order they're listed; their texts are help.<id>.title / tip / text / words in the language
@@ -64,11 +64,21 @@ TOPIC_LIST = [
     ("numbers", "Editing"),
     ("view", "Editing"),
     ("velocity", "Sound and MIDI"),
-    ("hz_live", "Sound and MIDI"),
     ("playback", "Sound and MIDI"),
     ("channels", "Sound and MIDI"),
     ("files", "Sound and MIDI"),
     ("domino", "Sound and MIDI"),
+    ("hz_notes", "Hz bass"),
+    ("hz_tone", "Hz bass"),
+    ("hz_slides", "Hz bass"),
+    ("hz_preview", "Hz bass"),
+    ("hz_effects", "Hz bass"),
+    ("hz_envelope", "Hz bass"),
+    ("hz_effect_list", "Hz bass"),
+    ("hz_live", "Hz bass"),
+    ("hz_osc", "Hz bass"),
+    ("hz_voice", "Hz bass"),
+    ("hz_fx", "Hz bass"),
     ("drawer", "Custom shape drawer"),
     ("drawer_select", "Custom shape drawer"),
     ("drawer_erase", "Custom shape drawer"),
@@ -109,8 +119,18 @@ SEE = {
     "box": ["custom", "fill", "custom_edit", "formulas", "live"],
     "funnel": ["funnel_curves", "funnel_links", "formulas"],
     "text": ["fill", "custom_edit"],
-    "hz_bass": ["hz_live", "fill", "custom_edit"],
-    "hz_live": ["hz_bass", "playback"],
+    "hz_bass": ["hz_notes", "hz_tone", "hz_slides", "hz_preview", "hz_effects", "hz_live", "fill"],
+    "hz_notes": ["hz_bass", "hz_tone", "hz_slides", "hz_effects"],
+    "hz_tone": ["hz_notes", "hz_slides", "hz_bass"],
+    "hz_slides": ["hz_notes", "hz_tone", "hz_voice"],
+    "hz_preview": ["hz_live", "playback", "hz_bass"],
+    "hz_effects": ["hz_envelope", "hz_effect_list", "hz_fx"],
+    "hz_envelope": ["hz_effects", "hz_effect_list", "hz_osc"],
+    "hz_effect_list": ["hz_effects", "hz_osc"],
+    "hz_live": ["hz_osc", "hz_voice", "hz_fx", "hz_preview", "hz_bass"],
+    "hz_osc": ["hz_live", "hz_voice", "hz_fx", "hz_effect_list"],
+    "hz_voice": ["hz_osc", "hz_slides", "hz_live"],
+    "hz_fx": ["hz_osc", "hz_effects", "hz_envelope", "hz_live"],
     "picture": ["channels", "files", "selecting"],
     "slice": ["join", "selecting", "fill"],
     "live": ["turn_live", "fill", "curves_pen", "straighten", "drawer", "join"],
