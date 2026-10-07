@@ -21,7 +21,8 @@ LOOP = 0.1                  # a stroke ending this close to its start (part of i
 SHAPE_SAMPLES = 120         # points along a loop when fitting shapes to it
 PIECE_SAMPLES = (600, 6000)  # points along a stroke when finding its corners and fitting lines / curves: at least,
                              # at most (in between: as many as keep them within the tolerance's double)
-CORNER_COST = 0.012         # how much worse (part of the loop's size) a fit may be per extra corner / setting it saves
+TOO_SMALL = 1e-3            # a stroke smaller than this (keys, or the custom shape's box) is left as drawn
+CORNER_COST = 0.012        # how much worse (part of the loop's size) a fit may be per extra corner / setting it saves
 
 
 def tolerance(level, size):
@@ -46,7 +47,7 @@ def smooth_path(pts, level, k=1.0):
         return pts
     xs, ys = [x for x, _ in q], [y for _, y in q]
     size = math.hypot(max(xs) - min(xs), max(ys) - min(ys))
-    if size < 1e-9:
+    if size < TOO_SMALL:  # (too small to see; the fitting's own limits are around there: one took 36 s)
         return pts
     tol = tolerance(level, size)
     gap = math.dist(q[0], q[-1])
