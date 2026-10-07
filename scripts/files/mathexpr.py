@@ -13,6 +13,16 @@ _OPS = {
 }
 
 
+def _power(left, right):
+    """left ** right, refused when the exponent is over 64 or the answer would be past any number a box takes
+    (whole numbers are worked out exactly, digit by digit: pow(9, 99999999) or powers of powers froze it)."""
+    if abs(right) > 64:
+        raise ValueError(tr("mathexpr.exponent_too_large"))
+    if isinstance(left, int) and isinstance(right, int) and abs(left) > 1 and right * math.log2(abs(left)) > 1100:
+        raise OverflowError
+    return left ** right
+
+
 def calc(text):
     """Evaluate simple math. Only numbers and + - * / // % ** ( ); x and ^ work too."""
     text = text.replace("x", "*").replace("×", "*").replace("^", "**")
@@ -24,8 +34,8 @@ def calc(text):
             return node.value
         if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
             left, right = ev(node.left), ev(node.right)
-            if isinstance(node.op, ast.Pow) and abs(right) > 64:
-                raise ValueError(tr("mathexpr.exponent_too_large"))
+            if isinstance(node.op, ast.Pow):
+                return _power(left, right)
             return _OPS[type(node.op)](left, right)
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
             return -ev(node.operand) if isinstance(node.op, ast.USub) else ev(node.operand)
@@ -48,7 +58,7 @@ FORMULA_FUNCS = {
     "sin": math.sin, "cos": math.cos, "tan": math.tan, "asin": math.asin, "acos": math.acos, "atan": math.atan,
     "sinh": math.sinh, "cosh": math.cosh, "tanh": math.tanh, "sqrt": math.sqrt, "exp": math.exp,
     "log": math.log, "ln": math.log, "log10": math.log10, "log2": math.log2, "abs": abs, "min": min, "max": max,
-    "floor": math.floor, "ceil": math.ceil, "round": round, "pow": pow,
+    "floor": math.floor, "ceil": math.ceil, "round": round, "pow": _power,
 }
 
 
@@ -101,8 +111,8 @@ def formula(text, named=False, var="x"):
             return x if node.id == var else FORMULA_NAMES[node.id] if node.id in FORMULA_NAMES else values[node.id]
         if isinstance(node, ast.BinOp):
             left, right = ev(node.left, x, values), ev(node.right, x, values)
-            if isinstance(node.op, ast.Pow) and abs(right) > 64:
-                raise ValueError(tr("mathexpr.exponent_too_large"))
+            if isinstance(node.op, ast.Pow):
+                return _power(left, right)
             return _OPS[type(node.op)](left, right)
         if isinstance(node, ast.UnaryOp):
             v = ev(node.operand, x, values)
