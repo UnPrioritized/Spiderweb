@@ -252,8 +252,26 @@ def sections(sh):
 
 
 def split_pieces(sh):
-    """A joined curve back as one curve per piece (a piece whose shapes kept their own tumours: one per shape)."""
-    return [_cut(sh, a, b, tm) for a, b, tm in sections(sh)]
+    """A joined curve back as one curve per piece (a piece whose shapes kept their own tumours: one per shape). A
+    formula laid across all the pieces is made into ordinary anchors first, so each piece keeps its part of it."""
+    parts = [_cut(sh, a, b, tm) for a, b, tm in sections(sh)]
+    if (sh.get("shape") or sh.get("pattern")) and not _looks_same(sh, parts):
+        from notes.pattern import baked
+        tm = shown_tumour(sh)  # (with a formula the tumours are one setting for all: joined_paths)
+        plain = dict(sh, **baked(sh), shape=None, pattern=None, tumour=tm, tumours=None, splits=None)
+        plain = {key: v for key, v in plain.items() if v is not None and not (key in ("gaps", "sharp") and not v)}
+        parts = [_cut(plain, a, b, tm) for a, b, tm in sections(plain)]
+    return parts
+
+
+def _looks_same(sh, parts):
+    """Whether the parts' lines (formulas on, tumours off) are the curve's."""
+    import numpy as np
+    bare = {"tumour": None, "tumours": None, "splits": None}
+    whole = joined_paths(dict(sh, **bare), None)
+    mine = [p for part in parts for p in joined_paths(dict(part, **bare), None)]
+    return len(whole) == len(mine) and all(len(a) == len(b) and np.allclose(a, b, atol=1e-6)
+                                           for a, b in zip(whole, mine))
 
 
 def set_tumours(sh, tms, splits):
