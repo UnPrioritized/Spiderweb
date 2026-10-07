@@ -316,7 +316,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self._area_cache = self._area_px = self._area_img = self._gap_cache = None
         self._settled = "[]"   # the strokes as JSON when the areas last matched them (changed)
         self.stuck = None      # where the last point stuck (sticky.py): (kind, (u, v), pixels away), shown as a mark
-        self.stuck2 = None     # a circle resting on two lines: the second touch's mark
+        self.stuck2 = None     # a circle / square / moved stroke resting on two lines: the second touch's mark
+        self.square_corners = [2]  # a square being drawn: its corners touching (stuck_pieces; 2 = the mouse's)
         self.guide = []        # a circle near sticking or stuck: where to point the mouse for it to touch, each
         # ((u, v), [the touched strokes' points moved through it])
         self._stick_cache = None
@@ -807,8 +808,9 @@ class Drawer(DrawerLayers, tk.Toplevel):
         if st:
             if st["kind"] == "poly" and self.tool.get() == "poly":
                 return [st["pts"][-2:]]
-            if st["kind"] == "poly" and self.tool.get() == "square":
-                return [st["pts"][1:4]]
+            if st["kind"] == "poly" and self.tool.get() == "square":  # (resting on lines: the sides at each touch)
+                c = self.square_corners
+                return [st["pts"][min(c) - 1:max(c) + 2]]
             return [stroke_points(st)]
         if not drag:
             return []
@@ -1342,6 +1344,24 @@ class Drawer(DrawerLayers, tk.Toplevel):
         start, pt = self.drag[1], self.event_pt(e, stick=tool != "circle")
         if tool in ("square", "circle") and e.state & CTRL:
             pt = self.perfect(start, pt)
+        self.square_corners = [2]
+        if tool == "square" and not e.state & (CTRL | SHIFT):  # its sides rest on lines too, like a moved stroke
+            # (user): on one line, or on two at once (a smaller reach); the mouse's corner sticking to a point or a
+            # crossing still comes first. Resting by a side corner, the other way stays on the grid.
+            raw = self.from_xy(e.x, e.y)
+            best = self.stuck and (STICK_RANK[self.stuck[0]], -self.stuck[2])
+            n = int(self.grid_n.get())
+            for kind, (su, sv), far, touch, corners in self.stick_targets().rest_box(
+                    start, raw, self.stick_view(), REACH * self.scale):
+                if best is None or (STICK_RANK[kind], -far) > best:
+                    best = STICK_RANK[kind], -far
+                    pt = [raw[0] + su, raw[1] + sv]
+                    if corners == [1]:
+                        pt[1] = round(raw[1] * n) / n
+                    elif corners == [3]:
+                        pt[0] = round(raw[0] * n) / n
+                    self.stuck, self.stuck2 = ("line", touch[0], far), touch[1:] and ("line", touch[1], far) or None
+                    self.square_corners = corners
         if tool == "circle" and not e.state & SHIFT:  # its line sticks, not the dragged corner (user; the pressed
             # corner sticks like any point): the circle to the mouse, grown / shrunk from that corner until it touches
             raw = self.from_xy(e.x, e.y)

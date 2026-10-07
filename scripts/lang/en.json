@@ -2327,7 +2327,7 @@
  "help.drawer_square.title": "Drawer: Square",
  "help.drawer_square.tip": "Corner to corner. Ctrl = a perfect square.",
  "help.drawer_square.text": [
-  "Drag (or click) corner to corner; Ctrl makes it a perfect square."
+  "Drag (or click) corner to corner; Ctrl makes it a perfect square. While you drag, its sides stick too: near another stroke's slanted line the square grows or shrinks until a corner rests on it (not with Ctrl; Shift = free). Between two lines it can rest on both at once (a smaller reach, with a mark at each touch). The corner under the mouse sticking to a point or a crossing still comes first."
  ],
  "help.drawer_circle.title": "Drawer: Circle",
  "help.drawer_circle.tip": "Corner to corner. Ctrl = a perfect circle.",

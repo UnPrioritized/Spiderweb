@@ -323,6 +323,66 @@ class Targets:
         return ((float(d[m, 0]), float(d[m, 1])), float(far[m]),
                 [(float(ti[m, 0]), float(ti[m, 1])), (float(tj[m, 0]), float(tj[m, 1]))])
 
+    def rest_box(self, a, b, view, reach):
+        """A square being drawn (corner a pressed, b at the mouse; its sides straight across / up) resting on a
+        stroke's line (user), as a moved stroke rests (touch_line / rest_two): [(kind "rest" / "two", (du, dv) to move
+        b by, pixels, [(u, v) where it touches], [its corners touching])], each the nearest: one line within reach
+        pixels, two within half of it. Corners: 1 = (b's u, a's v), 2 = b, 3 = (a's u, b's v); resting by corner 1
+        moves only b's u, by 3 only its v. Lines through a are left out (it would always rest on them)."""
+        k = view[0]
+        a, b = np.asarray(a, float), np.asarray(b, float)
+        if abs(b[0] - a[0]) * k < 1 or abs(b[1] - a[1]) * k < 1:
+            return []
+        box = np.array([a, [b[0], a[1]], b, [a[0], b[1]]])
+        lo, hi = box.min(0) - 2 * reach / k, box.max(0) + 2 * reach / k
+        p0, r, ln, n, kk, gk, owner = self.rests(box, lo, hi)
+        if not len(p0):
+            return []
+        t = np.clip(((a - p0) * r).sum(1) / ln ** 2, 0, 1)
+        through = np.hypot(*(p0 + t[:, None] * r - a).T) * k < 1
+        near = np.flatnonzero((kk > 0) & ~through & (np.abs(gk) * k <= reach))
+        near = near[np.argsort(np.abs(gk[near]))][:12]
+        if not len(near):
+            return []
+        p0, r, ln, n, kk, gk, owner = (x[near] for x in (p0, r, ln, n, kk, gk, owner))
+        free = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], float)[kk]  # (which of b's u / v moves each corner)
+        A = n * free  # (moving b by D: corner kk is on its line when A . D = -gk)
+
+        def fits(d, touch, i):  # (each touch within its piece, the box not turned over or flat)
+            ok = np.ones(len(d), bool)
+            for tp, m in zip(touch, i):
+                s = ((tp - p0[m]) * r[m]).sum(1) / ln[m] ** 2
+                ok &= (s >= 0) & (s <= 1)
+            nb = b + d
+            return ok & np.all(np.sign(nb - a) == np.sign(b - a), 1) & np.all(np.abs(nb - a) * k >= 1, 1)
+
+        out = []
+        aa = (A * A).sum(1)
+        d = -gk[:, None] * A / np.where(aa == 0, np.inf, aa)[:, None]  # (the smallest move)
+        far = np.hypot(*d.T) * k
+        ok = fits(d, [box[kk] + d * free], [np.arange(len(d))]) & (aa > 0) & (far <= reach)
+        if ok.any():
+            m = int(np.argmin(np.where(ok, far, np.inf)))
+            tp = box[kk[m]] + d[m] * free[m]
+            out.append(("rest", (float(d[m, 0]), float(d[m, 1])), float(far[m]), [(float(tp[0]), float(tp[1]))],
+                        [int(kk[m])]))
+        i, j = np.triu_indices(len(near), 1)
+        det = A[i, 0] * A[j, 1] - A[i, 1] * A[j, 0]
+        ok = np.abs(det) >= np.sqrt(aa[i] * aa[j]) * np.where(owner[i] == owner[j], 0.5, 0.1)
+        i, j, det = i[ok], j[ok], det[ok]
+        if len(i):
+            bi, bj = -gk[i], -gk[j]
+            d = np.column_stack([(bi * A[j, 1] - bj * A[i, 1]) / det, (bj * A[i, 0] - bi * A[j, 0]) / det])
+            ti, tj = box[kk[i]] + d * free[i], box[kk[j]] + d * free[j]
+            far = np.hypot(*d.T) * k
+            ok = fits(d, [ti, tj], [i, j]) & (np.hypot(*(ti - tj).T) * k >= 3) & (far <= reach / 2)
+            if ok.any():
+                m = int(np.argmin(np.where(ok, far, np.inf)))
+                out.append(("two", (float(d[m, 0]), float(d[m, 1])), float(far[m]),
+                            [(float(ti[m, 0]), float(ti[m, 1])), (float(tj[m, 0]), float(tj[m, 1]))],
+                            sorted({int(kk[i[m]]), int(kk[j[m]])})))
+        return out
+
     @staticmethod
     def crossing(seg, owner, index, x, y, view, reach):
         """The nearest spot within reach where two of these pieces cross (pieces of different strokes, or of one
