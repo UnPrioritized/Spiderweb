@@ -737,13 +737,23 @@ def stretches(notes, owner, split="key"):
     """One list's notes as (key, start, end, owner) rows, its notes on a key joined into stretches (back-to-back spam
     = one stretch): anything with a length that overlaps a stretch overlaps one of its notes. Notes without a length
     stay on their own. split="time": every note counts as key 0."""
+    fast = loops()
+    if fast:  # (the compiled loop: the same rows; a spam shape's notes mostly come by key and start already)
+        notes = np.ascontiguousarray(notes, np.int64)
+        out, m = fast.note_stretches(notes, split == "key", owner, np.zeros(0, np.int64))
+        if m < 0:
+            key = notes[:, 2] if split == "key" else np.zeros(len(notes), np.int64)
+            out, m = fast.note_stretches(notes, split == "key", owner, np.lexsort((notes[:, 0], key)))
+        return out if m == len(out) else out[:m].copy()
     flat = notes[:, 1] <= notes[:, 0]
     key = notes[:, 2] if split == "key" else np.zeros(len(notes), np.int64)
     out = [np.column_stack([key[flat], notes[flat, 0], notes[flat, 1], np.full(int(flat.sum()), owner, np.int64)])]
-    a, key = notes[~flat], key[~flat]
+    a, key = (notes[~flat], key[~flat]) if flat.any() else (notes, key)
     if len(a):
-        order = np.lexsort((a[:, 0], key))
-        s, e, k = a[order, 0], a[order, 1], key[order]
+        s, e, k = a[:, 0], a[:, 1], key
+        if not ((k[1:] > k[:-1]) | (k[1:] == k[:-1]) & (s[1:] >= s[:-1])).all():  # (else in that order already)
+            order = np.lexsort((s, k))
+            s, e, k = s[order], e[order], k[order]
         run = running_max(e, k)
         new = np.ones(len(s), bool)
         new[1:] = (k[1:] != k[:-1]) | (s[1:] > run[:-1])

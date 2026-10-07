@@ -10,6 +10,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   overlap_order  engine.resolve_overlaps' groups and sort (first_seen + overlap_order)
   overlap_sweep  engine.resolve_overlaps after its sort: cut / stretch / merge the notes on one key and slot
   midi_events    midi_out.track_data: one track's note-ons / offs as MIDI file bytes
+  note_stretches engine.stretches (Multi channel): one shape's notes on a key joined into stretches
 The first start compiles them (about a second, in the background); the result is kept in __pycache__ for the next
 starts (not in the exe: its files can't be kept, so it compiles each start)."""
 
@@ -368,6 +369,38 @@ def overlap_sweep(notes, order, group):
 
 
 @njit(cache=CACHE, nogil=True)
+def note_stretches(notes, by_key, owner, order):
+    """engine.stretches: (key, start, end, owner) rows, the notes without a length first as they come, then the rest's
+    stretches (back-to-back notes on a key joined) by key and start. order: the notes by key, then start, or empty =
+    as they come, if they come in that order (else -> (empty, -1): sort them first). -> (rows, how many)."""
+    n = len(notes)
+    out = np.empty((n, 4), np.int64)
+    m = 0
+    for i in range(n):
+        if notes[i, 1] <= notes[i, 0]:
+            out[m, 0] = notes[i, 2] if by_key else 0
+            out[m, 1], out[m, 2], out[m, 3] = notes[i, 0], notes[i, 1], owner
+            m += 1
+    first, pk, ps = m, 0, 0  # (the note before: key, start)
+    for j in range(len(order) if len(order) else n):
+        i = order[j] if len(order) else j
+        s, e = notes[i, 0], notes[i, 1]
+        if e <= s:
+            continue
+        k = notes[i, 2] if by_key else 0
+        if m > first and not len(order) and (k < pk or k == pk and s < ps):
+            return out[:0], -1
+        pk, ps = k, s
+        if m > first and k == out[m - 1, 0] and s <= out[m - 1, 2]:  # (starts while the stretch sounds: it goes on)
+            if e > out[m - 1, 2]:
+                out[m - 1, 2] = e
+        else:
+            out[m, 0], out[m, 1], out[m, 2], out[m, 3] = k, s, e, owner
+            m += 1
+    return out, m
+
+
+@njit(cache=CACHE, nogil=True)
 def _put_vlq(out, p, d):
     """A MIDI wait (7 bits per byte, every byte but the last with the top bit set) at out[p]; returns the next p."""
     k = 1 + (d >= 1 << 7) + (d >= 1 << 14) + (d >= 1 << 21)
@@ -423,3 +456,4 @@ def warm():
     overlap_sweep(np.zeros((1, 6), np.int64), i1, i1)
     overlap_order(np.zeros((1, 6), np.int64))
     midi_events(np.zeros((1, 6), np.int64), np.zeros(2, np.int64), 0, 1)
+    note_stretches(np.zeros((1, 4), np.int64), True, 0, np.zeros(0, np.int64))
