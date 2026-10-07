@@ -124,7 +124,13 @@ def dark_title(win):
             if ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(on), ctypes.sizeof(on)) == 0:
                 break
         # (drawn again now, not only when the window is next clicked: SWP_NOSIZE | NOMOVE | NOZORDER | FRAMECHANGED)
-        ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x1 | 0x2 | 0x4 | 0x20)
+        user32 = ctypes.windll.user32
+        user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x1 | 0x2 | 0x4 | 0x20)
+        # (the window with the keyboard kept a light title bar until it lost and got the keyboard back: that
+        # repaint, faked with WM_NCACTIVATE off then as it really is)
+        active = user32.GetForegroundWindow() == hwnd
+        user32.SendMessageW(hwnd, 0x86, not active, 0)
+        user32.SendMessageW(hwnd, 0x86, active, 0)
     except (AttributeError, OSError):
         pass
 

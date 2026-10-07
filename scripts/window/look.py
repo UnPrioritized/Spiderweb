@@ -326,6 +326,7 @@ def apply(root):
         if w not in TITLED and not w.wm_overrideredirect():  # (no title bar: tooltips, the tools list)
             TITLED.add(w)  # (a moment after it shows: set at once, some windows kept a light title bar)
             w.bind("<Destroy>", lambda e: TITLED.discard(w) if e.widget is w else None, add="+")
+            dark_title(w)  # (at once too: a shorter white flash)
             w.after(20, lambda: w.winfo_exists() and dark_title(w))
     for cls in (root.winfo_class(), "Toplevel"):  # (the main window's class is the program's name)
         root.bind_class(cls, "<Map>", title, add="+")
