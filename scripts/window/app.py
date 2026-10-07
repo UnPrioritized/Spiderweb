@@ -148,6 +148,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.player = Player(self.out)
         self.play_voices = 1000  # Built-in BASSMIDI's voice limit (user; with the window settings)
         self.play_guard = tk.BooleanVar(self, value=False)  # lowered by itself while overloaded (user: off to start)
+        self.play_limiter = tk.BooleanVar(self, value=False)  # (off to start, as in the driver it copies)
         self.overload, self.overload_text = Overload(), ""  # (red next to the Settings button while it plays)
         self.builtin_window = self.voices_entry = None  # (window/builtin_settings.py)
         self._play_job = None
@@ -1749,7 +1750,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 self.synth = Synth()
             if self.synth.font_path != font:
                 self.synth.set_font(font)
-            return Live(self.synth, self.play_voices)
+            return Live(self.synth, self.play_voices, limiter=self.play_limiter.get())
         finally:
             self.busy(None)
 
@@ -1822,6 +1823,12 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
 
     def on_play_guard(self):
         self.overload.set_guard(self.play_guard.get())
+        self.schedule_autosave()
+
+    def on_play_limiter(self):
+        """Heard at once while Built-in BASSMIDI is open."""
+        if self.out.name == BUILTIN and self.out.handle:
+            self.out.handle.set_limiter(self.play_limiter.get())
         self.schedule_autosave()
 
     def set_playhead(self, beat):

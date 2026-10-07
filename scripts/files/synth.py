@@ -68,6 +68,8 @@ class _Font(ctypes.Structure):
 # (WINFUNCTYPE is Windows-only: elsewhere BASS uses the plain C way of calling)
 _STREAMPROC = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)(ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p,
                                                                ctypes.c_uint, ctypes.c_void_p)
+_DSPPROC = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)(None, ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p,
+                                                            ctypes.c_uint, ctypes.c_void_p)
 _dlls = None
 
 
@@ -111,6 +113,7 @@ def _load():
                             ("BASS_ChannelSetAttribute", [u, u, f], i),
                             ("BASS_ChannelSlideAttribute", [u, u, f, u], i),
                             ("BASS_ChannelGetAttribute", [u, u, ctypes.POINTER(f)], i),
+                            ("BASS_ChannelSetDSP", [u, _DSPPROC, p, i], u), ("BASS_ChannelRemoveDSP", [u, u], i),
                             ("BASS_SetConfig", [u, u], i), ("BASS_GetConfig", [u], u)):
         fn = getattr(bass, name)
         fn.argtypes, fn.restype = args, res
@@ -271,7 +274,8 @@ class Limiter:
     CEILING = 0.5
     RELEASE = 0.3  # seconds to come back up by about two thirds
 
-    def __init__(self):
+    def __init__(self, ceiling=CEILING):
+        self.CEILING = ceiling
         self.inp = np.zeros((self.BLOCK, 2), np.float32)  # not turned yet (the last block waits for the next one)
         self.out = [np.zeros((self.BLOCK, 2), np.float32)]  # turned, not handed out yet
         self.env, self.gain = self.CEILING, 1.0
@@ -400,11 +404,14 @@ class Live:
     sound pumped and stuttered next to it): BASS plays the stream itself, straight into the sound device's mix (no
     Python in the sound thread, so a busy window can't starve it), full volume and no limiter (too loud = clipped,
     as there), linear sample interpolation, notes killed rather than faded at the voice limit, voices dropped
-    rather than stuttering when it can't keep up. Holds the soundfont open until close()."""
+    rather than stuttering when it can't keep up. Holds the soundfont open until close(). set_limiter = the
+    driver's optional limiter (a limiter plugin at its defaults: catches only what goes past full volume): Limiter
+    with its ceiling at full volume, handed each piece by BASS as it makes it (Python only for that short step;
+    BASS's own compressor measured useless here: at full volume it does nothing, past +6 dB it lets sound through)."""
     CPU = 95  # % of the time it may spend making sound before voices are dropped (the driver's default)
     QUEUE = 65536 * 4  # bytes of messages waiting for the sound thread (the driver's default)
 
-    def __init__(self, synth, voices, volume=1.0, nofx=False):
+    def __init__(self, synth, voices, volume=1.0, nofx=False, limiter=False):
         if not synth.font:
             raise SynthError("synth.no_font")
         if not synth.can_play:
@@ -424,6 +431,10 @@ class Live:
                             (_ATTRIB_VOL, volume)):
             at(h, attr, float(value))
         self.set_voices(voices)
+        self.dsp, self._dsp_proc = 0, _DSPPROC(self._limit)  # (kept: BASS holds the callback)
+        self.limiter = None
+        if limiter:
+            self.set_limiter(True)
         midi.BASS_MIDI_StreamLoadSamples(h)  # (program 0 + the drums: no wait at the first notes)
         if not bass.BASS_ChannelPlay(h, 0):
             err = bass.BASS_ErrorGetCode()
@@ -432,6 +443,26 @@ class Live:
 
     def set_voices(self, voices):
         self.synth.bass.BASS_ChannelSetAttribute(self.handle, _ATTRIB_MIDI_VOICES, float(voices))
+
+    def set_limiter(self, on):
+        """Heard at once."""
+        bass = self.synth.bass
+        if not self.handle or bool(on) == bool(self.dsp):
+            return
+        if on:
+            self.limiter = Limiter(1.0)
+            self.dsp = bass.BASS_ChannelSetDSP(self.handle, self._dsp_proc, None, 0)
+        else:
+            bass.BASS_ChannelRemoveDSP(self.handle, self.dsp)
+            self.dsp = 0
+
+    def _limit(self, dsp, channel, buf, length, user):
+        """(BASS's sound thread) A piece just made, turned down in place where too loud."""
+        try:
+            x = np.ctypeslib.as_array(ctypes.cast(buf, ctypes.POINTER(ctypes.c_float)), (length // 8, 2))
+            x[:] = self.limiter.process(x.copy())
+        except Exception:  # (never into BASS's thread: that piece just plays as made)
+            pass
 
     def send(self, msg):
         """One short MIDI message (status | data1 << 8 | data2 << 16, as a MIDI-out device takes it)."""

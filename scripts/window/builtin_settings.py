@@ -64,6 +64,12 @@ class BuiltinSettings(tk.Toplevel):
         Tooltip(c, tr("bs.guard_tip"))
         r += 1
 
+        c = ttk.Checkbutton(box, text=tr("bs.limiter"), variable=app.play_limiter, command=app.on_play_limiter,
+                            takefocus=False)
+        c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        Tooltip(c, tr("bs.limiter_tip"))
+        r += 1
+
         self.state = ttk.Label(box, text="", foreground=look.ERROR)
         self.state.grid(row=r, column=1, columnspan=2, sticky="w", pady=(3, 0))
 
