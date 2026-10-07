@@ -1652,7 +1652,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         else:
             self.start_play()
 
-    def start_play(self):
+    def start_play(self, keep=False):
+        """keep = started again at once (play line moved while playing, new PPQ): Built-in BASSMIDI keeps a voice
+        limit lowered by itself."""
         self.scrub_end()
         try:
             ppq, bpm, beats = self.read_project()
@@ -1671,7 +1673,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.player.start(self.rendered, ppq, bpm, self.playhead, self.play_end(ppq, beats, self.playhead),
                           self.picture_use10)
         if self.out.name == BUILTIN:
-            self.overload.start(self.out.handle, self.play_voices, self.play_guard.get())
+            self.overload.start(self.out.handle, self.play_voices, self.play_guard.get(), keep)
         self.play_btn.config(text=tr("app.stop_space"))
         self.roll.show_playhead(start=True)
         self._play_job = self.after(15, self._play_tick)
@@ -1695,7 +1697,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         if ppq != self.player.ppq or ppq != self.ppq:
             self.stop_play()
             if ppq == self.ppq:
-                self.start_play()
+                self.start_play(keep=True)
             return
         # (the end: never before where it is, so a note deleted at the end doesn't stop it at once)
         self.player.update(self.rendered, bpm, self.play_end(ppq, beats, self.player.position()), self.picture_use10)
@@ -1755,10 +1757,15 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         """Built-in BASSMIDI's row (its Settings button) shows only while it's the MIDI out."""
         if not hasattr(self, "builtin_row"):
             return
+        on = self.midi_device.get() == BUILTIN
         for w in self.builtin_row:
-            grid_shown(w, self.midi_device.get() == BUILTIN)
-        if self.builtin_window is not None:
-            self.builtin_window.refresh()  # (the soundfont's name)
+            grid_shown(w, on)
+        w = self.builtin_window
+        if w is not None and w.winfo_exists():
+            if on:
+                w.refresh()  # (the soundfont's name)
+            else:
+                w.close()
 
     def pick_soundfont(self):
         """Pick the soundfont (shared by Built-in BASSMIDI and the Hz bass preview). True = one was picked."""
@@ -1807,9 +1814,10 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.voices_var.set(str(v))
         if v != self.play_voices:
             self.play_voices = v
-            if self.out.name == BUILTIN and self.out.handle:
-                self.out.handle.set_voices(v)  # (heard at once, while playing too)
-                self.overload.set_limit(v)
+            if self.overload.running:
+                self.overload.set_limit(v)  # (its thread sends it: heard at once)
+            elif self.out.name == BUILTIN and self.out.handle:
+                self.out.handle.set_voices(v)
             self.schedule_autosave()
 
     def on_play_guard(self):

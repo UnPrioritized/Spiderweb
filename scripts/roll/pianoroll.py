@@ -1042,13 +1042,13 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.box_kept = (self.box_more + [self.box_area()] if self.box_area() else self.box_more,
                              set(self.app.sels))
         elif kind == "seek" and self.drag[1]:
-            self.app.start_play()  # it was playing: carry on from the new spot
+            self.app.start_play(keep=True)  # it was playing: carry on from the new spot
         elif kind == "box" and not self.box_area() and not e.state & CTRL:
             playing = self.app.player.running
             self.app.stop_play()
             self.app.set_playhead(self.event_pt(e)[0])
             if playing:
-                self.app.start_play()
+                self.app.start_play(keep=True)
         elif kind == "move" and not self.drag[4] and self.dup:  # Ctrl+click in the box: adds / takes out one
             if self.dup["click"] is not None:
                 self.app.select(self.dup["click"], toggle=True)
