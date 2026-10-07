@@ -101,7 +101,7 @@ class Overload:
     def __init__(self):
         self.thread = None
         self._stop = threading.Event()
-        self.text_args = None  # None, ("overloaded",) or ("lowered", voices playing)
+        self.text_args = None  # None, ("overloaded",) or ("lowered", the limit in use)
 
     def start(self, live, limit, guard):
         self.stop()
@@ -134,18 +134,14 @@ class Overload:
         live, clock = self.live, time.perf_counter
         t0, p0 = clock(), live.position()
         lost = collections.deque()  # (time, seconds missing since the look before)
-        voices = collections.deque()  # (time, voices playing)
         last_drop = last_lost = t0
         while not self._stop.wait(self.EVERY):
             t, p = clock(), live.position()
             gone = (t - t0) - (p - p0) / 8 / RATE
             t0, p0 = t, p
             lost.append((t, max(0.0, gone)))
-            voices.append((t, live.voices_playing()))
             while lost[0][0] < t - 1:
                 lost.popleft()
-            while voices[0][0] < t - 1:
-                voices.popleft()
             missing = sum(g for _, g in lost)
             if gone > 0.003:
                 last_lost = t
@@ -159,7 +155,7 @@ class Overload:
                     live.set_voices(self.now_limit)
                     last_drop = t
                 if self.now_limit < self.limit or missing > self.TOO_MUCH:
-                    self.text_args = ("lowered", round(sum(v for _, v in voices) / len(voices)))
+                    self.text_args = ("lowered", self.now_limit)  # (user: the limit, climbing back once calm)
                 else:
                     self.text_args = None
             else:
