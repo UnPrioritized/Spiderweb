@@ -57,6 +57,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.grabbed = None      # the shape a move drag was started on (None: all selected, the kept boxes moved)
         self.room = None         # how far each shape being moved can go: {shape number: move_room}
         self.limit = None        # how far the shapes being edited may reach (limits)
+        self.hz_held = None      # a Hz bass's tones as the drag of one of its stroke points started (drag_stroke)
         self._pan = None
         self._panned = False     # the middle button moved further than a click's 3 px (pan_to)
         self._saved_view = None
@@ -641,7 +642,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         kept, self.box_kept, self.box_moving, self.dup = self.kept_box(), None, None, None
         self.grabbed = None
         self.box_in = False
-        self.room = self.limit = None
+        self.room = self.limit = self.hz_held = None
         if self.follow and self.sx is not None:  # a shape started with a click: this click finishes it
             self.drag, self.follow = self.follow, None
             self.on_drag(e)

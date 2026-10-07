@@ -16,6 +16,7 @@ import math
 from files.lang import tr
 from notes.bezier import anchor_count
 from notes.custom import add_stroke, custom_strokes, drawn_view, new_live_shape, stroke_bp
+from notes.hzbass import left_edge, shifted_hz
 from notes.joined import is_joined, join_velocity
 from notes.tumour import LINE_KINDS
 
@@ -102,8 +103,6 @@ def to_live(shapes, paths, defaults, custom_defaults, k=None):
     if first:
         new.update(name=first.get("name") or new["name"], fill=first["fill"], gate=first["gate"],
                    align=first.get("align", "auto"), ends=first.get("ends", "drop"))
-        if first.get("hz"):
-            new["hz"] = dict(first["hz"])
     src = 0
     for sh, path in zip(shapes, paths):
         if sh["kind"] == "custom":
@@ -124,6 +123,8 @@ def to_live(shapes, paths, defaults, custom_defaults, k=None):
     mine = [b for p in custom_strokes(new) for b, _ in p]
     join_velocity(new, shapes, spans, (min(mine), max(mine)))  # (each keeps its velocities)
     new.update(shared_settings(shapes)[0])
+    if first and first.get("hz"):  # (its tones count from the box's left edge: they stay where they were)
+        new["hz"] = shifted_hz(json.loads(json.dumps(first["hz"])), left_edge(first) - left_edge(new))
     new["from"] = {"shapes": json.loads(json.dumps(shapes)), "strokes": json.loads(json.dumps(new["strokes"])),
                    "pts": [list(p) for p in new["pts"]]}
     return new

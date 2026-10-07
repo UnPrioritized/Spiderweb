@@ -1471,6 +1471,73 @@ def left_edge(sh):
     return min(b0, b1, b2, b1 + b2 - b0)
 
 
+def shifted_hz(hz, d):
+    """hz for the shape's left edge moved d beats to the LEFT (d < 0: to the right), so every tone and effect point
+    stays on the same beat in the song. Tones then before the edge are left out (one reaching past it starts at it);
+    a repeating effect counted from the edge starts its repeat that much later, so it stays in step."""
+    if abs(d) < 1e-12:
+        return hz
+    hz = json.loads(json.dumps(hz))
+    tones = []
+    for n in hz.get("tones") or ():
+        t, end = n["t"] + d, n["t"] + n["len"] + d
+        if end <= MIN_LEN:
+            continue
+        n["t"], n["len"] = max(0.0, t), max(MIN_LEN, end - max(0.0, t))
+        tones.append(n)
+    if "tones" in hz:
+        ids = {n.get("id") for n in tones}
+        for n in tones:
+            n["to"] = [s for s in n.get("to") or () if s.get("id") in ids]
+        hz["tones"] = tones
+    loop, froms = hz.get("loop") or {}, hz.get("from") or {}
+    for name, pts in (hz.get("fx") or {}).items():
+        if name in froms:  # (counted from each note: the edge doesn't matter)
+            continue
+        hz["fx"][name] = _turned_repeat(pts, d, loop[name]) if name in loop else _shifted_line(pts, d)
+    for name, pts in (hz.get("amount") or {}).items():
+        hz["amount"][name] = _shifted_line(pts, d)
+    return hz
+
+
+def hz_up_to(hz, width):
+    """hz without the tones starting at or after width beats from the left edge (a part split off a Hz bass: they
+    made nothing in it); slides to them go too."""
+    tones = [n for n in hz.get("tones") or () if n["t"] < width - 1e-9]
+    if len(tones) == len(hz.get("tones") or ()):
+        return hz
+    ids = {n.get("id") for n in tones}
+    for n in tones:
+        n["to"] = [s for s in n.get("to") or () if s.get("id") in ids]
+    return dict(hz, tones=tones)
+
+
+def _shifted_line(pts, d):
+    """An effect line's points d beats later; past the left edge (beat 0) it starts with its value there."""
+    if not pts:
+        return pts
+    moved = [[p[0] + d, *p[1:]] for p in pts]
+    if moved[0][0] >= 0:
+        return moved
+    keep = [p for p in moved if p[0] > 0]
+    head = [0.0, float(line_at(pts, -d))]
+    last = [p for p in moved if p[0] <= 0][-1]  # (the line it cuts goes on as it was bent)
+    if keep and len(last) > 2:
+        head.append(last[2])
+    return [head] + keep
+
+
+def _turned_repeat(pts, d, every):
+    """One repeat's points (0..every) for its repeat starting d beats later: the same points, the ones going past
+    its end coming round to its start (in the same order, so the line is exactly the same)."""
+    s = d % every
+    if s < 1e-12 or every - s < 1e-12:
+        return pts
+    moved = [[p[0] + s, *p[1:]] for p in pts]
+    over = [[p[0] - every, *p[1:]] for p in moved if p[0] >= every - 1e-12]
+    return [[max(0.0, p[0]), *p[1:]] for p in over] + [p for p in moved if p[0] < every - 1e-12]
+
+
 def fit_length(sh):
     """hz["grow"]: the shape made as long as its tones and the falls after them (stretched from its left edge)."""
     span = max(sound_span(sh["hz"]), MIN_LEN)

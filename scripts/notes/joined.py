@@ -403,10 +403,14 @@ def stroke_groups(strokes):
 def split_custom(sh):
     """A custom shape (e.g. drawn with Live shape) as one custom shape per group of touching strokes."""
     from notes.custom import refit
+    from notes.hzbass import hz_up_to, left_edge
     out = []
     for g in custom_groups(sh):
         new = json.loads(json.dumps(sh))
         new["strokes"] = [new["strokes"][i] for i in g]
-        refit(new)
+        refit(new)  # (a Hz bass's tones stay where they were)
+        if new.get("hz"):
+            bs = [b for b, _ in new["pts"]]
+            new["hz"] = hz_up_to(new["hz"], max(bs + [bs[1] + bs[2] - bs[0]]) - left_edge(new))
         out.append(new)
     return out

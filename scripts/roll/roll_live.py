@@ -14,6 +14,7 @@ from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half
 from notes.custom import (add_stroke, box_frame, carried_spots, carry_areas, custom_settings, frame_to_bp, frame_to_uv,
                           map_stroke, new_live_shape, plain_stroke, refit, settled_areas, stroke_bp, stroke_ends,
                           stroke_points, uv_k)
+from notes.hzbass import left_edge, shifted_hz
 from notes.pattern import has_formula
 from notes.polygon import polygon_aspect, polygon_strokes
 from roll.roll_funnel import seg_dist
@@ -290,6 +291,8 @@ class LiveDrawing:
         unless Shift; Alt like bezier.drag_point). Returns the hid to go on with. Coloured areas keep their colours
         (custom.carry_areas)."""
         old = self.before_edit(sh)
+        if sh.get("hz") and self.hz_held is None:  # (each step from the tones at the press: none lost on the way)
+            self.hz_held = (copy.deepcopy(sh["hz"]), left_edge(sh))
         if hid[0] == "pt":
             hid = self.drag_stroke_point(sh, hid, e)
         else:
@@ -301,6 +304,8 @@ class LiveDrawing:
             refit(sh)
         if old:
             sh["areas"] = carry_areas(old, sh)
+        if sh.get("hz") and self.hz_held:
+            sh["hz"] = shifted_hz(self.hz_held[0], self.hz_held[1] - left_edge(sh))
         return hid
 
     def delete_stroke_handle(self, sh, hid):

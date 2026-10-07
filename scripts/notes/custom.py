@@ -19,8 +19,8 @@ from notes.polygon import side_paths
 from notes.smooth import clean_level, smooth_path
 from notes.paths import (TOP_KEY, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
-from notes.hzbass import (HZ_DEFAULTS, KeyGrid, clean_hz, hz_gate, hz_of, off_cents, squares,  # (Hz bass: hzbass.py)
-                          threshold)
+from notes.hzbass import (HZ_DEFAULTS, KeyGrid, clean_hz, hz_gate, hz_of, left_edge, off_cents, shifted_hz,
+                          squares, threshold)  # (Hz bass: hzbass.py)
 from notes.shrink import (SAMPLES, inner_lines, inner_rows, merge as shrink_merge, minus as shrink_minus,
                           near_lines as shrink_near, proportion as shrink_proportion,
                           segments as shrink_segments)  # (the outline gate's even band)
@@ -615,7 +615,10 @@ def refit(sh):
     if abs(ul) < 1e-12 and abs(vl) < 1e-12 and abs(w - 1) < 1e-12 and abs(h - 1) < 1e-12:
         return
     to_bp = frame_to_bp(sh["pts"])
+    left = left_edge(sh)
     sh["pts"] = [list(to_bp(ul, vl)), list(to_bp(ul + w, vl)), list(to_bp(ul, vl + h))]
+    if sh.get("hz"):  # (its tones count from the box's left edge: they stay where they were)
+        sh["hz"] = shifted_hz(sh["hz"], left - left_edge(sh))
     for st in sh["strokes"]:  # (each stroke stays the same dict: a formula window may be holding it)
         new = map_stroke(st, lambda u, v: ((u - ul) / w, (v - vl) / h), 1 / w, 1 / h)
         st.clear()
