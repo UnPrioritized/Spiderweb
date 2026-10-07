@@ -472,6 +472,8 @@ class CustomPanel:
                 t.pop(key, None)  # (shapes only have them when they're on)
         self.shapes_changed()
         self.sync_custom()
+        if key == "fill":  # (Colours' "Each key row" is greyed or not by the fill)
+            self.sync_colours()
         if key == "fill" and value != "empty":
             self.tips.show("fill", wait=True)
 
