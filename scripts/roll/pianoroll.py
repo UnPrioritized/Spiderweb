@@ -977,8 +977,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         app = self.app
         first = len(app.shapes)
         app.shapes += [copy.deepcopy(app.shapes[j]) for j in sorted(orig)]
-        between_copied(app.shapes[first:])  # (a whole Add between group: a new group; parts of one: plain shapes)
+        between_copied(app.shapes, first)  # (a whole Add between group: a new group; parts of one: plain shapes)
         new = {first + k: orig[j] for k, j in enumerate(sorted(orig))}
+        if len(app.shapes) > first + len(orig):  # (a group copied without its steps: they were added)
+            new.update({j: copy.deepcopy(app.shapes[j]["pts"]) for j in range(first + len(orig), len(app.shapes))})
         app.select_many(new, max(new))
         app.shapes_changed(now=True)  # (the copies' notes are there before they're carried along)
         self.dup = "done"

@@ -209,6 +209,8 @@ class ShapeMenu:
         item(tr("between.menu_select"), "", lambda: app.select_group(i))
         if b["role"] == "key":
             item(tr("between.menu_unkey"), "", lambda: app.unkey(i))
+        if b.get("vel"):
+            item(tr("between.menu_group_vel"), "", lambda: app.group_velocity(i))
         item(tr("between.menu_unlink"), "", lambda: app.unlink_between(i))
 
     def glue_items(self, item):

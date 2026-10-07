@@ -2808,7 +2808,7 @@
  "between.reverse": "Reverse",
  "between.reverse_tip": "Pairs the first shape's start with the last shape's end (and the other way round). Turn it on or off if the steps twist through each other.",
  "between.colours": "Each shape its own colour",
- "between.colours_tip": "Every shape of the group gets a channel of its own, the first and last shapes too. Past the number of colours they take turns. Needs Channels: Multi channel.",
+ "between.colours_tip": "Every shape of the group gets a channel of its own, the first and last shapes too. Past the number of colours they take turns. Needs Channels: Multi channel. A shape with Colours turned on keeps its own Colours.",
  "between.turns": "taking turns over",
  "between.turns_tip": "How many colours the shapes take turns over (at most 15).",
  "between.needs_multi": "Channels isn't Multi channel now, so all the steps are in one channel and look the same.",
@@ -2840,6 +2840,9 @@
  "between.menu_select": "Select the whole group",
  "between.menu_unkey": "Not a key any more",
  "between.menu_unlink": "Unlink (make them plain shapes)",
+ "between.making": "Making the steps…",
+ "between.menu_group_vel": "Velocity from the group again",
+ "between.group_vel": "Velocity from the group again",
  "help.between.title": "Add between",
  "help.between.tip": "Select two open lines (lines, polylines, curves or arcs), right-click one: Add between…. In-between shapes appear, changing step by step from the first shape into the second. Change one end later and the steps follow.",
  "help.between.text": [

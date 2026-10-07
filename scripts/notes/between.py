@@ -8,6 +8,7 @@ Every shape of a group carries sh["between"] = {"id": the group, "role": "first"
 - steps and keys have "at" = their place along the group (0 = the first shape, 1 = the last);
 - a step has "sig" = a fingerprint of how it was made: a step changed by hand (it no longer matches) becomes a "key"
   shape the steps around it change towards (user). Keys are never remade; "Not a key any more" makes one a step again.
+  A step whose velocity alone was changed stays a step with its own velocity, "vel" = {vel0, vel1, vel_env?} (user).
 The first and last shape (and the keys) are the user's own shapes; the steps are remade from them whenever they
 change (sync_groups), keeping their place in the shape list. A group whose first or last shape is gone is unlinked:
 the rest become plain shapes.
@@ -33,7 +34,7 @@ MOST_STEPS = 500
 STRAIGHT = [[0.0, 0.0], [1.0, 1.0]]
 SETTINGS_DEFAULT = {"steps": STEPS_DEFAULT, "graph": STRAIGHT, "rev": False, "colours": 15}
 COLOURS_MOST = 15
-_made = {}  # remembered steps: (anchors, settings, place) -> the step
+_made = {}  # remembered steps: (the pair, f) -> (the step, its fingerprint)
 
 
 # ---------------------------------------------------------------- reading from a file
@@ -80,6 +81,8 @@ def clean_between(b):
         out["at"] = at
         if b["role"] == "step" and isinstance(b.get("sig"), str):
             out["sig"] = b["sig"]
+        if b["role"] == "step" and isinstance(b.get("vel"), dict) and _clean_vel(b["vel"]):
+            out["vel"] = _clean_vel(b["vel"])
     return out
 
 
@@ -224,29 +227,56 @@ def _longest(pts):
     return (fr[s] + fr[s + 1]) / 2
 
 
-def _lerp_pts(p, q, f):
-    return [[a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f] for a, b in zip(p, q)]
+class Pair:
+    """Two shapes ready to be blended: their points matched ONCE, then each step only moves them part of the way
+    (matching long curves for every step made 500 steps take half a minute)."""
 
+    def __init__(self, a, b, rev):
+        self.a, self.b, self.rev = a, b, rev
+        plain = not (a.get("shape") or b.get("shape"))
+        pa, pb = a["pts"], b["pts"][::-1] if rev else b["pts"]
+        if plain and a["kind"] == b["kind"] and len(pa) == len(pb) and a["kind"] in ("line", "poly", "arc"):
+            self.kind, self.sharp = a["kind"], []
+        else:
+            from notes.joined import reversed_bezier
+            ca, cb = _bezier(a), _bezier(b)
+            if rev:
+                cb = reversed_bezier(*cb)
+            ca, cb = matched(ca, cb)
+            pa, pb = ca[0], cb[0]
+            self.kind, self.sharp = "curve", sorted(set(ca[1]) | set(cb[1]))
+        self.pa = np.asarray(pa, float).reshape(-1, 2)
+        self.d = np.asarray(pb, float).reshape(-1, 2) - self.pa
 
-def _geometry(a, b, f, rev):
-    """The step's kind and points (and sharp anchors / k)."""
-    plain = not (a.get("shape") or b.get("shape"))
-    pa, pb = a["pts"], b["pts"][::-1] if rev else b["pts"]
-    if plain and a["kind"] == b["kind"] and len(pa) == len(pb) and a["kind"] in ("line", "poly", "arc"):
-        out = {"kind": a["kind"], "pts": _lerp_pts(pa, pb, f)}
-        if a["kind"] == "arc":
+    def geometry(self, f):
+        """The step's kind and points (and sharp anchors / k)."""
+        a, b = self.a, self.b
+        out = {"kind": self.kind, "pts": (self.pa + self.d * f).tolist()}
+        if self.kind == "arc":
             out["k"] = a.get("k", 1.0) + (b.get("k", 1.0) - a.get("k", 1.0)) * f
+        if self.sharp:
+            out["sharp"] = list(self.sharp)
         return out
-    from notes.joined import reversed_bezier
-    ca, cb = _bezier(a), _bezier(b)
-    if rev:
-        cb = reversed_bezier(*cb)
-    ca, cb = matched(ca, cb)
-    out = {"kind": "curve", "pts": _lerp_pts(ca[0], cb[0], f)}
-    sharp = sorted(set(ca[1]) | set(cb[1]))
-    if sharp:
-        out["sharp"] = sharp
-    return out
+
+    def at(self, f):
+        """The shape f of the way from a to b (see blend)."""
+        from notes.engine import clean_shape
+        a, b, rev = self.a, self.b, self.rev
+        out = self.geometry(f)
+        out.update(_velocity(a, b, f))
+        out["end_dot"] = a.get("end_dot", False) if f < 0.5 else b.get("end_dot", False)
+        tm = _tumour(a, b, f, rev)
+        if tm:
+            out["tumour"] = tm
+        if out["kind"] in ("line", "poly", "arc", "curve"):
+            p = _pattern(a, b, f, rev)
+            if p:
+                out["pattern"] = p
+        for key in ("glue", "fx", "cycle"):  # (only when both have the same: the numbers change step by step, user)
+            x, y = a.get(key), b.get(key)
+            if x is not None and y is not None and alike(x, y):
+                out[key] = mix(x, y, f)
+        return clean_shape(out)
 
 
 def mix(a, b, f):
@@ -328,7 +358,8 @@ def _tumour(a, b, f, rev):
     return _swap(ta, tb, f, "size")
 
 
-PATTERN_SAME = ("formula", "along", "loop", "preset", "sym")
+PATTERN_SAME = ("formula", "along", "loop", "preset", "sym", "mirror")
+# (on the other side: shrinks to nothing, then grows on the other side, like a tumour: user)
 
 
 def _pattern(a, b, f, rev):
@@ -343,29 +374,43 @@ def _pattern(a, b, f, rev):
 def blend(a, b, f, rev=False):
     """The shape f of the way from shape a to shape b (0 = a, 1 = b; the points of b paired the other way round when
     rev). A plain shape (no "between"), cleaned like one read from a file."""
-    from notes.engine import clean_shape
-    out = _geometry(a, b, f, rev)
-    out.update(_velocity(a, b, f))
-    out["end_dot"] = a.get("end_dot", False) if f < 0.5 else b.get("end_dot", False)
-    tm = _tumour(a, b, f, rev)
-    if tm:
-        out["tumour"] = tm
-    if out["kind"] in ("line", "poly", "arc", "curve"):
-        p = _pattern(a, b, f, rev)
-        if p:
-            out["pattern"] = p
-    for key in ("glue", "fx", "cycle"):  # (only when both have the same: the numbers change step by step, user)
-        x, y = a.get(key), b.get(key)
-        if x is not None and y is not None and alike(x, y):
-            out[key] = mix(x, y, f)
-    return clean_shape(out)
+    return Pair(a, b, rev).at(f)
 
 
 # ---------------------------------------------------------------- groups
 
+def _plain(sh):
+    return {k: v for k, v in sh.items() if k != "between"}
+
+
 def fingerprint(sh):
-    plain = {k: v for k, v in sh.items() if k != "between"}
-    return hashlib.md5(json.dumps(plain, sort_keys=True).encode()).hexdigest()[:16]
+    return hashlib.md5(json.dumps(_plain(sh), sort_keys=True).encode()).hexdigest()[:16]
+
+
+VEL_KEYS = ("vel0", "vel1", "vel_env")
+
+
+def _no_vel(sh):
+    return {k: v for k, v in sh.items() if k not in VEL_KEYS and k != "between"}
+
+
+def with_vel(step, vel):
+    """A made step with a step's own velocity (one changed by hand, e.g. a velocity line drawn over the group: it
+    stays a step, user)."""
+    out = {k: v for k, v in step.items() if k != "vel_env"}
+    out.update(json.loads(json.dumps(vel)))
+    return out
+
+
+def _clean_vel(v):
+    from notes.engine import clean_basics
+    try:
+        out = {k: x for k, x in clean_basics(v).items() if k in ("vel0", "vel1")}
+        if v.get("vel_env"):
+            out["vel_env"] = [[float(u), max(1.0, min(127.0, float(y)))] for u, y in v["vel_env"]]
+        return out
+    except (TypeError, ValueError, AttributeError):
+        return None
 
 
 def close(a, b, tol=1e-6):
@@ -394,33 +439,55 @@ def anchors(shapes, gid):
     return got
 
 
-def step_at(anchor_list, at, s):
-    """The step at place `at` between the anchors around it."""
-    lo = max((p for p in anchor_list if p[0] <= at), key=lambda p: p[0])
-    hi = min((p for p in anchor_list if p[0] >= at and p is not lo), key=lambda p: p[0], default=lo)
-    graph = s["graph"]
-    y, y0, y1 = change_at(graph, at), change_at(graph, lo[0]), change_at(graph, hi[0])
-    if hi is lo:
-        f = 0.0
-    elif abs(y1 - y0) > 1e-12:
-        f = (y - y0) / (y1 - y0)
-    else:
-        f = (at - lo[0]) / (hi[0] - lo[0])
-    rev = s["rev"] and lo[1]["between"]["role"] == "first" and hi[1]["between"]["role"] == "last"
-    # (keys are the user's own: Reverse pairs only the first shape with the last, a key's points go as they are)
-    return made(lo[1], hi[1], f, rev)
+class Steps:
+    """A group's steps as its anchors (first shape, keys, last shape) and settings make them now: each pair of
+    anchors written out once, not once per step (it was slow with many steps of long curves)."""
+
+    def __init__(self, shapes, gid, s):
+        self.marks, self.s, self.keys = anchors(shapes, gid), s, {}
+
+    def at(self, at):
+        """(the step at place `at` between the anchors around it, its fingerprint): remembered, don't change it."""
+        marks = self.marks
+        lo = max((p for p in marks if p[0] <= at), key=lambda p: p[0])
+        hi = min((p for p in marks if p[0] >= at and p is not lo), key=lambda p: p[0], default=lo)
+        graph = self.s["graph"]
+        y, y0, y1 = change_at(graph, at), change_at(graph, lo[0]), change_at(graph, hi[0])
+        if hi is lo:
+            f = 0.0
+        elif abs(y1 - y0) > 1e-12:
+            f = (y - y0) / (y1 - y0)
+        else:
+            f = (at - lo[0]) / (hi[0] - lo[0])
+        rev = self.s["rev"] and hi is not lo and hi[1]["between"]["role"] == "last"
+        # (a key runs the way the first shape does, like the steps it was made from: Reverse pairs the last shape
+        # the other way round with the first shape AND with a key)
+        k = (id(lo[1]), id(hi[1]), rev)
+        if k not in self.keys:
+            self.keys[k] = json.dumps([_plain(lo[1]), _plain(hi[1]), bool(rev)], sort_keys=True)
+        return made(self.keys[k], f)
 
 
-def made(a, b, f, rev):
-    """blend, remembered (dragging an end remakes every step at every mouse move)."""
-    key = json.dumps([{k: v for k, v in a.items() if k != "between"}, {k: v for k, v in b.items() if k != "between"},
-                      round(f, 12), rev], sort_keys=True)
-    got = _made.get(key)
+_pairs = {}  # remembered Pairs: their two shapes + Reverse as JSON -> Pair
+
+
+def made(key, f):
+    """(blend, its fingerprint) of the pair `key` (Steps.at) at f, remembered (dragging an end remakes every step at
+    every mouse move)."""
+    k = (key, round(f, 12))
+    got = _made.get(k)
     if got is None:
+        pair = _pairs.get(key)
+        if pair is None:
+            if len(_pairs) > 64:
+                _pairs.clear()
+            a, b, rev = json.loads(key)
+            pair = _pairs[key] = Pair(a, b, rev)
         if len(_made) > 4000:
             _made.clear()
-        got = _made[key] = blend(a, b, f, rev)
-    return json.loads(json.dumps(got))
+        step = pair.at(f)
+        got = _made[k] = (step, fingerprint(step))
+    return got
 
 
 def unlink(shapes, gid):
@@ -432,8 +499,8 @@ def unlink(shapes, gid):
 
 def sync_groups(shapes):
     """Every group's steps remade from its first / last shape and keys, in place (the shapes keep their numbers). A
-    step changed by hand becomes a key; a group missing its first or last shape is unlinked. True if anything
-    changed."""
+    step changed by hand becomes a key (only its velocity changed: it keeps that velocity and stays a step); a
+    group missing its first or last shape is unlinked. True if anything changed."""
     changed = False
     gids = []
     for sh in shapes:
@@ -448,27 +515,42 @@ def sync_groups(shapes):
             continue
         s = settings_of(shapes, gid)
         steps = [shapes[i] for i in ordered(shapes, gid) if shapes[i]["between"]["role"] == "step"]
-        marks = anchors(shapes, gid)
-        for sh in steps:  # changed by hand since it was made (not by moving the whole group): a key now
+        now = Steps(shapes, gid, s)
+        prints = [fingerprint(sh) for sh in steps]
+        keyed = False
+        for sh, sig in zip(steps, prints):  # changed by hand since it was made (not by moving the whole group)
             b = sh["between"]
-            if b.get("sig") and b["sig"] != fingerprint(sh):
-                want = step_at(marks, b["at"], s)
-                if not close({k: v for k, v in sh.items() if k != "between"}, want):
-                    b["role"] = "key"
-                    b.pop("sig", None)
-                    changed = True
-        marks = anchors(shapes, gid)
-        for sh in steps:
+            if not b.get("sig") or b["sig"] == sig:
+                continue
+            want = now.at(b["at"])[0]
+            if b.get("vel"):
+                want = with_vel(want, b["vel"])
+            mine = _plain(sh)
+            if close(mine, want):
+                continue
+            if close(_no_vel(mine), _no_vel(want)):  # (only its velocity: a step with a velocity of its own, user)
+                b["vel"] = {k: sh[k] for k in VEL_KEYS if k in sh}
+                continue
+            b["role"] = "key"
+            for k in ("sig", "vel"):
+                b.pop(k, None)
+            changed = keyed = True
+        if keyed:
+            now = Steps(shapes, gid, s)
+        for sh, old in zip(steps, prints):
             b = sh["between"]
             if b["role"] != "step":
                 continue
-            new = step_at(marks, b["at"], s)
-            sig = fingerprint(new)
-            if b.get("sig") == sig and fingerprint(sh) == sig:
+            new, sig = now.at(b["at"])
+            if b.get("vel"):
+                new = with_vel(new, b["vel"])
+                sig = fingerprint(new)
+            if b.get("sig") == sig and old == sig:
                 continue
             sh.clear()
-            sh.update(new)
-            sh["between"] = {"id": gid, "role": "step", "at": b["at"], "sig": sig}
+            sh.update(json.loads(json.dumps(new)))
+            sh["between"] = dict({"id": gid, "role": "step", "at": b["at"], "sig": sig},
+                                 **({"vel": b["vel"]} if b.get("vel") else {}))
             changed = True
     return changed
 
@@ -478,23 +560,45 @@ def slots(n):
     return [i / (n + 1) for i in range(1, n + 1)]
 
 
-def rebuild(shapes, gid, s):
-    """The group's steps made again for settings s (put on its first shape): keys stay at their places, the steps
-    go in every other slot. Returns the new shape list (the steps right after the first shape) and the numbers of the
-    group's shapes in it."""
+def places(n, keys):
+    """The places of the steps when n in-between shapes are wanted and some are keys (at their own places, in
+    keys): the parts between the keys share the steps by their length, each part's steps evenly spread (user)."""
+    ks = sorted(k for k in keys if 0 < k < 1)
+    free = max(0, n - len(ks))
+    edges = [0.0] + ks + [1.0]
+    want = [free * (b - a) for a, b in zip(edges, edges[1:])]
+    got = [math.floor(w + 1e-9) for w in want]
+    for i in sorted(range(len(got)), key=lambda i: (got[i] - want[i], i))[:free - sum(got)]:
+        got[i] += 1
+    return [a + (b - a) * j / (c + 1) for a, b, c in zip(edges, edges[1:], got) for j in range(1, c + 1)]
+
+
+def rebuild(shapes, gid, s, remake=None):
+    """Settings s put on the group (on its first shape) and its steps made again: only remade from scratch when
+    the step count changed (or remake): keys stay at their places, the steps spread between them (places);
+    otherwise the steps there are stay (a deleted one stays gone, user). Returns the new shape list (new steps right
+    after the first shape) and the numbers of the group's shapes in it."""
     first = first_of(shapes, gid)
+    old = clean_settings(first["between"].get("set"))["steps"]
     first["between"]["set"] = clean_settings(s)
     s = first["between"]["set"]
-    n = s["steps"]
-    taken = {min(n, max(1, round(sh["between"]["at"] * (n + 1)))) for sh in shapes
-             if group_of(sh) == gid and sh["between"]["role"] == "key"}
+    if remake is None:
+        remake = s["steps"] != old
+    if not remake:
+        out = list(shapes)
+        sync_groups(out)
+        return out, ordered(out, gid)
+    keys = [sh["between"]["at"] for sh in shapes if group_of(sh) == gid and sh["between"]["role"] == "key"]
     out = [sh for sh in shapes if not (group_of(sh) == gid and sh["between"]["role"] == "step")]
     at = next(i for i, sh in enumerate(out) if sh is first) + 1
-    new = [{"kind": "line", "pts": [[0, 0], [1, 1]],
-            "between": {"id": gid, "role": "step", "at": u}} for i, u in enumerate(slots(n), 1) if i not in taken]
-    out[at:at] = new
+    out[at:at] = [_blank(gid, u) for u in places(s["steps"], keys)]
     sync_groups(out)
     return out, ordered(out, gid)
+
+
+def _blank(gid, at):
+    """A step still to be made (sync_groups)."""
+    return {"kind": "line", "pts": [[0, 0], [1, 1]], "between": {"id": gid, "role": "step", "at": at}}
 
 
 def start_group(shapes, i, j):
@@ -508,7 +612,7 @@ def start_group(shapes, i, j):
     gid = new_id()
     a["between"] = {"id": gid, "role": "first", "set": s}
     b["between"] = {"id": gid, "role": "last"}
-    return rebuild(shapes, gid, s)[0], gid
+    return rebuild(shapes, gid, s, remake=True)[0], gid
 
 
 def ends_cross(a, b):
@@ -518,7 +622,8 @@ def ends_cross(a, b):
 
 
 def turns(shapes):
-    """Each shape's (group, colour turn) when its group gives each shape its own colour, else None."""
+    """Each shape's (group, colour turn) when its group gives each shape its own colour, else None. A shape with
+    Colours on keeps its own Colours (user: Colours always comes first)."""
     out = [None] * len(shapes)
     done = set()
     for sh in shapes:
@@ -529,22 +634,30 @@ def turns(shapes):
         n = settings_of(shapes, gid)["colours"]
         if n:
             for k, i in enumerate(ordered(shapes, gid)):
-                out[i] = (gid, k % n)
+                if not shapes[i].get("cycle"):
+                    out[i] = (gid, k % n)
     return out
 
 
-def copied(copies):
-    """Copies of shapes (pasted / duplicated): a group copied with its first and last shape stays a group (a new
-    one); otherwise the copies are plain shapes (user)."""
+def copied(shapes, start=0):
+    """shapes[start:] are copies (pasted / duplicated): a group copied with its first and last shape stays a group
+    (a new one; copied without any of its steps: they're made again, added at the end); otherwise the copies are
+    plain shapes (user)."""
+    copies = shapes[start:]
     gids = {group_of(sh) for sh in copies} - {None}
-    for gid in gids:
+    count = len(shapes)
+    for gid in sorted(gids):
         roles = [sh["between"]["role"] for sh in copies if group_of(sh) == gid]
         if "first" in roles and "last" in roles:
             fresh = new_id()
             for sh in copies:
                 if group_of(sh) == gid:
                     sh["between"]["id"] = fresh
+            if not any(r in ("step", "key") for r in roles):
+                shapes += [_blank(fresh, u) for u in slots(settings_of(copies, fresh)["steps"])]
         else:
             for sh in copies:
                 if group_of(sh) == gid:
                     del sh["between"]
+    if len(shapes) > count:
+        sync_groups(shapes)

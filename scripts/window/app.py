@@ -1038,7 +1038,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             new["pts"] = [[b + shift, p] for b, p in new["pts"]]
             self.shapes.append(new)
         fresh_marks(self.shapes[first:])
-        between_copied(self.shapes[first:])  # (a whole Add between group: a new group; parts of one: plain shapes)
+        between_copied(self.shapes, first)  # (a whole Add between group: a new group; parts of one: plain shapes)
         self.select_many(range(first, len(self.shapes)), len(self.shapes) - 1)
         self.shapes_changed()
 

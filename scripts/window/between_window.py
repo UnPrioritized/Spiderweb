@@ -34,6 +34,7 @@ PRESETS = [("between.even", between.STRAIGHT), ("between.near_first", _power(2))
            ("between.near_last", _power(0.5)), ("between.near_ends", _s_curve(0.5)),
            ("between.near_middle", _s_curve(2))]
 U_SNAP, Y_SNAP = 1 / 40, 1 / 20  # dragging moves points in these steps (Shift = free)
+PREVIEW_POINTS = 100000  # the preview's steps drawn with at most about this many points in all
 
 
 class BetweenWindow(tk.Toplevel):
@@ -203,7 +204,13 @@ class BetweenWindow(tk.Toplevel):
         n = math.floor(n + 0.5)
         if n != self.set["steps"]:
             self.set["steps"] = n
-            self.apply()
+            self.app.busy(tr("between.making"))  # (hundreds of long curves take a moment)
+            self.config(cursor="watch")
+            try:
+                self.apply()
+            finally:
+                self.config(cursor="")
+                self.app.busy(None)
             self.hist.mark("steps")
             return True
 
@@ -231,16 +238,18 @@ class BetweenWindow(tk.Toplevel):
             return True
 
     def ok(self):
-        changed = self.on_steps()  # (a number typed without Enter counts too)
-        changed = self.on_turns() or changed
+        if self.closed:
+            return
+        self.on_steps()  # (a number typed without Enter counts too)
+        self.on_turns()
         self.closed = True
-        if changed:  # (a long wait just now: Windows' "not responding" copy of the window must go before it's
-            self.update()  # destroyed, or Tk crashes)
         if json.dumps(self.app.shapes) != self.before:
             self.app.add_undo_step(self.before, self.name, sel=self.app.sel_state())
         self.close()
 
     def cancel(self):
+        if self.closed:
+            return
         self.closed = True
         app = self.app
         app.roll.cancel_draft()
@@ -252,7 +261,8 @@ class BetweenWindow(tk.Toplevel):
         self.close()
 
     def close(self):
-        self.grab_release()
+        self.update()  # (after a long wait Windows shows a "not responding" copy of the window: destroyed before
+        self.grab_release()  # that's gone, Tk crashed)
         self.destroy()
 
     # ---- the preview: the whole group, the first and last shapes' points can be dragged (user)
@@ -273,6 +283,14 @@ class BetweenWindow(tk.Toplevel):
         b0, bw, top, kh = self.pv_view
         return (b - b0) / bw, (top - p) / kh
 
+    def px_line(self, sh, most=None):
+        """A shape's line as preview coordinates (most: at most this many of its points, spread along it)."""
+        a = np.asarray(cached_path(sh), float).reshape(-1, 2)
+        if most and len(a) > most:
+            a = a[np.unique(np.linspace(0, len(a) - 1, most).round().astype(int))]
+        b0, bw, top, kh = self.pv_view
+        return np.column_stack([(a[:, 0] - b0) / bw, (top - a[:, 1]) / kh]).ravel().tolist()
+
     def draw_preview(self):
         cv, s = self.pv, self.s
         cv.delete("all")
@@ -281,16 +299,17 @@ class BetweenWindow(tk.Toplevel):
         if self.pv_drag is None:  # (still while a point is dragged)
             self.pv_view = self.fit_view()
         order = between.ordered(self.app.shapes, self.gid)
+        most = max(16, min(400, PREVIEW_POINTS // max(1, len(order))))  # (500 long curves were 9 M points)
         for i in order[1:-1]:
             sh = self.app.shapes[i]
             colour = look.CHART_LINE_FAINT if sh["between"]["role"] == "step" else look.CHART_GRID_STRONG
-            xy = [c for b, p in cached_path(sh) for c in self.to_px(b, p)]
+            xy = self.px_line(sh, most)
             if len(xy) >= 4:
                 cv.create_line(*xy, fill=colour, width=max(1, round(s)))
         lw = max(1, round(2 * s))
         r = 4 * s
         for sh, colour, name in zip(self.ends(), (look.VALUE, look.CHART_LINE), ("first", "last")):
-            xy = [c for b, p in cached_path(sh) for c in self.to_px(b, p)]
+            xy = self.px_line(sh)
             if len(xy) >= 4:
                 cv.create_line(*xy, fill=colour, width=lw)
             pts = sh["pts"]
@@ -345,7 +364,8 @@ class BetweenWindow(tk.Toplevel):
             sb = self.app.snap_beats()
             b = round(b / sb) * sb if sb else b
             p = round(p)
-        b = max(0.0, b)
+        b = max(0.0, b)  # (beat 0 and the lowest / highest key stop it, like the piano roll: unless it's past already)
+        p = min(max(p, min(0.0, was[j][1])), max(self.app.keys - 1.0, was[j][1]))
         db, dp = b - was[j][0], p - was[j][1]
         pts = json.loads(json.dumps(was))
         sh = self.ends()[0 if name == "first" else 1]
@@ -397,7 +417,8 @@ class BetweenWindow(tk.Toplevel):
         cv.create_text(x0, bot + 4 * s, text=tr("between.first"), anchor="nw", fill=look.LABEL, font=look.font(7))
         cv.create_text(x1, bot + 4 * s, text=tr("between.last"), anchor="ne", fill=look.LABEL, font=look.font(7))
         n = self.set["steps"]
-        for u in between.slots(n):  # (where each step is: a tick on the line)
+        shapes = self.app.shapes  # (where each step / key is: a tick on the line)
+        for u in [shapes[i]["between"]["at"] for i in between.ordered(shapes, self.gid)[1:-1]]:
             x, y = self.u2x(u), self.y2c(between.change_at(self.pts, u))
             cv.create_line(x, bot, x, y, fill=look.CHART_LINE_FAINT)
         lw = max(1, round(1.5 * s))
@@ -519,6 +540,15 @@ class BetweenGroups:
         self.push_undo(name=tr("between.unkey"))
         b = self.shapes[i]["between"]
         b["role"] = "step"
+        b.pop("sig", None)
+        self.shapes_changed()
+        self.sync_panel()
+
+    def group_velocity(self, i):
+        """A step with a velocity of its own (changed by hand) takes the group's velocity again."""
+        self.push_undo(name=tr("between.group_vel"))
+        b = self.shapes[i]["between"]
+        b.pop("vel", None)
         b.pop("sig", None)
         self.shapes_changed()
         self.sync_panel()
