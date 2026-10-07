@@ -32,6 +32,32 @@ def key_points(st, line):
     return [(j, tuple(p)) for j, p in enumerate(line)]
 
 
+def rest_scales(a, dirs, seg):
+    """For circles drawn from corner a with boxes a + s * dirs[n]: the s at which each rests on each line piece
+    (as Targets.touch_circle: its short pieces' nearest corner on the line, the circle on its middle's side, the
+    touch within the piece), NaN where it can't; and where it touches. seg: (M, 4), or (N, M, 4) = each box its
+    own pieces. Shapes (N, M), (N, M, 2)."""
+    dirs = np.asarray(dirs, float)
+    seg = np.broadcast_to(seg, (len(dirs),) + np.shape(seg)[-2:])
+    ang = 2 * np.pi * np.arange(ELLIPSE_STEPS) / ELLIPSE_STEPS
+    w = dirs[:, None] / 2 + np.stack([-np.abs(dirs[:, :1]) / 2 * np.cos(ang),
+                                      np.abs(dirs[:, 1:]) / 2 * np.sin(ang)], 2)  # (N, K, 2)
+    p0, r = seg[..., :2], seg[..., 2:] - seg[..., :2]
+    ln = np.hypot(r[..., 0], r[..., 1])
+    nrm = np.stack([-r[..., 1], r[..., 0]], -1) / ln[..., None]
+    g = ((a - p0) * nrm).sum(-1)  # (N, M)
+    m = np.einsum("nmc,nkc->nmk", nrm, w)
+    side = np.sign(g + (dirs[:, None] * nrm).sum(-1) / 2)
+    kk = np.where(side >= 0, np.argmin(m, 2), np.argmax(m, 2))
+    mk = np.take_along_axis(m, kk[..., None], 2)[..., 0]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        s = -g / mk
+    touch = a + s[..., None] * w[np.arange(len(w))[:, None], kk]
+    t = ((touch - p0) * r).sum(-1) / ln ** 2
+    ok = np.isfinite(s) & (s > 0) & (t >= 0) & (t <= 1)
+    return np.where(ok, s, np.nan), touch
+
+
 class Targets:
     """What can be stuck to in a drawing: strokes skip left out (the ones being changed), and for skip_pts
     {(stroke, point number)} of polylines only that point and the two pieces beside it."""
@@ -99,8 +125,8 @@ class Targets:
 
     def touch_circle(self, a, d, view, reach):
         """A circle being drawn (its box from corner a to a + d, u / v) whose LINE sticks (user: not the box's
-        corner): (kind "point" / "line", (u, v) where it touches, pixels away, s, the stroke touched) or None; the box from a to
-        a + s * d then touches exactly: its short pieces (as stroke_points makes them) pass through a stroke's point,
+        corner): (kind "point" / "line", (u, v) where it touches, pixels away, s, the stroke touched) or None; the
+        box from a to a + s * d then touches exactly: its short pieces (as stroke_points makes them) pass through a stroke's point,
         or one of its corners lies on a stroke's line with the whole circle on one side (it rests on it). Points
         first, then lines; the nearest within reach pixels."""
         k = view[0]
@@ -151,6 +177,64 @@ class Targets:
         if gap[i] > reach:
             return None
         return "line", (float(touch[i, 0]), float(touch[i, 1])), float(gap[i]), float(s[i]), int(owner[i])
+
+    def touch_two(self, a, d, view, reach):
+        """A circle being drawn (box from corner a; the mouse at a + d) resting on TWO strokes' lines at once (user):
+        its box's width and height both change, so it's an oval as a rule. (corner (u, v) to draw the box to, pixels
+        from the mouse, [(u, v) where it touches, the stroke touched] x 2) or None: the nearest within reach pixels.
+        Lines near the circle only, two that aren't parallel; boxes from 1:5 to 5:1."""
+        k = view[0]
+        a, d = np.asarray(a, float), np.asarray(d, float)
+        size = np.hypot(*d)
+        if abs(d[0]) * k < 1 or abs(d[1]) * k < 1 or not len(self.seg):
+            return None
+        lo, hi = np.minimum(a, a + d) - 3 * reach / k, np.maximum(a, a + d) + 3 * reach / k
+        seg = self.seg
+        keep = np.all((np.maximum(seg[:, :2], seg[:, 2:]) >= lo) & (np.minimum(seg[:, :2], seg[:, 2:]) <= hi), 1)
+        keep &= np.hypot(seg[:, 2] - seg[:, 0], seg[:, 3] - seg[:, 1]) > 0
+        seg, owner = seg[keep], self.owner[keep]
+        if len(seg) < 2:
+            return None
+        sign = np.sign(d)
+        ray = lambda th: size * np.column_stack([sign[0] * np.cos(th), sign[1] * np.sin(th)])
+        s, _ = rest_scales(a, d[None], seg)  # (now: the lines near sticking first, at most 12)
+        near = np.flatnonzero(np.isfinite(s[0]) & (np.abs(s[0] - 1) * size * k <= 4 * reach))
+        near = near[np.argsort(np.abs(s[0, near] - 1))][:12]
+        if len(near) < 2:
+            return None
+        seg, owner = seg[near], owner[near]
+        th = np.linspace(np.arctan(0.2), np.arctan(5), 120)
+        s, _ = rest_scales(a, ray(th), seg)
+        r = seg[:, 2:] - seg[:, :2]
+        r = r / np.hypot(*r.T)[:, None]
+        pi, pj = np.triu_indices(len(seg), 1)
+        keep = np.abs(r[pi, 0] * r[pj, 1] - r[pi, 1] * r[pj, 0]) >= 0.1  # (about parallel: no single spot)
+        pi, pj = pi[keep], pj[keep]
+        f = s[:, pi] - s[:, pj]  # (angle, pair)
+        n, p = np.nonzero(np.sign(f[:-1]) * np.sign(f[1:]) < 0)  # (where it changes sign: a spot between)
+        if not len(n):
+            return None
+        pi, pj, lo_t, hi_t, f_lo = pi[p], pj[p], th[n], th[n + 1], f[n, p]
+        pair = np.stack([seg[pi], seg[pj]], 1)  # (each spot its own two lines)
+        for _ in range(40):  # (halving, all at once: the same s for both lines, as exactly as floats go)
+            mid = (lo_t + hi_t) / 2
+            sm, _ = rest_scales(a, ray(mid), pair)
+            fm = sm[:, 0] - sm[:, 1]
+            same = np.sign(fm) == np.sign(f_lo)
+            lo_t, f_lo = np.where(same, mid, lo_t), np.where(same, fm, f_lo)
+            hi_t = np.where(same, hi_t, mid)
+        dd = ray(lo_t)
+        sm, touch = rest_scales(a, dd, pair)
+        si, sj, ti, tj = sm[:, 0], sm[:, 1], touch[:, 0], touch[:, 1]
+        ok = np.isfinite(si) & np.isfinite(sj) & (np.abs(si - sj) <= 1e-9 * np.maximum(si, 1))
+        ok &= np.hypot(*(ti - tj).T) * k >= 3  # (not one spot where the two lines meet)
+        corner = a + si[:, None] * dd
+        far = np.where(ok, np.hypot(*(corner - (a + d)).T) * k, np.inf)
+        b = int(np.argmin(far))
+        if far[b] > reach:
+            return None
+        return (tuple(map(float, corner[b])), float(far[b]),
+                [(tuple(map(float, ti[b])), int(owner[pi[b]])), (tuple(map(float, tj[b])), int(owner[pj[b]]))])
 
     @staticmethod
     def crossing(seg, owner, index, x, y, view, reach):

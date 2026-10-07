@@ -67,6 +67,14 @@ def mirror_fns(mode):
     return {"h": [h], "v": [v], "both": [h, v, lambda u, w: (1 - u, 1 - w)]}.get(mode, [])
 
 
+def seg_dist(p, a, b):
+    """How far point p is from the piece a-b."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    ll = dx * dx + dy * dy
+    t = 0 if ll == 0 else min(1, max(0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / ll))
+    return math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy)
+
+
 def same_stroke(a, b):
     """The two strokes lie on each other (a stroke the mirror leaves where it is: no copy)."""
     if a["kind"] != b["kind"]:
@@ -307,7 +315,9 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self._area_cache = self._area_px = self._area_img = self._gap_cache = None
         self._settled = "[]"   # the strokes as JSON when the areas last matched them (changed)
         self.stuck = None      # where the last point stuck (sticky.py): (kind, (u, v), pixels away), shown as a mark
-        self.guide = None      # a circle near sticking or stuck: where to point the mouse for it to touch ((u, v), the touched stroke's points moved through it)
+        self.stuck2 = None     # a circle resting on two lines: the second touch's mark
+        self.guide = []        # a circle near sticking or stuck: where to point the mouse for it to touch, each
+        # ((u, v), [the touched strokes' points moved through it])
         self._stick_cache = None
         self.zoom = 1.0        # 1 = the whole board fits the window
         self.center = [0.5, 0.5]  # the board point in the middle of the window (0.5, 0.5 = the board's middle)
@@ -775,6 +785,17 @@ class Drawer(DrawerLayers, tk.Toplevel):
         extra_lines = extra_lines + self.mirror_lines()
         return self.stick_targets(frozenset(skip), frozenset(skip_pts)).find(
             x, y, self.stick_view(), REACH * self.scale, extra_pts, extra_lines)
+
+    def guide_at(self, corner, touches):
+        """A Circle guide: the corner, and each touched stroke's shape [((u, v) touched, stroke)] moved to pass
+        through it (a polyline: only the straight piece touched)."""
+        out = []
+        for (tu, tv), i in touches:
+            pts = stroke_points(self.strokes[i])
+            if self.strokes[i]["kind"] == "poly" and len(pts) > 2:
+                pts = min((pts[j:j + 2] for j in range(len(pts) - 1)), key=lambda ab: seg_dist((tu, tv), *ab))
+            out.append([(u + corner[0] - tu, v + corner[1] - tv) for u, v in pts])
+        return corner, out
 
     def stuck_pieces(self):
         """The parts of what's being drawn / dragged that end at the stuck point (user: shown purple), as lists of
@@ -1303,7 +1324,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
             self.redraw()
             return
         tool = self.tool.get()
-        self.guide = None
+        self.guide, self.stuck2 = [], None
         start, pt = self.drag[1], self.event_pt(e, stick=tool != "circle")
         if tool in ("square", "circle") and e.state & CTRL:
             pt = self.perfect(start, pt)
@@ -1315,16 +1336,25 @@ class Drawer(DrawerLayers, tk.Toplevel):
             d = (raw[0] - start[0], raw[1] - start[1])
             targets, view = self.stick_targets(), self.stick_view()
             got = targets.touch_circle(start, d, view, REACH * self.scale)
-            if got:
-                self.stuck, s = got[:3], got[3]
-                pt = [start[0] + s * d[0], start[1] + s * d[1]]
-            # where to point the mouse for it to touch: a dotted purple point on the touched stroke's shape moved to
-            # pass through it (faint, dotted); shown while it's stuck too (user)
-            near = got or targets.touch_circle(start, d, view, GUIDE_REACH * self.scale)
-            if near:
-                gu, gv = start[0] + near[3] * d[0], start[1] + near[3] * d[1]
-                du, dv = gu - near[1][0], gv - near[1][1]
-                self.guide = (gu, gv), [(u + du, v + dv) for u, v in stroke_points(self.strokes[near[4]])]
+            # resting on two lines at once (user; not with Ctrl: a perfect circle from that corner rarely can)
+            two = None if e.state & CTRL else targets.touch_two(start, d, view, GUIDE_REACH * self.scale)
+            if two and two[1] <= REACH * self.scale:
+                (t1, _), (t2, _) = two[2]
+                self.stuck, self.stuck2 = ("line", t1, two[1]), ("line", t2, two[1])
+                pt = list(two[0])
+                self.guide = [self.guide_at(two[0], two[2])]
+            else:
+                if got:
+                    self.stuck, s = got[:3], got[3]
+                    pt = [start[0] + s * d[0], start[1] + s * d[1]]
+                # where to point the mouse for it to touch: a dotted purple point on the touched stroke's shape
+                # moved to pass through it (faint, dotted); shown while it's stuck too (user)
+                near = got or targets.touch_circle(start, d, view, GUIDE_REACH * self.scale)
+                if near:
+                    self.guide.append(self.guide_at((start[0] + near[3] * d[0], start[1] + near[3] * d[1]),
+                                                    [(near[1], near[4])]))
+                if two:
+                    self.guide.append(self.guide_at(two[0], two[2]))
         (u0, v0), (u1, v1) = start, pt
         if tool == "line":
             self.draft = {"kind": "poly", "pts": [start, pt]}
@@ -1339,7 +1369,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
 
     def on_release(self, e, second=False):
         """second: the click that finishes a stroke started with a click (see follow)."""
-        self.stuck = self.guide = None  # (the mark goes; hovering shows it again)
+        self.stuck = self.stuck2 = None  # (the mark goes; hovering shows it again)
+        self.guide = []
         if self.drag and (self.tool.get() == "select" or self.drag[0] in ("points", "pen")):
             self.select_release()
         drag, self.drag = self.drag, None
@@ -1729,7 +1760,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
 
     def cancel_draft(self):
         self.let_go()  # (a stroke held by Esc / a tool key: moved is moved, like letting go)
-        self.draft = self.guide = None
+        self.draft = None
+        self.guide = []
         self.follow = None
         self.arc_bend = False
         self.redraw()
@@ -2171,13 +2203,14 @@ class Drawer(DrawerLayers, tk.Toplevel):
                 self.draw_stroke(st, look.DRAFT_LINE, w)
             self.draw_pieces(pieces, w + 1)
             self.draw_draft_points(r, h)
-        if self.draft and self.guide:  # a dotted ring with a dot inside on the touched stroke's faint dotted copy
-            # (thin: Windows draws thick dotted lines solid)
-            x, y = self.to_screen(*self.guide[0])
+        for spot, lines in self.guide if self.draft else []:  # a dotted ring with a dot inside on the touched
+            # strokes' faint dotted copies (thin: Windows draws thick dotted lines solid)
+            x, y = self.to_screen(*spot)
             q, p = 7 * s, 2 * s
-            coords = self.screen_points(self.guide[1])
-            if len(coords) >= 4:
-                c.create_line(*coords, fill=look.STICK_GUIDE, width=max(1, round(s)), dash=(2, 4))
+            for line in lines:
+                coords = self.screen_points(line)
+                if len(coords) >= 4:
+                    c.create_line(*coords, fill=look.STICK_GUIDE, width=max(1, round(s)), dash=(2, 4))
             c.create_oval(x - q, y - q, x + q, y + q, outline=STICK_COLOR, width=max(1, round(s)), dash=(2, 3))
             c.create_oval(x - p, y - p, x + p, y + p, fill=STICK_COLOR, outline="")
         if self.chosen() and self.tool.get() == "select":  # the kept select boxes
@@ -2186,8 +2219,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
         if self.drag and self.drag[0] in ("boxsel", "erasebox"):  # a select / eraser box being dragged
             c.create_rectangle(*self.drag[1:5], outline=look.HANDLE if self.drag[0] == "boxsel" else look.ERASE_BOX,
                                width=max(1, round(s)), dash=(4, 2))
-        if self.stuck:  # where the point sticks: a square on a point, an X on a crossing, a diamond on a line
-            kind, (u, v), _ = self.stuck
+        for kind, (u, v), _ in [m for m in (self.stuck, self.stuck and self.stuck2) if m]:  # where the point
+            # sticks (a circle on two lines: both): a square on a point, an X on a crossing, a diamond on a line
             x, y = self.to_screen(u, v)
             q, lw = 6 * s, max(2, round(2 * s))
             if kind == "point":
