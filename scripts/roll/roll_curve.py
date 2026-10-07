@@ -4,8 +4,8 @@ in bezier.py, shared with the drawer)."""
 import json
 
 from files.lang import tr
-from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half_at, handle_lines, keep_symmetric,
-                          nearest, pen_handles, set_symmetry)
+from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half_at, handle_lines, held_axis,
+                          keep_symmetric, nearest, pen_handles, set_symmetry)
 from roll.roll_shared import ALT
 
 
@@ -29,9 +29,14 @@ class CurveEditing:
     def curve_handle_lines(sh):
         return handle_lines(sh["pts"], sh.get("gaps", ()))
 
-    def keep_symmetric(self, sh, i=0):
-        """A symmetric curve's other half follows the half point i is in. True if it's symmetric."""
-        return sh["kind"] == "curve" and self.sx is not None and keep_symmetric(sh, i, self.to_xy)
+    def held_axis(self, sh):
+        """Before an edit: the way a mirrored curve's mirror line runs (bezier.held_axis)."""
+        return held_axis(sh, self.to_xy) if sh["kind"] == "curve" and self.sx is not None else "screen"
+
+    def keep_symmetric(self, sh, i=0, axis="screen"):
+        """A symmetric curve's other half follows the half point i is in. True if it's symmetric. axis: from
+        held_axis before the edit."""
+        return sh["kind"] == "curve" and self.sx is not None and keep_symmetric(sh, i, self.to_xy, axis=axis)
 
     def drag_curve(self, sh, i, e):
         """Dragging a curve's point (snapped unless Shift), see bezier.drag_point (Alt = sharp / new handles)."""

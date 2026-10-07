@@ -731,8 +731,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         new = [values[0] / self.ppq, values[1]]
         if sh["pts"][i] != new:
             self.begin_edit(("point", self.sel, i))
+            axis = self.roll.held_axis(sh)
             sh["pts"][i] = new
-            if self.roll.keep_symmetric(sh, i):
+            if self.roll.keep_symmetric(sh, i, axis):
                 self.sync_points()  # the other half followed
             self.shapes_changed()
 

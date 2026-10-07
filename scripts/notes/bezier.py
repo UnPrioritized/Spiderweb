@@ -197,13 +197,37 @@ def sym_axis(pts, to_screen, exact=False):
     return 1 if abs(bx - ax) >= abs(by - ay) else 0
 
 
-def keep_symmetric(c, i, to_screen, exact=False):
-    """A symmetric curve's other half follows the half point i is in. True if it's symmetric."""
+def held_axis(c, to_screen, exact=False):
+    """Before an edit: the way a mirrored curve's mirror line runs. The one it IS mirrored across now, so zooming
+    never changes it (user: the other half jumped when a drag came after a zoom that made the ends look steeper /
+    flatter); as it looks on screen (sym_axis) only when that can't be told (both fit, or neither: e.g. turned at
+    a slant since)."""
+    pts = c["pts"]
+    screen = sym_axis(pts, to_screen, exact)
+    n = len(pts)
+    if exact or c.get("sym") != "mirror" or n < 7 or (n - 1) % 6:
+        return screen
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    near = 1e-7 * max(1.0, max(xs) - min(xs), max(ys) - min(ys), *map(abs, xs + ys))
+    fits = []
+    for axis in (0, 1):
+        sym = Symmetry(pts, "mirror", axis)
+        mid = pts[(n - 1) // 2]
+        if sym.ok and math.dist(sym.onto_line(mid), mid) <= near and all(
+                math.dist(sym.reflect(pts[j]), pts[n - 1 - j]) <= near for j in range(1, (n - 1) // 2)):
+            fits.append(axis)
+    return fits[0] if len(fits) == 1 else screen
+
+
+def keep_symmetric(c, i, to_screen, exact=False, axis="screen"):
+    """A symmetric curve's other half follows the half point i is in. True if it's symmetric. axis: the mirror
+    line's way (held_axis, found before the edit), else as it looks on screen now."""
     if not c.get("sym"):
         return False
     source = 1 if i > (len(c["pts"]) - 1) // 2 else 0
-    c["pts"], sharp = symmetric(c["pts"], c.get("sharp", []), c["sym"], sym_axis(c["pts"], to_screen, exact),
-                                source)
+    if axis == "screen":
+        axis = sym_axis(c["pts"], to_screen, exact)
+    c["pts"], sharp = symmetric(c["pts"], c.get("sharp", []), c["sym"], axis, source)
     set_sharp(c, sharp)
     return True
 
@@ -214,6 +238,7 @@ def drag_point(c, i, new, alt, to_screen, from_screen, exact=False):
     a handle point moves, and on a smooth anchor the other handle turns with it to keep the curve smooth, keeping
     its length on screen (alt: just this one, the anchor becomes a sharp corner).
     A symmetric curve's other half follows."""
+    axis = held_axis(c, to_screen, exact)
     pts, sharp = c["pts"], c.get("sharp", [])
     n = len(pts)
     if i % 3 == 0:
@@ -240,7 +265,7 @@ def drag_point(c, i, new, alt, to_screen, from_screen, exact=False):
                 d, length = math.hypot(hx - ax, hy - ay), math.hypot(ox - ax, oy - ay)
                 if d > 0 and length > 0:
                     pts[other] = list(from_screen(ax - (hx - ax) / d * length, ay - (hy - ay) / d * length))
-    keep_symmetric(c, i, to_screen, exact)
+    keep_symmetric(c, i, to_screen, exact, axis)
 
 
 def add_anchor(c, seg, t, new, to_screen, exact=False):
@@ -248,6 +273,7 @@ def add_anchor(c, seg, t, new, to_screen, exact=False):
     on the other half too. Returns False (nothing added) if that's an anchor already."""
     if t in (0, 1):
         return False
+    axis = held_axis(c, to_screen, exact)
     pts, sharp = c["pts"], c.get("sharp", [])
     splits = [(seg, t)]
     if c.get("sym"):  # the same place on the other half
@@ -266,7 +292,7 @@ def add_anchor(c, seg, t, new, to_screen, exact=False):
         pts[j] = [pts[j][0] + d[0], pts[j][1] + d[1]]
     c["pts"] = pts
     set_sharp(c, sharp)
-    keep_symmetric(c, at, to_screen, exact)
+    keep_symmetric(c, at, to_screen, exact, axis)
     return True
 
 
@@ -286,6 +312,7 @@ def delete_point(c, i, to_screen, exact=False):
     """Right-click on point i (see can_delete): an anchor between the ends is removed (on a symmetric curve its
     partner too), a handle point is pulled back into its anchor (a sharp corner there)."""
     what = can_delete(c, i)
+    axis = held_axis(c, to_screen, exact)
     pts, sharp = c["pts"], c.get("sharp", [])
     if what == "anchor":
         a = i // 3
@@ -301,7 +328,7 @@ def delete_point(c, i, to_screen, exact=False):
         set_sharp(c, sharp + [a // 3])
     else:
         return
-    keep_symmetric(c, i, to_screen, exact)
+    keep_symmetric(c, i, to_screen, exact, axis)
 
 
 def set_symmetry(c, mode, source, to_screen, exact=False):

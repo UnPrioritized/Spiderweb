@@ -20,7 +20,7 @@ from files.mathexpr import calc, fmt, formula
 from files.project import HERE
 from files.safefile import write_text
 from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_point, fit_symmetric, handle_lines,
-                          keep_symmetric, nearest, pen_handles, sample)
+                          held_axis, keep_symmetric, nearest, pen_handles, sample)
 from notes.pattern import (LOOPS_DEFAULT, MAX_LOOPS, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, clean_loop,
                            formula_loop, formula_shape, keep_sym, new_pattern, new_shape, pattern_name, pattern_names,
                            shape_name, shape_names)
@@ -778,6 +778,7 @@ class FormulaDialog(tk.Toplevel):
         c = self.pat["loop"]
         last = len(c["pts"]) - 1
         ends = [list(c["pts"][0]), list(c["pts"][last])]
+        axis = held_axis(c, self.to_xy)  # (zooming the preview never changes which way it's mirrored)
         drag_point(c, self.drag, self.from_xy(e.x, e.y), e.state & ALT, self.to_xy, self.from_xy)
         for i, handle, along in ((0, 1, 0.0), (last, last - 1, 1.0)):
             if self.layer == "shape":  # a shape's ends stay where they are
@@ -793,7 +794,7 @@ class FormulaDialog(tk.Toplevel):
                 dy = c["pts"][self.drag][1] - c["pts"][other][1]
                 for j in (other, handle):
                     c["pts"][j] = [c["pts"][j][0], c["pts"][j][1] + dy]
-            keep_symmetric(c, self.drag, self.to_xy)
+            keep_symmetric(c, self.drag, self.to_xy, axis=axis)
         self.set_info(tr("pattern_dialog.shape_edited_by_hand") if self.layer == "shape" else
                       tr("pattern_dialog.edited_by_hand"), "#1d6b1d", back=True)
         want = ["loops"] if self.layer == "pattern" else []
