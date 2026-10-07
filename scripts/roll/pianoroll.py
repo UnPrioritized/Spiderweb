@@ -1405,6 +1405,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if k == "escape":
             if self.app.vel.confirm():  # (done with a velocity line / curve, like Enter)
                 return
+            self.drop_hz_keys()
             self.cancel_draft()
             self.app.set_parts(())
             self.app.set_stroke(None)

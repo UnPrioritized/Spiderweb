@@ -42,6 +42,20 @@ class HzStart:
         lo, hi = app.hz_defaults["lo"], app.hz_defaults["hi"]
         app.show_position(tr("pianoroll.hz_keys", lo=note_name(lo), hi=note_name(hi), n=hi - lo + 1))
 
+    def hz_keys_held(self):
+        """The keys of a new Hz bass being dragged (or following the mouse after a click)."""
+        return any(d and d[0] == "hzkeys" for d in (self.drag, self.follow))
+
+    def drop_hz_keys(self):
+        """Esc / Ctrl+Z while the keys are dragged: called off, the start mark goes (nothing undone, like Ctrl+Z
+        while drawing a shape). False when they aren't being dragged."""
+        if not self.hz_keys_held():
+            return False
+        self.drag = self.follow = None
+        self.app.hz_start = None
+        self.request_redraw()
+        return True
+
     def draw_hz_start(self):
         """The spot picked for a new Hz bass: a dashed red line over the keys it will repeat."""
         app = self.app

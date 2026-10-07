@@ -16,6 +16,7 @@ import json
 import math
 import os
 import re
+import time
 import tkinter as tk
 from types import SimpleNamespace
 from tkinter import font as tkfont
@@ -42,7 +43,7 @@ from window.hz_preview import Preview
 from window.hz_synth import open_synth
 from window.preview_settings import open_preview_settings
 from window.snap_picker import SnapPicker
-from window.widgets import Scrub, Tooltip, bad, good, placed
+from window.widgets import Scrub, StatusLine, Tooltip, bad, good, placed
 
 BLACK = (1, 3, 6, 8, 10)
 RED = "#e02020"
@@ -320,6 +321,7 @@ class HzWindow(tk.Toplevel):
         self.layout()
         self.status = ttk.Label(self, text="", foreground="#555", padding=(8, 2, 8, 4))
         self.status.pack(side="bottom", fill="x")
+        self.said_until = 0.0  # (say: a message stays until then)
         self.fx = FxPane(self)
         self.notes_box = tk.Frame(self)  # the notes with the main piano roll's scrollbars (zoombar.py)
         self.notes_box.pack(fill="both", expand=True)
@@ -392,7 +394,8 @@ class HzWindow(tk.Toplevel):
         sh = self.target()
         hz = (sh or {}).get("hz") or {}
         tones = clean_tones(hz.get("tones"))
-        if (id(sh) if sh is not None else None) != self.shown:  # another Hz bass: a slide's first mark goes (user)
+        other = (id(sh) if sh is not None else None) != self.shown
+        if other:  # another Hz bass: a slide's first mark goes (user)
             self.shown, self.pending = (id(sh) if sh is not None else None), None
         if tones != self.tones:
             self.tones, self.sel = tones, set()
@@ -406,7 +409,10 @@ class HzWindow(tk.Toplevel):
             self.grow.set(True)
         else:
             text = tr("hz.shape", name=self.app.shape_label(sh))
-            self.grow.set(bool(hz.get("grow")) if tones else hz_made(sh))
+            if tones:
+                self.grow.set(bool(hz.get("grow")))
+            elif other:  # (no notes yet: ticked by hand stays ticked until the first note, whatever else changes)
+                self.grow.set(hz_made(sh))
         if hz:  # (no Hz bass yet: the dropdown stays as picked, for the one the first note makes)
             self.pitch_var.set(fmt(hz["cents"]))
             self.pitch_entry.config(style="TEntry")
@@ -800,7 +806,14 @@ class HzWindow(tk.Toplevel):
         """The slide from tone a to tone b, or None."""
         return next((s for s in a["to"] if s["id"] == b["id"]), None)
 
+    def say(self, text):
+        """A message in the status line, kept for a few seconds (the mouse moving would write over it at once)."""
+        self.said_until = time.perf_counter() + StatusLine.HOLD_MS / 1000
+        self.status.config(text=text)
+
     def show_status(self, e=None):
+        if time.perf_counter() < self.said_until:
+            return
         n = len(self.tones)
         text = tr("hz.one_note") if n == 1 else tr("hz.n_notes", n=n)
         sh = self.target()
@@ -1812,6 +1825,10 @@ class HzWindow(tk.Toplevel):
         fx = self.fx_settings()
         sh = self.target()
         bpm = app.current_bpm()
+        if bpm is None and tones and not (sh or {}).get("hz"):  # (the first notes: the tone is worked out for the
+            self.bell()                                          # BPM, so it must be a number)
+            self.call_off(before, before_fx)
+            return self.say(tr("hz.bpm_needed"))
         if sh is None:
             if not tones or app.hz_start is None:
                 return self.redraw()
@@ -1838,7 +1855,10 @@ class HzWindow(tk.Toplevel):
                     new["fill"] = "spam"
                 if not sh.get("hz"):  # (a spam shape's first notes: its gate and Range come back if Hz bass is
                     new["before_hz"] = {"gate": sh["gate"]}  # unticked; no Range with Hz bass, user)
-                    if new.get("range"):
+                    if new.get("range"):  # (asked first, like the side panel's Hz bass box)
+                        if not messagebox.askokcancel(tr("panel_custom.spiderweb"), tr("panel_custom.hz_range_off"),
+                                                      icon="warning", parent=self):
+                            return self.call_off(before, before_fx)
                         new["range_kept"] = new.pop("range")
                         new["before_hz"]["range"] = True
                 if self.grow.get():
@@ -1977,8 +1997,12 @@ class HzWindow(tk.Toplevel):
         return True
 
     def on_escape(self):
-        """Esc: a drag going on is called off (cancel_drag), else nothing is selected any more."""
-        if not self.cancel_drag():
+        """Esc: a drag going on is called off (cancel_drag; in the effects pane too, like Ctrl+Z), else nothing is
+        selected any more."""
+        held = None if self.drag else self.held_fx()
+        if held:
+            held()
+        elif not self.cancel_drag():
             self.select(())
         return "break"
 
@@ -2008,14 +2032,9 @@ class HzWindow(tk.Toplevel):
             self.preview.stop()
             self.live.stop()
         else:
-            if not os.path.isfile(cfg["font"]):
-                path = filedialog.askopenfilename(
-                    parent=self, title=tr("hz.preview_pick_font"),
-                    filetypes=[(tr("hz.preview_fonts"), "*.sf2 *.sf3 *.sfz *.sf2pack"), (tr("hz.preview_all"), "*.*")])
-                if not path:
-                    self.preview_on.set(False)
-                    return
-                cfg["font"] = os.path.normpath(path)
+            if not os.path.isfile(cfg["font"]) and not self.ask_font():
+                self.preview_on.set(False)
+                return
             err = self.preview.start()
             if err:
                 self.preview_failed(err)
@@ -2025,13 +2044,32 @@ class HzWindow(tk.Toplevel):
         self.redraw()
         self.canvas.focus_set()  # (so Space plays)
 
-    def preview_failed(self, err):
-        """The synth or the soundfont didn't work: the preview goes off and says why."""
+    def ask_font(self):
+        """The soundfont picker: True when one was picked (it's the preview's now)."""
+        cfg = self.app.hz_preview
+        path = filedialog.askopenfilename(
+            parent=self, title=tr("hz.preview_pick_font"),
+            initialdir=os.path.dirname(cfg["font"]) if cfg["font"] else None,
+            filetypes=[(tr("hz.preview_fonts"), "*.sf2 *.sf3 *.sfz *.sf2pack"), (tr("hz.preview_all"), "*.*")])
+        if not path:
+            return False
+        cfg["font"] = os.path.normpath(path)
+        self.app.schedule_autosave()
+        return True
+
+    def preview_failed(self, err, font=False):
+        """The synth or the soundfont didn't work: the preview goes off and says why. font: the soundfont couldn't
+        be opened: another one is offered (else the same file was tried again at every switch-on)."""
         self.preview_on.set(False)
         self.app.hz_preview["on"] = False
         self.preview.stop()
         self.live.stop()
-        messagebox.showerror(tr("hz.window_title"), err, parent=self)
+        if not font:
+            return messagebox.showerror(tr("hz.window_title"), err, parent=self)
+        if messagebox.askyesno(tr("hz.window_title"), err + "\n\n" + tr("hz.preview_other_font"), icon="error",
+                               parent=self) and self.winfo_exists() and self.ask_font():
+            self.preview_on.set(True)
+            self.on_preview()
 
     def on_space(self, e):
         """Space: the preview plays / stops (preview off: nothing; the main piano roll only plays from its own

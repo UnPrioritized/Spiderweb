@@ -2535,6 +2535,8 @@
  "hz.preview_pick_font": "Pick a soundfont for the preview",
  "hz.preview_fonts": "Soundfonts",
  "hz.preview_all": "All files",
+ "hz.preview_other_font": "Pick another soundfont?",
+ "hz.bpm_needed": "The BPM box needs a number (4 to 100000) first: the tone is worked out from it.",
  "hz.preview_loading": "Loading soundfont…",
  "hz.preview_loaded": "Soundfont loaded",
  "hz.preview_nothing": "No notes to hear yet",

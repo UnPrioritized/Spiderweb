@@ -881,7 +881,10 @@ class FxPane:
 
     def delete_key(self):
         """Delete in the window: the points selected, or (none, the pane pressed last) the highlighted effect taken
-        off. False when it's not for the pane (the notes' Delete then)."""
+        off. False when it's not for the pane (the notes' Delete then). While the mouse holds anything but a point
+        here (a line being drawn, a box, a bend...): nothing until it's let go."""
+        if self.drag and self.drag["kind"] != "point":
+            return True
         if self.sel:
             self.delete_selected()
             return True
@@ -1278,6 +1281,8 @@ class FxPane:
         win.commit_fx(before)
 
     def on_menu(self, e):
+        if self.drag:  # (the left button holds something: nothing, like the notes; the menu would take its let-go)
+            return "break"
         name, hit = self.name_at(e.x, e.y), self.hit(e.x, e.y)
         menu = tk.Menu(self.win, tearoff=0)
         if hit and hit[0] == "point":

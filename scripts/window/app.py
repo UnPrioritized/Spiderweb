@@ -1287,8 +1287,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         if self.tool.get() not in ("select", "slice"):  # (Slice isn't one to go back to, user)
             self.draw_tool = self.tool.get()
         if self.tool.get() != "hz":
-            self.hz_start = None
-        elif self.hz_window:
+            self.hz_start = None  # (a spot waiting for its first note: the Hz bass window stops offering it)
+        if self.hz_window:
             self.hz_window.sync()
         self.roll.cancel_draft()
         self.roll.config(cursor={"select": "arrow", "text": "xterm"}.get(self.tool.get(), "crosshair"))
@@ -1682,6 +1682,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self._edit_key = key
 
     def undo(self):
+        if self.roll.drop_hz_keys():  # (a new Hz bass's keys being dragged: just called off)
+            return
         if self.roll.draft or self.roll.typing_empty():  # something half drawn (a funnel waiting for its wall, a
             return self.roll.cancel_draft()                # polyline, a text caret with nothing typed): just drop it
         if self.hz_window and self.hz_window.pending:  # a slide started in the Hz bass window: just drop its mark
@@ -1691,6 +1693,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self._restore(self.undo_stack, self.redo_stack)
 
     def redo(self):
+        if self.roll.hz_keys_held():  # (a new Hz bass's keys being dragged: nothing)
+            return
         self._restore(self.redo_stack, self.undo_stack)
 
     def in_hz(self, widget=None):

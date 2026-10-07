@@ -98,13 +98,17 @@ class Preview:
         self.synth = self.app.synth
         self.clear()
         if self.synth.font_path != self.cfg["font"] and not (self.load and self.load.is_alive()):
-            font = self.cfg["font"]
-            self.load = threading.Thread(target=self._open_font, args=(font,), daemon=True)
-            self.load.error = None
-            self.load.start()
+            self._load_font()  # (one still opening: tick opens the one picked once it's done)
         if not self._tick:
             self._tick = self.win.after(0, self.tick)
         return None
+
+    def _load_font(self):
+        """The soundfont picked opened in the background (see loading)."""
+        font = self.cfg["font"]
+        self.load = threading.Thread(target=self._open_font, args=(font,), daemon=True)
+        self.load.error, self.load.path = None, font
+        self.load.start()
 
     def _open_font(self, path):
         try:
@@ -176,11 +180,12 @@ class Preview:
             return
         old, same_time = self.ev, (ppq, bpm) == (self.ppq, self.bpm)
         self.notes, self.ppq, self.bpm, self.shape = notes, ppq, bpm, shape
-        if notes is None or not len(notes):
+        ev = events(notes, ppq, bpm) if notes is not None and len(notes) else None
+        if ev is None or len(ev) <= 3:  # (no notes, or only ones above key 127, which can't sound: nothing to play)
             self.ev, self.span, self.last = None, (0, 0), 0
             self.clear()
             return
-        self.ev = ev = events(notes, ppq, bpm)
+        self.ev = ev
         ticks = ev["tick"][2:-1]
         self.last = int(self.frames(int(ticks[-1])))
         self.span = (int(self.frames(int(ticks[0]))), self.last)
@@ -239,10 +244,13 @@ class Preview:
         if not self.win.winfo_exists():
             return
         if self.load is not None and not self.load.is_alive():  # the soundfont is open (or failed)
-            err, self.load = self.load.error, None
-            if err:
-                return self.win.preview_failed(err)
-            self.loaded_at = time.perf_counter()
+            err, path, self.load = self.load.error, self.load.path, None
+            if path != self.cfg["font"]:  # (another one was picked while it opened: that one now)
+                self._load_font()
+            elif err:
+                return self.win.preview_failed(err, font=True)
+            else:
+                self.loaded_at = time.perf_counter()
         self.look()
         for i, job in list(self.jobs.items()):
             if job.finished:

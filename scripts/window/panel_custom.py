@@ -574,7 +574,9 @@ class CustomPanel:
         self.hz_var.set(bool(hz))
         self._loading = False
         on = bool(hz) and spam
-        self.hz_check.config(state="normal" if spam and not new_off else "disabled")
+        # (one made with the Hz bass tool is nothing but its notes: no switching it off, it's deleted instead)
+        tool_made = placed and any(hz_tool(t) for t in tgts)
+        self.hz_check.config(state="normal" if spam and not new_off and not tool_made else "disabled")
         bpm = self.current_bpm()
         self.hz_stale_on = on and bpm is not None and any(t.get("hz") and abs(t["hz"]["bpm"] - bpm) > 1e-9
                                                           for t in tgts)
