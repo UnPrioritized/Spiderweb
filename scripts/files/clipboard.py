@@ -1,12 +1,16 @@
 """The Windows clipboard through ctypes: raw bytes in any format (domino_clip.py's notes) and plain text
-(share.py's shared shapes). Tk's own clipboard is left out: it only handles text, and only while Tk runs."""
+(share.py's shared shapes). Tk's own clipboard is left out there: it only handles text, and only while Tk runs.
+Elsewhere (Linux, untested) only text works, through Tk's clipboard (what Spiderweb copied may go when it closes,
+unless the desktop keeps clipboards); RAW is False there (no Domino buttons)."""
 
 import ctypes
 from ctypes import wintypes
 
 from files.lang import tr
+from files.system import WINDOWS
 
 TEXT = 13  # CF_UNICODETEXT
+RAW = WINDOWS  # raw bytes in any format (put / get / registered) work
 
 
 def _api():
@@ -29,7 +33,10 @@ def _api():
 
 
 def count():
-    """A number Windows raises every time anything is put on the clipboard, by any program."""
+    """A number Windows raises every time anything is put on the clipboard, by any program. Elsewhere: one made
+    from the text held (so the same text copied again doesn't count)."""
+    if not WINDOWS:
+        return hash(get_text())
     return _api()[0].GetClipboardSequenceNumber()
 
 
@@ -92,13 +99,35 @@ def get(fmt):
         user32.CloseClipboard()
 
 
+def _tk():
+    """The Tk window whose clipboard is used when not on Windows (None before there is one)."""
+    import tkinter
+    return tkinter._default_root
+
+
 def put_text(text):
     """Text -> the clipboard. False if the clipboard was busy."""
+    if not WINDOWS:
+        root = _tk()
+        if root is None:
+            return False
+        root.clipboard_clear()
+        root.clipboard_append(text)
+        return True
     return put(TEXT, (text + "\0").encode("utf-16-le"))
 
 
 def get_text():
     """The clipboard's text ("" if it holds none), or None if the clipboard was busy."""
+    if not WINDOWS:
+        import tkinter
+        root = _tk()
+        if root is None:
+            return None
+        try:
+            return root.clipboard_get()
+        except tkinter.TclError:  # (empty, or no text in it)
+            return ""
     raw = get(TEXT)
     if raw is None:
         return None

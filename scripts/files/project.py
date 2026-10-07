@@ -22,6 +22,7 @@ from notes.polygon import POLYGON_DEFAULTS, clean_polygon
 from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.text import TEXT_DEFAULTS, clean_text
+from files import clipboard
 from files.domino_clip import DOMINO_STARTS, clip_data, get_from_clipboard, put_on_clipboard, read_notes
 from files.midi_out import MAX_DELTA, PPQ_WARN, long_silences, write_midi
 from files.about import HERE, VERSION
@@ -590,6 +591,9 @@ class ProjectFiles:
         """Ctrl+Shift+C: the selected shapes' notes (all notes when nothing is selected) on the clipboard, for
         Ctrl+V in Domino. One track per channel that has notes; the copy starts on the first note or at the bar
         line before it (domino_start)."""
+        if not clipboard.RAW:
+            messagebox.showinfo(tr("project.spiderweb"), tr("project.notes_clipboard_windows_only"))
+            return
         try:
             ppq, _, beats = self.read_project()
         except ValueError as e:
@@ -649,6 +653,9 @@ class ProjectFiles:
         pastes: the start of what was copied (or its first note, see domino_start) on the play line (snapped to the
         grid). Every track's notes go into
         the one shape; controllers and other events are left out. Ticks are taken as they are (same PPQ)."""
+        if not clipboard.RAW:
+            messagebox.showinfo(tr("project.spiderweb"), tr("project.notes_clipboard_windows_only"))
+            return
         self.busy(tr("project.pasting_from_domino"))  # (millions of notes take a few seconds)
         try:
             raw = get_from_clipboard()

@@ -1270,6 +1270,7 @@
  "project.no_notes_to_copy_draw_something": "No notes to copy — draw something inside the 0–127 pitch range first.",
  "project.the_selected_shapes_have_no_notes": "The selected shapes have no notes.",
  "project.couldn_t_use_the_clipboard_another": "Couldn't use the clipboard (another program has it open). Try again.",
+ "project.notes_clipboard_windows_only": "Copying and pasting notes this way only works on Windows for now.",
  "project.all_notes": "all {n:,} notes",
  "project.the_track": "the track",
  "project.the_first_of_tracks": "the first of {tracks} tracks",
