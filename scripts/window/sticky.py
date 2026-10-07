@@ -6,6 +6,8 @@ The lines are the strokes' short straight pieces Fill / Spam see (custom.stroke_
 stuck points aren't rounded: a point stuck to a line is ON it exactly, so it counts as touching (no red dot, no
 closing line) in the drawer and on the placed shape at any size."""
 
+import copy
+
 import numpy as np
 
 from notes.custom import CURVE_STEPS, ELLIPSE_STEPS, stroke_points
@@ -137,8 +139,10 @@ class Targets:
         """A circle being drawn (its box from corner a to a + d, u / v) whose LINE sticks (user: not the box's
         corner): (kind "point" / "line", (u, v) where it touches, pixels away, s, the stroke touched) or None; the
         box from a to a + s * d then touches exactly: its short pieces (as stroke_points makes them) pass through a stroke's point,
-        or one of its corners lies on a stroke's line with the whole circle on one side (it rests on it). Points
-        first, then lines; the nearest within reach pixels."""
+        or one of its corners lies on a stroke's line with the whole circle on one side (it rests on it). The
+        nearest within reach pixels, counted as how far the mouse's corner would move (a + d to a + s * d): a line
+        along the circle's side near a needs it to grow a lot for a small gap. Never a box under 1 pixel (a line
+        through a: the circle can't grow onto it)."""
         k = view[0]
         a, d = np.asarray(a, float), np.asarray(d, float)
         if abs(d[0]) * k < 1 or abs(d[1]) * k < 1:
@@ -146,6 +150,9 @@ class Targets:
         ang = 2 * np.pi * np.arange(ELLIPSE_STEPS) / ELLIPSE_STEPS
         w = d / 2 + np.column_stack([-abs(d[0]) / 2 * np.cos(ang), abs(d[1]) / 2 * np.sin(ang)])  # (corner = a + s w)
         lo, hi = np.minimum(a, a + d) - 2 * reach / k, np.maximum(a, a + d) + 2 * reach / k  # (near it only)
+        size = np.hypot(*d) * k  # (the mouse's corner moves this many pixels per 1 of s)
+        small = 1 / (min(abs(d[0]), abs(d[1])) * k)  # (s below this: a box under 1 pixel)
+        best = None
         inside = np.all((self.pts >= lo) & (self.pts <= hi), axis=1) if len(self.pts) else np.zeros(0, bool)
         pts, pt_owner = self.pts[inside], self.pt_owner[inside]
         if len(pts):  # a point on the ray from a: on the circle where the ray crosses its pieces, scaled to reach it
@@ -158,17 +165,18 @@ class Targets:
             ok = (t >= 0) & (t <= 1) & ((hit * q[:, None]).sum(2) > 0)
             far = np.hypot(*hit.transpose(2, 0, 1))
             near = np.hypot(*q.T)[:, None]
-            gap = np.where(ok, np.abs(near - far) * k, np.inf)
+            s = near / np.where(far == 0, np.nan, far)
+            gap = np.where(ok & (s >= small), np.abs(s - 1) * size, np.inf)
             i, j = np.unravel_index(np.argmin(gap), gap.shape)
             if gap[i, j] <= reach:
-                return ("point", (float(pts[i, 0]), float(pts[i, 1])), float(gap[i, j]), float(near[i, 0] / far[i, j]),
+                best = ("point", (float(pts[i, 0]), float(pts[i, 1])), float(gap[i, j]), float(s[i, j]),
                         int(pt_owner[i]))
         seg, owner = self.seg, self.owner
         if len(seg):
             keep = np.all((np.maximum(seg[:, :2], seg[:, 2:]) >= lo) & (np.minimum(seg[:, :2], seg[:, 2:]) <= hi), 1)
             seg, owner = seg[keep], owner[keep]
         if not len(seg):
-            return None
+            return best
         p0, r = seg[:, :2], seg[:, 2:] - seg[:, :2]
         ln = np.hypot(*r.T)
         seg, owner, p0, r, ln = seg[ln > 0], owner[ln > 0], p0[ln > 0], r[ln > 0], ln[ln > 0]
@@ -181,13 +189,27 @@ class Targets:
         s = -g / np.where(mk == 0, np.nan, mk)
         touch = a + s[:, None] * w[kk]
         t = ((touch - p0) * r).sum(1) / ln ** 2
-        gap = np.abs(g + mk) * k  # (how far its nearest corner is from the line now)
         past = PAST / (k * ln)
-        gap = np.where((s > 0) & (t >= -past) & (t <= 1 + past) & np.isfinite(s), gap, np.inf)
-        i = int(np.argmin(gap))
-        if gap[i] > reach:
-            return None
+        gap = np.where((s >= small) & (t >= -past) & (t <= 1 + past) & np.isfinite(s), np.abs(s - 1) * size, np.inf)
+        i = int(np.argmin(gap)) if len(gap) else 0
+        if not len(gap) or gap[i] > reach or (best and best[2] <= gap[i]):
+            return best
         return "line", (float(touch[i, 0]), float(touch[i, 1])), float(gap[i]), float(s[i]), int(owner[i])
+
+    def with_lines(self, lines):
+        """A copy with more lines to stick to (point lists, e.g. the mirror lines; owner -1, -2...: no stroke)."""
+        if not lines:
+            return self
+        out = copy.copy(self)
+        seg, owner, index = [self.seg], [self.owner], [self.index]
+        for n, line in enumerate(lines):
+            line = np.asarray(line, float).reshape(-1, 2)
+            if len(line) > 1:
+                seg.append(np.column_stack([line[:-1], line[1:]]))
+                owner.append(np.full(len(line) - 1, -1 - n))
+                index.append(np.arange(len(line) - 1))
+        out.seg, out.owner, out.index = np.concatenate(seg), np.concatenate(owner), np.concatenate(index)
+        return out
 
     def touch_two(self, a, d, view, reach):
         """A circle being drawn (box from corner a; the mouse at a + d) resting on TWO strokes' lines at once (user):

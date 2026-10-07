@@ -30,7 +30,7 @@ from window.help import open_help
 from window.formula_host import DrawerHost, formula_menu
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
 from window.layers import DrawerLayers, pasted
-from window.sticky import REACH, Targets, key_points
+from window.sticky import BEND, REACH, Targets, key_points
 from window.widgets import Tooltip, symmetry_menu
 
 LIBRARY = os.path.join(HERE, "shapes")
@@ -46,6 +46,7 @@ TOOLS = [("select", tr("drawer.select"), "v"), ("erase", tr("drawer.eraser"), "e
          ("arc", tr("drawer.arc"), "a"), ("square", tr("drawer.square"), "s"), ("circle", tr("drawer.circle"), "o"),
          ("areas", tr("drawer.areas"), "b")]
 SHIFT, CTRL = 0x1, 0x4
+MOD_KEYS = ("shift_l", "shift_r", "control_l", "control_r")
 STROKE_COLOR = look.STROKE  # (a stroke with an outline colour: that colour's dark shade)
 # Areas (areas.py) on the board: what Fill / Spam fill as normal, an area emptied by hand, the outside, the board
 AREA_NORMAL, AREA_EMPTY, OFF_BOARD, BOARD = look.AREA_NORMAL, look.AREA_EMPTY, look.DRAWER_BG, look.BOARD
@@ -340,8 +341,9 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self.square_sides = [1, 2]  # a square being drawn: its sides lit (stuck_pieces; 1, 2 = at the mouse's corner)
         self.guide = []        # a circle near sticking or stuck: where to point the mouse for it to touch, each
         # ((u, v), [the touched strokes' points moved through it])
-        self._stick_cache = None
-        self.zoom = 1.0        # 1 = the whole board fits the window
+        self._stick_cache = self._circle_cache = None
+        self.drag_xy = None    # where the mouse was at the last drag step (Shift / Ctrl pressed: done again there)
+        self.zoom = 1.0       # 1 = the whole board fits the window
         self.center = [0.5, 0.5]  # the board point in the middle of the window (0.5, 0.5 = the board's middle)
         self._pan = None
         self._panned = False  # the middle button moved further than a click's 3 px (pan_to)
@@ -698,6 +700,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         grab_while_panning(c)
         c.bind("<MouseWheel>", self.on_wheel)
         self.bind("<Key>", self.on_key)
+        self.bind("<KeyRelease>", lambda e: e.keysym.lower() in MOD_KEYS and self.mod_changed(e, False))
         self.bind("<F1>", lambda e: self.open_help())
         for keys, fn in (("z Z", self.undo), ("y Y", self.redo), ("c C", self.copy), ("v V", self.paste), ("h H", lambda: self.flip(True)),
                          ("j J", lambda: self.flip(False)), ("Left", lambda: self.turn(False)),
@@ -844,14 +847,31 @@ class Drawer(DrawerLayers, tk.Toplevel):
         return self.stick_targets(frozenset(skip), frozenset(skip_pts)).find(
             x, y, self.stick_view(), REACH * self.scale, extra_pts, extra_lines)
 
-    def guide_at(self, corner, touches):
+    def circle_targets(self):
+        """stick_targets for the Circle tool: the mirror lines count too (it rests on them, touching its copy)."""
+        base, lines = self.stick_targets(), self.mirror_lines()
+        if self._circle_cache is None or self._circle_cache[:2] != (base, lines):
+            self._circle_cache = (base, lines, base.with_lines(lines))
+        return self._circle_cache[2]
+
+    def guide_at(self, corner, touches, lines=()):
         """A Circle guide: the corner, and each touched stroke's shape [((u, v) touched, stroke)] moved to pass
-        through it (a polyline: only the straight piece touched)."""
+        through it (a polyline: only the straight stretch touched, up to a corner of more than 20 degrees: one
+        piece of a drawn polyline, more of a freehand stroke's tiny steps). Stroke -1, -2...: mirror line lines[0]..."""
         out = []
         for (tu, tv), i in touches:
-            pts = stroke_points(self.strokes[i])
-            if self.strokes[i]["kind"] == "poly" and len(pts) > 2:
-                pts = min((pts[j:j + 2] for j in range(len(pts) - 1)), key=lambda ab: seg_dist((tu, tv), *ab))
+            pts = lines[-1 - i] if i < 0 else stroke_points(self.strokes[i])
+            if i >= 0 and self.strokes[i]["kind"] == "poly" and len(pts) > 2:
+                P = np.asarray(pts, float)
+                j0 = j1 = min(range(len(P) - 1), key=lambda j: seg_dist((tu, tv), pts[j], pts[j + 1]))
+                r = np.diff(P, axis=0)
+                ln = np.hypot(r[:, 0], r[:, 1])
+                straight = (r[:-1] * r[1:]).sum(1) >= BEND * ln[:-1] * ln[1:]  # (piece j and j + 1 in one stretch)
+                while j0 > 0 and straight[j0 - 1]:
+                    j0 -= 1
+                while j1 < len(straight) and straight[j1]:
+                    j1 += 1
+                pts = pts[j0:j1 + 2]
             out.append([(u + corner[0] - tu, v + corner[1] - tv) for u, v in pts])
         return corner, out
 
@@ -1024,7 +1044,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
                 self.commit()
             self.redraw()
             return
-        self.drag = ("box", pt, e.x, e.y)
+        self.drag, self.drag_xy = ("box", pt, e.x, e.y), (e.x, e.y)
 
     def erase_release(self, drag):
         _, x0, y0, x1, y1 = drag
@@ -1404,6 +1424,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
             return
         tool = self.tool.get()
         self.guide, self.stuck2 = [], None
+        self.drag_xy = e.x, e.y
         start, pt = self.drag[1], self.event_pt(e, stick=tool != "circle")
         if tool in ("square", "circle") and e.state & CTRL:
             pt = self.perfect(start, pt)
@@ -1434,27 +1455,27 @@ class Drawer(DrawerLayers, tk.Toplevel):
             if e.state & CTRL:
                 raw = self.perfect(start, raw)
             d = (raw[0] - start[0], raw[1] - start[1])
-            targets, view = self.stick_targets(), self.stick_view()
-            got = targets.touch_circle(start, d, view, REACH * self.scale)
-            # resting on two lines at once (user; not with Ctrl: a perfect circle from that corner rarely can)
+            targets, view, lines = self.circle_targets(), self.stick_view(), self.mirror_lines()
+            # each counted as how far the mouse is from where it would touch: on one line / point (the nearest), or
+            # resting on two lines at once (user; not with Ctrl: a perfect circle from that corner rarely can), which
+            # wins within half the reach (like a moved stroke / square), so the mouse on a one-line guide point
+            # sticks there unless a two-line spot is right beside it
+            one = targets.touch_circle(start, d, view, GUIDE_REACH * self.scale)
             two = None if e.state & CTRL else targets.touch_two(start, d, view, GUIDE_REACH * self.scale)
-            if two and two[1] <= REACH * self.scale:
+            if two and two[1] <= REACH * self.scale / 2:
                 (t1, _), (t2, _) = two[2]
                 self.stuck, self.stuck2 = ("line", t1, two[1]), ("line", t2, two[1])
                 pt = list(two[0])
-                self.guide = [self.guide_at(two[0], two[2])]
-            else:
-                if got:
-                    self.stuck, s = got[:3], got[3]
-                    pt = [start[0] + s * d[0], start[1] + s * d[1]]
-                # where to point the mouse for it to touch: a dotted purple point on the touched stroke's shape
-                # moved to pass through it (faint, dotted); shown while it's stuck too (user)
-                near = got or targets.touch_circle(start, d, view, GUIDE_REACH * self.scale)
-                if near:
-                    self.guide.append(self.guide_at((start[0] + near[3] * d[0], start[1] + near[3] * d[1]),
-                                                    [(near[1], near[4])]))
-                if two:
-                    self.guide.append(self.guide_at(two[0], two[2]))
+            elif one and one[2] <= REACH * self.scale:
+                self.stuck, s = one[:3], one[3]
+                pt = [start[0] + s * d[0], start[1] + s * d[1]]
+            # where to point the mouse for it to touch: a dotted purple point on the touched stroke's shape moved to
+            # pass through it (faint, dotted); shown while it's stuck too (user)
+            if one:
+                self.guide.append(self.guide_at((start[0] + one[3] * d[0], start[1] + one[3] * d[1]),
+                                                [(one[1], one[4])], lines))
+            if two:
+                self.guide.append(self.guide_at(two[0], two[2], lines))
         (u0, v0), (u1, v1) = start, pt
         if tool == "line":
             self.draft = {"kind": "poly", "pts": [start, pt]}
@@ -1508,7 +1529,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
             return self.commit(pts)
         if st["kind"] == "ellipse":
             u0, v0, u1, v1 = st["box"]
-            ok = u1 > u0 and v1 > v0
+            ok = min(u1 - u0, v1 - v0) * self.px() >= 1  # (not one under a pixel: it can't be seen)
         else:
             us, vs = [p[0] for p in st["pts"]], [p[1] for p in st["pts"]]
             wide, tall = max(us) > min(us), max(vs) > min(vs)
@@ -1570,6 +1591,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
         k = e.keysym.lower()
         if isinstance(e.widget, (tk.Entry, ttk.Entry)):
             return
+        if k in MOD_KEYS:
+            return self.mod_changed(e, True)
         if k == "escape":
             self.cancel_draft()
         elif k == "return":
@@ -1580,6 +1603,22 @@ class Drawer(DrawerLayers, tk.Toplevel):
             for tool, _, hot in TOOLS:
                 if k == hot:
                     self.tool.set(tool)
+
+    def mod_changed(self, e, down):
+        """Shift / Ctrl pressed or let go while a square / circle / line / curve is dragged out (or follows the mouse
+        after a click): done again where the mouse is, so Shift drops the sticking and Ctrl makes it perfect at once."""
+        held = self.drag if self.drag and self.drag[0] == "box" else self.follow
+        if not (held and held[0] == "box" and self.drag_xy):
+            return
+        bit = SHIFT if e.keysym.lower().startswith("shift") else CTRL
+        state = (e.state | bit) if down else (e.state & ~bit)  # (a key event's state is from before it)
+        spot = SimpleNamespace(x=self.drag_xy[0], y=self.drag_xy[1], state=state)
+        if self.drag:
+            self.on_drag(spot)
+        else:
+            self.drag, self.follow = self.follow, None
+            self.on_drag(spot)
+            self.follow, self.drag = self.drag, None
 
     def right_click(self, e):
         """Finishes a polyline being drawn. Otherwise, like on the piano roll: on the selected curve's anchor =
