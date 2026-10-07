@@ -181,7 +181,9 @@ class FormulaDialog(tk.Toplevel):
         right.columnconfigure(1, weight=1)
         self.name = tk.StringVar(value=self.pat.get("name") or self.preset_name())
         ttk.Label(right, text=tr("pattern_dialog.name")).grid(row=0, column=0, sticky="w")
-        ttk.Entry(right, textvariable=self.name, width=30).grid(row=0, column=1, sticky="ew", padx=(5, 0), pady=1)
+        self.name_box = ttk.Entry(right, textvariable=self.name, width=30)
+        self.name_box.grid(row=0, column=1, sticky="ew", padx=(5, 0), pady=1)
+        self.name_box.bind("<Return>", lambda e: (self.save(), "break")[1])  # (a name typed: Enter saves, user)
         # the formula boxes: y = and along = (a pattern) or x(t) = and y(t) = (a shape)
         keys = ("x", "y") if shape else ("formula", "along")
         labels = {"x": tr("pattern_dialog.xt"), "y": tr("pattern_dialog.yt"), "formula": tr("pattern_dialog.y"),
