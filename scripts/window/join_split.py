@@ -11,7 +11,7 @@ import numpy as np
 
 from files.lang import tr
 from notes.arc import arc_circle, arc_points
-from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live
+from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live, velocity_changed
 from notes.bezier import anchor_count, nearest, split
 from notes.engine import as_made, cached_arrays, shape_path
 from notes.glue import for_part as glue_for_part, glue_box
@@ -253,6 +253,10 @@ class JoinSplit:
             return
         back = originals(sh) if sh["kind"] == "custom" else None
         if back:  # the shapes it was made of (Turn into live shape), as they were
+            if velocity_changed(sh):  # (with the velocities it was given since, each over its own time)
+                whole = span(sh)
+                for p in back:
+                    piece_velocity(p, sh, span(p), whole)
             self.replace_shape(i, back, velocity=False, name=tr("join_split.split_back_into_the_old_shapes"))
             n = len(back)
             self.status.config(text=tr("join_split.back_to_the_shape_it_was") if n == 1 else

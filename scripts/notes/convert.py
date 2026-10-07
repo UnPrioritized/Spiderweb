@@ -141,8 +141,22 @@ def to_live(shapes, paths, defaults, custom_defaults, k=None):
     if areas:
         new["areas"] = areas
     new["from"] = {"shapes": json.loads(json.dumps(shapes)), "strokes": json.loads(json.dumps(new["strokes"])),
-                   "pts": [list(p) for p in new["pts"]]}
+                   "pts": [list(p) for p in new["pts"]], "vel": velocities(new)}
     return new
+
+
+VEL_KEYS = ("vel0", "vel1", "vel_env")
+
+
+def velocities(sh):
+    return {k: json.loads(json.dumps(sh[k])) for k in VEL_KEYS if k in sh}
+
+
+def velocity_changed(sh):
+    """Whether a live shape's velocities were changed since it was made of other shapes (Split then gives them to
+    those shapes)."""
+    fr = sh.get("from") or {}
+    return "vel" in fr and not _same(velocities(sh), fr["vel"])
 
 
 def _same(a, b, tol=1e-7):

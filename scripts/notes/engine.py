@@ -198,6 +198,12 @@ def clean_shape(sh):
                 if all(olds) and len(fr["pts"]) == 3:
                     out["from"] = {"shapes": olds, "strokes": clean_strokes(fr["strokes"]),
                                    "pts": [[float(b), float(p)] for b, p in fr["pts"]]}
+                    vel = fr.get("vel")  # (its velocities when made: changed since = Split gives them to the shapes)
+                    if isinstance(vel, dict):
+                        got = {k: v for k, v in clean_basics(vel).items() if k != "end_dot"}
+                        if vel.get("vel_env"):
+                            got["vel_env"] = [[float(u), max(1.0, min(127.0, float(v)))] for u, v in vel["vel_env"]]
+                        out["from"]["vel"] = got
             except (KeyError, TypeError, ValueError):
                 pass
         pg = clean_polygon(sh.get("polygon"))
