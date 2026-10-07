@@ -11,7 +11,6 @@ from tkinter import ttk
 
 from files.lang import tr
 from window import look
-from window.widgets import Tooltip
 
 SHIFT, CTRL, ALT = 0x1, 0x4, 0x20000
 EYE, LOCK = "👁", "🔒"
@@ -196,7 +195,6 @@ class DrawerLayers:
         t.bind("<F2>", lambda e: (self.rename_layer(), "break")[1])
         t.bind("<Delete>", lambda e: (self.delete_layers(), "break")[1])
         t.bind("<BackSpace>", lambda e: "break")
-        Tooltip(t, tr("layers.tip"))
         self._layer_rows = None   # what the list shows now (sync_layers rebuilds it when this changes)
         self._layer_echo = None   # the rows sync_layers picked (their "picked" event isn't the user's)
         self._layer_press = None  # [row, y at the press, dragged yet, keep the picks]

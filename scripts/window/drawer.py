@@ -54,6 +54,7 @@ AREA_FRAME = DRAWN_FRAME  # (the drawing's box as a custom shape, for finding it
 STICK_RANK = {"point": 2, "cross": 1, "line": 0}
 STICK_COLOR = look.STICK
 STICK_LINE = look.STICK_LINE
+GUIDE_REACH = 6 * REACH  # pixels: a circle this near to sticking shows where it would touch (dotted)
 LIST_AWAY = look.LIST_AWAY  # the shape picked in the library list while the keyboard is elsewhere (blue when it's there)
 DOUBLE_CLICK_MS = double_click_ms()  # (the system's own setting)
 DRAW_TOOLS = ("line", "poly", "curve", "arc", "square", "circle")  # (the ones whose points stick)
@@ -306,6 +307,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self._area_cache = self._area_px = self._area_img = self._gap_cache = None
         self._settled = "[]"   # the strokes as JSON when the areas last matched them (changed)
         self.stuck = None      # where the last point stuck (sticky.py): (kind, (u, v), pixels away), shown as a mark
+        self.guide = None      # a circle not yet in reach of sticking: where it would touch (an ellipse stroke)
         self._stick_cache = None
         self.zoom = 1.0        # 1 = the whole board fits the window
         self.center = [0.5, 0.5]  # the board point in the middle of the window (0.5, 0.5 = the board's middle)
@@ -723,9 +725,15 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self.stuck = None
         if snap and not e.state & SHIFT:
             self.stuck = self.stick_at(e.x, e.y) if stick else None
+            n = int(self.grid_n.get())
+            if self.stuck and self.stuck[0] == "line":  # along a mirror line: on the grid too (user)
+                kind, (su, sv), far = self.stuck
+                if self.mirror_mode() in ("h", "both") and abs(su - 0.5) < 1e-9:
+                    self.stuck = kind, (0.5, round(sv * n) / n), far
+                elif self.mirror_mode() in ("v", "both") and abs(sv - 0.5) < 1e-9:
+                    self.stuck = kind, (round(su * n) / n, 0.5), far
             if self.stuck:
                 return list(self.stuck[1])
-            n = int(self.grid_n.get())
             u, v = round(u * n) / n, round(v * n) / n
         return [round(u, 5), round(v, 5)]
 
@@ -1295,6 +1303,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
             self.redraw()
             return
         tool = self.tool.get()
+        self.guide = None
         start, pt = self.drag[1], self.event_pt(e, stick=tool != "circle")
         if tool in ("square", "circle") and e.state & CTRL:
             pt = self.perfect(start, pt)
@@ -1303,11 +1312,20 @@ class Drawer(DrawerLayers, tk.Toplevel):
             raw = self.from_xy(e.x, e.y)
             if e.state & CTRL:
                 raw = self.perfect(start, raw)
-            got = self.stick_targets().touch_circle(start, (raw[0] - start[0], raw[1] - start[1]), self.stick_view(),
-                                                    REACH * self.scale)
+            d = (raw[0] - start[0], raw[1] - start[1])
+            targets, view = self.stick_targets(), self.stick_view()
+            got = targets.touch_circle(start, d, view, REACH * self.scale)
             if got:
                 self.stuck, s = got[:3], got[3]
-                pt = [start[0] + s * (raw[0] - start[0]), start[1] + s * (raw[1] - start[1])]
+                pt = [start[0] + s * d[0], start[1] + s * d[1]]
+            else:  # not in reach yet: where it would touch, a dotted purple circle (user)
+                near = targets.touch_circle(start, d, view, GUIDE_REACH * self.scale)
+                if near:
+                    s = near[3]
+                    self.guide = {"kind": "ellipse", "box": [min(start[0], start[0] + s * d[0]),
+                                                             min(start[1], start[1] + s * d[1]),
+                                                             max(start[0], start[0] + s * d[0]),
+                                                             max(start[1], start[1] + s * d[1])]}
         (u0, v0), (u1, v1) = start, pt
         if tool == "line":
             self.draft = {"kind": "poly", "pts": [start, pt]}
@@ -1322,7 +1340,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
 
     def on_release(self, e, second=False):
         """second: the click that finishes a stroke started with a click (see follow)."""
-        self.stuck = None  # (the mark goes; hovering shows it again)
+        self.stuck = self.guide = None  # (the mark goes; hovering shows it again)
         if self.drag and (self.tool.get() == "select" or self.drag[0] in ("points", "pen")):
             self.select_release()
         drag, self.drag = self.drag, None
@@ -1712,7 +1730,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
 
     def cancel_draft(self):
         self.let_go()  # (a stroke held by Esc / a tool key: moved is moved, like letting go)
-        self.draft = None
+        self.draft = self.guide = None
         self.follow = None
         self.arc_bend = False
         self.redraw()
@@ -2154,6 +2172,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
                 self.draw_stroke(st, look.DRAFT_LINE, w)
             self.draw_pieces(pieces, w + 1)
             self.draw_draft_points(r, h)
+        if self.draft and self.guide:  # (thin: Windows draws thick dotted lines solid)
+            self.draw_stroke(self.guide, STICK_LINE, max(1, round(s)), dash=(2, 4))
         if self.chosen() and self.tool.get() == "select":  # the kept select boxes
             for box in self.screen_boxes():
                 c.create_rectangle(*box, outline=look.HANDLE, width=max(1, round(s)), dash=(4, 2))
