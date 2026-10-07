@@ -251,6 +251,13 @@ def apply(root):
         st.map(name, background=[("disabled", WINDOW_BG), ("pressed", BUTTON_DOWN), ("active", BUTTON_HOT)],
                lightcolor=[("pressed", BUTTON_DOWN), ("active", BUTTON_HOT)],
                darkcolor=[("pressed", BUTTON_DOWN), ("active", BUTTON_HOT)])
+    st.configure("Toolbutton", background=WINDOW_BG, lightcolor=WINDOW_BG, darkcolor=WINDOW_BG,
+                 bordercolor=WINDOW_BG)  # (the picked tool = a normal button's grey, user: clam's own was too bright)
+    st.map("Toolbutton", background=[("disabled", WINDOW_BG), ("pressed", BUTTON_DOWN), ("selected", BUTTON_BG),
+                                     ("active", BUTTON_DOWN)],
+           lightcolor=[("pressed", BUTTON_DOWN), ("selected", BUTTON_BG), ("active", BUTTON_DOWN)],
+           darkcolor=[("pressed", BUTTON_DOWN), ("selected", BUTTON_BG), ("active", BUTTON_DOWN)],
+           bordercolor=[("selected", EDGE), ("active", EDGE)])
     for name in ("TCheckbutton", "TRadiobutton"):
         st.configure(name, indicatorbackground=FIELD_BG, indicatorforeground=TEXT, upperbordercolor=EDGE,
                      lowerbordercolor=EDGE)
