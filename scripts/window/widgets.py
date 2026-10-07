@@ -7,6 +7,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
+from window import look
 
 SHIFT, CTRL = 0x1, 0x4
 DRAG_PX = 4  # pixels of label dragging per step
@@ -402,7 +403,7 @@ class Tooltip:
         w = self.widget
         self.tip = tk.Toplevel(w)
         self.tip.wm_overrideredirect(True)
-        tk.Label(self.tip, text=self.text, justify="left", background="#ffffe8", relief="solid",
+        tk.Label(self.tip, text=self.text, justify="left", background=look.TIP_BG, relief="solid",
                  borderwidth=1, padx=6, pady=4, wraplength=round(TIP_WIDTH * w.winfo_fpixels("1i") / 96)).pack()
         self.tip.update_idletasks()
         # under the widget, or under the mouse for a tall one (a list as tall as the window: not at its bottom);

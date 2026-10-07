@@ -28,6 +28,7 @@ from files.synth import RATE, Player, SynthError
 from notes.custom import BOX_STROKE, box_frame, custom_settings
 from notes.engine import shape_notes_tracks
 from notes.hzbass import EXTRAS, MIN_LEN, key_range, sound_span
+from window import look
 
 LEAD = 0.05  # seconds from a press / let-go to its sound (time for its notes to be made)
 BUFFER = 0.06  # seconds of sound the sound device keeps ready (short: a press is heard soon)
@@ -362,7 +363,7 @@ class LiveKeys:
         """(text, colour) for the words by the Preview toggle while it plays."""
         qs = self.app.quick
         if qs is None or not qs.ready() or self.waits:
-            return tr("hz.live_recording"), "#c06000"
+            return tr("hz.live_recording"), look.WARN
         if self.band > 1:
-            return tr("hz.live_rough", n=self.band, mb=f"{qs.used_mb():,.0f}"), "#555"
-        return tr("hz.live_playing", mb=f"{qs.used_mb():,.0f}"), "#555"
+            return tr("hz.live_rough", n=self.band, mb=f"{qs.used_mb():,.0f}"), look.INFO
+        return tr("hz.live_playing", mb=f"{qs.used_mb():,.0f}"), look.INFO

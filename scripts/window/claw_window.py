@@ -8,6 +8,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.claw import CLAW_DEFAULTS, COUNTS, MAX_COUNT, PERIODS, TRASHES, clean_claw
+from window import look
 from window.tool_window import Knob, ToolWindow
 from window.widgets import Scrub, Tooltip, bad, good, grid_shown
 
@@ -57,7 +58,7 @@ class ClawWindow(ToolWindow):
         dial.grid(row=2, column=1, sticky="w", pady=4)
         self.knob = Knob(dial, s, self.on_knob, pressed=self.knob_pressed)
         self.knob.pack(side="left")
-        self.knob_text = ttk.Label(dial, text="", width=5, foreground="#777")
+        self.knob_text = ttk.Label(dial, text="", width=5, foreground=look.HINT)
         self.knob_text.pack(side="left", padx=(6, 0))
         Tooltip(self.knob, tr("claw.tip_dist"))
         self.ticks = {}
@@ -76,15 +77,15 @@ class ClawWindow(ToolWindow):
         for r, key, label, tip in ((0, "keep", tr("claw.keep"), tr("claw.tip_keep")),
                                    (1, "skip", tr("claw.then_trash"), tr("claw.tip_skip"))):
             self.number_row(count, r, key, label, tip, (1, 10, 1), 0 if key == "skip" else 1, MAX_COUNT)
-            u = ttk.Label(count, text="", foreground="#777")
+            u = ttk.Label(count, text="", foreground=look.HINT)
             u.grid(row=r, column=2, sticky="w", padx=(5, 0))
             self.units.append(u)
-        ttk.Label(count, text=tr("claw.then_again"), foreground="#777").grid(row=2, column=1, columnspan=2,
+        ttk.Label(count, text=tr("claw.then_again"), foreground=look.HINT).grid(row=2, column=1, columnspan=2,
                                                                             sticky="w", pady=(2, 0))
 
         rand = self.boxes["random"] = self.mode_box(box)
         self.number_row(rand, 0, "pct", tr("claw.keep"), tr("claw.tip_pct"), (1, 10, 0.1), 0, 100)
-        ttk.Label(rand, text=tr("unit.percent"), foreground="#777").grid(row=0, column=2, sticky="w", padx=(5, 0))
+        ttk.Label(rand, text=tr("unit.percent"), foreground=look.HINT).grid(row=0, column=2, sticky="w", padx=(5, 0))
         again = ttk.Button(rand, text=tr("claw.new_random"),
                            command=lambda: self.put("seed", random.randrange(1, 10 ** 9)))
         again.grid(row=1, column=1, columnspan=2, sticky="w", pady=(4, 0))
@@ -98,7 +99,7 @@ class ClawWindow(ToolWindow):
         Tooltip(b, tr("claw.tip_shorten"))
         cut.columnconfigure(0, minsize=round(80 * s))
         self.number_row(cut, 1, "cut", tr("claw.to"), tr("claw.tip_cut"), (1, 10, 0.1), 1, 99)
-        ttk.Label(cut, text=tr("claw.of_their_length"), foreground="#777").grid(row=1, column=2, sticky="w",
+        ttk.Label(cut, text=tr("claw.of_their_length"), foreground=look.HINT).grid(row=1, column=2, sticky="w",
                                                                                 padx=(5, 0))
         self.cut_row = cut.grid_slaves(row=1)  # (only shown while "shorten" is ticked, user)
         self.update_idletasks()  # (as wide as the widest mode, so the window keeps its width)

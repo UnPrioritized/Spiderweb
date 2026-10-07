@@ -24,6 +24,7 @@ from files.lang import tr
 from notes.engine import shape_notes_tracks
 from notes.hzbass import ENVELOPES, FX, FX_START, line_at, sound_span
 from roll.roll_shared import note_name
+from window import look
 from window.hz_effects import AMOUNT, FxPane
 from window.hz_knobs import SynthKnobs
 from window.hz_live import free_sound_later, keep_sound
@@ -364,8 +365,8 @@ class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
             return
         self.fx.draw_dots()
         self.draw_adsr_dot()
-        says, colour = self.live.says() if self.live.active() else (self.live.ready() or "", "#555")
-        colour = DIM if colour == "#555" else WARN  # (the Hz bass window's colours, for the dark look)
+        says, colour = self.live.says() if self.live.active() else (self.live.ready() or "", look.INFO)
+        colour = DIM if colour == look.INFO else WARN  # (the Hz bass window's colours, for the dark look)
         if (self.says.cget("text"), str(self.says.cget("foreground"))) != (says, colour):
             self.says.config(text=says, foreground=colour)
         if self.held is None and self.live.key is None and self.piano.find_withtag("lit"):

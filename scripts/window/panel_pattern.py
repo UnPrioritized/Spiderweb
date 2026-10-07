@@ -11,6 +11,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.pattern import FORMULA_KINDS, MAX_LOOPS, formula_shape, loop_points, most_loops
 from notes.polygon import update_polygon
+from window import look
 from window.formula_host import SYM_CHOICES, RollHost, layer_name, set_loop_sym, sym_label
 from window.panel_custom import GAP_COLOR
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
@@ -32,7 +33,7 @@ class PatternPanel:
             top.pack(fill="x")
             ttk.Label(top, text=tr("panel_pattern.shape") if layer == "shape" else
                       tr("panel_pattern.pattern")).pack(side="left")
-            label = ttk.Label(top, text="", foreground="#777")
+            label = ttk.Label(top, text="", foreground=look.HINT)
             label.pack(side="left", padx=(5, 0))
             numbers = ttk.Frame(row)  # a box per name in the formula (a pattern: Loops first); rebuilt when they change
             numbers.pack(fill="x", pady=(2, 0))
@@ -50,7 +51,7 @@ class PatternPanel:
                 Tooltip(w, tr("pattern_dialog.sym_tip"))
             # (only while the Loops box is at the most, user)
             most = ttk.Label(row, text=tr("panel_pattern.loops_most", most=fmt(MAX_LOOPS)), foreground=GAP_COLOR,
-                             font=("Segoe UI", 8), wraplength=int(300 * self.scale), justify="left")
+                             font=look.font(8), wraplength=int(300 * self.scale), justify="left")
             self.formula_ui[layer] = {"row": row, "label": label, "numbers": numbers, "boxes": {}, "names": None,
                                       "sym": sym, "most": most}
         row = self.pattern_each_row = ttk.Frame(self.formula_ui["pattern"]["row"])

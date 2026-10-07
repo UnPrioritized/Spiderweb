@@ -5,6 +5,7 @@ from files.lang import tr
 from notes.custom import custom_settings
 from notes.text import build, from_roll, layout, missing_letters, new_axes, restyle, text_axes, text_font, with_arial
 from roll.roll_shared import CTRL, SHIFT
+from window import look
 
 BLINK_MS = 530
 
@@ -314,14 +315,14 @@ class TextTyping:
         pad = 0.08
         xs, ys = [x for x, _ in spots], [y for _, y in spots]
         rect(min(xs) - pad, max(xs) + pad, min(ys) - down - pad, max(ys) + up + pad, fill="",
-             outline="#3a7bd5", dash=(4, 3), width=max(1, round(self.scale)))
+             outline=look.TEXT_BOX, dash=(4, 3), width=max(1, round(self.scale)))
         s0, s1 = self.text_selection()
         text = tx["text"]
         for j in range(s0, s1):
             x0, y = spots[j]
             x1 = spots[j + 1][0] if text[j] != "\n" else x0 + 0.25  # a selected line break: a little stub
-            rect(x0, x1, y - down, y + up, fill="#3a7bd5", outline="", stipple="gray50")
+            rect(x0, x1, y - down, y + up, fill=look.TEXT_BOX, outline="", stipple="gray50")
         if caret and s0 == s1:
             x, y = spots[min(self.typing["caret"], len(spots) - 1)]
-            self.create_line(*xy(x, y - down), *xy(x, y + up), fill="#000000",
+            self.create_line(*xy(x, y - down), *xy(x, y + up), fill=look.TEXT_CARET,
                              width=max(2, round(2 * self.scale)), tags="caret")

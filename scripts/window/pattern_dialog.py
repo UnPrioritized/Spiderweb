@@ -25,6 +25,7 @@ from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_P
                            formula_shape, keep_sym, most_loops, new_pattern, new_shape, pattern_name, pattern_names,
                            shape_name, shape_names)
 from roll.roll_shared import ALT, grab_while_panning
+from window import look
 from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
 from window.panel_custom import GAP_COLOR
 from window.widgets import LocalUndo, Scrub, Tooltip, bad, good
@@ -171,7 +172,7 @@ class FormulaDialog(tk.Toplevel):
                               padding=6)
         left.pack(side="left", fill="y")
         self.listbox = tk.Listbox(left, height=16, width=22, activestyle="none", exportselection=False,
-                                  font=("Segoe UI", 9))
+                                  font=look.font(9))
         self.listbox.pack(fill="y", expand=True)
         self.listbox.bind("<<ListboxSelect>>", self.on_pick)
         ttk.Button(left, text=tr("pattern_dialog.delete"), command=self.delete).pack(anchor="w", pady=(4, 0))
@@ -196,7 +197,7 @@ class FormulaDialog(tk.Toplevel):
             row = ttk.Frame(right)
             row.grid(row=r, column=1, sticky="ew", padx=(5, 0), pady=1)
             var = self.texts[key] = tk.StringVar(value=self.pat.get(key, ""))
-            e = ttk.Entry(row, textvariable=var, width=34, font=("Consolas", 10), state="readonly")
+            e = ttk.Entry(row, textvariable=var, width=34, font=look.mono(10), state="readonly")
             e.pack(side="left", fill="x", expand=True)
             self.entries.append(e)
             if key == "along":
@@ -209,7 +210,7 @@ class FormulaDialog(tk.Toplevel):
                 Tooltip(b, tr("pattern_dialog.edit_formula_tip"))
         r = len(keys) + 1
         ttk.Label(right, text=tr("pattern_dialog.shape_help") if shape else tr(host.pattern_help),
-                  foreground="#777", font=("Segoe UI", 8), wraplength=int(440 * s),
+                  foreground=look.HINT, font=look.font(8), wraplength=int(440 * s),
                   justify="left").grid(row=r, column=0, columnspan=2, sticky="w", pady=(3, 4))
         row = ttk.Frame(right)  # symmetric halves: only the first half of the formula counts
         row.grid(row=r + 1, column=0, columnspan=2, sticky="w", pady=(0, 4))
@@ -228,8 +229,8 @@ class FormulaDialog(tk.Toplevel):
         self.numbers.grid(row=r + 1, column=0, columnspan=2, sticky="w", pady=(0, 6))
         self.boxes = {}
         self._names = None
-        self.canvas = tk.Canvas(right, width=self.w, height=self.h, bg="#ffffff", highlightthickness=1,
-                                highlightbackground="#c0c0c0")
+        self.canvas = tk.Canvas(right, width=self.w, height=self.h, bg=look.CHART_BG, highlightthickness=1,
+                                highlightbackground=look.PAT_BORDER)
         self.canvas.grid(row=r + 2, column=0, columnspan=2)
         c = self.canvas
         c.bind("<ButtonPress-1>", self.press)
@@ -244,7 +245,7 @@ class FormulaDialog(tk.Toplevel):
         c.bind("<Double-Button-1>", self.add_point)
         info = ttk.Frame(right)
         info.grid(row=r + 3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
-        self.info = ttk.Label(info, text="", font=("Segoe UI", 9), wraplength=int(300 * s), justify="left")
+        self.info = ttk.Label(info, text="", font=look.font(9), wraplength=int(300 * s), justify="left")
         self.info.pack(side="left")
         b = ttk.Button(info, text=tr("pattern_dialog.fit_view"), command=self.fit_again)
         b.pack(side="right")
@@ -328,7 +329,7 @@ class FormulaDialog(tk.Toplevel):
         for kind, _, name in self.items:
             self.listbox.insert("end", name)
             if kind == "preset":
-                self.listbox.itemconfig("end", foreground="#555")
+                self.listbox.itemconfig("end", foreground=look.INFO)
 
     def on_pick(self, _):
         sel = self.listbox.curselection()
@@ -416,7 +417,7 @@ class FormulaDialog(tk.Toplevel):
             self.ok = False
             typed = any(t.strip() for t in texts.values())
             self.set_info(tr("pattern_dialog.can_t_use_it", e=e) if typed else tr("pattern_dialog.type_a_formula"),
-                          "#c00000" if typed else "#777")
+                          look.ERROR_DARK if typed else look.HINT)
             return
         old = self.pat["vars"]
         if self.name.get() in [n for _, _, n in self.items]:  # it's not that preset / saved one any more
@@ -471,14 +472,14 @@ class FormulaDialog(tk.Toplevel):
                 self.works(self.pat)
             except ValueError as e:
                 self.ok = False
-                self.set_info(tr("pattern_dialog.can_t_use_it", e=e), "#c00000")
+                self.set_info(tr("pattern_dialog.can_t_use_it", e=e), look.ERROR_DARK)
         if self.ok:
             if self.pat.get("loop"):
                 self.set_info(tr("pattern_dialog.shape_edited_by_hand") if self.layer == "shape" else
-                              tr("pattern_dialog.edited_by_hand"), "#1d6b1d", back=True)
+                              tr("pattern_dialog.edited_by_hand"), look.GOOD, back=True)
             else:
                 self.set_info(tr("pattern_dialog.whole_shape") if self.layer == "shape" else
-                              tr("pattern_dialog.one_loop"), "#555")
+                              tr("pattern_dialog.one_loop"), look.INFO)
             if self.layer == "pattern" and self.pat["loops"] >= self.most_loops():  # (only then, user)
                 self.set_info(tr("panel_pattern.loops_most", most=fmt(self.most_loops())), GAP_COLOR,
                               back=bool(self.pat.get("loop")))
@@ -655,36 +656,36 @@ class FormulaDialog(tk.Toplevel):
         self.draw_grid()
         pts = loop["pts"]
         line = [self.to_xy(p) for p in sample([tuple(p) for p in pts], 32)]
-        font = ("Segoe UI", 8)
+        font = look.font(8)
         if self.layer == "pattern":
-            c.create_line(0, ym, self.w, ym, fill="#e0a0a0", dash=(6, 4))  # the curve itself (the origin path)
+            c.create_line(0, ym, self.w, ym, fill=look.PAT_ORIGIN, dash=(6, 4))  # the curve itself (the origin path)
             width = length * s
             for shift in (-1, 1):  # the loops before and after it, faint
-                c.create_line(*[v for x, y in line for v in (x + shift * width, y)], fill="#d8d8e8", width=2)
+                c.create_line(*[v for x, y in line for v in (x + shift * width, y)], fill=look.PAT_NEIGHBOUR, width=2)
         else:
             (ax, ay), (bx, by) = self.to_xy((0, 0)), self.to_xy((1, 0))
-            c.create_line(ax, ay, bx, by, fill="#e0a0a0", dash=(6, 4))  # the curve from A to B (the origin path)
-            c.create_text(ax, ay + 6, text="A", anchor="n", fill="#a05050", font=font)
-            c.create_text(bx, by + 6, text="B", anchor="n", fill="#a05050", font=font)
+            c.create_line(ax, ay, bx, by, fill=look.PAT_ORIGIN, dash=(6, 4))  # the curve from A to B (the origin path)
+            c.create_text(ax, ay + 6, text="A", anchor="n", fill=look.PAT_AB, font=font)
+            c.create_text(bx, by + 6, text="B", anchor="n", fill=look.PAT_AB, font=font)
         if self.pat.get("loop"):  # the formula it came from, faint under it
             try:
                 u, v = formula_shape(self.pat) if self.layer == "shape" else formula_loop(self.pat)
                 c.create_line(*[q for a, b in zip(u.tolist(), v.tolist()) for q in self.to_xy((a, b))],
-                              fill="#d0d0d0", width=4)
+                              fill=look.PAT_FORMULA, width=4)
             except (ValueError, KeyError):
                 pass
-        c.create_line(*[v for p in line for v in p], fill="#d01010", width=2)
+        c.create_line(*[v for p in line for v in p], fill=look.PAT_LINE, width=2)
         r = 3.5 * self.scale
         for a, h in handle_lines(pts):
-            c.create_line(*self.to_xy(a), *self.to_xy(h), fill="#6080c0")
+            c.create_line(*self.to_xy(a), *self.to_xy(h), fill=look.PAT_ARM)
         for i, kind in pen_handles(pts):
             x, y = self.to_xy(pts[i])
             if kind == "ctrl":
-                c.create_oval(x - r + 1, y - r + 1, x + r - 1, y + r - 1, fill="#0050d0", outline="")
+                c.create_oval(x - r + 1, y - r + 1, x + r - 1, y + r - 1, fill=look.HANDLE, outline="")
             elif kind == "anchor":
-                c.create_oval(x - r, y - r, x + r, y + r, fill="#ffffff", outline="#0050d0")
+                c.create_oval(x - r, y - r, x + r, y + r, fill=look.HANDLE_FILL, outline=look.HANDLE)
             else:
-                c.create_rectangle(x - r, y - r, x + r, y + r, fill="#ffffff", outline="#c00000")
+                c.create_rectangle(x - r, y - r, x + r, y + r, fill=look.HANDLE_FILL, outline=look.HANDLE_FIXED)
 
     def point_at(self, x, y):
         if self.view is None or (not self.ok and not self.pat.get("loop")):
@@ -749,7 +750,7 @@ class FormulaDialog(tk.Toplevel):
         0 (and at the loop's end), their numbers along the left and bottom edges."""
         c = self.canvas
         s, x0, ym, length = self.view
-        font = ("Segoe UI", 7)
+        font = look.font(7)
         gap = 32 * self.scale  # at least this many pixels between lines
         for axis, per in ((0, length * s), (1, s)):
             raw = gap / max(per, 1e-12)
@@ -759,15 +760,15 @@ class FormulaDialog(tk.Toplevel):
             for k in range(math.ceil(lo / step), math.floor(hi / step) + 1):
                 v = k * step
                 strong = abs(v) < step / 2 or (axis == 0 and self.layer == "pattern" and abs(v - 1) < step / 2)
-                color = "#d4d4d4" if strong else "#eeeeee"
+                color = look.PAT_GRID_STRONG if strong else look.PAT_GRID
                 if axis == 0:
                     x = self.to_xy((v, 0))[0]
                     c.create_line(x, 0, x, self.h, fill=color)
-                    c.create_text(x + 2, self.h - 1, text=fmt(v), anchor="sw", fill="#aaaaaa", font=font)
+                    c.create_text(x + 2, self.h - 1, text=fmt(v), anchor="sw", fill=look.PAT_GRID_TEXT, font=font)
                 else:
                     y = self.to_xy((0, v))[1]
                     c.create_line(0, y, self.w, y, fill=color)
-                    c.create_text(2, y - 1, text=fmt(v), anchor="sw", fill="#aaaaaa", font=font)
+                    c.create_text(2, y - 1, text=fmt(v), anchor="sw", fill=look.PAT_GRID_TEXT, font=font)
 
     def press(self, e):
         self.drag = self.point_at(e.x, e.y)
@@ -802,7 +803,7 @@ class FormulaDialog(tk.Toplevel):
                     c["pts"][j] = [c["pts"][j][0], c["pts"][j][1] + dy]
             keep_symmetric(c, self.drag, self.to_xy, axis=axis)
         self.set_info(tr("pattern_dialog.shape_edited_by_hand") if self.layer == "shape" else
-                      tr("pattern_dialog.edited_by_hand"), "#1d6b1d", back=True)
+                      tr("pattern_dialog.edited_by_hand"), look.GOOD, back=True)
         want = ["loops"] if self.layer == "pattern" else []
         if self._names != want:
             self.build_boxes(want)

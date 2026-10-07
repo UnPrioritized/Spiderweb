@@ -13,6 +13,7 @@ from files.lang import tr
 from files.snap import (COUNT_RANGE, DIV_RANGE, DOTS, NOTE_RANGE, SNAP_LIST, custom_parts, custom_snap, snap_text,
                         whole_notes)
 from files.mathexpr import fmt
+from window import look
 from window.widgets import Tooltip
 
 SIZE = 16  # the pictures' size at 100 % display scaling (drawn in a 16 x 16 box, then scaled)
@@ -170,7 +171,7 @@ class CustomSnapWindow(tk.Toplevel):
         div_box = ttk.Spinbox(row, textvariable=self.div, from_=DIV_RANGE[0], to=DIV_RANGE[1], width=6)
         div_box.pack(side="left")
         Tooltip(div_box, tr("snap.divided_by_tip"))
-        self.info = ttk.Label(box, text="", foreground="#777")
+        self.info = ttk.Label(box, text="", foreground=look.HINT)
         self.info.pack(anchor="w", pady=(6, 0))
         row = ttk.Frame(box)
         row.pack(anchor="e", pady=(8, 0))
@@ -201,13 +202,13 @@ class CustomSnapWindow(tk.Toplevel):
         if snap is None:
             self.info.config(text=tr("snap.out_of_range", COUNT=f"{COUNT_RANGE[0]}-{COUNT_RANGE[1]}",
                                      NOTE=f"{NOTE_RANGE[0]}-{NOTE_RANGE[1]}", DIV=f"{DIV_RANGE[0]}-{DIV_RANGE[1]}"),
-                             foreground="#d00000")
+                             foreground=look.ERROR)
             return
         beats = whole_notes(snap) * 4
         ppq = self.app.ppq
         self.info.config(text=tr("snap.length", beats=f"{float(beats):.4f}".rstrip("0").rstrip("."),
                                  ticks=fmt(round(float(beats * ppq), 2)),
-                                 ppq=ppq), foreground="#777")
+                                 ppq=ppq), foreground=look.HINT)
 
     def ok(self):
         snap = self.snap()

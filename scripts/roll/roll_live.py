@@ -19,6 +19,7 @@ from notes.pattern import has_formula
 from notes.polygon import polygon_aspect, polygon_strokes
 from roll.roll_funnel import seg_dist
 from roll.roll_shared import ALT, PICK, cached_strokes, shown_points
+from window import look
 
 STROKE_TOOLS = ("line", "poly", "free", "curve", "arc", "circle", "polygon")
 BOX_TOOLS = ("circle", "polygon")  # always make custom shapes (their own, or strokes of the live one)
@@ -481,5 +482,5 @@ class LiveDrawing:
             return
         path = cached_strokes(sh)[k]
         if len(path) >= 2:
-            self.create_line(*[v for b, p in path for v in (self.t2x(b), self.p2y(p))], fill="#7a1fe0",
+            self.create_line(*[v for b, p in path for v in (self.t2x(b), self.p2y(p))], fill=look.LIVE_LINE,
                              width=max(3, round(3 * self.scale)), capstyle="round", joinstyle="round")

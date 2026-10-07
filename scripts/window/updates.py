@@ -13,6 +13,7 @@ from tkinter import ttk
 from files.about import VERSION, WEBSITE
 from files.lang import tr
 from files.update_check import newer_releases
+from window import look
 
 OFTEN = ["launch", "day", "week", "month", "off"]  # (saved as these)
 PERIOD = {"launch": 0, "day": 86400, "week": 7 * 86400, "month": 30 * 86400}
@@ -162,13 +163,13 @@ class UpdateQuestion(tk.Toplevel):
         self.title(tr("updates.question_title"))
         box = ttk.Frame(self, padding=(16, 12, 16, 12))
         box.pack(fill="both", expand=True)
-        ttk.Label(box, text=tr("updates.question_head"), font=("Segoe UI", 10, "bold")).pack(anchor="w")
+        ttk.Label(box, text=tr("updates.question_head"), font=look.font(10, "bold")).pack(anchor="w")
         ttk.Label(box, text=tr("updates.question_text"), wraplength=int(400 * s),
                   justify="left").pack(anchor="w", pady=(4, 8))
         self.var = tk.StringVar(value="launch")
         for k, name in often_names().items():
             ttk.Radiobutton(box, text=name, value=k, variable=self.var).pack(anchor="w", padx=(8, 0))
-        ttk.Label(box, text=tr("updates.question_later"), foreground="#777").pack(anchor="w", pady=(8, 10))
+        ttk.Label(box, text=tr("updates.question_later"), foreground=look.HINT).pack(anchor="w", pady=(8, 10))
         ttk.Button(box, text=tr("updates.ok"), command=self.ok).pack(side="right")
         self.bind("<Return>", lambda e: self.ok())
         on_top(self, app)
@@ -192,18 +193,18 @@ class UpdatePopup(tk.Toplevel):
         box = ttk.Frame(self, padding=(16, 12, 16, 12))
         box.pack(fill="both", expand=True)
         ttk.Label(box, text=tr("updates.popup_head", version=found[0]["version"]),
-                  font=("Segoe UI", 11, "bold")).pack(anchor="w")
-        ttk.Label(box, text=tr("updates.you_have", VERSION=VERSION), foreground="#777").pack(anchor="w", pady=(2, 8))
-        ttk.Label(box, text=tr("updates.whats_new"), font=("Segoe UI", 10, "bold")).pack(anchor="w")
+                  font=look.font(11, "bold")).pack(anchor="w")
+        ttk.Label(box, text=tr("updates.you_have", VERSION=VERSION), foreground=look.HINT).pack(anchor="w", pady=(2, 8))
+        ttk.Label(box, text=tr("updates.whats_new"), font=look.font(10, "bold")).pack(anchor="w")
         text_box = ttk.Frame(box)
         text_box.pack(fill="both", expand=True, pady=(4, 10))
-        text = tk.Text(text_box, wrap="word", font=("Segoe UI", 9), width=64, height=14, relief="solid",
+        text = tk.Text(text_box, wrap="word", font=look.font(9), width=64, height=14, relief="solid",
                        borderwidth=1, padx=8, pady=6, spacing3=2, cursor="arrow")
         sb = ttk.Scrollbar(text_box, orient="vertical", command=text.yview)
         text.configure(yscrollcommand=sb.set)
         text.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
-        text.tag_configure("version", font=("Segoe UI", 10, "bold"), spacing1=4, spacing3=4)
+        text.tag_configure("version", font=look.font(10, "bold"), spacing1=4, spacing3=4)
         text.tag_configure("bullet", lmargin2=text.tk.call("font", "measure", text.cget("font"), "•  "))
         for n, rel in enumerate(found):
             if len(found) > 1:

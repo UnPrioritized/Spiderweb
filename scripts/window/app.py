@@ -16,7 +16,7 @@ import numpy as np
 from files.lang import tr
 from notes.areas import COLOURS
 from notes.custom import CUSTOM_DEFAULTS, capped_colours, custom_note_count, tracks_apart
-from window import big_ask
+from window import big_ask, look
 from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
@@ -220,8 +220,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.project_entries = {}  # BPM, Beats per bar
         self.point_rows = []
 
-        ttk.Style(self).configure("Bad.TEntry", foreground="#d00000")
-        ttk.Style(self).configure("Bad.TCombobox", foreground="#d00000")
+        ttk.Style(self).configure("Bad.TEntry", foreground=look.ERROR)
+        ttk.Style(self).configure("Bad.TCombobox", foreground=look.ERROR)
         remember_good(self)  # (a wrong value typed in a number box goes back to its last good one)
         self._build()
         self.restore_window()
@@ -324,7 +324,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         help_btn.pack(side="left", padx=(12, 0))
         Tooltip(help_btn, tr("app.every_tip_searchable_opens_at_the"))
 
-        self.status = StatusLine(self, text="", padding=(6, 2), font=("Segoe UI", 9))
+        self.status = StatusLine(self, text="", padding=(6, 2), font=look.font(9))
         self.status.pack(side="bottom", fill="x")
 
         side = self._build_side()
@@ -336,7 +336,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
 
         s = self.scale
         self.panes = tk.PanedWindow(self, orient="vertical", sashwidth=int(6 * s), sashrelief="raised",
-                                    bd=0, bg="#c8c8c8", opaqueresize=True)
+                                    bd=0, bg=look.SASH, opaqueresize=True)
         self.panes.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=(0, 6))
         roll_box = tk.Frame(self.panes)
         self.roll = PianoRoll(roll_box, self, s)
@@ -354,7 +354,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 Tooltip(b, tr("app.formula_tip"))
         self.vel_formula_bar = VelocityFormulaBar(vbar, self)  # (shown while Formula is the tool)
         self.vel_hint = ttk.Label(vbar, text=tr("app.ctrl_flat_shift_snap_enter_done"),
-                                  foreground="#777", font=("Segoe UI", 8))
+                                  foreground=look.HINT, font=look.font(8))
         self.vel_hint.pack(side="left", padx=(10, 0))
         self.vel_tool.trace_add("write", lambda *_: self.show_vel_formula())
         self.vel = VelocityPane(self.vel_box, self, s)
@@ -439,8 +439,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 for seq in ("<Return>", "<FocusOut>"):  # a wrong PPQ: back to the last good one (user)
                     self.ppq_box.bind(seq, lambda e: self.ppq_ok() or self.pvar["ppq"].set(str(self.ppq)), add="+")
                 # Many MIDI programs can't open a file with a PPQ of 32767 or more (above that it's SMPTE timing anyway)
-                self.ppq_warning = ttk.Label(row, text=tr("app.many_programs_can_t_open_this"), foreground="#d00000",
-                                             font=("Segoe UI", 8))
+                self.ppq_warning = ttk.Label(row, text=tr("app.many_programs_can_t_open_this"), foreground=look.ERROR,
+                                             font=look.font(8))
                 Tooltip(self.ppq_warning, tr("app.a_ppq_of_or_more_many", PPQ_WARN=PPQ_WARN))
             else:
                 cell = ttk.Frame(box)
@@ -534,7 +534,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         box.pack(fill="x", pady=(8, 0))
         row = ttk.Frame(box)
         row.pack(fill="x")
-        self.listbox = tk.Listbox(row, height=8, activestyle="none", exportselection=False, font=("Segoe UI", 9),
+        self.listbox = tk.Listbox(row, height=8, activestyle="none", exportselection=False, font=look.font(9),
                                   selectmode="extended")
         sb = ttk.Scrollbar(row, orient="vertical", command=self.listbox.yview)
         self.listbox.config(yscrollcommand=sb.set)
@@ -564,9 +564,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             watch_bad(self.fentries[key])
         # dragging "Velocity" moves both ends together
         Scrub(self, [(self.fentries[k], self.fvars[k], None) for k in ("vel0", "vel1")], (1, 10, 1), 1, 127, label=lb)
-        ttk.Label(v, text=tr("app.start_end"), foreground="#777").pack(side="left", padx=(5, 0))
-        self.env_note = ttk.Label(self.settings, text=tr("app.velocity_drawn_in_the_velocity_pane"), foreground="#777",
-                                  font=("Segoe UI", 8),
+        ttk.Label(v, text=tr("app.start_end"), foreground=look.HINT).pack(side="left", padx=(5, 0))
+        self.env_note = ttk.Label(self.settings, text=tr("app.velocity_drawn_in_the_velocity_pane"), foreground=look.HINT,
+                                  font=look.font(8),
                                   wraplength=int(300 * self.scale), justify="left")
         self._build_colours()
         last = self.last_row = ttk.Frame(self.settings)
@@ -599,11 +599,11 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         if not names:
             return
         if len(names) > MAX_POINT_BOXES:  # (a box pair per point took ~0.02 s: a fitted curve's hundreds froze it)
-            ttk.Label(self.points_box, text=tr("app.too_many_points", n=f"{len(names):,}"), foreground="#777",
+            ttk.Label(self.points_box, text=tr("app.too_many_points", n=f"{len(names):,}"), foreground=look.HINT,
                       wraplength=int(300 * self.scale), justify="left").grid(row=0, column=0, sticky="w")
             return
         for col, text in enumerate((tr("app.point"), tr("app.tick"), tr("app.pitch"))):
-            ttk.Label(self.points_box, text=text, foreground="#777").grid(row=0, column=col, sticky="w", padx=(0, 5))
+            ttk.Label(self.points_box, text=text, foreground=look.HINT).grid(row=0, column=col, sticky="w", padx=(0, 5))
         for i, name in enumerate(names):
             tv, pv = tk.StringVar(), tk.StringVar()
             ttk.Label(self.points_box, text=name).grid(row=i + 1, column=0, sticky="w", pady=1, padx=(0, 5))
@@ -900,7 +900,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.listbox.insert("end",
                                 tr("app.notes", i=i + 1, shape_label=self.shape_label(sh), counts=counts[i], uses=uses))
             if chans[i] > MANY_CHANNELS:  # (past this the note colours and channel numbers repeat)
-                self.listbox.itemconfig(i, foreground=GAP_COLOR, selectforeground="#ffd9b0")
+                self.listbox.itemconfig(i, foreground=GAP_COLOR, selectforeground=look.GAP_PICKED)
         self.sync_list_selection()
         self.roll.request_redraw()
         self.update_status()

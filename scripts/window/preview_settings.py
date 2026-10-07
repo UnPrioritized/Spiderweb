@@ -10,10 +10,11 @@ from tkinter import filedialog, ttk
 
 from files.lang import tr
 from files.mathexpr import calc
+from window import look
 from window.hz_preview import LIVE_MB, VOICES, WORKERS
 from window.widgets import Scrub, Tooltip, bad, good
 
-ORANGE = "#c06000"
+ORANGE = look.WARN
 
 
 def open_preview_settings(win):
@@ -98,7 +99,7 @@ class PreviewSettings(tk.Toplevel):
         self.live_used = ttk.Label(box, text="")
         self.live_used.grid(row=r, column=0, columnspan=3, sticky="w", pady=(2, 0))
         r += 1
-        ttk.Label(box, text=tr("ps.limiter"), foreground="#666", wraplength=round(380 * s)).grid(
+        ttk.Label(box, text=tr("ps.limiter"), foreground=look.SOFT_TEXT, wraplength=round(380 * s)).grid(
             row=r, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
         self.bind("<Escape>", lambda e: self.destroy())
@@ -118,13 +119,13 @@ class PreviewSettings(tk.Toplevel):
             self.font_name.config(text=name)
         limit = cfg["voices"]
         if not self.win.preview_on.get():
-            used, colour = tr("ps.off"), "#555"
+            used, colour = tr("ps.off"), look.INFO
             speed = ""
         else:
             full = p.voices_used >= limit
             used = tr("ps.used", used=f"{p.voices_used:,}", limit=f"{limit:,}") + (
                 "  " + tr("ps.full") if full else "")
-            colour = ORANGE if full else "#222"
+            colour = ORANGE if full else look.DARK_TEXT
             if p.speed:
                 slow = p.speed < 1.0
                 speed = tr("ps.speed", speed=f"{p.speed:.1f}", n=WORKERS) + ("  " + tr("ps.slow") if slow else "")
@@ -132,13 +133,13 @@ class PreviewSettings(tk.Toplevel):
                 slow, speed = False, tr("ps.speed_none")
         if (self.used.cget("text"), str(self.used.cget("foreground"))) != (used, colour):
             self.used.config(text=used, foreground=colour)
-        sc = ORANGE if speed and p.speed and p.speed < 1.0 else "#222"
+        sc = ORANGE if speed and p.speed and p.speed < 1.0 else look.DARK_TEXT
         if (self.speed.cget("text"), str(self.speed.cget("foreground"))) != (speed, sc):
             self.speed.config(text=speed, foreground=sc)
         qs = getattr(self.app, "quick", None)  # the live keys' recordings (orange: full, old ones thrown away)
         used = qs.used_mb() if qs is not None else 0.0
         live = tr("ps.live_used", used=f"{used:,.0f}", limit=f"{cfg['live_mb']:,}")
-        lc = ORANGE if used >= cfg["live_mb"] * 0.98 else "#222"
+        lc = ORANGE if used >= cfg["live_mb"] * 0.98 else look.DARK_TEXT
         if (self.live_used.cget("text"), str(self.live_used.cget("foreground"))) != (live, lc):
             self.live_used.config(text=live, foreground=lc)
 

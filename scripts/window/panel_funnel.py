@@ -7,6 +7,7 @@ from tkinter import ttk
 from files.lang import tr
 from notes.funnel import funnel_reversed, gate_ticks
 from files.mathexpr import calc
+from window import look
 from window.widgets import Scrub, Tooltip, bad, good, grid_shown, leave_box, unchanged
 
 # Funnel panel: (setting, label, [(value, text, tooltip)])
@@ -88,7 +89,7 @@ class FunnelPanel:
         # arrows / wheel step one gate, dragging "Gate" steps both
         gates = [(e, var, lambda key=key: self.on_funnel_entry(key)) for key, (var, e) in self.funnel_entries.items()]
         Scrub(self, gates, GATE_STEPS, 1, 10 ** 7, label=lb)
-        self.funnel_ticks = ttk.Label(row, text=tr("unit.ticks"), foreground="#777")
+        self.funnel_ticks = ttk.Label(row, text=tr("unit.ticks"), foreground=look.HINT)
         self.funnel_ticks.pack(side="left")
         self.funnel_gate_tip = Tooltip(row, "")
         self.funnel_vary = tk.BooleanVar()
@@ -99,7 +100,7 @@ class FunnelPanel:
         Tooltip(vary, tr("panel_funnel.off_one_gate_for_the_whole"))
         radios(5, "change")
         radios(6, "follow")
-        self.funnel_info = ttk.Label(box, text="", foreground="#777", font=("Segoe UI", 8),
+        self.funnel_info = ttk.Label(box, text="", foreground=look.HINT, font=look.font(8),
                                      wraplength=int(300 * self.scale), justify="left")
         self.funnel_info.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(2, 0))
 

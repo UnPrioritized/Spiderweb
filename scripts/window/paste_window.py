@@ -9,6 +9,7 @@ from tkinter import ttk
 from files import clipboard
 from files import colour_list as CL
 from files.lang import tr
+from window import look
 
 
 class PasteWindow(tk.Toplevel):
@@ -27,13 +28,13 @@ class PasteWindow(tk.Toplevel):
         r.pack(fill="x")
         ttk.Label(r, text=tr("paste.intro")).pack(side="left")
         ttk.Button(r, text=tr("paste.from_clipboard"), command=self.from_clipboard).pack(side="right")
-        self.text = tk.Text(box, height=12, width=100, font=("Consolas", 9), wrap="none", undo=True)
+        self.text = tk.Text(box, height=12, width=100, font=look.mono(9), wrap="none", undo=True)
         self.text.pack(fill="x", pady=(4, 0))
-        self.text.tag_config("use", background="#bfe0ff")
-        self.text.tag_config("other", background="#e6e6e6")
-        self.text.tag_config("off", foreground="#aaa", overstrike=True)
+        self.text.tag_config("use", background=look.PASTE_USE)
+        self.text.tag_config("other", background=look.PASTE_OTHER)
+        self.text.tag_config("off", foreground=look.FAINTER_TEXT, overstrike=True)
         self.text.bind("<KeyRelease>", lambda e: self.read())
-        self.legend = ttk.Label(box, text="", foreground="#666")
+        self.legend = ttk.Label(box, text="", foreground=look.SOFT_TEXT)
         self.legend.pack(anchor="w", pady=(2, 8))
         self.found = ttk.LabelFrame(box, text="", padding=6)
         self.found.pack(fill="x")
@@ -105,7 +106,7 @@ class PasteWindow(tk.Toplevel):
             sw.pack(side="right")
             for c in found[:32]:
                 tk.Frame(sw, width=14, height=14, background="#" + c[3], highlightthickness=1,
-                         highlightbackground="#555").pack(side="left", padx=1)
+                         highlightbackground=look.OUTLINE_SOFT).pack(side="left", padx=1)
         slots = self.slots()
         grid = ttk.Frame(self.where)
         grid.pack(anchor="w")
@@ -114,20 +115,20 @@ class PasteWindow(tk.Toplevel):
             cell = ttk.Frame(grid)
             cell.pack(side="left", padx=2)
             c = slots.get(k)
-            cv = tk.Canvas(cell, width=32, height=24, background="#" + c[0] if c else "#f0f0f0",
-                           highlightthickness=1, highlightbackground="#555")
+            cv = tk.Canvas(cell, width=32, height=24, background="#" + c[0] if c else look.PASTE_EMPTY,
+                           highlightthickness=1, highlightbackground=look.OUTLINE_SOFT)
             cv.pack()
             used = c is not None and k < self.wanted
             if c is not None and not used:
-                cv.create_line(0, 0, 34, 26, fill="#999")
+                cv.create_line(0, 0, 34, 26, fill=look.FAINT_TEXT)
             ttk.Label(cell, text=(tr("paste.ch", n=chans[k]) if self.by == "channel" else str(k + 1)),
-                      foreground="#333" if used else "#999").pack()
+                      foreground=look.LABEL if used else look.FAINT_TEXT).pack()
         note = (tr("paste.ch10_left") if self.by == "channel" and not self.use10 else "")
         alpha = {c[1] for c in slots.values() if c[1]}
         if alpha:
             note += ("  " if note else "") + tr("paste.alpha", a="/".join(sorted(alpha)))
         if note:
-            ttk.Label(self.where, text=note, foreground="#666").pack(anchor="w", pady=(4, 0))
+            ttk.Label(self.where, text=note, foreground=look.SOFT_TEXT).pack(anchor="w", pady=(4, 0))
         self.use_btn.config(state="normal" if slots else "disabled")
 
     def use(self):

@@ -7,6 +7,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.fonts import DEFAULT_FONT, WEIGHTS
 from notes.text import TEXT_DEFAULTS, build, restyle, shown_size, text_axes, text_font, with_arial
+from window import look
 from window.font_dialog import FontDialog
 from window.widgets import Scrub, Tooltip, bad, good, leave_box
 
@@ -47,7 +48,7 @@ class TextPanel:
         self.text_align = tk.StringVar(value="left")
         self.font_dialog = None
 
-        ttk.Label(box, text=tr("panel_text.text"), font=("Segoe UI", 9, "bold")).grid(row=0, column=0, columnspan=2,
+        ttk.Label(box, text=tr("panel_text.text"), font=look.font(9, "bold")).grid(row=0, column=0, columnspan=2,
                                                                                     sticky="w")
         ttk.Label(box, text=tr("panel_text.font")).grid(row=1, column=0, sticky="w", pady=1)
         self.font_btn = ttk.Button(box, text=tr("panel_text.text_2", font=DEFAULT_FONT), command=self.open_font_dialog)
@@ -68,7 +69,7 @@ class TextPanel:
             Scrub(self, [(e, self.text_vars[key], lambda key=key: self.on_text_entry(key))], STEPS[key], lo, hi,
                   label=lb)
             if unit:
-                ttk.Label(row, text=unit, foreground="#777").pack(side="left", padx=(3, 0))
+                ttk.Label(row, text=unit, foreground=look.HINT).pack(side="left", padx=(3, 0))
             if key in TIPS:
                 Tooltip(e, TIPS[key])
             if key == "size":
@@ -100,7 +101,7 @@ class TextPanel:
                                     command=lambda: self.set_text_setting({"align": self.text_align.get()})
                                     ).pack(side="left", padx=(0, 1))
                 r += 1
-        self.text_info = ttk.Label(box, text="", foreground="#777", font=("Segoe UI", 8),
+        self.text_info = ttk.Label(box, text="", foreground=look.HINT, font=look.font(8),
                                    wraplength=int(300 * self.scale), justify="left")
         self.text_info.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(2, 0))
 

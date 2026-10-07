@@ -17,6 +17,7 @@ from files.safefile import write_text
 from files.snap import snap_beats, snap_text
 from notes.chop import (CHOP_DEFAULTS, MAX_STEPS, RHYTHMS, clean_chop, clean_pieces, rhythm, step_ticks, switched,
                         too_many, top)
+from window import look
 from window.snap_picker import SnapPicker
 from window.tool_window import ORANGE, ToolWindow
 from window.widgets import Scrub, Tooltip, bad, good
@@ -60,8 +61,8 @@ class RhythmStrip(tk.Canvas):
 
     def __init__(self, parent, scale, changed):
         self.w, self.h = round(360 * scale), round(90 * scale)
-        super().__init__(parent, width=self.w, height=self.h, background="white", highlightthickness=1,
-                         highlightbackground="#bbb", cursor="crosshair")
+        super().__init__(parent, width=self.w, height=self.h, background=look.CHART_BG, highlightthickness=1,
+                         highlightbackground=look.CHOP_BORDER, cursor="crosshair")
         self.changed, self.steps, self.pieces, self.cells, self.drag = changed, 1, [], 4, None
         self.fixed, self.erased = False, False  # (velocities 1..127 instead of % of the note)
         self.bind("<ButtonPress-1>", self.press)
@@ -98,20 +99,20 @@ class RhythmStrip(tk.Canvas):
         for i in range(1, n):
             x = self.x(i / self.cells)
             strong = i % self.cells == 0
-            self.create_line(x, 0, x, self.h, fill="#bbb" if strong else "#e8e8e8")
+            self.create_line(x, 0, x, self.h, fill=look.CHOP_GRID_STRONG if strong else look.CHOP_GRID)
         if not self.fixed:  # (the note's own velocity)
             y = self.vel_y(100)
-            self.create_line(0, y, self.w, y, fill="#ddd", dash=(2, 3))
+            self.create_line(0, y, self.w, y, fill=look.CHOP_MIDDLE, dash=(2, 3))
         for s, ln, v in self.pieces:
             self.create_rectangle(self.x(s) + 1, self.vel_y(v), self.x(s + ln) - 1, self.h - 1, fill=ORANGE,
-                                  outline="#b06d00")
+                                  outline=look.CHOP_MARK)
 
     def number(self, lo, hi, v):
         """The velocity being dragged, written over its piece (inside it near the top when there's no room)."""
         x, y = (self.x(lo) + self.x(hi)) / 2, self.vel_y(v)
         text = fmt(v) if self.fixed else tr("chop.percent", v=fmt(v))
         room = y > 14
-        self.create_text(x, y - 1 if room else y + 2, text=text, anchor="s" if room else "n", fill="#333")
+        self.create_text(x, y - 1 if room else y + 2, text=text, anchor="s" if room else "n", fill=look.LABEL)
 
     def piece_at(self, x):
         s = self.step_at(x)
@@ -148,7 +149,7 @@ class RhythmStrip(tk.Canvas):
         lo = min(lo, hi - cell)
         self.draw()
         self.create_rectangle(self.x(lo) + 1, self.vel_y(v), self.x(hi) - 1, self.h - 1, fill="",
-                              outline="#b06d00", dash=(3, 2))
+                              outline=look.CHOP_MARK, dash=(3, 2))
         self.number(lo, hi, v)
         self.drag = ("new", a, lo, hi, v)
 
@@ -245,7 +246,7 @@ class ChopWindow(ToolWindow):
         self.snap_picker = SnapPicker(self.app, row, self.snap)
         self.snap_picker.button.pack(side="left")
         Tooltip(self.snap_picker.button, tr("chop.tip_step_length"))
-        self.ticks_text = ttk.Label(row, text="", foreground="#777")
+        self.ticks_text = ttk.Label(row, text="", foreground=look.HINT)
         self.ticks_text.pack(side="left", padx=(6, 0))
         self.snap.trace_add("write", lambda *_: self.on_snap())
 
@@ -265,7 +266,7 @@ class ChopWindow(ToolWindow):
         self.vel_entry.bind("<Return>", lambda e: (self.on_vel(), "break")[1])
         self.vel_entry.bind("<FocusOut>", lambda e: self.on_vel())
         Scrub(self.app, [(self.vel_entry, self.vel_var, lambda: self.on_vel(False))], (1, 10, 0.1), 0, 100, label=lb)
-        ttk.Label(row, text=tr("unit.percent"), foreground="#777").pack(side="left", padx=(5, 0))
+        ttk.Label(row, text=tr("unit.percent"), foreground=look.HINT).pack(side="left", padx=(5, 0))
         Tooltip(self.vel_entry, tr("chop.tip_velocity"))
 
         self.abs = tk.BooleanVar()
@@ -274,7 +275,7 @@ class ChopWindow(ToolWindow):
         b.grid(row=8, column=0, columnspan=2, sticky="w", pady=(6, 0))
         Tooltip(b, tr("chop.tip_absolute"))
 
-        self.info = ttk.Label(box, text="", foreground="#777")
+        self.info = ttk.Label(box, text="", foreground=look.HINT)
         self.info.grid(row=9, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         row = ttk.Frame(box)
@@ -446,7 +447,7 @@ class ChopWindow(ToolWindow):
         stuck = any(too_many(n, cl, app.ppq) for n in plain)
         empty = not self.cfg["pieces"]
         self.info.config(text=tr("chop.no_pieces") if empty else tr("chop.too_many") if stuck else
-                         tr("chop.count", before=before, after=after), foreground="#d00000" if stuck or empty else "#777")
+                         tr("chop.count", before=before, after=after), foreground=look.ERROR if stuck or empty else look.HINT)
 
 
 open_chop = ChopWindow.open

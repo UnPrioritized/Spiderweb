@@ -16,6 +16,7 @@ from notes.fx import with_velocity
 from notes.pattern import loop_points
 from roll.roll_shared import (CTRL, DRAFT_COLOR, SHIFT, SELECTED_COLOR, SLOT_COLORS, cached_path, fade,
                               grab_while_panning)
+from window import look
 
 LEVELS = (127, 96, 64, 32, 0)
 CURVE_STEPS = 48
@@ -102,7 +103,7 @@ def curve_mid(a, b, c):
 
 class VelocityPane(tk.Canvas):
     def __init__(self, parent, app, scale):
-        super().__init__(parent, bg="#ffffff", highlightthickness=0, cursor="crosshair")
+        super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
         self.app = app
         self.scale = scale
         self.top = int(7 * scale)  # gap above velocity 127
@@ -478,18 +479,18 @@ class VelocityPane(tk.Canvas):
         else:
             self.paint(w, h, kb)
             self._pic = pic
-        self.create_rectangle(0, 0, kb, h, fill="#f0f0f0", outline="")
-        self.create_line(kb - 1, 0, kb - 1, h, fill="#808080")
+        self.create_rectangle(0, 0, kb, h, fill=look.RULER_BG, outline="")
+        self.create_line(kb - 1, 0, kb - 1, h, fill=look.ROLL_EDGE)
         for v in LEVELS:
             y = min(max(self.v2y(v), 6 * self.scale), h - 6 * self.scale)
-            self.create_text(kb - 5, y, text=str(v), anchor="e", fill="#333", font=("Segoe UI", 7))
+            self.create_text(kb - 5, y, text=str(v), anchor="e", fill=look.LABEL, font=look.font(7))
         ed = self.edit
         lw = max(1, round(self.scale))
         cv = ed.get("curve") if ed else None
         if cv:
             self.draw_curve_line(*cv, lw, kind=self.kind())
         elif ed and len(ed["trail"]) >= 2:
-            self.create_line(*[c for b, y in ed["trail"] for c in (roll.t2x(b), y)], fill="#d00000", width=lw)
+            self.create_line(*[c for b, y in ed["trail"] for c in (roll.t2x(b), y)], fill=look.CHART_LINE, width=lw)
         cv = None if ed else self.live_curve()
         if cv:
             self.draw_curve_line(cv["a"], cv["b"], cv["c"], lw, kind=cv["kind"])
@@ -502,7 +503,7 @@ class VelocityPane(tk.Canvas):
             return
         x = round(roll.t2x(self.app.playhead))
         if roll.kb_w <= x <= self.winfo_width():
-            self.create_line(x, 0, x, self.winfo_height(), fill="#0a50e0", width=max(1, round(self.scale)),
+            self.create_line(x, 0, x, self.winfo_height(), fill=look.PLAY_LINE, width=max(1, round(self.scale)),
                              tags="playhead")
 
     def draw_curve_line(self, a, b, c, lw, kind="curve"):
@@ -512,16 +513,16 @@ class VelocityPane(tk.Canvas):
         pts = self.shape_env(kind, a, b, c, 0)[1:-1]
         if len(pts) < 2:
             return
-        self.create_line(*[q for b_, v in pts for q in (roll.t2x(b_), self.v2y(v))], fill="#d00000", width=lw)
+        self.create_line(*[q for b_, v in pts for q in (roll.t2x(b_), self.v2y(v))], fill=look.CHART_LINE, width=lw)
         if a[0] != b[0]:
             r = 4 * self.scale
             if bend:
                 m = curve_mid(a, b, c)
                 x, y = roll.t2x(m[0]), self.v2y(m[1])
-                self.create_oval(x - r, y - r, x + r, y + r, fill="#ffffff", outline="#d00000", width=lw)
+                self.create_oval(x - r, y - r, x + r, y + r, fill=look.CHART_POINT, outline=look.CHART_LINE, width=lw)
             for b_, v in (a, b):
                 x, y = roll.t2x(b_), self.v2y(v)
-                self.create_rectangle(x - r, y - r, x + r, y + r, fill="#ffffff", outline="#d00000", width=lw)
+                self.create_rectangle(x - r, y - r, x + r, y + r, fill=look.CHART_POINT, outline=look.CHART_LINE, width=lw)
 
     def bars(self, w, kb):
         """Visible notes -> {(x, layer): top y} for the bars and {(y, x0, x1, layer)} for the gate caps."""
@@ -577,15 +578,15 @@ class VelocityPane(tk.Canvas):
 
         fills = [px(f) for f, _ in LAYERS]
         borders = [px(b) for _, b in LAYERS]
-        row_color = {self.v2y(v): "#d3dff0" for v in (96, 64, 32)}
-        row_color[self.v2y(127)] = row_color[self.v2y(0)] = "#9fb2cf"
-        row_color[h - 1] = "#808080"
+        row_color = {self.v2y(v): look.CHART_GRID for v in (96, 64, 32)}
+        row_color[self.v2y(127)] = row_color[self.v2y(0)] = look.CHART_GRID_STRONG
+        row_color[h - 1] = look.ROLL_EDGE
         cols = [(int(x) - kb, px(c)) for x, c in self.app.roll.grid_cols(w) if 0 <= int(x) - kb < iw]
 
         rows = {}  # row colour -> the current row: that colour, grid lines, and every bar started so far
-        for color in {"#ffffff", *row_color.values()}:
+        for color in {look.ROLL_BG, *row_color.values()}:
             line = bytearray(px(color) * iw)
-            if color != "#808080":
+            if color != look.ROLL_EDGE:
                 for x, c in cols:
                     line[x * 3:x * 3 + 3] = c
             rows[color] = line
@@ -606,7 +607,7 @@ class VelocityPane(tk.Canvas):
                     active[x] = layer
                     for line in rows.values():
                         line[x * 3:x * 3 + 3] = fills[layer]
-            row = bytearray(rows[row_color.get(y, "#ffffff")])
+            row = bytearray(rows[row_color.get(y, look.ROLL_BG)])
             for x, layer in new:
                 if active[x] == layer:
                     row[x * 3:x * 3 + 3] = borders[layer]  # dark top of the bar

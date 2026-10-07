@@ -19,7 +19,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import SPAM_FILLS, gate_ticks, range_gates
 from notes.gaterange import DIRS, STRAIGHT, clean_range, gate_steps, steps_of
-from window import big_ask
+from window import big_ask, look
 from window.panel_funnel import GATE_STEPS
 from window.widgets import LocalUndo, Scrub, Tooltip
 
@@ -32,8 +32,8 @@ PRESETS = [("range_window.straight", STRAIGHT), ("range_window.short_longer", _p
            ("range_window.long_longer", _power(0.5)), ("range_window.hill", [[0, 0], [0.5, 1], [1, 0]]),
            ("range_window.valley", [[0, 1], [0.5, 0], [1, 1]])]
 U_SNAP, Y_SNAP = 1 / 40, 1 / 20  # dragging moves points in these steps (Shift = free)
-OFF_COLOR = "#b0b0b0"  # the graph while the Range is off
-BAR, BAR_HOT, NONE = "#4a90e2", "#1f5fb0", "#e0503c"  # notes per gate: bars, the one pointed at, gates with none
+OFF_COLOR = look.CHART_OFF  # the graph while the Range is off
+BAR, BAR_HOT, NONE = look.RANGE_BAR, look.RANGE_BAR_HOT, look.RANGE_NONE  # notes per gate: bars, the one pointed at, gates with none
 BAR_PX = 3  # bars at least this wide: more gates than fit share a bar
 
 
@@ -82,7 +82,7 @@ class RangeGraph(tk.Toplevel):
             Scrub(app, [(e, var, lambda k=key: self.on_gate(k))], GATE_STEPS, 1, 10 ** 7, label=lb)
             for w in (lb, e):
                 Tooltip(w, tr(f"range_window.{key}_tip"))
-        ttk.Label(row, text=tr("range_window.ticks_unit"), foreground="#777").pack(side="left")
+        ttk.Label(row, text=tr("range_window.ticks_unit"), foreground=look.HINT).pack(side="left")
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(4, 0))
         ttk.Label(row, text=tr("range_window.across")).pack(side="left")
@@ -99,11 +99,11 @@ class RangeGraph(tk.Toplevel):
         self.info.pack(anchor="w", pady=(6, 0))
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=4)
-        cv = self.canvas = tk.Canvas(row, width=self.w, height=self.h, bg="#ffffff", highlightthickness=1,
-                                     highlightbackground="#a0a0a0", cursor="crosshair")
+        cv = self.canvas = tk.Canvas(row, width=self.w, height=self.h, bg=look.CHART_BG, highlightthickness=1,
+                                     highlightbackground=look.CHART_BORDER, cursor="crosshair")
         cv.pack(side="left")
-        ch = self.chart = tk.Canvas(row, width=self.cw, height=self.h, bg="#ffffff", highlightthickness=1,
-                                    highlightbackground="#a0a0a0")
+        ch = self.chart = tk.Canvas(row, width=self.cw, height=self.h, bg=look.CHART_BG, highlightthickness=1,
+                                    highlightbackground=look.CHART_BORDER)
         ch.pack(side="left", padx=(6, 0))
         ch.bind("<Motion>", lambda e: self.on_bar_hover(e.x))
         ch.bind("<Leave>", lambda e: self.on_bar_hover(None))
@@ -114,7 +114,7 @@ class RangeGraph(tk.Toplevel):
             b = ttk.Button(row, text=tr(key), command=lambda pts=pts: self.set_points(pts))
             b.pack(side="left", padx=(0, 4))
             self.preset_btns.append(b)
-        ttk.Label(box, text=tr("range_window.hint"), foreground="#777", font=("Segoe UI", 8), justify="left",
+        ttk.Label(box, text=tr("range_window.hint"), foreground=look.HINT, font=look.font(8), justify="left",
                   wraplength=self.w + self.cw).pack(anchor="w", pady=(6, 0))
         row = ttk.Frame(box)
         row.pack(anchor="e", pady=(6, 0))
@@ -326,20 +326,20 @@ class RangeGraph(tk.Toplevel):
         a, b = self.gates()
         x0, x1, top, bot = self.u2x(0), self.u2x(1), self.y2c(1), self.y2c(0)
         for j in range(1, 4):
-            cv.create_line(self.u2x(j / 4), top, self.u2x(j / 4), bot, fill="#d3dff0")
+            cv.create_line(self.u2x(j / 4), top, self.u2x(j / 4), bot, fill=look.CHART_GRID)
         n = abs(b - a) + 1
         for k in range(5):  # gate labels at 0, 25 ... 100 % of the way
             y = k / 4
             g = a + (1 if b >= a else -1) * min(n - 1, int(y * n))
-            cv.create_line(x0, self.y2c(y), x1, self.y2c(y), fill="#d3dff0")
-            cv.create_text(x0 - 4 * s, self.y2c(y), text=tr("range_window.ticks", n=g), anchor="e", fill="#333",
-                           font=("Segoe UI", 7))
-        cv.create_rectangle(x0, top, x1, bot, outline="#808080")
+            cv.create_line(x0, self.y2c(y), x1, self.y2c(y), fill=look.CHART_GRID)
+            cv.create_text(x0 - 4 * s, self.y2c(y), text=tr("range_window.ticks", n=g), anchor="e", fill=look.LABEL,
+                           font=look.font(7))
+        cv.create_rectangle(x0, top, x1, bot, outline=look.CHART_FRAME)
         ends = {"time": ("left", "right"), "keys": ("low", "high"), "keys_down": ("high", "low")}[self.memo[0]["dir"]]
-        cv.create_text(x0, bot + 4 * s, text=tr(f"range_window.{ends[0]}"), anchor="nw", fill="#333",
-                       font=("Segoe UI", 7))
-        cv.create_text(x1, bot + 4 * s, text=tr(f"range_window.{ends[1]}"), anchor="ne", fill="#333",
-                       font=("Segoe UI", 7))
+        cv.create_text(x0, bot + 4 * s, text=tr(f"range_window.{ends[0]}"), anchor="nw", fill=look.LABEL,
+                       font=look.font(7))
+        cv.create_text(x1, bot + 4 * s, text=tr(f"range_window.{ends[1]}"), anchor="ne", fill=look.LABEL,
+                       font=look.font(7))
         # the whole-tick gates the notes get (pale steps)
         span = (b - a) or 1
         if on and len(steps_of(self.pts, a, b)[0]) <= 2000:
@@ -348,20 +348,20 @@ class RangeGraph(tk.Toplevel):
                 y = self.y2c((g - a) / span if b != a else 0)
                 line += [self.u2x(u0), y, self.u2x(u1), y]
             if len(line) >= 4:
-                cv.create_line(*line, fill="#f0b0b0", width=max(1, round(2 * s)))
+                cv.create_line(*line, fill=look.CHART_LINE_FAINT, width=max(1, round(2 * s)))
         lw = max(1, round(1.5 * s))
-        colour = "#d00000" if on else OFF_COLOR
+        colour = look.CHART_LINE if on else OFF_COLOR
         cv.create_line(*[c for u, y in self.pts for c in (self.u2x(u), self.y2c(y))], fill=colour, width=lw)
         r = 4 * s
         for i, (u, y) in enumerate(self.pts):
             x, yy = self.u2x(u), self.y2c(y)
             shape = cv.create_rectangle if i in (0, len(self.pts) - 1) else cv.create_oval
-            shape(x - r, yy - r, x + r, yy + r, fill="#ffffff", outline=colour, width=lw)
+            shape(x - r, yy - r, x + r, yy + r, fill=look.CHART_POINT, outline=colour, width=lw)
         at = self.pts[self.drag] if self.drag is not None else self.hover
         if at is not None and on:
             g = a + (1 if b >= a else -1) * min(n - 1, int(float(at[1]) * n))
             cv.create_text(x1 - 4 * s, top + 4 * s, text=tr("range_window.at", at=fmt(round(at[0] * 100, 1)), n=g),
-                           anchor="ne", fill="#0a50e0", font=("Segoe UI", 8))
+                           anchor="ne", fill=look.VALUE, font=look.font(8))
 
     def chart_bins(self):
         """(gates per bar, notes in each bar, plot left, plot width)."""
@@ -376,8 +376,8 @@ class RangeGraph(tk.Toplevel):
         ch, s = self.chart, self.s
         ch.delete("all")
         top, bot = int(22 * s), self.h - self.mb
-        ch.create_text(int(6 * s), int(4 * s), text=tr("range_window.spread"), anchor="nw", fill="#333",
-                       font=("Segoe UI", 8))
+        ch.create_text(int(6 * s), int(4 * s), text=tr("range_window.spread"), anchor="nw", fill=look.LABEL,
+                       font=look.font(8))
         if self.counts is None:
             ch.create_rectangle(int(40 * s), top, self.cw - int(8 * s), bot, outline=OFF_COLOR)
             return
@@ -387,8 +387,8 @@ class RangeGraph(tk.Toplevel):
         most = max(1, int(bins.max()))
         for v in sorted({0, most, most // 2} if most >= 2 else {0, most}):
             y = bot - v / most * (bot - top)
-            ch.create_line(left, y, left + width, y, fill="#e4e4e4")
-            ch.create_text(left - 4 * s, y, text=str(v), anchor="e", fill="#333", font=("Segoe UI", 7))
+            ch.create_line(left, y, left + width, y, fill=look.CHART_BAND)
+            ch.create_text(left - 4 * s, y, text=str(v), anchor="e", fill=look.LABEL, font=look.font(7))
         bw = width / len(bins)
         gap = 1 if bw >= 4 else 0
         for i, v in enumerate(bins.tolist()):
@@ -400,20 +400,20 @@ class RangeGraph(tk.Toplevel):
             else:
                 ch.create_rectangle(x0, bot - max(2, round(3 * s)), x0 + bw - gap, bot, width=0,
                                     fill=BAR_HOT if hot else NONE)
-        ch.create_line(left, bot, left + width, bot, fill="#808080")
+        ch.create_line(left, bot, left + width, bot, fill=look.CHART_FRAME)
         marks = min(len(bins), 5)  # gate numbers under a few bars, both ends included
         for k in range(marks):
             i = round(k * (len(bins) - 1) / max(1, marks - 1))
             anchor = "nw" if k == 0 and marks > 1 else "ne" if k == marks - 1 and marks > 1 else "n"
             x = left + i * bw + (0 if anchor == "nw" else bw if anchor == "ne" else bw / 2)
-            ch.create_text(x, bot + 4 * s, text=str(a + sign * i * per), anchor=anchor, fill="#333",
-                           font=("Segoe UI", 7))
+            ch.create_text(x, bot + 4 * s, text=str(a + sign * i * per), anchor=anchor, fill=look.LABEL,
+                           font=look.font(7))
         if self.bar_hover is not None and self.bar_hover < len(bins):
             i = self.bar_hover
             g0, g1 = a + sign * i * per, a + sign * min(len(self.counts) - 1, (i + 1) * per - 1)
             text = (tr("range_window.spread_at", g=g0, n=int(bins[i])) if g0 == g1 else
                     tr("range_window.spread_at_many", g0=g0, g1=g1, n=int(bins[i])))
-            ch.create_text(self.cw - 6 * s, int(4 * s), text=text, anchor="ne", fill="#0a50e0", font=("Segoe UI", 8))
+            ch.create_text(self.cw - 6 * s, int(4 * s), text=text, anchor="ne", fill=look.VALUE, font=look.font(8))
 
     def on_bar_hover(self, x):
         self.bar_hover = None

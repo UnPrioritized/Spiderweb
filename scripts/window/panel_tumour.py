@@ -6,6 +6,7 @@ from tkinter import ttk
 from files.lang import tr
 from notes.joined import shown_tumour
 from notes.tumour import LINE_KINDS
+from window import look
 from window.tumour_window import SHAPE_CHOICES, TumourWindow
 from window.widgets import Tooltip
 
@@ -21,7 +22,7 @@ class TumourPanel:
         self.tumour_btn = ttk.Button(box, text=tr("panel_tumour.tumours"), command=self.open_tumours)
         self.tumour_btn.pack(side="left")
         Tooltip(self.tumour_btn, tr("panel_tumour.bumps_along_the_line_opens_the"))
-        self.tumour_summary = ttk.Label(box, text="", foreground="#777")
+        self.tumour_summary = ttk.Label(box, text="", foreground=look.HINT)
         self.tumour_summary.pack(side="left", padx=(8, 0))
 
     def tumour_targets(self):

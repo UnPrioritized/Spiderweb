@@ -8,10 +8,11 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
+from window import look
 from window.widgets import Tooltip, placed
 
 START = tr("history.start")  # the first row: the oldest state still kept
-FUTURE = "#a0a0a0"  # steps undone (Ctrl+Y / clicking them brings them back; a new change drops them)
+FUTURE = look.FUTURE  # steps undone (Ctrl+Y / clicking them brings them back; a new change drops them)
 EDIT_NAMES = {"vel0": tr("history.velocity"), "vel1": tr("history.velocity"), "point": tr("history.move_a_point"),
               "smooth": tr("history.straighten"), "pattern": tr("history.pattern"),
               "shape": tr("history.shape"), "polygon": tr("history.polygon")}
@@ -45,12 +46,12 @@ class HistoryPanel:
         frame = ttk.Frame(parent)
         row = ttk.Frame(frame)
         row.pack(side="bottom", fill="x", pady=(4, 0))
-        ttk.Label(row, text=tr("history.click_a_step_to_go_back"), foreground="#777").pack(side="left")
+        ttk.Label(row, text=tr("history.click_a_step_to_go_back"), foreground=look.HINT).pack(side="left")
         b = ttk.Button(row, text=tr("history.dock") if parent is not self.history_box else tr("history.undock"),
                        command=self.toggle_history_dock)
         b.pack(side="right")
         Tooltip(b, tr("history.dock_tip"))
-        lst = tk.Listbox(frame, height=height, activestyle="none", exportselection=False, font=("Segoe UI", 9))
+        lst = tk.Listbox(frame, height=height, activestyle="none", exportselection=False, font=look.font(9))
         sb = ttk.Scrollbar(frame, orient="vertical", command=lst.yview)
         lst.config(yscrollcommand=sb.set)
         lst.pack(side="left", fill="both", expand=True)
@@ -82,7 +83,7 @@ class HistoryPanel:
         for i, name in enumerate(names):
             lst.insert("end", f"{name}")
             if i > now:
-                lst.itemconfig(i, foreground=FUTURE, selectforeground="#ffffff")
+                lst.itemconfig(i, foreground=FUTURE, selectforeground=look.FUTURE_PICKED)
         lst.selection_clear(0, "end")
         lst.selection_set(now)
         lst.yview_moveto(top)

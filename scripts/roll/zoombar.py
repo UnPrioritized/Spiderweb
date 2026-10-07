@@ -3,9 +3,10 @@
 import tkinter as tk
 
 from files.lang import tr
+from window import look
 from window.widgets import Tooltip
 
-TROUGH, THUMB, THUMB_HOT, GRIP = "#e4e4e4", "#b4b4b4", "#9a9a9a", "#707070"
+TROUGH, THUMB, THUMB_HOT, GRIP = look.TROUGH, look.THUMB, look.THUMB_HOT, look.GRIP
 
 
 class ZoomBar(tk.Canvas):
@@ -149,7 +150,7 @@ def add_zoom_bars(box, roll, widget=None):
             cell.pack(side=side)
             b = tk.Button(cell, text=tr("zoombar.plus" if text == "+" else "zoombar.minus"), bd=1, relief="flat",
                           bg=TROUGH, activebackground=THUMB, padx=0, pady=0, takefocus=False,
-                          font=("Segoe UI", 9, "bold"), repeatdelay=350, repeatinterval=90,
+                          font=look.font(9, "bold"), repeatdelay=350, repeatinterval=90,
                           command=lambda f=f, across=across: roll.zoom_step(across, f))
             b.pack(fill="both", expand=True)
             Tooltip(b, tr(f"zoombar.{tip}_{'time' if across else 'keys'}"))

@@ -25,6 +25,7 @@ from files.share import LONG_LINE, ShareError, drawing_line, made_by, read_drawi
 from files.speed import Photo
 from files.system import double_click_ms
 from roll.roll_shared import BOX_STILL, grab_while_panning, line_touches_box, mouse_trail, shown_points
+from window import look
 from window.help import open_help
 from window.formula_host import DrawerHost, formula_menu
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
@@ -44,15 +45,15 @@ TOOLS = [("select", tr("drawer.select"), "v"), ("erase", tr("drawer.eraser"), "e
          ("arc", tr("drawer.arc"), "a"), ("square", tr("drawer.square"), "s"), ("circle", tr("drawer.circle"), "o"),
          ("areas", tr("drawer.areas"), "b")]
 SHIFT, CTRL, ALT = 0x1, 0x4, 0x20000
-STROKE_COLOR = "#c0392b"  # (a stroke with an outline colour: that colour's dark shade)
+STROKE_COLOR = look.SHAPE_LINE  # (a stroke with an outline colour: that colour's dark shade)
 # Areas (areas.py) on the board: what Fill / Spam fill as normal, an area emptied by hand, the outside, the board
-AREA_NORMAL, AREA_EMPTY, OFF_BOARD, BOARD = "#d4d4d4", "#fbe4e4", "#f4f4f4", "#ffffff"
-WARN_COLOR = "#c06000"  # more colours than a shape can have (like the side panel's warning)
+AREA_NORMAL, AREA_EMPTY, OFF_BOARD, BOARD = look.AREA_NORMAL, look.AREA_EMPTY, look.DRAWER_BG, look.BOARD
+WARN_COLOR = look.WARN  # more colours than a shape can have (like the side panel's warning)
 AREA_FRAME = DRAWN_FRAME  # (the drawing's box as a custom shape, for finding its areas)
 STICK_RANK = {"point": 2, "cross": 1, "line": 0}
-STICK_COLOR = "#d000d0"  # the mark where a point sticks
-STICK_LINE = "#c070e0"  # the parts ending at that point (lighter, so the mark stands out on them)
-LIST_AWAY = "#d9d9d9"  # the shape picked in the library list while the keyboard is elsewhere (blue when it's there)
+STICK_COLOR = look.STICK
+STICK_LINE = look.STICK_LINE
+LIST_AWAY = look.LIST_AWAY  # the shape picked in the library list while the keyboard is elsewhere (blue when it's there)
 DOUBLE_CLICK_MS = double_click_ms()  # (the system's own setting)
 DRAW_TOOLS = ("line", "poly", "curve", "arc", "square", "circle")  # (the ones whose points stick)
 
@@ -243,7 +244,7 @@ def help_box(parent, text):
     """Grey help text that fills the rest of the panel; a scrollbar shows up when it doesn't fit.
     frame.set_text(text) changes it."""
     frame = ttk.Frame(parent)
-    t = tk.Text(frame, wrap="word", font=("Segoe UI", 8), foreground="#666", relief="flat", borderwidth=0,
+    t = tk.Text(frame, wrap="word", font=look.font(8), foreground=look.SOFT_TEXT, relief="flat", borderwidth=0,
                 highlightthickness=0, height=1, padx=0, pady=0, cursor="arrow", takefocus=0,
                 background=ttk.Style().lookup("TFrame", "background") or "SystemButtonFace")
     sb = ttk.Scrollbar(frame, orient="vertical", command=t.yview)
@@ -346,10 +347,10 @@ class Drawer(tk.Toplevel):
             x, y = 2 + n * (k + 2), 2
             on = n == self.area_pick
             c.create_rectangle(x, y, x + k, y + k, fill=area_color(n) if n else AREA_EMPTY,
-                               outline="#000000" if on else "#909090", width=2 if on else 1)
+                               outline=look.SWATCH_EDGE_ON if on else look.SWATCH_EDGE, width=2 if on else 1)
             if not n:  # Empty: a cross
-                c.create_line(x + 3, y + 3, x + k - 3, y + k - 3, fill="#c0392b")
-                c.create_line(x + k - 3, y + 3, x + 3, y + k - 3, fill="#c0392b")
+                c.create_line(x + 3, y + 3, x + k - 3, y + k - 3, fill=look.SHAPE_LINE)
+                c.create_line(x + k - 3, y + 3, x + 3, y + k - 3, fill=look.SHAPE_LINE)
 
     def swatch_at(self, x):
         n = int((x - 2) // (self.swatch + 2))
@@ -535,7 +536,7 @@ class Drawer(tk.Toplevel):
         if self.hover is not None:  # the area under the mouse: darker
             h = area == self.hover
             lut[h & tint] = (lut[h & tint] * 0.75).astype(np.uint8)
-            lut[h & ~tint] = rgb("#e8eef8")
+            lut[h & ~tint] = rgb(look.AREA_HOVER)
             tint[h] = True
         img = np.where(board[..., None], np.uint8(rgb(BOARD)), np.uint8(rgb(OFF_BOARD))).astype(np.uint8)
         img = np.where(tint[face][..., None], lut[face], img).astype(np.uint8)
@@ -568,7 +569,7 @@ class Drawer(tk.Toplevel):
         box.pack(fill="x")
         row = ttk.Frame(box)
         row.pack(fill="x")
-        self.listbox = tk.Listbox(row, height=12, activestyle="none", exportselection=False, font=("Segoe UI", 9))
+        self.listbox = tk.Listbox(row, height=12, activestyle="none", exportselection=False, font=look.font(9))
         sb = ttk.Scrollbar(row, orient="vertical", command=self.listbox.yview)
         self.listbox.config(yscrollcommand=sb.set)
         self.listbox.pack(side="left", fill="x", expand=True)
@@ -584,8 +585,8 @@ class Drawer(tk.Toplevel):
         lb.bind("<F2>", lambda e: (self.start_rename(), "break")[1])
         lb.bind("<FocusIn>", lambda e: lb.config(selectbackground="SystemHighlight",
                                                  selectforeground="SystemHighlightText"))
-        lb.bind("<FocusOut>", lambda e: lb.config(selectbackground=LIST_AWAY, selectforeground="black"))
-        lb.config(selectbackground=LIST_AWAY, selectforeground="black")
+        lb.bind("<FocusOut>", lambda e: lb.config(selectbackground=LIST_AWAY, selectforeground=look.LIST_AWAY_TEXT))
+        lb.config(selectbackground=LIST_AWAY, selectforeground=look.LIST_AWAY_TEXT)
         self.renaming = None  # the box a name is typed into while renaming (start_rename)
         self._slow_click = None
         btns = ttk.Frame(box)
@@ -613,7 +614,7 @@ class Drawer(tk.Toplevel):
         b = ttk.Button(btns, text=tr("drawer.import"), command=self.import_shared)
         b.pack(side="left", padx=4)
         Tooltip(b, tr("drawer.import_tip"))
-        self.pos_label = ttk.Label(side, text="", foreground="#555", font=("Segoe UI", 9))
+        self.pos_label = ttk.Label(side, text="", foreground=look.INFO, font=look.font(9))
         self.pos_label.pack(fill="x", pady=(8, 0))
         self.state_label = ttk.Label(side, text="", wraplength=int(285 * self.scale), justify="left")
         self.state_label.pack(fill="x", pady=(8, 0))
@@ -635,7 +636,7 @@ class Drawer(tk.Toplevel):
         self.side_help = help_box(side, "")  # the current tool's help (update_side_help)
         self.side_help.pack(fill="both", expand=True, pady=(8, 0))
 
-        self.canvas = tk.Canvas(self, bg="#f4f4f4", highlightthickness=0, cursor="crosshair")
+        self.canvas = tk.Canvas(self, bg=OFF_BOARD, highlightthickness=0, cursor="crosshair")
         self.canvas.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=(0, 6))
         c = self.canvas
         c.bind("<Configure>", lambda e: self.redraw())
@@ -2004,7 +2005,7 @@ class Drawer(tk.Toplevel):
         if img is not None:  # the board with the areas' colours
             c.create_image(0, 0, image=img, anchor="nw")
         else:
-            c.create_rectangle(x0, y0, x1, y1, fill="#ffffff", outline="")  # the board
+            c.create_rectangle(x0, y0, x1, y1, fill=BOARD, outline="")  # the board
         # Grid lines over the whole window (every line when they're far enough apart, else only the quarters)
         n = int(self.grid_n.get())
         k = self.px() / n  # pixels per grid square
@@ -2016,9 +2017,9 @@ class Drawer(tk.Toplevel):
                 i = math.ceil(lo * n / step) * step
                 while i <= hi * n:
                     if i * 2 == n:
-                        color = "#7f8fb0"  # the middle of the board: 0
+                        color = look.BOARD_MIDDLE  # the middle of the board: 0
                     else:
-                        color = "#9aa4b4" if i % major == 0 else "#dde3ec"
+                        color = look.BOARD_GRID_MAJOR if i % major == 0 else look.BOARD_GRID
                     if vertical:
                         x = self.to_screen(i / n, 0)[0]
                         c.create_line(x, 0, x, ch, fill=color)
@@ -2026,17 +2027,17 @@ class Drawer(tk.Toplevel):
                         y = self.to_screen(0, i / n)[1]
                         c.create_line(0, y, cw, y, fill=color)
                     i += step
-        c.create_rectangle(x0, y0, x1, y1, outline="#606060")
+        c.create_rectangle(x0, y0, x1, y1, outline=look.BOARD_EDGE)
         w = max(2, round(2 * self.scale))
         gaps = self.gaps()
         closed = any(not role_of(st) for st in self.strokes) and not gaps
         chosen = set(self.chosen())
         for i, st in enumerate(self.strokes):  # a stroke with formulas: the stroke as drawn (the origin path), dashed
             if st["kind"] != "ellipse" and has_formula(st):
-                self.draw_stroke(plain_stroke(st), "#e89a9a" if i in chosen else "#efc0c0", 1, dash=(6, 4))
+                self.draw_stroke(plain_stroke(st), look.ORIGIN_PICKED if i in chosen else look.ORIGIN, 1, dash=(6, 4))
         for i, st in enumerate(self.strokes):  # outline only: dotted; fill line: thin dashes
             role = role_of(st)
-            color = ("#ff8c1a" if i in chosen else SLOT_COLORS[(colour_of(st) - 1) % len(SLOT_COLORS)][1]
+            color = (look.STROKE_PICKED if i in chosen else SLOT_COLORS[(colour_of(st) - 1) % len(SLOT_COLORS)][1]
                      if colour_of(st) else STROKE_COLOR)
             if role == "cut":
                 self.draw_stroke(st, color, max(1, round(self.scale)), dash=(6, 4))  # (thin: Windows dots thick ones)
@@ -2050,38 +2051,38 @@ class Drawer(tk.Toplevel):
         sel = self.strokes[self.sel] if self.sel is not None else None
         curve = sel if sel and sel["kind"] == "curve" else None
         if curve:  # handle lines: blue on a white edge
-            for width, color in ((max(3, round(3.5 * s)), "#ffffff"), (max(1, round(1.5 * s)), "#0050d0")):
+            for width, color in ((max(3, round(3.5 * s)), look.HANDLE_FILL), (max(1, round(1.5 * s)), look.HANDLE)):
                 for a, b in handle_lines(curve["pts"]):
                     c.create_line(*self.to_screen(*a), *self.to_screen(*b), fill=color, width=width)
         if self.tool.get() == "select":  # the ends of strokes, ellipse corners: squares
             for i, j, u, v in self.handles():
                 if not self.is_pen_point(i, j):
                     x, y = self.to_screen(u, v)
-                    c.create_rectangle(x - h, y - h, x + h, y + h, fill="#ffffff",
-                                       outline="#c05a00" if i in chosen else "#0050d0")
+                    c.create_rectangle(x - h, y - h, x + h, y + h, fill=look.HANDLE_FILL,
+                                       outline=look.POINT_PICKED if i in chosen else look.HANDLE)
         if curve:  # its handle dots and anchors work with any tool
             for j, kind in pen_handles(curve["pts"]):
                 x, y = self.to_screen(*curve["pts"][j])
                 if kind == "ctrl":
                     q = r + 0.5 * s
-                    c.create_oval(x - q, y - q, x + q, y + q, fill="#0050d0", outline="#ffffff",
+                    c.create_oval(x - q, y - q, x + q, y + q, fill=look.HANDLE, outline=look.HANDLE_FILL,
                                   width=max(1, round(s)))
                 elif kind == "anchor":
                     q = r + 1.5 * s
-                    c.create_oval(x - q, y - q, x + q, y + q, fill="#ffffff", outline="#0050d0",
+                    c.create_oval(x - q, y - q, x + q, y + q, fill=look.HANDLE_FILL, outline=look.HANDLE,
                                   width=max(2, round(2 * s)))
         for u, v in (end for path in gaps for end in (path[0], path[-1])):  # open ends: red dots
             x, y = self.to_screen(u, v)
-            c.create_oval(x - r, y - r, x + r, y + r, fill="#ff2020", outline="#800000")
+            c.create_oval(x - r, y - r, x + r, y + r, fill=look.OPEN_END, outline=look.OPEN_END_EDGE)
         if self.draft:
-            self.draw_stroke(self.draft, "#0a8f0a", w)
+            self.draw_stroke(self.draft, look.DRAFT_LINE, w)
             self.draw_pieces(pieces, w + 1)
             self.draw_draft_points(r, h)
         if self.chosen() and self.tool.get() == "select":  # the kept select boxes
             for box in self.screen_boxes():
-                c.create_rectangle(*box, outline="#0050d0", width=max(1, round(s)), dash=(4, 2))
+                c.create_rectangle(*box, outline=look.HANDLE, width=max(1, round(s)), dash=(4, 2))
         if self.drag and self.drag[0] in ("boxsel", "erasebox"):  # a select / eraser box being dragged
-            c.create_rectangle(*self.drag[1:5], outline="#0050d0" if self.drag[0] == "boxsel" else "#d02020",
+            c.create_rectangle(*self.drag[1:5], outline=look.HANDLE if self.drag[0] == "boxsel" else look.ERASE_BOX,
                                width=max(1, round(s)), dash=(4, 2))
         if self.stuck:  # where the point sticks: a square on a point, an X on a crossing, a diamond on a line
             kind, (u, v), _ = self.stuck
@@ -2108,7 +2109,7 @@ class Drawer(tk.Toplevel):
             text = tr("drawer.open_ends_red_dots_fill_and")
         if self.dirty and self.strokes:
             text += tr("drawer.not_saved_yet")
-        self.state_label.config(text=text, foreground="#1d6b1d" if closed else "#9a4b00")
+        self.state_label.config(text=text, foreground=look.GOOD if closed else look.WARN_DARK)
 
     def draw_draft_points(self, r, h):
         """The points of the stroke being drawn: its ends, a polyline's / square's corners, an arc's three points
@@ -2126,9 +2127,9 @@ class Drawer(tk.Toplevel):
             x, y = self.to_screen(u, v)
             if st["kind"] == "arc" and j == 1 and len(pts) == 3:
                 q = r + 1.5 * s
-                c.create_oval(x - q, y - q, x + q, y + q, fill="#ffffff", outline="#0050d0", width=max(2, round(2 * s)))
+                c.create_oval(x - q, y - q, x + q, y + q, fill=look.HANDLE_FILL, outline=look.HANDLE, width=max(2, round(2 * s)))
             else:
-                c.create_rectangle(x - h, y - h, x + h, y + h, fill="#ffffff", outline="#0a8f0a",
+                c.create_rectangle(x - h, y - h, x + h, y + h, fill=look.HANDLE_FILL, outline=look.DRAFT_LINE,
                                    width=max(1, round(s)))
 
     def draw_stroke(self, st, color, width, dash=None):

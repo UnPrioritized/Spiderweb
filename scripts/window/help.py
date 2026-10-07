@@ -13,6 +13,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.about import BANNER, BANNER_HALF, HERE, LICENSE, VERSION, WEBSITE
+from window import look
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS, NEXT, SECTION_NAMES, SECTIONS, SEE, TOOL_TOPICS, TOPICS
 from window.updates import often_box
 
@@ -201,7 +202,7 @@ class TipPopup(tk.Toplevel):
             pass
         box = ttk.Frame(self, padding=(12, 10, 12, 10))
         box.pack(fill="both", expand=True)
-        self.head = ttk.Label(box, font=("Segoe UI", 10, "bold"))
+        self.head = ttk.Label(box, font=look.font(10, "bold"))
         self.head.pack(anchor="w")
         self.body = ttk.Label(box, wraplength=int(380 * s), justify="left")
         self.body.pack(anchor="w", pady=(4, 10))
@@ -266,8 +267,8 @@ class HelpWindow(tk.Toplevel):
         self.query = tk.StringVar()
         search = ttk.Entry(left, textvariable=self.query, width=30)
         search.pack(fill="x")
-        ttk.Label(left, text=tr("help.search_type_words_all_of_them"), foreground="#777",
-                  font=("Segoe UI", 8)).pack(anchor="w", pady=(2, 4))
+        ttk.Label(left, text=tr("help.search_type_words_all_of_them"), foreground=look.HINT,
+                  font=look.font(8)).pack(anchor="w", pady=(2, 4))
         self.query.trace_add("write", lambda *_: self.fill_list())
         search.bind("<Down>", lambda e: (self.tree.focus_set(), self.pick_first()))
         search.bind("<Return>", lambda e: self.pick_first())
@@ -287,27 +288,27 @@ class HelpWindow(tk.Toplevel):
         ttk.Checkbutton(bottom, text=tr("help.show_a_tip_the_first_time"), variable=app.tips.on,
                         command=app.schedule_autosave).pack(side="left")
         ttk.Button(bottom, text=tr("help.show_all_tips_again"), command=self.reset_tips).pack(side="left", padx=(8, 0))
-        self.reset_note = ttk.Label(bottom, text="", foreground="#1d6b1d")
+        self.reset_note = ttk.Label(bottom, text="", foreground=look.GOOD)
         self.reset_note.pack(side="left", padx=(6, 0))
-        version = ttk.Label(bottom, text=tr("help.spiderweb", VERSION=VERSION), foreground="#999", cursor="hand2")
+        version = ttk.Label(bottom, text=tr("help.spiderweb", VERSION=VERSION), foreground=look.FAINT_TEXT, cursor="hand2")
         version.pack(side="right")
         version.bind("<Button-1>", lambda e: self.open_topic("about"))
-        version.bind("<Enter>", lambda e: version.config(font=("Segoe UI", 9, "underline")))
-        version.bind("<Leave>", lambda e: version.config(font=("Segoe UI", 9)))
+        version.bind("<Enter>", lambda e: version.config(font=look.font(9, "underline")))
+        version.bind("<Leave>", lambda e: version.config(font=look.font(9)))
         text_box = ttk.Frame(right)
         text_box.pack(fill="both", expand=True)
         bg = ttk.Style().lookup("TFrame", "background") or "SystemButtonFace"
-        self.text = tk.Text(text_box, wrap="word", font=("Segoe UI", 10), relief="flat", borderwidth=0,
+        self.text = tk.Text(text_box, wrap="word", font=look.font(10), relief="flat", borderwidth=0,
                             highlightthickness=0, padx=10, pady=6, cursor="arrow", background=bg,
                             spacing2=2, spacing3=4)
         tsb = ttk.Scrollbar(text_box, orient="vertical", command=self.text.yview)
         self.text.configure(yscrollcommand=tsb.set)
         self.text.pack(side="left", fill="both", expand=True)
         tsb.pack(side="right", fill="y")
-        self.text.tag_configure("title", font=("Segoe UI", 14, "bold"), spacing3=8)
-        self.text.tag_configure("section", font=("Segoe UI", 9), foreground="#777")
-        self.text.tag_configure("hit", background="#fff08a")
-        self.text.tag_configure("link", foreground="#1a5fb4")
+        self.text.tag_configure("title", font=look.font(14, "bold"), spacing3=8)
+        self.text.tag_configure("section", font=look.font(9), foreground=look.HINT)
+        self.text.tag_configure("hit", background=look.SEARCH_HIT)
+        self.text.tag_configure("link", foreground=look.LINK)
         self.text.tag_configure("hover", underline=True)
         self.text.config(state="disabled")
         self.bind("<Escape>", lambda e: self.destroy())
@@ -472,7 +473,7 @@ class HelpWindow(tk.Toplevel):
         row.pack(anchor="w")
         ttk.Label(row, text=tr("updates.check_for_updates")).pack(side="left")
         often_box(row, updates).pack(side="left", padx=(6, 8))
-        status = ttk.Label(box, text="", foreground="#777")  # (under the row, so a long answer isn't cut off)
+        status = ttk.Label(box, text="", foreground=look.HINT)  # (under the row, so a long answer isn't cut off)
         status.pack(anchor="w", pady=(4, 0))
         ttk.Button(row, text=tr("updates.check_now"), takefocus=False, command=lambda: (
             status.config(text=tr("updates.checking")),

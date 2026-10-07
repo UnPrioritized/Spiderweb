@@ -42,12 +42,13 @@ from notes.hzbass import (BEND, ENVELOPES, FROM_MODES, FX, FX_START, LOOP_SHAPES
                           chains, group_count, legato_links, line_at,
                           loop_off, loop_on, loop_shape, sound_span, sustained, tones_span)
 from roll.roll_shared import BOX_STILL, CTRL, SELECT_CURSOR, SHIFT
+from window import look
 from window.widgets import Scrub
 
 # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
 REPEAT_MOST = 999  # Repeat every… [n] / [n]: the biggest number in either box
-REPEAT_LINE = "#18a048"  # where each repeat would start while the Repeat every… window is open
-PLAY_LINE = "#0a50e0"  # the preview's play line (as in the notes above)
+REPEAT_LINE = look.HZ_GREEN  # where each repeat would start while the Repeat every… window is open
+PLAY_LINE = look.PLAY_LINE  # the preview's play line (as in the notes above)
 FX_COLOR = {"volume": "#9b2d5f", "slant": "#8a3ff0", "groups": "#0a8f8f", "offpitch": "#d0189a", "noisy": "#8a5a14",
             "vibrato": "#00a5d8", "pitch": "#4b0082", "sweep": "#7f8c00", "wah": "#2c3e6b", "tremolo": "#e0607a",
             "octave": "#1d6b3a", "sine": "#b060c0", "square": "#606060", "saw": "#c0a000", "triangle": "#c05a30"}
@@ -80,9 +81,9 @@ def faint(colour, by=0.6):
 
 class FxPane:
     # the pane's colours (the synth window's dark look has its own: hz_synth.LOOK)
-    LOOK = {"bg": "white", "grid": "#e4e4e4", "outside": "#f1f1f1", "notes": "#c8d6f5", "hint": "#777",
-            "repeat": "#dcdcdc", "names": "#fafafa", "names_dim": 0.5, "text": "#999", "edge": "#707070",
-            "box": "#555", "point": "white"}
+    LOOK = {"bg": look.FX_BG, "grid": look.FX_GRID, "outside": look.FX_OUTSIDE, "notes": look.FX_NOTES,
+            "hint": look.HINT, "repeat": look.FX_REPEAT, "names": look.FX_NAMES, "names_dim": 0.5,
+            "text": look.FX_TEXT, "edge": look.FX_EDGE, "box": look.FX_BOX, "point": look.FX_POINT}
 
     def __init__(self, win):
         self.win, self.s = win, win.s
@@ -396,7 +397,7 @@ class FxPane:
         return faint(colour, by)
 
     def redraw(self):
-        c, win, s, look = self.canvas, self.win, self.s, self.LOOK
+        c, win, s, pal = self.canvas, self.win, self.s, self.LOOK
         c.delete("all")
         self.drawn = {}
         w, h, kb = c.winfo_width(), c.winfo_height(), win.kb_w
@@ -405,17 +406,17 @@ class FxPane:
         fx = win.fxl
         self.sel = {(n, i) for n, i in self.sel if n in fx and i < len(fx[n])}
         for v in (0.0, 0.5, 1.0):
-            c.create_line(kb, self.y_of(v), w, self.y_of(v), fill=look["grid"])
+            c.create_line(kb, self.y_of(v), w, self.y_of(v), fill=pal["grid"])
         if win.tones:  # before and after the notes (and the falls after them): grey
             x0, x1 = max(kb, win.x_of(0.0)), max(kb, win.x_of(sound_span(self.hz_now())))
             for a, b in ((kb, x0), (x1, w)):
                 if b > a:
-                    c.create_rectangle(a, 0, b, h, fill=look["outside"], outline="")
+                    c.create_rectangle(a, 0, b, h, fill=pal["outside"], outline="")
         for n in win.tones:  # where the notes are, faintly
             c.create_rectangle(max(kb, win.x_of(n["t"])), h - 3 * s, max(kb, win.x_of(n["t"] + n["len"])), h,
-                               fill=look["notes"], outline="")
+                               fill=pal["notes"], outline="")
         if not fx:
-            c.create_text((kb + w) / 2, h / 2, text=tr("hz.fx_hint"), fill=look["hint"], width=w - kb - 40 * s,
+            c.create_text((kb + w) / 2, h / 2, text=tr("hz.fx_hint"), fill=pal["hint"], width=w - kb - 40 * s,
                           justify="center")
         order = sorted(self.names(), key=lambda k: base(k) == self.active)  # (the highlighted one on top)
         trying = self.copies_of(self.trying, *self.trying_how) if self.trying else None
@@ -426,7 +427,7 @@ class FxPane:
         for _, o, _, _ in (self.copies(self.active) or () if self.active in win.loops else ()):  # where each
             x = win.x_of(o)  # repeat starts
             if x > kb:
-                c.create_line(x, 0, x, h, fill=look["repeat"], dash=(2, 3))
+                c.create_line(x, 0, x, h, fill=pal["repeat"], dash=(2, 3))
         if self.sustain(self.active) is not None:  # where each note ends: its fall starts there
             for k, _, _, _ in self.copies(self.active) or ():
                 x = win.x_of(self.release(self.active, k)[1])
@@ -449,7 +450,7 @@ class FxPane:
                 r = 3.5 * s
                 at = self.sustain(name)
                 for x, y, i, _ in self.points(name):
-                    fill = colour if (name, i) in self.sel else look["point"]
+                    fill = colour if (name, i) in self.sel else pal["point"]
                     if at is not None and abs(fx[name][i][0] - at) < 1e-9:  # the sustain point: a diamond
                         q = r * 1.5
                         c.create_polygon(x, y - q, x + q, y, x, y + q, x - q, y, fill=fill, outline=colour,
@@ -459,27 +460,27 @@ class FxPane:
                                        width=max(1, round(1.5 * s)))
                 r = 3 * s
                 for x, y, _, _ in self.handles(name):
-                    c.create_oval(x - r, y - r, x + r, y + r, fill=look["point"], outline=colour, width=1)
-        c.create_rectangle(0, 0, kb, h, fill=look["names"], outline="")  # the effects
+                    c.create_oval(x - r, y - r, x + r, y + r, fill=pal["point"], outline=colour, width=1)
+        c.create_rectangle(0, 0, kb, h, fill=pal["names"], outline="")  # the effects
         for i, name in enumerate(FX):
             y = 4 * s + i * self.row_h + self.row_h / 2
             lit = self.active in (None, name)
-            colour = self.colour(name) if lit else self.faint(self.colour(name), look["names_dim"])
+            colour = self.colour(name) if lit else self.faint(self.colour(name), pal["names_dim"])
             r = 3 * s
             on = name in fx and name not in win.off
             c.create_rectangle(4 * s, y - r, 4 * s + 2 * r, y + r, outline=colour, fill=colour if on else "")
             if name in win.off:  # (switched off: crossed out)
                 c.create_line(4 * s, y + r, 4 * s + 2 * r, y - r, fill=colour)
             c.create_text(8 * s + 2 * r, y, text=tr("hz.fx_" + name), anchor="w", fill=colour,
-                          font=("Segoe UI", 8, "bold" if self.active == name else "normal"))
+                          font=look.font(8, "bold" if self.active == name else "normal"))
         for v in (0.0, 0.5, 1.0):  # what the heights mean
-            c.create_text(w - 4 * s, self.y_of(v), text=f"{v * 100:.0f} %", anchor="e", fill=look["text"],
-                          font=("Segoe UI", 7))
-        c.create_line(kb, 0, kb, h, fill=look["edge"])
-        c.create_line(0, 0, w, 0, fill=look["edge"])
+            c.create_text(w - 4 * s, self.y_of(v), text=f"{v * 100:.0f} %", anchor="e", fill=pal["text"],
+                          font=look.font(7))
+        c.create_line(kb, 0, kb, h, fill=pal["edge"])
+        c.create_line(0, 0, w, 0, fill=pal["edge"])
         d = self.drag
         if d and d["kind"] == "box" and "x1" in d:
-            c.create_rectangle(d["x0"], d["y0"], d["x1"], d["y1"], outline=look["box"], dash=(3, 3))
+            c.create_rectangle(d["x0"], d["y0"], d["x1"], d["y1"], outline=pal["box"], dash=(3, 3))
         self.dots = None
         self.draw_dots()
 

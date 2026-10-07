@@ -12,6 +12,7 @@ from tkinter import messagebox, simpledialog, ttk
 from files import clipboard
 from files import colour_list as CL
 from files.lang import tr
+from window import look
 
 WS = re.compile(r"^[ \t]+|[ \t]+$", re.M)
 TAGS = [("{n}", "fmt.tag_n"), ("{n0}", "fmt.tag_n0"), ("{n:2}", "fmt.tag_n2"), ("{hex}", "fmt.tag_hex"),
@@ -60,7 +61,7 @@ class FormatWindow(tk.Toplevel):
         self.rename_btn.pack(side="left", padx=4)
         self.delete_btn = ttk.Button(r, text=tr("fmt.delete"), command=self.delete)
         self.delete_btn.pack(side="left")
-        ttk.Label(box, text=tr("fmt.built_in_note"), foreground="#777").pack(anchor="w", pady=(2, 8))
+        ttk.Label(box, text=tr("fmt.built_in_note"), foreground=look.HINT).pack(anchor="w", pady=(2, 8))
         r = self.lists_row = ttk.Frame(box)
         r.pack(fill="x")
         mid = ttk.Frame(box)
@@ -70,10 +71,10 @@ class FormatWindow(tk.Toplevel):
         self.texts = {}
         for k in ("start", "each", "end"):
             ttk.Label(self.edit, text=tr("fmt." + k)).pack(anchor="w")
-            t = tk.Text(self.edit, height=2, width=50, font=("Consolas", 10), undo=True)
+            t = tk.Text(self.edit, height=2, width=50, font=look.mono(10), undo=True)
             t.pack(fill="x", pady=(0, 6))
-            for name, kw in (("tag", dict(foreground="#1060c0")), ("plain", dict(foreground="#888", background="#eee")),
-                             ("bad", dict(foreground="white", background="#d33")), ("ws", dict(background="#cfe2ff"))):
+            for name, kw in (("tag", dict(foreground=look.FMT_TAG)), ("plain", dict(foreground=look.FMT_PLAIN, background=look.FMT_PLAIN_BG)),
+                             ("bad", dict(foreground=look.BAD_MARK_TEXT, background=look.BAD_MARK)), ("ws", dict(background=look.FMT_SPACE))):
                 t.tag_config(name, **kw)
             t.bind("<KeyRelease>", lambda e, k=k: self.typed(k))
             self.texts[k] = t
@@ -89,12 +90,12 @@ class FormatWindow(tk.Toplevel):
         ttk.Label(r, text="", width=15).pack(side="left")
         ttk.Radiobutton(r, text=tr("fmt.custom"), variable=self.sep, value="custom",
                         command=lambda: self.change("sep", "custom")).pack(side="left", padx=3)
-        self.custom = tk.Text(r, width=14, height=1, wrap="none", font=("Consolas", 10))
-        self.custom.tag_config("ws", background="#cfe2ff")
+        self.custom = tk.Text(r, width=14, height=1, wrap="none", font=look.mono(10))
+        self.custom.tag_config("ws", background=look.FMT_SPACE)
         self.custom.pack(side="left")
         self.custom.bind("<Return>", lambda e: "break")
         self.custom.bind("<KeyRelease>", lambda e: self.change("custom", self.custom.get("1.0", "end-1c")))
-        ttk.Label(self.edit, text=tr("fmt.codes"), foreground="#777", font=("Consolas", 9), justify="left").pack(
+        ttk.Label(self.edit, text=tr("fmt.codes"), foreground=look.HINT, font=look.mono(9), justify="left").pack(
             anchor="w", pady=(2, 0))
         r = ttk.Frame(self.edit)
         r.pack(fill="x", pady=(4, 0))
@@ -113,9 +114,9 @@ class FormatWindow(tk.Toplevel):
         for t, what in TAGS:
             rr = ttk.Frame(tags)
             rr.pack(fill="x", pady=1)
-            tk.Button(rr, text=t, font=("Consolas", 9), width=11, relief="groove",
+            tk.Button(rr, text=t, font=look.mono(9), width=11, relief="groove",
                       command=lambda t=t: self.put_tag(t)).pack(side="left")
-            ttk.Label(rr, text=tr(what), foreground="#555").pack(side="left", padx=4)
+            ttk.Label(rr, text=tr(what), foreground=look.INFO).pack(side="left", padx=4)
         rr = ttk.Frame(tags)
         rr.pack(fill="x", pady=(2, 0))
         ttk.Label(rr, text="{a} =", width=13, anchor="e").pack(side="left")
@@ -126,11 +127,11 @@ class FormatWindow(tk.Toplevel):
             anchor="w", pady=(6, 0))
 
         ttk.Label(box, text=tr("fmt.output")).pack(anchor="w", pady=(8, 2))
-        self.out = tk.Text(box, height=9, font=("Consolas", 10), background="#fafafa", wrap="none")
+        self.out = tk.Text(box, height=9, font=look.mono(10), background=look.FIELD_SOFT, wrap="none")
         self.out.pack(fill="both", expand=True)
-        self.out.tag_config("bad", foreground="white", background="#d33")
-        self.out.tag_config("ws", background="#cfe2ff")
-        self.status = ttk.Label(box, text="", foreground="#555")
+        self.out.tag_config("bad", foreground=look.BAD_MARK_TEXT, background=look.BAD_MARK)
+        self.out.tag_config("ws", background=look.FMT_SPACE)
+        self.status = ttk.Label(box, text="", foreground=look.INFO)
         self.status.pack(anchor="w", pady=(4, 0))
         r = ttk.Frame(box)
         r.pack(fill="x", pady=(6, 0))
@@ -311,8 +312,8 @@ class FormatWindow(tk.Toplevel):
         for m in WS.finditer(s):
             t.tag_add("ws", "1.0+%dc" % m.start(), "1.0+%dc" % m.end())
         for line in range(1, s.count("\n") + 1):
-            t.window_create("%d.end" % line, window=tk.Label(t, text="↵", fg="#8aa8d0", bg=t.cget("background"),
-                                                             bd=0, padx=0, pady=0, font=("Consolas", 9)))
+            t.window_create("%d.end" % line, window=tk.Label(t, text="↵", fg=look.FMT_RETURN, bg=t.cget("background"),
+                                                             bd=0, padx=0, pady=0, font=look.mono(9)))
 
     def tag_colours(self):
         t = self.texts["each"]
@@ -333,7 +334,7 @@ class FormatWindow(tk.Toplevel):
         for t in boxes:
             self.mark(t)
         ok = CL.unescape(self.fmt.get("custom", ""))[1]
-        self.custom.config(background="white" if ok else "#f6c0c0")
+        self.custom.config(background=look.FIELD if ok else look.ERROR_BG)
         pieces = CL.write(self.fmt, self.colours(), self.by(), self.use10())
         out = self.out
         out.config(state="normal")
@@ -345,7 +346,7 @@ class FormatWindow(tk.Toplevel):
         bad = CL.unknown(pieces)
         n = len(self.colours())
         self.status.config(text=tr("fmt.status", n=n, lists=len(self.fmt["lists"])) +
-                           (tr("fmt.status_bad", bad=bad) if bad else ""), foreground="#c33" if bad else "#555")
+                           (tr("fmt.status_bad", bad=bad) if bad else ""), foreground=look.FMT_BAD if bad else look.INFO)
 
     def copy(self):
         copy_colours(self, self.fmt, self.colours(), self.by(), self.use10())

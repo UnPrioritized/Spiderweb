@@ -37,6 +37,7 @@ from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, 
                               SLOT_COLORS, boxes_side, boxes_upright, draw_boxes, grab_while_panning,
                               grid_span, note_name)
 from roll.zoombar import add_zoom_bars
+from window import look
 from window.hz_effects import AMOUNT, FxPane
 from window.hz_live import LiveKeys
 from window.hz_preview import Preview
@@ -46,14 +47,14 @@ from window.snap_picker import SnapPicker
 from window.widgets import Scrub, StatusLine, Tooltip, bad, good, placed
 
 BLACK = (1, 3, 6, 8, 10)
-RED = "#e02020"
-PLAY_LINE = "#0a50e0"  # (the main piano roll's)
-GREY = "#8a8a8a"  # over what the preview hasn't made yet
-ORANGE = "#c06000"
-FAINT = "#f0a0a0"  # behind the red line: each repeat's own pitch
-GREEN = "#18a048"  # a note's exact tone (the middle of its row)
+RED = look.HZ_RED
+PLAY_LINE = look.PLAY_LINE  # (the main piano roll's)
+GREY = look.HZ_UNMADE  # over what the preview hasn't made yet
+ORANGE = look.WARN
+FAINT = look.HZ_FAINT  # behind the red line: each repeat's own pitch
+GREEN = look.HZ_GREEN  # a note's exact tone (the middle of its row)
 # Auto gates: the threshold around a note's tone, (fill, edge) when it gets fixed / mixed gates
-BAND_FIXED, BAND_MIXED = ("#8ee0a4", "#18a048"), ("#ffc27a", "#c06000")
+BAND_FIXED, BAND_MIXED = look.HZ_BAND_FIXED, look.HZ_BAND_MIXED
 GATE_MODES = ("auto", "mixed", "fixed")  # the Gates dropdown's choices, in order
 TUNE_ROW = 20  # px: rows at least this tall show the exact tone, and the red line can be dragged up / down
 TUNE_STICK = 3.0  # cents: a dragged tune this near the exact tone sticks to it (at any zoom; was 5 px, user)
@@ -92,7 +93,7 @@ def auto_box(app, parent, var, apply):
     lb.pack(side="left")
     f.entry = ttk.Entry(f, textvariable=var, width=4)
     f.entry.pack(side="left", padx=(4, 2))
-    ttk.Label(f, text=tr("panel_custom.hz_cents"), foreground="#777").pack(side="left", padx=(0, 4))
+    ttk.Label(f, text=tr("panel_custom.hz_cents"), foreground=look.HINT).pack(side="left", padx=(0, 4))
     f.entry.bind("<Return>", lambda e: apply())
     f.entry.bind("<FocusOut>", lambda e: no_spaces(var) or apply())
     Scrub(app, [(f.entry, var, apply)], (0.5, 5, 0.1), 0, AUTO_MOST, label=lb)
@@ -117,7 +118,7 @@ def ask_live(win, app, prompt, value, lo, hi, steps, on_change):
     var = tk.StringVar(value=fmt(value))
     entry = ttk.Entry(row, textvariable=var, width=9)
     entry.pack(side="left")
-    lb = ttk.Label(row, text=tr("panel_custom.hz_cents"), foreground="#777")
+    lb = ttk.Label(row, text=tr("panel_custom.hz_cents"), foreground=look.HINT)
     lb.pack(side="left", padx=(4, 0))
     Scrub(app, [(entry, var, None)], steps, lo, hi, label=lb, drag_box=True)
     got = {"value": None}
@@ -250,7 +251,7 @@ class HzWindow(tk.Toplevel):
         self.pitch_var = tk.StringVar(value="0")
         self.pitch_entry = ttk.Entry(f, textvariable=self.pitch_var, width=5)
         self.pitch_entry.pack(side="left", padx=4)
-        ttk.Label(f, text=tr("panel_custom.hz_cents"), foreground="#777").pack(side="left", padx=(0, 10))
+        ttk.Label(f, text=tr("panel_custom.hz_cents"), foreground=look.HINT).pack(side="left", padx=(0, 10))
         for w in (lb, self.pitch_entry):
             Tooltip(w, tr("panel_custom.hz_cents_tip"))
         self.pitch_entry.bind("<Return>", lambda e: self.on_pitch())
@@ -285,7 +286,7 @@ class HzWindow(tk.Toplevel):
                        takefocus=False)
         b.pack(side="left", padx=(4, 0))
         Tooltip(b, tr("hz.preview_settings_tip"))
-        self.preview_says = ttk.Label(f, text="", foreground="#555")
+        self.preview_says = ttk.Label(f, text="", foreground=look.INFO)
         self.preview_says.pack(side="left", padx=(6, 10))
         b = ttk.Button(f, text=tr("hz.synth"), command=lambda: open_synth(self), takefocus=False)
         b.pack(side="left", padx=(0, 10))
@@ -293,7 +294,7 @@ class HzWindow(tk.Toplevel):
         self.settings_window = None  # Preview settings… (preview_settings.py)
         self.synth_win = None  # the synth window (hz_synth.py)
         f = piece()
-        self.what = ttk.Label(f, text="", foreground="#555")
+        self.what = ttk.Label(f, text="", foreground=look.INFO)
         self.what.pack(side="left", padx=(0, 10))
         # the BPM changed since the Hz bass was made: said in red in the shape's place, with the button (user)
         self.stale = ttk.Label(f, text=tr("hz.stale"), foreground=RED)
@@ -316,13 +317,13 @@ class HzWindow(tk.Toplevel):
             f.bind("<Configure>", lambda e: self.after_idle(self.layout))
         bar.bind("<Configure>", lambda e: self.after_idle(self.layout))
         self.layout()
-        self.status = ttk.Label(self, text="", foreground="#555", padding=(8, 2, 8, 4))
+        self.status = ttk.Label(self, text="", foreground=look.INFO, padding=(8, 2, 8, 4))
         self.status.pack(side="bottom", fill="x")
         self.said_until = 0.0  # (say: a message stays until then)
         self.fx = FxPane(self)
         self.notes_box = tk.Frame(self)  # the notes with the main piano roll's scrollbars (zoombar.py)
         self.notes_box.pack(fill="both", expand=True)
-        c = self.canvas = tk.Canvas(self.notes_box, background="white", highlightthickness=0, takefocus=True)
+        c = self.canvas = tk.Canvas(self.notes_box, background=look.HZ_BG, highlightthickness=0, takefocus=True)
         self.scale, self.bars = s, ()
         add_zoom_bars(self.notes_box, self, c)
         self.on_fx()
@@ -629,8 +630,8 @@ class HzWindow(tk.Toplevel):
         for k in range(k_lo, k_hi + 1):  # rows
             y = self.y_of(k)
             if k % 12 in BLACK:
-                c.create_rectangle(kb, y, w, y + self.sy, fill="#eef1f8", outline="")
-            c.create_line(kb, y + self.sy, w, y + self.sy, fill="#c9c9c9" if k % 12 == 0 else "#ececec")
+                c.create_rectangle(kb, y, w, y + self.sy, fill=look.HZ_ROW_BLACK, outline="")
+            c.create_line(kb, y + self.sy, w, y + self.sy, fill=look.HZ_OCTAVE_LINE if k % 12 == 0 else look.HZ_ROW_LINE)
         beats, sb = self.app.beats, self.snap_beats()
         step = sb if sb and sb * self.sx >= 8 else 1.0
         if step * self.sx < 8:  # zoomed far out: bars, then every 2nd, 4th... bar
@@ -643,13 +644,13 @@ class HzWindow(tk.Toplevel):
             x = self.x_of(b)
             whole = abs(b - round(b)) < 1e-9
             bar = whole and round(b) % beats == 0
-            c.create_line(x, rh, x, h, fill="#707070" if bar else "#bdbdbd" if whole else "#ececec")
+            c.create_line(x, rh, x, h, fill=look.HZ_GRID_BAR if bar else look.HZ_GRID_BEAT if whole else look.HZ_GRID)
             n += 1
         sh = self.target()
         if sh is not None and not self.grow.get():  # the shape ends here: what's after it isn't used
             x = max(kb, self.x_of(shape_length(sh)))
-            c.create_rectangle(x, rh, w, h, fill="#d8d8d8", outline="", stipple="gray50")
-            c.create_line(x, rh, x, h, fill="#909090", dash=(4, 3))
+            c.create_rectangle(x, rh, w, h, fill=look.HZ_SHADE, outline="", stipple="gray50")
+            c.create_line(x, rh, x, h, fill=look.HZ_SHADE_EDGE, dash=(4, 3))
         for i, n in enumerate(self.tones):  # notes
             x0, x1, y = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
             fill, edge = SELECTED_COLOR if i in self.sel else SLOT_COLORS[0]
@@ -658,25 +659,25 @@ class HzWindow(tk.Toplevel):
             self.draw_line(w)
         for x, y, *_ in self.dots():
             r = 3.5 * s
-            c.create_oval(x - r, y - r, x + r, y + r, fill="white", outline=RED, width=max(1, round(1.5 * s)))
+            c.create_oval(x - r, y - r, x + r, y + r, fill=look.HZ_DOT, outline=RED, width=max(1, round(1.5 * s)))
         d = self.drag  # the Select box (with the ones kept when Ctrl+drag adds it), or the last ones (kept_box)
         boxes = d["more"] + [b for b in (self.box_area(),) if b] if d and d["kind"] == "box" else self.kept_box() or []
         draw_boxes(c, [self.box_rect(b) for b in boxes], kb, rh, s)
-        c.create_rectangle(0, 0, kb, h, fill="#fafafa", outline="", tags="frame")  # keys (the preview's grey
+        c.create_rectangle(0, 0, kb, h, fill=look.HZ_KEYS, outline="", tags="frame")  # keys (the preview's grey
         # goes under this: draw_preview)
         for k in range(k_lo, k_hi + 1):
             y = self.y_of(k)
             if k % 12 in BLACK:
-                c.create_rectangle(0, y, kb * 0.6, y + self.sy, fill="#303030", outline="")
+                c.create_rectangle(0, y, kb * 0.6, y + self.sy, fill=look.HZ_KEY_BLACK, outline="")
             if self.sy >= 4 * s:
-                c.create_line(0, y + self.sy, kb, y + self.sy, fill="#d0d0d0")
+                c.create_line(0, y + self.sy, kb, y + self.sy, fill=look.HZ_KEY_LINE)
         for k in range(k_lo, k_hi + 1):  # (the names after the keys, so small rows don't cover them)
             y = self.y_of(k)
             if k % 12 == 0 or (self.sy >= 15 * s and k % 12 not in BLACK):
-                c.create_text(kb - 3, y + self.sy / 2, text=note_name(k), anchor="e", fill="#222",
-                              font=("Segoe UI", 7, "bold" if k % 12 == 0 else "normal"))
-        c.create_line(kb, 0, kb, h, fill="#707070")
-        c.create_rectangle(0, 0, w, rh, fill="#f3f3f3", outline="")  # bar numbers
+                c.create_text(kb - 3, y + self.sy / 2, text=note_name(k), anchor="e", fill=look.HZ_KEY_TEXT,
+                              font=look.font(7, "bold" if k % 12 == 0 else "normal"))
+        c.create_line(kb, 0, kb, h, fill=look.HZ_EDGE)
+        c.create_rectangle(0, 0, w, rh, fill=look.HZ_RULER, outline="")  # bar numbers
         every = 1  # (zoomed far out: every 2nd, 4th... bar number, so they don't run into each other)
         while every * beats * self.sx < 40 * s:
             every *= 2
@@ -684,11 +685,11 @@ class HzWindow(tk.Toplevel):
         while n * beats <= self.beat_at(w):
             x = self.x_of(n * beats)
             if x >= kb:
-                c.create_text(x + 3, rh / 2, text=str(n + 1), anchor="w", fill="#333", font=("Segoe UI", 8))
+                c.create_text(x + 3, rh / 2, text=str(n + 1), anchor="w", fill=look.LABEL, font=look.font(8))
             n += every
-        c.create_line(0, rh, w, rh, fill="#707070")
+        c.create_line(0, rh, w, rh, fill=look.HZ_EDGE)
         if not self.can_place():
-            c.create_text((kb + w) / 2, (rh + h) / 2, text=tr("hz.hint_none"), fill="#777",
+            c.create_text((kb + w) / 2, (rh + h) / 2, text=tr("hz.hint_none"), fill=look.HINT,
                           width=w - kb - 40 * s, justify="center")
         self.show_status()
         self.fx.redraw()
@@ -2120,7 +2121,7 @@ class HzWindow(tk.Toplevel):
                               tags="preview")
             if c.find_withtag("frame"):
                 c.tag_lower("preview", "frame")
-        says, colour = "", "#555"
+        says, colour = "", look.INFO
         if on:
             vo = tr("hz.preview_voices", used=f"{p.voices_used:,}", limit=f"{self.app.hz_preview['voices']:,}")
             if p.loading():

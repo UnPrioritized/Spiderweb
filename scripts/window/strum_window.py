@@ -11,6 +11,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.strum import END_KNOB, LIMITS, STRUM_DEFAULTS, TIME_KNOB, VEL_KNOB, clean_strum
+from window import look
 from window.tool_window import GREEN, ORANGE, Knob, ToolWindow
 from window.widgets import Scrub, Tooltip, bad, good
 
@@ -38,7 +39,7 @@ class StrumWindow(ToolWindow):
             panel.grid(row=1, column=col, rowspan=2 if key == "start" else 1, sticky="new",
                        padx=(0, 10) if key == "start" else 0)
             for c, text in ((1, tr("strum.strength")), (2, tr("strum.tension"))):
-                ttk.Label(panel, text=text, foreground="#777", font="TkSmallCaptionFont").grid(row=0, column=c)
+                ttk.Label(panel, text=text, foreground=look.HINT, font="TkSmallCaptionFont").grid(row=0, column=c)
             for r, (strength, tension, label) in enumerate(rows, 1):
                 ttk.Label(panel, text=label).grid(row=r, column=0, sticky="e", padx=(0, 6))
                 self.dial(panel, r, 1, strength)

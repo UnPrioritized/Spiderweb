@@ -6,6 +6,7 @@ import math
 import tkinter as tk
 
 from roll.roll_shared import SELECT_CURSOR, SHIFT
+from window import look
 
 
 class CustomBox:
@@ -219,11 +220,11 @@ class CustomBox:
     def draw_custom_box(self, sh):
         """The box of the selected custom shape: dashed outline and corner squares to resize it."""
         corners = [(self.t2x(b), self.p2y(p)) for b, p in self.custom_corners(sh)]
-        self.create_polygon(*[c for pt in corners for c in pt], fill="", outline="#0050d0", dash=(4, 3))
+        self.create_polygon(*[c for pt in corners for c in pt], fill="", outline=look.HANDLE, dash=(4, 3))
         r, m = 4 * self.scale, 3 * self.scale
         for k, (x, y) in enumerate(corners):
             nx, ny = corners[(k + 1) % 4]
             mx, my = (x + nx) / 2, (y + ny) / 2  # the middle of each side: drag the side
-            self.create_rectangle(mx - m, my - m, mx + m, my + m, fill="#ffffff", outline="#0050d0")
+            self.create_rectangle(mx - m, my - m, mx + m, my + m, fill=look.HANDLE_FILL, outline=look.HANDLE)
         for x, y in corners:
-            self.create_rectangle(x - r, y - r, x + r, y + r, fill="#ffffff", outline="#0050d0", width=2)
+            self.create_rectangle(x - r, y - r, x + r, y + r, fill=look.HANDLE_FILL, outline=look.HANDLE, width=2)

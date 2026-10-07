@@ -14,6 +14,7 @@ from files.lang import tr
 from files.mathexpr import calc, formula, fmt
 from notes.joined import shown_tumour
 from notes.tumour import GRAPH_LIMIT, TUMOUR_DEFAULTS
+from window import look
 from window.panel_custom import GAP_COLOR
 from window.widgets import LocalUndo, Scrub, placed
 
@@ -62,8 +63,8 @@ class GraphWindow(tk.Toplevel):
         # the box's number is 0: the graph multiplies it, so it changes nothing (shown only then, user)
         self.zero_note = ttk.Label(box, text=tr("graph_window.box_is_zero", label=label), foreground=GAP_COLOR,
                                    wraplength=int(640 * s), justify="left")
-        self.canvas = tk.Canvas(box, width=self.w, height=self.h, bg="#ffffff", highlightthickness=1,
-                                highlightbackground="#a0a0a0", cursor="crosshair")
+        self.canvas = tk.Canvas(box, width=self.w, height=self.h, bg=look.CHART_BG, highlightthickness=1,
+                                highlightbackground=look.CHART_BORDER, cursor="crosshair")
         self.canvas.pack(pady=(4, 4))
         row = ttk.Frame(box)
         row.pack(fill="x")
@@ -98,9 +99,9 @@ class GraphWindow(tk.Toplevel):
         self.formula_box.pack(side="left", padx=(5, 4))
         self.formula_box.bind("<Return>", lambda e: (self.apply_formula(), "break")[1])
         ttk.Button(row, text=tr("graph_window.apply"), command=self.apply_formula).pack(side="left")
-        self.formula_note = ttk.Label(box, text=FORMULA_HINT, foreground="#777", font=("Segoe UI", 8))
+        self.formula_note = ttk.Label(box, text=FORMULA_HINT, foreground=look.HINT, font=look.font(8))
         self.formula_note.pack(anchor="w")
-        ttk.Label(box, text=HINT, foreground="#777", font=("Segoe UI", 8), justify="left").pack(anchor="w", pady=(6, 0))
+        ttk.Label(box, text=HINT, foreground=look.HINT, font=look.font(8), justify="left").pack(anchor="w", pady=(6, 0))
         row = ttk.Frame(box)
         row.pack(anchor="e", pady=(6, 0))
         ttk.Button(row, text=tr("graph_window.ok"), command=self.ok).pack(side="left")
@@ -197,10 +198,10 @@ class GraphWindow(tk.Toplevel):
         except (ValueError, ZeroDivisionError, OverflowError, TypeError) as e:
             msg = str(e) if isinstance(e, ValueError) else tr("graph_window.it_doesn_t_give_a_number")
             self.formula_box.config(style="Bad.TEntry")
-            self.formula_note.config(text=tr("graph_window.can_t_use_it", msg=msg), foreground="#d00000")
+            self.formula_note.config(text=tr("graph_window.can_t_use_it", msg=msg), foreground=look.ERROR)
             return
         self.formula_box.config(style="TEntry")
-        self.formula_note.config(text=FORMULA_HINT, foreground="#777")
+        self.formula_note.config(text=FORMULA_HINT, foreground=look.HINT)
         # (points on a straight stretch aren't needed)
         keep = [pts[0]] + [b for a, b, c in zip(pts, pts[1:], pts[2:])
                            if abs((b[1] - a[1]) - (c[1] - b[1])) > 1e-9] + [pts[-1]]
@@ -350,37 +351,37 @@ class GraphWindow(tk.Toplevel):
         r0, r1 = sorted((tm["start"], tm["end"]))
         for a, b in ((0.0, r0), (r1, 1.0)):
             if b - a > 1e-9:
-                cv.create_rectangle(self.u2x(a), y_top, self.u2x(b), y_bot, fill="#e4e4e4", outline="")
+                cv.create_rectangle(self.u2x(a), y_top, self.u2x(b), y_bot, fill=look.CHART_BAND, outline="")
         step = self.grid_step()
         for k in range(math.ceil(lo / step - 1e-9), math.floor(hi / step + 1e-9) + 1):
             v = round(k * step, 6)
             y = self.f2y(v / 100)
-            cv.create_line(x0, y, x1, y, fill="#9fb2cf" if v in (0, 100) else "#d3dff0")
-            cv.create_text(x0 - 4 * s, y, text=f"{fmt(v)} %", anchor="e", fill="#333", font=("Segoe UI", 7))
+            cv.create_line(x0, y, x1, y, fill=look.CHART_GRID_STRONG if v in (0, 100) else look.CHART_GRID)
+            cv.create_text(x0 - 4 * s, y, text=f"{fmt(v)} %", anchor="e", fill=look.LABEL, font=look.font(7))
         for j in range(1, 4):
             x = self.u2x(j / 4)
-            cv.create_line(x, y_top, x, y_bot, fill="#d3dff0")
-        cv.create_rectangle(x0, y_top, x1, y_bot, outline="#808080")
-        cv.create_text(x0, y_bot + 4 * s, text=tr("graph_window.line_start"), anchor="nw", fill="#333",
-                       font=("Segoe UI", 7))
-        cv.create_text(x1, y_bot + 4 * s, text=tr("graph_window.line_end"), anchor="ne", fill="#333",
-                       font=("Segoe UI", 7))
+            cv.create_line(x, y_top, x, y_bot, fill=look.CHART_GRID)
+        cv.create_rectangle(x0, y_top, x1, y_bot, outline=look.CHART_FRAME)
+        cv.create_text(x0, y_bot + 4 * s, text=tr("graph_window.line_start"), anchor="nw", fill=look.LABEL,
+                       font=look.font(7))
+        cv.create_text(x1, y_bot + 4 * s, text=tr("graph_window.line_end"), anchor="ne", fill=look.LABEL,
+                       font=look.font(7))
         if r0 > 1e-9 or r1 < 1 - 1e-9:
             cv.create_text((self.u2x(r0) + self.u2x(r1)) / 2, y_bot + 4 * s, text=tr("graph_window.tumour_range"),
                            anchor="n",
-                           fill="#777", font=("Segoe UI", 7))
+                           fill=look.HINT, font=look.font(7))
         lw = max(1, round(1.5 * s))
-        cv.create_line(*[c for u, f in self.pts for c in (self.u2x(u), self.f2y(f))], fill="#d00000", width=lw)
+        cv.create_line(*[c for u, f in self.pts for c in (self.u2x(u), self.f2y(f))], fill=look.CHART_LINE, width=lw)
         r = 4 * s
         for i, (u, f) in enumerate(self.pts):
             x, y = self.u2x(u), self.f2y(f)
             shape = cv.create_rectangle if i in (0, len(self.pts) - 1) else cv.create_oval
-            shape(x - r, y - r, x + r, y + r, fill="#ffffff", outline="#d00000", width=lw)
+            shape(x - r, y - r, x + r, y + r, fill=look.CHART_POINT, outline=look.CHART_LINE, width=lw)
         # what's under the mouse (or the point being dragged)
         at = self.pts[self.drag["i"]] if self.drag else self.hover
         if at is not None:
             text = tr("graph_window.at_of_the_line", at=fmt(round(at[0] * 100, 1)), value_text=self.value_text(at[1]))
-            cv.create_text(x1 - 4 * s, y_top + 4 * s, text=text, anchor="ne", fill="#0a50e0", font=("Segoe UI", 8))
+            cv.create_text(x1 - 4 * s, y_top + 4 * s, text=text, anchor="ne", fill=look.VALUE, font=look.font(8))
         name = self.label.lower()
         self.info.config(text=tr("graph_window.along_the_line_100_the_box", label=self.label,
                                  split=self.value_text(1).split('= ')[1])

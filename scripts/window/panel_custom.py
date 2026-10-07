@@ -9,6 +9,7 @@ from files.lang import tr
 from notes.areas import COLOURS
 from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, edge_gate, gap_lines,
                           gate_ticks, hz_gate, join_strokes, map_stroke, normalize_areas, normalize_strokes, open_paths)
+from window import look
 from window.drawer import Drawer, clean_name, library_names, load_drawing, save_shape, shape_stamp
 from window.panel_funnel import GATE_STEPS
 from files.mathexpr import calc, fmt
@@ -18,9 +19,9 @@ from window.hz_window import open_hz
 from window.range_window import open_range_graph
 from window.widgets import Scrub, Tooltip, bad, good, grid_shown, leave_box, unchanged
 
-GAP_COLOR = "#c06000"  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
+GAP_COLOR = look.WARN  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
 MISSING_MARK = "✕ "  # in the Shape box: a placed shape whose library shape was renamed or deleted (user, 2026-10-05)
-MISSING_COLOR = "#808080"
+MISSING_COLOR = look.MISSING_SHAPE
 FILL_CHOICES = [
     ("empty", tr("panel_custom.empty"), tr("panel_custom.just_the_outline_like_lines")),
     ("fill", tr("panel_custom.fill"), tr("panel_custom.one_long_note_per_key_inside")),
@@ -71,7 +72,7 @@ class CustomPanel:
         ttk.Button(row, text=tr("panel_custom.drawer"), command=self.open_drawer).pack(side="left", padx=(4, 0))
         # under the Shape box while a placed shape's library shape was renamed or deleted (not_in_library)
         self.missing_note = ttk.Label(box, text=tr("panel_custom.not_in_library"), foreground=GAP_COLOR,
-                                      font=("Segoe UI", 8), wraplength=int(300 * self.scale), justify="left")
+                                      font=look.font(8), wraplength=int(300 * self.scale), justify="left")
         row = self.custom_fill_row = ttk.Frame(box)
         row.pack(fill="x", pady=(4, 0))
         ttk.Label(row, text=tr("panel_custom.inside")).pack(side="left", anchor="n")
@@ -109,7 +110,7 @@ class CustomPanel:
         self.custom_rows.append((self.borders_box, dict(anchor="w", padx=(20, 0), pady=(1, 0))))
         Tooltip(self.borders_box, tr("panel_custom.borders_tip"))
         # more colours than a shape can have (outline and own fill count): the extra ones merged into the last
-        self.colours_warn = ttk.Label(opts, text="", foreground=GAP_COLOR, font=("Segoe UI", 8),
+        self.colours_warn = ttk.Label(opts, text="", foreground=GAP_COLOR, font=look.font(8),
                                       wraplength=int(HZ_WRAP * self.scale), justify="left")
         self.custom_rows.append((self.colours_warn, dict(anchor="w", padx=(20, 0))))
         g = self.gate_row = ttk.Frame(opts)
@@ -118,7 +119,7 @@ class CustomPanel:
         lb.pack(side="left")
         self.gate_entry = ttk.Entry(g, textvariable=self.gate_var, width=7)
         self.gate_entry.pack(side="left", padx=4)
-        ttk.Label(g, text=tr("panel_custom.ticks_enter_to_apply"), foreground="#777").pack(side="left")
+        ttk.Label(g, text=tr("panel_custom.ticks_enter_to_apply"), foreground=look.HINT).pack(side="left")
         self.gate_entry.bind("<Return>", lambda e: self.on_gate())
         leave_box(self, self.gate_entry, self.gate_var, self.on_gate)
         self._hz_ok = None  # the shapes skip_hz was OK'd for (not asked again while they stay selected)
@@ -142,10 +143,10 @@ class CustomPanel:
         self.hz_notes_btn = ttk.Button(h, text=tr("panel_custom.hz_notes"), command=lambda: open_hz(self))
         self.hz_notes_btn.pack(side="left", padx=(6, 0))
         Tooltip(self.hz_notes_btn, tr("panel_custom.hz_notes_tip"))
-        self.hz_info = ttk.Label(opts, text="", foreground=GAP_COLOR, font=("Segoe UI", 8),  # (short gates)
+        self.hz_info = ttk.Label(opts, text="", foreground=GAP_COLOR, font=look.font(8),  # (short gates)
                                  wraplength=int(HZ_WRAP * self.scale), justify="left")
         self.hz_stale = ttk.Frame(opts)  # the BPM changed since: its tone is off until it's updated
-        ttk.Label(self.hz_stale, text=tr("panel_custom.hz_stale"), foreground=GAP_COLOR, font=("Segoe UI", 8),
+        ttk.Label(self.hz_stale, text=tr("panel_custom.hz_stale"), foreground=GAP_COLOR, font=look.font(8),
                   wraplength=int(HZ_WRAP * self.scale), justify="left").pack(anchor="w")
         ttk.Button(self.hz_stale, text=tr("panel_custom.hz_update"), command=self.update_hz).pack(anchor="w", pady=(1, 2))
         for w in (self.hz_info, self.hz_stale):
@@ -178,7 +179,7 @@ class CustomPanel:
         self.edge_var = tk.StringVar()
         self.edge_entry = ttk.Entry(o, textvariable=self.edge_var, width=7)
         self.edge_entry.pack(side="left", padx=4)
-        ttk.Label(o, text=tr("panel_custom.edge_unit"), foreground="#777").pack(side="left")
+        ttk.Label(o, text=tr("panel_custom.edge_unit"), foreground=look.HINT).pack(side="left")
         for w in (lb, self.edge_entry):
             Tooltip(w, tr("panel_custom.edge_tip"))
         o = self.edge_mode_row = ttk.Frame(opts)
@@ -205,7 +206,7 @@ class CustomPanel:
                                           command=lambda: self.set_custom("union", not self.cancel_var.get()))
         self.custom_rows.append((self.cancel_box, dict(anchor="w", padx=(20, 0), pady=(2, 0))))
         Tooltip(self.cancel_box, CANCEL_TIP)
-        self.custom_info = ttk.Label(box, text="", foreground="#777", font=("Segoe UI", 8),
+        self.custom_info = ttk.Label(box, text="", foreground=look.HINT, font=look.font(8),
                                      wraplength=int(300 * self.scale), justify="left")
         self.custom_info.pack(fill="x", pady=(2, 0))
 

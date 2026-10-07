@@ -17,24 +17,25 @@ from notes.paths import KEYS
 from notes.sliced import moved_by, moved_mark
 from roll.roll_shared import (BLACK, DRAFT_COLOR, PIANO_88, PREVIEW_LIMIT, SELECTED_COLOR, SLOT_COLORS,
                               draw_boxes, fade, note_name)
+from window import look
 
-HANDLE_COLOR = "#0050d0"
-STROKE_POINT_COLOR = "#7a1fe0"  # the points of a custom shape's strokes (purple, like a picked stroke)
-PART_COLOR = "#7a1fe0"  # a highlighted funnel line / the curve clicked
-TWIN_COLOR = "#00a39a"  # the curves linked to it
+HANDLE_COLOR = look.HANDLE
+STROKE_POINT_COLOR = look.STROKE_POINT
+PART_COLOR = look.PART
+TWIN_COLOR = look.TWIN
 # Note colours: number = colour * 32 + velocity // 4 (low velocity = paler fill, the outline stays); colours = the
 # slot colours, then selected (unused: a selected shape's notes keep their colours, user; a red line goes round
 # them, draw_ring), then the shape being drawn
 SELECTED, DRAFT = len(SLOT_COLORS), len(SLOT_COLORS) + 1
 NOTE_COLORS = [(fade(f, 1 - level * 4 / 124), b) for f, b in SLOT_COLORS + [SELECTED_COLOR, DRAFT_COLOR]
                for level in range(32)]
-RING_COLOR = "#b40000"  # (user: #e00000 looked bright, almost pink)
+RING_COLOR = look.RING
 RING_RGB = np.frombuffer(bytes.fromhex(RING_COLOR[1:]), np.uint8)
-PREVIEW_COLOR, PREVIEW_HALO = "#ff1f1f", "#ffa8a8"  # the outline gate's preview line (draw_edge_preview)
+PREVIEW_COLOR, PREVIEW_HALO = look.PREVIEW_LINE, look.PREVIEW_HALO  # (draw_edge_preview)
 RING_GAP = 4  # px: notes in a row closer than this count as touching for the ring
 RING_MAX = 20000  # more ring pieces on screen than this: none drawn (canvas items are slow)
 CUT_MARK = 12  # px each side of a sliced piece's cut end: its stretch of the Slice line (draw_cut_marks)
-FAINT_CUT = "#f0c8c8"  # the really faint line from a piece's cut end to the other piece's (user)
+FAINT_CUT = look.FAINT_CUT
 
 
 def piece_runs(x0, y0, x1, y1):
@@ -392,17 +393,17 @@ class RollDrawing:
             if ((sh.get("pattern") or sh.get("shape") or any(tm["on"] for tm in all_tumours(sh)))
                     and (i in app.sels or app.show_lines.get())):
                 self.draw_path(dict(sh, tumour=None, tumours=None, pattern=None, shape=None),
-                               "#e89a9a" if i in app.sels else "#efc0c0", 1, dash=(6, 4))
+                               look.ORIGIN_PICKED if i in app.sels else look.ORIGIN, 1, dash=(6, 4))
             if sh["kind"] in ("funnel", "custom") and (i in app.sels or app.show_lines.get()):  # its curves' / strokes'
                 for path in funnel_origins(sh) if sh["kind"] == "funnel" else (p for _, p in self.origin_strokes(sh)):
                     self.create_line(*[v for b, p in path for v in (self.t2x(b), self.p2y(p))], width=1,
-                                     fill="#e89a9a" if i in app.sels else "#efc0c0", dash=(6, 4))
+                                     fill=look.ORIGIN_PICKED if i in app.sels else look.ORIGIN, dash=(6, 4))
         if app.show_lines.get():
             for i, sh in enumerate(app.shapes):
                 if i not in app.sels:
-                    self.draw_path(sh, "#c0392b", 1)
+                    self.draw_path(sh, look.SHAPE_LINE, 1)
         for i in app.sels:
-            self.draw_path(app.shapes[i], "#ff1f1f", 2)
+            self.draw_path(app.shapes[i], look.SHAPE_LINE_PICKED, 2)
         for i in app.sels:
             if i < len(app.shapes) and "picture" in app.shapes[i]:
                 self.draw_picture_label(app.shapes[i])
@@ -417,7 +418,7 @@ class RollDrawing:
                 self.draw_custom_box(sel)
             self.draw_handles(sel)  # on top: a stroke's point wins over the box's squares
         if self.draft:
-            self.draw_path(self.draft, "#0a8f0a", 2)
+            self.draw_path(self.draft, look.DRAFT_LINE, 2)
             self.draw_draft_points()
         self.draw_hz_start()
         self.draw_above_marks()
@@ -438,10 +439,10 @@ class RollDrawing:
         p = sh["picture"]
         text = tr("image.label", name=sh.get("name") or "?", keys=p["grid"][1], colours=len(p["set"].get("pal", ())))
         x, y = min(xs), min(ys) - 4
-        t = self.create_text(x + 5, y - 9, text=text, anchor="w", font=("TkDefaultFont", 9))
+        t = self.create_text(x + 5, y - 9, text=text, anchor="w", font=look.font(9, family=look.TK))
         bx = self.bbox(t)
         if bx:
-            r = self.create_rectangle(bx[0] - 4, bx[1] - 2, bx[2] + 4, bx[3] + 2, fill="#fffbe6", outline="#c9b26b")
+            r = self.create_rectangle(bx[0] - 4, bx[1] - 2, bx[2] + 4, bx[3] + 2, fill=look.LABEL_BG, outline=look.LABEL_EDGE)
             self.tag_lower(r, t)
 
     def ring_now(self):
@@ -592,8 +593,8 @@ class RollDrawing:
         (pianoroll.above_marks; user: one, in the middle of the shape). Selected: red like its line."""
         s, y = self.scale, self.ruler_h + 3 * self.scale
         for i, x in self.above_marks():
-            self.create_polygon(x, y, x + 6 * s, y + 9 * s, x - 6 * s, y + 9 * s, outline="#ffffff",
-                                fill="#ff1f1f" if i in self.app.sels else "#c0392b")
+            self.create_polygon(x, y, x + 6 * s, y + 9 * s, x - 6 * s, y + 9 * s, outline=look.ABOVE_EDGE,
+                                fill=look.SHAPE_LINE_PICKED if i in self.app.sels else look.SHAPE_LINE)
 
     def draw_cut_marks(self):
         """A selected piece's cut ends (notes/sliced.py; user, 2026-10-06): a Slice cut = a short stretch of the Slice
@@ -622,8 +623,8 @@ class RollDrawing:
                 if m.get("segs") and not m.get("hits"):  # (a custom shape's: along its cut edge, over its line there)
                     for (b0, k0), (b1, k1) in m["segs"]:
                         xy = self.t2x(b0), self.p2y(k0), self.t2x(b1), self.p2y(k1)
-                        self.create_line(*xy, fill="#ffffff", width=max(1, round(2 * s)) + 1)
-                        self.create_line(*xy, fill="#d00000", width=max(1, round(2 * s)), dash=(6, 3))
+                        self.create_line(*xy, fill=look.CUT_UNDER, width=max(1, round(2 * s)) + 1)
+                        self.create_line(*xy, fill=look.CUT, width=max(1, round(2 * s)), dash=(6, 3))
                 elif m["kind"] == "slice":  # (a line's cut through its notes: one where it crosses each run, user)
                     dx, dy = m.get("dir", (0, 1))
                     dx, dy = dx * self.sx, -dy * self.sy
@@ -631,7 +632,7 @@ class RollDrawing:
                     dx, dy = dx / ln * CUT_MARK * s, dy / ln * CUT_MARK * s
                     for hx, hy in ([(self.t2x(b), self.p2y(k)) for b, k in m["hits"]] if m.get("hits") else
                                    [(x, y)]):
-                        self.create_line(hx - dx, hy - dy, hx + dx, hy + dy, fill="#d00000",
+                        self.create_line(hx - dx, hy - dy, hx + dx, hy + dy, fill=look.CUT,
                                          width=max(1, round(2 * s)), dash=(6, 3))
                 else:
                     self.draw_scissors(x + 9 * s, y - 9 * s, s)
@@ -642,8 +643,8 @@ class RollDrawing:
         r, w = 2.5 * s, max(1, round(1.5 * s))
         for side in (-1, 1):
             cx, cy = x + side * 3 * s, y + 4.5 * s
-            self.create_oval(cx - r, cy - r, cx + r, cy + r, outline="#d00000", width=w)
-            self.create_line(cx - side * 1 * s, cy - r, x - side * 3 * s, y - 6 * s, fill="#d00000", width=w)
+            self.create_oval(cx - r, cy - r, cx + r, cy + r, outline=look.CUT, width=w)
+            self.create_line(cx - side * 1 * s, cy - r, x - side * 3 * s, y - 6 * s, fill=look.CUT, width=w)
 
     def draw_select_box(self):
         """The box being dragged with Select (with the ones kept when Ctrl+drag adds it), or the last ones
@@ -663,10 +664,10 @@ class RollDrawing:
             return
         (xa, ya), (xb, yb) = (self.to_xy(p) for p in self.drag[1:3])
         s = self.scale
-        self.create_line(xa, ya, xb, yb, fill="#d00000", width=max(1, round(2 * s)), dash=(6, 3), tags="slice")
+        self.create_line(xa, ya, xb, yb, fill=look.CUT, width=max(1, round(2 * s)), dash=(6, 3), tags="slice")
         r = 3 * s
         for x, y in ((xa, ya), (xb, yb)):
-            self.create_oval(x - r, y - r, x + r, y + r, fill="#d00000", outline="", tags="slice")
+            self.create_oval(x - r, y - r, x + r, y + r, fill=look.CUT, outline="", tags="slice")
 
     def draw_playhead(self):
         self.delete("playhead")
@@ -674,8 +675,8 @@ class RollDrawing:
         w, h = self.winfo_width(), self.winfo_height()
         if self.kb_w <= x <= w:
             s, top = self.scale, self.ruler_h
-            self.create_line(x, top, x, h, fill="#0a50e0", width=max(1, round(s)), tags="playhead")
-            self.create_polygon(x - 5 * s, top - 8 * s, x + 5 * s, top - 8 * s, x, top, fill="#0a50e0",
+            self.create_line(x, top, x, h, fill=look.PLAY_LINE, width=max(1, round(s)), tags="playhead")
+            self.create_polygon(x - 5 * s, top - 8 * s, x + 5 * s, top - 8 * s, x, top, fill=look.PLAY_LINE,
                                 tags="playhead")
 
     def show_playhead(self, start=False):
@@ -707,21 +708,21 @@ class RollDrawing:
         same rows, whichever is used.
         """
         top = self.ruler_h
-        rows = [(top, h, "#ffffff")]
+        rows = [(top, h, look.ROLL_BG)]
         p_lo, p_hi = self.visible_pitches(h)
         for p in range(p_lo, p_hi + 1):
             y0, y1 = self.row_y(p)
             if p % 12 in BLACK:
-                rows.append((y0, y1, "#e7eefa"))
+                rows.append((y0, y1, look.ROW_BLACK))
             elif self.sy >= 4:
-                rows.append((y1, None, "#dfe6f2"))
+                rows.append((y1, None, look.ROW_LINE))
         for p in range(p_lo, p_hi + 1):
             if p % 12 == 0:
-                rows.append((self.row_y(p)[1], None, "#606060"))
+                rows.append((self.row_y(p)[1], None, look.OCTAVE_LINE))
         if self.p2y(-0.5) < h:
-            rows.append((self.row_y(0)[1], h, "#ececec"))
+            rows.append((self.row_y(0)[1], h, look.OUTSIDE_KEYS))
         if self.p2y(self.app.keys - 0.5) > top:
-            rows.append((top, self.row_y(self.app.keys - 1)[0], "#ececec"))
+            rows.append((top, self.row_y(self.app.keys - 1)[0], look.OUTSIDE_KEYS))
         return rows, self.grid_cols(w)
 
     def row_y(self, p):
@@ -738,20 +739,20 @@ class RollDrawing:
             while i * sb <= b_hi:
                 b = i * sb
                 if abs(b - round(b)) > 1e-9:
-                    cols.append((round(self.t2x(b)), "#eef1f6"))
+                    cols.append((round(self.t2x(b)), look.GRID_SNAP))
                 i += 1
         beats = self.app.beats
         if self.sx >= 5:
             for b in range(max(0, math.ceil(b_lo)), math.floor(b_hi) + 1):
                 if b % beats:
-                    cols.append((round(self.t2x(b)), "#bcc4d2"))
+                    cols.append((round(self.t2x(b)), look.GRID_BEAT))
         step = beats
         while step * self.sx < 6:
             step *= 2
         b = math.floor(b_lo / step) * step
         while b <= b_hi:
             if b >= 0:
-                cols.append((round(self.t2x(b)), "#3a3a3a"))
+                cols.append((round(self.t2x(b)), look.GRID_BAR))
             b += step
         return cols
 
@@ -1056,7 +1057,7 @@ class RollDrawing:
             return rgb[color]
 
         # Every pixel row of the grid is one of a few patterns: its colour with the vertical lines on top
-        row_color = ["#ffffff"] * ih
+        row_color = [look.ROLL_BG] * ih
         for y0, y1, color in rows:
             a = int(y0) - top
             b = a + 1 if y1 is None else int(y1) - top
@@ -1225,7 +1226,7 @@ class RollDrawing:
                 shown.append((ax, ay, hx, hy, color))
         for width, edge in ((max(3, round(3.5 * s)), True), (max(1, round(1.5 * s)), False)):
             for ax, ay, hx, hy, color in shown:
-                self.create_line(ax, ay, hx, hy, fill="#ffffff" if edge else color, width=width)
+                self.create_line(ax, ay, hx, hy, fill=look.HANDLE_FILL if edge else color, width=width)
         r = 4 * s
         handles = [hd for hd in self.handles(sh) if x0 <= self.t2x(hd[0]) <= x1 and y0 <= self.p2y(hd[1]) <= y1]
         if colors:
@@ -1237,7 +1238,7 @@ class RollDrawing:
                 kind = i[0]
                 if kind == "pt":  # a point of a custom shape's stroke (Select tool): a small square
                     q = r - s
-                    self.create_rectangle(x - q, y - q, x + q, y + q, fill="#ffffff", outline=STROKE_POINT_COLOR,
+                    self.create_rectangle(x - q, y - q, x + q, y + q, fill=look.HANDLE_FILL, outline=STROKE_POINT_COLOR,
                                           width=2)
                     continue
                 if kind != "start":
@@ -1250,21 +1251,21 @@ class RollDrawing:
                 kind = None
             if kind == "anchor":  # an anchor between a curve's ends: round
                 q = r + 1.5 * s
-                self.create_oval(x - q, y - q, x + q, y + q, fill="#ffffff", outline=color,
+                self.create_oval(x - q, y - q, x + q, y + q, fill=look.HANDLE_FILL, outline=color,
                                  width=max(2, round(2 * s)))
                 continue
             if kind == "ctrl":  # the end of a handle line: a solid dot with a white edge
                 q = r + 0.5 * s
-                self.create_oval(x - q, y - q, x + q, y + q, fill=color, outline="#ffffff",
+                self.create_oval(x - q, y - q, x + q, y + q, fill=color, outline=look.HANDLE_FILL,
                                  width=max(1, round(s)))
                 continue
             if isinstance(i, tuple):  # where a funnel's curves start: a diamond
                 d = r + 2
-                self.create_polygon(x, y - d, x + d, y, x, y + d, x - d, y, fill="#ffffff", outline="#0050d0",
+                self.create_polygon(x, y - d, x + d, y, x, y + d, x - d, y, fill=look.HANDLE_FILL, outline=look.HANDLE,
                                     width=2)
                 continue
-            self.create_rectangle(x - r, y - r, x + r, y + r, fill="#ffffff",
-                                  outline="#0050d0" if free else "#c00000", width=2)
+            self.create_rectangle(x - r, y - r, x + r, y + r, fill=look.HANDLE_FILL,
+                                  outline=look.HANDLE if free else look.HANDLE_FIXED, width=2)
 
     def draw_draft_points(self):
         """The points of the shape being drawn, like a selected shape's: its ends, a polyline's corners, an arc's
@@ -1285,15 +1286,15 @@ class RollDrawing:
             x, y = self.t2x(b), self.p2y(p)
             if kind == "arc" and i == 1 and len(pts) == 3:
                 q = r + 1.5 * s
-                self.create_oval(x - q, y - q, x + q, y + q, fill="#ffffff", outline=HANDLE_COLOR,
+                self.create_oval(x - q, y - q, x + q, y + q, fill=look.HANDLE_FILL, outline=HANDLE_COLOR,
                                  width=max(2, round(2 * s)))
             else:
-                self.create_rectangle(x - r, y - r, x + r, y + r, fill="#ffffff", outline="#c00000", width=2)
+                self.create_rectangle(x - r, y - r, x + r, y + r, fill=look.HANDLE_FILL, outline=look.HANDLE_FIXED, width=2)
 
     def draw_keyboard(self, h):
         """Piano keys follow the pitch zoom: black keys on their rows, white-key edges between B/C and E/F."""
         kb, top = self.kb_w, self.ruler_h
-        self.create_rectangle(0, top, kb, h, fill="#ffffff", outline="")
+        self.create_rectangle(0, top, kb, h, fill=look.KEY_WHITE, outline="")
         p_lo, p_hi = self.visible_pitches(h)
         font_size = max(7, min(11, int(self.sy * 0.6 / self.scale)))
         # faintly greyed: outside a real 88-key piano; with 256 keys, above the standard 128 instead
@@ -1302,23 +1303,23 @@ class RollDrawing:
             y0, y1 = self.row_y(p)
             n = p % 12
             if p not in usual:
-                self.create_rectangle(0, y0, kb, y1, fill="#e2e2e2", outline="")
+                self.create_rectangle(0, y0, kb, y1, fill=look.KEY_OUTSIDE, outline="")
             if n in BLACK:
-                self.create_rectangle(0, y0, kb * 0.6, y1, fill="#222222" if p in usual else "#6a6a6a", outline="")
+                self.create_rectangle(0, y0, kb * 0.6, y1, fill=look.KEY_BLACK if p in usual else look.KEY_BLACK_OUTSIDE, outline="")
             if n in (0, 5):  # bottom edge of C and F = white key border
-                self.create_line(0, y1, kb, y1, fill="#606060" if n == 0 else "#b0b0b0")
+                self.create_line(0, y1, kb, y1, fill=look.KEY_EDGE_C if n == 0 else look.KEY_EDGE_F)
             label = note_name(p) if n == 0 and self.sy >= 6 else (
                 note_name(p) if n not in BLACK and self.sy >= 16 else None)
             if label:
-                self.create_text(kb - 3, (y0 + y1) / 2, text=label, anchor="e", fill="#333",
-                                 font=("Segoe UI", font_size, "bold" if n == 0 else "normal"))
-        self.create_line(kb, top, kb, h, fill="#808080")
+                self.create_text(kb - 3, (y0 + y1) / 2, text=label, anchor="e", fill=look.KEY_TEXT,
+                                 font=look.font(font_size, "bold" if n == 0 else "normal"))
+        self.create_line(kb, top, kb, h, fill=look.ROLL_EDGE)
 
     def draw_ruler(self, w):
         kb, top = self.kb_w, self.ruler_h
         beats = self.app.beats
-        self.create_rectangle(0, 0, w, top, fill="#f0f0f0", outline="")
-        self.create_line(0, top, w, top, fill="#808080")
+        self.create_rectangle(0, 0, w, top, fill=look.RULER_BG, outline="")
+        self.create_line(0, top, w, top, fill=look.ROLL_EDGE)
         step = beats
         while step * self.sx < 40:
             step *= 2
@@ -1326,8 +1327,8 @@ class RollDrawing:
         while b <= self.x2t(w):
             x = self.t2x(b)
             if x >= kb:
-                self.create_line(x, top - 6, x, top, fill="#555")
-                self.create_text(x + 3, top / 2, text=str(int(b // beats) + 1), anchor="w", fill="#333",
-                                 font=("Segoe UI", 8))
+                self.create_line(x, top - 6, x, top, fill=look.RULER_TICK)
+                self.create_text(x + 3, top / 2, text=str(int(b // beats) + 1), anchor="w", fill=look.RULER_TEXT,
+                                 font=look.font(8))
             b += step
-        self.create_rectangle(0, 0, kb, top, fill="#f0f0f0", outline="")
+        self.create_rectangle(0, 0, kb, top, fill=look.RULER_BG, outline="")

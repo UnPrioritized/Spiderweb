@@ -15,13 +15,14 @@ from tkinter import ttk
 from files.lang import tr
 from notes.fx import copied, is_page, pages
 from notes.sliced import steps_kept
+from window import look
 from window.widgets import LocalUndo, Tooltip, placed
 
 NEW = "new"  # the "+" tab
 TAB_STYLE = "ToolTab.Toolbutton"  # (text in the middle: "+" sat at the left of its button)
 
-ORANGE = "#f5a623"
-GREEN = "#7cc21b"
+ORANGE = look.KNOB_ORANGE
+GREEN = look.KNOB_GREEN
 
 
 class Knob(tk.Canvas):
@@ -69,15 +70,15 @@ class Knob(tk.Canvas):
     def draw(self):
         self.delete("all")
         s, m = self.size, max(3, self.size // 9)
-        ring = "#888" if self.focus_get() is self else "#bbb"
+        ring = look.KNOB_RING_FOCUS if self.focus_get() is self else look.KNOB_RING
         self.create_oval(m, m, s - m, s - m, outline=ring, width=max(2, m // 2))
         if self.value:
             self.create_arc(m, m, s - m, s - m, start=90, extent=-self.value / 100 * self.TURN, style="arc",
-                            outline=self.color if self.enabled else "#ccc", width=max(2, m // 2))
+                            outline=self.color if self.enabled else look.KNOB_RING_OFF, width=max(2, m // 2))
         c, r = s / 2, s / 2 - m * 1.8
         a = math.radians(90 - self.value / 100 * self.TURN)
-        self.create_oval(c - r, c - r, c + r, c + r, fill="#555" if self.enabled else "#aaa", outline="")
-        self.create_line(c, c, c + r * math.cos(a), c - r * math.sin(a), fill="white", width=2)
+        self.create_oval(c - r, c - r, c + r, c + r, fill=look.KNOB_BODY if self.enabled else look.KNOB_BODY_OFF, outline="")
+        self.create_line(c, c, c + r * math.cos(a), c - r * math.sin(a), fill=look.KNOB_POINTER, width=2)
 
     def held(self):
         """Is the mouse turning it (left or right button)?"""
@@ -147,7 +148,7 @@ class ThinBar(tk.Canvas):
 
     def __init__(self, parent, scroll, scale):
         super().__init__(parent, width=1, height=max(5, round(6 * scale)), highlightthickness=0, borderwidth=0,
-                         background="#e2e2e2")
+                         background=look.TAB_TROUGH)
         self.scroll, self.lo, self.hi, self.drag = scroll, 0.0, 1.0, None
         self.bind("<ButtonPress-1>", self.press)
         self.bind("<B1-Motion>", self.move)
@@ -162,7 +163,7 @@ class ThinBar(tk.Canvas):
         self.delete("all")
         w, h = self.winfo_width(), self.winfo_height()
         self.create_rectangle(self.lo * w, 0, self.hi * w, h, outline="",
-                              fill="#7a7a7a" if self.drag else "#a6a6a6")
+                              fill=look.TAB_THUMB_HELD if self.drag else look.TAB_THUMB)
 
     def press(self, e):
         f = e.x / max(1, self.winfo_width())
@@ -216,7 +217,7 @@ class ToolWindow(tk.Toplevel):
         top.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         head = ttk.Frame(top)
         head.pack(fill="x")
-        self.what = ttk.Label(head, text="", foreground="#777")
+        self.what = ttk.Label(head, text="", foreground=look.HINT)
         self.what.pack(side="left")
         self.build_tabs(top, head)
         self.build(box)
@@ -297,7 +298,7 @@ class ToolWindow(tk.Toplevel):
             w.bind("<Configure>", lambda e: self.fit_tabs())
             self.wheel(w)
         self.tab = tk.StringVar(value=NEW)
-        self.differ = ttk.Label(row, text=tr("tool_window.differ"), foreground="#777")
+        self.differ = ttk.Label(row, text=tr("tool_window.differ"), foreground=look.HINT)
         self.shown_tabs = None
         self.tab_buttons = []
 
@@ -389,10 +390,10 @@ class ToolWindow(tk.Toplevel):
                 Tooltip(b, shown[1])
                 self.wheel(b)
                 self.tab_buttons.append(b)
-                x = ttk.Label(self.tabs, text="×", foreground="#888", cursor="hand2", padding=(2, 0, 6, 0))
+                x = ttk.Label(self.tabs, text="×", foreground=look.CLOSE, cursor="hand2", padding=(2, 0, 6, 0))
                 x.pack(side="left")
-                x.bind("<Enter>", lambda e, x=x: x.config(foreground="#d00"))
-                x.bind("<Leave>", lambda e, x=x: x.config(foreground="#888"))
+                x.bind("<Enter>", lambda e, x=x: x.config(foreground=look.CLOSE_HOT))
+                x.bind("<Leave>", lambda e, x=x: x.config(foreground=look.CLOSE))
                 x.bind("<ButtonRelease-1>", lambda e, k=k: self.remove_tab(e, k))
                 Tooltip(x, tr("tool_window.tip_remove"))
                 self.wheel(x)

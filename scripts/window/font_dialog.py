@@ -6,6 +6,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from notes.fonts import font_families
+from window import look
 
 SAMPLE = "AaBbCc 0123"
 
@@ -31,15 +32,15 @@ class FontDialog(tk.Toplevel):
         self.entry.pack(fill="x", pady=(2, 6))
         row = ttk.Frame(box)
         row.pack(fill="both", expand=True)
-        self.listbox = tk.Listbox(row, activestyle="none", exportselection=False, font=("Segoe UI", 10))
+        self.listbox = tk.Listbox(row, activestyle="none", exportselection=False, font=look.font(10))
         sb = ttk.Scrollbar(row, orient="vertical", command=self.listbox.yview)
         self.listbox.config(yscrollcommand=sb.set)
         self.listbox.pack(side="left", fill="both", expand=True)
         sb.pack(side="left", fill="y")
-        self.preview = tk.Label(box, text=self.sample, anchor="w", height=2, bg="#ffffff", relief="solid", bd=1,
+        self.preview = tk.Label(box, text=self.sample, anchor="w", height=2, bg=look.WHITE_BOX, relief="solid", bd=1,
                                 padx=6)
         self.preview.pack(fill="x", pady=(6, 0))
-        self.note = ttk.Label(box, text="", foreground="#777", font=("Segoe UI", 8))
+        self.note = ttk.Label(box, text="", foreground=look.HINT, font=look.font(8))
         self.note.pack(anchor="w")
         btns = ttk.Frame(box)
         btns.pack(fill="x", pady=(6, 0))
@@ -103,7 +104,7 @@ class FontDialog(tk.Toplevel):
             self.preview.config(text=self.sample, font=(f, 22))
             self.note.config(text=f)
         else:
-            self.preview.config(text=tr("font_dialog.no_font_with_that_name"), font=("Segoe UI", 11))
+            self.preview.config(text=tr("font_dialog.no_font_with_that_name"), font=look.font(11))
             self.note.config(text="")
 
     def pick(self):

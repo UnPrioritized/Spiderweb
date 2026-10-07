@@ -6,6 +6,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import refit, uv_k
+from window import look
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
 
 TIP = tr("panel_freehand.makes_the_freehand_stroke_perfect_0")
@@ -24,7 +25,7 @@ class FreehandPanel:
         e.bind("<Return>", lambda ev: self.on_free_entry())
         leave_box(self, e, self.free_var, self.on_free_entry)
         Scrub(self, [(e, self.free_var, self.on_free_entry)], (1, 10, 1), 0, 100, label=lb)
-        ttk.Label(box, text=tr("panel_freehand.0_as_drawn_100_simplest"), foreground="#777").pack(side="left")
+        ttk.Label(box, text=tr("panel_freehand.0_as_drawn_100_simplest"), foreground=look.HINT).pack(side="left")
         for w in (lb, e):
             Tooltip(w, TIP)
 

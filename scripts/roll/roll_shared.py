@@ -10,6 +10,7 @@ import numpy as np
 from files.about import ICONS
 
 from notes.engine import cached_path, cached_strokes  # (used from here by the piano roll's parts)
+from window import look
 
 PREVIEW_LIMIT = 200_000  # a custom shape / funnel being drawn with more notes than this previews as its outline only
 PICK = 10  # how near (screen pixels) the mouse must be to a shape's line / stroke / funnel part to pick it
@@ -200,7 +201,7 @@ def draw_boxes(canvas, rects, left, top, scale, **kw):
     for x0, y0, x1, y1 in boxes_outline(rects):
         if x1 < left or y1 < top:
             continue
-        canvas.create_line(max(x0, left), max(y0, top), max(x1, left), max(y1, top), fill="#000000", width=width,
+        canvas.create_line(max(x0, left), max(y0, top), max(x1, left), max(y1, top), fill=look.SELECT_BOX, width=width,
                            capstyle="projecting", **kw)
 
 

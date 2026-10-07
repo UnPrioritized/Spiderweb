@@ -23,6 +23,7 @@ from notes.joined import (custom_groups, join_shapes, join_velocity, joined_end_
                           split_at, split_custom, split_pieces)
 from notes.tumour import LINE_KINDS, split_tumour
 from roll.roll_shared import cached_path, cached_strokes
+from window import look
 from window.widgets import Tooltip
 
 TOUCH_PX = 8  # ends closer than this on screen (times the display scaling) count as touching, like Live shape snaps
@@ -63,7 +64,7 @@ class JoinSplit:
     def _build_line_fill(self):
         """A greyed-out Inside row for lines: says how to fill them."""
         row = self.line_fill_row = ttk.Frame(self.settings)
-        ttk.Label(row, text=tr("join_split.inside"), foreground="#999").pack(side="left")
+        ttk.Label(row, text=tr("join_split.inside"), foreground=look.FAINT_TEXT).pack(side="left")
         for text in (tr("join_split.empty"), tr("join_split.fill"), tr("join_split.spam"),
                      tr("join_split.outline_spam")):
             b = ttk.Radiobutton(row, text=text, value=text, state="disabled")

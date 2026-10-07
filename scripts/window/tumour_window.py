@@ -11,6 +11,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.joined import shown_tumour, unify_tumours
 from notes.tumour import GRAPH_KEYS, TUMOUR_DEFAULTS, clean_graph
+from window import look
 from window.graph_window import GraphWindow
 from window.panel_custom import GAP_COLOR
 from window.widgets import LocalUndo, Scrub, Tooltip, bad, good, grid_shown, placed, unchanged
@@ -64,7 +65,7 @@ class TumourWindow(tk.Toplevel):
         box = ttk.Frame(self, padding=8)
         box.pack(fill="both", expand=True)
         box.columnconfigure(3, weight=1)
-        self.what = ttk.Label(box, text="", foreground="#777", wraplength=int(300 * app.scale), justify="left")
+        self.what = ttk.Label(box, text="", foreground=look.HINT, wraplength=int(300 * app.scale), justify="left")
         self.what.grid(row=0, column=0, columnspan=5, sticky="w", pady=(0, 4))
         top = ttk.Frame(box)
         top.grid(row=1, column=0, columnspan=5, sticky="w")
@@ -90,7 +91,7 @@ class TumourWindow(tk.Toplevel):
                 b.grid(row=r, column=2, sticky="w", padx=(0, 5))
                 Tooltip(b, tr("tumour_window.a_graph_this_number_changes_along"))
                 self.widgets.append(b)
-            u = self.units[key] = ttk.Label(box, text=unit, foreground="#777")
+            u = self.units[key] = ttk.Label(box, text=unit, foreground=look.HINT)
             u.grid(row=r, column=3, sticky="w")
             Tooltip(e, TIPS[key])
             self.widgets.append(e)
@@ -126,7 +127,7 @@ class TumourWindow(tk.Toplevel):
                                  command=lambda: self.set("seed", random.randrange(1, 10 ** 9)))
         self.reroll.pack(side="left", padx=(8, 0))
         Tooltip(self.reroll, tr("tumour_window.random_sides_pick_them_again"))
-        self.info = ttk.Label(box, text="", foreground="#777", font=("Segoe UI", 8),
+        self.info = ttk.Label(box, text="", foreground=look.HINT, font=look.font(8),
                               wraplength=int(300 * app.scale), justify="left")
         self.info.grid(row=10, column=0, columnspan=5, sticky="ew", pady=(4, 0))
         # like the claw / strum windows (user): changes show at once, Accept keeps them (one undo step), X / Esc puts
@@ -312,7 +313,7 @@ class TumourWindow(tk.Toplevel):
         for key, _, unit, *_ in NUMBERS:
             if key in self.graph_btns:
                 self.units[key].config(text=tr("tumour_window.graph", unit=unit) if key in graphs else unit,
-                                       foreground="#0a50e0" if key in graphs else "#777")
+                                       foreground=look.VALUE if key in graphs else look.HINT)
         if self.graph_window:
             self.graph_window.sync()
         own = bool(tgts) and any(t.get("tumours") for t in tgts)
@@ -320,7 +321,7 @@ class TumourWindow(tk.Toplevel):
                          tr("tumour_window.the_joined_shapes_kept_their_own") if own else
                          tr("tumour_window.bumps_along_the_line_the_line")
                          if on else tr("tumour_window.tick_tumours_to_put_bumps_along"),
-                         foreground=GAP_COLOR if own else "#777")
+                         foreground=GAP_COLOR if own else look.HINT)
 
     def set(self, key, value, group=False):
         """A tumour setting changed (group: typing / quick-changing one box is one Ctrl+Z step in the window)."""

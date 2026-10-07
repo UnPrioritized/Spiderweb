@@ -17,6 +17,7 @@ from files import speed
 from files.lang import tr
 from files.speed import Photo
 from notes import picture as P
+from window import look
 from window.widgets import Tooltip, placed
 
 PREVIEW_W, PREVIEW_H = 900, 520  # the preview's size to start with (it grows with the window)
@@ -196,18 +197,18 @@ class ImageWindow(tk.Toplevel):
         for v, t in (("fall", tr("image.falling")), ("roll", tr("image.roll_view"))):
             ttk.Radiobutton(bar, text=t, variable=self.view, value=v, command=lambda: self.put("view", self.view.get())
                             ).pack(side="left", padx=4)
-        ttk.Label(bar, text=tr("image.hold_hint"), foreground="#777").pack(side="left", padx=16)
-        self.what = ttk.Label(left, text=tr("image.preview_title"), font=("TkDefaultFont", 10, "bold"))
+        ttk.Label(bar, text=tr("image.hold_hint"), foreground=look.HINT).pack(side="left", padx=16)
+        self.what = ttk.Label(left, text=tr("image.preview_title"), font=look.font(10, "bold", family=look.TK))
         self.what.pack(anchor="w")
-        self.cv = tk.Canvas(left, width=PREVIEW_W, height=PREVIEW_H, background="black", highlightthickness=1,
-                            highlightbackground="#999")
+        self.cv = tk.Canvas(left, width=PREVIEW_W, height=PREVIEW_H, background=look.IMG_PREVIEW_BG, highlightthickness=1,
+                            highlightbackground=look.IMG_BORDER)
         self.cv.pack(fill="both", expand=True)
         self.cv.bind("<Configure>", lambda e: self.resized(e.width, e.height))
         self.cv.bind("<ButtonPress-1>", lambda e: self.hold(True))
         self.cv.bind("<ButtonRelease-1>", lambda e: self.hold(False))
         info = ttk.Frame(left)
         info.pack(side="bottom", fill="x", pady=(8, 0), before=self.cv)  # (a short window shrinks the preview)
-        self.info = ttk.Label(info, text="", foreground="#555")
+        self.info = ttk.Label(info, text="", foreground=look.INFO)
         self.info.pack(side="left")
         self.prog = ttk.Frame(left, padding=8, borderwidth=1, relief="solid")  # (on the preview while a big picture is made:
         self.prog_text = ttk.Label(self.prog, text="")             # show_bar; nothing moves, user)
@@ -216,7 +217,7 @@ class ImageWindow(tk.Toplevel):
         self.cancel_btn.pack(side="right", pady=(6, 0))
         self.bar = ttk.Progressbar(self.prog, length=90, maximum=100)
         self.bar.pack(side="left", fill="x", expand=True, padx=(0, 8), pady=(6, 0))
-        self.handle = tk.Label(info, text=tr("image.drag"), background="#dfe8f5", relief="ridge", padx=10, pady=6,
+        self.handle = tk.Label(info, text=tr("image.drag"), background=look.IMG_HANDLE, relief="ridge", padx=10, pady=6,
                                cursor="fleur")
         self.handle.pack(side="right")
         self.handle.bind("<ButtonPress-1>", self.drag_start)
@@ -250,7 +251,7 @@ class ImageWindow(tk.Toplevel):
         r = ttk.Frame(f)
         r.pack(fill="x")
         ttk.Button(r, text=tr("image.open"), command=self.ask_file).pack(side="left")
-        self.name = ttk.Label(r, text=tr("image.no_picture", kinds=_kinds()), foreground="#777")
+        self.name = ttk.Label(r, text=tr("image.no_picture", kinds=_kinds()), foreground=look.HINT)
         self.name.pack(side="left", padx=6)
         r = ttk.Frame(f)
         r.pack(fill="x", pady=(3, 0))
@@ -288,7 +289,7 @@ class ImageWindow(tk.Toplevel):
         Tooltip(self.swatches, tr("image.swatch_tip"))
         self.slider(f, "focus", 0, 1, None, ends=(tr("image.whole"), tr("image.details")))
         self.slider(f, "share", 0.25, 4, lambda v: "%.1f×" % v)  # (only matters with other pictures placed)
-        self.share_note = ttk.Label(f, text="", foreground="#777", wraplength=330, justify="left")
+        self.share_note = ttk.Label(f, text="", foreground=look.HINT, wraplength=330, justify="left")
         self.share_note.pack(anchor="w")
 
         f = self.section(t1, "image.blending")
@@ -339,7 +340,7 @@ class ImageWindow(tk.Toplevel):
             self.vars[k] = tk.BooleanVar(value=self.s[k])
             ttk.Checkbutton(f, text=tr("image." + k), variable=self.vars[k],
                             command=lambda k=k: self.put(k, self.vars[k].get())).pack(anchor="w", pady=1)
-        ttk.Label(t2, text=tr("image.look_note"), foreground="#777", wraplength=330, justify="left").pack(
+        ttk.Label(t2, text=tr("image.look_note"), foreground=look.HINT, wraplength=330, justify="left").pack(
             anchor="w", pady=(0, 6))
 
         f = ttk.LabelFrame(t2, text=tr("image.colour_list"), padding=(6, 2, 6, 4))
@@ -363,11 +364,11 @@ class ImageWindow(tk.Toplevel):
         ttk.Button(r, text=tr("image.copy"), command=self.copy_colours).pack(side="left")
         ttk.Button(r, text=tr("image.paste"), command=self.paste_colours).pack(side="left", padx=4)
         ttk.Button(r, text=tr("image.edit_formats"), command=self.edit_formats).pack(side="left")
-        ttk.Label(f, text=tr("image.copy_gives"), foreground="#555").pack(anchor="w", pady=(4, 0))
-        self.gives = tk.Text(f, width=40, height=7, font=("Consolas", 9), background="#fafafa", wrap="none")
+        ttk.Label(f, text=tr("image.copy_gives"), foreground=look.INFO).pack(anchor="w", pady=(4, 0))
+        self.gives = tk.Text(f, width=40, height=7, font=look.mono(9), background=look.FIELD_SOFT, wrap="none")
         self.gives.pack(fill="x")
         self.gives.bind("<ButtonPress-1>", lambda e: self.gives.focus_set(), add="+")  # (so Ctrl+C copies its text)
-        self.gives.tag_config("bad", foreground="white", background="#d33")
+        self.gives.tag_config("bad", foreground=look.BAD_MARK_TEXT, background=look.BAD_MARK)
         self.start = {}  # pasted colours that are only a starting point: slot -> linear colour
 
     def fit_side(self):
@@ -417,7 +418,7 @@ class ImageWindow(tk.Toplevel):
         var = self.vars[key] = tk.DoubleVar(value=self.s[key])
         label = None
         if ends:
-            ttk.Label(r, text=ends[0], foreground="#777").pack(side="left")
+            ttk.Label(r, text=ends[0], foreground=look.HINT).pack(side="left")
 
         def moved(v):
             v = round(float(v)) if whole else round(float(v), 3)
@@ -463,7 +464,7 @@ class ImageWindow(tk.Toplevel):
         scale.bind("<Double-Button-1>", reset)
         self.scales[key] = scale
         if ends:
-            ttk.Label(r, text=ends[1], foreground="#777").pack(side="left")
+            ttk.Label(r, text=ends[1], foreground=look.HINT).pack(side="left")
         else:
             label = ttk.Label(r, text=shown(self.s[key]), width=6)
             label.pack(side="left")
@@ -680,7 +681,7 @@ class ImageWindow(tk.Toplevel):
         if not self.locked and self.editing is None:  # (colours pasted / picked before are kept)
             self.locked = self.project_locks()
         self.made_for = (None, None)
-        self.name.config(text=os.path.basename(path), foreground="#2a7")
+        self.name.config(text=os.path.basename(path), foreground=look.FILE_OK)
         self.remake()  # (app.image_last: once it's made)
         self.after_made = then  # (set after remake: it drops one left from before)
         if then and not self.making and self.made and self.made[0] is pic:  # (made right away)
@@ -800,12 +801,12 @@ class ImageWindow(tk.Toplevel):
         self.after_made = None
         if self.made is None:
             self.pic, self.grid = None, None
-            self.name.config(text=tr("image.no_picture", kinds=_kinds()), foreground="#777")
+            self.name.config(text=tr("image.no_picture", kinds=_kinds()), foreground=look.HINT)
         else:
             pic, s, editing = self.made
             self.pic = pic
             self.s = dict(s, **{k: self.s[k] for k in LOOK_ONLY + ("fmt", "by")})
-            self.name.config(text=os.path.basename(pic.path), foreground="#2a7")
+            self.name.config(text=os.path.basename(pic.path), foreground=look.FILE_OK)
             if (editing or (0, 0, None))[2] != (self.editing or (0, 0, None))[2]:  # (another one was opened)
                 self.editing = None
                 self.apply_btn.pack_forget()
@@ -831,10 +832,10 @@ class ImageWindow(tk.Toplevel):
             return
         for k, c in enumerate(self.pal):
             cv = tk.Canvas(self.swatches, width=SWATCH, height=SWATCH, highlightthickness=1,
-                           highlightbackground="#555", background="#" + P.hex_of(c))
+                           highlightbackground=look.OUTLINE_SOFT, background="#" + P.hex_of(c))
             cv.pack(side="left", padx=1)
             if k in self.locked:  # (picked by hand: a small corner mark)
-                cv.create_polygon(0, 0, 8, 0, 0, 8, fill="white", outline="black")
+                cv.create_polygon(0, 0, 8, 0, 0, 8, fill=look.IMG_MARK, outline=look.IMG_MARK_EDGE)
             cv.bind("<ButtonRelease-1>", lambda e, k=k: self.pick_colour(k))
             cv.bind("<ButtonRelease-3>", lambda e, k=k: self.free_colour(k))
 
@@ -880,7 +881,7 @@ class ImageWindow(tk.Toplevel):
         cv.delete("all")
         if not self.pic or self.grid is None or self.made is None:
             if not self.making:  # (making: the progress box says so)
-                cv.create_text(self.view_size[0] // 2, self.view_size[1] // 2, fill="#aaa",
+                cv.create_text(self.view_size[0] // 2, self.view_size[1] // 2, fill=look.FAINTER_TEXT,
                                text=tr("image.no_picture", kinds=_kinds()))
                 self.info.config(text="")
             return
@@ -920,18 +921,18 @@ class ImageWindow(tk.Toplevel):
         cv, keys = self.cv, self.grid.shape[1 if fall else 0]
         if fall:
             top, kw = y + h + 2, w / keys
-            cv.create_rectangle(x, top, x + w, top + KB - 4, fill="#e8e8e8", outline="")
+            cv.create_rectangle(x, top, x + w, top + KB - 4, fill=look.IMG_KEYS, outline="")
             for k in range(keys):
                 if k % 12 in (1, 3, 6, 8, 10):
-                    cv.create_rectangle(x + k * kw, top, x + (k + 1) * kw, top + (KB - 4) * 0.6, fill="#222",
+                    cv.create_rectangle(x + k * kw, top, x + (k + 1) * kw, top + (KB - 4) * 0.6, fill=look.IMG_KEY_BLACK,
                                         outline="")
         else:
             left, kh = x - KB, h / keys
-            cv.create_rectangle(left, y, x - 2, y + h, fill="#e8e8e8", outline="")
+            cv.create_rectangle(left, y, x - 2, y + h, fill=look.IMG_KEYS, outline="")
             for k in range(keys):
                 if k % 12 in (1, 3, 6, 8, 10):
                     yy = y + h - (k + 1) * kh
-                    cv.create_rectangle(left, yy, left + (KB - 2) * 0.6, yy + kh, fill="#222", outline="")
+                    cv.create_rectangle(left, yy, left + (KB - 2) * 0.6, yy + kh, fill=look.IMG_KEY_BLACK, outline="")
 
     # ------------------------------------------------------------ placing
 
@@ -1010,7 +1011,7 @@ class ImageWindow(tk.Toplevel):
             return
         b0, k0, length, keys = self.box_at(*spot)
         roll.create_rectangle(roll.t2x(b0), roll.p2y(k0 - 0.5 + keys), roll.t2x(b0 + length), roll.p2y(k0 - 0.5),
-                              outline="#e02020", dash=(4, 3), width=2, tags="picdrag")
+                              outline=look.IMG_DRAG, dash=(4, 3), width=2, tags="picdrag")
 
     def drag_end(self, e):
         self.app.roll.delete("picdrag")
@@ -1037,26 +1038,26 @@ class ImageWindow(tk.Toplevel):
         if state == "ok":
             self.pic = self.app.picture_for(p)
             self.made_for = (None, None)
-            self.name.config(text=os.path.basename(p["file"]), foreground="#2a7")
+            self.name.config(text=os.path.basename(p["file"]), foreground=look.FILE_OK)
             self.remake()
             return
         self.pic, self.grid = None, None
         self.redraw()
         if state == "missing":  # (user: warn + a file picker)
-            self.name.config(text=tr("image.missing", name=os.path.basename(p["file"])), foreground="#c60")
+            self.name.config(text=tr("image.missing", name=os.path.basename(p["file"])), foreground=look.FILE_WARN)
             if ask and messagebox.askyesno(tr("image.window_title"), tr("image.missing_ask", path=p["file"]),
                                            parent=self):
                 self.ask_file()
             return
         if state == "unreadable":  # (e.g. a JPG placed where Pillow was installed: not "changed")
-            self.name.config(text=tr("image.needs_pillow", name=os.path.basename(p["file"])), foreground="#c60")
+            self.name.config(text=tr("image.needs_pillow", name=os.path.basename(p["file"])), foreground=look.FILE_WARN)
             if ask:
                 command = f'"{sys.executable.replace("pythonw", "python")}" -m pip install pillow'
                 messagebox.showinfo(tr("image.window_title"),
                                     tr("image.needs_pillow_info", path=p["file"], command=command), parent=self)
             return
         # changed since it was placed (user: "Use the new version / Keep the current one")
-        self.name.config(text=tr("image.changed", name=os.path.basename(p["file"])), foreground="#c60")
+        self.name.config(text=tr("image.changed", name=os.path.basename(p["file"])), foreground=look.FILE_WARN)
         if ask and messagebox.askyesno(tr("image.window_title"), tr("image.changed_ask", path=p["file"]), parent=self):
             self.app._pictures = {k: v for k, v in self.app._pictures.items() if k[0] != p["file"]}
             self.load(p["file"], then=self.apply)

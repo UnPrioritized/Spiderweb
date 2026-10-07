@@ -7,12 +7,13 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
+from window import look
 from window.help_texts import BY_ID, TOOL_TOPICS
 from window.snap_picker import SIZE, _png, _segment
 from window.widgets import Tooltip
 
 FIRST = "line"  # the tool the button shows on the very first start
-ROW_BG, HOVER_BG, PICKED_BG = "#ffffff", "#e5f3ff", "#cce4f7"
+ROW_BG, HOVER_BG, PICKED_BG = look.TOOL_ROW, look.TOOL_HOVER, look.TOOL_PICKED
 LIST_OPEN = "ToolListOpen"  # a bind tag put first on every other widget while the list is open (see open)
 # pinned together (user): one Custom shape button, with Circle / Polygon opening beside it while one of them is the tool
 GROUP = ("custom", "circle", "polygon")
