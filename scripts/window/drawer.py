@@ -29,7 +29,7 @@ from window import look
 from window.help import open_help
 from window.formula_host import DrawerHost, formula_menu
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
-from window.layers import DrawerLayers
+from window.layers import DrawerLayers, without_group
 from window.sticky import REACH, Targets, key_points
 from window.widgets import Tooltip, symmetry_menu
 
@@ -945,6 +945,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         one is deleted)."""
         if set(idx) & set(self.chosen()):
             self.boxes = []
+        self.keep_names()  # (the others' names don't count along again)
         keep = [i for i in range(len(self.strokes)) if i not in idx]
         new = {old: k for k, old in enumerate(keep)}
         self.strokes = [self.strokes[i] for i in keep]
@@ -1052,11 +1053,12 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self.redraw()
 
     def select(self, i):
-        """Clicked stroke i: it's selected (the others selected stay so when it's one of them)."""
+        """Clicked stroke i: it's selected, with its group (user; Ctrl+click = one stroke); the others selected stay
+        so when it's one of them."""
         if i in self.chosen():
             self.picks = set(self.chosen()) - {i}
         else:
-            self.picks, self.boxes = set(), []
+            self.picks, self.boxes = set(self.mates(i)) - {i}, []
         self.sel = i
 
     def select_drag(self, e):
@@ -1184,7 +1186,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
             return
         self.pastes += 1
         d = self.pastes / int(self.grid_n.get())
-        new = [self.map_stroke(st, lambda u, v: (u + d, v - d)) for st in json.loads(self.clipboard)]
+        new = [without_group(self.map_stroke(st, lambda u, v: (u + d, v - d))) for st in json.loads(self.clipboard)]
         self.push_undo()
         self.strokes += new
         self.sel = len(self.strokes) - 1  # the pasted strokes are selected, so they can be moved together
@@ -1472,6 +1474,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
             return self.show_group_menu(e)
         self.select(i)
         self.redraw()
+        if len(self.chosen()) > 1:  # (a stroke in a group: the group's menu)
+            return self.show_group_menu(e)
         self.show_menu(e, i)
 
     def show_group_menu(self, e):
@@ -1494,6 +1498,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
         m.add_command(label=tr("drawer.copy_strokes", n=len(idx)), accelerator=tr("drawer.ctrl_c"), command=self.copy)
         m.add_command(label=tr("drawer.paste"), accelerator=tr("drawer.ctrl_v"), command=self.paste,
                       state="normal" if self.clipboard else "disabled")
+        m.add_separator()
+        self.layer_menu_items(m, idx)
         self.add_flip_turn(m)
         try:
             m.tk_popup(e.x_root, e.y_root)
@@ -1537,6 +1543,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
         m.add_command(label=tr("drawer.copy_stroke"), accelerator=tr("drawer.ctrl_c"), command=self.copy)
         m.add_command(label=tr("drawer.paste"), accelerator=tr("drawer.ctrl_v"), command=self.paste,
                       state="normal" if self.clipboard else "disabled")
+        m.add_separator()
+        self.layer_menu_items(m, [i])
         self.add_flip_turn(m)
         try:
             m.tk_popup(e.x_root, e.y_root)
