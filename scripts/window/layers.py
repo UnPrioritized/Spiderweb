@@ -221,7 +221,7 @@ class DrawerLayers:
         box.pack(fill="both", expand=True, pady=(8, 0))
         row_lines(self)
         t = self.layers = ttk.Treeview(box, style="Layers.Treeview", columns=("eye", "lock"), show="tree headings",
-                                       selectmode="extended")
+                                       selectmode="extended", height=8)  # (its least rows: past that the panel scrolls)
         t.heading("#0", text=tr("layers.strokes"), anchor="w")
         t.heading("eye", text=EYE)
         t.heading("lock", text=LOCK)
