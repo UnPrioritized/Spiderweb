@@ -56,6 +56,24 @@ STICK_LINE = look.STICK_LINE
 LIST_AWAY = look.LIST_AWAY  # the shape picked in the library list while the keyboard is elsewhere (blue when it's there)
 DOUBLE_CLICK_MS = double_click_ms()  # (the system's own setting)
 DRAW_TOOLS = ("line", "poly", "curve", "arc", "square", "circle")  # (the ones whose points stick)
+MIRRORS = ("off", "h", "v", "both")  # Mirror: off, left <-> right, top <-> bottom, both (across the board's middle)
+
+
+def mirror_fns(mode):
+    """The ways a new stroke is mirrored: [fn(u, v) -> (u, v)] (none when off)."""
+    h, v = (lambda u, w: (1 - u, w)), (lambda u, w: (u, 1 - w))
+    return {"h": [h], "v": [v], "both": [h, v, lambda u, w: (1 - u, 1 - w)]}.get(mode, [])
+
+
+def same_stroke(a, b):
+    """The two strokes lie on each other (a stroke the mirror leaves where it is: no copy)."""
+    if a["kind"] != b["kind"]:
+        return False
+    if a["kind"] == "ellipse":
+        return all(abs(p - q) < 1e-6 for p, q in zip(a["box"], b["box"]))
+    pa, pb = a["pts"], b["pts"]
+    return len(pa) == len(pb) and any(all(math.dist(p, q) < 1e-6 for p, q in zip(pa, side))
+                                      for side in (pb, pb[::-1]))
 
 
 def rgb(color):
@@ -308,11 +326,13 @@ class Drawer(tk.Toplevel):
         self._panned = False  # the middle button moved further than a click's 3 px (pan_to)
         self.tool = tk.StringVar(value="poly")
         self.grid_n = tk.StringVar(value="16")
+        self.mirror = tk.StringVar(value=tr("drawer.mirror_off"))  # (its shown name: mirror_mode)
         self.name = tk.StringVar()
         self._build()
         self.refresh_list()
         self.tool.trace_add("write", lambda *_: (setattr(self, "sel", None), self.cancel_draft(), self.on_tool()))
         self.grid_n.trace_add("write", lambda *_: self.redraw())
+        self.mirror.trace_add("write", lambda *_: self.redraw())
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.update_side_help()
         self.after(500, lambda: app.tips.show("drawer", parent=self))  # the first time it opens
@@ -523,8 +543,8 @@ class Drawer(tk.Toplevel):
             v = self.center[1] - (np.arange(ch) + 0.5 - ch / 2) / k
             face = fc.area_grid(u, v)
             board = ((u >= 0) & (u <= 1))[None, :] & ((v >= 0) & (v <= 1))[:, None]
-            self._area_px = (view, face, board)
-        _, face, board = self._area_px
+            self._area_px = (view, face, board, u, v)
+        _, face, board, u, v = self._area_px
         paint = self.area_paint(amap)[area]  # (each face's)
         lut = np.zeros((len(area), 3), np.uint8)
         tint = np.zeros(len(area), bool)
@@ -539,6 +559,9 @@ class Drawer(tk.Toplevel):
             lut[h & ~tint] = rgb(look.AREA_HOVER)
             tint[h] = True
         img = np.where(board[..., None], np.uint8(rgb(BOARD)), np.uint8(rgb(OFF_BOARD))).astype(np.uint8)
+        if self.mirror_mode() != "off":
+            side = board & self.mirror_side(u[None, :], v[:, None])
+            img[side] = rgb(look.MIRROR_SIDE)
         img = np.where(tint[face][..., None], lut[face], img).astype(np.uint8)
         if self._area_img is None or (self._area_img.width(), self._area_img.height()) != (cw, ch):
             self._area_pic = Photo(self, cw, ch)
@@ -558,6 +581,12 @@ class Drawer(tk.Toplevel):
         bar.pack(fill="x")
         ttk.Label(bar, text=tr("drawer.grid")).pack(side="left", padx=(0, 4))
         ttk.Combobox(bar, textvariable=self.grid_n, values=GRIDS, width=4, state="readonly").pack(side="left")
+        ttk.Label(bar, text=tr("drawer.mirror")).pack(side="left", padx=(12, 4))
+        names = [tr("drawer.mirror_" + m) for m in MIRRORS]
+        b = ttk.Combobox(bar, textvariable=self.mirror, values=names, width=max(map(len, names)) + 1,
+                         state="readonly")
+        b.pack(side="left")
+        Tooltip(b, tr("drawer.mirror_tip"))
         ttk.Button(bar, text=tr("drawer.clear"), command=self.clear).pack(side="left", padx=(12, 0))
         ttk.Button(bar, text=tr("drawer.reset_view"), command=self.reset_view).pack(side="left", padx=(12, 0))
         ttk.Button(bar, text=tr("drawer.help_f1"), command=self.open_help).pack(side="left", padx=(12, 0))
@@ -753,6 +782,7 @@ class Drawer(tk.Toplevel):
             extra_lines = [extra_pts] if len(extra_pts) > 1 else []
         elif draft and draft["kind"] == "arc" and len(draft["pts"]) == 3 and not self.arc_bend:
             extra_pts = draft["pts"][:1]
+        extra_lines = extra_lines + self.mirror_lines()
         return self.stick_targets(frozenset(skip), frozenset(skip_pts)).find(
             x, y, self.stick_view(), REACH * self.scale, extra_pts, extra_lines)
 
@@ -1174,10 +1204,10 @@ class Drawer(tk.Toplevel):
         self.picks, self.boxes = set(range(len(self.strokes) - len(new), self.sel)), []
         self.changed()
 
-    def map_stroke(self, st, fn):
-        """The stroke with every point moved by fn(u, v) -> (u, v)."""
+    def map_stroke(self, st, fn, exact=False):
+        """The stroke with every point moved by fn(u, v) -> (u, v) (exact: not rounded to 5 decimals)."""
         def pt(u, v):
-            return [round(c, 5) for c in fn(u, v)]
+            return list(fn(u, v)) if exact else [round(c, 5) for c in fn(u, v)]
         if st["kind"] == "ellipse":
             (a, b), (c, d) = pt(*st["box"][:2]), pt(*st["box"][2:])
             return dict(st, box=[min(a, c), min(b, d), max(a, c), max(b, d)])
@@ -1644,11 +1674,43 @@ class Drawer(tk.Toplevel):
         if pts is not None:
             st = {"kind": "poly", "pts": pts}
         self.push_undo()
-        self.strokes.append(st)
+        new = [st] + self.mirrored(st)
+        if len(new) > 1:  # (halves meeting on the mirror line: one line, user)
+            new = join_strokes(new)
+        self.strokes += new
         if st["kind"] == "curve":
             self.deselect()
-            self.sel = len(self.strokes) - 1  # selected, so its handles can be bent right away
+            self.sel = len(self.strokes) - len(new) + next(k for k, s in enumerate(new) if s is st)  # selected, so
+            # its handles can be bent right away
         self.changed()
+
+    # ------------------------------------------------------------ mirror
+
+    def mirror_mode(self):
+        """"off", "h" (left <-> right), "v" (top <-> bottom) or "both"."""
+        names = [tr("drawer.mirror_" + m) for m in MIRRORS]
+        return MIRRORS[names.index(self.mirror.get())] if self.mirror.get() in names else "off"
+
+    def mirrored(self, st):
+        """A new stroke's mirrored copies (Mirror; none that would lie on the stroke itself or on another copy).
+        Not rounded: a point stuck exactly on a line stays exactly on that line's mirrored copy."""
+        out = []
+        for fn in mirror_fns(self.mirror_mode()):
+            m = self.map_stroke(st, fn, exact=True)
+            if not any(same_stroke(m, s) for s in [st] + out):
+                out.append(m)
+        return out
+
+    def mirror_lines(self):
+        """The lines new strokes are mirrored across, as board point lists (points stick to them too)."""
+        mode, far = self.mirror_mode(), 100
+        return ([[[0.5, -far], [0.5, far]]] if mode in ("h", "both") else []) + \
+               ([[[-far, 0.5], [far, 0.5]]] if mode in ("v", "both") else [])
+
+    def mirror_side(self, u, v):
+        """Where the board shows the mirrored side (faint grey): [u, v] -> bool (numpy arrays work too)."""
+        mode = self.mirror_mode()
+        return (mode in ("h", "both")) & (u > 0.5) | (mode in ("v", "both")) & (v < 0.5)
 
     def cancel_draft(self):
         self.let_go()  # (a stroke held by Esc / a tool key: moved is moved, like letting go)
@@ -2006,6 +2068,12 @@ class Drawer(tk.Toplevel):
             c.create_image(0, 0, image=img, anchor="nw")
         else:
             c.create_rectangle(x0, y0, x1, y1, fill=BOARD, outline="")  # the board
+            mode = self.mirror_mode()  # Mirror: the side that gets the copy, faint grey
+            for on, (u0, v0, u1, v1) in ((mode in ("h", "both"), (0.5, 0, 1, 1)),
+                                         (mode in ("v", "both"), (0, 0, 1, 0.5))):
+                if on:
+                    c.create_rectangle(*self.to_screen(u0, v1), *self.to_screen(u1, v0), fill=look.MIRROR_SIDE,
+                                       outline="")
         # Grid lines over the whole window (every line when they're far enough apart, else only the quarters)
         n = int(self.grid_n.get())
         k = self.px() / n  # pixels per grid square
@@ -2028,6 +2096,10 @@ class Drawer(tk.Toplevel):
                         c.create_line(0, y, cw, y, fill=color)
                     i += step
         c.create_rectangle(x0, y0, x1, y1, outline=look.BOARD_EDGE)
+        mode, mx, my = self.mirror_mode(), *self.to_screen(0.5, 0.5)  # Mirror: thin lines across the window
+        for on, coords in ((mode in ("h", "both"), (mx, 0, mx, ch)), (mode in ("v", "both"), (0, my, cw, my))):
+            if on:
+                c.create_line(*coords, fill=look.MIRROR_LINE, width=max(2, round(2 * self.scale)))
         w = max(2, round(2 * self.scale))
         gaps = self.gaps()
         closed = any(not role_of(st) for st in self.strokes) and not gaps
@@ -2076,7 +2148,8 @@ class Drawer(tk.Toplevel):
             x, y = self.to_screen(u, v)
             c.create_oval(x - r, y - r, x + r, y + r, fill=look.OPEN_END, outline=look.OPEN_END_EDGE)
         if self.draft:
-            self.draw_stroke(self.draft, look.DRAFT_LINE, w)
+            for st in [self.draft] + self.mirrored(self.draft):  # (Mirror: its copies follow live)
+                self.draw_stroke(st, look.DRAFT_LINE, w)
             self.draw_pieces(pieces, w + 1)
             self.draw_draft_points(r, h)
         if self.chosen() and self.tool.get() == "select":  # the kept select boxes

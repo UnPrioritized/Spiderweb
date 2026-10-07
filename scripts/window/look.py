@@ -164,6 +164,8 @@ OPEN_END, OPEN_END_EDGE = pick("#ff2020"), pick("#800000")  # red dots at a stro
 ERASE_BOX = pick("#d02020", "#ff5050")
 STICK = pick("#d000d0", "#ff4dff")  # the mark where a point sticks
 STICK_LINE = pick("#c070e0", "#d08cff")  # the parts ending at that point (lighter, so the mark stands out on them)
+MIRROR_SIDE = pick("#f0f0f2", "#36363a")  # Mirror: the side that gets the mirrored copy (faint grey)
+MIRROR_LINE = pick("#0097a7", "#26c6da")  # Mirror: the line it's mirrored across
 
 # --- Small windows
 TOOL_ROW, TOOL_HOVER = pick("#ffffff", "#2f2f31"), pick("#e5f3ff", "#3d4a5c")  # the drawing tools list
