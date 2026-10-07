@@ -465,6 +465,12 @@ class RollDrawing:
         t = self.create_text(x + 5, y - 9, text=text, anchor="w", font=look.font(9, family=look.TK))
         bx = self.bbox(t)
         if bx:
+            # kept inside the piano roll (user): not under the ruler / keyboard when the box is at the edge
+            dx = max(0, self.kb_w + 8 - bx[0])
+            dy = max(0, self.ruler_h + 4 - bx[1])
+            if dx or dy:
+                self.move(t, dx, dy)
+                bx = (bx[0] + dx, bx[1] + dy, bx[2] + dx, bx[3] + dy)
             r = self.create_rectangle(bx[0] - 4, bx[1] - 2, bx[2] + 4, bx[3] + 2, fill=look.LABEL_BG, outline=look.LABEL_EDGE)
             self.tag_lower(r, t)
 
