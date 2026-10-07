@@ -102,6 +102,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def __init__(self, autosave=AUTOSAVE):
         super().__init__()
         errors.install(self)
+        look.apply(self)  # (the dark look, before any widget is made)
         self.title(tr("app.spiderweb", VERSION=VERSION))
         try:  # title bar + taskbar icon; True = every other window (drawer, Help, ...) gets it too
             self.icons = [tk.PhotoImage(file=os.path.join(ICONS, f"icon-{n}.png")) for n in (16, 24, 32, 48, 64, 256)]

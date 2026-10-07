@@ -2037,7 +2037,8 @@ class Drawer(tk.Toplevel):
                 self.draw_stroke(plain_stroke(st), look.ORIGIN_PICKED if i in chosen else look.ORIGIN, 1, dash=(6, 4))
         for i, st in enumerate(self.strokes):  # outline only: dotted; fill line: thin dashes
             role = role_of(st)
-            color = (look.STROKE_PICKED if i in chosen else SLOT_COLORS[(colour_of(st) - 1) % len(SLOT_COLORS)][1]
+            color = (look.STROKE_PICKED if i in chosen else
+                     look.readable(SLOT_COLORS[(colour_of(st) - 1) % len(SLOT_COLORS)][1])
                      if colour_of(st) else STROKE_COLOR)
             if role == "cut":
                 self.draw_stroke(st, color, max(1, round(self.scale)), dash=(6, 4))  # (thin: Windows dots thick ones)

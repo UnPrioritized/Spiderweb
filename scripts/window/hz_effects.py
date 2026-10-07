@@ -52,6 +52,7 @@ PLAY_LINE = look.PLAY_LINE  # the preview's play line (as in the notes above)
 FX_COLOR = {"volume": "#9b2d5f", "slant": "#8a3ff0", "groups": "#0a8f8f", "offpitch": "#d0189a", "noisy": "#8a5a14",
             "vibrato": "#00a5d8", "pitch": "#4b0082", "sweep": "#7f8c00", "wah": "#2c3e6b", "tremolo": "#e0607a",
             "octave": "#1d6b3a", "sine": "#b060c0", "square": "#606060", "saw": "#c0a000", "triangle": "#c05a30"}
+FX_COLOR = {k: look.readable(v) for k, v in FX_COLOR.items()}  # (lighter in the dark look)
 
 
 AMOUNT = ":amount"  # (the window's key for an effect's amount line: effect + AMOUNT)
