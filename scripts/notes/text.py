@@ -16,11 +16,11 @@ import math
 
 from files.lang import tr
 from notes.bezier import segments
-from notes.fonts import get_font
+from notes.fonts import DEFAULT_FONT, get_font
 
 UNITS = ("font", "rows")  # "font" = size is the font size (em) in keys, "rows" = capital letters are that many keys
 TEXT_ALIGNS = ("left", "center", "right")
-TEXT_DEFAULTS = {"font": "Arial", "size": 24.0, "unit": "font", "weight": 400, "italic": False, "tracking": 0.0,
+TEXT_DEFAULTS = {"font": DEFAULT_FONT,"size": 24.0, "unit": "font", "weight": 400, "italic": False, "tracking": 0.0,
                  "leading": 100.0, "align": "left", "threshold": 50.0, "grow": 0.0}
 SUB_ROWS = 20  # each key is looked at on this many lines for the threshold (5% steps)
 
@@ -58,9 +58,10 @@ def missing_letters(tx):
 
 
 def with_arial(tx, changes):
-    """Setting changes for a text, plus the font Arial if its font isn't installed here: a shared text keeps its
-    letters until it's edited, then all of it is redrawn in Arial (the user is asked first, missing_font_ok)."""
-    return changes if "font" in changes or text_font(tx).found else dict(changes, font="Arial")
+    """Setting changes for a text, plus the default font (Arial on Windows) if its font isn't installed here: a
+    shared text keeps its letters until it's edited, then all of it is redrawn in that font (the user is asked
+    first, missing_font_ok)."""
+    return changes if "font" in changes or text_font(tx).found else dict(changes, font=DEFAULT_FONT)
 
 
 def em_keys(tx, size=None):

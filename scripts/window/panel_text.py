@@ -5,7 +5,7 @@ from tkinter import ttk, messagebox
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.fonts import WEIGHTS
+from notes.fonts import DEFAULT_FONT, WEIGHTS
 from notes.text import TEXT_DEFAULTS, build, restyle, shown_size, text_axes, text_font, with_arial
 from window.font_dialog import FontDialog
 from window.widgets import Scrub, Tooltip, bad, good, leave_box
@@ -50,7 +50,7 @@ class TextPanel:
         ttk.Label(box, text=tr("panel_text.text"), font=("Segoe UI", 9, "bold")).grid(row=0, column=0, columnspan=2,
                                                                                     sticky="w")
         ttk.Label(box, text=tr("panel_text.font")).grid(row=1, column=0, sticky="w", pady=1)
-        self.font_btn = ttk.Button(box, text=tr("panel_text.arial"), command=self.open_font_dialog)
+        self.font_btn = ttk.Button(box, text=tr("panel_text.text_2", font=DEFAULT_FONT), command=self.open_font_dialog)
         self.font_btn.grid(row=1, column=1, sticky="ew", padx=(5, 0), pady=1)
         Tooltip(self.font_btn, TIPS["font"])
 
@@ -143,7 +143,7 @@ class TextPanel:
         self.font_btn.config(text=tr("panel_text.text_2", font=tx['font']))
         font = text_font(tx)
         if not font.found:
-            info = tr("panel_text.isn_t_installed_on_this_pc", font=tx['font'])
+            info = tr("panel_text.isn_t_installed_on_this_pc", font=tx['font'], default=DEFAULT_FONT)
         elif typing:
             info = tr("panel_text.typing_enter_new_line_esc_done")
         elif tool == "text":
@@ -156,10 +156,11 @@ class TextPanel:
 
     def missing_font_ok(self, txs):
         """These placed texts are about to be redrawn: if a font of theirs isn't installed here, ask first (they're
-        redrawn in Arial, with_arial). True = go on."""
+        redrawn in the default font, with_arial). True = go on."""
         missing = sorted({tx["font"] for tx in txs if not text_font(tx).found})
         return not missing or messagebox.askyesno(
-            tr("app.spiderweb_2"), tr("panel_text.font_missing_edit", fonts=", ".join(f"“{f}”" for f in missing)),
+            tr("app.spiderweb_2"), tr("panel_text.font_missing_edit", fonts=", ".join(f"“{f}”" for f in missing),
+                                      default=DEFAULT_FONT),
             icon="warning", parent=self)
 
     def set_text_setting(self, changes, refocus=True):

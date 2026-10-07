@@ -70,6 +70,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     text.py          text: letters laid out in a font -> a custom shape, threshold, grow
     hzbass.py        Hz bass: spam gates from tones (placed notes, slides, chords)
     fonts.py         letter outlines from the fonts installed in Windows
+    fonts_ft.py      the same on Linux (fontconfig + FreeType)
     funnel.py        funnels: curves, note grid, gates
     bezier.py        Bezier curves (anchors + handles) for curves and funnel curves, symmetry, fitting to points
     arc.py           arcs: pieces of a perfect circle through three points

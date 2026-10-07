@@ -7,6 +7,8 @@ which is what the nonzero fill rule needs.
 
 Letters the font doesn't have come from another installed font that has them (like Windows' own programs do): the
 fonts Windows lists as stand-ins for this one, then BACKUPS. Not for symbol fonts (their letters ARE other pictures).
+
+Elsewhere (Linux) Font is fonts_ft.FtFont: the same, read with fontconfig + FreeType.
 """
 
 import bisect
@@ -15,6 +17,7 @@ import struct
 from ctypes import wintypes
 
 from files.lang import tr
+from files.system import WINDOWS
 
 EM = 2048  # the font is asked for at this many units per em (fine enough for any size)
 # where letters a font lacks are looked for, after the ones Windows lists for that font (first that has it wins)
@@ -290,6 +293,13 @@ def _parse(raw):
             contours.append(pts)
         pos = end
     return contours
+
+
+if WINDOWS:
+    DEFAULT_FONT = "Arial"  # new texts, and a text whose font isn't installed once it's edited
+else:
+    from notes.fonts_ft import FtFont as Font, default_family
+    DEFAULT_FONT = default_family()
 
 
 def get_font(family, weight=400, italic=False):
