@@ -14,6 +14,8 @@ key, so a key with no notes still counts), "chords" (notes starting together = o
 "skip", keep "keep", ... "random": keeps about "pct" % of the notes, picked by "seed" (the same pick every time).
 "shorten" (these modes): the notes picked to go stay, "cut" % of their length long (at least 1 tick)."""
 
+import math
+
 import numpy as np
 
 PERIODS = (1, 2, 4, 8, 16)  # beats
@@ -41,7 +43,8 @@ def clean_claw(c):
                          ("cut", 1, 99)):
         try:
             v = float(c.get(key, out[key]))
-            out[key] = max(lo, min(hi, v if key in ("pct", "cut") else int(v)))
+            if math.isfinite(v):  # (not a number / endless: the default)
+                out[key] = max(lo, min(hi, v if key in ("pct", "cut") else int(v)))
         except (TypeError, ValueError, OverflowError):
             pass
     if c.get("period") in PERIODS:
@@ -50,7 +53,9 @@ def clean_claw(c):
     if isinstance(t, (list, tuple)) and tuple(t) in TRASHES:
         out["trash"] = list(t)
     try:
-        out["dist"] = max(-100.0, min(100.0, float(c.get("dist", 0.0))))
+        v = float(c.get("dist", 0.0))
+        if math.isfinite(v):
+            out["dist"] = max(-100.0, min(100.0, v))
     except (TypeError, ValueError):
         pass
     out["stretch"] = c.get("stretch") is True
