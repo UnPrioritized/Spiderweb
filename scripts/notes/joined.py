@@ -126,6 +126,28 @@ def join_shapes(shapes, k, touch):
     return out
 
 
+def last_points(arrays):
+    """Where "Last note: starts on it" puts its note on a line made of these pieces (engine.cached_arrays): each
+    piece's later end in time, rounded."""
+    out = set()
+    for a in arrays:
+        if len(a):
+            p = a[-1] if a[-1][0] >= a[0][0] else a[0]
+            out.add((round(float(p[0]), 6), round(float(p[1]), 6)))
+    return out
+
+
+def joined_end_dot(olds, arrays, first):
+    """"Last note: starts on it" for the joined curve: on or off, whichever keeps the most of the shapes' last
+    notes where they were (a tie: the first shape's). olds: [(its end_dot, its cached arrays)]; arrays: the
+    curve's. Returns (end_dot, whether every last note stayed as it was)."""
+    want = set().union(*(last_points(a) for dot, a in olds if dot))
+    mine = last_points(arrays)
+    off, on = len(want), len(want ^ mine)
+    dot = on < off or (on == off and bool(first))
+    return dot, min(on, off) == 0
+
+
 def clean_joined(sh, out):
     """A joined curve's gaps / splits / tumours from a file into out (a cleaned curve); anything that doesn't fit
     the curve is dropped."""

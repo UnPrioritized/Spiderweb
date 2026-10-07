@@ -19,8 +19,8 @@ from notes.slice import clip_segment, crossings, slice_custom
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
                           rejoined, slice_in_two, split_here_ok, tooled)
 from notes.smooth import smooth_path
-from notes.joined import (custom_groups, join_shapes, join_velocity, piece_velocity, sections, split_at, split_custom,
-                          split_pieces)
+from notes.joined import (custom_groups, join_shapes, join_velocity, joined_end_dot, piece_velocity, sections,
+                          split_at, split_custom, split_pieces)
 from notes.tumour import LINE_KINDS, split_tumour
 from roll.roll_shared import cached_path, cached_strokes
 from window.widgets import Tooltip
@@ -31,6 +31,12 @@ TOUCH_PX = 8  # ends closer than this on screen (times the display scaling) coun
 def span(sh):
     bs = [b for b, _ in cached_path(sh)]
     return min(bs), max(bs)
+
+
+def last_note(olds, new):
+    """"Last note: starts on it" for new (olds joined) and whether every old last note stays (joined.py)."""
+    return joined_end_dot([(sh.get("end_dot"), cached_arrays(sh)) for sh in olds], cached_arrays(new),
+                          olds[0].get("end_dot"))
 
 
 def part_glue(part, whole):
@@ -165,6 +171,7 @@ class JoinSplit:
             if new is not None:
                 new.update(shared_settings(shapes)[0])  # (glue / chop / claw / strum / Colours: kept when all alike)
                 join_velocity(new, shapes, [span(sh) for sh in shapes], span(new))  # (each keeps its velocities)
+                new["end_dot"] = last_note(shapes, new)[0]
             return new
 
         order = sorted(self.sels)
@@ -177,8 +184,10 @@ class JoinSplit:
             self.status.config(text=tr("join_split.cant_rejoin"))
             return
         lost = shared_settings(olds)[1]
+        if not again and not last_note(olds, new)[1]:
+            lost.append(tr("join_split.last_note_moves"))
         if lost and not messagebox.askokcancel(
-                tr("join_split.spiderweb"), tr("join_split.joining_these_changes") + lost[0] +
+                tr("join_split.spiderweb"), tr("join_split.joining_these_changes") + "\n• ".join(lost) +
                 tr("join_split.ctrl_z_gives_them_back"), icon="warning", parent=self):
             return
         new = again or new

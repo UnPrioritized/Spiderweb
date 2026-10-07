@@ -1152,6 +1152,7 @@
  "convert.glue": "Glue",
  "join_split.joining_these_changes": "Joining these changes this:\n\n• ",
  "join_split.ctrl_z_gives_them_back": "\n\nCtrl+Z gives the old shapes back.",
+ "join_split.last_note_moves": "\"Last note: starts on it\" can't stay as it was on every shape: the curve has one setting for all its ends, so some last notes go, or come where a shape didn't have one.",
  "velocity.draw_velocity": "Draw velocity",
  "velocity.velocity": "     velocity {y2v}",
  "custom.live_drawing": "Live drawing",
