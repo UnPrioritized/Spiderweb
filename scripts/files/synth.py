@@ -442,6 +442,13 @@ class Live:
         """Bytes of sound made so far (8 a frame)."""
         return self.synth.bass.BASS_ChannelGetPosition(self.handle, _POS_BYTE) if self.handle else 0
 
+    def voices_playing(self):
+        used = ctypes.c_float()
+        if not self.handle or not self.synth.bass.BASS_ChannelGetAttribute(self.handle, _ATTRIB_MIDI_VOICES_ACTIVE,
+                                                                            ctypes.byref(used)):
+            return 0
+        return int(used.value)
+
     def close(self):
         h, self.handle = self.handle, 0
         if not h:

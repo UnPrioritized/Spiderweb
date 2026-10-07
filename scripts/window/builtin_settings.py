@@ -106,8 +106,12 @@ class Overload:
     DROP = 0.85  # the limit is multiplied by this while overloaded and still losing sound...
     DROP_WAIT = 0.3  # ...at most this often (a lower limit takes a moment to show)
     LOWEST = 50  # never lowered below this (a stall more voices can't fix: device unplugged, PC hiccup)
-    QUIET = 0.5  # seconds without being overloaded before the limit goes back up...
-    CLIMB_WAIT = 0.2  # ...half the way to the user's limit this often (user: climb back quickly)
+    # Climbing back (user: slowly while still in the spam, else it breaks up every few moments; quickly once free)
+    FREE = 0.7  # free = the voices sounding stayed under this share of the limit for the last second...
+    QUIET = 0.5  # ...and not overloaded for this long: half the way to the user's limit...
+    CLIMB_WAIT = 0.2  # ...this often
+    SLOW_QUIET = 5.0  # still busy: seconds not overloaded before the limit goes up...
+    RISE = 1.05  # ...by this much a second
 
     def __init__(self):
         self.thread = None
@@ -157,6 +161,7 @@ class Overload:
         live, clock = self.live, time.perf_counter
         t0, p0 = clock(), live.position()
         lost = collections.deque()  # (time, seconds missing since the look before; negative = sound ran ahead)
+        busy = collections.deque()  # (time, voices sounding)
         last_drop = last_climb = last_over = t0
         since_drop = 0.0  # seconds missing since the last drop
         while not self._stop.wait(self.EVERY):
@@ -167,6 +172,10 @@ class Overload:
             while lost[0][0] < t - 1:
                 lost.popleft()
             missing = max(0.0, sum(g for _, g in lost))
+            busy.append((t, live.voices_playing()))
+            while busy[0][0] < t - 1:
+                busy.popleft()
+            free = max(v for _, v in busy) < self.now_limit * self.FREE
             since_drop += gone
             over = missing > self.TOO_MUCH
             if over:
@@ -181,8 +190,13 @@ class Overload:
             elif over and since_drop > 0.003 and t - last_drop >= self.DROP_WAIT and self.now_limit > lowest:
                 self.now_limit = max(lowest, int(self.now_limit * self.DROP))
                 last_drop, since_drop = t, 0.0
-            elif self.now_limit < limit and t - last_over >= self.QUIET and t - last_climb >= self.CLIMB_WAIT:
+            elif self.now_limit >= limit:
+                pass
+            elif free and t - last_over >= self.QUIET and t - last_climb >= self.CLIMB_WAIT:
                 self.now_limit = min(limit, self.now_limit + max(1, (limit - self.now_limit + 1) // 2))
+                last_climb = t
+            elif t - last_over >= self.SLOW_QUIET and t - max(last_climb, last_drop) >= 1:
+                self.now_limit = min(limit, int(self.now_limit * self.RISE) + 1)
                 last_climb = t
             if self.now_limit != self._sent:
                 live.set_voices(self.now_limit)
