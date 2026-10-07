@@ -5,7 +5,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc
-from notes.custom import CYCLE_MAX, CYCLES
+from notes.custom import CYCLE_MAX, CYCLES, row_restart_ok
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
 
 CYCLE_CHOICES = [(None, tr("colours.off"))] + [(v, tr("colours." + v)) for v in CYCLES]
@@ -101,7 +101,10 @@ class ColoursPanel:
             same_or_blank(e, var, values)
         restart = {c.get("rows") for c in on}
         self.cycle_rows_box.current([v for v, _ in ROW_CHOICES].index(next(iter(restart))) if len(restart) == 1 else 0)
-        show_mixed(self.cycle_rows_box, len(restart) > 1, self.cycle_rows_tip, tr("colours.rows_tip"))
+        # (Spam / Outline spam only: greyed when none of the picked shapes is one, user; new shapes: any)
+        rows_ok = not self.sels or any(row_restart_ok(t) for t in tgts)
+        show_mixed(self.cycle_rows_box, len(restart) > 1, self.cycle_rows_tip,
+                   tr("colours.rows_tip") + ("" if rows_ok else tr("colours.rows_only")))
         self._loading = False
         if (by != "key") != bool(self.cycle_rows_row.winfo_manager()):
             if by != "key":
@@ -123,7 +126,7 @@ class ColoursPanel:
         show_mixed(self.cycle_box, mixed, self.cycle_tip, tr("colours.tip") + (tr("colours.needs") if lonely else ""))
         for e in [self.cycle_n_entry] + self.cycle_entries:
             e.config(state="normal" if cy and not mixed else "disabled", style="TEntry")
-        self.cycle_rows_box.config(state="readonly" if cy and not mixed else "disabled")
+        self.cycle_rows_box.config(state="readonly" if cy and not mixed and rows_ok else "disabled")
         if bool(cy) != bool(self.cycle_n_entry.winfo_manager()):
             if cy:
                 self.cycle_n_label.pack(side="left")

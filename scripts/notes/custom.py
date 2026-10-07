@@ -1741,31 +1741,61 @@ def chop_rows(stretches, grid, count=False, fit=False):
     """chop for a gate Range along each key row (gaterange.RangeRows): the whole graph over each stretch's own
     length (join: over its key's stretches together), squares whose middle is inside it, as chop_grid. One too
     short for any square = one note of the first gate from its start (user; with fit: the stretch as it is).
-    Stretches laid out the same from their t0 get the same notes, so each layout is worked out once."""
+    The squares only depend on the length the graph runs over, so all stretches of one length go at once."""
     if not len(stretches):
         return np.zeros(0, np.int64) if count else np.zeros((0, 3), np.int64)
     s0, e0, q = stretches[:, 0], stretches[:, 1], stretches[:, 2]
     t0, t1 = range_spans(stretches, grid.join)
-    groups, inv = np.unique(np.column_stack([t1 - t0, s0 - t0, e0 - t0]), axis=0, return_inverse=True)
-    inv = inv.reshape(-1)
-    temps = []
-    for length, a0, a1 in groups.tolist():
-        st = np.array([[a0, a1, 0]], np.int64)
+    n = np.zeros(len(stretches), np.int64)
+    parts = []
+    for length, rows in _same(t1 - t0):
         sq = grid.squares(0, length)
-        if fit or chop_grid(st, sq, True)[0]:
-            temps.append(chop_grid(st, sq, fit=fit, keep=True))
-        else:
-            temps.append(np.array([[a0, a0 + grid.a, 0]], np.int64))
-    ng = np.array([len(t) for t in temps], np.int64)
-    n = ng[inv]
+        rel = np.column_stack([s0[rows] - t0[rows], e0[rows] - t0[rows], rows])  # (from t0; key = the row's number)
+        got = chop_grid(rel, sq, True)
+        none = got == 0
+        n[rows] = np.maximum(got, 1)
+        if not count:
+            got = chop_grid(rel, sq, fit=fit, keep=True)
+            if not fit:
+                short = np.repeat(none, n[rows])
+                got[short, 1] = got[short, 0] + grid.a
+            parts.append(got)
     if count:
         return n
-    first = np.cumsum(ng) - ng
-    idx = np.repeat(first[inv], n) + np.arange(n.sum()) - np.repeat(np.cumsum(n) - n, n)
-    out = np.concatenate(temps)[idx]
-    out[:, :2] += np.repeat(t0, n)[:, None]
-    out[:, 2] = np.repeat(q, n)
+    out = np.concatenate(parts)
+    out = out[np.argsort(out[:, 2], kind="stable")]  # (back in the stretches' order)
+    owner = out[:, 2].copy()
+    out[:, :2] += t0[owner][:, None]
+    out[:, 2] = q[owner]
     return out
+
+
+def _same(values):
+    """(value, indices) for each different value, in one sort (not a scan of all of them per value)."""
+    vals, inv = np.unique(values, return_inverse=True)
+    inv = inv.reshape(-1)
+    order = np.argsort(inv, kind="stable")
+    return zip(vals.tolist(), np.split(order, np.cumsum(np.bincount(inv, minlength=len(vals)))[:-1]))
+
+
+def stretch_of(st, notes):
+    """Which of the (start, end, key) stretches st each (start, end, key) note was cut from: the one its start is
+    inside, else the one its middle is in (a note reaching back over a gap: "Across gaps in a row" cuts its squares
+    along the whole key, so one can start before its stretch, user's hunt). Both = the last stretch on its key
+    starting at or before that tick; -1 = none on its key."""
+    o = np.lexsort((st[:, 0], st[:, 2]))
+    big = np.int64(1) << 40
+    keyed = st[o, 2].astype(np.int64) * big + st[o, 0]
+    key = notes[:, 2].astype(np.int64)
+
+    def last_at(t):
+        i = np.searchsorted(keyed, key * big + t, "right") - 1
+        j = o[np.maximum(i, 0)]
+        return np.where((i >= 0) & (st[j, 2] == key), j, -1)
+
+    j = last_at(notes[:, 0].astype(np.int64))
+    inside = (j >= 0) & (notes[:, 0] < st[j, 1])
+    return np.where(inside, j, last_at((notes[:, 0].astype(np.int64) + notes[:, 1]) // 2))
 
 
 def chop(sh, stretches, g, count=False):
@@ -2152,29 +2182,24 @@ def range_stretches(sh, ppq):
 
 def row_steps(sh, notes, ppq, grid, fit):
     """range_steps / range_gates along each key row: (each note's square in its stretch, that square's gate). A
-    note's stretch = the last one on its key starting at or before it; one too short for any square = step 0 and
-    the first gate (chop_rows)."""
+    note's stretch: stretch_of; one too short for any square = step 0 and the first gate (chop_rows)."""
     k, g = np.zeros(len(notes), np.int64), np.full(len(notes), grid.a, np.int64)
     st = range_stretches(sh, ppq)
     if not len(st) or not len(notes):
         return k, g
     t0, t1 = range_spans(st, grid.join)
-    o = np.lexsort((st[:, 0], st[:, 2]))
-    big = np.int64(1) << 40
-    at = np.searchsorted(st[o, 2] * big + st[o, 0], notes[:, 2].astype(np.int64) * big + notes[:, 0], "right")
-    j = o[np.maximum(at - 1, 0)]
+    j = stretch_of(st, notes)
     s = (notes[:, 0] + notes[:, 1]) / 2 if fit else notes[:, 0]
-    which, inv = np.unique(j, return_inverse=True)
-    inv = inv.reshape(-1)
-    order = np.argsort(inv, kind="stable")
-    ends = np.cumsum(np.bincount(inv, minlength=len(which)))
-    for i, w in enumerate(which.tolist()):
-        rows = order[ends[i - 1] if i else 0:ends[i]]
-        sq = grid.squares(int(t0[w]), int(t1[w]))
-        if not fit and not chop_grid(st[w:w + 1], sq, True)[0]:
-            continue  # (too short: the first gate)
-        k[rows] = _nearest(sq[:, 0], s[rows], fit)
-        g[rows] = sq[k[rows], 1] - sq[k[rows], 0]
+    has = np.flatnonzero(j >= 0)
+    for length, rows in _same((t1 - t0)[j[has]]):  # (the squares only depend on the length, as in chop_rows)
+        idx, w = has[rows], j[has[rows]]
+        sq = grid.squares(0, length)
+        kk = _nearest(sq[:, 0], s[idx] - t0[w], fit)
+        gg = sq[kk, 1] - sq[kk, 0]
+        if not fit:  # (too short: the first gate)
+            short = chop_grid(np.column_stack([st[w, 0] - t0[w], st[w, 1] - t0[w], w]), sq, True) == 0
+            kk, gg = np.where(short, 0, kk), np.where(short, grid.a, gg)
+        k[idx], g[idx] = kk, gg
     return k, g
 
 
@@ -2198,20 +2223,18 @@ def cycle_turns(sh, notes, ppq):
     """Which turn (0 .. n - 1) each (start, end, key) note gets (CYCLES). Spam steps are counted from the shape's
     first note (with the "aligned" start from tick 0, so they keep to the gate grid), at the shape's gate (a gate
     Range: its own gates, range_steps; Hz bass with placed tones: its repeats, hz_steps), each note in the step it
-    starts nearest to; other notes: each start time is a step. "Each key row": counted again from each part of a key
-    row, from its first note or back from its last (row_restart; other notes: each start time in the part)."""
+    starts nearest to; other notes: each start time is a step. "Each key row" (Spam / Outline spam only,
+    row_restart_ok): counted again from each piece of a key row, from its first note or back from its last."""
     c = sh["cycle"]
     s = notes[:, 0]
-    rows = bool(c.get("rows")) and c["by"] != "key"
+    rows = bool(c.get("rows")) and c["by"] != "key" and row_restart_ok(sh)
     back = c.get("rows") == "end"
     if c["by"] == "key":
         k = notes[:, 2] - notes[:, 2].min()
     elif c["by"] == "time":
         a, b = c["every"]
         k = np.floor(s * b / (4 * a * ppq) + 1e-9).astype(np.int64)
-        return (row_restart(notes, k, back) if rows else k) % c["n"]
-    elif rows and not (sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS):
-        k = row_restart(notes, None, back)
+        return (row_restart(notes, k, back, colour_pieces(sh, notes, ppq)) if rows else k) % c["n"]
     elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS and (sh.get("hz") or {}).get("tones"):
         k = hz_steps(sh, notes, ppq)
     elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS and sh.get("range") and not sh.get("hz"):
@@ -2222,30 +2245,45 @@ def cycle_turns(sh, notes, ppq):
         k = np.floor((s - x0) / g + 0.5).astype(np.int64)
     else:
         k = np.unique(s, return_inverse=True)[1].reshape(-1)
-    if rows and sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS:
-        k = row_restart(notes, k, back)
+    if rows:
+        k = row_restart(notes, k, back, colour_pieces(sh, notes, ppq))
     return (k // int(c["every"])) % c["n"]
 
 
-def row_restart(notes, k, back=False):
-    """Colours' "Each key row": each note's step k counted again from the first step of its part of a key row (the
-    notes on one key touching or overlapping each other; a gap starts a new part, user: a ring's right side starts
-    over too). back: counted back from the part's last step instead (the colours follow the shape's right edge).
-    k None: each start time in the part is a step (lines: the row's own notes)."""
-    o = np.lexsort((notes[:, 0], notes[:, 2]))
-    key = notes[o, 2].astype(np.int64)
-    s, e = notes[o, 0].astype(np.int64), notes[o, 1].astype(np.int64)
-    big = np.int64(1) << 40
-    reach = np.maximum.accumulate(key * big + e) - key * big  # (the furthest end so far on this key)
-    first = np.ones(len(o), bool)
-    first[1:] = (key[1:] != key[:-1]) | (s[1:] > reach[:-1])
-    part = np.cumsum(first) - 1
-    if k is None:
-        new = first.copy()
-        new[1:] |= s[1:] != s[:-1]
-        ks = np.cumsum(new)
+def row_restart_ok(sh):
+    """Colours' "Each key row" works on Spam / Outline spam shapes only (user): Fill, Empty and lines have one note
+    per piece of a key row, so every note would start again (one colour)."""
+    return sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS and "notes" not in sh
+
+
+def colour_pieces(sh, notes, ppq):
+    """Which piece of its key row each note of a spam shape is in: the shape's own pieces (a gap between them in the
+    shape starts a new one even where a note sticks out over it, user's hunt), by stretch_of; None = none found."""
+    st = merged_rows(range_stretches(sh, ppq))
+    if not len(st):
+        return None
+    j = stretch_of(st, notes)
+    return np.where(j >= 0, j, len(st) + np.arange(len(j)))  # (a note on no piece: one of its own)
+
+
+def row_restart(notes, k, back=False, piece=None):
+    """Colours' "Each key row": each note's step k counted again from the first step of its piece of a key row (a
+    gap starts a new piece, user: a ring's right side starts over too). piece: each note's piece (colour_pieces); None
+    = the notes on one key touching or overlapping each other. back: counted back from the piece's last step instead
+    (the colours follow the shape's right edge)."""
+    if piece is None:
+        o = np.lexsort((notes[:, 0], notes[:, 2]))
+        key = notes[o, 2].astype(np.int64)
+        s, e = notes[o, 0].astype(np.int64), notes[o, 1].astype(np.int64)
+        big = np.int64(1) << 40
+        reach = np.maximum.accumulate(key * big + e) - key * big  # (the furthest end so far on this key)
+        first = np.ones(len(o), bool)
+        first[1:] = (key[1:] != key[:-1]) | (s[1:] > reach[:-1])
     else:
-        ks = np.asarray(k, np.int64)[o]
+        o = np.argsort(piece, kind="stable")
+        first = np.r_[True, piece[o][1:] != piece[o][:-1]]
+    part = np.cumsum(first) - 1
+    ks = np.asarray(k, np.int64)[o]
     at = np.flatnonzero(first)
     got = np.maximum.reduceat(ks, at)[part] - ks if back else ks - np.minimum.reduceat(ks, at)[part]
     out = np.empty(len(o), np.int64)

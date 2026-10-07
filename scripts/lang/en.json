@@ -442,7 +442,8 @@
  "colours.rows_off": "Off",
  "colours.rows_start": "From its start",
  "colours.rows_end": "From its end",
- "colours.rows_tip": "From its start: each key row starts again at the first channel where its notes begin, so the colours follow the shape's left edge instead of making straight stripes.\nFrom its end: each key row's last note gets the first channel, counting back, so the colours follow the shape's right edge (exact with Ends: Stretch or a short gate).\nA row with a gap (like a ring's two sides) starts again after the gap too.\nLines: each row counts its own notes.",
+ "colours.rows_tip": "From its start: each key row starts again at the first channel where its notes begin, so the colours follow the shape's left edge instead of making straight stripes.\nFrom its end: each key row's last note gets the first channel, counting back, so the colours follow the shape's right edge (exact with Ends: Stretch or a short gate).\nA row with a gap (like a ring's two sides) starts again after the gap too.\nSpam and Outline spam shapes only.",
+ "colours.rows_only": "\n\nNone of the picked shapes is Spam or Outline spam: Fill, Empty and lines have one note per piece of a key row, so every note would start again (one colour).",
  "colours.tip": "The notes take turns over several channels, so the colour changes with each turn (which colours you see depends on the program showing the MIDI).\nBy step: each step the next channel (spam: each gate column; lines: each note in time).\nBy key: each key the next channel (rows).\nBy time: a note length from the start of the song, like the snap (1/4 = a beat), so it lines up with the bar lines.\nChannels: how many take turns. Every: how long one channel lasts.\nNeeds Channels: Multi channel.",
  "colours.needs": "\n\nChannels isn't Multi channel now: all its notes are in one channel, so the colour doesn't change.",
  "panel_custom.hz_bass": "Hz bass",
@@ -2231,7 +2232,7 @@
   "",
   "Every channel has its own note colour.",
   "",
-  "Colours (in the side panel, under Velocity): any shape's notes take turns over several channels, so its colour keeps changing. By step = each step the next channel (spam: each gate column; lines: each note in time), By key = each key, By time = every note length from the start of the song (1/4 = a beat, so it lines up with the bar lines). Channels = how many take turns, every = how long one lasts. Each key row (By step / By time): From its start = each key row starts again at the first channel where its notes begin (after a gap too), so the colours follow the shape's left edge; From its end = counted back from each row's last note, so they follow the right edge. It needs Multi channel. Which colours you see depends on the program showing the MIDI."
+  "Colours (in the side panel, under Velocity): any shape's notes take turns over several channels, so its colour keeps changing. By step = each step the next channel (spam: each gate column; lines: each note in time), By key = each key, By time = every note length from the start of the song (1/4 = a beat, so it lines up with the bar lines). Channels = how many take turns, every = how long one lasts. Each key row (By step / By time, Spam and Outline spam shapes only): From its start = each key row starts again at the first channel where its notes begin (after a gap too), so the colours follow the shape's left edge; From its end = counted back from each row's last note, so they follow the right edge. It needs Multi channel. Which colours you see depends on the program showing the MIDI."
  ],
  "help.channels.words": "channel track overlap colour color cycle take turns rainbow",
  "help.files.title": "Saving and MIDI export",
