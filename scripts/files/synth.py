@@ -1,7 +1,7 @@
 """The built-in synth (the Hz bass preview): BASS + BASSMIDI by Un4seen Developments through ctypes.
 
 The DLLs sit in scripts/bass/x64 and x86 (the one matching this Python is used; the .exe carries the 64-bit ones
-inside). They are free for non-commercial use only (README). Nothing here needs a MIDI-out device.
+inside); Linux's .so files in scripts/bass/linux-x64 (64-bit PCs only). They are free for non-commercial use only (README). Nothing here needs a MIDI-out device.
 
 Sound is made ahead of time, not live: render() turns a stretch of the notes into sound (48 kHz stereo floats) and
 can run in several threads at once, each on its own core (the DLL lets go of Python while it works). Speed depends
@@ -21,6 +21,7 @@ from collections import deque
 import numpy as np
 
 from files.about import HERE
+from files.system import WINDOWS
 
 RATE = 48000  # frames a second
 PREROLL = 1.0  # seconds rendered before a stretch and thrown away. Measured: joined stretches differ from one long
@@ -71,10 +72,15 @@ def _load():
     if _dlls:
         return _dlls
     arch = "x64" if struct.calcsize("P") == 8 else "x86"
-    folder = os.path.join(getattr(sys, "_MEIPASS", os.path.join(HERE, "scripts")), "bass", arch)
+    folder = os.path.join(getattr(sys, "_MEIPASS", os.path.join(HERE, "scripts")), "bass",
+                          arch if WINDOWS else "linux-" + arch)
     try:
-        bass = ctypes.WinDLL(os.path.join(folder, "bass.dll"))
-        midi = ctypes.WinDLL(os.path.join(folder, "bassmidi.dll"))
+        if WINDOWS:
+            bass = ctypes.WinDLL(os.path.join(folder, "bass.dll"))
+            midi = ctypes.WinDLL(os.path.join(folder, "bassmidi.dll"))
+        else:  # (Linux, untested: libbassmidi.so needs libbass.so's names, so that one is shared first)
+            bass = ctypes.CDLL(os.path.join(folder, "libbass.so"), mode=ctypes.RTLD_GLOBAL)
+            midi = ctypes.CDLL(os.path.join(folder, "libbassmidi.so"))
     except (AttributeError, OSError) as e:
         raise SynthError("synth.no_dll", err=e) from None
     u, i, p, f = ctypes.c_uint, ctypes.c_int, ctypes.c_void_p, ctypes.c_float
@@ -92,7 +98,7 @@ def _load():
                             ("BASS_SetConfig", [u, u], i), ("BASS_GetConfig", [u], u)):
         fn = getattr(bass, name)
         fn.argtypes, fn.restype = args, res
-    for name, args, res in (("BASS_MIDI_FontInit", [ctypes.c_wchar_p, u], u), ("BASS_MIDI_FontFree", [u], i),
+    for name, args, res in (("BASS_MIDI_FontInit", [ctypes.c_wchar_p if WINDOWS else ctypes.c_char_p, u], u), ("BASS_MIDI_FontFree", [u], i),
                             ("BASS_MIDI_StreamCreateEvents", [p, u, u, u], u),
                             ("BASS_MIDI_StreamSetFonts", [u, p, u], i), ("BASS_MIDI_StreamLoadSamples", [u], i)):
         fn = getattr(midi, name)
@@ -137,7 +143,9 @@ class Synth:
 
     def set_font(self, path):
         """Opens a soundfont (.sf2 / .sfz); the old one is closed. SynthError if it can't be read."""
-        font = self.midi.BASS_MIDI_FontInit(path, _UNICODE)
+        # (file names: UTF-16 on Windows, UTF-8 bytes elsewhere)
+        font = (self.midi.BASS_MIDI_FontInit(path, _UNICODE) if WINDOWS else
+                self.midi.BASS_MIDI_FontInit(os.fsencode(path), 0))
         if not font:
             raise SynthError("synth.bad_font", name=os.path.basename(path), err=self.bass.BASS_ErrorGetCode())
         with self._lock:
