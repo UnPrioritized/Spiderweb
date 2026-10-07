@@ -72,7 +72,16 @@ def losses(shapes):
         out.append(tr("convert.tumours_become_fixed_points_they_can"))
     if any(sh["kind"] in LINE_KINDS and sh.get("end_dot") for sh in shapes):
         out.append(tr("convert.last_note_starts_on_it_is"))
+    if any(keeps_notes(sh) for sh in shapes):
+        out.append(tr("convert.pieces_become_complete"))
     return out + shared_settings(shapes)[1]
+
+
+def keeps_notes(sh):
+    """A piece cut from another shape that still makes that shape's notes (sliced.py)."""
+    from notes.engine import as_made
+    from notes.sliced import moved_by
+    return bool(sh.get("cut")) and moved_by(as_made(sh)) is not None
 
 
 NOTE_SETTINGS = (("glue", "convert.glue"), ("fx", "convert.fx"), ("cycle", "colours.colours"))
