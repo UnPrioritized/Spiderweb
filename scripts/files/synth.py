@@ -71,6 +71,16 @@ _STREAMPROC = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)(ctypes.c_uint, ct
 _dlls = None
 
 
+def _pin(*paths):
+    """(Windows) The DLLs stay loaded until Spiderweb ends. A MIDI-out device running on BASS (OmniMIDI, measured
+    2026-10-07) shares ours and unloads them once too often as it closes: loaded again at its next use, BASSMIDI then
+    crashed at the built-in synth's next stream (access violation)."""
+    k32 = ctypes.WinDLL("kernel32")
+    k32.GetModuleHandleExW.argtypes = [ctypes.c_uint, ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_void_p)]
+    for path in paths:
+        k32.GetModuleHandleExW(1, path, ctypes.byref(ctypes.c_void_p()))  # (1 = GET_MODULE_HANDLE_EX_FLAG_PIN)
+
+
 def _load():
     """(bass, bassmidi), loaded once. SynthError when they can't be."""
     global _dlls
@@ -83,6 +93,7 @@ def _load():
         if WINDOWS:
             bass = ctypes.WinDLL(os.path.join(folder, "bass.dll"))
             midi = ctypes.WinDLL(os.path.join(folder, "bassmidi.dll"))
+            _pin(os.path.join(folder, "bass.dll"), os.path.join(folder, "bassmidi.dll"))
         else:  # (Linux, untested: libbassmidi.so needs libbass.so's names, so that one is shared first)
             bass = ctypes.CDLL(os.path.join(folder, "libbass.so"), mode=ctypes.RTLD_GLOBAL)
             midi = ctypes.CDLL(os.path.join(folder, "libbassmidi.so"))
