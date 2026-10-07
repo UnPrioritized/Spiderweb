@@ -25,6 +25,19 @@ def kind_key(st):
     return {"ellipse": "drawer.circle", "curve": "drawer.curve", "arc": "drawer.arc"}.get(st["kind"], "drawer.line")
 
 
+def row_lines(w):
+    """The style "Layers.Treeview": a faint line under each row (user), drawn over the row's own colour (picked rows
+    stay blue). The 1 px image is a named Tk image, so it lives as long as the program."""
+    st, img = ttk.Style(w), "layers_row_line"
+    if img not in w.tk.call("image", "names"):
+        w.tk.call("image", "create", "photo", img, "-width", 1, "-height", 1)
+        w.tk.call(img, "put", look.LIST_LINE)
+    if "Layers.line" not in st.element_names():
+        st.element_create("Layers.line", "image", img)
+    st.layout("Layers.Treeview.Row", [("Treeitem.row", {"sticky": "nswe", "children": [
+        ("Layers.line", {"side": "bottom", "sticky": "we"})]})])
+
+
 def without_group(st):
     """A copy of the stroke out of its group (pasted copies are strokes of their own)."""
     lay = {k: v for k, v in (st.get("layer") or {}).items() if k != "group"}
@@ -188,7 +201,9 @@ class DrawerLayers:
         s = self.scale
         box = self.layers_box = ttk.LabelFrame(side, text=tr("layers.title"), padding=4)
         box.pack(fill="both", expand=True, pady=(8, 0))
-        t = self.layers = ttk.Treeview(box, columns=("eye", "lock"), show="tree headings", selectmode="extended")
+        row_lines(self)
+        t = self.layers = ttk.Treeview(box, style="Layers.Treeview", columns=("eye", "lock"), show="tree headings",
+                                       selectmode="extended")
         t.heading("#0", text=tr("layers.strokes"), anchor="w")
         t.heading("eye", text=EYE)
         t.heading("lock", text=LOCK)

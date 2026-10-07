@@ -165,6 +165,7 @@ ERASE_BOX = pick("#d02020", "#ff5050")
 STICK = pick("#d000d0", "#ff4dff")  # the mark where a point sticks
 STICK_LINE = pick("#c070e0", "#d08cff")  # the parts ending at that point (lighter, so the mark stands out on them)
 STICK_GUIDE = pick("#dcb4ee", "#7a5a90")  # the drawer's Circle guide: the touched stroke's faint dotted copy
+LIST_LINE = pick("#e6e6e6", "#4a4a4e")  # the faint line under each row of the drawer's Layers list
 MIRROR_SIDE = pick("#f0f0f2", "#36363a")  # Mirror: the side that gets the mirrored copy (faint grey)
 MIRROR_LINE = pick("#0097a7", "#26c6da")  # Mirror: the line it's mirrored across
 
