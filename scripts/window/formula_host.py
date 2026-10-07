@@ -20,6 +20,7 @@ from notes.pattern import (PATTERN_PRESETS, SHAPE_NAMES, SHAPE_PRESETS, baked_pa
 
 STRAIGHT = [[0.0, 0.0], [1 / 3, 1 / 3], [2 / 3, 2 / 3], [1.0, 1.0]]  # a funnel curve's origin when given a shape
 DRAWER_SCALE = 0.01  # a drawer pattern's sizes: shares of the board, in 100ths
+BIG_PLAIN = 10_000  # Turn into plain curve: anchors asked about past this (big_ok)
 
 
 def layer_name(layer, p):
@@ -67,6 +68,7 @@ class FormulaHost:
     sym_modes = ("mirror", "turn")  # symmetric halves a baked curve can get (a funnel's curves have none)
     layers = ("shape", "pattern")  # the formulas it can have
     plain_label = "roll_menu.turn_into_plain_curve"
+    asks_big = True  # Turn into plain curve asks first past BIG_PLAIN anchors (bake works on a copy)
 
     def targets(self):
         """The holders the menu / window change."""
@@ -193,15 +195,40 @@ class FormulaHost:
         tgts = self.with_formula()
         if not tgts:
             return
-        self.begin(tr("panel_pattern.turn_into_plain_curve"))
         self.app.busy(tr("panel_pattern.baking"))  # (thousands of loops take seconds)
         try:
-            for h in tgts:
-                self.bake(h)
+            if self.asks_big:  # (baked on copies first: a huge result is asked about before anything changes)
+                news = [copy.deepcopy(h) for h in tgts]
+                for c in news:
+                    self.bake(c)
+                if not self.big_ok(sum(anchor_count(c["pts"]) for c in news)):
+                    return
+            self.begin(tr("panel_pattern.turn_into_plain_curve"))
+            for i, h in enumerate(tgts):
+                if self.asks_big:
+                    h.clear()
+                    h.update(news[i])
+                else:
+                    self.bake(h)
             self.spread()
             self.changed()
         finally:
             self.app.busy(None)
+
+    def big_ok(self, n):
+        """True = go ahead. More than BIG_PLAIN anchors are asked about (user, 2026-10-07): a curve that big is slow
+        to show while it's selected. "Don't ask again" is remembered like big_ask's."""
+        from window.big_ask import dialog
+        if n <= BIG_PLAIN or "plain" in self.app.big_skip:
+            return True
+        self.app.busy(None)
+        go, skip = dialog(self.parent or self.app, tr("big_ask.title"),
+                          tr("panel_pattern.plain_big", n=f"{n:,}") + "\n\n" + tr("big_ask.go"), False)
+        if go and skip:
+            self.app.big_skip.add("plain")
+        if go:
+            self.app.busy(tr("panel_pattern.baking"))
+        return go
 
     def open_dialog(self, layer):
         from window.pattern_dialog import FormulaDialog
@@ -509,6 +536,7 @@ class PolygonHost(FormulaHost):
     pattern_help = "pattern_dialog.help_polygon"
     number_tip = "panel_pattern.number_tip_polygon"
     plain_label = "roll_menu.turn_into_plain_lines"
+    asks_big = False  # (bake changes the polygon's shape, not the holder; plain lines aren't slow to show)
 
     def __init__(self, app):
         self.app = self.parent = app
