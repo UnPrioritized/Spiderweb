@@ -1908,6 +1908,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self._normal_geometry = self.wm_geometry()
 
     def on_close(self):
+        if self.drawer and self.drawer.winfo_exists() and not self.drawer.may_quit():
+            return
         if not self.close_autosave():
             return
         self.stop_play()

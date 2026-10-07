@@ -1955,6 +1955,16 @@ class Drawer(DrawerLayers, tk.Toplevel):
         return not (self.dirty and self.strokes) or messagebox.askyesno(
             tr("drawer.spiderweb"), tr("drawer.the_current_drawing_isn_t_saved"), parent=self)
 
+    def may_quit(self):
+        """Spiderweb is closing: True if the drawing is saved, or the user says to close anyway (the drawer shown
+        first, so they see what isn't saved)."""
+        if not (self.dirty and self.strokes):
+            return True
+        self.deiconify()
+        self.lift()
+        return messagebox.askyesno(tr("drawer.spiderweb"), tr("drawer.unsaved_quit"), icon="warning", default="no",
+                                   parent=self)
+
     def open_selected(self):
         name = self.picked()
         if not name or not self.keep_changes():

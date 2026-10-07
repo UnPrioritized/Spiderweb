@@ -911,6 +911,7 @@
  "drawer.ctrl_right": "Ctrl+Right",
  "drawer.spiderweb": "Spiderweb",
  "drawer.the_current_drawing_isn_t_saved": "The current drawing isn't saved. Throw it away?",
+ "drawer.unsaved_quit": "The drawing in the shape drawer isn't saved.\nClose Spiderweb anyway and lose it?",
  "drawer.couldn_t_read_the_shape": "Couldn't read the shape \"{name}\".",
  "drawer.is_built_in_and_can_t": "\"{name}\" is built in and can't be deleted.",
  "drawer.the_built_in_comes_back_in": "\nThe built-in \"{built_in_name}\" comes back in its place.",
