@@ -16,6 +16,7 @@ from files.speed import loops
 from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX_STROKE, block_notes, check_notes,
                           clean_curve, clean_cycle,
                           clean_strokes, custom_notes_groups, custom_strokes, cycle_turns, cycling)
+from notes.between import KINDS as BETWEEN_KINDS, clean_between
 from notes.envelope import env_values, velocity_env
 from notes.joined import clean_joined, is_joined, joined_paths
 from notes.hzbass import clean_hz, velocity_factor
@@ -143,6 +144,9 @@ def clean_shape(sh):
     tm = clean_tumour(sh.get("tumour")) if out["kind"] in LINE_KINDS else None
     if tm:
         out["tumour"] = tm
+    bt = clean_between(sh.get("between")) if out["kind"] in BETWEEN_KINDS else None
+    if bt:  # one of an Add between group (between.py)
+        out["between"] = bt
     if out["kind"] == "custom":
         strokes = clean_strokes(sh.get("strokes"))
         if len(out["pts"]) != 3 or not strokes:
