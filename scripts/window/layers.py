@@ -161,11 +161,26 @@ class DrawerLayers:
         self.edit_layers({i: {"group": None} for g in groups for i in self.members(g)})
 
     def layer_menu_items(self, m, idx):
-        """Group / Ungroup in a stroke menu (the board's and the list's)."""
+        """Group / Ungroup, Invert selection, Hide / Lock selected in a stroke menu (the board's and the list's)."""
         m.add_command(label=tr("layers.group"), command=lambda: self.group_strokes(idx),
                       state="normal" if idx else "disabled")
         m.add_command(label=tr("layers.ungroup"), command=lambda: self.ungroup(idx),
                       state="normal" if any(self.group_of(i) for i in idx) else "disabled")
+        m.add_separator()
+        m.add_command(label=tr("layers.invert"), command=self.invert_picks)
+        hidden = bool(idx) and all(self.is_hidden(i) for i in idx)  # (all already: the other way)
+        m.add_command(label=tr("layers.show_picked" if hidden else "layers.hide_picked"),
+                      command=lambda: self.edit_layers({i: {"hidden": not hidden} for i in idx}))
+        locked = bool(idx) and all(self.is_locked(i) for i in idx)
+        m.add_command(label=tr("layers.unlock_picked" if locked else "layers.lock_picked"),
+                      command=lambda: self.edit_layers({i: {"lock": not locked} for i in idx}))
+
+    def invert_picks(self):
+        """Invert selection: every shown stroke not picked is picked instead (locked ones too, as in the list)."""
+        now = set(self.chosen())
+        idx = [i for i in self.shown_idx() if i not in now]
+        self.sel, self.picks, self.boxes = (idx[-1] if idx else None), set(idx[:-1]), []
+        self.redraw()
 
     # ------------------------------------------------------------ the list
 
