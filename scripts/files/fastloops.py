@@ -9,6 +9,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   paint_notes    roll_draw.paint_region: the notes' colours straight into the picture (the last painted wins)
   overlap_order  engine.resolve_overlaps' groups and sort (first_seen + overlap_order)
   overlap_sweep  engine.resolve_overlaps after its sort: cut / stretch / merge the notes on one key and slot
+  midi_events    midi_out.track_data: one track's note-ons / offs as MIDI file bytes
 The first start compiles them (about a second, in the background); the result is kept in __pycache__ for the next
 starts (not in the exe: its files can't be kept, so it compiles each start)."""
 
@@ -366,6 +367,49 @@ def overlap_sweep(notes, order, group):
     return out, m
 
 
+@njit(cache=CACHE, nogil=True)
+def _put_vlq(out, p, d):
+    """A MIDI wait (7 bits per byte, every byte but the last with the top bit set) at out[p]; returns the next p."""
+    k = 1 + (d >= 1 << 7) + (d >= 1 << 14) + (d >= 1 << 21)
+    for b in range(k):
+        left = k - 1 - b
+        out[p + b] = ((d >> (7 * left)) & 0x7F) | (0x80 if left > 0 else 0)
+    return p + k
+
+
+@njit(cache=CACHE, nogil=True)
+def midi_events(notes, order, ch, most):
+    """midi_out.track_data's events as bytes (end-of-track not included): order = event numbers in time order
+    (note i's on = 2i, its off = 2i + 1); a wait over most is split by empty text events (FF 01 00)."""
+    size, last = 0, 0
+    for i in range(len(order)):
+        j = order[i]
+        d = notes[j >> 1, j & 1] - last
+        last += d
+        while d > most:
+            size += 7  # (most takes 4 bytes)
+            d -= most
+        size += 4 + (d >= 1 << 7) + (d >= 1 << 14) + (d >= 1 << 21)
+    out = np.empty(size, np.uint8)
+    p, last = 0, 0
+    for i in range(len(order)):
+        j = order[i]
+        d = notes[j >> 1, j & 1] - last
+        last += d
+        while d > most:
+            p = _put_vlq(out, p, most)
+            out[p], out[p + 1], out[p + 2] = 0xFF, 0x01, 0x00
+            p += 3
+            d -= most
+        p = _put_vlq(out, p, d)
+        on = (j & 1) == 0
+        out[p] = (0x90 if on else 0x80) | ch
+        out[p + 1] = notes[j >> 1, 2] & 0xFF
+        out[p + 2] = notes[j >> 1, 3] & 0xFF if on else 0
+        p += 3
+    return out
+
+
 def warm():
     """Compiles (or loads) every loop with the same kinds of values the program hands them."""
     i1, f, b = np.zeros(1, np.int64), 0.0, np.zeros(1, bool)
@@ -378,3 +422,4 @@ def warm():
     paint_notes(np.zeros((1, 3), np.uint8), 0, 0, 1, 1, i1, i1, i1, i1, i1, np.zeros((1, 2, 3), np.uint8))
     overlap_sweep(np.zeros((1, 6), np.int64), i1, i1)
     overlap_order(np.zeros((1, 6), np.int64))
+    midi_events(np.zeros((1, 6), np.int64), np.zeros(2, np.int64), 0, 1)

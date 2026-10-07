@@ -5,6 +5,7 @@ import struct
 import numpy as np
 
 from files.safefile import write_bytes
+from files.speed import loops
 from notes.engine import slot_track_channel
 
 PPQ_WARN = 32767  # a PPQ this high or higher: many MIDI programs can't open the file; still written
@@ -24,12 +25,16 @@ def track_data(notes, ch):
     """One track's events (a note-on and a note-off per note) as bytes, ending with end-of-track. Events in time
     order, note-offs first on a shared tick, otherwise in the notes' order."""
     n = len(notes)
-    tick = np.column_stack([notes[:, 0], notes[:, 1]]).ravel()  # on, off, on, off, ...
-    on = np.tile(np.array([1, 0], np.int64), n)
-    order = np.lexsort((np.arange(2 * n), on, tick))
-    tick, on = tick[order], on[order]
-    key = np.repeat(notes[:, 2], 2)[order]
-    vel = np.repeat(notes[:, 3], 2)[order] * on
+    tick = np.empty(2 * n, np.int64)  # on, off, on, off, ... as tick * 2, + 1 on a note-on (so offs come first)
+    tick[0::2] = notes[:, 0] * 2 + 1
+    tick[1::2] = notes[:, 1] * 2
+    order = np.argsort(tick, kind="stable")  # (one number sorts in half the time of three)
+    fast = loops()
+    if fast is not None:  # (the bytes in one pass: ~3x quicker)
+        return fast.midi_events(notes, order, ch, MAX_DELTA).tobytes() + vlq(0) + b"\xFF\x2F\x00"
+    tick, on, note = tick[order] >> 1, (order & 1) ^ 1, order >> 1
+    key = notes[note, 2]
+    vel = notes[note, 3] * on
     delta = np.diff(tick, prepend=0)
     status = np.where(on == 1, 0x90 | ch, 0x80 | ch)
     if len(delta) and delta.max() > MAX_DELTA:
