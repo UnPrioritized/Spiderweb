@@ -372,7 +372,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if w < 50:
             return
         bs = [b for sh in self.app.shapes for b, _ in cached_path(sh)]
-        lo, hi = (min(bs), max(bs)) if bs else (0, 4 * self.app.beats)
+        notes = self.app.rendered
+        if len(notes):  # (and the notes: pages / gates can put them far past the drawings, user)
+            bs += [notes[:, 0].min() / self.app.ppq, notes[:, 1].max() / self.app.ppq]
+        lo, hi = (float(min(bs)), float(max(bs))) if bs else (0, 4 * self.app.beats)
         span = max(hi - lo, 1)
         self.sx = (w - self.kb_w) / (span * 1.06)
         self.view_t = max(0.0, lo - span * 0.03)
