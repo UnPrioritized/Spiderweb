@@ -13,7 +13,7 @@ from notes.joined import shown_tumour, unify_tumours
 from notes.tumour import GRAPH_KEYS, TUMOUR_DEFAULTS, clean_graph
 from window.graph_window import GraphWindow
 from window.panel_custom import GAP_COLOR
-from window.widgets import LocalUndo, Scrub, Tooltip, bad, good, grid_shown
+from window.widgets import LocalUndo, Scrub, Tooltip, bad, good, grid_shown, unchanged
 
 SHAPE_CHOICES = [("triangle", tr("tumour_window.triangle")), ("square", tr("tumour_window.square")),
                  ("circle", tr("tumour_window.circle")), ("parabola", tr("tumour_window.parabola"))]
@@ -81,7 +81,7 @@ class TumourWindow(tk.Toplevel):
             e = ttk.Entry(box, textvariable=var, width=10)
             e.grid(row=r, column=1, sticky="w", padx=(5, 3), pady=1)
             e.bind("<Return>", lambda ev, key=key: (self.on_entry(key), "break")[1])  # (not Accept)
-            e.bind("<FocusOut>", lambda ev, key=key: self.on_entry(key))
+            e.bind("<FocusOut>", lambda ev, key=key: self.on_entry(key, left=True))
             Scrub(app, [(e, var, lambda key=key: self.on_entry(key))], steps, lo, hi, label=lb)
             if key in GRAPH_KEYS:
                 b = self.graph_btns[key] = ttk.Button(box, text="…", width=2,
@@ -111,7 +111,7 @@ class TumourWindow(tk.Toplevel):
             e = ttk.Entry(row, textvariable=var, width=5)
             e.pack(side="left", padx=(5 if not i else 0, 0))
             e.bind("<Return>", lambda ev, key=key: (self.on_entry(key), "break")[1])  # (not Accept)
-            e.bind("<FocusOut>", lambda ev, key=key: self.on_entry(key))
+            e.bind("<FocusOut>", lambda ev, key=key: self.on_entry(key, left=True))
             Tooltip(e, TIPS["range"])
             self.widgets.append(e)
             self.entries[key] = e
@@ -284,8 +284,9 @@ class TumourWindow(tk.Toplevel):
             self.vars[key].set(fmt(round(value, 3)))
         for key in ("start", "end"):
             self.vars[key].set(fmt(round(tm[key] * 100, 3)))
-        for e in self.entries.values():
+        for key, e in self.entries.items():
             e.config(style="TEntry")
+            e.shown_text = self.vars[key].get()  # (left unchanged: nothing happens, see on_entry)
         self.loading = False
         on = tm["on"] and bool(tgts)
         self.on_box.config(state="normal" if tgts else "disabled")
@@ -348,9 +349,11 @@ class TumourWindow(tk.Toplevel):
         if key == "on" and value:
             app.tips.show("tumours")
 
-    def on_entry(self, key):
+    def on_entry(self, key, left=False):
+        """A number typed (Enter, quick change), or the box left (left: nothing happens while it still shows what
+        sync put there; else several shapes all got the first one's number, or a rounded one was written back)."""
         var, e = self.vars[key], self.entries[key]
-        if self.loading or str(e.cget("state")) == "disabled":
+        if self.loading or str(e.cget("state")) == "disabled" or left and unchanged(e):
             return
         try:
             x = calc(var.get())
