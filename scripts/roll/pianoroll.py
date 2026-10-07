@@ -73,6 +73,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self._shown = None       # the pixels the picture on screen has now (show_image sends only what differs)
         self._ring = None       # the selected notes' outline, worked out (draw_ring)
         self._carry = None     # the picture's parts while shapes are dragged (paint_carried)
+        self._draft_base = None  # the other notes' picture while a shape is drawn / placed (paint_drafted)
         self.paint_time = 0.0    # seconds the last whole repaint of the notes took (app.shapes_changed: slow?)
         self._redraw_pending = False
         self._late_redraw = None  # request_redraw(delay)'s timer

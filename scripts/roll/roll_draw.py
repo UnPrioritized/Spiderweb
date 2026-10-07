@@ -368,7 +368,9 @@ class RollDrawing:
         pic = (app.rendered, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols)))
         # (a shape being drawn / placed: its notes are in the picture, unless only its lines show)
         drafted = self.draft_notes() is not None
-        old = None if drafted or not app.show_notes.get() or self._tiles is None else self._note_pic
+        if not drafted:
+            self._draft_base = None
+        old =None if drafted or not app.show_notes.get() or self._tiles is None else self._note_pic
         if self._exact:
             self.after_cancel(self._exact)
             self._exact = None
@@ -391,17 +393,20 @@ class RollDrawing:
             self._exact = self.after(300, self.paint_exact)
         else:
             started = time.perf_counter()
-            rects = self.note_rects(w, h) if app.show_notes.get() else None
-            if rects is not None and len(rects[0]) > w * h // 2000:
-                # Lots of notes: paint grid + notes as one picture (thousands of canvas items redraw slowly)
-                self.paint_image(w, h, rows, cols, rects)
-                self._note_pic = None if drafted else pic
+            if drafted and app.show_notes.get() and self.paint_drafted(w, h, rows, cols):
+                self._note_pic = None
             else:
-                self._tiles = self._note_pic = self._img = None
-                self.draw_grid(w, h, rows, cols)
-                colors = note_tables(app.picture_pal)[0]
-                for x0, y0, x1, y1, color in zip(*(v.tolist() for v in rects or ())):
-                    self.create_rectangle(x0, y0, x1, y1, fill=colors[color][0], outline=colors[color][1])
+                rects = self.note_rects(w, h) if app.show_notes.get() else None
+                if rects is not None and len(rects[0]) > w * h // 2000:
+                    # Lots of notes: paint grid + notes as one picture (thousands of canvas items redraw slowly)
+                    self.paint_image(w, h, rows, cols, rects)
+                    self._note_pic = None if drafted else pic
+                else:
+                    self._tiles = self._note_pic = self._img = None
+                    self.draw_grid(w, h, rows, cols)
+                    colors = note_tables(app.picture_pal)[0]
+                    for x0, y0, x1, y1, color in zip(*(v.tolist() for v in rects or ())):
+                        self.create_rectangle(x0, y0, x1, y1, fill=colors[color][0], outline=colors[color][1])
             self.paint_time = time.perf_counter() - started
         if carried is None:  # (while shapes are dragged their notes are stamped along: no ring)
             self.draw_ring(w, h)
@@ -836,12 +841,13 @@ class RollDrawing:
         lo, hi = self.visible_range(t_lo, t_hi)
         return self.sorted_notes()[lo:hi]
 
-    def note_rects(self, w, h, clip=None, area=None, only=None):
+    def note_rects(self, w, h, clip=None, area=None, only=None, draft="with"):
         """On-screen notes as whole-pixel rectangles, skipping exact repeats: NumPy arrays (x0, y0, x1, y1, colour),
         colour = a number in NOTE_COLORS. Painted in this order (selected shapes' notes, then the draft, on top).
         clip = (x0, y0, x1, y1): only the notes that touch this part of the screen (the same rectangles).
         area = (x0, y0, x1, y1): as if the note area were there (it can reach past the screen).
-        only: True = just the selected shapes' notes, False = all but theirs (no draft either way)."""
+        only: True = just the selected shapes' notes, False = all but theirs (no draft either way).
+        draft: "with" = the draft's notes too, "without" = all but them, "alone" = only them (paint_drafted)."""
         app, ppq = self.app, self.app.ppq
         ax, bx = self.sx / ppq, self.kb_w - self.view_t * self.sx  # x = tick * ax + bx
         ay, by = -self.sy, self.ruler_h + self.view_top * self.sy  # y = pitch * ay + by
@@ -855,9 +861,13 @@ class RollDrawing:
         t_lo, t_hi = (self.x2t(clip[0] - 2) * ppq, self.x2t(clip[2] + 2) * ppq) if clip else (self.x2t(kb) * ppq,
                                                                                                self.x2t(w) * ppq)
         fast = loops()
-        drafted = self.draft_notes() if only is None else None
-        kept = self.paint_order(fast) if fast else None
+        drafted = self.draft_notes() if only is None and draft != "without" else None
+        kept = self.paint_order(fast) if fast and draft != "alone" else None
         main = None
+        if draft == "alone":
+            if drafted is None:
+                return tuple(np.zeros(0, np.int64) for _ in range(5))
+            main = tuple(np.zeros(0, np.int64) for _ in range(4))
         if kept is not None:  # (the compiled loops, the notes kept in painting order: the same notes)
             (s, e, k, c, first, longest), others = kept
             b0, b1 = 0, len(first) - 1
@@ -1041,6 +1051,31 @@ class RollDrawing:
         self._img = img
         self.show_image()
 
+    def paint_drafted(self, w, h, rows, cols):
+        """The picture while a shape is drawn / placed over lots of notes: the other notes painted once, the new
+        shape's notes (painted last anyway) and the ring put over them at every move. The same pixels as painting
+        them all, minus the work. False with few notes (canvas rectangles, painted the normal way)."""
+        app = self.app
+        kb, top = int(self.kb_w), int(self.ruler_h)
+        if w - kb < 1 or h - top < 1:
+            return False
+        region = (kb, top, w, h)
+        key = (frozenset(app.sels), self.sx, self.sy, kb, top, w, h, self.view_t, self.view_top, tuple(rows),
+               tuple(cols), app.keys, app.ppq)
+        c = self._draft_base
+        if c is None or c[0] is not app.rendered or c[1] != key:
+            rects = self.note_rects(w, h, draft="without")
+            # (more than this: a picture either way, see redraw)
+            base = self.paint_region(rows, cols, rects, region, ring=False) if len(rects[0]) > w * h // 2000 else None
+            c = self._draft_base = (app.rendered, key, base)
+        if c[2] is None:
+            return False
+        img = c[2].copy()
+        self.paint_rects(img, self.note_rects(w, h, draft="alone"), region)
+        self._img = img
+        self.show_image()
+        return True
+
     def paint_exact(self):
         """The picture painted whole again (after it was moved along with the view)."""
         if self._exact:
@@ -1078,6 +1113,11 @@ class RollDrawing:
                     line[x * 3:x * 3 + 3] = px(c)
             patterns[color] = bytes(line)
         img = np.frombuffer(b"".join(patterns[c] for c in row_color), np.uint8).reshape(ih, iw, 3).copy()
+        self.paint_rects(img, rects, region, ring)
+        return img
+
+    def paint_rects(self, img, rects, region, ring=True):
+        """note_rects' notes painted over img, the pixels of region = (x0, y0, x1, y1), then the ring (paint_region)."""
         fast = loops()
         if fast:  # (the compiled loops: the colours go straight in, no list of pixels in between)
             pal = getattr(getattr(self, "app", None), "picture_pal", None)
@@ -1089,7 +1129,6 @@ class RollDrawing:
         at = self.ring_pixels(region) if ring else None
         if at is not None:
             img.reshape(-1, 3)[at] = RING_RGB
-        return img
 
     def note_pixels(self, rects, region):
         """The pixels of note_rects' notes inside region = (x0, y0, x1, y1): (where, colours), where = row * the
