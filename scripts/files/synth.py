@@ -10,7 +10,7 @@ starts PREROLL seconds early and that part is thrown away, so notes from before 
 is already full, as in one long render. Player plays sound from anywhere (it asks for it piece by piece) through
 Limiter, which keeps the level in bounds (raw BASSMIDI output peaks 10-16 times too loud with many keys).
 Live is the other way: notes sounded the moment they're sent, like a MIDI-out device ("Built-in BASSMIDI" under
-MIDI out: playback, listening with the mouse, the Hz window's keys)."""
+MIDI out: playback, listening with the mouse, the Hz window's keys), played by BASS itself without Player."""
 
 import atexit
 import ctypes
@@ -38,8 +38,9 @@ _DEVICE_NONE, _DEVICE_DEFAULT = 0, -1
 _ERROR_ALREADY = 14
 _SAMPLE_FLOAT, _STREAM_DECODE, _UNICODE = 0x100, 0x200000, 0x80000000
 _DATA_FLOAT, _POS_BYTE, _STREAMPROC_END = 0x40000000, 0, 0x80000000
-_MIDI_DECAYEND, _MIDI_NOFX = 0x1000, 0x2000
+_MIDI_DECAYEND, _MIDI_NOFX, _MIDI_ASYNC = 0x1000, 0x2000, 0x400000
 _ATTRIB_MIDI_VOICES, _ATTRIB_MIDI_VOICES_ACTIVE = 0x12003, 0x12004
+_ATTRIB_MIDI_CPU, _ATTRIB_MIDI_SRC, _ATTRIB_MIDI_KILL, _ATTRIB_MIDI_QUEUE_ASYNC = 0x12001, 0x12006, 0x12007, 0x1200d
 _ATTRIB_VOL, _ATTRIB_BUFFER = 2, 13
 _CONFIG_UPDATEPERIOD = 1
 _EV_END, _EV_NOTE, _EV_PROGRAM, _EV_TEMPO = 0, 1, 2, 62
@@ -384,31 +385,39 @@ class Player:
 
 class Live:
     """A BASSMIDI stream with 16 channels (10 = drums, as on any GM synth) that sounds each message the moment it's
-    sent, heard through Player (so the Limiter keeps it in bounds). Holds the soundfont open until close()."""
-    BUFFER = 0.08  # seconds of sound the sound device keeps ready (the sound is this much behind what's sent)
+    sent, set up like the common BASSMIDI MIDI-out driver (user, 2026-10-07: Player's Limiter + Python feeding the
+    sound pumped and stuttered next to it): BASS plays the stream itself, straight into the sound device's mix (no
+    Python in the sound thread, so a busy window can't starve it), full volume and no limiter (too loud = clipped,
+    as there), linear sample interpolation, notes killed rather than faded at the voice limit, voices dropped
+    rather than stuttering when it can't keep up. Holds the soundfont open until close()."""
+    CPU = 95  # % of the time it may spend making sound before voices are dropped (the driver's default)
+    QUEUE = 65536 * 4  # bytes of messages waiting for the sound thread (the driver's default)
 
-    def __init__(self, synth, voices, volume=0.8, nofx=False):
+    def __init__(self, synth, voices, volume=1.0, nofx=False):
         if not synth.font:
             raise SynthError("synth.no_font")
         if not synth.can_play:
             raise SynthError("synth.no_device")
         bass, midi = synth.bass, synth.midi
         self.synth, self.font_path = synth, synth.font_path
-        self.handle = midi.BASS_MIDI_StreamCreate(16, _STREAM_DECODE | _SAMPLE_FLOAT | (_MIDI_NOFX if nofx else 0),
+        self.handle = midi.BASS_MIDI_StreamCreate(16, _SAMPLE_FLOAT | _MIDI_ASYNC | (_MIDI_NOFX if nofx else 0),
                                                   RATE)
         if not self.handle:
             raise SynthError("synth.failed", err=bass.BASS_ErrorGetCode())
         self.font = synth._take()
         font = _Font(self.font, -1, 0)
         midi.BASS_MIDI_StreamSetFonts(self.handle, ctypes.byref(font), 1)
+        h, at = self.handle, bass.BASS_ChannelSetAttribute
+        for attr, value in ((_ATTRIB_BUFFER, 0), (_ATTRIB_MIDI_SRC, 0), (_ATTRIB_MIDI_KILL, 1),
+                            (_ATTRIB_MIDI_CPU, self.CPU), (_ATTRIB_MIDI_QUEUE_ASYNC, self.QUEUE),
+                            (_ATTRIB_VOL, volume)):
+            at(h, attr, float(value))
         self.set_voices(voices)
-        midi.BASS_MIDI_StreamLoadSamples(self.handle)  # (program 0 + the drums: no wait at the first notes)
-        try:
-            self.player = Player(synth, self.pull, volume, self.BUFFER)
-        except SynthError:
+        midi.BASS_MIDI_StreamLoadSamples(h)  # (program 0 + the drums: no wait at the first notes)
+        if not bass.BASS_ChannelPlay(h, 0):
+            err = bass.BASS_ErrorGetCode()
             self.close()
-            raise
-        self.player.play()
+            raise SynthError("synth.failed", err=err)
 
     def set_voices(self, voices):
         self.synth.bass.BASS_ChannelSetAttribute(self.handle, _ATTRIB_MIDI_VOICES, float(voices))
@@ -418,19 +427,9 @@ class Live:
         if self.handle:
             self.synth.midi.BASS_MIDI_StreamEvents(self.handle, _EVENTS_RAW, ctypes.byref(ctypes.c_uint32(msg)), 3)
 
-    def pull(self, n):
-        """(BASS's thread) the next n frames."""
-        out = np.zeros((n, 2), np.float32)
-        h = self.handle
-        if h:
-            self.synth.bass.BASS_ChannelGetData(h, out.ctypes.data, (n * 8) | _DATA_FLOAT)
-        return out
-
     def close(self):
         h, self.handle = self.handle, 0
         if not h:
             return
-        if getattr(self, "player", None):
-            self.player.stop()
         self.synth.bass.BASS_StreamFree(h)
         self.synth._give(self.font)
