@@ -295,10 +295,10 @@ def adjust(cl, brightness=0.0, contrast=0.0, saturation=0.0, sharpen=0.0):
     return out
 
 
-def detail(cl):
-    """How much each cell differs from its neighbours (OKLab), relative to the picture's average, capped at 3
-    (a rain streak must not take colours away from faces)."""
-    L = oklab(cl)
+def detail(cl, L=None):
+    """How much each cell differs from its neighbours (OKLab; L = oklab(cl) if already worked out), relative to the
+    picture's average, capped at 3 (a rain streak must not take colours away from faces)."""
+    L = oklab(cl) if L is None else L
     g = np.zeros(cl.shape[:2])
     g[1:] += np.sqrt(((L[1:] - L[:-1]) ** 2).sum(-1))
     g[:, 1:] += np.sqrt(((L[:, 1:] - L[:, :-1]) ** 2).sum(-1))
@@ -316,10 +316,11 @@ def fit_palette(pictures, k, locked=(), tries=4, seed=1, samples=12000, init="sp
     average of every cell it stands for (weighted by detail it drifted to outline tones). tick(0..1): told how far
     it is now and then (it may raise Cancelled)."""
     tick = tick or (lambda f: None)
-    labs, lins, wts = [], [], []
+    labs, lins, wts, whole = [], [], [], []
     for cl, al, share, focus in pictures:
-        lab = oklab(cl).reshape(-1, 3)
-        w = (1 - focus) + focus * (0.2 + detail(cl).reshape(-1))
+        whole.append(oklab(cl))
+        lab = whole[-1].reshape(-1, 3)
+        w = (1 - focus) + focus * (0.2 + detail(cl, whole[-1]).reshape(-1))
         if al is not None:
             keep = al.reshape(-1) >= 0.5
             lab, w, lin = lab[keep], w[keep], cl.reshape(-1, 3)[keep]
@@ -340,7 +341,7 @@ def fit_palette(pictures, k, locked=(), tries=4, seed=1, samples=12000, init="sp
     rng = np.random.default_rng(seed)
     look = None
     if pick == "look":  # judge each try by how close the picture looks (blurred a little), not the group error
-        look = [(oklab(c), oklab(blur(c, 2)), a) for c, a, _, _ in pictures]
+        look = [(L, oklab(blur(c, 2)), a) for L, (c, a, _, _) in zip(whole, pictures)]
     lab_all, lin_all = lab, lin
     if len(lab) > samples:
         sel = rng.choice(len(lab), samples, replace=False, p=None)
@@ -374,7 +375,7 @@ def fit_palette(pictures, k, locked=(), tries=4, seed=1, samples=12000, init="sp
             near = new if near is None else np.minimum(near, new)
         free_a = np.array(free, int)
         for _ in range(25):
-            grp = _dist2(lab, cen).argmin(1)
+            grp = _argnearest(lab, cen)
             tot = np.bincount(grp, wt, k)[free_a]
             has = tot > 0
             if not has.any():
@@ -384,7 +385,7 @@ def fit_palette(pictures, k, locked=(), tries=4, seed=1, samples=12000, init="sp
             cen[free_a[has]] = new
             if moved < 1e-4:
                 break
-        grp = _dist2(lab, cen).argmin(1)
+        grp = _argnearest(lab, cen)
         if look is None:
             err = (((lab - cen[grp]) ** 2).sum(1) * wt).sum()
         else:
@@ -416,6 +417,14 @@ def _dist2(lab, cen):
     return d
 
 
+def _argnearest(lab, cen):
+    """n x 3 colours -> each one's nearest of the k x 3 centres (the first of equal ones)."""
+    fast = speed.loops()
+    if fast:  # (the compiled loop: the same numbers)
+        return fast.nearest(np.ascontiguousarray(lab, float), np.ascontiguousarray(cen, float))
+    return _dist2(lab, cen).argmin(1)
+
+
 def _nearest(lab, pal_lab, tick=None):
     """Each colour's nearest palette colour, a piece at a time (a huge grid all at once took GBs)."""
     flat = lab.reshape(-1, 3)
@@ -423,7 +432,7 @@ def _nearest(lab, pal_lab, tick=None):
     for i in range(0, len(flat), 65536):
         if tick:
             tick(i / len(flat))
-        out[i:i + 65536] = _dist2(flat[i:i + 65536], pal_lab).argmin(1)
+        out[i:i + 65536] = _argnearest(flat[i:i + 65536], pal_lab)
     return out.reshape(lab.shape[:-1])
 
 
@@ -431,6 +440,7 @@ class Cancelled(Exception):
     """Making a picture was cancelled (a tick saw it)."""
 
 
+SURE = 1e-9  # (compiled spreading: two colours nearer each other than this, in squared OKLab, are picked by NumPy)
 _BAYER = (np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]) + 0.5) / 16 - 0.5
 
 
@@ -466,6 +476,19 @@ def _spread(cl, pal, pal_lab, strength, free, tick=None):
     """Error spreading, left to right, top to bottom. A cell needs its left neighbour and the three above it
     done, so every cell on one slanted line (x + 2y the same) can go at once."""
     rows, cols = cl.shape[:2]
+    fast = speed.loops()
+    if fast:  # (the compiled loop, cell by cell: the same picks)
+        a0, free = np.ascontiguousarray(cl, float), np.ascontiguousarray(free, float)
+        pal, pal_lab = np.ascontiguousarray(pal, float), np.ascontiguousarray(pal_lab, float)
+        idx, err, cur = np.zeros((rows, cols), np.int64), np.zeros((rows, cols, 3)), np.zeros(3)
+        y, x, forced = 0, 0, -1
+        while True:
+            if tick:
+                tick(y / rows)
+            y, x = fast.spread(a0, free, pal, pal_lab, _M1, _M2, float(strength), idx, err, cur, y, x, forced, SURE)
+            if y < 0:
+                return idx
+            forced = int(_nearest(oklab(np.clip(cur, 0, 1)[None]), pal_lab)[0])  # (too close to call: as below)
     a = cl.astype(float).copy()
     idx = np.zeros((rows, cols), int)
     lines = cols + 2 * (rows - 1)
