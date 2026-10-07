@@ -272,7 +272,8 @@ def apply(root):
                  selectforeground="#ffffff", insertcolor=TEXT, arrowcolor=TEXT, focuscolor=EDGE)
     st.map(".", foreground=[("disabled", TEXT_OFF)], background=[("disabled", WINDOW_BG)])
     for name in ("TButton", "TMenubutton"):
-        st.configure(name, background=BUTTON_BG, lightcolor=BUTTON_BG, darkcolor=BUTTON_BG)
+        st.configure(name, background=BUTTON_BG, lightcolor=BUTTON_BG, darkcolor=BUTTON_BG,
+                     padding=("3.75p", "1.5p"))  # (a little shorter than clam's 3.75p all round, user)
         st.map(name, background=[("disabled", WINDOW_BG), ("pressed", BUTTON_DOWN), ("active", BUTTON_HOT)],
                lightcolor=[("pressed", BUTTON_DOWN), ("active", BUTTON_HOT)],
                darkcolor=[("pressed", BUTTON_DOWN), ("active", BUTTON_HOT)])
