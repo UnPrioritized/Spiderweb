@@ -110,7 +110,14 @@ KEY_EDGE_C, KEY_EDGE_F = pick("#606060", "#5a5a5c"), pick("#b0b0b0", "#8a8a8c") 
 KEY_TEXT = pick("#333", "#363637")
 ROLL_EDGE = pick("#808080", "#656567")  # beside the keys, under the ruler
 RULER_BG, RULER_TICK, RULER_TEXT = pick("#f0f0f0", "#434346"), pick("#555", "#a0a0a4"), pick("#333", "#e2e2e4")
-PLAY_LINE = pick("#0a50e0", "#5b9bff")
+PLAY_LINE = pick("#0a50e0", "#d6e8ff")  # (dark: pale blue, the bright notes' blue hid a stronger one, user)
+# The notes' (fill, edge) per channel slot in the dark look (user's pick "B warm": the light look's colours lighter
+# with a little cream; light look's in roll_shared.SLOT_COLORS), the shape being drawn
+NOTES_DARK = [("#a3bef1", "#19449b"), ("#f7a39e", "#a51610"), ("#a6f4a0", "#36842b"), ("#f5e1a0", "#9c7b18"),
+              ("#cea4ef", "#611b95"), ("#a6f4ef", "#328983"), ("#f7c59e", "#a54f10"), ("#ceccc7", "#605b55"),
+              ("#f6a3ce", "#a31762"), ("#dff4a0", "#79931d"), ("#a5a9f0", "#1c2098"), ("#f5caa0", "#89592b"),
+              ("#a6f4cc", "#35865a"), ("#f5a4ef", "#922887"), ("#a6d2ef", "#36617e")]
+SELECTED_DARK, DRAFT_DARK = ("#ffd196", "#b26402"), ("#a6f4a0", "#318926")
 HANDLE = pick("#0050d0", "#5b9bff")  # a shape's points and handles
 HANDLE_FILL = pick("#ffffff")  # inside them, and the white edge round handle lines
 HANDLE_FIXED = pick("#c00000", "#ff4d4d")  # a corner that isn't free, the points of a shape being drawn

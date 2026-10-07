@@ -71,6 +71,8 @@ SLOT_COLORS = [("#7ea6f5", "#1f3a93"), ("#f58e8e", "#8f1f1f"), ("#8fd68f", "#1f6
                ("#7fd6b0", "#135c3f"), ("#e38ae3", "#7a1f7a"), ("#8fb8d6", "#1f4a6b")]
 SELECTED_COLOR = ("#ffb65c", "#9a4b00")
 DRAFT_COLOR = ("#9be39b", "#1d6b1d")
+if look.DARK:  # (the dark look's own, lighter: look.NOTES_DARK)
+    SLOT_COLORS, SELECTED_COLOR, DRAFT_COLOR = list(look.NOTES_DARK), look.SELECTED_DARK, look.DRAFT_DARK
 
 SHIFT, CTRL = 0x1, 0x4
 # the Select tool's mouse pointer: a cross (its middle = the spot pointed at) with a small dotted box
