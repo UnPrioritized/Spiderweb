@@ -152,6 +152,7 @@ class PreviewSettings(tk.Toplevel):
             return
         cfg["font"] = os.path.normpath(path)
         self.app.schedule_autosave()
+        self.app.soundfont_changed()  # (Built-in BASSMIDI plays with it too)
         self.remake()
 
     def on_voices(self):

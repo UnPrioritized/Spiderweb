@@ -25,6 +25,7 @@ from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
 from files.domino_clip import DOMINO_STARTS, clip_data, get_from_clipboard, put_on_clipboard, read_notes
 from files.midi_out import MAX_DELTA, PPQ_WARN, long_silences, write_midi
+from files.playback import keep_saved
 from files.about import HERE, VERSION
 from files.safefile import write_bytes, write_text
 from files.snap import clean_snap
@@ -366,7 +367,8 @@ class ProjectFiles:
                               "velocity": self.show_velocity.get(), "history": self.show_history.get(),
                               "show_lines": self.show_lines.get(), "show_notes": self.show_notes.get(),
                               "velocity_height": self.velocity_height() / self.scale,
-                              "midi_device": self.midi_device.get(), "live": self.live.get(),
+                              "midi_device": self.midi_device.get(), "play_voices": self.play_voices,
+                              "live": self.live.get(),
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
                               "claw_window": self.claw_pos, "strum_window": self.strum_pos, "chop_window": self.chop_pos, "hz_window": self.hz_pos, "hz_fx_height": self.hz_fx_h, "hz_preview": self.hz_preview,
                               "history_window": self.history_pos, "history_undocked": self.history_undocked,
@@ -433,7 +435,7 @@ class ProjectFiles:
                 self.state("zoomed")
             if "velocity_height" in win:
                 self._vel_height = max(int(50 * self.scale), int(float(win["velocity_height"]) * self.scale))
-            if win.get("midi_device"):
+            if win.get("midi_device") and keep_saved(str(win["midi_device"])):
                 self.midi_device.set(str(win["midi_device"]))
             self.live.set(win.get("live") is True)
             self.show_lines.set(win.get("show_lines") is not False)
@@ -449,8 +451,13 @@ class ProjectFiles:
             h = win.get("hz_fx_height")
             if isinstance(h, int) and not isinstance(h, bool) and 0 < h < 10000:
                 self.hz_fx_h = h
-            from window.hz_preview import clean_settings
+            from window.hz_preview import VOICES, clean_settings
             self.hz_preview = clean_settings(win.get("hz_preview"))
+            v = win.get("play_voices")
+            if isinstance(v, int) and not isinstance(v, bool) and VOICES[0] <= v <= VOICES[1]:
+                self.play_voices = v
+                self.voices_var.set(str(v))
+            self.sync_builtin()
             pos = win.get("history_window")
             if isinstance(pos, str) and re.fullmatch(r"(\d+x\d+)?\+-?\d+\+-?\d+", pos):
                 self.history_pos = pos

@@ -1,4 +1,5 @@
-"""Playback through a Windows MIDI-OUT device (winmm.dll via ctypes, nothing to install)."""
+"""Playback through a MIDI-OUT device: Windows' own (winmm.dll via ctypes, nothing to install) or the built-in synth
+(BUILTIN, files/synth.py's Live; the only one elsewhere)."""
 
 import ctypes
 import heapq
@@ -10,9 +11,12 @@ from ctypes import wintypes
 import numpy as np
 
 from files.lang import tr
+from files.system import WINDOWS
 from notes.engine import CHANNELS
 
-DEFAULT_DEVICE = "Windows default (MIDI Mapper)"
+MAPPER_NAME = "Windows default (MIDI Mapper)"
+BUILTIN = "Built-in BASSMIDI"  # (the user's name for it; like a device's name it's saved, so not translated)
+DEFAULT_DEVICE = MAPPER_NAME if WINDOWS else BUILTIN
 MAPPER = 0xFFFFFFFF
 
 try:
@@ -37,36 +41,53 @@ if _winmm:
     _winmm.midiOutClose.argtypes = [wintypes.HANDLE]
 
 
-def devices():
-    """Names of the MIDI-OUT devices, default first."""
-    out = [DEFAULT_DEVICE]
-    if not _winmm:
-        return out
-    for i in range(_winmm.midiOutGetNumDevs()):
+def _winmm_devices():
+    out = []
+    for i in range(_winmm.midiOutGetNumDevs() if _winmm else 0):
         caps = _Caps()
         ok = _winmm.midiOutGetDevCapsW(i, ctypes.byref(caps), ctypes.sizeof(caps)) == 0
         out.append(caps.szPname if ok else tr("playback.device", i=i + 1))
     return out
 
 
-class MidiOut:
-    """One open MIDI-OUT device, kept open until another is picked."""
+def devices():
+    """Names of the MIDI-OUT devices: Windows' default first, then the built-in synth."""
+    return [MAPPER_NAME, BUILTIN] + _winmm_devices() if _winmm else [BUILTIN]
 
-    def __init__(self):
+
+def keep_saved(name):
+    """A saved MIDI out to pick again: on Windows any (an unplugged device is told about at Play), elsewhere only
+    what's there (a Windows device saved in a settings file brought over is dropped)."""
+    return bool(_winmm) or name in devices()
+
+
+class MidiOut:
+    """One open MIDI-OUT device, kept open until another is picked. handle = winmm's, or the built-in synth's Live."""
+
+    def __init__(self, make_live=None):
         self.handle = None
         self.name = None
+        self.make_live = make_live  # () -> a started synth.Live (or raises SynthError)
 
     def open(self, name):
         """Open the device called name. Returns an error message, or None when it's ready."""
         if self.handle and self.name == name:
             return None
         self.close()
+        if name == BUILTIN:
+            from files.synth import SynthError
+            try:
+                self.handle = self.make_live()
+            except SynthError as e:
+                return str(e)
+            self.name = name
+            return None
         if not _winmm:
             return tr("playback.midi_playback_only_works_on_windows")
-        names = devices()
-        if name not in names:
+        names = _winmm_devices()
+        if name != MAPPER_NAME and name not in names:
             return tr("playback.the_midi_device_isn_t_there", name=name)
-        dev = MAPPER if name == DEFAULT_DEVICE else names.index(name) - 1
+        dev = MAPPER if name == MAPPER_NAME else names.index(name)
         # The preview synth's BASS is loaded first: some MIDI-out devices run on BASS too and load theirs by name;
         # loaded before ours, the preview can't make sound (measured with one, 2026-10-01). Loaded after, they
         # share ours and both work.
@@ -83,8 +104,12 @@ class MidiOut:
         return None
 
     def send(self, msg):
-        if self.handle:
-            _winmm.midiOutShortMsg(self.handle, msg)
+        h = self.handle
+        if h:
+            if self.name == BUILTIN:
+                h.send(msg)
+            else:
+                _winmm.midiOutShortMsg(h, msg)
 
     def note(self, ch, pitch, vel):
         """Note on (vel 0 = note off). Keys above 127 (256 keys) can't be sent: skipped."""
@@ -93,8 +118,11 @@ class MidiOut:
 
     def close(self):
         if self.handle:
-            _winmm.midiOutReset(self.handle)
-            _winmm.midiOutClose(self.handle)
+            if self.name == BUILTIN:
+                self.handle.close()
+            else:
+                _winmm.midiOutReset(self.handle)
+                _winmm.midiOutClose(self.handle)
         self.handle = self.name = None
 
 

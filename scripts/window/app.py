@@ -9,7 +9,7 @@ import math
 import os
 import time
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import filedialog, ttk, messagebox
 
 import numpy as np
 
@@ -42,7 +42,7 @@ from window.panel_text import TextPanel
 from window.claw_window import open_claw
 from window.strum_window import open_strum
 from window.chop_window import open_chop, quick_chop
-from window.hz_preview import clean_settings as clean_preview
+from window.hz_preview import VOICES, clean_settings as clean_preview
 from window.panel_tumour import TumourPanel
 from notes.joined import all_tumours, is_joined
 from window.join_split import JoinSplit
@@ -50,7 +50,8 @@ from window.history import HistoryPanel, edit_name
 from roll.pianoroll import PianoRoll
 from files import errors, speed
 from files.about import ICONS, VERSION
-from files.playback import DEFAULT_DEVICE, MidiOut, Player, devices
+from files.playback import BUILTIN, DEFAULT_DEVICE, MidiOut, Player, devices
+from files.synth import Live, Synth, SynthError
 from files.midi_out import PPQ_WARN
 from files.domino_clip import DOMINO_STARTS
 from files.clipboard import copy_count, get_text, put_text
@@ -63,7 +64,7 @@ from window.snap_picker import SnapPicker
 from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
-from window.widgets import Scrub, StatusLine, Tooltip, bad, good, remember_good, watch_bad
+from window.widgets import Scrub, StatusLine, Tooltip, bad, good, grid_shown, leave_box, remember_good, watch_bad
 
 
 VEL_KEYS = ("vel0", "vel1")
@@ -122,8 +123,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.seen_clip = None  # the Windows clipboard's copy count at Spiderweb's last copy (shared_clip)
         self.stroke_clip, self.clip_kind, self.stroke_pastes = None, None, 0  # a copied stroke (roll_live.py)
         self.playhead = 0.0  # beat of the play line
-        self.out = MidiOut()
+        self.out = MidiOut(self.make_live)
         self.player = Player(self.out)
+        self.play_voices = 1000  # Built-in BASSMIDI's voice limit (user; with the window settings)
         self._play_job = None
         self._scrub_held = {}
         self.defaults = dict(SHAPE_DEFAULTS)
@@ -156,7 +158,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.hz_start = None  # the beat picked with the Hz bass tool for a new Hz bass (roll_hz.py)
         self.hz_defaults = {"lo": 48, "hi": 58}  # the keys a new Hz bass repeats
         self.hz_preview = clean_preview({})  # the Hz bass preview's settings (hz_preview.py; with the window's)
-        self.synth = None  # the built-in synth (files/synth.py), started when the preview is first turned on
+        self.synth = None  # the built-in synth (files/synth.py), started when the preview or Built-in BASSMIDI is first used
         self.rendered, self.slot_count = NO_NOTES, 0  # (start, end, pitch, velocity, slot, owner) rows
         self.note_counts = []  # notes per shape in rendered
         self.notes_late = False  # the notes are behind the shapes (a drag going on: see shapes_changed)
@@ -269,7 +271,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                          ("Control-Left", lambda: self.rotate(False)), ("Control-Right", lambda: self.rotate(True))):
             for k in keys.split():
                 self.bind_all(f"<{k}>", self.hotkey(fn))
-        self.midi_device.trace_add("write", lambda *_: (self.stop_play(), self.out.close(), self.schedule_autosave()))
+        self.midi_device.trace_add("write", lambda *_: (self.stop_play(), self.out.close(), self.sync_builtin(),
+                                                        self.schedule_autosave()))
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.bind("<Configure>", self.remember_geometry, add="+")
         # a click anywhere outside the velocity pane = done with its line / curve
@@ -485,6 +488,25 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         dev = ttk.Combobox(box, textvariable=self.midi_device, state="readonly", values=devices())
         dev.configure(postcommand=lambda: dev.configure(values=devices()))  # re-list when it opens
         dev.grid(row=r, column=1, sticky="ew", padx=5, pady=(3, 0))
+        r += 1
+        # Built-in BASSMIDI's own row (shown only while it's picked, sync_builtin): voice limit + soundfont
+        lb = ttk.Label(box, text=tr("app.voices"))
+        lb.grid(row=r, column=0, sticky="w", pady=(3, 0))
+        cell = ttk.Frame(box)
+        cell.grid(row=r, column=1, sticky="ew", padx=5, pady=(3, 0))
+        self.voices_var = tk.StringVar(value=str(self.play_voices))
+        e = self.voices_entry = ttk.Entry(cell, textvariable=self.voices_var, width=7)
+        e.pack(side="left")
+        e.bind("<Return>", lambda ev: self.on_play_voices())
+        leave_box(self, e, self.voices_var, lambda left: self.on_play_voices())
+        Scrub(self, [(e, self.voices_var, self.on_play_voices)], (50, 500, 1), *VOICES, label=lb)
+        Tooltip(e, tr("app.voices_tip"))
+        Tooltip(lb, tr("app.voices_tip"))
+        self.font_btn_play = ttk.Button(cell, text=tr("app.soundfont"), command=self.pick_soundfont)
+        self.font_btn_play.pack(side="left", padx=(4, 0))
+        self.font_tip_play = Tooltip(self.font_btn_play, "")  # (says the soundfont's name: sync_builtin)
+        self.builtin_row = (lb, cell)
+        self.sync_builtin()
         r += 1
         names = [name for _, name in DOMINO_STARTS]
         ttk.Label(box, text=tr("app.domino_start")).grid(row=r, column=0, sticky="w", pady=(6, 0))
@@ -1529,6 +1551,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         except ValueError as e:
             messagebox.showerror(tr("app.spiderweb_2"), str(e))
             return
+        if self.midi_device.get() == BUILTIN and not self.hz_preview["font"] and not self.pick_soundfont():
+            return
         err = self.out.open(self.midi_device.get())
         if err:
             messagebox.showerror(tr("app.spiderweb_2"), err)
@@ -1585,6 +1609,82 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.roll.show_playhead()
             self.schedule_autosave()
         self.play_btn.config(text=tr("app.play_space"))
+
+    # ------------------------------------------------------------ Built-in BASSMIDI (MIDI out)
+
+    def make_live(self):
+        """(MidiOut.open) The built-in synth started for playing, with the soundfont (the Hz bass preview's) and
+        voice limit set now. Raises SynthError."""
+        font = self.hz_preview["font"]
+        if not font:
+            raise SynthError("synth.no_font")
+        self.busy(tr("app.opening_soundfont"))  # (a big soundfont takes a moment)
+        try:
+            if self.synth is None:
+                self.synth = Synth()
+            if self.synth.font_path != font:
+                self.synth.set_font(font)
+            return Live(self.synth, self.play_voices)
+        finally:
+            self.busy(None)
+
+    def sync_builtin(self):
+        """Built-in BASSMIDI's row (voices + soundfont) shows only while it's the MIDI out."""
+        if not hasattr(self, "builtin_row"):
+            return
+        for w in self.builtin_row:
+            grid_shown(w, self.midi_device.get() == BUILTIN)
+        font = self.hz_preview["font"]
+        self.font_tip_play.text = tr("app.soundfont_tip", name=os.path.basename(font) if font else tr("ps.no_font"))
+
+    def pick_soundfont(self):
+        """Pick the soundfont (shared by Built-in BASSMIDI and the Hz bass preview). True = one was picked."""
+        cfg = self.hz_preview
+        path = filedialog.askopenfilename(
+            parent=self, title=tr("app.pick_soundfont_title"),
+            initialdir=os.path.dirname(cfg["font"]) if cfg["font"] else None,
+            filetypes=[(tr("hz.preview_fonts"), "*.sf2 *.sf3 *.sfz *.sf2pack"), (tr("hz.preview_all"), "*.*")])
+        if not path:
+            return False
+        cfg["font"] = os.path.normpath(path)
+        self.schedule_autosave()
+        self.soundfont_changed()
+        hz = self.hz_window
+        if hz is not None:  # (the preview makes its sound again with it)
+            if hz.settings_window and hz.settings_window.winfo_exists():
+                hz.settings_window.remake()
+            elif hz.preview_on.get():
+                err = hz.preview.remake()
+                if err:
+                    hz.preview_failed(err)
+        return True
+
+    def soundfont_changed(self):
+        """The shared soundfont was changed (here or in the Hz bass preview's settings): Built-in BASSMIDI opens it
+        at the next note."""
+        if self.out.name == BUILTIN:
+            self.stop_play()
+            self.scrub_end()
+            self.out.close()
+        self.sync_builtin()
+
+    def on_play_voices(self, left=False):
+        e = self.voices_entry
+        try:
+            v = int(round(float(calc(self.voices_var.get()))))
+            if not VOICES[0] <= v <= VOICES[1]:
+                raise ValueError
+        except (ValueError, ZeroDivisionError):
+            bad(e)
+            return
+        good(e)
+        if str(v) != self.voices_var.get():
+            self.voices_var.set(str(v))
+        if v != self.play_voices:
+            self.play_voices = v
+            if self.out.name == BUILTIN and self.out.handle:
+                self.out.handle.set_voices(v)  # (heard at once, while playing too)
+            self.schedule_autosave()
 
     def set_playhead(self, beat):
         self.playhead = max(0.0, beat)

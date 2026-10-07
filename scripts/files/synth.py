@@ -8,8 +8,11 @@ can run in several threads at once, each on its own core (the DLL lets go of Pyt
 on the voice limit, hardly on the note count (measured: 1000 voices = about 4x real time on one core). A stretch
 starts PREROLL seconds early and that part is thrown away, so notes from before it still sound and the voice limit
 is already full, as in one long render. Player plays sound from anywhere (it asks for it piece by piece) through
-Limiter, which keeps the level in bounds (raw BASSMIDI output peaks 10-16 times too loud with many keys)."""
+Limiter, which keeps the level in bounds (raw BASSMIDI output peaks 10-16 times too loud with many keys).
+Live is the other way: notes sounded the moment they're sent, like a MIDI-out device ("Built-in BASSMIDI" under
+MIDI out: playback, listening with the mouse, the Hz window's keys)."""
 
+import atexit
 import ctypes
 import math
 import os
@@ -40,6 +43,7 @@ _ATTRIB_MIDI_VOICES, _ATTRIB_MIDI_VOICES_ACTIVE = 0x12003, 0x12004
 _ATTRIB_VOL, _ATTRIB_BUFFER = 2, 13
 _CONFIG_UPDATEPERIOD = 1
 _EV_END, _EV_NOTE, _EV_PROGRAM, _EV_TEMPO = 0, 1, 2, 62
+_EVENTS_RAW = 0x10000
 
 EVENT = np.dtype([("event", "<u4"), ("param", "<u4"), ("chan", "<u4"), ("tick", "<u4"), ("pos", "<u4")])
 
@@ -100,10 +104,14 @@ def _load():
         fn.argtypes, fn.restype = args, res
     for name, args, res in (("BASS_MIDI_FontInit", [ctypes.c_wchar_p if WINDOWS else ctypes.c_char_p, u], u), ("BASS_MIDI_FontFree", [u], i),
                             ("BASS_MIDI_StreamCreateEvents", [p, u, u, u], u),
+                            ("BASS_MIDI_StreamCreate", [u, u, u], u), ("BASS_MIDI_StreamEvents", [u, u, p, u], u),
                             ("BASS_MIDI_StreamSetFonts", [u, p, u], i), ("BASS_MIDI_StreamLoadSamples", [u], i)):
         fn = getattr(midi, name)
         fn.argtypes, fn.restype = args, res
     _dlls = bass, midi
+    # BASS stopped while Python can still answer: its sound thread asking a player for sound while Python shuts
+    # down crashed the program on Linux (measured in WSL, a song playing when the window closed)
+    atexit.register(bass.BASS_Free)
     return _dlls
 
 
@@ -372,3 +380,57 @@ class Player:
         else:
             bass.BASS_ChannelStop(h)
             bass.BASS_StreamFree(h)
+
+
+class Live:
+    """A BASSMIDI stream with 16 channels (10 = drums, as on any GM synth) that sounds each message the moment it's
+    sent, heard through Player (so the Limiter keeps it in bounds). Holds the soundfont open until close()."""
+    BUFFER = 0.08  # seconds of sound the sound device keeps ready (the sound is this much behind what's sent)
+
+    def __init__(self, synth, voices, volume=0.8, nofx=False):
+        if not synth.font:
+            raise SynthError("synth.no_font")
+        if not synth.can_play:
+            raise SynthError("synth.no_device")
+        bass, midi = synth.bass, synth.midi
+        self.synth, self.font_path = synth, synth.font_path
+        self.handle = midi.BASS_MIDI_StreamCreate(16, _STREAM_DECODE | _SAMPLE_FLOAT | (_MIDI_NOFX if nofx else 0),
+                                                  RATE)
+        if not self.handle:
+            raise SynthError("synth.failed", err=bass.BASS_ErrorGetCode())
+        self.font = synth._take()
+        font = _Font(self.font, -1, 0)
+        midi.BASS_MIDI_StreamSetFonts(self.handle, ctypes.byref(font), 1)
+        self.set_voices(voices)
+        midi.BASS_MIDI_StreamLoadSamples(self.handle)  # (program 0 + the drums: no wait at the first notes)
+        try:
+            self.player = Player(synth, self.pull, volume, self.BUFFER)
+        except SynthError:
+            self.close()
+            raise
+        self.player.play()
+
+    def set_voices(self, voices):
+        self.synth.bass.BASS_ChannelSetAttribute(self.handle, _ATTRIB_MIDI_VOICES, float(voices))
+
+    def send(self, msg):
+        """One short MIDI message (status | data1 << 8 | data2 << 16, as a MIDI-out device takes it)."""
+        if self.handle:
+            self.synth.midi.BASS_MIDI_StreamEvents(self.handle, _EVENTS_RAW, ctypes.byref(ctypes.c_uint32(msg)), 3)
+
+    def pull(self, n):
+        """(BASS's thread) the next n frames."""
+        out = np.zeros((n, 2), np.float32)
+        h = self.handle
+        if h:
+            self.synth.bass.BASS_ChannelGetData(h, out.ctypes.data, (n * 8) | _DATA_FLOAT)
+        return out
+
+    def close(self):
+        h, self.handle = self.handle, 0
+        if not h:
+            return
+        if getattr(self, "player", None):
+            self.player.stop()
+        self.synth.bass.BASS_StreamFree(h)
+        self.synth._give(self.font)
