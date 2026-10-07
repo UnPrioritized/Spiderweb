@@ -11,7 +11,8 @@ positive leaning forward (the way the line runs), so 90 lays it flat along the l
 triangle; minus = wider than its base).
 `graphs` (optional): {setting: [[u, f], ...]} for the settings in GRAPH_KEYS: along the whole line (u = 0 its start,
 1 its end, by length on screen) that setting is multiplied by f (1 = 100 %), straight between the points. Size
-changes point by point (like easing); length, slant and rotation per bump (at its start, rotation at its middle);
+changes point by point (like easing); length, slant and rotation per bump (at its start, rotation at its middle; a
+bump the length graph makes 0 long is a spike there, straight out and back);
 distance sets how far apart bumps are wherever they are.
 `fit`: the distance is stretched a little so a whole number of steps fits the range exactly; round a closed loop
 (e.g. a full circle) the bumps then meet up where it starts.
@@ -412,7 +413,16 @@ def tumour_path(path, tm):
             room = min(hi, starts[i + 1] if i + 1 < len(starts) else math.inf)
             li = length if lg is None else max(0.0, length * float(lg(s)))
             e = min(s + li, room)
-            if e - s < 1e-9:  # no room left (it would start right on the end of the range), or no length
+            if li < 1e-9 < room - s:  # the length graph at 0 here: a spike, as a bump this thin would be (user)
+                a = w.at(s)
+                ux, uy = w.direction(s)
+                h = size * grow(s) * (1.0 if zg is None else float(zg(s)))
+                r = rot if rg is None else rot * float(rg(s))
+                along, out_ = math.sin(r) * h, math.cos(r) * h * side
+                out.add([a, (a[0] - uy * out_ + ux * along, a[1] + ux * out_ + uy * along), a])
+                out.add(base(s, starts[i + 1] if i + 1 < len(starts) else w.total))
+                continue
+            if e - s < 1e-9:  # no room left (it would start right on the end of the range)
                 out.add([w.at(s)])
                 out.add(base(e, starts[i + 1] if i + 1 < len(starts) else w.total))
                 continue
