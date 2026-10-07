@@ -236,6 +236,51 @@ class Targets:
         return (tuple(map(float, corner[b])), float(far[b]),
                 [(tuple(map(float, ti[b])), int(owner[pi[b]])), (tuple(map(float, tj[b])), int(owner[pj[b]]))])
 
+    def touch_line(self, line, view, reach):
+        """A stroke being moved (line = its stroke_points where it is now) whose LINE sticks (user: not only its
+        points), each the nearest within reach pixels: [(kind, (u, v) where it touches, pixels away, (du, dv) to move
+        it by more)], kind "on" = a stroke's point comes onto its pieces, "rest" = its corner nearest a stroke's line
+        comes onto it with the moved stroke on one side (the side its middle is on: it rests on the line)."""
+        k = view[0]
+        line = np.asarray(line, float).reshape(-1, 2)
+        if len(line) < 2:
+            return []
+        out = []
+        lo, hi = line.min(0) - 2 * reach / k, line.max(0) + 2 * reach / k  # (near it only)
+        pts = self.pts[np.all((self.pts >= lo) & (self.pts <= hi), 1)] if len(self.pts) else self.pts
+        if len(pts):
+            a, r = line[:-1], line[1:] - line[:-1]
+            ll = (r * r).sum(1)
+            q = pts[:, None] - a[None]  # (point, piece, 2)
+            t = np.clip((q * r[None]).sum(2) / np.where(ll == 0, 1, ll), 0, 1)
+            gap = q - t[..., None] * r[None]  # (from the nearest spot on each piece to the point)
+            far = np.hypot(gap[..., 0], gap[..., 1]) * k
+            i, j = np.unravel_index(np.argmin(far), far.shape)
+            if far[i, j] <= reach:
+                out.append(("on", (float(pts[i, 0]), float(pts[i, 1])), float(far[i, j]),
+                            (float(gap[i, j, 0]), float(gap[i, j, 1]))))
+        seg = self.seg
+        if len(seg):
+            keep = np.all((np.maximum(seg[:, :2], seg[:, 2:]) >= lo) & (np.minimum(seg[:, :2], seg[:, 2:]) <= hi), 1)
+            seg = seg[keep]
+            seg = seg[np.hypot(seg[:, 2] - seg[:, 0], seg[:, 3] - seg[:, 1]) > 0]
+        if len(seg):
+            p0, r = seg[:, :2], seg[:, 2:] - seg[:, :2]
+            ln = np.hypot(r[:, 0], r[:, 1])
+            n = np.column_stack([-r[:, 1], r[:, 0]]) / ln[:, None]
+            g = np.einsum("mkc,mc->mk", line[None] - p0[:, None], n)  # (each corner's side of each line, how far)
+            side = np.sign((((line.min(0) + line.max(0)) / 2 - p0) * n).sum(1))  # (its middle's side of each line)
+            kk = np.where(side >= 0, np.argmin(g, 1), np.argmax(g, 1))
+            gk = g[np.arange(len(g)), kk]
+            touch = line[kk] - gk[:, None] * n
+            t = ((touch - p0) * r).sum(1) / ln ** 2
+            far = np.where((t >= 0) & (t <= 1), np.abs(gk) * k, np.inf)
+            i = int(np.argmin(far))
+            if far[i] <= reach:
+                out.append(("rest", (float(touch[i, 0]), float(touch[i, 1])), float(far[i]),
+                            (float(-gk[i] * n[i, 0]), float(-gk[i] * n[i, 1]))))
+        return out
+
     @staticmethod
     def crossing(seg, owner, index, x, y, view, reach):
         """The nearest spot within reach where two of these pieces cross (pieces of different strokes, or of one

@@ -51,7 +51,7 @@ STROKE_COLOR = look.SHAPE_LINE  # (a stroke with an outline colour: that colour'
 AREA_NORMAL, AREA_EMPTY, OFF_BOARD, BOARD = look.AREA_NORMAL, look.AREA_EMPTY, look.DRAWER_BG, look.BOARD
 WARN_COLOR = look.WARN  # more colours than a shape can have (like the side panel's warning)
 AREA_FRAME = DRAWN_FRAME  # (the drawing's box as a custom shape, for finding its areas)
-STICK_RANK = {"point": 2, "cross": 1, "line": 0}
+STICK_RANK = {"point": 4, "cross": 3, "on": 2, "rest": 1, "line": 0}  # (moving a stroke: on / rest = its line)
 STICK_COLOR = look.STICK
 STICK_LINE = look.STICK_LINE
 GUIDE_REACH = 6 * REACH  # pixels: a circle this near to sticking shows where it would touch (dotted)
@@ -831,20 +831,28 @@ class Drawer(DrawerLayers, tk.Toplevel):
                 self.canvas.create_line(*coords, fill=STICK_LINE, width=width, capstyle="round", joinstyle="round")
 
     def stick_move(self, i, st, du, dv):
-        """Stroke i (st = as it was when grabbed) moved by du, dv: (du, dv) changed so its point nearest to
-        something to stick to lands on it, or None (nothing in reach)."""
+        """Stroke i (st = as it was when grabbed) moved by du, dv: (du, dv) changed so it sticks, or None (nothing
+        in reach). Its points stick to points / crossings / lines, and its LINE too (user): a stroke's point onto
+        it, or resting on a stroke's line (sticky.touch_line)."""
         targets, view, best = self.stick_targets(frozenset([i])), self.stick_view(), None
         k, ox, oy = view
-        for _, (u, v) in key_points(st, stroke_points(st)):
+        line = stroke_points(st)
+        for _, (u, v) in key_points(st, line):
             got = targets.find(ox + (u + du) * k, oy - (v + dv) * k, view, REACH * self.scale)
+            if got and got[0] == "line" and st["kind"] == "ellipse":
+                continue  # (its left / right / top / bottom on a slanted line = crossing it: its line rests instead)
             rank = got and (STICK_RANK[got[0]], -got[2])  # (a point first, then a crossing, then a line; nearest)
             if got and (best is None or rank > best[2]):
-                best = got, (u, v), rank
+                best = got, (got[1][0] - u, got[1][1] - v), rank
+        for kind, at, far, (su, sv) in targets.touch_line([(u + du, v + dv) for u, v in line], view,
+                                                          REACH * self.scale):
+            rank = STICK_RANK[kind], -far
+            if best is None or rank > best[2]:
+                best = ("point" if kind == "on" else "line", at, far), (du + su, dv + sv), rank
         if best is None:
             return None
         self.stuck = best[0]
-        (tu, tv), (u, v) = best[0][1], best[1]
-        return tu - u, tv - v
+        return best[1]
 
     def perfect(self, start, pt):
         """pt moved so the box from start is square."""
