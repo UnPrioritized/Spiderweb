@@ -3,10 +3,14 @@ in bezier.py, shared with the drawer)."""
 
 import json
 
+import numpy as np
+
 from files.lang import tr
 from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half_at, handle_lines, held_axis,
                           keep_symmetric, nearest, pen_handles, set_symmetry)
-from roll.roll_shared import ALT
+from roll.roll_shared import ALT, LONG_STROKE
+
+CROWDED = 8  # px: a long curve's anchors 2+ per square this size on screen hide their handles (crowded)
 
 
 class CurveEditing:
@@ -18,16 +22,32 @@ class CurveEditing:
     def from_xy(self, x, y):
         return [self.x2t(x), self.y2p(y)]
 
-    @staticmethod
-    def curve_handles(sh):
+    def crowded(self, sh):
+        """True if the curve's anchors on screen are too packed to grab one by one (more than LONG_STROKE of them,
+        on average 2+ in each CROWDED px square they're in; a plain curve made from a pattern: thousands, seconds a
+        redraw): only its ends show and can be grabbed until zoomed in (user, 2026-10-07)."""
+        pts = sh["pts"]
+        if len(pts) <= 3 * LONG_STROKE or self.sx is None:
+            return False
+        a = np.asarray(pts[::3], float)
+        s = self.scale
+        x, y = self.t2x(a[:, 0]), self.p2y(a[:, 1])
+        on = ((x >= self.kb_w - 20 * s) & (x <= self.winfo_width() + 20 * s) &
+              (y >= self.ruler_h - 20 * s) & (y <= self.winfo_height() + 20 * s))
+        n = on.sum()
+        if n <= LONG_STROKE:
+            return False
+        squares = np.floor(x[on] / (CROWDED * s)) + 1j * np.floor(y[on] / (CROWDED * s))
+        return n >= 2 * len(np.unique(squares))
+
+    def curve_handles(self, sh):
         """(beat, pitch, point number, draggable with any tool) of a curve: handle points, anchors on top. The two
         ends need the Select tool (like a line's ends), so the Curve tool can start a new curve there."""
         pts = sh["pts"]
-        return [(*pts[i], i, kind != "end") for i, kind in pen_handles(pts, gaps=sh.get("gaps", ()))]
+        return [(*pts[i], i, kind != "end") for i, kind in pen_handles(pts, not self.crowded(sh), sh.get("gaps", ()))]
 
-    @staticmethod
-    def curve_handle_lines(sh):
-        return handle_lines(sh["pts"], sh.get("gaps", ()))
+    def curve_handle_lines(self, sh):
+        return [] if self.crowded(sh) else handle_lines(sh["pts"], sh.get("gaps", ()))
 
     def held_axis(self, sh):
         """Before an edit: the way a mirrored curve's mirror line runs (bezier.held_axis)."""
