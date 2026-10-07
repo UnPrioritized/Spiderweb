@@ -467,7 +467,11 @@ class LiveDrawing:
             return
         cb, cp = self.stroke_middle(sh, k)
         r, sign = self.sy / self.sx, 1 if clockwise else -1
-        self.change_stroke(sh, k, lambda b, p: (cb + sign * (p - cp) * r, cp - sign * (b - cb) / r), turn=r,
+        turned = [(cb + sign * (p - cp) * r, cp - sign * (b - cb) / r) for b, p in cached_strokes(sh)[k]]
+        bs, ps = [b for b, _ in turned], [p for _, p in turned]
+        # (turned past an edge: pushed back inside, like turning a shape)
+        db, dp = self.push_in((min(bs), min(ps), max(ps), max(bs)) if turned else None, self.limits([sh]))
+        self.change_stroke(sh, k, lambda b, p: (cb + sign * (p - cp) * r + db, cp - sign * (b - cb) / r + dp), turn=r,
                            name=tr("roll_live.turn_a_stroke"))
 
     def draw_picked_stroke(self, sh):
