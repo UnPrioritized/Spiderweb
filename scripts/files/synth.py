@@ -72,8 +72,8 @@ _dlls = None
 
 
 def _pin(*paths):
-    """(Windows) The DLLs stay loaded until Spiderweb ends. A MIDI-out device running on BASS (OmniMIDI, measured
-    2026-10-07) shares ours and unloads them once too often as it closes: loaded again at its next use, BASSMIDI then
+    """(Windows) The DLLs stay loaded until Spiderweb ends. A MIDI-out device running on BASS (one measured 2026-10-07)
+    shares ours and unloads them once too often as it closes: loaded again at its next use, BASSMIDI then
     crashed at the built-in synth's next stream (access violation)."""
     k32 = ctypes.WinDLL("kernel32")
     k32.GetModuleHandleExW.argtypes = [ctypes.c_uint, ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_void_p)]
