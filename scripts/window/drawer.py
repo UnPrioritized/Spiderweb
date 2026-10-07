@@ -46,7 +46,7 @@ TOOLS = [("select", tr("drawer.select"), "v"), ("erase", tr("drawer.eraser"), "e
          ("arc", tr("drawer.arc"), "a"), ("square", tr("drawer.square"), "s"), ("circle", tr("drawer.circle"), "o"),
          ("areas", tr("drawer.areas"), "b")]
 SHIFT, CTRL = 0x1, 0x4
-STROKE_COLOR = look.SHAPE_LINE  # (a stroke with an outline colour: that colour's dark shade)
+STROKE_COLOR = look.STROKE  # (a stroke with an outline colour: that colour's dark shade)
 # Areas (areas.py) on the board: what Fill / Spam fill as normal, an area emptied by hand, the outside, the board
 AREA_NORMAL, AREA_EMPTY, OFF_BOARD, BOARD = look.AREA_NORMAL, look.AREA_EMPTY, look.DRAWER_BG, look.BOARD
 WARN_COLOR = look.WARN  # more colours than a shape can have (like the side panel's warning)
@@ -382,8 +382,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
             c.create_rectangle(x, y, x + k, y + k, fill=area_color(n) if n else AREA_EMPTY,
                                outline=look.SWATCH_EDGE_ON if on else look.SWATCH_EDGE, width=2 if on else 1)
             if not n:  # Empty: a cross
-                c.create_line(x + 3, y + 3, x + k - 3, y + k - 3, fill=look.SHAPE_LINE)
-                c.create_line(x + k - 3, y + 3, x + 3, y + k - 3, fill=look.SHAPE_LINE)
+                c.create_line(x + 3, y + 3, x + k - 3, y + k - 3, fill=look.STROKE)
+                c.create_line(x + k - 3, y + 3, x + 3, y + k - 3, fill=look.STROKE)
 
     def swatch_at(self, x):
         n = int((x - 2) // (self.swatch + 2))

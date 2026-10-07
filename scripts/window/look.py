@@ -125,10 +125,12 @@ STROKE_POINT = pick("#7a1fe0", "#b37aff")  # the points of a custom shape's stro
 PART = pick("#7a1fe0", "#b37aff")  # a highlighted funnel line / the curve clicked
 TWIN = pick("#00a39a", "#2fd6cb")  # the curves linked to it
 LIVE_LINE = pick("#7a1fe0", "#b37aff")  # a live shape's stroke being drawn
-RING = pick("#b40000", "#ff6060")  # round the selected shapes' notes (user: #e00000 looked bright, almost pink)
+RING = pick("#b40000", "#f4f4f6")  # round the selected shapes' notes (user: #e00000 looked bright, almost pink;
+# dark: white, red was harsh and grey hid against the light notes)
 PREVIEW_LINE, PREVIEW_HALO = pick("#ff1f1f"), pick("#ffa8a8", "#7a3030")  # the outline gate's preview line
-SHAPE_LINE = pick("#c0392b", "#e0574a")  # a shape's line (shown lines), an arrow for a shape above the top key
-SHAPE_LINE_PICKED = pick("#ff1f1f", "#ff3b3b")  # ... selected
+SHAPE_LINE = pick("#c0392b", "#a4a4a8")  # a shape's line (shown lines), an arrow for a shape above the top key
+SHAPE_LINE_PICKED = pick("#ff1f1f", "#dcdce0")  # ... selected (dark: greyish white like the ring, user)
+STROKE = pick("#c0392b", "#e0574a")  # the drawer's strokes, its Empty cross
 ABOVE_EDGE = pick("#ffffff")  # round that arrow
 ORIGIN, ORIGIN_PICKED = pick("#efc0c0", "#7a5656"), pick("#e89a9a", "#a86a6a")  # a line as drawn under its tumours
 DRAFT_LINE = pick("#0a8f0a", "#3fcf3f")  # the shape being drawn
