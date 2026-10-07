@@ -374,6 +374,25 @@ def shape_notes_tracks(sh, ppq, keys=128):
     return get(sh)
 
 
+BIG_TEXT = 100_000  # characters: a text this long (pasted / image notes, packed) is kept apart by shape_key
+
+
+def shape_key(sh):
+    """A shape as a key of the notes it makes (equal for exactly the same shape): its JSON text, with big texts
+    (pasted / image notes, many MB) kept as the strings themselves, so they're never written out again: comparing
+    the same string is instant (App.notes_key is asked at every rest of a drag)."""
+    big = sorted(k for k, v in sh.items() if isinstance(v, str) and len(v) > BIG_TEXT)
+    if not big:
+        return json.dumps(sh, sort_keys=True)
+    return (json.dumps({k: v for k, v in sh.items() if k not in big}, sort_keys=True),
+            tuple((k, sh[k]) for k in big))
+
+
+def from_key(key):
+    """A copy of the shape shape_key was made from (big texts shared: a string never changes)."""
+    return json.loads(key) if isinstance(key, str) else dict(json.loads(key[0]), **dict(key[1]))
+
+
 DEEP = 50  # steps: more, and fx_notes makes the notes before each one first (see there)
 _warming = threading.local()
 

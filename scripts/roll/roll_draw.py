@@ -1,6 +1,5 @@
 """Piano roll: painting the grid, notes, shapes, handles, keyboard and ruler."""
 
-import json
 import math
 import time
 import tkinter as tk
@@ -10,7 +9,7 @@ import numpy as np
 from notes.custom import custom_note_count, edge_inner, gap_lines, role_of
 from files.lang import tr
 from files.speed import loops
-from notes.engine import cached_arrays, shape_notes_tracks
+from notes.engine import cached_arrays, shape_key, shape_notes_tracks
 from notes.joined import all_tumours
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
 from notes.paths import KEYS
@@ -320,7 +319,7 @@ class RollDrawing:
              funnel_note_count(d, app.ppq) if d["kind"] == "funnel" else None)
         if (n or 0) > PREVIEW_LIMIT:
             return None
-        key = (json.dumps(d, sort_keys=True), app.ppq, app.keys)  # (app.notes_tracks' key: kept for it, keep_draft)
+        key = (shape_key(d), app.ppq, app.keys)  # (app.notes_tracks' key: kept for it, keep_draft)
         if not self._draft_made or self._draft_made[0] != key:
             started = time.perf_counter()
             self._draft_made = (key, shape_notes_tracks(d, app.ppq, app.keys))
@@ -347,8 +346,7 @@ class RollDrawing:
     def keep_draft(self):
         """The shape being drawn / placed is added: the app takes the notes already made for it."""
         app = self.app
-        if self.draft and self._draft_made and self._draft_made[0] == (json.dumps(self.draft, sort_keys=True),
-                                                                       app.ppq, app.keys):
+        if self.draft and self._draft_made and self._draft_made[0] == (shape_key(self.draft), app.ppq, app.keys):
             app._notes_cache[self._draft_made[0]] = self._draft_made[1]
         self._draft_made = None
 

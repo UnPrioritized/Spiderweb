@@ -21,8 +21,8 @@ from window import big_ask, look
 from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
-from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, fx_notes, point_names, render,
-                          slot_track_channel)
+from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, point_names,
+                          render, shape_key, slot_track_channel)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
@@ -100,6 +100,10 @@ SPLIT_CHOICES = [
 SPLIT_TIP = (
     tr("app.same_key_shapes_only_get_split")
 )
+
+
+class Stopped(Exception):
+    """Notes being made in the background (App.notes_rested) aren't wanted any more."""
 
 
 def all_notes(shapes, ppq, keys, mode, split, notes_tracks):
@@ -850,7 +854,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def notes_tracks(self, sh):
         """shape_notes_tracks, remembered. Each note tool page goes on top of the notes remembered without it
         (trying a page's settings doesn't make the notes before it again)."""
-        key = (json.dumps(sh, sort_keys=True), self.ppq, self.keys)
+        key = (shape_key(sh), self.ppq, self.keys)
         if key not in self._notes_cache:
             got = fx_notes(sh, self.ppq, self.keys, self.notes_tracks)
             if len(self._notes_cache) > 500:
@@ -931,31 +935,33 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
 
     def notes_key(self):
         """Everything the notes are made from (shapes_changed): a background result is used only for exactly this."""
-        return (tuple(json.dumps(sh, sort_keys=True) for sh in self.shapes), self.ppq, self.keys,
+        return (tuple(shape_key(sh) for sh in self.shapes), self.ppq, self.keys,
                 self.channel_mode.get(), SPLIT_CHOICES[max(self.split_box.current(), 0)][0])
 
     def _make_coming(self, show):
         self._late_notes = None
         show = show or not (self.roll.drag or self.scrubbing)  # (the drag called off: no let go to wait for)
-        job = self._coming
-        if job and not job["done"]:  # (one at a time: the shapes as they are then are made after it)
-            job["again"] = show if job.get("again") is None else job["again"] or show
-            return
-        key = self.notes_key()
-        if job and job["key"] == key and job["got"] is not None:  # (made already, e.g. moved and back)
-            if show:
+        job, key = self._coming, self.notes_key()
+        if job and job["key"] == key and (job["got"] is not None or not job["done"]):  # (made / being made already)
+            if not job["done"]:
+                job["show"] = job["show"] or show
+            elif show:
                 self.shapes_changed(now=True)
             return
-        shapes = [json.loads(s) for s in key[0]]  # (the thread's own copy: the drag goes on with the real ones)
+        if job:  # (made for another spot: it stops at its next shape, these start at once)
+            job["stop"] = True
+        shapes = [from_key(s) for s in key[0]]  # (the thread's own copy: the drag goes on with the real ones)
         for sh in shapes:
             if "cut" in sh and moved_by(as_made(sh)) is None:
                 completed(sh)
-        job = self._coming = {"key": key, "show": show, "done": False, "got": None, "own": {}}
+        job = self._coming = {"key": key, "show": show, "done": False, "got": None, "own": {}, "stop": False}
         known = self._notes_cache  # (only read in the thread; its own new notes go to job["own"])
         sels, fast = frozenset(self.sels), speed.loops()
 
         def notes_tracks(sh):
-            k = (json.dumps(sh, sort_keys=True), key[1], key[2])
+            if job["stop"]:
+                raise Stopped
+            k = (shape_key(sh), key[1], key[2])
             got = known.get(k) or job["own"].get(k)
             if got is None:
                 got = job["own"][k] = fx_notes(sh, key[1], key[2], notes_tracks)
@@ -965,6 +971,10 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             started = time.perf_counter()
             try:
                 got = all_notes(shapes, *key[1:], notes_tracks)
+                # (the same time as shapes_changed's: making the notes only, not the orders below)
+                job["time"] = time.perf_counter() - started
+                if job["stop"]:
+                    raise Stopped
                 # (the piano roll's orders for painting them too: roll_draw.start_order / paint_order)
                 rendered, order = got[2], None
                 start = np.argsort(np.ascontiguousarray(rendered[:, 0]), kind="stable")
@@ -974,9 +984,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                              painting_order(fast, rendered, start, sels, pics, key[2]))
                 job["drawn"] = (start, order)
                 job["got"] = got
-            except Exception:  # (MemoryError too: made again the normal way, which tells about it)
+            except Exception:  # (MemoryError too: made again the normal way, which tells about it; Stopped)
                 job["got"] = None
-            job["time"] = time.perf_counter() - started
             job["done"] = True
         job["thread"] = threading.Thread(target=work, daemon=True, name="notes")
         job["thread"].start()
@@ -988,21 +997,22 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         if not job["done"]:
             self.after(15, self._coming_check, job)
             return
-        again = job.get("again")
-        show = job["show"] or again or not (self.roll.drag or self.scrubbing)
-        if again is None and not show or not self.notes_late:
+        held = self.roll.drag or self.scrubbing
+        if not self.notes_late or not (job["show"] or not held):
             return
-        if job["got"] is not None and self.notes_key() == job["key"]:
-            if show:
+        if job["got"] is None:  # (failed: made the normal way, which tells about it; held: done when let go)
+            if not held:
                 self.shapes_changed(now=True)
-        elif again is not None:  # (the mouse rested again while these were made: those shapes now)
-            self._make_coming(again)
+        elif self.notes_key() == job["key"]:
+            self.shapes_changed(now=True)
 
     def notes_made(self):
         """The notes made in the background for the shapes exactly as they are now (waited for if still being made),
         else None. Called by shapes_changed, which then makes them itself."""
         job, self._coming = self._coming, None
         if job is None or job["key"] != self.notes_key():
+            if job:  # (made for another spot: stopped, so it doesn't slow down making these)
+                job["stop"] = True
             return None
         job["thread"].join()
         if job["got"] is None:
