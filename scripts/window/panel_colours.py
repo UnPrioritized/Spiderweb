@@ -34,8 +34,10 @@ class ColoursPanel:
         self.cycle_n_entry.pack(side="left", padx=(4, 0))
         Scrub(self, [(self.cycle_n_entry, self.cycle_n_var, lambda: self.on_cycle("n"))], (1, 3, 1), 2, CYCLE_MAX,
               label=lb, drag_box=True)
-        c = self.cycle_every_row = ttk.Frame(box)  # (channels + this row: only shown while Colours is on, user)
-        c.pack(anchor="w", padx=(20, 0), pady=(1, 0))
+        rows = self.cycle_every_row = ttk.Frame(box)  # (channels + these rows: only shown while Colours is on, user)
+        rows.pack(anchor="w", padx=(20, 0), pady=(1, 0))
+        c = ttk.Frame(rows)
+        c.pack(anchor="w")
         ttk.Label(c, text=tr("colours.every")).pack(side="left")
         self.cycle_vars = [tk.StringVar(), tk.StringVar()]  # steps / keys, or the note length's a / b
         self.cycle_entries = []
@@ -49,6 +51,13 @@ class ColoursPanel:
             self.cycle_entries.append(e)
         self.cycle_unit = ttk.Label(c, text="")
         self.cycle_unit.pack(side="left")
+        # "Restart each key row" (not By key: every row would be one colour)
+        self.cycle_rows_var = tk.StringVar(value="0")
+        self.cycle_rows_box = ttk.Checkbutton(rows, text=tr("colours.rows"), variable=self.cycle_rows_var,
+                                              onvalue="1", offvalue="0",
+                                              command=lambda: (self.on_cycle("rows"), self.roll.focus_set()))
+        self.cycle_rows_box.pack(anchor="w", pady=(1, 0))
+        self.cycle_rows_tip = Tooltip(self.cycle_rows_box, tr("colours.rows_tip"))
         for e, var, what in ([(self.cycle_n_entry, self.cycle_n_var, "n")] +
                              [(e, v, "every") for e, v in zip(self.cycle_entries, self.cycle_vars)]):
             e.bind("<Return>", lambda ev, what=what: self.on_cycle(what))
@@ -86,7 +95,16 @@ class ColoursPanel:
         parts = [[x[0] for x in every], [x[1] for x in every]] if by == "time" else [every, [4]]
         for e, var, values in zip(self.cycle_entries, self.cycle_vars, parts):
             same_or_blank(e, var, values)
+        restart = {bool(c.get("rows")) for c in on}
+        self.cycle_rows_var.set("1" if restart == {True} else "0")
+        mixed_tip = tr("widgets.mixed_tip") + "\n\n" if len(restart) > 1 else ""
+        self.cycle_rows_tip.text = mixed_tip + tr("colours.rows_tip")
         self._loading = False
+        if (by != "key") != bool(self.cycle_rows_box.winfo_manager()):
+            if by != "key":
+                self.cycle_rows_box.pack(anchor="w", pady=(1, 0))
+            else:
+                self.cycle_rows_box.pack_forget()
         time = by == "time"
         if time != bool(self.cycle_slash.winfo_manager()):  # By time: a second box, "a / b note"
             for w in (self.cycle_slash, self.cycle_entries[1], self.cycle_unit):
@@ -102,6 +120,9 @@ class ColoursPanel:
         show_mixed(self.cycle_box, mixed, self.cycle_tip, tr("colours.tip") + (tr("colours.needs") if lonely else ""))
         for e in [self.cycle_n_entry] + self.cycle_entries:
             e.config(state="normal" if cy and not mixed else "disabled", style="TEntry")
+        self.cycle_rows_box.config(state="normal" if cy and not mixed else "disabled")
+        # (half-ticked = Mixed; after the var's set and config(state): both clear it)
+        self.cycle_rows_box.state(["alternate"] if len(restart) > 1 else ["!alternate"])
         if bool(cy) != bool(self.cycle_n_entry.winfo_manager()):
             if cy:
                 self.cycle_n_label.pack(side="left")
@@ -143,7 +164,9 @@ class ColoursPanel:
             return None
 
         tgts = self.colour_targets()
-        if what == "n":
+        if what == "rows":
+            value = self.cycle_rows_var.get() == "1"
+        elif what == "n":
             value = number(self.cycle_n_entry, self.cycle_n_var, 2, CYCLE_MAX)
         elif what == "every":  # (only the kind they all have; an empty box (different numbers): each keeps its own)
             kind = self.cycle_kind(tgts)
@@ -163,9 +186,12 @@ class ColoursPanel:
                 if old and old["by"] == by:
                     return old
                 kept = old["n"] if old else (int(n) if n.isdigit() and 2 <= int(n) <= CYCLE_MAX else 4)
-                return {"by": by, "n": kept, "every": [1, 4] if by == "time" else 1}
+                new = {"by": by, "n": kept, "every": [1, 4] if by == "time" else 1}
+                return dict(new, rows=True) if old and old.get("rows") else new  # (the tick stays with a new kind)
             if not old:
                 return old
+            if what == "rows":
+                return dict(old, rows=True) if value else {k: v for k, v in old.items() if k != "rows"}
             if isinstance(value, list):
                 return dict(old, every=[v if v is not None else o for v, o in zip(value, old["every"])])
             return dict(old, **{what: value})
