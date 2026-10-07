@@ -486,7 +486,7 @@ class ToolWindow(tk.Toplevel):
         """Work on the selected shapes, on a new page ("+")."""
         app = self.app
         self.targets = sorted(app.note_tool_sels())  # (not pictures)
-        self.saved, self.saved_sel = json.dumps(app.shapes), app.sel_state()  # (for the undo step)
+        self.saved_sel = app.sel_state()  # (for the undo step)
         self.before = self.now = self.settings()  # (before: put back by X / Esc; now: as this window last left them)
         self.at = None
         self.cfg = dict(self.DEFAULTS)
@@ -521,9 +521,16 @@ class ToolWindow(tk.Toplevel):
         step), and from now on X / Esc only puts back what changes after this."""
         self.catch_up()
         if self.now != self.before and self.settings() == self.now:
-            saved, sel = self.saved, self.saved_sel
-            self.saved, self.saved_sel, self.before = json.dumps(self.app.shapes), self.app.sel_state(), self.now
-            self.app.add_undo_step(saved, tr(f"{self.KEY}.step"), sel)
+            # the step takes back only the steps tried here (a shape moved on the piano roll meanwhile has its own)
+            saved = json.loads(json.dumps(self.app.shapes))
+            for i, fx in self.before.items():
+                if fx:
+                    saved[i]["fx"] = fx
+                else:
+                    saved[i].pop("fx", None)
+            sel = self.saved_sel
+            self.saved_sel, self.before = self.app.sel_state(), self.now
+            self.app.add_undo_step(json.dumps(saved), tr(f"{self.KEY}.step"), sel)
 
     def put(self, key, value, done=True):
         """A setting changed: show it on the piano roll."""

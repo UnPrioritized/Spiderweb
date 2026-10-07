@@ -42,6 +42,7 @@ TIPS = {
     "fit": tr("tumour_window.fit_the_bumps_evenly_the_distance"),
 }
 NOTHING = tr("tumour_window.select_a_line_polyline_freehand_stroke")
+TUMOUR_KEYS = ("tumour", "tumours", "splits")  # what this window changes on a shape (joined.py: "tumours", "splits")
 
 
 class TumourWindow(tk.Toplevel):
@@ -164,22 +165,29 @@ class TumourWindow(tk.Toplevel):
     # ---- the change being tried: X / Esc puts the selected shapes back as they were (before), Accept keeps it
 
     def state(self):
-        """The selected shapes as they are now."""
-        return json.dumps([self.app.shapes[i] for i in self.targets if i < len(self.app.shapes)])
+        """The selected shapes' tumour settings as they are now (only these: a shape moved on the piano roll stays
+        where it is when they're put back)."""
+        return json.dumps([{k: self.app.shapes[i][k] for k in TUMOUR_KEYS if k in self.app.shapes[i]}
+                           for i in self.targets if i < len(self.app.shapes)])
 
     def begin(self):
         """Start from the selected shapes as they are now."""
         self.targets = sorted(self.app.sels)
-        self.saved, self.saved_sel = json.dumps(self.app.shapes), self.app.sel_state()  # (for the undo step)
+        self.saved_sel = self.app.sel_state()  # (for the undo step)
         self.before = self.now = self.state()  # (now: as this window last left them)
         self.undo.reset()
 
+    def put_tumours(self, shapes, state):
+        """The tumour settings in state put on the selected ones of shapes."""
+        for i, tms in zip(self.targets, json.loads(state)):
+            for k in TUMOUR_KEYS:  # (the same dicts: the graph window knows them)
+                shapes[i].pop(k, None)
+            shapes[i].update(tms)
+
     def put_state(self, state):
-        """The selected shapes as they were (Ctrl+Z / Ctrl+Y in the window, or X / Esc)."""
+        """The selected shapes' tumours as they were (Ctrl+Z / Ctrl+Y in the window, or X / Esc)."""
         app = self.app
-        for i, sh in zip(self.targets, json.loads(state)):
-            app.shapes[i].clear()  # (the same dicts: the graph window knows them)
-            app.shapes[i].update(sh)
+        self.put_tumours(app.shapes, state)
         self.now = self.state()
         app.shapes_changed()
         app.sync_tumour()
@@ -198,8 +206,13 @@ class TumourWindow(tk.Toplevel):
             self.graph_window.after_cancel(self.graph_window.job)
             self.graph_window.store()
         if self.now != self.before and self.state() == self.now:
-            self.app.add_undo_step(self.saved, tr("tumour_window.tumours"), self.saved_sel)
-            self.saved, self.saved_sel, self.before = json.dumps(self.app.shapes), self.app.sel_state(), self.now
+            # the step takes back only the tumours tried here (a shape moved on the piano roll meanwhile has its own)
+            saved = json.loads(json.dumps(self.app.shapes))
+            self.put_tumours(saved, self.before)
+            sel = self.saved_sel
+            self.saved_sel, self.before = self.app.sel_state(), self.now
+            self.app.add_undo_step(json.dumps(saved), tr("tumour_window.tumours"), sel)
+            self.undo.reset()  # (Ctrl+Z in the window goes back as far as X / Esc does: no further)
 
     def reset(self):
         """Every setting back to its default and no graphs; tumours stay on or off."""
