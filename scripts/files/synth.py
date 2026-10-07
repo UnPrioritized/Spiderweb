@@ -274,8 +274,7 @@ class Limiter:
     CEILING = 0.5
     RELEASE = 0.3  # seconds to come back up by about two thirds
 
-    def __init__(self, ceiling=CEILING):
-        self.CEILING = ceiling
+    def __init__(self):
         self.inp = np.zeros((self.BLOCK, 2), np.float32)  # not turned yet (the last block waits for the next one)
         self.out = [np.zeros((self.BLOCK, 2), np.float32)]  # turned, not handed out yet
         self.env, self.gain = self.CEILING, 1.0
@@ -398,6 +397,64 @@ class Player:
             bass.BASS_StreamFree(h)
 
 
+# Built-in BASSMIDI's limiter (Live.set_limiter): Limiter's way (gain worked out per block, looking one block ahead,
+# ceiling at full volume) but with all it keeps in one row of numbers, so BASS's sound thread can run it as compiled
+# code that never waits for Python (fastloops.limit_dsp, when Numba is there) or else live_limit below (the same
+# maths; dev/tests/live_limiter.py compares them). Switched on / off, it fades between the plain and the limited
+# sound over LIM_FADE (a cut clicks: the limited sound is LIM_DELAY frames late); the first LIM_DELAY frames after
+# it's put on the stream stay plain (nothing late to fade to yet).
+LIM_BLOCK, LIM_DELAY, LIM_RING = 64, 128, 256  # frames: a gain per block, the limited sound this late, frames kept
+LIM_N, LIM_ON, LIM_MIX, LIM_ENV, LIM_G0, LIM_G1, LIM_PEAK, LIM_PREV = range(8)  # (the row: then the kept frames)
+LIM_HEAD = 8
+LIM_SIZE = LIM_HEAD + 2 * LIM_RING
+LIM_CEILING = 1.0  # full volume (the driver's limiter plugin at its defaults)
+LIM_FALL = math.exp(-LIM_BLOCK / (Limiter.RELEASE * RATE))
+LIM_FADE = 0.005  # seconds
+LIM_STEP = 1 / (LIM_FADE * RATE)
+
+
+def limit_state():
+    st = np.zeros(LIM_SIZE)
+    st[LIM_ENV], st[LIM_G0], st[LIM_G1] = LIM_CEILING, 1.0, 1.0
+    return st
+
+
+def live_limit(st, x):
+    """The limiter without Numba: x = float32 rows (left, right), changed in place; st = limit_state()'s row."""
+    ring = st[LIM_HEAD:].reshape(LIM_RING, 2)
+    m, i = len(x), 0
+    while i < m:  # (in pieces ending at block ends)
+        n = int(st[LIM_N])
+        k = min(m - i, LIM_BLOCK - n % LIM_BLOCK)
+        a = x[i:i + k].astype(np.float64)
+        r = n % LIM_RING
+        ring[r:r + k] = a
+        st[LIM_PEAK] = max(st[LIM_PEAK], np.abs(a).max())
+        d = n - LIM_DELAY
+        steps = LIM_STEP * np.arange(1, k + 1)
+        if st[LIM_ON]:
+            mix = np.minimum(1.0, st[LIM_MIX] + steps) if d >= 0 else np.full(k, st[LIM_MIX])
+        else:
+            mix = np.maximum(0.0, st[LIM_MIX] - steps)
+        if d >= 0:
+            t = (d % LIM_BLOCK + np.arange(1, k + 1)) / LIM_BLOCK
+            gain = st[LIM_G0] * (1 - t) + st[LIM_G1] * t
+            r = d % LIM_RING
+            y = ring[r:r + k] * gain[:, None]
+            x[i:i + k] = a * (1 - mix)[:, None] + y * mix[:, None]
+        else:
+            x[i:i + k] = a * (1 - mix)[:, None]
+        st[LIM_MIX] = mix[-1]
+        n += k
+        st[LIM_N] = n
+        if n % LIM_BLOCK == 0:  # a block made: the gain at the end of the one before it (the next to come out)
+            if n >= 2 * LIM_BLOCK:
+                st[LIM_ENV] = max(st[LIM_PREV], st[LIM_PEAK], st[LIM_ENV] * LIM_FALL)
+                st[LIM_G0], st[LIM_G1] = st[LIM_G1], LIM_CEILING / max(st[LIM_ENV], LIM_CEILING)
+            st[LIM_PREV], st[LIM_PEAK] = st[LIM_PEAK], 0.0
+        i += k
+
+
 class Live:
     """A BASSMIDI stream with 16 channels (10 = drums, as on any GM synth) that sounds each message the moment it's
     sent, set up like the common BASSMIDI MIDI-out driver (user, 2026-10-07: Player's Limiter + Python feeding the
@@ -405,9 +462,10 @@ class Live:
     Python in the sound thread, so a busy window can't starve it), full volume and no limiter (too loud = clipped,
     as there), linear sample interpolation, notes killed rather than faded at the voice limit, voices dropped
     rather than stuttering when it can't keep up. Holds the soundfont open until close(). set_limiter = the
-    driver's optional limiter (a limiter plugin at its defaults: catches only what goes past full volume): Limiter
-    with its ceiling at full volume, handed each piece by BASS as it makes it (Python only for that short step;
-    BASS's own compressor measured useless here: at full volume it does nothing, past +6 dB it lets sound through)."""
+    driver's optional limiter (a limiter plugin at its defaults: catches only what goes past full volume), handed
+    each piece by BASS as it makes it (see LIM_BLOCK; BASS's own compressor measured useless here: at full volume it
+    does nothing, past +6 dB it lets sound through). Without Numba that step is Python: it waits while the window is
+    busy and the sound breaks up then (hunt 2026-10-08: editing while playing, 150 ms of 6 s missing)."""
     CPU = 95  # % of the time it may spend making sound before voices are dropped (the driver's default)
     QUEUE = 65536 * 4  # bytes of messages waiting for the sound thread (the driver's default)
 
@@ -431,8 +489,8 @@ class Live:
                             (_ATTRIB_VOL, volume)):
             at(h, attr, float(value))
         self.set_voices(voices)
-        self.dsp, self._dsp_proc = 0, _DSPPROC(self._limit)  # (kept: BASS holds the callback)
-        self.limiter = None
+        self.dsp, self.st, self._proc = 0, None, None  # (st + _proc kept: BASS holds on to them)
+        self._lock = threading.Lock()
         if limiter:
             self.set_limiter(True)
         midi.BASS_MIDI_StreamLoadSamples(h)  # (program 0 + the drums: no wait at the first notes)
@@ -445,22 +503,44 @@ class Live:
         self.synth.bass.BASS_ChannelSetAttribute(self.handle, _ATTRIB_MIDI_VOICES, float(voices))
 
     def set_limiter(self, on):
-        """Heard at once."""
-        bass = self.synth.bass
-        if not self.handle or bool(on) == bool(self.dsp):
-            return
-        if on:
-            self.limiter = Limiter(1.0)
-            self.dsp = bass.BASS_ChannelSetDSP(self.handle, self._dsp_proc, None, 0)
-        else:
-            bass.BASS_ChannelRemoveDSP(self.handle, self.dsp)
+        """Heard at once (faded over LIM_FADE). Turned off, it leaves the stream once faded out."""
+        with self._lock:
+            if not self.handle:
+                return
+            if on and not self.dsp:
+                from files import speed
+                fast = speed.loops()
+                if fast is not None and struct.calcsize("P") == 8:  # (compiled code calls the plain C way: 64-bit)
+                    self._proc = _DSPPROC(fast.limit_dsp.address)
+                else:
+                    self._proc = _DSPPROC(self._limit)
+                self.st = limit_state()
+                self.dsp = self.synth.bass.BASS_ChannelSetDSP(self.handle, self._proc, self.st.ctypes.data, 0)
+            if self.dsp:
+                self.st[LIM_ON] = 1.0 if on else 0.0
+                if not on:
+                    self._let_go_later()
+
+    def _let_go_later(self):
+        timer = threading.Timer(LIM_FADE + 0.05, self._let_go)
+        timer.daemon = True
+        timer.start()
+
+    def _let_go(self):
+        with self._lock:
+            if not self.dsp or not self.handle or self.st[LIM_ON]:
+                return
+            if self.st[LIM_MIX] > 0:  # (not faded out yet: the sound device stalled)
+                self._let_go_later()
+                return
+            self.synth.bass.BASS_ChannelRemoveDSP(self.handle, self.dsp)
             self.dsp = 0
 
     def _limit(self, dsp, channel, buf, length, user):
-        """(BASS's sound thread) A piece just made, turned down in place where too loud."""
+        """(BASS's sound thread, without Numba) A piece just made, turned down in place where too loud."""
         try:
-            x = np.ctypeslib.as_array(ctypes.cast(buf, ctypes.POINTER(ctypes.c_float)), (length // 8, 2))
-            x[:] = self.limiter.process(x.copy())
+            live_limit(self.st, np.ctypeslib.as_array(ctypes.cast(buf, ctypes.POINTER(ctypes.c_float)),
+                                                      (length // 8, 2)))
         except Exception:  # (never into BASS's thread: that piece just plays as made)
             pass
 
@@ -481,7 +561,8 @@ class Live:
         return int(used.value)
 
     def close(self):
-        h, self.handle = self.handle, 0
+        with self._lock:
+            h, self.handle = self.handle, 0
         if not h:
             return
         self.synth.bass.BASS_StreamFree(h)

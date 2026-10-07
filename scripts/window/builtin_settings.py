@@ -11,6 +11,7 @@ import time
 import tkinter as tk
 from tkinter import ttk
 
+from files import speed
 from files.lang import tr
 from files.synth import RATE
 from window import look
@@ -67,7 +68,7 @@ class BuiltinSettings(tk.Toplevel):
         c = ttk.Checkbutton(box, text=tr("bs.limiter"), variable=app.play_limiter, command=app.on_play_limiter,
                             takefocus=False)
         c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
-        Tooltip(c, tr("bs.limiter_tip"))
+        Tooltip(c, tr("bs.limiter_tip") + (tr("bs.limiter_slow") if speed.without_loops() else ""))
         r += 1
 
         self.state = ttk.Label(box, text="", foreground=look.ERROR)

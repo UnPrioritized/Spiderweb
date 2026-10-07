@@ -13,13 +13,18 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   note_stretches engine.stretches (Multi channel): one shape's notes on a key joined into stretches
   nearest        picture._dist2(...).argmin(1) (Image to notes): each colour's nearest palette colour
   spread_line    picture._spread: the error spreading, one slanted line at a time (its OKLab left to NumPy)
+  limit_dsp      synth.live_limit as a callback BASS's sound thread calls itself (Built-in BASSMIDI's limiter: it
+                 never waits for Python); the same maths within float rounding
 The first start compiles them (about a second, in the background); the result is kept in __pycache__ for the next
 starts (not in the exe: its files can't be kept, so it compiles each start)."""
 
 import sys
 
 import numpy as np
-from numba import njit
+from numba import carray, cfunc, njit, types
+
+from files.synth import (LIM_BLOCK, LIM_CEILING, LIM_DELAY, LIM_ENV, LIM_FALL, LIM_G0, LIM_G1, LIM_HEAD, LIM_MIX,
+                         LIM_N, LIM_ON, LIM_PEAK, LIM_PREV, LIM_RING, LIM_SIZE, LIM_STEP)
 
 CACHE = not getattr(sys, "frozen", False)
 
@@ -512,6 +517,47 @@ def midi_events(notes, order, ch, most):
         out[p + 2] = notes[j >> 1, 3] & 0xFF if on else 0
         p += 3
     return out
+
+
+@njit(cache=CACHE, nogil=True)
+def limit_live(st, x, frames):
+    """synth.live_limit one frame at a time: x = the piece's floats (left, right, left...), changed in place."""
+    for f in range(frames):
+        n = int(st[LIM_N])
+        r = LIM_HEAD + 2 * (n % LIM_RING)
+        left, right = float(x[2 * f]), float(x[2 * f + 1])
+        st[r], st[r + 1] = left, right
+        st[LIM_PEAK] = max(st[LIM_PEAK], abs(left), abs(right))
+        d = n - LIM_DELAY
+        if st[LIM_ON]:
+            if d >= 0:
+                st[LIM_MIX] = min(1.0, st[LIM_MIX] + LIM_STEP)
+        else:
+            st[LIM_MIX] = max(0.0, st[LIM_MIX] - LIM_STEP)
+        mix = st[LIM_MIX]
+        if d >= 0:
+            t = (d % LIM_BLOCK + 1) / LIM_BLOCK
+            gain = st[LIM_G0] * (1 - t) + st[LIM_G1] * t
+            r = LIM_HEAD + 2 * (d % LIM_RING)
+            x[2 * f] = left * (1 - mix) + st[r] * gain * mix
+            x[2 * f + 1] = right * (1 - mix) + st[r + 1] * gain * mix
+        else:
+            x[2 * f] = left * (1 - mix)
+            x[2 * f + 1] = right * (1 - mix)
+        n += 1
+        st[LIM_N] = n
+        if n % LIM_BLOCK == 0:
+            if n >= 2 * LIM_BLOCK:
+                st[LIM_ENV] = max(st[LIM_PREV], st[LIM_PEAK], st[LIM_ENV] * LIM_FALL)
+                st[LIM_G0], st[LIM_G1] = st[LIM_G1], LIM_CEILING / max(st[LIM_ENV], LIM_CEILING)
+            st[LIM_PREV], st[LIM_PEAK] = st[LIM_PEAK], 0.0
+
+
+# (BASS's DSPPROC: handle, channel, the piece, its bytes, user = the limiter's row of numbers)
+@cfunc(types.void(types.uint32, types.uint32, types.CPointer(types.float32), types.uint32,
+                  types.CPointer(types.float64)), cache=CACHE)
+def limit_dsp(dsp, channel, buf, length, user):
+    limit_live(carray(user, (LIM_SIZE,)), carray(buf, (length // 4,)), length // 8)
 
 
 def warm():

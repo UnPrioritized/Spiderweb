@@ -12,6 +12,7 @@ import tkinter as tk
 
 _loops = None
 _started = False
+_failed = False
 
 
 def start():
@@ -22,6 +23,8 @@ def start():
     _started = True
     how = os.environ.get("SPIDERWEB_SPEED", "")
     if how == "off":
+        global _failed
+        _failed = True
         return
     if how == "now":
         _load()
@@ -41,6 +44,8 @@ def _load():
         _loops = fastloops
         how = "compiled loops ready in %.1f s" % (time.perf_counter() - began)
     except Exception:  # no Numba (or it can't compile here): the NumPy code is used
+        global _failed
+        _failed = True
         how = "compiled loops off: " + repr(sys.exc_info()[1])
         if importlib.util.find_spec("numba") is not None:  # (there but not working: worth a line in errors.log)
             from files import errors
@@ -54,6 +59,11 @@ def _load():
 def loops():
     """The fastloops module once it's ready, else None (use the NumPy code)."""
     return _loops
+
+
+def without_loops():
+    """True = the compiled loops won't come (no Numba, it failed, or turned off); False while they still load."""
+    return _failed or not _started
 
 
 # ------------------------------------------------------------------ Pillow
