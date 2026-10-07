@@ -61,6 +61,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     roll_text.py     the Text tool: typing on the roll, the caret
     roll_hz.py       the Hz bass tool: picking where a Hz bass starts
     roll_shared.py   colours, key names, modifier keys, outline caches
+    tiles.py         the notes' picture on screen as tiles (moved along when the view scrolls)
     zoombar.py       the piano roll's scrollbars (drag an end to zoom) and zoom buttons
   notes/             shapes -> notes
     engine.py        shapes -> notes, overlap handling, channel assignment

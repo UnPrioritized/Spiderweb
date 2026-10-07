@@ -63,7 +63,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self._pan = None
         self._panned = False     # the middle button moved further than a click's 3 px (pan_to)
         self._saved_view = None
-        self.note_img = None     # grid + notes as one picture when there are too many notes for canvas items
+        self._tiles = None       # grid + notes as one picture when there are too many notes for canvas items
         self._note_pic = None    # what that picture shows (see redraw)
         self._note_index = None  # rendered notes sorted by start, to find the visible ones quickly
         self._start_order = None  # their row numbers in that order

@@ -9,7 +9,7 @@ import numpy as np
 
 from notes.custom import custom_note_count, edge_inner, gap_lines, role_of
 from files.lang import tr
-from files.speed import Photo, loops
+from files.speed import loops
 from notes.engine import cached_arrays, shape_notes_tracks
 from notes.joined import all_tumours
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
@@ -17,6 +17,7 @@ from notes.paths import KEYS
 from notes.sliced import moved_by, moved_mark
 from roll.roll_shared import (BLACK, DRAFT_COLOR, PIANO_88, PREVIEW_LIMIT, SELECTED_COLOR, SLOT_COLORS,
                               draw_boxes, fade, note_name)
+from roll.tiles import Tiles
 from window import look
 
 HANDLE_COLOR = look.HANDLE
@@ -367,7 +368,7 @@ class RollDrawing:
         pic = (app.rendered, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols)))
         # (a shape being drawn / placed: its notes are in the picture, unless only its lines show)
         drafted = self.draft_notes() is not None
-        old = None if drafted or not app.show_notes.get() or self.note_img is None else self._note_pic
+        old = None if drafted or not app.show_notes.get() or self._tiles is None else self._note_pic
         if self._exact:
             self.after_cancel(self._exact)
             self._exact = None
@@ -381,7 +382,7 @@ class RollDrawing:
             self.paint_carried(w, h, rows, cols, fixed, *carried)
             self._note_pic = None
         elif old is not None and old[0] is pic[0] and old[1] == pic[1]:
-            self.create_image(int(self.kb_w), int(self.ruler_h), image=self.note_img, anchor="nw")
+            self._tiles.place(self, int(self.kb_w), int(self.ruler_h))
         elif moved:
             # only the view moved, by whole pixels: the picture is moved along and just the new edge is painted.
             # (A pixel here and there can round the other way, so it's painted whole once the view rests.)
@@ -396,7 +397,7 @@ class RollDrawing:
                 self.paint_image(w, h, rows, cols, rects)
                 self._note_pic = None if drafted else pic
             else:
-                self.note_img = self._note_pic = self._img = None
+                self._tiles = self._note_pic = self._img = None
                 self.draw_grid(w, h, rows, cols)
                 colors = note_tables(app.picture_pal)[0]
                 for x0, y0, x1, y1, color in zip(*(v.tolist() for v in rects or ())):
@@ -485,7 +486,7 @@ class RollDrawing:
         """The ring as lines on the canvas, when the notes are canvas rectangles (in the notes' picture it's painted
         with them: ring_pixels)."""
         parts = self.ring_now()
-        if parts is None or self.note_img is not None:
+        if parts is None or self._tiles is not None:
             return
         # on the notes' edge pixels, growing inward (user); a wider line as 1 px lines side by side (joined lines
         # are drawn with whole pixels only that way)
@@ -949,17 +950,11 @@ class RollDrawing:
         that far, but for these strips (x0, y0, x1, y1 inside the picture), so only they are sent."""
         img = self._img
         ih, iw = img.shape[:2]
-        if self.note_img is None or (self.note_img.width(), self.note_img.height()) != (iw, ih):
-            self._photo = Photo(self, iw, ih)
-            self.note_img = self._photo.photo
+        if self._tiles is None or self._tiles.size != (iw, ih):
+            self._tiles = Tiles(self, iw, ih)
             moved = self._shown = None
-        name = self.note_img.name
-        if moved and self._photo.whole_is_quicker(sum((x1 - x0) * (y1 - y0) for x0, y0, x1, y1 in strips)):
-            moved = self._shown = None  # (the whole picture goes, no copy needed)
         if moved:
-            dx, dy = moved
-            self.tk.call(name, "copy", name, "-from", max(-dx, 0), max(-dy, 0), iw + min(-dx, 0), ih + min(-dy, 0),
-                         "-to", max(dx, 0), max(dy, 0))
+            self._tiles.move(*moved)
         elif self._shown is not None and self._shown.shape == img.shape:
             # only the part that differs from what's shown is sent (sending pixels is the slow part)
             was = self._shown.reshape(ih, -1)
@@ -971,12 +966,10 @@ class RollDrawing:
                 strips = [(int(cols[0]), y0, int(cols[-1]) + 1, y1)]
         else:
             strips = [(0, 0, iw, ih)]
-        if self._photo.whole_is_quicker(sum((x1 - x0) * (y1 - y0) for x0, y0, x1, y1 in strips)):
-            strips = [(0, 0, iw, ih)]
         for x0, y0, x1, y1 in strips:
-            self._photo.put(img[y0:y1, x0:x1], x0, y0)
+            self._tiles.put(img, x0, y0, x1, y1)
         self._shown = img
-        self.create_image(int(self.kb_w), int(self.ruler_h), image=self.note_img, anchor="nw")
+        self._tiles.place(self, int(self.kb_w), int(self.ruler_h))
 
     def pan_pixels(self, old, pic, w, h):
         """(dx, dy): how far the picture painted for old has to move to show pic, if the view just moved by whole
