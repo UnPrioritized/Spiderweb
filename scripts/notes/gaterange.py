@@ -1,6 +1,6 @@
 """Spam gate Range: the gate goes from the spam gate (sh["gate"]) to a second one across the shape, instead of one
 gate for every note. sh["range"] = {"to": the second gate in beats, "graph": [[u, y], ...], "dir": "time" / "keys" /
-"keys_down", "fit": bool}.
+"keys_down", "fit": bool, "rows": bool, "join": bool}.
 
 The graph: u = 0..1 across the shape (left to right in time, bottom to top in keys, top to bottom in keys_down), y =
 0..1 from the first gate
@@ -9,7 +9,9 @@ to the second, straight lines between the points. Every whole-tick gate between 
 gates make most of the notes).
 
 Time: one row of back-to-back notes for the whole shape, from its left edge (every key cut at the same places),
-each note as long as the gate where it starts. Keys: each key row has its own gate, even all along the row.
+each note as long as the gate where it starts. Rows (time only, "Each key row by itself"): the whole graph over each
+stretch of a row on its own (join: over each key's first to last stretch, gaps included; custom.chop_rows); one too
+short for any note = one note of the first gate (user). Keys: each key row has its own gate, even all along the row.
 Fit: each stretch's first note starts and its last note ends right at the stretch's edges (stretched over the blank
 left there, or trimmed where it sticks out; custom.chop_grid)."""
 
@@ -46,7 +48,8 @@ def clean_range(r):
     if not math.isfinite(to) or to <= 0:
         return None
     return {"to": min(to, 10 ** 4), "graph": clean_graph(r.get("graph")) or [list(p) for p in STRAIGHT],
-            "dir": r["dir"] if r.get("dir") in DIRS else "time", "fit": bool(r.get("fit"))}
+            "dir": r["dir"] if r.get("dir") in DIRS else "time", "fit": bool(r.get("fit")), "rows": bool(r.get("rows")),
+            "join": bool(r.get("join"))}
 
 
 def reversed_graph(graph):
@@ -153,6 +156,27 @@ class RangeKeys:
         return np.column_stack([edges[:-1], edges[1:]])
 
 
+class RangeRows:
+    """Range along each key row: the whole graph over every stretch's own length (join: each key's stretches
+    together; custom.chop_rows asks it for the squares over (t0, t1))."""
+
+    def __init__(self, a, b, graph, join):
+        self.a, self.b, self.graph, self.join = a, b, tuple(map(tuple, graph)), join
+
+    def squares(self, t0, t1):
+        return t0 + _row_squares(max(t1 - t0, 1), self.a, self.b, self.graph)
+
+
+@functools.lru_cache(maxsize=4096)
+def _row_squares(span, a, b, graph):
+    """range_squares from 0 (kept: many stretches share a length)."""
+    return range_squares(0, span, a, b, graph)
+
+
+def is_rows(r):
+    return bool(r) and r["dir"] == "time" and r.get("rows")
+
+
 def frame_span(sh):
     """A custom shape's frame: (first beat, last beat, lowest key, highest key)."""
     (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
@@ -169,7 +193,10 @@ def _span(sh, r, ppq):
 def part_range(whole, part, ppq):
     """A piece cut off a ranged shape (Slice) -> its (gate in beats, range): the part of the whole's range over the
     piece's own stretch, so each spot keeps the gate it had (the graph cut there; the gates between its lowest and
-    highest, each the same stretch of y as before)."""
+    highest, each the same stretch of y as before). Along each key row: the whole's range as it is (each row of the
+    piece runs it all)."""
+    if is_rows(whole["range"]):
+        return whole["gate"], dict(whole["range"])
     down = whole["range"]["dir"] == "keys_down"
     r = keys_up(whole["range"])
     a = max(1, math.floor(whole["gate"] * ppq + 0.5))
@@ -196,10 +223,13 @@ def part_range(whole, part, ppq):
 
 
 def range_grid(sh, ppq):
-    """What custom.chop cuts the stretches with for a shape with a Range: squares (time) or a RangeKeys (keys)."""
+    """What custom.chop cuts the stretches with for a shape with a Range: squares (time), a RangeRows (time, each key
+    row by itself) or a RangeKeys (keys)."""
     r = keys_up(sh["range"])
     a = max(1, math.floor(sh["gate"] * ppq + 0.5))
     b = max(1, math.floor(r["to"] * ppq + 0.5))
+    if is_rows(r):
+        return RangeRows(a, b, r["graph"], bool(r.get("join")))
     lo, hi, k0, k1 = frame_span(sh)
     t0, t1 = math.floor(lo * ppq), math.ceil(hi * ppq)
     if r["dir"] == "keys":

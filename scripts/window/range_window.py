@@ -1,7 +1,7 @@
 """The spam gate Range window (the side panel's Range… button next to the gate; gaterange.py). Everything about the
 Range is set here, not in the panel (user: room for more options later): on / off, the first and second gate (From
 = the shape's spam gate, To = where the graph reaches the top), across time or keys (low to high or top to bottom),
-Fit to the shape's edges, and the graph: across the shape from the first gate to the second. Drag points, click to add one, right-click
+each key row by itself (+ across gaps), Fit to the shape's edges, and the graph: across the shape from the first gate to the second. Drag points, click to add one, right-click
 one to delete it; presets. The pale steps behind the line = the whole-tick gates the notes really get. Beside it:
 how many notes get each gate (counted from the picked shapes' real notes; red = a gate no note gets).
 
@@ -90,6 +90,15 @@ class RangeGraph(tk.Toplevel):
         self.dir_box.pack(side="left", padx=4)
         self.dir_box.bind("<<ComboboxSelected>>", lambda e: self.change("dir", DIRS[self.dir_box.current()]))
         Tooltip(self.dir_box, tr("range_window.dir_tip"))
+        self.rows_var, self.join_var = tk.BooleanVar(), tk.BooleanVar()
+        self.rows_check = ttk.Checkbutton(box, text=tr("range_window.rows"), variable=self.rows_var,
+                                          command=lambda: self.change("rows", self.rows_var.get()))
+        self.rows_check.pack(anchor="w", pady=(4, 0))
+        Tooltip(self.rows_check, tr("range_window.rows_tip"))
+        self.join_check = ttk.Checkbutton(box, text=tr("range_window.join"), variable=self.join_var,
+                                          command=lambda: self.change("join", self.join_var.get()))
+        self.join_check.pack(anchor="w", padx=(int(20 * s), 0))
+        Tooltip(self.join_check, tr("range_window.join_tip"))
         self.fit_var = tk.BooleanVar()
         self.fit_check = ttk.Checkbutton(box, text=tr("range_window.fit"), variable=self.fit_var,
                                          command=lambda: self.change("fit", self.fit_var.get()))
@@ -243,6 +252,11 @@ class RangeGraph(tk.Toplevel):
             self.gate_boxes[key].config(style="TEntry", state="normal" if on else "disabled")
         self.dir_box.current(DIRS.index(self.memo[0]["dir"]))
         self.dir_box.config(state="readonly" if on else "disabled")
+        time = on and self.memo[0]["dir"] == "time"  # (each key row by itself: left to right only)
+        self.rows_var.set(self.memo[0]["rows"])
+        self.rows_check.config(state="normal" if time else "disabled")
+        self.join_var.set(self.memo[0]["join"])
+        self.join_check.config(state="normal" if time and self.memo[0]["rows"] else "disabled")
         self.fit_var.set(self.memo[0]["fit"])
         self.fit_check.config(state="normal" if on else "disabled")
         for btn in self.preset_btns:
@@ -336,6 +350,8 @@ class RangeGraph(tk.Toplevel):
                            font=look.font(7))
         cv.create_rectangle(x0, top, x1, bot, outline=look.CHART_FRAME)
         ends = {"time": ("left", "right"), "keys": ("low", "high"), "keys_down": ("high", "low")}[self.memo[0]["dir"]]
+        if self.memo[0]["dir"] == "time" and self.memo[0]["rows"]:
+            ends = ("row_start", "row_end")
         cv.create_text(x0, bot + 4 * s, text=tr(f"range_window.{ends[0]}"), anchor="nw", fill=look.LABEL,
                        font=look.font(7))
         cv.create_text(x1, bot + 4 * s, text=tr(f"range_window.{ends[1]}"), anchor="ne", fill=look.LABEL,

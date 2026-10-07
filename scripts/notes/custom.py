@@ -11,7 +11,7 @@ from files.lang import tr
 from notes.arc import arc_k, arc_points, ellipse_bezier
 from notes.areas import COLOURS, _maps, area_map, inside_loops  # (areas coloured by hand)
 from notes.faces import faces  # (what's filled when it isn't plain even-odd: fill_test)
-from notes.gaterange import RangeKeys, clean_range, range_grid  # (a spam gate going from one to another)
+from notes.gaterange import RangeKeys, RangeRows, clean_range, range_grid  # (a spam gate going from one to another)
 from notes.bezier import sample
 from notes.pattern import (baked_path, clean_pattern, clean_shape_formula, formed_path, formed_paths, has_formula,
                            moved_formulas)
@@ -1698,12 +1698,59 @@ def chop_keys(stretches, grid, count=False, fit=False, keep=False):
     return np.concatenate(parts)[np.argsort(np.concatenate(owners), kind="stable")]
 
 
+def range_spans(stretches, join):
+    """Where a Range along each key row runs for each stretch: (t0s, t1s) = its own ends, or join: its key's first
+    stretch's start to last one's end (gaps included)."""
+    s0, e0 = stretches[:, 0], stretches[:, 1]
+    if not join or not len(stretches):
+        return s0, e0
+    keys, inv = np.unique(stretches[:, 2], return_inverse=True)
+    inv = inv.reshape(-1)
+    lo, hi = np.full(len(keys), s0.max()), np.full(len(keys), e0.min())
+    np.minimum.at(lo, inv, s0)
+    np.maximum.at(hi, inv, e0)
+    return lo[inv], hi[inv]
+
+
+def chop_rows(stretches, grid, count=False, fit=False):
+    """chop for a gate Range along each key row (gaterange.RangeRows): the whole graph over each stretch's own
+    length (join: over its key's stretches together), squares whose middle is inside it, as chop_grid. One too
+    short for any square = one note of the first gate from its start (user; with fit: the stretch as it is).
+    Stretches laid out the same from their t0 get the same notes, so each layout is worked out once."""
+    if not len(stretches):
+        return np.zeros(0, np.int64) if count else np.zeros((0, 3), np.int64)
+    s0, e0, q = stretches[:, 0], stretches[:, 1], stretches[:, 2]
+    t0, t1 = range_spans(stretches, grid.join)
+    groups, inv = np.unique(np.column_stack([t1 - t0, s0 - t0, e0 - t0]), axis=0, return_inverse=True)
+    inv = inv.reshape(-1)
+    temps = []
+    for length, a0, a1 in groups.tolist():
+        st = np.array([[a0, a1, 0]], np.int64)
+        sq = grid.squares(0, length)
+        if fit or chop_grid(st, sq, True)[0]:
+            temps.append(chop_grid(st, sq, fit=fit, keep=True))
+        else:
+            temps.append(np.array([[a0, a0 + grid.a, 0]], np.int64))
+    ng = np.array([len(t) for t in temps], np.int64)
+    n = ng[inv]
+    if count:
+        return n
+    first = np.cumsum(ng) - ng
+    idx = np.repeat(first[inv], n) + np.arange(n.sum()) - np.repeat(np.cumsum(n) - n, n)
+    out = np.concatenate(temps)[idx]
+    out[:, :2] += np.repeat(t0, n)[:, None]
+    out[:, 2] = np.repeat(q, n)
+    return out
+
+
 def chop(sh, stretches, g, count=False):
     """stretches: NumPy array of (start, end, key) rows in ticks -> each filled with back-to-back notes of gate g,
     as an array of (start, end, key) rows in the same order. Where they start: ALIGNS; what happens to the bit that
     doesn't fit a whole gate: ENDS. count: just how many notes each stretch gets."""
     keep = bool(sh.get("range")) and not sh.get("hz")
     fit = keep and bool(sh["range"].get("fit"))
+    if isinstance(g, RangeRows):
+        return chop_rows(stretches, g, count, fit)
     if isinstance(g, (KeyGrid, RangeKeys)):
         return chop_keys(stretches, g, count, fit, keep)
     if isinstance(g, np.ndarray):
@@ -2043,29 +2090,75 @@ def cycling(sh):
 def range_steps(sh, notes, ppq):
     """Spam steps of a shape with a gate Range: which of its gates each note starts nearest to (time: the same for
     every key, so columns line up; keys: counted along each key's own row). Fit: the square its middle is in (a row's
-    first and last note reach past their own square's start / end)."""
+    first and last note reach past their own square's start / end). Along each key row: counted along its stretch."""
     grid = range_grid(sh, ppq)
     fit = sh["range"].get("fit")
-
-    def nearest(starts, s):
-        if fit:
-            return np.maximum(np.searchsorted(starts, s, "right") - 1, 0)
-        return np.searchsorted((starts[:-1] + starts[1:]) / 2, s, "right")
-
+    if isinstance(grid, RangeRows):
+        return row_steps(sh, notes, ppq, grid, fit)[0]
     s = (notes[:, 0] + notes[:, 1]) / 2 if fit else notes[:, 0]
     if not isinstance(grid, RangeKeys):
-        return nearest(grid[:, 0], s)
+        return _nearest(grid[:, 0], s, fit)
     k = np.zeros(len(notes), np.int64)
     for key in np.unique(notes[:, 2]).tolist():
         rows = notes[:, 2] == key
-        k[rows] = nearest(grid.squares(key)[:, 0], s[rows])
+        k[rows] = _nearest(grid.squares(key)[:, 0], s[rows], fit)
     return k
+
+
+def _nearest(starts, s, fit):
+    """Which of the squares (their starts) each spot s is in (fit: s = a note's middle) / starts nearest to."""
+    if fit:
+        return np.maximum(np.searchsorted(starts, s, "right") - 1, 0)
+    return np.searchsorted((starts[:-1] + starts[1:]) / 2, s, "right")
+
+
+def range_stretches(sh, ppq):
+    """The (start, end, key) stretches a spam shape's notes are chopped from (as _notes_groups chops them)."""
+    if sh["fill"] == "outline_spam":
+        return np.asarray(outline_groups(sh, ppq)[0], np.int64).reshape(-1, 3)
+    if not fillable(sh["strokes"]):
+        return np.zeros((0, 3), np.int64)
+    if has_areas(sh):
+        rows = merged_rows(area_spans(sh, ppq)[:, :3])
+    else:
+        rows = np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]
+    return np.concatenate([rows, flat_notes(sh, ppq), edge_lines(sh, ppq)[0]]).astype(np.int64)
+
+
+def row_steps(sh, notes, ppq, grid, fit):
+    """range_steps / range_gates along each key row: (each note's square in its stretch, that square's gate). A
+    note's stretch = the last one on its key starting at or before it; one too short for any square = step 0 and
+    the first gate (chop_rows)."""
+    k, g = np.zeros(len(notes), np.int64), np.full(len(notes), grid.a, np.int64)
+    st = range_stretches(sh, ppq)
+    if not len(st) or not len(notes):
+        return k, g
+    t0, t1 = range_spans(st, grid.join)
+    o = np.lexsort((st[:, 0], st[:, 2]))
+    big = np.int64(1) << 40
+    at = np.searchsorted(st[o, 2] * big + st[o, 0], notes[:, 2].astype(np.int64) * big + notes[:, 0], "right")
+    j = o[np.maximum(at - 1, 0)]
+    s = (notes[:, 0] + notes[:, 1]) / 2 if fit else notes[:, 0]
+    which, inv = np.unique(j, return_inverse=True)
+    inv = inv.reshape(-1)
+    order = np.argsort(inv, kind="stable")
+    ends = np.cumsum(np.bincount(inv, minlength=len(which)))
+    for i, w in enumerate(which.tolist()):
+        rows = order[ends[i - 1] if i else 0:ends[i]]
+        sq = grid.squares(int(t0[w]), int(t1[w]))
+        if not fit and not chop_grid(st[w:w + 1], sq, True)[0]:
+            continue  # (too short: the first gate)
+        k[rows] = _nearest(sq[:, 0], s[rows], fit)
+        g[rows] = sq[k[rows], 1] - sq[k[rows], 0]
+    return k, g
 
 
 def range_gates(sh, notes, ppq):
     """The gate (ticks) each note of a shape with a gate Range was cut with (its step's; with Fit a row's first and
     last note count as their step's gate even when stretched or trimmed)."""
     grid = range_grid(sh, ppq)
+    if isinstance(grid, RangeRows):
+        return row_steps(sh, notes, ppq, grid, sh["range"].get("fit"))[1]
     if not isinstance(grid, RangeKeys):
         k = range_steps(sh, notes, ppq)
         return grid[k, 1] - grid[k, 0]
