@@ -212,9 +212,10 @@ BOX_CURSORS = {(-1, 0): "sb_h_double_arrow", (1, 0): "sb_h_double_arrow", (0, -1
 
 
 def fade(color, amount=0.72):
-    """color mixed towards white"""
+    """color mixed towards the piano roll's background (white in the light look)"""
     r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
-    return "#%02x%02x%02x" % tuple(round(c + (255 - c) * amount) for c in (r, g, b))
+    to = [int(look.ROLL_BG[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#%02x%02x%02x" % tuple(round(c + (t - c) * amount) for c, t in zip((r, g, b), to))
 
 
 def note_name(p):
