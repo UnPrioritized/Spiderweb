@@ -66,7 +66,8 @@ top of the shape's own velocity; loudness goes with velocity squared):
   "sweep": a bump of loudness over the keys; the value is where it is, 0 = the lowest key, 1 = the highest.
   "wah": loud and quiet stripes over the keys, more of them the higher the value (0 = every key full).
   "tremolo": every key louder and quieter in turn, value x TREMOLO times a beat (0 = steady), down to 1 -
-  TREMOLO_DEPTH of its loudness (or 1 - hz["lfo"]["tremolo_depth"], set by the synth window's knobs).
+  TREMOLO_DEPTH of its loudness (or 1 - hz["lfo"]["tremolo_depth"], set by the synth window's knobs), coming in
+  from each note's start after hz["lfo"]["tremolo_wait"] beats over ["tremolo_rise"] (none: there at once).
   "octave": every other repeat softer, down to velocity 1 at 1: the tone an octave below comes in.
 Waveforms ("sine", "square", "saw", "triangle"): every key hits SUB times in each wave instead of once, and how
 hard each of those hits is follows the shape drawn over one wave (WAVES), which takes overtones out of the tone
@@ -76,7 +77,7 @@ out, so the note count grows with the value, up to SUB times as many.
 hz["voice"] = the synth window's Voice box (not lines; clean_voice): {"voices": copies of the sound (2..VOICES),
 "detune": cents between the lowest and the highest copy, their tones spread evenly between, "same": True = every key
 plays every copy (as many times the notes) instead of each key one copy in turn (no extra notes), "glide": beats a
-note takes to glide in from the tone of the note before it (glides), "touching": True = only from a note that ends
+note takes to glide in from the tone of the note before it (glides), "curve": how (glide_left), "touching": True = only from a note that ends
 where it starts, "legato": True = a note that starts right where another ends carries on its effects (no new attack,
 no fall after the first: legato_links)}. Glide only bends the tone: each note still starts its effects over, like a
 synth's voices (unless Legato joins them).
@@ -115,7 +116,13 @@ VIBRATO_RATE = 2.5  # ... times a beat (unless hz["lfo"]["vibrato_rate"])
 WAH = 8.0  # "wah" at 1: this many loud stripes over the keys
 TREMOLO = 8.0  # "tremolo" at 1: this many times a beat
 TREMOLO_DEPTH = 0.9  # ... how much quieter it gets (unless hz["lfo"]["tremolo_depth"])
-LFO = {"vibrato_rate": (0.0, 64.0), "tremolo_depth": (0.0, 1.0)}  # hz["lfo"]: what each can be
+# hz["lfo"]: what each can be; tremolo_wait / tremolo_rise = beats from each note's start before the tremolo comes
+# in, and how long it then takes to reach its depth (the vibrato's are in its line)
+LFO = {"vibrato_rate": (0.0, 64.0), "tremolo_depth": (0.0, 1.0), "tremolo_wait": (0.0, 64.0),
+       "tremolo_rise": (0.0, 64.0)}
+# ... and how the synth window's Rate knobs move (vibrato_timing / tremolo_timing; not missing = "free"): free, or
+# only to note lengths (straight, triplets, dotted). Only the knobs care: the rate itself is still times a beat
+TIMINGS = ("free", "straight", "triplet", "dotted")
 BEND = 0.98  # how far a line between two points can be bent (1 = a step)
 LOOP = (1 / 256, 1024.0)  # beats: how short and how long one repeat of a repeating effect can be
 FROM_MODES = ("note", "restart")  # hz["from"]: once from each note's start / repeating, starting over at each note
@@ -154,8 +161,9 @@ RACK = {"chorus": {"depth": (0.0, 100.0, 15.0), "rate": (0.0, 64.0, 0.5)},
 # hz["arp"] (the Arpeggio box; there only while it's on): every note (or the notes placed together, a chord) becomes a
 # fast run through its pitches: `chord` = "placed" (the notes placed together) or a chord's steps in keys on each
 # note; `octaves` = the same again 1, 2... octaves up; `pattern` = the order; `speed` = notes a beat, each `gate` of
-# its step long (1 = touching)
-ARP = {"speed": (0.25, 32.0, 4.0), "octaves": (1.0, 4.0, 1.0), "gate": (0.05, 1.0, 1.0)}
+# its step long (1 = touching); `swing` = every second step comes late, by up to half a step at 1 (the step before it
+# that much longer, its own that much shorter)
+ARP = {"speed": (0.25, 32.0, 4.0), "octaves": (1.0, 4.0, 1.0), "gate": (0.05, 1.0, 1.0), "swing": (0.0, 1.0, 0.0)}
 ARP_PATTERNS = ("up", "down", "updown", "random")
 CHORDS = {"placed": (0,), "octave": (0, 12), "fifth": (0, 7), "major": (0, 4, 7), "minor": (0, 3, 7),
           "seventh": (0, 4, 7, 10), "sus4": (0, 5, 7)}
@@ -163,6 +171,7 @@ OFF_BOXES = ("volume", "wave", "pitch", "vibrato", "tremolo", "tone", "character
 VOICES = 8  # hz["voice"]: the most copies
 DETUNE = 100.0  # ... the most cents between the lowest and the highest copy
 GLIDE = 64.0  # ... the longest glide, in beats
+GLIDE_CURVE = 0.5  # ... its curve when there's none: -1 = slow first, 0 = straight, 1 = fast first (glide_left)
 
 
 def group_count(value):
@@ -247,6 +256,9 @@ def clean_lfo(lfo):
             continue
         if math.isfinite(v):
             out[key] = min(hi, max(lo, v))
+    for key in ("vibrato_timing", "tremolo_timing"):
+        if isinstance(lfo, dict) and lfo.get(key) in TIMINGS[1:]:
+            out[key] = lfo[key]
     return out
 
 
@@ -272,6 +284,9 @@ def clean_voice(voice):
         out["glide"] = min(GLIDE, glide)
         if voice.get("touching") is True:
             out["touching"] = True
+        curve = min(1.0, max(-1.0, num("curve", GLIDE_CURVE)))
+        if abs(curve - GLIDE_CURVE) > 1e-9:
+            out["curve"] = curve
     if voice.get("legato") is True:
         out["legato"] = True
     return out
@@ -300,11 +315,15 @@ def clean_settings(got, table):
 
 
 def clean_arp(arp):
-    """The Arpeggio box checked (hz["arp"], see ARP): {pattern, chord, speed, octaves, gate}, or {} (off)."""
+    """The Arpeggio box checked (hz["arp"], see ARP): {pattern, chord, speed, octaves, gate, swing (left out at 0)},
+    or {} (off)."""
     if not isinstance(arp, dict):
         return {}
-    return {"pattern": arp.get("pattern") if arp.get("pattern") in ARP_PATTERNS else "up",
-            "chord": arp.get("chord") if arp.get("chord") in CHORDS else "placed", **clean_settings(arp, ARP)}
+    out = {"pattern": arp.get("pattern") if arp.get("pattern") in ARP_PATTERNS else "up",
+           "chord": arp.get("chord") if arp.get("chord") in CHORDS else "placed", **clean_settings(arp, ARP)}
+    if not out["swing"]:
+        del out["swing"]
+    return out
 
 
 def arpeggiated(tones, arp):
@@ -313,6 +332,7 @@ def arpeggiated(tones, arp):
     and octaves) in the pattern's order; a note let go drops out of the run. Each keeps its note's tune and gates;
     slides made by hand are left out (the run's notes are new ones)."""
     step = 1.0 / arp["speed"]
+    late = arp.get("swing", 0.0) * step / 2  # (every second step: that much later, the one before it longer)
     out = []
     order = sorted(tones, key=lambda n: n["t"])
     i = 0
@@ -332,9 +352,10 @@ def arpeggiated(tones, arp):
         rng = np.random.default_rng(int(round(t0 * 1000)) % (2 ** 32))
         k = 0
         while True:
-            t = t0 + k * step
+            t = t0 + k * step + (late if k % 2 else 0.0)
             if t >= end - 1e-9:
                 break
+            slot = step - late if k % 2 else step + late
             held = [(key, n) for key, n in items if n["t"] + n["len"] > t + 1e-9]
             if held:
                 seq = held if arp["pattern"] != "down" else held[::-1]
@@ -343,7 +364,7 @@ def arpeggiated(tones, arp):
                 pick = seq[int(rng.integers(len(seq)))] if arp["pattern"] == "random" else seq[k % len(seq)]
                 (key, cents), n = pick
                 if 0 <= key <= 127:
-                    tone = {"t": t, "len": max(MIN_LEN, min(step * arp["gate"], n["t"] + n["len"] - t)), "key": key,
+                    tone = {"t": t, "len": max(MIN_LEN, min(slot * arp["gate"], n["t"] + n["len"] - t)), "key": key,
                             "cents": cents, "id": len(out) + 1, "to": []}
                     tone.update({f: n[f] for f in ("auto", "gate") if f in n})
                     out.append(tone)
@@ -881,6 +902,12 @@ def legato_links(voice, tones):
     return out
 
 
+def glide_left(u, curve):
+    """How much of a glide's way is left at u (0..1 of its time): (1 - u) ^ 4^curve, so curve 0 = straight, 1 = fast
+    first, -1 = slow first (GLIDE_CURVE = (1 - u)^2, as glides always were)."""
+    return (1.0 - u) ** (4.0 ** curve)
+
+
 def glides(hz):
     """{tone id: [pitch it glides in from, ...]} with Glide on (hz["voice"]): a note glides in from the note(s)
     that ended last before it starts ("touching": only when they end right where it starts), like the slides made
@@ -994,11 +1021,12 @@ def tone_runs(hz, left, ppq):
         if n["id"] in gl:
             s, e = (left + n["t"]) * ppq, (left + n["t"] + min(hz["voice"]["glide"], n["len"])) * ppq
             a = max(a, n["t"] + min(hz["voice"]["glide"], n["len"]))
+            curve = hz["voice"].get("curve", GLIDE_CURVE)
             for k0 in gl[n["id"]]:
                 part, after, t = [], [], s
                 while t < e:
                     part.append(t)
-                    t += wave(hz, ppq, pitch(n) + (k0 - pitch(n)) * (1.0 - (t - s) / (e - s)) ** 2)
+                    t += wave(hz, ppq, pitch(n) + (k0 - pitch(n)) * glide_left((t - s) / (e - s), curve))
                     after.append(t)
                 out.append((np.array(part), np.array(after), (n, None)))
         b = n["t"] + n["len"] - min([min(s["out"], n["len"]) for m, _, s in ls if m is n], default=0.0)
@@ -1185,6 +1213,8 @@ class KeyGrid:
         self.copies, self.same = copies(hz), bool((hz.get("voice") or {}).get("same"))
         self.mode, self.ppq = hz.get("mode") or {}, ppq
         self.chorus, self.echo, self.reverb = (rack_on(hz, k) for k in ("chorus", "echo", "reverb"))
+        lfo = hz.get("lfo") or {}
+        self.trem_in = (lfo.get("tremolo_wait", 0.0), lfo.get("tremolo_rise", 0.0))  # (beats: see LFO)
         self.runs = []
         tail = tails(hz)
         for starts, nexts, whose in tone_runs(hz, left, ppq):
@@ -1368,7 +1398,15 @@ class KeyGrid:
             swept = 0.08 + 0.92 * np.clip(np.cos(np.pi * (xv - f["sweep"][src])), 0.0, 1.0) ** 4
             loud = np.where(f["swept"][src], swept, 1.0)
             loud = loud * (1.0 + np.cos(2.0 * np.pi * WAH * f["wah"][src] * (xv - 0.5))) / 2.0
-            loud = loud * (trem[0] + trem[1] * (1.0 + np.cos(2.0 * np.pi * f["turns"][src])) / 2.0)
+            if any(self.trem_in):  # (coming in after Delay over Rise, from each note's start)
+                wait, rise = self.trem_in
+                since = f["since"][src]
+                come = (np.clip((since - wait) / rise, 0.0, 1.0) if rise > 0
+                        else (since >= wait - 1e-9).astype(float))
+                d = trem[1] * come
+                loud = loud * (1.0 - d * (1.0 - np.cos(2.0 * np.pi * f["turns"][src])) / 2.0)
+            else:
+                loud = loud * (trem[0] + trem[1] * (1.0 + np.cos(2.0 * np.pi * f["turns"][src])) / 2.0)
             vol = np.where(f["has_volume"][src], f["volume"][src], 1.0)
             loud = loud * vol
             if tailed.any():  # (the reverb: starting at its level, fading)
