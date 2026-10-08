@@ -2313,7 +2313,7 @@
  "help.hz_live.text": [
   "In the Hz bass window, press Synth… (it turns Preview on). The synth window has three tabs (the big buttons at the top left): OSC (the knobs), FX (the effects) and Draw (the effects' lines for one note, big), and a keyboard along the bottom.",
   "",
-  "Click and hold a key to hear the Hz bass of that key, as a note placed there would sound: its keys, gates and effects. Let go, and the falls after the sustain points play. Drag sideways to play other keys.",
+  "Click and hold a key to hear the Hz bass of that key, as a note placed there would sound: its keys, gates and effects. Let go, and the falls after the sustain points play. Drag sideways to play other keys. Hold several letters (or letters and the mouse) to play keys together, as on a synth; keys pressed at the same moment start together, as a chord.",
   "",
   "You can play with your computer's keyboard too, like a small piano: the middle row of letters A S D F G H J K are the white keys from C up, W E T Y U above them the black keys, and O L P ; go on past the next C.",
   "",

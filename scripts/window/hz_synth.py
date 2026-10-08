@@ -158,9 +158,9 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
         self.kb_w = hz.kb_w
         self.sx, self.t0 = 100.0, 0.0
         self.tool, self.pencil, self.live = hz.tool, hz.pencil, hz.live
-        self.held = None  # the key held with the mouse or a letter
-        self.held_by = None  # ... "mouse", or the letter (keysym)
-        self.letter_up = None  # a letter let go: its key stops a moment later unless it's pressed again (repeating)
+        self.holding = {}  # the keys held: "mouse" or a letter (keysym) -> its key (several together, as a synth)
+        self.codes = {}  # ... a letter's key code (letter_check)
+        self.letter_up = {}  # a letter let go: its key stops a moment later unless it's pressed again (repeating)
         self.kb_base = getattr(self.app, "hz_kb_base", 24)  # the key the letter A plays (C1; Hz bass is low)
         self.shown = None  # what the pane was drawn for (refresh)
         self.meter_job, self.meter_for = None, None  # the note meter: waiting to be counted, counted for
@@ -393,7 +393,7 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
         colour = DIM if colour == look.INFO else WARN  # (the Hz bass window's colours, for the dark look)
         if (self.says.cget("text"), str(self.says.cget("foreground"))) != (says, colour):
             self.says.config(text=says, foreground=colour)
-        if self.held is None and self.live.key is None and self.piano.find_withtag("lit"):
+        if not self.holding and self.live.key is None and self.piano.find_withtag("lit"):
             self.draw_keys()
 
     # ------------------------------------------------------------ the note meter
@@ -490,10 +490,10 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
         w, h = c.winfo_width(), c.winfo_height()
         if w < 50:
             return
-        lit = self.held if self.held is not None else self.live.key
+        lit = set(self.holding.values()) or set(self.live.held_keys())
         bh = h * 0.6
         for k, x0, x1, black in self.key_spots():
-            on = k == lit
+            on = k in lit
             reach = self.kb_base <= k <= self.kb_base + len(LETTERS) - 1
             fill = KEY_HELD if on else (KEY_BLACK if reach else OUT_BLACK) if black else KEY_WHITE if reach else OUT_WHITE
             c.create_rectangle(x0, 0, x1, bh if black else h, fill=fill, outline=BG,
@@ -510,34 +510,50 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
                 return k
         return None
 
+    @property
+    def held(self):
+        """The key held last (None: none)."""
+        return next(reversed(self.holding.values()), None)
+
+    def hold(self, by, key):
+        """`by` ("mouse" or a letter) presses key, the keys held already sounding on. Returns why it can't, or
+        None."""
+        why = self.live.press(key, parent=self)
+        if why:
+            self.status.config(text=why)
+            return why
+        self.holding[by] = key
+        self.draw_keys()
+        return None
+
     def on_key_press(self, e):
         k = self.key_at(e.x, e.y)
         if k is None:
             return
-        why = self.live.press(k, parent=self)
-        if why:
-            self.status.config(text=why)
-            return
-        self.held, self.held_by = k, "mouse"  # (a letter held: the mouse takes over)
-        self.show_status()
-        self.draw_keys()
+        if "mouse" in self.holding:
+            self.let_go("mouse")
+        if not self.hold("mouse", k):
+            self.show_status()
 
     def on_key_drag(self, e):
-        if self.held is None or self.held_by != "mouse":
+        if "mouse" not in self.holding:
             return
         k = self.key_at(min(max(e.x, 0), self.piano.winfo_width() - 1), min(max(e.y, 0), self.piano.winfo_height() - 1))
-        if k is not None and k != self.held:  # (onto another key: that one plays)
-            self.live.press(k, parent=self)
-            self.held = k
-            self.draw_keys()
+        if k is not None and k != self.holding["mouse"]:  # (onto another key: that one plays, the one left lets go)
+            self.let_go("mouse")
+            self.hold("mouse", k)
 
     def on_key_release(self, e):
-        if self.held is not None and self.held_by == "mouse":
-            self.let_go()
+        if "mouse" in self.holding:
+            self.let_go("mouse")
 
-    def let_go(self):
-        self.held = self.held_by = None
-        self.live.release()
+    def let_go(self, by=None):
+        """`by` lets go of its key (None: every key held); a key still held by another (the mouse and a letter on
+        one key) sounds on."""
+        for b in [by] if by is not None else list(self.holding):
+            key = self.holding.pop(b, None)
+            if key is not None and key not in self.holding.values():
+                self.live.release(key)
         self.draw_keys()
 
     # ------------------------------------------------------------ the computer keyboard's letters
@@ -557,21 +573,14 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
             return "break"
         if k not in LETTERS:
             return None
-        if self.letter_up and self.held_by == k:  # (the key repeating: let go and pressed at once = still held)
-            self.after_cancel(self.letter_up)
-            self.letter_up = None
-        if self.held_by == k:
+        if k in self.letter_up:  # (the key repeating: let go and pressed at once = still held)
+            self.after_cancel(self.letter_up.pop(k))
+        if k in self.holding:
             return "break"
         key = self.kb_base + LETTERS.index(k)
-        if key > 127:
+        if key > 127 or self.hold(k, key):
             return "break"
-        why = self.live.press(key, parent=self)
-        if why:
-            self.status.config(text=why)
-            return "break"
-        self.held, self.held_by = key, k
-        self.held_code = e.keycode
-        self.draw_keys()
+        self.codes[k] = e.keycode
         self.after(LETTER_CHECK_MS, lambda: self.letter_check(k))
         return "break"
 
@@ -597,43 +606,44 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
 
     def letter_check(self, k):
         """A letter still held? Its key let go without telling us (the window was moved meanwhile): let go now."""
-        if not self.winfo_exists() or self.held_by != k:
+        if not self.winfo_exists() or k not in self.holding:
             return
-        if key_down(self.held_code) is False:
-            self.let_go()
+        if key_down(self.codes.get(k)) is False:
+            self.let_go(k)
             return
         self.after(LETTER_CHECK_MS, lambda: self.letter_check(k))
 
     def on_letter_up(self, e):
         k = e.keysym.lower()
-        if k == self.held_by and not self.letter_up:
-            self.letter_up = self.after(40, self.letter_gone)
+        if k in self.holding and k != "mouse" and k not in self.letter_up:
+            self.letter_up[k] = self.after(40, lambda: self.letter_gone(k))
 
-    def letter_gone(self):
-        self.letter_up = None
-        if self.held_by not in (None, "mouse"):
-            self.let_go()
+    def letter_gone(self, k):
+        self.letter_up.pop(k, None)
+        if k in self.holding:
+            self.let_go(k)
 
     def letters_lost(self):
-        """The window lost the keyboard (another window clicked): a letter held stops (its let-go won't come)."""
-        if not self.winfo_exists() or self.held_by in (None, "mouse"):
+        """The window lost the keyboard (another window clicked): the letters held stop (their let-go won't come)."""
+        letters = [b for b in self.holding if b != "mouse"]
+        if not self.winfo_exists() or not letters:
             return
         try:
             w = self.focus_get()
         except (KeyError, tk.TclError):
             w = None
         if w is None or w.winfo_toplevel() is not self:
-            self.let_go()
+            for b in letters:
+                self.let_go(b)
 
     def close(self):
-        for job in (self.meter_job, self.meter_poll):
+        for job in (self.meter_job, self.meter_poll, *self.letter_up.values()):
             if job:
                 self.after_cancel(job)
         self.meter_asked = None
-        if self.letter_up:
-            self.after_cancel(self.letter_up)
-        if self.held is not None:
-            self.held = self.held_by = None
+        self.letter_up = {}
+        if self.holding:
+            self.holding = {}
             self.live.release()
         if self.fx.asking:  # (the Repeat every… window)
             self.fx.asking.destroy()
