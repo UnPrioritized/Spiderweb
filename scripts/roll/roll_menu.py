@@ -218,7 +218,8 @@ class ShapeMenu:
 
     def merge_menu(self, m, stay):
         """Gate sensitive merge ▸ From the left / From the right (two shapes selected; stay = the right-clicked one).
-        The side the other shape is on comes first."""
+        Named by the sliding shape's side that gets merged (user): From the left = its start meets the staying
+        shape's end (it ends up after it). The shortest slide comes first."""
         app = self.app
         if not app.merge_pair():
             return
@@ -229,7 +230,7 @@ class ShapeMenu:
         sub = tk.Menu(m, tearoff=0)
         sides = (True, False) if comes_from_left(*rows) else (False, True)
         for left in sides:
-            sub.add_command(label=tr("join_split.merge_left" if left else "join_split.merge_right"),
+            sub.add_command(label=tr("join_split.merge_right" if left else "join_split.merge_left"),
                             command=lambda left=left: app.gate_merge(stay, left))
         m.add_cascade(label=tr("join_split.merge_menu"), menu=sub)
 
