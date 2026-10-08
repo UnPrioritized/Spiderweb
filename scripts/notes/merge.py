@@ -4,6 +4,7 @@ staying shape's note on that key (gate end = next start), lengths kept. Rows wit
 their key ("leftovers") slide by the smallest slide a row made and are handed back apart (user: their own shape,
 to delete or keep)."""
 
+import json
 import math
 
 import numpy as np
@@ -75,15 +76,56 @@ def merged(parts, right, ppq, keys):
 def recipe_notes(m):
     """The merged shape's packed notes (custom.notes_shape) made from its recipe, or None. Leftover rows stay in
     it (user: never removed without the user's say)."""
+    got = recipe_shape(m)
+    return got and got["notes"]
+
+
+def recipe_shape(m):
+    """custom.notes_shape of the recipe's notes ("notes" packed, "pts" = their box where they were made), or None
+    (no notes at all). No row meeting any more (a part's settings changed): both as they are, nothing slid."""
     from notes.custom import notes_shape
     from notes.engine import shape_notes
-    got = merged([shape_notes(p, m["ppq"], m["keys"]) for p in m["parts"]], m["right"], m["ppq"], m["keys"])
+    parts = [np.asarray(shape_notes(p, m["ppq"], m["keys"]), np.int64).reshape(-1, 4) for p in m["parts"]]
+    got = merged(parts, m["right"], m["ppq"], m["keys"])
     if got is None:
+        out = np.concatenate(parts)
+    else:
+        out, rest = got
+        out = np.concatenate([out, rest[~np.isin(rest[:, 2], m["apart"])]])  # (not the ones made "Merge leftovers")
+    if not len(out):
         return None
-    out, rest = got
-    out = np.concatenate([out, rest[~np.isin(rest[:, 2], m["apart"])]])  # (but not the ones made "Merge leftovers")
     notes = np.column_stack([out[:, 0], out[:, 1] - out[:, 0], out[:, 2], out[:, 3], np.zeros(len(out), np.int64)])
-    return notes_shape(notes, m["ppq"], "")["notes"]
+    return notes_shape(notes, m["ppq"], "")
+
+
+# PANEL SETTINGS (user: the merged shape acts as one custom shape, but its outline is never edited, it's made of
+# two shapes): the custom shape panel changes both parts (App.custom_targets), then refit makes the notes again.
+
+BIG_KEYS = ("strokes", "pts", "areas", "polygon", "from", "cut", "text", "notes", "picture", "merge")
+
+
+def settings_key(m):
+    """The parts' settings (not their drawings) as one string: changed = refit."""
+    return json.dumps([{k: v for k, v in p.items() if k not in BIG_KEYS} for p in m["parts"]], sort_keys=True)
+
+
+def refit(sh):
+    """A merged shape made again from its parts after their settings changed: new notes, its box fitted to them,
+    still moved / turned / slanted / stretched as it was."""
+    m = sh["merge"]
+    got = recipe_shape(m)
+    if not got:
+        return
+    was = m.get("box")
+    mp = box_map(was, sh["pts"]) if was else None
+    if mp is None:  # (an old recipe: only moved)
+        at = m.get("at") or sh["pts"][0]
+        mp = np.eye(2), np.asarray(sh["pts"][0], float) - np.asarray(at, float)
+    L, o = mp
+    made = [[float(b), float(p)] for b, p in got["pts"]]
+    sh["notes"] = got["notes"]
+    sh["pts"] = [[float(x) for x in L @ pt + o] for pt in made]
+    m["box"], m["at"] = made, list(made[0])
 
 
 # TURNED / SLANTED / STRETCHED (user: like one custom shape, gates kept): both parts get the same turn / slant /

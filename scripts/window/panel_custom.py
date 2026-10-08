@@ -252,8 +252,19 @@ class CustomPanel:
     def custom_targets(self):
         """What the custom shape panel changes: the selected custom shapes, or (with nothing selected) the
         settings for new ones."""
-        customs = [self.shapes[i] for i in sorted(self.sels) if self.shapes[i]["kind"] == "custom"]
+        customs = []
+        for i in sorted(self.sels):
+            sh = self.shapes[i]
+            if sh.get("merge"):  # (Gate sensitive merge: both shapes it's made of, merged again after: merge.refit)
+                customs += [p for p in sh["merge"]["parts"]
+                            if p["kind"] == "custom" and "notes" not in p and not p.get("text")]
+            elif sh["kind"] == "custom":
+                customs.append(sh)
         return customs or ([] if self.sels else [self.custom_defaults])
+
+    def merge_part(self, t):
+        """t is a drawing inside a merged shape: its settings change from the panel, its outline never (user)."""
+        return any(t is p for sh in self.shapes if sh.get("merge") for p in sh["merge"]["parts"])
 
     def sync_custom(self):
         tgts = self.custom_targets()
@@ -272,7 +283,8 @@ class CustomPanel:
         self.sync_polygon()
         # text: no library shape to pick (its letters are the shape; a Hz bass made with the Hz bass tool is a
         # musical tool, not a shape, user: its box is only its notes)
-        text = all(t.get("text") or "notes" in t or hz_tool(t) for t in tgts) if placed else tool in ("text", "hz")
+        text = (all(t.get("text") or "notes" in t or hz_tool(t) or self.merge_part(t) for t in tgts) if placed
+                else tool in ("text", "hz"))
         # pasted notes: nothing to fill either (the notes are the shape)
         pasted = placed and all("notes" in t for t in tgts)
         if not self.custom_fill_row.winfo_manager():
@@ -305,7 +317,7 @@ class CustomPanel:
             name, tpl = self.custom_shape, self.custom_template(self.custom_shape)
             gaps = len(open_paths(tpl[0])) if tpl else 0
         fill, gate = tgts[0]["fill"], tgts[0]["gate"]
-        missing = placed and self.not_in_library(tgts[0])
+        missing = placed and not text and self.not_in_library(tgts[0])  # (no shape picker: nothing to miss)
         self.custom_combo.config(style="Missing.TCombobox" if missing else "TCombobox")
         if missing and not self.missing_note.winfo_manager():
             self.missing_note.pack(fill="x", pady=(2, 0), after=self.custom_shape_row)
@@ -417,7 +429,8 @@ class CustomPanel:
             return self.sync_custom()
         self.custom_shape = name
         tgts = [t for t in self.custom_targets()
-                if t is not self.custom_defaults and not t.get("text") and "notes" not in t and not hz_tool(t)]
+                if t is not self.custom_defaults and not t.get("text") and "notes" not in t and not hz_tool(t)
+                and not self.merge_part(t)]  # (a merged shape's outline is never changed, user)
         if tgts:
             self.push_undo(name=tr("panel_custom.custom_shape"))
             for t in tgts:

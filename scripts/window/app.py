@@ -208,6 +208,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.colours_wanted = []  # per shape, how many colours (tracks) its notes ask for (shapes_changed)
         self.leave_boxes = {}  # side panel box -> what takes its number when it's left (widgets.leave_box)
         self._notes_worked = 0  # shapes whose notes had to be worked out (not remembered)
+        self._merge_keys = {}  # merged shapes' parts' settings when last seen (remake_merges)
         self._notes_time = 0.0  # how long that took the last time
         self._late_notes = None  # while dragging: notes left until the mouse rests
         self._coming = None  # notes being made in the background while a drag rests (notes_rested)
@@ -875,6 +876,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self._late_notes = None
         if sync_groups(self.shapes):  # Add between: the steps follow their first / last shape (between.py)
             self.after_idle(self.sync_title)  # (a step changed by hand is a key now)
+        self.remake_merges()
         slow = self._notes_time > 0.15
         # (other drags make the notes AND repaint them all at every step: the repaint counts too)
         slow = slow or not moving and self._notes_time + self.roll.paint_time > 0.15
@@ -1529,6 +1531,21 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self._pictures = {k: v for k, v in self._pictures.items() if k[0] != path}
             self._pictures[key] = got
         return got if not info["sig"] or got.sig == info["sig"] else None
+
+    def remake_merges(self):
+        """Merged shapes whose parts' settings were changed in the panel (custom_targets): made again (merge.refit).
+        A recipe seen for the first time (new, loaded, undone) is taken as it is."""
+        from notes.merge import refit, settings_key
+        seen = {}
+        for sh in self.shapes:
+            m = sh.get("merge")
+            if not m:
+                continue
+            key = settings_key(m)
+            if self._merge_keys.get(id(m), key) != key:
+                refit(sh)
+            seen[id(m)] = key
+        self._merge_keys = seen
 
     def remake_pictures(self):
         """Placed pictures resized (box not turned): their notes made again from the ORIGINAL picture at the new
