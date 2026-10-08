@@ -1376,7 +1376,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         return new  # (a Hz bass's notes keep their lengths: its box only limits where they sound, user)
 
     def shape_label(self, sh):
-        if "picture" in sh:  # (the picture's file name, user)
+        if "picture" in sh or sh.get("merge"):  # (the picture's file name, user; "Merged notes")
             return sh.get("name") or "?"
         if "notes" in sh:
             return tr("app.pasted_notes")
