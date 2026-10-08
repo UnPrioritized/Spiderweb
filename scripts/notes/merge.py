@@ -15,16 +15,17 @@ def comes_from_left(stay, slide):
     return np.asarray(slide)[:, :2].mean() < np.asarray(stay)[:, :2].mean()
 
 
-def gate_merge(stay, slide, from_left=None):
+def gate_merge(stay, slide, from_left=None, rest_slides=True):
     """stay, slide: (start, end, pitch, velocity[, track]) rows in ticks. Returns (stay + slide's rows that met,
     slide's leftover rows), or None when no row meets. Each row comes in from far away on that side (from_left;
     None = the side slide's middle is on), so it meets the staying shape's outer edge there: a row inside a hollow
-    shape or overlapping it goes out to that edge."""
-    got = _merge(stay, slide, from_left)
+    shape or overlapping it goes out to that edge. rest_slides: the leftover rows slide by the smallest slide (off:
+    they stay where they are)."""
+    got = _merge(stay, slide, from_left, rest_slides)
     return got and got[:2]
 
 
-def _merge(stay, slide, from_left):
+def _merge(stay, slide, from_left, rest_slides=True):
     """gate_merge, and also the smallest slide and how much later everything went (to stay after tick 0)."""
     stay = np.asarray(stay, np.int64)
     moved = np.array(slide, np.int64, copy=True)
@@ -49,7 +50,8 @@ def _merge(stay, slide, from_left):
     if not shifts:
         return None
     least = min(shifts, key=abs)
-    moved[~met, :2] += least
+    if rest_slides:
+        moved[~met, :2] += least
     out, rest = np.concatenate([stay, moved[met]]), moved[~met]
     first = min(out[:, 0].min(), rest[:, 0].min() if len(rest) else 0)
     late = max(0, -int(first))
@@ -171,8 +173,9 @@ def box_map(was, now):
     return L, n[0] - L @ w[0]
 
 
-def mapped_part(p, f):
-    """Shape p with every point through f(beat, key) -> [beat, key], or None if it can't be turned that way."""
+def mapped_part(p, f, L=None):
+    """Shape p with every point through f(beat, key) -> [beat, key], or None if it can't be turned that way. L (the
+    map's 2x2 matrix): what a Flip / Turn 90° does to a shape's settings is done too (flipped_settings)."""
     import copy
     from notes.engine import cached_arrays
     from notes.convert import has_tumours
@@ -192,8 +195,34 @@ def mapped_part(p, f):
         for k in ("tumour", "tumours", "shape", "pattern", "k", "smooth"):
             q.pop(k, None)
         q.update(kind="poly", pts=[f(b, k) for b, k in paths[0]])
-        return q
+        return flipped_settings(q, L)
     q["pts"] = [f(b, k) for b, k in p["pts"]]
+    return flipped_settings(q, L)
+
+
+def flipped_settings(q, L):
+    """The settings a Flip / Turn 90° changes along with the drawing (fx.flip_shape / turn_shape: velocities flip
+    sideways, a gate Range turns / flips), done as the map L does: mostly a quarter turn = turned that way, then
+    mirrored (det < 0) = flipped, sideways when time runs backwards. Changes q."""
+    from notes.gaterange import flipped_range, turned_range
+    if L is None:
+        return q
+    if abs(L[0, 0]) < abs(L[1, 0]):  # (time now runs mostly along the keys: a quarter turn, clockwise = down)
+        cw = L[1, 0] < 0
+        for k in ("range", "range_kept"):
+            if q.get(k):
+                q[k] = turned_range(q[k], cw)
+        L = np.array([[0, -1], [1, 0]] if cw else [[0, 1], [-1, 0]], float) @ L  # (the rest after turning back)
+    if np.linalg.det(L) < 0:
+        sideways = L[0, 0] < 0
+        if sideways:
+            if q.get("vel_env"):
+                q["vel_env"] = [[1 - u, v] for u, v in reversed(q["vel_env"])]
+            if "vel0" in q and "vel1" in q:
+                q["vel0"], q["vel1"] = q["vel1"], q["vel0"]
+        for k in ("range", "range_kept"):
+            if q.get(k):
+                q[k] = flipped_range(q[k], sideways)
     return q
 
 
@@ -213,7 +242,7 @@ def reshaped_parts(sh):
     parts = []
     for i, p in enumerate(m["parts"]):
         d = (late + (least if i == slide else 0)) / m["ppq"]
-        q = mapped_part(p, lambda b, k, d=d: [float(x) for x in L @ (b + d, k) + o])
+        q = mapped_part(p, lambda b, k, d=d: [float(x) for x in L @ (b + d, k) + o], L)
         if q is None:
             return None
         parts.append(q)
@@ -239,7 +268,11 @@ def reshaped_notes(sh, ppq, keys):
         mid = np.column_stack([(moved[:, 0] + moved[:, 1]) / (2 * ppq), moved[:, 2] + 0.5])
         was = (mid - o) @ np.linalg.inv(L).T
         moved = moved[~np.isin(np.floor(was[:, 1]).astype(np.int64), apart)]
-    merged_rows = gate_merge(stay, moved, from_left) if len(stay) and len(moved) else None
+    # (rows with nothing to meet stay where they are: the sliding part already sits at its slide; a quarter turn: no
+    # key row runs along the old ones, nothing merged again)
+    upright = abs(L[0, 0]) <= 1e-9 * max(1.0, abs(L[1, 0]))
+    merged_rows = (gate_merge(stay, moved, from_left, rest_slides=False) if len(stay) and len(moved) and not upright
+                   else None)
     return np.concatenate(merged_rows) if merged_rows else np.concatenate([stay, moved])
 
 
