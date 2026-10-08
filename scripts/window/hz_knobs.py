@@ -30,10 +30,10 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.hzbass import (ARP, ARP_PATTERNS, BLEND, CHORDS, CRUSH, DETUNE, FAST, GLIDE_CURVE, GROUPS, GROWL, LOOP,
-                          MODES, OFF_BOXES, OFF_PITCH, OSC2, PITCH, RACK, SCALES, SOFT, START_STEPS, SUB, TIMINGS,
-                          TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE, VOICES, WAH, WAVES, arpeggiated, blend_gains,
-                          glide_left, clean_arp, clean_extra, clean_mode, clean_steps, clean_voice, copies, group_count,
-                          line_at, osc2_shift, wave_hits)
+                          MODES, OFF_BOXES, OFF_PITCH, OSC2, PITCH, RACK, SCALES, SOFT, START_COUNT, START_STEPS,
+                          STEPS, SUB, TIMINGS, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE, VOICES, WAH, WAVES, arpeggiated,
+                          blend_gains, glide_left, clean_arp, clean_extra, clean_mode, clean_steps, clean_voice, copies,
+                          group_count, line_at, osc2_shift, wave_hits)
 from roll.roll_shared import NOTE_NAMES
 from window.hz_effects import AMOUNT, FX_COLOR
 from window.hz_steps import StepEditor
@@ -143,11 +143,11 @@ START = dict({key: start for key, (_, _, start) in KNOBS.items()}, wave="none", 
              touching=False, legato=False, mode="off", rack=(), rack_off=(), arp_on=False, arp_pattern="up",
              arp_chord="placed", arp_scale="off", arp_root=0, vibrato_timing="free", tremolo_timing="free",
              osc2_on=False, osc2_wave="none", osc2_split=False, osc2_mode="off", osc2_a_off=False,
-             arp_steps=[dict(s) for s in START_STEPS])
+             arp_steps=[dict(s) for s in START_STEPS], arp_count=START_COUNT)
 ARP_CHOICES = ("pattern", "chord", "scale", "root")  # (the Arpeggio box's dropdowns)
-ARP_KEYS = ARP_CHOICES + tuple(ARP) + ("steps",)  # (all it has)
+ARP_KEYS = ARP_CHOICES + tuple(ARP) + ("steps", "count")  # (all it has)
 KEEP = (tuple(KNOBS) + ("same", "touching", "osc2_split", "osc2_a_off") + tuple(f"arp_{w}" for w in ARP_CHOICES)
-        + ("osc2_wave", "osc2_mode", "arp_steps"))
+        + ("osc2_wave", "osc2_mode", "arp_steps", "arp_count"))
 CHOICES = {"arp_pattern": ARP_PATTERNS, "arp_chord": tuple(CHORDS), "arp_scale": ("off",) + tuple(SCALES),
            "arp_root": tuple(range(12)), "osc2_wave": WAVE_NAMES, "osc2_mode": MODE_NAMES}
 
@@ -163,6 +163,8 @@ def kept_value(key, v):
         return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v in range(12) else None
     if key == "arp_steps":
         return clean_steps(v) if isinstance(v, list) and v else None
+    if key == "arp_count":  # (a count: kept as 5.0)
+        return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v in range(1, STEPS + 1) else None
     if key in CHOICES:
         return v if v in CHOICES[key] else None
     if key in ("same", "touching", "osc2_split", "osc2_a_off"):
@@ -424,7 +426,8 @@ def read_arp(win, was):
     if not arp:
         return {"arp_on": False}, True
     return {"arp_on": True, "arp_swing": 0.0, "arp_scale": "off", "arp_root": was["arp_root"],
-            "arp_steps": was["arp_steps"], **{f"arp_{k}": v for k, v in arp.items()}}, True
+            "arp_steps": was["arp_steps"], "arp_count": was["arp_count"],
+            **{f"arp_{k}": v for k, v in arp.items()}}, True
 
 
 def read_osc2(win, was):
@@ -920,14 +923,15 @@ class SynthKnobs:
             if self.fx.now() != before:
                 self.commit_fx(before)
 
-    def on_steps(self, steps, done):
-        """The Arpeggio's steps set in the step editor (done: let go / one click = one undo step); it puts the
-        arpeggio on."""
-        if self.turning is None:
+    def on_steps(self, steps, count, done):
+        """The Arpeggio's steps (all of them) and how many play set in the step editor (done: let go / one click =
+        one undo step); it puts the arpeggio on."""
+        if self.turning is None:  # (from the press on: held, so Ctrl+Z calls the drag off, hunt)
             self.turning, self.turn_vals = self.fx.state(), dict(self.vals)
-        self.vals["arp_steps"] = [dict(s) for s in steps]
-        self.sweep_on("arp_")
-        self.write("arp")
+        if steps != self.vals["arp_steps"] or count != self.vals["arp_count"]:
+            self.vals["arp_steps"], self.vals["arp_count"] = [dict(s) for s in steps], count
+            self.sweep_on("arp_")
+            self.write("arp")
         if done:
             before, self.turning = self.turning, None
             if self.fx.now() != before:
@@ -1279,7 +1283,7 @@ class SynthKnobs:
         if bool(frame.winfo_manager()) != (self.vals["arp_pattern"] == "steps"):  # (the box changes height)
             grid_shown(frame, self.vals["arp_pattern"] == "steps")
             self.after_idle(self.fit_knobs)
-        self.step_edit.show(self.vals["arp_steps"], self.vals["arp_on"])
+        self.step_edit.show(self.vals["arp_steps"], self.vals["arp_count"], self.vals["arp_on"])
         for box, (var, names, key) in self.mode_picks.items():
             mode = self.vals[key]
             if var.get() != names[MODE_NAMES.index(mode)]:
@@ -1348,7 +1352,8 @@ class SynthKnobs:
                    (self.pv["wave"], self.pv["mode"], self.a_silent()) if box == "wave" else None,
                    self.pv["sweep"] if box == "tone" else None,
                    (self.pv["same"], self.pv["touching"]) if box == "voice" else None,
-                   (self.pv["arp_on"], *(self.pv[f"arp_{w}"] for w in ARP_CHOICES), str(self.pv["arp_steps"]))
+                   (self.pv["arp_on"], *(self.pv[f"arp_{w}"] for w in ARP_CHOICES), str(self.pv["arp_steps"]),
+                    self.pv["arp_count"])
                    if box == "arp" else None,
                    tuple(self.pv[k] for k in ("osc2_on", "osc2_wave", "osc2_mode")) if box == "osc2" else None,
                    self.pic_colour(box) if box in BYPASS else None,
@@ -1619,7 +1624,8 @@ class SynthKnobs:
         keys = (33, 36, 40) if arp["chord"] == "placed" else (33,)
         tones = [{"t": 0.0, "len": 2.0, "key": k, "cents": 0.0, "id": i + 1, "to": []} for i, k in enumerate(keys)]
         got = arpeggiated(tones, arp)  # (off: the same run, greyed)
-        lo, hi = min(n["key"] for n in got), max(n["key"] for n in got)
+        lo, hi = min((n["key"] for n in got), default=33), max((n["key"] for n in got), default=33)  # (every step a
+        # rest: an empty picture, hunt)
         top = 12 * s  # (room for the words at the top)
         rh = (h - pad - top) / max(6, hi - lo + 1)
         colour = COLOURS["arp"] if v["arp_on"] else MID
@@ -1628,7 +1634,8 @@ class SynthKnobs:
             x0 = pad + n["t"] / 2 * (w - 2 * pad)
             x1 = max(x0 + 2, pad + (n["t"] + n["len"]) / 2 * (w - 2 * pad) - 1)
             y = h - pad - (n["key"] - lo + 1) * rh
-            c.create_rectangle(x0, y + 1, x1, y + rh - 1, fill=colour, outline="")
+            c.create_rectangle(x0, y + 1, x1, y + rh - 1, fill=mix(colour, PIC, 0.8 * (1 - n.get("level", 1.0))),
+                               outline="")  # (a quiet step fainter)
         c.create_text(w - 3 * s, 2 * s, text=tr("hz.synth_arp_notes", n=fmt(arp["speed"])), anchor="ne",
                       fill=DIM, font=("Segoe UI", 7))
 

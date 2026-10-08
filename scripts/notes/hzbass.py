@@ -187,10 +187,12 @@ ARP_PATTERNS = ("up", "down", "updown", "random", "steps")
 # hz["arp"]["steps"] (only with the "steps" pattern): the run's own steps, looped, one every 1 / speed beats; each =
 # {"note": which held note (1 = the lowest; more than are held = counted round again; 0 = a rest), "octave": moved
 # that many octaves, "level": how loud (0..1), "length": of the step (times Gate), "tie": True = it lasts on through
-# the next step (which plays nothing new)}. Octaves = the steps played again 1, 2... octaves up in turn.
-STEPS = 16  # ... the most steps
+# the next step (which plays nothing new)}. Octaves = the steps played again 1, 2... octaves up in turn. Always STEPS
+# of them; hz["arp"]["count"] = how many play (those past it kept for when it grows, as a synth's, hunt).
+STEPS = 16  # ... how many
 STEP = {"note": (0, 8, 1), "octave": (-2, 2, 0), "level": (0.0, 1.0, 1.0), "length": (0.05, 1.0, 1.0)}
-START_STEPS = tuple({"note": 1 + i % 4, "octave": 0, "level": 1.0, "length": 1.0} for i in range(8))
+START_STEPS = tuple({"note": 1 + i % 4, "octave": 0, "level": 1.0, "length": 1.0} for i in range(STEPS))  # (notes
+START_COUNT = 8  # 1 to 4 in turn; 8 of them playing)
 # hz["arp"]["scale"]: the run's notes moved to the nearest note of the scale (counted from hz["arp"]["root"], 0 = C)
 SCALES = {"major": (0, 2, 4, 5, 7, 9, 11), "minor": (0, 2, 3, 5, 7, 8, 10), "harmonic": (0, 2, 3, 5, 7, 8, 11),
           "dorian": (0, 2, 3, 5, 7, 9, 10), "phrygian": (0, 1, 3, 5, 7, 8, 10), "mixolydian": (0, 2, 4, 5, 7, 9, 10),
@@ -388,11 +390,21 @@ def clean_arp(arp):
         out["root"] = int(root) if good else 0
     if out["pattern"] == "steps":
         out["steps"] = clean_steps(arp.get("steps"))
+        out["count"] = clean_count(arp.get("count"), arp.get("steps"))
     return out
 
 
+def clean_count(count, steps=None):
+    """How many of the Arpeggio's steps play (1..STEPS); none: as many as were given (made before the count was
+    saved on its own), else START_COUNT."""
+    if isinstance(count, (int, float)) and not isinstance(count, bool) and math.isfinite(count):
+        return int(min(STEPS, max(1, round(count))))
+    given = len([s for s in steps if isinstance(s, dict)]) if isinstance(steps, list) else 0
+    return min(STEPS, given) if given else START_COUNT
+
+
 def clean_steps(steps):
-    """The Arpeggio's own steps checked (see STEPS): 1..STEPS of them; none good = START_STEPS."""
+    """The Arpeggio's own steps checked (see STEPS): always STEPS of them (missing ones as START_STEPS)."""
     out = []
     for s in steps if isinstance(steps, list) else ():
         if not isinstance(s, dict) or len(out) >= STEPS:
@@ -406,7 +418,7 @@ def clean_steps(steps):
         if s.get("tie") is True:
             step["tie"] = True
         out.append(step)
-    return out or [dict(s) for s in START_STEPS]
+    return out + [dict(s) for s in START_STEPS[len(out):]]
 
 
 def in_scale(key, scale, root):
@@ -427,7 +439,7 @@ def arpeggiated(tones, arp, left=0.0):
     (STEPS) pick the held notes, low to high, each with its octave, loudness ("level" on the tone) and length."""
     step = 1.0 / arp["speed"]
     late = arp.get("swing", 0.0) * step / 2  # (every second step: that much later, the one before it longer)
-    steps = arp.get("steps") if arp["pattern"] == "steps" else None
+    steps = arp["steps"][:arp["count"]] if arp["pattern"] == "steps" else None
 
     def at(k, t0):
         """Step k from t0: (its start, how long its slot is)."""
@@ -924,9 +936,12 @@ def old_fx(tones):
 
 def has_fx(hz):
     """True when every key needs its own repeats (KeyGrid): placed tones with effects, several copies (Voice), a
-    Random start, a wave mode or OSC B."""
+    Random start, a wave mode, OSC B or Arpeggio steps quieter than full (as played, or still to be played)."""
+    arp = hz.get("arp") or {}
+    quiet = (any(n.get("level", 1.0) != 1.0 for n in hz.get("tones") or ())
+             or any(s["level"] != 1.0 for s in (arp.get("steps") or ())[:arp.get("count", STEPS)]))
     return ((bool(hz.get("fx")) or len(copies(hz)) > 1 or bool((hz.get("voice") or {}).get("random"))
-             or bool(hz.get("mode")) or bool(hz.get("osc2"))
+             or bool(hz.get("mode")) or bool(hz.get("osc2")) or quiet
              or any(not e.get("off") for e in hz.get("rack") or ())) and bool(hz.get("tones")))
 
 

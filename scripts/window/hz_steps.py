@@ -8,7 +8,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc
-from notes.hzbass import STEP, STEPS
+from notes.hzbass import START_COUNT, START_STEPS, STEP, STEPS
 from window.synth_look import DIM, EDGE, ENTRY, GRID, MID, PIC, mix
 from window.widgets import Scrub, Tooltip
 
@@ -20,23 +20,20 @@ LEFT = 26  # the row names left of it
 TIE = 14  # the Length lane's Tie row at its top
 
 
-def new_step(i):
-    """Step i as it is when the steps grow: notes 1 to 4 round again, the rest as STEP starts."""
-    return {"note": 1 + i % 4, "octave": 0, "level": 1.0, "length": 1.0}
-
-
 class StepEditor:
-    """changed(steps, done): the steps set (done = let go / one click: one undo step)."""
+    """changed(steps, count, done): the steps (all STEPS of them) and how many play set (done = let go / one click:
+    one undo step)."""
 
     def __init__(self, parent, s, app, colour, changed):
         self.s, self.colour, self.changed = s, colour, changed
-        self.steps, self.on, self.lane = [new_step(i) for i in range(8)], True, "note"
+        self.steps, self.count = [dict(st) for st in START_STEPS], START_COUNT
+        self.on, self.lane = True, "note"
         self.drag = None  # (while the mouse paints: the last column it was over)
         self.frame = ttk.Frame(parent, style="Synth.Box.TFrame")
         left = ttk.Frame(self.frame, style="Synth.Box.TFrame")
         left.pack(side="left", anchor="n", padx=(0, round(8 * s)))
         ttk.Label(left, text=tr("hz.synth_steps_count"), style="Synth.Box.TLabel").pack()
-        self.count_var = tk.StringVar(value=str(len(self.steps)))
+        self.count_var = tk.StringVar(value=str(self.count))
         e = self.count_box = ttk.Entry(left, textvariable=self.count_var, width=4, justify="center", style=ENTRY)
         e.pack(pady=(2, 0))
         e.bind("<Return>", lambda ev: (self.on_count(), self.frame.focus_set(), "break")[2])
@@ -97,21 +94,23 @@ class StepEditor:
                     self.draw()
             return
         col = self.col_at(e.x)
-        if 0 <= col < len(self.steps):
+        if 0 <= col < self.count:
             self.drag = col
+            self.changed(self.steps, self.count, False)  # (held from here on, even before a value changes: Ctrl+Z
+            # calls it off, hunt)
             self.paint(col, col, e.y, False)
 
     def move(self, e):
-        if self.drag is None:
+        if self.drag is None:  # (called off: Ctrl+Z)
             return
-        col = min(len(self.steps) - 1, max(0, self.col_at(e.x)))
+        col = min(self.count - 1, max(0, self.col_at(e.x)))
         self.paint(self.drag, col, e.y, False)
         self.drag = col
 
     def release(self, e):
         if self.drag is not None:
             self.drag = None
-            self.changed(self.steps, True)
+            self.changed(self.steps, self.count, True)
 
     def paint(self, a, b, y, done):
         """Every step from column a to b set to the value at y."""
@@ -121,42 +120,43 @@ class StepEditor:
         if steps != self.steps:
             self.steps = steps
             self.draw()
-            self.changed(steps, done)
+            self.changed(steps, self.count, done)
 
     def reset(self, e):
         """Middle-click: the step's value in the picked lane back to its start."""
         col = self.col_at(e.x)
-        if self.drag is None and 0 <= col < len(self.steps) and e.y / self.s >= TOP:
+        if self.drag is None and 0 <= col < self.count and e.y / self.s >= TOP:
             steps = list(self.steps)
             self.put(steps, col, STEP[self.lane][2])
             if steps != self.steps:
                 self.steps = steps
                 self.draw()
-                self.changed(steps, True)
+                self.changed(steps, self.count, True)
 
     def on_count(self):
-        """The Steps box typed / stepped: steps added (notes 1 to 4 round again) or taken off the end."""
+        """The Steps box typed / stepped: how many steps play (those past it kept, as a synth's: hunt)."""
         try:
             n = int(round(float(calc(self.count_var.get()))))
             if not 1 <= n <= STEPS:
                 raise ValueError
         except (ValueError, ZeroDivisionError):
-            n = len(self.steps)
+            n = self.count
         self.count_var.set(str(n))
-        if n != len(self.steps):
-            self.steps = self.steps[:n] + [new_step(i) for i in range(len(self.steps), n)]
+        if n != self.count:
+            self.count = n
             self.draw()
-            self.changed(self.steps, True)
+            self.changed(self.steps, n, True)
 
     # ------------------------------------------------------------ showing them
 
-    def show(self, steps, on):
-        """The steps as the sound has them (on: the arpeggio on; off = greyed)."""
-        if self.drag is not None or (steps == self.steps and on == self.on and self.canvas.find_all()):
+    def show(self, steps, count, on):
+        """The steps as the sound has them (count: how many play; on: the arpeggio on, off = greyed)."""
+        if self.drag is not None or (steps == self.steps and (count, on) == (self.count, self.on)
+                                     and self.canvas.find_all()):
             return
-        self.steps, self.on = [dict(s) for s in steps], on
+        self.steps, self.count, self.on = [dict(s) for s in steps], count, on
         if self.count_box.focus_get() is not self.count_box:
-            self.count_var.set(str(len(steps)))
+            self.count_var.set(str(count))
         self.draw()
 
     def draw(self):
@@ -175,7 +175,7 @@ class StepEditor:
         rows = {"note": 9, "octave": 5}.get(self.lane)
         for i in range(STEPS):  # (columns past the last step: dark; a line every 4 steps)
             x0 = (LEFT + CELL * i) * s
-            if i >= len(self.steps):
+            if i >= self.count:
                 c.create_rectangle(x0, top, x0 + CELL * s, top + h, fill=GRID, outline="")
             elif i % 4 == 0:
                 c.create_line(x0, top, x0, top + h, fill=MID)
@@ -183,25 +183,29 @@ class StepEditor:
             for r in range(rows):
                 y = top + h * r / rows
                 if r:
-                    c.create_line(LEFT * s, y, (LEFT + CELL * len(self.steps)) * s, y, fill=GRID)
+                    c.create_line(LEFT * s, y, (LEFT + CELL * self.count) * s, y, fill=GRID)
                 name = (str(8 - r) if r < 8 else tr("hz.synth_steps_rest")) if rows == 9 else f"{2 - r:+d}"
                 c.create_text((LEFT - 3) * s, y + h / rows / 2, text=name.replace("+0", "0"), anchor="e", font=font,
                               fill=DIM)
         elif self.lane == "length":
             c.create_text((LEFT - 3) * s, top + TIE * s / 2, text=tr("hz.synth_steps_tie"), anchor="e", font=font,
                           fill=DIM)
-            c.create_line(LEFT * s, top + TIE * s, (LEFT + CELL * len(self.steps)) * s, top + TIE * s, fill=MID,
+            c.create_line(LEFT * s, top + TIE * s, (LEFT + CELL * self.count) * s, top + TIE * s, fill=MID,
                           dash=(2, 2))
         else:
             c.create_text((LEFT - 3) * s, top + 4 * s, text="100", anchor="e", font=font, fill=DIM)
-        tied = False
+        n = self.count  # (the last step tied: the first one held on from it each time round, hunt)
+        tied = n > 1 and bool(self.steps[n - 1].get("tie"))
         for i, st in enumerate(self.steps):
             x0, x1 = (LEFT + CELL * i + 2) * s, (LEFT + CELL * (i + 1) - 2) * s
             fill = colour if not tied else mix(colour, PIC, 0.6)  # (held on by the step before: faint)
+            if i >= n:  # (past the count: kept for when it grows, not played)
+                fill = MID
             if self.lane == "note":
                 r = 8 - st["note"]
                 y0 = top + h * r / 9
-                c.create_rectangle(x0, y0 + 1, x1, y0 + h / 9 - 1, fill=fill if st["note"] else MID, outline="")
+                c.create_rectangle(x0, y0 + 1, x1, y0 + h / 9 - 1, fill=fill if st["note"] and i < n else MID,
+                                   outline="" if st["note"] or i < n else EDGE)
             elif self.lane == "octave":
                 r = 2 - st["octave"]
                 y0 = top + h * r / 5
