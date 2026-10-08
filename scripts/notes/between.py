@@ -4,7 +4,8 @@ Every shape of a group carries sh["between"] = {"id": the group, "role": "first"
 - the first shape keeps the group's settings in "set" = {"steps": how many in-between shapes, "graph": [[u, y]]
   (u = the step's place from the first shape to the last, y = how far it has changed: 0 = like the first, 1 = like
   the last), "rev": the last shape's points paired the other way round, "colours": each shape its own channel colour,
-  taking turns over this many (0 = off)};
+  taking turns over this many (0 = off), "smooth": keys gone through without a corner (Steps)};
+- the first, last shape and keys may have "push" = [x, y]: which way and how hard the steps leave it (push_of);
 - steps and keys have "at" = their place along the group (0 = the first shape, 1 = the last);
 - a step has "sig" = a fingerprint of how it was made: a step changed by hand (it no longer matches) becomes a "key"
   shape the steps around it change towards (user). Keys are never remade; "Not a key any more" makes one a step again.
@@ -61,6 +62,7 @@ def clean_settings(s):
         out["colours"] = max(0, min(COLOURS_MOST, int(s.get("colours", 15))))
     except (TypeError, ValueError):
         pass
+    out["smooth"] = s.get("smooth") is True  # (off for groups saved before it: they keep their look)
     return out
 
 
@@ -69,6 +71,8 @@ def clean_between(b):
     if not isinstance(b, dict) or b.get("role") not in ROLES or not isinstance(b.get("id"), str) or not b["id"]:
         return None
     out = {"id": b["id"], "role": b["role"]}
+    if b["role"] != "step" and _clean_push(b.get("push")):
+        out["push"] = _clean_push(b["push"])
     if b["role"] == "first":
         out["set"] = clean_settings(b.get("set"))
     elif b["role"] in ("step", "key"):
@@ -439,36 +443,121 @@ def anchors(shapes, gid):
     return got
 
 
+PUSH_REACH = 4.0  # a full push (pad at its edge) = the path leaving this many times the group's size per whole group
+PUSH_FLOOR = (1.0, 12.0)  # (the group's size counts as at least 1 beat wide and 12 keys high: a flat group can still
+# be pushed up / down)
+
+
+def push_of(sh):
+    """A shape's push [x, y] (each -1..1, at most 1 long; [0, 0] = none): which way and how hard the steps leave it."""
+    return _clean_push((sh.get("between") or {}).get("push")) or [0.0, 0.0]
+
+
+def _clean_push(p):
+    """A push from a file made valid, or None when there is none."""
+    try:
+        x, y = float(p[0]), float(p[1])
+    except (TypeError, ValueError, IndexError, KeyError):
+        return None
+    if not (math.isfinite(x) and math.isfinite(y)) or math.hypot(x, y) < 1e-9:
+        return None
+    n = math.hypot(x, y)
+    return [x / n, y / n] if n > 1 else [x, y]
+
+
+def _h10(f):
+    return f * f * f - 2 * f * f + f
+
+
+def _h11(f):
+    return f * f * f - f * f
+
+
 class Steps:
     """A group's steps as its anchors (first shape, keys, last shape) and settings make them now: each pair of
-    anchors written out once, not once per step (it was slow with many steps of long curves)."""
+    anchors written out once, not once per step (it was slow with many steps of long curves).
+
+    Push (user): each anchor can push the steps a way (push_of); the steps then travel on a curve, not straight. The
+    curve of every point is a Hermite curve whose speed at an anchor is its straight speed plus the push, so the
+    pushes only move each step as a whole (a shift, worked out once per step): no pushes = exactly the straight
+    steps. A key with a push (or every key, with "Smooth through keys" on) is gone through without a corner: the
+    speeds on its two sides are made the same (their average) before the push is added."""
 
     def __init__(self, shapes, gid, s):
         self.marks, self.s, self.keys = anchors(shapes, gid), s, {}
+        self.bends = self._bends()
+
+    def _part(self, i):
+        """Anchors i and i + 1: (the pair's key for made, the part's length in the graph's change)."""
+        (u0, a), (u1, b) = self.marks[i], self.marks[i + 1]
+        rev = self.s["rev"] and b["between"]["role"] == "last"
+        # (a key runs the way the first shape does, like the steps it was made from: Reverse pairs the last shape
+        # the other way round with the first shape AND with a key)
+        k = (id(a), id(b), rev)
+        if k not in self.keys:
+            self.keys[k] = json.dumps([_plain(a), _plain(b), bool(rev)], sort_keys=True)
+        graph = self.s["graph"]
+        dy = change_at(graph, u1) - change_at(graph, u0)
+        return self.keys[k], (dy if abs(dy) > 1e-12 else u1 - u0)
+
+    def _bends(self):
+        """Each part's (extra speed leaving its first anchor, extra speed arriving at its last) as [x, y], or None
+        when no part bends (the steps straight, as before pushes)."""
+        marks = self.marks
+        pushes = [push_of(sh) for _, sh in marks]
+        smooth = self.s.get("smooth") and len(marks) > 2
+        if not smooth and not any(p != [0.0, 0.0] for p in pushes):
+            return None
+        pts = np.asarray([p for _, sh in marks for p in sh["pts"]], float).reshape(-1, 2)
+        size = np.maximum(pts.max(0) - pts.min(0), PUSH_FLOOR) * PUSH_REACH
+        push = [np.asarray(p) * size for p in pushes]
+        parts = [self._part(i) for i in range(len(marks) - 1)]
+        speeds = []  # (each part's straight speed of the shape as a whole: its middle's move per change)
+        for key, d in parts:
+            pair = _pair(key)
+            speeds.append(pair.d.mean(0) / d if abs(d) > 1e-12 else np.zeros(2))
+        out = [[push[i].copy(), push[i + 1].copy()] for i in range(len(parts))]
+        for j in range(1, len(marks) - 1):  # (the keys)
+            if not (smooth or pushes[j] != [0.0, 0.0]):
+                continue
+            mid = (speeds[j - 1] + speeds[j]) / 2
+            out[j - 1][1] += mid - speeds[j - 1]
+            out[j][0] += mid - speeds[j]
+        return out
 
     def at(self, at):
         """(the step at place `at` between the anchors around it, its fingerprint): remembered, don't change it."""
         marks = self.marks
-        lo = max((p for p in marks if p[0] <= at), key=lambda p: p[0])
-        hi = min((p for p in marks if p[0] >= at and p is not lo), key=lambda p: p[0], default=lo)
+        lo = min(max([i for i in range(len(marks)) if marks[i][0] <= at] or [0]), len(marks) - 2)
+        u0, u1 = marks[lo][0], marks[lo + 1][0]
+        if u1 - u0 <= 1e-12:
+            return made(self._part(lo)[0], 0.0)
         graph = self.s["graph"]
-        y, y0, y1 = change_at(graph, at), change_at(graph, lo[0]), change_at(graph, hi[0])
-        if hi is lo:
-            f = 0.0
-        elif abs(y1 - y0) > 1e-12:
-            f = (y - y0) / (y1 - y0)
-        else:
-            f = (at - lo[0]) / (hi[0] - lo[0])
-        rev = self.s["rev"] and hi is not lo and hi[1]["between"]["role"] == "last"
-        # (a key runs the way the first shape does, like the steps it was made from: Reverse pairs the last shape
-        # the other way round with the first shape AND with a key)
-        k = (id(lo[1]), id(hi[1]), rev)
-        if k not in self.keys:
-            self.keys[k] = json.dumps([_plain(lo[1]), _plain(hi[1]), bool(rev)], sort_keys=True)
-        return made(self.keys[k], f)
+        y, y0, y1 = change_at(graph, at), change_at(graph, u0), change_at(graph, u1)
+        f = (y - y0) / (y1 - y0) if abs(y1 - y0) > 1e-12 else (at - u0) / (u1 - u0)
+        key, d = self._part(lo)
+        step, sig = made(key, f)
+        if self.bends is None:
+            return step, sig
+        e0, e1 = self.bends[lo]
+        off = d * (_h10(f) * e0 + _h11(f) * e1)
+        if not off.any():
+            return step, sig
+        step = dict(step, pts=(np.asarray(step["pts"], float) + off).tolist())
+        return step, fingerprint(step)
 
 
 _pairs = {}  # remembered Pairs: their two shapes + Reverse as JSON -> Pair
+
+
+def _pair(key):
+    pair = _pairs.get(key)
+    if pair is None:
+        if len(_pairs) > 64:
+            _pairs.clear()
+        a, b, rev = json.loads(key)
+        pair = _pairs[key] = Pair(a, b, rev)
+    return pair
 
 
 def made(key, f):
@@ -477,12 +566,7 @@ def made(key, f):
     k = (key, round(f, 12))
     got = _made.get(k)
     if got is None:
-        pair = _pairs.get(key)
-        if pair is None:
-            if len(_pairs) > 64:
-                _pairs.clear()
-            a, b, rev = json.loads(key)
-            pair = _pairs[key] = Pair(a, b, rev)
+        pair = _pair(key)
         if len(_made) > 4000:
             _made.clear()
         step = pair.at(f)
@@ -609,6 +693,7 @@ def start_group(shapes, i, j):
         a, b = b, a
     s = clean_settings(None)
     s["rev"] = ends_cross(a, b)
+    s["smooth"] = True
     gid = new_id()
     a["between"] = {"id": gid, "role": "first", "set": s}
     b["between"] = {"id": gid, "role": "last"}

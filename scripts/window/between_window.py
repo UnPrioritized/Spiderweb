@@ -541,6 +541,7 @@ class BetweenGroups:
         b = self.shapes[i]["between"]
         b["role"] = "step"
         b.pop("sig", None)
+        b.pop("push", None)
         self.shapes_changed()
         self.sync_panel()
 
