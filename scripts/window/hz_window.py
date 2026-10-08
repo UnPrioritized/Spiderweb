@@ -202,6 +202,8 @@ class HzWindow(tk.Toplevel):
         self.box_kept = None  # ([box_area, ...], selection) of the last Select boxes, shown after letting go
         self.sel_before = None  # (tones before an edit, sel_state() from then): what its undo step keeps (commit)
         self.pushing = None  # (the sel_state() of the undo step being made, commit)
+        self.own_step = False  # (an undo step being made here: App.push_undo marks it as this window's whatever has
+        # the keyboard; a dropdown's list or a wheel over an unfocused window left it marked "elsewhere", user)
         self.box_timer = None  # (box_scroll)
         self.pending = None  # (tone id, beats from its start): the first middle click of a slide, waiting for the
         # second (it moves with its note, user; mark_beat)
@@ -1842,7 +1844,11 @@ class HzWindow(tk.Toplevel):
                 return self.call_off(before, before_fx)
             app.hz_start = None
             self.tones = tones  # (so the selection stays when the main window's selection changes to the new shape)
-            app.add_shape(new)
+            self.own_step = True
+            try:
+                app.add_shape(new)
+            finally:
+                self.own_step = False
         else:
             hz = dict(sh.get("hz") or self.new_hz(bpm))  # (none yet: the window's Gates and Pitch boxes)
             for k in ("tones", "grow", "fx", "loop", "off", "amount", "from", "fit", "sustain", "lfo") + EXTRAS:
@@ -1865,11 +1871,11 @@ class HzWindow(tk.Toplevel):
                 if not app.confirm_big([new]):
                     return self.call_off(before, before_fx)
             if push:
-                self.pushing = was
+                self.pushing, self.own_step = was, True
                 try:
                     app.push_undo(name=name)
                 finally:
-                    self.pushing = None
+                    self.pushing, self.own_step = None, False
             if tones or not hz_made(sh):
                 if not tones:  # the last note deleted from a shape of its own: back to its one tone
                     new["hz"] = hz

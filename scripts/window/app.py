@@ -1922,7 +1922,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             sc["pushed"] = True
         else:
             self._scrub = None
-        self.add_undo_step(state or json.dumps(self.shapes), name, hz=self.in_hz())
+        own = bool(self.hz_window and self.hz_window.own_step)  # (made there, whatever has the keyboard now)
+        self.add_undo_step(state or json.dumps(self.shapes), name, hz=own or self.in_hz())
 
     def add_undo_step(self, before, name=None, sel=None, hz=False):
         """push_undo without its checks (before: the shapes as JSON). The selection is kept with it (sel: the one
