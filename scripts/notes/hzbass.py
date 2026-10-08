@@ -684,15 +684,16 @@ MOD_SETTINGS = dict({"tremolo_depth": (*LFO["tremolo_depth"], None), "sweep_trac
                        for kind, k in MODE_AMOUNTS.items()})
 # ... the Effects tab's (knob = effect_setting). Its effects work on the whole sound, not on each note (as a synth's
 # effects after the voices): sources counted from each note follow the newest note (mod_value with no tone)
+TIME_TOP, TIME_MOST = 4.0, 64.0  # (a time knob: beats along a curve up to TIME_TOP, typed up to TIME_MOST)
 RACK_MOD = {"chorus": ("depth",), "flanger": ("depth", "mix"), "echo": ("fade",), "reverb": ("level", "scatter"),
-            "compressor": ("threshold", "ratio", "gain")}
-RACK_CURVES = {("compressor", "ratio"): RACK["compressor"]["ratio"][1]}  # (curved knobs: their top)
+            "compressor": ("threshold", "ratio", "gain", "attack", "release")}
+RACK_CURVES = {("compressor", "ratio"): RACK["compressor"]["ratio"][1],  # (curved knobs: their top)
+               ("compressor", "attack"): TIME_TOP, ("compressor", "release"): TIME_TOP}
 MOD_RACK = {f"{kind}_{k}": (kind, k) for kind, ks in RACK_MOD.items() for k in ks}
 MOD_SETTINGS.update({name: (*RACK[kind][k][:2], RACK_CURVES.get((kind, k))) for name, (kind, k) in MOD_RACK.items()})
 # ... the time knobs (beats; along a curve up to TIME_TOP, typed up to TIME_MOST): a running envelope's stage gets
 # shorter or longer as they move (timed_line). The Volume box's Attack / Decay / Release (ADSR_KNOBS) only while
 # the Volume line is as its knobs make it (knob_adsr)
-TIME_TOP, TIME_MOST = 4.0, 64.0
 ADSR_KNOBS = ("attack", "decay", "release")
 MOD_SETTINGS.update({name: (0.0, TIME_MOST, TIME_TOP) for name in ADSR_KNOBS})
 TIME_STEP = 1 / 1024  # beats: how finely a moved envelope is worked out (fewer steps on very long notes)
@@ -1019,15 +1020,27 @@ def mod_turn(hz, targets, beat, tone=None, sources=None, start=0.0):
 def setting_base(hz, target):
     """Where a knob of MOD_SETTINGS is set (its own value, before the MOD tab moves it), or None while it does
     nothing: no Tremolo / Sweep line (Depth, Key track), under 3 voices (Blend), OSC B off or with no waveform
-    (Shape), another Mode or the oscillator off (a Mode's amount)."""
-    fx, lfo, osc = hz.get("fx") or {}, hz.get("lfo") or {}, hz.get("osc2") or {}
+    (Shape), another Mode or the oscillator off (a Mode's knobs), the Voice box off (Glide, Curve); a time knob
+    whose line was drawn otherwise."""
     if target in TIMED_KNOBS:  # (a time knob: while its line is as the knobs make it)
         got = TIMED[TIMED_KNOBS[target]][1](hz)
         return got[target] if got else None
+    return plain_base(hz, target)
+
+
+def plain_base(hz, target):
+    """setting_base of a knob read as it's set (not from a line)."""
+    fx, lfo, osc = hz.get("fx") or {}, hz.get("lfo") or {}, hz.get("osc2") or {}
     if target in MOD_RACK:  # (an Effects tab effect's: while it's there and on)
         kind, key = MOD_RACK[target]
         e = rack_on(hz, kind)
         return e[key] if e else None
+    if target in ("glide", "curve"):  # (a glide is worked out once, at the note's start: tone_runs)
+        if "voice" in (hz.get("bypass") or {}).get("boxes", ()):
+            return None
+        return (hz.get("voice") or {}).get(target, 0.0 if target == "glide" else GLIDE_CURVE)
+    if target in ("tremolo_wait", "tremolo_rise"):
+        return lfo.get(target, 0.0) if "tremolo" in fx else None
     if target == "tremolo_depth":
         return lfo.get("tremolo_depth", TREMOLO_DEPTH) if "tremolo" in fx else None
     if target == "sweep_track":
@@ -1144,13 +1157,30 @@ def name_bent(hz, name):
             or name in (hz.get("amount") or {}))
 
 
-# the lines whose time knobs the MOD tab moves (timed_line): line -> its knobs, how they're read from it
+def knobs_set(*knobs):
+    """A TIMED reader for knobs read as they're set: {knob: value}, or None while one does nothing (plain_base)."""
+    def read(hz):
+        got = {k: plain_base(hz, k) for k in knobs}
+        return None if None in got.values() else got
+    return read
+
+
+# the envelope-like things whose time knobs the MOD tab moves (timed_line): name -> its knobs, how they're read. The
+# lines' (from them, as their knobs make them), then those worked out in KeyGrid: the Tremolo's Delay / Rise (how
+# much of it has come in), each Mode's Time (FM's depth falling, Sync's rise: how far through it)
 TIMED = {"volume": (ADSR_KNOBS, knob_adsr), "pitch": (("time",), lambda hz: knob_bend(hz, "pitch", "time")),
          "sweep": (("sweep_time",), lambda hz: knob_bend(hz, "sweep", "sweep_time")),
-         "vibrato": (("vibrato_wait", "vibrato_delay"), knob_vibrato)}
+         "vibrato": (("vibrato_wait", "vibrato_delay"), knob_vibrato),
+         "tremolo_in": (("tremolo_wait", "tremolo_rise"), knobs_set("tremolo_wait", "tremolo_rise")),
+         **{f"{osc}{kind}_in": ((f"{osc}{kind}_time",), knobs_set(f"{osc}{kind}_time"))
+            for osc in ("", "osc2_") for kind in ("fm", "sync")}}
 TIMED_KNOBS = {k: line for line, (knobs, _) in TIMED.items() for k in knobs}
-MOD_SETTINGS.update({name: (0.0, TIME_MOST, TIME_TOP) for name in TIMED_KNOBS})
+MOD_SETTINGS.update({name: (0.0, TIME_MOST, TIME_TOP) for name in TIMED_KNOBS},
+                    glide=(0.0, GLIDE, TIME_TOP), curve=(-1.0, 1.0, None))
 MOD_TARGETS = MOD_LINES + tuple(MOD_SETTINGS)
+# (knobs the engine reads once for a whole note or the whole sound, not for each repeat: KeyGrid.moved leaves them
+# out)
+NOT_EACH = set(TIMED_KNOBS) | {"glide", "curve", "compressor_attack", "compressor_release"}
 
 
 def longest_fall(hz):
@@ -1187,14 +1217,22 @@ def timed_grid(hz, name, e, linked, tone):
     g = s0 + np.arange(int(span / dt) + 2) * dt
     sources = {}
 
-    def stage(key, t0):
-        """A stage of knob `key` starting at t0: (how far through it, 0..1 at each step; when it ends)."""
+    def stage(key, t0, stays=False):
+        """A stage of knob `key` starting at t0: (how far through it, 0..1 at each step; when it ends). A length of 0
+        = over at once, or (stays: FM's Time) never moving."""
         if e[key] <= 0 and key not in linked or t0 == math.inf:
-            return (g >= t0).astype(float), t0
+            return ((g < -math.inf) if stays else (g >= t0)).astype(float), (math.inf if stays else t0)
         length = setting_at(hz, key, e[key], g, tone, sources) if key in linked else np.full(len(g), e[key])
+        if stays:
+            length = np.where(length > 0, length, math.inf)
         sums = stage_sums(length, dt)
         return np.clip(sums - np.interp(min(t0, g[-1]), g, sums), 0.0, 1.0), stage_end(sums, g, t0)
 
+    if name.endswith("_in"):  # (KeyGrid's: how far through, 0..1)
+        if name == "tremolo_in":  # (none for Delay, then coming in over Rise)
+            _, tw = stage("tremolo_wait", s0)
+            return g, stage("tremolo_rise", tw)[0]
+        return g, stage(TIMED[name][0][0], s0, stays=name.endswith("fm_in"))[0]
     if name in ("pitch", "sweep"):  # (from start to end, fast first)
         p, _ = stage(next(iter(TIMED[name][0])), s0)
         return g, e["start"] + (e["end"] - e["start"]) * (1.0 - (1.0 - p) ** 2)
@@ -1532,7 +1570,7 @@ def glides(hz):
     pitch."""
     voice = hz.get("voice") or {}
     tones = hz.get("tones") or ()
-    if not voice.get("glide") or len(tones) < 2:
+    if not (voice.get("glide") or glide_moved(hz)) or len(tones) < 2:
         return {}
     slid = {b["id"] for _, b, _ in links(tones)}
     ended = sorted(tones, key=lambda n: n["t"] + n["len"])
@@ -1559,6 +1597,21 @@ def glides(hz):
             if got and b["id"] not in slid:
                 out[b["id"]] = got
     return out
+
+
+def glide_moved(hz):
+    """The MOD tab moves the Voice box's Glide (and its box is on): notes may glide even with Glide at 0."""
+    return (any(link["to"] == "glide" for link in (hz.get("mod") or {}).get("links", ()))
+            and plain_base(hz, "glide") is not None)
+
+
+def glide_of(hz, n, key):
+    """Note n's Glide time / Curve (key "glide" / "curve"): as set, or moved by the MOD tab as at its start (a glide
+    is over quickly: read once, as it starts)."""
+    base = plain_base(hz, key)
+    if base is None:
+        return 0.0 if key == "glide" else GLIDE_CURVE
+    return float(setting_at(hz, key, base, np.array([n["t"]]), n)[0])
 
 
 def wave(hz, ppq, key, limit=None, whole=None):
@@ -1635,10 +1688,11 @@ def tone_runs(hz, left, ppq):
     out, held = [], {}
     for n in tones:
         a = n["t"] + min([min(s["in"], n["len"]) for _, b, s in ls if b is n], default=0.0)
-        if n["id"] in gl:
-            s, e = (left + n["t"]) * ppq, (left + n["t"] + min(hz["voice"]["glide"], n["len"])) * ppq
-            a = max(a, n["t"] + min(hz["voice"]["glide"], n["len"]))
-            curve = hz["voice"].get("curve", GLIDE_CURVE)
+        took = glide_of(hz, n, "glide") if n["id"] in gl else 0.0
+        if took > 0:
+            s, e = (left + n["t"]) * ppq, (left + n["t"] + min(took, n["len"])) * ppq
+            a = max(a, n["t"] + min(took, n["len"]))
+            curve = glide_of(hz, n, "curve")
             for k0 in gl[n["id"]]:
                 part, after, t = [], [], s
                 while t < e:
@@ -1804,12 +1858,13 @@ def wave_hits(shapes, plain, number, since, mode):
     0..1 of the wave; loudness 0..1), arrays (repeats x hits). shapes = [(waveform function, its value for each repeat,
     on for each repeat)]; plain = the repeats with no waveform on (one hit a wave; FM makes them a sine, Pulse width
     full hits); number = each repeat's number in its stretch; since = beats from its note's start; mode = hz["mode"]
-    ({} = none)."""
+    ({} = none; its knobs may be arrays, one value each repeat; "progress" = how far through its Time each is)."""
     part = np.arange(SUB) / SUB
     rows, kind = len(plain), mode.get("kind")
     p = np.broadcast_to(part, (rows, SUB))
+    moved = mode.get("progress")  # (its Time moved by the MOD tab: how far through it each repeat is)
     if kind == "fm":  # (the place in the wave pushed back and forth; counted over the stretch so it runs on)
-        depth = FM_INDEX * mode["depth"] * fall_off(since, mode["time"])
+        depth = FM_INDEX * mode["depth"] * (fall_off(since, mode["time"]) if moved is None else (1.0 - moved) ** 2)
         at = np.asarray(number, float)[:, None] + part[None, :]
         p = np.mod(at + depth[:, None] / (2.0 * np.pi) * np.sin(2.0 * np.pi * mode["ratio"] * at), 1.0)
     mix = np.ones((rows, SUB))
@@ -1826,7 +1881,8 @@ def wave_hits(shapes, plain, number, since, mode):
         mix = mix * (part[None, :] < width[:, None])
     where = np.broadcast_to(part, (rows, SUB))
     if kind == "sync" and rows:  # (the wave's hits squeezed into 1 / r of it, over and over until the wave ends)
-        r = mode["amount"] if mode["time"] <= 0 else 1.0 + (mode["amount"] - 1.0) * np.clip(since / mode["time"], 0, 1)
+        r = (1.0 + (mode["amount"] - 1.0) * moved if moved is not None else mode["amount"] if mode["time"] <= 0
+             else 1.0 + (mode["amount"] - 1.0) * np.clip(since / mode["time"], 0, 1))
         r = np.broadcast_to(np.asarray(r, float), (rows,))
         cols = np.flatnonzero((mix >= SOFT).any(axis=0))
         k = int(math.ceil(r.max() - 1e-9))
@@ -1860,8 +1916,12 @@ class KeyGrid:
         # (the knobs that aren't lines the MOD tab moves, each run's values worked out in made_runs; setting_at)
         self.hz = hz
         self.moved = {link["to"] for link in (hz.get("mod") or {}).get("links", ())
-                      if link["to"] in MOD_SETTINGS and link["to"] not in TIMED_KNOBS  # (those: in the lines, fx_at)
+                      if link["to"] in MOD_SETTINGS and link["to"] not in NOT_EACH
                       and setting_base(hz, link["to"]) is not None}
+        # (the Tremolo's Delay / Rise and the Modes' Time moved: how far through them each repeat is, timed_line)
+        self.linked = linked = {link["to"] for link in (hz.get("mod") or {}).get("links", ())}
+        self.timed = sorted(name for name, (knobs, read) in TIMED.items()
+                            if name.endswith("_in") and linked & set(knobs) and read(hz) is not None)
         n = len(self.copies)
         self.middle = np.isin(np.arange(n), ((n - 1) // 2, n // 2))  # (Blend: the middle copies)
         self.runs = [] if self.a_off else self.made_runs(hz, left, ppq, 0)
@@ -1911,6 +1971,8 @@ class KeyGrid:
             for name in self.moved:  # (the MOD tab's knobs that aren't lines: from each note too)
                 run[name] = (setting_at(hz, name, setting_base(hz, name), beat, None, mono) if name in MOD_RACK
                              else setting_at(hz, name, setting_base(hz, name), beat, n0, sources))
+            for name in self.timed:
+                run[name] = timed_line(hz, name, beat, n0)
             run["swept"] = np.full(len(beat), "sweep" in fx)  # (sweep at 0 = the bump on the lowest key)
             run["has_volume"] = np.full(len(beat), "volume" in fx)
             for name in WAVES:  # (a waveform at 0 = the plain tone; without any: the plain tone too)
@@ -1961,7 +2023,7 @@ class KeyGrid:
         runs = self.runs
         n = np.array([len(r["starts"]) for r in runs], np.int64)
         names = ["starts", "waves", "beat", "limits", "since", "trem_since", "turns", "swept", "has_volume", "groups",
-                 "track", "level", *FX, *sorted(self.moved),
+                 "track", "level", *FX, *sorted(self.moved), *self.timed,
                  *("has_" + name for name in WAVES)]
         self.flat = {k: np.concatenate([np.broadcast_to(np.asarray(r[k]), (len(r["starts"]),)) for r in runs])
                      if runs else np.zeros(0) for k in names}
@@ -2161,11 +2223,8 @@ class KeyGrid:
             swept = 0.08 + 0.92 * np.clip(np.cos(np.pi * (xv - where)), 0.0, 1.0) ** 4
             loud = np.where(f["swept"][src], swept, 1.0)
             loud = loud * (1.0 + np.cos(2.0 * np.pi * WAH * f["wah"][src] * (xv - 0.5))) / 2.0
-            if any(self.trem_in):  # (coming in after Delay over Rise, from each note's start)
-                wait, rise = self.trem_in
-                since = f["trem_since"][src]
-                come = (np.clip((since - wait) / rise, 0.0, 1.0) if rise > 0
-                        else (since >= wait - 1e-9).astype(float))
+            if any(self.trem_in) or "tremolo_in" in self.timed:  # (coming in after Delay over Rise, from each
+                come = self.trem_come(src)  # note's start)
                 d = trem[1] * come
                 loud = loud * (1.0 - d * (1.0 - np.cos(2.0 * np.pi * f["turns"][src])) / 2.0)
             else:
@@ -2272,14 +2331,26 @@ class KeyGrid:
         d = self.flat["tremolo_depth"][src]
         return 1.0 - d, d
 
+    def trem_come(self, src=slice(None)):
+        """How much of the tremolo has come in (0..1) for these repeats: none for its Delay, then over its Rise, from
+        each note's start (moved by the MOD tab: as timed_line works it out)."""
+        if "tremolo_in" in self.timed:
+            return self.flat["tremolo_in"][src]
+        wait, rise = self.trem_in
+        since = self.flat["trem_since"][src]
+        return np.clip((since - wait) / rise, 0.0, 1.0) if rise > 0 else (since >= wait - 1e-9).astype(float)
+
     def mode_now(self, o, src):
         """Oscillator o's Mode (OSC A = 0, OSC B = 1) for these repeats: as set, or its amount knob each repeat's
-        own while the MOD tab moves it (MODE_AMOUNTS)."""
+        own while the MOD tab moves it (MODE_AMOUNTS); its Time moved: "progress" = how far through it each is."""
         mode = self.modes[o]
-        name = ("osc2_" if o else "") + f"{mode.get('kind')}_{MODE_AMOUNTS.get(mode.get('kind'))}"
-        if name not in self.moved:
-            return mode
-        return dict(mode, **{MODE_AMOUNTS[mode["kind"]]: self.flat[name][src]})
+        prefix = "osc2_" if o else ""
+        name = prefix + f"{mode.get('kind')}_{MODE_AMOUNTS.get(mode.get('kind'))}"
+        if name in self.moved:
+            mode = dict(mode, **{MODE_AMOUNTS[mode["kind"]]: self.flat[name][src]})
+        if f"{prefix}{mode.get('kind')}_in" in self.timed:
+            mode = dict(mode, progress=self.flat[f"{prefix}{mode['kind']}_in"][src])
+        return mode
 
     def after(self, kind):
         """True when the compressor is on and comes after the Effects tab's `kind` (so it squeezes what that makes)."""
@@ -2303,11 +2374,8 @@ class KeyGrid:
         if self.osc2:  # (OSC B as loud as its Level)
             lv = lv * f["level"]
         trem = self.trem()
-        if any(self.trem_in):
-            wait, rise = self.trem_in
-            since = f["trem_since"]
-            come = np.clip((since - wait) / rise, 0.0, 1.0) if rise > 0 else (since >= wait - 1e-9).astype(float)
-            lv = lv * (1.0 - trem[1] * come * (1.0 - np.cos(2.0 * np.pi * f["turns"])) / 2.0)
+        if any(self.trem_in) or "tremolo_in" in self.timed:
+            lv = lv * (1.0 - trem[1] * self.trem_come() * (1.0 - np.cos(2.0 * np.pi * f["turns"])) / 2.0)
         else:
             lv = lv * (trem[0] + trem[1] * (1.0 + np.cos(2.0 * np.pi * f["turns"])) / 2.0)
         tails = np.repeat(each["tail"], each["n"])
@@ -2353,9 +2421,18 @@ class KeyGrid:
         a = 1.0 - math.exp(-dt / comp["attack"]) if comp["attack"] > 0 else 1.0
         rel = 1.0 - math.exp(-dt / comp["release"]) if comp["release"] > 0 else 1.0
         now = 0.0
-        for k, w in enumerate(want.tolist()):
-            now += (w - now) * (a if w > now else rel)
-            down[k] = now
+        if {"compressor_attack", "compressor_release"} & self.linked:  # (moved: each step's own)
+            a, rel = (np.ones(size) * v if f"compressor_{k}" not in self.linked else np.where(
+                t > 0, 1.0 - np.exp(-dt / np.maximum(t, 1e-12)), 1.0) for k, v, t in (
+                ("attack", a, setting_at(self.hz, "compressor_attack", comp["attack"], at, None)),
+                ("release", rel, setting_at(self.hz, "compressor_release", comp["release"], at, None))))
+            for k, (w, up, back) in enumerate(zip(want.tolist(), a.tolist(), rel.tolist())):
+                now += (w - now) * (up if w > now else back)
+                down[k] = now
+        else:
+            for k, w in enumerate(want.tolist()):
+                now += (w - now) * (a if w > now else rel)
+                down[k] = now
         return t0, dt, 10.0 ** ((gain - down) / 20.0)
 
     def squeezed(self, beat):
