@@ -35,7 +35,7 @@
  "join_split.merged_done": "Merged: each key row slid in until it met the other shape's notes.",
  "join_split.merge_no_meet": "No key row of these shapes meets the other's notes: nothing merged.",
  "join_split.merge_leftovers": "Merge leftovers",
- "join_split.merged_left": "Merged. {n} key rows had nothing to meet: they're a shape of their own now, selected (Delete removes them).",
+ "join_split.merged_left": "Merged. {n} key rows had nothing to meet: they're a shape of their own now (\"Merge leftovers\").",
  "join_split.joined_shapes_into_one_curve": "Joined {n} shapes into one curve",
  "join_split.split_here_use_slice": "This piece was flipped, turned or sliced through its notes after its own pages: Split here can't tell which notes go where. Use the Slice tool (K) across its notes",
  "join_split.cant_rejoin": "Pieces sliced through their notes only join with the pieces beside them, cut from the same shape (moved together, if at all)",

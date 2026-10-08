@@ -219,7 +219,7 @@ class JoinSplit:
         to the right = the shape on the left slides right, each key row until it meets the other shape's notes;
         to the left = the shape on the right slides left (notes/merge.py). Both become one custom shape of plain
         notes (Ctrl+Z: both again). Rows with nothing to meet slide by the smallest slide and become a shape of
-        their own right after it, selected alone (user: easy to delete)."""
+        their own right after it (user: to delete or keep later)."""
         pair = self.merge_pair()
         if not pair:
             return
@@ -245,7 +245,7 @@ class JoinSplit:
         for i in reversed(pair):
             del self.shapes[i]
         self.shapes[pair[0]:pair[0]] = new
-        self.select(pair[0] + len(new) - 1)  # (leftovers picked, if any: Delete takes them away)
+        self.select(pair[0])  # (the merged shape, user: leftovers are dealt with later)
         self.shapes_changed()
         self.status.config(text=tr("join_split.merged_left", n=len(np.unique(rest[:, 2]))) if len(rest)
                            else tr("join_split.merged_done"))
