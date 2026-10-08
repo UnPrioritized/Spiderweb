@@ -385,6 +385,7 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
             return
         self.fx.draw_dots()
         self.draw_adsr_dot()
+        self.draw_mod_dots()
         says, colour = self.live.says() if self.live.active() else (self.live.ready() or "", look.INFO)
         colour = DIM if colour == look.INFO else WARN  # (the Hz bass window's colours, for the dark look)
         if (self.says.cget("text"), str(self.says.cget("foreground"))) != (says, colour):

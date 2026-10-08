@@ -15,7 +15,7 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.hzbass import (MOD_ENV, MOD_ENVS, MOD_LFO_MODES, MOD_LFO_SHAPES, MOD_LFOS, MOD_SOURCES, TIMINGS, adsr_line,
-                          line_at, loop_shape, mod_start)
+                          line_at, loop_shape, mod_start, mod_value)
 from window.hz_knobs import KINDS, PERCENTS, Dial, knob_of, note_name, shown, snap_rate, timed_rates, value_of
 from window.hz_macros import LINK_AMOUNT, REST_MS, inside
 from window.synth_look import ENTRY, GRID, HEAD_FONT, MID, PANEL, PIC, Box, dark_list, dark_menu, mix
@@ -570,6 +570,37 @@ class SynthMod:
                 reach = knob_of_line(key, v + a)
                 low = knob_of_line(key, v - a) if link.get("bipolar") else None
                 ring = (reach, colour, k.value, low)
+            if ring != k.ring:
+                k.ring = ring
+                k.draw()
+
+    def draw_mod_dots(self):
+        """(Every tick of the live keys) each knob a source moves: a dot on its ring where the sound has it now (as
+        a synth's knobs show their modulation), the sources' values worked out for the key heard; when the sound
+        stops, the rings as they were."""
+        links = self.mod_links()
+        pos = self.live.position() if links and self.live.active() and self.page.get() in ("knobs", "effects") else None
+        if pos is None:
+            if getattr(self, "mod_dots_on", False):
+                self.mod_dots_on = False
+                self.show_macros()
+            return
+        u, gone = pos
+        key = self.live.key if self.live.key is not None else 60
+        tone = {"t": 0.0, "len": gone if gone is not None else u + 1e6, "key": key, "cents": 0.0, "id": 1, "to": []}
+        hz = {"mod": self.extra.get("mod"), "tones": [tone], "key": 33}
+        by = {}
+        for link in links:
+            s = float(mod_value(hz, link["from"], np.array([u]), tone)[0])
+            by[link["to"]] = by.get(link["to"], 0.0) + link["amount"] * (2 * s - 1 if link.get("bipolar") else s)
+        self.mod_dots_on = True
+        for key_, k in self.dials.items():
+            to = MOD_KNOBS.get(key_)
+            if to not in by:
+                continue
+            now = knob_of_line(key_, line_of(key_, k.value) + by[to])
+            colour = SOURCE_COLOURS[next(link["from"] for link in links if link["to"] == to)]
+            ring = (k.ring[0], k.ring[1], now, *k.ring[3:]) if k.ring else (None, colour, now)
             if ring != k.ring:
                 k.ring = ring
                 k.draw()
