@@ -36,7 +36,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     hz_live.py       the Hz bass live keys: a key held = its Hz bass, played with the quick sound
     hz_synth.py      the Hz bass synth window: the effects' lines for one note + a keyboard for the live keys
     hz_knobs.py      its Knobs tab: boxes of knobs (like a synth's) that make the effects' lines
-    hz_rack.py       its Effects tab: a rack of effects (chorus, echo, reverb look-alike)
+    hz_rack.py       its Effects tab: a rack of effects (chorus, flanger, echo, reverb, compressor look-alikes)
+    hz_macros.py     its macros: big knobs that turn the knobs linked to them
     hz_presets.py    its preset bar: ready-made sounds and the user's own (hz_presets.json)
     synth_look.py    its dark look: colours, boxes with a header strip, the big tabs, dark ttk styles
     preview_settings.py  its Preview settings window (soundfont, voice limit, reverb, volume, live keys' memory)

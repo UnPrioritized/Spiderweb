@@ -28,6 +28,7 @@ from window import look
 from window.hz_effects import AMOUNT, FxPane
 from window.hz_knobs import SynthKnobs
 from window.hz_live import free_sound_later, keep_sound
+from window.hz_macros import SynthMacros
 from window.hz_presets import PresetBar
 from window.hz_rack import SynthRack
 from window.synth_look import (BG, DIM, EDGE, GRID, MID, PANEL, PIC, TEXT, WARN, BigTab, bright, dark_title, mix,
@@ -139,7 +140,7 @@ class SynthPane(FxPane):
                       font=font)
 
 
-class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
+class SynthWindow(PresetBar, SynthMacros, SynthRack, SynthKnobs, tk.Toplevel):
     """The window (one per Hz bass window: hz.synth_win). The pane's `win`: its lines are the Hz bass window's."""
 
     def __init__(self, hz):
@@ -203,6 +204,7 @@ class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
         self.build_knobs(self.knobs)
         self.rack_box = ttk.Frame(self, padding=(10, 4, 10, 8), style="Synth.TFrame")  # (the Effects tab)
         self.build_rack(self.rack_box)
+        self.build_macros(self)  # (the macro strip: under the warning line on the OSC and FX tabs)
         self.canvas = self.fx.canvas
         self.canvas.config(takefocus=True)
         self.canvas.bind("<Configure>", lambda e: self.redraw())
@@ -248,6 +250,9 @@ class SynthWindow(PresetBar, SynthRack, SynthKnobs, tk.Toplevel):
             self.tab_buttons[key].picked(key == self.page.get())
             if key != self.page.get():
                 w.pack_forget()
+        self.macro_box.pack_forget()
+        if self.page.get() != "lines":  # (the macros' strip: over the OSC and FX tabs, so knobs on both can be linked)
+            self.macro_box.pack(fill="x", padx=round(10 * self.s), pady=(round(4 * self.s), 0), after=self.warn)
         pages[self.page.get()].pack(fill="both", expand=True)
         self.show_status()
         self.show_knobs()

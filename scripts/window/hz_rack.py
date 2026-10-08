@@ -201,8 +201,8 @@ class SynthRack:
         self.rack_edit(self.vals["rack"], off)
 
     def write_rack(self):
-        """hz["rack"] made from the strips' knobs."""
-        v = self.vals
+        """hz["rack"] made from the strips' knobs (with what the macros add to them)."""
+        v = self.macro_vals()
         self.set_extra("rack", [{"kind": k, **{key.split("_", 1)[1]: v[key] for key, _ in RACK_KNOBS[k]},
                                  **({"off": True} if k in v["rack_off"] else {})} for k in v["rack"]])
 

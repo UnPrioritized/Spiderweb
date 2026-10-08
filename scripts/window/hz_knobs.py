@@ -437,9 +437,64 @@ def paint_knob(k, start, turn, arc_from, arc):
                   outline=KNOB_FOCUS if k.focus_get() is k else KNOB_RIM)
     k.create_line(c + r * 0.25 * math.cos(a), c - r * 0.25 * math.sin(a), c + r * math.cos(a), c - r * math.sin(a),
                   fill="#f2f4f7" if k.enabled else DIM, width=2, capstyle="round")
+    if k.hover:  # (a macro dragged over it: let go = linked)
+        k.create_oval(1, 1, s - 1, s - 1, outline=k.hover, width=2)
+    if k.ring:  # (a macro moves it: the picked macro's reach on the outside, a dot where the sound has it)
+        reach, colour, now = k.ring
+        if reach is not None:
+            o = max(1, m - w)
+            k.create_arc(o, o, s - o, s - o, start=k.angle(k.value), extent=k.angle(reach) - k.angle(k.value),
+                         style="arc", width=2, outline=colour)
+        a, rr = math.radians(k.angle(now)), (s - 2 * m) / 2
+        d = max(2, w)
+        k.create_oval(c + rr * math.cos(a) - d, c - rr * math.sin(a) - d, c + rr * math.cos(a) + d,
+                      c - rr * math.sin(a) + d, fill=colour, outline=PIC)
 
 
-class UpDown(Knob):
+class Ringed:
+    """A synth knob a macro can move (window/hz_macros.py): ring = (where the picked macro all the way takes it, or
+    None; its colour; where the sound has it now), in the knob's own 0..100 (or -100..100). Dragging on its outside
+    (past the grey body) while the picked macro moves it = ring_drag(pixels up since the press, fine, done): how far
+    the macro moves it. hover = a macro dragged over it (its colour)."""
+
+    ring = ring_drag = ring_held = hover = None
+
+    def ringed(self):
+        self.bind("<ButtonPress-1>", self.ring_press)
+        self.bind("<B1-Motion>", self.ring_move)
+        self.bind("<ButtonRelease-1>", lambda e: self.ring_release())
+
+    def on_ring(self, e):
+        s = self.size
+        c, r = s / 2, s / 2 - max(3, s // 9) * 1.9
+        return bool(self.ring and self.ring[0] is not None and self.ring_drag) and (e.x - c) ** 2 + (e.y - c) ** 2 > r * r
+
+    def ring_press(self, e):
+        if self.enabled and self.on_ring(e):
+            self.focus_set()
+            self.ring_held = e.y
+            self.ring_drag(0, False, False)
+        else:
+            self.press(e)
+
+    def ring_move(self, e):
+        if self.ring_held is not None:
+            self.ring_drag(self.ring_held - e.y, bool(e.state & 1), False)
+        else:
+            self.move(e)
+
+    def ring_release(self):
+        if self.ring_held is not None:
+            self.ring_held = None
+            self.ring_drag(None, False, True)
+        else:
+            self.release()
+
+    def held(self):
+        return bool(self.drag or self.pointing or self.ring_held is not None)
+
+
+class UpDown(Ringed, Knob):
     """The up / down knob (Pitch Amount: 0 in the middle) in the dark look, turning 135 degrees each way like the
     others."""
 
@@ -451,6 +506,10 @@ class UpDown(Knob):
         self.start = start  # (a middle-click puts it back there)
         self.stepping = 0  # (while a wheel / arrow step turns it: which way; see SynthKnobs.on_dial)
         self.bind("<ButtonPress-2>", lambda e: self.turn_to(self.start, True))
+        self.ringed()
+
+    def angle(self, v):
+        return 90 - v / 100 * self.TURN
 
     def draw(self):
         paint_knob(self, 225, 2 * self.TURN, 90, self.value / 100 * self.TURN)
@@ -464,7 +523,7 @@ class UpDown(Knob):
             self.stepping = 0
 
 
-class Dial(Knob):
+class Dial(Ringed, Knob):
     """A synth's knob: 0 (pointing down left) to 100 (down right), turning 270 degrees. As Knob otherwise, without
     sticking anywhere; a middle-click puts it back to `start`. In the dark look."""
 
@@ -476,6 +535,10 @@ class Dial(Knob):
         self.start = start
         self.stepping = 0  # (while a wheel / arrow step turns it: which way; see SynthKnobs.on_dial)
         self.bind("<ButtonPress-2>", lambda e: self.turn_to(self.start, True))
+        self.ringed()
+
+    def angle(self, v):
+        return 225 - v / 100 * self.TURN
 
     def draw(self):
         paint_knob(self, 225, self.TURN, 225, self.value / 100 * self.TURN)
@@ -808,8 +871,9 @@ class SynthKnobs:
         hz = self.hz
         hz.fxl, hz.loops, hz.off, hz.froms, hz.fits, hz.sustains, hz.lfo, hz.extra = self.turning
         self.vals, self.turning = self.turn_vals, None
-        for dial in self.dials.values():
-            dial.drag, dial.pointing = None, False
+        for dial in list(self.dials.values()) + self.macro_dials:
+            dial.drag, dial.pointing, dial.ring_held = None, False, None
+        self.macro_drop()
         self.redraw()
         self.show_knobs()
         return True
@@ -889,9 +953,11 @@ class SynthKnobs:
         if self.fx.now() != before:
             self.commit_fx(before)
 
-    def write(self, box):
-        """The lines made from a box's knobs (a box switched off stays off: its knobs turn while it's silent)."""
-        v, fx = self.vals, self.fx
+    def write(self, box, show=True):
+        """The lines made from a box's knobs (a box switched off stays off: its knobs turn while it's silent), with
+        what the macros add to them; show=False: nothing shown yet (more boxes coming: a macro turned)."""
+        self.keep_bases()
+        v, fx = self.macro_vals(), self.fx
         was_off = box in BYPASS and self.box_off(box)
         if was_off and box in BOX_EXTRA:  # (its kept setting is written anew below)
             self.set_extra("bypass", {k: s for k, s in self.extra.get("bypass", {}).items() if k != BOX_EXTRA[box]})
@@ -966,9 +1032,10 @@ class SynthKnobs:
             kept = dict(self.extra["bypass"])  # Lines tab: no longer named as off)
             kept["boxes"] = [b for b in kept["boxes"] if b != box]
             self.set_extra("bypass", kept)
-        self.keep_vals()
-        self.redraw()
-        self.show_knobs()
+        if show:
+            self.keep_vals()
+            self.redraw()
+            self.show_knobs()
 
     def keep_vals(self):
         """The knobs that do nothing right now (the sound as it is doesn't show them) kept in hz["kept"], so they're
@@ -977,8 +1044,8 @@ class SynthKnobs:
         for read in READ.values():
             got.update(read(self, START)[0])
         got.update(read_rack(self, START))
-        v = self.vals
-        self.set_extra("kept", {k: v[k] for k in KEEP if v[k] != got[k]
+        v, linked = self.vals, self.linked()  # (a knob a macro moves: its own value is in hz["macro"])
+        self.set_extra("kept", {k: v[k] for k in KEEP if k not in linked and v[k] != got[k]
                                 and not (isinstance(v[k], float) and abs(v[k] - got[k]) < 1e-9)})
 
     def kept_vals(self):
@@ -1068,6 +1135,7 @@ class SynthKnobs:
                 if self.box_says[box].cget("text") != says:
                     self.box_says[box].config(text=says)
             self.vals.update(read_rack(self, was))
+            self.vals.update(self.bases())  # (a knob a macro moves shows its own value, the lines have the sum)
         for key, (box, kind, _) in KNOBS.items():
             v = self.vals[key]
             k = knob_of(kind, v)
@@ -1119,6 +1187,7 @@ class SynthKnobs:
             self.legato_var.set(self.vals["legato"])
         self.light_boxes()
         self.draw_pics()
+        self.show_macros()
         self.show_rack()
         self.show_preset()
         self.meter_later()

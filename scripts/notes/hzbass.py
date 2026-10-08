@@ -85,7 +85,7 @@ synth's voices (unless Legato joins them).
 hz["mode"] = the Wave box's Mode (MODES, clean_mode): FM, Pulse width or Sync change the hits in each wave
 (wave_hits), Growl and Bitcrush when each one lands. A synth window box switched off (Bypass) puts its lines in
 hz["off"] and moves its own setting (mode / voice) to hz["bypass"], which also names it (clean_bypass). Its knobs
-that do nothing right now are kept in hz["kept"] (clean_kept)."""
+that do nothing right now are kept in hz["kept"] (clean_kept), its macros in hz["macro"] (clean_macro)."""
 
 import bisect
 import functools
@@ -514,8 +514,36 @@ def clean_kept(kept):
     return out
 
 
+MACROS = 4  # the synth window's macro knobs
+
+
+def clean_macro(macro):
+    """The synth window's macros checked: hz["macro"] = {"values": each macro knob 0..1 (MACROS of them), "links":
+    [[macro, knob, amount -1..1 of the knob's turn at the macro all the way]], "base": {knob: its own value, the
+    macros' turns added to it}}. Only the window reads it: the knobs' lines already hold what the macros do."""
+    macro = macro if isinstance(macro, dict) else {}
+    vals = macro.get("values") if isinstance(macro.get("values"), list) else []
+    vals = [min(1.0, max(0.0, float(v))) if isinstance(v, (int, float)) and not isinstance(v, bool)
+            and math.isfinite(v) else 0.0 for v in vals[:MACROS]]
+    vals += [0.0] * (MACROS - len(vals))
+    links, seen = [], set()
+    for link in macro.get("links") if isinstance(macro.get("links"), list) else ():
+        if (isinstance(link, list) and len(link) == 3 and link[0] in range(MACROS) and not isinstance(link[0], bool)
+                and isinstance(link[1], str) and len(link[1]) <= 40 and isinstance(link[2], (int, float))
+                and not isinstance(link[2], bool) and math.isfinite(link[2]) and (link[0], link[1]) not in seen
+                and len(links) < 200):
+            seen.add((link[0], link[1]))
+            links.append([int(link[0]), link[1], min(1.0, max(-1.0, float(link[2])))])
+    linked = {k for _, k, _ in links}
+    base = {k: float(v) for k, v in (macro.get("base").items() if isinstance(macro.get("base"), dict) else ())
+            if k in linked and isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)}
+    if not links and not any(vals):
+        return {}
+    return {"values": vals, "links": links, "base": base}
+
+
 CLEAN_EXTRA = {"voice": clean_voice, "mode": clean_mode, "rack": clean_rack, "arp": clean_arp, "bypass": clean_bypass,
-               "kept": clean_kept}
+               "kept": clean_kept, "macro": clean_macro}
 EXTRAS = tuple(CLEAN_EXTRA)  # the synth window's own settings (not lines), each checked by its CLEAN_EXTRA
 
 
