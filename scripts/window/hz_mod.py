@@ -2,8 +2,8 @@
 LFO 4: LFO 1 and 2 are the Vibrato and the Tremolo), two more envelopes (ENV 2 / ENV 3: ENV 1 is the Volume box),
 and each note's Velocity and Note, which move knobs over time. Their names are also in the macros' strip on the OSC
 and FX tabs (where the knobs are): drag one onto a knob, as a macro's, to link them; the knob's ring then shows how
-far the source moves it (drag the ring: the amount, down to 0 = unlinked). Only knobs that make an effect's line can
-be moved (MOD_KNOBS). Saved in hz["mod"] (hzbass.clean_mod); the engine moves the lines while the notes are made."""
+far the source moves it (drag the ring: the amount, down to 0 = unlinked). The knobs in MOD_KNOBS can be moved.
+Saved in hz["mod"] (hzbass.clean_mod); the engine moves the lines and settings while the notes are made."""
 
 import copy
 import math
@@ -15,17 +15,21 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.hzbass import (MOD_ENV, MOD_ENVS, MOD_LINKS, MOD_NEED_LINE, NEUTRAL, WAVES, MOD_LFO_MODES, MOD_LFO_SHAPES, MOD_LFOS, MOD_SOURCES, TIMINGS, adsr_line,
-                          line_at, loop_shape, mod_start, mod_value)
-from window.hz_knobs import BYPASS, KINDS, KNOBS, PERCENTS, Dial, knob_of, note_name, shown, snap_rate, timed_rates, value_of
+from notes.hzbass import (MOD_ENV, MOD_ENVS, MOD_LINKS, MOD_NEED_LINE, MOD_SETTINGS, NEUTRAL, WAVES, MOD_LFO_MODES,
+                          MOD_LFO_SHAPES, MOD_LFOS, MOD_SOURCES, TIMINGS, adsr_line, line_at, loop_shape, mod_start,
+                          mod_value, setting_base)
+from window.hz_knobs import (BYPASS, KINDS, KNOBS, PERCENTS, UPDOWN, Dial, knob_of, note_name, shown, snap_rate,
+                             timed_rates, value_of)
 from window.hz_macros import LINK_AMOUNT, REST_MS, inside
 from window.synth_look import ENTRY, GRID, HEAD_FONT, MID, PANEL, PIC, Box, dark_list, dark_menu, mix
 from window.widgets import Scrub, Tooltip
 
-# the knobs a source can move: knob -> the effect line it makes (hzbass.MOD_TARGETS; "wave" = the picked waveform's)
-MOD_KNOBS = {"shape": "wave", "octave": "octave", "sustain": "volume", "amount": "pitch", "vibrato_depth": "vibrato",
-             "tremolo_rate": "tremolo", "sweep_start": "sweep", "sweep_end": "sweep", "wah": "wah", "slant": "slant",
-             "groups": "groups", "offpitch": "offpitch", "noisy": "noisy"}
+# the knobs a source can move: knob -> the effect line it makes (hzbass.MOD_LINES; "wave" = the picked waveform's),
+# or itself: a knob that makes no line, read by the engine where it's used (hzbass.MOD_SETTINGS)
+MOD_KNOBS = dict({"shape": "wave", "octave": "octave", "sustain": "volume", "amount": "pitch",
+                  "vibrato_depth": "vibrato", "tremolo_rate": "tremolo", "sweep_start": "sweep", "sweep_end": "sweep",
+                  "wah": "wah", "slant": "slant", "groups": "groups", "offpitch": "offpitch", "noisy": "noisy"},
+                 **{key: key for key in MOD_SETTINGS if key in KNOBS})
 SOURCE_COLOURS = {"lfo3": "#60a5fa", "lfo4": "#34d399", "env2": "#fb923c", "env3": "#facc15", "velocity": "#a78bfa",
                   "note": "#f87171"}
 LFO_KNOBS = (("rate", "vib_rate"),)
@@ -35,8 +39,9 @@ MATRIX_COLOUR = "#9aa3ae"
 
 
 def line_of(key, k):
-    """The value a knob's line has with the knob at k (its own 0..100, Pitch Amount -100..100)."""
-    if key == "amount":
+    """The value a knob's line has with the knob at k (its own 0..100, Pitch Amount -100..100); a knob that makes no
+    line: how far round it points (0..1 of its whole turn, the engine's setting_at counts the same)."""
+    if key == "amount" or KNOBS[key][1] in UPDOWN:
         return 0.5 + k / 200
     if key == "tremolo_rate":  # (the knob goes along a curve: line = rate / TREMOLO, knob = 100 x its square root)
         return (k / 100) ** 2
@@ -46,7 +51,7 @@ def line_of(key, k):
 def knob_of_line(key, v):
     """Where a knob points for its line's value v (0..1)."""
     v = min(1.0, max(0.0, v))
-    if key == "amount":
+    if key == "amount" or KNOBS[key][1] in UPDOWN:
         return (v - 0.5) * 200
     if key == "tremolo_rate":
         return 100 * math.sqrt(v)
@@ -613,6 +618,11 @@ class SynthMod:
         to, box = MOD_KNOBS[key], KNOBS[key][0]
         if box in BYPASS and self.box_off(box):
             return None
+        if to in MOD_SETTINGS:  # (a knob that makes no line: where it points, while it does something)
+            heard = dict(self.extra, lfo=self.lfo, fx={n: p for n, p in self.fxl.items() if n not in self.off})
+            if setting_base(heard, to) is None:
+                return None
+            return line_of(key, knob_of(KNOBS[key][1], self.pv[key]))
         name = next((w for w in WAVES if w in self.fxl), None) if to == "wave" else to
         if name is None or name not in self.fxl:
             return None if to in MOD_NEED_LINE else NEUTRAL.get(to, 0.0)

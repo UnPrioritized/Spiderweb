@@ -1169,7 +1169,8 @@ class SynthKnobs:
     def box_linked(self, name):
         """A MOD tab source moves one of the box's effects (it changes the sound, even with its knob at 0)."""
         return any(MOD_BOXES[link["to"]] == name for link in (self.extra.get("mod") or {}).get("links", ())
-                   if link["to"] not in MOD_NEED_LINE or link["to"] in self.fxl
+                   if link["to"] in MOD_BOXES  # (a knob that makes no line: its box has its setting already)
+                   and (link["to"] not in MOD_NEED_LINE or link["to"] in self.fxl)
                    or link["to"] == "wave" and any(w in self.fxl for w in WAVES))
 
     def box_off(self, name):
