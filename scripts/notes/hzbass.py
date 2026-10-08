@@ -1203,12 +1203,26 @@ MOD_SETTINGS.update(vibrato_rate=(*LFO["vibrato_rate"], RATE_TOP),
 # ... and the MOD tab's own LFO 3 / LFO 4 Rate (moved_lfo; never by the LFO itself: clean_mod)
 LFO_RATES = {f"{src}_rate": src for src in MOD_LFOS}
 MOD_SETTINGS.update({name: (*MOD_LFO["rate"][:2], RATE_TOP) for name in LFO_RATES})
-# ... the tuning: the Voice box's Detune (each repeat's own spread) and Random start (read once, as each note starts)
-MOD_SETTINGS.update(detune=(0.0, DETUNE, None), random=(0.0, 1.0, None))
+# ... the tuning: the Voice box's Detune (each repeat's own spread) and Random start (read once, as each note starts),
+# OSC B's Octave / Semi (whole octaves / keys, as their knobs) and Fine, bending its tone as the Pitch line does
+# (KeyGrid.osc2_keys)
+OSC2_TUNE = ("osc2_octave", "osc2_semi", "osc2_fine")
+MOD_SETTINGS.update(detune=(0.0, DETUNE, None), random=(0.0, 1.0, None),
+                    **{name: (*OSC2[name[5:]][:2], None) for name in OSC2_TUNE})
 MOD_TARGETS = MOD_LINES + tuple(MOD_SETTINGS)
 # (knobs the engine reads once for a whole note or the whole sound, not for each repeat: KeyGrid.moved leaves them
 # out)
-NOT_EACH = set(TIMED_KNOBS) | {"glide", "curve", "compressor_attack", "compressor_release", *LFO_RATES}
+NOT_EACH = set(TIMED_KNOBS) | {"glide", "curve", "compressor_attack", "compressor_release", *LFO_RATES, *OSC2_TUNE}
+
+
+def osc2_most(hz):
+    """OSC B's tone from the note's, in keys, at the highest the MOD tab's links can take it."""
+    osc = dict(hz["osc2"])
+    for name in OSC2_TUNE:
+        if any(link["to"] == name for link in (hz.get("mod") or {}).get("links", ())):
+            v = setting_most(hz, name, osc[name[5:]])
+            osc[name[5:]] = v if name == "osc2_fine" else float(round(v))
+    return osc2_shift(osc)
 
 
 def longest_fall(hz):
@@ -1789,13 +1803,15 @@ def tone_runs(hz, left, ppq):
     return out
 
 
-def bent(hz, left, ppq, starts, nexts, tone=None):
+def bent(hz, left, ppq, starts, nexts, tone=None, keys=None):
     """A stretch of tone's repeats (start ticks, next ones' starts) moved by the "pitch" effect: the tone goes up or
     down by the line (PITCH keys at 1 and 0), its waves shorter or longer. The repeats are spaced by adding up the
     tone over time, so a big bend keeps its timing (a repeat is where the waves so far come to a whole number).
-    tone = the tone the stretch belongs to (a slide: the one it leaves), for a line counted from each note."""
+    tone = the tone the stretch belongs to (a slide: the one it leaves), for a line counted from each note. keys =
+    another bend instead of the line's: keys up at beats (OSC B's tune moved, KeyGrid.osc2_keys)."""
     t = np.append(starts, nexts[-1])
-    f = 2.0 ** ((fx_at(hz, "pitch", t / ppq - left, tone) - 0.5) * 2.0 * PITCH / 12.0)  # (how many times the tone)
+    up = (fx_at(hz, "pitch", t / ppq - left, tone) - 0.5) * 2.0 * PITCH if keys is None else keys(t / ppq - left)
+    f = 2.0 ** (up / 12.0)  # (how many times the tone)
     phase = np.concatenate([[0.0], np.cumsum((f[:-1] + f[1:]) / 2.0)])  # (one wave as placed = 1 at f = 1)
     n = max(1, int(math.ceil(phase[-1] - 1e-9)))
     at = np.interp(np.arange(n + 1, dtype=float), phase, t)
@@ -1985,6 +2001,7 @@ class KeyGrid:
         self.linked = linked = {link["to"] for link in (hz.get("mod") or {}).get("links", ())}
         self.timed = sorted(name for name, (knobs, read) in TIMED.items()
                             if name.endswith("_in") and linked & set(knobs) and read(hz) is not None)
+        self.tune = [name for name in OSC2_TUNE if name in linked] if self.osc2 else []  # (OSC B's tune moved)
         n = len(self.copies)
         self.middle = np.isin(np.arange(n), ((n - 1) // 2, n // 2))  # (Blend: the middle copies)
         self.runs = [] if self.a_off else self.made_runs(hz, left, ppq, 0)
@@ -2019,8 +2036,10 @@ class KeyGrid:
         shift = osc2_shift(self.osc2) if osc else 0.0
         b = self.osc2 if osc else None
         for starts, nexts, whose in tone_runs(hz, left, ppq):
-            beat = starts / ppq - left
             n0 = whose[0]
+            if osc and self.tune:  # (OSC B's tune moved: its tone bent from the note's, as the Pitch line bends it)
+                starts, nexts = bent(hz, left, ppq, starts, nexts, keys=lambda b: self.osc2_keys(hz, b, n0))
+            beat = starts / ppq - left
             run = {"starts": starts, "waves": nexts - starts, "number": np.arange(len(starts)), "beat": beat,
                    "limits": _limits(hz, left, ppq, starts),
                    # (a repeat moved past its own tone's end, its fall included, is left out: the next tone may
@@ -2074,6 +2093,16 @@ class KeyGrid:
             run["osc"], run["level"] = osc, level * n0.get("level", 1.0)
             runs.append(run)
         return runs
+
+    def osc2_keys(self, hz, beat, tone):
+        """Keys OSC B's tone is moved from where its knobs set it at beat (an array) for tone's note, while the MOD
+        tab moves its Octave / Semi (whole octaves / keys, as their knobs) or Fine."""
+        sources, got = {}, {}
+        for name in OSC2_TUNE:
+            k = name[5:]
+            v = setting_at(hz, name, self.osc2[k], beat, tone, sources) if name in self.tune else self.osc2[k]
+            got[k] = v if k == "fine" else np.round(v)
+        return osc2_shift(got) - osc2_shift(self.osc2)
 
     def starting_points(self):
         """Random start: where each Voice copy's waves start in each note (runs x VOICES, 0..1 of a wave), as a
@@ -2700,6 +2729,6 @@ def shortest_gate(hz, ppq):
         push = sum(abs(link["amount"]) if link.get("bipolar") else max(0.0, link["amount"])
                    for link in (played.get("mod") or {}).get("links", ()) if link["to"] == "pitch")
         top += max(0.0, (min(1.0, max(p[1] for p in pts) + push) - 0.5) * 2.0 * PITCH)
-    if played.get("osc2") and played.get("tones"):  # (OSC B tuned up)
-        top += max(0.0, osc2_shift(played["osc2"]))
+    if played.get("osc2") and played.get("tones"):  # (OSC B tuned up, as far as the MOD tab can take it)
+        top += max(0.0, osc2_most(played))
     return wave(hz, ppq, top)
