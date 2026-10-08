@@ -78,6 +78,59 @@ def recipe_notes(m):
     return notes_shape(notes, m["ppq"], "")["notes"]
 
 
+MOST_SAMPLES = 20_000_000  # (key rows x time steps, like a turned picture's)
+
+
+def turned_notes(sh, ppq):
+    """A turned / slanted merged shape's notes, (start, end, pitch, velocity, track) rows (user: it turns as the one
+    shape seen on screen, like a turned image, not chopped into staircases). Every key row crossing the box is
+    sampled one tick at a time (fewer past MOST_SAMPLES): the note of the merged notes under each spot, so each
+    stretch of one note = a flat note; touching notes stay apart."""
+    from notes.custom import unpack_notes
+    rows = unpack_notes(sh["notes"])  # (start, end, key, velocity, track), from the box's corner
+    (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
+    ub, up, vb, vp = b1 - b0, p1 - p0, b2 - b0, p2 - p0
+    det = ub * vp - up * vb
+    if abs(det) < 1e-12 or not len(rows):
+        return np.zeros((0, 5), np.int64)
+    t_all, k_all = float(rows[:, 1].max()), float(rows[:, 2].max() + 1)
+    cb, cp = [b0, b1, b2, b1 + b2 - b0], [p0, p1, p2, p1 + p2 - p0]
+    lo_k, hi_k = int(np.ceil(min(cp))), int(np.floor(max(cp)))
+    t0, span = min(cb), max(cb) - min(cb)
+    n = max(1, int(np.ceil(span * ppq)))
+    if hi_k < lo_k:
+        return np.zeros((0, 5), np.int64)
+    n = min(n, max(1, MOST_SAMPLES // (hi_k - lo_k + 1)))
+    step = span / n
+    kk = np.arange(lo_k, hi_k + 1, dtype=float)[:, None]
+    bb = t0 + (np.arange(n) + 0.5)[None, :] * step
+    u = ((bb - b0) * vp - (kk - p0) * vb) / det
+    v = ((kk - p0) * ub - up * (bb - b0)) / det
+    inside = (u >= 0) & (u < 1) & (v >= 0) & (v < 1)
+    key = np.clip((v * k_all).astype(np.int64), 0, int(k_all) - 1)
+    tick = u * t_all
+    order = np.lexsort((rows[:, 0], rows[:, 2]))  # by key, then start (notes on one key don't overlap)
+    srt = rows[order]
+    flat = srt[:, 2] * (t_all + 1) + srt[:, 0]  # (one sorted number per note start)
+    at = np.searchsorted(flat, key * (t_all + 1) + tick, side="right") - 1
+    ok = inside & (at >= 0)
+    at = np.clip(at, 0, len(srt) - 1)
+    ok &= (srt[at, 2] == key) & (tick < srt[at, 1])
+    a = np.where(ok, at, -1)  # key rows x time steps: which note, -1 = none
+    change = np.ones(a.shape, bool)
+    change[:, 1:] = a[:, 1:] != a[:, :-1]
+    ks, ts = np.nonzero(change)
+    ends = np.full(len(ts), n)
+    ends[:-1] = np.where(ks[1:] == ks[:-1], ts[1:], n)
+    val = a[ks, ts]
+    on = val >= 0
+    start = np.round((t0 + ts * step) * ppq).astype(np.int64)
+    end = np.round((t0 + ends * step) * ppq).astype(np.int64)
+    got = srt[np.maximum(val, 0)]
+    out = np.column_stack([start, end, ks + lo_k, got[:, 3], got[:, 4]])[on]
+    return out[out[:, 1] > out[:, 0]]
+
+
 def clean_merge(m, clean_shape):
     """A recipe from a file -> valid, or None."""
     try:
