@@ -78,6 +78,23 @@ def free_sound(app):
         q.forget()
 
 
+def kept_tones(tones, now, tail):
+    """The take's notes still needed at beat `now` (tail = beats a note sounds on after its end): those held or
+    still sounding, the ones joined to them back in time (touching or overlapping: an Arpeggio run, a Legato chain,
+    hunt 2026-10-09), and the last one let go before them (a Glide from it)."""
+    keep = [n["len"] is None or n["t"] + n["len"] >= now - tail - 1.0 for n in tones]
+    lo = min((n["t"] for n, k in zip(tones, keep) if k), default=math.inf)
+    changed = True
+    while changed:
+        changed = False
+        for i, n in enumerate(tones):
+            if not keep[i] and n["t"] + n["len"] >= lo - 1e-9:
+                keep[i], lo, changed = True, min(lo, n["t"]), True
+    ended = [n for n, k in zip(tones, keep) if not k]
+    last = max(ended, key=lambda n: n["t"] + n["len"], default=None)
+    return [n for n, k in zip(tones, keep) if k or n is last]
+
+
 class LiveKeys:
     def __init__(self, win):
         self.win, self.app = win, win.app
@@ -267,10 +284,7 @@ class LiveKeys:
                      for n in self.tones]
             now = self.beats(self.at)
         tail = sound_span(self.held_shape(60, MIN_LEN)["hz"])  # (how long one note sounds on after it ends)
-        ended = [n for n in tones if n["t"] + n["len"] < now - tail - 1.0]
-        last = max(ended, key=lambda n: n["t"] + n["len"], default=None)
-        tones = [n for n in tones if n not in ended or n is last]
-        sh = self.take_shape(tones)
+        sh = self.take_shape(kept_tones(tones, now, tail))
         qs = quick_sound(self.app)
         self.job = self.jobs.submit(self._make, sh, ppq, self.bpm, gen, p0, None, qs)
 
@@ -354,8 +368,12 @@ class LiveKeys:
         """(BASS's thread) n frames of sound, None = not ready (silence, waiting), empty = the end."""
         qs = self.app.quick
         with self.lock:
+            # (the notes being made again (self.cut): the old ones play on meanwhile, the new ones take over from
+            # where the sound has got to once they're there (a long take held: no silence, hunt 2026-10-09); with
+            # no old ones past the cut (a first press) the sound waits for them, so none is missed)
             at, end = self.at, self.at + n
-            end = min(end, max(at, self.cut)) if math.isfinite(self.cut) else end
+            if math.isfinite(self.cut) and not (len(self.starts) and self.starts[-1] >= self.cut):
+                end = min(end, max(at, self.cut))
             self.waits = False
             got, j = {}, self.i
             while j < len(self.starts) and self.starts[j] < end:
