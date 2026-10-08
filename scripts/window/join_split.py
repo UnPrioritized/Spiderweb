@@ -13,7 +13,9 @@ from files.lang import tr
 from notes.arc import arc_circle, arc_points
 from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live, velocity_changed
 from notes.bezier import anchor_count, nearest, split
-from notes.engine import as_made, cached_arrays, shape_path
+from notes.custom import notes_shape
+from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_path
+from notes.merge import gate_merge
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
@@ -206,6 +208,37 @@ class JoinSplit:
         self.status.config(text=tr("join_split.joined_shapes_into_one_curve", n=len(order)) +
                            (tr("join_split.pieces_some_ends_didn_t_touch", pieces=pieces) if pieces > 1 else ""))
         self.tips.show("join", wait=True)
+
+    def merge_pair(self):
+        """The two selected shapes Gate sensitive merge can use, or None."""
+        sels = sorted(i for i in self.sels if i < len(self.shapes))
+        return sels if len(sels) == 2 else None
+
+    def gate_merge(self, stay=None):
+        """Right-click → Gate sensitive merge (user, first try): the right-clicked shape stays, each key row of the
+        other slides in until it meets it (notes/merge.py); both become one custom shape of plain notes (Ctrl+Z:
+        both again)."""
+        pair = self.merge_pair()
+        if not pair:
+            return
+        stay = stay if stay in pair else pair[0]
+        slide = pair[1] if stay == pair[0] else pair[0]
+        rows = [np.asarray(self.notes_of(self.shapes[i]), np.int64).reshape(-1, 4)[:, :4] for i in (stay, slide)]
+        out = gate_merge(rows[0], rows[1])
+        if not len(out):
+            self.status.config(text=tr("join_split.merge_no_notes"))
+            return
+        notes = np.column_stack([out[:, 0], out[:, 1] - out[:, 0], out[:, 2], out[:, 3], np.zeros(len(out), np.int64)])
+        new = clean_shape({**SHAPE_DEFAULTS, **self.defaults, **notes_shape(notes, self.ppq, tr("join_split.merged"))})
+        self.roll.cancel_draft()
+        self.push_undo(name=tr("join_split.merge"))
+        self.unlink_groups(pair)
+        for i in reversed(pair):
+            del self.shapes[i]
+        self.shapes.insert(pair[0], new)
+        self.select(pair[0])
+        self.shapes_changed()
+        self.status.config(text=tr("join_split.merged_done"))
 
     def pieces(self):
         """The selected shapes that are pieces cut from another shape, keeping their notes (sliced.py)."""

@@ -136,6 +136,8 @@ class ShapeMenu:
             item(tr("roll_menu.quick_chop"), tr("roll_menu.ctrl_u"), lambda: quick_chop(app), keys=True)
             self.glue_items(item)
         self.between_items(item, i)
+        if app.merge_pair():
+            item(tr("join_split.merge_menu"), "", lambda: app.gate_merge(i))
         if len(app.sels) >= 2:  # (greyed out, saying why, when something else is selected too)
             ok = app.can_join()
             item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
@@ -184,6 +186,8 @@ class ShapeMenu:
             self.glue_items(item)
         if app.between_pair():
             item(tr("between.menu_add"), "", app.add_between)
+        if app.merge_pair():
+            item(tr("join_split.merge_menu"), "", lambda i=self.shape_at(e.x, e.y): app.gate_merge(i))
         ok = app.can_join()
         item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
              tr("roll_menu.ctrl_g"), app.join_selected, ok)
