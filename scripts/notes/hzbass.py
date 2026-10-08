@@ -161,8 +161,8 @@ RACK = {"chorus": {"depth": (0.0, 100.0, 15.0), "rate": (0.0, 64.0, 0.5)},
 # hz["arp"] (the Arpeggio box; there only while it's on): every note (or the notes placed together, a chord) becomes a
 # fast run through its pitches: `chord` = "placed" (the notes placed together) or a chord's steps in keys on each
 # note; `octaves` = the same again 1, 2... octaves up; `pattern` = the order; `speed` = notes a beat, each `gate` of
-# its step long (1 = touching); `swing` = every second step comes late, by up to half a step at 1 (the step before it
-# that much longer, its own that much shorter)
+# its step long (1 = touching); `swing` = the steps between the grid's beats (counted from the Hz bass's start) come
+# late, by up to half a step at 1 (the step before it that much longer, its own that much shorter)
 ARP = {"speed": (0.25, 32.0, 4.0), "octaves": (1.0, 4.0, 1.0), "gate": (0.05, 1.0, 1.0), "swing": (0.0, 1.0, 0.0)}
 ARP_PATTERNS = ("up", "down", "updown", "random")
 CHORDS = {"placed": (0,), "octave": (0, 12), "fifth": (0, 7), "major": (0, 4, 7), "minor": (0, 3, 7),
@@ -352,10 +352,14 @@ def arpeggiated(tones, arp):
         rng = np.random.default_rng(int(round(t0 * 1000)) % (2 ** 32))
         k = 0
         while True:
-            t = t0 + k * step + (late if k % 2 else 0.0)
+            t = t0 + k * step
+            # (swing by the beat grid, counted from the Hz bass's start as a synth counts from the song's: the
+            # steps between the grid's beats come late, wherever the chord starts; user, 2026-10-08)
+            odd = bool(late) and math.floor(t / step + 0.5) % 2 == 1
+            t += late if odd else 0.0
             if t >= end - 1e-9:
                 break
-            slot = step - late if k % 2 else step + late
+            slot = step - late if odd else step + late
             held = [(key, n) for key, n in items if n["t"] + n["len"] > t + 1e-9]
             if held:
                 seq = held if arp["pattern"] != "down" else held[::-1]
@@ -1241,6 +1245,7 @@ class KeyGrid:
             run["trem"] = (0.1, TREMOLO_DEPTH) if depth is None else (1.0 - depth, depth)
             span = note_span(hz, beat, n0)  # (beats from its note's start, a chain's: the wave modes)
             run["since"] = beat - (n0["t"] if span is None else span[0])
+            run["trem_since"] = run["since"]  # (the tremolo's Delay / Rise: a reverb tail keeps it as at the end)
             run["tone"], run["held"] = n0, whose[1] is None
             self.runs.append(run)
         if self.reverb:
@@ -1257,7 +1262,7 @@ class KeyGrid:
         hundreds of runs; one by one, 128 keys took seconds)."""
         runs = self.runs
         n = np.array([len(r["starts"]) for r in runs], np.int64)
-        names = ["starts", "waves", "beat", "limits", "since", "turns", "swept", "has_volume", "groups", *FX,
+        names = ["starts", "waves", "beat", "limits", "since", "trem_since", "turns", "swept", "has_volume", "groups", *FX,
                  *("has_" + name for name in WAVES)]
         self.flat = {k: np.concatenate([np.broadcast_to(np.asarray(r[k]), (len(r["starts"]),)) for r in runs])
                      if runs else np.zeros(0) for k in names}
@@ -1400,7 +1405,7 @@ class KeyGrid:
             loud = loud * (1.0 + np.cos(2.0 * np.pi * WAH * f["wah"][src] * (xv - 0.5))) / 2.0
             if any(self.trem_in):  # (coming in after Delay over Rise, from each note's start)
                 wait, rise = self.trem_in
-                since = f["since"][src]
+                since = f["trem_since"][src]
                 come = (np.clip((since - wait) / rise, 0.0, 1.0) if rise > 0
                         else (since >= wait - 1e-9).astype(float))
                 d = trem[1] * come

@@ -289,8 +289,11 @@ def read_vibrato(win, was):
     every = win.loops.get("vibrato")
     wait = rise = 0.0
     if every and win.froms.get("vibrato") == "note":
+        # (from the points, not the length: a line is never shorter than LOOP[0], so a tiny Delay made it longer)
         if len(pts) == 3 and pts[0][1] == 0.0 and pts[1][1] == 0.0:  # (none first, then coming in)
-            wait, rise = pts[1][0], every - pts[1][0]
+            wait, rise = pts[1][0], pts[2][0] - pts[1][0]
+        elif len(pts) == 2:
+            rise = pts[1][0]
         else:
             rise = every
     got = {"vibrato_rate": rate, "vibrato_timing": timing, "vibrato_depth": max(p[1] for p in pts),
@@ -426,10 +429,19 @@ class UpDown(Knob):
         super().__init__(parent, scale, changed, color=color, size=size)
         self.config(background=PANEL)
         self.start = start  # (a middle-click puts it back there)
+        self.stepping = 0  # (while a wheel / arrow step turns it: which way; see SynthKnobs.on_dial)
         self.bind("<ButtonPress-2>", lambda e: self.turn_to(self.start, True))
 
     def draw(self):
         paint_knob(self, 225, 2 * self.TURN, 90, self.value / 100 * self.TURN)
+
+    def step(self, d):
+        """A wheel / arrow step: one turn of its own (one undo step), as the synth's other knobs."""
+        if self.enabled:
+            self.stepping = d
+            v = self.value + d
+            self.turn_to(0 if v * self.value < 0 else v, True)  # (stops at 0 on the way past)
+            self.stepping = 0
 
 
 class Dial(Knob):
@@ -442,6 +454,7 @@ class Dial(Knob):
         super().__init__(parent, scale, changed, color=color, size=size)
         self.config(background=PANEL)
         self.start = start
+        self.stepping = 0  # (while a wheel / arrow step turns it: which way; see SynthKnobs.on_dial)
         self.bind("<ButtonPress-2>", lambda e: self.turn_to(self.start, True))
 
     def draw(self):
@@ -449,7 +462,9 @@ class Dial(Knob):
 
     def step(self, d):
         if self.enabled:
+            self.stepping = d
             self.turn_to(self.value + d, True)
+            self.stepping = 0
 
     def point(self, e):
         if not self.enabled:
@@ -669,7 +684,7 @@ class SynthKnobs:
             self.unit_labels[key].pack(side="left", padx=(2, 0))
         e.bind("<Return>", lambda ev: (self.on_box(key), self.keyboard_back(e), "break")[2])
         e.bind("<FocusOut>", lambda ev: self.on_box(key))
-        Scrub(self.app, [(e, var, lambda: self.on_box(key))], steps, lo, hi, drag_box=True)
+        Scrub(self.app, [(e, var, lambda: self.on_box(key, stepped=True))], steps, lo, hi, drag_box=True)
         for w in (k, e):
             Tooltip(w, tr(f"hz.synth_tip_{key}") + "\n" + tr("hz.synth_tip_knob"))
         return cell
@@ -692,12 +707,25 @@ class SynthKnobs:
         self.timing_picks[name] = (var, names)
 
     def on_timing(self, name, timing):
-        """An LFO box's Timing picked: its Rate moved to the nearest note length of it, one undo step."""
+        """An LFO box's Timing picked: its Rate moved to the nearest note length of it, one undo step. Only the
+        rate changes: a line drawn by hand stays (the Vibrato's rate isn't in its line; the Tremolo's line is
+        written again only when its rate moved)."""
+        if timing == self.vals[f"{name}_timing"]:
+            return
         before = self.fx.state()
         key = f"{name}_rate"
-        self.vals[f"{name}_timing"] = timing
-        self.vals[key] = snap_rate(self.vals[key], timing, KINDS[KNOBS[key][1]][2])
-        self.write(name)
+        rate = snap_rate(self.vals[key], timing, KINDS[KNOBS[key][1]][2])
+        moved = abs(rate - self.vals[key]) > 1e-9
+        self.vals[f"{name}_timing"], self.vals[key] = timing, rate
+        if name == "tremolo" and moved:
+            self.write(name)
+        else:
+            if name == "vibrato":
+                self.set_lfo("vibrato_rate", rate, VIBRATO_RATE)
+            self.set_timing(f"{name}_timing", timing)
+            self.keep_vals()
+            self.redraw()
+            self.show_knobs()
         if self.fx.now() != before:
             self.commit_fx(before)
 
@@ -723,7 +751,7 @@ class SynthKnobs:
         """A knob turned (done: let go / one step of the wheel or the keys = one undo step)."""
         if self.turning is None:
             self.turning, self.turn_vals = self.fx.state(), dict(self.vals)
-        self.vals[key] = self.timed(key, value_of(KNOBS[key][1], k))
+        self.vals[key] = self.timed(key, value_of(KNOBS[key][1], k), self.dials[key].stepping)
         self.sweep_on(key)
         self.write(KNOBS[key][0])
         if done:
@@ -731,11 +759,21 @@ class SynthKnobs:
             if self.fx.now() != before:
                 self.commit_fx(before)
 
-    def timed(self, key, v):
-        """A Rate knob's value at its box's Timing (the nearest note length; Free: as it is), others as they are."""
-        if key not in TIMED:
+    def timed(self, key, v, step=0):
+        """A Rate knob's value at its box's Timing (the nearest note length; Free: as it is), others as they are.
+        step = a wheel / arrow / box step's way (+ / -): at least one note length that way, as a synced Rate moves."""
+        timing = self.vals.get(TIMED.get(key), "free")
+        if key not in TIMED or timing == "free":
             return v
-        return snap_rate(v, self.vals[TIMED[key]], KINDS[KNOBS[key][1]][2])
+        hi = KINDS[KNOBS[key][1]][2]
+        got, now = snap_rate(v, timing, hi), self.vals[key]
+        if step and abs(got - now) < 1e-9:
+            rates = timed_rates(timing, hi)
+            if step > 0:
+                got = next((r for r in rates if r > now + 1e-9), now)
+            else:
+                got = next((r for r in reversed(rates) if r < now - 1e-9), now)
+        return got
 
     def keyboard_back(self, w):
         """A wave picked / a value typed with Enter: the keyboard back to the window (no blue box left), so the
@@ -755,8 +793,8 @@ class SynthKnobs:
         self.show_knobs()
         return True
 
-    def on_box(self, key):
-        """A value typed (or stepped) in the box under a knob."""
+    def on_box(self, key, stepped=False):
+        """A value typed (or stepped: Up / Down, the wheel, a drag) in the box under a knob."""
         e, var = self.dial_boxes[key], self.dial_vars[key]
         box, kind, _ = KNOBS[key]
         lo, hi = KINDS[kind][1:3]
@@ -772,7 +810,8 @@ class SynthKnobs:
             return
         e.config(style=ENTRY)
         self.box_text[key] = var.get()  # (taken: from now on the box shows the sound again)
-        v = self.timed(key, v / 100 if kind in PERCENTS else float(round(v)) if kind in COUNTS else v)
+        v = v / 100 if kind in PERCENTS else float(round(v)) if kind in COUNTS else v
+        v = self.timed(key, v, (v > self.vals[key]) - (v < self.vals[key]) if stepped else 0)
         if abs(v - self.vals[key]) > 1e-9:
             self.sweep_on(key)
             self.change(box, key, v)
