@@ -60,6 +60,7 @@ LOOK = {"bg": PIC, "grid": GRID, "outside": "#1b1f24", "notes": "#34507e", "hint
 # the row above = black ones); Z / X = an octave down / up
 LETTERS = ("a", "w", "s", "e", "d", "f", "t", "g", "y", "h", "u", "j", "k", "o", "l", "p", "semicolon")
 NO_LETTERS = 0x4 | (0x20000 if sys.platform == "win32" else 0x8)  # (Ctrl or Alt held: a shortcut, not a key)
+WIDE, TALL = 1200, 820  # the window's biggest size when it opens (about a big synth's own; user: it grew past the screen)
 LETTER_CHECK_MS = 100  # while a letter is held: how often we ask if it's still down (its let-go can get lost)
 
 
@@ -225,17 +226,22 @@ class SynthWindow(PresetBar, SynthMacros, SynthRack, SynthKnobs, tk.Toplevel):
             c.bind(key, lambda e: (self.fx.paste_points(), "break")[1])
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.show_page()
-        self.update_idletasks()  # (as wide and tall as the knobs need, at least enough for the effects' names; a
-        w = min(max(round(1000 * s), self.knobs.winfo_reqwidth()), self.winfo_screenwidth() - 40)  # small screen:
-        self.lay_boxes(w - 20)  # as wide as it is, the boxes in more rows, and the Knobs tab scrolls)
+        tag = f"SynthLetters{id(self)}"  # (a letter that plays a key, typed in a number box: the number taken, the
+        for e in self.boxes_typed(self):  # key plays; user)
+            e.bindtags((tag,) + e.bindtags())
+        self.bind_class(tag, "<KeyPress>", self.box_letter)
+        self.update_idletasks()  # (a synth's size (user: it grew past the screen): as the knobs need, at most
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()  # WIDE x TALL and the screen less its taskbar;
+        w = min(max(round(1000 * s), self.knobs.winfo_reqwidth()), round(WIDE * s), sw - 40)  # the boxes in more
+        self.lay_boxes(w - 20)  # rows then, and the Knobs tab scrolls)
         self.update_idletasks()
         tw, th = (max(f(b) for b in self.tab_buttons.values()) for f in (tk.Misc.winfo_reqwidth, tk.Misc.winfo_reqheight))
         for b in self.tab_buttons.values():  # (the big tabs all one size: the biggest one's, user)
             b.config(width=tw, height=th)
             b.pack_propagate(False)
         need = self.winfo_reqheight() - kc.winfo_reqheight() + self.knobs.winfo_reqheight()
-        h = min(max(need, names_h + round(160 * s)), self.winfo_screenheight() - 80)
-        self.geometry(f"{w}x{h}")
+        h = min(max(need, names_h + round(160 * s)), round(TALL * s), sh - 120)
+        self.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h - 80) // 2)}")  # (in the screen's middle)
         dark_title(self)
 
     def pick_page(self, key):
@@ -524,9 +530,11 @@ class SynthWindow(PresetBar, SynthMacros, SynthRack, SynthKnobs, tk.Toplevel):
 
     # ------------------------------------------------------------ the computer keyboard's letters
 
-    def on_letter(self, e):
-        """A letter pressed (not in a box, no Ctrl / Alt): its key plays, held until it's let go; Z / X move them."""
-        typing = isinstance(e.widget, (tk.Entry, ttk.Entry)) and str(e.widget.cget("state")) != "readonly"
+    def on_letter(self, e, typed=False):
+        """A letter pressed (not in a box, no Ctrl / Alt): its key plays, held until it's let go; Z / X move them.
+        typed: pressed in a number box, what was typed there just taken (box_letter)."""
+        typing = (not typed and isinstance(e.widget, (tk.Entry, ttk.Entry))
+                  and str(e.widget.cget("state")) != "readonly")
         if typing or e.state & NO_LETTERS:  # (a dropdown with the keyboard: they play, user)
             return None
         k = e.keysym.lower()
@@ -553,6 +561,26 @@ class SynthWindow(PresetBar, SynthMacros, SynthRack, SynthKnobs, tk.Toplevel):
         self.held_code = e.keycode
         self.draw_keys()
         self.after(LETTER_CHECK_MS, lambda: self.letter_check(k))
+        return "break"
+
+    def boxes_typed(self, w):
+        """Every number box in the window (Scrub boxes: knobs', macros', the Arpeggio's Steps)."""
+        for c in w.winfo_children():
+            if isinstance(c, (tk.Entry, ttk.Entry)) and getattr(c, "_scrub", False):
+                yield c
+            yield from self.boxes_typed(c)
+
+    def box_letter(self, e):
+        """A letter that plays a key (or Z / X) pressed while a number box has the keyboard: what's typed there is
+        taken (as Enter does), the keyboard goes back to the window and the key plays (user: type a number, then
+        hear it at once)."""
+        k = e.keysym.lower()
+        if e.state & NO_LETTERS or k not in LETTERS + ("z", "x"):
+            return None
+        e.widget.event_generate("<Return>")
+        if self.winfo_exists():
+            self.focus_set()
+            return self.on_letter(e, typed=True)
         return "break"
 
     def letter_check(self, k):
