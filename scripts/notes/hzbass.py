@@ -434,12 +434,14 @@ def in_scale(key, scale, root):
     return key
 
 
-def arpeggiated(tones, arp, left=0.0):
+def arpeggiated(tones, arp, left=0.0, hz=None):
     """The tones as the Arpeggio box plays them: from each start (the notes starting together = one chord) a run of
     short tones, one every 1 / speed beats while any of them is held, through their pitches (with the chord's steps
     and octaves) in the pattern's order; a note let go drops out of the run. Each keeps its note's tune and gates;
     slides made by hand are left out (the run's notes are new ones). The "steps" pattern: the box's own steps
-    (STEPS) pick the held notes, low to high, each with its octave, loudness ("level" on the tone) and length."""
+    (STEPS) pick the held notes, low to high, each with its octave, loudness ("level" on the tone) and length.
+    hz = the Hz bass played (its tones = these), for the MOD tab moving Speed / Gate / Swing (arp_moved)."""
+    moved = {link["to"] for link in ((hz or {}).get("mod") or {}).get("links", ()) if link["to"] in ARP_KNOBS}
     step = 1.0 / arp["speed"]
     late = arp.get("swing", 0.0) * step / 2  # (every second step: that much later, the one before it longer)
     steps = arp["steps"][:arp["count"]] if arp["pattern"] == "steps" else None
@@ -473,14 +475,18 @@ def arpeggiated(tones, arp, left=0.0):
         # (Random: drawn from the chord's beat in the song (left = the shape's edge), so a Split or a moved edge
         # leaves it as it was)
         rng = np.random.default_rng(int(round((left + t0) * 1000)) % (2 ** 32))
+        if moved:
+            when, gate = arp_moved(hz, arp, moved, chord, t0, end)
+        else:
+            when, gate = (lambda j, t0=t0: at(j, t0)), (lambda j: arp["gate"])
         k = 0
         while True:
-            t, slot = at(k, t0)
+            t, slot = when(k)
             if t >= end - 1e-9:
                 break
             held = [(key, n) for key, n in items if n["t"] + n["len"] > t + 1e-9]
             if steps:
-                tone = stepped(steps, k, t, held, arp, lambda j: at(j, t0), end)
+                tone = stepped(steps, k, t, held, arp, when, end, gate)
                 if tone:
                     tone["id"] = len(out) + 1
                     out.append(tone)
@@ -491,7 +497,7 @@ def arpeggiated(tones, arp, left=0.0):
                 pick = seq[int(rng.integers(len(seq)))] if arp["pattern"] == "random" else seq[k % len(seq)]
                 (key, cents), n = pick
                 if 0 <= key <= 127:
-                    tone = {"t": t, "len": max(MIN_LEN, min(slot * arp["gate"], n["t"] + n["len"] - t)), "key": key,
+                    tone = {"t": t, "len": max(MIN_LEN, min(slot * gate(k), n["t"] + n["len"] - t)), "key": key,
                             "cents": cents, "id": len(out) + 1, "to": []}
                     tone.update({f: n[f] for f in ("auto", "gate") if f in n})
                     out.append(tone)
@@ -499,10 +505,10 @@ def arpeggiated(tones, arp, left=0.0):
     return sorted(out, key=lambda n: (n["t"], n["key"]))
 
 
-def stepped(steps, k, t, held, arp, at, end):
+def stepped(steps, k, t, held, arp, at, end, gate):
     """The "steps" pattern's tone at step k (at t; held = the pitches still held, low to high; at(j) = step j's
-    (start, slot); end = when the last note is let go), or None: a rest, nothing held, one held on by the step before
-    (tie)."""
+    (start, slot); end = when the last note is let go; gate(j) = step j's Gate), or None: a rest, nothing held, one
+    held on by the step before (tie)."""
     s, count = steps[k % len(steps)], len(steps)
     if k and steps[(k - 1) % count].get("tie") or not s["note"] or s["level"] <= 0 or not held:
         return None
@@ -516,13 +522,43 @@ def stepped(steps, k, t, held, arp, at, end):
     while steps[j % count].get("tie") and at(j + 1)[0] < end - 1e-9:
         j += 1
     tj, slot = at(j)
-    tone = {"t": t, "len": max(MIN_LEN, min(tj - t + slot * steps[j % count]["length"] * arp["gate"],
+    tone = {"t": t, "len": max(MIN_LEN, min(tj - t + slot * steps[j % count]["length"] * gate(j),
                                             n["t"] + n["len"] - t)),
             "key": key, "cents": cents, "to": []}
     if s["level"] < 1.0:
         tone["level"] = s["level"]
     tone.update({f: n[f] for f in ("auto", "gate") if f in n})
     return tone
+
+
+def arp_moved(hz, arp, moved, chord, t0, end):
+    """The Arpeggio's run from t0 (a chord let go at end) while the MOD tab moves its Speed / Gate / Swing (moved):
+    (at(k) = step k's (start, slot), gate(k) = its Gate), the sources read for the chord's note held longest. Speed:
+    the steps added up finely, so the run goes faster or slower from where it is; Swing and Gate: as each step
+    starts (the steps between the grid's beats counted as if the run went at its first Speed from the start)."""
+    tone = max(chord, key=lambda n: n["len"])
+    span = max(end - t0, MIN_LEN)
+    dt = max(TIME_STEP, span / 100000)
+    g = t0 + np.arange(int(span / dt) + 2) * dt
+    speed = (setting_at(hz, "arp_speed", arp["speed"], g, tone, {}) if "arp_speed" in moved
+             else np.full(len(g), arp["speed"]))
+    done = np.concatenate([[0.0], np.cumsum(speed[:-1] * dt)])  # (steps gone by)
+    k = np.arange(int(done[-1]) + 5, dtype=float)
+    t = np.interp(k, done, g)
+    past = k > done[-1]  # (past the grid: on at the last Speed)
+    t[past] = g[-1] + (k[past] - done[-1]) / speed[-1]
+    swing = (setting_at(hz, "arp_swing", arp.get("swing", 0.0), t, tone, {}) if "arp_swing" in moved
+             else np.full(len(t), arp.get("swing", 0.0)))
+    odd = np.floor(t0 * speed[0] + k + 0.5) % 2 == 1
+    start = t[:-1] + np.where(odd[:-1], swing[:-1] * np.diff(t) / 2, 0.0)  # (late by up to half its step)
+    slot = np.diff(start)
+    start = start[:-1]
+    gates = (setting_at(hz, "arp_gate", arp["gate"], start, tone, {}) if "arp_gate" in moved
+             else np.full(len(start), arp["gate"]))
+
+    def at(j):
+        return (float(start[j]), float(slot[j])) if j < len(start) else (math.inf, 0.0)
+    return at, (lambda j: float(gates[min(j, len(gates) - 1)]))
 
 
 def clean_rack(rack):
@@ -803,7 +839,7 @@ def live(hz, left=0.0):
     if hz.get("arp") and hz.get("tones"):  # (taken out once played, so live of live is the same)
         arp = hz["arp"]
         hz = {k: v for k, v in hz.items() if k not in ("arp", "_memo")}  # (other tones: nothing cached holds)
-        hz["tones"] = arpeggiated(hz["tones"], arp, left)
+        hz["tones"] = arpeggiated(hz["tones"], arp, left, hz)
     fx = hz.get("fx") or {}
     boxes_off = (hz.get("bypass") or {}).get("boxes", ())
     if ("volume" not in fx and "volume" not in boxes_off and any(
@@ -1050,6 +1086,9 @@ def plain_base(hz, target):
         return lfo.get("tremolo_depth", TREMOLO_DEPTH) if "tremolo" in fx else None
     if target == "vibrato_rate":
         return lfo.get("vibrato_rate", VIBRATO_RATE) if "vibrato" in fx else None
+    if target in ARP_KNOBS:  # (while the Arpeggio is on)
+        arp = hz.get("arp") or {}
+        return arp.get(target[4:], 0.0) if arp else None
     if target in LFO_RATES:
         return (hz.get("mod") or mod_start())["lfo"][MOD_LFOS.index(LFO_RATES[target])]["rate"]
     if target == "sweep_track":
@@ -1209,10 +1248,16 @@ MOD_SETTINGS.update({name: (*MOD_LFO["rate"][:2], RATE_TOP) for name in LFO_RATE
 OSC2_TUNE = ("osc2_octave", "osc2_semi", "osc2_fine")
 MOD_SETTINGS.update(detune=(0.0, DETUNE, None), random=(0.0, 1.0, None),
                     **{name: (*OSC2[name[5:]][:2], None) for name in OSC2_TUNE})
+# ... and the Arpeggio box's Speed (its steps added up, so the run goes faster or slower from where it is), Gate and
+# Swing (read as each step starts): arp_moved
+ARP_KNOBS = ("arp_speed", "arp_gate", "arp_swing")
+MOD_SETTINGS.update(arp_speed=(*ARP["speed"][:2], ARP["speed"][1]), arp_gate=(*ARP["gate"][:2], None),
+                    arp_swing=(*ARP["swing"][:2], None))
 MOD_TARGETS = MOD_LINES + tuple(MOD_SETTINGS)
 # (knobs the engine reads once for a whole note or the whole sound, not for each repeat: KeyGrid.moved leaves them
 # out)
-NOT_EACH = set(TIMED_KNOBS) | {"glide", "curve", "compressor_attack", "compressor_release", *LFO_RATES, *OSC2_TUNE}
+NOT_EACH = set(TIMED_KNOBS) | {"glide", "curve", "compressor_attack", "compressor_release", *LFO_RATES, *OSC2_TUNE,
+                               *ARP_KNOBS}
 
 
 def osc2_most(hz):
