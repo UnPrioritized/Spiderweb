@@ -17,7 +17,7 @@ made shows them about where it is (with a note); turning one makes new lines fro
   Voice: Voices, Detune, Blend, Random start, Voices on (split / same keys), Glide, Curve, Only notes that touch,
   Legato = hz["voice"] (not lines).
   Arpeggio (third row): On, Pattern, Speed, Octaves, Gate, Swing, Chord, Scale, Root = hz["arp"] (not lines; there
-  only while on).
+  only while on); the Steps pattern's own steps under its picture (window/hz_steps.py).
 Each box has a picture: the envelope (with a dot while a key sounds), one wave's hits (the notes), the pitch, the
 wobbles over two beats, which keys are loud over time, the keys' notes over four waves, the copies' tones and a glide."""
 
@@ -30,12 +30,13 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.hzbass import (ARP, ARP_PATTERNS, BLEND, CHORDS, CRUSH, DETUNE, FAST, GLIDE_CURVE, GROUPS, GROWL, LOOP,
-                          MODES, OFF_BOXES, OFF_PITCH, OSC2, PITCH, RACK, SCALES, SOFT, SUB, TIMINGS, TREMOLO,
-                          TREMOLO_DEPTH, VIBRATO_RATE, VOICES, WAH, WAVES, arpeggiated, blend_gains, glide_left,
-                          clean_arp, clean_extra, clean_mode, clean_voice, copies, group_count, line_at, osc2_shift,
-                          wave_hits)
+                          MODES, OFF_BOXES, OFF_PITCH, OSC2, PITCH, RACK, SCALES, SOFT, START_STEPS, SUB, TIMINGS,
+                          TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE, VOICES, WAH, WAVES, arpeggiated, blend_gains,
+                          glide_left, clean_arp, clean_extra, clean_mode, clean_steps, clean_voice, copies, group_count,
+                          line_at, osc2_shift, wave_hits)
 from roll.roll_shared import NOTE_NAMES
 from window.hz_effects import AMOUNT, FX_COLOR
+from window.hz_steps import StepEditor
 from window.synth_look import (DIM, EDGE, ENTRY, GRID, MID, PANEL, PIC, TEXT, Box, bright, dark_list, mix)
 from window.tool_window import Knob
 from window.widgets import Scrub, Tooltip, grid_shown
@@ -141,11 +142,12 @@ WAVE_NAMES = ("none",) + tuple(WAVES)
 START = dict({key: start for key, (_, _, start) in KNOBS.items()}, wave="none", sweep=False, same=False,
              touching=False, legato=False, mode="off", rack=(), rack_off=(), arp_on=False, arp_pattern="up",
              arp_chord="placed", arp_scale="off", arp_root=0, vibrato_timing="free", tremolo_timing="free",
-             osc2_on=False, osc2_wave="none", osc2_split=False, osc2_mode="off", osc2_a_off=False)
+             osc2_on=False, osc2_wave="none", osc2_split=False, osc2_mode="off", osc2_a_off=False,
+             arp_steps=[dict(s) for s in START_STEPS])
 ARP_CHOICES = ("pattern", "chord", "scale", "root")  # (the Arpeggio box's dropdowns)
-ARP_KEYS = ARP_CHOICES + tuple(ARP)  # (all it has)
+ARP_KEYS = ARP_CHOICES + tuple(ARP) + ("steps",)  # (all it has)
 KEEP = (tuple(KNOBS) + ("same", "touching", "osc2_split", "osc2_a_off") + tuple(f"arp_{w}" for w in ARP_CHOICES)
-        + ("osc2_wave", "osc2_mode"))
+        + ("osc2_wave", "osc2_mode", "arp_steps"))
 CHOICES = {"arp_pattern": ARP_PATTERNS, "arp_chord": tuple(CHORDS), "arp_scale": ("off",) + tuple(SCALES),
            "arp_root": tuple(range(12)), "osc2_wave": WAVE_NAMES, "osc2_mode": MODE_NAMES}
 
@@ -159,6 +161,8 @@ def kept_value(key, v):
     """A kept knob's value checked against its knob (None: no good)."""
     if key == "arp_root":  # (a key name's number: kept as 5.0)
         return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v in range(12) else None
+    if key == "arp_steps":
+        return clean_steps(v) if isinstance(v, list) and v else None
     if key in CHOICES:
         return v if v in CHOICES[key] else None
     if key in ("same", "touching", "osc2_split", "osc2_a_off"):
@@ -414,12 +418,13 @@ def read_voice(win, was):
 
 def read_arp(win, was):
     """The Arpeggio box: ({arp_on, arp_pattern, arp_chord, arp_scale, arp_root, arp_speed, arp_octaves, arp_gate,
-    arp_swing}, True) (off: its settings kept as they were; no scale: its Root too)."""
+    arp_swing, arp_steps}, True) (off: its settings kept as they were; no scale: its Root too; not the Steps
+    pattern: its steps too)."""
     arp = win.extra.get("arp")
     if not arp:
         return {"arp_on": False}, True
     return {"arp_on": True, "arp_swing": 0.0, "arp_scale": "off", "arp_root": was["arp_root"],
-            **{f"arp_{k}": v for k, v in arp.items()}}, True
+            "arp_steps": was["arp_steps"], **{f"arp_{k}": v for k, v in arp.items()}}, True
 
 
 def read_osc2(win, was):
@@ -722,6 +727,10 @@ class SynthKnobs:
             says = self.box_says[name] = ttk.Label(box, text="", style="Synth.Box.Warn.TLabel",
                                                    wraplength=round(size[0] * s))
             says.grid(row=2, column=0, columnspan=col, sticky="w", pady=(6, 0))
+            if name == "arp":  # (the Steps pattern's own steps, under the picture: shown while it's picked)
+                self.step_edit = StepEditor(box, s, self.app, COLOURS["arp"], self.on_steps)
+                self.step_edit.frame.grid(row=3, column=0, columnspan=col, sticky="w", pady=(8, 0))
+                self.step_edit.frame.grid_remove()
             pic.bind("<Configure>", lambda e, says=says: (says.config(wraplength=e.width), self.draw_pics()))
         self.lay_boxes(math.inf)  # (as wide as they need: the window's size is set from that; then as wide as it is)
 
@@ -911,6 +920,19 @@ class SynthKnobs:
             if self.fx.now() != before:
                 self.commit_fx(before)
 
+    def on_steps(self, steps, done):
+        """The Arpeggio's steps set in the step editor (done: let go / one click = one undo step); it puts the
+        arpeggio on."""
+        if self.turning is None:
+            self.turning, self.turn_vals = self.fx.state(), dict(self.vals)
+        self.vals["arp_steps"] = [dict(s) for s in steps]
+        self.sweep_on("arp_")
+        self.write("arp")
+        if done:
+            before, self.turning = self.turning, None
+            if self.fx.now() != before:
+                self.commit_fx(before)
+
     def timed(self, key, v, step=0):
         """A Rate knob's value at its box's Timing (the nearest note length; Free: as it is), others as they are.
         step = a wheel / arrow / box step's way (+ / -): at least one note length that way, as a synced Rate moves."""
@@ -950,6 +972,7 @@ class SynthKnobs:
         self.vals, self.turning = self.turn_vals, None
         for dial in list(self.dials.values()) + self.macro_dials:
             dial.drag, dial.pointing, dial.ring_held = None, False, None
+        self.step_edit.drag = None
         self.macro_drop()
         self.redraw()
         self.show_knobs()
@@ -1252,6 +1275,11 @@ class SynthKnobs:
             name = names[ids.index(self.vals[f"arp_{what}"])]
             if var.get() != name:
                 var.set(name)
+        frame = self.step_edit.frame
+        if bool(frame.winfo_manager()) != (self.vals["arp_pattern"] == "steps"):  # (the box changes height)
+            grid_shown(frame, self.vals["arp_pattern"] == "steps")
+            self.after_idle(self.fit_knobs)
+        self.step_edit.show(self.vals["arp_steps"], self.vals["arp_on"])
         for box, (var, names, key) in self.mode_picks.items():
             mode = self.vals[key]
             if var.get() != names[MODE_NAMES.index(mode)]:
@@ -1320,7 +1348,8 @@ class SynthKnobs:
                    (self.pv["wave"], self.pv["mode"], self.a_silent()) if box == "wave" else None,
                    self.pv["sweep"] if box == "tone" else None,
                    (self.pv["same"], self.pv["touching"]) if box == "voice" else None,
-                   (self.pv["arp_on"], *(self.pv[f"arp_{w}"] for w in ARP_CHOICES)) if box == "arp" else None,
+                   (self.pv["arp_on"], *(self.pv[f"arp_{w}"] for w in ARP_CHOICES), str(self.pv["arp_steps"]))
+                   if box == "arp" else None,
                    tuple(self.pv[k] for k in ("osc2_on", "osc2_wave", "osc2_mode")) if box == "osc2" else None,
                    self.pic_colour(box) if box in BYPASS else None,
                    c.winfo_width(),

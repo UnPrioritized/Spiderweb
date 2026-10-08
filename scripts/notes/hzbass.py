@@ -394,8 +394,8 @@ def clean_arp(arp):
 def clean_steps(steps):
     """The Arpeggio's own steps checked (see STEPS): 1..STEPS of them; none good = START_STEPS."""
     out = []
-    for s in steps[:STEPS] if isinstance(steps, list) else ():
-        if not isinstance(s, dict):
+    for s in steps if isinstance(steps, list) else ():
+        if not isinstance(s, dict) or len(out) >= STEPS:
             continue
         step = {}
         for k, (lo, hi, start) in STEP.items():
@@ -594,13 +594,17 @@ def clean_bypass(kept):
 
 def clean_kept(kept):
     """The synth window's knobs that do nothing right now (an Arpeggio off, Sweep unticked, Detune with one voice...)
-    checked: hz["kept"] = {knob: its value (a number, True / False or a short name)}, so they're there again later, as
+    checked: hz["kept"] = {knob: its value (a number, True / False, a short name, or "arp_steps": the Arpeggio's
+    steps as in hz["arp"]["steps"])}, so they're there again later, as
     in a synth (user); nothing that makes the notes reads them (the window checks each against its knob)."""
     out = {}
     for k, v in (kept.items() if isinstance(kept, dict) else ()):
         if not isinstance(k, str) or len(k) > 40 or len(out) >= 200:
             continue
-        if isinstance(v, bool) or isinstance(v, str) and len(v) <= 40:
+        if k == "arp_steps":  # (the Arpeggio's own steps while another Pattern is picked)
+            if isinstance(v, list) and v:
+                out[k] = clean_steps(v)
+        elif isinstance(v, bool) or isinstance(v, str) and len(v) <= 40:
             out[k] = v
         elif isinstance(v, (int, float)) and math.isfinite(v):
             out[k] = float(v)
