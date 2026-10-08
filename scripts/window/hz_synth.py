@@ -34,7 +34,7 @@ from window.hz_rack import SynthRack
 from window.synth_look import (BG, DIM, EDGE, GRID, MID, PANEL, PIC, TEXT, WARN, BigTab, bright, dark_title, mix,
                                styles)
 from window.tool_window import Knob
-from window.widgets import Tooltip
+from window.widgets import Tooltip, remember_place
 
 BLACK = (1, 3, 6, 8, 10)
 KEY_HELD = "#7aa7f0"
@@ -242,6 +242,7 @@ class SynthWindow(PresetBar, SynthMacros, SynthRack, SynthKnobs, tk.Toplevel):
         need = self.winfo_reqheight() - kc.winfo_reqheight() + self.knobs.winfo_reqheight()
         h = min(max(need, names_h + round(160 * s)), round(TALL * s), sh - 120)
         self.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h - 80) // 2)}")  # (in the screen's middle)
+        remember_place(self, "synth")  # (or where it was last, as big)
         dark_title(self)
 
     def pick_page(self, key):

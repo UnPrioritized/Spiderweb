@@ -19,7 +19,7 @@ from files.mathexpr import calc
 from notes import between
 from notes.engine import cached_path
 from window import look
-from window.widgets import LocalUndo, Scrub, Tooltip
+from window.widgets import LocalUndo, Scrub, Tooltip, remember_place
 
 
 def _power(k):
@@ -152,6 +152,7 @@ class BetweenWindow(tk.Toplevel):
         self.hist = LocalUndo(self, self.state, self.put_state)
         self.update_idletasks()
         self.geometry(f"+{app.winfo_rootx() + 120}+{app.winfo_rooty() + 120}")
+        remember_place(self, "add_between")
         self.grab_set()  # (the group stays as it is while it's open)
         self.focus_set()
 

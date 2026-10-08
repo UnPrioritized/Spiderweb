@@ -16,7 +16,7 @@ from notes.joined import shown_tumour
 from notes.tumour import GRAPH_LIMIT, TUMOUR_DEFAULTS
 from window import look
 from window.panel_custom import GAP_COLOR
-from window.widgets import LocalUndo, Scrub, placed
+from window.widgets import LocalUndo, Scrub, placed, remember_place
 
 FLAT = [[0.0, 1.0], [1.0, 1.0]]
 PRESETS = [(tr("graph_window.flat_off"), FLAT), (tr("graph_window.rise"), [[0.0, 0.0], [1.0, 1.0]]),
@@ -534,6 +534,7 @@ class PointDialog(tk.Toplevel):
         self.bind("<Escape>", lambda e: self.destroy())
         self.update_idletasks()
         self.geometry(f"+{gw.winfo_pointerx() + 10}+{gw.winfo_pointery() + 10}")
+        remember_place(self, "graph_point")
         self.grab_set()
         e = self.boxes["value"]
         e.focus_set()

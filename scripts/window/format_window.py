@@ -13,6 +13,7 @@ from files import clipboard
 from files import colour_list as CL
 from files.lang import tr
 from window import look
+from window.widgets import remember_place
 
 WS = re.compile(r"^[ \t]+|[ \t]+$", re.M)
 TAGS = [("{n}", "fmt.tag_n"), ("{n0}", "fmt.tag_n0"), ("{n:2}", "fmt.tag_n2"), ("{hex}", "fmt.tag_hex"),
@@ -38,6 +39,7 @@ class FormatWindow(tk.Toplevel):
         self.show_format()
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<Escape>", lambda e: self.close())
+        remember_place(self, "colour_format")
 
     def find(self, name):
         return next((f for f in self.built + self.yours if f["name"] == name), None)

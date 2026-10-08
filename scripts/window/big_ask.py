@@ -94,6 +94,8 @@ def dialog(parent, title, text, strong):
     x = top.winfo_rootx() + (top.winfo_width() - win.winfo_reqwidth()) // 2
     y = top.winfo_rooty() + (top.winfo_height() - win.winfo_reqheight()) // 3
     win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+    from window.widgets import remember_place
+    remember_place(win, "big_ask")
     win.deiconify()
     win.grab_set()
     first.focus_set()

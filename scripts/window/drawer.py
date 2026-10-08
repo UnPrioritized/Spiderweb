@@ -31,7 +31,7 @@ from window.formula_host import DrawerHost, formula_menu
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
 from window.layers import DrawerLayers, pasted
 from window.sticky import BEND, REACH, Targets, key_points
-from window.widgets import Tooltip, symmetry_menu
+from window.widgets import Tooltip, remember_place, symmetry_menu
 
 LIBRARY = os.path.join(HERE, "shapes")
 # Always in the library (not files). A saved shape with the same name is used instead; deleting it brings these back.
@@ -315,6 +315,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self.title(tr("drawer.spiderweb_custom_shape_drawer"))
         self.geometry(f"{int(1000 * s)}x{int(720 * s)}")
         self.minsize(int(700 * s), int(500 * s))
+        remember_place(self, "drawer")
         self.strokes = []      # {"kind": "poly" / "curve", "pts": [[u, v], ...]} or {"kind": "ellipse", "box": [...]}
         self.clipboard = None  # copied strokes, and how many times they've been pasted
         self.pastes = 0

@@ -28,7 +28,7 @@ from roll.roll_shared import ALT, grab_while_panning
 from window import look
 from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
 from window.panel_custom import GAP_COLOR
-from window.widgets import LocalUndo, Scrub, Tooltip, bad, good
+from window.widgets import LocalUndo, Scrub, Tooltip, bad, good, remember_place
 
 PATTERNS_FILE = os.path.join(HERE, "patterns.json")
 OLD_CURVES_FILE = os.path.join(HERE, "curves.json")  # the funnel's saved curve formulas (before shapes of curves)
@@ -271,6 +271,7 @@ class FormulaDialog(tk.Toplevel):
         x = parent.winfo_rootx() + (parent.winfo_width() - self.winfo_width()) // 2
         y = parent.winfo_rooty() + (parent.winfo_height() - self.winfo_height()) // 3
         self.geometry(f"+{max(0, x)}+{max(0, y)}")
+        remember_place(self, "formula")
         self.grab_set()  # the roll can't change under it while it previews
         self.focus_set()
 

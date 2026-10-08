@@ -44,7 +44,7 @@ from window.hz_preview import Preview
 from window.hz_synth import open_synth
 from window.preview_settings import open_preview_settings
 from window.snap_picker import SnapPicker
-from window.widgets import Scrub, StatusLine, Tooltip, bad, good, placed
+from window.widgets import Scrub, StatusLine, Tooltip, bad, good, placed, remember_place
 
 BLACK = (1, 3, 6, 8, 10)
 RED = look.HZ_RED
@@ -157,6 +157,7 @@ def ask_live(win, app, prompt, value, lo, hi, steps, on_change):
     for k in ("z", "Z", "y", "Y"):  # (the main undo would change the shape under the window)
         top.bind(f"<Control-{k}>", lambda e: "break")
     top.geometry(f"+{win.winfo_pointerx() - 40}+{win.winfo_pointery() - 40}")
+    remember_place(top, "hz_number")
     entry.focus_set()
     entry.select_range(0, "end")
     top.grab_set()

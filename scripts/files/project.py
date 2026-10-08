@@ -374,6 +374,7 @@ class ProjectFiles:
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
                               "claw_window": self.claw_pos, "strum_window": self.strum_pos, "chop_window": self.chop_pos, "hz_window": self.hz_pos, "hz_fx_height": self.hz_fx_h, "hz_preview": self.hz_preview,
                               "history_window": self.history_pos, "history_undocked": self.history_undocked,
+                              "places": getattr(self, "window_places", {}),
                               **self.tips.state(), **self.updates.state(), **self.tool_picker.state()}
         # pictures in the project's folder (or one inside it) are saved relative to it: they move together
         data["shapes"] = paths_for_file(data["shapes"], os.path.dirname(os.path.abspath(path)), True)
@@ -447,6 +448,10 @@ class ProjectFiles:
                 pos = win.get(key)
                 if isinstance(pos, str) and re.fullmatch(r"\+-?\d+\+-?\d+", pos):
                     setattr(self, attr, pos)
+            from window.widgets import PLACE  # (every other window's place: widgets.remember_place)
+            places = win.get("places") if isinstance(win.get("places"), dict) else {}
+            self.window_places = {k: v for k, v in list(places.items())[:100] if isinstance(k, str) and len(k) <= 40
+                                  and isinstance(v, str) and re.fullmatch(PLACE, v)}
             pos = win.get("hz_window")
             if isinstance(pos, str) and re.fullmatch(r"\d+x\d+\+-?\d+\+-?\d+", pos):
                 self.hz_pos = pos

@@ -21,7 +21,7 @@ from notes.custom import SPAM_FILLS, gate_ticks, range_gates
 from notes.gaterange import DIRS, STRAIGHT, clean_range, gate_steps, steps_of
 from window import big_ask, look
 from window.panel_funnel import GATE_STEPS
-from window.widgets import LocalUndo, Scrub, Tooltip
+from window.widgets import LocalUndo, Scrub, Tooltip, remember_place
 
 
 def _power(k):
@@ -144,6 +144,7 @@ class RangeGraph(tk.Toplevel):
         self.hist = LocalUndo(self, self.state, self.put_state)
         self.update_idletasks()
         self.geometry(f"+{app.winfo_rootx() + 120}+{app.winfo_rooty() + 120}")
+        remember_place(self, "range")
         self.grab_set()  # (the shapes it works on stay picked while it's open)
         self.focus_set()
 

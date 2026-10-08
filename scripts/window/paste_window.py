@@ -10,6 +10,7 @@ from files import clipboard
 from files import colour_list as CL
 from files.lang import tr
 from window import look
+from window.widgets import remember_place
 
 
 class PasteWindow(tk.Toplevel):
@@ -52,6 +53,7 @@ class PasteWindow(tk.Toplevel):
         self.use_btn = ttk.Button(r, text=tr("paste.use"), command=self.use)
         self.use_btn.pack(side="right", padx=6)
         self.bind("<Escape>", lambda e: self.destroy())
+        remember_place(self, "paste_colours")
         self.from_clipboard()
 
     def from_clipboard(self):

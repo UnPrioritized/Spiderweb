@@ -12,7 +12,7 @@ from files.lang import tr
 from files.mathexpr import calc
 from window import look
 from window.hz_preview import LIVE_MB, VOICES, WORKERS
-from window.widgets import Scrub, Tooltip, bad, good
+from window.widgets import Scrub, Tooltip, bad, good, remember_place
 
 ORANGE = look.WARN
 
@@ -108,6 +108,7 @@ class PreviewSettings(tk.Toplevel):
         self.update_idletasks()  # (next to the Hz bass window's top right)
         x = win.winfo_rootx() + max(0, win.winfo_width() - self.winfo_reqwidth() - round(20 * s))
         self.geometry(f"+{x}+{win.winfo_rooty() + round(60 * s)}")
+        remember_place(self, "preview_settings")
 
     def refresh(self):
         """What the preview is doing (called by the Hz bass window every time it looks)."""

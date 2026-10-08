@@ -16,7 +16,7 @@ from files.lang import tr
 from files.synth import RATE
 from window import look
 from window.hz_preview import VOICES
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, remember_place
 
 
 def open_builtin_settings(app):
@@ -81,6 +81,7 @@ class BuiltinSettings(tk.Toplevel):
         btn = app.builtin_btn
         x = btn.winfo_rootx() - self.winfo_reqwidth() - round(10 * s)
         self.geometry(f"+{max(0, x)}+{max(0, btn.winfo_rooty() - round(40 * s))}")
+        remember_place(self, "builtin_settings")
 
     def close(self):
         """Closed (Esc, X, another MIDI out picked): a voice limit typed without Enter is taken, a wrong one goes

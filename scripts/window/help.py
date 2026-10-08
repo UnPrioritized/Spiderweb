@@ -15,6 +15,7 @@ from files.lang import tr
 from files.about import BANNER, BANNER_HALF, HERE, LICENSE, VERSION, WEBSITE
 from files.system import WINDOWS
 from window import look
+from window.widgets import remember_place
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS, NEXT, SECTION_NAMES, SECTIONS, SEE, TOOL_TOPICS, TOPICS
 from window.updates import often_box
 
@@ -252,7 +253,11 @@ class TipPopup(tk.Toplevel):
         area = getattr(p, "roll", None) or getattr(p, "canvas", None) or p
         x = area.winfo_rootx() + area.winfo_width() - self.winfo_reqwidth() - int(16 * self.scale)
         y = area.winfo_rooty() + int(16 * self.scale)
-        self.geometry(f"+{max(0, x)}+{max(0, y)}")
+        if "tip" not in getattr(self.tips.app, "window_places", {}):  # (moved once: it stays where it was put)
+            self.geometry(f"+{max(0, x)}+{max(0, y)}")
+        if not getattr(self, "remembered", False):
+            self.remembered = True
+            remember_place(self, "tip")
         self.deiconify()
 
     def got_it(self):
@@ -281,6 +286,7 @@ class HelpWindow(tk.Toplevel):
         self.title(tr("help.spiderweb_help", VERSION=VERSION))
         self.geometry(f"{int(900 * s)}x{int(620 * s)}")
         self.minsize(int(600 * s), int(360 * s))
+        remember_place(self, "help")
         self.topic = None
         self.clips = []  # the Clip objects playing in the shown topic
 

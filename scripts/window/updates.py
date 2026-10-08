@@ -14,6 +14,7 @@ from files.about import VERSION, WEBSITE
 from files.lang import tr
 from files.update_check import newer_releases
 from window import look
+from window.widgets import remember_place
 
 OFTEN = ["launch", "day", "week", "month", "off"]  # (saved as these)
 PERIOD = {"launch": 0, "day": 86400, "week": 7 * 86400, "month": 30 * 86400}
@@ -139,8 +140,8 @@ def often_box(parent, updates, width=26):
     return box
 
 
-def on_top(win, parent):
-    """A small window over Spiderweb (and over any open tip), in the middle of it."""
+def on_top(win, parent, name):
+    """A small window over Spiderweb (and over any open tip), in the middle of it (or where it was last: name)."""
     win.transient(parent)
     win.resizable(False, False)
     win.attributes("-topmost", True)
@@ -148,6 +149,7 @@ def on_top(win, parent):
     x = parent.winfo_rootx() + (parent.winfo_width() - win.winfo_reqwidth()) // 2
     y = parent.winfo_rooty() + (parent.winfo_height() - win.winfo_reqheight()) // 3
     win.geometry(f"+{max(0, x)}+{max(0, y)}")
+    remember_place(win, name)
     win.lift()
     win.focus_force()
 
@@ -172,7 +174,7 @@ class UpdateQuestion(tk.Toplevel):
         ttk.Label(box, text=tr("updates.question_later"), foreground=look.HINT).pack(anchor="w", pady=(8, 10))
         ttk.Button(box, text=tr("updates.ok"), command=self.ok).pack(side="right")
         self.bind("<Return>", lambda e: self.ok())
-        on_top(self, app)
+        on_top(self, app, "update_question")
 
     def ok(self):
         self.updates.set_often(self.var.get())
@@ -222,7 +224,7 @@ class UpdatePopup(tk.Toplevel):
         ttk.Button(row, text=tr("updates.later"), command=self.destroy).pack(side="right")
         ttk.Button(row, text=tr("updates.open_download_page"), command=self.download).pack(side="right", padx=(0, 6))
         self.bind("<Escape>", lambda e: self.destroy())
-        on_top(self, app)
+        on_top(self, app, "update_popup")
 
     def download(self):
         webbrowser.open(self.url or WEBSITE + "/releases/latest")

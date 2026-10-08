@@ -43,7 +43,7 @@ from notes.hzbass import (BEND, ENVELOPES, FROM_MODES, FX, FX_START, LOOP_SHAPES
                           loop_off, loop_on, loop_shape, sound_span, sustained, tones_span)
 from roll.roll_shared import BOX_STILL, CTRL, SELECT_CURSOR, SHIFT
 from window import look
-from window.widgets import Scrub
+from window.widgets import Scrub, remember_place
 
 # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
 REPEAT_MOST = 999  # Repeat every… [n] / [n]: the biggest number in either box
@@ -1244,6 +1244,7 @@ class FxPane:
         top.protocol("WM_DELETE_WINDOW", lambda: done(False))
         switched()
         top.geometry(f"+{x}+{y}")
+        remember_place(top, "hz_repeat")
         top.entry.focus_set()
         top.entry.select_range(0, "end")
 

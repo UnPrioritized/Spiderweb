@@ -40,6 +40,28 @@ def placed(widget, geo):
     return geo or ""
 
 
+PLACE = r"(\d+x\d+)?\+-?\d+\+-?\d+"  # a remembered window place: "WxH+X+Y" (one that can be resized) or "+X+Y"
+
+
+def remember_place(win, name):
+    """User 2026-10-09: every window opens where it was last, and as big when it can be resized. Call it after the
+    window has set its own first size / place (that's used when nothing is remembered, or the place is off every
+    screen). The places are the main window's window_places (saved in the autosave)."""
+    places = win._root().__dict__.setdefault("window_places", {})
+    sizes = any(win.resizable())
+    geo = placed(win, places.get(name, ""))
+    if geo and not sizes:
+        geo = geo[geo.index("+"):] if "+" in geo else ""
+    if geo:
+        win.geometry(geo)
+
+    def keep(e=None):
+        if (e is None or e.widget is win) and win.winfo_ismapped():
+            geo = win.wm_geometry()
+            places[name] = geo if sizes else geo[geo.index("+"):]
+    win.bind("<Configure>", keep, add="+")  # (moved or resized: remembered at once)
+
+
 def grid_shown(w, on):
     """Show / hide a gridded widget (where it was gridded before), only when that changes: placing a widget again
     lays its window out again, which flashes while a number is stepped."""

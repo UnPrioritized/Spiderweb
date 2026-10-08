@@ -14,7 +14,7 @@ from files.snap import (COUNT_RANGE, DIV_RANGE, DOTS, NOTE_RANGE, SNAP_LIST, cus
                         whole_notes)
 from files.mathexpr import fmt
 from window import look
-from window.widgets import Tooltip
+from window.widgets import Tooltip, remember_place
 
 SIZE = 16  # the pictures' size at 100 % display scaling (drawn in a 16 x 16 box, then scaled)
 DIGIT_3 = ["111", "001", "011", "001", "111"]
@@ -186,6 +186,7 @@ class CustomSnapWindow(tk.Toplevel):
         self.update_info()
         self.update_idletasks()
         self.geometry(f"+{app.winfo_rootx() + 80}+{app.winfo_rooty() + 80}")
+        remember_place(self, "custom_snap")
         self.grab_set()
         self.count_box.focus_set() if self.kind.get() == "/" else div_box.focus_set()
 

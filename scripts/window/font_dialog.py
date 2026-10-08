@@ -7,6 +7,7 @@ from tkinter import ttk
 from files.lang import tr
 from notes.fonts import font_families
 from window import look
+from window.widgets import remember_place
 
 SAMPLE = "AaBbCc 0123"
 
@@ -20,6 +21,7 @@ class FontDialog(tk.Toplevel):
         s = app.scale
         self.geometry(f"{int(420 * s)}x{int(460 * s)}")
         self.minsize(int(300 * s), int(300 * s))
+        remember_place(self, "font")
         self.families = font_families(self)
         self.shown = []
         self.sample = " ".join(sample.split())[:40] or SAMPLE
