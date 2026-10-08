@@ -443,6 +443,8 @@ def arpeggiated(tones, arp, left=0.0, hz=None):
     (STEPS) pick the held notes, low to high, each with its octave, loudness ("level" on the tone) and length.
     hz = the Hz bass played (its tones = these), for the MOD tab moving Speed / Gate / Swing (arp_moved)."""
     moved = {link["to"] for link in ((hz or {}).get("mod") or {}).get("links", ()) if link["to"] in ARP_KNOBS}
+    if moved:  # (a private copy: what the sources need (the chains...) worked out once, not for every run)
+        hz = dict(hz, _memo={})
     step = 1.0 / arp["speed"]
     late = arp.get("swing", 0.0) * step / 2  # (every second step: that much later, the one before it longer)
     steps = arp["steps"][:arp["count"]] if arp["pattern"] == "steps" else None
@@ -2270,13 +2272,21 @@ class KeyGrid:
 
     def added_up(self, name):
         """An Effects tab Rate the MOD tab moves (the whole sound's: sources from the newest note): (grid beats from
-        the shape's start, its waves so far there), added up step by step so a Rate moving never jumps."""
+        the shape's start, its waves so far there), added up step by step so a Rate moving never jumps. The
+        Flanger's from the song's start (as the plain one counts: a Split leaves it), more coarsely before the shape."""
         beats = self.flat["beat"]
         end = float(beats.max()) if len(beats) else 0.0
-        dt = max(TIME_STEP, end / 100000)
-        g = np.arange(int(end / dt) + 2) * dt
-        rate = setting_at(self.hz, name, setting_base(self.hz, name), g, None, {})
-        return g, np.concatenate([[0.0], np.cumsum(rate[:-1] * dt)])
+
+        def summed(a, b):
+            dt = max(TIME_STEP, (b - a) / 100000)
+            g = a + np.arange(int((b - a) / dt) + 2) * dt
+            rate = setting_at(self.hz, name, setting_base(self.hz, name), g, None, {})
+            return g, np.concatenate([[0.0], np.cumsum(rate[:-1] * dt)])
+        g, turns = summed(0.0, end)
+        if name == "flanger_rate" and self.left > 0:
+            before = summed(-self.left, 0.0)
+            turns = turns + float(np.interp(0.0, *before))
+        return g, turns
 
     def rack_wave(self, name, plain, beat):
         """How many waves of an Effects tab Rate (plain: as set) have gone by at beat (from the shape's start)."""
@@ -2389,8 +2399,8 @@ class KeyGrid:
         if fl and np.any(on):
             # (late by up to Depth and back, counted from the song's start like Random start: a Split keeps it)
             depth = f["flanger_depth"][src] if "flanger_depth" in self.moved else fl["depth"]
-            if "flanger_rate" in self.rack_turns:  # (moved: added up from the shape's start, as set before it)
-                turns = fl["rate"] * self.left + self.rack_wave("flanger_rate", fl["rate"], f["beat"][src])
+            if "flanger_rate" in self.rack_turns:  # (moved: added up from the song's start)
+                turns = self.rack_wave("flanger_rate", fl["rate"], f["beat"][src])
             else:
                 turns = fl["rate"] * (self.left + f["beat"][src])
             moved = depth * (1.0 - np.cos(2.0 * np.pi * turns)) / 2.0
