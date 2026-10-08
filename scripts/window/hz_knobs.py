@@ -801,11 +801,13 @@ class SynthKnobs:
         rate = snap_rate(self.vals[key], timing, KINDS[KNOBS[key][1]][2])
         moved = abs(rate - self.vals[key]) > 1e-9
         self.vals[f"{name}_timing"], self.vals[key] = timing, rate
-        if name == "tremolo" and moved:
+        linked = key in self.linked()  # (a macro adds to it: the sum snapped to the timing too, hunt)
+        if name == "tremolo" and (moved or linked):
             self.write(name)
         else:
+            self.keep_bases()
             if name == "vibrato":
-                self.set_lfo("vibrato_rate", rate, VIBRATO_RATE)
+                self.set_lfo("vibrato_rate", self.macro_vals()[key], VIBRATO_RATE)
             self.set_timing(f"{name}_timing", timing)
             self.keep_vals()
             self.redraw()
@@ -1127,6 +1129,7 @@ class SynthKnobs:
         turned)."""
         if self.turning is None:
             was = self.kept_vals()  # (the knobs the sound doesn't show: as kept, else where they start)
+            was.update(self.bases())  # (... and those a macro moves: their own values, e.g. Pitch Time at 0)
             self.vals.update({k: was[k] for k in KEEP})
             for box, read in READ.items():
                 got, made = read(self, was)
@@ -1135,7 +1138,8 @@ class SynthKnobs:
                 if self.box_says[box].cget("text") != says:
                     self.box_says[box].config(text=says)
             self.vals.update(read_rack(self, was))
-            self.vals.update(self.bases())  # (a knob a macro moves shows its own value, the lines have the sum)
+            self.vals.update(self.bases_read(self.vals))  # (a knob a macro moves shows its own value, the lines
+            # have the sum)
         for key, (box, kind, _) in KNOBS.items():
             v = self.vals[key]
             k = knob_of(kind, v)
@@ -1212,11 +1216,11 @@ class SynthKnobs:
         """Each box's picture drawn again when its values (or size) changed."""
         for box, knobs in BOXES.items():
             c = self.pics[box]
-            key = (tuple(self.vals[k] for k, _, _ in knobs),
-                   (self.vals["wave"], self.vals["mode"]) if box == "wave" else None,
-                   self.vals["sweep"] if box == "tone" else None,
-                   (self.vals["same"], self.vals["touching"]) if box == "voice" else None,
-                   (self.vals["arp_on"], *(self.vals[f"arp_{w}"] for w in ARP_CHOICES)) if box == "arp" else None,
+            key = (tuple(self.pv[k] for k, _, _ in knobs),
+                   (self.pv["wave"], self.pv["mode"]) if box == "wave" else None,
+                   self.pv["sweep"] if box == "tone" else None,
+                   (self.pv["same"], self.pv["touching"]) if box == "voice" else None,
+                   (self.pv["arp_on"], *(self.pv[f"arp_{w}"] for w in ARP_CHOICES)) if box == "arp" else None,
                    self.pic_colour(box) if box in BYPASS else None,
                    c.winfo_width(),
                    c.winfo_height())
@@ -1231,7 +1235,7 @@ class SynthKnobs:
     def adsr_spots(self):
         """The envelope's picture: (its points, sustain point, length, x of a beat, y of a value, the held part's
         width)."""
-        v = self.vals
+        v = self.pv
         pts, at, _ = adsr_line(v["attack"], v["decay"], v["sustain"], v["release"])
         every = at + v["release"]
         c = self.pics["volume"]
@@ -1260,7 +1264,7 @@ class SynthKnobs:
         colour = self.pic_colour("volume")
         c.create_rectangle(x_of(at), 0, x_of(at) + held, h, fill=mix(colour, PIC, 0.88), outline="")
         font = ("Segoe UI", 7)
-        for text, x0, x1 in (("A", x_of(0.0), x_of(self.vals["attack"])), ("D", x_of(self.vals["attack"]), x_of(at)),
+        for text, x0, x1 in (("A", x_of(0.0), x_of(self.pv["attack"])), ("D", x_of(self.pv["attack"]), x_of(at)),
                              ("S", x_of(at), x_of(at) + held), ("R", x_of(at) + held, x_of(every, True))):
             if x1 - x0 >= 8 * s:
                 c.create_text((x0 + x1) / 2, 2 * s, text=text, anchor="n", fill=DIM, font=font)
@@ -1275,7 +1279,7 @@ class SynthKnobs:
     def wave_hits(self):
         """Two waves' hits at a note's start as the notes come out (hzbass.wave_hits, as KeyGrid makes them; Growl
         and Bitcrush for an A1): [(place 0..2, how hard 0..1)], the soft ones left out."""
-        v = self.vals
+        v = self.pv
         mode = clean_mode({"kind": v["mode"], **{key.split("_", 1)[1]: v[key] for key, _ in MODE_KNOBS.get(v["mode"], ())}})
         number, since = np.arange(2), np.zeros(2)
         wave = v["wave"] != "none"
@@ -1298,7 +1302,7 @@ class SynthKnobs:
         w, h, pad = c.winfo_width(), c.winfo_height(), 8 * s
         hits = self.wave_hits()
         bw = (w - 2 * pad) / (2 * SUB)
-        colour = bright(FX_COLOR[self.vals["wave"]]) if self.vals["wave"] in FX_COLOR else DIM
+        colour = bright(FX_COLOR[self.pv["wave"]]) if self.pv["wave"] in FX_COLOR else DIM
         if self.box_off("wave"):
             colour = MID
         c.create_line(pad + (w - 2 * pad) / 2, pad, pad + (w - 2 * pad) / 2, h - pad, fill=MID, dash=(3, 3))
@@ -1316,7 +1320,7 @@ class SynthKnobs:
         """The pitch over the start of a note: from Amount keys off to the tone (the middle line)."""
         s = self.s
         w, h, pad = c.winfo_width(), c.winfo_height(), 10 * self.s
-        v = self.vals
+        v = self.pv
         mid = h / 2
         c.create_line(pad, mid, w - pad, mid, fill=MID)
         font = ("Segoe UI", 7)
@@ -1352,7 +1356,7 @@ class SynthKnobs:
     def draw_vibrato(self, c):
         """The tone going up and down over two beats from a note's start (none for Delay, then coming in over
         Rise)."""
-        v = self.vals
+        v = self.pv
         b = np.linspace(0.0, 2.0, 400)
         come = coming_in(b, v["vibrato_wait"], v["vibrato_delay"])
         self.wobble(c, v["vibrato_depth"] * come * np.sin(2 * np.pi * v["vibrato_rate"] * b),
@@ -1361,7 +1365,7 @@ class SynthKnobs:
     def draw_tremolo(self, c):
         """The loudness over two beats: down to 1 - Depth, Rate times a beat (none for Delay, then coming in over
         Rise)."""
-        v = self.vals
+        v = self.pv
         b = np.linspace(0.0, 2.0, 400)
         d = (v["tremolo_depth"] if v["tremolo_rate"] > 0 else 0.0) * coming_in(b, v["tremolo_wait"], v["tremolo_rise"])
         self.wobble(c, (1 - d) + d * (1 + np.cos(2 * np.pi * v["tremolo_rate"] * b)) / 2, self.pic_colour("tremolo"),
@@ -1370,7 +1374,7 @@ class SynthKnobs:
     def draw_tone(self, c):
         """Which of the shape's keys are loud (the darker, the louder; the highest keys at the top) over a note's
         start: the Sweep moving from Start to End (dashed line: Time), Wah's stripes."""
-        v = self.vals
+        v = self.pv
         w, h, pad = c.winfo_width(), c.winfo_height(), 6 * self.s
         pts, every = sweep_line(v["sweep_start"], v["sweep_end"], v["sweep_time"])
         total = max(1.0, 1.5 * v["sweep_time"]) if every else 1.0
@@ -1398,7 +1402,7 @@ class SynthKnobs:
     def draw_character(self, c):
         """Eight of the shape's keys (the highest at the top) and their notes over four waves: when each key hits
         (Slant, Groups, Noisy late; Off pitch drifting)."""
-        v = self.vals
+        v = self.pv
         w, h, pad = c.winfo_width(), c.winfo_height(), 6 * self.s
         keys, waves = 8, 4
         sx, rh = (w - 2 * pad) / waves, (h - 2 * pad) / keys
@@ -1422,7 +1426,7 @@ class SynthKnobs:
     def draw_voice(self, c):
         """Left: eight of the shape's keys (the highest at the top) and the copies they play, each copy at its tone
         (the middle line = the note's own); right: a note gliding in from a lower one before it (Glide)."""
-        s, v = self.s, self.vals
+        s, v = self.s, self.pv
         w, h, pad = c.winfo_width(), c.winfo_height(), 6 * s
         colour, font = self.pic_colour("voice"), ("Segoe UI", 7)
         split = w * 0.45
@@ -1463,7 +1467,7 @@ class SynthKnobs:
     def draw_arp(self, c):
         """Two beats of what it plays (a small piano roll): for a chord of A1, C2 and E2 placed together, or (with a
         chord shape) one A1; greyed while it's off."""
-        s, v = self.s, self.vals
+        s, v = self.s, self.pv
         w, h, pad = c.winfo_width(), c.winfo_height(), 6 * s
         arp = clean_arp({k: v[f"arp_{k}"] for k in ARP_KEYS})
         keys = (33, 36, 40) if arp["chord"] == "placed" else (33,)

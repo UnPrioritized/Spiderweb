@@ -1971,6 +1971,8 @@ class HzWindow(tk.Toplevel):
                 return pane.cancel_drag
         if syn and syn.turning is not None:
             return syn.cancel_turn
+        if syn and syn.macro_held:  # (a macro's name being dragged: the drag ends, nothing linked)
+            return syn.macro_cancel
         if syn and syn.list_held:  # (an effect held in the Effects tab's list)
             return syn.cancel_list
         return None

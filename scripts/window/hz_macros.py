@@ -5,13 +5,15 @@ shows how far; dragging the ring changes it, down to 0 = unlinked). One macro is
 clicking it, or making a link. A macro is one setting for the sound, not changing over time (user: that comes with
 the matrix): the knobs' lines get the sum, so it's all in the MIDI. Saved in hz["macro"] (hzbass.clean_macro)."""
 
+import copy
+import math
 import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.hzbass import MACROS, RACK
-from window.hz_knobs import KNOBS, UPDOWN, Dial, knob_of, value_of
+from window.hz_knobs import KINDS, KNOBS, PERCENTS, UPDOWN, Dial, knob_of, value_of
 from window.synth_look import ENTRY, HEAD_FONT, MID, PANEL, Box, TEXT, dark_menu
 from window.widgets import Scrub, Tooltip
 
@@ -31,11 +33,35 @@ def knob_span(key):
     return 200.0 if KNOBS[key][1] in UPDOWN else 100.0
 
 
+def knob_raw(kind, v):
+    """Where a knob would point for a value, past its end too (a time / rate typed further than it turns)."""
+    most = KINDS[kind][4]
+    return 100 * math.sqrt(max(0.0, v) / most) if most else knob_of(kind, v)
+
+
+def typed_range(kind, v):
+    """A value kept inside what its box takes."""
+    lo, hi = KINDS[kind][1:3]
+    if kind in PERCENTS:
+        lo, hi = lo / 100, hi / 100
+    return min(hi, max(lo, v))
+
+
 def turned(key, base, by):
-    """A knob's value with `by` of its whole turn added (stopping at its ends), as the knob gives it."""
+    """A knob's value with `by` of its whole turn added, as the knob gives it: stopping at the knob's ends, or for a
+    value typed past its end, at what its box takes (hunt: the macro made a typed 10 beats 4)."""
     kind = KNOBS[key][1]
     lo = -100.0 if kind in UPDOWN else 0.0
-    return value_of(kind, min(100.0, max(lo, knob_of(kind, base) + by * knob_span(key))))
+    raw = knob_raw(kind, base)
+    top = 100.0 if raw <= 100.0 else knob_raw(kind, KINDS[kind][2])
+    return typed_range(kind, value_of(kind, min(top, max(lo, raw + by * knob_span(key)))))
+
+
+def unturned(key, value, by):
+    """The knob's own value that `by` of its whole turn added makes `value` (a line drawn by hand on a linked knob)."""
+    kind = KNOBS[key][1]
+    lo = -100.0 if kind in UPDOWN else 0.0
+    return typed_range(kind, value_of(kind, max(lo, knob_raw(kind, value) - by * knob_span(key))))
 
 
 class SynthMacros:
@@ -108,21 +134,53 @@ class SynthMacros:
         if m:
             self.set_extra("macro", dict(m, base={k: self.vals[k] for _, k, _ in m["links"] if k in KNOBS}))
 
-    def macro_vals(self):
-        """The knobs' values as the lines get them: each linked knob turned by its macros (value x amount of its
-        whole turn, added up), stopping at its ends."""
-        m = self.extra.get("macro")
-        if not m:
-            return self.vals
+    def macro_by(self):
+        """{linked knob: how much of its whole turn the macros add to it now}."""
+        m = self.extra.get("macro") or {}
         by = {}
-        for i, key, amount in m["links"]:
+        for i, key, amount in m.get("links", ()):
             if key in KNOBS:
                 by[key] = by.get(key, 0.0) + m["values"][i] * amount
-        v = dict(self.vals)
+        return by
+
+    def macro_vals(self, vals=None):
+        """The knobs' values (self.vals, or these) as the lines get them: each linked knob turned by its macros
+        (value x amount of its whole turn, added up), stopping at its ends."""
+        vals = self.vals if vals is None else vals
+        by = self.macro_by()
+        if not by:
+            return vals
+        v = dict(vals)
         for key, d in by.items():
             if abs(d) > 1e-12:  # (nothing added: its own value as it is, not through the knob and back)
                 v[key] = self.timed(key, turned(key, v[key], d))
         return v
+
+    def macro_moves(self, i):
+        """Macro i adds something to a knob right now (at 0, a link made or taken away changes no line)."""
+        m = self.extra.get("macro") or {}
+        return bool(m and m["values"][i] and any(j == i and a for j, _, a in m["links"]))
+
+    @property
+    def pv(self):
+        """The knobs' values as the sound has them (the pictures draw these, hunt: not the knobs' own)."""
+        return self.macro_vals()
+
+    def bases_read(self, read):
+        """The linked knobs' own values for the knobs read from the lines (read = every knob as read): as kept,
+        unless the line isn't what that and the macros make (drawn by hand, e.g. on the Draw tab): then the value
+        that with the macros makes the line, as an unlinked knob follows the line (hunt)."""
+        out = self.bases()
+        if not out:
+            return out
+        want = self.macro_vals(dict(read, **out))
+        by = self.macro_by()
+        for key, base in out.items():
+            r = read[key]
+            if (isinstance(r, (int, float)) and abs(r - base) > 1e-6 and abs(r - want[key]) > 1e-6
+                    and KNOBS[key][0] in self.box_says and not self.box_says[KNOBS[key][0]].cget("text")):
+                out[key] = self.timed(key, unturned(key, r, by.get(key, 0.0)))
+        return out
 
     def macro_write(self, keys):
         """The boxes of these knobs written again (a macro or a link changed), then everything shown."""
@@ -132,14 +190,23 @@ class SynthMacros:
         self.redraw()
         self.show_knobs()
 
-    def macro_step(self, change, keys):
-        """One change of the macros (change(m) edits a copy of hz["macro"]): the knobs' lines again, one undo step."""
+    def macro_step(self, change, keys, quiet=False):
+        """One change of the macros (change(m) edits a copy of hz["macro"]): the knobs' lines again (keys: those
+        knobs' boxes; none = no line changes), one undo step (quiet: saved without one)."""
         before = self.fx.state()
         m = self.macro()
         change(m)
         self.set_extra("macro", m)
         self.macro_write(keys)
         if self.fx.now() != before:
+            self.macro_commit(before, quiet)
+
+    def macro_commit(self, before, quiet):
+        """The change saved in the shape: one undo step, or (quiet: a macro moving nothing, hunt) none."""
+        if quiet:
+            self.hz.fx.tidy()
+            self.hz.commit(tr("hz.step_fx"), copy.deepcopy(self.hz.tones), before, push=False)
+        else:
             self.commit_fx(before)
 
     # ------------------------------------------------------------ the macro knobs
@@ -158,11 +225,12 @@ class SynthMacros:
         m = self.macro()
         m["values"][i] = max(0.0, min(1.0, k / 100))
         self.set_extra("macro", m)
-        self.macro_write({key for j, key, _ in m["links"] if j == i})
+        keys = {key for j, key, _ in m["links"] if j == i}
+        self.macro_write(keys)
         if done:
             before, self.turning = self.turning, None
             if self.fx.now() != before:
-                self.commit_fx(before)
+                self.macro_commit(before, not keys)  # (linked to nothing: no undo step, hunt)
 
     def on_macro_box(self, i):
         """A macro's value typed (or stepped) in the box under it (in %)."""
@@ -179,8 +247,8 @@ class SynthMacros:
             return
         self.macro_text[i] = var.get()
         self.macro_pick = i
-        self.macro_step(lambda m: m["values"].__setitem__(i, v / 100),
-                        {key for j, key, _ in self.macro()["links"] if j == i})
+        keys = {key for j, key, _ in self.macro()["links"] if j == i}
+        self.macro_step(lambda m: m["values"].__setitem__(i, v / 100), keys, quiet=not keys)
 
     # ------------------------------------------------------------ linking
 
@@ -234,6 +302,11 @@ class SynthMacros:
         if held:
             self.macro_hover(held[1], None)
 
+    def macro_cancel(self):
+        """Ctrl+Z / Esc while a macro's name is dragged: the drag ends, nothing linked, no step taken back."""
+        self.macro_drop()
+        return True
+
     def macro_release(self):
         """A macro's name let go on a knob it rested on: linked (LINK_AMOUNT), one undo step; already linked: just
         picked."""
@@ -245,8 +318,9 @@ class SynthMacros:
         i, key = held
         if any(j == i and k == key for j, k, _ in self.macro()["links"]):
             return self.show_macros()
-        self.macro_step(lambda m: (m["links"].append([i, key, LINK_AMOUNT]),
-                                   m["base"].__setitem__(key, self.vals[key])), {key})
+        self.macro_step(lambda m: (m["links"].append([i, key, LINK_AMOUNT]),  # (macro at 0: no line written
+                                   m["base"].__setitem__(key, self.vals[key])),  # again, hunt: a drawn one stays)
+                        {key} if self.extra.get("macro", {}).get("values", [0.0] * MACROS)[i] else set())
 
     def link_amount(self, i, key):
         return next((a for j, k, a in self.macro()["links"] if j == i and k == key), None)
@@ -271,7 +345,7 @@ class SynthMacros:
             if key not in {k for _, k, _ in m["links"]}:
                 m["base"].pop(key, None)
         self.set_extra("macro", m)
-        self.macro_write({key})
+        self.macro_write({key} if m["values"][i] else set())  # (macro at 0: the lines stay as they are)
         if done:
             before, self.turning = self.turning, None
             if self.fx.now() != before:
@@ -305,7 +379,7 @@ class SynthMacros:
             m["links"] = [link for link in m["links"] if not (link[0] == i and link[1] in keys)]
             still = {k for _, k, _ in m["links"]}
             m["base"] = {k: v for k, v in m["base"].items() if k in still}
-        self.macro_step(change, keys)
+        self.macro_step(change, keys if self.macro_moves(i) else set())  # (adding nothing: no line written again)
 
     # ------------------------------------------------------------ showing them
 

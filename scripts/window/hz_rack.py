@@ -244,13 +244,13 @@ class SynthRack:
 
     def draw_rack_pics(self):
         for kind, c in self.rack_pics.items():
-            key = (tuple(self.vals[k] for k, _ in RACK_KNOBS[kind]), kind in self.vals["rack_off"], c.winfo_width(),
+            key = (tuple(self.pv[k] for k, _ in RACK_KNOBS[kind]), kind in self.pv["rack_off"], c.winfo_width(),
                    c.winfo_height())
             if c.winfo_width() < 50 or self.rack_pic_for.get(kind) == key:
                 continue
             self.rack_pic_for[kind] = key
             c.delete("all")
-            getattr(self, "draw_rack_" + kind)(c, COLOURS[kind] if kind not in self.vals["rack_off"] else MID)
+            getattr(self, "draw_rack_" + kind)(c, COLOURS[kind] if kind not in self.pv["rack_off"] else MID)
 
     def rack_text(self, c, text, low=False):
         """A few words in a picture's top right corner (low: bottom right, under a line that ends high)."""
@@ -260,7 +260,7 @@ class SynthRack:
 
     def draw_rack_chorus(self, c, colour):
         """Every other key's tone over two beats: up to Depth cents and back."""
-        v = self.vals
+        v = self.pv
         b = np.linspace(0.0, 2.0, 400)
         self.wobble(c, v["chorus_depth"] / 100.0 * (1.0 - np.cos(2.0 * np.pi * v["chorus_rate"] * b)) / 2.0, colour,
                     False)
@@ -268,7 +268,7 @@ class SynthRack:
 
     def draw_rack_flanger(self, c, colour):
         """How late the moving keys hit over two beats: up to Depth of a wave and back."""
-        v = self.vals
+        v = self.pv
         b = np.linspace(0.0, 2.0, 400)
         self.wobble(c, v["flanger_depth"] * (1.0 - np.cos(2.0 * np.pi * v["flanger_rate"] * b)) / 2.0, colour, False)
         self.rack_text(c, tr("hz.rack_no_extra"))
@@ -276,7 +276,7 @@ class SynthRack:
     def draw_rack_compressor(self, c, colour):
         """How loud a sound comes out (up) for how loud it goes in (across), in dB from -48 to 0: straight up to the
         threshold (dashed), flatter past it, all lifted by Gain."""
-        s, v = self.s, self.vals
+        s, v = self.s, self.pv
         w, h, pad = c.winfo_width(), c.winfo_height(), 6 * s
         lo = RACK["compressor"]["threshold"][0]
         comp = {k: v["compressor_" + k] for k in RACK["compressor"]}
@@ -292,7 +292,7 @@ class SynthRack:
 
     def draw_rack_echo(self, c, colour):
         """The sound and its repeats: a bar for each, as loud as it is, Time apart."""
-        s, v = self.s, self.vals
+        s, v = self.s, self.pv
         w, h, pad = c.winfo_width(), c.winfo_height(), 6 * s
         n = int(v["echo_repeats"])
         heard = [i for i in range(n + 1) if v["echo_fade"] ** i >= SOFT]
@@ -306,7 +306,7 @@ class SynthRack:
 
     def draw_rack_reverb(self, c, colour):
         """A note, then its tone ringing on: fading, its waves more and more scattered."""
-        s, v = self.s, self.vals
+        s, v = self.s, self.pv
         w, h, pad = c.winfo_width(), c.winfo_height(), 6 * s
         note = (w - 2 * pad) * 0.25
         c.create_rectangle(pad, h / 2 - 3 * s, pad + note, h / 2 + 3 * s, fill="#6b737e", outline="")
