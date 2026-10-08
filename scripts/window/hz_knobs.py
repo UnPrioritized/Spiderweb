@@ -30,8 +30,8 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.hzbass import (ARP, ARP_PATTERNS, BLEND, CHORDS, CRUSH, DETUNE, FAST, GLIDE_CURVE, GROUPS, GROWL, LOOP,
-                          MODES, OFF_BOXES, OFF_PITCH, OSC2, PITCH, RACK, SCALES, SOFT, START_COUNT, START_STEPS,
-                          MOD_BOXES, MOD_NEED_LINE, STEPS, SUB, TIMINGS, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE,
+                          MODES, OFF_BOXES, OFF_PITCH, OSC2, PITCH, RACK, RATE_TOP, SCALES, SOFT, START_COUNT,
+                          START_STEPS, MOD_BOXES, MOD_NEED_LINE, STEPS, SUB, TIMINGS, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE,
                           VOICES, WAH, WAVES, adsr_line,
                           arpeggiated,
                           blend_gains, glide_left, clean_arp, clean_extra, clean_mode, clean_steps, clean_voice, copies,
@@ -51,7 +51,7 @@ TIME_MOST = 64.0  # ... and a typed one
 KINDS = {"time": ("hz.synth_beats", 0.0, TIME_MOST, (0.05, 0.25, 0.01), TIME_KNOB),
          "percent": ("hz.synth_percent", 0.0, 100.0, (1, 10, 0.1), None),
          "keys": ("hz.synth_keys", -PITCH, PITCH, (1, 3, 0.1), None),
-         "vib_rate": ("hz.synth_a_beat", 0.0, 64.0, (0.1, 1, 0.01), 10.0),
+         "vib_rate": ("hz.synth_a_beat", 0.0, 64.0, (0.1, 1, 0.01), RATE_TOP),
          "trem_rate": ("hz.synth_a_beat", 0.0, TREMOLO, (0.1, 1, 0.01), TREMOLO),
          "groups": (None, 1.0, float(GROUPS), (1, 1, 1), None),
          "voices": (None, 1.0, float(VOICES), (1, 1, 1), None),

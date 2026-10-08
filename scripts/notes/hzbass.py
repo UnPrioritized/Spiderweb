@@ -1043,6 +1043,8 @@ def plain_base(hz, target):
         return lfo.get(target, 0.0) if "tremolo" in fx else None
     if target == "tremolo_depth":
         return lfo.get("tremolo_depth", TREMOLO_DEPTH) if "tremolo" in fx else None
+    if target == "vibrato_rate":
+        return lfo.get("vibrato_rate", VIBRATO_RATE) if "vibrato" in fx else None
     if target == "sweep_track":
         return lfo.get("sweep_track", 0.0) if "sweep" in fx else None
     if target == "blend":
@@ -1177,6 +1179,14 @@ TIMED = {"volume": (ADSR_KNOBS, knob_adsr), "pitch": (("time",), lambda hz: knob
 TIMED_KNOBS = {k: line for line, (knobs, _) in TIMED.items() for k in knobs}
 MOD_SETTINGS.update({name: (0.0, TIME_MOST, TIME_TOP) for name in TIMED_KNOBS},
                     glide=(0.0, GLIDE, TIME_TOP), curve=(-1.0, 1.0, None))
+# ... the speed knobs: how far through its waves each repeat is gets added up repeat by repeat (KeyGrid "_turns"), so
+# a speed moving makes the wave go faster or slower from where it is, never jump. Vibrato Rate (from each stretch's
+# start, as before), each Mode's Pulse Rate (from the note's start) and FM Ratio (wave by wave over the stretch)
+RATE_TOP = 10.0  # (a Rate knob: times a beat along a curve up to this)
+SPEED_KNOBS = ("vibrato_rate",) + tuple(f"{osc}{k}" for osc in ("", "osc2_") for k in ("pulse_rate", "fm_ratio"))
+MOD_SETTINGS.update(vibrato_rate=(*LFO["vibrato_rate"], RATE_TOP),
+                    **{f"{osc}pulse_rate": (*MODES["pulse"]["rate"][:2], RATE_TOP) for osc in ("", "osc2_")},
+                    **{f"{osc}fm_ratio": (*MODES["fm"]["ratio"][:2], MODES["fm"]["ratio"][1]) for osc in ("", "osc2_")})
 MOD_TARGETS = MOD_LINES + tuple(MOD_SETTINGS)
 # (knobs the engine reads once for a whole note or the whole sound, not for each repeat: KeyGrid.moved leaves them
 # out)
@@ -1858,7 +1868,9 @@ def wave_hits(shapes, plain, number, since, mode):
     0..1 of the wave; loudness 0..1), arrays (repeats x hits). shapes = [(waveform function, its value for each repeat,
     on for each repeat)]; plain = the repeats with no waveform on (one hit a wave; FM makes them a sine, Pulse width
     full hits); number = each repeat's number in its stretch; since = beats from its note's start; mode = hz["mode"]
-    ({} = none; its knobs may be arrays, one value each repeat; "progress" = how far through its Time each is)."""
+    ({} = none; its knobs may be arrays, one value each repeat; "progress" = how far through its Time each is;
+    "turns" = its speed moved by the MOD tab: Pulse's waves so far, FM's wobbles so far less Ratio x the wave's
+    number)."""
     part = np.arange(SUB) / SUB
     rows, kind = len(plain), mode.get("kind")
     p = np.broadcast_to(part, (rows, SUB))
@@ -1866,7 +1878,9 @@ def wave_hits(shapes, plain, number, since, mode):
     if kind == "fm":  # (the place in the wave pushed back and forth; counted over the stretch so it runs on)
         depth = FM_INDEX * mode["depth"] * (fall_off(since, mode["time"]) if moved is None else (1.0 - moved) ** 2)
         at = np.asarray(number, float)[:, None] + part[None, :]
-        p = np.mod(at + depth[:, None] / (2.0 * np.pi) * np.sin(2.0 * np.pi * mode["ratio"] * at), 1.0)
+        wobble = (mode["ratio"] * at if "turns" not in mode
+                  else mode["turns"][:, None] + mode["ratio"][:, None] * at)
+        p = np.mod(at + depth[:, None] / (2.0 * np.pi) * np.sin(2.0 * np.pi * wobble), 1.0)
     mix = np.ones((rows, SUB))
     for fn, v, on in shapes:  # (several on one note: multiplied)
         mix *= np.where(on[:, None], (1.0 - v[:, None]) * (part == 0) + v[:, None] * fn(p), 1.0)
@@ -1877,7 +1891,8 @@ def wave_hits(shapes, plain, number, since, mode):
     else:
         mix[plain] = part == 0
     if kind == "pulse":
-        width = mode["width"] + (0.5 - mode["width"]) * (1.0 - np.cos(2.0 * np.pi * mode["rate"] * since)) / 2.0
+        turns = mode["turns"] if "turns" in mode else mode["rate"] * since
+        width = mode["width"] + (0.5 - mode["width"]) * (1.0 - np.cos(2.0 * np.pi * turns)) / 2.0
         mix = mix * (part[None, :] < width[:, None])
     where = np.broadcast_to(part, (rows, SUB))
     if kind == "sync" and rows:  # (the wave's hits squeezed into 1 / r of it, over and over until the wave ends)
@@ -1918,6 +1933,7 @@ class KeyGrid:
         self.moved = {link["to"] for link in (hz.get("mod") or {}).get("links", ())
                       if link["to"] in MOD_SETTINGS and link["to"] not in NOT_EACH
                       and setting_base(hz, link["to"]) is not None}
+        self.turned = sorted(name + "_turns" for name in self.moved if name in SPEED_KNOBS)  # (speeds: added up)
         # (the Tremolo's Delay / Rise and the Modes' Time moved: how far through them each repeat is, timed_line)
         self.linked = linked = {link["to"] for link in (hz.get("mod") or {}).get("links", ())}
         self.timed = sorted(name for name, (knobs, read) in TIMED.items()
@@ -1991,6 +2007,13 @@ class KeyGrid:
             span = note_span(hz, beat, n0)  # (beats from its note's start, a chain's: the wave modes)
             run["since"] = beat - (n0["t"] if span is None else span[0])
             run["trem_since"] = run["since"]  # (the tremolo's Delay / Rise: a reverb tail keeps it as at the end)
+            for k in self.turned:  # (a speed the MOD tab moves: its waves added up repeat by repeat, SPEED_KNOBS)
+                r = run[k[:-6]]
+                if k.endswith("fm_ratio_turns"):  # (wobbles per wave, less Ratio x the wave's number: wave_hits)
+                    run[k] = np.concatenate([[0.0], np.cumsum(r[:-1])]) - r * run["number"]
+                else:  # (times a beat: the vibrato from the stretch's start, Pulse from the note's)
+                    first = r[0] * run["since"][0] if len(r) and k != "vibrato_rate_turns" else 0.0
+                    run[k] = first + np.concatenate([[0.0], np.cumsum(r[:-1] * np.diff(beat))])
             run["tone"], run["held"] = n0, whose[1] is None
             run["track"] = pitch(n0) - shift - home  # (keys the note is above the Hz bass's own tone)
             # (OSC B's Level x the Arpeggio step's loudness)
@@ -2023,7 +2046,7 @@ class KeyGrid:
         runs = self.runs
         n = np.array([len(r["starts"]) for r in runs], np.int64)
         names = ["starts", "waves", "beat", "limits", "since", "trem_since", "turns", "swept", "has_volume", "groups",
-                 "track", "level", *FX, *sorted(self.moved), *self.timed,
+                 "track", "level", *FX, *sorted(self.moved), *self.timed, *self.turned,
                  *("has_" + name for name in WAVES)]
         self.flat = {k: np.concatenate([np.broadcast_to(np.asarray(r[k]), (len(r["starts"]),)) for r in runs])
                      if runs else np.zeros(0) for k in names}
@@ -2087,6 +2110,9 @@ class KeyGrid:
             run["limits"] = np.full(count, math.floor(at + length * ppq + 0.5), np.int64)
             run["until"], run["held"] = np.inf, False
             run["tail_u"] = np.arange(count) * gate / (length * ppq)
+            for k in self.turned:  # (the speeds as at the end, their waves going on from there)
+                run[k] = (np.zeros(count) if k.endswith("fm_ratio_turns")
+                          else src[k][i] + src[k[:-6]][i] * (run["beat"] - src["beat"][i]))
             mono = {}
             for name in rack:
                 run[name] = setting_at(self.hz, name, setting_base(self.hz, name), run["beat"], None, mono)
@@ -2138,9 +2164,10 @@ class KeyGrid:
                                   / 2.0 / 1200.0)
         scaled = np.bincount(part, wide != 1.0, len(run)) > 0
         moves = (each["moves"][run] | scaled) & (n > 0)
+        vib = (f["vibrato_rate_turns"][src] if "vibrato_rate" in self.moved  # (its Rate moved: added up)
+               else each["vib_rate"][run][part] * (f["beat"][src] - each["beat0"][run][part]))
         stretch = wide * (1.0 + OFF_PITCH * f["offpitch"][src] * (x - 0.5)) * (
-            1.0 + VIBRATO * f["vibrato"][src] * np.sin(2.0 * np.pi * each["vib_rate"][run][part]
-                                                       * (f["beat"][src] - each["beat0"][run][part])))
+            1.0 + VIBRATO * f["vibrato"][src] * np.sin(2.0 * np.pi * vib))
         size = np.where(moves, n + n // 10 + 3, n)
         start = np.concatenate([[0], np.cumsum(size)[:-1]]).astype(np.int64)
         part = np.repeat(np.arange(len(run)), size)
@@ -2350,6 +2377,10 @@ class KeyGrid:
             mode = dict(mode, **{MODE_AMOUNTS[mode["kind"]]: self.flat[name][src]})
         if f"{prefix}{mode.get('kind')}_in" in self.timed:
             mode = dict(mode, progress=self.flat[f"{prefix}{mode['kind']}_in"][src])
+        speed = {"fm": "ratio", "pulse": "rate"}.get(mode.get("kind"))
+        if speed and f"{prefix}{mode['kind']}_{speed}" in self.moved:  # (Ratio / Rate moved: added up, wave_hits)
+            name = f"{prefix}{mode['kind']}_{speed}"
+            mode = dict(mode, **{speed: self.flat[name][src], "turns": self.flat[name + "_turns"][src]})
         return mode
 
     def after(self, kind):
