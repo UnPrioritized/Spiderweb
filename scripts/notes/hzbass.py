@@ -435,9 +435,10 @@ def in_scale(key, scale, root):
 
 
 def arpeggiated(tones, arp, left=0.0, hz=None):
-    """The tones as the Arpeggio box plays them: from each start (the notes starting together = one chord) a run of
-    short tones, one every 1 / speed beats while any of them is held, through their pitches (with the chord's steps
-    and octaves) in the pattern's order; a note let go drops out of the run. Each keeps its note's tune and gates;
+    """The tones as the Arpeggio box plays them, as a synth's arpeggiator: from the first note's start a run of short
+    tones, one every 1 / speed beats while any note is held, through the held notes' pitches (with the chord's steps
+    and octaves) in the pattern's order; a note pressed meanwhile joins the run at its next step, a note let go drops
+    out (user 2026-10-09). Once nothing is held the run ends; the next note starts a new one. Each keeps its note's tune and gates;
     slides made by hand are left out (the run's notes are new ones). The "steps" pattern: the box's own steps
     (STEPS) pick the held notes, low to high, each with its octave, loudness ("level" on the tone) and length.
     hz = the Hz bass played (its tones = these), for the MOD tab moving Speed / Gate / Swing (arp_moved)."""
@@ -457,21 +458,21 @@ def arpeggiated(tones, arp, left=0.0, hz=None):
     order = sorted(tones, key=lambda n: n["t"])
     i = 0
     while i < len(order):
-        t0 = order[i]["t"]
-        j = i
-        while j < len(order) and order[j]["t"] <= t0 + 1e-9:
+        t0, end = order[i]["t"], order[i]["t"] + order[i]["len"]
+        j = i + 1
+        while j < len(order) and order[j]["t"] <= end + 1e-9:  # (pressed while one is held, or as it's let go)
+            end = max(end, order[j]["t"] + order[j]["len"])
             j += 1
         chord, i = order[i:j], j
-        pitches = {}  # (key, tune) -> the note it's from (one pitch from two notes: the one held longest)
-        for n in sorted(chord, key=lambda n: n["len"]):
+        items = []  # ((key, tune), the note it's from), low to high; one pitch from two notes: the longer first
+        for n in sorted(chord, key=lambda n: -n["len"]):
             for k in CHORDS[arp["chord"]]:
                 for o in range(1 if steps else int(arp["octaves"])):  # (steps: their own octaves, below)
                     key = n["key"] + k + 12 * o
                     if arp.get("scale") and not steps:  # (moved into the scale: two landing on one key = one)
                         key = in_scale(key, arp["scale"], arp.get("root", 0))
-                    pitches[(key, n["cents"])] = n
-        items = sorted(pitches.items(), key=lambda kv: kv[0][0] + kv[0][1] / 100)
-        end = max(n["t"] + n["len"] for n in chord)
+                    items.append(((key, n["cents"]), n))
+        items.sort(key=lambda kv: kv[0][0] + kv[0][1] / 100)  # (stable: the longer note first on one pitch)
         # (Random: drawn from the chord's beat in the song (left = the shape's edge), so a Split or a moved edge
         # leaves it as it was)
         rng = np.random.default_rng(int(round((left + t0) * 1000)) % (2 ** 32))
@@ -484,7 +485,11 @@ def arpeggiated(tones, arp, left=0.0, hz=None):
             t, slot = when(k)
             if t >= end - 1e-9:
                 break
-            held = [(key, n) for key, n in items if n["t"] + n["len"] > t + 1e-9]
+            held, seen = [], set()  # (the pitches held at this step, each once)
+            for key, n in items:
+                if n["t"] <= t + 1e-9 and n["t"] + n["len"] > t + 1e-9 and key not in seen:
+                    seen.add(key)
+                    held.append((key, n))
             if steps:
                 tone = stepped(steps, k, t, held, arp, when, end, gate)
                 if tone:
@@ -533,7 +538,7 @@ def stepped(steps, k, t, held, arp, at, end, gate):
 
 def arp_moved(hz, arp, moved, chord, t0, end):
     """The Arpeggio's run from t0 (a chord let go at end) while the MOD tab moves its Speed / Gate / Swing (moved):
-    (at(k) = step k's (start, slot), gate(k) = its Gate), the sources read for the chord's note held longest. Speed:
+    (at(k) = step k's (start, slot), gate(k) = its Gate), the sources read for the run's note held longest. Speed:
     the steps added up finely, so the run goes faster or slower from where it is; Swing and Gate: as each step
     starts (the steps between the grid's beats counted as if the run went at its first Speed from the start)."""
     tone = max(chord, key=lambda n: n["len"])
