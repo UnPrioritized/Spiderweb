@@ -87,7 +87,8 @@ hz["mode"] = the Wave box's Mode (MODES, clean_mode): FM, Pulse width or Sync ch
 there only while it's on): every note played again as its own set of repeats, `octave` x 12 + `semi` keys + `fine`
 cents from it, its own "wave" (one of WAVES at `shape`, or the plain tone) and "mode" (as hz["mode"]), `level` as
 loud; "split": True = the key rows take turns playing OSC A or OSC B (no extra notes) instead of each row both
-(twice the notes). Everything else (the lines, Voice, the Effects tab) works on both. A synth window box switched off (Bypass) puts its lines in
+(twice the notes); "a_off": True = OSC A switched off (only OSC B sounds, on every row). With Fine, OSC B's gates
+alternate (whole-tick ones would round a few cents away). Everything else (the lines, Voice, the Effects tab) works on both. A synth window box switched off (Bypass) puts its lines in
 hz["off"] and moves its own setting (mode / voice) to hz["bypass"], which also names it (clean_bypass). Its knobs
 that do nothing right now are kept in hz["kept"] (clean_kept), its macros in hz["macro"] (clean_macro)."""
 
@@ -345,12 +346,14 @@ def clean_settings(got, table):
 
 def clean_osc2(osc):
     """OSC B checked (hz["osc2"], see OSC2): {"wave" (a waveform or "none"), its settings, "split": True (only when
-    the key rows take turns), "mode" (as clean_mode, only with one)}, or {} (off)."""
+    the key rows take turns), "a_off": True (only when OSC A is switched off: OSC B alone), "mode" (as clean_mode,
+    only with one)}, or {} (off)."""
     if not isinstance(osc, dict):
         return {}
     out = {"wave": osc["wave"] if osc.get("wave") in WAVES else "none", **clean_settings(osc, OSC2)}
-    if osc.get("split") is True:
-        out["split"] = True
+    for flag in ("split", "a_off"):
+        if osc.get(flag) is True:
+            out[flag] = True
     mode = clean_mode(osc.get("mode"))
     if mode:
         out["mode"] = mode
@@ -1282,6 +1285,22 @@ def _grid(starts, limits):
     return out, order[keep]
 
 
+def silent_beside(starts, limits, quiet, osc):
+    """A key row playing both oscillators: which repeats are too quiet while the other oscillator sounds there (its
+    latest repeat by then is heard and not over), so they're left out before the notes are laid end to end and don't
+    cut the other's notes short (OSC B at Level 0 = as if off). Arrays, one item per repeat."""
+    drop = np.zeros(len(starts), bool)
+    for o in (0, 1):
+        mine, other = np.flatnonzero(quiet & (osc == o)), np.flatnonzero(osc != o)
+        if not len(mine) or not len(other):
+            continue
+        other = other[np.argsort(starts[other], kind="stable")]
+        at = np.searchsorted(starts[other], starts[mine], "right") - 1
+        got = other[np.maximum(at, 0)]
+        drop[mine] = (at >= 0) & ~quiet[got] & (starts[mine] < limits[got])
+    return drop
+
+
 def fall_off(since, time):
     """1 at a note's start, falling to 0 over `time` beats, fast first (time 0: stays 1). since = beats (array)."""
     since = np.asarray(since, float)
@@ -1347,10 +1366,14 @@ class KeyGrid:
         self.track = lfo.get("sweep_track", 0.0)  # (Key track: the Sweep follows each note's pitch)
         self.osc2 = hz.get("osc2") or None  # (OSC B: see the docstring)
         self.modes = [self.mode, (self.osc2 or {}).get("mode") or {}]  # (each oscillator's own Mode)
-        self.runs = self.made_runs(hz, left, ppq, 0)
+        self.a_off = bool((self.osc2 or {}).get("a_off"))  # (OSC A switched off: only OSC B sounds)
+        self.runs = [] if self.a_off else self.made_runs(hz, left, ppq, 0)
         if self.osc2:  # (its notes moved by its tune: everything counted from each note stays as the notes have it)
             shift = 100.0 * osc2_shift(self.osc2)
             moved = dict(hz, _memo={}, tones=[dict(n, cents=n.get("cents", 0.0) + shift) for n in hz["tones"]])
+            if abs(self.osc2["fine"]) > 1e-9:  # (Fine: alternating gates, else whole-tick ones would round it away)
+                moved = {k: v for k, v in moved.items() if k not in ("fixed", "auto")}
+                moved["tones"] = [{k: v for k, v in n.items() if k not in ("gate", "auto")} for n in moved["tones"]]
             self.runs += self.made_runs(moved, left, ppq, 1)
         if self.reverb:  # (each oscillator's tail of its own)
             self.runs += [r for o in (0, 1) for r in self.reverb_runs(hz, left, ppq, [r for r in self.runs
@@ -1508,11 +1531,15 @@ class KeyGrid:
         noise = np.random.default_rng(1000 + key)  # (the same every time: the key is the seed)
         row = key - self.lo
         oscs = [0, 1] if self.osc2 else [0]  # (the oscillators this key row plays: OSC B's Split keys = turns)
-        if self.osc2 and self.osc2.get("split"):
+        if self.a_off:
+            oscs = [1]
+        elif self.osc2 and self.osc2.get("split") and self.n > 1:  # (one key: plays both)
             oscs, row = [row % 2], row // 2  # (the Voice copies' turns: by pairs of rows then)
         which = list(range(len(self.copies))) if self.same else [row % len(self.copies)]  # (Voice copies)
         cents = [self.copies[i] for i in which]
-        chorus = self.chorus if (key - self.lo) % 2 == 1 else None  # (every other key)
+        if not self.same:  # (the chorus and flanger take turns among the keys of the same copy (and oscillator),
+            row //= len(self.copies)  # so every copy has some moved)
+        chorus = self.chorus if row % 2 == 1 else None  # (every other key)
         f, each = self.flat, self.each
         runs = np.flatnonzero(np.isin(each["osc"], oscs)) if self.osc2 else np.arange(len(self.runs))
         run = np.repeat(runs, len(cents))  # each part's run
@@ -1579,7 +1606,7 @@ class KeyGrid:
         crushed = grid > 0
         fx_late = np.zeros(len(late))
         fl = self.flanger
-        i = key - self.lo
+        i = row  # (as the chorus: among the keys of the same copy and oscillator)
         if fl and math.floor((i + 1) * fl["mix"] + 1e-9) > math.floor(i * fl["mix"] + 1e-9):  # (Mix: this key moves)
             # (late by up to Depth and back, counted from the song's start like Random start: a Split keeps it)
             moved = fl["depth"] * (1.0 - np.cos(2.0 * np.pi * fl["rate"] * (self.left + f["beat"][src]))) / 2.0
@@ -1640,7 +1667,7 @@ class KeyGrid:
                 rows = np.concatenate([g[0] for g in got]).astype(np.int64)
                 starts = np.concatenate([g[1] for g in got])
                 limits, until, hear, fx_late = limits[rows], until[rows], hear[rows], fx_late[rows]
-                grid, crushed = grid[rows], crushed[rows]
+                grid, crushed, osc = grid[rows], crushed[rows], osc[rows]
                 env, mix, soft = loud[rows], np.concatenate([g[2] for g in got]), soft[rows]
                 quiet = vol[rows] < SOFT
             else:
@@ -1685,6 +1712,9 @@ class KeyGrid:
             fa = np.sqrt(mixed) * np.tile(soft[keep], sets) * np.concatenate(all_gain)
             if self.comp:  # (too quiet even after the compressor: left out, decided after it)
                 qu = qu | (mixed * np.concatenate(all_gain) ** 2 < SOFT)
+            if len(oscs) > 1 and qu.any():  # (both oscillators: one too quiet while the other sounds never cuts it)
+                drop = silent_beside(st, li, qu, np.tile(osc[keep], sets))
+                st, li, fa, qu = st[~drop], li[~drop], fa[~drop], qu[~drop]
             if (self.gains != 1.0).any() or self.osc2:  # (Blend, OSC B: repeats on one tick = the loudest one, left
                 # out only if all are)
                 first = np.lexsort((-fa, qu))

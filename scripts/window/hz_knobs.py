@@ -141,10 +141,10 @@ WAVE_NAMES = ("none",) + tuple(WAVES)
 START = dict({key: start for key, (_, _, start) in KNOBS.items()}, wave="none", sweep=False, same=False,
              touching=False, legato=False, mode="off", rack=(), rack_off=(), arp_on=False, arp_pattern="up",
              arp_chord="placed", arp_scale="off", arp_root=0, vibrato_timing="free", tremolo_timing="free",
-             osc2_on=False, osc2_wave="none", osc2_split=False, osc2_mode="off")
+             osc2_on=False, osc2_wave="none", osc2_split=False, osc2_mode="off", osc2_a_off=False)
 ARP_CHOICES = ("pattern", "chord", "scale", "root")  # (the Arpeggio box's dropdowns)
 ARP_KEYS = ARP_CHOICES + tuple(ARP)  # (all it has)
-KEEP = (tuple(KNOBS) + ("same", "touching", "osc2_split") + tuple(f"arp_{w}" for w in ARP_CHOICES)
+KEEP = (tuple(KNOBS) + ("same", "touching", "osc2_split", "osc2_a_off") + tuple(f"arp_{w}" for w in ARP_CHOICES)
         + ("osc2_wave", "osc2_mode"))
 CHOICES = {"arp_pattern": ARP_PATTERNS, "arp_chord": tuple(CHORDS), "arp_scale": ("off",) + tuple(SCALES),
            "arp_root": tuple(range(12)), "osc2_wave": WAVE_NAMES, "osc2_mode": MODE_NAMES}
@@ -161,7 +161,7 @@ def kept_value(key, v):
         return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v in range(12) else None
     if key in CHOICES:
         return v if v in CHOICES[key] else None
-    if key in ("same", "touching", "osc2_split"):
+    if key in ("same", "touching", "osc2_split", "osc2_a_off"):
         return v if isinstance(v, bool) else None
     if isinstance(v, bool) or not isinstance(v, float):
         return None
@@ -429,7 +429,7 @@ def read_osc2(win, was):
     if not b:
         return {"osc2_on": False}, True
     mode = b.get("mode") or {}
-    got = {"osc2_on": True, "osc2_wave": b["wave"], "osc2_split": bool(b.get("split")),
+    got = {"osc2_on": True, "osc2_wave": b["wave"], "osc2_split": bool(b.get("split")), "osc2_a_off": bool(b.get("a_off")),
            "osc2_mode": mode.get("kind", "off"), **{f"osc2_{k}": b[k] for k in OSC2}}
     for key, _ in MODE_KNOBS.get(got["osc2_mode"], ()):
         got[f"osc2_{key}"] = mode[key.split("_", 1)[1]]
@@ -903,7 +903,7 @@ class SynthKnobs:
         """A knob turned (done: let go / one step of the wheel or the keys = one undo step)."""
         if self.turning is None:
             self.turning, self.turn_vals = self.fx.state(), dict(self.vals)
-        self.vals[key] = self.timed(key, value_of(KNOBS[key][1], k), self.dials[key].stepping)
+        self.vals[key] = self.whole_step(key, self.timed(key, value_of(KNOBS[key][1], k), self.dials[key].stepping))
         self.sweep_on(key)
         self.write(KNOBS[key][0])
         if done:
@@ -926,6 +926,15 @@ class SynthKnobs:
             else:
                 got = next((r for r in reversed(rates) if r < now - 1e-9), now)
         return got
+
+    def whole_step(self, key, v):
+        """A wheel / arrow step on a knob of whole numbers (Octave, Semi, Groups, Voices...): at least one whole
+        number that way (a step of the knob's turn alone can round back to where it was)."""
+        step, kind = self.dials[key].stepping, KNOBS[key][1]
+        if not step or kind not in COUNTS + ("keys",) or abs(v - self.vals[key]) > 1e-9:
+            return v
+        lo, hi = KINDS[kind][1:3]
+        return float(min(hi, max(lo, self.vals[key] + (1 if step > 0 else -1))))
 
     def keyboard_back(self, w):
         """A wave picked / a value typed with Enter: the keyboard back to the window (no blue box left), so the
@@ -1088,7 +1097,7 @@ class SynthKnobs:
             self.set_extra("arp", {k: v[f"arp_{k}"] for k in ARP_KEYS} if v["arp_on"] else None)
         elif box == "osc2":
             m = v["osc2_mode"]
-            self.set_extra("osc2", {"wave": v["osc2_wave"], "split": v["osc2_split"],
+            self.set_extra("osc2", {"wave": v["osc2_wave"], "split": v["osc2_split"], "a_off": v["osc2_a_off"],
                                     **{k: v[f"osc2_{k}"] for k in OSC2},
                                     "mode": {"kind": m, **{key.split("_", 1)[1]: v[f"osc2_{key}"]
                                                            for key, _ in MODE_KNOBS.get(m, ())}}}
@@ -1165,7 +1174,10 @@ class SynthKnobs:
 
     def bypass_click(self, name):
         """A box's light or name clicked: the box switched off (kept, silent) or back on, one undo step; a box that
-        does nothing has nothing to switch (a ding)."""
+        does nothing has nothing to switch (a ding). OSC A's while OSC B is on: OSC A's notes off / on (as a synth's
+        oscillator switch)."""
+        if name == "wave" and self.vals["osc2_on"]:
+            return self.change("osc2", "osc2_a_off", not self.vals["osc2_a_off"])
         off = self.box_off(name)
         lines, extra = self.box_parts(name)
         if not off and not lines and extra not in self.extra:
@@ -1283,10 +1295,18 @@ class SynthKnobs:
             lines = [n for n in BOX_LINES.get(name, ()) if n in self.fxl and n not in self.off]
             if lines == ["volume"] and flat(self, "volume") == 1.0:  # (the Volume line full all along)
                 lines = []
-            outer.lamp.light(bool(lines) or BOX_EXTRA.get(name) in self.extra)
-            colour = DIM if name in BYPASS and self.box_off(name) else COLOURS[name]
+            lit = bool(lines) or BOX_EXTRA.get(name) in self.extra
+            if name == "wave" and self.vals["osc2_on"]:  # (OSC A's light = its notes on while OSC B is on)
+                lit = not self.vals["osc2_a_off"]
+            outer.lamp.light(lit)
+            grey = name in BYPASS and self.box_off(name) or name == "wave" and self.a_silent()
+            colour = DIM if grey else COLOURS[name]
             if outer.title.cget("foreground") != colour:
                 outer.title.config(foreground=colour)
+
+    def a_silent(self):
+        """OSC A's notes switched off (OSC B on, alone)."""
+        return self.vals["osc2_on"] and self.vals["osc2_a_off"]
 
     def pic_colour(self, name):
         """A box's colour in its picture: grey while the box is switched off."""
@@ -1297,7 +1317,7 @@ class SynthKnobs:
         for box, knobs in BOXES.items():
             c = self.pics[box]
             key = (tuple(self.pv[k] for k, _, _ in knobs),
-                   (self.pv["wave"], self.pv["mode"]) if box == "wave" else None,
+                   (self.pv["wave"], self.pv["mode"], self.a_silent()) if box == "wave" else None,
                    self.pv["sweep"] if box == "tone" else None,
                    (self.pv["same"], self.pv["touching"]) if box == "voice" else None,
                    (self.pv["arp_on"], *(self.pv[f"arp_{w}"] for w in ARP_CHOICES)) if box == "arp" else None,
@@ -1400,7 +1420,7 @@ class SynthKnobs:
         bw = (w - 2 * pad) / (2 * SUB)
         wave = self.pv[osc + "wave"]
         colour = bright(FX_COLOR[wave]) if wave in FX_COLOR else DIM
-        if self.box_off("wave") if not osc else not self.pv["osc2_on"]:
+        if (self.box_off("wave") or self.a_silent()) if not osc else not self.pv["osc2_on"]:
             colour = MID
         c.create_line(pad + (w - 2 * pad) / 2, pad, pad + (w - 2 * pad) / 2, h - pad, fill=MID, dash=(3, 3))
         for p, x in hits:
