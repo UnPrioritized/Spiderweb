@@ -96,6 +96,7 @@ class JoinSplit:
 
     def turn_into_live(self):
         """The selected shapes -> one live shape (notes/convert.py), where the first of them was."""
+        self.commit_typing()  # (a typed number: to the shapes before they're replaced)
         problem = self.live_problem()
         if problem:  # (the shortcut: say why)
             self.status.config(text=problem)
@@ -149,6 +150,7 @@ class JoinSplit:
         return None
 
     def split_selected(self):
+        self.commit_typing()  # (a typed number: to the shape before it's replaced)
         problem = self.split_problem()
         if problem:  # (the shortcut: say why)
             self.status.config(text=problem)
@@ -159,6 +161,7 @@ class JoinSplit:
         return self.join_problem() is None
 
     def join_selected(self):
+        self.commit_typing()  # (a typed number: to the shapes before they're replaced)
         problem = self.join_problem()
         if problem:  # (the shortcut: say why)
             self.status.config(text=problem)
@@ -220,6 +223,7 @@ class JoinSplit:
         to the left = the shape on the right slides left (notes/merge.py). Both become one custom shape of plain
         notes (Ctrl+Z: both again). Rows with nothing to meet slide by the smallest slide and become a shape of
         their own right after it (user: to delete or keep later)."""
+        self.commit_typing()  # (a number typed in a panel box: to the two shapes before they're replaced)
         pair = self.merge_pair()
         if not pair:
             return

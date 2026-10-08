@@ -1378,7 +1378,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         return new  # (a Hz bass's notes keep their lengths: its box only limits where they sound, user)
 
     def shape_label(self, sh):
-        if "picture" in sh or sh.get("merge"):  # (the picture's file name, user; "Merged notes")
+        if ("picture" in sh or sh.get("merge") or  # (the picture's file name, user; "Merged notes")
+                "notes" in sh and sh.get("name") == tr("join_split.merge_leftovers")):  # (plain notes, user)
             return sh.get("name") or "?"
         if "notes" in sh:
             return tr("app.pasted_notes")
@@ -1392,7 +1393,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
 
     def note_count(self, sh):
         """Notes a shape makes (quick for spam, which can be millions)."""
-        n = (custom_note_count(sh, self.ppq) if sh["kind"] == "custom" else
+        n = (None if sh.get("merge") else  # (turned / slanted: made again from its shapes, merge.py)
+             custom_note_count(sh, self.ppq) if sh["kind"] == "custom" else
              funnel_note_count(sh, self.ppq) if sh["kind"] == "funnel" else None)
         return len(self.notes_of(sh)) if n is None else n
 
@@ -1533,8 +1535,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         return got if not info["sig"] or got.sig == info["sig"] else None
 
     def remake_merges(self):
-        """Merged shapes whose parts' settings were changed in the panel (custom_targets): made again (merge.refit).
-        A recipe seen for the first time (new, loaded, undone) is taken as it is."""
+        """Merged shapes whose parts' settings were changed in the panel (custom_targets), or made at another PPQ /
+        key range than the project's now: made again (merge.refit). A recipe seen for the first time (new, loaded,
+        undone) is taken as it is."""
         from notes.merge import refit, settings_key
         seen = {}
         for sh in self.shapes:
@@ -1542,7 +1545,10 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             if not m:
                 continue
             key = settings_key(m)
-            if self._merge_keys.get(id(m), key) != key:
+            if (m["ppq"], m["keys"]) != (self.ppq, self.keys):  # (its gates in whole ticks of the project's PPQ)
+                m["ppq"], m["keys"] = self.ppq, self.keys
+                refit(sh)
+            elif self._merge_keys.get(id(m), key) != key:
                 refit(sh)
             seen[id(m)] = key
         self._merge_keys = seen

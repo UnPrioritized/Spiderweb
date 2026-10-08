@@ -400,7 +400,10 @@ class CustomPanel:
         elif not placed and not self.custom_template(name):
             info = tr("panel_custom.pick_a_shape_or_make_one")
         elif placed:
-            info = tr("panel_custom.n_notes", n=sum(self.note_count(t) for t in tgts))
+            # (a merged shape: its own notes, not its two shapes' as they were: some rows may be "Merge leftovers")
+            counted = ([self.shapes[i] for i in sorted(self.sels) if self.shapes[i]["kind"] == "custom"]
+                       if any(self.merge_part(t) for t in tgts) else tgts)
+            info = tr("panel_custom.n_notes", n=sum(self.note_count(t) for t in counted))
             if gaps and fill in ("fill", "spam"):
                 info += (tr("panel_custom.one_gap_in_the_outline_filled") if gaps == 1 else
                          tr("panel_custom.gaps_in_the_outline_filled_as", gaps=gaps))
