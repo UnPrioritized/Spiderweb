@@ -460,7 +460,9 @@ def arpeggiated(tones, arp, left=0.0, hz=None):
     while i < len(order):
         t0, end = order[i]["t"], order[i]["t"] + order[i]["len"]
         j = i + 1
-        while j < len(order) and order[j]["t"] <= end + 1e-9:  # (pressed while one is held, or as it's let go)
+        # (pressed while one is held; one starting right where the run ends starts a new run, as a synth gets the
+        # let-go first: notes end to end, hunt 2026-10-09)
+        while j < len(order) and order[j]["t"] < end - 1e-9:
             end = max(end, order[j]["t"] + order[j]["len"])
             j += 1
         chord, i = order[i:j], j
