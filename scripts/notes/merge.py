@@ -4,6 +4,8 @@ staying shape's note on that key (gate end = next start), lengths kept. Rows wit
 their key ("leftovers") slide by the smallest slide a row made and are handed back apart (user: their own shape,
 to delete or keep)."""
 
+import math
+
 import numpy as np
 
 
@@ -82,8 +84,12 @@ def clean_merge(m, clean_shape):
         parts = [clean_shape(p) if isinstance(p, dict) else None for p in m["parts"]]
         ppq, keys = int(m["ppq"]), int(m["keys"])
         apart = sorted({int(k) for k in m.get("apart", [])})
+        at = [float(x) for x in m["at"]] if m.get("at") is not None else None
     except (KeyError, TypeError, ValueError):
         return None
     if len(parts) != 2 or not all(parts) or not 1 <= ppq <= 65535 or keys not in (128, 256):
         return None
-    return {"parts": parts, "right": m.get("right") is True, "ppq": ppq, "keys": keys, "apart": apart}
+    out = {"parts": parts, "right": m.get("right") is True, "ppq": ppq, "keys": keys, "apart": apart}
+    if at and len(at) == 2 and all(map(math.isfinite, at)):
+        out["at"] = at  # (its box's first corner when made: Split moves the parts as far as it moved)
+    return out

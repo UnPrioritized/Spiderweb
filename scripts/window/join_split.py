@@ -141,7 +141,7 @@ class JoinSplit:
         if len(self.sels) != 1 or self.sel is None or self.sel >= len(self.shapes):
             return tr("join_split.select_one_shape_to_split_it")
         sh = self.selected()
-        if sh["kind"] == "custom" and (sh.get("text") or "notes" in sh):
+        if sh["kind"] == "custom" and (sh.get("text") or "notes" in sh) and not sh.get("merge"):
             return tr("join_split.text_and_pasted_notes_can_t")
         if not self.can_split_pieces(sh):
             return (tr("join_split.it_s_all_one_piece_nothing") if sh["kind"] in ("curve", "custom")
@@ -240,7 +240,8 @@ class JoinSplit:
         for p in parts:
             p.pop("between", None)  # (its Add between group is unlinked)
         new[0]["merge"] = {"parts": parts, "right": bool(to_right),
-                           "ppq": self.ppq, "keys": self.keys, "apart": sorted(set(rest[:, 2].tolist()))}
+                           "ppq": self.ppq, "keys": self.keys, "apart": sorted(set(rest[:, 2].tolist())),
+                           "at": list(new[0]["pts"][0])}  # (where its box was: Split moves the parts as far as it)
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.merge"))
         self.unlink_groups(pair)
@@ -272,8 +273,8 @@ class JoinSplit:
 
     def can_split_pieces(self, sh):
         """A joined curve with more than one piece / shape in it, a live shape that can go back to the shapes it was
-        made of, or a custom drawing with separate parts."""
-        if sh["kind"] == "custom" and originals(sh):
+        made of, a Gate sensitive merge, or a custom drawing with separate parts."""
+        if sh["kind"] == "custom" and (originals(sh) or sh.get("merge")):
             return True
         if sh["kind"] == "curve":
             return len(sections(sh)) > 1
@@ -301,6 +302,15 @@ class JoinSplit:
     def split_pieces(self, i):
         sh = self.shapes[i]
         if not self.can_split_pieces(sh):
+            return
+        if sh.get("merge"):  # Gate sensitive merge: the two shapes as they were before it, moved along with it
+            m = sh["merge"]
+            db, dp = (sh["pts"][0][0] - m["at"][0], sh["pts"][0][1] - m["at"][1]) if m.get("at") else (0, 0)
+            back = copy.deepcopy(m["parts"])
+            for p in back:
+                p["pts"] = [[b + db, q + dp] for b, q in p["pts"]]
+            self.replace_shape(i, back, velocity=False, name=tr("join_split.split_back_into_the_old_shapes"))
+            self.status.config(text=tr("join_split.back_to_the_shapes_it_was", n=2))
             return
         back = originals(sh) if sh["kind"] == "custom" else None
         if back:  # the shapes it was made of (Turn into live shape), as they were

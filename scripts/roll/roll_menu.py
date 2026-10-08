@@ -148,7 +148,7 @@ class ShapeMenu:
         if app.live_problem() is None:
             item(tr("roll_menu.turn_into_live_shape"), tr("roll_menu.ctrl_r"), app.turn_into_live, keys=True)
         if len(app.sels) == 1 and app.can_split_pieces(sh):
-            label = (tr("roll_menu.split_back_into_the_shapes_it") if originals(sh) else
+            label = (tr("roll_menu.split_back_into_the_shapes_it") if originals(sh) or sh.get("merge") else
                      tr("roll_menu.split_into_separate_shapes"))
             item(label, tr("roll_menu.ctrl_shift_g"), lambda: app.split_pieces(i), keys=True)
         # (with a stroke picked, the keys work on it)
