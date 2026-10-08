@@ -1057,6 +1057,13 @@ def plain_base(hz, target):
     if target == "blend":
         voice = hz.get("voice") or {}
         return voice.get("blend", BLEND) if voice.get("voices", 1) >= 3 else None
+    if target in ("detune", "random"):  # (Detune: 2 voices or more)
+        voice = hz.get("voice") or {}
+        if "voice" in (hz.get("bypass") or {}).get("boxes", ()):
+            return None
+        if target == "detune":
+            return voice["detune"] if voice.get("voices", 1) >= 2 else None
+        return voice.get("random", 0.0)
     if target.startswith("osc2_"):
         key = target[5:]
         if not osc or key == "shape" and osc["wave"] == "none":
@@ -1196,6 +1203,8 @@ MOD_SETTINGS.update(vibrato_rate=(*LFO["vibrato_rate"], RATE_TOP),
 # ... and the MOD tab's own LFO 3 / LFO 4 Rate (moved_lfo; never by the LFO itself: clean_mod)
 LFO_RATES = {f"{src}_rate": src for src in MOD_LFOS}
 MOD_SETTINGS.update({name: (*MOD_LFO["rate"][:2], RATE_TOP) for name in LFO_RATES})
+# ... the tuning: the Voice box's Detune (each repeat's own spread) and Random start (read once, as each note starts)
+MOD_SETTINGS.update(detune=(0.0, DETUNE, None), random=(0.0, 1.0, None))
 MOD_TARGETS = MOD_LINES + tuple(MOD_SETTINGS)
 # (knobs the engine reads once for a whole note or the whole sound, not for each repeat: KeyGrid.moved leaves them
 # out)
@@ -1998,7 +2007,7 @@ class KeyGrid:
                      or "blend" in self.moved or any(np.any(r["level"] != 1.0) for r in self.runs))
         self.pack()
         self.rack_turns = {name: self.added_up(name) for name in ("chorus_rate", "flanger_rate") if name in self.moved}
-        self.starting = self.starting_points() if self.random else None
+        self.starting = self.starting_points() if self.random or "random" in self.moved else None
         self.squeeze = self.comp_curve() if self.comp else None  # (the compressor's turn-down over time)
 
     def made_runs(self, hz, left, ppq, osc):
@@ -2046,6 +2055,10 @@ class KeyGrid:
             span = note_span(hz, beat, n0)  # (beats from its note's start, a chain's: the wave modes)
             run["since"] = beat - (n0["t"] if span is None else span[0])
             run["trem_since"] = run["since"]  # (the tremolo's Delay / Rise: a reverb tail keeps it as at the end)
+            if "random" in self.moved:  # (Random start moved: read once, as its note (chain of slides) starts)
+                head = run["beat"][:1] - run["since"][:1]
+                run["random"] = np.full(len(beat), float(setting_at(hz, "random", setting_base(hz, "random"), head,
+                                                                    n0, {})[0]))
             for k in self.turned:  # (a speed the MOD tab moves: its waves added up repeat by repeat, SPEED_KNOBS)
                 r = run[k[:-6]]
                 if k.endswith("fm_ratio_turns"):  # (wobbles per wave, less Ratio x the wave's number: wave_hits)
@@ -2213,6 +2226,9 @@ class KeyGrid:
         part = np.repeat(np.arange(len(run)), n)
         src = each["offsets"][run][part] + np.arange(len(part)) - first[part]
         wide = np.repeat(scale, n)
+        if "detune" in self.moved:  # (Detune moved: each repeat's own spread between the copies)
+            spread = np.tile(np.array([i / (len(self.copies) - 1) - 0.5 for i in which]), len(runs))
+            wide = 2.0 ** (-f["detune"][src] * np.repeat(spread, n) / 1200.0)
         if chorus:  # (up to depth cents and back, counted from the shape's start: it runs on over the notes)
             depth = f["chorus_depth"][src] if "chorus_depth" in self.moved else chorus["depth"]
             wide = wide * 2.0 ** (-depth * (1.0 - np.cos(2.0 * np.pi * self.rack_wave("chorus_rate", chorus["rate"],
@@ -2243,7 +2259,8 @@ class KeyGrid:
         part, number, src, waves, starts = part[keep], number[keep], src[keep], waves[keep], starts[keep]
         late = f["slant"][src] * x + np.floor(x * f["groups"][src]) / f["groups"][src]
         if self.starting is not None:  # (Random start: each copy's waves start that far in, the same all through)
-            late = late + self.random * self.starting[run, copy][part]
+            amount = f["random"][src] if "random" in self.moved else self.random
+            late = late + amount * self.starting[run, copy][part]
         # the random numbers each part takes, in order: its Noisy ones (if it has any), then the reverb's
         count = np.bincount(part, minlength=len(run))
         noisy = np.bincount(part, f["noisy"][src] != 0, len(run)) > 0
