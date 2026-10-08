@@ -939,9 +939,7 @@ def tails(hz):
     longest fall, also under the notes after them (like a synth's voices), cut only where a tone of the same pitch
     starts (both there would make their repeats twice as many: a higher tone)."""
     hz = live(hz)
-    fall = max((hz["loop"][name] - at for name, at in (hz.get("sustain") or {}).items()), default=0.0)
-    if any(link["to"] == "release" for link in (hz.get("mod") or {}).get("links", ())) and knob_adsr(hz):
-        fall = max(fall, setting_most(hz, "release", knob_adsr(hz)["release"]))  # (as long as it can get)
+    fall = longest_fall(hz)
     tones = hz.get("tones") or ()
     if fall <= 1e-12 or not tones:
         return {}
@@ -986,7 +984,7 @@ def fx_at(hz, name, beat, tone=None, sources=None):
     mode = (hz.get("from") or {}).get(name) if every else None
     at = (hz.get("sustain") or {}).get(name) if mode == "note" else None
     span = note_span(hz, np.asarray(beat, float), tone) if at is not None else None
-    timed = timed_line(hz, name, beat, tone) if mode == "note" else None
+    timed = timed_line(hz, name, beat, tone)
     if timed is not None:  # (its time knobs moved by the MOD tab)
         v = timed
     elif span is not None:
@@ -1023,8 +1021,8 @@ def setting_base(hz, target):
     nothing: no Tremolo / Sweep line (Depth, Key track), under 3 voices (Blend), OSC B off or with no waveform
     (Shape), another Mode or the oscillator off (a Mode's amount)."""
     fx, lfo, osc = hz.get("fx") or {}, hz.get("lfo") or {}, hz.get("osc2") or {}
-    if target in ADSR_KNOBS:
-        got = knob_adsr(hz)
+    if target in TIMED_KNOBS:  # (a time knob: while its line is as the knobs make it)
+        got = TIMED[TIMED_KNOBS[target]][1](hz)
         return got[target] if got else None
     if target in MOD_RACK:  # (an Effects tab effect's: while it's there and on)
         kind, key = MOD_RACK[target]
@@ -1108,42 +1106,109 @@ def stage_end(sums, g, t0):
     return float(np.interp(want, sums, g)) if want <= sums[-1] else math.inf
 
 
-def timed_line(hz, name, beat, tone):
-    """An effect's line played once per note whose time knobs the MOD tab moves (the Volume box's ADSR: knob_adsr),
-    at beat (an array) for tone's note, or None (nothing moves them; no tone: as drawn). Worked out on a grid from the
-    note's start: each stage as long as its knob says at every step (as a synth's envelope, a running stage gets
-    shorter or longer), the fall from where it got when the note ends."""
-    if tone is None or name != "volume":
+def knob_bend(hz, name, key):
+    """The Pitch / Sweep line as its box's knobs make it (pitch_line, sweep_line: from `start` to `end`, fast first, in
+    `key` beats, once per note): {key, start, end}, or None (no such line, drawn otherwise)."""
+    pts = (hz.get("fx") or {}).get(name)
+    if (not pts or len(pts) != 2 or list(pts[0][2:]) != [FAST] or len(pts[1]) > 2 or pts[0][0] != 0.0
+            or (hz.get("from") or {}).get(name) != "note" or name in (hz.get("fit") or ())
+            or name in (hz.get("sustain") or {}) or name in (hz.get("amount") or {})
+            or abs((hz.get("loop") or {}).get(name, 0.0) - max(LOOP[0], pts[1][0])) > 1e-9):
         return None
-    linked = {link["to"] for link in (hz.get("mod") or {}).get("links", ()) if link["to"] in ADSR_KNOBS}
-    e = knob_adsr(hz) if linked else None
+    return {key: pts[1][0], "start": pts[0][1], "end": pts[1][1]}
+
+
+def knob_vibrato(hz):
+    """The Vibrato line as its knobs make it (none for Delay = vibrato_wait beats from each note's start, then coming
+    in over Rise = vibrato_delay beats, linear): {vibrato_wait, vibrato_delay, depth}, or None (drawn otherwise)."""
+    pts = (hz.get("fx") or {}).get("vibrato")
+    every = (hz.get("loop") or {}).get("vibrato")
+    if (not pts or any(len(p) > 2 for p in pts) or name_bent(hz, "vibrato")
+            or (every is not None) == (len(pts) == 1)):
+        return None
+    if len(pts) == 1:  # (all along)
+        return {"vibrato_wait": 0.0, "vibrato_delay": 0.0, "depth": pts[0][1]}
+    if ((hz.get("from") or {}).get("vibrato") != "note" or list(pts[0]) != [0.0, 0.0]
+            or abs(every - max(LOOP[0], pts[-1][0])) > 1e-9):
+        return None
+    if len(pts) == 2:
+        return {"vibrato_wait": 0.0, "vibrato_delay": pts[1][0], "depth": pts[1][1]}
+    if len(pts) == 3 and pts[1][1] == 0.0:
+        return {"vibrato_wait": pts[1][0], "vibrato_delay": pts[2][0] - pts[1][0], "depth": pts[2][1]}
+    return None
+
+
+def name_bent(hz, name):
+    """An effect's line stretched over each note, with a sustain point or an amount line (no knob makes those)."""
+    return (name in (hz.get("fit") or ()) or name in (hz.get("sustain") or {})
+            or name in (hz.get("amount") or {}))
+
+
+# the lines whose time knobs the MOD tab moves (timed_line): line -> its knobs, how they're read from it
+TIMED = {"volume": (ADSR_KNOBS, knob_adsr), "pitch": (("time",), lambda hz: knob_bend(hz, "pitch", "time")),
+         "sweep": (("sweep_time",), lambda hz: knob_bend(hz, "sweep", "sweep_time")),
+         "vibrato": (("vibrato_wait", "vibrato_delay"), knob_vibrato)}
+TIMED_KNOBS = {k: line for line, (knobs, _) in TIMED.items() for k in knobs}
+MOD_SETTINGS.update({name: (0.0, TIME_MOST, TIME_TOP) for name in TIMED_KNOBS})
+MOD_TARGETS = MOD_LINES + tuple(MOD_SETTINGS)
+
+
+def longest_fall(hz):
+    """Beats the sound goes on after a note at most (the falls of the lines with a sustain point; a Volume Release
+    the MOD tab moves: as long as it can get)."""
+    fall = max((hz["loop"][name] - at for name, at in (hz.get("sustain") or {}).items()), default=0.0)
+    if any(link["to"] == "release" for link in (hz.get("mod") or {}).get("links", ())) and knob_adsr(hz):
+        fall = max(fall, setting_most(hz, "release", knob_adsr(hz)["release"]))
+    return fall
+
+
+def timed_line(hz, name, beat, tone):
+    """An effect's line played once per note whose time knobs the MOD tab moves (TIMED: the Volume box's ADSR, Pitch
+    Time, Sweep Time, Vibrato Delay / Rise), at beat (an array) for tone's note, or None (nothing moves them; drawn
+    otherwise; no tone: as drawn). Worked out on a grid from the note's start: each stage as long as its knob says at
+    every step (as a synth's envelope, a running stage gets shorter or longer)."""
+    if tone is None or name not in TIMED:
+        return None
+    knobs, read = TIMED[name]
+    linked = {link["to"] for link in (hz.get("mod") or {}).get("links", ()) if link["to"] in knobs}
+    e = read(hz) if linked else None
     if e is None:
         return None
-    g, v = cached(hz, ("timed", name, tone.get("id")), lambda: adsr_moved(hz, e, linked, tone))
+    g, v = cached(hz, ("timed", name, tone.get("id")), lambda: timed_grid(hz, name, e, linked, tone))
     return np.interp(np.asarray(beat, float), g, v)
 
 
-def adsr_moved(hz, e, linked, tone):
-    """timed_line's Volume: (grid beats, the line's value there), from the note's start past its longest fall."""
+def timed_grid(hz, name, e, linked, tone):
+    """timed_line's (grid beats, the line's value there), from the note's start past its longest fall."""
     s0, end = note_span(hz, 0.0, tone)
     s0, end = float(s0), float(end)
-    fall = setting_most(hz, "release", e["release"]) if "release" in linked else e["release"]
-    span = end - s0 + fall + 2 * TIME_STEP
+    span = end - s0 + cached(hz, "fall", lambda: longest_fall(hz)) + 2 * TIME_STEP
     dt = max(TIME_STEP, span / 100000)
     g = s0 + np.arange(int(span / dt) + 2) * dt
     sources = {}
-    a, d, r = (setting_at(hz, k, e[k], g, tone, sources) if k in linked else np.full(len(g), e[k])
-               for k in ADSR_KNOBS)
-    s = e["sustain"]
+
+    def stage(key, t0):
+        """A stage of knob `key` starting at t0: (how far through it, 0..1 at each step; when it ends)."""
+        if e[key] <= 0 and key not in linked or t0 == math.inf:
+            return (g >= t0).astype(float), t0
+        length = setting_at(hz, key, e[key], g, tone, sources) if key in linked else np.full(len(g), e[key])
+        sums = stage_sums(length, dt)
+        return np.clip(sums - np.interp(min(t0, g[-1]), g, sums), 0.0, 1.0), stage_end(sums, g, t0)
+
+    if name in ("pitch", "sweep"):  # (from start to end, fast first)
+        p, _ = stage(next(iter(TIMED[name][0])), s0)
+        return g, e["start"] + (e["end"] - e["start"]) * (1.0 - (1.0 - p) ** 2)
+    if name == "vibrato":  # (none, then coming in)
+        _, tw = stage("vibrato_wait", s0)
+        p, _ = stage("vibrato_delay", tw)
+        return g, e["depth"] * p
+    s = e["sustain"]  # (the Volume: ADSR)
     top = 1.0 if e["decay"] > 0 or "decay" in linked else s  # (no decay: the rise goes straight to the sustain)
-    ca, cd, cr = stage_sums(a, dt), stage_sums(d, dt), stage_sums(r, dt)
-    ta = stage_end(ca, g, s0) if e["attack"] > 0 or "attack" in linked else s0
-    td = stage_end(cd, g, ta) if ta < math.inf else math.inf
-    pa = np.clip(ca, 0.0, 1.0)
-    pd = np.clip(cd - np.interp(min(ta, g[-1]), g, cd), 0.0, 1.0)
+    pa, ta = stage("attack", s0)
+    pd, td = stage("decay", ta)
     held = np.where(g < ta, top * pa ** 2, np.where(g < td, 1.0 + (s - 1.0) * (1.0 - (1.0 - pd) ** 2), s))
     left = float(np.interp(end, g, held))  # (where it got when the note ends: the fall starts from there)
-    pr = np.clip(cr - np.interp(end, g, cr), 0.0, 1.0)
+    pr, _ = stage("release", end)
     fell = np.clip(s * (1.0 - pr) ** 2 + (left - s) * (1.0 - pr), 0.0, 1.0)
     return g, np.where(g < end, held, fell)
 
@@ -1795,7 +1860,7 @@ class KeyGrid:
         # (the knobs that aren't lines the MOD tab moves, each run's values worked out in made_runs; setting_at)
         self.hz = hz
         self.moved = {link["to"] for link in (hz.get("mod") or {}).get("links", ())
-                      if link["to"] in MOD_SETTINGS and link["to"] not in ADSR_KNOBS  # (those: in the lines, fx_at)
+                      if link["to"] in MOD_SETTINGS and link["to"] not in TIMED_KNOBS  # (those: in the lines, fx_at)
                       and setting_base(hz, link["to"]) is not None}
         n = len(self.copies)
         self.middle = np.isin(np.arange(n), ((n - 1) // 2, n // 2))  # (Blend: the middle copies)
