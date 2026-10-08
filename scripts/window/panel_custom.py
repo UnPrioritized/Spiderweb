@@ -139,7 +139,7 @@ class CustomPanel:
         self.hz_var = tk.BooleanVar()
         self.hz_check = ttk.Checkbutton(h, text=tr("panel_custom.hz_bass"), variable=self.hz_var, command=self.on_hz)
         self.hz_check.pack(side="left")
-        Tooltip(self.hz_check, tr("panel_custom.hz_tip"))
+        self.hz_check_tip = Tooltip(self.hz_check, tr("panel_custom.hz_tip"))
         self.hz_notes_btn = ttk.Button(h, text=tr("panel_custom.hz_notes"), command=lambda: open_hz(self))
         self.hz_notes_btn.pack(side="left", padx=(6, 0))
         Tooltip(self.hz_notes_btn, tr("panel_custom.hz_notes_tip"))
@@ -592,7 +592,9 @@ class CustomPanel:
         on = bool(hz) and spam
         # (one made with the Hz bass tool is nothing but its notes: no switching it off, it's deleted instead)
         tool_made = placed and any(hz_tool(t) for t in tgts)
-        self.hz_check.config(state="normal" if spam and not new_off and not tool_made else "disabled")
+        merged = placed and any(self.merge_part(t) for t in tgts)  # (its Notes… window can't reach the shapes in it)
+        self.hz_check.config(state="normal" if spam and not new_off and not tool_made and not merged else "disabled")
+        self.hz_check_tip.text = tr("panel_custom.hz_tip") + (tr("panel_custom.hz_not_merged") if merged else "")
         bpm = self.current_bpm()
         self.hz_stale_on = on and bpm is not None and any(t.get("hz") and abs(t["hz"]["bpm"] - bpm) > 1e-9
                                                           for t in tgts)

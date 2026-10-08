@@ -26,7 +26,8 @@ def gate_merge(stay, slide, from_left=None, rest_slides=True):
 
 
 def _merge(stay, slide, from_left, rest_slides=True):
-    """gate_merge, and also the smallest slide and how much later everything went (to stay after tick 0)."""
+    """gate_merge, and also the smallest slide, how much later everything went (to stay after tick 0) and each met
+    key row's slide {key: ticks}."""
     stay = np.asarray(stay, np.int64)
     moved = np.array(slide, np.int64, copy=True)
     if not len(stay) or not len(moved):
@@ -34,7 +35,7 @@ def _merge(stay, slide, from_left, rest_slides=True):
     if from_left is None:
         from_left = comes_from_left(stay, moved)
     met = np.zeros(len(moved), bool)
-    shifts = []
+    shifts, by_key = [], {}
     for key in np.unique(moved[:, 2]):
         here = stay[stay[:, 2] == key]
         if not len(here):
@@ -47,6 +48,7 @@ def _merge(stay, slide, from_left, rest_slides=True):
         moved[rows, :2] += shift
         met |= rows
         shifts.append(int(shift))
+        by_key[int(key)] = int(shift)
     if not shifts:
         return None
     least = min(shifts, key=abs)
@@ -58,7 +60,41 @@ def _merge(stay, slide, from_left, rest_slides=True):
     if late:  # (slid before the song's start: everything waits)
         out[:, :2] += late
         rest[:, :2] += late
-    return out, rest, least, late
+    return out, rest, least, late, by_key
+
+
+def preview_parts(sh, ppq, keys):
+    """The merged shape's shapes placed where their notes are, for the outline gate's preview line: [(shape, how far
+    each key row of it slid in beats {key: beats} or None)]; the sliding one per row, roughly (a line crossing
+    rows goes with the row at its middle). [] = can't tell."""
+    m = sh["merge"]
+    got = reshaped_parts(sh)
+    if got:
+        parts, slide, from_left, (L, o, least) = got
+        rows = part_rows(parts, ppq, keys)
+        upright = abs(L[0, 0]) <= 1e-9 * max(1.0, abs(L[1, 0]))
+        done = None if upright else _merge(rows[1 - slide], rows[slide], from_left, rest_slides=False)
+        slid = {k: v / ppq for k, v in done[4].items()} if done else {}  # (rows not met: where they are)
+        return [(p, slid if i == slide else None) for i, p in enumerate(parts)]
+    sides = made_sides(m)
+    if not sides:
+        return []
+    slide, from_left, least, late = sides
+    a, b = part_rows(m["parts"], m["ppq"], m["keys"])
+    done = _merge((a, b)[1 - slide], (a, b)[slide], from_left)
+    at = m.get("at") or sh["pts"][0]
+    db, dp = sh["pts"][0][0] - at[0] + late / m["ppq"], sh["pts"][0][1] - at[1]
+    out = []
+    for i, p in enumerate(m["parts"]):
+        q = mapped_part(p, lambda b, k: [b + db, k + dp])
+        if q is None:
+            continue
+        if i == slide:  # (every row of it: met = its own slide, the rest the smallest)
+            ks = np.unique((a, b)[slide][:, 2])
+            out.append((q, {int(k) + round(dp): done[4].get(int(k), least) / m["ppq"] for k in ks}))
+        else:
+            out.append((q, None))
+    return out
 
 
 # THE RECIPE (user: saved as both shapes + the way, not the notes): the merged shape is a custom shape of plain
@@ -274,6 +310,22 @@ def reshaped_notes(sh, ppq, keys):
     merged_rows = (gate_merge(stay, moved, from_left, rest_slides=False) if len(stay) and len(moved) and not upright
                    else None)
     return np.concatenate(merged_rows) if merged_rows else np.concatenate([stay, moved])
+
+
+def slid_preview(got, slid, ppq):
+    """custom.edge_inner's preview (("rows", (start, end, key) ticks) or ("lines", (b0, k0, b1, k1, b_in, k_in))
+    with each key row moved as far as it slid (slid: {key: beats}; a line goes with the row at its middle, an edge
+    between two rows with the one on its inner side)."""
+    kind, a = got
+    if kind == "rows":
+        a = np.array(a, np.int64, copy=True)
+        a[:, :2] += np.round(np.array([slid.get(int(k), 0.0) for k in a[:, 2]]) * ppq).astype(np.int64)[:, None]
+        return kind, a
+    a = np.array(a, float, copy=True)
+    mid = (a[:, 1] + a[:, 3]) / 2
+    rows = np.round(mid + np.clip(a[:, 5] - mid, -0.25, 0.25)).astype(np.int64)
+    a[:, [0, 2, 4]] += np.array([slid.get(int(k), 0.0) for k in rows])[:, None]
+    return kind, a
 
 
 MOST_SAMPLES = 20_000_000  # (key rows x time steps, like a turned picture's)

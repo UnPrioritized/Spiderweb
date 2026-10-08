@@ -11,6 +11,7 @@ from files.lang import tr
 from files.speed import loops
 from notes.engine import cached_arrays, shape_key, shape_notes_tracks
 from notes.joined import all_tumours
+from notes.merge import preview_parts, slid_preview
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
 from notes.paths import KEYS
 from notes.sliced import moved_by, moved_mark
@@ -552,12 +553,20 @@ class RollDrawing:
             return
         bx = self.kb_w - self.view_t * self.sx  # (x = beat * sx + bx, y = key * ay + by)
         ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
+        todo = []
         for i in app.sels:
             sh = app.shapes[i] if i < len(app.shapes) else None
-            if sh and sh["kind"] == "custom" and "notes" not in sh:
+            if sh and sh.get("merge"):  # (Gate sensitive merge: its shapes where their notes are, merge.py)
+                todo += preview_parts(sh, app.ppq, app.keys)
+            elif sh and sh["kind"] == "custom" and "notes" not in sh:
+                todo.append((sh, None))
+        for sh, slid in todo:
+            if sh["kind"] == "custom" and "notes" not in sh:
                 got = edge_inner(dict(sh, edge=g), app.ppq)
                 if got is None or not len(got[1]):
                     continue
+                if slid:  # (each key row of the sliding shape as far as it slid)
+                    got = slid_preview(got, slid, app.ppq)
                 # (user: red like a shape's line, a bit thicker than 1 px but never as thick as the selected
                 # shape's 2 px: a red pixel with a light red one beside it)
                 if got[0] == "rows":
