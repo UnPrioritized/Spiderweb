@@ -682,6 +682,13 @@ MOD_SETTINGS = dict({"tremolo_depth": (*LFO["tremolo_depth"], None), "sweep_trac
                      "osc2_level": (*OSC2["level"][:2], None)},
                     **{f"{osc}{kind}_{k}": (*MODES[kind][k][:2], None) for osc in ("", "osc2_")
                        for kind, k in MODE_AMOUNTS.items()})
+# ... the Effects tab's (knob = effect_setting). Its effects work on the whole sound, not on each note (as a synth's
+# effects after the voices): sources counted from each note follow the newest note (mod_value with no tone)
+RACK_MOD = {"chorus": ("depth",), "flanger": ("depth", "mix"), "echo": ("fade",), "reverb": ("level", "scatter"),
+            "compressor": ("threshold", "ratio", "gain")}
+RACK_CURVES = {("compressor", "ratio"): RACK["compressor"]["ratio"][1]}  # (curved knobs: their top)
+MOD_RACK = {f"{kind}_{k}": (kind, k) for kind, ks in RACK_MOD.items() for k in ks}
+MOD_SETTINGS.update({name: (*RACK[kind][k][:2], RACK_CURVES.get((kind, k))) for name, (kind, k) in MOD_RACK.items()})
 MOD_TARGETS = MOD_LINES + tuple(MOD_SETTINGS)
 # the synth window's box each effect is in: a box switched off (hz["bypass"]["boxes"]) stops its links too
 MOD_BOXES = dict({w: "wave" for w in tuple(WAVES) + ("wave", "octave")}, volume="volume", pitch="pitch", vibrato="vibrato",
@@ -996,6 +1003,10 @@ def setting_base(hz, target):
     nothing: no Tremolo / Sweep line (Depth, Key track), under 3 voices (Blend), OSC B off or with no waveform
     (Shape), another Mode or the oscillator off (a Mode's amount)."""
     fx, lfo, osc = hz.get("fx") or {}, hz.get("lfo") or {}, hz.get("osc2") or {}
+    if target in MOD_RACK:  # (an Effects tab effect's: while it's there and on)
+        kind, key = MOD_RACK[target]
+        e = rack_on(hz, kind)
+        return e[key] if e else None
     if target == "tremolo_depth":
         return lfo.get("tremolo_depth", TREMOLO_DEPTH) if "tremolo" in fx else None
     if target == "sweep_track":
@@ -1019,15 +1030,26 @@ def setting_base(hz, target):
 def setting_at(hz, target, base, beat, tone=None, sources=None):
     """A MOD_SETTINGS knob's value at beat (an array) for tone's note: base (setting_base) moved by the links to it,
     along the knob's turn (as the lines: amount 1 = the whole turn), kept within its ends."""
-    lo, hi, most = MOD_SETTINGS[target]
     turn = mod_turn(hz, (target,), beat, tone, sources)
     if turn is None:
         return np.full(np.shape(beat), float(base))
+    return turned_setting(target, base, turn)
+
+
+def turned_setting(target, base, turn):
+    """A MOD_SETTINGS knob set at base, turned that much more (0..1 = its whole turn), kept within its ends."""
+    lo, hi, most = MOD_SETTINGS[target]
     if most:  # (a curved knob: points at the square root of how far up it is)
         v = most * np.maximum(0.0, math.sqrt(max(0.0, base) / most) + turn) ** 2
     else:
         v = base + turn * (hi - lo)
     return np.clip(v, lo, hi)
+
+
+def setting_most(hz, target, base):
+    """The highest a MOD_SETTINGS knob set at base can be taken by its links (every source at its fullest)."""
+    reach = sum(abs(link["amount"]) for link in (hz.get("mod") or {}).get("links", ()) if link["to"] == target)
+    return float(turned_setting(target, base, reach))
 
 
 def adsr_line(attack, decay, sustain, release):
@@ -1076,11 +1098,17 @@ def mod_value(hz, src, beat, tone=None):
     beat = np.asarray(beat, float)
     mod = hz["mod"]
     if src in ("velocity", "note"):
-        if tone is None:
+        def of(n):
+            return (n.get("level", 1.0) if src == "velocity"
+                    else min(1.0, max(0.0, n.get("played", pitch(n)) / 127.0)))
+        if tone is not None:
+            return np.full(beat.shape, float(of(tone)))
+        tones = sorted(hz.get("tones") or (), key=lambda n: (n["t"], n["len"]))
+        if not tones:
             return np.full(beat.shape, 1.0 if src == "velocity" else hz.get("key", HZ_DEFAULTS["key"]) / 127.0)
-        got = (tone.get("level", 1.0) if src == "velocity"
-               else min(1.0, max(0.0, tone.get("played", pitch(tone)) / 127.0)))
-        return np.full(beat.shape, float(got))
+        # (no tone: the newest note's, as a synth's effects after its voices; together: the longest)
+        i = np.searchsorted(np.array([n["t"] for n in tones]), beat, side="right") - 1
+        return np.array([float(of(n)) for n in tones])[np.clip(i, 0, len(tones) - 1)]
     span = note_span(hz, beat, tone)
     s0, end = span if span is not None else (0.0, 0.0)
     if src in MOD_ENVS:
@@ -1663,6 +1691,7 @@ class KeyGrid:
         self.modes = [self.mode, (self.osc2 or {}).get("mode") or {}]  # (each oscillator's own Mode)
         self.a_off = bool((self.osc2 or {}).get("a_off"))  # (OSC A switched off: only OSC B sounds)
         # (the knobs that aren't lines the MOD tab moves, each run's values worked out in made_runs; setting_at)
+        self.hz = hz
         self.moved = {link["to"] for link in (hz.get("mod") or {}).get("links", ())
                       if link["to"] in MOD_SETTINGS and setting_base(hz, link["to"]) is not None}
         n = len(self.copies)
@@ -1710,8 +1739,10 @@ class KeyGrid:
             sources = {}  # (the MOD tab's sources: worked out once for the run)
             for name in FX:  # (each tone counts from its own start, like a synth's voice)
                 run[name] = fx_at(hz, name, beat, n0, sources)
+            mono = {}  # (the Effects tab's: from the newest note, for the whole sound)
             for name in self.moved:  # (the MOD tab's knobs that aren't lines: from each note too)
-                run[name] = setting_at(hz, name, setting_base(hz, name), beat, n0, sources)
+                run[name] = (setting_at(hz, name, setting_base(hz, name), beat, None, mono) if name in MOD_RACK
+                             else setting_at(hz, name, setting_base(hz, name), beat, n0, sources))
             run["swept"] = np.full(len(beat), "sweep" in fx)  # (sweep at 0 = the bump on the lowest key)
             run["has_volume"] = np.full(len(beat), "volume" in fx)
             for name in WAVES:  # (a waveform at 0 = the plain tone; without any: the plain tone too)
@@ -1787,9 +1818,11 @@ class KeyGrid:
         oscillator's."""
         r, tones = self.reverb, hz["tones"]
         soft = SOFT / self.lift("reverb")  # (a compressor after it may lift the tail's end: it goes on further)
-        if r["level"] ** 2 <= soft:
+        level = self.most("reverb_level", r["level"])  # (the MOD tab may turn it up: as far as it can go)
+        if level ** 2 <= soft:
             return []
-        quiet = 1.0 - (soft / r["level"] ** 2) ** (1 / 3)  # (0..1 of the way: from here on too soft, left out)
+        quiet = 1.0 - (soft / level ** 2) ** (1 / 3)  # (0..1 of the way: from here on too soft, left out)
+        rack = [name for name in self.moved if name in MOD_RACK]  # (the Effects tab's: on over the tail, in time)
         leaving = {a["id"] for a, _, _ in links(tones)} | {a["id"] for a, _ in legato_links(hz.get("voice"), tones)}
         last, starts = {}, {}
         for run in runs:  # (each tone's held stretch that goes on longest)
@@ -1824,8 +1857,15 @@ class KeyGrid:
             run["limits"] = np.full(count, math.floor(at + length * ppq + 0.5), np.int64)
             run["until"], run["held"] = np.inf, False
             run["tail_u"] = np.arange(count) * gate / (length * ppq)
+            mono = {}
+            for name in rack:
+                run[name] = setting_at(self.hz, name, setting_base(self.hz, name), run["beat"], None, mono)
             out.append(run)
         return out
+
+    def most(self, name, plain):
+        """The highest a knob that makes no line can be (plain: as set): as far as the MOD tab's links can take it."""
+        return setting_most(self.hz, name, plain) if name in self.moved else plain
 
     def made(self, key):
         """A key's repeats, (start, end) ticks in order, none overlapping, and each one's part of the velocity.
@@ -1863,7 +1903,8 @@ class KeyGrid:
         src = each["offsets"][run][part] + np.arange(len(part)) - first[part]
         wide = np.repeat(scale, n)
         if chorus:  # (up to depth cents and back, counted from the shape's start: it runs on over the notes)
-            wide = wide * 2.0 ** (-chorus["depth"] * (1.0 - np.cos(2.0 * np.pi * chorus["rate"] * f["beat"][src]))
+            depth = f["chorus_depth"][src] if "chorus_depth" in self.moved else chorus["depth"]
+            wide = wide * 2.0 ** (-depth * (1.0 - np.cos(2.0 * np.pi * chorus["rate"] * f["beat"][src]))
                                   / 2.0 / 1200.0)
         scaled = np.bincount(part, wide != 1.0, len(run)) > 0
         moves = (each["moves"][run] | scaled) & (n > 0)
@@ -1916,16 +1957,22 @@ class KeyGrid:
         fx_late = np.zeros(len(late))
         fl = self.flanger
         i = row  # (as the chorus: among the keys of the same copy and oscillator)
-        if fl and math.floor((i + 1) * fl["mix"] + 1e-9) > math.floor(i * fl["mix"] + 1e-9):  # (Mix: this key moves)
+        mix = f["flanger_mix"][src] if "flanger_mix" in self.moved else fl["mix"] if fl else 0.0
+        on = np.floor((i + 1) * mix + 1e-9) > np.floor(i * mix + 1e-9)  # (Mix: this key moves (each repeat's own))
+        if fl and np.any(on):
             # (late by up to Depth and back, counted from the song's start like Random start: a Split keeps it)
-            moved = fl["depth"] * (1.0 - np.cos(2.0 * np.pi * fl["rate"] * (self.left + f["beat"][src]))) / 2.0
+            depth = f["flanger_depth"][src] if "flanger_depth" in self.moved else fl["depth"]
+            moved = depth * (1.0 - np.cos(2.0 * np.pi * fl["rate"] * (self.left + f["beat"][src]))) / 2.0
+            if np.ndim(on):
+                moved = np.where(on, moved, 0.0)
             fx_late = np.where(crushed, fx_late + moved, fx_late)
             late = np.where(crushed, late, late + moved)
         tailed = tail[part]
         tail_u = f["tail_u"][src]  # (the reverb's: more and more scattered)
         if tailed.any():
             later = place + (count * noisy)[part]
-            scatter = self.reverb["scatter"] * 0.5 * tail_u * drawn[np.where(tailed, later, 0)]
+            spread = f["reverb_scatter"][src] if "reverb_scatter" in self.moved else self.reverb["scatter"]
+            scatter = spread * 0.5 * tail_u * drawn[np.where(tailed, later, 0)]
             fx_late = np.where(tailed & crushed, fx_late + scatter, fx_late)
             late = np.where(tailed & ~crushed, late + scatter, late)
         starts = starts + late * waves
@@ -1935,6 +1982,7 @@ class KeyGrid:
             hear = np.where(tailed, each["beat0"][run][part], hear)
         limits = f["limits"][src]
         until = each["until"][run][part]
+        fade = f["echo_fade"][src] if "echo_fade" in self.moved else None  # (the echo's, each repeat's own)
         quiet = np.zeros(len(starts), bool)
         if self.loud:
             trem = self.trem(src)
@@ -1963,7 +2011,8 @@ class KeyGrid:
                 gains * f["level"][src])  # (Blend; OSC B's Level)
             loud = loud * vol
             if tailed.any():  # (the reverb: starting at its level, fading)
-                loud = np.where(tailed, loud * self.reverb["level"] ** 2 * (1.0 - tail_u) ** 3, loud)
+                level = f["reverb_level"][src] if "reverb_level" in self.moved else self.reverb["level"]
+                loud = np.where(tailed, loud * level ** 2 * (1.0 - tail_u) ** 3, loud)
             soft = np.where(number % 2 == 1, 1.0 - f["octave"][src], 1.0)  # (on the velocity itself)
             if self.shaped:  # SUB hits in every wave, each as loud as the waveforms say there (wave_hits)
                 plain = ~np.any([f["has_" + name][src] for name in WAVES], axis=0)
@@ -1984,6 +2033,7 @@ class KeyGrid:
                 starts = np.concatenate([g[1] for g in got])
                 limits, until, hear, fx_late = limits[rows], until[rows], hear[rows], fx_late[rows]
                 grid, crushed, osc = grid[rows], crushed[rows], osc[rows]
+                fade = fade[rows] if fade is not None else None
                 env, mix, soft = loud[rows], np.concatenate([g[2] for g in got]), soft[rows]
                 quiet = vol[rows] < SOFT
             else:
@@ -2006,9 +2056,10 @@ class KeyGrid:
         if self.echo and len(run):  # (the whole sound again, later and quieter: one more line of notes each)
             made = all_starts[0], all_limits[0], all_env[0], all_quiet[0]
             most = self.lift("echo")  # (the compressor after it may bring a quiet one up)
+            fades = self.echo["fade"] if fade is None else fade[keep]
             for i in range(1, int(self.echo["repeats"]) + 1):
-                gain = self.echo["fade"] ** (i / 2.0)  # (loudness goes with the velocity squared)
-                if gain * gain * most < SOFT:
+                gain = fades ** (i / 2.0)  # (loudness goes with the velocity squared)
+                if np.max(gain, initial=0.0) ** 2 * most < SOFT:
                     break
                 shift = i * self.echo["time"] * self.ppq
                 all_starts.append(made[0] + shift)
@@ -2031,9 +2082,8 @@ class KeyGrid:
             if len(oscs) > 1 and qu.any():  # (both oscillators: one too quiet while the other sounds never cuts it)
                 drop = silent_beside(st, li, qu, np.tile(osc[keep], sets))
                 st, li, fa, qu = st[~drop], li[~drop], fa[~drop], qu[~drop]
-            if (self.gains != 1.0).any() or "blend" in self.moved or self.osc2:  # (Blend, OSC B: repeats on one
-                # tick = the loudest one, left
-                # out only if all are)
+            # (Blend, OSC B: repeats on one tick = the loudest one, left out only if all are)
+            if (self.gains != 1.0).any() or "blend" in self.moved or self.osc2:
                 first = np.lexsort((-fa, qu))
                 st, li, fa, qu = st[first], li[first], fa[first], qu[first]
             sq, which = _grid(st, li)
@@ -2070,7 +2120,7 @@ class KeyGrid:
     def lift(self, kind):
         """How many times louder the compressor after `kind` can make something at most (its Gain), else 1: what's
         too quiet to keep is decided after it."""
-        return 10.0 ** (self.comp["gain"] / 20.0) if self.after(kind) else 1.0
+        return 10.0 ** (self.most("compressor_gain", self.comp["gain"]) / 20.0) if self.after(kind) else 1.0
 
     def comp_curve(self):
         """The compressor as a real one works: it listens to the whole sound (every note sounding together, how loud
@@ -2094,7 +2144,8 @@ class KeyGrid:
             lv = lv * (trem[0] + trem[1] * (1.0 + np.cos(2.0 * np.pi * f["turns"])) / 2.0)
         tails = np.repeat(each["tail"], each["n"])
         if tails.any():
-            lv = np.where(tails, lv * self.reverb["level"] ** 2 * (1.0 - f["tail_u"]) ** 3, lv)
+            level = f["reverb_level"] if "reverb_level" in self.moved else self.reverb["level"]
+            lv = np.where(tails, lv * level ** 2 * (1.0 - f["tail_u"]) ** 3, lv)
         ends = each["end"] / self.ppq - self.left
         t0 = float(each["beat0"].min())
         t1 = float(ends.max())
@@ -2104,6 +2155,8 @@ class KeyGrid:
         dt = max(1 / 128, (t1 - t0) / 100000)  # (a step: fine enough for the tremolo, never too many)
         size = int((t1 - t0) / dt) + 2
         power = np.zeros(size)
+        faded = echo and "echo_fade" in self.moved  # (the echo's Fade moved: each step's, by the notes sounding)
+        fades = np.zeros(size) if faded else None
         for r in range(len(self.runs)):  # (each note's loudness at every step it sounds; notes together add up)
             o, n = int(each["offsets"][r]), int(each["n"][r])
             if not n or each["tail"][r] and not self.after("reverb"):
@@ -2111,15 +2164,23 @@ class KeyGrid:
             b, v = f["beat"][o:o + n], lv[o:o + n]
             k0, k1 = int(math.ceil((b[0] - t0) / dt)), int(math.floor((ends[r] - t0) / dt))
             if k1 >= k0:
-                power[k0:k1 + 1] += np.interp(t0 + np.arange(k0, k1 + 1) * dt, b, v) ** 2
+                p = np.interp(t0 + np.arange(k0, k1 + 1) * dt, b, v) ** 2
+                power[k0:k1 + 1] += p
+                if faded:
+                    fades[k0:k1 + 1] += p * np.interp(t0 + np.arange(k0, k1 + 1) * dt, b, f["echo_fade"][o:o + n])
         if echo:  # (the echoes after it count too)
             dry = power.copy()
+            fade = fades / np.maximum(power, 1e-24) if faded else echo["fade"]
             for i in range(1, int(echo["repeats"]) + 1):
                 k = int(round(i * echo["time"] / dt))
                 if k < size:
-                    power[k:] += echo["fade"] ** (2 * i) * dry[:size - k]
+                    power[k:] += (fade[:size - k] if faded else fade) ** (2 * i) * dry[:size - k]
+        # (the knobs as the MOD tab moves them, at each step: by the newest note, as a synth's effects)
+        at = t0 + np.arange(size) * dt
+        thr, ratio, gain = (setting_at(self.hz, f"compressor_{k}", comp[k], at, None) if f"compressor_{k}"
+                            in self.moved else comp[k] for k in ("threshold", "ratio", "gain"))
         db = 10.0 * np.log10(np.maximum(power, 1e-24))
-        want = np.maximum(0.0, db - comp["threshold"]) * (1.0 - 1.0 / comp["ratio"])  # (dB to turn down)
+        want = np.maximum(0.0, db - thr) * (1.0 - 1.0 / ratio)  # (dB to turn down)
         down = np.empty(size)
         a = 1.0 - math.exp(-dt / comp["attack"]) if comp["attack"] > 0 else 1.0
         rel = 1.0 - math.exp(-dt / comp["release"]) if comp["release"] > 0 else 1.0
@@ -2127,7 +2188,7 @@ class KeyGrid:
         for k, w in enumerate(want.tolist()):
             now += (w - now) * (a if w > now else rel)
             down[k] = now
-        return t0, dt, 10.0 ** ((comp["gain"] - down) / 20.0)
+        return t0, dt, 10.0 ** ((gain - down) / 20.0)
 
     def squeezed(self, beat):
         """How many times as loud the compressor makes the sound at these beats (from the left edge)."""
