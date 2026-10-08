@@ -223,6 +223,9 @@ class JoinSplit:
         pair = self.merge_pair()
         if not pair:
             return
+        if any("picture" in self.shapes[i] for i in pair):  # (user: an image keeps its own colours, so not merged)
+            self.status.config(text=tr("join_split.merge_no_image"))
+            return
         got = merged(part_rows([self.shapes[i] for i in pair], self.ppq, self.keys), to_right, self.ppq, self.keys)
         if got is None:
             self.status.config(text=tr("join_split.merge_no_meet"))

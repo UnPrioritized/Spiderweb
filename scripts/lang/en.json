@@ -34,6 +34,7 @@
  "join_split.merged": "Merged notes",
  "join_split.merged_done": "Merged: each key row slid in until it met the other shape's notes.",
  "join_split.merge_no_meet": "No key row of these shapes meets the other's notes: nothing merged.",
+ "join_split.merge_no_image": "Images can't be merged (they keep their own colours): nothing merged.",
  "join_split.merge_leftovers": "Merge leftovers",
  "join_split.merged_left": "Merged. {n} key rows had nothing to meet: they're a shape of their own now (\"Merge leftovers\").",
  "join_split.joined_shapes_into_one_curve": "Joined {n} shapes into one curve",
