@@ -739,6 +739,8 @@ def clean_mod(mod):
             link = dict(link, to="wave")
         if not (isinstance(link, dict) and link.get("from") in MOD_SOURCES and link.get("to") in MOD_TARGETS):
             continue
+        if link["to"] == f"{link['from']}_rate":  # (an LFO moving its own Rate: never)
+            continue
         a = link.get("amount")
         if (isinstance(a, (int, float)) and not isinstance(a, bool) and math.isfinite(a)
                 and (link["from"], link["to"]) not in seen and len(out["links"]) < MOD_LINKS):
@@ -1048,6 +1050,8 @@ def plain_base(hz, target):
         return lfo.get("tremolo_depth", TREMOLO_DEPTH) if "tremolo" in fx else None
     if target == "vibrato_rate":
         return lfo.get("vibrato_rate", VIBRATO_RATE) if "vibrato" in fx else None
+    if target in LFO_RATES:
+        return (hz.get("mod") or mod_start())["lfo"][MOD_LFOS.index(LFO_RATES[target])]["rate"]
     if target == "sweep_track":
         return lfo.get("sweep_track", 0.0) if "sweep" in fx else None
     if target == "blend":
@@ -1189,10 +1193,13 @@ SPEED_KNOBS = ("vibrato_rate",) + tuple(f"{osc}{k}" for osc in ("", "osc2_") for
 MOD_SETTINGS.update(vibrato_rate=(*LFO["vibrato_rate"], RATE_TOP),
                     **{f"{osc}pulse_rate": (*MODES["pulse"]["rate"][:2], RATE_TOP) for osc in ("", "osc2_")},
                     **{f"{osc}fm_ratio": (*MODES["fm"]["ratio"][:2], MODES["fm"]["ratio"][1]) for osc in ("", "osc2_")})
+# ... and the MOD tab's own LFO 3 / LFO 4 Rate (moved_lfo; never by the LFO itself: clean_mod)
+LFO_RATES = {f"{src}_rate": src for src in MOD_LFOS}
+MOD_SETTINGS.update({name: (*MOD_LFO["rate"][:2], RATE_TOP) for name in LFO_RATES})
 MOD_TARGETS = MOD_LINES + tuple(MOD_SETTINGS)
 # (knobs the engine reads once for a whole note or the whole sound, not for each repeat: KeyGrid.moved leaves them
 # out)
-NOT_EACH = set(TIMED_KNOBS) | {"glide", "curve", "compressor_attack", "compressor_release"}
+NOT_EACH = set(TIMED_KNOBS) | {"glide", "curve", "compressor_attack", "compressor_release", *LFO_RATES}
 
 
 def longest_fall(hz):
@@ -1331,6 +1338,8 @@ def mod_value(hz, src, beat, tone=None):
     if src in MOD_ENVS:
         return env_value(mod["env"][MOD_ENVS.index(src)], beat - s0, np.asarray(end) - s0)
     lfo = mod["lfo"][MOD_LFOS.index(src)]
+    if any(link["to"] == f"{src}_rate" for link in mod.get("links", ())):
+        return moved_lfo(hz, src, beat, tone, s0)
     if lfo["rate"] <= 0:  # (stopped: where a wave starts)
         return np.full(beat.shape, float(line_at(loop_shape(lfo["shape"], 1.0, seed=MOD_LFOS.index(src)), 0.0)))
     every = 1.0 / lfo["rate"]
@@ -1339,6 +1348,33 @@ def mod_value(hz, src, beat, tone=None):
         return line_at(pts, beat - mod.get("phase", 0.0), every)
     u = np.maximum(0.0, beat - s0)
     return line_at(pts, u, every) if lfo["mode"] == "restart" else line_at(pts, np.minimum(u, every))
+
+
+def moved_lfo(hz, src, beat, tone, s0):
+    """mod_value of an LFO whose Rate the MOD tab moves: its waves added up step by step from its note's start (s0;
+    no tone: from the shape's start), so a Rate moving makes it go faster or slower from where it is, never jump.
+    Free: as if it ran at the Rate it starts with until then. The Rate's sources are read with no LFO Rate moved (two
+    LFOs can't move each other round and round)."""
+    mod = hz["mod"]
+    i = MOD_LFOS.index(src)
+    lfo = mod["lfo"][i]
+    s0 = np.broadcast_to(np.asarray(s0, float), beat.shape)
+    start = float(s0.min()) if tone is not None and beat.size else 0.0
+    end = max(start, float(beat.max())) if beat.size else start
+    dt = max(TIME_STEP, (end - start) / 100000)
+    g = start + np.arange(int((end - start) / dt) + 2) * dt
+    plain = dict(hz, mod=dict(mod, links=[link for link in mod["links"] if link["to"] not in LFO_RATES]))
+    sources = {link["from"]: mod_value(plain, link["from"], g, tone) for link in mod["links"]
+               if link["to"] == f"{src}_rate"}
+    rate = setting_at(hz, f"{src}_rate", lfo["rate"], g, tone, sources)
+    turns = np.concatenate([[0.0], np.cumsum(rate[:-1] * dt)])
+    at = np.interp(beat, g, turns)
+    if lfo["mode"] == "free":  # (counted late by "phase", as mod_value's)
+        at = at + rate[0] * (start - mod.get("phase", 0.0))
+    else:
+        at = np.maximum(0.0, at - np.interp(s0, g, turns))
+    pts = cached(hz, ("mod1", src), lambda: loop_shape(lfo["shape"], 1.0, seed=i))
+    return line_at(pts, np.minimum(at, 1.0)) if lfo["mode"] == "once" else line_at(pts, at, 1.0)
 
 
 def loop_on(pts, every):

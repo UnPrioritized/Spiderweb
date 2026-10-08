@@ -2,7 +2,8 @@
 LFO 4: LFO 1 and 2 are the Vibrato and the Tremolo), two more envelopes (ENV 2 / ENV 3: ENV 1 is the Volume box),
 and each note's Velocity and Note, which move knobs over time. Their names are also in the macros' strip on the OSC
 and FX tabs (where the knobs are): drag one onto a knob, as a macro's, to link them; the knob's ring then shows how
-far the source moves it (drag the ring: the amount, down to 0 = unlinked). The knobs in MOD_KNOBS can be moved.
+far the source moves it (drag the ring: the amount, down to 0 = unlinked). The knobs in MOD_KNOBS can be moved; on
+the MOD tab, a box's name dragged onto the other LFO's Rate links it (SOURCE_KNOBS).
 Saved in hz["mod"] (hzbass.clean_mod); the engine moves the lines and settings while the notes are made."""
 
 import copy
@@ -15,9 +16,9 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.hzbass import (MOD_ENV, MOD_ENVS, MOD_LINKS, MOD_NEED_LINE, MOD_SETTINGS, NEUTRAL, WAVES, MOD_LFO_MODES,
-                          MOD_LFO_SHAPES, MOD_LFOS, MOD_SOURCES, TIMINGS, adsr_line, line_at, loop_shape, mod_start,
-                          mod_value, setting_base)
+from notes.hzbass import (LFO_RATES, MOD_ENV, MOD_ENVS, MOD_LINKS, MOD_NEED_LINE, MOD_SETTINGS, NEUTRAL, WAVES,
+                          MOD_LFO_MODES, MOD_LFO_SHAPES, MOD_LFOS, MOD_SOURCES, TIMINGS, adsr_line, line_at, loop_shape,
+                          mod_start, mod_value, setting_base)
 from window.hz_knobs import (BYPASS, KINDS, KNOBS, PERCENTS, UPDOWN, Dial, knob_of, note_name, shown, snap_rate,
                              timed_rates, value_of)
 from window.hz_effects import AMOUNT
@@ -30,7 +31,10 @@ from window.widgets import Scrub, Tooltip
 MOD_KNOBS = dict({"shape": "wave", "octave": "octave", "sustain": "volume", "amount": "pitch",
                   "vibrato_depth": "vibrato", "tremolo_rate": "tremolo", "sweep_start": "sweep", "sweep_end": "sweep",
                   "wah": "wah", "slant": "slant", "groups": "groups", "offpitch": "offpitch", "noisy": "noisy"},
-                 **{key: key for key in MOD_SETTINGS if key in KNOBS})
+                 **{key: key for key in MOD_SETTINGS if key in KNOBS}, **{key: key for key in LFO_RATES})
+# ... of them the MOD tab's own LFO Rate knobs (by (source, knob) in SynthMod.mod_dials): another source's box name
+# dragged onto one links it (never the LFO's own)
+SOURCE_KNOBS = {key: (src, "rate") for key, src in LFO_RATES.items()}
 SOURCE_COLOURS = {"lfo3": "#60a5fa", "lfo4": "#34d399", "env2": "#fb923c", "env3": "#facc15", "velocity": "#a78bfa",
                   "note": "#f87171"}
 LFO_KNOBS = (("rate", "vib_rate"),)
@@ -42,7 +46,7 @@ MATRIX_COLOUR = "#9aa3ae"
 def line_of(key, k):
     """The value a knob's line has with the knob at k (its own 0..100, Pitch Amount -100..100); a knob that makes no
     line: how far round it points (0..1 of its whole turn, the engine's setting_at counts the same)."""
-    if key == "amount" or KNOBS[key][1] in UPDOWN:
+    if key == "amount" or key in KNOBS and KNOBS[key][1] in UPDOWN:
         return 0.5 + k / 200
     if key == "tremolo_rate":  # (the knob goes along a curve: line = rate / TREMOLO, knob = 100 x its square root)
         return (k / 100) ** 2
@@ -52,7 +56,7 @@ def line_of(key, k):
 def knob_of_line(key, v):
     """Where a knob points for its line's value v (0..1)."""
     v = min(1.0, max(0.0, v))
-    if key == "amount" or KNOBS[key][1] in UPDOWN:
+    if key == "amount" or key in KNOBS and KNOBS[key][1] in UPDOWN:
         return (v - 0.5) * 200
     if key == "tremolo_rate":
         return 100 * math.sqrt(v)
@@ -86,6 +90,13 @@ class SynthMod:
             box = self.mod_boxes_of[src] = Box(rows[i // 2], s, source_name(src), SOURCE_COLOURS[src])
             box.pack(side="left", anchor="n", padx=(0, 10))
             Tooltip(box.lamp, tr("hz.synth_tip_mod_lamp"))
+            name = box.title  # (dragged onto the other LFO's Rate: linked, as the strip's names on the OSC tab)
+            name.config(cursor="fleur")
+            name.bind("<ButtonPress-1>", lambda e, src=src: self.mod_press(src))
+            name.bind("<B1-Motion>", self.mod_motion)
+            name.bind("<ButtonRelease-1>", lambda e: self.mod_release())
+            name.bind("<ButtonPress-3>", lambda e, src=src: self.mod_menu(src, e))
+            Tooltip(name, tr("hz.synth_tip_mod_box_name"))
             col = 0
             if src in MOD_LFOS:
                 for what, ids in (("shape", MOD_LFO_SHAPES), ("mode", MOD_LFO_MODES), ("timing", TIMINGS)):
@@ -227,7 +238,8 @@ class SynthMod:
         self.mod_amount_boxes.append(e)
 
     def mod_row_set(self, i, key, value):
-        """A row's source, knob or both-ways changed: one undo step (a source + line linked twice: a ding)."""
+        """A row's source, knob or both-ways changed: one undo step (a source + line linked twice, an LFO on its own
+        Rate: a ding)."""
         links = self.mod_links()
         if i >= len(links):
             return
@@ -240,7 +252,8 @@ class SynthMod:
                 link["bipolar"] = True
         else:
             link[key] = value
-        if any(j != i and (o["from"], o["to"]) == (link["from"], link["to"]) for j, o in enumerate(links)):
+        if link["to"] == f"{link['from']}_rate" or any(  # (an LFO on its own Rate: never, hzbass.clean_mod)
+                j != i and (o["from"], o["to"]) == (link["from"], link["to"]) for j, o in enumerate(links)):
             self.bell()
             self.mod_rows_for = None  # (the row shows the link as it is again)
             return self.show_mod()
@@ -277,7 +290,7 @@ class SynthMod:
         taken = {(link["from"], link["to"]) for link in links}
         for src in MOD_SOURCES:
             for key, to in MOD_KNOBS.items():
-                if (src, to) not in taken:
+                if (src, to) not in taken and to != f"{src}_rate":
                     return self.mod_step(lambda m: m["links"].append({"from": src, "to": to, "amount": LINK_AMOUNT,
                                                                       "knob": key}))
         self.bell()
@@ -356,6 +369,8 @@ class SynthMod:
         for w in (k, e):
             Tooltip(w, tip + "\n" + tr("hz.synth_tip_knob"))
         self.mod_dials[(src, key)], self.mod_vars[(src, key)], self.mod_boxes[(src, key)] = k, var, e
+        if (src, key) in SOURCE_KNOBS.values():  # (another source can move it: its ring dragged, as a synth knob's)
+            k.ring_drag = lambda dy, fine, done, to=f"{src}_{key}": self.ring_drag(to, dy, fine, done)
         if key == "rate":
             self.mod_rate_units = getattr(self, "mod_rate_units", {})
             self.mod_rate_units[src] = (unit_label, tr(unit))
@@ -462,14 +477,37 @@ class SynthMod:
         held = self.macro_held
         if not held:
             return
-        key = self.knob_at(e.x_root, e.y_root)
-        key = key if key in MOD_KNOBS else None
+        key = self.knob_at(e.x_root, e.y_root) or self.source_knob_at(e.x_root, e.y_root)
+        key = key if key in MOD_KNOBS and key != f"{held[0][1]}_rate" else None  # (never an LFO's own Rate)
         if key != held[1]:
             self.macro_hover(held[1], None)
             held[1], held[2] = key, False
             if self.macro_wait:
                 self.after_cancel(self.macro_wait)
             self.macro_wait = self.after(REST_MS, self.mod_arm) if key else None
+
+    def source_knob_at(self, x, y):
+        """The MOD tab's LFO Rate knob (its SOURCE_KNOBS key) at the screen point x, y, if one is showing there."""
+        for key, at in SOURCE_KNOBS.items():
+            k = self.mod_dials[at]
+            if k.winfo_viewable() and inside(k, x, y):
+                return key
+        return None
+
+    def target_dial(self, key):
+        """The knob a link to key shows on: a synth knob, or the MOD tab's LFO Rate."""
+        return self.mod_dials[SOURCE_KNOBS[key]] if key in SOURCE_KNOBS else self.dials[key]
+
+    def macro_hover(self, key, colour):
+        if key and self.target_dial(key).hover != colour:
+            self.target_dial(key).hover = colour
+            self.target_dial(key).draw()
+
+    def knob_label(self, key):
+        """As SynthMacros', the MOD tab's LFO Rate knobs too ("LFO 3: Rate")."""
+        if key in SOURCE_KNOBS:
+            return tr("hz.synth_macro_knob", box=source_name(SOURCE_KNOBS[key][0]), knob=tr("hz.synth_mod_rate"))
+        return super().knob_label(key)
 
     def mod_arm(self):
         self.macro_wait = None
@@ -591,6 +629,7 @@ class SynthMod:
             back = MID if s == src else PANEL
             if name.cget("background") != back:
                 name.config(background=back)
+        self.show_source_rings(src)
         if src is None:
             return
         for i, name in enumerate(self.macro_names):  # (no macro picked meanwhile)
@@ -608,6 +647,22 @@ class SynthMod:
                 reach = knob_of_line(key, v + a)
                 low = knob_of_line(key, v - a) if link.get("bipolar") else None
                 ring = (reach, colour, k.value, low)
+            if ring != k.ring:
+                k.ring = ring
+                k.draw()
+
+    def show_source_rings(self, src):
+        """The MOD tab's LFO Rate knobs: the picked source's ring on them (none while a macro is picked)."""
+        if not hasattr(self, "mod_dials"):  # (not built yet)
+            return
+        mine = {link["to"]: link for link in self.mod_links(src)} if src else {}
+        for key, at in SOURCE_KNOBS.items():
+            k, link = self.mod_dials[at], mine.get(key)
+            ring = None
+            if link is not None:
+                v, a = line_of(key, k.value), link["amount"]
+                ring = (knob_of_line(key, v + a), SOURCE_COLOURS[src], k.value,
+                        knob_of_line(key, v - a) if link.get("bipolar") else None)
             if ring != k.ring:
                 k.ring = ring
                 k.draw()
