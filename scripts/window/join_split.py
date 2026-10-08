@@ -218,28 +218,37 @@ class JoinSplit:
         """Right-click → Gate sensitive merge ▸ Merge to right / left (user; no anchor, anywhere in the menu works):
         to the right = the shape on the left slides right, each key row until it meets the other shape's notes;
         to the left = the shape on the right slides left (notes/merge.py). Both become one custom shape of plain
-        notes (Ctrl+Z: both again)."""
+        notes (Ctrl+Z: both again). Rows with nothing to meet slide by the smallest slide and become a shape of
+        their own right after it, selected alone (user: easy to delete)."""
         pair = self.merge_pair()
         if not pair:
             return
         a, b = (np.asarray(self.notes_of(self.shapes[i]), np.int64).reshape(-1, 4)[:, :4] for i in pair)
         if len(a) and len(b) and comes_from_left(a, b):  # (a = the one on the left)
             a, b = b, a
-        out = gate_merge(b, a, True) if to_right else gate_merge(a, b, False)
-        if not len(out):
-            self.status.config(text=tr("join_split.merge_no_notes"))
+        got = gate_merge(b, a, True) if to_right else gate_merge(a, b, False)
+        if got is None:
+            self.status.config(text=tr("join_split.merge_no_meet"))
             return
-        notes = np.column_stack([out[:, 0], out[:, 1] - out[:, 0], out[:, 2], out[:, 3], np.zeros(len(out), np.int64)])
-        new = clean_shape({**SHAPE_DEFAULTS, **self.defaults, **notes_shape(notes, self.ppq, tr("join_split.merged"))})
+
+        def shape(rows, name):
+            notes = np.column_stack([rows[:, 0], rows[:, 1] - rows[:, 0], rows[:, 2], rows[:, 3],
+                                     np.zeros(len(rows), np.int64)])
+            return clean_shape({**SHAPE_DEFAULTS, **self.defaults, **notes_shape(notes, self.ppq, name)})
+
+        out, rest = got
+        new = [shape(out, tr("join_split.merged"))] + ([shape(rest, tr("join_split.merge_leftovers"))] if len(rest)
+                                                        else [])
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.merge"))
         self.unlink_groups(pair)
         for i in reversed(pair):
             del self.shapes[i]
-        self.shapes.insert(pair[0], new)
-        self.select(pair[0])
+        self.shapes[pair[0]:pair[0]] = new
+        self.select(pair[0] + len(new) - 1)  # (leftovers picked, if any: Delete takes them away)
         self.shapes_changed()
-        self.status.config(text=tr("join_split.merged_done"))
+        self.status.config(text=tr("join_split.merged_left", n=len(np.unique(rest[:, 2]))) if len(rest)
+                           else tr("join_split.merged_done"))
 
     def pieces(self):
         """The selected shapes that are pieces cut from another shape, keeping their notes (sliced.py)."""
