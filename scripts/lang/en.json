@@ -1259,7 +1259,7 @@
  "roll_menu.glue_in_box": "Glue touching notes in the box",
  "roll_menu.remove_glue": "Remove glue",
  "roll_menu.join_shapes_into_one_curve": "Join shapes into one curve",
- "roll_menu.join_shapes_into_one_curve_only": "Join shapes into one curve  (only lines, polylines, freehand strokes, curves and arcs)",
+ "roll_menu.join_shapes_into_one_curve_only": "Join into one curve (lines and curves only)",
  "roll_menu.ctrl_g": "Ctrl+G",
  "roll_menu.split_here": "Split here",
  "roll_menu.make_complete": "Turn into a complete shape",
