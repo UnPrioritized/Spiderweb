@@ -13,7 +13,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.hzbass import MACROS, RACK
-from window.hz_knobs import KINDS, KNOBS, PERCENTS, UPDOWN, Dial, knob_of, value_of
+from window.hz_knobs import KINDS, KNOBS, PERCENTS, UPDOWN, Dial, knob_of, text_key, value_of
 from window.synth_look import ENTRY, HEAD_FONT, MID, PANEL, Box, TEXT, dark_menu
 from window.widgets import Scrub, Tooltip
 
@@ -371,7 +371,7 @@ class SynthMacros:
         """A knob's box and name, e.g. "Tone: End"."""
         box = KNOBS[key][0]
         return tr("hz.synth_macro_knob", box=tr(f"hz.rack_{box}" if box in RACK else f"hz.synth_{box}"),
-                  knob=tr(f"hz.synth_{key}"))
+                  knob=tr(f"hz.synth_{text_key(key)}"))
 
     def unlink(self, i, keys):
         """Macro i no longer moves these knobs (they stay at their own values), one undo step."""

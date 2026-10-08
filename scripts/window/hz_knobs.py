@@ -2,8 +2,10 @@
 lines the Hz bass already has, so everything they do is in the MIDI. A line drawn by hand that the knobs can't have
 made shows them about where it is (with a note); turning one makes new lines from the knobs.
   Volume: Attack, Decay, Sustain, Release = the Volume line once per note, with its sustain point and fall.
-  Wave: one waveform (or the plain tone) at a Shape amount, and Octave below: those lines, flat; Mode (FM, Pulse width,
-  Sync, Growl, Bitcrush) and its knobs (only the picked mode's shown) = hz["mode"] (not lines).
+  OSC A (the Wave box): one waveform (or the plain tone) at a Shape amount, and Octave below: those lines, flat; Mode
+  (FM, Pulse width, Sync, Growl, Bitcrush) and its knobs (only the picked mode's shown) = hz["mode"] (not lines).
+  OSC B (after it): On, Waveform, Plays on (every key / split keys), Shape, Octave, Semi, Fine, Level, its own Mode =
+  hz["osc2"] (not lines; there only while on).
   Pitch: Amount (keys) and Time = the Pitch line once per note, from Amount keys off to the note's tone.
   Vibrato (LFO 1): Timing + Rate (hz["lfo"]), Depth = the Vibrato line, Delay = none that long, then Rise = it
   comes in over that long, once per note.
@@ -28,9 +30,10 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.hzbass import (ARP, ARP_PATTERNS, BLEND, CHORDS, CRUSH, DETUNE, FAST, GLIDE_CURVE, GROUPS, GROWL, LOOP,
-                          MODES, OFF_BOXES, OFF_PITCH, PITCH, RACK, SCALES, SOFT, SUB, TIMINGS, TREMOLO, TREMOLO_DEPTH,
-                          VIBRATO_RATE, VOICES, WAH, WAVES, arpeggiated, blend_gains, glide_left,
-                          clean_arp, clean_extra, clean_mode, clean_voice, copies, group_count, line_at, wave_hits)
+                          MODES, OFF_BOXES, OFF_PITCH, OSC2, PITCH, RACK, SCALES, SOFT, SUB, TIMINGS, TREMOLO,
+                          TREMOLO_DEPTH, VIBRATO_RATE, VOICES, WAH, WAVES, arpeggiated, blend_gains, glide_left,
+                          clean_arp, clean_extra, clean_mode, clean_voice, copies, group_count, line_at, osc2_shift,
+                          wave_hits)
 from roll.roll_shared import NOTE_NAMES
 from window.hz_effects import AMOUNT, FX_COLOR
 from window.synth_look import (DIM, EDGE, ENTRY, GRID, MID, PANEL, PIC, TEXT, Box, bright, dark_list, mix)
@@ -66,15 +69,17 @@ KINDS = {"time": ("hz.synth_beats", 0.0, TIME_MOST, (0.05, 0.25, 0.01), TIME_KNO
                        (1, 6, 0.1), None),
          "comp_ratio": ("hz.synth_to_one", RACK["compressor"]["ratio"][0], RACK["compressor"]["ratio"][1],
                         (0.5, 2, 0.1), RACK["compressor"]["ratio"][1]),
-         "gain": ("hz.synth_db", RACK["compressor"]["gain"][0], RACK["compressor"]["gain"][1], (1, 6, 0.1), None)}
+         "gain": ("hz.synth_db", RACK["compressor"]["gain"][0], RACK["compressor"]["gain"][1], (1, 6, 0.1), None),
+         "osc_octave": (None, OSC2["octave"][0], OSC2["octave"][1], (1, 1, 1), None),
+         "fine": ("hz.synth_cents", OSC2["fine"][0], OSC2["fine"][1], (1, 10, 0.1), None)}
 PERCENTS = ("percent", "width", "gate", "swing", "bend")  # (kept 0..1, shown and typed in %)
-UPDOWN = ("keys", "bend")  # (knobs with 0 in the middle)
+UPDOWN = ("keys", "bend", "osc_octave", "fine")  # (knobs with 0 in the middle)
 # the LFO boxes' Rate knobs that can move by note lengths (Timing dropdown; hzbass.TIMINGS), and how a timing's rates
 # are to the plain note lengths' (1/4 = 1 a beat)
 TIMED = {"vibrato_rate": "vibrato_timing", "tremolo_rate": "tremolo_timing"}
 TIMING_TIMES = {"straight": 1.0, "triplet": 1.5, "dotted": 2 / 3}
 NOTE_RATES = tuple(2.0 ** i for i in range(-4, 7))  # (times a beat: 4 bars' notes .. 1/256 notes)
-COUNTS = ("groups", "voices", "every", "repeats", "octaves")  # (whole numbers)
+COUNTS = ("groups", "voices", "every", "repeats", "octaves", "osc_octave")  # (whole numbers)
 # the Wave box's modes (hzbass.MODES): their knobs (knob = mode_setting) and kinds; only the picked mode's are shown
 MODE_KNOBS = {"fm": (("fm_depth", "percent"), ("fm_ratio", "ratio"), ("fm_time", "time")),
               "pulse": (("pulse_width", "width"), ("pulse_rate", "vib_rate")),
@@ -82,6 +87,7 @@ MODE_KNOBS = {"fm": (("fm_depth", "percent"), ("fm_ratio", "ratio"), ("fm_time",
               "growl": (("growl_amount", "percent"), ("growl_every", "every")),
               "crush": (("crush_amount", "percent"),)}
 MODE_NAMES = ("off",) + tuple(MODE_KNOBS)
+OSC2_KNOBS = (("shape", "percent"), ("octave", "osc_octave"), ("semi", "keys"), ("fine", "fine"), ("level", "percent"))
 # the boxes and their knobs: (knob, kind, value at the start / a middle-click); rows of boxes
 BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain", "percent", 1.0),
                     ("release", "time", 0.0)),
@@ -99,8 +105,12 @@ BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain",
                        ("noisy", "percent", 0.0)),
          "voice": (("voices", "voices", 1.0), ("detune", "cents", 20.0), ("blend", "percent", BLEND),
                    ("random", "percent", 0.0), ("glide", "time", 0.0), ("curve", "bend", GLIDE_CURVE)),
-         "arp": tuple((f"arp_{k}", k, start) for k, (_, _, start) in ARP.items())}
-ROWS = (("volume", "wave", "pitch", "tone"), ("vibrato", "tremolo", "character", "voice"), ("arp",))
+         "arp": tuple((f"arp_{k}", k, start) for k, (_, _, start) in ARP.items()),
+         # (OSC B: its knobs, then its own Mode's, named osc2_ + OSC A's)
+         "osc2": tuple((f"osc2_{k}", kind, OSC2[k][2]) for k, kind in OSC2_KNOBS)
+         + tuple((f"osc2_{key}", kind, MODES[m][key.split("_", 1)[1]][2]) for m, knobs in MODE_KNOBS.items()
+                 for key, kind in knobs)}
+ROWS = (("volume", "wave", "osc2", "pitch"), ("vibrato", "tremolo", "tone", "character"), ("voice", "arp"))
 # the Effects tab's effects (hzbass.RACK, window/hz_rack.py): their knobs (knob = effect_setting) and kinds
 RACK_KNOBS = {"chorus": (("chorus_depth", "cents"), ("chorus_rate", "vib_rate")),
               "flanger": (("flanger_rate", "vib_rate"), ("flanger_depth", "percent"), ("flanger_mix", "percent")),
@@ -115,27 +125,34 @@ KNOBS.update({key: (fx, kind, RACK[fx][key.split("_", 1)[1]][2]) for fx, knobs i
 COLOURS = {k: bright(v) for k, v in {
     "volume": FX_COLOR["volume"], "wave": FX_COLOR["sine"], "pitch": FX_COLOR["pitch"], "vibrato": FX_COLOR["vibrato"],
     "tremolo": FX_COLOR["tremolo"], "tone": FX_COLOR["sweep"], "character": FX_COLOR["slant"], "voice": "#3a6ee0",
-    "arp": "#c0398a"}.items()}
+    "arp": "#c0398a", "osc2": "#2f9e6e"}.items()}
 # the lines each box writes (its header light is lit while one of them changes the sound) and its own setting
 BOX_LINES = {"volume": ("volume",), "wave": tuple(WAVES) + ("octave",), "pitch": ("pitch",), "vibrato": ("vibrato",),
              "tremolo": ("tremolo",), "tone": ("sweep", "wah"), "character": ("slant", "offpitch", "noisy", "groups")}
-BOX_EXTRA = {"wave": "mode", "voice": "voice", "arp": "arp"}
+BOX_EXTRA = {"wave": "mode", "voice": "voice", "arp": "arp", "osc2": "osc2"}
 # the boxes a click on the light / name switches off and on (Bypass: the lines in hz["off"], the own setting moved to
 # hz["bypass"]; the Arpeggio's click is its On instead)
 BYPASS = OFF_BOXES
 PICTURES = {"volume": (260, 90), "wave": (200, 90), "pitch": (150, 90), "vibrato": (230, 60), "tremolo": (150, 60),
-            "tone": (200, 90), "character": (220, 60), "voice": (230, 60), "arp": (260, 60)}
+            "tone": (200, 90), "character": (220, 60), "voice": (230, 60), "arp": (260, 60), "osc2": (200, 90)}
 CHARACTER = ("slant", "offpitch", "noisy")  # (the Character box's lines that are just their value; Groups is counted)
 WAVE_NAMES = ("none",) + tuple(WAVES)
 # every knob and choice where it starts; those that do nothing right now are kept in hz["kept"] (hzbass.clean_kept)
 START = dict({key: start for key, (_, _, start) in KNOBS.items()}, wave="none", sweep=False, same=False,
              touching=False, legato=False, mode="off", rack=(), rack_off=(), arp_on=False, arp_pattern="up",
-             arp_chord="placed", arp_scale="off", arp_root=0, vibrato_timing="free", tremolo_timing="free")
+             arp_chord="placed", arp_scale="off", arp_root=0, vibrato_timing="free", tremolo_timing="free",
+             osc2_on=False, osc2_wave="none", osc2_split=False, osc2_mode="off")
 ARP_CHOICES = ("pattern", "chord", "scale", "root")  # (the Arpeggio box's dropdowns)
 ARP_KEYS = ARP_CHOICES + tuple(ARP)  # (all it has)
-KEEP = tuple(KNOBS) + ("same", "touching") + tuple(f"arp_{w}" for w in ARP_CHOICES)
+KEEP = (tuple(KNOBS) + ("same", "touching", "osc2_split") + tuple(f"arp_{w}" for w in ARP_CHOICES)
+        + ("osc2_wave", "osc2_mode"))
 CHOICES = {"arp_pattern": ARP_PATTERNS, "arp_chord": tuple(CHORDS), "arp_scale": ("off",) + tuple(SCALES),
-           "arp_root": tuple(range(12))}
+           "arp_root": tuple(range(12)), "osc2_wave": WAVE_NAMES, "osc2_mode": MODE_NAMES}
+
+
+def text_key(key):
+    """The knob whose name and tip a knob shows: OSC B's Mode knobs are OSC A's (osc2_fm_depth: fm_depth)."""
+    return key[5:] if key.startswith("osc2_") and key.split("_")[1] in MODE_KNOBS else key
 
 
 def kept_value(key, v):
@@ -144,7 +161,7 @@ def kept_value(key, v):
         return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v in range(12) else None
     if key in CHOICES:
         return v if v in CHOICES[key] else None
-    if key in ("same", "touching"):
+    if key in ("same", "touching", "osc2_split"):
         return v if isinstance(v, bool) else None
     if isinstance(v, bool) or not isinstance(v, float):
         return None
@@ -405,6 +422,20 @@ def read_arp(win, was):
             **{f"arp_{k}": v for k, v in arp.items()}}, True
 
 
+def read_osc2(win, was):
+    """The OSC B box: ({osc2_on, osc2_wave, osc2_split, osc2_mode, its knobs and its mode's}, True) (off: its
+    settings kept as they were; no mode: the modes' knobs too)."""
+    b = win.extra.get("osc2")
+    if not b:
+        return {"osc2_on": False}, True
+    mode = b.get("mode") or {}
+    got = {"osc2_on": True, "osc2_wave": b["wave"], "osc2_split": bool(b.get("split")),
+           "osc2_mode": mode.get("kind", "off"), **{f"osc2_{k}": b[k] for k in OSC2}}
+    for key, _ in MODE_KNOBS.get(got["osc2_mode"], ()):
+        got[f"osc2_{key}"] = mode[key.split("_", 1)[1]]
+    return got, True
+
+
 def read_rack(win, was):
     """The Effects tab: {rack: its effects in order, rack_off: those switched off, each one's knobs} (an effect not
     there: its knobs kept as they were)."""
@@ -418,7 +449,7 @@ def read_rack(win, was):
 
 READ = {"volume": read_volume, "wave": read_wave, "pitch": read_pitch, "vibrato": read_vibrato,
         "tremolo": read_tremolo, "tone": read_tone, "character": read_character, "voice": read_voice,
-        "arp": read_arp}
+        "arp": read_arp, "osc2": read_osc2}
 
 
 def paint_knob(k, start, turn, arc_from, arc):
@@ -579,11 +610,9 @@ def knob_of(kind, v):
     most = KINDS[kind][4]
     if most:
         return min(100.0, 100 * math.sqrt(max(0.0, v) / most))
-    if kind == "keys":
-        return max(-100.0, min(100.0, 100 * v / PITCH))
-    if kind == "bend":
-        return max(-100.0, min(100.0, 100 * v))
     lo, hi = KINDS[kind][1:3]
+    if kind in UPDOWN:  # (-hi .. hi)
+        return max(-100.0, min(100.0, 100 * shown(kind, v) / hi))
     return max(0.0, min(100.0, 100 * (shown(kind, v) - lo) / (hi - lo)))
 
 
@@ -592,8 +621,10 @@ def value_of(kind, k):
     unit, lo, hi, _, most = KINDS[kind]
     if most:
         return max(lo, round(most * (k / 100) ** 2, 3))
-    if kind == "keys":
-        return float(round(PITCH * k / 100))
+    if kind in ("keys", "osc_octave"):  # (whole keys / octaves)
+        return float(round(hi * k / 100))
+    if kind == "fine":
+        return round(hi * k / 100, 1)
     if kind in ("percent", "bend"):
         return k / 100
     x = lo + (hi - lo) * k / 100
@@ -613,7 +644,8 @@ class SynthKnobs:
         s = self.s
         self.turning = None  # while a knob is turned: the lines from before (FxPane.state)
         self.vals = dict(START)  # (rack / rack_off: the Effects tab's effects in order, those switched off)
-        self.mode_cells = {}  # the Wave box's mode -> its knobs' cells (only the picked mode's shown)
+        self.mode_cells = {}  # OSC A's (wave) / B's box -> mode -> its knobs' cells (only the picked mode's shown)
+        self.mode_col, self.mode_picks, self.mode_shown = {}, {}, {}  # (... where they start, the Mode dropdowns)
         self.dials, self.dial_vars, self.dial_boxes, self.box_says, self.pics = {}, {}, {}, {}, {}
         self.unit_labels, self.timing_picks = {}, {}  # (each knob's unit beside its box; the LFO boxes' Timing)
         self.pic_for = {}  # what each picture was drawn for
@@ -623,7 +655,8 @@ class SynthKnobs:
         self.boxes, self.laid = {}, None  # show on top of them)
         for name, knobs in BOXES.items():
             outer = self.boxes[name] = Box(page, s, tr(f"hz.synth_{name}"), COLOURS[name])
-            Tooltip(outer.lamp, tr("hz.synth_tip_arp_on" if name == "arp" else "hz.synth_tip_lamp"))
+            Tooltip(outer.lamp, tr({"arp": "hz.synth_tip_arp_on", "osc2": "hz.synth_tip_osc2_on"}.get(
+                name, "hz.synth_tip_lamp")))
             if name in BYPASS:
                 for w in (outer.lamp, outer.title):
                     w.config(cursor="hand2")
@@ -645,6 +678,8 @@ class SynthKnobs:
                 col = 1
             if name == "arp":
                 col = self.arp_cells(outer)
+            if name == "osc2":
+                col = self.osc2_cells(outer)
             if name == "tone":
                 cell = ttk.Frame(box, style="Synth.Box.TFrame")
                 cell.grid(row=0, column=0, padx=6, sticky="n")
@@ -660,15 +695,15 @@ class SynthKnobs:
                 self.timing_cell(box, name)
                 col = 1
             for key, kind, start in knobs:
-                mode = key.split("_")[0]
-                if name == "wave" and mode in MODE_KNOBS:  # (Mode after Octave below, then the picked mode's knobs)
-                    if not self.mode_cells:
-                        self.mode_cell(box, col)
-                        self.mode_col = col + 1
-                    at = self.mode_col + [k for k, _ in MODE_KNOBS[mode]].index(key)
+                mode = text_key(key).split("_")[0]
+                if name in ("wave", "osc2") and mode in MODE_KNOBS:  # (Mode after Octave below / Level, then the
+                    if name not in self.mode_cells:  # picked mode's knobs)
+                        self.mode_cell(box, col, name)
+                        self.mode_col[name] = col + 1
+                    at = self.mode_col[name] + [k for k, _ in MODE_KNOBS[mode]].index(text_key(key))
                     cell = self.dial_cell(box, at, key, kind, start, COLOURS[name])
                     cell.grid_remove()
-                    self.mode_cells.setdefault(mode, []).append(cell)
+                    self.mode_cells[name].setdefault(mode, []).append(cell)
                     col = max(col, at + 1)
                     continue
                 self.dial_cell(box, col, key, kind, start, COLOURS[name])
@@ -749,7 +784,7 @@ class SynthKnobs:
         """A knob with its name over it and its value's box under it."""
         cell = ttk.Frame(box, style="Synth.Box.TFrame")
         cell.grid(row=0, column=col, padx=6)
-        ttk.Label(cell, text=tr(f"hz.synth_{key}"), style="Synth.Box.TLabel").pack()
+        ttk.Label(cell, text=tr(f"hz.synth_{text_key(key)}"), style="Synth.Box.TLabel").pack()
         changed = lambda v, done: self.on_dial(key, v, done)
         if kind in UPDOWN:  # (up or down: 0 in the middle)
             k = UpDown(cell, self.s, changed, colour, size=46, start=knob_of(kind, start))
@@ -769,8 +804,11 @@ class SynthKnobs:
         e.bind("<Return>", lambda ev: (self.on_box(key), self.keyboard_back(e), "break")[2])
         e.bind("<FocusOut>", lambda ev: self.on_box(key))
         Scrub(self.app, [(e, var, lambda: self.on_box(key, stepped=True))], steps, lo, hi, drag_box=True)
+        tip = tr(f"hz.synth_tip_{text_key(key)}")
+        if text_key(key) != key:  # (OSC B's Mode knobs)
+            tip = tr("hz.synth_tip_osc2_mode") + "\n" + tip
         for w in (k, e):
-            Tooltip(w, tr(f"hz.synth_tip_{key}") + "\n" + tr("hz.synth_tip_knob"))
+            Tooltip(w, tip + "\n" + tr("hz.synth_tip_knob"))
         return cell
 
     def timing_cell(self, box, name):
@@ -815,21 +853,49 @@ class SynthKnobs:
         if self.fx.now() != before:
             self.commit_fx(before)
 
-    def mode_cell(self, box, col):
-        """The Wave box's Mode dropdown (Off, FM, Pulse width, Sync, Growl, Bitcrush)."""
+    def mode_cell(self, box, col, name):
+        """OSC A's (the Wave box's) or OSC B's Mode dropdown (Off, FM, Pulse width, Sync, Growl, Bitcrush)."""
         cell = ttk.Frame(box, style="Synth.Box.TFrame")
         cell.grid(row=0, column=col, padx=6, sticky="n")
         ttk.Label(cell, text=tr("hz.synth_mode"), style="Synth.Box.TLabel").pack()
-        self.mode_names = [tr(f"hz.synth_mode_{m}") for m in MODE_NAMES]
-        self.mode_var = tk.StringVar(value=self.mode_names[0])
-        cb = ttk.Combobox(cell, textvariable=self.mode_var, values=self.mode_names, state="readonly", width=11,
-                          style="Synth.TCombobox")
+        names = [tr(f"hz.synth_mode_{m}") for m in MODE_NAMES]
+        var = tk.StringVar(value=names[0])
+        cb = ttk.Combobox(cell, textvariable=var, values=names, state="readonly", width=11, style="Synth.TCombobox")
         dark_list(cb)
         cb.pack(pady=(12, 0))
+        key = "mode" if name == "wave" else "osc2_mode"
         cb.bind("<<ComboboxSelected>>", lambda e: (
-            self.change("wave", "mode", MODE_NAMES[self.mode_names.index(self.mode_var.get())]),
+            self.sweep_on(key), self.change(name, key, MODE_NAMES[names.index(var.get())]),
             self.keyboard_back(e.widget)))
-        Tooltip(cb, tr("hz.synth_tip_mode"))
+        Tooltip(cb, (tr("hz.synth_tip_osc2_mode") + "\n" if name == "osc2" else "") + tr("hz.synth_tip_mode"))
+        self.mode_cells[name] = {}
+        self.mode_picks[name] = (var, names, key)
+
+    def osc2_cells(self, outer):
+        """The OSC B box's On (the light on its header, or its name: a click switches it) and, in column 0, its
+        Waveform and Plays on dropdowns: the next free column."""
+        def switch(e):
+            self.change("osc2", "osc2_on", not self.vals["osc2_on"])
+        for w in (outer.lamp, outer.title):
+            w.config(cursor="hand2")
+            w.bind("<ButtonPress-1>", switch)
+        cell = ttk.Frame(outer.body, style="Synth.Box.TFrame")
+        cell.grid(row=0, column=0, padx=6, sticky="n")
+        picks = (("wave_kind", "osc2_wave", self.wave_names, WAVE_NAMES, "hz.synth_tip_osc2_wave"),
+                 ("osc2_plays", "osc2_split", [tr("hz.synth_osc2_every"), tr("hz.synth_osc2_split")], (False, True),
+                  "hz.synth_tip_osc2_plays"))
+        for i, (label, key, names, ids, tip) in enumerate(picks):
+            ttk.Label(cell, text=tr(f"hz.synth_{label}"), style="Synth.Box.TLabel").pack(pady=(4 if i else 0, 0))
+            var = tk.StringVar(value=names[0])
+            cb = ttk.Combobox(cell, textvariable=var, values=names, state="readonly", width=9, style="Synth.TCombobox")
+            dark_list(cb)
+            cb.pack(pady=(2, 0))
+            cb.bind("<<ComboboxSelected>>", lambda e, key=key, names=names, ids=ids, var=var: (
+                self.sweep_on(key), self.change("osc2", key, ids[names.index(var.get())]),
+                self.keyboard_back(e.widget)))
+            Tooltip(cb, tr(tip))
+            setattr(self, f"{key}_pick", (var, names, ids))
+        return 1
 
     # ------------------------------------------------------------ changes
 
@@ -907,11 +973,13 @@ class SynthKnobs:
             self.box_text[key] = var.get()
 
     def sweep_on(self, key):
-        """Turning one of Sweep's knobs puts it on (its On box ticked); the Arpeggio's the same."""
+        """Turning one of Sweep's knobs puts it on (its On box ticked); the Arpeggio's and OSC B's the same."""
         if key.startswith("sweep_"):
             self.vals["sweep"] = True
         if key.startswith("arp_"):
             self.vals["arp_on"] = True
+        if key.startswith("osc2_"):
+            self.vals["osc2_on"] = True
 
     def arp_cells(self, outer):
         """The Arpeggio box's On (the light on its header, or its name: a click switches it) and Pattern dropdown
@@ -1018,6 +1086,13 @@ class SynthKnobs:
                 self.fxl["wah"] = [[0.0, v["wah"]]]
         elif box == "arp":
             self.set_extra("arp", {k: v[f"arp_{k}"] for k in ARP_KEYS} if v["arp_on"] else None)
+        elif box == "osc2":
+            m = v["osc2_mode"]
+            self.set_extra("osc2", {"wave": v["osc2_wave"], "split": v["osc2_split"],
+                                    **{k: v[f"osc2_{k}"] for k in OSC2},
+                                    "mode": {"kind": m, **{key.split("_", 1)[1]: v[f"osc2_{key}"]
+                                                           for key, _ in MODE_KNOBS.get(m, ())}}}
+                           if v["osc2_on"] else None)
         elif box in RACK:
             self.write_rack()
         else:
@@ -1165,15 +1240,20 @@ class SynthKnobs:
             name = names[ids.index(self.vals[f"arp_{what}"])]
             if var.get() != name:
                 var.set(name)
-        name = self.mode_names[MODE_NAMES.index(self.vals["mode"])]
-        if self.mode_var.get() != name:
-            self.mode_var.set(name)
-        if getattr(self, "mode_shown", None) != self.vals["mode"]:  # (the Wave box changes width: rows laid again)
-            self.mode_shown = self.vals["mode"]
-            for mode, cells in self.mode_cells.items():
-                for cell in cells:
-                    grid_shown(cell, mode == self.vals["mode"])
-            self.after_idle(self.fit_knobs)
+        for box, (var, names, key) in self.mode_picks.items():
+            mode = self.vals[key]
+            if var.get() != names[MODE_NAMES.index(mode)]:
+                var.set(names[MODE_NAMES.index(mode)])
+            if self.mode_shown.get(box) != mode:  # (the box changes width: rows laid again)
+                self.mode_shown[box] = mode
+                for m, cells in self.mode_cells[box].items():
+                    for cell in cells:
+                        grid_shown(cell, m == mode)
+                self.after_idle(self.fit_knobs)
+        for key in ("osc2_wave", "osc2_split"):
+            var, names, ids = getattr(self, f"{key}_pick")
+            if var.get() != names[ids.index(self.vals[key])]:
+                var.set(names[ids.index(self.vals[key])])
         for box, (var, names) in self.timing_picks.items():
             timing = self.vals[f"{box}_timing"]
             if var.get() != names[TIMINGS.index(timing)]:
@@ -1221,6 +1301,7 @@ class SynthKnobs:
                    self.pv["sweep"] if box == "tone" else None,
                    (self.pv["same"], self.pv["touching"]) if box == "voice" else None,
                    (self.pv["arp_on"], *(self.pv[f"arp_{w}"] for w in ARP_CHOICES)) if box == "arp" else None,
+                   tuple(self.pv[k] for k in ("osc2_on", "osc2_wave", "osc2_mode")) if box == "osc2" else None,
                    self.pic_colour(box) if box in BYPASS else None,
                    c.winfo_width(),
                    c.winfo_height())
@@ -1276,16 +1357,17 @@ class SynthKnobs:
                       font=font)
         c.create_line(*[v for p in xy for v in p], fill=colour, width=max(2, round(2 * s)))
 
-    def wave_hits(self):
+    def wave_hits(self, osc=""):
         """Two waves' hits at a note's start as the notes come out (hzbass.wave_hits, as KeyGrid makes them; Growl
-        and Bitcrush for an A1): [(place 0..2, how hard 0..1)], the soft ones left out."""
-        v = self.pv
+        and Bitcrush for an A1): [(place 0..2, how hard 0..1)], the soft ones left out. osc = "osc2_": OSC B's."""
+        v = {k[len(osc):]: x for k, x in self.pv.items() if k.startswith(osc)}
         mode = clean_mode({"kind": v["mode"], **{key.split("_", 1)[1]: v[key] for key, _ in MODE_KNOBS.get(v["mode"], ())}})
         number, since = np.arange(2), np.zeros(2)
         wave = v["wave"] != "none"
         shapes = [(WAVES[v["wave"]], np.full(2, v["shape"]), np.ones(2, bool))] if wave else []
         where, mix = wave_hits(shapes, np.full(2, not wave), number, since, mode)
-        mix = mix * np.where(number % 2 == 1, 1.0 - v["octave"], 1.0)[:, None]  # (every other wave softer)
+        if not osc:  # (Octave below: every other wave softer)
+            mix = mix * np.where(number % 2 == 1, 1.0 - v["octave"], 1.0)[:, None]
         at = number[:, None] + where
         if mode.get("kind") == "growl":
             at = at + GROWL * mode["amount"] * (number % mode["every"] / (mode["every"] - 1))[:, None]
@@ -1296,14 +1378,29 @@ class SynthKnobs:
         keep = (mix >= SOFT) & (at < 2.0)
         return [(float(a), float(x)) for a, x in zip(at[keep], mix[keep])]
 
-    def draw_wave(self, c):
-        """Two waves' notes, one bar each, as tall as it hits (and how many notes a wave takes)."""
+    def draw_osc2(self, c):
+        """OSC B's two waves (as OSC A's), how far it's tuned from the note, or that it's off."""
+        v = self.pv
+        self.draw_wave(c, "osc2_")
+        keys = osc2_shift({k: v[f"osc2_{k}"] for k in OSC2})
+        font = ("Segoe UI", 7)
+        if not v["osc2_on"]:
+            c.create_text(c.winfo_width() / 2, c.winfo_height() / 2, text=tr("hz.synth_osc2_off"), fill=TEXT,
+                          font=font)
+        elif abs(keys) > 1e-9:
+            c.create_text(3 * self.s, 2 * self.s, text=tr("hz.synth_osc2_tune", keys=("+" if keys > 0 else "")
+                                                         + fmt(round(keys, 2))), anchor="nw", fill=DIM, font=font)
+
+    def draw_wave(self, c, osc=""):
+        """Two waves' notes, one bar each, as tall as it hits (and how many notes a wave takes); osc = "osc2_": OSC
+        B's (grey while it's off)."""
         s = self.s
         w, h, pad = c.winfo_width(), c.winfo_height(), 8 * s
-        hits = self.wave_hits()
+        hits = self.wave_hits(osc)
         bw = (w - 2 * pad) / (2 * SUB)
-        colour = bright(FX_COLOR[self.pv["wave"]]) if self.pv["wave"] in FX_COLOR else DIM
-        if self.box_off("wave"):
+        wave = self.pv[osc + "wave"]
+        colour = bright(FX_COLOR[wave]) if wave in FX_COLOR else DIM
+        if self.box_off("wave") if not osc else not self.pv["osc2_on"]:
             colour = MID
         c.create_line(pad + (w - 2 * pad) / 2, pad, pad + (w - 2 * pad) / 2, h - pad, fill=MID, dash=(3, 3))
         for p, x in hits:

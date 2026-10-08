@@ -262,6 +262,7 @@ class SynthWindow(PresetBar, SynthMacros, SynthRack, SynthKnobs, tk.Toplevel):
         c = self.knobs_canvas
         if not self.winfo_exists() or c.winfo_width() < 50:
             return
+        self.knobs.update_idletasks()  # (a box that just grew, e.g. a Mode's knobs shown: its new width first)
         self.lay_boxes(c.winfo_width() - 20)
         need, have = self.knobs.winfo_reqheight(), c.winfo_height()
         c.itemconfigure(self.knobs_win, width=c.winfo_width(), height=max(need, have))
