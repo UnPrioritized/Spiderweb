@@ -3,6 +3,7 @@
 
 import ctypes
 import heapq
+import os
 import sys
 import threading
 import time
@@ -16,6 +17,7 @@ from notes.engine import CHANNELS
 
 MAPPER_NAME = "Windows default (MIDI Mapper)"
 BUILTIN = "Built-in BASSMIDI"  # (the user's name for it; like a device's name it's saved, so not translated)
+KDMAPI = "OmniMIDI (KDMAPI)"  # (OmniMIDI's own direct way in, skipping Windows' MIDI layers; user's name, saved)
 DEFAULT_DEVICE = MAPPER_NAME if WINDOWS else BUILTIN
 MAPPER = 0xFFFFFFFF
 
@@ -50,9 +52,43 @@ def _winmm_devices():
     return out
 
 
+def _kdmapi_path():
+    """Where OmniMIDI's library is, or None. Windows: the system folder (a 32-bit Python is sent to SysWOW64 by
+    Windows itself, so the bitness matches). Linux (OmniMIDI 2's libOmniMIDI.so, untested): the usual places."""
+    if WINDOWS:
+        path = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "OmniMIDI.dll")
+        return path if os.path.isfile(path) else None
+    import ctypes.util
+    return ctypes.util.find_library("OmniMIDI")
+
+
+_kdmapi = None  # (OmniMIDI's library once loaded: loaded at the first open, after our BASS, see MidiOut.open)
+
+
+def _load_kdmapi():
+    """OmniMIDI's library with KDMAPI's calls set up, or raises OSError / AttributeError."""
+    global _kdmapi
+    if _kdmapi is None:
+        path = _kdmapi_path()
+        if not path:
+            raise OSError("not found")
+        lib = (ctypes.WinDLL if WINDOWS else ctypes.CDLL)(path)
+        for f in ("IsKDMAPIAvailable", "InitializeKDMAPIStream", "TerminateKDMAPIStream"):
+            getattr(lib, f).restype = ctypes.c_int
+            getattr(lib, f).argtypes = []
+        lib.SendDirectData.argtypes = [ctypes.c_uint32]
+        lib.SendDirectData.restype = None
+        lib.ResetKDMAPIStream.argtypes = []
+        lib.ResetKDMAPIStream.restype = None
+        _kdmapi = lib
+    return _kdmapi
+
+
 def devices():
-    """Names of the MIDI-OUT devices: Windows' default first, then the built-in synth."""
-    return [MAPPER_NAME, BUILTIN] + _winmm_devices() if _winmm else [BUILTIN]
+    """Names of the MIDI-OUT devices: Windows' default first, then the built-in synth, OmniMIDI's direct way when
+    it's installed, then Windows' devices."""
+    kd = [KDMAPI] if _kdmapi_path() else []
+    return [MAPPER_NAME, BUILTIN] + kd + _winmm_devices() if _winmm else [BUILTIN] + kd
 
 
 def keep_saved(name):
@@ -82,6 +118,21 @@ class MidiOut:
                 return str(e)
             self.name = name
             return None
+        if name == KDMAPI:
+            from files.synth import SynthError, _load
+            try:
+                _load()  # (ours first, as for the Windows devices below)
+            except SynthError:
+                pass
+            try:
+                lib = _load_kdmapi()
+                ok = lib.IsKDMAPIAvailable() and lib.InitializeKDMAPIStream()
+            except (OSError, AttributeError):
+                ok = False
+            if not ok:
+                return tr("playback.kdmapi_failed")
+            self.handle, self.name = lib, name
+            return None
         if not _winmm:
             return tr("playback.midi_playback_only_works_on_windows")
         names = _winmm_devices()
@@ -108,6 +159,8 @@ class MidiOut:
         if h:
             if self.name == BUILTIN:
                 h.send(msg)
+            elif self.name == KDMAPI:
+                h.SendDirectData(msg)
             else:
                 _winmm.midiOutShortMsg(h, msg)
 
@@ -120,6 +173,9 @@ class MidiOut:
         if self.handle:
             if self.name == BUILTIN:
                 self.handle.close()
+            elif self.name == KDMAPI:
+                self.handle.ResetKDMAPIStream()
+                self.handle.TerminateKDMAPIStream()
             else:
                 _winmm.midiOutReset(self.handle)
                 _winmm.midiOutClose(self.handle)

@@ -1189,6 +1189,7 @@
  "pattern_dialog.edited_by_hand": "Edited by hand: every loop along the line follows this one.",
  "pattern_dialog.one_loop": "One loop, as long as it is on the curve. Drag a point to change it by hand; double-click the line to add a point, right-click a point to remove it. Alt + drag: a sharp corner. Wheel = zoom, drag empty space = move.",
  "playback.device": "Device {i}",
+ "playback.kdmapi_failed": "Couldn't start OmniMIDI (KDMAPI). Check that OmniMIDI is installed and works, or pick another MIDI out under Project.",
  "playback.midi_playback_only_works_on_windows": "This MIDI out only works on Windows: pick Built-in BASSMIDI under Project.",
  "playback.the_midi_device_isn_t_there": "The MIDI device \"{name}\" isn't there any more — pick another one under Project.",
  "playback.couldn_t_open_windows_error_another": "Couldn't open \"{name}\" (Windows error {err}). Another program may be using it.",
