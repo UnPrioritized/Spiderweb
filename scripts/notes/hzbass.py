@@ -685,10 +685,13 @@ MOD_SETTINGS = dict({"tremolo_depth": (*LFO["tremolo_depth"], None), "sweep_trac
 # ... the Effects tab's (knob = effect_setting). Its effects work on the whole sound, not on each note (as a synth's
 # effects after the voices): sources counted from each note follow the newest note (mod_value with no tone)
 TIME_TOP, TIME_MOST = 4.0, 64.0  # (a time knob: beats along a curve up to TIME_TOP, typed up to TIME_MOST)
-RACK_MOD = {"chorus": ("depth",), "flanger": ("depth", "mix"), "echo": ("fade",), "reverb": ("level", "scatter"),
-            "compressor": ("threshold", "ratio", "gain", "attack", "release")}
+RATE_TOP = 10.0  # (a Rate knob: times a beat along a curve up to this)
+# (Chorus / Flanger Rate: their waves added up over the whole sound, KeyGrid.rack_turns)
+RACK_MOD = {"chorus": ("depth", "rate"), "flanger": ("depth", "mix", "rate"), "echo": ("fade",),
+            "reverb": ("level", "scatter"), "compressor": ("threshold", "ratio", "gain", "attack", "release")}
 RACK_CURVES = {("compressor", "ratio"): RACK["compressor"]["ratio"][1],  # (curved knobs: their top)
-               ("compressor", "attack"): TIME_TOP, ("compressor", "release"): TIME_TOP}
+               ("compressor", "attack"): TIME_TOP, ("compressor", "release"): TIME_TOP,
+               ("chorus", "rate"): RATE_TOP, ("flanger", "rate"): RATE_TOP}
 MOD_RACK = {f"{kind}_{k}": (kind, k) for kind, ks in RACK_MOD.items() for k in ks}
 MOD_SETTINGS.update({name: (*RACK[kind][k][:2], RACK_CURVES.get((kind, k))) for name, (kind, k) in MOD_RACK.items()})
 # ... the time knobs (beats; along a curve up to TIME_TOP, typed up to TIME_MOST): a running envelope's stage gets
@@ -1182,7 +1185,6 @@ MOD_SETTINGS.update({name: (0.0, TIME_MOST, TIME_TOP) for name in TIMED_KNOBS},
 # ... the speed knobs: how far through its waves each repeat is gets added up repeat by repeat (KeyGrid "_turns"), so
 # a speed moving makes the wave go faster or slower from where it is, never jump. Vibrato Rate (from each stretch's
 # start, as before), each Mode's Pulse Rate (from the note's start) and FM Ratio (wave by wave over the stretch)
-RATE_TOP = 10.0  # (a Rate knob: times a beat along a curve up to this)
 SPEED_KNOBS = ("vibrato_rate",) + tuple(f"{osc}{k}" for osc in ("", "osc2_") for k in ("pulse_rate", "fm_ratio"))
 MOD_SETTINGS.update(vibrato_rate=(*LFO["vibrato_rate"], RATE_TOP),
                     **{f"{osc}pulse_rate": (*MODES["pulse"]["rate"][:2], RATE_TOP) for osc in ("", "osc2_")},
@@ -1959,6 +1961,7 @@ class KeyGrid:
                      or bool(self.echo or self.reverb or self.comp) or bool((self.gains != 1.0).any())
                      or "blend" in self.moved or any(np.any(r["level"] != 1.0) for r in self.runs))
         self.pack()
+        self.rack_turns = {name: self.added_up(name) for name in ("chorus_rate", "flanger_rate") if name in self.moved}
         self.starting = self.starting_points() if self.random else None
         self.squeeze = self.comp_curve() if self.comp else None  # (the compressor's turn-down over time)
 
@@ -2119,6 +2122,22 @@ class KeyGrid:
             out.append(run)
         return out
 
+    def added_up(self, name):
+        """An Effects tab Rate the MOD tab moves (the whole sound's: sources from the newest note): (grid beats from
+        the shape's start, its waves so far there), added up step by step so a Rate moving never jumps."""
+        beats = self.flat["beat"]
+        end = float(beats.max()) if len(beats) else 0.0
+        dt = max(TIME_STEP, end / 100000)
+        g = np.arange(int(end / dt) + 2) * dt
+        rate = setting_at(self.hz, name, setting_base(self.hz, name), g, None, {})
+        return g, np.concatenate([[0.0], np.cumsum(rate[:-1] * dt)])
+
+    def rack_wave(self, name, plain, beat):
+        """How many waves of an Effects tab Rate (plain: as set) have gone by at beat (from the shape's start)."""
+        if name in self.rack_turns:
+            return np.interp(beat, *self.rack_turns[name])
+        return plain * beat
+
     def most(self, name, plain):
         """The highest a knob that makes no line can be (plain: as set): as far as the MOD tab's links can take it."""
         return setting_most(self.hz, name, plain) if name in self.moved else plain
@@ -2160,7 +2179,8 @@ class KeyGrid:
         wide = np.repeat(scale, n)
         if chorus:  # (up to depth cents and back, counted from the shape's start: it runs on over the notes)
             depth = f["chorus_depth"][src] if "chorus_depth" in self.moved else chorus["depth"]
-            wide = wide * 2.0 ** (-depth * (1.0 - np.cos(2.0 * np.pi * chorus["rate"] * f["beat"][src]))
+            wide = wide * 2.0 ** (-depth * (1.0 - np.cos(2.0 * np.pi * self.rack_wave("chorus_rate", chorus["rate"],
+                                                                                        f["beat"][src])))
                                   / 2.0 / 1200.0)
         scaled = np.bincount(part, wide != 1.0, len(run)) > 0
         moves = (each["moves"][run] | scaled) & (n > 0)
@@ -2219,7 +2239,11 @@ class KeyGrid:
         if fl and np.any(on):
             # (late by up to Depth and back, counted from the song's start like Random start: a Split keeps it)
             depth = f["flanger_depth"][src] if "flanger_depth" in self.moved else fl["depth"]
-            moved = depth * (1.0 - np.cos(2.0 * np.pi * fl["rate"] * (self.left + f["beat"][src]))) / 2.0
+            if "flanger_rate" in self.rack_turns:  # (moved: added up from the shape's start, as set before it)
+                turns = fl["rate"] * self.left + self.rack_wave("flanger_rate", fl["rate"], f["beat"][src])
+            else:
+                turns = fl["rate"] * (self.left + f["beat"][src])
+            moved = depth * (1.0 - np.cos(2.0 * np.pi * turns)) / 2.0
             if np.ndim(on):
                 moved = np.where(on, moved, 0.0)
             fx_late = np.where(crushed, fx_late + moved, fx_late)
