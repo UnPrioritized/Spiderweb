@@ -2976,6 +2976,7 @@
  "hz.synth_mod_hint": "To link one of these to a knob, go to the OSC or FX tab and drag its name (in the strip at the top) onto the knob, as with a macro. Only knobs that make an effect line can move.",
  "hz.synth_tip_mod_lamp": "Lit while this moves a knob.",
  "hz.synth_mod_list": "Links",
+ "hz.synth_mod_full": "{n} links at most: remove one to add another.",
  "hz.synth_mod_add": "+ Add link",
  "hz.synth_mod_list_none": "Nothing linked yet.",
  "hz.synth_mod_col_source": "Source",

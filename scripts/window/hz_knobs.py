@@ -31,7 +31,8 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.hzbass import (ARP, ARP_PATTERNS, BLEND, CHORDS, CRUSH, DETUNE, FAST, GLIDE_CURVE, GROUPS, GROWL, LOOP,
                           MODES, OFF_BOXES, OFF_PITCH, OSC2, PITCH, RACK, SCALES, SOFT, START_COUNT, START_STEPS,
-                          STEPS, SUB, TIMINGS, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE, VOICES, WAH, WAVES, adsr_line,
+                          MOD_BOXES, MOD_NEED_LINE, STEPS, SUB, TIMINGS, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE,
+                          VOICES, WAH, WAVES, adsr_line,
                           arpeggiated,
                           blend_gains, glide_left, clean_arp, clean_extra, clean_mode, clean_steps, clean_voice, copies,
                           group_count, line_at, osc2_shift, wave_hits)
@@ -1165,6 +1166,12 @@ class SynthKnobs:
             lines = []
         return lines, BOX_EXTRA.get(name)
 
+    def box_linked(self, name):
+        """A MOD tab source moves one of the box's effects (it changes the sound, even with its knob at 0)."""
+        return any(MOD_BOXES[link["to"]] == name for link in (self.extra.get("mod") or {}).get("links", ())
+                   if link["to"] not in MOD_NEED_LINE or link["to"] in self.fxl
+                   or link["to"] == "wave" and any(w in self.fxl for w in WAVES))
+
     def box_off(self, name):
         """The box is switched off (Bypass): all it has is off, or it has nothing and was switched off (it stays off
         while its knobs do nothing, user)."""
@@ -1196,7 +1203,7 @@ class SynthKnobs:
             return self.change("osc2", "osc2_a_off", not self.vals["osc2_a_off"])
         off = self.box_off(name)
         lines, extra = self.box_parts(name)
-        if not off and not lines and extra not in self.extra:
+        if not off and not lines and extra not in self.extra and not self.box_linked(name):
             return self.bell()
         before = self.fx.state()
         self.switch_box(name, not off)
@@ -1316,7 +1323,8 @@ class SynthKnobs:
             lines = [n for n in BOX_LINES.get(name, ()) if n in self.fxl and n not in self.off]
             if lines == ["volume"] and flat(self, "volume") == 1.0:  # (the Volume line full all along)
                 lines = []
-            lit = bool(lines) or BOX_EXTRA.get(name) in self.extra
+            lit = (bool(lines) or BOX_EXTRA.get(name) in self.extra
+                   or self.box_linked(name) and not (name in BYPASS and self.box_off(name)))
             if name == "wave" and self.vals["osc2_on"]:  # (OSC A's light = its notes on while OSC B is on)
                 lit = not self.vals["osc2_a_off"]
             outer.lamp.light(lit)

@@ -15,6 +15,7 @@ note's start too (a key pressed plays them from there). While a key sounds, a do
 import json
 import math
 import sys
+import time
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor
 from tkinter import ttk
@@ -374,6 +375,8 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
         self.show_knobs()
 
     def show_status(self, e=None):
+        if getattr(self, "status_until", 0.0) > time.monotonic():  # (a message stays a few seconds)
+            return
         knobs = self.page.get() != "lines"  # (the Effects tab has knobs too)
         letters = tr("hz.synth_letters", lo=note_name(self.kb_base), hi=note_name(min(127, self.kb_base + 16)))
         hint = tr("hz.synth_hint_knobs") if knobs else self.fx.says or tr("hz.synth_hint")

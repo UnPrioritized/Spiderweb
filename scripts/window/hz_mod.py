@@ -7,6 +7,7 @@ be moved (MOD_KNOBS). Saved in hz["mod"] (hzbass.clean_mod); the engine moves th
 
 import copy
 import math
+import time
 import tkinter as tk
 from tkinter import ttk
 
@@ -14,9 +15,9 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.hzbass import (MOD_ENV, MOD_ENVS, MOD_LFO_MODES, MOD_LFO_SHAPES, MOD_LFOS, MOD_SOURCES, TIMINGS, adsr_line,
+from notes.hzbass import (MOD_ENV, MOD_ENVS, MOD_LINKS, MOD_NEED_LINE, NEUTRAL, WAVES, MOD_LFO_MODES, MOD_LFO_SHAPES, MOD_LFOS, MOD_SOURCES, TIMINGS, adsr_line,
                           line_at, loop_shape, mod_start, mod_value)
-from window.hz_knobs import KINDS, PERCENTS, Dial, knob_of, note_name, shown, snap_rate, timed_rates, value_of
+from window.hz_knobs import BYPASS, KINDS, KNOBS, PERCENTS, Dial, knob_of, note_name, shown, snap_rate, timed_rates, value_of
 from window.hz_macros import LINK_AMOUNT, REST_MS, inside
 from window.synth_look import ENTRY, GRID, HEAD_FONT, MID, PANEL, PIC, Box, dark_list, dark_menu, mix
 from window.widgets import Scrub, Tooltip
@@ -55,7 +56,8 @@ def knob_of_line(key, v):
 def ring_knob(link):
     """The knob a link's ring shows on: the one it was linked on (two knobs can make one line: Sweep Start / End)."""
     key = link.get("knob")
-    return key if MOD_KNOBS.get(key) == link["to"] else next(k for k, to in MOD_KNOBS.items() if to == link["to"])
+    return key if MOD_KNOBS.get(key) == link["to"] else next((k for k, to in MOD_KNOBS.items() if to == link["to"]),
+                                                             "shape")
 
 
 def source_name(src):
@@ -123,6 +125,7 @@ class SynthMod:
         c.bind("<Configure>", lambda e: self.fit_mod_list())
         self.mod_rows.bind("<Configure>", lambda e: self.after_idle(self.fit_mod_list))
         c.bind("<MouseWheel>", self.mod_list_wheel)
+        self.mod_rows.bind("<MouseWheel>", self.mod_list_wheel)
         self.mod_rows_for = None  # (the links the rows were made for)
         self.mod_amount_text = {}  # (each row's amount box: what it was last given to show)
 
@@ -144,63 +147,78 @@ class SynthMod:
             self.mod_list_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
 
     def make_mod_rows(self, links):
-        """The list's rows made again for these links."""
-        for w in self.mod_rows.winfo_children():
-            w.destroy()
-        self.mod_amount_vars, self.mod_amount_boxes, self.mod_amount_text = [], [], {}
-        knobs = list(dict.fromkeys(MOD_KNOBS))
-        knob_names = [self.knob_label(k) for k in knobs]
-        src_names = [source_name(src) for src in MOD_SOURCES]
-        heads = ("hz.synth_mod_col_source", "hz.synth_mod_col_knob", "hz.synth_mod_col_amount", "", "")
-        for col, head in enumerate(heads):
-            ttk.Label(self.mod_rows, text=tr(head) if head else "", style="Synth.Box.Dim.TLabel").grid(
-                row=0, column=col, sticky="w", padx=(0, 10))
+        """The list's rows for these links: rows added or taken away at the end, each row's source, knob and
+        both-ways set in place (hunt: making them all again took seconds with many rows)."""
+        if not hasattr(self, "mod_row_parts"):
+            self.mod_row_parts = []  # (each row: its widgets, source / knob / both-ways variables)
+            self.mod_amount_vars, self.mod_amount_boxes = [], []
+            self.mod_knob_keys = list(MOD_KNOBS)
+            self.mod_knob_names = [self.knob_label(k) for k in self.mod_knob_keys]
+            self.mod_src_names = [source_name(src) for src in MOD_SOURCES]
+            heads = ("hz.synth_mod_col_source", "hz.synth_mod_col_knob", "hz.synth_mod_col_amount", "", "")
+            for col, head in enumerate(heads):
+                ttk.Label(self.mod_rows, text=tr(head) if head else "", style="Synth.Box.Dim.TLabel").grid(
+                    row=0, column=col, sticky="w", padx=(0, 10))
+        while len(self.mod_row_parts) > len(links):
+            widgets = self.mod_row_parts.pop()[0]
+            self.mod_amount_vars.pop()
+            self.mod_amount_boxes.pop()
+            for w in widgets:
+                w.destroy()
+        while len(self.mod_row_parts) < len(links):
+            self.mod_row(len(self.mod_row_parts))
         for i, link in enumerate(links):
-            r = i + 1
-            var = tk.StringVar(value=source_name(link["from"]))
-            cb = ttk.Combobox(self.mod_rows, textvariable=var, values=src_names, state="readonly",
-                              width=max(len(n) for n in src_names) + 1, style="Synth.TCombobox")
-            dark_list(cb)
-            cb.grid(row=r, column=0, sticky="w", padx=(0, 10), pady=2)
-            cb.bind("<<ComboboxSelected>>", lambda e, i=i, var=var: (
-                self.mod_row_set(i, "from", MOD_SOURCES[src_names.index(var.get())]), self.keyboard_back(e.widget)))
-            Tooltip(cb, tr("hz.synth_tip_mod_col_source"))
-            var = tk.StringVar(value=self.knob_label(ring_knob(link)))
-            cb = ttk.Combobox(self.mod_rows, textvariable=var, values=knob_names, state="readonly",
-                              width=max(len(n) for n in knob_names) + 1, style="Synth.TCombobox")
-            dark_list(cb)
-            cb.grid(row=r, column=1, sticky="w", padx=(0, 10), pady=2)
-            cb.bind("<<ComboboxSelected>>", lambda e, i=i, var=var: (
-                self.mod_row_set(i, "knob", knobs[knob_names.index(var.get())]), self.keyboard_back(e.widget)))
-            Tooltip(cb, tr("hz.synth_tip_mod_col_knob"))
-            cell = ttk.Frame(self.mod_rows, style="Synth.Box.TFrame")
-            cell.grid(row=r, column=2, sticky="w", padx=(0, 10))
-            var = tk.StringVar(value=fmt(round(100 * link["amount"], 1)))
-            e = ttk.Entry(cell, textvariable=var, width=6, justify="center", style=ENTRY)
-            e.pack(side="left")
-            ttk.Label(cell, text=tr("hz.synth_percent"), style="Synth.Box.Dim.TLabel").pack(side="left", padx=(2, 0))
-            e.bind("<Return>", lambda ev, i=i, e=e: (self.on_mod_amount(i), self.keyboard_back(e), "break")[2])
-            e.bind("<FocusOut>", lambda ev, i=i: self.on_mod_amount(i))
-            Scrub(self.app, [(e, var, lambda i=i: self.on_mod_amount(i))], (1, 10, 0.1), -100.0, 100.0, drag_box=True)
-            Tooltip(e, tr("hz.synth_tip_mod_col_amount"))
-            self.mod_amount_vars.append(var)
-            self.mod_amount_boxes.append(e)
-            self.mod_amount_text[i] = var.get()
-            both = tk.BooleanVar(value=bool(link.get("bipolar")))
-            cb = ttk.Checkbutton(self.mod_rows, text=tr("hz.synth_mod_both"), variable=both,
-                                 style="Synth.Box.TCheckbutton",
-                                 command=lambda i=i, both=both: self.mod_row_set(i, "bipolar", both.get()))
-            cb.grid(row=r, column=3, sticky="w", padx=(0, 10))
-            Tooltip(cb, tr("hz.synth_tip_mod_both"))
-            x = ttk.Button(self.mod_rows, text="✕", width=3, style="Synth.TButton",
-                           command=lambda i=i: self.mod_row_remove(i))
-            x.grid(row=r, column=4, sticky="w")
-            Tooltip(x, tr("hz.synth_tip_mod_remove"))
-        for e in self.mod_amount_boxes:  # (a letter that plays a key, typed there: as in the other boxes)
-            e.bindtags((f"SynthLetters{id(self)}",) + e.bindtags())
-        for w in [self.mod_rows] + list(self.mod_rows.winfo_children()):
-            if not isinstance(w, (ttk.Combobox, ttk.Frame)):
-                w.bind("<MouseWheel>", self.mod_list_wheel, add="+")
+            _, src_var, knob_var, both = self.mod_row_parts[i]
+            src_var.set(source_name(link["from"]))
+            knob_var.set(self.knob_label(ring_knob(link)))
+            both.set(bool(link.get("bipolar")))
+            self.mod_amount_text.pop(i, None)  # (its amount shown again below)
+
+    def mod_row(self, i):
+        """Row i of the list (under the headings)."""
+        r, src_names, knob_names = i + 1, self.mod_src_names, self.mod_knob_names
+        src_var = tk.StringVar()
+        a = ttk.Combobox(self.mod_rows, textvariable=src_var, values=src_names, state="readonly",
+                         width=max(len(n) for n in src_names) + 1, style="Synth.TCombobox")
+        dark_list(a)
+        a.grid(row=r, column=0, sticky="w", padx=(0, 10), pady=2)
+        a.bind("<<ComboboxSelected>>", lambda e: (
+            self.mod_row_set(i, "from", MOD_SOURCES[src_names.index(src_var.get())]), self.keyboard_back(e.widget)))
+        Tooltip(a, tr("hz.synth_tip_mod_col_source"))
+        knob_var = tk.StringVar()
+        b = ttk.Combobox(self.mod_rows, textvariable=knob_var, values=knob_names, state="readonly",
+                         width=max(len(n) for n in knob_names) + 1, style="Synth.TCombobox")
+        dark_list(b)
+        b.grid(row=r, column=1, sticky="w", padx=(0, 10), pady=2)
+        b.bind("<<ComboboxSelected>>", lambda e: (
+            self.mod_row_set(i, "knob", self.mod_knob_keys[knob_names.index(knob_var.get())]),
+            self.keyboard_back(e.widget)))
+        Tooltip(b, tr("hz.synth_tip_mod_col_knob"))
+        cell = ttk.Frame(self.mod_rows, style="Synth.Box.TFrame")
+        cell.grid(row=r, column=2, sticky="w", padx=(0, 10))
+        var = tk.StringVar()
+        e = ttk.Entry(cell, textvariable=var, width=6, justify="center", style=ENTRY)
+        e.pack(side="left")
+        unit = ttk.Label(cell, text=tr("hz.synth_percent"), style="Synth.Box.Dim.TLabel")
+        unit.pack(side="left", padx=(2, 0))
+        e.bind("<Return>", lambda ev: (self.on_mod_amount(i), self.keyboard_back(e), "break")[2])
+        e.bind("<FocusOut>", lambda ev: self.on_mod_amount(i))
+        Scrub(self.app, [(e, var, lambda: self.on_mod_amount(i))], (1, 10, 0.1), -100.0, 100.0, drag_box=True)
+        Tooltip(e, tr("hz.synth_tip_mod_col_amount"))
+        e.bindtags((f"SynthLetters{id(self)}",) + e.bindtags())  # (a letter that plays a key: as in the other boxes)
+        both = tk.BooleanVar()
+        c = ttk.Checkbutton(self.mod_rows, text=tr("hz.synth_mod_both"), variable=both, style="Synth.Box.TCheckbutton",
+                            command=lambda: self.mod_row_set(i, "bipolar", both.get()))
+        c.grid(row=r, column=3, sticky="w", padx=(0, 10))
+        Tooltip(c, tr("hz.synth_tip_mod_both"))
+        x = ttk.Button(self.mod_rows, text="✕", width=3, style="Synth.TButton", command=lambda: self.mod_row_remove(i))
+        x.grid(row=r, column=4, sticky="w")
+        Tooltip(x, tr("hz.synth_tip_mod_remove"))
+        for w in (unit, c, x):
+            w.bind("<MouseWheel>", self.mod_list_wheel, add="+")
+        self.mod_row_parts.append(((a, b, cell, c, x), src_var, knob_var, both))
+        self.mod_amount_vars.append(var)
+        self.mod_amount_boxes.append(e)
 
     def mod_row_set(self, i, key, value):
         """A row's source, knob or both-ways changed: one undo step (a source + line linked twice: a ding)."""
@@ -248,6 +266,8 @@ class SynthMod:
     def mod_add(self):
         """+ Add link: LFO 3 (or the next source) on the first knob it doesn't move yet, at 50 %."""
         links = self.mod_links()
+        if self.mod_full():
+            return
         taken = {(link["from"], link["to"]) for link in links}
         for src in MOD_SOURCES:
             for key, to in MOD_KNOBS.items():
@@ -255,6 +275,15 @@ class SynthMod:
                     return self.mod_step(lambda m: m["links"].append({"from": src, "to": to, "amount": LINK_AMOUNT,
                                                                       "knob": key}))
         self.bell()
+
+    def mod_full(self):
+        """MOD_LINKS links already: a ding and a word in the status line (hunt: the next one was dropped silently)."""
+        if len(self.mod_links()) < MOD_LINKS:
+            return False
+        self.bell()
+        self.status.config(text=tr("hz.synth_mod_full", n=MOD_LINKS))
+        self.status_until = time.monotonic() + 3.0  # (show_status leaves it that long)
+        return True
 
     def build_mod_names(self, strip, col):
         """The sources' names in the macros' strip (column col): drag one onto a knob to link them."""
@@ -453,6 +482,8 @@ class SynthMod:
         src, key = held[0][1], held[1]
         if any(link["to"] == MOD_KNOBS[key] for link in self.mod_links(src)):
             return self.show_macros()
+        if self.mod_full():
+            return
         self.mod_step(lambda m: m["links"].append({"from": src, "to": MOD_KNOBS[key], "amount": LINK_AMOUNT,
                                                    "knob": key}))
 
@@ -565,7 +596,8 @@ class SynthMod:
             link = mine.get(key)
             ring = None
             if link is not None:
-                v = line_of(key, k.value)
+                v = self.mod_base(key)
+                v = line_of(key, k.value) if v is None else v
                 a = link["amount"]
                 reach = knob_of_line(key, v + a)
                 low = knob_of_line(key, v - a) if link.get("bipolar") else None
@@ -573,6 +605,18 @@ class SynthMod:
             if ring != k.ring:
                 k.ring = ring
                 k.draw()
+
+    def mod_base(self, key):
+        """The value a linked knob's line has before the sources move it, as the sound has it (the macros' part
+        added; no line: where it does nothing, as the engine starts it), or None while it does nothing at all (its
+        box switched off, Sweep unticked, no waveform)."""
+        to, box = MOD_KNOBS[key], KNOBS[key][0]
+        if box in BYPASS and self.box_off(box):
+            return None
+        name = next((w for w in WAVES if w in self.fxl), None) if to == "wave" else to
+        if name is None or name not in self.fxl:
+            return None if to in MOD_NEED_LINE else NEUTRAL.get(to, 0.0)
+        return line_of(key, knob_of(KNOBS[key][1], self.pv[key]))
 
     def draw_mod_dots(self):
         """(Every tick of the live keys) each knob a source moves: a dot on its ring where the sound has it now (as
@@ -596,9 +640,13 @@ class SynthMod:
         self.mod_dots_on = True
         for key_, k in self.dials.items():
             to = MOD_KNOBS.get(key_)
-            if to not in by:
+            base = self.mod_base(key_) if to in by else None
+            if base is None:  # (not moved, or doing nothing now: no dot)
+                if k.ring and k.ring[0] is None:
+                    k.ring = None
+                    k.draw()
                 continue
-            now = knob_of_line(key_, line_of(key_, k.value) + by[to])
+            now = knob_of_line(key_, base + by[to])
             colour = SOURCE_COLOURS[next(link["from"] for link in links if link["to"] == to)]
             ring = (k.ring[0], k.ring[1], now, *k.ring[3:]) if k.ring else (None, colour, now)
             if ring != k.ring:

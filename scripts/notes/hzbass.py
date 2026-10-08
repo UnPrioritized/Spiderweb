@@ -671,6 +671,10 @@ MOD_LINKS = 64  # links at most
 # these only while their box is on (Sweep ticked, a waveform picked), like a synth's filter / oscillator switched off
 MOD_NEED_LINE = ("sweep", "wave") + tuple(WAVES)
 MOD_TARGETS = FX + ("wave",)  # "wave" = whichever waveform's line there is (the Wave box's Shape)
+# the synth window's box each effect is in: a box switched off (hz["bypass"]["boxes"]) stops its links too
+MOD_BOXES = dict({w: "wave" for w in tuple(WAVES) + ("wave", "octave")}, volume="volume", pitch="pitch", vibrato="vibrato",
+                 tremolo="tremolo", sweep="tone", wah="tone", slant="character", offpitch="character",
+                 noisy="character", groups="character")
 
 
 def mod_start():
@@ -684,8 +688,9 @@ def clean_mod(mod):
     """The MOD tab checked: hz["mod"] = {"lfo": [LFO 3, LFO 4: {shape, rate, mode, timing (only the knob cares, as
     LFO's)}], "env": [ENV 2, ENV 3: MOD_ENV], "links": [{"from": a MOD_SOURCES, "to": an effect (MOD_TARGETS), "amount": -1..1
     of the line's whole height at the source's top, "bipolar": True = the source swings both ways round the line
-    (left out when False), "knob": the synth window's knob it was linked on (only the window reads it)}]}, or {}
-    when it's all as it starts."""
+    (left out when False), "knob": the synth window's knob it was linked on (only the window reads it)}], "phase":
+    beats the Free LFOs count late by (the shape's left edge moved, shifted_hz: they stay in step with the song)},
+    or {} when it's all as it starts."""
     mod = mod if isinstance(mod, dict) else {}
     out = mod_start()
     for i, got in enumerate((mod.get("lfo") if isinstance(mod.get("lfo"), list) else [])[:len(MOD_LFOS)]):
@@ -700,6 +705,8 @@ def clean_mod(mod):
             out["env"][i].update(clean_settings(got, MOD_ENV))
     seen = set()
     for link in mod.get("links") if isinstance(mod.get("links"), list) else ():
+        if isinstance(link, dict) and link.get("to") in WAVES:  # (a waveform's own name: the Shape knob's "wave")
+            link = dict(link, to="wave")
         if not (isinstance(link, dict) and link.get("from") in MOD_SOURCES and link.get("to") in MOD_TARGETS):
             continue
         a = link.get("amount")
@@ -710,7 +717,10 @@ def clean_mod(mod):
                                      **({"bipolar": True} if link.get("bipolar") is True else {}),
                                      **({"knob": link["knob"]} if isinstance(link.get("knob"), str)
                                         and len(link["knob"]) <= 40 else {})))
-    return {} if out == mod_start() else out
+    phase = mod.get("phase")
+    if isinstance(phase, (int, float)) and not isinstance(phase, bool) and math.isfinite(phase) and phase:
+        out["phase"] = float(phase)
+    return {} if {k: v for k, v in out.items() if k != "phase"} == mod_start() else out
 
 
 CLEAN_EXTRA = {"voice": clean_voice, "mode": clean_mode, "rack": clean_rack, "arp": clean_arp, "bypass": clean_bypass,
@@ -763,8 +773,9 @@ def live(hz, left=0.0):
         hz = {k: v for k, v in hz.items() if k not in ("arp", "_memo")}  # (other tones: nothing cached holds)
         hz["tones"] = arpeggiated(hz["tones"], arp, left)
     fx = hz.get("fx") or {}
+    boxes_off = (hz.get("bypass") or {}).get("boxes", ())
     missing = [link["to"] for link in (hz.get("mod") or {}).get("links", ())
-               if link["to"] not in fx and link["to"] not in MOD_NEED_LINE]
+               if link["to"] not in fx and link["to"] not in MOD_NEED_LINE and MOD_BOXES[link["to"]] not in boxes_off]
     if missing:  # (the MOD tab moves them from where they do nothing)
         hz = dict(hz, fx=dict(fx, **{name: [[0.0, NEUTRAL.get(name, 0.0)]] for name in missing}))
         hz.pop("_memo", None)
@@ -924,13 +935,14 @@ def sound_span(hz):
     return end + rack_tail(hz) if tones else end
 
 
-def fx_at(hz, name, beat, tone=None):
+def fx_at(hz, name, beat, tone=None, sources=None):
     """The value of an effect at beat (an array, from the shape's left edge; 0 when there's no such line).
     Before the first point and after the last one the line stays flat, unless it repeats (hz["loop"]); a repeating
     one is made stronger or weaker by its amount line (hz["amount"]). One counted from each note (hz["from"]):
     tone = the tone it's for (each note has its own), else from the latest note start (note_beats); with a sustain
     point: sustained. The MOD tab's links to it (hz["mod"]) then move it by their sources (mod_value), kept within
-    0..1 (one to an effect with no line: live gave it one where it does nothing, see MOD_NEED_LINE)."""
+    0..1 (one to an effect with no line: live gave it one where it does nothing, see MOD_NEED_LINE). sources = a
+    dict keeping each source's values for this beat and tone (the same run's effects share them)."""
     pts = (hz.get("fx") or {}).get(name)
     if not pts:
         return np.zeros(np.shape(beat))
@@ -952,9 +964,12 @@ def fx_at(hz, name, beat, tone=None):
     mod = hz.get("mod")
     if mod:
         moved = False
+        sources = {} if sources is None else sources
         for link in mod["links"]:
             if link["to"] == name or link["to"] == "wave" and name in WAVES:
-                s = mod_value(hz, link["from"], beat, tone)
+                if link["from"] not in sources:
+                    sources[link["from"]] = mod_value(hz, link["from"], beat, tone)
+                s = sources[link["from"]]
                 v = v + link["amount"] * (2.0 * s - 1.0 if link.get("bipolar") else s)
                 moved = True
         if moved:
@@ -975,6 +990,33 @@ def adsr_line(attack, decay, sustain, release):
     return pts, at, max(LOOP[0], at + release)
 
 
+def env_line(e, x):
+    """adsr_line's line at x beats (an array), worked out directly (its bends FAST / -FAST are squares: many times
+    faster than line_at for the MOD tab's envelopes, hunt)."""
+    a, d, s, r = e["attack"], e["decay"], e["sustain"], e["release"]
+    at = a + d
+    top = 1.0 if d > 0 else s  # (where the rise goes: no decay = straight to the sustain level)
+    rise = top * np.clip(x / a, 0.0, 1.0) ** 2 if a > 0 else np.full(x.shape, top)
+    fall = 1.0 + (s - 1.0) * (1.0 - (1.0 - np.clip((x - a) / d, 0.0, 1.0)) ** 2) if d > 0 else rise
+    out = np.where(x < a, rise, fall)
+    if r > 0:
+        out = np.where(x < at, out, s * (1.0 - np.clip((x - at) / r, 0.0, 1.0)) ** 2)
+    return out
+
+
+def env_value(e, u, held):
+    """A MOD tab envelope u beats after its note's start for a note held `held` beats: as sustained(adsr_line(...))."""
+    u = np.maximum(0.0, u)
+    held = np.broadcast_to(np.asarray(held, float), u.shape)
+    at = e["attack"] + e["decay"]
+    fall = max(LOOP[0], at + e["release"]) - at
+    dd = u - held
+    gone = np.clip(dd / fall, 0.0, 1.0) if fall > 1e-12 else np.ones(u.shape)
+    after = env_line(e, at + np.clip(dd, 0.0, max(fall, 0.0))) + (env_line(e, np.minimum(held, at))
+                                                                  - e["sustain"]) * (1 - gone)
+    return np.where(dd < 0, env_line(e, np.minimum(u, at)), np.clip(after, 0.0, 1.0))
+
+
 def mod_value(hz, src, beat, tone=None):
     """A MOD tab source's value at beat (an array, from the shape's left edge), 0..1 (see MOD_SOURCES): those counted
     from each note go by tone's note (chain of slides), or (tone None) the latest one to start (note_span)."""
@@ -989,16 +1031,14 @@ def mod_value(hz, src, beat, tone=None):
     span = note_span(hz, beat, tone)
     s0, end = span if span is not None else (0.0, 0.0)
     if src in MOD_ENVS:
-        e = mod["env"][MOD_ENVS.index(src)]
-        pts, at, every = adsr_line(e["attack"], e["decay"], e["sustain"], e["release"])
-        return sustained(pts, every, at, beat - s0, np.asarray(end) - s0)
+        return env_value(mod["env"][MOD_ENVS.index(src)], beat - s0, np.asarray(end) - s0)
     lfo = mod["lfo"][MOD_LFOS.index(src)]
     if lfo["rate"] <= 0:  # (stopped: where a wave starts)
         return np.full(beat.shape, float(line_at(loop_shape(lfo["shape"], 1.0, seed=MOD_LFOS.index(src)), 0.0)))
     every = 1.0 / lfo["rate"]
-    pts = loop_shape(lfo["shape"], every, seed=MOD_LFOS.index(src))
-    if lfo["mode"] == "free":
-        return line_at(pts, beat, every)
+    pts = cached(hz, ("mod", src), lambda: loop_shape(lfo["shape"], every, seed=MOD_LFOS.index(src)))
+    if lfo["mode"] == "free":  # (counted late by "phase": the shape's left edge moved, the song's beats kept)
+        return line_at(pts, beat - mod.get("phase", 0.0), every)
     u = np.maximum(0.0, beat - s0)
     return line_at(pts, u, every) if lfo["mode"] == "restart" else line_at(pts, np.minimum(u, every))
 
@@ -1609,8 +1649,9 @@ class KeyGrid:
                    "until": (left + n0["t"] + n0["len"] + tail.get(n0["id"], 0.0)) * ppq if whose[1] is None
                    else np.inf}
             fx = hz.get("fx") or {}
-            for name in FX:
-                run[name] = fx_at(hz, name, beat, n0)  # (each tone counts from its own start, like a synth's voice)
+            sources = {}  # (the MOD tab's sources: worked out once for the run)
+            for name in FX:  # (each tone counts from its own start, like a synth's voice)
+                run[name] = fx_at(hz, name, beat, n0, sources)
             run["swept"] = np.full(len(beat), "sweep" in fx)  # (sweep at 0 = the bump on the lowest key)
             run["has_volume"] = np.full(len(beat), "volume" in fx)
             for name in WAVES:  # (a waveform at 0 = the plain tone; without any: the plain tone too)
@@ -2090,6 +2131,11 @@ def shifted_hz(hz, d):
         hz["fx"][name] = _turned_repeat(pts, d, loop[name]) if name in loop else _shifted_line(pts, d)
     for name, pts in (hz.get("amount") or {}).items():
         hz["amount"][name] = _shifted_line(pts, d)
+    if hz.get("mod"):  # (the Free LFOs: counted that much later, so they stay in step too)
+        phase = hz["mod"].get("phase", 0.0) + d
+        hz["mod"].pop("phase", None)
+        if abs(phase) > 1e-12:
+            hz["mod"]["phase"] = phase
     return hz
 
 
@@ -2148,8 +2194,10 @@ def shortest_gate(hz, ppq):
     played = live(hz)  # (the Arpeggio box's octaves go higher)
     top = max((pitch(n) for n in played.get("tones") or ()), default=hz["key"])
     pts = (played.get("fx") or {}).get("pitch") if hz.get("tones") else None
-    if pts:  # (the amount line only ever weakens it)
-        top += max(0.0, (max(p[1] for p in pts) - 0.5) * 2.0 * PITCH)
+    if pts:  # (the amount line only ever weakens it; the MOD tab's links push it up as far as they reach)
+        push = sum(abs(link["amount"]) if link.get("bipolar") else max(0.0, link["amount"])
+                   for link in (played.get("mod") or {}).get("links", ()) if link["to"] == "pitch")
+        top += max(0.0, (min(1.0, max(p[1] for p in pts) + push) - 0.5) * 2.0 * PITCH)
     if played.get("osc2") and played.get("tones"):  # (OSC B tuned up)
         top += max(0.0, osc2_shift(played["osc2"]))
     return wave(hz, ppq, top)
