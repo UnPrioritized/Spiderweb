@@ -28,6 +28,7 @@ from notes.claw import apply_claw
 from notes.fx import (clean_fx, flip_shape, groups, idle, mirrored, notes_box, swapped, toggled, turn_notes, turn_pts,
                       turn_shape, velocities)
 from notes.gaterange import clean_range
+from notes.merge import clean_merge, recipe_notes
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
 from notes.bezier import anchor_count, sample
@@ -217,6 +218,11 @@ def clean_shape(sh):
         tx = clean_text(sh["text"]) if isinstance(sh.get("text"), dict) else None
         if tx:  # typed text (text.py): its strokes are the letters, the settings let it be retyped
             out["text"] = tx
+        mg = clean_merge(sh["merge"], clean_shape) if isinstance(sh.get("merge"), dict) else None
+        if mg:  # Gate sensitive merge (merge.py): two shapes' notes, saved as the recipe
+            out["merge"] = mg
+            if "notes" not in sh:  # (left out of project files: made again)
+                sh = dict(sh, notes=recipe_notes(mg))
         if "notes" in sh:  # pasted notes (custom.py): the strokes are just the box
             if not isinstance(sh["notes"], str) or not check_notes(sh["notes"]):
                 return None

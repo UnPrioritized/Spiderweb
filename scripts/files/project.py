@@ -153,7 +153,8 @@ def short_shape(sh):
         if k == "text":
             return {a: [short_num(x) for x in b] if a == "bbox" else short_num(b) for a, b in v.items()}
         return short_num(v) if k in ("gate", "gate0", "gate1", "k") else v
-    return json.dumps({k: short(k, v) for k, v in sh.items()})
+    # (a Gate sensitive merge's notes are made again from its recipe when loaded: merge.py)
+    return json.dumps({k: short(k, v) for k, v in sh.items() if not (k == "notes" and "merge" in sh)})
 
 
 def project_json(data):

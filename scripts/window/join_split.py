@@ -15,7 +15,7 @@ from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live,
 from notes.bezier import anchor_count, nearest, split
 from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_path
-from notes.merge import comes_from_left, gate_merge
+from notes.merge import merged
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
@@ -223,10 +223,7 @@ class JoinSplit:
         pair = self.merge_pair()
         if not pair:
             return
-        a, b = (np.asarray(self.notes_of(self.shapes[i]), np.int64).reshape(-1, 4)[:, :4] for i in pair)
-        if len(a) and len(b) and comes_from_left(a, b):  # (a = the one on the left)
-            a, b = b, a
-        got = gate_merge(b, a, True) if to_right else gate_merge(a, b, False)
+        got = merged([self.notes_of(self.shapes[i]) for i in pair], to_right, self.ppq, self.keys)
         if got is None:
             self.status.config(text=tr("join_split.merge_no_meet"))
             return
@@ -239,6 +236,11 @@ class JoinSplit:
         out, rest = got
         new = [shape(out, tr("join_split.merged"))] + ([shape(rest, tr("join_split.merge_leftovers"))] if len(rest)
                                                         else [])
+        parts = [copy.deepcopy(self.shapes[i]) for i in pair]
+        for p in parts:
+            p.pop("between", None)  # (its Add between group is unlinked)
+        new[0]["merge"] = {"parts": parts, "right": bool(to_right),
+                           "ppq": self.ppq, "keys": self.keys, "apart": sorted(set(rest[:, 2].tolist()))}
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.merge"))
         self.unlink_groups(pair)
