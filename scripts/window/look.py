@@ -151,6 +151,7 @@ CHART_GRID, CHART_GRID_STRONG = pick("#d3dff0", "#4f4f52"), pick("#9fb2cf", "#6a
 CHART_BAND = pick("#e4e4e4", "#4a4a4d")  # a greyed stretch / faint lines
 CHART_LINE = pick("#d00000", "#dcdce0")  # the line you draw (dark: greyish white, user)
 CHART_LINE_FAINT = pick("#f0b0b0", "#6a6a6e")
+PUSH_PICKED = pick("#fde7a8", "#5e5640")  # (Add between preview: a pale band under the shape the push pad pushes)
 CHART_OFF = pick("#b0b0b0", "#707074")  # the line while it's switched off
 CHART_POINT = pick("#ffffff", "#3c3c3f")  # inside the line's points
 RANGE_BAR, RANGE_BAR_HOT = pick("#4a90e2"), pick("#1f5fb0", "#7ab4ff")  # Range…: notes per gate, the one pointed at

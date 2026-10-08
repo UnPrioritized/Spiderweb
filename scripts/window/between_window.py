@@ -35,6 +35,7 @@ PRESETS = [("between.even", between.STRAIGHT), ("between.near_first", _power(2))
            ("between.near_middle", _s_curve(2))]
 U_SNAP, Y_SNAP = 1 / 40, 1 / 20  # dragging moves points in these steps (Shift = free)
 PREVIEW_POINTS = 100000  # the preview's steps drawn with at most about this many points in all
+PAD_STICK = 8  # the push pad's middle pulls the stick in within this many px (Shift = not)
 
 
 class BetweenWindow(tk.Toplevel):
@@ -58,9 +59,13 @@ class BetweenWindow(tk.Toplevel):
         self.colours_touched = False  # (the Multi channel note only shows once the colours are changed: user)
         box = ttk.Frame(self, padding=8)
         box.pack(fill="both", expand=True)
-        pv = self.pv = tk.Canvas(box, width=self.w, height=self.ph, bg=look.CHART_BG, highlightthickness=1,
+        top = ttk.Frame(box)
+        top.pack(anchor="w")
+        pv = self.pv = tk.Canvas(top, width=self.w, height=self.ph, bg=look.CHART_BG, highlightthickness=1,
                                  highlightbackground=look.CHART_BORDER)
-        pv.pack(anchor="w")
+        pv.pack(side="left", anchor="n")
+        self.push_on, self.pad_drag = 0, None  # (which anchor the pad pushes: its number from the first shape)
+        self.build_pad(top)
         ttk.Label(box, text=tr("between.preview_hint"), foreground=look.HINT, font=look.font(8), justify="left",
                   wraplength=self.w).pack(anchor="w", pady=(2, 6))
         pv.bind("<ButtonPress-1>", self.pv_press)
@@ -142,16 +147,30 @@ class BetweenWindow(tk.Toplevel):
         got = [self.app.shapes[i] for i in between.ordered(self.app.shapes, self.gid)]
         return got[0], got[-1]
 
+    def anchors(self):
+        """The group's first shape, keys (by place) and last shape: the shapes that can push."""
+        return [sh for _, sh in between.anchors(self.app.shapes, self.gid)]
+
     def state(self):
         a, b = self.ends()
-        return json.dumps([self.set, a["pts"], b["pts"]], sort_keys=True)
+        pushes = [sh["between"].get("push") for sh in self.anchors()]
+        return json.dumps([self.set, a["pts"], b["pts"], pushes, self.push_on], sort_keys=True)
 
     def put_state(self, state):
-        self.drag = self.pv_drag = None
-        self.set, pa, pb = json.loads(state)
+        self.drag = self.pv_drag = self.pad_drag = None
+        self.set, pa, pb, pushes, self.push_on = json.loads(state)
         a, b = self.ends()
         a["pts"], b["pts"] = pa, pb
+        for sh, p in zip(self.anchors(), pushes):
+            self.put_push(sh, p)
         self.apply()
+
+    @staticmethod
+    def put_push(sh, p):
+        if p and (p[0] or p[1]):
+            sh["between"]["push"] = [float(p[0]), float(p[1])]
+        else:
+            sh["between"].pop("push", None)
 
     def change(self, key, value, mark=True):
         self.set[key] = value
@@ -189,8 +208,10 @@ class BetweenWindow(tk.Toplevel):
             self.multi_note.pack(anchor="w", after=self.turns_box.master, pady=(2, 0))
         elif shown and not want:
             self.multi_note.pack_forget()
+        self.smooth_var.set(self.set.get("smooth", False))
         self.draw()
         self.draw_preview()
+        self.draw_pad()
 
     def on_steps(self):
         if self.closed:
@@ -300,6 +321,11 @@ class BetweenWindow(tk.Toplevel):
             self.pv_view = self.fit_view()
         order = between.ordered(self.app.shapes, self.gid)
         most = max(16, min(400, PREVIEW_POINTS // max(1, len(order))))  # (500 long curves were 9 M points)
+        marks = self.anchors()
+        self.push_on = min(self.push_on, len(marks) - 1)
+        xy = self.px_line(marks[self.push_on])  # (the shape the pad pushes: a wide pale band under it)
+        if len(xy) >= 4:
+            cv.create_line(*xy, fill=look.PUSH_PICKED, width=max(3, round(9 * s)), capstyle="round")
         for i in order[1:-1]:
             sh = self.app.shapes[i]
             colour = look.CHART_LINE_FAINT if sh["between"]["role"] == "step" else look.CHART_GRID_STRONG
@@ -352,6 +378,32 @@ class BetweenWindow(tk.Toplevel):
             a, b = self.ends()
             sh = a if hit[0] == "first" else b
             self.pv_drag = (hit[0], hit[1], json.loads(json.dumps(sh["pts"])), e.x, e.y)
+            self.pick_push(0 if hit[0] == "first" else len(self.anchors()) - 1)
+            return
+        near = self.pv_line(e.x, e.y)
+        if near is not None:
+            self.pick_push(near)
+
+    def pv_line(self, x, y):
+        """The number of the first shape / key / last shape whose line is under the mouse (the nearest), or None."""
+        best = None
+        for j, sh in enumerate(self.anchors()):
+            a = np.asarray(self.px_line(sh), float).reshape(-1, 2)
+            if len(a) < 2:
+                continue
+            p, q = a[:-1], a[1:]
+            d = q - p
+            t = np.clip(((x - p[:, 0]) * d[:, 0] + (y - p[:, 1]) * d[:, 1]) / np.maximum((d * d).sum(1), 1e-12), 0, 1)
+            dist = float(np.hypot(p[:, 0] + t * d[:, 0] - x, p[:, 1] + t * d[:, 1] - y).min())
+            if dist <= 6 * self.s and (best is None or dist < best[0]):
+                best = (dist, j)
+        return None if best is None else best[1]
+
+    def pick_push(self, j):
+        if j != self.push_on:
+            self.push_on = j
+            self.draw_preview()
+            self.draw_pad()
 
     def pv_motion(self, e):
         if not self.pv_drag:
@@ -386,6 +438,118 @@ class BetweenWindow(tk.Toplevel):
             self.app.catch_up_notes()
             self.draw_preview()
             self.hist.mark()
+
+    # ---- the push pad (user): like a game controller's stick. Drag from the middle: the way = which way the steps
+    # leave the picked shape, how far = how hard. The middle is sticky (Shift = not), Ctrl = 8 ways, double-click =
+    # no push.
+
+    def build_pad(self, parent):
+        s = self.s
+        col = ttk.Frame(parent)
+        col.pack(side="left", anchor="n", padx=(8, 0))
+        self.pad_title = ttk.Label(col, text="")
+        self.pad_title.pack(anchor="w")
+        n = self.pad_size = int(112 * s)
+        pad = self.pad = tk.Canvas(col, width=n, height=n, bg=look.CHART_BG, highlightthickness=1,
+                                   highlightbackground=look.CHART_BORDER, cursor="crosshair")
+        pad.pack(anchor="w", pady=(2, 0))
+        pad.bind("<ButtonPress-1>", self.pad_press)
+        pad.bind("<B1-Motion>", self.pad_motion)
+        pad.bind("<ButtonRelease-1>", self.pad_release)
+        pad.bind("<Double-Button-1>", self.pad_reset)
+        Tooltip(pad, tr("between.push_tip"))
+        self.pad_info = ttk.Label(col, text="", foreground=look.HINT, font=look.font(8))
+        self.pad_info.pack(anchor="w")
+        self.smooth_var = tk.BooleanVar()
+        sm = ttk.Checkbutton(col, text=tr("between.smooth"), variable=self.smooth_var,
+                             command=lambda: self.change("smooth", self.smooth_var.get()))
+        sm.pack(anchor="w", pady=(6, 0))
+        Tooltip(sm, tr("between.smooth_tip"))
+
+    def pad_radius(self):
+        return self.pad_size / 2 - 10 * self.s
+
+    def picked(self):
+        marks = self.anchors()
+        return marks[min(self.push_on, len(marks) - 1)]
+
+    def draw_pad(self):
+        cv, s = self.pad, self.s
+        cv.delete("all")
+        if between.first_of(self.app.shapes, self.gid) is None:
+            return
+        marks = self.anchors()
+        j = min(self.push_on, len(marks) - 1)
+        name = (tr("between.first") if j == 0 else tr("between.last") if j == len(marks) - 1
+                else tr("between.key_n", n=j))
+        self.pad_title.config(text=tr("between.push_on", name=name))
+        c, r = self.pad_size / 2, self.pad_radius()
+        cv.create_oval(c - r, c - r, c + r, c + r, outline=look.CHART_FRAME)
+        cv.create_line(c - r, c, c + r, c, fill=look.CHART_GRID)
+        cv.create_line(c, c - r, c, c + r, fill=look.CHART_GRID)
+        st = PAD_STICK * s
+        cv.create_oval(c - st, c - st, c + st, c + st, outline=look.CHART_GRID_STRONG, dash=(2, 2))
+        x, y = between.push_of(marks[j])
+        px, py = c + x * r, c - y * r
+        colour = look.VALUE if j == 0 else look.CHART_LINE if j == len(marks) - 1 else look.CHART_GRID_STRONG
+        lw = max(1, round(2 * s))
+        if x or y:
+            cv.create_line(c, c, px, py, fill=colour, width=lw, arrow="last", arrowshape=(8 * s, 10 * s, 3 * s))
+        k = 6 * s
+        cv.create_oval(px - k, py - k, px + k, py + k, fill=colour if self.pad_drag else look.CHART_POINT,
+                       outline=colour, width=lw)
+        strength = math.hypot(x, y)
+        self.pad_info.config(text=tr("between.push_none") if not strength else
+                             tr("between.push_amount", n=round(strength * 100),
+                                a=round(math.degrees(math.atan2(y, x))) % 360))
+
+    def pad_at(self, e):
+        """The push for the mouse at e: Ctrl = 8 ways, the middle sticky unless Shift (user)."""
+        c, r = self.pad_size / 2, self.pad_radius()
+        x, y = (e.x - c) / r, (c - e.y) / r
+        n = math.hypot(x, y)
+        if n > 1:
+            x, y, n = x / n, y / n, 1.0
+        if not e.state & 0x1 and n * r <= PAD_STICK * self.s:
+            return [0.0, 0.0]
+        if e.state & 0x4 and n:
+            a = round(math.atan2(y, x) / (math.pi / 4)) * (math.pi / 4)
+            x, y = n * math.cos(a), n * math.sin(a)
+        return [round(x, 4), round(y, 4)]
+
+    def pad_press(self, e):
+        if between.first_of(self.app.shapes, self.gid) is None:
+            return
+        self.pad_drag = True
+        self.pad_motion(e)
+
+    def pad_motion(self, e):
+        if not self.pad_drag:
+            return
+        self.set_push(self.pad_at(e))
+
+    def set_push(self, p):
+        sh = self.picked()
+        if between.push_of(sh) == ([0.0, 0.0] if not (p[0] or p[1]) else p):
+            return self.draw_pad()
+        self.app.roll.cancel_draft()
+        self.put_push(sh, p)
+        self.app.shapes_changed()
+        self.draw_preview()
+        self.draw_pad()
+
+    def pad_release(self, e):
+        if self.pad_drag:
+            self.pad_drag = None
+            self.app.catch_up_notes()
+            self.draw_pad()
+            self.hist.mark()
+
+    def pad_reset(self, e):
+        self.pad_drag = None
+        self.set_push([0.0, 0.0])
+        self.app.catch_up_notes()
+        self.hist.mark()
 
     # ---- the graph (left = the first shape, right = the last; up = changed more towards the last)
 
