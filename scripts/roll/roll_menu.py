@@ -9,6 +9,7 @@ from notes.convert import originals
 from notes.custom import ROLES
 from window.drawer import colour_menu
 from notes.joined import is_joined
+from notes.merge import comes_from_left
 from notes.funnel import inside_out, new_start, turned_curve
 from notes.tumour import LINE_KINDS
 from roll.roll_shared import SHIFT
@@ -136,8 +137,7 @@ class ShapeMenu:
             item(tr("roll_menu.quick_chop"), tr("roll_menu.ctrl_u"), lambda: quick_chop(app), keys=True)
             self.glue_items(item)
         self.between_items(item, i)
-        if app.merge_pair():
-            item(tr("join_split.merge_menu"), "", lambda: app.gate_merge(i))
+        self.merge_menu(m, i)
         if len(app.sels) >= 2:  # (greyed out, saying why, when something else is selected too)
             ok = app.can_join()
             item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
@@ -186,8 +186,7 @@ class ShapeMenu:
             self.glue_items(item)
         if app.between_pair():
             item(tr("between.menu_add"), "", app.add_between)
-        if app.merge_pair():
-            item(tr("join_split.merge_menu"), "", lambda i=self.shape_at(e.x, e.y): app.gate_merge(i))
+        self.merge_menu(m, self.shape_at(e.x, e.y))
         ok = app.can_join()
         item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
              tr("roll_menu.ctrl_g"), app.join_selected, ok)
@@ -216,6 +215,23 @@ class ShapeMenu:
         if b.get("vel"):
             item(tr("between.menu_group_vel"), "", lambda: app.group_velocity(i))
         item(tr("between.menu_unlink"), "", lambda: app.unlink_between(i))
+
+    def merge_menu(self, m, stay):
+        """Gate sensitive merge ▸ From the left / From the right (two shapes selected; stay = the right-clicked one).
+        The side the other shape is on comes first."""
+        app = self.app
+        if not app.merge_pair():
+            return
+        rows = app.merge_rows(stay)
+        if not len(rows[0]) or not len(rows[1]):
+            m.add_command(label=tr("join_split.merge_menu"), command=lambda: app.gate_merge(stay))  # (says why)
+            return
+        sub = tk.Menu(m, tearoff=0)
+        sides = (True, False) if comes_from_left(*rows) else (False, True)
+        for left in sides:
+            sub.add_command(label=tr("join_split.merge_left" if left else "join_split.merge_right"),
+                            command=lambda left=left: app.gate_merge(stay, left))
+        m.add_cascade(label=tr("join_split.merge_menu"), menu=sub)
 
     def glue_items(self, item):
         """Glue (glue.py): in the kept Select boxes if there are any, else all the selected shapes' notes."""

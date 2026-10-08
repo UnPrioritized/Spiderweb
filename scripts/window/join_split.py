@@ -214,17 +214,23 @@ class JoinSplit:
         sels = sorted(i for i in self.sels if i < len(self.shapes))
         return sels if len(sels) == 2 else None
 
-    def gate_merge(self, stay=None):
-        """Right-click → Gate sensitive merge (user, first try): the right-clicked shape stays, each key row of the
-        other slides in until it meets it (notes/merge.py); both become one custom shape of plain notes (Ctrl+Z:
-        both again)."""
+    def merge_rows(self, stay):
+        """(staying shape's notes, sliding shape's notes) for Gate sensitive merge, stay = the right-clicked shape
+        (not one of the pair: the first)."""
+        pair = self.merge_pair()
+        stay = stay if stay in pair else pair[0]
+        slide = pair[1] if stay == pair[0] else pair[0]
+        return [np.asarray(self.notes_of(self.shapes[i]), np.int64).reshape(-1, 4)[:, :4] for i in (stay, slide)]
+
+    def gate_merge(self, stay=None, from_left=None):
+        """Right-click → Gate sensitive merge ▸ From the left / right (user): the right-clicked shape stays, each key
+        row of the other slides in from that side until it meets it (notes/merge.py); both become one custom shape
+        of plain notes (Ctrl+Z: both again)."""
         pair = self.merge_pair()
         if not pair:
             return
-        stay = stay if stay in pair else pair[0]
-        slide = pair[1] if stay == pair[0] else pair[0]
-        rows = [np.asarray(self.notes_of(self.shapes[i]), np.int64).reshape(-1, 4)[:, :4] for i in (stay, slide)]
-        out = gate_merge(rows[0], rows[1])
+        rows = self.merge_rows(stay)
+        out = gate_merge(rows[0], rows[1], from_left)
         if not len(out):
             self.status.config(text=tr("join_split.merge_no_notes"))
             return

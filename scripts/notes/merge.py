@@ -6,14 +6,21 @@ their key stay where they are."""
 import numpy as np
 
 
-def gate_merge(stay, slide):
+def comes_from_left(stay, slide):
+    """True if slide's middle is before stay's: the side it comes in from unless the user picks the other."""
+    return np.asarray(slide)[:, :2].mean() < np.asarray(stay)[:, :2].mean()
+
+
+def gate_merge(stay, slide, from_left=None):
     """stay, slide: (start, end, pitch, velocity[, track]) rows in ticks. Returns all rows together, slide's moved.
-    slide comes in from the side its middle is on."""
+    Each row comes in from far away on that side (from_left; None = the side slide's middle is on), so it meets
+    the staying shape's outer edge there: a row inside a hollow shape or overlapping it goes out to that edge."""
     stay = np.asarray(stay, np.int64)
     moved = np.array(slide, np.int64, copy=True)
     if not len(stay) or not len(moved):
         return np.concatenate([stay, moved]) if len(stay) or len(moved) else stay
-    from_left = moved[:, :2].mean() < stay[:, :2].mean()
+    if from_left is None:
+        from_left = comes_from_left(stay, moved)
     for key in np.unique(moved[:, 2]):
         here = stay[stay[:, 2] == key]
         if not len(here):
