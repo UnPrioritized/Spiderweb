@@ -28,7 +28,7 @@
  "join_split.only_joined_curves_and_custom_shapes": "Only joined curves and custom shapes split into separate shapes.",
  "join_split.join": "Join",
  "join_split.merge": "Gate sensitive merge",
- "join_split.merge_menu": "Gate sensitive merge",
+ "join_split.merge_menu": "Gate sensitive merge (experimental)",
  "join_split.merge_left": "Merge to left",
  "join_split.merge_right": "Merge to right",
  "join_split.merged": "Merged notes",
