@@ -15,7 +15,7 @@ from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live,
 from notes.bezier import anchor_count, nearest, split
 from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_path
-from notes.merge import gate_merge
+from notes.merge import comes_from_left, gate_merge
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
@@ -214,23 +214,18 @@ class JoinSplit:
         sels = sorted(i for i in self.sels if i < len(self.shapes))
         return sels if len(sels) == 2 else None
 
-    def merge_rows(self, stay):
-        """(staying shape's notes, sliding shape's notes) for Gate sensitive merge, stay = the right-clicked shape
-        (not one of the pair: the first)."""
-        pair = self.merge_pair()
-        stay = stay if stay in pair else pair[0]
-        slide = pair[1] if stay == pair[0] else pair[0]
-        return [np.asarray(self.notes_of(self.shapes[i]), np.int64).reshape(-1, 4)[:, :4] for i in (stay, slide)]
-
-    def gate_merge(self, stay=None, from_left=None):
-        """Right-click → Gate sensitive merge ▸ From the left / right (user): the right-clicked shape stays, each key
-        row of the other slides in from that side until it meets it (notes/merge.py); both become one custom shape
-        of plain notes (Ctrl+Z: both again)."""
+    def gate_merge(self, to_right):
+        """Right-click → Gate sensitive merge ▸ Merge to right / left (user; no anchor, anywhere in the menu works):
+        to the right = the shape on the left slides right, each key row until it meets the other shape's notes;
+        to the left = the shape on the right slides left (notes/merge.py). Both become one custom shape of plain
+        notes (Ctrl+Z: both again)."""
         pair = self.merge_pair()
         if not pair:
             return
-        rows = self.merge_rows(stay)
-        out = gate_merge(rows[0], rows[1], from_left)
+        a, b = (np.asarray(self.notes_of(self.shapes[i]), np.int64).reshape(-1, 4)[:, :4] for i in pair)
+        if len(a) and len(b) and comes_from_left(a, b):  # (a = the one on the left)
+            a, b = b, a
+        out = gate_merge(b, a, True) if to_right else gate_merge(a, b, False)
         if not len(out):
             self.status.config(text=tr("join_split.merge_no_notes"))
             return
