@@ -9,7 +9,8 @@ made shows them about where it is (with a note); turning one makes new lines fro
   comes in over that long, once per note.
   Tremolo (LFO 2): Timing (hz["lfo"]), Rate = the Tremolo line (its value is how fast), Depth, Delay, Rise
   (hz["lfo"]). Timing other than Free = the Rate moves by note lengths (straight, triplets, dotted).
-  Tone: Sweep (on / off) from Start to End in Time = the Sweep line once per note; Wah = its line, flat.
+  Tone: Sweep (on / off) from Start to End in Time = the Sweep line once per note, Key track (hz["lfo"]) = how far
+  it follows each note's pitch; Wah = its line, flat.
   Character: Slant, Groups, Off pitch, Noisy = their lines, flat.
   Voice: Voices, Detune, Blend, Random start, Voices on (split / same keys), Glide, Curve, Only notes that touch,
   Legato = hz["voice"] (not lines).
@@ -60,7 +61,12 @@ KINDS = {"time": ("hz.synth_beats", 0.0, TIME_MOST, (0.05, 0.25, 0.01), TIME_KNO
          "octaves": (None, ARP["octaves"][0], ARP["octaves"][1], (1, 1, 1), None),
          "gate": ("hz.synth_percent", 100 * ARP["gate"][0], 100 * ARP["gate"][1], (1, 10, 0.1), None),
          "swing": ("hz.synth_percent", 100 * ARP["swing"][0], 100 * ARP["swing"][1], (1, 10, 0.1), None),
-         "bend": ("hz.synth_percent", -100.0, 100.0, (1, 10, 0.1), None)}  # (bend: -1..1, 0 in the middle)
+         "bend": ("hz.synth_percent", -100.0, 100.0, (1, 10, 0.1), None),  # (bend: -1..1, 0 in the middle)
+         "threshold": ("hz.synth_db", RACK["compressor"]["threshold"][0], RACK["compressor"]["threshold"][1],
+                       (1, 6, 0.1), None),
+         "comp_ratio": ("hz.synth_to_one", RACK["compressor"]["ratio"][0], RACK["compressor"]["ratio"][1],
+                        (0.5, 2, 0.1), RACK["compressor"]["ratio"][1]),
+         "gain": ("hz.synth_db", RACK["compressor"]["gain"][0], RACK["compressor"]["gain"][1], (1, 6, 0.1), None)}
 PERCENTS = ("percent", "width", "gate", "swing", "bend")  # (kept 0..1, shown and typed in %)
 UPDOWN = ("keys", "bend")  # (knobs with 0 in the middle)
 # the LFO boxes' Rate knobs that can move by note lengths (Timing dropdown; hzbass.TIMINGS), and how a timing's rates
@@ -88,7 +94,7 @@ BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain",
          "tremolo": (("tremolo_rate", "trem_rate", 0.0), ("tremolo_depth", "percent", TREMOLO_DEPTH),
                      ("tremolo_wait", "time", 0.0), ("tremolo_rise", "time", 0.0)),
          "tone": (("sweep_start", "percent", 1.0), ("sweep_end", "percent", 0.0), ("sweep_time", "time", 1.0),
-                  ("wah", "percent", 0.0)),
+                  ("sweep_track", "bend", 0.0), ("wah", "percent", 0.0)),
          "character": (("slant", "percent", 0.0), ("groups", "groups", 1.0), ("offpitch", "percent", 0.0),
                        ("noisy", "percent", 0.0)),
          "voice": (("voices", "voices", 1.0), ("detune", "cents", 20.0), ("blend", "percent", BLEND),
@@ -97,8 +103,11 @@ BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain",
 ROWS = (("volume", "wave", "pitch", "tone"), ("vibrato", "tremolo", "character", "voice"), ("arp",))
 # the Effects tab's effects (hzbass.RACK, window/hz_rack.py): their knobs (knob = effect_setting) and kinds
 RACK_KNOBS = {"chorus": (("chorus_depth", "cents"), ("chorus_rate", "vib_rate")),
+              "flanger": (("flanger_rate", "vib_rate"), ("flanger_depth", "percent"), ("flanger_mix", "percent")),
               "echo": (("echo_time", "time"), ("echo_repeats", "repeats"), ("echo_fade", "percent")),
-              "reverb": (("reverb_length", "time"), ("reverb_scatter", "percent"), ("reverb_level", "percent"))}
+              "reverb": (("reverb_length", "time"), ("reverb_scatter", "percent"), ("reverb_level", "percent")),
+              "compressor": (("compressor_threshold", "threshold"), ("compressor_ratio", "comp_ratio"),
+                             ("compressor_attack", "time"), ("compressor_gain", "gain"))}
 KNOBS = {key: (box, kind, start) for box, knobs in BOXES.items() for key, kind, start in knobs}
 KNOBS.update({key: (fx, kind, RACK[fx][key.split("_", 1)[1]][2]) for fx, knobs in RACK_KNOBS.items()
               for key, kind in knobs})
@@ -333,14 +342,14 @@ def sweep_line(start, end, time):
 
 
 def read_tone(win, was):
-    """The Tone box: ({sweep, sweep_start, sweep_end, sweep_time, wah}, made) as read_volume (no Sweep line: off,
-    its knobs kept as they were)."""
+    """The Tone box: ({sweep, sweep_start, sweep_end, sweep_time, sweep_track, wah}, made) as read_volume (no Sweep
+    line: off, its knobs kept as they were; Key track is hz["lfo"]'s)."""
     got = {"sweep": False, "sweep_start": was["sweep_start"], "sweep_end": was["sweep_end"],
-           "sweep_time": was["sweep_time"], "wah": 0.0}
+           "sweep_time": was["sweep_time"], "sweep_track": was["sweep_track"], "wah": 0.0}
     made = True
     pts = win.fxl.get("sweep")
     if pts:
-        got["sweep"] = True
+        got["sweep"], got["sweep_track"] = True, win.lfo.get("sweep_track", 0.0)
         v = flat(win, "sweep")
         if v is not None:
             got["sweep_start"] = got["sweep_end"] = v
@@ -934,6 +943,7 @@ class SynthKnobs:
                 self.fxl["sweep"] = pts
                 if every:
                     self.loops["sweep"], self.froms["sweep"] = every, "note"
+            self.set_lfo("sweep_track", v["sweep_track"] if v["sweep"] else 0.0, 0.0)  # (off: kept in hz["kept"])
             fx.drop("wah")
             if v["wah"] > 0:
                 self.fxl["wah"] = [[0.0, v["wah"]]]

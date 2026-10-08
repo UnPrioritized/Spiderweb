@@ -1,6 +1,7 @@
 """The synth window's Effects tab (user 2026-10-05: a rack, as many synths have). On the left, every effect in a list
 (lit = in use; a click puts it in or takes it out, dragging one in use changes the order); on the right, a strip for
-each effect in use, in order (Chorus, Echo, Reverb look-alike): a tag with its name, its knobs, a picture, and a power
+each effect in use, in order (Chorus, Flanger, Echo, Reverb look-alike, Compressor): a tag with its name, its knobs,
+a picture, and a power
 button (off = kept but silent); a scroll bar when they don't fit. They're the Hz bass's own setting hz["rack"]
 (hzbass.RACK), not lines; one undo step a change. The knobs are the Knobs tab's (hz_knobs.RACK_KNOBS)."""
 
@@ -9,14 +10,15 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
-from notes.hzbass import RACK, SOFT
+from notes.hzbass import RACK, SOFT, compress
 from window.hz_knobs import RACK_KNOBS
 from window.synth_look import BG, DIM, EDGE, HEAD_FONT, LIGHT_OFF, MID, PANEL, PIC, TEXT, bright, mix
 from window.widgets import DRAG_PX, Tooltip
 
-COLOURS = {k: bright(v) for k, v in {"chorus": "#2a9d8f", "echo": "#d07a1e", "reverb": "#6a5acd"}.items()}
+COLOURS = {k: bright(v) for k, v in {"chorus": "#2a9d8f", "flanger": "#3a8fd0", "echo": "#d07a1e", "reverb": "#6a5acd",
+                                     "compressor": "#c94c4c"}.items()}
 PICTURE = (240, 64)
-LIST_W, ROW_H = 170, 30  # the list of effects on the left: its width, a row's height
+LIST_W, ROW_H = 215, 30  # the list of effects on the left: its width, a row's height
 
 
 class SynthRack:
@@ -250,9 +252,11 @@ class SynthRack:
             c.delete("all")
             getattr(self, "draw_rack_" + kind)(c, COLOURS[kind] if kind not in self.vals["rack_off"] else MID)
 
-    def rack_text(self, c, text):
-        c.create_text(c.winfo_width() - 3 * self.s, 2 * self.s, text=text, anchor="ne", fill=DIM,
-                      font=("Segoe UI", 7))
+    def rack_text(self, c, text, low=False):
+        """A few words in a picture's top right corner (low: bottom right, under a line that ends high)."""
+        s = self.s
+        c.create_text(c.winfo_width() - 3 * s, c.winfo_height() - 2 * s if low else 2 * s, text=text,
+                      anchor="se" if low else "ne", fill=DIM, font=("Segoe UI", 7))
 
     def draw_rack_chorus(self, c, colour):
         """Every other key's tone over two beats: up to Depth cents and back."""
@@ -261,6 +265,30 @@ class SynthRack:
         self.wobble(c, v["chorus_depth"] / 100.0 * (1.0 - np.cos(2.0 * np.pi * v["chorus_rate"] * b)) / 2.0, colour,
                     False)
         self.rack_text(c, tr("hz.rack_no_extra"))
+
+    def draw_rack_flanger(self, c, colour):
+        """How late the moving keys hit over two beats: up to Depth of a wave and back."""
+        v = self.vals
+        b = np.linspace(0.0, 2.0, 400)
+        self.wobble(c, v["flanger_depth"] * (1.0 - np.cos(2.0 * np.pi * v["flanger_rate"] * b)) / 2.0, colour, False)
+        self.rack_text(c, tr("hz.rack_no_extra"))
+
+    def draw_rack_compressor(self, c, colour):
+        """How loud a sound comes out (up) for how loud it goes in (across), in dB from -48 to 0: straight up to the
+        threshold (dashed), flatter past it, all lifted by Gain."""
+        s, v = self.s, self.vals
+        w, h, pad = c.winfo_width(), c.winfo_height(), 6 * s
+        lo = RACK["compressor"]["threshold"][0]
+        comp = {k: v["compressor_" + k] for k in RACK["compressor"]}
+        db = np.linspace(lo, 0.0, 200)
+        out = 20.0 * np.log10(np.maximum(compress(10.0 ** (db / 20.0), np.full(len(db), 1e9), comp), 1e-12))
+        x = lambda d: pad + (d - lo) / -lo * (w - 2 * pad)
+        y = lambda d: h - pad - (min(0.0, max(lo, d)) - lo) / -lo * (h - 2 * pad)
+        c.create_line(x(lo), y(lo), x(0.0), y(0.0), fill=MID)  # (as it went in)
+        xt = x(v["compressor_threshold"])
+        c.create_line(xt, pad, xt, h - pad, fill=DIM, dash=(3, 3))
+        c.create_line(*[q for d, o in zip(db, out) for q in (x(d), y(o))], fill=colour, width=max(2, round(2 * s)))
+        self.rack_text(c, tr("hz.rack_no_extra"), low=True)
 
     def draw_rack_echo(self, c, colour):
         """The sound and its repeats: a bar for each, as loud as it is, Time apart."""

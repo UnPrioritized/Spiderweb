@@ -63,7 +63,8 @@ Five more change how hard the keys hit instead (KeyGrid.factor -> velocity_facto
 top of the shape's own velocity; loudness goes with velocity squared):
   "volume": how loud, 1 = as the shape's velocity, 0 = silence (repeats softer than SOFT are left out, and the one
   before them still ends where it would have).
-  "sweep": a bump of loudness over the keys; the value is where it is, 0 = the lowest key, 1 = the highest.
+  "sweep": a bump of loudness over the keys; the value is where it is, 0 = the lowest key, 1 = the highest
+  (hz["lfo"]["sweep_track"] moves it with each note's pitch: see LFO).
   "wah": loud and quiet stripes over the keys, more of them the higher the value (0 = every key full).
   "tremolo": every key louder and quieter in turn, value x TREMOLO times a beat (0 = steady), down to 1 -
   TREMOLO_DEPTH of its loudness (or 1 - hz["lfo"]["tremolo_depth"], set by the synth window's knobs), coming in
@@ -117,9 +118,11 @@ WAH = 8.0  # "wah" at 1: this many loud stripes over the keys
 TREMOLO = 8.0  # "tremolo" at 1: this many times a beat
 TREMOLO_DEPTH = 0.9  # ... how much quieter it gets (unless hz["lfo"]["tremolo_depth"])
 # hz["lfo"]: what each can be; tremolo_wait / tremolo_rise = beats from each note's start before the tremolo comes
-# in, and how long it then takes to reach its depth (the vibrato's are in its line)
+# in, and how long it then takes to reach its depth (the vibrato's are in its line); sweep_track = the Tone box's
+# Key track: how far the Sweep's loud part follows each note's pitch (1 = one key row up for every key the note is
+# above the Hz bass's own tone, like a filter's key tracking; -1 = down)
 LFO = {"vibrato_rate": (0.0, 64.0), "tremolo_depth": (0.0, 1.0), "tremolo_wait": (0.0, 64.0),
-       "tremolo_rise": (0.0, 64.0)}
+       "tremolo_rise": (0.0, 64.0), "sweep_track": (-1.0, 1.0)}
 # ... and how the synth window's Rate knobs move (vibrato_timing / tremolo_timing; not missing = "free"): free, or
 # only to note lengths (straight, triplets, dotted). Only the knobs care: the rate itself is still times a beat
 TIMINGS = ("free", "straight", "triplet", "dotted")
@@ -154,10 +157,17 @@ CRUSH = 1 / 40
 # highest, where its knob starts). chorus: every other key's tone goes up to `depth` cents and back `rate` times a
 # beat (no extra notes); echo: the whole sound again `repeats` times, `time` beats apart, each `fade` as loud as the
 # one before; reverb: each note's tone rings on `length` beats after it ends, starting `level` as loud and fading,
-# its waves landing more and more scattered (up to `scatter` x half a wave)
+# its waves landing more and more scattered (up to `scatter` x half a wave); flanger: a `mix` share of the keys
+# (spread evenly: 0.5 = every other key) hits late by up to `depth` x a wave and back, `rate` times a beat (no extra
+# notes); compressor: loudness over `threshold` dB is cut down to 1 / `ratio` of how far it's over, coming in over
+# `attack` beats from each note's start, then everything made `gain` dB louder (never past full): the quiet parts
+# come up next to the loud ones
 RACK = {"chorus": {"depth": (0.0, 100.0, 15.0), "rate": (0.0, 64.0, 0.5)},
+        "flanger": {"rate": (0.0, 64.0, 0.25), "depth": (0.0, 1.0, 0.5), "mix": (0.0, 1.0, 0.5)},
         "echo": {"time": (1 / 64, 64.0, 0.75), "repeats": (1.0, 8.0, 3.0), "fade": (0.0, 1.0, 0.5)},
-        "reverb": {"length": (1 / 16, 64.0, 2.0), "scatter": (0.0, 1.0, 0.5), "level": (0.0, 1.0, 0.5)}}
+        "reverb": {"length": (1 / 16, 64.0, 2.0), "scatter": (0.0, 1.0, 0.5), "level": (0.0, 1.0, 0.5)},
+        "compressor": {"threshold": (-48.0, 0.0, -12.0), "ratio": (1.0, 20.0, 4.0), "attack": (0.0, 64.0, 0.0),
+                       "gain": (0.0, 24.0, 9.0)}}
 # hz["arp"] (the Arpeggio box; there only while it's on): every note (or the notes placed together, a chord) becomes a
 # fast run through its pitches: `chord` = "placed" (the notes placed together) or a chord's steps in keys on each
 # note; `octaves` = the same again 1, 2... octaves up; `pattern` = the order; `speed` = notes a beat, each `gate` of
@@ -428,6 +438,18 @@ def rack_tail(hz):
     """Beats the Effects tab's echo and reverb make the sound go on for after the notes."""
     echo, reverb = rack_on(hz, "echo"), rack_on(hz, "reverb")
     return (echo["repeats"] * echo["time"] if echo else 0.0) + (reverb["length"] if reverb else 0.0)
+
+
+def compress(loud, since, comp):
+    """Loudness (0..1, 1 = full) through the Effects tab's compressor (RACK): what's over its threshold cut to 1 /
+    ratio of how far over (in dB), that cut coming in over `attack` beats from the note's start (since), then all of
+    it `gain` dB louder, never past full; silence stays silent."""
+    loud = np.asarray(loud, float)
+    db = 20.0 * np.log10(np.maximum(loud, 1e-12))
+    cut = np.maximum(0.0, db - comp["threshold"]) * (1.0 - 1.0 / comp["ratio"])
+    if comp["attack"] > 0:
+        cut = cut * np.clip(np.asarray(since, float) / comp["attack"], 0.0, 1.0)
+    return np.where(loud > 0, np.minimum(1.0, 10.0 ** ((db - cut + comp["gain"]) / 20.0)), 0.0)
 
 
 def clean_extra(hz):
@@ -1264,9 +1286,13 @@ class KeyGrid:
         self.random = (hz.get("voice") or {}).get("random", 0.0)  # (Random start: see starting_points)
         self.left = left
         self.mode, self.ppq = hz.get("mode") or {}, ppq
-        self.chorus, self.echo, self.reverb = (rack_on(hz, k) for k in ("chorus", "echo", "reverb"))
+        self.chorus, self.echo, self.reverb, self.flanger, self.comp = (
+            rack_on(hz, k) for k in ("chorus", "echo", "reverb", "flanger", "compressor"))
+        self.order = [e["kind"] for e in hz.get("rack") or () if not e.get("off")]  # (the compressor's place counts)
         lfo = hz.get("lfo") or {}
         self.trem_in = (lfo.get("tremolo_wait", 0.0), lfo.get("tremolo_rise", 0.0))  # (beats: see LFO)
+        self.track = lfo.get("sweep_track", 0.0)  # (Key track: the Sweep follows each note's pitch)
+        home = hz.get("key", HZ_DEFAULTS["key"]) + hz.get("cents", 0.0) / 100.0  # (... from the Hz bass's own tone)
         self.runs = []
         tail = tails(hz)
         for starts, nexts, whose in tone_runs(hz, left, ppq):
@@ -1295,13 +1321,14 @@ class KeyGrid:
             run["since"] = beat - (n0["t"] if span is None else span[0])
             run["trem_since"] = run["since"]  # (the tremolo's Delay / Rise: a reverb tail keeps it as at the end)
             run["tone"], run["held"] = n0, whose[1] is None
+            run["track"] = pitch(n0) - home  # (keys above the Hz bass's own tone)
             self.runs.append(run)
         if self.reverb:
             self.runs += self.reverb_runs(hz, left, ppq)
         self.shaped = (any(r["has_" + name].any() for r in self.runs for name in WAVES)
                        or self.mode.get("kind") in ("fm", "pulse", "sync"))
         self.loud = (self.shaped or any(name in (hz.get("fx") or ()) for name in VEL_FX)
-                     or bool(self.echo or self.reverb) or bool((self.gains != 1.0).any()))
+                     or bool(self.echo or self.reverb or self.comp) or bool((self.gains != 1.0).any()))
         self.pack()
         self.starting = self.starting_points() if self.random else None
 
@@ -1326,7 +1353,8 @@ class KeyGrid:
         hundreds of runs; one by one, 128 keys took seconds)."""
         runs = self.runs
         n = np.array([len(r["starts"]) for r in runs], np.int64)
-        names = ["starts", "waves", "beat", "limits", "since", "trem_since", "turns", "swept", "has_volume", "groups", *FX,
+        names = ["starts", "waves", "beat", "limits", "since", "trem_since", "turns", "swept", "has_volume", "groups",
+                 "track", *FX,
                  *("has_" + name for name in WAVES)]
         self.flat = {k: np.concatenate([np.broadcast_to(np.asarray(r[k]), (len(r["starts"]),)) for r in runs])
                      if runs else np.zeros(0) for k in names}
@@ -1456,6 +1484,11 @@ class KeyGrid:
         if self.mode.get("kind") == "growl":  # (late by turns: 0 .. amount over `every` waves)
             every = int(self.mode["every"])
             late = late + GROWL * self.mode["amount"] * (number % every) / (every - 1)
+        fl = self.flanger
+        i = key - self.lo
+        if fl and math.floor((i + 1) * fl["mix"] + 1e-9) > math.floor(i * fl["mix"] + 1e-9):  # (Mix: this key moves)
+            # (late by up to Depth and back, counted from the song's start like Random start: a Split keeps it)
+            late = late + fl["depth"] * (1.0 - np.cos(2.0 * np.pi * fl["rate"] * (self.left + f["beat"][src]))) / 2.0
         tailed = tail[part]
         tail_u = f["tail_u"][src]  # (the reverb's: more and more scattered)
         if tailed.any():
@@ -1465,10 +1498,13 @@ class KeyGrid:
         starts = starts + late * waves
         limits = f["limits"][src]
         until = each["until"][run][part]
-        factor, quiet = np.ones(len(starts)), np.zeros(len(starts), bool)
+        quiet, squeezed = np.zeros(len(starts), bool), False  # (squeezed: the compressor has had them)
         if self.loud:
             trem = self.runs[0]["trem"]
-            swept = 0.08 + 0.92 * np.clip(np.cos(np.pi * (xv - f["sweep"][src])), 0.0, 1.0) ** 4
+            where = f["sweep"][src]
+            if self.track:  # (Key track: one key row for every key the note is above the Hz bass's tone, at 1)
+                where = where + self.track * f["track"][src] / max(1, self.n - 1)
+            swept = 0.08 + 0.92 * np.clip(np.cos(np.pi * (xv - where)), 0.0, 1.0) ** 4
             loud = np.where(f["swept"][src], swept, 1.0)
             loud = loud * (1.0 + np.cos(2.0 * np.pi * WAH * f["wah"][src] * (xv - 0.5))) / 2.0
             if any(self.trem_in):  # (coming in after Delay over Rise, from each note's start)
@@ -1482,7 +1518,10 @@ class KeyGrid:
                 loud = loud * (trem[0] + trem[1] * (1.0 + np.cos(2.0 * np.pi * f["turns"][src])) / 2.0)
             vol = np.where(f["has_volume"][src], f["volume"][src], 1.0) * self.gains[copy][part]  # (Blend)
             loud = loud * vol
-            if tailed.any():  # (the reverb: starting at its level, fading)
+            since = f["since"][src]
+            if tailed.any():  # (the reverb: starting at its level, fading; a compressor before it doesn't touch that)
+                if self.comp and self.order.index("compressor") < self.order.index("reverb"):
+                    loud, squeezed = self.compressed(loud, since), True
                 loud = np.where(tailed, loud * self.reverb["level"] ** 2 * (1.0 - tail_u) ** 3, loud)
             soft = np.where(number % 2 == 1, 1.0 - f["octave"][src], 1.0)  # (on the velocity itself)
             if self.shaped:  # SUB hits in every wave, each as loud as the waveforms say there (wave_hits)
@@ -1492,19 +1531,29 @@ class KeyGrid:
                 keep = mix >= SOFT
                 rows = np.nonzero(keep)[0]
                 starts = (starts[:, None] + where * waves[:, None])[keep]
-                limits, until = limits[rows], until[rows]
-                factor = np.sqrt(loud[rows] * mix[keep]) * soft[rows]
+                limits, until, since = limits[rows], until[rows], since[rows]
+                env, mix, soft = loud[rows], mix[keep], soft[rows]
                 quiet = vol[rows] < SOFT
             else:
-                factor = np.sqrt(loud) * soft
+                env, mix = loud, np.ones(len(loud))
                 quiet = vol < SOFT
+        else:
+            env, mix, soft, since = (np.ones(len(starts)), np.ones(len(starts)), np.ones(len(starts)),
+                                     np.zeros(len(starts)))
+        # (each note's velocity part = sqrt(env x mix) x soft x the echo's gain: env = its loudness, which the
+        # compressor works on; mix and soft = the waveform's and Octave below's part, which it leaves alone)
         if self.mode.get("kind") == "crush" and self.mode["amount"] > 0:  # (onto a coarse grid of ticks)
             grid = self.mode["amount"] ** 2 * CRUSH * self.ppq
             starts = np.floor(starts / grid + 0.5) * grid
         keep = starts < until - 1e-6
-        all_starts, all_limits, all_factors, all_quiet = [starts[keep]], [limits[keep]], [factor[keep]], [quiet[keep]]
+        late_comp = bool(self.comp and not squeezed and self.echo
+                         and self.order.index("echo") < self.order.index("compressor"))  # (squeezing the echo too)
+        if self.comp and not squeezed and not late_comp:
+            env[keep] = self.compressed(env[keep], since[keep])
+        all_starts, all_limits, all_env, all_quiet = [starts[keep]], [limits[keep]], [env[keep]], [quiet[keep]]
+        all_gain = [np.ones(int(keep.sum()))]
         if self.echo and len(run):  # (the whole sound again, later and quieter: one more line of notes each)
-            made = all_starts[0], all_limits[0], all_factors[0], all_quiet[0]
+            made = all_starts[0], all_limits[0], all_env[0], all_quiet[0]
             for i in range(1, int(self.echo["repeats"]) + 1):
                 gain = self.echo["fade"] ** (i / 2.0)  # (loudness goes with the velocity squared)
                 if gain * gain < SOFT:
@@ -1512,11 +1561,17 @@ class KeyGrid:
                 shift = i * self.echo["time"] * self.ppq
                 all_starts.append(made[0] + shift)
                 all_limits.append(made[1] + int(math.floor(shift + 0.5)))
-                all_factors.append(made[2] * gain)
+                all_env.append(made[2] * gain * gain if late_comp else made[2])
+                all_gain.append(np.full(len(made[0]), 1.0 if late_comp else gain))
                 all_quiet.append(made[3])
         if len(run):
             st, li = np.concatenate(all_starts), np.concatenate(all_limits)
-            fa, qu = np.concatenate(all_factors), np.concatenate(all_quiet)
+            env, qu = np.concatenate(all_env), np.concatenate(all_quiet)
+            sets = len(all_starts)  # (the sound and its echoes)
+            if late_comp:
+                env = self.compressed(env, np.tile(since[keep], sets))
+            fa = (np.sqrt(env * np.tile(mix[keep], sets)) * np.tile(soft[keep], sets)
+                  * np.concatenate(all_gain))
             if (self.gains != 1.0).any():  # (Blend: copies on one tick = the loudest one, left out only if all are)
                 first = np.lexsort((-fa, qu))
                 st, li, fa, qu = st[first], li[first], fa[first], qu[first]
@@ -1529,6 +1584,10 @@ class KeyGrid:
         factor.setflags(write=False)
         got = self.got[key] = (sq, factor)
         return got
+
+    def compressed(self, loud, since):
+        """The Effects tab's compressor on loudness values (0..1; since = beats from each one's note's start)."""
+        return compress(loud, since, self.comp)
 
     def squares(self, key):
         """A key's repeats: (start, end) ticks in order, none overlapping."""
