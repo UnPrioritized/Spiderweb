@@ -3020,6 +3020,7 @@
  "between.turns_tip": "How many colours the shapes take turns over (at most 15).",
  "between.needs_multi": "Channels isn't Multi channel now, so all the steps are in one channel and look the same.",
  "between.graph": "How the steps change:",
+ "between.preview_title": "Preview",
  "between.even": "Even",
  "between.near_first": "Near the first",
  "between.near_last": "Near the last",

@@ -60,23 +60,33 @@ class BetweenWindow(tk.Toplevel):
         self.colours_touched = False  # (the Multi channel note only shows once the colours are changed: user)
         box = ttk.Frame(self, padding=8)
         box.pack(fill="both", expand=True)
+        # (two rows of two: the preview + the push pad, the graph + the settings; titles over both boxes, user)
         top = ttk.Frame(box)
         top.pack(anchor="w")
+        ttk.Label(top, text=tr("between.preview_title"), foreground=look.LABEL).grid(row=0, column=0, sticky="w")
         pv = self.pv = tk.Canvas(top, width=self.w, height=self.ph, bg=look.CHART_BG, highlightthickness=1,
                                  highlightbackground=look.CHART_BORDER)
-        pv.pack(side="left", anchor="n")
+        pv.grid(row=1, column=0, sticky="nw", pady=(2, 0))
         self.push_on, self.pad_drag = 0, None  # (which anchor the pad pushes: its number from the first shape)
         self.pad_was = None  # (the window's undo place before a pad press: a double-click's first click undone)
         marks = [sh for _, sh in between.anchors(app.shapes, gid)]
         self.push_on = next((j for j, sh in enumerate(marks) if sh is opened_on), 0)
         self.build_pad(top)
-        ttk.Label(box, text=tr("between.preview_hint"), foreground=look.HINT, font=look.font(8), justify="left",
-                  wraplength=self.w).pack(anchor="w", pady=(2, 6))
+        ttk.Label(top, text=tr("between.preview_hint"), foreground=look.HINT, font=look.font(8), justify="left",
+                  wraplength=self.w).grid(row=2, column=0, sticky="nw", pady=(2, 6))
         pv.bind("<ButtonPress-1>", self.pv_press)
         pv.bind("<B1-Motion>", self.pv_motion)
         pv.bind("<ButtonRelease-1>", self.pv_release)
         pv.bind("<Motion>", self.pv_move)
-        row = ttk.Frame(box)
+        ttk.Label(box, text=tr("between.graph"), foreground=look.LABEL).pack(anchor="w")
+        mid = ttk.Frame(box)
+        mid.pack(anchor="w", pady=(2, 4))
+        cv = self.canvas = tk.Canvas(mid, width=self.w, height=self.h, bg=look.CHART_BG, highlightthickness=1,
+                                     highlightbackground=look.CHART_BORDER, cursor="crosshair")
+        cv.pack(side="left", anchor="n")
+        side = ttk.Frame(mid)
+        side.pack(side="left", anchor="n", padx=(8, 0))
+        row = ttk.Frame(side)
         row.pack(anchor="w")
         lb = ttk.Label(row, text=tr("between.steps"))
         lb.pack(side="left")
@@ -88,21 +98,26 @@ class BetweenWindow(tk.Toplevel):
         Scrub(app, [(e, self.steps_var, self.on_steps)], (1, 10, 1), 1, between.MOST_STEPS, label=lb)
         for w in (lb, e):
             Tooltip(w, tr("between.steps_tip"))
-        self.info = ttk.Label(row, text="", foreground=look.HINT)
-        self.info.pack(side="left", padx=(4, 0))
+        self.info = ttk.Label(side, text="", foreground=look.HINT)
+        self.info.pack(anchor="w", pady=(2, 0))
         self.rev_var = tk.BooleanVar()
-        rev = ttk.Checkbutton(box, text=tr("between.reverse"), variable=self.rev_var,
+        rev = ttk.Checkbutton(side, text=tr("between.reverse"), variable=self.rev_var,
                               command=lambda: self.change("rev", self.rev_var.get()))
         rev.pack(anchor="w", pady=(6, 0))
         Tooltip(rev, tr("between.reverse_tip"))
-        row = ttk.Frame(box)
-        row.pack(anchor="w", pady=(4, 0))
+        self.smooth_var = tk.BooleanVar()
+        sm = ttk.Checkbutton(side, text=tr("between.smooth"), variable=self.smooth_var,
+                             command=lambda: self.change("smooth", self.smooth_var.get()))
+        sm.pack(anchor="w", pady=(4, 0))
+        Tooltip(sm, tr("between.smooth_tip"))
         self.col_var = tk.BooleanVar()
-        col = ttk.Checkbutton(row, text=tr("between.colours"), variable=self.col_var, command=self.on_colours)
-        col.pack(side="left")
+        col = ttk.Checkbutton(side, text=tr("between.colours"), variable=self.col_var, command=self.on_colours)
+        col.pack(anchor="w", pady=(4, 0))
         Tooltip(col, tr("between.colours_tip"))
+        row = ttk.Frame(side)
+        row.pack(anchor="w", padx=(int(20 * s), 0))
         self.turns_label = ttk.Label(row, text=tr("between.turns"))
-        self.turns_label.pack(side="left", padx=(6, 0))
+        self.turns_label.pack(side="left")
         self.turns_var = tk.StringVar()
         e = self.turns_box = ttk.Entry(row, textvariable=self.turns_var, width=4)
         e.pack(side="left", padx=4)
@@ -111,12 +126,8 @@ class BetweenWindow(tk.Toplevel):
         Scrub(app, [(e, self.turns_var, self.on_turns)], (1, 5, 1), 1, between.COLOURS_MOST, label=self.turns_label)
         for w in (self.turns_label, e):
             Tooltip(w, tr("between.turns_tip"))
-        self.multi_note = ttk.Label(box, text=tr("between.needs_multi"), foreground=look.WARN, font=look.font(8),
-                                    wraplength=self.w, justify="left")
-        ttk.Label(box, text=tr("between.graph"), foreground=look.LABEL).pack(anchor="w", pady=(8, 0))
-        cv = self.canvas = tk.Canvas(box, width=self.w, height=self.h, bg=look.CHART_BG, highlightthickness=1,
-                                     highlightbackground=look.CHART_BORDER, cursor="crosshair")
-        cv.pack(anchor="w", pady=4)
+        self.multi_note = ttk.Label(side, text=tr("between.needs_multi"), foreground=look.WARN, font=look.font(8),
+                                    wraplength=self.ph, justify="left")
         row = ttk.Frame(box)
         row.pack(anchor="w")
         for key, pts in PRESETS:
@@ -454,28 +465,21 @@ class BetweenWindow(tk.Toplevel):
     # no push.
 
     def build_pad(self, parent):
-        s = self.s
-        col = ttk.Frame(parent)
-        col.pack(side="left", anchor="n", padx=(8, 0))
-        self.pad_title = ttk.Label(col, text="")
-        self.pad_title.pack(anchor="w")
-        n = self.pad_size = int(112 * s)
-        pad = self.pad = tk.Canvas(col, width=n, height=n, bg=look.CHART_BG, highlightthickness=1,
+        """The pad beside the preview (parent's grid column 1), as tall as it, its title on the preview's title row."""
+        self.pad_title = ttk.Label(parent, text="", foreground=look.LABEL)
+        self.pad_title.grid(row=0, column=1, sticky="w", padx=(8, 0))
+        n = self.pad_size = self.ph
+        pad = self.pad = tk.Canvas(parent, width=n, height=n, bg=look.CHART_BG, highlightthickness=1,
                                    highlightbackground=look.CHART_BORDER, cursor="crosshair")
-        pad.pack(anchor="w", pady=(2, 0))
+        pad.grid(row=1, column=1, sticky="nw", padx=(8, 0), pady=(2, 0))
         pad.bind("<ButtonPress-1>", self.pad_press)
         pad.bind("<B1-Motion>", self.pad_motion)
         pad.bind("<ButtonRelease-1>", self.pad_release)
         pad.bind("<Double-Button-1>", self.pad_reset)
-        self.pad_info = ttk.Label(col, text="", foreground=look.HINT, font=look.font(8))
-        self.pad_info.pack(anchor="w")
+        self.pad_info = ttk.Label(parent, text="", foreground=look.HINT, font=look.font(8))
+        self.pad_info.grid(row=2, column=1, sticky="nw", padx=(8, 0), pady=(2, 0))
         for w in (self.pad_title, self.pad_info):  # (not on the pad itself: it covered the stick, user)
             Tooltip(w, tr("between.push_tip"))
-        self.smooth_var = tk.BooleanVar()
-        sm = ttk.Checkbutton(col, text=tr("between.smooth"), variable=self.smooth_var,
-                             command=lambda: self.change("smooth", self.smooth_var.get()))
-        sm.pack(anchor="w", pady=(6, 0))
-        Tooltip(sm, tr("between.smooth_tip"))
 
     def pad_radius(self):
         return self.pad_size / 2 - 10 * self.s
