@@ -3064,11 +3064,13 @@
   "",
   "In the window: Steps = how many in-between shapes. Reverse pairs the first shape's start with the second's end; switch it if the steps twist through each other. Each shape its own colour gives every shape of the group its own channel, taking turns past the number of colours (needs Channels: Multi channel). The picture at the top shows the group: drag the first or last shape's points to change them. The graph sets how the steps are spread: Even, bunched near the first or last shape, near both ends, or near the middle. OK keeps it all as one undo step, Cancel puts everything back.",
   "",
+  "Push: the steps travel straight from one shape to the next unless pushed. The pad beside the picture works like a game controller's stick: drag from the middle and the steps leave the picked shape that way, the further out the harder, then curve round to reach the next shape. Click a shape's line in the picture to pick which one the pad pushes (the first shape, the last, or a key shape; the picked one has a pale yellow band). Pushing the last shape sets the way the steps arrive at it. The middle pulls the stick in (hold Shift to place it anywhere), Ctrl gives 8 ways only, double-click = no push. Notes pushed past the top key or below key 0 are cut off. Smooth through keys lets the steps go through each key shape without a corner.",
+  "",
   "The group stays linked: move or reshape the first or last shape and the steps follow. A spot where both shapes are the same (a shared start) stays put in every step. Change a step yourself and it becomes a key shape: the steps on each side change towards it. Right-click a key → Not a key any more makes it a step again.",
   "",
   "Velocities, tumours and formulas change step by step too. A tumour or formula only one of the shapes has (or two that can't change into each other) shrinks to nothing by the middle step, then the other one grows from there. Settings that are only on or off switch at the middle step. Claw machine, Strum and Chop pages are kept only when both shapes have the same ones.",
   "",
   "The Shapes list shows the group as one row; clicking it selects the whole group. Right-click a shape of the group: Edit add between… (or double-click it), Select the whole group, Unlink. Deleting the first or last shape makes the rest plain shapes. Join, Turn into live shape, Split and Slice unlink the group first. Copying the whole group makes a new group; copying a single step gives a plain shape."
  ],
- "help.between.words": "in between steps morph blend tween transition interpolate many curves fan spread from one shape to another series copies gradually"
+ "help.between.words": "in between steps morph blend tween transition interpolate many curves fan spread from one shape to another series copies gradually push pad stick velocity direction throw launch curved path smooth keys"
 }
