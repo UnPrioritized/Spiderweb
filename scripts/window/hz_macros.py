@@ -17,6 +17,7 @@ from window.widgets import Scrub, Tooltip
 
 MACRO_COLOURS = ("#f0b43c", "#4fd1c5", "#c084fc", "#f472b6")
 LINK_AMOUNT = 0.5  # how far a new link moves its knob (of its turn, the macro all the way)
+REST_MS = 500  # how long a dragged macro's name must rest on a knob before a let-go links it (user)
 
 
 def inside(w, x, y):
@@ -194,37 +195,53 @@ class SynthMacros:
 
     def macro_press(self, i):
         self.pick_macro(i)
-        self.macro_held = [i, None]
+        self.macro_held = [i, None, False]  # (macro, the knob under the mouse, rested on long enough)
+        self.macro_wait = None
 
     def macro_motion(self, e):
-        """A macro's name dragged: the knob under the mouse lit in its colour."""
-        if not self.macro_held:
+        """A macro's name dragged: a knob the mouse rests on for REST_MS is lit in its colour, and only then a let-go
+        links it (user: passing over knobs linked them by mistake)."""
+        held = self.macro_held
+        if not held:
             return
         key = self.knob_at(e.x_root, e.y_root)
-        if key != self.macro_held[1]:
-            self.macro_hover(None)
-            self.macro_held[1] = key
-            self.macro_hover(key)
+        if key != held[1]:
+            self.macro_hover(held[1], None)
+            held[1], held[2] = key, False
+            if self.macro_wait:
+                self.after_cancel(self.macro_wait)
+            self.macro_wait = self.after(REST_MS, self.macro_arm) if key else None
 
-    def macro_hover(self, key):
-        if key:
-            k = self.dials[key]
-            k.hover = MACRO_COLOURS[self.macro_held[0]] if self.macro_held and self.macro_held[1] == key else None
-            k.draw()
+    def macro_arm(self):
+        """The mouse rested on a knob long enough: let go = linked."""
+        self.macro_wait = None
+        held = self.macro_held
+        if held and held[1]:
+            held[2] = True
+            self.macro_hover(held[1], MACRO_COLOURS[held[0]])
+
+    def macro_hover(self, key, colour):
+        if key and self.dials[key].hover != colour:
+            self.dials[key].hover = colour
+            self.dials[key].draw()
 
     def macro_drop(self):
-        """The name's drag called off (Ctrl+Z, Esc): nothing linked."""
+        """The name's drag ended or called off (Ctrl+Z): no knob lit any more."""
         held, self.macro_held = self.macro_held, None
-        if held and held[1]:
-            self.dials[held[1]].hover = None
-            self.dials[held[1]].draw()
+        if getattr(self, "macro_wait", None):
+            self.after_cancel(self.macro_wait)
+            self.macro_wait = None
+        if held:
+            self.macro_hover(held[1], None)
 
     def macro_release(self):
-        """A macro's name let go on a knob: linked (LINK_AMOUNT), one undo step; already linked: just picked."""
+        """A macro's name let go on a knob it rested on: linked (LINK_AMOUNT), one undo step; already linked: just
+        picked."""
         held = self.macro_held
         self.macro_drop()
-        if not held or not held[1]:
+        if not held or not held[1] or not held[2]:
             return
+        held = held[:2]
         i, key = held
         if any(j == i and k == key for j, k, _ in self.macro()["links"]):
             return self.show_macros()
@@ -317,7 +334,11 @@ class SynthMacros:
                 self.macro_names[i].config(background=back)
         self.macro_box.lamp.light(any(m["values"][i] and a for i, key, a in m["links"] if key in KNOBS))
         now = self.macro_vals()
+        held = self.macro_held
         for key, k in self.dials.items():
+            if k.hover and not (held and held[1] == key and held[2]):  # (no outline left over from a drag)
+                k.hover = None
+                k.draw()
             mine = [(j, a) for j, kk, a in m["links"] if kk == key]
             ring = None
             if mine:
