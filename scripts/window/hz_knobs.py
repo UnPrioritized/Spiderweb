@@ -466,11 +466,12 @@ def paint_knob(k, start, turn, arc_from, arc):
                   fill="#f2f4f7" if k.enabled else DIM, width=2, capstyle="round")
     if k.hover:  # (a macro dragged over it: let go = linked)
         k.create_oval(1, 1, s - 1, s - 1, outline=k.hover, width=2)
-    if k.ring:  # (a macro moves it: the picked macro's reach on the outside, a dot where the sound has it)
-        reach, colour, now = k.ring
+    if k.ring:  # (a macro moves it: the picked macro's reach on the outside, a dot where the sound has it; a MOD
+        reach, colour, now = k.ring[:3]  # source's both ways: from its low end)
+        low = k.ring[3] if len(k.ring) > 3 and k.ring[3] is not None else k.value
         if reach is not None:
             o = max(1, m - w)
-            k.create_arc(o, o, s - o, s - o, start=k.angle(k.value), extent=k.angle(reach) - k.angle(k.value),
+            k.create_arc(o, o, s - o, s - o, start=k.angle(low), extent=k.angle(reach) - k.angle(low),
                          style="arc", width=2, outline=colour)
         a, rr = math.radians(k.angle(now)), (s - 2 * m) / 2
         d = max(2, w)

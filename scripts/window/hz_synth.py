@@ -1,6 +1,7 @@
 """The Hz bass synth window (Hz bass window → Synth…), like a synth's own window (user): a Knobs tab (boxes of knobs,
 like a synth's, writing the effects' lines: hz_knobs.py), an Effects tab (a rack: chorus, echo, reverb look-alike:
-hz_rack.py), a Lines tab (the effects' lines big, for one note), and a
+hz_rack.py), a MOD tab (more LFOs and envelopes moving knobs over time: hz_mod.py), a Lines tab (the effects' lines
+big, for one note), and a
 piano keyboard along the bottom to hear the Hz bass live (hz_live.py: the quick sound, NOT the MIDI; the warning stays
 at the top).
 
@@ -28,7 +29,9 @@ from window import look
 from window.hz_effects import AMOUNT, FxPane
 from window.hz_knobs import SynthKnobs
 from window.hz_live import free_sound_later, keep_sound
+from notes.hzbass import MACROS
 from window.hz_macros import SynthMacros
+from window.hz_mod import SynthMod
 from window.hz_presets import PresetBar
 from window.hz_rack import SynthRack
 from window.synth_look import (BG, DIM, EDGE, GRID, MID, PANEL, PIC, TEXT, WARN, BigTab, bright, dark_title, mix,
@@ -141,7 +144,7 @@ class SynthPane(FxPane):
                       font=font)
 
 
-class SynthWindow(PresetBar, SynthMacros, SynthRack, SynthKnobs, tk.Toplevel):
+class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.Toplevel):
     """The window (one per Hz bass window: hz.synth_win). The pane's `win`: its lines are the Hz bass window's."""
 
     def __init__(self, hz):
@@ -167,7 +170,7 @@ class SynthWindow(PresetBar, SynthMacros, SynthRack, SynthKnobs, tk.Toplevel):
         top.pack(fill="x", padx=round(8 * s), pady=(round(8 * s), 0))
         self.page = tk.StringVar(value="knobs")
         self.tab_buttons = {}
-        for key in ("knobs", "effects", "lines"):
+        for key in ("knobs", "effects", "mod", "lines"):
             b = self.tab_buttons[key] = BigTab(top, s, tr(f"hz.synth_{key}"), lambda key=key: self.pick_page(key))
             b.pack(side="left", fill="y")
             Tooltip(b, tr(f"hz.synth_tab_{key}_tip"))
@@ -205,7 +208,10 @@ class SynthWindow(PresetBar, SynthMacros, SynthRack, SynthKnobs, tk.Toplevel):
         self.build_knobs(self.knobs)
         self.rack_box = ttk.Frame(self, padding=(10, 4, 10, 8), style="Synth.TFrame")  # (the Effects tab)
         self.build_rack(self.rack_box)
+        self.mod_box = ttk.Frame(self, padding=(10, 4, 10, 8), style="Synth.TFrame")  # (the MOD tab)
+        self.build_mod(self.mod_box)
         self.build_macros(self)  # (the macro strip: under the warning line on the OSC and FX tabs)
+        self.build_mod_names(self.macro_box.body, MACROS + 1)  # (... with the MOD tab's sources, to link them)
         self.canvas = self.fx.canvas
         self.canvas.config(takefocus=True)
         self.canvas.bind("<Configure>", lambda e: self.redraw())
@@ -251,14 +257,15 @@ class SynthWindow(PresetBar, SynthMacros, SynthRack, SynthKnobs, tk.Toplevel):
         self.show_page()
 
     def show_page(self):
-        """The Knobs, the Effects or the Lines tab shown (its big tab lit)."""
-        pages = {"knobs": self.knobs_box, "effects": self.rack_box, "lines": self.canvas}
+        """The Knobs, the Effects, the MOD or the Lines tab shown (its big tab lit)."""
+        pages = {"knobs": self.knobs_box, "effects": self.rack_box, "mod": self.mod_box, "lines": self.canvas}
         for key, w in pages.items():
             self.tab_buttons[key].picked(key == self.page.get())
             if key != self.page.get():
                 w.pack_forget()
         self.macro_box.pack_forget()
-        if self.page.get() != "lines":  # (the macros' strip: over the OSC and FX tabs, so knobs on both can be linked)
+        if self.page.get() in ("knobs", "effects"):  # (the macros' strip: over the OSC and FX tabs, so knobs on both
+            # can be linked)
             self.macro_box.pack(fill="x", padx=round(10 * self.s), pady=(round(4 * self.s), 0), after=self.warn)
         pages[self.page.get()].pack(fill="both", expand=True)
         self.show_status()

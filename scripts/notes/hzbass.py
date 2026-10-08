@@ -667,6 +667,10 @@ MOD_LFO_MODES = ("free", "restart", "once")
 MOD_ENV = {"attack": (0.0, 64.0, 0.0), "decay": (0.0, 64.0, 1.0), "sustain": (0.0, 1.0, 0.0),
            "release": (0.0, 64.0, 0.0)}
 MOD_LINKS = 64  # links at most
+# a link moves its effect's line, or (none: the box does nothing) the effect from where it does nothing (live), but
+# these only while their box is on (Sweep ticked, a waveform picked), like a synth's filter / oscillator switched off
+MOD_NEED_LINE = ("sweep", "wave") + tuple(WAVES)
+MOD_TARGETS = FX + ("wave",)  # "wave" = whichever waveform's line there is (the Wave box's Shape)
 
 
 def mod_start():
@@ -678,9 +682,10 @@ def mod_start():
 
 def clean_mod(mod):
     """The MOD tab checked: hz["mod"] = {"lfo": [LFO 3, LFO 4: {shape, rate, mode, timing (only the knob cares, as
-    LFO's)}], "env": [ENV 2, ENV 3: MOD_ENV], "links": [{"from": a MOD_SOURCES, "to": an effect (FX), "amount": -1..1
+    LFO's)}], "env": [ENV 2, ENV 3: MOD_ENV], "links": [{"from": a MOD_SOURCES, "to": an effect (MOD_TARGETS), "amount": -1..1
     of the line's whole height at the source's top, "bipolar": True = the source swings both ways round the line
-    (left out when False)}]}, or {} when it's all as it starts."""
+    (left out when False), "knob": the synth window's knob it was linked on (only the window reads it)}]}, or {}
+    when it's all as it starts."""
     mod = mod if isinstance(mod, dict) else {}
     out = mod_start()
     for i, got in enumerate((mod.get("lfo") if isinstance(mod.get("lfo"), list) else [])[:len(MOD_LFOS)]):
@@ -695,14 +700,16 @@ def clean_mod(mod):
             out["env"][i].update(clean_settings(got, MOD_ENV))
     seen = set()
     for link in mod.get("links") if isinstance(mod.get("links"), list) else ():
-        if not (isinstance(link, dict) and link.get("from") in MOD_SOURCES and link.get("to") in FX):
+        if not (isinstance(link, dict) and link.get("from") in MOD_SOURCES and link.get("to") in MOD_TARGETS):
             continue
         a = link.get("amount")
         if (isinstance(a, (int, float)) and not isinstance(a, bool) and math.isfinite(a)
                 and (link["from"], link["to"]) not in seen and len(out["links"]) < MOD_LINKS):
             seen.add((link["from"], link["to"]))
             out["links"].append(dict({"from": link["from"], "to": link["to"], "amount": min(1.0, max(-1.0, float(a)))},
-                                     **({"bipolar": True} if link.get("bipolar") is True else {})))
+                                     **({"bipolar": True} if link.get("bipolar") is True else {}),
+                                     **({"knob": link["knob"]} if isinstance(link.get("knob"), str)
+                                        and len(link["knob"]) <= 40 else {})))
     return {} if out == mod_start() else out
 
 
@@ -755,6 +762,12 @@ def live(hz, left=0.0):
         arp = hz["arp"]
         hz = {k: v for k, v in hz.items() if k not in ("arp", "_memo")}  # (other tones: nothing cached holds)
         hz["tones"] = arpeggiated(hz["tones"], arp, left)
+    fx = hz.get("fx") or {}
+    missing = [link["to"] for link in (hz.get("mod") or {}).get("links", ())
+               if link["to"] not in fx and link["to"] not in MOD_NEED_LINE]
+    if missing:  # (the MOD tab moves them from where they do nothing)
+        hz = dict(hz, fx=dict(fx, **{name: [[0.0, NEUTRAL.get(name, 0.0)]] for name in missing}))
+        hz.pop("_memo", None)
     off = hz.get("off")
     if not off:
         return hz
@@ -917,7 +930,7 @@ def fx_at(hz, name, beat, tone=None):
     one is made stronger or weaker by its amount line (hz["amount"]). One counted from each note (hz["from"]):
     tone = the tone it's for (each note has its own), else from the latest note start (note_beats); with a sustain
     point: sustained. The MOD tab's links to it (hz["mod"]) then move it by their sources (mod_value), kept within
-    0..1; a link moves only a line that's there."""
+    0..1 (one to an effect with no line: live gave it one where it does nothing, see MOD_NEED_LINE)."""
     pts = (hz.get("fx") or {}).get(name)
     if not pts:
         return np.zeros(np.shape(beat))
@@ -940,7 +953,7 @@ def fx_at(hz, name, beat, tone=None):
     if mod:
         moved = False
         for link in mod["links"]:
-            if link["to"] == name:
+            if link["to"] == name or link["to"] == "wave" and name in WAVES:
                 s = mod_value(hz, link["from"], beat, tone)
                 v = v + link["amount"] * (2.0 * s - 1.0 if link.get("bipolar") else s)
                 moved = True
@@ -1048,7 +1061,7 @@ def has_fx(hz):
     quiet = (any(n.get("level", 1.0) != 1.0 for n in hz.get("tones") or ())
              or any(s["level"] != 1.0 for s in (arp.get("steps") or ())[:arp.get("count", STEPS)]))
     return ((bool(hz.get("fx")) or len(copies(hz)) > 1 or bool((hz.get("voice") or {}).get("random"))
-             or bool(hz.get("mode")) or bool(hz.get("osc2")) or quiet
+             or bool(hz.get("mode")) or bool(hz.get("osc2")) or quiet or bool((hz.get("mod") or {}).get("links"))
              or any(not e.get("off") for e in hz.get("rack") or ())) and bool(hz.get("tones")))
 
 
