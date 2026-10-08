@@ -281,7 +281,7 @@ class SynthRack:
         lo = RACK["compressor"]["threshold"][0]
         comp = {k: v["compressor_" + k] for k in RACK["compressor"]}
         db = np.linspace(lo, 0.0, 200)
-        out = 20.0 * np.log10(np.maximum(compress(10.0 ** (db / 20.0), np.full(len(db), 1e9), comp), 1e-12))
+        out = 20.0 * np.log10(np.maximum(compress(10.0 ** (db / 20.0), comp), 1e-12))
         x = lambda d: pad + (d - lo) / -lo * (w - 2 * pad)
         y = lambda d: h - pad - (min(0.0, max(lo, d)) - lo) / -lo * (h - 2 * pad)
         c.create_line(x(lo), y(lo), x(0.0), y(0.0), fill=MID)  # (as it went in)

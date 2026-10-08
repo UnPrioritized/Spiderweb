@@ -107,7 +107,8 @@ RACK_KNOBS = {"chorus": (("chorus_depth", "cents"), ("chorus_rate", "vib_rate"))
               "echo": (("echo_time", "time"), ("echo_repeats", "repeats"), ("echo_fade", "percent")),
               "reverb": (("reverb_length", "time"), ("reverb_scatter", "percent"), ("reverb_level", "percent")),
               "compressor": (("compressor_threshold", "threshold"), ("compressor_ratio", "comp_ratio"),
-                             ("compressor_attack", "time"), ("compressor_gain", "gain"))}
+                             ("compressor_attack", "time"), ("compressor_release", "time"),
+                             ("compressor_gain", "gain"))}
 KNOBS = {key: (box, kind, start) for box, knobs in BOXES.items() for key, kind, start in knobs}
 KNOBS.update({key: (fx, kind, RACK[fx][key.split("_", 1)[1]][2]) for fx, knobs in RACK_KNOBS.items()
               for key, kind in knobs})
@@ -345,8 +346,8 @@ def read_tone(win, was):
     """The Tone box: ({sweep, sweep_start, sweep_end, sweep_time, sweep_track, wah}, made) as read_volume (no Sweep
     line: off, its knobs kept as they were; Key track is hz["lfo"]'s)."""
     got = {"sweep": False, "sweep_start": was["sweep_start"], "sweep_end": was["sweep_end"],
-           "sweep_time": was["sweep_time"], "sweep_track": was["sweep_track"], "wah": 0.0}
-    made = True
+           "sweep_time": was["sweep_time"], "sweep_track": win.lfo.get("sweep_track", was["sweep_track"]), "wah": 0.0}
+    made = True  # (Key track: as the sound has it even without a Sweep line, e.g. one deleted on the Draw tab)
     pts = win.fxl.get("sweep")
     if pts:
         got["sweep"], got["sweep_track"] = True, win.lfo.get("sweep_track", 0.0)
