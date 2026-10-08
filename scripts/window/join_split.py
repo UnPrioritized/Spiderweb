@@ -15,7 +15,7 @@ from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live,
 from notes.bezier import anchor_count, nearest, split
 from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_path
-from notes.merge import merged
+from notes.merge import merged, reshaped_parts
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
@@ -241,7 +241,8 @@ class JoinSplit:
             p.pop("between", None)  # (its Add between group is unlinked)
         new[0]["merge"] = {"parts": parts, "right": bool(to_right),
                            "ppq": self.ppq, "keys": self.keys, "apart": sorted(set(rest[:, 2].tolist())),
-                           "at": list(new[0]["pts"][0])}  # (where its box was: Split moves the parts as far as it)
+                           "at": list(new[0]["pts"][0]),  # (where its box was: Split moves the parts as far as it)
+                           "box": [list(p) for p in new[0]["pts"]]}  # (turned / slanted since: the parts too)
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.merge"))
         self.unlink_groups(pair)
@@ -305,10 +306,14 @@ class JoinSplit:
             return
         if sh.get("merge"):  # Gate sensitive merge: the two shapes as they were before it, moved along with it
             m = sh["merge"]
-            db, dp = (sh["pts"][0][0] - m["at"][0], sh["pts"][0][1] - m["at"][1]) if m.get("at") else (0, 0)
-            back = copy.deepcopy(m["parts"])
-            for p in back:
-                p["pts"] = [[b + db, q + dp] for b, q in p["pts"]]
+            got = reshaped_parts(sh)
+            if got:  # (turned / slanted / stretched: the parts that way, the sliding one where it slid)
+                back = got[0]
+            else:
+                db, dp = (sh["pts"][0][0] - m["at"][0], sh["pts"][0][1] - m["at"][1]) if m.get("at") else (0, 0)
+                back = copy.deepcopy(m["parts"])
+                for p in back:
+                    p["pts"] = [[b + db, q + dp] for b, q in p["pts"]]
             self.replace_shape(i, back, velocity=False, name=tr("join_split.split_back_into_the_old_shapes"))
             self.status.config(text=tr("join_split.back_to_the_shapes_it_was", n=2))
             return

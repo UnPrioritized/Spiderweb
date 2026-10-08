@@ -19,6 +19,12 @@ def gate_merge(stay, slide, from_left=None):
     slide's leftover rows), or None when no row meets. Each row comes in from far away on that side (from_left;
     None = the side slide's middle is on), so it meets the staying shape's outer edge there: a row inside a hollow
     shape or overlapping it goes out to that edge."""
+    got = _merge(stay, slide, from_left)
+    return got and got[:2]
+
+
+def _merge(stay, slide, from_left):
+    """gate_merge, and also the smallest slide and how much later everything went (to stay after tick 0)."""
     stay = np.asarray(stay, np.int64)
     moved = np.array(slide, np.int64, copy=True)
     if not len(stay) or not len(moved):
@@ -41,13 +47,15 @@ def gate_merge(stay, slide, from_left=None):
         shifts.append(int(shift))
     if not shifts:
         return None
-    moved[~met, :2] += min(shifts, key=abs)
+    least = min(shifts, key=abs)
+    moved[~met, :2] += least
     out, rest = np.concatenate([stay, moved[met]]), moved[~met]
     first = min(out[:, 0].min(), rest[:, 0].min() if len(rest) else 0)
-    if first < 0:  # (slid before the song's start: everything waits)
-        out[:, :2] -= first
-        rest[:, :2] -= first
-    return out, rest
+    late = max(0, -int(first))
+    if late:  # (slid before the song's start: everything waits)
+        out[:, :2] += late
+        rest[:, :2] += late
+    return out, rest, least, late
 
 
 # THE RECIPE (user: saved as both shapes + the way, not the notes): the merged shape is a custom shape of plain
@@ -76,6 +84,108 @@ def recipe_notes(m):
     out = np.concatenate([out, rest[~np.isin(rest[:, 2], m["apart"])]])  # (but not the ones made "Merge leftovers")
     notes = np.column_stack([out[:, 0], out[:, 1] - out[:, 0], out[:, 2], out[:, 3], np.zeros(len(out), np.int64)])
     return notes_shape(notes, m["ppq"], "")["notes"]
+
+
+# TURNED / SLANTED / STRETCHED (user: like one custom shape, gates kept): both parts get the same turn / slant /
+# stretch as the merged shape's box ("box" = its corners when made), then they merge again. The sliding part first
+# goes as far as its smallest slide (where it is on screen), so turning moves it round the right spot. Moved only:
+# the notes kept (block_notes). A part that can't be turned this way (pasted notes, text, Hz bass, funnel...): the
+# merged notes sampled like a turned image (turned_notes).
+
+def made_sides(m):
+    """(sliding part's index, from the left?, its smallest slide, how much later all went) as the recipe was made,
+    ticks at m["ppq"]; None = nothing met."""
+    from notes.engine import shape_notes
+    a, b = (shape_notes(p, m["ppq"], m["keys"]) for p in m["parts"])
+    left = 1 if len(a) and len(b) and comes_from_left(a, b) else 0
+    slide = left if m["right"] else 1 - left
+    got = _merge((a, b)[1 - slide], (a, b)[slide], m["right"])
+    return got and (slide, m["right"], got[2], got[3])
+
+
+def box_map(was, now):
+    """The 2x2 matrix L and the offset o taking the box was to the box now (beats, keys): x -> L x + o; None when
+    was is flat."""
+    w, n = np.asarray(was, float), np.asarray(now, float)
+    a = np.column_stack([w[1] - w[0], w[2] - w[0]])
+    if abs(np.linalg.det(a)) < 1e-12:
+        return None
+    L = np.column_stack([n[1] - n[0], n[2] - n[0]]) @ np.linalg.inv(a)
+    return L, n[0] - L @ w[0]
+
+
+def mapped_part(p, f):
+    """Shape p with every point through f(beat, key) -> [beat, key], or None if it can't be turned that way."""
+    import copy
+    from notes.engine import cached_arrays
+    from notes.convert import has_tumours
+    from notes.tumour import LINE_KINDS
+    if p.get("cut") or isinstance(p.get("glue"), list):
+        return None  # (notes from the shape it was cut from / glue boxes fixed in the song)
+    q = copy.deepcopy(p)
+    if p["kind"] == "custom":
+        if "notes" in p or p.get("text") or p.get("hz") or p.get("merge"):
+            return None
+    elif p["kind"] not in LINE_KINDS:
+        return None
+    elif p["kind"] == "arc" or has_tumours(p) or p.get("shape") or p.get("pattern"):
+        paths = cached_arrays(p)  # (as drawn, made into points: an arc turned or slanted isn't an arc)
+        if len(paths) != 1:
+            return None
+        for k in ("tumour", "tumours", "shape", "pattern", "k", "smooth"):
+            q.pop(k, None)
+        q.update(kind="poly", pts=[f(b, k) for b, k in paths[0]])
+        return q
+    q["pts"] = [f(b, k) for b, k in p["pts"]]
+    return q
+
+
+def reshaped_parts(sh):
+    """(the two parts turned / slanted / stretched with the merged shape's box, the sliding one at its smallest
+    slide; sliding part's index; from the left?; (L, o, smallest slide in beats)) or None (only moved, an old
+    recipe, nothing met, a part that can't be turned)."""
+    m = sh["merge"]
+    got = m.get("box") and box_map(m["box"], sh["pts"])
+    if not got or np.allclose(got[0], np.eye(2), atol=1e-9):
+        return None
+    L, o = got
+    sides = made_sides(m)
+    if not sides:
+        return None
+    slide, from_left, least, late = sides
+    parts = []
+    for i, p in enumerate(m["parts"]):
+        d = (late + (least if i == slide else 0)) / m["ppq"]
+        q = mapped_part(p, lambda b, k, d=d: [float(x) for x in L @ (b + d, k) + o])
+        if q is None:
+            return None
+        parts.append(q)
+    if abs(L[0, 0]) > 1e-9:  # (time flipped: it comes from the other side; turned upright: by the middles)
+        from_left = from_left == (L[0, 0] > 0)
+    else:
+        from_left = None
+    return parts, slide, from_left, (L, o, least / m["ppq"])
+
+
+def reshaped_notes(sh, ppq, keys):
+    """The merged shape's notes, (start, end, pitch, velocity, track) rows, when its box was turned / slanted /
+    stretched: the parts made again that way and merged again (rows that newly meet nothing stay in it, user), or
+    None (see reshaped_parts)."""
+    from notes.engine import shape_notes
+    got = reshaped_parts(sh)
+    if not got:
+        return None
+    parts, slide, from_left, (L, o, least) = got
+    stay, moved = (shape_notes(p, ppq, keys) for p in (parts[1 - slide], parts[slide]))
+    apart = sh["merge"]["apart"]
+    if len(moved) and apart:  # (rows made "Merge leftovers": their notes stay out, found where they were drawn)
+        mid = np.column_stack([(moved[:, 0] + moved[:, 1]) / (2 * ppq), moved[:, 2] + 0.5])
+        was = (mid - o) @ np.linalg.inv(L).T
+        moved = moved[~np.isin(np.floor(was[:, 1]).astype(np.int64), apart)]
+    merged_rows = gate_merge(stay, moved, from_left) if len(stay) and len(moved) else None
+    out = np.concatenate(merged_rows) if merged_rows else np.concatenate(
+        [np.asarray(stay, np.int64).reshape(-1, 4), np.asarray(moved, np.int64).reshape(-1, 4)])
+    return np.column_stack([out[:, :4], np.zeros(len(out), np.int64)])
 
 
 MOST_SAMPLES = 20_000_000  # (key rows x time steps, like a turned picture's)
@@ -145,4 +255,10 @@ def clean_merge(m, clean_shape):
     out = {"parts": parts, "right": m.get("right") is True, "ppq": ppq, "keys": keys, "apart": apart}
     if at and len(at) == 2 and all(map(math.isfinite, at)):
         out["at"] = at  # (its box's first corner when made: Split moves the parts as far as it moved)
+    try:
+        box = [[float(b), float(p)] for b, p in m["box"]] if m.get("box") is not None else None
+    except (TypeError, ValueError):
+        box = None
+    if box and len(box) == 3 and all(math.isfinite(x) for pt in box for x in pt):
+        out["box"] = box  # (its box when made: turned / slanted / stretched since = the parts too, merged again)
     return out

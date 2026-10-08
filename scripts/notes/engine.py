@@ -28,7 +28,7 @@ from notes.claw import apply_claw
 from notes.fx import (clean_fx, flip_shape, groups, idle, mirrored, notes_box, swapped, toggled, turn_notes, turn_pts,
                       turn_shape, velocities)
 from notes.gaterange import clean_range
-from notes.merge import clean_merge, recipe_notes, turned_notes as merge_turned
+from notes.merge import clean_merge, recipe_notes, reshaped_notes as merge_reshaped, turned_notes as merge_turned
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
 from notes.bezier import anchor_count, sample
@@ -645,8 +645,12 @@ def _notes_tracks(sh, ppq, keys):
     if piece:
         raw, spots = spotted_notes(sh, ppq, end_dot)
     elif sh["kind"] == "custom" and "notes" in sh:
-        # (a turned / skewed picture or merged shape: each key row sampled across it, not its notes tilted)
-        if not frame_upright(sh["pts"]) and ("picture" in sh or "merge" in sh):
+        # (a merged shape turned / slanted / stretched: its parts the same way, merged again; else a turned / skewed
+        # picture or merged shape: each key row sampled across it, not its notes tilted)
+        raw = merge_reshaped(sh, ppq, keys) if "merge" in sh else None
+        if raw is not None:
+            pass
+        elif not frame_upright(sh["pts"]) and ("picture" in sh or "merge" in sh):
             raw = turned_notes(sh, ppq) if "picture" in sh else merge_turned(sh, ppq)
         else:
             raw = block_notes(sh, ppq)
