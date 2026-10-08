@@ -31,7 +31,8 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.hzbass import (ARP, ARP_PATTERNS, BLEND, CHORDS, CRUSH, DETUNE, FAST, GLIDE_CURVE, GROUPS, GROWL, LOOP,
                           MODES, OFF_BOXES, OFF_PITCH, OSC2, PITCH, RACK, SCALES, SOFT, START_COUNT, START_STEPS,
-                          STEPS, SUB, TIMINGS, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE, VOICES, WAH, WAVES, arpeggiated,
+                          STEPS, SUB, TIMINGS, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE, VOICES, WAH, WAVES, adsr_line,
+                          arpeggiated,
                           blend_gains, glide_left, clean_arp, clean_extra, clean_mode, clean_steps, clean_voice, copies,
                           group_count, line_at, osc2_shift, wave_hits)
 from roll.roll_shared import NOTE_NAMES
@@ -174,19 +175,6 @@ def kept_value(key, v):
     kind = KNOBS[key][1]
     lo, hi = KINDS[kind][1:3]
     return v if lo - 1e-9 <= shown(kind, v) <= hi + 1e-9 else None
-
-
-def adsr_line(attack, decay, sustain, release):
-    """The Volume line of an ADSR envelope (beats; sustain 0..1): (points, its sustain point, its length). The rise
-    comes late and the drops fast first, as the ready-made envelopes do (the top half sounds about the same)."""
-    pts = [[0.0, 0.0, -FAST]] if attack > 0 else []
-    if decay > 0:
-        pts.append([attack, 1.0, FAST])
-    at = attack + decay
-    pts.append([at, sustain, FAST] if release > 0 else [at, sustain])
-    if release > 0:
-        pts.append([at + release, 0.0])
-    return pts, at, max(LOOP[0], at + release)
 
 
 def pitch_line(amount, time):
