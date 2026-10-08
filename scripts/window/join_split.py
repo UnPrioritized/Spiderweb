@@ -15,7 +15,7 @@ from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live,
 from notes.bezier import anchor_count, nearest, split
 from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_path
-from notes.merge import merged, reshaped_parts
+from notes.merge import merged, part_rows, reshaped_parts
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
@@ -223,14 +223,13 @@ class JoinSplit:
         pair = self.merge_pair()
         if not pair:
             return
-        got = merged([self.notes_of(self.shapes[i]) for i in pair], to_right, self.ppq, self.keys)
+        got = merged(part_rows([self.shapes[i] for i in pair], self.ppq, self.keys), to_right, self.ppq, self.keys)
         if got is None:
             self.status.config(text=tr("join_split.merge_no_meet"))
             return
 
-        def shape(rows, name):
-            notes = np.column_stack([rows[:, 0], rows[:, 1] - rows[:, 0], rows[:, 2], rows[:, 3],
-                                     np.zeros(len(rows), np.int64)])
+        def shape(rows, name):  # (track = each shape's own colours, merge.part_rows)
+            notes = np.column_stack([rows[:, 0], rows[:, 1] - rows[:, 0], rows[:, 2], rows[:, 3], rows[:, 4]])
             return clean_shape({**SHAPE_DEFAULTS, **self.defaults, **notes_shape(notes, self.ppq, name)})
 
         out, rest = got

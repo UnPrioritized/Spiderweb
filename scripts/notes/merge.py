@@ -64,10 +64,26 @@ def _merge(stay, slide, from_left):
 # "apart": keys whose rows became the "Merge leftovers" shape}. Project files leave its "notes" out; loading makes
 # them again from the recipe.
 
+def part_rows(parts, ppq, keys):
+    """Each shape's notes as (start, end, pitch, velocity, track) rows: its own colours (areas, outline colours,
+    Colours turns) kept, the second shape's after the first's (user: each keeps its colours; with Multi channel
+    they stay apart like the shapes were, as Turn into live shape does)."""
+    from notes.engine import shape_notes_tracks
+    out, first = [], 0
+    for p in parts:
+        notes, tracks = shape_notes_tracks(p, ppq, keys)
+        notes = np.asarray(notes, np.int64).reshape(-1, 4)
+        tracks = np.zeros(len(notes), np.int64) if tracks is None or not len(tracks) else np.asarray(tracks, np.int64)
+        tracks = tracks - (tracks.min() if len(tracks) else 0)
+        out.append(np.column_stack([notes, tracks + first]))
+        first += int(tracks.max()) + 1 if len(tracks) else 1
+    return out
+
+
 def merged(parts, right, ppq, keys):
-    """gate_merge of two shapes' notes (each (start, end, pitch, velocity) rows): parts = [left, right] by their
-    middles; right = the left one slides right."""
-    a, b = (np.asarray(p, np.int64).reshape(-1, 4)[:, :4] for p in parts)
+    """gate_merge of two shapes' notes (each (start, end, pitch, velocity[, track]) rows): parts = [left, right] by
+    their middles; right = the left one slides right."""
+    a, b = (np.asarray(p, np.int64).reshape(len(p), -1) for p in parts)
     if len(a) and len(b) and comes_from_left(a, b):  # (a = the one on the left)
         a, b = b, a
     return gate_merge(b, a, True) if right else gate_merge(a, b, False)
@@ -84,8 +100,7 @@ def recipe_shape(m):
     """custom.notes_shape of the recipe's notes ("notes" packed, "pts" = their box where they were made), or None
     (no notes at all). No row meeting any more (a part's settings changed): both as they are, nothing slid."""
     from notes.custom import notes_shape
-    from notes.engine import shape_notes
-    parts = [np.asarray(shape_notes(p, m["ppq"], m["keys"]), np.int64).reshape(-1, 4) for p in m["parts"]]
+    parts = part_rows(m["parts"], m["ppq"], m["keys"])
     got = merged(parts, m["right"], m["ppq"], m["keys"])
     if got is None:
         out = np.concatenate(parts)
@@ -94,7 +109,7 @@ def recipe_shape(m):
         out = np.concatenate([out, rest[~np.isin(rest[:, 2], m["apart"])]])  # (not the ones made "Merge leftovers")
     if not len(out):
         return None
-    notes = np.column_stack([out[:, 0], out[:, 1] - out[:, 0], out[:, 2], out[:, 3], np.zeros(len(out), np.int64)])
+    notes = np.column_stack([out[:, 0], out[:, 1] - out[:, 0], out[:, 2], out[:, 3], out[:, 4]])
     return notes_shape(notes, m["ppq"], "")
 
 
@@ -213,21 +228,19 @@ def reshaped_notes(sh, ppq, keys):
     """The merged shape's notes, (start, end, pitch, velocity, track) rows, when its box was turned / slanted /
     stretched: the parts made again that way and merged again (rows that newly meet nothing stay in it, user), or
     None (see reshaped_parts)."""
-    from notes.engine import shape_notes
     got = reshaped_parts(sh)
     if not got:
         return None
     parts, slide, from_left, (L, o, least) = got
-    stay, moved = (shape_notes(p, ppq, keys) for p in (parts[1 - slide], parts[slide]))
+    rows = part_rows(parts, ppq, keys)
+    stay, moved = rows[1 - slide], rows[slide]
     apart = sh["merge"]["apart"]
     if len(moved) and apart:  # (rows made "Merge leftovers": their notes stay out, found where they were drawn)
         mid = np.column_stack([(moved[:, 0] + moved[:, 1]) / (2 * ppq), moved[:, 2] + 0.5])
         was = (mid - o) @ np.linalg.inv(L).T
         moved = moved[~np.isin(np.floor(was[:, 1]).astype(np.int64), apart)]
     merged_rows = gate_merge(stay, moved, from_left) if len(stay) and len(moved) else None
-    out = np.concatenate(merged_rows) if merged_rows else np.concatenate(
-        [np.asarray(stay, np.int64).reshape(-1, 4), np.asarray(moved, np.int64).reshape(-1, 4)])
-    return np.column_stack([out[:, :4], np.zeros(len(out), np.int64)])
+    return np.concatenate(merged_rows) if merged_rows else np.concatenate([stay, moved])
 
 
 MOST_SAMPLES = 20_000_000  # (key rows x time steps, like a turned picture's)
