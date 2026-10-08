@@ -165,6 +165,10 @@ RACK = {"chorus": {"depth": (0.0, 100.0, 15.0), "rate": (0.0, 64.0, 0.5)},
 # late, by up to half a step at 1 (the step before it that much longer, its own that much shorter)
 ARP = {"speed": (0.25, 32.0, 4.0), "octaves": (1.0, 4.0, 1.0), "gate": (0.05, 1.0, 1.0), "swing": (0.0, 1.0, 0.0)}
 ARP_PATTERNS = ("up", "down", "updown", "random")
+# hz["arp"]["scale"]: the run's notes moved to the nearest note of the scale (counted from hz["arp"]["root"], 0 = C)
+SCALES = {"major": (0, 2, 4, 5, 7, 9, 11), "minor": (0, 2, 3, 5, 7, 8, 10), "harmonic": (0, 2, 3, 5, 7, 8, 11),
+          "dorian": (0, 2, 3, 5, 7, 9, 10), "phrygian": (0, 1, 3, 5, 7, 8, 10), "mixolydian": (0, 2, 4, 5, 7, 9, 10),
+          "pentatonic": (0, 2, 4, 7, 9), "minor_pentatonic": (0, 3, 5, 7, 10), "blues": (0, 3, 5, 6, 7, 10)}
 CHORDS = {"placed": (0,), "octave": (0, 12), "fifth": (0, 7), "major": (0, 4, 7), "minor": (0, 3, 7),
           "seventh": (0, 4, 7, 10), "sus4": (0, 5, 7)}
 OFF_BOXES = ("volume", "wave", "pitch", "vibrato", "tremolo", "tone", "character", "voice")  # boxes that switch off
@@ -172,6 +176,7 @@ VOICES = 8  # hz["voice"]: the most copies
 DETUNE = 100.0  # ... the most cents between the lowest and the highest copy
 GLIDE = 64.0  # ... the longest glide, in beats
 GLIDE_CURVE = 0.5  # ... its curve when there's none: -1 = slow first, 0 = straight, 1 = fast first (glide_left)
+BLEND = 0.5  # ... how loud the middle copies are next to the outer ones when there's none: all the same (blend_gains)
 
 
 def group_count(value):
@@ -280,6 +285,12 @@ def clean_voice(voice):
         out["detune"] = min(DETUNE, max(0.0, detune))
         if voice.get("same") is True:
             out["same"] = True
+        blend = min(1.0, max(0.0, num("blend", BLEND)))
+        if abs(blend - BLEND) > 1e-9:
+            out["blend"] = blend
+    random = min(1.0, max(0.0, num("random", 0.0)))
+    if random > 0:
+        out["random"] = random
     if glide > 0:
         out["glide"] = min(GLIDE, glide)
         if voice.get("touching") is True:
@@ -315,15 +326,29 @@ def clean_settings(got, table):
 
 
 def clean_arp(arp):
-    """The Arpeggio box checked (hz["arp"], see ARP): {pattern, chord, speed, octaves, gate, swing (left out at 0)},
-    or {} (off)."""
+    """The Arpeggio box checked (hz["arp"], see ARP): {pattern, chord, speed, octaves, gate, swing (left out at 0),
+    scale and root (only with a scale, see SCALES)}, or {} (off)."""
     if not isinstance(arp, dict):
         return {}
     out = {"pattern": arp.get("pattern") if arp.get("pattern") in ARP_PATTERNS else "up",
            "chord": arp.get("chord") if arp.get("chord") in CHORDS else "placed", **clean_settings(arp, ARP)}
     if not out["swing"]:
         del out["swing"]
+    if arp.get("scale") in SCALES:
+        out["scale"] = arp["scale"]
+        root = arp.get("root")
+        good = isinstance(root, (int, float)) and not isinstance(root, bool) and root in range(12)
+        out["root"] = int(root) if good else 0
     return out
+
+
+def in_scale(key, scale, root):
+    """A key moved to the nearest key of the scale (SCALES) counted from root (0 = C); half way: down."""
+    steps = SCALES[scale]
+    for d in (0, -1, 1, -2, 2, -3, 3):
+        if (key + d - root) % 12 in steps:
+            return key + d
+    return key
 
 
 def arpeggiated(tones, arp):
@@ -346,7 +371,10 @@ def arpeggiated(tones, arp):
         for n in sorted(chord, key=lambda n: n["len"]):
             for k in CHORDS[arp["chord"]]:
                 for o in range(int(arp["octaves"])):
-                    pitches[(n["key"] + k + 12 * o, n["cents"])] = n
+                    key = n["key"] + k + 12 * o
+                    if arp.get("scale"):  # (moved into the scale: two landing on one key = one)
+                        key = in_scale(key, arp["scale"], arp.get("root", 0))
+                    pitches[(key, n["cents"])] = n
         items = sorted(pitches.items(), key=lambda kv: kv[0][0] + kv[0][1] / 100)
         end = max(n["t"] + n["len"] for n in chord)
         rng = np.random.default_rng(int(round(t0 * 1000)) % (2 ** 32))
@@ -417,6 +445,18 @@ def copies(hz):
     if n < 2:
         return [0.0]
     return [v["detune"] * (i / (n - 1) - 0.5) for i in range(n)]
+
+
+def blend_gains(hz):
+    """How loud each Voice copy is (copies' order), as a synth's unison Blend: the middle one (two, with an even
+    count) full and the outer ones quieter below BLEND, the other way round above it (0 = only the middle ones,
+    1 = only the outer ones); at BLEND (or one copy) all full."""
+    v = hz.get("voice") or {}
+    n, b = v.get("voices", 1), v.get("blend", BLEND)
+    if n < 2:
+        return np.ones(1)
+    middle = np.isin(np.arange(n), ((n - 1) // 2, n // 2))
+    return np.where(middle, min(1.0, 2.0 * (1.0 - b)), min(1.0, 2.0 * b))
 
 
 def clean_bypass(kept):
@@ -734,9 +774,10 @@ def old_fx(tones):
 
 
 def has_fx(hz):
-    """True when every key needs its own repeats (KeyGrid): placed tones with effects, several copies (Voice) or a
-    wave mode."""
-    return ((bool(hz.get("fx")) or len(copies(hz)) > 1 or bool(hz.get("mode"))
+    """True when every key needs its own repeats (KeyGrid): placed tones with effects, several copies (Voice), a
+    Random start or a wave mode."""
+    return ((bool(hz.get("fx")) or len(copies(hz)) > 1 or bool((hz.get("voice") or {}).get("random"))
+             or bool(hz.get("mode"))
              or any(not e.get("off") for e in hz.get("rack") or ())) and bool(hz.get("tones")))
 
 
@@ -1215,6 +1256,8 @@ class KeyGrid:
         hz = dict(hz, _memo={})  # (its own: what's worked out once for all the notes, cached)
         self.lo, self.n, self.got = lo, max(1, n), {}
         self.copies, self.same = copies(hz), bool((hz.get("voice") or {}).get("same"))
+        self.gains = blend_gains(hz)  # (each copy's loudness: Blend)
+        self.random = (hz.get("voice") or {}).get("random", 0.0)  # (Random start: see starting_points)
         self.mode, self.ppq = hz.get("mode") or {}, ppq
         self.chorus, self.echo, self.reverb = (rack_on(hz, k) for k in ("chorus", "echo", "reverb"))
         lfo = hz.get("lfo") or {}
@@ -1253,8 +1296,24 @@ class KeyGrid:
         self.shaped = (any(r["has_" + name].any() for r in self.runs for name in WAVES)
                        or self.mode.get("kind") in ("fm", "pulse", "sync"))
         self.loud = (self.shaped or any(name in (hz.get("fx") or ()) for name in VEL_FX)
-                     or bool(self.echo or self.reverb))
+                     or bool(self.echo or self.reverb) or bool((self.gains != 1.0).any()))
         self.pack()
+        self.starting = self.starting_points() if self.random else None
+
+    def starting_points(self):
+        """Random start: where each Voice copy's waves start in each note (runs x VOICES, 0..1 of a wave), as a
+        synth's random phase: new at every note, kept through its slides (drawn from the beat its chain of slides
+        starts at, so the same every time the notes are made)."""
+        f, at = self.flat, np.minimum(self.each["offsets"], len(self.flat["beat"]) - 1)  # (a run with none: any)
+        heads = f["beat"][at] - f["since"][at] if len(f["beat"]) else np.zeros(len(self.runs))
+        drawn = {}
+        out = np.zeros((len(self.runs), VOICES))
+        for i, h in enumerate(heads):
+            seed = int(round(float(h) * 65536)) % (2 ** 32)
+            if seed not in drawn:
+                drawn[seed] = np.random.default_rng([seed, 7]).random(VOICES)
+            out[i] = drawn[seed]
+        return out
 
     def pack(self):
         """Every run's numbers end to end (self.flat: one array each, each repeat's value), and each run's own in
@@ -1334,10 +1393,12 @@ class KeyGrid:
         x = min(1.0, max(0.0, (key - self.lo) / self.n))  # where the key is among the shape's keys, 0 = the lowest
         xv = min(1.0, max(0.0, (key - self.lo) / max(1, self.n - 1)))  # (for loudness: 1 = the highest key)
         noise = np.random.default_rng(1000 + key)  # (the same every time: the key is the seed)
-        cents = self.copies if self.same else [self.copies[(key - self.lo) % len(self.copies)]]  # (Voice copies)
+        which = list(range(len(self.copies))) if self.same else [(key - self.lo) % len(self.copies)]  # (Voice copies)
+        cents = [self.copies[i] for i in which]
         chorus = self.chorus if (key - self.lo) % 2 == 1 else None  # (every other key)
         f, each = self.flat, self.each
         run = np.repeat(np.arange(len(self.runs)), len(cents))  # each part's run
+        copy = np.tile(np.array(which, np.int64), len(self.runs))  # ... and copy
         scale = np.tile(np.array([2.0 ** (-c / 1200.0) for c in cents]), len(self.runs))
         n = each["n"][run]
         # A stretch of tone: off pitch and vibrato make its waves longer or shorter one after the other (every value
@@ -1374,6 +1435,8 @@ class KeyGrid:
         keep = ~(moved & scaled[part]) | (starts < each["end"][run][part] - 1e-6)
         part, number, src, waves, starts = part[keep], number[keep], src[keep], waves[keep], starts[keep]
         late = f["slant"][src] * x + np.floor(x * f["groups"][src]) / f["groups"][src]
+        if self.starting is not None:  # (Random start: each copy's waves start that far in, the same all through)
+            late = late + self.random * self.starting[run, copy][part]
         # the random numbers each part takes, in order: its Noisy ones (if it has any), then the reverb's
         count = np.bincount(part, minlength=len(run))
         noisy = np.bincount(part, f["noisy"][src] != 0, len(run)) > 0
@@ -1412,7 +1475,7 @@ class KeyGrid:
                 loud = loud * (1.0 - d * (1.0 - np.cos(2.0 * np.pi * f["turns"][src])) / 2.0)
             else:
                 loud = loud * (trem[0] + trem[1] * (1.0 + np.cos(2.0 * np.pi * f["turns"][src])) / 2.0)
-            vol = np.where(f["has_volume"][src], f["volume"][src], 1.0)
+            vol = np.where(f["has_volume"][src], f["volume"][src], 1.0) * self.gains[copy][part]  # (Blend)
             loud = loud * vol
             if tailed.any():  # (the reverb: starting at its level, fading)
                 loud = np.where(tailed, loud * self.reverb["level"] ** 2 * (1.0 - tail_u) ** 3, loud)

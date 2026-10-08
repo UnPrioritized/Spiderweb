@@ -11,10 +11,10 @@ made shows them about where it is (with a note); turning one makes new lines fro
   (hz["lfo"]). Timing other than Free = the Rate moves by note lengths (straight, triplets, dotted).
   Tone: Sweep (on / off) from Start to End in Time = the Sweep line once per note; Wah = its line, flat.
   Character: Slant, Groups, Off pitch, Noisy = their lines, flat.
-  Voice: Voices, Detune, Voices on (split / same keys), Glide, Curve, Only notes that touch, Legato = hz["voice"]
-  (not lines).
-  Arpeggio (third row): On, Pattern, Speed, Octaves, Gate, Swing, Chord = hz["arp"] (not lines; there only while
-  on).
+  Voice: Voices, Detune, Blend, Random start, Voices on (split / same keys), Glide, Curve, Only notes that touch,
+  Legato = hz["voice"] (not lines).
+  Arpeggio (third row): On, Pattern, Speed, Octaves, Gate, Swing, Chord, Scale, Root = hz["arp"] (not lines; there
+  only while on).
 Each box has a picture: the envelope (with a dot while a key sounds), one wave's hits (the notes), the pitch, the
 wobbles over two beats, which keys are loud over time, the keys' notes over four waves, the copies' tones and a glide."""
 
@@ -26,10 +26,11 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.hzbass import (ARP, ARP_PATTERNS, CHORDS, CRUSH, DETUNE, FAST, GLIDE_CURVE, GROUPS, GROWL, LOOP, MODES,
-                          OFF_BOXES, OFF_PITCH, PITCH, RACK, SOFT, SUB, TIMINGS, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE,
-                          VOICES, WAH, WAVES, arpeggiated, glide_left,
+from notes.hzbass import (ARP, ARP_PATTERNS, BLEND, CHORDS, CRUSH, DETUNE, FAST, GLIDE_CURVE, GROUPS, GROWL, LOOP,
+                          MODES, OFF_BOXES, OFF_PITCH, PITCH, RACK, SCALES, SOFT, SUB, TIMINGS, TREMOLO, TREMOLO_DEPTH,
+                          VIBRATO_RATE, VOICES, WAH, WAVES, arpeggiated, blend_gains, glide_left,
                           clean_arp, clean_extra, clean_mode, clean_voice, copies, group_count, line_at, wave_hits)
+from roll.roll_shared import NOTE_NAMES
 from window.hz_effects import AMOUNT, FX_COLOR
 from window.synth_look import (DIM, EDGE, ENTRY, GRID, MID, PANEL, PIC, TEXT, Box, bright, dark_list, mix)
 from window.tool_window import Knob
@@ -90,8 +91,8 @@ BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain",
                   ("wah", "percent", 0.0)),
          "character": (("slant", "percent", 0.0), ("groups", "groups", 1.0), ("offpitch", "percent", 0.0),
                        ("noisy", "percent", 0.0)),
-         "voice": (("voices", "voices", 1.0), ("detune", "cents", 20.0), ("glide", "time", 0.0),
-                   ("curve", "bend", GLIDE_CURVE)),
+         "voice": (("voices", "voices", 1.0), ("detune", "cents", 20.0), ("blend", "percent", BLEND),
+                   ("random", "percent", 0.0), ("glide", "time", 0.0), ("curve", "bend", GLIDE_CURVE)),
          "arp": tuple((f"arp_{k}", k, start) for k, (_, _, start) in ARP.items())}
 ROWS = (("volume", "wave", "pitch", "tone"), ("vibrato", "tremolo", "character", "voice"), ("arp",))
 # the Effects tab's effects (hzbass.RACK, window/hz_rack.py): their knobs (knob = effect_setting) and kinds
@@ -119,13 +120,18 @@ WAVE_NAMES = ("none",) + tuple(WAVES)
 # every knob and choice where it starts; those that do nothing right now are kept in hz["kept"] (hzbass.clean_kept)
 START = dict({key: start for key, (_, _, start) in KNOBS.items()}, wave="none", sweep=False, same=False,
              touching=False, legato=False, mode="off", rack=(), rack_off=(), arp_on=False, arp_pattern="up",
-             arp_chord="placed", vibrato_timing="free", tremolo_timing="free")
-KEEP = tuple(KNOBS) + ("same", "touching", "arp_pattern", "arp_chord")
-CHOICES = {"arp_pattern": ARP_PATTERNS, "arp_chord": tuple(CHORDS)}
+             arp_chord="placed", arp_scale="off", arp_root=0, vibrato_timing="free", tremolo_timing="free")
+ARP_CHOICES = ("pattern", "chord", "scale", "root")  # (the Arpeggio box's dropdowns)
+ARP_KEYS = ARP_CHOICES + tuple(ARP)  # (all it has)
+KEEP = tuple(KNOBS) + ("same", "touching") + tuple(f"arp_{w}" for w in ARP_CHOICES)
+CHOICES = {"arp_pattern": ARP_PATTERNS, "arp_chord": tuple(CHORDS), "arp_scale": ("off",) + tuple(SCALES),
+           "arp_root": tuple(range(12))}
 
 
 def kept_value(key, v):
     """A kept knob's value checked against its knob (None: no good)."""
+    if key == "arp_root":  # (a key name's number: kept as 5.0)
+        return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v in range(12) else None
     if key in CHOICES:
         return v if v in CHOICES[key] else None
     if key in ("same", "touching"):
@@ -364,12 +370,15 @@ def read_character(win, was):
 
 
 def read_voice(win, was):
-    """The Voice box: ({voices, detune, same, glide, touching, legato}, True): its own settings, not lines (one
-    voice: Detune and Voices on kept as they were; no glide: Only notes that touch too)."""
+    """The Voice box: ({voices, detune, same, blend, random, glide, curve, touching, legato}, True): its own
+    settings, not lines (one voice: Detune, Voices on and Blend kept as they were; no glide: Curve and Only notes
+    that touch too)."""
     v = win.extra.get("voice") or win.extra.get("bypass", {}).get("voice", {})
     n = v.get("voices", 1)
     got = {"voices": float(n), "detune": v["detune"] if n > 1 else was["detune"],
-           "same": bool(v.get("same")) if n > 1 else was["same"], "glide": v.get("glide", 0.0),
+           "same": bool(v.get("same")) if n > 1 else was["same"],
+           "blend": v.get("blend", BLEND) if n > 1 else was["blend"], "random": v.get("random", 0.0),
+           "glide": v.get("glide", 0.0),
            "curve": v.get("curve", GLIDE_CURVE) if v.get("glide") else was["curve"],
            "touching": bool(v.get("touching")) if v.get("glide") else was["touching"],
            "legato": bool(v.get("legato"))}
@@ -377,12 +386,13 @@ def read_voice(win, was):
 
 
 def read_arp(win, was):
-    """The Arpeggio box: ({arp_on, arp_pattern, arp_chord, arp_speed, arp_octaves, arp_gate}, True) (off: its
-    settings kept as they were)."""
+    """The Arpeggio box: ({arp_on, arp_pattern, arp_chord, arp_scale, arp_root, arp_speed, arp_octaves, arp_gate,
+    arp_swing}, True) (off: its settings kept as they were; no scale: its Root too)."""
     arp = win.extra.get("arp")
     if not arp:
         return {"arp_on": False}, True
-    return {"arp_on": True, "arp_swing": 0.0, **{f"arp_{k}": v for k, v in arp.items()}}, True
+    return {"arp_on": True, "arp_swing": 0.0, "arp_scale": "off", "arp_root": was["arp_root"],
+            **{f"arp_{k}": v for k, v in arp.items()}}, True
 
 
 def read_rack(win, was):
@@ -590,12 +600,13 @@ class SynthKnobs:
                     continue
                 self.dial_cell(box, col, key, kind, start, COLOURS[name])
                 col += 1
-                if key in ("detune", "curve"):  # (Voices on after the copies' knobs, the tick boxes after Glide's)
+                if key in ("random", "curve"):  # (Voices on after the copies' knobs, the tick boxes after Glide's)
                     self.voice_cell(box, col, key)
                     col += 1
             if name == "arp":
-                self.arp_choice(box, col, "chord", tuple(CHORDS))
-                col += 1
+                for what in ARP_CHOICES[1:]:  # (Chord, Scale, Root after the knobs)
+                    self.arp_choice(box, col, what, CHOICES[f"arp_{what}"])
+                    col += 1
             size = PICTURES[name]
             pic = self.pics[name] = tk.Canvas(box, width=round(size[0] * s), height=round(size[1] * s),
                                               background=PIC, highlightthickness=1, highlightbackground=EDGE)
@@ -634,7 +645,7 @@ class SynthKnobs:
         (after Glide and its Curve)."""
         cell = ttk.Frame(box, style="Synth.Box.TFrame")
         cell.grid(row=0, column=col, padx=6, sticky="n")
-        if after == "detune":
+        if after == "random":
             ttk.Label(cell, text=tr("hz.synth_voices_on"), style="Synth.Box.TLabel").pack()
             self.same_names = [tr("hz.synth_voices_split"), tr("hz.synth_voices_same")]
             self.same_var = tk.StringVar(value=self.same_names[0])
@@ -841,11 +852,12 @@ class SynthKnobs:
         return 1
 
     def arp_choice(self, box, col, what, ids):
-        """One of the Arpeggio box's dropdowns (Pattern / Chord): picking one puts the arpeggio on."""
+        """One of the Arpeggio box's dropdowns (Pattern / Chord / Scale / Root): picking one puts the arpeggio on."""
         cell = ttk.Frame(box, style="Synth.Box.TFrame")
         cell.grid(row=0, column=col, padx=6, sticky="n")
         ttk.Label(cell, text=tr(f"hz.synth_arp_{what}"), style="Synth.Box.TLabel").pack()
-        names = [tr(f"hz.synth_arp_{what}_{i}") for i in ids]
+        names = ([NOTE_NAMES[i] for i in ids] if what == "root"  # (C, C#...: as on the piano roll's keys)
+                 else [tr(f"hz.synth_arp_{what}_{i}") for i in ids])
         var = tk.StringVar(value=names[0])
         cb = ttk.Combobox(cell, textvariable=var, values=names, state="readonly",
                           width=max(len(n) for n in names) + 1, style="Synth.TCombobox")
@@ -905,8 +917,8 @@ class SynthKnobs:
             self.set_timing("vibrato_timing", v["vibrato_timing"])
         elif box == "voice":
             self.set_extra("voice", {"voices": int(v["voices"]), "detune": v["detune"], "same": v["same"],
-                                      "glide": v["glide"], "curve": v["curve"], "touching": v["touching"],
-                                      "legato": v["legato"]})
+                                      "blend": v["blend"], "random": v["random"], "glide": v["glide"],
+                                      "curve": v["curve"], "touching": v["touching"], "legato": v["legato"]})
         elif box == "tremolo":
             fx.drop("tremolo")
             if v["tremolo_rate"] > 0:
@@ -926,7 +938,7 @@ class SynthKnobs:
             if v["wah"] > 0:
                 self.fxl["wah"] = [[0.0, v["wah"]]]
         elif box == "arp":
-            self.set_extra("arp", {k: v[f"arp_{k}"] for k in ("pattern", "chord", *ARP)} if v["arp_on"] else None)
+            self.set_extra("arp", {k: v[f"arp_{k}"] for k in ARP_KEYS} if v["arp_on"] else None)
         elif box in RACK:
             self.write_rack()
         else:
@@ -963,7 +975,7 @@ class SynthKnobs:
         out = dict(START)
         for k, v in self.extra.get("kept", {}).items():
             if k in KEEP and kept_value(k, v) is not None:
-                out[k] = v
+                out[k] = kept_value(k, v)
         return out
 
     def box_parts(self, name):
@@ -1065,7 +1077,7 @@ class SynthKnobs:
             self.sweep_var.set(self.vals["sweep"])
         if self.arp_var.get() != self.vals["arp_on"]:
             self.arp_var.set(self.vals["arp_on"])
-        for what in ("pattern", "chord"):
+        for what in ARP_CHOICES:
             var, names, ids = getattr(self, f"arp_{what}_pick")
             name = names[ids.index(self.vals[f"arp_{what}"])]
             if var.get() != name:
@@ -1124,7 +1136,7 @@ class SynthKnobs:
                    (self.vals["wave"], self.vals["mode"]) if box == "wave" else None,
                    self.vals["sweep"] if box == "tone" else None,
                    (self.vals["same"], self.vals["touching"]) if box == "voice" else None,
-                   (self.vals["arp_on"], self.vals["arp_pattern"], self.vals["arp_chord"]) if box == "arp" else None,
+                   (self.vals["arp_on"], *(self.vals[f"arp_{w}"] for w in ARP_CHOICES)) if box == "arp" else None,
                    self.pic_colour(box) if box in BYPASS else None,
                    c.winfo_width(),
                    c.winfo_height())
@@ -1336,6 +1348,7 @@ class SynthKnobs:
         split = w * 0.45
         n = int(v["voices"])
         cents = copies({"voice": clean_voice({"voices": n, "detune": v["detune"]})})
+        gains = blend_gains({"voice": clean_voice({"voices": n, "detune": v["detune"], "blend": v["blend"]})})
         keys, rh = 8, (h - 2 * pad) / 8
 
         def x_of(c_):  # (a copy's tone: the note's own in the middle, half the most Detune each way)
@@ -1346,8 +1359,10 @@ class SynthKnobs:
         r = max(2.0, min(rh * 0.35, 4 * s))
         for i in range(keys):
             y = h - pad - (i + 0.5) * rh
-            for c_ in (cents if v["same"] else [cents[i % len(cents)]]):
-                c.create_rectangle(x_of(c_) - r, y - r, x_of(c_) + r, y + r, fill=colour, outline="")
+            for j in (range(len(cents)) if v["same"] else [i % len(cents)]):  # (fainter = quieter: Blend)
+                c_ = cents[j]
+                c.create_rectangle(x_of(c_) - r, y - r, x_of(c_) + r, y + r, outline="",
+                                   fill=mix(colour, PIC, 0.85 * (1.0 - gains[j])))
         says = (tr("hz.synth_voice_notes", n=n) if v["same"] else tr("hz.synth_voice_no_extra")) if n > 1 else ""
         c.create_text(split - 3 * s, 1 * s, text=says, anchor="ne", fill=DIM, font=font)
         c.create_line(split, pad, split, h - pad, fill=MID)
@@ -1370,7 +1385,7 @@ class SynthKnobs:
         chord shape) one A1; greyed while it's off."""
         s, v = self.s, self.vals
         w, h, pad = c.winfo_width(), c.winfo_height(), 6 * s
-        arp = clean_arp({k: v[f"arp_{k}"] for k in ("pattern", "chord", *ARP)})
+        arp = clean_arp({k: v[f"arp_{k}"] for k in ARP_KEYS})
         keys = (33, 36, 40) if arp["chord"] == "placed" else (33,)
         tones = [{"t": 0.0, "len": 2.0, "key": k, "cents": 0.0, "id": i + 1, "to": []} for i, k in enumerate(keys)]
         got = arpeggiated(tones, arp)  # (off: the same run, greyed)
