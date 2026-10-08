@@ -581,7 +581,11 @@ def rack_on(hz, kind):
 def rack_tail(hz):
     """Beats the Effects tab's echo and reverb make the sound go on for after the notes."""
     echo, reverb = rack_on(hz, "echo"), rack_on(hz, "reverb")
-    return (echo["repeats"] * echo["time"] if echo else 0.0) + (reverb["length"] if reverb else 0.0)
+    linked = {link["to"] for link in (hz.get("mod") or {}).get("links", ())}  # (moved: as long as they can get)
+    time = setting_most(hz, "echo_time", echo["time"]) if echo and "echo_time" in linked else echo and echo["time"]
+    length = (setting_most(hz, "reverb_length", reverb["length"]) if reverb and "reverb_length" in linked
+              else reverb and reverb["length"])
+    return (echo["repeats"] * time if echo else 0.0) + (length if reverb else 0.0)
 
 
 def compress(loud, comp):
@@ -723,11 +727,15 @@ MOD_SETTINGS = dict({"tremolo_depth": (*LFO["tremolo_depth"], None), "sweep_trac
 TIME_TOP, TIME_MOST = 4.0, 64.0  # (a time knob: beats along a curve up to TIME_TOP, typed up to TIME_MOST)
 RATE_TOP = 10.0  # (a Rate knob: times a beat along a curve up to this)
 # (Chorus / Flanger Rate: their waves added up over the whole sound, KeyGrid.rack_turns)
-RACK_MOD = {"chorus": ("depth", "rate"), "flanger": ("depth", "mix", "rate"), "echo": ("fade",),
-            "reverb": ("level", "scatter"), "compressor": ("threshold", "ratio", "gain", "attack", "release")}
+# (Echo Time: each repeat's echoes as far apart as it says when that repeat plays; Reverb Length: read as each note
+# ends)
+RACK_MOD = {"chorus": ("depth", "rate"), "flanger": ("depth", "mix", "rate"), "echo": ("fade", "time"),
+            "reverb": ("level", "scatter", "length"),
+            "compressor": ("threshold", "ratio", "gain", "attack", "release")}
 RACK_CURVES = {("compressor", "ratio"): RACK["compressor"]["ratio"][1],  # (curved knobs: their top)
                ("compressor", "attack"): TIME_TOP, ("compressor", "release"): TIME_TOP,
-               ("chorus", "rate"): RATE_TOP, ("flanger", "rate"): RATE_TOP}
+               ("chorus", "rate"): RATE_TOP, ("flanger", "rate"): RATE_TOP, ("echo", "time"): TIME_TOP,
+               ("reverb", "length"): TIME_TOP}
 MOD_RACK = {f"{kind}_{k}": (kind, k) for kind, ks in RACK_MOD.items() for k in ks}
 MOD_SETTINGS.update({name: (*RACK[kind][k][:2], RACK_CURVES.get((kind, k))) for name, (kind, k) in MOD_RACK.items()})
 # ... the time knobs (beats; along a curve up to TIME_TOP, typed up to TIME_MOST): a running envelope's stage gets
@@ -1256,8 +1264,8 @@ MOD_SETTINGS.update(arp_speed=(*ARP["speed"][:2], ARP["speed"][1]), arp_gate=(*A
 MOD_TARGETS = MOD_LINES + tuple(MOD_SETTINGS)
 # (knobs the engine reads once for a whole note or the whole sound, not for each repeat: KeyGrid.moved leaves them
 # out)
-NOT_EACH = set(TIMED_KNOBS) | {"glide", "curve", "compressor_attack", "compressor_release", *LFO_RATES, *OSC2_TUNE,
-                               *ARP_KNOBS}
+NOT_EACH = set(TIMED_KNOBS) | {"glide", "curve", "compressor_attack", "compressor_release", "reverb_length",
+                               *LFO_RATES, *OSC2_TUNE, *ARP_KNOBS}
 
 
 def osc2_most(hz):
@@ -2222,7 +2230,10 @@ class KeyGrid:
             same = starts[pitch(n)]
             k = bisect.bisect_left(same, end - 1e-9)
             nxt = same[k] if k < len(same) else math.inf
-            length = min(r["length"], nxt - end)
+            full = r["length"]
+            if "reverb_length" in self.linked:  # (Length moved: as it is when the note ends, by the newest note)
+                full = float(setting_at(self.hz, "reverb_length", full, np.array([end]), None, {})[0])
+            length = min(full, nxt - end)
             if length <= 1e-9:
                 continue
             i = max(0, int(np.searchsorted(src["beat"], end, "right")) - 1)
@@ -2391,6 +2402,7 @@ class KeyGrid:
         limits = f["limits"][src]
         until = each["until"][run][part]
         fade = f["echo_fade"][src] if "echo_fade" in self.moved else None  # (the echo's, each repeat's own)
+        gap = f["echo_time"][src] if "echo_time" in self.moved else None
         quiet = np.zeros(len(starts), bool)
         if self.loud:
             trem = self.trem(src)
@@ -2439,6 +2451,7 @@ class KeyGrid:
                 limits, until, hear, fx_late = limits[rows], until[rows], hear[rows], fx_late[rows]
                 grid, crushed, osc = grid[rows], crushed[rows], osc[rows]
                 fade = fade[rows] if fade is not None else None
+                gap = gap[rows] if gap is not None else None
                 env, mix, soft = loud[rows], np.concatenate([g[2] for g in got]), soft[rows]
                 quiet = vol[rows] < SOFT
             else:
@@ -2462,16 +2475,18 @@ class KeyGrid:
             made = all_starts[0], all_limits[0], all_env[0], all_quiet[0]
             most = self.lift("echo")  # (the compressor after it may bring a quiet one up)
             fades = self.echo["fade"] if fade is None else fade[keep]
+            times = self.echo["time"] if gap is None else gap[keep]  # (Time moved: each repeat's own)
             for i in range(1, int(self.echo["repeats"]) + 1):
                 gain = fades ** (i / 2.0)  # (loudness goes with the velocity squared)
                 if np.max(gain, initial=0.0) ** 2 * most < SOFT:
                     break
-                shift = i * self.echo["time"] * self.ppq
+                shift = i * times * self.ppq
                 all_starts.append(made[0] + shift)
-                all_limits.append(made[1] + int(math.floor(shift + 0.5)))
+                all_limits.append(made[1] + (int(math.floor(shift + 0.5)) if gap is None
+                                             else np.floor(shift + 0.5).astype(np.int64)))
                 if late_comp:  # (squeezed as heard then, among the other echoes)
                     all_env.append(np.minimum(1.0, pre * gain * gain
-                                              * self.squeezed(hear[keep] + i * self.echo["time"])))
+                                              * self.squeezed(hear[keep] + i * times)))
                 else:
                     all_env.append(made[2])
                 all_gain.append(np.full(len(made[0]), 1.0 if late_comp else gain))
@@ -2569,7 +2584,7 @@ class KeyGrid:
         t1 = float(ends.max())
         echo = self.echo if self.after("echo") else None
         if echo:
-            t1 += echo["repeats"] * echo["time"]
+            t1 += echo["repeats"] * self.most("echo_time", echo["time"])
         dt = max(1 / 128, (t1 - t0) / 100000)  # (a step: fine enough for the tremolo, never too many)
         size = int((t1 - t0) / dt) + 2
         power = np.zeros(size)
@@ -2589,7 +2604,15 @@ class KeyGrid:
         if echo:  # (the echoes after it count too)
             dry = power.copy()
             fade = fades / np.maximum(power, 1e-24) if faded else echo["fade"]
+            gaps = None
+            if "echo_time" in self.moved:  # (Time moved: each step's sound comes back as far apart as it says then)
+                gaps = setting_at(self.hz, "echo_time", echo["time"], t0 + np.arange(size) * dt, None)
             for i in range(1, int(echo["repeats"]) + 1):
+                if gaps is not None:
+                    k = np.arange(size) + np.round(i * gaps / dt).astype(np.int64)
+                    ok = k < size
+                    np.add.at(power, k[ok], ((fade[ok] if faded else fade) ** (2 * i)) * dry[ok])
+                    continue
                 k = int(round(i * echo["time"] / dt))
                 if k < size:
                     power[k:] += (fade[:size - k] if faded else fade) ** (2 * i) * dry[:size - k]
