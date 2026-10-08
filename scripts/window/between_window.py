@@ -457,9 +457,10 @@ class BetweenWindow(tk.Toplevel):
         pad.bind("<B1-Motion>", self.pad_motion)
         pad.bind("<ButtonRelease-1>", self.pad_release)
         pad.bind("<Double-Button-1>", self.pad_reset)
-        Tooltip(pad, tr("between.push_tip"))
         self.pad_info = ttk.Label(col, text="", foreground=look.HINT, font=look.font(8))
         self.pad_info.pack(anchor="w")
+        for w in (self.pad_title, self.pad_info):  # (not on the pad itself: it covered the stick, user)
+            Tooltip(w, tr("between.push_tip"))
         self.smooth_var = tk.BooleanVar()
         sm = ttk.Checkbutton(col, text=tr("between.smooth"), variable=self.smooth_var,
                              command=lambda: self.change("smooth", self.smooth_var.get()))
