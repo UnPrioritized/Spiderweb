@@ -49,7 +49,8 @@ from window.panel_tumour import TumourPanel
 from notes.joined import all_tumours, is_joined
 from window.join_split import JoinSplit
 from window.between_window import BetweenGroups
-from notes.between import copied as between_copied, sync_groups, turns as between_turns
+from notes.between import (copied as between_copied, keep_pushes, push_sizes, sync_groups, turns as between_turns,
+                           whole_groups)
 from window.history import HistoryPanel, edit_name
 from roll.pianoroll import PianoRoll
 from roll.roll_draw import painting_order
@@ -1303,6 +1304,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         vals = [pt[k] for sh in shapes for pt in cached_path(sh)]
         mid2 = min(vals) + max(vals)  # twice the middle
         self.push_undo(name=tr("app.flip_sideways") if sideways else tr("app.flip_upside_down"))
+        sizes = push_sizes(self.shapes, whole_groups(self.shapes, self.sels))  # (Add between pushes flip too)
         for sh in shapes:
             steps = steps_kept(sh)  # (a piece of a shape with pages: a flip step too, it stays a piece)
             flip_shape(sh, sideways, mid2)
@@ -1312,6 +1314,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                     sh["fx"] = fx
                 else:
                     sh.pop("fx", None)
+        keep_pushes(self.shapes, sizes, lambda v: (-v[0], v[1]) if sideways else (v[0], -v[1]))
         self.roll.move_kept_box(lambda b, p: (mid2 - b, p) if sideways else (b, mid2 - p))  # (flips too)
         self.sync_panel()
         self.shapes_changed()
@@ -1331,6 +1334,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         sign = 1 if clockwise else -1
         limit = self.roll.limits(shapes)  # (turned past an edge: pushed back inside, user)
         self.push_undo(name=tr("app.turn_90"))
+        sizes = push_sizes(self.shapes, whole_groups(self.shapes, self.sels))  # (Add between pushes turn too)
         for sh in shapes:
             steps = steps_kept(sh)  # (a piece of a shape with pages: a turn step too, it stays a piece)
             turn_shape(sh, clockwise, r, cb, cp)
@@ -1340,6 +1344,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                     sh["fx"] = fx
                 else:
                     sh.pop("fx", None)
+        keep_pushes(self.shapes, sizes, lambda v: (sign * v[1] * r, -sign * v[0] / r))
         db, dp = self.roll.push_in(self.roll.reach(shapes), limit)
         if db or dp:
             for sh in shapes:

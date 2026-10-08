@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from files.lang import tr
-from notes.between import copied as between_copied, group_of
+from notes.between import copied as between_copied, group_of, keep_pushes, push_sizes, whole_groups
 from notes.custom import box_frame, fill_plan, fill_test
 from notes.engine import cached_arrays, make_shape
 from notes.joined import all_tumours
@@ -247,9 +247,12 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             ky = (at_p - ap) / (edge - ap)
             new[1 if sy < 0 else 3] = at_p
         step = self.held_step(orig)
+        olds = [orig.get(j, sh) for j, sh in enumerate(app.shapes)]
+        sizes = push_sizes(olds, whole_groups(olds, orig))  # (Add between pushes stretch too)
         for j, sh in orig.items():
             app.shapes[j].clear()
             app.shapes[j].update(app.stretched(sh, ab, kx, ap, ky))
+        keep_pushes(app.shapes, sizes, lambda v: (v[0] * kx, v[1] * ky))
         if len(boxes) > 1:  # (several boxes: each one stretched the same way)
             new = [(ab + (a[0] - ab) * kx, ap + (a[1] - ap) * ky, ab + (a[2] - ab) * kx, ap + (a[3] - ap) * ky)
                    for a in boxes]

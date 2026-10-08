@@ -446,10 +446,11 @@ def anchors(shapes, gid):
 PUSH_REACH = 4.0  # a full push (pad at its edge) = the path leaving this many times the group's size per whole group
 PUSH_FLOOR = (1.0, 12.0)  # (the group's size counts as at least 1 beat wide and 12 keys high: a flat group can still
 # be pushed up / down)
+PUSH_MOST = 4.0  # (the pad goes to 1; a small group stretched can need more: keep_pushes)
 
 
 def push_of(sh):
-    """A shape's push [x, y] (each -1..1, at most 1 long; [0, 0] = none): which way and how hard the steps leave it."""
+    """A shape's push [x, y] (the pad's edge = 1 long; [0, 0] = none): which way and how hard the steps leave it."""
     return _clean_push((sh.get("between") or {}).get("push")) or [0.0, 0.0]
 
 
@@ -461,8 +462,53 @@ def _clean_push(p):
         return None
     if not (math.isfinite(x) and math.isfinite(y)) or math.hypot(x, y) < 1e-9:
         return None
-    n = math.hypot(x, y)
+    n = math.hypot(x, y) / PUSH_MOST
     return [x / n, y / n] if n > 1 else [x, y]
+
+
+def _size(marks):
+    """How far a full push reaches, in beats and keys: the group's size (anchors' points) x PUSH_REACH."""
+    pts = np.asarray([p for _, sh in marks for p in sh["pts"]], float).reshape(-1, 2)
+    return np.maximum(pts.max(0) - pts.min(0), PUSH_FLOOR) * PUSH_REACH
+
+
+def whole_groups(shapes, idx):
+    """The groups all of whose shapes are among the shape numbers idx."""
+    idx = set(idx)
+    gids = {group_of(shapes[i]) for i in idx} - {None}
+    return [g for g in sorted(gids) if set(members(shapes, g)) <= idx]
+
+
+def push_sizes(shapes, gids):
+    """{group: _size} before a whole-group flip / turn / stretch (keep_pushes)."""
+    return {g: _size(anchors(shapes, g)) for g in gids}
+
+
+def keep_pushes(shapes, sizes, fn):
+    """After whole groups were flipped / turned / stretched: their pushes changed the same way (fn: a push's reach
+    [beats, keys] -> the new one), so the steps still match what the group makes (else every step became a key,
+    hunt 2026-10-08). sizes = push_sizes from before."""
+    for g, old in sizes.items():
+        marks = anchors(shapes, g)
+        if not marks:
+            continue
+        new = _size(marks)
+        for _, sh in marks:
+            p = push_of(sh)
+            if p != [0.0, 0.0]:
+                v = fn(np.asarray(p) * old)
+                p = _clean_push([float(v[0] / new[0]), float(v[1] / new[1])])
+                if p:
+                    sh["between"]["push"] = p
+                else:
+                    sh["between"].pop("push", None)
+
+
+def _capped(extra, d, reach):
+    """An extra speed over a part of length d, cut so it bends the path no further than reach (each axis: how far
+    the shapes move over the key's two parts)."""
+    lim = reach + 1e-9
+    return np.clip(extra * d, -lim, lim) / d
 
 
 def _h10(f):
@@ -508,21 +554,23 @@ class Steps:
         smooth = self.s.get("smooth") and len(marks) > 2
         if not smooth and not any(p != [0.0, 0.0] for p in pushes):
             return None
-        pts = np.asarray([p for _, sh in marks for p in sh["pts"]], float).reshape(-1, 2)
-        size = np.maximum(pts.max(0) - pts.min(0), PUSH_FLOOR) * PUSH_REACH
+        size = _size(marks)
         push = [np.asarray(p) * size for p in pushes]
         parts = [self._part(i) for i in range(len(marks) - 1)]
-        speeds = []  # (each part's straight speed of the shape as a whole: its middle's move per change)
-        for key, d in parts:
-            pair = _pair(key)
-            speeds.append(pair.d.mean(0) / d if abs(d) > 1e-12 else np.zeros(2))
+        moves = [_pair(key).d.mean(0) for key, _ in parts]  # (each part's move of the shape as a whole: its middle)
         out = [[push[i].copy(), push[i + 1].copy()] for i in range(len(parts))]
         for j in range(1, len(marks) - 1):  # (the keys)
             if not (smooth or pushes[j] != [0.0, 0.0]):
                 continue
-            mid = (speeds[j - 1] + speeds[j]) / 2
-            out[j - 1][1] += mid - speeds[j - 1]
-            out[j][0] += mid - speeds[j]
+            d0, d1 = parts[j - 1][1], parts[j][1]
+            if abs(d0 + d1) < 0.5 * (abs(d0) + abs(d1)) or abs(d0) < 1e-12 or abs(d1) < 1e-12:
+                continue  # (the graph turning back at the key, or a part with no length: a corner)
+            # (the speed through the key = the move over both parts / both parts' length, weighted by length: a short
+            # part's huge speed no longer flings the steps on the other side far off, hunt 2026-10-08)
+            mid = (moves[j - 1] + moves[j]) / (d0 + d1)
+            reach = np.abs(moves[j - 1]) + np.abs(moves[j])
+            out[j - 1][1] += _capped(mid - moves[j - 1] / d0, d0, reach)
+            out[j][0] += _capped(mid - moves[j] / d1, d1, reach)
         return out
 
     def at(self, at):
@@ -738,8 +786,9 @@ def copied(shapes, start=0):
             for sh in copies:
                 if group_of(sh) == gid:
                     sh["between"]["id"] = fresh
-            if not any(r in ("step", "key") for r in roles):
-                shapes += [_blank(fresh, u) for u in slots(settings_of(copies, fresh)["steps"])]
+            if "step" not in roles:  # (keys copied without steps too: the steps spread between them, hunt 2026-10-08)
+                keys = [sh["between"]["at"] for sh in copies if group_of(sh) == fresh and sh["between"]["role"] == "key"]
+                shapes += [_blank(fresh, u) for u in places(settings_of(copies, fresh)["steps"], keys)]
         else:
             for sh in copies:
                 if group_of(sh) == gid:

@@ -39,9 +39,10 @@ PAD_STICK = 8  # the push pad's middle pulls the stick in within this many px (S
 
 
 class BetweenWindow(tk.Toplevel):
-    def __init__(self, app, gid, before, name):
+    def __init__(self, app, gid, before, name, opened_on=None):
         """gid: the group (made already); before: the shapes as JSON before the window (Cancel puts them back, OK
-        makes one undo step from them, called name)."""
+        makes one undo step from them, called name); opened_on: the shape it was opened from (the pad starts on it
+        when it's the first / last shape or a key)."""
         super().__init__(app)
         self.app, self.gid, self.before, self.name = app, gid, before, name
         self.title(tr("between.title"))
@@ -65,6 +66,9 @@ class BetweenWindow(tk.Toplevel):
                                  highlightbackground=look.CHART_BORDER)
         pv.pack(side="left", anchor="n")
         self.push_on, self.pad_drag = 0, None  # (which anchor the pad pushes: its number from the first shape)
+        self.pad_was = None  # (the window's undo place before a pad press: a double-click's first click undone)
+        marks = [sh for _, sh in between.anchors(app.shapes, gid)]
+        self.push_on = next((j for j, sh in enumerate(marks) if sh is opened_on), 0)
         self.build_pad(top)
         ttk.Label(box, text=tr("between.preview_hint"), foreground=look.HINT, font=look.font(8), justify="left",
                   wraplength=self.w).pack(anchor="w", pady=(2, 6))
@@ -158,6 +162,7 @@ class BetweenWindow(tk.Toplevel):
 
     def put_state(self, state):
         self.drag = self.pv_drag = self.pad_drag = None
+        self.app.scrubbing = False
         self.set, pa, pb, pushes, self.push_on = json.loads(state)
         a, b = self.ends()
         a["pts"], b["pts"] = pa, pb
@@ -282,6 +287,9 @@ class BetweenWindow(tk.Toplevel):
         self.close()
 
     def close(self):
+        if self.app.scrubbing:  # (closed while the pad / a point was held: its notes may be late)
+            self.app.scrubbing = False
+            self.app.catch_up_notes()
         self.update()  # (after a long wait Windows shows a "not responding" copy of the window: destroyed before
         self.grab_release()  # that's gone, Tk crashed)
         self.destroy()
@@ -378,6 +386,7 @@ class BetweenWindow(tk.Toplevel):
             a, b = self.ends()
             sh = a if hit[0] == "first" else b
             self.pv_drag = (hit[0], hit[1], json.loads(json.dumps(sh["pts"])), e.x, e.y)
+            self.app.scrubbing = True  # (slow notes wait for the mouse to rest / let go: App.shapes_changed)
             self.pick_push(0 if hit[0] == "first" else len(self.anchors()) - 1)
             return
         near = self.pv_line(e.x, e.y)
@@ -435,6 +444,7 @@ class BetweenWindow(tk.Toplevel):
     def pv_release(self, e):
         if self.pv_drag:
             self.pv_drag = None
+            self.app.scrubbing = False
             self.app.catch_up_notes()
             self.draw_preview()
             self.hist.mark()
@@ -521,7 +531,9 @@ class BetweenWindow(tk.Toplevel):
     def pad_press(self, e):
         if between.first_of(self.app.shapes, self.gid) is None:
             return
+        self.pad_was = (self.hist.at, len(self.hist.states))
         self.pad_drag = True
+        self.app.scrubbing = True  # (slow notes wait for the mouse to rest / let go: App.shapes_changed)
         self.pad_motion(e)
 
     def pad_motion(self, e):
@@ -542,15 +554,23 @@ class BetweenWindow(tk.Toplevel):
     def pad_release(self, e):
         if self.pad_drag:
             self.pad_drag = None
+            self.app.scrubbing = False
             self.app.catch_up_notes()
             self.draw_pad()
             self.hist.mark()
 
     def pad_reset(self, e):
+        """Double-click: no push. Its first click already pushed and made an undo step: that step is dropped, so
+        Ctrl+Z gives back the push from before the double-click (hunt 2026-10-08)."""
         self.pad_drag = None
+        self.app.scrubbing = False
+        h, was = self.hist, self.pad_was
+        if was and h.at == was[0] + 1 and len(h.states) == was[1] + 1:
+            del h.states[h.at:]
+            h.at -= 1
         self.set_push([0.0, 0.0])
         self.app.catch_up_notes()
-        self.hist.mark()
+        h.mark()
 
     # ---- the graph (left = the first shape, right = the last; up = changed more towards the last)
 
@@ -694,7 +714,7 @@ class BetweenGroups:
         self.roll.cancel_draft()
         got = between.ordered(self.shapes, gid)
         self.select_many(got, got[0])
-        BetweenWindow(self, gid, json.dumps(self.shapes), tr("between.step_edit"))
+        BetweenWindow(self, gid, json.dumps(self.shapes), tr("between.step_edit"), opened_on=self.shapes[i])
 
     def select_group(self, i):
         got = between.ordered(self.shapes, between.group_of(self.shapes[i]))
