@@ -343,15 +343,16 @@ def clean_arp(arp):
 
 
 def in_scale(key, scale, root):
-    """A key moved to the nearest key of the scale (SCALES) counted from root (0 = C); half way: down."""
+    """A key moved to the nearest key of the scale (SCALES) counted from root (0 = C); half way: down; one that
+    would leave the keys (0..127) goes the other way."""
     steps = SCALES[scale]
-    for d in (0, -1, 1, -2, 2, -3, 3):
-        if (key + d - root) % 12 in steps:
+    for d in (0, -1, 1, -2, 2, -3, 3, -4, 4):
+        if (key + d - root) % 12 in steps and 0 <= key + d <= 127:
             return key + d
     return key
 
 
-def arpeggiated(tones, arp):
+def arpeggiated(tones, arp, left=0.0):
     """The tones as the Arpeggio box plays them: from each start (the notes starting together = one chord) a run of
     short tones, one every 1 / speed beats while any of them is held, through their pitches (with the chord's steps
     and octaves) in the pattern's order; a note let go drops out of the run. Each keeps its note's tune and gates;
@@ -377,7 +378,9 @@ def arpeggiated(tones, arp):
                     pitches[(key, n["cents"])] = n
         items = sorted(pitches.items(), key=lambda kv: kv[0][0] + kv[0][1] / 100)
         end = max(n["t"] + n["len"] for n in chord)
-        rng = np.random.default_rng(int(round(t0 * 1000)) % (2 ** 32))
+        # (Random: drawn from the chord's beat in the song (left = the shape's edge), so a Split or a moved edge
+        # leaves it as it was)
+        rng = np.random.default_rng(int(round((left + t0) * 1000)) % (2 ** 32))
         k = 0
         while True:
             t = t0 + k * step
@@ -453,8 +456,8 @@ def blend_gains(hz):
     1 = only the outer ones); at BLEND (or one copy) all full."""
     v = hz.get("voice") or {}
     n, b = v.get("voices", 1), v.get("blend", BLEND)
-    if n < 2:
-        return np.ones(1)
+    if n < 3:  # (two copies are both "the middle two": nothing to blend)
+        return np.ones(n)
     middle = np.isin(np.arange(n), ((n - 1) // 2, n // 2))
     return np.where(middle, min(1.0, 2.0 * (1.0 - b)), min(1.0, 2.0 * b))
 
@@ -533,12 +536,13 @@ def clean_off(off, fx):
     return [name for name in FX if name in fx and name in off]
 
 
-def live(hz):
-    """hz as it's heard: without the effects switched off (Bypass), its tones as the Arpeggio box plays them."""
+def live(hz, left=0.0):
+    """hz as it's heard: without the effects switched off (Bypass), its tones as the Arpeggio box plays them (left =
+    the shape's left edge: the Random pattern counts from the song's start)."""
     if hz.get("arp") and hz.get("tones"):  # (taken out once played, so live of live is the same)
         arp = hz["arp"]
         hz = {k: v for k, v in hz.items() if k not in ("arp", "_memo")}  # (other tones: nothing cached holds)
-        hz["tones"] = arpeggiated(hz["tones"], arp)
+        hz["tones"] = arpeggiated(hz["tones"], arp, left)
     off = hz.get("off")
     if not off:
         return hz
@@ -1171,7 +1175,7 @@ def heard(hz, left, ppq, bpm):
     PPQ, the more. Alternating ("mixed") gates take turns so that the average is the wanted tone; fixed gates are all the same, so
     there the average is each repeat's own pitch.
     The pitch is counted from the shape's own tuning (hz["cents"]), so a key's exact tone is that key."""
-    return _heard(json.dumps(live(hz), sort_keys=True), left, ppq, float(bpm))
+    return _heard(json.dumps(live(hz, left), sort_keys=True), left, ppq, float(bpm))
 
 
 @functools.lru_cache(maxsize=16)
@@ -1258,6 +1262,7 @@ class KeyGrid:
         self.copies, self.same = copies(hz), bool((hz.get("voice") or {}).get("same"))
         self.gains = blend_gains(hz)  # (each copy's loudness: Blend)
         self.random = (hz.get("voice") or {}).get("random", 0.0)  # (Random start: see starting_points)
+        self.left = left
         self.mode, self.ppq = hz.get("mode") or {}, ppq
         self.chorus, self.echo, self.reverb = (rack_on(hz, k) for k in ("chorus", "echo", "reverb"))
         lfo = hz.get("lfo") or {}
@@ -1302,10 +1307,10 @@ class KeyGrid:
 
     def starting_points(self):
         """Random start: where each Voice copy's waves start in each note (runs x VOICES, 0..1 of a wave), as a
-        synth's random phase: new at every note, kept through its slides (drawn from the beat its chain of slides
-        starts at, so the same every time the notes are made)."""
+        synth's random phase: new at every note, kept through its slides (drawn from the beat in the song its chain
+        of slides starts at, so the same every time the notes are made, and after a Split or a moved left edge)."""
         f, at = self.flat, np.minimum(self.each["offsets"], len(self.flat["beat"]) - 1)  # (a run with none: any)
-        heads = f["beat"][at] - f["since"][at] if len(f["beat"]) else np.zeros(len(self.runs))
+        heads = self.left + f["beat"][at] - f["since"][at] if len(f["beat"]) else np.zeros(len(self.runs))
         drawn = {}
         out = np.zeros((len(self.runs), VOICES))
         for i, h in enumerate(heads):
@@ -1510,9 +1515,14 @@ class KeyGrid:
                 all_factors.append(made[2] * gain)
                 all_quiet.append(made[3])
         if len(run):
-            sq, which = _grid(np.concatenate(all_starts), np.concatenate(all_limits))
-            factor = np.concatenate(all_factors)[which]
-            heard = ~np.concatenate(all_quiet)[which]  # (volume 0: left out once every repeat has its end)
+            st, li = np.concatenate(all_starts), np.concatenate(all_limits)
+            fa, qu = np.concatenate(all_factors), np.concatenate(all_quiet)
+            if (self.gains != 1.0).any():  # (Blend: copies on one tick = the loudest one, left out only if all are)
+                first = np.lexsort((-fa, qu))
+                st, li, fa, qu = st[first], li[first], fa[first], qu[first]
+            sq, which = _grid(st, li)
+            factor = fa[which]
+            heard = ~qu[which]  # (volume 0: left out once every repeat has its end)
             sq, factor = sq[heard], factor[heard]
         else:
             sq, factor = np.zeros((0, 2), np.int64), np.zeros(0)
@@ -1563,7 +1573,7 @@ def velocity_factor(sh, ppq, starts, keys):
 def squares(sh, ppq):
     """The repeats of a shape with placed tones: an array of (start, end) ticks in order, none overlapping. When
     it has effects: a KeyGrid (each key has its own)."""
-    hz = live(sh["hz"])
+    hz = live(sh["hz"], left_edge(sh))
     hz_json = json.dumps(hz, sort_keys=True)
     if has_fx(hz):
         lo, hi = key_range(sh)

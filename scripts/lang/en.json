@@ -2980,7 +2980,7 @@
  "hz.synth_voices": "Voices",
  "hz.synth_detune": "Detune",
  "hz.synth_blend": "Blend",
- "hz.synth_tip_blend": "Blend: how loud the middle copy (the middle two, with an even number of Voices) is next to the outer ones. 50 % = all as loud. Lower = the middle louder, the outer ones fade (0 = only the middle). Higher = the outer ones louder, the middle fades (100 % = only the outer ones: wide and hollow). Needs 3 Voices or more.",
+ "hz.synth_tip_blend": "Blend: how loud the middle copy (the middle two, with an even number of Voices) is next to the outer ones. 50 % = all as loud. Lower = the middle louder, the outer ones fade (0 = only the middle). Higher = the outer ones louder, the middle fades (100 % = only the outer ones: wide and hollow). Needs 3 Voices or more. With Voices on Split keys each key row plays one copy, so Blend makes whole rows quieter (at 0 or 100 %, some rows go silent).",
  "hz.synth_random": "Random start",
  "hz.synth_tip_random": "Random start: each copy starts its wave at a random point at every new note, instead of all at the very start, so the notes don't all sound exactly alike and stacked Voices sound wider. 0 = every note starts the same. 100 % = anywhere in the wave. The same every time the notes are made.",
  "hz.synth_glide": "Glide",
