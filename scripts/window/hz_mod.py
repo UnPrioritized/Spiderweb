@@ -20,6 +20,7 @@ from notes.hzbass import (MOD_ENV, MOD_ENVS, MOD_LINKS, MOD_NEED_LINE, MOD_SETTI
                           mod_value, setting_base)
 from window.hz_knobs import (BYPASS, KINDS, KNOBS, PERCENTS, UPDOWN, Dial, knob_of, note_name, shown, snap_rate,
                              timed_rates, value_of)
+from window.hz_effects import AMOUNT
 from window.hz_macros import LINK_AMOUNT, REST_MS, inside
 from window.synth_look import ENTRY, GRID, HEAD_FONT, MID, PANEL, PIC, Box, dark_list, dark_menu, mix
 from window.widgets import Scrub, Tooltip
@@ -619,7 +620,10 @@ class SynthMod:
         if box in BYPASS and self.box_off(box):
             return None
         if to in MOD_SETTINGS:  # (a knob that makes no line: where it points, while it does something)
-            heard = dict(self.extra, lfo=self.lfo, fx={n: p for n, p in self.fxl.items() if n not in self.off})
+            fx = {n: p for n, p in self.fxl.items() if n not in self.off and not n.endswith(AMOUNT)}
+            heard = dict(self.extra, lfo=self.lfo, fx=fx, loop=self.loops, sustain=self.sustains, fit=self.fits,
+                         amount={n[:-len(AMOUNT)]: p for n, p in self.fxl.items() if n.endswith(AMOUNT)},
+                         **{"from": self.froms})
             if setting_base(heard, to) is None:
                 return None
             return line_of(key, knob_of(KNOBS[key][1], self.pv[key]))

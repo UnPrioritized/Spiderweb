@@ -689,6 +689,13 @@ RACK_MOD = {"chorus": ("depth",), "flanger": ("depth", "mix"), "echo": ("fade",)
 RACK_CURVES = {("compressor", "ratio"): RACK["compressor"]["ratio"][1]}  # (curved knobs: their top)
 MOD_RACK = {f"{kind}_{k}": (kind, k) for kind, ks in RACK_MOD.items() for k in ks}
 MOD_SETTINGS.update({name: (*RACK[kind][k][:2], RACK_CURVES.get((kind, k))) for name, (kind, k) in MOD_RACK.items()})
+# ... the time knobs (beats; along a curve up to TIME_TOP, typed up to TIME_MOST): a running envelope's stage gets
+# shorter or longer as they move (timed_line). The Volume box's Attack / Decay / Release (ADSR_KNOBS) only while
+# the Volume line is as its knobs make it (knob_adsr)
+TIME_TOP, TIME_MOST = 4.0, 64.0
+ADSR_KNOBS = ("attack", "decay", "release")
+MOD_SETTINGS.update({name: (0.0, TIME_MOST, TIME_TOP) for name in ADSR_KNOBS})
+TIME_STEP = 1 / 1024  # beats: how finely a moved envelope is worked out (fewer steps on very long notes)
 MOD_TARGETS = MOD_LINES + tuple(MOD_SETTINGS)
 # the synth window's box each effect is in: a box switched off (hz["bypass"]["boxes"]) stops its links too
 MOD_BOXES = dict({w: "wave" for w in tuple(WAVES) + ("wave", "octave")}, volume="volume", pitch="pitch", vibrato="vibrato",
@@ -793,6 +800,14 @@ def live(hz, left=0.0):
         hz["tones"] = arpeggiated(hz["tones"], arp, left)
     fx = hz.get("fx") or {}
     boxes_off = (hz.get("bypass") or {}).get("boxes", ())
+    if ("volume" not in fx and "volume" not in boxes_off and any(
+            link["to"] in ADSR_KNOBS for link in (hz.get("mod") or {}).get("links", ()))):
+        # (the Volume knobs' times moved with no Volume line: as the knobs have it, full all along)
+        pts, at, every = adsr_line(0.0, 0.0, 1.0, 0.0)
+        hz = {k: v for k, v in hz.items() if k != "_memo"}
+        hz.update(fx=dict(fx, volume=pts), loop=dict(hz.get("loop") or {}, volume=every),
+                  sustain=dict(hz.get("sustain") or {}, volume=at), **{"from": dict(hz.get("from") or {}, volume="note")})
+        fx = hz["fx"]
     missing = [link["to"] for link in (hz.get("mod") or {}).get("links", ()) if link["to"] in MOD_BOXES
                and link["to"] not in fx and link["to"] not in MOD_NEED_LINE and MOD_BOXES[link["to"]] not in boxes_off]
     if missing:  # (the MOD tab moves them from where they do nothing)
@@ -925,6 +940,8 @@ def tails(hz):
     starts (both there would make their repeats twice as many: a higher tone)."""
     hz = live(hz)
     fall = max((hz["loop"][name] - at for name, at in (hz.get("sustain") or {}).items()), default=0.0)
+    if any(link["to"] == "release" for link in (hz.get("mod") or {}).get("links", ())) and knob_adsr(hz):
+        fall = max(fall, setting_most(hz, "release", knob_adsr(hz)["release"]))  # (as long as it can get)
     tones = hz.get("tones") or ()
     if fall <= 1e-12 or not tones:
         return {}
@@ -969,7 +986,10 @@ def fx_at(hz, name, beat, tone=None, sources=None):
     mode = (hz.get("from") or {}).get(name) if every else None
     at = (hz.get("sustain") or {}).get(name) if mode == "note" else None
     span = note_span(hz, np.asarray(beat, float), tone) if at is not None else None
-    if span is not None:
+    timed = timed_line(hz, name, beat, tone) if mode == "note" else None
+    if timed is not None:  # (its time knobs moved by the MOD tab)
+        v = timed
+    elif span is not None:
         s0, end = span
         v = sustained(pts, every, at, np.asarray(beat, float) - s0, np.asarray(end) - s0)
     elif mode:
@@ -1003,6 +1023,9 @@ def setting_base(hz, target):
     nothing: no Tremolo / Sweep line (Depth, Key track), under 3 voices (Blend), OSC B off or with no waveform
     (Shape), another Mode or the oscillator off (a Mode's amount)."""
     fx, lfo, osc = hz.get("fx") or {}, hz.get("lfo") or {}, hz.get("osc2") or {}
+    if target in ADSR_KNOBS:
+        got = knob_adsr(hz)
+        return got[target] if got else None
     if target in MOD_RACK:  # (an Effects tab effect's: while it's there and on)
         kind, key = MOD_RACK[target]
         e = rack_on(hz, kind)
@@ -1044,6 +1067,85 @@ def turned_setting(target, base, turn):
     else:
         v = base + turn * (hi - lo)
     return np.clip(v, lo, hi)
+
+
+def same_points(a, b):
+    """Two lines' points the same (to a millionth)."""
+    def same(x, y):
+        return x == y if isinstance(x, str) or isinstance(y, str) else abs(x - y) < 1e-6
+    return len(a) == len(b) and all(len(p) == len(q) and all(map(same, p, q)) for p, q in zip(a, b))
+
+
+def knob_adsr(hz):
+    """The Volume line as the Volume box's knobs make it (adsr_line, once per note with its sustain point):
+    {attack, decay, sustain, release}; full all along (or none) = (0, 0, 1, 0); None when it was drawn otherwise."""
+    plain = {"attack": 0.0, "decay": 0.0, "sustain": 1.0, "release": 0.0}
+    pts = (hz.get("fx") or {}).get("volume")
+    if not pts or "volume" not in (hz.get("loop") or {}) and all(p[1] == 1.0 for p in pts):
+        return plain if "volume" not in (hz.get("amount") or {}) else None
+    at = (hz.get("sustain") or {}).get("volume")
+    if (at is None or (hz.get("from") or {}).get("volume") != "note" or "volume" in (hz.get("fit") or ())
+            or "volume" in (hz.get("amount") or {})):
+        return None
+    attack = pts[1][0] if len(pts) > 1 and pts[0][1] == 0.0 and list(pts[0][2:]) == [-FAST] else 0.0
+    attack = min(max(0.0, attack), at)
+    got = {"attack": attack, "decay": at - attack, "sustain": float(line_at(pts, at)),
+           "release": pts[-1][0] - at if pts[-1][0] > at + 1e-9 else 0.0}
+    return got if same_points(adsr_line(**got)[0], pts) else None
+
+
+def stage_sums(length, dt):
+    """For a stage whose length (beats) is read at every step of a grid dt apart: how far through a stage of that
+    length the time from the grid's start has come (adding dt / length step by step: a length moving while the
+    stage runs makes it go faster or slower). A length of 0 = done at once."""
+    step = dt / np.maximum(np.asarray(length, float), 1e-12)
+    return np.concatenate([[0.0], np.cumsum(step[:-1])])
+
+
+def stage_end(sums, g, t0):
+    """When a stage starting at t0 ends (sums = stage_sums over the grid g), inf when it never does."""
+    want = float(np.interp(t0, g, sums)) + 1.0
+    return float(np.interp(want, sums, g)) if want <= sums[-1] else math.inf
+
+
+def timed_line(hz, name, beat, tone):
+    """An effect's line played once per note whose time knobs the MOD tab moves (the Volume box's ADSR: knob_adsr),
+    at beat (an array) for tone's note, or None (nothing moves them; no tone: as drawn). Worked out on a grid from the
+    note's start: each stage as long as its knob says at every step (as a synth's envelope, a running stage gets
+    shorter or longer), the fall from where it got when the note ends."""
+    if tone is None or name != "volume":
+        return None
+    linked = {link["to"] for link in (hz.get("mod") or {}).get("links", ()) if link["to"] in ADSR_KNOBS}
+    e = knob_adsr(hz) if linked else None
+    if e is None:
+        return None
+    g, v = cached(hz, ("timed", name, tone.get("id")), lambda: adsr_moved(hz, e, linked, tone))
+    return np.interp(np.asarray(beat, float), g, v)
+
+
+def adsr_moved(hz, e, linked, tone):
+    """timed_line's Volume: (grid beats, the line's value there), from the note's start past its longest fall."""
+    s0, end = note_span(hz, 0.0, tone)
+    s0, end = float(s0), float(end)
+    fall = setting_most(hz, "release", e["release"]) if "release" in linked else e["release"]
+    span = end - s0 + fall + 2 * TIME_STEP
+    dt = max(TIME_STEP, span / 100000)
+    g = s0 + np.arange(int(span / dt) + 2) * dt
+    sources = {}
+    a, d, r = (setting_at(hz, k, e[k], g, tone, sources) if k in linked else np.full(len(g), e[k])
+               for k in ADSR_KNOBS)
+    s = e["sustain"]
+    top = 1.0 if e["decay"] > 0 or "decay" in linked else s  # (no decay: the rise goes straight to the sustain)
+    ca, cd, cr = stage_sums(a, dt), stage_sums(d, dt), stage_sums(r, dt)
+    ta = stage_end(ca, g, s0) if e["attack"] > 0 or "attack" in linked else s0
+    td = stage_end(cd, g, ta) if ta < math.inf else math.inf
+    pa = np.clip(ca, 0.0, 1.0)
+    pd = np.clip(cd - np.interp(min(ta, g[-1]), g, cd), 0.0, 1.0)
+    held = np.where(g < ta, top * pa ** 2, np.where(g < td, 1.0 + (s - 1.0) * (1.0 - (1.0 - pd) ** 2), s))
+    left = float(np.interp(end, g, held))  # (where it got when the note ends: the fall starts from there)
+    pr = np.clip(cr - np.interp(end, g, cr), 0.0, 1.0)
+    fell = np.clip(s * (1.0 - pr) ** 2 + (left - s) * (1.0 - pr), 0.0, 1.0)
+    return g, np.where(g < end, held, fell)
 
 
 def setting_most(hz, target, base):
@@ -1693,7 +1795,8 @@ class KeyGrid:
         # (the knobs that aren't lines the MOD tab moves, each run's values worked out in made_runs; setting_at)
         self.hz = hz
         self.moved = {link["to"] for link in (hz.get("mod") or {}).get("links", ())
-                      if link["to"] in MOD_SETTINGS and setting_base(hz, link["to"]) is not None}
+                      if link["to"] in MOD_SETTINGS and link["to"] not in ADSR_KNOBS  # (those: in the lines, fx_at)
+                      and setting_base(hz, link["to"]) is not None}
         n = len(self.copies)
         self.middle = np.isin(np.arange(n), ((n - 1) // 2, n // 2))  # (Blend: the middle copies)
         self.runs = [] if self.a_off else self.made_runs(hz, left, ppq, 0)
