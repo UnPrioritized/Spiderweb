@@ -1078,6 +1078,8 @@ def setting_base(hz, target):
     nothing: no Tremolo / Sweep line (Depth, Key track), under 3 voices (Blend), OSC B off or with no waveform
     (Shape), another Mode or the oscillator off (a Mode's knobs), the Voice box off (Glide, Curve); a time knob
     whose line was drawn otherwise."""
+    if target in ADSR_KNOBS and "volume" in (hz.get("bypass") or {}).get("boxes", ()):  # (the Volume box off)
+        return None
     if target in TIMED_KNOBS:  # (a time knob: while its line is as the knobs make it)
         got = TIMED[TIMED_KNOBS[target]][1](hz)
         return got[target] if got else None
@@ -1289,7 +1291,8 @@ def longest_fall(hz):
     """Beats the sound goes on after a note at most (the falls of the lines with a sustain point; a Volume Release
     the MOD tab moves: as long as it can get)."""
     fall = max((hz["loop"][name] - at for name, at in (hz.get("sustain") or {}).items()), default=0.0)
-    if any(link["to"] == "release" for link in (hz.get("mod") or {}).get("links", ())) and knob_adsr(hz):
+    if any(link["to"] == "release" for link in (hz.get("mod") or {}).get("links", ())) and setting_base(hz, "release")\
+            is not None:
         fall = max(fall, setting_most(hz, "release", knob_adsr(hz)["release"]))
     return fall
 
@@ -1354,8 +1357,10 @@ def timed_grid(hz, name, e, linked, tone):
 
 
 def setting_most(hz, target, base):
-    """The highest a MOD_SETTINGS knob set at base can be taken by its links (every source at its fullest)."""
-    reach = sum(abs(link["amount"]) for link in (hz.get("mod") or {}).get("links", ()) if link["to"] == target)
+    """The highest a MOD_SETTINGS knob set at base can be taken by its links (every source at its fullest; a link
+    turning it down only adds nothing, one both ways its upward half)."""
+    reach = sum(abs(link["amount"]) if link.get("bipolar") else max(0.0, link["amount"])
+                for link in (hz.get("mod") or {}).get("links", ()) if link["to"] == target)
     return float(turned_setting(target, base, reach))
 
 
