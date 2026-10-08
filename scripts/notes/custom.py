@@ -2138,8 +2138,9 @@ def custom_notes_groups(sh, ppq):
 
 
 def cycling(sh):
-    """The shape's notes take turns over channels ("Colours"; not pasted notes, they keep their tracks)."""
-    return bool(sh.get("cycle")) and "notes" not in sh
+    """The shape's notes take turns over channels ("Colours"; not pasted notes, they keep their tracks; a merged
+    shape does, across both its shapes, user)."""
+    return bool(sh.get("cycle")) and ("notes" not in sh or bool(sh.get("merge")))
 
 
 def range_steps(sh, notes, ppq):
@@ -2229,12 +2230,17 @@ def cycle_turns(sh, notes, ppq):
     s = notes[:, 0]
     rows = bool(c.get("rows")) and c["by"] != "key" and row_restart_ok(sh)
     back = c.get("rows") == "end"
+    merge = bool(sh.get("merge"))  # (a merged shape, merge.py: each key row = one piece, user)
     if c["by"] == "key":
         k = notes[:, 2] - notes[:, 2].min()
     elif c["by"] == "time":
         a, b = c["every"]
         k = np.floor(s * b / (4 * a * ppq) + 1e-9).astype(np.int64)
-        return (row_restart(notes, k, back, colour_pieces(sh, notes, ppq)) if rows else k) % c["n"]
+        if rows:
+            k = row_restart(notes, k, back, notes[:, 2].astype(np.int64) if merge else colour_pieces(sh, notes, ppq))
+        return k % c["n"]
+    elif merge:  # by step: each key row's notes one after another (its two shapes' gates needn't line up in time)
+        k, rows = row_steps_of(notes, back and rows), False
     elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS and (sh.get("hz") or {}).get("tones"):
         k = hz_steps(sh, notes, ppq)
     elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS and sh.get("range") and not sh.get("hz"):
@@ -2253,7 +2259,21 @@ def cycle_turns(sh, notes, ppq):
 def row_restart_ok(sh):
     """Colours' "Each key row" works on Spam / Outline spam shapes only (user): Fill, Empty and lines have one note
     per piece of a key row, so every note would start again (one colour)."""
+    if sh.get("merge"):  # (a merged shape: its key rows' notes in a row, merge.py)
+        return True
     return sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS and "notes" not in sh
+
+
+def row_steps_of(notes, back=False):
+    """Each note's place along its key row (0 = the row's first note; back: 0 = its last)."""
+    o = np.lexsort((-notes[:, 0] if back else notes[:, 0], notes[:, 2]))
+    key = notes[o, 2]
+    first = np.ones(len(o), bool)
+    first[1:] = key[1:] != key[:-1]
+    at = np.arange(len(o))
+    k = np.empty(len(o), np.int64)
+    k[o] = at - np.maximum.accumulate(np.where(first, at, 0))
+    return k
 
 
 def colour_pieces(sh, notes, ppq):

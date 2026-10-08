@@ -230,7 +230,9 @@ class JoinSplit:
 
         def shape(rows, name):  # (track = each shape's own colours, merge.part_rows)
             notes = np.column_stack([rows[:, 0], rows[:, 1] - rows[:, 0], rows[:, 2], rows[:, 3], rows[:, 4]])
-            return clean_shape({**SHAPE_DEFAULTS, **self.defaults, **notes_shape(notes, self.ppq, name)})
+            new = {**SHAPE_DEFAULTS, **self.defaults, **notes_shape(notes, self.ppq, name)}
+            new.pop("cycle", None)  # (Colours for new shapes: not on it, its shapes keep their own colours)
+            return clean_shape(new)
 
         out, rest = got
         new = [shape(out, tr("join_split.merged"))] + ([shape(rest, tr("join_split.merge_leftovers"))] if len(rest)

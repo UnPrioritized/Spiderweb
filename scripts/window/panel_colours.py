@@ -68,9 +68,10 @@ class ColoursPanel:
             leave_box(self, e, var, lambda left, e=e, what=what: self.on_cycle(what, left and e))
 
     def colour_targets(self):
-        """What the Colours row changes: the selected shapes (not pasted notes: they keep their tracks), or the
-        settings for new shapes."""
-        tgts = [t for t in self.targets() if "notes" not in t]
+        """What the Colours row changes: the selected shapes (not pasted notes: they keep their tracks; a merged
+        shape does, its turns across both its shapes, replacing their own colours), or the settings for new
+        shapes."""
+        tgts = [t for t in self.targets() if "notes" not in t or t.get("merge")]  # (merged: as a whole, user)
         return tgts if self.sels else [self.defaults]
 
     def cycle_kind(self, tgts):

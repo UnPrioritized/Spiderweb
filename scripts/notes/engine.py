@@ -699,11 +699,17 @@ def _notes_tracks(sh, ppq, keys):
             raw = raw[:, :3]
     if own is not None:
         own = own[keep]
+        if cycling(sh):  # (a merged shape with Colours: turns across it all, not its shapes' own colours)
+            own[:, 1] = 0
         if sh.get("own_vel"):  # (the same note in two tracks stays twice: they can go to different channels)
             got = unique_rows(np.column_stack([raw, own]))
+            if cycling(sh) and len(got):
+                return got[:, :4], cycle_turns(sh, got[:, :3], ppq)
             return got[:, :4], got[:, 4]
         got = unique_rows(np.column_stack([raw, own[:, 1]]))
         raw, tracks = got[:, :3], got[:, 3]
+        if cycling(sh) and len(raw):
+            tracks = cycle_turns(sh, raw, ppq)
     elif groups is not None:  # (the same note from two of them stays twice, like two shapes)
         got = unique_rows(np.column_stack([raw, np.asarray(groups, np.int64)[keep]]))
         raw, tracks = got[:, :3], got[:, 3]
