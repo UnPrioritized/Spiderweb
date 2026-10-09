@@ -10,6 +10,7 @@ from tkinter import filedialog, ttk
 
 from files.lang import tr
 from files.mathexpr import calc
+from files.synth import FONT_TYPES
 from window import look
 from window.hz_preview import LIVE_MB, VOICES, WORKERS
 from window.widgets import Scrub, Tooltip, bad, good, remember_place
@@ -149,7 +150,7 @@ class PreviewSettings(tk.Toplevel):
         path = filedialog.askopenfilename(
             parent=self, title=tr("hz.preview_pick_font"),
             initialdir=os.path.dirname(cfg["font"]) if cfg["font"] else None,
-            filetypes=[(tr("hz.preview_fonts"), "*.sf2 *.sf3 *.sfz *.sf2pack"), (tr("hz.preview_all"), "*.*")])
+            filetypes=[(tr("hz.preview_fonts"), FONT_TYPES), (tr("hz.preview_all"), "*.*")])
         if not path:
             return
         cfg["font"] = os.path.normpath(path)

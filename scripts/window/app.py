@@ -57,7 +57,7 @@ from roll.roll_draw import painting_order
 from files import errors, speed
 from files.about import ICONS, VERSION
 from files.playback import BUILTIN, DEFAULT_DEVICE, MidiOut, Player, devices
-from files.synth import Live, Synth, SynthError
+from files.synth import FONT_TYPES, Live, Synth, SynthError
 from files.midi_out import PPQ_WARN
 from files.domino_clip import DOMINO_STARTS
 from files.clipboard import copy_count, get_text, put_text
@@ -150,6 +150,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.stroke_clip, self.clip_kind, self.stroke_pastes = None, None, 0  # a copied stroke (roll_live.py)
         self.playhead = 0.0  # beat of the play line
         self.out = MidiOut(self.make_live)
+        self.font_failed = False  # (make_live: the soundfont couldn't be read)
         self.player = Player(self.out)
         self.play_voices = 1000  # Built-in BASSMIDI's voice limit (user; with the window settings)
         self.play_guard = tk.BooleanVar(self, value=False)  # lowered by itself while overloaded (user: off to start)
@@ -303,8 +304,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                          ("Control-Left", lambda: self.rotate(False)), ("Control-Right", lambda: self.rotate(True))):
             for k in keys.split():
                 self.bind_all(f"<{k}>", self.hotkey(fn))
-        self.midi_device.trace_add("write", lambda *_: (self.stop_play(), self.out.close(), self.sync_builtin(),
-                                                        self.schedule_autosave()))
+        self._device_was = self.midi_device.get()
+        self.midi_device.trace_add("write", lambda *_: self.midi_device_picked())
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.bind("<Configure>", self.remember_geometry, add="+")
         # a click anywhere outside the velocity pane = done with its line / curve
@@ -1700,9 +1701,16 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         except ValueError as e:
             messagebox.showerror(tr("app.spiderweb_2"), str(e))
             return
-        if self.midi_device.get() == BUILTIN and not self.hz_preview["font"] and not self.pick_soundfont():
+        dev = self.midi_device.get()
+        if dev == BUILTIN and not self.hz_preview["font"] and not self.pick_soundfont():
             return
-        err = self.out.open(self.midi_device.get())
+        self.fresh_builtin()
+        err = self.out.open(dev)
+        while err and dev == BUILTIN and self.font_failed:  # (moved, gone or broken: offer another, hunt 2026-10-09)
+            if not messagebox.askyesno(tr("app.spiderweb_2"), err + "\n\n" + tr("synth.pick_other"), parent=self) \
+                    or not self.pick_soundfont():
+                return
+            err = self.out.open(dev)
         if err:
             messagebox.showerror(tr("app.spiderweb_2"), err)
             return
@@ -1776,9 +1784,20 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
 
     # ------------------------------------------------------------ Built-in BASSMIDI (MIDI out)
 
+    def midi_device_picked(self):
+        """MIDI out picked: the old one stops and closes (the same one picked again changes nothing)."""
+        if self.midi_device.get() == self._device_was:
+            return
+        self._device_was = self.midi_device.get()
+        self.stop_play()
+        self.out.close()
+        self.sync_builtin()
+        self.schedule_autosave()
+
     def make_live(self):
         """(MidiOut.open) The built-in synth started for playing, with the soundfont (the Hz bass preview's) and
-        voice limit set now. Raises SynthError."""
+        voice limit set now. Raises SynthError (font_failed = True when the soundfont couldn't be read)."""
+        self.font_failed = False
         font = self.hz_preview["font"]
         if not font:
             raise SynthError("synth.no_font")
@@ -1787,7 +1806,11 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             if self.synth is None:
                 self.synth = Synth()
             if self.synth.font_path != font:
-                self.synth.set_font(font)
+                try:
+                    self.synth.set_font(font)
+                except SynthError:
+                    self.font_failed = True
+                    raise
             return Live(self.synth, self.play_voices, limiter=self.play_limiter.get())
         finally:
             self.busy(None)
@@ -1812,7 +1835,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         path = filedialog.askopenfilename(
             parent=self, title=tr("app.pick_soundfont_title"),
             initialdir=os.path.dirname(cfg["font"]) if cfg["font"] else None,
-            filetypes=[(tr("hz.preview_fonts"), "*.sf2 *.sf3 *.sfz *.sf2pack"), (tr("hz.preview_all"), "*.*")])
+            filetypes=[(tr("hz.preview_fonts"), FONT_TYPES), (tr("hz.preview_all"), "*.*")])
         if not path:
             return False
         cfg["font"] = os.path.normpath(path)
@@ -1827,6 +1850,13 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 if err:
                     hz.preview_failed(err)
         return True
+
+    def fresh_builtin(self):
+        """Built-in BASSMIDI open with another soundfont than the shared one (one picked where nobody told this
+        window, e.g. the Hz window asking when its file is gone): closed, so it opens the new one."""
+        live = self.out.handle
+        if self.out.name == BUILTIN and live and live.font_path != self.hz_preview["font"]:
+            self.out.close()
 
     def soundfont_changed(self):
         """The shared soundfont was changed (here or in the Hz bass preview's settings): Built-in BASSMIDI opens it
@@ -1876,6 +1906,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
 
     def scrub(self, t_from, t_to):
         """Right-drag listening: sound the notes under the mouse (tick t_to) and any it just swept past."""
+        self.fresh_builtin()
         if not self.out.handle:
             err = self.out.open(self.midi_device.get())
             if err:

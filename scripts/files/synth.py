@@ -36,6 +36,10 @@ FADE_MS = 60  # stopping fades out this long (a sudden stop clicks)
 # bass.h / bassmidi.h
 _DEVICE_NONE, _DEVICE_DEFAULT = 0, -1
 _ERROR_ALREADY = 14
+_ERROR_CODEC = 44
+_NO_DEVICE = 0xFFFFFFFF  # (BASS_GetDevice's "none")
+# The soundfont picker's file types (Linux's picker matches capitals exactly: SGM.SF2 was hidden)
+FONT_TYPES = "*.sf2 *.sf3 *.sfz *.sf2pack" + ("" if WINDOWS else " *.SF2 *.SF3 *.SFZ *.SF2PACK")
 _SAMPLE_FLOAT, _STREAM_DECODE, _UNICODE = 0x100, 0x200000, 0x80000000
 _DATA_FLOAT, _POS_BYTE, _STREAMPROC_END = 0x40000000, 0, 0x80000000
 _MIDI_DECAYEND, _MIDI_NOFX, _MIDI_ASYNC = 0x1000, 0x2000, 0x400000
@@ -114,13 +118,15 @@ def _load():
                             ("BASS_ChannelSlideAttribute", [u, u, f, u], i),
                             ("BASS_ChannelGetAttribute", [u, u, ctypes.POINTER(f)], i),
                             ("BASS_ChannelSetDSP", [u, _DSPPROC, p, i], u), ("BASS_ChannelRemoveDSP", [u, u], i),
-                            ("BASS_SetConfig", [u, u], i), ("BASS_GetConfig", [u], u)):
+                            ("BASS_SetConfig", [u, u], i), ("BASS_GetConfig", [u], u),
+                            ("BASS_SetDevice", [u], i), ("BASS_GetDevice", [], u)):
         fn = getattr(bass, name)
         fn.argtypes, fn.restype = args, res
     for name, args, res in (("BASS_MIDI_FontInit", [ctypes.c_wchar_p if WINDOWS else ctypes.c_char_p, u], u), ("BASS_MIDI_FontFree", [u], i),
                             ("BASS_MIDI_StreamCreateEvents", [p, u, u, u], u),
                             ("BASS_MIDI_StreamCreate", [u, u, u], u), ("BASS_MIDI_StreamEvents", [u, u, p, u], u),
-                            ("BASS_MIDI_StreamSetFonts", [u, p, u], i), ("BASS_MIDI_StreamLoadSamples", [u], i)):
+                            ("BASS_MIDI_StreamSetFonts", [u, p, u], i), ("BASS_MIDI_StreamLoadSamples", [u], i),
+                            ("BASS_MIDI_FontLoad", [u, i, i], i)):
         fn = getattr(midi, name)
         fn.argtypes, fn.restype = args, res
     _dlls = bass, midi
@@ -154,15 +160,33 @@ class Synth:
 
     def __init__(self):
         self.bass, self.midi = _load()
-        self.can_play = self._init(_DEVICE_DEFAULT) or self._init(_DEVICE_NONE)
+        self.play_device = None  # (BASS's number for the sound device, once it opened)
+        if not self._init(_DEVICE_DEFAULT):
+            self._init(_DEVICE_NONE)  # (sound can still be made, not played: the device is asked for again)
         self.font, self.font_path = 0, None
         self._lock = threading.Lock()
         self._users = {}  # font -> renders using it now (an old font is only closed when none are left)
         self._old = set()  # fonts replaced, to close once unused
 
     def _init(self, device):
-        return bool(self.bass.BASS_Init(device, RATE, 0, None, None)) or \
+        ok = bool(self.bass.BASS_Init(device, RATE, 0, None, None)) or \
             (self.bass.BASS_ErrorGetCode() == _ERROR_ALREADY and device == _DEVICE_DEFAULT)
+        if ok and device == _DEVICE_DEFAULT:
+            self.play_device = self.bass.BASS_GetDevice()
+        return ok
+
+    @property
+    def can_play(self):
+        """True when there's a sound device to play through, made this thread's for the stream about to be made.
+        Not there at the start (headphones off) = asked again each time (hunt 2026-10-09: it stayed silent, with no
+        message, until a restart)."""
+        if self.play_device is None:
+            self._init(_DEVICE_DEFAULT)
+            if self.play_device is None:
+                return False
+        if self.play_device != _NO_DEVICE:
+            self.bass.BASS_SetDevice(self.play_device)
+        return True
 
     def set_font(self, path):
         """Opens a soundfont (.sf2 / .sfz); the old one is closed. SynthError if it can't be read."""
@@ -171,6 +195,12 @@ class Synth:
                 self.midi.BASS_MIDI_FontInit(os.fsencode(path), 0))
         if not font:
             raise SynthError("synth.bad_font", name=os.path.basename(path), err=self.bass.BASS_ErrorGetCode())
+        # A packed soundfont opens even when its samples' format can't be read (FLAC / WavPack need BASS add-ons
+        # we don't ship): its notes would be silent, so the piano is loaded now to find out
+        if path.lower().endswith(".sf2pack") and not self.midi.BASS_MIDI_FontLoad(font, 0, 0) and \
+                self.bass.BASS_ErrorGetCode() == _ERROR_CODEC:
+            self.midi.BASS_MIDI_FontFree(font)
+            raise SynthError("synth.pack_codec", name=os.path.basename(path))
         with self._lock:
             old, self.font, self.font_path = self.font, font, path
             if old:
@@ -468,7 +498,6 @@ class Live:
     busy and the sound breaks up then (hunt 2026-10-08: editing while playing, 150 ms of 6 s missing)."""
     CPU = 95  # % of the time it may spend making sound before voices are dropped (the driver's default)
     QUEUE = 65536 * 4  # bytes of messages waiting for the sound thread (the driver's default)
-
     def __init__(self, synth, voices, volume=1.0, nofx=False, limiter=False):
         if not synth.font:
             raise SynthError("synth.no_font")
@@ -565,5 +594,14 @@ class Live:
             h, self.handle = self.handle, 0
         if not h:
             return
-        self.synth.bass.BASS_StreamFree(h)
-        self.synth._give(self.font)
+        bass = self.synth.bass
+        if bass.BASS_ChannelIsActive(h) and bass.BASS_ChannelSlideAttribute(h, _ATTRIB_VOL, -1.0, FADE_MS):
+            # (a quick fade out like Player.stop: cut off mid-sound it clicked; the timer keeps this Live, so the
+            # limiter's _proc lives while BASS may still call it)
+            timer = threading.Timer(FADE_MS / 1000 + 0.1, lambda: (bass.BASS_StreamFree(h), self.synth._give(self.font),
+                                                                  self))
+            timer.daemon = True
+            timer.start()
+        else:
+            bass.BASS_StreamFree(h)
+            self.synth._give(self.font)
