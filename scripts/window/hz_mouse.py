@@ -698,6 +698,7 @@ class HzMouse:
                 menu.add_command(label=tr("hz.auto_shared", cents=f"{hz['auto']:g}"),
                                  command=lambda: self.set_auto(first, None))
         self.gate_items(menu, first)
+        self.bend_items(menu, first)
         if pairs and all(self.link(a, b) for a, b in pairs):
             menu.add_command(label=tr("hz.slide_remove"), command=lambda: self.set_slide(False))
         else:
@@ -724,6 +725,7 @@ class HzMouse:
                     menu.add_command(label=tr("hz.auto_shared", cents=f"{hz['auto']:g}"),
                                      command=lambda: self.set_auto(hit[1], None))
             self.gate_items(menu, hit[1])
+            self.bend_items(menu, hit[1])  # (its own bend line: copy, paste, clear; hz_bend.py)
             if self.app.hz_line.get():  # a slide's dots, like two middle-clicks
                 n = self.tones[hit[1]]
                 first = next((m for m in self.tones if self.pending and m["id"] == self.pending[0]), None)

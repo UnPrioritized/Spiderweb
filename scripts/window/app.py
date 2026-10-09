@@ -185,6 +185,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.picture_owners, self.picture_pal = np.zeros(0, bool), None  # (shapes_changed: for the piano roll)
         self.picture_use10 = False  # (shapes_changed: pictures use channel 10 too)
         self.hz_clip = None  # notes copied in it (HzWindow.copy_notes)
+        self.hz_bend_clip = None  # a note's bend line copied in it (HzBend.copy_bend)
         self.hz_copied = None  # the Windows clipboard's copy count at its last copy (a later Domino copy wins Ctrl+V)
         self.hz_pos = ""  # its size and place ("WxH+x+y", remembered in the autosave)
         self.hz_fx_h = 0  # its effects pane's height in pixels, dragged by its top edge (0 = as it starts)

@@ -5,12 +5,14 @@ notes/hz_lines.note_bend), edited right on the note.
 A click on a note (or on its bend line, wherever it has gone) adds a point there and holds it; a point dragged moves
 (between its neighbours; the end points only up / down). Points snap to the grid and to whole keys (Shift = free:
 any tick, any cent). Right-click a point (or Delete while holding it) = it goes; a line back at 0 everywhere = no
-bend. Each change is one undo step. Empty space = a Select box, like the Select tool.
+bend. Each change is one undo step. Empty space = a Select box, like the Select tool. A note's right-click menu
+(any tool) has a Bend submenu: Copy bend, Paste bend onto it / the selected notes, Clear bend.
 A small square sits half way along each piece between two points that differ: dragged up / down it curves the
 piece (like a slide's square: sticks to straight within BEND_STICK px, Shift = free; hollow = straight), stored
 as the first point's third number (hz_lines.bent_part); double-click it = straight again."""
 
 import copy
+import tkinter as tk
 
 import numpy as np
 
@@ -256,6 +258,41 @@ class HzBend:
             return ""
         k = self.tones[d["i"]]["bend"][d["j"]][1]
         return "     " + tr("hz.bend_keys", keys=("+" if k > 0 else "") + fmt(k))
+
+    def bend_items(self, menu, i):
+        """The right-click menu's Bend submenu for note i (and the other selected notes when it's one of them): Copy
+        bend (note i's), Paste bend (the one copied last, in any Hz bass; it stretches to each note), Clear bend."""
+        sub = tk.Menu(menu, tearoff=0)
+        picked = sorted(self.sel) if i in self.sel else [i]
+        own = self.tones[i].get("bend")
+        sub.add_command(label=tr("hz.bend_copy"), command=lambda: self.copy_bend(i),
+                        state="normal" if own else "disabled")
+        sub.add_command(label=tr("hz.bend_paste"), command=lambda: self.set_bends(picked, self.app.hz_bend_clip,
+                                                                                   tr("hz.step_note_bend_paste")),
+                        state="normal" if self.app.hz_bend_clip else "disabled")
+        sub.add_command(label=tr("hz.bend_clear"), command=lambda: self.set_bends(picked, None,
+                                                                                   tr("hz.step_note_bend_clear")),
+                        state="normal" if any(self.tones[j].get("bend") for j in picked) else "disabled")
+        menu.add_cascade(label=tr("hz.bend_menu"), menu=sub)
+        menu.bend_sub = sub  # (kept while the menu shows)
+
+    def copy_bend(self, i):
+        self.app.hz_bend_clip = copy.deepcopy(self.tones[i].get("bend"))
+        self.say(tr("hz.bend_copied"))
+
+    def set_bends(self, picked, pts, name):
+        """The notes numbered `picked` get bend line pts (None: none), one undo step."""
+        before = copy.deepcopy(self.tones)
+        self.sel_before = (before, self.sel_state())
+        for j in picked:
+            n = self.tones[j]
+            if pts:
+                n["bend"] = copy.deepcopy(pts)
+                tidy_bend(n)
+            else:
+                n.pop("bend", None)
+        if self.tones != before:
+            self.commit(name, before)
 
     def draw_bends(self):
         """With the Bend tool: each note's bend line in view (as it bends the note, dashed) and its points."""
