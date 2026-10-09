@@ -293,6 +293,8 @@ class HzMouse:
         a quick drag still moves it). With Select on empty space it pastes the copied notes there (user, like the
         main piano roll). On the note the first click just placed: one more note (every click places one, user).
         Anywhere else, or with Ctrl, it's a press like any other."""
+        if self.draw_double(e):  # (the polyline being drawn ends: hz_draw.py)
+            return
         hit = self.hit(e.x, e.y)
         if (hit and hit[0] in ("note", "tune", "left", "right") and self.tones[hit[1]]["id"] == self.placed
                 and not e.state & CTRL and self.tool.get() == "pencil"):
