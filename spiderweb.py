@@ -75,6 +75,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     hzbass.py        Hz bass: spam gates from tones (placed notes, slides, chords)
     hz_settings.py   Hz bass: every setting's limits and starting value, checking saved settings
     hz_lines.py      Hz bass: effect lines' values over time, repeat shapes, envelopes
+    hz_glide.py      Hz bass: slides, glides and legato chains between notes
     fonts.py         letter outlines from the fonts installed in Windows
     fonts_ft.py      the same on Linux (fontconfig + FreeType)
     funnel.py        funnels: curves, note grid, gates
