@@ -2,11 +2,29 @@
 whole pixels the tiles are just put further along and only the strips coming into view are sent: copying one
 picture onto itself took ~13 ms of every scroll step at the user's size, placing the tiles ~1 ms."""
 
+import struct
+import tkinter as tk
+import zlib
+
 import numpy as np
 
 from files.speed import Photo
 
 TILE = 1024  # px each side, about (the picture's size split evenly)
+
+
+def see_through(master, rgba):
+    """A Tk picture of rgba (rows x columns x 4, uint8; alpha 0 = see-through, 255 = solid), sent as PNG bytes
+    (the only way into Tk with see-through pixels; plain Tk reads PNG)."""
+    h, w = rgba.shape[:2]
+    rows = np.zeros((h, w * 4 + 1), np.uint8)  # (each row starts with its filter byte, 0 = none)
+    rows[:, 1:] = rgba.reshape(h, -1)
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    data = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows.tobytes(), 1)) + chunk(b"IEND", b""))
+    return tk.PhotoImage(master=master, data=data, format="png")
 
 
 class Tiles:

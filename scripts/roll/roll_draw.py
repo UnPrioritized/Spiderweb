@@ -17,7 +17,7 @@ from notes.paths import KEYS
 from notes.sliced import moved_by, moved_mark
 from roll.roll_shared import (BLACK, DRAFT_COLOR, PIANO_88, PREVIEW_LIMIT, SELECTED_COLOR, SLOT_COLORS,
                               draw_boxes, fade, note_name)
-from roll.tiles import Tiles
+from roll.tiles import Tiles, see_through
 from window import look
 
 HANDLE_COLOR = look.HANDLE
@@ -355,10 +355,20 @@ class RollDrawing:
         self._redraw_pending = False
         for bar in self.bars:
             bar.refresh()
-        self.delete("all")
+        # the grid, keyboard + ruler and play line stay when nothing they show changed (e.g. dragging a shape): Tk
+        # puts back on screen only the part around what's made again, not the whole piano roll (measured on the
+        # user's screen: ~43 ms a mouse move for the whole)
+        self.delete("!(grid||frame||playhead)")
         w, h = self.winfo_width(), self.winfo_height()
         if self.sx is None or w < 50:
+            self.delete("all")
+            self._grid_key = self._frame_key = None
             return
+        frame_key = (w, h, self.kb_w, self.ruler_h, self.sx, self.sy, self.view_t, self.view_top, self.scale,
+                     self.app.keys, self.app.beats)
+        if frame_key != self._frame_key:
+            self.delete("frame", "playhead")
+            self._frame_key = None
         app = self.app
         rows, cols = self.grid_parts(w, h)
         # the picture below shows exactly this: when nothing here changed (e.g. dragging a shape whose notes catch up
@@ -402,11 +412,14 @@ class RollDrawing:
                     self._note_pic = None if drafted else pic
                 else:
                     self._tiles = self._note_pic = self._img = None
-                    self.draw_grid(w, h, rows, cols)
+                    self.keep_grid(w, h, rows, cols)
                     colors = note_tables(app.picture_pal)[0]
                     for x0, y0, x1, y1, color in zip(*(v.tolist() for v in rects or ())):
                         self.create_rectangle(x0, y0, x1, y1, fill=colors[color][0], outline=colors[color][1])
             self.paint_time = time.perf_counter() - started
+        if self._tiles is not None and self._grid_key:  # (the grid is in the notes' picture)
+            self.delete("grid")
+            self._grid_key = None
         if carried is None:  # (while shapes are dragged their notes are stamped along: no ring)
             self.draw_ring(w, h)
             self.draw_edge_preview(w, h)
@@ -446,11 +459,27 @@ class RollDrawing:
         self.draw_above_marks()
         self.draw_select_box()
         self.draw_slice()
-        self.draw_keyboard(h)
-        self.draw_ruler(w)
-        self.draw_playhead()
+        if self._frame_key is None:
+            self.draw_keyboard(h)
+            self.draw_ruler(w)
+            self._frame_key = frame_key
+            self.draw_playhead()
+        else:  # (what was made now goes under the kept keyboard + ruler, in its own order)
+            self.addtag_withtag("made", "!(grid||frame||playhead)")
+            self.tag_lower("made", "frame")
+            self.dtag("made")
+            self.draw_playhead(keep=True)
         if self.typing:
             self.show_caret()
+
+    def keep_grid(self, w, h, rows, cols):
+        """The grid as canvas items: the ones already there stay when it's the same grid (redraw)."""
+        grid_key = (w, h, self.kb_w, self.ruler_h, tuple(rows), tuple(cols))
+        if grid_key != self._grid_key:
+            self.delete("grid")
+            self.draw_grid(w, h, rows, cols)
+            self.tag_lower("grid")  # (under the keyboard + ruler kept above)
+            self._grid_key = grid_key
 
     def draw_picture_label(self, sh):
         """A selected placed picture: its name, keys and colours above its box's top left corner (only while
@@ -705,9 +734,13 @@ class RollDrawing:
         for x, y in ((xa, ya), (xb, yb)):
             self.create_oval(x - r, y - r, x + r, y + r, fill=look.CUT, outline="", tags="slice")
 
-    def draw_playhead(self):
-        self.delete("playhead")
+    def draw_playhead(self, keep=False):
+        """keep: left as it is when it's already there (redraw with the keyboard + ruler kept)."""
         x = round(self.t2x(self.app.playhead))
+        if keep and self._playhead_x == x and self.find_withtag("playhead"):
+            return
+        self.delete("playhead")
+        self._playhead_x = x
         w, h = self.winfo_width(), self.winfo_height()
         if self.kb_w <= x <= w:
             s, top = self.scale, self.ruler_h
@@ -796,11 +829,11 @@ class RollDrawing:
         x0, top = self.kb_w, self.ruler_h
         for y0, y1, color in rows:
             if y1 is None:
-                self.create_line(x0, y0, w, y0, fill=color)
+                self.create_line(x0, y0, w, y0, fill=color, tags="grid")
             else:
-                self.create_rectangle(x0, y0, w, y1, fill=color, outline="")
+                self.create_rectangle(x0, y0, w, y1, fill=color, outline="", tags="grid")
         for x, color in cols:
-            self.create_line(x, top, x, h, fill=color)
+            self.create_line(x, top, x, h, fill=color, tags="grid")
 
     def start_order(self):
         """The rendered notes' row numbers by start (stable: the same start keeps their order), kept until the
@@ -1040,29 +1073,50 @@ class RollDrawing:
         return round((b - b0) * self.sx), round((p0 - p) * self.sy)
 
     def paint_carried(self, w, h, rows, cols, fixed, dx, dy):
-        """The picture while shapes are dragged with lots of notes about: the other shapes' notes painted once, and
-        the dragged shapes' notes as they were, put over them (dx, dy) pixels further every time. (What they really
-        turn into at the new place, overlaps and all, is worked out when the mouse is let go.)"""
+        """While shapes are dragged and their notes are left for later (slow to make): the other shapes' notes shown
+        as usual, made once, and the dragged shapes' notes as they were, as ONE see-through picture slid (dx, dy)
+        pixels further every time (Tk only moves it: painting the notes again at every move took 25-35 ms on the
+        user's screen). What they really turn into at the new place, overlaps and all, is worked out when the mouse
+        is let go."""
         app = self.app
         kb, top = int(self.kb_w), int(self.ruler_h)
         iw, ih = w - kb, h - top
-        key = (fixed, self.view_t, self.view_top)
+        key = (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols))
         c = self._carry
         if c is None or c["rendered"] is not app.rendered or c["key"] != key:
-            rects = self.note_rects(w, h, only=False)
-            c = self._carry = {"rendered": app.rendered, "key": key, "area": None,
-                               "base": self.paint_region(rows, cols, rects, (kb, top, w, h), ring=False)}
-        a = c["area"]  # the dragged notes' pixels are kept for the part of the screen they come from, and around it
+            c = self._carry = {"rendered": app.rendered, "key": key, "area": None, "base": None}
+            if len(app.rendered) > w * h // 2000:  # (lots of notes: a picture, as redraw paints them)
+                c["base"] = self.paint_region(rows, cols, self.note_rects(w, h, only=False), (kb, top, w, h),
+                                              ring=False)
+        if c["base"] is not None:
+            if self._shown is c["base"] and self._tiles is not None:
+                self._tiles.place(self, kb, top)  # (nothing new to send)
+            else:
+                self._img = c["base"]
+                self.show_image()
+        else:
+            self._tiles = self._img = None
+            self.keep_grid(w, h, rows, cols)
+            colors = note_tables(app.picture_pal)[0]
+            for x0, y0, x1, y1, color in zip(*(v.tolist() for v in self.note_rects(w, h, only=False))):
+                self.create_rectangle(x0, y0, x1, y1, fill=colors[color][0], outline=colors[color][1])
+        a = c["area"]  # the dragged notes' picture holds the part of the screen they come from, and around it
         if a is None or a[0] > kb - dx or a[1] > top - dy or a[2] < w - dx or a[3] < h - dy:
             a = c["area"] = (kb - dx - iw // 2, top - dy - ih // 2, w - dx + iw // 2, h - dy + ih // 2)
-            at, c["rgb"] = self.note_pixels(self.note_rects(w, h, area=a, only=True), a)
-            c["y"], c["x"] = np.divmod(at, a[2] - a[0])
-        x, y = c["x"] + (a[0] - kb + dx), c["y"] + (a[1] - top + dy)
-        on = (x >= 0) & (x < iw) & (y >= 0) & (y < ih)
-        img = c["base"].copy()
-        img[y[on], x[on]] = c["rgb"][on]
-        self._img = img
-        self.show_image()
+            c["photo"] = None
+            rects = self.note_rects(w, h, area=a, only=True)
+            if len(rects[0]):
+                x0, y0 = max(int(rects[0].min()), a[0]), max(int(rects[1].min()), a[1])
+                x1, y1 = min(int(rects[2].max()) + 1, a[2]), min(int(rects[3].max()) + 1, a[3])
+                if x1 > x0 and y1 > y0:
+                    at, rgb = self.note_pixels(rects, (x0, y0, x1, y1))
+                    px = np.zeros(((y1 - y0) * (x1 - x0), 4), np.uint8)
+                    px[at, :3] = rgb
+                    px[at, 3] = 255
+                    c["photo"] = (see_through(self, px.reshape(y1 - y0, x1 - x0, 4)), x0, y0)
+        if c["photo"]:
+            photo, x0, y0 = c["photo"]
+            self.create_image(x0 + dx, y0 + dy, image=photo, anchor="nw")
 
     def paint_drafted(self, w, h, rows, cols):
         """The picture while a shape is drawn / placed over lots of notes: the other notes painted once, the new
@@ -1352,7 +1406,7 @@ class RollDrawing:
     def draw_keyboard(self, h):
         """Piano keys follow the pitch zoom: black keys on their rows, white-key edges between B/C and E/F."""
         kb, top = self.kb_w, self.ruler_h
-        self.create_rectangle(0, top, kb, h, fill=look.KEY_WHITE, outline="")
+        self.create_rectangle(0, top, kb, h, fill=look.KEY_WHITE, outline="", tags="frame")
         p_lo, p_hi = self.visible_pitches(h)
         font_size = max(7, min(11, int(self.sy * 0.6 / self.scale)))
         # faintly greyed: outside a real 88-key piano; with 256 keys, above the standard 128 instead
@@ -1361,23 +1415,24 @@ class RollDrawing:
             y0, y1 = self.row_y(p)
             n = p % 12
             if p not in usual:
-                self.create_rectangle(0, y0, kb, y1, fill=look.KEY_OUTSIDE, outline="")
+                self.create_rectangle(0, y0, kb, y1, fill=look.KEY_OUTSIDE, outline="", tags="frame")
             if n in BLACK:
-                self.create_rectangle(0, y0, kb * 0.6, y1, fill=look.KEY_BLACK if p in usual else look.KEY_BLACK_OUTSIDE, outline="")
+                self.create_rectangle(0, y0, kb * 0.6, y1, fill=look.KEY_BLACK if p in usual else look.KEY_BLACK_OUTSIDE,
+                                      outline="", tags="frame")
             if n in (0, 5):  # bottom edge of C and F = white key border
-                self.create_line(0, y1, kb, y1, fill=look.KEY_EDGE_C if n == 0 else look.KEY_EDGE_F)
+                self.create_line(0, y1, kb, y1, fill=look.KEY_EDGE_C if n == 0 else look.KEY_EDGE_F, tags="frame")
             label = note_name(p) if n == 0 and self.sy >= 6 else (
                 note_name(p) if n not in BLACK and self.sy >= 16 else None)
             if label:
                 self.create_text(kb - 3, (y0 + y1) / 2, text=label, anchor="e", fill=look.KEY_TEXT,
-                                 font=look.font(font_size, "bold" if n == 0 else "normal"))
-        self.create_line(kb, top, kb, h, fill=look.ROLL_EDGE)
+                                 font=look.font(font_size, "bold" if n == 0 else "normal"), tags="frame")
+        self.create_line(kb, top, kb, h, fill=look.ROLL_EDGE, tags="frame")
 
     def draw_ruler(self, w):
         kb, top = self.kb_w, self.ruler_h
         beats = self.app.beats
-        self.create_rectangle(0, 0, w, top, fill=look.RULER_BG, outline="")
-        self.create_line(0, top, w, top, fill=look.ROLL_EDGE)
+        self.create_rectangle(0, 0, w, top, fill=look.RULER_BG, outline="", tags="frame")
+        self.create_line(0, top, w, top, fill=look.ROLL_EDGE, tags="frame")
         step = beats
         while step * self.sx < 40:
             step *= 2
@@ -1385,8 +1440,8 @@ class RollDrawing:
         while b <= self.x2t(w):
             x = self.t2x(b)
             if x >= kb:
-                self.create_line(x, top - 6, x, top, fill=look.RULER_TICK)
+                self.create_line(x, top - 6, x, top, fill=look.RULER_TICK, tags="frame")
                 self.create_text(x + 3, top / 2, text=str(int(b // beats) + 1), anchor="w", fill=look.RULER_TEXT,
-                                 font=look.font(8))
+                                 font=look.font(8), tags="frame")
             b += step
-        self.create_rectangle(0, 0, kb, top, fill=look.RULER_BG, outline="")
+        self.create_rectangle(0, 0, kb, top, fill=look.RULER_BG, outline="", tags="frame")

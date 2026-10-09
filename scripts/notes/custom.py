@@ -1,6 +1,7 @@
 """Custom shapes: drawings from the drawer placed on the roll, as outlines or filled with notes."""
 
 import base64
+import functools
 import json
 import math
 import zlib
@@ -208,14 +209,20 @@ def takes_formula(st):
     return st["kind"] in ("curve", "arc") or st["kind"] == "poly" and not st.get("free")
 
 
+@functools.lru_cache(maxsize=512)
+def ellipse_points(u0, v0, u1, v1):
+    """An ellipse stroke's points (stroke_points), kept: a custom shape's lines are worked out at every mouse move
+    while it's dragged."""
+    cu, cv, ru, rv = (u0 + u1) / 2, (v0 + v1) / 2, (u1 - u0) / 2, (v1 - v0) / 2
+    pts = [(cu - ru * math.cos(a), cv + rv * math.sin(a))
+           for a in (2 * math.pi * i / ELLIPSE_STEPS for i in range(ELLIPSE_STEPS))]
+    return tuple(pts + [pts[0]])
+
+
 def stroke_points(st):
     """A stroke as (u, v) points. An ellipse starts at its leftmost point and ends exactly where it started."""
     if st["kind"] == "ellipse":
-        u0, v0, u1, v1 = st["box"]
-        cu, cv, ru, rv = (u0 + u1) / 2, (v0 + v1) / 2, (u1 - u0) / 2, (v1 - v0) / 2
-        pts = [(cu - ru * math.cos(a), cv + rv * math.sin(a))
-               for a in (2 * math.pi * i / ELLIPSE_STEPS for i in range(ELLIPSE_STEPS))]
-        return pts + [pts[0]]
+        return list(ellipse_points(*st["box"]))
     if st["kind"] == "curve":
         return formed_path(sample([tuple(p) for p in st["pts"]], CURVE_STEPS), st)
     if st["kind"] == "arc":
