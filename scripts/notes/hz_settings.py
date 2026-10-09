@@ -757,7 +757,7 @@ def clean_hz(hz):
     if tones:
         out["tones"] = tones
     loud = clean_line(hz.get("loud")) if isinstance(hz.get("loud"), list) else []
-    if loud:
+    if any(p[1] != 1.0 for p in loud):  # (at 100 % all along: it changes nothing, left out)
         out["loud"] = loud
     layers = clean_layers(hz, out)
     if layers:

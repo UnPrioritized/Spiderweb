@@ -146,7 +146,7 @@ class KeyGrid:
         self.loud = (self.shaped or any(name in (hz.get("fx") or ()) for name in VEL_FX)
                      or bool(self.echo or self.reverb or self.comp) or bool((self.gains != 1.0).any())
                      or "blend" in self.moved or any(np.any(r["level"] != 1.0) for r in self.runs)
-                     or any(np.any(r["own"] > 0) or np.any(r["layer"] != 1.0) for r in self.runs))
+                     or any(np.any(r["own"] > 0) for r in self.runs) or bool(hz.get("loud")))
         self.pack()
         self.rack_turns = {name: self.added_up(name) for name in ("chorus_rate", "flanger_rate") if name in self.moved}
         self.starting = self.starting_points() if self.random or "random" in self.moved else None
@@ -218,6 +218,11 @@ class KeyGrid:
             run["osc"], run["level"] = osc, level * n0.get("level", 1.0)
             own = note_vel(n0, beat)  # (the note's own velocity from its loudness line, of 127; 0 = the Hz bass's)
             run["own"] = own / 127.0 if own is not None else 0.0
+            n1 = whose[1]
+            if n1 is not None and (n0.get("vel") or n1.get("vel")):  # (a slide: from the note slid to's start on,
+                into = beat >= n1["t"] - 1e-9  # its line, as a synth reads the velocity at its key press)
+                got = note_vel(n1, beat)
+                run["own"] = np.where(into, got / 127.0 if got is not None else 0.0, run["own"])
             run["layer"] = line_at(hz["loud"], beat) if hz.get("loud") else 1.0  # (the layer's loudness line)
             runs.append(run)
         return runs
@@ -587,6 +592,8 @@ class KeyGrid:
             if self.comp:  # (too quiet even after the compressor: left out, decided after it)
                 qu = qu | (mixed * np.concatenate(all_gain) ** 2 < SOFT)
             pe = np.tile(per[keep], (sets, 1))
+            if self.hz.get("loud"):  # (the layer's line where each note really starts: echoes and the reverb's
+                pe[:, 1] = line_at(self.hz["loud"], st / self.ppq - self.left)  # tail too, like a fader)
             fa = fa * np.where(pe[:, 0] > 0, pe[:, 0], 1.0) * pe[:, 1]
             qu = qu | (pe[:, 1] <= 0)  # (the layer's line at 0: silence)
             if len(oscs) > 1 and qu.any():  # (both oscillators: one too quiet while the other sounds never cuts it)

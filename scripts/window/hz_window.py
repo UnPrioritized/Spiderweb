@@ -268,13 +268,15 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         for k in ("<Control-c>", "<Control-C>"):  # (effect points selected: they're copied; else the notes)
             c.bind(k, lambda e: self.copy_notes() or "break")
         for k in ("<Control-v>", "<Control-V>"):  # (what was copied last: effect points, or notes at the play line;
-            c.bind(k, lambda e: (self.drag or self.fx.paste_points()  # nothing while the mouse is held)
+            c.bind(k, lambda e: (self.drag or self.loudness.held() or self.fx.paste_points()  # nothing while
+                                 # the mouse is held)
                                  or self.paste_notes(self.play_line_beat()), "break")[1])
         c.bind("<Escape>", lambda e: self.on_escape())
         c.bind("<Return>", lambda e: self.loudness.confirm())  # (the last loudness line drawn: done)
         self.bind("<space>", self.on_space)  # (anywhere in the window: the buttons don't take the keyboard)
         for k in ("<Control-a>", "<Control-A>"):
-            c.bind(k, lambda e: (self.drag or self.select(range(len(self.tones))), "break")[1])
+            c.bind(k, lambda e: (self.drag or self.loudness.held() or self.select(range(len(self.tones))),
+                                 "break")[1])
         for k, tool in (("p", "pencil"), ("P", "pencil"), ("v", "select"), ("V", "select")):
             c.bind(f"<KeyPress-{k}>", lambda e, tool=tool: self.tool.set(tool) or self.on_motion(e) or "break")
         self.bind("<Configure>", self.remember)
@@ -321,7 +323,9 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         if tones != self.tones:
             self.tones, self.sel = tones, set()
             self.drop_drag()
-        if sh is not None or self.fx_of is not None:  # (no Hz bass yet: the lines picked stay for the first note)
+        waiting = sh is not None and not sh.get("hz") and self.fx_of == ("waiting", id(sh))  # (commit)
+        if (sh is not None or self.fx_of is not None) and not waiting:  # (no Hz bass yet: the lines picked stay
+            # for the first note)
             self.set_fx(hz)
             self.loud = clean_line(hz.get("loud"))
             self.fx_of = id(sh) if sh is not None else None

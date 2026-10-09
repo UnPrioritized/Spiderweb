@@ -15,6 +15,8 @@ import json
 import tkinter as tk
 from tkinter import ttk
 
+import numpy as np
+
 from files.lang import tr
 from notes.engine import cached_path
 from notes.envelope import env_at, env_values, paint_env, tidy_env, velocity_env
@@ -116,24 +118,39 @@ class LoudPane:
         bot = self.bottom()
         return max(self.lowest(), min(TOP, (bot - y) / max(1, bot - self.pad) * TOP))
 
-    def base_vel(self, n):
-        """The velocity a note without its own line gets: the Hz bass's (side panel) where it starts."""
+    def base_line(self, n):
+        """The velocity a note without its own line gets, as a line over it (u 0..1): the Hz bass's (side panel)
+        over the note's time, as the notes made get it (it may change along a long note)."""
         sh = self.win.target()
         if sh is None:
-            return float(self.app.defaults.get("vel0", 100))
+            v = float(self.app.defaults.get("vel0", 100))
+            return [[0.0, v], [1.0, v]]
         bs = [b for b, _ in cached_path(sh)]
         lo, hi = min(bs), max(bs)
-        u = (left_edge(sh) + n["t"] - lo) / (hi - lo) if hi > lo else 0.0
-        return float(env_values(velocity_env(sh), [min(1.0, max(0.0, u))])[0])
+        env = velocity_env(sh)
+        if hi <= lo:
+            v = float(env_values(env, [0.0])[0])
+            return [[0.0, v], [1.0, v]]
+        start = left_edge(sh) + n["t"]
+        ua, ub = ((b - lo) / (hi - lo) for b in (start, start + n["len"]))
+        va, vb = env_values(env, np.clip([ua, ub], 0.0, 1.0))
+        span = max(ub - ua, 1e-12)
+        return ([[0.0, float(va)]] + [[(u - ua) / span, float(v)] for u, v in env if ua < u < ub]
+                + [[1.0, float(vb)]])
 
-    def targets(self, tones, lo, hi):
-        """The notes a line from beat lo to hi changes: those it reaches, only the selected ones when some are."""
+    def targets(self, tones, lo, hi, ids):
+        """The notes a line from beat lo to hi changes: those it reaches among ids (the notes it was drawn for)."""
+        return [i for i, n in enumerate(tones) if n.get("id") in ids and n["t"] < hi and n["t"] + n["len"] > lo]
+
+    def drawn_for(self):
+        """The ids of the notes a line drawn now is for: the selected ones when some are, else all."""
         sel = self.win.sel
-        return [i for i, n in enumerate(tones) if (not sel or i in sel) and n["t"] < hi and n["t"] + n["len"] > lo]
+        return {n.get("id") for i, n in enumerate(self.win.tones) if not sel or i in sel}
 
-    def applied(self, drawn, tones, loud):
+    def applied(self, drawn, tones, loud, ids):
         """(tones, layer line) with the line drawn (beat, value in velocity steps) put on: the notes it reaches
-        take their part of it, or the layer's line (0..1) takes it. Copies; tones / loud stay as they are."""
+        (among ids) take their part of it, or the layer's line (0..1) takes it. Copies; tones / loud stay as
+        they are."""
         lo, hi = drawn[0][0], drawn[-1][0]
         if self.which.get() == "layer":
             pts = [[b, v / TOP] for b, v in drawn]
@@ -141,13 +158,20 @@ class LoudPane:
             if line[0][0] < 0:  # (before the left edge: none; starts with its value there)
                 first = env_at(line, [p[0] for p in line], 0.0)
                 line = [[0.0, first]] + [p for p in line if p[0] > 0]
-            return tones, clean_line(tidy_line(line))
+            line = clean_line(tidy_line(line))
+            return tones, line if any(p[1] != 1.0 for p in line) else []  # (100 % all along: no line)
         tones = copy.deepcopy(tones)
-        for i in self.targets(tones, lo, hi):
+        for i in self.targets(tones, lo, hi, ids):
             n = tones[i]
             span = max(n["len"], 1e-12)
-            base = n.get("vel") or [[0.0, self.base_vel(n)], [1.0, self.base_vel(n)]]
-            env = tidy_env(paint_env(base, [[(b - n["t"]) / span, v] for b, v in drawn]))
+            pts = [[(b - n["t"]) / span, v] for b, v in drawn]
+            # (only its own part: the line's value where the note starts / ends, and its points in between)
+            ua, ub = max(0.0, pts[0][0]), min(1.0, pts[-1][0])
+            va, vb = env_values(pts, [ua, ub])
+            pts = [[ua, float(va)]] + [p for p in pts if ua < p[0] < ub] + [[ub, float(vb)]]
+            env = paint_env(n.get("vel") or self.base_line(n), pts)
+            ends = env_values(env, [0.0, 1.0])  # (nothing kept outside the note)
+            env = tidy_env([[0.0, float(ends[0])]] + [p for p in env if 0 < p[0] < 1] + [[1.0, float(ends[1])]])
             n["vel"] = [[round(u, 9), round(min(TOP, max(1.0, v)), 3)] for u, v in env]
         return tones, loud
 
@@ -156,7 +180,7 @@ class LoudPane:
         win, ed = self.win, self.edit
         if ed and ed.get("drawn"):
             base = ed["base"]
-            return self.applied(ed["drawn"], base[0], base[1])
+            return self.applied(ed["drawn"], base[0], base[1], ed["ids"])
         return win.tones, win.loud
 
     def colours(self):
@@ -184,12 +208,9 @@ class LoudPane:
             if x1 < kb or x0 > w:
                 continue
             pts = n.get("vel")
-            if pts:
-                vs = env_values(pts, [0.0, 1.0])
-                xy = ([(x0, vs[0])] + [(x0 + u * (x1 - x0), v) for u, v in pts if 0 < u < 1] + [(x1, vs[1])])
-            else:
-                v = self.base_vel(n)
-                xy = [(x0, v), (x1, v)]
+            line = pts or self.base_line(n)
+            vs = env_values(line, [0.0, 1.0])
+            xy = ([(x0, vs[0])] + [(x0 + u * (x1 - x0), v) for u, v in line if 0 < u < 1] + [(x1, vs[1])])
             c.create_line(x0, self.y_of(0), x0, self.y_of(xy[0][1]), fill=colour, width=lw)
             c.create_line(*[q for x, v in xy for q in (x, self.y_of(v))], fill=colour, width=2 * lw if pts else lw,
                           dash=() if pts else (3, 3))
@@ -246,9 +267,15 @@ class LoudPane:
             b = round(b / sb) * sb
         return [b, self.value_at(e.y)]
 
+    def held(self):
+        """A line being drawn (or a handle moved) with the mouse: the window's keys and menus wait."""
+        return bool(self.edit) and self.edit["kind"] != "size"
+
     def state_now(self):
-        """What the notes' and the layer's lines are now (to see whether they changed since a line was drawn)."""
-        return json.dumps([self.win.tones, self.win.loud], sort_keys=True)
+        """The notes, the layer's line and the whole Hz bass now: any change since a line was drawn (Pitch, an
+        effect, a knob...) ends its handles, so a bend never joins another change's undo step."""
+        hz = (self.win.target() or {}).get("hz")
+        return json.dumps([self.win.tones, self.win.loud, hz], sort_keys=True, default=str)
 
     def live_curve(self):
         """The last line / curve drawn, if nothing changed since (then its handles can still change it)."""
@@ -282,13 +309,13 @@ class LoudPane:
         which = self.near_handle(cv, e) if cv else None
         if which:
             self.edit = {"kind": cv["kind"], "handle": which, "curve": (cv["a"], cv["b"], cv["c"]),
-                         "base": cv["before"], "drawn": None}
+                         "base": cv["before"], "drawn": None, "ids": cv["ids"]}
             return
         self.curve = None
         pt = self.spot(e)
         tool = self.tool.get()
         self.edit = {"kind": tool, "start": pt, "last": pt, "drawn": None, "trail": [pt],
-                     "base": (copy.deepcopy(win.tones), copy.deepcopy(win.loud))}
+                     "base": (copy.deepcopy(win.tones), copy.deepcopy(win.loud)), "ids": self.drawn_for()}
         if tool == "pencil":
             self.extend(pt)
         else:
@@ -362,7 +389,7 @@ class LoudPane:
         if not ed.get("moved"):
             return self.redraw()  # (a click: no line)
         before = ed["base"]
-        tones, loud = self.applied(ed["drawn"], *before)
+        tones, loud = self.applied(ed["drawn"], *before, ed["ids"])
         if json.dumps([tones, loud], sort_keys=True) == json.dumps(list(before), sort_keys=True):
             self.curve = None
             return self.redraw()
@@ -372,7 +399,7 @@ class LoudPane:
         if ed.get("curve") and ed["curve"][0][0] != ed["curve"][1][0]:
             a, b, c = ed["curve"]
             self.curve = {"a": a, "b": b, "c": c, "kind": ed["kind"], "which": self.which.get(), "before": before,
-                          "made": self.state_now()}
+                          "ids": ed["ids"], "made": self.state_now()}  # (bent later: the same notes, user)
         self.redraw()
 
     def drop(self):
@@ -410,7 +437,10 @@ class LoudPane:
                  else tr("hz.loud_vel", v=round(v)))
 
     def on_menu(self, e):
-        """Right-click: done with the last line's handles; a menu to take the lines drawn away."""
+        """Right-click: done with the last line's handles; a menu to take the lines drawn away. Nothing while a line
+        is held."""
+        if self.held():
+            return
         self.confirm()
         win = self.win
         menu = tk.Menu(self.canvas, tearoff=0)

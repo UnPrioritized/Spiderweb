@@ -427,6 +427,9 @@ class HzGates:
                 app.add_shape(new)
             finally:
                 self.own_step = False
+        elif not sh.get("hz") and not tones:  # (a spam shape not a Hz bass yet, no notes: lines drawn wait here for
+            self.fx_of = ("waiting", id(sh))  # its first note, nothing changes, no step; sync keeps them)
+            return self.redraw()
         else:
             hz = dict(sh.get("hz") or self.new_hz(bpm))  # (none yet: the window's Gates and Pitch boxes)
             others = len(all_tones(hz)) > len(hz.get("tones") or ())  # (other layers' notes: the Hz bass stays)

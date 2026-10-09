@@ -519,7 +519,7 @@ class HzMouse:
         line): its tune, typed. On empty space the menu waits for the double click time first (a double right
         click switches the tool), and there's none when there's nothing to pick. None while the left button is held
         (user: the menu took its let-go, and the window and the piano roll no longer agreed)."""
-        if self.drag:
+        if self.drag or self.loudness.held():
             return
         hit = self.hit(e.x, e.y)
         kept = self.kept_box() if not (hit and hit[0] in ("in", "out")) else None
@@ -635,6 +635,8 @@ class HzMouse:
         effects pane pressed last its highlighted effect; else the selected notes."""
         if self.drag:
             self.delete_dragged()
+        elif self.loudness.held():  # (a loudness line held: keys wait, like the main velocity pane)
+            pass
         elif not self.fx.delete_key():
             self.delete_selected()
         return "break"
