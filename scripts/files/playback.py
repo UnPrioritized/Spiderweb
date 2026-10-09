@@ -58,10 +58,13 @@ def _kdmapi_path():
     if WINDOWS:
         path = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "OmniMIDI.dll")
         return path if os.path.isfile(path) else None
-    import ctypes.util
-    return ctypes.util.find_library("OmniMIDI")
+    if not _found:  # (the search starts other programs, ~0.1 s: done once, not at every dropdown opening)
+        import ctypes.util
+        _found.append(ctypes.util.find_library("OmniMIDI"))
+    return _found[0]
 
 
+_found = []  # (Linux: [the search's answer] once searched)
 _kdmapi = None  # (OmniMIDI's library once loaded: loaded at the first open, after our BASS, see MidiOut.open)
 
 
