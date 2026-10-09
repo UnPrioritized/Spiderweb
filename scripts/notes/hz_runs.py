@@ -10,7 +10,7 @@ import numpy as np
 
 from notes.hz_settings import ADSR_KNOBS, GLIDE_CURVE, MOD_BOXES, MOD_NEED_LINE, NEUTRAL, PITCH, hz_of
 from notes.hz_lines import adsr_line
-from notes.hz_glide import cached, chains, glide, glide_left, legato_links, links, pitch
+from notes.hz_glide import cached, chains, glide, glide_left, legato_links, links, pitch, slide_part
 from notes.hz_modulate import fx_at, longest_fall, plain_base, rack_tail, setting_at
 from notes.hz_arp import arpeggiated
 
@@ -139,6 +139,12 @@ def glide_of(hz, n, key):
     return float(setting_at(hz, key, base, np.array([n["t"]]), n)[0])
 
 
+def slide_knob(hz, a):
+    """The Glide curve an untouched slide leaving tone a follows (hz_glide.slide_part): the Voice box's Curve while
+    Glide is on for a, else None (straight)."""
+    return glide_of(hz, a, "curve") if glide_of(hz, a, "glide") > 0 else None
+
+
 def wave(hz, ppq, key, limit=None, whole=None):
     """The gate, in ticks, of one wave of key's tone (hz = the shape's settings: cents, bpm, fixed). limit = Auto
     gates' threshold in cents for a tone held still: whole ticks when that's at most this far off. whole = True /
@@ -236,6 +242,7 @@ def tone_runs(hz, left, ppq):
         x0, x1, k0, k1 = glide(a, b, link)
         if x1 - x0 < 1e-12:
             continue
+        knob = slide_knob(hz, a)
         s0, e0 = (left + x0) * ppq, (left + a["t"] + a["len"]) * ppq
         s1, e1 = (left + b["t"]) * ppq, (left + x1) * ppq
         t = s0
@@ -247,7 +254,7 @@ def tone_runs(hz, left, ppq):
             part, after = [], []
             while t < end:
                 part.append(t)
-                t += wave(hz, ppq, k0 + (k1 - k0) * (t - s0) / (e1 - s0))
+                t += wave(hz, ppq, k0 + (k1 - k0) * slide_part((t - s0) / (e1 - s0), link, knob))
                 after.append(t)
             if part:
                 out.append((np.array(part), np.array(after), (a, b)))

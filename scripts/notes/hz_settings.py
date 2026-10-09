@@ -110,6 +110,7 @@ OFF_BOXES = ("volume", "wave", "pitch", "vibrato", "tremolo", "tone", "character
 VOICES = 8  # hz["voice"]: the most copies
 DETUNE = 100.0  # ... the most cents between the lowest and the highest copy
 GLIDE = 64.0  # ... the longest glide, in beats
+SLIDE_BEND = 0.95  # a slide's own bend goes this far each way (hz_glide.slide_part; 1 would be a jump)
 GLIDE_CURVE = 0.5  # ... its curve when there's none: -1 = slow first, 0 = straight, 1 = fast first (glide_left)
 BLEND = 0.5  # ... how loud the middle copies are next to the outer ones when there's none: all the same (blend_gains)
 
@@ -655,6 +656,17 @@ def has_fx(hz):
              or any(not e.get("off") for e in hz.get("rack") or ())) and bool(hz.get("tones")))
 
 
+def clean_slide(s):
+    """A saved slide checked: {"id", "out", "in"} + its own "bend" (-SLIDE_BEND..SLIDE_BEND; missing = untouched,
+    it follows the Glide curve) and "kind": "double" (an S; missing = one curve). Raises like float() when broken."""
+    out = {"id": int(s["id"]), "out": max(0.0, float(s["out"])), "in": max(0.0, float(s["in"]))}
+    if s.get("bend") is not None and math.isfinite(float(s["bend"])):
+        out["bend"] = min(SLIDE_BEND, max(-SLIDE_BEND, float(s["bend"])))
+    if s.get("kind") == "double":
+        out["kind"] = "double"
+    return out
+
+
 def clean_tones(tones):
     """Placed tones checked and put in order (by start, then key)."""
     out, old = [], []
@@ -668,8 +680,7 @@ def clean_tones(tones):
                 tone["auto"] = max(0.0, min(AUTO_MOST, float(n["auto"])))
             if n.get("gate") in ("fixed", "mixed"):
                 tone["gate"] = n["gate"]
-            tone["to"] = [{"id": int(s["id"]), "out": max(0.0, float(s["out"])), "in": max(0.0, float(s["in"]))}
-                          for s in n.get("to") or ()]
+            tone["to"] = [clean_slide(s) for s in n.get("to") or ()]
             vel = clean_vel(n.get("vel")) if n.get("vel") else None
             if vel:
                 tone["vel"] = vel

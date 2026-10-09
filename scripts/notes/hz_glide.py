@@ -2,10 +2,11 @@
 way, and each note's own time span."""
 
 import bisect
+import math
 
 import numpy as np
 
-from notes.hz_settings import MIN_LEN
+from notes.hz_settings import MIN_LEN, SLIDE_BEND
 
 
 def cached(hz, key, make):
@@ -145,3 +146,41 @@ def glide_left(u, curve):
     """How much of a glide's way is left at u (0..1 of its time): (1 - u) ^ 4^curve, so curve 0 = straight, 1 = fast
     first, -1 = slow first (GLIDE_CURVE = (1 - u)^2, as glides always were)."""
     return (1.0 - u) ** (4.0 ** curve)
+
+
+def bent_one(u, b):
+    """notes.hz_lines.bent_part for one number: how far along (0..1) at u (0..1) with bend b (-1..1, 0 = straight;
+    the middle at (1 + b) / 2 of the way)."""
+    m = (1.0 + b) / 2.0
+    if b > 0:
+        return 1.0 - (1.0 - u) ** (math.log(1.0 - m) / math.log(0.5))
+    if b < 0:
+        return u ** (math.log(m) / math.log(0.5))
+    return u
+
+
+def slide_part(u, s, knob=None):
+    """How far along (0..1) slide s has come at u (0..1 of its time): its own "bend" (bent_one), or untouched the
+    Voice box's Glide curve (knob, when Glide is on: glide_left), else straight. "kind" "double" = an S: that
+    curve on each half, the second half turned round (bend above 0: fast at both ends, flat in the middle)."""
+    u = min(1.0, max(0.0, u))
+
+    def one(v):
+        if "bend" in s:
+            return bent_one(v, s["bend"])
+        return 1.0 - glide_left(v, knob) if knob is not None else v
+
+    if s.get("kind") == "double":
+        return 0.5 * one(2.0 * u) if u < 0.5 else 1.0 - 0.5 * one(2.0 - 2.0 * u)
+    return one(u)
+
+
+def handle_u(s):
+    """Where along a slide (0..1 of its time) its bend handle sits: the middle, a quarter for an S."""
+    return 0.25 if s.get("kind") == "double" else 0.5
+
+
+def bend_for(s, part):
+    """The bend that puts slide s's handle `part` (0..1) of the way from the first tone to the second."""
+    b = 4.0 * part - 1.0 if s.get("kind") == "double" else 2.0 * part - 1.0
+    return min(SLIDE_BEND, max(-SLIDE_BEND, b))

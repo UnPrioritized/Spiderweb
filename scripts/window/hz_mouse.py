@@ -14,12 +14,13 @@ from files.domino_clip import get_from_clipboard, read_notes
 from files.lang import tr
 from files.snap import snap_beats
 from files.system import double_click_ms
-from notes.hzbass import LAYERS, TUNE, can_slide, left_edge, next_id, pitch
+from notes.hzbass import LAYERS, TUNE, bend_for, can_slide, left_edge, next_id, pitch
 from roll.roll_shared import (BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, SELECT_CURSOR, SHIFT, boxes_side,
                               boxes_upright, grid_span)
 
 
 TUNE_STICK = 3.0  # cents: a dragged tune this near the exact tone sticks to it (at any zoom; was 5 px, user)
+DOTS = ("in", "out", "bend")  # what hit() calls a slide's dots: its two ends and its bend handle
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
 
 
@@ -144,12 +145,16 @@ class HzMouse:
         return sb if sb and not e.state & SHIFT else 1 / self.app.ppq
 
     def hit(self, x, y):
-        """What's under the mouse: ("in" / "out", tone, slide) a red dot,("left" / "right", tone) a note's end,
-        ("tune", tone) the red line in a note (tall rows only), ("note", tone), or None."""
+        """What's under the mouse: ("in" / "out", tone, slide) a red dot, ("bend", tone it leaves, slide) a slide's
+        bend handle, ("left" / "right", tone) a note's end, ("tune", tone) the red line in a note (tall rows only),
+        ("note", tone), or None."""
         r = 6 * self.s
         for dx, dy, i, which, s in self.dots():
             if abs(x - dx) <= r and abs(y - dy) <= r:
                 return which, i, s
+        for dx, dy, i, s, *_ in self.handles():
+            if abs(x - dx) <= r and abs(y - dy) <= r:
+                return "bend", i, s
         if x < self.kb_w or y < self.ruler_h:
             return None
         for i in range(len(self.tones) - 1, -1, -1):
@@ -167,7 +172,7 @@ class HzMouse:
         """Where the mouse is on the kept Select boxes: (1, 0) the right side (its corners too), (0, 0) inside (a
         note there wins), or None. The left side, top and bottom do nothing (user, like Domino); a slide's dot
         wins over it all. With Ctrl only inside counts, notes too (a drag there moves a copy; Select tool only)."""
-        if not kept or not self.sel or hit and hit[0] in ("in", "out"):
+        if not kept or not self.sel or hit and hit[0] in DOTS:
             return None
         side = boxes_side([self.box_rect(a) for a in kept], e.x, e.y, 5 * self.s)
         if e.state & CTRL:  # (the pencil's Ctrl+drag is its only box: a new one there)
@@ -188,6 +193,7 @@ class HzMouse:
             return self.show_status(e)
         self.canvas.config(cursor={"in": "sb_h_double_arrow", "out": "sb_h_double_arrow", "left": "sb_h_double_arrow",
                                    "right": "sb_h_double_arrow", "tune": "sb_v_double_arrow",
+                                   "bend": "sb_v_double_arrow",
                                    "note": "fleur"}.get(hit and hit[0], empty))
         self.show_status(e)
 
@@ -257,7 +263,10 @@ class HzMouse:
                          "orig": copy.deepcopy(self.tones), "x": e.x, "y": e.y, "moved": False,
                          "slide": hit[2] if len(hit) > 2 else None, "whole": whole,
                          "name": {"note": tr("hz.step_move"), "in": tr("hz.step_lead"), "out": tr("hz.step_lead"),
-                                  "tune": tr("hz.step_tune")}.get(kind, tr("hz.step_length"))}
+                                  "tune": tr("hz.step_tune"), "bend": tr("hz.step_bend")}.get(kind,
+                                                                                              tr("hz.step_length"))}
+            if kind == "bend":  # (where the handle was grabbed: Shift moves it a quarter as far from there)
+                self.drag.update(handle=next(h for h in self.handles() if h[3] is hit[2]))
             if kind == "note" and kept and i in sel0:  # a note the kept box selected: the box goes along
                 boxes = boxes_upright(kept)[0]
                 # (inside the box a click without dragging keeps the selection and the box: user)
@@ -282,6 +291,8 @@ class HzMouse:
             return self.on_press(e, place=True)
         if hit and hit[0] == "tune" and not e.state & CTRL:  # the red line (tall rows): its tune back to 0 (user)
             return self.reset_tune(hit[1])
+        if hit and hit[0] == "bend":  # a slide's handle: its own bend goes, it follows the Glide curve again
+            return self.slide_curve(hit[2], bend=None)
         if (self.tool.get() == "select" and hit is None and (self.app.hz_clip or self.domino_newer())
                 and not e.state & CTRL and e.x >= self.kb_w and e.y >= self.ruler_h
                 and not self.on_kept_box(self.kept_box(), e, hit)):
@@ -325,6 +336,11 @@ class HzMouse:
             d["slide"]["out"] = min(max(0.0, n["t"] + n["len"] - self.snap(beat, e)), n["len"])
         elif d["kind"] == "in":
             d["slide"]["in"] = min(max(0.0, self.snap(beat, e) - n["t"]), n["len"])
+        elif d["kind"] == "bend":  # how far from the first tone to the second the handle is dragged
+            hx, hy, _, s, k0, k1 = d["handle"]
+            y = hy + (e.y - d["y"]) * (0.25 if e.state & SHIFT else 1.0)
+            key = self.top + 0.5 - (y - self.ruler_h) / self.sy  # (pitch_y turned round)
+            s["bend"] = bend_for(s, (key - k0) / (k1 - k0))
         elif d["kind"] == "tune":  # the note's own tune: whole cents, and it sticks to the exact tone within
             cents = d["orig"][d["i"]]["cents"] + (d["y"] - e.y) / self.sy * 100  # TUNE_STICK cents (Shift = free)
             if e.state & SHIFT:
@@ -555,7 +571,7 @@ class HzMouse:
         """One end of a slide at e on note hit (on_middle; the right-click menu's Start / End a slide here)."""
         before = copy.deepcopy(self.tones)
         first = next((n for n in self.tones if self.pending and n["id"] == self.pending[0]), None)
-        if hit and hit[0] in ("in", "out"):
+        if hit and hit[0] in DOTS:
             for n in self.tones:
                 n["to"] = [s for s in n["to"] if s is not hit[2]]
             self.pending = None
@@ -605,7 +621,7 @@ class HzMouse:
         if self.drag or self.loudness.held():
             return
         hit = self.hit(e.x, e.y)
-        kept = self.kept_box() if not (hit and hit[0] in ("in", "out")) else None
+        kept = self.kept_box() if not (hit and hit[0] in DOTS) else None
         # inside the kept Select boxes: the menu for all they selected; just one note: its own menu, anywhere in
         # the boxes (user, like the main piano roll)
         if kept and boxes_side([self.box_rect(a) for a in kept], e.x, e.y, 0) == (0, 0):
@@ -659,7 +675,7 @@ class HzMouse:
         self.menu_wait = None
         pairs = self.pairs()
         menu = tk.Menu(self, tearoff=0)
-        if hit and hit[0] not in ("in", "out"):
+        if hit and hit[0] not in DOTS:
             menu.add_command(label=tr("hz.tune_type", cents=f"{self.tones[hit[1]]['cents']:+g}"),
                              command=lambda: self.type_tune(hit[1]))
             hz = (self.target() or {}).get("hz") or {}
@@ -678,8 +694,18 @@ class HzMouse:
                 ends = first is not None and first is not n and (can_slide(first, n) or can_slide(n, first))
                 menu.add_command(label=tr("hz.slide_end" if ends else "hz.slide_start"),
                                  command=lambda: self.slide_mark(e, hit))
-        if hit and hit[0] in ("in", "out"):  # a slide's dot: that slide goes, both its dots
+        if hit and hit[0] in DOTS:  # a slide's dot: its curve, or that slide goes (both its dots)
+            s = hit[2]
+            double = tk.StringVar(self, value=s.get("kind", "single"))
+            menu.add_radiobutton(label=tr("hz.curve_single"), variable=double, value="single",
+                                 command=lambda: self.slide_curve(s, kind=None))
+            menu.add_radiobutton(label=tr("hz.curve_double"), variable=double, value="double",
+                                 command=lambda: self.slide_curve(s, kind="double"))
+            menu.add_command(label=tr("hz.curve_reset"), command=lambda: self.slide_curve(s, bend=None),
+                             state="normal" if "bend" in s else "disabled")
+            menu.add_separator()
             menu.add_command(label=tr("hz.slide_delete"), command=lambda: self.delete_slide(hit[2]))
+            menu.double = double  # (kept while the menu shows)
         if len(self.sel) >= 2:  # (only with two or more selected, user)
             if menu.index("end") is not None and menu.type("end") != "separator":
                 menu.add_separator()
@@ -700,6 +726,18 @@ class HzMouse:
             n["to"] = [t for t in n["to"] if t is not s]
         if self.tones != before:
             self.commit(tr("hz.step_lead"), before)
+
+    def slide_curve(self, s, **change):
+        """Slide s's curve changed (one undo step): kind None / "double" (one curve / an S), bend None = its own bend
+        goes (it follows the Glide curve again)."""
+        before = copy.deepcopy(self.tones)
+        for key, value in change.items():
+            if value is None:
+                s.pop(key, None)
+            else:
+                s[key] = value
+        if self.tones != before:
+            self.commit(tr("hz.step_bend"), before)
 
     def set_slide(self, on):
         """Slides between the selected notes (see pairs): each a quarter of its two notes long to start with (its
@@ -735,7 +773,7 @@ class HzMouse:
         if d["kind"] == "new":
             return self.cancel_drag()
         self.end_drag()
-        if d["kind"] in ("in", "out"):
+        if d["kind"] in DOTS:
             for n in self.tones:
                 n["to"] = [s for s in n["to"] if s is not d["slide"]]
             name = tr("hz.step_lead")
