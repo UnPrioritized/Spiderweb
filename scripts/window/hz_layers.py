@@ -1,17 +1,21 @@
 """The Hz bass window's layers strip (left of its piano roll; the toolbar's Layers button shows / hides it, off to
 start with): one row per layer of the Hz bass shown (hzbass.clean_layers), like a DAW's tracks. Click a row = the
 layer edited (its notes and sound shown; the others' notes faded), M / S = mute / solo, the colour square = its
-colour, double-click the name = rename, right-click = menu, Delete = the picked layer goes, + = a new layer."""
+colour, double-click the name (or click the picked one's name again, slowly) = rename, drag a row up / down = its
+place in the list, right-click = menu, Delete = the picked layer goes, + = a new layer."""
 
 import copy
 import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
+from files.system import double_click_ms
 from notes.hzbass import LAYER_NAME, LAYERS, SOUND, fit_length, layers_of, with_layers
 from roll.roll_shared import SLOT_COLORS
 from window import look
 from window.widgets import Tooltip
+
+DOUBLE_MS = double_click_ms()  # (the system's own setting)
 
 
 def plain_layers(hz):
@@ -32,6 +36,8 @@ class LayerStrip:
         self.row_h = round(24 * s)
         self.box = ttk.Frame(win, width=round(170 * s))
         self.box.pack_propagate(False)
+        # a line between the list and the piano roll's keys
+        tk.Frame(self.box, width=round(3 * s), background=look.HZ_LAYER_SEP).pack(side="right", fill="y")
         head = ttk.Frame(self.box, padding=(6, 2, 4, 2))
         head.pack(fill="x")
         ttk.Label(head, text=tr("hz.layers")).pack(side="left")
@@ -42,11 +48,17 @@ class LayerStrip:
         c.pack(fill="both", expand=True)
         c.bind("<Configure>", lambda e: self.redraw())
         c.bind("<ButtonPress-1>", self.on_press)
+        c.bind("<B1-Motion>", self.on_drag)
+        c.bind("<ButtonRelease-1>", self.on_release)
         c.bind("<Double-Button-1>", self.on_double)
         c.bind("<ButtonPress-3>", self.on_menu)
         c.bind("<Delete>", lambda e: self.remove(self.picked()))
+        c.bind("<Escape>", lambda e: self.drop_held())
         self.naming = None  # (layer number, Entry) while a name is typed
         self.palette = None  # the colour squares' popup
+        self.held = None  # (row, press y, rename on let go, moved) while a row's name is held
+        self.drop = None  # where a dragged row would go (0 = above the first row ... n = under the last)
+        self.slow = None  # the slow second click's timer
 
     # ------------------------------------------------------------ what it shows
 
@@ -69,6 +81,7 @@ class LayerStrip:
             self.redraw()
         else:
             self.end_naming(False)
+            self.drop_held()
             self.box.pack_forget()
 
     def spots(self, i):
@@ -109,6 +122,9 @@ class LayerStrip:
                                    outline=look.HZ_EDGE)
                 c.create_text((x0 + x1) / 2, y + rh / 2, text=tr("hz.layer_" + key + "_key"), font=look.font(8, "bold"),
                               fill=look.HZ_LAYER_ON_TEXT if e.get(key) else look.LABEL)
+        if self.drop is not None and self.held and self.drop not in (self.held[0], self.held[0] + 1):
+            y = min(self.drop * rh, len(info) * rh - 1)
+            c.create_line(0, y, w, y, fill=look.HZ_LAYER_DROP, width=max(2, round(2 * s)))
 
     def row_at(self, y):
         hz = self.hz()
@@ -120,6 +136,8 @@ class LayerStrip:
     # ------------------------------------------------------------ mouse
 
     def on_press(self, e):
+        had_keys = self.canvas.focus_get() is self.canvas
+        self.drop_held()
         self.canvas.focus_set()
         self.end_naming(True)
         i = self.row_at(e.y)
@@ -134,9 +152,53 @@ class LayerStrip:
         elif s0 <= e.x <= s1:
             self.flag(i, "solo")
         else:
+            # the picked layer's name clicked again while the list has the keyboard = renamed on let go, after the
+            # double-click time (like Windows' file lists)
+            self.held = (i, e.y, had_keys and i == self.picked() and a1 + 3 < e.x < m0, False)
             self.pick(i)
 
+    def on_drag(self, e):
+        """A held row dragged half a row or more: a line shows where it goes on let go."""
+        if self.held is None:
+            return
+        i, y0, _, moved = self.held
+        if not moved and abs(e.y - y0) < self.row_h / 2:
+            return
+        self.held = (i, y0, False, True)
+        n = len(plain_layers(self.hz() or {})["layers"])
+        self.drop = min(max(round(e.y / self.row_h), 0), n)
+        self.redraw()
+
+    def on_release(self, e):
+        held, drop = self.held, self.drop
+        self.held = self.drop = None
+        if held is None:
+            return
+        i, _, rename, moved = held
+        if moved:
+            if drop is not None and drop not in (i, i + 1):
+                self.move(i, drop if drop < i else drop - 1)
+            else:
+                self.redraw()
+        elif rename:
+            self.slow = self.canvas.after(DOUBLE_MS, lambda: self.slow_rename(i))
+
+    def slow_rename(self, i):
+        self.slow = None
+        if self.canvas.winfo_exists() and self.box.winfo_manager() and i == self.picked():
+            self.start_naming(i)
+
+    def drop_held(self):
+        """A held / dragged row let go of with no change; a slow second click's rename called off."""
+        if self.slow is not None:
+            self.canvas.after_cancel(self.slow)
+            self.slow = None
+        if self.held is not None:
+            self.held = self.drop = None
+            self.redraw()
+
     def on_double(self, e):
+        self.drop_held()
         i = self.row_at(e.y)
         if i is not None and self.spots(i)[0][1] + 3 < e.x < self.spots(i)[1][0]:
             self.start_naming(i)
@@ -156,6 +218,11 @@ class LayerStrip:
                 to.add_command(label=self.name_of(hz, k), command=lambda k=k: self.copy_sound(i, k))
         m.add_cascade(label=tr("hz.layer_copy_sound"), menu=to,
                       state="normal" if len(plain_layers(hz)["layers"]) > 1 else "disabled")
+        m.add_separator()
+        m.add_command(label=tr("hz.layer_up"), command=lambda: self.move(i, i - 1),
+                      state="normal" if i > 0 else "disabled")
+        m.add_command(label=tr("hz.layer_down"), command=lambda: self.move(i, i + 1),
+                      state="normal" if i < len(plain_layers(hz)["layers"]) - 1 else "disabled")
         m.add_separator()
         m.add_command(label=tr("hz.layer_add"), command=self.add,
                       state="normal" if len(plain_layers(hz)["layers"]) < LAYERS else "disabled")
@@ -218,6 +285,19 @@ class LayerStrip:
         del every[i], info[i]
         picked = min(picked if picked < i else max(0, picked - 1) if picked > i else i, len(info) - 1)
         self.put(with_layers(dict(hz, layers=info), every, picked), tr("hz.step_layer_delete"))
+
+    def move(self, i, j):
+        """Layer i put at place j in the list (the others close up around it); the picked one stays picked. Names
+        given by place ("Layer 2") are kept as they were."""
+        hz = self.hz()
+        if hz is None or not hz.get("layers") or i == j or not 0 <= j < len(hz["layers"]):
+            return
+        every = layers_of(hz)
+        info = [dict(e, name=self.name_of(hz, k)) for k, e in enumerate(hz["layers"])]
+        order = list(range(len(info)))
+        order.insert(j, order.pop(i))
+        self.put(with_layers(dict(hz, layers=[info[k] for k in order]), [every[k] for k in order],
+                             order.index(hz.get("layer", 0))), tr("hz.step_layer_move"))
 
     def change(self, i, step, **what):
         """Layer i's name / colour / mute / solo set (None = taken out)."""
