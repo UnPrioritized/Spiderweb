@@ -629,15 +629,19 @@ class FxPane:
                       " " + tr("hz.fx_box_tip") if name in self.win.fxl and self.on_box(e.x) else ""))
         elif hit and hit[0] == "point":
             p, at = self.win.fxl[hit[1]][hit[2]], self.sustain(hit[1])
-            self.say(self.value_text(hit[1], p[1]) + (" " + tr("hz.fx_sustain_tip")
+            self.say(self.value_text(hit[1], p[1], self.pitch_keys()) + (" " + tr("hz.fx_sustain_tip")
                                                        if at is not None and abs(p[0] - at) < 1e-9 else ""))
         elif hit and hit[0] == "bend":
             self.say(tr("hz.fx_bend_tip"))
         else:
             self.say("")
 
+    def pitch_keys(self):
+        """Keys the Pitch line bends at its top and bottom (the Pitch box's Range)."""
+        return self.win.lfo.get("bend_range", PITCH)
+
     @staticmethod
-    def value_text(name, value):
+    def value_text(name, value, keys=PITCH):
         if name.endswith(AMOUNT):
             return tr("hz.fx_value_amount", name=tr("hz.fx_" + base(name)), value=f"{value * 100:.4g}")
         if name == "groups":
@@ -646,7 +650,7 @@ class FxPane:
         if name == "tremolo":
             return tr("hz.fx_value_beat", name=tr("hz.fx_" + name), n=f"{value * TREMOLO:.3g}")
         if name == "pitch":
-            return tr("hz.fx_value_keys", name=tr("hz.fx_" + name), n=f"{(value - 0.5) * 2 * PITCH:+.3g}")
+            return tr("hz.fx_value_keys", name=tr("hz.fx_" + name), n=f"{(value - 0.5) * 2 * keys:+.3g}")
         if name in ("offpitch", "vibrato"):  # how far apart the lowest and the highest key's tones are / how far
             most = OFF_PITCH if name == "offpitch" else VIBRATO  # the pitch goes up and down
             return tr("hz.fx_value", name=tr("hz.fx_" + name), value=f"{value * most * 100:.3g}")
@@ -766,7 +770,7 @@ class FxPane:
                 at = (at - o) / sc
         v = self.value_at(e.y)
         if name == "pitch" and not e.state & SHIFT:  # (whole keys; Shift = in between)
-            v = 0.5 + round((v - 0.5) * 2 * PITCH) / (2 * PITCH)
+            v = 0.5 + round((v - 0.5) * 2 * self.pitch_keys()) / (2 * self.pitch_keys())
         v = round(v, 3 if e.state & SHIFT else 2 if name != "pitch" else 6)
         b0, v0 = d["orig"][(name, i)]
         db, dv = self.limited(d["orig"], at - b0, v - v0)
@@ -775,7 +779,7 @@ class FxPane:
             was = d["sustains"].get(n)
             if was is not None and abs(b - was) < 1e-9:  # (the sustain point goes with its point)
                 win.sustains[n] = b + db
-        self.says = self.value_text(name, v0 + dv)
+        self.says = self.value_text(name, v0 + dv, self.pitch_keys())
         win.redraw()
 
     def limited(self, orig, db, dv):
@@ -978,7 +982,7 @@ class FxPane:
         wrap = self.wrap(name)
         new = [[lo, float(line_at(orig, lo, wrap))]] + new + [[hi, float(line_at(orig, hi, wrap))]]
         win.fxl[name] = sorted(kept + new, key=lambda p: p[0])
-        self.says = self.value_text(name, got[gs[-1]])
+        self.says = self.value_text(name, got[gs[-1]], self.pitch_keys())
         win.redraw()
 
     def on_drag_draw_point(self, d, x, y, e):
@@ -995,7 +999,7 @@ class FxPane:
         g = int(math.floor(beat / d["step"] + (0 if d["hold"] else 0.5)))
         v = self.value_at(y)
         if d["fx"] == "pitch" and not e.state & SHIFT:  # (whole keys, like the points)
-            v = 0.5 + round((v - 0.5) * 2 * PITCH) / (2 * PITCH)
+            v = 0.5 + round((v - 0.5) * 2 * self.pitch_keys()) / (2 * self.pitch_keys())
         v = round(v, 4)
         last = d.get("last")
         if last is not None and abs(g - last[0]) > 1:  # (a fast mouse: the cells in between too)

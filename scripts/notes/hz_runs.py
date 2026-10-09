@@ -8,8 +8,8 @@ import math
 
 import numpy as np
 
-from notes.hz_settings import (ADSR_KNOBS, GLIDE_CURVE, MOD_BOXES, MOD_NEED_LINE, NEUTRAL, PITCH, VIBRATO,
-                               VIBRATO_RATE, hz_of)
+from notes.hz_settings import (ADSR_KNOBS, GLIDE_CURVE, MOD_BOXES, MOD_NEED_LINE, NEUTRAL, VIBRATO,
+                               VIBRATO_RATE, bend_range, hz_of)
 from notes.hz_lines import adsr_line
 from notes.hz_glide import cached, chains, glide, glide_left, legato_links, links, note_span, pitch, slide_part
 from notes.hz_modulate import fx_at, longest_fall, plain_base, rack_tail, setting_at
@@ -291,12 +291,13 @@ def tone_runs(hz, left, ppq):
 
 def bent(hz, left, ppq, starts, nexts, tone=None, keys=None):
     """A stretch of tone's repeats (start ticks, next ones' starts) moved by the "pitch" effect: the tone goes up or
-    down by the line (PITCH keys at 1 and 0), its waves shorter or longer. The repeats are spaced by adding up the
+    down by the line (the Range's keys at 1 and 0), its waves shorter or longer. The repeats are spaced by adding up the
     tone over time, so a big bend keeps its timing (a repeat is where the waves so far come to a whole number).
     tone = the tone the stretch belongs to (a slide: the one it leaves), for a line counted from each note. keys =
     another bend instead of the line's: keys up at beats (OSC B's tune moved, KeyGrid.osc2_keys)."""
     t = np.append(starts, nexts[-1])
-    up = (fx_at(hz, "pitch", t / ppq - left, tone) - 0.5) * 2.0 * PITCH if keys is None else keys(t / ppq - left)
+    up = ((fx_at(hz, "pitch", t / ppq - left, tone) - 0.5) * 2.0 * bend_range(hz) if keys is None
+          else keys(t / ppq - left))
     f = 2.0 ** (up / 12.0)  # (how many times the tone)
     phase = np.concatenate([[0.0], np.cumsum((f[:-1] + f[1:]) / 2.0)])  # (one wave as placed = 1 at f = 1)
     n = max(1, int(math.ceil(phase[-1] - 1e-9)))

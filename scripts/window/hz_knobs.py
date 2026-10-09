@@ -29,7 +29,7 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.hzbass import (ARP, ARP_PATTERNS, BLEND, CHORDS, CRUSH, DETUNE, FAST, GLIDE_CURVE, GROUPS, GROWL, LOOP,
+from notes.hzbass import (ARP, ARP_PATTERNS, BLEND, CHORDS, CRUSH, DETUNE, FAST, GLIDE_CURVE, GROUPS, GROWL, LFO, LOOP,
                           MODES, OFF_BOXES, OFF_PITCH, OSC2, PITCH, RACK, RATE_TOP, SCALES, SOFT, START_COUNT,
                           START_STEPS, MOD_BOXES, MOD_NEED_LINE, STEPS, SUB, TIMINGS, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE,
                           VOICES, WAH, WAVES, adsr_line,
@@ -51,6 +51,8 @@ TIME_MOST = 64.0  # ... and a typed one
 KINDS = {"time": ("hz.synth_beats", 0.0, TIME_MOST, (0.05, 0.25, 0.01), TIME_KNOB),
          "percent": ("hz.synth_percent", 0.0, 100.0, (1, 10, 0.1), None),
          "keys": ("hz.synth_keys", -PITCH, PITCH, (1, 3, 0.1), None),
+         "pitch": ("hz.synth_keys", -PITCH, PITCH, (1, 3, 0.1), None),  # (Amount: up to the Range, set_range)
+         "range": ("hz.synth_keys", *LFO["bend_range"], (1, 12, 1), None),
          "vib_rate": ("hz.synth_a_beat", 0.0, 64.0, (0.1, 1, 0.01), RATE_TOP),
          "trem_rate": ("hz.synth_a_beat", 0.0, TREMOLO, (0.1, 1, 0.01), TREMOLO),
          "groups": (None, 1.0, float(GROUPS), (1, 1, 1), None),
@@ -76,13 +78,13 @@ KINDS = {"time": ("hz.synth_beats", 0.0, TIME_MOST, (0.05, 0.25, 0.01), TIME_KNO
          "osc_octave": (None, OSC2["octave"][0], OSC2["octave"][1], (1, 1, 1), None),
          "fine": ("hz.synth_cents", OSC2["fine"][0], OSC2["fine"][1], (1, 10, 0.1), None)}
 PERCENTS = ("percent", "width", "gate", "swing", "bend")  # (kept 0..1, shown and typed in %)
-UPDOWN = ("keys", "bend", "osc_octave", "fine")  # (knobs with 0 in the middle)
+UPDOWN = ("keys", "pitch", "bend", "osc_octave", "fine")  # (knobs with 0 in the middle)
 # the LFO boxes' Rate knobs that can move by note lengths (Timing dropdown; hzbass.TIMINGS), and how a timing's rates
 # are to the plain note lengths' (1/4 = 1 a beat)
 TIMED = {"vibrato_rate": "vibrato_timing", "tremolo_rate": "tremolo_timing"}
 TIMING_TIMES = {"straight": 1.0, "triplet": 1.5, "dotted": 2 / 3}
 NOTE_RATES = tuple(2.0 ** i for i in range(-4, 7))  # (times a beat: 4 bars' notes .. 1/256 notes)
-COUNTS = ("groups", "voices", "every", "repeats", "octaves", "osc_octave")  # (whole numbers)
+COUNTS = ("groups", "voices", "every", "repeats", "octaves", "osc_octave", "range")  # (whole numbers)
 # the Wave box's modes (hzbass.MODES): their knobs (knob = mode_setting) and kinds; only the picked mode's are shown
 MODE_KNOBS = {"fm": (("fm_depth", "percent"), ("fm_ratio", "ratio"), ("fm_time", "time")),
               "pulse": (("pulse_width", "width"), ("pulse_rate", "vib_rate")),
@@ -96,7 +98,7 @@ BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain",
                     ("release", "time", 0.0)),
          "wave": (("shape", "percent", 1.0), ("octave", "percent", 0.0))
          + tuple((key, kind, MODES[m][key.split("_", 1)[1]][2]) for m, knobs in MODE_KNOBS.items() for key, kind in knobs),
-         "pitch": (("amount", "keys", 0.0), ("time", "time", 0.25)),
+         "pitch": (("amount", "pitch", 0.0), ("time", "time", 0.25), ("bend_range", "range", PITCH)),
          # (vibrato_delay is its Rise: it was called Delay first; vibrato_wait is its Delay)
          "vibrato": (("vibrato_rate", "vib_rate", VIBRATO_RATE), ("vibrato_depth", "percent", 0.0),
                      ("vibrato_wait", "time", 0.0), ("vibrato_delay", "time", 0.0)),
@@ -178,13 +180,24 @@ def kept_value(key, v):
     return v if lo - 1e-9 <= shown(kind, v) <= hi + 1e-9 else None
 
 
-def pitch_line(amount, time):
+def set_range(keys):
+    """The Pitch box's Amount knob turns up to `keys` (its Range) each way."""
+    unit, _, _, steps, most = KINDS["pitch"]
+    KINDS["pitch"] = (unit, -keys, keys, steps, most)
+
+
+def pitch_line(amount, time, keys=PITCH):
     """The Pitch line from `amount` keys off (up or down) to the note's tone in `time` beats, fast first (like the
-    ready-made Drop): (points, length)."""
-    start = 0.5 + amount / (2 * PITCH)
+    ready-made Drop), with the line's top `keys` up (the Range): (points, length)."""
+    start = min(1.0, max(0.0, 0.5 + amount / (2 * keys)))
     if time <= 0:
         return [[0.0, 0.5]], LOOP[0]
     return [[0.0, start, FAST], [time, 0.5]], max(LOOP[0], time)
+
+
+def written(key):
+    """What a knob turned writes again (SynthKnobs.write): its box, or only the Range (the Pitch line kept)."""
+    return "bend_range" if key == "bend_range" else KNOBS[key][0]
 
 
 def same_line(a, b):
@@ -249,15 +262,17 @@ def read_wave(win, was):
 
 
 def read_pitch(win, was):
-    """The Pitch box: ({amount, time}, made) as read_volume (no Pitch line: Time kept as it was, and Amount too while
-    Time is 0: no line then either)."""
+    """The Pitch box: ({amount, time, bend_range}, made) as read_volume (no Pitch line: Time kept as it was, and
+    Amount too while Time is 0: no line then either)."""
+    keys = win.lfo.get("bend_range", PITCH)
     pts = win.fxl.get("pitch")
     if not pts:
-        return {"amount": was["amount"] if was["time"] <= 0 else 0.0, "time": was["time"]}, True
+        amount = min(keys, max(-keys, was["amount"])) if was["time"] <= 0 else 0.0
+        return {"amount": amount, "time": was["time"], "bend_range": keys}, True
     every = win.loops.get("pitch")
-    got = {"amount": (pts[0][1] - 0.5) * 2 * PITCH, "time": every or was["time"]}
+    got = {"amount": (pts[0][1] - 0.5) * 2 * keys, "time": every or was["time"], "bend_range": keys}
     made = (every and win.froms.get("pitch") == "note" and "pitch" not in win.fits and "pitch" not in win.sustains
-            and "pitch:amount" not in win.fxl and same_line(pitch_line(**got)[0], pts))
+            and "pitch:amount" not in win.fxl and same_line(pitch_line(got["amount"], got["time"], keys)[0], pts))
     return got, bool(made)
 
 
@@ -619,7 +634,7 @@ def value_of(kind, k):
     unit, lo, hi, _, most = KINDS[kind]
     if most:
         return max(lo, round(most * (k / 100) ** 2, 3))
-    if kind in ("keys", "osc_octave"):  # (whole keys / octaves)
+    if kind in ("keys", "pitch", "osc_octave"):  # (whole keys / octaves)
         return float(round(hi * k / 100))
     if kind == "fine":
         return round(hi * k / 100, 1)
@@ -645,6 +660,7 @@ class SynthKnobs:
         self.mode_cells = {}  # OSC A's (wave) / B's box -> mode -> its knobs' cells (only the picked mode's shown)
         self.mode_col, self.mode_picks, self.mode_shown = {}, {}, {}  # (... where they start, the Mode dropdowns)
         self.dials, self.dial_vars, self.dial_boxes, self.box_says, self.pics = {}, {}, {}, {}, {}
+        self.scrubs = {}  # (each knob's box's Up / Down / drag)
         self.unit_labels, self.timing_picks = {}, {}  # (each knob's unit beside its box; the LFO boxes' Timing)
         self.pic_for = {}  # what each picture was drawn for
         self.box_text = {}  # what each knob's box was last given to show (different = typed there)
@@ -805,7 +821,8 @@ class SynthKnobs:
             self.unit_labels[key].pack(side="left", padx=(2, 0))
         e.bind("<Return>", lambda ev: (self.on_box(key), self.keyboard_back(e), "break")[2])
         e.bind("<FocusOut>", lambda ev: self.on_box(key))
-        Scrub(self.app, [(e, var, lambda: self.on_box(key, stepped=True))], steps, lo, hi, drag_box=True)
+        self.scrubs[key] = Scrub(self.app, [(e, var, lambda: self.on_box(key, stepped=True))], steps, lo, hi,
+                                 drag_box=True)
         tip = tr(f"hz.synth_tip_{text_key(key)}")
         if text_key(key) != key:  # (OSC B's Mode knobs)
             tip = tr("hz.synth_tip_osc2_mode") + "\n" + tip
@@ -907,7 +924,7 @@ class SynthKnobs:
             self.turning, self.turn_vals = self.fx.state(), dict(self.vals)
         self.vals[key] = self.whole_step(key, self.timed(key, value_of(KNOBS[key][1], k), self.dials[key].stepping))
         self.sweep_on(key)
-        self.write(KNOBS[key][0])
+        self.write(written(key))
         if done:
             before, self.turning = self.turning, None
             if self.fx.now() != before:
@@ -947,7 +964,7 @@ class SynthKnobs:
         """A wheel / arrow step on a knob of whole numbers (Octave, Semi, Groups, Voices...): at least one whole
         number that way (a step of the knob's turn alone can round back to where it was)."""
         step, kind = self.dials[key].stepping, KNOBS[key][1]
-        if not step or kind not in COUNTS + ("keys",) or abs(v - self.vals[key]) > 1e-9:
+        if not step or kind not in COUNTS + ("keys", "pitch") or abs(v - self.vals[key]) > 1e-9:
             return v
         lo, hi = KINDS[kind][1:3]
         return float(min(hi, max(lo, self.vals[key] + (1 if step > 0 else -1))))
@@ -993,7 +1010,7 @@ class SynthKnobs:
         v = self.timed(key, v, (v > self.vals[key]) - (v < self.vals[key]) if stepped else 0)
         if abs(v - self.vals[key]) > 1e-9:
             self.sweep_on(key)
-            self.change(box, key, v)
+            self.change(written(key), key, v)
         else:  # (as the knob has it: rounded to whole groups)
             var.set(fmt(shown(kind, v)))
             self.box_text[key] = var.get()
@@ -1074,10 +1091,13 @@ class SynthKnobs:
             self.set_extra("mode", {"kind": m, **{key.split("_", 1)[1]: v[key] for key, _ in MODE_KNOBS.get(m, ())}})
         elif box == "pitch":
             fx.drop("pitch")
+            self.set_range(v["bend_range"])
             if v["amount"] and v["time"] > 0:
-                pts, every = pitch_line(v["amount"], v["time"])
+                pts, every = pitch_line(v["amount"], v["time"], v["bend_range"])
                 self.fxl["pitch"] = pts
                 self.loops["pitch"], self.froms["pitch"] = every, "note"
+        elif box == "bend_range":  # (only the Range: the Pitch line stays, bending that much further, as a synth's)
+            self.set_range(v["bend_range"])
         elif box == "vibrato":
             fx.drop("vibrato")
             if v["vibrato_depth"] > 0:
@@ -1226,6 +1246,17 @@ class SynthKnobs:
         else:
             self.lfo[key] = value
 
+    def set_range(self, keys):
+        """The Pitch box's Range in hz["lfo"] (left out at PITCH), the Amount knob and its box turning that far."""
+        self.set_lfo("bend_range", keys, PITCH)
+        self.show_range()
+
+    def show_range(self):
+        """The Amount knob and its box turn as far as the sound's Range."""
+        keys = self.lfo.get("bend_range", PITCH)
+        set_range(keys)
+        self.scrubs["amount"].lo, self.scrubs["amount"].hi = -keys, keys
+
     def set_timing(self, key, timing):
         """An LFO box's Timing in hz["lfo"] (left out while Free)."""
         if timing == "free":
@@ -1238,6 +1269,7 @@ class SynthKnobs:
     def show_knobs(self):
         """The knobs, their boxes and the pictures show the lines (not while a knob is turned: it shows what's
         turned)."""
+        self.show_range()
         if self.turning is None:
             was = self.kept_vals()  # (the knobs the sound doesn't show: as kept, else where they start)
             was.update(self.bases())  # (... and those a macro moves: their own values, e.g. Pitch Time at 0)
@@ -1474,11 +1506,12 @@ class SynthKnobs:
         c.create_line(pad, mid, w - pad, mid, fill=MID)
         font = ("Segoe UI", 7)
         c.create_text(w - 3 * s, mid - 2 * s, text=tr("hz.synth_pitch_tone"), anchor="se", fill=DIM, font=font)
-        for k, y in ((PITCH, pad), (-PITCH, h - pad)):
+        keys = v["bend_range"]
+        for k, y in ((keys, pad), (-keys, h - pad)):
             c.create_text(3 * s, y, text=f"{k:+.0f}", anchor="w", fill=DIM, font=font)
         time = max(v["time"], 1e-9)
         total = time * 1.4  # (a bit of the tone after it)
-        pts, _ = pitch_line(v["amount"], v["time"]) if v["amount"] else ([[0.0, 0.5]], 0)
+        pts, _ = pitch_line(v["amount"], v["time"], keys) if v["amount"] else ([[0.0, 0.5]], 0)
         b = np.linspace(0.0, total, 60)
         ys = line_at(pts, b)
         x0 = pad + 14 * s

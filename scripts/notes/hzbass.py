@@ -65,7 +65,7 @@ own tone's end is left out):
   synth window's knobs), by value x VIBRATO of its pitch (every key the same; its waves made shorter and longer like
   off pitch's).
   "pitch": unlike the others it DOES change the pitch: the tone bent up or down by the line, 0.5 = as placed, 1 / 0 =
-  PITCH keys up / down (bent, in tone_runs, so the red line shows it and every key is in step).
+  PITCH keys up / down, or the Pitch box's Range (hz["lfo"]["bend_range"]; bent, in tone_runs, so the red line shows it and every key is in step).
 With effects every key has its own repeats (KeyGrid, custom.chop_keys); without any, nothing changes.
 Five more change how hard the keys hit instead (KeyGrid.factor -> velocity_factor, used by engine._notes_tracks on
 top of the shape's own velocity; loudness goes with velocity squared):
@@ -252,7 +252,7 @@ def shortest_gate(hz, ppq):
     if pts:  # (the amount line only ever weakens it; the MOD tab's links push it up as far as they reach)
         push = sum(abs(link["amount"]) if link.get("bipolar") else max(0.0, link["amount"])
                    for link in (played.get("mod") or {}).get("links", ()) if link["to"] == "pitch")
-        top += max(0.0, (min(1.0, max(p[1] for p in pts) + push) - 0.5) * 2.0 * PITCH)
+        top += max(0.0, (min(1.0, max(p[1] for p in pts) + push) - 0.5) * 2.0 * bend_range(played))
     if played.get("osc2") and played.get("tones"):  # (OSC B tuned up, as far as the MOD tab can take it)
         top += max(0.0, osc2_most(played))
     return wave(hz, ppq, top)

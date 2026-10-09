@@ -32,9 +32,10 @@ TREMOLO_DEPTH = 0.9  # ... how much quieter it gets (unless hz["lfo"]["tremolo_d
 # hz["lfo"]: what each can be; tremolo_wait / tremolo_rise = beats from each note's start before the tremolo comes
 # in, and how long it then takes to reach its depth (the vibrato's are in its line); sweep_track = the Tone box's
 # Key track: how far the Sweep's loud part follows each note's pitch (1 = one key row up for every key the note is
-# above the Hz bass's own tone, like a filter's key tracking; -1 = down)
+# above the Hz bass's own tone, like a filter's key tracking; -1 = down); bend_range = the Pitch box's Range: whole
+# keys the "pitch" line goes up at 1 and down at 0 (missing = PITCH; bend_range())
 LFO = {"vibrato_rate": (0.0, 64.0), "tremolo_depth": (0.0, 1.0), "tremolo_wait": (0.0, 64.0),
-       "tremolo_rise": (0.0, 64.0), "sweep_track": (-1.0, 1.0)}
+       "tremolo_rise": (0.0, 64.0), "sweep_track": (-1.0, 1.0), "bend_range": (1.0, 48.0)}
 # ... and how the synth window's Rate knobs move (vibrato_timing / tremolo_timing; not missing = "free"): free, or
 # only to note lengths (straight, triplets, dotted). Only the knobs care: the rate itself is still times a beat
 TIMINGS = ("free", "straight", "triplet", "dotted")
@@ -49,7 +50,7 @@ LOOP_SHAPES = {"sine": None, "triangle": [(0, 0), (0.5, 1), (1, 0)], "saw_up": [
 ENVELOPES = ("drop", "rise", "pluck")
 FAST = 0.5  # their bend: fast first, then settling ((1 - u)^2, the drop the user heard best)
 GROUPS = 6  # "groups" at 1
-PITCH = 12.0  # "pitch": keys up at 1 (and down at 0; 0.5 = the tone as placed)
+PITCH = 12.0  # "pitch": keys up at 1 (and down at 0; 0.5 = the tone as placed), unless hz["lfo"]["bend_range"]
 OFF_PITCH = 0.02  # "offpitch" at 1: the highest key's tone is this much (x the tone) below the lowest key's
 # hz["mode"] (the Wave box's Mode): kind -> its settings (lowest, highest, where its knob starts). fm: the wave's
 # place pushed back and forth by a wobble `ratio` x the tone, `depth` (x FM_INDEX) falling to 0 over `time` beats
@@ -217,11 +218,16 @@ def clean_lfo(lfo):
         except (KeyError, TypeError, ValueError):
             continue
         if math.isfinite(v):
-            out[key] = min(hi, max(lo, v))
+            out[key] = min(hi, max(lo, float(round(v)) if key == "bend_range" else v))
     for key in ("vibrato_timing", "tremolo_timing"):
         if isinstance(lfo, dict) and lfo.get(key) in TIMINGS[1:]:
             out[key] = lfo[key]
     return out
+
+
+def bend_range(hz):
+    """Keys the "pitch" line bends up at 1 and down at 0 (the Pitch box's Range)."""
+    return (hz.get("lfo") or {}).get("bend_range", PITCH)
 
 
 def clean_voice(voice):

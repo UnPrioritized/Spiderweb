@@ -253,9 +253,10 @@ class SynthMacros:
     # ------------------------------------------------------------ linking
 
     def knob_at(self, x, y):
-        """The knob (its key) at the screen point x, y: one shown on the tab showing, not scrolled out of sight."""
+        """The knob (its key) at the screen point x, y: one shown on the tab showing, not scrolled out of sight (never
+        the Pitch box's Range: a set-up, as a synth's bend range)."""
         for key, k in self.dials.items():
-            if k.winfo_viewable() and inside(k, x, y):
+            if key != "bend_range" and k.winfo_viewable() and inside(k, x, y):
                 page = self.knobs_canvas if str(k).startswith(str(self.knobs_canvas)) else self.rack_canvas
                 if inside(page, x, y):
                     return key
