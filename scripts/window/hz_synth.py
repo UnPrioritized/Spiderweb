@@ -229,7 +229,7 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
         c = self.canvas
         c.bind("<Delete>", lambda e: (self.fx.delete_key(), "break")[1])
         for key in ("<Control-c>", "<Control-C>"):
-            c.bind(key, lambda e: (self.fx.copy_points() and setattr(self.app, "hz_clip", None), "break")[1])
+            c.bind(key, lambda e: (self.fx.copy_points() and self.win.copied(None), "break")[1])
         for key in ("<Control-v>", "<Control-V>"):
             c.bind(key, lambda e: (self.fx.paste_points(), "break")[1])
         self.protocol("WM_DELETE_WINDOW", self.close)

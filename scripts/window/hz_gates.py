@@ -391,6 +391,7 @@ class HzGates:
         part of the step taken already, e.g. the Tune window trying values). before = the tones (and before_fx the
         lines) to go back to if it's called off (too many notes)."""
         app = self.app
+        more, self.more_layers = self.more_layers, None  # (notes pasted from Domino for the layers under this one)
         # the undo step keeps the selection from before the edit (the notes are still numbered as in `before`)
         was = self.sel_before[1] if self.sel_before and self.sel_before[0] is before else self.sel_state()
         self.sel_before = None
@@ -418,6 +419,9 @@ class HzGates:
                        hz=dict(self.new_hz(bpm), tones=copy.deepcopy(tones), grow=True, own=True,
                                **copy.deepcopy(fx), **({"loud": copy.deepcopy(self.loud)} if self.loud else {})))
             new.pop("range", None)  # (no gate Range with Hz bass, user)
+            if more:
+                new["hz"] = self.layers.with_more(new["hz"], more)
+                fit_length(new)
             if not app.confirm_big([new]):
                 return self.call_off(before, before_fx)
             app.hz_start = None
@@ -440,6 +444,8 @@ class HzGates:
                 new["hz"] = dict(hz, **({"tones": tones} if tones else {}),
                                  **({"grow": True} if self.grow.get() else {}), **copy.deepcopy(fx),
                                  **({"loud": copy.deepcopy(self.loud)} if self.loud else {}))
+                if more:
+                    new["hz"] = self.layers.with_more(new["hz"], more)
                 if new["fill"] not in SPAM_FILLS:
                     new["fill"] = "spam"
                 if not sh.get("hz"):  # (a spam shape's first notes: its gate and Range come back if Hz bass is

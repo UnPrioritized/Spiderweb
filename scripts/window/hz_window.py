@@ -110,6 +110,7 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.sound_jobs, self.sound_on = [], set()  # (the notes still to start / stop, the keys on now)
         self.last_len = 1.0  # beats: how long a newly placed note is (the last length used)
         self.placed = None  # the id of the note the last click placed (a double click there places one more)
+        self.more_layers = None  # notes pasted from Domino for the layers under the picked one (commit puts them in)
         self.fxl, self.fx_of = {}, None  # the effects' lines (hz["fx"]) and whose they are (the shape, or None)
         self.loops = {}  # the effects that repeat (hz["loop"])
         self.off = []  # the effects switched off (hz["off"])
@@ -267,10 +268,10 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         c.bind("<Delete>", lambda e: self.on_delete())
         for k in ("<Control-c>", "<Control-C>"):  # (effect points selected: they're copied; else the notes)
             c.bind(k, lambda e: self.copy_notes() or "break")
-        for k in ("<Control-v>", "<Control-V>"):  # (what was copied last: effect points, or notes at the play line;
-            c.bind(k, lambda e: (self.drag or self.loudness.held() or self.fx.paste_points()  # nothing while
-                                 # the mouse is held)
-                                 or self.paste_notes(self.play_line_beat()), "break")[1])
+        for k in ("<Control-v>", "<Control-V>"):  # (what was copied last: notes copied in Domino, effect points, or
+            c.bind(k, lambda e: (self.drag or self.loudness.held()  # notes, at the play line; nothing while the
+                                 or self.paste_domino(self.play_line_beat())  # mouse is held)
+                                 or self.fx.paste_points() or self.paste_notes(self.play_line_beat()), "break")[1])
         c.bind("<Escape>", lambda e: self.on_escape())
         c.bind("<Return>", lambda e: self.loudness.confirm())  # (the last loudness line drawn: done)
         self.bind("<space>", self.on_space)  # (anywhere in the window: the buttons don't take the keyboard)

@@ -11,7 +11,8 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.system import double_click_ms
-from notes.hzbass import LAYER_NAME, LAYERS, NOT_SOUND, SOUND, all_tones, fit_length, layers_of, left_edge, with_layers
+from notes.hzbass import (LAYER_NAME, LAYERS, NOT_SOUND, SOUND, all_tones, clean_tones, fit_length, layers_of, left_edge,
+                          next_id, with_layers)
 from roll.roll_shared import SLOT_COLORS
 from window import look
 from window.hz_gates import hz_keys, hz_made
@@ -23,6 +24,17 @@ DOUBLE_MS = double_click_ms()  # (the system's own setting)
 def plain_layers(hz):
     """hz with its layers list made even when it has one layer only (that one then gets a name and a colour)."""
     return hz if hz.get("layers") else dict(hz, layers=[{"name": "", "colour": 0}], layer=0)
+
+
+def new_entry(info):
+    """A new layer's list entry (info = the layers' entries so far): no name yet, the first colour not in use."""
+    used = {e.get("colour", 0) % len(SLOT_COLORS) for e in info}
+    return {"name": "", "colour": next((k for k in range(len(SLOT_COLORS)) if k not in used), len(info) % len(SLOT_COLORS))}
+
+
+def empty_layer(every):
+    """A new layer's Hz bass (every = layers_of's list): no notes, a new Hz bass's sound."""
+    return {k: v for k, v in every[0].items() if k not in SOUND}
 
 
 def layer_colour(hz, i):
@@ -310,12 +322,24 @@ class LayerStrip:
         hz = plain_layers(copy.deepcopy(hz))
         if len(hz["layers"]) >= LAYERS:
             return self.win.bell()
-        used = {e.get("colour", 0) % len(SLOT_COLORS) for e in hz["layers"]}
-        colour = next((k for k in range(len(SLOT_COLORS)) if k not in used), len(hz["layers"]) % len(SLOT_COLORS))
         every = layers_of(hz)
-        new = {k: v for k, v in every[0].items() if k not in SOUND}
-        hz = dict(hz, layers=hz["layers"] + [{"name": "", "colour": colour}])
-        self.put(with_layers(hz, every + [new], len(every)), tr("hz.step_layer_add"))
+        hz = dict(hz, layers=hz["layers"] + [new_entry(hz["layers"])])
+        self.put(with_layers(hz, every + [empty_layer(every)], len(every)), tr("hz.step_layer_add"))
+
+    def with_more(self, hz, more):
+        """hz (being saved by commit) with notes pasted from Domino put in: more[k] goes into the layer k + 1 places
+        under the picked one, new layers made under the last one as needed (like add)."""
+        hz = plain_layers(copy.deepcopy(hz))
+        every, info, picked = layers_of(hz), list(hz["layers"]), hz["layer"]
+        for k, tones in enumerate(more, 1):
+            i = picked + k
+            if i >= len(every):
+                every.append(empty_layer(every))
+                info.append(new_entry(info))
+            have = every[i].get("tones") or []
+            base = next_id(have)
+            every[i] = dict(every[i], tones=clean_tones(have + [dict(n, id=base + j) for j, n in enumerate(tones)]))
+        return with_layers(dict(hz, layers=info), every, picked)
 
     def remove(self, i):
         """Layer i goes, with its notes (the last one stays). No notes left in a Hz bass made with the Hz bass tool:

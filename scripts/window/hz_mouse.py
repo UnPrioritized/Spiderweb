@@ -6,10 +6,15 @@ import math
 import tkinter as tk
 from types import SimpleNamespace
 
+import numpy as np
+
+from files import clipboard
+from files.clipboard import copy_count
+from files.domino_clip import get_from_clipboard, read_notes
 from files.lang import tr
 from files.snap import snap_beats
 from files.system import double_click_ms
-from notes.hzbass import TUNE, can_slide, left_edge, next_id, pitch
+from notes.hzbass import LAYERS, TUNE, can_slide, left_edge, next_id, pitch
 from roll.roll_shared import (BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, SELECT_CURSOR, SHIFT, boxes_side,
                               boxes_upright, grid_span)
 
@@ -277,10 +282,13 @@ class HzMouse:
             return self.on_press(e, place=True)
         if hit and hit[0] == "tune" and not e.state & CTRL:  # the red line (tall rows): its tune back to 0 (user)
             return self.reset_tune(hit[1])
-        if (self.tool.get() == "select" and hit is None and self.app.hz_clip and not e.state & CTRL
-                and e.x >= self.kb_w and e.y >= self.ruler_h and not self.on_kept_box(self.kept_box(), e, hit)):
+        if (self.tool.get() == "select" and hit is None and (self.app.hz_clip or self.domino_newer())
+                and not e.state & CTRL and e.x >= self.kb_w and e.y >= self.ruler_h
+                and not self.on_kept_box(self.kept_box(), e, hit)):
             self.drop_drag()
-            return self.paste_notes(self.snap(self.beat_at(e.x), e))
+            at = self.snap(self.beat_at(e.x), e)
+            if self.paste_domino(at) or self.paste_notes(at):  # (what was copied last)
+                return
         self.on_press(e)
         if self.drag and hit and hit[0] in ("note", "tune", "left", "right") and not e.state & CTRL:
             self.drag["double"] = True
@@ -372,10 +380,76 @@ class HzMouse:
         """Ctrl+C: the effect points selected, else the notes selected (app.hz_clip, kept for any Hz bass). The
         last one copied is what Ctrl+V pastes."""
         if self.fx.copy_points():
-            self.app.hz_clip = None
+            self.copied(None)
         elif self.sel:
-            self.app.hz_clip = copy.deepcopy([self.tones[i] for i in sorted(self.sel)])
+            self.copied(copy.deepcopy([self.tones[i] for i in sorted(self.sel)]))
             self.fx.clip = None
+
+    def copied(self, notes):
+        """Something was copied here: notes (None: effect points). Notes copied in Domino after this win Ctrl+V."""
+        self.app.hz_clip = notes
+        self.app.hz_copied = copy_count() if clipboard.RAW else None
+
+    def domino_newer(self):
+        """True when the Windows clipboard has changed since the last copy here: notes copied in Domino there are
+        then what was copied last."""
+        return clipboard.RAW and copy_count() != self.app.hz_copied
+
+    def paste_domino(self, at):
+        """The notes copied in Domino, when copied after anything copied here, added from beat `at` (the copy's
+        start, or its first note: the main window's start dropdown) and selected, like paste_notes. Each copied
+        track goes into a layer: the first into the picked one, the next ones into the layers under it (new layers
+        made under the last, like Domino fills tracks downwards; empty tracks are skipped). Ticks are taken at the
+        project's PPQ; a note's velocity becomes its own loudness line (flat). False when there's nothing of
+        Domino's to paste."""
+        if not self.domino_newer() or not self.can_place():
+            return False
+        raw = get_from_clipboard()
+        if not raw:
+            if raw is None:
+                self.bell()
+                self.say(tr("project.couldn_t_use_the_clipboard_another"))
+            return raw is None
+        try:
+            notes, their_ppq = read_notes(raw)
+        except (ValueError, MemoryError) as e:
+            self.bell()
+            self.say(tr("hz.domino_bad", e=e if isinstance(e, ValueError) else tr("big_ask.out_of_memory")))
+            return True
+        if not len(notes):
+            self.bell()
+            self.say(tr("project.what_was_copied_in_domino_has"))
+            return True
+        if self.app.domino_start() == "note":
+            notes[:, 0] -= notes[:, 0].min()
+        ppq = self.app.ppq
+        tracks = np.unique(notes[:, 4]).tolist()
+        room = LAYERS - self.layers.picked()
+        left = len(tracks) - room
+        made = []
+        for k in tracks[:room]:
+            rows = notes[notes[:, 4] == k]
+            made.append([{"t": at + int(t) / ppq, "len": int(g) / ppq, "key": int(key), "cents": 0.0, "to": [],
+                          "vel": [[0.0, float(v)], [1.0, float(v)]]} for t, g, key, v, _ in rows.tolist()])
+        before = copy.deepcopy(self.tones)
+        self.sel_before = (before, self.sel_state())
+        base, first = next_id(self.tones), len(self.tones)
+        self.tones += [dict(n, id=base + j) for j, n in enumerate(made[0])]
+        self.sel = set(range(first, len(self.tones)))
+        self.more_layers = made[1:] or None
+        steps = len(self.app.undo_stack)
+        self.commit(tr("hz.step_paste_domino"), before)
+        if len(self.app.undo_stack) > steps:
+            n = sum(map(len, made))
+            text = tr("hz.domino_pasted_one") if n == 1 else tr("hz.domino_pasted", n=f"{n:,}")
+            if len(made) > 1:
+                text += tr("hz.domino_layers", n=len(made))
+            if left > 0:
+                text += tr("hz.domino_left_out", n=left, most=LAYERS)
+            if their_ppq and their_ppq != ppq:
+                text += tr("project.they_were_copied_at_ppq_ticks", their_ppq=their_ppq)
+            self.say(text)
+        return True
 
     def play_line_beat(self):
         """Where Ctrl+V pastes notes: the preview's play line (preview on), else the main window's play line;
