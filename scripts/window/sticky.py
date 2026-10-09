@@ -97,18 +97,46 @@ class Targets:
         self.owner = np.concatenate(owner) if owner else np.zeros(0, int)
         self.index = np.concatenate(index) if index else np.zeros(0, int)
 
-    def find(self, x, y, view, reach, extra_pts=(), extra_lines=()):
+    def near(self, pt, reach):
+        """The points and lines that may be within reach (board units) of pt (u, v): (point numbers, line numbers),
+        both empty when none. Found on a grid of squares the size of reach (each line marked in every square it
+        passes): moving many long strokes, find() then looks at only these (speed)."""
+        if getattr(self, "_cells_reach", None) != reach:
+            cells = {}
+            seg = self.seg
+            if len(seg):
+                n = np.maximum(1, np.ceil(np.hypot(seg[:, 2] - seg[:, 0], seg[:, 3] - seg[:, 1]) / reach)).astype(int)
+                rep = np.repeat(np.arange(len(seg)), n + 1)
+                t = (np.arange(len(rep)) - np.repeat(np.cumsum(n + 1) - (n + 1), n + 1)) / np.repeat(n, n + 1)
+                along = seg[rep, :2] + (seg[rep, 2:] - seg[rep, :2]) * t[:, None]
+                for c, s in zip(map(tuple, np.floor(along / reach).astype(np.int64).tolist()), rep.tolist()):
+                    cells.setdefault(c, (set(), set()))[1].add(s)
+            for c, p in zip(map(tuple, np.floor(self.pts / reach).astype(np.int64).tolist()), range(len(self.pts))):
+                cells.setdefault(c, (set(), set()))[0].add(p)
+            self._cells, self._cells_reach = cells, reach
+        cx, cy = int(np.floor(pt[0] / reach)), int(np.floor(pt[1] / reach))
+        ps, ss = set(), set()
+        for i in (-1, 0, 1):
+            for j in (-1, 0, 1):
+                got = self._cells.get((cx + i, cy + j))
+                if got:
+                    ps |= got[0]
+                    ss |= got[1]
+        return sorted(ps), sorted(ss)
+
+    def find(self, x, y, view, reach, extra_pts=(), extra_lines=(), only=None):
         """Where screen spot (x, y) sticks: (kind "point" / "cross" / "line", (u, v), pixels away) or None.
         view = (k, ox, oy): on screen x = ox + u * k, y = oy - v * k. extra_pts / extra_lines: the stroke being
-        drawn's own (polylines as point lists)."""
+        drawn's own (polylines as point lists). only: (point numbers, line numbers) to look at (near())."""
         k, ox, oy = view
-        pts = np.concatenate([self.pts, np.asarray(extra_pts, float).reshape(-1, 2)])
+        mp, ms = (slice(None), slice(None)) if only is None else only
+        pts = np.concatenate([self.pts[mp], np.asarray(extra_pts, float).reshape(-1, 2)])
         if len(pts):
             d = np.hypot(ox + pts[:, 0] * k - x, oy - pts[:, 1] * k - y)
             i = int(np.argmin(d))
             if d[i] <= reach:
                 return "point", (float(pts[i, 0]), float(pts[i, 1])), float(d[i])
-        seg, owner, index = [self.seg], [self.owner], [self.index]
+        seg, owner, index = [self.seg[ms]], [self.owner[ms]], [self.index[ms]]
         for n, line in enumerate(extra_lines):
             line = np.asarray(line, float).reshape(-1, 2)
             if len(line) > 1:

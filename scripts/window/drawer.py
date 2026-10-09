@@ -3,6 +3,7 @@
 import json
 import math
 import os
+import re
 import tkinter as tk
 from tkinter import ttk, messagebox
 from types import SimpleNamespace
@@ -756,6 +757,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
         def handler(e):
             if isinstance(e.widget, (tk.Entry, ttk.Entry)):
                 return None
+            if (self.knife or self.erasing()) and fn not in (self.undo, self.redo):  # (flip / turn / copy / paste
+                return "break"  # wait while a Slice line / eraser box is held; undo / redo drop it)
             fn()
             return "break"
         return handler
@@ -821,10 +824,23 @@ class Drawer(DrawerLayers, tk.Toplevel):
     def stick_targets(self, skip=frozenset(), skip_pts=frozenset()):
         """sticky.Targets of the strokes (but skip / skip_pts, and hidden ones), remembered until they change."""
         skip = skip | frozenset(i for i in range(len(self.strokes)) if self.is_hidden(i))
-        key = (json.dumps(self.strokes), skip, skip_pts)
+        # (the skipped strokes left out of the key: strokes being moved change every step, the rest don't)
+        key = (json.dumps([st if i not in skip else None for i, st in enumerate(self.strokes)]), skip, skip_pts)
         if self._stick_cache is None or self._stick_cache[0] != key:
-            self._stick_cache = (key, Targets(self.strokes, skip, skip_pts))
+            boxes = [np.r_[p.min(0), p.max(0)] for p in (np.asarray(stroke_points(self.strokes[i]), float).reshape(-1, 2)
+                     for i in range(len(self.strokes)) if i not in skip) if len(p)]
+            self._stick_cache = (key, Targets(self.strokes, skip, skip_pts), np.array(boxes).reshape(-1, 4))
         return self._stick_cache[1]
+
+    def near_others(self, line, reach):
+        """Could the line ((N, 2) board points) touch another stroke within reach (board units)? By their boxes
+        (stick_targets' strokes; call that first): moving many strokes, the far ones aren't checked (speed)."""
+        boxes = self._stick_cache[2]
+        if not len(boxes):
+            return False
+        lo, hi = line.min(0) - reach, line.max(0) + reach
+        return bool(((boxes[:, 0] <= hi[0]) & (boxes[:, 2] >= lo[0]) & (boxes[:, 1] <= hi[1])
+                     & (boxes[:, 3] >= lo[1])).any())
 
     def stick_at(self, x, y):
         """Where screen spot (x, y) sticks, or None. Leaves out what's being changed: the dragged points (a
@@ -928,10 +944,17 @@ class Drawer(DrawerLayers, tk.Toplevel):
         targets, view, best = self.stick_targets(frozenset(moving)), self.stick_view(), None
         k, ox, oy = view
         two_best = None
+        reach = REACH * self.scale / k
         for i, st in moving.items():
             line = stroke_points(st)
-            for _, (u, v) in key_points(st, line):
-                got = targets.find(ox + (u + du) * k, oy - (v + dv) * k, view, REACH * self.scale)
+            if len(moving) > 1 and not self.near_others(np.asarray(line, float).reshape(-1, 2) + (du, dv), reach):
+                continue
+            keys = [p for _, p in key_points(st, line)]
+            for u, v in keys:
+                only = targets.near((u + du, v + dv), reach) if len(keys) > 8 else None  # (many: only what's near,
+                if only is not None and not (only[0] or only[1]):  # speed)
+                    continue
+                got = targets.find(ox + (u + du) * k, oy - (v + dv) * k, view, REACH * self.scale, only=only)
                 if got and got[0] == "line" and st["kind"] == "ellipse":
                     continue  # (its left / right / top / bottom on a slanted line = crossing it: its line rests)
                 rank = got and (STICK_RANK[got[0]], -got[2])  # (a point first, then a crossing, then a line; nearest)
@@ -1304,7 +1327,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
     def delete_selected_stroke(self):
         if self.holding():
             return self.delete_dragged()
-        if self.movable() and self.tool.get() == "select":  # (locked / hidden ones stay: Del in the list)
+        if self.movable() and self.tool.get() in ("select", "slice"):  # (locked / hidden ones stay: Del in the list)
             self.push_undo()
             self.remove_strokes(self.movable())
             self.changed()
@@ -1926,13 +1949,13 @@ class Drawer(DrawerLayers, tk.Toplevel):
         return knives
 
     def split_here(self, i, e):
-        """Right-click > Split here on open stroke i: cut in two at the spot on it nearest the mouse's point (stuck
-        or on the grid like drawing, Shift = free), by a tiny cut line across it there; with Mirror, the mirrored
-        spot of whatever stroke lies there too."""
-        pt = self.event_pt(e)
-        if self.stuck and self.stuck[0] not in ("point", "cross"):  # (along a line: means nothing here, grid)
-            pt = self.event_pt(e, stick=False)
-        x, y = self.to_screen(*pt)
+        """Right-click > Split here on open stroke i: cut in two at the spot on it nearest the mouse (a point or a
+        crossing in sticking reach: there; Shift = never), by a tiny cut line across it there; with Mirror, its
+        mirror copies at the mirrored spot too."""
+        x, y = e.x, e.y
+        self.event_pt(e)
+        if self.stuck and self.stuck[0] in ("point", "cross"):  # (no grid: on a slanted line it's far off, user)
+            x, y = self.to_screen(*self.stuck[1])
         self.stuck = None
         pts = self.screen_points(stroke_points(self.strokes[i]))
         pts = list(zip(pts[::2], pts[1::2]))
@@ -1944,26 +1967,43 @@ class Drawer(DrawerLayers, tk.Toplevel):
         p = np.array(self.from_screen(ax + t * dx, ay + t * dy))
         n = np.array([-dy, -dx]) / math.sqrt(ll) * 1e-4  # (across the piece; screen y is down, board v up)
         a, b = list(p - n), list(p + n)
-        everyone = {j for j in range(len(self.strokes)) if self.pickable(j)}
-        knives = self.knife_copies(a, b)
-        self.cut_strokes([(ka, kb, {i} if n_ == 0 else everyone) for n_, (ka, kb) in enumerate(knives)], [],
-                         "drawer.split_nothing")
+        knives = [(a, b, {i})]
+        for fn in mirror_fns(self.mirror_mode()):  # (only the right-clicked stroke's mirror copies, user)
+            m = self.map_stroke(self.strokes[i], fn, exact=True)
+            copies = {j for j in range(len(self.strokes)) if self.pickable(j) and same_stroke(m, self.strokes[j])}
+            if copies:
+                knives.append((list(fn(*a)), list(fn(*b)), copies))
+        self.cut_strokes(knives, [], "drawer.split_nothing")
 
     def cut_strokes(self, knives, picked, nothing):
-        """Cuts by knives [(a, b, the strokes it may cut)]; picked = the strokes picked before (they stay picked).
-        nothing: the text key said when nothing was cut."""
+        """Cuts by knives [(a, b, the strokes it may cut)]; picked = the strokes picked before: the uncut ones stay
+        picked, the pieces aren't (user: a click then picks ONE piece to delete, and the next cut isn't held to
+        them). nothing: the text key said when nothing was cut."""
         before = self.snap()
         self.keep_names()  # (the pieces after a cut stroke shift the numbers: names stay as they are)
+        taken = set(self.layer_names())
+        slack = 1.5 * self.scale / self.px()  # (board units: a knife end stuck onto a curve's drawn pieces lies a
+        # hair off the curve itself)
         out, cut = [], set()
         for i, st in enumerate(self.strokes):
             pieces = [st]
-            for ka, kb, idx in knives:
-                if i in idx:
-                    pieces = [q for p in pieces for q in (slice_stroke(p, ka, kb) or [p])]
+            # (each knife judged on the stroke as it was: a closed one only by a knife all the way through it)
+            for ka, kb, idx in [k for k in knives if i in k[2] and slice_stroke(st, k[0], k[1], slack)]:
+                pieces = [q for p in pieces for q in (slice_stroke(p, ka, kb, slack) or [p])]
             if len(pieces) > 1:
                 lay = self.layer(i)
+                base, num = lay["name"], 1
+                m = re.fullmatch(r"(.*) \((\d+)\)", base)
+                if m:
+                    base, num = m.group(1), int(m.group(2))
                 for n, p in enumerate(pieces):
-                    p["layer"] = dict(lay, name=lay["name"] if n == 0 else f"{lay['name']} ({n + 1})")
+                    name = lay["name"]
+                    if n:  # (the next free "Line 3 (n)")
+                        while f"{base} ({num})" in taken or num < 2:
+                            num += 1
+                        name = f"{base} ({num})"
+                        taken.add(name)
+                    p["layer"] = dict(lay, name=name)
                 cut.add(i)
             out.append(pieces)
         if not cut:
@@ -1974,7 +2014,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self.strokes, new_idx, k = [], set(), 0
         for i, pieces in enumerate(out):
             for p in pieces:
-                if i in cut or i in picked:
+                if i in picked and i not in cut:
                     new_idx.add(k)
                 self.strokes.append(p)
                 k += 1

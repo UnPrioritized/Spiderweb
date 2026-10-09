@@ -205,26 +205,30 @@ def stroke_pieces(st, poly, a, b, us=None):
     return [dict(keep, kind="poly", pts=[list(pt) for pt in p]) for p in pieces]
 
 
-def slice_stroke(st, a, b):
+def slice_stroke(st, a, b, slack=0.0):
     """The drawer's Slice: one stroke cut along the segment a-b -> its pieces (keeping its role, colour and layer),
     or None when it isn't cut. A closed stroke (circle, square...) is cut only when the segment goes all the way
-    across it (user, like the piano roll); an open one wherever the segment crosses it (not at its own ends)."""
+    across it (user, like the piano roll); an open one wherever the segment crosses it (not at its own ends).
+    slack: how far past its ends (board units) the segment still counts, for a curve (an end stuck onto the
+    points it's drawn with lies a hair off the curve itself)."""
     poly = stroke_points(st)
     if len(poly) < 2:
         return None
     a, b = np.asarray(a, float), np.asarray(b, float)
-    if np.hypot(*(b - a)) < EPS:
+    length = np.hypot(*(b - a))
+    if length < EPS:
         return None
+    far = 1e-6 + slack / length  # (in s along a-b)
     closed = is_closed(poly)
     if closed:
         got = crossings(poly, a, b, whole_line=True)
-        if len(got) < 2 or any(s < -1e-6 or s > 1 + 1e-6 for _, s in got):
+        if len(got) < 2 or any(s < -far or s > 1 + far for _, s in got):
             return None
     us = None
     if st["kind"] == "curve" and exact(st):
         found = [(u, s) for u, _, s in curve_cuts(st["pts"], a, b)]
         if not closed:
-            found = [(u, s) for u, s in found if -1e-6 <= s <= 1 + 1e-6]
+            found = [(u, s) for u, s in found if -far <= s <= 1 + far]
         us = [u for u, _ in found]
     pieces = stroke_pieces(st, poly, a, b, us)
     pieces = [p for p in pieces if len(p["pts"]) >= 2
