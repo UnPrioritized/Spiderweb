@@ -18,6 +18,7 @@ import numpy as np
 
 from files.lang import tr
 from files.synth import RATE, Player, Synth, SynthError, events
+from notes.engine import CLASH
 from notes.hzbass import all_tones, left_edge
 
 CHUNK = 2.0  # seconds of sound made in one piece
@@ -174,13 +175,16 @@ class Preview:
             ppq, bpm, _ = self.app.read_project()
         except ValueError:
             return
-        notes = self.app.notes_of(sh) if sh is not None and all_tones(sh.get("hz") or {}) else None  # (any layer's)
+        notes, tracks = (self.app.notes_tracks(sh) if sh is not None and all_tones(sh.get("hz") or {})  # (any layer's)
+                         else (None, None))
         shape = (id(sh), left_edge(sh)) if sh is not None else None
         if notes is self.notes and (ppq, bpm) == (self.ppq, self.bpm) and shape == self.shape:
             return
         old, same_time = self.ev, (ppq, bpm) == (self.ppq, self.bpm)
         self.notes, self.ppq, self.bpm, self.shape = notes, ppq, bpm, shape
-        ev = events(notes, ppq, bpm) if notes is not None and len(notes) else None
+        # (a layer's notes clashing with another's: on another channel, as in the MIDI)
+        chans = np.asarray(tracks) // CLASH if tracks is not None and len(tracks) else None
+        ev = events(notes, ppq, bpm, chans) if notes is not None and len(notes) else None
         if ev is None or len(ev) <= 3:  # (no notes, or only ones above key 127, which can't sound: nothing to play)
             self.ev, self.span, self.last = None, (0, 0), 0
             self.clear()
@@ -194,13 +198,13 @@ class Preview:
             return self.set_end()
         n = min(len(old), len(ev))  # the changed stretch: from the first event that differs to the last one
         a, b = old[:n], ev[:n]
-        diff = np.flatnonzero((a["tick"] != b["tick"]) | (a["param"] != b["param"]))
+        diff = np.flatnonzero((a["tick"] != b["tick"]) | (a["param"] != b["param"]) | (a["chan"] != b["chan"]))
         first = int(diff[0]) if len(diff) else n
         if first == len(old) == len(ev):
             return self.set_end()
         a, b = old[::-1][:n], ev[::-1][:n]
-        diff = np.flatnonzero((a["tick"] != b["tick"]) | (a["param"] != b["param"]))
-        last = int(diff[0]) if len(diff) else n
+        diff = np.flatnonzero((a["tick"] != b["tick"]) | (a["param"] != b["param"]) | (a["chan"] != b["chan"]))
+        last =int(diff[0]) if len(diff) else n
         lo = min(int(old["tick"][min(first, len(old) - 1)]), int(ev["tick"][min(first, len(ev) - 1)]))
         hi = max(int(old["tick"][max(len(old) - 1 - last, 0)]), int(ev["tick"][max(len(ev) - 1 - last, 0)]))
         self.clear(self.frames(lo), self.frames(hi) + TAIL * RATE)

@@ -17,12 +17,15 @@ into the shape), hz_sound.py (the key held, the preview), hz_layers.py (the laye
 import os
 import re
 import tkinter as tk
+
+import numpy as np
 from tkinter import font as tkfont
 from tkinter import ttk
 
 from files.about import ICONS
 from files.lang import tr
 from files.mathexpr import fmt
+from notes.engine import CLASH
 from notes.hzbass import AUTO, AUTO_MOST, FX, all_tones, clean_tones, left_edge
 from roll.roll_shared import grab_while_panning
 from roll.zoombar import add_zoom_bars
@@ -196,6 +199,9 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.stale = ttk.Label(f, text=tr("hz.stale"), foreground=RED)
         self.stale_btn = ttk.Button(f, text=tr("panel_custom.hz_update"), command=app.update_hz, takefocus=False)
         self.stale_shown = False
+        # two layers on the same key at the same time: the later layer's notes go on another channel, said in orange
+        self.clash = ttk.Label(f, text="", foreground=look.WARN)
+        Tooltip(self.clash, tr("hz.clash_tip"))
         f = piece("right")
         b = ttk.Checkbutton(f, text=tr("hz.layers_btn"), variable=app.hz_layers, command=self.on_layers,
                             style="Toolbutton", takefocus=False)
@@ -329,6 +335,7 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.show_auto()
         self.what.config(text=text)
         self.show_stale()
+        self.show_clash(sh)
         self.after_idle(self.layout)  # (its width changed)
         self.grow_box.config(state="normal" if sh is not None else "disabled")
         if bool(self.layers.box.winfo_manager()) != self.app.hz_layers.get():  # (a project opened)
@@ -352,6 +359,28 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
             self.stale.pack(side="left", padx=(0, 6))
         else:
             self.what.pack(side="left", padx=(0, 10))
+        if self.clash.winfo_manager():  # (the orange text stays after them)
+            self.clash.pack_forget()
+            self.clash.pack(side="left", padx=(0, 10))
+        self.after_idle(self.layout)
+
+    def show_clash(self, sh):
+        """The orange text while notes of a layer sound on a key another layer sounds at the same time: how many,
+        and that they go on another channel (engine.layered_notes). Not while the notes wait for a slow drag."""
+        if self.app.notes_late:
+            return
+        n = 0
+        if sh is not None and len((sh.get("hz") or {}).get("layers") or ()) > 1:
+            tracks = self.app.notes_tracks(sh)[1]
+            n = int(np.count_nonzero(np.asarray(tracks) >= CLASH)) if tracks is not None else 0
+        text = tr("hz.clash_one") if n == 1 else tr("hz.clash", n=f"{n:,}") if n else ""
+        if text == self.clash.cget("text"):
+            return
+        self.clash.config(text=text)
+        if not text:
+            self.clash.pack_forget()
+        elif not self.clash.winfo_manager():
+            self.clash.pack(side="left", padx=(0, 10))
         self.after_idle(self.layout)
 
     def before_restore(self):

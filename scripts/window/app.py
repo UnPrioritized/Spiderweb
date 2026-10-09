@@ -21,7 +21,7 @@ from window import big_ask, look
 from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
-from notes.engine import (KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, point_names,
+from notes.engine import (CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, point_names,
                           render, shape_key, slot_track_channel)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
@@ -113,8 +113,9 @@ def all_notes(shapes, ppq, keys, mode, split, notes_tracks):
     got = [notes_tracks(sh) for sh in shapes]
     # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
     # merged into the last (pasted notes keep their tracks)
-    wanted = [0 if t is None or "notes" in sh else len(np.unique(t)) for sh, (_, t) in zip(shapes, got)]
-    got = [(n, capped_colours(t) if w > COLOURS else t) for (n, t), w in zip(got, wanted)]
+    # (a Hz bass layer's notes clashing with another's: another channel, not another colour asked for)
+    wanted = [0 if t is None or "notes" in sh else len(np.unique(np.asarray(t) % CLASH)) for sh, (_, t) in zip(shapes, got)]
+    got = [(n, capped_colours(t % CLASH) + t // CLASH * CLASH if w > COLOURS else t) for (n, t), w in zip(got, wanted)]
     # (pictures using channel 10 too: one setting for the project, kept with every picture)
     use10 = next((sh["picture"]["set"].get("use10", False) for sh in shapes if "picture" in sh), False)
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],

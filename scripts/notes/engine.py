@@ -70,6 +70,8 @@ SHAPE_DEFAULTS = {"vel0": 127, "vel1": 127, "end_dot": False}
 # Every MIDI channel except 10 (drums). Each slot gets its own track (MIDI editors want one channel per track):
 # slot 0 = track 1 channel 1, slot 9 = track 10 channel 11, slot 15 = track 16 channel 1 again, ...
 CHANNELS = [c for c in range(16) if c != 9]
+CLASH = 1 << 16  # a track number this or past it: a Hz bass layer's note clashing with another layer's (layered_notes):
+#                  its track // CLASH = how many channels past the shape's own (in every Channels mode)
 
 
 # ---------------------------------------------------------------- shapes
@@ -624,14 +626,52 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
 
 
 def layered_notes(sh, ppq, keys):
-    """_notes_tracks of a Hz bass with layers: each layer heard makes its notes as a Hz bass of its own, in order."""
+    """_notes_tracks of a Hz bass with layers: each layer heard makes its notes as a Hz bass of its own, in order.
+    A note on a key an earlier layer sounds at the same time goes on another channel (user): its track + CLASH x its
+    clash_levels level."""
     got = [_notes_tracks(dict(sh, hz=hz), ppq, keys) for hz in heard_layers(sh["hz"])]
     if not got:
         return np.zeros((0, 4), np.int64), None
     notes = np.concatenate([n for n, _ in got])
-    if all(t is None for _, t in got):
+    levels = np.concatenate(clash_levels([n for n, _ in got]))
+    if all(t is None for _, t in got) and not levels.any():
         return notes, None
-    return notes, np.concatenate([np.zeros(len(n), np.int64) if t is None else np.asarray(t) for n, t in got])
+    tracks = np.concatenate([np.zeros(len(n), np.int64) if t is None else np.asarray(t, np.int64) for n, t in got])
+    return notes, tracks + levels * CLASH
+
+
+def clash_levels(lists):
+    """Note lists ((start, end, key, ...) rows), in order -> per list, each note's level: 0 = no note of an earlier
+    list on its key at the same time, else the lowest level where none is (notes touching end to start don't clash)."""
+    out = [np.zeros(len(n), np.int64) for n in lists]
+    if len(lists) < 2:
+        return out
+    span = max([int(n[:, 1].max()) for n in lists if len(n)] or [0]) + 1
+    placed = []  # per level: its notes' key * span + start (sorted), and the latest end so far on that key
+    for notes, lv in zip(lists, out):
+        left = np.arange(len(notes))
+        level = 0
+        while len(left):
+            q = notes[left]
+            if level < len(placed):
+                at, ends, keys = placed[level]
+                i = np.searchsorted(at, q[:, 2] * span + q[:, 1], "left") - 1
+                j = np.maximum(i, 0)
+                hit = (i >= 0) & (keys[j] == q[:, 2]) & (ends[j] > q[:, 0])
+            else:
+                hit = np.zeros(len(q), bool)
+            free = left[~hit]
+            lv[free] = level
+            if len(free):
+                a = notes[free][:, :3]
+                if level < len(placed):  # (its notes back with their latest ends: the running max stays the same)
+                    at, ends, keys = placed[level]
+                    a = np.concatenate([np.column_stack([at % span, ends, keys]), a])
+                a = a[np.lexsort((a[:, 0], a[:, 2]))]
+                placed[level:level + 1] = [(a[:, 2] * span + a[:, 0], running_max(a[:, 1], a[:, 2]), a[:, 2])]
+            left = left[hit]
+            level += 1
+    return out
 
 
 def _notes_tracks(sh, ppq, keys):
@@ -992,9 +1032,10 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
             unit_slots = unit_slots + (unit_slots + 6) // 15
         slot_of = [pin if u is None else unit_slots[u] for u, pin in zip(unit_of, pinned)]
         count = int(unit_slots.max()) + 1 if len(units) else 0
-    else:
-        slot_of = [0 if pin is None else pin for pin in pinned]
-        count = 1 if any(p is None for p in pinned) else 0
+    else:  # (a Hz bass layer's clashing notes: slots of their own here too)
+        slot_of = [pin if pin is not None else np.asarray(tr, np.int64) // CLASH if tr is not None and len(tr) else 0
+                   for pin, tr in zip(pinned, tracks)]
+        count = max([int(np.max(s)) + 1 for s, p in zip(slot_of, pinned) if p is None] or [0])
     count = max(count, top)
     notes = np.empty((sum(len(lst) for lst in note_lists), 6), np.int64)
     at = 0

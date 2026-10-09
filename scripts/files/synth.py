@@ -136,11 +136,13 @@ def _load():
     return _dlls
 
 
-def events(notes, ppq, bpm):
-    """The notes (rows start, end, key, velocity, ... in ticks) as BASSMIDI's event list: one channel, program 0,
-    one tempo. At the same tick a note's end comes before the next start. Keys above 127 are left out."""
+def events(notes, ppq, bpm, chans=None):
+    """The notes (rows start, end, key, velocity, ... in ticks) as BASSMIDI's event list: one channel (chans: each
+    note's channel, never 10's), program 0, one tempo. At the same tick a note's end comes before the next start.
+    Keys above 127 are left out."""
     notes = np.asarray(notes)
-    notes = notes[notes[:, 2] <= 127] if len(notes) else notes.reshape(0, 4)
+    keep = notes[:, 2] <= 127 if len(notes) else np.zeros(0, bool)
+    notes = notes[keep] if len(notes) else notes.reshape(0, 4)
     n = len(notes)
     ev = np.zeros(2 * n + 3, EVENT)
     ev[0] = (_EV_TEMPO, int(round(60e6 / bpm)), 0, 0, 0)
@@ -150,6 +152,9 @@ def events(notes, ppq, bpm):
     body["tick"][:n], body["tick"][n:] = notes[:, 0], notes[:, 1]
     body["param"][:n] = notes[:, 2] | (np.clip(notes[:, 3], 1, 127) << 8)
     body["param"][n:] = notes[:, 2]  # (velocity 0 = the note ends)
+    if chans is not None:
+        c = np.minimum(np.asarray(chans, np.int64)[keep], 14)
+        body["chan"][:n] = body["chan"][n:] = c + (c >= 9)
     ev[2:-1] = body[np.lexsort((np.r_[np.ones(n), np.zeros(n)], body["tick"]))]
     ev[-1] = (_EV_END, 0, 0, ev[-2]["tick"], 0)
     return ev
