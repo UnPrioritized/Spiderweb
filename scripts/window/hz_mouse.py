@@ -14,12 +14,13 @@ from files.domino_clip import get_from_clipboard, read_notes
 from files.lang import tr
 from files.snap import snap_beats
 from files.system import double_click_ms
-from notes.hzbass import LAYERS, TUNE, bend_for, can_slide, left_edge, next_id, pitch
+from notes.hzbass import LAYERS, TUNE, bend_for, can_slide, handle_u, left_edge, next_id, pitch
 from roll.roll_shared import (BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, SELECT_CURSOR, SHIFT, boxes_side,
                               boxes_upright, grid_span)
 
 
 TUNE_STICK = 3.0  # cents: a dragged tune this near the exact tone sticks to it (at any zoom; was 5 px, user)
+BEND_STICK = 5  # px: a slide's bend handle this near straight sticks to it (Shift = free)
 DOTS = ("in", "out", "bend")  # what hit() calls a slide's dots: its two ends and its bend handle
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
 
@@ -265,7 +266,7 @@ class HzMouse:
                          "name": {"note": tr("hz.step_move"), "in": tr("hz.step_lead"), "out": tr("hz.step_lead"),
                                   "tune": tr("hz.step_tune"), "bend": tr("hz.step_bend")}.get(kind,
                                                                                               tr("hz.step_length"))}
-            if kind == "bend":  # (where the handle was grabbed: Shift moves it a quarter as far from there)
+            if kind == "bend":  # (where the handle was grabbed: it moves as far as the mouse from there)
                 self.drag.update(handle=next(h for h in self.handles() if h[3] is hit[2]))
             if kind == "note" and kept and i in sel0:  # a note the kept box selected: the box goes along
                 boxes = boxes_upright(kept)[0]
@@ -336,11 +337,13 @@ class HzMouse:
             d["slide"]["out"] = min(max(0.0, n["t"] + n["len"] - self.snap(beat, e)), n["len"])
         elif d["kind"] == "in":
             d["slide"]["in"] = min(max(0.0, self.snap(beat, e) - n["t"]), n["len"])
-        elif d["kind"] == "bend":  # how far from the first tone to the second the handle is dragged
-            hx, hy, _, s, k0, k1 = d["handle"]
-            y = hy + (e.y - d["y"]) * (0.25 if e.state & SHIFT else 1.0)
+        elif d["kind"] == "bend":  # how far from the first tone to the second the handle is dragged; it sticks to
+            hx, hy, _, s, k0, k1 = d["handle"]  # straight within BEND_STICK px (Shift = free, user)
+            y = hy + e.y - d["y"]
             key = self.top + 0.5 - (y - self.ruler_h) / self.sy  # (pitch_y turned round)
-            s["bend"] = bend_for(s, (key - k0) / (k1 - k0))
+            straight = self.pitch_y(k0 + (k1 - k0) * handle_u(s))
+            s["bend"] = (0.0 if abs(y - straight) <= BEND_STICK * self.s and not e.state & SHIFT
+                         else bend_for(s, (key - k0) / (k1 - k0)))
         elif d["kind"] == "tune":  # the note's own tune: whole cents, and it sticks to the exact tone within
             cents = d["orig"][d["i"]]["cents"] + (d["y"] - e.y) / self.sy * 100  # TUNE_STICK cents (Shift = free)
             if e.state & SHIFT:
