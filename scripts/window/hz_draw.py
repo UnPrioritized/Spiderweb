@@ -3,21 +3,28 @@ a path drawn over the notes becomes notes joined by slides that follow it (notes
 
 While it's drawn and afterwards, until it's made, the path stays editable (its points can be dragged; not a
 freehand one's) and the notes it will make show faded ("ghost" notes). It's made into real notes (one undo step) by
-Enter, a right-click, another tool, or starting a new path; Esc / Ctrl+Z throw it away. Like the main piano roll:
-Line = a drag or click-click; Polyline = click each point (or drag each piece), double-click ends it; Freehand = a
-drag. Points snap to the grid and to whole keys (Shift = free: any tick, any cent); freehand ones never snap.
-The path only goes forward in time (a pitch for each moment): a point can't go before the one before it."""
+Enter, a right-click, another tool, or starting a new path; Esc / Ctrl+Z throw it away. What's made is what's shown
+(a polyline / arc not finished yet: as it is with the mouse where it is). Like the main piano roll:
+Line / Curve = a drag or click-click; Polyline = click each point (or drag each piece), double-click ends it;
+Freehand = a drag; Arc = click start, a point it passes through, end (or drag start -> end, then click where it
+passes through). A curve is a pen-tool Bézier (notes/bezier.py): its handles dragged (Alt: a sharp corner),
+middle-click on it = a new anchor, right-click on an anchor / handle = removed / pulled in.
+Points snap to the grid and to whole keys (Shift = free: any tick, any cent); freehand ones never snap.
+The path is a pitch for each moment: a polyline's point can't go before the one before it; a curve or arc bending
+back in time changes the pitch at the same moment there (notes/hz_trace.py)."""
 
 import copy
 import math
 
 from files.lang import tr
+from notes.arc import arc_points, line_bezier
+from notes.bezier import add_anchor, can_delete, delete_point, drag_point, handle_lines, nearest, pen_handles, sample
 from notes.hz_trace import TOL, path_tones
-from roll.roll_shared import CTRL, SHIFT, fade
+from roll.roll_shared import ALT, CTRL, SHIFT, fade
 from window import look
 
-DRAW = ("line", "poly", "free")  # the drawing tools, in the list's order
-HOT = {"line": "l", "poly": "y", "free": "f"}  # (P stays the Pencil's: Polyline = Y, user)
+DRAW = ("line", "poly", "free", "curve", "arc")  # the drawing tools, in the list's order
+HOT = {"line": "l", "poly": "y", "free": "f", "curve": "c", "arc": "a"}  # (P stays the Pencil's: Polyline = Y, user)
 NEAR = 7  # px: a press this near a point of the path being edited grabs it
 FREE_STEP = 3  # px: a freehand path takes a point when the mouse has moved this far (like the main piano roll's)
 FREE_TOL = 1.5  # px: a freehand path's notes may be this far off it (a hand can't draw closer), at least TOL
@@ -26,7 +33,8 @@ FREE_TOL = 1.5  # px: a freehand path's notes may be this far off it (a hand can
 class HzDraw:
     def draw_tools(self):
         """[(key, label, hot key)] for the tools button (window/tool_picker.py)."""
-        names = {"line": tr("app.line"), "poly": tr("app.polyline"), "free": tr("app.freehand")}
+        names = {"line": tr("app.line"), "poly": tr("app.polyline"), "free": tr("app.freehand"),
+                 "curve": tr("app.curve"), "arc": tr("app.arc")}
         return [(k, names[k], HOT[k]) for k in DRAW]
 
     def draw_tips(self):
@@ -48,25 +56,41 @@ class HzDraw:
     def draft_xy(self, pt):
         return self.x_of(pt[0]), self.pitch_y(pt[1])
 
+    def draft_pt(self, x, y):
+        """draft_xy turned round."""
+        return [self.beat_at(x), self.top + 0.5 - (y - self.ruler_h) / self.sy]
+
     def grabbable(self):
         """The points of the path being edited that can be grabbed: [(number, x, y)] (a freehand path's: none; an
-        unfinished polyline's: not the one following the mouse)."""
+        unfinished polyline's / arc's: not the one following the mouse; a curve's: its pen-tool points)."""
         d = self.draft
-        if d is None or d["tool"] == "free" or d.get("waiting"):
+        if d is None or d["tool"] == "free" or d.get("waiting") or d.get("follow") is not None:
             return []
+        if d["tool"] == "curve":
+            return [(i, *self.draft_xy(d["pts"][i])) for i, _ in pen_handles(d["pts"])]
         pts = d["pts"][:-1] if d.get("open") else d["pts"]
         return [(i, *self.draft_xy(p)) for i, p in enumerate(pts)]
 
     def kept_order(self, i, pt):
-        """pt for point i of the path being drawn, kept between its neighbours in time (a line's two ends can
-        cross: it's put in order when made)."""
+        """pt for point i of the polyline being drawn, kept between its neighbours in time (a line's two ends can
+        cross: it's put in order when made; curves and arcs: as dragged)."""
         d = self.draft
-        if d["tool"] == "line":
+        if d["tool"] != "poly":
             return pt
         pts = d["pts"]
         lo = pts[i - 1][0] if i > 0 else 0.0
         hi = pts[i + 1][0] if i + 1 < len(pts) and not (d.get("open") and i + 1 == len(pts) - 1) else math.inf
         return [min(max(pt[0], lo), hi), pt[1]]
+
+    def path_of(self, d):
+        """The path drawn as [(beat, pitch)] in order."""
+        if d["tool"] == "line":
+            return sorted(d["pts"], key=lambda p: p[0])
+        if d["tool"] == "curve":
+            return sample(d["pts"], 48)
+        if d["tool"] == "arc" and len(d["pts"]) == 3:
+            return arc_points(d["pts"], d["k"])
+        return d["pts"]
 
     def draft_tones(self):
         """The notes the path being drawn would make (worked out once for each shape of it), or None (none yet:
@@ -76,23 +100,31 @@ class HzDraw:
             return None
         key = tuple(map(tuple, d["pts"])), self.app.ppq, len(self.tones)
         if d.get("made_for") != key:
-            pts = sorted(d["pts"], key=lambda p: p[0]) if d["tool"] == "line" else d["pts"]
-            d["made_for"], d["made"] = key, path_tones(pts, self.app.ppq, self.tones, d.get("tol", TOL))
+            d["made_for"], d["made"] = key, path_tones(self.path_of(d), self.app.ppq, self.tones, d.get("tol", TOL))
         return d["made"]
 
     # ------------------------------------------------------------ mouse
 
     def draw_press(self, e):
         """A press with a drawing tool: a point of the path being edited grabbed, the click-click line's end or the
-        polyline's next point put down, or a new path started (the one before made first). True when it was the
-        drawing tool's."""
+        polyline's / arc's next point put down, or a new path started (the one before made first). True when it was
+        the drawing tool's."""
         if not self.drawing() or e.state & CTRL or e.x < self.kb_w or e.y < self.ruler_h:
             return False
         d = self.draft
         if d is not None:
-            if d.get("waiting"):  # click-click line: this press puts the end down
-                d["pts"][-1] = self.path_point(e)
+            if d.get("waiting"):  # click-click line / curve: this press puts the end down
+                self.put_end(self.path_point(e))
                 d["waiting"] = False
+                return self.redraw() or True
+            if d.get("follow") is not None:  # arc: the point following the mouse is put down
+                i = d["follow"]
+                d["pts"][i] = self.path_point(e)
+                if len(d["pts"]) == 2:  # (clicked: start, through, end)
+                    d["pts"].append(list(d["pts"][i]))
+                    d["follow"] = 2
+                else:
+                    d["follow"] = None
                 return self.redraw() or True
             if d.get("open"):  # polyline: the point following the mouse is put down, a new one follows (a drag
                 i = len(d["pts"]) - 1  # moves it: the piece is dragged)
@@ -100,10 +132,10 @@ class HzDraw:
                 d["pts"].append(list(d["pts"][i]))
                 d.update(held=i + 1, x=e.x, y=e.y, moved=False)
                 return self.redraw() or True
-            near = [(math.hypot(x - e.x, y - e.y), i) for i, x, y in self.grabbable()]
+            near = [(math.hypot(x - e.x, y - e.y), -i, i) for i, x, y in self.grabbable()]  # (the last drawn on top)
             got = min(near) if near else None
             if got and got[0] <= NEAR * self.s:
-                d.update(held=got[1], x=e.x, y=e.y, moved=False)
+                d.update(held=got[2], x=e.x, y=e.y, moved=False)
                 return True
             self.make_draft()
         if not self.can_place():
@@ -117,8 +149,20 @@ class HzDraw:
             pt = self.path_point(e)
             self.draft = {"tool": tool, "pts": [pt, list(pt)], "held": 1, "x": e.x, "y": e.y, "moved": False,
                           "new": True, "open": tool == "poly"}
+            if tool == "curve":
+                self.draft.update(pts=line_bezier(pt, pt), held=3)
+            elif tool == "arc":
+                self.draft["k"] = self.sy / self.sx  # (round as it looks on screen now, like the main piano roll's)
         self.redraw()
         return True
+
+    def put_end(self, pt):
+        """The new line's / curve's end goes to pt (a curve stays straight until it's bent)."""
+        d = self.draft
+        if d["tool"] == "curve":
+            d["pts"] = line_bezier(d["pts"][0], pt)
+        else:
+            d["pts"][-1] = pt
 
     def draw_drag(self, e):
         d = self.draft
@@ -129,7 +173,13 @@ class HzDraw:
         if not d["moved"] and abs(e.x - d["x"]) < 4 and abs(e.y - d["y"]) < 4:
             return True
         d["moved"] = True
-        d["pts"][d["held"]] = self.kept_order(d["held"], self.path_point(e))
+        pt = self.path_point(e)
+        if d.get("new") and d["tool"] in ("line", "curve", "arc"):  # (the end of a new one)
+            self.put_end(pt)
+        elif d["tool"] == "curve":  # (a pen-tool point: a smooth anchor's other handle turns with it)
+            drag_point(d, d["held"], pt, e.state & ALT, self.draft_xy, self.draft_pt)
+        else:
+            d["pts"][d["held"]] = self.kept_order(d["held"], pt)
         self.redraw()
         self.show_status(e)
         return True
@@ -159,8 +209,14 @@ class HzDraw:
             if len(d["pts"]) < 2:
                 self.draft = None
         else:
-            if d.pop("new", False) and not d["moved"] and not d.get("open"):  # a click: the line's end follows
-                d["waiting"] = True  # the mouse until the next click
+            new = d.pop("new", False)
+            if new and d["tool"] == "arc":  # dragged start -> end: the point it passes through follows the mouse;
+                if d["moved"]:  # clicked: the next click is that point (then the end)
+                    a, b = d["pts"]
+                    d["pts"] = [a, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], b]
+                d["follow"] = 1
+            elif new and not d["moved"] and not d.get("open"):  # a click: the end follows the mouse until the next
+                d["waiting"] = True  # click
             d["held"] = None
         self.redraw()
         return True
@@ -187,20 +243,53 @@ class HzDraw:
         self.redraw()
 
     def draw_motion(self, e):
-        """The mouse moving with a drawing tool: the click-click line's end / the polyline's next point follows it;
-        the pointer."""
+        """The mouse moving with a drawing tool: the click-click line's / curve's end, the polyline's next point or
+        the arc's next point follows it; the pointer."""
         if not self.drawing():
             return False
         d = self.draft
-        if d is not None and (d.get("waiting") or d.get("open")) and d.get("held") is None:
-            i = len(d["pts"]) - 1
-            d["pts"][i] = self.kept_order(i, self.path_point(e))
-            self.redraw()
+        if d is not None and d.get("held") is None:
+            if d.get("waiting"):
+                self.put_end(self.path_point(e))
+                self.redraw()
+            elif d.get("follow") is not None:
+                d["pts"][d["follow"]] = self.path_point(e)
+                self.redraw()
+            elif d.get("open"):
+                i = len(d["pts"]) - 1
+                d["pts"][i] = self.kept_order(i, self.path_point(e))
+                self.redraw()
         inside = e.x >= self.kb_w and e.y >= self.ruler_h
         on_point = any(math.hypot(x - e.x, y - e.y) <= NEAR * self.s for _, x, y in self.grabbable())
-        self.canvas.config(cursor="fleur" if on_point and not (d or {}).get("open")
-                           else "crosshair" if inside and self.can_place() else "")
+        self.canvas.config(cursor="fleur" if on_point else "crosshair" if inside and self.can_place() else "")
         self.show_status(e)
+        return True
+
+    def draft_middle(self, e):
+        """A middle click on the curve being edited: a new anchor there (moved to the mouse, snapped). True when
+        it was on it."""
+        d = self.draft
+        if d is None or d["tool"] != "curve" or d.get("waiting") or d.get("held") is not None:
+            return False
+        seg, t, dist = nearest(d["pts"], self.draft_xy, e.x, e.y)
+        if dist > NEAR * self.s:
+            return False
+        add_anchor(d, seg, t, self.path_point(e), self.draft_xy)
+        self.redraw()
+        return True
+
+    def draft_menu(self, e):
+        """A right-click on a curve's point: an anchor between the ends goes, a handle is pulled back in (like the
+        main piano roll's curves). True when it did."""
+        d = self.draft
+        if d is None or d["tool"] != "curve":
+            return False
+        near = [(math.hypot(x - e.x, y - e.y), -i, i) for i, x, y in self.grabbable()]
+        got = min(near) if near else None
+        if not got or got[0] > NEAR * self.s or can_delete(d, got[2]) not in ("anchor", "handle"):
+            return False
+        delete_point(d, got[2], self.draft_xy)
+        self.redraw()
         return True
 
     # ------------------------------------------------------------ made / thrown away
@@ -240,7 +329,8 @@ class HzDraw:
     # ------------------------------------------------------------ drawing it
 
     def draw_draft(self, colour):
-        """The notes the path would make, faded, and the path over them with its points."""
+        """The notes the path would make, faded, and the path over them with its points (a curve's handle lines
+        too)."""
         d = self.draft
         if d is None:
             return
@@ -249,10 +339,15 @@ class HzDraw:
         for n in self.draft_tones() or ():
             x0, x1, y = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
             c.create_rectangle(x0, y + 1, max(x1, x0 + 2), y + self.sy - 1, fill=fill, outline=edge, dash=(3, 2))
-        if len(d["pts"]) > 1:
-            xy = [v for pt in d["pts"] for v in self.draft_xy(pt)]
-            c.create_line(*xy, fill=look.DRAFT_LINE, width=max(2, round(2 * s)))
+        path = self.path_of(d)
+        if len(path) > 1:
+            c.create_line(*[v for pt in path for v in self.draft_xy(pt)], fill=look.DRAFT_LINE,
+                          width=max(2, round(2 * s)))
+        if d["tool"] == "curve":
+            for a, h in handle_lines(d["pts"]):
+                c.create_line(*self.draft_xy(a), *self.draft_xy(h), fill=look.HANDLE)
         r = 3.5 * s
-        for _, x, y in self.grabbable():
-            c.create_rectangle(x - r, y - r, x + r, y + r, fill=look.HANDLE_FILL, outline=look.HANDLE,
-                               width=max(1, round(1.5 * s)))
+        for i, x, y in self.grabbable():
+            round_ = d["tool"] == "curve" and i % 3  # (a curve's handle points: round, like the main piano roll's)
+            (c.create_oval if round_ else c.create_rectangle)(x - r, y - r, x + r, y + r, fill=look.HANDLE_FILL,
+                                                               outline=look.HANDLE, width=max(1, round(1.5 * s)))
