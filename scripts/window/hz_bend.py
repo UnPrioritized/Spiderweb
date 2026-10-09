@@ -22,7 +22,7 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import fmt
 from notes.hzbass import SLIDE_BEND, bend_range, line_at, note_bend, pitch
-from roll.roll_shared import SELECT_CURSOR, SHIFT
+from roll.roll_shared import SHIFT
 from window import look
 
 NEAR = 6  # px: a press this near a bend point grabs it
@@ -61,7 +61,8 @@ class HzBend:
 
     def bend_squares(self):
         """[(x, y, tone number, piece number, keys at its start, at its end)]: the curve squares of the notes in view,
-        half way along each piece whose two points differ (Bend tool only)."""
+        half way along each piece whose two points differ (Bend tool only). None on a piece the Range cuts (a point
+        past it: the square would sit where the clipped line isn't, and a nudge would bend it a lot)."""
         if not self.bending():
             return []
         most, out = self.bend_most(), []
@@ -71,17 +72,17 @@ class HzBend:
             if j + 1 >= len(pts):
                 continue
             (u0, k0), (u1, k1) = pts[j][:2], pts[j + 1][:2]
-            k0, k1 = max(-most, min(most, k0)), max(-most, min(most, k1))
             x0, x1 = self.x_of(n["t"] + u0 * n["len"]), self.x_of(n["t"] + u1 * n["len"])
-            if abs(k1 - k0) < 1e-9 or x1 - x0 < SQUARE_ROOM * self.s:
+            if abs(k1 - k0) < 1e-9 or x1 - x0 < SQUARE_ROOM * self.s or max(abs(k0), abs(k1)) > most + 1e-9:
                 continue
-            k = max(-most, min(most, float(line_at(pts, (u0 + u1) / 2))))
+            k = float(line_at(pts, (u0 + u1) / 2))
             out.append(((x0 + x1) / 2, self.pitch_y(pitch(n) + k), i, j, k0, k1))
         return out
 
     def bend_hit(self, x, y):
         """What the Bend tool would take at (x, y): ("point", tone, point number), ("curve", tone, piece number) a
-        curve square, ("note", tone) on a note or on its bend line, or None."""
+        curve square, ("slide",) a slide's dot or square (those win over a note: the usual tools take them), ("note",
+        tone) on a note or on its bend line, or None."""
         r = NEAR * self.s
         for px, py, i, j in reversed(self.bend_points()):
             if abs(x - px) <= r and abs(y - py) <= r:
@@ -89,6 +90,9 @@ class HzBend:
         for sx, sy, i, j, *_ in self.bend_squares():
             if abs(x - sx) <= r and abs(y - sy) <= r:
                 return "curve", i, j
+        r = 6 * self.s  # (as hz_mouse.hit grabs them)
+        if any(abs(x - dx) <= r and abs(y - dy) <= r for dx, dy, *_ in self.dots() + self.handles()):
+            return ("slide",)
         if x < self.kb_w or y < self.ruler_h:
             return None
         most, beat = self.bend_most(), self.beat_at(x)
@@ -113,11 +117,12 @@ class HzBend:
 
     def bend_press(self, e):
         """A press with the Bend tool: on a point it's held; on a note a new point is put there and held (a note
-        without a bend gets a line at 0 from end to end first). False on empty space (a Select box)."""
+        without a bend gets a line at 0 from end to end first). False on empty space (a Select box) and on a slide's
+        dot / square (they're grabbed as with the other tools)."""
         if not self.bending():
             return False
         hit = self.bend_hit(e.x, e.y)
-        if hit is None:
+        if hit is None or hit[0] == "slide":
             return False
         kept = self.kept_box()
         self.press_was = (set(self.sel), kept)  # (what Esc / Ctrl+Z while held go back to: cancel_drag)
@@ -215,11 +220,11 @@ class HzBend:
     def bend_double(self, e):
         """A double-click with the Bend tool: on a curve square its piece is straight again (one step); on a note /
         point a second press like the first (no note deleted). False when the tool isn't on or it's on empty
-        space (that works as with the Select tool: pastes)."""
+        space (that works as with the Select tool: pastes) or a slide's dot / square (as with the other tools)."""
         if not self.bending():
             return False
         hit = self.bend_hit(e.x, e.y)
-        if not hit:
+        if not hit or hit[0] == "slide":
             return False
         if hit[0] != "curve":
             self.on_press(e)
@@ -246,13 +251,15 @@ class HzBend:
         return True
 
     def bend_motion(self, e):
-        """The pointer with the Bend tool: a hand on a point, the pencil on a note, the Select box's on empty space."""
+        """The pointer with the Bend tool: a hand on a point, up / down arrows on a curve square, the pencil on a
+        note. False elsewhere: the usual pointers (a slide's dot, the kept Select box's sides, the Select tool's on
+        empty space)."""
         if not self.bending():
             return False
         hit = self.bend_hit(e.x, e.y)
-        inside = e.x >= self.kb_w and e.y >= self.ruler_h
-        cursor = ("fleur" if hit and hit[0] == "point" else "sb_v_double_arrow" if hit and hit[0] == "curve"
-                  else self.pencil if hit else SELECT_CURSOR if inside else "")
+        if not hit or hit[0] == "slide":
+            return False
+        cursor = "fleur" if hit[0] == "point" else "sb_v_double_arrow" if hit[0] == "curve" else self.pencil
         self.canvas.config(cursor=cursor)
         self.show_status(e)
         return True
@@ -267,12 +274,13 @@ class HzBend:
 
     def bend_items(self, menu, i):
         """The right-click menu's Bend submenu for note i (and the other selected notes when it's one of them): Copy
-        bend (note i's), Paste bend (the one copied last, in any Hz bass; it stretches to each note), Clear bend."""
+        bend (note i's, or with none the first of those that has one), Paste bend (the one copied last, in any Hz
+        bass; it stretches to each note), Clear bend."""
         sub = tk.Menu(menu, tearoff=0)
         picked = sorted(self.sel) if i in self.sel else [i]
-        own = self.tones[i].get("bend")
-        sub.add_command(label=tr("hz.bend_copy"), command=lambda: self.copy_bend(i),
-                        state="normal" if own else "disabled")
+        own = next((j for j in [i] + picked if self.tones[j].get("bend")), None)
+        sub.add_command(label=tr("hz.bend_copy"), command=lambda: self.copy_bend(own),
+                        state="normal" if own is not None else "disabled")
         sub.add_command(label=tr("hz.bend_paste"), command=lambda: self.set_bends(picked, self.app.hz_bend_clip,
                                                                                    tr("hz.step_note_bend_paste")),
                         state="normal" if self.app.hz_bend_clip else "disabled")
@@ -338,7 +346,7 @@ def shaped(kind, length):
     if kind == "fall":  # (from the note, down at the end: slow first)
         return [[max(0.5, 1.0 - FALL[0] / length), 0.0, -0.6], [1.0, -FALL[1]]]
     rate, depth = WOBBLE  # wobble: quarter waves, each piece curved like a sine's (fast out of 0, slow at the tops)
-    count = min(256, max(4, round(4 * rate * length)))
+    count = min(WOBBLE_MOST, max(2, round(4 * rate * length)))  # (a note under a wave long: part of one)
     return [[k / count, (0.0, depth, 0.0, -depth)[k % 4], 0.6 if k % 2 == 0 else -0.6] for k in range(count + 1)]
 
 
@@ -346,6 +354,7 @@ SHAPES = ("scoop", "fall", "wobble")
 SCOOP = (0.125, 2.0)  # beats, keys below: Scoop up
 FALL = (0.25, 5.0)  # ... keys down at the end: Fall off
 WOBBLE = (4.0, 0.5)  # waves a beat, keys each way
+WOBBLE_MOST = 4096  # quarter waves at most on one note (256 beats at 4 a beat)
 
 
 def tidy_bend(n):

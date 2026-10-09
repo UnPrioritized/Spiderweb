@@ -64,7 +64,8 @@ def note_bend(n, beat, most):
 
 def bend_part(n, t, span):
     """The part of note n's bend line from beat t for span beats, as a line of its own (u 0..1 over that part), or
-    None when it has none: for a note cut at the left edge. A curved piece cut through becomes short straight ones."""
+    None when it has none or it's at 0 all along: for a note cut at the left edge. A curved piece cut through becomes
+    short straight ones; a jump (two points at one spot) stays a jump."""
     pts = n.get("bend")
     if not pts:
         return None
@@ -74,18 +75,27 @@ def bend_part(n, t, span):
     def at(u):
         return float(line_at(pts, min(1.0, max(0.0, u))))
     if u1 - u0 <= 1e-12:
-        return [[0.0, at(u0)]]
-    xs = [p[0] for p in pts]
-    cuts = sorted({u0, u1, *(x for x in xs if u0 < x < u1)})
-    out = []
-    for a, b in zip(cuts, cuts[1:]):
-        j = max(0, min(len(xs) - 2, int(np.searchsorted(xs, (a + b) / 2, side="right")) - 1))
-        inside = len(xs) > 1 and xs[j] <= (a + b) / 2 <= xs[j + 1]
-        if inside and bend_of(pts[j]) and (a, b) != (xs[j], xs[j + 1]):  # (a curve cut through: sampled)
-            out += [[(a + (b - a) * i / 8 - u0) / (u1 - u0), at(a + (b - a) * i / 8)] for i in range(8)]
-        else:
-            out.append([(a - u0) / (u1 - u0), at(a)] + ([bend_of(pts[j])] if inside and bend_of(pts[j]) else []))
-    return out + [[1.0, at(u1)]]
+        out = [[0.0, at(u0)]]
+    else:
+        xs = [p[0] for p in pts]
+        first = int(np.searchsorted(xs, u0, side="right")) - 1  # (the piece the cut starts in; -1: before the line)
+        # (the cut's start, every point inside (both of a jump's), its end; each with the curve of the piece after it
+        # and True when that piece is a whole one of the line's)
+        nodes = [(u0, at(u0), bend_of(pts[first]) if 0 <= first < len(pts) - 1 else 0.0, False)]
+        inside = [j for j, x in enumerate(xs) if u0 < x < u1]
+        for k, j in enumerate(inside):
+            nodes.append((xs[j], pts[j][1], bend_of(pts[j]) if j < len(pts) - 1 else 0.0, k + 1 < len(inside)))
+        nodes.append((u1, at(u1), 0.0, True))
+        out = []
+        for (a, va, curve, whole), (b, _, _, _) in zip(nodes, nodes[1:]):
+            if curve and not whole and b > a:  # (a curve cut through: sampled)
+                out.append([a, va])
+                out += [[a + (b - a) * i / 8, at(a + (b - a) * i / 8)] for i in range(1, 8)]
+            else:
+                out.append([a, va] + ([curve] if curve else []))
+        out.append([u1, nodes[-1][1]])
+        out = [[(p[0] - u0) / (u1 - u0), *p[1:]] for p in out]
+    return out if any(abs(p[1]) > 1e-9 for p in out) else None
 
 
 def bend_from(n):

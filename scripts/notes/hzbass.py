@@ -192,8 +192,10 @@ def shifted_hz(hz, d):
             continue
         if t < 0 and n.get("vel"):  # (cut at the edge: the rest of its loudness line)
             n["vel"] = vel_part(dict(n, t=n["t"] + d), 0.0, end)
-        if t < 0 and n.get("bend"):  # (... and of its bend line)
+        if t < 0 and n.get("bend"):  # (... and of its bend line; none left when that part is at 0 all along)
             n["bend"] = bend_part(dict(n, t=n["t"] + d), 0.0, end)
+            if n["bend"] is None:
+                del n["bend"]
         n["t"], n["len"] = max(0.0, t), max(MIN_LEN, end - max(0.0, t))
         tones.append(n)
     if "tones" in hz:

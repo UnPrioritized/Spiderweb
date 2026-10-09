@@ -166,8 +166,8 @@ class HzMouse:
                     return ("right" if x >= x1 - edge else "left"), i
                 if handle:
                     return handle
-                on_line = (self.tune_rows() and self.app.hz_line.get()
-                           and abs(y - self.pitch_y(pitch(n))) <= 4 * self.s)
+                on_line = (self.tune_rows() and self.app.hz_line.get()  # (where the line is drawn: its own bend)
+                           and abs(y - self.pitch_y(self.bent_pitch(n, self.beat_at(x)))) <= 4 * self.s)
                 return ("tune" if on_line else "note"), i
         return handle
 
@@ -190,7 +190,7 @@ class HzMouse:
         hit = self.hit(e.x, e.y)
         # a pencil where a press places a note (not on the keys or bar numbers, not with Ctrl: that's the box)
         inside = e.x >= self.kb_w and e.y >= self.ruler_h
-        empty = (SELECT_CURSOR if inside and self.tool.get() == "select" else
+        empty = (SELECT_CURSOR if inside and self.tool.get() in ("select", "bend") else
                  self.pencil if inside and self.can_place() and not e.state & CTRL else "")
         on_box = self.on_kept_box(self.kept_box(), e, hit)
         if on_box:
@@ -659,7 +659,7 @@ class HzMouse:
         hit = self.hit(e.x, e.y)
         if self.bending() and not (hit and hit[0] in DOTS):  # (the Bend tool: a note's bend line or curve square,
             got = self.bend_hit(e.x, e.y)  # wherever it has gone, is that note: its menu)
-            if got:
+            if got and got[0] != "slide":
                 hit = ("note", got[1])
         kept = self.kept_box() if not (hit and hit[0] in DOTS) else None
         # inside the kept Select boxes: the menu for all they selected; just one note: its own menu, anywhere in

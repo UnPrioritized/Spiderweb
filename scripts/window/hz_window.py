@@ -250,7 +250,8 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         for k, tool in (("p", "pencil"), ("P", "pencil"), ("v", "select"), ("V", "select"), ("b", "bend"), ("B", "bend"),
                         *((h, t) for t, _, hot in self.draw_tools() for h in (hot, hot.upper()))):
             c.bind(f"<KeyPress-{k}>", lambda e, tool=tool: None if e.state & CTRL else  # (Ctrl+Y: redo, the
-                   self.tool.set(tool) or self.on_motion(e) or "break")  # program's own shortcuts)
+                   "break" if self.drag or self.loudness.held() else  # program's own shortcuts; the mouse holding
+                   self.tool.set(tool) or self.on_motion(e) or "break")  # something: waits, like the other keys)
         self.bind("<Configure>", self.remember)
         self.protocol("WM_DELETE_WINDOW", self.close)
         c.focus_set()
