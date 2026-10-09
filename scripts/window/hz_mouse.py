@@ -185,6 +185,8 @@ class HzMouse:
         return (0, 0) if side == (0, 0) and not hit else None
 
     def on_motion(self, e):
+        if self.draw_motion(e):  # (a drawing tool: hz_draw.py)
+            return
         hit = self.hit(e.x, e.y)
         # a pencil where a press places a note (not on the keys or bar numbers, not with Ctrl: that's the box)
         inside = e.x >= self.kb_w and e.y >= self.ruler_h
@@ -207,6 +209,8 @@ class HzMouse:
     def on_press(self, e, place=False):
         """place: a new note even if there's one under the mouse (see on_double)."""
         self.canvas.focus_set()
+        if self.draw_press(e):  # (a drawing tool: hz_draw.py)
+            return
         self.placed = None
         self.fx.pressed = False  # (Delete is for the notes now)
         if self.fx.sel:  # (the effect points selected aren't any more)
@@ -309,6 +313,8 @@ class HzMouse:
             self.drag["double"] = True
 
     def on_drag(self, e):
+        if self.draw_drag(e):
+            return
         d = self.drag
         if not d:
             return
@@ -531,6 +537,8 @@ class HzMouse:
                     s["in"] = min(max(0.0, s0["in"] - (n["t"] - was["t"])), n["len"])
 
     def on_release(self, e):
+        if self.draw_release(e):
+            return
         d = self.drag
         self.drop_drag()
         if not d:
@@ -616,13 +624,13 @@ class HzMouse:
         return n["t"] + min(self.pending[1], n["len"])
 
     def toggle_tool(self, e=None):
-        """Double right click: Select <-> Pencil."""
-        if e is not None and self.drag:  # (the left button held: right clicks do nothing)
-            return
+        """Double right click: Select <-> the tool used last (Pencil or a drawing tool)."""
+        if e is not None and (self.drag or self.draft and self.draft.get("held") is not None):  # (the left
+            return  # button held: right clicks do nothing)
         if self.menu_wait:
             self.after_cancel(self.menu_wait)
             self.menu_wait = None
-        self.tool.set("pencil" if self.tool.get() == "select" else "select")
+        self.tool.set(self.last_tool if self.tool.get() == "select" else "select")
         if e is not None:
             self.on_motion(e)
 
@@ -631,7 +639,9 @@ class HzMouse:
         line): its tune, typed. On empty space the menu waits for the double click time first (a double right
         click switches the tool), and there's none when there's nothing to pick. None while the left button is held
         (user: the menu took its let-go, and the window and the piano roll no longer agreed)."""
-        if self.drag or self.loudness.held():
+        if self.drag or self.loudness.held() or self.draft and self.draft.get("held") is not None:
+            return
+        if self.make_draft():  # (a path drawn: made, like the main piano roll's right-click ending a shape)
             return
         hit = self.hit(e.x, e.y)
         kept = self.kept_box() if not (hit and hit[0] in DOTS) else None
@@ -869,7 +879,9 @@ class HzMouse:
         """Esc: a drag going on is called off (cancel_drag; in the effects pane too, like Ctrl+Z), else nothing is
         selected any more."""
         held = None if self.drag else self.held_fx()
-        if held:
+        if self.drop_draft():  # (a path drawn: thrown away)
+            pass
+        elif held:
             held()
         elif not self.cancel_drag() and not self.loudness.confirm():  # (the last loudness line's handles go first)
             self.select(())

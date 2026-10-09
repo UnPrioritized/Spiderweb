@@ -233,6 +233,7 @@ class HzView:
             r = 3 * s
             c.create_rectangle(x - r, y - r, x + r, y + r, fill=red if "bend" in sl else "", outline=red,
                                width=max(1, round(1.5 * s)))
+        self.draw_draft(own)  # (a path being drawn, and the notes it would make: hz_draw.py)
         d = self.drag  # the Select box (with the ones kept when Ctrl+drag adds it), or the last ones (kept_box)
         boxes = d["more"] + [b for b in (self.box_area(),) if b] if d and d["kind"] == "box" else self.kept_box() or []
         draw_boxes(c, [self.box_rect(b) for b in boxes], kb, rh, s)

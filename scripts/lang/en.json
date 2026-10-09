@@ -526,6 +526,8 @@
  "hz.repeats": "{n} notes on the piano roll",
  "hz.position": "beat {beat}   {key}   {hz} Hz",
  "hz.step_place": "Hz bass: place a note",
+ "hz.step_trace": "Hz bass: draw notes",
+ "hz.tool_line_tip": "Drag (or click, then click again) to draw a line: it becomes notes joined by a slide, so the tone glides along it.\nFaint notes show what it will make. Drag its ends to change it; Enter or a right-click makes the notes, Esc throws it away.\nIts ends snap to the grid and to whole keys (Shift: free).",
  "hz.step_move": "Hz bass: move notes",
  "hz.step_stretch": "Hz bass: stretch notes",
  "hz.step_duplicate": "Hz bass: copy notes",

@@ -39,12 +39,14 @@ from window.hz_preview import Preview
 from window.hz_synth import open_synth
 from window.preview_settings import PreviewSettings, auto_box, no_spaces, open_settings  # noqa: F401
 from window.snap_picker import SnapPicker
+from window.tool_picker import ToolPicker
 from window.widgets import Tooltip, placed
 # the window is made of these parts (each a mixin of HzWindow); shape_length / DOUBLE_MS are handed on from here
 from window.hz_view import RED, HzView, shape_length  # noqa: F401
 from window.hz_sound import HzSound
 from window.hz_gates import GATE_MODES, HzGates, gate_mode, hz_keys, hz_made
 from window.hz_mouse import DOUBLE_MS, HzMouse  # noqa: F401
+from window.hz_draw import DRAW, HzDraw
 
 POS = r"\d+x\d+\+-?\d+\+-?\d+"  # a remembered size and place
 
@@ -60,7 +62,7 @@ def open_hz(app):
     w.after_idle(lambda: w.winfo_exists() and w.canvas.focus_force())
 
 
-class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
+class HzWindow(HzDraw, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
@@ -120,6 +122,22 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
                                 takefocus=False)
             b.pack(side="left")
             Tooltip(b, tr(f"hz.{key}_tip"))
+        # the drawing tools (hz_draw.py): the one picked last + ▾ list + pinned ones, like the main toolbar's (user)
+        self.draft, self.last_tool = None, "pencil"  # (the path being drawn; what a double right-click goes back to)
+        self.picker = ToolPicker(app, f, self.draw_tools(), var=self.tool, owner=self, tips=self.draw_tips(),
+                                 group=(), fit=lambda: self.winfo_exists() and self.layout())
+        self.picker.frame.pack(side="left", padx=(2, 0))
+        kept = app.hz_tools
+        if kept.get("shown") in self.picker.label:
+            self.picker.last = kept["shown"]
+        if isinstance(kept.get("pins"), list):
+            self.picker.pins = [k for k in dict.fromkeys(kept["pins"]) if k in self.picker.label]
+        if kept.get("tool") in ("select", "pencil", *DRAW):
+            self.tool.set(kept["tool"])
+        if kept.get("last") in ("pencil", *DRAW):
+            self.last_tool = kept["last"]
+        self.picker.show()
+        self.tool.trace_add("write", lambda *a: self.on_tool())
         f = piece()
         ttk.Label(f, text=tr("app.snap")).pack(side="left", padx=(10, 0))
         SnapPicker(app, f, app.hz_snap).button.pack(side="left", padx=(4, 10))
@@ -221,12 +239,14 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
                                  or self.paste_domino(self.play_line_beat())  # mouse is held)
                                  or self.fx.paste_points() or self.paste_notes(self.play_line_beat()), "break")[1])
         c.bind("<Escape>", lambda e: self.on_escape())
-        c.bind("<Return>", lambda e: self.loudness.confirm())  # (the last loudness line drawn: done)
+        c.bind("<Return>", lambda e: self.make_draft() or self.loudness.confirm())  # (the path drawn: made; the
+        # last loudness line drawn: done)
         self.bind("<space>", self.on_space)  # (anywhere in the window: the buttons don't take the keyboard)
         for k in ("<Control-a>", "<Control-A>"):
             c.bind(k, lambda e: (self.drag or self.loudness.held() or self.select(range(len(self.tones))),
                                  "break")[1])
-        for k, tool in (("p", "pencil"), ("P", "pencil"), ("v", "select"), ("V", "select")):
+        for k, tool in (("p", "pencil"), ("P", "pencil"), ("v", "select"), ("V", "select"),
+                        *((h, t) for t, _, hot in self.draw_tools() for h in (hot, hot.upper()))):
             c.bind(f"<KeyPress-{k}>", lambda e, tool=tool: self.tool.set(tool) or self.on_motion(e) or "break")
         self.bind("<Configure>", self.remember)
         self.protocol("WM_DELETE_WINDOW", self.close)
@@ -264,8 +284,8 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         tones = clean_tones(hz.get("tones"))
         mark = (id(sh), hz.get("layer", 0)) if sh is not None else None  # (another layer: another set of notes)
         other = mark != self.shown
-        if other:  # another Hz bass: a slide's first mark goes (user)
-            self.shown, self.pending = mark, None
+        if other:  # another Hz bass: a slide's first mark goes (user), and a path being drawn
+            self.shown, self.pending, self.draft = mark, None, None
             self.fx.sel = set()  # (points picked on another layer's lines)
             for pane in (self.fx, self.synth_win.fx if self.synth_win else None):
                 if pane is not None and pane.asking:  # (Repeat every… was for the lines shown before)
@@ -433,7 +453,27 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
 
     # ------------------------------------------------------------ the preview (hz_preview.py)
 
+    def on_tool(self):
+        """Another tool: the path being drawn is made first; the tools button shows it."""
+        tool = self.tool.get()
+        if self.draft is not None and self.draft["tool"] != tool:
+            self.make_draft()
+        if tool != "select":
+            self.last_tool = tool
+        self.picker.tool_changed()
+        self.app.schedule_autosave()
+        self.point_again()
+
+    def tools_state(self):
+        """The tools button as the autosave keeps it (app.hz_tools)."""
+        return {"shown": self.picker.last, "pins": list(self.picker.pins), "tool": self.tool.get(),
+                "last": self.last_tool}
+
     def close(self):
+        if self.draft is not None:  # (a path drawn: made, as if another tool were picked)
+            self.make_draft()
+        self.app.hz_tools = self.tools_state()
+        self.picker.close()
         if self.settings_window and self.settings_window.winfo_exists():
             self.settings_window.destroy()
         if self.fx.asking:  # (the Repeat every… window)

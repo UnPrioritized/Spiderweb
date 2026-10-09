@@ -1,6 +1,7 @@
 """The drawing tools' button in the toolbar: the drawing tool picked last (lit while it's the tool; a click picks it
 again) and an arrow that opens the list of every drawing tool. A tool pinned in the list (the pin on its right)
-gets its own button next to it. The tool shown and the pins are remembered in the autosave (state / restore)."""
+gets its own button next to it. The tool shown and the pins are remembered in the autosave (state / restore).
+The main window's toolbar has one; the Hz bass window has its own (var / owner / tips / group / fit, user 2026-10-09)."""
 
 import base64
 import tkinter as tk
@@ -55,16 +56,22 @@ class RestTip(Tooltip):
 
 
 class ToolPicker:
-    """tools: [(key, label, hot)] in list order. Packs itself into parent; app.tool is the tool in use."""
+    """tools: [(key, label, hot)] in list order. Packs itself into parent; var (app.tool) is the tool in use. owner =
+    the window it's in (app), tips = {key: tip} (the Help topics' tips), group = tools pinned together (GROUP), fit =
+    called when its width changed (app.fit_toolbar)."""
 
-    def __init__(self, app, parent, tools):
+    def __init__(self, app, parent, tools, var=None, owner=None, tips=None, group=GROUP, fit=None):
         self.app, self.tools = app, tools
+        self.var, self.owner, self.group = var or app.tool, owner or app, group
+        self.tips = tips or {key: BY_ID[TOOL_TOPICS[key]]["tip"] for key, _, _ in tools}
+        self.fit = fit or app.fit_toolbar
+        self.tag = LIST_OPEN + str(id(self))  # (its own bind tag: two pickers' bindings would replace each other)
         self.label = {key: f"{label} ({hot.upper()})" for key, label, hot in tools}
-        self.last, self.pins, self.popup = FIRST, [], None
+        self.last, self.pins, self.popup = tools[0][0] if FIRST not in self.label else FIRST, [], None
         size = max(SIZE, round(SIZE * app.scale))
         self.pin_on, self.pin_off = _picture(size, look.rgb(look.ICON)), _picture(size, look.rgb(look.ICON_OFF))
         box = self.frame = ttk.Frame(parent)
-        self.main = ttk.Radiobutton(box, variable=app.tool, style="Toolbutton")
+        self.main = ttk.Radiobutton(box, variable=self.var, style="Toolbutton", takefocus=False)
         self.main.pack(side="left")
         self.main_tip = Tooltip(self.main, "")
         self.arrow_pic = _picture(size, look.rgb(look.ICON), _arrow_inside)  # (drawn, so it sits right in the middle)
@@ -75,11 +82,12 @@ class ToolPicker:
         self.group_box, self.group_lit = None, tk.BooleanVar(value=False)  # (the pinned group, see show_group)
         # a click anywhere else in Spiderweb only closes the list (the click itself does nothing else)
         self.tagged, self.held = [], False
-        app.bind_class(LIST_OPEN, "<ButtonPress>", self.press)
-        app.bind_class(LIST_OPEN, "<ButtonRelease>", self.release)
+        app.bind_class(self.tag, "<ButtonPress>", self.press)
+        app.bind_class(self.tag, "<ButtonRelease>", self.release)
         for b in (1, 2, 3):
-            app.bind_class(LIST_OPEN, f"<B{b}-Motion>", lambda e: "break")
-        app.bind("<Configure>", lambda e: e.widget is app and self.close(), add="+")  # (the window moved)
+            app.bind_class(self.tag, f"<B{b}-Motion>", lambda e: "break")
+        owner = self.owner
+        owner.bind("<Configure>", lambda e: e.widget is owner and self.close(), add="+")  # (the window moved)
         self.show()
 
     # ------------------------------------------------------------ the buttons
@@ -89,7 +97,7 @@ class ToolPicker:
         if self.last not in free and free:  # the button moves on to a tool that has no button of its own
             self.last = free[0]
         self.main.config(text=self.label[self.last], value=self.last)
-        self.main_tip.text = BY_ID[TOOL_TOPICS[self.last]]["tip"]
+        self.main_tip.text = self.tips[self.last]
         if not free:  # every tool pinned: only the arrow is left (user)
             self.main.pack_forget()
         elif not self.main.winfo_manager():
@@ -101,30 +109,30 @@ class ToolPicker:
             self.pinned.pack(side="left")
         self.group_box = None
         for key, _, _ in self.tools:
-            if key not in self.pins or key in GROUP[1:]:
+            if key not in self.pins or key in self.group[1:]:
                 continue
-            if key == GROUP[0]:  # (lit while any of the group is the tool: they all make custom shapes)
-                b = ttk.Checkbutton(self.pinned, text=self.label[key], variable=self.group_lit, style="Toolbutton",
-                                    command=lambda: self.app.tool.set(GROUP[0]))
+            if self.group and key == self.group[0]:  # (lit while any of the group is the tool: they all make
+                b = ttk.Checkbutton(self.pinned, text=self.label[key], variable=self.group_lit,  # custom shapes)
+                                    style="Toolbutton", command=lambda: self.var.set(self.group[0]))
             else:
-                b = ttk.Radiobutton(self.pinned, text=self.label[key], value=key, variable=self.app.tool,
-                                    style="Toolbutton")
+                b = ttk.Radiobutton(self.pinned, text=self.label[key], value=key, variable=self.var,
+                                    style="Toolbutton", takefocus=False)
             b.pack(side="left", padx=(2, 0))
-            Tooltip(b, BY_ID[TOOL_TOPICS[key]]["tip"])
-            if key == GROUP[0]:  # the rest of the group opens beside it while one of them is the tool
+            Tooltip(b, self.tips[key])
+            if self.group and key == self.group[0]:  # the rest of the group opens beside it while one of them is the tool
                 g = self.group_box = ttk.Frame(self.pinned)
                 self.group_after = b
                 ttk.Separator(g, orient="vertical").pack(side="left", fill="y", padx=(2, 1), pady=2)
-                for k in GROUP[1:]:
-                    b = ttk.Radiobutton(g, text=self.label[k], value=k, variable=self.app.tool, style="Toolbutton")
+                for k in self.group[1:]:
+                    b = ttk.Radiobutton(g, text=self.label[k], value=k, variable=self.var, style="Toolbutton")
                     b.pack(side="left", padx=(2, 0))
-                    Tooltip(b, BY_ID[TOOL_TOPICS[k]]["tip"])
+                    Tooltip(b, self.tips[k])
                 ttk.Separator(g, orient="vertical").pack(side="left", fill="y", padx=(3, 0), pady=2)
         self.show_group()
 
     def show_group(self):
         """The pinned group: Circle / Polygon beside Custom shape only while one of the three is the tool."""
-        on = self.app.tool.get() in GROUP
+        on = self.var.get() in self.group
         self.group_lit.set(on)
         g = self.group_box
         if g and on != bool(g.winfo_manager()):
@@ -132,11 +140,11 @@ class ToolPicker:
                 g.pack(side="left", after=self.group_after)
             else:
                 g.pack_forget()
-        self.app.after_idle(self.app.fit_toolbar)
+        self.owner.after_idle(self.fit)
 
     def tool_changed(self):
         """A drawing tool picked any way (list, key) shows on the button, unless it has its own pinned button."""
-        tool = self.app.tool.get()
+        tool = self.var.get()
         if tool in self.label and tool not in self.pins and tool != self.last:
             self.last = tool
             self.show()
@@ -147,11 +155,11 @@ class ToolPicker:
             self.close()
 
     def toggle_pin(self, key):
-        keys = GROUP if key in GROUP else (key,)  # (the group is pinned / unpinned together)
+        keys = self.group if key in self.group else (key,)  # (the group is pinned / unpinned together)
         if key in self.pins:
             self.pins = [k for k in self.pins if k not in keys]
-            if self.app.tool.get() in keys:  # the tool in use loses its own button: the main one shows it, lit
-                self.last = self.app.tool.get()
+            if self.var.get() in keys:  # the tool in use loses its own button: the main one shows it, lit
+                self.last = self.var.get()
         else:
             self.pins += [k for k in keys if k not in self.pins]
         self.show()
@@ -164,7 +172,7 @@ class ToolPicker:
         if self.popup:
             self.close()
             return
-        p = self.popup = tk.Toplevel(self.app)
+        p = self.popup = tk.Toplevel(self.owner)
         p.overrideredirect(True)
         self.list_box = tk.Frame(p, background=ROW_BG, relief="solid", borderwidth=1)
         self.list_box.pack()
@@ -180,7 +188,7 @@ class ToolPicker:
         while todo:
             w = todo.pop()
             if w is not p:
-                w.bindtags((LIST_OPEN,) + w.bindtags())
+                w.bindtags((self.tag,) + w.bindtags())
                 self.tagged.append(w)
                 todo += w.winfo_children()
 
@@ -195,7 +203,7 @@ class ToolPicker:
             return
         for w in self.list_box.winfo_children():
             w.destroy()
-        tool = self.app.tool.get()
+        tool = self.var.get()
         for key, _, _ in self.tools:
             bg = PICKED_BG if key == tool else ROW_BG
             name = tk.Label(self.list_box, text=self.label[key], anchor="w", background=bg, padx=10, pady=3)
@@ -210,12 +218,12 @@ class ToolPicker:
             # (let go somewhere else = nothing, like a menu)
             name.bind("<ButtonRelease-1>", lambda e, k=key: _let_go_on(e) and self.pick(k))
             pin.bind("<ButtonRelease-1>", lambda e, k=key: _let_go_on(e) and self.toggle_pin(k))
-            RestTip(name, BY_ID[TOOL_TOPICS[key]]["tip"], self.list_box)
+            RestTip(name, self.tips[key], self.list_box)
             RestTip(pin, tr("app.pin_tip"), self.list_box)
 
     def pick(self, key):
         self.close()
-        self.app.tool.set(key)
+        self.var.set(key)
 
     def press(self, e):
         """A click outside the list closes it and goes no further (on the arrow too: its click would open it again).
@@ -232,7 +240,7 @@ class ToolPicker:
     def untag(self):
         for w in self.tagged:
             try:
-                w.bindtags(tuple(t for t in w.bindtags() if t != LIST_OPEN))
+                w.bindtags(tuple(t for t in w.bindtags() if t != self.tag))
             except tk.TclError:  # (closed meanwhile)
                 pass
         self.tagged = []
@@ -256,8 +264,8 @@ class ToolPicker:
         pins = win.get("draw_tool_pins")
         if isinstance(pins, list):
             self.pins = [k for k in dict.fromkeys(pins) if isinstance(k, str) and k in self.label]
-            if any(k in self.pins for k in GROUP):
-                self.pins += [k for k in GROUP if k not in self.pins]
+            if any(k in self.pins for k in self.group):
+                self.pins += [k for k in self.group if k not in self.pins]
         # the tool in use, and the one a double right-click goes back to (the tool's own effects: App.__init__)
         tool = win.get("tool")
         if tool in self.label or tool in ("select", "slice"):

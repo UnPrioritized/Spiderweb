@@ -230,6 +230,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.hz_line = tk.BooleanVar(value=True)  # the Hz bass window shows its red line
         self.hz_fx = tk.BooleanVar(value=False)  # the Hz bass window shows its effects pane
         self.hz_layers = tk.BooleanVar(value=False)  # ... and its layers strip (off to start: plain Hz bass users, user)
+        self.hz_tools = {}  # ... its tools button: {"shown": the drawing tool on it, "pins": [...], "tool": in use}
         self.hz_loud = tk.BooleanVar(value=False)  # ... and its loudness pane (off to start, user)
         self.show_lines = tk.BooleanVar(value=True)
         self.show_notes = tk.BooleanVar(value=True)
@@ -2050,6 +2051,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         held = hz.held_fx()  # (the same for an effect's points and the synth window's knobs)
         if held:
             return None if redo else held()
+        if hz.draft is not None and (hz.draft.get("held") is not None or not redo):  # a path being drawn: it
+            return None if redo else (hz.drop_draft(), "break")[1]  # goes, nothing made (Ctrl+Y: nothing)
         if not redo and hz.pending:  # a slide started: just drop its mark
             hz.pending = None
             return hz.redraw()

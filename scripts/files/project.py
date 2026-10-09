@@ -375,7 +375,7 @@ class ProjectFiles:
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
                               "live": self.live.get(),
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
-                              "claw_window": self.claw_pos, "strum_window": self.strum_pos, "chop_window": self.chop_pos, "hz_window": self.hz_pos, "hz_fx_height": self.hz_fx_h, "hz_loud_height": self.hz_loud_h,"hz_preview": self.hz_preview,
+                              "claw_window": self.claw_pos, "strum_window": self.strum_pos, "chop_window": self.chop_pos, "hz_window": self.hz_pos, "hz_fx_height": self.hz_fx_h, "hz_loud_height": self.hz_loud_h,"hz_preview": self.hz_preview, "hz_tools": self.hz_window.tools_state() if self.hz_window else self.hz_tools,
                               "history_window": self.history_pos, "history_undocked": self.history_undocked,
                               "places": getattr(self, "window_places", {}),
                               **self.tips.state(), **self.updates.state(), **self.tool_picker.state()}
@@ -432,6 +432,8 @@ class ProjectFiles:
             self.tips.restore(win)
             self.updates.restore(win)
             self.tool_picker.restore(win)
+            if isinstance(win.get("hz_tools"), dict):  # (the Hz bass window's tools button: window/hz_draw.py)
+                self.hz_tools = win["hz_tools"]
             from window.widgets import placed
             geo = placed(self, win.get("geometry", "") if isinstance(win.get("geometry"), str) else "")
             if geo:
