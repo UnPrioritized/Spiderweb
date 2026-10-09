@@ -185,7 +185,7 @@ class HzMouse:
         return (0, 0) if side == (0, 0) and not hit else None
 
     def on_motion(self, e):
-        if self.draw_motion(e):  # (a drawing tool: hz_draw.py)
+        if self.draw_motion(e) or self.bend_motion(e):  # (a drawing tool: hz_draw.py; Bend: hz_bend.py)
             return
         hit = self.hit(e.x, e.y)
         # a pencil where a press places a note (not on the keys or bar numbers, not with Ctrl: that's the box)
@@ -216,6 +216,8 @@ class HzMouse:
         if self.fx.sel:  # (the effect points selected aren't any more)
             self.fx.sel = set()
             self.fx.redraw()
+        if not place and self.bend_press(e):  # (the Bend tool on a note: hz_bend.py)
+            return
         kept, self.box_kept, sel0 = self.kept_box(), None, set(self.sel)
         self.press_was = (sel0, kept)  # (what Esc / Ctrl+Z while the mouse is held go back to: cancel_drag)
         self.drop_drag()
@@ -240,7 +242,7 @@ class HzMouse:
                 return self.put_play_line(self.beat_at(e.x))
             if e.x < self.kb_w or e.y < self.ruler_h:
                 return
-            if e.state & CTRL or self.tool.get() == "select":  # a box that selects the notes it touches
+            if e.state & CTRL or self.tool.get() in ("select", "bend"):  # a box that selects the notes it touches
                 add = e.state & CTRL and self.tool.get() == "select"  # (Ctrl: added to the selection and the
                 base = set(self.sel) if add else set()  # boxes kept)
                 self.sel = set(base)
@@ -295,6 +297,8 @@ class HzMouse:
         Anywhere else, or with Ctrl, it's a press like any other."""
         if self.draw_double(e):  # (the polyline being drawn ends: hz_draw.py)
             return
+        if self.bending():  # (the Bend tool: a second press like the first; no note deleted)
+            return self.on_press(e)
         hit = self.hit(e.x, e.y)
         if (hit and hit[0] in ("note", "tune", "left", "right") and self.tones[hit[1]]["id"] == self.placed
                 and not e.state & CTRL and self.tool.get() == "pencil"):
@@ -315,7 +319,7 @@ class HzMouse:
             self.drag["double"] = True
 
     def on_drag(self, e):
-        if self.draw_drag(e):
+        if self.draw_drag(e) or self.bend_drag(e):
             return
         d = self.drag
         if not d:
@@ -539,7 +543,7 @@ class HzMouse:
                     s["in"] = min(max(0.0, s0["in"] - (n["t"] - was["t"])), n["len"])
 
     def on_release(self, e):
-        if self.draw_release(e):
+        if self.draw_release(e) or self.bend_release(e):
             return
         d = self.drag
         self.drop_drag()
@@ -649,6 +653,8 @@ class HzMouse:
             return
         if self.draft_menu(e) or self.make_draft():  # (a curve's point: removed; else a path drawn: made, like
             # the main piano roll's right-click ending a shape)
+            return
+        if self.bend_menu(e):  # (the Bend tool on a bend point: it goes)
             return
         hit = self.hit(e.x, e.y)
         kept = self.kept_box() if not (hit and hit[0] in DOTS) else None
@@ -802,6 +808,8 @@ class HzMouse:
             return
         if d["kind"] == "new":
             return self.cancel_drag()
+        if d["kind"] == "bendpt":  # (a bend point held: it goes)
+            return self.bend_delete_dragged()
         self.end_drag()
         if d["kind"] in DOTS:
             for n in self.tones:

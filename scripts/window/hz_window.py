@@ -47,6 +47,7 @@ from window.hz_sound import HzSound
 from window.hz_gates import GATE_MODES, HzGates, gate_mode, hz_keys, hz_made
 from window.hz_mouse import DOUBLE_MS, HzMouse  # noqa: F401
 from window.hz_draw import DRAW, HzDraw
+from window.hz_bend import HzBend
 
 POS = r"\d+x\d+\+-?\d+\+-?\d+"  # a remembered size and place
 
@@ -62,7 +63,7 @@ def open_hz(app):
     w.after_idle(lambda: w.winfo_exists() and w.canvas.focus_force())
 
 
-class HzWindow(HzDraw, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
+class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
@@ -117,7 +118,7 @@ class HzWindow(HzDraw, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
 
         self.tool = tk.StringVar(value="pencil")
         f = piece()
-        for key in ("select", "pencil"):
+        for key in ("select", "pencil", "bend"):
             b = ttk.Radiobutton(f, text=tr("hz." + key), value=key, variable=self.tool, style="Toolbutton",
                                 takefocus=False)
             b.pack(side="left")
@@ -133,9 +134,9 @@ class HzWindow(HzDraw, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         pins = app.hz_tools.get("pins")
         if isinstance(pins, list):
             self.picker.pins = [k for k in dict.fromkeys(p for p in pins if isinstance(p, str)) if k in self.picker.label]
-        if kept.get("tool") in ("select", "pencil", *DRAW):
+        if kept.get("tool") in ("select", "pencil", "bend", *DRAW):
             self.tool.set(kept["tool"])
-        if kept.get("last") in ("pencil", *DRAW):
+        if kept.get("last") in ("pencil", "bend", *DRAW):
             self.last_tool = kept["last"]
         self.picker.show()
         self.tool.trace_add("write", lambda *a: self.on_tool())
@@ -246,7 +247,7 @@ class HzWindow(HzDraw, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         for k in ("<Control-a>", "<Control-A>"):
             c.bind(k, lambda e: (self.drag or self.loudness.held() or self.select(range(len(self.tones))),
                                  "break")[1])
-        for k, tool in (("p", "pencil"), ("P", "pencil"), ("v", "select"), ("V", "select"),
+        for k, tool in (("p", "pencil"), ("P", "pencil"), ("v", "select"), ("V", "select"), ("b", "bend"), ("B", "bend"),
                         *((h, t) for t, _, hot in self.draw_tools() for h in (hot, hot.upper()))):
             c.bind(f"<KeyPress-{k}>", lambda e, tool=tool: None if e.state & CTRL else  # (Ctrl+Y: redo, the
                    self.tool.set(tool) or self.on_motion(e) or "break")  # program's own shortcuts)
@@ -464,6 +465,7 @@ class HzWindow(HzDraw, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
             self.last_tool = tool
         self.picker.tool_changed()
         self.app.schedule_autosave()
+        self.redraw()  # (the Bend tool shows the notes' bend points)
         self.point_again()
 
     def tools_state(self):

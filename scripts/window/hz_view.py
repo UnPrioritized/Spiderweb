@@ -8,7 +8,7 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import fmt
-from notes.hzbass import (HZ_DEFAULTS, all_tones, auto_state, can_slide, glide, handle_u, heard, hz_of, layers_of,
+from notes.hzbass import (HZ_DEFAULTS, all_tones, auto_state, bend_range, can_slide, glide, handle_u, heard, hz_of, layers_of,
                           left_edge, links, pitch, slide_knob, slide_part)
 from roll.roll_shared import ALT, CTRL, SELECTED_COLOR, SHIFT, SLOT_COLORS, draw_boxes, fade, note_name
 from window import look
@@ -233,6 +233,7 @@ class HzView:
             r = 3 * s
             c.create_rectangle(x - r, y - r, x + r, y + r, fill=red if "bend" in sl else "", outline=red,
                                width=max(1, round(1.5 * s)))
+        self.draw_bends()  # (the Bend tool: each note's own bend line and points, over the slides', hz_bend.py)
         self.draw_draft(own)  # (a path being drawn, and the notes it would make: hz_draw.py)
         d = self.drag  # the Select box (with the ones kept when Ctrl+drag adds it), or the last ones (kept_box)
         boxes = d["more"] + [b for b in (self.box_area(),) if b] if d and d["kind"] == "box" else self.kept_box() or []
@@ -293,9 +294,11 @@ class HzView:
         hz = self.line_hz()
         knobs = dict(hz, _memo={})  # (each slide's Glide curve: what the MOD tab needs worked out once)
         red = self.slide_red()
+        most = bend_range(hz)
         for a, b, s in links(self.tones):  # a slide over a gap between two notes: no sound there
             x0, x1 = a["t"] + a["len"], b["t"]
             f0, f1, k0, k1 = glide(a, b, s)
+            k0, k1 = self.bent_pitch(a, f0, most), self.bent_pitch(b, f1, most)  # (from / to the bent pitches)
             if x1 - x0 > 1e-9:
                 knob = slide_knob(knobs, a)
                 beats = np.linspace(x0, x1, 17)
@@ -351,12 +354,13 @@ class HzView:
         if not self.app.hz_line.get():
             return out
         index = {id(n): i for i, n in enumerate(self.tones)}
-        off = 6 * self.s
-        for a, b, s in links(self.tones):
+        off, most = 6 * self.s, self.bend_most()
+        for a, b, s in links(self.tones):  # (on the notes' bent pitches, where the slide leaves / arrives)
             x0, x1, _, _ = glide(a, b, s)
-            out.append((self.x_of(x0) + (off if x0 >= a["t"] + a["len"] else 0), self.pitch_y(pitch(a)),
-                        index[id(a)], "out", s))
-            out.append((self.x_of(x1) - (off if x1 <= b["t"] else 0), self.pitch_y(pitch(b)), index[id(b)], "in", s))
+            out.append((self.x_of(x0) + (off if x0 >= a["t"] + a["len"] else 0),
+                        self.pitch_y(self.bent_pitch(a, x0, most)), index[id(a)], "out", s))
+            out.append((self.x_of(x1) - (off if x1 <= b["t"] else 0), self.pitch_y(self.bent_pitch(b, x1, most)),
+                        index[id(b)], "in", s))
         return out
 
     def line_hz(self):
@@ -385,8 +389,10 @@ class HzView:
         ends = {}
         for x, y, _, _, s in self.dots():
             ends.setdefault(id(s), []).append((x, y))
+        most = self.bend_most()
         for a, b, s in links(self.tones):
             f0, f1, k0, k1 = glide(a, b, s)
+            k0, k1 = self.bent_pitch(a, f0, most), self.bent_pitch(b, f1, most)  # (from / to the bent pitches)
             if abs(k1 - k0) < 1e-6 or self.x_of(f1) - self.x_of(f0) < 20 * self.s:
                 continue
             hz = hz or dict(self.line_hz(), _memo={})  # (what the MOD tab needs worked out once for all)
@@ -443,6 +449,7 @@ class HzView:
                                  hz=f"{hz_of(k, cents):.2f}")
         if self.drag and self.drag["kind"] == "tune":
             text += "     " + tr("hz.tune", cents=f"{self.tones[self.drag['i']]['cents']:+g}")
+        text += self.bend_status()
         hit = self.hit(e.x, e.y) if e is not None and not self.drag else None
         held = self.drag["kind"] if self.drag else hit and hit[0]
         if held in ("in", "out", "bend") and self.slides_off():

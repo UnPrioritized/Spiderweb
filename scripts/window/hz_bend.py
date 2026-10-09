@@ -1,0 +1,219 @@
+"""The Hz bass window's Bend tool (B; user, 2026-10-10): each note's own bend line (tone["bend"] = [[u, keys], ...],
+u 0..1 along the note, so it stretches with it; heard on top of everything else, up to the Range knob:
+notes/hz_lines.note_bend), edited right on the note.
+
+A click on a note (or on its bend line, wherever it has gone) adds a point there and holds it; a point dragged moves
+(between its neighbours; the end points only up / down). Points snap to the grid and to whole keys (Shift = free:
+any tick, any cent). Right-click a point (or Delete while holding it) = it goes; a line back at 0 everywhere = no
+bend. Each change is one undo step. Empty space = a Select box, like the Select tool."""
+
+import copy
+
+import numpy as np
+
+from files.lang import tr
+from files.mathexpr import fmt
+from notes.hzbass import bend_range, note_bend, pitch
+from roll.roll_shared import SELECT_CURSOR, SHIFT
+from window import look
+
+NEAR = 6  # px: a press this near a bend point grabs it
+LINE_NEAR = 4  # px: ... this near a note's bend line adds a point to it
+BEND = look.HZ_BEND
+
+
+class HzBend:
+    def bending(self):
+        return self.tool.get() == "bend"
+
+    def bend_most(self):
+        """Keys a note's bend goes at most each way (the Pitch box's Range)."""
+        return bend_range(self.line_hz())
+
+    def bent_pitch(self, n, beat, most=None):
+        """Note n's pitch at beat with its own bend line (keys)."""
+        got = note_bend(n, np.array([beat], float), self.bend_most() if most is None else most)
+        return pitch(n) + (0.0 if got is None else float(got[0]))
+
+    def bend_points(self):
+        """[(x, y, tone number, point number)]: the bend points of the notes in view (Bend tool only)."""
+        if not self.bending():
+            return []
+        most, w, out = self.bend_most(), self.canvas.winfo_width(), []
+        for i, n in enumerate(self.tones):
+            pts = n.get("bend")
+            if not pts or self.x_of(n["t"] + n["len"]) < self.kb_w or self.x_of(n["t"]) > w:
+                continue
+            for j, p in enumerate(pts):
+                out.append((self.x_of(n["t"] + p[0] * n["len"]), self.pitch_y(pitch(n) + max(-most, min(most, p[1]))),
+                            i, j))
+        return out
+
+    def bend_hit(self, x, y):
+        """What the Bend tool would take at (x, y): ("point", tone, point number), ("note", tone) on a note or on its
+        bend line, or None."""
+        r = NEAR * self.s
+        for px, py, i, j in reversed(self.bend_points()):
+            if abs(x - px) <= r and abs(y - py) <= r:
+                return "point", i, j
+        if x < self.kb_w or y < self.ruler_h:
+            return None
+        most, beat = self.bend_most(), self.beat_at(x)
+        for i in range(len(self.tones) - 1, -1, -1):
+            n = self.tones[i]
+            x0, x1, y0 = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
+            if not x0 - 1 <= x <= max(x1, x0 + 2) + 1:
+                continue
+            if y0 <= y < y0 + self.sy or n.get("bend") and abs(y - self.pitch_y(self.bent_pitch(n, beat, most))) <= \
+                    LINE_NEAR * self.s:
+                return "note", i
+        return None
+
+    def bend_spot(self, n, e):
+        """[u, keys] at the mouse for note n: the grid line nearest it (in the note) and whole keys (Shift: any
+        tick, keys to the cent), no further than the Range."""
+        u = (self.snap(self.beat_at(e.x), e) - n["t"]) / max(n["len"], 1e-12)
+        k = self.top + 0.5 - (e.y - self.ruler_h) / self.sy - pitch(n)  # (pitch_y turned round)
+        k = round(k, 2) if e.state & SHIFT else float(round(k))
+        most = self.bend_most()
+        return [min(1.0, max(0.0, u)), max(-most, min(most, k))]
+
+    def bend_press(self, e):
+        """A press with the Bend tool: on a point it's held; on a note a new point is put there and held (a note
+        without a bend gets a line at 0 from end to end first). False on empty space (a Select box)."""
+        if not self.bending():
+            return False
+        hit = self.bend_hit(e.x, e.y)
+        if hit is None:
+            return False
+        kept = self.kept_box()
+        self.press_was = (set(self.sel), kept)  # (what Esc / Ctrl+Z while held go back to: cancel_drag)
+        self.drop_drag()
+        before = copy.deepcopy(self.tones)
+        self.sel_before = (before, (sorted(self.sel), kept and list(kept), len(before)))
+        i, n = hit[1], self.tones[hit[1]]
+        self.sel, self.box_kept = {i}, None
+        if hit[0] == "point":
+            j = hit[2]
+        else:
+            u, k = self.bend_spot(n, e)
+            pts = [list(p) for p in n.get("bend") or ([0.0, 0.0], [1.0, 0.0])]
+            j = next((j for j, p in enumerate(pts) if abs(p[0] - u) < 1e-9), None)
+            if j is None:  # (after the points at the same spot: the new one is the last there)
+                j = sum(p[0] <= u for p in pts)
+                pts.insert(j, [u, k])
+            else:
+                pts[j][1] = k
+            n["bend"] = pts
+        p = n["bend"][j]
+        self.drag = {"kind": "bendpt", "i": i, "j": j, "before": before, "x": e.x, "y": e.y,
+                     "moved": hit[0] == "note", "pinned": p[0] in (0.0, 1.0), "name": tr("hz.step_note_bend")}
+        self.redraw()
+        self.show_status(e)
+        return True
+
+    def bend_drag(self, e):
+        d = self.drag
+        if not d or d["kind"] != "bendpt":
+            return False
+        if not d["moved"] and abs(e.x - d["x"]) < 4 and abs(e.y - d["y"]) < 4:
+            return True  # (a click with a wobble changes nothing)
+        d["moved"] = True
+        n = self.tones[d["i"]]
+        pts, j = n["bend"], d["j"]
+        u, k = self.bend_spot(n, e)
+        if not d["pinned"]:  # (between its neighbours; two at one spot = a jump)
+            lo = pts[j - 1][0] if j > 0 else 0.0
+            hi = pts[j + 1][0] if j + 1 < len(pts) else 1.0
+            pts[j][0] = min(hi, max(lo, u))
+        pts[j][1] = k
+        self.redraw()
+        self.show_status(e)
+        return True
+
+    def bend_release(self, e):
+        d = self.drag
+        if not d or d["kind"] != "bendpt":
+            return False
+        self.drop_drag()
+        self.bend_done(d)
+        return True
+
+    def bend_done(self, d, name=None):
+        """The bend held / changed in drag d is done: tidied, one undo step when anything changed."""
+        tidy_bend(self.tones[d["i"]])
+        if self.tones != d["before"]:
+            self.commit(name or d["name"], d["before"])
+        else:
+            self.redraw()
+
+    def bend_delete_dragged(self):
+        """Delete while a point is held: that point goes (one undo step with what the drag did)."""
+        d = self.drag
+        self.end_drag()
+        pts = self.tones[d["i"]]["bend"]
+        del pts[d["j"]]
+        self.bend_done(d, tr("hz.step_note_bend_delete"))
+        self.point_again()
+
+    def bend_menu(self, e):
+        """Right-click with the Bend tool on a point: it goes. False anywhere else (the usual menu)."""
+        if not self.bending():
+            return False
+        hit = self.bend_hit(e.x, e.y)
+        if not hit or hit[0] != "point":
+            return False
+        before = copy.deepcopy(self.tones)
+        self.sel_before = (before, self.sel_state())
+        del self.tones[hit[1]]["bend"][hit[2]]
+        self.bend_done({"i": hit[1], "before": before}, tr("hz.step_note_bend_delete"))
+        self.point_again()
+        return True
+
+    def bend_motion(self, e):
+        """The pointer with the Bend tool: a hand on a point, the pencil on a note, the Select box's on empty space."""
+        if not self.bending():
+            return False
+        hit = self.bend_hit(e.x, e.y)
+        inside = e.x >= self.kb_w and e.y >= self.ruler_h
+        cursor = "fleur" if hit and hit[0] == "point" else self.pencil if hit else SELECT_CURSOR if inside else ""
+        self.canvas.config(cursor=cursor)
+        self.show_status(e)
+        return True
+
+    def bend_status(self):
+        """The status line's part for a point held: how far it bends."""
+        d = self.drag
+        if not d or d["kind"] != "bendpt":
+            return ""
+        k = self.tones[d["i"]]["bend"][d["j"]][1]
+        return "     " + tr("hz.bend_keys", keys=("+" if k > 0 else "") + fmt(k))
+
+    def draw_bends(self):
+        """With the Bend tool: each note's bend line in view (as it bends the note, dashed) and its points."""
+        if not self.bending():
+            return
+        c, s, most, w = self.canvas, self.s, self.bend_most(), self.canvas.winfo_width()
+        for n in self.tones:
+            if not n.get("bend") or self.x_of(n["t"] + n["len"]) < self.kb_w or self.x_of(n["t"]) > w:
+                continue
+            beats = np.union1d(np.linspace(n["t"], n["t"] + n["len"], 49),
+                               [n["t"] + p[0] * n["len"] for p in n["bend"]])
+            keys = pitch(n) + note_bend(n, beats, most)
+            xy = np.column_stack([[self.x_of(b) for b in beats], self.pitch_y(keys)]).ravel().tolist()
+            c.create_line(*xy, fill=BEND, width=max(1, round(1.5 * s)), dash=(4, 2))
+        r = 3.5 * s
+        for x, y, i, j in self.bend_points():
+            held = self.drag and self.drag["kind"] == "bendpt" and (self.drag["i"], self.drag["j"]) == (i, j)
+            c.create_oval(x - r, y - r, x + r, y + r, fill=look.HZ_DOT if held else BEND, outline=BEND,
+                          width=max(1, round(1.5 * s)))
+
+
+def tidy_bend(n):
+    """A note's bend line after a change: rounded; none left when every point is back at 0."""
+    pts = n.get("bend")
+    if pts is None:
+        return
+    pts[:] = [[round(p[0], 9), round(p[1], 4), *p[2:]] for p in pts]
+    if not pts or all(abs(p[1]) < 1e-9 for p in pts):
+        n.pop("bend")

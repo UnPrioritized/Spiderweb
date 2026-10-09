@@ -506,6 +506,11 @@
  "hz.name": "Hz bass",
  "hz.grow": "Shape length follows the notes",
  "hz.grow_tip": "Ticked: the shape on the piano roll is made as long as the notes here.\nNot ticked: the shape keeps its length, and notes past its end (the grey part) aren't used.",
+ "hz.bend": "Bend (B)",
+ "hz.bend_tip": "Gives a note its own bend: click a note to add a point to its bend line and drag it up or down.\nThe line stretches with the note and is heard on top of everything else, up to the Pitch box's Range.\nPoints snap to the grid and to whole keys (Shift: free). Right-click a point to remove it.\nDrag on empty space to select with a box.",
+ "hz.bend_keys": "Bend: {keys} keys",
+ "hz.step_note_bend": "Hz bass: bend a note",
+ "hz.step_note_bend_delete": "Hz bass: remove a bend point",
  "hz.pencil": "Pencil (P)",
  "hz.pencil_tip": "Press on empty space to place a note. Ctrl+drag selects with a box.\nDouble right-click switches between Select and Pencil.",
  "hz.select": "Select (V)",
@@ -1785,9 +1790,11 @@
   "",
   "A slide belongs to its two notes: notes added later don't change it.",
   "",
-  "A note can slide to several notes and several notes can slide to one: select the one note and the others (three or more notes) and pick Slide between the selected notes, or middle-click for each slide."
+  "A note can slide to several notes and several notes can slide to one: select the one note and the others (three or more notes) and pick Slide between the selected notes, or middle-click for each slide.",
+  "",
+  "A note can also bend on its own, with the Bend tool (B): click a note to add a point to its bend line and drag it up or down. Points snap to the grid and to whole keys (Shift = free); the points at the note's two ends only move up and down. Right-click a point to remove it. The line stretches with the note, and it bends the note on top of everything else, as far as the Pitch box's Range. A slide leaves from the bent pitch and arrives at the bent pitch."
  ],
- "help.hz_slides.words": "hz bass slide slides glide portamento bend middle-click dots curve s-curve double single handle",
+ "help.hz_slides.words": "hz bass slide slides glide portamento bend middle-click dots curve s-curve double single handle bend tool per-note pitch scoop fall",
  "help.hz_preview.title": "Preview (Hz bass)",
  "help.hz_preview.tip": "Preview plays this Hz bass alone through Spiderweb's own synth with your soundfont. Grey over the notes = not made yet.",
  "help.hz_preview.text": [
