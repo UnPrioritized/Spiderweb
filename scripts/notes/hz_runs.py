@@ -90,7 +90,12 @@ def sound_span(hz):
 
 
 def glides(hz):
-    """{tone id: [pitch it glides in from, ...]} with Glide on (hz["voice"]): a note glides in from the note(s)
+    """{tone id: [pitch it glides in from, ...]} (glide_tones)."""
+    return {k: [pitch(a) for a in v] for k, v in glide_tones(hz).items()}
+
+
+def glide_tones(hz):
+    """{tone id: [tone it glides in from, ...]} with Glide on (hz["voice"]): a note glides in from the note(s)
     that ended last before it starts ("touching": only when they end right where it starts), like the slides made
     by hand: one to a chord, several to one, chord to chord none. Not into a note a slide reaches, nor from the same
     pitch."""
@@ -119,7 +124,7 @@ def glides(hz):
         if len(before) > 1 and len(chord) > 1:
             continue
         for b in chord:
-            got = [pitch(a) for a in before if abs(pitch(a) - pitch(b)) > 1e-9]
+            got = [a for a in before if abs(pitch(a) - pitch(b)) > 1e-9]
             if got and b["id"] not in slid:
                 out[b["id"]] = got
     return out
@@ -211,81 +216,123 @@ def tone_runs(hz, left, ppq):
     = the next one's start, whose: (tone, None) or (tone slid from, tone slid to))], not rounded. A tone held is
     one stretch, from where the first slide into it arrives to where the last slide out of it leaves; every slide
     is one more (two when there's a gap between its tones: nothing sounds there), its waves in step with the tone
-    it leaves. A tone a chain ends with goes on for its fall (tails). Glide (glides): a tone's start is one more
-    stretch from each tone it glides in from, fast first, then the tone held (whose: (tone, None) for both)."""
+    it leaves. A tone a chain ends with goes on for its fall (tails). Glide (glide_tones): a tone's start is one more
+    stretch from each tone it glides in from, fast first, then the tone held (whose: (tone, None) for both).
+    No cut wave where one goes on from another (like a synth's oscillator running on): a tone a slide, a glide or
+    Legato reaches is held from the last wave of what reached it, a glide starts on the next wave's end of the
+    tone it leaves, and with no held part left the slide out of a tone starts where the one into it ended. Worked
+    out in time order, each stretch bent by the Pitch line as it's made, so these hold with it too."""
     tones = hz["tones"]
     ls = links(tones)
     tail = tails(hz)
-    gl = glides(hz)
-    out, held = [], {}
+    gl = glide_tones(hz)
+    legato = {}
+    for p, n in legato_links(hz.get("voice"), tones):
+        legato.setdefault(n["id"], p)  # (several to one: the first)
+    ins, outs = {}, {}
+    for i, (a, b, s) in enumerate(ls):
+        ins.setdefault(b["id"], []).append(min(s["in"], b["len"]))
+        outs.setdefault(a["id"], []).append(i)
+    bend = "pitch" in (hz.get("fx") or {})
+    own, made = {}, {}
+    held = {}  # (tone id: its held part's waves, start, gate, end)
+    carry = {}  # (tone id with no held part left: (where what reached it ended, where it reached it as placed))
+    reach = {}  # (tone id: (where the first slide reaching it where its held part starts ends, that as placed))
 
-    def hold(n, s, e, gate):  # (tone n held from tick s to e: a slide / glide arriving moves s to its last wave's end;
-        if gate == math.floor(gate) and s != held[n["id"]][4]:  # whole-tick waves: on the next whole tick)
-            s = math.ceil(s - 1e-9)
-        starts = s + gate * np.arange(max(1, int(math.ceil((e - s) / gate))))
-        out[held[n["id"]][2]] = (starts, starts + gate, (n, None))
-        held[n["id"]] = (s, gate, held[n["id"]][2], e, held[n["id"]][4])
+    def run(starts, nexts, whose):
+        starts, nexts = np.asarray(starts, float), np.asarray(nexts, float)
+        if bend:
+            starts, nexts = bent(hz, left, ppq, starts, nexts, whose[0])
+        return starts, nexts, whose
 
-    for n in tones:
-        a = n["t"] + min([min(s["in"], n["len"]) for _, b, s in ls if b is n], default=0.0)
-        took = glide_of(hz, n, "glide") if n["id"] in gl else 0.0
-        lead = None  # (where the glide into it ends, on its last wave: the tone held goes on from there)
+    def next_wave(p, at):  # (where tone p's sound next ends a wave at or after tick at; None when it isn't there)
+        h = held.get(p["id"])
+        if h is None:
+            c = carry.get(p["id"])
+            return c[0] if c is not None and c[0] >= at - 1e-6 else None
+        starts, nexts, s, gate, e = h
+        if e < at - 1e-6 or at < s:
+            return None
+        if not bend:
+            return s + math.ceil((at - s) / gate - 1e-9) * gate
+        ends = np.append(starts[:1], nexts)
+        return float(ends[min(int(np.searchsorted(ends, at - 1e-6)), len(ends) - 1)])
+
+    for n in sorted(tones, key=lambda n: (n["t"], n["t"] + n["len"])):
+        me = n["id"]
+        a = n["t"] + min(ins.get(me, ()), default=0.0)
+        took = glide_of(hz, n, "glide") if me in gl else 0.0
+        lead = None  # (where the glide / Legato into it ends, on its last wave: the tone held goes on from there)
+        at = (left + n["t"]) * ppq
         if took > 0:
-            s, e = (left + n["t"]) * ppq, (left + n["t"] + min(took, n["len"])) * ppq
-            if n["t"] + min(took, n["len"]) >= a - 1e-9 and len(gl[n["id"]]) == 1:
+            s, e = at, (left + n["t"] + min(took, n["len"])) * ppq
+            if n["t"] + min(took, n["len"]) >= a - 1e-9 and len(gl[me]) == 1:
                 a = n["t"] + min(took, n["len"])
                 lead = e
             a = max(a, n["t"] + min(took, n["len"]))
             curve = glide_of(hz, n, "curve")
-            for k0 in gl[n["id"]]:
-                part, after, t = [], [], s
+            for p in gl[me]:
+                k0 = pitch(p)
+                t = next_wave(p, at)
+                part, after, t = [], [], s if t is None else t
                 while t < e:
                     part.append(t)
                     t += wave(hz, ppq, pitch(n) + (k0 - pitch(n)) * glide_left((t - s) / (e - s), curve))
                     after.append(t)
-                out.append((np.array(part), np.array(after), (n, None)))
+                if part:
+                    got = run(part, after, (n, None))
+                    own.setdefault(id(n), []).append(got)
+                    t = got[1][-1]
                 if lead is not None:
                     lead = t
-        b = n["t"] + n["len"] - min([min(s["out"], n["len"]) for m, _, s in ls if m is n], default=0.0)
-        b += tail.get(n["id"], 0.0)
-        if b > a:
-            s, e, gate = (left + a) * ppq, (left + b) * ppq, wave(hz, ppq, pitch(n), threshold(hz, n), own_gate(n))
-            out.append(None)
-            held[n["id"]] = (s, gate, len(out) - 1, e, s)  # (start, gate, where in out, end, start as placed)
-            hold(n, lead if lead is not None and lead < e else s, e, gate)
-    # slides, a chain's earlier ones first (a tone's held part moves to where the slide into it ends, and the slide
-    # out of it keeps in step with that), put in out in the links' order
-    made = {}
-    for i in sorted(range(len(ls)), key=lambda i: ls[i][0]["t"]):
-        a, b, link = ls[i]
-        x0, x1, k0, k1 = glide(a, b, link)
-        if x1 - x0 < 1e-12:
-            continue
-        knob = slide_knob(hz, a)
-        s0, e0 = (left + x0) * ppq, (left + a["t"] + a["len"]) * ppq
-        s1, e1 = (left + b["t"]) * ppq, (left + x1) * ppq
-        t = s0
-        if a["id"] in held and s0 >= held[a["id"]][0]:  # in step with the tone it leaves
-            s, gate = held[a["id"]][:2]
-            t = s + math.ceil((s0 - s) / gate - 1e-9) * gate
-        gap = s1 - e0 > 1e-6
-        made[i] = []
-        for end in (e0, e1) if gap else (e1,):
-            part, after = [], []
-            while t < end:
-                part.append(t)
-                t += wave(hz, ppq, k0 + (k1 - k0) * slide_part((t - s0) / (e1 - s0), link, knob))
-                after.append(t)
-            if part:
-                made[i].append((np.array(part), np.array(after), (a, b)))
-            t = max(t, s1)
-        h = held.get(b["id"])  # (the tone it reaches, held from where it arrives: its waves go on from the last one)
-        if h is not None and abs(h[4] - e1) < 1e-6 and h[0] == h[4] and t < h[3]:
-            hold(b, t, h[3], h[1])
+        elif me in legato and me not in ins:
+            lead = next_wave(legato[me], at)
+        b = n["t"] + n["len"] - min([min(ls[i][2]["out"], n["len"]) for i in outs.get(me, ())], default=0.0)
+        b += tail.get(me, 0.0)
+        placed, e = (left + a) * ppq, (left + b) * ppq
+        r = reach.get(me)
+        s = r[0] if r is not None and abs(r[1] - placed) < 1e-6 else placed if lead is None else lead
+        if b > a and s < e:
+            gate = wave(hz, ppq, pitch(n), threshold(hz, n), own_gate(n))
+            if gate == math.floor(gate) and s != placed:  # (whole-tick waves: on the next whole tick)
+                s = math.ceil(s - 1e-9)
+            starts = s + gate * np.arange(max(1, int(math.ceil((e - s) / gate))))
+            got = run(starts, starts + gate, (n, None))
+            own.setdefault(id(n), []).append(got)
+            held[me] = (got[0], got[1], s, gate, e)
+        elif s != placed:  # (what reached it goes past its end: no held part)
+            carry[me] = (s, placed)
+        for i in outs.get(me, ()):  # (its slides, in step with it; the tone each reaches is worked out later)
+            _, c, link = ls[i]
+            x0, x1, k0, k1 = glide(n, c, link)
+            if x1 - x0 < 1e-12:
+                continue
+            knob = slide_knob(hz, n)
+            s0, e0 = (left + x0) * ppq, (left + n["t"] + n["len"]) * ppq
+            s1, e1 = (left + c["t"]) * ppq, (left + x1) * ppq
+            t = s0
+            if me in held and s0 >= held[me][2]:
+                t = next_wave(n, s0)
+            elif me in carry and carry[me][1] <= s0 + 1e-6:
+                t = max(s0, carry[me][0])
+            gap = s1 - e0 > 1e-6
+            made[i] = []
+            for end in (e0, e1) if gap else (e1,):
+                part, after = [], []
+                while t < end:
+                    part.append(t)
+                    t += wave(hz, ppq, k0 + (k1 - k0) * slide_part((t - s0) / (e1 - s0), link, knob))
+                    after.append(t)
+                if part:
+                    got = run(part, after, (n, c))
+                    made[i].append(got)
+                    t = got[1][-1]
+                t = max(t, s1)
+            if c["id"] not in reach and abs((left + c["t"] + min(ins[c["id"]])) * ppq - e1) < 1e-6:
+                reach[c["id"]] = (t, e1)
+    out = [got for n in tones for got in own.get(id(n), ())]
     for i in range(len(ls)):
         out.extend(made.get(i, ()))
-    if "pitch" in (hz.get("fx") or {}):
-        out = [bent(hz, left, ppq, starts, nexts, whose[0]) + (whose,) for starts, nexts, whose in out]
     return out
 
 
