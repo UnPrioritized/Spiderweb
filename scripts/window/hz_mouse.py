@@ -586,6 +586,8 @@ class HzMouse:
         second one on another note makes the slide between the two spots: it's theirs alone, whatever other notes
         and slides there are. On a dot of a slide: that slide goes. Anywhere else: the mark goes."""
         x, y = self.pan[:2]
+        if self.draft is not None and self.draft.get("held") is not None:  # (the left button holds a path being
+            return  # drawn: middle clicks do nothing, as when it holds a note)
         if abs(e.x - x) < 4 and abs(e.y - y) < 4 and not self.drag and self.draft_middle(e):  # (on the curve being
             return  # drawn: a new anchor, hz_draw.py)
         if abs(e.x - x) >= 4 or abs(e.y - y) >= 4 or not self.app.hz_line.get() or self.drag:

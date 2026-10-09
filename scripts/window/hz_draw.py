@@ -90,6 +90,8 @@ class HzDraw:
             return sample(d["pts"], 48)
         if d["tool"] == "arc" and len(d["pts"]) == 3:
             return arc_points(d["pts"], d["k"])
+        if d.get("open"):  # (a polyline being drawn: the piece to the mouse isn't part of it yet, user; like the
+            return d["pts"][:-1]  # main piano roll's, it ends at the last click)
         return d["pts"]
 
     def draft_tones(self):
@@ -98,9 +100,13 @@ class HzDraw:
         d = self.draft
         if d is None or d.get("held") == "free":
             return None
+        if len(self.path_of(d)) < 2:  # (a polyline with one point put down)
+            return None
         key = tuple(map(tuple, d["pts"])), self.app.ppq, len(self.tones)
         if d.get("made_for") != key:
-            d["made_for"], d["made"] = key, path_tones(self.path_of(d), self.app.ppq, self.tones, d.get("tol", TOL))
+            tol = d.get("tol", TOL)
+            d["made_for"], d["made"] = key, path_tones(self.path_of(d), self.app.ppq, self.tones, tol,
+                                                       turn=tol if d["tool"] == "free" else None)
         return d["made"]
 
     # ------------------------------------------------------------ mouse
@@ -339,7 +345,7 @@ class HzDraw:
         for n in self.draft_tones() or ():
             x0, x1, y = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
             c.create_rectangle(x0, y + 1, max(x1, x0 + 2), y + self.sy - 1, fill=fill, outline=edge, dash=(3, 2))
-        path = self.path_of(d)
+        path = d["pts"] if d.get("open") else self.path_of(d)  # (the piece to the mouse: drawn, no notes)
         if len(path) > 1:
             c.create_line(*[v for pt in path for v in self.draft_xy(pt)], fill=look.DRAFT_LINE,
                           width=max(2, round(2 * s)))

@@ -109,6 +109,8 @@ class PreviewSettings(tk.Toplevel):
         ppq = ttk.Combobox(box, textvariable=app.pvar["ppq"], values=app.ppq_box["values"], width=7, height=12)
         ppq.grid(row=r, column=1, sticky="w", pady=3)  # (the project's PPQ: the same box as under Project)
         ppq.bind("<FocusOut>", lambda e: no_spaces(app.pvar["ppq"]))
+        for seq in ("<Return>", "<FocusOut>"):  # a wrong PPQ: back to the last good one (as the side panel's box)
+            ppq.bind(seq, lambda e: app.ppq_ok() or app.pvar["ppq"].set(str(app.ppq)), add="+")
         Tooltip(ppq, tr("hz.ppq_tip"))
         r += 1
 

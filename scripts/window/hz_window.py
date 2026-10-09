@@ -28,7 +28,7 @@ from files.lang import tr
 from files.mathexpr import fmt
 from notes.engine import CLASH
 from notes.hzbass import AUTO, AUTO_MOST, FX, all_tones, clean_line, clean_tones, left_edge
-from roll.roll_shared import grab_while_panning
+from roll.roll_shared import CTRL, grab_while_panning
 from roll.zoombar import add_zoom_bars
 from window import look
 from window.hz_effects import FxPane
@@ -127,11 +127,12 @@ class HzWindow(HzDraw, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.picker = ToolPicker(app, f, self.draw_tools(), var=self.tool, owner=self, tips=self.draw_tips(),
                                  group=(), fit=lambda: self.winfo_exists() and self.layout())
         self.picker.frame.pack(side="left", padx=(2, 0))
-        kept = app.hz_tools
+        kept = {k: v for k, v in app.hz_tools.items() if isinstance(v, str)}  # (a damaged autosave: left out)
         if kept.get("shown") in self.picker.label:
             self.picker.last = kept["shown"]
-        if isinstance(kept.get("pins"), list):
-            self.picker.pins = [k for k in dict.fromkeys(kept["pins"]) if k in self.picker.label]
+        pins = app.hz_tools.get("pins")
+        if isinstance(pins, list):
+            self.picker.pins = [k for k in dict.fromkeys(p for p in pins if isinstance(p, str)) if k in self.picker.label]
         if kept.get("tool") in ("select", "pencil", *DRAW):
             self.tool.set(kept["tool"])
         if kept.get("last") in ("pencil", *DRAW):
@@ -247,7 +248,8 @@ class HzWindow(HzDraw, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
                                  "break")[1])
         for k, tool in (("p", "pencil"), ("P", "pencil"), ("v", "select"), ("V", "select"),
                         *((h, t) for t, _, hot in self.draw_tools() for h in (hot, hot.upper()))):
-            c.bind(f"<KeyPress-{k}>", lambda e, tool=tool: self.tool.set(tool) or self.on_motion(e) or "break")
+            c.bind(f"<KeyPress-{k}>", lambda e, tool=tool: None if e.state & CTRL else  # (Ctrl+Y: redo, the
+                   self.tool.set(tool) or self.on_motion(e) or "break")  # program's own shortcuts)
         self.bind("<Configure>", self.remember)
         self.protocol("WM_DELETE_WINDOW", self.close)
         c.focus_set()

@@ -263,14 +263,14 @@ class ToolPicker:
             self.last = win["draw_tool_shown"]
         pins = win.get("draw_tool_pins")
         if isinstance(pins, list):
-            self.pins = [k for k in dict.fromkeys(pins) if isinstance(k, str) and k in self.label]
+            self.pins = [k for k in dict.fromkeys(p for p in pins if isinstance(p, str)) if k in self.label]
             if any(k in self.pins for k in self.group):
                 self.pins += [k for k in self.group if k not in self.pins]
         # the tool in use, and the one a double right-click goes back to (the tool's own effects: App.__init__)
-        tool = win.get("tool")
+        tool = win.get("tool") if isinstance(win.get("tool"), str) else None
         if tool in self.label or tool in ("select", "slice"):
             self.app.tool.set(tool)
-        if win.get("draw_tool") in self.label:
+        if isinstance(win.get("draw_tool"), str) and win["draw_tool"] in self.label:
             self.app.draw_tool = win["draw_tool"]
         elif "draw_tool_shown" in win:  # (saved before this was remembered)
             self.app.draw_tool = self.last

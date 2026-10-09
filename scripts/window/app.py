@@ -2126,6 +2126,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def on_close(self):
         if self.drawer and self.drawer.winfo_exists() and not self.drawer.may_quit():
             return
+        if self.hz_window and self.hz_window.draft is not None:  # (a path drawn there: made, as when the Hz bass
+            self.hz_window.make_draft()  # window itself is closed)
         if not self.close_autosave():
             return
         self.stop_play()
