@@ -13,7 +13,7 @@ from notes.hz_settings import (CRUSH, FM_INDEX, FX, GROWL, HZ_DEFAULTS, MODE_AMO
 from notes.hz_glide import legato_links, links, note_span, pitch
 from notes.hz_lines import line_at, note_vel
 from notes.hz_modulate import TIMED, fx_at, setting_at, setting_base, setting_most, timed_line
-from notes.hz_runs import _grid, _limits, bent, tails, tone_runs
+from notes.hz_runs import _grid, _limits, follows, tails, tone_runs
 
 
 def compress(loud, comp):
@@ -137,10 +137,20 @@ class KeyGrid:
             if abs(self.osc2["fine"]) > 1e-9:  # (Fine: alternating gates, else whole-tick ones would round it away)
                 moved = {k: v for k, v in moved.items() if k not in ("fixed", "auto")}
                 moved["tones"] = [{k: v for k, v in n.items() if k not in ("gate", "auto")} for n in moved["tones"]]
-            self.runs += self.made_runs(moved, left, ppq, 1)
+            more = self.made_runs(moved, left, ppq, 1)
+            for r in more:
+                r["prev"] += len(self.runs) if r["prev"] >= 0 else 0
+            self.runs += more
         if self.reverb:  # (each oscillator's tail of its own)
             self.runs += [r for o in (0, 1) for r in self.reverb_runs(hz, left, ppq, [r for r in self.runs
                                                                                         if r["osc"] == o])]
+            where = {id(r): i for i, r in enumerate(self.runs)}
+            for r in self.runs:
+                if "from_run" in r:  # (a tail goes on from its note's waves)
+                    r["prev"] = where[id(r.pop("from_run"))]
+        for r in self.runs:  # (a run another goes on from: its moved last waves are never left out, made)
+            if r["prev"] >= 0:
+                self.runs[r["prev"]]["until"] = np.inf
         self.shaped = (any(r["has_" + name].any() for r in self.runs for name in WAVES)
                        or any(m.get("kind") in ("fm", "pulse", "sync") for m in self.modes))
         self.loud = (self.shaped or any(name in (hz.get("fx") or ()) for name in VEL_FX)
@@ -154,18 +164,26 @@ class KeyGrid:
 
     def made_runs(self, hz, left, ppq, osc):
         """One oscillator's runs (OSC A = 0: the notes as placed; OSC B = 1: hz with its tones moved by its tune):
-        each stretch of tone's repeats with every value they need."""
-        runs = []
+        each stretch of tone's repeats with every value they need. "prev" = the run its sound goes on from (follows;
+        -1: none), whose counts (the tremolo's, a speed the MOD tab moves, FM's wobbles) go on in this one."""
         tail = tails(hz)
         home = hz.get("key", HZ_DEFAULTS["key"]) + hz.get("cents", 0.0) / 100.0  # (Key track: from the Hz bass's tone)
         shift = osc2_shift(self.osc2) if osc else 0.0
         b = self.osc2 if osc else None
-        for starts, nexts, whose in tone_runs(hz, left, ppq):
+        # (OSC B's tune moved: its tone bent from the note's as the stretches are made, as the Pitch line bends it)
+        stretches = tone_runs(hz, left, ppq, (lambda beats, tone: self.osc2_keys(hz, beats, tone))
+                              if osc and self.tune else None)
+        after = follows(hz, [(s[0], e[-1], w[0], w[1]) for s, e, w in stretches])
+        runs = [None] * len(stretches)
+        for i in sorted(range(len(stretches)), key=lambda i: stretches[i][0][0]):  # (each after the one it goes on from)
+            starts, nexts, whose = stretches[i]
             n0 = whose[0]
-            if osc and self.tune:  # (OSC B's tune moved: its tone bent from the note's, as the Pitch line bends it)
-                starts, nexts = bent(hz, left, ppq, starts, nexts, keys=lambda b: self.osc2_keys(hz, b, n0))
+            j, chained = after[i]
+            prev = runs[j] if j >= 0 else None
             beat = starts / ppq - left
-            run = {"starts": starts, "waves": nexts - starts, "number": np.arange(len(starts)), "beat": beat,
+            first = prev["number"][-1] + 1 if prev is not None else 0  # (waves counted along the chain)
+            run = {"starts": starts, "waves": nexts - starts, "number": first + np.arange(len(starts)), "beat": beat,
+                   "prev": j,
                    "limits": _limits(hz, left, ppq, starts),
                    # (a repeat moved past its own tone's end, its fall included, is left out: the next tone may
                    # touch it)
@@ -191,7 +209,11 @@ class KeyGrid:
             if b is not None:
                 run["octave"] = np.zeros(len(beat))  # (Octave below is OSC A's)
             run["groups"] = group_count(run["groups"])
-            run["turns"] = np.concatenate([[0.0], np.cumsum(run["tremolo"] * TREMOLO * run["waves"] / ppq)[:-1]])
+            trem = np.cumsum(run["tremolo"] * TREMOLO * run["waves"] / ppq)
+            run["turns"] = np.concatenate([[0.0], trem[:-1]])
+            if prev is not None and chained:  # (on through its slides / Legato, as the Vibrato)
+                run["turns"] = run["turns"] + prev["turns_end"]
+            run["turns_end"] = run["turns"][0] + trem[-1]
             lfo = hz.get("lfo") or {}
             run["vib_rate"] = lfo.get("vibrato_rate", VIBRATO_RATE)
             depth = lfo.get("tremolo_depth")  # (as it was without one: the very same numbers)
@@ -205,10 +227,13 @@ class KeyGrid:
                                                                     n0, {})[0]))
             for k in self.turned:  # (a speed the MOD tab moves: its waves added up repeat by repeat, SPEED_KNOBS)
                 r = run[k[:-6]]
-                if k.endswith("fm_ratio_turns"):  # (wobbles per wave, less Ratio x the wave's number: wave_hits)
-                    run[k] = np.concatenate([[0.0], np.cumsum(r[:-1])]) - r * run["number"]
-                else:  # (times a beat: from the note's start, a chain of slides' first note's)
-                    first = r[0] * run["since"][0] if len(r) else 0.0
+                if k.endswith("fm_ratio_turns"):  # (wobbles per wave, less Ratio x the wave's number: wave_hits;
+                    so_far = prev["sum_" + k] if prev is not None else 0.0  # added up along the chain)
+                    added = so_far + np.concatenate([[0.0], np.cumsum(r[:-1])])
+                    run[k], run["sum_" + k] = added - r * run["number"], added[-1] + r[-1]
+                else:  # (times a beat: from the note's start, a chain of slides' first note's; on from the one before)
+                    first = (prev[k][-1] + prev[k[:-6]][-1] * (beat[0] - prev["beat"][-1]) if prev is not None
+                             and chained else r[0] * run["since"][0])
                     run[k] = first + np.concatenate([[0.0], np.cumsum(r[:-1] * np.diff(beat))])
             run["tone"], run["held"] = n0, whose[1] is None
             run["track"] = pitch(n0) - shift - home  # (keys the note is above the Hz bass's own tone)
@@ -224,7 +249,7 @@ class KeyGrid:
                 got = note_vel(n1, beat)
                 run["own"] = np.where(into, got / 127.0 if got is not None else 0.0, run["own"])
             run["layer"] = line_at(hz["loud"], beat) if hz.get("loud") else 1.0  # (the layer's loudness line)
-            runs.append(run)
+            runs[i] = run
         return runs
 
     def osc2_keys(self, hz, beat, tone):
@@ -275,6 +300,7 @@ class KeyGrid:
                      "moves": np.array([bool(r["offpitch"].any() or r["vibrato"].any()) for r in runs], bool),
                      "until": np.array([r["until"] for r in runs], float),
                      "tail": np.array(["tail_u" in r for r in runs], bool),
+                     "prev": np.array([r["prev"] for r in runs], np.int64),
                      "vib_rate": np.array([r["vib_rate"] for r in runs], float),
                      "osc": np.array([r["osc"] for r in runs], np.int64)}
 
@@ -316,23 +342,38 @@ class KeyGrid:
             length = min(full, nxt - end)
             if length <= 1e-9:
                 continue
-            i = max(0, int(np.searchsorted(src["beat"], end, "right")) - 1)
-            gate, at = float(src["waves"][i]), (left + end) * ppq
-            count = int(math.ceil(quiet * length * ppq / gate))
-            run = {k: (np.full(count, v[i]) if isinstance(v, np.ndarray) else v) for k, v in src.items()}
+            i = max(0, int(np.searchsorted(src["beat"], end, "right")) - 1)  # (everything as the note ends)
+            gate, e = float(src["waves"][i]), (left + end) * ppq
+            # (it takes over on the note's own waves, so they run on (no cut wave), where its fall gets quieter
+            # than the tail would be there (never both on one key row: twice the notes, a higher tone))
+            took = len(src["starts"])
+            k = max(1, int(np.searchsorted(src["starts"], e - 1e-6)))
+            if k < took and src["has_volume"][i]:
+                u = np.clip((src["starts"][k:] - e) / (length * ppq), 0.0, 1.0)
+                under = np.flatnonzero(src["volume"][k:] < src["volume"][i] * r["level"] ** 2 * (1.0 - u) ** 3)
+                k = k + int(under[0]) if len(under) else took
+            at = float(src["starts"][k]) if k < took else float(src["starts"][-1] + src["waves"][-1])
+            count = int(math.ceil((e + quiet * length * ppq - at) / gate - 1e-9))
+            if count <= 0:
+                continue
+            run = {key: (np.full(count, v[i]) if isinstance(v, np.ndarray) else v) for key, v in src.items()}
             run["starts"] = at + gate * np.arange(count)
             run["waves"], run["number"] = np.full(count, gate), np.arange(count)
             run["beat"] = run["starts"] / ppq - left
             run["since"] = src["since"][i] + (run["starts"] - src["starts"][i]) / ppq
-            run["limits"] = np.full(count, math.floor(at + length * ppq + 0.5), np.int64)
-            run["until"], run["held"] = np.inf, False
-            run["tail_u"] = np.arange(count) * gate / (length * ppq)
-            for k in self.turned:  # (the speeds as at the end, their waves going on from there)
-                run[k] = (np.zeros(count) if k.endswith("fm_ratio_turns")
-                          else src[k][i] + src[k[:-6]][i] * (run["beat"] - src["beat"][i]))
+            run["limits"] = np.full(count, math.floor(e + length * ppq + 0.5), np.int64)
+            run["until"], run["held"], run["from_run"] = np.inf, False, src
+            run["tail_u"] = (run["starts"] - e) / (length * ppq)
+            for name in self.turned:  # (the speeds as at the end, their waves going on from there)
+                run[name] = (np.zeros(count) if name.endswith("fm_ratio_turns")
+                             else src[name][i] + src[name[:-6]][i] * (run["beat"] - src["beat"][i]))
             mono = {}
             for name in rack:
                 run[name] = setting_at(self.hz, name, setting_base(self.hz, name), run["beat"], None, mono)
+            if k < took:  # (the note's own waves end where the tail takes over)
+                for key, v in list(src.items()):
+                    if isinstance(v, np.ndarray) and v.shape[:1] == (took,):
+                        src[key] = v[:k]
             out.append(run)
         return out
 
@@ -391,10 +432,14 @@ class KeyGrid:
         copy = np.tile(np.array(which, np.int64), len(runs))  # ... and copy
         scale = np.tile(np.array([2.0 ** (-c / 1200.0) for c in cents]), len(runs))
         n = each["n"][run]
-        # A stretch of tone: off pitch and vibrato make its waves longer or shorter one after the other (every value
-        # of a repeat taken for the one with the same number; past the end, the last one's), so it may take more or
-        # fewer repeats to fill the stretch; scale = every wave that many times as long (a Voice copy's own tone, or
-        # the chorus: none past the stretch's end)
+        # A stretch of tone: off pitch and vibrato make its waves longer or shorter one after the other, scale = every
+        # wave that many times as long (a Voice copy's own tone, or the chorus), so it may take more or fewer repeats
+        # to fill the stretch (none past its end: a held part a slide takes over from would sound on under it).
+        # Counted as one wave count along the run each part goes on from (pack's "prev": the same copy's, through
+        # slides, glides, Legato and into the reverb's tail), so the waves run on like a synth's oscillator: a part's
+        # waves start where that count comes to a whole number, each as long as the moved wave where it starts (its
+        # values taken there, by time: every copy bends at the same moment), numbered along the chain (Octave below,
+        # Growl, FM go on). A part the count reaches on a whole number and nothing moves: its repeats as made.
         first = np.concatenate([[0], np.cumsum(n)[:-1]]).astype(np.int64)  # (each part's first repeat as it was)
         part = np.repeat(np.arange(len(run)), n)
         src = each["offsets"][run][part] + np.arange(len(part)) - first[part]
@@ -413,24 +458,37 @@ class KeyGrid:
                else each["vib_rate"][run][part] * f["since"][src])  # its note's start, on through slides: user)
         stretch = wide * (1.0 + OFF_PITCH * f["offpitch"][src] * (x - 0.5)) * (
             1.0 + VIBRATO * f["vibrato"][src] * np.sin(2.0 * np.pi * vib))
-        size = np.where(moves, n + n // 10 + 3, n)
-        start = np.concatenate([[0], np.cumsum(size)[:-1]]).astype(np.int64)
-        part = np.repeat(np.arange(len(run)), size)
-        number = np.arange(len(part)) - start[part]
-        at = np.minimum(number, n[part] - 1)
-        src = each["offsets"][run][part] + at
-        moved = moves[part]
-        waves = np.where(moved, f["waves"][src] * stretch[np.minimum(first[part] + at, len(stretch) - 1)],
-                         f["waves"][src]) if len(part) else np.zeros(0)
-        starts = f["starts"][src].copy()
-        for size_k in np.unique(size[moves]):  # (summed wave by wave, as each part on its own would be)
-            rows = np.flatnonzero(moves & (size == size_k))
-            idx = start[rows][:, None] + np.arange(size_k)
-            sums = np.cumsum(waves[idx], axis=1)
-            starts[idx[:, 1:]] = starts[idx[:, :1]] + sums[:, :-1]
-        # (none past the stretch's end either: a held part a slide takes over from would sound on under it)
-        keep = ~moved | (starts < each["end"][run][part] - 1e-6)
-        part, number, src, waves, starts = part[keep], number[keep], src[keep], waves[keep], starts[keep]
+        inc = np.where(moves[part], 1.0 / stretch, 1.0)  # (each repeat as made: how many moved waves it holds)
+        total = np.bincount(part, inc, len(run))
+        pos = np.full(len(self.runs), -1, np.int64)
+        pos[runs] = np.arange(len(runs))
+        up = each["prev"][run]
+        up = np.where(up >= 0, pos[np.maximum(up, 0)], -1)
+        up = np.where(up >= 0, up * len(cents) + np.tile(np.arange(len(cents)), len(runs)), -1)
+        head = np.where(up >= 0, total[np.maximum(up, 0)], 0.0)  # (the count where each part starts: added up
+        while (up >= 0).any():  # along its chain, doubling the steps)
+            on, safe = up >= 0, np.maximum(up, 0)
+            head, up = head + np.where(on, head[safe], 0.0), np.where(on, up[safe], -1)
+        counted = moves | (np.abs(head - np.round(head)) > 1e-9)
+        j0 = np.ceil(head - 1e-9)
+        size = np.where(counted, np.maximum(np.ceil(head + total - 1e-9) - j0, 0), n).astype(np.int64)
+        plain = np.flatnonzero(~counted[part])  # (as made)
+        p0 = part[plain]
+        got = [(p0, np.round(head[p0]).astype(np.int64) + plain - first[p0], src[plain], f["waves"][src[plain]],
+                f["starts"][src[plain]])]
+        rows = np.flatnonzero(counted)
+        if len(rows):
+            k = size[rows]
+            p1 = np.repeat(rows, k)
+            j = (np.repeat(j0[rows], k) + np.arange(int(k.sum())) - np.repeat(np.cumsum(k) - k, k)).astype(np.int64)
+            ends = np.cumsum(inc)
+            here = np.concatenate([[0.0], np.cumsum(total)[:-1]])[p1] + (j - head[p1])
+            at = np.clip(np.searchsorted(ends, here, "right"), first[p1], first[p1] + n[p1] - 1)
+            into = (here - (ends[at] - inc[at])) / inc[at]  # (how far into the repeat as made, 0..1)
+            got.append((p1, j, src[at], f["waves"][src[at]] / inc[at], f["starts"][src[at]] + into * f["waves"][src[at]]))
+        part, number, src, waves, starts = (np.concatenate([g[i] for g in got]) for i in range(5))
+        order = np.lexsort((number, part))
+        part, number, src, waves, starts = part[order], number[order], src[order], waves[order], starts[order]
         late = f["slant"][src] * x + np.floor(x * f["groups"][src]) / f["groups"][src]
         if self.starting is not None:  # (Random start: each copy's waves start that far in, the same all through)
             amount = f["random"][src] if "random" in self.moved else self.random

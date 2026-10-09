@@ -211,7 +211,7 @@ def auto_picks(hz, ppq):
     return tuple(auto_state(hz, ppq, n)[2] for n in hz["tones"])
 
 
-def tone_runs(hz, left, ppq):
+def tone_runs(hz, left, ppq, keys=None):
     """The repeats of the placed tones as unbroken stretches of tone: [(start ticks, the ticks their waves are over
     = the next one's start, whose: (tone, None) or (tone slid from, tone slid to))], not rounded. A tone held is
     one stretch, from where the first slide into it arrives to where the last slide out of it leaves; every slide
@@ -221,7 +221,8 @@ def tone_runs(hz, left, ppq):
     No cut wave where one goes on from another (like a synth's oscillator running on): a tone a slide, a glide or
     Legato reaches is held from the last wave of what reached it, a glide starts on the next wave's end of the
     tone it leaves, and with no held part left the slide out of a tone starts where the one into it ended. Worked
-    out in time order, each stretch bent by the Pitch line as it's made, so these hold with it too."""
+    out in time order, each stretch bent by the Pitch line as it's made, so these hold with it too. keys = one more
+    bend (keys up at beats for a tone: OSC B's tune moved, KeyGrid.osc2_keys), made the same way."""
     tones = hz["tones"]
     ls = links(tones)
     tail = tails(hz)
@@ -233,7 +234,8 @@ def tone_runs(hz, left, ppq):
     for i, (a, b, s) in enumerate(ls):
         ins.setdefault(b["id"], []).append(min(s["in"], b["len"]))
         outs.setdefault(a["id"], []).append(i)
-    bend = "pitch" in (hz.get("fx") or {})
+    pitched = "pitch" in (hz.get("fx") or {})
+    bend = pitched or keys is not None
     own, made = {}, {}
     held = {}  # (tone id: its held part's waves, start, gate, end)
     carry = {}  # (tone id with no held part left: (where what reached it ended, where it reached it as placed))
@@ -241,8 +243,10 @@ def tone_runs(hz, left, ppq):
 
     def run(starts, nexts, whose):
         starts, nexts = np.asarray(starts, float), np.asarray(nexts, float)
-        if bend:
+        if pitched:
             starts, nexts = bent(hz, left, ppq, starts, nexts, whose[0])
+        if keys is not None:
+            starts, nexts = bent(hz, left, ppq, starts, nexts, keys=lambda b: keys(b, whose[0]))
         return starts, nexts, whose
 
     def next_wave(p, at):  # (where tone p's sound next ends a wave at or after tick at; None when it isn't there)
@@ -336,6 +340,33 @@ def tone_runs(hz, left, ppq):
     return out
 
 
+def follows(hz, items):
+    """For each stretch of tone (items: (start tick, tick its last wave ends, tone, tone slid to or None), as
+    tone_runs makes them): (the one its sound goes on from, or -1; True when both are in one chain of slides /
+    Legato, so the effects counted from each note go on too). It goes on from one ending where it starts (a
+    whole-tick held part: up to a tick later) in its own chain, or from the tone it glides in from."""
+    tones = hz.get("tones") or ()
+    span = cached(hz, "chains", lambda: chains(tones, legato_links(hz.get("voice"), tones)))
+    gl = {k: {p["id"] for p in v} for k, v in glide_tones(hz).items()}
+    order = sorted(range(len(items)), key=lambda i: items[i][1])
+    ends = [items[i][1] for i in order]
+    out = []
+    for i, (s, _, n0, _) in enumerate(items):
+        got, k = (-1, False), bisect.bisect_right(ends, s + 1e-6)
+        while k > 0 and ends[k - 1] > s - 1.0 - 1e-6:
+            k -= 1
+            j = order[k]
+            m0, m1 = items[j][2], items[j][3]
+            if j == i:
+                continue
+            chained = span.get(m0["id"]) is not None and span.get(m0["id"]) == span.get(n0["id"])
+            if chained or (m1 or m0)["id"] in gl.get(n0["id"], ()):
+                got = (j, chained)
+                break
+        out.append(got)
+    return out
+
+
 def bent(hz, left, ppq, starts, nexts, tone=None, keys=None):
     """A stretch of tone's repeats (start ticks, next ones' starts) moved by the "pitch" effect: the tone goes up or
     down by the line (the Range's keys at 1 and 0), its waves shorter or longer. The repeats are spaced by adding up the
@@ -379,31 +410,38 @@ def _whole(v):
     return np.floor(v + 0.5).astype(np.int64)
 
 
-def vibrato_keys(hz, beat, tone):
+def vibrato_keys(hz, beat, tone, before=None):
     """Keys the Vibrato moves a stretch of tone's repeats at beat (an array; 0 without it), as the notes are made
     (hz_grid.KeyGrid.made: each wave VIBRATO x the line longer / shorter, its Rate counted from the start of the
-    note's chain of slides; a Rate the MOD tab moves added up), for the red line only."""
+    note's chain of slides; a Rate the MOD tab moves added up, on from the stretch before in its chain: before =
+    (its last beat, turns there, Rate there)), for the red line only; and (last beat, turns, Rate) for the next."""
     depth = fx_at(hz, "vibrato", beat, tone) if "vibrato" in (hz.get("fx") or {}) and len(beat) else None
     if depth is None or not np.any(depth):
-        return 0.0
+        return 0.0, None
     span = note_span(hz, beat, tone)
     since = beat - (tone["t"] if span is None else span[0])
     base = plain_base(hz, "vibrato_rate")
     if any(link["to"] == "vibrato_rate" for link in (hz.get("mod") or {}).get("links", ())) and base is not None:
         rate = setting_at(hz, "vibrato_rate", base, beat, tone)
-        turns = rate[0] * since[0] + np.concatenate([[0.0], np.cumsum(rate[:-1] * np.diff(beat))])
+        first = rate[0] * since[0] if before is None else before[1] + before[2] * (beat[0] - before[0])
+        turns = first + np.concatenate([[0.0], np.cumsum(rate[:-1] * np.diff(beat))])
+        last = (float(beat[-1]), float(turns[-1]), float(rate[-1]))
     else:
-        turns = (hz.get("lfo") or {}).get("vibrato_rate", VIBRATO_RATE) * since
-    return -12.0 * np.log2(1.0 + VIBRATO * depth * np.sin(2.0 * np.pi * turns))
+        turns, last = (hz.get("lfo") or {}).get("vibrato_rate", VIBRATO_RATE) * since, None
+    return -12.0 * np.log2(1.0 + VIBRATO * depth * np.sin(2.0 * np.pi * turns)), last
 
 
 @functools.lru_cache(maxsize=16)
 def _heard(hz_json, left, ppq, bpm):
     hz = dict(json.loads(hz_json), _memo={})
-    out = []
-    for starts, nexts, whose in tone_runs(hz, left, ppq):
+    out, runs = [], list(tone_runs(hz, left, ppq))
+    after = follows(hz, [(s[0], e[-1], w[0], w[1]) for s, e, w in runs])
+    lasts = {}
+    for i in sorted(range(len(runs)), key=lambda i: runs[i][0][0]):  # (a stretch after the one it goes on from)
+        starts, nexts, whose = runs[i]
         limits = _limits(hz, left, ppq, starts)
-        wobble = vibrato_keys(hz, starts / ppq - left, whose[0])
+        j, chained = after[i]
+        wobble, lasts[i] = vibrato_keys(hz, starts / ppq - left, whose[0], lasts.get(j) if chained else None)
         mean = nexts - starts  # (the wave as made: with mixed gates the whole-tick ones come to this on average)
         starts, nexts = _whole(starts), _whole(nexts)
         gates = np.maximum(nexts - starts, 1)  # (whole ticks: what the PPQ lets the wave be)
@@ -412,8 +450,8 @@ def _heard(hz_json, left, ppq, bpm):
         ends = np.minimum(nexts, limits)
         keep = ends > starts
         if keep.any():
-            out.append((starts[keep] / ppq - left, ends[keep] / ppq - left, keys[keep], mean[keep]))
-    return out
+            out.append((i, starts[keep] / ppq - left, ends[keep] / ppq - left, keys[keep], mean[keep]))
+    return [got[1:] for got in sorted(out, key=lambda got: got[0])]  # (in tone_runs' order)
 
 
 def heard(hz, left, ppq, bpm):
