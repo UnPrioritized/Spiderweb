@@ -192,6 +192,8 @@ def shifted_hz(hz, d):
             continue
         if t < 0 and n.get("vel"):  # (cut at the edge: the rest of its loudness line)
             n["vel"] = vel_part(dict(n, t=n["t"] + d), 0.0, end)
+        if t < 0 and n.get("bend"):  # (... and of its bend line)
+            n["bend"] = bend_part(dict(n, t=n["t"] + d), 0.0, end)
         n["t"], n["len"] = max(0.0, t), max(MIN_LEN, end - max(0.0, t))
         tones.append(n)
     if "tones" in hz:
@@ -247,7 +249,9 @@ def shortest_gate(hz, ppq):
     if hz.get("layers"):
         return min(shortest_gate(l, ppq) for l in heard_layers(hz) or layers_of(hz))
     played = live(hz)  # (the Arpeggio box's octaves go higher)
-    top = max((pitch(n) for n in played.get("tones") or ()), default=hz["key"])
+    # (each note bent up by its own bend line, as far as the Range lets it)
+    top = max((pitch(n) + max(0.0, min(bend_range(played), max((p[1] for p in n.get("bend") or ()), default=0.0)))
+               for n in played.get("tones") or ()), default=hz["key"])
     pts = (played.get("fx") or {}).get("pitch") if hz.get("tones") else None
     if pts:  # (the amount line only ever weakens it; the MOD tab's links push it up as far as they reach)
         push = sum(abs(link["amount"]) if link.get("bipolar") else max(0.0, link["amount"])

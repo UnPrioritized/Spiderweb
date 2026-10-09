@@ -6,7 +6,7 @@ import math
 import numpy as np
 
 from notes.hz_settings import ARP_KNOBS, CHORDS, MIN_LEN, SCALES, TIME_STEP
-from notes.hz_lines import vel_part
+from notes.hz_lines import bend_from, vel_part
 from notes.hz_modulate import setting_at
 
 
@@ -97,6 +97,7 @@ def arpeggiated(tones, arp, left=0.0, hz=None):
                     tone.update({f: n[f] for f in ("auto", "gate") if f in n})
                     if n.get("vel"):  # (its part of the held note's loudness line)
                         tone["vel"] = vel_part(n, t, tone["len"])
+                    tone.update(bend_from(n))  # (the held note's bend line, by time)
                     out.append(tone)
             k += 1
     return sorted(out, key=lambda n: (n["t"], n["key"]))
@@ -127,6 +128,7 @@ def stepped(steps, k, t, held, arp, at, end, gate):
     tone.update({f: n[f] for f in ("auto", "gate") if f in n})
     if n.get("vel"):  # (its part of the held note's loudness line)
         tone["vel"] = vel_part(n, t, tone["len"])
+    tone.update(bend_from(n))  # (the held note's bend line, by time)
     return tone
 
 

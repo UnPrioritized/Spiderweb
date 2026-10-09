@@ -50,6 +50,51 @@ def vel_part(n, t, span):
             + [[1.0, float(b)]])
 
 
+def note_bend(n, beat, most):
+    """Keys a note's own bend line (tone["bend"]) moves its tone at beat (an array, counted like its "t"; before its
+    start / after its end: as at them), no further than `most` (the Range knob) each way; None when it has none.
+    "bend_at" = (start, length) the line is spread over when it's another note's (an arpeggio's step: by time)."""
+    pts = n.get("bend")
+    if not pts:
+        return None
+    t, span = n.get("bend_at") or (n["t"], n["len"])
+    u = np.clip((np.asarray(beat, float) - t) / max(span, 1e-12), 0.0, 1.0)
+    return np.clip(line_at(pts, u), -most, most)
+
+
+def bend_part(n, t, span):
+    """The part of note n's bend line from beat t for span beats, as a line of its own (u 0..1 over that part), or
+    None when it has none: for a note cut at the left edge. A curved piece cut through becomes short straight ones."""
+    pts = n.get("bend")
+    if not pts:
+        return None
+    size = max(n["len"], 1e-12)
+    u0, u1 = (t - n["t"]) / size, (t + span - n["t"]) / size
+
+    def at(u):
+        return float(line_at(pts, min(1.0, max(0.0, u))))
+    if u1 - u0 <= 1e-12:
+        return [[0.0, at(u0)]]
+    xs = [p[0] for p in pts]
+    cuts = sorted({u0, u1, *(x for x in xs if u0 < x < u1)})
+    out = []
+    for a, b in zip(cuts, cuts[1:]):
+        j = max(0, min(len(xs) - 2, int(np.searchsorted(xs, (a + b) / 2, side="right")) - 1))
+        inside = len(xs) > 1 and xs[j] <= (a + b) / 2 <= xs[j + 1]
+        if inside and bend_of(pts[j]) and (a, b) != (xs[j], xs[j + 1]):  # (a curve cut through: sampled)
+            out += [[(a + (b - a) * i / 8 - u0) / (u1 - u0), at(a + (b - a) * i / 8)] for i in range(8)]
+        else:
+            out.append([(a - u0) / (u1 - u0), at(a)] + ([bend_of(pts[j])] if inside and bend_of(pts[j]) else []))
+    return out + [[1.0, at(u1)]]
+
+
+def bend_from(n):
+    """The fields a note made from note n (an arpeggio's step) takes to play n's bend line by time."""
+    if not n.get("bend"):
+        return {}
+    return {"bend": n["bend"], "bend_at": list(n.get("bend_at") or (n["t"], n["len"]))}
+
+
 def line_at(pts, beat, every=None):
     """A line's value at beat (a number or an array): through its points (each line between two bent as the first
     one says), flat before the first and after the last; every = the points are one repeat of that many beats,

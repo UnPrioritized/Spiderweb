@@ -10,7 +10,7 @@ import numpy as np
 
 from notes.hz_settings import (ADSR_KNOBS, GLIDE_CURVE, MOD_BOXES, MOD_NEED_LINE, NEUTRAL, VIBRATO,
                                VIBRATO_RATE, bend_range, hz_of)
-from notes.hz_lines import adsr_line
+from notes.hz_lines import adsr_line, note_bend
 from notes.hz_glide import cached, chains, glide, glide_left, legato_links, links, note_span, pitch, slide_part
 from notes.hz_modulate import fx_at, longest_fall, plain_base, rack_tail, setting_at
 from notes.hz_arp import arpeggiated
@@ -222,7 +222,9 @@ def tone_runs(hz, left, ppq, keys=None):
     Legato reaches is held from the last wave of what reached it, a glide starts on the next wave's end of the
     tone it leaves, and with no held part left the slide out of a tone starts where the one into it ended. Worked
     out in time order, each stretch bent by the Pitch line as it's made, so these hold with it too. keys = one more
-    bend (keys up at beats for a tone: OSC B's tune moved, KeyGrid.osc2_keys), made the same way."""
+    bend (keys up at beats for a tone: OSC B's tune moved, KeyGrid.osc2_keys), made the same way. A note's own bend
+    line (tone["bend"]) bends its held part and the glides into it the same way; a slide goes from the bent pitch
+    where it leaves to the bent pitch where it arrives."""
     tones = hz["tones"]
     ls = links(tones)
     tail = tails(hz)
@@ -235,8 +237,13 @@ def tone_runs(hz, left, ppq, keys=None):
         ins.setdefault(b["id"], []).append(min(s["in"], b["len"]))
         outs.setdefault(a["id"], []).append(i)
     pitched = "pitch" in (hz.get("fx") or {})
-    bend = pitched or keys is not None
+    most = bend_range(hz)
+    bend = pitched or keys is not None or any(n.get("bend") for n in tones)
     own, made = {}, {}
+
+    def own_bend(n, beat):  # (keys tone n's own bend line moves it at beat, a number)
+        got = note_bend(n, np.array([beat]), most)
+        return 0.0 if got is None else float(got[0])
     held = {}  # (tone id: its held part's waves, start, gate, end)
     carry = {}  # (tone id with no held part left: (where what reached it ended, where it reached it as placed))
     reach = {}  # (tone id: (where the first slide reaching it where its held part starts ends, that as placed))
@@ -245,8 +252,11 @@ def tone_runs(hz, left, ppq, keys=None):
         starts, nexts = np.asarray(starts, float), np.asarray(nexts, float)
         if pitched:
             starts, nexts = bent(hz, left, ppq, starts, nexts, whose[0])
-        if keys is not None:
-            starts, nexts = bent(hz, left, ppq, starts, nexts, keys=lambda b: keys(b, whose[0]))
+        mine = whose[0] if whose[1] is None and whose[0].get("bend") else None  # (a slide's: in its own pitches)
+        if keys is not None or mine is not None:
+            starts, nexts = bent(hz, left, ppq, starts, nexts, keys=lambda b: (
+                (keys(b, whose[0]) if keys is not None else 0.0)
+                + (note_bend(mine, b, most) if mine is not None else 0.0)))
         return starts, nexts, whose
 
     def next_wave(p, at):  # (where tone p's sound next ends a wave at or after tick at; None when it isn't there)
@@ -276,7 +286,8 @@ def tone_runs(hz, left, ppq, keys=None):
             a = max(a, n["t"] + min(took, n["len"]))
             curve = glide_of(hz, n, "curve")
             for p in gl[me]:
-                k0 = pitch(p)
+                # (from p's pitch bent as it ended; run adds this note's own bend, so that much less here)
+                k0 = pitch(p) + own_bend(p, n["t"]) - own_bend(n, n["t"])
                 t = next_wave(p, at)
                 part, after, t = [], [], s if t is None else t
                 while t < e:
@@ -311,6 +322,7 @@ def tone_runs(hz, left, ppq, keys=None):
             x0, x1, k0, k1 = glide(n, c, link)
             if x1 - x0 < 1e-12:
                 continue
+            k0, k1 = k0 + own_bend(n, x0), k1 + own_bend(c, x1)  # (from / to the notes' bent pitches)
             knob = slide_knob(hz, n)
             s0, e0 = (left + x0) * ppq, (left + n["t"] + n["len"]) * ppq
             s1, e1 = (left + c["t"]) * ppq, (left + x1) * ppq

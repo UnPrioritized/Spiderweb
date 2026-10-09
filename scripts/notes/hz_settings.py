@@ -167,6 +167,26 @@ def clean_vel(pts):
     return sorted(got, key=lambda p: p[0]) or None
 
 
+def clean_bend(pts):
+    """A note's own bend line checked (tone["bend"]): [[u, keys(, curve)], ...] in order, u = 0..1 along the note,
+    keys up (below 0: down) as far as the Range knob goes, curve = how the piece to the next point bends
+    (-SLIDE_BEND..SLIDE_BEND, hz_lines.bent_part; missing = straight); None when it's no good or empty."""
+    most = LFO["bend_range"][1]
+    out = []
+    try:
+        for p in pts or ():
+            u, k = float(p[0]), float(p[1])
+            curve = float(p[2]) if len(p) > 2 else 0.0
+            if math.isfinite(u) and math.isfinite(k) and math.isfinite(curve):
+                got = [min(1.0, max(0.0, u)), min(most, max(-most, k))]
+                if curve:
+                    got.append(min(SLIDE_BEND, max(-SLIDE_BEND, curve)))
+                out.append(got)
+    except (TypeError, ValueError, IndexError):
+        return None
+    return sorted(out, key=lambda p: p[0]) or None
+
+
 def clean_fx(fx):
     """Effects checked: {effect: [[beat, value(, bend)], ...]} in order, beats from 0, values 0..1. Effects with no
     points are left out."""
@@ -694,6 +714,9 @@ def clean_tones(tones):
             vel = clean_vel(n.get("vel")) if n.get("vel") else None
             if vel:
                 tone["vel"] = vel
+            bend = clean_bend(n.get("bend")) if n.get("bend") else None
+            if bend:
+                tone["bend"] = bend
         except (KeyError, TypeError, ValueError, AttributeError):
             continue
         ok = all(math.isfinite(v) for v in [tone["t"], tone["len"], tone["cents"], tone.get("auto", 0.0), *leads]
