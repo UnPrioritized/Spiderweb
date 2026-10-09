@@ -551,12 +551,15 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         Tooltip(self.domino_box, tr("app.where_copied_and_pasted_notes_start"))
         domino = ttk.Frame(box)
         domino.grid(row=r + 1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
-        paste = b = ttk.Button(domino, text=tr("app.paste_from_domino"), command=self.paste_from_domino)
-        Tooltip(b, tr("app.ctrl_shift_v_the_notes_copied"))
-        b = ttk.Button(domino, text=tr("app.copy_to_domino"), command=self.copy_to_domino)
-        b.pack(side="right")
-        paste.pack(side="right", padx=4)  # (next to it, the same gap as Open… / Save…)
-        Tooltip(b, tr("app.ctrl_shift_c_copies_the_selected"))
+        ttk.Label(domino, text=tr("app.domino_row")).pack(side="left")
+        for text, tip, command, gap in (("app.domino_export", "app.domino_export_tip", self.export_dms, 0),
+                                        ("app.domino_copy", "app.ctrl_shift_c_copies_the_selected",
+                                         self.copy_to_domino, 4),  # (the same gap as Open… / Save…)
+                                        ("app.domino_paste", "app.ctrl_shift_v_the_notes_copied",
+                                         self.paste_from_domino, 0)):
+            b = ttk.Button(domino, text=tr(text), command=command)
+            b.pack(side="right", padx=gap)
+            Tooltip(b, tr(tip))
         btns = ttk.Frame(box)
         btns.grid(row=r + 2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         ttk.Button(btns, text=tr("app.open"), command=self.open_project).pack(side="left")

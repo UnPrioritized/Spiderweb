@@ -23,7 +23,7 @@ from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
-from files.domino_clip import DOMINO_STARTS, clip_data, get_from_clipboard, put_on_clipboard, read_notes
+from files.domino_clip import DOMINO_STARTS, clip_data, dms_data, get_from_clipboard, put_on_clipboard, read_notes
 from files.midi_out import MAX_DELTA, PPQ_WARN, long_silences, write_midi
 from files.playback import keep_saved
 from files.about import HERE, VERSION
@@ -610,6 +610,50 @@ class ProjectFiles:
         messagebox.showinfo(tr("project.spiderweb"),
                             tr("project.saved_notes_on_track_s_one", n=len(self.rendered), channels=channels, path=path,
                                note=note))
+
+    def export_dms(self):
+        """Export to Domino: every note in a .dms file (Domino's own song file, PPQ up to 65535) next to the MIDI
+        file the Output file box names, with the same name. Asked before replacing, like Generate MIDI."""
+        try:
+            ppq, bpm, beats = self.read_project()
+        except ValueError as e:
+            messagebox.showerror(tr("project.spiderweb"), str(e))
+            return
+        self.catch_up_notes()
+        notes = self.rendered
+        high = int((notes[:, 2] > 127).sum())  # (256 keys: Domino only has 128)
+        notes = notes[notes[:, 2] <= 127]
+        if not len(notes):
+            messagebox.showerror(tr("project.spiderweb"),
+                                 tr("project.no_notes_yet_draw_something_inside", keys=min(self.keys, 128) - 1))
+            return
+        if int(notes[:, 1].max()) > 0xFFFFFFFF:
+            messagebox.showerror(tr("project.spiderweb"), tr("project.too_long_for_domino"))
+            return
+        if not ask_big(self, "midi", len(notes)):
+            return
+        path = os.path.splitext(output_path(self.pvar["output"].get()))[0] + ".dms"
+        if os.path.exists(path) and not messagebox.askyesno(
+                tr("project.confirm_save_as"), tr("project.already_exists_do_you_want_to",
+                                                  basename=os.path.basename(path)),
+                icon="warning", default="no"):
+            return
+        self.busy(tr("project.saving_dms"))
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            write_bytes(path, dms_data(notes, ppq, bpm, beats, self.picture_use10))
+        except OSError as e:
+            messagebox.showerror(tr("project.spiderweb"), couldnt_save(e))
+            return
+        except MemoryError:
+            messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))
+            return
+        finally:
+            self.busy(None)
+        tracks = int(notes[:, 4].max()) + 1
+        messagebox.showinfo(tr("project.spiderweb"),
+                            tr("project.saved_dms", n=len(notes), tracks=tracks, path=path)
+                            + (tr("project.notes_above_key_127_left_out", high=high) if high else ""))
 
     def copy_to_domino(self):
         """Ctrl+Shift+C: the selected shapes' notes (all notes when nothing is selected) on the clipboard, for
