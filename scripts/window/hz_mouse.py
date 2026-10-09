@@ -695,6 +695,8 @@ class HzMouse:
         """(Ctrl+Z) What puts back what the mouse holds in an effects pane (here or the synth window's), on a synth
         knob or in its Effects list; None when nothing is held there."""
         syn = self.synth_win
+        if self.layers.held is not None:  # (a layers list row held: let go of, nothing moved)
+            return self.layers.drop_held
         for pane in (self.fx, syn.fx if syn else None):
             if pane is not None and pane.drag:
                 return pane.cancel_drag

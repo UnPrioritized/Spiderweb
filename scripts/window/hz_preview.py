@@ -18,7 +18,7 @@ import numpy as np
 
 from files.lang import tr
 from files.synth import RATE, Player, Synth, SynthError, events
-from notes.hzbass import left_edge
+from notes.hzbass import all_tones, left_edge
 
 CHUNK = 2.0  # seconds of sound made in one piece
 AHEAD = 60.0  # seconds made ahead of the play line (or the view's left edge)
@@ -174,7 +174,7 @@ class Preview:
             ppq, bpm, _ = self.app.read_project()
         except ValueError:
             return
-        notes = self.app.notes_of(sh) if sh is not None and (sh.get("hz") or {}).get("tones") else None
+        notes = self.app.notes_of(sh) if sh is not None and all_tones(sh.get("hz") or {}) else None  # (any layer's)
         shape = (id(sh), left_edge(sh)) if sh is not None else None
         if notes is self.notes and (ppq, bpm) == (self.ppq, self.bpm) and shape == self.shape:
             return

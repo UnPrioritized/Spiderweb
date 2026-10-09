@@ -23,7 +23,7 @@ from tkinter import ttk
 from files.about import ICONS
 from files.lang import tr
 from files.mathexpr import fmt
-from notes.hzbass import AUTO, AUTO_MOST, FX, clean_tones, left_edge
+from notes.hzbass import AUTO, AUTO_MOST, FX, all_tones, clean_tones, left_edge
 from roll.roll_shared import grab_while_panning
 from roll.zoombar import add_zoom_bars
 from window import look
@@ -299,6 +299,9 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         if other:  # another Hz bass: a slide's first mark goes (user)
             self.shown, self.pending = mark, None
             self.fx.sel = set()  # (points picked on another layer's lines)
+            for pane in (self.fx, self.synth_win.fx if self.synth_win else None):
+                if pane is not None and pane.asking:  # (Repeat every… was for the lines shown before)
+                    pane.asking.destroy()
         if tones != self.tones:
             self.tones, self.sel = tones, set()
             self.drop_drag()
@@ -311,7 +314,7 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
             self.grow.set(True)
         else:
             text = tr("hz.shape", name=self.app.shape_label(sh))
-            if tones:
+            if all_tones(hz):  # (any layer's notes: the Hz bass's own setting, whichever layer is picked)
                 self.grow.set(bool(hz.get("grow")))
             elif other:  # (no notes yet: ticked by hand stays ticked until the first note, whatever else changes)
                 self.grow.set(hz_made(sh))
@@ -354,7 +357,8 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
     def before_restore(self):
         """Undo / redo is about to change the shapes: what's shown now (for after_restore)."""
         app, sh = self.app, self.target()
-        self.chosen_at = app.sel if self.chosen is not None and self.chosen is app.selected() else None
+        self.layers.settle()  # (a name typed, the colour popup, a held row: they point at rows by number)
+        self.chosen_at =app.sel if self.chosen is not None and self.chosen is app.selected() else None
         if sh is not None and hz_made(sh):
             return "shape", left_edge(sh), hz_keys(sh)
         if sh is None and app.hz_start is not None:

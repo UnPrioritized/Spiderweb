@@ -8,7 +8,8 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import fmt
-from notes.hzbass import HZ_DEFAULTS, auto_state, can_slide, glide, heard, hz_of, layers_of, left_edge, links, pitch
+from notes.hzbass import (HZ_DEFAULTS, all_tones, auto_state, can_slide, glide, heard, hz_of, layers_of, left_edge,
+                          links, pitch)
 from roll.roll_shared import ALT, CTRL, SELECTED_COLOR, SHIFT, SLOT_COLORS, draw_boxes, fade, note_name
 from window import look
 from window.hz_layers import layer_colour
@@ -383,7 +384,7 @@ class HzView:
         n = len(self.tones)
         text = tr("hz.one_note") if n == 1 else tr("hz.n_notes", n=n)
         sh = self.target()
-        if sh is not None and self.tones:
+        if sh is not None and all_tones(sh.get("hz") or {}):  # (every layer's: what the piano roll gets)
             text += "     " + tr("hz.repeats", n=f"{self.app.note_count(sh):,}")
         if e is not None and e.x >= self.kb_w and e.y >= self.ruler_h:
             k = self.key_at(e.y)

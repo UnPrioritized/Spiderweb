@@ -6,13 +6,15 @@ place in the list, right-click = menu, Delete = the picked layer goes, + = a new
 
 import copy
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 
 from files.lang import tr
 from files.system import double_click_ms
-from notes.hzbass import LAYER_NAME, LAYERS, SOUND, fit_length, layers_of, with_layers
+from notes.hzbass import LAYER_NAME, LAYERS, SOUND, all_tones, fit_length, layers_of, left_edge, with_layers
 from roll.roll_shared import SLOT_COLORS
 from window import look
+from window.hz_gates import hz_keys, hz_made
 from window.widgets import Tooltip
 
 DOUBLE_MS = double_click_ms()  # (the system's own setting)
@@ -44,17 +46,23 @@ class LayerStrip:
         self.add_btn = ttk.Button(head, text="+", width=3, command=self.add, takefocus=False)
         self.add_btn.pack(side="right")
         Tooltip(self.add_btn, tr("hz.layer_add_tip"))
-        c = self.canvas = tk.Canvas(self.box, background=look.HZ_LAYER_BG, highlightthickness=0, takefocus=True)
+        c = self.canvas = tk.Canvas(self.box, background=look.HZ_LAYER_BG, highlightthickness=0, takefocus=True,
+                                    yscrollincrement=self.row_h)
+        self.bar = ttk.Scrollbar(self.box, orient="vertical", command=c.yview)  # (shown only when rows don't fit)
+        c.config(yscrollcommand=self.bar.set)
         c.pack(fill="both", expand=True)
         c.bind("<Configure>", lambda e: self.redraw())
+        c.bind("<MouseWheel>", lambda e: c.yview_scroll(-1 if e.delta > 0 else 1, "units") if self.bar.winfo_manager()
+               else None)
+        self.name_font = tkfont.Font(font=look.font(9))
         c.bind("<ButtonPress-1>", self.on_press)
         c.bind("<B1-Motion>", self.on_drag)
         c.bind("<ButtonRelease-1>", self.on_release)
         c.bind("<Double-Button-1>", self.on_double)
         c.bind("<ButtonPress-3>", self.on_menu)
-        c.bind("<Delete>", lambda e: self.remove(self.picked()))
+        c.bind("<Delete>", lambda e: (self.drop_held(), self.remove(self.picked())))  # (a row held: let go first)
         c.bind("<Escape>", lambda e: self.drop_held())
-        self.naming = None  # (layer number, Entry) while a name is typed
+        self.naming = None  # (layer number, Entry, its text, the shape) while a name is typed
         self.palette = None  # the colour squares' popup
         self.held = None  # (row, press y, rename on let go, moved) while a row's name is held
         self.drop = None  # where a dragged row would go (0 = above the first row ... n = under the last)
@@ -80,9 +88,15 @@ class LayerStrip:
             self.box.pack(side="left", fill="y", before=self.win.notes_box)
             self.redraw()
         else:
-            self.end_naming(False)
-            self.drop_held()
+            self.settle()
             self.box.pack_forget()
+
+    def settle(self):
+        """Undo / redo coming, or the list hidden: a name being typed, the colour popup and a held row are called
+        off (they point at rows by number)."""
+        self.end_naming(False)
+        self.close_palette()
+        self.drop_held()
 
     def spots(self, i):
         """x spans of a row's parts: colour square, M, S."""
@@ -95,16 +109,19 @@ class LayerStrip:
         c = self.canvas
         if not self.box.winfo_manager():
             return
-        c.delete("all")
+        c.delete(*[k for k in c.find_all() if "naming" not in c.gettags(k)])  # (a name being typed stays)
         hz = self.hz()
         self.add_btn.config(state="normal" if hz is not None and len(plain_layers(hz)["layers"]) < LAYERS
                             else "disabled")
         w = c.winfo_width()
         if hz is None:
+            self.show_bar(False)
             c.create_text(w / 2, 20 * self.s, text=tr("hz.layers_none"), fill=look.HINT, width=w - 12 * self.s,
                           justify="center")
             return
         info, picked, rh, s = plain_layers(hz)["layers"], hz.get("layer", 0), self.row_h, self.s
+        self.show_bar(len(info) * rh > c.winfo_height())
+        c.config(scrollregion=(0, 0, w, max(len(info) * rh, c.winfo_height())))
         solo = any(e.get("solo") for e in info)
         for i, e in enumerate(info):
             y = i * rh
@@ -115,8 +132,8 @@ class LayerStrip:
             fill, edge = SLOT_COLORS[e.get("colour", 0) % len(SLOT_COLORS)]
             c.create_rectangle(a0, y + rh / 2 - 6 * s, a1, y + rh / 2 + 6 * s, fill=fill, outline=edge)
             heard = e.get("solo") if solo else not e.get("mute")
-            c.create_text(a1 + 6 * s, y + rh / 2, text=self.name_of(hz, i), anchor="w", font=look.font(9),
-                          fill=look.LABEL if heard else look.HINT, width=max(10, m0 - a1 - 10 * s))
+            c.create_text(a1 + 6 * s, y + rh / 2, text=self.cut_name(self.name_of(hz, i), m0 - a1 - 10 * s),
+                          anchor="w", font=self.name_font, fill=look.LABEL if heard else look.HINT)
             for x0, x1, key, colour in ((m0, m1, "mute", look.HZ_LAYER_MUTE), (s0, s1, "solo", look.HZ_LAYER_SOLO)):
                 c.create_rectangle(x0, y + 4 * s, x1, y + rh - 4 * s, fill=colour if e.get(key) else look.HZ_LAYER_OFF,
                                    outline=look.HZ_EDGE)
@@ -125,12 +142,31 @@ class LayerStrip:
         if self.drop is not None and self.held and self.drop not in (self.held[0], self.held[0] + 1):
             y = min(self.drop * rh, len(info) * rh - 1)
             c.create_line(0, y, w, y, fill=look.HZ_LAYER_DROP, width=max(2, round(2 * s)))
+        c.tag_raise("naming")
+
+    def show_bar(self, on):
+        if on != bool(self.bar.winfo_manager()):
+            if on:
+                self.bar.pack(side="right", fill="y", before=self.canvas)
+            else:
+                self.bar.pack_forget()
+                self.canvas.yview_moveto(0)
+
+    def cut_name(self, name, room):
+        """name on one line: cut with "…" to fit room pixels."""
+        f = self.name_font
+        if f.measure(name) <= room:
+            return name
+        while name and f.measure(name + "…") > room:
+            name = name[:-1]
+        return name.rstrip() + "…"
 
     def row_at(self, y):
+        """The row at the mouse's y in the list (scrolled or not), or None."""
         hz = self.hz()
         if hz is None:
             return None
-        i = int(y // self.row_h)
+        i = int(self.canvas.canvasy(y) // self.row_h)
         return i if 0 <= i < len(plain_layers(hz)["layers"]) else None
 
     # ------------------------------------------------------------ mouse
@@ -166,7 +202,7 @@ class LayerStrip:
             return
         self.held = (i, y0, False, True)
         n = len(plain_layers(self.hz() or {})["layers"])
-        self.drop = min(max(round(e.y / self.row_h), 0), n)
+        self.drop = min(max(round(self.canvas.canvasy(e.y) / self.row_h), 0), n)
         self.redraw()
 
     def on_release(self, e):
@@ -205,8 +241,10 @@ class LayerStrip:
 
     def on_menu(self, e):
         i = self.row_at(e.y)
-        if i is None or self.win.drag:
+        if i is None or self.win.drag or self.held is not None:  # (a row held: nothing, like the piano roll)
             return
+        self.end_naming(True)
+        self.close_palette()
         self.pick(i)
         hz = self.hz()
         m = tk.Menu(self.canvas, tearoff=False)
@@ -276,26 +314,49 @@ class LayerStrip:
         self.put(with_layers(hz, every + [new], len(every)), tr("hz.step_layer_add"))
 
     def remove(self, i):
-        """Layer i goes, with its notes (the last one stays)."""
+        """Layer i goes, with its notes (the last one stays). No notes left in a Hz bass made with the Hz bass tool:
+        it goes, like when its last note is deleted (a new one can start at the same spot)."""
         hz = self.hz()
-        if hz is None or len(hz.get("layers") or ()) < 2:
+        if hz is None or len(hz.get("layers") or ()) < 2 or not 0 <= i < len(hz["layers"]):
             return self.win.bell()
         every, info = layers_of(hz), list(hz["layers"])
         picked = hz.get("layer", 0)
         del every[i], info[i]
         picked = min(picked if picked < i else max(0, picked - 1) if picked > i else i, len(info) - 1)
-        self.put(with_layers(dict(hz, layers=info), every, picked), tr("hz.step_layer_delete"))
+        hz = with_layers(dict(hz, layers=info), every, picked)
+        win, app, sh = self.win, self.app, self.win.target()
+        if win.synth_win:
+            win.synth_win.forget_preset()
+        if all_tones(hz) or not hz_made(sh):
+            return self.put(hz, tr("hz.step_layer_delete"))
+        win.drop_drag()
+        win.own_step = True
+        try:
+            app.push_undo(name=tr("hz.step_layer_delete"))
+        finally:
+            win.own_step = False
+        app.hz_start, app.hz_defaults = left_edge(sh), hz_keys(sh)
+        del app.shapes[app.sel]
+        win.tones = []
+        app.select(None)
+        app.shapes_changed()
+        app.sync_custom()
+        app.schedule_autosave()
+        win.sync()
 
     def move(self, i, j):
         """Layer i put at place j in the list (the others close up around it); the picked one stays picked. Names
         given by place ("Layer 2") are kept as they were."""
         hz = self.hz()
-        if hz is None or not hz.get("layers") or i == j or not 0 <= j < len(hz["layers"]):
+        n = len((hz or {}).get("layers") or ())
+        if i == j or not (0 <= i < n and 0 <= j < n):
             return
         every = layers_of(hz)
         info = [dict(e, name=self.name_of(hz, k)) for k, e in enumerate(hz["layers"])]
         order = list(range(len(info)))
         order.insert(j, order.pop(i))
+        if self.win.synth_win:
+            self.win.synth_win.forget_preset()
         self.put(with_layers(dict(hz, layers=[info[k] for k in order]), [every[k] for k in order],
                              order.index(hz.get("layer", 0))), tr("hz.step_layer_move"))
 
@@ -305,6 +366,8 @@ class LayerStrip:
         if hz is None:
             return
         hz = plain_layers(copy.deepcopy(hz))
+        if not 0 <= i < len(hz["layers"]):
+            return
         e = hz["layers"][i]
         for k, v in what.items():
             if v is None:
@@ -343,7 +406,7 @@ class LayerStrip:
                         tags="naming")
         entry.select_range(0, "end")
         entry.focus_set()
-        self.naming = (i, entry, var)
+        self.naming = (i, entry, var, self.win.target())
         entry.bind("<Return>", lambda e: self.end_naming(True) or "break")
         entry.bind("<Escape>", lambda e: self.end_naming(False) or "break")
         entry.bind("<FocusOut>", lambda e: self.end_naming(True))
@@ -351,13 +414,14 @@ class LayerStrip:
     def end_naming(self, keep):
         if self.naming is None:
             return
-        i, entry, var = self.naming
+        i, entry, var, sh = self.naming
         self.naming = None
         name = var.get().strip()[:LAYER_NAME]
         self.canvas.delete("naming")
         entry.destroy()
         hz = self.hz()
-        if keep and hz is not None and i < len(plain_layers(hz)["layers"]) and name != self.name_of(hz, i):
+        if (keep and hz is not None and sh is self.win.target() and i < len(plain_layers(hz)["layers"])
+                and name != self.name_of(hz, i)):  # (another Hz bass shown since: nothing renamed)
             self.change(i, tr("hz.step_layer_rename"), name=name or None)
         else:
             self.redraw()
@@ -367,8 +431,7 @@ class LayerStrip:
 
     def ask_colour(self, i):
         """A small popup of the piano roll's note colours under the row; a click picks one."""
-        if self.palette is not None:
-            self.palette.destroy()
+        self.close_palette()
         c, s = self.canvas, self.s
         top = self.palette = tk.Toplevel(c)
         top.overrideredirect(True)
@@ -395,5 +458,10 @@ class LayerStrip:
         pal.bind("<ButtonRelease-1>", picked)
         top.bind("<Escape>", close)
         top.bind("<FocusOut>", close)
-        top.geometry(f"+{c.winfo_rootx() + round(4 * s)}+{c.winfo_rooty() + (i + 1) * self.row_h}")
+        top.geometry(f"+{c.winfo_rootx() + round(4 * s)}+{c.winfo_rooty() + round((i + 1) * self.row_h - c.canvasy(0))}")
         top.focus_force()
+
+    def close_palette(self):
+        if self.palette is not None:
+            top, self.palette = self.palette, None
+            top.destroy()

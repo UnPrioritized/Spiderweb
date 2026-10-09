@@ -19,8 +19,8 @@ from notes.polygon import side_paths
 from notes.smooth import clean_level, smooth_path
 from notes.paths import (TOP_KEY, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
-from notes.hzbass import (HZ_DEFAULTS, KeyGrid, clean_hz, hz_gate, hz_of, left_edge, off_cents, shifted_hz,
-                          squares, threshold)  # (Hz bass: hzbass.py)
+from notes.hzbass import (HZ_DEFAULTS, KeyGrid, clean_hz, heard_layers, hz_gate, hz_of, left_edge, off_cents,
+                          shifted_hz, squares, threshold)  # (Hz bass: hzbass.py)
 from notes.shrink import (SAMPLES, inner_lines, inner_rows, merge as shrink_merge, minus as shrink_minus,
                           near_lines as shrink_near, proportion as shrink_proportion,
                           segments as shrink_segments)  # (the outline gate's even band)
@@ -2061,6 +2061,9 @@ def custom_note_count(sh, ppq):
         return len(unpack_notes(sh["notes"]))
     if sh.get("apart") and sh["fill"] in ("fill", "spam"):
         return None  # (made to count them)
+    if (sh.get("hz") or {}).get("layers") and not sh.get("cut"):  # each layer heard makes its own (engine)
+        counts = [custom_note_count(dict(sh, hz=hz), ppq) for hz in heard_layers(sh["hz"])]
+        return None if None in counts else sum(counts)
     if sh["fill"] == "outline_spam":
         return chop_count(sh, outline_groups(sh, ppq)[0], spam_gate(sh, ppq))
     if sh["fill"] == "empty" or not fillable(sh["strokes"]):

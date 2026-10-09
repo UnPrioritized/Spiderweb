@@ -226,7 +226,7 @@ class HzGates:
         sh = self.target()
         if sh is None:
             return
-        if not self.tones:  # (nothing placed yet: just how it'll be when there is)
+        if not all_tones(sh.get("hz") or {}):  # (nothing placed yet in any layer: just how it'll be when there is)
             return self.redraw()
         self.commit(tr("hz.grow"), copy.deepcopy(self.tones))
 

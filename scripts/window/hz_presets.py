@@ -215,6 +215,11 @@ class PresetBar:
         stack = self.hz.app.undo_stack
         self.preset_mark = (self.shape_number(), stack[-1] if stack else None)
 
+    def forget_preset(self):
+        """Layers deleted / moved: the layer number the preset was picked for may name another layer now."""
+        if self.preset_mark is not None:
+            self.preset_mark = ((None, -1), None)
+
     def shape_number(self):
         """(the shape's number, its layer picked): a preset names one layer's sound."""
         sh = self.hz.target()
