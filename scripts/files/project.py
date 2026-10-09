@@ -23,7 +23,7 @@ from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
-from files.domino_clip import DOMINO_STARTS, clip_data, dms_data, get_from_clipboard, put_on_clipboard, read_notes
+from files.domino_clip import DOMINO_STARTS, LONGEST, clip_data, dms_data, dms_path, get_from_clipboard, put_on_clipboard, read_notes
 from files.midi_out import MAX_DELTA, PPQ_WARN, long_silences, write_midi
 from files.playback import keep_saved
 from files.about import HERE, VERSION
@@ -621,18 +621,19 @@ class ProjectFiles:
             return
         self.catch_up_notes()
         notes = self.rendered
-        high = int((notes[:, 2] > 127).sum())  # (256 keys: Domino only has 128)
-        notes = notes[notes[:, 2] <= 127]
+        high = int((notes[:, 2] > 127).sum()) if self.keys > 128 else 0  # (256 keys: Domino only has 128)
+        if high:
+            notes = notes[notes[:, 2] <= 127]
         if not len(notes):
             messagebox.showerror(tr("project.spiderweb"),
                                  tr("project.no_notes_yet_draw_something_inside", keys=min(self.keys, 128) - 1))
             return
-        if int(notes[:, 1].max()) > 0xFFFFFFFF:
-            messagebox.showerror(tr("project.spiderweb"), tr("project.too_long_for_domino"))
+        if int(notes[:, 1].max()) > LONGEST:
+            messagebox.showerror(tr("project.spiderweb"), tr("project.too_long_for_domino", longest=LONGEST))
             return
-        if not ask_big(self, "midi", len(notes)):
+        if not ask_big(self, "dms", len(notes)):
             return
-        path = os.path.splitext(output_path(self.pvar["output"].get()))[0] + ".dms"
+        path = dms_path(output_path(self.pvar["output"].get()))
         if os.path.exists(path) and not messagebox.askyesno(
                 tr("project.confirm_save_as"), tr("project.already_exists_do_you_want_to",
                                                   basename=os.path.basename(path)),

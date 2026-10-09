@@ -14,6 +14,7 @@ tracks together. The start dropdown (DOMINO_STARTS) picks whether the empty lead
 the bar line) comes along, both ways.
 """
 
+import os
 import struct
 import zlib
 
@@ -26,6 +27,9 @@ from notes.engine import slot_track_channel
 FORMAT = "MidiPortalSequence"
 MAGIC = b"PortalSequenceData"
 LONGEST = 2 ** 31 - 1  # pasted notes are saved as 32-bit ticks (custom.pack_notes): a note ending later = damaged data
+# (Export to Domino stops there too: likely what Domino itself counts to)
+PIECE = 1 << 20  # Export to Domino: notes made into note items and packed at a time
+DMS_LEVEL = 3  # zlib level for .dms files: the same size as the default 6, ~40 % quicker (measured at 10 M notes)
 
 SONG_START = bytes.fromhex("e80300000000e90300000000")  # 1000 (empty), 1001 = copyright text (empty)
 SONG_REST = bytes.fromhex(  # after 1002 = PPQ
@@ -85,16 +89,27 @@ def clip_data(notes, ppq, bar, start="bar"):
     return MAGIC + struct.pack("<I", len(data)) + zlib.compress(data)
 
 
+def dms_path(mid_path):
+    """The .dms file next to the MIDI file (output_path) with the same name. A name typed with .dms (made
+    "song.dms.mid" by output_path) is used as it is."""
+    stem = os.path.splitext(mid_path)[0]
+    return stem if stem.lower().endswith(".dms") else stem + ".dms"
+
+
 def note_items(notes, first=0):
     """notes: (start, end, pitch, velocity, ...) rows -> their note items in time order, ticks from first."""
-    notes = notes[np.lexsort((notes[:, 2], notes[:, 0]))]
+    return note_rows(notes[np.lexsort((notes[:, 2], notes[:, 0]))], first).tobytes()
+
+
+def note_rows(notes, first=0):
+    """notes: (start, end, pitch, velocity, ...) rows, in order -> a NOTE array of their note items."""
     rows = np.zeros(len(notes), NOTE)
     rows["tag"], rows["len"] = 2001, NOTE.itemsize - 6
     rows["t1"], rows["l1"], rows["tick"] = 1001, 4, notes[:, 0] - first
     rows["t2"], rows["l2"], rows["key"] = 2001, 1, notes[:, 2]
     rows["t3"], rows["l3"], rows["vel"] = 2002, 1, notes[:, 3]
     rows["t4"], rows["l4"], rows["gate"] = 2003, 4, notes[:, 1] - notes[:, 0]
-    return rows.tobytes()
+    return rows
 
 
 def time_signature(beats):
@@ -107,21 +122,48 @@ def dms_data(notes, ppq, bpm, beats, use10=False):
     PPQ up to 65535 where a MIDI file stops at 32767). It's the clipboard's format with a Conductor track first
     (tempo + time signature), then one track per slot like the MIDI export (empty ones too), each with its own
     channel (Domino refuses a track mixing channels); a track on channel 10 is marked as a drum track like Domino
-    does. Keys above 127 must be left out first."""
-    def track(channel, name, events, end, conductor=False):
-        return item(1003, item(1000, b"\0\0") + item(1001, bytes([channel])) + item(1002, name)
-                    + item(1003, bytes([conductor])) + item(1004, bytes([channel == 9 and not conductor]))
-                    + TRACK_SETTINGS + events + item(2009, item(1001, struct.pack("<I", end)))
-                    + TRACK_TAIL[:17] + item(1007, struct.pack("<I", ppq)) + TRACK_TAIL[27:])
+    does. Keys above 127 must be left out first.
+    Packed as it's made, PIECE notes at a time: the whole unpacked file (40 bytes a note) never sits in memory, and
+    the notes are cut into tracks by one sort instead of a search through all of them for each track."""
+    z, packed, size = zlib.compressobj(DMS_LEVEL), [], 0
 
-    tempo = item(2008, item(1001, struct.pack("<I", 0)) + item(2001, item(0, struct.pack("<f", bpm))))
-    tracks = [track(0, b"Conductor", tempo + time_signature(beats), 0, True)]
-    for slot in range(int(notes[:, 4].max()) + 1 if len(notes) else 0):
-        mine = notes[notes[:, 4] == slot]
-        tracks.append(track(slot_track_channel(slot, use10)[1], b"", note_items(mine),
-                            int(mine[:, 1].max()) if len(mine) else 0))
-    data = SONG_START + item(1002, struct.pack("<H", ppq)) + DMS_SONG_REST + b"".join(tracks) + SONG_TAIL
-    return MAGIC + struct.pack("<I", len(data)) + zlib.compress(data)
+    def feed(part):
+        nonlocal size
+        size += len(part)
+        packed.append(z.compress(part))
+
+    def track_head(channel, name, events, conductor=False):  # events = how many bytes of events follow
+        head = (item(1000, b"\0\0") + item(1001, bytes([channel])) + item(1002, name) + item(1003, bytes([conductor]))
+                + item(1004, bytes([channel == 9 and not conductor])) + TRACK_SETTINGS)
+        feed(struct.pack("<HI", 1003, len(head) + events + len(track_tail(0))) + head)
+
+    def track_tail(end):
+        return (item(2009, item(1001, struct.pack("<I", end))) + TRACK_TAIL[:17] + item(1007, struct.pack("<I", ppq))
+                + TRACK_TAIL[27:])
+
+    feed(SONG_START + item(1002, struct.pack("<H", ppq)) + DMS_SONG_REST)
+    events = (item(2008, item(1001, struct.pack("<I", 0)) + item(2001, item(0, struct.pack("<f", bpm))))
+              + time_signature(beats))
+    track_head(0, b"Conductor", len(events), True)
+    feed(events + track_tail(0))
+    count = int(notes[:, 4].max()) + 1 if len(notes) else 0
+    slots = notes[:, 4].astype(np.int16 if count < 2 ** 15 else np.int64)  # (16-bit: NumPy's quick stable sort)
+    order = np.argsort(slots, kind="stable")
+    del slots
+    cuts = np.searchsorted(notes[order, 4], np.arange(count + 1))
+    for slot in range(count):
+        mine = order[cuts[slot]:cuts[slot + 1]]
+        mine = mine[np.lexsort((notes[mine, 2], notes[mine, 0]))]  # (in time order, then by key)
+        track_head(slot_track_channel(slot, use10)[1], b"", len(mine) * NOTE.itemsize)
+        end = 0
+        for at in range(0, len(mine), PIECE):
+            part = notes[mine[at:at + PIECE]]
+            feed(note_rows(part).view(np.uint8))
+            end = max(end, int(part[:, 1].max()))
+        feed(track_tail(end))
+    feed(SONG_TAIL)
+    packed.append(z.flush())
+    return MAGIC + struct.pack("<I", size) + b"".join(packed)
 
 
 def put_on_clipboard(raw):
