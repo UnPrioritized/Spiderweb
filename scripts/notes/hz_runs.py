@@ -218,11 +218,23 @@ def tone_runs(hz, left, ppq):
     tail = tails(hz)
     gl = glides(hz)
     out, held = [], {}
+
+    def hold(n, s, e, gate):  # (tone n held from tick s to e: a slide / glide arriving moves s to its last wave's end;
+        if gate == math.floor(gate) and s != held[n["id"]][4]:  # whole-tick waves: on the next whole tick)
+            s = math.ceil(s - 1e-9)
+        starts = s + gate * np.arange(max(1, int(math.ceil((e - s) / gate))))
+        out[held[n["id"]][2]] = (starts, starts + gate, (n, None))
+        held[n["id"]] = (s, gate, held[n["id"]][2], e, held[n["id"]][4])
+
     for n in tones:
         a = n["t"] + min([min(s["in"], n["len"]) for _, b, s in ls if b is n], default=0.0)
         took = glide_of(hz, n, "glide") if n["id"] in gl else 0.0
+        lead = None  # (where the glide into it ends, on its last wave: the tone held goes on from there)
         if took > 0:
             s, e = (left + n["t"]) * ppq, (left + n["t"] + min(took, n["len"])) * ppq
+            if n["t"] + min(took, n["len"]) >= a - 1e-9 and len(gl[n["id"]]) == 1:
+                a = n["t"] + min(took, n["len"])
+                lead = e
             a = max(a, n["t"] + min(took, n["len"]))
             curve = glide_of(hz, n, "curve")
             for k0 in gl[n["id"]]:
@@ -232,14 +244,20 @@ def tone_runs(hz, left, ppq):
                     t += wave(hz, ppq, pitch(n) + (k0 - pitch(n)) * glide_left((t - s) / (e - s), curve))
                     after.append(t)
                 out.append((np.array(part), np.array(after), (n, None)))
+                if lead is not None:
+                    lead = t
         b = n["t"] + n["len"] - min([min(s["out"], n["len"]) for m, _, s in ls if m is n], default=0.0)
         b += tail.get(n["id"], 0.0)
         if b > a:
             s, e, gate = (left + a) * ppq, (left + b) * ppq, wave(hz, ppq, pitch(n), threshold(hz, n), own_gate(n))
-            starts = s + gate * np.arange(int(math.ceil((e - s) / gate)))
-            out.append((starts, starts + gate, (n, None)))
-            held[n["id"]] = (s, gate)
-    for a, b, link in ls:
+            out.append(None)
+            held[n["id"]] = (s, gate, len(out) - 1, e, s)  # (start, gate, where in out, end, start as placed)
+            hold(n, lead if lead is not None and lead < e else s, e, gate)
+    # slides, a chain's earlier ones first (a tone's held part moves to where the slide into it ends, and the slide
+    # out of it keeps in step with that), put in out in the links' order
+    made = {}
+    for i in sorted(range(len(ls)), key=lambda i: ls[i][0]["t"]):
+        a, b, link = ls[i]
         x0, x1, k0, k1 = glide(a, b, link)
         if x1 - x0 < 1e-12:
             continue
@@ -248,9 +266,10 @@ def tone_runs(hz, left, ppq):
         s1, e1 = (left + b["t"]) * ppq, (left + x1) * ppq
         t = s0
         if a["id"] in held and s0 >= held[a["id"]][0]:  # in step with the tone it leaves
-            s, gate = held[a["id"]]
+            s, gate = held[a["id"]][:2]
             t = s + math.ceil((s0 - s) / gate - 1e-9) * gate
         gap = s1 - e0 > 1e-6
+        made[i] = []
         for end in (e0, e1) if gap else (e1,):
             part, after = [], []
             while t < end:
@@ -258,8 +277,13 @@ def tone_runs(hz, left, ppq):
                 t += wave(hz, ppq, k0 + (k1 - k0) * slide_part((t - s0) / (e1 - s0), link, knob))
                 after.append(t)
             if part:
-                out.append((np.array(part), np.array(after), (a, b)))
+                made[i].append((np.array(part), np.array(after), (a, b)))
             t = max(t, s1)
+        h = held.get(b["id"])  # (the tone it reaches, held from where it arrives: its waves go on from the last one)
+        if h is not None and abs(h[4] - e1) < 1e-6 and h[0] == h[4] and t < h[3]:
+            hold(b, t, h[3], h[1])
+    for i in range(len(ls)):
+        out.extend(made.get(i, ()))
     if "pitch" in (hz.get("fx") or {}):
         out = [bent(hz, left, ppq, starts, nexts, whose[0]) + (whose,) for starts, nexts, whose in out]
     return out
