@@ -103,6 +103,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.kb_w = max(self.kb_w, round(20 * s) + max(names.measure(tr("hz.fx_" + n)) for n in FX))  # effects' names
         self.sx, self.sy, self.t0, self.top = 80.0 * s, 12.0 * s, -0.25, 64.0
         self.fitted = False
+        self.homed = ()  # (the Hz bass with no notes the view last went back to the start for: sync)
         if app.hz_view:  # (as it was when last closed)
             self.set_view_state(app.hz_view)
 
@@ -333,6 +334,10 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
             self.layers.show(self.app.hz_layers.get())
         if self.every_tone() and not self.fitted:
             self.fit_view()
+        elif not self.every_tone() and self.homed != (mark and mark[0]):  # no notes (a new Hz bass): back to the
+            self.homed = mark and mark[0]  # start, the remembered zoom kept (user); once per Hz bass (scrollable)
+            self.t0, self.top = -0.25, 64.0
+            self.clamp_view()
         self.redraw()
 
     def show_stale(self):
