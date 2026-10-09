@@ -10,6 +10,8 @@ from notes.engine import slot_track_channel
 
 PPQ_WARN = 32767  # a PPQ this high or higher: many MIDI programs can't open the file; still written
 MAX_DELTA = (1 << 28) - 1  # the longest wait between two events a MIDI file can hold (4 bytes)
+PIECE = 1 << 20  # events made at a time without the speed-ups
+END = b"\x00\xFF\x2F\x00"  # end-of-track
 
 
 def vlq(value):
@@ -21,9 +23,9 @@ def vlq(value):
     return bytes(reversed(out))
 
 
-def track_data(notes, ch):
-    """One track's events (a note-on and a note-off per note) as bytes, ending with end-of-track. Events in time
-    order, note-offs first on a shared tick, otherwise in the notes' order."""
+def track_events(notes, ch):
+    """One track's events (a note-on and a note-off per note) as byte pieces (uint8 arrays), end-of-track not
+    included. Events in time order, note-offs first on a shared tick, otherwise in the notes' order."""
     n = len(notes)
     tick = np.empty(2 * n, np.int64)  # on, off, on, off, ... as tick * 2, + 1 on a note-on (so offs come first)
     tick[0::2] = notes[:, 0] * 2 + 1
@@ -31,11 +33,19 @@ def track_data(notes, ch):
     order = np.argsort(tick, kind="stable")  # (one number sorts in half the time of three)
     fast = loops()
     if fast is not None:  # (the bytes in one pass: ~3x quicker)
-        return fast.midi_events(notes, order, ch, MAX_DELTA).tobytes() + vlq(0) + b"\xFF\x2F\x00"
+        del tick
+        return [fast.midi_events(np.ascontiguousarray(notes), order, ch, MAX_DELTA)]
+    # (in pieces: the NumPy way makes many arrays per event)
+    return [_events(notes, order[at:at + PIECE], tick, int(tick[order[at - 1]] >> 1) if at else 0, ch)
+            for at in range(0, 2 * n, PIECE)]
+
+
+def _events(notes, order, tick, last, ch):
+    """track_events' bytes for some events in time order; last = the tick before the first of them."""
     tick, on, note = tick[order] >> 1, (order & 1) ^ 1, order >> 1
     key = notes[note, 2]
     vel = notes[note, 3] * on
-    delta = np.diff(tick, prepend=0)
+    delta = np.diff(tick, prepend=last)
     status = np.where(on == 1, 0x90 | ch, 0x80 | ch)
     if len(delta) and delta.max() > MAX_DELTA:
         # a silence too long for one step: empty text events (FF 01 00, 3 bytes like a note's) every MAX_DELTA
@@ -53,14 +63,14 @@ def track_data(notes, ch):
         size += delta >= 1 << bits
     at = np.cumsum(size + 3) - (size + 3)  # where each event starts
     out = np.zeros(int((size + 3).sum()), np.uint8)
-    for k in range(int(size.max()) if n else 0):
+    for k in range(int(size.max())):
         has = size > k
         left = size[has] - 1 - k  # 7-bit groups still to come after this byte
         out[at[has] + k] = (delta[has] >> (7 * left)) & 0x7F | np.where(left > 0, 0x80, 0)
     out[at + size] = status
     out[at + size + 1] = key
     out[at + size + 2] = vel
-    return out.tobytes() + vlq(0) + b"\xFF\x2F\x00"
+    return out
 
 
 def long_silences(notes):
@@ -89,8 +99,22 @@ def write_midi(path, ppq, bpm, beats, notes, use10=False):
     head += vlq(0) + b"\xFF\x2F\x00"
 
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
-    chunks = [_chunk(head)]
-    for track in range(int(notes[:, 4].max()) + 1 if len(notes) else 0):
-        chunks.append(_chunk(track_data(notes[notes[:, 4] == track], slot_track_channel(track, use10)[1])))
+    count = int(notes[:, 4].max()) + 1 if len(notes) else 0
+    write_bytes(path, _pieces(notes, count, use10, b"MThd" + struct.pack(">IHHH", 6, 1, count + 1, ppq) + _chunk(head)))
 
-    write_bytes(path, b"MThd" + struct.pack(">IHHH", 6, 1, len(chunks), ppq) + b"".join(chunks))
+
+def _pieces(notes, count, use10, start):
+    """write_midi's file as pieces, one track at a time (a big file is never whole in memory)."""
+    yield start
+    if count > 1:  # (one sort finds every track's notes, in their own order)
+        slots = notes[:, 4].astype(np.int16 if count < 2 ** 15 else np.int64)
+        order = np.argsort(slots, kind="stable")
+        cuts = np.searchsorted(slots[order], np.arange(count + 1))
+        del slots
+    for track in range(count):
+        events = track_events(notes if count == 1 else notes[order[cuts[track]:cuts[track + 1]]],
+                              slot_track_channel(track, use10)[1])
+        yield b"MTrk" + struct.pack(">I", sum(len(e) for e in events) + len(END))
+        yield from events
+        events = None
+        yield END

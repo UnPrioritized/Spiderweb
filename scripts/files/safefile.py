@@ -3,14 +3,19 @@ which only replaces the real file once it's completely written. A crash, power c
 the old file as it was."""
 
 import os
+import shutil
 import time
 
 
 def write_bytes(path, data):
+    """data = bytes, or byte pieces one after another (a generator: big files are never whole in memory)."""
     tmp = path + ".tmp"
+    if isinstance(data, (bytes, bytearray, memoryview)):
+        data = (data,)
     try:
         with open(tmp, "wb") as f:
-            f.write(data)
+            for piece in data:
+                f.write(piece)
             f.flush()
             os.fsync(f.fileno())
     except BaseException:  # (a full disk: the half-written temp file would go on taking the space)
@@ -29,8 +34,7 @@ def write_bytes(path, data):
             time.sleep(0.05)
     # still locked: write it directly (like before) rather than not at all
     try:
-        with open(path, "wb") as f:
-            f.write(data)
+        shutil.copyfile(tmp, path)
     finally:
         try:
             os.remove(tmp)

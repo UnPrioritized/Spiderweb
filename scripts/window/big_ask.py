@@ -14,10 +14,10 @@ from files.lang import tr
 from files.system import free_memory
 
 BIG = 1_000_000  # notes: asked past this (making shapes, Copy to Domino)
-# memory each note takes while it's done (measured: 20 M notes in the window ~6 GB in all, saving a MIDI file
-# 1.4 GB more, copying 4 M notes 0.57 GB)
-# Export to Domino 36-43 bytes a note (10 M notes, 1-300 tracks)
-PER_NOTE = {"notes": 300, "midi": 70, "domino": 150, "dms": 45}
+# memory each note takes while it's done (measured: 20 M notes in the window ~6 GB in all, copying 4 M notes
+# 0.57 GB; 10 M notes, 1-300 tracks: Generate MIDI 20-32 bytes a note, 51 on one track without the speed-ups,
+# Export to Domino 36-43)
+PER_NOTE = {"notes": 300, "midi": 55, "domino": 150, "dms": 45}
 DRUM_TRACK = 10  # Copy to Domino: asked when the copy fills this many tracks (ask_drums)
 
 

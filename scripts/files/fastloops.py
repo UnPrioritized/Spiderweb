@@ -9,7 +9,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   paint_notes    roll_draw.paint_region: the notes' colours straight into the picture (the last painted wins)
   overlap_order  engine.resolve_overlaps' groups and sort (first_seen + overlap_order)
   overlap_sweep  engine.resolve_overlaps after its sort: cut / stretch / merge the notes on one key and slot
-  midi_events    midi_out.track_data: one track's note-ons / offs as MIDI file bytes
+  midi_events    midi_out.track_events: one track's note-ons / offs as MIDI file bytes
   note_stretches engine.stretches (Multi channel): one shape's notes on a key joined into stretches
   nearest        picture._dist2(...).argmin(1) (Image to notes): each colour's nearest palette colour
   spread_line    picture._spread: the error spreading, one slanted line at a time (its OKLab left to NumPy)
@@ -488,7 +488,7 @@ def _put_vlq(out, p, d):
 
 @njit(cache=CACHE, nogil=True)
 def midi_events(notes, order, ch, most):
-    """midi_out.track_data's events as bytes (end-of-track not included): order = event numbers in time order
+    """midi_out.track_events' bytes (end-of-track not included): order = event numbers in time order
     (note i's on = 2i, its off = 2i + 1); a wait over most is split by empty text events (FF 01 00)."""
     size, last = 0, 0
     for i in range(len(order)):
