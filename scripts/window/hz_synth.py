@@ -153,6 +153,7 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
         self.hz, self.app, self.s = hz, hz.app, hz.s
         s = self.s
         self.title(tr("hz.synth_title"))
+        self.show_title()
         names_h = round(8 * s) + len(FX) * round(15 * s)  # (the pane tall enough for all the effects' names)
         self.minsize(round(400 * s), round(260 * s))
         self.kb_w = hz.kb_w
@@ -370,9 +371,18 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
         """The Hz bass window drew itself: this pane too when the lines changed there (an edit, undo)."""
         if not self.winfo_exists():
             return
+        self.show_title()
         if self.drawn_for() != self.shown:
             self.draw_pane()
         self.show_knobs()
+
+    def show_title(self):
+        """With layers, the title names the layer whose sound this is."""
+        hz = (self.hz.target() or {}).get("hz") or {}
+        title = (tr("hz.synth_title_layer", name=self.hz.layers.name_of(hz, hz.get("layer", 0)))
+                 if len(hz.get("layers") or ()) > 1 else tr("hz.synth_title"))
+        if self.title() != title:
+            self.title(title)
 
     def show_status(self, e=None):
         if getattr(self, "status_until", 0.0) > time.monotonic():  # (a message stays a few seconds)

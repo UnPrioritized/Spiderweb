@@ -216,8 +216,10 @@ class PresetBar:
         self.preset_mark = (self.shape_number(), stack[-1] if stack else None)
 
     def shape_number(self):
+        """(the shape's number, its layer picked): a preset names one layer's sound."""
         sh = self.hz.target()
-        return next((i for i, s in enumerate(self.hz.app.shapes) if s is sh), None)
+        return (next((i for i, s in enumerate(self.hz.app.shapes) if s is sh), None),
+                ((sh or {}).get("hz") or {}).get("layer", 0))
 
     def preset_holds(self):
         """The preset picked still names this sound (changed or not): the same shape (by number: undo makes it anew),

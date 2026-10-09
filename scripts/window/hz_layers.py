@@ -150,6 +150,12 @@ class LayerStrip:
         m = tk.Menu(self.canvas, tearoff=False)
         m.add_command(label=tr("hz.layer_rename"), command=lambda: self.start_naming(i))
         m.add_command(label=tr("hz.layer_colour"), command=lambda: self.ask_colour(i))
+        to = tk.Menu(m, tearoff=False)
+        for k in range(len(plain_layers(hz)["layers"])):
+            if k != i:
+                to.add_command(label=self.name_of(hz, k), command=lambda k=k: self.copy_sound(i, k))
+        m.add_cascade(label=tr("hz.layer_copy_sound"), menu=to,
+                      state="normal" if len(plain_layers(hz)["layers"]) > 1 else "disabled")
         m.add_separator()
         m.add_command(label=tr("hz.layer_add"), command=self.add,
                       state="normal" if len(plain_layers(hz)["layers"]) < LAYERS else "disabled")
@@ -226,6 +232,16 @@ class LayerStrip:
             else:
                 e[k] = v
         self.put(hz, step)
+
+    def copy_sound(self, i, k):
+        """Layer i's whole sound (knobs, effect lines, MOD...: not its notes) onto layer k."""
+        hz = self.hz()
+        if hz is None or not hz.get("layers"):
+            return
+        every = layers_of(hz)
+        every[k] = dict({key: v for key, v in every[k].items() if key not in SOUND or key == "tones"},
+                        **{key: copy.deepcopy(v) for key, v in every[i].items() if key in SOUND and key != "tones"})
+        self.put(with_layers(hz, every), tr("hz.step_layer_sound"))
 
     def flag(self, i, key):
         hz = self.hz()
