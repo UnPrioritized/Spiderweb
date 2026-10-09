@@ -5,7 +5,10 @@ notes/hz_lines.note_bend), edited right on the note.
 A click on a note (or on its bend line, wherever it has gone) adds a point there and holds it; a point dragged moves
 (between its neighbours; the end points only up / down). Points snap to the grid and to whole keys (Shift = free:
 any tick, any cent). Right-click a point (or Delete while holding it) = it goes; a line back at 0 everywhere = no
-bend. Each change is one undo step. Empty space = a Select box, like the Select tool."""
+bend. Each change is one undo step. Empty space = a Select box, like the Select tool.
+A small square sits half way along each piece between two points that differ: dragged up / down it curves the
+piece (like a slide's square: sticks to straight within BEND_STICK px, Shift = free; hollow = straight), stored
+as the first point's third number (hz_lines.bent_part); double-click it = straight again."""
 
 import copy
 
@@ -13,12 +16,14 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import fmt
-from notes.hzbass import bend_range, note_bend, pitch
+from notes.hzbass import SLIDE_BEND, bend_range, line_at, note_bend, pitch
 from roll.roll_shared import SELECT_CURSOR, SHIFT
 from window import look
 
 NEAR = 6  # px: a press this near a bend point grabs it
 LINE_NEAR = 4  # px: ... this near a note's bend line adds a point to it
+BEND_STICK = 5  # px: a curve square this near straight sticks to it (Shift = free), as a slide's
+SQUARE_ROOM = 20  # px: a piece narrower than this gets no square (its points' grab areas would cover it)
 BEND = look.HZ_BEND
 
 
@@ -49,13 +54,36 @@ class HzBend:
                             i, j))
         return out
 
+    def bend_squares(self):
+        """[(x, y, tone number, piece number, keys at its start, at its end)]: the curve squares of the notes in view,
+        half way along each piece whose two points differ (Bend tool only)."""
+        if not self.bending():
+            return []
+        most, out = self.bend_most(), []
+        for i, j in {(i, j) for _, _, i, j in self.bend_points()}:
+            n = self.tones[i]
+            pts = n["bend"]
+            if j + 1 >= len(pts):
+                continue
+            (u0, k0), (u1, k1) = pts[j][:2], pts[j + 1][:2]
+            k0, k1 = max(-most, min(most, k0)), max(-most, min(most, k1))
+            x0, x1 = self.x_of(n["t"] + u0 * n["len"]), self.x_of(n["t"] + u1 * n["len"])
+            if abs(k1 - k0) < 1e-9 or x1 - x0 < SQUARE_ROOM * self.s:
+                continue
+            k = max(-most, min(most, float(line_at(pts, (u0 + u1) / 2))))
+            out.append(((x0 + x1) / 2, self.pitch_y(pitch(n) + k), i, j, k0, k1))
+        return out
+
     def bend_hit(self, x, y):
-        """What the Bend tool would take at (x, y): ("point", tone, point number), ("note", tone) on a note or on its
-        bend line, or None."""
+        """What the Bend tool would take at (x, y): ("point", tone, point number), ("curve", tone, piece number) a
+        curve square, ("note", tone) on a note or on its bend line, or None."""
         r = NEAR * self.s
         for px, py, i, j in reversed(self.bend_points()):
             if abs(x - px) <= r and abs(y - py) <= r:
                 return "point", i, j
+        for sx, sy, i, j, *_ in self.bend_squares():
+            if abs(x - sx) <= r and abs(y - sy) <= r:
+                return "curve", i, j
         if x < self.kb_w or y < self.ruler_h:
             return None
         most, beat = self.bend_most(), self.beat_at(x)
@@ -93,6 +121,12 @@ class HzBend:
         self.sel_before = (before, (sorted(self.sel), kept and list(kept), len(before)))
         i, n = hit[1], self.tones[hit[1]]
         self.sel, self.box_kept = {i}, None
+        if hit[0] == "curve":  # (where the square was grabbed: it moves as far as the mouse from there)
+            square = next(q for q in self.bend_squares() if q[2:4] == (i, hit[2]))
+            self.drag = {"kind": "bendcurve", "i": i, "j": hit[2], "before": before, "x": e.x, "y": e.y,
+                         "moved": False, "square": square, "name": tr("hz.step_note_bend_curve")}
+            self.redraw()
+            return True
         if hit[0] == "point":
             j = hit[2]
         else:
@@ -114,12 +148,25 @@ class HzBend:
 
     def bend_drag(self, e):
         d = self.drag
-        if not d or d["kind"] != "bendpt":
+        if not d or d["kind"] not in ("bendpt", "bendcurve"):
             return False
         if not d["moved"] and abs(e.x - d["x"]) < 4 and abs(e.y - d["y"]) < 4:
             return True  # (a click with a wobble changes nothing)
         d["moved"] = True
         n = self.tones[d["i"]]
+        if d["kind"] == "bendcurve":  # how far from the piece's first point to its second the square is dragged
+            _, sy, _, j, k0, k1 = d["square"]
+            y = sy + e.y - d["y"]
+            part = (self.top + 0.5 - (y - self.ruler_h) / self.sy - pitch(n) - k0) / (k1 - k0)  # (pitch_y turned round)
+            straight = self.pitch_y(pitch(n) + (k0 + k1) / 2)
+            p = n["bend"][j]
+            del p[2:]
+            if abs(y - straight) > BEND_STICK * self.s or e.state & SHIFT:  # (else it sticks to straight)
+                b = min(SLIDE_BEND, max(-SLIDE_BEND, 2.0 * part - 1.0))
+                if b:
+                    p.append(b)
+            self.redraw()
+            return True
         pts, j = n["bend"], d["j"]
         u, k = self.bend_spot(n, e)
         if not d["pinned"]:  # (between its neighbours; two at one spot = a jump)
@@ -133,7 +180,7 @@ class HzBend:
 
     def bend_release(self, e):
         d = self.drag
-        if not d or d["kind"] != "bendpt":
+        if not d or d["kind"] not in ("bendpt", "bendcurve"):
             return False
         self.drop_drag()
         self.bend_done(d)
@@ -148,13 +195,33 @@ class HzBend:
             self.redraw()
 
     def bend_delete_dragged(self):
-        """Delete while a point is held: that point goes (one undo step with what the drag did)."""
+        """Delete while a point is held: that point goes; a curve square: its piece straight again (one undo step
+        with what the drag did)."""
         d = self.drag
         self.end_drag()
         pts = self.tones[d["i"]]["bend"]
-        del pts[d["j"]]
-        self.bend_done(d, tr("hz.step_note_bend_delete"))
+        if d["kind"] == "bendcurve":
+            del pts[d["j"]][2:]
+        else:
+            del pts[d["j"]]
+        self.bend_done(d, tr("hz.step_note_bend_delete") if d["kind"] == "bendpt" else None)
         self.point_again()
+
+    def bend_double(self, e):
+        """A double-click with the Bend tool: on a curve square its piece is straight again (one step); else a
+        second press like the first (no note deleted). False when the tool isn't on."""
+        if not self.bending():
+            return False
+        hit = self.bend_hit(e.x, e.y)
+        if not hit or hit[0] != "curve":
+            self.on_press(e)
+            return True
+        self.drop_drag()
+        before = copy.deepcopy(self.tones)
+        self.sel_before = (before, self.sel_state())
+        del self.tones[hit[1]]["bend"][hit[2]][2:]
+        self.bend_done({"i": hit[1], "before": before}, tr("hz.step_note_bend_curve"))
+        return True
 
     def bend_menu(self, e):
         """Right-click with the Bend tool on a point: it goes. False anywhere else (the usual menu)."""
@@ -176,7 +243,8 @@ class HzBend:
             return False
         hit = self.bend_hit(e.x, e.y)
         inside = e.x >= self.kb_w and e.y >= self.ruler_h
-        cursor = "fleur" if hit and hit[0] == "point" else self.pencil if hit else SELECT_CURSOR if inside else ""
+        cursor = ("fleur" if hit and hit[0] == "point" else "sb_v_double_arrow" if hit and hit[0] == "curve"
+                  else self.pencil if hit else SELECT_CURSOR if inside else "")
         self.canvas.config(cursor=cursor)
         self.show_status(e)
         return True
@@ -202,6 +270,11 @@ class HzBend:
             keys = pitch(n) + note_bend(n, beats, most)
             xy = np.column_stack([[self.x_of(b) for b in beats], self.pitch_y(keys)]).ravel().tolist()
             c.create_line(*xy, fill=BEND, width=max(1, round(1.5 * s)), dash=(4, 2))
+        r = 3 * s
+        for x, y, i, j, *_ in self.bend_squares():  # (filled = curved)
+            curved = len(self.tones[i]["bend"][j]) > 2
+            c.create_rectangle(x - r, y - r, x + r, y + r, fill=BEND if curved else "", outline=BEND,
+                               width=max(1, round(1.5 * s)))
         r = 3.5 * s
         for x, y, i, j in self.bend_points():
             held = self.drag and self.drag["kind"] == "bendpt" and (self.drag["i"], self.drag["j"]) == (i, j)

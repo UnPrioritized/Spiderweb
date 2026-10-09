@@ -297,8 +297,8 @@ class HzMouse:
         Anywhere else, or with Ctrl, it's a press like any other."""
         if self.draw_double(e):  # (the polyline being drawn ends: hz_draw.py)
             return
-        if self.bending():  # (the Bend tool: a second press like the first; no note deleted)
-            return self.on_press(e)
+        if self.bend_double(e):  # (the Bend tool: a curve square straight again, else a press; no note deleted)
+            return
         hit = self.hit(e.x, e.y)
         if (hit and hit[0] in ("note", "tune", "left", "right") and self.tones[hit[1]]["id"] == self.placed
                 and not e.state & CTRL and self.tool.get() == "pencil"):
@@ -808,7 +808,7 @@ class HzMouse:
             return
         if d["kind"] == "new":
             return self.cancel_drag()
-        if d["kind"] == "bendpt":  # (a bend point held: it goes)
+        if d["kind"] in ("bendpt", "bendcurve"):  # (a bend point held: it goes; a curve square: straight again)
             return self.bend_delete_dragged()
         self.end_drag()
         if d["kind"] in DOTS:
