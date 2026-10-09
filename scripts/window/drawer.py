@@ -18,6 +18,7 @@ from notes.custom import (DRAWN_FRAME, ROLES, area_paint, areas_filled, carry_ar
                           shape_areas, stroke_points, takes_formula)
 from roll.roll_shared import SLOT_COLORS
 from notes.pattern import has_formula, moved_formulas
+from notes.slice import slice_stroke
 from files.about import HERE
 from files.safefile import write_text
 from files.clipboard import get_text, put_text
@@ -44,7 +45,7 @@ GRIDS = ["4", "8", "12", "16", "24", "32", "48", "64"]
 TOOLS = [("select", tr("drawer.select"), "v"), ("erase", tr("drawer.eraser"), "e"), ("line", tr("drawer.line"), "l"),
          ("poly", tr("drawer.polyline"), "p"), ("free", tr("drawer.freehand"), "f"), ("curve", tr("drawer.curve"), "c"),
          ("arc", tr("drawer.arc"), "a"), ("square", tr("drawer.square"), "s"), ("circle", tr("drawer.circle"), "o"),
-         ("areas", tr("drawer.areas"), "b")]
+         ("areas", tr("drawer.areas"), "b"), ("slice", tr("drawer.slice"), "k")]
 SHIFT, CTRL = 0x1, 0x4
 MOD_KEYS = ("shift_l", "shift_r", "control_l", "control_r")
 STROKE_COLOR = look.STROKE  # (a stroke with an outline colour: that colour's dark shade)
@@ -59,7 +60,7 @@ STICK_LINE = look.STICK_LINE
 GUIDE_REACH = 6 * REACH  # pixels: a circle this near to sticking shows where it would touch (dotted)
 LIST_AWAY = look.LIST_AWAY  # the shape picked in the library list while the keyboard is elsewhere (blue when it's there)
 DOUBLE_CLICK_MS = double_click_ms()  # (the system's own setting)
-DRAW_TOOLS = ("line", "poly", "curve", "arc", "square", "circle")  # (the ones whose points stick)
+DRAW_TOOLS = ("line", "poly", "curve", "arc", "square", "circle", "slice")  # (the ones whose points stick)
 MIRRORS = ("off", "h", "v", "both")  # Mirror: off, left <-> right, top <-> bottom, both (across the board's middle)
 
 
@@ -343,6 +344,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self.guide = []        # a circle near sticking or stuck: where to point the mouse for it to touch, each
         # ((u, v), [the touched strokes' points moved through it])
         self._stick_cache = self._circle_cache = None
+        self.knife = None      # the Slice tool's line being dragged: [start, end] (board points)
         self.drag_xy = None    # where the mouse was at the last drag step (Shift / Ctrl pressed: done again there)
         self.zoom = 1.0       # 1 = the whole board fits the window
         self.center = [0.5, 0.5]  # the board point in the middle of the window (0.5, 0.5 = the board's middle)
@@ -354,7 +356,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self.name = tk.StringVar()
         self._build()
         self.refresh_list()
-        self.tool.trace_add("write", lambda *_: (setattr(self, "sel", None), self.cancel_draft(), self.on_tool()))
+        self.tool.trace_add("write", lambda *_: (self.drop_sel(), self.cancel_draft(), self.on_tool()))
         self.grid_n.trace_add("write", lambda *_: self.redraw())
         self.mirror.trace_add("write", lambda *_: self.redraw())
         self.protocol("WM_DELETE_WINDOW", self.close)
@@ -1006,6 +1008,10 @@ class Drawer(DrawerLayers, tk.Toplevel):
             return self.select_press(e)
         if tool == "areas":
             return self.area_press(e)
+        if tool == "slice":  # drag a line: the strokes it crosses are cut there (slice_along)
+            pt = self.event_pt(e)
+            self.knife, self.drag = [pt, list(pt)], ("slice", e.x, e.y)
+            return self.redraw()
         j = self.curve_handle_at(e.x, e.y) if self.draft is None else None
         if j is not None:  # the selected curve's anchors and handles work with any tool
             self.push_undo()
@@ -1403,6 +1409,9 @@ class Drawer(DrawerLayers, tk.Toplevel):
         if self.drag[0] == "erasebox":
             self.drag = self.drag[:3] + (e.x, e.y)
             return self.redraw()
+        if self.drag[0] == "slice":
+            self.knife[1] = self.event_pt(e)
+            return self.redraw()
         if self.tool.get() == "select" or self.drag[0] in ("points", "pen"):
             return self.select_drag(e)
         if self.drag[0] == "free":  # also where Windows skipped the mouse while busy (see mouse_trail)
@@ -1498,6 +1507,11 @@ class Drawer(DrawerLayers, tk.Toplevel):
         drag, self.drag = self.drag, None
         if drag and drag[0] == "erasebox":
             return self.erase_release(drag)
+        if drag and drag[0] == "slice":
+            knife, self.knife = self.knife, None
+            if knife and knife[0] != knife[1]:
+                return self.slice_along(*knife)
+            return self.redraw()
         if not drag or drag[0] == "areas":
             return
         still = drag[0] in ("box", "segment", "arcdrag") and abs(e.x - drag[-2]) < 4 and abs(e.y - drag[-1]) < 4
@@ -1627,7 +1641,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self.canvas.focus_set()  # (keys go to the drawing now, not the shape list)
         if self.holding():  # (the left button holds a stroke: nothing, its menu would work on it mid-move)
             return
-        if self.erasing():  # an eraser box being dragged: dropped, nothing erased (like Esc)
+        if self.erasing() or self.knife:  # an eraser box / Slice line being dragged: dropped (like Esc)
             return self.cancel_draft()
         if self.draft or self.follow:
             if self.draft and self.draft["kind"] == "poly" and self.tool.get() == "poly":
@@ -1878,6 +1892,53 @@ class Drawer(DrawerLayers, tk.Toplevel):
             # its handles can be bent right away
         self.changed()
 
+    def drop_sel(self):
+        """Another tool picked: the selected stroke stops showing its handles. For Slice it stays picked (only the
+        picked strokes are cut)."""
+        if self.sel is not None and self.tool.get() == "slice":
+            self.picks.add(self.sel)
+        self.sel = None
+
+    def slice_along(self, a, b):
+        """The Slice tool's line a-b (and its Mirror copies) cuts the strokes it crosses: the picked ones if any,
+        else every one the board can change (never hidden / locked ones). Each cut stroke's pieces take its place
+        and layer ("Line 3", "Line 3 (2)"...), all picked afterwards. Nothing crossed: nothing happens."""
+        knives = [(a, b)]
+        for fn in mirror_fns(self.mirror_mode()):
+            k = (list(fn(*a)), list(fn(*b)))
+            if not any(same_stroke({"kind": "poly", "pts": list(k)}, {"kind": "poly", "pts": list(q)}) for q in knives):
+                knives.append(k)
+        picked = self.movable()
+        idx = picked or [i for i in range(len(self.strokes)) if self.pickable(i)]
+        before = self.snap()
+        self.keep_names()  # (the pieces after a cut stroke shift the numbers: names stay as they are)
+        out, cut = [], set()
+        for i, st in enumerate(self.strokes):
+            pieces = [st]
+            if i in idx:
+                for ka, kb in knives:
+                    pieces = [q for p in pieces for q in (slice_stroke(p, ka, kb) or [p])]
+            if len(pieces) > 1:
+                lay = self.layer(i)
+                for n, p in enumerate(pieces):
+                    p["layer"] = dict(lay, name=lay["name"] if n == 0 else f"{lay['name']} ({n + 1})")
+                cut.add(i)
+            out.append(pieces)
+        if not cut:
+            self.load_snap(before)
+            self.pos_label.config(text=tr("drawer.slice_nothing"))
+            return self.redraw()
+        self.push_undo(before)
+        self.strokes, new_idx, k = [], set(), 0
+        for i, pieces in enumerate(out):
+            for p in pieces:
+                if i in cut or i in picked:
+                    new_idx.add(k)
+                self.strokes.append(p)
+                k += 1
+        self.sel, self.picks, self.boxes = None, new_idx, []
+        self.changed()
+
     # ------------------------------------------------------------ mirror
 
     def mirror_mode(self):
@@ -1920,6 +1981,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
 
     def cancel_draft(self):
         self.let_go()  # (a stroke held by Esc / a tool key: moved is moved, like letting go)
+        if self.knife:  # (a Slice line dropped: nothing cut)
+            self.knife = self.drag = None
         self.draft = None
         self.guide = []
         self.follow = None
@@ -1960,7 +2023,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
     def undo(self):
         if self.erasing():  # (nothing while an eraser box is held)
             return
-        if self.draft:
+        if self.draft or self.knife:
             return self.cancel_draft()
         self.drop_drag()
         self.restore(self.undo_stack, self.redo_stack)
@@ -1968,7 +2031,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
     def redo(self):
         if self.erasing():
             return
-        if self.draft:
+        if self.draft or self.knife:
             return self.cancel_draft()
         self.drop_drag()
         self.restore(self.redo_stack, self.undo_stack)
@@ -2373,6 +2436,11 @@ class Drawer(DrawerLayers, tk.Toplevel):
                 self.draw_stroke(st, look.DRAFT_LINE, w)
             self.draw_pieces(pieces, w + 1)
             self.draw_draft_points(r, h)
+        if self.knife:  # the Slice line (red dashed, like the piano roll's), and its Mirror copies
+            a, b = self.knife
+            for p, q in [(a, b)] + [(fn(*a), fn(*b)) for fn in mirror_fns(self.mirror_mode())]:
+                c.create_line(*self.to_screen(*p), *self.to_screen(*q), fill=look.CUT, width=max(1, round(s)),
+                              dash=(6, 4))
         for spot, lines in self.guide if self.draft else []:  # a dotted ring with a dot inside on the touched
             # strokes' faint dotted copies (thin: Windows draws thick dotted lines solid)
             x, y = self.to_screen(*spot)

@@ -181,6 +181,62 @@ def inside(polys, pt):
     return n % 2 == 1
 
 
+def is_closed(poly):
+    return len(poly) > 2 and np.hypot(*(np.asarray(poly[0], float) - np.asarray(poly[-1], float))) < 1e-9
+
+
+def stroke_pieces(st, poly, a, b, us=None):
+    """One stroke (poly = its stroke_points) cut where it crosses the segment a-b -> its pieces (strokes without
+    role / colour). us: a curve cut as itself, at these spots (curve_cuts' u). Closed: its last and first pieces
+    are one."""
+    joins = is_closed(poly) and side([poly[0]], a, b)
+    if us is not None:
+        pieces = curve_pieces(st, us)
+        if joins and len(pieces) > 1:
+            pieces = [joined_curve(pieces[-1], pieces[0])] + pieces[1:-1]
+        return pieces
+    pieces = cut_pieces(st["pts"] if st["kind"] == "poly" and exact(st) else poly, a, b)
+    if joins and len(pieces) > 1:
+        pieces = [pieces[-1] + pieces[0][1:]] + pieces[1:-1]
+    if st["kind"] == "arc" and exact(st):  # (an arc's piece is an arc: its ends and a point between)
+        return [{"kind": "arc", "pts": [list(p[0]), list(p[len(p) // 2]), list(p[-1])], "k": st.get("k", 1.0)}
+                if len(p) > 2 else {"kind": "poly", "pts": [list(pt) for pt in p]} for p in pieces]
+    keep = {k: st[k] for k in ("free", "k") if k in st and st["kind"] == "poly" and exact(st)}
+    return [dict(keep, kind="poly", pts=[list(pt) for pt in p]) for p in pieces]
+
+
+def slice_stroke(st, a, b):
+    """The drawer's Slice: one stroke cut along the segment a-b -> its pieces (keeping its role, colour and layer),
+    or None when it isn't cut. A closed stroke (circle, square...) is cut only when the segment goes all the way
+    across it (user, like the piano roll); an open one wherever the segment crosses it (not at its own ends)."""
+    poly = stroke_points(st)
+    if len(poly) < 2:
+        return None
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    if np.hypot(*(b - a)) < EPS:
+        return None
+    closed = is_closed(poly)
+    if closed:
+        got = crossings(poly, a, b, whole_line=True)
+        if len(got) < 2 or any(s < -1e-6 or s > 1 + 1e-6 for _, s in got):
+            return None
+    us = None
+    if st["kind"] == "curve" and exact(st):
+        found = [(u, s) for u, _, s in curve_cuts(st["pts"], a, b)]
+        if not closed:
+            found = [(u, s) for u, s in found if -1e-6 <= s <= 1 + 1e-6]
+        us = [u for u, _ in found]
+    pieces = stroke_pieces(st, poly, a, b, us)
+    pieces = [p for p in pieces if len(p["pts"]) >= 2
+              and np.ptp(np.asarray(stroke_points(p), float).reshape(-1, 2), axis=0).max() > 1e-9]
+    if len(pieces) < 2:
+        return None
+    keep = {k: copy.deepcopy(st[k]) for k in ("role", "colour", "layer") if k in st}
+    for p in pieces:  # (plain numbers, like drawn points)
+        p["pts"] = [[float(u), float(v)] for u, v in p["pts"]]
+    return [dict(keep, **p) for p in pieces]
+
+
 def slice_custom(sh, a, b, ppq):
     """A custom shape cut along the segment a-b (beats, keys) -> its two halves, or None when the segment doesn't
     go all the way across it (or misses it). A spam gate Range is shared out: each half gets its part of it. Glue
@@ -211,22 +267,7 @@ def slice_custom(sh, a, b, ppq):
             cut_lines.append([list(a + (b - a) * s0), list(a + (b - a) * s1)])
     halves = {1: [], -1: []}
     for n, (st, poly) in enumerate(zip(sh["strokes"], polys)):
-        closed = len(poly) > 2 and np.hypot(*(np.asarray(poly[0]) - np.asarray(poly[-1]))) < 1e-9
-        joins = closed and side([poly[0]], a, b)  # (closed: its last and first pieces are one)
-        if n in cuts:
-            pieces = curve_pieces(st, [u for u, _, _ in cuts[n]])
-            if joins and len(pieces) > 1:
-                pieces = [joined_curve(pieces[-1], pieces[0])] + pieces[1:-1]
-        else:
-            pieces = cut_pieces(st["pts"] if st["kind"] == "poly" and exact(st) else poly, a, b)
-            if joins and len(pieces) > 1:
-                pieces = [pieces[-1] + pieces[0][1:]] + pieces[1:-1]
-            if st["kind"] == "arc" and exact(st):  # (an arc's piece is an arc: its ends and a point between)
-                pieces = [{"kind": "arc", "pts": [list(p[0]), list(p[len(p) // 2]), list(p[-1])], "k": st.get("k", 1.0)}
-                          if len(p) > 2 else {"kind": "poly", "pts": [list(pt) for pt in p]} for p in pieces]
-            else:
-                keep = {k: st[k] for k in ("free", "k") if k in st and st["kind"] == "poly" and exact(st)}
-                pieces = [dict(keep, kind="poly", pts=[list(pt) for pt in p]) for p in pieces]
+        pieces = stroke_pieces(st, poly, a, b, [u for u, _, _ in cuts[n]] if n in cuts else None)
         keep = {k: st[k] for k in ("role", "colour") if k in st}
         for piece in pieces:
             k = side(stroke_points(piece), a, b)

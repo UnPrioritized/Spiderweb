@@ -1023,6 +1023,8 @@
  "drawer.nothing_to_fill": "Only outline-only lines and fill lines: Fill and Spam have nothing to fill.",
  "drawer.only_coloured_filled": "Only outline-only lines and fill lines: Fill and Spam fill only the coloured areas.",
  "drawer.areas": "Areas",
+ "drawer.slice": "Slice",
+ "drawer.slice_nothing": "Nothing cut: the line has to cross a stroke (a closed one all the way through).",
  "drawer.area_colour": "Colour for the areas you click:",
  "drawer.area_empty": "Empty: no notes there",
  "drawer.area_n": "Colour {n}",
@@ -2643,6 +2645,18 @@
   "Very thin slivers may take the colour of the area next to them."
  ],
  "help.drawer_areas.words": "drawer area colour color channel fill paint bucket zone track",
+ "help.drawer_slice.title": "Drawer: Slice",
+ "help.drawer_slice.tip": "Drag a line across strokes to cut them there. A circle or square is cut only when the line goes all the way through it.",
+ "help.drawer_slice.text": [
+  "Drag a straight line across your drawing: every stroke it crosses is cut in two there, so you can then pick the part you don't want and delete it. The line's ends stick to points and lines like when drawing (Shift = free).",
+  "",
+  "A closed stroke (a circle, a square, a closed polyline) is cut only when the line goes all the way through it. An open stroke is cut wherever the line crosses it.",
+  "",
+  "With strokes picked (Select tool), only those are cut; otherwise every stroke the line crosses. Hidden and locked layers are never cut. With Mirror on, the mirrored line cuts too.",
+  "",
+  "The pieces stay where they were, in the same layer and group, and are all picked afterwards. Curves, arcs and polylines stay curves, arcs and polylines; circles and freehand strokes become polylines. Right-click or Esc while dragging drops the line. Ctrl+Z undoes a cut."
+ ],
+ "help.drawer_slice.words": "drawer slice cut knife split scissors trim delete part",
  "help.shortcuts.title": "Keyboard and mouse shortcuts",
  "help.shortcuts.tip": "Every key and mouse shortcut in one list.",
  "help.shortcuts.text": [
