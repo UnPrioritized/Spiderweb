@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from files.lang import tr
+from files.synth import FONT_TYPES
 from notes.engine import slot_track_channel
 from window import look
 from window.hz_view import GREEN, GREY, ORANGE, PLAY_LINE
@@ -103,7 +104,7 @@ class HzSound:
         path = filedialog.askopenfilename(
             parent=self, title=tr("hz.preview_pick_font"),
             initialdir=os.path.dirname(cfg["font"]) if cfg["font"] else None,
-            filetypes=[(tr("hz.preview_fonts"), "*.sf2 *.sf3 *.sfz *.sf2pack"), (tr("hz.preview_all"), "*.*")])
+            filetypes=[(tr("hz.preview_fonts"), FONT_TYPES), (tr("hz.preview_all"), "*.*")])
         if not path:
             return False
         cfg["font"] = os.path.normpath(path)
