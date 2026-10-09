@@ -41,7 +41,7 @@ from files.snap import SNAPS, snap_beats, snap_text
 from notes.hzbass import (BEND, ENVELOPES, FROM_MODES, FX, FX_START, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, bend_of, bent_part,
                           chains, group_count, legato_links, line_at,
                           loop_off, loop_on, loop_shape, sound_span, sustained, tones_span)
-from roll.roll_shared import BOX_STILL, CTRL, SELECT_CURSOR, SHIFT
+from roll.roll_shared import BOX_STILL, CTRL, MAX_SX, MIN_SX, SELECT_CURSOR, SHIFT
 from window import look
 from window.widgets import Scrub, remember_place
 
@@ -1348,7 +1348,7 @@ class FxPane:
         up = e.delta > 0
         if e.state & CTRL:
             b = win.beat_at(e.x)
-            win.sx = min(100000.0, max(0.05, win.sx * (1.25 if up else 0.8)))
+            win.sx = min(MAX_SX, max(MIN_SX, win.sx * (1.25 if up else 0.8)))
             win.t0 = b - (e.x - win.kb_w) / win.sx
         else:
             win.t0 += (-1 if up else 1) * 120 / win.sx

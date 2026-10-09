@@ -153,6 +153,8 @@ def add_zoom_bars(box, roll, widget=None):
                           font=look.font(9, "bold"), repeatdelay=350, repeatinterval=90,
                           command=lambda f=f, across=across: roll.zoom_step(across, f))
             b.pack(fill="both", expand=True)
+            # (held while its window closes: Tk's next repeat ran on the gone button, an error window)
+            b.bind("<Destroy>", lambda e: e.widget.tk.eval("catch {after cancel $::tk::Priv(afterId)}"), add="+")
             Tooltip(b, tr(f"zoombar.{tip}_{'time' if across else 'keys'}"))
         bar.pack(side="left" if across else "top", fill="both", expand=True)
     tk.Frame(box, bg=TROUGH).grid(row=1, column=1, sticky="nsew")  # the corner

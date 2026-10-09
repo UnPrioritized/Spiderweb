@@ -188,6 +188,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.hz_bend_clip = None  # a note's bend line copied in it (HzBend.copy_bend)
         self.hz_copied = None  # the Windows clipboard's copy count at its last copy (a later Domino copy wins Ctrl+V)
         self.hz_pos = ""  # its size and place ("WxH+x+y", remembered in the autosave)
+        self.hz_view = None  # its zoom + scroll when last closed (HzView.view_state, remembered in the autosave)
         self.hz_fx_h = 0  # its effects pane's height in pixels, dragged by its top edge (0 = as it starts)
         self.hz_loud_h = 0  # ... its loudness pane's (hz_loud.py)
         self.hz_start = None  # the beat picked with the Hz bass tool for a new Hz bass (roll_hz.py)
@@ -1152,7 +1153,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def duplicate(self):
         if not self.sels:
             return
-        shift = self.snap_beats() or 1.0
+        shift = max(self.snap_beats(), 1 / self.ppq) if self.snap_beats() else 1.0  # (a step under a tick: on top)
         self.add_copies([self.shapes[i] for i in sorted(self.sels)], shift, tr("app.duplicate"))
 
     def add_copies(self, shapes, shift, name=tr("app.paste")):

@@ -10,7 +10,7 @@ from files.lang import tr
 from files.mathexpr import fmt
 from notes.hzbass import (HZ_DEFAULTS, all_tones, auto_state, bend_range, can_slide, glide, handle_u, heard, hz_of, layers_of,
                           left_edge, links, pitch, slide_knob, slide_part)
-from roll.roll_shared import ALT, CTRL, SELECTED_COLOR, SHIFT, SLOT_COLORS, draw_boxes, fade, note_name
+from roll.roll_shared import (ALT, CTRL, MAX_SX, MIN_SX, SELECTED_COLOR, SHIFT, SLOT_COLORS, draw_boxes, fade, note_name)
 from window import look
 from window.hz_layers import layer_colour
 from window.widgets import StatusLine
@@ -43,14 +43,31 @@ class HzView:
         if h < 50:
             return
         self.fitted = True
-        keys = [n["key"] for n in self.tones]
+        keys = [n["key"] for n in self.every_tone()]
         rows = max(1.0, (h - self.ruler_h) / self.sy)
         self.top = min(127.0, max(rows - 1, (max(keys) + min(keys)) / 2 + rows / 2))
+
+    def view_state(self):
+        """Zoom + scroll as kept on the app between openings and in the autosave (app.hz_view)."""
+        return {"sx": self.sx / self.s, "sy": self.sy / self.s, "t0": self.t0, "top": self.top}
+
+    def set_view_state(self, v):
+        """The zoom + scroll the window had when last closed (a damaged one: left out, fitted as on a first open)."""
+        try:
+            v = {k: float(v[k]) for k in ("sx", "sy", "t0", "top")}
+        except (TypeError, KeyError, ValueError):
+            return
+        if not all(map(math.isfinite, v.values())):
+            return
+        self.sx = min(MAX_SX, max(MIN_SX, v["sx"] * self.s))
+        self.sy = min(60.0 * self.s, max(1.0, v["sy"] * self.s))
+        self.t0, self.top = v["t0"], v["top"]
+        self.fitted = True
 
     def on_resize(self, e=None):
         """The canvas got its size or changed size: the notes in sight the first time, no empty space past the
         lowest / highest key."""
-        if self.tones and not self.fitted:
+        if self.every_tone() and not self.fitted:
             self.fit_view()
         self.clamp_view()
         self.redraw()
@@ -91,17 +108,35 @@ class HzView:
                 self.top += 3 if up else -3
         self.clamp_view()
         self.redraw()
+        self.held_to_mouse(e)
+
+    def held_to_mouse(self, e):
+        """The view moved under the mouse (wheel) while a note / path is held: it goes to the mouse at once, as on the
+        main piano roll (it stayed on the old spot in the song until the mouse moved, and letting go put it there)."""
+        if e.state & 0x100:  # (the left button held)
+            self.on_drag(e)
+        elif self.draft is not None:  # (a path drawn click by click)
+            self.on_motion(e)
+
+    def every_tone(self):
+        """The notes of every layer: the picked one's (self.tones) + the others' (shown faded)."""
+        hz = (self.target() or {}).get("hz") or {}
+        if not hz.get("layers"):
+            return self.tones
+        picked = hz.get("layer", 0)
+        return self.tones + [n for i, l in enumerate(layers_of(hz)) if i != picked for n in l.get("tones") or ()]
 
     def fit_notes(self):
-        """The Fit view button: every note in sight (no notes: the first bars, the keys as they are)."""
+        """The Fit view button: every note of every layer in sight (no notes: the first bars, the keys as they are)."""
         w, h = self.canvas.winfo_width() - self.kb_w, self.canvas.winfo_height() - self.ruler_h
         if w < 50 or h < 50:
             return
-        lo, hi = (0.0, max(n["t"] + n["len"] for n in self.tones)) if self.tones else (0.0, 4.0 * self.app.beats)
+        tones = self.every_tone()
+        lo, hi = (0.0, max(n["t"] + n["len"] for n in tones)) if tones else (0.0, 4.0 * self.app.beats)
         span = max(hi - lo, 1.0)
         self.sx, self.t0 = w / (span * 1.06), lo - span * 0.03
-        if self.tones:
-            keys = [n["key"] for n in self.tones]
+        if tones:
+            keys = [n["key"] for n in tones]
             rows = max(keys) - min(keys) + 1 + 4  # (two keys of room above and below)
             self.sy = min(12.0 * self.s, max(1.0, h / rows))  # (a few notes: not huge rows)
             self.top = (max(keys) + min(keys)) / 2 + h / self.sy / 2
@@ -111,7 +146,7 @@ class HzView:
     def zoom_x(self, f, x):
         """Zoom time by f; the beat at canvas x stays where it is."""
         b = self.beat_at(x)
-        self.sx = min(100000.0, max(0.05, self.sx * f))
+        self.sx = min(MAX_SX, max(MIN_SX, self.sx * f))
         self.t0 = b - (x - self.kb_w) / self.sx
 
     def zoom_y(self, f, y):
@@ -126,7 +161,8 @@ class HzView:
         c = self.canvas
         if across:
             a, span = self.t0 + 0.25, max(1, c.winfo_width() - self.kb_w) / self.sx
-            end = (max(n["t"] + n["len"] for n in self.tones) if self.tones else 0.0) + 0.25 + 8 * self.app.beats
+            tones = self.every_tone()
+            end = (max(n["t"] + n["len"] for n in tones) if tones else 0.0) + 0.25 + 8 * self.app.beats
             return a, a + span, max(end, a + span)
         a, span = 127.0 - self.top, max(1, c.winfo_height() - self.ruler_h) / self.sy
         return a, a + span, max(128.0, a + span)
@@ -145,7 +181,7 @@ class HzView:
         c = self.canvas
         if across:
             px = max(1, c.winfo_width() - self.kb_w)
-            self.sx = min(100000.0, max(0.05, px / (b - a)))
+            self.sx = min(MAX_SX, max(MIN_SX, px / (b - a)))
             self.t0 = (a if which == "end" else b - px / self.sx) - 0.25
         else:
             px = max(1, c.winfo_height() - self.ruler_h)
@@ -189,19 +225,20 @@ class HzView:
                 c.create_rectangle(kb, y, w, y + self.sy, fill=look.HZ_ROW_BLACK, outline="")
             c.create_line(kb, y + self.sy, w, y + self.sy, fill=look.HZ_OCTAVE_LINE if k % 12 == 0 else look.HZ_ROW_LINE)
         beats, sb = self.app.beats, self.snap_beats()
-        step = sb if sb and sb * self.sx >= 8 else 1.0
-        if step * self.sx < 8:  # zoomed far out: bars, then every 2nd, 4th... bar
-            step = float(beats)
-            while step * self.sx < 8:
-                step *= 2
-        n = math.floor(max(0.0, self.beat_at(kb)) / step)
-        while n * step <= self.beat_at(w):  # columns
-            b = n * step
-            x = self.x_of(b)
-            whole = abs(b - round(b)) < 1e-9
-            bar = whole and round(b) % beats == 0
-            c.create_line(x, rh, x, h, fill=look.HZ_GRID_BAR if bar else look.HZ_GRID_BEAT if whole else look.HZ_GRID)
-            n += 1
+        bar_step = float(beats)
+        while bar_step * self.sx < 8:  # zoomed far out: bars, then every 2nd, 4th... bar
+            bar_step *= 2
+        lo, hi = max(0.0, self.beat_at(kb)), self.beat_at(w)
+        # (columns: the snap's lines, then every beat and bar over them, as on the main piano roll: a 3/16 or 1/6
+        # snap left most beat / bar lines out)
+        for step, colour in ((sb, look.HZ_GRID), (1.0, look.HZ_GRID_BEAT), (bar_step, look.HZ_GRID_BAR)):
+            if not step or step * self.sx < 8:
+                continue
+            n = math.floor(lo / step)
+            while n * step <= hi:
+                x = self.x_of(n * step)
+                c.create_line(x, rh, x, h, fill=colour)
+                n += 1
         sh = self.target()
         if sh is not None and not self.grow.get():  # the shape ends here: what's after it isn't used
             x = max(kb, self.x_of(shape_length(sh)))

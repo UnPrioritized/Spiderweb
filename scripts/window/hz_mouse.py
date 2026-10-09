@@ -379,7 +379,8 @@ class HzMouse:
             for j in self.sel - {d["i"]}:
                 self.tones[j]["cents"] = max(-TUNE, min(TUNE, round(d["orig"][j]["cents"] + moved, 6)))
         else:  # move every selected note: the one held goes to the grid line nearest to where it's dragged
-            if not d["moved"] and abs(e.x - d["x"]) < 4 and abs(e.y - d["y"]) < 4:
+            far = abs(beat - d["beat"]) * self.sx  # (in the song: the wheel can move the view under a still mouse)
+            if not d["moved"] and far < 4 and abs(e.y - d["y"]) < 4 and self.key_at(e.y) == d["key"]:
                 return
             d["moved"] = True
             if d.get("dup") and not d.get("copied"):
@@ -387,7 +388,7 @@ class HzMouse:
                 n = self.tones[d["i"]]
             orig = d["orig"]
             held = orig[d["i"]]
-            dt = 0.0 if abs(e.x - d["x"]) < 4 else self.snap(held["t"] + beat - d["beat"], e) - held["t"]
+            dt = 0.0 if far < 4 else self.snap(held["t"] + beat - d["beat"], e) - held["t"]
             dk = self.key_at(e.y) - d["key"]
             dt = max(dt, -min(orig[i]["t"] for i in self.sel))
             dk = max(-min(orig[i]["key"] for i in self.sel), min(127 - max(orig[i]["key"] for i in self.sel), dk))

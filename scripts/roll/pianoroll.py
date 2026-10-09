@@ -29,7 +29,7 @@ from window import look
 from window.hz_window import open_hz
 from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
-from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, PICK, SHIFT, boxes_side,
+from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, MAX_SX, MIN_SX, PICK, SHIFT, boxes_side,
                               boxes_upright, cached_path, cached_strokes, grab_while_panning, grid_span, line_touches_box,
                               mouse_trail, note_name)
 from roll.roll_text import TextTyping
@@ -409,8 +409,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
     def apply_saved_view(self):
         v, self._saved_view = self._saved_view, None
-        self.sx = min(100000.0, max(0.05, v["sx"] * self.scale))
-        self.sy = min(60 * self.scale, max(1.0, v["sy"] * self.scale))
+        self.sx = min(MAX_SX, max(MIN_SX, v["sx"] * self.scale))
+        self.sy = min(60 * self.scale, max(self.least_sy(), v["sy"] * self.scale))
         self.view_t, self.view_top = v["t"], v["top"]
         self.clamp_view()
         self.request_redraw()
@@ -459,25 +459,30 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         """A scrollbar's end was dragged (which: "start" / "end"): the view shows a..b, the other end stays."""
         if across:
             px = max(1, self.winfo_width() - self.kb_w)
-            self.sx = min(100000.0, max(0.05, px / (b - a)))
+            self.sx = min(MAX_SX, max(MIN_SX, px / (b - a)))
             self.view_t = a if which == "end" else b - px / self.sx
         else:
             px = max(1, self.winfo_height() - self.ruler_h)
-            self.sy = min(60 * self.scale, max(1.0, px / (b - a)))
+            self.sy = min(60 * self.scale, max(self.least_sy(), px / (b - a)))
             self.view_top = self.app.keys - 0.5 - (a if which == "end" else b - px / self.sy)
         self.clamp_view()
         self.request_redraw()
 
+    def least_sy(self):
+        """How small a key row can be zoomed: 1 px, or less when that's what fits every key (Fit view with 256 keys
+        on a short piano roll: "-" zoomed in from there)."""
+        return min(1.0, (self.winfo_height() - self.ruler_h) / self.app.keys)
+
     def zoom_x(self, f, x):
         """Zoom time by f; the beat at canvas x stays where it is."""
         b = self.x2t(x)
-        self.sx = min(100000.0, max(0.05, self.sx * f))
+        self.sx = min(MAX_SX, max(MIN_SX, self.sx * f))
         self.view_t = b - (x - self.kb_w) / self.sx
 
     def zoom_y(self, f, y):
         """Zoom the keys by f; the key at canvas y stays where it is."""
         p = self.y2p(y)
-        self.sy = min(60 * self.scale, max(1.0, self.sy * f))
+        self.sy = min(60 * self.scale, max(self.least_sy(), self.sy * f))
         self.view_top = p + (y - self.ruler_h) / self.sy
 
     def zoom_step(self, across, f):

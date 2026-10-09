@@ -103,6 +103,8 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.kb_w = max(self.kb_w, round(20 * s) + max(names.measure(tr("hz.fx_" + n)) for n in FX))  # effects' names
         self.sx, self.sy, self.t0, self.top = 80.0 * s, 12.0 * s, -0.25, 64.0
         self.fitted = False
+        if app.hz_view:  # (as it was when last closed)
+            self.set_view_state(app.hz_view)
 
         # The toolbar: pieces that stay together; when the window is too narrow for one row, they wrap to a second
         # (layout)
@@ -329,7 +331,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.grow_box.config(state="normal" if sh is not None else "disabled")
         if bool(self.layers.box.winfo_manager()) != self.app.hz_layers.get():  # (a project opened)
             self.layers.show(self.app.hz_layers.get())
-        if self.tones and not self.fitted:
+        if self.every_tone() and not self.fitted:
             self.fit_view()
         self.redraw()
 
@@ -478,6 +480,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         if self.draft is not None:  # (a path drawn: made, as if another tool were picked)
             self.make_draft()
         self.app.hz_tools = self.tools_state()
+        self.app.hz_view = self.view_state()
         self.picker.close()
         if self.settings_window and self.settings_window.winfo_exists():
             self.settings_window.destroy()

@@ -81,6 +81,9 @@ GRAB_CURSOR = "{@" + os.path.join(ICONS, "grab.cur").replace("\\", "/") + "}"  #
 PIANO_88 = range(21, 109)  # A0 to C8, the keys of a real piano
 BOX_STILL = 4  # a Select box moved less than this many pixels from where it started is still a click
 BOX_SCROLL_MS = 100  # a Select box dragged past the edge scrolls the view a beat (3 keys up / down) this often
+# px per beat: how far the wheel / bars / buttons zoom time (both rolls). Low enough for Fit view on any song (at
+# 0.05 a very long one went past it, and "-" then zoomed in)
+MIN_SX, MAX_SX = 1e-5, 100000.0
 
 
 def grid_span(a, b, step, step_b=None):
