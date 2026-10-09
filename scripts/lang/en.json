@@ -1025,6 +1025,9 @@
  "drawer.areas": "Areas",
  "drawer.slice": "Slice",
  "drawer.slice_nothing": "Nothing cut: the line has to cross a stroke (a closed one all the way through).",
+ "drawer.split_here": "Split here",
+ "drawer.split_closed": "Split here (closed line: use the Slice tool)",
+ "drawer.split_nothing": "Nothing split: that spot is the stroke's end.",
  "drawer.area_colour": "Colour for the areas you click:",
  "drawer.area_empty": "Empty: no notes there",
  "drawer.area_n": "Colour {n}",
@@ -2654,7 +2657,9 @@
   "",
   "With strokes picked (Select tool), only those are cut; otherwise every stroke the line crosses. Hidden and locked layers are never cut. With Mirror on, the mirrored line cuts too.",
   "",
-  "The pieces stay where they were, in the same layer and group, and are all picked afterwards. Curves, arcs and polylines stay curves, arcs and polylines; circles and freehand strokes become polylines. Right-click or Esc while dragging drops the line. Ctrl+Z undoes a cut."
+  "The pieces stay where they were, in the same layer and group, and are all picked afterwards. Curves, arcs and polylines stay curves, arcs and polylines; circles and freehand strokes become polylines. Right-click or Esc while dragging drops the line. Ctrl+Z undoes a cut.",
+  "",
+  "To cut one open stroke at one spot, right-click it → Split here (with any tool): it's cut at the mouse's spot, which sticks to points and crossings or goes to the grid like when drawing (Shift = exactly at the mouse). Closed strokes need the Slice tool, so Split here is greyed out on them."
  ],
  "help.drawer_slice.words": "drawer slice cut knife split scissors trim delete part",
  "help.shortcuts.title": "Keyboard and mouse shortcuts",

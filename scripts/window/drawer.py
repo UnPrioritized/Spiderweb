@@ -18,7 +18,7 @@ from notes.custom import (DRAWN_FRAME, ROLES, area_paint, areas_filled, carry_ar
                           shape_areas, stroke_points, takes_formula)
 from roll.roll_shared import SLOT_COLORS
 from notes.pattern import has_formula, moved_formulas
-from notes.slice import slice_stroke
+from notes.slice import is_closed, slice_stroke
 from files.about import HERE
 from files.safefile import write_text
 from files.clipboard import get_text, put_text
@@ -1732,6 +1732,9 @@ class Drawer(DrawerLayers, tk.Toplevel):
             symmetry_menu(m, st.get("sym"), lambda mode: self.set_curve_symmetry(i, mode, e))
         elif st["kind"] == "poly":
             m.add_command(label=tr("drawer.add_point_here"), command=lambda: self.add_poly_point(i, e))
+        closed = is_closed(stroke_points(st))  # (cut only all the way through: the Slice tool, user)
+        m.add_command(label=tr("drawer.split_closed" if closed else "drawer.split_here"),
+                      command=lambda: self.split_here(i, e), state="disabled" if closed else "normal")
         if takes_formula(st):
             self._formula_picks = {}  # (kept, so the dots show)
             formula_menu(m, DrawerHost(self), self._formula_picks)
@@ -1903,20 +1906,53 @@ class Drawer(DrawerLayers, tk.Toplevel):
         """The Slice tool's line a-b (and its Mirror copies) cuts the strokes it crosses: the picked ones if any,
         else every one the board can change (never hidden / locked ones). Each cut stroke's pieces take its place
         and layer ("Line 3", "Line 3 (2)"...), all picked afterwards. Nothing crossed: nothing happens."""
-        knives = [(a, b)]
+        picked = self.movable()
+        idx = set(picked or [i for i in range(len(self.strokes)) if self.pickable(i)])
+        self.cut_strokes([(ka, kb, idx) for ka, kb in self.knife_copies(a, b)], picked, "drawer.slice_nothing")
+
+    def knife_copies(self, a, b):
+        """A cut line and its Mirror copies (none lying on another): [(a, b)]."""
+        knives = [(list(a), list(b))]
         for fn in mirror_fns(self.mirror_mode()):
             k = (list(fn(*a)), list(fn(*b)))
             if not any(same_stroke({"kind": "poly", "pts": list(k)}, {"kind": "poly", "pts": list(q)}) for q in knives):
                 knives.append(k)
-        picked = self.movable()
-        idx = picked or [i for i in range(len(self.strokes)) if self.pickable(i)]
+        return knives
+
+    def split_here(self, i, e):
+        """Right-click > Split here on open stroke i: cut in two at the spot on it nearest the mouse's point (stuck
+        or on the grid like drawing, Shift = free), by a tiny cut line across it there; with Mirror, the mirrored
+        spot of whatever stroke lies there too."""
+        pt = self.event_pt(e)
+        if self.stuck and self.stuck[0] not in ("point", "cross"):  # (along a line: means nothing here, grid)
+            pt = self.event_pt(e, stick=False)
+        x, y = self.to_screen(*pt)
+        self.stuck = None
+        pts = self.screen_points(stroke_points(self.strokes[i]))
+        pts = list(zip(pts[::2], pts[1::2]))
+        k = min(range(len(pts) - 1), key=lambda j: seg_dist((x, y), pts[j], pts[j + 1]))
+        (ax, ay), (bx, by) = pts[k], pts[k + 1]
+        dx, dy = bx - ax, by - ay
+        ll = dx * dx + dy * dy or 1
+        t = max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / ll))
+        p = np.array(self.from_screen(ax + t * dx, ay + t * dy))
+        n = np.array([-dy, -dx]) / math.sqrt(ll) * 1e-4  # (across the piece; screen y is down, board v up)
+        a, b = list(p - n), list(p + n)
+        everyone = {j for j in range(len(self.strokes)) if self.pickable(j)}
+        knives = self.knife_copies(a, b)
+        self.cut_strokes([(ka, kb, {i} if n_ == 0 else everyone) for n_, (ka, kb) in enumerate(knives)], [],
+                         "drawer.split_nothing")
+
+    def cut_strokes(self, knives, picked, nothing):
+        """Cuts by knives [(a, b, the strokes it may cut)]; picked = the strokes picked before (they stay picked).
+        nothing: the text key said when nothing was cut."""
         before = self.snap()
         self.keep_names()  # (the pieces after a cut stroke shift the numbers: names stay as they are)
         out, cut = [], set()
         for i, st in enumerate(self.strokes):
             pieces = [st]
-            if i in idx:
-                for ka, kb in knives:
+            for ka, kb, idx in knives:
+                if i in idx:
                     pieces = [q for p in pieces for q in (slice_stroke(p, ka, kb) or [p])]
             if len(pieces) > 1:
                 lay = self.layer(i)
@@ -1926,7 +1962,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
             out.append(pieces)
         if not cut:
             self.load_snap(before)
-            self.pos_label.config(text=tr("drawer.slice_nothing"))
+            self.pos_label.config(text=tr(nothing))
             return self.redraw()
         self.push_undo(before)
         self.strokes, new_idx, k = [], set(), 0
