@@ -6,7 +6,8 @@ A click on a note (or on its bend line, wherever it has gone) adds a point there
 (between its neighbours; the end points only up / down). Points snap to the grid and to whole keys (Shift = free:
 any tick, any cent). Right-click a point (or Delete while holding it) = it goes; a line back at 0 everywhere = no
 bend. Each change is one undo step. Empty space = a Select box, like the Select tool. A note's right-click menu
-(any tool) has a Bend submenu: Copy bend, Paste bend onto it / the selected notes, Clear bend.
+(any tool) has a Bend submenu: Copy bend, Paste bend onto it / the selected notes, Clear bend, and ready shapes
+(Scoop up, Fall off, Wobble: shaped) that replace the bend.
 A small square sits half way along each piece between two points that differ: dragged up / down it curves the
 piece (like a slide's square: sticks to straight within BEND_STICK px, Shift = free; hollow = straight), stored
 as the first point's third number (hz_lines.bent_part); double-click it = straight again."""
@@ -273,6 +274,10 @@ class HzBend:
         sub.add_command(label=tr("hz.bend_clear"), command=lambda: self.set_bends(picked, None,
                                                                                    tr("hz.step_note_bend_clear")),
                         state="normal" if any(self.tones[j].get("bend") for j in picked) else "disabled")
+        sub.add_separator()
+        for kind in SHAPES:
+            sub.add_command(label=tr(f"hz.bend_{kind}"),
+                            command=lambda kind=kind: self.set_bends(picked, kind, tr("hz.step_note_bend_shape")))
         menu.add_cascade(label=tr("hz.bend_menu"), menu=sub)
         menu.bend_sub = sub  # (kept while the menu shows)
 
@@ -281,13 +286,14 @@ class HzBend:
         self.say(tr("hz.bend_copied"))
 
     def set_bends(self, picked, pts, name):
-        """The notes numbered `picked` get bend line pts (None: none), one undo step."""
+        """The notes numbered `picked` get bend line pts (None: none; a SHAPES name: that shape, made for each note's
+        length), one undo step."""
         before = copy.deepcopy(self.tones)
         self.sel_before = (before, self.sel_state())
         for j in picked:
             n = self.tones[j]
             if pts:
-                n["bend"] = copy.deepcopy(pts)
+                n["bend"] = shaped(pts, n["len"]) if pts in SHAPES else copy.deepcopy(pts)
                 tidy_bend(n)
             else:
                 n.pop("bend", None)
@@ -317,6 +323,24 @@ class HzBend:
             held = self.drag and self.drag["kind"] == "bendpt" and (self.drag["i"], self.drag["j"]) == (i, j)
             c.create_oval(x - r, y - r, x + r, y + r, fill=look.HZ_DOT if held else BEND, outline=BEND,
                           width=max(1, round(1.5 * s)))
+
+
+def shaped(kind, length):
+    """A ready bend line (SHAPES) for a note `length` beats long, its times worked out in beats (a scoop stays as
+    short on a long note), then kept as parts of the note like any bend (so it stretches with it afterwards)."""
+    if kind == "scoop":  # (2 keys low, up onto the note: fast first)
+        return [[0.0, -SCOOP[1], 0.6], [min(0.5, SCOOP[0] / length), 0.0]]
+    if kind == "fall":  # (from the note, down at the end: slow first)
+        return [[max(0.5, 1.0 - FALL[0] / length), 0.0, -0.6], [1.0, -FALL[1]]]
+    rate, depth = WOBBLE  # wobble: quarter waves, each piece curved like a sine's (fast out of 0, slow at the tops)
+    count = min(256, max(4, round(4 * rate * length)))
+    return [[k / count, (0.0, depth, 0.0, -depth)[k % 4], 0.6 if k % 2 == 0 else -0.6] for k in range(count + 1)]
+
+
+SHAPES = ("scoop", "fall", "wobble")
+SCOOP = (0.125, 2.0)  # beats, keys below: Scoop up
+FALL = (0.25, 5.0)  # ... keys down at the end: Fall off
+WOBBLE = (4.0, 0.5)  # waves a beat, keys each way
 
 
 def tidy_bend(n):
