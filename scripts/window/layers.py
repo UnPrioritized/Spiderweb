@@ -28,11 +28,12 @@ def kind_key(st):
 
 def row_lines(w):
     """The style "Layers.Treeview": a faint line under each row (user), drawn over the row's own colour (picked rows
-    stay blue). The 1 px image is a named Tk image, so it lives as long as the program."""
+    stay blue). The 1 px high image is a named Tk image, so it lives as long as the program. It's wider than any
+    list: a 1 x 1 one is repeated pixel by pixel across every row (a 25-row list took 300 ms a repaint)."""
     st, img = ttk.Style(w), "layers_row_line"
     if img not in w.tk.call("image", "names"):
-        w.tk.call("image", "create", "photo", img, "-width", 1, "-height", 1)
-        w.tk.call(img, "put", look.LIST_LINE)
+        w.tk.call("image", "create", "photo", img, "-width", 4000, "-height", 1)
+        w.tk.call(img, "put", look.LIST_LINE, "-to", 0, 0, 4000, 1)
     if "Layers.line" not in st.element_names():
         st.element_create("Layers.line", "image", img)
     st.layout("Layers.Treeview.Row", [("Treeitem.row", {"sticky": "nswe", "children": [
