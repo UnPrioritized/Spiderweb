@@ -73,6 +73,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     faces.py         the areas a custom shape's lines close in, and how many lines deep each is (what Fill fills)
     text.py          text: letters laid out in a font -> a custom shape, threshold, grow
     hzbass.py        Hz bass: spam gates from tones (placed notes, slides, chords)
+    hz_settings.py   Hz bass: every setting's limits and starting value, checking saved settings
     fonts.py         letter outlines from the fonts installed in Windows
     fonts_ft.py      the same on Linux (fontconfig + FreeType)
     funnel.py        funnels: curves, note grid, gates
