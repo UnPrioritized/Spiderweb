@@ -42,10 +42,10 @@ BUILT_IN = {
     "Triangle": [{"kind": "poly", "pts": [[0, 0], [1, 0], [0.5, 1], [0, 0]]}],
 }
 GRIDS = ["4", "8", "12", "16", "24", "32", "48", "64"]
-TOOLS = [("select", tr("drawer.select"), "v"), ("erase", tr("drawer.eraser"), "e"), ("line", tr("drawer.line"), "l"),
+TOOLS = [("select", tr("drawer.select"), "v"), ("slice", tr("drawer.slice"), "k"), ("erase", tr("drawer.eraser"), "e"), ("line", tr("drawer.line"), "l"),
          ("poly", tr("drawer.polyline"), "p"), ("free", tr("drawer.freehand"), "f"), ("curve", tr("drawer.curve"), "c"),
          ("arc", tr("drawer.arc"), "a"), ("square", tr("drawer.square"), "s"), ("circle", tr("drawer.circle"), "o"),
-         ("areas", tr("drawer.areas"), "b"), ("slice", tr("drawer.slice"), "k")]
+         ("areas", tr("drawer.areas"), "b")]
 SHIFT, CTRL = 0x1, 0x4
 MOD_KEYS = ("shift_l", "shift_r", "control_l", "control_r")
 STROKE_COLOR = look.STROKE  # (a stroke with an outline colour: that colour's dark shade)
@@ -339,6 +339,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self._area_cache = self._area_px = self._area_img = self._gap_cache = None
         self._settled = "[]"   # the strokes as JSON when the areas last matched them (changed)
         self.stuck = None      # where the last point stuck (sticky.py): (kind, (u, v), pixels away), shown as a mark
+        self.stuck_stroke = None  # of the strokes being moved, the one that stuck (stick_move)
         self.stuck2 = None     # a circle / square / moved stroke resting on two lines: the second touch's mark
         self.square_sides = [1, 2]  # a square being drawn: its sides lit (stuck_pieces; 1, 2 = at the mouse's corner)
         self.guide = []        # a circle near sticking or stuck: where to point the mouse for it to touch, each
@@ -909,8 +910,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
             return out
         if drag[0] in ("pen", "corner"):
             return [stroke_points(self.strokes[drag[1]])]
-        if drag[0] == "stroke" and len(drag[2]) == 1:
-            return [stroke_points(self.strokes[i]) for i in drag[2]]
+        if drag[0] == "stroke" and self.stuck_stroke in drag[2]:  # (the one of those moved that touches)
+            return [stroke_points(self.strokes[self.stuck_stroke])]
         return []
 
     def draw_pieces(self, pieces, width):
@@ -919,33 +920,38 @@ class Drawer(DrawerLayers, tk.Toplevel):
             if len(coords) >= 4:
                 self.canvas.create_line(*coords, fill=STICK_LINE, width=width, capstyle="round", joinstyle="round")
 
-    def stick_move(self, i, st, du, dv):
-        """Stroke i (st = as it was when grabbed) moved by du, dv: (du, dv) changed so it sticks, or None (nothing
-        in reach). Its points stick to points / crossings / lines, and its LINE too (user): a stroke's point onto
-        it, or resting on a stroke's line (sticky.touch_line)."""
-        targets, view, best = self.stick_targets(frozenset([i])), self.stick_view(), None
+    def stick_move(self, moving, du, dv):
+        """The strokes moving ({index: stroke as it was when grabbed}) moved by du, dv: (du, dv) changed so they
+        stick, or None (nothing in reach). Their points stick to the other strokes' points / crossings / lines, and
+        their LINES too (user): a stroke's point onto one, or one resting on a stroke's line (sticky.touch_line).
+        Several moved together (a select box, user): the nearest touch of any of them wins (stuck_stroke = which)."""
+        targets, view, best = self.stick_targets(frozenset(moving)), self.stick_view(), None
         k, ox, oy = view
-        line = stroke_points(st)
-        for _, (u, v) in key_points(st, line):
-            got = targets.find(ox + (u + du) * k, oy - (v + dv) * k, view, REACH * self.scale)
-            if got and got[0] == "line" and st["kind"] == "ellipse":
-                continue  # (its left / right / top / bottom on a slanted line = crossing it: its line rests instead)
-            rank = got and (STICK_RANK[got[0]], -got[2])  # (a point first, then a crossing, then a line; nearest)
-            if got and (best is None or rank > best[2]):
-                best = got, (got[1][0] - u, got[1][1] - v), rank
-        moved = [(u + du, v + dv) for u, v in line]
-        for kind, at, far, (su, sv) in targets.touch_line(moved, view, REACH * self.scale):
-            rank = STICK_RANK[kind], -far
-            if best is None or rank > best[2]:
-                best = ("point" if kind == "on" else "line", at, far), (du + su, dv + sv), rank
-        two = targets.rest_two(moved, view, REACH * self.scale / 2)  # (resting on two lines: a smaller reach, user)
-        if two and (best is None or (STICK_RANK["two"], -two[1]) > best[2]):
-            (su, sv), far, (t1, t2) = two
+        two_best = None
+        for i, st in moving.items():
+            line = stroke_points(st)
+            for _, (u, v) in key_points(st, line):
+                got = targets.find(ox + (u + du) * k, oy - (v + dv) * k, view, REACH * self.scale)
+                if got and got[0] == "line" and st["kind"] == "ellipse":
+                    continue  # (its left / right / top / bottom on a slanted line = crossing it: its line rests)
+                rank = got and (STICK_RANK[got[0]], -got[2])  # (a point first, then a crossing, then a line; nearest)
+                if got and (best is None or rank > best[2]):
+                    best = got, (got[1][0] - u, got[1][1] - v), rank, i
+            moved = [(u + du, v + dv) for u, v in line]
+            for kind, at, far, (su, sv) in targets.touch_line(moved, view, REACH * self.scale):
+                rank = STICK_RANK[kind], -far
+                if best is None or rank > best[2]:
+                    best = ("point" if kind == "on" else "line", at, far), (du + su, dv + sv), rank, i
+            two = targets.rest_two(moved, view, REACH * self.scale / 2)  # (on two lines: a smaller reach, user)
+            if two and (two_best is None or two[1] < two_best[0][1]):
+                two_best = two, i
+        if two_best and (best is None or (STICK_RANK["two"], -two_best[0][1]) > best[2]):
+            ((su, sv), far, (t1, t2)), i = two_best
             self.stuck2 = "line", t2, far
-            best = ("line", t1, far), (du + su, dv + sv), None
+            best = ("line", t1, far), (du + su, dv + sv), None, i
         if best is None:
             return None
-        self.stuck = best[0]
+        self.stuck, self.stuck_stroke = best[0], best[3]
         return best[1]
 
     def perfect(self, start, pt):
@@ -1225,8 +1231,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
             cur = self.event_pt(e, snap=False)
             du, dv = cur[0] - start[0], cur[1] - start[1]
             self.stuck = self.stuck2 = None
-            if not e.state & SHIFT:  # one stroke: its point nearest to a line sticks to it; else whole grid squares
-                got = len(origs) == 1 and self.stick_move(*next((i, json.loads(o)) for i, o in origs.items()), du, dv)
+            if not e.state & SHIFT:  # the strokes' point / line nearest to a line sticks to it; else grid squares
+                got = self.stick_move({i: json.loads(o) for i, o in origs.items()}, du, dv)
                 if got:
                     du, dv = got
                 else:
