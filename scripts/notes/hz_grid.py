@@ -428,7 +428,8 @@ class KeyGrid:
             idx = start[rows][:, None] + np.arange(size_k)
             sums = np.cumsum(waves[idx], axis=1)
             starts[idx[:, 1:]] = starts[idx[:, :1]] + sums[:, :-1]
-        keep = ~(moved & scaled[part]) | (starts < each["end"][run][part] - 1e-6)
+        # (none past the stretch's end either: a held part a slide takes over from would sound on under it)
+        keep = ~moved | (starts < each["end"][run][part] - 1e-6)
         part, number, src, waves, starts = part[keep], number[keep], src[keep], waves[keep], starts[keep]
         late = f["slant"][src] * x + np.floor(x * f["groups"][src]) / f["groups"][src]
         if self.starting is not None:  # (Random start: each copy's waves start that far in, the same all through)
