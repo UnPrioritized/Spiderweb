@@ -179,7 +179,7 @@ class HzMouse:
             return None
         side = boxes_side([self.box_rect(a) for a in kept], e.x, e.y, 5 * self.s)
         if e.state & CTRL:  # (the pencil's Ctrl+drag is its only box: a new one there)
-            return (0, 0) if side == (0, 0) and self.tool.get() == "select" else None
+            return (0, 0) if side == (0, 0) and self.tool.get() in ("select", "bend") else None
         if side and side[0] == 1:
             return 1, 0
         return (0, 0) if side == (0, 0) and not hit else None
@@ -243,7 +243,7 @@ class HzMouse:
             if e.x < self.kb_w or e.y < self.ruler_h:
                 return
             if e.state & CTRL or self.tool.get() in ("select", "bend"):  # a box that selects the notes it touches
-                add = e.state & CTRL and self.tool.get() == "select"  # (Ctrl: added to the selection and the
+                add = e.state & CTRL and self.tool.get() in ("select", "bend")  # (Ctrl: added to the selection and the
                 base = set(self.sel) if add else set()  # boxes kept)
                 self.sel = set(base)
                 self.drag = {"kind": "box", "from": (self.beat_at(e.x), self.top - (e.y - self.ruler_h) / self.sy),
@@ -307,7 +307,7 @@ class HzMouse:
             return self.reset_tune(hit[1])
         if hit and hit[0] == "bend":  # a slide's handle: its own bend goes, it follows the Glide curve again
             return self.slide_curve(hit[2], bend=None)
-        if (self.tool.get() == "select" and hit is None and (self.app.hz_clip or self.domino_newer())
+        if (self.tool.get() in ("select", "bend") and hit is None and (self.app.hz_clip or self.domino_newer())
                 and not e.state & CTRL and e.x >= self.kb_w and e.y >= self.ruler_h
                 and not self.on_kept_box(self.kept_box(), e, hit)):
             self.drop_drag()
@@ -557,7 +557,7 @@ class HzMouse:
                 self.box_pick(d)
             if self.box_area(d) or d["more"] and e.state & CTRL:
                 self.box_kept = (d["more"] + [self.box_area(d)] if self.box_area(d) else d["more"], set(self.sel))
-            elif (not e.state & CTRL and self.tool.get() == "select"
+            elif (not e.state & CTRL and self.tool.get() in ("select", "bend")
                     and self.preview_on.get()):  # a click, not a drag: the play line goes there
                 self.put_play_line(self.snap(d["from"][0], e))
             return self.redraw()
@@ -657,6 +657,10 @@ class HzMouse:
         if self.bend_menu(e):  # (the Bend tool on a bend point: it goes)
             return
         hit = self.hit(e.x, e.y)
+        if self.bending() and not (hit and hit[0] in DOTS):  # (the Bend tool: a note's bend line or curve square,
+            got = self.bend_hit(e.x, e.y)  # wherever it has gone, is that note: its menu)
+            if got:
+                hit = ("note", got[1])
         kept = self.kept_box() if not (hit and hit[0] in DOTS) else None
         # inside the kept Select boxes: the menu for all they selected; just one note: its own menu, anywhere in
         # the boxes (user, like the main piano roll)

@@ -507,7 +507,7 @@
  "hz.grow": "Shape length follows the notes",
  "hz.grow_tip": "Ticked: the shape on the piano roll is made as long as the notes here.\nNot ticked: the shape keeps its length, and notes past its end (the grey part) aren't used.",
  "hz.bend": "Bend (B)",
- "hz.bend_tip": "Gives a note its own bend: click a note to add a point to its bend line and drag it up or down.\nThe line stretches with the note and is heard on top of everything else, up to the Pitch box's Range.\nPoints snap to the grid and to whole keys (Shift: free). Right-click a point to remove it.\nDrag the small square between two points up or down to curve that piece; double-click it to make it straight.\nDrag on empty space to select with a box.",
+ "hz.bend_tip": "Gives a note its own bend: click a note to add a point to its bend line and drag it up or down.\nThe line stretches with the note and is heard on top of everything else, up to the Pitch box's Range.\nPoints snap to the grid and to whole keys (Shift: free). Right-click a point to remove it.\nDrag the small square between two points up or down to curve that piece; double-click it to make it straight.\nRight-click a note's bend line for the note's menu.\nOn empty space it works like the Select tool (box, Ctrl+box adds, a click unselects).",
  "hz.bend_keys": "Bend: {keys} keys",
  "hz.step_note_bend": "Hz bass: bend a note",
  "hz.step_note_bend_delete": "Hz bass: remove a bend point",

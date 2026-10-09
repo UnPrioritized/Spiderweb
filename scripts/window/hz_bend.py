@@ -5,7 +5,9 @@ notes/hz_lines.note_bend), edited right on the note.
 A click on a note (or on its bend line, wherever it has gone) adds a point there and holds it; a point dragged moves
 (between its neighbours; the end points only up / down). Points snap to the grid and to whole keys (Shift = free:
 any tick, any cent). Right-click a point (or Delete while holding it) = it goes; a line back at 0 everywhere = no
-bend. Each change is one undo step. Empty space = a Select box, like the Select tool. A note's right-click menu
+bend. Each change is one undo step. Empty space works exactly like the Select tool (user, 2026-10-10: box,
+Ctrl+box adds, a click unselects, double-click pastes; hz_mouse checks the tool for "select" / "bend"). A
+right-click on a note's bend line or curve square = that note's menu (on a point: the point goes). A note's menu
 (any tool) has a Bend submenu: Copy bend, Paste bend onto it / the selected notes, Clear bend, and ready shapes
 (Scoop up, Fall off, Wobble: shaped) that replace the bend.
 A small square sits half way along each piece between two points that differ: dragged up / down it curves the
@@ -211,12 +213,15 @@ class HzBend:
         self.point_again()
 
     def bend_double(self, e):
-        """A double-click with the Bend tool: on a curve square its piece is straight again (one step); else a
-        second press like the first (no note deleted). False when the tool isn't on."""
+        """A double-click with the Bend tool: on a curve square its piece is straight again (one step); on a note /
+        point a second press like the first (no note deleted). False when the tool isn't on or it's on empty
+        space (that works as with the Select tool: pastes)."""
         if not self.bending():
             return False
         hit = self.bend_hit(e.x, e.y)
-        if not hit or hit[0] != "curve":
+        if not hit:
+            return False
+        if hit[0] != "curve":
             self.on_press(e)
             return True
         self.drop_drag()
