@@ -44,7 +44,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     hz_macros.py     its macros: big knobs that turn the knobs linked to them
     hz_presets.py    its preset bar: ready-made sounds and the user's own (hz_presets.json)
     synth_look.py    its dark look: colours, boxes with a header strip, the big tabs, dark ttk styles
-    preview_settings.py  its Preview settings window (soundfont, voice limit, reverb, volume, live keys' memory)
+    preview_settings.py  its Settings window (Pitch, Gates, PPQ, shape length; preview: soundfont, voices, volume...)
     builtin_settings.py Built-in BASSMIDI's Settings window + the overload watcher (red "Overloaded")
     velocity_formula.py the velocity pane's Formula tool settings (pattern, loops, its numbers)
     tool_window.py   what the Claw machine and Strum windows share (live preview, undo, the Knob dial)

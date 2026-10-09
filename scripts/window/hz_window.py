@@ -37,9 +37,9 @@ from window.hz_live import LiveKeys
 from window.hz_loud import LoudPane
 from window.hz_preview import Preview
 from window.hz_synth import open_synth
-from window.preview_settings import open_preview_settings
+from window.preview_settings import PreviewSettings, auto_box, no_spaces, open_settings  # noqa: F401
 from window.snap_picker import SnapPicker
-from window.widgets import Scrub, Tooltip, placed
+from window.widgets import Tooltip, placed
 # the window is made of these parts (each a mixin of HzWindow); shape_length / DOUBLE_MS are handed on from here
 from window.hz_view import RED, HzView, shape_length  # noqa: F401
 from window.hz_sound import HzSound
@@ -58,29 +58,6 @@ def open_hz(app):
     app.hz_window.sync()
     w = app.hz_window  # it takes the keyboard (user: keys pressed right after went to the piano roll behind)
     w.after_idle(lambda: w.winfo_exists() and w.canvas.focus_force())
-
-
-def no_spaces(var):
-    """A box's spaces taken out (Space types one there, user; numbers have none) when the box is left."""
-    if " " in var.get():
-        var.set(var.get().replace(" ", ""))
-
-
-def auto_box(app, parent, var, apply):
-    """The Auto gates threshold box ("within [3] cents"): a frame (not packed) with .entry. apply() on Enter,
-    leaving the box, and each step of the number."""
-    f = ttk.Frame(parent)
-    lb = ttk.Label(f, text=tr("hz.auto_within"))
-    lb.pack(side="left")
-    f.entry = ttk.Entry(f, textvariable=var, width=4)
-    f.entry.pack(side="left", padx=(4, 2))
-    ttk.Label(f, text=tr("panel_custom.hz_cents"), foreground=look.HINT).pack(side="left", padx=(0, 4))
-    f.entry.bind("<Return>", lambda e: apply())
-    f.entry.bind("<FocusOut>", lambda e: no_spaces(var) or apply())
-    Scrub(app, [(f.entry, var, apply)], (0.5, 5, 0.1), 0, AUTO_MOST, label=lb)
-    for w in (lb, f.entry):
-        Tooltip(w, tr("hz.auto_tip", most=f"{AUTO_MOST:g}"))
-    return f
 
 
 class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
@@ -147,35 +124,11 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         ttk.Label(f, text=tr("app.snap")).pack(side="left", padx=(10, 0))
         SnapPicker(app, f, app.hz_snap).button.pack(side="left", padx=(4, 10))
         ttk.Button(f, text=tr("app.fit_view"), command=self.fit_notes).pack(side="left", padx=(0, 10))
-        f = piece()  # the whole Hz bass's pitch, in cents (moved here from the side panel, user)
-        lb = ttk.Label(f, text=tr("hz.pitch"))
-        lb.pack(side="left")
-        self.pitch_var = tk.StringVar(value="0")
-        self.pitch_entry = ttk.Entry(f, textvariable=self.pitch_var, width=5)
-        self.pitch_entry.pack(side="left", padx=4)
-        ttk.Label(f, text=tr("panel_custom.hz_cents"), foreground=look.HINT).pack(side="left", padx=(0, 10))
-        for w in (lb, self.pitch_entry):
-            Tooltip(w, tr("panel_custom.hz_cents_tip"))
-        self.pitch_entry.bind("<Return>", lambda e: self.on_pitch())
-        self.pitch_entry.bind("<FocusOut>", lambda e: no_spaces(self.pitch_var) or self.on_pitch())
-        Scrub(app, [(self.pitch_entry, self.pitch_var, self.on_pitch)], (1, 10, 0.1), -1200, 1200, label=lb)
-        f = piece()
-        ttk.Label(f, text=tr("hz.gates")).pack(side="left")
-        names = [tr("panel_custom.hz_" + m) for m in GATE_MODES]
-        self.gates = ttk.Combobox(f, values=names, state="readonly", width=max(map(len, names)))
-        self.gates.current(GATE_MODES.index("auto"))  # (a new Hz bass: Auto, user)
-        self.gates.pack(side="left", padx=(4, 10))
-        self.gates.bind("<<ComboboxSelected>>", self.on_gates)
-        Tooltip(self.gates, tr("panel_custom.hz_gates_tip"))
+        # Pitch, Gates, PPQ and "Shape length follows the notes" are in the Settings window (user: the toolbar was
+        # too full): their values here, their boxes made with that window (preview_settings.py)
+        self.pitch_var = tk.StringVar(value="0")  # the whole Hz bass's pitch, in cents
         self.auto_var = tk.StringVar(value=fmt(AUTO))
-        self.auto_row = auto_box(app, f, self.auto_var, self.on_auto)  # (shown with Auto gates)
-        f = piece()
-        ttk.Label(f, text=tr("app.ppq")).pack(side="left")  # the project's PPQ: the same box as under Project
-        ppq = ttk.Combobox(f, textvariable=app.pvar["ppq"], values=app.ppq_box["values"], width=7,
-                           height=12)
-        ppq.pack(side="left", padx=(4, 10))
-        ppq.bind("<FocusOut>", lambda e: no_spaces(app.pvar["ppq"]))
-        Tooltip(ppq, tr("hz.ppq_tip"))
+        self.grow = tk.BooleanVar(value=True)
         self.ppq_trace = app.pvar["ppq"].trace_add(
             "write", lambda *a: self.after_idle(lambda: self.winfo_exists() and self.redraw()))
         f = piece()
@@ -184,16 +137,15 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
                             style="Toolbutton", takefocus=False)
         b.pack(side="left")
         Tooltip(b, tr("hz.preview_tip"))
-        b = ttk.Button(f, text=tr("hz.preview_settings"), command=lambda: open_preview_settings(self),
-                       takefocus=False)
-        b.pack(side="left", padx=(4, 0))
-        Tooltip(b, tr("hz.preview_settings_tip"))
         self.preview_says = ttk.Label(f, text="", foreground=look.INFO)
         self.preview_says.pack(side="left", padx=(6, 10))
         b = ttk.Button(f, text=tr("hz.synth"), command=lambda: open_synth(self), takefocus=False)
-        b.pack(side="left", padx=(0, 10))
+        b.pack(side="left", padx=(0, 6))
         Tooltip(b, tr("hz.synth_tip"))
-        self.settings_window = None  # Preview settings… (preview_settings.py)
+        b = ttk.Button(f, text=tr("hz.settings"), command=lambda: open_settings(self), takefocus=False)
+        b.pack(side="left", padx=(0, 10))
+        Tooltip(b, tr("hz.settings_tip"))
+        self.settings_window = None  # Settings… (preview_settings.py; made at the end, once the preview is there)
         self.synth_win = None  # the synth window (hz_synth.py)
         f = piece()
         self.what = ttk.Label(f, text="", foreground=look.INFO)
@@ -219,12 +171,8 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         b.pack(side="left", padx=(0, 10))
         Tooltip(b, tr("hz.loud_tip"))
         line_box = ttk.Checkbutton(f, text=tr("hz.line"), variable=app.hz_line, command=self.on_line)
-        line_box.pack(side="left", padx=(0, 10))
+        line_box.pack(side="left")
         Tooltip(line_box, tr("hz.line_tip"))
-        self.grow = tk.BooleanVar(value=True)
-        self.grow_box = ttk.Checkbutton(f, text=tr("hz.grow"), variable=self.grow, command=self.on_grow)
-        self.grow_box.pack(side="left")
-        Tooltip(self.grow_box, tr("hz.grow_tip"))
         self.laid = None  # which row each piece is in now
         for f, side in self.pieces:
             f.bind("<Configure>", lambda e: self.after_idle(self.layout))
@@ -285,6 +233,7 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         c.focus_set()
         self.preview = Preview(self)
         self.live = LiveKeys(self)
+        self.settings_window = PreviewSettings(self)  # (hidden until Settings…)
         if app.hz_preview["on"]:  # (on last time: on again, if its soundfont is still there)
             self.after_idle(self.preview_again)
 
