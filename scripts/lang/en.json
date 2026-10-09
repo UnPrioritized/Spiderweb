@@ -1742,7 +1742,7 @@
  "help.hz_tone.title": "Tone and tuning (Hz bass)",
  "help.hz_tone.tip": "The red line is the tone you hear. Zoomed in, drag it in a note to tune that note. Gates: Alternating = exact, Fixed = a little off.",
  "help.hz_tone.text": [
-  "The red line is the tone you hear; the middle of a row is the exact tone (a green line when you zoom in).",
+  "The red line is the tone you hear; the middle of a row is the exact tone (a green line when you zoom in). It bends with everything that moves the tone: slides, Glide, the Pitch line and envelope, and the Vibrato's wave (fading in with its line).",
   "",
   "Every repeat lasts a whole number of ticks, so each one is a little off, more at a low PPQ: the faint line behind the red one shows every repeat's own pitch. With Alternating gates the repeats take turns being too high and too low (the faint line jumps) and the average, the red line, is exact. With Fixed gates every repeat is off the same way, so the red line itself sits off to one side.",
   "",

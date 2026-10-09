@@ -8,7 +8,8 @@ import math
 
 import numpy as np
 
-from notes.hz_settings import ADSR_KNOBS, GLIDE_CURVE, MOD_BOXES, MOD_NEED_LINE, NEUTRAL, PITCH, hz_of
+from notes.hz_settings import (ADSR_KNOBS, GLIDE_CURVE, MOD_BOXES, MOD_NEED_LINE, NEUTRAL, PITCH, VIBRATO,
+                               VIBRATO_RATE, hz_of)
 from notes.hz_lines import adsr_line
 from notes.hz_glide import cached, chains, glide, glide_left, legato_links, links, pitch, slide_part
 from notes.hz_modulate import fx_at, longest_fall, plain_base, rack_tail, setting_at
@@ -306,16 +307,33 @@ def _whole(v):
     return np.floor(v + 0.5).astype(np.int64)
 
 
+def vibrato_keys(hz, beat, tone):
+    """Keys the Vibrato moves a stretch of tone's repeats at beat (an array; 0 without it), as the notes are made
+    (hz_grid.KeyGrid.made: each wave VIBRATO x the line longer / shorter, its Rate counted from the stretch's start;
+    a Rate the MOD tab moves added up), for the red line only."""
+    depth = fx_at(hz, "vibrato", beat, tone) if "vibrato" in (hz.get("fx") or {}) and len(beat) else None
+    if depth is None or not np.any(depth):
+        return 0.0
+    base = plain_base(hz, "vibrato_rate")
+    if any(link["to"] == "vibrato_rate" for link in (hz.get("mod") or {}).get("links", ())) and base is not None:
+        rate = setting_at(hz, "vibrato_rate", base, beat, tone)
+        turns = np.concatenate([[0.0], np.cumsum(rate[:-1] * np.diff(beat))])
+    else:
+        turns = (hz.get("lfo") or {}).get("vibrato_rate", VIBRATO_RATE) * (beat - beat[0])
+    return -12.0 * np.log2(1.0 + VIBRATO * depth * np.sin(2.0 * np.pi * turns))
+
+
 @functools.lru_cache(maxsize=16)
 def _heard(hz_json, left, ppq, bpm):
     hz = dict(json.loads(hz_json), _memo={})
     out = []
-    for starts, nexts, _ in tone_runs(hz, left, ppq):
+    for starts, nexts, whose in tone_runs(hz, left, ppq):
         limits = _limits(hz, left, ppq, starts)
+        wobble = vibrato_keys(hz, starts / ppq - left, whose[0])
         mean = nexts - starts  # (the wave as made: with mixed gates the whole-tick ones come to this on average)
         starts, nexts = _whole(starts), _whole(nexts)
         gates = np.maximum(nexts - starts, 1)  # (whole ticks: what the PPQ lets the wave be)
-        keys, mean = (69.0 + 12.0 * np.log2(ppq * bpm / 60.0 / 440.0 / g) - hz["cents"] / 100.0
+        keys, mean = (69.0 + 12.0 * np.log2(ppq * bpm / 60.0 / 440.0 / g) - hz["cents"] / 100.0 + wobble
                       for g in (gates, mean))
         ends = np.minimum(nexts, limits)
         keep = ends > starts
