@@ -31,6 +31,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     sticky.py        the drawer's sticky lines: points stick to other strokes' points, crossings and lines
     velocity.py      the velocity pane under the piano roll
     hz_window.py     the Hz bass window: a small piano roll where its notes are placed
+    hz_view.py       the Hz bass window's zoom, scrolling and drawing
     hz_effects.py    the effects pane under the Hz bass window's notes (lines with points)
     hz_preview.py    the Hz bass window's Preview: its sound made ahead (greyed until made) and played
     hz_live.py       the Hz bass live keys: a key held = its Hz bass, played with the quick sound
