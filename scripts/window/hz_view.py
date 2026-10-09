@@ -8,9 +8,10 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import fmt
-from notes.hzbass import HZ_DEFAULTS, auto_state, can_slide, glide, heard, hz_of, left_edge, links, pitch
-from roll.roll_shared import ALT, CTRL, SELECTED_COLOR, SHIFT, SLOT_COLORS, draw_boxes, note_name
+from notes.hzbass import HZ_DEFAULTS, auto_state, can_slide, glide, heard, hz_of, layers_of, left_edge, links, pitch
+from roll.roll_shared import ALT, CTRL, SELECTED_COLOR, SHIFT, SLOT_COLORS, draw_boxes, fade, note_name
 from window import look
+from window.hz_layers import layer_colour
 from window.widgets import StatusLine
 
 
@@ -205,9 +206,21 @@ class HzView:
             x = max(kb, self.x_of(shape_length(sh)))
             c.create_rectangle(x, rh, w, h, fill=look.HZ_SHADE, outline="", stipple="gray50")
             c.create_line(x, rh, x, h, fill=look.HZ_SHADE_EDGE, dash=(4, 3))
+        hz = (sh or {}).get("hz") or {}
+        own = SLOT_COLORS[0]
+        if hz.get("layers"):  # the other layers' notes, faded (only the picked one's can be changed)
+            picked = hz.get("layer", 0)
+            own = layer_colour(hz, picked)
+            for i, layer in enumerate(layers_of(hz)):
+                if i == picked:
+                    continue
+                fill, edge = (fade(colour) for colour in layer_colour(hz, i))
+                for n in layer.get("tones") or ():
+                    x0, x1, y = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
+                    c.create_rectangle(x0, y + 1, max(x1, x0 + 2), y + self.sy - 1, fill=fill, outline=edge)
         for i, n in enumerate(self.tones):  # notes
             x0, x1, y = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
-            fill, edge = SELECTED_COLOR if i in self.sel else SLOT_COLORS[0]
+            fill, edge = SELECTED_COLOR if i in self.sel else own
             c.create_rectangle(x0, y + 1, max(x1, x0 + 2), y + self.sy - 1, fill=fill, outline=edge)
         if self.app.hz_line.get():
             self.draw_line(w)
@@ -246,6 +259,7 @@ class HzView:
             c.create_text((kb + w) / 2, (rh + h) / 2, text=tr("hz.hint_none"), fill=look.HINT,
                           width=w - kb - 40 * s, justify="center")
         self.show_status()
+        self.layers.redraw()
         self.fx.redraw()
         if self.synth_win:  # (the same lines there)
             self.synth_win.refresh()

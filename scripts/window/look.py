@@ -224,6 +224,9 @@ HZ_GREEN = pick("#18a048", "#3fcf6f")  # a note's exact tone, where each repeat 
 HZ_UNMADE = pick("#8a8a8a", "#1f1f21")  # over what the preview hasn't made yet
 HZ_BAND_FIXED = (pick("#8ee0a4"), pick("#18a048"))
 HZ_BAND_MIXED = (pick("#ffc27a"), pick("#c06000"))
+HZ_LAYER_BG, HZ_LAYER_PICKED = pick("#f7f7f7", "#38383b"), pick("#dbe6fb", "#2f4466")  # the layers strip, picked row
+HZ_LAYER_MUTE, HZ_LAYER_SOLO = pick("#f0a030", "#d98a20"), pick("#e8d040", "#c9b230")  # M / S switched on
+HZ_LAYER_OFF, HZ_LAYER_ON_TEXT = pick("#ececec", "#46464a"), pick("#000000", "#000000")
 # effect panes (the synth window has its own, synth_look)
 FX_BG, FX_GRID = pick("white", "#3c3c3f"), pick("#e4e4e4", "#4a4a4d")
 FX_OUTSIDE, FX_NOTES = pick("#f1f1f1", "#333336"), pick("#c8d6f5", "#3d4a66")

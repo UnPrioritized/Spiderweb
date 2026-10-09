@@ -226,6 +226,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.hz_snap = tk.StringVar(value=DEFAULT_SNAP)  # the Hz bass window's own snap
         self.hz_line = tk.BooleanVar(value=True)  # the Hz bass window shows its red line
         self.hz_fx = tk.BooleanVar(value=False)  # the Hz bass window shows its effects pane
+        self.hz_layers = tk.BooleanVar(value=False)  # ... and its layers strip (off to start: plain Hz bass users, user)
         self.show_lines = tk.BooleanVar(value=True)
         self.show_notes = tk.BooleanVar(value=True)
         self.channel_mode = tk.StringVar(value="single")

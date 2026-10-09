@@ -12,7 +12,7 @@ main window, made when the mouse is let go (the notes on the piano roll are made
 
 This file opens the window, lays it out and follows the selection / undo; the rest is in its parts: hz_view.py
 (zoom, scrolling, drawing), hz_mouse.py (mouse and keys on the notes), hz_gates.py (gates, tune, toggles, saving
-into the shape), hz_sound.py (the key held, the preview)."""
+into the shape), hz_sound.py (the key held, the preview), hz_layers.py (the layers strip)."""
 
 import os
 import re
@@ -28,6 +28,7 @@ from roll.roll_shared import grab_while_panning
 from roll.zoombar import add_zoom_bars
 from window import look
 from window.hz_effects import FxPane
+from window.hz_layers import LayerStrip
 from window.hz_live import LiveKeys
 from window.hz_preview import Preview
 from window.hz_synth import open_synth
@@ -99,7 +100,7 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.box_timer = None  # (box_scroll)
         self.pending = None  # (tone id, beats from its start): the first middle click of a slide, waiting for the
         # second (it moves with its note, user; mark_beat)
-        self.shown = None  # id() of the shape shown (another one: the pending mark goes)
+        self.shown = None  # (id() of the shape shown, its layer picked): another one = the pending mark goes
         self.sounding = None  # (channel, what's played) heard now: the notes held with the mouse (see sound)
         self.sound_jobs, self.sound_on = [], set()  # (the notes still to start / stop, the keys on now)
         self.last_len = 1.0  # beats: how long a newly placed note is (the last length used)
@@ -196,6 +197,10 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.stale_btn = ttk.Button(f, text=tr("panel_custom.hz_update"), command=app.update_hz, takefocus=False)
         self.stale_shown = False
         f = piece("right")
+        b = ttk.Checkbutton(f, text=tr("hz.layers_btn"), variable=app.hz_layers, command=self.on_layers,
+                            style="Toolbutton", takefocus=False)
+        b.pack(side="left", padx=(0, 6))
+        Tooltip(b, tr("hz.layers_btn_tip"))
         fx_box = ttk.Checkbutton(f, text=tr("hz.fx"), variable=app.hz_fx, command=self.on_fx, style="Toolbutton",
                                  takefocus=False)
         fx_box.pack(side="left", padx=(0, 10))
@@ -221,7 +226,9 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         c = self.canvas = tk.Canvas(self.notes_box, background=look.HZ_BG, highlightthickness=0, takefocus=True)
         self.scale, self.bars = s, ()
         add_zoom_bars(self.notes_box, self, c)
+        self.layers = LayerStrip(self)
         self.on_fx()
+        self.on_layers()
         self.pencil = ("@" + os.path.join(ICONS, "pencil.cur").replace("\\", "/"),)  # its tip is the spot pointed at
         try:
             c.config(cursor=self.pencil)
@@ -287,9 +294,11 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         sh = self.target()
         hz = (sh or {}).get("hz") or {}
         tones = clean_tones(hz.get("tones"))
-        other = (id(sh) if sh is not None else None) != self.shown
+        mark = (id(sh), hz.get("layer", 0)) if sh is not None else None  # (another layer: another set of notes)
+        other = mark != self.shown
         if other:  # another Hz bass: a slide's first mark goes (user)
-            self.shown, self.pending = (id(sh) if sh is not None else None), None
+            self.shown, self.pending = mark, None
+            self.fx.sel = set()  # (points picked on another layer's lines)
         if tones != self.tones:
             self.tones, self.sel = tones, set()
             self.drop_drag()
@@ -319,6 +328,8 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.show_stale()
         self.after_idle(self.layout)  # (its width changed)
         self.grow_box.config(state="normal" if sh is not None else "disabled")
+        if bool(self.layers.box.winfo_manager()) != self.app.hz_layers.get():  # (a project opened)
+            self.layers.show(self.app.hz_layers.get())
         if self.tones and not self.fitted:
             self.fit_view()
         self.redraw()
@@ -376,6 +387,11 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
     # ------------------------------------------------------------ drawing
 
     # ------------------------------------------------------------ mouse
+
+    def on_layers(self):
+        """The Layers button: shows / hides the layers strip (off to start with, user)."""
+        self.layers.show(self.app.hz_layers.get())
+        self.app.schedule_autosave()
 
     def layout(self):
         """The toolbar in one row, or two when the window is too narrow: the pieces keep their order, the ones that
