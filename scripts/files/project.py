@@ -264,7 +264,8 @@ class ProjectFiles:
         hz_keys = ({"lo": keys["lo"], "hi": keys["hi"]} if all(type(keys.get(k)) is int for k in ("lo", "hi"))
                    and 0 <= keys["lo"] <= keys["hi"] <= 255 else None)
         custom = get(lambda: self.read_custom_defaults(table("custom_defaults")))
-        funnel = get(lambda: {k: v for k, v in clean_funnel(table("funnel_defaults")).items() if k in FUNNEL_DEFAULTS}
+        funnel = get(lambda: {k: v for k, v in clean_funnel(table("funnel_defaults")).items()
+                              if k in FUNNEL_DEFAULTS or k in ("range", "range_kept")}
                      if table("funnel_defaults") else None)
         tx = get(lambda: clean_text(dict(table("text_defaults"), bbox=[0, 0, 1, 1])) if table("text_defaults") else None)
         pg = get(lambda: clean_polygon(data.get("polygon_defaults")))

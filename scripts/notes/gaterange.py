@@ -1,6 +1,6 @@
 """Spam gate Range: the gate goes from the spam gate (sh["gate"]) to a second one across the shape, instead of one
 gate for every note. sh["range"] = {"to": the second gate in beats, "graph": [[u, y], ...], "dir": "time" / "keys" /
-"keys_down", "fit": bool, "rows": bool, "join": bool}.
+"keys_down", "fit": bool, "rows": bool, "join": bool, "halves": bool (Steps), "follow": "curve" (funnels only)}.
 
 The graph: u = 0..1 across the shape (left to right in time, bottom to top in keys, top to bottom in keys_down), y =
 0..1 from the first gate
@@ -13,7 +13,11 @@ each note as long as the gate where it starts. Rows (time only, "Each key row by
 stretch of a row on its own (join: over each key's first to last stretch, gaps included; custom.chop_rows); one too
 short for any note = one note of the first gate (user). Keys: each key row has its own gate, even all along the row.
 Fit: each stretch's first note starts and its last note ends right at the stretch's edges (stretched over the blank
-left there, or trimmed where it sticks out; custom.chop_grid)."""
+left there, or trimmed where it sticks out; custom.chop_grid).
+Steps ("halves"): the gate only halves or doubles from the first one (first, half of it, a quarter...; never past
+the second): each gate the graph gives is snapped to the nearest of those (halved).
+Funnels (funnel.py) have a range too: always from the line start to the wall (no keys / rows / fit); "follow"
+"curve" = along how far the funnel has opened instead of evenly."""
 
 import functools
 import math
@@ -49,7 +53,8 @@ def clean_range(r):
         return None
     return {"to": min(to, 10 ** 4), "graph": clean_graph(r.get("graph")) or [list(p) for p in STRAIGHT],
             "dir": r["dir"] if r.get("dir") in DIRS else "time", "fit": bool(r.get("fit")), "rows": bool(r.get("rows")),
-            "join": bool(r.get("join"))}
+            "join": bool(r.get("join")), "halves": bool(r.get("halves")),
+            **({"follow": "curve"} if r.get("follow") == "curve" else {})}
 
 
 def reversed_graph(graph):
@@ -78,15 +83,28 @@ def turned_range(r, clockwise):
     return dict(r, dir="keys" if to_keys else "time", graph=reversed_graph(r["graph"]) if back else r["graph"])
 
 
-def gate_at(graph, a, b, u):
-    """The whole-tick gate at u (0..1 across the shape): a .. b ticks, each an equal stretch of the graph's y."""
+def halved(g, a, b):
+    """Steps: gates (ticks) snapped to the nearest halving / doubling of a, never past b."""
+    if a == b:
+        return g
+    k = np.round(np.log2(np.asarray(g, float) / a))
+    return np.clip(np.rint(a * 2.0 ** k), min(a, b), max(a, b)).astype(np.int64)
+
+
+def y_gate(a, b, y, halves=False):
+    """The whole-tick gate where the graph is at y (0..1): a .. b ticks, each an equal stretch of y."""
     n = abs(b - a) + 1
-    y = float(np.interp(u, [p[0] for p in graph], [p[1] for p in graph]))
-    return a + (1 if b >= a else -1) * min(n - 1, int(y * n))
+    g = a + (1 if b >= a else -1) * min(n - 1, int(y * n))
+    return int(halved(g, a, b)) if halves else g
+
+
+def gate_at(graph, a, b, u, halves=False):
+    """The whole-tick gate at u (0..1 across the shape)."""
+    return y_gate(a, b, float(np.interp(u, [p[0] for p in graph], [p[1] for p in graph])), halves)
 
 
 @functools.lru_cache(maxsize=16)
-def _steps(graph, a, b):
+def _steps(graph, a, b, halves=False):
     """gate_steps as arrays (u0s, u1s, gates), worked out all at once: a To of millions of ticks has millions of
     steps (one loop turn each took seconds). graph: a tuple of (u, y) pairs (kept: the window redraws often)."""
     n = abs(b - a) + 1
@@ -104,27 +122,29 @@ def _steps(graph, a, b):
     p, q = p[wide], q[wide]
     y = np.interp((p + q) / 2, [pt[0] for pt in graph], [pt[1] for pt in graph])
     g = a + (1 if b >= a else -1) * np.minimum(n - 1, (y * n).astype(np.int64))
+    if halves:
+        g = halved(g, a, b)
     first = np.flatnonzero(np.r_[True, g[1:] != g[:-1]])  # (next to each other with the same gate = one step)
     last = np.r_[first[1:], len(g)] - 1
     return p[first], q[last], g[first]
 
 
-def steps_of(graph, a, b):
+def steps_of(graph, a, b, halves=False):
     """gate_steps as arrays (u0s, u1s, gates)."""
-    return _steps(tuple(map(tuple, graph)), a, b)
+    return _steps(tuple(map(tuple, graph)), a, b, bool(halves))
 
 
-def gate_steps(graph, a, b):
+def gate_steps(graph, a, b, halves=False):
     """[(u0, u1, gate)]: where along the shape each gate holds (in order, next to each other)."""
-    u0, u1, g = steps_of(graph, a, b)
+    u0, u1, g = steps_of(graph, a, b, halves)
     return list(zip(u0.tolist(), u1.tolist(), g.tolist()))
 
 
-def range_squares(t0, t1, a, b, graph):
+def range_squares(t0, t1, a, b, graph, halves=False):
     """The notes' (start, end) ticks from t0 past t1, back to back, each as long as the gate where it starts."""
     span = max(t1 - t0, 1)
     t, parts = t0, []
-    _, u1s, gs = steps_of(graph, a, b)
+    _, u1s, gs = steps_of(graph, a, b, halves)
     ends = t0 + u1s * span
     i = 0
     while True:  # (each turn: the step the next note starts in; steps it jumps over cost nothing)
@@ -145,12 +165,13 @@ class RangeKeys:
     """Range by keys: every key row its own gate, notes back to back from the shape's left edge (custom.chop_keys
     asks it for each key's squares)."""
 
-    def __init__(self, t0, t1, k0, k1, a, b, graph):
+    def __init__(self, t0, t1, k0, k1, a, b, graph, halves=False):
         self.t0, self.t1, self.k0, self.k1, self.a, self.b, self.graph = t0, t1, k0, k1, a, b, graph
+        self.halves = halves
 
     def squares(self, key):
         u = (key - self.k0) / (self.k1 - self.k0) if self.k1 > self.k0 else 0.0
-        g = gate_at(self.graph, self.a, self.b, min(1.0, max(0.0, u)))
+        g = gate_at(self.graph, self.a, self.b, min(1.0, max(0.0, u)), self.halves)
         n = math.ceil((self.t1 - self.t0) / g) + 2
         edges = self.t0 + g * np.arange(n + 1, dtype=np.int64)
         return np.column_stack([edges[:-1], edges[1:]])
@@ -160,17 +181,17 @@ class RangeRows:
     """Range along each key row: the whole graph over every stretch's own length (join: each key's stretches
     together; custom.chop_rows asks it for the squares over (t0, t1))."""
 
-    def __init__(self, a, b, graph, join):
-        self.a, self.b, self.graph, self.join = a, b, tuple(map(tuple, graph)), join
+    def __init__(self, a, b, graph, join, halves=False):
+        self.a, self.b, self.graph, self.join, self.halves = a, b, tuple(map(tuple, graph)), join, bool(halves)
 
     def squares(self, t0, t1):
-        return t0 + _row_squares(max(t1 - t0, 1), self.a, self.b, self.graph)
+        return t0 + _row_squares(max(t1 - t0, 1), self.a, self.b, self.graph, self.halves)
 
 
 @functools.lru_cache(maxsize=4096)
-def _row_squares(span, a, b, graph):
+def _row_squares(span, a, b, graph, halves):
     """range_squares from 0 (kept: many stretches share a length)."""
-    return range_squares(0, span, a, b, graph)
+    return range_squares(0, span, a, b, graph, halves)
 
 
 def is_rows(r):
@@ -193,8 +214,9 @@ def _span(sh, r, ppq):
 def part_range(whole, part, ppq):
     """A piece cut off a ranged shape (Slice) -> its (gate in beats, range): the part of the whole's range over the
     piece's own stretch, so each spot keeps the gate it had (the graph cut there; the gates between its lowest and
-    highest, each the same stretch of y as before). Along each key row: the whole's range as it is (each row of the
-    piece runs it all)."""
+    highest, each the same stretch of y as before; Steps: the whole's two gates kept, only the graph cut, so the
+    halvings still count from the same gate). Along each key row: the whole's range as it is (each row of the piece
+    runs it all)."""
     if is_rows(whole["range"]):
         return whole["gate"], dict(whole["range"])
     down = whole["range"]["dir"] == "keys_down"
@@ -216,9 +238,13 @@ def part_range(whole, part, ppq):
     graph = [[(u - u0) / width if width > 1e-12 else (0.0 if k == 0 else 1.0),
               min(1.0, max(0.0, (y * n - j0) / m))] for k, (u, y) in enumerate(pts)]
     graph[0][0], graph[-1][0] = 0.0, 1.0
+    if r.get("halves"):
+        graph = [[g[0], y] for g, (_, y) in zip(graph, pts)]
     sign = 1 if b >= a else -1
     if down:
         graph = reversed_graph(graph)
+    if r.get("halves"):
+        return whole["gate"], dict(r, graph=graph, dir=whole["range"]["dir"])
     return (a + sign * j0) / ppq, dict(r, to=(a + sign * j1) / ppq, graph=graph, dir=whole["range"]["dir"])
 
 
@@ -229,9 +255,9 @@ def range_grid(sh, ppq):
     a = max(1, math.floor(sh["gate"] * ppq + 0.5))
     b = max(1, math.floor(r["to"] * ppq + 0.5))
     if is_rows(r):
-        return RangeRows(a, b, r["graph"], bool(r.get("join")))
+        return RangeRows(a, b, r["graph"], bool(r.get("join")), r.get("halves"))
     lo, hi, k0, k1 = frame_span(sh)
     t0, t1 = math.floor(lo * ppq), math.ceil(hi * ppq)
     if r["dir"] == "keys":
-        return RangeKeys(t0, t1, round(k0), round(k1), a, b, r["graph"])
-    return range_squares(t0, t1, a, b, r["graph"])
+        return RangeKeys(t0, t1, round(k0), round(k1), a, b, r["graph"], r.get("halves"))
+    return range_squares(t0, t1, a, b, r["graph"], r.get("halves"))

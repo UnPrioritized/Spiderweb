@@ -8,6 +8,7 @@ import numpy as np
 
 from notes.bezier import anchor_count, fit, handle_anchor, sample
 from notes.custom import row_spans
+from notes.gaterange import clean_range, y_gate
 from notes.paths import EDGE, TOP_KEY, pitch_of
 from notes.pattern import clean_pattern, clean_shape_formula, formed_path, has_formula, moved_formulas
 
@@ -32,37 +33,60 @@ from notes.pattern import clean_pattern, clean_shape_formula, formed_path, has_f
 # (The first versions had "bends" the curve went through; old projects are converted when they load.)
 # Every key plays while it's inside a curve's area (between the curve, the line and the wall) or on the line,
 # the wall or a curve.
-# fill: "spam" = back-to-back notes whose gate goes from gate0 (at the line start) to gate1 (at the wall), the
-# same note grid on every key so the columns line up; "long" = one note per key per stretch.
-# vary: False = one gate (gate1 is kept equal to gate0), True = a different start and wall gate.
-# change: "smooth" = every note its own gate, "steps" = gates only halve/double (gate0, gate0/2, ...).
-# follow: the gate changes evenly over "time", or with the "curve" (as the funnel opens: how many keys play).
-# wall: "in" = the notes stop at the wall, "past" = one more column on the other side of it (a normal funnel:
-# the wall notes start on the wall; a reverse funnel: they end on it).
+# fill: "spam" = back-to-back notes, the same note grid on every key so the columns line up; "long" = one note per
+# key per stretch.
+# gate: the spam gate (beats). "range" (gaterange.py, set in the Range window like a custom shape's): the gate goes
+# from it at the line start to range["to"] at the wall along the range's graph, evenly or as the funnel opens
+# ("follow": "curve": how many keys play), in steps that only halve / double ("halves") or smoothly.
+# wall: "in" = the notes stop at the wall, "past" = one more column on the other side of it, as long as the wall
+# gate (a normal funnel: the wall notes start on the wall; a reverse funnel: they end on it).
+# (Older versions had gate0 / gate1 / vary / change / follow: turned into a range when they load, old_gates.)
 
 FUNNEL_FILLS = ("spam", "long")
-GATE_CHANGES = ("steps", "smooth")
-GATE_FOLLOWS = ("time", "curve")
 WALL_MODES = ("in", "past")
-FUNNEL_DEFAULTS = {"fill": "spam", "gate0": 0.0625, "gate1": 0.0625, "vary": False, "change": "steps",
-                   "follow": "time", "wall": "in"}
+FUNNEL_DEFAULTS = {"fill": "spam", "gate": 0.0625, "wall": "in"}
 FUNNEL_BEND = [0.75, 0.2]  # the first versions' default curve
 MAX_BENDS = 32
+OLD_GRAPH_POINTS = 16  # an old funnel's sliding gate as a range graph: this many straight pieces
 
 
 def clean_funnel(sh):
     """The funnel settings of sh (not its lines or curves), made valid."""
     out = {}
-    for key, choices in (("fill", FUNNEL_FILLS), ("change", GATE_CHANGES), ("follow", GATE_FOLLOWS),
-                         ("wall", WALL_MODES)):
+    for key, choices in (("fill", FUNNEL_FILLS), ("wall", WALL_MODES)):
         out[key] = sh.get(key) if sh.get(key) in choices else FUNNEL_DEFAULTS[key]
-    for key in ("gate0", "gate1"):
-        out[key] = max(1e-6, float(sh.get(key, FUNNEL_DEFAULTS[key])))
-    # older files have no "vary": two different gates there were meant to vary
-    out["vary"] = bool(sh["vary"]) if "vary" in sh else abs(out["gate0"] - out["gate1"]) > 1e-9
-    if not out["vary"]:
-        out["gate1"] = out["gate0"]
+    if "gate0" in sh and "gate" not in sh:
+        out.update(old_gates(sh))
+    else:
+        out["gate"] = max(1e-6, float(sh.get("gate", FUNNEL_DEFAULTS["gate"])))
+        for key in ("range", "range_kept"):
+            rg = funnel_range(sh.get(key))
+            if rg:
+                out[key] = rg
     return out
+
+
+def funnel_range(r):
+    """A range from a file made valid for a funnel (from the line start to the wall: no keys / rows / fit)."""
+    r = clean_range(r)
+    return r and dict(r, dir="time", rows=False, join=False, fit=False)
+
+
+def old_gates(sh):
+    """The gate settings of an older funnel (gate0 at the start, gate1 at the wall, "vary", "change" steps / smooth,
+    "follow" time / curve) as a gate + range: the gate slid from one to the other by the same share each way (gate0
+    x (gate1 / gate0) ^ w), so the graph is that curve."""
+    g0 = max(1e-6, float(sh["gate0"]))
+    g1 = max(1e-6, float(sh.get("gate1", g0)))
+    vary = bool(sh["vary"]) if "vary" in sh else abs(g0 - g1) > 1e-9  # (older files: two gates = meant to vary)
+    if not vary or abs(g1 - g0) < 1e-9:
+        return {"gate": g0}
+    if sh.get("fill") == "long":  # (long notes only used the wall gate: the column past the wall)
+        return {"gate": g1}
+    n = OLD_GRAPH_POINTS
+    graph = [[i / n, (g0 * (g1 / g0) ** (i / n) - g0) / (g1 - g0)] for i in range(n + 1)]
+    return {"gate": g0, "range": funnel_range({"to": g1, "graph": graph, "halves": sh.get("change") != "smooth",
+                                               "follow": sh.get("follow")})}
 
 
 def clean_starts(starts, lines):
@@ -550,7 +574,7 @@ def funnel_axis(sh, spans):
     lo = min(a for s in spans.values() for a, _ in s)
     hi = max(b for s in spans.values() for _, b in s)
     if hi - lo < 1e-9:  # just an upright line (the wall, drawn first): a column of wall gate ending on it
-        return lo, -1, sh["gate1"]
+        return lo, -1, wall_gate(sh)
     return lo, 1, hi - lo  # the line and the wall start at the same time (turned funnel): left to right
 
 
@@ -614,45 +638,55 @@ def funnel_openness(dspans):
     return w
 
 
-def funnel_gate(sh, g0, g1, w):
-    """The gate (ticks) of a note that far (w: 0 = start gate, 1 = wall gate) through the funnel."""
-    g = g0 * (g1 / g0) ** w
-    if sh["change"] == "steps" and g0 != g1:
-        g = g0 * 2.0 ** round(math.log2(g / g0))
-        g = min(max(g, min(g0, g1)), max(g0, g1))
-    return max(g, 1.0)
-
-
 def gate_ticks(gate, ppq):
-    """A start / wall gate (beats) in whole ticks (user: like the spam gate; after a PPQ change too)."""
+    """A gate (beats) in whole ticks (user: like the spam gate; after a PPQ change too)."""
     return max(1, math.floor(gate * ppq + 0.5))
+
+
+def wall_gate(sh):
+    """The gate (beats) at the wall: the column past it (Notes start on it). Long notes: always the gate (no Range)."""
+    return sh["range"]["to"] if sh.get("range") and sh["fill"] == "spam" else sh["gate"]
 
 
 def funnel_grid(sh, ppq, dspans, length):
     """The note grid every key of a spam funnel shares, as grid distances: from the line start to the wall
-    (a leftover under half a gate joins the last note), then on past everything plus one more note."""
-    g0, g1 = gate_ticks(sh["gate0"], ppq), gate_ticks(sh["gate1"], ppq)  # (the gates between them can be fractions)
-    opened = funnel_openness(dspans) if sh["follow"] == "curve" else None
+    (a leftover under half a gate joins the last note), then on past everything plus one more note.
+    -> (marks, the gate each mark's note was cut with)."""
+    a = gate_ticks(sh["gate"], ppq)
+    r = sh.get("range")
+    if r:
+        b = gate_ticks(r["to"], ppq)
+        us, ys = [p[0] for p in r["graph"]], [p[1] for p in r["graph"]]
+        opened = funnel_openness(dspans) if r.get("follow") == "curve" else None
 
     def gate(d):
-        if d >= length:
-            return funnel_gate(sh, g0, g1, 1.0)
-        w = min(1.0, max(0.0, d / length)) if opened is None else opened(d)
-        return funnel_gate(sh, g0, g1, w)
+        if not r:
+            return a
+        u = 1.0 if d >= length else opened(d) if opened else min(1.0, max(0.0, d / length))
+        i = min(max(bisect.bisect_right(us, u) - 1, 0), len(us) - 2)  # (the graph at u: np.interp, but quicker)
+        k = (u - us[i]) / (us[i + 1] - us[i]) if us[i + 1] > us[i] else 1.0
+        return y_gate(a, b, ys[i] + (ys[i + 1] - ys[i]) * min(1.0, max(0.0, k)), r["halves"])
 
-    lo = min(a for s in dspans.values() for a, _ in s)
-    hi = max(b for s in dspans.values() for _, b in s)
+    lo = min(x for s in dspans.values() for x, _ in s)
+    hi = max(y for s in dspans.values() for _, y in s)
     marks, d = [0.0], 0.0
-    while d + 1.5 * gate(d) <= length:
-        d += gate(d)
+    gates = [gate(0.0)]
+    while d + 1.5 * gates[-1] <= length:
+        d += gates[-1]
         marks.append(d)
-    marks.append(length)
+        gates.append(gate(d))
+    marks.append(length)  # (the leftover joins the last note: its gate stays the one it was cut with)
+    gates.append(gate(length))
     while marks[-1] < hi:
-        marks.append(marks[-1] + gate(marks[-1]))
-    marks.append(marks[-1] + gate(marks[-1]))  # room for the wall column past the wall
+        marks.append(marks[-1] + gates[-1])
+        gates.append(gate(marks[-1]))
+    marks.append(marks[-1] + gates[-1])  # room for the wall column past the wall
+    gates.append(gates[-1])
+    first = gates[0]
     while marks[0] > lo:
-        marks.insert(0, marks[0] - g0)
-    return marks
+        marks.insert(0, marks[0] - first)
+        gates.insert(0, first)
+    return marks, gates
 
 
 def _nearest(xs, x):
@@ -662,15 +696,16 @@ def _nearest(xs, x):
     return i
 
 
-def funnel_cells(sh, ppq, main=True):
+def funnel_cells(sh, ppq, main=True, gates=None):
     """Spam: (grid ticks, [(key, first grid line, last grid line)]), every key's notes running from grid
-    line to grid line. Long: (None, [(key, start tick, end tick)]). One side of the wall (funnel_sides)."""
+    line to grid line. Long: (None, [(key, start tick, end tick)]). One side of the wall (funnel_sides).
+    gates: a list, given the gate each grid line's note was cut with (spam)."""
     lay = funnel_layout(sh, ppq, main)
     if not lay:
         return None, []
     dspans, walls, length, t0, sign = lay
     past = main and sh["wall"] == "past"
-    g1 = gate_ticks(sh["gate1"], ppq)
+    g1 = gate_ticks(wall_gate(sh), ppq)
 
     def at_wall(q, d):
         w = walls.get(q)
@@ -687,13 +722,16 @@ def funnel_cells(sh, ppq, main=True):
                 s, e = sorted((tick(a), far))
                 out.append((q, s, max(e, s + 1)))
         return None, out
-    marks = funnel_grid(sh, ppq, dspans, length)
-    ticks, ds = [], []
-    for d in marks:
+    marks, cut = funnel_grid(sh, ppq, dspans, length)
+    ticks, ds, gs = [], [], []
+    for d, g in zip(marks, cut):
         t = tick(d)
         if not ticks or t != ticks[-1]:
             ticks.append(t)
             ds.append(sign * (t - t0))
+            gs.append(g)
+    if gates is not None:
+        gates[:] = gs
     out = []
     for q, spans in dspans.items():
         ranges = []
@@ -726,6 +764,21 @@ def funnel_note_count(sh, ppq):
 
 def funnel_notes(sh, ppq):
     return np.concatenate([_side_notes(*funnel_cells(half, ppq, main)) for half, main in funnel_sides(sh)])
+
+
+def funnel_gates(sh, ppq):
+    """The gate (ticks) every note of a spam funnel was cut with, in funnel_notes' order (the Range window's
+    "Notes per gate")."""
+    out = []
+    for half, main in funnel_sides(sh):
+        gs = []
+        ticks, cells = funnel_cells(half, ppq, main, gs)
+        if ticks is not None and cells:
+            q, i, j = np.asarray(cells, np.int64).reshape(-1, 3).T
+            n = np.maximum(j - i, 0)
+            at = np.repeat(i, n) + np.arange(n.sum()) - np.repeat(np.cumsum(n) - n, n)
+            out.append(np.asarray(gs, np.int64)[at])
+    return np.concatenate(out) if out else np.zeros(0, np.int64)
 
 
 def _side_notes(ticks, cells):

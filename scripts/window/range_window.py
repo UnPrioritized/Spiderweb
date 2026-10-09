@@ -18,7 +18,8 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import SPAM_FILLS, gate_ticks, range_gates
-from notes.gaterange import DIRS, STRAIGHT, clean_range, gate_steps, steps_of
+from notes.funnel import funnel_gates, funnel_range
+from notes.gaterange import DIRS, STRAIGHT, clean_range, gate_steps, halved, steps_of, y_gate
 from window import big_ask, look
 from window.panel_funnel import GATE_STEPS
 from window.widgets import LocalUndo, Scrub, Tooltip, remember_place
@@ -48,12 +49,17 @@ class RangeGraph(tk.Toplevel):
         self.w, self.h, self.cw = int(440 * s), int(220 * s), int(300 * s)
         self.ml, self.mr, self.mt, self.mb = int(56 * s), int(12 * s), int(10 * s), int(22 * s)
         self.tgts = tgts or app.custom_targets()
+        # funnels (or the settings for new ones): from the line start to the wall, so no Across / rows / Fit; they
+        # can follow the curve
+        self.funnel = self.tgts[0] is app.funnel_defaults or self.tgts[0].get("kind") == "funnel"
         self.before = json.dumps(app.shapes)
         self.old = [json.loads(json.dumps({k: t.get(k) for k in ("gate", "range", "range_kept")})) for t in self.tgts]
         # each shape's range, kept while it's switched off so switching on brings it back (sh["range_kept"] while
-        # it's off; new: 4 times the gate)
-        self.memo = [clean_range(json.loads(json.dumps(t.get("range") or t.get("range_kept") or
-                                                       {"to": t["gate"] * 4, "graph": STRAIGHT, "dir": "time"})))
+        # it's off; new: 4 times the gate; a funnel's in steps, as its gate first changed)
+        clean = funnel_range if self.funnel else clean_range
+        self.memo = [clean(json.loads(json.dumps(t.get("range") or t.get("range_kept") or
+                                                 {"to": t["gate"] * 4, "graph": STRAIGHT, "dir": "time",
+                                                  "halves": self.funnel})))
                      for t in self.tgts]
         for i, t in enumerate(self.tgts[1:], 1):  # (shapes without a Range on take the one shown: the first's)
             if not t.get("range"):
@@ -62,7 +68,7 @@ class RangeGraph(tk.Toplevel):
         self.drag, self.hover, self.bar_hover, self.counts = None, None, None, None
         self.held, self.drag_from = False, None  # (a drag's graph that would make too many notes: not used yet)
         # notes already said yes to: what the shapes make now (asked again only past that and the usual limit)
-        self.big_ok = sum(app.note_count(t) or 0 for t in self.tgts if t is not app.custom_defaults)
+        self.big_ok = sum(app.note_count(t) or 0 for t in self.tgts if self.placed(t))
         box = ttk.Frame(self, padding=8)
         box.pack(fill="both", expand=True)
         self.on_var = tk.BooleanVar(value=True)
@@ -90,20 +96,38 @@ class RangeGraph(tk.Toplevel):
         self.dir_box.pack(side="left", padx=4)
         self.dir_box.bind("<<ComboboxSelected>>", lambda e: self.change("dir", DIRS[self.dir_box.current()]))
         Tooltip(self.dir_box, tr("range_window.dir_tip"))
+        if self.funnel:  # (always from the line start to the wall)
+            row.pack_forget()
+        # Smooth / Steps (every shape), Evenly / With the curve (funnels only, greyed for others)
+        self.choice_vars, self.choice_btns = {}, {}
+        for key, choices in (("halves", (("smooth", False), ("steps", True))),
+                             ("follow", (("evenly", "time"), ("with_curve", "curve")))):
+            row = ttk.Frame(box)
+            row.pack(anchor="w", pady=(4, 0))
+            ttk.Label(row, text=tr(f"range_window.{key}")).pack(side="left", padx=(0, 4))
+            var = self.choice_vars[key] = tk.StringVar()
+            self.choice_btns[key] = []
+            for name, value in choices:
+                b = ttk.Radiobutton(row, text=tr(f"range_window.{name}"), value=name, variable=var,
+                                    command=lambda key=key, value=value: self.change(key, value))
+                b.pack(side="left", padx=(0, 6))
+                Tooltip(b, tr(f"range_window.{name}_tip"))
+                self.choice_btns[key].append(b)
         self.rows_var, self.join_var = tk.BooleanVar(), tk.BooleanVar()
         self.rows_check = ttk.Checkbutton(box, text=tr("range_window.rows"), variable=self.rows_var,
                                           command=lambda: self.change("rows", self.rows_var.get()))
-        self.rows_check.pack(anchor="w", pady=(4, 0))
         Tooltip(self.rows_check, tr("range_window.rows_tip"))
         self.join_check = ttk.Checkbutton(box, text=tr("range_window.join"), variable=self.join_var,
                                           command=lambda: self.change("join", self.join_var.get()))
-        self.join_check.pack(anchor="w", padx=(int(20 * s), 0))
         Tooltip(self.join_check, tr("range_window.join_tip"))
         self.fit_var = tk.BooleanVar()
         self.fit_check = ttk.Checkbutton(box, text=tr("range_window.fit"), variable=self.fit_var,
                                          command=lambda: self.change("fit", self.fit_var.get()))
-        self.fit_check.pack(anchor="w", pady=(4, 0))
         Tooltip(self.fit_check, tr("range_window.fit_tip"))
+        if not self.funnel:
+            self.rows_check.pack(anchor="w", pady=(4, 0))
+            self.join_check.pack(anchor="w", padx=(int(20 * s), 0))
+            self.fit_check.pack(anchor="w", pady=(4, 0))
         self.info = ttk.Label(box, text="")
         self.info.pack(anchor="w", pady=(6, 0))
         row = ttk.Frame(box)
@@ -154,6 +178,10 @@ class RangeGraph(tk.Toplevel):
     def pts(self):
         return self.memo[0]["graph"]
 
+    def placed(self, t):
+        """Not the settings for new shapes."""
+        return t is not self.app.custom_defaults and t is not self.app.funnel_defaults
+
     def gates(self):
         """The first and second gate in ticks (the first target's)."""
         return (max(1, math.floor(self.tgts[0]["gate"] * self.app.ppq + 0.5)),
@@ -178,7 +206,7 @@ class RangeGraph(tk.Toplevel):
             t.pop("range_kept", None)
             t["range" if on else "range_kept"] = json.loads(json.dumps(m))
         self.app.shapes_changed()
-        self.count = sum(self.app.note_count(t) or 0 for t in self.tgts if t is not self.app.custom_defaults)
+        self.count = sum(self.app.note_count(t) or 0 for t in self.tgts if self.placed(t))
         self.counts = self.spread()
         self.show_boxes()
         self.draw()
@@ -193,7 +221,14 @@ class RangeGraph(tk.Toplevel):
         n = abs(b - a) + 1
         out = np.zeros(n, np.int64)
         for t in self.tgts:
-            if t is self.app.custom_defaults or not t.get("range") or t.get("fill") not in SPAM_FILLS:
+            if not self.placed(t) or not t.get("range"):
+                continue
+            if self.funnel:  # (a funnel's notes come with their gates: funnel.py)
+                if t["fill"] == "spam":
+                    j = (funnel_gates(t, self.app.ppq) - a) * (1 if b >= a else -1)
+                    out += np.bincount(j[(j >= 0) & (j < n)], minlength=n)
+                continue
+            if t.get("fill") not in SPAM_FILLS:
                 continue
             bare = {k: v for k, v in t.items() if k != "fx"}
             fx = [st for st in t.get("fx") or () if st["tool"] not in ("strum", "claw")]
@@ -212,7 +247,7 @@ class RangeGraph(tk.Toplevel):
         if trial is None:
             on = self.on_var.get()
             trial = [dict({k: v for k, v in t.items() if k != "range"}, **({"range": m} if on else {}))
-                     for t, m in zip(self.tgts, self.memo) if t is not self.app.custom_defaults]
+                     for t, m in zip(self.tgts, self.memo) if self.placed(t)]
         total = sum(self.app.note_count(t) for t in trial)
         if total <= self.big_ok or not big_ask.trouble(self.app, "notes", total)[0]:
             return True
@@ -228,6 +263,8 @@ class RangeGraph(tk.Toplevel):
         if key:
             for m in self.memo:
                 m[key] = json.loads(json.dumps(value))
+                if key == "follow" and value != "curve":  # (saved only when it follows the curve)
+                    del m[key]
         if self.drag is not None and not self.fits(ask=False):
             self.held = True
             return self.draw()
@@ -260,6 +297,11 @@ class RangeGraph(tk.Toplevel):
         self.join_check.config(state="normal" if time and self.memo[0]["rows"] else "disabled")
         self.fit_var.set(self.memo[0]["fit"])
         self.fit_check.config(state="normal" if on else "disabled")
+        self.choice_vars["halves"].set("steps" if self.memo[0].get("halves") else "smooth")
+        self.choice_vars["follow"].set("with_curve" if self.memo[0].get("follow") == "curve" else "evenly")
+        for key, ok in (("halves", on), ("follow", on and self.funnel)):
+            for btn in self.choice_btns[key]:
+                btn.config(state="normal" if ok else "disabled")
         for btn in self.preset_btns:
             btn.config(state="normal" if on else "disabled")
         self.info.config(text=tr("range_window.info", a=a, b=b) +
@@ -281,7 +323,7 @@ class RangeGraph(tk.Toplevel):
         if ticks == gate_ticks(now, self.app.ppq):  # (the same whole ticks: kept as it is, in beats)
             return
         beats = ticks / self.app.ppq
-        placed = [(t, m) for t, m in zip(self.tgts, self.memo) if t is not self.app.custom_defaults]
+        placed = [(t, m) for t, m in zip(self.tgts, self.memo) if self.placed(t)]
         if key == "from":
             trial = [dict(t, gate=beats, range=m) for t, m in placed]
         else:
@@ -318,7 +360,10 @@ class RangeGraph(tk.Toplevel):
     def close(self):
         self.grab_release()
         self.destroy()
-        self.app.sync_custom()
+        if self.funnel:
+            self.app.sync_funnel()
+        else:
+            self.app.sync_custom()
 
     # ---- drawing
 
@@ -342,10 +387,10 @@ class RangeGraph(tk.Toplevel):
         x0, x1, top, bot = self.u2x(0), self.u2x(1), self.y2c(1), self.y2c(0)
         for j in range(1, 4):
             cv.create_line(self.u2x(j / 4), top, self.u2x(j / 4), bot, fill=look.CHART_GRID)
-        n = abs(b - a) + 1
+        halves = self.memo[0].get("halves")
         for k in range(5):  # gate labels at 0, 25 ... 100 % of the way
             y = k / 4
-            g = a + (1 if b >= a else -1) * min(n - 1, int(y * n))
+            g = y_gate(a, b, y, halves)
             cv.create_line(x0, self.y2c(y), x1, self.y2c(y), fill=look.CHART_GRID)
             cv.create_text(x0 - 4 * s, self.y2c(y), text=tr("range_window.ticks", n=g), anchor="e", fill=look.LABEL,
                            font=look.font(7))
@@ -353,15 +398,17 @@ class RangeGraph(tk.Toplevel):
         ends = {"time": ("left", "right"), "keys": ("low", "high"), "keys_down": ("high", "low")}[self.memo[0]["dir"]]
         if self.memo[0]["dir"] == "time" and self.memo[0]["rows"]:
             ends = ("row_start", "row_end")
+        if self.funnel:
+            ends = ("line_start", "wall")
         cv.create_text(x0, bot + 4 * s, text=tr(f"range_window.{ends[0]}"), anchor="nw", fill=look.LABEL,
                        font=look.font(7))
         cv.create_text(x1, bot + 4 * s, text=tr(f"range_window.{ends[1]}"), anchor="ne", fill=look.LABEL,
                        font=look.font(7))
         # the whole-tick gates the notes get (pale steps)
         span = (b - a) or 1
-        if on and len(steps_of(self.pts, a, b)[0]) <= 2000:
+        if on and len(steps_of(self.pts, a, b, halves)[0]) <= 2000:
             line = []
-            for u0, u1, g in gate_steps(self.pts, a, b):
+            for u0, u1, g in gate_steps(self.pts, a, b, halves):
                 y = self.y2c((g - a) / span if b != a else 0)
                 line += [self.u2x(u0), y, self.u2x(u1), y]
             if len(line) >= 4:
@@ -376,7 +423,7 @@ class RangeGraph(tk.Toplevel):
             shape(x - r, yy - r, x + r, yy + r, fill=look.CHART_POINT, outline=colour, width=lw)
         at = self.pts[self.drag] if self.drag is not None else self.hover
         if at is not None and on:
-            g = a + (1 if b >= a else -1) * min(n - 1, int(float(at[1]) * n))
+            g = y_gate(a, b, float(at[1]), halves)
             cv.create_text(x1 - 4 * s, top + 4 * s, text=tr("range_window.at", at=fmt(round(at[0] * 100, 1)), n=g),
                            anchor="ne", fill=look.VALUE, font=look.font(8))
 
@@ -387,6 +434,14 @@ class RangeGraph(tk.Toplevel):
         per = max(1, math.ceil(len(self.counts) * BAR_PX * s / width))
         bins = np.add.reduceat(self.counts, np.arange(0, len(self.counts), per))
         return per, bins, left, width
+
+    def can_get(self, per):
+        """For each bar: does it hold a gate notes can get? (Steps: only the halvings; the rest left blank, not
+        red.)"""
+        a, b = self.gates()
+        gates = a + (1 if b >= a else -1) * np.arange(len(self.counts))
+        ok = np.ones(len(gates), bool) if not self.memo[0].get("halves") else halved(gates, a, b) == gates
+        return np.add.reduceat(ok, np.arange(0, len(ok), per)) > 0
 
     def draw_chart(self):
         """Notes per gate: a bar for each gate from From (left) to To (right); red marks for gates no note gets."""
@@ -408,13 +463,14 @@ class RangeGraph(tk.Toplevel):
             ch.create_text(left - 4 * s, y, text=str(v), anchor="e", fill=look.LABEL, font=look.font(7))
         bw = width / len(bins)
         gap = 1 if bw >= 4 else 0
+        can = self.can_get(per)
         for i, v in enumerate(bins.tolist()):
             x0 = left + i * bw
             hot = i == self.bar_hover
             if v:
                 ch.create_rectangle(x0, bot - v / most * (bot - top), x0 + bw - gap, bot, width=0,
                                     fill=BAR_HOT if hot else BAR)
-            else:
+            elif can[i]:
                 ch.create_rectangle(x0, bot - max(2, round(3 * s)), x0 + bw - gap, bot, width=0,
                                     fill=BAR_HOT if hot else NONE)
         ch.create_line(left, bot, left + width, bot, fill=look.CHART_FRAME)
@@ -520,4 +576,11 @@ class RangeGraph(tk.Toplevel):
 def open_range_graph(app):
     tgts = app.skip_hz(app.custom_targets())  # (a Hz bass picked too: left out, after a warning)
     if tgts:
+        RangeGraph(app, tgts)
+
+
+def open_funnel_range(app):
+    """The same window for the selected funnels (or the settings for new ones)."""
+    tgts = app.funnel_targets()
+    if tgts and not app.funnel_draft():
         RangeGraph(app, tgts)

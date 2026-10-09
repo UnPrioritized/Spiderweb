@@ -128,8 +128,8 @@ def flip_shape(sh, sideways, mid2):
             sh["vel0"], sh["vel1"] = sh["vel1"], sh["vel0"]
     if sh.get("glue"):  # (its boxes are shares of the shape's box)
         sh["glue"] = glue_flipped(sh["glue"], sideways)
-    for k in ("range", "range_kept"):  # (a spam gate range runs the other way, the one kept while off too)
-        if sh.get(k):
+    for k in ("range", "range_kept"):  # (a spam gate range runs the other way, the one kept while off too; a
+        if sh.get(k) and sh["kind"] != "funnel":  # funnel's runs from its line start to its wall, wherever it is)
             sh[k] = flipped_range(sh[k], sideways)
     return sh
 
@@ -319,6 +319,6 @@ def turn_shape(sh, clockwise, r, cb, cp):
     if sh.get("glue"):
         sh["glue"] = glue_turned(sh["glue"], clockwise)
     for k in ("range", "range_kept"):
-        if sh.get(k):
+        if sh.get(k) and sh["kind"] != "funnel":
             sh[k] = turned_range(sh[k], clockwise)
     return sh

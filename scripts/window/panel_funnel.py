@@ -1,4 +1,4 @@
-"""The side panel's funnel settings (wall, inside, gates)."""
+"""The side panel's funnel settings (wall, inside, gate + its Range)."""
 
 import math
 import tkinter as tk
@@ -19,12 +19,6 @@ FUNNEL_CHOICES = [
     ("wall", tr("panel_funnel.wall"), [
         ("in", tr("panel_funnel.notes_end_on_it"), tr("panel_funnel.the_notes_stop_at_the_wall")),
         ("past", tr("panel_funnel.notes_start_on_it"), tr("panel_funnel.one_more_column_of_notes_on"))]),
-    ("change", "", [
-        ("steps", tr("panel_funnel.steps"), tr("panel_funnel.the_gate_only_halves_or_doubles")),
-        ("smooth", tr("panel_funnel.smooth"), tr("panel_funnel.every_note_gets_its_own_gate"))]),
-    ("follow", "", [
-        ("time", tr("panel_funnel.evenly"), tr("panel_funnel.the_gate_changes_evenly_from_the")),
-        ("curve", tr("panel_funnel.with_the_curve"), tr("panel_funnel.the_gate_changes_as_the_funnel"))]),
 ]
 
 
@@ -32,11 +26,11 @@ GATE_STEPS = (1, 10, 1)  # quick changes of a gate in ticks (widgets.Scrub): ste
 
 
 def changed_funnel(t, key, value):
-    """Funnel (settings) t with one setting changed; with one gate the wall gate stays the same as it (so turning
-    "Different start and wall gate" on starts from there)."""
+    """Funnel (settings) t with one setting changed; a new gate typed takes its Range off (kept for the Range window
+    to bring back, like a custom shape's)."""
     out = dict(t, **{key: value})
-    if not out["vary"]:
-        out["gate1"] = out["gate0"]
+    if key == "gate" and out.get("range"):
+        out["range_kept"] = out.pop("range")
     return out
 
 
@@ -44,11 +38,11 @@ class FunnelPanel:
     """Mixed into App."""
 
     def _build_funnel(self):
-        """Funnel settings: note-off or note-on on the wall, what's inside, the gates."""
+        """Funnel settings: note-off or note-on on the wall, what's inside, the gate."""
+        from window.range_window import open_funnel_range
         box = self.funnel_box = ttk.Frame(self.settings)
         box.columnconfigure(1, weight=1)
         self.funnel_vars = {key: tk.StringVar() for key, _, _ in FUNNEL_CHOICES}
-        self.funnel_entries = {}  # setting -> (variable, entry box)
         self.funnel_radios = {}   # setting -> [radio buttons]
         self.funnel_grid = {}     # row name -> its widgets in the grid (hidden while they do nothing, user)
 
@@ -67,14 +61,6 @@ class FunnelPanel:
                 Tooltip(b, tip)
                 self.funnel_radios[key].append(b)
 
-        def entry(row, key, width):
-            var = tk.StringVar()
-            e = ttk.Entry(row, textvariable=var, width=width)
-            e.pack(side="left", padx=(0, 4))
-            e.bind("<Return>", lambda ev: self.on_funnel_entry(key))
-            self.funnel_entries[key] = (var, e)
-            leave_box(self, e, var, lambda left: self.on_funnel_entry(key, left))
-
         radios(1, "wall")
         radios(2, "fill")
         lb = ttk.Label(box, text=tr("panel_funnel.gate"))
@@ -82,24 +68,20 @@ class FunnelPanel:
         row = ttk.Frame(box)
         row.grid(row=3, column=1, sticky="w", padx=(5, 0), pady=1)
         self.funnel_grid["gate"] = (lb, row)
-        entry(row, "gate0", 6)
-        self.funnel_arrow = ttk.Label(row, text="→")
-        self.funnel_arrow.pack(side="left", padx=(0, 4))
-        entry(row, "gate1", 6)
-        # arrows / wheel step one gate, dragging "Gate" steps both
-        gates = [(e, var, lambda key=key: self.on_funnel_entry(key)) for key, (var, e) in self.funnel_entries.items()]
-        Scrub(self, gates, GATE_STEPS, 1, 10 ** 7, label=lb)
-        self.funnel_ticks = ttk.Label(row, text=tr("unit.ticks"), foreground=look.HINT)
-        self.funnel_ticks.pack(side="left")
-        self.funnel_gate_tip = Tooltip(row, "")
-        self.funnel_vary = tk.BooleanVar()
-        vary = ttk.Checkbutton(box, text=tr("panel_funnel.different_start_and_wall_gate"), variable=self.funnel_vary,
-                               command=lambda: self.set_funnel("vary", self.funnel_vary.get()))
-        vary.grid(row=4, column=1, sticky="w", padx=(5, 0), pady=1)
-        self.funnel_grid["vary"] = (vary,)
-        Tooltip(vary, tr("panel_funnel.off_one_gate_for_the_whole"))
-        radios(5, "change")
-        radios(6, "follow")
+        var = self.funnel_gate_var = tk.StringVar()
+        e = self.funnel_gate_entry = ttk.Entry(row, textvariable=var, width=6)
+        e.pack(side="left", padx=(0, 4))
+        e.bind("<Return>", lambda ev: self.on_funnel_entry())
+        leave_box(self, e, var, lambda left: self.on_funnel_entry(left))
+        Scrub(self, [(e, var, self.on_funnel_entry)], GATE_STEPS, 1, 10 ** 7, label=lb)
+        ttk.Label(row, text=tr("unit.ticks"), foreground=look.HINT).pack(side="left")
+        self.funnel_gate_tip = Tooltip(e, "")
+        # Range (gaterange.py, the same window as a custom shape's): the gate goes from this one at the line start
+        # to a second one at the wall, along a graph, smoothly or in steps, evenly or with the curve
+        self.funnel_range_btn = ttk.Button(row, text=tr("panel_custom.range"),
+                                           command=lambda: open_funnel_range(self))
+        self.funnel_range_btn.pack(side="left", padx=(8, 0))
+        Tooltip(self.funnel_range_btn, tr("panel_funnel.range_tip"))
         self.funnel_info = ttk.Label(box, text="", foreground=look.HINT, font=look.font(8),
                                      wraplength=int(300 * self.scale), justify="left")
         self.funnel_info.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(2, 0))
@@ -129,13 +111,13 @@ class FunnelPanel:
         if not self._rows["funnel"]:
             return
         t = tgts[0]
+        spam, past = t["fill"] == "spam", t["wall"] == "past"
+        rg = t.get("range") if spam else None  # (long notes: one gate, the column past the wall)
         self._loading = True
         for key, var in self.funnel_vars.items():
             var.set(t[key])
-        for key, (var, e) in self.funnel_entries.items():
-            var.set(str(gate_ticks(t[key], self.ppq)))  # (the ticks used)
-            e.config(style="TEntry")
-        self.funnel_vary.set(t["vary"])
+        self.funnel_gate_var.set(str(gate_ticks(t["gate"], self.ppq)))  # (the ticks used)
+        self.funnel_gate_entry.config(style="Gap.TEntry" if rg else "TEntry")
         self._loading = False
         # a reverse funnel's wall comes first: "one more column" is before it, ending on it
         texts = [tr("panel_funnel.notes_end_on_it"), tr("panel_funnel.notes_start_on_it")]
@@ -143,29 +125,19 @@ class FunnelPanel:
             texts.reverse()
         for b, text in zip(self.funnel_radios["wall"], texts):
             b.config(text=text)
-        spam, vary, past = t["fill"] == "spam", t["vary"], t["wall"] == "past"
-        # long notes: the wall gate is still the length of the column past the wall (with one gate: that one)
-        wall_box = self.funnel_entries["gate1"][1]
-        self.funnel_entries["gate0"][1].config(state="normal" if spam or (past and not vary) else "disabled")
-        wall_box.config(state="normal" if vary and (spam or past) else "disabled")
-        # only what does something shows (user): long notes use one gate, and only past the wall (with "different"
-        # gates on, the wall one); the wall gate box only when the gates can differ
-        start_box = self.funnel_entries["gate0"][1]
-        boxes = [(start_box, spam or not vary), (self.funnel_arrow, spam and vary), (wall_box, vary)]
-        if [on for _, on in boxes] != [bool(w.winfo_manager()) for w, _ in boxes]:  # (only when it changes: flashes)
-            for w, _ in boxes:
-                w.pack_forget()
-            for w, on in boxes:
-                if on:
-                    w.pack(side="left", padx=(0, 4), before=self.funnel_ticks)
-        for key, on in (("gate", spam or past), ("vary", spam), ("change", spam and vary), ("follow", spam and vary)):
-            for w in self.funnel_grid[key]:
-                grid_shown(w, on)
-        self.funnel_gate_tip.text = (tr("panel_funnel.spam_gate_at_the_start_at") if vary else
+        # only what does something shows (user): long notes use the gate only past the wall, and no Range
+        for w in self.funnel_grid["gate"]:
+            grid_shown(w, spam or past)
+        if spam != bool(self.funnel_range_btn.winfo_manager()):  # (only when it changes: flashes)
+            if spam:
+                self.funnel_range_btn.pack(side="left", padx=(8, 0))
+            else:
+                self.funnel_range_btn.pack_forget()
+        # (the funnel being drawn takes the panel's settings, but the Range window works on placed ones)
+        self.funnel_range_btn.config(state="disabled" if self.funnel_draft() else "normal")
+        self.funnel_gate_tip.text = (tr("panel_funnel.gate_ranged_tip", a=gate_ticks(t["gate"], self.ppq),
+                                        b=gate_ticks(rg["to"], self.ppq)) if rg else
                                      tr("panel_funnel.spam_gate_with_long_notes_the"))
-        for key in ("change", "follow"):
-            for b in self.funnel_radios[key]:
-                b.config(state="normal" if spam and vary else "disabled")
         draft = self.roll.draft
         if draft and draft["kind"] == "funnel" and len(draft["pts"]) == 2:
             info = (note + " " if note else "") + tr("panel_funnel.now_draw_the_wall_ctrl_centred")
@@ -188,19 +160,21 @@ class FunnelPanel:
             return
         tgts = self.funnel_targets()
         placed = [t for t in tgts if t is not self.funnel_defaults]
-        same = all(abs(t[key] - value) < 1e-12 if key in ("gate0", "gate1") else t[key] == value for t in tgts)
+        same = all(abs(t[key] - value) < 1e-12 if key == "gate" else t[key] == value for t in tgts)
         if same or not self.confirm_big([changed_funnel(t, key, value) for t in placed]):
             return self.sync_funnel()
         if placed:
             self.push_undo(name=tr("panel_funnel.funnel_setting"))
         for t in tgts + [d for d in (self.funnel_draft(),) if d]:  # (the funnel being drawn too: user)
-            t.update(changed_funnel(t, key, value))
+            new = changed_funnel(t, key, value)
+            t.clear()
+            t.update(new)
         self.shapes_changed()
         self.sync_funnel()
 
-    def on_funnel_entry(self, key, left=False):
-        """A gate box (Enter, stepped, or left: widgets.leave_box). Whole ticks: a fraction is rounded (user)."""
-        var, e = self.funnel_entries[key]
+    def on_funnel_entry(self, left=False):
+        """The gate box (Enter, stepped, or left: widgets.leave_box). Whole ticks: a fraction is rounded (user)."""
+        var, e = self.funnel_gate_var, self.funnel_gate_entry
         if self._loading or str(e.cget("state")) == "disabled" or left and unchanged(e):
             return
         try:
@@ -211,5 +185,5 @@ class FunnelPanel:
         except (ValueError, ZeroDivisionError):
             bad(e)
             return
-        self.set_funnel(key, value)
+        self.set_funnel("gate", value)
         good(e)  # (after: the box shows the whole ticks now)
