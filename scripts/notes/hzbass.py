@@ -22,6 +22,10 @@ tones, and several can slide to one: each slide is a line of its own, next to th
 slide the tone just stops at its end. The red line in the window is what is really heard (heard).
 All the repeats together, each lasting until the next one starts, are the squares every key of the shape is chopped
 by (custom.chop_grid), so a chord takes one channel. Nothing sounds where no tone is.
+LAYERS (like a DAW's tracks): hz["layers"] (clean_layers) = more sets of notes in one Hz bass, each with its own
+sound; the picked one's notes and sound are where a Hz bass without layers has them, so all editing works on it.
+Each layer heard (heard_layers: mute / solo) makes its notes as a Hz bass of its own, put together by
+engine._notes_tracks.
 hz["grow"] = the shape is kept as long as its tones (fit_length). hz["own"] = made with the Hz bass tool: a box
 that is nothing but its tones (it goes when its last tone is deleted; the panel shows the keys it repeats).
 
@@ -167,6 +171,8 @@ def shifted_hz(hz, d):
     a repeating effect counted from the edge starts its repeat that much later, so it stays in step."""
     if abs(d) < 1e-12:
         return hz
+    if hz.get("layers"):
+        return each_layer(hz, lambda l: shifted_hz(l, d))
     hz = json.loads(json.dumps(hz))
     tones = []
     for n in hz.get("tones") or ():
@@ -198,6 +204,8 @@ def shifted_hz(hz, d):
 def hz_up_to(hz, width):
     """hz without the tones starting at or after width beats from the left edge (a part split off a Hz bass: they
     made nothing in it); slides to them go too."""
+    if hz.get("layers"):
+        return each_layer(hz, lambda l: hz_up_to(l, width))
     tones = [n for n in hz.get("tones") or () if n["t"] < width - 1e-9]
     if len(tones) == len(hz.get("tones") or ()):
         return hz
@@ -209,7 +217,7 @@ def hz_up_to(hz, width):
 
 def fit_length(sh):
     """hz["grow"]: the shape made as long as its tones and the falls after them (stretched from its left edge)."""
-    span = max(sound_span(sh["hz"]), MIN_LEN)
+    span = max(max(sound_span(l) for l in layers_of(sh["hz"])), MIN_LEN)  # (every layer's notes)
     (b0, _), (b1, _), (b2, _) = sh["pts"]
     bs = (b0, b1, b2, b1 + b2 - b0)
     left, width = min(bs), max(bs) - min(bs)
@@ -220,7 +228,9 @@ def fit_length(sh):
 
 def shortest_gate(hz, ppq):
     """The shortest gate, in ticks, a shape's Hz bass uses (its highest tone, bent up by the "pitch" effect's
-    highest point)."""
+    highest point; with layers, the shortest of the layers heard)."""
+    if hz.get("layers"):
+        return min(shortest_gate(l, ppq) for l in heard_layers(hz) or layers_of(hz))
     played = live(hz)  # (the Arpeggio box's octaves go higher)
     top = max((pitch(n) for n in played.get("tones") or ()), default=hz["key"])
     pts = (played.get("fx") or {}).get("pitch") if hz.get("tones") else None

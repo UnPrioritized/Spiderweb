@@ -14,7 +14,7 @@ from window.drawer import Drawer, clean_name, library_names, load_drawing, save_
 from window.panel_funnel import GATE_STEPS
 from files.mathexpr import calc, fmt
 from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
-from notes.hzbass import AUTO, auto_picks, shortest_gate
+from notes.hzbass import AUTO, all_tones, auto_picks, each_layer, layers_of, shortest_gate
 from window.hz_window import open_hz
 from window.range_window import open_range_graph
 from window.widgets import Scrub, Tooltip, bad, good, grid_shown, leave_box, unchanged
@@ -53,6 +53,12 @@ def hz_tool(sh):
     """A Hz bass made with the Hz bass tool (hz["own"]): a musical tool, not a shape (user): no library shape to
     pick and no "Overlaps cancel out" for it."""
     return bool((sh.get("hz") or {}).get("own"))
+
+
+def layer_picks(hz, ppq):
+    """auto_picks of every layer of a Hz bass (None when the gates aren't Auto)."""
+    got = tuple(auto_picks(l, ppq) for l in layers_of(hz))
+    return None if None in got else got
 
 
 class CustomPanel:
@@ -706,21 +712,22 @@ class CustomPanel:
             return {k: hz[k] for k in ("fixed", "auto") if k in hz}
 
         def own(hz):
-            return every and any("gate" in n for n in hz.get("tones") or ())
+            return every and any("gate" in n for n in all_tones(hz))
 
         tgts = [t for t in self.custom_targets() if t.get("hz") and (gates(t["hz"]) != want or own(t["hz"]))]
         if self._loading or not tgts:
             return
         if any(t is not self.custom_defaults for t in tgts):
             self.push_undo(name=tr("panel_custom.hz_gates_step"))
-        before = [auto_picks(t["hz"], self.ppq) for t in tgts]
+        before = [layer_picks(t["hz"], self.ppq) for t in tgts]
         for t in tgts:
             t["hz"] = dict({k: v for k, v in t["hz"].items() if k not in ("fixed", "auto")}, **want)
             if own(t["hz"]):
-                t["hz"]["tones"] = [{k: v for k, v in n.items() if k != "gate"} for n in t["hz"]["tones"]]
+                t["hz"] = each_layer(t["hz"], lambda l: dict(l, tones=[{k: v for k, v in n.items() if k != "gate"}
+                                                                       for n in l["tones"]]) if l.get("tones") else l)
         # (a new threshold that gives every note the same gates as before leaves the notes as they are: nothing
         # to make again, and the preview keeps its sound)
-        if None in before or before != [auto_picks(t["hz"], self.ppq) for t in tgts]:
+        if None in before or before != [layer_picks(t["hz"], self.ppq) for t in tgts]:
             self.shapes_changed()
         self.sync_custom()
         if self.hz_window:

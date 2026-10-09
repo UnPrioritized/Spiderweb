@@ -9,9 +9,9 @@ from tkinter import messagebox, ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
-from notes.hzbass import (AUTO, AUTO_MOST, EXTRAS, HZ_DEFAULTS, TUNE, clean_fit, clean_from, clean_extra, clean_fx,
-                          clean_lfo, clean_loop, clean_off, clean_sustain, clean_tones, fit_length, held_fixed,
-                          left_edge, sound_span)
+from notes.hzbass import (AUTO, AUTO_MOST, EXTRAS, HZ_DEFAULTS, TUNE, all_tones, clean_fit, clean_from, clean_extra,
+                          clean_fx, clean_lfo, clean_loop, clean_off, clean_sustain, clean_tones, fit_length,
+                          held_fixed, left_edge, sound_span)
 from window import look
 from window.hz_effects import AMOUNT
 from window.widgets import Scrub, bad, good, remember_place
@@ -92,7 +92,7 @@ def ask_live(win, app, prompt, value, lo, hi, steps, on_change):
 def hz_made(sh):
     """True for a Hz bass made with the Hz bass tool (hz["own"]): a box that is nothing but its placed tones."""
     hz = (sh or {}).get("hz") or {}
-    return bool(hz.get("own") and hz.get("tones"))
+    return bool(hz.get("own") and all_tones(hz))
 
 
 def hz_keys(sh):
@@ -417,11 +417,13 @@ class HzGates:
                 self.own_step = False
         else:
             hz = dict(sh.get("hz") or self.new_hz(bpm))  # (none yet: the window's Gates and Pitch boxes)
+            others = len(all_tones(hz)) > len(hz.get("tones") or ())  # (other layers' notes: the Hz bass stays)
             for k in ("tones", "grow", "fx", "loop", "off", "amount", "from", "fit", "sustain", "lfo") + EXTRAS:
                 hz.pop(k, None)
             new = copy.deepcopy(sh)
-            if tones:
-                new["hz"] = dict(hz, tones=tones, **({"grow": True} if self.grow.get() else {}), **copy.deepcopy(fx))
+            if tones or others:
+                new["hz"] = dict(hz, **({"tones": tones} if tones else {}),
+                                 **({"grow": True} if self.grow.get() else {}), **copy.deepcopy(fx))
                 if new["fill"] not in SPAM_FILLS:
                     new["fill"] = "spam"
                 if not sh.get("hz"):  # (a spam shape's first notes: its gate and Range come back if Hz bass is
@@ -442,8 +444,8 @@ class HzGates:
                     app.push_undo(name=name)
                 finally:
                     self.pushing, self.own_step = None, False
-            if tones or not hz_made(sh):
-                if not tones:  # the last note deleted from a shape of its own: back to its one tone
+            if tones or others or not hz_made(sh):
+                if not tones and not others:  # the last note deleted from a shape of its own: back to its one tone
                     new["hz"] = hz
                 sh.clear()
                 sh.update(new)

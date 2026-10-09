@@ -19,7 +19,7 @@ from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX
 from notes.between import KINDS as BETWEEN_KINDS, clean_between
 from notes.envelope import env_values, velocity_env
 from notes.joined import clean_joined, is_joined, joined_paths
-from notes.hzbass import clean_hz, velocity_factor
+from notes.hzbass import clean_hz, heard_layers, layers_of, velocity_factor, with_layers
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
@@ -386,7 +386,10 @@ BIG_TEXT = 100_000  # characters: a text this long (pasted / image notes, packed
 def shape_key(sh):
     """A shape as a key of the notes it makes (equal for exactly the same shape): its JSON text, with big texts
     (pasted / image notes, many MB) kept as the strings themselves, so they're never written out again: comparing
-    the same string is instant (App.notes_key is asked at every rest of a drag)."""
+    the same string is instant (App.notes_key is asked at every rest of a drag). A Hz bass with another layer
+    picked is the same shape (the same notes: picking a layer makes nothing again)."""
+    if (sh.get("hz") or {}).get("layer"):
+        sh = dict(sh, hz=with_layers(sh["hz"], layers_of(sh["hz"]), 0))
     big = sorted(k for k, v in sh.items() if isinstance(v, str) and len(v) > BIG_TEXT)
     if not big:
         return json.dumps(sh, sort_keys=True)
@@ -620,12 +623,25 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
     return a
 
 
+def layered_notes(sh, ppq, keys):
+    """_notes_tracks of a Hz bass with layers: each layer heard makes its notes as a Hz bass of its own, in order."""
+    got = [_notes_tracks(dict(sh, hz=hz), ppq, keys) for hz in heard_layers(sh["hz"])]
+    if not got:
+        return np.zeros((0, 4), np.int64), None
+    notes = np.concatenate([n for n, _ in got])
+    if all(t is None for _, t in got):
+        return notes, None
+    return notes, np.concatenate([np.zeros(len(n), np.int64) if t is None else np.asarray(t) for n, t in got])
+
+
 def _notes_tracks(sh, ppq, keys):
     # cut by the Slice tool: the whole's notes on its side (sliced.py; a line too when cut from a piece as it was)
     if sh.get("cut") and (sh["kind"] == "custom" or (sh["cut"].get("whole") or {}).get("cut")):
         got = piece_notes(sh, ppq, keys, shape_notes_tracks)  # (the whole's glue / pages done first)
         if got is not None:
             return got
+    if sh["kind"] == "custom" and (sh.get("hz") or {}).get("layers"):
+        return layered_notes(sh, ppq, keys)
     end_dot = sh.get("end_dot", False)
     piece = source(sh) if sh["kind"] in LINE_KINDS and sh.get("cut") else None
     vel_sh = sh  # (whose velocities, over whose time)

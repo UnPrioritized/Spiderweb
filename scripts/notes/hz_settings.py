@@ -731,7 +731,98 @@ def clean_hz(hz):
     out.update(clean_extra(hz))
     if tones:
         out["tones"] = tones
+    layers = clean_layers(hz, out)
+    if layers:
+        out["layers"], out["layer"] = layers
+    if any(l.get("tones") for l in layers_of(out)):
         for flag in ("grow", "own"):
             if hz.get(flag) is True:
                 out[flag] = True
     return out
+
+
+# ---------------------------------------------------------------- layers
+
+SOUND = ("tones", "fx", "loop", "off", "amount", "from", "fit", "sustain", "lfo") + EXTRAS  # one layer's own
+LAYERS = 16  # the most layers in one Hz bass
+LAYER_NAME = 40  # characters: the longest layer name
+
+
+def clean_layers(hz, out):
+    """hz["layers"] checked: (layers, picked number) or None. A Hz bass with layers keeps the PICKED layer's notes
+    and sound where one without has them (hz["tones"], hz["fx"]...: everything that edits them works on it) and
+    hz["layers"] = [{"name", "colour" (a number in the piano roll's note colours), "mute": True?, "solo": True?,
+    and for every layer but the picked one its own SOUND}, ...] in order; hz["layer"] = the picked one's number.
+    out = hz checked so far (the shared settings, the picked layer's sound)."""
+    got = hz.get("layers")
+    if not isinstance(got, list) or not got:
+        return None
+    try:
+        picked = int(hz.get("layer", 0))
+    except (TypeError, ValueError):
+        picked = 0
+    picked = max(0, min(len(got[:LAYERS]) - 1, picked))
+    shared = {k: out[k] for k in ("key", "cents", "bpm")}
+    layers = []
+    for i, entry in enumerate(got[:LAYERS]):
+        entry = entry if isinstance(entry, dict) else {}
+        name = entry.get("name")
+        try:
+            colour = max(0, int(entry.get("colour", i)))
+        except (TypeError, ValueError):
+            colour = i
+        info = {"name": name[:LAYER_NAME] if isinstance(name, str) else "", "colour": colour}
+        for flag in ("mute", "solo"):
+            if entry.get(flag) is True:
+                info[flag] = True
+        if i != picked:
+            own = clean_hz(dict(shared, **{k: entry[k] for k in SOUND if k in entry}))
+            info.update({k: own[k] for k in SOUND if k in own})
+        layers.append(info)
+    return layers, picked
+
+
+def layers_of(hz):
+    """Every layer of a Hz bass as a Hz bass of its own (no "layers" in it), in order; one without layers: [hz]."""
+    got = hz.get("layers")
+    if not got:
+        return [hz]
+    picked = hz.get("layer", 0)
+    shared = {k: v for k, v in hz.items() if k not in SOUND and k not in ("layers", "layer", "_memo")}
+    return [dict(shared, **{k: src[k] for k in SOUND if k in src}) for src in
+            (hz if i == picked else entry for i, entry in enumerate(got))]
+
+
+def heard_layers(hz):
+    """The layers that make notes: those with notes, not muted (any soloed: only those). None has notes: the Hz
+    bass as it is (its one tone, no layers)."""
+    every = layers_of(hz)
+    if not hz.get("layers") or not any(l.get("tones") for l in every):
+        return [every[hz.get("layer", 0)] if hz.get("layers") else hz]
+    solo = any(e.get("solo") for e in hz["layers"])
+    return [l for l, e in zip(every, hz["layers"]) if l.get("tones") and (e.get("solo") if solo else not e.get("mute"))]
+
+
+def all_tones(hz):
+    """The notes of every layer of a Hz bass, one list."""
+    return [n for l in layers_of(hz) for n in l.get("tones") or ()]
+
+
+def with_layers(hz, every, picked=None):
+    """hz with its layers' sounds (layers_of's list, each changed) put back, picked (default: as it was) on top."""
+    if not hz.get("layers"):
+        return every[0]
+    picked = hz.get("layer", 0) if picked is None else picked
+    out = {k: v for k, v in hz.items() if k not in SOUND and k != "_memo"}
+    out.update({k: every[picked][k] for k in SOUND if k in every[picked]})
+    out.update({k: v for k, v in every[picked].items() if k not in SOUND and k not in ("layers", "layer")})
+    out["layers"] = [{k: v for k, v in e.items() if k not in SOUND} if i == picked else
+                     dict({k: v for k, v in e.items() if k not in SOUND}, **{k: every[i][k] for k in SOUND if k in every[i]})
+                     for i, e in enumerate(hz["layers"])]
+    out["layer"] = picked
+    return out
+
+
+def each_layer(hz, fn):
+    """hz with fn(layer's Hz bass) done to every layer (e.g. moved: every layer's notes and lines alike)."""
+    return with_layers(hz, [fn(l) for l in layers_of(hz)])
