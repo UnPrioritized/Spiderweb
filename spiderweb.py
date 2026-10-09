@@ -77,6 +77,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     hz_lines.py      Hz bass: effect lines' values over time, repeat shapes, envelopes
     hz_glide.py      Hz bass: slides, glides and legato chains between notes
     hz_modulate.py   Hz bass: the MOD tab's engine (LFOs / envelopes moving lines and knobs over time)
+    hz_arp.py        Hz bass: the arpeggio's runs (patterns, custom steps, scales, chords)
     fonts.py         letter outlines from the fonts installed in Windows
     fonts_ft.py      the same on Linux (fontconfig + FreeType)
     funnel.py        funnels: curves, note grid, gates
