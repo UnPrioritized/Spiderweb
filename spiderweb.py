@@ -34,6 +34,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     hz_view.py       the Hz bass window's zoom, scrolling and drawing
     hz_sound.py      the Hz bass window's sound: the key held, the preview
     hz_gates.py      the Hz bass window's gates, tune, Pitch, toggles; changes saved into the shape
+    hz_mouse.py      the Hz bass window's mouse and keys on its notes (place, move, select, menus)
     hz_effects.py    the effects pane under the Hz bass window's notes (lines with points)
     hz_preview.py    the Hz bass window's Preview: its sound made ahead (greyed until made) and played
     hz_live.py       the Hz bass live keys: a key held = its Hz bass, played with the quick sound

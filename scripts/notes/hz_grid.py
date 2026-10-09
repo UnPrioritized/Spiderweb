@@ -12,7 +12,7 @@ from notes.hz_settings import (CRUSH, FM_INDEX, FX, GROWL, HZ_DEFAULTS, MODE_AMO
                                group_count, osc2_shift, rack_on)
 from notes.hz_glide import legato_links, links, note_span, pitch
 from notes.hz_modulate import TIMED, fx_at, setting_at, setting_base, setting_most, timed_line
-from notes.hz_runs import _grid, _limits, bent, heard, tails, tone_runs
+from notes.hz_runs import _grid, _limits, bent, tails, tone_runs
 
 
 def compress(loud, comp):
