@@ -660,8 +660,12 @@ def clean_slide(s):
     """A saved slide checked: {"id", "out", "in"} + its own "bend" (-SLIDE_BEND..SLIDE_BEND; missing = untouched,
     it follows the Glide curve) and "kind": "double" (an S; missing = one curve). Raises like float() when broken."""
     out = {"id": int(s["id"]), "out": max(0.0, float(s["out"])), "in": max(0.0, float(s["in"]))}
-    if s.get("bend") is not None and math.isfinite(float(s["bend"])):
-        out["bend"] = min(SLIDE_BEND, max(-SLIDE_BEND, float(s["bend"])))
+    try:  # (a broken bend alone is left out: the slide follows the Glide curve, the note stays)
+        bend = float(s["bend"]) if s.get("bend") is not None else math.nan
+    except (TypeError, ValueError):
+        bend = math.nan
+    if math.isfinite(bend):
+        out["bend"] = min(SLIDE_BEND, max(-SLIDE_BEND, bend))
     if s.get("kind") == "double":
         out["kind"] = "double"
     return out

@@ -11,7 +11,7 @@ import numpy as np
 from notes.hz_settings import (ADSR_KNOBS, GLIDE_CURVE, MOD_BOXES, MOD_NEED_LINE, NEUTRAL, PITCH, VIBRATO,
                                VIBRATO_RATE, hz_of)
 from notes.hz_lines import adsr_line
-from notes.hz_glide import cached, chains, glide, glide_left, legato_links, links, pitch, slide_part
+from notes.hz_glide import cached, chains, glide, glide_left, legato_links, links, note_span, pitch, slide_part
 from notes.hz_modulate import fx_at, longest_fall, plain_base, rack_tail, setting_at
 from notes.hz_arp import arpeggiated
 
@@ -309,17 +309,19 @@ def _whole(v):
 
 def vibrato_keys(hz, beat, tone):
     """Keys the Vibrato moves a stretch of tone's repeats at beat (an array; 0 without it), as the notes are made
-    (hz_grid.KeyGrid.made: each wave VIBRATO x the line longer / shorter, its Rate counted from the stretch's start;
-    a Rate the MOD tab moves added up), for the red line only."""
+    (hz_grid.KeyGrid.made: each wave VIBRATO x the line longer / shorter, its Rate counted from the start of the
+    note's chain of slides; a Rate the MOD tab moves added up), for the red line only."""
     depth = fx_at(hz, "vibrato", beat, tone) if "vibrato" in (hz.get("fx") or {}) and len(beat) else None
     if depth is None or not np.any(depth):
         return 0.0
+    span = note_span(hz, beat, tone)
+    since = beat - (tone["t"] if span is None else span[0])
     base = plain_base(hz, "vibrato_rate")
     if any(link["to"] == "vibrato_rate" for link in (hz.get("mod") or {}).get("links", ())) and base is not None:
         rate = setting_at(hz, "vibrato_rate", base, beat, tone)
-        turns = np.concatenate([[0.0], np.cumsum(rate[:-1] * np.diff(beat))])
+        turns = rate[0] * since[0] + np.concatenate([[0.0], np.cumsum(rate[:-1] * np.diff(beat))])
     else:
-        turns = (hz.get("lfo") or {}).get("vibrato_rate", VIBRATO_RATE) * (beat - beat[0])
+        turns = (hz.get("lfo") or {}).get("vibrato_rate", VIBRATO_RATE) * since
     return -12.0 * np.log2(1.0 + VIBRATO * depth * np.sin(2.0 * np.pi * turns))
 
 

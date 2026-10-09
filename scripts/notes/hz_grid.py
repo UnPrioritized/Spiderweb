@@ -207,8 +207,8 @@ class KeyGrid:
                 r = run[k[:-6]]
                 if k.endswith("fm_ratio_turns"):  # (wobbles per wave, less Ratio x the wave's number: wave_hits)
                     run[k] = np.concatenate([[0.0], np.cumsum(r[:-1])]) - r * run["number"]
-                else:  # (times a beat: the vibrato from the stretch's start, Pulse from the note's)
-                    first = r[0] * run["since"][0] if len(r) and k != "vibrato_rate_turns" else 0.0
+                else:  # (times a beat: from the note's start, a chain of slides' first note's)
+                    first = r[0] * run["since"][0] if len(r) else 0.0
                     run[k] = first + np.concatenate([[0.0], np.cumsum(r[:-1] * np.diff(beat))])
             run["tone"], run["held"] = n0, whose[1] is None
             run["track"] = pitch(n0) - shift - home  # (keys the note is above the Hz bass's own tone)
@@ -409,8 +409,8 @@ class KeyGrid:
                                   / 2.0 / 1200.0)
         scaled = np.bincount(part, wide != 1.0, len(run)) > 0
         moves = (each["moves"][run] | scaled) & (n > 0)
-        vib = (f["vibrato_rate_turns"][src] if "vibrato_rate" in self.moved  # (its Rate moved: added up)
-               else each["vib_rate"][run][part] * (f["beat"][src] - each["beat0"][run][part]))
+        vib = (f["vibrato_rate_turns"][src] if "vibrato_rate" in self.moved  # (its Rate moved: added up; from
+               else each["vib_rate"][run][part] * f["since"][src])  # its note's start, on through slides: user)
         stretch = wide * (1.0 + OFF_PITCH * f["offpitch"][src] * (x - 0.5)) * (
             1.0 + VIBRATO * f["vibrato"][src] * np.sin(2.0 * np.pi * vib))
         size = np.where(moves, n + n // 10 + 3, n)

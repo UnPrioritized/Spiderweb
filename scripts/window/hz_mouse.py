@@ -153,21 +153,23 @@ class HzMouse:
         for dx, dy, i, which, s in self.dots():
             if abs(x - dx) <= r and abs(y - dy) <= r:
                 return which, i, s
-        for dx, dy, i, s, *_ in self.handles():
-            if abs(x - dx) <= r and abs(y - dy) <= r:
-                return "bend", i, s
+        handle = next((("bend", i, s) for dx, dy, i, s, *_ in self.handles() if abs(x - dx) <= r and abs(y - dy) <= r),
+                      None)
         if x < self.kb_w or y < self.ruler_h:
-            return None
+            return handle
         for i in range(len(self.tones) - 1, -1, -1):
             n = self.tones[i]
             x0, x1, y0 = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
             if x0 - 1 <= x <= max(x1, x0 + 2) + 1 and y0 <= y < y0 + self.sy:
                 edge = min(5 * self.s, (x1 - x0) / 3)
+                if x >= x1 - edge or x <= x0 + edge:  # (a note's ends win over a slide's square, like over its dots)
+                    return ("right" if x >= x1 - edge else "left"), i
+                if handle:
+                    return handle
                 on_line = (self.tune_rows() and self.app.hz_line.get()
                            and abs(y - self.pitch_y(pitch(n))) <= 4 * self.s)
-                return ("right" if x >= x1 - edge else "left" if x <= x0 + edge else
-                        "tune" if on_line else "note"), i
-        return None
+                return ("tune" if on_line else "note"), i
+        return handle
 
     def on_kept_box(self, kept, e, hit):
         """Where the mouse is on the kept Select boxes: (1, 0) the right side (its corners too), (0, 0) inside (a
@@ -267,7 +269,8 @@ class HzMouse:
                                   "tune": tr("hz.step_tune"), "bend": tr("hz.step_bend")}.get(kind,
                                                                                               tr("hz.step_length"))}
             if kind == "bend":  # (where the handle was grabbed: it moves as far as the mouse from there)
-                self.drag.update(handle=next(h for h in self.handles() if h[3] is hit[2]))
+                self.drag.update(handle=next(h for h in self.handles() if h[3] is hit[2]),
+                                 had_bend="bend" in hit[2])
             if kind == "note" and kept and i in sel0:  # a note the kept box selected: the box goes along
                 boxes = boxes_upright(kept)[0]
                 # (inside the box a click without dragging keeps the selection and the box: user)
@@ -338,12 +341,19 @@ class HzMouse:
         elif d["kind"] == "in":
             d["slide"]["in"] = min(max(0.0, self.snap(beat, e) - n["t"]), n["len"])
         elif d["kind"] == "bend":  # how far from the first tone to the second the handle is dragged; it sticks to
-            hx, hy, _, s, k0, k1 = d["handle"]  # straight within BEND_STICK px (Shift = free, user)
+            hx, hy, _, s, k0, k1, knob = d["handle"]  # straight within BEND_STICK px (Shift = free, user)
+            if not d["moved"] and abs(e.x - d["x"]) < 4 and abs(e.y - d["y"]) < 4:
+                return  # (a click with a wobble changes nothing)
+            d["moved"] = True
             y = hy + e.y - d["y"]
             key = self.top + 0.5 - (y - self.ruler_h) / self.sy  # (pitch_y turned round)
             straight = self.pitch_y(k0 + (k1 - k0) * handle_u(s))
-            s["bend"] = (0.0 if abs(y - straight) <= BEND_STICK * self.s and not e.state & SHIFT
-                         else bend_for(s, (key - k0) / (k1 - k0)))
+            if abs(y - straight) > BEND_STICK * self.s or e.state & SHIFT:
+                s["bend"] = bend_for(s, (key - k0) / (k1 - k0))
+            elif d["had_bend"] or knob is not None:
+                s["bend"] = 0.0
+            else:  # (one following a straight Glide curve, let go straight: it still follows it)
+                s.pop("bend", None)
         elif d["kind"] == "tune":  # the note's own tune: whole cents, and it sticks to the exact tone within
             cents = d["orig"][d["i"]]["cents"] + (d["y"] - e.y) / self.sy * 100  # TUNE_STICK cents (Shift = free)
             if e.state & SHIFT:
@@ -566,8 +576,8 @@ class HzMouse:
         second one on another note makes the slide between the two spots: it's theirs alone, whatever other notes
         and slides there are. On a dot of a slide: that slide goes. Anywhere else: the mark goes."""
         x, y = self.pan[:2]
-        if abs(e.x - x) >= 4 or abs(e.y - y) >= 4 or not self.app.hz_line.get():
-            return
+        if abs(e.x - x) >= 4 or abs(e.y - y) >= 4 or not self.app.hz_line.get() or self.drag:
+            return  # (the left button held: middle clicks do nothing, like right clicks)
         self.slide_mark(e, self.hit(e.x, e.y))
 
     def slide_mark(self, e, hit):

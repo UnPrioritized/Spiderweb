@@ -225,12 +225,13 @@ class HzView:
             c.create_rectangle(x0, y + 1, max(x1, x0 + 2), y + self.sy - 1, fill=fill, outline=edge)
         if self.app.hz_line.get():
             self.draw_line(w)
+        red = self.slide_red()  # (faded while the Arpeggio leaves the slides out)
         for x, y, *_ in self.dots():
             r = 3.5 * s
-            c.create_oval(x - r, y - r, x + r, y + r, fill=look.HZ_DOT, outline=RED, width=max(1, round(1.5 * s)))
+            c.create_oval(x - r, y - r, x + r, y + r, fill=look.HZ_DOT, outline=red, width=max(1, round(1.5 * s)))
         for x, y, _, sl, *_ in self.handles():  # a slide's bend: hollow while it follows the Glide curve
             r = 3 * s
-            c.create_rectangle(x - r, y - r, x + r, y + r, fill=RED if "bend" in sl else "", outline=RED,
+            c.create_rectangle(x - r, y - r, x + r, y + r, fill=red if "bend" in sl else "", outline=red,
                                width=max(1, round(1.5 * s)))
         d = self.drag  # the Select box (with the ones kept when Ctrl+drag adds it), or the last ones (kept_box)
         boxes = d["more"] + [b for b in (self.box_area(),) if b] if d and d["kind"] == "box" else self.kept_box() or []
@@ -289,15 +290,17 @@ class HzView:
         sh = self.target()
         bpm = float(app.current_bpm() or 120)
         hz = self.line_hz()
+        knobs = dict(hz, _memo={})  # (each slide's Glide curve: what the MOD tab needs worked out once)
+        red = self.slide_red()
         for a, b, s in links(self.tones):  # a slide over a gap between two notes: no sound there
             x0, x1 = a["t"] + a["len"], b["t"]
             f0, f1, k0, k1 = glide(a, b, s)
             if x1 - x0 > 1e-9:
-                knob = slide_knob(hz, a)
+                knob = slide_knob(knobs, a)
                 beats = np.linspace(x0, x1, 17)
                 pts = [(self.x_of(t), self.pitch_y(k0 + (k1 - k0) * slide_part((t - f0) / (f1 - f0), s, knob)))
                        for t in beats]
-                c.create_line(*[v for p in pts for v in p], fill=RED, dash=(3, 3))
+                c.create_line(*[v for p in pts for v in p], fill=red, dash=(3, 3))
         left = left_edge(sh) if sh is not None else app.hz_start or 0.0
         lo, hi = self.beat_at(kb), self.beat_at(w)
         for n in self.tones:  # Auto gates: the threshold around each note's tone, green = fixed, orange = mixed (a
@@ -360,22 +363,38 @@ class HzView:
         sh = self.target()
         return dict((sh or {}).get("hz") or self.new_hz(float(self.app.current_bpm() or 120)), tones=self.tones)
 
+    def slides_off(self):
+        """True while the Arpeggio box is on: it plays new notes, leaving the slides made by hand out (like a
+        synth's arpeggiator); they're drawn faded and still edited (user)."""
+        return bool(self.line_hz().get("arp"))
+
+    def slide_red(self):
+        return fade(RED) if self.slides_off() else RED
+
     def handles(self):
-        """[(x, y, tone number, slide, pitch at its start, at its end)]: each slide's bend handle, on its curve at
-        hz_glide.handle_u (tone number = the note it leaves). None while the red line is hidden, on a slide between
-        two notes of the same tone (nothing to bend), or one too short to grab beside its dots."""
+        """[(x, y, tone number, slide, pitch at its start, at its end, the Glide curve it follows or None)]: each
+        slide's bend handle, on its curve at hz_glide.handle_u (tone number = the note it leaves). None while the
+        red line is hidden, on a slide between two notes of the same tone (nothing to bend), or one too short to grab
+        beside its dots (a dot's grab area reaching it)."""
         out = []
         if not self.app.hz_line.get():
             return out
         hz, index = None, {id(n): i for i, n in enumerate(self.tones)}
+        near = 12 * self.s
+        ends = {}
+        for x, y, _, _, s in self.dots():
+            ends.setdefault(id(s), []).append((x, y))
         for a, b, s in links(self.tones):
             f0, f1, k0, k1 = glide(a, b, s)
             if abs(k1 - k0) < 1e-6 or self.x_of(f1) - self.x_of(f0) < 20 * self.s:
                 continue
-            hz = hz or self.line_hz()
+            hz = hz or dict(self.line_hz(), _memo={})  # (what the MOD tab needs worked out once for all)
             u = handle_u(s)
-            k = k0 + (k1 - k0) * slide_part(u, s, slide_knob(hz, a))
-            out.append((self.x_of(f0 + (f1 - f0) * u), self.pitch_y(k), index[id(a)], s, k0, k1))
+            knob = slide_knob(hz, a)
+            x, y = self.x_of(f0 + (f1 - f0) * u), self.pitch_y(k0 + (k1 - k0) * slide_part(u, s, knob))
+            if any(abs(x - dx) <= near and abs(y - dy) <= near for dx, dy in ends.get(id(s), ())):
+                continue
+            out.append((x, y, index[id(a)], s, k0, k1, knob))
         return out
 
     def pairs(self):
@@ -424,6 +443,9 @@ class HzView:
         if self.drag and self.drag["kind"] == "tune":
             text += "     " + tr("hz.tune", cents=f"{self.tones[self.drag['i']]['cents']:+g}")
         hit = self.hit(e.x, e.y) if e is not None and not self.drag else None
+        held = self.drag["kind"] if self.drag else hit and hit[0]
+        if held in ("in", "out", "bend") and self.slides_off():
+            text += "     " + tr("hz.arp_slides")
         got = (auto_state(sh["hz"], self.app.ppq, self.tones[hit[1]])
                if hit and hit[0] not in ("in", "out", "bend") and sh is not None and sh.get("hz") else None)
         if got and got[1] is None:  # the note's own gates
