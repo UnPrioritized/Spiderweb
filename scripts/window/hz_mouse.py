@@ -437,15 +437,24 @@ class HzMouse:
         self.tones += [dict(n, id=base + j) for j, n in enumerate(made[0])]
         self.sel = set(range(first, len(self.tones)))
         self.more_layers = made[1:] or None
-        steps = len(self.app.undo_stack)
-        self.commit(tr("hz.step_paste_domino"), before)
-        if len(self.app.undo_stack) > steps:
+        stack = self.app.undo_stack
+        last = stack[-1] if stack else None
+        self.app.busy(tr("project.pasting_from_domino"))  # (thousands of notes take a moment)
+        self.config(cursor="watch")
+        self.update_idletasks()
+        try:
+            self.commit(tr("hz.step_paste_domino"), before)
+        finally:
+            self.config(cursor="")
+            self.app.busy(None)
+        if stack and stack[-1] is not last:  # (a step was saved: the paste went through; the list may be full)
             n = sum(map(len, made))
             text = tr("hz.domino_pasted_one") if n == 1 else tr("hz.domino_pasted", n=f"{n:,}")
             if len(made) > 1:
                 text += tr("hz.domino_layers", n=len(made))
             if left > 0:
-                text += tr("hz.domino_left_out", n=left, most=LAYERS)
+                text += (tr("hz.domino_left_out_one", most=LAYERS) if left == 1 else
+                         tr("hz.domino_left_out", n=left, most=LAYERS))
             if their_ppq and their_ppq != ppq:
                 text += tr("project.they_were_copied_at_ppq_ticks", their_ppq=their_ppq)
             self.say(text)

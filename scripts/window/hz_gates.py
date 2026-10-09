@@ -395,10 +395,10 @@ class HzGates:
         # the undo step keeps the selection from before the edit (the notes are still numbered as in `before`)
         was = self.sel_before[1] if self.sel_before and self.sel_before[0] is before else self.sel_state()
         self.sel_before = None
-        picked = [self.tones[i] for i in self.sel if i < len(self.tones)]
+        picked = {id(self.tones[i]) for i in self.sel if i < len(self.tones)}
         boxed = self.box_kept is not None and self.box_kept[1] == self.sel
         self.tones.sort(key=lambda n: (n["t"], n["key"]))
-        self.sel = {i for i, n in enumerate(self.tones) if any(n is p for p in picked)}
+        self.sel = {i for i, n in enumerate(self.tones) if id(n) in picked}
         if boxed:  # (the same notes, numbered anew: the Select box stays, user)
             self.box_kept = (self.box_kept[0], set(self.sel))
         tones = clean_tones(copy.deepcopy(self.tones))
