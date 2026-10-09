@@ -144,6 +144,27 @@ def clean_point(p):
     return out
 
 
+def clean_line(pts):
+    """A line over the notes checked (the layer's loudness line, hz["loud"]): [[beat, value(, bend)], ...] in
+    order, or [] when it's no good."""
+    try:
+        got = [clean_point(p) for p in pts or ()]
+    except (TypeError, ValueError, AttributeError, IndexError):
+        return []
+    return sorted((p for p in got if p), key=lambda p: p[0])
+
+
+def clean_vel(pts):
+    """A note's loudness line checked (tone["vel"]): [[u, velocity], ...] in order, u = 0..1 along the note (a point
+    may sit just outside it), velocity 1..127; None when it's no good or empty."""
+    try:
+        got = [[float(u), float(v)] for u, v in pts or ()]
+    except (TypeError, ValueError):
+        return None
+    got = [[u, min(127.0, max(1.0, v))] for u, v in got if math.isfinite(u) and math.isfinite(v)]
+    return sorted(got, key=lambda p: p[0]) or None
+
+
 def clean_fx(fx):
     """Effects checked: {effect: [[beat, value(, bend)], ...]} in order, beats from 0, values 0..1. Effects with no
     points are left out."""
@@ -626,8 +647,9 @@ def has_fx(hz):
     """True when every key needs its own repeats (KeyGrid): placed tones with effects, several copies (Voice), a
     Random start, a wave mode, OSC B or Arpeggio steps quieter than full (as played, or still to be played)."""
     arp = hz.get("arp") or {}
-    quiet = (any(n.get("level", 1.0) != 1.0 for n in hz.get("tones") or ())
-             or any(s["level"] != 1.0 for s in (arp.get("steps") or ())[:arp.get("count", STEPS)]))
+    quiet = (any(n.get("level", 1.0) != 1.0 or n.get("vel") for n in hz.get("tones") or ())
+             or any(s["level"] != 1.0 for s in (arp.get("steps") or ())[:arp.get("count", STEPS)])
+             or bool(hz.get("loud")))  # (loudness lines: each note's, the layer's)
     return ((bool(hz.get("fx")) or len(copies(hz)) > 1 or bool((hz.get("voice") or {}).get("random"))
              or bool(hz.get("mode")) or bool(hz.get("osc2")) or quiet or bool((hz.get("mod") or {}).get("links"))
              or any(not e.get("off") for e in hz.get("rack") or ())) and bool(hz.get("tones")))
@@ -648,6 +670,9 @@ def clean_tones(tones):
                 tone["gate"] = n["gate"]
             tone["to"] = [{"id": int(s["id"]), "out": max(0.0, float(s["out"])), "in": max(0.0, float(s["in"]))}
                           for s in n.get("to") or ()]
+            vel = clean_vel(n.get("vel")) if n.get("vel") else None
+            if vel:
+                tone["vel"] = vel
         except (KeyError, TypeError, ValueError, AttributeError):
             continue
         ok = all(math.isfinite(v) for v in [tone["t"], tone["len"], tone["cents"], tone.get("auto", 0.0), *leads]
@@ -731,6 +756,9 @@ def clean_hz(hz):
     out.update(clean_extra(hz))
     if tones:
         out["tones"] = tones
+    loud = clean_line(hz.get("loud")) if isinstance(hz.get("loud"), list) else []
+    if loud:
+        out["loud"] = loud
     layers = clean_layers(hz, out)
     if layers:
         out["layers"], out["layer"] = layers
@@ -743,7 +771,9 @@ def clean_hz(hz):
 
 # ---------------------------------------------------------------- layers
 
-SOUND = ("tones", "fx", "loop", "off", "amount", "from", "fit", "sustain", "lfo") + EXTRAS  # one layer's own
+# one layer's own ("tones" and "loud" = its notes and its loudness line: not its sound, which Copy sound to copies)
+SOUND = ("tones", "fx", "loop", "off", "amount", "from", "fit", "sustain", "lfo", "loud") + EXTRAS
+NOT_SOUND = ("tones", "loud")
 LAYERS = 16  # the most layers in one Hz bass
 LAYER_NAME = 40  # characters: the longest layer name
 

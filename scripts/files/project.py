@@ -189,6 +189,7 @@ class ProjectFiles:
             "hz_defaults": self.hz_defaults, "hz_snap": self.hz_snap.get(),
             "hz_line": bool(self.hz_line.get()),
             "hz_fx": bool(self.hz_fx.get()), "hz_layers": bool(self.hz_layers.get()),
+            "hz_loud": bool(self.hz_loud.get()),
             "funnel_defaults": self.funnel_defaults, "text_defaults": self.text_defaults,
             "polygon_defaults": self.polygon_defaults,
             "free_smooth": self.free_smooth, "shapes": self.shapes,
@@ -283,6 +284,7 @@ class ProjectFiles:
         self.hz_line.set(data.get("hz_line") is not False)
         self.hz_fx.set(data.get("hz_fx") is True)
         self.hz_layers.set(data.get("hz_layers") is True)
+        self.hz_loud.set(data.get("hz_loud") is True)
         self.defaults = defaults
         if hz_keys:
             self.hz_defaults = hz_keys
@@ -373,7 +375,7 @@ class ProjectFiles:
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
                               "live": self.live.get(),
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
-                              "claw_window": self.claw_pos, "strum_window": self.strum_pos, "chop_window": self.chop_pos, "hz_window": self.hz_pos, "hz_fx_height": self.hz_fx_h, "hz_preview": self.hz_preview,
+                              "claw_window": self.claw_pos, "strum_window": self.strum_pos, "chop_window": self.chop_pos, "hz_window": self.hz_pos, "hz_fx_height": self.hz_fx_h, "hz_loud_height": self.hz_loud_h,"hz_preview": self.hz_preview,
                               "history_window": self.history_pos, "history_undocked": self.history_undocked,
                               "places": getattr(self, "window_places", {}),
                               **self.tips.state(), **self.updates.state(), **self.tool_picker.state()}
@@ -459,6 +461,9 @@ class ProjectFiles:
             h = win.get("hz_fx_height")
             if isinstance(h, int) and not isinstance(h, bool) and 0 < h < 10000:
                 self.hz_fx_h = h
+            h = win.get("hz_loud_height")
+            if isinstance(h, int) and not isinstance(h, bool) and 0 < h < 10000:
+                self.hz_loud_h = h
             from window.hz_preview import VOICES, clean_settings
             self.hz_preview = clean_settings(win.get("hz_preview"))
             v = win.get("play_voices")

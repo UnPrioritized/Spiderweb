@@ -697,6 +697,8 @@ class HzMouse:
         syn = self.synth_win
         if self.layers.held is not None:  # (a layers list row held: let go of, nothing moved)
             return self.layers.drop_held
+        if self.loudness.edit and self.loudness.edit["kind"] != "size":  # (a loudness line being drawn: thrown away)
+            return self.loudness.drop
         for pane in (self.fx, syn.fx if syn else None):
             if pane is not None and pane.drag:
                 return pane.cancel_drag
@@ -733,7 +735,7 @@ class HzMouse:
         held = None if self.drag else self.held_fx()
         if held:
             held()
-        elif not self.cancel_drag():
+        elif not self.cancel_drag() and not self.loudness.confirm():  # (the last loudness line's handles go first)
             self.select(())
         return "break"
 

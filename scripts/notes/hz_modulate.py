@@ -9,7 +9,7 @@ from notes.hz_settings import (ADSR_KNOBS, ARP_KNOBS, BLEND, FAST, GLIDE_CURVE, 
                                MOD_ENVS, MOD_LFOS, MOD_RACK, MOD_SETTINGS, NEUTRAL, OSC2, OSC2_TUNE, TIMED_KNOBS,
                                TIMED_NAMES, TIME_STEP, TREMOLO_DEPTH, VIBRATO_RATE, WAVES, mod_start, osc2_shift,
                                rack_on)
-from notes.hz_lines import adsr_line, env_value, line_at, loop_shape, same_points, sustained
+from notes.hz_lines import adsr_line, env_value, line_at, loop_shape, note_vel, same_points, sustained
 from notes.hz_glide import cached, note_beats, note_span, pitch
 
 
@@ -328,7 +328,9 @@ def mod_value(hz, src, beat, tone=None):
     mod = hz["mod"]
     if src in ("velocity", "note"):
         def of(n):
-            return (n.get("level", 1.0) if src == "velocity"
+            # (velocity: the note's loudness line where it starts, as a synth reads it at the key press)
+            return (n.get("level", 1.0) * (float(note_vel(n, n["t"])) / 127.0 if n.get("vel") else 1.0)
+                    if src == "velocity"
                     else min(1.0, max(0.0, n.get("played", pitch(n)) / 127.0)))
         if tone is not None:
             return np.full(beat.shape, float(of(tone)))

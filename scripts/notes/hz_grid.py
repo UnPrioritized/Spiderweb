@@ -11,6 +11,7 @@ from notes.hz_settings import (CRUSH, FM_INDEX, FX, GROWL, HZ_DEFAULTS, MODE_AMO
                                TREMOLO_DEPTH, VEL_FX, VIBRATO, VIBRATO_RATE, VOICES, WAH, WAVES, blend_gains, copies,
                                group_count, osc2_shift, rack_on)
 from notes.hz_glide import legato_links, links, note_span, pitch
+from notes.hz_lines import line_at, note_vel
 from notes.hz_modulate import TIMED, fx_at, setting_at, setting_base, setting_most, timed_line
 from notes.hz_runs import _grid, _limits, bent, tails, tone_runs
 
@@ -99,7 +100,7 @@ class KeyGrid:
 
     def __init__(self, hz, left, ppq, lo, n):
         hz = dict(hz, _memo={})  # (its own: what's worked out once for all the notes, cached)
-        self.lo, self.n, self.got = lo, max(1, n), {}
+        self.lo, self.n, self.got, self.mine = lo, max(1, n), {}, {}
         self.copies, self.same = copies(hz), bool((hz.get("voice") or {}).get("same"))
         self.gains = blend_gains(hz)  # (each copy's loudness: Blend)
         self.random = (hz.get("voice") or {}).get("random", 0.0)  # (Random start: see starting_points)
@@ -144,7 +145,8 @@ class KeyGrid:
                        or any(m.get("kind") in ("fm", "pulse", "sync") for m in self.modes))
         self.loud = (self.shaped or any(name in (hz.get("fx") or ()) for name in VEL_FX)
                      or bool(self.echo or self.reverb or self.comp) or bool((self.gains != 1.0).any())
-                     or "blend" in self.moved or any(np.any(r["level"] != 1.0) for r in self.runs))
+                     or "blend" in self.moved or any(np.any(r["level"] != 1.0) for r in self.runs)
+                     or any(np.any(r["own"] > 0) or np.any(r["layer"] != 1.0) for r in self.runs))
         self.pack()
         self.rack_turns = {name: self.added_up(name) for name in ("chorus_rate", "flanger_rate") if name in self.moved}
         self.starting = self.starting_points() if self.random or "random" in self.moved else None
@@ -214,6 +216,9 @@ class KeyGrid:
             level = run["osc2_level"] if b is not None and "osc2_level" in self.moved else (
                 b["level"] if b is not None else 1.0)
             run["osc"], run["level"] = osc, level * n0.get("level", 1.0)
+            own = note_vel(n0, beat)  # (the note's own velocity from its loudness line, of 127; 0 = the Hz bass's)
+            run["own"] = own / 127.0 if own is not None else 0.0
+            run["layer"] = line_at(hz["loud"], beat) if hz.get("loud") else 1.0  # (the layer's loudness line)
             runs.append(run)
         return runs
 
@@ -250,7 +255,7 @@ class KeyGrid:
         runs = self.runs
         n = np.array([len(r["starts"]) for r in runs], np.int64)
         names = ["starts", "waves", "beat", "limits", "since", "trem_since", "turns", "swept", "has_volume", "groups",
-                 "track", "level", *FX, *sorted(self.moved), *self.timed, *self.turned,
+                 "track", "level", "own", "layer", *FX, *sorted(self.moved), *self.timed, *self.turned,
                  *("has_" + name for name in WAVES)]
         self.flat = {k: np.concatenate([np.broadcast_to(np.asarray(r[k]), (len(r["starts"]),)) for r in runs])
                      if runs else np.zeros(0) for k in names}
@@ -482,6 +487,9 @@ class KeyGrid:
         fade = f["echo_fade"][src] if "echo_fade" in self.moved else None  # (the echo's, each repeat's own)
         gap = f["echo_time"][src] if "echo_time" in self.moved else None
         quiet = np.zeros(len(starts), bool)
+        # (each repeat's note's own velocity, of 127 (0 = the Hz bass's), and its layer's loudness line: on the
+        # velocity at the end, after the effects, as a mixer's fader)
+        per = np.column_stack([f["own"][src], f["layer"][src]]) if len(src) else np.zeros((0, 2))
         if self.loud:
             trem = self.trem(src)
             where = f["sweep"][src]
@@ -532,6 +540,7 @@ class KeyGrid:
                 gap = gap[rows] if gap is not None else None
                 env, mix, soft = loud[rows], np.concatenate([g[2] for g in got]), soft[rows]
                 quiet = vol[rows] < SOFT
+                per = per[rows]
             else:
                 env, mix = loud, np.ones(len(loud))
                 quiet = vol < SOFT
@@ -577,20 +586,25 @@ class KeyGrid:
             fa = np.sqrt(mixed) * np.tile(soft[keep], sets) * np.concatenate(all_gain)
             if self.comp:  # (too quiet even after the compressor: left out, decided after it)
                 qu = qu | (mixed * np.concatenate(all_gain) ** 2 < SOFT)
+            pe = np.tile(per[keep], (sets, 1))
+            fa = fa * np.where(pe[:, 0] > 0, pe[:, 0], 1.0) * pe[:, 1]
+            qu = qu | (pe[:, 1] <= 0)  # (the layer's line at 0: silence)
             if len(oscs) > 1 and qu.any():  # (both oscillators: one too quiet while the other sounds never cuts it)
                 drop = silent_beside(st, li, qu, np.tile(osc[keep], sets))
-                st, li, fa, qu = st[~drop], li[~drop], fa[~drop], qu[~drop]
+                st, li, fa, qu, pe = st[~drop], li[~drop], fa[~drop], qu[~drop], pe[~drop]
             # (Blend, OSC B: repeats on one tick = the loudest one, left out only if all are)
             if (self.gains != 1.0).any() or "blend" in self.moved or self.osc2:
                 first = np.lexsort((-fa, qu))
-                st, li, fa, qu = st[first], li[first], fa[first], qu[first]
+                st, li, fa, qu, pe = st[first], li[first], fa[first], qu[first], pe[first]
             sq, which = _grid(st, li)
-            factor = fa[which]
+            factor, mine = fa[which], pe[which, 0] > 0
             heard = ~qu[which]  # (volume 0: left out once every repeat has its end)
-            sq, factor = sq[heard], factor[heard]
+            sq, factor, mine = sq[heard], factor[heard], mine[heard]
         else:
-            sq, factor = np.zeros((0, 2), np.int64), np.zeros(0)
+            sq, factor, mine = np.zeros((0, 2), np.int64), np.zeros(0), np.zeros(0, bool)
         factor.setflags(write=False)
+        mine.setflags(write=False)
+        self.mine[key] = mine  # (which take their note's own velocity: factor)
         got = self.got[key] = (sq, factor)
         return got
 
@@ -736,3 +750,12 @@ class KeyGrid:
             return np.ones(len(starts))
         at = np.minimum(np.searchsorted(sq[:, 0], starts), len(sq) - 1)
         return np.where(sq[at, 0] == starts, factor[at], 1.0)
+
+    def own(self, key, starts):
+        """Which of a key's notes (start ticks) have their note's own velocity from its loudness line: their factor
+        is then of 127, not of the shape's velocity."""
+        sq, _ = self.made(key)
+        if not len(sq):
+            return np.zeros(len(starts), bool)
+        at = np.minimum(np.searchsorted(sq[:, 0], starts), len(sq) - 1)
+        return (sq[at, 0] == starts) & self.mine[key][at]

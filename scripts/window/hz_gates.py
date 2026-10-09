@@ -10,7 +10,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
 from notes.hzbass import (AUTO, AUTO_MOST, EXTRAS, HZ_DEFAULTS, TUNE, all_tones, clean_fit, clean_from, clean_extra,
-                          clean_fx, clean_lfo, clean_loop, clean_off, clean_sustain, clean_tones, fit_length,
+                          clean_fx, clean_lfo, clean_line, clean_loop, clean_off, clean_sustain, clean_tones, fit_length,
                           held_fixed, left_edge, sound_span)
 from window import look
 from window.hz_effects import AMOUNT
@@ -327,6 +327,18 @@ class HzGates:
             self.fx.canvas.pack_forget()
         self.app.schedule_autosave()
 
+    def on_loud(self):
+        """The Loudness button: shows / hides the loudness pane (off to start with, user), under the effects pane."""
+        pane = self.loudness
+        if self.app.hz_loud.get():
+            pane.box.pack(side="bottom", fill="x",
+                          before=self.fx.canvas if self.fx.canvas.winfo_manager() else self.notes_box)
+            pane.redraw()
+        else:
+            pane.edit = None
+            pane.box.pack_forget()
+        self.app.schedule_autosave()
+
     def commit_fx(self, before):
         """The effects' lines changed: one undo step. before = FxPane.state() to go back to if it's
         called off."""
@@ -404,7 +416,7 @@ class HzGates:
                        **custom_settings(app.custom_defaults))
             new.update(fill="spam", pts=box_frame(app.hz_start, lo, app.hz_start + sound_span(dict(fx, tones=tones)), hi),
                        hz=dict(self.new_hz(bpm), tones=copy.deepcopy(tones), grow=True, own=True,
-                               **copy.deepcopy(fx)))  # (its own copy)
+                               **copy.deepcopy(fx), **({"loud": copy.deepcopy(self.loud)} if self.loud else {})))
             new.pop("range", None)  # (no gate Range with Hz bass, user)
             if not app.confirm_big([new]):
                 return self.call_off(before, before_fx)
@@ -418,12 +430,13 @@ class HzGates:
         else:
             hz = dict(sh.get("hz") or self.new_hz(bpm))  # (none yet: the window's Gates and Pitch boxes)
             others = len(all_tones(hz)) > len(hz.get("tones") or ())  # (other layers' notes: the Hz bass stays)
-            for k in ("tones", "grow", "fx", "loop", "off", "amount", "from", "fit", "sustain", "lfo") + EXTRAS:
+            for k in ("tones", "grow", "fx", "loop", "off", "amount", "from", "fit", "sustain", "lfo", "loud") + EXTRAS:
                 hz.pop(k, None)
             new = copy.deepcopy(sh)
             if tones or others:
                 new["hz"] = dict(hz, **({"tones": tones} if tones else {}),
-                                 **({"grow": True} if self.grow.get() else {}), **copy.deepcopy(fx))
+                                 **({"grow": True} if self.grow.get() else {}), **copy.deepcopy(fx),
+                                 **({"loud": copy.deepcopy(self.loud)} if self.loud else {}))
                 if new["fill"] not in SPAM_FILLS:
                     new["fill"] = "spam"
                 if not sh.get("hz"):  # (a spam shape's first notes: its gate and Range come back if Hz bass is
@@ -461,6 +474,8 @@ class HzGates:
 
     def call_off(self, before, before_fx=None):
         self.tones, self.sel = before, set()
+        if self.target() is not None:  # (the layer's loudness line: the shape's, unchanged)
+            self.loud = clean_line((self.target().get("hz") or {}).get("loud"))
         if before_fx is not None:
             self.fxl, self.loops, self.off, self.froms, self.fits, self.sustains, self.lfo, self.extra = before_fx
         self.redraw()

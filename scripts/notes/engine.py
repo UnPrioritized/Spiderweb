@@ -19,7 +19,7 @@ from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX
 from notes.between import KINDS as BETWEEN_KINDS, clean_between
 from notes.envelope import env_values, velocity_env
 from notes.joined import clean_joined, is_joined, joined_paths
-from notes.hzbass import clean_hz, heard_layers, layers_of, velocity_factor, with_layers
+from notes.hzbass import clean_hz, heard_layers, layers_of, velocity_parts, with_layers
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
@@ -775,9 +775,10 @@ def _notes_tracks(sh, ppq, keys):
             tracks = cycle_turns(sh, raw, ppq)
     vel = env_velocities(env, raw[:, 0], t_lo, t_hi)
     if sh["kind"] == "custom" and own is None and (sh.get("hz") or {}).get("tones"):  # Hz bass velocity effects
-        factor = velocity_factor(sh, ppq, raw[:, 0], raw[:, 2])
-        if factor is not None:
-            vel = np.clip(np.floor(vel * factor + 0.5), 1, 127).astype(np.int64)
+        got = velocity_parts(sh, ppq, raw[:, 0], raw[:, 2])
+        if got is not None:  # (a note with a loudness line drawn: its own velocity instead of the shape's)
+            factor, mine = got
+            vel = np.clip(np.floor(np.where(mine, 127, vel) * factor + 0.5), 1, 127).astype(np.int64)
     return np.column_stack([raw, vel]), tracks
 
 

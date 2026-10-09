@@ -262,6 +262,7 @@ class HzView:
         self.show_status()
         self.layers.redraw()
         self.fx.redraw()
+        self.loudness.redraw()
         if self.synth_win:  # (the same lines there)
             self.synth_win.refresh()
         self.preview.shown = None
@@ -401,6 +402,6 @@ class HzView:
         elif got:  # Auto gates: what this note gets, and why
             text += "     " + tr("hz.auto_fixed" if got[2] else "hz.auto_mixed", off=f"{got[0]:.2f}",
                                  limit=f"{got[1]:g}")
-        if self.fx.says:
-            text = self.fx.says
+        if self.fx.says or self.loudness.says:
+            text = self.fx.says or self.loudness.says
         self.status.config(text=text)

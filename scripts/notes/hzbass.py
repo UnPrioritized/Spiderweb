@@ -13,7 +13,11 @@ until it's updated (the panel warns); a changed PPQ keeps the tone.
 
 Placed notes (the Hz bass window): hz["tones"] = [{"t": start in beats from the shape's left edge, "len": beats,
 "key": its tone, "cents": its own tune, "auto": its own Auto gates threshold (optional), "gate": "fixed" / "mixed" =
-its own gates while held, whatever the Hz bass's (optional, see own_gate), "id": its number (never reused in the shape), "to": its slides}, ...].
+its own gates while held, whatever the Hz bass's (optional, see own_gate), "id": its number (never reused in the shape), "to": its slides,
+"vel": its own loudness line (optional: [[u 0..1 along the note, velocity 1..127], ...]; its repeats take that
+velocity instead of the shape's, the effects still on it: velocity_parts)}, ...].
+hz["loud"] = the layer's loudness line (optional: [[beat, 0..1], ...] like an effect line): every repeat's velocity
+times it, after everything else, like a mixer's fader (0 = left out).
 Each tone makes repeats one wave apart for as long as it lasts; tones sounding together are a chord. A slide is
 made by the user and belongs to two tones: "to" = [{"id": the tone slid to, "out": lead out, "in": lead in
 (beats)}, ...]: the tone glides from `out` before this tone's end to `in` after the start of the other one (which
@@ -136,16 +140,23 @@ def key_range(sh):
 def velocity_factor(sh, ppq, starts, keys):
     """What the effects make of the velocity of a shape's notes (arrays: start ticks, keys): a number from 0 to 1
     for each to multiply it by, or None when there's no effect that changes it."""
+    got = velocity_parts(sh, ppq, starts, keys)
+    return None if got is None else got[0]
+
+
+def velocity_parts(sh, ppq, starts, keys):
+    """velocity_factor's numbers, and True for each note whose own note has a loudness line (tone["vel"]): its number
+    is then of 127, not of the shape's velocity. None when nothing changes the velocity."""
     if not has_fx(live(sh["hz"])) or not len(starts):
         return None
     grid = squares(sh, ppq)
     if not grid.loud:
         return None
-    out = np.ones(len(starts))
+    out, own = np.ones(len(starts)), np.zeros(len(starts), bool)
     for key in np.unique(keys):
         rows = np.flatnonzero(keys == key)
-        out[rows] = grid.factor(int(key), starts[rows])
-    return out
+        out[rows], own[rows] = grid.factor(int(key), starts[rows]), grid.own(int(key), starts[rows])
+    return out, own
 
 
 def squares(sh, ppq):
@@ -179,6 +190,8 @@ def shifted_hz(hz, d):
         t, end = n["t"] + d, n["t"] + n["len"] + d
         if end <= MIN_LEN:
             continue
+        if t < 0 and n.get("vel"):  # (cut at the edge: the rest of its loudness line)
+            n["vel"] = vel_part(dict(n, t=n["t"] + d), 0.0, end)
         n["t"], n["len"] = max(0.0, t), max(MIN_LEN, end - max(0.0, t))
         tones.append(n)
     if "tones" in hz:
@@ -193,6 +206,8 @@ def shifted_hz(hz, d):
         hz["fx"][name] = _turned_repeat(pts, d, loop[name]) if name in loop else _shifted_line(pts, d)
     for name, pts in (hz.get("amount") or {}).items():
         hz["amount"][name] = _shifted_line(pts, d)
+    if hz.get("loud"):
+        hz["loud"] = _shifted_line(hz["loud"], d)
     if hz.get("mod"):  # (the Free LFOs: counted that much later, so they stay in step too)
         phase = hz["mod"].get("phase", 0.0) + d
         hz["mod"].pop("phase", None)

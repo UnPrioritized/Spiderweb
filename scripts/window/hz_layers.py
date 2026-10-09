@@ -11,7 +11,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.system import double_click_ms
-from notes.hzbass import LAYER_NAME, LAYERS, SOUND, all_tones, fit_length, layers_of, left_edge, with_layers
+from notes.hzbass import LAYER_NAME, LAYERS, NOT_SOUND, SOUND, all_tones, fit_length, layers_of, left_edge, with_layers
 from roll.roll_shared import SLOT_COLORS
 from window import look
 from window.hz_gates import hz_keys, hz_made
@@ -85,7 +85,11 @@ class LayerStrip:
 
     def show(self, on):
         if on:
-            self.box.pack(side="left", fill="y", before=self.win.notes_box)
+            # (before the panes under the notes too: they then start after the list, in step with the notes)
+            win = self.win
+            under = (win.loudness.box, win.fx.canvas, win.notes_box)
+            first = next(w for w in win.pack_slaves() if w in under)
+            self.box.pack(side="left", fill="y", before=first)
             self.redraw()
         else:
             self.settle()
@@ -382,8 +386,9 @@ class LayerStrip:
         if hz is None or not hz.get("layers"):
             return
         every = layers_of(hz)
-        every[k] = dict({key: v for key, v in every[k].items() if key not in SOUND or key == "tones"},
-                        **{key: copy.deepcopy(v) for key, v in every[i].items() if key in SOUND and key != "tones"})
+        every[k] = dict({key: v for key, v in every[k].items() if key not in SOUND or key in NOT_SOUND},
+                        **{key: copy.deepcopy(v) for key, v in every[i].items()
+                           if key in SOUND and key not in NOT_SOUND})
         self.put(with_layers(hz, every), tr("hz.step_layer_sound"))
 
     def flag(self, i, key):

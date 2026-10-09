@@ -5,6 +5,7 @@ import math
 
 import numpy as np
 
+from notes.envelope import env_values
 from notes.hz_settings import FAST, LOOP, LOOP_SHAPES
 
 
@@ -23,6 +24,30 @@ def bent_part(u, bend):
 def bend_of(p):
     """A point's bend as a number (nan = hold)."""
     return (math.nan if p[2] == "hold" else float(p[2])) if len(p) > 2 else 0.0
+
+
+def note_vel(n, beat):
+    """A note's own velocity at beat (an array, counted like its "t") from its loudness line (tone["vel"]; before
+    its start / after its end: as at them), or None when it has none (it takes the Hz bass's velocity)."""
+    pts = n.get("vel")
+    if not pts:
+        return None
+    u = np.clip((np.asarray(beat, float) - n["t"]) / max(n["len"], 1e-12), 0.0, 1.0)
+    return env_values(pts, u)
+
+
+def vel_part(n, t, span):
+    """The part of note n's loudness line from beat t for span beats, as a line of its own (u 0..1 over that part),
+    or None when it has none: for a note made from it (an arpeggio's step, a note cut at the left edge)."""
+    pts = n.get("vel")
+    if not pts:
+        return None
+    u0, u1 = (t - n["t"]) / max(n["len"], 1e-12), (t + span - n["t"]) / max(n["len"], 1e-12)
+    if u1 - u0 <= 1e-12:
+        return [[0.0, float(note_vel(n, t))]]
+    a, b = env_values(pts, np.clip([u0, u1], 0.0, 1.0))
+    return ([[0.0, float(a)]] + [[(p[0] - u0) / (u1 - u0), p[1]] for p in pts if u0 < p[0] < u1]
+            + [[1.0, float(b)]])
 
 
 def line_at(pts, beat, every=None):

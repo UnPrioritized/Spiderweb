@@ -2,7 +2,8 @@
 places a note at once, and it follows the mouse (snapped to the nearest grid line; Shift = not) until the button is let go; a note that's
 there is moved the same way, either end changes its length, Ctrl+drag (or a drag with Select) selects with a box, Delete removes the
 selected ones, a double click removes the note under it. The key of the note held with the mouse sounds on the MIDI-out device. The window has its own snap.
-Under the notes: the effects pane (hz_effects.py), one line for each effect over all the notes.
+Under the notes: the effects pane (hz_effects.py), one line for each effect over all the notes, and the loudness pane
+(hz_loud.py): each note's loudness line and the layer's.
 The red line is the tone travelling through the notes: it jumps at the next note unless its dots are dragged (lead
 out of one note, lead in of the next), then it slides.
 
@@ -26,13 +27,14 @@ from files.about import ICONS
 from files.lang import tr
 from files.mathexpr import fmt
 from notes.engine import CLASH
-from notes.hzbass import AUTO, AUTO_MOST, FX, all_tones, clean_tones, left_edge
+from notes.hzbass import AUTO, AUTO_MOST, FX, all_tones, clean_line, clean_tones, left_edge
 from roll.roll_shared import grab_while_panning
 from roll.zoombar import add_zoom_bars
 from window import look
 from window.hz_effects import FxPane
 from window.hz_layers import LayerStrip
 from window.hz_live import LiveKeys
+from window.hz_loud import LoudPane
 from window.hz_preview import Preview
 from window.hz_synth import open_synth
 from window.preview_settings import open_preview_settings
@@ -209,8 +211,12 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         Tooltip(b, tr("hz.layers_btn_tip"))
         fx_box = ttk.Checkbutton(f, text=tr("hz.fx"), variable=app.hz_fx, command=self.on_fx, style="Toolbutton",
                                  takefocus=False)
-        fx_box.pack(side="left", padx=(0, 10))
+        fx_box.pack(side="left", padx=(0, 6))
         Tooltip(fx_box, tr("hz.fx_tip"))
+        b = ttk.Checkbutton(f, text=tr("hz.loud"), variable=app.hz_loud, command=self.on_loud, style="Toolbutton",
+                            takefocus=False)
+        b.pack(side="left", padx=(0, 10))
+        Tooltip(b, tr("hz.loud_tip"))
         line_box = ttk.Checkbutton(f, text=tr("hz.line"), variable=app.hz_line, command=self.on_line)
         line_box.pack(side="left", padx=(0, 10))
         Tooltip(line_box, tr("hz.line_tip"))
@@ -227,6 +233,8 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.status.pack(side="bottom", fill="x")
         self.said_until = 0.0  # (say: a message stays until then)
         self.fx = FxPane(self)
+        self.loud = []  # the picked layer's loudness line (hz["loud"])
+        self.loudness = LoudPane(self)
         self.notes_box = tk.Frame(self)  # the notes with the main piano roll's scrollbars (zoombar.py)
         self.notes_box.pack(fill="both", expand=True)
         c = self.canvas = tk.Canvas(self.notes_box, background=look.HZ_BG, highlightthickness=0, takefocus=True)
@@ -234,6 +242,7 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         add_zoom_bars(self.notes_box, self, c)
         self.layers = LayerStrip(self)
         self.on_fx()
+        self.on_loud()
         self.on_layers()
         self.pencil = ("@" + os.path.join(ICONS, "pencil.cur").replace("\\", "/"),)  # its tip is the spot pointed at
         try:
@@ -262,6 +271,7 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
             c.bind(k, lambda e: (self.drag or self.fx.paste_points()  # nothing while the mouse is held)
                                  or self.paste_notes(self.play_line_beat()), "break")[1])
         c.bind("<Escape>", lambda e: self.on_escape())
+        c.bind("<Return>", lambda e: self.loudness.confirm())  # (the last loudness line drawn: done)
         self.bind("<space>", self.on_space)  # (anywhere in the window: the buttons don't take the keyboard)
         for k in ("<Control-a>", "<Control-A>"):
             c.bind(k, lambda e: (self.drag or self.select(range(len(self.tones))), "break")[1])
@@ -313,6 +323,7 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
             self.drop_drag()
         if sh is not None or self.fx_of is not None:  # (no Hz bass yet: the lines picked stay for the first note)
             self.set_fx(hz)
+            self.loud = clean_line(hz.get("loud"))
             self.fx_of = id(sh) if sh is not None else None
         if sh is None:
             text = (tr("hz.hint_new", beat=fmt(self.app.hz_start + 1)) if self.app.hz_start is not None

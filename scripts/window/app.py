@@ -187,6 +187,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.hz_clip = None  # notes copied in it (HzWindow.copy_notes)
         self.hz_pos = ""  # its size and place ("WxH+x+y", remembered in the autosave)
         self.hz_fx_h = 0  # its effects pane's height in pixels, dragged by its top edge (0 = as it starts)
+        self.hz_loud_h = 0  # ... its loudness pane's (hz_loud.py)
         self.hz_start = None  # the beat picked with the Hz bass tool for a new Hz bass (roll_hz.py)
         self.hz_defaults = {"lo": 48, "hi": 58}  # the keys a new Hz bass repeats
         self.hz_preview = clean_preview({})  # the Hz bass preview's settings (hz_preview.py; with the window's)
@@ -228,6 +229,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.hz_line = tk.BooleanVar(value=True)  # the Hz bass window shows its red line
         self.hz_fx = tk.BooleanVar(value=False)  # the Hz bass window shows its effects pane
         self.hz_layers = tk.BooleanVar(value=False)  # ... and its layers strip (off to start: plain Hz bass users, user)
+        self.hz_loud = tk.BooleanVar(value=False)  # ... and its loudness pane (off to start, user)
         self.show_lines = tk.BooleanVar(value=True)
         self.show_notes = tk.BooleanVar(value=True)
         self.channel_mode = tk.StringVar(value="single")
