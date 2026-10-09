@@ -366,11 +366,14 @@ class HzWindow(HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
 
     def show_clash(self, sh):
         """The orange text while notes of a layer sound on a key another layer sounds at the same time: how many,
-        and that they go on another channel (engine.layered_notes). Not while the notes wait for a slow drag."""
+        and that they go on another channel (engine.layered_notes). Multi channel only: As drawn (overlaps
+        kept) and Single channel (overlaps fixed) keep them on the one channel (user). Not while the notes wait for
+        a slow drag."""
         if self.app.notes_late:
             return
         n = 0
-        if sh is not None and len((sh.get("hz") or {}).get("layers") or ()) > 1:
+        if (sh is not None and self.app.channel_mode.get() == "auto"
+                and len((sh.get("hz") or {}).get("layers") or ()) > 1):
             tracks = self.app.notes_tracks(sh)[1]
             n = int(np.count_nonzero(np.asarray(tracks) >= CLASH)) if tracks is not None else 0
         text = tr("hz.clash_one") if n == 1 else tr("hz.clash", n=f"{n:,}") if n else ""

@@ -177,13 +177,14 @@ class Preview:
             return
         notes, tracks = (self.app.notes_tracks(sh) if sh is not None and all_tones(sh.get("hz") or {})  # (any layer's)
                          else (None, None))
-        shape = (id(sh), left_edge(sh)) if sh is not None else None
+        multi = self.app.channel_mode.get() == "auto"
+        shape = (id(sh), left_edge(sh), multi) if sh is not None else None
         if notes is self.notes and (ppq, bpm) == (self.ppq, self.bpm) and shape == self.shape:
             return
         old, same_time = self.ev, (ppq, bpm) == (self.ppq, self.bpm)
         self.notes, self.ppq, self.bpm, self.shape = notes, ppq, bpm, shape
-        # (a layer's notes clashing with another's: on another channel, as in the MIDI)
-        chans = np.asarray(tracks) // CLASH if tracks is not None and len(tracks) else None
+        # (a layer's notes clashing with another's: on another channel with Multi channel, as in the MIDI)
+        chans = np.asarray(tracks) // CLASH if multi and tracks is not None and len(tracks) else None
         ev = events(notes, ppq, bpm, chans) if notes is not None and len(notes) else None
         if ev is None or len(ev) <= 3:  # (no notes, or only ones above key 127, which can't sound: nothing to play)
             self.ev, self.span, self.last = None, (0, 0), 0

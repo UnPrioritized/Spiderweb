@@ -1032,10 +1032,9 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
             unit_slots = unit_slots + (unit_slots + 6) // 15
         slot_of = [pin if u is None else unit_slots[u] for u, pin in zip(unit_of, pinned)]
         count = int(unit_slots.max()) + 1 if len(units) else 0
-    else:  # (a Hz bass layer's clashing notes: slots of their own here too)
-        slot_of = [pin if pin is not None else np.asarray(tr, np.int64) // CLASH if tr is not None and len(tr) else 0
-                   for pin, tr in zip(pinned, tracks)]
-        count = max([int(np.max(s)) + 1 for s, p in zip(slot_of, pinned) if p is None] or [0])
+    else:  # (a Hz bass layer's clashing notes too: one channel, user)
+        slot_of = [0 if pin is None else pin for pin in pinned]
+        count = 1 if any(p is None for p in pinned) else 0
     count = max(count, top)
     notes = np.empty((sum(len(lst) for lst in note_lists), 6), np.int64)
     at = 0

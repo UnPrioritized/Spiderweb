@@ -1054,6 +1054,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.shapes_changed()
         self.sync_custom()
         self.sync_colours()
+        if self.hz_window:
+            self.hz_window.show_clash(self.hz_window.target())  # (Multi channel only)
         if self.channel_mode.get() == "auto":
             self.tips.show("channels", wait=True)
 
