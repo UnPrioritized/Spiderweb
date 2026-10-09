@@ -5,21 +5,22 @@ the Help window; which ones go where: see help_texts.py)."""
 
 import os
 import re
-import subprocess
 import sys
 import tkinter as tk
 import webbrowser
-from tkinter import messagebox, ttk
+from tkinter import font as tkfont, messagebox, ttk
 
 from files.lang import tr
 from files.about import BANNER, BANNER_HALF, HERE, LICENSE, VERSION, WEBSITE
-from files.system import WINDOWS
+from files.system import WINDOWS, open_path
 from window import look
-from window.widgets import remember_place
+from window.widgets import placed, remember_place
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS, NEXT, SECTION_NAMES, SECTIONS, SEE, TOOL_TOPICS, TOPICS
 from window.updates import often_box
 
 TOOL_TIPS = set(TOOL_TOPICS.values()) | set(DRAWER_TOOL_TOPICS.values())
+# the tips' place once dragged (window_places; "tip" was saved where the first tip showed, moved or not: left behind)
+TIP_PLACE = "tip_moved"
 CLIPS = os.path.join(getattr(sys, "_MEIPASS", HERE), "clips")  # (the .exe carries them inside)
 
 
@@ -186,7 +187,11 @@ class Tips:
         self.popup = None
 
     def closed(self):
-        """A tip was closed: the next one waiting, if any (skipping ones seen in the meantime)."""
+        """A tip was closed: the next one waiting, if any (skipping ones seen in the meantime). Tips turned off:
+        the waiting ones are dropped too."""
+        if not self.on.get():
+            self.waiting = []
+            return
         while self.waiting and (self.popup is None or not self.popup.winfo_exists()):
             topic_id, parent, force = self.waiting.pop(0)
             if parent is None or parent.winfo_exists():
@@ -253,12 +258,28 @@ class TipPopup(tk.Toplevel):
         area = getattr(p, "roll", None) or getattr(p, "canvas", None) or p
         x = area.winfo_rootx() + area.winfo_width() - self.winfo_reqwidth() - int(16 * self.scale)
         y = area.winfo_rooty() + int(16 * self.scale)
-        if "tip" not in getattr(self.tips.app, "window_places", {}):  # (moved once: it stays where it was put)
-            self.geometry(f"+{max(0, x)}+{max(0, y)}")
-        if not getattr(self, "remembered", False):
-            self.remembered = True
-            remember_place(self, "tip")
+        # dragged once: every tip stays where it was put; until then each one goes to its own window's corner
+        places = self._root().__dict__.setdefault("window_places", {})
+        moved = placed(self, places.get(TIP_PLACE, ""))
+        if moved:
+            self.put = None
+            self.geometry(moved)
+        else:
+            self.put = (max(0, x), max(0, y))
+            self.geometry("+%d+%d" % self.put)
+        if not getattr(self, "watched", False):
+            self.watched = True
+            self.bind("<Configure>", self.keep_place, add="+")
         self.deiconify()
+
+    def keep_place(self, e):
+        """Remembered only when the user moved it (not where it was put)."""
+        if e.widget is not self or not self.winfo_ismapped():
+            return
+        m = re.search(r"\+(-?\d+)\+(-?\d+)$", self.wm_geometry())
+        if m and (self.put is None or abs(int(m[1]) - self.put[0]) > 2 or abs(int(m[2]) - self.put[1]) > 2):
+            self._root().window_places[TIP_PLACE] = f"+{m[1]}+{m[2]}"
+            self.put = None
 
     def got_it(self):
         """Close it, or go on to the tip that follows this one (NEXT) if that wasn't seen yet."""
@@ -270,9 +291,9 @@ class TipPopup(tk.Toplevel):
             self.tips.closed()
 
     def more(self):
+        """The Help window at this topic. A tip waiting stays waiting (it would take the keyboard from Help)."""
         open_help(self.tips.app, self.topic)
         self.destroy()
-        self.tips.closed()
 
 
 class HelpWindow(tk.Toplevel):
@@ -288,7 +309,9 @@ class HelpWindow(tk.Toplevel):
         self.minsize(int(600 * s), int(360 * s))
         remember_place(self, "help")
         self.topic = None
+        self.drawn = None  # (topic, search) on the page now: the same again isn't drawn twice
         self.clips = []  # the Clip objects playing in the shown topic
+        self.pictures = {}  # clips/<name>.png read once while the window is open
 
         left = ttk.Frame(self, padding=(8, 8, 4, 8))
         left.pack(side="left", fill="y")
@@ -303,6 +326,8 @@ class HelpWindow(tk.Toplevel):
         tree_box = ttk.Frame(left)
         tree_box.pack(fill="both", expand=True)
         self.tree = ttk.Treeview(tree_box, show="tree", selectmode="browse")
+        font = tkfont.nametofont(look.TK)  # (wide enough for the longest title, in any language)
+        self.tree.column("#0", width=max(font.measure(t["title"]) for t in TOPICS) + int(48 * s))
         sb = ttk.Scrollbar(tree_box, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side="left", fill="both", expand=True)
@@ -338,8 +363,11 @@ class HelpWindow(tk.Toplevel):
         self.text.tag_configure("hit", background=look.SEARCH_HIT)
         self.text.tag_configure("link", foreground=look.LINK)
         self.text.tag_configure("hover", underline=True)
+        # (a long bullet line wraps under its text, not under the •)
+        self.text.tag_configure("bullet", lmargin2=tkfont.Font(font=self.text.cget("font")).measure("•  "))
         self.text.config(state="disabled")
         self.bind("<Escape>", lambda e: self.destroy())
+        self.bind("<F1>", lambda e: "break")  # (already open: stays on the page being read)
         self.bind("<Control-f>", lambda e: (search.focus_set(), search.select_range(0, "end")))
         self.bind("<Key>", lambda e: self.type_to_search(e, search))
         self.fill_list()
@@ -414,11 +442,18 @@ class HelpWindow(tk.Toplevel):
         self.show(topic_id)
 
     def show(self, topic_id):
-        self.topic = topic_id
+        """The topic's page (None: "Nothing found", the open topic kept for when the search finds it again)."""
+        if (topic_id, self.query.get()) == self.drawn:
+            return
+        self.drawn = (topic_id, self.query.get())
+        if topic_id is not None:
+            self.topic = topic_id
         t = self.text
         t.config(state="normal")
-        t.delete("1.0", "end")
         self.stop_clip()
+        for w in t.winfo_children():  # (deleting the text leaves them to Python, with their pictures)
+            w.destroy()
+        t.delete("1.0", "end")
         if topic_id is None:
             t.insert("end", tr("help.nothing_found_try_fewer_or_other"), "section")
         else:
@@ -435,6 +470,9 @@ class HelpWindow(tk.Toplevel):
                         t.insert("end", "\n")
                 else:
                     t.insert("end", part)
+            for i in range(1, int(t.index("end").split(".")[0])):
+                if t.get(f"{i}.0") == "•":
+                    t.tag_add("bullet", f"{i}.0", f"{i}.end")
             for w in set(self.query.get().lower().split()):
                 start = "1.0"
                 while True:
@@ -489,9 +527,9 @@ class HelpWindow(tk.Toplevel):
                    command=lambda: webbrowser.open(WEBSITE)).pack(side="left", padx=(0, 8))
         if os.path.exists(LICENSE):
             ttk.Button(row, text=tr("help.license"), takefocus=False,
-                       command=lambda: subprocess.Popen(["notepad.exe", LICENSE])).pack(side="left")
+                       command=lambda: open_path(LICENSE, text=True)).pack(side="left")
         ttk.Button(row, text=tr("help.open_spiderweb_s_folder"), takefocus=False,
-                   command=lambda: os.startfile(HERE)).pack(side="left", padx=(8, 0))
+                   command=lambda: open_path(HERE)).pack(side="left", padx=(8, 0))
         self.text.insert("end", "\n\n")
         self.embed(row)
         # updates: how often to look, and looking now (the answer shows next to the button)
@@ -521,12 +559,13 @@ class HelpWindow(tk.Toplevel):
         path = os.path.join(CLIPS, name + ".gif")
         picture = os.path.join(CLIPS, name + ".png")
         if not os.path.exists(path) and os.path.exists(picture):
-            try:
-                image = tk.PhotoImage(file=picture)
-            except tk.TclError:
-                return False
+            image = self.pictures.get(name)
+            if image is None:
+                try:  # (kept in self.pictures, or Tk forgets it)
+                    image = self.pictures[name] = tk.PhotoImage(file=picture)
+                except tk.TclError:
+                    return False
             label = tk.Label(self.text, image=image, borderwidth=0)
-            label.image = image  # (Tk forgets a picture nobody keeps)
             self.embed(label)
             return True
         try:

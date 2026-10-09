@@ -59,6 +59,24 @@ def dark_system():
     return False
 
 
+def open_path(path, text=False):
+    """Open a folder, or a file in its usual program (text: a plain text file without a known ending, Notepad on
+    Windows). False if it couldn't be opened."""
+    import os
+    import subprocess
+    try:
+        if WINDOWS:
+            if text:
+                subprocess.Popen(["notepad.exe", path])
+            else:
+                os.startfile(path)
+        else:  # (Linux: the desktop's own opener)
+            subprocess.Popen(["xdg-open", path])
+        return True
+    except (OSError, AttributeError):
+        return False
+
+
 def error_box(title, msg):
     """An error message that works without a Spiderweb window (e.g. it couldn't start). Nothing if it can't show."""
     if WINDOWS:

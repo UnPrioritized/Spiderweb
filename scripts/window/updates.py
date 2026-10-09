@@ -34,6 +34,7 @@ class Updates:
         self.seen_version = None
         self.old_user = False  # there were window settings: not the very first start
         self.running = False
+        self.reports = []  # the About page's lines waiting for the running check's answer
         self.popup = None
         self.question = None
 
@@ -64,7 +65,8 @@ class Updates:
         if self.often is None:
             self._started = time.time()
             self.app.after(1000, self._wait_for_tips)
-        elif self.often != "off" and time.time() - self.last >= PERIOD[self.often]:
+        elif self.often != "off" and (time.time() - self.last >= PERIOD[self.often]
+                                      or self.last > time.time()):  # (a clock once set ahead: due now)
             self.app.after(3000, self.check)
 
     def _wait_for_tips(self):
@@ -89,7 +91,9 @@ class Updates:
 
     def check(self, report=None):
         """Look on GitHub in the background. report(text): the About page's line, told how it went (the check at
-        start has none: nothing shows unless there's an update)."""
+        start has none: nothing shows unless there's an update). Asked while a check runs: told when that one ends."""
+        if report:
+            self.reports.append(report)
         if self.running:
             return
         self.running = True
@@ -109,18 +113,21 @@ class Updates:
                 self.app.after(200, wait)
                 return
             self.running = False
+            reports, self.reports = self.reports, []
+
+            def tell(msg):
+                for r in reports:
+                    r(msg)
             if "error" in result:
-                if report:
-                    report(tr("updates.no_connection"))
+                tell(tr("updates.no_connection"))
                 return
             self.last = time.time()
             self.app.schedule_autosave()
             if result["found"]:
-                if report:
-                    report(tr("updates.found", version=result["found"][0]["version"]))
+                tell(tr("updates.found", version=result["found"][0]["version"]))
                 self.show_popup(result["found"])
-            elif report:
-                report(tr("updates.newest", VERSION=VERSION))
+            else:
+                tell(tr("updates.newest", VERSION=VERSION))
 
         self.app.after(200, wait)
 
@@ -140,8 +147,9 @@ def often_box(parent, updates, width=26):
     return box
 
 
-def on_top(win, parent, name):
-    """A small window over Spiderweb (and over any open tip), in the middle of it (or where it was last: name)."""
+def on_top(win, parent, name, focus=True):
+    """A small window over Spiderweb (and over any open tip), in the middle of it (or where it was last: name).
+    focus=False: the keyboard stays where it is."""
     win.transient(parent)
     win.resizable(False, False)
     win.attributes("-topmost", True)
@@ -151,7 +159,8 @@ def on_top(win, parent, name):
     win.geometry(f"+{max(0, x)}+{max(0, y)}")
     remember_place(win, name)
     win.lift()
-    win.focus_force()
+    if focus:
+        win.focus_force()
 
 
 class UpdateQuestion(tk.Toplevel):
@@ -159,6 +168,7 @@ class UpdateQuestion(tk.Toplevel):
 
     def __init__(self, updates):
         app = updates.app
+        f = app.focus_get()  # (before this window exists)
         super().__init__(app)
         self.updates = updates
         s = app.scale
@@ -174,7 +184,10 @@ class UpdateQuestion(tk.Toplevel):
         ttk.Label(box, text=tr("updates.question_later"), foreground=look.HINT).pack(anchor="w", pady=(8, 10))
         ttk.Button(box, text=tr("updates.ok"), command=self.ok).pack(side="right")
         self.bind("<Return>", lambda e: self.ok())
-        on_top(self, app, "update_question")
+        # it shows while you work: the keyboard stays where it was (an Enter meant for a box doesn't answer it)
+        on_top(self, app, "update_question", focus=False)
+        if f is not None:
+            self.after(30, lambda: f.focus_force() if f.winfo_exists() else None)
 
     def ok(self):
         self.updates.set_often(self.var.get())
