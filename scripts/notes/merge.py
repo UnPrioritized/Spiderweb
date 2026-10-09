@@ -127,6 +127,22 @@ def merged(parts, right, ppq, keys):
     return gate_merge(b, a, True) if right else gate_merge(a, b, False)
 
 
+def edge_moves(m):
+    """How far each part's notes' first start and last end went in the merge, [(d0, d1)] in beats (the sliding
+    one's rows each slid their own way), for giving the parts the merged shape's velocities on Split."""
+    rows = part_rows(m["parts"], m["ppq"], m["keys"])
+    got = merged(rows, m["right"], m["ppq"], m["keys"])
+    if got is None or not all(len(r) for r in rows):
+        return [(0.0, 0.0)] * 2
+    now = np.concatenate(got)
+    first = int(rows[1][:, 4].min())  # (the second part's tracks come after the first's)
+    out = []
+    for i, was in enumerate(rows):
+        mine = now[(now[:, 4] >= first) == (i == 1)]
+        out.append(((mine[:, 0].min() - was[:, 0].min()) / m["ppq"], (mine[:, 1].max() - was[:, 1].max()) / m["ppq"]))
+    return out
+
+
 def recipe_notes(m):
     """The merged shape's packed notes (custom.notes_shape) made from its recipe, or None. Leftover rows stay in
     it (user: never removed without the user's say)."""

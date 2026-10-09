@@ -15,7 +15,7 @@ from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live,
 from notes.bezier import anchor_count, nearest, split
 from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_path
-from notes.merge import merged, part_rows, reshaped_parts
+from notes.merge import edge_moves, merged, part_rows, reshaped_parts
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
@@ -322,6 +322,12 @@ class JoinSplit:
                 back = copy.deepcopy(m["parts"])
                 for p in back:
                     p["pts"] = [[b + db, q + dp] for b, q in p["pts"]]
+            if not sh.get("own_vel"):  # (its velocity was changed: each shape takes the line where its notes sat)
+                moves = [(0.0, 0.0)] * 2 if got else edge_moves(m)
+                for p, (d0, d1) in zip(back, moves):
+                    lo, hi = span(p)
+                    piece_velocity(p, sh, (lo + d0, hi + d1), span(sh))
+                    p.pop("own_vel", None)
             self.replace_shape(i, back, velocity=False, name=tr("join_split.split_back_into_the_old_shapes"))
             self.status.config(text=tr("join_split.back_to_the_shapes_it_was", n=2))
             return
