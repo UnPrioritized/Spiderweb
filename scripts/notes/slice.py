@@ -316,9 +316,9 @@ def clip_segment(a, b, box):
 
 def slice_notes(sh, notes, tracks, a, b, ppq):
     """Pasted notes (a custom shape holding notes, custom.py) cut by the Slice tool along a-b (beats, keys), by time
-    (user, 2026-10-10: it needn't go all the way across): on each key row the line crosses, the notes after the
-    spot it crosses at go to a new shape, a note sounding there cut in two at that tick; rows it doesn't cross stay
-    whole. notes: its (start, end, key, velocity) notes as they sound now, tracks: each one's track. -> the two
+    (user, 2026-10-10: it needn't go all the way across): on each key row the line crosses, the notes before the
+    spot it crosses at go to a new shape (user), a note sounding there cut in two at that tick; rows it doesn't cross
+    stay whole with the notes after it. notes: its (start, end, key, velocity) notes as they sound now, tracks: each one's track. -> the two
     halves (each a pasted-notes shape around its own notes, sh's other settings kept), or None: the line touches
     no note's row between its first note and last end, or one side would be empty."""
     a, b = np.asarray(a, float), np.asarray(b, float)
@@ -337,9 +337,9 @@ def slice_notes(sh, notes, tracks, a, b, ppq):
     if not touched:
         return None
     lo, hi = notes[:, 0], notes[:, 1]
-    left, right = ~on | (lo < x), on & (hi > x)
+    rest, before = ~on | (hi > x), on & (lo < x)
     parts = []
-    for keep, s0, s1 in ((left, lo, np.where(on, np.minimum(hi, x), hi)), (right, np.maximum(lo, x), hi)):
+    for keep, s0, s1 in ((rest, np.where(on, np.maximum(lo, x), lo), hi), (before, lo, np.minimum(hi, x))):
         n = np.column_stack([s0, s1 - s0, notes[:, 2], notes[:, 3], tracks])[keep]
         if not len(n):
             return None

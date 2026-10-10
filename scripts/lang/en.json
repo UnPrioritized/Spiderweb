@@ -2262,7 +2262,7 @@
   "",
   "Funnels are cut through their notes: the line has to go all the way across them. Each piece keeps the funnel's notes on its side (a note across the line is cut in two there) and shows only its side of the funnel. A setting changed on a piece (gate, Inside, wall) changes only that piece. Changing a piece's points or curves (or Turn into a complete shape) makes it a whole funnel again, with all its notes.",
   "",
-  "Pasted notes are cut by time, and the line doesn't have to go all the way across: on each key row it crosses, the notes after the line become a new shape and a note it goes through is cut in two there. Rows it doesn't cross stay whole. Both pieces are ordinary pasted notes. A velocity line, glue or pages on the pasted notes are kept in the pieces' notes as they sounded, but can't be changed any more.",
+  "Pasted notes are cut by time, and the line doesn't have to go all the way across: on each key row it crosses, the notes before the line become a new shape and a note it goes through is cut in two there. Rows it doesn't cross stay whole, together with the notes after the line. Both pieces are ordinary pasted notes. A velocity line, glue or pages on the pasted notes are kept in the pieces' notes as they sounded, but can't be changed any more.",
   "",
   "Only some shapes or part of them: draw a Select box (or several, with Ctrl) first, then pick Slice. Only the shapes the boxes selected are cut, and only where the slice line is inside a box.",
   "",
