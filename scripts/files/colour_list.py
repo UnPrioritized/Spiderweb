@@ -11,11 +11,11 @@ import json
 import os
 import re
 
-from files.about import HERE
+from files.about import USER
 from files.lang import tr
 from files.safefile import write_text
 
-FORMATS_FILE = os.path.join(HERE, "colour_formats.json")
+FORMATS_FILE = os.path.join(USER, "colour_formats.json")
 TAG = re.compile(r"\{\{|\}\}|\{[^{}\s]*\}?")
 GOOD = re.compile(r"^\{(n|n0|n:\d|hex|HEX|r|g|b|a)\}$")
 SEPS = {"line": "\n", "comma": ",", "space": " ", "none": ""}

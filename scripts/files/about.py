@@ -1,4 +1,4 @@
-"""The program's version and its folder (where autosave, shapes, output and errors.log go)."""
+"""The program's version and its folder (output goes there; autosave, settings, shapes, errors.log in user/)."""
 
 import os
 import sys
@@ -10,6 +10,31 @@ WEBSITE = "https://github.com/UnPrioritized/Spiderweb"  # new versions, the sour
 # the folder the .exe is in instead.
 HERE = (os.path.dirname(sys.executable) if getattr(sys, "frozen", False)
         else os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# The app's own files (autosave, settings, presets, saved shapes, errors.log): one folder, so the spiderweb folder
+# holds only the program and the user's own files
+USER = os.path.join(HERE, "user")
+# What older versions kept loose in the spiderweb folder (move_old_files puts them in USER)
+OLD_FILES = ("autosave.json", "autosave-backup.json", "look.json", "hz_presets.json", "hz_presets-broken.json",
+             "patterns.json", "curves.json", "curves-old.json", "rhythms.json", "colour_formats.json",
+             "packages.json", "errors.log", "errors-old.log", "shapes")
+
+
+def move_old_files():
+    """Moves what older versions kept loose next to Spiderweb into USER, once (a file already in USER wins and
+    the old one stays where it was). Never stops Spiderweb from starting."""
+    try:
+        os.makedirs(USER, exist_ok=True)
+        names = list(OLD_FILES) + [f for f in os.listdir(HERE) if f.startswith("autosave-kept-")
+                                   and f.endswith(".json")]
+    except OSError:
+        return
+    for name in names:
+        old, new = os.path.join(HERE, name), os.path.join(USER, name)
+        if os.path.exists(old) and not os.path.exists(new):
+            try:
+                os.replace(old, new)
+            except OSError:
+                pass
 
 # The window icons (made by make_icon.py); the .exe carries them inside, unpacked with the program
 ICONS = os.path.join(getattr(sys, "_MEIPASS", os.path.join(HERE, "scripts")), "icons")

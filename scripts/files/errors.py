@@ -1,4 +1,4 @@
-"""Errors: the details go to errors.log (next to spiderweb.py / Spiderweb.exe) and the user is told once per session.
+"""Errors: the details go to errors.log (user/ next to spiderweb.py / Spiderweb.exe) and the user is told once per session.
 The .exe and pythonw have no console, so without this an error would just be invisible."""
 
 import os
@@ -9,11 +9,11 @@ import time
 import traceback
 
 from files.lang import tr
-from files.about import HERE, VERSION
+from files.about import USER, VERSION
 from files.system import error_box
 
-LOG = os.path.join(HERE, "errors.log")
-OLD_LOG = os.path.join(HERE, "errors-old.log")  # errors.log moves here when it gets big
+LOG = os.path.join(USER, "errors.log")
+OLD_LOG = os.path.join(USER, "errors-old.log")  # errors.log moves here when it gets big
 MAX_LOG = 1_000_000  # bytes
 
 _app = None  # the window, once there is one

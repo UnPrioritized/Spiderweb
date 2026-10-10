@@ -21,3 +21,4 @@ scripts/bass/**/*.txt
 scripts/bass/**/*.lib
 scripts/bass/**/*.h
 .claude/
+user/

@@ -60,9 +60,9 @@ scanners also wrongly flag programs packed with PyInstaller. If you'd rather
 not run the .exe, run it from source instead (below): the code is all there
 to read.
 
-Your autosave, saved shapes and exported MIDI go in the same folder as the
-.exe. To update to a new version, replace just Spiderweb.exe in that folder;
-everything else stays.
+Exported MIDI goes in the same folder as the .exe; your autosave, settings,
+presets, saved shapes and errors.log go in its "user" folder. To update to a
+new version, replace just Spiderweb.exe in that folder; everything else stays.
 
 Spiderweb can look on GitHub for a new version when it starts (it asks you
 once how often: every start, once a day, week or month, or never; change it
@@ -100,10 +100,10 @@ Good to know
   that read 256-key MIDI (handy for tunings like 31edo). Most MIDI programs,
   Domino included, only read keys 0-127, and Spiderweb's own playback
   skips the keys above 127.
-- Everything you do is saved on its own (autosave.json). Each time Spiderweb
+- Everything you do is saved on its own (user/autosave.json). Each time Spiderweb
   starts, the previous session is also kept as autosave-backup.json; open it
   with Open... if something went wrong.
-- If Spiderweb runs into an error, the details go to errors.log in its
+- If Spiderweb runs into an error, the details go to user/errors.log in its
   folder. Please include that file when you report a problem (on the
   website's Issues page).
 

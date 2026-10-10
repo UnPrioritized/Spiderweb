@@ -9,12 +9,12 @@ window, which has its own dark look (synth_look.py, user: keep it as it is)."""
 import json
 import os
 
-from files.about import HERE
+from files.about import USER
 from files.safefile import write_text
 from files.system import WINDOWS, dark_system
 
 LOOKS = ("light", "dark", "windows")  # (saved as these; windows = follow the system's setting)
-LOOK_FILE = os.path.join(HERE, "look.json")
+LOOK_FILE = os.path.join(USER, "look.json")
 
 
 def read_look():

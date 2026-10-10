@@ -17,7 +17,7 @@ from tkinter import ttk, messagebox
 
 from files.lang import tr
 from files.mathexpr import calc, fmt, formula
-from files.project import HERE
+from files.about import USER
 from files.safefile import write_text
 from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_point, fit_symmetric, handle_lines,
                           held_axis, keep_symmetric, nearest, pen_handles, sample)
@@ -30,8 +30,8 @@ from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
 from window.panel_custom import GAP_COLOR
 from window.widgets import LocalUndo, Scrub, Tooltip, bad, good, remember_place
 
-PATTERNS_FILE = os.path.join(HERE, "patterns.json")
-OLD_CURVES_FILE = os.path.join(HERE, "curves.json")  # the funnel's saved curve formulas (before shapes of curves)
+PATTERNS_FILE = os.path.join(USER, "patterns.json")
+OLD_CURVES_FILE = os.path.join(USER, "curves.json")  # the funnel's saved curve formulas (before shapes of curves)
 LOOP_TOLERANCE = 0.02    # how closely the anchors + handles follow a pattern's formula when first edited, in keys
 SHAPE_TOLERANCE = 0.002  # the same for a shape, as a share of the curve's length
 GRAB = 7  # how near (pixels) a point has to be to be dragged

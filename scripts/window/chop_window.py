@@ -10,7 +10,7 @@ import os
 import tkinter as tk
 from tkinter import simpledialog, ttk
 
-from files.about import HERE
+from files.about import USER
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from files.safefile import write_text
@@ -22,7 +22,7 @@ from window.snap_picker import SnapPicker
 from window.tool_window import ORANGE, ToolWindow
 from window.widgets import Scrub, Tooltip, bad, good
 
-RHYTHMS_FILE = os.path.join(HERE, "rhythms.json")
+RHYTHMS_FILE = os.path.join(USER, "rhythms.json")
 CELLS = (1, 2, 3, 4, 6, 8)  # the strip's grid: cells per step
 
 

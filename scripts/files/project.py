@@ -26,13 +26,13 @@ from files import clipboard
 from files.domino_clip import DOMINO_STARTS, LONGEST, clip_data, dms_data, dms_path, get_from_clipboard, put_on_clipboard, read_notes
 from files.midi_out import MAX_DELTA, PPQ_WARN, long_silences, write_midi
 from files.playback import keep_saved
-from files.about import HERE, VERSION
+from files.about import HERE, USER, VERSION
 from files.safefile import write_bytes, write_text
 from files.snap import clean_snap
 from files.update_check import version_tuple
 from window.big_ask import ask as ask_big, ask_drums
 
-AUTOSAVE = os.path.join(HERE, "autosave.json")
+AUTOSAVE = os.path.join(USER, "autosave.json")
 OUTPUT_DIR = os.path.join(HERE, "output")
 
 

@@ -238,8 +238,8 @@ def offer_extras():
     import importlib
     import importlib.util
     import json
-    from files.about import HERE
-    path = os.path.join(HERE, "packages.json")
+    from files.about import USER
+    path = os.path.join(USER, "packages.json")
     try:
         with open(path, encoding="utf-8") as f:
             declined = list(json.load(f).get("declined", []))
@@ -337,6 +337,8 @@ if __name__ == "__main__":
             sys.exit(0)
     except (AttributeError, OSError):  # not Windows: no lock
         pass
+    from files.about import move_old_files
+    move_old_files()
     if not check_numpy():
         sys.exit(1)
     try:

@@ -20,7 +20,7 @@ from notes.custom import (DRAWN_FRAME, ROLES, area_paint, areas_filled, carry_ar
 from roll.roll_shared import SLOT_COLORS
 from notes.pattern import has_formula, moved_formulas
 from notes.slice import is_closed, slice_stroke
-from files.about import HERE
+from files.about import USER
 from files.safefile import write_text
 from files.clipboard import get_text, put_text
 from files.share import LONG_LINE, ShareError, drawing_line, made_by, read_drawing, unpack
@@ -35,7 +35,7 @@ from window.layers import DrawerLayers, pasted
 from window.sticky import BEND, REACH, Targets, key_points
 from window.widgets import REDO_KEYS, UNDO_KEYS, Tooltip, remember_place, symmetry_menu
 
-LIBRARY = os.path.join(HERE, "shapes")
+LIBRARY = os.path.join(USER, "shapes")
 # Always in the library (not files). A saved shape with the same name is used instead; deleting it brings these back.
 BUILT_IN = {
     "Circle": [{"kind": "ellipse", "box": [0, 0, 1, 1]}],

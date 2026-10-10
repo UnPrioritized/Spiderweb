@@ -1,7 +1,7 @@
 """The synth window's presets (window/hz_synth.py; user 2026-10-05: a bar at the top left, like a synth's): the
 preset's name (click it: the list, ours first, then the user's), ◀ ▶ to step through them, Save… and Delete; a *
 after the name once the sound has been changed. A preset is the whole sound: every effect's line and setting
-(HzWindow.fx_settings), not the notes. Picking one = one undo step. The user's are kept in spiderweb/hz_presets.json."""
+(HzWindow.fx_settings), not the notes. Picking one = one undo step. The user's are kept in spiderweb/user/hz_presets.json."""
 
 import copy
 import json
@@ -10,14 +10,14 @@ import types
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
-from files.about import HERE
+from files.about import USER
 from files.lang import tr
 from files.safefile import write_text
 from window.hz_knobs import adsr_line, pitch_line, sweep_line, vibrato_line
 from window.synth_look import dark_menu
 from window.widgets import Tooltip
 
-PRESETS_FILE = os.path.join(HERE, "hz_presets.json")
+PRESETS_FILE = os.path.join(USER, "hz_presets.json")
 
 
 def volume(attack, decay, sustain, release):
