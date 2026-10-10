@@ -199,9 +199,10 @@ class LoudPane:
             c.create_line(kb, self.y_of(v * TOP if layer else v), w, self.y_of(v * TOP if layer else v),
                           fill=look.FX_GRID)
         tones, loud = self.shown()
-        edge = self.colours()[1]
+        part = 0 if look.DARK else 1  # (dark: the notes' light fill, their dark edge hid on the grey)
+        edge = self.colours()[part]
         for i, n in enumerate(tones):  # each note's line, from a stem at its start (like velocity bars)
-            colour = SELECTED_COLOR[1] if i in win.sel else edge
+            colour = SELECTED_COLOR[part] if i in win.sel else edge
             if layer:
                 colour = fade(colour)
             x0, x1 = win.x_of(n["t"]), win.x_of(n["t"] + n["len"])

@@ -64,7 +64,7 @@ class HzMouse:
 
     def box_to(self, d):
         """The Select box's corner goes to the mouse (d["mouse"]), kept inside the piano roll. Nothing is selected
-        before it's let go (box_pick; user: like Domino)."""
+        before it's let go (box_pick; user: like many MIDI programs)."""
         x, y, state = d["mouse"]
         d["to"] = (min(max(x, self.kb_w), self.canvas.winfo_width()),
                    min(max(y, self.ruler_h), self.canvas.winfo_height()))
@@ -102,7 +102,7 @@ class HzMouse:
 
     def stretch_to(self, d, e):
         """The kept Select box's right side dragged: it goes to the mouse (the grid line nearest it, Shift = not
-        snapped) and every note it selected gets that much longer / shorter, the same for all (user, like Domino:
+        snapped) and every note it selected gets that much longer / shorter, the same for all (user, like many MIDI programs:
         one grid step = one grid step on each note); starts and keys stay."""
         (b0, _, b1, _), orig = d["area"], d["orig"]
         at = max(self.snap(self.beat_at(e.x), e), b0 + self.shortest(e))
@@ -173,7 +173,7 @@ class HzMouse:
 
     def on_kept_box(self, kept, e, hit):
         """Where the mouse is on the kept Select boxes: (1, 0) the right side (its corners too), (0, 0) inside (a
-        note there wins), or None. The left side, top and bottom do nothing (user, like Domino); a slide's dot
+        note there wins), or None. The left side, top and bottom do nothing (user, like many MIDI programs); a slide's dot
         wins over it all. With Ctrl only inside counts, notes too (a drag there moves a copy; Select tool only)."""
         if not kept or not self.sel or hit and hit[0] in DOTS:
             return None
@@ -808,10 +808,10 @@ class HzMouse:
     def delete_dragged(self):
         """Delete while the mouse is held (like the main piano roll): the note grabbed goes, or all the selected
         notes when the Select box is grabbed on its empty space or stretched, or copies are moved; a slide's dot:
-        that slide. A Select box being drawn: nothing (user, like Domino). The other notes stay as they are now; the drag ends (one undo step) and
+        that slide. A Select box being drawn: nothing (user, like many MIDI programs). The other notes stay as they are now; the drag ends (one undo step) and
         the pointer is the one for where the mouse is. A note still being placed just goes (no step)."""
         d = self.drag
-        if d["kind"] == "box":  # (nothing selected by it yet: user, like Domino)
+        if d["kind"] == "box":  # (nothing selected by it yet: user, like many MIDI programs)
             return
         if d["kind"] == "new":
             return self.cancel_drag()
@@ -884,7 +884,7 @@ class HzMouse:
     def cancel_drag(self):
         """Esc / Ctrl+Z while the mouse is held: the drag is called off. The notes, the selection and the Select
         boxes go back to how they were at the press (user); no undo step. False when there's no drag. A Select box
-        being drawn: nothing (user, like Domino)."""
+        being drawn: nothing (user, like many MIDI programs)."""
         d = self.drag
         if not d:
             return False

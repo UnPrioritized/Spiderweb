@@ -177,7 +177,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
     def box_to(self):
         """The Select box's corner goes to the mouse (box_mouse), kept inside the piano roll. Nothing is selected
-        before it's let go (box_pick; user: like Domino)."""
+        before it's let go (box_pick; user: like many MIDI programs)."""
         _, b, p, _, _, base, primary = self.drag
         mx, my, state = self.box_mouse
         self.drag = ("box", b, p, min(max(mx, self.kb_w), self.winfo_width()),
@@ -1146,7 +1146,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.app.edit_picture(self.picture_at(e))  # double-click a picture: its look in the image window
         elif self.app.tool.get() == "select" and self.group_at(e) is not None:
             self.app.edit_between(self.group_at(e))  # double-click an Add between group: its window
-        elif self.paste_spot(e):  # (user, like Domino: Select double-click on empty space pastes there)
+        elif self.paste_spot(e):  # (user, like many MIDI programs: Select double-click on empty space pastes there)
             self.app.paste(whole=True, at=self.event_pt(e)[0])
         elif self.app.tool.get() == "text":
             self.text_double(e)  # the word there gets selected

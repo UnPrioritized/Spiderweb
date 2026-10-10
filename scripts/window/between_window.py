@@ -72,7 +72,8 @@ class BetweenWindow(tk.Toplevel):
         marks = [sh for _, sh in between.anchors(app.shapes, gid)]
         self.push_on = next((j for j, sh in enumerate(marks) if sh is opened_on), 0)
         self.build_pad(top)
-        ttk.Label(top, text=tr("between.preview_hint"), foreground=look.HINT, font=look.font(8), justify="left",
+        hint = tr("between.preview_hint_dark" if look.DARK else "between.preview_hint")  # (dark: the last is white)
+        ttk.Label(top, text=hint, foreground=look.HINT, font=look.font(8), justify="left",
                   wraplength=self.w).grid(row=2, column=0, sticky="nw", pady=(2, 6))
         pv.bind("<ButtonPress-1>", self.pv_press)
         pv.bind("<B1-Motion>", self.pv_motion)
@@ -799,11 +800,13 @@ class BetweenGroups:
                     used = len(np.unique(rendered[np.isin(rendered[:, 5], row), 4]))
                 uses = tr("app.channels_2", chans=used) if used > 1 else ""
                 n = sum(1 for j in row if self.shapes[j]["between"]["role"] in ("step", "key"))
-                text = tr("between.row", i=i + 1, n=n, counts=sum(counts[j] for j in row), uses=uses)
+                total = sum(counts[j] for j in row)
+                text = tr("between.row_one" if total == 1 else "between.row", i=i + 1, n=n, counts=total, uses=uses)
             else:
                 used = chans[i]
                 uses = tr("app.channels_2", chans=used) if used > 1 else ""
-                text = tr("app.notes", i=i + 1, shape_label=self.shape_label(sh), counts=counts[i], uses=uses)
+                text = tr("app.notes_one" if counts[i] == 1 else "app.notes", i=i + 1,
+                          shape_label=self.shape_label(sh), counts=counts[i], uses=uses)
             self.listbox.insert("end", text)
             if used > many:  # (past this the note colours and channel numbers repeat)
                 self.listbox.itemconfig(r, foreground=look.WARN, selectforeground=look.GAP_PICKED)

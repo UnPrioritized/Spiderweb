@@ -2110,8 +2110,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         return widget is not None and str(widget).startswith(str(self.hz_window))
 
     def box_drawn(self):
-        """A Select box being drawn on the main piano roll: shortcuts do nothing until it's let go (user: like
-        Domino)."""
+        """A Select box being drawn on the main piano roll: shortcuts do nothing until it's let go (user: like many
+        MIDI programs)."""
         return bool(self.roll.drag) and self.roll.drag[0] == "box"
 
     def key_undo(self, e, redo=False):
