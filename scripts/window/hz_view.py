@@ -312,8 +312,10 @@ class HzView:
         self.loudness.redraw()
         if self.synth_win:  # (the same lines there)
             self.synth_win.refresh()
-        if self.trace_win and self.trace_win.winfo_exists() and self.trace_win.winfo_viewable():
-            self.trace_win.refresh()  # (the same wave shape there)
+        if self.trace_win and self.trace_win.winfo_exists():
+            self.trace_win.check_local()  # (its own undo steps: only while no Hz bass holds the line)
+            if self.trace_win.winfo_viewable():
+                self.trace_win.refresh()  # (the same wave shape there)
         self.preview.shown = None
         self.draw_preview()
 

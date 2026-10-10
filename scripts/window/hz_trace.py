@@ -63,6 +63,7 @@ class TraceWindow(tk.Toplevel):
         self.placed = False  # (the last press put a new point in)
         self.local, self.local_redo = [], []  # the shapes before / after changes no Hz bass held (local_step)
         self.local_for = None  # (what they were made for: waiting_for())
+        self.drawn = None  # (what the drawing shows: look_now())
         hint = ttk.Label(self, text=tr("hz.trace_hint"), foreground=look.HINT, padding=(8, 0, 8, 8))
         hint.pack(side="bottom", fill="x")  # (the rows under the drawing first: they always show)
         hint.bind("<Configure>", lambda e: hint.config(wraplength=max(1, e.width - round(16 * s))))
@@ -173,6 +174,8 @@ class TraceWindow(tk.Toplevel):
         r = [cx + t * (b[0] - cx), cy + t * (b[1] - cy)]
         self.pts[i] = [b[0], b[1], (r[0] - (p[0] + b[0]) / 2) / 2, (r[1] - (p[1] + b[1]) / 2) / 2]
         self.pts.insert(i, [p[0], p[1], (l[0] - (a[0] + p[0]) / 2) / 2, (l[1] - (a[1] + p[1]) / 2) / 2])
+        self.pull_in(i)
+        self.pull_in(i + 1)
 
     def rows(self):
         """How many key rows the Hz bass shown has (its box's keys; the keys it will have before its first note)."""
@@ -186,14 +189,27 @@ class TraceWindow(tk.Toplevel):
     # ------------------------------------------------------------ drawing
 
     def refresh(self):
-        """The shape from the Hz bass window (another Hz bass shown, undo...), unless the mouse holds a point."""
+        """The shape from the Hz bass window (another Hz bass shown, undo...), unless the mouse holds a point. Drawn
+        again only when something it shows changed (the Hz bass window redraws often: dragging, scrolling)."""
         if self.drag is None:
             self.pts = shown_trace(self.hz.extra)
-        self.draw()
+        if self.drawn != self.look_now():
+            self.draw()
+
+    def check_local(self):
+        """This window's own undo steps are forgotten once the shape they were made for changed: a Hz bass holds
+        the line now (its steps count), another shape shown, or the one shown gone."""
+        if self.local_for != self.waiting_for() or (self.hz.target() or {}).get("hz"):
+            self.local, self.local_redo = [], []
+
+    def look_now(self):
+        """What the drawing shows (draw: nothing changed = not drawn again)."""
+        return [list(p) for p in self.pts], self.rows(), self.canvas.winfo_width(), self.canvas.winfo_height()
 
     def draw(self):
         c, s = self.canvas, self.s
         c.delete("all")
+        self.drawn = self.look_now()
         x0, y0, w, h = self.area()
         for i in range(GRID + 1):  # (the grid: quarters stronger)
             colour = look.CHART_GRID_STRONG if i % (GRID // 4) == 0 else look.CHART_GRID
@@ -211,7 +227,7 @@ class TraceWindow(tk.Toplevel):
         total = 0
         for k in range(n):
             y = (k + 0.5) / n
-            hits = trace_hits(line, y)
+            hits = sorted({round(x, 9) for x in trace_hits(line, y)})  # (hits at the same moment: one note, as made)
             total += len(hits)
             if k % every:
                 continue
@@ -226,7 +242,7 @@ class TraceWindow(tk.Toplevel):
         q = 3.5 * s
         for i in self.dots():  # (each piece's round dot: drag it to bend the piece)
             x, y = self.xy(self.middle(i))
-            c.create_oval(x - q, y - q, x + q, y + q, fill=look.CHART_BG if len(self.pts[i]) < 4 else look.CHART_POINT,
+            c.create_oval(x - q, y - q, x + q, y + q, fill=look.CHART_POINT if len(self.pts[i]) < 4 else look.CHART_LINE,
                           outline=look.CHART_LINE)
         for p in self.pts:
             x, y = self.xy(p)
@@ -261,7 +277,7 @@ class TraceWindow(tk.Toplevel):
                 i = got[0]
                 self.split(i, got[1], self.point_at(e))
         self.drag = {"i": i, "bend": bool(bend), "was": was, "before": self.hz.fx.state(), "at": (e.x, e.y),
-                     "moved": False}
+                     "moved": False, "start": [list(p) for p in self.pts]}  # (start: as at the press, new point in)
         self.draw()
 
     def on_drag(self, e):
@@ -276,9 +292,22 @@ class TraceWindow(tk.Toplevel):
             a, b = self.pts[i - 1], self.pts[i]
             bx, by = p[0] - (a[0] + b[0]) / 2, p[1] - (a[1] + b[1]) / 2
             self.pts[i] = b[:2] + ([bx, by] if max(abs(bx), abs(by)) > 1e-9 else [])
-        else:
-            self.pts[i] = p + self.pts[i][2:]  # (its bend kept)
+        else:  # (a point: the bends on both sides kept as at the press, pulled in so their dots stay inside)
+            self.pts = [list(q) for q in d["start"]]
+            self.pts[i] = p + self.pts[i][2:]
+            for j in (i, i + 1):
+                self.pull_in(j)
         self.draw()
+
+    def pull_in(self, i):
+        """The bend of the piece coming to point i made smaller if its round dot would be outside the drawing (it
+        couldn't be grabbed there)."""
+        if not 0 < i < len(self.pts) or len(self.pts[i]) < 4:
+            return
+        a, b = self.pts[i - 1], self.pts[i]
+        mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
+        bx, by = min(1.0, max(0.0, mx + b[2])) - mx, min(1.0, max(0.0, my + b[3])) - my
+        self.pts[i] = b[:2] + ([bx, by] if max(abs(bx), abs(by)) > 1e-9 else [])
 
     def on_release(self, e):
         d, self.drag = self.drag, None
@@ -302,7 +331,10 @@ class TraceWindow(tk.Toplevel):
         i = self.grabbed(e)
         if i is None:
             j = self.bend_at(e)
-            if j is None or len(self.pts[j]) < 4:
+            if j is None:  # (or the bent piece itself: its dot may sit on a point, where it can't be grabbed)
+                got = self.on_line(e)
+                j = got and got[0]
+            if not j or len(self.pts[j]) < 4:
                 return
             was, before = [list(p) for p in self.pts], self.hz.fx.state()
             self.pts[j] = self.pts[j][:2]
@@ -367,8 +399,7 @@ class TraceWindow(tk.Toplevel):
     def local_step(self, redo=False):
         """Ctrl+Z / Ctrl+Y in this window: a change no Hz bass held taken back / done again. False when there's
         none (the main undo goes on)."""
-        if self.local_for != self.waiting_for() or (self.hz.target() or {}).get("hz"):
-            self.local, self.local_redo = [], []  # (another shape shown, or the Hz bass made since: its steps count)
+        self.check_local()
         src, dst = (self.local_redo, self.local) if redo else (self.local, self.local_redo)
         if not src or self.drag is not None:
             return False

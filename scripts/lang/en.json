@@ -3046,7 +3046,7 @@
  "hz.trace_title": "Hz bass wave shape",
  "hz.trace_reset": "Reset",
  "hz.trace_reset_tip": "Back to a straight line up at the start: every key hits together.",
- "hz.trace_hint": "Drag a point to move it. Click the line to add a point there, or click empty space to add one at the end. Right-click or double-click a point to remove it. Drag the round dot in the middle of a piece to bend it into a curve; right-click or double-click the dot to make it straight again. Hold Shift to move off the grid. The line is stretched to cover all the keys. The green dots show where each key hits.",
+ "hz.trace_hint": "Drag a point to move it. Click the line to add a point there, or click empty space to add one at the end. Right-click or double-click a point to remove it. Drag the round dot in the middle of a piece to bend it into a curve; right-click or double-click the dot (or right-click the curve) to make it straight again. Hold Shift to move off the grid. The line is stretched to cover all the keys. The green dots show where each key hits.",
  "hz.trace_shapes": "Shapes",
  "hz.trace_shapes_tip": "Start from a ready-made shape. A saw hits each key once a wave; the others hit each key twice (twice the notes).",
  "hz.trace_saw": "Saw",
