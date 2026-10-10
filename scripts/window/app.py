@@ -528,11 +528,11 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         b.bind("<<ComboboxSelected>>", lambda e: self.on_project_change())
         Tooltip(b, tr("app.128_the_standard_keys_0_127"))
         self.edo_ticks = ttk.Frame(kf)  # (shown with 256 keys only)
-        t = ttk.Checkbutton(self.edo_ticks, text=tr("app.edo31"), variable=self.edo31, command=self.sync_edo)
+        t = ttk.Checkbutton(self.edo_ticks, text=tr("app.edo31"), variable=self.edo31, command=self.edo_ticked)
         t.pack(side="left", padx=(6, 0))
         Tooltip(t, tr("app.edo31_tip"))
         self.edo_audio_tick = ttk.Checkbutton(self.edo_ticks, text=tr("app.edo31_audio"), variable=self.edo31_audio,
-                                              command=self.sync_edo)
+                                              command=self.edo_ticked)
         self.edo_audio_tick.pack(side="left", padx=(4, 0))
         Tooltip(self.edo_audio_tick, tr("app.edo31_audio_tip"))
         box.update_idletasks()
@@ -903,6 +903,10 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def edo(self):
         """True while the piano roll shows 31-EDO (256 keys + its tick)."""
         return self.keys == KEYS[1] and self.edo31.get()
+
+    def edo_ticked(self):
+        self.sync_edo()
+        self.schedule_autosave()
 
     def sync_edo(self):
         """The 31-EDO ticks: shown with 256 keys only, Audio greyed until 31-EDO is ticked."""
@@ -2028,8 +2032,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         now = {}  # (channel, key) -> (start of the latest note there, velocity)
         near = self.roll.visible_notes(lo, hi)
         s_, e_ = near[:, 0], near[:, 1]
+        tuned = self.out.tuned  # (31-EDO: a row is one channel whatever its colour: kept by row)
         for s, e, p, v, slot, _ in near[((lo <= s_) & (s_ <= hi)) | ((s_ <= t_to) & (t_to < e_))].tolist():
-            k = (slot_track_channel(slot, self.picture_use10)[1], p)
+            k = (0 if tuned else slot_track_channel(slot, self.picture_use10)[1], p)
             if k not in now or s > now[k][0]:
                 now[k] = (s, v)
         held = self._scrub_held

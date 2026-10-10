@@ -319,7 +319,8 @@ class Player:
         clock, sleep, stop = time.perf_counter, time.sleep, self._stop
         send = self.out.send
         t0 = self.start_beat * self.ppq
-        ons = _Ons(notes, t0, self.stop_beat * self.ppq, use10, self.tune)
+        tune = self.tune
+        ons = _Ons(notes, t0, self.stop_beat * self.ppq, use10, tune)
         del notes
         self._clock = (clock(), t0, self.spt)
         held = self.held = {}
@@ -353,8 +354,11 @@ class Player:
             done = tick
             if off:
                 key = heapq.heappop(offs)[1]
-                send(0x80 | key)
                 n = held.get(key, 0) - 1
+                # (31-EDO: every colour's notes on a row share its one channel, so the row sounds until its last
+                # note ends, like the colours' own channels do in 12-tone)
+                if n <= 0 or not tune:
+                    send(0x80 | key)
                 if n > 0:
                     held[key] = n
                 else:
