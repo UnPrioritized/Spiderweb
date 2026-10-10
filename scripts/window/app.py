@@ -435,7 +435,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self._toolbar_rows = rows
         self.tool_bar.grid(row=0, column=0, sticky="w")
         if rows == 1:
-            self.option_bar.grid(row=0, column=1, sticky="e")
+            # (columnspan / pady set again: grid keeps the two-row ones, which put it over the gear's column)
+            self.option_bar.grid(row=0, column=1, columnspan=1, sticky="e", pady=0)
         else:
             self.option_bar.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
