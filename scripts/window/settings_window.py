@@ -4,7 +4,7 @@ Updates (how often to look; kept with the window settings in the autosave), late
 (user)."""
 
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import colorchooser, messagebox, simpledialog, ttk
 
 from files.lang import tr
 from files.system import WINDOWS
@@ -94,16 +94,26 @@ class SettingsWindow(tk.Toplevel):
         self.pal_box.grid(row=r + 1, column=1, sticky="w", pady=3)
         self.pal_box.bind("<<ComboboxSelected>>", lambda e: self.pick_palette())
         Tooltip(self.pal_box, tr("palette.tip"))
-        size = round(18 * self.app.scale)
-        self.swatches = tk.Canvas(page, width=palettes.SLOTS * (size + 2), height=size + 2, highlightthickness=0,
+        # the colours, each over its MIDI channel's number (click one to change it)
+        s = self.swatch_size = round(22 * self.app.scale)
+        self.number_h = round(16 * self.app.scale)
+        ttk.Label(page, text=tr("palette.channel")).grid(row=r + 2, column=0, sticky="se", padx=(0, 8),
+                                                         pady=(4, 4))
+        self.swatches = tk.Canvas(page, width=palettes.SLOTS * (s + 3), height=s + 2 + self.number_h,
+                                  highlightthickness=0, cursor="hand2",
                                   background=look.WINDOW_BG if look.DARK else None)
         self.swatches.grid(row=r + 2, column=1, sticky="w", pady=(4, 4))
-        self.swatch_size = size
-        row = ttk.Frame(page)
-        row.grid(row=r + 3, column=1, sticky="w", pady=(4, 0))
-        for text, command, tip in (("palette.new", self.new_palette, "palette.new_tip"),
-                                   ("palette.rename", self.rename_palette, "palette.rename_tip"),
-                                   ("palette.delete", self.delete_palette, "palette.delete_tip")):
+        self.swatches.bind("<Button-1>", self.click_swatch)
+        Tooltip(self.swatches, tr("palette.swatch_tip"))
+        for k, (text, command, tip) in enumerate((
+                ("palette.new", self.new_palette, "palette.new_tip"),
+                ("palette.rename", self.rename_palette, "palette.rename_tip"),
+                ("palette.delete", self.delete_palette, "palette.delete_tip"),
+                ("palette.random", self.random_palette, "palette.random_tip"),
+                ("palette.gradient", self.gradient_palette, "palette.gradient_tip"))):
+            if k % 3 == 0:
+                row = ttk.Frame(page)
+                row.grid(row=r + 3 + k // 3, column=1, sticky="w", pady=(4, 0))
             b = ttk.Button(row, text=tr(text), command=command, takefocus=False)
             b.pack(side="left", padx=(0, 6))
             Tooltip(b, tr(tip))
@@ -126,7 +136,68 @@ class SettingsWindow(tk.Toplevel):
         c, s = self.swatches, self.swatch_size
         c.delete("all")
         for k, (fill, edge) in enumerate(palettes.colours_of(now)):
-            c.create_rectangle(1 + k * (s + 2), 1, k * (s + 2) + s, s, fill=fill, outline=edge)
+            x = k * (s + 3)
+            c.create_rectangle(x + 1, 1, x + s, s, fill=fill, outline=edge, width=2)
+            c.create_text(x + s / 2, s + 2 + self.number_h / 2, text=str(palettes.CHANNELS[k] + 1),
+                          fill=look.LABEL, font=look.font(8))
+
+    # editing: Default itself never changes, so an edit on it first makes a copy (asks its name)
+
+    def own_palette(self):
+        """The palette to change: the one in use, or a new copy of Default (None = the name wasn't given)."""
+        now = palettes.picked()
+        if now != palettes.DEFAULT:
+            return now
+        name = self.ask_name(tr("palette.copy_title"), "", prompt=tr("palette.copy_ask"))
+        if name is None:
+            return None
+        palettes.save(name, palettes.colours_of(now))
+        palettes.use(name, self.app)
+        return name
+
+    def change_colours(self, make):
+        """make(colours) -> the new colours, None = no change; saved and shown at once."""
+        try:
+            name = self.own_palette()
+            if name is None:
+                return
+            colours = make(palettes.colours_of(name))
+            if colours is not None:
+                palettes.save(name, colours, keep=palettes.user_palettes()[name][0])
+                palettes.apply(colours, self.app)
+        except OSError as e:
+            messagebox.showerror(tr("palette.title"), tr("palette.not_saved", e=e), parent=self)
+        self.show_palettes()
+
+    def click_swatch(self, e):
+        k = int(e.x // (self.swatch_size + 3))
+        if not 0 <= k < palettes.SLOTS:
+            return
+
+        def make(colours):
+            got = colorchooser.askcolor(colours[k][0], parent=self,
+                                        title=tr("palette.pick_title", channel=palettes.CHANNELS[k] + 1))
+            if not got or not got[1]:
+                return None
+            colours[k] = palettes.with_edge(got[1])
+            return colours
+        self.change_colours(make)
+
+    def random_palette(self):
+        self.change_colours(lambda colours: palettes.random_colours())
+
+    def gradient_palette(self):
+        """From a first colour to a last one across every channel (both asked; the first / last channel's now
+        to start with)."""
+        def make(colours):
+            first = colorchooser.askcolor(colours[0][0], parent=self, title=tr("palette.gradient_first"))
+            if not first or not first[1]:
+                return None
+            last = colorchooser.askcolor(colours[-1][0], parent=self, title=tr("palette.gradient_last"))
+            if not last or not last[1]:
+                return None
+            return palettes.gradient(first[1], last[1])
+        self.change_colours(make)
 
     def pick_palette(self):
         try:
@@ -135,9 +206,9 @@ class SettingsWindow(tk.Toplevel):
             messagebox.showerror(tr("palette.title"), tr("palette.not_saved", e=e), parent=self)
         self.show_palettes()
 
-    def ask_name(self, title, name, but=None):
+    def ask_name(self, title, name, but=None, prompt=None):
         """A palette name typed (asked again while it's taken), None = cancelled."""
-        prompt = tr("palette.name_ask")
+        prompt = prompt or tr("palette.name_ask")
         while True:
             name = simpledialog.askstring(title, prompt, parent=self, initialvalue=name)
             name = clean_name(name or "")

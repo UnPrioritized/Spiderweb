@@ -10,6 +10,7 @@ import os
 from files import settings
 from files.about import USER
 from files.safefile import write_text
+from notes.engine import CHANNELS  # (slot k's MIDI channel: channel 10 is skipped, it's the drums)
 from roll import roll_shared
 from window.drawer import clean_name, file_stem
 
@@ -33,6 +34,63 @@ def clean(colours):
         if isinstance(pair, (list, tuple)) and len(pair) == 2:
             fill, edge = _colour(pair[0]), _colour(pair[1])
         out.append((fill or BUILT_IN[k][0], edge or BUILT_IN[k][1]))
+    return out
+
+
+def _oklab(c):
+    """"#rrggbb" -> OKLab (even steps look even to the eye: gradients don't go muddy in the middle)."""
+    lin = [((v / 255 + 0.055) / 1.055) ** 2.4 if v / 255 > 0.04045 else v / 255 / 12.92
+           for v in (int(c[i:i + 2], 16) for i in (1, 3, 5))]
+    r, g, b = lin
+    l_, m_, s_ = ((0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b) ** (1 / 3),
+                  (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b) ** (1 / 3),
+                  (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b) ** (1 / 3))
+    return (0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+            1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+            0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_)
+
+
+def _hex(lab):
+    L, a, b = lab
+    l_, m_, s_ = L + 0.3963377774 * a + 0.2158037573 * b, L - 0.1055613458 * a - 0.0638541728 * b, \
+        L - 0.0894841775 * a - 1.2914855480 * b
+    l, m, s = l_ ** 3, m_ ** 3, s_ ** 3
+    rgb = (4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+           -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+           -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s)
+    out = []
+    for v in rgb:
+        v = min(1.0, max(0.0, v))
+        v = 1.055 * v ** (1 / 2.4) - 0.055 if v > 0.0031308 else 12.92 * v
+        out.append(round(v * 255))
+    return "#%02x%02x%02x" % tuple(out)
+
+
+def with_edge(fill):
+    """(fill, edge) for a picked colour: the note's outline a darker shade of it, like the built-in ones."""
+    L, a, b = _oklab(fill)
+    return fill.lower(), _hex((L * 0.5, a * 1.1, b * 1.1))
+
+
+def gradient(first, last):
+    """Every channel's colour on the way from first to last (evenly, as the eye sees it)."""
+    a, b = _oklab(first), _oklab(last)
+    n = SLOTS - 1
+    return [with_edge(first if k == 0 else last if k == n else
+                      _hex(tuple(x + (y - x) * k / n for x, y in zip(a, b)))) for k in range(SLOTS)]
+
+
+def random_colours():
+    """Random colours that still look good together: hues spread round the colour wheel from a random start
+    (golden-ratio steps, so neighbours differ), soft like the built-in ones, a little random in strength."""
+    import colorsys
+    import random
+    start = random.random()
+    out = []
+    for k in range(SLOTS):
+        h = (start + k * 0.618033988749895) % 1.0
+        r, g, b = colorsys.hls_to_rgb(h, random.uniform(0.62, 0.78), random.uniform(0.55, 0.85))
+        out.append(with_edge("#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))))
     return out
 
 
