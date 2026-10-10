@@ -320,7 +320,8 @@ SHAPE_KEYS = ("starts", "tumour", "k", "text", "smooth", "gaps", "splits",
 def _cached(sh):
     key = (sh["kind"], tuple(map(tuple, sh["pts"])), json.dumps(sh.get("strokes")),
            json.dumps([sh.get(k) for k in SHAPE_KEYS]),
-           json.dumps([sh["cut"].get("knife"), sh["cut"]["was"]]) if sh["kind"] == "funnel" and sh.get("cut") else None)
+           json.dumps([sh["cut"].get("knife"), sh["cut"]["was"], sh.get("fx"), sh.get("_m")])
+           if sh["kind"] == "funnel" and sh.get("cut") else None)
     got = _paths.get(key)
     if got is None:
         if len(_paths) > 3000:

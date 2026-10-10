@@ -29,7 +29,7 @@ from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
 from notes.polygon import POLYGON_DEFAULTS
-from notes.sliced import completed, fresh_marks, moved_by, steps_kept
+from notes.sliced import completed, fresh_marks, moved_by, steps_kept, turned_piece
 from notes.smooth import SMOOTH_DEFAULT
 from notes.text import TEXT_DEFAULTS
 from files.mathexpr import calc, calc_int, fmt
@@ -1323,7 +1323,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         sizes = push_sizes(self.shapes, whole_groups(self.shapes, self.sels))  # (Add between pushes flip too)
         for sh in shapes:
             steps = steps_kept(sh)  # (a piece of a shape with pages: a flip step too, it stays a piece)
+            frm = sh["pts"]
             flip_shape(sh, sideways, mid2)
+            turned_piece(sh, frm, lambda w: flip_shape(w, sideways, mid2))  # (a funnel piece stays one)
             if sh.get("fx") or steps:  # (its note tool pages' result is flipped too, fx.py)
                 fx = fx_flipped(sh.get("fx"), "time" if sideways else "keys", steps)
                 if fx:
@@ -1351,6 +1353,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         limit = self.roll.limits(shapes)  # (turned past an edge: pushed back inside, user)
         self.push_undo(name=tr("app.turn_90"))
         sizes = push_sizes(self.shapes, whole_groups(self.shapes, self.sels))  # (Add between pushes turn too)
+        frms = [sh["pts"] for sh in shapes]
         for sh in shapes:
             steps = steps_kept(sh)  # (a piece of a shape with pages: a turn step too, it stays a piece)
             turn_shape(sh, clockwise, r, cb, cp)
@@ -1365,6 +1368,12 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         if db or dp:
             for sh in shapes:
                 sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
+
+        def turned(w):
+            turn_shape(w, clockwise, r, cb, cp)
+            w["pts"] = [[b + db, p + dp] for b, p in w["pts"]]
+        for sh, frm in zip(shapes, frms):  # (a funnel piece stays one)
+            turned_piece(sh, frm, turned)
         self.roll.move_kept_box(lambda b, p: (cb + sign * (p - cp) * r + db, cp - sign * (b - cb) / r + dp))  # (too)
         self.sync_panel()
         self.shapes_changed()

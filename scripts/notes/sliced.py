@@ -42,12 +42,90 @@ def keys_of(sh):
 
 def piece_knives(sh):
     """A funnel piece's Slice cuts where they are now [[b0, k0, db, dk, side]] (it keeps the whole funnel's notes
-    on its side of them, knife_cut), else None (not a funnel piece, or its outline changed)."""
+    on its side of them, knife_cut), else None (not a funnel piece, or its outline changed). Flipped / turned (a
+    flip / turn step, steps_kept): the cuts flipped / turned along with its drawing."""
     cut = sh.get("cut")
-    d = moved_by(sh) if cut and sh["kind"] == "funnel" else None
+    if not cut or sh["kind"] != "funnel":
+        return None
+    made = sh
+    if sh.get("fx"):
+        from notes.engine import as_made
+        made = as_made(sh)
+    d = moved_by(made)
     if d is None:
         return None
-    return [[b0 + d[0], k0 + d[1], db, dk, sd] for b0, k0, db, dk, sd in cut.get("knife") or []]
+    knives = [[b0 + d[0], k0 + d[1], db, dk, sd] for b0, k0, db, dk, sd in cut.get("knife") or []]
+    return knives if close(made["pts"], sh["pts"]) else carried_knives(knives, made["pts"], sh["pts"])
+
+
+def change_of(frm, to):
+    """The change (matrix m, shift t: p -> m p + t) taking the points frm to the points to (a flip / turn moves every
+    point the same way), or None when it can't be told (points all on one line)."""
+    p = np.asarray(frm, float).reshape(-1, 2)
+    q = np.asarray(to, float).reshape(-1, 2)
+    a = np.column_stack([p, np.ones(len(p))])
+    if len(p) != len(q) or len(p) < 3 or np.linalg.matrix_rank(a) < 3:
+        return None
+    x = np.linalg.lstsq(a, q, rcond=None)[0]
+    return x[:2].T, x[2]
+
+
+def carried_knives(knives, frm, to):
+    """Knives on a drawing with the points frm, on the same drawing flipped / turned to the points to."""
+    ch = change_of(frm, to)
+    if ch is None:
+        return knives
+    m, t = ch
+    flip = 1 if np.linalg.det(m) > 0 else -1  # (a flip swaps the sides)
+    out = []
+    for b0, k0, db, dk, sd in knives:
+        o = m @ [b0, k0] + t
+        v = m @ [db, dk]
+        out.append([float(o[0]), float(o[1]), float(v[0]), float(v[1]), sd * flip])
+    return out
+
+
+def carried_mark(m, ch):
+    """A cut mark (where it is now) flipped / turned by the change ch (change_of)."""
+    mat, t = ch
+
+    def pt(p):
+        q = mat @ [p[0], p[1]] + t
+        return [float(q[0]), float(q[1])]
+    out = dict(m, at=pt(m["at"]))
+    if m.get("dir"):
+        v = mat @ m["dir"]
+        out["dir"] = [float(v[0]), float(v[1])]
+    if m.get("segs"):
+        out["segs"] = [[pt(a), pt(b)] for a, b in m["segs"]]
+    if m.get("hits"):
+        out["hits"] = [pt(p) for p in m["hits"]]
+    return out
+
+
+def turned_piece(sh, frm, change):
+    """A funnel piece flipped / turned as a piece (user: a flip made it the whole funnel again, two of them on top of
+    each other): sh (its drawing changed already, from the points frm) gets the funnel it was cut from changed the same
+    way (change(shape) does it to a copy), its cuts and marks along. Changes sh; False when it can't (not such a
+    piece: it becomes a shape of its own as before)."""
+    cut = sh.get("cut")
+    if not cut or sh["kind"] != "funnel" or whole_made(cut):  # (pages / glue: a flip / turn step, steps_kept)
+        return False
+    d = moved_by(dict(sh, pts=frm))
+    ch = change_of(frm, sh["pts"]) if d is not None else None
+    if ch is None:
+        return False
+    old = dict(sh, pts=frm)
+    same_vel = cut.get("vel") is not None and close(velocity(old), cut["vel"])
+    whole = json.loads(json.dumps(moved(cut["whole"], d)))
+    change(whole)
+    cut["whole"] = whole
+    cut["knife"] = carried_knives(piece_knives(old) or [], frm, sh["pts"])
+    cut["marks"] = [carried_mark(moved_mark(m, d), ch) for m in cut.get("marks", [])]
+    cut["was"] = outline(sh)
+    if same_vel:
+        cut["vel"] = velocity(sh)
+    return True
 
 
 def on_side(knives, b, p):
