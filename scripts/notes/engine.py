@@ -744,7 +744,7 @@ def _notes_tracks(sh, ppq, keys):
     env = velocity_env(vel_sh)
     raw = note_array(raw, 3)
     if sh["kind"] in HZ_KINDS and sh.get("hz") and "notes" not in sh and not piece:  # (a Hz bass's Note length)
-        raw = note_lengths(sh["hz"], raw, sh["kind"] != "funnel")
+        raw = note_lengths(sh["hz"], raw, ppq, sh["kind"] != "funnel")
     keep = (raw[:, 2] >= 0) & (raw[:, 2] < keys) & (raw[:, 1] > 0)
     raw = raw[keep]
     raw[:, 0] = np.maximum(raw[:, 0], 0)

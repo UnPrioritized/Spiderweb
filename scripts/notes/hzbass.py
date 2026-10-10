@@ -32,7 +32,7 @@ Each layer heard (heard_layers: mute / solo) makes its notes as a Hz bass of its
 engine._notes_tracks.
 hz["grow"] = the shape is kept as long as its tones (fit_length). hz["own"] = made with the Hz bass tool: a box
 that is nothing but its tones (it goes when its last tone is deleted; the panel shows the keys it repeats).
-hz["length"] = the Note length (clean_length; missing = 100 %), a layer's own in hz["own_length"] (one of EXTRAS, so
+hz["length"] = the Note length (clean_length: % or beats, shown in ticks; missing = 100 %), a layer's own in hz["own_length"] (one of EXTRAS, so
 Copy sound and presets carry it); hz["stick"] = the last note of each run keeps a whole wave, even past the shape.
 Both only change the notes' ends once they're made (note_lengths), never which repeats there are.
 
@@ -194,12 +194,13 @@ def squares(sh, ppq):
 LENGTH_KEYS = ("length", "own_length", "stick")
 
 
-def note_lengths(hz, notes, stick=True):
+def note_lengths(hz, notes, ppq, stick=True):
     """A Hz bass layer's notes ((start, end, key) ticks, as made: each lasting until the next one on its key starts)
     with its Note length (a layer's own, else the Hz bass's): each lasts that share of how long it does now ("pct") or
-    that many ticks, never longer than it is now ("ticks"). hz["stick"] (stick=False: a funnel, no notes past its
-    wall): the last note of each run (cut where its tones end) gets a whole wave, as long as the one before it, even
-    past the shape; a number of ticks there is kept whole. Never past the next note on its key."""
+    that many beats in whole ticks, at least 1 (follows a PPQ change), never longer than it is now ("beats").
+    hz["stick"] (stick=False: a funnel, no notes past its wall): the last note of each run (cut where its tones end)
+    is first made a whole wave, as long as the one before it (a lone one: as it is), even past the shape. Never past
+    the next note on its key."""
     got = hz.get("own_length") or hz.get("length") or FULL_LENGTH
     stick = stick and hz.get("stick")
     if not len(notes) or (got == FULL_LENGTH and not stick):
@@ -219,8 +220,8 @@ def note_lengths(hz, notes, stick=True):
     if stick:  # (the note before it on its key runs into it: a whole wave is about as long as that one)
         before = np.concatenate([[False], ~last[:-1] & (k[:-1] == k[1:])])
         full = np.where(last & before, np.minimum(np.maximum(now, np.concatenate([[0], now[:-1]])), room), now)
-    if "ticks" in got:
-        new = np.minimum(got["ticks"], np.where(last, room, now) if stick else now)
+    if "beats" in got:
+        new = np.minimum(length_ticks(got, ppq), full)
     else:
         new = np.floor(full * got["pct"] / 100.0 + 0.5)
     out = notes.copy()

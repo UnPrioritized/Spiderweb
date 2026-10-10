@@ -118,7 +118,7 @@ TRACE_POINTS = 256  # hz["trace"]: the most points of the drawn wave shape
 START_TRACE = ((0.0, 0.0), (0.0, 1.0))  # ... as it starts: straight up at the wave's start (every key together)
 CURVE_STEPS = 24  # ... a bent piece is made of this many straight ones (trace_line)
 FULL_LENGTH = {"pct": 100.0}  # hz["length"]: every repeat as long as it is made (left out of the saved Hz bass)
-LENGTH_TICKS = 1 << 30  # ... the most ticks it can be
+LENGTH_BEATS = 1 << 16  # ... the most beats it can be (never longer than the note as made anyway)
 
 
 def group_count(value):
@@ -434,16 +434,21 @@ def clean_trace(trace):
 
 def clean_length(length):
     """A Note length checked (hz["length"], the Hz bass's; hz["own_length"], a layer's own): {"pct": 1..100, whole}
-    = each repeat lasts that share of how long it does now, {"ticks": 1..} = that many ticks (never past the next one
-    on its key); None when broken."""
+    = each repeat lasts that share of how long it does now, {"beats": > 0} = that long (typed and shown in whole
+    ticks; kept in beats so a PPQ change keeps the look, user), never longer than it is now; None when broken."""
     if not isinstance(length, dict):
         return None
-    for unit, lo, hi in (("pct", 1.0, 100.0), ("ticks", 1, LENGTH_TICKS)):
+    for unit, lo, hi in (("pct", 1.0, 100.0), ("beats", MIN_LEN, LENGTH_BEATS)):
         v = length.get(unit)
         if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
             v = max(lo, min(hi, v))
-            return {unit: int(round(v)) if unit == "ticks" else float(round(v))}  # (whole numbers, user)
+            return {unit: float(v) if unit == "beats" else float(round(v))}  # (whole %, user)
     return None
+
+
+def length_ticks(length, ppq):
+    """A Note length in beats ({"beats": b}) as the whole ticks it gives at this PPQ (at least 1)."""
+    return max(1, math.floor(length["beats"] * ppq + 0.5))
 
 
 def trace_line(trace, steps=CURVE_STEPS):
