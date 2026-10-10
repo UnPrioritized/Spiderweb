@@ -765,11 +765,33 @@ def hz_stretches(sh, ppq):
     return np.asarray(cells, np.int64).reshape(-1, 3)[:, [1, 2, 0]]
 
 
+def hz_notes(sh, ppq):
+    """A Hz bass funnel's notes (one layer): its stretches chopped into the repeats. A key only touching the funnel
+    for a sliver (where a curve meets the wall) has no repeat mostly inside it: it gets the one overlapping it most
+    (like a spam funnel's key reached on the wall: just the last note); none = silence there."""
+    st = hz_stretches(sh, ppq)
+    g = spam_gate(sh, ppq)
+    if isinstance(g, float):  # (one grid from tick 0: none = a key's stretch too short, as custom.chop_even)
+        none = np.ceil(st[:, 1] / g - 0.5) - np.ceil(st[:, 0] / g - 0.5) <= 0
+    else:
+        none = chop(sh, st, g, True) == 0
+    out = [chop(sh, st[~none], g)]
+    for s, e, q in st[none].tolist():
+        if isinstance(g, float):
+            k = np.arange(math.floor(s / g), math.floor(e / g) + 1)
+            sq = np.column_stack([np.floor(k * g + 0.5), np.floor((k + 1) * g + 0.5)]).astype(np.int64)
+        else:
+            sq = g.squares(q) if hasattr(g, "squares") else g
+            sq = sq[(sq[:, 0] < max(e, s + 1)) & (sq[:, 1] > s)]
+        if len(sq):
+            best = sq[np.argmax(np.minimum(sq[:, 1], max(e, s + 1)) - np.maximum(sq[:, 0], s))]
+            out.append(np.array([[best[0], best[1], q]], np.int64))
+    return np.concatenate(out)
+
+
 def funnel_note_count(sh, ppq):
     if sh.get("hz"):  # (each layer heard makes its own: engine.layered_notes)
-        st = hz_stretches(sh, ppq)
-        return int(sum(chop(dict(sh, hz=hz), st, spam_gate(dict(sh, hz=hz), ppq), True).sum()
-                       for hz in heard_layers(sh["hz"])))
+        return sum(len(hz_notes(dict(sh, hz=hz), ppq)) for hz in heard_layers(sh["hz"]))
     count = 0
     for half, main in funnel_sides(sh):
         ticks, cells = funnel_cells(half, ppq, main)
@@ -779,7 +801,7 @@ def funnel_note_count(sh, ppq):
 
 def funnel_notes(sh, ppq):
     if sh.get("hz"):  # (one layer: engine.layered_notes hands each its own)
-        return chop(sh, hz_stretches(sh, ppq), spam_gate(sh, ppq))
+        return hz_notes(sh, ppq)
     return np.concatenate([_side_notes(*funnel_cells(half, ppq, main)) for half, main in funnel_sides(sh)])
 
 
