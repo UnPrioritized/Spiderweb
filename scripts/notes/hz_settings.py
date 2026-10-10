@@ -117,6 +117,8 @@ BLEND = 0.5  # ... how loud the middle copies are next to the outer ones when th
 TRACE_POINTS = 256  # hz["trace"]: the most points of the drawn wave shape
 START_TRACE = ((0.0, 0.0), (0.0, 1.0))  # ... as it starts: straight up at the wave's start (every key together)
 CURVE_STEPS = 24  # ... a bent piece is made of this many straight ones (trace_line)
+FULL_LENGTH = {"pct": 100.0}  # hz["length"]: every repeat as long as it is made (left out of the saved Hz bass)
+LENGTH_TICKS = 1 << 30  # ... the most ticks it can be
 
 
 def group_count(value):
@@ -430,6 +432,20 @@ def clean_trace(trace):
     return out
 
 
+def clean_length(length):
+    """A Note length checked (hz["length"], the Hz bass's; hz["own_length"], a layer's own): {"pct": 1..100} = each
+    repeat lasts that share of how long it does now, {"ticks": 1..} = that many ticks (never past the next one on its
+    key); None when broken."""
+    if not isinstance(length, dict):
+        return None
+    for unit, lo, hi in (("pct", 1.0, 100.0), ("ticks", 1, LENGTH_TICKS)):
+        v = length.get(unit)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+            v = max(lo, min(hi, v))
+            return {unit: int(round(v)) if unit == "ticks" else float(v)}
+    return None
+
+
 def trace_line(trace, steps=CURVE_STEPS):
     """The drawn wave shape as straight pieces: [[x, y], ...], each bent piece cut into `steps` (a curve through its
     bent middle, clamped to 0..1)."""
@@ -656,7 +672,8 @@ def clean_mod(mod):
 
 
 CLEAN_EXTRA = {"voice": clean_voice, "mode": clean_mode, "rack": clean_rack, "arp": clean_arp, "bypass": clean_bypass,
-               "kept": clean_kept, "macro": clean_macro, "osc2": clean_osc2, "mod": clean_mod, "trace": clean_trace}
+               "kept": clean_kept, "macro": clean_macro, "osc2": clean_osc2, "mod": clean_mod, "trace": clean_trace,
+               "own_length": clean_length}
 EXTRAS = tuple(CLEAN_EXTRA)  # the synth window's own settings (not lines), each checked by its CLEAN_EXTRA
 
 
@@ -864,6 +881,11 @@ def clean_hz(hz):
     out.update(clean_extra(hz))
     if tones:
         out["tones"] = tones
+    length = clean_length(hz.get("length"))
+    if length and length != FULL_LENGTH:
+        out["length"] = length
+    if hz.get("stick") is True:
+        out["stick"] = True
     loud = clean_line(hz.get("loud")) if isinstance(hz.get("loud"), list) else []
     if any(p[1] != 1.0 for p in loud):  # (at 100 % all along: it changes nothing, left out)
         out["loud"] = loud

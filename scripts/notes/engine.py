@@ -19,7 +19,7 @@ from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX
 from notes.between import KINDS as BETWEEN_KINDS, clean_between
 from notes.envelope import env_values, velocity_env
 from notes.joined import clean_joined, is_joined, joined_paths
-from notes.hzbass import HZ_KINDS, clean_hz, heard_layers, layers_of, velocity_parts, with_layers
+from notes.hzbass import HZ_KINDS, clean_hz, heard_layers, layers_of, note_lengths, velocity_parts, with_layers
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
@@ -743,6 +743,8 @@ def _notes_tracks(sh, ppq, keys):
     t_hi = float(path[:, 0].max())
     env = velocity_env(vel_sh)
     raw = note_array(raw, 3)
+    if sh["kind"] in HZ_KINDS and sh.get("hz") and "notes" not in sh and not piece:  # (a Hz bass's Note length)
+        raw = note_lengths(sh["hz"], raw, sh["kind"] != "funnel")
     keep = (raw[:, 2] >= 0) & (raw[:, 2] < keys) & (raw[:, 1] > 0)
     raw = raw[keep]
     raw[:, 0] = np.maximum(raw[:, 0], 0)

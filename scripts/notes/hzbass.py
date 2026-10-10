@@ -32,6 +32,9 @@ Each layer heard (heard_layers: mute / solo) makes its notes as a Hz bass of its
 engine._notes_tracks.
 hz["grow"] = the shape is kept as long as its tones (fit_length). hz["own"] = made with the Hz bass tool: a box
 that is nothing but its tones (it goes when its last tone is deleted; the panel shows the keys it repeats).
+hz["length"] = the Note length (clean_length; missing = 100 %), a layer's own in hz["own_length"] (one of EXTRAS, so
+Copy sound and presets carry it); hz["stick"] = the last note of each run keeps a whole wave, even past the shape.
+Both only change the notes' ends once they're made (note_lengths), never which repeats there are.
 
 Effects: hz["fx"] = {effect: [[beat, value], ...]}: one line through points over all the tones (beat counted like a
 tone's "t", from the shape's left edge; flat before the first point and after the last), value 0..1.
@@ -180,12 +183,49 @@ def velocity_parts(sh, ppq, starts, keys):
 def squares(sh, ppq):
     """The repeats of a shape with placed tones: an array of (start, end) ticks in order, none overlapping. When
     it has effects: a KeyGrid (each key has its own)."""
-    hz = live(sh["hz"], left_edge(sh))
+    hz = {k: v for k, v in live(sh["hz"], left_edge(sh)).items() if k not in LENGTH_KEYS}  # (made after: note_lengths)
     hz_json = json.dumps(hz, sort_keys=True)
     if has_fx(hz):
         lo, hi = key_range(sh)
         return _key_grid(hz_json, left_edge(sh), ppq, lo, hi - lo + 1)
     return _squares(hz_json, left_edge(sh), ppq)
+
+
+LENGTH_KEYS = ("length", "own_length", "stick")
+
+
+def note_lengths(hz, notes, stick=True):
+    """A Hz bass layer's notes ((start, end, key) ticks, as made: each lasting until the next one on its key starts)
+    with its Note length (a layer's own, else the Hz bass's): each lasts that share of how long it does now ("pct") or
+    that many ticks, never longer than it is now ("ticks"). hz["stick"] (stick=False: a funnel, no notes past its
+    wall): the last note of each run (cut where its tones end) gets a whole wave, as long as the one before it, even
+    past the shape; a number of ticks there is kept whole. Never past the next note on its key."""
+    got = hz.get("own_length") or hz.get("length") or FULL_LENGTH
+    stick = stick and hz.get("stick")
+    if not len(notes) or (got == FULL_LENGTH and not stick):
+        return notes
+    o = np.lexsort((notes[:, 0], notes[:, 2]))
+    s, e, k = notes[o, 0], notes[o, 1], notes[o, 2]
+    big = np.int64(1) << 40
+    keyed = k.astype(np.int64) * big + s
+    j = np.searchsorted(keyed, keyed, "right")  # (the next note on its key, starting later)
+    has = j < len(s)
+    j = np.minimum(j, len(s) - 1)
+    has &= k[j] == k
+    room = np.where(has, s[j] - s, big)
+    now = e - s
+    last = ~(has & (s[j] <= e))  # (ends a run: no note on its key starts where it ends)
+    full = now
+    if stick:  # (the note before it on its key runs into it: a whole wave is about as long as that one)
+        before = np.concatenate([[False], ~last[:-1] & (k[:-1] == k[1:])])
+        full = np.where(last & before, np.minimum(np.maximum(now, np.concatenate([[0], now[:-1]])), room), now)
+    if "ticks" in got:
+        new = np.minimum(got["ticks"], np.where(last, room, now) if stick else now)
+    else:
+        new = np.floor(full * got["pct"] / 100.0 + 0.5)
+    out = notes.copy()
+    out[o, 1] = s + np.maximum(new, 1).astype(np.int64)
+    return out
 
 
 def left_edge(sh):
