@@ -581,6 +581,6 @@ def open_range_graph(app):
 
 def open_funnel_range(app):
     """The same window for the selected funnels (or the settings for new ones)."""
-    tgts = app.funnel_targets()
+    tgts = app.skip_hz(app.funnel_targets())  # (a Hz bass funnel picked too: left out, after a warning)
     if tgts and not app.funnel_draft():
         RangeGraph(app, tgts)

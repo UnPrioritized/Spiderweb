@@ -213,6 +213,10 @@ class FunnelPanel:
         if self._loading:
             return
         tgts = self.funnel_targets()
+        if key in ("gate", "fill"):  # (a Hz bass funnel picked too: left out, after a warning, like custom shapes)
+            tgts = self.skip_hz(tgts)
+            if not tgts:
+                return self.sync_funnel()
         placed = [t for t in tgts if t is not self.funnel_defaults]
         same = all(abs(t[key] - value) < 1e-12 if key == "gate" else t[key] == value for t in tgts)
         if same or not self.confirm_big([changed_funnel(t, key, value) for t in placed]):
