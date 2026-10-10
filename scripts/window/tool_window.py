@@ -16,7 +16,7 @@ from files.lang import tr
 from notes.fx import copied, is_page, pages
 from notes.sliced import steps_kept
 from window import look
-from window.widgets import LocalUndo, Tooltip, placed
+from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Tooltip, placed
 
 NEW = "new"  # the "+" tab
 TAB_STYLE = "ToolTab.Toolbutton"  # (text in the middle: "+" sat at the left of its button)
@@ -224,8 +224,8 @@ class ToolWindow(tk.Toplevel):
         self.targets = []
         self.undo = LocalUndo(self, self.undo_state, self.put_state)
         self.turning = None  # a knob held: (it, how it was at the press, the inside undo steps then)
-        for k in ("z", "Z", "y", "Y"):  # (in place of LocalUndo's: a knob held first)
-            self.bind(f"<Control-{k}>", lambda e, d=-1 if k in "zZ" else 1: (self.undo_key(d), "break")[1])
+        for k in UNDO_KEYS + REDO_KEYS:  # (in place of LocalUndo's: a knob held first)
+            self.bind(k, lambda e, d=-1 if k in UNDO_KEYS else 1: (self.undo_key(d), "break")[1])
         self.bind("<Control-Key>", lambda e: "break")  # (the piano roll's shortcuts wait until it's closed)
         self.bind("<F1>", lambda e: (app.open_help(self.KEY), "break")[1])
         self.bind("<Escape>", lambda e: self.cancel())

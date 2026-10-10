@@ -43,7 +43,7 @@ from notes.hzbass import (BEND, ENVELOPES, FROM_MODES, FX, FX_START, LOOP_SHAPES
                           loop_off, loop_on, loop_shape, sound_span, sustained, tones_span)
 from roll.roll_shared import BOX_STILL, CTRL, MAX_SX, MIN_SX, SELECT_CURSOR, SHIFT
 from window import look
-from window.widgets import Scrub, remember_place
+from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, remember_place
 
 # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
 REPEAT_MOST = 999  # Repeat every… [n] / [n]: the biggest number in either box
@@ -1243,8 +1243,8 @@ class FxPane:
         top.bind("<Return>", lambda e: done(True) if value() else None)
         top.bind("<Escape>", lambda e: done(False))
         top.bind("<Destroy>", gone)
-        for k in ("z", "Z", "y", "Y"):  # (the main window's undo would change the lines under it)
-            top.bind(f"<Control-{k}>", lambda e: "break")
+        for k in UNDO_KEYS + REDO_KEYS:  # (the main window's undo would change the lines under it)
+            top.bind(k, lambda e: "break")
         top.protocol("WM_DELETE_WINDOW", lambda: done(False))
         switched()
         top.geometry(f"+{x}+{y}")

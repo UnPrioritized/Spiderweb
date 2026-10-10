@@ -123,7 +123,7 @@ class TextTyping:
                 return self.end_typing() or "break"
             if low in ("z", "y"):
                 self.end_typing()
-                app.undo() if low == "z" else app.redo()
+                app.undo() if low == "z" and not e.state & SHIFT else app.redo()  # (Ctrl+Shift+Z = redo too)
                 return "break"
             if low == "a":  # all of this text, not every shape
                 ty["anchor"], ty["caret"] = 0, len(text)

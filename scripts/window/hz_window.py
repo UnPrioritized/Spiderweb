@@ -242,6 +242,8 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         c.bind("<Delete>", lambda e: self.on_delete())
         for k in ("<Control-c>", "<Control-C>"):  # (effect points selected: they're copied; else the notes)
             c.bind(k, lambda e: self.copy_notes() or "break")
+        for k in ("<Control-x>", "<Control-X>"):
+            c.bind(k, lambda e: self.cut_notes() or "break")
         for k in ("<Control-v>", "<Control-V>"):  # (what was copied last: notes copied in Domino, effect points, or
             c.bind(k, lambda e: (self.drag or self.loudness.held()  # notes, at the play line; nothing while the
                                  or self.paste_domino(self.play_line_beat())  # mouse is held)

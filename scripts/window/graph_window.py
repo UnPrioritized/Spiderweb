@@ -16,7 +16,7 @@ from notes.joined import shown_tumour
 from notes.tumour import GRAPH_LIMIT, TUMOUR_DEFAULTS
 from window import look
 from window.panel_custom import GAP_COLOR
-from window.widgets import LocalUndo, Scrub, placed, remember_place
+from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, placed, remember_place
 
 FLAT = [[0.0, 1.0], [1.0, 1.0]]
 PRESETS = [(tr("graph_window.flat_off"), FLAT), (tr("graph_window.rise"), [[0.0, 0.0], [1.0, 1.0]]),
@@ -37,8 +37,8 @@ def view_text(v):
 
 def block_undo(win):
     """Ctrl+Z / Ctrl+Y do nothing in win (they'd reach the main window's undo)."""
-    for k in "zZyY":
-        win.bind(f"<Control-{k}>", lambda e: "break")
+    for k in UNDO_KEYS + REDO_KEYS:
+        win.bind(k, lambda e: "break")
 
 
 class GraphWindow(tk.Toplevel):

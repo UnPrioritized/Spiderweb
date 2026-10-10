@@ -427,6 +427,18 @@ class HzMouse:
             self.copied(copy.deepcopy([self.tones[i] for i in sorted(self.sel)]))
             self.fx.clip = None
 
+    def cut_notes(self):
+        """Ctrl+X: like Ctrl+C, then what was copied is deleted (one undo step). Nothing while the mouse holds
+        something."""
+        if self.drag or self.fx.drag or self.loudness.held():
+            return
+        if self.fx.copy_points():
+            self.copied(None)
+            self.fx.delete_selected()
+        elif self.sel:
+            self.copy_notes()
+            self.delete_selected(tr("hz.step_cut"))
+
     def copied(self, notes):
         """Something was copied here: notes (None: effect points). Notes copied in Domino after this win Ctrl+V."""
         self.app.hz_clip = notes
@@ -841,12 +853,12 @@ class HzMouse:
             n["to"] = [s for s in n["to"] if s["id"] in left]
         self.sel = {i for i, n in enumerate(self.tones) if any(n is k for k in keep)}
 
-    def delete_selected(self):
+    def delete_selected(self, name=None):
         if self.sel:
             before = copy.deepcopy(self.tones)
             self.sel_before = (before, self.sel_state())
             self.remove_notes(set(self.sel))
-            self.commit(tr("hz.step_delete"), before)
+            self.commit(name or tr("hz.step_delete"), before)
 
     def drop_drag(self):
         self.drag = None

@@ -33,7 +33,7 @@ from window.formula_host import DrawerHost, formula_menu
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
 from window.layers import DrawerLayers, pasted
 from window.sticky import BEND, REACH, Targets, key_points
-from window.widgets import Tooltip, remember_place, symmetry_menu
+from window.widgets import REDO_KEYS, UNDO_KEYS, Tooltip, remember_place, symmetry_menu
 
 LIBRARY = os.path.join(HERE, "shapes")
 # Always in the library (not files). A saved shape with the same name is used instead; deleting it brings these back.
@@ -707,7 +707,10 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self.bind("<Key>", self.on_key)
         self.bind("<KeyRelease>", lambda e: e.keysym.lower() in MOD_KEYS and self.mod_changed(e, False))
         self.bind("<F1>", lambda e: self.open_help())
-        for keys, fn in (("z Z", self.undo), ("y Y", self.redo), ("c C", self.copy), ("v V", self.paste), ("h H", lambda: self.flip(True)),
+        for keys, fn in ((UNDO_KEYS, self.undo), (REDO_KEYS, self.redo)):
+            for k in keys:
+                self.bind(k, self.hotkey(fn))
+        for keys, fn in (("c C", self.copy), ("x X", self.cut), ("v V", self.paste), ("h H", lambda: self.flip(True)),
                          ("j J", lambda: self.flip(False)), ("Left", lambda: self.turn(False)),
                          ("Right", lambda: self.turn(True))):
             for k in keys.split():
@@ -1343,6 +1346,12 @@ class Drawer(DrawerLayers, tk.Toplevel):
         if self.strokes:
             self.clipboard = json.dumps([self.strokes[i] for i in self.targets()])
             self.pastes = 0
+
+    def cut(self):
+        """Ctrl+X: the selected strokes copied, then deleted (nothing selected: nothing, not the whole drawing)."""
+        if self.chosen() and self.movable() and not self.holding() and self.tool.get() in ("select", "slice"):
+            self.copy()
+            self.delete_selected_stroke()
 
     def paste(self):
         """Paste one grid square further down and right each time, so it doesn't sit exactly on the copy."""

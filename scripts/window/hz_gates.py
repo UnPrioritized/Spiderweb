@@ -15,7 +15,7 @@ from notes.hzbass import (AUTO, AUTO_MOST, EXTRAS, FULL_LENGTH, HZ_DEFAULTS, LEN
                           clean_sustain, clean_tones, fit_length, held_fixed, left_edge, length_ticks, sound_span)
 from window import look
 from window.hz_effects import AMOUNT
-from window.widgets import Scrub, bad, good, remember_place
+from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, bad, good, remember_place
 
 
 GATE_MODES = ("auto", "mixed", "fixed")  # the Gates dropdown's choices, in order
@@ -80,8 +80,8 @@ def ask_live(win, app, prompt, value, lo, hi, steps, on_change):
     ttk.Button(btns, text=tr("hz.live_cancel"), command=top.destroy).pack(side="left", padx=(6, 0))
     top.bind("<Return>", ok)
     top.bind("<Escape>", lambda e: top.destroy())
-    for k in ("z", "Z", "y", "Y"):  # (the main undo would change the shape under the window)
-        top.bind(f"<Control-{k}>", lambda e: "break")
+    for k in UNDO_KEYS + REDO_KEYS:  # (the main undo would change the shape under the window)
+        top.bind(k, lambda e: "break")
     top.geometry(f"+{win.winfo_pointerx() - 40}+{win.winfo_pointery() - 40}")
     remember_place(top, "hz_number")
     entry.focus_set()

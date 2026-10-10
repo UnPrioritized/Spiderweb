@@ -71,7 +71,7 @@ from window.snap_picker import SnapPicker
 from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
-from window.widgets import Scrub, StatusLine, Tooltip, bad, good, grid_shown, remember_good, watch_bad
+from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, StatusLine, Tooltip, bad, good, grid_shown, remember_good, watch_bad
 
 
 VEL_KEYS = ("vel0", "vel1")
@@ -301,11 +301,12 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         for seq in ("<Alt-Key>", "<Alt-KeyRelease>"):
             self.tk.call("bind", "all", seq, 'if {"%K" in {F4 space}} {tk::WinMenuKey %W %N}')
         self.bind_all("<F1>",lambda e: None if self.in_drawer(e) else self.open_help())
-        for key, fn in (("<Control-z>", lambda e: self.key_undo(e)), ("<Control-y>", lambda e: self.key_undo(e, True)),
-                        ("<Control-s>", lambda e: self.save_project())):
-            self.bind_all(key, lambda e, fn=fn: None if self.in_drawer(e) else fn(e))
+        for keys, fn in ((UNDO_KEYS, lambda e: self.key_undo(e)), (REDO_KEYS, lambda e: self.key_undo(e, True)),
+                         (("<Control-s>",), lambda e: self.save_project())):
+            for key in keys:
+                self.bind_all(key, lambda e, fn=fn: None if self.in_drawer(e) else fn(e))
         self.bind_all("<space>", self.hotkey(self.toggle_play, main_only=True, while_held=True))  # (pop-ups: not the main playback)
-        for keys, fn in (("Control-c Control-C", self.copy_selected),
+        for keys, fn in (("Control-c Control-C", self.copy_selected), ("Control-x Control-X", self.cut_selected),
                          ("Control-Shift-c Control-Shift-C", self.copy_to_domino),
                          ("Control-Shift-v Control-Shift-V", self.paste_from_domino),
                          ("Control-g Control-G", self.join_selected),
@@ -1209,13 +1210,13 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                        max(picked, default=None))
             self.select_many(picked, primary)
 
-    def delete_selected(self, only=None):
+    def delete_selected(self, only=None, name=None):
         """Delete the selected shapes, or `only` these (Delete while dragging them): the rest stay selected."""
         gone = set(self.sels if only is None else only)
         if not gone:
             return
         self.roll.end_typing()  # first: it refreshes the panel, which must still see the old shapes
-        self.push_undo(name=tr("app.delete"))
+        self.push_undo(name=name or tr("app.delete"))
         for i in sorted(gone, reverse=True):
             del self.shapes[i]
         rest = [i - sum(j < i for j in gone) for i in sorted(self.sels - gone)]  # (numbers after the gone ones drop)
@@ -1310,6 +1311,12 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 self.remember_clip()
                 msg += tr("app.couldn_t_share")
             self.status.config(text=msg)
+
+    def cut_selected(self):
+        """Ctrl+X: the selected shapes copied (whole, like the menu's Copy), then deleted in one undo step."""
+        if self.sels:
+            self.copy_selected(whole=True)
+            self.delete_selected(name=tr("app.cut"))
 
     def remember_clip(self):
         """Spiderweb copied something: what the Windows clipboard holds now is older than that copy."""

@@ -358,6 +358,11 @@ class Scrub:
         self.app.catch_up_notes()
 
 
+# Undo / redo keys. Upper case = Caps Lock on; Ctrl+Shift+Z is redo too (it wins over <Control-Z>: Shift is named)
+UNDO_KEYS = ("<Control-z>", "<Control-Z>")
+REDO_KEYS = ("<Control-y>", "<Control-Y>", "<Control-Shift-z>", "<Control-Shift-Z>")
+
+
 class LocalUndo:
     """Ctrl+Z / Ctrl+Y inside a pop-up window: its own steps, which never reach the main window's undo.
     get(): how it is now (a string, e.g. JSON); put(state): make it so. mark(key) after each change: changes with the
@@ -366,10 +371,10 @@ class LocalUndo:
     def __init__(self, win, get, put, limit=300):
         self.get, self.put, self.limit = get, put, limit
         self.reset()
-        for k in ("z", "Z"):
-            win.bind(f"<Control-{k}>", lambda e: (self.undo(), "break")[1])
-        for k in ("y", "Y"):
-            win.bind(f"<Control-{k}>", lambda e: (self.redo(), "break")[1])
+        for k in UNDO_KEYS:
+            win.bind(k, lambda e: (self.undo(), "break")[1])
+        for k in REDO_KEYS:
+            win.bind(k, lambda e: (self.redo(), "break")[1])
 
     def reset(self):
         """Start again from how it is now (nothing to undo)."""

@@ -243,6 +243,7 @@ class ShapeMenu:
         shapes = tr("roll_menu.shape") if n == 1 else tr("roll_menu.n_shapes", n=n)
         item(tr("roll_menu.delete", shapes=shapes), tr("roll_menu.del"), app.delete_selected, keys=keys and whole)
         item(tr("roll_menu.duplicate", shapes=shapes), tr("roll_menu.ctrl_d"), app.duplicate, keys=True)
+        item(tr("roll_menu.cut", shapes=shapes), tr("roll_menu.ctrl_x"), app.cut_selected, keys=curve_keys and whole)
         item(tr("roll_menu.copy", shapes=shapes), tr("roll_menu.ctrl_c"), lambda: app.copy_selected(whole=True),
              keys=curve_keys and whole)
         item(tr("roll_menu.paste_at_the_play_line"), tr("roll_menu.ctrl_v"), lambda: app.paste(whole=True),
