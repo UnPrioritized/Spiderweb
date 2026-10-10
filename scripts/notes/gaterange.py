@@ -84,11 +84,21 @@ def turned_range(r, clockwise):
 
 
 def halved(g, a, b):
-    """Steps: gates (ticks) snapped to the nearest halving / doubling of a, never past b."""
+    """Steps: gates (ticks) snapped to the nearest halving / doubling of a, never past b (only real ones: a To that
+    isn't one is never reached, hunt 2026-10-10)."""
     if a == b:
         return g
     k = np.round(np.log2(np.asarray(g, float) / a))
-    return np.clip(np.rint(a * 2.0 ** k), min(a, b), max(a, b)).astype(np.int64)
+    lo, hi = sorted((0, steps_to(a, b)))
+    return np.rint(a * 2.0 ** np.clip(k, lo, hi)).astype(np.int64)
+
+
+def steps_to(a, b):
+    """How many halvings (< 0) / doublings (> 0) of a fit between a and b (Steps; 0 = none: one gate)."""
+    if a <= 0 or b <= 0 or a == b:
+        return 0
+    x = math.log2(b / a)
+    return math.floor(x + 1e-9) if x > 0 else math.ceil(x - 1e-9)
 
 
 def y_gate(a, b, y, halves=False):

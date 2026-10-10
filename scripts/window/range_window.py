@@ -19,7 +19,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import SPAM_FILLS, gate_ticks, range_gates
 from notes.funnel import funnel_gates, funnel_range
-from notes.gaterange import DIRS, STRAIGHT, clean_range, gate_steps, halved, steps_of, y_gate
+from notes.gaterange import DIRS, STRAIGHT, clean_range, gate_steps, halved, steps_of, steps_to, y_gate
 from window import big_ask, look
 from window.panel_funnel import GATE_STEPS
 from window.widgets import LocalUndo, Scrub, Tooltip, remember_place
@@ -307,7 +307,9 @@ class RangeGraph(tk.Toplevel):
         for btn in self.preset_btns:
             btn.config(state="normal" if on else "disabled")
         self.info.config(text=tr("range_window.info", a=a, b=b) +
-                         (tr("range_window.notes", n=self.count) if self.count else ""))
+                         (tr("range_window.notes", n=self.count) if self.count else "") +
+                         (tr("range_window.no_step") if on and self.memo[0].get("halves") and a != b
+                          and not steps_to(a, b) else ""))  # (Steps: no halving / doubling fits)
 
     def on_gate(self, key):
         """From (the spam gate itself) or To typed / stepped."""

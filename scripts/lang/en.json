@@ -2894,6 +2894,7 @@
  "range_window.at": "{at} % across: gate {n} ticks",
  "range_window.info": "Gate from {a} to {b} ticks",
  "range_window.notes": " · {n} notes",
+ "range_window.no_step": "\nSteps: no halving or doubling of From fits up to To, so every note keeps the first gate.",
  "range_window.spread": "Notes per gate",
  "range_window.spread_at": "{g} ticks: {n} notes",
  "range_window.spread_at_many": "{g0}–{g1} ticks: {n} notes",
