@@ -1427,6 +1427,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return None if e.state & CTRL else "break"  # (Ctrl+Z / Ctrl+Y and shortcuts: their own rules)
         if self.typing:
             return self.type_key(e)
+        if self.app.held_scrub:  # (a number box's label held: Delete, Esc, tool keys wait; Ctrl keys: their own rules)
+            return None if e.state & CTRL else "break"
         if self.app.box_drawn():  # (Esc, tool keys, Delete...: nothing until the Select box is let go, user)
             return "break"
         k = e.keysym.lower()

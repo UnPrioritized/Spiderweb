@@ -71,12 +71,11 @@ class HistoryPanel:
         """Refresh the list if the steps changed (cheap to call often)."""
         if not hasattr(self, "history_list") or not self.show_history.get() or self._history_jumping:
             return
-        sig = (len(self.undo_stack), len(self.redo_stack), id(self.undo_stack[-1]) if self.undo_stack else None,
-               id(self.redo_stack[-1]) if self.redo_stack else None)
+        names, now = self.history_rows()
+        sig = (names, now)  # (the names themselves: a step replaced by another can sit at the same spot in memory)
         if sig == self._history_sig and not force:
             return
         self._history_sig = sig
-        names, now = self.history_rows()
         lst = self.history_list
         top = lst.yview()[0]  # (refilling it scrolls to the top: put the scroll back, see() below only moves it if needed)
         lst.delete(0, "end")
@@ -97,12 +96,13 @@ class HistoryPanel:
     def history_jump(self, row):
         """Undo / redo until row is the current step."""
         self.roll.cancel_draft()
-        self._history_jumping = True  # (no list refresh for every step on the way: each would scroll it)
+        self._history_jumping = True  # (no list refresh on the way)
         try:
-            while len(self.undo_stack) > row and self.undo_stack:
-                self._restore(self.undo_stack, self.redo_stack)
-            while len(self.undo_stack) < row and self.redo_stack:
-                self._restore(self.redo_stack, self.undo_stack)
+            n = len(self.undo_stack) - row
+            if n > 0:
+                self._restore(self.undo_stack, self.redo_stack, n)
+            elif n < 0:
+                self._restore(self.redo_stack, self.undo_stack, -n)
         finally:
             self._history_jumping = False
         self.sync_history(force=True)
@@ -115,7 +115,8 @@ class HistoryPanel:
             if kept and kept[1] == len(self.undo_stack):
                 self.redo_stack[:] = kept[0]  # (the steps undone before it are back)
             self.undo_stack.pop()
-            self._redo_kept = None
+            self.undo_stack[:0] = getattr(self, "_trimmed", None) or []  # (the oldest steps the 300 limit dropped)
+            self._redo_kept = self._trimmed = None
 
     def settle_history(self):
         """After a mouse drag: a step that changed nothing goes."""

@@ -239,6 +239,7 @@ class Scrub:
                 self.app.after_cancel(self.drag["job"])
             self.drag = self.held = None
             self.app.scrubbing = False
+            self.app.held_scrub = None
             self.app.after_idle(self.app.catch_up_notes)
 
     def step_size(self, state):
@@ -272,8 +273,8 @@ class Scrub:
         return "break"
 
     def wheel(self, e, box):
-        if self.app.focus_get() is not box[0]:
-            return None  # not being typed in: the panel scrolls
+        if self.app.focus_get() is not box[0] or self.app.side_gliding(box[0]):
+            return None  # not being typed in / the side panel is being scrolled: the panel scrolls
         self.change([box], 1 if e.delta > 0 else -1, e.state, box[0])
         return "break"
 
@@ -308,6 +309,21 @@ class Scrub:
         self.drag = {"x": e.x_root, "n": 0, "job": None, "gesture": object(), "state": e.state,
                      "boxes": boxes or self.boxes}
         self.app.scrubbing = True  # (slow notes are made when the mouse rests or is let go: App.shapes_changed)
+        self.app.held_scrub = self  # (shortcuts / Delete wait, Ctrl+Z = cancel: App.key_undo)
+
+    def cancel(self):
+        """Ctrl+Z while held: the drag ends, the numbers go back to the press with no step (the mouse does nothing
+        more until let go)."""
+        d = self.drag
+        if not d:
+            return
+        if d["job"]:
+            self.app.after_cancel(d["job"])
+        if self.held:
+            self.held["box"][0].config(cursor="")
+        self.drag = self.held = None
+        self.app.held_scrub = None
+        self.app.take_back_scrub(d["gesture"])
 
     def motion(self, e):
         d = self.drag
@@ -338,6 +354,7 @@ class Scrub:
             self.flush()
         self.drag = None
         self.app.scrubbing = False
+        self.app.held_scrub = None
         self.app.catch_up_notes()
 
 

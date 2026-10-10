@@ -199,6 +199,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.note_counts = []  # notes per shape in rendered
         self.notes_late = False  # the notes are behind the shapes (a drag going on: see shapes_changed)
         self.scrubbing = False  # a number box's label is being dragged (widgets.Scrub): slow notes wait too
+        self.held_scrub = None  # that Scrub (shortcuts / Delete wait, Ctrl+Z cancels it)
+        self._trimmed = None  # the oldest steps the 300 limit dropped for the last step (add_undo_step)
         self.rendered_pts = []  # each shape's first point when rendered was made
         self.ppq, self.beats = 960, 4
         self.undo_stack, self.redo_stack = [], []
@@ -438,6 +440,16 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         c.bind("<Configure>", lambda e: self.fit_side())
         side.bind("<Configure>", lambda e: self.after_idle(self.fit_side))
         self.bind("<MouseWheel>", self.side_wheel, add="+")
+        self._side_wheel_at = 0.0
+        own = self.bind_class("TCombobox", "<MouseWheel>")  # (a dropdown's own wheel: next / last choice)
+
+        def drop_wheel(e):
+            if self.side_gliding(e.widget):
+                return self.side_wheel(e, dropdown=True) or "break"
+            if own:
+                self.tk.eval(own.replace("%W", str(e.widget)).replace("%D", str(e.delta)))
+            return None
+        self.bind_class("TCombobox", "<MouseWheel>", drop_wheel)
         return side
 
     def fit_side(self):
@@ -456,12 +468,22 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.side_box.config(width=int(330 * self.scale))
             c.yview_moveto(0)
 
-    def side_wheel(self, e):
-        """The mouse wheel over the side panel scrolls it (lists scroll themselves)."""
+    def side_wheel(self, e, dropdown=False):
+        """The mouse wheel over the side panel scrolls it (lists scroll themselves; dropdowns and number boxes
+        with the keyboard change, unless the panel is already scrolling: side_gliding)."""
         w = str(e.widget)
         if (w.startswith(str(self.side_canvas)) and self.side_bar.winfo_ismapped()
-                and not isinstance(e.widget, (tk.Listbox, tk.Text, ttk.Combobox))):
+                and (dropdown or not isinstance(e.widget, (tk.Listbox, tk.Text, ttk.Combobox)))):
             self.side_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
+            self._side_wheel_at = time.monotonic()
+
+    SIDE_GLIDE = 0.5  # seconds: a wheel turned within this of the last panel scroll keeps scrolling the panel (user)
+
+    def side_gliding(self, widget):
+        """The side panel is being scrolled with the wheel: a dropdown / number box the mouse passes over scrolls
+        on with it instead of changing (user: like web pages; still the wheel stops = they change again)."""
+        return (str(widget).startswith(str(self.side_canvas)) and self.side_bar.winfo_ismapped()
+                and time.monotonic() - self._side_wheel_at < self.SIDE_GLIDE)
 
     def _build_project(self, side):
         box = ttk.LabelFrame(side, text=tr("app.project"), padding=6)
@@ -795,12 +817,32 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         sh = self.selected()
         new = [values[0] / self.ppq, values[1]]
         if sh["pts"][i] != new:
+            trial = dict(sh, pts=[new if j == i else p for j, p in enumerate(sh["pts"])])
+            if not self.point_ok(sh, trial):
+                return bad(te, typing=True)  # (a stray zero: many notes asked first, like the Gate box)
             self.begin_edit(("point", self.sel, i))
             axis = self.roll.held_axis(sh)
             sh["pts"][i] = new
             if self.roll.keep_symmetric(sh, i, axis):
                 self.sync_points()  # the other half followed
             self.shapes_changed()
+
+    def point_ok(self, sh, trial):
+        """A point typed on a spam custom shape / funnel: past big_ask's 1 M notes = asked first. Counted only when
+        the most it could make is past that (counting a funnel 10^9 ticks long took 12 s by itself); far past it
+        the most is asked about."""
+        if sh["kind"] not in ("custom", "funnel") or sh.get("merge") or trial.get("hz"):
+            return True
+        beats = [p[0] for p in trial["pts"]]
+        keys = [p[1] for p in trial["pts"]]
+        gate = min(sh.get("gate", 1), (sh.get("range") or {}).get("to", math.inf))
+        most = (int((max(beats) - min(beats)) * self.ppq / max(1, round(gate * self.ppq))) + 3) * (
+            int(max(keys) - min(keys)) + 2) * 2
+        if most <= big_ask.BIG:
+            return True
+        if most > 50 * big_ask.BIG:
+            return self.ask_notes(most)
+        return self.note_count(trial) <= self.note_count(sh) or self.confirm_big([trial])
 
     def ppq_ok(self):
         try:
@@ -1422,7 +1464,11 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         return len(self.notes_of(sh)) if n is None else n
 
     def confirm_big(self, shapes):
-        return big_ask.ask(self, "notes", sum(self.note_count(sh) for sh in shapes))
+        return self.ask_notes(sum(self.note_count(sh) for sh in shapes))
+
+    def ask_notes(self, n):
+        """True = go ahead making n notes (asked past big_ask.BIG)."""
+        return big_ask.ask(self, "notes", n)
 
     def layout_rows(self):
         """Show the panel's optional parts, always in the same order above the point boxes."""
@@ -1692,7 +1738,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 return None
             if isinstance(w, (tk.Entry, ttk.Entry)) and str(w.cget("state")) != "readonly":
                 return None
-            if self.box_drawn() or not while_held and (self.roll.holding() or self.vel.edit):
+            if self.box_drawn() or not while_held and (self.roll.holding() or self.vel.edit or self.held_scrub):
                 return "break"  # (a velocity line held: its shapes mustn't change under it either)
             fn()
             return "break"
@@ -1977,6 +2023,23 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self._scrub = None
         own = bool(self.hz_window and self.hz_window.own_step)  # (made there, whatever has the keyboard now)
         self.add_undo_step(state or json.dumps(self.shapes), name, hz=own or self.in_hz())
+        if sc and sc["active"]:
+            sc["at"] = len(self.undo_stack)  # (take_back_scrub: still the last step?)
+
+    def take_back_scrub(self, gesture):
+        """Ctrl+Z while a number box's label is held (Scrub.cancel): its step goes, not even kept for redo; the
+        steps undone before it and the oldest ones the 300 limit dropped come back."""
+        sc = self._scrub
+        if sc and sc["gesture"] is gesture and sc["pushed"] and sc.get("at") == len(self.undo_stack):
+            kept, trimmed = self._redo_kept, self._trimmed
+            self._restore(self.undo_stack, self.redo_stack)
+            self.redo_stack.pop()
+            if kept:
+                self.redo_stack[:] = kept[0]
+            if trimmed:
+                self.undo_stack[:0] = trimmed
+            self.sync_history()
+        self._scrub = None
 
     def add_undo_step(self, before, name=None, sel=None, hz=False):
         """push_undo without its checks (before: the shapes as JSON). The selection is kept with it (sel: the one
@@ -1984,6 +2047,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         picked by number, which can point at another shape after undo). hz: made in the Hz bass window (key_undo)."""
         self.drop_empty_step(before)
         self.undo_stack.append((before, name or tr("app.change"), sel or self.sel_state(), hz))
+        self._trimmed = self.undo_stack[:-300]  # (put back by drop_empty_step if this step changes nothing)
         del self.undo_stack[:-300]
         # the undone steps are kept aside until this step turns out to change something (a click on a shape that
         # doesn't drag it mustn't throw them away: drop_empty_step brings them back)
@@ -2058,6 +2122,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             return None  # (a pop-up without its own undo: the shapes it works on stay as they are)
         if self.vel.edit:  # a velocity line held: Ctrl+Z throws it away (no step), Ctrl+Y does nothing
             return "break" if redo else (self.vel.drop(), "break")[1]
+        if self.held_scrub:  # a number box's label held: Ctrl+Z = back to the press (no step), Ctrl+Y nothing
+            return "break" if redo else (self.held_scrub.cancel(), "break")[1]
         if not self.in_hz(e.widget):
             return "break" if self.box_drawn() else self.redo() if redo else self.undo()
         if hz.drag:  # the mouse held there: Ctrl+Z only puts back what's being dragged (no step), Ctrl+Y nothing
@@ -2078,7 +2144,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             return hz.status.config(text=tr("hz.redo_elsewhere" if redo else "hz.undo_elsewhere"))
         self._restore(src, self.undo_stack if redo else self.redo_stack)
 
-    def _restore(self, src, dst):
+    def _restore(self, src, dst, count=1):
+        """count steps from src to dst (a History jump: the steps on the way only move, the shapes are made once)."""
         for w in (self.claw_window, self.strum_window, self.chop_window, self.tumour_window):
             if w:
                 w.settle()  # (so Ctrl+Z here takes back the claw / strum / tumours being tried out)
@@ -2088,9 +2155,13 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             return
         hz_was = self.hz_window and self.hz_window.before_restore()
         self.roll.cancel_draft()
-        state, name, picked, hz = src.pop()
-        self._redo_kept = None
-        dst.append((json.dumps(self.shapes), name, self.sel_state(), hz))
+        now, sel_now = json.dumps(self.shapes), self.sel_state()
+        for _ in range(min(count, len(src))):
+            state, name, picked, hz = src.pop()
+            dst.append((now, name, sel_now, hz))
+            now, sel_now = state, picked
+        state, picked = now, sel_now
+        self._redo_kept = self._trimmed = None
         self.shapes = json.loads(state)
         self.sels, self.sel = set(picked[0]), picked[1]
         self.sels = {i for i in self.sels if i < len(self.shapes)}
