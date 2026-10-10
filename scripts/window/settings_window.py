@@ -4,7 +4,7 @@ Updates (how often to look; kept with the window settings in the autosave), late
 (user)."""
 
 import tkinter as tk
-from tkinter import colorchooser, messagebox, simpledialog, ttk
+from tkinter import colorchooser, messagebox, ttk
 
 from files.lang import tr
 from files.system import WINDOWS
@@ -33,6 +33,63 @@ def look_box(parent):
             messagebox.showinfo(tr("look.title"), tr("look.restart"), parent=box.winfo_toplevel())
     box.bind("<<ComboboxSelected>>", picked)
     return box
+
+
+class NameDialog(tk.Toplevel):
+    """Asks a palette's name. OK with a name that won't do (empty, or check(name) gives a reason) keeps it open: the
+    question turns into that reason in red for WRONG_MS, then comes back (user: it closed doing nothing).
+    .name = the name given, None = cancelled."""
+    WRONG_MS = 2000
+
+    def __init__(self, parent, title, prompt, initial="", check=None):
+        super().__init__(parent)
+        self.title(title)
+        self.transient(parent)
+        self.resizable(False, False)
+        self.name, self.check, self.prompt, self._back = None, check, prompt, None
+        box = ttk.Frame(self, padding=(12, 10, 12, 12))
+        box.pack(fill="both", expand=True)
+        self.label = ttk.Label(box, text=prompt, wraplength=round(320 * parent.app.scale), justify="left")
+        self.label.pack(anchor="w")
+        self.var = tk.StringVar(value=initial)
+        self.entry = ttk.Entry(box, textvariable=self.var, width=36)
+        self.entry.pack(fill="x", pady=(6, 10))
+        self.entry.select_range(0, "end")
+        row = ttk.Frame(box)
+        row.pack(anchor="e")
+        ttk.Button(row, text=tr("palette.ok"), command=self.ok).pack(side="left", padx=(0, 6))
+        ttk.Button(row, text=tr("palette.cancel"), command=self.destroy).pack(side="left")
+        self.bind("<Return>", lambda e: self.ok())
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.update_idletasks()
+        self.geometry("+%d+%d" % (parent.winfo_rootx() + 30, parent.winfo_rooty() + 30))
+        self.entry.focus_set()
+
+    def ok(self):
+        name = clean_name(self.var.get())
+        wrong = tr("palette.name_empty") if not name else self.check(name) if self.check else None
+        if wrong:
+            self.label.config(text=wrong, foreground=look.ERROR)
+            if self._back:
+                self.after_cancel(self._back)
+            self._back = self.after(self.WRONG_MS, self.question_back)
+            self.entry.focus_set()
+            return
+        self.name = name
+        self.destroy()
+
+    def question_back(self):
+        self._back = None
+        if self.winfo_exists():
+            self.label.config(text=self.prompt, foreground="")
+
+
+def ask_name(parent, title, prompt, initial="", check=None):
+    """The name typed in a NameDialog (waits for it), None = cancelled."""
+    d = NameDialog(parent, title, prompt, initial, check)
+    d.grab_set()
+    d.wait_window()
+    return d.name
 
 
 def open_settings(app):
@@ -207,16 +264,9 @@ class SettingsWindow(tk.Toplevel):
         self.show_palettes()
 
     def ask_name(self, title, name, but=None, prompt=None):
-        """A palette name typed (asked again while it's taken), None = cancelled."""
-        prompt = prompt or tr("palette.name_ask")
-        while True:
-            name = simpledialog.askstring(title, prompt, parent=self, initialvalue=name)
-            name = clean_name(name or "")
-            if not name:
-                return None
-            if not palettes.taken(name, but):
-                return name
-            prompt = tr("palette.name_taken", name=name)
+        """A palette name typed (empty / taken: said in red, the dialog stays open), None = cancelled."""
+        return ask_name(self, title, prompt or tr("palette.name_ask"), name,
+                        check=lambda n: tr("palette.name_taken", name=n) if palettes.taken(n, but) else None)
 
     def new_palette(self):
         """A new palette: a copy of the one in use (its colours are changed later), picked."""
