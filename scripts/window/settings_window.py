@@ -4,7 +4,7 @@ Updates (how often to look; kept with the window settings in the autosave), late
 (user)."""
 
 import tkinter as tk
-from tkinter import colorchooser, messagebox, ttk
+from tkinter import colorchooser, font as tkfont, messagebox, ttk
 
 from files.lang import tr
 from files.system import WINDOWS
@@ -49,8 +49,22 @@ class NameDialog(tk.Toplevel):
         self.name, self.check, self.prompt, self._back = None, check, prompt, None
         box = ttk.Frame(self, padding=(12, 10, 12, 12))
         box.pack(fill="both", expand=True)
-        self.label = ttk.Label(box, text=prompt, wraplength=round(320 * parent.app.scale), justify="left")
-        self.label.pack(anchor="w")
+        # the text's room is fixed (user: the window grew and shrank as the text changed): as tall as the longest
+        # text it can show, plus a line for a long name in the "taken" one; only ever grows past that
+        wrap = round(320 * parent.app.scale)
+        self.holder = ttk.Frame(box, width=wrap)
+        self.holder.pack(anchor="w", fill="x")
+        self.holder.pack_propagate(False)
+        self.label = ttk.Label(self.holder, wraplength=wrap, justify="left")
+        self.label.pack(anchor="nw")
+        tall = 0
+        for text in (prompt, tr("palette.name_empty"), tr("palette.name_taken", name="M" * 12)):
+            self.label.config(text=text)
+            self.label.update_idletasks()
+            tall = max(tall, self.label.winfo_reqheight())
+        line = tkfont.nametofont("TkDefaultFont").metrics("linespace")
+        self.holder.config(height=tall + line)
+        self.label.config(text=prompt)
         self.var = tk.StringVar(value=initial)
         self.entry = ttk.Entry(box, textvariable=self.var, width=36)
         self.entry.pack(fill="x", pady=(6, 10))
@@ -70,6 +84,9 @@ class NameDialog(tk.Toplevel):
         wrong = tr("palette.name_empty") if not name else self.check(name) if self.check else None
         if wrong:
             self.label.config(text=wrong, foreground=look.ERROR)
+            self.label.update_idletasks()
+            if self.label.winfo_reqheight() > self.holder.winfo_height():  # (a really long name: grows, never shrinks)
+                self.holder.config(height=self.label.winfo_reqheight())
             if self._back:
                 self.after_cancel(self._back)
             self._back = self.after(self.WRONG_MS, self.question_back)
