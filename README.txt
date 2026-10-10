@@ -14,12 +14,15 @@ What it can do:
   any length (spam).
 - Add bumps along lines (tumours), shape the velocities, and put
   overlapping shapes on different channels.
-- Hz bass: spam so fast it sounds like a tone, with effects and a
-  preview you can hear right away.
-- Strum and claw machine tools that change the notes of a shape.
+- Hz bass: spam so fast it sounds like a tone, with a synth window (knobs,
+  effects, layers) and a preview you can hear right away.
+- Turn an image into notes in up to 15 colours.
+- Claw machine, Strum and Chop pages that change the notes of a shape, Add
+  between (shapes that step from one shape to another), slicing and merging.
 - Share shapes with others as one line of text.
 - Play it as you go, then write a .mid file, or copy the notes straight into
-  Domino (and paste notes from Domino).
+  Domino (and paste notes from Domino, or save a Domino song file).
+- Light or dark look.
 
 New versions, source code and problem reports:
 https://github.com/UnPrioritized/Spiderweb
@@ -35,12 +38,16 @@ Ideas borrowed from osu! mapping: arcs through three points work like osu!'s
 Mapping Tools by OliBomby (github.com/OliBomby/Mapping_Tools), written anew
 here for the piano roll.
 
-The Hz bass preview uses BASS and BASSMIDI by Un4seen Developments
-(un4seen.com; the DLLs and Linux .so files in scripts/bass, the DLLs also
-inside the .exe). They are NOT
+The Hz bass preview and the Built-in BASSMIDI playback use BASS and BASSMIDI
+by Un4seen Developments (un4seen.com; the DLLs and Linux .so files in
+scripts/bass, the DLLs also inside the .exe). They are NOT
 covered by Spiderweb's MIT License: they are free for non-commercial use
 only. Anyone selling or otherwise making money from a copy of Spiderweb
 needs a BASS licence from Un4seen.
+
+The .exe also carries Python, Tcl/Tk, NumPy, Numba, llvmlite (with LLVM),
+Pillow and PyInstaller's starter program. Their licences are in
+THIRD-PARTY-NOTICES.txt.
 
 Running the .exe
 ----------------
@@ -102,14 +109,15 @@ Good to know
 
 Running from source
 -------------------
-Needs Windows, Python 3.10 or newer (python.org; tested with 3.14; Tkinter
+Needs Windows (Linux should work too, but no Linux user has tested it yet:
+please report how it goes), Python 3.10 or newer (python.org; tested with 3.14; Tkinter
 comes with it) and NumPy (fast maths for millions of notes).
 Double-click Spiderweb.bat. If NumPy
 isn't installed yet, Spiderweb offers to install it for you; or type
   pip install numpy
 in a command prompt.
 Two more packages are optional: Numba (much faster with lots of notes) and
-Pillow (pictures shown faster; the Picture tool opens JPG, WebP, BMP and
+Pillow (images shown faster; the Image tool opens JPG, WebP, BMP and
 TIFF too, not just PNG and GIF). Spiderweb works without them, just slower.
 It offers to install them once; to do it yourself later, type
   pip install numba pillow
@@ -118,9 +126,10 @@ prepares its fast code (kept for the next starts).
 Tested with Python 3.14.7, NumPy 2.5.3, Numba 0.68.0 and Pillow 12.3.0. If
 something misbehaves with other versions, these are known to work, e.g.
   pip install numpy==2.5.3 numba==0.68.0 pillow==12.3.0
-Playback uses Windows' built-in MIDI output. The Hz bass window's Preview
-uses the built-in synth instead (BASS, in scripts/bass; no MIDI device needed)
-with a soundfont you pick.
+Playback goes to the MIDI out picked under Project: Windows' MIDI output,
+Built-in BASSMIDI (Spiderweb's own synth, with a soundfont you pick; the only
+choice on Linux), or OmniMIDI (KDMAPI) when OmniMIDI is installed. The Hz bass
+window's Preview always uses the built-in synth (no MIDI device needed).
 
 Building the .exe yourself
 --------------------------
