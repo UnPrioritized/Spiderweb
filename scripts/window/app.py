@@ -378,7 +378,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         Tooltip(help_btn, tr("app.every_tip_searchable_opens_at_the"))
         # Settings: always at the top right corner, whatever row the buttons are on (user)
         b = self.gear = ttk.Button(top, text="⚙", width=3, command=lambda: open_settings(self), takefocus=False)
-        b.grid(row=0, column=2, sticky="ne", padx=(8, 0))
+        b.grid(row=0, column=2, sticky="e", padx=(8, 0))  # (centred in the row, like the buttons beside it)
         Tooltip(b, tr("settings.button_tip"))
 
         self.status = StatusLine(self, text="", padding=(6, 2), font=look.font(9))
