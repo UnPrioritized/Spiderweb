@@ -14,6 +14,7 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed --name Spiderweb 
 if errorlevel 1 (pause & exit /b 1)
 copy /y LICENSE dist\ >nul
 copy /y README.txt dist\ >nul
+copy /y THIRD-PARTY-NOTICES.txt dist\ >nul
 if exist dist\clips rmdir /s /q dist\clips
 rem Source archive for sharing: spiderweb.py + the scripts and clips folders, launchers and license only (no autosave/shapes/output).
 if exist dist\Spiderweb-source.zip del dist\Spiderweb-source.zip
