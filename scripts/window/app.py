@@ -537,7 +537,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.edo_audio_tick = ttk.Checkbutton(self.edo_ticks, text=tr("app.edo31_audio"), variable=self.edo31_audio,
                                               command=self.edo_ticked)
         self.edo_audio_tick.pack(side="left", padx=(4, 0))
-        Tooltip(self.edo_audio_tick, tr("app.edo31_audio_tip"))
+        self.edo_audio_tip = Tooltip(self.edo_audio_tick, tr("app.edo31_audio_tip"))
+        ttk.Style().configure("Warn.TCheckbutton", foreground=look.WARN)  # (Audio on, another MIDI out: edo_warn)
         box.update_idletasks()
         for e in boxes:
             e.master.config(width=b.winfo_reqwidth(), height=e.winfo_reqheight())
@@ -928,7 +929,14 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.out.edo = tuned
             if playing:
                 self.start_play(keep=True)
+        self.edo_warn()
         self.roll.request_redraw()
+
+    def edo_warn(self):
+        """The Audio tick orange (+ its tip says why) while it's on but the MIDI out can't play 31-EDO."""
+        off = self.edo() and self.edo31_audio.get() and self.midi_device.get() != BUILTIN
+        self.edo_audio_tick.config(style="Warn.TCheckbutton" if off else "TCheckbutton")
+        self.edo_audio_tip.text = tr("app.edo31_audio_needs_builtin" if off else "app.edo31_audio_tip")
 
     def read_project(self):
         try:
@@ -1924,6 +1932,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.stop_play()
         self.out.close()
         self.sync_builtin()
+        self.edo_warn()
         self.schedule_autosave()
 
     def make_live(self):
