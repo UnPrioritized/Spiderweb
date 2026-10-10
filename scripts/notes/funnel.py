@@ -780,11 +780,12 @@ def hz_stretches(sh, ppq):
                             and not isinstance(v, np.ndarray)}, sort_keys=True, default=str))
     got = _STRETCHES.get(key)
     if got is None:
-        got = _STRETCHES[key] = _hz_stretches(sh, ppq)
+        got = _hz_stretches(sh, ppq)
         for a in got:
             a.setflags(write=False)
-        while len(_STRETCHES) > 8:
-            _STRETCHES.pop(next(iter(_STRETCHES)))
+        if len(_STRETCHES) >= 8:  # (the window and the background note making both use it: never fails)
+            _STRETCHES.clear()
+        _STRETCHES[key] = got
     return got
 
 
