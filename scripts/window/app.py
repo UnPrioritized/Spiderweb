@@ -2033,6 +2033,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             if k not in now or s > now[k][0]:
                 now[k] = (s, v)
         held = self._scrub_held
+        if self.out.edo and self.out.name != BUILTIN and now and not held:
+            self.status.config(text=tr("app.edo31_audio_builtin_only"))
         for k in [k for k in held if k not in now]:
             self.out.note(*k, 0, rows=True)
             del held[k]
