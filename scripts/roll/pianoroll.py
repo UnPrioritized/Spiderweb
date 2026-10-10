@@ -19,7 +19,7 @@ from notes.joined import all_tumours
 from notes.paths import KEYS
 from notes.funnel import funnel_contains, funnel_handles, funnel_origins
 from notes.fx import copied as fx_copied, with_turn as fx_turned
-from notes.sliced import clip_strokes, on_side, piece_knives, steps_kept
+from notes.sliced import clip_strokes, fresh_marks, on_side, piece_knives, steps_kept
 from roll.roll_curve import CurveEditing
 from roll.roll_custom import CustomBox
 from roll.roll_draw import RollDrawing
@@ -992,6 +992,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         app = self.app
         first = len(app.shapes)
         app.shapes += [copy.deepcopy(app.shapes[j]) for j in sorted(orig)]
+        fresh_marks(app.shapes[first:])
         between_copied(app.shapes, first)  # (a whole Add between group: a new group; parts of one: plain shapes)
         new = {first + k: orig[j] for k, j in enumerate(sorted(orig))}
         if len(app.shapes) > first + len(orig):  # (a group copied without its steps: they were added)

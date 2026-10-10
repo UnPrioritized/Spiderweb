@@ -5,6 +5,7 @@ formulas, ellipses, freehand made perfect: as polylines) and gets the cut line's
 shape as a new edge, so its fill closes there. Areas coloured by hand stay with the half their spot is in."""
 
 import copy
+import uuid
 
 import numpy as np
 
@@ -318,35 +319,46 @@ def slice_notes(sh, notes, tracks, a, b, ppq):
     """Pasted notes (a custom shape holding notes, custom.py) cut by the Slice tool along a-b (beats, keys), by time
     (user, 2026-10-10: it needn't go all the way across): on each key row the line crosses, the notes before the
     spot it crosses at go to a new shape (user), a note sounding there cut in two at that tick; rows it doesn't cross
-    stay whole with the notes after it. notes: its (start, end, key, velocity) notes as they sound now, tracks: each one's track. -> the two
-    halves (each a pasted-notes shape around its own notes, sh's other settings kept), or None: the line touches
-    no note's row between its first note and last end, or one side would be empty."""
+    stay whole with the notes after it. notes: its (start, end, key, velocity) notes as they sound now (rows above
+    the top key too), tracks: each one's track. -> (the two halves, each a pasted-notes shape around its own notes
+    with sh's other settings, or None: the line touches no note's row between its first note and last end, or one
+    side would be empty; crossed: the line went over the notes' box, for the status line)."""
     a, b = np.asarray(a, float), np.asarray(b, float)
     dk = b[1] - a[1]
     if not len(notes) or abs(dk) < EPS:  # (a flat line runs between key rows: it crosses none)
-        return None
+        return None, False
     notes = np.asarray(notes, np.int64)[:, :4]
+    lo, hi, keys = notes[:, 0], notes[:, 1], notes[:, 2]
+    t0, t1, k0, k1 = int(lo.min()), int(hi.max()), int(keys.min()), int(keys.max())
+    if (max(a[0], b[0]) * ppq <= t0 or min(a[0], b[0]) * ppq >= t1 or max(a[1], b[1]) < k0
+            or min(a[1], b[1]) > k1):  # (nowhere near them: quick, a paste can be millions of notes)
+        return None, False
+    rows = np.arange(k1 + 1)
+    s = (rows - a[1]) / dk  # (where along a-b it crosses each row's middle)
+    row_on = (s >= -EPS) & (s <= 1 + EPS)
+    row_x = np.round((a[0] + (b[0] - a[0]) * s) * ppq).astype(np.int64)
+    inside = row_on[k0:] & (row_x[k0:] > t0) & (row_x[k0:] < t1)
+    crossed = bool(inside.any())
+    on, x = row_on[keys], row_x[keys]
+    # (it has to go through a note or between a row's notes somewhere: a note starting before it on the row, and one
+    # ending after it)
+    early = np.bincount(keys[on & (lo < x)], minlength=k1 + 1) > 0
+    late = np.bincount(keys[on & (hi > x)], minlength=k1 + 1) > 0
+    if not (early & late).any():
+        return None, crossed
     tracks = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64)
-    s = (notes[:, 2] - a[1]) / dk  # (where along a-b it crosses each note's row middle)
-    on = (s >= -EPS) & (s <= 1 + EPS)
-    x = np.round((a[0] + (b[0] - a[0]) * s) * ppq).astype(np.int64)
-    touched = False
-    for k in np.unique(notes[on, 2]):  # (it has to go through a note or between a row's notes somewhere)
-        r = on & (notes[:, 2] == k)
-        touched |= bool(notes[r, 0].min() < x[r][0] < notes[r, 1].max())
-    if not touched:
-        return None
-    lo, hi = notes[:, 0], notes[:, 1]
     rest, before = ~on | (hi > x), on & (lo < x)
+    paste = sh.get("paste") or uuid.uuid4().hex[:12]  # (its tracks keep their channels across the pieces: render)
     parts = []
     for keep, s0, s1 in ((rest, np.where(on, np.maximum(lo, x), lo), hi), (before, lo, np.minimum(hi, x))):
-        n = np.column_stack([s0, s1 - s0, notes[:, 2], notes[:, 3], tracks])[keep]
+        n = np.column_stack([s0, s1 - s0, keys, notes[:, 3], tracks])[keep]
         if not len(n):
-            return None
+            return None, crossed
         half = {k: copy.deepcopy(v) for k, v in sh.items()
                 if k not in ("notes", "pts", "vel_env", "fx", "glue", "between")}
-        half.update(notes_shape(n, ppq, sh.get("name")))  # (pages / glue / a velocity line: in its notes now)
+        half.update(notes_shape(n, ppq, sh.get("name")), paste=paste)  # (pages / glue / a velocity line: in its notes)
         if "name" not in sh:
             half.pop("name")
         parts.append(half)
-    return parts
+    return parts, crossed
+

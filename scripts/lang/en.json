@@ -56,6 +56,7 @@
  "join_split.sliced": "Sliced {shapes} shape(s) into {n} pieces (selected)",
  "join_split.slice_nothing": "The slice line didn't cross any shape it can cut (lines, curves, arcs, custom shapes, funnels and pasted notes; not text, pictures or Hz bass)",
  "join_split.slice_partly": "A custom shape is only cut when the slice line goes all the way across it",
+ "join_split.slice_missed_notes": "Pasted notes are only cut where the slice line goes through notes or between a row's notes",
  "join_split.slice_partly_too": ". {n} custom shape(s) weren't crossed all the way, so they stay whole",
  "app.select": "Select",
  "app.line": "Line",

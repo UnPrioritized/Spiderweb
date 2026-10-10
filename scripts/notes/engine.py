@@ -222,6 +222,8 @@ def clean_shape(sh):
             out.update(notes=sh["notes"], strokes=[dict(BOX_STROKE)], fill="empty")
             if sh.get("own_vel"):
                 out["own_vel"] = True
+            if isinstance(sh.get("paste"), str):  # pieces sliced from one paste: its tracks share channels (render)
+                out["paste"] = sh["paste"]
             pic = clean_picture(sh.get("picture"))
             if pic:  # a picture made into notes (picture.py): the notes are its finished colours, track = slot
                 out["picture"] = pic
@@ -991,7 +993,7 @@ CHANNEL_MODES = ("raw", "single", "auto")
 SPLITS = ("key", "time")
 
 
-def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None):
+def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None, pastes=None):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -1007,7 +1009,10 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     teams: per shape None, or (group, turn) for an Add between group giving each shape its own colour (between.py):
     with "auto" the group's shapes of one turn share a channel, and every turn of a group gets a different one (its
     shapes' own tracks are left out).
+    pastes: per shape None, or the id of the paste it was sliced from (pasted notes, slice.slice_notes): with "auto"
+    one track of all the pieces of a paste is ONE unit, so it keeps one channel across them.
     """
+    pastes = pastes or [None] * len(note_lists)
     tracks = tracks or [None] * len(note_lists)
     apart = apart or [False] * len(note_lists)
     fixed = fixed or [False] * len(note_lists)
@@ -1017,7 +1022,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     if mode == "auto":
         units, unit_of, forced = [], [], []  # the shapes, pasted notes split up by track; unit_of = each note's unit
         team_unit, team_units = {}, {}  # (group, turn) -> its unit; group -> its units
-        for lst, tr, sep, pin, team in zip(note_lists, tracks, apart, pinned, teams):
+        paste_unit, paste_units = {}, {}  # (paste, track) -> its unit; paste -> its units
+        for lst, tr, sep, pin, team, pid in zip(note_lists, tracks, apart, pinned, teams, pastes):
             if pin is not None:
                 unit_of.append(None)
                 continue
@@ -1037,11 +1043,25 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                 continue
             ids, which = np.unique(tr, return_inverse=True)
             which = which.ravel()
+            if pid is not None:  # (a piece of a paste: each track joins that track's unit in the other pieces)
+                if pid not in paste_units:  # (all its tracks' units at once, in track order: channels as before the cut)
+                    every = np.unique(np.concatenate([np.asarray(t2) for t2, p2 in zip(tracks, pastes)
+                                                      if p2 == pid and t2 is not None]))
+                    paste_units[pid] = list(range(len(units), len(units) + len(every)))
+                    for t2 in every.tolist():
+                        paste_unit[pid, t2] = len(units)
+                        units.append(lst[:0])
+                us = [paste_unit[pid, t] for t in ids.tolist()]
+                for k, u in enumerate(us):
+                    units[u] = np.concatenate([units[u], lst[which == k]])
+                unit_of.append(np.asarray(us, np.int64)[which])
+                continue
             unit_of.append(len(units) + which)
             if sep:
                 forced.append(range(len(units), len(units) + len(ids)))
             units += [lst[which == k] for k in range(len(ids))]
         forced += [us for us in team_units.values() if len(us) > 1]
+        forced += [us for us in paste_units.values() if len(us) > 1]  # (pasted tracks: always apart, tracks_apart)
         unit_slots = np.array(assign_slots(units, split, forced), np.int64)
         if use10:  # (0..8, 10..24, 26..40...: never a slot that is channel 10)
             unit_slots = unit_slots + (unit_slots + 6) // 15

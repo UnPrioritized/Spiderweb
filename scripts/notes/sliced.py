@@ -777,12 +777,15 @@ def on_knife(m, k):
 
 def fresh_marks(copies):
     """Copied pieces keep their cut marks, but no faint line goes from them to the pieces they were copied from (user):
-    their marks get new ids (the same among the copies, so pieces copied together still pair up)."""
+    their marks get new ids (the same among the copies, so pieces copied together still pair up). Pieces sliced from
+    pasted notes the same: copies get a paste id of their own (they get channels apart from the originals)."""
     import uuid
     new = {}
     for sh in copies:
         for m in (sh.get("cut") or {}).get("marks", []):
             m["id"] = new.setdefault(m["id"], uuid.uuid4().hex[:12])
+        if "paste" in sh:
+            sh["paste"] = new.setdefault(("paste", sh["paste"]), uuid.uuid4().hex[:12])
 
 
 def slice_in_two(sh, halves, a, b):

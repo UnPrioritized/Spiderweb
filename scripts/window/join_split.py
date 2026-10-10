@@ -14,7 +14,7 @@ from notes.arc import arc_circle, arc_points
 from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live, velocity_changed
 from notes.bezier import anchor_count, nearest, split
 from notes.custom import notes_shape
-from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_path
+from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_notes_tracks, shape_path
 from notes.merge import edge_moves, merged, part_rows, reshaped_parts
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom, slice_notes
@@ -403,20 +403,22 @@ class JoinSplit:
         boxes = roll.kept_box()
         segs = [(a, b)] if not boxes else [s for s in (clip_segment(a, b, box) for box in boxes) if s]
         targets = sorted(self.sels) if boxes else range(len(self.shapes))
-        done, out, skipped, plain = {}, {}, 0, set()
+        done, out, skipped, plain, missed = {}, {}, 0, set(), 0
         for i in targets:
             sh = self.shapes[i]
             if (sh["kind"] == "custom" and "notes" in sh and "picture" not in sh and "merge" not in sh
                     and not sh.get("text") and not sh.get("hz")):
                 # pasted notes: by time, each row the line crosses (slice.slice_notes); pieces = new pasted notes
-                pieces = [sh]
+                pieces, crossed = [sh], False
                 for sa, sb in segs:
                     nxt = []
                     for p in pieces:
-                        got = slice_notes(p, *self.notes_tracks(p), sa, sb, self.ppq)
+                        got, hit = slice_notes(p, *self.all_rows(p), sa, sb, self.ppq)
+                        crossed |= hit
                         nxt += got or [p]
                     pieces = nxt
                 plain.add(i)
+                missed += len(pieces) == 1 and crossed
             elif sh["kind"] in ("custom", "funnel") and ("notes" in sh or sh.get("text") or sh.get("hz")):
                 continue
             elif (sh["kind"] == "custom" or sh["kind"] in LINE_KINDS) and tooled(sh) or sh["kind"] == "funnel":
@@ -464,7 +466,8 @@ class JoinSplit:
             if len(pieces) > 1:
                 done[i] = pieces
         if not done:
-            self.status.config(text=tr("join_split.slice_nothing") if not skipped else tr("join_split.slice_partly"))
+            self.status.config(text=tr("join_split.slice_partly") if skipped else
+                               tr("join_split.slice_missed_notes") if missed else tr("join_split.slice_nothing"))
             return
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.slice"))
@@ -489,6 +492,14 @@ class JoinSplit:
         n = sum(len(p) for p in done.values())
         self.status.config(text=tr("join_split.sliced", shapes=len(done), n=n) +
                            (tr("join_split.slice_partly_too", n=skipped) if skipped else ""))
+
+    def all_rows(self, sh):
+        """A pasted-notes shape's notes and tracks for the Slice tool, rows moved past the top key too (they're hidden
+        but kept: a slice mustn't lose them)."""
+        (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
+        if max(p0, p1, p2, p1 + p2 - p0) <= self.keys - 0.5:
+            return self.notes_tracks(sh)
+        return shape_notes_tracks(sh, self.ppq, 256)
 
     def path_dist(self, sh, at):
         """How far (on screen) the shape's line passes from at."""

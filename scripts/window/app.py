@@ -120,7 +120,8 @@ def all_notes(shapes, ppq, keys, mode, split, notes_tracks):
     # (pictures using channel 10 too: one setting for the project, kept with every picture)
     use10 = next((sh["picture"]["set"].get("use10", False) for sh in shapes if "picture" in sh), False)
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
-                             ["picture" in sh for sh in shapes], use10, between_turns(shapes))
+                             ["picture" in sh for sh in shapes], use10, between_turns(shapes),
+                             [sh.get("paste") if "notes" in sh else None for sh in shapes])
     return wanted, use10, rendered, slots
 
 
