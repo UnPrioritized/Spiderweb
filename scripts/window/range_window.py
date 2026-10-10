@@ -224,8 +224,10 @@ class RangeGraph(tk.Toplevel):
             if not self.placed(t) or not t.get("range"):
                 continue
             if self.funnel:  # (a funnel's notes come with their gates: funnel.py)
-                if t["fill"] == "spam":
-                    j = (funnel_gates(t, self.app.ppq) - a) * (1 if b >= a else -1)
+                if t["fill"] == "spam":  # (a sliced piece: its own notes' lengths, the ones cut at its cut shorter)
+                    gates = funnel_gates(t, self.app.ppq) if not t.get("cut") else np.diff(
+                        self.app.notes_of(t)[:, :2], axis=1).ravel()
+                    j = (gates - a) * (1 if b >= a else -1)
                     out += np.bincount(j[(j >= 0) & (j < n)], minlength=n)
                 continue
             if t.get("fill") not in SPAM_FILLS:

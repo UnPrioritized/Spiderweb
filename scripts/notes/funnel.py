@@ -867,6 +867,9 @@ def hz_notes(sh, ppq):
 
 
 def funnel_note_count(sh, ppq):
+    """How many notes the funnel makes (quick), or None: a sliced piece (only its side's: count its notes)."""
+    if sh.get("cut"):
+        return None
     if sh.get("hz"):  # (each layer heard makes its own: engine.layered_notes)
         return sum(len(hz_notes(dict(sh, hz=hz), ppq)) for hz in heard_layers(sh["hz"]))
     count = 0
