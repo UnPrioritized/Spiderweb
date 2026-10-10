@@ -700,10 +700,11 @@ def _nearest(xs, x):
     return i
 
 
-def funnel_cells(sh, ppq, main=True, gates=None):
+def funnel_cells(sh, ppq, main=True, gates=None, raw=False):
     """Spam: (grid ticks, [(key, first grid line, last grid line)]), every key's notes running from grid
     line to grid line. Long: (None, [(key, start tick, end tick)]). One side of the wall (funnel_sides).
-    gates: a list, given the gate each grid line's note was cut with (spam)."""
+    gates: a list, given the gate each grid line's note was cut with (spam). raw: long notes as they are (a key
+    reached just on the wall: start = end, not 1 tick)."""
     lay = funnel_layout(sh, ppq, main)
     if not lay:
         return None, []
@@ -724,7 +725,7 @@ def funnel_cells(sh, ppq, main=True, gates=None):
             for a, b in spans:
                 far = tick(b) + (sign * g1 if past and at_wall(q, b) else 0)  # a wall gate past the wall
                 s, e = sorted((tick(a), far))
-                out.append((q, s, max(e, s + 1)))
+                out.append((q, s, e if raw else max(e, s + 1)))
         return None, out
     marks, cut = funnel_grid(sh, ppq, dspans, length)
     ticks, ds, gs = [], [], []
@@ -760,33 +761,51 @@ def funnel_cells(sh, ppq, main=True, gates=None):
 
 def hz_stretches(sh, ppq):
     """A Hz bass funnel: where each key plays, as (start, end, key) ticks: what long notes would be, both sides of
-    the wall (Notes start on it: one repeat past it), each then chopped into the Hz bass's repeats (custom.chop)."""
-    cells = [c for half, main in funnel_sides(dict(sh, fill="long")) for c in funnel_cells(half, ppq, main)[1]]
-    return np.asarray(cells, np.int64).reshape(-1, 3)[:, [1, 2, 0]]
+    the wall (Notes start on it: one repeat past it), each then chopped into the Hz bass's repeats (custom.chop).
+    -> (stretches, side): which end of each is the wall's (1 = its end, -1 = its start; Notes start on it: the end
+    of the column past it)."""
+    parts, sides = [], []
+    for half, main in funnel_sides(dict(sh, fill="long")):
+        lay = funnel_layout(half, ppq, main)
+        cells = funnel_cells(half, ppq, main, raw=True)[1] if lay else []
+        parts += cells
+        sides += [lay[4] if lay else 0] * len(cells)
+    return np.asarray(parts, np.int64).reshape(-1, 3)[:, [1, 2, 0]], np.asarray(sides, np.int64)
 
 
 def hz_notes(sh, ppq):
-    """A Hz bass funnel's notes (one layer): its stretches chopped into the repeats. A key only touching the funnel
-    for a sliver (where a curve meets the wall) has no repeat mostly inside it: it gets the one overlapping it most
-    (like a spam funnel's key reached on the wall: just the last note); none = silence there."""
-    st = hz_stretches(sh, ppq)
+    """A Hz bass funnel's notes (one layer): its stretches chopped into the repeats. The repeats don't line up
+    with the wall (they run from tick 0): one crossing it is cut there (user: no notes past the wall). A key only
+    touching the funnel for a sliver (where a curve meets the wall) has no repeat mostly inside it: it gets the one
+    nearest the wall that reaches into it (like a spam funnel's key reached on the wall: just the last note); none
+    (no note sounding there) = silence."""
+    st, side = hz_stretches(sh, ppq)
     g = spam_gate(sh, ppq)
     if isinstance(g, float):  # (one grid from tick 0: none = a key's stretch too short, as custom.chop_even)
         none = np.ceil(st[:, 1] / g - 0.5) - np.ceil(st[:, 0] / g - 0.5) <= 0
     else:
         none = chop(sh, st, g, True) == 0
-    out = [chop(sh, st[~none], g)]
-    for s, e, q in st[none].tolist():
+    ok = np.flatnonzero(~none)
+    notes = chop(sh, st[ok], g)
+    owner = np.repeat(ok, chop(sh, st[ok], g, True))
+    for i in np.flatnonzero(none).tolist():
+        s, e, q = st[i].tolist()
         if isinstance(g, float):
-            k = np.arange(math.floor(s / g), math.floor(e / g) + 1)
+            k = np.arange(math.floor(s / g) - 1, math.floor(e / g) + 2)
             sq = np.column_stack([np.floor(k * g + 0.5), np.floor((k + 1) * g + 0.5)]).astype(np.int64)
         else:
             sq = g.squares(q) if hasattr(g, "squares") else g
-            sq = sq[(sq[:, 0] < max(e, s + 1)) & (sq[:, 1] > s)]
-        if len(sq):
-            best = sq[np.argmax(np.minimum(sq[:, 1], max(e, s + 1)) - np.maximum(sq[:, 0], s))]
-            out.append(np.array([[best[0], best[1], q]], np.int64))
-    return np.concatenate(out)
+        # (reaching into it; just on the wall (start = end): the one on the funnel's side of it)
+        at = sq[(sq[:, 0] < e) & (sq[:, 1] > s)] if e > s else sq[(sq[:, 0] < e) & (sq[:, 1] >= s) if side[i] > 0
+                                                                   else (sq[:, 0] <= e) & (sq[:, 1] > s)]
+        if len(at):
+            best = at[-1] if side[i] > 0 else at[0]  # (the one nearest the wall)
+            notes = np.concatenate([notes, [[best[0], best[1], q]]]).astype(np.int64)
+            owner = np.append(owner, i)
+    end, start = side[owner] > 0, side[owner] < 0  # cut at the wall
+    notes[end, 1] = np.minimum(notes[end, 1], st[owner[end], 1])
+    notes[start, 0] = np.maximum(notes[start, 0], st[owner[start], 0])
+    return notes[notes[:, 1] > notes[:, 0]]
 
 
 def funnel_note_count(sh, ppq):
