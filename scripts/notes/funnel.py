@@ -2,6 +2,7 @@
 
 import bisect
 import copy
+import json
 import math
 
 import numpy as np
@@ -759,11 +760,28 @@ def funnel_cells(sh, ppq, main=True, gates=None, raw=False):
     return ticks, out
 
 
+_STRETCHES = {}  # (ppq, the funnel without its Hz bass) -> hz_stretches' answer (the last few)
+
+
 def hz_stretches(sh, ppq):
     """A Hz bass funnel: where each key plays, as (start, end, key) ticks: what long notes would be, both sides of
     the wall (Notes start on it: one repeat past it), each then chopped into the Hz bass's repeats (custom.chop).
     -> (stretches, side): which end of each is the wall's (1 = its end, -1 = its start; Notes start on it: the end
-    of the column past it)."""
+    of the column past it). Kept for the same funnel: tracing its outline is the slow part (a big funnel ~0.1 s,
+    done for every layer and count while the Hz bass window is edited)."""
+    key = (ppq, json.dumps({k: v for k, v in sh.items() if k not in ("hz", "before_hz")
+                            and not isinstance(v, np.ndarray)}, sort_keys=True, default=str))
+    got = _STRETCHES.get(key)
+    if got is None:
+        got = _STRETCHES[key] = _hz_stretches(sh, ppq)
+        for a in got:
+            a.setflags(write=False)
+        while len(_STRETCHES) > 8:
+            _STRETCHES.pop(next(iter(_STRETCHES)))
+    return got
+
+
+def _hz_stretches(sh, ppq):
     parts, sides = [], []
     for half, main in funnel_sides(dict(sh, fill="long")):
         lay = funnel_layout(half, ppq, main)
