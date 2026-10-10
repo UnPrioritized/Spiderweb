@@ -138,7 +138,7 @@ class Updates:
 
 
 def often_box(parent, updates, width=26):
-    """The "how often" dropdown (Help → About, the update popup)."""
+    """The "how often" dropdown (Settings → Updates, the update popup)."""
     names = often_names()
     var = tk.StringVar(value=names[updates.often or "launch"])
     box = ttk.Combobox(parent, textvariable=var, values=list(names.values()), state="readonly", width=width)

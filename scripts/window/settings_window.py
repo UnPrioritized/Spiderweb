@@ -1,18 +1,16 @@
-"""The Settings window (the ⚙ button at the end of the toolbar): the app's own settings, saved in user/settings.ini
-(files/settings.py), not the project's: no undo. Tabs: Look (light / dark; more look settings and the note colour
-palettes later), later Language. Opens by itself once, on the first start that has no "shown" mark (user: Linux
-setups vary, so the look is worth a look first)."""
+"""The Settings window (the ⚙ button at the end of the toolbar): the app's own settings, not the project's: no undo.
+Tabs: Look (light / dark, saved in user/settings.ini; more look settings and the note colour palettes later),
+Updates (how often to look; kept with the window settings in the autosave), later Language. Never opens by itself
+(user)."""
 
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from files import settings
 from files.lang import tr
 from files.system import WINDOWS
 from window import look
+from window.updates import often_box
 from window.widgets import remember_place
-
-FIRST_START = True  # (the saved tests turn it off: every test starts with no settings.ini)
 
 
 def look_box(parent):
@@ -47,17 +45,6 @@ def open_settings(app):
     return app.settings_window
 
 
-def first_start(app):
-    """Opens the Settings window on the first start (marked as shown in settings.ini, so only once)."""
-    if not FIRST_START or settings.get("settings", "shown"):
-        return
-    try:
-        settings.put("settings", "shown", "yes")
-    except OSError:  # (can't be written: opening it every start would be worse than never)
-        return
-    open_settings(app)
-
-
 class SettingsWindow(tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
@@ -74,6 +61,20 @@ class SettingsWindow(tk.Toplevel):
         self.look.grid(row=0, column=1, sticky="w", pady=3)
         ttk.Label(page, text=tr("settings.look_hint"), foreground=look.HINT, wraplength=round(300 * app.scale),
                   justify="left").grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        # updates: how often to look, and looking now (the answer shows under the row)
+        page = ttk.Frame(tabs, padding=(12, 10, 12, 12))
+        tabs.add(page, text=tr("settings.updates_tab"))
+        updates = app.updates
+        row = ttk.Frame(page)
+        row.pack(anchor="w")
+        ttk.Label(row, text=tr("updates.check_for_updates")).pack(side="left")
+        often_box(row, updates).pack(side="left", padx=(6, 8))
+        status = self.update_status = ttk.Label(page, text="", foreground=look.HINT,
+                                                wraplength=round(360 * app.scale), justify="left")
+        status.pack(anchor="w", pady=(6, 0))
+        ttk.Button(row, text=tr("updates.check_now"), takefocus=False, command=lambda: (
+            status.config(text=tr("updates.checking")),
+            updates.check(report=lambda msg: status.winfo_exists() and status.config(text=msg)))).pack(side="left")
         self.bind("<Escape>", lambda e: self.destroy())
         self.update_idletasks()  # (first time: in the middle of the main window)
         self.geometry("+%d+%d" % (app.winfo_rootx() + (app.winfo_width() - self.winfo_reqwidth()) // 2,

@@ -1,7 +1,7 @@
 """The program's colours and fonts, all in one place (user, 2026-10-07: for dark mode and the planned Look settings
 window). Each colour is pick(light, dark): the light one is the look as it always was; dark None = not picked yet
 (the light one is used). DARK is fixed as this file is first read, before any window is made: the look picked in
-Help → About is saved in user/settings.ini and put on at the next start (user).
+Settings → Look is saved in user/settings.ini and put on at the next start (user).
 
 Not here: the note colours (roll_shared.SLOT_COLORS: the same in both looks), colours a user picks, and the synth
 window, which has its own dark look (synth_look.py, user: keep it as it is)."""
@@ -18,7 +18,7 @@ LOOK_FILE = os.path.join(USER, "look.json")  # (older versions' file: moved into
 
 
 def read_look():
-    """The look picked in Help → About ("light" when none was, or the file won't read)."""
+    """The look picked in Settings → Look ("light" when none was, or the file won't read)."""
     how = settings.get("look", "look")
     if how is None and os.path.exists(LOOK_FILE):
         try:
