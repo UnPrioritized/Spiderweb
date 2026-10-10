@@ -100,7 +100,8 @@ OUTLINE_SOFT = pick("#555", "#8a8a8e")  # a thin edge round a small colour box
 ROLL_BG = pick("#ffffff", "#3c3c3f")  # white-key rows (quiet notes fade toward it too)
 ROW_BLACK = pick("#e7eefa", "#353538")  # black-key rows
 ROW_LINE = pick("#dfe6f2", "#353538")  # between two white-key rows
-ROW_HALF = pick("#f3f6fc", "#39393b")  # 31-EDO's half sharp / half flat rows
+# 31-EDO: half sharp / half flat rows, and its sharp / flat rows a little darker than ROW_BLACK (three clear steps)
+ROW_HALF, ROW_BLACK_EDO = pick("#eef2fa", "#373739"), pick("#dce4f4", "#303033")
 OCTAVE_LINE = pick("#606060", "#7a7a7c")  # under each C
 OUTSIDE_KEYS = pick("#ececec", "#2f2f31")  # past the lowest / highest key
 GRID_SNAP, GRID_BEAT, GRID_BAR = pick("#eef1f6", "#464649"), pick("#bcc4d2", "#57575a"), pick("#3a3a3a", "#8a8a8c")

@@ -786,7 +786,7 @@ class RollDrawing:
         for p in range(p_lo, p_hi + 1):
             y0, y1 = self.row_y(p)
             if p % size in black:
-                rows.append((y0, y1, look.ROW_BLACK))
+                rows.append((y0, y1, look.ROW_BLACK_EDO if edo else look.ROW_BLACK))
             elif edo and p % size not in EDO_WHITE:
                 rows.append((y0, y1, look.ROW_HALF))
             elif self.sy >= 4:
@@ -1422,6 +1422,8 @@ class RollDrawing:
         edo = self.app.edo()
         usual = EDO_PIANO if edo else PIANO_88 if self.app.keys == KEYS[0] else range(KEYS[0])
         size, black, f = (EDO, EDO_BLACK, 13) if edo else (12, BLACK, 5)
+        # (31-EDO names every row: shorter keys and smaller in-between names leave them room)
+        black_w, half_w = (0.45, 0.35) if edo else (0.6, 0)
         for p in range(p_lo, p_hi + 1):
             y0, y1 = self.row_y(p)
             n = p % size
@@ -1429,19 +1431,20 @@ class RollDrawing:
             if p not in usual:
                 self.create_rectangle(0, y0, kb, y1, fill=look.KEY_OUTSIDE, outline="", tags="frame")
             if n in black:
-                self.create_rectangle(0, y0, kb * 0.6, y1, fill=look.KEY_BLACK if p in usual else look.KEY_BLACK_OUTSIDE,
-                                      outline="", tags="frame")
+                self.create_rectangle(0, y0, kb * black_w, y1,
+                                      fill=look.KEY_BLACK if p in usual else look.KEY_BLACK_OUTSIDE, outline="", tags="frame")
             elif half:
-                self.create_rectangle(0, y0, kb * 0.45, y1, fill=look.KEY_HALF if p in usual else look.KEY_HALF_OUTSIDE,
+                self.create_rectangle(0, y0, kb * half_w, y1, fill=look.KEY_HALF if p in usual else look.KEY_HALF_OUTSIDE,
                                       outline="", tags="frame")
             if n in (0, f):  # bottom edge of C and F = white key border
                 self.create_line(0, y1, kb, y1, fill=look.KEY_EDGE_C if n == 0 else look.KEY_EDGE_F, tags="frame")
-            white = n not in black and not half
+            white = n not in black and not half  # (31-EDO: every row named once there's room)
             label = note_name(p, edo) if n == 0 and self.sy >= 6 else (
-                note_name(p, edo) if white and self.sy >= 16 else None)
+                note_name(p, edo) if (white or edo) and self.sy >= 16 else None)
             if label:
                 self.create_text(kb - 3, (y0 + y1) / 2, text=label, anchor="e", fill=look.KEY_TEXT,
-                                 font=look.font(font_size, "bold" if n == 0 else "normal"), tags="frame")
+                                 font=look.font(font_size if white else min(font_size, 8), "bold" if n == 0 else "normal"),
+                                 tags="frame")
         self.create_line(kb, top, kb, h, fill=look.ROLL_EDGE, tags="frame")
 
     def draw_ruler(self, w):
