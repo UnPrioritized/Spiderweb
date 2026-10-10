@@ -1,7 +1,7 @@
 """The program's colours and fonts, all in one place (user, 2026-10-07: for dark mode and the planned Look settings
 window). Each colour is pick(light, dark): the light one is the look as it always was; dark None = not picked yet
 (the light one is used). DARK is fixed as this file is first read, before any window is made: the look picked in
-Help → About is saved in look.json and put on at the next start (user).
+Help → About is saved in user/settings.ini and put on at the next start (user).
 
 Not here: the note colours (roll_shared.SLOT_COLORS: the same in both looks), colours a user picks, and the synth
 window, which has its own dark look (synth_look.py, user: keep it as it is)."""
@@ -9,26 +9,34 @@ window, which has its own dark look (synth_look.py, user: keep it as it is)."""
 import json
 import os
 
+from files import settings
 from files.about import USER
-from files.safefile import write_text
 from files.system import WINDOWS, dark_system
 
 LOOKS = ("light", "dark", "windows")  # (saved as these; windows = follow the system's setting)
-LOOK_FILE = os.path.join(USER, "look.json")
+LOOK_FILE = os.path.join(USER, "look.json")  # (older versions' file: moved into settings.ini once, kept as look-old)
 
 
 def read_look():
     """The look picked in Help → About ("light" when none was, or the file won't read)."""
-    try:
-        with open(LOOK_FILE, encoding="utf-8") as f:
-            how = json.load(f).get("look")
-    except (OSError, ValueError, AttributeError):
-        how = None
+    how = settings.get("look", "look")
+    if how is None and os.path.exists(LOOK_FILE):
+        try:
+            with open(LOOK_FILE, encoding="utf-8") as f:
+                how = json.load(f).get("look")
+        except (OSError, ValueError, AttributeError):
+            how = None
+        if how in LOOKS:
+            try:
+                save_look(how)
+                os.replace(LOOK_FILE, os.path.splitext(LOOK_FILE)[0] + "-old.json")
+            except OSError:
+                pass
     return how if how in LOOKS else "light"
 
 
 def save_look(how):
-    write_text(LOOK_FILE, json.dumps({"look": how}) + "\n")
+    settings.put("look", "look", how)
 
 
 def is_dark(how):

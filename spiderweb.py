@@ -109,7 +109,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     project.py       project files, autosave (+ its backup), MIDI export
     safefile.py      saving without half-written files
     errors.py        errors.log and the "something went wrong" message
-    about.py         version number, the program's folder
+    about.py         version number, the program's folder, the user folder (moving old files in)
+    settings.py      the app's own settings (user/settings.ini: the look, later more)
     system.py        what's asked of Windows / Linux (double-click speed, free memory, an error box)
     update_check.py  asking GitHub for newer versions (and their notes)
     midi_out.py      MIDI file writer
