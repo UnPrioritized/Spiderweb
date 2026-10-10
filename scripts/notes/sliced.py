@@ -28,6 +28,7 @@ from notes.paths import dedupe, dot_segment_notes, path_notes
 OUTLINE = ("kind", "pts", "k", "smooth", "tumour", "tumours", "gaps", "splits", "sharp", "sym", "shape", "pattern",
            "end_dot")
 CUSTOM_OUTLINE = ("kind", "pts", "strokes", "areas", "round")  # a custom shape's (its strokes are in its frame)
+FUNNEL_OUTLINE = ("kind", "pts", "starts")  # a funnel's (its curves are in "starts"; cut through its notes, knife_in_two)
 VELOCITY = ("vel0", "vel1", "vel_env")
 GATE = ("gate", "range")  # a custom piece's spam gate: the whole's until it's changed (slice shares out a Range)
 BIG = 1 << 30  # a joined curve's piece k has the spots k * BIG + ...
@@ -36,7 +37,56 @@ WHOLE_TOOLS = ("glue", "fx")  # the whole's glue and note tool pages: done on th
 
 
 def keys_of(sh):
-    return CUSTOM_OUTLINE if sh["kind"] == "custom" else OUTLINE
+    return {"custom": CUSTOM_OUTLINE, "funnel": FUNNEL_OUTLINE}.get(sh["kind"], OUTLINE)
+
+
+def piece_knives(sh):
+    """A funnel piece's Slice cuts where they are now [[b0, k0, db, dk, side]] (it keeps the whole funnel's notes
+    on its side of them, knife_cut), else None (not a funnel piece, or its outline changed)."""
+    cut = sh.get("cut")
+    d = moved_by(sh) if cut and sh["kind"] == "funnel" else None
+    if d is None:
+        return None
+    return [[b0 + d[0], k0 + d[1], db, dk, sd] for b0, k0, db, dk, sd in cut.get("knife") or []]
+
+
+def on_side(knives, b, p):
+    """Is the spot (beat, key) on the kept side of every knife (knife_cut's sides; right on one counts)?"""
+    return all(sd * (db * (p - k0) - dk * (b - b0)) >= -1e-9 for b0, k0, db, dk, sd in knives)
+
+
+def clip_strokes(strokes, knives):
+    """(beat, key) polylines with the parts past any knife left out (user: a funnel piece shows only its side of the
+    funnel). Nothing left = the strokes as they were (the piece still has to be seen and picked)."""
+    out = []
+    for st in strokes:
+        pieces = [[tuple(p) for p in st]]
+        for b0, k0, db, dk, sd in knives:
+            def f(p):
+                return sd * (db * (p[1] - k0) - dk * (p[0] - b0))
+            nxt = []
+            for pc in pieces:
+                run, w = [], None
+                for p in pc:
+                    v = f(p)
+                    if w is not None and (v >= 0) != (w >= 0):  # (crossing it: the spot where)
+                        t = w / (w - v)
+                        x = (q[0] + (p[0] - q[0]) * t, q[1] + (p[1] - q[1]) * t)
+                        if v >= 0:
+                            run = [x]
+                        else:
+                            run.append(x)
+                            if len(run) > 1:
+                                nxt.append(run)
+                            run = []
+                    if v >= 0:
+                        run.append(p)
+                    q, w = p, v
+                if len(run) > 1 or (len(run) == 1 and len(pc) == 1):
+                    nxt.append(run)
+            pieces = nxt
+        out += pieces
+    return [[list(p) for p in pc] for pc in out] if out else strokes
 
 
 def outline(sh):
@@ -752,8 +802,10 @@ def clean_cut(c):
     try:
         whole, was = clean_shape(dict(c["whole"])), clean_shape(dict(c["was"]))
         # (a line kind's piece can be another line kind: a polyline's last two points are a line)
-        if not whole or not was or (whole["kind"] == "custom") != (was["kind"] == "custom") or not (
-                whole["kind"] in LINE_KINDS or whole["kind"] == "custom" and "notes" not in whole):
+        if not whole or not was or (whole["kind"] == "custom") != (was["kind"] == "custom") or (
+                (whole["kind"] == "funnel") != (was["kind"] == "funnel")) or not (
+                whole["kind"] in LINE_KINDS or whole["kind"] == "funnel" or whole["kind"] == "custom"
+                and "notes" not in whole):
             return None
         if whole["kind"] == "custom":
             part = [[float(x) for x in h[:4]] + [1 if h[4] > 0 else -1] for h in c["part"]]

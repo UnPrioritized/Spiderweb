@@ -14,7 +14,7 @@ from notes.joined import all_tumours
 from notes.merge import preview_parts, slid_preview
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
 from notes.paths import KEYS
-from notes.sliced import moved_by, moved_mark
+from notes.sliced import clip_strokes, moved_by, moved_mark, piece_knives
 from roll.roll_shared import (BLACK, DRAFT_COLOR, PIANO_88, PREVIEW_LIMIT, SELECTED_COLOR, SLOT_COLORS,
                               draw_boxes, fade, note_name)
 from roll.tiles import Tiles, see_through
@@ -430,7 +430,9 @@ class RollDrawing:
                 self.draw_path(dict(sh, tumour=None, tumours=None, pattern=None, shape=None),
                                look.ORIGIN_PICKED if i in app.sels else look.ORIGIN, 1, dash=(6, 4))
             if sh["kind"] in ("funnel", "custom") and (i in app.sels or app.show_lines.get()):  # its curves' / strokes'
-                for path in funnel_origins(sh) if sh["kind"] == "funnel" else (p for _, p in self.origin_strokes(sh)):
+                knives = piece_knives(sh) if sh["kind"] == "funnel" else None  # (a funnel piece: its side only)
+                for path in ((clip_strokes(funnel_origins(sh), knives) if knives else funnel_origins(sh))
+                             if sh["kind"] == "funnel" else (p for _, p in self.origin_strokes(sh))):
                     self.create_line(*[v for b, p in path for v in (self.t2x(b), self.p2y(p))], width=1,
                                      fill=look.ORIGIN_PICKED if i in app.sels else look.ORIGIN, dash=(6, 4))
         if app.show_lines.get():

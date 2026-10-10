@@ -19,7 +19,7 @@ from notes.joined import all_tumours
 from notes.paths import KEYS
 from notes.funnel import funnel_contains, funnel_handles, funnel_origins
 from notes.fx import copied as fx_copied, with_turn as fx_turned
-from notes.sliced import steps_kept
+from notes.sliced import clip_strokes, on_side, piece_knives, steps_kept
 from roll.roll_curve import CurveEditing
 from roll.roll_custom import CustomBox
 from roll.roll_draw import RollDrawing
@@ -573,7 +573,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if sh.get("pattern") or sh.get("shape") or any(tm["on"] for tm in all_tumours(sh)):
             strokes = strokes + cached_strokes(dict(sh, tumour=None, tumours=None, pattern=None, shape=None))
         if sh["kind"] == "funnel":
-            strokes = strokes + funnel_origins(sh)
+            knives = piece_knives(sh)  # (a piece: its side only)
+            strokes = strokes + (clip_strokes(funnel_origins(sh), knives) if knives else funnel_origins(sh))
         elif sh["kind"] == "custom":  # (its strokes' under a formula)
             strokes = strokes + [p for _, p in PianoRoll.origin_strokes(sh)]
         return strokes
@@ -626,7 +627,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 if (test([b], [p])[0] if test else
                         self.inside_strokes(cached_strokes(sh) if sh.get("text") else fill_plan(sh)["polys"], b, p)):
                     return i  # filled shapes can be clicked anywhere inside
-            if sh["kind"] == "funnel" and funnel_contains(sh, self.x2t(x), self.y2p(y)):
+            if sh["kind"] == "funnel" and funnel_contains(sh, self.x2t(x), self.y2p(y)) and on_side(
+                    piece_knives(sh) or [], self.x2t(x), self.y2p(y)):
                 return i
         return None
 

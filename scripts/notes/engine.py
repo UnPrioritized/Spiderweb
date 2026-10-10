@@ -37,8 +37,8 @@ from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, for
 from notes.custom import frame_upright
 from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
-from notes.sliced import (clean_cut, cut_through, in_part, knife_cut, moved_by, piece_notes, run_origins, source,
-                          spotted_notes, whole_made)
+from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_cut, moved_by, piece_knives, piece_notes,
+                          run_origins, source, spotted_notes, whole_made)
 from notes.smooth import clean_level, smooth_path
 from notes.text import clean_text
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
@@ -304,7 +304,8 @@ def shape_strokes(sh):
     if sh["kind"] == "custom":
         return custom_strokes(sh)
     if sh["kind"] == "funnel":
-        return funnel_strokes(sh)
+        knives = piece_knives(sh)  # (a piece: only its side, sliced.py)
+        return clip_strokes(funnel_strokes(sh), knives) if knives else funnel_strokes(sh)
     if is_joined(sh):  # one path per piece
         return joined_paths(sh, tumour_path)
     return [shape_path(sh)]
@@ -318,7 +319,8 @@ SHAPE_KEYS = ("starts", "tumour", "k", "text", "smooth", "gaps", "splits",
 
 def _cached(sh):
     key = (sh["kind"], tuple(map(tuple, sh["pts"])), json.dumps(sh.get("strokes")),
-           json.dumps([sh.get(k) for k in SHAPE_KEYS]))
+           json.dumps([sh.get(k) for k in SHAPE_KEYS]),
+           json.dumps([sh["cut"].get("knife"), sh["cut"]["was"]]) if sh["kind"] == "funnel" and sh.get("cut") else None)
     got = _paths.get(key)
     if got is None:
         if len(_paths) > 3000:
@@ -684,7 +686,7 @@ def clash_levels(lists):
 
 def _notes_tracks(sh, ppq, keys):
     # cut by the Slice tool: the whole's notes on its side (sliced.py; a line too when cut from a piece as it was)
-    if sh.get("cut") and (sh["kind"] == "custom" or (sh["cut"].get("whole") or {}).get("cut")):
+    if sh.get("cut") and (sh["kind"] in ("custom", "funnel") or (sh["cut"].get("whole") or {}).get("cut")):
         got = piece_notes(sh, ppq, keys, shape_notes_tracks)  # (the whole's glue / pages done first)
         if got is not None:
             return got

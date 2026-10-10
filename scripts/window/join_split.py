@@ -406,10 +406,11 @@ class JoinSplit:
         done, out, skipped = {}, {}, 0
         for i in targets:
             sh = self.shapes[i]
-            if sh["kind"] == "custom" and ("notes" in sh or sh.get("text") or sh.get("hz")):
+            if sh["kind"] in ("custom", "funnel") and ("notes" in sh or sh.get("text") or sh.get("hz")):
                 continue
-            if (sh["kind"] == "custom" or sh["kind"] in LINE_KINDS) and tooled(sh):
-                # (pages / glue: its notes are cut, wherever they are; both pieces keep the drawing, user)
+            if (sh["kind"] == "custom" or sh["kind"] in LINE_KINDS) and tooled(sh) or sh["kind"] == "funnel":
+                # (pages / glue: its notes are cut, wherever they are; both pieces keep the drawing, user. A funnel:
+                # always its notes, each piece drawn only on its side: sliced.piece_knives)
                 pieces, crossed = [sh], False
                 for sa, sb in segs:
                     nxt = []
@@ -418,7 +419,8 @@ class JoinSplit:
                         crossed |= hit
                         if stretch:
                             got = [copy.deepcopy(p), copy.deepcopy(p)]
-                            hits = knife_hits(self.notes_of(p), sa, sb, self.ppq) if sh["kind"] != "custom" else ()
+                            hits = (knife_hits(self.notes_of(p), sa, sb, self.ppq) if sh["kind"] in LINE_KINDS
+                                    else ())
                             knife_in_two(p, got, sa, sb, stretch, hits)
                         nxt += got if stretch else [p]
                     pieces = nxt
