@@ -8,11 +8,11 @@ import re
 import sys
 import tkinter as tk
 import webbrowser
-from tkinter import font as tkfont, messagebox, ttk
+from tkinter import font as tkfont, ttk
 
 from files.lang import tr
 from files.about import BANNER, BANNER_HALF, HERE, LICENSE, VERSION, WEBSITE
-from files.system import WINDOWS, open_path
+from files.system import open_path
 from window import look
 from window.widgets import placed, remember_place
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS, NEXT, SECTION_NAMES, SECTIONS, SEE, TOOL_TOPICS, TOPICS
@@ -22,27 +22,6 @@ TOOL_TIPS = set(TOOL_TOPICS.values()) | set(DRAWER_TOOL_TOPICS.values())
 # the tips' place once dragged (window_places; "tip" was saved where the first tip showed, moved or not: left behind)
 TIP_PLACE = "tip_moved"
 CLIPS = os.path.join(getattr(sys, "_MEIPASS", HERE), "clips")  # (the .exe carries them inside)
-
-
-def look_box(parent):
-    """Help → About: Light / Dark / Follow Windows (only on Windows). Saved at once; a different look than the one
-    showing = a message to restart (user: it's put on at the next start)."""
-    names = {k: tr("look." + k) for k in look.LOOKS if k != "windows" or WINDOWS}
-    var = tk.StringVar(value=names.get(look.read_look(), names["light"]))
-    box = ttk.Combobox(parent, textvariable=var, values=list(names.values()), state="readonly", width=18)
-
-    def picked(e):
-        how = next(k for k, n in names.items() if n == var.get())
-        try:
-            look.save_look(how)
-        except OSError:
-            messagebox.showerror(tr("look.title"), tr("look.not_saved"), parent=box.winfo_toplevel())
-            var.set(names.get(look.read_look(), names["light"]))  # (back to the pick that's saved)
-            return
-        if look.is_dark(how) != look.DARK:
-            messagebox.showinfo(tr("look.title"), tr("look.restart"), parent=box.winfo_toplevel())
-    box.bind("<<ComboboxSelected>>", picked)
-    return box
 
 
 def gif_frames(path):
@@ -546,12 +525,6 @@ class HelpWindow(tk.Toplevel):
             updates.check(report=lambda msg: status.winfo_exists() and status.config(text=msg)))).pack(side="left")
         self.text.insert("end", "\n\n")
         self.embed(box)
-        # the look: light / dark / follow Windows (put on at the next start)
-        row = ttk.Frame(self.text)
-        ttk.Label(row, text=tr("look.look")).pack(side="left")
-        look_box(row).pack(side="left", padx=(6, 0))
-        self.text.insert("end", "\n\n")
-        self.embed(row)
 
     def add_clip(self, name):
         """Put clips/<name>.gif (playing) or clips/<name>.png (a still picture) at the end of the text. False if

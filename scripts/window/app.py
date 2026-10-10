@@ -68,6 +68,7 @@ from files.snap import DEFAULT_SNAP, snap_beats
 from roll.roll_shared import cached_path
 from roll.zoombar import add_zoom_bars
 from window.snap_picker import SnapPicker
+from window.settings_window import first_start, open_settings
 from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
@@ -275,6 +276,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.load_autosave()
         self.sync_panel()
         self.after(800, lambda: self.tips.show("welcome"))  # the first time Spiderweb starts
+        self.after(600, lambda: first_start(self))  # (the Settings window, once)
         self.updates.start()  # (What's new after an update; asks about / looks for updates)
         speed.start()  # (the compiled loops for lots of notes, if Numba is there: loaded in the background)
 
@@ -373,6 +375,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         help_btn = ttk.Button(bar, text=tr("app.help_f1"), command=self.open_help, takefocus=False)
         help_btn.pack(side="left", padx=(12, 0))
         Tooltip(help_btn, tr("app.every_tip_searchable_opens_at_the"))
+        b = ttk.Button(bar, text="⚙", width=3, command=lambda: open_settings(self), takefocus=False)
+        b.pack(side="left", padx=(4, 0))
+        Tooltip(b, tr("settings.button_tip"))
 
         self.status = StatusLine(self, text="", padding=(6, 2), font=look.font(9))
         self.status.pack(side="bottom", fill="x")
