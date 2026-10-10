@@ -9,6 +9,7 @@ step of the Hz bass window per change, on release; Ctrl+Z / Esc while held = bac
 The shape is the Hz bass's (its picked layer's) sound setting hz["trace"], kept in the Hz bass window's `extra`."""
 
 import copy
+import math
 import tkinter as tk
 from tkinter import ttk
 
@@ -21,6 +22,11 @@ GRID = 16  # grid lines each way (snapped to)
 PAD = 14  # px round the drawing area (x scale)
 GRAB = 7  # px: how near a point / the line a press takes it
 ROWS_SHOWN = 64  # more key rows than this: only some drawn (every key still hits)
+# the starting shapes of the Shapes ▾ menu (my picks): a saw = each key once, the others each key twice a wave
+SHAPES = {"saw": [[0.0, 0.0], [1.0, 1.0]],
+          "triangle": [[0.0, 0.0], [0.5, 1.0], [1.0, 0.0]],
+          "sine": [[i / 32, round(0.5 - 0.5 * math.cos(2 * math.pi * i / 32), 6)] for i in range(33)],
+          "square": [[0.0, 0.0], [0.0, 1.0], [0.5, 1.0], [0.5, 0.0], [1.0, 0.0]]}
 
 
 def open_trace(hz):
@@ -59,6 +65,12 @@ class TraceWindow(tk.Toplevel):
         b = ttk.Button(bar, text=tr("hz.trace_reset"), command=self.reset, takefocus=False)
         b.pack(side="left")
         Tooltip(b, tr("hz.trace_reset_tip"))
+        m = ttk.Menubutton(bar, text=tr("hz.trace_shapes"), takefocus=False)
+        m.pack(side="left", padx=(6, 0))
+        m["menu"] = menu = tk.Menu(m, tearoff=False)
+        for name in SHAPES:
+            menu.add_command(label=tr("hz.trace_" + name), command=lambda name=name: self.use(SHAPES[name]))
+        Tooltip(m, tr("hz.trace_shapes_tip"))
         self.says = ttk.Label(bar, text="", foreground=look.INFO)
         self.says.pack(side="left", padx=(10, 0))
         c = self.canvas = tk.Canvas(self, background=look.CHART_BG, highlightthickness=0, takefocus=True)
@@ -243,10 +255,14 @@ class TraceWindow(tk.Toplevel):
 
     def reset(self):
         """Back to straight up at the wave's start (every key together): one undo step."""
-        if self.drag is not None or not self.hz.extra.get("trace"):
+        self.use(START_TRACE)
+
+    def use(self, pts):
+        """The line replaced by these points (Reset, a starting shape): one undo step (none when it's the same)."""
+        if self.drag is not None:
             return
         before = self.hz.fx.state()
-        self.pts = shown_trace({})
+        self.pts = [list(p) for p in pts]
         self.save(before)
         self.draw()
 
