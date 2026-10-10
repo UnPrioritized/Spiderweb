@@ -217,27 +217,22 @@ class SettingsWindow(tk.Toplevel):
 
     # editing: Default itself never changes, so an edit on it first makes a copy (asks its name)
 
-    def own_palette(self):
-        """The palette to change: the one in use, or a new copy of Default (None = the name wasn't given)."""
-        now = palettes.picked()
-        if now != palettes.DEFAULT:
-            return now
-        name = self.ask_name(tr("palette.copy_title"), "", prompt=tr("palette.copy_ask"))
-        if name is None:
-            return None
-        palettes.save(name, palettes.colours_of(now))
-        palettes.use(name, self.app)
-        return name
-
     def change_colours(self, make):
-        """make(colours) -> the new colours, None = no change; saved and shown at once."""
+        """make(colours) -> the new colours, None = no change; saved and shown at once. On Default the colours are
+        picked first, then the copy's name asked (a cancelled colour picker makes no copy)."""
         try:
-            name = self.own_palette()
-            if name is None:
+            now = palettes.picked()
+            colours = make(palettes.colours_of(now))
+            if colours is None:
                 return
-            colours = make(palettes.colours_of(name))
-            if colours is not None:
-                palettes.save(name, colours, keep=palettes.user_palettes()[name][0])
+            if now == palettes.DEFAULT:
+                name = self.ask_name(tr("palette.copy_title"), "", prompt=tr("palette.copy_ask"))
+                if name is None:
+                    return
+                palettes.save(name, colours)
+                palettes.use(name, self.app)
+            else:
+                palettes.save(now, colours, keep=palettes.user_palettes()[now][0])
                 palettes.apply(colours, self.app)
         except OSError as e:
             messagebox.showerror(tr("palette.title"), tr("palette.not_saved", e=e), parent=self)
@@ -288,7 +283,10 @@ class SettingsWindow(tk.Toplevel):
     def new_palette(self):
         """A new palette: a copy of the one in use (its colours are changed later), picked."""
         now = palettes.picked()
-        name = self.ask_name(tr("palette.new_title"), "" if now == palettes.DEFAULT else now + " 2")
+        k = 2
+        while now != palettes.DEFAULT and palettes.taken(f"{now} {k}"):  # (the first number not taken)
+            k += 1
+        name = self.ask_name(tr("palette.new_title"), "" if now == palettes.DEFAULT else f"{now} {k}")
         if name is None:
             return
         try:

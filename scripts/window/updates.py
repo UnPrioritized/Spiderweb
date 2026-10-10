@@ -87,6 +87,8 @@ class Updates:
 
     def set_often(self, often):
         self.often = often
+        if getattr(self, "often_var", None) is not None:  # (open boxes show it, e.g. after the first question)
+            self.often_var.set(often_names()[often or "launch"])
         self.app.schedule_autosave()
 
     def check(self, report=None):
@@ -140,7 +142,10 @@ class Updates:
 def often_box(parent, updates, width=26):
     """The "how often" dropdown (Settings → Updates, the update popup)."""
     names = often_names()
-    var = tk.StringVar(value=names[updates.often or "launch"])
+    var = getattr(updates, "often_var", None)  # (one value for every such box: Settings and the popup agree)
+    if var is None:
+        var = updates.often_var = tk.StringVar(updates.app)
+    var.set(names[updates.often or "launch"])
     box = ttk.Combobox(parent, textvariable=var, values=list(names.values()), state="readonly", width=width)
     box.bind("<<ComboboxSelected>>",
              lambda e: updates.set_often(next(k for k, n in names.items() if n == var.get())))

@@ -341,7 +341,7 @@ if __name__ == "__main__":
     except (AttributeError, OSError):  # not Windows: no lock
         pass
     from files.about import move_old_files
-    move_old_files()
+    not_moved = move_old_files()
     if not check_numpy():
         sys.exit(1)
     try:
@@ -352,6 +352,12 @@ if __name__ == "__main__":
         from window.app import App
         app = App()
         label_window(app)
+        if not_moved:  # (old files another program held: they stay beside Spiderweb, the user moves them)
+            from tkinter import messagebox
+            from files.about import HERE, USER
+            from files.lang import tr
+            app.after(500, lambda: messagebox.showwarning("Spiderweb", tr(
+                "about.not_moved", files="\n".join(not_moved), here=HERE, user=USER), parent=app))
         app.mainloop()
     except Exception:  # couldn't start (errors inside the running window are caught by errors.install)
         errors.report(*sys.exc_info(), "(starting up)", fatal=True)

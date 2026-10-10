@@ -253,14 +253,14 @@ def load_layers(name):
     return strokes, (areas if strokes else [])
 
 
-def file_stem(name):
-    """A shape's name as a file name Windows takes: the characters it refuses -> "_", no dot / space at the end,
-    not one of its device names ("CON" -> "CON (shape)")."""
+def file_stem(name, what="shape"):
+    """A shape's (palette's...) name as a file name Windows takes: the characters it refuses -> "_", no dot / space
+    at the end, not one of its device names ("CON" -> "CON (shape)")."""
     stem = "".join("_" if c in BAD_CHARS or c < " " else c for c in name).strip().rstrip(". ")
     base, dot, rest = stem.partition(".")
     if base.strip().upper() in DEVICES:
-        stem = f"{base} (shape){dot}{rest}"
-    return stem or "shape"
+        stem = f"{base} ({what}){dot}{rest}"
+    return stem or what
 
 
 def free_path(name, keep=None):

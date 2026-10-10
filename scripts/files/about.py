@@ -21,20 +21,23 @@ OLD_FILES = ("autosave.json", "autosave-backup.json", "look.json", "hz_presets.j
 
 def move_old_files():
     """Moves what older versions kept loose next to Spiderweb into USER, once (a file already in USER wins and
-    the old one stays where it was). Never stops Spiderweb from starting."""
+    the old one stays where it was). Never stops Spiderweb from starting. Returns the names it couldn't move (held
+    by another program...): the user is told, so the old work isn't thought lost."""
     try:
         os.makedirs(USER, exist_ok=True)
-        names = list(OLD_FILES) + [f for f in os.listdir(HERE) if f.startswith("autosave-kept-")
+        names = list(OLD_FILES) + [f for f in os.listdir(HERE) if f.startswith(("autosave-kept-", "autosave-broken-"))
                                    and f.endswith(".json")]
     except OSError:
-        return
+        return []
+    failed = []
     for name in names:
         old, new = os.path.join(HERE, name), os.path.join(USER, name)
         if os.path.exists(old) and not os.path.exists(new):
             try:
                 os.replace(old, new)
             except OSError:
-                pass
+                failed.append(name)
+    return failed
 
 # The window icons (made by make_icon.py); the .exe carries them inside, unpacked with the program
 ICONS = os.path.join(getattr(sys, "_MEIPASS", os.path.join(HERE, "scripts")), "icons")

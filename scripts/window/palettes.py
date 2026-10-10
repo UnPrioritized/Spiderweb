@@ -21,18 +21,27 @@ BUILT_IN = [tuple(p) for p in roll_shared.SLOT_COLORS]  # (as the look made them
 
 
 def _colour(c):
+    """"#rrggbb" (also "#rgb", any capitals), None when it isn't a colour code."""
     c = str(c).strip().lower()
-    return c if len(c) == 7 and c[0] == "#" and all(ch in "0123456789abcdef" for ch in c[1:]) else None
+    if not (c[:1] == "#" and len(c) in (4, 7) and all(ch in "0123456789abcdef" for ch in c[1:])):
+        return None
+    return c if len(c) == 7 else "#" + "".join(ch * 2 for ch in c[1:])
 
 
 def clean(colours):
-    """A palette's colours as SLOTS (fill, edge) pairs; missing / wrong ones = the built-in one in that slot."""
+    """A palette's colours as SLOTS (fill, edge) pairs; missing / wrong ones = the built-in one in that slot. A fill
+    alone (or with a wrong edge) gets its edge made like a picked colour's."""
     out = []
     for k in range(SLOTS):
         pair = colours[k] if isinstance(colours, list) and k < len(colours) else None
+        if isinstance(pair, str):
+            pair = [pair]
         fill = edge = None
-        if isinstance(pair, (list, tuple)) and len(pair) == 2:
-            fill, edge = _colour(pair[0]), _colour(pair[1])
+        if isinstance(pair, (list, tuple)) and 1 <= len(pair) <= 2:
+            fill = _colour(pair[0])
+            edge = _colour(pair[1]) if len(pair) == 2 else None
+            if fill and not edge:
+                edge = with_edge(fill)[1]
         out.append((fill or BUILT_IN[k][0], edge or BUILT_IN[k][1]))
     return out
 
@@ -99,23 +108,32 @@ def read(path):
     try:
         with open(path, encoding="utf-8-sig") as f:
             got = json.load(f)
-        name = clean_name(str(got.get("name") or os.path.splitext(os.path.basename(path))[0]))
+        name = (clean_name(str(got.get("name") or "")) or
+                clean_name(os.path.splitext(os.path.basename(path))[0]))  # (no name inside: the file's)
         return (name, clean(got.get("colours"))) if name else None
     except (OSError, ValueError, AttributeError):
         return None
 
 
 def user_palettes():
-    """{name: (path, colours)} of the user's palettes, by name (a broken file: left out)."""
+    """{name: (path, colours)} of the user's palettes, by name (a broken file: left out). A name already used (two
+    files with one name, or one named like Default, e.g. handed over by someone) gets " (2)" added to tell it apart."""
+    from files.lang import tr
     out = {}
     try:
         files = sorted(f for f in os.listdir(FOLDER) if f.lower().endswith(".json"))
     except OSError:
         return out
+    used = {tr("palette.default").casefold()}
     for f in files:
         got = read(os.path.join(FOLDER, f))
-        if got and got[0].casefold() not in {n.casefold() for n in out}:
-            out[got[0]] = (os.path.join(FOLDER, f), got[1])
+        if not got:
+            continue
+        name, k = got[0], 2
+        while name.casefold() in used:
+            name, k = f"{got[0]} ({k})", k + 1
+        used.add(name.casefold())
+        out[name] = (os.path.join(FOLDER, f), got[1])
     return out
 
 
@@ -147,7 +165,7 @@ def taken(name, but=None):
 
 
 def _path_for(name, keep=None):
-    stem, k = file_stem(name), 2
+    stem, k = file_stem(name, "palette"), 2
     path = os.path.join(FOLDER, stem + ".json")
     while os.path.exists(path) and os.path.normcase(path) != os.path.normcase(keep or ""):
         path, k = os.path.join(FOLDER, f"{stem} ({k}).json"), k + 1
@@ -208,6 +226,8 @@ def apply(colours, app=None):
                 w.redraw()
                 if name == "hz_window":  # (its layers strip)
                     w.layers.redraw()
+                else:  # (the Areas tool's colours to pick from)
+                    w.draw_swatches()
         except Exception:  # (one that can't be redrawn now does at its next change)
             pass
 
