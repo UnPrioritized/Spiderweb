@@ -796,6 +796,7 @@
  "panel_funnel.gate": "Gate",
  "panel_funnel.spam_gate_with_long_notes_the": "Spam gate (with long notes: the column past the wall). Enter to apply.",
  "panel_funnel.gate_ranged_tip": "A gate Range is on: the gate goes from {a} ticks at the line start to {b} ticks at the wall (Range… changes it). Changing this number takes the Range off, back to one gate for every note.",
+ "panel_funnel.hz_tip": "Hz bass: the whole funnel becomes one Hz bass, both sides of the wall. Every key repeats so fast it sounds like a tone, wherever it would play a long note. Notes… opens the window to place notes, chords and slides; they count from the funnel's first beat, and the funnel keeps its length.",
  "panel_funnel.range_tip": "Opens a window where the gate can go from one number at the line start to another at the wall, along a graph you can change: smoothly or in steps that halve or double, evenly or as the funnel opens.",
  "panel_funnel.now_draw_the_wall_ctrl_centred": "Now draw the wall (Ctrl = centred on the line, right-click = cancel).",
  "panel_funnel.notes": "{value:,} notes.  ",
@@ -1663,7 +1664,9 @@
   "",
   "With a funnel selected, a line drawn to (or from) its wall is added to it (two-line funnels). Lines on the other side of the wall make their own half, with its own notes running to the wall: they just start (or end) on the wall; the wall setting is for the first line's side.",
   "",
-  "Panel: the wall (notes end on it, or start on it), the inside (spam or long notes) and the gate. With spam, Range… next to the gate lets the gate change from the line start to the wall, the same window as a custom shape's gate Range: the graph, Smooth or Steps (the gate only halves or doubles), and Evenly or With the curve (the gate changes as the funnel opens)."
+  "Panel: the wall (notes end on it, or start on it), the inside (spam or long notes) and the gate. With spam, Range… next to the gate lets the gate change from the line start to the wall, the same window as a custom shape's gate Range: the graph, Smooth or Steps (the gate only halves or doubles), and Evenly or With the curve (the gate changes as the funnel opens).",
+  "",
+  "Hz bass (a placed funnel): the whole funnel becomes one Hz bass, both sides of the wall. Every key repeats so fast it sounds like a tone, wherever it would play a long note, so the funnel's shape is where the tone sounds. Notes… opens the Hz bass window (see Hz bass): its notes count from the funnel's first beat, and the funnel keeps the length it's drawn. While it's on, Inside and the gate don't count; unticking brings back the gate and Range it had."
  ],
  "help.funnel.words": "spam gate wall reverse",
  "help.text.title": "Text (X)",

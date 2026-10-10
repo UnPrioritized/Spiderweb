@@ -9,7 +9,7 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import fmt
 from notes.hzbass import (HZ_DEFAULTS, all_tones, auto_state, bend_range, can_slide, glide, handle_u, heard, hz_of, layers_of,
-                          left_edge, links, pitch, slide_knob, slide_part)
+                          funnel_box, left_edge, links, pitch, slide_knob, slide_part)
 from roll.roll_shared import (ALT, CTRL, MAX_SX, MIN_SX, SELECTED_COLOR, SHIFT, SLOT_COLORS, draw_boxes, fade, note_name)
 from window import look
 from window.hz_layers import layer_colour
@@ -29,7 +29,10 @@ TUNE_ROW = 20  # px: rows at least this tall show the exact tone, and the red li
 
 
 def shape_length(sh):
-    """How long a custom shape's box is, in beats."""
+    """How long a custom shape's box is, in beats (a funnel: from its first beat to its last)."""
+    if sh["kind"] == "funnel":
+        b0, b1, _, _ = funnel_box(sh)
+        return b1 - b0
     (b0, _), (b1, _), (b2, _) = sh["pts"]
     bs = (b0, b1, b2, b1 + b2 - b0)
     return max(bs) - min(bs)

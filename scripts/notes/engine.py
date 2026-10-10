@@ -19,7 +19,7 @@ from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX
 from notes.between import KINDS as BETWEEN_KINDS, clean_between
 from notes.envelope import env_values, velocity_env
 from notes.joined import clean_joined, is_joined, joined_paths
-from notes.hzbass import clean_hz, heard_layers, layers_of, velocity_parts, with_layers
+from notes.hzbass import HZ_KINDS, clean_hz, heard_layers, layers_of, velocity_parts, with_layers
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
@@ -188,16 +188,7 @@ def clean_shape(sh):
         rg = clean_range(sh.get("range_kept"))
         if rg:  # (one switched off: the Range window brings it back when it's switched on)
             out["range_kept"] = rg
-        hz = clean_hz(sh.get("hz"))
-        if hz:  # Hz bass (custom.py): the gate is one wave of a tone
-            out["hz"] = hz
-            was = sh.get("before_hz")  # (the spam gate it had before Hz bass was ticked: back when it's unticked)
-            try:
-                gate = float(was["gate"])
-                if math.isfinite(gate) and gate > 0:
-                    out["before_hz"] = {"gate": gate, **({"range": True} if was.get("range") else {})}
-            except (TypeError, KeyError, ValueError, AttributeError):
-                pass
+        clean_hz_of(sh, out)
         fr = sh.get("from")  # the shapes it was made of (convert.py)
         if isinstance(fr, dict) and isinstance(fr.get("shapes"), list) and fr["shapes"]:
             olds = [clean_shape(o) if isinstance(o, dict) else None for o in fr["shapes"]]
@@ -271,7 +262,24 @@ def clean_shape(sh):
             out["starts"] = clean_starts(starts, len(out["pts"]) // 2 - 1)
         except (TypeError, ValueError, AttributeError):
             return None
+        clean_hz_of(sh, out)
     return out
+
+
+def clean_hz_of(sh, out):
+    """A custom shape's / funnel's Hz bass from a file into out (the gate is one wave of a tone), with the spam gate
+    it had before Hz bass was ticked (back when it's unticked)."""
+    hz = clean_hz(sh.get("hz"))
+    if not hz:
+        return
+    out["hz"] = hz
+    was = sh.get("before_hz")
+    try:
+        gate = float(was["gate"])
+        if math.isfinite(gate) and gate > 0:
+            out["before_hz"] = {"gate": gate, **({"range": True} if was.get("range") else {})}
+    except (TypeError, KeyError, ValueError, AttributeError):
+        pass
 
 
 def shape_path(sh):
@@ -680,7 +688,7 @@ def _notes_tracks(sh, ppq, keys):
         got = piece_notes(sh, ppq, keys, shape_notes_tracks)  # (the whole's glue / pages done first)
         if got is not None:
             return got
-    if sh["kind"] == "custom" and (sh.get("hz") or {}).get("layers"):
+    if sh["kind"] in HZ_KINDS and (sh.get("hz") or {}).get("layers"):
         return layered_notes(sh, ppq, keys)
     end_dot = sh.get("end_dot", False)
     piece = source(sh) if sh["kind"] in LINE_KINDS and sh.get("cut") else None
@@ -774,7 +782,7 @@ def _notes_tracks(sh, ppq, keys):
         if cycling(sh) and len(raw):  # "Colours" on a line / funnel
             tracks = cycle_turns(sh, raw, ppq)
     vel = env_velocities(env, raw[:, 0], t_lo, t_hi)
-    if sh["kind"] == "custom" and own is None and (sh.get("hz") or {}).get("tones"):  # Hz bass velocity effects
+    if sh["kind"] in HZ_KINDS and own is None and (sh.get("hz") or {}).get("tones"):  # Hz bass velocity effects
         got = velocity_parts(sh, ppq, raw[:, 0], raw[:, 2])
         if got is not None:  # (a note with a loudness line drawn: its own velocity instead of the shape's)
             factor, mine = got

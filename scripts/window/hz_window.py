@@ -27,7 +27,7 @@ from files.about import ICONS
 from files.lang import tr
 from files.mathexpr import fmt
 from notes.engine import CLASH
-from notes.hzbass import AUTO, AUTO_MOST, FX, all_tones, clean_line, clean_tones, left_edge
+from notes.hzbass import AUTO, AUTO_MOST, FX, HZ_KINDS, all_tones, clean_line, clean_tones, left_edge
 from roll.roll_shared import CTRL, grab_while_panning
 from roll.zoombar import add_zoom_bars
 from window import look
@@ -267,12 +267,12 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
     # ------------------------------------------------------------ what it shows
 
     def target(self):
-        """The shape whose tones are shown: the one selected custom shape (not text or pasted notes) when it's a Hz
-        bass, or the one the window was opened for (a spam shape's Notes… button: self.chosen), or None. Any other
-        custom shape is left alone (user: one stray click turned it into a Hz bass)."""
+        """The shape whose tones are shown: the one selected custom shape (not text or pasted notes) or funnel when
+        it's a Hz bass, or the one the window was opened for (a spam shape's / funnel's Notes… button: self.chosen),
+        or None. Any other shape is left alone (user: one stray click turned it into a Hz bass)."""
         app = self.app
         sh = app.selected()
-        if (sh and len(app.sels) == 1 and sh["kind"] == "custom" and not sh.get("text") and "notes" not in sh
+        if (sh and len(app.sels) == 1 and sh["kind"] in HZ_KINDS and not sh.get("text") and "notes" not in sh
                 and (sh.get("hz") or sh is self.chosen)):
             return sh
         return None
@@ -312,7 +312,9 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
             self.grow.set(True)
         else:
             text = tr("hz.shape", name=self.app.shape_label(sh))
-            if all_tones(hz):  # (any layer's notes: the Hz bass's own setting, whichever layer is picked)
+            if sh["kind"] == "funnel":  # (a funnel keeps the length it's drawn)
+                self.grow.set(False)
+            elif all_tones(hz):  # (any layer's notes: the Hz bass's own setting, whichever layer is picked)
                 self.grow.set(bool(hz.get("grow")))
             elif other:  # (no notes yet: ticked by hand stays ticked until the first note, whatever else changes)
                 self.grow.set(hz_made(sh))
@@ -329,7 +331,8 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.show_stale()
         self.show_clash(sh)
         self.after_idle(self.layout)  # (its width changed)
-        self.grow_box.config(state="normal" if sh is not None else "disabled")
+        # (a funnel keeps the length it's drawn)
+        self.grow_box.config(state="normal" if sh is not None and sh["kind"] != "funnel" else "disabled")
         if bool(self.layers.box.winfo_manager()) != self.app.hz_layers.get():  # (a project opened)
             self.layers.show(self.app.hz_layers.get())
         if self.every_tone() and not self.fitted:

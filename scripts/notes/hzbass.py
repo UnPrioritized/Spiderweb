@@ -130,8 +130,22 @@ def _key_grid(hz_json, left, ppq, lo, n):
     return KeyGrid(json.loads(hz_json), left, ppq, lo, n)
 
 
+HZ_KINDS = ("custom", "funnel")  # the shapes that can be a Hz bass (a funnel: the whole of it, both sides of the wall)
+
+
+def funnel_box(sh):
+    """A funnel's (first beat, last beat, lowest key, highest key): around its lines, wall and curves."""
+    from notes.funnel import funnel_strokes  # (funnel.py needs custom.py, which needs this file)
+    pts = [p for s in funnel_strokes(sh) for p in s]
+    bs, ps = [b for b, _ in pts], [p for _, p in pts]
+    return min(bs), max(bs), min(ps), max(ps)
+
+
 def key_range(sh):
-    """The lowest and highest key of a custom shape's box."""
+    """The lowest and highest key of a custom shape's box (a funnel: around it)."""
+    if sh["kind"] == "funnel":
+        _, _, lo, hi = funnel_box(sh)
+        return round(lo), round(hi)
     ps = [p for _, p in sh["pts"]]
     ps.append(ps[1] + ps[2] - ps[0])
     return round(min(ps)), round(max(ps))
@@ -171,7 +185,9 @@ def squares(sh, ppq):
 
 
 def left_edge(sh):
-    """The beat a custom shape's box starts at (its tones count from there)."""
+    """The beat a custom shape's box starts at (its tones count from there; a funnel: its first beat)."""
+    if sh["kind"] == "funnel":
+        return funnel_box(sh)[0]
     (b0, _), (b1, _), (b2, _) = sh["pts"]
     return min(b0, b1, b2, b1 + b2 - b0)
 
@@ -235,7 +251,10 @@ def hz_up_to(hz, width):
 
 
 def fit_length(sh):
-    """hz["grow"]: the shape made as long as its tones and the falls after them (stretched from its left edge)."""
+    """hz["grow"]: the shape made as long as its tones and the falls after them (stretched from its left edge). Not a
+    funnel: it keeps the length it's drawn."""
+    if sh["kind"] == "funnel":
+        return
     span = max(max(sound_span(l) for l in layers_of(sh["hz"])), MIN_LEN)  # (every layer's notes)
     (b0, _), (b1, _), (b2, _) = sh["pts"]
     bs = (b0, b1, b2, b1 + b2 - b0)

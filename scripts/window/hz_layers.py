@@ -304,7 +304,7 @@ class LayerStrip:
         if hz.get("grow"):
             fit_length(sh)
         app.shapes_changed()
-        app.sync_custom()
+        app.sync_hz_panels()
         app.schedule_autosave()
         win.sync()
 
@@ -368,7 +368,7 @@ class LayerStrip:
         win.tones = []
         app.select(None)
         app.shapes_changed()
-        app.sync_custom()
+        app.sync_hz_panels()
         app.schedule_autosave()
         win.sync()
 

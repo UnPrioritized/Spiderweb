@@ -6,6 +6,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from notes.funnel import funnel_reversed, gate_ticks
+from notes.hzbass import HZ_DEFAULTS, shortest_gate
 from files.mathexpr import calc
 from window import look
 from window.widgets import Scrub, Tooltip, bad, good, grid_shown, leave_box, unchanged
@@ -38,7 +39,8 @@ class FunnelPanel:
     """Mixed into App."""
 
     def _build_funnel(self):
-        """Funnel settings: note-off or note-on on the wall, what's inside, the gate."""
+        """Funnel settings: note-off or note-on on the wall, what's inside, the gate, Hz bass."""
+        from window.hz_window import open_hz
         from window.range_window import open_funnel_range
         box = self.funnel_box = ttk.Frame(self.settings)
         box.columnconfigure(1, weight=1)
@@ -82,6 +84,27 @@ class FunnelPanel:
                                            command=lambda: open_funnel_range(self))
         self.funnel_range_btn.pack(side="left", padx=(8, 0))
         Tooltip(self.funnel_range_btn, tr("panel_funnel.range_tip"))
+        # Hz bass (hzbass.py): the whole funnel is one (user). The same switch, Notes… and warnings as a custom
+        # shape's; new funnels never start with it (greyed until one is placed)
+        row = ttk.Frame(box)
+        row.grid(row=4, column=0, columnspan=2, sticky="w", pady=1)
+        self.funnel_hz_var = tk.BooleanVar()
+        self.funnel_hz_check = ttk.Checkbutton(row, text=tr("panel_custom.hz_bass"), variable=self.funnel_hz_var,
+                                               command=self.on_funnel_hz)
+        self.funnel_hz_check.pack(side="left")
+        Tooltip(self.funnel_hz_check, tr("panel_funnel.hz_tip"))
+        b = self.funnel_hz_notes = ttk.Button(row, text=tr("panel_custom.hz_notes"), command=lambda: open_hz(self))
+        b.pack(side="left", padx=(6, 0))
+        Tooltip(b, tr("panel_custom.hz_notes_tip"))
+        self.funnel_hz_info = ttk.Label(box, text="", foreground=look.WARN, font=look.font(8),
+                                        wraplength=int(300 * self.scale), justify="left")  # (short gates)
+        self.funnel_hz_info.grid(row=5, column=0, columnspan=2, sticky="w")
+        self.funnel_hz_stale = ttk.Frame(box)  # the BPM changed since: its tone is off until it's updated
+        ttk.Label(self.funnel_hz_stale, text=tr("panel_custom.hz_stale"), foreground=look.WARN, font=look.font(8),
+                  wraplength=int(300 * self.scale), justify="left").pack(anchor="w")
+        ttk.Button(self.funnel_hz_stale, text=tr("panel_custom.hz_update"),
+                   command=self.update_hz).pack(anchor="w", pady=(1, 2))
+        self.funnel_hz_stale.grid(row=6, column=0, columnspan=2, sticky="w")
         self.funnel_info = ttk.Label(box, text="", foreground=look.HINT, font=look.font(8),
                                      wraplength=int(300 * self.scale), justify="left")
         self.funnel_info.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(2, 0))
@@ -125,9 +148,14 @@ class FunnelPanel:
             texts.reverse()
         for b, text in zip(self.funnel_radios["wall"], texts):
             b.config(text=text)
-        # only what does something shows (user): long notes use the gate only past the wall, and no Range
+        # only what does something shows (user): long notes use the gate only past the wall, and no Range; a Hz bass
+        # makes its own notes from its tones (no Inside, no gate)
+        hz = t.get("hz") if placed else None
+        for w in self.funnel_grid["fill"]:
+            grid_shown(w, not hz)
         for w in self.funnel_grid["gate"]:
-            grid_shown(w, spam or past)
+            grid_shown(w, (spam or past) and not hz)
+        self.sync_funnel_hz(tgts, hz, placed)
         if spam != bool(self.funnel_range_btn.winfo_manager()):  # (only when it changes: flashes)
             if spam:
                 self.funnel_range_btn.pack(side="left", padx=(8, 0))
@@ -153,6 +181,32 @@ class FunnelPanel:
         else:
             info = tr("panel_funnel.draw_the_funnel_s_line_then")
         self.funnel_info.config(text=info)
+
+    def sync_funnel_hz(self, tgts, hz, placed):
+        """The Hz bass row: on / off (greyed for new funnels: they never start with it), the warnings (short gates,
+        BPM changed)."""
+        from window.panel_custom import HZ_SHORT
+        self._loading = True
+        self.funnel_hz_var.set(bool(hz))
+        self._loading = False
+        for w in (self.funnel_hz_check, self.funnel_hz_notes):
+            w.config(state="normal" if placed else "disabled")
+        bpm = self.current_bpm()
+        stale = bool(hz) and bpm is not None and any(t.get("hz") and abs(t["hz"]["bpm"] - bpm) > 1e-9 for t in tgts)
+        short = bool(hz) and shortest_gate(dict(hz, bpm=bpm or hz["bpm"]), self.ppq) < HZ_SHORT
+        if short:
+            self.funnel_hz_info.config(text=tr("panel_custom.hz_short_fixed" if hz.get("fixed")
+                                               else "panel_custom.hz_short").strip())
+        grid_shown(self.funnel_hz_info, short)
+        grid_shown(self.funnel_hz_stale, stale)
+
+    def on_funnel_hz(self):
+        """The funnel panel's Hz bass box ticked or cleared: the selected funnels."""
+        if self._loading:
+            return
+        tgts = [t for t in self.funnel_targets() if t is not self.funnel_defaults]
+        if tgts:
+            self.set_hz({k: HZ_DEFAULTS[k] for k in ("key", "cents")} if self.funnel_hz_var.get() else None, tgts)
 
     def set_funnel(self, key, value):
         """A funnel setting changed in the panel."""

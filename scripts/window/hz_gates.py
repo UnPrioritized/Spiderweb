@@ -138,7 +138,7 @@ class HzGates:
             app._redo_kept = None
             self.tones = copy.deepcopy(before)  # (the same notes as the shape's: the selection stays)
             app.shapes_changed()
-            app.sync_custom()
+            app.sync_hz_panels()
             app.sync_history()
             app.schedule_autosave()
             self.sync()
@@ -446,7 +446,7 @@ class HzGates:
                                  **({"loud": copy.deepcopy(self.loud)} if self.loud else {}))
                 if more:
                     new["hz"] = self.layers.with_more(new["hz"], more)
-                if new["fill"] not in SPAM_FILLS:
+                if new["kind"] == "custom" and new["fill"] not in SPAM_FILLS:  # (a funnel's own fill doesn't count)
                     new["fill"] = "spam"
                 if not sh.get("hz"):  # (a spam shape's first notes: its gate and Range come back if Hz bass is
                     new["before_hz"] = {"gate": sh["gate"]}  # unticked; no Range with Hz bass, user)
@@ -477,7 +477,7 @@ class HzGates:
                 self.tones = []
                 app.select(None)
             app.shapes_changed()
-            app.sync_custom()
+            app.sync_hz_panels()
             app.schedule_autosave()
         self.sync()
 

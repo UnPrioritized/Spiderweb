@@ -268,6 +268,15 @@ class CustomPanel:
                 customs.append(sh)
         return customs or ([] if self.sels else [self.custom_defaults])
 
+    def hz_targets(self):
+        """What the Hz bass settings (Pitch, Gates, Update) change: custom_targets and the selected funnels."""
+        return self.custom_targets() + [self.shapes[i] for i in sorted(self.sels) if self.shapes[i]["kind"] == "funnel"]
+
+    def sync_hz_panels(self):
+        """A Hz bass changed: the custom shape and funnel panels show it."""
+        self.sync_custom()
+        self.sync_funnel()
+
     def merge_part(self, t):
         """t is a drawing inside a merged shape: its settings change from the panel, its outline never (user)."""
         return any(t is p for sh in self.shapes if sh.get("merge") for p in sh["merge"]["parts"])
@@ -633,7 +642,7 @@ class CustomPanel:
 
     def set_hz_cents(self, cents):
         """The Hz bass window's Pitch box: every target's tone moved by its own cents (one undo step)."""
-        tgts = [t for t in self.custom_targets() if t.get("hz") and t["hz"]["cents"] != cents]
+        tgts = [t for t in self.hz_targets() if t.get("hz") and t["hz"]["cents"] != cents]
         if self._loading or not tgts:
             return
         placed = [t for t in tgts if t is not self.custom_defaults]
@@ -648,17 +657,18 @@ class CustomPanel:
             if t is not self.custom_defaults:  # (new spam shapes keep their own gate)
                 t["gate"] = hz_gate(h, h["bpm"])
         self.shapes_changed()
-        self.sync_custom()
+        self.sync_hz_panels()
         if self.hz_window:
             self.hz_window.sync()
         self.schedule_autosave()
 
-    def set_hz(self, hz):
+    def set_hz(self, hz, tgts=None):
         """Hz bass on (hz = {"key", "cents"}: the gate is worked out for the BPM now) or off (None) for the custom
-        shape panel's targets. A shape's placed tones, fixed gates and grow stay as they are."""
-        tgts, bpm = self.custom_targets(), self.current_bpm()
+        shape panel's targets (tgts: these instead, the funnel panel's). A shape's placed tones, fixed gates and grow
+        stay as they are."""
+        tgts, bpm = tgts or self.custom_targets(), self.current_bpm()
         if hz and bpm is None:
-            return self.sync_custom()
+            return self.sync_hz_panels()
 
         def changed(t):
             if t is self.custom_defaults:  # (shared with the Hz bass tool: new spam shapes keep their own gate and
@@ -684,12 +694,12 @@ class CustomPanel:
 
         placed = [t for t in tgts if t is not self.custom_defaults]
         if all(changed(t).get("hz") == t.get("hz") for t in tgts):
-            return self.sync_custom()
+            return self.sync_hz_panels()
         if hz and any(t.get("range") and not t.get("hz") for t in placed) and not messagebox.askokcancel(
                 tr("panel_custom.spiderweb"), tr("panel_custom.hz_range_off"), icon="warning", parent=self):
-            return self.sync_custom()
+            return self.sync_hz_panels()
         if not self.confirm_big([changed(t) for t in placed]):
-            return self.sync_custom()
+            return self.sync_hz_panels()
         if placed:
             self.push_undo(name=tr("panel_custom.hz_bass"))
         for t in tgts:
@@ -697,7 +707,9 @@ class CustomPanel:
             t.clear()
             t.update(new)
         self.shapes_changed()
-        self.sync_custom()
+        self.sync_hz_panels()
+        if self.hz_window:
+            self.hz_window.sync()
         self.schedule_autosave()
 
     def set_hz_gates(self, mode, limit=None, every=False):
@@ -714,7 +726,7 @@ class CustomPanel:
         def own(hz):
             return every and any("gate" in n for n in all_tones(hz))
 
-        tgts = [t for t in self.custom_targets() if t.get("hz") and (gates(t["hz"]) != want or own(t["hz"]))]
+        tgts = [t for t in self.hz_targets() if t.get("hz") and (gates(t["hz"]) != want or own(t["hz"]))]
         if self._loading or not tgts:
             return
         if any(t is not self.custom_defaults for t in tgts):
@@ -729,7 +741,7 @@ class CustomPanel:
         # to make again, and the preview keeps its sound)
         if None in before or before != [layer_picks(t["hz"], self.ppq) for t in tgts]:
             self.shapes_changed()
-        self.sync_custom()
+        self.sync_hz_panels()
         if self.hz_window:
             self.hz_window.sync()
         self.schedule_autosave()
@@ -737,7 +749,7 @@ class CustomPanel:
     def update_hz(self):
         """The "Update Hz bass" button: every target's gate worked out again for the BPM now."""
         bpm = self.current_bpm()
-        tgts = [t for t in self.custom_targets() if t.get("hz")]
+        tgts = [t for t in self.hz_targets() if t.get("hz")]
         if bpm is None or not tgts:
             return
         if any(t is not self.custom_defaults for t in tgts):
@@ -747,7 +759,7 @@ class CustomPanel:
             if t is not self.custom_defaults:
                 t["gate"] = hz_gate(t["hz"], bpm)
         self.shapes_changed()
-        self.sync_custom()
+        self.sync_hz_panels()
         if self.hz_window:
             self.hz_window.sync()
         self.schedule_autosave()

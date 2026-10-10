@@ -7,8 +7,9 @@ import math
 import numpy as np
 
 from notes.bezier import anchor_count, fit, handle_anchor, sample
-from notes.custom import row_spans
+from notes.custom import chop, row_spans, spam_gate
 from notes.gaterange import clean_range, y_gate
+from notes.hzbass import heard_layers
 from notes.paths import EDGE, TOP_KEY, pitch_of
 from notes.pattern import clean_pattern, clean_shape_formula, formed_path, has_formula, moved_formulas
 
@@ -40,6 +41,9 @@ from notes.pattern import clean_pattern, clean_shape_formula, formed_path, has_f
 # ("follow": "curve": how many keys play), in steps that only halve / double ("halves") or smoothly.
 # wall: "in" = the notes stop at the wall, "past" = one more column on the other side of it, as long as the wall
 # gate (a normal funnel: the wall notes start on the wall; a reverse funnel: they end on it).
+# "hz" (Hz bass, hzbass.py; the whole funnel is ONE Hz bass, user): every key plays where long notes would
+# (hz_stretches), chopped into its repeats like a custom shape's; Inside / gate / Range don't count then. Its tones
+# count from the funnel's first beat (hzbass.left_edge), and it never grows with its notes.
 # (Older versions had gate0 / gate1 / vary / change / follow: turned into a range when they load, old_gates.)
 
 FUNNEL_FILLS = ("spam", "long")
@@ -754,7 +758,18 @@ def funnel_cells(sh, ppq, main=True, gates=None):
     return ticks, out
 
 
+def hz_stretches(sh, ppq):
+    """A Hz bass funnel: where each key plays, as (start, end, key) ticks: what long notes would be, both sides of
+    the wall (Notes start on it: one repeat past it), each then chopped into the Hz bass's repeats (custom.chop)."""
+    cells = [c for half, main in funnel_sides(dict(sh, fill="long")) for c in funnel_cells(half, ppq, main)[1]]
+    return np.asarray(cells, np.int64).reshape(-1, 3)[:, [1, 2, 0]]
+
+
 def funnel_note_count(sh, ppq):
+    if sh.get("hz"):  # (each layer heard makes its own: engine.layered_notes)
+        st = hz_stretches(sh, ppq)
+        return int(sum(chop(dict(sh, hz=hz), st, spam_gate(dict(sh, hz=hz), ppq), True).sum()
+                       for hz in heard_layers(sh["hz"])))
     count = 0
     for half, main in funnel_sides(sh):
         ticks, cells = funnel_cells(half, ppq, main)
@@ -763,6 +778,8 @@ def funnel_note_count(sh, ppq):
 
 
 def funnel_notes(sh, ppq):
+    if sh.get("hz"):  # (one layer: engine.layered_notes hands each its own)
+        return chop(sh, hz_stretches(sh, ppq), spam_gate(sh, ppq))
     return np.concatenate([_side_notes(*funnel_cells(half, ppq, main)) for half, main in funnel_sides(sh)])
 
 
