@@ -63,6 +63,13 @@ def mouse_trail(x_root, y_root, since):
 
 BLACK = {1, 3, 6, 8, 10}
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+# The 31-EDO view (256 keys + its tick): 31 rows an octave, row 0 = C0. ^ = half sharp, v = half flat
+EDO = 31
+EDO_NAMES = ["C", "C^", "C#", "Db", "Dv", "D", "D^", "D#", "Eb", "Ev", "E", "E^", "Fv", "F", "F^", "F#", "Gb", "Gv",
+             "G", "G^", "G#", "Ab", "Av", "A", "A^", "A#", "Bb", "Bv", "B", "B^", "Cv"]
+EDO_WHITE = {0, 5, 10, 13, 18, 23, 28}  # the 7 plain notes
+EDO_BLACK = {2, 3, 7, 8, 15, 16, 20, 21, 25, 26}  # sharps and flats (the other 14 rows: half sharps / half flats)
+EDO_PIANO = range(23, 249)  # A0 .. C8, a real 88-key piano's range
 # Note colours per channel slot (auto channels), blue first. 15 of them, one per usable channel,
 # so a colour always means the same channel
 SLOT_COLORS = [("#7ea6f5", "#1f3a93"), ("#f58e8e", "#8f1f1f"), ("#8fd68f", "#1f6f1f"), ("#e6c65c", "#7a5f00"),
@@ -224,5 +231,7 @@ def fade(color, amount=0.72):
     return "#%02x%02x%02x" % tuple(round(c + (t - c) * amount) for c, t in zip((r, g, b), to))
 
 
-def note_name(p):
+def note_name(p, edo=False):
+    if edo:  # (Cv sits just under the next octave's C)
+        return f"{EDO_NAMES[p % EDO]}{p // EDO + (p % EDO == EDO - 1)}"
     return f"{NOTE_NAMES[p % 12]}{p // 12 - 1}"

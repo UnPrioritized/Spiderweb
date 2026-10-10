@@ -244,6 +244,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.channel_split = "key"  # what counts as an overlap for Multi channel (engine.SPLITS)
         self.keys = 128  # the project's key range: 0 .. keys - 1 (paths.KEYS)
         self.keys_var = tk.StringVar(value=str(KEYS[0]))
+        self.edo31 = tk.BooleanVar(value=False)  # 256 keys shown as 31-EDO (the look only: edo())
+        self.edo31_audio = tk.BooleanVar(value=False)  # ... and played that way (Built-in BASSMIDI)
         self.show_history = tk.BooleanVar(value=False)  # the History panel (off on a fresh start, like the velocity pane)
         self.show_velocity = tk.BooleanVar(value=False)  # off on a fresh start: turning it on shows its tip
         self.vel_tool = tk.StringVar(value="line")
@@ -518,11 +520,20 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                       *((4, 100000) if key == "bpm" else (1, 32)), label=lb)
             r += 1
         ttk.Label(box, text=tr("app.keys")).grid(row=r, column=0, sticky="w", pady=1)
-        b = ttk.Combobox(box, textvariable=self.keys_var, values=[str(k) for k in KEYS], state="readonly",
+        kf = ttk.Frame(box)
+        kf.grid(row=r, column=1, sticky="w", padx=5)
+        b = ttk.Combobox(kf, textvariable=self.keys_var, values=[str(k) for k in KEYS], state="readonly",
                          width=7)
-        b.grid(row=r, column=1, sticky="w", padx=5)
+        b.pack(side="left")
         b.bind("<<ComboboxSelected>>", lambda e: self.on_project_change())
         Tooltip(b, tr("app.128_the_standard_keys_0_127"))
+        self.edo_ticks = ttk.Frame(kf)  # (shown with 256 keys only)
+        t = ttk.Checkbutton(self.edo_ticks, text=tr("app.edo31"), variable=self.edo31, command=self.sync_edo)
+        t.pack(side="left", padx=(6, 0))
+        Tooltip(t, tr("app.edo31_tip"))
+        self.edo_audio_tick = ttk.Checkbutton(self.edo_ticks, text=tr("app.edo31_audio"), variable=self.edo31_audio)
+        self.edo_audio_tick.pack(side="left", padx=(4, 0))
+        Tooltip(self.edo_audio_tick, tr("app.edo31_audio_tip"))
         box.update_idletasks()
         for e in boxes:
             e.master.config(width=b.winfo_reqwidth(), height=e.winfo_reqheight())
@@ -868,6 +879,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 ok = False
             (good if ok else lambda e: bad(e, typing=True))(self.project_entries["bpm"])
         self.keys = KEYS[1] if self.keys_var.get() == str(KEYS[1]) else KEYS[0]
+        self.sync_edo()
         self.roll.clamp_view()
         warn = self.ppq >= PPQ_WARN
         self.ppq_box.config(style="Bad.TCombobox" if warn else "TCombobox")
@@ -886,6 +898,20 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         for w in (self.claw_window, self.strum_window, self.chop_window):
             if w:
                 w.ppq_changed()  # (numbers shown in ticks)
+
+    def edo(self):
+        """True while the piano roll shows 31-EDO (256 keys + its tick)."""
+        return self.keys == KEYS[1] and self.edo31.get()
+
+    def sync_edo(self):
+        """The 31-EDO ticks: shown with 256 keys only, Audio greyed until 31-EDO is ticked."""
+        big = self.keys == KEYS[1]
+        if big and not self.edo_ticks.winfo_manager():
+            self.edo_ticks.pack(side="left")
+        elif not big and self.edo_ticks.winfo_manager():
+            self.edo_ticks.pack_forget()
+        self.edo_audio_tick.state(["!disabled" if self.edo31.get() else "disabled"])
+        self.roll.request_redraw()
 
     def read_project(self):
         try:

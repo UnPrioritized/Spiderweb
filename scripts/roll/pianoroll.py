@@ -1491,5 +1491,5 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         text = self.time_text(e.x)
         p = round(self.y2p(e.y))
         if 0 <= p < self.app.keys:
-            text += f"     {note_name(p)} ({p})"
+            text += f"     {note_name(p, self.app.edo())} ({p})"
         return text

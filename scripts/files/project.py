@@ -183,7 +183,8 @@ class ProjectFiles:
             "version": 2, "app_version": VERSION,  # the file format, and the Spiderweb that saved it
             "ppq": self.pvar["ppq"].get(), "bpm": self.pvar["bpm"].get(), "beats": self.pvar["beats"].get(),
             "output": self.pvar["output"].get(), "channel_mode": self.channel_mode.get(), "channel_split": self.channel_split,
-            "keys": self.keys, "domino_start": self.domino_start(),
+            "keys": self.keys, "edo31": bool(self.edo31.get()), "edo31_audio": bool(self.edo31_audio.get()),
+            "domino_start": self.domino_start(),
             "snap": self.snap.get(), "defaults": self.defaults,
             "custom_defaults": dict(self.custom_defaults, shape=self.custom_shape),
             "hz_defaults": self.hz_defaults, "hz_snap": self.hz_snap.get(),
@@ -275,6 +276,8 @@ class ProjectFiles:
             self.pvar[key].set(value)
         self.channel_mode.set(mode if mode in CHANNEL_MODES else "single")
         self.keys_var.set(str(KEYS[1] if data.get("keys") == KEYS[1] else KEYS[0]))
+        self.edo31.set(data.get("edo31") is True)
+        self.edo31_audio.set(data.get("edo31_audio") is True)
         self.split_box.current(SPLITS.index(split) if split in SPLITS else 0)
         if start in starts:
             self.domino_box.current(starts.index(start))

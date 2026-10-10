@@ -15,8 +15,8 @@ from notes.merge import preview_parts, slid_preview
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
 from notes.paths import KEYS
 from notes.sliced import clip_strokes, moved_by, moved_mark, on_side, piece_knives
-from roll.roll_shared import (BLACK, DRAFT_COLOR, PIANO_88, PREVIEW_LIMIT, SELECTED_COLOR, SLOT_COLORS,
-                              draw_boxes, fade, note_name)
+from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, PIANO_88, PREVIEW_LIMIT,
+                              SELECTED_COLOR, SLOT_COLORS, draw_boxes, fade, note_name)
 from roll.tiles import Tiles, see_through
 from window import look
 
@@ -365,7 +365,7 @@ class RollDrawing:
             self._grid_key = self._frame_key = None
             return
         frame_key = (w, h, self.kb_w, self.ruler_h, self.sx, self.sy, self.view_t, self.view_top, self.scale,
-                     self.app.keys, self.app.beats)
+                     self.app.keys, self.app.edo(), self.app.beats)
         if frame_key != self._frame_key:
             self.delete("frame", "playhead")
             self._frame_key = None
@@ -781,14 +781,18 @@ class RollDrawing:
         top = self.ruler_h
         rows = [(top, h, look.ROLL_BG)]
         p_lo, p_hi = self.visible_pitches(h)
+        edo = self.app.edo()
+        size, black = (EDO, EDO_BLACK) if edo else (12, BLACK)
         for p in range(p_lo, p_hi + 1):
             y0, y1 = self.row_y(p)
-            if p % 12 in BLACK:
+            if p % size in black:
                 rows.append((y0, y1, look.ROW_BLACK))
+            elif edo and p % size not in EDO_WHITE:
+                rows.append((y0, y1, look.ROW_HALF))
             elif self.sy >= 4:
                 rows.append((y1, None, look.ROW_LINE))
         for p in range(p_lo, p_hi + 1):
-            if p % 12 == 0:
+            if p % size == 0:
                 rows.append((self.row_y(p)[1], None, look.OCTAVE_LINE))
         if self.p2y(-0.5) < h:
             rows.append((self.row_y(0)[1], h, look.OUTSIDE_KEYS))
@@ -1413,20 +1417,28 @@ class RollDrawing:
         self.create_rectangle(0, top, kb, h, fill=look.KEY_WHITE, outline="", tags="frame")
         p_lo, p_hi = self.visible_pitches(h)
         font_size = max(7, min(11, int(self.sy * 0.6 / self.scale)))
-        # faintly greyed: outside a real 88-key piano; with 256 keys, above the standard 128 instead
-        usual = PIANO_88 if self.app.keys == KEYS[0] else range(KEYS[0])
+        # faintly greyed: outside a real 88-key piano; with 256 keys, above the standard 128 instead (31-EDO: the
+        # piano's range again, A0 .. C8)
+        edo = self.app.edo()
+        usual = EDO_PIANO if edo else PIANO_88 if self.app.keys == KEYS[0] else range(KEYS[0])
+        size, black, f = (EDO, EDO_BLACK, 13) if edo else (12, BLACK, 5)
         for p in range(p_lo, p_hi + 1):
             y0, y1 = self.row_y(p)
-            n = p % 12
+            n = p % size
+            half = edo and n not in EDO_WHITE and n not in black  # (31-EDO's half sharps / flats: narrower, grey)
             if p not in usual:
                 self.create_rectangle(0, y0, kb, y1, fill=look.KEY_OUTSIDE, outline="", tags="frame")
-            if n in BLACK:
+            if n in black:
                 self.create_rectangle(0, y0, kb * 0.6, y1, fill=look.KEY_BLACK if p in usual else look.KEY_BLACK_OUTSIDE,
                                       outline="", tags="frame")
-            if n in (0, 5):  # bottom edge of C and F = white key border
+            elif half:
+                self.create_rectangle(0, y0, kb * 0.45, y1, fill=look.KEY_HALF if p in usual else look.KEY_HALF_OUTSIDE,
+                                      outline="", tags="frame")
+            if n in (0, f):  # bottom edge of C and F = white key border
                 self.create_line(0, y1, kb, y1, fill=look.KEY_EDGE_C if n == 0 else look.KEY_EDGE_F, tags="frame")
-            label = note_name(p) if n == 0 and self.sy >= 6 else (
-                note_name(p) if n not in BLACK and self.sy >= 16 else None)
+            white = n not in black and not half
+            label = note_name(p, edo) if n == 0 and self.sy >= 6 else (
+                note_name(p, edo) if white and self.sy >= 16 else None)
             if label:
                 self.create_text(kb - 3, (y0 + y1) / 2, text=label, anchor="e", fill=look.KEY_TEXT,
                                  font=look.font(font_size, "bold" if n == 0 else "normal"), tags="frame")
