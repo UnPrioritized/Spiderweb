@@ -510,6 +510,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         out = [(b, p, i, sh["kind"] == "arc" and i == 1) for i, (b, p) in enumerate(pts)]  # an arc's middle: any tool
         if sh["kind"] == "funnel":  # curve starts, anchors, handles: ("start", k) / ("anchor" or "ctrl", k, end, i)
             out += [(b, p, hid, True) for b, p, hid in funnel_handles(sh)]
+            knives = piece_knives(sh)  # (a piece: only the ones on its side, like its drawing)
+            if knives:
+                out = [hd for hd in out if on_side(knives, hd[0], hd[1])]
         return out
 
     def point_shape(self):

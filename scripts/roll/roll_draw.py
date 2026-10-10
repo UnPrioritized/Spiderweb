@@ -14,7 +14,7 @@ from notes.joined import all_tumours
 from notes.merge import preview_parts, slid_preview
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
 from notes.paths import KEYS
-from notes.sliced import clip_strokes, moved_by, moved_mark, piece_knives
+from notes.sliced import clip_strokes, moved_by, moved_mark, on_side, piece_knives
 from roll.roll_shared import (BLACK, DRAFT_COLOR, PIANO_88, PREVIEW_LIMIT, SELECTED_COLOR, SLOT_COLORS,
                               draw_boxes, fade, note_name)
 from roll.tiles import Tiles, see_through
@@ -1325,8 +1325,10 @@ class RollDrawing:
         # the handle lines of the anchors: blue on a white edge, so they show on notes
         # a highlighted funnel curve's handles take its colour (purple / teal), so you see which ones shape it
         colors = self.part_colors() if sh["kind"] == "funnel" else {}
+        knives = (piece_knives(sh) if sh["kind"] == "funnel" else None) or []
         lines = ([(a, h, HANDLE_COLOR) for a, h in self.curve_handle_lines(sh)] if sh["kind"] == "curve" else
-                 [(a, h, colors.get(c, HANDLE_COLOR)) for a, h, c in funnel_handle_lines(sh)]
+                 [(a, h, colors.get(c, HANDLE_COLOR)) for a, h, c in funnel_handle_lines(sh)
+                  if on_side(knives, *a)]  # (a funnel piece: its side's only)
                  if sh["kind"] == "funnel" else
                  [(a, h, HANDLE_COLOR) for a, h in self.stroke_handle_lines(sh)] if sh["kind"] == "custom" else [])
         lines.sort(key=lambda line: line[2] != HANDLE_COLOR)  # the coloured ones on top

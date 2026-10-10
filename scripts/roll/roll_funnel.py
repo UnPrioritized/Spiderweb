@@ -7,6 +7,7 @@ from files.lang import tr
 from notes.bezier import anchor_count, difference, handle_anchor, nearest, remove_anchor, segments, split
 from notes.funnel import (box_point, box_uf, curve_box, funnel_curves, funnel_handles, funnel_lines, line_index,
                           new_start, new_curve, next_link, partners, remove_funnel_parts, set_shape, turned, turned_curve)
+from notes.sliced import on_side, piece_knives
 from roll.roll_shared import ALT, CTRL, PICK
 
 
@@ -178,6 +179,8 @@ class FunnelEditing:
         start / anchor / handle point already there (a second one on top of it, user)."""
         if sh["kind"] != "funnel" or len(sh["pts"]) < 4:
             return False
+        if not on_side(piece_knives(sh) or [], self.x2t(e.x), self.y2p(e.y)):
+            return False  # (a sliced piece: nothing on the other piece's side)
         near = max(9, 10 * self.scale)  # (as hit_handle)
         if any(abs(self.t2x(b) - e.x) <= near and abs(self.p2y(p) - e.y) <= near for b, p, _ in funnel_handles(sh)):
             return False
