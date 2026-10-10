@@ -103,7 +103,8 @@ hz["mod"] = the MOD tab (the matrix, clean_mod): two more LFOs, two more envelop
 linked to effect lines or knobs that make no line (MOD_SETTINGS), which they move over time while the notes are made
 (fx_at, setting_at, mod_value).
 hz["trace"] = the drawn wave shape (clean_trace): a line through one wave, the keys from bottom to top; each key row
-hits wherever the line crosses it (trace_hits: stretched to all the keys, several crossings = several hits a wave),
+hits wherever the line crosses it (trace_line: bent pieces as straight ones, then trace_hits: stretched to all the
+keys, several crossings = several hits a wave),
 before the lateness effects add theirs. Missing = straight up at the wave's start, every key together.
 
 The code is in parts, each using only the ones before it: hz_settings (limits, starting values, checking saved

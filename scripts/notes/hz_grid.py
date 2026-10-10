@@ -9,7 +9,7 @@ import numpy as np
 from notes.hz_settings import (CRUSH, FM_INDEX, FX, GROWL, HZ_DEFAULTS, MODE_AMOUNTS, MOD_RACK, MOD_SETTINGS,
                                NOT_EACH, OFF_PITCH, OSC2_TUNE, SOFT, SPEED_KNOBS, SUB, TIME_STEP, TREMOLO,
                                TREMOLO_DEPTH, VEL_FX, VIBRATO, VIBRATO_RATE, VOICES, WAH, WAVES, blend_gains, copies,
-                               group_count, osc2_shift, rack_on, trace_hits)
+                               group_count, osc2_shift, rack_on, trace_hits, trace_line)
 from notes.hz_glide import legato_links, links, note_span, pitch
 from notes.hz_lines import line_at, note_vel
 from notes.hz_modulate import TIMED, fx_at, setting_at, setting_base, setting_most, timed_line
@@ -115,7 +115,8 @@ class KeyGrid:
         self.osc2 = hz.get("osc2") or None  # (OSC B: see the docstring)
         self.modes = [self.mode, (self.osc2 or {}).get("mode") or {}]  # (each oscillator's own Mode)
         self.a_off = bool((self.osc2 or {}).get("a_off"))  # (OSC A switched off: only OSC B sounds)
-        self.trace = hz.get("trace") or None  # (the drawn wave shape: where in each wave each key row hits)
+        self.trace = trace_line(hz["trace"]) if hz.get("trace") else None  # (the drawn wave shape: where in each
+        # wave each key row hits; bent pieces as straight ones)
         # (the knobs that aren't lines the MOD tab moves, each run's values worked out in made_runs; setting_at)
         self.hz = hz
         self.moved = {link["to"] for link in (hz.get("mod") or {}).get("links", ())

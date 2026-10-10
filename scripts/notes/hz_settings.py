@@ -116,6 +116,7 @@ GLIDE_CURVE = 0.5  # ... its curve when there's none: -1 = slow first, 0 = strai
 BLEND = 0.5  # ... how loud the middle copies are next to the outer ones when there's none: all the same (blend_gains)
 TRACE_POINTS = 256  # hz["trace"]: the most points of the drawn wave shape
 START_TRACE = ((0.0, 0.0), (0.0, 1.0))  # ... as it starts: straight up at the wave's start (every key together)
+CURVE_STEPS = 24  # ... a bent piece is made of this many straight ones (trace_line)
 
 
 def group_count(value):
@@ -408,38 +409,61 @@ def clean_extra(hz):
 
 def clean_trace(trace):
     """The drawn wave shape checked (hz["trace"]): [[x, y], ...] in drawing order, x = where in one wave (0..1), y =
-    how high among the keys (0..1); 2..TRACE_POINTS points, or [] when it's as it starts (START_TRACE)."""
+    how high among the keys (0..1); 2..TRACE_POINTS points, or [] when it's as it starts (START_TRACE). A point may
+    have a bend [x, y, bx, by]: the piece coming to it is a curve whose middle is (bx, by) off the straight middle
+    (trace_line)."""
     out = []
     for p in trace if isinstance(trace, list) else ():
         try:
             x, y = float(p[0]), float(p[1])
+            bx, by = (float(p[2]), float(p[3])) if len(p) >= 4 else (0.0, 0.0)
         except (TypeError, ValueError, IndexError, KeyError):
             continue
         if math.isfinite(x) and math.isfinite(y):
-            out.append([min(1.0, max(0.0, x)), min(1.0, max(0.0, y))])
+            q = [min(1.0, max(0.0, x)), min(1.0, max(0.0, y))]
+            if out and math.isfinite(bx) and math.isfinite(by) and max(abs(bx), abs(by)) > 1e-9:
+                q += [min(1.0, max(-1.0, bx)), min(1.0, max(-1.0, by))]
+            out.append(q)
     out = out[:TRACE_POINTS]
     if len(out) < 2 or out == [list(p) for p in START_TRACE]:
         return []
     return out
 
 
-def trace_hits(trace, y):
+def trace_line(trace, steps=CURVE_STEPS):
+    """The drawn wave shape as straight pieces: [[x, y], ...], each bent piece cut into `steps` (a curve through its
+    bent middle, clamped to 0..1)."""
+    out = [[trace[0][0], trace[0][1]]]
+    for a, b in zip(trace, trace[1:]):
+        if len(b) >= 4:
+            cx = 2.0 * b[2] + (a[0] + b[0]) / 2.0  # (the curve's pull point: its middle is halfway to it)
+            cy = 2.0 * b[3] + (a[1] + b[1]) / 2.0
+            for i in range(1, steps):
+                t = i / steps
+                u = 1.0 - t
+                out.append([min(1.0, max(0.0, u * u * a[0] + 2 * u * t * cx + t * t * b[0])),
+                            min(1.0, max(0.0, u * u * a[1] + 2 * u * t * cy + t * t * b[1]))])
+        out.append([b[0], b[1]])
+    return out
+
+
+def trace_hits(line, y):
     """Where in each wave (0..1) a key row whose middle is at y (0..1 among the shape's keys) hits, drawn wave shape
-    `trace`: once wherever the line crosses the row, the line stretched so its lowest point is the lowest key and its
-    highest the highest (every key gets at least one hit). A point right on the row counts once (each piece from its
-    start, not its end; the last one both). A flat line: every key once, at its first point."""
-    lo, hi = min(p[1] for p in trace), max(p[1] for p in trace)
+    `line` (trace_line: straight pieces): once wherever the line crosses the row, the line stretched so its lowest
+    point is the lowest key and its highest the highest (every key gets at least one hit). A point right on the row
+    counts once (each piece from its start, not its end; the last one both). A flat line: every key once, at its
+    first point."""
+    a = np.asarray(line, float)
+    lo, hi = a[:, 1].min(), a[:, 1].max()
     if hi - lo < 1e-12:
-        return [trace[0][0]]
+        return [float(a[0, 0])]
     y = lo + y * (hi - lo)
-    got = []
-    for i, ((x0, y0), (x1, y1)) in enumerate(zip(trace, trace[1:])):
-        if y0 == y1:
-            continue
+    x0, y0, x1, y1 = a[:-1, 0], a[:-1, 1], a[1:, 0], a[1:, 1]
+    with np.errstate(divide="ignore", invalid="ignore"):
         t = (y - y0) / (y1 - y0)
-        if 0.0 <= t < 1.0 or (t == 1.0 and i == len(trace) - 2):
-            got.append(x0 + t * (x1 - x0))
-    return got
+    last = np.arange(len(t)) == len(t) - 1
+    keep = (y0 != y1) & (((t >= 0.0) & (t < 1.0)) | ((t == 1.0) & last))
+    return (x0[keep] + t[keep] * (x1[keep] - x0[keep])).tolist()
 
 
 def copies(hz):

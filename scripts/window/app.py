@@ -2133,6 +2133,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             return None if redo else held()
         if hz.draft is not None and (hz.draft.get("held") is not None or not redo):  # a path being drawn: it
             return None if redo else (hz.drop_draft(), "break")[1]  # goes, nothing made (Ctrl+Y: nothing)
+        tw = hz.trace_win  # (the Wave shape window's changes no Hz bass held yet: its own steps)
+        if tw and tw.winfo_exists() and str(e.widget).startswith(str(tw)) and tw.local_step(redo):
+            return "break"
         if not redo and hz.pending:  # a slide started: just drop its mark
             hz.pending = None
             return hz.redraw()

@@ -4,9 +4,13 @@ crosses it (hzbass.trace_hits). Straight lines from point to point. The line is 
 key rows are drawn between its lowest and highest point, each with a dot where it hits.
 
 Mouse: drag a point; a press on the line = a new point there, dragged; a press elsewhere = a new point at the line's
-end; right-click / double-click a point = gone (2 stay). Snapped to the grid (1/16 each way), Shift = free. One undo
-step of the Hz bass window per change, on release; Ctrl+Z / Esc while held = back to the press (HzMouse.held_fx).
-The shape is the Hz bass's (its picked layer's) sound setting hz["trace"], kept in the Hz bass window's `extra`."""
+end; right-click / double-click a point = gone (2 stay). Each piece has a round dot in its middle (user, 2026-10-10):
+dragged = the piece bends into a curve through it, right-click / double-click = straight again. Snapped to the grid
+(1/16 each way), Shift = free. One undo step of the Hz bass window per change, on release; Ctrl+Z / Esc while held =
+back to the press (HzMouse.held_fx). With no Hz bass to hold it yet (nothing made, a spam shape without notes) a
+change makes no step there: this window undoes those itself (local_step), so Ctrl+Z never lands on a step of the
+piano roll's. The shape is the Hz bass's (its picked layer's) sound setting hz["trace"], kept in the Hz bass
+window's `extra`."""
 
 import copy
 import math
@@ -14,7 +18,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
-from notes.hzbass import START_TRACE, TRACE_POINTS, clean_extra, key_range, trace_hits
+from notes.hzbass import CURVE_STEPS, START_TRACE, TRACE_POINTS, clean_extra, key_range, trace_hits, trace_line
 from window import look
 from window.widgets import Tooltip, remember_place
 
@@ -57,6 +61,8 @@ class TraceWindow(tk.Toplevel):
         self.pts = shown_trace(hz.extra)
         self.drag = None  # {"i": point number, "was": points, "before": fx state, ...} while the mouse holds one
         self.placed = False  # (the last press put a new point in)
+        self.local, self.local_redo = [], []  # the shapes before / after changes no Hz bass held (local_step)
+        self.local_for = None  # (what they were made for: waiting_for())
         hint = ttk.Label(self, text=tr("hz.trace_hint"), foreground=look.HINT, padding=(8, 0, 8, 8))
         hint.pack(side="bottom", fill="x")  # (the rows under the drawing first: they always show)
         hint.bind("<Configure>", lambda e: hint.config(wraplength=max(1, e.width - round(16 * s))))
@@ -115,17 +121,58 @@ class TraceWindow(tk.Toplevel):
                 best, near = i, d
         return best
 
-    def on_line(self, e):
-        """The piece of the line under the mouse: the number of the point it goes to, or None."""
-        best, near = None, GRAB * self.s
+    def middle(self, i):
+        """The middle of the piece coming to point i (its round dot): halfway, moved by its bend."""
+        a, b = self.pts[i - 1], self.pts[i]
+        bx, by = (b[2], b[3]) if len(b) >= 4 else (0.0, 0.0)
+        return [(a[0] + b[0]) / 2 + bx, (a[1] + b[1]) / 2 + by]
+
+    def dots(self):
+        """The pieces showing a round dot (the numbers of the points they go to): bent ones, and straight ones long
+        enough on screen for it not to crowd their ends (a Sine's many short pieces have none)."""
+        out = []
         for i in range(1, len(self.pts)):
             (ax, ay), (bx, by) = self.xy(self.pts[i - 1]), self.xy(self.pts[i])
-            dx, dy = bx - ax, by - ay
-            t = 0.0 if dx == dy == 0 else max(0.0, min(1.0, ((e.x - ax) * dx + (e.y - ay) * dy) / (dx * dx + dy * dy)))
-            d = ((ax + t * dx - e.x) ** 2 + (ay + t * dy - e.y) ** 2) ** 0.5
+            if len(self.pts[i]) >= 4 or ((ax - bx) ** 2 + (ay - by) ** 2) ** 0.5 >= 4 * GRAB * self.s:
+                out.append(i)
+        return out
+
+    def bend_at(self, e):
+        """The round dot under the mouse (the number of the point its piece goes to), or None."""
+        best, near = None, GRAB * self.s
+        for i in self.dots():
+            x, y = self.xy(self.middle(i))
+            d = ((x - e.x) ** 2 + (y - e.y) ** 2) ** 0.5
             if d <= near:
                 best, near = i, d
         return best
+
+    def on_line(self, e):
+        """The piece of the line under the mouse: (the number of the point it goes to, how far along it 0..1), or
+        None."""
+        best, near = None, GRAB * self.s
+        for i in range(1, len(self.pts)):
+            line = [self.xy(p) for p in trace_line([self.pts[i - 1], self.pts[i]])]
+            for k, ((ax, ay), (bx, by)) in enumerate(zip(line, line[1:])):
+                dx, dy = bx - ax, by - ay
+                t = 0.0 if dx == dy == 0 else max(0.0, min(1.0, ((e.x - ax) * dx + (e.y - ay) * dy) / (dx * dx + dy * dy)))
+                d = ((ax + t * dx - e.x) ** 2 + (ay + t * dy - e.y) ** 2) ** 0.5
+                if d <= near:
+                    best, near = (i, (k + t) / (len(line) - 1)), d
+        return best
+
+    def split(self, i, t, p):
+        """A new point p put in the piece coming to point i, t of the way along it: a bent piece stays the same
+        curve on both sides (cut at t), only moved to p."""
+        a, b = self.pts[i - 1], self.pts[i]
+        if len(b) < 4:
+            self.pts.insert(i, p)
+            return
+        cx, cy = 2 * b[2] + (a[0] + b[0]) / 2, 2 * b[3] + (a[1] + b[1]) / 2  # (the curve's pull point)
+        l = [a[0] + t * (cx - a[0]), a[1] + t * (cy - a[1])]  # (each half's pull point)
+        r = [cx + t * (b[0] - cx), cy + t * (b[1] - cy)]
+        self.pts[i] = [b[0], b[1], (r[0] - (p[0] + b[0]) / 2) / 2, (r[1] - (p[1] + b[1]) / 2) / 2]
+        self.pts.insert(i, [p[0], p[1], (l[0] - (a[0] + p[0]) / 2) / 2, (l[1] - (a[1] + p[1]) / 2) / 2])
 
     def rows(self):
         """How many key rows the Hz bass shown has (its box's keys; the keys it will have before its first note)."""
@@ -152,7 +199,8 @@ class TraceWindow(tk.Toplevel):
             colour = look.CHART_GRID_STRONG if i % (GRID // 4) == 0 else look.CHART_GRID
             c.create_line(x0 + i * w / GRID, y0, x0 + i * w / GRID, y0 + h, fill=colour)
             c.create_line(x0, y0 + i * h / GRID, x0 + w, y0 + i * h / GRID, fill=colour)
-        lo, hi = min(p[1] for p in self.pts), max(p[1] for p in self.pts)
+        line = trace_line(self.pts)
+        lo, hi = min(p[1] for p in line), max(p[1] for p in line)
         for a, b in ((hi, 1.0), (0.0, lo)):  # (outside the line's height: no keys there, it's stretched to them)
             if b - a > 1e-9:
                 c.create_rectangle(x0, y0 + (1 - b) * h, x0 + w, y0 + (1 - a) * h, fill=look.CHART_BAND, outline="",
@@ -163,7 +211,7 @@ class TraceWindow(tk.Toplevel):
         total = 0
         for k in range(n):
             y = (k + 0.5) / n
-            hits = trace_hits(self.pts, y)
+            hits = trace_hits(line, y)
             total += len(hits)
             if k % every:
                 continue
@@ -174,8 +222,12 @@ class TraceWindow(tk.Toplevel):
                 px = x0 + x * w
                 c.create_oval(px - r, py - r, px + r, py + r, fill=look.HZ_GREEN, outline="")
         c.create_rectangle(x0, y0, x0 + w, y0 + h, outline=look.CHART_FRAME)
-        c.create_line(*[v for p in self.pts for v in self.xy(p)], fill=look.CHART_LINE, width=max(1, round(2 * s)))
+        c.create_line(*[v for p in line for v in self.xy(p)], fill=look.CHART_LINE, width=max(1, round(2 * s)))
         q = 3.5 * s
+        for i in self.dots():  # (each piece's round dot: drag it to bend the piece)
+            x, y = self.xy(self.middle(i))
+            c.create_oval(x - q, y - q, x + q, y + q, fill=look.CHART_BG if len(self.pts[i]) < 4 else look.CHART_POINT,
+                          outline=look.CHART_LINE)
         for p in self.pts:
             x, y = self.xy(p)
             c.create_rectangle(x - q, y - q, x + q, y + q, fill=look.CHART_POINT, outline=look.CHART_LINE)
@@ -194,14 +246,22 @@ class TraceWindow(tk.Toplevel):
             return
         was = [list(p) for p in self.pts]
         i = self.grabbed(e)
+        bend = i is None and self.bend_at(e)
+        if bend:
+            i = bend
         self.placed = i is None  # (a double click on the point this click puts in doesn't take it out again)
         if i is None:
             if len(self.pts) >= TRACE_POINTS:
                 return self.bell()
-            j = self.on_line(e)
-            i = j if j is not None else len(self.pts)
-            self.pts.insert(i, self.point_at(e))
-        self.drag = {"i": i, "was": was, "before": self.hz.fx.state(), "at": (e.x, e.y), "moved": False}
+            got = self.on_line(e)
+            if got is None:
+                i = len(self.pts)
+                self.pts.append(self.point_at(e))
+            else:
+                i = got[0]
+                self.split(i, got[1], self.point_at(e))
+        self.drag = {"i": i, "bend": bool(bend), "was": was, "before": self.hz.fx.state(), "at": (e.x, e.y),
+                     "moved": False}
         self.draw()
 
     def on_drag(self, e):
@@ -211,7 +271,13 @@ class TraceWindow(tk.Toplevel):
         if not d["moved"] and max(abs(e.x - d["at"][0]), abs(e.y - d["at"][1])) < 3:
             return  # (under 3 px: still a click, the point stays where it is)
         d["moved"] = True
-        self.pts[d["i"]] = self.point_at(e)
+        i, p = d["i"], self.point_at(e)
+        if d["bend"]:  # (the round dot: the piece bends so its middle is there)
+            a, b = self.pts[i - 1], self.pts[i]
+            bx, by = p[0] - (a[0] + b[0]) / 2, p[1] - (a[1] + b[1]) / 2
+            self.pts[i] = b[:2] + ([bx, by] if max(abs(bx), abs(by)) > 1e-9 else [])
+        else:
+            self.pts[i] = p + self.pts[i][2:]  # (its bend kept)
         self.draw()
 
     def on_release(self, e):
@@ -219,7 +285,7 @@ class TraceWindow(tk.Toplevel):
         if d is None:
             return
         if self.pts != d["was"]:
-            self.save(d["before"])
+            self.save(d["before"], d["was"])
         self.draw()
 
     def on_double(self, e):
@@ -231,15 +297,23 @@ class TraceWindow(tk.Toplevel):
             self.remove(e)
 
     def remove(self, e):
-        """The point under the mouse taken away (the line keeps at least 2)."""
+        """The point under the mouse taken away (the line keeps at least 2; the piece left there is straight), or
+        the round dot's piece made straight again."""
         i = self.grabbed(e)
         if i is None:
-            return
-        if len(self.pts) <= 2:
-            return self.bell()
-        before = self.hz.fx.state()
-        del self.pts[i]
-        self.save(before)
+            j = self.bend_at(e)
+            if j is None or len(self.pts[j]) < 4:
+                return
+            was, before = [list(p) for p in self.pts], self.hz.fx.state()
+            self.pts[j] = self.pts[j][:2]
+        else:
+            if len(self.pts) <= 2:
+                return self.bell()
+            was, before = [list(p) for p in self.pts], self.hz.fx.state()
+            del self.pts[i]
+            if i < len(self.pts):  # (the point after it: its piece now comes from further back, straight)
+                self.pts[i] = self.pts[i][:2]
+        self.save(before, was)
         self.draw()
 
     def cancel_drag(self):
@@ -261,18 +335,49 @@ class TraceWindow(tk.Toplevel):
         """The line replaced by these points (Reset, a starting shape): one undo step (none when it's the same)."""
         if self.drag is not None:
             return
-        before = self.hz.fx.state()
+        was, before = [list(p) for p in self.pts], self.hz.fx.state()
         self.pts = [list(p) for p in pts]
-        self.save(before)
+        self.save(before, was)
         self.draw()
 
-    def save(self, before):
-        """The shape drawn becomes the Hz bass's: one undo step of the Hz bass window."""
-        hz = self.hz
+    def save(self, before, was):
+        """The shape drawn becomes the Hz bass's: one undo step of the Hz bass window (was: the points before).
+        Nothing there to hold it yet (no step made): a step of this window's own (local_step)."""
+        hz, app = self.hz, self.app
         hz.extra = clean_extra(dict(hz.extra, trace=[list(p) for p in self.pts]))
-        if hz.fx.now() != before:
-            hz.fx.tidy()
-            hz.commit(tr("hz.step_trace"), copy.deepcopy(hz.tones), before)
+        if hz.fx.now() == before:
+            return
+        top = app.undo_stack[-1] if app.undo_stack else None
+        hz.fx.tidy()
+        hz.commit(tr("hz.step_wave"), copy.deepcopy(hz.tones), before)
+        if (app.undo_stack[-1] if app.undo_stack else None) is not top:
+            self.local, self.local_redo = [], []  # (a real step: the Hz bass holds the shape now)
+        else:
+            if self.local_for != self.waiting_for():
+                self.local = []
+            self.local.append(was)
+            self.local_redo, self.local_for = [], self.waiting_for()
+
+    def waiting_for(self):
+        """What changes making no undo step are for: the shape shown (a spam shape without notes), or None (a new
+        Hz bass not made yet)."""
+        sh = self.hz.target()
+        return id(sh) if sh is not None else None
+
+    def local_step(self, redo=False):
+        """Ctrl+Z / Ctrl+Y in this window: a change no Hz bass held taken back / done again. False when there's
+        none (the main undo goes on)."""
+        if self.local_for != self.waiting_for() or (self.hz.target() or {}).get("hz"):
+            self.local, self.local_redo = [], []  # (another shape shown, or the Hz bass made since: its steps count)
+        src, dst = (self.local_redo, self.local) if redo else (self.local, self.local_redo)
+        if not src or self.drag is not None:
+            return False
+        dst.append([list(p) for p in self.pts])
+        self.pts = src.pop()
+        self.hz.extra = clean_extra(dict(self.hz.extra, trace=[list(p) for p in self.pts]))
+        self.hz.fx.tidy()
+        self.draw()
+        return True
 
     def close(self):
         self.cancel_drag()
