@@ -21,6 +21,23 @@ KDMAPI = "OmniMIDI (KDMAPI)"  # (OmniMIDI's own direct way in, skipping Windows'
 DEFAULT_DEVICE = MAPPER_NAME if WINDOWS else BUILTIN
 MAPPER = 0xFFFFFFFF
 
+# 31-EDO sound (Built-in BASSMIDI only): row r = 31-EDO step r above C0. Each step of the octave has its own
+# channel (EDO_FIRST + step), pitch-bent once when the synth opens (EDO_BENDS, at the usual +-2 key bend range),
+# so any number of notes can sound at once and the note colours' channels don't matter. A message to channel 16
+# or past carries the first channel of its group of 16 in its top byte (synth.Live.send).
+EDO = 31
+EDO_FIRST = 16
+_EDO_KEYS = np.array([round(s * 1200 / EDO / 100) for s in range(EDO)], np.int64)  # nearest key above C, per step
+EDO_BENDS = [8192 + round((s * 1200 / EDO - 100 * int(_EDO_KEYS[s])) / 100 * 4096) for s in range(EDO)]
+
+
+def edo_code(rows):
+    """channel | key << 8 (+ channel group << 24) of rows (a NumPy array or one int) in 31-EDO."""
+    rows = np.asarray(rows, np.int64)
+    step = rows % EDO
+    ch = EDO_FIRST + step
+    return (ch & 15) | (12 + 12 * (rows // EDO) + _EDO_KEYS[step]) << 8 | (ch - ch % 16) << 24
+
 try:
     _winmm = ctypes.WinDLL("winmm")
 except (AttributeError, OSError):
@@ -107,6 +124,12 @@ class MidiOut:
         self.handle = None
         self.name = None
         self.make_live = make_live  # () -> a started synth.Live (or raises SynthError)
+        self.edo = False  # the project's notes played in 31-EDO (the app's 31-EDO + Audio ticks): see tuned
+
+    @property
+    def tuned(self):
+        """True when the piano roll's notes are played in 31-EDO now (Built-in BASSMIDI only)."""
+        return self.edo and self.name == BUILTIN
 
     def open(self, name):
         """Open the device called name. Returns an error message, or None when it's ready."""
@@ -167,9 +190,12 @@ class MidiOut:
             else:
                 _winmm.midiOutShortMsg(h, msg)
 
-    def note(self, ch, pitch, vel):
-        """Note on (vel 0 = note off). Keys above 127 (256 keys) can't be sent: skipped."""
-        if pitch <= 127:
+    def note(self, ch, pitch, vel, rows=False):
+        """Note on (vel 0 = note off). Keys above 127 (256 keys) can't be sent: skipped. rows = pitch is a piano
+        roll row: played in 31-EDO while tuned (every row, ch not used)."""
+        if rows and self.tuned:
+            self.send(0x90 | int(edo_code(pitch)) | vel << 16)
+        elif pitch <= 127:
             self.send(0x90 | ch | pitch << 8 | vel << 16)
 
     def close(self):
@@ -189,15 +215,18 @@ class _Ons:
     """The notes to play, in the order they start: only the order is worked out (the notes stay where they are, so
     millions take little memory), and they're turned into Python numbers a batch at a time as they're played."""
 
-    def __init__(self, notes, t0, t1, use10):
+    def __init__(self, notes, t0, t1, use10, tune=False):
         s = notes[:, 0]
-        keep = np.flatnonzero((s >= t0) & (s < t1) & (notes[:, 2] <= 127))  # (a synth has 128 keys)
+        if tune:  # (31-EDO: every row fits in the synth's 128 keys)
+            keep = np.flatnonzero((s >= t0) & (s < t1))
+        else:
+            keep = np.flatnonzero((s >= t0) & (s < t1) & (notes[:, 2] <= 127))  # (a synth has 128 keys)
         starts = s[keep]
         if len(starts) > 1 and not (starts[1:] >= starts[:-1]).all():
             order = np.argsort(starts, kind="stable")
             keep, starts = keep[order], starts[order]
             del order
-        self.notes, self.keep, self.starts, self.use10 = notes, keep, starts, use10
+        self.notes, self.keep, self.starts, self.use10, self.tune = notes, keep, starts, use10, tune
 
     def __len__(self):
         return len(self.keep)
@@ -209,6 +238,9 @@ class _Ons:
     def batch(self, i, size=4096):
         """Notes i.. as (start, end, channel | key << 8, velocity) tuples."""
         part = self.notes[self.keep[i:i + size]]
+        if self.tune:
+            return list(zip(part[:, 0].tolist(), part[:, 1].tolist(), edo_code(part[:, 2]).tolist(),
+                            part[:, 3].tolist()))
         slot = part[:, 4]
         ch = slot % 16 if self.use10 else np.array(CHANNELS, np.int64)[slot % len(CHANNELS)]  # (slot_track_channel)
         return list(zip(part[:, 0].tolist(), part[:, 1].tolist(), (ch | part[:, 2] << 8).tolist(),
@@ -225,6 +257,7 @@ class Player:
         self._stop = threading.Event()
         self._switch = sys.getswitchinterval()
         self.held = {}  # (channel | key << 8) -> how many notes on it are sounding right now
+        self.tune = False  # (31-EDO: see start)
         self._clock = None
         self._swap = None  # new notes ready for the playing thread (_Ons)
         self._wanted = None  # new notes waiting to be put in order (notes, use10)
@@ -240,6 +273,7 @@ class Player:
         changed in place; use10: the slots use channel 10 too, engine.slot_track_channel)."""
         self.stop()
         self.ppq, self.start_beat, self.stop_beat = ppq, start_beat, stop_beat
+        self.tune = self.out.tuned  # (31-EDO: kept until the next start, so note-offs match their note-ons)
         self.spt = 60 / bpm / ppq  # seconds a tick
         self._clock = None  # (the line waits at the start while the notes are put in order)
         self._gen += 1
@@ -269,7 +303,7 @@ class Player:
     def _sort(self):
         while self._wanted is not None:
             (gen, notes, use10), self._wanted = self._wanted, None
-            ons = _Ons(notes, self.start_beat * self.ppq, self.stop_beat * self.ppq, use10)
+            ons = _Ons(notes, self.start_beat * self.ppq, self.stop_beat * self.ppq, use10, self.tune)
             if self._wanted is None and gen == self._gen:  # (changed again meanwhile: those first)
                 self._swap = ons
 
@@ -285,7 +319,7 @@ class Player:
         clock, sleep, stop = time.perf_counter, time.sleep, self._stop
         send = self.out.send
         t0 = self.start_beat * self.ppq
-        ons = _Ons(notes, t0, self.stop_beat * self.ppq, use10)
+        ons = _Ons(notes, t0, self.stop_beat * self.ppq, use10, self.tune)
         del notes
         self._clock = (clock(), t0, self.spt)
         held = self.held = {}

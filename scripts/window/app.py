@@ -531,7 +531,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         t = ttk.Checkbutton(self.edo_ticks, text=tr("app.edo31"), variable=self.edo31, command=self.sync_edo)
         t.pack(side="left", padx=(6, 0))
         Tooltip(t, tr("app.edo31_tip"))
-        self.edo_audio_tick = ttk.Checkbutton(self.edo_ticks, text=tr("app.edo31_audio"), variable=self.edo31_audio)
+        self.edo_audio_tick = ttk.Checkbutton(self.edo_ticks, text=tr("app.edo31_audio"), variable=self.edo31_audio,
+                                              command=self.sync_edo)
         self.edo_audio_tick.pack(side="left", padx=(4, 0))
         Tooltip(self.edo_audio_tick, tr("app.edo31_audio_tip"))
         box.update_idletasks()
@@ -911,6 +912,15 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         elif not big and self.edo_ticks.winfo_manager():
             self.edo_ticks.pack_forget()
         self.edo_audio_tick.state(["!disabled" if self.edo31.get() else "disabled"])
+        tuned = self.edo() and self.edo31_audio.get()
+        if tuned != self.out.edo:  # (sounding notes end first: their note-offs go where their note-ons went)
+            playing = self.player.running
+            if playing:
+                self.stop_play()
+            self.scrub_end()
+            self.out.edo = tuned
+            if playing:
+                self.start_play(keep=True)
         self.roll.request_redraw()
 
     def read_project(self):
@@ -1821,6 +1831,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                           self.picture_use10)
         if self.out.name == BUILTIN:
             self.overload.start(self.out.handle, self.play_voices, self.play_guard.get(), keep)
+        elif self.out.edo:
+            self.status.config(text=tr("app.edo31_audio_builtin_only"))
         self.play_btn.config(text=tr("app.stop_space"))
         self.roll.show_playhead(start=True)
         self._play_job = self.after(15, self._play_tick)
@@ -2022,20 +2034,20 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 now[k] = (s, v)
         held = self._scrub_held
         for k in [k for k in held if k not in now]:
-            self.out.note(*k, 0)
+            self.out.note(*k, 0, rows=True)
             del held[k]
         for (ch, p), (s, v) in now.items():
             if held.get((ch, p)) != s:  # a new note on this key (back-to-back spam notes each sound)
                 if (ch, p) in held:
-                    self.out.note(ch, p, 0)
-                self.out.note(ch, p, v)
+                    self.out.note(ch, p, 0, rows=True)
+                self.out.note(ch, p, v, rows=True)
                 held[(ch, p)] = s
         self.set_playhead(t_to / self.ppq)
         return True
 
     def scrub_end(self):
         for ch, p in self._scrub_held:
-            self.out.note(ch, p, 0)
+            self.out.note(ch, p, 0, rows=True)
         self._scrub_held.clear()
 
     # ------------------------------------------------------------ undo

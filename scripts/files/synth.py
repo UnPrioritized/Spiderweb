@@ -47,7 +47,7 @@ _ATTRIB_MIDI_VOICES, _ATTRIB_MIDI_VOICES_ACTIVE = 0x12003, 0x12004
 _ATTRIB_MIDI_CPU, _ATTRIB_MIDI_SRC, _ATTRIB_MIDI_KILL, _ATTRIB_MIDI_QUEUE_ASYNC = 0x12001, 0x12006, 0x12007, 0x1200d
 _ATTRIB_VOL, _ATTRIB_BUFFER = 2, 13
 _CONFIG_UPDATEPERIOD = 1
-_EV_END, _EV_NOTE, _EV_PROGRAM, _EV_TEMPO = 0, 1, 2, 62
+_EV_END, _EV_NOTE, _EV_PROGRAM, _EV_PITCH, _EV_TEMPO = 0, 1, 2, 4, 62
 _EVENTS_RAW = 0x10000
 
 EVENT = np.dtype([("event", "<u4"), ("param", "<u4"), ("chan", "<u4"), ("tick", "<u4"), ("pos", "<u4")])
@@ -125,6 +125,7 @@ def _load():
     for name, args, res in (("BASS_MIDI_FontInit", [ctypes.c_wchar_p if WINDOWS else ctypes.c_char_p, u], u), ("BASS_MIDI_FontFree", [u], i),
                             ("BASS_MIDI_StreamCreateEvents", [p, u, u, u], u),
                             ("BASS_MIDI_StreamCreate", [u, u, u], u), ("BASS_MIDI_StreamEvents", [u, u, p, u], u),
+                            ("BASS_MIDI_StreamEvent", [u, u, u, u], i),
                             ("BASS_MIDI_StreamSetFonts", [u, p, u], i), ("BASS_MIDI_StreamLoadSamples", [u], i),
                             ("BASS_MIDI_FontLoad", [u, i, i], i)):
         fn = getattr(midi, name)
@@ -491,9 +492,9 @@ def live_limit(st, x):
 
 
 class Live:
-    """A BASSMIDI stream with 16 channels (10 = drums, as on any GM synth) that sounds each message the moment it's
-    sent, set up like the common BASSMIDI MIDI-out driver (user, 2026-10-07: Player's Limiter + Python feeding the
-    sound pumped and stuttered next to it): BASS plays the stream itself, straight into the sound device's mix (no
+    """A BASSMIDI stream with 48 channels (0-15 as on any GM synth, 10 = drums; 16-46 = 31-EDO's steps, each
+    pitch-bent once here, playback.EDO_BENDS) that sounds each message the moment it's sent, set up like the
+    common BASSMIDI MIDI-out driver (user, 2026-10-07: Player's Limiter + Python feeding the sound pumped and stuttered next to it): BASS plays the stream itself, straight into the sound device's mix (no
     Python in the sound thread, so a busy window can't starve it), full volume and no limiter (too loud = clipped,
     as there), linear sample interpolation, notes killed rather than faded at the voice limit, voices dropped
     rather than stuttering when it can't keep up. Holds the soundfont open until close(). set_limiter = the
@@ -510,7 +511,7 @@ class Live:
             raise SynthError("synth.no_device")
         bass, midi = synth.bass, synth.midi
         self.synth, self.font_path = synth, synth.font_path
-        self.handle = midi.BASS_MIDI_StreamCreate(16, _SAMPLE_FLOAT | _MIDI_ASYNC | (_MIDI_NOFX if nofx else 0),
+        self.handle = midi.BASS_MIDI_StreamCreate(48, _SAMPLE_FLOAT | _MIDI_ASYNC | (_MIDI_NOFX if nofx else 0),
                                                   RATE)
         if not self.handle:
             raise SynthError("synth.failed", err=bass.BASS_ErrorGetCode())
@@ -528,6 +529,10 @@ class Live:
         if limiter:
             self.set_limiter(True)
         midi.BASS_MIDI_StreamLoadSamples(h)  # (program 0 + the drums: no wait at the first notes)
+        from files.playback import EDO_BENDS, EDO_FIRST
+        for step, bend in enumerate(EDO_BENDS):
+            ch = EDO_FIRST + step
+            self.send(0xE0 | ch & 15 | (bend & 0x7F) << 8 | (bend >> 7) << 16 | (ch - ch % 16) << 24)
         if not bass.BASS_ChannelPlay(h, 0):
             err = bass.BASS_ErrorGetCode()
             self.close()
@@ -579,9 +584,20 @@ class Live:
             pass
 
     def send(self, msg):
-        """One short MIDI message (status | data1 << 8 | data2 << 16, as a MIDI-out device takes it)."""
-        if self.handle:
+        """One short MIDI message (status | data1 << 8 | data2 << 16, as a MIDI-out device takes it; channels past 16:
+        + the first channel of its group of 16 << 24, the status naming the channel within it). Those go one event
+        at a time naming the channel: raw messages with the group added to the mode all land on the group's FIRST
+        channel (measured 2026-10-10). Only note on / off and pitch bend are sent there."""
+        if not self.handle:
+            return
+        if msg < 1 << 24:
             self.synth.midi.BASS_MIDI_StreamEvents(self.handle, _EVENTS_RAW, ctypes.byref(ctypes.c_uint32(msg)), 3)
+            return
+        ch, kind, a, b = (msg >> 24) + (msg & 15), msg & 0xF0, (msg >> 8) & 0x7F, (msg >> 16) & 0x7F
+        if kind == 0xE0:
+            self.synth.midi.BASS_MIDI_StreamEvent(self.handle, ch, _EV_PITCH, a | b << 7)
+        elif kind in (0x80, 0x90):
+            self.synth.midi.BASS_MIDI_StreamEvent(self.handle, ch, _EV_NOTE, a | (b << 8 if kind == 0x90 else 0))
 
     def position(self):
         """Bytes of sound made so far (8 a frame)."""
