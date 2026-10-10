@@ -25,8 +25,8 @@ from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
 from notes.chop import apply_chop
 from notes.claw import apply_claw
-from notes.fx import (clean_fx, flip_shape, groups, idle, mirrored, notes_box, swapped, toggled, turn_notes, turn_pts,
-                      turn_shape, velocities)
+from notes.fx import (clean_fx, flip_shape, groups, idle, mirrored, notes_box, reverse_velocity, swapped, toggled,
+                      turn_notes, turn_pts, turn_shape, velocities)
 from notes.gaterange import clean_range
 from notes.merge import clean_merge, recipe_notes, reshaped_notes as merge_reshaped, turned_notes as merge_turned
 from notes.glue import apply_glue, clean_glue, glue_box
@@ -511,12 +511,13 @@ def turned_back(sh, step):
         for _ in range(abs(q)):
             turn_shape(back, q < 0, r, cb, cp)
         if back.get("_m") and q % 2:
+            if len(back["_m"]) == 1:  # (a sideways flip now undone as an upside-down one: its velocity put back)
+                reverse_velocity(back)
             back["_m"] = swapped(back["_m"])
         return back
-    if back.get("_m"):  # (flipped after a slanted turn: the drawing flipped back first)
-        back["pts"] = [[2 * cb - b if "time" in back["_m"] else b, 2 * cp - p if "keys" in back["_m"] else p]
-                       for b, p in back["pts"]]
-        del back["_m"]
+    if back.get("_m"):  # (flipped after a slanted turn: the drawing flipped back first, velocity / glue / Range too)
+        for axis in back.pop("_m"):
+            flip_shape(back, axis == "time", 2 * (cb if axis == "time" else cp))
     back["pts"] = turn_pts(back["pts"], -deg, r, cb, cp)
     return back
 

@@ -26,6 +26,7 @@ from notes.engine import (CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cache
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
+from notes.merge import velocity_reversed as merge_vrev
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
 from notes.polygon import POLYGON_DEFAULTS
@@ -1366,6 +1367,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         for sh in shapes:
             steps = steps_kept(sh)  # (a piece of a shape with pages: a flip step too, it stays a piece)
             frm = sh["pts"]
+            if sh.get("merge"):  # (its parts' velocities: each sideways flip turns them round, merge.py)
+                sh["merge"]["vrev"] = merge_vrev(sh) != sideways
             flip_shape(sh, sideways, mid2)
             turned_piece(sh, frm, lambda w: flip_shape(w, sideways, mid2))  # (a funnel piece stays one)
             if sh.get("fx") or steps:  # (its note tool pages' result is flipped too, fx.py)
@@ -1398,6 +1401,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         frms = [sh["pts"] for sh in shapes]
         for sh in shapes:
             steps = steps_kept(sh)  # (a piece of a shape with pages: a turn step too, it stays a piece)
+            if sh.get("merge"):  # (a turn leaves its parts' velocities as they are)
+                sh["merge"]["vrev"] = merge_vrev(sh)
             turn_shape(sh, clockwise, r, cb, cp)
             if sh.get("fx") or steps:  # (its note tool pages' result is turned too, fx.py)
                 fx = fx_turned(sh.get("fx"), 90 if clockwise else -90, r, steps)

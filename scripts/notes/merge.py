@@ -225,7 +225,7 @@ def box_map(was, now):
     return L, n[0] - L @ w[0]
 
 
-def mapped_part(p, f, L=None):
+def mapped_part(p, f, L=None, vrev=None):
     """Shape p with every point through f(beat, key) -> [beat, key], or None if it can't be turned that way. L (the
     map's 2x2 matrix): what a Flip / Turn 90° does to a shape's settings is done too (flipped_settings)."""
     import copy
@@ -247,16 +247,21 @@ def mapped_part(p, f, L=None):
         for k in ("tumour", "tumours", "shape", "pattern", "k", "smooth"):
             q.pop(k, None)
         q.update(kind="poly", pts=[f(b, k) for b, k in paths[0]])
-        return flipped_settings(q, L)
+        return flipped_settings(q, L, vrev)
     q["pts"] = [f(b, k) for b, k in p["pts"]]
-    return flipped_settings(q, L)
+    return flipped_settings(q, L, vrev)
 
 
-def flipped_settings(q, L):
+def flipped_settings(q, L, vrev=None):
     """The settings a Flip / Turn 90° changes along with the drawing (fx.flip_shape / turn_shape: velocities flip
     sideways, a gate Range turns / flips), done as the map L does: mostly a quarter turn = turned that way, then
-    mirrored (det < 0) = flipped, sideways when time runs backwards. Changes q."""
+    mirrored (det < 0) = flipped, sideways when time runs backwards, or a half turn. vrev: the velocities run the
+    other way (the merged shape's sideways flips, counted as they're done: both flips and a half turn give the same
+    box, but only flips turn velocities round); None = worked out from L (older recipes). Changes q."""
+    from notes.fx import reverse_velocity
     from notes.gaterange import flipped_range, turned_range
+    if vrev:
+        reverse_velocity(q)
     if L is None:
         return q
     if abs(L[0, 0]) < abs(L[1, 0]):  # (time now runs mostly along the keys: a quarter turn, clockwise = down)
@@ -267,15 +272,31 @@ def flipped_settings(q, L):
         L = np.array([[0, -1], [1, 0]] if cw else [[0, 1], [-1, 0]], float) @ L  # (the rest after turning back)
     if np.linalg.det(L) < 0:
         sideways = L[0, 0] < 0
-        if sideways:
-            if q.get("vel_env"):
-                q["vel_env"] = [[1 - u, v] for u, v in reversed(q["vel_env"])]
-            if "vel0" in q and "vel1" in q:
-                q["vel0"], q["vel1"] = q["vel1"], q["vel0"]
+        if sideways and vrev is None:
+            reverse_velocity(q)
         for k in ("range", "range_kept"):
             if q.get(k):
                 q[k] = flipped_range(q[k], sideways)
+    elif L[0, 0] < 0:  # (a half turn: the Range runs the other way on both axes)
+        for k in ("range", "range_kept"):
+            if q.get(k):
+                q[k] = flipped_range(flipped_range(q[k], True), False)
     return q
+
+
+def velocity_reversed(sh):
+    """Do the merged shape sh's parts' velocities run the other way? Its sideways flips counted (m["vrev"]), or for
+    an older recipe worked out from its box as before."""
+    m = sh["merge"]
+    if "vrev" in m:
+        return m["vrev"]
+    got = m.get("box") and box_map(m["box"], sh["pts"])
+    if not got:
+        return False
+    L = got[0]
+    if abs(L[0, 0]) < abs(L[1, 0]):
+        L = np.array([[0, -1], [1, 0]] if L[1, 0] < 0 else [[0, 1], [-1, 0]], float) @ L
+    return bool(np.linalg.det(L) < 0 and L[0, 0] < 0)
 
 
 def reshaped_parts(sh):
@@ -284,8 +305,8 @@ def reshaped_parts(sh):
     recipe, nothing met, a part that can't be turned)."""
     m = sh["merge"]
     got = m.get("box") and box_map(m["box"], sh["pts"])
-    if not got or np.allclose(got[0], np.eye(2), atol=1e-9):
-        return None
+    if not got or np.allclose(got[0], np.eye(2), atol=1e-9) and not m.get("vrev"):
+        return None  # (moved only; flipped both ways and half turned back still has its velocities turned round)
     L, o = got
     sides = made_sides(m)
     if not sides:
@@ -294,7 +315,7 @@ def reshaped_parts(sh):
     parts = []
     for i, p in enumerate(m["parts"]):
         d = (late + (least if i == slide else 0)) / m["ppq"]
-        q = mapped_part(p, lambda b, k, d=d: [float(x) for x in L @ (b + d, k) + o], L)
+        q = mapped_part(p, lambda b, k, d=d: [float(x) for x in L @ (b + d, k) + o], L, m.get("vrev"))
         if q is None:
             return None
         parts.append(q)
@@ -417,4 +438,6 @@ def clean_merge(m, clean_shape):
         box = None
     if box and len(box) == 3 and all(math.isfinite(x) for pt in box for x in pt):
         out["box"] = box  # (its box when made: turned / slanted / stretched since = the parts too, merged again)
+    if "vrev" in m:
+        out["vrev"] = m["vrev"] is True  # (flipped sideways an odd number of times: velocities the other way)
     return out

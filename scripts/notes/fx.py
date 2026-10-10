@@ -122,15 +122,21 @@ def flip_shape(sh, sideways, mid2):
         if sh.get(key):
             sh[key]["mirror"] = not sh[key]["mirror"]
     if sideways:  # the velocities flip with it
-        if sh.get("vel_env"):
-            sh["vel_env"] = [[1 - u, v] for u, v in reversed(sh["vel_env"])]
-        if "vel0" in sh and "vel1" in sh:
-            sh["vel0"], sh["vel1"] = sh["vel1"], sh["vel0"]
+        reverse_velocity(sh)
     if sh.get("glue"):  # (its boxes are shares of the shape's box)
         sh["glue"] = glue_flipped(sh["glue"], sideways)
     for k in ("range", "range_kept"):  # (a spam gate range runs the other way, the one kept while off too; a
         if sh.get(k) and sh["kind"] != "funnel":  # funnel's runs from its line start to its wall, wherever it is)
             sh[k] = flipped_range(sh[k], sideways)
+    return sh
+
+
+def reverse_velocity(sh):
+    """sh's velocity line run the other way (what a sideways flip does to it). Changes sh."""
+    if sh.get("vel_env"):
+        sh["vel_env"] = [[1 - u, v] for u, v in reversed(sh["vel_env"])]
+    if "vel0" in sh and "vel1" in sh:
+        sh["vel0"], sh["vel1"] = sh["vel1"], sh["vel0"]
     return sh
 
 
