@@ -17,7 +17,7 @@ from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_path
 from notes.merge import edge_moves, merged, part_rows, reshaped_parts
 from notes.glue import for_part as glue_for_part, glue_box
-from notes.slice import clip_segment, crossings, slice_custom
+from notes.slice import clip_segment, crossings, slice_custom, slice_notes
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
                           rejoined, slice_in_two, split_here_ok, tooled)
 from notes.smooth import smooth_path
@@ -403,12 +403,23 @@ class JoinSplit:
         boxes = roll.kept_box()
         segs = [(a, b)] if not boxes else [s for s in (clip_segment(a, b, box) for box in boxes) if s]
         targets = sorted(self.sels) if boxes else range(len(self.shapes))
-        done, out, skipped = {}, {}, 0
+        done, out, skipped, plain = {}, {}, 0, set()
         for i in targets:
             sh = self.shapes[i]
-            if sh["kind"] in ("custom", "funnel") and ("notes" in sh or sh.get("text") or sh.get("hz")):
+            if (sh["kind"] == "custom" and "notes" in sh and "picture" not in sh and "merge" not in sh
+                    and not sh.get("text") and not sh.get("hz")):
+                # pasted notes: by time, each row the line crosses (slice.slice_notes); pieces = new pasted notes
+                pieces = [sh]
+                for sa, sb in segs:
+                    nxt = []
+                    for p in pieces:
+                        got = slice_notes(p, *self.notes_tracks(p), sa, sb, self.ppq)
+                        nxt += got or [p]
+                    pieces = nxt
+                plain.add(i)
+            elif sh["kind"] in ("custom", "funnel") and ("notes" in sh or sh.get("text") or sh.get("hz")):
                 continue
-            if (sh["kind"] == "custom" or sh["kind"] in LINE_KINDS) and tooled(sh) or sh["kind"] == "funnel":
+            elif (sh["kind"] == "custom" or sh["kind"] in LINE_KINDS) and tooled(sh) or sh["kind"] == "funnel":
                 # (pages / glue: its notes are cut, wherever they are; both pieces keep the drawing, user. A funnel:
                 # always its notes, each piece drawn only on its side: sliced.piece_knives)
                 pieces, crossed = [sh], False
@@ -465,7 +476,7 @@ class JoinSplit:
         for i, sh in enumerate(self.shapes):
             parts = done.get(i, [sh])
             whole = span(sh)
-            for p in parts if i in done else ():
+            for p in parts if i in done and i not in plain else ():  # (pasted notes: their notes kept as they were)
                 piece_velocity(p, sh, span(p), whole)
                 part_glue(p, sh)
                 keep_velocity(p)

@@ -9,7 +9,7 @@ import copy
 import numpy as np
 
 from notes.bezier import anchor_count, sample, seg_point, segments, split
-from notes.custom import CURVE_STEPS, frame_to_uv, refit, stroke_points
+from notes.custom import CURVE_STEPS, frame_to_uv, notes_shape, refit, stroke_points
 from notes.gaterange import part_range
 from notes.pattern import has_formula
 
@@ -312,3 +312,41 @@ def clip_segment(a, b, box):
         if t0 > t1:
             return None
     return tuple(a + d * t0), tuple(a + d * t1)
+
+
+def slice_notes(sh, notes, tracks, a, b, ppq):
+    """Pasted notes (a custom shape holding notes, custom.py) cut by the Slice tool along a-b (beats, keys), by time
+    (user, 2026-10-10: it needn't go all the way across): on each key row the line crosses, the notes after the
+    spot it crosses at go to a new shape, a note sounding there cut in two at that tick; rows it doesn't cross stay
+    whole. notes: its (start, end, key, velocity) notes as they sound now, tracks: each one's track. -> the two
+    halves (each a pasted-notes shape around its own notes, sh's other settings kept), or None: the line touches
+    no note's row between its first note and last end, or one side would be empty."""
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    dk = b[1] - a[1]
+    if not len(notes) or abs(dk) < EPS:  # (a flat line runs between key rows: it crosses none)
+        return None
+    notes = np.asarray(notes, np.int64)[:, :4]
+    tracks = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64)
+    s = (notes[:, 2] - a[1]) / dk  # (where along a-b it crosses each note's row middle)
+    on = (s >= -EPS) & (s <= 1 + EPS)
+    x = np.round((a[0] + (b[0] - a[0]) * s) * ppq).astype(np.int64)
+    touched = False
+    for k in np.unique(notes[on, 2]):  # (it has to go through a note or between a row's notes somewhere)
+        r = on & (notes[:, 2] == k)
+        touched |= bool(notes[r, 0].min() < x[r][0] < notes[r, 1].max())
+    if not touched:
+        return None
+    lo, hi = notes[:, 0], notes[:, 1]
+    left, right = ~on | (lo < x), on & (hi > x)
+    parts = []
+    for keep, s0, s1 in ((left, lo, np.where(on, np.minimum(hi, x), hi)), (right, np.maximum(lo, x), hi)):
+        n = np.column_stack([s0, s1 - s0, notes[:, 2], notes[:, 3], tracks])[keep]
+        if not len(n):
+            return None
+        half = {k: copy.deepcopy(v) for k, v in sh.items()
+                if k not in ("notes", "pts", "vel_env", "fx", "glue", "between")}
+        half.update(notes_shape(n, ppq, sh.get("name")))  # (pages / glue / a velocity line: in its notes now)
+        if "name" not in sh:
+            half.pop("name")
+        parts.append(half)
+    return parts
