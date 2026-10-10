@@ -1,5 +1,6 @@
 """The Hz bass window's "Settings…" window (user, 2026-10-09: the toolbar was too full). Two parts:
-- Hz bass: Pitch (cents), Gates + the Auto threshold, the project's PPQ, "Shape length follows the notes". Its boxes
+- Hz bass: Pitch (cents), Gates + the Auto threshold, the project's PPQ, "Shape length follows the notes", the
+  "Wave shape…" button (hz_trace.py; moved here from the toolbar, user 2026-10-10). Its boxes
   are the Hz bass window's own (win.pitch_entry, win.gates, win.auto_row, win.grow_box): the window is made once with
   the Hz bass window and only hidden when closed, so they're always there. Changes are undo steps of the Hz bass
   window (this window sits inside it: App.in_hz).
@@ -19,6 +20,7 @@ from notes.hzbass import AUTO_MOST
 from window import look
 from window.hz_gates import GATE_MODES
 from window.hz_preview import LIVE_MB, VOICES, WORKERS
+from window.hz_trace import open_trace
 from window.widgets import Scrub, Tooltip, bad, good, remember_place
 
 ORANGE = look.WARN
@@ -118,6 +120,11 @@ class PreviewSettings(tk.Toplevel):
                                        takefocus=False)
         win.grow_box.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
         Tooltip(win.grow_box, tr("hz.grow_tip"))
+        r += 1
+
+        b = ttk.Button(box, text=tr("hz.trace"), command=lambda: open_trace(win), takefocus=False)
+        b.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)  # (moved here from the toolbar, user)
+        Tooltip(b, tr("hz.trace_tip"))
         r += 1
 
         # ---- the preview

@@ -37,7 +37,6 @@ from window.hz_live import LiveKeys
 from window.hz_loud import LoudPane
 from window.hz_preview import Preview
 from window.hz_synth import open_synth
-from window.hz_trace import open_trace
 from window.preview_settings import PreviewSettings, auto_box, no_spaces, open_settings  # noqa: F401
 from window.snap_picker import SnapPicker
 from window.tool_picker import ToolPicker
@@ -166,10 +165,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         b = ttk.Button(f, text=tr("hz.synth"), command=lambda: open_synth(self), takefocus=False)
         b.pack(side="left", padx=(0, 6))
         Tooltip(b, tr("hz.synth_tip"))
-        b = ttk.Button(f, text=tr("hz.trace"), command=lambda: open_trace(self), takefocus=False)
-        b.pack(side="left", padx=(0, 6))
-        Tooltip(b, tr("hz.trace_tip"))
-        self.trace_win = None  # the Wave shape window (hz_trace.py)
+        self.trace_win = None  # the Wave shape window (hz_trace.py; its button is in Settings…, user)
         b = ttk.Button(f, text=tr("hz.settings"), command=lambda: open_settings(self), takefocus=False)
         b.pack(side="left", padx=(0, 10))
         Tooltip(b, tr("hz.settings_tip"))
