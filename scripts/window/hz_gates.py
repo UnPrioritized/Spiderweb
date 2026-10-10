@@ -9,15 +9,16 @@ from tkinter import messagebox, ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
-from notes.hzbass import (AUTO, AUTO_MOST, EXTRAS, HZ_DEFAULTS, TUNE, all_tones, clean_fit, clean_from, clean_extra,
-                          clean_fx, clean_lfo, clean_line, clean_loop, clean_off, clean_sustain, clean_tones, fit_length,
-                          held_fixed, left_edge, sound_span)
+from notes.hzbass import (AUTO, AUTO_MOST, EXTRAS, FULL_LENGTH, HZ_DEFAULTS, LENGTH_TICKS, TUNE, all_tones, clean_fit,
+                          clean_from, clean_extra, clean_fx, clean_length, clean_lfo, clean_line, clean_loop, clean_off,
+                          clean_sustain, clean_tones, fit_length, held_fixed, left_edge, sound_span)
 from window import look
 from window.hz_effects import AMOUNT
 from window.widgets import Scrub, bad, good, remember_place
 
 
 GATE_MODES = ("auto", "mixed", "fixed")  # the Gates dropdown's choices, in order
+LENGTH_UNITS = ("pct", "ticks")  # the Note length's units, in order (hzbass.clean_length)
 
 
 def gate_mode(hz):
@@ -290,6 +291,122 @@ class HzGates:
         if sh is not None and sh.get("hz"):
             self.app.set_hz_gates("auto", limit)
         self.redraw()
+
+    # ------------------------------------------------------------ Note length (Settings…)
+
+    def length_of(self, var, row):
+        """A Note length box as {unit: whole number} (a wrong value: back to its last good one), or None."""
+        unit = LENGTH_UNITS[row.unit.current()]
+        hi = 100 if unit == "pct" else LENGTH_TICKS
+        row.scrub.hi = hi
+        for again in (False, True):
+            try:
+                v = int(round(float(calc(var.get()))))
+                if 1 <= v <= hi:
+                    good(row.entry)
+                    if str(v) != var.get():
+                        var.set(str(v))
+                    return {unit: v}
+            except (ValueError, ZeroDivisionError, OverflowError):
+                pass
+            if not again:
+                if unit == "pct":  # (ticks -> %: a number past 100 isn't wrong, just too big)
+                    try:
+                        if float(calc(var.get())) > 100:
+                            var.set("100")
+                            continue
+                    except (ValueError, ZeroDivisionError, OverflowError):
+                        pass
+                bad(row.entry)
+        return None
+
+    def put_length(self, var, row, length):
+        unit = next(iter(length))
+        row.unit.current(LENGTH_UNITS.index(unit))
+        row.scrub.hi = 100 if unit == "pct" else LENGTH_TICKS
+        var.set(str(int(length[unit])))
+        good(row.entry)
+
+    def length_target(self):
+        """The Hz bass the Note length rows change (one with notes), or None."""
+        sh = self.target()
+        return sh if sh is not None and all_tones(sh.get("hz") or {}) else None
+
+    def set_shared(self, name, key, value):
+        """A setting of the whole Hz bass (every layer's: "length", "stick"), None = left out: one undo step."""
+        sh = self.length_target()
+        if sh is None or sh["hz"].get(key) == value:
+            return
+        app = self.app
+        app.push_undo(name=name)
+        sh["hz"] = dict({k: v for k, v in sh["hz"].items() if k != key}, **({} if value is None else {key: value}))
+        app.shapes_changed()
+        app.sync_hz_panels()
+        self.sync()
+        app.schedule_autosave()
+
+    def on_length(self):
+        """The Note length box typed, stepped or dragged, or its unit picked."""
+        got = self.length_of(self.length_var, self.length_row)
+        if got is not None:
+            got = clean_length(got)
+            self.set_shared(tr("hz.step_length"), "length", None if got == FULL_LENGTH else got)
+        self.redraw()
+
+    def on_stick(self):
+        self.set_shared(tr("hz.step_stick"), "stick", True if self.stick.get() else None)
+
+    def set_own(self, length):
+        """The layer picked's own Note length (None: the Hz bass's): one undo step, kept with its sound."""
+        if self.length_target() is None:
+            return
+        before = self.fx.state()
+        self.extra = clean_extra(dict(self.extra, own_length=length))
+        if self.fx.now() != before:
+            self.fx.tidy()
+            self.commit(tr("hz.step_length"), copy.deepcopy(self.tones), before)
+
+    def on_own_pick(self):
+        """This layer: Same as the Hz bass / Its own length (starting as the Hz bass's)."""
+        sh = self.length_target()
+        own = self.own_pick.current() == 1
+        if sh is not None:
+            self.set_own(clean_length(sh["hz"].get("length") or FULL_LENGTH) if own else None)
+        self.canvas.focus_set()
+        self.sync()
+
+    def on_own_length(self):
+        got = self.length_of(self.own_var, self.own_row)
+        if got is not None:
+            self.set_own(clean_length(got))
+        self.redraw()
+
+    def show_length(self, sh, hz):
+        """The Note length rows as the Hz bass shown has them (greyed until it has notes); This layer only with
+        layers, its box only with a length of its own."""
+        ok = sh is not None and bool(all_tones(hz))
+        self.put_length(self.length_var, self.length_row, hz.get("length") or FULL_LENGTH)
+        own = self.extra.get("own_length") if ok else None
+        self.own_pick.current(1 if own else 0)
+        if own:
+            self.put_length(self.own_var, self.own_row, own)
+            if not self.own_row.winfo_manager():
+                self.own_row.pack(side="left")
+        elif self.own_row.winfo_manager():
+            self.own_row.pack_forget()
+        layered = ok and bool(hz.get("layers"))
+        for w in (self.own_label, self.own_frame):
+            if bool(w.winfo_manager()) != layered:
+                w.grid() if layered else w.grid_remove()
+        self.stick.set(bool(hz.get("stick")))
+        funnel = sh is not None and sh["kind"] == "funnel"
+        self.stick_tip.text = tr("hz.stick_tip") + ("\n" + tr("hz.stick_funnel") if funnel else "")
+        state = "normal" if ok else "disabled"
+        for row in (self.length_row, self.own_row):
+            row.entry.config(state=state)
+            row.unit.config(state="readonly" if ok else "disabled")
+        self.own_pick.config(state="readonly" if ok else "disabled")
+        self.stick_box.config(state="normal" if ok and not funnel else "disabled")
 
     def pitch(self):
         """The Pitch box in cents (a wrong value, not -1200 to 1200: back to its last good one), or None."""

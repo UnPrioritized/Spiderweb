@@ -1,7 +1,8 @@
 """The Hz bass window's "Settings…" window (user, 2026-10-09: the toolbar was too full). Two parts:
 - Hz bass: Pitch (cents), Gates + the Auto threshold, the project's PPQ, "Shape length follows the notes", the
-  "Wave shape…" button (hz_trace.py; moved here from the toolbar, user 2026-10-10). Its boxes
-  are the Hz bass window's own (win.pitch_entry, win.gates, win.auto_row, win.grow_box): the window is made once with
+  "Wave shape…" button (hz_trace.py; moved here from the toolbar, user 2026-10-10), Note length (+ the layer's own,
+  last note sticking out; hz_gates.show_length). Its boxes are the Hz bass window's own (win.pitch_entry, win.gates,
+  win.auto_row, win.grow_box, win.length_row...): the window is made once with
   the Hz bass window and only hidden when closed, so they're always there. Changes are undo steps of the Hz bass
   window (this window sits inside it: App.in_hz).
 - Preview (hz_preview.py): soundfont, voice limit, no reverb / chorus, volume, the live keys' memory (hz_live.py),
@@ -18,7 +19,7 @@ from files.mathexpr import calc
 from files.synth import FONT_TYPES
 from notes.hzbass import AUTO_MOST
 from window import look
-from window.hz_gates import GATE_MODES
+from window.hz_gates import GATE_MODES, LENGTH_UNITS
 from window.hz_preview import LIVE_MB, VOICES, WORKERS
 from window.hz_trace import open_trace
 from window.widgets import Scrub, Tooltip, bad, good, remember_place
@@ -54,6 +55,25 @@ def auto_box(app, parent, var, apply):
     Scrub(app, [(f.entry, var, apply)], (0.5, 5, 0.1), 0, AUTO_MOST, label=lb)
     for w in (lb, f.entry):
         Tooltip(w, tr("hz.auto_tip", most=f"{AUTO_MOST:g}"))
+    return f
+
+
+def length_box(app, parent, var, apply, label=None):
+    """A Note length box ("[100] [% ▾]"): a frame (not placed) with .entry, .unit (the dropdown: LENGTH_UNITS) and
+    .scrub. apply() on Enter, leaving the box, each step of the number and a unit picked."""
+    f = ttk.Frame(parent)
+    f.entry = ttk.Entry(f, textvariable=var, width=7)
+    f.entry.pack(side="left", padx=(0, 4))
+    names = [tr("hz.length_" + u) for u in LENGTH_UNITS]
+    f.unit = ttk.Combobox(f, values=names, state="readonly", width=max(map(len, names)) + 1)
+    f.unit.current(0)
+    f.unit.pack(side="left")
+    f.unit.bind("<<ComboboxSelected>>", lambda e: apply())
+    f.entry.bind("<Return>", lambda e: apply())
+    f.entry.bind("<FocusOut>", lambda e: no_spaces(var) or apply())
+    f.scrub = Scrub(app, [(f.entry, var, apply)], (1, 10, 1), 1, 100, label=label)
+    for w in (f.entry, f.unit):
+        Tooltip(w, tr("hz.length_tip"))
     return f
 
 
@@ -125,6 +145,32 @@ class PreviewSettings(tk.Toplevel):
         b = ttk.Button(box, text=tr("hz.trace"), command=lambda: open_trace(win), takefocus=False)
         b.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)  # (moved here from the toolbar, user)
         Tooltip(b, tr("hz.trace_tip"))
+        r += 1
+
+        # Note length (user, 2026-10-10): the Hz bass's, the layer picked's own (with layers only), sticking out
+        lb = ttk.Label(box, text=tr("hz.length"))
+        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        win.length_row = length_box(app, box, win.length_var, win.on_length, lb)
+        win.length_row.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        Tooltip(lb, tr("hz.length_tip"))
+        r += 1
+        lb = win.own_label = ttk.Label(box, text=tr("hz.own_length"))
+        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        f = win.own_frame = ttk.Frame(box)
+        f.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        names = [tr("hz.own_same"), tr("hz.own_own")]
+        win.own_pick = ttk.Combobox(f, values=names, state="readonly", width=max(map(len, names)))
+        win.own_pick.current(0)
+        win.own_pick.pack(side="left", padx=(0, 8))
+        win.own_pick.bind("<<ComboboxSelected>>", lambda e: win.on_own_pick())
+        win.own_row = length_box(app, f, win.own_var, win.on_own_length)
+        for w in (lb, win.own_pick):
+            Tooltip(w, tr("hz.own_length_tip"))
+        r += 1
+        win.stick_box = ttk.Checkbutton(box, text=tr("hz.stick"), variable=win.stick, command=win.on_stick,
+                                        takefocus=False)
+        win.stick_box.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        win.stick_tip = Tooltip(win.stick_box, tr("hz.stick_tip"))
         r += 1
 
         # ---- the preview

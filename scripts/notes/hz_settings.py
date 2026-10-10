@@ -433,16 +433,16 @@ def clean_trace(trace):
 
 
 def clean_length(length):
-    """A Note length checked (hz["length"], the Hz bass's; hz["own_length"], a layer's own): {"pct": 1..100} = each
-    repeat lasts that share of how long it does now, {"ticks": 1..} = that many ticks (never past the next one on its
-    key); None when broken."""
+    """A Note length checked (hz["length"], the Hz bass's; hz["own_length"], a layer's own): {"pct": 1..100, whole}
+    = each repeat lasts that share of how long it does now, {"ticks": 1..} = that many ticks (never past the next one
+    on its key); None when broken."""
     if not isinstance(length, dict):
         return None
     for unit, lo, hi in (("pct", 1.0, 100.0), ("ticks", 1, LENGTH_TICKS)):
         v = length.get(unit)
         if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
             v = max(lo, min(hi, v))
-            return {unit: int(round(v)) if unit == "ticks" else float(v)}
+            return {unit: int(round(v)) if unit == "ticks" else float(round(v))}  # (whole numbers, user)
     return None
 
 

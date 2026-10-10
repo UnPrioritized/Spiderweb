@@ -152,6 +152,8 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.pitch_var = tk.StringVar(value="0")  # the whole Hz bass's pitch, in cents
         self.auto_var = tk.StringVar(value=fmt(AUTO))
         self.grow = tk.BooleanVar(value=True)
+        self.length_var, self.own_var = tk.StringVar(value="100"), tk.StringVar(value="100")  # (Note length)
+        self.stick = tk.BooleanVar(value=False)
         self.ppq_trace = app.pvar["ppq"].trace_add(
             "write", lambda *a: self.after_idle(lambda: self.winfo_exists() and self.redraw()))
         f = piece()
@@ -328,6 +330,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.gates.config(state="readonly" if self.can_place() else "disabled")
         self.pitch_entry.config(state="normal" if self.can_place() else "disabled")
         self.show_auto()
+        self.show_length(sh, hz)
         self.what.config(text=text)
         self.show_stale()
         self.show_clash(sh)
