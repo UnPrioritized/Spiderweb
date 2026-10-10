@@ -119,7 +119,7 @@ class TextTyping:
         s0, s1 = self.text_selection()
         if e.state & CTRL:
             low = k.lower()
-            if low == "z" and self.typing_empty():  # (only the caret goes, like Ctrl+Z mid-draw)
+            if low == "z" and not e.state & SHIFT and self.typing_empty():  # (only the caret goes, like Ctrl+Z mid-draw)
                 return self.end_typing() or "break"
             if low in ("z", "y"):
                 self.end_typing()

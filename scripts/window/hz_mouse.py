@@ -427,6 +427,13 @@ class HzMouse:
             self.copied(copy.deepcopy([self.tones[i] for i in sorted(self.sel)]))
             self.fx.clip = None
 
+    def select_all_notes(self):
+        """Ctrl+A: every note; the effect points selected are let go (copy / cut then take the notes)."""
+        if self.fx.sel:
+            self.fx.sel = set()
+            self.fx.redraw()
+        self.select(range(len(self.tones)))
+
     def cut_notes(self):
         """Ctrl+X: like Ctrl+C, then what was copied is deleted (one undo step). Nothing while the mouse holds
         something."""

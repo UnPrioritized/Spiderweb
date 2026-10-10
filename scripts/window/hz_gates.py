@@ -455,6 +455,7 @@ class HzGates:
             self.fx.canvas.pack(side="bottom", fill="x", before=self.notes_box)
         else:
             self.fx.drag = None
+            self.fx.sel = set()  # (hidden points stay out of copy / cut / Delete)
             self.fx.canvas.pack_forget()
         self.app.schedule_autosave()
 
