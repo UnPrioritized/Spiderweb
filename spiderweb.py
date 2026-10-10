@@ -111,7 +111,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     errors.py        errors.log and the "something went wrong" message
     about.py         version number, the program's folder, the user folder (moving old files in)
     settings.py      the app's own settings (user/settings.ini: the look, later more)
-    (window/) settings_window.py  the Settings window (gear button): Look tab
+    (window/) settings_window.py  the Settings window (gear button): Look (+ note colour palettes), Updates
+    (window/) palettes.py  note colour palettes (user/palettes/), switched live
     system.py        what's asked of Windows / Linux (double-click speed, free memory, an error box)
     update_check.py  asking GitHub for newer versions (and their notes)
     midi_out.py      MIDI file writer

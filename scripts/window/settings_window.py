@@ -1,16 +1,17 @@
 """The Settings window (the ⚙ button at the end of the toolbar): the app's own settings, not the project's: no undo.
-Tabs: Look (light / dark, saved in user/settings.ini; more look settings and the note colour palettes later),
+Tabs: Look (light / dark, saved in user/settings.ini; the note colour palettes, palettes.py; more later),
 Updates (how often to look; kept with the window settings in the autosave), later Language. Never opens by itself
 (user)."""
 
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, simpledialog, ttk
 
 from files.lang import tr
 from files.system import WINDOWS
-from window import look
+from window import look, palettes
+from window.drawer import clean_name
 from window.updates import often_box
-from window.widgets import remember_place
+from window.widgets import Tooltip, remember_place
 
 
 def look_box(parent):
@@ -61,6 +62,7 @@ class SettingsWindow(tk.Toplevel):
         self.look.grid(row=0, column=1, sticky="w", pady=3)
         ttk.Label(page, text=tr("settings.look_hint"), foreground=look.HINT, wraplength=round(300 * app.scale),
                   justify="left").grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self.build_palettes(page, 2)
         # updates: how often to look, and looking now (the answer shows under the row)
         page = ttk.Frame(tabs, padding=(12, 10, 12, 12))
         tabs.add(page, text=tr("settings.updates_tab"))
@@ -81,3 +83,104 @@ class SettingsWindow(tk.Toplevel):
                                   app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3))
         remember_place(self, "settings")
         self.focus_set()
+
+    # ------------------------------------------------------------ note colours (palettes.py)
+
+    def build_palettes(self, page, r):
+        ttk.Separator(page).grid(row=r, column=0, columnspan=2, sticky="ew", pady=(12, 8))
+        ttk.Label(page, text=tr("palette.label")).grid(row=r + 1, column=0, sticky="e", padx=(0, 8), pady=3)
+        self.pal_var = tk.StringVar()
+        self.pal_box = ttk.Combobox(page, textvariable=self.pal_var, state="readonly", width=24)
+        self.pal_box.grid(row=r + 1, column=1, sticky="w", pady=3)
+        self.pal_box.bind("<<ComboboxSelected>>", lambda e: self.pick_palette())
+        Tooltip(self.pal_box, tr("palette.tip"))
+        size = round(18 * self.app.scale)
+        self.swatches = tk.Canvas(page, width=palettes.SLOTS * (size + 2), height=size + 2, highlightthickness=0,
+                                  background=look.WINDOW_BG if look.DARK else None)
+        self.swatches.grid(row=r + 2, column=1, sticky="w", pady=(4, 4))
+        self.swatch_size = size
+        row = ttk.Frame(page)
+        row.grid(row=r + 3, column=1, sticky="w", pady=(4, 0))
+        for text, command, tip in (("palette.new", self.new_palette, "palette.new_tip"),
+                                   ("palette.rename", self.rename_palette, "palette.rename_tip"),
+                                   ("palette.delete", self.delete_palette, "palette.delete_tip")):
+            b = ttk.Button(row, text=tr(text), command=command, takefocus=False)
+            b.pack(side="left", padx=(0, 6))
+            Tooltip(b, tr(tip))
+            setattr(self, text.replace(".", "_"), b)
+        self.show_palettes()
+
+    def shown_name(self, name):
+        return tr("palette.default") if name == palettes.DEFAULT else name
+
+    def show_palettes(self):
+        """The list, the one in use, its colours; Rename / Delete only for the user's own."""
+        names = palettes.names()
+        self.pal_names = {self.shown_name(n): n for n in names}
+        self.pal_box.config(values=list(self.pal_names))
+        now = palettes.picked()
+        self.pal_var.set(self.shown_name(now))
+        own = ["!disabled"] if now != palettes.DEFAULT else ["disabled"]
+        self.palette_rename.state(own)
+        self.palette_delete.state(own)
+        c, s = self.swatches, self.swatch_size
+        c.delete("all")
+        for k, (fill, edge) in enumerate(palettes.colours_of(now)):
+            c.create_rectangle(1 + k * (s + 2), 1, k * (s + 2) + s, s, fill=fill, outline=edge)
+
+    def pick_palette(self):
+        try:
+            palettes.use(self.pal_names.get(self.pal_var.get(), palettes.DEFAULT), self.app)
+        except OSError as e:
+            messagebox.showerror(tr("palette.title"), tr("palette.not_saved", e=e), parent=self)
+        self.show_palettes()
+
+    def ask_name(self, title, name, but=None):
+        """A palette name typed (asked again while it's taken), None = cancelled."""
+        prompt = tr("palette.name_ask")
+        while True:
+            name = simpledialog.askstring(title, prompt, parent=self, initialvalue=name)
+            name = clean_name(name or "")
+            if not name:
+                return None
+            if not palettes.taken(name, but):
+                return name
+            prompt = tr("palette.name_taken", name=name)
+
+    def new_palette(self):
+        """A new palette: a copy of the one in use (its colours are changed later), picked."""
+        now = palettes.picked()
+        name = self.ask_name(tr("palette.new_title"), "" if now == palettes.DEFAULT else now + " 2")
+        if name is None:
+            return
+        try:
+            palettes.save(name, palettes.colours_of(now))
+            palettes.use(name, self.app)
+        except OSError as e:
+            messagebox.showerror(tr("palette.title"), tr("palette.not_saved", e=e), parent=self)
+        self.show_palettes()
+
+    def rename_palette(self):
+        now = palettes.picked()
+        if now == palettes.DEFAULT:
+            return
+        name = self.ask_name(tr("palette.rename_title"), now, but=now)
+        if name is None or name == now:
+            return
+        try:
+            palettes.rename(now, name)
+        except OSError as e:
+            messagebox.showerror(tr("palette.title"), tr("palette.not_saved", e=e), parent=self)
+        self.show_palettes()
+
+    def delete_palette(self):
+        now = palettes.picked()
+        if now == palettes.DEFAULT or not messagebox.askyesno(tr("palette.delete_title"),
+                                                              tr("palette.delete_ask", name=now), parent=self):
+            return
+        try:
+            palettes.delete(now)
+            palettes.apply(palettes.colours_of(palettes.DEFAULT), self.app)
+        except OSError as e:
+            messagebox.showerror(tr("palette.title"), tr("palette.not_saved", e=e), parent=self)
+        self.show_palettes()

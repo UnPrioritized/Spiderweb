@@ -68,6 +68,7 @@ from files.snap import DEFAULT_SNAP, snap_beats
 from roll.roll_shared import cached_path
 from roll.zoombar import add_zoom_bars
 from window.snap_picker import SnapPicker
+from window import palettes
 from window.settings_window import open_settings
 from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
@@ -132,6 +133,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         super().__init__()
         errors.install(self)
         look.apply(self)  # (the dark look, before any widget is made)
+        palettes.start()  # (the note colours picked in Settings)
         self.title(tr("app.spiderweb", VERSION=VERSION))
         try:  # title bar + taskbar icon; True = every other window (drawer, Help, ...) gets it too
             self.icons = [tk.PhotoImage(file=os.path.join(ICONS, f"icon-{n}.png")) for n in (16, 24, 32, 48, 64, 256)]
@@ -374,8 +376,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         help_btn = ttk.Button(bar, text=tr("app.help_f1"), command=self.open_help, takefocus=False)
         help_btn.pack(side="left", padx=(12, 0))
         Tooltip(help_btn, tr("app.every_tip_searchable_opens_at_the"))
-        b = ttk.Button(bar, text="⚙", width=3, command=lambda: open_settings(self), takefocus=False)
-        b.pack(side="left", padx=(4, 0))
+        # Settings: always at the top right corner, whatever row the buttons are on (user)
+        b = self.gear = ttk.Button(top, text="⚙", width=3, command=lambda: open_settings(self), takefocus=False)
+        b.grid(row=0, column=2, sticky="ne", padx=(8, 0))
         Tooltip(b, tr("settings.button_tip"))
 
         self.status = StatusLine(self, text="", padding=(6, 2), font=look.font(9))
@@ -424,7 +427,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def fit_toolbar(self):
         """The view settings and buttons: right of the tools when both fit in the window's width, else below them."""
         top = self.toolbar
-        need = self.tool_bar.winfo_reqwidth() + self.option_bar.winfo_reqwidth() + int(24 * self.scale)
+        need = (self.tool_bar.winfo_reqwidth() + self.option_bar.winfo_reqwidth() + self.gear.winfo_reqwidth()
+                + int(32 * self.scale))
         rows = 1 if need <= top.winfo_width() - 12 else 2
         if rows == self._toolbar_rows:
             return
