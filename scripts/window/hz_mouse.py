@@ -863,6 +863,9 @@ class HzMouse:
         """(Ctrl+Z) What puts back what the mouse holds in an effects pane (here or the synth window's), on a synth
         knob or in its Effects list; None when nothing is held there."""
         syn = self.synth_win
+        held = self.trace_win.held() if self.trace_win and self.trace_win.winfo_exists() else None
+        if held:  # (a point of the Wave shape window's line: back to the press)
+            return held
         if self.layers.held is not None:  # (a layers list row held: let go of, nothing moved)
             return self.layers.drop_held
         if self.loudness.edit and self.loudness.edit["kind"] != "size":  # (a loudness line being drawn: thrown away)
