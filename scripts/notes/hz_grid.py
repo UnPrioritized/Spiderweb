@@ -9,7 +9,7 @@ import numpy as np
 from notes.hz_settings import (CRUSH, FM_INDEX, FX, GROWL, HZ_DEFAULTS, MODE_AMOUNTS, MOD_RACK, MOD_SETTINGS,
                                NOT_EACH, OFF_PITCH, OSC2_TUNE, SOFT, SPEED_KNOBS, SUB, TIME_STEP, TREMOLO,
                                TREMOLO_DEPTH, VEL_FX, VIBRATO, VIBRATO_RATE, VOICES, WAH, WAVES, blend_gains, copies,
-                               group_count, osc2_shift, rack_on)
+                               group_count, osc2_shift, rack_on, trace_hits)
 from notes.hz_glide import legato_links, links, note_span, pitch
 from notes.hz_lines import line_at, note_vel
 from notes.hz_modulate import TIMED, fx_at, setting_at, setting_base, setting_most, timed_line
@@ -115,6 +115,7 @@ class KeyGrid:
         self.osc2 = hz.get("osc2") or None  # (OSC B: see the docstring)
         self.modes = [self.mode, (self.osc2 or {}).get("mode") or {}]  # (each oscillator's own Mode)
         self.a_off = bool((self.osc2 or {}).get("a_off"))  # (OSC A switched off: only OSC B sounds)
+        self.trace = hz.get("trace") or None  # (the drawn wave shape: where in each wave each key row hits)
         # (the knobs that aren't lines the MOD tab moves, each run's values worked out in made_runs; setting_at)
         self.hz = hz
         self.moved = {link["to"] for link in (hz.get("mod") or {}).get("links", ())
@@ -489,7 +490,14 @@ class KeyGrid:
         part, number, src, waves, starts = (np.concatenate([g[i] for g in got]) for i in range(5))
         order = np.lexsort((number, part))
         part, number, src, waves, starts = part[order], number[order], src[order], waves[order], starts[order]
-        late = f["slant"][src] * x + np.floor(x * f["groups"][src]) / f["groups"][src]
+        late = np.zeros(len(part))
+        if self.trace:  # (the drawn wave shape: every wave hits where its line crosses this key row, maybe several
+            hits = trace_hits(self.trace, (key - self.lo + 0.5) / self.n)  # times: each one a repeat of its own)
+            if len(hits) != 1:
+                again = np.repeat(np.arange(len(part)), len(hits))
+                part, number, src, waves, starts = part[again], number[again], src[again], waves[again], starts[again]
+            late = np.tile(np.asarray(hits, float), len(part) // max(1, len(hits)))
+        late = late + f["slant"][src] * x + np.floor(x * f["groups"][src]) / f["groups"][src]
         if self.starting is not None:  # (Random start: each copy's waves start that far in, the same all through)
             amount = f["random"][src] if "random" in self.moved else self.random
             late = late + amount * self.starting[run, copy][part]

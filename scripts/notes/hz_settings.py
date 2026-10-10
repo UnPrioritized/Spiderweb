@@ -114,6 +114,8 @@ GLIDE = 64.0  # ... the longest glide, in beats
 SLIDE_BEND = 0.95  # a slide's own bend goes this far each way (hz_glide.slide_part; 1 would be a jump)
 GLIDE_CURVE = 0.5  # ... its curve when there's none: -1 = slow first, 0 = straight, 1 = fast first (glide_left)
 BLEND = 0.5  # ... how loud the middle copies are next to the outer ones when there's none: all the same (blend_gains)
+TRACE_POINTS = 256  # hz["trace"]: the most points of the drawn wave shape
+START_TRACE = ((0.0, 0.0), (0.0, 1.0))  # ... as it starts: straight up at the wave's start (every key together)
 
 
 def group_count(value):
@@ -404,6 +406,42 @@ def clean_extra(hz):
     return out
 
 
+def clean_trace(trace):
+    """The drawn wave shape checked (hz["trace"]): [[x, y], ...] in drawing order, x = where in one wave (0..1), y =
+    how high among the keys (0..1); 2..TRACE_POINTS points, or [] when it's as it starts (START_TRACE)."""
+    out = []
+    for p in trace if isinstance(trace, list) else ():
+        try:
+            x, y = float(p[0]), float(p[1])
+        except (TypeError, ValueError, IndexError, KeyError):
+            continue
+        if math.isfinite(x) and math.isfinite(y):
+            out.append([min(1.0, max(0.0, x)), min(1.0, max(0.0, y))])
+    out = out[:TRACE_POINTS]
+    if len(out) < 2 or out == [list(p) for p in START_TRACE]:
+        return []
+    return out
+
+
+def trace_hits(trace, y):
+    """Where in each wave (0..1) a key row whose middle is at y (0..1 among the shape's keys) hits, drawn wave shape
+    `trace`: once wherever the line crosses the row, the line stretched so its lowest point is the lowest key and its
+    highest the highest (every key gets at least one hit). A point right on the row counts once (each piece from its
+    start, not its end; the last one both). A flat line: every key once, at its first point."""
+    lo, hi = min(p[1] for p in trace), max(p[1] for p in trace)
+    if hi - lo < 1e-12:
+        return [trace[0][0]]
+    y = lo + y * (hi - lo)
+    got = []
+    for i, ((x0, y0), (x1, y1)) in enumerate(zip(trace, trace[1:])):
+        if y0 == y1:
+            continue
+        t = (y - y0) / (y1 - y0)
+        if 0.0 <= t < 1.0 or (t == 1.0 and i == len(trace) - 2):
+            got.append(x0 + t * (x1 - x0))
+    return got
+
+
 def copies(hz):
     """The tones of the Voice box's copies, in cents from the note's (one copy: [0])."""
     v = hz.get("voice") or {}
@@ -594,7 +632,7 @@ def clean_mod(mod):
 
 
 CLEAN_EXTRA = {"voice": clean_voice, "mode": clean_mode, "rack": clean_rack, "arp": clean_arp, "bypass": clean_bypass,
-               "kept": clean_kept, "macro": clean_macro, "osc2": clean_osc2, "mod": clean_mod}
+               "kept": clean_kept, "macro": clean_macro, "osc2": clean_osc2, "mod": clean_mod, "trace": clean_trace}
 EXTRAS = tuple(CLEAN_EXTRA)  # the synth window's own settings (not lines), each checked by its CLEAN_EXTRA
 
 
@@ -672,13 +710,15 @@ def old_fx(tones):
 
 def has_fx(hz):
     """True when every key needs its own repeats (KeyGrid): placed tones with effects, several copies (Voice), a
-    Random start, a wave mode, OSC B or Arpeggio steps quieter than full (as played, or still to be played)."""
+    Random start, a wave mode, OSC B, a drawn wave shape or Arpeggio steps quieter than full (as played, or still to
+    be played)."""
     arp = hz.get("arp") or {}
     quiet = (any(n.get("level", 1.0) != 1.0 or n.get("vel") for n in hz.get("tones") or ())
              or any(s["level"] != 1.0 for s in (arp.get("steps") or ())[:arp.get("count", STEPS)])
              or bool(hz.get("loud")))  # (loudness lines: each note's, the layer's)
     return ((bool(hz.get("fx")) or len(copies(hz)) > 1 or bool((hz.get("voice") or {}).get("random"))
-             or bool(hz.get("mode")) or bool(hz.get("osc2")) or quiet or bool((hz.get("mod") or {}).get("links"))
+             or bool(hz.get("mode")) or bool(hz.get("osc2")) or bool(hz.get("trace")) or quiet
+             or bool((hz.get("mod") or {}).get("links"))
              or any(not e.get("off") for e in hz.get("rack") or ())) and bool(hz.get("tones")))
 
 
