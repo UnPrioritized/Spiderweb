@@ -1447,15 +1447,17 @@
   "",
   "All of the code was written by an AI model (Claude Opus 5.5, by Anthropic). Kanade Tachibana directed the project: decided what it should do, tested it and asked for changes.",
   "",
-  "Spiderweb's folder holds your autosave (and autosave-backup), your shape library (shapes), the MIDI files you generate (output) and errors.log, where the details go if something goes wrong."
+  "Spiderweb's folder holds your autosave (and autosave-backup), your shape library (shapes), the MIDI files you generate (output) and errors.log, where the details go if something goes wrong.",
+  "",
+  "Look (at the bottom of this page): Light, Dark, or Follow Windows (the same as your Windows setting). Restart Spiderweb to see the new look."
  ],
- "help.about.words": "about version license copyright author credits folder errors log website github download update source bug report",
+ "help.about.words": "about version license copyright author credits folder errors log website github download update source bug report look dark mode light theme",
  "help.welcome.title": "Welcome to Spiderweb",
  "help.welcome.tip": "Draw lines and shapes on the piano roll and they become notes. Pick a tool at the top; a short tip like this one explains each the first time. F1 or the Help button: every tip, searchable.",
  "help.welcome.text": [
   "Draw lines, curves and shapes on the piano roll; every key they cross gets notes, like drawing notes by hand but in one stroke.",
   "",
-  "1. Pick a tool at the top and draw. The arrow next to Line opens every drawing tool (Polyline, Freehand, Curve, Arc, Custom shape, Funnel, Text...); the pin next to one gives it its own button.",
+  "1. Pick a tool at the top and draw. The arrow next to Line opens every drawing tool (Polyline, Freehand, Curve, Arc, Custom shape, Funnel, Text…); the pin next to one gives it its own button.",
   "",
   "2. Select a shape to change it: drag its points, or change its settings in the panel on the right.",
   "",
@@ -1763,6 +1765,8 @@
   "",
   "Ctrl+click picks several, Ctrl+A all; Delete removes the selected notes.",
   "",
+  "Drawing tools (the button after Bend, ▾ for the list): Line (L), Polyline (Y), Freehand (F), Curve (C) and Arc (A) draw a path that becomes notes joined by slides, so the tone follows it. Faint notes show what it will make, and its points can still be dragged. Enter, right-click or another tool makes the notes; Esc throws the path away. Points snap to the grid and to whole keys (Shift = free).",
+  "",
   "Ctrl+C copies the selected notes and Ctrl+V pastes them at the play line (the preview's, or the main window's when the preview is off); with Select, double-click empty space to paste them there. With the preview on, a click on empty space with Select moves the play line there.",
   "",
   "Notes copied in Domino after that paste the same way (Windows only): each copied track goes into its own layer, the first into the picked layer and the next ones into the layers under it (new layers are added as needed). A note's velocity becomes its own loudness line. Ticks are taken as they are: use the same PPQ.",
@@ -1780,6 +1784,10 @@
   "Zoomed in, drag the red line in a note up or down to tune that note alone (whole cents, Shift = finer; it sticks to the exact tone). Double-click the red line to put the tune back to 0. Right-click a note and pick Tune… to type it.",
   "",
   "In the window's Settings…: Pitch moves every tone in cents (100 = one key). Gates: Alternating = gates of two sizes take turns so the tone is exact; Fixed = every gate is a whole number of ticks, a little off.",
+  "",
+  "Wave shape… (in Settings…) sets where in each wave the keys hit: draw a line through one wave (left to right) over the Hz bass's keys (bottom to top). The pitch stays the same; the texture changes. A key hits wherever the line crosses its row, so a zigzag makes more notes. Shapes has ready ones (Saw, Triangle, Sine, Square); Reset goes back to a straight line (every key hits together).",
+  "",
+  "Note length (in Settings…) sets how long each repeat lasts: 100 % = until the next one starts, less = a gap after each one, or a number of ticks. With layers, This layer gives the picked layer a length of its own. Last note sticks out of the shape lets the last repeat before a gap or the end keep a whole wave.",
   "",
   "Auto gates (what a new Hz bass starts with): a note that holds still gets Fixed gates when they're off its tone by no more than the threshold (the number next to Gates, in cents), else Alternating ones. A slide is always Alternating.",
   "",
@@ -1808,6 +1816,24 @@
   "Right-click a note → Bend: Copy bend copies its bend line, Paste bend gives it to the note (or to all the selected notes, if it's one of them; the line stretches to each note), Clear bend takes it away. Below them are ready shapes that replace the bend: Scoop up (from 2 keys below onto the note in its first 1/8 beat), Fall off (down 5 keys in its last 1/4 beat) and Wobble (half a key up and down, 4 times a beat). They can be changed afterwards with the Bend tool."
  ],
  "help.hz_slides.words": "hz bass slide slides glide portamento bend middle-click dots curve s-curve double single handle bend tool per-note pitch scoop fall",
+ "help.hz_layers.title": "Layers and loudness (Hz bass)",
+ "help.hz_layers.tip": "Layers (in the Hz bass window's toolbar) shows the layers list: each layer has its own notes and its own sound. Loudness shows a pane to draw how loud each note and layer is.",
+ "help.hz_layers.text": [
+  "Layers in the Hz bass window's toolbar shows the layers list on the left (it's hidden to start with). Each layer has its own notes and its own sound: the synth window shows the picked layer's sound.",
+  "",
+  "Click a layer to pick it: you place and edit only its notes, and the other layers' notes show faded. + adds a layer. M mutes a layer, S plays it alone (solo).",
+  "",
+  "Right-click a layer to rename it, change its colour, delete it, move it up or down, or copy its sound to another layer. You can also drag a row to move it, or click a picked layer's name again to rename it.",
+  "",
+  "Slides only go between notes of the same layer.",
+  "",
+  "With Multi channel, when two layers play the same key at the same time, the notes of the lower layer in the list go on another MIDI channel (one channel can't play a key twice at once). Orange text in the toolbar says how many.",
+  "",
+  "Loudness in the toolbar shows a pane under the notes. Notes = draw each note's own loudness line, in velocity (1 to 127): it takes the place of the Hz bass's velocity for that note. A note without a line has a dotted one that follows the Hz bass's velocity. Layer = draw the picked layer's line, from 0 to 100 %: it turns the whole layer down, like a mixer's fader.",
+  "",
+  "Draw with Linear, Curve or Pencil, like the velocity pane (Ctrl = flat line, Shift = snap to the grid, Enter = done). With notes selected, only their lines change. Right-click the pane to take the lines away again."
+ ],
+ "help.hz_layers.words": "hz bass layers layer mute solo rename colour copy sound move clash channel loudness loud velocity fader volume mixer line",
  "help.hz_preview.title": "Preview (Hz bass)",
  "help.hz_preview.tip": "Preview plays this Hz bass alone through Spiderweb's own synth with your soundfont. Grey over the notes = not made yet.",
  "help.hz_preview.text": [
@@ -2268,6 +2294,20 @@
   "Notes: a joined curve plays like one curve, so where two lines meet it doesn't start a new note the way two separate lines would."
  ],
  "help.join.words": "join merge combine connect split cut separate pieces break apart",
+ "help.merge.title": "Gate sensitive merge (experimental)",
+ "help.merge.tip": "Select two shapes, right-click → Gate sensitive merge: each key row of one shape slides over until it meets the other shape's notes.",
+ "help.merge.text": [
+  "Select two shapes, right-click one of them → Gate sensitive merge (experimental), then pick a side. Merge to right: the shape on the left slides right. Merge to left: the shape on the right slides left. Where you right-click doesn't matter.",
+  "",
+  "Each key row of the sliding shape moves on its own, until its note meets the other shape's note on the same key (it ends where that one starts). The notes keep their lengths, so a straight block takes on the other shape's slanted edge.",
+  "",
+  "Both become one shape (\"Merged notes\" in the Shapes list), and it's selected. Rows that have nothing to meet slide by the smallest slide and become a shape of their own, \"Merge leftovers\". If no row meets anything, nothing is merged.",
+  "",
+  "A merged shape can be moved, turned, slanted and stretched like a custom shape, and the custom panel's settings go into both parts. Each part keeps its own colours. Split into separate shapes (Ctrl+Shift+G) gives the two parts back.",
+  "",
+  "Images can't be merged."
+ ],
+ "help.merge.words": "merge gate sensitive meet slide rows key row edge leftovers experimental combine",
  "help.funnel_curves.title": "Funnel curves",
  "help.funnel_curves.tip": "Middle-click the line: a new curve start. Middle-click near a curve: an anchor. Select tool: click a curve again to highlight it (Del, right-click = shapes, linking).",
  "help.funnel_curves.text": [
@@ -2585,7 +2625,9 @@
   "",
   "Built-in BASSMIDI (in the MIDI out list) plays through Spiderweb's own synth, with a soundfont you pick (the Hz bass preview uses the same one). Voices = how many sounds can ring at once: if playback stutters, lower it.",
   "",
-  "Right-drag (any tool) = listen to the notes under the mouse, like scrubbing."
+  "Right-drag (any tool) = listen to the notes under the mouse, like scrubbing.",
+  "",
+  "OmniMIDI (KDMAPI) shows in the MIDI out list when OmniMIDI is installed. It plays straight through OmniMIDI with your own OmniMIDI settings, skipping Windows' MIDI layers, so many notes play more smoothly."
  ],
  "help.playback.words": "play sound listen midi out scrub audio",
  "help.channels.title": "Channels",
