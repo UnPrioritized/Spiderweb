@@ -290,7 +290,7 @@ class HzView:
             y = self.y_of(k)
             if k % 12 == 0 or (self.sy >= 15 * s and k % 12 not in BLACK):
                 c.create_text(kb - 3, y + self.sy / 2, text=note_name(k), anchor="e", fill=look.HZ_KEY_TEXT,
-                              font=look.font(7, "bold" if k % 12 == 0 else "normal"))
+                              font=look.font(7, "bold" if k % 12 == 0 else "normal", fit=True))
         c.create_line(kb, 0, kb, h, fill=look.HZ_EDGE)
         c.create_rectangle(0, 0, w, rh, fill=look.HZ_RULER, outline="")  # bar numbers
         every = 1  # (zoomed far out: every 2nd, 4th... bar number, so they don't run into each other)
@@ -300,7 +300,7 @@ class HzView:
         while n * beats <= self.beat_at(w):
             x = self.x_of(n * beats)
             if x >= kb:
-                c.create_text(x + 3, rh / 2, text=str(n + 1), anchor="w", fill=look.LABEL, font=look.font(8))
+                c.create_text(x + 3, rh / 2, text=str(n + 1), anchor="w", fill=look.LABEL, font=look.font(8, fit=True))
             n += every
         c.create_line(0, rh, w, rh, fill=look.HZ_EDGE)
         if not self.can_place():

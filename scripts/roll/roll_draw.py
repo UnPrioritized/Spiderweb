@@ -1443,7 +1443,8 @@ class RollDrawing:
                 note_name(p, edo) if (white or edo) and self.sy >= 16 else None)
             if label:
                 self.create_text(kb - 3, (y0 + y1) / 2, text=label, anchor="e", fill=look.KEY_TEXT,
-                                 font=look.font(font_size if white else min(font_size, 8), "bold" if n == 0 else "normal"),
+                                 font=look.font(font_size if white else min(font_size, 8), "bold" if n == 0 else "normal",
+                                                 fit=True),
                                  tags="frame")
         self.create_line(kb, top, kb, h, fill=look.ROLL_EDGE, tags="frame")
 
@@ -1461,6 +1462,6 @@ class RollDrawing:
             if x >= kb:
                 self.create_line(x, top - 6, x, top, fill=look.RULER_TICK, tags="frame")
                 self.create_text(x + 3, top / 2, text=str(int(b // beats) + 1), anchor="w", fill=look.RULER_TEXT,
-                                 font=look.font(8), tags="frame")
+                                 font=look.font(8, fit=True), tags="frame")
             b += step
         self.create_rectangle(0, 0, kb, top, fill=look.RULER_BG, outline="", tags="frame")

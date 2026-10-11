@@ -1,11 +1,13 @@
 """The Settings window (the ⚙ button at the end of the toolbar): the app's own settings, not the project's: no undo.
-Tabs: Look (light / dark, saved in user/settings.ini; the note colour palettes, palettes.py; more later),
+Tabs: Look (light / dark, Size / Font / Text size, saved in user/settings.ini; the note colour palettes,
+palettes.py),
 Updates (how often to look; kept with the window settings in the autosave), later Language. Never opens by itself
 (user)."""
 
 import tkinter as tk
 from tkinter import colorchooser, font as tkfont, messagebox, ttk
 
+from files import settings
 from files.lang import tr
 from files.system import WINDOWS
 from window import look, palettes
@@ -136,7 +138,8 @@ class SettingsWindow(tk.Toplevel):
         self.look.grid(row=0, column=1, sticky="w", pady=3)
         ttk.Label(page, text=tr("settings.look_hint"), foreground=look.HINT, wraplength=round(300 * app.scale),
                   justify="left").grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        self.build_palettes(page, 2)
+        self.build_size(page, 2)
+        self.build_palettes(page, 7)
         # updates: how often to look, and looking now (the answer shows under the row)
         page = ttk.Frame(tabs, padding=(12, 10, 12, 12))
         tabs.add(page, text=tr("settings.updates_tab"))
@@ -157,6 +160,58 @@ class SettingsWindow(tk.Toplevel):
                                   app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3))
         remember_place(self, "settings")
         self.focus_set()
+
+    # ------------------------------------------------------------ size, font, text size (look.apply_size)
+
+    def build_size(self, page, r):
+        """Size / Font / Text size: saved at once, put on at the next start (an orange line says so while what's
+        saved isn't what's showing)."""
+        ttk.Separator(page).grid(row=r, column=0, columnspan=2, sticky="ew", pady=(12, 8))
+        self.size_names = {k: tr("look.size_system") if k == "system" else f"{k} %" for k in look.SIZES}
+        self.font_default = tr("look.font_default", font=look.USUAL_FAMILY)
+        self.text_names = {k: tr("look.text_" + k) for k in look.TEXT_STEPS}
+        self.size_var = tk.StringVar(value=self.size_names[look.read_size()])
+        self.font_var = tk.StringVar(value=look.read_font() or self.font_default)
+        self.text_var = tk.StringVar(value=self.text_names[look.read_text()])
+        families = [f for f in tkfont.families(self) if not f.startswith("@")]  # (@ = sideways fonts)
+        rows = (("look.size", self.size_var, list(self.size_names.values()), 18, "look.size_tip"),
+                ("look.font", self.font_var, [self.font_default] + sorted(set(families), key=str.lower), 24,
+                 "look.font_tip"),
+                ("look.text", self.text_var, list(self.text_names.values()), 18, "look.text_tip"))
+        for k, (label, var, values, width, tip) in enumerate(rows):
+            ttk.Label(page, text=tr(label)).grid(row=r + 1 + k, column=0, sticky="e", padx=(0, 8), pady=3)
+            box = ttk.Combobox(page, textvariable=var, values=values, state="readonly", width=width)
+            box.grid(row=r + 1 + k, column=1, sticky="w", pady=3)
+            box.bind("<<ComboboxSelected>>", lambda e: self.save_size())
+            Tooltip(box, tr(tip))
+            setattr(self, label.replace(".", "_") + "_box", box)
+        self.size_note = ttk.Label(page, text=tr("look.restart_size"), foreground=look.WARN,
+                                   wraplength=round(300 * self.app.scale), justify="left")
+        self.size_note.grid(row=r + 4, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.show_size_note()
+
+    def picked_size(self):
+        """(size, font, text) as picked in the three lists."""
+        size = next(k for k, n in self.size_names.items() if n == self.size_var.get())
+        family = "" if self.font_var.get() == self.font_default else self.font_var.get()
+        text = next(k for k, n in self.text_names.items() if n == self.text_var.get())
+        return size, family, text
+
+    def save_size(self):
+        size, family, text = self.picked_size()
+        try:
+            settings.put("look", "size", size)
+            settings.put("look", "font", family)
+            settings.put("look", "text", text)
+        except OSError:
+            messagebox.showerror(tr("look.title"), tr("look.not_saved"), parent=self)
+        self.show_size_note()
+
+    def show_size_note(self):
+        if (look.read_size(), look.read_font(), look.read_text()) == look.RUNNING:
+            self.size_note.grid_remove()
+        else:
+            self.size_note.grid()
 
     # ------------------------------------------------------------ note colours (palettes.py)
 

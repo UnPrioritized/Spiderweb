@@ -57,15 +57,44 @@ SANS = "Segoe UI"
 MONO = "Consolas"
 TK = "TkDefaultFont"  # Tk's own font for widgets (a few texts drawn on the piano roll match it)
 
+# Settings → Look's Size, Font and Text size (user, 2026-10-11; put on at the next start, like the look):
+# size = "system" (the screen's own scaling) or a percent; font = "" (the usual one) or a family; text = a step
+SIZES = ("system", 75, 100, 125, 150, 175, 200)
+TEXT_STEPS = {"small": -1, "normal": 0, "large": 2}  # (points added to every text)
+STEP = 0  # the Text size in use (apply)
+RUNNING = ("system", "", "normal")  # the Size, Font, Text size this start put on (apply_size)
+USUAL_FAMILY = SANS  # Tk's own widget font before a picked Font replaced it (the Font list's "Default")
+TK_FONTS = ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont", "TkCaptionFont", "TkSmallCaptionFont",
+            "TkIconFont", "TkTooltipFont")
 
-def font(size, *style, family=None):
-    """A font for a widget or a canvas text: font(9), font(8, "bold")."""
-    return (family or SANS, size, *style)
+
+def read_size():
+    """The Size picked: "system" or a percent (an int)."""
+    size = settings.get("look", "size", "system")
+    try:
+        return int(size) if int(size) in SIZES else "system"
+    except ValueError:
+        return "system"
+
+
+def read_font():
+    return settings.get("look", "font", "") or ""
+
+
+def read_text():
+    text = settings.get("look", "text", "normal")
+    return text if text in TEXT_STEPS else "normal"
+
+
+def font(size, *style, family=None, fit=False):
+    """A font for a widget or a canvas text: font(9), font(8, "bold"). fit = sized to fit a fixed room (the piano
+    roll's key names): the Text size leaves it alone."""
+    return (family or SANS, size if fit else max(6, size + STEP), *style)
 
 
 def mono(size, *style):
     """A font where every letter is as wide (formulas, text to copy)."""
-    return (MONO, size, *style)
+    return (MONO, max(6, size + STEP), *style)
 
 
 # --- Texts on the window
@@ -276,10 +305,40 @@ def readable(colour):
     return "#%02x%02x%02x" % tuple(round(v * 255) for v in colorsys.hls_to_rgb(h, lum, s))
 
 
+def apply_size(root):
+    """Settings → Look's Size, Font and Text size (called once, before any widget is made; nothing saved = nothing
+    changes). Size = Tk's points-to-pixels (the windows' own sizes follow it: App.scale is read from it after)."""
+    import tkinter
+    from tkinter import font as tkfont
+    global SANS, STEP, RUNNING, USUAL_FAMILY
+    size, family, text = RUNNING = read_size(), read_font(), read_text()
+    STEP = TEXT_STEPS[text]
+    try:
+        USUAL_FAMILY = tkfont.nametofont("TkDefaultFont", root=root).actual("family")
+    except tkinter.TclError:
+        pass
+    if family:
+        SANS = family
+    if family or STEP or size != "system":
+        dpi = root.winfo_fpixels("1i")  # (the screen's, before Size changes it)
+        for name in TK_FONTS:
+            try:
+                f = tkfont.nametofont(name, root=root)
+            except tkinter.TclError:
+                continue
+            points = f.cget("size")
+            if points < 0:  # (in pixels on some Linux setups: as points, so Size grows them too)
+                points = round(-points * 72 / dpi)
+            f.configure(size=max(6, points + STEP), **({"family": family} if family else {}))
+    if size != "system":
+        root.tk.call("tk", "scaling", size / 100 * 96 / 72)
+
+
 def apply(root):
     """The dark look for every window (called once, before any widget is made): Tk's plain "clam" buttons and
     boxes (Windows' own can't be coloured) and default colours for the plain Tk widgets; each window's title bar
-    goes dark as it opens. The light look: nothing changes."""
+    goes dark as it opens. The light look: nothing changes. Then the Size / Font / Text size (apply_size)."""
+    apply_size(root)
     if not DARK:
         return
     from tkinter import ttk
