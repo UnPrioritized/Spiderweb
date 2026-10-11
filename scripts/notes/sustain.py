@@ -55,7 +55,11 @@ def auto_gap(notes):
     shape's own notes have), a little more for rounding. Holes are rarer and longer, so they don't count."""
     if len(notes) < 2:
         return 1
-    gaps = row_order(notes)[1]
+    return gap_of(row_order(notes)[1])
+
+
+def gap_of(gaps):
+    """auto_gap from row_order's gaps."""
     gaps = gaps[gaps >= 0]
     if not len(gaps):
         return 1

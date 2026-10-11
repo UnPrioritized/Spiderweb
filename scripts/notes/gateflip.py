@@ -17,8 +17,9 @@ import numpy as np
 
 from notes.custom import SPAM_FILLS, gate_ticks
 from notes.fx import flip_shape, reverse_velocity
+from notes.sustain import gap_of, row_order
 
-LEFT_OUT = ("cut", "merge", "notes", "picture", "hz")  # (sliced pieces / merged / pasted notes: later steps)
+LEFT_OUT = ("cut", "merge", "notes", "picture", "hz")  # (sliced pieces / merged: a later step; pasted: their own way)
 
 
 def offered(sh):
@@ -26,9 +27,17 @@ def offered(sh):
     return sh["kind"] != "funnel" and not sh.get("hz") and "picture" not in sh
 
 
+def is_pasted(sh):
+    """True if sh is pasted notes the gate aware flip works on (each run on a key mirrored inside itself)."""
+    return sh["kind"] == "custom" and "notes" in sh and not any(k in sh for k in ("cut", "merge", "picture", "hz"))
+
+
 def why_not(sh, notes):
-    """None if a gate aware flip changes sh's notes (notes: (start, end, key, ...) rows), else why not: "one_gate"
-    (every key row has one note: nothing to lay the other way, user) or "no_gates"."""
+    """None if a gate aware flip changes sh's notes (notes: (start, end, key, velocity) rows), else why not:
+    "one_gate" (every key row has one note, or pasted notes whose runs read the same both ways: nothing to lay the
+    other way, user) or "no_gates"."""
+    if is_pasted(sh):
+        return "one_gate" if runs_same_both_ways(notes) else None
     if sh["kind"] != "custom" or sh.get("fill") not in SPAM_FILLS or any(k in sh for k in LEFT_OUT):
         return "no_gates"
     if len(np.unique(notes[:, 2])) == len(notes):
@@ -37,9 +46,58 @@ def why_not(sh, notes):
 
 
 def is_flipped(sh):
-    """True if sh's notes are made gate flipped."""
+    """True if sh's notes are made gate flipped from its drawing (pasted notes: is_pasted_flipped)."""
     return (sh.get("gate_flip") is True and sh["kind"] == "custom" and sh.get("fill") in SPAM_FILLS
             and not any(k in sh for k in LEFT_OUT))
+
+
+def is_pasted_flipped(sh):
+    return sh.get("gate_flip") is True and is_pasted(sh)
+
+
+def mirrored_runs(notes, tracks, carry_vel):
+    """Pasted notes' gates laid the other way: on each key, each run (notes whose gaps are no longer than the usual
+    gap, as Sustain's Auto works it out) mirrored inside itself, its first start and last end kept (user). Colours
+    (tracks) go with their notes; velocities too when they're the notes' own (carry_vel), else each place keeps its
+    velocity (a velocity line drawn in Spiderweb: turned round once when switched on, like a flip)."""
+    if len(notes) < 2:
+        return notes, tracks
+    order, a, out, other = _mirrored(notes)
+    if not carry_vel and a.shape[1] > 3:  # (the note at the other end of its run had this place's velocity)
+        out[:, 3] = a[other, 3]
+    back = np.empty_like(notes)
+    back[order] = out
+    return back, tracks
+
+
+def _mirrored(notes):
+    """mirrored_runs' work: (the order, the notes in it, them mirrored, each one's partner at the other end of its
+    run)."""
+    order, gaps = row_order(notes)
+    new = (gaps < 0) | (gaps > gap_of(gaps))
+    first = np.flatnonzero(new)
+    run = np.cumsum(new) - 1
+    a = notes[order]
+    lo = np.minimum.reduceat(a[:, 0], first)[run]
+    hi = np.maximum.reduceat(a[:, 1], first)[run]
+    out = a.copy()
+    out[:, 0], out[:, 1] = lo + hi - a[:, 1], lo + hi - a[:, 0]
+    last = np.r_[first[1:], len(a)] - 1
+    return order, a, out, first[run] + last[run] - np.arange(len(a))
+
+
+def runs_same_both_ways(notes):
+    """True if mirroring every run changes nothing: each note matches its partner at the other end of its run, laid
+    the other way (quick: a right-click on millions of pasted notes asks it)."""
+    if len(notes) < 2:
+        return True
+    if _same[0] is not notes:  # (the app hands over the same remembered array each time)
+        _, a, out, other = _mirrored(notes)
+        _same[:] = [notes, bool((out[other, :4] == a[:, :4]).all())]
+    return _same[1]
+
+
+_same = [None, False]  # (the notes last asked about, and the answer)
 
 
 def mirror_ticks(sh, right, ppq):

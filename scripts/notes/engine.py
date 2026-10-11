@@ -28,8 +28,8 @@ from notes.claw import apply_claw
 from notes.fx import (clean_fx, flip_shape, groups, idle, mirrored, notes_box, reverse_velocity, swapped, toggled,
                       turn_notes, turn_pts, turn_shape, velocities)
 from notes.gaterange import clean_range
-from notes.gateflip import (flipped_back, flipped_drawing, is_flipped as is_gate_flipped, kept_in_place,
-                            mirror_ticks)
+from notes.gateflip import (flipped_back, flipped_drawing, is_flipped as is_gate_flipped, is_pasted_flipped,
+                            kept_in_place, mirror_ticks, mirrored_runs)
 from notes.merge import clean_merge, recipe_notes, reshaped_notes as merge_reshaped, turned_notes as merge_turned
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
@@ -469,6 +469,9 @@ def fx_notes(sh, ppq, keys, get):
             return get(unflipped(sh))
         notes, tracks = get(bare_of(sh))
         return mirrored(notes, sh["_m"], notes_box(notes)), tracks
+    if is_pasted_flipped(sh):  # (pasted notes: each run on a key mirrored inside itself, gateflip.py)
+        notes, tracks = get({k: v for k, v in sh.items() if k not in ("gate_flip", "glue")})
+        return with_glue(*mirrored_runs(notes, tracks, bool(sh.get("own_vel"))), sh, ppq)
     if is_gate_flipped(sh):  # (made from the drawing flipped, then flipped back: gateflip.py)
         ticks = mirror_ticks(sh, float(np.concatenate(cached_arrays(sh))[:, 0].max()), ppq)
         notes, tracks = get(flipped_drawing(sh, ticks / ppq))
