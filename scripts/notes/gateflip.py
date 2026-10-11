@@ -24,11 +24,10 @@ def offered(sh):
 
 
 def why_not(sh, ppq):
-    """None if a gate aware flip changes sh's notes, else why not: "aligned", "one_gate" or "no_gates"."""
+    """None if a gate aware flip changes sh's notes, else why not: "one_gate" or "no_gates". (Start Aligned is no
+    reason: a Range lays the gates by itself, never reading the Start, and without one it's one gate anyway.)"""
     if sh["kind"] != "custom" or sh.get("fill") not in SPAM_FILLS or any(k in sh for k in LEFT_OUT):
         return "no_gates"
-    if sh.get("align") == "aligned":  # (its notes sit on the song's gate grid: mirrored they wouldn't)
-        return "aligned"
     rg = sh.get("range")
     if not rg:
         return "one_gate"
@@ -39,9 +38,10 @@ def why_not(sh, ppq):
 
 
 def is_flipped(sh):
-    """True if sh's notes are made gate flipped (an Aligned one keeps the setting but is made as usual)."""
+    """True if sh's notes are made gate flipped (Aligned with no Range keeps the setting but is made as usual: its
+    notes sit on the song's gate grid, mirrored they wouldn't)."""
     return (sh.get("gate_flip") is True and sh["kind"] == "custom" and sh.get("fill") in SPAM_FILLS
-            and sh.get("align") != "aligned" and not any(k in sh for k in LEFT_OUT))
+            and (sh.get("align") != "aligned" or bool(sh.get("range"))) and not any(k in sh for k in LEFT_OUT))
 
 
 def mirror_beats(right):

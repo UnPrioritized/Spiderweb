@@ -1478,7 +1478,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         ok = [sh for sh, w in zip(shapes, why) if w is None]
         if ok:
             return ok, False, None
-        return [], False, next(w for w in ("aligned", "one_gate", "no_gates") if w in why)
+        return [], False, next(w for w in ("one_gate", "no_gates") if w in why)
 
     def gate_flip(self):
         """Right-click "Gate aware flip": the selected shapes' gates laid from the other side, or back (gateflip.py).

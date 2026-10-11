@@ -797,7 +797,6 @@
  "roll_menu.copy_this_stroke": "Copy this stroke",
  "roll_menu.paste_stroke_into_this_shape": "Paste stroke into this shape",
  "roll_menu.gate_flip": "Gate aware flip",
- "roll_menu.gate_flip_aligned": "Gate aware flip (not with Aligned)",
  "roll_menu.gate_flip_one_gate": "Gate aware flip (one gate)",
  "roll_menu.gate_flip_no_gates": "Gate aware flip (no gates)",
  "roll_menu.flip_sideways": "Flip sideways",
