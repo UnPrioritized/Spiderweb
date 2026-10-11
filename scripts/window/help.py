@@ -438,6 +438,9 @@ class HelpWindow(tk.Toplevel):
             topic = BY_ID[topic_id]
             t.insert("end", SECTION_NAMES[topic["section"]] + "\n", "section")
             t.insert("end", topic["title"] + "\n", "title")
+            hidden = self.found_by(topic)
+            if hidden:
+                t.insert("end", tr("help.found_by") + ", ".join(hidden) + "\n\n", "section")
             if topic_id == "about":
                 self.about_banner()
             if self.add_clip(topic_id):
@@ -464,6 +467,17 @@ class HelpWindow(tk.Toplevel):
                 self.about_buttons()
             self.see_also(SEE.get(topic_id, []))
         t.config(state="disabled")
+
+    def found_by(self, topic):
+        """The search words found only in the topic's hidden search words or its tip (not on its page): the
+        words holding them, so the page shows why it was found and they get highlighted."""
+        shown = (topic["title"] + " " + topic["page"]).lower()
+        hidden = re.findall(r"[\w'-]+", (topic.get("words", "") + " " + topic["tip"]).lower())
+        out = []
+        for w in dict.fromkeys(self.query.get().lower().split()):
+            if w not in shown:
+                out += [h for h in dict.fromkeys(hidden) if w in h and h not in out]
+        return out
 
     def see_also(self, ids):
         """The clickable "See also" line: each related topic's title opens it."""

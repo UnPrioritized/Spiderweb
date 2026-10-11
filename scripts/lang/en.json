@@ -858,6 +858,7 @@
  "help.spiderweb": "Spiderweb {VERSION}",
  "help.nothing_found_try_fewer_or_other": "Nothing found. Try fewer or other words.",
  "help.see_also": "\n\nSee also: ",
+ "help.found_by": "Found by: ",
  "help.website": "Website",
  "help.license": "License",
  "help.open_spiderweb_s_folder": "Open Spiderweb's folder",
