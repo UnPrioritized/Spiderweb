@@ -100,7 +100,7 @@ def _load():
             bass = ctypes.WinDLL(os.path.join(folder, "bass.dll"))
             midi = ctypes.WinDLL(os.path.join(folder, "bassmidi.dll"))
             _pin(os.path.join(folder, "bass.dll"), os.path.join(folder, "bassmidi.dll"))
-        else:  # (Linux, untested: libbassmidi.so needs libbass.so's names, so that one is shared first)
+        else:  # (Linux, a Linux user says it works: libbassmidi.so needs libbass.so's names, so that one is shared first)
             bass = ctypes.CDLL(os.path.join(folder, "libbass.so"), mode=ctypes.RTLD_GLOBAL)
             midi = ctypes.CDLL(os.path.join(folder, "libbassmidi.so"))
     except (AttributeError, OSError) as e:
