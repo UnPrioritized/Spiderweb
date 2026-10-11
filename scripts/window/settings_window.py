@@ -187,6 +187,8 @@ class SettingsWindow(tk.Toplevel):
             box.bind("<<ComboboxSelected>>", lambda e: self.save_size())
             Tooltip(box, tr(tip))
             setattr(self, label.replace(".", "_") + "_box", box)
+        self.font_values = list(self.look_font_box.cget("values"))
+        self.font_search()
         self.size_reset = ttk.Button(row, text=tr("look.reset"), takefocus=False, command=self.reset_size)
         self.size_reset.pack(side="left", padx=(8, 0))
         Tooltip(self.size_reset, tr("look.reset_tip"))
@@ -197,8 +199,8 @@ class SettingsWindow(tk.Toplevel):
         self.build_preview(page, r + 5)
 
     def build_preview(self, page, r):
-        """Pieces that do nothing (user): drawn with the picked Size / Font / Text size at once, while the rest of
-        the app waits for the restart. Own styles ("Preview.T..."), so the real widgets never change."""
+        """Pieces that work but change nothing else (user: tick, open the dropdown, step / type the number), drawn
+        with the picked Size / Font / Text size at once, while the rest of the app waits for the restart. Own styles ("Preview.T..."), so the real widgets never change."""
         box = self.preview = ttk.LabelFrame(page, text=tr("look.preview"), padding=(10, 6, 10, 8))
         box.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         Tooltip(box, tr("look.preview_tip"))
@@ -208,9 +210,6 @@ class SettingsWindow(tk.Toplevel):
         for name in ("TButton", "TCheckbutton", "TCombobox", "TSpinbox"):
             st.configure("Preview." + name, font=self.pv_fonts["text"])
         self.pv_tick = tk.BooleanVar(self, value=True)
-
-        def still(e):  # (clicks and keys do nothing; the mouse over it still lights it up)
-            return "break"
         ttk.Label(box, text=tr("look.preview_heading"), font=self.pv_fonts["heading"]).pack(anchor="w")
         ttk.Label(box, text=tr("look.preview_text"), font=self.pv_fonts["text"]).pack(anchor="w")
         ttk.Label(box, text=tr("look.preview_hint"), font=self.pv_fonts["hint"], foreground=look.HINT).pack(anchor="w")
@@ -220,17 +219,21 @@ class SettingsWindow(tk.Toplevel):
             ttk.Button(row, text=tr("look.preview_button"), style="Preview.TButton", takefocus=False),
             ttk.Checkbutton(row, text=tr("look.preview_tick"), variable=self.pv_tick, style="Preview.TCheckbutton",
                             takefocus=False),
-            ttk.Combobox(row, values=[tr("look.preview_drop")], state="readonly", width=10, style="Preview.TCombobox",
-                         font=self.pv_fonts["text"], takefocus=False),
-            ttk.Spinbox(row, from_=0, to=999, width=5, style="Preview.TSpinbox", font=self.pv_fonts["text"],
-                        takefocus=False))
-        self.pv_widgets[2].set(tr("look.preview_drop"))
+            ttk.Combobox(row, values=[tr("look.preview_drop"), tr("look.preview_drop2"), tr("look.preview_drop3")],
+                         state="readonly", width=12, style="Preview.TCombobox", font=self.pv_fonts["text"],
+                         takefocus=False),
+            ttk.Spinbox(row, from_=0, to=999, width=5, style="Preview.TSpinbox", font=self.pv_fonts["text"]))
+        drop = self.pv_widgets[2]
+        drop.set(tr("look.preview_drop"))
+        drop.bind("<<ComboboxSelected>>", lambda e: drop.selection_clear())
+        try:  # (its open list in the preview's font too)
+            self.tk.call(self.tk.call("ttk::combobox::PopdownWindow", drop) + ".f.l", "configure", "-font",
+                         self.pv_fonts["text"])
+        except tk.TclError:
+            pass
         self.pv_widgets[3].set("120")
         for k, w in enumerate(self.pv_widgets):
             w.pack(side="left", padx=(0 if k == 0 else 8, 0))
-            if k:  # (the button may be pressed: it does nothing anyway)
-                for seq in ("<Button-1>", "<ButtonRelease-1>", "<Key>", "<MouseWheel>", "<Button-4>", "<Button-5>"):
-                    w.bind(seq, still)
         # the usual paddings, to grow / shrink with the picked Size
         self.pv_pads = {name: st.lookup(name, "padding") for name in ("TButton", "TCheckbutton", "TCombobox",
                                                                        "TSpinbox")}
@@ -263,10 +266,62 @@ class SettingsWindow(tk.Toplevel):
                 except tk.TclError:
                     pass
 
+    def font_search(self):
+        """The Font box can be typed in (user): the list keeps only the fonts holding what's typed (starting with
+        it first), Enter takes the one typed or the first left; leaving the box with a font not in the list (or
+        Escape) puts the saved one back."""
+        box = self.look_font_box
+        box.config(state="normal")
+
+        def hits():
+            typed = self.font_var.get().strip().casefold()
+            first = [f for f in self.font_values if f.casefold().startswith(typed)]
+            return first + [f for f in self.font_values if typed in f.casefold() and f not in first]
+
+        def typed(e):
+            if e.keysym not in ("Return", "KP_Enter", "Escape", "Up", "Down", "Tab", "Left", "Right", "Home", "End"):
+                box.config(values=hits() or self.font_values)
+
+        def enter(e):
+            name = self.font_var.get().strip()
+            found = next((f for f in self.font_values if f.casefold() == name.casefold()), None) or next(
+                iter(hits()), None)
+            if found:
+                self.font_var.set(found)
+                box.config(values=self.font_values)
+                box.icursor("end")
+                self.save_size()
+            else:
+                back()
+            return "break"
+
+        def back(e=None):
+            self.font_var.set(look.read_font() or self.font_default)
+            box.config(values=self.font_values)
+            return "break"
+
+        def left(e):  # (focus going into its own open list doesn't count)
+            def check():
+                focus = self.tk.call("focus")
+                if not str(focus).startswith(str(box)) and self.font_var.get() not in self.font_values:
+                    back()
+            self.after_idle(check)
+
+        box.bind("<KeyRelease>", typed)
+        box.bind("<Return>", enter)
+        box.bind("<KP_Enter>", enter)
+        box.bind("<Escape>", back)
+        box.bind("<FocusOut>", left)
+        box.bind("<<ComboboxSelected>>", lambda e: (box.config(values=self.font_values), box.selection_clear(),
+                                                     self.save_size()))
+
     def picked_size(self):
-        """(size, font, text) as picked in the three lists."""
+        """(size, font, text) as picked in the three lists (a font half typed: the saved one)."""
         size = next(k for k, n in self.size_names.items() if n == self.size_var.get())
-        family = "" if self.font_var.get() == self.font_default else self.font_var.get()
+        family = self.font_var.get()
+        if family not in self.font_values:
+            family = look.read_font() or self.font_default
+        family = "" if family == self.font_default else family
         text = next(k for k, n in self.text_names.items() if n == self.text_var.get())
         return size, family, text
 
