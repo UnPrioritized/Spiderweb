@@ -219,6 +219,9 @@ def clean_shape(sh):
         mg = clean_merge(sh["merge"], clean_shape) if isinstance(sh.get("merge"), dict) else None
         if mg:  # Gate sensitive merge (merge.py): two shapes' notes, saved as the recipe
             out["merge"] = mg
+            if mg.pop("lift", False):  # (its parts' gate flips moved onto it: notes made again, unflipped parts)
+                out["gate_flip"] = True
+                sh = {k: v for k, v in sh.items() if k != "notes"}
             if "notes" not in sh:  # (left out of project files: made again)
                 sh = dict(sh, notes=recipe_notes(mg))
         if "notes" in sh:  # pasted notes (custom.py): the strokes are just the box
@@ -1048,8 +1051,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     shapes' notes end where one of its notes on their key and slot starts.
     back: per shape True if its gates are laid from the right (gateflip.py colours_back): with "auto" its tracks get
     channels in the mirrored order, as if each started where its mirror image would (the colour at the right edge =
-    the one the left edge has without it); or a list of (first, last + 1) track ranges, each mirrored over its own
-    notes (a merged shape's flipped parts). A paste's pieces: mirrored over the whole paste.
+    the one the left edge has without it). A paste's pieces: mirrored over the whole paste.
     """
     pastes = pastes or [None] * len(note_lists)
     tracks = tracks or [None] * len(note_lists)
@@ -1103,14 +1105,9 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
             if sep:
                 forced.append(range(len(units), len(units) + len(ids)))
             mine = [lst[which == k] for k in range(len(ids))]
-            b = back[len(unit_of) - 1]
-            for lo_t, hi_t in ([(-1 << 62, 1 << 62)] if b is True else b or ()):
-                # (mirrored: a track starts where its latest end would be, flipped over its part's notes)
-                part = (np.asarray(tr) >= lo_t) & (np.asarray(tr) < hi_t)
-                if not part.any():
-                    continue
-                lo_hi = int(lst[part, 0].min()) + int(lst[part, 1].max())
-                for k in np.flatnonzero((ids >= lo_t) & (ids < hi_t)).tolist():
+            if back[len(unit_of) - 1]:  # (mirrored: a track starts where its latest end would be, flipped over)
+                lo_hi = int(lst[:, 0].min()) + int(lst[:, 1].max())
+                for k in range(len(ids)):
                     firsts[len(units) + k] = lo_hi - int(mine[k][:, 1].max())
             units += mine
         for pid in paste_back:

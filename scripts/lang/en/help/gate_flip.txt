@@ -8,6 +8,8 @@ Nothing moves: every key row starts and ends on the same ticks as before. To kee
 
 Pasted notes: on each key, every run of notes is flipped inside itself, so its first and last tick stay put. A run ends at a gap longer than the usual gap between the notes, like Sustain's Auto.
 
+Gate sensitive merge: the merged shape flips as one, each key row across both shapes, so the place where they meet moves too. Merging two flipped shapes gives a flipped merged shape, and Split gives them back flipped.
+
 The menu item has a tick while it's on; click it again to switch it off. The Shapes list says (Gates flipped). It's greyed when there's nothing to flip: (one gate) when every key row has one note, or pasted runs that read the same both ways; (no gates) for shapes without spam, like Fill or lines.
 
 It comes before the Claw machine, Strum and Chop pages and Sustain, so they work on the flipped notes as usual. A normal flip or a turn keeps it on. A Hz bass, a funnel and an image don't have it.

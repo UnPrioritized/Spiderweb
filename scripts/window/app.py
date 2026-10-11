@@ -25,10 +25,10 @@ from notes.engine import (CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cache
                           render, shape_key, slot_track_channel)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
-from notes.gateflip import (all_flipped, colours_back, offered as gate_offered, parts as gate_parts,
+from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
                             turn_velocities, why_not as gate_why_not)
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
-from notes.merge import refit as merge_refit, settings_key as merge_settings_key, velocity_reversed as merge_vrev
+from notes.merge import velocity_reversed as merge_vrev
 from notes.sustain import is_sustained
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
@@ -1469,18 +1469,13 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def gate_flip_state(self):
         """The right-click "Gate aware flip" for the selected shapes: (shapes it switches, on: ticked, why: None or
         why it's greyed), or None when no selected shape takes it (Hz bass, funnels, images: gateflip.offered)."""
-        groups = []  # (per selected shape: what it switches; a merged shape: its parts, all of them on = ticked)
-        for i in sorted(self.sels):
-            if i < len(self.shapes):
-                g = [p for p in gate_parts(self.shapes[i]) if gate_offered(p)]
-                if g:
-                    groups.append((self.shapes[i], g))
-        if not groups:
+        sel = [self.shapes[i] for i in sorted(self.sels) if i < len(self.shapes) and gate_offered(self.shapes[i])]
+        if not sel:
             return None
-        on = [p for sh, g in groups if all_flipped(sh) for p in g if p.get("gate_flip")]
+        on = [sh for sh in sel if all_flipped(sh)]
         if on:  # (switching off always works, even where it does nothing now)
             return on, True, None
-        shapes = [p for _, g in groups for p in g if not p.get("gate_flip")]  # (a merged shape's flipped part: kept)
+        shapes = [sh for sh in sel if not sh.get("gate_flip")]
         why = [gate_why_not(sh, *self.notes_tracks(sh)) for sh in shapes]
         ok = [sh for sh, w in zip(shapes, why) if w is None]
         if ok:
@@ -1501,30 +1496,10 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             else:
                 sh["gate_flip"] = True
             turn_velocities(sh)
-        switched = {id(sh) for sh in shapes}
-        for i in sorted(self.sels):  # (merged shapes, inner ones first: made again from their parts at once)
-            self.gate_flip_merged(self.shapes[i], switched)
         self.sync_panel()
         self.shapes_changed()
         if not on:
             self.tips.show("gate_flip", wait=True)  # (the first time: what it does)
-
-    def gate_flip_merged(self, sh, switched):
-        """After a gate aware flip switched some of a merged shape's parts (ids in switched): its inner merged shapes
-        first, then it, made again (merge.refit; remake_merges only sees its own parts' settings, so an inner merge
-        kept its old notes until opened again, hunt), and a velocity line drawn on any of them turned round too.
-        True if it holds a switched part."""
-        m = sh.get("merge")
-        if not m:
-            return id(sh) in switched
-        hit = [self.gate_flip_merged(p, switched) for p in m["parts"]]
-        if not any(hit):
-            return False
-        if not sh.get("own_vel"):
-            turn_velocities(sh)
-        merge_refit(sh)
-        self._merge_keys[id(m)] = merge_settings_key(m)  # (made already: not again in remake_merges)
-        return True
 
     def rotate(self, clockwise, whole=False):
         """Turn the selected shapes 90 degrees as a group, around their middle, as they look on screen

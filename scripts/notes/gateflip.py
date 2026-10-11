@@ -19,7 +19,7 @@ from notes.custom import SPAM_FILLS, gate_ticks
 from notes.fx import flip_shape, reverse_velocity
 from notes.sustain import gap_of, row_order
 
-NOT_DRAWN = ("merge", "notes", "picture", "hz")  # (pasted notes: their own way; merged shapes: their parts keep it)
+NOT_DRAWN = ("merge", "notes", "picture", "hz")  # (pasted notes and merged shapes: each run mirrored, is_pasted)
 LEFT_OUT = ("cut",) + NOT_DRAWN  # (a sliced piece: its whole's notes are made with the piece's setting, sliced.source)
 
 
@@ -29,8 +29,9 @@ def offered(sh):
 
 
 def is_pasted(sh):
-    """True if sh is pasted notes the gate aware flip works on (each run on a key mirrored inside itself)."""
-    return sh["kind"] == "custom" and "notes" in sh and not any(k in sh for k in ("cut", "merge", "picture", "hz"))
+    """True if sh is pasted notes or a merged shape (Gate sensitive merge: the whole of each key row across both
+    parts, user 2026-10-11) the gate aware flip works on: each run on a key mirrored inside itself."""
+    return sh["kind"] == "custom" and "notes" in sh and not any(k in sh for k in ("cut", "picture", "hz"))
 
 
 def why_not(sh, notes, tracks=None):
@@ -46,42 +47,39 @@ def why_not(sh, notes, tracks=None):
     return None
 
 
-def parts(sh):
-    """The shapes the menu item switches for sh: a merged shape's parts (Gate sensitive merge: its notes are made
-    from them, merged again after, like the custom panel's settings: user saw the setting lost), else sh itself."""
-    if sh.get("merge"):
-        return [q for p in sh["merge"]["parts"] for q in parts(p)]
-    return [sh]
-
-
-def takes_it(sh):
-    """True if a gate aware flip can be on sh (a merged shape: through its parts)."""
-    return sh.get("gate_flip") is True or sh["kind"] == "custom" and (
-        is_pasted(sh) or sh.get("fill") in SPAM_FILLS and not any(k in sh for k in NOT_DRAWN))
-
-
 def all_flipped(sh):
-    """True if sh is gate flipped: the menu's tick and the Shapes list's "(Gates flipped)" (one rule for both, hunt).
-    A merged shape: every part that takes it."""
-    if sh.get("merge"):
-        ps = [p for p in parts(sh) if offered(p) and takes_it(p)]
-        return bool(ps) and all(p.get("gate_flip") is True for p in ps)
+    """True if sh is gate flipped: the menu's tick and the Shapes list's "(Gates flipped)" (one rule for both, hunt)."""
     return sh.get("gate_flip") is True and sh["kind"] == "custom" and (
         is_pasted(sh) or sh.get("fill") in SPAM_FILLS and not any(k in sh for k in NOT_DRAWN))
 
 
+def lifted(parts):
+    """A merge's parts all gate flipped: their flips taken off (velocities turned back) so the merged shape is
+    flipped as a whole instead, each row across both parts (user 2026-10-11: it should work all the way across).
+    Changes parts; returns [was flipped] per part (Split puts them back: put_back), or None when they weren't all
+    flipped (one flipped part keeps its own)."""
+    if not parts or not all(p.get("gate_flip") is True for p in parts):
+        return None
+    for p in parts:
+        del p["gate_flip"]
+        if p.get("fx"):  # (its own steps: turn_velocities changes them in place)
+            p["fx"] = [dict(s) for s in p["fx"]]
+        turn_velocities(p)
+    return [True] * len(parts)
+
+
+def put_back(parts, flips):
+    """Split: the flips lifted when merged (lifted) back on the parts."""
+    for p, f in zip(parts, flips or ()):
+        if f and p.get("gate_flip") is not True:
+            p["gate_flip"] = True
+            turn_velocities(p)
+
+
 def colours_back(sh):
-    """Which of sh's colours get their channels in mirrored order (engine.render back): True = all, False = none, or
-    a list of (first, last + 1) track ranges each mirrored over its own notes. A merged shape: each flipped part's
-    own colours (merge recipe "split" = where the second part's start; user expected each part to keep its own
-    colours), all of them when Colours is set on the merged shape itself. Pasted notes sliced from a flipped paste
-    keep the mirrored order ("flip_colours", slice.slice_notes); flipped again they're back in order."""
-    if sh.get("merge"):
-        m = sh["merge"]
-        if sh.get("cycle") or not isinstance(m.get("split"), int):
-            return all_flipped(sh)
-        spans = [(0, m["split"]), (m["split"], 1 << 40)]
-        return [s for s, p in zip(spans, m["parts"]) if all_flipped(p)] or False
+    """True if sh's colours get their channels in mirrored order (engine.render back). Pasted notes sliced from a
+    flipped paste keep the mirrored order ("flip_colours", slice.slice_notes); flipped again they're back in
+    order."""
     if is_pasted(sh):
         return (sh.get("gate_flip") is True) != (sh.get("flip_colours") is True)
     return all_flipped(sh)

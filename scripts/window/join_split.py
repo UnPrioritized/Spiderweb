@@ -15,6 +15,7 @@ from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live,
 from notes.bezier import anchor_count, nearest, split
 from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_notes_tracks, shape_path
+from notes.gateflip import lifted, put_back, turn_velocities
 from notes.merge import edge_moves, merged, part_rows, reshaped_parts
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom, slice_notes
@@ -230,7 +231,9 @@ class JoinSplit:
         if any("picture" in self.shapes[i] for i in pair):  # (user: an image keeps its own colours, so not merged)
             self.status.config(text=tr("join_split.merge_no_image"))
             return
-        rows = part_rows([self.shapes[i] for i in pair], self.ppq, self.keys)
+        parts = [copy.deepcopy(self.shapes[i]) for i in pair]
+        flips = lifted(parts)  # (both gate flipped: the merged shape is, each row across both, user 2026-10-11)
+        rows = part_rows(parts, self.ppq, self.keys)
         got = merged(rows, to_right, self.ppq, self.keys)
         if got is None:
             self.status.config(text=tr("join_split.merge_no_meet"))
@@ -249,15 +252,16 @@ class JoinSplit:
         if sus[0] is not None and sus[0] == sus[1]:  # (both sustained alike: so are the merged notes, like Join)
             for sh in new:
                 sh["sustain"] = copy.deepcopy(sus[0])
-        parts = [copy.deepcopy(self.shapes[i]) for i in pair]
         for p in parts:
             p.pop("between", None)  # (its Add between group is unlinked)
         new[0]["merge"] = {"parts": parts, "right": bool(to_right),
                            "ppq": self.ppq, "keys": self.keys, "apart": sorted(set(rest[:, 2].tolist())),
                            "at": list(new[0]["pts"][0]),  # (where its box was: Split moves the parts as far as it)
                            "box": [list(p) for p in new[0]["pts"]]}  # (turned / slanted since: the parts too)
-        if len(rows[1]):  # (where the second part's colours start: merge.recipe_shape)
-            new[0]["merge"]["split"] = int(rows[1][:, 4].min())
+        if flips:
+            new[0]["merge"]["flips"] = flips
+            for sh in new:  # (the leftovers too: they were flipped)
+                sh["gate_flip"] = True
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.merge"))
         self.unlink_groups(pair)
@@ -331,10 +335,15 @@ class JoinSplit:
                     p["pts"] = [[b + db, q + dp] for b, q in p["pts"]]
             if not sh.get("own_vel"):  # (its velocity was changed: each shape takes the line where its notes sat)
                 moves = [(0.0, 0.0)] * 2 if got else edge_moves(m)
+                line = sh
+                if sh.get("gate_flip"):  # (its line as before its gate aware flip)
+                    line = copy.deepcopy(sh)
+                    turn_velocities(line)
                 for p, (d0, d1) in zip(back, moves):
                     lo, hi = span(p)
-                    piece_velocity(p, sh, (lo + d0, hi + d1), span(sh))
+                    piece_velocity(p, line, (lo + d0, hi + d1), span(sh))
                     p.pop("own_vel", None)
+            put_back(back, m.get("flips"))  # (gate flipped when merged: again, user: as before merging)
             self.replace_shape(i, back, velocity=False, name=tr("join_split.split_back_into_the_old_shapes"))
             self.status.config(text=tr("join_split.back_to_the_shapes_it_was", n=2))
             return
