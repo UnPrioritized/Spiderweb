@@ -6,17 +6,50 @@ Texts with numbers in them have {name} places, e.g. "Split into {n} shapes": tr(
 lines (an empty line = a new paragraph), so there are no "\\n" in the file.
 
 Language files are looked for next to Spiderweb (a lang folder beside spiderweb.py or the .exe) first, then the ones
-built in. There's no language picker yet (only English exists): LANGUAGE picks it."""
+built in. Settings → Language picks one (user/settings.ini [language] code), put on at the next start; each file
+names itself with its "language.name" text."""
 
 import json
 import os
+import re
 import sys
 
+from files import settings
 from files.about import HERE
 
-LANGUAGE = "en"
 BUILT_IN = os.path.join(getattr(sys, "_MEIPASS", os.path.join(HERE, "scripts")), "lang")
+CODE = r"[A-Za-z0-9_-]{1,20}"  # (a file name only: never a path)
 _texts = {}
+
+
+def read_language():
+    """The language picked in Settings → Language ("en" when none was, or it's not a usable code)."""
+    code = str(settings.get("language", "code") or "").strip()
+    return code if re.fullmatch(CODE, code) else "en"
+
+
+def save_language(code):
+    settings.put("language", "code", code)
+
+
+def languages():
+    """[(code, the language's own name), ...] of every language file found, English first."""
+    found = {}
+    for folder in (os.path.join(HERE, "lang"), BUILT_IN):
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for name in names:
+            code, ext = os.path.splitext(name)
+            if ext.lower() == ".json" and re.fullmatch(CODE, code) and code not in found:
+                own = _load(code).get("language.name")
+                found[code] = own.strip() if isinstance(own, str) and own.strip() else code
+    found.setdefault("en", "English")
+    return sorted(found.items(), key=lambda c: (c[0] != "en", c[1].casefold()))
+
+
+LANGUAGE = read_language()
 
 
 def _load(code):

@@ -6,7 +6,7 @@ user/settings.ini. Never opens by itself (user)."""
 import tkinter as tk
 from tkinter import colorchooser, font as tkfont, messagebox, ttk
 
-from files import settings
+from files import lang, settings
 from files.lang import tr
 from files.playback import BUILTIN, devices
 from files.system import WINDOWS
@@ -163,6 +163,7 @@ class SettingsWindow(tk.Toplevel):
             status.config(text=tr("updates.checking")),
             updates.check(report=lambda msg: status.winfo_exists() and status.config(text=msg)))).pack(side="left")
         self.build_tips(page)
+        self.build_language()
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.update_idletasks()  # (first time: in the middle of the main window)
@@ -194,6 +195,43 @@ class SettingsWindow(tk.Toplevel):
             note.config(text=tr("help.done_every_tip_shows_again_the"))
         ttk.Button(row, text=tr("help.show_all_tips_again"), takefocus=False, command=again).pack(side="left")
         note.pack(side="left", padx=(6, 0))
+
+    # ------------------------------------------------------------ language (lang.languages; next start, like the look)
+
+    def build_language(self):
+        page = self.pages["language"] = ttk.Frame(self.tabs, padding=(12, 10, 12, 12))
+        self.tabs.add(page, text=tr("settings.language_tab"))
+        found = lang.languages()
+        names = {code: name for code, name in found}
+        saved = lang.read_language()
+        if saved not in names:  # (its file was removed: shown as its code, still the saved pick)
+            names[saved] = saved
+        self.language_names = names
+        var = self.language_var = tk.StringVar(value=names[saved])
+        row = ttk.Frame(page)
+        row.pack(anchor="w")
+        ttk.Label(row, text=tr("language.pick")).pack(side="left")
+        box = self.language_box = ttk.Combobox(row, textvariable=var, values=list(names.values()), state="readonly",
+                                               width=max(18, max(len(n) for n in names.values()) + 2))
+        box.pack(side="left", padx=(6, 0))
+        Tooltip(box, tr("language.tip"))
+        note = self.language_note = ttk.Label(page, text="", foreground=look.WARN,
+                                              wraplength=round(320 * self.app.scale), justify="left")
+        note.pack(anchor="w", pady=(8, 0))
+        if len(found) < 2:
+            ttk.Label(page, text=tr("language.only_english"), foreground=look.HINT, justify="left",
+                      wraplength=round(320 * self.app.scale)).pack(anchor="w", pady=(8, 0))
+
+        def picked(e):
+            code = next(c for c, n in names.items() if n == var.get())
+            try:
+                lang.save_language(code)
+            except OSError:
+                messagebox.showerror(tr("settings.title"), tr("language.not_saved"), parent=self)
+                var.set(names[lang.read_language()] if lang.read_language() in names else names[saved])
+                return
+            note.config(text="" if code == lang.LANGUAGE else tr("language.restart"))
+        box.bind("<<ComboboxSelected>>", picked)
 
     # ------------------------------------------------------------ sound (MIDI out + Built-in BASSMIDI)
 
