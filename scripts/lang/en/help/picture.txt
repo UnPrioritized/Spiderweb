@@ -11,7 +11,7 @@ Size: Keys = how many keys tall (or wide) the image is. Steps per key = how much
 
 A big image is made with a progress bar on the preview: press Cancel there (or Esc) to stop it (the image and its settings go back to how they were). Past a million grid cells (up to that many notes) you're asked first.
 
-Colours: an image has at most 15 colours, one per channel (channel 10 is left out). Click a colour to pick it yourself; it stays as picked (a corner mark). Right-click it to let Spiderweb pick it again. Focus on: whole = every part of the image counts the same; details = faces, eyes and edges get their colours first.
+Colours: an image has at most 15 colours, one per channel (channel 10 is left out unless Use channel 10 is ticked). Click a colour to pick it yourself; it stays as picked (a corner mark). Right-click it to let Spiderweb pick it again. Focus on: whole = every part of the image counts the same; details = faces, eyes and edges get their colours first.
 
 Blending mixes neighbouring colours so the eye sees colours in between. Spread is the closest to the original; Keep details stops it from washing away small things like a mouth or eyes. Pattern is a fixed even pattern. None = only the nearest colour.
 
@@ -29,7 +29,7 @@ Edit formats… opens the format editor: Start, Each colour and End boxes, tags 
 
 Paste colours… reads colours out of any text (a whole player settings file is fine): pick the list you want, then lock the colours (the image uses exactly them) or use them only as a starting point.
 
-Use channel 10: 16 colours, colour 10 on channel 10. Many players draw channel 10's notes, but they play no sound (or drums). Shapes never use channel 10.
+Use channel 10: 16 colours, colour 10 on channel 10. Many players draw channel 10's notes, but they play no sound (or drums). Other shapes use channel 10 only when the project's "Use channel 10" is ticked under Multi channel; then this tick is on for every image too.
 
 Several images in one project share one set of colours (a player has only one). Share sets how much this image counts when they compete for colours.
 

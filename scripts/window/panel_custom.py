@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 
 from files.lang import tr
-from notes.areas import COLOURS
+from notes.areas import most_colours
 from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, edge_gate, gap_lines,
                           gate_ticks, hz_gate, join_strokes, map_stroke, normalize_areas, normalize_strokes, open_paths)
 from window import look
@@ -394,9 +394,10 @@ class CustomPanel:
         self.cancel_box.config(state="normal" if fill in ("fill", "spam") and not text else "disabled")
         wanted = max([self.colours_wanted[i] for i, s in enumerate(self.shapes) if any(s is t for t in tgts)
                       and i < len(self.colours_wanted)] or [0])
-        if wanted > COLOURS:
-            self.colours_warn.config(text=tr("panel_custom.too_many_colours", n=wanted, most=COLOURS))
-        rows = {self.colours_warn: wanted > COLOURS, self.gate_row: spam and not hz, self.hz_row: spam, self.hz_info: self.hz_short_on,
+        most = most_colours(self.all16())
+        if wanted > most:
+            self.colours_warn.config(text=tr("panel_custom.too_many_colours", n=wanted, most=most))
+        rows = {self.colours_warn: wanted > most, self.gate_row: spam and not hz, self.hz_row: spam, self.hz_info: self.hz_short_on,
                 self.hz_stale: self.hz_stale_on, self.ends_row: spam and not hz and not ranged,
                 self.start_row: spam and not hz and ends != "stretch" and not ranged,
                 self.edge_row: outline,

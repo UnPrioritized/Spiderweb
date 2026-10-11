@@ -14,7 +14,14 @@ import numpy as np
 from notes.faces import faces
 
 MAP_CELLS = 1024
-COLOURS = 15
+COLOURS = 15  # the most colours a shape has (user: like a MIDI player's)...
+ALL_COLOURS = 16  # ... and with the project's "Use channel 10" (what a saved shape may hold: most_colours)
+
+
+def most_colours(all16):
+    return ALL_COLOURS if all16 else COLOURS
+
+
 REACH = 3  # cells: a fill line's loose ends go this much further, so one ending right on a line still splits (and
 # for drawing the areas exact, a point this near a line is joined to it, see landed)
 _maps = {}
@@ -28,7 +35,7 @@ def clean_areas(areas):
             u, v, c = float(a[0]), float(a[1]), int(a[2])
         except (TypeError, ValueError, IndexError, KeyError):
             continue
-        if 0 <= c <= COLOURS and math.isfinite(u) and math.isfinite(v):
+        if 0 <= c <= ALL_COLOURS and math.isfinite(u) and math.isfinite(v):
             out.append([u, v, c])
     return out
 

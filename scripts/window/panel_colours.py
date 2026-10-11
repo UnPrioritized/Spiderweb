@@ -5,7 +5,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc
-from notes.custom import CYCLE_MAX, CYCLES, row_restart_ok
+from notes.custom import CYCLE_ALL, CYCLE_MAX, CYCLES, row_restart_ok
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
 
 CYCLE_CHOICES = [(None, tr("colours.off"))] + [(v, tr("colours." + v)) for v in CYCLES]
@@ -34,8 +34,8 @@ class ColoursPanel:
         lb.pack(side="left")
         self.cycle_n_entry = ttk.Entry(c, textvariable=self.cycle_n_var, width=3)
         self.cycle_n_entry.pack(side="left", padx=(4, 0))
-        Scrub(self, [(self.cycle_n_entry, self.cycle_n_var, lambda: self.on_cycle("n"))], (1, 3, 1), 2, CYCLE_MAX,
-              label=lb, drag_box=True)
+        self.cycle_n_scrub = Scrub(self, [(self.cycle_n_entry, self.cycle_n_var, lambda: self.on_cycle("n"))],
+                                   (1, 3, 1), 2, self.cycle_most(), label=lb, drag_box=True)
         rows = self.cycle_every_row = ttk.Frame(box)  # (channels + these rows: only shown while Colours is on, user)
         rows.pack(anchor="w", padx=(20, 0), pady=(1, 0))
         c = ttk.Frame(rows)
@@ -102,10 +102,15 @@ class ColoursPanel:
         changed only the ones with Colours on)."""
         return len({t["cycle"]["by"] if t.get("cycle") else None for t in tgts}) > 1
 
+    def cycle_most(self):
+        """The most channels Colours can take turns over: 16 with "Use channel 10"."""
+        return CYCLE_ALL if self.all16() else CYCLE_MAX
+
     def sync_colours(self):
         """Several shapes with different settings: the dropdown says Mixed, a number box is left empty (shared
         widgets.same_or_blank). Different kinds (or some Off): the channels box greyed and empty, no every row,
         until a kind is picked for all of them (user)."""
+        self.cycle_n_scrub.hi = self.cycle_most()
         tgts = self.colour_targets()
         on = [t["cycle"] for t in tgts if t.get("cycle")]
         cy = on[0] if on else None
@@ -200,7 +205,7 @@ class ColoursPanel:
                 return
             value = ROW_CHOICES[self.cycle_rows_box.current()][0]
         elif what == "n":
-            value = number(self.cycle_n_entry, self.cycle_n_var, 2, CYCLE_MAX)
+            value = number(self.cycle_n_entry, self.cycle_n_var, 2, self.cycle_most())
         elif what == "every":  # (only the kind they all have; an empty box (different numbers): each keeps its own)
             kind = self.cycle_kind(tgts)
             got = [number(e, v, 1, EVERY_MAX) for e, v in zip(self.cycle_entries, self.cycle_vars)]
@@ -222,7 +227,7 @@ class ColoursPanel:
                     return None
                 if old and old["by"] == by:
                     return old
-                kept = old["n"] if old else (int(n) if n.isdigit() and 2 <= int(n) <= CYCLE_MAX else 4)
+                kept = old["n"] if old else (int(n) if n.isdigit() and 2 <= int(n) <= self.cycle_most() else 4)
                 new = {"by": by, "n": kept, "every": [1, 4] if by == "time" else 1}
                 return dict(new, **{k: old[k] for k in ("rows", "shift") if old and old.get(k)})  # (kept with a new kind)
             if not old:

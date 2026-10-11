@@ -17,7 +17,7 @@ from notes.paths import KEYS
 from notes.sliced import clip_strokes, moved_by, moved_mark, on_side, piece_knives
 from notes.sustain import is_sustained
 from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, PIANO_88, PREVIEW_LIMIT,
-                              SELECTED_COLOR, SLOT_COLORS, draw_boxes, fade, note_name)
+                              SELECTED_COLOR, SLOT_COLORS, draw_boxes, fade, note_name, slot_colours)
 from roll.tiles import Tiles, see_through
 from window import look
 
@@ -273,9 +273,9 @@ def covered_ends(e, nxt, room):
     return np.where(nxt_e >= e, np.minimum(e, nxt_s + room), e)
 
 
-def painting_order(fast, rendered, start, sels, pics, keys):
-    """RollDrawing.paint_order's work (start = the notes' rows by start). Touches no Tk: also done in a background
-    thread for notes made there (App.notes_rested)."""
+def painting_order(fast, rendered, start, sels, pics, keys, use10):
+    """RollDrawing.paint_order's work (start = the notes' rows by start; use10: channel 10 used, slot_colours).
+    Touches no Tk: also done in a background thread for notes made there (App.notes_rested)."""
     if not (len(rendered) and rendered[:, 2].min() >= 0 and rendered[:, 2].max() < keys and rendered[:, 5].min() >= 0):
         return None
     owners = int(rendered[:, 5].max()) + 1
@@ -286,7 +286,7 @@ def painting_order(fast, rendered, start, sels, pics, keys):
     rank[~sel] = np.arange(others)
     rank[sel] = np.arange(others, owners)
     made = fast.paint_order(np.ascontiguousarray(rendered, np.int64), start, rank, owners,
-                            pics if pics.any() else np.zeros(0, bool), len(SLOT_COLORS), PICTURE_GROUP)
+                            pics if pics.any() else np.zeros(0, bool), slot_colours(use10), PICTURE_GROUP)
     return made, others
 
 
@@ -895,11 +895,11 @@ class RollDrawing:
         app = self.app
         rendered = app.rendered
         pics = np.asarray(getattr(app, "picture_owners", ()), bool)
-        key = (frozenset(app.sels), pics.tobytes(), len(pics))
+        key = (frozenset(app.sels), pics.tobytes(), len(pics), bool(app.picture_use10))
         got = self._paint_order
         if got is not None and got[0] is rendered and got[1] == key:
             return got[2]
-        made = painting_order(fast, rendered, self.start_order(), app.sels, pics, app.keys)
+        made = painting_order(fast, rendered, self.start_order(), app.sels, pics, app.keys, app.picture_use10)
         self._paint_order = (rendered, key, made)
         return made
 
@@ -991,7 +991,8 @@ class RollDrawing:
                 if lo != hi:
                     on = on[np.argsort(owner.astype(np.uint16) if 0 <= lo and hi < 65536 else owner, kind="stable")]
                     owner = notes[on, 5]
-                color = notes[on, 4] % len(SLOT_COLORS)
+                cols = slot_colours(getattr(app, "picture_use10", False))
+                color = cols[notes[on, 4] % len(cols)]
                 pics = getattr(app, "picture_owners", ())
                 if len(pics) and pics.any():  # a placed picture's notes: its own colours (PICTURE_GROUP on)
                     mine = pics[np.clip(owner, 0, len(pics) - 1)]

@@ -1,8 +1,10 @@
-"""Note colour palettes (user, 2026-10-11): the 15 channel slot colours notes are drawn with (roll_shared.SLOT_COLORS;
-the drawer's strokes and Hz bass layers use them too). Saved with the app, not the project, as switchable profiles:
-"Default" is built in (today's colours: the light look's, or look.NOTES_DARK in the dark look) and can't be renamed
-or deleted; the user's are files in user/palettes/ (one file each, so a palette can be handed to someone), named
-inside the file like the shape library. The picked one: settings.ini [look] palette. Switching repaints at once."""
+"""Note colour palettes (user, 2026-10-11): the 16 channel colours notes are drawn with (roll_shared.SLOT_COLORS; the
+16th = channel 10's, used with "Use channel 10"; the drawer's strokes and Hz bass layers use them too). Saved with the
+app, not the project, as switchable profiles: "Default" is built in (today's colours: the light look's, or
+look.NOTES_DARK in the dark look) and can't be renamed or deleted; the user's are files in user/palettes/ (one file
+each, so a palette can be handed to someone), named inside the file like the shape library; files of 15 colours
+(before channel 10 had one) get Default's 16th. The picked one: settings.ini [look] palette. Switching repaints at
+once. Files keep SLOT_COLORS' order; the Settings window shows them by channel (ORDER)."""
 
 import json
 import os
@@ -10,7 +12,6 @@ import os
 from files import settings
 from files.about import USER
 from files.safefile import write_text
-from notes.engine import CHANNELS  # (slot k's MIDI channel: channel 10 is skipped, it's the drums)
 from roll import roll_shared
 from window.drawer import clean_name, file_stem
 
@@ -18,6 +19,7 @@ FOLDER = os.path.join(USER, "palettes")
 DEFAULT = ""  # (the built-in palette's id; its shown name is tr("palette.default"))
 SLOTS = len(roll_shared.SLOT_COLORS)
 BUILT_IN = [tuple(p) for p in roll_shared.SLOT_COLORS]  # (as the look made them at start)
+ORDER = roll_shared.COLOURS_16.tolist()  # channel 1..16 -> its place in the colours
 
 
 def _colour(c):
@@ -81,17 +83,25 @@ def with_edge(fill):
     return fill.lower(), _hex((L * 0.5, a * 1.1, b * 1.1))
 
 
+def by_channel(made):
+    """Colours made in channel order (channel 1 first) -> SLOT_COLORS' order."""
+    out = [None] * SLOTS
+    for ch, c in enumerate(made):
+        out[ORDER[ch]] = c
+    return out
+
+
 def gradient(first, last):
-    """Every channel's colour on the way from first to last (evenly, as the eye sees it)."""
+    """Every channel's colour on the way from first (channel 1) to last (channel 16), evenly as the eye sees it."""
     a, b = _oklab(first), _oklab(last)
     n = SLOTS - 1
-    return [with_edge(first if k == 0 else last if k == n else
-                      _hex(tuple(x + (y - x) * k / n for x, y in zip(a, b)))) for k in range(SLOTS)]
+    return by_channel([with_edge(first if k == 0 else last if k == n else
+                                 _hex(tuple(x + (y - x) * k / n for x, y in zip(a, b)))) for k in range(SLOTS)])
 
 
 def random_colours():
     """Random colours that still look good together: hues spread round the colour wheel from a random start
-    (golden-ratio steps, so neighbours differ), soft like the built-in ones, a little random in strength."""
+    (golden-ratio steps, so neighbouring channels differ), soft like the built-in ones, a little random in strength."""
     import colorsys
     import random
     start = random.random()
@@ -100,7 +110,7 @@ def random_colours():
         h = (start + k * 0.618033988749895) % 1.0
         r, g, b = colorsys.hls_to_rgb(h, random.uniform(0.62, 0.78), random.uniform(0.55, 0.85))
         out.append(with_edge("#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))))
-    return out
+    return by_channel(out)
 
 
 def read(path):

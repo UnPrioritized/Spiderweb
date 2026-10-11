@@ -610,7 +610,7 @@ class ProjectFiles:
         self.busy(tr("project.saving_midi"))  # (millions of notes take a few seconds)
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            write_midi(path, ppq, bpm, beats, self.rendered, self.picture_use10)
+            write_midi(path, ppq, bpm, beats, self.rendered, self.picture_use10, melodic10=self.all16())
         except OSError as e:
             messagebox.showerror(tr("project.spiderweb"), couldnt_save(e))
             return

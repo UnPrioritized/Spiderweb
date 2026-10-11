@@ -17,6 +17,7 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc
 from notes import between
+from notes.areas import most_colours
 from notes.engine import cached_path
 from notes.gateflip import all_flipped
 from notes.sustain import is_sustained
@@ -55,7 +56,7 @@ class BetweenWindow(tk.Toplevel):
         self.ml, self.mr, self.mt, self.mb = int(40 * s), int(12 * s), int(10 * s), int(22 * s)
         self.sel_before = (set(app.sels), app.sel)
         self.set = between.settings_of(app.shapes, gid)
-        self.kept_turns = self.set["colours"] or between.COLOURS_MOST
+        self.kept_turns = self.set["colours"] or most_colours(app.all16())
         self.closed = False
         self.drag, self.hover = None, None
         self.pv_drag, self.pv_view, self.pv_hover = None, None, None  # (a point of the first / last shape held)
@@ -126,7 +127,8 @@ class BetweenWindow(tk.Toplevel):
         e.pack(side="left", padx=4)
         e.bind("<Return>", lambda ev: (self.on_turns(), "break")[1])
         e.bind("<FocusOut>", lambda ev: self.on_turns())
-        Scrub(app, [(e, self.turns_var, self.on_turns)], (1, 5, 1), 1, between.COLOURS_MOST, label=self.turns_label)
+        Scrub(app, [(e, self.turns_var, self.on_turns)], (1, 5, 1), 1, most_colours(app.all16()),
+              label=self.turns_label)
         for w in (self.turns_label, e):
             Tooltip(w, tr("between.turns_tip"))
         self.multi_note = ttk.Label(side, text=tr("between.needs_multi"), foreground=look.WARN, font=look.font(8),
@@ -266,7 +268,7 @@ class BetweenWindow(tk.Toplevel):
             return
         try:
             n = calc(self.turns_var.get())
-            if not 1 <= n <= between.COLOURS_MOST:
+            if not 1 <= n <= most_colours(self.app.all16()):
                 raise ValueError
         except (ValueError, ZeroDivisionError):
             return self.turns_var.set(str(self.set["colours"]))

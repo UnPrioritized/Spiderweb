@@ -13,7 +13,7 @@ from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half
                           set_symmetry)
 import numpy as np
 
-from notes.areas import COLOURS, clean_areas
+from notes.areas import ALL_COLOURS, COLOURS, clean_areas, most_colours
 from notes.custom import (DRAWN_FRAME, ROLES, area_paint, areas_filled, carry_areas, carried_spots,
                           clean_strokes, colour_of, filled_spots, join_strokes, open_paths, plain_stroke, role_of, settled_areas,
                           shape_areas, stroke_points, takes_formula)
@@ -119,11 +119,12 @@ def area_color(c):
     return SLOT_COLORS[(c - 1) % len(SLOT_COLORS)][0]
 
 
-def colour_menu(parent, var, pick):
-    """A menu of the shape's own colour and colours 1 .. COLOURS (a stroke's outline colour), var = the one on."""
+def colour_menu(parent, var, pick, most=COLOURS):
+    """A menu of the shape's own colour and colours 1 .. most (a stroke's outline colour; areas.most_colours), var =
+    the one on."""
     m = tk.Menu(parent, tearoff=0)
     m.add_radiobutton(label=tr("drawer.colour_own"), value=0, variable=var, command=lambda: pick(0))
-    for c in range(1, COLOURS + 1):
+    for c in range(1, max(most, var.get()) + 1):  # (a 16th kept on a shape is still shown ticked)
         m.add_radiobutton(label=tr("drawer.area_n", n=c), value=c, variable=var, command=lambda c=c: pick(c))
     return m
 BAD_CHARS = '<>:"/\\|?*'
@@ -380,10 +381,17 @@ class Drawer(DrawerLayers, tk.Toplevel):
 
     # ------------------------------------------------------------ areas (coloured by hand: areas.py)
 
+    def most_colours(self):
+        """The most colours a shape can have in this project (16 with "Use channel 10")."""
+        return most_colours(self.app.all16())
+
     def draw_swatches(self):
         c, k = self.swatches, self.swatch
         c.delete("all")
-        for n in range(COLOURS + 1):
+        most = self.most_colours()
+        self.area_pick = min(self.area_pick, most)  # (the 16th picked, then "Use channel 10" turned off)
+        c.config(width=(most + 1) * (k + 2) + 2)
+        for n in range(most + 1):
             x, y = 2 + n * (k + 2), 2
             on = n == self.area_pick
             c.create_rectangle(x, y, x + k, y + k, fill=area_color(n) if n else AREA_EMPTY,
@@ -394,7 +402,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
 
     def swatch_at(self, x):
         n = int((x - 2) // (self.swatch + 2))
-        return n if 0 <= n <= COLOURS else None
+        return n if 0 <= n <= self.most_colours() else None
 
     def pick_swatch(self, e):
         n = self.swatch_at(e.x)
@@ -534,11 +542,12 @@ class Drawer(DrawerLayers, tk.Toplevel):
         if not self.area_bar.winfo_manager():
             return
         n, with_outline = self.colours_count() if self.shown_idx() else (0, 0)
-        text = tr("drawer.colours_used", n=n, most=COLOURS, m=with_outline)
-        if with_outline > COLOURS:
-            text += " " + tr("drawer.colours_too_many", most=COLOURS)
+        most = self.most_colours()
+        text = tr("drawer.colours_used", n=n, most=most, m=with_outline)
+        if with_outline > most:
+            text += " " + tr("drawer.colours_too_many", most=most)
         if self.colours_used.cget("text") != text:
-            self.colours_used.config(text=text, foreground=WARN_COLOR if with_outline > COLOURS else "")
+            self.colours_used.config(text=text, foreground=WARN_COLOR if with_outline > most else "")
 
     def reset_areas(self):
         """Every area back to how Fill / Spam fill it as normal (asks first)."""
@@ -574,7 +583,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         normal = filled & (paint < 0)
         lut[normal], tint[normal] = rgb(AREA_NORMAL), True
         lut[paint == 0], tint[paint == 0] = rgb(AREA_EMPTY), True
-        for c in range(1, COLOURS + 1):
+        for c in range(1, ALL_COLOURS + 1):
             lut[paint == c], tint[paint == c] = rgb(area_color(c)), True
         if self.hover is not None:  # the area under the mouse: darker
             h = area == self.hover
@@ -675,7 +684,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self.area_bar = ttk.Frame(side)
         ttk.Label(self.area_bar, text=tr("drawer.area_colour")).pack(anchor="w")
         k = self.swatch = max(14, round(16 * self.scale))
-        self.swatches = tk.Canvas(self.area_bar, width=(COLOURS + 1) * (k + 2) + 2, height=k + 4,
+        self.swatches = tk.Canvas(self.area_bar, width=(ALL_COLOURS + 1) * (k + 2) + 2, height=k + 4,
                                   highlightthickness=0, background=ttk.Style().lookup("TFrame", "background")
                                   or "SystemButtonFace", cursor="hand2")
         self.swatches.pack(anchor="w", pady=(3, 0))
@@ -1733,7 +1742,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         colours = {self.strokes[i].get("colour", 0) for i in idx if role_of(self.strokes[i]) != "cut"}
         self._colour_var = tk.IntVar(value=min(colours) if len(colours) == 1 else -1)
         m.add_cascade(label=tr("drawer.outline_colour"), menu=colour_menu(
-            m, self._colour_var, lambda c: self.set_stroke_colour(idx, c)),
+            m, self._colour_var, lambda c: self.set_stroke_colour(idx, c), self.most_colours()),
             state="normal" if colours else "disabled")
         m.add_separator()
         m.add_command(label=tr("drawer.delete_strokes", n=len(idx)), accelerator=tr("drawer.del"),
@@ -1782,7 +1791,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
                               command=lambda r=role: self.set_role([i], r))
         self._colour_var = tk.IntVar(value=st.get("colour", 0))
         m.add_cascade(label=tr("drawer.outline_colour"), menu=colour_menu(
-            m, self._colour_var, lambda c: self.set_stroke_colour([i], c)),
+            m, self._colour_var, lambda c: self.set_stroke_colour([i], c), self.most_colours()),
             state="disabled" if role_of(st) == "cut" else "normal")
         m.add_separator()
         m.add_command(label=tr("drawer.delete_stroke"), accelerator=tr("drawer.del"),

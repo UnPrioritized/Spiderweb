@@ -15,7 +15,7 @@ from notes.envelope import env_at, env_values, paint_env, tidy_env, velocity_env
 from notes.fx import with_velocity
 from notes.pattern import loop_points
 from roll.roll_shared import (CTRL, DRAFT_COLOR, SHIFT, SELECTED_COLOR, SLOT_COLORS, cached_path, fade,
-                              grab_while_panning)
+                              grab_while_panning, slot_colours)
 from window import look
 
 LEVELS = (127, 96, 64, 32, 0)
@@ -540,7 +540,8 @@ class VelocityPane(tk.Canvas):
         if preview is not None:  # velocities being drawn right now
             drawn = preview[first:end]
             vel = np.where(drawn >= 0, drawn, vel)
-        slot = notes[:, 4] % len(SLOT_COLORS)
+        cols = slot_colours(getattr(self.app, "picture_use10", False))
+        slot = cols[notes[:, 4] % len(cols)]
         if sels:
             layer = np.where(np.isin(notes[:, 5], list(sels)), NORMAL + slot, slot)  # (own colours, others faded)
         else:

@@ -70,12 +70,27 @@ EDO_NAMES = ["C", "C^", "C#", "Db", "Dv", "D", "D^", "D#", "Eb", "Ev", "E", "E^"
 EDO_WHITE = {0, 5, 10, 13, 18, 23, 28}  # the 7 plain notes
 EDO_BLACK = {2, 3, 7, 8, 15, 16, 20, 21, 25, 26}  # sharps and flats (the other 14 rows: half sharps / half flats)
 EDO_PIANO = range(23, 249)  # A0 .. C8, a real 88-key piano's range
-# Note colours per channel slot (auto channels), blue first. 15 of them, one per usable channel,
-# so a colour always means the same channel
+# Note colours per channel, blue first: the first 15 = channels 1-9, 11-16 (a slot's channel, engine.CHANNELS), so
+# a colour always means the same channel; the 16th (CH10) = channel 10's, used only when channel 10 is ("Use
+# channel 10" / an image's own tick: slot_colours)
 SLOT_COLORS = [("#7ea6f5", "#1f3a93"), ("#f58e8e", "#8f1f1f"), ("#8fd68f", "#1f6f1f"), ("#e6c65c", "#7a5f00"),
                ("#c79bf2", "#5a2a8f"), ("#6fd6d6", "#136b6b"), ("#f2a36b", "#8a4310"), ("#b0b0b0", "#404040"),
                ("#f59ad0", "#8f1f63"), ("#c2e36b", "#4f6b0f"), ("#9aa0f5", "#2a2f8f"), ("#c9a27e", "#5c3a1a"),
-               ("#7fd6b0", "#135c3f"), ("#e38ae3", "#7a1f7a"), ("#8fb8d6", "#1f4a6b")]
+               ("#7fd6b0", "#135c3f"), ("#e38ae3", "#7a1f7a"), ("#8fb8d6", "#1f4a6b"), ("#3fae9f", "#0f4f47")]
+CH10 = 15  # SLOT_COLORS' place of channel 10's colour
+# slot -> SLOT_COLORS place: slot % len(table) looked up (channel 10 skipped / used, engine.slot_track_channel)
+COLOURS_15 = np.arange(15, dtype=np.int64)
+COLOURS_16 = np.array(list(range(9)) + [CH10] + list(range(9, 15)), np.int64)
+
+
+def slot_colours(use10):
+    """The slot -> colour table (COLOURS_16 while channel 10 is used: slot k = channel k)."""
+    return COLOURS_16 if use10 else COLOURS_15
+
+
+def channel_place(ch):
+    """MIDI channel (0-based) -> its place in SLOT_COLORS."""
+    return int(COLOURS_16[ch % 16])
 SELECTED_COLOR = ("#ffb65c", "#9a4b00")
 DRAFT_COLOR = ("#9be39b", "#1d6b1d")
 if look.DARK:  # (the dark look's own, lighter: look.NOTES_DARK)

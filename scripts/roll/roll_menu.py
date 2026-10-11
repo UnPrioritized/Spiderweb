@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from files.lang import tr
 from window.formula_host import FunnelHost, PolygonHost, RollHost, StrokeHost, formula_menu
+from notes.areas import most_colours
 from notes.convert import originals
 from notes.custom import ROLES
 from window.drawer import colour_menu
@@ -125,7 +126,8 @@ class ShapeMenu:
                                         command=lambda r=role: self.set_stroke_role(sh, k, r))
                 self._colour_var = tk.IntVar(value=sh["strokes"][k].get("colour", 0))
                 sub.add_cascade(label=tr("drawer.outline_colour"), menu=colour_menu(
-                    sub, self._colour_var, lambda c: self.set_stroke_colour(sh, k, c)),
+                    sub, self._colour_var, lambda c: self.set_stroke_colour(sh, k, c),
+                    most_colours(self.app.all16())),
                     state="disabled" if sh["strokes"][k].get("role") == "cut" else "normal")
                 m.add_cascade(label=tr("roll_menu.this_stroke"), menu=sub)
             item(tr("roll_menu.save_drawing_to_the_shape_library"), "", lambda: app.save_to_library(sh))

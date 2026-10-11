@@ -6,9 +6,11 @@ Single channel: where two notes on the same key overlap, the earlier one is cut 
 
 Multi channel: shapes whose notes clash go on different channels, each on its own track (channel 10, drums, is skipped). Split: Same key = only notes on the same key at the same time clash; Any notes = any notes at the same time. Shapes that follow one after another share a channel.
 
-Some shapes can spread over several channels: pasted notes (by track), live shapes made with Turn into live shape (by the shape each stroke came from), and Fill / Spam set to Outline (the outline and the inside). The shape list says how many. Above 15 it shows in orange, and from there the colours and channel numbers repeat.
+Use channel 10 (16 colours), under Multi channel: channel 10 is used too, so there are 16 colours instead of 15 (a shape, Colours and the drawer's areas can then have 16). Many synths play channel 10 as drums. Generate MIDI marks it as a normal channel, and many synths follow that, but some may still play drums there. Built-in BASSMIDI plays it as a piano. Black MIDI players only show the colour. Saved with the project.
 
-Every channel has its own note colour.
+Some shapes can spread over several channels: pasted notes (by track), live shapes made with Turn into live shape (by the shape each stroke came from), and Fill / Spam set to Outline (the outline and the inside). The shape list says how many. Above 15 (16 with Use channel 10) it shows in orange, and from there the colours and channel numbers repeat.
+
+Every channel has its own note colour (Settings → Look → Note colours).
 
 Colours (in the side panel, under Velocity): any shape's notes take turns over several channels, so its colour keeps changing. It needs Multi channel. Which colours you see depends on the program showing the MIDI.
 [clip:channels-colours]

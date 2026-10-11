@@ -612,10 +612,12 @@ class SettingsWindow(tk.Toplevel):
         self.palette_delete.state(own)
         c, s = self.swatches, self.swatch_size
         c.delete("all")
-        for k, (fill, edge) in enumerate(palettes.colours_of(now)):
-            x = k * (s + 3)
+        colours = palettes.colours_of(now)
+        for ch, k in enumerate(palettes.ORDER):  # (by channel: channel 10's colour is the palette's 16th)
+            fill, edge = colours[k]
+            x = ch * (s + 3)
             c.create_rectangle(x + 1, 1, x + s, s, fill=fill, outline=edge, width=2)
-            c.create_text(x + s / 2, s + 2 + self.number_h / 2, text=str(palettes.CHANNELS[k] + 1),
+            c.create_text(x + s / 2, s + 2 + self.number_h / 2, text=str(ch + 1),
                           fill=look.LABEL, font=look.font(8))
 
     # editing: Default itself never changes, so an edit on it first makes a copy (asks its name)
@@ -642,13 +644,14 @@ class SettingsWindow(tk.Toplevel):
         self.show_palettes()
 
     def click_swatch(self, e):
-        k = int(e.x // (self.swatch_size + 3))
-        if not 0 <= k < palettes.SLOTS:
+        ch = int(e.x // (self.swatch_size + 3))
+        if not 0 <= ch < palettes.SLOTS:
             return
+        k = palettes.ORDER[ch]
 
         def make(colours):
             got = colorchooser.askcolor(colours[k][0], parent=self,
-                                        title=tr("palette.pick_title", channel=palettes.CHANNELS[k] + 1))
+                                        title=tr("palette.pick_title", channel=ch + 1))
             if not got or not got[1]:
                 return None
             colours[k] = palettes.with_edge(got[1])
@@ -665,7 +668,8 @@ class SettingsWindow(tk.Toplevel):
             first = colorchooser.askcolor(colours[0][0], parent=self, title=tr("palette.gradient_first"))
             if not first or not first[1]:
                 return None
-            last = colorchooser.askcolor(colours[-1][0], parent=self, title=tr("palette.gradient_last"))
+            last = colorchooser.askcolor(colours[palettes.ORDER[-1]][0], parent=self,
+                                         title=tr("palette.gradient_last"))
             if not last or not last[1]:
                 return None
             return palettes.gradient(first[1], last[1])

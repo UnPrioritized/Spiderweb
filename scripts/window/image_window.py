@@ -280,10 +280,10 @@ class ImageWindow(tk.Toplevel):
         f = self.section(t1, "image.colours")
         self.slider(f, "colours", 2, 15, lambda v: str(round(v)), whole=True, label="image.how_many")
         self.vars["use10"] = tk.BooleanVar(value=self.s["use10"])
-        use10 = ttk.Checkbutton(f, text=tr("image.use10"), variable=self.vars["use10"],  # (user: here, not Player look)
-                                command=lambda: self.set_use10(self.vars["use10"].get()))
-        use10.pack(anchor="w", pady=(2, 0))
-        Tooltip(use10, tr("image.use10_tip"))
+        use10 = self.use10_tick = ttk.Checkbutton(f, text=tr("image.use10"), variable=self.vars["use10"],
+                                                  command=lambda: self.set_use10(self.vars["use10"].get()))
+        use10.pack(anchor="w", pady=(2, 0))  # (user: here, not Player look)
+        self.use10_tip = Tooltip(use10, tr("image.use10_tip"))
         self.swatches = ttk.Frame(f)
         self.swatches.pack(anchor="w", pady=3)
         Tooltip(self.swatches, tr("image.swatch_tip"))
@@ -489,7 +489,11 @@ class ImageWindow(tk.Toplevel):
         self.by_box.current([k for k, _ in self.bys].index(s["by"]))
         self.fmt_box.config(values=[f["name"] for f in self.formats()])
         self.fmt_box.set(self.format()["name"])
-        self.scales["colours"].config(to=16 if s["use10"] else 15)
+        self.scales["colours"].config(to=16 if self.uses10() else 15)
+        project = self.app.all16()  # (the project's "Use channel 10" covers it: ticked and greyed)
+        self.vars["use10"].set(self.uses10())
+        self.use10_tick.state(["disabled" if project else "!disabled"])
+        self.use10_tip.text = tr("image.use10_project" if project else "image.use10_tip")
         n = len(self.others())
         self.share_note.config(text=tr("image.share_note", n=n) if n else tr("image.share_alone"))
 
@@ -559,13 +563,17 @@ class ImageWindow(tk.Toplevel):
         t = self.gives
         t.config(state="normal")
         t.delete("1.0", "end")
-        for text, ok in CL.write(self.format(), self.colours_hex(), self.s["by"], self.s["use10"]):
+        for text, ok in CL.write(self.format(), self.colours_hex(), self.s["by"], self.uses10()):
             t.insert("end", text, () if ok else ("bad",))
         t.config(state="disabled")
 
+    def uses10(self):
+        """Channel 10 used: this image's own tick or the project's "Use channel 10"."""
+        return self.s["use10"] or self.app.all16()
+
     def set_use10(self, on):
         self.s["use10"] = on
-        if not on and self.s["colours"] > 15:
+        if not self.uses10() and self.s["colours"] > 15:
             self.s["colours"] = 15
         self.show_settings()
         self.show_gives()
@@ -574,7 +582,7 @@ class ImageWindow(tk.Toplevel):
     def copy_colours(self):
         from window.format_window import copy_colours
         if self.pal is not None and copy_colours(self, self.format(), self.colours_hex(), self.s["by"],
-                                                 self.s["use10"]):
+                                                 self.uses10()):
             self.app.status.config(text=tr("image.copied", name=self.format()["name"]))
 
     def edit_formats(self):
@@ -586,16 +594,16 @@ class ImageWindow(tk.Toplevel):
             self.show_settings()
             self.show_gives()
 
-        FormatWindow(self, self.colours_hex, lambda: self.s["by"], lambda: self.s["use10"], self.format()["name"],
+        FormatWindow(self, self.colours_hex, lambda: self.s["by"], self.uses10, self.format()["name"],
                      done)
 
     def paste_colours(self):
         from window.paste_window import PasteWindow
-        PasteWindow(self, self.s["by"], self.s["use10"], self.s["colours"], self.pasted)
+        PasteWindow(self, self.s["by"], self.uses10(), self.s["colours"], self.pasted)
 
     def pasted(self, slots, lock, alpha):
         """Paste colours' "Use these colours": the picture takes them (locked, or as a starting point)."""
-        n = max(2, min(16 if self.s["use10"] else 15, max(slots) + 1))
+        n = max(2, min(16 if self.uses10() else 15, max(slots) + 1))
         self.s["colours"] = n
         cols = {k: P.lin_of(h) for k, h in slots.items() if k < n}
         if lock:

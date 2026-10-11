@@ -15,7 +15,7 @@ from tkinter import filedialog, ttk, messagebox
 import numpy as np
 
 from files.lang import size as lang_size, tr
-from notes.areas import COLOURS
+from notes.areas import most_colours
 from notes.custom import CUSTOM_DEFAULTS, capped_colours, custom_note_count, tracks_apart
 from window import big_ask, look
 from window.help import Tips, open_help
@@ -92,7 +92,6 @@ DRAW_TOOLS = [("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"), 
               ("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q"), ("funnel", tr("app.funnel"), "n"),
               ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h"), ("picture", tr("app.picture"), "i")]
 MAX_POINT_BOXES = 40  # a curve with more points than this lists none in the panel (a line saying so instead)
-MANY_CHANNELS = 15  # a shape spread over more channels than this is shown orange in the shape list
 CHANNEL_CHOICES = [
     ("raw", tr("app.as_drawn"),
      tr("app.keeps_overlaps_every_note_exactly_as")),
@@ -123,7 +122,8 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks):
     # merged into the last (pasted notes keep their tracks)
     # (a Hz bass layer's notes clashing with another's: another channel, not another colour asked for)
     wanted = [0 if t is None or "notes" in sh else len(np.unique(np.asarray(t) % CLASH)) for sh, (_, t) in zip(shapes, got)]
-    got = [(n, capped_colours(t % CLASH) + t // CLASH * CLASH if w > COLOURS else t) for (n, t), w in zip(got, wanted)]
+    most = most_colours(all16)
+    got = [(n, capped_colours(t % CLASH, most) + t // CLASH * CLASH if w > most else t) for (n, t), w in zip(got, wanted)]
     # (pictures using channel 10 too: one setting for the project, kept with every picture)
     use10 = next((sh["picture"]["set"].get("use10", False) for sh in shapes if "picture" in sh), False)
     # (with all16 nothing skips channel 10: the other shapes' slots needn't stay off the pictures' channel 10)
@@ -1063,7 +1063,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         if self.channel_mode.get() == "auto" and len(self.rendered):
             pairs = np.unique(self.rendered[:, 5] * (self.slot_count + 1) + self.rendered[:, 4])
             chans = np.bincount(pairs // (self.slot_count + 1), minlength=len(self.shapes)).tolist()
-        self.fill_shape_list(counts, chans, MANY_CHANNELS)  # (an Add between group is one row: between_window.py)
+        # (an Add between group is one row: between_window.py)
+        self.fill_shape_list(counts, chans, most_colours(self.all16()))
         self.sync_list_selection()
         self.roll.request_redraw()
         self.update_status()
@@ -1123,8 +1124,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 start = np.argsort(np.ascontiguousarray(rendered[:, 0]), kind="stable")
                 if fast:
                     pics = np.array(["picture" in sh for sh in shapes], bool)
-                    order = ((sels, pics.tobytes(), len(pics)),
-                             painting_order(fast, rendered, start, sels, pics, key[2]))
+                    order = ((sels, pics.tobytes(), len(pics), bool(got[1])),
+                             painting_order(fast, rendered, start, sels, pics, key[2], got[1]))
                 job["drawn"] = (start, order)
                 job["got"] = got
             except Exception:  # (MemoryError too: made again the normal way, which tells about it; Stopped)
@@ -1191,6 +1192,15 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.shapes_changed()
         self.sync_custom()
         self.sync_colours()
+        d, im = getattr(self, "drawer", None), self.image_window  # (16 colours with "Use channel 10")
+        try:
+            if d is not None and d.winfo_exists():
+                d.draw_swatches()
+                d.show_colours_count()
+            if im is not None and im.winfo_exists():
+                im.show_settings()
+        except tk.TclError:
+            pass
         if self.hz_window:
             self.hz_window.show_clash(self.hz_window.target())  # (Multi channel only)
         if self.channel_mode.get() == "auto":

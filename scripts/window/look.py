@@ -176,7 +176,7 @@ PLAY_LINE = pick("#0a50e0", "#d6e8ff")  # (dark: pale blue, the bright notes' bl
 NOTES_DARK = [("#a3bef1", "#19449b"), ("#f7a39e", "#a51610"), ("#a6f4a0", "#36842b"), ("#f5e1a0", "#9c7b18"),
               ("#cea4ef", "#611b95"), ("#a6f4ef", "#328983"), ("#f7c59e", "#a54f10"), ("#ceccc7", "#605b55"),
               ("#f6a3ce", "#a31762"), ("#dff4a0", "#79931d"), ("#a5a9f0", "#1c2098"), ("#f5caa0", "#89592b"),
-              ("#a6f4cc", "#35865a"), ("#f5a4ef", "#922887"), ("#a6d2ef", "#36617e")]
+              ("#a6f4cc", "#35865a"), ("#f5a4ef", "#922887"), ("#a6d2ef", "#36617e"), ("#5fc4b4", "#1d6b60")]
 SELECTED_DARK, DRAFT_DARK = ("#ffd196", "#b26402"), ("#a6f4a0", "#318926")
 HANDLE = pick("#0050d0", "#5b9bff")  # a shape's points and handles
 HANDLE_FILL = pick("#ffffff")  # inside them, and the white edge round handle lines

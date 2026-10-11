@@ -10,7 +10,7 @@ import numpy as np
 
 from files.lang import tr
 from notes.arc import arc_k, arc_points, ellipse_bezier
-from notes.areas import COLOURS, _maps, area_map, inside_loops  # (areas coloured by hand)
+from notes.areas import ALL_COLOURS, COLOURS, _maps, area_map, inside_loops  # (areas coloured by hand)
 from notes.faces import faces  # (what's filled when it isn't plain even-odd: fill_test)
 from notes.gaterange import RangeKeys, RangeRows, clean_range, range_grid  # (a spam gate going from one to another)
 from notes.bezier import sample
@@ -58,7 +58,8 @@ CUSTOM_FLAGS = ("union", "apart", "borders")
 # "shift" (step / time only, "Diagonal"): [s, m] = every m keys up from the shape's lowest, the turns start s
 # channels later, so one channel makes slanted lines; missing = [0, 1] (none).
 CYCLES = ("step", "key", "time")
-CYCLE_MAX = 15  # (15 note colours)
+CYCLE_MAX = 15  # (15 note colours; the Diagonal's shift stays within it)
+CYCLE_ALL = 16  # (the most channels to take turns over: 16 with "Use channel 10", the panel's box allows it then)
 
 
 def clean_cycle(c):
@@ -66,7 +67,7 @@ def clean_cycle(c):
     if not isinstance(c, dict) or c.get("by") not in CYCLES:
         return None
     try:
-        n = max(2, min(CYCLE_MAX, int(c.get("n", 2))))
+        n = max(2, min(CYCLE_ALL, int(c.get("n", 2))))
         every = c.get("every", 1)
         if c["by"] == "time":
             a, b = every if isinstance(every, (list, tuple)) and len(every) == 2 else (1, 4)
@@ -160,7 +161,7 @@ def clean_strokes(strokes):
                 out[-1]["src"] = st["src"]
             if st.get("role") in ROLES and out:
                 out[-1]["role"] = st["role"]
-            if isinstance(st.get("colour"), int) and 1 <= st["colour"] <= COLOURS and out:
+            if isinstance(st.get("colour"), int) and 1 <= st["colour"] <= ALL_COLOURS and out:
                 out[-1]["colour"] = st["colour"]
             layer = clean_layer(st.get("layer"))
             if layer and out:
@@ -2483,12 +2484,12 @@ def tracks_apart(sh):
             or has_areas(sh) and any(a[2] for a in sh["areas"]) or coloured_strokes(sh))
 
 
-def capped_colours(groups):
-    """A shape's groups (custom_notes_groups) kept to COLOURS colours (user: a shape never has more than 15, like a
-    MIDI player's colours; the outline and the shape's own fill count too): the groups past the 15th used are
-    merged into the 15th, so none wraps round onto another's colour."""
+def capped_colours(groups, most=COLOURS):
+    """A shape's groups (custom_notes_groups) kept to `most` colours (user: a shape never has more than 15, like a
+    MIDI player's colours, 16 with "Use channel 10": areas.most_colours; the outline and the shape's own fill count
+    too): the groups past the last one used are merged into it, so none wraps round onto another's colour."""
     ids = np.unique(groups)
-    return groups if len(ids) <= COLOURS else np.minimum(groups, ids[COLOURS - 1])
+    return groups if len(ids) <= most else np.minimum(groups, ids[most - 1])
 
 
 def merged_by_key(notes):

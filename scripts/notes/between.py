@@ -34,7 +34,7 @@ STEPS_DEFAULT = 10
 MOST_STEPS = 500
 STRAIGHT = [[0.0, 0.0], [1.0, 1.0]]
 SETTINGS_DEFAULT = {"steps": STEPS_DEFAULT, "graph": STRAIGHT, "rev": False, "colours": 15}
-COLOURS_MOST = 15
+COLOURS_MOST = 16  # (16 with "Use channel 10"; the window allows areas.most_colours)
 _made = {}  # remembered steps: (the pair, f) -> (the step, its fingerprint)
 
 
