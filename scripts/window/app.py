@@ -25,6 +25,7 @@ from notes.engine import (CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cache
                           render, shape_key, slot_track_channel)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
+from notes.gateflip import offered as gate_offered, turn_velocities, why_not as gate_why_not
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
 from notes.merge import velocity_reversed as merge_vrev
 from notes.sustain import is_sustained
@@ -1460,6 +1461,39 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                     sh.pop("fx", None)
         keep_pushes(self.shapes, sizes, lambda v: (-v[0], v[1]) if sideways else (v[0], -v[1]))
         self.roll.move_kept_box(lambda b, p: (mid2 - b, p) if sideways else (b, mid2 - p))  # (flips too)
+        self.sync_panel()
+        self.shapes_changed()
+
+    def gate_flip_state(self):
+        """The right-click "Gate aware flip" for the selected shapes: (shapes it switches, on: ticked, why: None or
+        why it's greyed), or None when no selected shape takes it (Hz bass, funnels, images: gateflip.offered)."""
+        shapes = [self.shapes[i] for i in sorted(self.sels) if i < len(self.shapes)]
+        shapes = [sh for sh in shapes if gate_offered(sh)]
+        if not shapes:
+            return None
+        on = [sh for sh in shapes if sh.get("gate_flip")]
+        if on:  # (switching off always works, even where it does nothing now)
+            return on, True, None
+        why = [gate_why_not(sh, self.ppq) for sh in shapes]
+        ok = [sh for sh, w in zip(shapes, why) if w is None]
+        if ok:
+            return ok, False, None
+        return [], False, next(w for w in ("aligned", "one_gate", "no_gates") if w in why)
+
+    def gate_flip(self):
+        """Right-click "Gate aware flip": the selected shapes' gates laid from the other side, or back (gateflip.py).
+        Their velocities turn round with it, like a flip."""
+        got = self.gate_flip_state()
+        if not got or not got[0]:
+            return
+        shapes, on, _ = got
+        self.push_undo(name=tr("app.gate_flip"))
+        for sh in shapes:
+            if on:
+                del sh["gate_flip"]
+            else:
+                sh["gate_flip"] = True
+            turn_velocities(sh)
         self.sync_panel()
         self.shapes_changed()
 

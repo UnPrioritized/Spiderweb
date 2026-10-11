@@ -264,6 +264,12 @@ class ShapeMenu:
              bool(app.clipboard) or app.shared_clip() is not None,
              keys=curve_keys and app.clip_kind != "stroke")
         m.add_separator()
+        gf = app.gate_flip_state()
+        if gf:  # (above the normal flips, ticked while on; greyed saying why in a few words, user)
+            self._gate_flip_var = tk.BooleanVar(value=gf[1])  # (kept: the tick shows)
+            m.add_checkbutton(label=tr("roll_menu.gate_flip_" + gf[2]) if gf[2] else tr("roll_menu.gate_flip"),
+                              variable=self._gate_flip_var, command=app.gate_flip,
+                              state="normal" if gf[0] else "disabled")
         item(tr("roll_menu.flip_sideways"), tr("roll_menu.ctrl_h"), lambda: app.flip(True, whole=True),
              keys=curve_keys and whole)
         item(tr("roll_menu.flip_upside_down"), tr("roll_menu.ctrl_j"), lambda: app.flip(False, whole=True),

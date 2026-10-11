@@ -28,6 +28,7 @@ from notes.claw import apply_claw
 from notes.fx import (clean_fx, flip_shape, groups, idle, mirrored, notes_box, reverse_velocity, swapped, toggled,
                       turn_notes, turn_pts, turn_shape, velocities)
 from notes.gaterange import clean_range
+from notes.gateflip import flipped_back, flipped_drawing, is_flipped as is_gate_flipped, mirror_beats
 from notes.merge import clean_merge, recipe_notes, reshaped_notes as merge_reshaped, turned_notes as merge_turned
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
@@ -165,6 +166,8 @@ def clean_shape(sh):
         out["align"] = sh.get("align") if sh.get("align") in ALIGNS else "auto"
         out["ends"] = sh.get("ends") if sh.get("ends") in ENDS else "drop"
         out.update({k: True for k in CUSTOM_FLAGS if sh.get(k) is True})
+        if sh.get("gate_flip") is True:  # its gates laid from the right (gateflip.py)
+            out["gate_flip"] = True
         try:  # the smallest outline gate in beats (custom.grow_inward)
             edge = float(sh.get("edge") or 0)
         except (TypeError, ValueError):
@@ -465,6 +468,10 @@ def fx_notes(sh, ppq, keys, get):
             return get(unflipped(sh))
         notes, tracks = get(bare_of(sh))
         return mirrored(notes, sh["_m"], notes_box(notes)), tracks
+    if is_gate_flipped(sh):  # (made from the drawing flipped, then flipped back: gateflip.py)
+        mid2 = mirror_beats(float(np.concatenate(cached_arrays(sh))[:, 0].max()))
+        notes, tracks = get(flipped_drawing(sh, mid2))
+        return with_glue(flipped_back(notes, mid2 * ppq), tracks, sh, ppq)
     return with_glue(*_notes_tracks(sh, ppq, keys), sh, ppq)
 
 
