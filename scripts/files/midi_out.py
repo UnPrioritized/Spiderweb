@@ -90,31 +90,22 @@ def _chunk(data):
     return b"MTrk" + struct.pack(">I", len(data)) + bytes(data)
 
 
-# "Use channel 10" (user, 2026-10-11): channel 10 marked as a normal instrument for synths that would play it as
-# drums: GM2 System On in the first track, then on each channel 10 track bank 121 (GM2's normal instruments) + the
-# piano. Measured 2026-10-11 (dev/scratch/ch10_marks.py): BASSMIDI follows only this (GS "use for rhythm part" off,
-# XG bank 0: still drums); Kestrel plays channel 10 as the piano anyway. Black MIDI players ignore both.
-GM2_ON = vlq(0) + bytes([0xF0, 0x05, 0x7E, 0x7F, 0x09, 0x03, 0xF7])
-PIANO_10 = bytes([0, 0xB9, 0, 121, 0, 0xB9, 32, 0, 0, 0xC9, 0])
 
-
-def write_midi(path, ppq, bpm, beats, notes, use10=False, melodic10=False):
+def write_midi(path, ppq, bpm, beats, notes, use10=False):
     """notes: [start, end, pitch, velocity, slot, ...]. Every slot gets its own track with a single channel
-    (use10: pictures use channel 10 too, slot_track_channel; melodic10: channel 10 marked as not drums, GM2_ON)."""
+    (use10: channel 10 used too, slot_track_channel). Nothing marks channel 10 as not drums (user, 2026-10-12: no
+    messages that could switch something on in their own setup)."""
     head = bytearray()
-    if melodic10:
-        head += GM2_ON
     head += vlq(0) + b"\xFF\x51\x03" + round(60_000_000 / bpm).to_bytes(3, "big")
     head += vlq(0) + bytes([0xFF, 0x58, 4, beats, 2, 24, 8])
     head += vlq(0) + b"\xFF\x2F\x00"
 
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
     count = int(notes[:, 4].max()) + 1 if len(notes) else 0
-    write_bytes(path, _pieces(notes, count, use10, b"MThd" + struct.pack(">IHHH", 6, 1, count + 1, ppq) + _chunk(head),
-                              melodic10))
+    write_bytes(path, _pieces(notes, count, use10, b"MThd" + struct.pack(">IHHH", 6, 1, count + 1, ppq) + _chunk(head)))
 
 
-def _pieces(notes, count, use10, start, melodic10=False):
+def _pieces(notes, count, use10, start):
     """write_midi's file as pieces, one track at a time (a big file is never whole in memory)."""
     yield start
     if count > 1:  # (one sort finds every track's notes, in their own order)
@@ -125,8 +116,6 @@ def _pieces(notes, count, use10, start, melodic10=False):
     for track in range(count):
         channel = slot_track_channel(track, use10)[1]
         events = track_events(notes if count == 1 else notes[order[cuts[track]:cuts[track + 1]]], channel)
-        if melodic10 and channel == 9:
-            events = [PIANO_10] + list(events)
         yield b"MTrk" + struct.pack(">I", sum(len(e) for e in events) + len(END))
         yield from events
         events = None

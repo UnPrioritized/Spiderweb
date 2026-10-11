@@ -152,7 +152,7 @@
  "app.split_any_notes_at_the_same": "Split: any notes at the same time",
  "app.use_ch10": "Use channel 10 (16 colours)",
  "app.use_ch10_off": "Channel 10 off: 15 colours",
- "app.use_ch10_tip": "Shapes may use channel 10 too, so there are 16 colours instead of 15.\nMany synths play channel 10 as drums. Generate MIDI marks it as a normal\nchannel, which many of them follow (some may still play drums there).\nBuilt-in BASSMIDI plays it as a piano. Saved with the project.",
+ "app.use_ch10_tip": "Shapes may use channel 10 too, so there are 16 colours instead of 15.\nMany synths play channel 10 as drums (black MIDI players stay silent there).\nBuilt-in BASSMIDI plays it as a piano. Saved with the project.",
  "app.same_key_shapes_only_get_split":"Same key: shapes only get split when they play the same key at the same time.\nAny notes: shapes get split whenever their notes play at the same time,\neven on different keys (e.g. two parallel lines, or lines starting on the\nsame tick). Shapes that follow one after another still share a channel.",
  "app.spiderweb": "Spiderweb {VERSION}",
  "app.live_shape_g": "Live shape (G)",
