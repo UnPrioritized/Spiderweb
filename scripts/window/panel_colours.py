@@ -76,7 +76,7 @@ class ColoursPanel:
             e.pack(side="left", padx=4)
             Scrub(self, [(e, var, lambda: self.on_cycle("shift"))], (1, 4 if i else 3, 1), lo, hi,
                   label=None if i else lb, drag_box=True)
-            Tooltip(e, tr("colours.shift_tip"))
+            e.mixed_tip = Tooltip(e, tr("colours.shift_tip"))  # (one tip: Mixed's sentence goes on top, sync_colours)
             ttk.Label(c, text=tr(unit)).pack(side="left")
             self.shift_entries.append(e)
         for e, var, what in ([(self.cycle_n_entry, self.cycle_n_var, "n")] +
@@ -119,8 +119,11 @@ class ColoursPanel:
         for e, var, values in zip(self.cycle_entries, self.cycle_vars, parts):
             same_or_blank(e, var, values)
         shifts = [c.get("shift", [0, 1]) for c in on] or [[0, 1]]
-        for i, (e, var) in enumerate(zip(self.shift_entries, self.shift_vars)):
-            same_or_blank(e, var, [s[i] for s in shifts])
+        # (the keys box: a Diagonal of 0 does nothing, so its keys don't make the box Mixed)
+        for e, var, values in zip(self.shift_entries, self.shift_vars,
+                                  ([s[0] for s in shifts], [s[1] for s in shifts if s[0]] or [shifts[0][1]])):
+            differ = same_or_blank(e, var, values)
+            e.mixed_tip.text = (tr("widgets.mixed_tip") + "\n\n" if differ else "") + tr("colours.shift_tip")
         restart = {c.get("rows") for c in on}
         self.cycle_rows_box.current([v for v, _ in ROW_CHOICES].index(next(iter(restart))) if len(restart) == 1 else 0)
         # (Spam / Outline spam only: greyed when none of the picked shapes is one, user; new shapes: any)

@@ -2240,13 +2240,36 @@ def range_gates(sh, notes, ppq):
     return g
 
 
-def cycle_turns(sh, notes, ppq):
+def shape_bottom(sh):
+    """The lowest key of a custom shape's box, even below the piano roll's keys (None: not one with a box)."""
+    pts = sh.get("pts")
+    if sh.get("kind") != "custom" or sh.get("merge") or not pts or len(pts) != 3:
+        return None
+    ps = [p for _, p in pts]
+    return min(ps + [ps[1] + ps[2] - ps[0]])
+
+
+def cycle_effect(c):
+    """A Colours setting as what it does: Diagonal / Each key row left out where they change nothing (Diagonal 0,
+    By key), so two that colour the same count as the same."""
+    if not c:
+        return c
+    c = dict(c)
+    if c["by"] == "key":
+        c.pop("rows", None)
+    if c["by"] == "key" or not (c.get("shift") or [0])[0]:
+        c.pop("shift", None)
+    return c
+
+
+def cycle_turns(sh, notes, ppq, bottom=None):
     """Which turn (0 .. n - 1) each (start, end, key) note gets (CYCLES). Spam steps are counted from the shape's
     first note (with the "aligned" start from tick 0, so they keep to the gate grid), at the shape's gate (a gate
     Range: its own gates, range_steps; Hz bass with placed tones: its repeats, hz_steps), each note in the step it
     starts nearest to; other notes: each start time is a step. "Each key row" (Spam / Outline spam only,
     row_restart_ok): counted again from each piece of a key row, from its first note or back from its last.
-    "Diagonal" (shift [s, m], not By key): every m keys up, s channels later."""
+    "Diagonal" (shift [s, m], not By key): every m keys up from the shape's lowest key, s channels later. bottom:
+    the lowest key of the drawing (a line's path), for a shape reaching below key 0 (its stripes move with it)."""
     c = sh["cycle"]
     s = notes[:, 0]
 
@@ -2254,7 +2277,11 @@ def cycle_turns(sh, notes, ppq):
         d, m = c.get("shift") or (0, 1)
         if not d or c["by"] == "key" or not len(notes):
             return k
-        return k + d * ((notes[:, 2] - notes[:, 2].min()).astype(np.int64) // m)
+        lo = int(notes[:, 2].min())
+        low = bottom if bottom is not None else shape_bottom(sh)
+        if lo <= 0 and low is not None:  # (cut off at key 0: counted from where the drawing really starts)
+            lo = min(lo, math.floor(low + 0.5))
+        return k + d * ((notes[:, 2] - lo).astype(np.int64) // m)
 
     rows = bool(c.get("rows")) and c["by"] != "key" and row_restart_ok(sh)
     back = c.get("rows") == "end"

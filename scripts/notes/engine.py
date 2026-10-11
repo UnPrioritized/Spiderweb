@@ -757,7 +757,7 @@ def _notes_tracks(sh, ppq, keys):
         keep = unique_index(raw)
         raw, spots = raw[keep], spots[keep]
         if cycling(sh) and len(raw):
-            tracks = cycle_turns(sh, raw, ppq)
+            tracks = cycle_turns(sh, raw, ppq, float(path[:, 1].min()))
         if sh.get("glue") or sh.get("fx"):  # the whole's glue / note tool pages first, on all its notes (sliced.py)
             raw, spots, tracks = whole_tools(sh, raw, spots, tracks, ppq)
         raw, spots, tracks = cut_through(sh, raw, spots, tracks, part, ppq)
@@ -788,7 +788,7 @@ def _notes_tracks(sh, ppq, keys):
     elif spots is None:
         raw = unique_rows(raw)
         if cycling(sh) and len(raw):  # "Colours" on a line / funnel
-            tracks = cycle_turns(sh, raw, ppq)
+            tracks = cycle_turns(sh, raw, ppq, float(path[:, 1].min()))
     vel = env_velocities(env, raw[:, 0], t_lo, t_hi)
     if sh["kind"] in HZ_KINDS and own is None and (sh.get("hz") or {}).get("tones"):  # Hz bass velocity effects
         got = velocity_parts(sh, ppq, raw[:, 0], raw[:, 2])

@@ -278,9 +278,22 @@ class Pair:
                 out["pattern"] = p
         for key in ("glue", "fx", "cycle"):  # (only when both have the same: the numbers change step by step, user)
             x, y = a.get(key), b.get(key)
+            if key == "cycle" and x and y:  # (Diagonal / Each key row missing at one end = 0 / Off: they blend)
+                x, y = _full_cycle(x), _full_cycle(y)
+                if alike(dict(x, rows=None), dict(y, rows=None)):  # (Each key row switches at the middle)
+                    out[key] = mix(x, y, f)
+                continue
             if x is not None and y is not None and alike(x, y):
                 out[key] = mix(x, y, f)
         return clean_shape(out)
+
+
+def _full_cycle(c):
+    """A Colours setting with Diagonal [0, 1] / Each key row False filled in where it has none (clean_cycle drops them
+    again), so a step can blend one end's into the other's."""
+    from notes.custom import cycle_effect
+    c = cycle_effect(c)
+    return dict(c, shift=c.get("shift", [0, 1]), rows=c.get("rows", False))
 
 
 def mix(a, b, f):

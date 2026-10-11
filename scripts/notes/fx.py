@@ -123,6 +123,8 @@ def flip_shape(sh, sideways, mid2):
             sh[key]["mirror"] = not sh[key]["mirror"]
     if sideways:  # the velocities flip with it
         reverse_velocity(sh)
+    elif (sh.get("cycle") or {}).get("shift"):  # (Colours' Diagonal slants the other way, user)
+        sh["cycle"] = dict(sh["cycle"], shift=[-sh["cycle"]["shift"][0], sh["cycle"]["shift"][1]])
     if sh.get("glue"):  # (its boxes are shares of the shape's box)
         sh["glue"] = glue_flipped(sh["glue"], sideways)
     for k in ("range", "range_kept"):  # (a spam gate range runs the other way, the one kept while off too; a

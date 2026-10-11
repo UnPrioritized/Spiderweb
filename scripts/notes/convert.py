@@ -15,7 +15,7 @@ import math
 
 from files.lang import tr
 from notes.bezier import anchor_count
-from notes.custom import (CUSTOM_FLAGS, add_stroke, custom_strokes, drawn_view, frame_to_bp, frame_to_uv,
+from notes.custom import (CUSTOM_FLAGS, add_stroke, cycle_effect,custom_strokes, drawn_view, frame_to_bp, frame_to_uv,
                           new_live_shape, stroke_bp)
 from notes.hzbass import left_edge, shifted_hz
 from notes.joined import is_joined, join_velocity
@@ -96,7 +96,8 @@ def shared_settings(shapes):
         vals = [sh.get(key) or None for sh in shapes]
         if not any(vals):
             continue
-        if all(v == vals[0] for v in vals) and (key != "glue" or vals[0] is True):
+        same = [cycle_effect(v) for v in vals] if key == "cycle" else vals  # (Colours: by what they do)
+        if all(v == same[0] for v in same) and (key != "glue" or vals[0] is True):
             keep[key] = json.loads(json.dumps(vals[0]))
         else:
             lost.append(tr(name))
