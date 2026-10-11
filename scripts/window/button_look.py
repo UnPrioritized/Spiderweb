@@ -16,7 +16,8 @@ KINDS = ("TButton", "TMenubutton", "Toolbutton", "TEntry", "TCombobox", "TSpinbo
 FRAMES = {"TButton": "Button.border", "TMenubutton": "Menubutton.border", "Toolbutton": "Toolbutton.border",
           "TEntry": "Entry.field", "TCombobox": "Combobox.field", "TSpinbox": "Spinbox.field"}
 CLAM_PIECES = tuple(FRAMES.values()) + ("Menubutton.indicator", "Combobox.downarrow", "Spinbox.uparrow",
-                                        "Spinbox.downarrow")
+                                        "Spinbox.downarrow", "Checkbutton.indicator")
+PREVIEW_KINDS = KINDS + ("TCheckbutton",)  # (the preview's tick box follows the style too: the app's go clam with it)
 EDGES = (1, 2, 3, 4)  # how thick the edges are, in pixels (System's own can't change: Tk draws none of it)
 RUNNING, RUNNING_EDGE = "system", 1  # the style showing (start)
 SYSTEM_THEME, SYSTEM_LAYOUTS, CLAM_LAYOUTS = "", {}, {}
@@ -24,15 +25,13 @@ PICTURES = []  # (kept: Tk forgets a picture nothing in Python holds)
 
 
 def read_style():
-    style = settings.get("look", "button")
+    style = str(settings.get("look", "button") or "").strip().lower()  # (edited by hand: any capitals)
     return style if style in STYLES else "system"
 
 
 def read_edge():
-    try:
-        edge = int(settings.get("look", "edge") or 1)
-    except ValueError:
-        return 1
+    from window.look import whole_number
+    edge = whole_number(settings.get("look", "edge") or 1)
     return edge if edge in EDGES else 1
 
 
@@ -47,7 +46,7 @@ def start(st):
     global RUNNING, RUNNING_EDGE, SYSTEM_THEME
     RUNNING, RUNNING_EDGE = shown_style(read_style()), read_edge()
     SYSTEM_THEME = st.theme_use()
-    for kind in KINDS:
+    for kind in PREVIEW_KINDS:
         SYSTEM_LAYOUTS[kind] = st.layout(kind)
         spec = st.tk.call("ttk::style", "theme", "settings", "clam", "ttk::style layout " + kind)
         CLAM_LAYOUTS[kind] = ttk._list_from_layouttuple(st.tk, st.tk.splitlist(spec))
@@ -57,7 +56,7 @@ def dress(st, target, style, p):
     """The colours of the buttons and boxes in the picked style (target "" = the app's own, "Preview." = the
     Settings preview's). Plain = the dark look's as it always was."""
     if target:  # (the preview may sit on the system's theme: everything clam's pieces read)
-        for kind in KINDS:
+        for kind in PREVIEW_KINDS:
             st.configure(target + kind, foreground=p["text"], background=p["window"], bordercolor=p["edge"],
                          fieldbackground=p["field"], insertcolor=p["text"], arrowcolor=p["text"],
                          focuscolor=p["edge"], selectbackground=p["pick"], selectforeground="#ffffff")
@@ -76,18 +75,29 @@ def dress(st, target, style, p):
         st.configure(target + name, lightcolor=p["field"], darkcolor=p["field"])
         st.map(target + name, fieldbackground=[("disabled", p["window"]), ("readonly", p["field"])],
                bordercolor=[("focus", p["focus"])])
+    # (the preview's dropdown, picked while it had the keyboard: its text showed white on white on the system's
+    # theme, user. No highlight there at all)
     st.map(target + "TCombobox", background=[("active", p["hot"])],
-           selectbackground=[("readonly", "!focus", p["field"])], selectforeground=[("readonly", "!focus", p["text"])])
+           selectbackground=[("readonly", p["field"]) if target else ("readonly", "!focus", p["field"])],
+           selectforeground=[("readonly", p["text"]) if target else ("readonly", "!focus", p["text"])])
     # the dropdown's / number box's arrow boxes (inside the box's own edge in the drawn styles)
     for name in ("TCombobox", "TSpinbox"):
         if style == "raised":
             st.configure(target + name, background=p["button"], lightcolor=p["hi"], darkcolor=p["lo"],
                          bordercolor=p["lo2"])
+            st.map(target + name, bordercolor=[("focus", p["lo2"])])
         elif style in ("outlined", "flat"):
             st.configure(target + name, background=p["field"], bordercolor=p["field"])
+            st.map(target + name, bordercolor=[("focus", p["field"])])
         else:
             st.configure(target + name, background=p["button"])
     st.map(target + "TSpinbox", background=[("active", p["hot"])])
+    if target:  # (the preview's tick box: clam's, as the app's are with any style but the system's own)
+        st.configure(target + "TCheckbutton", foreground=p["text"], background=p["window"],
+                     indicatorbackground=p["field"], indicatorforeground=p["text"], upperbordercolor=p["edge"],
+                     lowerbordercolor=p["edge"])
+        st.map(target + "TCheckbutton", background=[("active", p["tick_hot"])],
+               indicatorbackground=[("pressed", p["button"])])
 
 
 def ring_picture(st, fill, rings):

@@ -217,9 +217,6 @@ class SettingsWindow(tk.Toplevel):
         Tooltip(box, tr("look.preview_tip"))
         self.pv_fonts = {k: tkfont.Font(self, family=look.USUAL_FAMILY, size=9) for k in ("text", "heading", "hint")}
         self.pv_fonts["heading"].configure(weight="bold")
-        st = ttk.Style(self)
-        for name in ("TButton", "TCheckbutton", "TCombobox", "TSpinbox"):
-            st.configure("Preview." + name, font=self.pv_fonts["text"])
         self.pv_tick = tk.BooleanVar(self, value=True)
         ttk.Label(box, text=tr("look.preview_heading"), font=self.pv_fonts["heading"]).pack(anchor="w")
         ttk.Label(box, text=tr("look.preview_text"), font=self.pv_fonts["text"]).pack(anchor="w")
@@ -245,11 +242,9 @@ class SettingsWindow(tk.Toplevel):
         self.pv_widgets[3].set("120")
         for k, w in enumerate(self.pv_widgets):
             w.pack(side="left", padx=(0 if k == 0 else 8, 0))
-        # the usual paddings, to grow / shrink with the picked Size
-        self.pv_pads = {name: st.lookup(name, "padding") for name in ("TButton", "TCheckbutton", "TCombobox",
-                                                                       "TSpinbox")}
-        # (the dropdown's / number box's arrows too; the tick box's square has no size setting: it stays)
-        self.pv_arrows = {name: st.lookup(name, "arrowsize") for name in ("TCombobox", "TSpinbox")}
+        # each style's own paddings + arrow sizes, to grow / shrink with the picked Size (the tick box's square has
+        # no size setting: it stays)
+        self.pv_sizes = {}
         self.show_preview()
 
     def show_preview(self):
@@ -268,30 +263,28 @@ class SettingsWindow(tk.Toplevel):
         edge = self.picked_edge()
         self.look_edge_box.config(state="disabled" if style == "system" else "readonly")  # (it can't change those)
         target = f"Pv{style.title()}{edge}."
-        kinds = ("TButton", "TCombobox", "TSpinbox")
-        if style != "system":
-            button_look.dress(st, target, style, look.parts())
-        button_look.put_on(self, st, target, style, look.parts(), kinds, edge)
-        for name in kinds:
+        kinds = ("TButton", "TCheckbutton", "TCombobox", "TSpinbox")
+        if target not in self.pv_sizes:  # (made the first time this style is picked; its own paddings kept)
+            if style != "system":
+                button_look.dress(st, target, style, look.parts())
+            button_look.put_on(self, st, target, style, look.parts(), kinds, edge)
+
+            def usual(name, option):  # (Tk's own clam values for its styles: the system's theme may be running)
+                if style == "system":
+                    return st.lookup(target + name, option)
+                own = st.configure(target + name, option)
+                return own if own not in ("", None) else st.tk.call(
+                    "ttk::style", "theme", "settings", "clam", f"ttk::style lookup {name} -{option}")
+            self.pv_sizes[target] = {name: (usual(name, "padding"), usual(name, "arrowsize")) for name in kinds}
+        for w, name in zip(self.pv_widgets, kinds):
             st.configure(target + name, font=self.pv_fonts["text"])
-        for w, name in zip((self.pv_widgets[0], self.pv_widgets[2], self.pv_widgets[3]), kinds):
-            if str(w.cget("style")) != target + name:
-                w.configure(style=target + name)
-                if name != "TButton":  # (a new style leaves its text unshown until it's laid out again, user)
-                    w.set(w.get())
-        for name, pad in self.pv_pads.items():
-            if pad:
-                try:
-                    st.configure((target if name in kinds else "Preview.") + name, padding=[
-                        round(self.winfo_fpixels(p) * ratio) for p in self.tk.splitlist(str(pad))])
-                except tk.TclError:
-                    pass
-        for name, value in self.pv_arrows.items():
-            if value:
-                try:
-                    st.configure(target + name, arrowsize=round(self.winfo_fpixels(value) * ratio))
-                except tk.TclError:
-                    pass
+            w.configure(style=target + name)
+        for name, (pad, arrow) in self.pv_sizes[target].items():
+            if pad not in ("", None):
+                parts = pad if isinstance(pad, (tuple, list)) else self.tk.splitlist(str(pad))  # (Tk 9: a list)
+                st.configure(target + name, padding=[round(self.winfo_fpixels(str(p)) * ratio) for p in parts])
+            if arrow not in ("", None) and name in ("TCombobox", "TSpinbox"):
+                st.configure(target + name, arrowsize=round(self.winfo_fpixels(str(arrow)) * ratio))
 
     def font_search(self):
         """The Font box can be typed in (user): the list keeps only the fonts holding what's typed (starting with
@@ -330,8 +323,11 @@ class SettingsWindow(tk.Toplevel):
         def left(e):  # (focus going into its own open list doesn't count)
             def check():
                 focus = self.tk.call("focus")
-                if not str(focus).startswith(str(box)) and self.font_var.get() not in self.font_values:
-                    back()
+                if not str(focus).startswith(str(box)):
+                    if self.font_var.get() not in self.font_values:
+                        back()
+                    else:  # (a whole name typed: the whole list back too)
+                        box.config(values=self.font_values)
             self.after_idle(check)
 
         # typing while its list is open jumps to the first font starting with the letters typed (user; a pause of
@@ -388,6 +384,8 @@ class SettingsWindow(tk.Toplevel):
 
     def save_size(self):
         size, family, text = self.picked_size()
+        if self.font_var.get() in self.font_values:  # (not half typed, e.g. after Reset: the whole font list back)
+            self.look_font_box.config(values=self.font_values)
         try:
             settings.put("look", "size", size)
             settings.put("look", "font", family)

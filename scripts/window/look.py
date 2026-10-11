@@ -70,13 +70,19 @@ TK_FONTS = ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont", "TkCap
             "TkIconFont", "TkTooltipFont")
 
 
+def whole_number(value):
+    """A saved number as an int, also when edited by hand ("150.0", "150 %"); None = not a whole number."""
+    try:
+        number = float(str(value).strip().rstrip("%").strip())
+    except ValueError:
+        return None
+    return int(number) if number.is_integer() else None
+
+
 def read_size():
     """The Size picked: "system" or a percent (an int)."""
-    size = settings.get("look", "size", "system")
-    try:
-        return int(size) if int(size) in SIZES else "system"
-    except ValueError:
-        return "system"
+    size = whole_number(settings.get("look", "size", "system"))
+    return size if size in SIZES else "system"
 
 
 def read_font():
@@ -84,7 +90,7 @@ def read_font():
 
 
 def read_text():
-    text = settings.get("look", "text", "normal")
+    text = str(settings.get("look", "text", "normal")).strip().lower()
     return text if text in TEXT_STEPS else "normal"
 
 
@@ -93,10 +99,7 @@ LINE_WIDTHS = (1, 2, 3, 4)
 
 def read_lines():
     """Shape lines: how thick the shapes' lines are in the piano roll, in pixels (a selected one's a pixel more)."""
-    try:
-        width = int(settings.get("look", "lines") or 1)
-    except ValueError:
-        return 1
+    width = whole_number(settings.get("look", "lines") or 1)
     return width if width in LINE_WIDTHS else 1
 
 
@@ -386,13 +389,18 @@ def apply(root):
     style = button_look.RUNNING
     if style == "system":
         return
+    if not DARK:  # (the window grey = the system's own, which plain Tk widgets keep: #f0f0f0 on Windows)
+        try:
+            LIGHT_PARTS["window"] = "#%02x%02x%02x" % tuple(v >> 8 for v in root.winfo_rgb(root.cget("background")))
+        except (ttk.tkinter.TclError, ValueError):
+            pass
     p = parts()
     st.theme_use("clam")
     st.configure(".", background=p["window"], foreground=p["text"], fieldbackground=p["field"], bordercolor=p["edge"],
                  lightcolor=p["window"], darkcolor=p["window"], troughcolor=p["trough"], selectbackground=p["pick"],
                  selectforeground="#ffffff", insertcolor=p["text"], arrowcolor=p["text"], focuscolor=p["edge"])
     st.map(".", foreground=[("disabled", p["text_off"])], background=[("disabled", p["window"])])
-    button_look.dress(st, "", "plain", p)
+    button_look.dress(st, "", style, p)
     for name in ("TCheckbutton", "TRadiobutton"):
         st.configure(name, indicatorbackground=p["field"], indicatorforeground=p["text"], upperbordercolor=p["edge"],
                      lowerbordercolor=p["edge"])

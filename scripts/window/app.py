@@ -142,7 +142,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             pass
         s = self.scale = self.winfo_fpixels("1i") / 96  # match Windows display scaling
         self.geometry(f"{int(1400 * s)}x{int(820 * s)}")
-        self.minsize(int(1000 * s), int(600 * s))
+        # (never bigger than the screen: a big Size on a small screen put the window's edges off it)
+        self.minsize(min(int(1000 * s), int(self.winfo_screenwidth() * 0.9)),
+                     min(int(600 * s), int(self.winfo_screenheight() * 0.85)))
         self.autosave_path = autosave
 
         self.shapes = []

@@ -1019,7 +1019,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if math.hypot(x - lx, y - ly) >= 3:
                 pt = self.event_pt(SimpleNamespace(x=x, y=y, state=e.state), snap=False)
                 self.create_line(self.t2x(pts[-1][0]), self.p2y(pts[-1][1]), self.t2x(pt[0]), self.p2y(pt[1]),
-                                 fill=look.DRAFT_LINE, width=2)
+                                 fill=look.DRAFT_LINE, width=look.LINES + 1)  # (as the draft's redraw)
                 pts.append(pt)
                 lx, ly = x, y
         self.drag = ("free", lx, ly, since)

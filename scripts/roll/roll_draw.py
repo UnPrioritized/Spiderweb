@@ -1292,7 +1292,9 @@ class RollDrawing:
                 # a long thick line: Windows paints thick lines with thousands of points very slowly (seconds),
                 # thin ones quickly, so it's the thin line a few times, a pixel apart (2 px wide: three times)
                 self.create_line(*coords, fill=color, width=1, dash=dash)
-                for dx, dy in [(k, 0) for k in range(1, width)] + [(0, k) for k in range(1, width)]:
+                # (spread to both sides, centred like a real thick line: 4 px = -1 .. +2)
+                shifts = [k for k in range(-((width - 1) // 2), width // 2 + 1) if k]
+                for dx, dy in [(k, 0) for k in shifts] + [(0, k) for k in shifts]:
                     self.create_line(*[v + (dx if n % 2 == 0 else dy) for n, v in enumerate(coords)], fill=color,
                                      width=1, dash=dash)
         if sh["kind"] == "custom" and sh.get("fill") in ("fill", "spam"):
