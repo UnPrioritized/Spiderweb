@@ -91,9 +91,8 @@ class SustainWindow(tk.Toplevel):
                              tr("sustain.auto", n=n))
 
     def auto_of(self, t):
-        """Shape t's Auto gap in ticks (from its notes without Sustain, each colour on its own)."""
-        notes, tracks = self.app.notes_tracks({k: v for k, v in t.items() if k != "sustain"})
-        return auto_gap(np.asarray(notes), tracks)
+        """Shape t's Auto gap in ticks (from its notes without Sustain)."""
+        return auto_gap(np.asarray(self.app.notes_of({k: v for k, v in t.items() if k != "sustain"})))
 
     def state(self):
         return json.dumps([self.on_var.get(), self.mode.get(), self.gap_var.get()])

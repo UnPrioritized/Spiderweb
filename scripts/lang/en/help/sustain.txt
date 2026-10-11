@@ -10,7 +10,7 @@ Sustain comes last, after the outline gate, Colours, glue and the Claw machine /
 
 Channels: a sustained shape keeps its overlaps in every Channels mode, even Single channel. Other shapes still fix their own overlaps, and their notes end where a sustained note on the same key starts.
 
-Each colour is held on its own: a note is held only over the notes of its own colour on that key.
+Colours don't split a group: with Colours taking turns along a key, the whole row is still held, the colours piling up on top of each other.
 
 A Hz bass and an image can't be sustained: holding a Hz bass's repeats would ruin the sound, and an image's notes are its picture.
 
