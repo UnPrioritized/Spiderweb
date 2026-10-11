@@ -25,7 +25,8 @@ from notes.engine import (CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cache
                           render, shape_key, slot_track_channel)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
-from notes.gateflip import offered as gate_offered, turn_velocities, why_not as gate_why_not
+from notes.gateflip import (is_flipped as is_gate_flipped, offered as gate_offered, turn_velocities,
+                            why_not as gate_why_not)
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
 from notes.merge import velocity_reversed as merge_vrev
 from notes.sustain import is_sustained
@@ -127,7 +128,7 @@ def all_notes(shapes, ppq, keys, mode, split, notes_tracks):
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
                              ["picture" in sh for sh in shapes], use10, between_turns(shapes),
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
-                             [is_sustained(sh) for sh in shapes])
+                             [is_sustained(sh) for sh in shapes], [is_gate_flipped(sh) for sh in shapes])
     return wanted, use10, rendered, slots
 
 
@@ -1474,7 +1475,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         on = [sh for sh in shapes if sh.get("gate_flip")]
         if on:  # (switching off always works, even where it does nothing now)
             return on, True, None
-        why = [gate_why_not(sh, self.ppq) for sh in shapes]
+        why = [gate_why_not(sh, self.notes_of(sh)) for sh in shapes]
         ok = [sh for sh, w in zip(shapes, why) if w is None]
         if ok:
             return ok, False, None

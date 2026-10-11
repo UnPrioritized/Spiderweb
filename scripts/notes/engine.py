@@ -28,7 +28,7 @@ from notes.claw import apply_claw
 from notes.fx import (clean_fx, flip_shape, groups, idle, mirrored, notes_box, reverse_velocity, swapped, toggled,
                       turn_notes, turn_pts, turn_shape, velocities)
 from notes.gaterange import clean_range
-from notes.gateflip import flipped_back, flipped_drawing, is_flipped as is_gate_flipped, mirror_beats
+from notes.gateflip import flipped_back, flipped_drawing, is_flipped as is_gate_flipped, mirror_ticks
 from notes.merge import clean_merge, recipe_notes, reshaped_notes as merge_reshaped, turned_notes as merge_turned
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
@@ -469,9 +469,9 @@ def fx_notes(sh, ppq, keys, get):
         notes, tracks = get(bare_of(sh))
         return mirrored(notes, sh["_m"], notes_box(notes)), tracks
     if is_gate_flipped(sh):  # (made from the drawing flipped, then flipped back: gateflip.py)
-        mid2 = mirror_beats(float(np.concatenate(cached_arrays(sh))[:, 0].max()))
-        notes, tracks = get(flipped_drawing(sh, mid2))
-        return with_glue(flipped_back(notes, mid2 * ppq), tracks, sh, ppq)
+        ticks = mirror_ticks(sh, float(np.concatenate(cached_arrays(sh))[:, 0].max()), ppq)
+        notes, tracks = get(flipped_drawing(sh, ticks / ppq))
+        return with_glue(flipped_back(notes, ticks), tracks, sh, ppq)
     return with_glue(*_notes_tracks(sh, ppq, keys), sh, ppq)
 
 
@@ -814,12 +814,13 @@ def _notes_tracks(sh, ppq, keys):
 
 # ---------------------------------------------------------------- overlaps and channels
 
-def assign_slots(note_lists, split="key", apart=()):
+def assign_slots(note_lists, split="key", apart=(), first=None):
     """
     Auto channels: shapes whose notes overlap get different slots, shapes that don't clash reuse the lowest
     free one. Earlier shapes get the lower slots. split="key": only notes on the same key at the same time
     clash; split="time": any notes sounding at the same time clash, whatever their key.
     apart: groups of note list numbers that always get different slots (a custom shape's outline and inside).
+    first: per list None, or the tick to count it as starting at instead (a gate aware flip's colours: mirrored).
     """
     n = len(note_lists)
     busy = range(n)
@@ -845,7 +846,8 @@ def assign_slots(note_lists, split="key", apart=()):
         for a in group:
             clashes[a] |= set(group) - {a}
 
-    first = [int(notes[:, 0].min()) if len(notes) else math.inf for notes in note_lists]
+    first = [f if f is not None else int(notes[:, 0].min()) if len(notes) else math.inf
+             for notes, f in zip(note_lists, first or [None] * n)]
     order = sorted(range(n), key=lambda i: (first[i], i))
     slots, done = [0] * n, set()
     for i in order:
@@ -1008,7 +1010,7 @@ SPLITS = ("key", "time")
 
 
 def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None, pastes=None,
-           held=None):
+           held=None, back=None):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -1028,12 +1030,17 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     one track of all the pieces of a paste is ONE unit, so it keeps one channel across them.
     held: per shape True if it's sustained (sustain.py): its notes keep their overlaps in every mode, and other
     shapes' notes end where one of its notes on their key and slot starts.
+    back: per shape True if its gates are laid from the right (gateflip.py): with "auto" its tracks get channels in
+    the mirrored order, as if each started where its mirror image would (the colour at the right edge = the one
+    the left edge has without it).
     """
     pastes = pastes or [None] * len(note_lists)
     tracks = tracks or [None] * len(note_lists)
     apart = apart or [False] * len(note_lists)
     fixed = fixed or [False] * len(note_lists)
     teams = teams or [None] * len(note_lists)
+    back = back or [False] * len(note_lists)
+    firsts = []  # (per unit: None, or the tick it counts as starting at: assign_slots first)
     pinned = [np.asarray(tr, np.int64) if fx and tr is not None else None for tr, fx in zip(tracks, fixed)]
     top = max([int(p.max()) + 1 for p in pinned if p is not None and len(p)] or [0])
     if mode == "auto":
@@ -1076,10 +1083,15 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
             unit_of.append(len(units) + which)
             if sep:
                 forced.append(range(len(units), len(units) + len(ids)))
-            units += [lst[which == k] for k in range(len(ids))]
+            mine = [lst[which == k] for k in range(len(ids))]
+            if back[len(unit_of) - 1]:  # (mirrored: a track starts where its latest end would be, flipped)
+                lo_hi = int(lst[:, 0].min()) + int(lst[:, 1].max())
+                firsts += [None] * (len(units) - len(firsts)) + [lo_hi - int(u[:, 1].max()) for u in mine]
+            units += mine
         forced += [us for us in team_units.values() if len(us) > 1]
         forced += [us for us in paste_units.values() if len(us) > 1]  # (pasted tracks: always apart, tracks_apart)
-        unit_slots = np.array(assign_slots(units, split, forced), np.int64)
+        firsts += [None] * (len(units) - len(firsts))
+        unit_slots = np.array(assign_slots(units, split, forced, firsts), np.int64)
         if use10:  # (0..8, 10..24, 26..40...: never a slot that is channel 10)
             unit_slots = unit_slots + (unit_slots + 6) // 15
         slot_of = [pin if u is None else unit_slots[u] for u, pin in zip(unit_of, pinned)]
