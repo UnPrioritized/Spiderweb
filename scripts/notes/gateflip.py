@@ -46,9 +46,20 @@ def why_not(sh, notes, tracks=None):
     return None
 
 
+def parts(sh):
+    """The shapes the menu item switches for sh: a merged shape's parts (Gate sensitive merge: its notes are made
+    from them, merged again after, like the custom panel's settings: user saw the setting lost), else sh itself."""
+    if sh.get("merge"):
+        return [q for p in sh["merge"]["parts"] for q in parts(p)]
+    return [sh]
+
+
 def colours_back(sh):
-    """True if sh's colours get their channels in mirrored order (engine.render back): it's gate flipped, a sliced
-    piece of a drawn shape too."""
+    """True if sh's colours get their channels in mirrored order (engine.render back) and the Shapes list says so:
+    it's gate flipped (a sliced piece of a drawn shape too; a merged shape: every part that takes it)."""
+    if sh.get("merge"):
+        ps = [p for p in parts(sh) if p.get("gate_flip") is not None or is_pasted(p) or p.get("fill") in SPAM_FILLS]
+        return bool(ps) and all(colours_back(p) for p in ps)
     return sh.get("gate_flip") is True and sh["kind"] == "custom" and (
         is_pasted(sh) or sh.get("fill") in SPAM_FILLS and not any(k in sh for k in NOT_DRAWN))
 

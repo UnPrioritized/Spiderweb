@@ -25,7 +25,8 @@ from notes.engine import (CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cache
                           render, shape_key, slot_track_channel)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
-from notes.gateflip import colours_back, offered as gate_offered, turn_velocities, why_not as gate_why_not
+from notes.gateflip import (colours_back, offered as gate_offered, parts as gate_parts, turn_velocities,
+                            why_not as gate_why_not)
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
 from notes.merge import velocity_reversed as merge_vrev
 from notes.sustain import is_sustained
@@ -1468,7 +1469,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def gate_flip_state(self):
         """The right-click "Gate aware flip" for the selected shapes: (shapes it switches, on: ticked, why: None or
         why it's greyed), or None when no selected shape takes it (Hz bass, funnels, images: gateflip.offered)."""
-        shapes = [self.shapes[i] for i in sorted(self.sels) if i < len(self.shapes)]
+        shapes = [p for i in sorted(self.sels) if i < len(self.shapes) for p in gate_parts(self.shapes[i])]
         shapes = [sh for sh in shapes if gate_offered(sh)]
         if not shapes:
             return None
@@ -1495,6 +1496,10 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             else:
                 sh["gate_flip"] = True
             turn_velocities(sh)
+        for i in sorted(self.sels):  # (a merged shape's own velocity line, when drawn on it, turns round too)
+            sh = self.shapes[i]
+            if sh.get("merge") and not sh.get("own_vel") and any(p in shapes for p in sh["merge"]["parts"]):
+                turn_velocities(sh)
         self.sync_panel()
         self.shapes_changed()
         if not on:
