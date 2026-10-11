@@ -1186,6 +1186,9 @@ class FxPane:
         b.pack(anchor="e")
 
         def mode():
+            i = pick.current()  # (the place: names alike stay apart; a watcher on how runs before the box's text
+            if 0 <= i < len(texts) and texts[i] == how.get():  # follows, so the word decides when they differ)
+                return modes[i]
             return modes[texts.index(how.get())] if how.get() in texts else None
 
         def switched(*_):

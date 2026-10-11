@@ -27,7 +27,7 @@ from tkinter import font as tkfont, ttk
 
 import numpy as np
 
-from files.lang import tr
+from files.lang import english_width, tr
 from files.mathexpr import calc, fmt
 from notes.hzbass import (ARP, ARP_PATTERNS, BLEND, CHORDS, CRUSH, DETUNE, FAST, GLIDE_CURVE, GROUPS, GROWL, LFO, LOOP,
                           MODES, OFF_BOXES, OFF_PITCH, OSC2, PITCH, RACK, RATE_TOP, SCALES, SOFT, START_COUNT,
@@ -780,7 +780,7 @@ class SynthKnobs:
             dark_list(cb)
             cb.pack(pady=(12, 0))
             cb.bind("<<ComboboxSelected>>", lambda e: (
-                self.change("voice", "same", self.same_names.index(self.same_var.get()) == 1),
+                self.change("voice", "same", e.widget.current() == 1),
                 self.keyboard_back(e.widget)))
             Tooltip(cb, tr("hz.synth_tip_voices_on"))
         else:
@@ -836,13 +836,15 @@ class SynthKnobs:
         cell = ttk.Frame(box, style="Synth.Box.TFrame")
         cell.grid(row=0, column=0, padx=6, sticky="n")
         ttk.Label(cell, text=tr("hz.synth_timing"), style="Synth.Box.TLabel").pack()
-        names = [tr(f"hz.synth_timing_{t}") for t in TIMINGS]
+        def make():
+            return [tr(f"hz.synth_timing_{t}") for t in TIMINGS]
+        names = make()
         var = tk.StringVar(value=names[0])
         cb = ttk.Combobox(cell, textvariable=var, values=names, state="readonly",
-                          width=max(len(n) for n in names) + 1, style="Synth.TCombobox")
+                          width=english_width(make), style="Synth.TCombobox")
         dark_list(cb)
         cb.pack(pady=(12, 0))
-        cb.bind("<<ComboboxSelected>>", lambda e: (self.on_timing(name, TIMINGS[names.index(var.get())]),
+        cb.bind("<<ComboboxSelected>>", lambda e: (self.on_timing(name, TIMINGS[e.widget.current()]),
                                                     self.keyboard_back(e.widget)))
         Tooltip(cb, tr("hz.synth_tip_timing"))
         self.timing_picks[name] = (var, names)
@@ -884,7 +886,7 @@ class SynthKnobs:
         cb.pack(pady=(12, 0))
         key = "mode" if name == "wave" else "osc2_mode"
         cb.bind("<<ComboboxSelected>>", lambda e: (
-            self.sweep_on(key), self.change(name, key, MODE_NAMES[names.index(var.get())]),
+            self.sweep_on(key), self.change(name, key, MODE_NAMES[e.widget.current()]),
             self.keyboard_back(e.widget)))
         Tooltip(cb, (tr("hz.synth_tip_osc2_mode") + "\n" if name == "osc2" else "") + tr("hz.synth_tip_mode"))
         self.mode_cells[name] = {}
@@ -910,7 +912,7 @@ class SynthKnobs:
             dark_list(cb)
             cb.pack(pady=(2, 0))
             cb.bind("<<ComboboxSelected>>", lambda e, key=key, names=names, ids=ids, var=var: (
-                self.sweep_on(key), self.change("osc2", key, ids[names.index(var.get())]),
+                self.sweep_on(key), self.change("osc2", key, ids[e.widget.current()]),
                 self.keyboard_back(e.widget)))
             Tooltip(cb, tr(tip))
             setattr(self, f"{key}_pick", (var, names, ids))
@@ -1043,20 +1045,22 @@ class SynthKnobs:
         cell = ttk.Frame(box, style="Synth.Box.TFrame")
         cell.grid(row=0, column=col, padx=6, sticky="n")
         ttk.Label(cell, text=tr(f"hz.synth_arp_{what}"), style="Synth.Box.TLabel").pack()
-        names = ([NOTE_NAMES[i] for i in ids] if what == "root"  # (C, C#...: as on the piano roll's keys)
-                 else [tr(f"hz.synth_arp_{what}_{i}") for i in ids])
+        def make():
+            return ([NOTE_NAMES[i] for i in ids] if what == "root"  # (C, C#...: as on the piano roll's keys)
+                    else [tr(f"hz.synth_arp_{what}_{i}") for i in ids])
+        names = make()
         var = tk.StringVar(value=names[0])
         cb = ttk.Combobox(cell, textvariable=var, values=names, state="readonly",
-                          width=max(len(n) for n in names) + 1, style="Synth.TCombobox")
+                          width=english_width(make), style="Synth.TCombobox")
         dark_list(cb)
         cb.pack(pady=(12, 0))
         cb.bind("<<ComboboxSelected>>", lambda e: (self.sweep_on("arp_"), self.change(
-            "arp", f"arp_{what}", ids[names.index(var.get())]), self.keyboard_back(e.widget)))
+            "arp", f"arp_{what}", ids[e.widget.current()]), self.keyboard_back(e.widget)))
         Tooltip(cb, tr(f"hz.synth_tip_arp_{what}"))
         setattr(self, f"arp_{what}_pick", (var, names, ids))
 
     def on_wave(self):
-        self.change("wave", "wave", WAVE_NAMES[self.wave_names.index(self.wave_var.get())])
+        self.change("wave", "wave", WAVE_NAMES[self.wave_pick.current()])  # (the place: names alike stay apart)
 
     def change(self, box, key, value):
         """One knob's value set: one undo step."""

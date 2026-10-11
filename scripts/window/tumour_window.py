@@ -154,7 +154,7 @@ class TumourWindow(tk.Toplevel):
         var = self.vars[key] = tk.StringVar()
         c = ttk.Combobox(parent, textvariable=var, state="readonly", width=width, values=[t for _, t in choices])
         c.pack(side="left", padx=(5, 0))
-        c.bind("<<ComboboxSelected>>", lambda e: self.set(key, next(v for v, t in choices if t == var.get())))
+        c.bind("<<ComboboxSelected>>", lambda e: self.set(key, choices[e.widget.current()][0]))  # (by place)
         if key in TIPS:
             Tooltip(c, TIPS[key])
         self.widgets.append(c)

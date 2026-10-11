@@ -46,7 +46,7 @@ class PatternPanel:
             cb = ttk.Combobox(sym_row, textvariable=sym, values=names, state="readonly",
                               width=max(len(n) for n in names))
             cb.pack(side="left", padx=(5, 0))
-            cb.bind("<<ComboboxSelected>>", lambda e, l=layer: self.on_formula_sym(l))
+            cb.bind("<<ComboboxSelected>>", lambda e, l=layer: self.on_formula_sym(l, e.widget.current()))
             for w in (lb, cb):
                 Tooltip(w, tr("pattern_dialog.sym_tip"))
             # (only while the Loops box is at the most, user)
@@ -221,11 +221,13 @@ class PatternPanel:
         elif not most and ui["most"].winfo_manager():
             ui["most"].pack_forget()
 
-    def on_formula_sym(self, layer):
+    def on_formula_sym(self, layer, picked=-1):
+        """picked = the place in the list (two choices translated alike stay apart); -1: found by its word."""
         if self._loading:
             return
         text = self.formula_ui[layer]["sym"].get()
-        mode = next(value for value, key in SYM_CHOICES if tr(key) == text) or None
+        mode = (SYM_CHOICES[picked][0] if picked >= 0 else
+                next(value for value, key in SYM_CHOICES if tr(key) == text)) or None
         tgts = [h for h in self.with_layer(layer) if h[layer].get("sym") != mode]
         if not tgts:
             return

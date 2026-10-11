@@ -130,5 +130,6 @@ class PolygonPanel:
     def on_polygon_style(self):
         if self._loading:
             return
-        self.set_polygon("style", STYLES[STYLE_NAMES.index(self.polygon_style.get())])
+        picked = self.polygon_style_box.current()  # (the place: two choices translated alike stay apart)
+        self.set_polygon("style", STYLES[picked if picked >= 0 else STYLE_NAMES.index(self.polygon_style.get())])
 

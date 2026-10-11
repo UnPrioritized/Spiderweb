@@ -38,7 +38,7 @@ def fit_dropdown(cb):
     if not isinstance(cb, ttk.Combobox) or getattr(cb, "keep_width", False):
         return
     try:
-        values = tuple(str(v) for v in cb.cget("values"))
+        values = tuple(str(v) for v in cb.cget("values")) + tuple(getattr(cb, "fit_also", ()))
         if not values or getattr(cb, "fitted_for", None) == values:
             return
         cb.fitted_for = values
@@ -194,6 +194,10 @@ def show_mixed(box, mixed, tip=None, text=""):
     tip: its tooltip, which then starts with the shared sentence (text = its usual text)."""
     if mixed:
         box.set(tr("widgets.mixed"))
+        if not getattr(box, "fit_also", ()):  # (the shared word fits too: a long translation of it isn't cut)
+            box.fit_also = (tr("widgets.mixed"),)
+            box.fitted_for = None
+            fit_dropdown(box)
     if tip is not None:
         tip.text = (tr("widgets.mixed_tip") + "\n\n" + text if text else tr("widgets.mixed_tip")) if mixed else text
 

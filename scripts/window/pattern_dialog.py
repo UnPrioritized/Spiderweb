@@ -221,7 +221,7 @@ class FormulaDialog(tk.Toplevel):
         cb = ttk.Combobox(row, textvariable=self.sym, values=names, state="readonly",
                           width=max(len(n) for n in names))
         cb.pack(side="left", padx=(5, 0))
-        cb.bind("<<ComboboxSelected>>", lambda e: self.on_sym())
+        cb.bind("<<ComboboxSelected>>", lambda e: self.on_sym(e.widget.current()))
         for w in (lb, cb):
             Tooltip(w, tr("pattern_dialog.sym_tip"))
         r += 1
@@ -436,11 +436,14 @@ class FormulaDialog(tk.Toplevel):
         """ValueError if p's formulas can't be worked out."""
         formula_shape(p) if self.layer == "shape" else formula_loop(p)
 
-    def on_sym(self):
-        """Symmetric halves picked: the formula's first half makes the second (one edited by hand too)."""
+    def on_sym(self, picked=-1):
+        """Symmetric halves picked: the formula's first half makes the second (one edited by hand too). picked = the
+        place in the list (two choices translated alike stay apart); -1: found by its word."""
         if self._loading:
             return
-        mode = SYM_CHOICES[[tr(key) for _, key in SYM_CHOICES].index(self.sym.get())][0] or None
+        if picked < 0:
+            picked = [tr(key) for _, key in SYM_CHOICES].index(self.sym.get())
+        mode = SYM_CHOICES[picked][0] or None
         if mode == self.pat.get("sym"):
             return
         if mode:

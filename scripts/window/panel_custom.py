@@ -104,7 +104,7 @@ class CustomPanel:
                                     width=8)
                 drop.grid(row=row, column=1, sticky="w", padx=(14, 0))
                 drop.bind("<<ComboboxSelected>>", lambda e: (
-                    self.set_custom("apart", self.apart_var.get() == APART_CHOICES[1]), self.roll.focus_set()))
+                    self.set_custom("apart", e.widget.current() == 1), self.roll.focus_set()))
                 self.apart_boxes[value], self.apart_tips[value] = drop, Tooltip(drop, APART_TIP)
         # the rows under the choices: only the ones that do something for the chosen Inside are shown, so the
         # panel grows as options are picked (user; show_custom_rows)

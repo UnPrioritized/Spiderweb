@@ -150,7 +150,7 @@ def often_box(parent, updates, width=26):
     var.set(names[updates.often or "launch"])
     box = ttk.Combobox(parent, textvariable=var, values=list(names.values()), state="readonly", width=width)
     box.bind("<<ComboboxSelected>>",
-             lambda e: updates.set_often(next(k for k, n in names.items() if n == var.get())))
+             lambda e: updates.set_often(list(names)[e.widget.current()]))  # (the place: alike words stay apart)
     return box
 
 

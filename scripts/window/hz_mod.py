@@ -14,7 +14,7 @@ from tkinter import ttk
 
 import numpy as np
 
-from files.lang import tr
+from files.lang import english_width, tr
 from files.mathexpr import calc, fmt
 from notes.hzbass import (LFO_RATES, MOD_ENV, MOD_ENVS, MOD_LINKS, MOD_NEED_LINE, MOD_SETTINGS, NEUTRAL, WAVES,
                           MOD_LFO_MODES, MOD_LFO_SHAPES, MOD_LFOS, MOD_SOURCES, TIMINGS, adsr_line, line_at, loop_shape,
@@ -172,6 +172,8 @@ class SynthMod:
             self.mod_knob_keys = list(MOD_KNOBS)
             self.mod_knob_names = [self.knob_label(k) for k in self.mod_knob_keys]
             self.mod_src_names = [source_name(src) for src in MOD_SOURCES]
+            self.mod_widths = (english_width(lambda: [source_name(src) for src in MOD_SOURCES]),  # (English size)
+                               english_width(lambda: [self.knob_label(k) for k in self.mod_knob_keys]))
             heads = ("hz.synth_mod_col_source", "hz.synth_mod_col_knob", "hz.synth_mod_col_amount", "", "")
             for col, head in enumerate(heads):
                 ttk.Label(self.mod_rows, text=tr(head) if head else "", style="Synth.Box.Dim.TLabel").grid(
@@ -196,19 +198,19 @@ class SynthMod:
         r, src_names, knob_names = i + 1, self.mod_src_names, self.mod_knob_names
         src_var = tk.StringVar()
         a = ttk.Combobox(self.mod_rows, textvariable=src_var, values=src_names, state="readonly",
-                         width=max(len(n) for n in src_names) + 1, style="Synth.TCombobox")
+                         width=self.mod_widths[0], style="Synth.TCombobox")
         dark_list(a)
         a.grid(row=r, column=0, sticky="w", padx=(0, 10), pady=2)
         a.bind("<<ComboboxSelected>>", lambda e: (
-            self.mod_row_set(i, "from", MOD_SOURCES[src_names.index(src_var.get())]), self.keyboard_back(e.widget)))
+            self.mod_row_set(i, "from", MOD_SOURCES[e.widget.current()]), self.keyboard_back(e.widget)))
         Tooltip(a, tr("hz.synth_tip_mod_col_source"))
         knob_var = tk.StringVar()
         b = ttk.Combobox(self.mod_rows, textvariable=knob_var, values=knob_names, state="readonly",
-                         width=max(len(n) for n in knob_names) + 1, style="Synth.TCombobox")
+                         width=self.mod_widths[1], style="Synth.TCombobox")
         dark_list(b)
         b.grid(row=r, column=1, sticky="w", padx=(0, 10), pady=2)
         b.bind("<<ComboboxSelected>>", lambda e: (
-            self.mod_row_set(i, "knob", self.mod_knob_keys[knob_names.index(knob_var.get())]),
+            self.mod_row_set(i, "knob", self.mod_knob_keys[e.widget.current()]),
             self.keyboard_back(e.widget)))
         Tooltip(b, tr("hz.synth_tip_mod_col_knob"))
         cell = ttk.Frame(self.mod_rows, style="Synth.Box.TFrame")
@@ -329,16 +331,17 @@ class SynthMod:
         cell.grid(row=0, column=col, padx=6, sticky="n")
         label = "hz.synth_timing" if what == "timing" else f"hz.synth_mod_{what}"
         ttk.Label(cell, text=tr(label), style="Synth.Box.TLabel").pack()
-        names = [tr(f"hz.synth_timing_{i}" if what == "timing" else f"hz.fx_shape_{i}" if what == "shape"
-                    else f"hz.synth_mod_mode_{i}") for i in ids]
-        if what == "shape":  # (short: the box stays small)
-            names = [n.split(" (")[0] for n in names]
+        def make():
+            names = [tr(f"hz.synth_timing_{i}" if what == "timing" else f"hz.fx_shape_{i}" if what == "shape"
+                        else f"hz.synth_mod_mode_{i}") for i in ids]
+            return [n.split(" (")[0] for n in names] if what == "shape" else names  # (short: the box stays small)
+        names = make()
         var = tk.StringVar(value=names[0])
         cb = ttk.Combobox(cell, textvariable=var, values=names, state="readonly",
-                          width=max(len(n) for n in names) + 1, style="Synth.TCombobox")
+                          width=english_width(make), style="Synth.TCombobox")
         dark_list(cb)
         cb.pack(pady=(12, 0))
-        cb.bind("<<ComboboxSelected>>", lambda e: (self.on_mod_choice(src, what, ids[names.index(var.get())]),
+        cb.bind("<<ComboboxSelected>>", lambda e: (self.on_mod_choice(src, what, ids[e.widget.current()]),
                                                     self.keyboard_back(e.widget)))
         Tooltip(cb, tr("hz.synth_tip_timing" if what == "timing" else f"hz.synth_tip_mod_{what}"))
         self.mod_picks[(src, what)] = (var, names, ids)

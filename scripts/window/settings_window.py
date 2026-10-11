@@ -26,7 +26,7 @@ def look_box(parent):
     box = ttk.Combobox(parent, textvariable=var, values=list(names.values()), state="readonly", width=18)
 
     def picked(e):
-        how = next(k for k, n in names.items() if n == var.get())
+        how = list(names)[box.current()]  # (the place: two translated alike stay apart)
         try:
             look.save_look(how)
         except OSError:
@@ -222,9 +222,10 @@ class SettingsWindow(tk.Toplevel):
             note.config(text=tr("language.restart"))
         note.pack(anchor="w", pady=(8, 0))
         for file, (why, line) in sorted(lang.problems.items()):
-            ttk.Label(page, text=tr("language.broken", file=file, line=line) if why == "line" else
-                      tr("language.unreadable", file=file), foreground=look.WARN, wraplength=wrap,
-                      justify="left").pack(anchor="w", pady=(4, 0))
+            text = (tr("language.broken", file=file, line=line) if why == "line" else
+                    tr("language.bad_name", file=file) if why == "name" else tr("language.unreadable", file=file))
+            ttk.Label(page, text=text, foreground=look.WARN, wraplength=wrap, justify="left").pack(anchor="w",
+                                                                                               pady=(4, 0))
         if len(found) < 2:
             ttk.Label(page, text=tr("language.only_english"), foreground=look.HINT, justify="left",
                       wraplength=wrap).pack(anchor="w", pady=(8, 0))
@@ -245,11 +246,18 @@ class SettingsWindow(tk.Toplevel):
         box.bind("<<ComboboxSelected>>", picked)
 
     def make_template(self):
-        """Start a translation: a copy of the English texts beside Spiderweb, and its folder opened."""
+        """Start a translation: a copy of the English texts beside Spiderweb, and its folder opened. One made before
+        is only replaced when the user says so (No = its folder opened as it is)."""
+        if os.path.isdir(lang.template_path()) and not messagebox.askyesno(
+                tr("settings.title"), tr("language.template_replace"), parent=self):
+            open_path(lang.OWN)
+            return
         try:
             path = lang.make_template()
         except OSError:
-            messagebox.showerror(tr("settings.title"), tr("language.template_failed"), parent=self)
+            blocked = os.path.isfile(lang.OWN)  # (a file named lang where the folder goes)
+            messagebox.showerror(tr("settings.title"), tr("language.template_blocked" if blocked else
+                                                          "language.template_failed"), parent=self)
             return
         open_path(os.path.dirname(path))
 
@@ -311,11 +319,13 @@ class SettingsWindow(tk.Toplevel):
                 ("look.button", self.button_var, list(self.button_names.values()), 18, "look.button_tip"),
                 ("look.edge", self.edge_var, list(self.edge_names.values()), 18, "look.edge_tip"),
                 ("look.lines", self.lines_var, list(self.lines_names.values()), 18, "look.lines_tip"))
+        self.look_boxes = {}
         for k, (label, var, values, width, tip) in enumerate(rows):
             ttk.Label(page, text=tr(label)).grid(row=r + 1 + k, column=0, sticky="e", padx=(0, 8), pady=3)
             row = ttk.Frame(page)
             row.grid(row=r + 1 + k, column=1, sticky="w", pady=3)
-            box = ttk.Combobox(row, textvariable=var, values=values, state="readonly", width=width)
+            box = self.look_boxes[label] = ttk.Combobox(row, textvariable=var, values=values, state="readonly",
+                                                        width=width)
             if label == "look.font":
                 keep_width(box)  # (font names)
             box.pack(side="left")
@@ -491,16 +501,22 @@ class SettingsWindow(tk.Toplevel):
 
     def picked_size(self):
         """(size, font, text) as picked in the three lists (a font half typed: the saved one)."""
-        size = next(k for k, n in self.size_names.items() if n == self.size_var.get())
+        size = self.picked("look.size", self.size_names, self.size_var)
         family = self.font_var.get()
         if family not in self.font_values:
             family = look.read_font() or self.font_default
         family = "" if family == self.font_default else family
-        text = next(k for k, n in self.text_names.items() if n == self.text_var.get())
+        text = self.picked("look.text", self.text_names, self.text_var)
         return size, family, text
 
+    def picked(self, label, names, var):
+        """The key of the choice picked in a Look row: by its place in the list (two translated alike stay apart),
+        else by its word."""
+        i = self.look_boxes[label].current() if label in getattr(self, "look_boxes", {}) else -1
+        return list(names)[i] if 0 <= i < len(names) else next(k for k, n in names.items() if n == var.get())
+
     def picked_button(self):
-        return next(k for k, n in self.button_names.items() if n == self.button_var.get())
+        return self.picked("look.button", self.button_names, self.button_var)
 
     def picked_edge(self):
         return next(k for k, n in self.edge_names.items() if n == self.edge_var.get())

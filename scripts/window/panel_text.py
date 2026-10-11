@@ -87,7 +87,7 @@ class TextPanel:
                                  values=[name for _, name in WEIGHTS])
                 w.pack(side="left")
                 w.bind("<<ComboboxSelected>>", lambda ev: self.set_text_setting(
-                    {"weight": next(n for n, name in WEIGHTS if name == self.text_weight.get())}))
+                    {"weight": WEIGHTS[ev.widget.current()][0]}))  # (the place: alike words stay apart)
                 ttk.Checkbutton(row, text=tr("panel_text.italic"), variable=self.text_italic,
                                 command=lambda: self.set_text_setting({"italic": self.text_italic.get()})
                                 ).pack(side="left", padx=(8, 0))

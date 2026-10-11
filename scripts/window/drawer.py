@@ -607,8 +607,8 @@ class Drawer(DrawerLayers, tk.Toplevel):
         grid.pack(side="left")
         ttk.Label(bar, text=tr("drawer.mirror")).pack(side="left", padx=(12, 4))
         names = [tr("drawer.mirror_" + m) for m in MIRRORS]
-        b = ttk.Combobox(bar, textvariable=self.mirror, values=names, width=max(map(len, names)) + 1,
-                         state="readonly")
+        b = self.mirror_box = ttk.Combobox(bar, textvariable=self.mirror, values=names,
+                                           width=max(map(len, names)) + 1, state="readonly")
         b.pack(side="left")
         Tooltip(b, tr("drawer.mirror_tip"))
         for box in (grid, b):  # a choice picked: the keys go to the drawing again (Enter, Esc, tool keys)
@@ -2035,7 +2035,11 @@ class Drawer(DrawerLayers, tk.Toplevel):
     def mirror_mode(self):
         """"off", "h" (left <-> right), "v" (top <-> bottom) or "both"."""
         names = [tr("drawer.mirror_" + m) for m in MIRRORS]
-        return MIRRORS[names.index(self.mirror.get())] if self.mirror.get() in names else "off"
+        box = getattr(self, "mirror_box", None)
+        picked = box.current() if box is not None else -1  # (the place: two choices translated alike stay apart;
+        if not 0 <= picked < len(names) or names[picked] != self.mirror.get():  # the redraw watcher runs before
+            picked = names.index(self.mirror.get()) if self.mirror.get() in names else 0  # the box's text follows)
+        return MIRRORS[picked]
 
     def mirrored(self, st):
         """A new stroke's mirrored copies (Mirror; none that would lie on the stroke itself or on another copy).
