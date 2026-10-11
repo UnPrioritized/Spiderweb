@@ -50,6 +50,12 @@ def registered(name):
     return _api()[0].RegisterClipboardFormatW(name)
 
 
+def has(fmt):
+    """True if the clipboard holds format fmt (asked without opening it or reading the bytes)."""
+    user32 = _api()[0]
+    return bool(user32.IsClipboardFormatAvailable(fmt))
+
+
 def _open(user32, kernel32):
     for _ in range(10):  # another program may have it open for a moment
         if user32.OpenClipboard(None):

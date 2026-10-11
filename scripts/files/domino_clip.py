@@ -177,6 +177,11 @@ def get_from_clipboard():
     return clipboard.get(clipboard.registered(FORMAT))
 
 
+def on_clipboard():
+    """True if the clipboard holds notes copied in Domino (not read: millions of notes take a while)."""
+    return clipboard.has(clipboard.registered(FORMAT))
+
+
 def items(data, i=0):
     """(tag, body) of each item in data from byte i; stops at anything that doesn't fit."""
     while i + 6 <= len(data):

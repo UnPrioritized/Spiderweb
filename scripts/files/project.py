@@ -736,10 +736,10 @@ class ProjectFiles:
         """The start dropdown above the Domino buttons: "note" (first note at tick 0) or "bar" (from the bar line)."""
         return DOMINO_STARTS[max(self.domino_box.current(), 0)][0]
 
-    def paste_from_domino(self):
+    def paste_from_domino(self, at=None):
         """Ctrl+Shift+V: the notes copied in Domino as one shape (custom.py's pasted notes), placed like Domino
         pastes: the start of what was copied (or its first note, see domino_start) on the play line (snapped to the
-        grid). Every track's notes go into
+        grid), or at beat `at` (a Select double-click: the mouse, snapped already). Every track's notes go into
         the one shape; controllers and other events are left out. Ticks are taken as they are (same PPQ)."""
         if not clipboard.RAW:
             messagebox.showinfo(tr("project.spiderweb"), tr("project.notes_clipboard_windows_only"))
@@ -771,9 +771,10 @@ class ProjectFiles:
             return
         if not self.confirm_big([sh]):
             return
-        at, sb = self.playhead, self.snap_beats()
-        if sb:
-            at = round(at / sb) * sb
+        if at is None:
+            at, sb = self.playhead, self.snap_beats()
+            if sb:
+                at = round(at / sb) * sb
         self.roll.cancel_draft()
         self.busy(tr("project.pasting_from_domino"))
         try:

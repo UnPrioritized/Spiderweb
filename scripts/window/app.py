@@ -63,8 +63,8 @@ from files.about import ICONS, VERSION
 from files.playback import BUILTIN, DEFAULT_DEVICE, MidiOut, Player, devices
 from files.synth import FONT_TYPES, Live, Synth, SynthError
 from files.midi_out import PPQ_WARN
-from files.domino_clip import DOMINO_STARTS
-from files.clipboard import copy_count, get_text, put_text
+from files.domino_clip import DOMINO_STARTS, on_clipboard
+from files.clipboard import RAW, copy_count, get_text, put_text
 from files.share import LONG_LINE, FIND, ShareError, made_by, read_shapes, shapes_line, unpack
 from files.project import AUTOSAVE, OUTPUT_DIR, ProjectFiles
 from files.snap import DEFAULT_SNAP, snap_beats
@@ -1449,6 +1449,11 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 return None
         return text
 
+    def domino_newer(self):
+        """True when the Windows clipboard holds notes copied in Domino, put there after Spiderweb's last copy (so
+        they're what was copied last: paste takes them)."""
+        return RAW and copy_count() != self.seen_clip and on_clipboard()
+
     def paste_shared(self, text, at=None):
         """Paste shapes shared as text (share.py), like paste; they become Spiderweb's copied shapes. Shapes left
         out, or a line made by another Spiderweb version: a heads-up after pasting (popup + status line)."""
@@ -1484,13 +1489,16 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def paste(self, whole=False, at=None):
         """Paste the copied shapes so they start at the play line (snapped to the grid), or at beat `at` (a Select
         double-click: the mouse, snapped already). With curves highlighted and a curve copied: its shape onto them.
-        Shapes shared as text, copied after Spiderweb's last copy, come first (paste_shared)."""
+        Shapes shared as text or notes copied in Domino, copied after Spiderweb's last copy, come first
+        (paste_shared, paste_from_domino)."""
         text = self.shared_clip()
         if text == "":  # (busy: what's on it can't be told, so nothing older is pasted in its place)
             self.status.config(text=tr("app.clipboard_busy"))
             return
         if text is not None:
             return self.paste_shared(text, at)
+        if self.domino_newer():
+            return self.paste_from_domino(at)
         if not whole and self.roll.curve_parts() and self.roll.curve_clip:
             return self.roll.paste_curve()
         if not whole and self.clip_kind == "stroke":
