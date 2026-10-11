@@ -88,6 +88,21 @@ def read_text():
     return text if text in TEXT_STEPS else "normal"
 
 
+LINE_WIDTHS = (1, 2, 3, 4)
+
+
+def read_lines():
+    """Shape lines: how thick the shapes' lines are in the piano roll, in pixels (a selected one's a pixel more)."""
+    try:
+        width = int(settings.get("look", "lines") or 1)
+    except ValueError:
+        return 1
+    return width if width in LINE_WIDTHS else 1
+
+
+LINES = read_lines()  # (changed live from Settings)
+
+
 def font(size, *style, family=None, fit=False):
     """A font for a widget or a canvas text: font(9), font(8, "bold"). fit = sized to fit a fixed room (the piano
     roll's key names): the Text size leaves it alone."""

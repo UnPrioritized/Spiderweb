@@ -435,12 +435,12 @@ class RollDrawing:
                              if sh["kind"] == "funnel" else (p for _, p in self.origin_strokes(sh))):
                     self.create_line(*[v for b, p in path for v in (self.t2x(b), self.p2y(p))], width=1,
                                      fill=look.ORIGIN_PICKED if i in app.sels else look.ORIGIN, dash=(6, 4))
-        if app.show_lines.get():
+        if app.show_lines.get():  # (Settings → Look's Shape lines: their thickness, a selected one's a pixel more)
             for i, sh in enumerate(app.shapes):
                 if i not in app.sels:
-                    self.draw_path(sh, look.SHAPE_LINE, 1)
+                    self.draw_path(sh, look.SHAPE_LINE, look.LINES)
         for i in app.sels:
-            self.draw_path(app.shapes[i], look.SHAPE_LINE_PICKED, 2)
+            self.draw_path(app.shapes[i], look.SHAPE_LINE_PICKED, look.LINES + 1)
         for i in app.sels:
             if i < len(app.shapes) and "picture" in app.shapes[i]:
                 self.draw_picture_label(app.shapes[i])
@@ -455,7 +455,7 @@ class RollDrawing:
                 self.draw_custom_box(sel)
             self.draw_handles(sel)  # on top: a stroke's point wins over the box's squares
         if self.draft:
-            self.draw_path(self.draft, look.DRAFT_LINE, 2)
+            self.draw_path(self.draft, look.DRAFT_LINE, look.LINES + 1)
             self.draw_draft_points()
         self.draw_hz_start()
         self.draw_above_marks()
@@ -1290,9 +1290,9 @@ class RollDrawing:
                     self.create_line(*coords, fill=color, width=width, dash=dash)
                     continue
                 # a long thick line: Windows paints thick lines with thousands of points very slowly (seconds),
-                # thin ones quickly, so it's the thin line three times, a pixel apart
+                # thin ones quickly, so it's the thin line a few times, a pixel apart (2 px wide: three times)
                 self.create_line(*coords, fill=color, width=1, dash=dash)
-                for dx, dy in ((1, 0), (0, 1)):
+                for dx, dy in [(k, 0) for k in range(1, width)] + [(0, k) for k in range(1, width)]:
                     self.create_line(*[v + (dx if n % 2 == 0 else dy) for n, v in enumerate(coords)], fill=color,
                                      width=1, dash=dash)
         if sh["kind"] == "custom" and sh.get("fill") in ("fill", "spam"):
