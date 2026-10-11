@@ -84,7 +84,8 @@ def keeps_notes(sh):
     return bool(sh.get("cut")) and moved_by(as_made(sh)) is not None
 
 
-NOTE_SETTINGS = (("glue", "convert.glue"), ("fx", "convert.fx"), ("cycle", "colours.colours"))
+NOTE_SETTINGS = (("glue", "convert.glue"), ("fx", "convert.fx"), ("cycle", "colours.colours"),
+                 ("sustain", "sustain.title"))
 
 
 def shared_settings(shapes):
@@ -93,8 +94,9 @@ def shared_settings(shapes):
     (a list with one sentence, or empty)."""
     keep, lost = {}, []
     for key, name in NOTE_SETTINGS:
-        vals = [sh.get(key) or None for sh in shapes]
-        if not any(vals):
+        # (Sustain's Auto is an empty dict)
+        vals = [sh.get(key) if key == "sustain" else sh.get(key) or None for sh in shapes]
+        if all(v is None for v in vals):
             continue
         same = [cycle_effect(v) for v in vals] if key == "cycle" else vals  # (Colours: by what they do)
         if all(v == same[0] for v in same) and (key != "glue" or vals[0] is True):

@@ -156,6 +156,8 @@ class SustainWindow(tk.Toplevel):
         if json.dumps(self.app.shapes) != self.before:
             self.app.add_undo_step(self.before, tr("sustain.step"))
         self.close()
+        if self.on_var.get():
+            self.app.tips.show("sustain", wait=True)  # (the first time: what it does)
 
     def cancel(self):
         self.closed = True

@@ -18,6 +18,7 @@ from files.lang import tr
 from files.mathexpr import calc
 from notes import between
 from notes.engine import cached_path
+from notes.sustain import is_sustained
 from window import look
 from window.widgets import LocalUndo, Scrub, Tooltip, remember_place
 
@@ -805,8 +806,11 @@ class BetweenGroups:
             else:
                 used = chans[i]
                 uses = tr("app.channels_2", chans=used) if used > 1 else ""
+                label = self.shape_label(sh)
+                if is_sustained(sh):  # (its notes held on: sustain.py)
+                    label = tr("sustain.list", name=label)
                 text = tr("app.notes_one" if counts[i] == 1 else "app.notes", i=i + 1,
-                          shape_label=self.shape_label(sh), counts=counts[i], uses=uses)
+                          shape_label=label, counts=counts[i], uses=uses)
             self.listbox.insert("end", text)
             if used > many:  # (past this the note colours and channel numbers repeat)
                 self.listbox.itemconfig(r, foreground=look.WARN, selectforeground=look.GAP_PICKED)

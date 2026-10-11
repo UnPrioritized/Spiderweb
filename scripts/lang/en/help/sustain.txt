@@ -1,0 +1,15 @@
+Select one or more shapes, then right-click one: Sustain…. On each key, every note is held on until the last note of its group ends, so the notes pile up on top of each other. Made for lagging out MIDI players: far more notes sound at once, while the shape looks the same.
+
+A group is the notes on one key with no real gap between them. Small gaps, like the spacing between a spam shape's notes, are held over. Bigger gaps are holes in the shape (the inside of a ring, the space between letters) and stay empty, so the shape keeps its look.
+
+Hold over gaps up to: Auto works out the gap from the shape's own notes (the most common gap between notes on a key) and shows it in ticks. Or type your own number of ticks: a bigger number than a hole holds the notes across the hole too. The number follows the PPQ, so changing the PPQ keeps the look.
+
+Changes show on the piano roll at once. OK keeps them as one undo step, Cancel or Esc puts everything back. The menu item has a tick while a selected shape is sustained, and the Shapes list says (Sustained). Untick Sustain notes in the window to take it off.
+
+Sustain comes last, after the outline gate, Colours, glue and the Claw machine / Strum / Chop pages: it only makes notes longer.
+
+Channels: a sustained shape keeps its overlaps in every Channels mode, even Single channel. Other shapes still fix their own overlaps, and their notes end where a sustained note on the same key starts.
+
+A Hz bass can't be sustained: holding its repeats would ruin the sound.
+
+Spiderweb's own playback may lower the voice limit when it can't keep up, so it can sound lighter than the lag other players get from the MIDI file.
