@@ -144,11 +144,14 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def slice_pt(self, e):
         """The Slice tool's line end at the mouse: time on the snap grid, keys on the lines between key rows (so a
         flat cut runs between two keys); Shift = exactly there."""
-        b, p = self.event_pt(e, snap=False)
+        b, _ = self.event_pt(e, snap=False)
+        # (keys from the mouse itself: event_pt stops at key 0's middle, so the line couldn't reach under the
+        # bottom key)
+        p = self.y2p(min(max(e.y, self.ruler_h), self.winfo_height()))
         sb = self.app.snap_beats()
         if not e.state & SHIFT:
             b, p = (round(b / sb) * sb if sb else b), math.floor(p) + 0.5
-        return [b, p]
+        return [b, min(max(p, -0.5), self.app.keys - 0.5)]
 
     def box_area(self):
         """The Select box being dragged as (beat, pitch, beat, pitch) corners: out to whole snap steps and whole
