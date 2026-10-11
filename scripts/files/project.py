@@ -28,6 +28,7 @@ from files.midi_out import MAX_DELTA, PPQ_WARN, long_silences, write_midi
 from files.playback import keep_saved
 from files.about import HERE, USER, VERSION
 from files.safefile import write_bytes, write_text
+from files.settings import save_app_settings, with_app_settings
 from files.snap import clean_snap
 from files.update_check import version_tuple
 from window.big_ask import ask as ask_big, ask_drums
@@ -384,6 +385,7 @@ class ProjectFiles:
                               "history_window": self.history_pos, "history_undocked": self.history_undocked,
                               "places": getattr(self, "window_places", {}),
                               **self.tips.state(), **self.updates.state(), **self.tool_picker.state()}
+            save_app_settings(data["window"])  # (sound / updates / tips go to user/settings.ini instead)
         # pictures in the project's folder (or one inside it) are saved relative to it: they move together
         data["shapes"] = paths_for_file(data["shapes"], os.path.dirname(os.path.abspath(path)), True)
         write_text(path, project_json(data))
@@ -431,9 +433,16 @@ class ProjectFiles:
     def restore_window(self):
         try:
             try:
-                win = read_json(self.autosave_path).get("window") or {}
+                data = read_json(self.autosave_path)
             except (OSError, ValueError):  # damaged: load_autosave opens the backup, so take its window
-                win = read_json(backup_path(self.autosave_path)).get("window") or {}
+                data = read_json(backup_path(self.autosave_path))
+            win = data.get("window") or {}
+        except (OSError, ValueError, AttributeError):
+            data, win = {}, {}
+        win = with_app_settings(win)  # (user/settings.ini's sound / updates / tips)
+        if win and not win.get("seen_version") and isinstance(data.get("app_version"), str):
+            win["seen_version"] = data["app_version"]  # (settings.ini deleted: no What's new for the same version)
+        try:
             self.tips.restore(win)
             self.updates.restore(win)
             self.tool_picker.restore(win)

@@ -1,7 +1,8 @@
 """Update checks: asking once whether (and how often) to look on GitHub for a newer version, looking at start when
 it's time, the "update available" popup (with what's new in it), and the "What's new" Help page the first time a new
-version starts. Settings are in the autosave's window settings: update_check (how often; missing = not asked yet),
-update_last (the last check that reached GitHub) and seen_version (the version that last started). The looking itself
+version starts. Settings are in user/settings.ini [updates] (files/settings.APP_KEYS; handed over in the window
+settings): update_check (how often; missing = not asked yet), update_last (the last check that reached GitHub) and
+seen_version (the version that last started). The looking itself
 is files/update_check.py; it runs in the background, so the window never waits for it."""
 
 import threading
@@ -47,7 +48,8 @@ class Updates:
 
     def restore(self, win):
         self.old_user = bool(win)
-        self.often = win.get("update_check") if win.get("update_check") in OFTEN else None
+        often = str(win.get("update_check") or "").strip().lower()  # (settings.ini typed by hand: any capitals)
+        self.often = often if often in OFTEN else None
         try:
             self.last = float(win.get("update_last") or 0)
         except (TypeError, ValueError):
