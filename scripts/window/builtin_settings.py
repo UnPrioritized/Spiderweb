@@ -1,14 +1,13 @@
-"""Built-in BASSMIDI's "Settings…" window (the button under MIDI out): soundfont, voice limit, and lowering the voice
-limit by itself while the synth is overloaded (off to start). Overload watches the synth while it plays: when it
-can't make the sound as fast as it plays (busy spam), part of the sound goes missing (stops, crackles); the red
-text next to the Settings button says so. Program settings, not the project's: no undo, kept with the window
-settings in the autosave."""
+"""Built-in BASSMIDI's settings (Settings → Sound; the "Settings…" button under MIDI out opens it): soundfont, voice
+limit, and lowering the voice limit by itself while the synth is overloaded (off to start). Overload watches the
+synth while it plays: when it can't make the sound as fast as it plays (busy spam), part of the sound goes missing
+(stops, crackles); the red text next to the Settings button says so. Program settings, not the project's: no undo,
+saved in user/settings.ini [sound]."""
 
 import collections
 import os
 import threading
 import time
-import tkinter as tk
 from tkinter import ttk
 
 from files import speed
@@ -16,27 +15,24 @@ from files.lang import tr
 from files.synth import RATE
 from window import look
 from window.hz_preview import VOICES
-from window.widgets import Scrub, Tooltip, remember_place
+from window.widgets import Scrub, Tooltip
 
 
 def open_builtin_settings(app):
-    w = getattr(app, "builtin_window", None)
-    if w is not None and w.winfo_exists():
-        w.lift()
-    else:
-        app.builtin_window = BuiltinSettings(app)
+    """The "Settings…" button under MIDI out: the Settings window on its Sound tab (user, 2026-10-11)."""
+    from window.settings_window import open_settings
+    open_settings(app, "sound")
 
 
-class BuiltinSettings(tk.Toplevel):
-    def __init__(self, app):
-        super().__init__(app)
+class BuiltinPanel(ttk.Frame):
+    """Built-in BASSMIDI's settings in Settings → Sound, shown only while it's the MIDI out (app.builtin_window
+    while the Settings window is open)."""
+
+    def __init__(self, parent, app):
+        super().__init__(parent)
         self.app = app
-        self.title(tr("bs.title"))
-        self.transient(app)
-        self.resizable(False, False)
         s = app.scale
-        box = ttk.Frame(self, padding=(12, 10, 12, 12))
-        box.pack(fill="both", expand=True)
+        box = self
         box.columnconfigure(1, weight=1)
         r = 0
 
@@ -74,23 +70,15 @@ class BuiltinSettings(tk.Toplevel):
         self.state = ttk.Label(box, text="", foreground=look.ERROR)
         self.state.grid(row=r, column=1, columnspan=2, sticky="w", pady=(3, 0))
 
-        self.bind("<Escape>", lambda ev: self.close())
-        self.protocol("WM_DELETE_WINDOW", self.close)
         self.refresh()
-        self.update_idletasks()  # (near the side panel's MIDI out)
-        btn = app.builtin_btn
-        x = btn.winfo_rootx() - self.winfo_reqwidth() - round(10 * s)
-        self.geometry(f"+{max(0, x)}+{max(0, btn.winfo_rooty() - round(40 * s))}")
-        remember_place(self, "builtin_settings")
 
-    def close(self):
-        """Closed (Esc, X, another MIDI out picked): a voice limit typed without Enter is taken, a wrong one goes
-        back to the limit in use."""
+    def take_voices(self):
+        """Settings closed (Esc, X) or another MIDI out picked: a voice limit typed without Enter is taken, a wrong
+        one goes back to the limit in use."""
         app = self.app
         app.on_play_voices()
         if app.voices_var.get() != str(app.play_voices):
             app.voices_var.set(str(app.play_voices))
-        self.destroy()
 
     def refresh(self):
         if not self.winfo_exists():

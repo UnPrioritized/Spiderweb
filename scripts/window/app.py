@@ -1974,12 +1974,13 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         on = self.midi_device.get() == BUILTIN
         for w in self.builtin_row:
             grid_shown(w, on)
-        w = self.builtin_window
+        w = self.builtin_window  # (in Settings → Sound while that's open)
         if w is not None and w.winfo_exists():
             if on:
                 w.refresh()  # (the soundfont's name)
             else:
-                w.close()
+                w.take_voices()
+            w.master.winfo_toplevel().show_builtin()
 
     def pick_soundfont(self):
         """Pick the soundfont (shared by Built-in BASSMIDI and the Hz bass preview). True = one was picked."""
@@ -2020,7 +2021,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.sync_builtin()
 
     def on_play_voices(self, left=False):
-        e = self.voices_entry  # (in Built-in BASSMIDI's Settings window)
+        e = self.voices_entry  # (in Settings → Sound)
         try:
             v = int(round(float(calc(self.voices_var.get()))))
             if not VOICES[0] <= v <= VOICES[1]:

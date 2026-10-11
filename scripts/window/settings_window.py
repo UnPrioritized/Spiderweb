@@ -9,8 +9,10 @@ from tkinter import colorchooser, font as tkfont, messagebox, ttk
 
 from files import settings
 from files.lang import tr
+from files.playback import BUILTIN, devices
 from files.system import WINDOWS
 from window import button_look, look, palettes
+from window.builtin_settings import BuiltinPanel
 from window.drawer import clean_name
 from window.updates import often_box
 from window.widgets import Tooltip, remember_place
@@ -111,15 +113,18 @@ def ask_name(parent, title, prompt, initial="", check=None):
     return d.name
 
 
-def open_settings(app):
+def open_settings(app, tab=None):
+    """tab = "look" / "sound" / "general" / "language": shown at once (none = the one showing / the first)."""
     w = getattr(app, "settings_window", None)
     if w is not None and w.winfo_exists():
         w.deiconify()
         w.lift()
         w.focus_set()
     else:
-        app.settings_window = SettingsWindow(app)
-    return app.settings_window
+        w = app.settings_window = SettingsWindow(app)
+    if tab in w.pages:
+        w.tabs.select(w.pages[tab])
+    return w
 
 
 class SettingsWindow(tk.Toplevel):
@@ -133,7 +138,8 @@ class SettingsWindow(tk.Toplevel):
         self.resizable(False, False)
         tabs = self.tabs = ttk.Notebook(self)
         tabs.pack(fill="both", expand=True, padx=8, pady=8)
-        page = ttk.Frame(tabs, padding=(12, 10, 12, 12))
+        self.pages = {}
+        page = self.pages["look"] = ttk.Frame(tabs, padding=(12, 10, 12, 12))
         tabs.add(page, text=tr("settings.look_tab"))
         ttk.Label(page, text=tr("look.look")).grid(row=0, column=0, sticky="e", padx=(0, 8), pady=3)
         self.look = look_box(page)
@@ -142,8 +148,9 @@ class SettingsWindow(tk.Toplevel):
                   justify="left").grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self.build_size(page, 2)
         self.build_palettes(page, 11)
+        self.build_sound()
         # updates: how often to look, and looking now (the answer shows under the row)
-        page = ttk.Frame(tabs, padding=(12, 10, 12, 12))
+        page = self.pages["general"] = ttk.Frame(tabs, padding=(12, 10, 12, 12))
         tabs.add(page, text=tr("settings.updates_tab"))
         updates = app.updates
         row = ttk.Frame(page)
@@ -156,12 +163,51 @@ class SettingsWindow(tk.Toplevel):
         ttk.Button(row, text=tr("updates.check_now"), takefocus=False, command=lambda: (
             status.config(text=tr("updates.checking")),
             updates.check(report=lambda msg: status.winfo_exists() and status.config(text=msg)))).pack(side="left")
-        self.bind("<Escape>", lambda e: self.destroy())
+        self.bind("<Escape>", lambda e: self.close())
+        self.protocol("WM_DELETE_WINDOW", self.close)
         self.update_idletasks()  # (first time: in the middle of the main window)
         self.geometry("+%d+%d" % (app.winfo_rootx() + (app.winfo_width() - self.winfo_reqwidth()) // 2,
                                   app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3))
         remember_place(self, "settings")
         self.focus_set()
+
+    def close(self):
+        """Esc / X: a voice limit typed without Enter is taken first."""
+        panel = self.app.builtin_window
+        if panel is not None and panel.winfo_exists():
+            panel.take_voices()
+        self.destroy()
+
+    # ------------------------------------------------------------ sound (MIDI out + Built-in BASSMIDI)
+
+    def build_sound(self):
+        """MIDI out (the same choice as the side panel's) and, while Built-in BASSMIDI is picked, its settings."""
+        app = self.app
+        page = self.pages["sound"] = ttk.Frame(self.tabs, padding=(12, 10, 12, 12))
+        self.tabs.add(page, text=tr("settings.sound_tab"))
+        page.columnconfigure(1, weight=1)
+        ttk.Label(page, text=tr("app.midi_out")).grid(row=0, column=0, sticky="e", padx=(0, 8), pady=3)
+        dev = self.midi_box = ttk.Combobox(page, textvariable=app.midi_device, state="readonly", values=devices(),
+                                           width=30)
+        dev.configure(postcommand=lambda: dev.configure(values=devices()))  # (re-listed when it opens)
+        dev.grid(row=0, column=1, sticky="w", pady=3)
+        ttk.Separator(page).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 8))
+        self.builtin_title = ttk.Label(page, text=tr("bs.title"))
+        self.builtin_title.grid(row=2, column=0, columnspan=2, sticky="w")
+        panel = app.builtin_window = BuiltinPanel(page, app)
+        panel.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        panel.bind("<Destroy>", lambda e: e.widget is panel and setattr(app, "builtin_window", None), add="+")
+        self.builtin_off = ttk.Label(page, text=tr("settings.builtin_off"), foreground=look.HINT,
+                                     wraplength=round(320 * app.scale), justify="left")
+        self.builtin_off.grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.show_builtin()
+
+    def show_builtin(self):
+        """Built-in BASSMIDI's settings while it's the MIDI out, else a line saying they're for it."""
+        on = self.app.midi_device.get() == BUILTIN
+        for w in (self.builtin_title, self.app.builtin_window):
+            w.grid() if on else w.grid_remove()
+        self.builtin_off.grid_remove() if on else self.builtin_off.grid()
 
     # ------------------------------------------------------------ size, font, text size (look.apply_size)
 
