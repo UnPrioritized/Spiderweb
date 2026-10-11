@@ -19,7 +19,8 @@ from notes.custom import SPAM_FILLS, gate_ticks
 from notes.fx import flip_shape, reverse_velocity
 from notes.sustain import gap_of, row_order
 
-LEFT_OUT = ("cut", "merge", "notes", "picture", "hz")  # (sliced pieces / merged: a later step; pasted: their own way)
+NOT_DRAWN = ("merge", "notes", "picture", "hz")  # (pasted notes: their own way; merged shapes: their parts keep it)
+LEFT_OUT = ("cut",) + NOT_DRAWN  # (a sliced piece: its whole's notes are made with the piece's setting, sliced.source)
 
 
 def offered(sh):
@@ -38,11 +39,18 @@ def why_not(sh, notes, tracks=None):
     ways, colours included: nothing to lay the other way, user) or "no_gates"."""
     if is_pasted(sh):
         return "one_gate" if runs_same_both_ways(notes, tracks) else None
-    if sh["kind"] != "custom" or sh.get("fill") not in SPAM_FILLS or any(k in sh for k in LEFT_OUT):
+    if sh["kind"] != "custom" or sh.get("fill") not in SPAM_FILLS or any(k in sh for k in NOT_DRAWN):
         return "no_gates"
     if len(np.unique(notes[:, 2])) == len(notes):
         return "one_gate"
     return None
+
+
+def colours_back(sh):
+    """True if sh's colours get their channels in mirrored order (engine.render back): it's gate flipped, a sliced
+    piece of a drawn shape too."""
+    return sh.get("gate_flip") is True and sh["kind"] == "custom" and (
+        is_pasted(sh) or sh.get("fill") in SPAM_FILLS and not any(k in sh for k in NOT_DRAWN))
 
 
 def is_flipped(sh):

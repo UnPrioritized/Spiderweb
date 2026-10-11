@@ -18,6 +18,7 @@ from files.lang import tr
 from files.mathexpr import calc
 from notes import between
 from notes.engine import cached_path
+from notes.gateflip import colours_back
 from notes.sustain import is_sustained
 from window import look
 from window.widgets import LocalUndo, Scrub, Tooltip, remember_place
@@ -807,6 +808,8 @@ class BetweenGroups:
                 used = chans[i]
                 uses = tr("app.channels_2", chans=used) if used > 1 else ""
                 label = self.shape_label(sh)
+                if colours_back(sh):  # (its gates laid from the right: gateflip.py)
+                    label = tr("gate_flip.list", name=label)
                 if is_sustained(sh):  # (its notes held on: sustain.py)
                     label = tr("sustain.list", name=label)
                 text = tr("app.notes_one" if counts[i] == 1 else "app.notes", i=i + 1,

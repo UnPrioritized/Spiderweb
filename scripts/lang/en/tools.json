@@ -659,5 +659,6 @@
  "sustain.auto_tip": "Works out the gap from the shape's own notes: the most common gap between notes on a key.\nLonger gaps are holes in the shape (like the inside of a ring) and stay empty, so the shape keeps its look.",
  "sustain.ticks": "ticks",
  "sustain.own_tip": "Gaps up to this many ticks are held over. Make it bigger than a hole to hold across the hole too.",
- "sustain.list": "{name} (Sustained)"
+ "sustain.list": "{name} (Sustained)",
+ "gate_flip.list": "{name} (Gates flipped)"
 }

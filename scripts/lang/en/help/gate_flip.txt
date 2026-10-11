@@ -1,0 +1,13 @@
+Select one or more spam shapes, then right-click one: Gate aware flip. Only the way the gates are laid out is flipped sideways: each key row is laid from its right end instead of its left. The drawing stays where it is.
+
+With a gate Range, the long and short gates swap sides, and the edge where every row starts cleanly moves to the right. This isn't the same as drawing the Range's graph the other way round: that still lays every row from its left end, so the right edge comes out jagged.
+
+Colours turn round with the gates, so the colour at the left edge is now at the right edge. Velocities turn round too, like a normal flip. Drawing them again in the velocity pane works as usual.
+
+Nothing moves: every key row starts and ends on the same ticks as before. To keep the notes inside the drawing as well, tick "Fit to the shape's edges" in the Range window.
+
+Pasted notes: on each key, every run of notes is flipped inside itself, so its first and last tick stay put. A run ends at a gap longer than the usual gap between the notes, like Sustain's Auto.
+
+The menu item has a tick while it's on; click it again to switch it off. The Shapes list says (Gates flipped). It's greyed when there's nothing to flip: (one gate) when every key row has one note, or pasted runs that read the same both ways; (no gates) for shapes without spam, like Fill or lines.
+
+It comes before the Claw machine, Strum and Chop pages and Sustain, so they work on the flipped notes as usual. A normal flip or a turn keeps it on. A Hz bass, a funnel and an image don't have it.

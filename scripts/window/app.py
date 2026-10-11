@@ -25,8 +25,7 @@ from notes.engine import (CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cache
                           render, shape_key, slot_track_channel)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
-from notes.gateflip import (is_flipped as is_gate_flipped, is_pasted_flipped, offered as gate_offered,
-                            turn_velocities, why_not as gate_why_not)
+from notes.gateflip import colours_back, offered as gate_offered, turn_velocities, why_not as gate_why_not
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
 from notes.merge import velocity_reversed as merge_vrev
 from notes.sustain import is_sustained
@@ -129,7 +128,7 @@ def all_notes(shapes, ppq, keys, mode, split, notes_tracks):
                              ["picture" in sh for sh in shapes], use10, between_turns(shapes),
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
                              [is_sustained(sh) for sh in shapes],
-                             [is_gate_flipped(sh) or is_pasted_flipped(sh) for sh in shapes])
+                             [colours_back(sh) for sh in shapes])
     return wanted, use10, rendered, slots
 
 
@@ -1498,6 +1497,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             turn_velocities(sh)
         self.sync_panel()
         self.shapes_changed()
+        if not on:
+            self.tips.show("gate_flip", wait=True)  # (the first time: what it does)
 
     def rotate(self, clockwise, whole=False):
         """Turn the selected shapes 90 degrees as a group, around their middle, as they look on screen

@@ -355,8 +355,9 @@ def slice_notes(sh, notes, tracks, a, b, ppq):
         if not len(n):
             return None, crossed
         half = {k: copy.deepcopy(v) for k, v in sh.items()
-                if k not in ("notes", "pts", "vel_env", "fx", "glue", "between")}
-        half.update(notes_shape(n, ppq, sh.get("name")), paste=paste)  # (pages / glue / a velocity line: in its notes)
+                if k not in ("notes", "pts", "vel_env", "fx", "glue", "between", "gate_flip")}
+        # (pages / glue / a velocity line / a gate aware flip: in its notes)
+        half.update(notes_shape(n, ppq, sh.get("name")), paste=paste)
         if "name" not in sh:
             half.pop("name")
         parts.append(half)
