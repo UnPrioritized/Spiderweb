@@ -605,7 +605,7 @@
  "between.colours": "Each shape its own colour",
  "between.colours_tip": "Every shape of the group gets a channel of its own, the first and last shapes too. Past the number of colours they take turns. Needs Channels: Multi channel. A shape with Colours turned on keeps its own Colours.",
  "between.turns": "taking turns over",
- "between.turns_tip": "How many colours the shapes take turns over (at most 15).",
+ "between.turns_tip": "How many colours the shapes take turns over (at most 15, 16 with \"Use channel 10\").",
  "between.needs_multi": "Channels isn't Multi channel now, so all the steps are in one channel and look the same.",
  "between.graph": "How the steps change:",
  "between.preview_title": "Preview",

@@ -473,6 +473,8 @@ class ImageWindow(tk.Toplevel):
     def show_settings(self):
         """Every control shows self.s."""
         s = self.s
+        if not self.uses10() and s["colours"] > 15:  # (the project's "Use channel 10" turned off / another opened)
+            self.put("colours", 15)
         for k, v in self.vars.items():
             if k.endswith("_label"):
                 continue
@@ -949,7 +951,9 @@ class ImageWindow(tk.Toplevel):
         coloured)."""
         if not self.pic or self.grid is None:
             return None
-        s = dict(self.s, step=self.step_beats())
+        # (16 colours from the project's "Use channel 10": its own tick on too, so the 16th keeps channel 10 when
+        # the project's goes off)
+        s = dict(self.s, step=self.step_beats(), use10=self.s["use10"] or self.s["colours"] > 15)
         info = {"file": self.pic.path, "sig": self.pic.sig, "size": list(self.pic.size), "id": os.urandom(6).hex(),
                 "set": dict(P.clean_settings(s), pal=[P.hex_of(c) for c in self.pal], locked=sorted(self.locked))}
         vel = self.app.defaults.get("vel0", 127)

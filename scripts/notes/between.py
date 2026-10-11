@@ -777,13 +777,14 @@ def _blank(gid, at):
     return {"kind": "line", "pts": [[0, 0], [1, 1]], "between": {"id": gid, "role": "step", "at": at}}
 
 
-def start_group(shapes, i, j):
+def start_group(shapes, i, j, colours=15):
     """Shapes i and j become the first and last shape of a new group (the one starting earlier first; Reverse on
-    when pairing the ends the other way round travels less). Returns (new shape list, the group's id)."""
+    when pairing the ends the other way round travels less; colours = turns, 16 with "Use channel 10"). Returns
+    (new shape list, the group's id)."""
     a, b = shapes[i], shapes[j]
     if min(p[0] for p in b["pts"]) < min(p[0] for p in a["pts"]):
         a, b = b, a
-    s = clean_settings(None)
+    s = clean_settings({"colours": colours})
     s["rev"] = ends_cross(a, b)
     s["smooth"] = True
     gid = new_id()

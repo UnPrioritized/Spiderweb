@@ -318,6 +318,7 @@ class ProjectFiles:
         self.redo_stack.clear()
         self._redo_kept = None
         self.on_project_change()
+        self.show_colour_limit()  # (its "Use channel 10" in the open drawer / Image window)
         return True
 
     def read_custom_defaults(self, custom):

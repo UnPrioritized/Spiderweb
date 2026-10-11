@@ -91,6 +91,7 @@ DRAW_TOOLS = [("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"), 
               ("curve", tr("app.curve"), "c"), ("arc", tr("app.arc"), "a"), ("custom", tr("app.custom_shape"), "s"),
               ("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q"), ("funnel", tr("app.funnel"), "n"),
               ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h"), ("picture", tr("app.picture"), "i")]
+CH10_OFF = "ch10_off"  # (an undo step's mark: made by unticking "Use channel 10", App.on_use_ch10)
 MAX_POINT_BOXES = 40  # a curve with more points than this lists none in the panel (a line saying so instead)
 CHANNEL_CHOICES = [
     ("raw", tr("app.as_drawn"),
@@ -1191,21 +1192,14 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def on_use_ch10(self):
         """The "Use channel 10" tick. Turned off: Colours / Add between turns over 16 channels go down to 15 at
         once, as an undo step (user: not kept for when it's ticked again). Drawn colours (drawer areas, a stroke's
-        colour) stay: the drawer and panel say so in orange."""
+        colour) stay: the drawer and panel say so in orange. Ctrl+Z on that step ticks it again (_restore)."""
         if not self.use_ch10.get():
             most = most_colours(False)
-            over = []
-            for sh in self.shapes:
-                for t in [sh] + (sh["merge"]["parts"] if sh.get("merge") else []):
-                    if (t.get("cycle") or {}).get("n", 0) > most:
-                        over.append((t["cycle"], "n"))
-                    b = (t.get("between") or {}).get("set")
-                    if b and b.get("colours", 0) > most:
-                        over.append((b, "colours"))
-            if over:
+            if self.over_15(self.shapes, clamp=False):
                 self.push_undo(name=tr("app.use_ch10_off"))
-                for c, k in over:
-                    c[k] = most
+                state, name, sel, hz = self.undo_stack[-1]
+                self.undo_stack[-1] = (state, name, tuple(sel) + (CH10_OFF,), hz)  # (the step's mark: _restore)
+                self.over_15(self.shapes)
             if (self.defaults.get("cycle") or {}).get("n", 0) > most:
                 self.defaults["cycle"] = dict(self.defaults["cycle"], n=most)
         self.on_channel_mode()
@@ -1214,7 +1208,15 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.shapes_changed()
         self.sync_custom()
         self.sync_colours()
-        d, im = getattr(self, "drawer", None), self.image_window  # (16 colours with "Use channel 10")
+        self.show_colour_limit()
+        if self.hz_window:
+            self.hz_window.show_clash(self.hz_window.target())  # (Multi channel only)
+        if self.channel_mode.get() == "auto":
+            self.tips.show("channels", wait=True)
+
+    def show_colour_limit(self):
+        """The open drawer and Image window show the colours allowed now (16 with "Use channel 10")."""
+        d, im = getattr(self, "drawer", None), self.image_window
         try:
             if d is not None and d.winfo_exists():
                 d.draw_swatches()
@@ -1223,10 +1225,6 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 im.show_settings()
         except tk.TclError:
             pass
-        if self.hz_window:
-            self.hz_window.show_clash(self.hz_window.target())  # (Multi channel only)
-        if self.channel_mode.get() == "auto":
-            self.tips.show("channels", wait=True)
 
     def select(self, i, toggle=False):
         """Select shape i only (None = nothing), or with toggle add it to / take it out of the selection."""
@@ -1317,7 +1315,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.add_copies([self.shapes[i] for i in sorted(self.sels)], shift, tr("app.duplicate"))
 
     def add_copies(self, shapes, shift, name=tr("app.paste")):
-        """Add copies of shapes moved shift beats later, and select them."""
+        """Add copies of shapes moved shift beats later, and select them. Returns how many had 16 colours brought
+        down to 15 (copied from a project with "Use channel 10" into one without; also said in the status line)."""
         self.push_undo(name=name)
         first = len(self.shapes)
         for sh in shapes:
@@ -1326,8 +1325,32 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.shapes.append(new)
         fresh_marks(self.shapes[first:])
         between_copied(self.shapes, first)  # (a whole Add between group: a new group; parts of one: plain shapes)
+        clamped = 0 if self.all16() else len(self.over_15(self.shapes[first:]))
         self.select_many(range(first, len(self.shapes)), len(self.shapes) - 1)
         self.shapes_changed()
+        if clamped:
+            self.status.config(text=tr("app.pasted_15", n=clamped))
+        return clamped
+
+    def over_15(self, shapes, clamp=True):
+        """The shapes whose Colours / Add between turns go over 15 channels (only allowed with "Use channel 10"),
+        brought down to 15 (clamp). Merged shapes' parts count with them."""
+        most = most_colours(False)
+        found = []
+        for sh in shapes:
+            over = []
+            for t in [sh] + (sh["merge"]["parts"] if sh.get("merge") else []):
+                if (t.get("cycle") or {}).get("n", 0) > most:
+                    over.append((t["cycle"], "n"))
+                b = (t.get("between") or {}).get("set")
+                if b and b.get("colours", 0) > most:
+                    over.append((b, "colours"))
+            if over:
+                found.append(sh)
+            if clamp:
+                for c, k in over:
+                    c[k] = most
+        return found
 
     def glue_selected(self):
         """Right-click → Glue notes: touching notes on a key in the selected shapes become one (glue.py), inside the
@@ -1443,7 +1466,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             return
         self.remember_clip()
         self.clipboard, self.clip_kind = shapes, "shapes"
-        self.paste(whole=True, at=at)
+        clamped = self.paste(whole=True, at=at)
         made = made_by(got)
         notes = ([tr("app.shared_left_out", n=left)] if left else []) + (
             [tr(f"share.made_{made[0]}", version=made[1])] if made else [])
@@ -1452,6 +1475,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             msg += tr("app.shared_left_out_short", n=left)
         if made:
             msg += tr("app.shared_made_short", version=made[1])
+        if clamped:
+            msg += " " + tr("app.pasted_15", n=clamped)
         self.status.config(text=msg)
         if notes:
             messagebox.showwarning(tr("app.spiderweb_2"), "\n\n".join(notes), parent=self)
@@ -1477,7 +1502,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             at, sb = self.playhead, self.snap_beats()
             if sb:
                 at = round(at / sb) * sb
-        self.add_copies(self.clipboard, at - start)
+        return self.add_copies(self.clipboard, at - start)
 
     def flip(self, sideways, whole=False):
         """Mirror the selected shapes as a group: sideways (time) or upside down (pitch).
@@ -2345,10 +2370,17 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         hz_was = self.hz_window and self.hz_window.before_restore()
         self.roll.cancel_draft()
         now, sel_now = json.dumps(self.shapes), self.sel_state()
+        ch10 = None
         for _ in range(min(count, len(src))):
             state, name, picked, hz = src.pop()
-            dst.append((now, name, sel_now, hz))
+            mark = tuple(picked[7:8])  # (CH10_OFF: unticking "Use channel 10" made it: undo ticks it, redo unticks)
+            if mark:
+                ch10 = src is self.undo_stack
+                picked = tuple(picked[:7])
+            dst.append((now, name, tuple(sel_now) + mark, hz))
             now, sel_now = state, picked
+        if ch10 is not None:
+            self.use_ch10.set(ch10)
         state, picked = now, sel_now
         self._redo_kept = self._trimmed = None
         self.shapes = json.loads(state)
@@ -2367,6 +2399,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self._edit_key = self._scrub = None
         self.sync_panel()
         self.shapes_changed()
+        if ch10 is not None:
+            self.sync_colours()
+            self.show_colour_limit()
         if self.hz_window:
             self.hz_window.after_restore(hz_was)
             if self.sels == set(picked[0]):

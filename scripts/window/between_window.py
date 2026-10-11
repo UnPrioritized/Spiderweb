@@ -709,7 +709,7 @@ class BetweenGroups:
             return
         self.roll.cancel_draft()
         before = json.dumps(self.shapes)
-        self.shapes[:], gid = between.start_group(self.shapes, *pair)
+        self.shapes[:], gid = between.start_group(self.shapes, *pair, most_colours(self.all16()))
         got = between.ordered(self.shapes, gid)
         self.select_many(got, got[0])
         self.shapes_changed()

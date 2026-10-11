@@ -92,11 +92,13 @@ def by_channel(made):
 
 
 def gradient(first, last):
-    """Every channel's colour on the way from first (channel 1) to last (channel 16), evenly as the eye sees it."""
+    """Every channel's colour on the way from first (channel 1) to last (channel 16), evenly as the eye sees it
+    over the 15 channels used without "Use channel 10"; channel 10 halfway between 9 and 11 (hunt 2026-10-12)."""
     a, b = _oklab(first), _oklab(last)
-    n = SLOTS - 1
+    at = [0, 1, 2, 3, 4, 5, 6, 7, 8, 8.5, 9, 10, 11, 12, 13, 14]
+    n = at[-1]
     return by_channel([with_edge(first if k == 0 else last if k == n else
-                                 _hex(tuple(x + (y - x) * k / n for x, y in zip(a, b)))) for k in range(SLOTS)])
+                                 _hex(tuple(x + (y - x) * k / n for x, y in zip(a, b)))) for k in at])
 
 
 def random_colours():
