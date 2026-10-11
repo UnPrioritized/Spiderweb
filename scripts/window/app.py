@@ -14,7 +14,7 @@ from tkinter import filedialog, ttk, messagebox
 
 import numpy as np
 
-from files.lang import tr
+from files.lang import size as lang_size, tr
 from notes.areas import COLOURS
 from notes.custom import CUSTOM_DEFAULTS, capped_colours, custom_note_count, tracks_apart
 from window import big_ask, look
@@ -73,7 +73,8 @@ from window.settings_window import open_settings
 from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
-from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, StatusLine, Tooltip, bad, good, grid_shown, remember_good, watch_bad
+from window.widgets import (REDO_KEYS, UNDO_KEYS, Scrub, StatusLine, Tooltip, bad, fit_dropdowns, good, grid_shown,
+                            keep_width, remember_good, watch_bad)
 
 
 VEL_KEYS = ("vel0", "vel1")
@@ -445,7 +446,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def _build_side(self):
         """The side panel: scrolls (scrollbar, mouse wheel) when everything in it doesn't fit; otherwise the help
         text at the bottom takes the room that's left."""
-        box = self.side_box = ttk.Frame(self, width=int(330 * self.scale * look.WIDE))
+        self.side_width = int(lang_size("size.panel_width", 330) * self.scale * look.WIDE)  # (a translation may widen it)
+        box = self.side_box = ttk.Frame(self, width=self.side_width)
         box.pack(side="right", fill="y")
         box.pack_propagate(False)
         c = self.side_canvas = tk.Canvas(box, highlightthickness=0, bd=0,
@@ -468,6 +470,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 self.tk.eval(own.replace("%W", str(e.widget)).replace("%D", str(e.delta)))
             return None
         self.bind_class("TCombobox", "<MouseWheel>", drop_wheel)
+        fit_dropdowns(self)
         return side
 
     def fit_side(self):
@@ -479,11 +482,11 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         c.configure(scrollregion=(0, 0, c.winfo_width(), max(need, have)))
         if need > have + 1:
             if not self.side_bar.winfo_ismapped():  # the panel gets wider by the scrollbar, not narrower inside
-                self.side_box.config(width=int(330 * self.scale * look.WIDE) + self.side_bar.winfo_reqwidth())
+                self.side_box.config(width=self.side_width + self.side_bar.winfo_reqwidth())
                 self.side_bar.pack(side="right", fill="y", before=c)
         elif self.side_bar.winfo_ismapped():
             self.side_bar.pack_forget()
-            self.side_box.config(width=int(330 * self.scale * look.WIDE))
+            self.side_box.config(width=self.side_width)
             c.yview_moveto(0)
 
     def side_wheel(self, e, dropdown=False):
@@ -577,7 +580,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         Tooltip(self.split_box, SPLIT_TIP)
         r += 1
         ttk.Label(box, text=tr("app.midi_out")).grid(row=r, column=0, sticky="w", pady=(3, 0))
-        dev = ttk.Combobox(box, textvariable=self.midi_device, state="readonly", values=devices())
+        dev = keep_width(ttk.Combobox(box, textvariable=self.midi_device, state="readonly", values=devices()))
         dev.configure(postcommand=lambda: dev.configure(values=devices()))  # re-list when it opens
         dev.grid(row=r, column=1, sticky="ew", padx=5, pady=(3, 0))
         r += 1

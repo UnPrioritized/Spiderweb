@@ -5,7 +5,7 @@ import sys
 import tkinter as tk
 from tkinter import ttk
 
-from files.lang import tr
+from files.lang import size as lang_size, tr
 from files.mathexpr import calc, fmt
 from window import look
 
@@ -13,6 +13,54 @@ SHIFT, CTRL = 0x1, 0x4
 DRAG_PX = 4  # pixels of label dragging per step
 TIP_WIDTH = 560  # tooltips wrap longer lines at this width (at 100 % scaling), so a text needs no line breaks
 TALL = 120  # px: a widget taller than this gets its tooltip under the mouse instead of under itself
+
+
+SMALLEST_FIT = 7  # points: a squeezed dropdown's text never gets smaller than this
+
+
+def fit_dropdowns(root):
+    """Every dropdown fits its longest choice (measured in its own font, so wide letters count right) the first
+    time it shows, and again if its choices changed: it only ever GROWS, so English looks as it was. Dropdowns
+    holding names (shapes, fonts, devices...) opt out with keep_width; the synth window's keep their size and
+    make the text smaller instead (its knob grid stays put)."""
+    root.bind_class("TCombobox", "<Map>", lambda e: fit_dropdown(e.widget), add="+")
+
+
+def keep_width(cb):
+    """This dropdown keeps the width it was given (its choices are names someone typed, not texts)."""
+    cb.keep_width = True
+    return cb
+
+
+def fit_dropdown(cb):
+    import math
+    from tkinter import font as tkfont
+    if not isinstance(cb, ttk.Combobox) or getattr(cb, "keep_width", False):
+        return
+    try:
+        values = tuple(str(v) for v in cb.cget("values"))
+        if not values or getattr(cb, "fitted_for", None) == values:
+            return
+        cb.fitted_for = values
+        f = tkfont.Font(cb, font=cb.cget("font") or "TkTextFont")
+        width = int(cb.cget("width"))
+        zero = max(1, f.measure("0"))  # (a dropdown's width counts "0"s)
+        need = math.ceil(max(f.measure(v) for v in values) / zero)
+        if need <= width:
+            return
+        if not str(cb.cget("style")).startswith("Synth."):
+            cb.config(width=need)
+            return
+        room = width * zero  # (pixels: the box stays this wide, its width then counts the smaller font's "0"s)
+        size = f.actual("size") or 9
+        sign, size = (-1 if size < 0 else 1), abs(size)  # (below 0 = pixels: kept so)
+        while size > SMALLEST_FIT and max(f.measure(v) for v in values) > room:
+            size -= 1
+            f = tkfont.Font(cb, family=f.actual("family"), size=sign * size, weight=f.actual("weight"))
+        cb.fit_font = f  # (kept: Tk forgets a font once Python lets go of it)
+        cb.config(font=f, width=max(1, room // max(1, f.measure("0"))))
+    except (tk.TclError, ValueError):
+        pass
 
 
 def on_screen(widget, x, y):
@@ -456,7 +504,7 @@ class Tooltip:
         self.tip = tk.Toplevel(w)
         self.tip.wm_overrideredirect(True)
         tk.Label(self.tip, text=self.text, justify="left", background=look.TIP_BG, relief="solid",
-                 borderwidth=1, padx=6, pady=4, wraplength=round(TIP_WIDTH * w.winfo_fpixels("1i") / 96)).pack()
+                 borderwidth=1, padx=6, pady=4, wraplength=round(lang_size("size.tooltip_width", TIP_WIDTH) * w.winfo_fpixels("1i") / 96)).pack()
         self.tip.update_idletasks()
         # under the widget, or under the mouse for a tall one (a list as tall as the window: not at its bottom);
         # kept inside the window (the panel sits at its right edge)

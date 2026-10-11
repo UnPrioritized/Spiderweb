@@ -187,6 +187,16 @@ def texts():
     return _texts
 
 
+def size(key_, usual):
+    """A width a translation may change (pixels at 100 % scaling, e.g. "size.panel_width": "380" for longer
+    words): the language's number, kept between half and three times the usual one; usual if it's not a number."""
+    try:
+        got = float(str(texts().get(key_, usual)).strip())
+    except ValueError:
+        return usual
+    return min(max(got, usual / 2), usual * 3) if got == got else usual
+
+
 def tr(key_, **values):
     """The text for key in the current language (English if it's missing there; the key itself if it's missing
     everywhere), with {name} places filled in from values. A list (a Help page) comes back as lines."""

@@ -18,7 +18,7 @@ from files.lang import tr
 from files.speed import Photo
 from notes import picture as P
 from window import look
-from window.widgets import Tooltip, placed
+from window.widgets import Tooltip, keep_width, placed
 
 PREVIEW_W, PREVIEW_H = 900, 520  # the preview's size to start with (it grows with the window)
 KB = 36  # the keyboard drawn beside the preview, in pixels
@@ -348,7 +348,7 @@ class ImageWindow(tk.Toplevel):
         r = ttk.Frame(f)
         r.pack(fill="x", pady=1)
         ttk.Label(r, text=tr("image.format"), width=15).pack(side="left")
-        self.fmt_box = ttk.Combobox(r, width=24, state="readonly")
+        self.fmt_box = keep_width(ttk.Combobox(r, width=24, state="readonly"))
         self.fmt_box.pack(side="left")
         self.fmt_box.bind("<<ComboboxSelected>>", lambda e: self.set_fmt(self.fmt_box.get()))
         r = ttk.Frame(f)

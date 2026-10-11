@@ -1,5 +1,9 @@
 {
  "language": "English (UK)",
+ "size.panel_width": "330",
+ "size.tooltip_width": "560",
+ "size.tip_width": "380",
+ "size.help_width": "900",
  "extras.ask": "Spiderweb can use free Python packages that aren't installed yet:\n\n{list}\n\nSpiderweb works without them, just slower. Install them now? (needs the internet; it can take a few minutes)\n\nIf you say No, Spiderweb won't ask again.",
  "extras.numba": "Numba: much faster with lots of notes (zooming, moving shapes, letting go)",
  "extras.pillow": "Pillow: images shown faster, and the Image tool opens JPG, WebP, BMP and TIFF too",

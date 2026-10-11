@@ -11,7 +11,7 @@ from files.mathexpr import calc, fmt
 from notes.pattern import PATTERN_PRESETS, PRESET_ALONG, formula_loop, new_pattern
 from window.panel_custom import GAP_COLOR
 from window.pattern_dialog import load_patterns, saved_pattern
-from window.widgets import Scrub, Tooltip, bad, good
+from window.widgets import Scrub, Tooltip, bad, good, keep_width
 
 VEL_HEIGHT = 20.0  # a preset's height to start with, in velocity steps (on the piano roll it's 4 keys)
 VEL_LOOPS = 4.0
@@ -32,7 +32,7 @@ class VelocityFormulaBar(ttk.Frame):
         self.app = app
         app.vel_pattern = vel_pattern()
         self.pick = tk.StringVar()
-        self.box = ttk.Combobox(self, textvariable=self.pick, state="readonly", width=14)
+        self.box = keep_width(ttk.Combobox(self, textvariable=self.pick, state="readonly", width=14))
         self.box.pack(side="left", padx=(6, 6))
         self.box.bind("<<ComboboxSelected>>", lambda e: self.on_pick())
         self.box.bind("<Button-1>", lambda e: self.fill_list(), add="+")  # (saved ones may have changed)

@@ -10,7 +10,7 @@ import tkinter as tk
 import webbrowser
 from tkinter import font as tkfont, ttk
 
-from files.lang import tr
+from files.lang import size as lang_size, tr
 from files.about import BANNER, BANNER_HALF, HERE, LICENSE, VERSION, WEBSITE
 from files.system import open_path
 from window import look
@@ -210,7 +210,7 @@ class TipPopup(tk.Toplevel):
         box.pack(fill="both", expand=True)
         self.head = ttk.Label(box, font=look.font(10, "bold"))
         self.head.pack(anchor="w")
-        self.body = ttk.Label(box, wraplength=int(380 * s), justify="left")
+        self.body = ttk.Label(box, wraplength=int(lang_size("size.tip_width", 380) * s), justify="left")
         self.body.pack(anchor="w", pady=(4, 10))
         row = ttk.Frame(box)
         row.pack(fill="x")
@@ -283,7 +283,7 @@ class HelpWindow(tk.Toplevel):
         self.app = app
         s = self.scale = app.scale
         self.title(tr("help.spiderweb_help", VERSION=VERSION))
-        self.geometry(f"{int(900 * s)}x{int(620 * s)}")
+        self.geometry(f"{int(lang_size('size.help_width', 900) * s)}x{int(620 * s)}")
         self.minsize(int(600 * s), int(360 * s))
         remember_place(self, "help")
         self.topic = None

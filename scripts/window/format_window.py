@@ -13,7 +13,7 @@ from files import clipboard
 from files import colour_list as CL
 from files.lang import tr
 from window import look
-from window.widgets import remember_place
+from window.widgets import keep_width, remember_place
 
 WS = re.compile(r"^[ \t]+|[ \t]+$", re.M)
 TAGS = [("{n}", "fmt.tag_n"), ("{n0}", "fmt.tag_n0"), ("{n:2}", "fmt.tag_n2"), ("{hex}", "fmt.tag_hex"),
@@ -55,7 +55,7 @@ class FormatWindow(tk.Toplevel):
         r = ttk.Frame(box)
         r.pack(fill="x")
         ttk.Label(r, text=tr("fmt.format")).pack(side="left")
-        self.box = ttk.Combobox(r, width=32, state="readonly")
+        self.box = keep_width(ttk.Combobox(r, width=32, state="readonly"))
         self.box.pack(side="left", padx=6)
         self.box.bind("<<ComboboxSelected>>", lambda e: self.pick(self.box.get()))
         ttk.Button(r, text=tr("fmt.save_as"), command=self.save_as).pack(side="left")

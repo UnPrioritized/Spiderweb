@@ -15,7 +15,7 @@ from window import button_look, look, palettes
 from window.builtin_settings import BuiltinPanel
 from window.drawer import clean_name
 from window.updates import often_box
-from window.widgets import Tooltip, remember_place
+from window.widgets import Tooltip, keep_width, remember_place
 
 
 def look_box(parent):
@@ -264,6 +264,7 @@ class SettingsWindow(tk.Toplevel):
         ttk.Label(page, text=tr("app.midi_out")).grid(row=0, column=0, sticky="e", padx=(0, 8), pady=3)
         dev = self.midi_box = ttk.Combobox(page, textvariable=app.midi_device, state="readonly", values=devices(),
                                            width=30)
+        keep_width(dev)
         dev.configure(postcommand=lambda: dev.configure(values=devices()))  # (re-listed when it opens)
         dev.grid(row=0, column=1, sticky="w", pady=3)
         ttk.Separator(page).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 8))
@@ -315,6 +316,8 @@ class SettingsWindow(tk.Toplevel):
             row = ttk.Frame(page)
             row.grid(row=r + 1 + k, column=1, sticky="w", pady=3)
             box = ttk.Combobox(row, textvariable=var, values=values, state="readonly", width=width)
+            if label == "look.font":
+                keep_width(box)  # (font names)
             box.pack(side="left")
             box.bind("<<ComboboxSelected>>", lambda e: self.save_size())
             Tooltip(box, tr(tip))
@@ -548,7 +551,7 @@ class SettingsWindow(tk.Toplevel):
         ttk.Separator(page).grid(row=r, column=0, columnspan=2, sticky="ew", pady=(12, 8))
         ttk.Label(page, text=tr("palette.label")).grid(row=r + 1, column=0, sticky="e", padx=(0, 8), pady=3)
         self.pal_var = tk.StringVar()
-        self.pal_box = ttk.Combobox(page, textvariable=self.pal_var, state="readonly", width=24)
+        self.pal_box = keep_width(ttk.Combobox(page, textvariable=self.pal_var, state="readonly", width=24))
         self.pal_box.grid(row=r + 1, column=1, sticky="w", pady=3)
         self.pal_box.bind("<<ComboboxSelected>>", lambda e: self.pick_palette())
         Tooltip(self.pal_box, tr("palette.tip"))

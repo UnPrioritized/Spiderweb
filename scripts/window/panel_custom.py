@@ -17,7 +17,7 @@ from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
 from notes.hzbass import AUTO, all_tones, auto_picks, each_layer, layers_of, shortest_gate
 from window.hz_window import open_hz
 from window.range_window import open_range_graph
-from window.widgets import Scrub, Tooltip, bad, good, grid_shown, leave_box, unchanged
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown, keep_width, leave_box, unchanged
 
 GAP_COLOR = look.WARN  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
 MISSING_MARK = "✕ "  # in the Shape box: a placed shape whose library shape was renamed or deleted (user, 2026-10-05)
@@ -71,8 +71,8 @@ class CustomPanel:
         row = self.custom_shape_row = ttk.Frame(box)
         row.pack(fill="x")
         ttk.Label(row, text=tr("panel_custom.shape")).pack(side="left")
-        self.custom_combo = ttk.Combobox(row, textvariable=self.custom_pick, state="readonly", width=18,
-                                         postcommand=self.refresh_custom_names)
+        self.custom_combo = keep_width(ttk.Combobox(row, textvariable=self.custom_pick, state="readonly", width=18,
+                                                    postcommand=self.refresh_custom_names))
         self.custom_combo.pack(side="left", padx=(5, 0))
         self.custom_combo.bind("<<ComboboxSelected>>", lambda e: self.on_custom_pick())
         ttk.Button(row, text=tr("panel_custom.drawer"), command=self.open_drawer).pack(side="left", padx=(4, 0))
