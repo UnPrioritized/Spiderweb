@@ -54,14 +54,37 @@ def parts(sh):
     return [sh]
 
 
-def colours_back(sh):
-    """True if sh's colours get their channels in mirrored order (engine.render back) and the Shapes list says so:
-    it's gate flipped (a sliced piece of a drawn shape too; a merged shape: every part that takes it)."""
+def takes_it(sh):
+    """True if a gate aware flip can be on sh (a merged shape: through its parts)."""
+    return sh.get("gate_flip") is True or sh["kind"] == "custom" and (
+        is_pasted(sh) or sh.get("fill") in SPAM_FILLS and not any(k in sh for k in NOT_DRAWN))
+
+
+def all_flipped(sh):
+    """True if sh is gate flipped: the menu's tick and the Shapes list's "(Gates flipped)" (one rule for both, hunt).
+    A merged shape: every part that takes it."""
     if sh.get("merge"):
-        ps = [p for p in parts(sh) if p.get("gate_flip") is not None or is_pasted(p) or p.get("fill") in SPAM_FILLS]
-        return bool(ps) and all(colours_back(p) for p in ps)
+        ps = [p for p in parts(sh) if offered(p) and takes_it(p)]
+        return bool(ps) and all(p.get("gate_flip") is True for p in ps)
     return sh.get("gate_flip") is True and sh["kind"] == "custom" and (
         is_pasted(sh) or sh.get("fill") in SPAM_FILLS and not any(k in sh for k in NOT_DRAWN))
+
+
+def colours_back(sh):
+    """Which of sh's colours get their channels in mirrored order (engine.render back): True = all, False = none, or
+    a list of (first, last + 1) track ranges each mirrored over its own notes. A merged shape: each flipped part's
+    own colours (merge recipe "split" = where the second part's start; user expected each part to keep its own
+    colours), all of them when Colours is set on the merged shape itself. Pasted notes sliced from a flipped paste
+    keep the mirrored order ("flip_colours", slice.slice_notes); flipped again they're back in order."""
+    if sh.get("merge"):
+        m = sh["merge"]
+        if sh.get("cycle") or not isinstance(m.get("split"), int):
+            return all_flipped(sh)
+        spans = [(0, m["split"]), (m["split"], 1 << 40)]
+        return [s for s, p in zip(spans, m["parts"]) if all_flipped(p)] or False
+    if is_pasted(sh):
+        return (sh.get("gate_flip") is True) != (sh.get("flip_colours") is True)
+    return all_flipped(sh)
 
 
 def is_flipped(sh):
@@ -127,10 +150,20 @@ def mirror_ticks(sh, right, ppq):
     or past twice its right end, so the flipped drawing never starts before the song does and the ticks flip back
     exactly. Start Aligned with no Range: a line of its gate grid too (counted from tick 0), so the notes stay on
     it (only the colours' order turns round, user)."""
+    step = grid_step(sh, ppq)
+    return step * max(1, math.ceil(2 * right * ppq / step))
+
+
+def grid_step(sh, ppq):
+    """Ticks every grid that counts from the song's start lines up on: a bar, the Aligned gate grid, Colours By
+    time's bands (mirrored around / moved by a whole number of these, nothing on them shifts)."""
     step = 4 * ppq
     if sh.get("align") == "aligned" and not sh.get("range"):
         step = math.lcm(step, gate_ticks(sh["gate"], ppq))
-    return step * max(1, math.ceil(2 * right * ppq / step))
+    cy = sh.get("cycle") or {}
+    if cy.get("by") == "time":  # (Colours By time every a/b whole notes: a whole notes hold whole bands, so the
+        step = math.lcm(step, 4 * ppq * int(cy["every"][0]))  # bands' edges stay where they are, hunt)
+    return step
 
 
 def flipped_drawing(sh, mid2):
@@ -152,13 +185,25 @@ def flipped_back(notes, ticks):
     return out
 
 
+def cut_at_start(notes, tracks):
+    """Notes (and tracks) cut at the song's start like a drawing's own: none ending by tick 0, the rest starting at
+    0 at the earliest (a shape drawn partly before beat 0 made notes there, hunt)."""
+    out = notes.copy()
+    keep = out[:, 1] > 0
+    if not keep.all():
+        out = out[keep]
+        tracks = None if tracks is None else np.asarray(tracks)[keep]
+    out[:, 0] = np.maximum(out[:, 0], 0)
+    return out, tracks
+
+
 def runs(notes):
     """(each note's run number, each run's key, first start, place among its key's runs) of (start, end, key, ...)
     rows: a run = notes on one key touching or overlapping one another."""
     if not len(notes):
         z = np.zeros(0, np.int64)
         return z, z, z, z
-    o = np.lexsort((notes[:, 0], notes[:, 2]))
+    o = key_order(notes)
     s, e, k = notes[o, 0], notes[o, 1], notes[o, 2]
     big = int(e.max()) + 2  # (the latest end so far on the same key: keys apart by big)
     reach = np.maximum.accumulate(e + (k - k.min()) * big) - (k - k.min()) * big
@@ -171,6 +216,24 @@ def runs(notes):
     key_first = np.r_[True, rk[1:] != rk[:-1]]
     place = np.arange(len(first)) - np.maximum.accumulate(np.where(key_first, np.arange(len(first)), 0))
     return out, rk, s[first], place
+
+
+def key_order(notes):
+    """The order key row by key row, in time. Quick for a spam shape's notes, which come that way already, or (made
+    from the flipped drawing, mirrored back) with each key's notes the other way round: sorting millions of them
+    took most of kept_in_place's time (hunt)."""
+    k, s = notes[:, 2], notes[:, 0]
+    up, same = k[1:] > k[:-1], k[1:] == k[:-1]
+    if not (up | same).all():
+        return np.lexsort((s, k))
+    if (up | same & (s[1:] >= s[:-1])).all():
+        return np.arange(len(notes))
+    if (up | same & (s[1:] <= s[:-1])).all():  # (each key's run backwards: turned round in place)
+        i = np.arange(len(notes))
+        first = np.maximum.accumulate(np.where(np.r_[True, up], i, 0))
+        last = np.minimum.accumulate(np.where(np.r_[up, True], i, len(notes))[::-1])[::-1]
+        return first + last - i
+    return np.lexsort((s, k))
 
 
 def kept_in_place(notes, plain):

@@ -156,6 +156,8 @@ def recipe_shape(m):
     (no notes at all). No row meeting any more (a part's settings changed): both as they are, nothing slid."""
     from notes.custom import notes_shape
     parts = part_rows(m["parts"], m["ppq"], m["keys"])
+    if len(parts[1]):  # (the second part's colours start here: a gate aware flip mirrors each part's on its own)
+        m["split"] = int(parts[1][:, 4].min())
     got = merged(parts, m["right"], m["ppq"], m["keys"])
     if got is None:
         out = np.concatenate(parts)
@@ -441,4 +443,6 @@ def clean_merge(m, clean_shape):
         out["box"] = box  # (its box when made: turned / slanted / stretched since = the parts too, merged again)
     if "vrev" in m:
         out["vrev"] = m["vrev"] is True  # (flipped sideways an odd number of times: velocities the other way)
+    if isinstance(m.get("split"), int) and m["split"] >= 0:
+        out["split"] = m["split"]  # (where the second part's colours start: recipe_shape)
     return out

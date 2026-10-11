@@ -349,15 +349,19 @@ def slice_notes(sh, notes, tracks, a, b, ppq):
     tracks = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64)
     rest, before = ~on | (hi > x), on & (lo < x)
     paste = sh.get("paste") or uuid.uuid4().hex[:12]  # (its tracks keep their channels across the pieces: render)
+    from notes.gateflip import colours_back
+    mirrored = colours_back(sh) is True  # (a gate flipped paste: the pieces keep its colours' mirrored order)
     parts = []
     for keep, s0, s1 in ((rest, np.where(on, np.maximum(lo, x), lo), hi), (before, lo, np.minimum(hi, x))):
         n = np.column_stack([s0, s1 - s0, keys, notes[:, 3], tracks])[keep]
         if not len(n):
             return None, crossed
         half = {k: copy.deepcopy(v) for k, v in sh.items()
-                if k not in ("notes", "pts", "vel_env", "fx", "glue", "between", "gate_flip")}
+                if k not in ("notes", "pts", "vel_env", "fx", "glue", "between", "gate_flip", "flip_colours")}
         # (pages / glue / a velocity line / a gate aware flip: in its notes)
         half.update(notes_shape(n, ppq, sh.get("name")), paste=paste)
+        if mirrored:
+            half["flip_colours"] = True
         if "name" not in sh:
             half.pop("name")
         parts.append(half)

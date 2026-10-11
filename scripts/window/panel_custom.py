@@ -687,6 +687,7 @@ class CustomPanel:
             new = dict(rest, hz=dict(t.get("hz") or {"auto": AUTO}, bpm=float(bpm), **hz), gate=hz_gate(hz, bpm))
             if not t.get("hz"):  # (switched on: what it had is kept; a Range doesn't work with Hz bass, user)
                 new["before_hz"] = {"gate": t["gate"]}
+                new.pop("gate_flip", None)  # (no gate aware flip on a Hz bass: hidden it couldn't be switched off)
                 if new.get("range"):
                     new["range_kept"] = new.pop("range")
                     new["before_hz"]["range"] = True

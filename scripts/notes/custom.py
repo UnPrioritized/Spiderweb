@@ -2295,7 +2295,8 @@ def cycle_turns(sh, notes, ppq, bottom=None):
             k = row_restart(notes, k, back, notes[:, 2].astype(np.int64) if merge else colour_pieces(sh, notes, ppq))
         return slant(k) % c["n"]
     elif merge:  # by step: each key row's notes one after another (its two shapes' gates needn't line up in time)
-        k, rows = row_steps_of(notes, back and rows), False
+        from notes.gateflip import all_flipped  # (its parts' gates laid from the right: counted from each row's end)
+        k, rows = row_steps_of(notes, (back and rows) != all_flipped(sh)), False
     elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS and (sh.get("hz") or {}).get("tones"):
         k = hz_steps(sh, notes, ppq)
     elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS and sh.get("range") and not sh.get("hz"):

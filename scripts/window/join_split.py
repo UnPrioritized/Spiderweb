@@ -230,7 +230,8 @@ class JoinSplit:
         if any("picture" in self.shapes[i] for i in pair):  # (user: an image keeps its own colours, so not merged)
             self.status.config(text=tr("join_split.merge_no_image"))
             return
-        got = merged(part_rows([self.shapes[i] for i in pair], self.ppq, self.keys), to_right, self.ppq, self.keys)
+        rows = part_rows([self.shapes[i] for i in pair], self.ppq, self.keys)
+        got = merged(rows, to_right, self.ppq, self.keys)
         if got is None:
             self.status.config(text=tr("join_split.merge_no_meet"))
             return
@@ -255,6 +256,8 @@ class JoinSplit:
                            "ppq": self.ppq, "keys": self.keys, "apart": sorted(set(rest[:, 2].tolist())),
                            "at": list(new[0]["pts"][0]),  # (where its box was: Split moves the parts as far as it)
                            "box": [list(p) for p in new[0]["pts"]]}  # (turned / slanted since: the parts too)
+        if len(rows[1]):  # (where the second part's colours start: merge.recipe_shape)
+            new[0]["merge"]["split"] = int(rows[1][:, 4].min())
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.merge"))
         self.unlink_groups(pair)
