@@ -1,0 +1,22 @@
+Effects, in the pane under the notes, change how the tone sounds (only Pitch and Vibrato move its pitch). Click an effect's name on the left to put it on. Hold the mouse over a name to see what it does, at the bottom of the window.
+[clip:hz_effects-pane]
+
+Each effect is one line over all the notes, in step with them: 0 % at the bottom, 100 % at the top, flat before its first point and after its last.
+
+Drag a point to move it, press on the line to add a point, double-click a point to delete it (deleting the last one takes the effect off; Delete with no points selected takes the highlighted effect off).
+
+Drag the small round handle in the middle of a line up or down to bend it (double-click it: straight again); right-click a line → Hold makes it a step. Right-click for more.
+
+Click a name that's on to highlight its line (the others go faint); click it again to see them all. While one effect is highlighted, pressing on another's faint line adds a point to the highlighted one.
+
+The small square before a name that's on switches the effect off and on again without losing its line (Bypass).
+
+To select several points, drag a box around them with Select (or Ctrl+drag with either tool): drag one of them to move them all, Delete deletes them, Ctrl+C and Ctrl+V copy them and paste them where the mouse is (into the highlighted effect, if any).
+
+With the Pencil tool and an effect highlighted, drag on empty space to draw its line: with snap on it draws a step in every grid cell, with Shift (or snap off) a smooth line.
+
+Lines that move sound more alive than flat ones. Very fast movement is hard to hear.
+
+An effect can repeat, like an automation that repeats every beat: right-click it → Repeat every…, and type how long one repeat is as a note length, like the snap (1 / 4 = one beat); green lines show where each repeat starts while you type. The line you drew is squeezed into one repeat, and that repeat plays over and over from the start of the Hz bass. Change any copy and they all change.
+
+Right-click → Shape gives a ready-made one (sine, triangle, saw, square, pump, random steps). Stop repeating stretches it back over the notes. Right-click → Amount line adds a dotted line over the notes that says how strong the repeat is (0 % = as if the effect were off), for example to fade a pump in.

@@ -1,0 +1,5 @@
+Ctrl+Z undoes the last change, Ctrl+Y (or Ctrl+Shift+Z) does it again. Ctrl+Z while something is half drawn drops just that.
+
+Every change is a step with a name (the last 300 are kept). Tick History in the toolbar to see them all and click any step to jump straight to it (see History).
+
+The drawer has its own Ctrl+Z / Ctrl+Y for its drawing.

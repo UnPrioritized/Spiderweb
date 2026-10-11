@@ -1,0 +1,13 @@
+Select: drag a point (small squares; points in the same spot move together, so outlines stay closed), an ellipse's corners, or a whole stroke (moves in grid squares, Shift = free). Middle-drag scrolls.
+
+Dragged points stick to other strokes like new ones; one stroke moved on its own sticks by its point nearest to another stroke, and by its line too: another stroke's point comes onto it, or it rests against another stroke's line (a circle touches a slanted line instead of crossing it). Between two lines it can also rest on both at once (a smaller reach, with a mark at each touch).
+
+Drag on empty space to draw a box: every stroke it touches is selected, and the box stays until you click outside it. Ctrl+drag adds another box, Ctrl+click adds or removes one stroke. Dragging one of the selected strokes, or anywhere inside the box, moves them all; right-click inside the box (or on one of them) for what works on all of them at once. A click on empty space deselects. Del deletes the selected strokes.
+
+Right-click a stroke = its menu (add point / anchor, symmetric curve halves, its role, delete, copy, paste, flip, turn); empty space = deselect; while drawing a polyline = finish it.
+
+A stroke's role: Outline and fill (normal) makes notes and makes the inside for Fill and Spam. Outline only (dotted) makes notes on top of the fill, but cuts no hole and closes no gap. Fill line (thin dashes) makes no notes and doesn't change what's filled: it splits the inside into areas you can give their own colour.
+
+Outline colour: the stroke's notes go in that colour (a channel of their own with Multi channel; the same numbers as the Areas tool's, so colour 2 here and an area in colour 2 share a channel). It counts where the stroke's own notes are: Empty and Outline spam, and Outline only strokes with Fill and Spam (the edge of a filled area is the fill's).
+
+Ctrl+C / Ctrl+V = copy / paste (each paste lands one more grid square down and right), Ctrl+X = cut the selected strokes, Ctrl+H / Ctrl+J = flip sideways / upside down, Ctrl+Left / Ctrl+Right = turn 90°. These work on the selected strokes, or the whole drawing when nothing is selected. Pasted strokes come out selected, so they can be moved together.

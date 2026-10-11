@@ -1,0 +1,5 @@
+Freehand strokes (and freehand strokes in a live shape: pick the stroke first) have a Straighten number in the panel, 0-100.
+
+0 = exactly as drawn. Higher = the stroke may stray further from your drawing to become simpler: wobbly parts become straight lines and smooth curves, sharp turns stay corners. A stroke that ends where it started becomes a perfect shape: circle or ellipse, square or rectangle, triangle (or another straight-sided shape). Turning it up makes it simpler (an oval → a circle, a rectangle → a square); a loop keeps its kind and its tilt.
+
+The drawing is kept underneath, so you can change the number any time. New freehand strokes use the last number you picked.

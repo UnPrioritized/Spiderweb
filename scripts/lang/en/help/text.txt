@@ -1,0 +1,23 @@
+Click on the piano roll and type (Enter = new line, Esc = done). The letters become a custom shape, so they can be filled, moved, resized, turned and skewed.
+
+Panel: font, size (font size, or rows = how many keys capital letters are), weight and italic, plus:
+
+Letter spacing: extra room between the letters, in 1/1000 of the font size. Minus numbers pull them closer together.
+[clip:text-letterspace]
+
+Line spacing: room between lines (Enter starts a new line), in % of the font's own line spacing.
+[clip:text-linespace]
+
+Align: where the text sits on the spot you clicked. Left = it starts there, Centre = its middle is there, Right = it ends there. With several lines it also lines them up.
+[clip:text-align]
+
+Text is a custom shape, so Empty, Fill, Spam and Outline spam work on its letters too (see Inside fill).
+[clip:text-inside]
+
+Threshold (Fill / Spam): how much of a key's height has to be inside a letter for that key to play there. 50% = the key's middle. Lower = chunkier letters, higher = thinner.
+[clip:text-threshold]
+
+Grow: makes the letters' strokes thicker, in keys (minus = thinner). Big values can look odd in tight corners.
+[clip:text-grow]
+
+Click a text with the Text tool (or double-click it with Select) to retype it. Drag, Shift+arrows, double-click (a word) or Ctrl+A select letters; Ctrl+C / X / V copy, cut and paste them.

@@ -1,0 +1,13 @@
+Lines can't be filled, custom shapes can. Select one or more lines, polylines, freehand strokes, curves or arcs (custom shapes too) and press Ctrl+R, or right-click one → Turn into live shape.
+
+They become one live shape (a custom shape), each of them a stroke of its own kind: curves stay curves with their anchors, arcs stay arcs, a straightened freehand stroke stays straightened, and formulas stay on (a joined curve's become a plain curve).
+
+Then Fill, Spam and Outline spam work (see Inside fill), and its strokes can be edited like any live shape's.
+[clip:turn_live-fill]
+
+The notes stay the same, and so do the velocities (where shapes play at the same time, the first selected one's win). With Multi channel each stroke still remembers the shape it came from, so strokes that clash still get channels of their own; the shape list says how many channels a shape uses (orange above 15).
+
+What changes (Spiderweb asks first when it applies): tumours become fixed points, and "Last note: starts on it" is dropped.
+
+Going back: Split into separate shapes (Ctrl+Shift+G, or right-click → Split back into the old shapes) gives the old shapes back exactly as they were, tumours and all, as long as the drawing wasn't changed (moving the whole shape is fine; resizing, turning, flipping or editing its strokes isn't: then it splits into groups of touching strokes instead). Ctrl+Z always works.
+[clip:turn_live-back]

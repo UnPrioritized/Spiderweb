@@ -1,13 +1,15 @@
-"""Every text Spiderweb shows comes from a language file: lang/en.json (English, the default), other languages as
-lang/<code>.json (e.g. ko.json, zh-CN.json) with the same keys. A key missing from a language file is shown in
-English, so a translation can be done bit by bit. The program asks for a text by its key: tr("join.button").
+"""Every text Spiderweb shows comes from a language folder: lang/en/ (English, the default), other languages as
+lang/<code>/ (e.g. ko/, zh-CN/) with the same keys. Inside: any .json files (en has main.json, tools.json, hz.json;
+which file holds a key doesn't matter) and help/<topic>.txt = the Help page help.<topic>.text, one line per line (an
+empty line = a new paragraph). A key or file missing from a language is shown in English, so a translation can be
+done bit by bit. An old one-file translation lang/<code>.json still reads. The program asks for a text by its key:
+tr("join.button").
 
-Texts with numbers in them have {name} places, e.g. "Split into {n} shapes": tr("...", n=3). A Help page is a list of
-lines (an empty line = a new paragraph), so there are no "\\n" in the file.
+Texts with numbers in them have {name} places, e.g. "Split into {n} shapes": tr("...", n=3).
 
-Language files are looked for next to Spiderweb (a lang folder beside spiderweb.py or the .exe) first, then the ones
-built in. Settings → Language picks one (user/settings.ini [language] code), put on at the next start; each file
-names itself with its "language" text, e.g. "한국어 (Korean)"."""
+Languages are looked for next to Spiderweb (a lang folder beside spiderweb.py or the .exe) first, then the ones
+built in. Settings → Language picks one (user/settings.ini [language] code), put on at the next start; each names
+itself with its "language" text, e.g. "한국어 (Korean)"."""
 
 import json
 import os
@@ -20,10 +22,10 @@ from files.about import HERE
 
 BUILT_IN = os.path.join(getattr(sys, "_MEIPASS", os.path.join(HERE, "scripts")), "lang")
 OWN = os.path.join(HERE, "lang")  # (beside spiderweb.py / the exe: translations added by users, looked at first)
-CODE = r"[A-Za-z0-9][A-Za-z0-9_-]{0,19}"  # (a file name only, never a path; "_template" is never listed)
-TEMPLATE = "_template.json"  # (Settings → Language's "Start a translation": a copy of English to fill in)
+CODE = r"[A-Za-z0-9][A-Za-z0-9_-]{0,19}"  # (a file / folder name only, never a path; "_template" is never listed)
+TEMPLATE = "_template"  # (Settings → Language's "Start a translation": a copy of the English folder to fill in)
 _texts = {}
-problems = {}  # file name -> why it couldn't be read (the last time _load tried it)
+problems = {}  # file name (e.g. "ko/main.json") -> why it couldn't be read (the last time _load tried it)
 
 
 def read_language():
@@ -49,6 +51,8 @@ def languages():
             continue
         for name in names:
             code, ext = os.path.splitext(name)
+            if os.path.isdir(os.path.join(folder, name)):
+                code, ext = name, ".json"
             if ext.lower() == ".json" and re.fullmatch(CODE, code) and code not in found:
                 own = _load(code).get("language")
                 found[code] = own.strip() if isinstance(own, str) and own.strip() else code
@@ -62,15 +66,37 @@ def languages():
 
 
 def make_template():
-    """A copy of the English texts in the lang folder beside Spiderweb, to fill in and rename (e.g. ko.json): its
-    path. Raises OSError."""
+    """A copy of the English folder in the lang folder beside Spiderweb, to fill in and rename (e.g. ko): its path.
+    Raises OSError."""
     from files.safefile import write_text
-    english = dict(_load("en"))
-    english["language"] = ""
-    os.makedirs(OWN, exist_ok=True)
+    source, is_folder = _where("en")
+    if not is_folder:
+        raise OSError("no English folder")
     path = os.path.join(OWN, TEMPLATE)
-    write_text(path, json.dumps(english, ensure_ascii=False, indent=1) + "\n")
+    for here, _, names in os.walk(source):
+        to = os.path.join(path, os.path.relpath(here, source))
+        os.makedirs(to, exist_ok=True)
+        for name in names:
+            if name.lower().endswith((".json", ".txt")):
+                with open(os.path.join(here, name), encoding="utf-8-sig") as f:
+                    text = f.read()
+                if "language" in json_part(name, text):  # (the name line is for the translator to fill in)
+                    part = json.loads(text)
+                    part["language"] = ""
+                    text = json.dumps(part, ensure_ascii=False, indent=1) + "\n"
+                write_text(os.path.join(to, name), text)
     return path
+
+
+def json_part(name, text):
+    """A .json file's texts ({} for anything else or when it can't be read)."""
+    if not name.lower().endswith(".json"):
+        return {}
+    try:
+        got = json.loads(text)
+    except ValueError:
+        return {}
+    return got if isinstance(got, dict) else {}
 
 
 # (the one in use; SPIDERWEB_LANG in the environment wins: the saved tests run in English whatever the user picked)
@@ -78,23 +104,74 @@ _forced = os.environ.get("SPIDERWEB_LANG") or ""
 LANGUAGE = _forced if re.fullmatch(CODE, _forced) else read_language()
 
 
-def _load(code):
-    """The file's texts ({} when it can't be read: problems[file] says why). A "UTF-8 with BOM" file reads too."""
+def _where(code):
+    """(path, is a folder) of the language: its folder, else its one file; beside Spiderweb first. (None, False)
+    when there's neither."""
     for folder in (OWN, BUILT_IN):
-        path = os.path.join(folder, f"{code}.json")
-        if os.path.exists(path):
-            problems.pop(f"{code}.json", None)
-            try:
-                with open(path, encoding="utf-8-sig") as f:
-                    got = json.load(f)
-            except json.JSONDecodeError as e:
-                problems[f"{code}.json"] = ("line", e.lineno)
-                return {}
-            except (OSError, ValueError):
-                problems[f"{code}.json"] = ("unreadable", 0)
-                return {}
-            return got if isinstance(got, dict) else {}
-    return {}
+        path = os.path.join(folder, code)
+        if os.path.isdir(path):
+            return path, True
+        if os.path.exists(path + ".json"):
+            return path + ".json", False
+    return None, False
+
+
+def _read_json(path, shown):
+    """One .json file's texts ({} when it can't be read: problems[shown] says why). "UTF-8 with BOM" reads too."""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            got = json.load(f)
+    except json.JSONDecodeError as e:
+        problems[shown] = ("line", e.lineno)
+        return {}
+    except (OSError, ValueError):
+        problems[shown] = ("unreadable", 0)
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def _read_page(path, shown):
+    """A Help page .txt as its lines (None when it's empty or can't be read)."""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            text = f.read()
+    except (OSError, ValueError):
+        problems[shown] = ("unreadable", 0)
+        return None
+    if text.endswith("\n"):
+        text = text[:-1]
+    return text.split("\n") if text.strip() else None
+
+
+def _load(code):
+    """The language's texts: every .json in its folder + its help/*.txt pages (or its one old .json file)."""
+    path, is_folder = _where(code)
+    for name in [p for p in problems if p == f"{code}.json" or p.startswith(f"{code}/")]:
+        del problems[name]
+    if path is None:
+        return {}
+    if not is_folder:
+        return _read_json(path, f"{code}.json")
+    got = {}
+    try:
+        names = sorted(os.listdir(path))
+    except OSError:
+        names = []
+    for name in names:
+        if name.lower().endswith(".json") and os.path.isfile(os.path.join(path, name)):
+            got.update(_read_json(os.path.join(path, name), f"{code}/{name}"))
+    help_folder = os.path.join(path, "help")
+    try:
+        pages = sorted(os.listdir(help_folder))
+    except OSError:
+        pages = []
+    for name in pages:
+        topic, ext = os.path.splitext(name)
+        if ext.lower() == ".txt":
+            lines = _read_page(os.path.join(help_folder, name), f"{code}/help/{name}")
+            if lines is not None:
+                got[f"help.{topic}.text"] = lines
+    return got
 
 
 def _usable(v):

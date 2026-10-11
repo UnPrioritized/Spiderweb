@@ -1,0 +1,15 @@
+Version {VERSION}
+
+© 2026 Kanade Tachibana
+
+Free to use, share and change under the MIT License.
+
+New versions, the source code and problem reports: {WEBSITE}
+
+Spiderweb can look there for a new version by itself (set how often in Settings, the ⚙ button, on the Updates page; Never turns it off). When there is one, a small window says what's new in it and has a button to open the download page. Nothing is downloaded by itself: to update, download the new Spiderweb.exe and put it in place of the old one. Your autosave and shapes stay.
+
+All of the code was written by an AI model (Claude Opus 5.5, by Anthropic). Kanade Tachibana directed the project: decided what it should do, tested it and asked for changes.
+
+Spiderweb's folder holds the MIDI files you generate (output) and the user folder: your autosave (and autosave-backup), settings, presets, your shape library (shapes) and errors.log, where the details go if something goes wrong.
+
+Look (Settings, the ⚙ button): Light, Dark, or Follow Windows (the same as your Windows setting). Restart Spiderweb to see the new look.

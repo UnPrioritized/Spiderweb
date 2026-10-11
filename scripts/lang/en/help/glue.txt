@@ -1,0 +1,9 @@
+Select one or more shapes, then right-click one: Glue touching notes. On each key, notes that touch or overlap become one long note, from the first one's start to the last one's end. The shape looks the same with far fewer notes, for example a filled part with short gates.
+
+Only some notes: draw a Select box (or several, with Ctrl) over the part to glue, then right-click inside the box: Glue touching notes in the box. A note is glued when its middle is in the box.
+
+Notes with a gap between them, even one tick, stay apart. The glued note keeps the velocity of its first note. Notes of different colours don't glue together.
+
+The glue is kept with the shape: moving, resizing or reshaping it glues the new notes the same way, and the boxes move and stretch with it. Glue another part to add to it. Right-click → Remove glue takes all of it off the selected shapes.
+
+The glue comes first: Claw machine, Strum and Chop pages on the same shape work on the glued notes.

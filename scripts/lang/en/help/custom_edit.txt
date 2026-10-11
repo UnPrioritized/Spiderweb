@@ -1,0 +1,18 @@
+A selected custom shape (and text) shows a box. The mouse pointer changes to show what a drag will do.
+
+Move: drag anywhere inside it (Select tool). It moves in grid steps; Shift = free.
+[clip:custom_edit-move]
+
+Resize: drag a corner square. The opposite corner stays put; Ctrl keeps its proportions.
+[clip:custom_edit-resize]
+
+One side: drag a side (or its middle square) to move just that side.
+[clip:custom_edit-sides]
+
+Turn: drag from just outside a corner. It turns around its middle in 15° steps; Shift = any angle.
+[clip:custom_edit-turn]
+
+Skew: drag from just outside a side's middle. That side slides along itself in grid steps (Shift = free) while the opposite side stays.
+[clip:custom_edit-skew]
+
+Turning happens as the piano roll looks; zooming only one way afterwards slants it.

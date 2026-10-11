@@ -1,0 +1,45 @@
+Select a line, polyline, freehand stroke, curve or arc, click Tumours… in the panel (or right-click it: Tumours…) and tick Tumours in the window that opens: bumps along it. Changes show on the piano roll at once: Accept (or Enter) keeps them as one undo step, X or Esc puts the lines back as they were, Reset puts every setting back to its default.
+
+The window can stay open: it shows whatever you select (selecting other shapes keeps what you did to the last ones). The line's points stay draggable; the line as drawn shows faint and dashed.
+[clip:tumours-menu]
+[clip:tumours-window]
+
+Shape: triangle, square, circle or parabola.
+[clip:tumours-shape]
+
+Size: how far the bumps stick out, in keys.
+[clip:tumours-size]
+
+Length: how long each bump is along the line, in ticks. 0 = spikes (a zigzag).
+[clip:tumours-length]
+
+Distance: from the start of one bump to the start of the next, in ticks.
+[clip:tumours-distance]
+
+Rotation: tilts every bump while its two feet stay on the line. Plus leans it forward (the way the line runs), minus leans it back; 90 lays it flat along the line, 180 turns it over to the other side.
+[clip:tumours-rotation]
+
+Slant (square bumps only): 0 = a square, 100 = the top narrows to a point, minus = the top is wider than the bottom.
+[clip:tumours-slant]
+
+Graphs: the … button next to Size, Length, Distance, Rotation or Slant opens a graph of that number along the whole line (from its start on the left to its end on the right). 100 % = the number in the box, so the box still scales the whole graph. Drag the points (Shift = free), click to add one, or pick a preset or type a formula.
+
+Right-click a point: Value… types its exact place along the line and its value (in %, or as the number it makes), Delete point removes it (not when only two are left; deleting an end makes the next point the new end). Show picks how high the graph is shown, or type your own From / to. Ctrl+Z / Ctrl+Y undo and redo the graph's changes while the window is open.
+
+The part outside the tumour Range is greyed out. A number following a graph says "× graph" in blue; Flat (off) removes it. The piano roll shows the change as you go; OK keeps it, Cancel (or Esc) puts the graph back as it was.
+[clip:tumours-graph-window]
+[clip:tumours-graph]
+[clip:tumours-graph-example]
+
+Side: alternating, left, right or random.
+[clip:tumours-side]
+
+Straight or Bent with the line: this only matters where the line curves under a bump (long bumps on a curve, arc or circle). Straight builds each bump on a straight shortcut from where it starts to where it ends, so it looks angular. Bent with the line makes it follow the curve underneath, so the whole thing stays round. On a straight line both look the same.
+[clip:tumours-bent]
+
+Lead in: the bumps grow from nothing over that many ticks from each end, so the line eases into them.
+[clip:tumours-lead-in]
+
+Range: only part of the line gets bumps. Fit: a whole number of bumps fits exactly (seamless on a full circle).
+
+The zoom matters: bumps are shaped as they look on screen when you change a tumour setting (a circle comes out round at that zoom). Zooming afterwards stretches them like the rest of the piano roll; changing any tumour setting again reshapes them for the zoom you're at now. So zoom to how you want to see them first, then set them up.

@@ -1,0 +1,23 @@
+Copy to Domino (under Project, or Ctrl+Shift+C) puts the selected shapes' notes on the clipboard, or all notes when nothing is selected. In Domino, pick the track and press Ctrl+V, or double-click where the notes should go.
+
+The dropdown above the buttons sets where the notes start, for copying and pasting both:
+
+• First note at tick 0: the first note lands right on Domino's cursor (or on the play line here).
+
+• From the bar line: the empty space from the bar line before the first note comes along, so paste on a bar line and the notes keep their place in the bar.
+
+As drawn / Single channel: everything goes into the track you paste into, on that track's channel.
+
+Multi channel: each channel with notes becomes a track, in channel order, packed together (channels without notes are skipped): the first goes into the track you paste into, the next into the track below it, and so on. The pasted notes play on those tracks' own channels, and tracks that don't fit below the last one are dropped.
+
+Ticks are copied as they are: with a different PPQ in Domino the notes come out longer or shorter, so set the same PPQ in both (or use that on purpose). With 256 keys, notes above key 127 are left out (Domino has 128 keys).
+
+Paste from Domino (or Ctrl+Shift+V) works the other way: select notes in Domino, press Ctrl+C there, then paste here. The start of what you copied (or its first note, see the dropdown) lands on the play line (snapped to the grid), like pasting in Domino, and ticks are taken as they are.
+
+The notes of every copied track become ONE shape (Pasted notes); controllers and other events are left out. Each note remembers its track: with Multi channel every track gets a channel of its own (even tracks that never overlap), with Single channel all of them go on one channel and overlaps are removed.
+
+If Ctrl+Shift+V does nothing, another program (often a clipboard manager) has taken that shortcut for itself: free it in that program's settings, or use the button.
+
+Move, flip, turn, stretch or skew the shape like a custom shape: the notes go with its box. The notes keep their own velocities until you change the shape's velocity (in the panel or the velocity pane).
+
+Export (on the Domino row) saves every note as a Domino song file (.dms), next to the MIDI file in the Output file box, with the same name (spiderweb.mid → spiderweb.dms). Open it in Domino like any song. It can hold a PPQ up to 65535, where a MIDI file stops at 32767. The tracks, channels, tempo and beats per bar come out like Generate MIDI; notes above key 127 are left out.

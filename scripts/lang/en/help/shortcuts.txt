@@ -1,0 +1,17 @@
+Tools: V Select, K Slice, L Line, P Polyline, F Freehand, C Curve, A Arc, S Custom shape, O Circle, Q Polygon, N Funnel, X Text, H Hz bass, I Image. G = Live shape on / off.
+
+Drawing: Shift = don't snap. Ctrl = perfect (circle, equal-sided polygon or star, proportions). Right-click or Esc = cancel what's half drawn. Enter / double-click = finish a polyline.
+
+Mouse: right-click a shape = its menu, empty space = deselect. Double right-click = Select ↔ last tool. Right-drag = listen. Middle-click = add a point / anchor / funnel curve start. Middle-drag = scroll.
+
+Wheel = scroll, Shift+wheel = sideways, Ctrl+wheel = zoom, Ctrl+Shift+wheel = zoom time, Alt+wheel = zoom pitch.
+
+Editing: Del delete, Ctrl+D duplicate, Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) undo / redo (see History), Ctrl+A select all, Ctrl+C / Ctrl+X / Ctrl+V copy / cut / paste, Ctrl+H / Ctrl+J flip, Ctrl+Left / Ctrl+Right turn 90°, Ctrl+G join into one curve, Ctrl+Shift+G split into separate shapes, Ctrl+R turn into live shape, Alt+W claw machine, Alt+S strum, Alt+U chop, Ctrl+U quick chop, Esc clear highlight / unpick a stroke. With a stroke of a live shape picked, the copy / paste / flip / turn keys work on that stroke.
+
+Playing: Space play / stop. Click or drag the bar numbers = move the play line.
+
+Curves: Alt+drag a handle = sharp corner, Alt+drag an anchor = new handles, Ctrl = change only this curve (linked funnel curves).
+
+Number boxes: drag the name, Up / Down, wheel; Shift = big steps, Ctrl = small.
+
+F1 = Help. Ctrl+S = save. Ctrl+Shift+C = Copy to Domino, Ctrl+Shift+V = Paste from Domino.

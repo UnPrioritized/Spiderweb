@@ -1,0 +1,15 @@
+In the Hz bass window, pressing the mouse places a note at once, and it follows the mouse until you let go. A note that is there moves the same way; drag either end to change its length. A new note is as long as the last one you clicked or resized. While you hold a note, its key sounds on the MIDI-out device.
+
+Select (V) and Pencil (P) are at the top of the window; double right-click switches between the two. With Select, dragging on empty space draws a box that selects the notes it touches (Ctrl adds them); with Pencil, Ctrl+drag does it. The box snaps to the grid like on the piano roll.
+
+Drag the box's right side to make all its notes longer or shorter by the same amount (they keep their starts), or drag inside it to move them.
+
+Ctrl+click picks several, Ctrl+A all; Delete removes the selected notes.
+
+Drawing tools (the button after Bend, ▾ for the list): Line (L), Polyline (Y), Freehand (F), Curve (C) and Arc (A) draw a path that becomes notes joined by slides, so the tone follows it. Faint notes show what it will make, and its points can still be dragged. Enter, right-click or another tool makes the notes; Esc throws the path away. Points snap to the grid and to whole keys (Shift = free).
+
+Ctrl+C copies the selected notes and Ctrl+V pastes them at the play line (the preview's, or the main window's when the preview is off); with Select, double-click empty space to paste them there. With the preview on, a click on empty space with Select moves the play line there.
+
+Notes copied in Domino after that paste the same way (Windows only): each copied track goes into its own layer, the first into the picked layer and the next ones into the layers under it (new layers are added as needed). A note's velocity becomes its own loudness line. Ticks are taken as they are: use the same PPQ.
+
+The window has its own Snap (Shift = no snap). The mouse wheel scrolls, Shift+wheel goes sideways, Ctrl+wheel zooms, the middle button drags the view.

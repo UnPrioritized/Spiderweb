@@ -1,0 +1,13 @@
+Shapes can be shared as one line of text that starts with SPIDERWEB1:. Paste it anywhere as text to share it; whoever copies it can paste it into their own Spiderweb.
+
+On the piano roll, Ctrl+C copies the selected shapes as before and also puts that line on the clipboard. Only the shapes go along, not the PPQ, BPM or other settings, so they look the same in any project.
+
+Ctrl+V (or a Select double-click on empty space) pastes a shared line you copied after your last copy in Spiderweb: at the play line (or where you double-click), with the same spacing between the shapes. Otherwise it pastes what you copied in Spiderweb, as before.
+
+The status bar says when the line is longer than 2,000 characters, since some places may not take that much at once. Shapes with many points or pasted notes make longer lines.
+
+In the drawer, Export copies the whole drawing (its name, lines and coloured areas) as a line. Import adds a shared drawing to your shape library; if the name is taken, it gets a number, like "Star (2)". The drawing you're working on isn't touched.
+
+Shared shapes can't be imported in the drawer, and shared drawings can't be pasted on the piano roll: Spiderweb says which one it is. A line that was cut off or changed is refused, so nothing half-broken gets in.
+
+Text: if a text's font isn't installed on your PC, its letters stay as they were. The first time you change the text, Spiderweb asks, then redraws all of it in the default font (Arial on Windows).

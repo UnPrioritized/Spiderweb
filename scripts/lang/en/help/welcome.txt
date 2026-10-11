@@ -1,0 +1,13 @@
+Draw lines, curves and shapes on the piano roll; every key they cross gets notes, like drawing notes by hand but in one stroke.
+
+1. Pick a tool at the top and draw. The arrow next to Line opens every drawing tool (Polyline, Freehand, Curve, Arc, Custom shape, Funnel, Text…); the pin next to one gives it its own button.
+
+2. Select a shape to change it: drag its points, or change its settings in the panel on the right.
+
+3. Space plays it. Right-drag listens to the notes under the mouse.
+
+4. Set PPQ, BPM and the output file under Project, then Generate MIDI.
+
+Your work is saved on its own (autosave) and comes back next time. Save… keeps a copy as a project file.
+
+The first time you use a tool or feature, a small tip explains it. You can turn tips off or show them all again in this Help window (bottom).

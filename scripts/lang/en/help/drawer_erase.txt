@@ -1,0 +1,1 @@
+Click a stroke to remove it, or drag a box: when you let go, every stroke it touches is removed. Right-click or Esc while dragging drops the box without removing anything. Ctrl+Z brings back everything one box removed.

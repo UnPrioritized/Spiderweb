@@ -1,0 +1,7 @@
+Space (or Play) plays from the play line through the MIDI out picked under Project; the blue line follows and the view turns the page. Click or drag the bar numbers (or click empty space with Select) to move the play line. Playing stops a moment after the last note.
+
+Built-in BASSMIDI (in the MIDI out list) plays through Spiderweb's own synth, with a soundfont you pick (the Hz bass preview uses the same one). Voices = how many sounds can ring at once: if playback stutters, lower it.
+
+Right-drag (any tool) = listen to the notes under the mouse, like scrubbing.
+
+OmniMIDI (KDMAPI) shows in the MIDI out list when OmniMIDI is installed. It plays straight through OmniMIDI with your own OmniMIDI settings, skipping Windows' MIDI layers, so many notes play more smoothly.

@@ -1,0 +1,9 @@
+Drag a straight line across your drawing: every stroke it crosses is cut in two there, so you can then pick the part you don't want and delete it. The line's ends stick to points and lines like when drawing (Shift = free).
+
+A closed stroke (a circle, a square, a closed polyline) is cut only when the line goes all the way through it. An open stroke is cut wherever the line crosses it.
+
+With strokes picked (Select tool), only those are cut; otherwise every stroke the line crosses. Hidden and locked layers are never cut. With Mirror on, the mirrored line cuts too.
+
+The pieces stay where they were, in the same layer and group, and are all picked afterwards. Curves, arcs and polylines stay curves, arcs and polylines; circles and freehand strokes become polylines. Right-click or Esc while dragging drops the line. Ctrl+Z undoes a cut.
+
+To cut one open stroke at one spot, right-click it → Split here (with any tool): it's cut at the mouse's spot, which sticks to points and crossings or goes to the grid like when drawing (Shift = exactly at the mouse). Closed strokes need the Slice tool, so Split here is greyed out on them.

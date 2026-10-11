@@ -1,0 +1,27 @@
+Right-click a curve → Formula (a Curve tool curve, a line, a polyline, an arc, a stroke of a live shape or of the drawer, or highlighted funnel curves). It has two parts, and a curve can have both at once. (On a line, polyline or arc it works the same way: below, "curve" means them too. On a polyline the pattern runs along all of it, round its corners.)
+
+Shape of the line: the line takes a shape. One that ends where it starts (Circle, Flower, Heart, Figure 8) is as wide as from the curve's start (A) to its end (B) and sits on that line; the others start at A and end at B. They're round as the piano roll looks when you pick them.
+[clip:formulas-shapes]
+
+Pattern along the line: a pattern repeats along the line (along its shape, if it has one): Wave, Zigzag, Bounce, Square wave, Sawtooth, Teeth, Spikes, Half circles, Stair steps, Swell, Fading wave, Curls. Loops = how many times (4.5 works too). Its height is in keys. Curls: the line runs back over itself in little loops; "curl" over 1 makes loops, under 1 a wave.
+[clip:formulas-patterns]
+
+Symmetric halves (in the Formula menu under each list, in the Custom… window and in the side panel): only the first half of the formula counts, and the second half is made from it: Mirrored (like an arch) or Turned half way round (like an S). A shape that ends where it starts stays closed. It works on your own formulas and saved ones too, and Save keeps it.
+
+The curve you drew stays as a dashed line with its anchors and handles: bend it and the shape and pattern follow. The side panel shows the selected curve's numbers (like turns, petals, height and Loops). On a joined curve, Across all runs the loops on from piece to piece and Each piece gives every piece all of them. Separate curves each get their own pattern: join them first to run one pattern across them.
+
+Custom… (at the top of each list) shows every shape or pattern with its formula and a box for each of its numbers. The preview shows one loop of a pattern, or the whole shape: drag its points to change it by hand, and every loop on the curve follows (Back to formula forgets it). Ctrl+Z / Ctrl+Y undo and redo your changes inside the window (Cancel still puts everything back).
+
+When its two halves match (like Wave, Bounce, S-curve or Circle), the points come as symmetric halves: moving a point moves its partner in the other half too. Double-click the line to add a point, right-click a point to remove it, Alt+drag for a sharp corner.
+
+The grid shows the numbers (x from 0 to 1 along one loop; y in keys); the mouse wheel zooms, dragging empty space (or middle-dragging) moves around, and Fit view shows all of it again. Save puts it in your list (patterns.json in the user folder next to Spiderweb), and from then on it's in the Formula menu too.
+
+Your own formula: tick Edit formula. A pattern is y of x for one loop (x goes from 0 to 1, y = how far to the side); a shape is x(t) and y(t), t going from 0 to 1 while it's drawn. Any other name in it (like height) gets its own number box. Works: numbers, + - * / ^ ( ), pi, e, sin cos tan asin acos atan sqrt exp ln log abs min max floor.
+
+Remove formula takes them off (the curve you drew is left). Turn into plain curve makes what you see into ordinary anchors and handles (a line, polyline or arc becomes a curve); if its two halves match, it gets Symmetric halves.
+
+A stroke of a live shape (or of any placed drawing): right-click the stroke on the piano roll. Its sizes are in keys as the piano roll looks when you pick it, and grow and shrink with the shape after that. The fill follows what you see, and new strokes snap onto the ends you see.
+
+In the drawer, a pattern's sizes are hundredths of the board, so they grow and shrink with the placed shape. Funnel curves: a shape runs from the curve's start to its wall end inside the funnel (Slow start is x²); linked curves get the same formula; Back to the default curve resets it. Curve formulas saved in older versions (curves.json) are in the Shape list now.
+
+The velocity pane has a Formula tool too: a line with a pattern swinging around it (see Velocity pane).

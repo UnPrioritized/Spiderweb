@@ -1,0 +1,9 @@
+With Live shape on, Line, Polyline, Freehand, Curve, Arc, Circle and Polygon draw into one custom shape (the selected one, or a new one) instead of making separate shapes. Outlines that meet end to end join up, so a closed drawing can be filled (see Inside fill). Points snap onto the drawing's ends; clicking a polyline's first point closes it; letting go of a freehand stroke near its start closes it. Right-click empty space (deselect) to start the next shape.
+
+While it's on, the selected shape's points show (purple squares): drag them with Select. Points in the same spot move together, and a point dropped on another one joins it.
+
+Select tool: click a stroke of the selected shape to pick it: Del deletes it, a curve shows its handles, a freehand stroke can be straightened. Ctrl+C / Ctrl+V, Ctrl+H / Ctrl+J and Ctrl+Left / Ctrl+Right copy, paste, flip and turn just that stroke. Esc unpicks it: then they work on the whole shape again.
+
+A copied stroke is pasted into the selected custom shape, a grid step later and a key lower each time (nothing selected: into a new shape).
+
+Right-click a stroke for its menu. It also has Formula for a line, polyline, arc or curve stroke (see Formulas), and saving the drawing to the shape library. Its "This stroke" part sets the stroke's role and outline colour, like the drawer's (see Drawer: Select and editing).

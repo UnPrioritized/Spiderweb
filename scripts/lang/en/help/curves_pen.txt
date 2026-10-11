@@ -1,0 +1,12 @@
+Curves (the Curve tool, funnel curves, curve strokes in the drawer and in live shapes) work like a pen tool.
+
+Handles: drag the dot at the end of a blue handle line to steer the curve (its direction) and set how strongly it pulls (its length). On a smooth anchor both handles turn together. Handles can be dragged with any tool.
+[clip:curves_pen-drag-handles]
+
+Anchors: drag an anchor to move it; its handles come along. The curve's two ends are anchors too (the squares, Select tool).
+[clip:curves_pen-move-anchor]
+
+Adding and removing: middle-click the curve to add an anchor there (then drag it like any other). Right-click an anchor to remove it, or a handle dot to pull it back in (a corner).
+[clip:curves_pen-add-remove-anchor]
+
+Corners: Alt+drag a handle = move only that one (a sharp corner). Alt+drag an anchor = pull new handles out of it.

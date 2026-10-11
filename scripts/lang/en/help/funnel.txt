@@ -1,0 +1,11 @@
+Draw the funnel's line, then its wall (drag each, or click twice). Either can come first; a wall earlier in time than the line's start makes a reverse funnel. Ctrl while drawing or dragging the wall keeps it centred on the line.
+
+Middle-click on the line (any tool) to start a curve there: curves go to both ends of the wall. Middle-click near a curve to add an anchor it goes through. The curves have anchors and handles (see Funnel curves).
+
+With a funnel selected, a line drawn to (or from) its wall is added to it (two-line funnels). Lines on the other side of the wall make their own half, with its own notes running to the wall: they just start (or end) on the wall; the wall setting is for the first line's side.
+
+Panel: the wall (notes end on it, or start on it), the inside (spam or long notes) and the gate.
+
+With spam, Range… next to the gate lets the gate change from the line start to the wall. It's the same window as a custom shape's gate Range: the graph, Smooth or Steps, and Evenly or With the curve. With Steps the gate only halves or doubles; With the curve changes the gate as the funnel opens.
+
+Hz bass (a placed funnel): the whole funnel becomes one Hz bass, both sides of the wall. Every key repeats so fast it sounds like a tone, wherever it would play a long note, so the funnel's shape is where the tone sounds. Notes… opens the Hz bass window (see Hz bass): its notes count from the funnel's first beat, and the funnel keeps the length it's drawn. While it's on, Inside and the gate don't count; unticking brings back the gate and Range it had.

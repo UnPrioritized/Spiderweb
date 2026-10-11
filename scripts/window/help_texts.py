@@ -3,7 +3,8 @@ searchable list of all of them), the tool buttons' tooltips and the drawer's hel
 
 A topic: id, section, title, tip (a few lines: the popup and the tool button's tooltip), text (the whole story:
 the Help window and, for drawer tools, the drawer's side panel) and optional search words. The texts themselves are in the language
-files (lang/en.json: help.<id>.title / tip / text / words; a text is a list of lines, an empty line = a new paragraph);
+files (lang/en/main.json: help.<id>.title / tip / words; the text = lang/en/help/<id>.txt, an empty line = a new
+paragraph);
 this file lists the topics and how they're linked. The About page also gets the picture and the License / folder
 buttons (help.py).
 

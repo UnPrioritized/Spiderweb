@@ -1,0 +1,83 @@
+How a custom shape (and text) is filled, in the panel:
+
+Empty: just the outline, like lines (upright parts get 1-tick notes).
+
+Fill: one note per stretch of each key inside.
+
+Spam: back-to-back notes of the gate. Start: Auto = each key from its own left edge; Aligned = on the gate grid from the song's start (straight columns); Centred = what doesn't fit a whole gate is shared between both ends (peaks come out the same on both sides).
+
+Ends: with a gate of 1 tick every key is filled exactly. With a longer gate, a key's stretch is rarely a whole number of gates, so something has to give at its ends: Ends picks what happens to the bit that doesn't fit a whole gate. The same goes for Outline spam. The pictures show the same triangle each time.
+
+Round to a gate (new shapes start with this one): a whole gate if it's at least half a gate, else dropped. Every key gets at least one gate, so the edge stays in whole gates.
+
+Start: Auto
+[clip:fill-ends-round]
+
+Start: Centred
+[clip:fill-ends-round-centred]
+
+Keep leftovers: kept as a shorter note, so the edge follows the outline exactly.
+
+Start: Auto
+[clip:fill-ends-keep]
+
+Start: Centred
+[clip:fill-ends-keep-centred]
+
+Drop leftovers: dropped. A key too short for even one gate still gets one shorter note, so points end in thin slivers.
+
+Start: Auto
+[clip:fill-ends-drop]
+
+Start: Centred
+[clip:fill-ends-drop-centred]
+
+No slivers: like Drop leftovers, but no note shorter than a quarter gate.
+
+Start: Auto
+[clip:fill-ends-min]
+
+Start: Centred
+[clip:fill-ends-min-centred]
+
+Stretch gates: each key's gates are stretched or squeezed a little so a whole number fits exactly. Start doesn't matter then, so there's one picture.
+[clip:fill-ends-stretch]
+
+Outline spam: the outline chopped into notes of the gate.
+
+Range… (next to the gate, Spam and Outline spam) opens a window where the gate goes from one number to a second one across the shape instead of being the same everywhere. Opening it turns the Range on; untick "Use a gate range" there to take it off. While a Range is on, Start and Ends don't apply and the gate box in the side panel is orange; typing a new gate there takes the Range off.
+[clip:fill-range]
+
+From is the shape's gate, to is the second gate, and the graph sets how it gets there: the straight line gives every whole-tick gate between the two an equal share, like a gate distribution, so most notes get the short gates. Beside the graph, "Notes per gate" shows how many notes get each gate (red: a gate no note gets; point at a bar for its numbers).
+
+Smooth uses every whole-tick gate between the two. Steps lets the gate only halve or double from the first one (the first, half of it, a quarter…), so the shape is made of sections of equal notes; the graph still says where each step comes.
+
+Left to right (time): every key is cut at the same places, starting at the shape's left edge; with "Each key row by itself" every row instead runs the whole range along its own length (each piece of a row on its own, or across the gaps with "Across gaps in a row"), and a row too short for any note gets one note of the first gate.
+
+Low to high or Top to bottom (keys): each key gets its own gate. "Fit to the shape's edges" stretches or trims each row's first and last note so the notes reach exactly to the shape's edges, with no blank and nothing sticking out.
+
+Hz bass (Spam and Outline spam): spam so fast that the repeats sound like a tone. Tick it and type the key whose tone you want (like A1); the gate is worked out from that tone, the BPM and the PPQ. Every key is in step, so more keys make the tone thicker, not different. Notes… opens a window to place several tones, chords and slides (see Hz bass).
+
+Gaps: where the outline isn't closed (red dots in the drawer), Fill and Spam close it with straight lines, shown dashed, and the buttons turn orange. Loose ends that nearly touch (within 1/64 beat and 1 key) are joined to each other first. Every open part left is closed from its end back to its start.
+
+An open part that's almost straight (never more than half a key or 1/64 beat from that closing line) has nothing inside, so it isn't filled: it just keeps its notes.
+
+Close the gaps yourself to decide exactly where the edge goes.
+[clip:fill-gap]
+
+A line whose ends both land on a line (another one, or partway along itself) isn't a gap. It splits the area it crosses: both sides stay as they were (filled or empty), and the line keeps its own notes.
+
+Normal / Outline (the box next to Fill and Spam): Outline puts the notes along the edge of what's filled on a channel of their own (with Overlaps cancel out ticked that's every edge, around every filled bit; unticked, only the outer edge) and the inside's on another, with the same gate so they line up (where both would play, the outline's note is kept). It needs Channels: Multi channel; with the others it's all one channel and the box turns orange.
+[clip:fill-outline]
+
+Coloured areas: with Fill or Spam, the areas you coloured in the drawer (see Drawer: Areas) each get a colour of their own, and Empty ones get no notes. With Outline on, "Outline between colours" (under Fill and Spam) puts the notes where two colours meet on the outline too; unticked, the outline is only where the filled part ends. A shape has at most 15 colours (the outline and the plain fill count too): past that the extra colours share the 15th, and the panel says so in orange.
+
+Outline gate (with Empty, Outline spam, or Fill / Spam set to Outline): makes the outline at least this many ticks thick, so it doesn't get thin where the shape is steep. It grows into the inside, so the shape's edge stays where it is; where the shape is thinner than that, all of it becomes outline. While you change the number, a red line on the piano roll shows where the inside now ends.
+
+Even band shrinks the inside the same way on every side, top and bottom too, as the shape looked when it was first drawn: a circle or an arc shrinks into a smaller one even if you zoom differently now (then it can look uneven on screen, but it is right for the shape). Grow sideways just makes each short outline note longer toward the middle of its key.
+
+Overlaps cancel out (ticked unless you change it): where outlines overlap, the overlap stays empty, and a shape inside a shape makes a hole. Untick it to fill everything the lines close in: overlaps and holes too, also where one line crosses itself. (Text always fills its letters the way the font means them.)
+
+Lines, curves and arcs can't be filled: turn them into a live shape first (Ctrl+R, see Turn into live shape).
+
+Spiderweb asks before making more than a million notes.

@@ -1,0 +1,20 @@
+Under Project → Channels:
+
+As drawn: every note exactly as the shapes make it, one channel; notes on the same key may overlap.
+
+Single channel: where two notes on the same key overlap, the earlier one is cut where the later starts and the later one is stretched to where the earlier would have ended; notes starting on the same tick become one (the loudest, as long as the longest).
+
+Multi channel: shapes whose notes clash go on different channels, each on its own track (channel 10, drums, is skipped). Split: Same key = only notes on the same key at the same time clash; Any notes = any notes at the same time. Shapes that follow one after another share a channel.
+
+Some shapes can spread over several channels: pasted notes (by track), live shapes made with Turn into live shape (by the shape each stroke came from), and Fill / Spam set to Outline (the outline and the inside). The shape list says how many. Above 15 it shows in orange, and from there the colours and channel numbers repeat.
+
+Every channel has its own note colour.
+
+Colours (in the side panel, under Velocity): any shape's notes take turns over several channels, so its colour keeps changing. It needs Multi channel. Which colours you see depends on the program showing the MIDI.
+[clip:channels-colours]
+
+By step = each step the next channel (spam: each gate column; lines: each note in time), By key = each key, By time = every note length from the start of the song (1/4 = a beat, so it lines up with the bar lines). Channels = how many take turns, every = how long one lasts.
+
+Each key row (By step / By time, Spam and Outline spam shapes only): From its start = each key row starts again at the first channel where its notes begin (after a gap too), so the colours follow the shape's left edge; From its end = counted back from each row's last note, so they follow the right edge.
+
+Diagonal (By step / By time): [n] channels every [m] keys = every m keys up from the shape's lowest key, the turns start n channels later, so each colour runs as a slanted line through the shape. 0 = off, a minus number slants the other way. Mix it with Each key row and the every box to find a look you like.

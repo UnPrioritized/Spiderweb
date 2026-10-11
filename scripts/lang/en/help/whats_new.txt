@@ -1,0 +1,149 @@
+What changed in each version, newest first. This page opens by itself the first time a new version starts.
+
+Version 1.5.0
+
+Before you update: a lot changed inside Spiderweb, so a project or shape made in 1.4.0 can come out a little different. Keep a copy of your projects, your autosave and your shapes folder, and keep the old Spiderweb.exe for a while so you can compare. A project saved in 1.5.0 may not open fully in 1.4.0.
+
+What can be different in old projects:
+
+• Hz bass: the sound engine was rebuilt so every knob and effect line works, and the sound runs on through slides and glides. An old Hz bass can sound a little different. "Mixed" gates are now called Alternating.
+
+• Fill, Spam and coloured areas: stray notes along lines that end on other lines, thin tips and colour borders are gone, so some shapes get slightly different notes there.
+
+• Turned or slanted shapes with Claw, Strum or Chop: pieces that touch on a key now join into one note.
+
+• Spam gates are whole ticks (a typed fraction is rounded). Pattern loops stop at 50,000.
+
+• Turn into live shape moved from Ctrl+L to Ctrl+R.
+
+What's new:
+
+• Image tool (I): turns an image into notes in up to 15 colours, one per channel. Set it up in its window (size, colours, blending, how it looks in your player), then drag it into the piano roll.
+
+• Claw machine, Strum and Chop are now pages of one window (Alt+W, Alt+S, Alt+U). Chop (beta) cuts every note into a rhythm; Ctrl+U chops at the snap length.
+
+• Slice tool (K, beta): drag a line across shapes to cut them.
+
+• Glue: right-click → Glue touching notes. On each key, notes that touch become one long note.
+
+• Add between: select two shapes, right-click → Add between…. It makes the shapes that step from one to the other, with a graph for how the steps change.
+
+• Gate sensitive merge (experimental): select two shapes, right-click → Gate sensitive merge. Each key row of one shape slides over until it meets the other shape's notes.
+
+• Spam gate Range…: the gate can change across the shape, smoothly or in Steps, and each key row can have its own. Funnels have it too.
+
+• Funnels can be a Hz bass, and the Slice tool cuts funnels.
+
+• Hz bass synth window (Synth… in the Hz bass window): knobs, presets, effects, macros, a second oscillator, an arpeggiator and a MOD tab, like a real synth. Play it live from your computer keyboard.
+
+• Hz bass layers: each layer has its own notes and its own sound, with mute and solo. The Loudness pane draws how loud each note and each layer is.
+
+• More in the Hz bass window: drawing tools (Line, Polyline, Freehand, Curve, Arc) turn a path into notes and slides; the Bend tool (B) bends a note on its own; slides can curve; Wave shape… and Note length are in Settings…; notes copied in Domino paste in with Ctrl+V.
+
+• Custom shape drawer: the Eraser drags a box, the Slice tool and Split here cut strokes, Mirror draws both sides at once, and a Layers list holds the strokes (hide, lock, groups). Points stick to other strokes' points, crossings and lines.
+
+• Dark mode: Help → About → Look. Restart Spiderweb to see it.
+
+• Playback: Built-in BASSMIDI (Spiderweb's own synth with your soundfont) and OmniMIDI (KDMAPI) are in the MIDI out list.
+
+• Export to Domino: saves every note as a Domino song file (.dms).
+
+• Toolbar: the drawing tools are one button with a ▾ list. Pin a tool there to give it its own button.
+
+• Much faster with lots of notes: zooming, scrolling, moving shapes and letting go. Spiderweb offers to install Numba and Pillow (optional) to go faster still.
+
+• Linux: Spiderweb should run on Linux too. Nobody has tested it there yet, so please report how it goes.
+
+Version 1.4.0
+
+• Hz bass tool (H): spam so fast it sounds like a tone. Drag where it starts on the piano roll, then place notes in the window that opens (chords, slides). The red line there is the tone you really hear. Preview plays the Hz bass alone through a built-in synth with your soundfont.
+
+• Hz bass effects: lines drawn under the notes change the sound over time (pitch, volume, vibrato, wah, tremolo and more). They can repeat, for example for a pumping bass.
+
+• Select box: drag on empty space with Select to select what the box touches. Ctrl+drag adds another box. Drag a box's sides to stretch what it selected, the inside to move it, Ctrl+drag inside to move a copy. Right-click inside shows what works on all of them at once.
+
+• With Select, double-click on empty space to paste there.
+
+• Sharing shapes: Ctrl+C also copies the shapes as one line of text. Paste it anywhere to share it; others paste it into their Spiderweb with Ctrl+V. In the drawer, Export and Import do the same for drawings (Import adds them to your shape library).
+
+• Scrollbars on the piano roll: drag the bar to scroll, drag one of its ends to zoom, or use the − / + buttons.
+
+• Coloured areas: in the drawer, the new Areas tool (B) gives each piece of a custom shape a colour of its own, or leaves it empty. Click an area or drag across several; "Reset all colours" puts them all back. A line under the colours counts them (a shape has at most 15). On the piano roll they count with Fill or Spam and Multi channel.
+
+• Stroke roles (right-click a stroke): Outline and fill (normal), Outline only (notes on top of the fill, cuts no hole), or Fill line (no notes, just splits the inside into areas to colour).
+
+• Outline colour (right-click a stroke): the stroke's notes in a colour of their own. "Outline between colours" (under Fill and Spam, with Outline on) puts the notes where two colours meet on the outline too.
+
+• Colours (side panel, under Velocity): any shape's notes take turns over several channels by step, key or time, so the colour keeps changing.
+
+• Smoother with lots of notes: moving the view and dragging shapes.
+
+• New pattern: Curls (right-click a line → Formula → Pattern along the line). The line loops back over itself in little curls; "curl" sets how tight they are. In Custom…, the new "along =" formula moves a pattern forward or back along the line.
+
+• Formulas on more lines: polylines have them now, and so do the strokes of a live shape on the piano roll and the drawer's lines, polylines and arcs (right-click the stroke → Formula). Turn into live shape (Ctrl+L) keeps them.
+
+• Strum: select shapes, right-click → Strum… (Alt+S). The notes of each chord start one after another, like strumming a guitar, so a straight edge of notes becomes a slope or a curve. It works like the strum tool of other piano rolls (Time, Velocity, Tension, Preserve end, Trigger ahead, End, Chop chords, Alternate direction), and every knob shows its real value, which you can type past where the knob reaches. The shape remembers its strum.
+
+• Claw machine: no longer beta. Its shortcut is now Alt+W (was Ctrl+K).
+
+• Outline gate (side panel, with Empty, Outline spam or Outline on): makes the outline at least so many ticks thick, so it doesn't get thin where the shape is steep. It grows into the inside, so the shape's edge stays where it is.
+
+• The tumour window works like the Claw machine and Strum windows: changes show at once, Accept keeps them (one undo step), X or Esc puts the lines back, and Reset puts every setting back.
+
+• Selected shapes keep their own colours: a thin red line goes round their notes instead.
+
+• The side panel only shows the settings that do something for what's picked.
+
+• Join, Split and Turn into live shape left the Shapes box: they're in the right-click menu and on Ctrl+G, Ctrl+Shift+G and Ctrl+L.
+
+Version 1.3.0
+
+• Polygon tool (Q), next to Circle, instead of Square and Triangle: pick how many points it has and its kind in the panel (polygon, star, or crossing star). Its sides can have a shape or a pattern (right-click → Formula).
+
+• Claw machine: select shapes, right-click → Claw machine… (Alt+W). It cuts slices of time out of the notes, or keeps some notes and trashes some (by notes, keys, chords or at random), and can shorten notes instead of removing them. The shape remembers its claw, so moving or reshaping it keeps it.
+
+• Formulas: right-click a curve, line or arc → Formula. "Shape of the line" makes it a circle, spiral, flower, heart, figure 8, slow or fast start, or S-curve. "Pattern along the line" lays a wave, zigzag, bounce, square wave, sawtooth, teeth, spikes, half circles, stair steps, swell or fading wave along it. Custom… makes your own, with a preview you can zoom and move. Drawer curves, funnel curves and polygon sides have them too. "Turn into plain curve" makes the result an ordinary curve.
+
+• Symmetric halves (Off / Mirrored / Turned) for formula shapes and patterns: the first half makes the second. Shapes changed by hand or turned into a plain curve stay symmetric.
+
+• Velocity pane: a Formula tool (a line with a wave, zigzag, bounce or saved pattern swinging around it).
+
+• Update check: Spiderweb can look for a new version when it starts (every time, once a day, week or month, or never) and show what's new in it. Set it in Help → About; "Check now" looks right away. Nothing is downloaded by itself.
+
+• This What's new page.
+
+• Undo and Redo buttons on the toolbar (between Fit view and Play).
+
+• Funnel: lines on both sides of the wall make two halves, each with its own notes running to the wall. Notes ending on the wall make the same steps as notes starting on it.
+
+• Paste from Domino with Multi channel: every copied track gets a channel of its own.
+
+• Easier picking of lines, strokes, funnel parts and a box's corners and sides. Clicking the faint dashed line under a formula curve selects the shape.
+
+• Steep lines give 1-tick notes to keys that share a tick.
+
+• The Custom… formula window and the tumour graph have their own undo (Ctrl+Z / Ctrl+Y). The graph has From / to boxes and a right-click menu on its points.
+
+• Curves fitted from drawn paths follow long, wiggly paths with fewer anchors, and sharp corners stay sharp.
+
+Version 1.2.0
+
+• Inside fill: Spam ends (round, keep, drop, no slivers, stretch), Normal / Outline, Overlaps cancel out, and outlines with gaps can be filled.
+
+• Turn into live shape (Ctrl+L): lines, curves and arcs become one custom shape that can be filled.
+
+• Tumours: their own window, Rotation and Slant, and graphs so the numbers can change along the line.
+
+• Join (Ctrl+G) and Split (Ctrl+Shift+G), and Split here on a line's right-click menu.
+
+• Snap: the usual list of note lengths with note pictures, plus Custom….
+
+• History panel, Keys 128 / 256, picking shapes by their notes, Paste from Domino can start at the bar line, more tips, and typing anywhere in Help searches.
+
+Version 1.1.0
+
+• Copy to Domino (Ctrl+Shift+C) and Paste from Domino (Ctrl+Shift+V).
+
+Version 1.0.0
+
+• The first version.

@@ -1,0 +1,3 @@
+Drag from the start to the end, or click both. Then shape it (see Curves: anchors and handles): drag the blue dots to bend it, middle-click the curve to add an anchor.
+
+Right-click it: Formula (a shape like a spiral or heart, a pattern like a wave along it: see Formulas), Symmetric halves (one half follows the other), add an anchor, and the usual menu.

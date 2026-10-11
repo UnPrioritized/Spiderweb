@@ -1,0 +1,7 @@
+Drag from the start to the end, or click the start and click the end (the line follows the mouse in between; right-click or Esc cancels).
+
+Each key the line crosses gets one note, starting where the line reaches that key, so a slope becomes a smooth staircase. Points snap to the grid (Snap at the top); hold Shift to place them freely.
+
+Last note (panel): the last note ends on the line's end, or starts exactly on it.
+
+Right-click it: Formula (a shape or a pattern along it, see Formulas).

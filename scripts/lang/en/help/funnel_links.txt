@@ -1,0 +1,23 @@
+Linked curves change together: drag an anchor or handle on one and the others follow, and adding or removing an anchor does it on all of them. A new curve start's two curves come linked as mirror images of each other, so the funnel stays even on both sides.
+
+Changing just one: hold Ctrl while dragging (or middle-clicking to add an anchor). If that gives it a different number of anchors than the others, it stops following them until they match again or you link them anew.
+
+Linking curves yourself (any curves of one funnel, also on different lines):
+
+1. Select the funnel, then with the Select tool click one of its curves: it's highlighted (purple), with the curves already linked to it (teal).
+
+2. Ctrl+click more curves to add them (Ctrl+click a highlighted one to leave it out).
+
+3. Right-click the curve whose shape you want to keep → Link curves:
+
+   Auto: each curve takes whichever way is closer to how it looks now.
+
+   Mirrored / Same shape (the name depends on which way the curves open): the same curve, reflected across the line or the same way round.
+
+   Flipped: turned end to end, so what happens near the start on one happens near the wall on the other.
+
+   Unlink: the highlighted curves go their own way.
+
+The right-clicked curve keeps its shape, the others are reshaped to follow it. A curve can only be in one link group: linking it again takes it out of its old group.
+
+Ctrl while drawing or dragging the wall keeps it centred on the line, so mirrored curves stay exact mirrors on the piano roll.

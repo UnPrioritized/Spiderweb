@@ -1,0 +1,1 @@
+Click its start, a point it passes through, then its end (or drag from start to end, then click to set the bend): a piece of a perfect circle. End on the start = a whole circle. Select: drag its three points. Right-click it: Formula (a shape or a pattern along it, see Formulas).

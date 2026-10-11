@@ -1,0 +1,9 @@
+Preview (at the top of the Hz bass window) lets you hear this Hz bass alone, through a synth built into Spiderweb, with a soundfont of yours: no MIDI-out device is needed. The first time, it asks for a soundfont (.sf2 or .sfz). It's a quick guide, not a final render: another program will sound a bit different.
+
+The sound is made ahead of time, about a minute ahead of the play line (or of the left edge of the view when nothing plays). What isn't made yet is greyed over the notes, and clears as it's made. Change a note and only that stretch goes grey again.
+
+Space plays and stops; click the bar numbers to move the play line (blue). If playing catches up with the grey, it waits there instead of skipping notes.
+
+Settings… (at the top of the window) has the preview's settings: pick another soundfont, set the voice limit (how many sounds can ring at once: more is fuller but slower to make), leave out the soundfont's reverb and chorus, and set the volume.
+
+It also shows how many voices are in use (orange when the limit is reached: the oldest sounds are cut short) and how fast the sound is made (orange when it's slower than playing). Change the voice limit and the notes grey again while it's made anew, so you hear the difference at once. A limiter always keeps the sound from getting too loud.

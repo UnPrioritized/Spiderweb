@@ -1,0 +1,25 @@
+Slant: every key starts a little later than the key below it.
+
+Groups: the keys take turns in groups (20 % = 2 groups, up to 6).
+
+Off pitch: every key repeats a little faster or slower, so the keys drift apart and meet again.
+
+Noisy: every repeat is late by a random bit.
+
+Vibrato: the tone goes a little up and down.
+
+Pitch: bends the tone up or down, up to 12 keys each way (points stick to whole keys; Shift = in between).
+
+Volume: how loud (0 % = silence, no notes there).
+
+Sweep: a bump of loudness travels over the keys.
+
+Wah: loud and quiet stripes over the keys (strongest together with Slant).
+
+Tremolo: louder and quieter in turn (the line is how fast).
+
+Octave below: every other repeat is softer, so the tone an octave below comes in.
+
+Sine, Square, Saw, Triangle: every key hits 16 times in each wave, loud and soft in the shape of that wave. Sine takes the overtones away (a soft, pure tone), Square and Triangle take every second one away (a hollow tone), Saw makes the high ones a little quieter. 0 % is the plain tone.
+
+The waveforms make many more notes, up to 16 times as many: the count is at the bottom of the window.

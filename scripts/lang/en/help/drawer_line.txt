@@ -1,0 +1,1 @@
+Drag from start to end, or click the start and click the end. Right-click it: Formula (a shape or a pattern along it, see Formulas).

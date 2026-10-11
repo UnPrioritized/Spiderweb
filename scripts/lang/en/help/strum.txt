@@ -1,0 +1,25 @@
+Select one or more shapes, then right-click one: Strum… (or press Alt+S). The notes of each chord start one after another, like strumming a guitar, so a straight edge of notes becomes a slope or a curve. The notes change on the piano roll while you try settings. Accept keeps the change (one Ctrl+Z takes it back); X or Esc puts the notes back as they were. Reset sets the page back to the start, where it changes nothing.
+[clip:strum]
+[clip:strum-window]
+
+Like the Claw machine, you can keep working in the main window while it's open, and the strum is a page kept with the shape: moving or reshaping it strums the new notes the same way. Each time the window opens it starts a new page (+); click a tab on top to change one the shape has, or the small × beside a tab to take it off. Pages work one after another, in the order they were added.
+
+A chord = all the notes of a shape that start on the same tick (on a filled shape, each column of notes). A note on its own is left alone.
+
+It works like the strum tool found in other piano rolls. Each knob has a box under it with its real value (times in ticks); type a number there to go past where the knob reaches. Turn a knob by dragging it up / down (Shift = fine), with the mouse wheel or the arrow keys; hold the right mouse button on it to point it at the mouse; middle-click puts it back to 0.
+
+Start, Time: how much later each note starts than the one before. Turned right, the lowest note starts first; left, the highest. Tension: right = small steps first, each step bigger (100 = each twice the last); left = big steps first, each smaller (-100 = each half the last).
+
+Start, Velocity: how much quieter each note is than the one before it in the strum. Turned left, it's the other way round: the last note keeps its velocity and the ones before it are quieter. Never under 1. Its Tension works like Time's.
+
+Preserve end: the notes' ends stay where they were, so the notes get shorter instead of moving.
+
+Trigger ahead: the strum happens before the chord instead of after it, so the last note lands where the chord started. Its tension works the other way round.
+
+End, Time: the ends come earlier, one step more for each note. Turned right, the last note of the strum keeps its end; left, the first one does. A note that would end before it starts keeps 1 tick.
+
+Start and End each have a box at the top to switch that whole part on or off.
+
+Chop chords: wherever a note starts while other notes are still held, those notes are cut there, and the pieces strum again with it.
+
+Alternate direction: every other chord strums the other way (notes on their own don't count).

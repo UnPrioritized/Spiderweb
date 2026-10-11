@@ -1,0 +1,5 @@
+Pick a shape in the panel, or draw your own with Drawer…. Then drag a box on the piano roll (or click two corners); the drawing stretches to fill it. Ctrl keeps its drawn proportions.
+
+Its inside can be filled (see Inside fill). Circle and Polygon (O / Q), in the drawing tools' list (the arrow next to Line), make that shape straight away (Ctrl = perfect, as it looks).
+
+A placed shape keeps its own copy: changing the library shape later doesn't change it.

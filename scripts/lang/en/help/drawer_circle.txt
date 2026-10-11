@@ -1,0 +1,5 @@
+Drag (or click) corner to corner of its box; Ctrl makes it a perfect circle. While you drag, the circle's own line sticks: near another stroke's line or point it grows or shrinks until it touches exactly (Shift = free).
+
+A little further away, a dotted purple point shows where to point the mouse for it to touch, on a faint dotted copy of the line it would touch.
+
+Between two lines (a roof, a corner), a second point shows where it rests on both at once: the circle becomes an oval to fit. This doesn't happen with Ctrl. With Mirror on, it rests on the mirror line too, so it touches its copy.

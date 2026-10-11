@@ -1,0 +1,20 @@
+Beta: Chop is new and may still change in later versions.
+
+Select one or more shapes, then right-click one: Chop… (or press Alt+U). Every note is cut into pieces in a rhythm, shown on the piano roll at once. Accept keeps it (one Ctrl+Z takes it back); X or Esc puts the notes back.
+[clip:chop-window]
+
+Quick chop (Ctrl+U, also in the right-click menu): cuts the notes into even pieces as long as the snap. With the snap off, the pieces are 1 tick long.
+
+Rhythm: pick one from the list. The rhythm repeats along each note as many times as fits, and the last piece is whatever is left of the note. Empty parts of a rhythm leave gaps in the notes.
+
+Draw your own in the strip under the list: press on empty space to put a piece there, as loud as the mouse is high, and drag to make it longer (sideways) or louder and quieter (up and down). Drag a piece up or down to change its velocity; its number shows while you drag. Right-click a piece to delete it, or right-drag to delete every piece the mouse passes over. Grid sets how finely you can draw (3 for triplets). Save… keeps it in the list under a name; Delete removes a saved one.
+
+Steps: how long one repeat of the rhythm is. Step length: how long one step is, picked like the snap (shorter = a faster rhythm and more notes).
+
+Velocity: "% of each note" (the start) makes every piece a share of its note's own velocity, so velocity ramps and changes you made stay; the dotted line is 100 % (the note's own), and dragging sticks to it (Shift = no sticking). "Fixed (1–127)" makes every piece exactly the velocity drawn, whatever its note had. Switching keeps the pieces about as loud (100 % = 127). Amount: how much the rhythm's velocities count. 0 = every piece keeps its note's velocity, 100 = fully. Quick chop never changes velocities.
+
+Follow the song's grid (Absolute): on, the rhythm lines up with the song's beats, so a note that starts between them gets a short first piece. Off, the rhythm starts again at each note's start. In a shape with Fill, the notes that touch on one key (its outline notes, colour borders) count as one long note here, so the whole row follows one rhythm; spam notes each start their own.
+
+Like the Claw machine, you can keep working in the main window while it's open, and the chop is a page kept with the shape: moving or reshaping it chops the new notes the same way. Opened on a shape that has no Chop page yet, the window chops at once; otherwise it starts on +, a new page (it's added once a setting changes). Click a tab on top to change a page the shape has, or the small × beside a tab to take it off. Quick chop adds a page too.
+
+Order on one shape: Glue first, then the Claw machine, Strum and Chop pages in the order they were added.

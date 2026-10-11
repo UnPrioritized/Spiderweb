@@ -1,0 +1,11 @@
+Everything is saved on its own (autosave.json in the user folder next to Spiderweb) and comes back next time; each time Spiderweb starts, the previous session is kept as autosave-backup.json. Save… / Open… keep and open project files (.json). Opening one replaces what's on the piano roll (Undo can't bring it back), so if your shapes aren't saved in a project file, Spiderweb asks to save them first. Shapes are stored in beats, so changing PPQ doesn't move them.
+
+Generate MIDI writes the file set under Output file, with the PPQ, BPM and beats per bar from Project. PPQ 32767 or higher: many MIDI programs can't open the file (the box turns red).
+
+Keys (under Project) set to 256: the piano roll goes up to key 255 instead of 127, and the MIDI file keeps those keys. That's for players that support 256 keys (handy for tunings like 31edo, which need more keys per octave). Many MIDI programs can't read keys above 127, and playback here skips them (unless 31-EDO Audio is on).
+
+Back at 128, notes above 127 are left out; the shapes stay as they are.
+
+With 256 keys, two ticks show next to Keys: 31-EDO and Audio. 31-EDO shows the piano roll with 31 keys an octave instead of 12 (key 0 = C0): white rows are the 7 plain notes, dark rows sharps and flats, light rows half sharps (^) and half flats (v). Audio plays the notes that way too, every key up to 255, but only with Built-in BASSMIDI as the MIDI out. Only the look and the sound here change: the saved MIDI keeps the same key numbers.
+
+If something goes wrong, the details go to errors.log in the user folder next to Spiderweb.

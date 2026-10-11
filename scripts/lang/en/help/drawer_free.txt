@@ -1,0 +1,1 @@
+Hold the mouse button and draw. Letting go near the start closes it.

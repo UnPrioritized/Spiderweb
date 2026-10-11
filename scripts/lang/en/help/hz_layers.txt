@@ -1,0 +1,13 @@
+Layers in the Hz bass window's toolbar shows the layers list on the left (it's hidden to start with). Each layer has its own notes and its own sound: the synth window shows the picked layer's sound.
+
+Click a layer to pick it: you place and edit only its notes, and the other layers' notes show faded. + adds a layer. M mutes a layer, S plays it alone (solo).
+
+Right-click a layer to rename it, change its colour, delete it, move it up or down, or copy its sound to another layer. You can also drag a row to move it, or click a picked layer's name again to rename it.
+
+Slides only go between notes of the same layer.
+
+With Multi channel, when two layers play the same key at the same time, the notes of the lower layer in the list go on another MIDI channel (one channel can't play a key twice at once). Orange text in the toolbar says how many.
+
+Loudness in the toolbar shows a pane under the notes. Notes = draw each note's own loudness line, in velocity (1 to 127): it takes the place of the Hz bass's velocity for that note. A note without a line has a dotted one that follows the Hz bass's velocity. Layer = draw the picked layer's line, from 0 to 100 %: it turns the whole layer down, like a mixer's fader.
+
+Draw with Linear, Curve or Pencil, like the velocity pane (Ctrl = flat line, Shift = snap to the grid, Enter = done). With notes selected, only their lines change. Right-click the pane to take the lines away again.

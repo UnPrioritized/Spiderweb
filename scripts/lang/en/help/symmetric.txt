@@ -1,0 +1,9 @@
+Right-click a curve → Symmetric halves: one half follows the other. The curve gets an odd number of anchors with the middle one on the line of symmetry; editing one half rewrites the other.
+
+Mirrored (like an arch): the second half is the first one reflected.
+[clip:symmetric-arch]
+
+Turned half way round (like an S): the second half is the first one turned around the middle.
+[clip:symmetric-s]
+
+Off: the halves go their own way again.

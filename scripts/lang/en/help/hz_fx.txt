@@ -1,0 +1,22 @@
+The FX tab of the synth window is a rack, as many synths have. The list on the left has every effect: click one to put it on the sound (it's lit, and shows on the right as a strip with its knobs and a picture), click it again to take it off, and drag one that's on up or down to change their order. The round button at the end of a strip switches the effect off without losing its knobs.
+[clip:hz_fx-rack]
+
+Chorus: every other key goes a little out of tune and back (Depth, Rate), a wide moving sound with no extra notes.
+
+Echo: the whole sound comes again Repeats times, Time beats apart, each Fade as loud as the one before (one more set of notes each).
+
+Reverb look-alike: after each note its tone rings on for Length beats, starting at Level and fading, its waves landing more and more out of place (Scatter). Real reverb can't be in a MIDI file; this only sounds a bit like it.
+
+Flanger look-alike: some of the keys (Mix: 50 % = every other key) hit later and later, up to Depth of a wave, and back again, Rate times a beat: a sweep moving through the tone, with no extra notes.
+
+Compressor look-alike: the loud parts are turned down (whatever is over Threshold, by Ratio), then everything is made louder again (Gain), so the quiet parts come up next to the loud ones: fades, echoes and tails get louder. It changes how hard the notes hit, no extra notes.
+
+It listens to the whole sound (notes played together count together): Attack = how quickly it turns down when the sound gets loud (a little lets each note's start through), Release = how quickly it lets go when it gets quieter. Every key row is turned up and down alike, so Sweep and Wah keep their tone. Its place in the list counts: before Echo or Reverb look-alike it leaves their repeats and tails as they are, after them it squeezes those too.
+
+These are settings of their own too, not lines.
+
+The lines on the Draw tab are the Hz bass window's own: drag points, add them and right-click them just like in its effects pane, and both change. An effect you put on there goes with each note, as in a synth: it plays once per note, and a repeating shape starts over at each note.
+
+The note is drawn held for the longest line that plays once per note; its falls start at the "Let go" mark. While a key sounds, a dot runs along each line: it stops at the sustain point while you hold the key and runs down the fall when you let go.
+
+The Hz bass window's effects pane shows the dots too, on the first note in view, and while the preview plays, a dot where the play line crosses each line.
