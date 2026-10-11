@@ -949,6 +949,8 @@
  "look.preview_button": "Button",
  "look.preview_tick": "Tick box",
  "look.preview_drop": "Dropdown",
+ "look.reset": "Reset to default",
+ "look.reset_tip": "Size, font and text size back to how Spiderweb comes. The look and note colours stay.",
  "look.restart_size": "Restart Spiderweb to see the new size and font everywhere.",
  "updates.checking": "Checking…",
  "updates.no_connection": "Couldn't reach GitHub. Check your internet connection.",

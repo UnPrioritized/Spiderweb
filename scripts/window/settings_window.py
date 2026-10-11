@@ -180,11 +180,16 @@ class SettingsWindow(tk.Toplevel):
                 ("look.text", self.text_var, list(self.text_names.values()), 18, "look.text_tip"))
         for k, (label, var, values, width, tip) in enumerate(rows):
             ttk.Label(page, text=tr(label)).grid(row=r + 1 + k, column=0, sticky="e", padx=(0, 8), pady=3)
-            box = ttk.Combobox(page, textvariable=var, values=values, state="readonly", width=width)
-            box.grid(row=r + 1 + k, column=1, sticky="w", pady=3)
+            row = ttk.Frame(page)
+            row.grid(row=r + 1 + k, column=1, sticky="w", pady=3)
+            box = ttk.Combobox(row, textvariable=var, values=values, state="readonly", width=width)
+            box.pack(side="left")
             box.bind("<<ComboboxSelected>>", lambda e: self.save_size())
             Tooltip(box, tr(tip))
             setattr(self, label.replace(".", "_") + "_box", box)
+        self.size_reset = ttk.Button(row, text=tr("look.reset"), takefocus=False, command=self.reset_size)
+        self.size_reset.pack(side="left", padx=(8, 0))
+        Tooltip(self.size_reset, tr("look.reset_tip"))
         self.size_note = ttk.Label(page, text=tr("look.restart_size"), foreground=look.WARN,
                                    wraplength=round(300 * self.app.scale), justify="left")
         self.size_note.grid(row=r + 4, column=0, columnspan=2, sticky="w", pady=(4, 0))
@@ -275,6 +280,13 @@ class SettingsWindow(tk.Toplevel):
             messagebox.showerror(tr("look.title"), tr("look.not_saved"), parent=self)
         self.show_size_note()
         self.show_preview()
+
+    def reset_size(self):
+        """Size, Font and Text size back to the usual ones (the look and note colours stay)."""
+        self.size_var.set(self.size_names["system"])
+        self.font_var.set(self.font_default)
+        self.text_var.set(self.text_names["normal"])
+        self.save_size()
 
     def show_size_note(self):
         if (look.read_size(), look.read_font(), look.read_text()) == look.RUNNING:
