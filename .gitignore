@@ -22,3 +22,4 @@ scripts/bass/**/*.lib
 scripts/bass/**/*.h
 .claude/
 user/
+/lang/
