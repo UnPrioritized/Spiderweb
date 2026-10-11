@@ -55,6 +55,8 @@ CUSTOM_FLAGS = ("union", "apart", "borders")
 # note length from tick 0. every = how many steps / keys one channel lasts; for "time" [a, b] = a/b of a whole note
 # (like the snap: 1/4 = a beat). "rows" (step / time only, "Each key row"): True = each part of a key row starts
 # again at the first channel from its first note, "end" = counted back from its last note (row_restart).
+# "shift" (step / time only, "Diagonal"): [s, m] = every m keys up from the shape's lowest, the turns start s
+# channels later, so one channel makes slanted lines; missing = [0, 1] (none).
 CYCLES = ("step", "key", "time")
 CYCLE_MAX = 15  # (15 note colours)
 
@@ -76,6 +78,14 @@ def clean_cycle(c):
     out = {"by": c["by"], "n": n, "every": every}
     if c.get("rows"):
         out["rows"] = "end" if c["rows"] == "end" else True
+    shift = c.get("shift")
+    if isinstance(shift, (list, tuple)) and len(shift) == 2:
+        try:
+            s, m = max(-CYCLE_MAX, min(CYCLE_MAX, int(shift[0]))), max(1, min(10 ** 4, int(shift[1])))
+            if [s, m] != [0, 1]:  # (kept with any kind, like "rows"; By key ignores it)
+                out["shift"] = [s, m]
+        except (TypeError, ValueError):
+            pass
     return out
 
 
@@ -2235,9 +2245,17 @@ def cycle_turns(sh, notes, ppq):
     first note (with the "aligned" start from tick 0, so they keep to the gate grid), at the shape's gate (a gate
     Range: its own gates, range_steps; Hz bass with placed tones: its repeats, hz_steps), each note in the step it
     starts nearest to; other notes: each start time is a step. "Each key row" (Spam / Outline spam only,
-    row_restart_ok): counted again from each piece of a key row, from its first note or back from its last."""
+    row_restart_ok): counted again from each piece of a key row, from its first note or back from its last.
+    "Diagonal" (shift [s, m], not By key): every m keys up, s channels later."""
     c = sh["cycle"]
     s = notes[:, 0]
+
+    def slant(k):
+        d, m = c.get("shift") or (0, 1)
+        if not d or c["by"] == "key" or not len(notes):
+            return k
+        return k + d * ((notes[:, 2] - notes[:, 2].min()).astype(np.int64) // m)
+
     rows = bool(c.get("rows")) and c["by"] != "key" and row_restart_ok(sh)
     back = c.get("rows") == "end"
     merge = bool(sh.get("merge"))  # (a merged shape, merge.py: each key row = one piece, user)
@@ -2248,7 +2266,7 @@ def cycle_turns(sh, notes, ppq):
         k = np.floor(s * b / (4 * a * ppq) + 1e-9).astype(np.int64)
         if rows:
             k = row_restart(notes, k, back, notes[:, 2].astype(np.int64) if merge else colour_pieces(sh, notes, ppq))
-        return k % c["n"]
+        return slant(k) % c["n"]
     elif merge:  # by step: each key row's notes one after another (its two shapes' gates needn't line up in time)
         k, rows = row_steps_of(notes, back and rows), False
     elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS and (sh.get("hz") or {}).get("tones"):
@@ -2263,7 +2281,7 @@ def cycle_turns(sh, notes, ppq):
         k = np.unique(s, return_inverse=True)[1].reshape(-1)
     if rows:
         k = row_restart(notes, k, back, colour_pieces(sh, notes, ppq))
-    return (k // int(c["every"])) % c["n"]
+    return slant(k // int(c["every"])) % c["n"]
 
 
 def row_restart_ok(sh):

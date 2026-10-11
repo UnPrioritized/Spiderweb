@@ -471,6 +471,9 @@
  "colours.unit_key": "keys",
  "colours.unit_time": "note",
  "colours.rows": "Each key row",
+ "colours.shift": "Diagonal",
+ "colours.shift_mid": "channels every",
+ "colours.shift_tip": "Each key row starts on a different channel: every few keys up, the turns start this many channels later, so one colour makes slanted lines instead of straight stripes.\n0 = off. 1 = one way, -1 = the other way; bigger numbers make flatter lines, more keys make steeper ones.\nRows are counted from the shape's lowest key. Works with Each key row too.",
  "colours.rows_off": "Off",
  "colours.rows_start": "From its start",
  "colours.rows_end": "From its end",
@@ -2816,9 +2819,11 @@
   "",
   "By step = each step the next channel (spam: each gate column; lines: each note in time), By key = each key, By time = every note length from the start of the song (1/4 = a beat, so it lines up with the bar lines). Channels = how many take turns, every = how long one lasts.",
   "",
-  "Each key row (By step / By time, Spam and Outline spam shapes only): From its start = each key row starts again at the first channel where its notes begin (after a gap too), so the colours follow the shape's left edge; From its end = counted back from each row's last note, so they follow the right edge."
+  "Each key row (By step / By time, Spam and Outline spam shapes only): From its start = each key row starts again at the first channel where its notes begin (after a gap too), so the colours follow the shape's left edge; From its end = counted back from each row's last note, so they follow the right edge.",
+  "",
+  "Diagonal (By step / By time): [n] channels every [m] keys = every m keys up from the shape's lowest key, the turns start n channels later, so each colour runs as a slanted line through the shape. 0 = off, a minus number slants the other way. Mix it with Each key row and the every box to find a look you like."
  ],
- "help.channels.words": "channel track overlap colour color cycle take turns rainbow",
+ "help.channels.words": "channel track overlap colour color cycle take turns rainbow diagonal slant stripes",
  "help.files.title": "Saving and MIDI export",
  "help.files.tip": "Your work saves itself. Generate MIDI writes the .mid file set under Project.",
  "help.files.text": [

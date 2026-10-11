@@ -62,8 +62,26 @@ class ColoursPanel:
         self.cycle_rows_box.pack(side="left", padx=4)
         self.cycle_rows_box.bind("<<ComboboxSelected>>", lambda ev: (self.on_cycle("rows"), self.roll.focus_set()))
         self.cycle_rows_tip = Tooltip(self.cycle_rows_box, tr("colours.rows_tip"))
+        # "Diagonal" [s] channels every [m] keys (cycle["shift"]; not By key, like Each key row)
+        c = self.cycle_shift_row = ttk.Frame(rows)
+        c.pack(anchor="w", pady=(1, 0))
+        lb = ttk.Label(c, text=tr("colours.shift"))
+        lb.pack(side="left")
+        Tooltip(lb, tr("colours.shift_tip"))
+        self.shift_vars = [tk.StringVar(), tk.StringVar()]
+        self.shift_entries = []
+        for i, (var, lo, hi, unit) in enumerate([(self.shift_vars[0], -CYCLE_MAX, CYCLE_MAX, "colours.shift_mid"),
+                                                 (self.shift_vars[1], 1, EVERY_MAX, "colours.unit_key")]):
+            e = ttk.Entry(c, textvariable=var, width=4)
+            e.pack(side="left", padx=4)
+            Scrub(self, [(e, var, lambda: self.on_cycle("shift"))], (1, 4 if i else 3, 1), lo, hi,
+                  label=None if i else lb, drag_box=True)
+            Tooltip(e, tr("colours.shift_tip"))
+            ttk.Label(c, text=tr(unit)).pack(side="left")
+            self.shift_entries.append(e)
         for e, var, what in ([(self.cycle_n_entry, self.cycle_n_var, "n")] +
-                             [(e, v, "every") for e, v in zip(self.cycle_entries, self.cycle_vars)]):
+                             [(e, v, "every") for e, v in zip(self.cycle_entries, self.cycle_vars)] +
+                             [(e, v, "shift") for e, v in zip(self.shift_entries, self.shift_vars)]):
             e.bind("<Return>", lambda ev, what=what: self.on_cycle(what))
             leave_box(self, e, var, lambda left, e=e, what=what: self.on_cycle(what, left and e))
 
@@ -100,6 +118,9 @@ class ColoursPanel:
         parts = [[x[0] for x in every], [x[1] for x in every]] if by == "time" else [every, [4]]
         for e, var, values in zip(self.cycle_entries, self.cycle_vars, parts):
             same_or_blank(e, var, values)
+        shifts = [c.get("shift", [0, 1]) for c in on] or [[0, 1]]
+        for i, (e, var) in enumerate(zip(self.shift_entries, self.shift_vars)):
+            same_or_blank(e, var, [s[i] for s in shifts])
         restart = {c.get("rows") for c in on}
         self.cycle_rows_box.current([v for v, _ in ROW_CHOICES].index(next(iter(restart))) if len(restart) == 1 else 0)
         # (Spam / Outline spam only: greyed when none of the picked shapes is one, user; new shapes: any)
@@ -110,8 +131,10 @@ class ColoursPanel:
         if (by != "key") != bool(self.cycle_rows_row.winfo_manager()):
             if by != "key":
                 self.cycle_rows_row.pack(anchor="w", pady=(1, 0))
+                self.cycle_shift_row.pack(anchor="w", pady=(1, 0))
             else:
                 self.cycle_rows_row.pack_forget()
+                self.cycle_shift_row.pack_forget()
         time = by == "time"
         if time != bool(self.cycle_slash.winfo_manager()):  # By time: a second box, "a / b note"
             for w in (self.cycle_slash, self.cycle_entries[1], self.cycle_unit):
@@ -125,7 +148,7 @@ class ColoursPanel:
         self.cycle_box.config(state="readonly" if tgts else "disabled",
                               style="Gap.TCombobox" if lonely else "TCombobox")
         show_mixed(self.cycle_box, mixed, self.cycle_tip, tr("colours.tip") + (tr("colours.needs") if lonely else ""))
-        for e in [self.cycle_n_entry] + self.cycle_entries:
+        for e in [self.cycle_n_entry] + self.cycle_entries + self.shift_entries:
             e.config(state="normal" if cy and not mixed else "disabled", style="TEntry")
         self.cycle_rows_box.config(state="readonly" if cy and not mixed and rows_ok else "disabled")
         if bool(cy) != bool(self.cycle_n_entry.winfo_manager()):
@@ -179,6 +202,10 @@ class ColoursPanel:
             kind = self.cycle_kind(tgts)
             got = [number(e, v, 1, EVERY_MAX) for e, v in zip(self.cycle_entries, self.cycle_vars)]
             value = None if not kind else got if kind == "time" and got != [None, None] else got[0]
+        elif what == "shift":  # (an empty box (different numbers): each keeps its own)
+            got = [number(e, v, lo, hi) for e, v, lo, hi in
+                   zip(self.shift_entries, self.shift_vars, (-CYCLE_MAX, 1), (CYCLE_MAX, EVERY_MAX))]
+            value = None if got == [None, None] else got
         else:
             value = by
             on = [t["cycle"]["n"] for t in tgts if t.get("cycle")]
@@ -194,11 +221,14 @@ class ColoursPanel:
                     return old
                 kept = old["n"] if old else (int(n) if n.isdigit() and 2 <= int(n) <= CYCLE_MAX else 4)
                 new = {"by": by, "n": kept, "every": [1, 4] if by == "time" else 1}
-                return dict(new, rows=old["rows"]) if old and old.get("rows") else new  # (kept with a new kind)
+                return dict(new, **{k: old[k] for k in ("rows", "shift") if old and old.get(k)})  # (kept with a new kind)
             if not old:
                 return old
             if what == "rows":
                 return dict(old, rows=value) if value else {k: v for k, v in old.items() if k != "rows"}
+            if what == "shift":
+                s = [v if v is not None else o for v, o in zip(value, old.get("shift", [0, 1]))]
+                return dict(old, shift=s) if s != [0, 1] else {k: v for k, v in old.items() if k != "shift"}
             if isinstance(value, list):
                 return dict(old, every=[v if v is not None else o for v, o in zip(value, old["every"])])
             return dict(old, **{what: value})
