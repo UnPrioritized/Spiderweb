@@ -142,6 +142,8 @@ class ShapeMenu:
         self.sustain_item(m)
         self.between_items(item, i)
         self.merge_menu(m)
+        if app.cutter_ok(i):  # (the shape right-clicked = the cutter; shapes without an inside: not shown, user)
+            item(tr("roll_menu.cookie_cut"), "", lambda: app.cookie_cut(i))
         if len(app.sels) >= 2:  # (greyed out, saying why, when something else is selected too)
             ok = app.can_join()
             item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
@@ -163,9 +165,10 @@ class ShapeMenu:
         finally:
             m.grab_release()
 
-    def show_box_menu(self, e):
+    def show_box_menu(self, e, i=None):
         """Right-click inside the kept Select boxes with several shapes selected: only what works on all of them
-        at once (user asked; each shape's own options are left out)."""
+        at once (user asked; each shape's own options are left out). i: the shape right-clicked on, if any (Cut with
+        this shape)."""
         app = self.app
         app.commit_typing()  # (a number typed in a panel box: to the selected shapes first)
         m = tk.Menu(self, tearoff=0)
@@ -193,6 +196,8 @@ class ShapeMenu:
         if app.between_pair():
             item(tr("between.menu_add"), "", app.add_between)
         self.merge_menu(m)
+        if i is not None and app.cutter_ok(i):
+            item(tr("roll_menu.cookie_cut"), "", lambda: app.cookie_cut(i))
         ok = app.can_join()
         item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
              tr("roll_menu.ctrl_g"), app.join_selected, ok)

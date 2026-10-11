@@ -385,3 +385,33 @@ def slice_notes(sh, notes, tracks, a, b, ppq):
         parts.append(half)
     return parts, crossed
 
+
+# ---------------------------------------------------------------- cookie cutter (user, 2026-10-12)
+
+def cutter_loops(sh):
+    """The closed loops (beat, key arrays) that make a shape's inside, for "Cut with this shape": a custom shape's
+    filled loops (as Fill sees them), a closed polyline / curve / arc. [] = no inside (an open line, text, a picture,
+    pasted notes)."""
+    from notes.between import closed
+    from notes.custom import fill_plan
+    from notes.engine import cached_path
+    if sh["kind"] == "custom":
+        if "notes" in sh or "picture" in sh or sh.get("text") or not sh.get("strokes"):
+            return []
+        return [np.asarray(p, float).reshape(-1, 2) for p in fill_plan(sh)["polys"] if len(p) > 3]
+    if sh["kind"] in ("poly", "curve", "arc") and closed(sh):
+        return [np.asarray(cached_path(sh), float).reshape(-1, 2)]
+    return []
+
+
+def loop_crossings(path, loops):
+    """Where the polyline path crosses the loops' edges: [(point, the edge's direction)], near repeats (at an edge's
+    corner) once."""
+    out = []
+    for lp in loops:
+        for q0, q1 in zip(lp[:-1], lp[1:]):
+            for pt, _ in crossings(path, q0, q1):
+                if all(np.hypot(*(pt - p)) > 1e-7 for p, _ in out):
+                    out.append((pt, q1 - q0))
+    return out
+

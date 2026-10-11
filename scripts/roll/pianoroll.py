@@ -1298,7 +1298,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 # inside the kept Select boxes: the menu for all they selected, or (just one shape) that shape's own
                 # menu, anywhere in the boxes (user)
                 if len(self.app.sels) > 1:
-                    self.show_box_menu(e)
+                    self.show_box_menu(e, i)
                 else:
                     self.show_menu(e, next(iter(self.app.sels)))
             elif i is not None and sc["deselect"]:  # near a shape (or on its notes): its menu
