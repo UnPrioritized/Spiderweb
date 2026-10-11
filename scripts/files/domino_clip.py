@@ -117,12 +117,13 @@ def time_signature(beats):
     return item(2015, item(1001, struct.pack("<I", 0)) + item(2001, bytes([beats])) + item(2002, bytes([4])))
 
 
-def dms_data(notes, ppq, bpm, beats, use10=False):
+def dms_data(notes, ppq, bpm, beats, use10=False, drums=True):
     """notes: [start, end, pitch, velocity, slot, ...] -> a .dms file (Domino's own song file, which can hold a
     PPQ up to 65535 where a MIDI file stops at 32767). It's the clipboard's format with a Conductor track first
     (tempo + time signature), then one track per slot like the MIDI export (empty ones too), each with its own
     channel (Domino refuses a track mixing channels); a track on channel 10 is marked as a drum track like Domino
-    does. Keys above 127 must be left out first.
+    does, unless drums is False (the project's "Use channel 10": wanted for its colour). Keys above 127 must be
+    left out first.
     Packed as it's made, PIECE notes at a time: the whole unpacked file (40 bytes a note) never sits in memory, and
     the notes are cut into tracks by one sort instead of a search through all of them for each track."""
     z, packed, size = zlib.compressobj(DMS_LEVEL), [], 0
@@ -134,7 +135,7 @@ def dms_data(notes, ppq, bpm, beats, use10=False):
 
     def track_head(channel, name, events, conductor=False):  # events = how many bytes of events follow
         head = (item(1000, b"\0\0") + item(1001, bytes([channel])) + item(1002, name) + item(1003, bytes([conductor]))
-                + item(1004, bytes([channel == 9 and not conductor])) + TRACK_SETTINGS)
+                + item(1004, bytes([channel == 9 and drums and not conductor])) + TRACK_SETTINGS)
         feed(struct.pack("<HI", 1003, len(head) + events + len(track_tail(0))) + head)
 
     def track_tail(end):

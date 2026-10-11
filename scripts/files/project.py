@@ -184,7 +184,7 @@ class ProjectFiles:
             "version": 2, "app_version": VERSION,  # the file format, and the Spiderweb that saved it
             "ppq": self.pvar["ppq"].get(), "bpm": self.pvar["bpm"].get(), "beats": self.pvar["beats"].get(),
             "output": self.pvar["output"].get(), "channel_mode": self.channel_mode.get(), "channel_split": self.channel_split,
-            "keys": self.keys, "edo31": bool(self.edo31.get()), "edo31_audio": bool(self.edo31_audio.get()),
+            "use_ch10": bool(self.use_ch10.get()), "keys": self.keys, "edo31": bool(self.edo31.get()), "edo31_audio": bool(self.edo31_audio.get()),
             "domino_start": self.domino_start(),
             "snap": self.snap.get(), "defaults": self.defaults,
             "custom_defaults": dict(self.custom_defaults, shape=self.custom_shape),
@@ -276,6 +276,7 @@ class ProjectFiles:
         for key, value in boxes.items():
             self.pvar[key].set(value)
         self.channel_mode.set(mode if mode in CHANNEL_MODES else "single")
+        self.use_ch10.set(data.get("use_ch10") is True)
         self.keys_var.set(str(KEYS[1] if data.get("keys") == KEYS[1] else KEYS[0]))
         self.edo31.set(data.get("edo31") is True)
         self.edo31_audio.set(data.get("edo31_audio") is True)
@@ -658,7 +659,7 @@ class ProjectFiles:
         self.busy(tr("project.saving_dms"))
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            write_bytes(path, dms_data(notes, ppq, bpm, beats, self.picture_use10))
+            write_bytes(path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16()))
         except OSError as e:
             messagebox.showerror(tr("project.spiderweb"), couldnt_save(e))
             return
@@ -695,7 +696,8 @@ class ProjectFiles:
                                  if not self.sels or high else tr("project.the_selected_shapes_have_no_notes"))
             return
         tracks = len(np.unique(notes[:, 4]))
-        if not ask_big(self, "domino", len(notes)) or not ask_drums(self, tracks):
+        # (no channel 10 question when the project uses it on purpose: "Use channel 10")
+        if not ask_big(self, "domino", len(notes)) or not (self.all16() or ask_drums(self, tracks)):
             return
         self.busy(tr("project.copying_for_domino"))  # (millions of notes take a few seconds)
         try:

@@ -47,7 +47,7 @@ _ATTRIB_MIDI_VOICES, _ATTRIB_MIDI_VOICES_ACTIVE = 0x12003, 0x12004
 _ATTRIB_MIDI_CPU, _ATTRIB_MIDI_SRC, _ATTRIB_MIDI_KILL, _ATTRIB_MIDI_QUEUE_ASYNC = 0x12001, 0x12006, 0x12007, 0x1200d
 _ATTRIB_VOL, _ATTRIB_BUFFER = 2, 13
 _CONFIG_UPDATEPERIOD = 1
-_EV_END, _EV_NOTE, _EV_PROGRAM, _EV_PITCH, _EV_TEMPO = 0, 1, 2, 4, 62
+_EV_END, _EV_NOTE, _EV_PROGRAM, _EV_PITCH, _EV_DRUMS, _EV_TEMPO = 0, 1, 2, 4, 6, 62
 _EVENTS_RAW = 0x10000
 
 EVENT = np.dtype([("event", "<u4"), ("param", "<u4"), ("chan", "<u4"), ("tick", "<u4"), ("pos", "<u4")])
@@ -492,7 +492,7 @@ def live_limit(st, x):
 
 
 class Live:
-    """A BASSMIDI stream with 48 channels (0-15 as on any GM synth, 10 = drums; 16-46 = 31-EDO's steps, each
+    """A BASSMIDI stream with 48 channels (0-15 as on any GM synth, but 10 is a piano too; 16-46 = 31-EDO's steps, each
     pitch-bent once here, playback.EDO_BENDS) that sounds each message the moment it's sent, set up like the
     common BASSMIDI MIDI-out driver (user, 2026-10-07: Player's Limiter + Python feeding the sound pumped and stuttered next to it): BASS plays the stream itself, straight into the sound device's mix (no
     Python in the sound thread, so a busy window can't starve it), full volume and no limiter (too loud = clipped,
@@ -528,7 +528,10 @@ class Live:
         self._lock = threading.Lock()
         if limiter:
             self.set_limiter(True)
-        midi.BASS_MIDI_StreamLoadSamples(h)  # (program 0 + the drums: no wait at the first notes)
+        # channel 10 plays the piano like the others (user, 2026-10-11: "Use channel 10" is for its colour; nothing
+        # in Spiderweb is meant as drums)
+        midi.BASS_MIDI_StreamEvent(h, 9, _EV_DRUMS, 0)
+        midi.BASS_MIDI_StreamLoadSamples(h)  # (program 0: no wait at the first notes)
         from files.playback import EDO_BENDS, EDO_FIRST
         for step, bend in enumerate(EDO_BENDS):
             ch = EDO_FIRST + step

@@ -114,9 +114,10 @@ class Stopped(Exception):
     """Notes being made in the background (App.notes_rested) aren't wanted any more."""
 
 
-def all_notes(shapes, ppq, keys, mode, split, notes_tracks):
-    """Every shape's notes together, overlaps / channels worked out: (colours each shape asks for, channel 10 for
-    pictures, rendered, slot count). Touches no Tk: also made in a background thread (App.notes_rested)."""
+def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks):
+    """Every shape's notes together, overlaps / channels worked out: (colours each shape asks for, channel 10 used
+    (slot k = channel k, slot_track_channel), rendered, slot count). all16: the project's "Use channel 10" (every
+    shape may use it, not only pictures). Touches no Tk: also made in a background thread (App.notes_rested)."""
     got = [notes_tracks(sh) for sh in shapes]
     # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
     # merged into the last (pasted notes keep their tracks)
@@ -125,12 +126,13 @@ def all_notes(shapes, ppq, keys, mode, split, notes_tracks):
     got = [(n, capped_colours(t % CLASH) + t // CLASH * CLASH if w > COLOURS else t) for (n, t), w in zip(got, wanted)]
     # (pictures using channel 10 too: one setting for the project, kept with every picture)
     use10 = next((sh["picture"]["set"].get("use10", False) for sh in shapes if "picture" in sh), False)
+    # (with all16 nothing skips channel 10: the other shapes' slots needn't stay off the pictures' channel 10)
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
-                             ["picture" in sh for sh in shapes], use10, between_turns(shapes),
+                             ["picture" in sh for sh in shapes], use10 and not all16, between_turns(shapes),
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
                              [is_sustained(sh) for sh in shapes],
                              [colours_back(sh) for sh in shapes])
-    return wanted, use10, rendered, slots
+    return wanted, use10 or all16, rendered, slots
 
 
 class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
@@ -253,6 +255,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.show_notes = tk.BooleanVar(value=True)
         self.channel_mode = tk.StringVar(value="single")
         self.channel_split = "key"  # what counts as an overlap for Multi channel (engine.SPLITS)
+        self.use_ch10 = tk.BooleanVar(value=False)  # Multi channel uses channel 10 too: 16 colours (all16)
         self.keys = 128  # the project's key range: 0 .. keys - 1 (paths.KEYS)
         self.keys_var = tk.StringVar(value=str(KEYS[0]))
         self.edo31 = tk.BooleanVar(value=False)  # 256 keys shown as 31-EDO (the look only: edo())
@@ -583,6 +586,11 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.split_box.bind("<<ComboboxSelected>>", lambda e: self.shapes_changed())
         self.split_box.current(0)
         Tooltip(self.split_box, SPLIT_TIP)
+        # (shown under Multi channel too, user: most MIDI players play channel 10 as drums, some people only want
+        # the 16th colour)
+        self.ch10_tick = ttk.Checkbutton(ch, text=tr("app.use_ch10"), variable=self.use_ch10,
+                                         command=self.on_channel_mode)
+        Tooltip(self.ch10_tick, tr("app.use_ch10_tip"))
         r += 1
         ttk.Label(box, text=tr("app.midi_out")).grid(row=r, column=0, sticky="w", pady=(3, 0))
         dev = keep_width(ttk.Combobox(box, textvariable=self.midi_device, state="readonly", values=devices()))
@@ -923,6 +931,10 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             if w:
                 w.ppq_changed()  # (numbers shown in ticks)
 
+    def all16(self):
+        """True while Multi channel uses channel 10 too ("Use channel 10", shown only under Multi channel)."""
+        return self.use_ch10.get() and self.channel_mode.get() == "auto"
+
     def edo(self):
         """True while the piano roll shows 31-EDO (256 keys + its tick)."""
         return self.keys == KEYS[1] and self.edo31.get()
@@ -1025,15 +1037,17 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         if multi != bool(self.split_box.winfo_manager()):  # (only shown under Multi channel, user)
             if multi:
                 self.split_box.pack(anchor="w", padx=(18, 0), pady=(1, 0))
+                self.ch10_tick.pack(anchor="w", padx=(18, 0), pady=(2, 0))
             else:
                 self.split_box.pack_forget()
+                self.ch10_tick.pack_forget()
         made = self.notes_made()
         for sh in self.shapes:  # a piece whose outline was changed is a shape of its own now (sliced.py)
             if "cut" in sh and moved_by(as_made(sh)) is None:
                 completed(sh)  # (with the whole's glue / note tool pages)
         if made is None:
             made = all_notes(self.shapes, self.ppq, self.keys, self.channel_mode.get(), self.channel_split,
-                             self.notes_tracks)
+                             self.all16(), self.notes_tracks)
             if self._notes_worked != worked:
                 self._notes_time = time.perf_counter() - started
         wanted, self.picture_use10, self.rendered, self.slot_count = made
@@ -1065,7 +1079,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def notes_key(self):
         """Everything the notes are made from (shapes_changed): a background result is used only for exactly this."""
         return (tuple(shape_key(sh) for sh in self.shapes), self.ppq, self.keys,
-                self.channel_mode.get(), SPLIT_CHOICES[max(self.split_box.current(), 0)][0])
+                self.channel_mode.get(), SPLIT_CHOICES[max(self.split_box.current(), 0)][0], self.all16())
 
     def _make_coming(self, show):
         self._late_notes = None
