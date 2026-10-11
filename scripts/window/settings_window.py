@@ -1,8 +1,7 @@
 """The Settings window (the ⚙ button at the end of the toolbar): the app's own settings, not the project's: no undo.
 Tabs: Look (light / dark, Size / Font / Text size, saved in user/settings.ini; the note colour palettes,
-palettes.py),
-Updates (how often to look; kept with the window settings in the autosave), later Language. Never opens by itself
-(user)."""
+palettes.py), Sound (MIDI out + Built-in BASSMIDI's settings), General (update checks, tips), Language. All saved in
+user/settings.ini. Never opens by itself (user)."""
 
 import tkinter as tk
 from tkinter import colorchooser, font as tkfont, messagebox, ttk
@@ -149,9 +148,9 @@ class SettingsWindow(tk.Toplevel):
         self.build_size(page, 2)
         self.build_palettes(page, 11)
         self.build_sound()
-        # updates: how often to look, and looking now (the answer shows under the row)
+        # General: updates (how often to look, and looking now: the answer shows under the row), then tips
         page = self.pages["general"] = ttk.Frame(tabs, padding=(12, 10, 12, 12))
-        tabs.add(page, text=tr("settings.updates_tab"))
+        tabs.add(page, text=tr("settings.general_tab"))
         updates = app.updates
         row = ttk.Frame(page)
         row.pack(anchor="w")
@@ -163,6 +162,7 @@ class SettingsWindow(tk.Toplevel):
         ttk.Button(row, text=tr("updates.check_now"), takefocus=False, command=lambda: (
             status.config(text=tr("updates.checking")),
             updates.check(report=lambda msg: status.winfo_exists() and status.config(text=msg)))).pack(side="left")
+        self.build_tips(page)
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.update_idletasks()  # (first time: in the middle of the main window)
@@ -177,6 +177,23 @@ class SettingsWindow(tk.Toplevel):
         if panel is not None and panel.winfo_exists():
             panel.take_voices()
         self.destroy()
+
+    def build_tips(self, page):
+        """The same tick and button as at the bottom of the Help window (the tick shares app.tips.on)."""
+        tips = self.app.tips
+        ttk.Separator(page).pack(fill="x", pady=(12, 8))
+        ttk.Checkbutton(page, text=tr("help.show_a_tip_the_first_time"), variable=tips.on, takefocus=False,
+                        command=self.app.schedule_autosave).pack(anchor="w")
+        row = ttk.Frame(page)
+        row.pack(anchor="w", pady=(6, 0))
+        note = self.tips_note = ttk.Label(row, text="", foreground=look.GOOD)
+
+        def again():
+            tips.reset()
+            tips.on.set(True)
+            note.config(text=tr("help.done_every_tip_shows_again_the"))
+        ttk.Button(row, text=tr("help.show_all_tips_again"), takefocus=False, command=again).pack(side="left")
+        note.pack(side="left", padx=(6, 0))
 
     # ------------------------------------------------------------ sound (MIDI out + Built-in BASSMIDI)
 
