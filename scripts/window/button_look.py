@@ -76,7 +76,10 @@ def dress(st, target, style, p):
         st.map(target + name, fieldbackground=[("disabled", p["window"]), ("readonly", p["field"])],
                bordercolor=[("focus", p["focus"])])
     # (the preview's dropdown, picked while it had the keyboard: its text showed white on white on the system's
-    # theme, user. No highlight there at all)
+    # theme, user: that theme turns the text itself white for a blue fill only its own pieces draw. No highlight)
+    if target:
+        st.map(target + "TCombobox", foreground=[("disabled", p["text_off"]), ("readonly", "focus", p["text"])],
+               focusfill=[])
     st.map(target + "TCombobox", background=[("active", p["hot"])],
            selectbackground=[("readonly", p["field"]) if target else ("readonly", "!focus", p["field"])],
            selectforeground=[("readonly", p["text"]) if target else ("readonly", "!focus", p["text"])])
