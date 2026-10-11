@@ -267,6 +267,8 @@ class SettingsWindow(tk.Toplevel):
         if target not in self.pv_sizes:  # (made the first time this style is picked; its own paddings kept)
             if style != "system":
                 button_look.dress(st, target, style, look.parts())
+            else:
+                button_look.system_colours(st, target)
             button_look.put_on(self, st, target, style, look.parts(), kinds, edge)
 
             def usual(name, option):  # (Tk's own clam values for its styles: the system's theme may be running)

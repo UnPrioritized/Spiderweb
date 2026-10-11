@@ -20,7 +20,7 @@ CLAM_PIECES = tuple(FRAMES.values()) + ("Menubutton.indicator", "Combobox.downar
 PREVIEW_KINDS = KINDS + ("TCheckbutton",)  # (the preview's tick box follows the style too: the app's go clam with it)
 EDGES = (1, 2, 3, 4)  # how thick the edges are, in pixels (System's own can't change: Tk draws none of it)
 RUNNING, RUNNING_EDGE = "system", 1  # the style showing (start)
-SYSTEM_THEME, SYSTEM_LAYOUTS, CLAM_LAYOUTS = "", {}, {}
+SYSTEM_THEME, SYSTEM_LAYOUTS, SYSTEM_MAPS, CLAM_LAYOUTS = "", {}, {}, {}
 PICTURES = []  # (kept: Tk forgets a picture nothing in Python holds)
 
 
@@ -48,6 +48,7 @@ def start(st):
     SYSTEM_THEME = st.theme_use()
     for kind in PREVIEW_KINDS:
         SYSTEM_LAYOUTS[kind] = st.layout(kind)
+        SYSTEM_MAPS[kind] = st.map(kind)
         spec = st.tk.call("ttk::style", "theme", "settings", "clam", "ttk::style layout " + kind)
         CLAM_LAYOUTS[kind] = ttk._list_from_layouttuple(st.tk, st.tk.splitlist(spec))
 
@@ -101,6 +102,14 @@ def dress(st, target, style, p):
                      lowerbordercolor=p["edge"])
         st.map(target + "TCheckbutton", background=[("active", p["tick_hot"])],
                indicatorbackground=[("pressed", p["button"])])
+
+
+def system_colours(st, target):
+    """The preview's System's own pieces with the system theme's state colours (the running theme's own can be
+    clam's: its dropdown text turned white with the keyboard on it, for a blue fill only clam draws; user)."""
+    for kind, maps in SYSTEM_MAPS.items():
+        if maps:
+            st.map(target + kind, **maps)
 
 
 def ring_picture(st, fill, rings):
