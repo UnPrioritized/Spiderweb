@@ -275,7 +275,10 @@ class SettingsWindow(tk.Toplevel):
         for name in kinds:
             st.configure(target + name, font=self.pv_fonts["text"])
         for w, name in zip((self.pv_widgets[0], self.pv_widgets[2], self.pv_widgets[3]), kinds):
-            w.configure(style=target + name)
+            if str(w.cget("style")) != target + name:
+                w.configure(style=target + name)
+                if name != "TButton":  # (a new style leaves its text unshown until it's laid out again, user)
+                    w.set(w.get())
         for name, pad in self.pv_pads.items():
             if pad:
                 try:
