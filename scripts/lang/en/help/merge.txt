@@ -1,4 +1,4 @@
-Select two shapes, right-click one of them → Gate sensitive merge (experimental), then pick a side. Merge to right: the shape on the left slides right. Merge to left: the shape on the right slides left. Where you right-click doesn't matter.
+Select two shapes, right-click one of them → Gate sensitive merge, then pick a side. Merge to right: the shape on the left slides right. Merge to left: the shape on the right slides left. Where you right-click doesn't matter.
 
 Each key row of the sliding shape moves on its own, until its note meets the other shape's note on the same key (it ends where that one starts). The notes keep their lengths, so a straight block takes on the other shape's slanted edge.
 
