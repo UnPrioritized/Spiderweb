@@ -398,8 +398,8 @@ def apply(root):
     st.configure("TProgressbar", background=p["pick"], lightcolor=p["pick"], darkcolor=p["pick"])
     st.configure("TScale", background=p["button"])
     st.configure("TSeparator", background=p["edge"])
-    if style != "plain":
-        button_look.put_on(root, st, "", style, p)
+    if style != "plain" or button_look.RUNNING_EDGE != 1:
+        button_look.put_on(root, st, "", style, p, t=button_look.RUNNING_EDGE)
     if not DARK:  # (the light look's plain Tk widgets keep the system's colours)
         return
     for key, value in (("*Background", WINDOW_BG), ("*Foreground", TEXT), ("*activeBackground", BUTTON_HOT),

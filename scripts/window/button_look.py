@@ -17,7 +17,8 @@ FRAMES = {"TButton": "Button.border", "TMenubutton": "Menubutton.border", "Toolb
           "TEntry": "Entry.field", "TCombobox": "Combobox.field", "TSpinbox": "Spinbox.field"}
 CLAM_PIECES = tuple(FRAMES.values()) + ("Menubutton.indicator", "Combobox.downarrow", "Spinbox.uparrow",
                                         "Spinbox.downarrow")
-RUNNING = "system"  # the style showing (start)
+EDGES = (1, 2, 3, 4)  # how thick the edges are, in pixels (System's own can't change: Tk draws none of it)
+RUNNING, RUNNING_EDGE = "system", 1  # the style showing (start)
 SYSTEM_THEME, SYSTEM_LAYOUTS, CLAM_LAYOUTS = "", {}, {}
 PICTURES = []  # (kept: Tk forgets a picture nothing in Python holds)
 
@@ -25,6 +26,14 @@ PICTURES = []  # (kept: Tk forgets a picture nothing in Python holds)
 def read_style():
     style = settings.get("look", "button")
     return style if style in STYLES else "system"
+
+
+def read_edge():
+    try:
+        edge = int(settings.get("look", "edge") or 1)
+    except ValueError:
+        return 1
+    return edge if edge in EDGES else 1
 
 
 def shown_style(style):
@@ -35,8 +44,8 @@ def shown_style(style):
 
 def start(st):
     """Before look.apply changes the theme: the system's own theme and layouts, clam's (for the preview)."""
-    global RUNNING, SYSTEM_THEME
-    RUNNING = shown_style(read_style())
+    global RUNNING, RUNNING_EDGE, SYSTEM_THEME
+    RUNNING, RUNNING_EDGE = shown_style(read_style()), read_edge()
     SYSTEM_THEME = st.theme_use()
     for kind in KINDS:
         SYSTEM_LAYOUTS[kind] = st.layout(kind)

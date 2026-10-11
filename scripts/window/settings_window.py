@@ -141,7 +141,7 @@ class SettingsWindow(tk.Toplevel):
         ttk.Label(page, text=tr("settings.look_hint"), foreground=look.HINT, wraplength=round(300 * app.scale),
                   justify="left").grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self.build_size(page, 2)
-        self.build_palettes(page, 9)
+        self.build_palettes(page, 10)
         # updates: how often to look, and looking now (the answer shows under the row)
         page = ttk.Frame(tabs, padding=(12, 10, 12, 12))
         tabs.add(page, text=tr("settings.updates_tab"))
@@ -177,12 +177,15 @@ class SettingsWindow(tk.Toplevel):
         self.text_var = tk.StringVar(value=self.text_names[look.read_text()])
         self.button_names = {k: tr("look.button_" + k) for k in button_look.STYLES}
         self.button_var = tk.StringVar(value=self.button_names[button_look.read_style()])
+        self.edge_names = {k: f"{k} px" for k in button_look.EDGES}
+        self.edge_var = tk.StringVar(value=self.edge_names[button_look.read_edge()])
         families = [f for f in tkfont.families(self) if not f.startswith("@")]  # (@ = sideways fonts)
         rows = (("look.size", self.size_var, list(self.size_names.values()), 18, "look.size_tip"),
                 ("look.font", self.font_var, [self.font_default] + sorted(set(families), key=str.lower), 24,
                  "look.font_tip"),
                 ("look.text", self.text_var, list(self.text_names.values()), 18, "look.text_tip"),
-                ("look.button", self.button_var, list(self.button_names.values()), 18, "look.button_tip"))
+                ("look.button", self.button_var, list(self.button_names.values()), 18, "look.button_tip"),
+                ("look.edge", self.edge_var, list(self.edge_names.values()), 18, "look.edge_tip"))
         for k, (label, var, values, width, tip) in enumerate(rows):
             ttk.Label(page, text=tr(label)).grid(row=r + 1 + k, column=0, sticky="e", padx=(0, 8), pady=3)
             row = ttk.Frame(page)
@@ -199,9 +202,9 @@ class SettingsWindow(tk.Toplevel):
         Tooltip(self.size_reset, tr("look.reset_tip"))
         self.size_note = ttk.Label(page, text=tr("look.restart_size"), foreground=look.WARN,
                                    wraplength=round(300 * self.app.scale), justify="left")
-        self.size_note.grid(row=r + 5, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.size_note.grid(row=r + 6, column=0, columnspan=2, sticky="w", pady=(4, 0))
         self.show_size_note()
-        self.build_preview(page, r + 6)
+        self.build_preview(page, r + 7)
 
     def build_preview(self, page, r):
         """Pieces that work but change nothing else (user: tick, open the dropdown, step / type the number), drawn
@@ -259,11 +262,13 @@ class SettingsWindow(tk.Toplevel):
             self.pv_fonts[key].configure(family=family, size=-round(max(6, points + step) * dpi / 72))
         st = ttk.Style(self)
         style = button_look.shown_style(self.picked_button())
-        target = f"Pv{style.title()}."
+        edge = self.picked_edge()
+        self.look_edge_box.config(state="disabled" if style == "system" else "readonly")  # (it can't change those)
+        target = f"Pv{style.title()}{edge}."
         kinds = ("TButton", "TCombobox", "TSpinbox")
         if style != "system":
             button_look.dress(st, target, style, look.parts())
-        button_look.put_on(self, st, target, style, look.parts(), kinds)
+        button_look.put_on(self, st, target, style, look.parts(), kinds, edge)
         for name in kinds:
             st.configure(target + name, font=self.pv_fonts["text"])
         for w, name in zip((self.pv_widgets[0], self.pv_widgets[2], self.pv_widgets[3]), kinds):
@@ -369,6 +374,9 @@ class SettingsWindow(tk.Toplevel):
     def picked_button(self):
         return next(k for k, n in self.button_names.items() if n == self.button_var.get())
 
+    def picked_edge(self):
+        return next(k for k, n in self.edge_names.items() if n == self.edge_var.get())
+
     def save_size(self):
         size, family, text = self.picked_size()
         try:
@@ -376,6 +384,7 @@ class SettingsWindow(tk.Toplevel):
             settings.put("look", "font", family)
             settings.put("look", "text", text)
             settings.put("look", "button", self.picked_button())
+            settings.put("look", "edge", self.picked_edge())
         except OSError:
             messagebox.showerror(tr("look.title"), tr("look.not_saved"), parent=self)
         self.show_size_note()
@@ -387,11 +396,13 @@ class SettingsWindow(tk.Toplevel):
         self.font_var.set(self.font_default)
         self.text_var.set(self.text_names["normal"])
         self.button_var.set(self.button_names["system"])
+        self.edge_var.set(self.edge_names[1])
         self.save_size()
 
     def show_size_note(self):
-        if ((look.read_size(), look.read_font(), look.read_text()) == look.RUNNING
-                and button_look.shown_style(button_look.read_style()) == button_look.RUNNING):
+        style = button_look.shown_style(button_look.read_style())
+        if ((look.read_size(), look.read_font(), look.read_text()) == look.RUNNING and style == button_look.RUNNING
+                and (style == "system" or button_look.read_edge() == button_look.RUNNING_EDGE)):
             self.size_note.grid_remove()
         else:
             self.size_note.grid()
