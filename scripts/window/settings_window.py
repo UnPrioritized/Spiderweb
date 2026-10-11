@@ -123,6 +123,8 @@ def open_settings(app):
 
 
 class SettingsWindow(tk.Toplevel):
+    JUMP_MS = 1000  # (Font list open: letters typed closer together than this make one word)
+
     def __init__(self, app):
         super().__init__(app)
         self.app = app
@@ -307,6 +309,31 @@ class SettingsWindow(tk.Toplevel):
                     back()
             self.after_idle(check)
 
+        # typing while its list is open jumps to the first font starting with the letters typed (user; a pause of
+        # JUMP_MS starts a new word)
+        jump = {"text": "", "at": 0}
+        lb = self.tk.call("ttk::combobox::PopdownWindow", box) + ".f.l"
+
+        def jump_to(char, when):
+            if len(char) != 1 or not char.isprintable():
+                return
+            when = int(when)
+            jump["text"] = (jump["text"] if when - jump["at"] < self.JUMP_MS else "") + char.casefold()
+            jump["at"] = when
+            values = self.tk.splitlist(self.tk.call(lb, "get", 0, "end"))
+            k = next((i for i, f in enumerate(values) if f.casefold().startswith(jump["text"])), None)
+            if k is None and len(jump["text"]) > 1:  # (the same letter again: the next font with it)
+                jump["text"] = char.casefold()
+                now = int(self.tk.call(lb, "index", "active"))
+                k = next((i for i, f in list(enumerate(values))[now + 1:] + list(enumerate(values))[:now + 1]
+                          if f.casefold().startswith(jump["text"])), None)
+            if k is not None:
+                self.tk.call(lb, "selection", "clear", 0, "end")
+                self.tk.call(lb, "selection", "set", k)
+                self.tk.call(lb, "activate", k)
+                self.tk.call(lb, "see", k)
+        self.font_jump = jump_to
+        self.tk.call("bind", lb, "<KeyPress>", "+" + self.register(jump_to) + " %A %t")
         box.bind("<KeyRelease>", typed)
         box.bind("<Return>", enter)
         box.bind("<KP_Enter>", enter)
