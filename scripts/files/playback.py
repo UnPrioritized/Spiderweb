@@ -25,6 +25,7 @@ MAPPER = 0xFFFFFFFF
 # channel (EDO_FIRST + step), pitch-bent once when the synth opens (EDO_BENDS, at the usual +-2 key bend range),
 # so any number of notes can sound at once and the note colours' channels don't matter. A message to channel 16
 # or past carries the first channel of its group of 16 in its top byte (synth.Live.send).
+STACKED = 512  # notes still sounding on one channel at Stop past which it gets one "all notes off" (Player.stop)
 EDO = 31
 EDO_FIRST = 16
 _EDO_KEYS = np.array([round(s * 1200 / EDO / 100) for s in range(EDO)], np.int64)  # nearest key above C, per step
@@ -378,10 +379,21 @@ class Player:
             self.thread.join()
             self.thread = None
             # ordinary note-offs for what's still sounding, so the synth plays its release (a reset cuts it off);
-            # one for each note on a key (overlapping notes there each got a note-on)
+            # one for each note on a key (overlapping notes there each got a note-on). A channel with very many
+            # (Sustain's stacked notes: sustain.py) gets one "all notes off" instead, also a release: one by one, a
+            # million held notes kept Stop waiting
+            per = {}
             for key, n in self.held.items():
-                for _ in range(n):
-                    self.out.send(0x80 | key)
+                ch = key & ~0xFFFF00  # (the channel, with its group in the top byte)
+                per[ch] = per.get(ch, 0) + n
+            # (channels past 16 take note on / off only: synth.Live.send)
+            many = {ch for ch, n in per.items() if n > STACKED and ch < 1 << 24}
+            for key, n in self.held.items():
+                if key & ~0xFFFF00 not in many:
+                    for _ in range(n):
+                        self.out.send(0x80 | key)
+            for ch in many:
+                self.out.send(0xB0 | ch | 123 << 8)
             self.held = {}
             self._swap = self._wanted = None
             sys.setswitchinterval(self._switch)

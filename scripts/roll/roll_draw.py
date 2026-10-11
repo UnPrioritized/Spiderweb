@@ -15,6 +15,7 @@ from notes.merge import preview_parts, slid_preview
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
 from notes.paths import KEYS
 from notes.sliced import clip_strokes, moved_by, moved_mark, on_side, piece_knives
+from notes.sustain import is_sustained
 from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, PIANO_88, PREVIEW_LIMIT,
                               SELECTED_COLOR, SLOT_COLORS, draw_boxes, fade, note_name)
 from roll.tiles import Tiles, see_through
@@ -249,6 +250,27 @@ def screen_lines(path, ax, bx, ay, by, view):
             out.append((coords[k:k + c], size))
         k += c
     return out
+
+
+def cover_next(s, e, key, group):
+    """For each note, the next one painted after it on its key in its group (an owner): its start and end (-1 = none).
+    Notes come in painting order within each group."""
+    n = len(s)
+    nxt_s, nxt_e = np.zeros(n, np.int64), np.full(n, -1, np.int64)
+    if n > 1:
+        order = np.lexsort((np.arange(n), key, group))
+        same = (group[order][1:] == group[order][:-1]) & (key[order][1:] == key[order][:-1])
+        a, b = order[:-1][same], order[1:][same]
+        nxt_s[a], nxt_e[a] = s[b], e[b]
+    return nxt_s, nxt_e
+
+
+def covered_ends(e, nxt, room):
+    """Ends to PAINT (Sustain's stacked notes: sustain.py): a note the next one on its key covers to its end (painted
+    after it, ending no earlier) only needs painting to `room` ticks past that one's start, where its own right edge
+    is hidden under it: the same pixels, a fraction of the work (a long held bar costs every pixel it's long)."""
+    nxt_s, nxt_e = nxt
+    return np.where(nxt_e >= e, np.minimum(e, nxt_s + room), e)
 
 
 def painting_order(fast, rendered, start, sels, pics, keys):
@@ -888,6 +910,21 @@ class RollDrawing:
         if order is not None:
             self._paint_order = (rendered,) + order
 
+    def paint_ends(self, which, made, s, e, key, group):
+        """covered_ends for these notes at this zoom (None: no sustained shape, nothing to save), remembered per notes
+        (which = "fast" / "plain": the two ways' arrays, made = the array they came from) and zoom. group(): each
+        note's owner group."""
+        if not any(is_sustained(sh) for sh in self.app.shapes):
+            return None
+        room = math.ceil(3 * self.app.ppq / self.sx) + 1  # (3 px: its edge well inside the note over it)
+        got = self._cover.get(which)
+        if got is None or got[0] is not made:
+            got = self._cover[which] = [made, cover_next(s, e, key, group()), None]
+        if got[2] is None or got[2][0] != room:
+            ends = covered_ends(e, got[1], room)
+            got[2] = (room, ends, int((ends - s).max()) if len(s) else 0)
+        return got[2][1:]
+
     def visible_notes(self, t_lo, t_hi):
         """Rendered notes (array rows) that can overlap ticks t_lo..t_hi."""
         lo, hi = self.visible_range(t_lo, t_hi)
@@ -922,6 +959,9 @@ class RollDrawing:
             main = tuple(np.zeros(0, np.int64) for _ in range(4))
         if kept is not None:  # (the compiled loops, the notes kept in painting order: the same notes)
             (s, e, k, c, first, longest), others = kept
+            held = self.paint_ends("fast", s, s, e, k, lambda: np.repeat(np.arange(len(first) - 1), np.diff(first)))
+            if held is not None:  # (Sustain: held notes painted only where they show; same pixels)
+                e, longest = held
             b0, b1 = 0, len(first) - 1
             if only is not None and app.sels:
                 b0, b1 = (others, b1) if only else (0, others)
@@ -968,7 +1008,13 @@ class RollDrawing:
                     color * 32 + np.minimum(notes[on, 3], 127) // 4)
 
         if main is None:
-            notes = self.visible_notes(t_lo, t_hi)
+            lo, hi = self.visible_range(t_lo, t_hi)
+            notes = self.sorted_notes()[lo:hi]
+            every = self.sorted_notes()
+            held = self.paint_ends("plain", every, every[:, 0], every[:, 1], every[:, 2], lambda: every[:, 5])
+            if held is not None:  # (Sustain: held notes painted only where they show; same pixels)
+                notes = notes.copy()
+                notes[:, 1] = held[0][lo:hi]
             if clip:
                 notes = notes[shown[np.clip(notes[:, 2], 0, app.keys - 1)]]
             if only is not None and app.sels:

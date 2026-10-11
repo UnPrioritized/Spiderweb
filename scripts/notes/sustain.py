@@ -29,15 +29,23 @@ def clean_sustain(s):
 
 
 def is_sustained(sh):
-    """True if sh's notes are held on (a Hz bass never is: holding its repeats would ruin the sound)."""
-    return isinstance(sh.get("sustain"), dict) and not sh.get("hz")
+    """True if sh's notes are held on (a Hz bass never is: holding its repeats would ruin the sound; nor an image:
+    its notes are its picture, user)."""
+    return isinstance(sh.get("sustain"), dict) and not sh.get("hz") and "picture" not in sh
 
 
-def row_order(notes):
+def row_order(notes, tracks=None):
     """notes (start, end, pitch, ...) -> (the order key row by key row, in time; each note's gap to the notes
-    before it on its key: what has sounded until then, -1 for a row's first note)."""
-    order = np.lexsort((notes[:, 0], notes[:, 2]))
-    s, e, p = notes[order, 0], notes[order, 1], notes[order, 2]
+    before it on its key: what has sounded until then, -1 for a row's first note). tracks: each note's colour; a
+    key row of each colour is a row of its own (user: colours held apart)."""
+    if tracks is None:
+        order = np.lexsort((notes[:, 0], notes[:, 2]))
+        p = notes[order, 2]
+    else:
+        tracks = np.asarray(tracks, np.int64)
+        order = np.lexsort((notes[:, 0], tracks, notes[:, 2]))
+        p = notes[order, 2] * (int(tracks.max()) - int(tracks.min()) + 1) + tracks[order] - int(tracks.min())
+    s, e = notes[order, 0], notes[order, 1]
     gap = np.full(len(s), -1, np.int64)
     if len(s) > 1:
         same = p[1:] == p[:-1]
@@ -48,12 +56,12 @@ def row_order(notes):
     return order, gap
 
 
-def auto_gap(notes):
+def auto_gap(notes, tracks=None):
     """The hold gap in ticks worked out from the notes: the most common gap between notes on a key (the spacing a
     shape's own notes have), a little more for rounding. Holes are rarer and longer, so they don't count."""
     if len(notes) < 2:
         return 1
-    gaps = row_order(notes)[1]
+    gaps = row_order(notes, tracks)[1]
     gaps = gaps[gaps >= 0]
     if not len(gaps):
         return 1
@@ -62,19 +70,20 @@ def auto_gap(notes):
     return most + max(1, most // 2)
 
 
-def hold_gap(sus, notes, ppq):
+def hold_gap(sus, notes, ppq, tracks=None):
     """The hold gap in ticks: the typed one, else auto_gap."""
     if "gap" in sus:
         return int(round(sus["gap"] * ppq))
-    return auto_gap(notes)
+    return auto_gap(notes, tracks)
 
 
-def sustained(notes, sus, ppq):
-    """notes (start, end, pitch, velocity) with each group's notes held to the group's last end."""
+def sustained(notes, sus, ppq, tracks=None):
+    """notes (start, end, pitch, velocity) with each group's notes held to the group's last end (tracks: each
+    colour's notes grouped on their own)."""
     if len(notes) < 2:
         return notes
-    gap = hold_gap(sus, notes, ppq)
-    order, gaps = row_order(notes)
+    gap = hold_gap(sus, notes, ppq, tracks)
+    order, gaps = row_order(notes, tracks)
     new = (gaps < 0) | (gaps > gap)  # (a new group: a row's first note, or after a hole)
     first = np.flatnonzero(new)
     group = np.cumsum(new) - 1

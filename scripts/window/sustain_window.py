@@ -19,8 +19,10 @@ from window.widgets import LocalUndo, Scrub, Tooltip, remember_place
 
 
 def sustain_targets(app):
-    """The selected shapes Sustain works on: not a Hz bass (holding its repeats would ruin the sound)."""
-    return [app.shapes[i] for i in sorted(app.sels) if i < len(app.shapes) and not app.shapes[i].get("hz")]
+    """The selected shapes Sustain works on: not a Hz bass (holding its repeats would ruin the sound), not an image
+    (its notes are its picture, user)."""
+    return [app.shapes[i] for i in sorted(app.sels)
+            if i < len(app.shapes) and not app.shapes[i].get("hz") and "picture" not in app.shapes[i]]
 
 
 class SustainWindow(tk.Toplevel):
@@ -83,13 +85,15 @@ class SustainWindow(tk.Toplevel):
 
     def show_auto(self):
         """"Auto (n ticks)": the gap each shape works out from its own notes (several that differ: said so)."""
-        got = set()
-        for t in self.tgts:
-            notes = self.app.notes_of({k: v for k, v in t.items() if k != "sustain"})
-            got.add(auto_gap(np.asarray(notes)))
+        got = {self.auto_of(t) for t in self.tgts}
         n = got.pop() if len(got) == 1 else None
         self.auto_btn.config(text=tr("sustain.auto_each") if n is None else tr("sustain.auto_one") if n == 1 else
                              tr("sustain.auto", n=n))
+
+    def auto_of(self, t):
+        """Shape t's Auto gap in ticks (from its notes without Sustain, each colour on its own)."""
+        notes, tracks = self.app.notes_tracks({k: v for k, v in t.items() if k != "sustain"})
+        return auto_gap(np.asarray(notes), tracks)
 
     def state(self):
         return json.dumps([self.on_var.get(), self.mode.get(), self.gap_var.get()])
@@ -131,8 +135,7 @@ class SustainWindow(tk.Toplevel):
 
     def change(self):
         if self.mode.get() == "own" and self.gap() is None:  # (picked with an empty box: the first shape's gap)
-            self.gap_var.set(fmt(auto_gap(np.asarray(self.app.notes_of(
-                {k: v for k, v in self.tgts[0].items() if k != "sustain"})))))
+            self.gap_var.set(fmt(self.auto_of(self.tgts[0])))
         self.store()
         self.hist.mark()
 
@@ -161,10 +164,9 @@ class SustainWindow(tk.Toplevel):
 
     def cancel(self):
         self.closed = True
-        for t, old in zip(self.tgts, self.old):
-            t.pop("sustain", None)
-            if old is not None:
-                t["sustain"] = old
+        if json.dumps(self.app.shapes) != self.before:  # (all as it was: an Add between step tried out stays a step)
+            self.app.roll.cancel_draft()
+            self.app.shapes = json.loads(self.before)
         self.app.shapes_changed()
         self.close()
 

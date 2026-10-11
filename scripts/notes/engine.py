@@ -431,7 +431,7 @@ def fx_notes(sh, ppq, keys, get):
     notes flipped back). A hidden "_m" = the notes made flipped along those axes (the steps before a flip)."""
     if "sustain" in sh:  # (held on last, after everything else: sustain.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "sustain"})
-        return (sustained(notes, sh["sustain"], ppq), tracks) if is_sustained(sh) else (notes, tracks)
+        return (sustained(notes, sh["sustain"], ppq, tracks), tracks) if is_sustained(sh) else (notes, tracks)
     if "picture" in sh:  # (no glue / chop / claw / strum on a picture: its notes are its picture, user)
         return _notes_tracks(sh, ppq, keys)
     fx = sh.get("fx")

@@ -87,6 +87,11 @@ def clean_between(b):
             out["sig"] = b["sig"]
         if b["role"] == "step" and isinstance(b.get("vel"), dict) and _clean_vel(b["vel"]):
             out["vel"] = _clean_vel(b["vel"])
+        if b["role"] == "step" and "sus" in b:  # (its own Sustain: a setting, or False = off)
+            from notes.sustain import clean_sustain
+            sus = False if b["sus"] is False else clean_sustain(b["sus"])
+            if sus is not None:
+                out["sus"] = sus
     return out
 
 
@@ -285,6 +290,9 @@ class Pair:
                 continue
             if x is not None and y is not None and alike(x, y):
                 out[key] = mix(x, y, f)
+        x, y = a.get("sustain"), b.get("sustain")
+        if x is not None and y is not None:  # (both ends sustained: typed gaps change step by step, else the middle)
+            out["sustain"] = mix(x, y, f)
         return clean_shape(out)
 
 
@@ -416,6 +424,20 @@ def with_vel(step, vel):
     stays a step, user)."""
     out = {k: v for k, v in step.items() if k != "vel_env"}
     out.update(json.loads(json.dumps(vel)))
+    return out
+
+
+def _no_own(sh):
+    """sh without what a step may have of its own and stay a step: velocity and Sustain."""
+    return {k: v for k, v in _no_vel(sh).items() if k != "sustain"}
+
+
+def with_sus(step, sus):
+    """A made step with a step's own Sustain (sustain.py; False = off): Sustain changed on a step by hand keeps it a
+    step, like its velocity."""
+    out = {k: v for k, v in step.items() if k != "sustain"}
+    if sus is not False:
+        out["sustain"] = json.loads(json.dumps(sus))
     return out
 
 
@@ -670,14 +692,19 @@ def sync_groups(shapes):
             want = now.at(b["at"])[0]
             if b.get("vel"):
                 want = with_vel(want, b["vel"])
+            if "sus" in b:
+                want = with_sus(want, b["sus"])
             mine = _plain(sh)
             if close(mine, want):
                 continue
-            if close(_no_vel(mine), _no_vel(want)):  # (only its velocity: a step with a velocity of its own, user)
-                b["vel"] = {k: sh[k] for k in VEL_KEYS if k in sh}
+            if close(_no_own(mine), _no_own(want)):  # (only its velocity / Sustain: a step with its own, user)
+                if not close(mine, dict(_no_vel(mine), **{k: want[k] for k in VEL_KEYS if k in want})):
+                    b["vel"] = {k: sh[k] for k in VEL_KEYS if k in sh}
+                if mine.get("sustain") != want.get("sustain"):
+                    b["sus"] = json.loads(json.dumps(mine.get("sustain", False)))
                 continue
             b["role"] = "key"
-            for k in ("sig", "vel"):
+            for k in ("sig", "vel", "sus"):
                 b.pop(k, None)
             changed = keyed = True
         if keyed:
@@ -689,13 +716,17 @@ def sync_groups(shapes):
             new, sig = now.at(b["at"])
             if b.get("vel"):
                 new = with_vel(new, b["vel"])
+            if "sus" in b:
+                new = with_sus(new, b["sus"])
+            if b.get("vel") or "sus" in b:
                 sig = fingerprint(new)
             if b.get("sig") == sig and old == sig:
                 continue
             sh.clear()
             sh.update(json.loads(json.dumps(new)))
             sh["between"] = dict({"id": gid, "role": "step", "at": b["at"], "sig": sig},
-                                 **({"vel": b["vel"]} if b.get("vel") else {}))
+                                 **({"vel": b["vel"]} if b.get("vel") else {}),
+                                 **({"sus": b["sus"]} if "sus" in b else {}))
             changed = True
     return changed
 

@@ -234,8 +234,10 @@ class ShapeMenu:
 
     def sustain_item(self, m):
         """Sustain… (sustain_window.py), ticked while a selected shape is sustained; greyed when every selected shape
-        is a Hz bass."""
+        is a Hz bass; left out when every one is an image (like the note tools, user)."""
         app = self.app
+        if not app.note_tool_sels():
+            return
         self._sustain_var = tk.BooleanVar(value=any_sustained(app))  # (kept: the tick shows)
         m.add_checkbutton(label=tr("sustain.menu"), variable=self._sustain_var, command=lambda: open_sustain(app),
                           state="normal" if sustain_targets(app) else "disabled")

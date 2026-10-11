@@ -244,6 +244,10 @@ class JoinSplit:
         out, rest = got
         new = [shape(out, tr("join_split.merged"))] + ([shape(rest, tr("join_split.merge_leftovers"))] if len(rest)
                                                         else [])
+        sus = [self.shapes[i].get("sustain") for i in pair]
+        if sus[0] is not None and sus[0] == sus[1]:  # (both sustained alike: so are the merged notes, like Join)
+            for sh in new:
+                sh["sustain"] = copy.deepcopy(sus[0])
         parts = [copy.deepcopy(self.shapes[i]) for i in pair]
         for p in parts:
             p.pop("between", None)  # (its Add between group is unlinked)
@@ -495,7 +499,8 @@ class JoinSplit:
 
     def all_rows(self, sh):
         """A pasted-notes shape's notes and tracks for the Slice tool, rows moved past the top key too (they're hidden
-        but kept: a slice mustn't lose them)."""
+        but kept: a slice mustn't lose them). Without its Sustain: the pieces keep that as a setting (sustain.py)."""
+        sh = {k: v for k, v in sh.items() if k != "sustain"}
         (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
         if max(p0, p1, p2, p1 + p2 - p0) <= self.keys - 0.5:
             return self.notes_tracks(sh)

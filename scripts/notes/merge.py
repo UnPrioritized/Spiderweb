@@ -105,11 +105,12 @@ def preview_parts(sh, ppq, keys):
 def part_rows(parts, ppq, keys):
     """Each shape's notes as (start, end, pitch, velocity, track) rows: its own colours (areas, outline colours,
     Colours turns) kept, the second shape's after the first's (user: each keeps its colours; with Multi channel
-    they stay apart like the shapes were, as Turn into live shape does)."""
+    they stay apart like the shapes were, as Turn into live shape does). Without their Sustain: the merged shape
+    holds that itself (sustain.py)."""
     from notes.engine import shape_notes_tracks
     out, first = [], 0
     for p in parts:
-        notes, tracks = shape_notes_tracks(p, ppq, keys)
+        notes, tracks = shape_notes_tracks({k: v for k, v in p.items() if k != "sustain"}, ppq, keys)
         notes = np.asarray(notes, np.int64).reshape(-1, 4)
         tracks = np.zeros(len(notes), np.int64) if tracks is None or not len(tracks) else np.asarray(tracks, np.int64)
         tracks = tracks - (tracks.min() if len(tracks) else 0)
@@ -207,7 +208,7 @@ def made_sides(m):
     """(sliding part's index, from the left?, its smallest slide, how much later all went) as the recipe was made,
     ticks at m["ppq"]; None = nothing met."""
     from notes.engine import shape_notes
-    a, b = (shape_notes(p, m["ppq"], m["keys"]) for p in m["parts"])
+    a, b = (shape_notes({k: v for k, v in p.items() if k != "sustain"}, m["ppq"], m["keys"]) for p in m["parts"])
     left = 1 if len(a) and len(b) and comes_from_left(a, b) else 0
     slide = left if m["right"] else 1 - left
     got = _merge((a, b)[1 - slide], (a, b)[slide], m["right"])
