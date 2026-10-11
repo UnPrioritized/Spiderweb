@@ -65,6 +65,7 @@ STEP = 0  # the Text size in use (apply)
 RUNNING = ("system", "", "normal")  # the Size, Font, Text size this start put on (apply_size)
 USUAL_FAMILY = SANS  # Tk's own widget font before a picked Font replaced it (the Font list's "Default")
 USUAL_SIZE, SCREEN_DPI = 9, 96.0  # ... its size in points, and the screen's pixels an inch (the Preview's sizes)
+WIDE = 1.0  # how many times wider the picked Font / Text size makes texts (never under 1): the side panel's width
 TK_FONTS = ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont", "TkCaptionFont", "TkSmallCaptionFont",
             "TkIconFont", "TkTooltipFont")
 
@@ -311,9 +312,9 @@ def apply_size(root):
     changes). Size = Tk's points-to-pixels (the windows' own sizes follow it: App.scale is read from it after)."""
     import tkinter
     from tkinter import font as tkfont
-    global SANS, STEP, RUNNING, USUAL_FAMILY, USUAL_SIZE, SCREEN_DPI
+    global SANS, STEP, RUNNING, USUAL_FAMILY, USUAL_SIZE, SCREEN_DPI, WIDE
     size, family, text = RUNNING = read_size(), read_font(), read_text()
-    STEP = TEXT_STEPS[text]
+    STEP, WIDE = TEXT_STEPS[text], 1.0
     dpi = SCREEN_DPI = root.winfo_fpixels("1i")  # (the screen's, before Size changes it)
     try:
         usual = tkfont.nametofont("TkDefaultFont", root=root)
@@ -334,6 +335,12 @@ def apply_size(root):
             if points < 0:  # (in pixels on some Linux setups: as points, so Size grows them too)
                 points = round(-points * 72 / dpi)
             f.configure(size=max(6, points + STEP), **({"family": family} if family else {}))
+        try:  # how much wider texts came out (a picked font / bigger text): the side panel grows by as much
+            sample = "Domino start  First note at tick 0  Output file  Generate"
+            usual = tkfont.Font(root=root, family=USUAL_FAMILY, size=USUAL_SIZE).measure(sample)
+            WIDE = max(1.0, tkfont.nametofont("TkDefaultFont", root=root).measure(sample) / usual)
+        except (tkinter.TclError, ZeroDivisionError):
+            pass
     if size != "system":
         root.tk.call("tk", "scaling", size / 100 * 96 / 72)
 

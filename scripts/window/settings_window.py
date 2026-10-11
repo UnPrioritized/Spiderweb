@@ -256,7 +256,7 @@ class SettingsWindow(tk.Toplevel):
             if pad:
                 try:
                     st.configure("Preview." + name, padding=[round(self.winfo_fpixels(p) * ratio)
-                                                             for p in self.tk.splitlist(pad)])
+                                                             for p in self.tk.splitlist(str(pad))])
                 except tk.TclError:
                     pass
         for name, value in self.pv_arrows.items():

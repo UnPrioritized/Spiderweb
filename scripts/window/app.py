@@ -443,7 +443,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
     def _build_side(self):
         """The side panel: scrolls (scrollbar, mouse wheel) when everything in it doesn't fit; otherwise the help
         text at the bottom takes the room that's left."""
-        box = self.side_box = ttk.Frame(self, width=int(330 * self.scale))
+        box = self.side_box = ttk.Frame(self, width=int(330 * self.scale * look.WIDE))
         box.pack(side="right", fill="y")
         box.pack_propagate(False)
         c = self.side_canvas = tk.Canvas(box, highlightthickness=0, bd=0,
@@ -477,11 +477,11 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         c.configure(scrollregion=(0, 0, c.winfo_width(), max(need, have)))
         if need > have + 1:
             if not self.side_bar.winfo_ismapped():  # the panel gets wider by the scrollbar, not narrower inside
-                self.side_box.config(width=int(330 * self.scale) + self.side_bar.winfo_reqwidth())
+                self.side_box.config(width=int(330 * self.scale * look.WIDE) + self.side_bar.winfo_reqwidth())
                 self.side_bar.pack(side="right", fill="y", before=c)
         elif self.side_bar.winfo_ismapped():
             self.side_bar.pack_forget()
-            self.side_box.config(width=int(330 * self.scale))
+            self.side_box.config(width=int(330 * self.scale * look.WIDE))
             c.yview_moveto(0)
 
     def side_wheel(self, e, dropdown=False):
