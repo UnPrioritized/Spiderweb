@@ -139,7 +139,7 @@ class SettingsWindow(tk.Toplevel):
         ttk.Label(page, text=tr("settings.look_hint"), foreground=look.HINT, wraplength=round(300 * app.scale),
                   justify="left").grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self.build_size(page, 2)
-        self.build_palettes(page, 7)
+        self.build_palettes(page, 8)
         # updates: how often to look, and looking now (the answer shows under the row)
         page = ttk.Frame(tabs, padding=(12, 10, 12, 12))
         tabs.add(page, text=tr("settings.updates_tab"))
@@ -189,6 +189,74 @@ class SettingsWindow(tk.Toplevel):
                                    wraplength=round(300 * self.app.scale), justify="left")
         self.size_note.grid(row=r + 4, column=0, columnspan=2, sticky="w", pady=(4, 0))
         self.show_size_note()
+        self.build_preview(page, r + 5)
+
+    def build_preview(self, page, r):
+        """Pieces that do nothing (user): drawn with the picked Size / Font / Text size at once, while the rest of
+        the app waits for the restart. Own styles ("Preview.T..."), so the real widgets never change."""
+        box = self.preview = ttk.LabelFrame(page, text=tr("look.preview"), padding=(10, 6, 10, 8))
+        box.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        Tooltip(box, tr("look.preview_tip"))
+        self.pv_fonts = {k: tkfont.Font(self, family=look.USUAL_FAMILY, size=9) for k in ("text", "heading", "hint")}
+        self.pv_fonts["heading"].configure(weight="bold")
+        st = ttk.Style(self)
+        for name in ("TButton", "TCheckbutton", "TCombobox", "TSpinbox"):
+            st.configure("Preview." + name, font=self.pv_fonts["text"])
+        self.pv_tick = tk.BooleanVar(self, value=True)
+
+        def still(e):  # (clicks and keys do nothing; the mouse over it still lights it up)
+            return "break"
+        ttk.Label(box, text=tr("look.preview_heading"), font=self.pv_fonts["heading"]).pack(anchor="w")
+        ttk.Label(box, text=tr("look.preview_text"), font=self.pv_fonts["text"]).pack(anchor="w")
+        ttk.Label(box, text=tr("look.preview_hint"), font=self.pv_fonts["hint"], foreground=look.HINT).pack(anchor="w")
+        row = ttk.Frame(box)
+        row.pack(anchor="w", pady=(6, 0))
+        self.pv_widgets = (
+            ttk.Button(row, text=tr("look.preview_button"), style="Preview.TButton", takefocus=False),
+            ttk.Checkbutton(row, text=tr("look.preview_tick"), variable=self.pv_tick, style="Preview.TCheckbutton",
+                            takefocus=False),
+            ttk.Combobox(row, values=[tr("look.preview_drop")], state="readonly", width=10, style="Preview.TCombobox",
+                         font=self.pv_fonts["text"], takefocus=False),
+            ttk.Spinbox(row, from_=0, to=999, width=5, style="Preview.TSpinbox", font=self.pv_fonts["text"],
+                        takefocus=False))
+        self.pv_widgets[2].set(tr("look.preview_drop"))
+        self.pv_widgets[3].set("120")
+        for k, w in enumerate(self.pv_widgets):
+            w.pack(side="left", padx=(0 if k == 0 else 8, 0))
+            if k:  # (the button may be pressed: it does nothing anyway)
+                for seq in ("<Button-1>", "<ButtonRelease-1>", "<Key>", "<MouseWheel>", "<Button-4>", "<Button-5>"):
+                    w.bind(seq, still)
+        # the usual paddings, to grow / shrink with the picked Size
+        self.pv_pads = {name: st.lookup(name, "padding") for name in ("TButton", "TCheckbutton", "TCombobox",
+                                                                       "TSpinbox")}
+        # (the dropdown's / number box's arrows too; the tick box's square has no size setting: it stays)
+        self.pv_arrows = {name: st.lookup(name, "arrowsize") for name in ("TCombobox", "TSpinbox")}
+        self.show_preview()
+
+    def show_preview(self):
+        """The preview pieces at the picked size: fonts in pixels for the picked scaling (Tk's own is fixed
+        until the restart), paddings and arrows grown by as much."""
+        size, family, text = self.picked_size()
+        dpi = look.SCREEN_DPI if size == "system" else 96 * size / 100
+        ratio = dpi / self.winfo_fpixels("1i")
+        step = look.TEXT_STEPS[text]
+        family = family or look.USUAL_FAMILY
+        for key, points in (("text", look.USUAL_SIZE), ("heading", 10), ("hint", look.USUAL_SIZE)):
+            self.pv_fonts[key].configure(family=family, size=-round(max(6, points + step) * dpi / 72))
+        st = ttk.Style(self)
+        for name, pad in self.pv_pads.items():
+            if pad:
+                try:
+                    st.configure("Preview." + name, padding=[round(self.winfo_fpixels(p) * ratio)
+                                                             for p in self.tk.splitlist(pad)])
+                except tk.TclError:
+                    pass
+        for name, value in self.pv_arrows.items():
+            if value:
+                try:
+                    st.configure("Preview." + name, arrowsize=round(self.winfo_fpixels(value) * ratio))
+                except tk.TclError:
+                    pass
 
     def picked_size(self):
         """(size, font, text) as picked in the three lists."""
@@ -206,6 +274,7 @@ class SettingsWindow(tk.Toplevel):
         except OSError:
             messagebox.showerror(tr("look.title"), tr("look.not_saved"), parent=self)
         self.show_size_note()
+        self.show_preview()
 
     def show_size_note(self):
         if (look.read_size(), look.read_font(), look.read_text()) == look.RUNNING:

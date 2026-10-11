@@ -64,6 +64,7 @@ TEXT_STEPS = {"small": -1, "normal": 0, "large": 2}  # (points added to every te
 STEP = 0  # the Text size in use (apply)
 RUNNING = ("system", "", "normal")  # the Size, Font, Text size this start put on (apply_size)
 USUAL_FAMILY = SANS  # Tk's own widget font before a picked Font replaced it (the Font list's "Default")
+USUAL_SIZE, SCREEN_DPI = 9, 96.0  # ... its size in points, and the screen's pixels an inch (the Preview's sizes)
 TK_FONTS = ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont", "TkCaptionFont", "TkSmallCaptionFont",
             "TkIconFont", "TkTooltipFont")
 
@@ -310,17 +311,20 @@ def apply_size(root):
     changes). Size = Tk's points-to-pixels (the windows' own sizes follow it: App.scale is read from it after)."""
     import tkinter
     from tkinter import font as tkfont
-    global SANS, STEP, RUNNING, USUAL_FAMILY
+    global SANS, STEP, RUNNING, USUAL_FAMILY, USUAL_SIZE, SCREEN_DPI
     size, family, text = RUNNING = read_size(), read_font(), read_text()
     STEP = TEXT_STEPS[text]
+    dpi = SCREEN_DPI = root.winfo_fpixels("1i")  # (the screen's, before Size changes it)
     try:
-        USUAL_FAMILY = tkfont.nametofont("TkDefaultFont", root=root).actual("family")
+        usual = tkfont.nametofont("TkDefaultFont", root=root)
+        USUAL_FAMILY, USUAL_SIZE = usual.actual("family"), usual.cget("size")
+        if USUAL_SIZE < 0:
+            USUAL_SIZE = round(-USUAL_SIZE * 72 / dpi)
     except tkinter.TclError:
         pass
     if family:
         SANS = family
     if family or STEP or size != "system":
-        dpi = root.winfo_fpixels("1i")  # (the screen's, before Size changes it)
         for name in TK_FONTS:
             try:
                 f = tkfont.nametofont(name, root=root)
