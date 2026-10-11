@@ -113,6 +113,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     settings.py      the app's own settings (user/settings.ini: the look, later more)
     (window/) settings_window.py  the Settings window (gear button): Look (+ note colour palettes), Updates
     (window/) palettes.py  note colour palettes (user/palettes/), switched live
+    (window/) button_look.py  Settings → Look's Button style (system's own, Plain, Raised, Outlined, Flat)
     system.py        what's asked of Windows / Linux (double-click speed, free memory, an error box)
     update_check.py  asking GitHub for newer versions (and their notes)
     midi_out.py      MIDI file writer

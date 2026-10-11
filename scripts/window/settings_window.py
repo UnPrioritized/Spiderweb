@@ -10,7 +10,7 @@ from tkinter import colorchooser, font as tkfont, messagebox, ttk
 from files import settings
 from files.lang import tr
 from files.system import WINDOWS
-from window import look, palettes
+from window import button_look, look, palettes
 from window.drawer import clean_name
 from window.updates import often_box
 from window.widgets import Tooltip, remember_place
@@ -141,7 +141,7 @@ class SettingsWindow(tk.Toplevel):
         ttk.Label(page, text=tr("settings.look_hint"), foreground=look.HINT, wraplength=round(300 * app.scale),
                   justify="left").grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self.build_size(page, 2)
-        self.build_palettes(page, 8)
+        self.build_palettes(page, 9)
         # updates: how often to look, and looking now (the answer shows under the row)
         page = ttk.Frame(tabs, padding=(12, 10, 12, 12))
         tabs.add(page, text=tr("settings.updates_tab"))
@@ -175,11 +175,14 @@ class SettingsWindow(tk.Toplevel):
         self.size_var = tk.StringVar(value=self.size_names[look.read_size()])
         self.font_var = tk.StringVar(value=look.read_font() or self.font_default)
         self.text_var = tk.StringVar(value=self.text_names[look.read_text()])
+        self.button_names = {k: tr("look.button_" + k) for k in button_look.STYLES}
+        self.button_var = tk.StringVar(value=self.button_names[button_look.read_style()])
         families = [f for f in tkfont.families(self) if not f.startswith("@")]  # (@ = sideways fonts)
         rows = (("look.size", self.size_var, list(self.size_names.values()), 18, "look.size_tip"),
                 ("look.font", self.font_var, [self.font_default] + sorted(set(families), key=str.lower), 24,
                  "look.font_tip"),
-                ("look.text", self.text_var, list(self.text_names.values()), 18, "look.text_tip"))
+                ("look.text", self.text_var, list(self.text_names.values()), 18, "look.text_tip"),
+                ("look.button", self.button_var, list(self.button_names.values()), 18, "look.button_tip"))
         for k, (label, var, values, width, tip) in enumerate(rows):
             ttk.Label(page, text=tr(label)).grid(row=r + 1 + k, column=0, sticky="e", padx=(0, 8), pady=3)
             row = ttk.Frame(page)
@@ -196,9 +199,9 @@ class SettingsWindow(tk.Toplevel):
         Tooltip(self.size_reset, tr("look.reset_tip"))
         self.size_note = ttk.Label(page, text=tr("look.restart_size"), foreground=look.WARN,
                                    wraplength=round(300 * self.app.scale), justify="left")
-        self.size_note.grid(row=r + 4, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.size_note.grid(row=r + 5, column=0, columnspan=2, sticky="w", pady=(4, 0))
         self.show_size_note()
-        self.build_preview(page, r + 5)
+        self.build_preview(page, r + 6)
 
     def build_preview(self, page, r):
         """Pieces that work but change nothing else (user: tick, open the dropdown, step / type the number), drawn
@@ -245,7 +248,8 @@ class SettingsWindow(tk.Toplevel):
 
     def show_preview(self):
         """The preview pieces at the picked size: fonts in pixels for the picked scaling (Tk's own is fixed
-        until the restart), paddings and arrows grown by as much."""
+        until the restart), paddings and arrows grown by as much; the button, dropdown and number box in the picked
+        Button style (own styles "Pv<Style>.T...", made the first time it's picked)."""
         size, family, text = self.picked_size()
         dpi = look.SCREEN_DPI if size == "system" else 96 * size / 100
         ratio = dpi / self.winfo_fpixels("1i")
@@ -254,17 +258,27 @@ class SettingsWindow(tk.Toplevel):
         for key, points in (("text", look.USUAL_SIZE), ("heading", 10), ("hint", look.USUAL_SIZE)):
             self.pv_fonts[key].configure(family=family, size=-round(max(6, points + step) * dpi / 72))
         st = ttk.Style(self)
+        style = button_look.shown_style(self.picked_button())
+        target = f"Pv{style.title()}."
+        kinds = ("TButton", "TCombobox", "TSpinbox")
+        if style != "system":
+            button_look.dress(st, target, style, look.parts())
+        button_look.put_on(self, st, target, style, look.parts(), kinds)
+        for name in kinds:
+            st.configure(target + name, font=self.pv_fonts["text"])
+        for w, name in zip((self.pv_widgets[0], self.pv_widgets[2], self.pv_widgets[3]), kinds):
+            w.configure(style=target + name)
         for name, pad in self.pv_pads.items():
             if pad:
                 try:
-                    st.configure("Preview." + name, padding=[round(self.winfo_fpixels(p) * ratio)
-                                                             for p in self.tk.splitlist(str(pad))])
+                    st.configure((target if name in kinds else "Preview.") + name, padding=[
+                        round(self.winfo_fpixels(p) * ratio) for p in self.tk.splitlist(str(pad))])
                 except tk.TclError:
                     pass
         for name, value in self.pv_arrows.items():
             if value:
                 try:
-                    st.configure("Preview." + name, arrowsize=round(self.winfo_fpixels(value) * ratio))
+                    st.configure(target + name, arrowsize=round(self.winfo_fpixels(value) * ratio))
                 except tk.TclError:
                     pass
 
@@ -352,26 +366,32 @@ class SettingsWindow(tk.Toplevel):
         text = next(k for k, n in self.text_names.items() if n == self.text_var.get())
         return size, family, text
 
+    def picked_button(self):
+        return next(k for k, n in self.button_names.items() if n == self.button_var.get())
+
     def save_size(self):
         size, family, text = self.picked_size()
         try:
             settings.put("look", "size", size)
             settings.put("look", "font", family)
             settings.put("look", "text", text)
+            settings.put("look", "button", self.picked_button())
         except OSError:
             messagebox.showerror(tr("look.title"), tr("look.not_saved"), parent=self)
         self.show_size_note()
         self.show_preview()
 
     def reset_size(self):
-        """Size, Font and Text size back to the usual ones (the look and note colours stay)."""
+        """Size, Font, Text size and Buttons back to the usual ones (the look and note colours stay)."""
         self.size_var.set(self.size_names["system"])
         self.font_var.set(self.font_default)
         self.text_var.set(self.text_names["normal"])
+        self.button_var.set(self.button_names["system"])
         self.save_size()
 
     def show_size_note(self):
-        if (look.read_size(), look.read_font(), look.read_text()) == look.RUNNING:
+        if ((look.read_size(), look.read_font(), look.read_text()) == look.RUNNING
+                and button_look.shown_style(button_look.read_style()) == button_look.RUNNING):
             self.size_note.grid_remove()
         else:
             self.size_note.grid()

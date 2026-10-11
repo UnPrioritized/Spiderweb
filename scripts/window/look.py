@@ -283,6 +283,19 @@ WINDOW_BG, TEXT, TEXT_OFF = "#3a3a3c", "#e2e2e4", "#7c7c80"
 FIELD_BG, TROUGH_BG = "#2f2f31", "#333336"
 BUTTON_BG, BUTTON_HOT, BUTTON_DOWN = "#4a4a4d", "#57575a", "#424245"
 EDGE, PICK_BG = "#5c5c5f", "#2f6fd0"
+# the light look on Tk's own buttons (a Button style other than the system's: button_look.py), like Windows' colours
+LIGHT_PARTS = dict(window="#f0f0f0", text="#000000", text_off="#8c8c8c", field="#ffffff", trough="#e6e6e6",
+                   button="#e1e1e1", hot="#e5f1fb", down="#cce4f7", edge="#adadad", pick="#0078d7", focus="#0078d7",
+                   tick_hot="#e5f1fb", outline="#707070", hi="#ffffff", lo="#a0a0a0", lo2="#696969", tab="#e1e1e1")
+
+
+def parts():
+    """The window's colours for the look in use (the Button styles draw with these)."""
+    if not DARK:
+        return LIGHT_PARTS
+    return dict(window=WINDOW_BG, text=TEXT, text_off=TEXT_OFF, field=FIELD_BG, trough=TROUGH_BG, button=BUTTON_BG,
+                hot=BUTTON_HOT, down=BUTTON_DOWN, edge=EDGE, pick=PICK_BG, focus="#6d8fc7", tick_hot="#424245",
+                outline="#9a9a9e", hi="#6a6a6e", lo="#2c2c2e", lo2="#1e1e20", tab=BUTTON_DOWN)
 
 
 TITLED = set()  # the open windows whose title bar was made dark (apply)
@@ -348,56 +361,47 @@ def apply_size(root):
 def apply(root):
     """The dark look for every window (called once, before any widget is made): Tk's plain "clam" buttons and
     boxes (Windows' own can't be coloured) and default colours for the plain Tk widgets; each window's title bar
-    goes dark as it opens. The light look: nothing changes. Then the Size / Font / Text size (apply_size)."""
+    goes dark as it opens. The light look: nothing changes, unless a Button style other than the system's own is
+    picked (the same clam, in light colours: button_look.py). Then the Size / Font / Text size (apply_size)."""
+    from window import button_look
     apply_size(root)
-    if not DARK:
-        return
     from tkinter import ttk
     st = ttk.Style(root)
+    button_look.start(st)
+    style = button_look.RUNNING
+    if style == "system":
+        return
+    p = parts()
     st.theme_use("clam")
-    st.configure(".", background=WINDOW_BG, foreground=TEXT, fieldbackground=FIELD_BG, bordercolor=EDGE,
-                 lightcolor=WINDOW_BG, darkcolor=WINDOW_BG, troughcolor=TROUGH_BG, selectbackground=PICK_BG,
-                 selectforeground="#ffffff", insertcolor=TEXT, arrowcolor=TEXT, focuscolor=EDGE)
-    st.map(".", foreground=[("disabled", TEXT_OFF)], background=[("disabled", WINDOW_BG)])
-    for name in ("TButton", "TMenubutton"):
-        st.configure(name, background=BUTTON_BG, lightcolor=BUTTON_BG, darkcolor=BUTTON_BG,
-                     padding=("3.75p", "1.5p"))  # (a little shorter than clam's 3.75p all round, user)
-        st.map(name, background=[("disabled", WINDOW_BG), ("pressed", BUTTON_DOWN), ("active", BUTTON_HOT)],
-               lightcolor=[("pressed", BUTTON_DOWN), ("active", BUTTON_HOT)],
-               darkcolor=[("pressed", BUTTON_DOWN), ("active", BUTTON_HOT)])
-    st.configure("Toolbutton", background=WINDOW_BG, lightcolor=WINDOW_BG, darkcolor=WINDOW_BG,
-                 bordercolor=WINDOW_BG)  # (the picked tool = a normal button's grey, user: clam's own was too bright)
-    tool = [("disabled", WINDOW_BG), ("pressed", BUTTON_DOWN), ("active", BUTTON_HOT), ("selected", BUTTON_BG)]
-    st.map("Toolbutton", background=tool, lightcolor=tool[1:], darkcolor=tool[1:],  # (like Undo: lit, darker held)
-           bordercolor=[("pressed", EDGE), ("active", EDGE), ("selected", EDGE)])
+    st.configure(".", background=p["window"], foreground=p["text"], fieldbackground=p["field"], bordercolor=p["edge"],
+                 lightcolor=p["window"], darkcolor=p["window"], troughcolor=p["trough"], selectbackground=p["pick"],
+                 selectforeground="#ffffff", insertcolor=p["text"], arrowcolor=p["text"], focuscolor=p["edge"])
+    st.map(".", foreground=[("disabled", p["text_off"])], background=[("disabled", p["window"])])
+    button_look.dress(st, "", "plain", p)
     for name in ("TCheckbutton", "TRadiobutton"):
-        st.configure(name, indicatorbackground=FIELD_BG, indicatorforeground=TEXT, upperbordercolor=EDGE,
-                     lowerbordercolor=EDGE)
-        st.map(name, background=[("active", "#424245")], indicatorbackground=[("pressed", BUTTON_BG),
-                                                                               ("disabled", WINDOW_BG)])
+        st.configure(name, indicatorbackground=p["field"], indicatorforeground=p["text"], upperbordercolor=p["edge"],
+                     lowerbordercolor=p["edge"])
+        st.map(name, background=[("active", p["tick_hot"])], indicatorbackground=[("pressed", p["button"]),
+                                                                                   ("disabled", p["window"])])
     # (half ticked = a filled blue square: clam's own half tick shows as a full ✕ with these colours)
-    st.map("TCheckbutton", indicatorbackground=[("alternate", PICK_BG), ("pressed", BUTTON_BG),
-                                                ("disabled", WINDOW_BG)], indicatorforeground=[("alternate", PICK_BG)])
-    for name in ("TEntry", "TSpinbox", "TCombobox"):
-        st.configure(name, lightcolor=FIELD_BG, darkcolor=FIELD_BG)
-        st.map(name, fieldbackground=[("disabled", WINDOW_BG), ("readonly", FIELD_BG)],
-               bordercolor=[("focus", "#6d8fc7")])
-    st.configure("TCombobox", background=BUTTON_BG)
-    st.map("TCombobox", background=[("active", BUTTON_HOT)], selectbackground=[("readonly", "!focus", FIELD_BG)],
-           selectforeground=[("readonly", "!focus", TEXT)])
-    st.configure("TSpinbox", background=BUTTON_BG)
-    st.configure("TScrollbar", background=BUTTON_BG, lightcolor=BUTTON_BG, darkcolor=BUTTON_BG, bordercolor=WINDOW_BG,
-                 gripcount=0)
-    st.map("TScrollbar", background=[("active", BUTTON_HOT)])
-    st.configure("TNotebook", background=WINDOW_BG)
-    st.configure("TNotebook.Tab", background=BUTTON_DOWN, lightcolor=BUTTON_DOWN)
-    st.map("TNotebook.Tab", background=[("selected", WINDOW_BG)], lightcolor=[("selected", WINDOW_BG)])
-    st.configure("Treeview", background=FIELD_BG, fieldbackground=FIELD_BG, foreground=TEXT)
-    st.map("Treeview", background=[("selected", PICK_BG)], foreground=[("selected", "#ffffff")])
-    st.configure("Treeview.Heading", background=BUTTON_BG)
-    st.configure("TProgressbar", background=PICK_BG, lightcolor=PICK_BG, darkcolor=PICK_BG)
-    st.configure("TScale", background=BUTTON_BG)
-    st.configure("TSeparator", background=EDGE)
+    st.map("TCheckbutton", indicatorbackground=[("alternate", p["pick"]), ("pressed", p["button"]),
+                                                ("disabled", p["window"])], indicatorforeground=[("alternate", p["pick"])])
+    st.configure("TScrollbar", background=p["button"], lightcolor=p["button"], darkcolor=p["button"],
+                 bordercolor=p["window"], gripcount=0)
+    st.map("TScrollbar", background=[("active", p["hot"])])
+    st.configure("TNotebook", background=p["window"])
+    st.configure("TNotebook.Tab", background=p["tab"], lightcolor=p["tab"])
+    st.map("TNotebook.Tab", background=[("selected", p["window"])], lightcolor=[("selected", p["window"])])
+    st.configure("Treeview", background=p["field"], fieldbackground=p["field"], foreground=p["text"])
+    st.map("Treeview", background=[("selected", p["pick"])], foreground=[("selected", "#ffffff")])
+    st.configure("Treeview.Heading", background=p["button"])
+    st.configure("TProgressbar", background=p["pick"], lightcolor=p["pick"], darkcolor=p["pick"])
+    st.configure("TScale", background=p["button"])
+    st.configure("TSeparator", background=p["edge"])
+    if style != "plain":
+        button_look.put_on(root, st, "", style, p)
+    if not DARK:  # (the light look's plain Tk widgets keep the system's colours)
+        return
     for key, value in (("*Background", WINDOW_BG), ("*Foreground", TEXT), ("*activeBackground", BUTTON_HOT),
                        ("*activeForeground", TEXT), ("*disabledForeground", TEXT_OFF), ("*selectBackground", PICK_BG),
                        ("*selectForeground", "#ffffff"), ("*insertBackground", TEXT), ("*highlightBackground", WINDOW_BG),
