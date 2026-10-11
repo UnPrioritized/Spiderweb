@@ -315,6 +315,19 @@ def clip_segment(a, b, box):
     return tuple(a + d * t0), tuple(a + d * t1)
 
 
+def open_end(notes, end, ppq):
+    """True if the Slice tool's line end (beat, key) is in empty space: on the key rows it touches, it's before the
+    row's first note or after its last end (or the row is empty)."""
+    t, k = end[0] * ppq, end[1]
+    for r in range(int(np.floor(k - 0.5 + EPS)), int(np.floor(k + 0.5 + EPS)) + 1):
+        if abs(r - k) > 0.5 + EPS:
+            continue
+        row = notes[notes[:, 2] == r]
+        if len(row) and row[:, 0].min() < t < row[:, 1].max():
+            return False
+    return True
+
+
 def slice_notes(sh, notes, tracks, a, b, ppq):
     """Pasted notes (a custom shape holding notes, custom.py) cut by the Slice tool along a-b (beats, keys), by time
     (user, 2026-10-10: it needn't go all the way across): on each key row the line crosses, the notes before the
@@ -347,7 +360,12 @@ def slice_notes(sh, notes, tracks, a, b, ppq):
     if not (early & late).any():
         return None, crossed
     tracks = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64)
-    rest, before = ~on | (hi > x), on & (lo < x)
+    # rows past an end in empty space (user, 2026-10-12): each note goes to the side of the line carried on, by its
+    # middle, never cut. Past an end inside the notes (cutting a corner off): they stay whole after it.
+    sk = s[keys]
+    past = ~on & (((sk < 0) & open_end(notes, a, ppq)) | ((sk > 1) & open_end(notes, b, ppq)))
+    side = past & (lo + hi < 2 * x)
+    rest, before = (~on & ~side) | (on & (hi > x)), (on & (lo < x)) | side
     paste = sh.get("paste") or uuid.uuid4().hex[:12]  # (its tracks keep their channels across the pieces: render)
     from notes.gateflip import colours_back
     mirrored = bool(colours_back(sh))  # (a gate flipped paste: the pieces keep its colours' channels)
