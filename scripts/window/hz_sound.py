@@ -108,6 +108,7 @@ class HzSound:
         if not path:
             return False
         cfg["font"] = os.path.normpath(path)
+        self.app.soundfont_changed()  # (shared with Built-in BASSMIDI: Settings → Sound shows the new name)
         self.app.schedule_autosave()
         return True
 

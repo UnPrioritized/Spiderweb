@@ -50,7 +50,7 @@ class BuiltinPanel(ttk.Frame):
         e.grid(row=r, column=1, sticky="w", pady=3)
         e.bind("<Return>", lambda ev: (app.on_play_voices(), "break")[1])
         e.bind("<FocusOut>", lambda ev: app.on_play_voices())
-        Scrub(app, [(e, app.voices_var, app.on_play_voices)], (50, 500, 1), *VOICES, label=lb)
+        Scrub(app, [(e, app.voices_var, app.on_play_voices)], (50, 500, 1), *VOICES, label=lb, no_undo=True)
         Tooltip(e, tr("app.voices_tip"))
         Tooltip(lb, tr("app.voices_tip"))
         r += 1

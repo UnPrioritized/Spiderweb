@@ -222,7 +222,7 @@ class TipPopup(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", lambda: (self.destroy(), tips.closed()))
         self.set_topic(topic_id)
         # back to what you were doing: the popup doesn't take the keyboard (a box being typed in keeps it)
-        back = f if f is not None and f.winfo_toplevel() is parent.winfo_toplevel() else parent
+        back = f if f is not None else parent  # (in whichever window it is: a number box in Settings keeps it)
         self.after(30, lambda: (back if back.winfo_exists() else parent).focus_force() if parent.winfo_exists()
                    else None)
 

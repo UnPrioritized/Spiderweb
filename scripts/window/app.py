@@ -1813,6 +1813,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                 return None  # (the Hz bass window: its own keys only, nothing done to the main piano roll behind)
             if self.image_window and str(w).startswith(str(self.image_window)):
                 return None  # (the image window and its pop-ups: Ctrl+C there copies their text, not the shapes)
+            if self.in_settings(w):
+                return None  # (the Settings window: app settings only, the shapes behind stay as they are)
             if self.grabbed_elsewhere():
                 return None  # (a window like Range… is working on the picked shapes: nothing changes behind it)
             if main_only and not (isinstance(w, tk.Misc) and w.winfo_toplevel() is self):
@@ -1824,6 +1826,11 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             fn()
             return "break"
         return handler
+
+    def in_settings(self, w):
+        """w is in the Settings window (or one of its pop-ups)."""
+        sw = getattr(self, "settings_window", None)
+        return sw is not None and str(w).startswith(str(sw))
 
     def grabbed_elsewhere(self):
         """A pop-up holds the mouse and keyboard (grab_set: Range…, formula Custom…, tumour graph, snap picker)."""
@@ -2212,6 +2219,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             return "break" if redo else (self.vel.drop(), "break")[1]
         if self.held_scrub:  # a number box's label held: Ctrl+Z = back to the press (no step), Ctrl+Y nothing
             return "break" if redo else (self.held_scrub.cancel(), "break")[1]
+        if self.in_settings(e.widget):
+            return "break"  # (Settings has no undo; the shapes behind stay as they are)
         if not self.in_hz(e.widget):
             return "break" if self.box_drawn() else self.redo() if redo else self.undo()
         if hz.drag:  # the mouse held there: Ctrl+Z only puts back what's being dragged (no step), Ctrl+Y nothing
