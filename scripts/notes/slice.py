@@ -403,15 +403,3 @@ def cutter_loops(sh):
         return [np.asarray(cached_path(sh), float).reshape(-1, 2)]
     return []
 
-
-def loop_crossings(path, loops):
-    """Where the polyline path crosses the loops' edges: [(point, the edge's direction)], near repeats (at an edge's
-    corner) once."""
-    out = []
-    for lp in loops:
-        for q0, q1 in zip(lp[:-1], lp[1:]):
-            for pt, _ in crossings(path, q0, q1):
-                if all(np.hypot(*(pt - p)) > 1e-7 for p, _ in out):
-                    out.append((pt, q1 - q0))
-    return out
-

@@ -39,6 +39,7 @@ from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, for
 from notes.custom import frame_upright
 from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
+from notes.mould import clip_to, mould_cut, piece_loops
 from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_cut, moved_by, piece_knives, piece_notes,
                           run_origins, source, spotted_notes, whole_made)
 from notes.smooth import clean_level, smooth_path
@@ -320,9 +321,9 @@ def shape_strokes(sh):
     if sh["kind"] == "funnel":
         knives = piece_knives(sh)  # (a piece: only its side, sliced.py)
         return clip_strokes(funnel_strokes(sh), knives) if knives else funnel_strokes(sh)
-    if is_joined(sh):  # one path per piece
-        return joined_paths(sh, tumour_path)
-    return [shape_path(sh)]
+    paths = joined_paths(sh, tumour_path) if is_joined(sh) else [shape_path(sh)]  # (joined: one path per piece)
+    got = piece_loops(sh) if sh.get("cut") else None  # (cut with a shape: only its side, mould.py)
+    return clip_to(paths, *got) if got else paths
 
 
 _paths = {}
@@ -334,8 +335,8 @@ SHAPE_KEYS = ("starts", "tumour", "k", "text", "smooth", "gaps", "splits",
 def _cached(sh):
     key = (sh["kind"], tuple(map(tuple, sh["pts"])), json.dumps(sh.get("strokes")),
            json.dumps([sh.get(k) for k in SHAPE_KEYS]),
-           json.dumps([sh["cut"].get("knife"), sh["cut"]["was"], sh.get("fx"), sh.get("_m")])
-           if sh["kind"] == "funnel" and sh.get("cut") else None)
+           json.dumps([sh["cut"].get("knife"), sh["cut"]["was"], sh.get("fx"), sh.get("_m"), sh["cut"].get("mould")])
+           if sh.get("cut") and (sh["kind"] == "funnel" or sh["cut"].get("mould")) else None)
     got = _paths.get(key)
     if got is None:
         if len(_paths) > 3000:
@@ -720,6 +721,7 @@ def _notes_tracks(sh, ppq, keys):
     if piece:  # cut from another shape (sliced.py): its notes are made as that one's, then its own part kept
         whole, part, same_vel = piece
         knife, knife_d = sh["cut"].get("knife"), moved_by(sh)  # (cut through its notes by the Slice tool)
+        mould = sh["cut"].get("mould")  # (cut with a shape, mould.py)
         if same_vel:
             vel_sh = whole
         sh = whole
@@ -783,6 +785,8 @@ def _notes_tracks(sh, ppq, keys):
         raw, tracks = raw[mine], tracks[mine] if tracks is not None else None
         if knife:
             raw, tracks = knife_cut(raw, tracks, knife, knife_d, ppq)
+        if mould:
+            raw, tracks = mould_cut(raw, tracks, mould, knife_d, ppq)
         if raw.shape[1] == 4:  # (velocities made by the whole's pages: kept, unless the piece has its own)
             if same_vel:
                 return raw, tracks

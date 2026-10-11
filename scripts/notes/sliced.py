@@ -321,6 +321,9 @@ def piece_notes(sh, ppq, keys, make):
             _wholes.clear()
         whole = _wholes[key] = make(src, ppq, keys)
     notes, tracks = knife_cut(*whole, halves, moved_by(sh), ppq)  # (the cuts went along with it)
+    if sh["cut"].get("mould"):  # (cut with a shape, mould.py)
+        from notes.mould import mould_cut
+        notes, tracks = mould_cut(notes, tracks, sh["cut"]["mould"], moved_by(sh), ppq)
     if not same_vel and len(notes):  # (its own velocities: over its own time, as a shape of its own)
         from notes.engine import cached_arrays
         from notes.envelope import env_values, velocity_env
@@ -467,6 +470,7 @@ def knife_in_two(sh, halves, a, b, segs, hits=()):
     import uuid
     custom = sh["kind"] == "custom"
     got = source(sh)
+    mould = None  # (cut with a shape before, kept: mould.py)
     if sh.get("cut") and (sh.get("fx") or sh.get("glue") or not got):
         # a piece with pages / glue of its own (or flipped / turned with steps): the halves are cut from it as it is,
         # its notes after them (user, 2026-10-07: cut before them, the halves' notes changed)
@@ -490,6 +494,9 @@ def knife_in_two(sh, halves, a, b, segs, hits=()):
         whole = dict(outline(src), **velocity(cut["whole"]), **tools(cut["whole"]), **inner(src))
         if custom:
             whole.update(velocity(src, GATE))
+        if cut.get("mould"):
+            from notes.mould import moved_mould
+            mould = moved_mould(cut["mould"], d)
     else:
         part, marks, knives, own = [0.0, None], [], [], False
         whole = dict(outline(sh), **velocity(sh), **tools(sh))
@@ -513,6 +520,8 @@ def knife_in_two(sh, halves, a, b, segs, hits=()):
             h["cut"]["gate"] = velocity(h, GATE)
         else:
             h["cut"]["knife"] = knife
+        if mould:
+            h["cut"]["mould"] = json.loads(json.dumps(mould))
         if own:
             h["cut"]["own_vel"] = True
 
@@ -642,6 +651,9 @@ def cut_in_two(sh, halves, at, scale, mark):
         h["cut"] = {"whole": whole, "was": outline(h), "part": [a, b], "vel": None, "marks": mine + [new]}
         if knives:
             h["cut"]["knife"] = json.loads(json.dumps(knives))
+        if got and cut.get("mould"):  # (cut with a shape before: both halves keep that, mould.py)
+            from notes.mould import moved_mould
+            h["cut"]["mould"] = moved_mould(cut["mould"], d)
         if own:
             h["cut"]["own_vel"] = True
 
@@ -656,23 +668,37 @@ def rejoined(olds, new, join=None):
     others lie on top of them). None: not such pieces (a normal join); CANT: pieces cut through their notes that
     don't make one piece (a normal join would draw the drawing twice and lose their notes)."""
     got = [source(sh) for sh in olds]
-    fail = CANT if any((sh.get("cut") or {}).get("knife") for sh in olds) else None
+    fail = CANT if any((sh.get("cut") or {}).get("knife") or (sh.get("cut") or {}).get("mould") for sh in olds) else None
     if not all(got):
         return fail
     wholes = [json.dumps(dict(outline(g[0]), **tools(g[0]), cut=g[0].get("cut")), sort_keys=True) for g in got]
     if len(set(wholes)) > 1:
         return fail
+    keep = None  # cut with a shape (mould.py): pieces of one side stay that side; its two sides = the shape back
+    two = False
+    if fail and any(sh["cut"].get("mould") for sh in olds):
+        from notes.mould import moved_mould
+        ms = [moved_mould(sh["cut"]["mould"], moved_by(sh)) if sh["cut"].get("mould") else None for sh in olds]
+        if not all(ms) or any(not close([m["rows"], m["loops"]], [ms[0]["rows"], ms[0]["loops"]]) for m in ms):
+            return CANT
+        if len({m["side"] for m in ms}) == 1:
+            keep = ms[0]
+        elif not (len(olds) == 2 and all(g[1] == [0.0, None] and not sh["cut"].get("knife")
+                                         for sh, g in zip(olds, got))):
+            return CANT
+        else:
+            two = True
     items = []
     for sh, g in zip(olds, got):
         d = moved_by(sh)
         items.append([g[1], [[b0 + d[0], k0 + d[1], db, dk, sd] for b0, k0, db, dk, sd in sh["cut"].get("knife", [])]])
-    items = merged_parts(items)
+    items = [[[0.0, None], []]] if two else merged_parts(items)
     if len(items) > 1:
         return fail
     part, knives = items[0]
     same_vel = all(g[2] for g in got)
     src = got[0][0]
-    if part[0] == 0 and part[1] is None and not knives:  # all of it: the shape it was
+    if part[0] == 0 and part[1] is None and not knives and not keep:  # all of it: the shape it was
         out = {k: v for k, v in new.items() if k not in OUTLINE and k != "cut" and not (same_vel and k in VELOCITY)}
         out.update(outline(src))
         if same_vel:
@@ -710,6 +736,8 @@ def rejoined(olds, new, join=None):
                          "marks": list(marks.values())})
     if knives:
         out["cut"]["knife"] = knives
+    if keep:
+        out["cut"]["mould"] = keep
     if same_vel:
         out["cut"]["vel"] = velocity(new)
     else:
@@ -921,6 +949,12 @@ def clean_cut(c):
         out["gate"] = snaps["gate"]
     elif knife:
         out["knife"] = knife
+    if c.get("mould"):
+        from notes.mould import clean_mould
+        try:
+            out["mould"] = clean_mould(c["mould"])
+        except (KeyError, TypeError, ValueError, IndexError):
+            return None
     if c.get("own_vel"):
         out["own_vel"] = True
     return out
