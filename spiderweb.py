@@ -51,6 +51,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     claw_window.py   the Claw machine window
     strum_window.py  the Strum window (Start / End panels of knobs, each with its number box)
     range_window.py  the spam gate Range's graph window
+    sustain_window.py  the Sustain window (on / off, the gap held over: Auto or typed)
     between_window.py  the Add between window (preview, steps, graph) + a group in the main window (list row, menu)
     image_window.py  image to notes: the picture, its sliders, the player-look preview, placing it
     format_window.py the colour list format editor (live output, tags, codes, the user's formats)
@@ -102,6 +103,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     glue.py          glue: touching notes on a key made one long note (all of a shape or in boxes), first
     claw.py          the claw machine: a shape's notes thinned out / cut / bent after they're made
     strum.py         strum: each chord's notes start one after another (and end, velocity)
+    sustain.py       sustain: each key row's notes held to their group's end (overlaps kept), done last
     fx.py            a shape's Claw machine / Strum / Chop pages in order, flips and velocities after them
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes
     picture.py       image to notes: a picture file -> a grid of up to 16 colours (picking, blending, details)

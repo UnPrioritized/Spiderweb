@@ -646,5 +646,18 @@
  "between.menu_unlink": "Unlink (make them plain shapes)",
  "between.making": "Making the steps…",
  "between.menu_group_vel": "Velocity from the group again",
- "between.group_vel": "Velocity from the group again"
+ "between.group_vel": "Velocity from the group again",
+ "sustain.menu": "Sustain…",
+ "sustain.title": "Sustain",
+ "sustain.step": "Sustain",
+ "sustain.on": "Sustain notes",
+ "sustain.on_tip": "Each note is held until the last note of its group on the same key ends, so notes pile up on top of each other. Made for lagging out MIDI players.\nThese notes keep their overlaps in every Channels mode; other shapes' notes still end where these start.",
+ "sustain.hold": "Hold over gaps up to:",
+ "sustain.auto": "Auto ({n} ticks)",
+ "sustain.auto_one": "Auto (1 tick)",
+ "sustain.auto_each": "Auto (each shape works out its own)",
+ "sustain.auto_tip": "Works out the gap from the shape's own notes: the most common gap between notes on a key.\nLonger gaps are holes in the shape (like the inside of a ring) and stay empty, so the shape keeps its look.",
+ "sustain.ticks": "ticks",
+ "sustain.own_tip": "Gaps up to this many ticks are held over. Make it bigger than a hole to hold across the hole too.",
+ "sustain.list": "{name} (Sustained)"
 }

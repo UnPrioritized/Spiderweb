@@ -15,6 +15,7 @@ from roll.roll_shared import SHIFT
 from window.claw_window import open_claw
 from window.strum_window import open_strum
 from window.chop_window import open_chop, quick_chop
+from window.sustain_window import any_sustained, open_sustain, sustain_targets
 from window.widgets import symmetry_menu
 
 
@@ -136,6 +137,7 @@ class ShapeMenu:
             item(tr("roll_menu.chop"), tr("roll_menu.alt_u"), lambda: open_chop(app), keys=True)
             item(tr("roll_menu.quick_chop"), tr("roll_menu.ctrl_u"), lambda: quick_chop(app), keys=True)
             self.glue_items(item)
+        self.sustain_item(m)
         self.between_items(item, i)
         self.merge_menu(m)
         if len(app.sels) >= 2:  # (greyed out, saying why, when something else is selected too)
@@ -185,6 +187,7 @@ class ShapeMenu:
             item(tr("roll_menu.chop"), tr("roll_menu.alt_u"), lambda: open_chop(app))
             item(tr("roll_menu.quick_chop"), tr("roll_menu.ctrl_u"), lambda: quick_chop(app))
             self.glue_items(item)
+        self.sustain_item(m)
         if app.between_pair():
             item(tr("between.menu_add"), "", app.add_between)
         self.merge_menu(m)
@@ -228,6 +231,14 @@ class ShapeMenu:
             sub.add_command(label=tr("join_split.merge_right" if right else "join_split.merge_left"),
                             command=lambda right=right: app.gate_merge(right))
         m.add_cascade(label=tr("join_split.merge_menu"), menu=sub)
+
+    def sustain_item(self, m):
+        """Sustain… (sustain_window.py), ticked while a selected shape is sustained; greyed when every selected shape
+        is a Hz bass."""
+        app = self.app
+        self._sustain_var = tk.BooleanVar(value=any_sustained(app))  # (kept: the tick shows)
+        m.add_checkbutton(label=tr("sustain.menu"), variable=self._sustain_var, command=lambda: open_sustain(app),
+                          state="normal" if sustain_targets(app) else "disabled")
 
     def glue_items(self, item):
         """Glue (glue.py): in the kept Select boxes if there are any, else all the selected shapes' notes."""
