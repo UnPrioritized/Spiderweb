@@ -2307,7 +2307,12 @@ def cycle_turns(sh, notes, ppq, bottom=None):
     else:
         k = np.unique(s, return_inverse=True)[1].reshape(-1)
     if rows:
-        k = row_restart(notes, k, back, colour_pieces(sh, notes, ppq))
+        piece = colour_pieces(sh, notes, ppq)
+        if not (sh.get("hz") or {}).get("tones"):  # (each note's place along its piece, not its time: rounding to the
+            o = np.lexsort((s, notes[:, 2] if piece is None else piece))  # gate grid made a colour come twice in a
+            k = np.empty(len(notes), np.int64)  # row, at other spots when gate flipped, hunt)
+            k[o] = np.arange(len(notes))
+        k = row_restart(notes, k, back, piece)
     return slant(k // int(c["every"])) % c["n"]
 
 

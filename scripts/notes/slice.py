@@ -350,7 +350,7 @@ def slice_notes(sh, notes, tracks, a, b, ppq):
     rest, before = ~on | (hi > x), on & (lo < x)
     paste = sh.get("paste") or uuid.uuid4().hex[:12]  # (its tracks keep their channels across the pieces: render)
     from notes.gateflip import colours_back
-    mirrored = colours_back(sh) is True  # (a gate flipped paste: the pieces keep its colours' mirrored order)
+    mirrored = bool(colours_back(sh))  # (a gate flipped paste: the pieces keep its colours' channels)
     parts = []
     for keep, s0, s1 in ((rest, np.where(on, np.maximum(lo, x), lo), hi), (before, lo, np.minimum(hi, x))):
         n = np.column_stack([s0, s1 - s0, keys, notes[:, 3], tracks])[keep]

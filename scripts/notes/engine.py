@@ -28,8 +28,7 @@ from notes.claw import apply_claw
 from notes.fx import (clean_fx, flip_shape, groups, idle, mirrored, notes_box, reverse_velocity, swapped, toggled,
                       turn_notes, turn_pts, turn_shape, velocities)
 from notes.gaterange import clean_range
-from notes.gateflip import (cut_at_start, flipped_back, flipped_drawing, grid_step, is_flipped as is_gate_flipped,
-                            is_pasted_flipped, kept_in_place, mirror_ticks, mirrored_runs)
+from notes.gateflip import is_flipped as is_gate_flipped, is_pasted_flipped, mirrored_runs, unflipped_starts
 from notes.merge import clean_merge, recipe_notes, reshaped_notes as merge_reshaped, turned_notes as merge_turned
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
@@ -474,23 +473,9 @@ def fx_notes(sh, ppq, keys, get):
             return get(unflipped(sh))
         notes, tracks = get(bare_of(sh))
         return mirrored(notes, sh["_m"], notes_box(notes)), tracks
-    if is_pasted_flipped(sh):  # (pasted notes: each run on a key mirrored inside itself, gateflip.py)
+    if is_pasted_flipped(sh) or is_gate_flipped(sh):  # (each run on a key mirrored inside itself, gateflip.py)
         notes, tracks = get({k: v for k, v in sh.items() if k not in ("gate_flip", "glue")})
         return with_glue(*mirrored_runs(notes, tracks, bool(sh.get("own_vel"))), sh, ppq)
-    if is_gate_flipped(sh):  # (made from the drawing flipped, then flipped back: gateflip.py)
-        xs = np.concatenate(cached_arrays(sh))[:, 0]
-        if xs.min() < 0:  # (partly before beat 0: made whole further on, moved back, then cut there like its own)
-            step = grid_step(sh, ppq)
-            d = step * math.ceil(-float(xs.min()) * ppq / step)
-            notes, tracks = get(dict(sh, pts=[[b + d / ppq, p] for b, p in sh["pts"]]))
-            notes = notes.copy()
-            notes[:, :2] -= d
-            return cut_at_start(notes, tracks)
-        ticks = mirror_ticks(sh, float(xs.max()), ppq)
-        notes, tracks = get(flipped_drawing(sh, ticks / ppq))
-        plain = get({k: v for k, v in sh.items() if k not in ("gate_flip", "glue")})[0]  # (each run kept in place)
-        notes = kept_in_place(flipped_back(notes, ticks), plain)
-        return with_glue(*cut_at_start(notes, tracks), sh, ppq)
     return with_glue(*_notes_tracks(sh, ppq, keys), sh, ppq)
 
 
@@ -839,7 +824,8 @@ def assign_slots(note_lists, split="key", apart=(), first=None):
     free one. Earlier shapes get the lower slots. split="key": only notes on the same key at the same time
     clash; split="time": any notes sounding at the same time clash, whatever their key.
     apart: groups of note list numbers that always get different slots (a custom shape's outline and inside).
-    first: per list None, or the tick to count it as starting at instead (a gate aware flip's colours: mirrored).
+    first: per list None, or the tick to count it as starting at instead (a gate aware flip's colours: where they
+    start unflipped).
     """
     n = len(note_lists)
     busy = range(n)
@@ -1049,9 +1035,9 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     one track of all the pieces of a paste is ONE unit, so it keeps one channel across them.
     held: per shape True if it's sustained (sustain.py): its notes keep their overlaps in every mode, and other
     shapes' notes end where one of its notes on their key and slot starts.
-    back: per shape True if its gates are laid from the right (gateflip.py colours_back): with "auto" its tracks get
-    channels in the mirrored order, as if each started where its mirror image would (the colour at the right edge =
-    the one the left edge has without it). A paste's pieces: mirrored over the whole paste.
+    back: per shape True if it's gate flipped (gateflip.py colours_back): with "auto" its tracks get channels as if
+    they started where they do unflipped (gateflip.unflipped_starts), so each colour keeps its unflipped channel. A
+    paste's pieces: the whole paste's tracks counted that way, flipped pieces unflipped.
     """
     pastes = pastes or [None] * len(note_lists)
     tracks = tracks or [None] * len(note_lists)
@@ -1059,7 +1045,19 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     fixed = fixed or [False] * len(note_lists)
     teams = teams or [None] * len(note_lists)
     back = back or [False] * len(note_lists)
-    firsts, paste_back = {}, set()  # (unit -> the tick it counts as starting at: assign_slots first)
+    firsts, paste_back, paste_first = {}, set(), {}  # (unit -> the tick it counts as starting at: assign_slots first)
+    made = {}
+
+    def whole_starts(i):
+        """Unflipped starts of piece i of a gate flipped paste, its runs counted across all such pieces of the
+        paste (sliced after the flip: a run went across the cut)."""
+        if i not in made:
+            mine = [j for j in range(len(note_lists)) if pastes[j] == pastes[i] and back[j] == "whole"]
+            got = unflipped_starts(np.concatenate([note_lists[j] for j in mine]))
+            at = np.cumsum([0] + [len(note_lists[j]) for j in mine])
+            made.update({j: got[at[n]:at[n + 1]] for n, j in enumerate(mine)})
+        return made[i]
+
     pinned = [np.asarray(tr, np.int64) if fx and tr is not None else None for tr, fx in zip(tracks, fixed)]
     top = max([int(p.max()) + 1 for p in pinned if p is not None and len(p)] or [0])
     if mode == "auto":
@@ -1095,27 +1093,29 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                         paste_unit[pid, t2] = len(units)
                         units.append(lst[:0])
                 us = [paste_unit[pid, t] for t in ids.tolist()]
+                b = back[len(unit_of)]
+                starts = whole_starts(len(unit_of)) if b == "whole" else unflipped_starts(lst) if b else lst[:, 0]
                 for k, u in enumerate(us):
                     units[u] = np.concatenate([units[u], lst[which == k]])
+                    s0 = int(starts[which == k].min())
+                    paste_first[u] = min(paste_first.get(u, s0), s0)
                 unit_of.append(np.asarray(us, np.int64)[which])
-                if back[len(unit_of) - 1]:  # (a flipped paste's pieces: mirrored over the whole paste, below)
+                if b:  # (a gate flipped piece: the whole paste's tracks by where they start unflipped, below)
                     paste_back.add(pid)
                 continue
             unit_of.append(len(units) + which)
             if sep:
                 forced.append(range(len(units), len(units) + len(ids)))
             mine = [lst[which == k] for k in range(len(ids))]
-            if back[len(unit_of) - 1]:  # (mirrored: a track starts where its latest end would be, flipped over)
-                lo_hi = int(lst[:, 0].min()) + int(lst[:, 1].max())
+            if back[len(unit_of) - 1]:  # (each colour's channel as unflipped: counted from where it starts then)
+                starts = unflipped_starts(lst)
                 for k in range(len(ids)):
-                    firsts[len(units) + k] = lo_hi - int(mine[k][:, 1].max())
+                    firsts[len(units) + k] = int(starts[which == k].min())
             units += mine
         for pid in paste_back:
-            whole = np.concatenate([units[u] for u in paste_units[pid]])
-            lo_hi = int(whole[:, 0].min()) + int(whole[:, 1].max())
             for u in paste_units[pid]:
-                if len(units[u]):
-                    firsts[u] = lo_hi - int(units[u][:, 1].max())
+                if u in paste_first:
+                    firsts[u] = paste_first[u]
         forced += [us for us in team_units.values() if len(us) > 1]
         forced += [us for us in paste_units.values() if len(us) > 1]  # (pasted tracks: always apart, tracks_apart)
         unit_slots = np.array(assign_slots(units, split, forced, [firsts.get(u) for u in range(len(units))]),

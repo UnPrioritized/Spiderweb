@@ -1,22 +1,18 @@
 """Gate aware flip (right-click, above the normal flips): only how a spam shape's gates are laid is flipped sideways,
 not the drawing. sh["gate_flip"] = True.
 
-The notes are made from the drawing flipped sideways (its Range graph NOT reversed, its velocities as they are), then
-flipped back onto the real drawing: each key row is laid from its right edge, an exact mirror image of the shape
-laid from its left (Colours, area colours, outline gate band and leftover slivers go along). Not the same as
-reversing the Range graph: that still lays every row from its left edge (user's pictures, 2026-10-11). With Multi
-channel its colours are handed out in mirrored order too (engine.render back: the turn at the right edge gets the
-channel the one at the left edge had).
+The notes are made as usual, then each run on each key row (mirrored_runs) is mirrored inside itself: every key row
+reads exactly reversed, gates, colours and all (user 2026-10-11: r g b w -> w b g r, no exception), its first start
+and last end kept. Not the same as reversing the Range graph: that still lays every row from its left edge (user's
+pictures). With Multi channel each colour keeps the channel it has unflipped (engine.render back: channels handed
+out by where each colour starts unflipped, unflipped_starts).
 Done before glue, note tool pages and Sustain. Switching it on / off turns the velocities round once, like a flip
 (drawing them again in the velocity pane overrides that as usual)."""
 
-import json
-import math
-
 import numpy as np
 
-from notes.custom import SPAM_FILLS, gate_ticks
-from notes.fx import flip_shape, reverse_velocity
+from notes.custom import SPAM_FILLS
+from notes.fx import reverse_velocity
 from notes.sustain import gap_of, row_order
 
 NOT_DRAWN = ("merge", "notes", "picture", "hz")  # (pasted notes and merged shapes: each run mirrored, is_pasted)
@@ -77,16 +73,18 @@ def put_back(parts, flips):
 
 
 def colours_back(sh):
-    """True if sh's colours get their channels in mirrored order (engine.render back). Pasted notes sliced from a
-    flipped paste keep the mirrored order ("flip_colours", slice.slice_notes); flipped again they're back in
-    order."""
+    """True if sh is gate flipped, its colours given the channels they have unflipped (engine.render back). Pasted
+    notes sliced from a flipped paste ("flip_colours", slice.slice_notes): "whole" = flipped over the whole paste,
+    its pieces counted together (their runs went across the cuts); flipped again they're as pasted."""
     if is_pasted(sh):
-        return (sh.get("gate_flip") is True) != (sh.get("flip_colours") is True)
+        if sh.get("flip_colours") is True:
+            return "whole" if sh.get("gate_flip") is not True else False
+        return sh.get("gate_flip") is True
     return all_flipped(sh)
 
 
 def is_flipped(sh):
-    """True if sh's notes are made gate flipped from its drawing (pasted notes: is_pasted_flipped)."""
+    """True if sh is a drawn shape whose notes are gate flipped (pasted notes: is_pasted_flipped)."""
     return (sh.get("gate_flip") is True and sh["kind"] == "custom" and sh.get("fill") in SPAM_FILLS
             and not any(k in sh for k in LEFT_OUT))
 
@@ -95,11 +93,22 @@ def is_pasted_flipped(sh):
     return sh.get("gate_flip") is True and is_pasted(sh)
 
 
+def unflipped_starts(notes):
+    """Where each of these gate flipped notes starts unflipped (mirroring the runs again puts them back)."""
+    if len(notes) < 2:
+        return notes[:, 0]
+    order, _, out, _ = _mirrored(notes)
+    back = np.empty(len(notes), np.int64)
+    back[order] = out[:, 0]
+    return back
+
+
 def mirrored_runs(notes, tracks, carry_vel):
-    """Pasted notes' gates laid the other way: on each key, each run (notes whose gaps are no longer than the usual
-    gap, as Sustain's Auto works it out) mirrored inside itself, its first start and last end kept (user). Colours
-    (tracks) go with their notes; velocities too when they're the notes' own (carry_vel), else each place keeps its
-    velocity (a velocity line drawn in Spiderweb: turned round once when switched on, like a flip)."""
+    """Gates laid the other way: on each key, each run (notes whose gaps are no longer than the usual gap, as
+    Sustain's Auto works it out; a spam shape's touching notes) mirrored inside itself, its first start and last end
+    kept (user). Colours (tracks) go with their notes; velocities too when they're the notes' own (carry_vel), else
+    each place keeps its velocity (a velocity line drawn in Spiderweb: turned round once when switched on, like a
+    flip)."""
     if len(notes) < 2:
         return notes, tracks
     order, a, out, other = _mirrored(notes)
@@ -141,122 +150,6 @@ def runs_same_both_ways(notes, tracks=None):
 
 
 _same = [None, None, False]  # (the notes and tracks last asked about, and the answer)
-
-
-def mirror_ticks(sh, right, ppq):
-    """Twice the tick the drawing is flipped around (right = its right end in beats): a whole bar line (4 beats) at
-    or past twice its right end, so the flipped drawing never starts before the song does and the ticks flip back
-    exactly. Start Aligned with no Range: a line of its gate grid too (counted from tick 0), so the notes stay on
-    it (only the colours' order turns round, user)."""
-    step = grid_step(sh, ppq)
-    return step * max(1, math.ceil(2 * right * ppq / step))
-
-
-def grid_step(sh, ppq):
-    """Ticks every grid that counts from the song's start lines up on: a bar, the Aligned gate grid, Colours By
-    time's bands (mirrored around / moved by a whole number of these, nothing on them shifts)."""
-    step = 4 * ppq
-    if sh.get("align") == "aligned" and not sh.get("range"):
-        step = math.lcm(step, gate_ticks(sh["gate"], ppq))
-    cy = sh.get("cycle") or {}
-    if cy.get("by") == "time":  # (Colours By time every a/b whole notes: a whole notes hold whole bands, so the
-        step = math.lcm(step, 4 * ppq * int(cy["every"][0]))  # bands' edges stay where they are, hunt)
-    return step
-
-
-def flipped_drawing(sh, mid2):
-    """sh's drawing flipped sideways around mid2 / 2 for making its notes: no glue, pages or Sustain (done after, on
-    the real shape), the Range as it was (laid the same way, from the left), velocities as they were."""
-    out = json.loads(json.dumps({k: v for k, v in sh.items()
-                                 if k not in ("gate_flip", "glue", "fx", "_m", "sustain")}))
-    flip_shape(out, True, mid2)  # (its velocities turned round too: flipped back with the notes, they're as drawn)
-    for k in ("range", "range_kept"):
-        if k in sh:
-            out[k] = json.loads(json.dumps(sh[k]))
-    return out
-
-
-def flipped_back(notes, ticks):
-    """Notes made from the flipped drawing put back: start / end mirrored around ticks / 2."""
-    out = notes.copy()
-    out[:, 0], out[:, 1] = ticks - notes[:, 1], ticks - notes[:, 0]
-    return out
-
-
-def cut_at_start(notes, tracks):
-    """Notes (and tracks) cut at the song's start like a drawing's own: none ending by tick 0, the rest starting at
-    0 at the earliest (a shape drawn partly before beat 0 made notes there, hunt)."""
-    out = notes.copy()
-    keep = out[:, 1] > 0
-    if not keep.all():
-        out = out[keep]
-        tracks = None if tracks is None else np.asarray(tracks)[keep]
-    out[:, 0] = np.maximum(out[:, 0], 0)
-    return out, tracks
-
-
-def runs(notes):
-    """(each note's run number, each run's key, first start, place among its key's runs) of (start, end, key, ...)
-    rows: a run = notes on one key touching or overlapping one another."""
-    if not len(notes):
-        z = np.zeros(0, np.int64)
-        return z, z, z, z
-    o = key_order(notes)
-    s, e, k = notes[o, 0], notes[o, 1], notes[o, 2]
-    big = int(e.max()) + 2  # (the latest end so far on the same key: keys apart by big)
-    reach = np.maximum.accumulate(e + (k - k.min()) * big) - (k - k.min()) * big
-    new = np.r_[True, (k[1:] != k[:-1]) | (s[1:] > reach[:-1])]
-    num = np.cumsum(new) - 1
-    out = np.empty(len(notes), np.int64)
-    out[o] = num
-    first = np.flatnonzero(new)
-    rk = k[first]
-    key_first = np.r_[True, rk[1:] != rk[:-1]]
-    place = np.arange(len(first)) - np.maximum.accumulate(np.where(key_first, np.arange(len(first)), 0))
-    return out, rk, s[first], place
-
-
-def key_order(notes):
-    """The order key row by key row, in time. Quick for a spam shape's notes, which come that way already, or (made
-    from the flipped drawing, mirrored back) with each key's notes the other way round: sorting millions of them
-    took most of kept_in_place's time (hunt)."""
-    k, s = notes[:, 2], notes[:, 0]
-    up, same = k[1:] > k[:-1], k[1:] == k[:-1]
-    if not (up | same).all():
-        return np.lexsort((s, k))
-    if (up | same & (s[1:] >= s[:-1])).all():
-        return np.arange(len(notes))
-    if (up | same & (s[1:] <= s[:-1])).all():  # (each key's run backwards: turned round in place)
-        i = np.arange(len(notes))
-        first = np.maximum.accumulate(np.where(np.r_[True, up], i, 0))
-        last = np.minimum.accumulate(np.where(np.r_[up, True], i, len(notes))[::-1])[::-1]
-        return first + last - i
-    return np.lexsort((s, k))
-
-
-def kept_in_place(notes, plain):
-    """The gate flipped notes with each run moved to start where the same run starts unflipped (the leftover bit a
-    row's rounded last gate leaves stays where it was, user: nothing shifts). Keys whose runs don't pair up: as
-    they are."""
-    if not len(notes) or not len(plain):
-        return notes
-    num, k, s, place = runs(notes)
-    _, pk, ps, pplace = runs(plain)
-    keys, counts = np.unique(k, return_counts=True)
-    pkeys, pcounts = np.unique(pk, return_counts=True)
-    at = np.clip(np.searchsorted(pkeys, k), 0, len(pkeys) - 1)
-    same_count = (pkeys[at] == k) & (pcounts[at] == counts[np.searchsorted(keys, k)])
-    span = int(max(place.max(), pplace.max())) + 1
-    ids, pids = k * span + place, pk * span + pplace  # (both in order: by key, then start)
-    j = np.clip(np.searchsorted(pids, ids), 0, len(pids) - 1)
-    ok = same_count & (pids[j] == ids)
-    shift = np.where(ok, ps[j] - s, 0)
-    if not shift.any():
-        return notes
-    out = notes.copy()
-    out[:, 0] += shift[num]
-    out[:, 1] += shift[num]
-    return out
 
 
 def turn_velocities(sh):
