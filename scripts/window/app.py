@@ -589,7 +589,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         # (shown under Multi channel too, user: most MIDI players play channel 10 as drums, some people only want
         # the 16th colour)
         self.ch10_tick = ttk.Checkbutton(ch, text=tr("app.use_ch10"), variable=self.use_ch10,
-                                         command=self.on_channel_mode)
+                                         command=self.on_use_ch10)
         Tooltip(self.ch10_tick, tr("app.use_ch10_tip"))
         r += 1
         ttk.Label(box, text=tr("app.midi_out")).grid(row=r, column=0, sticky="w", pady=(3, 0))
@@ -1187,6 +1187,28 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         if sh["kind"] == "curve":  # the first curve: its anchors and handles
             self.tips.show("curves_pen", wait=True)
         self.tips.show("undo", wait=True)  # the first shape: how to take it back
+
+    def on_use_ch10(self):
+        """The "Use channel 10" tick. Turned off: Colours / Add between turns over 16 channels go down to 15 at
+        once, as an undo step (user: not kept for when it's ticked again). Drawn colours (drawer areas, a stroke's
+        colour) stay: the drawer and panel say so in orange."""
+        if not self.use_ch10.get():
+            most = most_colours(False)
+            over = []
+            for sh in self.shapes:
+                for t in [sh] + (sh["merge"]["parts"] if sh.get("merge") else []):
+                    if (t.get("cycle") or {}).get("n", 0) > most:
+                        over.append((t["cycle"], "n"))
+                    b = (t.get("between") or {}).get("set")
+                    if b and b.get("colours", 0) > most:
+                        over.append((b, "colours"))
+            if over:
+                self.push_undo(name=tr("app.use_ch10_off"))
+                for c, k in over:
+                    c[k] = most
+            if (self.defaults.get("cycle") or {}).get("n", 0) > most:
+                self.defaults["cycle"] = dict(self.defaults["cycle"], n=most)
+        self.on_channel_mode()
 
     def on_channel_mode(self):
         self.shapes_changed()
