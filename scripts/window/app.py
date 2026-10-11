@@ -27,6 +27,7 @@ from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
 from notes.merge import velocity_reversed as merge_vrev
+from notes.sustain import is_sustained
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
 from notes.polygon import POLYGON_DEFAULTS
@@ -124,7 +125,8 @@ def all_notes(shapes, ppq, keys, mode, split, notes_tracks):
     use10 = next((sh["picture"]["set"].get("use10", False) for sh in shapes if "picture" in sh), False)
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
                              ["picture" in sh for sh in shapes], use10, between_turns(shapes),
-                             [sh.get("paste") if "notes" in sh else None for sh in shapes])
+                             [sh.get("paste") if "notes" in sh else None for sh in shapes],
+                             [is_sustained(sh) for sh in shapes])
     return wanted, use10, rendered, slots
 
 

@@ -31,6 +31,7 @@ from notes.gaterange import clean_range
 from notes.merge import clean_merge, recipe_notes, reshaped_notes as merge_reshaped, turned_notes as merge_turned
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
+from notes.sustain import clean_sustain, cut_by, is_sustained, sustained
 from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
@@ -265,6 +266,9 @@ def clean_shape(sh):
         except (TypeError, ValueError, AttributeError):
             return None
         clean_hz_of(sh, out)
+    sus = clean_sustain(sh.get("sustain"))
+    if sus is not None:  # its notes held on (sustain.py)
+        out["sustain"] = sus
     return out
 
 
@@ -425,6 +429,9 @@ def fx_notes(sh, ppq, keys, get):
     """shape_notes_tracks' work: the notes, then its glue, then its note tool pages one after another (fx.py).
     get(shape) = another shape's notes and tracks (remembered by the caller: the steps before the last one, the
     notes flipped back). A hidden "_m" = the notes made flipped along those axes (the steps before a flip)."""
+    if "sustain" in sh:  # (held on last, after everything else: sustain.py)
+        notes, tracks = get({k: v for k, v in sh.items() if k != "sustain"})
+        return (sustained(notes, sh["sustain"], ppq), tracks) if is_sustained(sh) else (notes, tracks)
     if "picture" in sh:  # (no glue / chop / claw / strum on a picture: its notes are its picture, user)
         return _notes_tracks(sh, ppq, keys)
     fx = sh.get("fx")
@@ -993,7 +1000,8 @@ CHANNEL_MODES = ("raw", "single", "auto")
 SPLITS = ("key", "time")
 
 
-def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None, pastes=None):
+def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None, pastes=None,
+           held=None):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -1011,6 +1019,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     shapes' own tracks are left out).
     pastes: per shape None, or the id of the paste it was sliced from (pasted notes, slice.slice_notes): with "auto"
     one track of all the pieces of a paste is ONE unit, so it keeps one channel across them.
+    held: per shape True if it's sustained (sustain.py): its notes keep their overlaps in every mode, and other
+    shapes' notes end where one of its notes on their key and slot starts.
     """
     pastes = pastes or [None] * len(note_lists)
     tracks = tracks or [None] * len(note_lists)
@@ -1078,7 +1088,12 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
         part[:, :4], part[:, 4], part[:, 5] = lst, slot_of[o], o
         at += len(lst)
     if mode != "raw":
-        notes = resolve_overlaps(notes)
+        if held and any(held):  # (sustained shapes keep their overlaps; the others are cut where theirs start)
+            mine = np.asarray(held, bool)[notes[:, 5]]
+            kept = notes[mine]
+            notes = np.concatenate([cut_by(resolve_overlaps(notes[~mine]), kept), kept])
+        else:
+            notes = resolve_overlaps(notes)
     return notes, count
 
 
