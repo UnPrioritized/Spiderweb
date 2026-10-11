@@ -72,6 +72,52 @@ def flipped_back(notes, ticks):
     return out
 
 
+def runs(notes):
+    """(each note's run number, each run's key, first start, place among its key's runs) of (start, end, key, ...)
+    rows: a run = notes on one key touching or overlapping one another."""
+    if not len(notes):
+        z = np.zeros(0, np.int64)
+        return z, z, z, z
+    o = np.lexsort((notes[:, 0], notes[:, 2]))
+    s, e, k = notes[o, 0], notes[o, 1], notes[o, 2]
+    big = int(e.max()) + 2  # (the latest end so far on the same key: keys apart by big)
+    reach = np.maximum.accumulate(e + (k - k.min()) * big) - (k - k.min()) * big
+    new = np.r_[True, (k[1:] != k[:-1]) | (s[1:] > reach[:-1])]
+    num = np.cumsum(new) - 1
+    out = np.empty(len(notes), np.int64)
+    out[o] = num
+    first = np.flatnonzero(new)
+    rk = k[first]
+    key_first = np.r_[True, rk[1:] != rk[:-1]]
+    place = np.arange(len(first)) - np.maximum.accumulate(np.where(key_first, np.arange(len(first)), 0))
+    return out, rk, s[first], place
+
+
+def kept_in_place(notes, plain):
+    """The gate flipped notes with each run moved to start where the same run starts unflipped (the leftover bit a
+    row's rounded last gate leaves stays where it was, user: nothing shifts). Keys whose runs don't pair up: as
+    they are."""
+    if not len(notes) or not len(plain):
+        return notes
+    num, k, s, place = runs(notes)
+    _, pk, ps, pplace = runs(plain)
+    keys, counts = np.unique(k, return_counts=True)
+    pkeys, pcounts = np.unique(pk, return_counts=True)
+    at = np.clip(np.searchsorted(pkeys, k), 0, len(pkeys) - 1)
+    same_count = (pkeys[at] == k) & (pcounts[at] == counts[np.searchsorted(keys, k)])
+    span = int(max(place.max(), pplace.max())) + 1
+    ids, pids = k * span + place, pk * span + pplace  # (both in order: by key, then start)
+    j = np.clip(np.searchsorted(pids, ids), 0, len(pids) - 1)
+    ok = same_count & (pids[j] == ids)
+    shift = np.where(ok, ps[j] - s, 0)
+    if not shift.any():
+        return notes
+    out = notes.copy()
+    out[:, 0] += shift[num]
+    out[:, 1] += shift[num]
+    return out
+
+
 def turn_velocities(sh):
     """The velocities turned round, as a sideways flip does (switching the gate aware flip on / off): the line, and
     velocities drawn after its note tool pages."""
