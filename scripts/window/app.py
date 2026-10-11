@@ -325,7 +325,6 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.bind_all(k, self.hotkey(self.cut_selected, main_only=True))
         for keys, fn in (("Control-c Control-C", self.copy_selected),
                          ("Control-Shift-c Control-Shift-C", self.copy_to_domino),
-                         ("Control-Shift-v Control-Shift-V", self.paste_from_domino),
                          ("Control-g Control-G", self.join_selected),
                          ("Control-Shift-g Control-Shift-G", self.split_selected),
                          ("Control-r Control-R", self.turn_into_live),
@@ -624,9 +623,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         ttk.Label(domino, text=tr("app.domino_row")).pack(side="left")
         for text, tip, command, gap in (("app.domino_export", "app.domino_export_tip", self.export_dms, 0),
                                         ("app.domino_copy", "app.ctrl_shift_c_copies_the_selected",
-                                         self.copy_to_domino, 4),  # (the same gap as Open… / Save…)
-                                        ("app.domino_paste", "app.ctrl_shift_v_the_notes_copied",
-                                         self.paste_from_domino, 0)):
+                                         self.copy_to_domino, 4)):  # (the same gap as Open… / Save…)
             b = ttk.Button(domino, text=tr(text), command=command)
             b.pack(side="right", padx=gap)
             Tooltip(b, tr(tip))

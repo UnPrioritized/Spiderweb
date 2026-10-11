@@ -737,7 +737,7 @@ class ProjectFiles:
         return DOMINO_STARTS[max(self.domino_box.current(), 0)][0]
 
     def paste_from_domino(self, at=None):
-        """Ctrl+Shift+V: the notes copied in Domino as one shape (custom.py's pasted notes), placed like Domino
+        """Ctrl+V (app.paste, when they were copied last): the notes copied in Domino as one shape (custom.py's pasted notes), placed like Domino
         pastes: the start of what was copied (or its first note, see domino_start) on the play line (snapped to the
         grid), or at beat `at` (a Select double-click: the mouse, snapped already). Every track's notes go into
         the one shape; controllers and other events are left out. Ticks are taken as they are (same PPQ)."""
