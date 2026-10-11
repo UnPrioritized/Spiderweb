@@ -1475,7 +1475,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         on = [sh for sh in shapes if sh.get("gate_flip")]
         if on:  # (switching off always works, even where it does nothing now)
             return on, True, None
-        why = [gate_why_not(sh, self.notes_of(sh)) for sh in shapes]
+        why = [gate_why_not(sh, *self.notes_tracks(sh)) for sh in shapes]
         ok = [sh for sh, w in zip(shapes, why) if w is None]
         if ok:
             return ok, False, None
