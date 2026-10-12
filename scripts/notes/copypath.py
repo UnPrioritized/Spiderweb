@@ -415,6 +415,8 @@ def _halves(p, val, moved, f, down, spans, steps, ways, size):
         d = moved[b] - moved[o]  # (one sample further away from the point)
         if abs(d[0]) <= 1e-12:  # (copies not moving on in time: they'd never get past the point)
             continue
+        if d[1] * under < -1e-12:  # (a bend overshooting the point comes into it the wrong way: its peak is inside
+            continue               # the stretch, not here; carried on they went straight down in a column, user)
         keep = 1.0 if d[0] > 0 else -1.0
         for k in range(1, MOST_COPIES):
             a = k * step / abs(val[b] - val[o])
@@ -423,6 +425,8 @@ def _halves(p, val, moved, f, down, spans, steps, ways, size):
                 break  # (nothing of it left on the near side)
             if (under > 0 and mv[1] > key + 1e-9) or (under < 0 and mv[1] + tall < key - 1e-9):
                 break  # (wholly past the point's key: nothing kept; a tall tower made thousands of empty ones, hunt)
+            if abs(mv[0] - moved[b][0]) > wide + 1e-9 or abs(mv[1] - moved[b][1]) > tall + 1e-9:
+                break  # (a whole copy away from the last one: it can't fill the turn any more)
             fr = f[b] + a * (f[b] - f[o])
             out.append((hi + 0.1 + 0.3 * k / (k + 1), mv, fr, bool(down[b]), (at, keep, key, under, 0.0)))
             # (the other side of the point: the same, mirrored left-right there; user: like the shape's own halves)
