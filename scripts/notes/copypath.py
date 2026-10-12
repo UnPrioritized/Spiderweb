@@ -601,9 +601,10 @@ def covered(parts, wide):
     return np.concatenate(out)
 
 
-def apply_path(a, cfg, ppq, keys=256):
+def apply_path(a, cfg, ppq, keys=256, tag=False):
     """Notes a (start, end, key, then columns riding along; with 5+ columns the last is the colour group) and their
-    copies along the path."""
+    copies along the path. tag: one more column at the end, each note's copy (0 = the shape; Turn into plain
+    shapes)."""
     if not len(a) or not cfg:
         return a
     box = group_box(a, cfg, ppq)
@@ -652,6 +653,8 @@ def apply_path(a, cfg, ppq, keys=256):
                 x[:, 0], x[:, 1] = 2 * c - x[:, 1], 2 * c - s
         if col is not None:
             x[:, col] = coloured(x[:, col], i, cfg, own)
+        if tag:
+            x = np.column_stack([x, np.full(len(x), i, x.dtype)])
         total += len(x)
         if total > MOST_NOTES and parts:  # (grown copies have more notes than the shape: counted as made; hunt)
             break

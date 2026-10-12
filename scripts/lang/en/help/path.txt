@@ -1,0 +1,29 @@
+Select one or more shapes, then right-click one: Copy along a path…. The shape is copied again and again along a path from A to B, and on through more points if you add them. The copies change on the piano roll while you try settings. Accept keeps them (one Ctrl+Z takes them back); X or Esc puts the notes back as they were.
+
+Click on the piano roll where the path ends: that's B. Until you click, the copies follow the mouse. Then drag B, or the round middle point, to bend the path. Going up, A is the shape's bottom-left corner and B the last copy's top-right corner; going down, the corners swap, so the copies always stay between the points.
+
+Add point puts another point after the last one: it follows the mouse until you click. Right-click a point to remove it. The boxes under the settings show the picked point as bar, beat, tick and key: type there to put it exactly. Shift while dragging = off the grid.
+
+Like the Claw machine, the path is a page kept with the shape: moving or reshaping the shape moves the path and every copy along with it. Several selected shapes travel together as one group. Each time the window opens it starts a new page (+); click a tab on top to change one the shape has, or the small × beside a tab to take it off.
+
+Path: Straight, Curve (a bend through the round middle point) or Arc (a piece of a circle through it). Dragging a middle point on a straight path makes it a curve.
+
+Formula: a pattern laid along the whole path, like a curve's Formula (Wave, Zigzag, Curls…, or your own saved ones). Loops = how many times it repeats from A to the last point; the other boxes are the numbers in its formula, like height. Custom… opens the formula window to pick, change, draw or type one.
+
+Spacing: One copy every (a note length, or ticks) puts a copy each time the path goes that much later; Number of copies spreads that many evenly along it (the shape itself is the first). Copies on the points: a copy's corner sits right on each point. Half copies at the points: where the path turns, the copies carry on past the point, and only the parts on the near side are kept, so the turn is as full as the rest.
+
+Speed: Even, Speed up (close together at A, further apart towards the end) or Slow down.
+
+Size: how big the first and the last copy are, in %; the ones between grow or shrink step by step.
+
+Colours: Keep, Shift all channels, Turn within own colours, or One per copy, each Step channels on from the one before. Needs Multi channel.
+
+Flip: Each copy going down flips the copies where the path goes down (upside down, left-right or both). Mirror at the peak: past the path's first peak or dip, the copies are the ones before it mirrored.
+
+On top: where copies cover each other, which one is drawn on top. The one under it is cut away there, note by note.
+
+Range: Keep inside keeps only the notes from the lowest key to the highest key, the shape's own too; the rest are cut off. These keys stay put when the shape moves (dotted lines on the piano roll).
+
+Turn into plain shapes: every copy becomes a shape of its own notes, so you can move, cut or change each one by hand. The shape itself stays as drawn, without this path. The window closes; one Ctrl+Z takes it back.
+
+Notes past the lowest or highest key, or before the song's start, are cut off.

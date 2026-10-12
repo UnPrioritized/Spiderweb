@@ -17,8 +17,11 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from files.snap import SNAP_LIST, snap_beats, snap_text
 from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KEY_LIMITS, KINDS, LETTERS, MOST_POINTS,
-                            PATH_DEFAULTS, SIZE_LIMITS, SPEEDS, STEP_LIMITS, TOPS, WAYS, all_points, clean_path, peak,
-                            shifts, track)
+                            PATH_DEFAULTS, SIZE_LIMITS, SPEEDS, STEP_LIMITS, TOPS, WAYS, all_points, apply_path,
+                            clean_path, peak, shifts, track)
+from notes.custom import notes_shape
+from notes.engine import SHAPE_DEFAULTS, clean_shape
+from notes.fx import copied
 from notes.pattern import MAX_LOOPS, PATTERN_PRESETS, loop_points, new_pattern, pattern_name
 from roll.roll_shared import note_name
 from window import big_ask, look
@@ -29,6 +32,7 @@ from window.widgets import Scrub, Tooltip, bad, good, grid_shown, keep_width
 
 LENGTHS = [s for s, _ in SNAP_LIST if s != "off"]  # "one copy every" choices (the snap list's note lengths)
 CHOICES = {"kind": KINDS, "speed": SPEEDS, "colours": COLOURS, "flip": FLIPS, "way": WAYS, "top": TOPS}
+PLAIN_ASK = 500  # Turn into plain shapes: asked first past this many new shapes
 LOOP_COPIES = 8  # a new formula's Loops: about this many copies a loop
 GROUP_ONLY =("grp", "most")  # (page settings that may differ between the shapes of one group)
 
@@ -41,10 +45,6 @@ class PathWindow(ToolWindow):
     taking = False  # (take_typing at work)
     est = 0  # notes the shown settings make, about (asked past big_ask.BIG)
     pick = 0  # the point the bar / beat / tick / key boxes show (0 = B)
-
-    def __init__(self, app):
-        super().__init__(app)
-        self.bind("<F1>", lambda e: (app.open_help(), "break")[1])  # (its own Help page comes with the last group)
 
     def clean(self, cfg):
         return clean_path(cfg)
@@ -159,6 +159,9 @@ class PathWindow(ToolWindow):
         reset.pack(side="left")
         Tooltip(reset, tr("path.tip_reset"))
         ttk.Button(row, text=tr("path.accept"), command=self.accept).pack(side="right")
+        self.plain_button = ttk.Button(row, text=tr("path.plain"), command=self.plain_shapes)
+        self.plain_button.pack(side="right", padx=(0, 8))
+        Tooltip(self.plain_button, tr("path.tip_plain"))
 
     def label(self, box, r, text):
         lb = ttk.Label(box, text=text)
@@ -300,6 +303,75 @@ class PathWindow(ToolWindow):
     def accept(self):
         self.drop_loose()
         super().accept()
+
+    def plain_shapes(self):
+        """Turn into plain shapes: each copy (not the shape itself) becomes a shape of its own notes, right after its
+        shape in the list, with the steps after this page; the page goes (the shape = the first copy, its drawing
+        still editable). The window closes; one undo step after the path's own."""
+        self.catch_up()
+        self.drop_loose()
+        if self.at is None or not self.targets or self.page_step() is None:
+            return
+        app, ppq = self.app, self.app.ppq
+        made = {}
+        for i in self.targets:
+            sh = app.shapes[i]
+            fx, k = sh.get("fx") or [], self.at.get(i)
+            cl = clean_path((fx[k] if k is not None and k < len(fx) else {}).get("cfg"))
+            if cl is None or fx[k].get("off"):
+                continue
+            notes, tracks = app.notes_tracks(self.page_cut(sh, k))
+            if not len(notes):
+                continue
+            a = np.column_stack([notes[:, :4], tracks if tracks is not None else np.zeros(len(notes), np.int64)])
+            got = apply_path(a.astype(np.int64), cl, ppq, app.keys, tag=True)
+            news = []
+            for n in np.unique(got[:, -1]).tolist() if len(got) else []:
+                if n == 0:
+                    continue
+                x = got[got[:, -1] == n]
+                rows = np.column_stack([x[:, 0], x[:, 1] - x[:, 0], x[:, 2], x[:, 3], x[:, 4]])
+                new = {**SHAPE_DEFAULTS, **app.defaults,
+                       **notes_shape(rows, ppq, tr("path.plain_name", name=app.shape_label(sh), n=int(n) + 1))}
+                new.pop("cycle", None)  # (the notes keep the colours they had)
+                new.pop("sustain", None)
+                new = clean_shape(new)
+                self.put_fx(new, copied(fx[k + 1:]))  # (the steps after this page: on every copy too)
+                news.append(new)
+            made[i] = news
+        total = sum(len(v) for v in made.values())
+        if not total:
+            return
+        if total > PLAIN_ASK and "plain_path" not in app.big_skip:  # (thousands of shapes make the list slow)
+            go, skip = big_ask.dialog(self, tr("big_ask.title"), tr("path.plain_big", n=f"{total:,}") + "\n\n" +
+                                      tr("big_ask.go"), False)
+            if go and skip:
+                app.big_skip.add("plain_path")
+            if not go:
+                return
+        self.tidy()
+        self.settle()
+        app.roll.cancel_draft()
+        app.push_undo(name=tr("path.plain"))
+        out, picked = [], []
+        for i, sh in enumerate(app.shapes):
+            if i not in made:
+                out.append(sh)
+                continue
+            self.put_fx(sh, [st for j, st in enumerate(sh.get("fx") or []) if j != self.at[i]])
+            picked += range(len(out), len(out) + 1 + len(made[i]))  # (the shape and its copies, selected)
+            out += [sh] + made[i]
+        self.close()
+        app.shapes[:] = out
+        app.select_many(picked, picked[0])
+        app.shapes_changed()
+        app.status.config(text=tr("path.plain_done", n=total))
+
+    @staticmethod
+    def page_cut(sh, k):
+        """sh with only its steps before page k (its notes before it)."""
+        bare = {key: v for key, v in sh.items() if key != "fx"}
+        return dict(bare, fx=sh["fx"][:k]) if k else bare
 
     def sync(self):
         if sorted(self.app.note_tool_sels()) != self.targets:  # (another selection: a point not clicked goes)
@@ -678,6 +750,7 @@ class PathWindow(ToolWindow):
             config(self.entries[key], state="normal" if end else "disabled")
         name = note_name(round(end[1]), self.app.edo()) if end and 0 <= round(end[1]) < 256 else ""
         config(self.key_name, text=name)
+        self.show_plain()
         config(self.add_button, state="normal" if n and not self.placing() and n < MOST_POINTS else "disabled")
         multi = self.app.channel_mode.get() == "auto"
         note = "" if c["colours"] == "keep" or multi else tr("path.needs_multi")
@@ -700,9 +773,16 @@ class PathWindow(ToolWindow):
         config(self.info, text=info)
         self.app.roll.request_redraw()
 
+    def show_plain(self):
+        """Turn into plain shapes: only on a page with a placed path (the page is made at the first preview)."""
+        on = self.at is not None and clean_path(self.cfg) is not None and not self.placing()
+        if str(self.plain_button.cget("state")) != ("normal" if on else "disabled"):
+            self.plain_button.config(state="normal" if on else "disabled")
+
     def preview(self, now=True):
         if self.big_ok(now):
             super().preview(now)
+        self.show_plain()
         self.app.roll.request_redraw()
 
     def big_ok(self, now):
