@@ -1668,7 +1668,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
 
     def plain_label(self, sh):
         if ("picture" in sh or sh.get("merge") or  # (the picture's file name, user; "Merged notes")
-                "notes" in sh and sh.get("name") == tr("join_split.merge_leftovers")):  # (plain notes, user)
+                "notes" in sh and sh.get("name") in (tr("join_split.merge_leftovers"),  # (plain notes, user)
+                                                     tr("mask.applied"))):
             return sh.get("name") or "?"
         if "notes" in sh:
             return tr("app.pasted_notes")

@@ -192,6 +192,35 @@ def mask_area(sh, ppq, nkeys, notes_of):
     return got
 
 
+def unmasked(rendered, shapes):
+    """The rows of rendered a mask can cover (not masks' own: a mask is never masked)."""
+    return rendered[~np.isin(rendered[:, 5], [i for i, sh in enumerate(shapes) if is_mask(sh)])]
+
+
+def shown_by(notes, sh, ppq, nkeys, notes_of):
+    """What one mask shows of notes (rendered rows, no masks' own): (the shapes it covers, the rows that show, start
+    and end trimmed). Apply mask makes exactly these."""
+    none = np.zeros(0, np.int64), notes[:0]
+    a, b = mask_area(sh, ppq, nkeys, notes_of)
+    if not len(a) or not len(notes):
+        return none
+    # (only the notes near the area are looked at closely: millions of others cost one quick pass)
+    rows = (a - OFF) // ROW
+    lo_t, hi_t = int((a - OFF - rows * ROW).min()), int((b - OFF - rows * ROW).max())
+    near = np.flatnonzero((notes[:, 2] >= rows.min()) & (notes[:, 2] <= rows.max()) & (notes[:, 1] > lo_t)
+                          & (notes[:, 0] < hi_t))
+    hit, idx, ps, pe = kept_parts(notes[near], a, b, False)
+    if not hit.any():
+        return none
+    mine = np.unique(notes[near[hit], 5])
+    if sh["mask"]["invert"]:  # (every note of the shapes it touches: the ones away from the hole show whole)
+        near = np.flatnonzero(np.isin(notes[:, 5], mine))
+        hit, idx, ps, pe = kept_parts(notes[near], a, b, True)
+    got = notes[near[idx]].copy()
+    got[:, 0], got[:, 1] = ps, pe
+    return mine, got
+
+
 def mask_view(rendered, shapes, ppq, nkeys, notes_of):
     """The notes as the piano roll draws them with the masks: (rows, covered shapes). Rows of the shapes a mask
     covers come twice: all of them as ghosts (velocity -1, painted faint), then the parts that show over them
@@ -200,30 +229,13 @@ def mask_view(rendered, shapes, ppq, nkeys, notes_of):
     if not masks or not len(rendered):
         return rendered, set()
     owner = rendered[:, 5]
-    free = np.flatnonzero(~np.isin(owner, masks))  # (a mask is never masked)
-    notes = rendered[free]
+    notes = unmasked(rendered, shapes)
     covered, parts = set(), []
     for i in masks:
-        a, b = mask_area(shapes[i], ppq, nkeys, notes_of)
-        if not len(a):
-            continue
-        invert = shapes[i]["mask"]["invert"]
-        # (only the notes near the area are looked at closely: millions of others cost one quick pass)
-        rows = (a - OFF) // ROW
-        lo_t, hi_t = int((a - OFF - rows * ROW).min()), int((b - OFF - rows * ROW).max())
-        near = np.flatnonzero((notes[:, 2] >= rows.min()) & (notes[:, 2] <= rows.max()) & (notes[:, 1] > lo_t)
-                              & (notes[:, 0] < hi_t))
-        hit, idx, ps, pe = kept_parts(notes[near], a, b, False)
-        if not hit.any():
-            continue
-        mine = np.unique(notes[near[hit], 5])
-        if invert:  # (every note of the shapes it touches: the ones away from the hole show whole)
-            near = np.flatnonzero(np.isin(notes[:, 5], mine))
-            hit, idx, ps, pe = kept_parts(notes[near], a, b, True)
-        covered.update(mine.tolist())
-        got = notes[near[idx]].copy()
-        got[:, 0], got[:, 1] = ps, pe
-        parts.append(got)
+        mine, got = shown_by(notes, shapes[i], ppq, nkeys, notes_of)
+        if len(mine):
+            covered.update(mine.tolist())
+            parts.append(got)
     if not covered:
         return rendered, set()
     under = np.isin(owner, list(covered))

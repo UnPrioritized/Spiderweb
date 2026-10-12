@@ -18,11 +18,9 @@ from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, sh
 from notes.gateflip import lifted, put_back, turn_velocities
 from notes.merge import edge_moves, merged, part_rows, reshaped_parts
 from notes.glue import for_part as glue_for_part, glue_box
-from notes.mould import mould_rows
-from notes.slice import clip_segment, crossings, cutter_loops, slice_custom, slice_notes
-from notes.sliced import (CANT, WHOLE_TOOLS, completed, cut_in_two, inner, keep_velocity, knife_hits, knife_in_two,
-                          moved_by, notes_across, outline, rejoined, slice_in_two, split_here_ok, tools, tooled,
-                          velocity)
+from notes.slice import clip_segment, crossings, slice_custom, slice_notes
+from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
+                          rejoined, slice_in_two, split_here_ok, tooled)
 from notes.smooth import smooth_path
 from notes.joined import (custom_groups, join_shapes, join_velocity, joined_end_dot, piece_velocity, sections,
                           split_at, split_custom, split_pieces)
@@ -521,57 +519,6 @@ class JoinSplit:
             new += parts
         self.shapes[:] = new
         return picked
-
-    def cutter_ok(self, i):
-        """Can shape i cut the other selected shapes ("Cut with this shape")? It needs an inside, and something
-        else selected."""
-        return i in self.sels and len(self.sels) >= 2 and bool(cutter_loops(self.shapes[i]))
-
-    def cookie_cut(self, i):
-        """Right-click → Cut with this shape (user, 2026-10-12, like a cookie cutter): every other selected line kind
-        is cut BY NOTES (mould.py): on each key row the inside = the gaps between shape i's notes, inside its outline.
-        Each becomes an inside and an outside piece keeping the whole's notes on their side (a note across a wall
-        trimmed to fit). The cutter stays; the outside pieces end up selected (to delete or keep)."""
-        self.commit_typing()
-        cutter = self.shapes[i]
-        loops = cutter_loops(cutter)
-        if not loops:
-            return
-        rows = mould_rows(self.notes_of(cutter), loops, self.ppq)
-        flat = [[[round(float(b), 9), round(float(k), 9)] for b, k in lp] for lp in loops]
-        done, skipped = {}, 0
-        for j in sorted(self.sels):
-            sh = self.shapes[j]
-            if j == i:
-                continue
-            if sh["kind"] not in LINE_KINDS:
-                skipped += 1
-                continue
-            whole = dict(outline(sh), **velocity(sh), **tools(sh), **inner(sh))
-            pieces = []
-            for side in (1, -1):
-                h = copy.deepcopy(sh)
-                for k in WHOLE_TOOLS:  # (the whole's glue / pages are done before the cut now)
-                    h.pop(k, None)
-                h["cut"] = {"whole": whole, "was": outline(h), "part": [0.0, None], "vel": None, "marks": [],
-                            "mould": {"rows": rows, "side": side, "loops": flat}}
-                pieces.append(h)
-            if all(len(self.notes_of(h)) for h in pieces):  # (both sides have notes: it was cut)
-                done[j] = pieces
-        if not done:
-            self.status.config(text=tr("join_split.cookie_nothing"))
-            return
-
-        def outside(p):
-            return p["cut"]["mould"]["side"] < 0
-        picked = self.put_pieces(done, (), tr("join_split.cookie"), outside)
-        if picked:
-            self.select_many(picked, picked[0])
-        else:
-            self.select(self.shapes.index(cutter))
-        self.shapes_changed()
-        self.status.config(text=tr("join_split.cookie_done", shapes=len(done), n=len(picked)) +
-                           (tr("join_split.cookie_skipped", n=skipped) if skipped else ""))
 
     def all_rows(self, sh):
         """A pasted-notes shape's notes and tracks for the Slice tool, rows moved past the top key too (they're hidden

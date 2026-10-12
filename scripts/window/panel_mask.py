@@ -3,9 +3,14 @@
 import tkinter as tk
 from tkinter import ttk
 
+import numpy as np
+
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.mask import MASK_DEFAULTS, MOST_SIZE, SHOWS, THICKNESS, can_mask, is_solid, loops_of
+from notes.custom import notes_shape
+from notes.engine import SHAPE_DEFAULTS, clean_shape
+from notes.mask import (MASK_DEFAULTS, MOST_SIZE, SHOWS, THICKNESS, can_mask, is_mask, is_solid, loops_of, shown_by,
+                        unmasked)
 from window import look
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
 
@@ -57,6 +62,9 @@ class MaskPanel:
                                                     command=lambda: self.on_mask("invert"))
         b.pack(anchor="w", pady=(1, 0))
         Tooltip(b, tr("mask.invert_tip"))
+        b = ttk.Button(rows, text=tr("mask.apply"), command=self.apply_masks)
+        b.pack(anchor="w", pady=(4, 0))
+        Tooltip(b, tr("mask.apply_tip"))
 
     def mask_targets(self):
         return [self.shapes[i] for i in sorted(self.sels) if i < len(self.shapes) and can_mask(self.shapes[i])]
@@ -169,6 +177,43 @@ class MaskPanel:
         # (the next mask drawn starts with this thickness; always sounding, not inverted: user)
         self.mask_defaults = dict(MASK_DEFAULTS, **{k: new[-1][k] for k in THICKNESS})
         self.mask_done()
+
+    def apply_masks(self):
+        """Apply mask (panel button / right-click): each selected mask's shown notes -> a NEW shape of plain notes,
+        "Masked notes", just under the mask in the list (user: the shapes under it unchanged, the mask stays to be
+        moved and applied again; its own notes never copied). The notes as the preview shows them, velocities and
+        channels as they sound (track = the channel each came out on). The new shapes are selected; one undo step."""
+        self.commit_typing()
+        masks = [i for i in sorted(self.sels) if i < len(self.shapes) and is_mask(self.shapes[i])]
+        if not masks:
+            return
+        if self.notes_late:  # (notes still catching up with a drag: made now)
+            self.shapes_changed(now=True)
+        notes = unmasked(self.rendered, self.shapes)
+        made = {}
+        for i in masks:
+            got = shown_by(notes, self.shapes[i], self.ppq, self.keys, self.notes_of)[1]
+            if not len(got):
+                continue
+            rows = np.column_stack([got[:, 0], got[:, 1] - got[:, 0], got[:, 2], got[:, 3], got[:, 4]])
+            new = {**SHAPE_DEFAULTS, **self.defaults, **notes_shape(rows, self.ppq, tr("mask.applied"))}
+            new.pop("cycle", None)  # (Colours for new shapes: not on it, the notes keep the colours they had)
+            made[i] = (clean_shape(new), len(got))
+        if not made:
+            self.status.config(text=tr("mask.apply_nothing"))
+            return
+        self.roll.cancel_draft()
+        self.push_undo(name=tr("mask.apply_undo"))
+        out, picked = [], []
+        for i, sh in enumerate(self.shapes):
+            if i in made:  # (before the mask: its dashed line and border notes stay on top)
+                picked.append(len(out))
+                out.append(made[i][0])
+            out.append(sh)
+        self.shapes[:] = out
+        self.select_many(picked, picked[0])
+        self.shapes_changed()
+        self.status.config(text=tr("mask.apply_done", n=len(made), notes=sum(n for _, n in made.values())))
 
     def mask_done(self):
         self.shapes_changed()
