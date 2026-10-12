@@ -16,6 +16,7 @@ from notes.bezier import anchor_count, nearest, split
 from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_notes_tracks, shape_path
 from notes.gateflip import lifted, put_back, turn_velocities
+from notes.mask import same_mask
 from notes.merge import edge_moves, merged, part_rows, reshaped_parts
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom, slice_notes
@@ -255,7 +256,8 @@ class JoinSplit:
             for sh in new:
                 sh["sustain"] = copy.deepcopy(sus[0])
         masks = [self.shapes[i].get("mask") for i in pair]
-        if masks[0] and masks[0] == masks[1]:  # (both masks alike: so is what's made of them, like Join)
+        if masks[0] and masks[1] and same_mask(*masks):  # (both masks alike: so is what's made of them, like Join;
+            # groups apart, the first one's)
             for sh in new:
                 sh["mask"] = copy.deepcopy(masks[0])
         for p in parts:

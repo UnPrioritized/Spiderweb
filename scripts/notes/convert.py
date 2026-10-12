@@ -99,6 +99,9 @@ def shared_settings(shapes):
         if all(v is None for v in vals):
             continue
         same = [cycle_effect(v) for v in vals] if key == "cycle" else vals  # (Colours: by what they do)
+        if key == "mask" and all(vals):  # (masks alike but their groups: the first one's, hunt 2026-10-12)
+            from notes.mask import same_mask
+            same = [vals[0] if same_mask(v, vals[0]) else v for v in vals]
         if all(v == same[0] for v in same) and (key != "glue" or vals[0] is True):
             keep[key] = json.loads(json.dumps(vals[0]))
         else:

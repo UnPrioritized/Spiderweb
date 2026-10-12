@@ -28,7 +28,8 @@ from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
                             turn_velocities, why_not as gate_why_not)
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
-from notes.mask import MASK_DEFAULTS, can_mask, is_mask, mask_view, picture_like, pinned_slots, silent
+from notes.mask import (MASK_DEFAULTS, can_mask, is_mask, mask_view, picture_like, pinned_slots, silent,
+                        tidy_groups)
 from notes.merge import velocity_reversed as merge_vrev
 from notes.sustain import is_sustained
 from notes.pattern import moved_formulas
@@ -1036,6 +1037,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
             self._late_notes = None
         if sync_groups(self.shapes):  # Add between: the steps follow their first / last shape (between.py)
             self.after_idle(self.sync_title)  # (a step changed by hand is a key now)
+        if tidy_groups(self.shapes):  # (masks: a group of one = on its own, the first member Add; mask.py)
+            self.after_idle(self.sync_mask)
         self.remake_merges()
         busy = self._notes_time + self._mask_time  # (the masks' preview is made after the notes, mask.py)
         slow = busy > 0.15

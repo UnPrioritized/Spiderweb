@@ -10,14 +10,13 @@ from files.mathexpr import calc, fmt
 from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, clean_shape
 from notes.sustain import is_sustained
-from notes.mask import (MASK_DEFAULTS, MODES, MOST_SIZE, SHOWS, THICKNESS, can_mask, free_colour, is_mask, is_solid,
-                        loops_of, mask_units, unit_of, unit_shown, unmasked)
+from notes.mask import (GROUP_KEYS, MASK_DEFAULTS, MODES, MOST_SIZE, SHOWS, THICKNESS, can_mask, free_colour, is_mask,
+                        is_solid, loops_of, mask_units, new_group_id, tidy_groups, unit_of, unit_shown, unmasked)
 from window import look
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
 
 SHOW_CHOICES = [(v, tr("mask.show_" + v)) for v in SHOWS]
 MODE_CHOICES = [(v, tr("mask.mode_" + v)) for v in MODES]
-GROUP_KEYS = ("group", "mode", "colour")
 
 
 class MaskPanel:
@@ -311,14 +310,14 @@ class MaskPanel:
             m = self.shapes[next(iter(old))[0]]["mask"]
             gid, colour = m["group"], m.get("colour", 0)
         else:
-            gid = 1 + max((self.shapes[i]["mask"].get("group", 0) for u in units for i in u), default=0)
+            gid = new_group_id(self.shapes)
             colour = free_colour(self.shapes, masks, self.ppq, self.keys, self.notes_of)
         self.push_undo(name=tr("mask.combine_undo"))
         for i in masks:
             m = self.shapes[i]["mask"]
             self.shapes[i]["mask"] = dict(m, group=gid, colour=colour, mode=m.get("mode", "add") if
                                           m.get("group") == gid else "add")
-        self.lone_groups()
+        tidy_groups(self.shapes)
         self.mask_done()
         self.status.config(text=tr("mask.combine_done", n=len(unit_of(mask_units(self.shapes), masks[0]))))
 
@@ -330,15 +329,9 @@ class MaskPanel:
         self.push_undo(name=tr("mask.separate_undo"))
         for i in self.mask_indices():
             self.shapes[i]["mask"] = {k: v for k, v in self.shapes[i]["mask"].items() if k not in GROUP_KEYS}
-        self.lone_groups()
+        tidy_groups(self.shapes)
         self.mask_done()
-
-    def lone_groups(self):
-        """A group left with one member: that one on its own again (no group settings left on it)."""
-        for u in mask_units(self.shapes):
-            m = self.shapes[u[0]]["mask"]
-            if len(u) == 1 and "group" in m:
-                self.shapes[u[0]]["mask"] = {k: v for k, v in m.items() if k not in GROUP_KEYS}
+        self.status.config(text=tr("mask.separate_done"))
 
     def mask_done(self):
         self.shapes_changed()

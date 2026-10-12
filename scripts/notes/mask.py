@@ -19,6 +19,7 @@ A group's members are worked through in the Shapes list's order, top first; the 
 Effects); Apply on any member = the whole group. A group left with one member = a mask on its own."""
 
 import math
+import random
 
 import numpy as np
 
@@ -115,6 +116,41 @@ def mask_units(shapes):
                 groups[g] = [i]
                 units.append(groups[g])
     return units
+
+
+GROUP_KEYS = ("group", "mode", "colour")
+
+
+def new_group_id(shapes):
+    """A group number no mask here uses, picked at random so it's never used again later or in another project (a
+    mask pasted / split back joins only its own group, if that is still there)."""
+    used = {sh["mask"].get("group") for sh in shapes if is_mask(sh)}
+    while True:
+        g = random.randrange(1, 10 ** 9)
+        if g not in used:
+            return g
+
+
+def tidy_groups(shapes):
+    """No hidden group settings (hunt 2026-10-12): a mask left alone in its group loses them (so a duplicate of it
+    is a second lone mask), a group's first member is Add (as the panel shows it). True if anything changed."""
+    changed = False
+    for u in mask_units(shapes):
+        m = shapes[u[0]]["mask"]
+        if "group" not in m:
+            continue
+        if len(u) == 1:
+            shapes[u[0]]["mask"] = {k: v for k, v in m.items() if k not in GROUP_KEYS}
+            changed = True
+        elif m.get("mode", "add") != "add":
+            shapes[u[0]]["mask"] = dict(m, mode="add")
+            changed = True
+    return changed
+
+
+def same_mask(a, b):
+    """Two masks alike apart from their groups (Join / merge keep the first one's)."""
+    return {k: v for k, v in a.items() if k not in GROUP_KEYS} == {k: v for k, v in b.items() if k not in GROUP_KEYS}
 
 
 def unit_of(units, i):
@@ -238,6 +274,7 @@ def kept_parts(notes, a, b, invert):
 
 
 _areas = {}
+_room = [16]  # (how many areas are kept: mask_view makes it room for every mask, hunt: 17 remade them all)
 
 
 def mask_area(sh, ppq, nkeys, notes_of):
@@ -256,9 +293,11 @@ def mask_parts(sh, ppq, nkeys, notes_of):
     m = sh["mask"]
     src = area_source(sh)
     key = (shape_key(src), ppq, nkeys)  # (big pasted / image notes kept as the strings themselves: quick)
-    got = _areas.get(key)
-    if got is None:
-        if len(_areas) > 16:  # (a few: a big mask's area is many MB)
+    got = _areas.pop(key, None)
+    if got is not None:
+        _areas[key] = got  # (used last: kept longest)
+    else:
+        while len(_areas) > _room[0]:  # (a big mask's area is many MB, but every mask's is wanted at each change)
             _areas.pop(next(iter(_areas)))
         notes = notes_of(src)
         tpk = m["k"] * ppq
@@ -401,6 +440,7 @@ def mask_view(rendered, shapes, ppq, nkeys, notes_of, pattern=None):
     (start, end trimmed; every mask's own, they may overlap), taken from pattern (rendered without the masks' own
     notes; None = rendered). No masks = rendered itself."""
     units = mask_units(shapes)
+    _room[0] = max(16, 2 * sum(map(len, units)))
     if not units or not len(rendered):
         return rendered, set()
     owner = rendered[:, 5]
