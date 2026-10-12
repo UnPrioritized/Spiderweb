@@ -1,0 +1,27 @@
+A mask shapes a note pattern without cutting it. Draw your pattern first (often many shapes), then tick Mask (M) on the toolbar and draw over it: whatever you draw now becomes a mask. The shapes under it show only inside the mask; the rest is drawn faint. Nothing is cut: the shapes under it stay whole and still sound and export, so you can move or change the mask at any time.
+
+Any drawing tool makes a mask, Live shape too (paint with the mask like a brush). To turn a shape you already drew into a mask, select it and tick Mask in the side panel; untick it to make it a normal shape again. A mask's line is always shown, dashed.
+
+A mask covers every shape it touches, never other masks. To use a mask's notes as the pattern, untick Mask on it.
+
+What shows: a Fill or Spam mask shows its whole inside. Other closed shapes show their inside too (between their own notes), or only a band along their line when Shows is set to Along the line. Open lines (lines, curves, freehand) always show a band along the line. Thickness is how wide that band is, in keys, even all the way round. With Inside it widens the inside past the outline.
+
+A note across the mask's edge is cut exactly there, and every piece is kept, however short.
+
+Own notes sound (a border): ticked, the mask's own notes sound like any shape's, as a border, and the pattern never overlaps them. Unticked, the mask is a pure cutter: only its dashed line shows.
+
+Invert (cut a hole): the pattern shows everywhere except inside the mask, like a cookie cutter.
+
+Apply mask (side panel button or right-click): makes a new shape, Masked notes, of exactly the notes you see through the mask, colours and channels kept. The shapes under it don't change and the mask stays, so you can move it and apply it again, like a stamp. The mask's own notes aren't copied. The new shape is selected, so a drag moves it away.
+
+Combining masks: select two or more masks, right-click: Combine masks. They then work as one group, and their dashed lines get the group's own colour. Each mask in the group has a Mode in the side panel:
+
+• Add: the pattern also shows inside this mask.
+
+• Subtract: this mask cuts the pattern away.
+
+• Intersect: the pattern shows only where this mask and the ones above it overlap.
+
+The masks are worked through in the Shapes list's order, top first, and the first one always adds. Invert works on each mask by itself before its Mode. Apply mask on any mask of a group applies the whole group. Right-click: Separate masks takes the selected masks out of their group. Masks not in a group each work on their own.
+
+Clicking: a click where the pattern shows through a mask picks the mask. A plain click on the selected shape picks the next shape under the mouse, round again; a drag still moves the selected one.

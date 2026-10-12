@@ -143,8 +143,7 @@ class ShapeMenu:
         self.sustain_item(m)
         self.between_items(item, i)
         self.merge_menu(m)
-        if any(is_mask(app.shapes[j]) for j in app.sels if j < len(app.shapes)):
-            item(tr("mask.apply"), "", app.apply_masks)
+        self.mask_items(item)
         if len(app.sels) >= 2:  # (greyed out, saying why, when something else is selected too)
             ok = app.can_join()
             item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
@@ -196,8 +195,7 @@ class ShapeMenu:
         if app.between_pair():
             item(tr("between.menu_add"), "", app.add_between)
         self.merge_menu(m)
-        if any(is_mask(app.shapes[j]) for j in app.sels if j < len(app.shapes)):
-            item(tr("mask.apply"), "", app.apply_masks)
+        self.mask_items(item)
         ok = app.can_join()
         item(tr("roll_menu.join_shapes_into_one_curve") if ok else tr("roll_menu.join_shapes_into_one_curve_only"),
              tr("roll_menu.ctrl_g"), app.join_selected, ok)
@@ -226,6 +224,17 @@ class ShapeMenu:
         if b.get("vel"):
             item(tr("between.menu_group_vel"), "", lambda: app.group_velocity(i))
         item(tr("between.menu_unlink"), "", lambda: app.unlink_between(i))
+
+    def mask_items(self, item):
+        """Apply mask, Combine masks / Separate masks, when masks are selected."""
+        app = self.app
+        if not any(is_mask(app.shapes[j]) for j in app.sels if j < len(app.shapes)):
+            return
+        item(tr("mask.apply"), "", app.apply_masks)
+        if app.can_combine():
+            item(tr("mask.combine"), "", app.combine_masks)
+        if app.can_separate():
+            item(tr("mask.separate"), "", app.separate_masks)
 
     def merge_menu(self, m):
         """Gate sensitive merge ▸ Merge to right / Merge to left (two shapes selected; no anchor: where the menu was

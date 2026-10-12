@@ -196,6 +196,14 @@ ORIGIN, ORIGIN_PICKED = pick("#efc0c0", "#7a5656"), pick("#e89a9a", "#a86a6a")  
 DRAFT_LINE = pick("#0a8f0a", "#3fcf3f")  # the shape being drawn
 GHOST_NOTE = pick(("#f0f0f0", "#dadada"), ("#454548", "#505054"))  # a masked shape's notes the mask hides (mask.py)
 MASK_LINE, MASK_LINE_PICKED = pick("#008c8c", "#3fc9c9"), pick("#00b3b3", "#7ae6e6")  # a mask's dashed line
+MASK_GROUPS = [  # a mask group's dashed line, (line, picked) (mask.GROUP_COLOURS; never red or the plain mask's teal)
+    (pick("#d97a00", "#f0a040"), pick("#ff9a20", "#ffc580")),  # orange
+    (pick("#7b3fb8", "#b58ae6"), pick("#9a5ce0", "#d4b8f5")),  # purple
+    (pick("#c2338a", "#ec7fc0"), pick("#e04fa8", "#f6b3dc")),  # pink
+    (pick("#2563c9", "#7aa8f0"), pick("#3d7ef0", "#b3cdf8")),  # blue
+    (pick("#5f8a1c", "#a2cc5c"), pick("#78aa28", "#c8e69a")),  # green
+    (pick("#8a5a2b", "#c99b6c"), pick("#a8703a", "#e0c09c")),  # brown
+]
 MASKED_LINE = pick("#f0c8c8", "#6a5a5a")  # the line of a shape a mask covers: faint
 CUT, CUT_UNDER = pick("#d00000", "#ff5050"), pick("#ffffff")  # Slice line, cut marks, scissors (+ the white under a mark)
 FAINT_CUT = pick("#f0c8c8", "#8a5a5a")  # the really faint line from a piece's cut end to the other piece's (user)

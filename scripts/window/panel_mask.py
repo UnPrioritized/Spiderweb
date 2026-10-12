@@ -10,12 +10,14 @@ from files.mathexpr import calc, fmt
 from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, clean_shape
 from notes.sustain import is_sustained
-from notes.mask import (MASK_DEFAULTS, MOST_SIZE, SHOWS, THICKNESS, can_mask, is_mask, is_solid, loops_of, shown_by,
-                        unmasked)
+from notes.mask import (MASK_DEFAULTS, MODES, MOST_SIZE, SHOWS, THICKNESS, can_mask, free_colour, is_mask, is_solid,
+                        loops_of, mask_units, unit_of, unit_shown, unmasked)
 from window import look
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
 
 SHOW_CHOICES = [(v, tr("mask.show_" + v)) for v in SHOWS]
+MODE_CHOICES = [(v, tr("mask.mode_" + v)) for v in MODES]
+GROUP_KEYS = ("group", "mode", "colour")
 
 
 class MaskPanel:
@@ -63,7 +65,14 @@ class MaskPanel:
                                                     command=lambda: self.on_mask("invert"))
         b.pack(anchor="w", pady=(1, 0))
         Tooltip(b, tr("mask.invert_tip"))
-        b = ttk.Button(rows, text=tr("mask.apply"), command=self.apply_masks)
+        c = self.mask_mode_row = ttk.Frame(rows)  # (masks in a group only: right-click Combine masks)
+        ttk.Label(c, text=tr("mask.mode")).pack(side="left")
+        self.mask_mode_box = ttk.Combobox(c, values=[t for _, t in MODE_CHOICES], state="readonly",
+                                          width=max(len(t) for _, t in MODE_CHOICES))
+        self.mask_mode_box.pack(side="left", padx=4)
+        self.mask_mode_box.bind("<<ComboboxSelected>>", lambda ev: (self.on_mask("mode"), self.roll.focus_set()))
+        self.mask_mode_tip = Tooltip(self.mask_mode_box, tr("mask.mode_tip"))
+        b = self.mask_apply_button = ttk.Button(rows, text=tr("mask.apply"), command=self.apply_masks)
         b.pack(anchor="w", pady=(4, 0))
         Tooltip(b, tr("mask.apply_tip"))
 
@@ -125,6 +134,28 @@ class MaskPanel:
                 self.mask_rows.pack(anchor="w", padx=(20, 0), pady=(1, 0))
             else:
                 self.mask_rows.pack_forget()
+        # Mode: only while every picked mask is in a group; the first in its group always adds (greyed when only firsts)
+        units = mask_units(self.shapes)
+        picked = [unit_of(units, i) for i in self.mask_indices()]
+        grouped = every and all(u and len(u) > 1 for u in picked)
+        if grouped:
+            later = [self.shapes[i]["mask"].get("mode", "add") for i, u in zip(self.mask_indices(), picked) if i != u[0]]
+            modes = set(later) or {"add"}
+            self._loading = True
+            if len(modes) == 1:
+                self.mask_mode_box.current(MODES.index(next(iter(modes))))
+            show_mixed(self.mask_mode_box, len(modes) > 1, self.mask_mode_tip,
+                       tr("mask.mode_tip") + ("" if later else "\n\n" + tr("mask.mode_first")))
+            self._loading = False
+            self.mask_mode_box.config(state="readonly" if later else "disabled")
+        if grouped != bool(self.mask_mode_row.winfo_manager()):
+            if grouped:
+                self.mask_mode_row.pack(anchor="w", pady=(1, 0), before=self.mask_apply_button)
+            else:
+                self.mask_mode_row.pack_forget()
+
+    def mask_indices(self):
+        return [i for i in sorted(self.sels) if i < len(self.shapes) and is_mask(self.shapes[i])]
 
     def on_mask(self, what, left=None):
         """The Mask tick (what = "on"), a tick under it, Shows or the Thickness box. Only what was changed goes to each
@@ -157,6 +188,13 @@ class MaskPanel:
                 return
             value = SHOWS[self.mask_show_box.current()]
             new = [dict(m, show=value) for m in masks]
+        elif what == "mode":
+            if self.mask_mode_box.current() < 0:
+                return
+            value = MODES[self.mask_mode_box.current()]
+            units = mask_units(self.shapes)
+            firsts = {id(self.shapes[u[0]]["mask"]) for u in units}  # (the first in a group always adds: left alone)
+            new = [m if id(m) in firsts or "group" not in m else dict(m, mode=value) for m in masks]
         else:
             e, var = self.mask_size_entry, self.mask_size_var
             if not var.get().strip() and getattr(e, "blank_from", None):  # (Mixed, still empty)
@@ -183,17 +221,20 @@ class MaskPanel:
         """Apply mask (panel button / right-click): each selected mask's shown notes -> a NEW shape of plain notes,
         "Masked notes", just under the mask in the list (user: the shapes under it unchanged, the mask stays to be
         moved and applied again; its own notes never copied). The notes as the preview shows them, velocities and
-        channels as they sound (track = the channel each came out on). The new shapes are selected; one undo step."""
+        channels as they sound (track = the channel each came out on). A mask in a group = the whole group, once,
+        before its first member (user). The new shapes are selected; one undo step."""
         self.commit_typing()
-        masks = [i for i in sorted(self.sels) if i < len(self.shapes) and is_mask(self.shapes[i])]
+        masks = self.mask_indices()
         if not masks:
             return
         if self.notes_late:  # (notes still catching up with a drag: made now)
             self.shapes_changed(now=True)
         notes = unmasked(self.pattern, self.shapes)  # (as they sound without the masks' own notes)
+        units = mask_units(self.shapes)
         made, count = {}, 0
-        for i in masks:
-            got = shown_by(notes, self.shapes[i], self.ppq, self.keys, self.notes_of)[1]
+        for unit in [u for u in units if set(u) & set(masks)]:
+            i = unit[0]
+            got = unit_shown(notes, self.shapes, unit, self.ppq, self.keys, self.notes_of)[1]
             if not len(got):
                 continue
             count += len(got)
@@ -240,6 +281,61 @@ class MaskPanel:
         if multi and not picture:
             sh["own_slots"] = [float(v) for v in sh["pts"][0]]
         return sh
+
+    def can_combine(self):
+        """Right-click Combine masks: 2 or more masks selected, not all already one group."""
+        masks = self.mask_indices()
+        if len(masks) < 2:
+            return False
+        u = unit_of(mask_units(self.shapes), masks[0])
+        return not set(masks) <= set(u)
+
+    def can_separate(self):
+        units = mask_units(self.shapes)
+        return any(len(unit_of(units, i)) > 1 for i in self.mask_indices())
+
+    def combine_masks(self):
+        """Combine masks (right-click): the selected masks become one group, worked out together in the list's order,
+        each by its Mode (user). Picked masks of one group already: the rest join it (its colour kept); else a new
+        group, its line colour the first one no group it overlaps uses (user)."""
+        if not self.can_combine():
+            return
+        self.commit_typing()
+        masks = self.mask_indices()
+        units = mask_units(self.shapes)
+        old = {tuple(u) for u in (unit_of(units, i) for i in masks) if len(u) > 1}
+        if len(old) == 1:
+            m = self.shapes[next(iter(old))[0]]["mask"]
+            gid, colour = m["group"], m.get("colour", 0)
+        else:
+            gid = 1 + max((self.shapes[i]["mask"].get("group", 0) for u in units for i in u), default=0)
+            colour = free_colour(self.shapes, masks, self.ppq, self.keys, self.notes_of)
+        self.push_undo(name=tr("mask.combine_undo"))
+        for i in masks:
+            m = self.shapes[i]["mask"]
+            self.shapes[i]["mask"] = dict(m, group=gid, colour=colour, mode=m.get("mode", "add") if
+                                          m.get("group") == gid else "add")
+        self.lone_groups()
+        self.mask_done()
+        self.status.config(text=tr("mask.combine_done", n=len(unit_of(mask_units(self.shapes), masks[0]))))
+
+    def separate_masks(self):
+        """Separate masks (right-click): the selected masks leave their groups, each on its own again."""
+        if not self.can_separate():
+            return
+        self.commit_typing()
+        self.push_undo(name=tr("mask.separate_undo"))
+        for i in self.mask_indices():
+            self.shapes[i]["mask"] = {k: v for k, v in self.shapes[i]["mask"].items() if k not in GROUP_KEYS}
+        self.lone_groups()
+        self.mask_done()
+
+    def lone_groups(self):
+        """A group left with one member: that one on its own again (no group settings left on it)."""
+        for u in mask_units(self.shapes):
+            m = self.shapes[u[0]]["mask"]
+            if len(u) == 1 and "group" in m:
+                self.shapes[u[0]]["mask"] = {k: v for k, v in m.items() if k not in GROUP_KEYS}
 
     def mask_done(self):
         self.shapes_changed()

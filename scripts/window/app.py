@@ -376,7 +376,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
         live = ttk.Checkbutton(bar, text=tr("app.live_shape_g"), variable=self.live)
         live.pack(side="left", padx=(12, 0))
         Tooltip(live, BY_ID["live"]["tip"])
-        b = ttk.Checkbutton(bar, text=tr("mask.tick"), variable=self.mask)
+        b = ttk.Checkbutton(bar, text=tr("mask.tick"), variable=self.mask,
+                            command=lambda: self.mask.get() and self.tips.show("masks"))
         b.pack(side="left", padx=(8, 0))
         Tooltip(b, tr("mask.tick_tip"))
         bar = self.option_bar = ttk.Frame(top)

@@ -13,7 +13,10 @@ Invert = the other way round: the pattern shows everywhere but there (a hole). W
 the pattern never overlaps them (user), inverted or not. A note across the edge is cut exactly
 there and every piece kept, however short (user: dropping short pieces made long notes vanish while short ones showed).
 sh["mask"] = {"size": keys, "k": beats per key, "invert": bool, "own": bool (its own notes sound, a border; False =
-silent, only its line shows), "show": "inside" / "line" (missing = inside for closed shapes)}."""
+silent, only its line shows), "show": "inside" / "line" (missing = inside for closed shapes), and in a group (right-click
+Combine masks, user): "group": number, "mode": "add" / "subtract" / "intersect", "colour": the group's line colour}.
+A group's members are worked through in the Shapes list's order, top first; the first always adds (user, like After
+Effects); Apply on any member = the whole group. A group left with one member = a mask on its own."""
 
 import math
 
@@ -25,6 +28,8 @@ MASK_DEFAULTS = {"size": 2.0, "k": 0.0625, "invert": False, "own": True}
 MOST_SIZE = 127.0  # the thickness box's largest value (keys)
 SOLID = ("fill", "spam")  # custom shapes with these insides mask with the whole inside
 SHOWS = ("inside", "line")
+MODES = ("add", "subtract", "intersect")
+GROUP_COLOURS = 6  # (a small set, look.MASK_GROUPS: groups may share one, user)
 OFF = 1 << 40  # ticks are kept as row * ROW + tick + OFF: one sorted list for every key row
 ROW = 1 << 42
 
@@ -87,7 +92,40 @@ def clean_mask(m):
            "own": m.get("own") is not False}
     if m.get("show") in SHOWS:
         out["show"] = m["show"]
+    g, c = m.get("group"), m.get("colour")
+    if isinstance(g, (int, float)) and not isinstance(g, bool) and math.isfinite(g) and g == int(g) and 0 < g < 1e9:
+        out["group"] = int(g)
+        out["mode"] = m["mode"] if m.get("mode") in MODES else "add"
+        ok = isinstance(c, (int, float)) and not isinstance(c, bool) and math.isfinite(c) and c == int(c)
+        out["colour"] = int(c) % GROUP_COLOURS if ok else 0
     return out
+
+
+def mask_units(shapes):
+    """The masks worked out together: a list of lists of shape numbers, each group's members in the list's order (top
+    first), every mask not in a group (or the last one left in it) on its own."""
+    units, groups = [], {}
+    for i, sh in enumerate(shapes):
+        if is_mask(sh):
+            g = sh["mask"].get("group")
+            if g is None:
+                units.append([i])
+            elif g in groups:
+                groups[g].append(i)
+            else:
+                groups[g] = [i]
+                units.append(groups[g])
+    return units
+
+
+def unit_of(units, i):
+    return next((u for u in units if i in u), None)
+
+
+def in_group(units, i):
+    """Is shape i a mask in a group of 2 or more?"""
+    u = unit_of(units, i)
+    return bool(u) and len(u) > 1
 
 
 def loops_of(sh):
@@ -206,6 +244,15 @@ _areas = {}
 def mask_area(sh, ppq, nkeys, notes_of):
     """A mask shape's area (starts, ends) and its reach (the same before its own notes are taken out: which shapes
     it covers), remembered. notes_of(shape) = its notes."""
+    return mask_parts(sh, ppq, nkeys, notes_of)[:4]
+
+
+def own_area(sh, ppq, nkeys, notes_of):
+    """The spans of a mask's own notes the pattern never overlaps (sounding, not Fill / Spam), else empty ones."""
+    return mask_parts(sh, ppq, nkeys, notes_of)[4:]
+
+
+def mask_parts(sh, ppq, nkeys, notes_of):
     from notes.engine import shape_key
     m = sh["mask"]
     src = area_source(sh)
@@ -225,13 +272,89 @@ def mask_area(sh, ppq, nkeys, notes_of):
         else:
             got = area(notes, m["size"], tpk, nkeys)
         reach = got
+        own = area((), 0, 0, nkeys)
         if m["own"] and not is_solid(sh) and len(notes):
             # its own notes sound (a border): the pattern never overlaps them (user), whatever the thickness / gate
             own = area(notes, 0, 0, nkeys)
-            got = merged(np.concatenate([got[0], own[0]]), np.concatenate([got[1], own[1]])) if m["invert"] else \
-                minus(*got, *own)
-        got = _areas[key] = got + reach
+            got = joined(got, own) if m["invert"] else minus(*got, *own)
+        got = _areas[key] = got + reach + own
     return got
+
+
+def joined(x, y):
+    """Spans in x or y."""
+    return merged(np.concatenate([x[0], y[0]]), np.concatenate([x[1], y[1]]))
+
+
+def common(x, y):
+    """Spans in both x and y."""
+    return minus(*x, *minus(*x, *y))
+
+
+def unit_area(shapes, unit, ppq, nkeys, notes_of):
+    """The area of masks worked out together (mask_units): (starts, ends, reach starts, reach ends, inverted). Each
+    member's area (its Invert = everywhere but there) joins the result by its mode, the first adding (user); the reach
+    = every member's (the shapes any of them touches are covered). Sounding own notes stay free of the pattern."""
+    first = shapes[unit[0]]
+    a, b, ra, rb = mask_area(first, ppq, nkeys, notes_of)
+    cur, neg, reach = (a, b), first["mask"]["invert"], (ra, rb)
+    if len(unit) == 1:
+        return a, b, ra, rb, neg
+    own = own_area(first, ppq, nkeys, notes_of)
+    for i in unit[1:]:
+        sh = shapes[i]
+        m = sh["mask"]
+        a, b, ra, rb = mask_area(sh, ppq, nkeys, notes_of)
+        reach, own = joined(reach, (ra, rb)), joined(own, own_area(sh, ppq, nkeys, notes_of))
+        # (kept as spans + "everywhere but these": not x = neg; A - B = A and not B)
+        x, nx, mode = (a, b), m["invert"], m.get("mode", "add")
+        if mode == "subtract":
+            nx, mode = not nx, "intersect"
+        if mode == "add":
+            if not neg and not nx:
+                cur = joined(cur, x)
+            elif neg and nx:  # (not a or not b = not (a and b))
+                cur = common(cur, x)
+            elif neg:  # (not a or b = not (a - b))
+                cur = minus(*cur, *x)
+            else:  # (a or not b = not (b - a))
+                cur, neg = minus(*x, *cur), True
+        else:
+            if not neg and not nx:
+                cur = common(cur, x)
+            elif neg and nx:  # (not a and not b = not (a or b))
+                cur = joined(cur, x)
+            elif neg:  # (not a and b = b - a)
+                cur, neg = minus(*x, *cur), False
+            else:
+                cur = minus(*cur, *x)
+    cur = joined(cur, own) if neg else minus(*cur, *own)
+    return cur[0], cur[1], reach[0], reach[1], neg
+
+
+def reach_box(sh, ppq, nkeys, notes_of):
+    """The box round a mask's reach: (lowest key, highest key, first tick, last tick), None when empty."""
+    ra, rb = mask_area(sh, ppq, nkeys, notes_of)[2:]
+    if not len(ra):
+        return None
+    rows = (ra - OFF) // ROW
+    return int(rows.min()), int(rows.max()), int((ra - OFF - rows * ROW).min()), int((rb - OFF - rows * ROW).max())
+
+
+def free_colour(shapes, members, ppq, nkeys, notes_of):
+    """A new group's line colour: the first one no group it overlaps uses (user; fixed after). All taken = the one
+    used least there."""
+    def boxes(idx):
+        return [b for b in (reach_box(shapes[i], ppq, nkeys, notes_of) for i in idx) if b]
+
+    mine, used = boxes(members), []
+    for u in mask_units(shapes):
+        rest = [i for i in u if i not in members]  # (the group as it stays after its members picked here leave)
+        if len(rest) > 1 and any(x[0] <= y[1] and y[0] <= x[1] and x[2] < y[3] and y[2] < x[3]
+                                 for x in mine for y in boxes(rest)):
+            used.append(shapes[rest[0]]["mask"].get("colour", 0))
+    return next((c for c in range(GROUP_COLOURS) if c not in used),
+                min(range(GROUP_COLOURS), key=used.count))
 
 
 def unmasked(rendered, shapes):
@@ -240,10 +363,20 @@ def unmasked(rendered, shapes):
 
 
 def shown_by(notes, sh, ppq, nkeys, notes_of):
-    """What one mask shows of notes (rendered rows, no masks' own): (the shapes it covers, the rows that show, start
-    and end trimmed). Apply mask makes exactly these."""
+    """What one mask on its own shows of notes (shown_in)."""
+    return shown_in(notes, mask_area(sh, ppq, nkeys, notes_of) + (sh["mask"]["invert"],))
+
+
+def unit_shown(notes, shapes, unit, ppq, nkeys, notes_of):
+    """What masks worked out together show of notes (shown_in). Apply mask makes exactly these."""
+    return shown_in(notes, unit_area(shapes, unit, ppq, nkeys, notes_of))
+
+
+def shown_in(notes, got):
+    """What an area (unit_area's) shows of notes (rendered rows, no masks' own): (the shapes it covers, the rows that
+    show, start and end trimmed)."""
     none = np.zeros(0, np.int64), notes[:0]
-    a, b, ra, rb = mask_area(sh, ppq, nkeys, notes_of)
+    a, b, ra, rb, invert = got
     if not len(ra) or not len(notes):
         return none
     # (only the notes near the reach are looked at closely: millions of others cost one quick pass)
@@ -255,9 +388,9 @@ def shown_by(notes, sh, ppq, nkeys, notes_of):
     if not hit.any():
         return none
     mine = np.unique(notes[near[hit], 5])
-    if sh["mask"]["invert"]:  # (every note of the shapes it touches: the ones away from the hole show whole)
+    if invert:  # (every note of the shapes it touches: the ones away from the hole show whole)
         near = np.flatnonzero(np.isin(notes[:, 5], mine))
-    _, idx, ps, pe = kept_parts(notes[near], a, b, sh["mask"]["invert"])
+    _, idx, ps, pe = kept_parts(notes[near], a, b, invert)
     got = notes[near[idx]].copy()
     got[:, 0], got[:, 1] = ps, pe
     return mine, got
@@ -268,14 +401,14 @@ def mask_view(rendered, shapes, ppq, nkeys, notes_of, pattern=None):
     covers come twice: all of them as ghosts (velocity -1, painted faint), then the parts that show over them
     (start, end trimmed; every mask's own, they may overlap), taken from pattern (rendered without the masks' own
     notes; None = rendered). No masks = rendered itself."""
-    masks = [i for i, sh in enumerate(shapes) if is_mask(sh)]
-    if not masks or not len(rendered):
+    units = mask_units(shapes)
+    if not units or not len(rendered):
         return rendered, set()
     owner = rendered[:, 5]
     notes = unmasked(rendered if pattern is None else pattern, shapes)
     covered, parts = set(), []
-    for i in masks:
-        mine, got = shown_by(notes, shapes[i], ppq, nkeys, notes_of)
+    for unit in units:
+        mine, got = unit_shown(notes, shapes, unit, ppq, nkeys, notes_of)
         if len(mine):
             covered.update(mine.tolist())
             parts.append(got)

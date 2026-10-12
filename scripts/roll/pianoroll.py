@@ -1573,6 +1573,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.app.live.set(not self.app.live.get())
         elif k == "m" and not e.state & CTRL:
             self.app.mask.set(not self.app.mask.get())
+            if self.app.mask.get():
+                self.app.tips.show("masks")
         elif k == "d" and e.state & CTRL:
             if not self.holding():
                 self.app.duplicate()

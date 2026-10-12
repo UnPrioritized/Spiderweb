@@ -11,6 +11,7 @@ from files.lang import tr
 from files.speed import loops
 from notes.engine import cached_arrays, shape_key, shape_notes_tracks
 from notes.joined import all_tumours
+from notes.mask import mask_units, unit_of
 from notes.merge import preview_parts, slid_preview
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
 from notes.paths import KEYS
@@ -464,17 +465,25 @@ class RollDrawing:
                     self.create_line(*[v for b, p in path for v in (self.t2x(b), self.p2y(p))], width=1,
                                      fill=look.ORIGIN_PICKED if i in app.sels else look.ORIGIN, dash=(6, 4))
         covered = app.mask_covered
+        units = mask_units(app.shapes)
+
+        def mask_colour(i, picked):  # (a group's own colour, user; ungrouped = the plain mask colour)
+            u = unit_of(units, i)
+            if len(u) > 1:
+                return look.MASK_GROUPS[app.shapes[i]["mask"].get("colour", 0) % len(look.MASK_GROUPS)][picked]
+            return look.MASK_LINE_PICKED if picked else look.MASK_LINE
+
         for i, sh in enumerate(app.shapes):  # (Settings → Look's Shape lines: their thickness, a selected one's a pixel more)
             if i in app.sels:
                 continue
             if sh.get("mask"):  # a mask: always shown, dashed (so it isn't forgotten, mask.py)
-                self.draw_path(sh, look.MASK_LINE, look.LINES, dash=MASK_DASH)
+                self.draw_path(sh, mask_colour(i, False), look.LINES, dash=MASK_DASH)
             elif app.show_lines.get():
                 self.draw_path(sh, look.MASKED_LINE if i in covered else look.SHAPE_LINE, look.LINES)
         for i in app.sels:
             sh = app.shapes[i]
             if sh.get("mask"):
-                self.draw_path(sh, look.MASK_LINE_PICKED, look.LINES + 1, dash=MASK_DASH)
+                self.draw_path(sh, mask_colour(i, True), look.LINES + 1, dash=MASK_DASH)
             else:
                 self.draw_path(sh, look.SHAPE_LINE_PICKED, look.LINES + 1)
         for i in app.sels:
