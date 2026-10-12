@@ -12,6 +12,8 @@ import hashlib
 
 import numpy as np
 
+from files import speed
+
 _cache = {}
 
 
@@ -94,6 +96,9 @@ class Faces:
         lv = self.levels
         nl = len(lv)
         self.edge, self.slab = e, sl  # (slab by slab, left to right)
+        # (each of those lines as x = ex + es * (y - ey): area_at's halving reads these in that order)
+        self.ex, self.ey = self.x0[e], self.y0[e]
+        self.es = (self.x1[e] - self.ex) / (self.y1[e] - self.ey)
         count = np.bincount(sl, minlength=nl - 1)
         self.start = np.concatenate([[0], np.cumsum(count)])  # (each slab's lines: edge[start[s]:start[s + 1]])
         off = np.concatenate([[0], np.cumsum(count + 1)])  # (each slab's pieces: off[s] .. off[s] + count[s])
@@ -171,6 +176,11 @@ class Faces:
         out = np.full(len(x), self.lab[self.out], np.int64)
         if self.depth is None or not len(x):
             return out
+        fast = speed.loops()
+        if fast:  # (the same, as a compiled loop: files/fastloops.py)
+            return fast.area_spots(np.ascontiguousarray(x), np.ascontiguousarray(y), self.levels, self.start, self.off,
+                                   self.lab, self.out, self.edge, self.ex, self.ey, self.es, self.x0, self.y0,
+                                   self.x1, self.y1, float(self.eps))
         s = np.searchsorted(self.levels, y, "right") - 1
         q = np.flatnonzero((s >= 0) & (s < len(self.levels) - 1))
         k, xq, yq = s[q], x[q], y[q]
@@ -178,14 +188,17 @@ class Faces:
         # found by halving its slab's lines over and over (all spots at once)
         lo, hi = self.start[k], self.start[k + 1]
         act = np.flatnonzero(lo < hi)
+        ya, xa = yq, xq
         while len(act):
             mid = (lo[act] + hi[act]) >> 1
-            left = self._x(self.edge[mid], yq[act]) < xq[act]
+            if len(act) < len(ya):
+                ya, xa = yq[act], xq[act]
+            left = self.ex[mid] + self.es[mid] * (ya - self.ey[mid]) < xa
             lo[act[left]] = mid[left] + 1
             hi[act[~left]] = mid[~left]
             act = act[lo[act] < hi[act]]
         # a spot on a line, or right by one (lines too close to say which comes first): every line of its slab
-        # counted, as before the halving
+        # counted, as before the halving (the halving's x can be a hair off _x's: only right by a line, so here)
         first, end = self.start[k], self.start[k + 1]
         margin = self.eps * (end - first + 1)
         near = np.zeros(len(q), bool)

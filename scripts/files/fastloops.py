@@ -13,6 +13,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   note_stretches engine.stretches (Multi channel): one shape's notes on a key joined into stretches
   nearest        picture._dist2(...).argmin(1) (Image to notes): each colour's nearest palette colour
   spread_line    picture._spread: the error spreading, one slanted line at a time (its OKLab left to NumPy)
+  area_spots     faces.Faces.area_at: the area each spot is in (custom shapes' Fill / Spam, area colours)
   limit_dsp      synth.live_limit as a callback BASS's sound thread calls itself (Built-in BASSMIDI's limiter: it
                  never waits for Python); the same maths within float rounding
 The first start compiles them (about a second, in the background); the result is kept in __pycache__ for the next
@@ -562,6 +563,50 @@ def limit_dsp(dsp, channel, buf, length, user):
     limit_live(carray(user, (LIM_SIZE,)), carray(buf, (length // 4,)), length // 8)
 
 
+@njit(cache=CACHE, nogil=True)
+def area_spots(x, y, levels, start, off, lab, outside, edge, ex, ey, es, x0, y0, x1, y1, eps):
+    """faces.Faces.area_at for every spot (x, y): the same halving over its slab's lines, and the same recount of
+    every line of the slab for a spot right by one (worked out as _x does, so the very same numbers)."""
+    out = np.empty(len(x), np.int64)
+    nl = len(levels)
+    for i in range(len(x)):
+        xi, yi = x[i], y[i]
+        a, b = 0, nl  # (searchsorted "right": how many levels are at or under y)
+        while a < b:
+            m = (a + b) >> 1
+            if levels[m] <= yi:
+                a = m + 1
+            else:
+                b = m
+        s = a - 1
+        if s < 0 or s >= nl - 1:
+            out[i] = lab[outside]
+            continue
+        first, end = start[s], start[s + 1]
+        lo, hi = first, end
+        while lo < hi:
+            mid = (lo + hi) >> 1
+            if ex[mid] + es[mid] * (yi - ey[mid]) < xi:
+                lo = mid + 1
+            else:
+                hi = mid
+        margin = eps * (end - first + 1)
+        near = False
+        for side in (lo - 1, lo):
+            if first <= side < end:
+                e = edge[side]
+                if abs(x0[e] + (x1[e] - x0[e]) * (yi - y0[e]) / (y1[e] - y0[e]) - xi) <= margin:
+                    near = True
+        if near:
+            lo = first
+            for j in range(first, end):
+                e = edge[j]
+                if x0[e] + (x1[e] - x0[e]) * (yi - y0[e]) / (y1[e] - y0[e]) < xi:
+                    lo += 1
+        out[i] = lab[off[s] + lo - first]
+    return out
+
+
 def warm():
     """Compiles (or loads) every loop with the same kinds of values the program hands them."""
     i1, f, b = np.zeros(1, np.int64), 0.0, np.zeros(1, bool)
@@ -580,3 +625,5 @@ def warm():
     m = np.zeros((1, 3))
     spread_line(np.zeros((1, 1, 3)), np.zeros((1, 1)), m, m, 1.0, np.zeros((1, 1), np.int64), np.zeros((1, 1, 3)), 0,
                 m[:0], m, m.copy())
+    f1, i2 = np.zeros(1), np.zeros(2, np.int64)
+    area_spots(f1, f1, np.zeros(2), i2, i2, i2, 0, i1, f1, f1, f1, f1, f1, f1, f1, f)

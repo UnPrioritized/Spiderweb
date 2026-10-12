@@ -400,6 +400,7 @@ ON_LINE = 0.01  # placed: an end landing this close (in TOUCH_BEATS / TOUCH_KEYS
 SAME_SIZE = 0.98  # two coloured areas this close in size count as equally big (row_done: they meet in the middle)
 _plans = {}
 _spans = {}  # inside_spans, remembered
+_faces_of = {}  # shape_faces, remembered
 _inner = {}  # inner_ticks, remembered
 
 
@@ -951,12 +952,20 @@ def walls(sh):
 
 def shape_faces(sh):
     """faces.Faces of walls(sh) in the shape's own box (u, v), so it stays the same wherever the shape is put (None
-    if the box is flat)."""
+    if the box is flat). Remembered like fill_plan (fill_test asks for every key row)."""
+    key = (json.dumps(sh["strokes"]), json.dumps(sh["pts"]))
+    if key in _faces_of:
+        return _faces_of[key]
     plan = fill_plan(sh)
     closers = [uv_points(sh["pts"], c) for c in plan["closers"]]
     if any(c is None for c in closers) or uv_points(sh["pts"], [[0, 0]]) is None:
-        return None
-    return faces([uv_points(sh["pts"], p) for p in walls(sh)])
+        got = None
+    else:
+        got = faces([uv_points(sh["pts"], p) for p in walls(sh)])
+    if len(_faces_of) > 300:
+        _faces_of.clear()
+    _faces_of[key] = got
+    return got
 
 
 def spot_colour(sh, u, v, sizes=False):
@@ -970,16 +979,34 @@ def spot_colour(sh, u, v, sizes=False):
         return (got[:, 0], np.ones(len(got))) if sizes else got[:, 0]
     lab = drawn.fine_at(u.ravel(), v.ravel())
     got = area_paint(sh, drawn)[lab].reshape(u.shape)
-    out = np.asarray([max(set(row), key=row.count) for row in got.tolist()], np.int64).reshape(-1)
+    out = row_most(got)
     if not sizes:
         return out
-    most = [max(set(row), key=row.count) for row in lab.reshape(u.shape).tolist()]
-    return out, drawn.sizes()[np.asarray(most, np.int64)]
+    return out, drawn.sizes()[row_most(lab.reshape(u.shape))]
 
 
-def filled_uv(sh, u, v):
-    """fill_test for spots in the shape's box (u, v arrays)."""
-    fc = shape_faces(sh)
+def row_most(a):
+    """For each row of a ((n, m) ints): the value most of it holds. A tie: the one max(set(row), key=row.count)
+    gives (worked out one row at a time; the rest all at once)."""
+    a = np.asarray(a, np.int64).reshape(len(a), -1)
+    if not a.size:
+        return np.zeros(len(a), np.int64)
+    out = a[:, 0].copy()
+    mixed = np.flatnonzero((a != a[:, :1]).any(1))  # (most rows hold one value only)
+    b = a[mixed]
+    count = (b[:, :, None] == b[:, None, :]).sum(2)  # (how many of its row are like each one)
+    top = count.max(1)
+    out[mixed] = b[np.arange(len(b)), count.argmax(1)]
+    tie = mixed[(count == top[:, None]).sum(1) != top]  # (two values as many times)
+    for i in tie.tolist():
+        row = a[i].tolist()
+        out[i] = max(set(row), key=row.count)
+    return out
+
+
+def filled_uv(sh, u, v, fc=False):
+    """fill_test for spots in the shape's box (u, v arrays). fc: shape_faces(sh) if already known."""
+    fc = shape_faces(sh) if fc is False else fc
     if fc is None:
         return np.zeros(np.size(u), bool)
     d = fc.depth_at(u, v)
@@ -998,13 +1025,18 @@ def fill_test(sh):
     if not (sh.get("union") or plan["attached"] or plan["flat"]):
         return None
     frame = sh["pts"]
+    known = []  # (shape_faces, found at the first question: asked for every key row)
 
     def test(x, y):
         x, y = np.asarray(x, float), np.asarray(y, float)
         if not x.size:
             return np.zeros(len(x), bool)
         uv = uv_points(frame, np.column_stack([x.reshape(len(x), -1)[:, 0], y.reshape(len(y), -1)[:, 0]]))
-        return np.zeros(len(x), bool) if uv is None else filled_uv(sh, uv[:, 0], uv[:, 1])
+        if uv is None:
+            return np.zeros(len(x), bool)
+        if not known:
+            known.append(shape_faces(sh))
+        return filled_uv(sh, uv[:, 0], uv[:, 1], known[0])
     test.mode = "union" if sh.get("union") else "odd"  # (remembered results differ: shrink.field)
     return test
 
