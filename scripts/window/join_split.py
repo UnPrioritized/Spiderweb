@@ -89,7 +89,7 @@ class JoinSplit:
             return tr("join_split.select_the_shapes_to_turn_into", JOIN_KINDS=JOIN_KINDS)
         shapes = [self.shapes[i] for i in sels]
         if any(sh["kind"] not in CAN_TURN or sh.get("text") or "notes" in sh for sh in shapes):
-            other = sorted({self.shape_label(sh).split(":")[0] for sh in shapes
+            other = sorted({self.plain_label(sh).split(":")[0] for sh in shapes
                             if sh["kind"] not in CAN_TURN or sh.get("text") or "notes" in sh})
             return tr("join_split.only_and_custom_shapes_can_be", JOIN_KINDS=JOIN_KINDS,
                       join=tr("roll_funnel.and").join(other).lower())
@@ -133,7 +133,7 @@ class JoinSplit:
         sels = [i for i in self.sels if i < len(self.shapes)]
         if len(sels) < 2:
             return tr("join_split.select_two_or_more_to_join", JOIN_KINDS=JOIN_KINDS.replace(' and ', ' or '))
-        other = sorted({self.shape_label(self.shapes[i]).split(":")[0] for i in sels
+        other = sorted({self.plain_label(self.shapes[i]).split(":")[0] for i in sels
                         if self.shapes[i]["kind"] not in LINE_KINDS})
         if other:
             return tr("join_split.only_can_be_joined_selected", JOIN_KINDS=JOIN_KINDS,
@@ -254,6 +254,10 @@ class JoinSplit:
         if sus[0] is not None and sus[0] == sus[1]:  # (both sustained alike: so are the merged notes, like Join)
             for sh in new:
                 sh["sustain"] = copy.deepcopy(sus[0])
+        masks = [self.shapes[i].get("mask") for i in pair]
+        if masks[0] and masks[0] == masks[1]:  # (both masks alike: so is what's made of them, like Join)
+            for sh in new:
+                sh["mask"] = copy.deepcopy(masks[0])
         for p in parts:
             p.pop("between", None)  # (its Add between group is unlinked)
         new[0]["merge"] = {"parts": parts, "right": bool(to_right),

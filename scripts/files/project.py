@@ -15,7 +15,7 @@ from files.lang import tr
 from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape
 from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_shape
 from notes.hzbass import clean_hz
-from notes.mask import MASK_DEFAULTS, clean_mask
+from notes.mask import MASK_DEFAULTS, THICKNESS, clean_mask
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
 from notes.paths import KEYS
 from notes.picture import paths_for_file
@@ -466,7 +466,8 @@ class ProjectFiles:
                 self.midi_device.set(str(win["midi_device"]))
             self.live.set(win.get("live") is True)
             self.mask.set(win.get("mask") is True)
-            self.mask_defaults = clean_mask(win.get("mask_defaults")) or dict(MASK_DEFAULTS)
+            got = clean_mask(win.get("mask_defaults")) or MASK_DEFAULTS
+            self.mask_defaults = dict(MASK_DEFAULTS, **{k: got[k] for k in THICKNESS})
             self.show_lines.set(win.get("show_lines") is not False)
             self.show_notes.set(win.get("show_notes") is not False)
             for key, attr in (("tumour_window", "tumour_pos"), ("graph_window", "graph_pos"),

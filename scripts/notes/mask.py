@@ -10,7 +10,6 @@ part shorter than mould.SHORT of its note is left out (user: no slivers, the pre
 sh["mask"] = {"keys": int, "beats": float, "lock": beats per key (False = not locked), "invert": bool,
 "own": bool (its own notes sound, a border; False = silent, only its line shows)}."""
 
-import json
 import math
 
 import numpy as np
@@ -24,8 +23,16 @@ OFF = 1 << 40  # ticks are kept as row * ROW + tick + OFF: one sorted list for e
 ROW = 1 << 42
 
 
+THICKNESS = ("keys", "beats", "lock")  # (what a new mask takes from the last one set: never Invert / own, user)
+
+
 def is_mask(sh):
     return bool(sh.get("mask"))
+
+
+def can_mask(sh):
+    """Hz bass boxes never become masks (user)."""
+    return not sh.get("hz")
 
 
 def is_solid(sh):
@@ -86,7 +93,10 @@ def area(notes, keys, ticks, nkeys, solid):
     if not len(notes):
         z = np.zeros(0, np.int64)
         return z, z
-    s, e, k = notes[:, 0], notes[:, 1], notes[:, 2]
+    # each key row's notes joined into runs first (a big pasted mask: far fewer spans to widen, the same area)
+    a, b = merged(notes[:, 2] * ROW + notes[:, 0] + OFF, notes[:, 2] * ROW + notes[:, 1] + OFF)
+    k = (a - OFF) // ROW
+    s, e = a - OFF - k * ROW, b - OFF - k * ROW
     if solid:
         keys, ticks = 0, 0
     parts_a, parts_b = [], []
@@ -133,13 +143,14 @@ _areas = {}
 
 def mask_area(sh, ppq, nkeys, notes_of):
     """A mask shape's area (starts, ends), remembered. notes_of(shape) = its notes."""
+    from notes.engine import shape_key
     m = sh["mask"]
     src = area_source(sh)
-    key = (json.dumps(src, sort_keys=True, default=str), ppq, nkeys)
+    key = (shape_key(src), ppq, nkeys)  # (big pasted / image notes kept as the strings themselves: quick)
     got = _areas.get(key)
     if got is None:
-        if len(_areas) > 200:
-            _areas.clear()
+        if len(_areas) > 16:  # (a few: a big mask's area is many MB)
+            _areas.pop(next(iter(_areas)))
         got = _areas[key] = area(notes_of(src), m["keys"], int(round(m["beats"] * ppq)), nkeys, is_solid(sh))
     return got
 
@@ -157,16 +168,23 @@ def mask_view(rendered, shapes, ppq, nkeys, notes_of):
     covered, parts = set(), []
     for i in masks:
         a, b = mask_area(shapes[i], ppq, nkeys, notes_of)
+        if not len(a):
+            continue
         invert = shapes[i]["mask"]["invert"]
-        hit, idx, ps, pe = kept_parts(notes, a, b, invert)
+        # (only the notes near the area are looked at closely: millions of others cost one quick pass)
+        rows = (a - OFF) // ROW
+        lo_t, hi_t = int((a - OFF - rows * ROW).min()), int((b - OFF - rows * ROW).max())
+        near = np.flatnonzero((notes[:, 2] >= rows.min()) & (notes[:, 2] <= rows.max()) & (notes[:, 1] > lo_t)
+                              & (notes[:, 0] < hi_t))
+        hit, idx, ps, pe = kept_parts(notes[near], a, b, False)
         if not hit.any():
             continue
-        mine = np.unique(notes[hit, 5])
+        mine = np.unique(notes[near[hit], 5])
+        if invert:  # (every note of the shapes it touches: the ones away from the hole show whole)
+            near = np.flatnonzero(np.isin(notes[:, 5], mine))
+            hit, idx, ps, pe = kept_parts(notes[near], a, b, True)
         covered.update(mine.tolist())
-        if invert:  # (only the shapes it touches: the others aren't under it)
-            ok = np.isin(notes[idx, 5], mine)
-            idx, ps, pe = idx[ok], ps[ok], pe[ok]
-        got = notes[idx].copy()
+        got = notes[near[idx]].copy()
         got[:, 0], got[:, 1] = ps, pe
         parts.append(got)
     if not covered:

@@ -28,7 +28,7 @@ from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
                             turn_velocities, why_not as gate_why_not)
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
-from notes.mask import MASK_DEFAULTS, is_mask, mask_view, silent
+from notes.mask import MASK_DEFAULTS, can_mask, is_mask, mask_view, silent
 from notes.merge import velocity_reversed as merge_vrev
 from notes.sustain import is_sustained
 from notes.pattern import moved_formulas
@@ -239,6 +239,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
         self._notes_worked = 0  # shapes whose notes had to be worked out (not remembered)
         self._merge_keys = {}  # merged shapes' parts' settings when last seen (remake_merges)
         self._notes_time = 0.0  # how long that took the last time
+        self._mask_time = 0.0  # ... and the masks' preview (mask.mask_view)
         self._late_notes = None  # while dragging: notes left until the mouse rests
         self._coming = None  # notes being made in the background while a drag rests (notes_rested)
         self._position = None
@@ -1026,11 +1027,12 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
         if sync_groups(self.shapes):  # Add between: the steps follow their first / last shape (between.py)
             self.after_idle(self.sync_title)  # (a step changed by hand is a key now)
         self.remake_merges()
-        slow = self._notes_time > 0.15
+        busy = self._notes_time + self._mask_time  # (the masks' preview is made after the notes, mask.py)
+        slow = busy > 0.15
         # (other drags make the notes AND repaint them all at every step: the repaint counts too)
-        slow = slow or not moving and self._notes_time + self.roll.paint_time > 0.15
+        slow = slow or not moving and busy + self.roll.paint_time > 0.15
         # (moving: also whenever the piano roll shows its notes as one picture, which it can carry along)
-        if not now and (self.roll.drag or self.scrubbing) and (slow or moving and (self._notes_time > 0.03 or self.roll._img is not None)):
+        if not now and (self.roll.drag or self.scrubbing) and (slow or moving and (busy > 0.03 or self.roll._img is not None)):
             self.notes_late = True
             # the notes are made in the background once the mouse rests: quick enough to paint = the real notes
             # show then, else they wait for the mouse to be let go (and are ready by then)
@@ -1062,7 +1064,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
             if self._notes_worked != worked:
                 self._notes_time = time.perf_counter() - started
         wanted, self.picture_use10, self.rendered, self.slot_count = made
+        started = time.perf_counter()
         self.drawn, self.mask_covered = mask_view(self.rendered, self.shapes, self.ppq, self.keys, self.notes_of)
+        self._mask_time = time.perf_counter() - started
         if wanted != self.colours_wanted:
             self.colours_wanted = wanted
             self.after_idle(self.sync_custom)  # (the panel's warning)
@@ -1192,7 +1196,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
         self.shapes_changed(moving=moving)
 
     def add_shape(self, sh, name=None):
-        if self.mask.get() and not is_mask(sh):  # (drawn with the Mask tick on: a mask, mask.py)
+        if self.mask.get() and not is_mask(sh) and can_mask(sh):  # (drawn with the Mask tick on: a mask, mask.py)
             sh["mask"] = dict(self.mask_defaults)
         self.push_undo(name=name or tr("app.draw", shape_label=self.shape_label(sh)))
         self.shapes.append(sh)

@@ -5,7 +5,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc
-from notes.mask import MASK_DEFAULTS, MOST_BEATS, MOST_KEYS, is_solid
+from notes.mask import MASK_DEFAULTS, MOST_BEATS, MOST_KEYS, THICKNESS, can_mask, is_solid
 from window import look
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, unchanged
 
@@ -58,7 +58,7 @@ class MaskPanel:
         Tooltip(b, tr("mask.invert_tip"))
 
     def mask_targets(self):
-        return [self.shapes[i] for i in sorted(self.sels) if i < len(self.shapes)]
+        return [self.shapes[i] for i in sorted(self.sels) if i < len(self.shapes) and can_mask(self.shapes[i])]
 
     def sync_mask(self):
         """Mask tick half ticked when some picked shapes are masks and some not; the rows under it only while every
@@ -163,7 +163,8 @@ class MaskPanel:
         self.push_undo(name=tr("mask.undo"))
         for t, m in zip([t for t in tgts if t.get("mask")], new):
             t["mask"] = m
-        self.mask_defaults = dict(new[-1])  # (the next mask drawn starts with these)
+        # (the next mask drawn starts with this thickness; always sounding, not inverted: user)
+        self.mask_defaults = dict(MASK_DEFAULTS, **{k: new[-1][k] for k in THICKNESS})
         self.mask_done()
 
     def mask_done(self):
