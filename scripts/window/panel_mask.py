@@ -209,7 +209,7 @@ class MaskPanel:
             new = [dict(m, size=v) for m in masks]
         if new == masks:
             return self.sync_mask()
-        self.push_undo(name=tr("mask.undo"))
+        self.push_undo(name=tr("mask.undo_" + (what if what in ("own", "invert", "show", "mode") else "size")))
         for t, m in zip([t for t in tgts if t.get("mask")], new):
             t["mask"] = m
         # (the next mask drawn starts with this thickness; always sounding, not inverted: user)

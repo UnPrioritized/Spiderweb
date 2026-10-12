@@ -1597,6 +1597,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
         on = [sh for sh in sel if all_flipped(sh)]
         if on:  # (switching off always works, even where it does nothing now)
             return on, True, None
+        kept = [sh for sh in sel if sh.get("gate_flip")]
+        if kept:  # (flipped, then Fill / Empty picked: it does nothing now, but can still be switched off)
+            return kept, True, None
         shapes = [sh for sh in sel if not sh.get("gate_flip")]
         why = [gate_why_not(sh, *self.notes_tracks(sh)) for sh in shapes]
         ok = [sh for sh, w in zip(shapes, why) if w is None]
