@@ -75,6 +75,7 @@ SHAPE_DEFAULTS = {"vel0": 127, "vel1": 127, "end_dot": False}
 # Every MIDI channel except 10 (drums). Each slot gets its own track (MIDI editors want one channel per track):
 # slot 0 = track 1 channel 1, slot 9 = track 10 channel 11, slot 15 = track 16 channel 1 again, ...
 CHANNELS = [c for c in range(16) if c != 9]
+LAST10 = np.array(CHANNELS + [9], np.int64)  # ("Use channel 10": the shapes' 16 channels in order, render)
 CLASH = 1 << 16  # a track number this or past it: a Hz bass layer's note clashing with another layer's (layered_notes):
 #                  its track // CLASH = how many channels past the shape's own (in every Channels mode)
 
@@ -1058,7 +1059,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     fixed: per shape True if its tracks ARE its slots, whatever the mode (a picture's colours: slot k = the k-th
     colour of the project's picture colours, so its channel never changes).
     use10: the pictures use channel 10 too (slot k = channel k, slot_track_channel): the other shapes' slots skip
-    every slot that would be channel 10 (shapes never use it, user).
+    every slot that would be channel 10 (shapes never use it, user). "all" = the project's "Use channel 10": slots
+    are channels too, but the shapes take channel 10 only as the 16th (LAST10), so ticking it changes no colour.
     teams: per shape None, or (group, turn) for an Add between group giving each shape its own colour (between.py):
     with "auto" the group's shapes of one turn share a channel, and every turn of a group gets a different one (its
     shapes' own tracks are left out).
@@ -1151,7 +1153,9 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
         forced += [us for us in paste_units.values() if len(us) > 1]  # (pasted tracks: always apart, tracks_apart)
         unit_slots = np.array(assign_slots(units, split, forced, [firsts.get(u) for u in range(len(units))]),
                               np.int64)
-        if use10:  # (0..8, 10..24, 26..40...: never a slot that is channel 10)
+        if use10 == "all":  # (channel 10 last of each 16: the first 15 as without it, so ticking changes no colour)
+            unit_slots = unit_slots // 16 * 16 + LAST10[unit_slots % 16]
+        elif use10:  # (0..8, 10..24, 26..40...: never a slot that is channel 10)
             unit_slots = unit_slots + (unit_slots + 6) // 15
         slot_of = [pin if u is None else unit_slots[u] for u, pin in zip(unit_of, pinned)]
         count = int(unit_slots.max()) + 1 if len(units) else 0

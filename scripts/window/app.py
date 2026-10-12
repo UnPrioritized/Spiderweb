@@ -134,9 +134,9 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False):
     got = [(n, capped_colours(t % CLASH, most) + t // CLASH * CLASH if w > most else t) for (n, t), w in zip(got, wanted)]
     # (pictures using channel 10 too: one setting for the project, kept with every picture)
     use10 = next((sh["picture"]["set"].get("use10", False) for sh in shapes if "picture" in sh), False)
-    # (with all16 nothing skips channel 10: the other shapes' slots needn't stay off the pictures' channel 10)
+    # (with all16 the shapes use channel 10 too, but only as their 16th: render's "all")
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
-                             [pinned_slots(sh, mode) for sh in shapes], use10 and not all16, between_turns(shapes),
+                             [pinned_slots(sh, mode) for sh in shapes], "all" if all16 else use10, between_turns(shapes),
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
                              [is_sustained(sh) or sh.get("held") is True for sh in shapes],
                              [colours_back(sh) for sh in shapes])
