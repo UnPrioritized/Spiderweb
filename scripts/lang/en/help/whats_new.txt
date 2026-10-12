@@ -1,5 +1,49 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
+Version 1.5.1
+
+Before you update:
+
+• Spiderweb's own files (autosave, presets, shapes, palettes, errors.log...) now live in one "user" folder. They are moved there by themselves on the first start.
+
+• Notes shapes that were turned, slanted or stretched taller are now made like a turned image: no gaps or staircases, so they can come out a little different.
+
+• Ctrl+Shift+V and the Paste button in the Domino row are gone: Ctrl+V pastes notes copied in Domino.
+
+What's new:
+
+• Settings (gear button, top right): Look (dark mode, size, font, text size, button style, edges, shape line thickness, with a live preview), note colour palettes you can make and switch, Sound, General (updates, tips) and Language.
+
+• Translations: Spiderweb can be translated. Settings → Language → Start a translation.
+
+• Masks: tick Mask (M) and draw a shape: the shapes under it show only inside it. Invert makes a hole, masks can be combined (Add / Subtract / Intersect), and Apply mask makes a new shape of exactly what you see.
+
+• Copy along a path: right-click a shape → Copy along a path…. Copies it to a point along a line, curve, arc or formula, with size, speed, colours and flips changing along the way. Turn into plain shapes makes each copy its own shape.
+
+• Sustain: right-click → Sustain…. Holds notes on each key until the end of their group, for players that lag.
+
+• Gate aware flip: right-click → Gate aware flip. Every key row of a spam shape is reversed exactly, gates and velocities included.
+
+• Use channel 10: a tick under Multi channel lets shapes use all 16 channels.
+
+• 31-EDO: at 256 keys, a 31-EDO tick shows the piano roll in 31 notes an octave, and Audio plays it that way with Built-in BASSMIDI.
+
+• Cut with Ctrl+X (shapes, drawer strokes, Hz bass notes and effect points). Ctrl+Shift+Z redoes too.
+
+• Colours: Diagonal, each key row starts a few channels later.
+
+• Clicking a selected shape again picks the next shape under it (a drag still moves it).
+
+• Gate sensitive merge is no longer experimental.
+
+• Faster: Fill / Spam with many lines up to 3x, area colours about 2x, placing slow custom shapes.
+
+• Slice tool: cuts pasted notes by time, only on the key rows it crosses.
+
+• The Settings… buttons are now Sound settings… (under MIDI out) and Hz settings… (Hz bass window).
+
+• Many fixes.
+
 Version 1.5.0
 
 Before you update: a lot changed inside Spiderweb, so a project or shape made in 1.4.0 can come out a little different. Keep a copy of your projects, your autosave and your shapes folder, and keep the old Spiderweb.exe for a while so you can compare. A project saved in 1.5.0 may not open fully in 1.4.0.
