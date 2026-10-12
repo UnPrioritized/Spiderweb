@@ -5,12 +5,15 @@ points can be dragged (a middle point bends a straight path into a curve); right
 one following the mouse to stop adding. Snapped like drawing (time to the grid, keys to whole rows; Shift = free),
 and free to go past the piano roll's edges (notes there are cut off)."""
 
+import numpy as np
+
 from notes.copypath import LETTERS, all_points, clean_path, mid_of, track
 from roll.roll_draw import screen_lines
 from roll.roll_shared import SHIFT
 from window import look
 
 GRAB = 8  # px: how near a point the mouse must be to grab it
+MOST_DRAWN = 6000  # the most points of the dashed path line drawn
 
 
 class PathEditing:
@@ -124,7 +127,11 @@ class PathEditing:
             self.create_oval(x - r, y - r, x + r, y + r, outline="", fill=look.PATH_LINE, tags="copypath")
             return
         (b0, k0), size = fr
-        pts = track(cl, size, 128)[0] + [b0, k0]
+        pts = track(cl, size)[0]  # (the same one the copies were worked out from: remembered, copypath.track)
+        if len(pts) > MOST_DRAWN:  # (a formula with thousands of loops: a guide line, thinned; drawing it all took
+            step = -(-len(pts) // MOST_DRAWN)  # most of a drag's time, hunt)
+            pts = np.vstack([pts[::step], pts[-1:]])
+        pts = pts + [b0, k0]
         line = max(1, round(2 * s))
         if cl["inside"]:  # (Keep inside: the edges of its lowest and highest key rows, across the piano roll)
             for p in (cl["low"] - 0.5, cl["high"] + 0.5):

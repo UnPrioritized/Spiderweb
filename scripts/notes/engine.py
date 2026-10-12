@@ -502,6 +502,18 @@ def fx_notes(sh, ppq, keys, get):
     return with_glue(*_notes_tracks(sh, ppq, keys), sh, ppq)
 
 
+def tagged_notes(sh, k, ppq, keys):
+    """sh's notes and tracks as shown, with one more last column of the notes: which copy of its path page k each
+    note is (0 = the shape itself; copypath.apply_path's tag), carried through every step after the page (flips,
+    turns, Claw, Strum, Chop, Sustain...). Not remembered (made once, for Turn into plain shapes)."""
+    fx = list(sh["fx"])
+    fx[k] = dict(fx[k], tag=True)
+
+    def get(s):
+        return fx_notes(s, ppq, keys, get)
+    return get(dict(sh, fx=fx))
+
+
 def unflipped(sh):
     """sh (without its pages) with its drawing flipped back along its hidden "_m" axes, each within its own box."""
     out = json.loads(json.dumps(bare_of(sh)))
@@ -578,6 +590,11 @@ def fx_step(notes, tracks, step, sh, ppq, keys=256):
     if tool == "path":  # (copies past the highest key are cut off: copypath.py)
         if tracks is None and step["cfg"] and step["cfg"]["colours"] != "keep":  # (one colour: group 0, so it turns)
             tracks = np.zeros(len(notes), np.int64)
+        if step.get("tag") and step["cfg"]:  # (Turn into plain shapes: each note's copy rides along as one more
+            # column of the notes, through the steps after it: tagged_notes)
+            who = tracks if tracks is not None else np.zeros(len(notes), np.int64)
+            got = apply_path(np.column_stack([notes, who]).astype(np.int64), step["cfg"], ppq, keys, tag=True)
+            return np.column_stack([got[:, :-2], got[:, -1]]), None if tracks is None else got[:, -2]
         return _after(lambda a, cfg, q: apply_path(a, cfg, q, keys), notes, tracks, step["cfg"], ppq)
     if tool == "chop":
         return with_chop(notes, tracks, dict(sh, chop=step["cfg"]), ppq)

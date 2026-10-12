@@ -43,6 +43,7 @@ and flips work on the whole group. A page's settings (PATH_DEFAULTS' keys):
 Keys are rows (a corner = the middle of its row, like the points clicked on the piano roll). Notes past the lowest /
 highest key or before the song's start are cut off (user)."""
 
+import json
 import math
 
 import numpy as np
@@ -228,7 +229,36 @@ def runs(pts):
     return [(s, e, wt or 1, wk or 1) for s, e, wt, wk in out]
 
 
+_KEPT = {}  # the last few track / places results (one change asked for them 4-5 times: window text, size check,
+KEEP = 8    # notes, piano roll line; a formula with many loops made each take about 0.2 s, hunt)
+
+
+def _kept(fn, cfg, *args):
+    """fn(cfg, *args), remembered by the settings it depends on (read-only arrays: callers make new ones)."""
+    key = (fn.__name__, json.dumps({k: v for k, v in cfg.items() if k not in ("grp", "most")}, sort_keys=True),
+           tuple(float(a) if not isinstance(a, tuple) else tuple(map(float, a)) for a in args))
+    got = _KEPT.get(key)
+    if got is None:
+        got = fn(cfg, *args)
+        for a in got:
+            a.setflags(write=False)
+        if len(_KEPT) >= KEEP:
+            _KEPT.pop(next(iter(_KEPT)))
+        _KEPT[key] = got
+    return got
+
+
 def track(cfg, size, n=SAMPLES):
+    """_track, remembered."""
+    return _kept(_track, cfg, tuple(size), n)
+
+
+def places(cfg, size):
+    """_places, remembered."""
+    return _kept(_places, cfg, tuple(size))
+
+
+def _track(cfg, size, n=SAMPLES):
     """The path sampled, each stretch n points (its ends twice where two meet): the points (m, 2) from the group's
     first start, lowest key; the corner on the line there as parts of the box (m, 2: 0 = start / lowest key, 1 = end
     / highest); its run (m,); does it go down there (m,)."""
@@ -344,7 +374,7 @@ def _along_pos(along, lo, hi, at):
     return (lo + j + f).tolist()
 
 
-def places(cfg, size):
+def _places(cfg, size):
     """Each copy (size = the group's box (beats, keys)): how far it moves from the shape ((n, 2) beats, keys; the
     first (0, 0)), its corner on the path (the point it grows / shrinks round: from the group's first start, lowest
     key) and does the path go down there."""

@@ -17,9 +17,9 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from files.snap import SNAP_LIST, snap_beats, snap_text
 from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KEY_LIMITS, KINDS, LETTERS, MOST_POINTS,
-                            PATH_DEFAULTS, SIZE_LIMITS, SPEEDS, STEP_LIMITS, TOPS, WAYS, all_points, apply_path,
-                            clean_path, peak, shifts, track)
-from notes.fx import copied
+                            PATH_DEFAULTS, SIZE_LIMITS, SPEEDS, STEP_LIMITS, TOPS, WAYS, all_points, clean_path,
+                            peak, shifts, track)
+from notes.engine import tagged_notes
 from notes.pattern import MAX_LOOPS, PATTERN_PRESETS, loop_points, new_pattern, pattern_name
 from roll.roll_shared import note_name
 from window import big_ask, look
@@ -59,9 +59,9 @@ class PathWindow(ToolWindow):
         self.formula_box.bind("<<ComboboxSelected>>", lambda e: self.pick_formula(e.widget.current()))
         for w in (lb, self.formula_box):
             Tooltip(w, tr("path.tip_formula"))
-        custom = ttk.Button(kind, text=tr("roll_menu.custom"), command=self.custom_formula)
-        custom.grid(row=0, column=3, sticky="w", padx=(4, 0))
-        Tooltip(custom, tr("path.tip_custom"))
+        self.custom_button = ttk.Button(kind, text=tr("roll_menu.custom"), command=self.custom_formula)
+        self.custom_button.grid(row=0, column=3, sticky="w", padx=(4, 0))
+        Tooltip(self.custom_button, tr("path.tip_custom"))
         self.formula_numbers = ttk.Frame(kind)  # (Loops + a box per other name in the formula, while there is one)
         self.formula_numbers.grid(row=1, column=1, columnspan=3, sticky="w", pady=(4, 0))
         self.pat_boxes, self.pat_names = {}, None
@@ -281,6 +281,14 @@ class PathWindow(ToolWindow):
                 finally:
                     self.taking = False
                 return
+        for name, (var, e) in list(self.pat_boxes.items()):  # (the formula's Loops / numbers too)
+            if e is f:
+                self.taking = True
+                try:
+                    self.put_formula_number(name)
+                finally:
+                    self.taking = False
+                return
 
     def drop_loose(self):
         """A point never clicked (still following the mouse) goes; B too, and then its path page (user)."""
@@ -304,11 +312,12 @@ class PathWindow(ToolWindow):
 
     def plain_shapes(self):
         """Turn into plain shapes: each copy (not the shape itself) becomes a shape of its own notes, right after its
-        shape in the list, with the steps after this page; the page goes (the shape = the first copy, its drawing
-        still editable). The window closes; one undo step after the path's own."""
+        shape in the list, exactly as shown: the steps after this page (flips, turns, Claw, Strum, Sustain...) already
+        done on it, so it has none (user's pick); the page goes (the shape = the first copy, its drawing still
+        editable, its other steps kept). The window closes; one undo step after the path's own."""
         self.catch_up()
         self.drop_loose()
-        if self.at is None or not self.targets or self.page_step() is None:
+        if not self.plain_ok():
             return
         app, ppq = self.app, self.app.ppq
         if app.notes_late:  # (notes still catching up with a drag: made now, so the colours shown are known)
@@ -317,23 +326,23 @@ class PathWindow(ToolWindow):
         for i in self.targets:
             sh = app.shapes[i]
             fx, k = sh.get("fx") or [], self.at.get(i)
-            cl = clean_path((fx[k] if k is not None and k < len(fx) else {}).get("cfg"))
-            if cl is None or fx[k].get("off"):
+            if k is None or k >= len(fx) or fx[k].get("off") or clean_path(fx[k].get("cfg")) is None:
                 continue
-            notes, tracks = app.notes_tracks(self.page_cut(sh, k))
-            if not len(notes):
+            notes, tracks = tagged_notes(sh, k, ppq, app.keys)
+            if not len(notes) or notes.shape[1] < 5:
                 continue
-            a = np.column_stack([notes[:, :4], tracks if tracks is not None else np.zeros(len(notes), np.int64)])
-            got = apply_path(a.astype(np.int64), cl, ppq, app.keys, tag=True)
-            slots = self.shown_slots(got, i)
+            tag = notes[:, -1]
+            slots = self.shown_slots(notes, tag, tracks, i)
+            order = np.argsort(tag, kind="stable")  # (each copy's notes cut out once: one scan per copy was slow)
+            cuts = np.flatnonzero(np.diff(tag[order])) + 1
             news = []
-            for n in [n for n in np.unique(got[:, -1]).tolist() if n] if len(got) else []:
-                x = got[:, -1] == n
-                rows = np.column_stack([got[x, :4], slots[x], np.full(x.sum(), i)])
+            for x in np.split(order, cuts):
+                if not len(x) or tag[x[0]] == 0:
+                    continue
+                rows = np.column_stack([notes[x, :4], slots[x], np.full(len(x), i)])
                 new = app.copied(rows, False)  # (like Apply mask: the colours as they show, user)
                 new["made"] = "path"
-                new["name"] =tr("path.plain_name", name=app.shape_label(sh), n=len(news) + 2)
-                self.put_fx(new, copied(fx[k + 1:]))  # (the steps after this page: on every copy too)
+                new["name"] = tr("path.plain_name", name=app.shape_label(sh), n=len(news) + 2)
                 news.append(new)
             made[i] = news
         total = sum(len(v) for v in made.values())
@@ -364,30 +373,35 @@ class PathWindow(ToolWindow):
         app.shapes_changed()
         app.status.config(text=tr("path.plain_done", n=total))
 
-    def shown_slots(self, got, i):
-        """Each note's channel slot on the piano roll now (app.rendered, shape i's notes found by start, end and key);
-        a note the steps after this page changed: its copy's most common one, else its colour group."""
+    def shown_slots(self, notes, tag, tracks, i):
+        """Each note's channel slot on the piano roll now (app.rendered: shape i's notes found by start, end and key);
+        one not found there: its copy's most common one, else its colour group."""
         r = self.app.rendered
         r = r[r[:, 5] == i] if r is not None and len(r) else np.zeros((0, 6), np.int64)
-        both = np.concatenate([r[:, :3], got[:, :3]]).astype(np.int64)
-        if not len(both):
-            return got[:, 4].copy()
+        own = tracks if tracks is not None else np.zeros(len(notes), np.int64)
+        both = np.concatenate([r[:, :3], notes[:, :3]]).astype(np.int64)
+        if not len(r):
+            return np.asarray(own, np.int64).copy()
         ids = np.unique(both, axis=0, return_inverse=True)[1].ravel()
         by_id = np.full(ids.max() + 1, -1, np.int64)
         by_id[ids[:len(r)]] = r[:, 4]
         out = by_id[ids[len(r):]]
-        for n in np.unique(got[:, -1]).tolist():
-            x = got[:, -1] == n
-            seen = out[x][out[x] >= 0]
-            fill = np.bincount(seen).argmax() if len(seen) else None
-            out[x & (out < 0)] = got[x & (out < 0), 4] if fill is None else fill
+        lost = out < 0
+        if lost.any():
+            found = ~lost  # (each copy's most common slot: counted all at once, not copy by copy)
+            pairs, counts = np.unique(np.column_stack([tag[found], out[found]]), axis=0, return_counts=True)
+            best = {}
+            for (t, s), c in zip(pairs.tolist(), counts.tolist()):
+                if c > best.get(t, (0, 0))[0]:
+                    best[t] = (c, s)
+            out[lost] = [best[t][1] if t in best else int(o) for t, o in zip(tag[lost].tolist(), own[lost].tolist())]
         return out
 
-    @staticmethod
-    def page_cut(sh, k):
-        """sh with only its steps before page k (its notes before it)."""
-        bare = {key: v for key, v in sh.items() if key != "fx"}
-        return dict(bare, fx=sh["fx"][:k]) if k else bare
+    def plain_ok(self):
+        """Can Turn into plain shapes work: a page with a placed path, switched on."""
+        st = self.page_step()
+        return (self.at is not None and bool(self.targets) and st is not None and not st.get("off")
+                and clean_path(self.cfg) is not None and not self.placing())
 
     def sync(self):
         if sorted(self.app.note_tool_sels()) != self.targets:  # (another selection: a point not clicked goes)
@@ -569,11 +583,17 @@ class PathWindow(ToolWindow):
             new = new_pattern(PATTERN_PRESETS[i - 1][0], self.cfg["k"], old)
         else:
             new = saved_pattern(self.saved[i - 1 - len(PATTERN_PRESETS)], self.cfg["k"], old)
-        cl, fr = clean_path(self.cfg), self.frame()
-        if new and not old and cl and fr:  # (about 8 copies a loop to start: fewer can't show the wave)
-            new["loops"] = float(max(1, round((len(shifts(cl, self.app.ppq, fr[1])) - 1) / LOOP_COPIES)))
+        if new and not old and self.start_loops():
+            new["loops"] = self.start_loops()
         if new != old:
             self.put("pattern", new)
+
+    def start_loops(self):
+        """A new formula's Loops: about LOOP_COPIES copies a loop (fewer can't show the wave), or None (no path)."""
+        cl, fr = clean_path(dict(self.cfg, pattern=None)), self.frame()
+        if not cl or not fr:
+            return None
+        return float(max(1, round((len(shifts(cl, self.app.ppq, fr[1])) - 1) / LOOP_COPIES)))
 
     def custom_formula(self):
         """Custom…: the formula window used for curves, on this path."""
@@ -632,10 +652,9 @@ class PathWindow(ToolWindow):
                 e.config(style="TEntry")
 
     def put_inside(self, on):
-        """Keep inside ticked: Highest starts no higher than the piano roll's top key."""
-        if on and self.cfg["high"] > self.app.keys - 1:
-            self.cfg["high"] = self.app.keys - 1
-            self.cfg["low"] = min(self.cfg["low"], self.cfg["high"])
+        """Keep inside ticked: from key 0 to the piano roll's top key, so ticking cuts nothing (256 keys too)."""
+        if on:
+            self.cfg["low"], self.cfg["high"] = 0, self.app.keys - 1
         self.put("inside", on)
 
     def put_length(self, snap):
@@ -776,8 +795,8 @@ class PathWindow(ToolWindow):
         fr = self.frame()
         if not self.targets or fr is None:
             info = ""
-        elif self.idle:
-            info = tr("path.idle")
+        elif self.idle:  # (shapes whose paths differ: + gives them one together, user)
+            info = tr("path.idle_differ") if self.has_pages() else tr("path.idle")
         elif adding:
             info = tr("path.click_point", name=LETTERS[n + 1 if self.adding else n])
         elif self.placing():
@@ -792,9 +811,16 @@ class PathWindow(ToolWindow):
 
     def show_plain(self):
         """Turn into plain shapes: only on a page with a placed path (the page is made at the first preview)."""
-        on = self.at is not None and clean_path(self.cfg) is not None and not self.placing()
+        on = self.plain_ok()
         if str(self.plain_button.cget("state")) != ("normal" if on else "disabled"):
             self.plain_button.config(state="normal" if on else "disabled")
+        can = bool(self.targets) and not self.idle and bool(self.cfg.get("pts")) and not self.placing()
+        if str(self.custom_button.cget("state")) != ("normal" if can else "disabled"):  # (Custom…: once B is placed)
+            self.custom_button.config(state="normal" if can else "disabled")
+
+    def on_off(self):
+        super().on_off()
+        self.show_plain()
 
     def preview(self, now=True):
         if self.big_ok(now):
@@ -843,6 +869,9 @@ class PathHost(FormulaHost):
 
     def fresh(self, holder, layer):
         return {"k": self.win.cfg["k"], "scale": 1.0}
+
+    def start_loops(self):
+        return self.win.start_loops()
 
     def changed(self, final=True):
         self.win.show()

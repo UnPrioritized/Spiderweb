@@ -81,6 +81,10 @@ class FormulaHost:
     def placed(self, holder, layer, before):
         """A formula was just put on holder (before: how it was)."""
 
+    def start_loops(self):
+        """Loops a new pattern starts with in Custom… (None: the pattern's own)."""
+        return None
+
     def spread(self):
         """After a change: whatever has to follow the holders (a funnel's linked curves)."""
 

@@ -157,6 +157,8 @@ class FormulaDialog(tk.Toplevel):
         first = self.targets[0].get(layer)
         self.pat = copy.deepcopy(first) if first else new_shape("circle", self.k) if shape else new_pattern("wave",
                                                                                                           self.k)
+        if not first and not shape and host.start_loops():  # (a path's: as many as its dropdown would start with)
+            self.pat["loops"] = host.start_loops()
         self.ok = True      # the formulas work
         self.view = None    # (pixels per unit, left x, middle y, loop length in units) while dragging
         self.own_view = False  # zoomed / moved by hand (kept until Fit view or another pick in the list)
