@@ -575,6 +575,8 @@ def fx_step(notes, tracks, step, sh, ppq, keys=256):
         return notes, tracks
     tool = step["tool"]
     if tool == "path":  # (copies past the highest key are cut off: copypath.py)
+        if tracks is None and step["cfg"] and step["cfg"]["colours"] != "keep":  # (one colour: group 0, so it turns)
+            tracks = np.zeros(len(notes), np.int64)
         return _after(lambda a, cfg, q: apply_path(a, cfg, q, keys), notes, tracks, step["cfg"], ppq)
     if tool == "chop":
         return with_chop(notes, tracks, dict(sh, chop=step["cfg"]), ppq)

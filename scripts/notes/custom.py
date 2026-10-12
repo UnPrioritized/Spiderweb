@@ -2512,7 +2512,10 @@ def _notes_groups(sh, ppq):
 def tracks_apart(sh):
     """True if the shape's tracks must get channels of their own with Multi channel: pasted notes (each copied
     track keeps its own channel even when the tracks don't overlap), Fill / Spam with "Outline" (the outline
-    and the inside) and "Colours" (each turn, any shape)."""
+    and the inside) and "Colours" (each turn, any shape), and copies along a path that change colour (copypath.py)."""
+    if any(st["tool"] == "path" and not st.get("off") and (st.get("cfg") or {}).get("colours", "keep") != "keep"
+           for st in sh.get("fx") or ()):
+        return True
     if sh["kind"] != "custom":
         return cycling(sh)
     return ("notes" in sh or bool(sh.get("apart") and sh.get("fill") in ("fill", "spam")) or cycling(sh)

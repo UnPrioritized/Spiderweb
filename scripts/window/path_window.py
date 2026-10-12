@@ -1,9 +1,11 @@
-"""The Copy along a path window (notes/copypath.py): the selected shapes copied along a path from A (where they start
-in time) to B, shown live on the piano roll (the shared part: tool_window.py; the path's points on the piano roll:
-roll/roll_path.py). Several shapes travel together as one group: each gets the same page, so the same moves.
+"""The Copy along a path window (notes/copypath.py): the selected shapes copied along a path from A (where their notes
+start in time, at their middle key) to B, shown live on the piano roll (the shared part: tool_window.py; the path's
+points on the piano roll: roll/roll_path.py). Several shapes travel together as one group: each gets the same page,
+plus where the group's box is from its own notes ("grp", page_cfg), so sizes and flips work on the whole group.
 
-Path kind (Straight / Curve / Arc), spacing (one copy every [note length] or a number of copies) and where B is,
-as bar / beat / tick / key like the piano roll's status line, typed or dragged on the piano roll."""
+Path kind (Straight / Curve / Arc), spacing (one copy every [note length] or a number of copies), Speed, Size,
+Colours (+ Step), Flip (+ which way), On top, and where B is as bar / beat / tick / key like the piano roll's status
+line, typed or dragged on the piano roll."""
 
 import tkinter as tk
 from tkinter import ttk
@@ -11,13 +13,16 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from files.snap import SNAP_LIST, snap_beats, snap_text
-from notes.copypath import COUNT_LIMITS, EVERY_LIMITS, FAR, KINDS, PATH_DEFAULTS, clean_path, shifts
+from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KINDS, PATH_DEFAULTS, SIZE_LIMITS,
+                            SPEEDS, STEP_LIMITS, TOPS, WAYS, clean_path, peak, shifts)
 from roll.roll_shared import note_name
 from window import look
 from window.tool_window import ToolWindow
-from window.widgets import Scrub, Tooltip, bad, good
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown
 
 LENGTHS = [s for s, _ in SNAP_LIST if s != "off"]  # "one copy every" choices (the snap list's note lengths)
+CHOICES = {"kind": KINDS, "speed": SPEEDS, "colours": COLOURS, "flip": FLIPS, "way": WAYS, "top": TOPS}
+GROUP_ONLY = ("grp", "most")  # (page settings that may differ between the shapes of one group)
 
 
 class PathWindow(ToolWindow):
@@ -33,15 +38,11 @@ class PathWindow(ToolWindow):
 
     def build(self, box):
         s = self.app.scale
-        self.vars, self.entries = {}, {}
+        self.vars, self.entries, self.combos = {}, {}, {}
         box.columnconfigure(0, minsize=round(80 * s))
-        ttk.Label(box, text=tr("path.kind")).grid(row=1, column=0, sticky="e", padx=(0, 8), pady=2)
-        self.kind_box = ttk.Combobox(box, state="readonly", width=12, values=[tr(f"path.{k}") for k in KINDS])
-        self.kind_box.grid(row=1, column=1, sticky="w", pady=2)
-        self.kind_box.bind("<<ComboboxSelected>>", lambda e: self.put_kind(KINDS[e.widget.current()]))
-        Tooltip(self.kind_box, tr("path.tip_kind"))
+        self.choice(box, 1, "kind", tr("path.kind"))
 
-        ttk.Label(box, text=tr("path.spacing")).grid(row=2, column=0, sticky="ne", padx=(0, 8), pady=(6, 2))
+        self.label(box, 2, tr("path.spacing"))
         sp = ttk.Frame(box)
         sp.grid(row=2, column=1, sticky="w", pady=(6, 2))
         self.mode = tk.StringVar(value="every")
@@ -60,10 +61,30 @@ class PathWindow(ToolWindow):
         count.grid(row=1, column=0, sticky="w", pady=(4, 0))
         Tooltip(count, tr("path.tip_count"))
         self.number(sp, 1, 1, "count", tr("path.tip_count"), (1, 10, 1))
+        self.choice(box, 3, "speed", tr("path.speed"))
 
-        ttk.Label(box, text=tr("path.end")).grid(row=3, column=0, sticky="e", padx=(0, 8), pady=(6, 2))
+        self.label(box, 4, tr("path.size"))
+        size = ttk.Frame(box)
+        size.grid(row=4, column=1, sticky="w", pady=(6, 2))
+        for c, key in ((0, "size0"), (3, "size1")):
+            self.number(size, 0, c, key, tr(f"path.tip_{key}"), (1, 10, 0.1))
+            ttk.Label(size, text=tr("unit.percent"), foreground=look.HINT).grid(row=0, column=c + 1, sticky="w",
+                                                                              padx=(3, 0))
+        ttk.Label(size, text="→", foreground=look.HINT).grid(row=0, column=2, padx=6)
+
+        colours = self.choice(box, 5, "colours", tr("path.colours"))
+        lb = ttk.Label(colours, text=tr("path.step"), foreground=look.HINT)
+        lb.grid(row=0, column=1, sticky="e", padx=(10, 3))
+        self.number(colours, 0, 2, "step", tr("path.tip_step"), (1, 5, 1), label=lb, width=4)
+        self.colour_note = ttk.Label(box, text="", foreground=look.WARN, wraplength=round(440 * s))
+        self.colour_note.grid(row=6, column=1, sticky="w")
+        flip = self.choice(box, 7, "flip", tr("path.flip"))
+        self.choice(flip, 0, "way", None, column=1)
+        self.choice(box, 8, "top", tr("path.top"))
+
+        self.label(box, 9, tr("path.end"))
         end = ttk.Frame(box)
-        end.grid(row=3, column=1, sticky="w", pady=(6, 2))
+        end.grid(row=9, column=1, sticky="w", pady=(6, 2))
         for c, key, steps in ((0, "bar", (1, 4, 1)), (2, "beat", (1, 4, 1)), (4, "tick", (1, 10, 1)),
                               (6, "key", (1, 12, 1))):
             lb = ttk.Label(end, text=tr(f"path.{key}"), foreground=look.HINT)
@@ -73,13 +94,29 @@ class PathWindow(ToolWindow):
         self.key_name.grid(row=0, column=8, sticky="w", padx=(4, 0))
 
         self.info = ttk.Label(box, text="", foreground=look.HINT, wraplength=round(440 * s))  # (the window keeps its size)
-        self.info.grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self.info.grid(row=10, column=0, columnspan=2, sticky="w", pady=(8, 0))
         row = ttk.Frame(box)
-        row.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        row.grid(row=11, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         reset = ttk.Button(row, text=tr("path.reset"), command=self.reset)
         reset.pack(side="left")
         Tooltip(reset, tr("path.tip_reset"))
         ttk.Button(row, text=tr("path.accept"), command=self.accept).pack(side="right")
+
+    def label(self, box, r, text):
+        ttk.Label(box, text=text).grid(row=r, column=0, sticky="e", padx=(0, 8), pady=(6, 2))
+
+    def choice(self, box, r, key, text, column=0):
+        """A row with a dropdown (CHOICES[key], texts path.<choice>); returns its frame (more can go beside it)."""
+        if text is not None:
+            self.label(box, r, text)
+        f = ttk.Frame(box)
+        f.grid(row=r, column=column + 1, sticky="w", pady=(6, 2), padx=(10, 0) if column else 0)
+        c = self.combos[key] = ttk.Combobox(f, state="readonly", width=16,
+                                            values=[tr(f"path.{v}") for v in CHOICES[key]])
+        c.grid(row=0, column=0, sticky="w")
+        c.bind("<<ComboboxSelected>>", lambda e: self.put_choice(key, CHOICES[key][e.widget.current()]))
+        Tooltip(c, tr(f"path.tip_{key}"))
+        return f
 
     def number(self, parent, r, c, key, tip, steps, label=None, width=6):
         var = self.vars[key] = tk.StringVar()
@@ -90,12 +127,54 @@ class PathWindow(ToolWindow):
         Scrub(self.app, [(e, var, lambda: self.on_entry(key, False))], steps, label=label, drag_box=label is None)
         Tooltip(e, tip)
 
-    # ---- where A and B are
+    # ---- the group: where A is, each shape's page
+
+    def before_notes(self, i):
+        """Shape i's notes before this page (all of them while it's still a new one)."""
+        sh = self.app.shapes[i]
+        fx = sh.get("fx") or []
+        k = self.at.get(i, len(fx)) if self.at else len(fx)
+        bare = {key: v for key, v in sh.items() if key != "fx"}
+        return self.app.notes_of(dict(bare, fx=fx[:k]) if k else bare)
+
+    def boxes(self):
+        """{shape: (first start, last end, lowest key, highest key)} of the selected shapes' notes before this page."""
+        out = {}
+        for i in self.targets:
+            if i < len(self.app.shapes):
+                a = self.before_notes(i)
+                if len(a):
+                    out[i] = (int(a[:, 0].min()), int(a[:, 1].max()), int(a[:, 2].min()), int(a[:, 2].max()))
+        return out
+
+    def group(self):
+        boxes = self.boxes()
+        if not boxes:
+            return None
+        b = list(boxes.values())
+        return (min(x[0] for x in b), max(x[1] for x in b), min(x[2] for x in b), max(x[3] for x in b)), boxes
 
     def anchor(self):
-        """A: (beat where the selected shapes start, their middle key), or None (nothing drawn)."""
-        r = self.app.roll.reach([self.app.shapes[i] for i in self.targets if i < len(self.app.shapes)])
-        return None if r is None else (r[0], (r[1] + r[2]) / 2)
+        """A: (beat where the selected shapes' notes start, their middle key), or None (no notes)."""
+        g = self.group()
+        return None if g is None else (g[0][0] / self.app.ppq, (g[0][2] + g[0][3]) / 2)
+
+    def page_cfg(self, i, cfg):
+        """Shape i's page: where the group's box is from its own notes, and how many colours there are."""
+        if cfg is None:
+            return None
+        g = self.group()
+        own = g and g[1].get(i)
+        ppq = self.app.ppq
+        grp = [(g[0][0] - own[0]) / ppq, (g[0][1] - own[1]) / ppq, g[0][2] - own[2], g[0][3] - own[3]] if own else \
+            [0.0, 0.0, 0.0, 0.0]
+        return dict(cfg, grp=grp, most=16 if self.app.all16() else 15)
+
+    def alike(self, fx):
+        return [dict(st, cfg={k: v for k, v in st["cfg"].items() if k not in GROUP_ONLY})
+                if st["tool"] == self.KEY and st.get("cfg") else st for st in fx]
+
+    # ---- where B is
 
     def end_point(self):
         """B as (beat, key) on the piano roll, or None (not placed)."""
@@ -163,13 +242,13 @@ class PathWindow(ToolWindow):
 
     # ---- settings
 
-    def put_kind(self, kind):
-        self.cfg["kind"] = kind
-        if kind == "straight":
+    def put_choice(self, key, value):
+        if key == "kind" and value == "straight":
             self.cfg["mid"] = None
-        self.put("kind", kind)
+        self.put(key, value)
 
     def put_length(self, snap):
+        self.cfg["mode"] = "every"
         self.put("every", snap_beats(snap, self.app.beats))
 
     def on_entry(self, key, done=True):
@@ -186,18 +265,27 @@ class PathWindow(ToolWindow):
         elif key == "count":
             ok = COUNT_LIMITS[0] <= v <= COUNT_LIMITS[1] and v == int(v)
             v = int(v)
+        elif key in ("size0", "size1"):
+            ok = SIZE_LIMITS[0] <= v <= SIZE_LIMITS[1]
+        elif key == "step":
+            ok = STEP_LIMITS[0] <= v <= STEP_LIMITS[1] and v == int(v)
+            v = int(v)
         else:
             ok = self.end_point() is not None and v == int(v)
         if not ok:
             bad(e)
             return
         good(e)
-        if key in ("every", "count"):
+        if key in ("size0", "size1"):
+            size = list(self.cfg["size"])
+            size[key == "size1"] = v
+            if size != self.cfg["size"]:
+                self.put("size", size, done)
+            return
+        if key in ("every", "count", "step"):
             if v != self.cfg[key]:
-                if key == "every":
-                    self.cfg["mode"] = "every"
-                elif key == "count":
-                    self.cfg["mode"] = "count"
+                if key in ("every", "count"):
+                    self.cfg["mode"] = key
                 self.put(key, v, done)
             return
         beat, p = self.end_point()
@@ -230,9 +318,14 @@ class PathWindow(ToolWindow):
             if str(self.entries[key].cget("style")) != "TEntry":
                 self.entries[key].config(style="TEntry")
 
-        kind = tr(f"path.{c['kind']}")
-        if self.kind_box.get() != kind:
-            self.kind_box.set(kind)
+        def config(w, **opts):
+            if any(str(w.cget(k)) != str(v) for k, v in opts.items()):
+                w.config(**opts)
+
+        for key, box in self.combos.items():
+            text = tr(f"path.{c[key]}")
+            if box.get() != text:
+                box.set(text)
         if self.mode.get() != c["mode"]:
             self.mode.set(c["mode"])
         ppq = self.app.ppq
@@ -241,16 +334,22 @@ class PathWindow(ToolWindow):
             self.length_box.set(length)
         put_text("every", fmt(round(c["every"] * ppq, 6)))
         put_text("count", str(c["count"]))
+        put_text("size0", fmt(round(c["size"][0], 6)))
+        put_text("size1", fmt(round(c["size"][1], 6)))
+        put_text("step", str(c["step"]))
+        config(self.entries["step"], state="normal" if c["colours"] != "keep" else "disabled")
+        config(self.combos["way"], state="readonly" if c["flip"] == "each" else "disabled")
         end = self.end_point()
         bar_beat = self.bar_beat_tick(end[0]) if end else None
         for key, v in zip(("bar", "beat", "tick", "key"), (*bar_beat, end[1]) if end else (None,) * 4):
             put_text(key, "" if v is None else fmt(round(v, 6)))
-            state = "normal" if end else "disabled"
-            if str(self.entries[key].cget("state")) != state:
-                self.entries[key].config(state=state)
+            config(self.entries[key], state="normal" if end else "disabled")
         name = note_name(round(end[1]), self.app.edo()) if end and 0 <= round(end[1]) < 256 else ""
-        if self.key_name.cget("text") != name:
-            self.key_name.config(text=name)
+        config(self.key_name, text=name)
+        multi = self.app.channel_mode.get() == "auto"
+        note = "" if c["colours"] == "keep" or multi else tr("path.needs_multi")
+        config(self.colour_note, text=note)
+        grid_shown(self.colour_note, bool(note))  # (no empty row while there's nothing to say)
         if not self.targets:
             info = ""
         elif self.placing():
@@ -258,8 +357,9 @@ class PathWindow(ToolWindow):
         else:
             cl = clean_path(c)
             info = tr("path.n_copies", n=len(shifts(cl, ppq))) if cl else ""
-        if self.info.cget("text") != info:
-            self.info.config(text=info)
+            if cl and cl["flip"] == "mirror" and peak(cl) is None:
+                info += "\n" + tr("path.no_peak")
+        config(self.info, text=info)
         self.app.roll.request_redraw()
 
     def preview(self, now=True):

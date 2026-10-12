@@ -344,8 +344,16 @@ class ToolWindow(tk.Toplevel):
 
     def same(self):
         """Do the selected shapes all have the same steps? (Then their pages can be picked; else only "+".)"""
-        fx = [json.dumps(self.app.shapes[i].get("fx") or []) for i in self.targets]
+        fx = [json.dumps(self.alike(self.app.shapes[i].get("fx") or [])) for i in self.targets]
         return len(set(fx)) <= 1
+
+    def alike(self, fx):
+        """A shape's steps as compared with the other selected shapes' (same: their pages can be picked)."""
+        return fx
+
+    def page_cfg(self, i, cfg):
+        """The page's settings as put on shape i (the same on every shape, unless a window needs its own bit)."""
+        return cfg
 
     def order_text(self, fx):
         """Every step of a shape in order, for the tabs' tooltip."""
@@ -607,13 +615,13 @@ class ToolWindow(tk.Toplevel):
                 sh = self.app.shapes[i]
                 fx = copied(sh.get("fx") or [])
                 self.at[i] = len(fx)
-                sh["fx"] = fx + [{"tool": self.KEY, "cfg": cl}]
+                sh["fx"] = fx + [{"tool": self.KEY, "cfg": self.page_cfg(i, cl)}]
         else:
             for i in self.targets:
                 sh = self.app.shapes[i]
                 fx = copied(sh.get("fx") or [])
                 k = self.at[i]
-                fx[k] = dict(fx[k], cfg=cl)  # (None = changes nothing for now: dropped when the window closes)
+                fx[k] = dict(fx[k], cfg=self.page_cfg(i, cl))  # (None = changes nothing for now: dropped on close)
                 sh["fx"] = fx
         self.now = self.settings()
         self.sync_tabs()
