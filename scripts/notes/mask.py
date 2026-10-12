@@ -9,8 +9,8 @@ Its area, on each key row, comes from its own notes:
   "line" / open lines         a band round its notes
 The band is a round brush `size` keys across, measured in the shape's own proportions (`k` beats per key, the screen's
 when it became a mask), so a circle gets an even ring whatever the zoom later (user).
-Invert = the other way round: the pattern shows everywhere but there (a hole). A note across the edge is trimmed; a
-part shorter than mould.SHORT of its note is left out (user: no slivers, the preview = what Apply mask makes).
+Invert = the other way round: the pattern shows everywhere but there (a hole). A note across the edge is cut exactly
+there and every piece kept, however short (user: dropping short pieces made long notes vanish while short ones showed).
 sh["mask"] = {"size": keys, "k": beats per key, "invert": bool, "own": bool (its own notes sound, a border; False =
 silent, only its line shows), "show": "inside" / "line" (missing = inside for closed shapes)}."""
 
@@ -18,7 +18,7 @@ import math
 
 import numpy as np
 
-from notes.mould import SHORT, mould_rows
+from notes.mould import mould_rows
 
 MASK_DEFAULTS = {"size": 2.0, "k": 0.0625, "invert": False, "own": True}
 MOST_SIZE = 127.0  # the thickness box's largest value (keys)
@@ -139,7 +139,7 @@ def area(notes, size, tpk, nkeys, band=True, gaps=()):
 
 def kept_parts(notes, a, b, invert):
     """Which notes (rows start, end, key, ...) the area (a, b) touches, and the parts of them that show: (hit, the
-    notes' row numbers, part starts, part ends). Parts shorter than SHORT of their note are left out."""
+    notes' row numbers, part starts, part ends). Every piece is kept, however short (user)."""
     notes = np.asarray(notes)
     n = len(notes)
     if not n or not len(a):
@@ -161,7 +161,7 @@ def kept_parts(notes, a, b, invert):
     else:
         start, end = a[at] - base[idx], b[at] - base[idx]
     ps, pe = np.maximum(start, s[idx]), np.minimum(end, e[idx])
-    keep = (pe > ps) & (pe - ps >= SHORT * (e - s)[idx])
+    keep = pe > ps
     return hit, idx[keep], ps[keep], pe[keep]
 
 
