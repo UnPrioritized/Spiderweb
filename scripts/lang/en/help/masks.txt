@@ -2,7 +2,7 @@ A mask shapes a note pattern without cutting it. Draw your pattern first (often 
 
 Any drawing tool makes a mask, Live shape too (paint with the mask like a brush). To turn a shape you already drew into a mask, select it and tick Mask in the side panel; untick it to make it a normal shape again. A mask's line is always shown, dashed.
 
-Mask Preview (the tick next to Mask on the toolbar): untick it to see the shapes under masks whole again, without the faint parts; only the masks' dashed lines stay. It only changes what you see.
+Mask preview (the tick next to Mask on the toolbar): untick it to see the shapes under masks whole again, without the faint parts; only the masks' dashed lines stay. It only changes what you see.
 
 A mask covers every shape it touches, never other masks. To use a mask's notes as the pattern, untick Mask on it.
 

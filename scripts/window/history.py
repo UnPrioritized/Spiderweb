@@ -25,7 +25,7 @@ def edit_name(key):
         return EDIT_NAMES.get(key[2], key[2])
     if kind == "tumour":
         return tr("history.tumour", key=key[2]) if len(key) > 2 else tr("history.tumours")
-    return EDIT_NAMES.get(kind, "Change")
+    return EDIT_NAMES.get(kind, tr("app.change"))
 
 
 class HistoryPanel:

@@ -245,7 +245,7 @@
  "hz.preview_ready": "Ready, {voices}",
  "hz.preview_voices": "voices {used} / {limit}",
  "synth.no_device": "There's no sound device to play through.",
- "hz.settings": "Settings…",
+ "hz.settings": "Hz settings…",
  "hz.settings_tip": "The Hz bass's Pitch, Gates and PPQ, whether the shape grows with the notes, and the preview's soundfont, voice limit, reverb and volume.",
  "ps.title": "Hz bass settings",
  "ps.hz_head": "Hz bass",

@@ -14,4 +14,4 @@ What you hear is NOT your MIDI. It's a quick copy made by Spiderweb: each differ
 
 It sounds very close to the real thing with most soundfonts; a soundfont that changes its sound at random can't be copied exactly. Only notes you place in the Hz bass window go into your MIDI.
 
-The first press after a change (another soundfont, new effects) waits a moment while the notes are recorded. The recordings are kept while Spiderweb is open; Settings… → Memory for live keys says how much memory they may take. When it's full, the ones used least are thrown away and recorded again when needed.
+The first press after a change (another soundfont, new effects) waits a moment while the notes are recorded. The recordings are kept while Spiderweb is open; Hz settings… → Memory for live keys says how much memory they may take. When it's full, the ones used least are thrown away and recorded again when needed.
