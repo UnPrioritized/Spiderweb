@@ -1369,6 +1369,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         something (a point removed under a held one: wrong point / error)."""
         if self.holding():
             return
+        if not self.draft and self.path_right(e):  # Copy along a path: a point removed / the added one dropped
+            return
         finished = bool(self.draft and self.draft["kind"] in ("poly", "arc"))
         if self.follow:  # a shape started with a click, not finished: dropped
             self.drop_hz_keys()  # a new Hz bass's start mark goes too

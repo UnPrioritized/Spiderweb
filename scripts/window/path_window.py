@@ -1,11 +1,11 @@
-"""The Copy along a path window (notes/copypath.py): the selected shapes copied along a path from A (where their notes
-start in time, at their middle key) to B, shown live on the piano roll (the shared part: tool_window.py; the path's
-points on the piano roll: roll/roll_path.py). Several shapes travel together as one group: each gets the same page,
-plus where the group's box is from its own notes ("grp", page_cfg), so sizes and flips work on the whole group.
+"""The Copy along a path window (notes/copypath.py): the selected shapes copied along a path through points A (a corner
+of their notes' box), B, C, ..., shown live on the piano roll (the shared part: tool_window.py; the path's points on
+the piano roll: roll/roll_path.py). Several shapes travel together as one group: each gets the same page, plus where
+the group's box is from its own notes ("grp", page_cfg), so corners, sizes and flips work on the whole group.
 
 Path kind (Straight / Curve / Arc), spacing (one copy every [note length] or a number of copies), Speed, Size,
-Colours (+ Step), Flip (+ which way), On top, and where B is as bar / beat / tick / key like the piano roll's status
-line, typed or dragged on the piano roll."""
+Colours (+ Step), Flip (+ which way), On top, and where the picked point is as bar / beat / tick / key like the piano
+roll's status line, typed or dragged on the piano roll; Add point (it follows the mouse until a click places it)."""
 
 import tkinter as tk
 from tkinter import ttk
@@ -13,8 +13,9 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from files.snap import SNAP_LIST, snap_beats, snap_text
-from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KINDS, PATH_DEFAULTS, SIZE_LIMITS,
-                            SPEEDS, STEP_LIMITS, TOPS, WAYS, clean_path, peak, shifts)
+from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KINDS, LETTERS, MOST_POINTS,
+                            PATH_DEFAULTS, SIZE_LIMITS, SPEEDS, STEP_LIMITS, TOPS, WAYS, all_points, clean_path, peak,
+                            shifts)
 from roll.roll_shared import note_name
 from window import look
 from window.tool_window import ToolWindow
@@ -27,7 +28,9 @@ GROUP_ONLY = ("grp", "most")  # (page settings that may differ between the shape
 
 class PathWindow(ToolWindow):
     KEY, ATTR, POS, DEFAULTS = "path", "path_window", "path_pos", PATH_DEFAULTS
-    loose = False  # B follows the mouse on the piano roll until a click places it
+    loose = False  # the last point follows the mouse on the piano roll until a click places it
+    adding = False  # Add point pressed: the new point comes with the mouse's first move on the piano roll
+    pick = 0  # the point the bar / beat / tick / key boxes show (0 = B)
 
     def __init__(self, app):
         super().__init__(app)
@@ -82,7 +85,8 @@ class PathWindow(ToolWindow):
         self.choice(flip, 0, "way", None, column=1)
         self.choice(box, 8, "top", tr("path.top"))
 
-        self.label(box, 9, tr("path.end"))
+        self.point_label = self.label(box, 9, LETTERS[1])
+        Tooltip(self.point_label, tr("path.tip_point"))
         end = ttk.Frame(box)
         end.grid(row=9, column=1, sticky="w", pady=(6, 2))
         for c, key, steps in ((0, "bar", (1, 4, 1)), (2, "beat", (1, 4, 1)), (4, "tick", (1, 10, 1)),
@@ -92,6 +96,9 @@ class PathWindow(ToolWindow):
             self.number(end, 0, c + 1, key, tr(f"path.tip_{key}"), steps, label=lb, width=5)
         self.key_name = ttk.Label(end, text="", foreground=look.HINT, width=6)
         self.key_name.grid(row=0, column=8, sticky="w", padx=(4, 0))
+        self.add_button = ttk.Button(end, text=tr("path.add_point"), command=self.add_point)
+        self.add_button.grid(row=0, column=9, sticky="w", padx=(6, 0))
+        Tooltip(self.add_button, tr("path.tip_add_point"))
 
         self.info = ttk.Label(box, text="", foreground=look.HINT, wraplength=round(440 * s))  # (the window keeps its size)
         self.info.grid(row=10, column=0, columnspan=2, sticky="w", pady=(8, 0))
@@ -103,7 +110,9 @@ class PathWindow(ToolWindow):
         ttk.Button(row, text=tr("path.accept"), command=self.accept).pack(side="right")
 
     def label(self, box, r, text):
-        ttk.Label(box, text=text).grid(row=r, column=0, sticky="e", padx=(0, 8), pady=(6, 2))
+        lb = ttk.Label(box, text=text)
+        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=(6, 2))
+        return lb
 
     def choice(self, box, r, key, text, column=0):
         """A row with a dropdown (CHOICES[key], texts path.<choice>); returns its frame (more can go beside it)."""
@@ -127,7 +136,7 @@ class PathWindow(ToolWindow):
         Scrub(self.app, [(e, var, lambda: self.on_entry(key, False))], steps, label=label, drag_box=label is None)
         Tooltip(e, tip)
 
-    # ---- the group: where A is, each shape's page
+    # ---- the group: its box, each shape's page
 
     def before_notes(self, i):
         """Shape i's notes before this page (all of them while it's still a new one)."""
@@ -154,10 +163,22 @@ class PathWindow(ToolWindow):
         b = list(boxes.values())
         return (min(x[0] for x in b), max(x[1] for x in b), min(x[2] for x in b), max(x[3] for x in b)), boxes
 
-    def anchor(self):
-        """A: (beat where the selected shapes' notes start, their middle key), or None (no notes)."""
+    def frame(self):
+        """The group's box as ((beat it starts, lowest key), (beats, keys) it spans), or None (no notes). The points
+        are kept from its start, lowest key."""
         g = self.group()
-        return None if g is None else (g[0][0] / self.app.ppq, (g[0][2] + g[0][3]) / 2)
+        if g is None:
+            return None
+        (t0, t1, lo, hi), ppq = g[0], self.app.ppq
+        return (t0 / ppq, lo), ((t1 - t0) / ppq, hi - lo)
+
+    def points(self):
+        """A, B, C, ... as (beat, key) on the piano roll, or None (B not placed / no notes)."""
+        fr, cl = self.frame(), clean_path(self.cfg)
+        if fr is None or cl is None:
+            return None
+        (b0, k0), size = fr
+        return [(b0 + b, k0 + p) for b, p in all_points(cl, size)]
 
     def page_cfg(self, i, cfg):
         """Shape i's page: where the group's box is from its own notes, and how many colours there are."""
@@ -174,68 +195,139 @@ class PathWindow(ToolWindow):
         return [dict(st, cfg={k: v for k, v in st["cfg"].items() if k not in GROUP_ONLY})
                 if st["tool"] == self.KEY and st.get("cfg") else st for st in fx]
 
-    # ---- where B is
-
-    def end_point(self):
-        """B as (beat, key) on the piano roll, or None (not placed)."""
-        a, b = self.anchor(), self.cfg.get("b")
-        return None if a is None or b is None else (a[0] + b[0], a[1] + b[1])
+    # ---- the points
 
     def placing(self):
-        """Is B still to be clicked on the piano roll? (Until then it follows the mouse there: follow.)"""
-        return bool(self.targets) and (self.cfg.get("b") is None or self.loose)
+        """Is a point still to be clicked on the piano roll (B, or one added)? (Until then it follows the mouse
+        there: follow.)"""
+        return bool(self.targets) and (not self.cfg.get("pts") or self.loose or self.adding)
+
+    def lists(self):
+        """Copies of the points and the middle points (as many)."""
+        pts = [list(p) for p in self.cfg.get("pts") or []]
+        mids = list(self.cfg.get("mids") or [])
+        return pts, [None if m is None else list(m) for m in (mids + [None] * len(pts))[:len(pts)]]
+
+    def from_box(self, beat, key):
+        """(beat, key) on the piano roll -> from the group's start, lowest key; or None (no notes)."""
+        fr = self.frame()
+        return None if fr is None else [round(beat - fr[0][0], 9), round(key - fr[0][1], 9)]
 
     def follow(self, beat, key, k):
-        """B, not placed yet, follows the mouse on the piano roll: the copies show there (no step inside)."""
-        a = self.anchor()
-        if a is None:
+        """The point still to be placed follows the mouse on the piano roll: the copies show there (no step inside)."""
+        pt = self.from_box(beat, key)
+        if pt is None:
             return
-        self.loose = True
-        self.cfg["b"], self.cfg["k"] = [round(beat - a[0], 9), round(key - a[1], 9)], k
+        pts, mids = self.lists()
+        if self.loose:
+            pts[-1] = pt
+        else:
+            pts.append(pt)
+            mids.append(None)
+        self.loose, self.adding = True, False
+        self.pick = len(pts) - 1
+        self.cfg.update(pts=pts, mids=mids, k=k)
         self.show()
         self.preview(False)
 
+    def place(self, beat, key, k):
+        """A click on the piano roll places the point following the mouse (B, or one added)."""
+        pt = self.from_box(beat, key)
+        if pt is None:
+            return
+        pts, mids = self.lists()
+        if self.loose:
+            pts[-1] = pt
+        else:
+            pts.append(pt)
+            mids.append(None)
+        self.loose = self.adding = False
+        self.pick = len(pts) - 1
+        self.cfg.update(pts=pts, mids=mids, k=k)
+        self.show()
+        self.preview()
+        self.undo.mark()
+
+    def add_point(self):
+        """Add point: a new point after the last one follows the mouse on the piano roll until a click."""
+        if self.cfg.get("pts") and not self.placing() and len(self.cfg["pts"]) < MOST_POINTS:
+            self.adding = True
+            self.show()
+
+    def stop_adding(self):
+        """Right-click while an added point follows the mouse: it's dropped. True if so (B can't be)."""
+        if not self.cfg.get("pts") or not (self.loose or self.adding) or (self.loose and len(self.cfg["pts"]) < 2):
+            return False
+        if self.loose:
+            pts, mids = self.lists()
+            self.cfg.update(pts=pts[:-1], mids=mids[:-1])
+        self.loose = self.adding = False
+        self.pick = min(self.pick, len(self.cfg["pts"]) - 1)
+        self.show()
+        self.preview()
+        return True
+
+    def remove_point(self, i):
+        """Point i (0 = B) right-clicked: it goes, its two stretches become one straight one. Not the only one."""
+        pts, mids = self.lists()
+        if len(pts) < 2 or self.placing():
+            return
+        del pts[i]
+        mids = mids[:i] + ([None] if i < len(pts) else []) + mids[i + 2:]
+        self.pick = min(self.pick if self.pick < i else max(0, self.pick - 1), len(pts) - 1)
+        self.cfg.update(pts=pts, mids=mids)
+        self.show()
+        self.preview()
+        self.undo.mark()
+
+    def calm(self):
+        self.loose = self.adding = False
+        self.pick = 0
+
     def retarget(self):
-        self.loose = False
+        self.calm()
         super().retarget()
 
     def pick_page(self, k):
-        self.loose = False
+        self.calm()
         super().pick_page(k)
+        if self.cfg.get("pts") is None and self.cfg.get("b") is not None:  # (the first days' pages)
+            self.cfg = clean_path(self.cfg) or self.cfg
+            self.show()
 
     def new_page(self):
-        self.loose = False
+        self.calm()
         super().new_page()
 
     def put_state(self, state):
-        self.loose = False
+        self.loose = self.adding = False
         super().put_state(state)
 
     def reset(self):
-        self.loose = False
+        self.calm()
         super().reset()
 
     def set_point(self, which, beat, key, k, done):
-        """B ("b") or the middle point ("mid") put at (beat, key) on the piano roll (from the roll: k = beats per key
-        on screen now). The middle point of a straight path makes it a curve. B clicked while it follows the mouse:
-        placed there."""
-        a = self.anchor()
-        if a is None:
+        """A point ("pt", i: 0 = B) or a stretch's middle point ("mid", i) put at (beat, key) on the piano roll
+        (k = beats per key on screen now). A middle point on a straight path makes it a curve; a point moved takes
+        the bends beside it along by half as much."""
+        pt = self.from_box(beat, key)
+        if pt is None:
             return
-        if which == "b" and self.placing():
-            self.loose = False
-            self.cfg["b"] = None
-        pt = [round(beat - a[0], 9), round(key - a[1], 9)]
-        if which == "mid":
-            self.cfg["mid"] = pt
+        what, i = which
+        pts, mids = self.lists()
+        if what == "mid":
+            mids[i] = pt
             if self.cfg["kind"] == "straight":
                 self.cfg["kind"] = "curve"
         else:
-            if self.cfg.get("b") is not None and self.cfg.get("mid") is not None:  # (the bend kept as it was)
-                old, m = self.cfg["b"], self.cfg["mid"]
-                self.cfg["mid"] = [m[0] + (pt[0] - old[0]) / 2, m[1] + (pt[1] - old[1]) / 2]
-            self.cfg["b"] = pt
-        self.cfg["k"] = k
+            dx, dy = pt[0] - pts[i][0], pt[1] - pts[i][1]
+            for s in (i, i + 1):  # (the bends kept as they were)
+                if s < len(mids) and mids[s] is not None:
+                    mids[s] = [mids[s][0] + dx / 2, mids[s][1] + dy / 2]
+            pts[i] = pt
+            self.pick = i
+        self.cfg.update(pts=pts, mids=mids, k=k)
         self.show()
         self.preview(done)
         self.undo.mark(None if done else which)
@@ -244,7 +336,7 @@ class PathWindow(ToolWindow):
 
     def put_choice(self, key, value):
         if key == "kind" and value == "straight":
-            self.cfg["mid"] = None
+            self.cfg["mids"] = None
         self.put(key, value)
 
     def put_length(self, snap):
@@ -271,7 +363,7 @@ class PathWindow(ToolWindow):
             ok = STEP_LIMITS[0] <= v <= STEP_LIMITS[1] and v == int(v)
             v = int(v)
         else:
-            ok = self.end_point() is not None and v == int(v)
+            ok = self.picked() is not None and v == int(v)
         if not ok:
             bad(e)
             return
@@ -288,17 +380,22 @@ class PathWindow(ToolWindow):
                     self.cfg["mode"] = key
                 self.put(key, v, done)
             return
-        beat, p = self.end_point()
+        beat, p = self.picked()
         bar, b, t = self.bar_beat_tick(beat)
         bar, b, t, p = {"bar": (v, b, t, p), "beat": (bar, v, t, p), "tick": (bar, b, v, p),
                         "key": (bar, b, t, v)}[key]
         beat = ((bar - 1) * self.app.beats + (b - 1)) + t / ppq
-        a = self.anchor()
-        if abs(beat - a[0]) > FAR or abs(p - a[1]) > FAR:
+        base = self.frame()[0]
+        if abs(beat - base[0]) > FAR or abs(p - base[1]) > FAR:
             bad(e)
             return
-        if (beat, p) != self.end_point():
-            self.set_point("b", beat, p, self.cfg["k"], done)
+        if (beat, p) != self.picked():
+            self.set_point(("pt", self.pick), beat, p, self.cfg["k"], done)
+
+    def picked(self):
+        """The picked point as (beat, key) on the piano roll, or None (not placed)."""
+        pts = self.points()
+        return pts[min(self.pick, len(pts) - 2) + 1] if pts else None
 
     def bar_beat_tick(self, beat):
         """beat -> (bar, beat in it, tick in it) as the status line shows them (bar and beat from 1); before the
@@ -339,25 +436,33 @@ class PathWindow(ToolWindow):
         put_text("step", str(c["step"]))
         config(self.entries["step"], state="normal" if c["colours"] != "keep" else "disabled")
         config(self.combos["way"], state="readonly" if c["flip"] == "each" else "disabled")
-        end = self.end_point()
+        n = len(c.get("pts") or [])
+        self.pick = max(0, min(self.pick, n - 1))
+        adding = self.adding or (self.loose and n > 1)
+        config(self.point_label, text=LETTERS[(n if self.adding else self.pick) + 1])
+        end = self.picked() if not self.adding else None
         bar_beat = self.bar_beat_tick(end[0]) if end else None
         for key, v in zip(("bar", "beat", "tick", "key"), (*bar_beat, end[1]) if end else (None,) * 4):
             put_text(key, "" if v is None else fmt(round(v, 6)))
             config(self.entries[key], state="normal" if end else "disabled")
         name = note_name(round(end[1]), self.app.edo()) if end and 0 <= round(end[1]) < 256 else ""
         config(self.key_name, text=name)
+        config(self.add_button, state="normal" if n and not self.placing() and n < MOST_POINTS else "disabled")
         multi = self.app.channel_mode.get() == "auto"
         note = "" if c["colours"] == "keep" or multi else tr("path.needs_multi")
         config(self.colour_note, text=note)
         grid_shown(self.colour_note, bool(note))  # (no empty row while there's nothing to say)
-        if not self.targets:
+        fr = self.frame()
+        if not self.targets or fr is None:
             info = ""
+        elif adding:
+            info = tr("path.click_point", name=LETTERS[n + 1 if self.adding else n])
         elif self.placing():
             info = tr("path.click_b")
         else:
             cl = clean_path(c)
-            info = tr("path.n_copies", n=len(shifts(cl, ppq))) if cl else ""
-            if cl and cl["flip"] == "mirror" and peak(cl) is None:
+            info = tr("path.n_copies", n=len(shifts(cl, ppq, fr[1]))) if cl else ""
+            if cl and cl["flip"] == "mirror" and peak(cl, fr[1]) is None:
                 info += "\n" + tr("path.no_peak")
         config(self.info, text=info)
         self.app.roll.request_redraw()

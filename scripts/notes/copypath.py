@@ -1,19 +1,24 @@
-"""Copy along a path (user, 2026-10-12): the shape's notes copied again and again along a path from A to B, a page of
-the shape (fx.py) like Claw machine / Strum, so the drawing stays editable and every copy follows it.
+"""Copy along a path (user, 2026-10-12): the shape's notes copied again and again along a path through points A, B,
+C, ..., a page of the shape (fx.py) like Claw machine / Strum, so the drawing stays editable and every copy follows it.
 
-A = where the selected shapes' notes start in time, at their middle key (copy 1 = the shapes themselves); the path is
-kept FROM A, so moving a shape moves the path and all its copies along. Several shapes with the same page travel
-together as one group: each page keeps where the group's box is from its own notes ("grp"), so sizes and flips work
-on the whole group. A page's settings (PATH_DEFAULTS' keys):
-  "b"      B, [beats, keys] from A (None: not placed yet, the page does nothing)
-  "mid"    the path's middle point, [beats, keys] from A, for "curve" / "arc" (None: half way, a straight line)
-  "kind"   "straight" / "curve" (a bend through mid) / "arc" (a piece of a circle through mid, round on screen)
-  "mode"   "every": a copy each "every" beats from A (lined up with where the shape starts), the last one at or
-           before B; "count": "count" copies in all, spread evenly along the path's length
+The points sit on the copies' CORNERS (user): going up, A = the shape's bottom-left corner and B = the last copy's
+top-right; where the path turns down at B, B = the top-left of the first copy going down and C = the last one's
+bottom-right. Each run of the path going one way (up / down, forwards / back in time) slides the corner on the line
+from one to the other, so the copies stay between its points. The points are kept from the group's box (its first
+start, lowest key), so moving a shape moves the path and all its copies along. Several shapes with the same page
+travel together as one group: each page keeps where the group's box is from its own notes ("grp"), so corners, sizes
+and flips work on the whole group. A page's settings (PATH_DEFAULTS' keys):
+  "pts"    B, C, ...: [beats, keys] from the group's first start, lowest key (None: B not placed yet, the page does
+           nothing). A isn't kept: it's the corner the path starts from (corner_a)
+  "mids"   each stretch's middle point (A-B, B-C, ...), kept the same way (None: half way, a straight stretch)
+  "kind"   "straight" / "curve" (a bend through the middle point) / "arc" (a piece of a circle through it, round on
+           screen): how the stretches whose middle point was dragged bend
+  "mode"   "every": a copy each "every" beats (copies' starts lined up with where the shape starts), the last one at
+           or before the end; "count": "count" copies in all, spread evenly along the path's length
   "k"      beats per key on screen when the path was made (how long it is, and how round an arc is, as seen then)
-  "speed"  "even" / "up" (bunched at A, further apart towards B) / "down" (the other way)
-  "size"   [first copy %, last copy %]: each copy grows / shrinks from the group's start, middle key (key rows
-           sampled like a stretched picture: no gaps between rows)
+  "speed"  "even" / "up" (bunched at A, further apart towards the end) / "down" (the other way)
+  "size"   [first copy %, last copy %]: each copy grows / shrinks from its corner on the path (key rows sampled like
+           a stretched picture: no gaps between rows)
   "colours" "keep" / "shift" (every colour of copy n = n x step channels on, round the "most" colours) / "turn"
            (round the shape's own colours) / "one" (each copy one colour: n x step); "step" (-15 .. 15)
   "flip"   "none" / "each" (copies where the path goes down are flipped within the group's box, "way": "keys" upside
@@ -23,7 +28,7 @@ on the whole group. A page's settings (PATH_DEFAULTS' keys):
            there, note by note)
   "grp"    [beats, beats, keys, keys]: the group's box (first start, last end, lowest, highest key) less the
            shape's own (all 0 for one shape)
-Each copy = every note moved by the path's time and keys there (keys rounded to whole rows). Notes past the lowest /
+Keys are rows (a corner = the middle of its row, like the points clicked on the piano roll). Notes past the lowest /
 highest key or before the song's start are cut off (user)."""
 
 import math
@@ -37,9 +42,11 @@ COLOURS = ("keep", "shift", "turn", "one")
 FLIPS = ("none", "each", "mirror")
 WAYS = ("keys", "time", "both")
 TOPS = ("last", "first")
-PATH_DEFAULTS = {"b": None, "mid": None, "kind": "straight", "mode": "every", "every": 0.25, "count": 8, "k": 0.25,
-                 "speed": "even", "size": [100.0, 100.0], "colours": "keep", "step": 1, "most": 15, "flip": "none",
-                 "way": "keys", "top": "last", "grp": [0.0, 0.0, 0.0, 0.0]}
+PATH_DEFAULTS = {"pts": None, "mids": None, "kind": "straight", "mode": "every", "every": 0.25, "count": 8,
+                 "k": 0.25, "speed": "even", "size": [100.0, 100.0], "colours": "keep", "step": 1, "most": 15,
+                 "flip": "none", "way": "keys", "top": "last", "grp": [0.0, 0.0, 0.0, 0.0]}
+LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # the points' names
+MOST_POINTS = len(LETTERS) - 1  # B .. Z
 EVERY_LIMITS = (1e-6, 1024.0)  # beats
 COUNT_LIMITS = (2, 10_000)  # copies (the shape itself counts)
 SIZE_LIMITS = (1.0, 1000.0)  # %
@@ -47,7 +54,7 @@ STEP_LIMITS = (-15, 15)
 MOST_COPIES = 10_000
 MOST_NOTES = 20_000_000  # notes with the copies: past it the last copies are left out (memory)
 FAR = 1e6  # beats / keys: a path point further than this from A is a broken file
-SAMPLES = 1024  # points along a curve / arc
+SAMPLES = 1024  # points along each stretch
 SPEED_POWER = 2.0  # how bunched up Speed up / Slow down are
 
 
@@ -75,10 +82,17 @@ def clean_path(c):
     if not isinstance(c, dict):
         return None
     out = dict(PATH_DEFAULTS)
-    out["b"] = _pt(c.get("b"))
-    if out["b"] is None:
+    pts, mids = c.get("pts"), c.get("mids")
+    if pts is None and c.get("b") is not None:  # (the first days' pages: B and one middle point)
+        pts, mids = [c["b"]], [c.get("mid")]
+    if not isinstance(pts, (list, tuple)) or not pts:
         return None
-    out["mid"] = _pt(c.get("mid")) if c.get("mid") is not None else None
+    pts = [_pt(p) for p in pts[:MOST_POINTS]]
+    if None in pts:
+        return None
+    mids = list(mids) if isinstance(mids, (list, tuple)) else []
+    out["pts"] = pts
+    out["mids"] = [None if m is None else _pt(m) for m in (mids + [None] * len(pts))[:len(pts)]]
     for key, choices in (("kind", KINDS), ("mode", MODES), ("speed", SPEEDS), ("colours", COLOURS), ("flip", FLIPS),
                          ("way", WAYS), ("top", TOPS)):
         if c.get(key) in choices:
@@ -101,23 +115,44 @@ def clean_path(c):
     return out
 
 
-def middle(cfg):
-    """The path's middle point from A (beats, keys): its own, or half way to B."""
-    b = cfg["b"]
-    return cfg["mid"] if cfg.get("mid") is not None and cfg["kind"] != "straight" else [b[0] / 2, b[1] / 2]
+def _sign(v):
+    return 1 if v > 1e-9 else -1 if v < -1e-9 else 0
 
 
-def path_points(cfg, n=SAMPLES):
-    """Points along the path from A (0, 0) to B, as an (n, 2) array of (beats, keys)."""
-    b = np.array(cfg["b"], float)
+def corner_a(cfg, size):
+    """A: the corner of the group's box the path starts from (size = its (beats, keys)): bottom-left, top-left when
+    B is below the box's middle key, right when B is before its middle in time. From the box's start, lowest key."""
+    w, h = size
+    b = cfg["pts"][0]
+    return [0.0 if b[0] >= w / 2 else float(w), 0.0 if b[1] >= h / 2 else float(h)]
+
+
+def all_points(cfg, size):
+    """A, B, C, ... as [beats, keys] from the group's first start, lowest key."""
+    return [corner_a(cfg, size)] + [list(p) for p in cfg["pts"]]
+
+
+def bend_of(cfg, i):
+    """Stretch i's own middle point, or None (straight)."""
+    return cfg["mids"][i] if cfg["kind"] != "straight" else None
+
+
+def mid_of(cfg, size, i, pts=None):
+    """Stretch i's middle point (its own, or half way), like the points."""
+    pts = pts or all_points(cfg, size)
+    m = bend_of(cfg, i)
+    return list(m) if m is not None else [(pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2]
+
+
+def _stretch(b, m, kind, k, n):
+    """One stretch's points from (0, 0) to b, bent through m (None: straight): an (n, 2) array."""
+    b = np.asarray(b, float)
     t = np.linspace(0.0, 1.0, n)[:, None]
-    kind = cfg["kind"] if cfg.get("mid") is not None else "straight"
-    m = np.array(middle(cfg), float)
-    if kind == "curve":  # (a bend whose middle is the middle point: control = 2 m - b / 2)
-        c = 2 * m - b / 2
+    if m is not None and kind == "curve":  # (a bend whose middle is the middle point: control = 2 m - b / 2)
+        c = 2 * np.asarray(m, float) - b / 2
         return 2 * (1 - t) * t * c + t * t * b
-    if kind == "arc":
-        arc = arc_points(b, m, cfg["k"], n)
+    if m is not None and kind == "arc":
+        arc = arc_points(b, m, k, n)
         if arc is not None:
             return arc
     return t * b
@@ -154,6 +189,51 @@ def arc_points(b, m, k, n):
     return np.column_stack([(ux + r * np.cos(ang)) * k, uy + r * np.sin(ang)])
 
 
+def runs(pts):
+    """The path's runs going one way: [(first stretch, last stretch, time way, key way)] (ways 1 / -1). A stretch
+    level in keys (or still in time) goes on with the run before it."""
+    out = []
+    for i in range(len(pts) - 1):
+        dt, dk = _sign(pts[i + 1][0] - pts[i][0]), _sign(pts[i + 1][1] - pts[i][1])
+        if out:
+            s, _, wt, wk = out[-1]
+            if not (dt and wt and dt != wt) and not (dk and wk and dk != wk):
+                out[-1] = (s, i, wt or dt, wk or dk)
+                continue
+        out.append((i, i, dt, dk))
+    return [(s, e, wt or 1, wk or 1) for s, e, wt, wk in out]
+
+
+def track(cfg, size, n=SAMPLES):
+    """The path sampled, each stretch n points (its ends twice where two meet): the points (m, 2) from the group's
+    first start, lowest key; the corner on the line there as parts of the box (m, 2: 0 = start / lowest key, 1 = end
+    / highest); its run (m,); does it go down there (m,)."""
+    pts = all_points(cfg, size)
+    got_p, got_f, got_r, got_d = [], [], [], []
+    for r, (s, e, wt, wk) in enumerate(runs(pts)):
+        r0, span = np.array(pts[s], float), np.subtract(pts[e + 1], pts[s])
+        for i in range(s, e + 1):
+            m = bend_of(cfg, i)
+            seg = np.array(pts[i], float) + _stretch(np.subtract(pts[i + 1], pts[i]),
+                                                     None if m is None else np.subtract(m, pts[i]), cfg["kind"],
+                                                     cfg["k"], n)
+            f = np.zeros_like(seg)
+            for c in (0, 1):  # (how far along the run, in time and in keys)
+                if abs(span[c]) > 1e-9:
+                    f[:, c] = np.clip((seg[:, c] - r0[c]) / span[c], 0.0, 1.0)
+            if wt < 0:
+                f[:, 0] = 1 - f[:, 0]
+            if wk < 0:
+                f[:, 1] = 1 - f[:, 1]
+            dk = np.diff(seg[:, 1])
+            dk = np.r_[dk, dk[-1:]]
+            got_p.append(seg)
+            got_f.append(f)
+            got_r.append(np.full(n, r))
+            got_d.append((dk < -1e-9) | ((np.abs(dk) <= 1e-9) & (wk < 0)))
+    return np.concatenate(got_p), np.concatenate(got_f), np.concatenate(got_r), np.concatenate(got_d)
+
+
 def eased(u, speed):
     """Places 0..1 along the copies' run, bunched up as Speed says."""
     if speed == "up":
@@ -163,68 +243,76 @@ def eased(u, speed):
     return u
 
 
-def _crossings(pts, t, targets):
-    """For each time in targets (going up), the path's point where t first reaches it, searching on from the last
-    one; stops at the first never reached."""
-    got, i = [], 0
+def _crossings(t, run, targets):
+    """For each time in targets (going up), the place along the samples (sample number + part of the way to the next)
+    where t first reaches it, searching on from the last one; one where the path turns and the copies jump (a new
+    run) = the new run's first; the same place twice = once. Also how many targets were reached."""
+    got, i, reached = [], 0, 0
     for want in targets:
         past = np.flatnonzero(t[i:] >= want - 1e-9)
         if not len(past):
             break
+        reached += 1
         j = i + past[0]
-        if j == 0:
-            got.append(pts[0].copy())
+        if j == 0 or run[j - 1] != run[j]:
+            pos = float(j)
         else:
-            f = (want - t[j - 1]) / (t[j] - t[j - 1]) if t[j] != t[j - 1] else 1.0
-            got.append(pts[j - 1] + f * (pts[j] - pts[j - 1]))
+            pos = j - 1 + ((want - t[j - 1]) / (t[j] - t[j - 1]) if t[j] != t[j - 1] else 1.0)
+        if not got or abs(got[-1] - pos) > 1e-12:
+            got.append(pos)
         i = max(j - 1, 0)
-    return got
+    return got, reached
 
 
-def places(cfg):
-    """Where each copy goes, before rounding: an (n, 2) float array of (beats, keys) from A, the first (0, 0)."""
-    pts = path_points(cfg)
+def places(cfg, size):
+    """Each copy (size = the group's box (beats, keys)): how far it moves from the shape ((n, 2) beats, keys; the
+    first (0, 0)), its corner on the path (the point it grows / shrinks round: from the group's first start, lowest
+    key) and does the path go down there."""
+    p, f, run, down = track(cfg, size)
+    wh = np.array(size, float)
+    moved = p - f * wh
+    m = len(p)
     if cfg["mode"] == "count":
-        screen = pts / [cfg["k"], 1.0]
+        screen = p / [cfg["k"], 1.0]
         along = np.r_[0.0, np.cumsum(np.hypot(*np.diff(screen, axis=0).T))]
         at = eased(np.linspace(0.0, 1.0, cfg["count"]), cfg["speed"]) * along[-1]
-        return np.column_stack([np.interp(at, along, pts[:, 0]), np.interp(at, along, pts[:, 1])])
-    way = 1.0 if cfg["b"][0] >= 0 else -1.0
-    t = pts[:, 0] * way  # (time along the way to B: the first crossing of each step, in path order)
-    step = cfg["every"]
-    n = len(_crossings(pts, t, np.arange(min(MOST_COPIES, int(t.max() / step + 1e-9) + 1)) * step))
-    targets = np.arange(n) * step
-    if cfg["speed"] != "even" and n > 1:
-        targets = eased(targets / targets[-1], cfg["speed"]) * targets[-1]
-    got = np.array(_crossings(pts, t, targets)).reshape(-1, 2)
-    if cfg["speed"] == "even":
-        got[:, 0] = targets[:len(got)] * way  # (exactly on the steps)
-    return got
+        j = np.clip(np.searchsorted(along, at, "right") - 1, 0, m - 2)
+        gap = along[j + 1] - along[j]
+        pos = j + np.clip(np.where(gap > 0, (at - along[j]) / np.where(gap > 0, gap, 1.0), 0.0), 0.0, 1.0)
+    else:
+        s = moved[:, 0]
+        way = 1.0 if s[-1] >= s[0] else -1.0
+        t = s * way  # (the copies' starts along the way: the first crossing of each step, in path order)
+        step = cfg["every"]
+        top = min(MOST_COPIES, int(max(t.max(), 0.0) / step + 1e-9) + 1)
+        pos, n = _crossings(t, run, np.arange(top) * step)
+        if cfg["speed"] != "even" and n > 1:
+            pos = _crossings(t, run, eased(np.arange(n) / (n - 1), cfg["speed"]) * (n - 1) * step)[0]
+        pos = np.array(pos, float)
+    j = np.clip(np.floor(pos).astype(np.int64), 0, m - 2)
+    u = (pos - j)[:, None]
+    moved = moved[j] + u * (moved[j + 1] - moved[j])
+    corner = (f[j] + u * (f[j + 1] - f[j])) * wh
+    moved[0] = 0.0
+    return moved, corner, down[np.where(u[:, 0] >= 1, j + 1, j)]
 
 
-def shifts(cfg, ppq):
+def box_size(box, ppq):
+    """A group_box's size: (beats, keys)."""
+    return (box[1] - box[0]) / ppq, box[3] - box[2]
+
+
+def shifts(cfg, ppq, size):
     """Where each copy goes: an (n, 2) int array of (ticks, keys) from the shape, the first (0, 0) = the shape."""
-    got = places(cfg)
+    got = places(cfg, size)[0]
     out = np.column_stack([np.round(got[:, 0] * ppq), np.round(got[:, 1])]).astype(np.int64)
     out[0] = 0
     return out
 
 
-def going_down(got):
-    """For each copy (places), does the path go down there (to the next copy; the last: from the one before)?"""
-    if len(got) < 2:
-        return np.zeros(len(got), bool)
-    dk = np.diff(got[:, 1])
-    return np.r_[dk, dk[-1]] < -1e-9
-
-
-def peak(cfg):
-    """Beats from A where the path first turns back (a peak or a dip in keys), or None (it never does). Exact for a
-    curve and an arc (their top / bottom), else where the points along it turn."""
-    kind = cfg["kind"] if cfg.get("mid") is not None else "straight"
-    if kind == "straight":
-        return None
-    b, m = cfg["b"], middle(cfg)
+def _stretch_peak(b, m, kind, k):
+    """Beats from the stretch's start where it turns back in keys inside it (a curve's / arc's top or bottom), or
+    None."""
     if kind == "curve":  # (keys 2 (1-t) t c + t^2 b: still where t = c / (2c - b))
         cb, ck = 2 * m[0] - b[0] / 2, 2 * m[1] - b[1] / 2
         if abs(2 * ck - b[1]) > 1e-12:
@@ -232,17 +320,33 @@ def peak(cfg):
             if 1e-9 < t < 1 - 1e-9:
                 return 2 * (1 - t) * t * cb + t * t * b[0]
         return None
-    pts = path_points(cfg)
+    pts = arc_points(b, m, k, SAMPLES)
+    if pts is None:
+        return None
     dk = np.diff(pts[:, 1])
     moving = np.flatnonzero(np.abs(dk) > 1e-9)
-    if len(moving) < 2:
+    if len(moving) < 2 or not np.any(np.sign(dk[moving])[1:] != np.sign(dk[moving])[:-1]):
         return None
-    sign = np.sign(dk[moving])
-    turn = np.flatnonzero(sign[1:] != sign[:-1])
-    if not len(turn):
-        return None
-    got = arc_centre(b, m, cfg["k"])  # (an arc turns at its circle's top / bottom: right above its middle)
-    return float(got[0] * cfg["k"]) if got else float(pts[moving[turn[0]] + 1, 0])
+    return float(arc_centre(b, m, k)[0] * k)  # (an arc turns at its circle's top / bottom: right above its middle)
+
+
+def peak(cfg, size):
+    """Beats from the group's first start where the path first turns back in keys (a peak or a dip: a point where
+    it turns, or a bent stretch's top / bottom), or None (it never does)."""
+    pts = all_points(cfg, size)
+    last = 0
+    for i in range(len(pts) - 1):
+        b = np.subtract(pts[i + 1], pts[i])
+        dk = _sign(b[1])
+        if dk and last and dk != last:
+            return float(pts[i][0])
+        m = bend_of(cfg, i)
+        if m is not None:
+            got = _stretch_peak(b, np.subtract(m, pts[i]), cfg["kind"], cfg["k"])
+            if got is not None:
+                return pts[i][0] + got
+        last = dk or last
+    return None
 
 
 def group_box(a, cfg, ppq):
@@ -263,23 +367,22 @@ def flipped(x, box, way):
     return x
 
 
-def scaled(x, s, box, by_key):
-    """Notes x (by_key = (x sorted by key, its keys)) grown / shrunk s times from the box's start, middle key. Each key
-    row then = the row it came from (nearest), like a stretched picture."""
+def scaled(x, s, at, key, by_key):
+    """Notes x (by_key = (x sorted by key, its keys)) grown / shrunk s times round (tick at, key). Each key row then
+    = the row it came from (nearest), like a stretched picture."""
     xs, keys = by_key
-    t0, mid = box[0], (box[2] + box[3]) / 2
     lo, hi = keys[0], keys[-1]
-    r0 = math.ceil(mid + (lo - 0.5 - mid) * s - 1e-9)
-    r1 = math.floor(mid + (hi + 0.5 - mid) * s - 1e-9)
-    rows = np.arange(r0, r1 + 1) if r1 >= r0 else np.array([round(mid + ((lo + hi) / 2 - mid) * s)])
-    src = np.clip(np.round(mid + (rows - mid) / s), lo, hi)
+    r0 = math.ceil(key + (lo - 0.5 - key) * s - 1e-9)
+    r1 = math.floor(key + (hi + 0.5 - key) * s - 1e-9)
+    rows = np.arange(r0, r1 + 1) if r1 >= r0 else np.array([round(key + ((lo + hi) / 2 - key) * s)])
+    src = np.clip(np.round(key + (rows - key) / s), lo, hi)
     first, last = np.searchsorted(keys, src, "left"), np.searchsorted(keys, src, "right")
     n = last - first
     idx = np.repeat(first - np.cumsum(n) + n, n) + np.arange(n.sum())
     out = xs[idx].copy()
     out[:, 2] = np.repeat(rows, n)
-    start = t0 + np.round((out[:, 0] - t0) * s).astype(np.int64)
-    out[:, 1] = np.maximum(t0 + np.round((out[:, 1] - t0) * s).astype(np.int64), start + 1)
+    start = np.round(at + (out[:, 0] - at) * s).astype(np.int64)
+    out[:, 1] = np.maximum(np.round(at + (out[:, 1] - at) * s).astype(np.int64), start + 1)
     out[:, 0] = start
     return out
 
@@ -355,15 +458,16 @@ def apply_path(a, cfg, ppq, keys=256):
     copies along the path."""
     if not len(a) or not cfg:
         return a
-    got = places(cfg)
-    got = got[:max(1, MOST_NOTES // len(a))]
-    d = np.column_stack([np.round(got[:, 0] * ppq), np.round(got[:, 1])]).astype(np.int64)
-    d[0] = 0
-    n = len(d)
     box = group_box(a, cfg, ppq)
+    size = box_size(box, ppq)
+    got, corner, down = places(cfg, size)
+    n = min(len(got), max(1, MOST_NOTES // len(a)))
+    d = np.column_stack([np.round(got[:n, 0] * ppq), np.round(got[:n, 1])]).astype(np.int64)
+    d[0] = 0
+    at, key = box[0] + corner[:n, 0] * ppq, box[2] + corner[:n, 1]
     u = np.arange(n) / max(1, n - 1)
     size = (cfg["size"][0] + (cfg["size"][1] - cfg["size"][0]) * u) / 100
-    flips = going_down(got) if cfg["flip"] == "each" else np.zeros(n, bool)
+    flips = down[:n] if cfg["flip"] == "each" else np.zeros(n, bool)
     col = a.shape[1] - 1 if a.shape[1] >= 5 and cfg["colours"] != "keep" else None
     own = np.unique(a[:, col]) if col is not None else None
     order = np.argsort(a[:, 2], kind="stable")
@@ -376,12 +480,12 @@ def apply_path(a, cfg, ppq, keys=256):
             x = flipped(x, box, cfg["way"])
         if abs(size[i] - 1) > 1e-9:
             if x is a:
-                x = scaled(x, size[i], box, by_key)
+                x = scaled(x, size[i], at[i], key[i], by_key)
             else:
                 if flip_key is None:
                     o = np.argsort(x[:, 2], kind="stable")
                     flip_key = (x[o], x[o, 2])
-                x = scaled(x, size[i], box, flip_key)
+                x = scaled(x, size[i], at[i], key[i], flip_key)
         else:
             x = x.copy()
         x[:, :2] += d[i, 0]
@@ -390,7 +494,7 @@ def apply_path(a, cfg, ppq, keys=256):
             x[:, col] = coloured(x[:, col], i, cfg, own)
         parts.append(x)
     if cfg["flip"] == "mirror":
-        p = peak(cfg)
+        p = peak(cfg, box_size(box, ppq))
         if p is not None:
             at = box[0] + round(p * ppq)
             parts = [x for x in (mirrored_after(x, at) for x in parts) if len(x)]
