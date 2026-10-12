@@ -95,6 +95,9 @@ class PathWindow(ToolWindow):
         flip = self.choice(box, 7, "flip", tr("path.flip"))
         self.choice(flip, 0, "way", None, column=1)
         self.choice(box, 8, "top", tr("path.top"))
+        same = tuple(v for key in ("kind", "speed", "colours", "flip", "top") for v in self.combos[key].cget("values"))
+        for key in ("kind", "speed", "colours", "flip", "top"):  # (one width for the left column's dropdowns, user)
+            self.combos[key].fit_also = same
 
         self.label(box, 9, tr("path.range"))
         rng = ttk.Frame(box)
