@@ -361,7 +361,7 @@ def places(cfg, size):
     got = moved[j] + u * (moved[j + 1] - moved[j])
     corner = (f[j] + u * (f[j + 1] - f[j])) * wh
     falls = down[np.where(u[:, 0] >= 1, j + 1, j)]
-    cut = np.full((len(pos), 4), np.nan)
+    cut = np.full((len(pos), 5), np.nan)
     if half:
         at, mv, fr, dn, ct = zip(*half)
         order = np.argsort(np.r_[pos, at], kind="stable")[:MOST_COPIES]
@@ -375,32 +375,35 @@ def places(cfg, size):
 
 def _halves(p, val, moved, f, down, spans, steps, ways, wide):
     """Half copies at the points (user, 2026-10-12, from a mock-up): where the path turns, the copies before the
-    point carry on past it at their spacing, and the copies after it carry on back before it; of those, only what
-    pokes in on the near side of the point's time and on the inside of its key (under a peak, over a dip) is kept,
-    so the turn is as full as the rest. val = how far along each sample is (time for One copy every, length for
-    Number of copies), steps = each run's spacing in it, ways = runs' (time, key) ways, wide = the box's beats.
-    [(place to sort it in among the samples, how far it moves, its corner as parts of the box, does the path go down
-    there, (cut: beats from the group's start, 1 = what's before stays / -1 = after, key, 1 = what's at or under
-    it stays / -1 = at or over))]."""
+    point carry on past it at their spacing; of those, only what pokes in on the near side of the point's time and
+    on the inside of its key (under a peak, over a dip) is kept, so the turn is as full as the rest; the other side
+    gets the same mirrored left-right at the point (user: whatever the Flip, like the shape's own halves).
+    val = how far along each sample is (time for One copy every, length for Number of copies), steps = each run's
+    spacing in it, ways = runs' (time, key) ways, wide = the box's beats. [(place to sort it in among the samples,
+    how far it moves, its corner as parts of the box, does the path go down there, (cut: beats from the group's
+    start, 1 = what's before stays / -1 = after, key, 1 = what's at or under it stays / -1 = at or over, 1 =
+    mirrored left-right at the point))]."""
     out = []
     for r in range(len(spans) - 1):
         hi, lo2 = spans[r][1], spans[r + 1][0]
         at, key = p[hi]
         under = 1.0 if ways[r][1] > 0 else -1.0
-        for b, o, step, back in ((hi, hi - 1, steps[r], False), (lo2, lo2 + 1, steps[r + 1], True)):
-            if o < 0 or o >= len(p) or step <= 0 or abs(val[b] - val[o]) <= 1e-12:
-                continue
-            d = moved[b] - moved[o]  # (one sample further away from the point)
-            if abs(d[0]) <= 1e-12:  # (copies not moving on in time: they'd never get past the point)
-                continue
-            keep = 1.0 if d[0] > 0 else -1.0
-            for k in range(1, MOST_COPIES):
-                a = k * step / abs(val[b] - val[o])
-                mv = moved[b] + a * d
-                if (keep > 0 and mv[0] >= at - 1e-9) or (keep < 0 and mv[0] + wide <= at + 1e-9):
-                    break  # (nothing of it left on the near side)
-                place = (lo2 - 0.1 - 0.3 * k / (k + 1)) if back else (hi + 0.1 + 0.3 * k / (k + 1))
-                out.append((place, mv, f[b] + a * (f[b] - f[o]), bool(down[b]), (at, keep, key, under)))
+        b, o, step = hi, hi - 1, steps[r]
+        if o < 0 or step <= 0 or abs(val[b] - val[o]) <= 1e-12:
+            continue
+        d = moved[b] - moved[o]  # (one sample further away from the point)
+        if abs(d[0]) <= 1e-12:  # (copies not moving on in time: they'd never get past the point)
+            continue
+        keep = 1.0 if d[0] > 0 else -1.0
+        for k in range(1, MOST_COPIES):
+            a = k * step / abs(val[b] - val[o])
+            mv = moved[b] + a * d
+            if (keep > 0 and mv[0] >= at - 1e-9) or (keep < 0 and mv[0] + wide <= at + 1e-9):
+                break  # (nothing of it left on the near side)
+            fr = f[b] + a * (f[b] - f[o])
+            out.append((hi + 0.1 + 0.3 * k / (k + 1), mv, fr, bool(down[b]), (at, keep, key, under, 0.0)))
+            # (the other side of the point: the same, mirrored left-right there; user: like the shape's own halves)
+            out.append((lo2 - 0.1 - 0.3 * k / (k + 1), mv, fr, bool(down[b]), (at, keep, key, under, 1.0)))
     return out
 
 
@@ -606,6 +609,9 @@ def apply_path(a, cfg, ppq, keys=256):
                 x = x[x[:, 1] > c]
                 x[:, 0] = np.maximum(x[:, 0], c)
             x = x[x[:, 2] <= k] if cut[i, 3] > 0 else x[x[:, 2] >= k]
+            if cut[i, 4] > 0:  # (the point's other side: mirrored left-right there)
+                s = x[:, 0].copy()
+                x[:, 0], x[:, 1] = 2 * c - x[:, 1], 2 * c - s
         if col is not None:
             x[:, col] = coloured(x[:, col], i, cfg, own)
         parts.append(x)
