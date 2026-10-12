@@ -284,11 +284,19 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     @staticmethod
     def reach(shapes):
         """(first beat, lowest key, highest key, last beat) the shapes' lines reach, or None (nothing drawn)."""
-        arrays = [a for sh in shapes for a in cached_arrays(sh) if len(a)]
-        if not arrays:
+        got = []
+        for sh in shapes:
+            arrays = [a for a in cached_arrays(sh) if len(a)]
+            if not arrays:
+                continue
+            a = np.concatenate(arrays)
+            # (a notes shape's box is half a key past its notes: its notes reach the first / last key, user)
+            pad = 0.5 if sh.get("kind") == "custom" and "notes" in sh else 0.0
+            got.append((a[:, 0].min(), a[:, 1].min() + pad, a[:, 1].max() - pad, a[:, 0].max()))
+        if not got:
             return None
-        a = np.concatenate(arrays)
-        return float(a[:, 0].min()), float(a[:, 1].min()), float(a[:, 1].max()), float(a[:, 0].max())
+        return (float(min(g[0] for g in got)), float(min(g[1] for g in got)), float(max(g[2] for g in got)),
+                float(max(g[3] for g in got)))
 
     def limits(self, shapes, top=None):
         """How far these shapes may go: beat 0 and the lowest / highest key (top: another highest), or as far past

@@ -2420,6 +2420,9 @@ def hz_steps(sh, notes, ppq):
 
 def _notes_groups(sh, ppq):
     if "notes" in sh:
+        if "picture" not in sh and "merge" not in sh and notes_resampled(sh):  # (as engine makes them)
+            from notes.merge import turned_notes
+            return turned_notes(sh, ppq)[:, :3], None
         return block_notes(sh, ppq)[:, :3], None
     if sh["fill"] == "outline_spam":
         return outline_groups(sh, ppq, spam=True)
@@ -2655,6 +2658,16 @@ def notes_shape(notes, ppq, name):
     vel = max(1, min(127, round(float(notes[:, 3].mean()))))
     return dict(kind="custom", name=name, strokes=[dict(BOX_STROKE)], fill="empty", notes=pack_notes(rows),
                 own_vel=True, vel0=vel, vel1=vel, pts=box_frame(b0, k0 - 0.5, b1, k0 + 0.5 + int(rows[:, 2].max())))
+
+
+def notes_resampled(sh):
+    """Is a plain-notes shape's box turned, slanted or not its notes' own height any more (taller / shorter)? Then
+    it's sampled like a turned image (merge.turned_notes; user, 2026-10-12: tilted notes left gaps and
+    staircases). Moved, flipped or stretched sideways = its notes exactly (block_notes)."""
+    if not frame_upright(sh["pts"]):
+        return True
+    rows = unpack_notes(sh["notes"])
+    return abs(abs(sh["pts"][2][1] - sh["pts"][0][1]) - float(rows[:, 2].max() + 1)) > 1e-6
 
 
 def block_notes(sh, ppq):

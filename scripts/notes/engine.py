@@ -36,7 +36,7 @@ from notes.sustain import clean_sustain, cut_by, is_sustained, sustained
 from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
-from notes.custom import frame_upright
+from notes.custom import frame_upright, notes_resampled
 from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
 from notes.mask import clean_mask
@@ -762,6 +762,8 @@ def _notes_tracks(sh, ppq, keys):
             pass
         elif not frame_upright(sh["pts"]) and ("picture" in sh or "merge" in sh):
             raw = turned_notes(sh, ppq) if "picture" in sh else merge_turned(sh, ppq)
+        elif "picture" not in sh and notes_resampled(sh):  # (plain notes turned / taller: like a turned image too)
+            raw = merge_turned(sh, ppq)
         else:
             raw = block_notes(sh, ppq)
         raw, own = raw[:, :3], raw[:, 3:5]
