@@ -341,26 +341,28 @@ class RollDrawing:
         d, app = self.draft, self.app
         if not d or self.draft_moving:
             return None
-        n = (custom_note_count(d, app.ppq) if d["kind"] == "custom" else
-             funnel_note_count(d, app.ppq) if d["kind"] == "funnel" else None)
-        if (n or 0) > PREVIEW_LIMIT:
-            return None
         key = (shape_key(d), app.ppq, app.keys)  # (app.notes_tracks' key: kept for it, keep_draft)
         if not self._draft_made or self._draft_made[0] != key:
+            # (the count is timed too: for a filled shape it does most of the work, the notes then reuse it)
             started = time.perf_counter()
-            self._draft_made = (key, shape_notes_tracks(d, app.ppq, app.keys))
+            n = (custom_note_count(d, app.ppq) if d["kind"] == "custom" else
+                 funnel_note_count(d, app.ppq) if d["kind"] == "funnel" else None)
+            made = None if (n or 0) > PREVIEW_LIMIT else shape_notes_tracks(d, app.ppq, app.keys)
+            self._draft_made = (key, made, n)
             self._draft_time = time.perf_counter() - started
-        return self._draft_made[1][0]
+        made = self._draft_made[1]
+        return None if made is None else made[0]
 
     def draft_count(self):
-        """How many notes the shape being drawn / placed makes, or None while they're still to be made."""
-        d, ppq = self.draft, self.app.ppq
-        n = (custom_note_count(d, ppq) if d["kind"] == "custom" else
-             funnel_note_count(d, ppq) if d["kind"] == "funnel" else None)
-        if n is None:
-            notes = self.draft_notes()
-            n = None if notes is None else len(notes)
-        return n
+        """How many notes the shape being drawn / placed makes, or None while they're still to be made (also while
+        only its lines follow the mouse: the count shows when it rests, draft_moved)."""
+        if self.draft_moving:
+            return None
+        notes = self.draft_notes()  # (made for the draft as it is now)
+        if not self._draft_made:
+            return None
+        n = self._draft_made[2]
+        return len(notes) if n is None and notes is not None else n
 
     def show_draft(self, text=None):
         """The status line while placing: where the mouse is (text; None: as last time) and how many notes the new
@@ -372,7 +374,8 @@ class RollDrawing:
     def keep_draft(self):
         """The shape being drawn / placed is added: the app takes the notes already made for it."""
         app = self.app
-        if self.draft and self._draft_made and self._draft_made[0] == (shape_key(self.draft), app.ppq, app.keys):
+        if (self.draft and self._draft_made and self._draft_made[1] is not None
+                and self._draft_made[0] == (shape_key(self.draft), app.ppq, app.keys)):
             app._notes_cache[self._draft_made[0]] = self._draft_made[1]
         self._draft_made = None
 

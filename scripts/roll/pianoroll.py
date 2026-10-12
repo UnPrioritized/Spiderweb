@@ -79,7 +79,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self._redraw_pending = False
         self._late_redraw = None  # request_redraw(delay)'s timer
         self._grid_key = self._frame_key = self._playhead_x = None  # what the kept canvas items show (redraw)
-        self._draft_made = None  # the shape being drawn / placed: (notes_tracks key, its notes and tracks)
+        self._draft_made = None  # the shape being drawn / placed: (notes_tracks key, its notes and tracks or None
+        # past PREVIEW_LIMIT, its note count or None)
         self._draft_time = 0.0   # seconds making them took the last time
         self.draft_moving = False  # slow ones: only its lines follow the mouse (draft_moved)
         self._draft_rest = None  # timer: the mouse rested, its notes show
