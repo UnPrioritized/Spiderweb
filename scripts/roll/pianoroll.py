@@ -30,6 +30,7 @@ from window import look
 from window.hz_window import open_hz
 from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
+from roll.roll_path import PathEditing
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, MAX_SX, MIN_SX, PICK, SHIFT, boxes_side,
                               boxes_upright, cached_path, cached_strokes, grab_while_panning, grid_span, line_touches_box,
                               mouse_trail, note_name)
@@ -37,7 +38,7 @@ from roll.roll_text import TextTyping
 
 
 class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
-                tk.Canvas):
+                PathEditing, tk.Canvas):
     def __init__(self, parent, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
         self.app = app
@@ -772,6 +773,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             app.set_playhead(self.event_pt(e)[0])
             self.drag = ("seek", playing)
             return
+        if not self.draft and self.path_press(e):  # Copy along a path's window open: B placed, or its point grabbed
+            return
         tool = app.tool.get()
         pt = self.draw_pt(e)
 
@@ -956,6 +959,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.pan_view(e)                     # drag, so the view moves here; what's held follows the mouse)
         if kind == "pan":
             self.pan_to(e)
+        elif kind == "path":
+            self.path_drag(e)
         elif kind == "box":
             self.box_mouse = (e.x, e.y, e.state)
             self.box_to()
@@ -1135,6 +1140,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.after_idle(self.app.settle_history)  # (a click that changed nothing isn't a step)
         kind = self.drag[0]
         self.app.catch_up_notes()
+        if kind == "path":
+            self.path_release(e)
+            self.drag = None
+            return
         if kind == "slice":  # (a click without dragging cuts nothing)
             _, a, b, x, y = self.drag
             self.drag = None
@@ -1299,6 +1308,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
     def on_motion(self, e):
         self.app.show_position(self.position_text(e))
+        if not self.drag and not self.draft and (self.path_motion(e) or self.path_hit(e.x, e.y)):
+            self.set_cursor("fleur")  # (Copy along a path: B follows the mouse, or a point of its path is under it)
+            return
         if not self.drag:
             over = not self.draft and self.hit_handle(e.x, e.y, self.app.tool.get() == "select") is not None
             # (the arrow of a shape put away above the top key can be grabbed: the move pointer shows it, user)

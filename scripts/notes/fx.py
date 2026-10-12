@@ -1,9 +1,9 @@
 """A shape's note tool pages (user, 2026-10-06): sh["fx"] = the steps done to its notes after they're made (and
 after its glue), in the order they were added. The drawing stays editable: every step runs again on its new notes.
 
-  {"tool": "chop" / "claw" / "strum", "cfg": that tool's settings, "off": True (switched off; optional)}
-      a page of the Chop / Claw machine / Strum window (each window shows its own pages; the same tool can be
-      used again and again)
+  {"tool": "chop" / "claw" / "strum" / "path", "cfg": that tool's settings, "off": True (switched off; optional)}
+      a page of the Chop / Claw machine / Strum / Copy along a path window (each window shows its own pages; the
+      same tool can be used again and again)
   {"tool": "flip", "axis": "time" / "keys"}
       the shape was flipped after the steps before it: they run on the notes flipped back, and their result is
       flipped (each flip within the box of the notes it gets: they stay where they were)
@@ -25,11 +25,12 @@ import numpy as np
 
 from notes.chop import clean_chop
 from notes.claw import clean_claw
+from notes.copypath import clean_path
 from notes.envelope import env_values
 from notes.strum import clean_strum
 
-TOOLS = ("chop", "claw", "strum")  # (old files' order)
-CLEAN = {"chop": clean_chop, "claw": clean_claw, "strum": clean_strum}
+TOOLS = ("chop", "claw", "strum", "path")  # (old files' order; "path" = Copy along a path, copypath.py)
+CLEAN = {"chop": clean_chop, "claw": clean_claw, "strum": clean_strum, "path": clean_path}
 AXES = ("time", "keys")
 MAX_STEPS = 2000  # (a file's list is cut there: a broken one; flips in a row make one step each way, see flipped)
 
@@ -53,7 +54,7 @@ def clean_fx(sh, steps=False):
     steps: flips / turns / velocities before any page count too (a sliced piece's, see flipped)."""
     fx = sh.get("fx")
     if not isinstance(fx, list):
-        fx = [{"tool": k, "cfg": sh[k]} for k in TOOLS if sh.get(k)]
+        fx = [{"tool": k, "cfg": sh[k]} for k in TOOLS[:3] if sh.get(k)]
     out = []
     for st in fx[:MAX_STEPS]:
         if not isinstance(st, dict):

@@ -25,6 +25,7 @@ from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
 from notes.chop import apply_chop
 from notes.claw import apply_claw
+from notes.copypath import apply_path
 from notes.fx import (clean_fx, flip_shape, groups, idle, mirrored, notes_box, reverse_velocity, swapped, toggled,
                       turn_notes, turn_pts, turn_shape, velocities)
 from notes.gaterange import clean_range
@@ -488,7 +489,7 @@ def fx_notes(sh, ppq, keys, get):
             same = groups(np.column_stack([notes[:, 3:], tracks if tracks is not None else np.zeros(len(notes))]))
             notes, idx = turn_notes(notes, last["deg"], last["r"] * ppq, keys, same)
             return notes, None if tracks is None else np.asarray(tracks)[idx]
-        return fx_step(notes, tracks, last, sh, ppq)
+        return fx_step(notes, tracks, last, sh, ppq, keys)
     if sh.get("_m"):
         if sh.get("cut"):  # (a sliced piece: its notes as it was, before the flips; sliced.steps_kept)
             return get(unflipped(sh))
@@ -568,11 +569,13 @@ def bare_of(sh):
     return {k: v for k, v in sh.items() if k not in ("fx", "_m")}
 
 
-def fx_step(notes, tracks, step, sh, ppq):
+def fx_step(notes, tracks, step, sh, ppq, keys=256):
     """The notes after one step of sh["fx"] (fx.py)."""
     if step.get("off"):
         return notes, tracks
     tool = step["tool"]
+    if tool == "path":  # (copies past the highest key are cut off: copypath.py)
+        return _after(lambda a, cfg, q: apply_path(a, cfg, q, keys), notes, tracks, step["cfg"], ppq)
     if tool == "chop":
         return with_chop(notes, tracks, dict(sh, chop=step["cfg"]), ppq)
     if tool == "claw":

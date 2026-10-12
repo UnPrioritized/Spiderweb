@@ -15,6 +15,7 @@ from notes.funnel import inside_out, new_start, turned_curve
 from notes.tumour import LINE_KINDS
 from roll.roll_shared import SHIFT
 from window.claw_window import open_claw
+from window.path_window import open_path
 from window.strum_window import open_strum
 from window.chop_window import open_chop, quick_chop
 from window.sustain_window import any_sustained, open_sustain, sustain_targets
@@ -137,6 +138,7 @@ class ShapeMenu:
         if app.note_tool_sels():  # (pictures take no note tools, user)
             item(tr("roll_menu.claw_machine"), tr("roll_menu.alt_w"), lambda: open_claw(app), keys=True)
             item(tr("roll_menu.strum"), tr("roll_menu.alt_s"), lambda: open_strum(app), keys=True)
+            item(tr("roll_menu.copy_path"), "", lambda: open_path(app))
             item(tr("roll_menu.chop"), tr("roll_menu.alt_u"), lambda: open_chop(app), keys=True)
             item(tr("roll_menu.quick_chop"), tr("roll_menu.ctrl_u"), lambda: quick_chop(app), keys=True)
             self.glue_items(item)
@@ -188,6 +190,7 @@ class ShapeMenu:
         if app.note_tool_sels():  # (pictures take no note tools, user)
             item(tr("roll_menu.claw_machine"), tr("roll_menu.alt_w"), lambda: open_claw(app))
             item(tr("roll_menu.strum"), tr("roll_menu.alt_s"), lambda: open_strum(app))
+            item(tr("roll_menu.copy_path"), "", lambda: open_path(app))
             item(tr("roll_menu.chop"), tr("roll_menu.alt_u"), lambda: open_chop(app))
             item(tr("roll_menu.quick_chop"), tr("roll_menu.ctrl_u"), lambda: quick_chop(app))
             self.glue_items(item)

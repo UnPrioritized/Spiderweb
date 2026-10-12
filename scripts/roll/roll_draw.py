@@ -506,6 +506,7 @@ class RollDrawing:
         self.draw_above_marks()
         self.draw_select_box()
         self.draw_slice()
+        self.draw_copy_path()
         if self._frame_key is None:
             self.draw_keyboard(h)
             self.draw_ruler(w)

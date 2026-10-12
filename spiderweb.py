@@ -50,6 +50,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     tool_window.py   what the Claw machine and Strum windows share (live preview, undo, the Knob dial)
     claw_window.py   the Claw machine window
     strum_window.py  the Strum window (Start / End panels of knobs, each with its number box)
+    path_window.py   the Copy along a path window (path kind, spacing, where B is)
     range_window.py  the spam gate Range's graph window
     sustain_window.py  the Sustain window (on / off, the gap held over: Auto or typed)
     between_window.py  the Add between window (preview, steps, graph) + a group in the main window (list row, menu)
@@ -67,6 +68,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     roll_menu.py     the right-click menu
     roll_text.py     the Text tool: typing on the roll, the caret
     roll_hz.py       the Hz bass tool: picking where a Hz bass starts
+    roll_path.py     Copy along a path: the path drawn, B placed and its points dragged
     roll_shared.py   colours, key names, modifier keys, outline caches
     tiles.py         the notes' picture on screen as tiles (moved along when the view scrolls)
     zoombar.py       the piano roll's scrollbars (drag an end to zoom) and zoom buttons
@@ -103,6 +105,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     glue.py          glue: touching notes on a key made one long note (all of a shape or in boxes), first
     claw.py          the claw machine: a shape's notes thinned out / cut / bent after they're made
     strum.py         strum: each chord's notes start one after another (and end, velocity)
+    copypath.py      copy along a path: the shape's notes copied from A to B (straight / curve / arc)
     sustain.py       sustain: each key row's notes held to their group's end (overlaps kept), done last
     fx.py            a shape's Claw machine / Strum / Chop pages in order, flips and velocities after them
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes
