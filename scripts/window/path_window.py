@@ -4,7 +4,7 @@ the piano roll: roll/roll_path.py). Several shapes travel together as one group:
 the group's box is from its own notes ("grp", page_cfg), so corners, sizes and flips work on the whole group.
 
 Path kind (Straight / Curve / Arc), spacing (one copy every [note length] or a number of copies), Speed, Size,
-Colours (+ Step), Flip (+ which way), On top, and where the picked point is as bar / beat / tick / key like the piano
+Colours (+ Step), Flip (+ which way), On top, Range (Keep inside + Lowest / Highest key), and where the picked point is as bar / beat / tick / key like the piano
 roll's status line, typed or dragged on the piano roll; Add point (it follows the mouse until a click places it)."""
 
 import tkinter as tk
@@ -13,7 +13,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from files.snap import SNAP_LIST, snap_beats, snap_text
-from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KINDS, LETTERS, MOST_POINTS,
+from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KEY_LIMITS, KINDS, LETTERS, MOST_POINTS,
                             PATH_DEFAULTS, SIZE_LIMITS, SPEEDS, STEP_LIMITS, TOPS, WAYS, all_points, clean_path, peak,
                             shifts)
 from roll.roll_shared import note_name
@@ -96,10 +96,26 @@ class PathWindow(ToolWindow):
         self.choice(flip, 0, "way", None, column=1)
         self.choice(box, 8, "top", tr("path.top"))
 
-        self.point_label = self.label(box, 9, LETTERS[1])
+        self.label(box, 9, tr("path.range"))
+        rng = ttk.Frame(box)
+        rng.grid(row=9, column=1, sticky="w", pady=(6, 2))
+        var = tk.BooleanVar(value=False)
+        tick = ttk.Checkbutton(rng, text=tr("path.inside"), variable=var, command=lambda: self.put_inside(var.get()))
+        tick.grid(row=0, column=0, sticky="w")
+        Tooltip(tick, tr("path.tip_inside"))
+        self.ticks["inside"] = (tick, var)
+        self.range_names = {}
+        for c, key in ((1, "low"), (4, "high")):
+            lb = ttk.Label(rng, text=tr(f"path.{key}"), foreground=look.HINT)
+            lb.grid(row=0, column=c, sticky="e", padx=(10, 3))
+            self.number(rng, 0, c + 1, key, tr(f"path.tip_{key}"), (1, 12, 1), label=lb, width=5)
+            self.range_names[key] = ttk.Label(rng, text="", foreground=look.HINT, width=5)
+            self.range_names[key].grid(row=0, column=c + 2, sticky="w", padx=(4, 0))
+
+        self.point_label = self.label(box, 10, LETTERS[1])
         Tooltip(self.point_label, tr("path.tip_point"))
         end = ttk.Frame(box)
-        end.grid(row=9, column=1, sticky="w", pady=(6, 2))
+        end.grid(row=10, column=1, sticky="w", pady=(6, 2))
         for c, key, steps in ((0, "bar", (1, 4, 1)), (2, "beat", (1, 4, 1)), (4, "tick", (1, 10, 1)),
                               (6, "key", (1, 12, 1))):
             lb = ttk.Label(end, text=tr(f"path.{key}"), foreground=look.HINT)
@@ -112,9 +128,9 @@ class PathWindow(ToolWindow):
         Tooltip(self.add_button, tr("path.tip_add_point"))
 
         self.info = ttk.Label(box, text="", foreground=look.HINT, wraplength=round(440 * s))  # (the window keeps its size)
-        self.info.grid(row=10, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self.info.grid(row=11, column=0, columnspan=2, sticky="w", pady=(8, 0))
         row = ttk.Frame(box)
-        row.grid(row=11, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        row.grid(row=12, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         reset = ttk.Button(row, text=tr("path.reset"), command=self.reset)
         reset.pack(side="left")
         Tooltip(reset, tr("path.tip_reset"))
@@ -424,6 +440,13 @@ class PathWindow(ToolWindow):
     def put_choice(self, key, value):
         self.put(key, value)  # (Straight keeps the bends, hidden: Curve / Arc bring them back; user)
 
+    def put_inside(self, on):
+        """Keep inside ticked: Highest starts no higher than the piano roll's top key."""
+        if on and self.cfg["high"] > self.app.keys - 1:
+            self.cfg["high"] = self.app.keys - 1
+            self.cfg["low"] = min(self.cfg["low"], self.cfg["high"])
+        self.put("inside", on)
+
     def put_length(self, snap):
         self.cfg["mode"] = "every"
         self.put("every", snap_beats(snap, self.app.beats))
@@ -447,6 +470,9 @@ class PathWindow(ToolWindow):
         elif key == "step":
             ok = STEP_LIMITS[0] <= v <= STEP_LIMITS[1] and v == int(v)
             v = int(v)
+        elif key in ("low", "high"):
+            ok = KEY_LIMITS[0] <= v <= KEY_LIMITS[1] and v == int(v)
+            v = int(v)
         else:
             ok = self.picked() is not None and v == int(v)
         if not ok:
@@ -458,6 +484,15 @@ class PathWindow(ToolWindow):
             size[key == "size1"] = v
             if size != self.cfg["size"]:
                 self.put("size", size, done)
+            return
+        if key in ("low", "high"):
+            if v != self.cfg[key]:
+                other = self.cfg["high" if key == "low" else "low"]
+                if (key == "low") == (v > other):  # (crossed the other one: they swap)
+                    self.cfg["low"], self.cfg["high"] = sorted((v, other))
+                    self.put(key, self.cfg[key], done)
+                else:
+                    self.put(key, v, done)
             return
         if key in ("every", "count", "step"):
             if v != self.cfg[key]:
@@ -525,6 +560,10 @@ class PathWindow(ToolWindow):
         config(self.ticks["half"][0], state="normal" if c["speed"] == "even" and c["anchor"] else "disabled")
         config(self.entries["step"], state="normal" if c["colours"] != "keep" else "disabled")
         config(self.combos["way"], state="readonly" if c["flip"] == "each" else "disabled")
+        for key in ("low", "high"):
+            put_text(key, str(c[key]))
+            config(self.entries[key], state="normal" if c["inside"] else "disabled")
+            config(self.range_names[key], text=note_name(c[key], self.app.edo()))
         n = len(c.get("pts") or [])
         self.pick = max(0, min(self.pick, n - 1))
         adding = self.adding or (self.loose and n > 1)

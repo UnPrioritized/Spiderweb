@@ -34,6 +34,8 @@ and flips work on the whole group. A page's settings (PATH_DEFAULTS' keys):
            part before it mirrored left-right, the copy on the line cut in half there)
   "top"    "last" / "first": which copy is drawn on top where copies cover each other (the one under is cut away
            there, note by note)
+  "inside" Keep inside: only the notes from key "low" to key "high" are kept, the shape's own too (the piano roll's
+           own rows: a fence that stays put when the shape moves); the rest are cut off
   "grp"    [beats, beats, keys, keys]: the group's box (first start, last end, lowest, highest key) less the
            shape's own (all 0 for one shape)
 Keys are rows (a corner = the middle of its row, like the points clicked on the piano roll). Notes past the lowest /
@@ -53,13 +55,14 @@ TOPS = ("last", "first")
 PATH_DEFAULTS = {"pts": None, "mids": None, "kind": "straight", "mode": "every", "every": 0.25, "count": 8,
                  "k": 0.25, "speed": "even", "size": [100.0, 100.0], "colours": "keep", "step": 1, "most": 15,
                  "flip": "none", "way": "keys", "top": "last", "half": True, "anchor": True,
-                 "grp": [0.0, 0.0, 0.0, 0.0]}
+                 "inside": False, "low": 0, "high": 127, "grp": [0.0, 0.0, 0.0, 0.0]}
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # the points' names
 MOST_POINTS = len(LETTERS) - 1  # B .. Z
 EVERY_LIMITS = (1e-6, 1024.0)  # beats
 COUNT_LIMITS = (2, 10_000)  # copies (the shape itself counts)
 SIZE_LIMITS = (1.0, 1000.0)  # %
 STEP_LIMITS = (-15, 15)
+KEY_LIMITS = (0, 255)  # Keep inside's Lowest / Highest
 MOST_COPIES = 10_000
 MOST_NOTES = 20_000_000  # notes with the copies: past it the last copies are left out (memory)
 FAR = 1e6  # beats / keys: a path point further than this from A is a broken file
@@ -102,7 +105,7 @@ def clean_path(c):
     mids = list(mids) if isinstance(mids, (list, tuple)) else []
     out["pts"] = pts
     out["mids"] = [None if m is None else _pt(m) for m in (mids + [None] * len(pts))[:len(pts)]]
-    for key in ("half", "anchor"):
+    for key in ("half", "anchor", "inside"):
         if isinstance(c.get(key), bool):
             out[key] = c[key]
     for key, choices in (("kind", KINDS), ("mode", MODES), ("speed", SPEEDS), ("colours", COLOURS), ("flip", FLIPS),
@@ -110,7 +113,8 @@ def clean_path(c):
         if c.get(key) in choices:
             out[key] = c[key]
     for key, (lo, hi), whole in (("every", EVERY_LIMITS, False), ("count", COUNT_LIMITS, True),
-                                 ("k", (1e-9, 1e9), False), ("step", STEP_LIMITS, True), ("most", (15, 16), True)):
+                                 ("k", (1e-9, 1e9), False), ("step", STEP_LIMITS, True), ("most", (15, 16), True),
+                                 ("low", KEY_LIMITS, True), ("high", KEY_LIMITS, True)):
         v = _num(c.get(key, out[key]), lo, hi, whole)
         if v is not None:
             out[key] = v
@@ -119,6 +123,8 @@ def clean_path(c):
         got = [_num(v, *SIZE_LIMITS) for v in size]
         if None not in got:
             out["size"] = got
+    if out["low"] > out["high"]:
+        out["low"], out["high"] = out["high"], out["low"]
     grp = c.get("grp")
     if isinstance(grp, (list, tuple)) and len(grp) == 4:
         got = [_num(v, -FAR, FAR) for v in grp]
@@ -643,7 +649,8 @@ def apply_path(a, cfg, ppq, keys=256):
         if p is not None:
             at = box[0] + round(p * ppq)
             parts = [x for x in (mirrored_after(x, at) for x in parts) if len(x)]
-    parts = [x[(x[:, 2] >= 0) & (x[:, 2] < keys) & (x[:, 1] > 0)] for x in parts]
+    lo, hi = (max(0, cfg["low"]), min(keys - 1, cfg["high"])) if cfg["inside"] else (0, keys - 1)
+    parts = [x[(x[:, 2] >= lo) & (x[:, 2] <= hi) & (x[:, 1] > 0)] for x in parts]
     for x in parts:
         x[:, 0] = np.maximum(x[:, 0], 0)
     parts = [x for x in parts if len(x)]

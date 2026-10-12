@@ -126,6 +126,14 @@ class PathEditing:
         (b0, k0), size = fr
         pts = track(cl, size, 128)[0] + [b0, k0]
         line = max(1, round(2 * s))
+        if cl["inside"]:  # (Keep inside: the edges of its lowest and highest key rows, across the piano roll)
+            for p in (cl["low"] - 0.5, cl["high"] + 0.5):
+                y = self.to_xy((0, p))[1]
+                if not self.ruler_h <= y <= self.winfo_height():
+                    continue
+                for d in range(line):
+                    self.create_line(self.kb_w, y + d, self.winfo_width(), y + d, fill=look.PATH_LINE, width=1,
+                                     dash=(2, 4), tags="copypath")
         ax, bx = self.sx, self.kb_w - self.view_t * self.sx
         ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
         view = (self.kb_w - 20, self.ruler_h - 20, self.winfo_width() + 20, self.winfo_height() + 20)
