@@ -111,6 +111,11 @@ APP_KEYS = {
     "play_voice_guard": ("sound", "lower_by_itself", bool),
     "play_limiter": ("sound", "omnimidi_limiter", bool),
     "soundfont": ("sound", "soundfont", str),  # (the Hz bass preview's "font": shared with Built-in BASSMIDI)
+    "hz_on": ("hz_preview", "on", bool),
+    "hz_voices": ("hz_preview", "voice_limit", int),
+    "hz_nofx": ("hz_preview", "without_effects", bool),
+    "hz_volume": ("hz_preview", "volume", float),
+    "hz_live_mb": ("hz_preview", "live_keys_memory_mb", int),
     "update_check": ("updates", "how_often", str),
     "update_last": ("updates", "last_check", float),
     "seen_version": ("updates", "seen_version", str),
@@ -118,6 +123,9 @@ APP_KEYS = {
     "tips_seen": ("tips", "seen", list),
 }
 NOT_HERE = "not_in_settings_ini"  # (window key: the app settings this file couldn't take, kept in the autosave)
+# the ones the autosave keeps inside its "hz_preview" settings (1.5.1 sweep: all app-wide): window key -> key there
+IN_HZ = {"soundfont": "font", "hz_on": "on", "hz_voices": "voices", "hz_nofx": "nofx", "hz_volume": "volume",
+         "hz_live_mb": "live_mb"}
 
 
 def _read_value(text, kind):
@@ -182,8 +190,8 @@ def with_app_settings(win):
         if (sec, k) not in saved or wkey in kept:
             continue
         value = _read_value(saved[(sec, k)], kind)
-        if value is not None and wkey == "soundfont":
-            hz["font"] = value
+        if value is not None and wkey in IN_HZ:
+            hz[IN_HZ[wkey]] = value
             win["hz_preview"] = hz
         elif value is not None:
             win[wkey] = value
@@ -194,7 +202,8 @@ def save_app_settings(win):
     """Saves the app settings found in the window settings win here and takes them out of win; ones that can't be
     saved here (or all, when the file can't be written) stay in win, named in win[NOT_HERE]."""
     hz = win.get("hz_preview")
-    found = dict(win, soundfont=hz["font"]) if isinstance(hz, dict) and "font" in hz else win
+    hz = hz if isinstance(hz, dict) else {}
+    found = dict(win, **{wkey: hz[k] for wkey, k in IN_HZ.items() if k in hz})
     values, kept = {}, []
     for wkey, (sec, k, kind) in APP_KEYS.items():
         if wkey in found:
@@ -214,10 +223,11 @@ def save_app_settings(win):
         values = {}
     else:
         _known.update(changed)
+    gone = {IN_HZ[wkey] for wkey in values if wkey in IN_HZ}
+    if gone:
+        win["hz_preview"] = {k: v for k, v in hz.items() if k not in gone}
     for wkey in values:
-        if wkey == "soundfont":
-            win["hz_preview"] = {k: v for k, v in hz.items() if k != "font"}
-        else:
+        if wkey not in IN_HZ:
             win.pop(wkey, None)
     if kept:
         win[NOT_HERE] = kept
