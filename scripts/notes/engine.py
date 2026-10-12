@@ -254,7 +254,7 @@ def clean_shape(sh):
                 out["picture_notes"] = {"pal": list(pal) if ok else None}
             if sh.get("held") is True:
                 out["held"] = True
-            if sh.get("made") in ("mask", "leftovers"):
+            if sh.get("made") in ("mask", "leftovers", "path"):
                 out["made"] = sh["made"]
             pic = clean_picture(sh.get("picture"))
             if pic:  # a picture made into notes (picture.py): the notes are its finished colours, track = slot

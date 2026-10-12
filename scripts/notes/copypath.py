@@ -536,12 +536,15 @@ def coloured(tracks, i, cfg, own):
     return tracks
 
 
-def mirrored_after(out, p):
-    """The notes before tick p, then the same mirrored left-right after it (a note across p cut there)."""
+def mirrored_after(out, p, tag=0):
+    """The notes before tick p, then the same mirrored left-right after it (a note across p cut there). tag: added to
+    the mirrored ones' last column (apply_path's copy numbers: each mirrored copy one of its own)."""
     out = out[out[:, 0] < p].copy()
     out[:, 1] = np.minimum(out[:, 1], p)
     back = out.copy()
     back[:, 0], back[:, 1] = 2 * p - out[:, 1], 2 * p - out[:, 0]
+    if tag:
+        back[:, -1] += tag
     return np.concatenate([out, back])
 
 
@@ -667,7 +670,7 @@ def apply_path(a, cfg, ppq, keys=256, tag=False):
         p = peak(cfg, box_size(box, ppq))
         if p is not None:
             at = box[0] + round(p * ppq)
-            parts = [x for x in (mirrored_after(x, at) for x in parts) if len(x)]
+            parts = [x for x in (mirrored_after(x, at, n if tag else 0) for x in parts) if len(x)]
     lo, hi = (max(0, cfg["low"]), min(keys - 1, cfg["high"])) if cfg["inside"] else (0, keys - 1)
     parts = [x[(x[:, 2] >= lo) & (x[:, 2] <= hi) & (x[:, 1] > 0)] for x in parts]
     for x in parts:

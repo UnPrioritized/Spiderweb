@@ -1698,6 +1698,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
             return tr("mask.applied")
         if made == "leftovers":
             return tr("join_split.merge_leftovers")
+        if made == "path":  # (Copy along a path → Turn into plain shapes: "Line copy 2", named when made)
+            return sh.get("name") or "?"
         if ("picture" in sh or sh.get("merge") or  # (the picture's file name, user; "Merged notes")
                 "notes" in sh and sh.get("name") in (tr("join_split.merge_leftovers"),  # (plain notes, user; made
                                                      tr("mask.applied"))):  # before "made")

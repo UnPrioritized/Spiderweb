@@ -19,8 +19,6 @@ from files.snap import SNAP_LIST, snap_beats, snap_text
 from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KEY_LIMITS, KINDS, LETTERS, MOST_POINTS,
                             PATH_DEFAULTS, SIZE_LIMITS, SPEEDS, STEP_LIMITS, TOPS, WAYS, all_points, apply_path,
                             clean_path, peak, shifts, track)
-from notes.custom import notes_shape
-from notes.engine import SHAPE_DEFAULTS, clean_shape
 from notes.fx import copied
 from notes.pattern import MAX_LOOPS, PATTERN_PRESETS, loop_points, new_pattern, pattern_name
 from roll.roll_shared import note_name
@@ -313,6 +311,8 @@ class PathWindow(ToolWindow):
         if self.at is None or not self.targets or self.page_step() is None:
             return
         app, ppq = self.app, self.app.ppq
+        if app.notes_late:  # (notes still catching up with a drag: made now, so the colours shown are known)
+            app.shapes_changed(now=True)
         made = {}
         for i in self.targets:
             sh = app.shapes[i]
@@ -325,17 +325,14 @@ class PathWindow(ToolWindow):
                 continue
             a = np.column_stack([notes[:, :4], tracks if tracks is not None else np.zeros(len(notes), np.int64)])
             got = apply_path(a.astype(np.int64), cl, ppq, app.keys, tag=True)
+            slots = self.shown_slots(got, i)
             news = []
-            for n in np.unique(got[:, -1]).tolist() if len(got) else []:
-                if n == 0:
-                    continue
-                x = got[got[:, -1] == n]
-                rows = np.column_stack([x[:, 0], x[:, 1] - x[:, 0], x[:, 2], x[:, 3], x[:, 4]])
-                new = {**SHAPE_DEFAULTS, **app.defaults,
-                       **notes_shape(rows, ppq, tr("path.plain_name", name=app.shape_label(sh), n=int(n) + 1))}
-                new.pop("cycle", None)  # (the notes keep the colours they had)
-                new.pop("sustain", None)
-                new = clean_shape(new)
+            for n in [n for n in np.unique(got[:, -1]).tolist() if n] if len(got) else []:
+                x = got[:, -1] == n
+                rows = np.column_stack([got[x, :4], slots[x], np.full(x.sum(), i)])
+                new = app.copied(rows, False)  # (like Apply mask: the colours as they show, user)
+                new["made"] = "path"
+                new["name"] =tr("path.plain_name", name=app.shape_label(sh), n=len(news) + 2)
                 self.put_fx(new, copied(fx[k + 1:]))  # (the steps after this page: on every copy too)
                 news.append(new)
             made[i] = news
@@ -366,6 +363,25 @@ class PathWindow(ToolWindow):
         app.select_many(picked, picked[0])
         app.shapes_changed()
         app.status.config(text=tr("path.plain_done", n=total))
+
+    def shown_slots(self, got, i):
+        """Each note's channel slot on the piano roll now (app.rendered, shape i's notes found by start, end and key);
+        a note the steps after this page changed: its copy's most common one, else its colour group."""
+        r = self.app.rendered
+        r = r[r[:, 5] == i] if r is not None and len(r) else np.zeros((0, 6), np.int64)
+        both = np.concatenate([r[:, :3], got[:, :3]]).astype(np.int64)
+        if not len(both):
+            return got[:, 4].copy()
+        ids = np.unique(both, axis=0, return_inverse=True)[1].ravel()
+        by_id = np.full(ids.max() + 1, -1, np.int64)
+        by_id[ids[:len(r)]] = r[:, 4]
+        out = by_id[ids[len(r):]]
+        for n in np.unique(got[:, -1]).tolist():
+            x = got[:, -1] == n
+            seen = out[x][out[x] >= 0]
+            fill = np.bincount(seen).argmax() if len(seen) else None
+            out[x & (out < 0)] = got[x & (out < 0), 4] if fill is None else fill
+        return out
 
     @staticmethod
     def page_cut(sh, k):
@@ -453,10 +469,11 @@ class PathWindow(ToolWindow):
 
     @classmethod
     def open(cls, app):
-        """From the right-click menu: a new path for the selected shapes (the window opened, or brought up)."""
+        """From the right-click menu (the window opened, or brought up): shapes with a path show their last one (user:
+        another only with +); none yet = a new path waiting for B."""
         super().open(app)
         w = getattr(app, cls.ATTR)
-        if w and (w.at is not None or w.idle):
+        if w and w.at is None and w.idle and not w.has_pages():
             w.new_page()
 
     def retarget(self):

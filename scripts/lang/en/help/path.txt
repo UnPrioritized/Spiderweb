@@ -4,7 +4,7 @@ Click on the piano roll where the path ends: that's B. Until you click, the copi
 
 Add point puts another point after the last one: it follows the mouse until you click. Right-click a point to remove it. The boxes under the settings show the picked point as bar, beat, tick and key: type there to put it exactly. Shift while dragging = off the grid.
 
-Like the Claw machine, the path is a page kept with the shape: moving or reshaping the shape moves the path and every copy along with it. Several selected shapes travel together as one group. Each time the window opens it starts a new page (+); click a tab on top to change one the shape has, or the small × beside a tab to take it off.
+Like the Claw machine, the path is a page kept with the shape: moving or reshaping the shape moves the path and every copy along with it. Several selected shapes travel together as one group. Opening it from the menu on a shape that has a path shows its last path; click + on top for another one, a tab to change one the shape has, or the small × beside a tab to take it off.
 
 Path: Straight, Curve (a bend through the round middle point) or Arc (a piece of a circle through it). Dragging a middle point on a straight path makes it a curve.
 
@@ -24,6 +24,6 @@ On top: where copies cover each other, which one is drawn on top. The one under 
 
 Range: Keep inside keeps only the notes from the lowest key to the highest key, the shape's own too; the rest are cut off. These keys stay put when the shape moves (dotted lines on the piano roll).
 
-Turn into plain shapes: every copy becomes a shape of its own notes, so you can move, cut or change each one by hand. The shape itself stays as drawn, without this path. The window closes; one Ctrl+Z takes it back.
+Turn into plain shapes: every copy becomes a shape of its own notes, in the colours it showed, so you can move, cut or change each one by hand. With Mirror at the peak, a copy and its mirror image are two shapes. The shape itself stays as drawn, without this path. The window closes; one Ctrl+Z takes it back.
 
 Notes past the lowest or highest key, or before the song's start, are cut off.
