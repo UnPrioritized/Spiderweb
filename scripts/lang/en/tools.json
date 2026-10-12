@@ -598,6 +598,8 @@
  "path.tip_every_ticks": "The same in ticks: type any length.",
  "path.count": "Number of copies",
  "path.tip_count": "This many copies in all (the shape itself is the first), spread evenly along the path's length. For paths that go back in time, like a loop.",
+ "path.anchor": "Copies on the points",
+ "path.tip_anchor": "Ticked: a copy's corner sits right on each point, and each part of the path is spaced on its own.\nUnticked: the copies are spaced evenly along the whole path, straight through the points (a copy on top of an arc sits in its middle).",
  "path.half": "Half copies at the points",
  "path.tip_half": "Where the path turns, the copies carry on past the point at their spacing, and only the parts on the near side of the point are kept, so the turn is as full as the rest of the path (Speed Even only). With Number of copies, the spacing is also kept the same on every part of the path.\nUntick for whole copies only.",
  "path.idle": "Right-click a shape → Copy along a path… to start a new path, or click + above.",

@@ -65,11 +65,14 @@ class PathWindow(ToolWindow):
         count.grid(row=1, column=0, sticky="w", pady=(4, 0))
         Tooltip(count, tr("path.tip_count"))
         self.number(sp, 1, 1, "count", tr("path.tip_count"), (1, 10, 1))
-        self.half = tk.BooleanVar(value=True)
-        self.half_tick = ttk.Checkbutton(sp, text=tr("path.half"), variable=self.half,
-                                         command=lambda: self.put("half", self.half.get()))
-        self.half_tick.grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
-        Tooltip(self.half_tick, tr("path.tip_half"))
+        self.ticks = {}
+        for r, key in ((2, "anchor"), (3, "half")):
+            var = tk.BooleanVar(value=True)
+            tick = ttk.Checkbutton(sp, text=tr(f"path.{key}"), variable=var,
+                                   command=lambda k=key, v=var: self.put(k, v.get()))
+            tick.grid(row=r, column=0, columnspan=4, sticky="w", pady=(4, 0))
+            Tooltip(tick, tr(f"path.tip_{key}"))
+            self.ticks[key] = (tick, var)
         self.choice(box, 3, "speed", tr("path.speed"))
 
         self.label(box, 4, tr("path.size"))
@@ -469,9 +472,10 @@ class PathWindow(ToolWindow):
         put_text("size0", fmt(round(c["size"][0], 6)))
         put_text("size1", fmt(round(c["size"][1], 6)))
         put_text("step", str(c["step"]))
-        if self.half.get() != c["half"]:
-            self.half.set(c["half"])
-        config(self.half_tick, state="normal" if c["speed"] == "even" else "disabled")
+        for key, (tick, var) in self.ticks.items():
+            if var.get() != c[key]:
+                var.set(c[key])
+        config(self.ticks["half"][0], state="normal" if c["speed"] == "even" and c["anchor"] else "disabled")
         config(self.entries["step"], state="normal" if c["colours"] != "keep" else "disabled")
         config(self.combos["way"], state="readonly" if c["flip"] == "each" else "disabled")
         n = len(c.get("pts") or [])

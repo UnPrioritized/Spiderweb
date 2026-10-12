@@ -16,6 +16,9 @@ and flips work on the whole group. A page's settings (PATH_DEFAULTS' keys):
   "mode"   "every": one copy per "every" beats the copies' starts span, spread evenly along each run (a straight
            one: right on the steps), the last one at or before the end; "count": "count" copies in all, spread
            evenly along the copies' way
+  "anchor" True: copies sit on the points (a copy's corner right on each point, runs spaced on their own); False
+           (user): spaced evenly through the points along the whole path, the corner sliding across the whole path
+           in time (a copy on top of an arc sits in its middle); no half copies then
   "half"   Speed Even: where the path turns, the copies carry on past the point at their spacing (both ways), only
            what's before / after its time and under / over its key kept, so the turn is as full as the rest (user,
            from a mock-up; True to start). Either way a copy ends right on each turning point. Number of copies with
@@ -49,7 +52,8 @@ WAYS = ("keys", "time", "both")
 TOPS = ("last", "first")
 PATH_DEFAULTS = {"pts": None, "mids": None, "kind": "straight", "mode": "every", "every": 0.25, "count": 8,
                  "k": 0.25, "speed": "even", "size": [100.0, 100.0], "colours": "keep", "step": 1, "most": 15,
-                 "flip": "none", "way": "keys", "top": "last", "half": True, "grp": [0.0, 0.0, 0.0, 0.0]}
+                 "flip": "none", "way": "keys", "top": "last", "half": True, "anchor": True,
+                 "grp": [0.0, 0.0, 0.0, 0.0]}
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # the points' names
 MOST_POINTS = len(LETTERS) - 1  # B .. Z
 EVERY_LIMITS = (1e-6, 1024.0)  # beats
@@ -98,8 +102,9 @@ def clean_path(c):
     mids = list(mids) if isinstance(mids, (list, tuple)) else []
     out["pts"] = pts
     out["mids"] = [None if m is None else _pt(m) for m in (mids + [None] * len(pts))[:len(pts)]]
-    if isinstance(c.get("half"), bool):
-        out["half"] = c["half"]
+    for key in ("half", "anchor"):
+        if isinstance(c.get(key), bool):
+            out[key] = c[key]
     for key, choices in (("kind", KINDS), ("mode", MODES), ("speed", SPEEDS), ("colours", COLOURS), ("flip", FLIPS),
                          ("way", WAYS), ("top", TOPS)):
         if c.get(key) in choices:
@@ -217,8 +222,12 @@ def track(cfg, size, n=SAMPLES):
     / highest); its run (m,); does it go down there (m,)."""
     pts = all_points(cfg, size)
     got_p, got_f, got_r, got_d = [], [], [], []
+    whole = not cfg["anchor"]  # (Copies on the points off: in time the corner slides across the whole path)
+    t0, t_span = pts[0][0], pts[-1][0] - pts[0][0]
     for r, (s, e, wt, wk) in enumerate(runs(pts)):
         r0, span = np.array(pts[s], float), np.subtract(pts[e + 1], pts[s])
+        if whole:
+            r0[0], span[0], wt = t0, t_span, (1 if t_span >= 0 else -1)
         for i in range(s, e + 1):
             m = bend_of(cfg, i)
             seg = np.array(pts[i], float) + _stretch(np.subtract(pts[i + 1], pts[i]),
@@ -327,8 +336,10 @@ def places(cfg, size):
     m = len(p)
     spans = [(int(np.flatnonzero(run == r)[0]), int(np.flatnonzero(run == r)[-1])) for r in range(int(run.max()) + 1)]
     ways = [(wt, wk) for _, _, wt, wk in runs(all_points(cfg, size))]
-    halves = cfg["half"] and cfg["speed"] == "even"
+    halves = cfg["half"] and cfg["speed"] == "even" and cfg["anchor"]
     half = []
+    if not cfg["anchor"]:  # (user: evenly spaced through the points, none sitting on them)
+        spans = [(0, m - 1)]
     screen = moved / [cfg["k"], 1.0]  # (how far the copies go on screen; nothing across a turn's jump)
     along = np.r_[0.0, np.cumsum(np.where(run[1:] == run[:-1], np.hypot(*np.diff(screen, axis=0).T), 0.0))]
     if cfg["mode"] == "count":
