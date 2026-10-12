@@ -30,6 +30,7 @@ class FormatWindow(tk.Toplevel):
         self.title(tr("fmt.title"))
         self.transient(parent)
         self.colours, self.by, self.use10, self.done = colours, by, use10, done
+        ttk.Style(self).configure("Mono.TButton", font=look.mono(9))  # (the tag buttons: the Button style's edges)
         self.built = CL.built_in()
         self.yours = CL.load_formats()
         self.fmt = copy.deepcopy(self.find(picked) or self.built[0])
@@ -116,8 +117,8 @@ class FormatWindow(tk.Toplevel):
         for t, what in TAGS:
             rr = ttk.Frame(tags)
             rr.pack(fill="x", pady=1)
-            tk.Button(rr, text=t, font=look.mono(9), width=11, relief="groove",
-                      command=lambda t=t: self.put_tag(t)).pack(side="left")
+            ttk.Button(rr, text=t, width=11, style="Mono.TButton",
+                       command=lambda t=t: self.put_tag(t)).pack(side="left")
             ttk.Label(rr, text=tr(what), foreground=look.INFO).pack(side="left", padx=4)
         rr = ttk.Frame(tags)
         rr.pack(fill="x", pady=(2, 0))
@@ -153,10 +154,11 @@ class FormatWindow(tk.Toplevel):
         for w in self.lists_row.winfo_children():
             w.destroy()
         ttk.Label(self.lists_row, text=tr("fmt.lists")).pack(side="left")
+        self.list_var = tk.IntVar(value=self.cur)  # (the list shown = the picked button, like a tool)
         for k in range(len(self.fmt["lists"])):
-            tk.Button(self.lists_row, text=tr("fmt.list_n", n=k + 1), width=8,
-                      relief="sunken" if k == self.cur else "raised",
-                      command=lambda k=k: self.show_list(k)).pack(side="left", padx=2)
+            ttk.Radiobutton(self.lists_row, text=tr("fmt.list_n", n=k + 1), width=8, style="Toolbutton",
+                            variable=self.list_var, value=k,
+                            command=lambda k=k: self.show_list(k)).pack(side="left", padx=2)
         ttk.Button(self.lists_row, text=tr("fmt.add_list"), command=self.add_list).pack(side="left", padx=(8, 2))
         ttk.Button(self.lists_row, text=tr("fmt.remove_list"), command=self.remove_list,
                    state="normal" if len(self.fmt["lists"]) > 1 else "disabled").pack(side="left")

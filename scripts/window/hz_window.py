@@ -99,7 +99,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.lfo = {}  # the synth window's settings for vibrato / tremolo (hz["lfo"])
         self.extra = {}  # ... its own settings, not lines (hzbass.EXTRAS: Voice box, wave mode, rack, arpeggio)
         self.kb_w, self.ruler_h = round(44 * s), round(18 * s)
-        names = tkfont.Font(family="Segoe UI", size=8, weight="bold")  # the keys column: wide enough for the
+        names = tkfont.Font(font=look.font(8, "bold"))  # the keys column: wide enough for the
         self.kb_w = max(self.kb_w, round(20 * s) + max(names.measure(tr("hz.fx_" + n)) for n in FX))  # effects' names
         self.sx, self.sy, self.t0, self.top = 80.0 * s, 12.0 * s, -0.25, 64.0
         self.fitted = False
