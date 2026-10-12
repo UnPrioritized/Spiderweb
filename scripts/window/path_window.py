@@ -303,6 +303,19 @@ class PathWindow(ToolWindow):
         nothing waits for a click."""
         self.calm()
         super().retarget()
+        self.show_last()
+
+    def remove_page(self):
+        """A path taken off (its tab's ×): the last one left shows, or nothing waits for a click (user: no new path
+        made by moving the mouse)."""
+        if self.at is None:
+            return
+        super().remove_page()
+        self.show_last()
+
+    def show_last(self):
+        """The selected shapes' last path page shows; none: nothing waits for a click."""
+        self.calm()
         last = [k for k, st in enumerate(self.first_fx()) if st["tool"] == self.KEY]
         if last and self.same():
             self.pick_page(last[-1])
