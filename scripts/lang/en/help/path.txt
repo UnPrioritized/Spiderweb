@@ -6,23 +6,32 @@ Add point puts another point after the last one: it follows the mouse until you 
 
 Like the Claw machine, the path is a page kept with the shape: moving or reshaping the shape moves the path and every copy along with it. Several selected shapes travel together as one group. Opening it from the menu on a shape that has a path shows its last path; click + on top for another one, a tab to change one the shape has, or the small × beside a tab to take it off.
 
-Path: Straight, Curve (a bend through the round middle point) or Arc (a piece of a circle through it). Dragging a middle point on a straight path makes it a curve.
+Path: Straight, Curve (a bend through the round middle point) or Arc (a piece of a circle through it). Dragging a middle point on a straight path makes it a curve. Below, left to right: Straight, Curve and Arc, with the same middle point.
+[clip:path-kind]
 
-Formula: a pattern laid along the whole path, like a curve's Formula (Wave, Zigzag, Curls…, or your own saved ones). Loops = how many times it repeats from A to the last point; the other boxes are the numbers in its formula, like height. Custom… opens the formula window to pick, change, draw or type one.
+Formula: a pattern laid along the whole path, like a curve's Formula (Wave, Zigzag, Curls…, or your own saved ones). Loops = how many times it repeats from A to the last point; the other boxes are the numbers in its formula, like height. Custom… opens the formula window to pick, change, draw or type one. Below: a Wave with 2 loops on a straight path.
+[clip:path-formula]
 
-Spacing: One copy every (a note length, or ticks) puts a copy each time the path goes that much later; Number of copies spreads that many evenly along it (the shape itself is the first). Copies on the points: a copy's corner sits right on each point. Half copies at the points: where the path turns, the copies carry on past the point, and only the parts on the near side are kept, so the turn is as full as the rest.
+Spacing: One copy every (a note length, or ticks) puts a copy each time the path goes that much later; Number of copies spreads that many evenly along it (the shape itself is the first). Copies on the points: a copy's corner sits right on each point. Half copies at the points: where the path turns, the copies carry on past the point, and only the parts on the near side are kept, so the turn is as full as the rest. Below: a path up to B and down to C, with Copies on the points ticked (left: a copy right on B) and unticked (right: spaced evenly straight through B).
+[clip:path-spacing]
 
-Speed: Even, Speed up (close together at A, further apart towards the end) or Slow down.
+Speed: Even, Speed up (close together at A, further apart towards the end) or Slow down. Below, left to right: Even, Speed up, Slow down.
+[clip:path-speed]
 
-Size: how big the first and the last copy are, in %; the ones between grow or shrink step by step.
+Size: how big the first and the last copy are, in %; the ones between grow or shrink step by step. Below: 100 % to 100 % (left) and 100 % to 250 % (right).
+[clip:path-size]
 
-Colours: Keep, Shift all channels, Turn within own colours, or One per copy, each Step channels on from the one before. Needs Multi channel.
+Colours: Keep, Shift all channels, Turn within own colours, or One per copy, each Step channels on from the one before. Needs Multi channel. Below, on a shape with three colours: Keep and Shift all channels (top), Turn within own colours and One per copy (bottom).
+[clip:path-colours]
 
-Flip: Each copy going down flips the copies where the path goes down (upside down, left-right or both). Mirror at the peak: past the path's first peak or dip, the copies are the ones before it mirrored.
+Flip: Each copy going down flips the copies where the path goes down (upside down, left-right or both). Mirror at the peak: past the path's first peak or dip, the copies are the ones before it mirrored. Below, a triangle going up and down: no flip, Each copy going down (upside down), Mirror at the peak.
+[clip:path-flip]
 
-On top: where copies cover each other, which one is drawn on top. The one under it is cut away there, note by note.
+On top: where copies cover each other, which one is drawn on top. The one under it is cut away there, note by note. Below: the last copy on top (left) and the first (right).
+[clip:path-on-top]
 
-Range: Keep inside keeps only the notes from the lowest key to the highest key, the shape's own too; the rest are cut off. These keys stay put when the shape moves (dotted lines on the piano roll).
+Range: Keep inside keeps only the notes from the lowest key to the highest key, the shape's own too; the rest are cut off. These keys stay put when the shape moves (dotted lines on the piano roll). Below: without it (left) and with it (right).
+[clip:path-range]
 
 Turn into plain shapes: every copy becomes a shape of its own notes, in the colours it showed, so you can move, cut or change each one by hand. With Mirror at the peak, a copy and its mirror image are two shapes. Anything done to the shape after its path (a flip, a turn, Claw machine, Strum, Sustain…) is already in the copies' notes. The shape itself stays as drawn, without this path. The window closes; one Ctrl+Z takes it back.
 
