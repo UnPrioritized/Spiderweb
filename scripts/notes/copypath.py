@@ -13,6 +13,8 @@ and flips work on the whole group. A page's settings (PATH_DEFAULTS' keys):
   "mids"   each stretch's middle point (A-B, B-C, ...), kept the same way (None: half way, a straight stretch)
   "kind"   "straight" / "curve" (a bend through the middle point) / "arc" (a piece of a circle through it, round on
            screen): how the stretches whose middle point was dragged bend
+  "pattern" a formula laid along the whole path (pattern.py, like a curve's pattern along the line: sideways sizes in
+           keys, round as the piano roll looked: its k is the page's "k"), or None
   "mode"   "every": one copy per "every" beats the copies' starts span, spread evenly along each run (a straight
            one: right on the steps), the last one at or before the end; "count": "count" copies in all, spread
            evenly along the copies' way
@@ -45,6 +47,8 @@ import math
 
 import numpy as np
 
+from notes.pattern import clean_pattern, pattern_paths
+
 KINDS = ("straight", "curve", "arc")
 MODES = ("every", "count")
 SPEEDS = ("even", "up", "down")
@@ -55,7 +59,7 @@ TOPS = ("last", "first")
 PATH_DEFAULTS = {"pts": None, "mids": None, "kind": "straight", "mode": "every", "every": 0.25, "count": 8,
                  "k": 0.25, "speed": "even", "size": [100.0, 100.0], "colours": "keep", "step": 1, "most": 15,
                  "flip": "none", "way": "keys", "top": "last", "half": True, "anchor": True,
-                 "inside": False, "low": 0, "high": 127, "grp": [0.0, 0.0, 0.0, 0.0]}
+                 "inside": False, "low": 0, "high": 127, "pattern": None, "grp": [0.0, 0.0, 0.0, 0.0]}
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # the points' names
 MOST_POINTS = len(LETTERS) - 1  # B .. Z
 EVERY_LIMITS = (1e-6, 1024.0)  # beats
@@ -125,6 +129,8 @@ def clean_path(c):
             out["size"] = got
     if out["low"] > out["high"]:
         out["low"], out["high"] = out["high"], out["low"]
+    if c.get("pattern") is not None:
+        out["pattern"] = clean_pattern(c["pattern"])
     grp = c.get("grp")
     if isinstance(grp, (list, tuple)) and len(grp) == 4:
         got = [_num(v, -FAR, FAR) for v in grp]
@@ -230,15 +236,21 @@ def track(cfg, size, n=SAMPLES):
     got_p, got_f, got_r, got_d = [], [], [], []
     whole = not cfg["anchor"]  # (Copies on the points off: in time the corner slides across the whole path)
     t0, t_span = pts[0][0], pts[-1][0] - pts[0][0]
+    segs = []
+    for i in range(len(pts) - 1):
+        m = bend_of(cfg, i)
+        segs.append(np.array(pts[i], float) + _stretch(np.subtract(pts[i + 1], pts[i]),
+                                                       None if m is None else np.subtract(m, pts[i]), cfg["kind"],
+                                                       cfg["k"], n))
+    if cfg.get("pattern"):  # (the formula along the whole path, round as the piano roll looked: cfg "k")
+        segs = [np.asarray(a, float).reshape(-1, 2) for a in
+                pattern_paths(segs, dict(cfg["pattern"], k=cfg["k"], each=False))]
     for r, (s, e, wt, wk) in enumerate(runs(pts)):
         r0, span = np.array(pts[s], float), np.subtract(pts[e + 1], pts[s])
         if whole:
             r0[0], span[0], wt = t0, t_span, (1 if t_span >= 0 else -1)
         for i in range(s, e + 1):
-            m = bend_of(cfg, i)
-            seg = np.array(pts[i], float) + _stretch(np.subtract(pts[i + 1], pts[i]),
-                                                     None if m is None else np.subtract(m, pts[i]), cfg["kind"],
-                                                     cfg["k"], n)
+            seg = segs[i]
             f = np.zeros_like(seg)
             for c in (0, 1):  # (how far along the run, in time and in keys)
                 if abs(span[c]) > 1e-9:
@@ -251,7 +263,7 @@ def track(cfg, size, n=SAMPLES):
             dk = np.r_[dk, dk[-1:]]
             got_p.append(seg)
             got_f.append(f)
-            got_r.append(np.full(n, r))
+            got_r.append(np.full(len(seg), r))
             got_d.append((dk < -1e-9) | ((np.abs(dk) <= 1e-9) & (wk < 0)))
     return np.concatenate(got_p), np.concatenate(got_f), np.concatenate(got_r), np.concatenate(got_d)
 

@@ -3,27 +3,34 @@ of their notes' box), B, C, ..., shown live on the piano roll (the shared part: 
 the piano roll: roll/roll_path.py). Several shapes travel together as one group: each gets the same page, plus where
 the group's box is from its own notes ("grp", page_cfg), so corners, sizes and flips work on the whole group.
 
-Path kind (Straight / Curve / Arc), spacing (one copy every [note length] or a number of copies), Speed, Size,
+Path kind (Straight / Curve / Arc) + a Formula along it (a curve's patterns: presets, saved ones, Custom…), spacing (one copy every [note length] or a number of copies), Speed, Size,
 Colours (+ Step), Flip (+ which way), On top, Range (Keep inside + Lowest / Highest key), and where the picked point is as bar / beat / tick / key like the piano
 roll's status line, typed or dragged on the piano roll; Add point (it follows the mouse until a click places it)."""
 
+import math
 import tkinter as tk
 from tkinter import ttk
+
+import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from files.snap import SNAP_LIST, snap_beats, snap_text
 from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KEY_LIMITS, KINDS, LETTERS, MOST_POINTS,
                             PATH_DEFAULTS, SIZE_LIMITS, SPEEDS, STEP_LIMITS, TOPS, WAYS, all_points, clean_path, peak,
-                            shifts)
+                            shifts, track)
+from notes.pattern import MAX_LOOPS, PATTERN_PRESETS, loop_points, new_pattern, pattern_name
 from roll.roll_shared import note_name
 from window import big_ask, look
+from window.formula_host import FormulaHost
+from window.pattern_dialog import load_patterns, saved_pattern
 from window.tool_window import ToolWindow
-from window.widgets import Scrub, Tooltip, bad, good, grid_shown
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown, keep_width
 
 LENGTHS = [s for s, _ in SNAP_LIST if s != "off"]  # "one copy every" choices (the snap list's note lengths)
 CHOICES = {"kind": KINDS, "speed": SPEEDS, "colours": COLOURS, "flip": FLIPS, "way": WAYS, "top": TOPS}
-GROUP_ONLY = ("grp", "most")  # (page settings that may differ between the shapes of one group)
+LOOP_COPIES = 8  # a new formula's Loops: about this many copies a loop
+GROUP_ONLY =("grp", "most")  # (page settings that may differ between the shapes of one group)
 
 
 class PathWindow(ToolWindow):
@@ -46,7 +53,21 @@ class PathWindow(ToolWindow):
         s = self.app.scale
         self.vars, self.entries, self.combos = {}, {}, {}
         box.columnconfigure(0, minsize=round(80 * s))
-        self.choice(box, 1, "kind", tr("path.kind"))
+        kind = self.choice(box, 1, "kind", tr("path.kind"))
+        lb = ttk.Label(kind, text=tr("path.formula"), foreground=look.HINT)
+        lb.grid(row=0, column=1, sticky="e", padx=(10, 3))
+        self.formula_box = keep_width(ttk.Combobox(kind, state="readonly", width=14, postcommand=self.formula_list))
+        self.formula_box.grid(row=0, column=2, sticky="w")
+        self.formula_box.bind("<<ComboboxSelected>>", lambda e: self.pick_formula(e.widget.current()))
+        for w in (lb, self.formula_box):
+            Tooltip(w, tr("path.tip_formula"))
+        custom = ttk.Button(kind, text=tr("roll_menu.custom"), command=self.custom_formula)
+        custom.grid(row=0, column=3, sticky="w", padx=(4, 0))
+        Tooltip(custom, tr("path.tip_custom"))
+        self.formula_numbers = ttk.Frame(kind)  # (Loops + a box per other name in the formula, while there is one)
+        self.formula_numbers.grid(row=1, column=1, columnspan=3, sticky="w", pady=(4, 0))
+        self.pat_boxes, self.pat_names = {}, None
+        self.formula_list()
 
         self.label(box, 2, tr("path.spacing"))
         sp = ttk.Frame(box)
@@ -443,6 +464,84 @@ class PathWindow(ToolWindow):
     def put_choice(self, key, value):
         self.put(key, value)  # (Straight keeps the bends, hidden: Curve / Arc bring them back; user)
 
+    # ---- the formula along the path (pattern.py: the same presets / saved ones / Custom… as a curve's)
+
+    def formula_list(self):
+        """The Formula dropdown's choices: none, the presets, the saved ones (read again each time it opens)."""
+        self.saved = load_patterns("pattern")
+        self.formula_box.config(values=[tr("roll_menu.none")] + [name for _, name, _, _ in PATTERN_PRESETS]
+                                + [p["name"] for p in self.saved])
+
+    def pick_formula(self, i):
+        old = self.cfg.get("pattern")
+        if i <= 0:
+            new = None
+        elif i <= len(PATTERN_PRESETS):
+            new = new_pattern(PATTERN_PRESETS[i - 1][0], self.cfg["k"], old)
+        else:
+            new = saved_pattern(self.saved[i - 1 - len(PATTERN_PRESETS)], self.cfg["k"], old)
+        cl, fr = clean_path(self.cfg), self.frame()
+        if new and not old and cl and fr:  # (about 8 copies a loop to start: fewer can't show the wave)
+            new["loops"] = float(max(1, round((len(shifts(cl, self.app.ppq, fr[1])) - 1) / LOOP_COPIES)))
+        if new != old:
+            self.put("pattern", new)
+
+    def custom_formula(self):
+        """Custom…: the formula window used for curves, on this path."""
+        from window.pattern_dialog import FormulaDialog
+        if self.cfg.get("pts"):
+            FormulaDialog(PathHost(self), "pattern")
+
+    def put_formula_number(self, name, done=True):
+        """A formula number box (Loops first): typed, stepped or dragged."""
+        p = self.cfg.get("pattern")
+        var, e = self.pat_boxes[name]
+        try:
+            v = float(calc(var.get()))
+            if not math.isfinite(v) or (name == "loops" and not 0 < v <= MAX_LOOPS):
+                raise ValueError
+            new = dict(p, loops=v) if name == "loops" else dict(p, vars=dict(p["vars"], **{name: v}))
+            loop_points(new)  # (a number the formula can't be worked out with, e.g. sqrt of a minus)
+        except (ValueError, ZeroDivisionError, TypeError):
+            bad(e)
+            return
+        good(e)
+        if new != p:
+            self.put("pattern", new, done)
+
+    def show_formula(self):
+        p = self.cfg.get("pattern")
+        text = pattern_name(p) if p else tr("roll_menu.none")
+        if self.formula_box.get() != text:
+            self.formula_box.set(text)
+        names = (["loops"] + ([] if p.get("loop") else list(p["vars"]))) if p else []
+        if names != self.pat_names:
+            for w in self.formula_numbers.winfo_children():
+                w.destroy()
+            self.pat_boxes, self.pat_names = {}, names
+            for c, name in enumerate(names):
+                lb = ttk.Label(self.formula_numbers, text=tr("panel_pattern.loops") if name == "loops" else name,
+                               foreground=look.HINT)
+                lb.grid(row=0, column=2 * c, sticky="e", padx=(10 if c else 0, 3))
+                var = tk.StringVar()
+                e = ttk.Entry(self.formula_numbers, textvariable=var, width=6, justify="center")
+                e.grid(row=0, column=2 * c + 1, sticky="w")
+                e.bind("<Return>", lambda ev, n=name: (self.put_formula_number(n), "break")[1])
+                e.bind("<FocusOut>", lambda ev, n=name: self.put_formula_number(n))
+                Scrub(self.app, [(e, var, lambda n=name: self.put_formula_number(n, False))],
+                      (1, 10, 0.1) if name == "loops" else (0.5, 5, 0.1), label=lb)
+                tip = tr("panel_pattern.loops_tip") if name == "loops" else tr("panel_pattern.number_tip", name=name)
+                for w in (lb, e):
+                    Tooltip(w, tip)
+                self.pat_boxes[name] = (var, e)
+            grid_shown(self.formula_numbers, bool(names))
+        for name, (var, e) in self.pat_boxes.items():
+            text = fmt(round(p["loops"] if name == "loops" else p["vars"][name], 6))
+            if var.get() != text:
+                var.set(text)
+            if str(e.cget("style")) != "TEntry":
+                e.config(style="TEntry")
+
     def put_inside(self, on):
         """Keep inside ticked: Highest starts no higher than the piano roll's top key."""
         if on and self.cfg["high"] > self.app.keys - 1:
@@ -563,6 +662,7 @@ class PathWindow(ToolWindow):
         config(self.ticks["half"][0], state="normal" if c["speed"] == "even" and c["anchor"] else "disabled")
         config(self.entries["step"], state="normal" if c["colours"] != "keep" else "disabled")
         config(self.combos["way"], state="readonly" if c["flip"] == "each" else "disabled")
+        self.show_formula()
         for key in ("low", "high"):
             put_text(key, str(c[key]))
             config(self.entries[key], state="normal" if c["inside"] else "disabled")
@@ -630,6 +730,38 @@ class PathWindow(ToolWindow):
     def close(self):
         super().close()
         self.app.roll.request_redraw()
+
+
+class PathHost(FormulaHost):
+    """Custom… (pattern_dialog.py) on the path window's page: the holder is its settings (cfg "pattern"). Changes
+    show at once; Apply = one step in the window's own undo (Accept makes it the piano roll's)."""
+    layers = ("pattern",)
+
+    def __init__(self, win):
+        self.win = win
+        self.app, self.parent = win.app, win
+
+    def targets(self):
+        return [self.win.cfg]
+
+    def fresh(self, holder, layer):
+        return {"k": self.win.cfg["k"], "scale": 1.0}
+
+    def changed(self, final=True):
+        self.win.show()
+        self.win.preview(final)
+
+    def commit(self, snap, name):
+        self.changed()
+        self.win.undo.mark()
+
+    def loop_length(self, holder, pat):
+        """One loop along the whole path, in keys as the piano roll looked."""
+        cl, fr = clean_path(dict(holder, pattern=None)), self.win.frame()
+        if cl is None or fr is None or pat.get("loops", 0) <= 0:
+            return 0.0
+        pts = track(cl, fr[1], 128)[0] / [cl["k"], 1.0]
+        return float(np.hypot(*np.diff(pts, axis=0).T).sum()) / pat["loops"]
 
 
 open_path = PathWindow.open
