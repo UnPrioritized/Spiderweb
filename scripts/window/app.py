@@ -254,6 +254,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
         self.help_window = None
         self.live = tk.BooleanVar(value=False)  # drawing tools draw into one custom shape (roll_live.py)
         self.mask = tk.BooleanVar(value=False)  # what's drawn becomes a mask (mask.py)
+        self.mask_preview = tk.BooleanVar(value=True)  # masks hide what's outside them (off = the pattern drawn whole)
         self.mask_defaults = dict(MASK_DEFAULTS)  # a new mask's settings: the last ones set in the panel
         self.draw_tool = "line"  # the drawing tool a double right-click goes back to
         self.snap = tk.StringVar(value=DEFAULT_SNAP)
@@ -317,6 +318,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
                                                   self.roll.request_redraw(),
                                                   self.live.get() and self.tips.show("live")))
         self.mask.trace_add("write", lambda *_: (self.schedule_autosave(), self.roll.request_redraw()))
+        self.mask_preview.trace_add("write", lambda *_: (self.schedule_autosave(), any(map(is_mask, self.shapes)) and
+                                                         self.shapes_changed()))
         self.snap.trace_add("write", lambda *_: self.roll.request_redraw())
         self.hz_snap.trace_add("write", lambda *_: (self.hz_window and self.hz_window.redraw(),
                                                     self.schedule_autosave()))
@@ -380,6 +383,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
                             command=lambda: self.mask.get() and self.tips.show("masks"))
         b.pack(side="left", padx=(8, 0))
         Tooltip(b, tr("mask.tick_tip"))
+        b = ttk.Checkbutton(bar, text=tr("mask.preview"), variable=self.mask_preview)
+        b.pack(side="left", padx=(4, 0))
+        Tooltip(b, tr("mask.preview_tip"))
         bar = self.option_bar = ttk.Frame(top)
         self._toolbar_rows = None
         top.bind("<Configure>", lambda e: self.fit_toolbar())
@@ -1075,8 +1081,11 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
             # makes = the pattern as it sounds without them, user)
             self.pattern = all_notes(self.shapes, self.ppq, self.keys, "single", self.channel_split, self.all16(),
                                      self.notes_tracks, quiet=True)[2]
-        self.drawn, self.mask_covered = mask_view(self.rendered, self.shapes, self.ppq, self.keys, self.notes_of,
-                                                  self.pattern)
+        if self.mask_preview.get():
+            self.drawn, self.mask_covered = mask_view(self.rendered, self.shapes, self.ppq, self.keys, self.notes_of,
+                                                      self.pattern)
+        else:  # (toolbar "Preview" off: the pattern drawn whole, only the masks' dashed lines; user)
+            self.drawn, self.mask_covered = self.rendered, set()
         self._mask_time = time.perf_counter() - started
         if wanted != self.colours_wanted:
             self.colours_wanted = wanted
