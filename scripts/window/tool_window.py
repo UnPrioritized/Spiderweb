@@ -689,10 +689,11 @@ class ToolWindow(tk.Toplevel):
             todo.extend(w.winfo_children())
         for job in self.tk.splitlist(self.tk.call("after", "info")):
             try:
-                script = self.tk.splitlist(self.tk.call("after", "info", job))[0]
+                # text, a tuple (command + arguments) or a Tcl object: its first word is the command
+                script = self.tk.splitlist(self.tk.splitlist(self.tk.call("after", "info", job))[0])
             except tk.TclError:
                 continue
-            if script in mine:
+            if script and str(script[0]) in mine:
                 self.tk.call("after", "cancel", job)
 
     def close(self):
