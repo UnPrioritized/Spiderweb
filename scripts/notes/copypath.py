@@ -13,8 +13,9 @@ and flips work on the whole group. A page's settings (PATH_DEFAULTS' keys):
   "mids"   each stretch's middle point (A-B, B-C, ...), kept the same way (None: half way, a straight stretch)
   "kind"   "straight" / "curve" (a bend through the middle point) / "arc" (a piece of a circle through it, round on
            screen): how the stretches whose middle point was dragged bend
-  "mode"   "every": a copy each "every" beats (copies' starts lined up with where the shape starts), the last one at
-           or before the end; "count": "count" copies in all, spread evenly along the path's length
+  "mode"   "every": one copy per "every" beats the copies' starts span, spread evenly along each run (a straight
+           one: right on the steps), the last one at or before the end; "count": "count" copies in all, spread
+           evenly along the copies' way
   "half"   Speed Even: where the path turns, the copies carry on past the point at their spacing (both ways), only
            what's before / after its time and under / over its key kept, so the turn is as full as the rest (user,
            from a mock-up; True to start). Either way a copy ends right on each turning point. Number of copies with
@@ -292,6 +293,21 @@ def _spaced(along, spans, count):
     return pos[:MOST_COPIES], steps
 
 
+def _every(along, start, spans, every, speed):
+    """One copy every: each run gets one copy per step of time its copies' starts span (start: each sample's, in
+    beats), spread EVENLY along it (user: a curve's copies bunched up where it flattened out, timed by the grid); a
+    straight run's copies land right on the steps. (Places along the samples, each run's spacing in length.)"""
+    pos, steps = [], []
+    for lo, hi in spans:
+        span, room = abs(start[hi] - start[lo]), along[hi] - along[lo]
+        n = min(MOST_COPIES, int(span / every + 1e-9))
+        step = room * every / span if span > 0 else 0.0
+        u = eased(np.arange(n + 1) / n, speed) * n if n else np.zeros(1)
+        pos.extend(_along_pos(along, lo, hi, along[lo] + u * step))
+        steps.append(step)
+    return pos[:MOST_COPIES], steps
+
+
 def _along_pos(along, lo, hi, at):
     """Lengths along the path (in run lo..hi's) -> places along the samples."""
     seg = along[lo:hi + 1]
@@ -299,27 +315,6 @@ def _along_pos(along, lo, hi, at):
     gap = seg[np.minimum(j + 1, hi - lo)] - seg[j]
     f = np.clip(np.where(gap > 0, (at - seg[j]) / np.where(gap > 0, gap, 1.0), 0.0), 0.0, 1.0)
     return (lo + j + f).tolist()
-
-
-def _crossings(t, run, targets):
-    """For each time in targets (going up), the place along the samples (sample number + part of the way to the next)
-    where t first reaches it, searching on from the last one; one where the path turns and the copies jump (a new
-    run) = the new run's first; the same place twice = once. Also how many targets were reached."""
-    got, i, reached = [], 0, 0
-    for want in targets:
-        past = np.flatnonzero(t[i:] >= want - 1e-9)
-        if not len(past):
-            break
-        reached += 1
-        j = i + past[0]
-        if j == 0 or run[j - 1] != run[j]:
-            pos = float(j)
-        else:
-            pos = j - 1 + ((want - t[j - 1]) / (t[j] - t[j - 1]) if t[j] != t[j - 1] else 1.0)
-        if not got or abs(got[-1] - pos) > 1e-12:
-            got.append(pos)
-        i = max(j - 1, 0)
-    return got, reached
 
 
 def places(cfg, size):
@@ -334,9 +329,9 @@ def places(cfg, size):
     ways = [(wt, wk) for _, _, wt, wk in runs(all_points(cfg, size))]
     halves = cfg["half"] and cfg["speed"] == "even"
     half = []
+    screen = moved / [cfg["k"], 1.0]  # (how far the copies go on screen; nothing across a turn's jump)
+    along = np.r_[0.0, np.cumsum(np.where(run[1:] == run[:-1], np.hypot(*np.diff(screen, axis=0).T), 0.0))]
     if cfg["mode"] == "count":
-        screen = p / [cfg["k"], 1.0]
-        along = np.r_[0.0, np.cumsum(np.hypot(*np.diff(screen, axis=0).T))]
         if halves:
             pos, steps = _spaced(along, spans, cfg["count"])
             half = _halves(p, along, moved, f, down, spans, steps, ways, size[0])
@@ -344,17 +339,10 @@ def places(cfg, size):
             pos = _counted(along, spans, cfg["count"], cfg["speed"])
         pos = np.array(pos, float)
     else:
-        s = moved[:, 0]
-        way = 1.0 if s[-1] >= s[0] else -1.0
-        t = s * way  # (the copies' starts along the way: the first crossing of each step, in path order)
-        step = cfg["every"]
-        top = min(MOST_COPIES, int(max(t.max(), 0.0) / step + 1e-9) + 1)
-        pos, n = _crossings(t, run, np.arange(top) * step)
-        if cfg["speed"] != "even" and n > 1:
-            pos = _crossings(t, run, eased(np.arange(n) / (n - 1), cfg["speed"]) * (n - 1) * step)[0]
+        pos, steps = _every(along, moved[:, 0], spans, cfg["every"], cfg["speed"])
         pos = sorted(set(pos) | {float(hi) for _, hi in spans[:-1]})  # (user: a copy ends right on each turn)
         if halves:
-            half = _halves(p, t, moved, f, down, spans, [step] * len(spans), ways, size[0])
+            half = _halves(p, along, moved, f, down, spans, steps, ways, size[0])
         pos = np.array(pos, float)[:MOST_COPIES]
     j = np.clip(np.floor(pos).astype(np.int64), 0, m - 2)
     u = (pos - j)[:, None]
