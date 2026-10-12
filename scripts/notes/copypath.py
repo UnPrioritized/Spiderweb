@@ -345,7 +345,7 @@ def places(cfg, size):
     if cfg["mode"] == "count":
         if halves:
             pos, steps = _spaced(along, spans, cfg["count"])
-            half = _halves(p, along, moved, f, down, spans, steps, ways, size[0])
+            half = _halves(p, along, moved, f, down, spans, steps, ways, size)
         else:
             pos = _counted(along, spans, cfg["count"], cfg["speed"])
         pos = np.array(pos, float)
@@ -353,7 +353,7 @@ def places(cfg, size):
         pos, steps = _every(along, moved[:, 0], spans, cfg["every"], cfg["speed"])
         pos = sorted(set(pos) | {float(hi) for _, hi in spans[:-1]})  # (user: a copy ends right on each turn)
         if halves:
-            half = _halves(p, along, moved, f, down, spans, steps, ways, size[0])
+            half = _halves(p, along, moved, f, down, spans, steps, ways, size)
         pos = np.array(pos, float)[:MOST_COPIES]
     j = np.clip(np.floor(pos).astype(np.int64), 0, m - 2)
     u = (pos - j)[:, None]
@@ -372,18 +372,22 @@ def places(cfg, size):
     return got, corner, falls, cut
 
 
-def _halves(p, val, moved, f, down, spans, steps, ways, wide):
+def _halves(p, val, moved, f, down, spans, steps, ways, size):
     """Half copies at the points (user, 2026-10-12, from a mock-up): where the path turns, the copies before the
     point carry on past it at their spacing; of those, only what pokes in on the near side of the point's time and
     on the inside of its key (under a peak, over a dip) is kept, so the turn is as full as the rest; the other side
     gets the same mirrored left-right at the point (user: whatever the Flip, like the shape's own halves).
     val = how far along each sample is (time for One copy every, length for Number of copies), steps = each run's
-    spacing in it, ways = runs' (time, key) ways, wide = the box's beats. [(place to sort it in among the samples,
+    spacing in it, ways = runs' (time, key) ways, size = the box's (beats, keys). Only at peaks and dips. [(place to
+    sort it in among the samples,
     how far it moves, its corner as parts of the box, does the path go down there, (cut: beats from the group's
     start, 1 = what's before stays / -1 = after, key, 1 = what's at or under it stays / -1 = at or over, 1 =
     mirrored left-right at the point))]."""
     out = []
+    wide, tall = size
     for r in range(len(spans) - 1):
+        if ways[r][1] == ways[r + 1][1]:  # (a turn back in time only: no peak or dip to fill; hunt)
+            continue
         hi, lo2 = spans[r][1], spans[r + 1][0]
         at, key = p[hi]
         under = 1.0 if ways[r][1] > 0 else -1.0
@@ -399,6 +403,8 @@ def _halves(p, val, moved, f, down, spans, steps, ways, wide):
             mv = moved[b] + a * d
             if (keep > 0 and mv[0] >= at - 1e-9) or (keep < 0 and mv[0] + wide <= at + 1e-9):
                 break  # (nothing of it left on the near side)
+            if (under > 0 and mv[1] > key + 1e-9) or (under < 0 and mv[1] + tall < key - 1e-9):
+                break  # (wholly past the point's key: nothing kept; a tall tower made thousands of empty ones, hunt)
             fr = f[b] + a * (f[b] - f[o])
             out.append((hi + 0.1 + 0.3 * k / (k + 1), mv, fr, bool(down[b]), (at, keep, key, under, 0.0)))
             # (the other side of the point: the same, mirrored left-right there; user: like the shape's own halves)
@@ -562,6 +568,21 @@ def on_top(parts, wide):
     return np.concatenate([top, low]), cs, ce
 
 
+def covered(parts, wide):
+    """on_top for each bunch of copies whose times overlap (copies apart in time can't cover each other: no cutting
+    work for them; 2M notes side by side took 0.8 s, hunt). parts top first."""
+    t0 = np.array([int(x[:, 0].min()) for x in parts])
+    t1 = np.array([int(x[:, 1].max()) for x in parts])
+    order = np.argsort(t0, kind="stable")
+    reach = np.maximum.accumulate(t1[order])
+    starts = np.flatnonzero(np.r_[True, t0[order][1:] >= reach[:-1]])
+    out = []
+    for g in np.split(order, starts[1:]):
+        g = np.sort(g)  # (top first again)
+        out.append(parts[g[0]] if len(g) == 1 else on_top([parts[k] for k in g], wide)[0])
+    return np.concatenate(out)
+
+
 def apply_path(a, cfg, ppq, keys=256):
     """Notes a (start, end, key, then columns riding along; with 5+ columns the last is the colour group) and their
     copies along the path."""
@@ -582,7 +603,7 @@ def apply_path(a, cfg, ppq, keys=256):
     order = np.argsort(a[:, 2], kind="stable")
     by_key = (a[order], a[order, 2])
     flip_key = None
-    parts = []
+    parts, total = [], 0
     for i in range(n):
         x = a
         if flips[i]:
@@ -613,6 +634,9 @@ def apply_path(a, cfg, ppq, keys=256):
                 x[:, 0], x[:, 1] = 2 * c - x[:, 1], 2 * c - s
         if col is not None:
             x[:, col] = coloured(x[:, col], i, cfg, own)
+        total += len(x)
+        if total > MOST_NOTES and parts:  # (grown copies have more notes than the shape: counted as made; hunt)
+            break
         parts.append(x)
     if cfg["flip"] == "mirror":
         p = peak(cfg, box_size(box, ppq))
@@ -627,7 +651,7 @@ def apply_path(a, cfg, ppq, keys=256):
         return a[:0]
     if len(parts) > 1:
         wide = int(max(int(x[:, 1].max()) for x in parts)) + 2
-        out = on_top(parts[::-1] if cfg["top"] == "last" else parts, wide)[0]
+        out = covered(parts[::-1] if cfg["top"] == "last" else parts, wide)
     else:
         out = parts[0]
     return out

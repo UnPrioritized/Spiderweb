@@ -617,7 +617,7 @@
  "path.turn": "Turn within own colours",
  "path.one": "One per copy",
  "path.tip_colours": "Keep: every copy has the shape's own colours.\nShift all channels: each copy moves every colour on by Step channels, through all the channels.\nTurn within own colours: each copy uses only the shape's own colours, moved on by Step.\nOne per copy: each copy is one colour, the next one Step channels on.",
- "path.step": "Step",
+ "path.colour_step": "Step",
  "path.tip_step": "How far each copy's colours move on from the copy before (minus = backwards).",
  "path.needs_multi": "Channels isn't Multi channel now: the copies stay in one channel, so the colours don't change.",
  "path.flip": "Flip",

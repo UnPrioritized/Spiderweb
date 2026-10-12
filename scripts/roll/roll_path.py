@@ -6,6 +6,7 @@ one following the mouse to stop adding. Snapped like drawing (time to the grid, 
 and free to go past the piano roll's edges (notes there are cut off)."""
 
 from notes.copypath import LETTERS, all_points, clean_path, mid_of, track
+from roll.roll_draw import screen_lines
 from roll.roll_shared import SHIFT
 from window import look
 
@@ -123,10 +124,17 @@ class PathEditing:
             self.create_oval(x - r, y - r, x + r, y + r, outline="", fill=look.PATH_LINE, tags="copypath")
             return
         (b0, k0), size = fr
-        pts = track(cl, size, 128)[0]
-        xy = [v for b, p in pts for v in self.to_xy((b0 + b, k0 + p))]
+        pts = track(cl, size, 128)[0] + [b0, k0]
         line = max(1, round(2 * s))
-        self.create_line(*xy, fill=look.PATH_LINE, width=line, dash=(6, 3), tags="copypath")
+        ax, bx = self.sx, self.kb_w - self.view_t * self.sx
+        ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
+        view = (self.kb_w - 20, self.ruler_h - 20, self.winfo_width() + 20, self.winfo_height() + 20)
+        for coords, _ in screen_lines(pts, ax, bx, ay, by, view):
+            # (only what shows, as THIN dashed lines side by side: a thick dashed one reaching far off screen froze
+            # Windows, roll_draw.draw_path)
+            for d in range(line):
+                self.create_line(*[v + d for v in coords], fill=look.PATH_LINE, width=1, dash=(6, 3),
+                                 tags="copypath")
         spots = self.path_spots(w)
         n = len(cl["pts"])
         font = look.font(9, "bold", family=look.TK)

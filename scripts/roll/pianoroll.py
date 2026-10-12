@@ -280,7 +280,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def holding(self):
         """The left button holds a shape, its point / handle / box, or the kept Select box's side: shortcuts wait
         (user)."""
-        return bool(self.drag) and self.drag[0] in ("move", "handle", "resize", "skew", "turn", "stretch")
+        return bool(self.drag) and self.drag[0] in ("move", "handle", "resize", "skew", "turn", "stretch", "path")
 
     @staticmethod
     def reach(shapes):

@@ -19,6 +19,7 @@ from window import look
 from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Tooltip, placed
 
 NEW = "new"  # the "+" tab
+TOOL_WINDOWS = ("claw_window", "strum_window", "chop_window", "path_window")  # (the app's open note tool windows)
 TAB_STYLE = "ToolTab.Toolbutton"  # (text in the middle: "+" sat at the left of its button)
 
 ORANGE = look.KNOB_ORANGE
@@ -192,6 +193,10 @@ class ToolWindow(tk.Toplevel):
     def open(cls, app):
         if not app.note_tool_sels():  # (pictures take no note tools)
             return
+        for attr in TOOL_WINDOWS:  # (user: one note tool window at a time; another open one keeps its changes)
+            other = getattr(app, attr, None)
+            if attr != cls.ATTR and other:
+                other.accept()
         w = getattr(app, cls.ATTR)
         if w:
             w.lift()
@@ -673,9 +678,27 @@ class ToolWindow(tk.Toplevel):
         if e.widget is self:
             setattr(self.app, self.POS, f"+{self.winfo_x()}+{self.winfo_y()}")
 
+    def drop_jobs(self):
+        """Timers still waiting for this window or its widgets (tip, tab fitting, tooltips) called off: closed at
+        once (another note tool window opened, hunt), a job would call a freed command, or a new one that got its
+        name."""
+        mine, todo = set(), [self]
+        while todo:
+            w = todo.pop()
+            mine.update(getattr(w, "_tclCommands", None) or ())
+            todo.extend(w.winfo_children())
+        for job in self.tk.splitlist(self.tk.call("after", "info")):
+            try:
+                script = self.tk.splitlist(self.tk.call("after", "info", job))[0]
+            except tk.TclError:
+                continue
+            if script in mine:
+                self.tk.call("after", "cancel", job)
+
     def close(self):
         if self.late:
             self.after_cancel(self.late)
+        self.drop_jobs()
         setattr(self.app, self.ATTR, None)
         self.destroy()
         self.app.roll.focus_set()

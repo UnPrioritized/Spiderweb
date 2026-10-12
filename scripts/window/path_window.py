@@ -17,7 +17,7 @@ from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KIN
                             PATH_DEFAULTS, SIZE_LIMITS, SPEEDS, STEP_LIMITS, TOPS, WAYS, all_points, clean_path, peak,
                             shifts)
 from roll.roll_shared import note_name
-from window import look
+from window import big_ask, look
 from window.tool_window import ToolWindow
 from window.widgets import Scrub, Tooltip, bad, good, grid_shown
 
@@ -31,6 +31,8 @@ class PathWindow(ToolWindow):
     loose = False  # the last point follows the mouse on the piano roll until a click places it
     adding = False  # Add point pressed: the new point comes with the mouse's first move on the piano roll
     idle = False  # another shape selected meanwhile: no new path until the menu / + asks for one (user)
+    taking = False  # (take_typing at work)
+    est = 0  # notes the shown settings make, about (asked past big_ask.BIG)
     pick = 0  # the point the bar / beat / tick / key boxes show (0 = B)
 
     def __init__(self, app):
@@ -85,7 +87,7 @@ class PathWindow(ToolWindow):
         ttk.Label(size, text="→", foreground=look.HINT).grid(row=0, column=2, padx=6)
 
         colours = self.choice(box, 5, "colours", tr("path.colours"))
-        lb = ttk.Label(colours, text=tr("path.step"), foreground=look.HINT)
+        lb = ttk.Label(colours, text=tr("path.colour_step"), foreground=look.HINT)
         lb.grid(row=0, column=1, sticky="e", padx=(10, 3))
         self.number(colours, 0, 2, "step", tr("path.tip_step"), (1, 5, 1), label=lb, width=4)
         self.colour_note = ttk.Label(box, text="", foreground=look.WARN, wraplength=round(440 * s))
@@ -222,8 +224,51 @@ class PathWindow(ToolWindow):
         fr = self.frame()
         return None if fr is None else [round(beat - fr[0][0], 9), round(key - fr[0][1], 9)]
 
+    def take_typing(self):
+        """A number typed in a box without Enter counts before a piano roll click / move acts (user)."""
+        if self.taking:
+            return
+        try:
+            f = self.focus_get()
+        except (KeyError, tk.TclError):
+            return
+        for key, e in self.entries.items():
+            if e is f:
+                self.taking = True
+                try:
+                    self.on_entry(key)
+                finally:
+                    self.taking = False
+                return
+
+    def drop_loose(self):
+        """A point never clicked (still following the mouse) goes; B too, and then its path page (user)."""
+        loose, self.adding = self.loose, False
+        if not loose:
+            return
+        self.loose = False
+        pts, mids = self.lists()
+        if len(pts) > 1:
+            self.cfg.update(pts=pts[:-1], mids=mids[:-1])
+            self.pick = min(self.pick, len(pts) - 2)
+            self.preview()
+        else:
+            self.cfg.update(pts=None, mids=None)
+            if self.at is not None:
+                ToolWindow.remove_page(self)
+
+    def accept(self):
+        self.drop_loose()
+        super().accept()
+
+    def sync(self):
+        if sorted(self.app.note_tool_sels()) != self.targets:  # (another selection: a point not clicked goes)
+            self.drop_loose()
+        super().sync()
+
     def follow(self, beat, key, k):
         """The point still to be placed follows the mouse on the piano roll: the copies show there (no step inside)."""
+        self.take_typing()
         pt = self.from_box(beat, key)
         if pt is None:
             return
@@ -241,6 +286,7 @@ class PathWindow(ToolWindow):
 
     def place(self, beat, key, k):
         """A click on the piano roll places the point following the mouse (B, or one added)."""
+        self.take_typing()
         pt = self.from_box(beat, key)
         if pt is None:
             return
@@ -334,6 +380,7 @@ class PathWindow(ToolWindow):
             self.show()
 
     def new_page(self):
+        self.drop_loose()
         self.calm()
         super().new_page()
 
@@ -349,15 +396,17 @@ class PathWindow(ToolWindow):
         """A point ("pt", i: 0 = B) or a stretch's middle point ("mid", i) put at (beat, key) on the piano roll
         (k = beats per key on screen now). A middle point on a straight path makes it a curve; a point moved takes
         the bends beside it along by half as much."""
+        self.take_typing()
         pt = self.from_box(beat, key)
         if pt is None:
             return
         what, i = which
         pts, mids = self.lists()
         if what == "mid":
-            mids[i] = pt
-            if self.cfg["kind"] == "straight":
+            if self.cfg["kind"] == "straight":  # (bends hidden by Straight stay straight: only this one bends)
                 self.cfg["kind"] = "curve"
+                mids = [None] * len(mids)
+            mids[i] = pt
         else:
             dx, dy = pt[0] - pts[i][0], pt[1] - pts[i][1]
             for s in (i, i + 1):  # (the bends kept as they were)
@@ -373,9 +422,7 @@ class PathWindow(ToolWindow):
     # ---- settings
 
     def put_choice(self, key, value):
-        if key == "kind" and value == "straight":
-            self.cfg["mids"] = None
-        self.put(key, value)
+        self.put(key, value)  # (Straight keeps the bends, hidden: Curve / Arc bring them back; user)
 
     def put_length(self, snap):
         self.cfg["mode"] = "every"
@@ -512,8 +559,31 @@ class PathWindow(ToolWindow):
         self.app.roll.request_redraw()
 
     def preview(self, now=True):
-        super().preview(now)
+        if self.big_ok(now):
+            super().preview(now)
         self.app.roll.request_redraw()
+
+    def big_ok(self, now):
+        """Past big_ask.BIG notes (more than the shapes had so far): asked first, as other actions do (hunt).
+        While a point follows the mouse / is dragged (not now) the notes wait for the click / let go. No = the change
+        is put back."""
+        cl, fr = clean_path(self.cfg), self.frame()
+        if not cl or fr is None:
+            self.est = 0
+            return True
+        n = len(shifts(cl, self.app.ppq, fr[1])) * sum(len(self.before_notes(i)) for i in self.targets) * max(
+            1.0, max(cl["size"]) / 100)
+        if n <= big_ask.BIG or n <= self.est:
+            self.est = n
+            return True
+        if not now:
+            return False
+        if big_ask.ask(self.app, "notes", int(n), parent=self):
+            self.est = n
+            return True
+        self.loose = self.adding = False
+        self.put_state(self.undo.states[self.undo.at])
+        return False
 
     def close(self):
         super().close()
