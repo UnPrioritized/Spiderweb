@@ -1,0 +1,7 @@
+31-EDO splits the octave into 31 equal steps instead of 12. Spiderweb can show and play it when Keys (under Project) is set to 256: then two ticks show next to Keys.
+
+31-EDO: the piano roll shows 31 keys an octave (key 0 = C0). White rows are the 7 plain notes, dark rows sharps and flats, light rows half sharps (^) and half flats (v). Zoomed in, every row is named.
+
+Audio (only while 31-EDO is ticked): playback and listening with the right mouse button play the notes in 31-EDO, every key up to 255. It works only with Built-in BASSMIDI as the MIDI out; with another one the tick turns orange and playback plays the usual way (keys above 127 skipped).
+
+Only the look and the sound here change: the saved MIDI and Copy to Domino keep the same key numbers, so play it in a player set up for 31-EDO. Both ticks are saved with the project.

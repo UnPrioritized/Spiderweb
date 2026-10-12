@@ -967,6 +967,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
     def edo_ticked(self):
         self.sync_edo()
         self.schedule_autosave()
+        if self.edo31.get():
+            self.tips.show("edo31", wait=True)  # (the first time: what the ticks do)
 
     def sync_edo(self):
         """The 31-EDO ticks: shown with 256 keys only, Audio greyed until 31-EDO is ticked."""

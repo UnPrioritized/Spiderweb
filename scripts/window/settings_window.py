@@ -122,6 +122,7 @@ def open_settings(app, tab=None):
         w.focus_set()
     else:
         w = app.settings_window = SettingsWindow(app)
+        app.tips.show("settings", parent=w, wait=True)  # (the first time: what's in it)
     if tab in w.pages:
         w.tabs.select(w.pages[tab])
     return w

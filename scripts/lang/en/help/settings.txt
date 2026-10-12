@@ -1,0 +1,17 @@
+The ⚙ button at the top right of the toolbar opens Settings: how Spiderweb itself looks and sounds. These settings are kept for every project (in settings.ini in the user folder), not saved with a project, and Ctrl+Z doesn't take them back.
+
+Look tab:
+
+• Look: Light, Dark, or Follow Windows. Restart Spiderweb to see the new look.
+
+• Note colours: the colours of the notes on the piano roll, one per MIDI channel (the numbers under them). Default is built in and never changes; New… makes your own palette from the one in use, and Rename… / Delete work on yours. Click a colour to change it (changing Default makes a copy first). Random picks soft colours, Gradient… blends from a first to a last colour. Switching palettes shows at once.
+
+• Size, Font and Text size: how big everything is, the font, and the text a little smaller or larger. Buttons: how buttons and boxes are drawn (System's own, Plain, Raised, Outlined, Flat), and Edges how thick their edges are. The Preview beside them shows a pick at once; the rest of Spiderweb changes after a restart. Reset to default puts them back.
+
+• Shape lines: how thick shapes' lines are on the piano roll. This one shows at once.
+
+Sound tab: the MIDI out used for playback, and with Built-in BASSMIDI its soundfont, voice limit, lowering it by itself when it can't keep up, and Use OmniMIDI Limiter. The Sound settings… button under MIDI out opens this tab.
+
+General tab: how often to look for a new version (and Check now), tips on or off, and Show all tips again.
+
+Language tab: the language of every text, shown after a restart. Start a translation saves a copy of the English texts to fill in.
