@@ -1197,7 +1197,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
 
     def add_shape(self, sh, name=None):
         if self.mask.get() and not is_mask(sh) and can_mask(sh):  # (drawn with the Mask tick on: a mask, mask.py)
-            sh["mask"] = dict(self.mask_defaults)
+            sh["mask"] = self.new_mask()
         self.push_undo(name=name or tr("app.draw", shape_label=self.shape_label(sh)))
         self.shapes.append(sh)
         self.select(len(self.shapes) - 1)

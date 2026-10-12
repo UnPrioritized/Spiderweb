@@ -4,26 +4,31 @@ A mask is a PREVIEW only: the shapes under it stay whole and keep sounding; the 
 the mask as faint ghost notes. Every shape a mask touches is covered (not other masks: a mask is never masked).
 Its area, on each key row, comes from its own notes:
   Fill / Spam custom shapes   the whole inside (the rows its Fill notes cover)
-  anything else               a band round its notes, `keys` up / down and `beats` sideways (a round brush)
+  other closed shapes         "inside" (default): between its own notes, inside its outline (as the cookie cutter:
+                              the pattern never overlaps them), plus the band below when the thickness isn't 0
+  "line" / open lines         a band round its notes
+The band is a round brush `size` keys across, measured in the shape's own proportions (`k` beats per key, the screen's
+when it became a mask), so a circle gets an even ring whatever the zoom later (user).
 Invert = the other way round: the pattern shows everywhere but there (a hole). A note across the edge is trimmed; a
 part shorter than mould.SHORT of its note is left out (user: no slivers, the preview = what Apply mask makes).
-sh["mask"] = {"keys": int, "beats": float, "lock": beats per key (False = not locked), "invert": bool,
-"own": bool (its own notes sound, a border; False = silent, only its line shows)}."""
+sh["mask"] = {"size": keys, "k": beats per key, "invert": bool, "own": bool (its own notes sound, a border; False =
+silent, only its line shows), "show": "inside" / "line" (missing = inside for closed shapes)}."""
 
 import math
 
 import numpy as np
 
-from notes.mould import SHORT
+from notes.mould import SHORT, mould_rows
 
-MASK_DEFAULTS = {"keys": 2, "beats": 0.125, "lock": 0.0625, "invert": False, "own": True}
-MOST_KEYS, MOST_BEATS = 127, 64.0  # the thickness boxes' largest values
+MASK_DEFAULTS = {"size": 2.0, "k": 0.0625, "invert": False, "own": True}
+MOST_SIZE = 127.0  # the thickness box's largest value (keys)
 SOLID = ("fill", "spam")  # custom shapes with these insides mask with the whole inside
+SHOWS = ("inside", "line")
 OFF = 1 << 40  # ticks are kept as row * ROW + tick + OFF: one sorted list for every key row
 ROW = 1 << 42
 
 
-THICKNESS = ("keys", "beats", "lock")  # (what a new mask takes from the last one set: never Invert / own, user)
+THICKNESS = ("size",)  # (what a new mask takes from the last one set: never Invert / own, user)
 
 
 def is_mask(sh):
@@ -50,17 +55,32 @@ def clean_mask(m):
     if not isinstance(m, dict):
         return None
     try:
-        keys = int(min(MOST_KEYS, max(0, int(m.get("keys", MASK_DEFAULTS["keys"])))))
-        beats = float(min(MOST_BEATS, max(0.0, float(m.get("beats", MASK_DEFAULTS["beats"])))))
-        lock = m.get("lock", False)
-        lock = float(lock) if lock is not False and lock is not None and math.isfinite(float(lock)) and float(lock) > 0 \
-            else False
+        if "size" not in m and "keys" in m:  # (the first try's keys + beats sideways: kept as the same reach)
+            keys, beats = float(m["keys"]), float(m.get("beats", 0))
+            m = dict(m, size=keys, k=beats / keys if keys > 0 and beats > 0 else MASK_DEFAULTS["k"])
+        size = float(m.get("size", MASK_DEFAULTS["size"]))
+        k = float(m.get("k", MASK_DEFAULTS["k"]))
     except (TypeError, ValueError, OverflowError):
         return None
-    if not math.isfinite(beats):
+    if not (math.isfinite(size) and math.isfinite(k)):
         return None
-    return {"keys": keys, "beats": beats, "lock": lock, "invert": m.get("invert") is True,
-            "own": m.get("own") is not False}
+    out = {"size": min(MOST_SIZE, max(0.0, size)), "k": min(1e4, max(1e-6, k)), "invert": m.get("invert") is True,
+           "own": m.get("own") is not False}
+    if m.get("show") in SHOWS:
+        out["show"] = m["show"]
+    return out
+
+
+def loops_of(sh):
+    """A closed shape's outline loops (beat, key arrays), [] for an open line (slice.cutter_loops)."""
+    from notes.slice import cutter_loops
+    return cutter_loops(sh)
+
+
+def shows_inside(sh):
+    """Does this (non Fill / Spam) mask show its inside: a closed shape not set to "line"?"""
+    show = sh["mask"].get("show")
+    return show != "line" and bool(loops_of(sh))
 
 
 def area_source(sh):
@@ -87,26 +107,33 @@ def merged(starts, ends):
     return a[first], reach[last]
 
 
-def area(notes, keys, ticks, nkeys, solid):
-    """The mask's area made from its notes (start, end, key in ticks): (starts, ends) of the coded spans."""
+def area(notes, size, tpk, nkeys, band=True, gaps=()):
+    """The mask's area made from its notes (start, end, key in ticks): (starts, ends) of the coded spans. band: its
+    notes widened by a round brush `size` keys across (radius size / 2; tpk = ticks per key sideways); gaps =
+    [[key, from tick, to tick]] added as they are (a closed shape's inside)."""
     notes = np.asarray(notes, np.int64)
-    if not len(notes):
+    parts_a, parts_b = [], []
+    if len(gaps):
+        g = np.asarray(gaps, np.int64)
+        ok = (g[:, 0] >= 0) & (g[:, 0] < nkeys)
+        parts_a.append(g[ok, 0] * ROW + g[ok, 1] + OFF)
+        parts_b.append(g[ok, 0] * ROW + g[ok, 2] + OFF)
+    if band and len(notes):
+        # each key row's notes joined into runs first (a big pasted mask: far fewer spans to widen, the same area)
+        a, b = merged(notes[:, 2] * ROW + notes[:, 0] + OFF, notes[:, 2] * ROW + notes[:, 1] + OFF)
+        k = (a - OFF) // ROW
+        s, e = a - OFF - k * ROW, b - OFF - k * ROW
+        r = size / 2
+        for dk in range(-int(math.floor(r + 1e-9)), int(math.floor(r + 1e-9)) + 1):
+            # a round brush in the shape's own proportions: rows further off reach less far sideways
+            reach = int(round(tpk * math.sqrt(max(0.0, r * r - dk * dk))))
+            row = k + dk
+            ok = (row >= 0) & (row < nkeys)
+            parts_a.append(row[ok] * ROW + s[ok] - reach + OFF)
+            parts_b.append(row[ok] * ROW + e[ok] + reach + OFF)
+    if not parts_a:
         z = np.zeros(0, np.int64)
         return z, z
-    # each key row's notes joined into runs first (a big pasted mask: far fewer spans to widen, the same area)
-    a, b = merged(notes[:, 2] * ROW + notes[:, 0] + OFF, notes[:, 2] * ROW + notes[:, 1] + OFF)
-    k = (a - OFF) // ROW
-    s, e = a - OFF - k * ROW, b - OFF - k * ROW
-    if solid:
-        keys, ticks = 0, 0
-    parts_a, parts_b = [], []
-    for dk in range(-keys, keys + 1):
-        # a round brush: rows further from the note reach less far sideways
-        reach = int(round(ticks * math.sqrt(max(0.0, 1 - (dk / (keys + 0.5)) ** 2))))
-        row = k + dk
-        ok = (row >= 0) & (row < nkeys)
-        parts_a.append(row[ok] * ROW + s[ok] - reach + OFF)
-        parts_b.append(row[ok] * ROW + e[ok] + reach + OFF)
     return merged(np.concatenate(parts_a), np.concatenate(parts_b))
 
 
@@ -151,7 +178,17 @@ def mask_area(sh, ppq, nkeys, notes_of):
     if got is None:
         if len(_areas) > 16:  # (a few: a big mask's area is many MB)
             _areas.pop(next(iter(_areas)))
-        got = _areas[key] = area(notes_of(src), m["keys"], int(round(m["beats"] * ppq)), nkeys, is_solid(sh))
+        notes = notes_of(src)
+        tpk = m["k"] * ppq
+        if is_solid(sh):  # (its Fill notes are the inside)
+            got = area(notes, 0, 0, nkeys)
+        elif shows_inside(sh):  # (between its notes, inside its outline; widened outwards by the thickness)
+            gaps = [[k, round(b0 * ppq), round(b1 * ppq)] for k, b0, b1 in
+                    mould_rows(np.asarray(notes)[:, :3], loops_of(sh), ppq)] if len(notes) else []
+            got = area(notes, m["size"], tpk, nkeys, band=m["size"] > 0, gaps=gaps)
+        else:
+            got = area(notes, m["size"], tpk, nkeys)
+        _areas[key] = got
     return got
 
 
