@@ -16,6 +16,7 @@ from notes.between import copied as between_copied, group_of, keep_pushes, push_
 from notes.custom import box_frame, fill_plan, fill_test
 from notes.engine import cached_arrays, make_shape
 from notes.joined import all_tumours
+from notes.mask import is_mask
 from notes.paths import KEYS
 from notes.funnel import funnel_contains, funnel_handles, funnel_origins
 from notes.fx import copied as fx_copied, with_turn as fx_turned
@@ -543,7 +544,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         mark = self.above_mark_at(x, y)
         if mark is not None:
             return mark
-        for among in ([sels] if sels else []) + [None]:
+        # masks first (user: they lie over the shapes they cover, which took every click): line / inside, own notes
+        masks = [i for i in range(len(self.app.shapes) - 1, -1, -1) if is_mask(self.app.shapes[i])]
+        masks = [i for i in sels if i in masks] + [i for i in masks if i not in sels]
+        for among in ([masks] if masks else []) + ([sels] if sels else []) + [None]:
             i = self.hit_shape(x, y, among)
             if i is None:
                 i = self.note_owner(x, y, among)

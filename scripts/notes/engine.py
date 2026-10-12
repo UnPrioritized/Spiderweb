@@ -238,6 +238,8 @@ def clean_shape(sh):
                 out["flip_colours"] = True
             if isinstance(sh.get("paste"), str):  # pieces sliced from one paste: its tracks share channels (render)
                 out["paste"] = sh["paste"]
+            if sh.get("own_slots") is True:  # (Apply mask in Multi channel: track = the channel slot it had, kept)
+                out["own_slots"] = True
             pic = clean_picture(sh.get("picture"))
             if pic:  # a picture made into notes (picture.py): the notes are its finished colours, track = slot
                 out["picture"] = pic

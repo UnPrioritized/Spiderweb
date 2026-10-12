@@ -9,7 +9,8 @@ Its area, on each key row, comes from its own notes:
   "line" / open lines         a band round its notes
 The band is a round brush `size` keys across, measured in the shape's own proportions (`k` beats per key, the screen's
 when it became a mask), so a circle gets an even ring whatever the zoom later (user).
-Invert = the other way round: the pattern shows everywhere but there (a hole). A note across the edge is cut exactly
+Invert = the other way round: the pattern shows everywhere but there (a hole). While its own notes sound (a border),
+the pattern never overlaps them (user), inverted or not. A note across the edge is cut exactly
 there and every piece kept, however short (user: dropping short pieces made long notes vanish while short ones showed).
 sh["mask"] = {"size": keys, "k": beats per key, "invert": bool, "own": bool (its own notes sound, a border; False =
 silent, only its line shows), "show": "inside" / "line" (missing = inside for closed shapes)}."""
@@ -107,6 +108,22 @@ def merged(starts, ends):
     return a[first], reach[last]
 
 
+def minus(a, b, c, d):
+    """Spans (a, b) without the spans (c, d) (both merged): (starts, ends)."""
+    if not len(c) or not len(a):
+        return a, b
+    pos = np.concatenate([a, b, c, d])
+    ones_a, ones_c = np.ones(len(a), np.int64), np.ones(len(c), np.int64)
+    ins = np.concatenate([ones_a, -ones_a, ones_c * 0, ones_c * 0])  # (inside the area: +1 at a start, -1 at an end)
+    out = np.concatenate([ones_a * 0, ones_a * 0, ones_c, -ones_c])  # (inside the spans taken out)
+    order = np.argsort(pos, kind="stable")
+    pos, ins, out = pos[order], np.cumsum(ins[order]), np.cumsum(out[order])
+    last = np.append(pos[1:] != pos[:-1], True)  # (the count after every change at one spot)
+    pos, ins, out = pos[last], ins[last], out[last]
+    keep = (ins[:-1] > 0) & (out[:-1] == 0)
+    return merged(pos[:-1][keep], pos[1:][keep])
+
+
 def area(notes, size, tpk, nkeys, band=True, gaps=()):
     """The mask's area made from its notes (start, end, key in ticks): (starts, ends) of the coded spans. band: its
     notes widened by a round brush `size` keys across (radius size / 2; tpk = ticks per key sideways); gaps =
@@ -169,7 +186,8 @@ _areas = {}
 
 
 def mask_area(sh, ppq, nkeys, notes_of):
-    """A mask shape's area (starts, ends), remembered. notes_of(shape) = its notes."""
+    """A mask shape's area (starts, ends) and its reach (the same before its own notes are taken out: which shapes
+    it covers), remembered. notes_of(shape) = its notes."""
     from notes.engine import shape_key
     m = sh["mask"]
     src = area_source(sh)
@@ -188,7 +206,13 @@ def mask_area(sh, ppq, nkeys, notes_of):
             got = area(notes, m["size"], tpk, nkeys, band=m["size"] > 0, gaps=gaps)
         else:
             got = area(notes, m["size"], tpk, nkeys)
-        _areas[key] = got
+        reach = got
+        if m["own"] and not is_solid(sh) and len(notes):
+            # its own notes sound (a border): the pattern never overlaps them (user), whatever the thickness / gate
+            own = area(notes, 0, 0, nkeys)
+            got = merged(np.concatenate([got[0], own[0]]), np.concatenate([got[1], own[1]])) if m["invert"] else \
+                minus(*got, *own)
+        got = _areas[key] = got + reach
     return got
 
 
@@ -201,21 +225,21 @@ def shown_by(notes, sh, ppq, nkeys, notes_of):
     """What one mask shows of notes (rendered rows, no masks' own): (the shapes it covers, the rows that show, start
     and end trimmed). Apply mask makes exactly these."""
     none = np.zeros(0, np.int64), notes[:0]
-    a, b = mask_area(sh, ppq, nkeys, notes_of)
-    if not len(a) or not len(notes):
+    a, b, ra, rb = mask_area(sh, ppq, nkeys, notes_of)
+    if not len(ra) or not len(notes):
         return none
-    # (only the notes near the area are looked at closely: millions of others cost one quick pass)
-    rows = (a - OFF) // ROW
-    lo_t, hi_t = int((a - OFF - rows * ROW).min()), int((b - OFF - rows * ROW).max())
+    # (only the notes near the reach are looked at closely: millions of others cost one quick pass)
+    rows = (ra - OFF) // ROW
+    lo_t, hi_t = int((ra - OFF - rows * ROW).min()), int((rb - OFF - rows * ROW).max())
     near = np.flatnonzero((notes[:, 2] >= rows.min()) & (notes[:, 2] <= rows.max()) & (notes[:, 1] > lo_t)
                           & (notes[:, 0] < hi_t))
-    hit, idx, ps, pe = kept_parts(notes[near], a, b, False)
+    hit = kept_parts(notes[near], ra, rb, False)[0]  # (the shapes it covers: by its reach, own notes in it)
     if not hit.any():
         return none
     mine = np.unique(notes[near[hit], 5])
     if sh["mask"]["invert"]:  # (every note of the shapes it touches: the ones away from the hole show whole)
         near = np.flatnonzero(np.isin(notes[:, 5], mine))
-        hit, idx, ps, pe = kept_parts(notes[near], a, b, True)
+    _, idx, ps, pe = kept_parts(notes[near], a, b, sh["mask"]["invert"])
     got = notes[near[idx]].copy()
     got[:, 0], got[:, 1] = ps, pe
     return mine, got

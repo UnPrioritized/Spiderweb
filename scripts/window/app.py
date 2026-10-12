@@ -133,7 +133,8 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks):
     use10 = next((sh["picture"]["set"].get("use10", False) for sh in shapes if "picture" in sh), False)
     # (with all16 nothing skips channel 10: the other shapes' slots needn't stay off the pictures' channel 10)
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
-                             ["picture" in sh for sh in shapes], use10 and not all16, between_turns(shapes),
+                             ["picture" in sh or "own_slots" in sh for sh in shapes], use10 and not all16,
+                             between_turns(shapes),
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
                              [is_sustained(sh) for sh in shapes],
                              [colours_back(sh) for sh in shapes])

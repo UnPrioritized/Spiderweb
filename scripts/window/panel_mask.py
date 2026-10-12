@@ -198,6 +198,8 @@ class MaskPanel:
             rows = np.column_stack([got[:, 0], got[:, 1] - got[:, 0], got[:, 2], got[:, 3], got[:, 4]])
             new = {**SHAPE_DEFAULTS, **self.defaults, **notes_shape(rows, self.ppq, tr("mask.applied"))}
             new.pop("cycle", None)  # (Colours for new shapes: not on it, the notes keep the colours they had)
+            if self.channel_mode.get() == "auto":  # (each note keeps its channel: overlapping the shapes under it
+                new["own_slots"] = True  # would give it other ones, user)
             made[i] = (clean_shape(new), len(got))
         if not made:
             self.status.config(text=tr("mask.apply_nothing"))
