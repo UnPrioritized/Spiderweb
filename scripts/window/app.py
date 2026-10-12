@@ -28,7 +28,7 @@ from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
                             turn_velocities, why_not as gate_why_not)
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
-from notes.mask import MASK_DEFAULTS, can_mask, is_mask, mask_view, silent
+from notes.mask import MASK_DEFAULTS, can_mask, is_mask, mask_view, picture_like, pinned_slots, silent
 from notes.merge import velocity_reversed as merge_vrev
 from notes.sustain import is_sustained
 from notes.pattern import moved_formulas
@@ -116,13 +116,15 @@ class Stopped(Exception):
     """Notes being made in the background (App.notes_rested) aren't wanted any more."""
 
 
-def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks):
+def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False):
     """Every shape's notes together, overlaps / channels worked out: (colours each shape asks for, channel 10 used
     (slot k = channel k, slot_track_channel), rendered, slot count). all16: the project's "Use channel 10" (every
-    shape may use it, not only pictures). Touches no Tk: also made in a background thread (App.notes_rested)."""
+    shape may use it, not only pictures). Touches no Tk: also made in a background thread (App.notes_rested).
+    quiet: every mask's own notes left out (what the masks show: App.pattern)."""
     got = [notes_tracks(sh) for sh in shapes]
     # (a mask whose own notes don't sound: none, mask.py)
-    got = [(n[:0], None if t is None else t[:0]) if silent(sh) else (n, t) for sh, (n, t) in zip(shapes, got)]
+    got = [(n[:0], None if t is None else t[:0]) if silent(sh) or quiet and is_mask(sh) else (n, t)
+           for sh, (n, t) in zip(shapes, got)]
     # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
     # merged into the last (pasted notes keep their tracks)
     # (a Hz bass layer's notes clashing with another's: another channel, not another colour asked for)
@@ -133,10 +135,9 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks):
     use10 = next((sh["picture"]["set"].get("use10", False) for sh in shapes if "picture" in sh), False)
     # (with all16 nothing skips channel 10: the other shapes' slots needn't stay off the pictures' channel 10)
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
-                             ["picture" in sh or "own_slots" in sh for sh in shapes], use10 and not all16,
-                             between_turns(shapes),
+                             [pinned_slots(sh, mode) for sh in shapes], use10 and not all16, between_turns(shapes),
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
-                             [is_sustained(sh) for sh in shapes],
+                             [is_sustained(sh) or sh.get("held") is True for sh in shapes],
                              [colours_back(sh) for sh in shapes])
     return wanted, use10 or all16, rendered, slots
 
@@ -218,6 +219,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
         self.synth = None  # the built-in synth (files/synth.py), started when the preview or Built-in BASSMIDI is first used
         self.rendered, self.slot_count = NO_NOTES, 0  # (start, end, pitch, velocity, slot, owner) rows
         self.drawn, self.mask_covered = NO_NOTES, set()  # the notes as painted with the masks (mask.mask_view)
+        self.pattern = NO_NOTES  # rendered without the masks' own notes: what masks show (= rendered but in Single)
         self.note_counts = []  # notes per shape in rendered
         self.notes_late = False  # the notes are behind the shapes (a drag going on: see shapes_changed)
         self.scrubbing = False  # a number box's label is being dragged (widgets.Scrub): slow notes wait too
@@ -1066,15 +1068,23 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
                 self._notes_time = time.perf_counter() - started
         wanted, self.picture_use10, self.rendered, self.slot_count = made
         started = time.perf_counter()
-        self.drawn, self.mask_covered = mask_view(self.rendered, self.shapes, self.ppq, self.keys, self.notes_of)
+        self.pattern = self.rendered
+        if self.channel_mode.get() == "single" and any(is_mask(sh) and not silent(sh) for sh in self.shapes):
+            # (Single channel: sounding masks' notes cut the pattern's where they start; what a mask shows / Apply
+            # makes = the pattern as it sounds without them, user)
+            self.pattern = all_notes(self.shapes, self.ppq, self.keys, "single", self.channel_split, self.all16(),
+                                     self.notes_tracks, quiet=True)[2]
+        self.drawn, self.mask_covered = mask_view(self.rendered, self.shapes, self.ppq, self.keys, self.notes_of,
+                                                  self.pattern)
         self._mask_time = time.perf_counter() - started
         if wanted != self.colours_wanted:
             self.colours_wanted = wanted
             self.after_idle(self.sync_custom)  # (the panel's warning)
         self.play_changed()
         # placed pictures: their notes are drawn in the picture's own colours (the first picture's: they share them)
-        self.picture_owners = np.array(["picture" in sh for sh in self.shapes], bool)
-        self.picture_pal = next((sh["picture"]["set"].get("pal") for sh in self.shapes if "picture" in sh), None)
+        self.picture_owners = np.array([picture_like(sh) for sh in self.shapes], bool)
+        self.picture_pal = next((sh["picture"]["set"].get("pal") for sh in self.shapes if "picture" in sh),
+                                next((sh["picture_notes"].get("pal") for sh in self.shapes if "picture_notes" in sh), None))
         counts = self.note_counts = np.bincount(self.rendered[:, 5], minlength=len(self.shapes)).tolist()
         chans = [1] * len(self.shapes)  # Multi channel: how many channels each shape spreads over
         if self.channel_mode.get() == "auto" and len(self.rendered):
@@ -1140,7 +1150,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
                 rendered, order = got[2], None
                 start = np.argsort(np.ascontiguousarray(rendered[:, 0]), kind="stable")
                 if fast:
-                    pics = np.array(["picture" in sh for sh in shapes], bool)
+                    pics = np.array([picture_like(sh) for sh in shapes], bool)
                     order = ((sels, pics.tobytes(), len(pics), bool(got[1])),
                              painting_order(fast, rendered, start, sels, pics, key[2], got[1]))
                 job["drawn"] = (start, order)
@@ -1668,9 +1678,14 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
         return tr("mask.label", label=label) if is_mask(sh) else label
 
     def plain_label(self, sh):
+        made = sh.get("made") if "notes" in sh else None  # (named by what it is: the same in every language)
+        if made == "mask":
+            return tr("mask.applied")
+        if made == "leftovers":
+            return tr("join_split.merge_leftovers")
         if ("picture" in sh or sh.get("merge") or  # (the picture's file name, user; "Merged notes")
-                "notes" in sh and sh.get("name") in (tr("join_split.merge_leftovers"),  # (plain notes, user)
-                                                     tr("mask.applied"))):
+                "notes" in sh and sh.get("name") in (tr("join_split.merge_leftovers"),  # (plain notes, user; made
+                                                     tr("mask.applied"))):  # before "made")
             return sh.get("name") or "?"
         if "notes" in sh:
             return tr("app.pasted_notes")

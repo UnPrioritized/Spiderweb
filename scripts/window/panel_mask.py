@@ -9,6 +9,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, clean_shape
+from notes.sustain import is_sustained
 from notes.mask import (MASK_DEFAULTS, MOST_SIZE, SHOWS, THICKNESS, can_mask, is_mask, is_solid, loops_of, shown_by,
                         unmasked)
 from window import look
@@ -189,18 +190,15 @@ class MaskPanel:
             return
         if self.notes_late:  # (notes still catching up with a drag: made now)
             self.shapes_changed(now=True)
-        notes = unmasked(self.rendered, self.shapes)
-        made = {}
+        notes = unmasked(self.pattern, self.shapes)  # (as they sound without the masks' own notes)
+        made, count = {}, 0
         for i in masks:
             got = shown_by(notes, self.shapes[i], self.ppq, self.keys, self.notes_of)[1]
             if not len(got):
                 continue
-            rows = np.column_stack([got[:, 0], got[:, 1] - got[:, 0], got[:, 2], got[:, 3], got[:, 4]])
-            new = {**SHAPE_DEFAULTS, **self.defaults, **notes_shape(rows, self.ppq, tr("mask.applied"))}
-            new.pop("cycle", None)  # (Colours for new shapes: not on it, the notes keep the colours they had)
-            if self.channel_mode.get() == "auto":  # (each note keeps its channel: overlapping the shapes under it
-                new["own_slots"] = True  # would give it other ones, user)
-            made[i] = (clean_shape(new), len(got))
+            count += len(got)
+            pics = np.array(["picture" in self.shapes[o] for o in got[:, 5].tolist()], bool)
+            made[i] = [sh for sh in (self.copied(got[pics], True), self.copied(got[~pics], False)) if sh]
         if not made:
             self.status.config(text=tr("mask.apply_nothing"))
             return
@@ -209,13 +207,39 @@ class MaskPanel:
         out, picked = [], []
         for i, sh in enumerate(self.shapes):
             if i in made:  # (before the mask: its dashed line and border notes stay on top)
-                picked.append(len(out))
-                out.append(made[i][0])
+                picked += range(len(out), len(out) + len(made[i]))
+                out += made[i]
             out.append(sh)
         self.shapes[:] = out
         self.select_many(picked, picked[0])
         self.shapes_changed()
-        self.status.config(text=tr("mask.apply_done", n=len(made), notes=sum(n for _, n in made.values())))
+        self.status.config(text=tr("mask.apply_done", n=len(picked), notes=count))
+
+    def copied(self, got, picture):
+        """Shown rows (rendered's columns) -> one "Masked notes" shape, or None. Each note keeps its colour: copied
+        from a picture = its channel slot for good, painted in the picture's colours; in Multi channel its slot while
+        it stays where it's made (on the shapes it came from, which would push it onto other channels), moved away =
+        channels like any shape; in Single channel the shape it came from (Multi channel later: one colour each).
+        Copied from a sustained shape: its overlaps kept (user: sounds as the preview)."""
+        if not len(got):
+            return None
+        multi = self.channel_mode.get() == "auto"
+        owners = got[:, 5]
+        track = got[:, 4] if picture or multi else np.unique(owners, return_inverse=True)[1].ravel()
+        rows = np.column_stack([got[:, 0], got[:, 1] - got[:, 0], got[:, 2], got[:, 3], track])
+        new = {**SHAPE_DEFAULTS, **self.defaults, **notes_shape(rows, self.ppq, tr("mask.applied")), "made": "mask"}
+        new.pop("cycle", None)  # (Colours for new shapes: not on it, the notes keep the colours they had)
+        new.pop("sustain", None)
+        if picture:
+            new["own_slots"] = True
+            first = self.shapes[int(owners[0])]
+            new["picture_notes"] = {"pal": first["picture"]["set"].get("pal")}
+        if any(is_sustained(self.shapes[o]) for o in np.unique(owners).tolist()):
+            new["held"] = True
+        sh = clean_shape(new)
+        if multi and not picture:
+            sh["own_slots"] = [float(v) for v in sh["pts"][0]]
+        return sh
 
     def mask_done(self):
         self.shapes_changed()

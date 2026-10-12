@@ -41,6 +41,24 @@ def can_mask(sh):
     return not sh.get("hz")
 
 
+def pinned_slots(sh, mode):
+    """Are sh's note tracks its channel slots (render's fixed)? A picture always; Apply mask's notes: copied from a
+    picture always (own_slots True), else only in Multi channel while it lies where it was made (own_slots = its
+    first point then: moved away = channels like any shape, user)."""
+    if "picture" in sh:
+        return True
+    o = sh.get("own_slots")
+    if o is True:
+        return True
+    return (isinstance(o, list) and mode == "auto" and abs(sh["pts"][0][0] - o[0]) < 1e-6
+            and abs(sh["pts"][0][1] - o[1]) < 1e-6)
+
+
+def picture_like(sh):
+    """Painted in the pictures' colours: a picture, or Apply mask's notes copied from one."""
+    return "picture" in sh or "picture_notes" in sh
+
+
 def is_solid(sh):
     """Does the mask show its whole inside (Fill / Spam), not a band round its notes?"""
     return sh["kind"] == "custom" and sh.get("fill") in SOLID and "notes" not in sh
@@ -245,15 +263,16 @@ def shown_by(notes, sh, ppq, nkeys, notes_of):
     return mine, got
 
 
-def mask_view(rendered, shapes, ppq, nkeys, notes_of):
+def mask_view(rendered, shapes, ppq, nkeys, notes_of, pattern=None):
     """The notes as the piano roll draws them with the masks: (rows, covered shapes). Rows of the shapes a mask
     covers come twice: all of them as ghosts (velocity -1, painted faint), then the parts that show over them
-    (start, end trimmed; every mask's own, they may overlap). No masks = rendered itself."""
+    (start, end trimmed; every mask's own, they may overlap), taken from pattern (rendered without the masks' own
+    notes; None = rendered). No masks = rendered itself."""
     masks = [i for i, sh in enumerate(shapes) if is_mask(sh)]
     if not masks or not len(rendered):
         return rendered, set()
     owner = rendered[:, 5]
-    notes = unmasked(rendered, shapes)
+    notes = unmasked(rendered if pattern is None else pattern, shapes)
     covered, parts = set(), []
     for i in masks:
         mine, got = shown_by(notes, shapes[i], ppq, nkeys, notes_of)

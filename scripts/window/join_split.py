@@ -239,15 +239,17 @@ class JoinSplit:
             self.status.config(text=tr("join_split.merge_no_meet"))
             return
 
-        def shape(rows, name):  # (track = each shape's own colours, merge.part_rows)
+        def shape(rows, name, made=None):  # (track = each shape's own colours, merge.part_rows)
             notes = np.column_stack([rows[:, 0], rows[:, 1] - rows[:, 0], rows[:, 2], rows[:, 3], rows[:, 4]])
             new = {**SHAPE_DEFAULTS, **self.defaults, **notes_shape(notes, self.ppq, name)}
             new.pop("cycle", None)  # (Colours for new shapes: not on it, its shapes keep their own colours)
+            if made:
+                new["made"] = made  # (its name in any language)
             return clean_shape(new)
 
         out, rest = got
-        new = [shape(out, tr("join_split.merged"))] + ([shape(rest, tr("join_split.merge_leftovers"))] if len(rest)
-                                                        else [])
+        new = [shape(out, tr("join_split.merged"))] + ([shape(rest, tr("join_split.merge_leftovers"), "leftovers")]
+                                                       if len(rest) else [])
         sus = [self.shapes[i].get("sustain") for i in pair]
         if sus[0] is not None and sus[0] == sus[1]:  # (both sustained alike: so are the merged notes, like Join)
             for sh in new:

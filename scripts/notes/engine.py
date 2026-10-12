@@ -238,8 +238,22 @@ def clean_shape(sh):
                 out["flip_colours"] = True
             if isinstance(sh.get("paste"), str):  # pieces sliced from one paste: its tracks share channels (render)
                 out["paste"] = sh["paste"]
-            if sh.get("own_slots") is True:  # (Apply mask in Multi channel: track = the channel slot it had, kept)
-                out["own_slots"] = True
+            # Apply mask's notes (mask.py): track = the channel slot it had (True: from a picture, always kept; [beat,
+            # key]: Multi channel, while its first point is there), painted in the picture's colours, overlaps kept
+            # (copied from a sustained shape), what it is (its name in any language)
+            o = sh.get("own_slots")
+            if o is True or (isinstance(o, list) and len(o) == 2 and all(
+                    isinstance(v, (int, float)) and math.isfinite(v) for v in o)):
+                out["own_slots"] = o if o is True else [float(v) for v in o]
+            pn = sh.get("picture_notes")
+            if isinstance(pn, dict):  # (the picture's colours, picture.clean_settings' "pal": a list of #rrggbb)
+                pal = pn.get("pal")
+                ok = isinstance(pal, list) and all(isinstance(h, str) for h in pal)
+                out["picture_notes"] = {"pal": list(pal) if ok else None}
+            if sh.get("held") is True:
+                out["held"] = True
+            if sh.get("made") in ("mask", "leftovers"):
+                out["made"] = sh["made"]
             pic = clean_picture(sh.get("picture"))
             if pic:  # a picture made into notes (picture.py): the notes are its finished colours, track = slot
                 out["picture"] = pic
