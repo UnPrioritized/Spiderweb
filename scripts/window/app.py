@@ -2399,7 +2399,11 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
         if self.in_settings(e.widget):
             return "break"  # (Settings has no undo; the shapes behind stay as they are)
         if not self.in_hz(e.widget):
-            return "break" if self.box_drawn() else self.redo() if redo else self.undo()
+            if self.box_drawn():
+                return "break"
+            if self.path_window and self.path_window.local_step(redo):  # (its points are dragged on the piano roll)
+                return "break"
+            return self.redo() if redo else self.undo()
         if hz.drag:  # the mouse held there: Ctrl+Z only puts back what's being dragged (no step), Ctrl+Y nothing
             return None if redo else hz.cancel_drag()
         held = hz.held_fx()  # (the same for an effect's points and the synth window's knobs)

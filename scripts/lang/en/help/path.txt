@@ -2,7 +2,7 @@ Select one or more shapes, then right-click one: Copy along a path…. The shape
 
 Click on the piano roll where the path ends: that's B. Until you click, the copies follow the mouse. Then drag B, or the round middle point, to bend the path. Going up, A is the shape's bottom-left corner and B the last copy's top-right corner; going down, the corners swap, so the copies always stay between the points.
 
-Add point puts another point after the last one: it follows the mouse until you click. Right-click a point to remove it. The boxes under the settings show the picked point as bar, beat, tick and key: type there to put it exactly. Shift while dragging = off the grid.
+Add point puts another point after the last one: it follows the mouse until you click. Right-click a point to remove it. The boxes under the settings show the picked point as bar, beat, tick and key: type there to put it exactly. Shift while dragging = off the grid. While the window is open, Ctrl+Z / Ctrl+Y on the piano roll take back or bring back its changes one at a time, like inside the window.
 
 Like the Claw machine, the path is a page kept with the shape: moving or reshaping the shape moves the path and every copy along with it. Several selected shapes travel together as one group. Opening it from the menu on a shape that has a path shows its last path; click + on top for another one, a tab to change one the shape has, or the small × beside a tab to take it off.
 

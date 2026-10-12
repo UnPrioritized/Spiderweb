@@ -562,6 +562,20 @@ class PathWindow(ToolWindow):
         self.preview(done)
         self.undo.mark(None if done else which)
 
+    def local_step(self, redo):
+        """Ctrl+Z / Ctrl+Y pressed on the piano roll while open (App.key_undo): the points are dragged there, so this
+        window's own steps go first (user); none left = False (the main window's undo). A point held is let go."""
+        roll = self.app.roll
+        if roll.drag and roll.drag[0] == "path":
+            roll.drag = None
+        u = self.undo
+        if u.get() != u.states[u.at]:
+            u.mark()
+        if not (u.at < len(u.states) - 1 if redo else u.at > 0):
+            return False
+        self.undo_key(1 if redo else -1)
+        return True
+
     # ---- settings
 
     def put_choice(self, key, value):
