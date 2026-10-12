@@ -58,6 +58,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.dup = None          # Ctrl+press in the kept boxes: {"click": shape under the mouse}; the copies are
         #                          made at the first move ("done" then)
         self.grabbed = None      # the shape a move drag was started on (None: all selected, the kept boxes moved)
+        self.cycle = None  # the one selected shape clicked again: let go without dragging = the next one under it
         self.room = None         # how far each shape being moved can go: {shape number: move_room}
         self.limit = None        # how far the shapes being edited may reach (limits)
         self.hz_held = None      # a Hz bass's tones as the drag of one of its stroke points started (drag_stroke)
@@ -538,16 +539,15 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
     def shape_at(self, x, y, prefer_selected=True):
         """The shape a click at x, y is for, or None. A selected shape under the mouse comes first (so a selected
-        shape can be dragged from where another one lies over it); then lines (drawn over every note), the one on
-        top first; then insides / notes, again the one on top (drawn later = on top)."""
+        shape can be dragged from where another one lies over it; a click there without dragging goes on to the next
+        one under it, shapes_at); then masks (user: they lie over the shapes they cover); then lines (drawn over
+        every note), the one on top first; then insides / notes, again the one on top (drawn later = on top)."""
         sels = sorted(self.app.sels, reverse=True) if prefer_selected else []
         mark = self.above_mark_at(x, y)
         if mark is not None:
             return mark
-        # masks first (user: they lie over the shapes they cover, which took every click): line / inside, own notes
-        masks = [i for i in range(len(self.app.shapes) - 1, -1, -1) if is_mask(self.app.shapes[i])]
-        masks = [i for i in sels if i in masks] + [i for i in masks if i not in sels]
-        for among in ([masks] if masks else []) + ([sels] if sels else []) + [None]:
+        masks = self.masks_top_first()
+        for among in ([sels] if sels else []) + ([masks] if masks else []) + [None]:
             i = self.hit_shape(x, y, among)
             if i is None:
                 i = self.note_owner(x, y, among)
@@ -556,6 +556,27 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if i is not None:
                 return i
         return None
+
+    def masks_top_first(self):
+        return [i for i in range(len(self.app.shapes) - 1, -1, -1) if is_mask(self.app.shapes[i])]
+
+    def shapes_at(self, x, y):
+        """Every shape under x, y in the order clicks go through them (user: a click on the selected one without
+        dragging picks the next): masks first (line, own notes, area), then the rest, lines first, top first."""
+        masks = self.masks_top_first()
+        out = [i for i in masks if self.hit_shape(x, y, [i]) is not None or self.note_owner(x, y, [i]) is not None
+               or self.mask_area_at(x, y, [i]) is not None]
+        rest = [i for i in range(len(self.app.shapes) - 1, -1, -1) if i not in masks]
+        lines = [i for i in rest if self.hit_shape(x, y, [i]) is not None]
+        owners = self.note_owners(x, y)
+        return out + lines + [i for i in rest if i not in lines and i in owners]
+
+    def next_at(self, x, y, i):
+        """The shape after i under x, y (shapes_at, round again to the first), or None when i is the only one."""
+        got = self.shapes_at(x, y)
+        if i not in got or len(got) < 2:
+            return None
+        return got[(got.index(i) + 1) % len(got)]
 
     def mask_area_at(self, x, y, masks):
         """The first of masks whose area (where the pattern shows, its own notes too; Invert: the hole) is at x, y."""
@@ -660,15 +681,27 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 return i
         return None
 
-    def note_owner(self, x, y, among=None):
-        """The shape whose note is under the mouse (a few pixels either side count for short notes), or None.
-        Only while the notes are shown. among: just these shapes."""
+    def notes_near(self, x, y):
+        """The notes under the mouse, a few pixels either side (short notes), and the tick there; None while the
+        notes aren't shown."""
         if not self.app.show_notes.get() or not len(self.app.rendered):
             return None
         ppq, near = self.app.ppq, 5 * self.scale
         t, t_lo, t_hi = (self.x2t(v) * ppq for v in (x, x - near, x + near))
         ns = self.visible_notes(t_lo, t_hi)
-        ns = ns[(ns[:, 2] == math.floor(self.y2p(y) + 0.5)) & (ns[:, 0] <= t_hi) & (ns[:, 1] >= t_lo)]
+        return ns[(ns[:, 2] == math.floor(self.y2p(y) + 0.5)) & (ns[:, 0] <= t_hi) & (ns[:, 1] >= t_lo)], t
+
+    def note_owners(self, x, y):
+        got = self.notes_near(x, y)
+        return set() if got is None else set(got[0][:, 5].tolist())
+
+    def note_owner(self, x, y, among=None):
+        """The shape whose note is under the mouse (a few pixels either side count for short notes), or None.
+        Only while the notes are shown. among: just these shapes."""
+        got = self.notes_near(x, y)
+        if got is None:
+            return None
+        ns, t = got
         if among is not None:
             ns = ns[np.isin(ns[:, 5], list(among))]
         if not len(ns):
@@ -685,7 +718,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.app.commit_typing()  # (a number typed in a panel box goes to the shapes picked now, before this click)
         self.focus_set()
         kept, self.box_kept, self.box_moving, self.dup = self.kept_box(), None, None, None
-        self.grabbed = None
+        self.grabbed = self.cycle = None
         self.box_in = False
         self.room = self.limit = self.hz_held = None
         if self.follow and self.sx is not None:  # a shape started with a click: this click finishes it
@@ -804,6 +837,11 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 self.drag = ("box", self.x2t(e.x), self.y2p(e.y), e.x, e.y, set(app.sels), app.sel)
                 self.box_shift0 = bool(e.state & SHIFT)
                 return
+            # the one selected shape clicked again (not on a line / stroke of its own being picked): let go without
+            # dragging = the next shape under the mouse (user: masks, their Masked notes and the pattern lie stacked)
+            hard = part and (part[0] != "stroke" or part[1] is not None)
+            self.cycle = (i if app.sels == {i} and not e.state & CTRL and not hard and len(app.shapes) > 1
+                          else None)
             if e.state & CTRL:  # Ctrl+click adds or removes a shape
                 app.select(i, toggle=True)
                 if i not in app.sels:
@@ -1089,6 +1127,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.app.set_playhead(self.event_pt(e)[0])
             if playing:
                 self.app.start_play(keep=True)
+        elif (kind == "move" and not self.drag[4] and not self.dup and self.cycle is not None
+              and self.next_at(e.x, e.y, self.cycle) is not None):  # (the selected one clicked: the next under it)
+            self.app.select(self.next_at(e.x, e.y, self.cycle))
         elif kind == "move" and not self.drag[4] and self.dup:  # Ctrl+click in the box: adds / takes out one
             if self.dup["click"] is not None:
                 self.app.select(self.dup["click"], toggle=True)
