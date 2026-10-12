@@ -220,7 +220,7 @@ class MaskPanel:
     def apply_masks(self):
         """Apply mask (panel button / right-click): each selected mask's shown notes -> a NEW shape of plain notes,
         "Masked notes", just under the mask in the list (user: the shapes under it unchanged, the mask stays to be
-        moved and applied again; its own notes never copied). The notes as the preview shows them, velocities and
+        moved and applied again; its own sounding notes copied too). The notes as the preview shows them, velocities and
         channels as they sound (track = the channel each came out on). A mask in a group = the whole group, once,
         before its first member (user). The new shapes are selected; one undo step."""
         self.commit_typing()
@@ -235,8 +235,11 @@ class MaskPanel:
         for unit in [u for u in units if set(u) & set(masks)]:
             i = unit[0]
             got = unit_shown(notes, self.shapes, unit, self.ppq, self.keys, self.notes_of)[1]
-            if not len(got):
+            if not len(got):  # (nothing shows through: no copy of the border alone)
                 continue
+            # its own sounding notes (the border, as its fill settings make them) come along: the copy = what you see
+            # (user, 2026-10-12, after trying; silent masks have none)
+            got = np.concatenate([got, self.rendered[np.isin(self.rendered[:, 5], unit)]])
             count += len(got)
             pics = np.array(["picture" in self.shapes[o] for o in got[:, 5].tolist()], bool)
             made[i] = [sh for sh in (self.copied(got[pics], True), self.copied(got[~pics], False)) if sh]

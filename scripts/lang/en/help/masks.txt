@@ -12,7 +12,7 @@ Own notes sound (a border): ticked, the mask's own notes sound like any shape's,
 
 Invert (cut a hole): the pattern shows everywhere except inside the mask, like a cookie cutter.
 
-Apply mask (side panel button or right-click): makes a new shape, Masked notes, of exactly the notes you see through the mask, colours and channels kept. The shapes under it don't change and the mask stays, so you can move it and apply it again, like a stamp. The mask's own notes aren't copied. The new shape is selected, so a drag moves it away.
+Apply mask (side panel button or right-click): makes a new shape, Masked notes, of exactly the notes you see through the mask, colours and channels kept. The shapes under it don't change and the mask stays, so you can move it and apply it again, like a stamp. While Own notes sound is ticked, the mask's border notes are copied too, exactly as they sound; a silent mask copies only what shows through it. The new shape is selected, so a drag moves it away.
 
 Combining masks: select two or more masks, right-click: Combine masks. They then work as one group, and their dashed lines get the group's own colour. Each mask in the group has a Mode in the side panel:
 
