@@ -48,15 +48,14 @@ def can_mask(sh):
 
 def pinned_slots(sh, mode):
     """Are sh's note tracks its channel slots (render's fixed)? A picture always; Apply mask's notes: copied from a
-    picture always (own_slots True), else only in Multi channel while it lies where it was made (own_slots = its
-    first point then: moved away = channels like any shape, user)."""
+    picture always (own_slots True), else in Multi channel, wherever it's moved (user, 2026-10-12: colours swapped
+    once moved; own_slots = its first point when made, no longer checked)."""
     if "picture" in sh:
         return True
     o = sh.get("own_slots")
     if o is True:
         return True
-    return (isinstance(o, list) and mode == "auto" and abs(sh["pts"][0][0] - o[0]) < 1e-6
-            and abs(sh["pts"][0][1] - o[1]) < 1e-6)
+    return isinstance(o, list) and mode == "auto"
 
 
 def picture_like(sh):
