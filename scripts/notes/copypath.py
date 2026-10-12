@@ -15,6 +15,9 @@ and flips work on the whole group. A page's settings (PATH_DEFAULTS' keys):
            screen): how the stretches whose middle point was dragged bend
   "mode"   "every": a copy each "every" beats (copies' starts lined up with where the shape starts), the last one at
            or before the end; "count": "count" copies in all, spread evenly along the path's length
+  "half"   "every" (Speed Even): where the next copy on the steps would cross a point, it's made anyway, cut off at
+           the point's time (user: "half made"; True to start). False: whole copies only, one ending right on each
+           point where the path turns
   "k"      beats per key on screen when the path was made (how long it is, and how round an arc is, as seen then)
   "speed"  "even" / "up" (bunched at A, further apart towards the end) / "down" (the other way)
   "size"   [first copy %, last copy %]: each copy grows / shrinks from its corner on the path (key rows sampled like
@@ -44,7 +47,7 @@ WAYS = ("keys", "time", "both")
 TOPS = ("last", "first")
 PATH_DEFAULTS = {"pts": None, "mids": None, "kind": "straight", "mode": "every", "every": 0.25, "count": 8,
                  "k": 0.25, "speed": "even", "size": [100.0, 100.0], "colours": "keep", "step": 1, "most": 15,
-                 "flip": "none", "way": "keys", "top": "last", "grp": [0.0, 0.0, 0.0, 0.0]}
+                 "flip": "none", "way": "keys", "top": "last", "half": True, "grp": [0.0, 0.0, 0.0, 0.0]}
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # the points' names
 MOST_POINTS = len(LETTERS) - 1  # B .. Z
 EVERY_LIMITS = (1e-6, 1024.0)  # beats
@@ -93,6 +96,8 @@ def clean_path(c):
     mids = list(mids) if isinstance(mids, (list, tuple)) else []
     out["pts"] = pts
     out["mids"] = [None if m is None else _pt(m) for m in (mids + [None] * len(pts))[:len(pts)]]
+    if isinstance(c.get("half"), bool):
+        out["half"] = c["half"]
     for key, choices in (("kind", KINDS), ("mode", MODES), ("speed", SPEEDS), ("colours", COLOURS), ("flip", FLIPS),
                          ("way", WAYS), ("top", TOPS)):
         if c.get(key) in choices:
@@ -320,14 +325,46 @@ def places(cfg, size):
         pos, n = _crossings(t, run, np.arange(top) * step)
         if cfg["speed"] != "even" and n > 1:
             pos = _crossings(t, run, eased(np.arange(n) / (n - 1), cfg["speed"]) * (n - 1) * step)[0]
-        ends = [float(hi) for _, hi in spans[:-1]] if len(pos) < MOST_COPIES else []  # (user: copies touch at a turn)
-        pos = np.array(sorted(set(pos) | set(ends)), float)[:MOST_COPIES]
+        if cfg["half"] and cfg["speed"] == "even":
+            half = _halves(p, t, moved, f, down, spans, step)
+        else:  # (whole copies only: one ends right on each point where the path turns; user)
+            half = []
+            pos = sorted(set(pos) | {float(hi) for _, hi in spans[:-1]})
+        pos = np.array(pos, float)[:MOST_COPIES]
     j = np.clip(np.floor(pos).astype(np.int64), 0, m - 2)
     u = (pos - j)[:, None]
-    moved = moved[j] + u * (moved[j + 1] - moved[j])
+    got = moved[j] + u * (moved[j + 1] - moved[j])
     corner = (f[j] + u * (f[j + 1] - f[j])) * wh
-    moved[0] = 0.0
-    return moved, corner, down[np.where(u[:, 0] >= 1, j + 1, j)]
+    falls = down[np.where(u[:, 0] >= 1, j + 1, j)]
+    cut = np.full((len(pos), 2), np.nan)
+    if cfg["mode"] == "every" and half:
+        at, mv, fr, dn, ct = zip(*half)
+        order = np.argsort(np.r_[pos, at], kind="stable")[:MOST_COPIES]
+        got = np.concatenate([got, np.array(mv)])[order]
+        corner = np.concatenate([corner, np.array(fr) * wh])[order]
+        falls = np.r_[falls, dn][order]
+        cut = np.concatenate([cut, np.array(ct)])[order]
+    got[0] = 0.0
+    return got, corner, falls, cut
+
+
+def _halves(p, t, moved, f, down, spans, step):
+    """One copy every: at each point (each run's end), the next copy on the steps would cross it: it's made anyway,
+    cut off at the point's time (user: "half made"). [(place to sort it in among the samples, how far it moves, its
+    corner as parts of the box, does the path go down there, (cut at beats from the group's start, 1: what's
+    before it stays / -1: what's after))]."""
+    out = []
+    for lo, hi in spans:
+        if hi - lo < 1 or t[hi] - t[hi - 1] <= 1e-12:  # (copies not moving on in time there)
+            continue
+        nxt = math.ceil(t[hi] / step - 1e-9) * step
+        if nxt - t[hi] <= 1e-9:  # (a whole copy ends right on the point)
+            continue
+        a = (nxt - t[hi]) / (t[hi] - t[hi - 1])  # (further on along the run's last bit, in samples)
+        keep = 1.0 if moved[hi][0] >= moved[hi - 1][0] else -1.0
+        out.append((hi + 0.5, moved[hi] + a * (moved[hi] - moved[hi - 1]), f[hi] + a * (f[hi] - f[hi - 1]),
+                    bool(down[hi]), (p[hi][0], keep)))
+    return out
 
 
 def box_size(box, ppq):
@@ -493,7 +530,7 @@ def apply_path(a, cfg, ppq, keys=256):
         return a
     box = group_box(a, cfg, ppq)
     size = box_size(box, ppq)
-    got, corner, down = places(cfg, size)
+    got, corner, down, cut = places(cfg, size)
     n = min(len(got), max(1, MOST_NOTES // len(a)))
     d = np.column_stack([np.round(got[:n, 0] * ppq), np.round(got[:n, 1])]).astype(np.int64)
     d[0] = 0
@@ -523,6 +560,14 @@ def apply_path(a, cfg, ppq, keys=256):
             x = x.copy()
         x[:, :2] += d[i, 0]
         x[:, 2] += d[i, 1]
+        if not np.isnan(cut[i, 0]):  # (a half copy: cut off at the point)
+            c = box[0] + round(cut[i, 0] * ppq)
+            if cut[i, 1] > 0:
+                x = x[x[:, 0] < c]
+                x[:, 1] = np.minimum(x[:, 1], c)
+            else:
+                x = x[x[:, 1] > c]
+                x[:, 0] = np.maximum(x[:, 0], c)
         if col is not None:
             x[:, col] = coloured(x[:, col], i, cfg, own)
         parts.append(x)

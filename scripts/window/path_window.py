@@ -30,6 +30,7 @@ class PathWindow(ToolWindow):
     KEY, ATTR, POS, DEFAULTS = "path", "path_window", "path_pos", PATH_DEFAULTS
     loose = False  # the last point follows the mouse on the piano roll until a click places it
     adding = False  # Add point pressed: the new point comes with the mouse's first move on the piano roll
+    idle = False  # another shape selected meanwhile: no new path until the menu / + asks for one (user)
     pick = 0  # the point the bar / beat / tick / key boxes show (0 = B)
 
     def __init__(self, app):
@@ -64,6 +65,11 @@ class PathWindow(ToolWindow):
         count.grid(row=1, column=0, sticky="w", pady=(4, 0))
         Tooltip(count, tr("path.tip_count"))
         self.number(sp, 1, 1, "count", tr("path.tip_count"), (1, 10, 1))
+        self.half = tk.BooleanVar(value=True)
+        self.half_tick = ttk.Checkbutton(sp, text=tr("path.half"), variable=self.half,
+                                         command=lambda: self.put("half", self.half.get()))
+        self.half_tick.grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        Tooltip(self.half_tick, tr("path.tip_half"))
         self.choice(box, 3, "speed", tr("path.speed"))
 
         self.label(box, 4, tr("path.size"))
@@ -200,7 +206,7 @@ class PathWindow(ToolWindow):
     def placing(self):
         """Is a point still to be clicked on the piano roll (B, or one added)? (Until then it follows the mouse
         there: follow.)"""
-        return bool(self.targets) and (not self.cfg.get("pts") or self.loose or self.adding)
+        return bool(self.targets) and not self.idle and (not self.cfg.get("pts") or self.loose or self.adding)
 
     def lists(self):
         """Copies of the points and the middle points (as many)."""
@@ -281,12 +287,28 @@ class PathWindow(ToolWindow):
         self.undo.mark()
 
     def calm(self):
-        self.loose = self.adding = False
+        self.loose = self.adding = self.idle = False
         self.pick = 0
 
+    @classmethod
+    def open(cls, app):
+        """From the right-click menu: a new path for the selected shapes (the window opened, or brought up)."""
+        super().open(app)
+        w = getattr(app, cls.ATTR)
+        if w and (w.at is not None or w.idle):
+            w.new_page()
+
     def retarget(self):
+        """Another selection (user: no new path unless asked for in the menu / with +): its last path shows, or
+        nothing waits for a click."""
         self.calm()
         super().retarget()
+        last = [k for k, st in enumerate(self.first_fx()) if st["tool"] == self.KEY]
+        if last and self.same():
+            self.pick_page(last[-1])
+        else:
+            self.idle = bool(self.targets)
+            self.show()
 
     def pick_page(self, k):
         self.calm()
@@ -434,6 +456,9 @@ class PathWindow(ToolWindow):
         put_text("size0", fmt(round(c["size"][0], 6)))
         put_text("size1", fmt(round(c["size"][1], 6)))
         put_text("step", str(c["step"]))
+        if self.half.get() != c["half"]:
+            self.half.set(c["half"])
+        config(self.half_tick, state="normal" if c["mode"] == "every" and c["speed"] == "even" else "disabled")
         config(self.entries["step"], state="normal" if c["colours"] != "keep" else "disabled")
         config(self.combos["way"], state="readonly" if c["flip"] == "each" else "disabled")
         n = len(c.get("pts") or [])
@@ -455,6 +480,8 @@ class PathWindow(ToolWindow):
         fr = self.frame()
         if not self.targets or fr is None:
             info = ""
+        elif self.idle:
+            info = tr("path.idle")
         elif adding:
             info = tr("path.click_point", name=LETTERS[n + 1 if self.adding else n])
         elif self.placing():
