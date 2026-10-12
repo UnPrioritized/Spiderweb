@@ -471,7 +471,7 @@ class PathWindow(ToolWindow):
         put_text("step", str(c["step"]))
         if self.half.get() != c["half"]:
             self.half.set(c["half"])
-        config(self.half_tick, state="normal" if c["mode"] == "every" and c["speed"] == "even" else "disabled")
+        config(self.half_tick, state="normal" if c["speed"] == "even" else "disabled")
         config(self.entries["step"], state="normal" if c["colours"] != "keep" else "disabled")
         config(self.combos["way"], state="readonly" if c["flip"] == "each" else "disabled")
         n = len(c.get("pts") or [])

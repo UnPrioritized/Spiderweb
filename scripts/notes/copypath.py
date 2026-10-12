@@ -273,13 +273,32 @@ def _counted(along, spans, count, speed):
     n[np.argsort(n - share)[:count - 2 * len(spans) - n.sum()]] += 1  # (largest remainders)
     pos = []
     for (lo, hi), (a, b), k in zip(spans, v, n + 2):
-        at = eased(np.linspace(a, b, k), speed) * total
-        seg = along[lo:hi + 1]
-        j = np.clip(np.searchsorted(seg, at, "right") - 1, 0, max(0, hi - lo - 1))
-        gap = seg[np.minimum(j + 1, hi - lo)] - seg[j]
-        f = np.clip(np.where(gap > 0, (at - seg[j]) / np.where(gap > 0, gap, 1.0), 0.0), 0.0, 1.0)
-        pos.extend((lo + j + f).tolist())
+        pos.extend(_along_pos(along, lo, hi, eased(np.linspace(a, b, k), speed) * total))
     return np.array(pos)
+
+
+def _spaced(along, spans, count):
+    """Number of copies with Half copies at the points: the same spacing all the way (the path's length / (count -
+    1)), started again at each run's start (the copies jump there where the path turns): (places along the samples,
+    for each run the next place past its end, in the same length units)."""
+    step = along[-1] / max(1, count - 1)
+    pos, nexts = [], []
+    for lo, hi in spans:
+        room = along[hi] - along[lo]
+        k = int(room / step + 1e-9) if step > 0 else 0
+        pos.extend(_along_pos(along, lo, hi, along[lo] + np.arange(min(k + 1, MOST_COPIES)) * step))
+        whole = step <= 0 or room - k * step <= 1e-9 * max(1.0, room)  # (the last copy right on the point)
+        nexts.append(None if whole else along[lo] + (k + 1) * step)
+    return pos[:MOST_COPIES], nexts
+
+
+def _along_pos(along, lo, hi, at):
+    """Lengths along the path (in run lo..hi's) -> places along the samples."""
+    seg = along[lo:hi + 1]
+    j = np.clip(np.searchsorted(seg, at, "right") - 1, 0, max(0, hi - lo - 1))
+    gap = seg[np.minimum(j + 1, hi - lo)] - seg[j]
+    f = np.clip(np.where(gap > 0, (at - seg[j]) / np.where(gap > 0, gap, 1.0), 0.0), 0.0, 1.0)
+    return (lo + j + f).tolist()
 
 
 def _crossings(t, run, targets):
@@ -315,7 +334,12 @@ def places(cfg, size):
     if cfg["mode"] == "count":
         screen = p / [cfg["k"], 1.0]
         along = np.r_[0.0, np.cumsum(np.hypot(*np.diff(screen, axis=0).T))]
-        pos = _counted(along, spans, cfg["count"], cfg["speed"])
+        if cfg["half"] and cfg["speed"] == "even":  # (user: evenly spaced still, more copies than asked for)
+            pos, nexts = _spaced(along, spans, cfg["count"])
+            half = _halves(p, along, moved, f, down, spans, nexts)
+        else:
+            pos, half = _counted(along, spans, cfg["count"], cfg["speed"]), []
+        pos = np.array(pos, float)
     else:
         s = moved[:, 0]
         way = 1.0 if s[-1] >= s[0] else -1.0
@@ -326,7 +350,7 @@ def places(cfg, size):
         if cfg["speed"] != "even" and n > 1:
             pos = _crossings(t, run, eased(np.arange(n) / (n - 1), cfg["speed"]) * (n - 1) * step)[0]
         if cfg["half"] and cfg["speed"] == "even":
-            half = _halves(p, t, moved, f, down, spans, step)
+            half = _halves(p, t, moved, f, down, spans, [math.ceil(t[hi] / step - 1e-9) * step for _, hi in spans])
         else:  # (whole copies only: one ends right on each point where the path turns; user)
             half = []
             pos = sorted(set(pos) | {float(hi) for _, hi in spans[:-1]})
@@ -337,7 +361,7 @@ def places(cfg, size):
     corner = (f[j] + u * (f[j + 1] - f[j])) * wh
     falls = down[np.where(u[:, 0] >= 1, j + 1, j)]
     cut = np.full((len(pos), 2), np.nan)
-    if cfg["mode"] == "every" and half:
+    if half:
         at, mv, fr, dn, ct = zip(*half)
         order = np.argsort(np.r_[pos, at], kind="stable")[:MOST_COPIES]
         got = np.concatenate([got, np.array(mv)])[order]
@@ -348,16 +372,16 @@ def places(cfg, size):
     return got, corner, falls, cut
 
 
-def _halves(p, t, moved, f, down, spans, step):
-    """One copy every: at each point (each run's end), the next copy on the steps would cross it: it's made anyway,
+def _halves(p, t, moved, f, down, spans, nexts):
+    """Half copies at the points: at each point (each run's end), the next copy on the steps (nexts: per run, where
+    it would be in t's units: time for One copy every, length for Number of copies) would cross it: it's made anyway,
     cut off at the point's time (user: "half made"). [(place to sort it in among the samples, how far it moves, its
     corner as parts of the box, does the path go down there, (cut at beats from the group's start, 1: what's
     before it stays / -1: what's after))]."""
     out = []
-    for lo, hi in spans:
-        if hi - lo < 1 or t[hi] - t[hi - 1] <= 1e-12:  # (copies not moving on in time there)
+    for (lo, hi), nxt in zip(spans, nexts):
+        if nxt is None or hi - lo < 1 or t[hi] - t[hi - 1] <= 1e-12:  # (copies not moving on there)
             continue
-        nxt = math.ceil(t[hi] / step - 1e-9) * step
         if nxt - t[hi] <= 1e-9:  # (a whole copy ends right on the point)
             continue
         a = (nxt - t[hi]) / (t[hi] - t[hi - 1])  # (further on along the run's last bit, in samples)
