@@ -65,7 +65,7 @@
  "join_split.slice_partly_too": ". {n} custom shape(s) weren't crossed all the way, so they stay whole",
  "mask.tick": "Mask (M)",
  "mask.tick_tip": "While ticked, whatever you draw becomes a mask: a preview that shows the shapes under it only inside it (the rest faint). Nothing is cut: the shapes under it stay whole and still sound. Works with Live shape too (paint with the mask).",
- "mask.preview": "Preview",
+ "mask.preview": "Mask Preview",
  "mask.preview_tip": "Ticked: masks preview their cut, the parts of the shapes under them outside the mask drawn faint. Unticked: the shapes under masks are drawn whole, only the masks' dashed lines show. Nothing changes in the sound or the file either way, and Apply mask works the same.",
  "mask.label":"Mask: {label}",
  "mask.panel_tick": "Mask",
