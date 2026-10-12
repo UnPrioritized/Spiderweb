@@ -216,7 +216,8 @@ def apply(colours, app=None):
     from window import velocity
     roll_shared.SLOT_COLORS[:] = clean(colours)
     roll_draw.NOTE_COLORS[:] = [(roll_shared.fade(f, 1 - level * 4 / 124), b) for f, b in roll_shared.SLOT_COLORS
-                                + [roll_shared.SELECTED_COLOR, roll_shared.DRAFT_COLOR] for level in range(32)]
+                                + [roll_shared.SELECTED_COLOR, roll_shared.DRAFT_COLOR, roll_shared.GHOST_COLOR]
+                                for level in range(32)]
     roll_draw.NOTE_RGB = roll_draw.np.array([[[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in pair]
                                              for pair in roll_draw.NOTE_COLORS], roll_draw.np.uint8)
     roll_draw._tables.clear()

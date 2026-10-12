@@ -28,6 +28,7 @@ from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
                             turn_velocities, why_not as gate_why_not)
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
+from notes.mask import MASK_DEFAULTS, is_mask, mask_view, silent
 from notes.merge import velocity_reversed as merge_vrev
 from notes.sustain import is_sustained
 from notes.pattern import moved_formulas
@@ -38,6 +39,7 @@ from notes.smooth import SMOOTH_DEFAULT
 from notes.text import TEXT_DEFAULTS
 from files.mathexpr import calc, calc_int, fmt
 from window.panel_colours import ColoursPanel
+from window.panel_mask import MaskPanel
 from window.panel_custom import GAP_COLOR, CustomPanel
 from window.panel_freehand import FreehandPanel
 from window.panel_funnel import FunnelPanel
@@ -119,6 +121,8 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks):
     (slot k = channel k, slot_track_channel), rendered, slot count). all16: the project's "Use channel 10" (every
     shape may use it, not only pictures). Touches no Tk: also made in a background thread (App.notes_rested)."""
     got = [notes_tracks(sh) for sh in shapes]
+    # (a mask whose own notes don't sound: none, mask.py)
+    got = [(n[:0], None if t is None else t[:0]) if silent(sh) else (n, t) for sh, (n, t) in zip(shapes, got)]
     # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
     # merged into the last (pasted notes keep their tracks)
     # (a Hz bass layer's notes clashing with another's: another channel, not another colour asked for)
@@ -136,7 +140,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks):
     return wanted, use10 or all16, rendered, slots
 
 
-class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
+class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
           HistoryPanel, tk.Tk):
     def __init__(self, autosave=AUTOSAVE):
         super().__init__()
@@ -212,6 +216,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.hz_preview = clean_preview({})  # the Hz bass preview's settings (hz_preview.py; with the window's)
         self.synth = None  # the built-in synth (files/synth.py), started when the preview or Built-in BASSMIDI is first used
         self.rendered, self.slot_count = NO_NOTES, 0  # (start, end, pitch, velocity, slot, owner) rows
+        self.drawn, self.mask_covered = NO_NOTES, set()  # the notes as painted with the masks (mask.mask_view)
         self.note_counts = []  # notes per shape in rendered
         self.notes_late = False  # the notes are behind the shapes (a drag going on: see shapes_changed)
         self.scrubbing = False  # a number box's label is being dragged (widgets.Scrub): slow notes wait too
@@ -244,6 +249,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.updates = Updates(self)
         self.help_window = None
         self.live = tk.BooleanVar(value=False)  # drawing tools draw into one custom shape (roll_live.py)
+        self.mask = tk.BooleanVar(value=False)  # what's drawn becomes a mask (mask.py)
+        self.mask_defaults = dict(MASK_DEFAULTS)  # a new mask's settings: the last ones set in the panel
         self.draw_tool = "line"  # the drawing tool a double right-click goes back to
         self.snap = tk.StringVar(value=DEFAULT_SNAP)
         self.hz_snap = tk.StringVar(value=DEFAULT_SNAP)  # the Hz bass window's own snap
@@ -305,6 +312,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.live.trace_add("write", lambda *_: (self.sync_custom(), self.schedule_autosave(),
                                                   self.roll.request_redraw(),
                                                   self.live.get() and self.tips.show("live")))
+        self.mask.trace_add("write", lambda *_: (self.schedule_autosave(), self.roll.request_redraw()))
         self.snap.trace_add("write", lambda *_: self.roll.request_redraw())
         self.hz_snap.trace_add("write", lambda *_: (self.hz_window and self.hz_window.redraw(),
                                                     self.schedule_autosave()))
@@ -364,6 +372,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         live = ttk.Checkbutton(bar, text=tr("app.live_shape_g"), variable=self.live)
         live.pack(side="left", padx=(12, 0))
         Tooltip(live, BY_ID["live"]["tip"])
+        b = ttk.Checkbutton(bar, text=tr("mask.tick"), variable=self.mask)
+        b.pack(side="left", padx=(8, 0))
+        Tooltip(b, tr("mask.tick_tip"))
         bar = self.option_bar = ttk.Frame(top)
         self._toolbar_rows = None
         top.bind("<Configure>", lambda e: self.fit_toolbar())
@@ -673,6 +684,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
                                   font=look.font(8),
                                   wraplength=int(300 * self.scale), justify="left")
         self._build_colours()
+        self._build_mask()
         last = self.last_row = ttk.Frame(self.settings)
         last.pack(fill="x", pady=(4, 0))
         ttk.Label(last, text=tr("app.last_note")).pack(side="left", anchor="n")
@@ -765,6 +777,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             self.env_note.pack_forget()
         self.build_points()
         self.sync_colours()
+        self.sync_mask()
         self.sync_freehand()
         self.sync_tumour()
         self.sync_pattern()
@@ -1049,6 +1062,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
             if self._notes_worked != worked:
                 self._notes_time = time.perf_counter() - started
         wanted, self.picture_use10, self.rendered, self.slot_count = made
+        self.drawn, self.mask_covered = mask_view(self.rendered, self.shapes, self.ppq, self.keys, self.notes_of)
         if wanted != self.colours_wanted:
             self.colours_wanted = wanted
             self.after_idle(self.sync_custom)  # (the panel's warning)
@@ -1178,6 +1192,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         self.shapes_changed(moving=moving)
 
     def add_shape(self, sh, name=None):
+        if self.mask.get() and not is_mask(sh):  # (drawn with the Mask tick on: a mask, mask.py)
+            sh["mask"] = dict(self.mask_defaults)
         self.push_undo(name=name or tr("app.draw", shape_label=self.shape_label(sh)))
         self.shapes.append(sh)
         self.select(len(self.shapes) - 1)
@@ -1643,6 +1659,10 @@ class App(ProjectFiles, CustomPanel, ColoursPanel,PolygonPanel, FreehandPanel, F
         return new  # (a Hz bass's notes keep their lengths: its box only limits where they sound, user)
 
     def shape_label(self, sh):
+        label = self.plain_label(sh)
+        return tr("mask.label", label=label) if is_mask(sh) else label
+
+    def plain_label(self, sh):
         if ("picture" in sh or sh.get("merge") or  # (the picture's file name, user; "Merged notes")
                 "notes" in sh and sh.get("name") == tr("join_split.merge_leftovers")):  # (plain notes, user)
             return sh.get("name") or "?"

@@ -93,6 +93,7 @@ def channel_place(ch):
     return int(COLOURS_16[ch % 16])
 SELECTED_COLOR = ("#ffb65c", "#9a4b00")
 DRAFT_COLOR = ("#9be39b", "#1d6b1d")
+GHOST_COLOR = look.GHOST_NOTE  # (notes a mask hides: mask.py)
 if look.DARK:  # (the dark look's own, lighter: look.NOTES_DARK)
     SLOT_COLORS, SELECTED_COLOR, DRAFT_COLOR = list(look.NOTES_DARK), look.SELECTED_DARK, look.DRAFT_DARK
 

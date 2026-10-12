@@ -16,7 +16,7 @@ from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funne
 from notes.paths import KEYS
 from notes.sliced import clip_strokes, moved_by, moved_mark, on_side, piece_knives
 from notes.sustain import is_sustained
-from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, PIANO_88, PREVIEW_LIMIT,
+from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, GHOST_COLOR, PIANO_88, PREVIEW_LIMIT,
                               SELECTED_COLOR, SLOT_COLORS, draw_boxes, fade, note_name, slot_colours)
 from roll.tiles import Tiles, see_through
 from window import look
@@ -27,9 +27,11 @@ PART_COLOR = look.PART
 TWIN_COLOR = look.TWIN
 # Note colours: number = colour * 32 + velocity // 4 (low velocity = paler fill, the outline stays); colours = the
 # slot colours, then selected (unused: a selected shape's notes keep their colours, user; a red line goes round
-# them, draw_ring), then the shape being drawn
-SELECTED, DRAFT = len(SLOT_COLORS), len(SLOT_COLORS) + 1
-NOTE_COLORS = [(fade(f, 1 - level * 4 / 124), b) for f, b in SLOT_COLORS + [SELECTED_COLOR, DRAFT_COLOR]
+# them, draw_ring), then the shape being drawn, then the ghosts of notes a mask hides (velocity -1 in app.drawn,
+# painted as GHOST_CODE)
+SELECTED, DRAFT, GHOST = len(SLOT_COLORS), len(SLOT_COLORS) + 1, len(SLOT_COLORS) + 2
+GHOST_CODE = GHOST * 32 + 31
+NOTE_COLORS = [(fade(f, 1 - level * 4 / 124), b) for f, b in SLOT_COLORS + [SELECTED_COLOR, DRAFT_COLOR, GHOST_COLOR]
                for level in range(32)]
 RING_COLOR = look.RING
 RING_RGB = np.frombuffer(bytes.fromhex(RING_COLOR[1:]), np.uint8)
@@ -38,6 +40,7 @@ RING_GAP = 4  # px: notes in a row closer than this count as touching for the ri
 RING_MAX = 20000  # more ring pieces on screen than this: none drawn (canvas items are slow)
 CUT_MARK = 12  # px each side of a sliced piece's cut end: its stretch of the Slice line (draw_cut_marks)
 FAINT_CUT = look.FAINT_CUT
+MASK_DASH = (8, 4)  # a mask's line (mask.py)
 
 
 def piece_runs(x0, y0, x1, y1):
@@ -286,7 +289,7 @@ def painting_order(fast, rendered, start, sels, pics, keys, use10):
     rank[~sel] = np.arange(others)
     rank[sel] = np.arange(others, owners)
     made = fast.paint_order(np.ascontiguousarray(rendered, np.int64), start, rank, owners,
-                            pics if pics.any() else np.zeros(0, bool), slot_colours(use10), PICTURE_GROUP)
+                            pics if pics.any() else np.zeros(0, bool), slot_colours(use10), PICTURE_GROUP, GHOST_CODE)
     return made, others
 
 
@@ -396,7 +399,7 @@ class RollDrawing:
         # the picture below shows exactly this: when nothing here changed (e.g. dragging a shape whose notes catch up
         # later), it's shown again as it is instead of being painted again
         fixed = (frozenset(app.sels), self.sx, self.sy, self.kb_w, self.ruler_h, w, h)
-        pic = (app.rendered, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols)))
+        pic = (app.drawn, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols)))
         # (a shape being drawn / placed: its notes are in the picture, unless only its lines show)
         drafted = self.draft_notes() is not None
         if not drafted:
@@ -457,12 +460,20 @@ class RollDrawing:
                              if sh["kind"] == "funnel" else (p for _, p in self.origin_strokes(sh))):
                     self.create_line(*[v for b, p in path for v in (self.t2x(b), self.p2y(p))], width=1,
                                      fill=look.ORIGIN_PICKED if i in app.sels else look.ORIGIN, dash=(6, 4))
-        if app.show_lines.get():  # (Settings → Look's Shape lines: their thickness, a selected one's a pixel more)
-            for i, sh in enumerate(app.shapes):
-                if i not in app.sels:
-                    self.draw_path(sh, look.SHAPE_LINE, look.LINES)
+        covered = app.mask_covered
+        for i, sh in enumerate(app.shapes):  # (Settings → Look's Shape lines: their thickness, a selected one's a pixel more)
+            if i in app.sels:
+                continue
+            if sh.get("mask"):  # a mask: always shown, dashed (so it isn't forgotten, mask.py)
+                self.draw_path(sh, look.MASK_LINE, look.LINES, dash=MASK_DASH)
+            elif app.show_lines.get():
+                self.draw_path(sh, look.MASKED_LINE if i in covered else look.SHAPE_LINE, look.LINES)
         for i in app.sels:
-            self.draw_path(app.shapes[i], look.SHAPE_LINE_PICKED, look.LINES + 1)
+            sh = app.shapes[i]
+            if sh.get("mask"):
+                self.draw_path(sh, look.MASK_LINE_PICKED, look.LINES + 1, dash=MASK_DASH)
+            else:
+                self.draw_path(sh, look.SHAPE_LINE_PICKED, look.LINES + 1)
         for i in app.sels:
             if i < len(app.shapes) and "picture" in app.shapes[i]:
                 self.draw_picture_label(app.shapes[i])
@@ -530,19 +541,19 @@ class RollDrawing:
         """The red line round the selected shapes' notes (user: the notes keep their colours, even with short
         gates): ring_parts, worked out once per selection / notes / zoom, or None."""
         app = self.app
-        if not app.sels or not app.show_notes.get() or not len(app.rendered):
+        if not app.sels or not app.show_notes.get() or not len(app.drawn):
             return None
         ppq, ax = app.ppq, self.sx / app.ppq
         key = (frozenset(app.sels), self.sx, ppq)
-        if self._ring is None or self._ring[0] is not app.rendered or self._ring[1] != key:
+        if self._ring is None or self._ring[0] is not app.drawn or self._ring[1] != key:
             fast = loops()
             kept = self.paint_order(fast) if fast else None
             if kept is not None:  # (the selected shapes' notes are already together there, last)
                 (s, e, k, _, first, _), others = kept
                 notes = np.column_stack([s[first[others]:], e[first[others]:], k[first[others]:]])
             else:
-                notes = app.rendered[np.isin(app.rendered[:, 5], list(app.sels))]
-            self._ring = (app.rendered, key, ring_parts(notes, RING_GAP / ax) if len(notes) else None)
+                notes = app.drawn[np.isin(app.drawn[:, 5], list(app.sels))]
+            self._ring = (app.drawn, key, ring_parts(notes, RING_GAP / ax) if len(notes) else None)
         return self._ring[2]
 
     def draw_ring(self, w, h):
@@ -866,14 +877,14 @@ class RollDrawing:
     def start_order(self):
         """The rendered notes' row numbers by start (stable: the same start keeps their order), kept until the
         notes change."""
-        rendered = self.app.rendered
+        rendered = self.app.drawn
         if self._start_order is None or self._start_order[0] is not rendered:
             self._start_order = (rendered, np.argsort(np.ascontiguousarray(rendered[:, 0]), kind="stable"))
         return self._start_order[1]
 
     def sorted_notes(self):
         """The rendered notes sorted by start (kept until the notes change)."""
-        rendered = self.app.rendered
+        rendered = self.app.drawn
         if self._note_index is None or self._note_index[0] is not rendered:
             order = np.take(rendered, self.start_order(), axis=0)
             self._note_index = (rendered, order, int((order[:, 1] - order[:, 0]).max()) if len(order) else 0,
@@ -893,7 +904,7 @@ class RollDrawing:
         longest) + the number of unselected owners, kept until the notes, selection or picture colours change; None
         when there are no notes or keys / owners outside the tables (the other way then)."""
         app = self.app
-        rendered = app.rendered
+        rendered = app.drawn
         pics = np.asarray(getattr(app, "picture_owners", ()), bool)
         key = (frozenset(app.sels), pics.tobytes(), len(pics), bool(app.picture_use10))
         got = self._paint_order
@@ -1004,9 +1015,11 @@ class RollDrawing:
                         on, color = on[last], color[last]
             elif order:
                 color = np.zeros(0, np.int64)
-            # low velocity = paler fill (outline stays); 32 shades is plenty
+            # low velocity = paler fill (outline stays); 32 shades is plenty. Velocity -1 = a ghost (mask.py)
+            vel = notes[on, 3]
+            code = color * 32 + np.clip(vel, 0, 127) // 4
             return (x0[on].astype(np.int64), x1[on].astype(np.int64), key[on],
-                    color * 32 + np.minimum(notes[on, 3], 127) // 4)
+                    np.where(vel < 0, GHOST_CODE, code) if len(vel) and vel.min() < 0 else code)
 
         if main is None:
             lo, hi = self.visible_range(t_lo, t_hi)
@@ -1136,9 +1149,9 @@ class RollDrawing:
         iw, ih = w - kb, h - top
         key = (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols))
         c = self._carry
-        if c is None or c["rendered"] is not app.rendered or c["key"] != key:
-            c = self._carry = {"rendered": app.rendered, "key": key, "area": None, "base": None}
-            if len(app.rendered) > w * h // 2000:  # (lots of notes: a picture, as redraw paints them)
+        if c is None or c["rendered"] is not app.drawn or c["key"] != key:
+            c = self._carry = {"rendered": app.drawn, "key": key, "area": None, "base": None}
+            if len(app.drawn) > w * h // 2000:  # (lots of notes: a picture, as redraw paints them)
                 c["base"] = self.paint_region(rows, cols, self.note_rects(w, h, only=False), (kb, top, w, h),
                                               ring=False)
         if c["base"] is not None:
@@ -1183,11 +1196,11 @@ class RollDrawing:
         key = (frozenset(app.sels), self.sx, self.sy, kb, top, w, h, self.view_t, self.view_top, tuple(rows),
                tuple(cols), app.keys, app.ppq)
         c = self._draft_base
-        if c is None or c[0] is not app.rendered or c[1] != key:
+        if c is None or c[0] is not app.drawn or c[1] != key:
             rects = self.note_rects(w, h, draft="without")
             # (more than this: a picture either way, see redraw)
             base = self.paint_region(rows, cols, rects, region, ring=False) if len(rects[0]) > w * h // 2000 else None
-            c = self._draft_base = (app.rendered, key, base)
+            c = self._draft_base = (app.drawn, key, base)
         if c[2] is None:
             return False
         img = c[2].copy()
@@ -1333,7 +1346,8 @@ class RollDrawing:
                     self.create_line(*coords, fill=color, width=1, dash=(2, 3))
                 continue
             for coords, size in screen_lines(path, ax, bx, ay, by, view):
-                if width == 1 or size < 1000:
+                # (dashed: never one thick line, a thick dashed one reaching far off screen froze Windows)
+                if width == 1 or size < 1000 and not dash:
                     self.create_line(*coords, fill=color, width=width, dash=dash)
                     continue
                 # a long thick line: Windows paints thick lines with thousands of points very slowly (seconds),

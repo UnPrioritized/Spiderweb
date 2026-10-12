@@ -15,6 +15,7 @@ from files.lang import tr
 from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape
 from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_shape
 from notes.hzbass import clean_hz
+from notes.mask import MASK_DEFAULTS, clean_mask
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
 from notes.paths import KEYS
 from notes.picture import paths_for_file
@@ -380,7 +381,7 @@ class ProjectFiles:
                               "velocity_height": self.velocity_height() / self.scale,
                               "midi_device": self.midi_device.get(), "play_voices": self.play_voices,
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
-                              "live": self.live.get(),
+                              "live": self.live.get(), "mask": self.mask.get(), "mask_defaults": self.mask_defaults,
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
                               "claw_window": self.claw_pos, "strum_window": self.strum_pos, "chop_window": self.chop_pos, "hz_window": self.hz_pos, "hz_fx_height": self.hz_fx_h, "hz_loud_height": self.hz_loud_h,"hz_preview": self.hz_preview, "hz_tools": self.hz_window.tools_state() if self.hz_window else self.hz_tools,
                               "hz_view": self.hz_window.view_state() if self.hz_window else self.hz_view,
@@ -464,6 +465,8 @@ class ProjectFiles:
             if win.get("midi_device") and keep_saved(str(win["midi_device"])):
                 self.midi_device.set(str(win["midi_device"]))
             self.live.set(win.get("live") is True)
+            self.mask.set(win.get("mask") is True)
+            self.mask_defaults = clean_mask(win.get("mask_defaults")) or dict(MASK_DEFAULTS)
             self.show_lines.set(win.get("show_lines") is not False)
             self.show_notes.set(win.get("show_notes") is not False)
             for key, attr in (("tumour_window", "tumour_pos"), ("graph_window", "graph_pos"),

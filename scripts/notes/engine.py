@@ -39,6 +39,7 @@ from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, for
 from notes.custom import frame_upright
 from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
+from notes.mask import clean_mask
 from notes.mould import clip_to, mould_cut, piece_loops
 from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_cut, moved_by, piece_knives, piece_notes,
                           run_origins, source, spotted_notes, whole_made)
@@ -147,6 +148,9 @@ def clean_shape(sh):
     cy = clean_cycle(sh.get("cycle"))
     if cy:  # "Colours" (custom.py)
         out["cycle"] = cy
+    mk = clean_mask(sh.get("mask"))
+    if mk:  # a mask (mask.py)
+        out["mask"] = mk
     tm = clean_tumour(sh.get("tumour")) if out["kind"] in LINE_KINDS else None
     if tm:
         out["tumour"] = tm

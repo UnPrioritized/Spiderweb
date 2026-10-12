@@ -35,7 +35,7 @@ class LiveDrawing:
         """The custom shape new strokes go into (Live shape on and one custom shape selected), or None."""
         app, sh = self.app, self.app.selected()
         if (app.live.get() and sh and sh["kind"] == "custom" and not sh.get("text") and "notes" not in sh
-                and len(app.sels) == 1):
+                and len(app.sels) == 1 and bool(sh.get("mask")) == app.mask.get()):  # (Mask tick: into a mask)
             return sh
         return None
 
