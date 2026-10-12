@@ -16,7 +16,7 @@ from notes.between import copied as between_copied, group_of, keep_pushes, push_
 from notes.custom import box_frame, fill_plan, fill_test
 from notes.engine import cached_arrays, make_shape
 from notes.joined import all_tumours
-from notes.mask import is_mask
+from notes.mask import OFF, ROW, is_mask, mask_area
 from notes.paths import KEYS
 from notes.funnel import funnel_contains, funnel_handles, funnel_origins
 from notes.fx import copied as fx_copied, with_turn as fx_turned
@@ -551,7 +551,23 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             i = self.hit_shape(x, y, among)
             if i is None:
                 i = self.note_owner(x, y, among)
+            if i is None and among is masks:  # (anywhere the pattern shows through it, user)
+                i = self.mask_area_at(x, y, masks)
             if i is not None:
+                return i
+        return None
+
+    def mask_area_at(self, x, y, masks):
+        """The first of masks whose area (where the pattern shows, its own notes too; Invert: the hole) is at x, y."""
+        app = self.app
+        t, k = int(math.floor(self.x2t(x) * app.ppq)), math.floor(self.y2p(y) + 0.5)
+        if not 0 <= k < app.keys:
+            return None
+        code = k * ROW + t + OFF
+        for i in masks:
+            a, b = mask_area(app.shapes[i], app.ppq, app.keys, app.notes_of)[2:]
+            j = int(np.searchsorted(a, code, "right")) - 1
+            if j >= 0 and code < b[j]:
                 return i
         return None
 
