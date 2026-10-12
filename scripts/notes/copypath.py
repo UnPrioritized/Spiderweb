@@ -243,6 +243,40 @@ def eased(u, speed):
     return u
 
 
+def unease(u, speed):
+    """eased the other way round: a place 0..1 -> where it is in the copies' even steps."""
+    if speed == "up":
+        return u ** (1 / SPEED_POWER)
+    if speed == "down":
+        return 1 - (1 - u) ** (1 / SPEED_POWER)
+    return u
+
+
+def _counted(along, spans, count, speed):
+    """Number of copies: places along the samples (sample number + part of the way to the next). Each run gets a
+    copy on both its ends (user: the last copy going up and the first going down touch at the point), the rest
+    shared out by how long the runs are (bunched up as Speed says, over the whole path)."""
+    total = along[-1]
+    if total <= 0:
+        return np.zeros(count)
+    if count < 2 * len(spans):  # (too few for both ends of every run: spread over the whole path)
+        spans = [(spans[0][0], spans[-1][1])]
+    v = [(unease(along[lo] / total, speed), unease(along[hi] / total, speed)) for lo, hi in spans]
+    room = np.array([b - a for a, b in v])
+    share = room / room.sum() * (count - 2 * len(spans)) if room.sum() > 0 else np.zeros(len(spans))
+    n = np.floor(share).astype(int)
+    n[np.argsort(n - share)[:count - 2 * len(spans) - n.sum()]] += 1  # (largest remainders)
+    pos = []
+    for (lo, hi), (a, b), k in zip(spans, v, n + 2):
+        at = eased(np.linspace(a, b, k), speed) * total
+        seg = along[lo:hi + 1]
+        j = np.clip(np.searchsorted(seg, at, "right") - 1, 0, max(0, hi - lo - 1))
+        gap = seg[np.minimum(j + 1, hi - lo)] - seg[j]
+        f = np.clip(np.where(gap > 0, (at - seg[j]) / np.where(gap > 0, gap, 1.0), 0.0), 0.0, 1.0)
+        pos.extend((lo + j + f).tolist())
+    return np.array(pos)
+
+
 def _crossings(t, run, targets):
     """For each time in targets (going up), the place along the samples (sample number + part of the way to the next)
     where t first reaches it, searching on from the last one; one where the path turns and the copies jump (a new
@@ -272,13 +306,11 @@ def places(cfg, size):
     wh = np.array(size, float)
     moved = p - f * wh
     m = len(p)
+    spans = [(int(np.flatnonzero(run == r)[0]), int(np.flatnonzero(run == r)[-1])) for r in range(int(run.max()) + 1)]
     if cfg["mode"] == "count":
         screen = p / [cfg["k"], 1.0]
         along = np.r_[0.0, np.cumsum(np.hypot(*np.diff(screen, axis=0).T))]
-        at = eased(np.linspace(0.0, 1.0, cfg["count"]), cfg["speed"]) * along[-1]
-        j = np.clip(np.searchsorted(along, at, "right") - 1, 0, m - 2)
-        gap = along[j + 1] - along[j]
-        pos = j + np.clip(np.where(gap > 0, (at - along[j]) / np.where(gap > 0, gap, 1.0), 0.0), 0.0, 1.0)
+        pos = _counted(along, spans, cfg["count"], cfg["speed"])
     else:
         s = moved[:, 0]
         way = 1.0 if s[-1] >= s[0] else -1.0
@@ -288,7 +320,8 @@ def places(cfg, size):
         pos, n = _crossings(t, run, np.arange(top) * step)
         if cfg["speed"] != "even" and n > 1:
             pos = _crossings(t, run, eased(np.arange(n) / (n - 1), cfg["speed"]) * (n - 1) * step)[0]
-        pos = np.array(pos, float)
+        ends = [float(hi) for _, hi in spans[:-1]] if len(pos) < MOST_COPIES else []  # (user: copies touch at a turn)
+        pos = np.array(sorted(set(pos) | set(ends)), float)[:MOST_COPIES]
     j = np.clip(np.floor(pos).astype(np.int64), 0, m - 2)
     u = (pos - j)[:, None]
     moved = moved[j] + u * (moved[j + 1] - moved[j])
