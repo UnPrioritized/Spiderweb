@@ -296,6 +296,7 @@ HZ_RED = pick("#e02020", "#ff5050")  # the red tune line
 HZ_FAINT = pick("#f0a0a0", "#8a5050")  # behind the red line: each repeat's own pitch
 HZ_GREEN = pick("#18a048", "#3fcf6f")  # a note's exact tone, where each repeat would start
 HZ_NOTE_BAR = pick("#bfe5cb", "#3d5e47")  # Hz shape window: each key's note, faint (from its hit to its end)
+HZ_NOTE_BAR_EDGE = pick("#7fc496", "#5f8a6b")  # ... its edge (notes touching stay apart)
 HZ_BEND = pick("#7a3cff", "#b08cff")  # the Bend tool: a note's own bend line and its points
 HZ_UNMADE = pick("#8a8a8a", "#1f1f21")  # over what the preview hasn't made yet
 HZ_BAND_FIXED = (pick("#8ee0a4"), pick("#18a048"))

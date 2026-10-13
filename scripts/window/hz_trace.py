@@ -406,7 +406,7 @@ class TraceWindow(tk.Toplevel):
                 for a, b in ((x, min(end, 1.0)), (0.0, end - 1.0)):
                     if b - a > 1e-9:
                         c.create_rectangle(x0 + a * w, py - bh / 2, x0 + b * w, py + bh / 2, fill=look.HZ_NOTE_BAR,
-                                           outline="")
+                                           outline=look.HZ_NOTE_BAR_EDGE)  # (edged: touching notes stay apart, user)
                 self.ends.append((x0 + (end if end <= 1.0 + 1e-9 else end - 1.0) * w, py, size))
                 dots.append((x0 + x * w, py))
         for px, py in dots:  # (on top of every bar)
@@ -460,8 +460,8 @@ class TraceWindow(tk.Toplevel):
                 a = np.floor(left + np.maximum(starts, 0) / span * (sw - 1)).astype(int)
                 b = np.maximum(a + 1, np.ceil(left + np.minimum(ends, span) / span * (sw - 1)).astype(int))
                 run = None
-                for p, q in zip(a.tolist(), b.tolist()):  # (notes touching on screen drawn as one)
-                    if run and p <= run[1]:
+                for p, q in zip(a.tolist(), b.tolist()):  # (each note its own, edge and all, like the piano roll, user:
+                    if run and p <= run[0]:  # touching ones drawn as one looked like a long note; one pixel: one)
                         run[1] = max(run[1], q)
                         continue
                     if run:
@@ -473,7 +473,7 @@ class TraceWindow(tk.Toplevel):
 
     def strip_note(self, left, sw, top, rh, run, fill, edge):
         p, q = run[0], min(run[1], left + sw - 1)
-        self.strips.create_rectangle(p, top + 1, q, top + rh, fill=fill, outline=edge if q - p >= 3 and rh >= 3 else "")
+        self.strips.create_rectangle(p, top + 1, q, top + rh, fill=fill, outline=edge if rh >= 3 else "")
 
     # ------------------------------------------------------------ the mouse
 
