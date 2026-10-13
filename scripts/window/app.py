@@ -2290,13 +2290,20 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
 
     # ------------------------------------------------------------ undo
 
+    def settle_windows(self):
+        """The windows trying changes out (note tools, tumours, sustain) keep them as their own steps. Several at
+        once: the first step takes back what ALL of them tried, the next all but the first's... (each step was
+        made from the shapes as they are, which hold every window's tries: undoing them all came back to one)."""
+        ws = [w for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window,
+                          self.tumour_window, self.sustain_window) if w]
+        waiting = [w for w in ws if w.pending()]
+        for w in ws:
+            w.settle(also=waiting[waiting.index(w) + 1:] if w in waiting else ())
+
     def push_undo(self, state=None, name=None):
         """Remember the shapes (or `state`, shapes saved earlier as JSON) for Ctrl+Z; name = what the step does
         (the History panel)."""
-        for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window, self.tumour_window,
-                  self.sustain_window):
-            if w:
-                w.settle()  # (the claw / strum / tumours being tried out are kept first, as their own step)
+        self.settle_windows()  # (the claw / strum / tumours / sustain being tried out are kept first, as own steps)
         sc = self._scrub
         if sc and sc["active"]:  # stepping a number box: only its first step takes an undo step
             if sc["pushed"]:
@@ -2440,10 +2447,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
 
     def _restore(self, src, dst, count=1):
         """count steps from src to dst (a History jump: the steps on the way only move, the shapes are made once)."""
-        for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window, self.tumour_window,
-                  self.sustain_window):
-            if w:
-                w.settle()  # (so Ctrl+Z here takes back the claw / strum / tumours being tried out)
+        self.settle_windows()  # (so Ctrl+Z here takes back the claw / strum / tumours / sustain being tried out)
         if not src:
             if self.roll.holding():  # (nothing to take back: still lets go, or the rest of the drag had no step)
                 self.roll.cancel_draft()

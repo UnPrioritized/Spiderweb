@@ -200,16 +200,25 @@ class TumourWindow(tk.Toplevel):
         self.app.shapes_changed()
         self.app.sync_tumour()
 
-    def settle(self):
-        """Something else is about to change in the main window: the tumours tried so far are kept (their own undo
-        step), and from now on X / Esc only puts back what changes after this."""
+    def pending(self):
+        """Are there tumours tried here that settle would keep?"""
         if self.graph_window and self.graph_window.job:
             self.graph_window.after_cancel(self.graph_window.job)
             self.graph_window.store()
-        if self.now != self.before and self.state() == self.now:
+        return self.now != self.before and self.state() == self.now
+
+    def put_back(self, saved):
+        self.put_tumours(saved, self.before)
+
+    def settle(self, also=()):
+        """Something else is about to change in the main window: the tumours tried so far are kept (their own undo
+        step), and from now on X / Esc only puts back what changes after this. also: other windows kept next
+        (App.settle_windows): this step takes their tries back too."""
+        if self.pending():
             # the step takes back only the tumours tried here (a shape moved on the piano roll meanwhile has its own)
             saved = json.loads(json.dumps(self.app.shapes))
-            self.put_tumours(saved, self.before)
+            for w in (self, *also):
+                w.put_back(saved)
             sel = self.saved_sel
             self.saved_sel, self.before = self.app.sel_state(), self.now
             self.app.add_undo_step(json.dumps(saved), tr("tumour_window.tumours"), sel)

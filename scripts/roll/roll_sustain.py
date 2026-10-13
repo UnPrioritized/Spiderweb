@@ -116,12 +116,19 @@ class SustainStops:
 
     def stop_release(self, e):
         self.stop_drag(e)
+        self.stop_tidy()
+
+    def stop_tidy(self):
+        """A stop drag ends (let go, Esc, Ctrl+Z, the window closed): the stops in order again, two on one tick =
+        one (hunt: Esc left two lines on one spot)."""
+        if not (self.drag and self.drag[0] == "sustop"):
+            return
         _, i, k, gesture = self.drag
         app = self.app
         if i < len(app.shapes):
             st = (app.shapes[i].get("sustain") or {}).get("stops")
-            if st and st.get("at"):
-                st["at"] = sorted(set(st["at"]))  # (in order again; two on one tick = one)
+            if st and st.get("at") and st["at"] != sorted(set(st["at"])):
+                st["at"] = sorted(set(st["at"]))
                 app.shapes_changed()
                 if app.sustain_window:
                     app.sustain_window.stops_changed(gesture)

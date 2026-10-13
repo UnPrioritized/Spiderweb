@@ -1466,6 +1466,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def cancel_draft(self):
         self.end_typing()
         funnel = bool(self.draft and self.draft["kind"] == "funnel")
+        self.stop_tidy()  # (a sustain stop held: its stops in order again)
         self.draft = None
         self.drag = None
         self.follow = None

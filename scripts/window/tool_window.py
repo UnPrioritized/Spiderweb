@@ -576,18 +576,30 @@ class ToolWindow(tk.Toplevel):
                 for i in self.targets):
             self.pick_page(k)  # (the page shown is still there, the same: it stays picked, user)
 
-    def settle(self):
-        """Something else is about to change in the main window: the change tried so far is kept (its own undo
-        step), and from now on X / Esc only puts back what changes after this."""
+    def pending(self):
+        """Is there a change tried here that settle would keep?"""
         self.catch_up()
-        if self.now != self.before and self.settings() == self.now:
+        return self.now != self.before and self.settings() == self.now
+
+    def put_back(self, saved):
+        """The pages as before the change tried here, on saved (a copy of the shapes)."""
+        for i, fx in self.before.items():
+            if i >= len(saved):
+                continue
+            if fx:
+                saved[i]["fx"] = fx
+            else:
+                saved[i].pop("fx", None)
+
+    def settle(self, also=()):
+        """Something else is about to change in the main window: the change tried so far is kept (its own undo
+        step), and from now on X / Esc only puts back what changes after this. also: other windows whose tries
+        are kept next (App.settle_windows): this step takes theirs back too."""
+        if self.pending():
             # the step takes back only the steps tried here (a shape moved on the piano roll meanwhile has its own)
             saved = json.loads(json.dumps(self.app.shapes))
-            for i, fx in self.before.items():
-                if fx:
-                    saved[i]["fx"] = fx
-                else:
-                    saved[i].pop("fx", None)
+            for w in (self, *also):
+                w.put_back(saved)
             sel = self.saved_sel
             self.saved_sel, self.before = self.app.sel_state(), self.now
             self.app.add_undo_step(json.dumps(saved), tr(f"{self.KEY}.step"), sel)

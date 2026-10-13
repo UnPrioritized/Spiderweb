@@ -71,6 +71,7 @@ class SustainWindow(tk.Toplevel):
         self.transient(app)
         self.resizable(False, False)
         self.closed = False
+        self.ppq = app.ppq  # (the PPQ the boxes show ticks of)
         self.idx = []  # the shapes worked on (numbers in app.shapes)
         self.shown_beats = str(settings.get("sustain", "unit", "")).strip().lower() == "beats"
         self.unit = tk.StringVar(value="beats" if self.shown_beats else "ticks")
@@ -257,24 +258,57 @@ class SustainWindow(tk.Toplevel):
         else:
             self.show_auto()
 
-    def settle(self):
+    def fresh(self):
+        """The shapes worked on are still there, as this window last left them."""
+        return (not self.closed and bool(self.idx) and self.idx[-1] < len(self.app.shapes)
+                and self.sus_now() == self.now)
+
+    def pending(self):
+        """Is there a change tried here that settle would keep?"""
+        return self.fresh() and self.now != self.before
+
+    def put_back(self, saved):
+        """The shapes' Sustain as before the change tried here, on saved (a copy of the shapes)."""
+        for i, part in zip(self.idx, json.loads(self.kept)):
+            if i < len(saved):
+                put_own(saved[i], part)
+
+    def settle(self, also=()):
         """Something else is about to change in the main window: the change tried so far is kept (its own undo
-        step), and from now on Cancel only puts back what changes after this."""
-        if self.closed or not self.idx or self.idx[-1] >= len(self.app.shapes) or self.sus_now() != self.now \
-                or self.now == self.before:
+        step), and from now on Cancel only puts back what changes after this. also: other windows kept next
+        (App.settle_windows): this step takes their tries back too."""
+        if self.fresh():
+            self.hist.reset()  # (its steps would undo nothing of what comes next, hunt; kept: the main window's)
+        if not self.pending():
             return
         saved = json.loads(json.dumps(self.app.shapes))  # (the step takes back only what was tried here)
-        for i, part in zip(self.idx, json.loads(self.kept)):
-            put_own(saved[i], part)
+        for w in (self, *also):
+            w.put_back(saved)
         sel, self.saved_sel, self.before = self.saved_sel, self.app.sel_state(), self.now
         self.kept = self.own_now()
         self.app.add_undo_step(json.dumps(saved), tr("sustain.step"), sel)
-        self.hist.reset()  # (its steps are the main window's now)
 
     def ppq_changed(self):
-        """The project's PPQ changed: the boxes show the lengths in the new ticks."""
+        """A project setting changed (App.on_project_change: every key press in its boxes). Only a new PPQ
+        matters: the boxes show the same lengths in the new ticks (typed ones too); nothing else is started over
+        (hunt: the change tried so far lost its undo step and Cancel)."""
+        old = self.ppq
+        if self.app.ppq == old:
+            return
+        self.ppq = self.app.ppq
+        texts = [self.gap_var] + [r[1] for r in self.rows.values()]
+        got = [self.read(v.get(), 0, old) for v in texts]
+        seen = [self.read(t, 0, old) for t in [self.seen] + [r[4] for r in self.rows.values()]]
+        for v, b in zip(texts, got):
+            if b is not None:
+                v.set(self.text_of(b))
+        if seen[0] is not None:
+            self.seen = self.text_of(seen[0])
+        for r, b in zip(self.rows.values(), seen[1:]):
+            if b is not None:
+                r[4] = self.text_of(b)
         self.put_limits()
-        self.retarget()
+        self.show_auto()
 
     def stops_changed(self, key=None):
         """The piano roll moved / added / removed a stop put by hand (roll_sustain.py): one of this window's steps
@@ -309,18 +343,20 @@ class SustainWindow(tk.Toplevel):
             return fmt(ticks)
         return f"{ticks / ppq:.{len(str(ppq))}f}".rstrip("0").rstrip(".")  # (enough places for every tick)
 
-    def read(self, text, lo):
-        """Typed text -> beats (whole ticks, at most MOST_GAP), or None (empty, not a number, under lo ticks)."""
+    def read(self, text, lo, ppq=None):
+        """Typed text -> beats (whole ticks, at most MOST_GAP), or None (empty, not a number, under lo ticks). ppq: the
+        one it was typed for (default the project's)."""
+        ppq = ppq or self.app.ppq
         try:
             v = calc(text)
         except (ValueError, ZeroDivisionError):
             return None
         if not math.isfinite(v):
             return None
-        ticks = v * self.app.ppq if self.shown_beats else v
+        ticks = v * ppq if self.shown_beats else v
         if ticks < lo:
             return None
-        return min(max(math.floor(ticks + 0.5), 0) / self.app.ppq, MOST_GAP)
+        return min(max(math.floor(ticks + 0.5), 0) / ppq, MOST_GAP)
 
     def set_unit(self):
         """Ticks <-> beats: every box shows its number in the other unit (remembered for next time)."""
@@ -611,6 +647,7 @@ class SustainWindow(tk.Toplevel):
         self.app.sustain_window = None
         roll = self.app.roll
         if roll.drag and roll.drag[0] == "sustop":  # (a stop held: let go, its moves kept)
+            roll.stop_tidy()
             roll.drag = None
         self.destroy()
         roll.focus_set()
