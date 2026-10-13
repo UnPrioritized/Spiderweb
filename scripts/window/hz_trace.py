@@ -17,14 +17,19 @@ piano roll's. The shape is the Hz bass's (its picked layer's) sound setting hz["
 window's `extra`."""
 
 import copy
+import json
 import math
+import os
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 import numpy as np
 
+from files.about import USER
 from files.lang import tr
 from files.mathexpr import calc
+from files.safefile import write_text
+from notes.hz_settings import clean_trace
 from notes.hzbass import (CURVE_STEPS, FULL_LENGTH, HZ_DEFAULTS, START_TRACE, TRACE_POINTS, clean_extra, hz_gate,
                           key_range, length_ticks, trace_hits, trace_line)
 from roll.roll_shared import SLOT_COLORS
@@ -48,6 +53,53 @@ SHAPES = {"saw": [[0.0, 0.0], [1.0, 1.0]],
           "triangle": [[0.0, 0.0], [0.5, 1.0], [1.0, 0.0]],
           "sine": [[i / 32, round(0.5 - 0.5 * math.cos(2 * math.pi * i / 32), 6)] for i in range(33)],
           "square": [[0.0, 0.0], [0.0, 1.0], [0.5, 1.0], [0.5, 0.0], [1.0, 0.0]]}
+SHAPES_FILE = os.path.join(USER, "hz_shapes.json")  # the user's saved lines (Save…; under the Shapes ▾ menu's own)
+
+
+def load_shapes():
+    """The user's saved lines [{"name", "points"}] in saving order (a broken entry: left out)."""
+    try:
+        with open(SHAPES_FILE, encoding="utf-8-sig") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    out = []
+    for s in data.get("shapes", []) if isinstance(data, dict) else ():
+        try:
+            name, raw = clean_shape_name(str(s["name"])), s["points"]
+            pts = clean_trace(raw) or ([list(p) for p in START_TRACE] if raw == [list(p) for p in START_TRACE]
+                                       else None)  # (cleaned to [] = as it starts, or nothing usable)
+        except (TypeError, KeyError):
+            continue
+        if name and pts:
+            out.append({"name": name, "points": pts})
+    return out
+
+
+def save_shapes(items):
+    """Writes the saved lines (OSError when it can't be)."""
+    os.makedirs(os.path.dirname(SHAPES_FILE), exist_ok=True)
+    write_text(SHAPES_FILE, json.dumps({"shapes": items}, indent=1))
+
+
+def clean_shape_name(name):
+    from window.drawer import clean_name
+    return clean_name(name)
+
+
+def built_in_name(name):
+    """The name is one of the Shapes ▾ menu's own (as shown or its id; capitals or not)."""
+    low = name.casefold()
+    return any(low in (k.casefold(), tr("hz.trace_" + k).casefold()) for k in SHAPES)
+
+
+def free_shape_name(name, items):
+    """name, or "name (2)", "name (3)"... when a saved line already has it (capitals or not)."""
+    used = {s["name"].casefold() for s in items}
+    out, k = name, 2
+    while out.casefold() in used:
+        out, k = f"{name} ({k})", k + 1
+    return out
 
 
 def length_box(app, parent, var, apply, label=None):
@@ -170,10 +222,12 @@ class TraceWindow(tk.Toplevel):
         Tooltip(b, tr("hz.trace_reset_tip"))
         m = ttk.Menubutton(bar, text=tr("hz.trace_shapes"), takefocus=False)
         m.pack(side="left", padx=(6, 0))
-        m["menu"] = menu = tk.Menu(m, tearoff=False)
-        for name in SHAPES:
-            menu.add_command(label=tr("hz.trace_" + name), command=lambda name=name: self.use(SHAPES[name]))
+        m["menu"] = self.shapes_menu = tk.Menu(m, tearoff=False, postcommand=self.fill_shapes)
+        self.fill_shapes()
         Tooltip(m, tr("hz.trace_shapes_tip"))
+        b = ttk.Button(bar, text=tr("hz.trace_save"), command=self.save_shape, takefocus=False)
+        b.pack(side="left", padx=(6, 0))
+        Tooltip(b, tr("hz.trace_save_tip"))
         self.says = ttk.Label(bar, text="", foreground=look.INFO)
         self.says.pack(side="left", padx=(10, 0))
         st = self.strips = tk.Canvas(self, background=look.CHART_BG, highlightthickness=0, height=round(STRIP_H * s))
@@ -681,6 +735,52 @@ class TraceWindow(tk.Toplevel):
         self.pts = [list(p) for p in pts]
         self.save(before, was)
         self.draw()
+
+    def fill_shapes(self):
+        """The Shapes ▾ menu, made again each time it opens: the starting shapes, the saved ones, Delete ▸."""
+        menu = self.shapes_menu
+        menu.delete(0, "end")
+        for name in SHAPES:
+            menu.add_command(label=tr("hz.trace_" + name), command=lambda name=name: self.use(SHAPES[name]))
+        saved = load_shapes()
+        if not saved:
+            return
+        menu.add_separator()
+        for s in saved:
+            menu.add_command(label=s["name"], command=lambda p=s["points"]: self.use(p))
+        menu.add_separator()
+        gone = tk.Menu(menu, tearoff=False)
+        for s in saved:
+            gone.add_command(label=s["name"], command=lambda n=s["name"]: self.delete_shape(n))
+        menu.add_cascade(label=tr("hz.trace_delete"), menu=gone)
+
+    def save_shape(self):
+        """The line drawn saved under a name (asked: empty or a starting shape's name = asked again; a name already
+        saved gets " (2)", " (3)"...)."""
+        from window.settings_window import ask_name
+        if self.drag is not None or self.bar is not None:
+            return
+        name = ask_name(self, tr("hz.trace_save_title"), tr("hz.trace_save_ask"),
+                        check=lambda n: tr("hz.trace_built_in", name=n) if built_in_name(n) else None)
+        if name is None:
+            return
+        items = load_shapes()
+        name = free_shape_name(name, items)
+        items.append({"name": name, "points": [list(p) for p in self.pts]})
+        try:
+            save_shapes(items)
+        except OSError as e:
+            return messagebox.showerror(tr("hz.trace_title"), tr("hz.trace_not_saved", e=e), parent=self)
+        self.says.config(text=tr("hz.trace_saved", name=name), foreground=look.INFO)
+
+    def delete_shape(self, name):
+        """A saved line taken out of the list (asked first). The line drawn stays."""
+        if not messagebox.askyesno(tr("hz.trace_delete_title"), tr("hz.trace_delete_ask", name=name), parent=self):
+            return
+        try:
+            save_shapes([s for s in load_shapes() if s["name"] != name])
+        except OSError as e:
+            messagebox.showerror(tr("hz.trace_title"), tr("hz.trace_not_saved", e=e), parent=self)
 
     def save(self, before, was):
         """The shape drawn becomes the Hz bass's: one undo step of the Hz bass window (was: the points before).
