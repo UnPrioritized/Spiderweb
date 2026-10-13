@@ -207,6 +207,7 @@ MASK_GROUPS = [  # a mask group's dashed line, (line, picked) (mask.GROUP_COLOUR
 MASKED_LINE = pick("#f0c8c8", "#6a5a5a")  # the line of a shape a mask covers: faint
 CUT, CUT_UNDER = pick("#d00000", "#ff5050"), pick("#ffffff")  # Slice line, cut marks, scissors (+ the white under a mark)
 PATH_LINE = pick("#0d8f46", "#62d996")  # Copy along a path: the path on the piano roll, its points A / middle / B
+SUSTAIN_STOP = pick("#b0179a", "#f07ae0")  # Sustain: its stops put by hand, lines on the piano roll (roll_sustain.py)
 FAINT_CUT = pick("#f0c8c8", "#8a5a5a")  # the really faint line from a piece's cut end to the other piece's (user)
 LABEL_BG, LABEL_EDGE = pick("#fffbe6"), pick("#c9b26b")  # a placed picture's name above it (dark text: stays light)
 SELECT_BOX = pick("#000000", "#e8e8ea")  # the Select box's line

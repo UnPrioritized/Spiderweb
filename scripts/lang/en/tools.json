@@ -756,7 +756,7 @@
  "sustain.every": "Stop every",
  "sustain.every_tip": "The sustain stops this often, counted from the shape's first note: every note sounding there ends, and one new note per key starts on the same tick, so the sustain starts again with no gap.\nA resized shape gets more or fewer stops. The number follows the PPQ.",
  "sustain.stops": "Stop at my points",
- "sustain.stops_tip": "The sustain also stops at the points you put: every note sounding there ends, and one new note per key starts on the same tick.\nThe points stretch with the shape when it's resized.",
+ "sustain.stops_tip": "The sustain also stops at the points you put: every note sounding there ends, and one new note per key starts on the same tick.\nThe points stretch with the shape when it's resized. While the shape is selected, the piano roll shows them as lines: drag one to move it.",
  "sustain.add_stop": "Add stop",
  "sustain.add_stop_tip": "Puts a stop on the next snap line after the last stop (the first one: after the shape's start).",
  "sustain.clear_stops": "Clear points",

@@ -34,11 +34,12 @@ from roll.roll_path import PathEditing
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, MAX_SX, MIN_SX, PICK, SHIFT, boxes_side,
                               boxes_upright, cached_path, cached_strokes, grab_while_panning, grid_span, line_touches_box,
                               mouse_trail, note_name)
+from roll.roll_sustain import SustainStops
 from roll.roll_text import TextTyping
 
 
 class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
-                PathEditing, tk.Canvas):
+                PathEditing, SustainStops, tk.Canvas):
     def __init__(self, parent, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
         self.app = app
@@ -279,7 +280,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def holding(self):
         """The left button holds a shape, its point / handle / box, or the kept Select box's side: shortcuts wait
         (user)."""
-        return bool(self.drag) and self.drag[0] in ("move", "handle", "resize", "skew", "turn", "stretch", "path")
+        return bool(self.drag) and self.drag[0] in ("move", "handle", "resize", "skew", "turn", "stretch", "path",
+                                                     "sustop")
 
     @staticmethod
     def reach(shapes):
@@ -774,6 +776,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return
         if not self.draft and self.path_press(e):  # Copy along a path's window open: B placed, or its point grabbed
             return
+        if self.stop_press(e):  # a sustained shape's stop line held (the Select tool)
+            return
         tool = app.tool.get()
         pt = self.draw_pt(e)
 
@@ -958,6 +962,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.pan_view(e)                     # drag, so the view moves here; what's held follows the mouse)
         if kind == "pan":
             self.pan_to(e)
+        elif kind == "sustop":
+            self.stop_drag(e)
         elif kind == "path":
             self.path_drag(e)
         elif kind == "box":
@@ -1139,6 +1145,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.after_idle(self.app.settle_history)  # (a click that changed nothing isn't a step)
         kind = self.drag[0]
         self.app.catch_up_notes()
+        if kind == "sustop":
+            self.stop_release(e)
+            self.drag = None
+            return
         if kind == "path":
             self.path_release(e)
             self.drag = None
@@ -1309,6 +1319,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.app.show_position(self.position_text(e))
         if not self.drag and not self.draft and (self.path_motion(e) or self.path_hit(e.x, e.y)):
             self.set_cursor("fleur")  # (Copy along a path: B follows the mouse, or a point of its path is under it)
+            return
+        if not self.drag and self.stop_hit(e.x, e.y) is not None:
+            self.set_cursor("sb_h_double_arrow")  # (a sustained shape's stop line: drag it sideways)
             return
         if not self.drag:
             over = not self.draft and self.hit_handle(e.x, e.y, self.app.tool.get() == "select") is not None
