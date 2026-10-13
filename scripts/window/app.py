@@ -201,6 +201,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
         self.chop_window = None
         self.chop_pos = ""  # (and the chop window)
         self.path_window = None  # Copy along a path (path_window.py)
+        self.sustain_window = None  # Sustain… (sustain_window.py)
         self.path_pos = ""
         self.hz_window = None  # the Hz bass window (hz_window.py)
         self.image_window = None  # image to notes (image_window.py; opened by the Picture tool)
@@ -801,7 +802,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
         self.sync_funnel()
         self.sync_list_selection()
         self.sync_line_fill()
-        for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window):
+        for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window, self.sustain_window):
             if w:
                 w.sync()
         if self.hz_window:
@@ -953,7 +954,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
         self.sync_funnel()
         self.sync_tumour()
         self.sync_text()
-        for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window):
+        for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window, self.sustain_window):
             if w:
                 w.ppq_changed()  # (numbers shown in ticks)
 
@@ -2292,7 +2293,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
     def push_undo(self, state=None, name=None):
         """Remember the shapes (or `state`, shapes saved earlier as JSON) for Ctrl+Z; name = what the step does
         (the History panel)."""
-        for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window, self.tumour_window):
+        for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window, self.tumour_window,
+                  self.sustain_window):
             if w:
                 w.settle()  # (the claw / strum / tumours being tried out are kept first, as their own step)
         sc = self._scrub
@@ -2412,6 +2414,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
                 return "break"
             if self.path_window and self.path_window.local_step(redo):  # (its points are dragged on the piano roll)
                 return "break"
+            if self.sustain_window and self.sustain_window.local_step(redo):  # (its stops are dragged there)
+                return "break"
             return self.redo() if redo else self.undo()
         if hz.drag:  # the mouse held there: Ctrl+Z only puts back what's being dragged (no step), Ctrl+Y nothing
             return None if redo else hz.cancel_drag()
@@ -2436,7 +2440,8 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
 
     def _restore(self, src, dst, count=1):
         """count steps from src to dst (a History jump: the steps on the way only move, the shapes are made once)."""
-        for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window, self.tumour_window):
+        for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window, self.tumour_window,
+                  self.sustain_window):
             if w:
                 w.settle()  # (so Ctrl+Z here takes back the claw / strum / tumours being tried out)
         if not src:

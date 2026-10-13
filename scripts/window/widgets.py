@@ -259,10 +259,12 @@ class Scrub:
     a label over several boxes steps them all together. steps: (step, Shift step, Ctrl step), or a function giving
     them. One scrub of a box is one undo step (App.scrub_step)."""
 
-    def __init__(self, app, boxes, steps, lo=None, hi=None, label=None, drag_box=False, no_undo=False):
+    def __init__(self, app, boxes, steps, lo=None, hi=None, label=None, drag_box=False, no_undo=False, text=None):
         """drag_box: each box can be dragged sideways itself too (a click without moving still types). no_undo: the
-        boxes make no undo step (app settings): Ctrl+Z while held puts their numbers back itself."""
+        boxes make no undo step (app settings): Ctrl+Z while held puts their numbers back itself. text: number ->
+        what the box shows (default fmt)."""
         self.app, self.boxes, self.steps, self.lo, self.hi = app, boxes, steps, lo, hi
+        self.text = text or fmt
         self.no_undo = no_undo
         self.drag = None  # label drag: {"x": where the last step was, "n": steps waiting, "job", "gesture", "boxes"}
         self.held = None  # drag_box: the box pressed, until the mouse has moved far enough to be a drag
@@ -317,7 +319,7 @@ class Scrub:
                     value = max(self.lo, value)
                 if self.hi is not None:
                     value = min(self.hi, value)
-                var.set(fmt(value))
+                var.set(self.text(value))
                 if apply:
                     apply()
         self.app.scrub_step(gesture, run)
