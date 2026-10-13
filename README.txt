@@ -16,13 +16,14 @@ What it can do:
   overlapping shapes on different channels.
 - Hz bass: spam so fast it sounds like a tone, with a synth window (knobs,
   effects, layers) and a preview you can hear right away.
-- Turn an image into notes in up to 15 colours.
+- Turn an image into notes in up to 15 colours (16 with channel 10).
 - Claw machine, Strum and Chop pages that change the notes of a shape, Add
   between (shapes that step from one shape to another), slicing and merging.
 - Share shapes with others as one line of text.
 - Play it as you go, then write a .mid file, or copy the notes straight into
   Domino (and paste notes from Domino, or save a Domino song file).
-- Light or dark look.
+- Settings: light or dark look, your own note colours, size, font and
+  language.
 
 New versions, source code and problem reports:
 https://github.com/UnPrioritized/Spiderweb
@@ -66,7 +67,7 @@ new version, replace just Spiderweb.exe in that folder; everything else stays.
 
 Spiderweb can look on GitHub for a new version when it starts (it asks you
 once how often: every start, once a day, week or month, or never; change it
-later in Help > About). It only asks GitHub for the list of versions; nothing
+later in Settings, the gear button, on the General tab). It only asks GitHub for the list of versions; nothing
 about you or your work is sent, and nothing is downloaded by itself.
 
 Getting started
@@ -91,8 +92,8 @@ Good to know
   With Multi channel, each channel goes into its own track, from that
   track down. Use the same PPQ in both (the ticks are copied as
   they are).
-  Paste from Domino (Ctrl+Shift+V) does the opposite: notes copied in
-  Domino (Ctrl+C there) become one shape, starting at the play line.
+  Pasting does the opposite: notes copied in Domino (Ctrl+C there) and
+  pasted in Spiderweb (Ctrl+V) become one shape, starting at the play line.
   Only the notes come along (no controllers).
 - Domino can't open MIDI files with a PPQ of 32767 or higher. Spiderweb warns
   you (the PPQ turns red) but still writes them.
@@ -109,8 +110,8 @@ Good to know
 
 Running from source
 -------------------
-Needs Windows (Linux should work too, but no Linux user has tested it yet:
-please report how it goes), Python 3.10 or newer (python.org; tested with 3.14; Tkinter
+Needs Windows or Linux (a Linux user reports it works; copying notes to
+and from Domino works on Windows only), Python 3.10 or newer (python.org; tested with 3.14; Tkinter
 comes with it) and NumPy (fast maths for millions of notes).
 Double-click Spiderweb.bat. If NumPy
 isn't installed yet, Spiderweb offers to install it for you; or type
