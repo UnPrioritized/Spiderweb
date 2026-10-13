@@ -1,5 +1,19 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
+Version 1.5.2
+
+What's new:
+
+• Sustain: each note can be held to a set length at most, or stopped every so many ticks (the sustain starts again with no gap). You can also put stops by hand: they show as lines on the piano roll that you can drag, add and remove. Lengths in ticks or beats, and the piano roll stays usable while the window is open.
+
+• Hz bass works on text: one tone for all the letters, and the text keeps its length.
+
+• Chop and Slice are no longer beta.
+
+• Help pages brought up to date, with a new page listing every shape.
+
+• Fixes: Hz bass notes stay on their beats when a shape's left side is dragged or its text is retyped; text erased and typed again keeps its settings; a shape fits its notes again after its box is changed.
+
 Version 1.5.1
 
 Before you update:
