@@ -48,6 +48,7 @@ _ATTRIB_MIDI_VOICES, _ATTRIB_MIDI_VOICES_ACTIVE = 0x12003, 0x12004
 _ATTRIB_MIDI_CPU, _ATTRIB_MIDI_SRC, _ATTRIB_MIDI_KILL, _ATTRIB_MIDI_QUEUE_ASYNC = 0x12001, 0x12006, 0x12007, 0x1200d
 _ATTRIB_VOL, _ATTRIB_BUFFER = 2, 13
 _CONFIG_UPDATEPERIOD = 1
+_CONFIG_MIDI_COMPACT = 0x10400
 _EV_END, _EV_NOTE, _EV_PROGRAM, _EV_PITCH, _EV_DRUMS, _EV_TEMPO = 0, 1, 2, 4, 6, 62
 _EVENTS_RAW = 0x10000
 
@@ -132,6 +133,12 @@ def _load():
         fn = getattr(midi, name)
         fn.argtypes, fn.restype = args, res
     _dlls = bass, midi
+    # BASSMIDI's own "compacting" off: 2 s after any stream closes it throws away the samples no stream uses, in its
+    # own thread. The preview's pieces open and close streams all the time, each loading its samples: one freed while
+    # being loaded crashed Spiderweb (heap corruption in StreamLoadSamples, a user's crash log 2026-10-13; measured
+    # with a big SFZ piano, 2 of 3 runs crashed in the first seconds, none with this off). The help file advises it
+    # off when StreamLoadSamples is used. Samples now stay loaded until their soundfont is closed.
+    bass.BASS_SetConfig(_CONFIG_MIDI_COMPACT, 0)
     # BASS stopped while Python can still answer: its sound thread asking a player for sound while Python shuts
     # down crashed the program on Linux (measured in WSL, a song playing when the window closed)
     atexit.register(bass.BASS_Free)
@@ -174,6 +181,13 @@ class Synth:
         self._lock = threading.Lock()
         self._users = {}  # font -> renders using it now (an old font is only closed when none are left)
         self._old = set()  # fonts replaced, to close once unused
+        self._loading = threading.Lock()  # samples loaded by one thread at a time (see _load_samples)
+
+    def _load_samples(self, h):
+        """The samples stream h needs, loaded one thread at a time: six at once into one soundfont crashed (with
+        compacting on; together with it off, as safe as it gets). Already loaded ones cost nothing."""
+        with self._loading:
+            self.midi.BASS_MIDI_StreamLoadSamples(h)
 
     def _init(self, device):
         ok = bool(self.bass.BASS_Init(device, RATE, 0, None, None)) or \
@@ -246,7 +260,7 @@ class Synth:
             used = self._take()
             font = _Font(used, -1, 0)
             self.midi.BASS_MIDI_StreamSetFonts(h, ctypes.byref(font), 1)
-            self.midi.BASS_MIDI_StreamLoadSamples(h)
+            self._load_samples(h)
             self.bass.BASS_StreamFree(h)
             self._give(used)
 
@@ -267,7 +281,7 @@ class Synth:
             font = _Font(sf, -1, 0)
             self.midi.BASS_MIDI_StreamSetFonts(h, ctypes.byref(font), 1)
             bass.BASS_ChannelSetAttribute(h, _ATTRIB_MIDI_VOICES, float(voices))
-            self.midi.BASS_MIDI_StreamLoadSamples(h)
+            self._load_samples(h)
             # past the last note (the stream can't jump there): from PREROLL before the last note ends, so the
             # ring after it is heard
             length = bass.BASS_ChannelGetLength(h, _POS_BYTE) // 8

@@ -77,6 +77,7 @@ class Preview:
         self.last = 0  # the frame the last note ends at
         self.ends = {}  # piece -> the frame the ring died away at in it
         self.chunks, self.jobs, self.ver = {}, {}, {}  # made pieces, pieces being made, each piece's version
+        self.threads = []  # the threads making pieces, thrown-away ones too (at most WORKERS running)
         self.took = []  # seconds the last few pieces with notes in them took (for the speed)
         self.voices_used = 0  # the most voices at once in the pieces made since the settings last changed
         self.player, self.play_at = None, 0  # the player, the song frame it asks for next
@@ -298,13 +299,18 @@ class Preview:
             if i not in keep:
                 job.cancel.set()
                 del self.jobs[i]
+        # (a piece thrown away still runs until it sees cancel, which waits while its samples load: counted until it
+        # ends, or a slider dragged over a big soundfont piled up threads)
+        self.threads = [t for t in self.threads if t.is_alive()]
         if self.ev is not None and not self.loading() and (self.playing() or self.settled()):
             for i in want:
-                if len(self.jobs) >= WORKERS:
+                if len(self.threads) >= WORKERS:
                     break
                 if i not in self.chunks and i not in self.jobs:
                     job = self.jobs[i] = _Job(i, self.ver.get(i, 0))
-                    threading.Thread(target=self._work, args=(job, self.ev, self.ppq), daemon=True).start()
+                    t = threading.Thread(target=self._work, args=(job, self.ev, self.ppq), daemon=True)
+                    t.start()
+                    self.threads.append(t)
         if self.player is not None:
             pos = self.player.position()
             if pos is not None:
