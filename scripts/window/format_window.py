@@ -13,7 +13,7 @@ from files import clipboard
 from files import colour_list as CL
 from files.lang import tr
 from window import look
-from window.widgets import keep_width, remember_place
+from window.widgets import name_list, remember_place, set_names
 
 WS = re.compile(r"^[ \t]+|[ \t]+$", re.M)
 TAGS = [("{n}", "fmt.tag_n"), ("{n0}", "fmt.tag_n0"), ("{n:2}", "fmt.tag_n2"), ("{hex}", "fmt.tag_hex"),
@@ -56,7 +56,7 @@ class FormatWindow(tk.Toplevel):
         r = ttk.Frame(box)
         r.pack(fill="x")
         ttk.Label(r, text=tr("fmt.format")).pack(side="left")
-        self.box = keep_width(ttk.Combobox(r, width=32, state="readonly"))
+        self.box = name_list(ttk.Combobox(r, width=32, state="readonly"))
         self.box.pack(side="left", padx=6)
         self.box.bind("<<ComboboxSelected>>", lambda e: self.pick(self.box.get()))
         ttk.Button(r, text=tr("fmt.save_as"), command=self.save_as).pack(side="left")
@@ -143,11 +143,7 @@ class FormatWindow(tk.Toplevel):
 
     def show_format(self):
         """Every control shows self.fmt (list self.cur)."""
-        names = [f["name"] for f in self.built + self.yours]
-        if self.fmt["name"] not in names:
-            names.append(self.fmt["name"])
-        self.box.config(values=names)
-        self.box.set(self.fmt["name"])
+        self.show_format_name()
         mine = not self.is_built() and any(f["name"] == self.fmt["name"] for f in self.yours)
         for b in (self.rename_btn, self.delete_btn):
             b.config(state="normal" if mine else "disabled")
@@ -194,8 +190,10 @@ class FormatWindow(tk.Toplevel):
             self.show_format_name()
 
     def show_format_name(self):
-        names = [f["name"] for f in self.built + self.yours] + [self.fmt["name"]]
-        self.box.config(values=list(dict.fromkeys(names)))
+        """The list: the built-in formats, then yours newest first (one being made, not saved yet, on top)."""
+        top = [f["name"] for f in self.built]
+        saved = list(dict.fromkeys([self.fmt["name"]] + [f["name"] for f in reversed(self.yours)]))
+        set_names(self.box, top, [n for n in saved if n not in top])
         self.box.set(self.fmt["name"])
 
     def typed(self, k):

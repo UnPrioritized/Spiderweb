@@ -146,6 +146,13 @@ def set_names(cb, top, saved):
     return values
 
 
+def name_index(cb):
+    """The picked choice's place in the names as given to set_names (ready-made, then saved: the divider not
+    counted), or -1 (none, or the divider)."""
+    k, d = cb.current(), getattr(cb, "divider_at", None)
+    return -1 if k < 0 or k == d else k - 1 if d is not None and k > d else k
+
+
 def on_screen(widget, x, y):
     """Is the point (x, y) (screen pixels) on one of the screens? (Windows: any monitor; elsewhere the screen Tk
     knows, which on Linux spans them all.)"""

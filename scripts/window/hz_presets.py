@@ -139,9 +139,10 @@ class PresetBar:
         Tooltip(self.preset_del, tr("hz.preset_delete_tip"))
 
     def presets(self):
-        """Every preset in the list's order: [(key, name, sound)], ours first."""
+        """Every preset in the list's order: [(key, name, sound)], ours first, then yours newest first (user
+        2026-10-14)."""
         return ([(("ours", k), tr(f"hz.preset_{k}"), v) for k, v in OURS.items()] +
-                [(("yours", p["name"]), p["name"], p["sound"]) for p in self.yours])
+                [(("yours", p["name"]), p["name"], p["sound"]) for p in reversed(self.yours)])
 
     def canon(self, key, sound):
         """A preset's sound as the window's own settings would be (JSON), to tell whether the sound is it."""

@@ -272,7 +272,7 @@ def formula_menu(m, host, picks):
         saved = load_patterns(layer)
         if saved:
             menu.add_separator()
-        for item in saved:
+        for item in reversed(saved):  # (newest first, user 2026-10-14)
             menu.add_radiobutton(label=item["name"], value="saved:" + item["name"], variable=pick,
                                  command=lambda l=layer, it=item: host.set_formula(l, None, it))
         menu.add_separator()

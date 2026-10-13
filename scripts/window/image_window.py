@@ -18,7 +18,7 @@ from files.lang import tr
 from files.speed import Photo
 from notes import picture as P
 from window import look
-from window.widgets import Tooltip, keep_width, placed
+from window.widgets import Tooltip, name_list, placed, set_names
 
 PREVIEW_W, PREVIEW_H = 900, 520  # the preview's size to start with (it grows with the window)
 KB = 36  # the keyboard drawn beside the preview, in pixels
@@ -348,7 +348,7 @@ class ImageWindow(tk.Toplevel):
         r = ttk.Frame(f)
         r.pack(fill="x", pady=1)
         ttk.Label(r, text=tr("image.format"), width=15).pack(side="left")
-        self.fmt_box = keep_width(ttk.Combobox(r, width=24, state="readonly"))
+        self.fmt_box = name_list(ttk.Combobox(r, width=24, state="readonly"))
         self.fmt_box.pack(side="left")
         self.fmt_box.bind("<<ComboboxSelected>>", lambda e: self.set_fmt(self.fmt_box.get()))
         r = ttk.Frame(f)
@@ -489,7 +489,8 @@ class ImageWindow(tk.Toplevel):
         self.kind_box.current([k for k, _ in self.kinds].index(s["blend"]))
         self.look_box.current([k for k, _ in self.looks].index(s["look"]))
         self.by_box.current([k for k, _ in self.bys].index(s["by"]))
-        self.fmt_box.config(values=[f["name"] for f in self.formats()])
+        from files import colour_list as CL
+        set_names(self.fmt_box, [f["name"] for f in CL.built_in()], [f["name"] for f in reversed(CL.load_formats())])
         self.fmt_box.set(self.format()["name"])
         self.scales["colours"].config(to=16 if self.uses10() else 15)
         project = self.app.all16()  # (the project's "Use channel 10" covers it: ticked and greyed)

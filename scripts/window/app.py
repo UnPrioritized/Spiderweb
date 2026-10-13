@@ -81,7 +81,7 @@ from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.widgets import (REDO_KEYS, UNDO_KEYS, Scrub, StatusLine, Tooltip, bad, fit_dropdowns, good, grid_shown,
-                            keep_width, remember_good, watch_bad)
+                            keep_width, letter_jump, remember_good, watch_bad)
 
 
 VEL_KEYS = ("vel0", "vel1")
@@ -621,6 +621,7 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
         r += 1
         ttk.Label(box, text=tr("app.midi_out")).grid(row=r, column=0, sticky="w", pady=(3, 0))
         dev = keep_width(ttk.Combobox(box, textvariable=self.midi_device, state="readonly", values=devices()))
+        letter_jump(dev)
         dev.configure(postcommand=lambda: dev.configure(values=devices()))  # re-list when it opens
         dev.grid(row=r, column=1, sticky="ew", padx=5, pady=(3, 0))
         r += 1

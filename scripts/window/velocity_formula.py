@@ -11,7 +11,7 @@ from files.mathexpr import calc, fmt
 from notes.pattern import PATTERN_PRESETS, PRESET_ALONG, formula_loop, new_pattern
 from window.panel_custom import GAP_COLOR
 from window.pattern_dialog import load_patterns, saved_pattern
-from window.widgets import Scrub, Tooltip, bad, good, keep_width
+from window.widgets import Scrub, Tooltip, bad, good, name_index, name_list, set_names
 
 VEL_HEIGHT = 20.0  # a preset's height to start with, in velocity steps (on the piano roll it's 4 keys)
 VEL_LOOPS = 4.0
@@ -32,7 +32,7 @@ class VelocityFormulaBar(ttk.Frame):
         self.app = app
         app.vel_pattern = vel_pattern()
         self.pick = tk.StringVar()
-        self.box = keep_width(ttk.Combobox(self, textvariable=self.pick, state="readonly", width=14))
+        self.box = name_list(ttk.Combobox(self, textvariable=self.pick, state="readonly", width=14))
         self.box.pack(side="left", padx=(6, 6))
         self.box.bind("<<ComboboxSelected>>", lambda e: self.on_pick())
         self.box.bind("<Button-1>", lambda e: self.fill_list(), add="+")  # (saved ones may have changed)
@@ -49,11 +49,13 @@ class VelocityFormulaBar(ttk.Frame):
     def fill_list(self):
         # (not ones that move along: velocity can't go back in time)
         self.items = [("preset", pid, name) for pid, name, _, _ in PATTERN_PRESETS if pid not in PRESET_ALONG]
-        self.items += [("saved", item, item["name"]) for item in load_patterns("pattern") if not item.get("along")]
-        self.box.config(values=[name for _, _, name in self.items])
+        top = len(self.items)
+        self.items += [("saved", item, item["name"]) for item in reversed(load_patterns("pattern"))
+                       if not item.get("along")]  # (newest first, user 2026-10-14)
+        set_names(self.box, [name for _, _, name in self.items[:top]], [name for _, _, name in self.items[top:]])
 
     def on_pick(self):
-        i = self.box.current()  # (by place: a saved pattern may have a preset's name)
+        i = name_index(self.box)  # (by place: a saved pattern may have a preset's name)
         if 0 <= i < len(self.items):
             kind, what, _ = self.items[i]
             old = self.app.vel_pattern

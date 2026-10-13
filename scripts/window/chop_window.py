@@ -295,7 +295,7 @@ class ChopWindow(ToolWindow):
         saved = load_rhythms()
         if saved:
             m.add_separator()
-            for r in saved:
+            for r in reversed(saved):  # (newest first, user 2026-10-14)
                 m.add_command(label=r["name"], command=lambda r=r: self.pick_saved(r))
 
     def pick(self, name):

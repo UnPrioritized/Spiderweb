@@ -15,7 +15,7 @@ from window import button_look, look, palettes
 from window.builtin_settings import BuiltinPanel
 from window.drawer import clean_name
 from window.updates import often_box
-from window.widgets import Tooltip, keep_width, letter_jump, remember_place
+from window.widgets import Tooltip, keep_width, letter_jump, name_list, remember_place, set_names
 
 
 def look_box(parent):
@@ -216,6 +216,7 @@ class SettingsWindow(tk.Toplevel):
         box = self.language_box = ttk.Combobox(row, textvariable=var, values=names, state="readonly",
                                                width=max(18, max(len(n) for n in names) + 2))
         box.pack(side="left", padx=(6, 0))
+        letter_jump(box)
         Tooltip(box, tr("language.tip"))
         note = self.language_note = ttk.Label(page, text="", foreground=look.WARN, wraplength=wrap, justify="left")
         if saved != lang.LANGUAGE:  # (picked before, not put on yet: said for as long as it's true)
@@ -273,6 +274,7 @@ class SettingsWindow(tk.Toplevel):
         dev = self.midi_box = ttk.Combobox(page, textvariable=app.midi_device, state="readonly", values=devices(),
                                            width=30)
         keep_width(dev)
+        letter_jump(dev)
         dev.configure(postcommand=lambda: dev.configure(values=devices()))  # (re-listed when it opens)
         dev.grid(row=0, column=1, sticky="w", pady=3)
         ttk.Separator(page).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 8))
@@ -543,7 +545,7 @@ class SettingsWindow(tk.Toplevel):
         ttk.Separator(page).grid(row=r, column=0, columnspan=2, sticky="ew", pady=(12, 8))
         ttk.Label(page, text=tr("palette.label")).grid(row=r + 1, column=0, sticky="e", padx=(0, 8), pady=3)
         self.pal_var = tk.StringVar()
-        self.pal_box = keep_width(ttk.Combobox(page, textvariable=self.pal_var, state="readonly", width=24))
+        self.pal_box = name_list(ttk.Combobox(page, textvariable=self.pal_var, state="readonly", width=24))
         self.pal_box.grid(row=r + 1, column=1, sticky="w", pady=3)
         self.pal_box.bind("<<ComboboxSelected>>", lambda e: self.pick_palette())
         Tooltip(self.pal_box, tr("palette.tip"))
@@ -578,9 +580,9 @@ class SettingsWindow(tk.Toplevel):
 
     def show_palettes(self):
         """The list, the one in use, its colours; Rename / Delete only for the user's own."""
-        names = palettes.names()
+        names = palettes.names_newest()
         self.pal_names = {self.shown_name(n): n for n in names}
-        self.pal_box.config(values=list(self.pal_names))
+        set_names(self.pal_box, list(self.pal_names)[:1], list(self.pal_names)[1:])
         now = palettes.picked()
         self.pal_var.set(self.shown_name(now))
         own = ["!disabled"] if now != palettes.DEFAULT else ["disabled"]

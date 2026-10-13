@@ -26,7 +26,7 @@ from window import big_ask, look
 from window.formula_host import FormulaHost
 from window.pattern_dialog import load_patterns, saved_pattern
 from window.tool_window import ToolWindow
-from window.widgets import Scrub, Tooltip, bad, good, grid_shown, keep_width
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown, name_index, name_list, set_names
 
 LENGTHS = [s for s, _ in SNAP_LIST if s != "off"]  # "one copy every" choices (the snap list's note lengths)
 CHOICES = {"kind": KINDS, "speed": SPEEDS, "colours": COLOURS, "flip": FLIPS, "way": WAYS, "top": TOPS}
@@ -54,9 +54,9 @@ class PathWindow(ToolWindow):
         kind = self.choice(box, 1, "kind", tr("path.kind"))
         lb = ttk.Label(kind, text=tr("path.formula"), foreground=look.HINT)
         lb.grid(row=0, column=1, sticky="e", padx=(10, 3))
-        self.formula_box = keep_width(ttk.Combobox(kind, state="readonly", width=14, postcommand=self.formula_list))
+        self.formula_box = name_list(ttk.Combobox(kind, state="readonly", width=14, postcommand=self.formula_list))
         self.formula_box.grid(row=0, column=2, sticky="w")
-        self.formula_box.bind("<<ComboboxSelected>>", lambda e: self.pick_formula(e.widget.current()))
+        self.formula_box.bind("<<ComboboxSelected>>", lambda e: self.pick_formula(name_index(e.widget)))
         for w in (lb, self.formula_box):
             Tooltip(w, tr("path.tip_formula"))
         self.custom_button = ttk.Button(kind, text=tr("roll_menu.custom"), command=self.custom_formula)
@@ -584,12 +584,15 @@ class PathWindow(ToolWindow):
     # ---- the formula along the path (pattern.py: the same presets / saved ones / Custom… as a curve's)
 
     def formula_list(self):
-        """The Formula dropdown's choices: none, the presets, the saved ones (read again each time it opens)."""
-        self.saved = load_patterns("pattern")
-        self.formula_box.config(values=[tr("roll_menu.none")] + [name for _, name, _, _ in PATTERN_PRESETS]
-                                + [p["name"] for p in self.saved])
+        """The Formula dropdown's choices: none, the presets, the saved ones newest first (read again each time it
+        opens)."""
+        self.saved = load_patterns("pattern")[::-1]
+        set_names(self.formula_box, [tr("roll_menu.none")] + [name for _, name, _, _ in PATTERN_PRESETS],
+                  [p["name"] for p in self.saved])
 
     def pick_formula(self, i):
+        if i < 0:  # (the divider)
+            return
         old = self.cfg.get("pattern")
         if i <= 0:
             new = None

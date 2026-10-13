@@ -154,6 +154,17 @@ def names():
     return [DEFAULT] + sorted(user_palettes(), key=str.casefold)
 
 
+def names_newest():
+    """The palettes as the Settings list shows them (user 2026-10-14): DEFAULT first, then the user's, the last
+    saved / changed on top."""
+    def when(item):
+        try:
+            return -os.path.getmtime(item[1][0])
+        except OSError:
+            return 0.0
+    return [DEFAULT] + [n for n, _ in sorted(user_palettes().items(), key=lambda it: (when(it), it[0].casefold()))]
+
+
 def colours_of(name):
     if name != DEFAULT:
         got = user_palettes().get(name)
