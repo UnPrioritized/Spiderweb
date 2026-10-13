@@ -15,8 +15,12 @@ from files.system import error_box
 LOG = os.path.join(USER, "errors.log")
 OLD_LOG = os.path.join(USER, "errors-old.log")  # errors.log moves here when it gets big
 MAX_LOG = 1_000_000  # bytes
+CRASH_NOW = os.path.join(USER, "crash-now.log")  # this run's: faulthandler writes here if Spiderweb crashes
+CRASH_LOG = os.path.join(USER, "crash.log")  # every crash so far (crash-now.log moved in on the next start)
+OLD_CRASH_LOG = os.path.join(USER, "crash-old.log")
 
-_app = None  # the window, once there is one
+_app = None
+_crash_file = None  # (kept open the whole run: faulthandler writes into it)  # the window, once there is one
 _told = False
 _told_memory = False  # (out of memory said once too, apart from other errors)
 _seen = {}  # error text -> times it happened this session (an error on every mouse move would flood the log)
@@ -86,6 +90,38 @@ def report(exc_type, exc, tb, where="", fatal=False):
             pass
         return
     tell_user(saved, fatal, memory)
+
+
+def watch_crashes():
+    """A crash inside a DLL or compiled code (BASS, Numba, Tk) ends the program before Python can log anything.
+    faulthandler then writes what every thread was doing into crash-now.log; the next start moves that into
+    crash.log. A run that ended normally leaves only its start line, which the next start drops."""
+    global _crash_file
+    import faulthandler
+    try:
+        with open(CRASH_NOW, encoding="utf-8", errors="replace") as f:
+            last = f.read().strip()
+    except OSError:
+        last = ""
+    if "\n" in last:  # (more than the start line: the last run crashed)
+        try:
+            if os.path.getsize(CRASH_LOG) > MAX_LOG:
+                os.replace(CRASH_LOG, OLD_CRASH_LOG)
+        except OSError:
+            pass
+        try:
+            with open(CRASH_LOG, "a", encoding="utf-8") as f:
+                f.write(last + "\n\n")
+        except OSError:
+            return  # (crash-now.log kept for the next start rather than lost)
+    try:
+        _crash_file = open(CRASH_NOW, "w", encoding="utf-8")
+        _crash_file.write(f"==== started {time.strftime('%Y-%m-%d %H:%M:%S')}   Spiderweb {VERSION}   Python "
+                          f"{platform.python_version()} {platform.architecture()[0]}   {platform.platform()}\n")
+        _crash_file.flush()
+        faulthandler.enable(_crash_file, all_threads=True)
+    except (OSError, ValueError, RuntimeError):
+        pass
 
 
 def install(app):

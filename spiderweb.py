@@ -113,7 +113,7 @@ Files (the scripts live in scripts/, one subfolder per group):
   files/            saving, MIDI, sound
     project.py       project files, autosave (+ its backup), MIDI export
     safefile.py      saving without half-written files
-    errors.py        errors.log and the "something went wrong" message
+    errors.py        errors.log and the "something went wrong" message; crash.log when the program dies outright
     about.py         version number, the program's folder, the user folder (moving old files in)
     settings.py      the app's own settings (user/settings.ini: the look, later more)
     (window/) settings_window.py  the Settings window (gear button): Look (+ note colour palettes), Updates
@@ -348,6 +348,7 @@ if __name__ == "__main__":
         pass
     from files.about import move_old_files
     not_moved = move_old_files()
+    errors.watch_crashes()
     if not check_numpy():
         sys.exit(1)
     try:
