@@ -7,7 +7,7 @@ window open, each change is one of its steps (its Ctrl+Z); closed, one undo step
 
 from files.lang import tr
 from notes.sustain import MOST_PAST, MOST_POINTS, is_sustained
-from roll.roll_shared import SHIFT
+from roll.roll_shared import CTRL, SHIFT
 from window import look
 from window.sustain_window import bare_notes, target_indices
 
@@ -45,9 +45,10 @@ class SustainStops:
         del kept[:-8]
         return box
 
-    def stop_hit(self, x, y):
-        """The stop line under the mouse (Select tool, nothing being drawn): (shape number, place in "at"), or None."""
-        if self.app.tool.get() != "select" or self.draft or self.sx is None:
+    def stop_hit(self, x, y, state=0):
+        """The stop line under the mouse (Select tool, nothing being drawn): (shape number, place in "at"), or None.
+        Ctrl held: none (Ctrl+click / Ctrl+drag keep their meaning over the line, hunt)."""
+        if self.app.tool.get() != "select" or self.draft or self.sx is None or state & CTRL:
             return None
         g = GRAB * self.scale
         for i, k, tick, k0, k1 in reversed(self.stop_lines()):
@@ -88,7 +89,7 @@ class SustainStops:
 
     def stop_press(self, e):
         """A left press on a stop line: it's held (one undo step when the Sustain window is closed). True if taken."""
-        hit = self.stop_hit(e.x, e.y)
+        hit = self.stop_hit(e.x, e.y, e.state)
         if hit is None:
             return False
         if not self.app.sustain_window:
@@ -147,7 +148,7 @@ class SustainStops:
 
     def stop_right(self, e):
         """A right-click on a stop line: the stop goes. True if taken."""
-        hit = self.stop_hit(e.x, e.y)
+        hit = self.stop_hit(e.x, e.y, e.state)
         if hit is None:
             return False
         i, k = hit

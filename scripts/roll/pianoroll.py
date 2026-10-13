@@ -1322,7 +1322,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if not self.drag and not self.draft and (self.path_motion(e) or self.path_hit(e.x, e.y)):
             self.set_cursor("fleur")  # (Copy along a path: B follows the mouse, or a point of its path is under it)
             return
-        if not self.drag and self.stop_hit(e.x, e.y) is not None:
+        if not self.drag and self.stop_hit(e.x, e.y, e.state) is not None:
             self.set_cursor("sb_h_double_arrow")  # (a sustained shape's stop line: drag it sideways)
             return
         if not self.drag:
