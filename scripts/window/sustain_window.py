@@ -65,7 +65,11 @@ class SustainWindow(tk.Toplevel):
         for w in (self.own_btn, e, lb):
             Tooltip(w, tr("sustain.own_tip"))
         ttk.Separator(box).pack(fill="x", pady=(10, 6))
-        self.most_on, self.most_var, self.most_box, self.most_tick = self.length_row(box, "most", self.on_most)
+        self.rows = {}  # key -> [tick var or None, box var, box, tick or None, box as last used]
+        self.length_row(self.new_row(box), "most")
+        row = self.new_row(box)
+        self.length_row(row, "every")
+        self.length_row(row, "from", tick=False)
         row = ttk.Frame(box)
         row.pack(anchor="e", pady=(10, 0))
         ttk.Button(row, text=tr("range_window.ok"), command=self.ok).pack(side="left")
@@ -82,58 +86,75 @@ class SustainWindow(tk.Toplevel):
         self.grab_set()  # (the shapes it works on stay picked while it's open)
         self.focus_set()
 
-    def length_row(self, box, key, apply):
-        """A row "[ ] <text> [box] ticks" for sh["sustain"][key] (beats, shown in ticks): ticked while any shape has
-        it; the box empty when they differ. -> (tick var, box var, box, tick)."""
-        have = [t["sustain"][key] for t in self.tgts if key in (t.get("sustain") or {})]
-        on = tk.BooleanVar(value=bool(have))
-        var = tk.StringVar(value=fmt(self.ticks(have[0])) if have and len(set(have)) == 1 else "")
+    def new_row(self, box):
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(2, 0))
-        tick = ttk.Checkbutton(row, text=tr("sustain." + key), variable=on, command=lambda: self.tick_length(var))
-        tick.pack(side="left")
+        return row
+
+    def length_row(self, row, key, tick=True):
+        """"[ ] <text> [box] ticks" (tick=False: "<text> [box] ticks", a number going with the row's tick) for
+        sh["sustain"][key] (beats, shown in ticks): ticked while any shape has it; the box empty when they differ."""
+        have = self.have(key)
+        on = tk.BooleanVar(value=bool(have)) if tick else None
+        var = tk.StringVar(value=fmt(self.ticks(have[0])) if have and len(set(have)) == 1 else "" if tick else "0")
+        if tick:
+            w = ttk.Checkbutton(row, text=tr("sustain." + key), variable=on, command=lambda: self.tick_length(key))
+        else:
+            w = ttk.Label(row, text=tr("sustain." + key))
+        w.pack(side="left", padx=(0 if tick else 6, 0))
         e = ttk.Entry(row, textvariable=var, width=8)
         e.pack(side="left", padx=(4, 0))
-        e.bind("<Return>", lambda ev: (apply(), "break")[1])
-        e.bind("<FocusOut>", lambda ev: apply())
+        e.bind("<Return>", lambda ev: (self.on_length(key), "break")[1])
+        e.bind("<FocusOut>", lambda ev: self.on_length(key))
         lb = ttk.Label(row, text=tr("sustain.ticks"))
         lb.pack(side="left", padx=(4, 0))
-        Scrub(self.app, [(e, var, apply)], (1, 10, 1), 1, MOST_GAP * self.app.ppq, label=lb, no_undo=True)
-        for w in (tick, e, lb):
-            Tooltip(w, tr("sustain.%s_tip" % key))
-        return on, var, e, tick
+        Scrub(self.app, [(e, var, lambda: self.on_length(key))], (1, 10, 1), 1 if tick else 0,
+              MOST_GAP * self.app.ppq, label=lb, no_undo=True)
+        for x in (w, e, lb):
+            Tooltip(x, tr("sustain.%s_tip" % key))
+        self.rows[key] = [on, var, e, w if tick else None, var.get()]
 
-    def tick_length(self, var):
+    def have(self, key):
+        """The shapes' values of sustain[key] (of "from": every shape stopping "every", 0 when it has none)."""
+        if key == "from":
+            return [t["sustain"].get("from", 0) for t in self.tgts if "every" in (t.get("sustain") or {})]
+        return [t["sustain"][key] for t in self.tgts if key in (t.get("sustain") or {})]
+
+    def tick_length(self, key):
         """A length row ticked with an empty box: one beat to start with."""
-        if self.length(var) is None:
+        var = self.rows[key][1]
+        if self.length(key) is None:
             var.set(fmt(self.app.ppq))
         self.change()
 
-    def length(self, var):
-        """A typed length in beats (at least a tick), or None (empty / not a number)."""
+    def length(self, key):
+        """A row's typed length in beats (at least a tick; "from" 0 too), or None (empty / not a number)."""
         try:
-            ticks = calc(var.get())
+            ticks = calc(self.rows[key][1].get())
         except (ValueError, ZeroDivisionError):
             return None
-        if not math.isfinite(ticks) or ticks < 0.5:
+        if not math.isfinite(ticks) or ticks < (0 if self.rows[key][0] is None else 0.5):
             return None
-        return min(math.floor(ticks + 0.5) / self.app.ppq, MOST_GAP)
+        return min(max(math.floor(ticks + 0.5), 0) / self.app.ppq, MOST_GAP)
 
-    def on_length(self, key, on, var, box):
-        """A length typed / stepped in a length row: ticks the row."""
+    def on_length(self, key):
+        """A length typed / stepped in a row: ticks the row (a number without a tick: its row's)."""
+        on, var, box = self.rows[key][:3]
         if self.closed or str(box.cget("state")) == "disabled":
             return
-        beats = self.length(var)
+        beats = self.length(key)
         if beats is None:  # (a wrong number: back to the last good one, or empty)
-            have = [t["sustain"][key] for t in self.tgts if key in (t.get("sustain") or {})]
-            return var.set(fmt(self.ticks(have[0])) if have and len(set(have)) == 1 else "")
+            have = self.have(key)
+            return var.set(fmt(self.ticks(have[0])) if have and len(set(have)) == 1 else
+                           "" if on is not None else "0")
         var.set(fmt(self.ticks(beats)))
-        on.set(True)
+        own = next(k for k, r in self.rows.items() if r[2].master is box.master and r[0] is not None)
+        if not self.rows[own][0].get():
+            self.rows[own][0].set(True)
+            if self.length(own) is None:
+                self.rows[own][1].set(fmt(self.app.ppq))
         self.store()
         self.hist.mark(key)
-
-    def on_most(self):
-        self.on_length("most", self.most_on, self.most_var, self.most_box)
 
     def ticks(self, beats):
         return int(round(beats * self.app.ppq))
@@ -150,16 +171,18 @@ class SustainWindow(tk.Toplevel):
         return auto_gap(np.asarray(self.app.notes_of({k: v for k, v in t.items() if k != "sustain"})))
 
     def state(self):
-        return json.dumps([self.on_var.get(), self.mode.get(), self.gap_var.get(), self.most_on.get(),
-                           self.most_var.get()])
+        return json.dumps([self.on_var.get(), self.mode.get(), self.gap_var.get(),
+                           {k: [r[0] and r[0].get(), r[1].get()] for k, r in self.rows.items()}])
 
     def put_state(self, state):
-        on, mode, gap, most_on, most = json.loads(state)
+        on, mode, gap, rows = json.loads(state)
         self.on_var.set(on)
         self.mode.set(mode)
         self.gap_var.set(gap)
-        self.most_on.set(most_on)
-        self.most_var.set(most)
+        for k, (ticked, text) in rows.items():
+            if self.rows[k][0] is not None:
+                self.rows[k][0].set(ticked)
+            self.rows[k][1].set(text)
         self.store()
 
     def gap(self):
@@ -185,21 +208,28 @@ class SustainWindow(tk.Toplevel):
             else:  # (none picked yet / no number typed: each keeps what it had, Auto if it had none)
                 t["sustain"] = {"gap": old["gap"]} if "gap" in (old or {}) else {}
             if on:
-                self.put_length(t, old, "most", self.most_on, self.most_var)
+                self.put_length(t, old, "most", "most")
+                self.put_length(t, old, "every", "every")
+                self.put_length(t, old, "from", "every")
+                if not t["sustain"].get("from"):
+                    t["sustain"].pop("from", None)
         self.seen = self.gap_var.get()  # (the box as last used: typed past it without Enter = OK takes it)
-        self.seen_most = self.most_var.get()
+        for r in self.rows.values():
+            r[4] = r[1].get()
         state = "normal" if on else "disabled"
-        for w in (self.auto_btn, self.own_btn, self.gap_box, self.most_tick, self.most_box):
+        for w in [self.auto_btn, self.own_btn, self.gap_box] + [w for r in self.rows.values() for w in r[2:4] if w]:
             w.config(state=state)
         self.app.shapes_changed()
 
-    def put_length(self, t, old, key, on, var):
-        """A length row onto shape t: off = none; on with a number = it; on with an empty box (shapes that differ) =
-        each keeps what it had."""
-        beats = self.length(var)
-        if on.get() and beats is not None:
+    def put_length(self, t, old, key, tick):
+        """A row's number onto shape t (tick = the row whose tick it goes with): off = none; on with a number = it;
+        on with an empty box (shapes that differ) = each keeps what it had."""
+        beats = self.length(key)
+        if not self.rows[tick][0].get():
+            return
+        if beats is not None:
             t["sustain"][key] = beats
-        elif on.get() and key in (old or {}):
+        elif key in (old or {}):
             t["sustain"][key] = old[key]
 
     def change(self):
@@ -224,8 +254,9 @@ class SustainWindow(tk.Toplevel):
     def ok(self):
         if self.gap_var.get() != self.seen and self.on_var.get():
             self.on_gap()  # (a number typed without Enter counts too)
-        if self.most_var.get() != self.seen_most and self.on_var.get():
-            self.on_most()
+        for k, r in self.rows.items():
+            if r[1].get() != r[4] and self.on_var.get():
+                self.on_length(k)
         self.closed = True
         if json.dumps(self.app.shapes) != self.before:
             self.app.add_undo_step(self.before, tr("sustain.step"))

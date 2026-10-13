@@ -33,7 +33,7 @@ from notes.gateflip import is_flipped as is_gate_flipped, is_pasted_flipped, mir
 from notes.merge import clean_merge, recipe_notes, reshaped_notes as merge_reshaped, turned_notes as merge_turned
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
-from notes.sustain import clean_sustain, cut_by, is_sustained, sustained
+from notes.sustain import clean_sustain, cut_by, held, is_sustained
 from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
@@ -462,7 +462,7 @@ def fx_notes(sh, ppq, keys, get):
     notes flipped back). A hidden "_m" = the notes made flipped along those axes (the steps before a flip)."""
     if "sustain" in sh:  # (held on last, after everything else: sustain.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "sustain"})
-        return (sustained(notes, sh["sustain"], ppq), tracks) if is_sustained(sh) else (notes, tracks)
+        return held(notes, tracks, sh["sustain"], ppq) if is_sustained(sh) else (notes, tracks)
     if "picture" in sh:  # (no glue / chop / claw / strum on a picture: its notes are its picture, user)
         return _notes_tracks(sh, ppq, keys)
     fx = sh.get("fx")

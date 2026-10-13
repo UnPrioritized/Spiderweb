@@ -748,6 +748,10 @@
  "sustain.own_tip": "Gaps up to this many ticks are held over. Make it bigger than a hole to hold across the hole too.",
  "sustain.most": "Each note at most",
  "sustain.most_tip": "Each note is held to this many ticks long at most, instead of to the end of its group. It never goes past the group's end, so the shape keeps its look, and notes already longer stay as they are.\nThe number follows the PPQ.",
+ "sustain.every": "Stop every",
+ "sustain.every_tip": "The sustain stops every this many ticks, counted from the shape's first note: every note sounding there ends, and one new note per key starts on the same tick, so the sustain starts again with no gap.\nA resized shape gets more or fewer stops. The number follows the PPQ.",
+ "sustain.from": "starting at",
+ "sustain.from_tip": "Moves the stops later by this many ticks, so they needn't line up with the shape's start.",
  "sustain.list": "{name} (Sustained)",
  "gate_flip.list": "{name} (Gates flipped)"
 }

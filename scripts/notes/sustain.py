@@ -5,6 +5,8 @@ sh["sustain"] = {} (the hold gap worked out by itself), + "gap": beats (typed), 
 this long). Each key row on its own: notes whose gaps are no longer than the hold gap make one group, and every note
 of a group ends where the group's last note ends (stacked on the same key), or at its start + "most" if that comes
 first (never shorter than it was). Longer gaps are holes in the shape and stay empty, so its look is kept.
+Stops ("every": beats from the first note's start, + "from"): every note sounding across one ends there and the
+sustain starts again on the same tick, one note per key (no gap: the look is kept).
 Done last, after everything else that makes the shape's notes; only lengths change. A sustained shape keeps its
 overlaps in every Channels mode, other shapes still fix their clashes with it (engine.render).
 """
@@ -14,6 +16,8 @@ import math
 import numpy as np
 
 MOST_GAP = 10 ** 4  # beats a typed hold gap may be
+MOST_STOPS = 10 ** 6  # stops made by "every"
+MOST_PIECES = 20 * 10 ** 6  # notes the stops may cut the notes into (like Chop's limit)
 
 
 def clean_sustain(s):
@@ -27,6 +31,12 @@ def clean_sustain(s):
     most = _beats(s.get("most"))
     if most:  # (0 = held no longer than the notes are: nothing)
         out["most"] = most
+    every = _beats(s.get("every"))
+    if every:
+        out["every"] = every
+        at = _beats(s.get("from"))
+        if at:
+            out["from"] = at
     return out
 
 
@@ -102,6 +112,58 @@ def sustained(notes, sus, ppq):
     out = notes.copy()
     out[order, 1] = ends
     return out
+
+
+def held(notes, tracks, sus, ppq):
+    """A sustained shape's notes and tracks (engine.fx_notes): sustained, then cut at its stops."""
+    stops = stop_ticks(notes, sus, ppq)
+    notes = sustained(notes, sus, ppq)
+    return cut_at(notes, tracks, stops) if len(stops) else (notes, tracks)
+
+
+def stop_ticks(notes, sus, ppq):
+    """Where the sustain stops (sorted ticks inside the notes' time, from the notes before Sustain): "every" beats
+    from the first note's start (+ "from")."""
+    if not len(notes) or "every" not in sus:
+        return np.zeros(0, np.int64)
+    lo, hi = int(notes[:, 0].min()), int(notes[:, 1].max())
+    step = max(1, round(sus["every"] * ppq))
+    first = lo + round(sus.get("from", 0) * ppq)
+    k0 = max(0, (lo - first) // step + 1)  # (the first stop past the start)
+    k1 = min((hi - 1 - first) // step + 1, k0 + MOST_STOPS)
+    return first + step * np.arange(k0, max(k0, k1), dtype=np.int64)
+
+
+def cut_at(notes, tracks, stops):
+    """Every note sounding across a stop ends there and a new one starts on the same tick (no gap); the notes
+    starting on a stop on the same key make ONE note there (the sustain starts again: the longest, the loudest
+    velocity). Too many pieces = left whole."""
+    s, e = notes[:, 0], notes[:, 1]
+    a = np.searchsorted(stops, s, side="right")
+    k = np.searchsorted(stops, e, side="left") - a  # (stops inside each note)
+    k = np.maximum(k, 0)
+    if not k.any() or len(notes) + int(k.sum()) > MOST_PIECES:
+        return notes, tracks
+    rep = np.repeat(np.arange(len(notes)), k + 1)
+    j = np.arange(len(rep)) - np.repeat(np.cumsum(k + 1) - (k + 1), k + 1)  # (piece number in its note)
+    at = stops[np.clip(a[rep] + j - 1, 0, len(stops) - 1)]
+    till = stops[np.clip(a[rep] + j, 0, len(stops) - 1)]
+    out = notes[rep]
+    out[:, 0] = np.where(j == 0, s[rep], at)
+    out[:, 1] = np.where(j == k[rep], e[rep], till)
+    tr = None if tracks is None else np.asarray(tracks)[rep]
+    on = np.flatnonzero(np.isin(out[:, 0], stops))
+    if len(on) > 1:
+        o = on[np.lexsort((-out[on, 3], -out[on, 1], out[on, 0], out[on, 2]))]
+        new = np.ones(len(o), bool)
+        new[1:] = (out[o[1:], 2] != out[o[:-1], 2]) | (out[o[1:], 0] != out[o[:-1], 0])
+        first = np.flatnonzero(new)
+        out[o[first], 3] = np.maximum.reduceat(out[o, 3], first)
+        keep = np.ones(len(out), bool)
+        keep[o[~new]] = False
+        out = out[keep]
+        tr = None if tr is None else tr[keep]
+    return out, tr
 
 
 def cut_by(normal, held):
