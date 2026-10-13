@@ -119,6 +119,7 @@ def mono(size, *style):
 
 # --- Texts on the window
 HINT = pick("#777", "#a0a0a4")  # grey hints and units beside boxes
+LABEL_OFF = pick("#a0a0a0", "#7c7c80")  # a word beside a greyed box (light ttk labels don't grey by themselves)
 INFO = pick("#555", "#b4b4b8")  # status / info lines
 SOFT_TEXT = pick("#666", "#a8a8ac")  # longer help texts, legends
 FAINT_TEXT = pick("#999", "#808084")  # barely there (a version number, things not used)

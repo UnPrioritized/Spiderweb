@@ -95,7 +95,7 @@ class SustainWindow(tk.Toplevel):
         e.pack(side="left")
         e.bind("<Return>", lambda ev: (self.on_gap(), "break")[1])  # (not OK: the window stays)
         e.bind("<FocusOut>", lambda ev: self.on_gap())
-        lb = self.unit_label(row)
+        lb = self.gap_unit = self.unit_label(row)
         self.scrub(e, self.gap_var, self.on_gap, lb, 0)
         for w in (self.own_btn, e, lb):
             Tooltip(w, tr("sustain.own_tip"))
@@ -193,7 +193,8 @@ class SustainWindow(tk.Toplevel):
         self.scrub(e, var, lambda: self.on_length(key), lb, 1 if tick else 0)
         for x in (w, e, lb):
             Tooltip(x, tr("sustain.%s_tip" % key))
-        self.rows[key] = [on, var, e, w if tick else None, ""]
+        # (r[5]: the box, its unit and a word before it: greyed while its tick is off)
+        self.rows[key] = [on, var, e, w if tick else None, "", [e, lb] + ([] if tick else [w])]
 
     # ---- the shapes worked on
 
@@ -441,10 +442,19 @@ class SustainWindow(tk.Toplevel):
         elif not self.what.winfo_manager():  # (nothing to work on selected: said so, all greyed)
             self.what.pack(anchor="w", before=self.on_tick, pady=(0, 6))
         self.on_tick.config(state="normal" if self.idx else "disabled")
-        state = "normal" if self.on_var.get() and self.idx else "disabled"
-        for w in [self.auto_btn, self.own_btn, self.gap_box, self.stops_tick, self.add_btn, self.clear_btn,
-                  self.past_tick] + [w for r in self.rows.values() for w in r[2:4] if w]:
-            w.config(state=state)
+        on = self.on_var.get() and bool(self.idx)
+
+        def put(widgets, ok=True):
+            for w in widgets:
+                w.config(state="normal" if on and ok else "disabled")
+                if isinstance(w, ttk.Label):
+                    w.config(foreground="" if on and ok else look.LABEL_OFF)
+        put([self.auto_btn, self.own_btn, self.stops_tick, self.add_btn, self.clear_btn, self.past_tick] +
+            [r[3] for r in self.rows.values() if r[3]])
+        # (a box only while its way is picked / its row ticked, user)
+        put([self.gap_box, self.gap_unit], self.mode.get() == "own")
+        for key, r in self.rows.items():
+            put(r[5], self.rows[key if r[0] is not None else "every"][0].get())
         self.show_auto()
 
     def state(self):
