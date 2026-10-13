@@ -304,7 +304,7 @@ def fit_length(sh):
     (b0, _), (b1, _), (b2, _) = sh["pts"]
     bs = (b0, b1, b2, b1 + b2 - b0)
     left, width = min(bs), max(bs) - min(bs)
-    if width > 1e-12:
+    if width > 1e-12 and abs(span - width) > 1e-9:  # (already as long: untouched, not even by rounding)
         for p in sh["pts"]:
             p[0] = left + (p[0] - left) * span / width
 

@@ -28,6 +28,7 @@ from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
                             turn_velocities, why_not as gate_why_not)
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
+from notes.hzbass import fit_length
 from notes.mask import (MASK_DEFAULTS, can_mask, is_mask, mask_view, picture_like, pinned_slots, silent,
                         tidy_groups)
 from notes.merge import velocity_reversed as merge_vrev
@@ -1044,6 +1045,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
         if tidy_groups(self.shapes):  # (masks: a group of one = on its own, the first member Add; mask.py)
             self.after_idle(self.sync_mask)
         self.remake_merges()
+        for sh in self.shapes:  # ("Shape length follows the notes": after any change to its box too, hunt)
+            if (sh.get("hz") or {}).get("grow"):
+                fit_length(sh)
         busy = self._notes_time + self._mask_time  # (the masks' preview is made after the notes, mask.py)
         slow = busy > 0.15
         # (other drags make the notes AND repaint them all at every step: the repaint counts too)
