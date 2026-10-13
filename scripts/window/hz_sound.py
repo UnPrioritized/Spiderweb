@@ -156,13 +156,19 @@ class HzSound:
         on = self.preview_on.get()
         grey = p.grey() if on else []
         line = p.play_beat() if on and p.ev is not None else None
-        if line is not None and p.playing() and not self.drag:  # (playing past the right edge: the next page; not
-            # while the mouse holds a note / box: it would jump a page, user)
+        if line is not None and p.playing() and not self.drag and not self.paging:  # (playing past the right edge:
+            # the next page; not while the mouse holds a note / box: it would jump a page, user)
             x, w = self.x_of(line), c.winfo_width()
             if x > w - 6 * self.s or x < self.kb_w:
                 self.t0 = line
                 self.clamp_view()
-                return self.redraw()
+                # (once: a page that still can't show the line, e.g. a window too narrow, just goes on without it;
+                # turning again from redraw went on for ever and crashed Spiderweb)
+                self.paging = True
+                try:
+                    return self.redraw()
+                finally:
+                    self.paging = False
         shown = (tuple((round(self.x_of(a)), round(self.x_of(b))) for a, b in grey),
                  None if line is None else round(self.x_of(line)))
         if shown != p.shown:

@@ -7,7 +7,8 @@ not the whole song. What isn't made yet is greyed over the notes and clears as i
 greys (and makes again) only the stretch that changed. Playing waits at the grey; it never skips notes.
 
 The notes are looked at every TICK_MS (the shape's notes are remembered by the main window, so an unchanged shape
-costs nothing), so any change counts: this window, the main piano roll, undo, BPM / PPQ.
+costs nothing), so any change counts: this window, the main piano roll, undo, BPM / PPQ. The sound is made SETTLE
+after the last change (at once while playing). Another shape picked: the play line goes back to its first note.
 Settings: app.hz_preview (kept with the window settings in the autosave; the soundfont is a path on this PC)."""
 
 import os
@@ -26,6 +27,8 @@ AHEAD = 60.0  # seconds made ahead of the play line (or the view's left edge)
 BEHIND = 10.0  # seconds kept behind it (further back is thrown away, and greyed again)
 TAIL = 30.0  # seconds of ring after the last note at most (it ends where the soundfont's sound has died away)
 TICK_MS = 100
+SETTLE = 0.5  # seconds after the last change before the sound is made (a slider dragged changes it many times a
+# second: sound made for each step was thrown away at once, user). Playing (Space) makes it at once.
 LOADED_SHOWN = 3.0  # seconds the green "soundfont loaded" stays
 WORKERS = max(1, min(6, (os.cpu_count() or 2) - 2))  # pieces made at once
 DEFAULTS = {"on": False, "font": "", "voices": 1000, "nofx": False, "volume": 0.8, "live_mb": 1000}
@@ -77,8 +80,10 @@ class Preview:
         self.voices_used = 0  # the most voices at once in the pieces made since the settings last changed
         self.player, self.play_at = None, 0  # the player, the song frame it asks for next
         self.line = None  # the play line (song beat); None = at the first note
+        self.which = None  # the shown shape's place in app.shapes (another one picked: the line back to its start)
         self.shown = None  # what the grey looks like now (only drawn again when it changes)
         self._tick = None
+        self.changed = 0.0  # when the notes / settings last changed (the sound waits SETTLE after it)
         self.load = None  # the thread opening the soundfont (it happens in the background)
         self.loaded_at = 0.0  # when it finished (the green "loaded" shows for a few seconds)
 
@@ -144,6 +149,7 @@ class Preview:
     def clear(self, lo=None, hi=None):
         """Throws away the pieces between frames lo and hi (all without them) and stops making them. (ends too: a
         piece thrown away for being far from the view keeps its end, and a stale end would cut the sound short.)"""
+        self.changed = time.perf_counter()
         for i in list(self.ver.keys() | self.chunks.keys() | self.jobs.keys() | self.ends.keys()):
             if lo is None or (i + 1) * CHUNK * RATE > lo and i * CHUNK * RATE < hi:
                 self.ver[i] = self.ver.get(i, 0) + 1
@@ -171,6 +177,13 @@ class Preview:
         if self.app.notes_late:
             return
         sh = self.win.target()
+        which = next((i for i, s in enumerate(self.app.shapes) if s is sh), None)
+        if which != self.which:  # (another shape: its preview starts at its first note; the old song place could
+            # be far before it, user. By place, not id: undo makes new copies of the same shape)
+            self.which, self.line = which, None
+            if self.playing():
+                self.stop_play()
+                self.win.after_idle(self.replay)
         try:
             ppq, bpm, _ = self.app.read_project()
         except ValueError:
@@ -280,7 +293,7 @@ class Preview:
             if i not in keep:
                 job.cancel.set()
                 del self.jobs[i]
-        if self.ev is not None and not self.loading():
+        if self.ev is not None and not self.loading() and (self.playing() or self.settled()):
             for i in want:
                 if len(self.jobs) >= WORKERS:
                     break
@@ -295,6 +308,10 @@ class Preview:
                 self.stop_play()
         self.win.draw_preview()
         self._tick = self.win.after(TICK_MS, self.tick)
+
+    def settled(self):
+        """True once SETTLE has passed since the last change."""
+        return time.perf_counter() - self.changed >= SETTLE
 
     def grey(self):
         """(from, to) window beats not made yet, in the order they come."""
@@ -348,6 +365,12 @@ class Preview:
             return str(e)
         self.player.play(self.play_at)
         return None
+
+    def replay(self):
+        """(Another shape picked while playing) plays on from its first note, once its notes are in."""
+        if self.win.winfo_exists() and not self.playing():
+            self.play()
+            self.win.draw_preview()
 
     def put_line(self, beat):
         """The play line to this window beat (playing: plays on from there)."""

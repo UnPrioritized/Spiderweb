@@ -264,6 +264,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.close)
         c.focus_set()
         self.preview = Preview(self)
+        self.paging = False  # (draw_preview turning the page: once, see there)
         self.live = LiveKeys(self)
         self.settings_window = PreviewSettings(self)  # (hidden until Settings…)
         self.trace_win = TraceWindow(self, hidden=True)  # (... and Hz shape…: Note length rows, always there)
