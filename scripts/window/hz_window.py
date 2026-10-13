@@ -15,6 +15,7 @@ This file opens the window, lays it out and follows the selection / undo; the re
 (zoom, scrolling, drawing), hz_mouse.py (mouse and keys on the notes), hz_gates.py (gates, tune, toggles, saving
 into the shape), hz_sound.py (the key held, the preview), hz_layers.py (the layers strip)."""
 
+import copy
 import os
 import re
 import tkinter as tk
@@ -93,6 +94,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.placed = None  # the id of the note the last click placed (a double click there places one more)
         self.more_layers = None  # notes pasted from Domino for the layers under the picked one (commit puts them in)
         self.fxl, self.fx_of = {}, None  # the effects' lines (hz["fx"]) and whose they are (the shape, or None)
+        self.first_fx = None  # (start beat, FxPane.state(), loudness) as set just before a new Hz bass's first note
         self.loops = {}  # the effects that repeat (hz["loop"])
         self.off = []  # the effects switched off (hz["off"])
         self.froms, self.fits = {}, []  # repeating effects counted from each note (hz["from"]), stretched (hz["fit"])
@@ -414,6 +416,11 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         if was and was[0] == "shape" and self.target() is None and not any(
                 hz_made(s) and abs(left_edge(s) - was[1]) < 1e-9 and hz_keys(s) == was[2] for s in app.shapes):
             app.hz_start, app.hz_defaults = was[1], was[2]
+            first = self.first_fx
+            if first and abs(first[0] - was[1]) < 1e-9:  # (its first note undone: the sound set before it, hunt)
+                (self.fxl, self.loops, self.off, self.froms, self.fits, self.sustains, self.lfo,
+                 self.extra) = copy.deepcopy(first[1])
+                self.loud = copy.deepcopy(first[2])
             app.roll.request_redraw()
         elif was and was[0] == "start" and len(app.shapes) > was[1]:
             last = app.shapes[-1]

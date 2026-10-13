@@ -589,6 +589,8 @@ class HzGates:
                 fit_length(new)
             if not app.confirm_big([new]):
                 return self.call_off(before, before_fx)
+            # (the sound set before the first note: back if that note is undone, hunt: the line drawn was lost)
+            self.first_fx = (app.hz_start, self.fx.state(), copy.deepcopy(self.loud))
             app.hz_start = None
             self.tones = tones  # (so the selection stays when the main window's selection changes to the new shape)
             self.own_step = True
@@ -633,12 +635,14 @@ class HzGates:
                 finally:
                     self.pushing, self.own_step = None, False
             if tones or others or not hz_made(sh):
-                if not tones and not others:  # the last note deleted from a shape of its own: back to its one tone
-                    new["hz"] = hz
+                if not tones and not others:  # the last note deleted from a shape of its own: back to its one tone;
+                    new["hz"] = dict(hz, **copy.deepcopy(fx))  # the sound kept for the next notes (hunt: a line
+                    # drawn before any note went back at once)
                 sh.clear()
                 sh.update(new)
             else:  # ... from a Hz bass made here: it goes, a new one can start at the same spot, same keys
                 app.hz_start, app.hz_defaults = left_edge(sh), hz_keys(sh)
+                self.first_fx = None
                 del app.shapes[app.sel]
                 self.tones = []
                 app.select(None)

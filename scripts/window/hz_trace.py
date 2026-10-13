@@ -42,6 +42,8 @@ GRID = 16  # grid lines each way (snapped to)
 PAD = 14  # px round the drawing area (x scale)
 GRAB = 7  # px: how near a point / the line a press takes it
 ROWS_SHOWN = 64  # more key rows than this: only some drawn (every key still hits)
+MAX_BARS = 3000  # ... more note bars than this: fewer rows drawn (hunt: 33000 took 1.4 s to draw)
+QUICK_BARS = 600  # ... more than this while a point is dragged: drawn once the mouse rests (rest_draw)
 STRIP_H = 110  # px: the preview strips under the drawing (x scale; user 2026-10-13: how it looks low and high)
 STRIP_ROWS = 32  # ... more key rows than this: only some drawn
 STRIP_GAP = 6  # ... px between two (x scale)
@@ -227,6 +229,7 @@ class TraceWindow(tk.Toplevel):
         self.bar = None  # while a note's end is dragged: {"x": press x, "from": its length (waves), "pct": now, ...}
         self.ends = []  # each note's end drawn: (px x, px y, its length in waves) (bar_at)
         self.strips_timer = None  # (draw: the strips waiting for the mouse to rest)
+        self.resting = False  # (rest_draw: the mouse rests holding a point, everything drawn)
         self.placed = False  # (the last press put a new point in)
         self.local, self.local_redo = [], []  # the shapes before / after changes no Hz bass held (local_step)
         self.local_for = None  # (what they were made for: waiting_for())
@@ -468,16 +471,20 @@ class TraceWindow(tk.Toplevel):
                 c.create_rectangle(x0, y0 + (1 - b) * h, x0 + w, y0 + (1 - a) * h, fill=look.CHART_BAND, outline="",
                                    stipple="gray50")
         n = self.rows()
+        hits_of = row_hits(line, n)  # (hits at the same moment: one note, as made)
+        total = sum(map(len, hits_of))
         every = max(1, -(-n // ROWS_SHOWN))
+        while every < n and sum(len(x) for x in hits_of[::every]) > MAX_BARS:  # (fewer rows: hunt, 33000 bars
+            every += 1  # took 1.4 s a mouse move)
+        # a point held over many bars: only the line while the mouse moves, bars and dots once it rests (hunt)
+        quick = self.drag is not None and not self.resting and sum(len(x) for x in hits_of[::every]) > QUICK_BARS
         r = 2.5 * s
-        total = 0
         length, wave, ppq = self.length_now(), self.main_wave(), self.app.ppq
         bh = max(2.0, min(8 * s, 0.6 * every * (hi - lo) * h / n))  # (a note bar's height: under its row's room)
         self.ends = []
         dots = []
-        for k, hits in enumerate(row_hits(line, n)):  # (hits at the same moment: one note, as made)
-            total += len(hits)
-            if k % every:
+        for k, hits in enumerate(hits_of):
+            if k % every or quick:
                 continue
             y = (k + 0.5) / n
             py = y0 + (1 - (lo + y * (hi - lo))) * h if hi - lo > 1e-12 else y0 + (1 - lo) * h
@@ -514,10 +521,21 @@ class TraceWindow(tk.Toplevel):
         if self.strips_timer:
             self.after_cancel(self.strips_timer)
             self.strips_timer = None
-        if self.drag is not None or self.bar is not None:  # (held: drawn once the mouse rests, hunt: it lagged)
-            self.strips_timer = self.after(STRIP_WAIT, self.draw_strips)
+        if (self.drag is not None or self.bar is not None) and not self.resting:  # (held: drawn once the mouse
+            self.strips_timer = self.after(STRIP_WAIT, self.rest_draw if quick else self.draw_strips)  # rests, hunt)
         else:
             self.draw_strips()
+
+    def rest_draw(self):
+        """The mouse rests holding a point: the bars and dots drawn too (draw left them out while it moved)."""
+        self.strips_timer = None
+        if not self.canvas.winfo_exists():
+            return
+        self.resting = True
+        try:
+            self.draw()
+        finally:
+            self.resting = False
 
     def draw_strips(self):
         """The preview strips (user 2026-10-13): the notes the drawing makes at a few pitches from low to high, drawn
