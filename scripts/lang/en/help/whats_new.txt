@@ -1,5 +1,11 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
+Version 1.5.3
+
+What's new:
+
+• Hz bass: Wave shape… is now Hz shape…, and Note length moved into it. Note length can be a % of a wave (the new first choice), so short notes trace the drawn line on every pitch; a fraction like 1/8 works too. Faint bars show each note's length (drag a bar's end to change them all), and small strips show how the notes look at low and high pitches.
+
 Version 1.5.2
 
 What's new:

@@ -10,7 +10,11 @@ In the window's Hz settings…: Pitch moves every tone in cents (100 = one key).
 
 Hz shape… (in Hz settings…) sets how the notes look inside one wave. Its drawing sets where in each wave the keys hit: draw a line through one wave (left to right) over the Hz bass's keys (bottom to top). The pitch stays the same; the texture changes. A key hits wherever the line crosses its row, so a zigzag makes more notes. Shapes has ready ones (Saw, Triangle, Sine, Square); Reset goes back to a straight line (every key hits together).
 
-Note length (in Hz shape…, under the drawing) sets how long each repeat lasts: 100 % = until the next one starts, less = a gap after each one. % of a wave = that much of one wave of the note's tone, so short notes trace the drawn line on every pitch (a fraction works too: 1/8 = 12.5 %); % of the note = that much of how long each note is; or a number of ticks. Shorter notes change the look, hardly the sound. With layers, This layer gives the picked layer a length of its own. Last note sticks out of the shape lets the last repeat before a gap or the end keep a whole wave.
+Note length (in Hz shape…, under the drawing) sets how long each repeat lasts: 100 % = until the next one starts, less = a gap after each one. % of a wave = that much of one wave of the note's tone, so short notes trace the drawn line on every pitch (a fraction works too: 1/8 = 12.5 %); % of the note = that much of how long each note is; or a number of ticks. Shorter notes change the look, hardly the sound.
+
+In the drawing, faint bars show how long each key's notes last. Drag the end of any bar sideways to make every note longer or shorter (in % of a wave); the notes change when you let go. Where a bar reaches the next hit its end sits on the line, and a click there adds a point instead: type the length in the box then. The strips under the drawing show how the notes look in the piano roll at a few pitches, low on the left and high on the right: the Hz bass's lowest, middle and highest notes (a few octaves when it has none). Each covers the same stretch of time, so a higher pitch shows more waves. Effects aren't shown there.
+
+With layers, This layer gives the picked layer a length of its own. Last note sticks out of the shape lets the last repeat before a gap or the end keep a whole wave.
 
 Auto gates (what a new Hz bass starts with): a note that holds still gets Fixed gates when they're off its tone by no more than the threshold (the number next to Gates, in cents), else Alternating ones. A slide is always Alternating.
 
