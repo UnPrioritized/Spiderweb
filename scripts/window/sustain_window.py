@@ -20,7 +20,8 @@ import numpy as np
 from files import settings
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.sustain import MOST_GAP, MOST_PAST, MOST_POINTS, auto_gap, is_sustained, stop_share, stop_tick
+from notes.sustain import (MOST_GAP, MOST_PAST, MOST_PIECES, MOST_POINTS, auto_gap, is_sustained, stop_share, stop_tick,
+                           stop_ticks, sustained, too_many_pieces)
 from window import look
 from window.widgets import LocalUndo, Scrub, Tooltip, remember_place
 
@@ -123,7 +124,10 @@ class SustainWindow(tk.Toplevel):
         self.past_tick = ttk.Checkbutton(row, text=tr("sustain.past"), variable=self.past, command=self.change)
         self.past_tick.pack(side="left", padx=(int(16 * app.scale), 0))
         Tooltip(self.past_tick, tr("sustain.past_tip"))
+        self.warn = ttk.Label(box, text="", foreground=look.WARN)  # (shown only while stops can't be put on)
+        self.memo = []  # [(notes, what, its value)]: worked out from a shape's notes, kept while they're the same
         ttk.Separator(box).pack(fill="x", pady=(10, 6))
+        self.warn_after = box.winfo_children()[-1]
         row = self.new_row(box)
         ttk.Label(row, text=tr("sustain.unit")).pack(side="left")
         for value in ("ticks", "beats"):
@@ -426,6 +430,36 @@ class SustainWindow(tk.Toplevel):
         self.auto_btn.config(text=tr("sustain.auto_each") if n is None else tr("sustain.auto_one") if n == 1 else
                              tr("sustain.auto", n=n))
 
+    def remembered(self, notes, what, make):
+        """make() worked out once per notes (the same array while the shape's notes don't change: big shapes took
+        0.3 s each time)."""
+        for arr, w, value in self.memo:
+            if arr is notes and w == what:
+                return value
+        value = make()
+        self.memo.append((notes, what, value))
+        del self.memo[:-16]
+        return value
+
+    def too_many(self, t):
+        """Would shape t's stops cut its notes into more than the engine makes (so it leaves them whole)?"""
+        sus = t.get("sustain")
+        if not is_sustained(t) or not sus or not ("every" in sus or sus.get("stops")):
+            return False
+        notes = bare_notes(self.app, t)
+        if not len(notes):
+            return False
+        stops = stop_ticks(notes, sus, self.app.ppq)
+        rows = self.remembered(notes, "rows", lambda: len(np.unique(notes[:, 2])))
+        if len(notes) + rows * len(stops) <= MOST_PIECES:  # (at most one note per key row and stop)
+            return False
+        key = ("cut", json.dumps(sus, sort_keys=True), self.app.ppq)
+
+        def count():
+            reach = int(stops[-1]) if len(stops) and stops[-1] > notes[:, 1].max() else None
+            return too_many_pieces(sustained(notes, sus, self.app.ppq, reach), stops)
+        return self.remembered(notes, key, count)
+
     def auto_of(self, t):
         """Shape t's Auto gap in ticks (from its notes without Sustain)."""
         return auto_gap(bare_notes(self.app, t))
@@ -456,6 +490,12 @@ class SustainWindow(tk.Toplevel):
         for key, r in self.rows.items():
             put(r[5], self.rows[key if r[0] is not None else "every"][0].get())
         self.show_auto()
+        stuck = on and any(self.too_many(t) for t in self.tgts)
+        if stuck and not self.warn.winfo_manager():
+            self.warn.config(text=tr("sustain.too_many"))
+            self.warn.pack(anchor="w", before=self.warn_after, pady=(4, 0))
+        elif not stuck and self.warn.winfo_manager():
+            self.warn.pack_forget()
 
     def state(self):
         def kept(text):  # (a number in beats, so a step taken back after the unit changed reads right)

@@ -765,6 +765,7 @@
  "sustain.past": "Allow past the shape's end",
  "sustain.past_tip": "A stop may go past the end of the shape's notes. Then the last notes on each key are held on until that stop, so the shape gets longer.",
  "sustain.no_room": "No room for another stop before the shape's end.",
+ "sustain.too_many": "Too many stops for this many notes: the stops aren't put on. Use fewer stops.",
  "sustain.move_stop": "Move sustain stop",
  "sustain.add_here": "Add sustain stop here",
  "sustain.remove_stop": "Remove sustain stop",

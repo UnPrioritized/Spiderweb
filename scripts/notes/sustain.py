@@ -178,36 +178,92 @@ def stop_share(notes, tick):
     return (tick - lo) / (hi - lo) if hi > lo else None
 
 
+def _cover(notes, stops):
+    """Which stops each note reaches: (a, b) = the note sounds at stops[a:b] (starting on one counts; its end
+    doesn't), and the key rows' stretches of stops reached by some note, laid end to end as one flat list:
+    (each note's place in it (for the reaching ones), each stretch's (pitch, first stop, offset, length), how many
+    places in all)."""
+    s, e, p = notes[:, 0], notes[:, 1], notes[:, 2]
+    a = np.searchsorted(stops, s, side="left")
+    b = np.searchsorted(stops, e, side="left")
+    hit = np.flatnonzero(b > a)
+    if not len(hit):
+        return a, b, hit, None, None, 0
+    o = hit[np.lexsort((a[hit], p[hit]))]
+    po, ao, bo = p[o], a[o], b[o]
+    row = np.concatenate([[0], np.cumsum(po[1:] != po[:-1])])
+    lift = int(len(stops)) + 1  # (running end per row: each row lifted past the one before, like row_order)
+    ran = np.maximum.accumulate(bo + row * lift) - row * lift
+    new = np.ones(len(o), bool)
+    new[1:] = (po[1:] != po[:-1]) | (ao[1:] >= ran[:-1])
+    first = np.flatnonzero(new)
+    seg = np.cumsum(new) - 1
+    ends = np.maximum.reduceat(bo, first) if len(first) else bo
+    lens = ends - ao[first]
+    offs = np.concatenate([[0], np.cumsum(lens)[:-1]])
+    place = np.empty(len(notes), np.int64)
+    place[o] = offs[seg] + ao - ao[first][seg]
+    return a, b, hit, place, (po[first], ao[first], offs, lens), int(lens.sum())
+
+
+def _range_max(n, starts, lens, vals, fill):
+    """For each of n places, the most of vals over the ranges [start, start + len) covering it (fill: none). Each
+    range = its two biggest power-of-two blocks, pushed down level by level: as big as n, never notes x stops."""
+    out = np.full(n, fill, vals.dtype)
+    if not len(starts):
+        return out
+    lv = np.frexp(lens.astype(np.float64))[1] - 1  # (floor of log2)
+    for k in range(int(lv.max()), -1, -1):
+        h = 1 << k
+        if k < int(lv.max()):  # (a block of 2h at i covers the blocks of h at i and at i + h)
+            nxt = out.copy()
+            np.maximum(nxt[h:], out[:-h], out=nxt[h:])
+            out = nxt
+        m = lv == k
+        if m.any():
+            np.maximum.at(out, starts[m], vals[m])
+            np.maximum.at(out, starts[m] + lens[m] - h, vals[m])
+    return out
+
+
+def too_many_pieces(notes, stops):
+    """Would cutting these (sustained) notes at these stops make more than MOST_PIECES notes?"""
+    return len(stops) > 0 and len(notes) > 0 and len(notes) + _cover(notes, stops)[5] > MOST_PIECES
+
+
 def cut_at(notes, tracks, stops):
     """Every note sounding across a stop ends there and a new one starts on the same tick (no gap); the notes
-    starting on a stop on the same key make ONE note there (the sustain starts again: the longest, the loudest
-    velocity). Too many pieces = left whole."""
-    s, e = notes[:, 0], notes[:, 1]
-    a = np.searchsorted(stops, s, side="right")
-    k = np.searchsorted(stops, e, side="left") - a  # (stops inside each note)
-    k = np.maximum(k, 0)
-    if not k.any() or len(notes) + int(k.sum()) > MOST_PIECES:
+    starting on a stop on the same key make ONE note there (the sustain starts again: the loudest velocity, as long
+    as the longest). Worked out per key row and stop, never per note and stop (a held spam row: every note across
+    every stop). Too many pieces = left whole (too_many_pieces tells the window)."""
+    a, b, hit, place, segs, n = _cover(notes, stops)
+    if segs is None or len(notes) + n > MOST_PIECES:
         return notes, tracks
-    rep = np.repeat(np.arange(len(notes)), k + 1)
-    j = np.arange(len(rep)) - np.repeat(np.cumsum(k + 1) - (k + 1), k + 1)  # (piece number in its note)
-    at = stops[np.clip(a[rep] + j - 1, 0, len(stops) - 1)]
-    till = stops[np.clip(a[rep] + j, 0, len(stops) - 1)]
-    out = notes[rep]
-    out[:, 0] = np.where(j == 0, s[rep], at)
-    out[:, 1] = np.where(j == k[rep], e[rep], till)
-    tr = None if tracks is None else np.asarray(tracks)[rep]
-    on = np.flatnonzero(np.isin(out[:, 0], stops))
-    if len(on) > 1:
-        o = on[np.lexsort((-out[on, 3], -out[on, 1], out[on, 0], out[on, 2]))]
-        new = np.ones(len(o), bool)
-        new[1:] = (out[o[1:], 2] != out[o[:-1], 2]) | (out[o[1:], 0] != out[o[:-1], 0])
-        first = np.flatnonzero(new)
-        out[o[first], 3] = np.maximum.reduceat(out[o, 3], first)
-        keep = np.ones(len(out), bool)
-        keep[o[~new]] = False
-        out = out[keep]
-        tr = None if tr is None else tr[keep]
-    return out, tr
+    s, e = notes[:, 0], notes[:, 1]
+    lens = b[hit] - a[hit]
+    starts = place[hit]
+    reach = _range_max(n, starts, lens, b[hit].astype(np.int64), np.int64(-1))  # (the furthest stop reached)
+    idx = np.int64(1) << 32
+    loud = _range_max(n, starts, lens, notes[hit, 3].astype(np.int64) * idx + hit, np.int64(-1))
+    last = np.full(n, -1, np.int64)  # (the longest end of the notes ending before the next stop)
+    np.maximum.at(last, starts + lens - 1, e[hit].astype(np.int64))
+    pitch, first, offs, seglen = segs
+    j = np.repeat(first - offs, seglen) + np.arange(n)  # (each place's stop)
+    take = (loud & (idx - 1)).astype(np.int64)
+    new = notes[take].copy()
+    new[:, 0] = stops[j]
+    new[:, 1] = np.where(reach > j + 1, stops[np.minimum(j + 1, len(stops) - 1)], last)
+    new[:, 3] = loud >> 32
+    head = hit[s[hit] < stops[a[hit]]]  # (the part before the first stop: notes not starting on one)
+    lead = notes[head].copy()
+    lead[:, 1] = stops[a[head]]
+    whole = np.ones(len(notes), bool)
+    whole[hit] = False
+    out = np.concatenate([notes[whole], lead, new])
+    if tracks is None:
+        return out, None
+    tr = np.asarray(tracks)
+    return out, np.concatenate([tr[whole], tr[head], tr[take]])
 
 
 def cut_by(normal, held):
