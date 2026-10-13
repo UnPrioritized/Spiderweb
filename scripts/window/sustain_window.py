@@ -62,6 +62,9 @@ def put_own(sh, part):
             b["sus"] = mark
 
 
+LENGTHS = ("gap", "most", "every")  # (sh["sustain"] lengths in beats; "from" goes with "every")
+
+
 class SustainWindow(tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
@@ -80,17 +83,18 @@ class SustainWindow(tk.Toplevel):
         box.pack(fill="both", expand=True)
         self.what = ttk.Label(box, text=tr("sustain.nothing"), foreground=look.HINT)
         self.on_var = tk.BooleanVar(value=True)
-        self.on_tick = ttk.Checkbutton(box, text=tr("sustain.on"), variable=self.on_var, command=self.change)
+        self.on_tick = ttk.Checkbutton(box, text=tr("sustain.on"), variable=self.on_var,
+                                       command=lambda: self.put_all("on"))
         self.on_tick.pack(anchor="w")
         Tooltip(self.on_tick, tr("sustain.on_tip"))
         ttk.Label(box, text=tr("sustain.hold")).pack(anchor="w", pady=(8, 2))
         self.mode = tk.StringVar(value="")
-        self.auto_btn = ttk.Radiobutton(box, text="", value="auto", variable=self.mode, command=self.change)
+        self.auto_btn = ttk.Radiobutton(box, text="", value="auto", variable=self.mode, command=self.put_mode)
         self.auto_btn.pack(anchor="w", padx=(int(16 * app.scale), 0))
         Tooltip(self.auto_btn, tr("sustain.auto_tip"))
         row = ttk.Frame(box)
         row.pack(anchor="w", padx=(int(16 * app.scale), 0), pady=(2, 0))
-        self.own_btn = ttk.Radiobutton(row, text="", value="own", variable=self.mode, command=self.change)
+        self.own_btn = ttk.Radiobutton(row, text="", value="own", variable=self.mode, command=self.put_mode)
         self.own_btn.pack(side="left")
         self.gap_var = tk.StringVar(value="")
         e = self.gap_box = ttk.Entry(row, textvariable=self.gap_var, width=8)
@@ -111,7 +115,8 @@ class SustainWindow(tk.Toplevel):
         self.stops_on = tk.BooleanVar(value=False)
         self.past = tk.BooleanVar(value=False)
         row = self.new_row(box)
-        self.stops_tick = ttk.Checkbutton(row, text=tr("sustain.stops"), variable=self.stops_on, command=self.change)
+        self.stops_tick = ttk.Checkbutton(row, text=tr("sustain.stops"), variable=self.stops_on,
+                                          command=lambda: self.put_all("stops"))
         self.stops_tick.pack(side="left")
         Tooltip(self.stops_tick, tr("sustain.stops_tip"))
         self.add_btn = ttk.Button(row, text=tr("sustain.add_stop"), command=self.add_stop)
@@ -122,7 +127,8 @@ class SustainWindow(tk.Toplevel):
         self.count = ttk.Label(row, text="")
         self.count.pack(side="left", padx=(6, 0))
         row = self.new_row(box)
-        self.past_tick = ttk.Checkbutton(row, text=tr("sustain.past"), variable=self.past, command=self.change)
+        self.past_tick = ttk.Checkbutton(row, text=tr("sustain.past"), variable=self.past,
+                                         command=lambda: self.put_all("past"))
         self.past_tick.pack(side="left", padx=(int(16 * app.scale), 0))
         Tooltip(self.past_tick, tr("sustain.past_tip"))
         self.warn = ttk.Label(box, text="", foreground=look.WARN)  # (shown only while stops can't be put on)
@@ -141,6 +147,7 @@ class SustainWindow(tk.Toplevel):
         self.bind("<Escape>", lambda ev: self.cancel())
         self.bind("<Return>", lambda ev: self.ok())
         self.protocol("WM_DELETE_WINDOW", self.cancel)
+        self.on, self.vals, self.offs, self.pasts = [], {k: [] for k in LENGTHS + ("from",)}, [], []
         self.hist = LocalUndo(self, self.state, self.put_state)
         self.bind("<Control-Key>", lambda e: "break")  # (the piano roll's shortcuts wait until it's closed)
         self.retarget(start=True)
@@ -215,7 +222,6 @@ class SustainWindow(tk.Toplevel):
         self.saved_sel = self.app.sel_state()  # (for the undo step)
         self.before = self.sus_now()
         self.kept = self.own_now()  # (put back by Cancel)
-        self.old = [json.loads(json.dumps(t.get("sustain"))) for t in self.tgts]
         self.load(start)
         if start and self.idx:
             self.store()
@@ -225,26 +231,47 @@ class SustainWindow(tk.Toplevel):
         self.hist.reset()
 
     def load(self, start):
-        """The boxes and ticks from the shapes."""
-        tg = self.tgts
-        own = [t["sustain"]["gap"] for t in tg if "gap" in (t.get("sustain") or {})]
-        kinds = {"gap" in (t.get("sustain") or {}) for t in tg if t.get("sustain") is not None}
-        self.on_var.set(start or any(is_sustained(t) for t in tg))
-        # (several shapes: the way they all share, else none picked until one is; typed ones that differ: empty)
-        self.mode.set("own" if kinds == {True} else "auto" if kinds != {True, False} else "")
-        self.gap_var.set(self.text_of(own[0]) if own and len(set(own)) == 1 else "")
-        for key, r in self.rows.items():
-            have = self.have(key)
-            if r[0] is not None:
-                r[0].set(bool(have))
-            r[1].set(self.text_of(have[0]) if have and len(set(have)) == 1 else "" if r[0] is not None else "0")
-        self.load_stops()
+        """Each shape's settings from the shapes (start: all sustained), then the boxes and ticks."""
+        sus = [t.get("sustain") if is_sustained(t) else None for t in self.tgts]
+        self.on = [start or s is not None for s in sus]
+        # (each shape's own values, None = none; several shapes keep theirs until that row is changed, hunt)
+        self.vals = {k: [(s or {}).get(k) for s in sus] for k in LENGTHS}
+        self.vals["from"] = [(s or {}).get("from", 0) if "every" in (s or {}) else None for s in sus]
+        self.load_stops(show=False)
+        self.show_controls()
 
-    def load_stops(self):
-        stops = [(t.get("sustain") or {}).get("stops") or {} for t in self.tgts]
-        self.points = [list(s.get("at", [])) for s in stops]
-        self.stops_on.set(any(s and not s.get("off") for s in stops))
-        self.past.set(any(s.get("past") for s in stops))
+    def load_stops(self, show=True):
+        stops = [(t.get("sustain") or {}).get("stops") if is_sustained(t) else None for t in self.tgts]
+        self.points = [list(s["at"]) if s else [] for s in stops]
+        self.offs = [None if not s else bool(s.get("off")) for s in stops]  # (None: no stops of its own)
+        self.pasts = [bool(s and s.get("past")) for s in stops]
+        if show:
+            self.show_controls()
+
+    def show_controls(self):
+        """The ticks and boxes as the shapes' settings are: ticked when every shape has it, half-ticked when only
+        some do (like the side panel's Mixed); a box shows the number they share, else stays empty."""
+        def tick(var, w, flags):
+            var.set(bool(flags) and all(flags))
+            w.state(["alternate"] if any(flags) and not all(flags) else ["!alternate"])
+
+        def shared(values, empty=""):
+            got = {v for v in values if v is not None}
+            return self.text_of(got.pop()) if len(got) == 1 and None not in values else empty
+        tick(self.on_var, self.on_tick, self.on)
+        gaps = self.vals["gap"]
+        self.mode.set("auto" if all(g is None for g in gaps) else "own" if None not in gaps else "")
+        got = {g for g in gaps if g is not None}
+        self.gap_var.set(self.text_of(got.pop()) if len(got) == 1 else "")
+        for key, r in self.rows.items():
+            vals = self.vals[key]
+            if r[0] is not None:
+                tick(r[0], r[3], [v is not None for v in vals])
+                r[1].set(shared(vals))
+            else:
+                r[1].set(shared([v for v in vals if v is not None]) if any(v is not None for v in vals) else "0")
+        tick(self.stops_on, self.stops_tick, [o is False for o in self.offs])
+        tick(self.past, self.past_tick, self.pasts)
 
     def sync(self):
         """The main window changed the selection or the shapes (sync_panel)."""
@@ -383,18 +410,57 @@ class SustainWindow(tk.Toplevel):
         except OSError:
             pass
 
-    def have(self, key):
-        """The shapes' values of sustain[key] (of "from": every shape stopping "every", 0 when it has none)."""
-        if key == "from":
-            return [t["sustain"].get("from", 0) for t in self.tgts if "every" in (t.get("sustain") or {})]
-        return [t["sustain"][key] for t in self.tgts if key in (t.get("sustain") or {})]
+    def put_all(self, what):
+        """A tick changed ("on", "stops", "past"): every shape takes it (a half-ticked one: a click = all on)."""
+        if not self.idx:
+            return
+        n = len(self.idx)
+        if what == "on":
+            self.on = [self.on_var.get()] * n
+        elif what == "stops":  # (unticked: the stops kept for ticking again)
+            on = self.stops_on.get()
+            self.offs = [not on if o is not None or on else None for o in self.offs]
+        else:
+            self.pasts = [self.past.get()] * n
+        self.show_controls()
+        self.store()
+        self.hist.mark()
+
+    def put_mode(self):
+        """Auto / the typed gap picked: for every shape (the typed way with an empty box: the first shape's Auto
+        gap)."""
+        if not self.idx:
+            return
+        if self.mode.get() == "auto":
+            self.vals["gap"] = [None] * len(self.idx)
+        else:
+            gap = self.gap()
+            if gap is None:
+                gap = self.auto_of(self.tgts[0]) / self.app.ppq
+            self.vals["gap"] = [gap] * len(self.idx)
+        self.show_controls()
+        self.store()
+        self.hist.mark()
 
     def tick_length(self, key):
-        """A length row ticked with an empty box: one beat to start with."""
-        var = self.rows[key][1]
-        if self.length(key) is None:
-            var.set(self.text_of(1))
-        self.change()
+        """A length row ticked / unticked. Ticked: the shapes without it get the box's number (empty: one beat;
+        the others keep theirs while they differ)."""
+        on, var = self.rows[key][:2]
+        if not self.idx:
+            return
+        vals = self.vals[key]
+        if not on.get():
+            vals[:] = [None] * len(vals)
+            if key == "every":
+                self.vals["from"] = [None] * len(vals)
+        else:
+            beats = self.length(key)
+            vals[:] = [v if v is not None and beats is None else beats or 1.0 for v in vals]
+            if key == "every":
+                self.vals["from"] = [f or 0 for f in self.vals["from"]]
+        self.show_controls()
+        self.store()
+        self.hist.mark()
 
     def length(self, key):
         """A row's typed length in beats (at least a tick; "from" 0 too), or None (empty / not a number)."""
@@ -407,15 +473,14 @@ class SustainWindow(tk.Toplevel):
             return
         beats = self.length(key)
         if beats is None:  # (a wrong number: back to the last good one, or empty)
-            have = self.have(key)
-            return var.set(self.text_of(have[0]) if have and len(set(have)) == 1 else
-                           "" if on is not None else "0")
-        var.set(self.text_of(beats))
-        own = next(k for k, r in self.rows.items() if r[2].master is box.master and r[0] is not None)
-        if not self.rows[own][0].get():
-            self.rows[own][0].set(True)
-            if self.length(own) is None:
-                self.rows[own][1].set(self.text_of(1))
+            return self.show_controls()
+        own = key if on is not None else "every"
+        if None in self.vals[own]:  # (a number typed ticks its row for every shape)
+            self.vals[own] = [v if v is not None else 1.0 for v in self.vals[own]]
+        if own == "every":
+            self.vals["from"] = [f or 0 for f in self.vals["from"]]
+        self.vals[key] = [beats] * len(self.idx)
+        self.show_controls()
         self.store()
         self.hist.mark(key)
 
@@ -429,25 +494,26 @@ class SustainWindow(tk.Toplevel):
         """A stop on the next snap line after each shape's last usable stop (none: after its first note's start);
         never past its end unless "Allow past the shape's end" is ticked."""
         snap, added = self.app.snap_ticks(), False
-        for t, pts in zip(self.tgts, self.points):
+        for t, pts, past in zip(self.tgts, self.points, self.pasts):
             notes = bare_notes(self.app, t)
             if not len(notes) or len(pts) >= MOST_POINTS:
                 continue
             hi = int(notes[:, 1].max())
-            used = [stop_tick(notes, f) for f in pts if f < 1 or self.past.get()]
+            used = [stop_tick(notes, f) for f in pts if f < 1 or past]
             ref = max(used) if used else int(notes[:, 0].min())
             tick = (ref // snap + 1) * snap
-            if tick == hi and self.past.get():  # (a stop right on the end does nothing)
+            if tick == hi and past:  # (a stop right on the end does nothing)
                 tick += snap
             f = stop_share(notes, tick)
-            if f is None or (tick >= hi and not self.past.get()) or f > MOST_PAST:
+            if f is None or (tick >= hi and not past) or f > MOST_PAST:
                 continue
             pts.append(f)
             pts.sort()
             added = True
         if not added:
             return self.app.status.show(tr("sustain.no_room"))
-        self.stops_on.set(True)
+        self.offs = [False] * len(self.offs)  # (ticks "Stop at my points")
+        self.show_controls()
         self.store()
         self.hist.mark()
 
@@ -512,20 +578,23 @@ class SustainWindow(tk.Toplevel):
             self.what.pack_forget()
         elif not self.what.winfo_manager():  # (nothing to work on selected: said so, all greyed)
             self.what.pack(anchor="w", before=self.on_tick, pady=(0, 6))
-        self.on_tick.config(state="normal" if self.idx else "disabled")
-        on = self.on_var.get() and bool(self.idx)
+        self.on_tick.state(["!disabled"] if self.idx else ["disabled"])  # (state(): config(state=) drops a half-tick)
+        on = any(self.on) and bool(self.idx)  # (half-ticked = some shapes: their settings can be changed)
 
         def put(widgets, ok=True):
             for w in widgets:
-                w.config(state="normal" if on and ok else "disabled")
+                if isinstance(w, ttk.Checkbutton):  # (state(): config(state=) drops a half-tick)
+                    w.state(["!disabled"] if on and ok else ["disabled"])
+                else:
+                    w.config(state="normal" if on and ok else "disabled")
                 if isinstance(w, ttk.Label):
                     w.config(foreground="" if on and ok else look.LABEL_OFF)
         put([self.auto_btn, self.own_btn, self.stops_tick, self.add_btn, self.clear_btn, self.past_tick] +
             [r[3] for r in self.rows.values() if r[3]])
         # (a box only while its way is picked / its row ticked, user)
-        put([self.gap_box, self.gap_unit], self.mode.get() == "own")
-        for key, r in self.rows.items():
-            put(r[5], self.rows[key if r[0] is not None else "every"][0].get())
+        put([self.gap_box, self.gap_unit], any(g is not None for g in self.vals["gap"]))
+        for key, r in self.rows.items():  # (some shapes have it: typing sets it on all)
+            put(r[5], any(v is not None for v in self.vals[key if r[0] is not None else "every"]))
         self.show_auto()
         stuck = on and any(self.too_many(t) for t in self.tgts)
         if stuck and not self.warn.winfo_manager():
@@ -535,84 +604,43 @@ class SustainWindow(tk.Toplevel):
             self.warn.pack_forget()
 
     def state(self):
-        def kept(text):  # (a number in beats, so a step taken back after the unit changed reads right)
-            b = self.read(text, 0)
-            return text if b is None else b
-        return json.dumps([self.on_var.get(), self.mode.get(), kept(self.gap_var.get()),
-                           {k: [r[0] and r[0].get(), kept(r[1].get())] for k, r in self.rows.items()},
-                           self.stops_on.get(), self.past.get(), self.points])
+        return json.dumps([self.on, self.vals, self.points, self.offs, self.pasts])
 
     def put_state(self, state):
-        on, mode, gap, rows, stops_on, past, points = json.loads(state)
-        shown = lambda v: v if isinstance(v, str) else self.text_of(v)
-        self.stops_on.set(stops_on)
-        self.past.set(past)
+        on, vals, points, offs, pasts = json.loads(state)
+        self.on, self.vals, self.offs, self.pasts = on, vals, offs, pasts
         for pts, was in zip(self.points, points):
             pts[:] = was
-        self.on_var.set(on)
-        self.mode.set(mode)
-        self.gap_var.set(shown(gap))
-        for k, (ticked, text) in rows.items():
-            if self.rows[k][0] is not None:
-                self.rows[k][0].set(ticked)
-            self.rows[k][1].set(shown(text))
+        self.show_controls()
         self.store()
 
     def store(self):
-        """Put the window's settings on the shapes and show them."""
-        on, mode, gap = self.on_var.get(), self.mode.get(), self.gap()
-        for t, old, pts in zip(self.tgts, self.old, self.points):
-            if not on:
+        """Put each shape's settings on it and show them."""
+        for i, t in enumerate(self.tgts):
+            if not self.on[i]:
                 t.pop("sustain", None)
-            elif mode == "auto":
-                t["sustain"] = {}
-            elif mode == "own" and gap is not None:
-                t["sustain"] = {"gap": gap}
-            else:  # (none picked yet / no number typed: each keeps what it had, Auto if it had none)
-                t["sustain"] = {"gap": old["gap"]} if "gap" in (old or {}) else {}
-            if on:
-                self.put_length(t, old, "most", "most")
-                self.put_length(t, old, "every", "every")
-                self.put_length(t, old, "from", "every")
-                if not t["sustain"].get("from"):
-                    t["sustain"].pop("from", None)
-                if self.stops_on.get() or pts:  # (unticked: the stops kept for ticking again)
-                    t["sustain"]["stops"] = dict({"at": list(pts)}, **({"past": True} if self.past.get() else {}),
-                                                 **({} if self.stops_on.get() else {"off": True}))
+                continue
+            sus = {k: self.vals[k][i] for k in LENGTHS if self.vals[k][i] is not None}
+            if "every" in sus and self.vals["from"][i]:
+                sus["from"] = self.vals["from"][i]
+            pts, off = self.points[i], self.offs[i]
+            if off is not None or pts:  # (unticked: the stops kept for ticking again)
+                sus["stops"] = dict({"at": list(pts)}, **({"past": True} if self.pasts[i] else {}),
+                                    **({"off": True} if off else {}))
+            t["sustain"] = sus
         self.now = self.sus_now()
         self.show()
         self.app.shapes_changed()
 
-    def put_length(self, t, old, key, tick):
-        """A row's number onto shape t (tick = the row whose tick it goes with): off = none; on with a number = it;
-        on with an empty box (shapes that differ) = each keeps what it had."""
-        beats = self.length(key)
-        if not self.rows[tick][0].get():
-            return
-        if beats is not None:
-            t["sustain"][key] = beats
-        elif key in (old or {}):
-            t["sustain"][key] = old[key]
-
-    def change(self):
-        if not self.idx:
-            return
-        if self.mode.get() == "own" and self.gap() is None:  # (picked with an empty box: the first shape's gap)
-            self.gap_var.set(fmt(self.auto_of(self.tgts[0])) if not self.shown_beats else
-                             self.text_of(self.auto_of(self.tgts[0]) / self.app.ppq))
-        self.store()
-        self.hist.mark()
-
     def on_gap(self):
-        """A gap typed / stepped: picks the typed way."""
+        """A gap typed / stepped: the typed way for every shape."""
         if self.closed or str(self.gap_box.cget("state")) == "disabled":
             return
         gap = self.gap()
         if gap is None:  # (a wrong number: back to the last good one, or empty)
-            own = [t["sustain"]["gap"] for t in self.tgts if "gap" in (t.get("sustain") or {})]
-            return self.gap_var.set(self.text_of(own[0]) if own and len(set(own)) == 1 else "")
-        self.gap_var.set(self.text_of(gap))
-        self.mode.set("own")
+            return self.show_controls()
+        self.vals["gap"] = [gap] * len(self.idx)
+        self.show_controls()
         self.store()
         self.hist.mark("gap")
 
@@ -620,17 +648,17 @@ class SustainWindow(tk.Toplevel):
 
     def take_typing(self):
         """Numbers typed without Enter count too."""
-        if self.gap_var.get() != self.seen and self.on_var.get():
+        if self.gap_var.get() != self.seen and any(self.on):
             self.on_gap()
         for k, r in self.rows.items():
-            if r[1].get() != r[4] and self.on_var.get():
+            if r[1].get() != r[4] and any(self.on):
                 self.on_length(k)
 
     def ok(self):
         self.take_typing()
         self.settle()
         self.close()
-        if self.on_var.get() and self.idx:
+        if any(self.on) and self.idx:
             self.app.tips.show("sustain", wait=True)  # (the first time: what it does)
 
     def cancel(self):
@@ -657,9 +685,9 @@ def open_sustain(app):
     w = app.sustain_window
     if w:  # (already open: it follows the selection; the menu item puts Sustain on)
         w.sync()
-        if not w.on_var.get() and w.idx:
+        if w.idx and not all(w.on):
             w.on_var.set(True)
-            w.change()
+            w.put_all("on")
         w.lift()
         w.focus_set()
     elif target_indices(app):
