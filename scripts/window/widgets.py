@@ -63,6 +63,89 @@ def fit_dropdown(cb):
         pass
 
 
+JUMP_MS = 1000  # name lists open: letters typed closer together than this make one word (letter_jump)
+DIVIDER = "─" * 12  # name lists: the row between the ready-made names and the saved ones (set_names)
+
+
+def letter_jump(cb):
+    """Typing while the dropdown's list is open jumps to the first name starting with the letters typed (a pause of
+    JUMP_MS starts a new word; the same letter again = the next name with it). Returns the jump function (tests)."""
+    lb = cb.tk.call("ttk::combobox::PopdownWindow", cb) + ".f.l"
+    jump = {"text": "", "at": 0}
+
+    def jump_to(char, when):
+        if len(char) != 1 or not char.isprintable():
+            return
+        when = int(when)
+        jump["text"] = (jump["text"] if when - jump["at"] < JUMP_MS else "") + char.casefold()
+        jump["at"] = when
+        values = cb.tk.splitlist(cb.tk.call(lb, "get", 0, "end"))
+        k = next((i for i, f in enumerate(values) if f.casefold().startswith(jump["text"])), None)
+        if k is None and len(jump["text"]) > 1:  # (the same letter again: the next name with it)
+            jump["text"] = char.casefold()
+            now = int(cb.tk.call(lb, "index", "active"))
+            k = next((i for i, f in list(enumerate(values))[now + 1:] + list(enumerate(values))[:now + 1]
+                      if f.casefold().startswith(jump["text"])), None)
+        if k is not None:
+            cb.tk.call(lb, "selection", "clear", 0, "end")
+            cb.tk.call(lb, "selection", "set", k)
+            cb.tk.call(lb, "activate", k)
+            cb.tk.call(lb, "see", k)
+    cb.tk.call("bind", lb, "<KeyPress>", "+" + cb.register(jump_to) + " %A %t")
+    return jump_to
+
+
+def name_list(cb):
+    """A dropdown of names (shapes, palettes, presets...; user 2026-10-14): ready-made names first, a divider row,
+    then the saved ones (set_names), letters typed jump (letter_jump), names keep the box's width. The divider can't
+    be picked: a click on it changes nothing, the mouse wheel steps over it."""
+    keep_width(cb)
+    letter_jump(cb)
+    cb.divider_at = None
+    cb.name_before = cb.get()
+    pop = cb.tk.call("ttk::combobox::PopdownWindow", cb)
+    lb = pop + ".f.l"
+
+    def shown():  # (the list opened, just filled: the divider greyed, the name picked before kept)
+        cb.name_before, cb.list_open = cb.get(), True
+        k = cb.divider_at
+        if k is not None and k < int(cb.tk.call(lb, "size")):
+            cb.tk.call(lb, "itemconfigure", k, "-foreground", look.HINT, "-selectforeground", look.HINT,
+                       "-selectbackground", cb.tk.call(lb, "cget", "-background"))
+
+    def hidden():
+        cb.list_open = False
+    cb.list_open = False
+    cb.tk.call("bind", pop, "<Map>", "+" + cb.register(shown))
+    cb.tk.call("bind", pop, "<Unmap>", "+" + cb.register(hidden))
+
+    def picked(e):
+        k = cb.divider_at
+        if k is None or cb.current() != k:
+            cb.name_before = cb.get()
+            return None
+        values = cb.cget("values")
+        if cb.list_open or not values:  # (a click on the divider: as before, nothing picked)
+            cb.set(cb.name_before)
+            return "break"
+        before = list(values).index(cb.name_before) if cb.name_before in values else k - 1
+        cb.current(k + 1 if before < k and k + 1 < len(values) else k - 1)  # (the wheel: over it)
+        cb.name_before = cb.get()
+        return None
+    tag = f"NameList{cb}"
+    cb.bind_class(tag, "<<ComboboxSelected>>", picked)
+    cb.bindtags((tag,) + cb.bindtags())
+    return cb
+
+
+def set_names(cb, top, saved):
+    """A name_list's choices: the ready-made names, the divider (only when both kinds are there), the saved ones."""
+    values = list(top) + ([DIVIDER] if top and saved else []) + list(saved)
+    cb.divider_at = len(top) if top and saved else None
+    cb.config(values=values)
+    return values
+
+
 def on_screen(widget, x, y):
     """Is the point (x, y) (screen pixels) on one of the screens? (Windows: any monitor; elsewhere the screen Tk
     knows, which on Linux spans them all.)"""

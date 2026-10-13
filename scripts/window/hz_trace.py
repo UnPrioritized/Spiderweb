@@ -36,7 +36,7 @@ from roll.roll_shared import SLOT_COLORS
 from window import look
 from window.hz_gates import LENGTH_UNITS
 from window.hz_layers import layer_colour
-from window.widgets import Scrub, Tooltip, no_spaces, remember_place
+from window.widgets import Scrub, Tooltip, name_list, no_spaces, remember_place, set_names
 
 GRID = 16  # grid lines each way (snapped to)
 PAD = 14  # px round the drawing area (x scale)
@@ -53,33 +53,50 @@ SHAPES = {"saw": [[0.0, 0.0], [1.0, 1.0]],
           "triangle": [[0.0, 0.0], [0.5, 1.0], [1.0, 0.0]],
           "sine": [[i / 32, round(0.5 - 0.5 * math.cos(2 * math.pi * i / 32), 6)] for i in range(33)],
           "square": [[0.0, 0.0], [0.0, 1.0], [0.5, 1.0], [0.5, 0.0], [1.0, 0.0]]}
-SHAPES_FILE = os.path.join(USER, "hz_shapes.json")  # the user's saved lines (Save…; under the Shapes ▾ menu's own)
+SHAPES_FILE = os.path.join(USER, "hz_shapes.json")  # the user's saved lines (Save…; in the shapes box after the
+# ready-made ones, newest first)
 
 
-def load_shapes():
-    """The user's saved lines [{"name", "points"}] in saving order (a broken entry: left out)."""
+def read_shapes():
+    """(the user's saved lines [{"name", "points"}] in saving order, whether the file is there but can't be read).
+    A broken entry is left out; a missing file = none."""
+    if not os.path.exists(SHAPES_FILE):
+        return [], False
     try:
         with open(SHAPES_FILE, encoding="utf-8-sig") as f:
             data = json.load(f)
+        shapes = data.get("shapes") if isinstance(data, dict) else None
+        if not isinstance(shapes, list):
+            return [], True
     except (OSError, ValueError):
-        return []
+        return [], True
     out = []
-    for s in data.get("shapes", []) if isinstance(data, dict) else ():
+    for s in shapes:
         try:
             name, raw = clean_shape_name(str(s["name"])), s["points"]
             pts = clean_trace(raw) or ([list(p) for p in START_TRACE] if raw == [list(p) for p in START_TRACE]
                                        else None)  # (cleaned to [] = as it starts, or nothing usable)
-        except (TypeError, KeyError):
+        except (TypeError, KeyError, IndexError):
             continue
         if name and pts:
             out.append({"name": name, "points": pts})
-    return out
+    return out, False
+
+
+def load_shapes():
+    """The user's saved lines in saving order (none when the file can't be read)."""
+    return read_shapes()[0]
 
 
 def save_shapes(items):
-    """Writes the saved lines (OSError when it can't be)."""
+    """Writes the saved lines (OSError when it can't be). A file there that can't be read is kept first as
+    hz_shapes.json.bad (hunt: saving over it lost every older line); returns True when it was."""
     os.makedirs(os.path.dirname(SHAPES_FILE), exist_ok=True)
+    kept = read_shapes()[1]
+    if kept:
+        os.replace(SHAPES_FILE, SHAPES_FILE + ".bad")
     write_text(SHAPES_FILE, json.dumps({"shapes": items}, indent=1))
+    return kept
 
 
 def clean_shape_name(name):
@@ -88,17 +105,20 @@ def clean_shape_name(name):
 
 
 def built_in_name(name):
-    """The name is one of the Shapes ▾ menu's own (as shown or its id; capitals or not)."""
+    """The name is one of the ready-made shapes' (as shown or its id; capitals or not)."""
     low = name.casefold()
     return any(low in (k.casefold(), tr("hz.trace_" + k).casefold()) for k in SHAPES)
 
 
 def free_shape_name(name, items):
-    """name, or "name (2)", "name (3)"... when a saved line already has it (capitals or not)."""
+    """name, or "name (2)", "name (3)"... when a saved line already has it (capitals or not); the name cut so the
+    whole fits NAME_MAX letters (hunt: a long name came back cut to the one it copied)."""
+    from window.drawer import NAME_MAX
     used = {s["name"].casefold() for s in items}
     out, k = name, 2
     while out.casefold() in used:
-        out, k = f"{name} ({k})", k + 1
+        end = f" ({k})"
+        out, k = name[:NAME_MAX - len(end)].rstrip() + end, k + 1
     return out
 
 
@@ -200,8 +220,8 @@ class TraceWindow(tk.Toplevel):
         s = self.s = hz.app.scale
         self.title(tr("hz.trace_title"))
         self.transient(hz)
-        self.geometry(f"{round(460 * s)}x{round(640 * s)}")
-        self.minsize(round(360 * s), round(620 * s))  # (the drawing kept usable, ~200 px, under the strips, hunt)
+        self.geometry(f"{round(460 * s)}x{round(660 * s)}")
+        self.minsize(round(360 * s), round(640 * s))  # (the drawing kept usable, ~200 px, under the strips, hunt)
         self.pts = shown_trace(hz.extra)
         self.drag = None  # {"i": point number, "was": points, "before": fx state, ...} while the mouse holds one
         self.bar = None  # while a note's end is dragged: {"x": press x, "from": its length (waves), "pct": now, ...}
@@ -220,16 +240,22 @@ class TraceWindow(tk.Toplevel):
         b = ttk.Button(bar, text=tr("hz.trace_reset"), command=self.reset, takefocus=False)
         b.pack(side="left")
         Tooltip(b, tr("hz.trace_reset_tip"))
-        m = ttk.Menubutton(bar, text=tr("hz.trace_shapes"), takefocus=False)
-        m.pack(side="left", padx=(6, 0))
-        m["menu"] = self.shapes_menu = tk.Menu(m, tearoff=False, postcommand=self.fill_shapes)
-        self.fill_shapes()
-        Tooltip(m, tr("hz.trace_shapes_tip"))
+        self.saved = []  # the saved lines as the box lists them (newest first; fill_shapes)
+        self.pick = None  # the box's pick: ("ready", id) / ("saved", its place in self.saved) / None (show_pick)
+        box = self.shapes_box = name_list(ttk.Combobox(bar, state="readonly", width=14, takefocus=False,
+                                                       postcommand=self.fill_shapes))
+        box.pack(side="left", padx=(6, 0))
+        box.bind("<<ComboboxSelected>>", lambda e: self.on_pick())
+        Tooltip(box, tr("hz.trace_shapes_tip"))
         b = ttk.Button(bar, text=tr("hz.trace_save"), command=self.save_shape, takefocus=False)
         b.pack(side="left", padx=(6, 0))
         Tooltip(b, tr("hz.trace_save_tip"))
-        self.says = ttk.Label(bar, text="", foreground=look.INFO)
-        self.says.pack(side="left", padx=(10, 0))
+        b = self.delete_btn = ttk.Button(bar, text=tr("hz.trace_delete"), command=self.delete_shape, takefocus=False)
+        b.pack(side="left", padx=(6, 0))
+        Tooltip(b, tr("hz.trace_delete_tip"))
+        self.says = ttk.Label(self, text="", foreground=look.INFO, padding=(8, 0, 8, 0))  # (its own line: the bar
+        self.says.pack(side="bottom", fill="x")  # is full with the shapes box, Save… and Delete)
+        self.fill_shapes()
         st = self.strips = tk.Canvas(self, background=look.CHART_BG, highlightthickness=0, height=round(STRIP_H * s))
         st.pack(side="bottom", fill="x", padx=8, pady=(0, 4))
         st.bind("<Configure>", lambda e: self.draw_strips())
@@ -478,6 +504,7 @@ class TraceWindow(tk.Toplevel):
         for p in self.pts:
             x, y = self.xy(p)
             c.create_rectangle(x - q, y - q, x + q, y + q, fill=look.CHART_POINT, outline=look.CHART_LINE)
+        self.show_pick()
         times = total / n
         if abs(times - 1.0) < 1e-9:
             self.says.config(text=tr("hz.trace_same"), foreground=look.INFO)
@@ -736,26 +763,52 @@ class TraceWindow(tk.Toplevel):
         self.save(before, was)
         self.draw()
 
+    # ------------------------------------------------------------ the shapes box (user 2026-10-14)
+
     def fill_shapes(self):
-        """The Shapes ▾ menu, made again each time it opens: the starting shapes, the saved ones, Delete ▸."""
-        menu = self.shapes_menu
-        menu.delete(0, "end")
-        for name in SHAPES:
-            menu.add_command(label=tr("hz.trace_" + name), command=lambda name=name: self.use(SHAPES[name]))
-        saved = load_shapes()
-        if not saved:
+        """The shapes box's list, read again each time it opens: the ready-made shapes, a divider, the saved lines
+        newest first (each remembers its place in the file: "at")."""
+        items = load_shapes()
+        self.saved = [dict(s, at=k) for k, s in reversed(list(enumerate(items)))]
+        set_names(self.shapes_box, [tr("hz.trace_" + k) for k in SHAPES], [s["name"] for s in self.saved])
+        self.pick = None if self.pick and self.pick[0] == "saved" else self.pick  # (places may have moved)
+        self.show_pick()
+
+    def on_pick(self):
+        k, n = self.shapes_box.current(), len(SHAPES)
+        if k < 0:
             return
-        menu.add_separator()
-        for s in saved:
-            menu.add_command(label=s["name"], command=lambda p=s["points"]: self.use(p))
-        menu.add_separator()
-        gone = tk.Menu(menu, tearoff=False)
-        for s in saved:
-            gone.add_command(label=s["name"], command=lambda n=s["name"]: self.delete_shape(n))
-        menu.add_cascade(label=tr("hz.trace_delete"), menu=gone)
+        if k < n:
+            key = list(SHAPES)[k]
+            self.pick, pts = ("ready", key), SHAPES[key]
+        elif self.saved and k > n:
+            self.pick, pts = ("saved", k - n - 1), self.saved[k - n - 1]["points"]
+        else:
+            return
+        self.use(pts)
+        self.show_pick()
+
+    def show_pick(self):
+        """The box shows the shape the line is (the one picked while the line is still it, else the first that is
+        the same; empty when it's a line of its own); Delete only works on a saved one."""
+        def points(pick):
+            return SHAPES[pick[1]] if pick[0] == "ready" else self.saved[pick[1]]["points"]
+        now = [list(p) for p in self.pts]
+        if self.pick is None or points(self.pick) != now:
+            self.pick = next((("ready", k) for k in SHAPES if SHAPES[k] == now), None) or next(
+                (("saved", j) for j, s in enumerate(self.saved) if s["points"] == now), None)
+        box = self.shapes_box
+        if self.pick is None:
+            box.set("")
+        elif self.pick[0] == "ready":
+            box.current(list(SHAPES).index(self.pick[1]))
+        else:
+            box.current(len(SHAPES) + 1 + self.pick[1])
+        box.name_before = box.get()
+        self.delete_btn.state(["!disabled"] if self.pick and self.pick[0] == "saved" else ["disabled"])
 
     def save_shape(self):
-        """The line drawn saved under a name (asked: empty or a starting shape's name = asked again; a name already
+        """The line drawn saved under a name (asked: empty or a ready-made shape's name = asked again; a name already
         saved gets " (2)", " (3)"...)."""
         from window.settings_window import ask_name
         if self.drag is not None or self.bar is not None:
@@ -768,19 +821,35 @@ class TraceWindow(tk.Toplevel):
         name = free_shape_name(name, items)
         items.append({"name": name, "points": [list(p) for p in self.pts]})
         try:
-            save_shapes(items)
+            kept = save_shapes(items)
         except OSError as e:
             return messagebox.showerror(tr("hz.trace_title"), tr("hz.trace_not_saved", e=e), parent=self)
-        self.says.config(text=tr("hz.trace_saved", name=name), foreground=look.INFO)
+        self.fill_shapes()
+        self.pick = ("saved", 0)  # (the newest: on top)
+        self.show_pick()
+        self.says.config(text=tr("hz.trace_kept_bad") if kept else tr("hz.trace_saved", name=name),
+                         foreground=look.WARN if kept else look.INFO)
 
-    def delete_shape(self, name):
-        """A saved line taken out of the list (asked first). The line drawn stays."""
-        if not messagebox.askyesno(tr("hz.trace_delete_title"), tr("hz.trace_delete_ask", name=name), parent=self):
+    def delete_shape(self):
+        """The saved line picked in the box taken out of the file (asked first; only that one, even when another
+        has the same name). The line drawn stays."""
+        if not self.pick or self.pick[0] != "saved" or self.drag is not None or self.bar is not None:
             return
-        try:
-            save_shapes([s for s in load_shapes() if s["name"] != name])
-        except OSError as e:
-            messagebox.showerror(tr("hz.trace_title"), tr("hz.trace_not_saved", e=e), parent=self)
+        s = self.saved[self.pick[1]]
+        if not messagebox.askyesno(tr("hz.trace_delete_title"), tr("hz.trace_delete_ask", name=s["name"]),
+                                   parent=self):
+            return
+        items = load_shapes()
+        k = s["at"]
+        if k >= len(items) or items[k] != {"name": s["name"], "points": s["points"]}:  # (the file changed since)
+            k = next((i for i, t in enumerate(items) if t == {"name": s["name"], "points": s["points"]}), None)
+        if k is not None:
+            try:
+                save_shapes(items[:k] + items[k + 1:])
+            except OSError as e:
+                messagebox.showerror(tr("hz.trace_title"), tr("hz.trace_not_saved", e=e), parent=self)
+        self.pick = None
+        self.fill_shapes()
 
     def save(self, before, was):
         """The shape drawn becomes the Hz bass's: one undo step of the Hz bass window (was: the points before).

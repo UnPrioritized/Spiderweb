@@ -1,7 +1,9 @@
 Hz shape… (Hz bass window → Hz settings… → Hz shape…) sets how a Hz bass's notes look inside each wave of its tone, and how long they last. The pitch stays the same; mostly the look changes, and the texture of the sound a little.
 [clip:hz_shape-window]
 
-The drawing is one wave of the tone (left to right) over the Hz bass's keys (bottom to top). A key hits wherever the line crosses its row (the green dots), so a zigzag makes more notes: the text next to Shapes says how many more. The line is stretched to cover all the keys. Shapes has ready ones (Saw, Triangle, Sine, Square); Reset goes back to a straight line up at the start, where every key hits together. Save… keeps the line drawn under a name: it shows in Shapes under the ready ones, and Shapes → Delete takes it out again.
+The drawing is one wave of the tone (left to right) over the Hz bass's keys (bottom to top). A key hits wherever the line crosses its row (the green dots), so a zigzag makes more notes: the text over the buttons says how many more. The line is stretched to cover all the keys. The shapes box has ready ones (Saw, Triangle, Sine, Square), then the ones you saved, newest first; typing a letter while its list is open jumps to a name. Reset goes back to a straight line up at the start, where every key hits together.
+
+Save… keeps the line drawn under a name. Delete takes the saved shape picked in the box out again (you're asked first); it's greyed out for the ready-made shapes and for a line that isn't saved.
 
 Drag a point to move it. Click the line to add a point there, or click empty space to add one at the end. Right-click or double-click a point to remove it (two always stay). Drag the round dot in the middle of a piece to bend it into a curve; right-click or double-click the dot to make it straight again. Points snap to the grid; hold Shift to move them freely. Each change is one undo step.
 
