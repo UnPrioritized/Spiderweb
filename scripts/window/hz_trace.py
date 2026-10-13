@@ -40,6 +40,8 @@ ROWS_SHOWN = 64  # more key rows than this: only some drawn (every key still hit
 STRIP_H = 110  # px: the preview strips under the drawing (x scale; user 2026-10-13: how it looks low and high)
 STRIP_ROWS = 32  # ... more key rows than this: only some drawn
 STRIP_GAP = 6  # ... px between two (x scale)
+STRIP_WAVES = 48  # ... the most waves the highest shows
+STRIP_WAIT = 120  # ms: while the mouse holds something, the strips drawn again once it rests this long
 FIXED_STRIPS = (21, 33, 45, 57)  # ... their keys while the Hz bass has no notes (an octave apart; no names shown)
 # the starting shapes of the Shapes ▾ menu (my picks): a saw = each key once, the others each key twice a wave
 SHAPES = {"saw": [[0.0, 0.0], [1.0, 1.0]],
@@ -147,11 +149,12 @@ class TraceWindow(tk.Toplevel):
         self.title(tr("hz.trace_title"))
         self.transient(hz)
         self.geometry(f"{round(460 * s)}x{round(640 * s)}")
-        self.minsize(round(320 * s), round(480 * s))
+        self.minsize(round(360 * s), round(620 * s))  # (the drawing kept usable, ~200 px, under the strips, hunt)
         self.pts = shown_trace(hz.extra)
         self.drag = None  # {"i": point number, "was": points, "before": fx state, ...} while the mouse holds one
         self.bar = None  # while a note's end is dragged: {"x": press x, "from": its length (waves), "pct": now, ...}
         self.ends = []  # each note's end drawn: (px x, px y, its length in waves) (bar_at)
+        self.strips_timer = None  # (draw: the strips waiting for the mouse to rest)
         self.placed = False  # (the last press put a new point in)
         self.local, self.local_redo = [], []  # the shapes before / after changes no Hz bass held (local_step)
         self.local_for = None  # (what they were made for: waiting_for())
@@ -407,7 +410,7 @@ class TraceWindow(tk.Toplevel):
                     if b - a > 1e-9:
                         c.create_rectangle(x0 + a * w, py - bh / 2, x0 + b * w, py + bh / 2, fill=look.HZ_NOTE_BAR,
                                            outline=look.HZ_NOTE_BAR_EDGE)  # (edged: touching notes stay apart, user)
-                self.ends.append((x0 + (end if end <= 1.0 + 1e-9 else end - 1.0) * w, py, size))
+                self.ends.append((x0 + (end if end <= 1.0 + 1e-9 else end - 1.0) * w, py, size, size >= gap - 1e-9))
                 dots.append((x0 + x * w, py))
         for px, py in dots:  # (on top of every bar)
             c.create_oval(px - r, py - r, px + r, py + r, fill=look.HZ_GREEN, outline="")
@@ -427,20 +430,30 @@ class TraceWindow(tk.Toplevel):
         else:
             self.says.config(text=tr("hz.trace_times", times=f"{times:.2f}".rstrip("0").rstrip(".")),
                              foreground=look.WARN if times > 1.0 else look.INFO)
-        self.draw_strips()
+        if self.strips_timer:
+            self.after_cancel(self.strips_timer)
+            self.strips_timer = None
+        if self.drag is not None or self.bar is not None:  # (held: drawn once the mouse rests, hunt: it lagged)
+            self.strips_timer = self.after(STRIP_WAIT, self.draw_strips)
+        else:
+            self.draw_strips()
 
     def draw_strips(self):
         """The preview strips (user 2026-10-13): the notes the drawing makes at a few pitches from low to high, drawn
         like the piano roll (one row per key, bottom to top; no pitch names), all over the same stretch of time, so a
         higher pitch shows more waves. Only the drawing and the Note length: not the effects."""
         c, s = self.strips, self.s
+        self.strips_timer = None
+        if not c.winfo_exists():  # (a wait for the mouse to rest ending after the window went)
+            return
         c.delete("all")
         cw, ch = c.winfo_width(), c.winfo_height()
         if cw < 10 or ch < 10:
             return
         keys, ppq, bpm = self.strip_keys(), self.app.ppq, self.bpm()
         waves = [hz_gate({"key": k, "cents": 0.0}, bpm) * ppq for k in keys]
-        span = max(waves[0], min(4 * waves[0], 48 * waves[-1]))  # (4 waves of the lowest, unless the highest gets crowded)
+        span = min(4 * waves[0], STRIP_WAVES * waves[-1])  # (4 waves of the lowest, unless the highest gets crowded:
+        # then the lowest shows less than one, hunt: notes far apart drew ~1500 waves up high)
         n = self.rows()
         every = max(1, -(-n // STRIP_ROWS))
         rows = row_hits(trace_line(self.pts), n)[::every]
@@ -459,34 +472,44 @@ class TraceWindow(tk.Toplevel):
                 starts, ends = row_notes(hits, wave, span, length, ppq)
                 a = np.floor(left + np.maximum(starts, 0) / span * (sw - 1)).astype(int)
                 b = np.maximum(a + 1, np.ceil(left + np.minimum(ends, span) / span * (sw - 1)).astype(int))
-                run = None
-                for p, q in zip(a.tolist(), b.tolist()):  # (each note its own, edge and all, like the piano roll, user:
-                    if run and p <= run[0]:  # touching ones drawn as one looked like a long note; one pixel: one)
-                        run[1] = max(run[1], q)
-                        continue
-                    if run:
-                        self.strip_note(left, sw, top, rh, run, fill, edge)
-                    run = [p, q]
-                if run:
-                    self.strip_note(left, sw, top, rh, run, fill, edge)
+                if not len(a):
+                    continue
+                first = np.flatnonzero(np.concatenate([[True], a[1:] != a[:-1]]))  # (each note its own, edge and all,
+                a, b = a[first], np.minimum(np.maximum.reduceat(b, first), int(left + sw - 1))  # like the piano roll,
+                line = edge if rh >= 3 else ""  # user: touching ones drawn as one looked like a long note; notes in
+                for p, q in zip(a.tolist(), b.tolist()):  # one pixel: one)
+                    c.create_rectangle(p, top + 1, q, top + rh, fill=fill, outline=line)
             c.create_rectangle(left, 0, left + sw - 1, ch - 1, outline=look.CHART_FRAME)
-
-    def strip_note(self, left, sw, top, rh, run, fill, edge):
-        p, q = run[0], min(run[1], left + sw - 1)
-        self.strips.create_rectangle(p, top + 1, q, top + rh, fill=fill, outline=edge if rh >= 3 else "")
 
     # ------------------------------------------------------------ the mouse
 
     def bar_at(self, e):
-        """The note's end under the mouse (its length in waves), or None (none to change: no Hz bass)."""
+        """The note's end under the mouse (its length in waves), or None (none to change: no Hz bass). A note reaching
+        its row's next hit ends on the line: the line wins there (at 100 % every end does, hunt)."""
         if self.hz.length_target() is None:
             return None
         best, near = None, GRAB * self.s
-        for x, y, size in self.ends:
+        line = None
+        for x, y, size, full in self.ends:
             d = max(abs(x - e.x), abs(y - e.y) / 1.5)
+            if d <= near and full:
+                if line is None:
+                    line = self.on_line(e) is not None
+                if line:
+                    continue
             if d <= near:
                 best, near = size, d
         return best
+
+    def box_share(self):
+        """The Note length set, as a share of a wave (where a bar drag starts from: a bar cut short by its row's next
+        hit would make a small drag jump, hunt). % of the note: that share; ticks: of the Hz bass's own wave."""
+        length = self.length_now()
+        if "wave" in length:
+            return length["wave"]
+        if "beats" in length:
+            return min(1.0, length_ticks(length, self.app.ppq) / self.main_wave())
+        return length["pct"] / 100.0
 
     def on_motion(self, e):
         """Over a note's end: the sideways arrows (drag it to change every note's length)."""
@@ -512,10 +535,9 @@ class TraceWindow(tk.Toplevel):
         bend = i is None and self.bend_at(e)
         if bend:
             i = bend
-        size = None if i is not None else self.bar_at(e)
-        if size is not None:  # (a note's end: every note's length follows, in % of a wave, user)
+        if i is None and self.bar_at(e) is not None:  # (a note's end: every note's length follows, % of a wave, user)
             var, row, _ = self.length_box()
-            self.bar = {"x": e.x, "from": size, "pct": None, "was": (var.get(), row.unit.current())}
+            self.bar = {"x": e.x, "from": self.box_share(), "pct": None, "was": (var.get(), row.unit.current())}
             self.placed = True  # (a double click there takes nothing out)
             return
         self.placed = i is None  # (a double click on the point this click puts in doesn't take it out again)
@@ -568,8 +590,14 @@ class TraceWindow(tk.Toplevel):
         """A note's end dragged: every note that share of a wave long (whole %, 1..100), shown in the box at once;
         the notes made on release."""
         b = self.bar
-        if b["pct"] is None and abs(e.x - b["x"]) < 3:
-            return  # (under 3 px: still a click)
+        if abs(e.x - b["x"]) < 3:  # (under 3 px: a click; back there: as before, a typed 1/8 kept, hunt)
+            if b["pct"] is not None:
+                var, row, _ = self.length_box()
+                var.set(b["was"][0])
+                row.unit.current(b["was"][1])
+                b["pct"] = None
+                self.draw()
+            return
         pct = min(100, max(1, round((b["from"] + (e.x - b["x"]) / self.area()[2]) * 100)))
         if pct == b["pct"]:
             return
