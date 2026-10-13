@@ -172,6 +172,33 @@ def stop_tick(notes, f):
     return lo + int(round(f * (hi - lo)))
 
 
+def alike(sus):
+    """sh["sustain"] without where its stops put by hand are: shapes joined / merged are sustained alike when only
+    those differ (the stops are carried over by tick, carry_shares)."""
+    if not isinstance(sus, dict) or not isinstance(sus.get("stops"), dict):
+        return sus
+    return dict(sus, stops={k: v for k, v in sus["stops"].items() if k != "at"})
+
+
+def carry_shares(olds, notes, top):
+    """Stops put by hand carried to a shape made of other shapes (a slice's piece, a join, a merge, a live shape):
+    olds = [(shares, those shapes' notes before Sustain)], notes = the new shape's -> its shares for the same ticks,
+    inside its notes' time; one past its end only when it reaches the old end (top: the old shapes' last end)."""
+    if not len(notes):
+        return []
+    lo, hi = int(notes[:, 0].min()), int(notes[:, 1].max())
+    out = set()
+    for at, old in olds:
+        if not len(old) or not at:
+            continue
+        for f in at:
+            t = stop_tick(old, f)
+            f2 = stop_share(notes, t)
+            if f2 is not None and (lo < t < hi or t >= hi and hi >= top) and 0 < f2 <= MOST_PAST:
+                out.add(f2)
+    return sorted(out)[:MOST_POINTS]
+
+
 def stop_share(notes, tick):
     """stop_tick turned back: the share for a stop at this tick (None: notes with no length)."""
     lo, hi = int(notes[:, 0].min()), int(notes[:, 1].max())

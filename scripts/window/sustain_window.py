@@ -21,7 +21,7 @@ from files import settings
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.sustain import (MOST_GAP, MOST_PAST, MOST_PIECES, MOST_POINTS, auto_gap, is_sustained, stop_share, stop_tick,
-                           stop_ticks, sustained, too_many_pieces)
+                           carry_shares, stop_ticks, sustained, too_many_pieces)
 from window import look
 from window.widgets import LocalUndo, Scrub, Tooltip, remember_place
 
@@ -40,6 +40,21 @@ def sustain_targets(app):
 def bare_notes(app, sh):
     """Shape sh's notes without Sustain (what its stops put by hand are shares of)."""
     return np.asarray(app.notes_of({k: v for k, v in sh.items() if k != "sustain"}))
+
+
+def carry_stops(app, olds, news):
+    """New shapes made of olds (Slice / Split here pieces, Join, Gate sensitive merge, Ctrl+R) that took a Sustain
+    with stops put by hand: the stops stay on the same ticks, as shares of each new shape's own notes (hunt: copied
+    shares moved them); a piece keeps only the stops inside it."""
+    got = [((o.get("sustain") or {}).get("stops") or {}).get("at") for o in olds]
+    if not any(got):
+        return
+    old = [(at, bare_notes(app, o)) for at, o in zip(got, olds) if at]
+    top = max((int(n[:, 1].max()) for _, n in old if len(n)), default=0)
+    for sh in news:
+        st = (sh.get("sustain") or {}).get("stops")
+        if isinstance(st, dict):
+            st["at"] = carry_shares(old, bare_notes(app, sh), top)
 
 
 def own_part(sh):

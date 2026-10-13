@@ -17,6 +17,7 @@ from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_notes_tracks, shape_path
 from notes.gateflip import lifted, put_back, turn_velocities
 from notes.mask import same_mask
+from notes.sustain import alike
 from notes.merge import edge_moves, merged, part_rows, reshaped_parts
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import clip_segment, crossings, slice_custom, slice_notes
@@ -28,6 +29,7 @@ from notes.joined import (custom_groups, join_shapes, join_velocity, joined_end_
 from notes.tumour import LINE_KINDS, split_tumour
 from roll.roll_shared import cached_path, cached_strokes
 from window import look
+from window.sustain_window import carry_stops
 from window.widgets import Tooltip
 
 TOUCH_PX = 8  # ends closer than this on screen (times the display scaling) count as touching, like Live shape snaps
@@ -112,6 +114,7 @@ class JoinSplit:
             return
         new = to_live(olds, [cached_strokes(sh) for sh in olds], self.defaults, self.custom_defaults,
                       self.roll.sy / self.roll.sx if self.roll.sx else None)
+        carry_stops(self, olds, [new])  # (Sustain's stops put by hand: on the same ticks)
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.turn_into_live_shape"))
         self.unlink_groups(order)  # (an Add between group: plain shapes first, user)
@@ -199,6 +202,8 @@ class JoinSplit:
                 tr("join_split.spiderweb"), tr("join_split.joining_these_changes") + "\n• ".join(lost) +
                 tr("join_split.ctrl_z_gives_them_back"), icon="warning", parent=self):
             return
+        if not again:
+            carry_stops(self, olds, [new])
         new = again or new
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.join"))
@@ -252,9 +257,10 @@ class JoinSplit:
         new = [shape(out, tr("join_split.merged"))] + ([shape(rest, tr("join_split.merge_leftovers"), "leftovers")]
                                                        if len(rest) else [])
         sus = [self.shapes[i].get("sustain") for i in pair]
-        if sus[0] is not None and sus[0] == sus[1]:  # (both sustained alike: so are the merged notes, like Join)
-            for sh in new:
+        if sus[0] is not None and alike(sus[0]) == alike(sus[1]):  # (both sustained alike: so are the merged notes,
+            for sh in new:                                          # like Join; stops put by hand: on their ticks)
                 sh["sustain"] = copy.deepcopy(sus[0])
+            carry_stops(self, [self.shapes[i] for i in pair], new)
         masks = [self.shapes[i].get("mask") for i in pair]
         if masks[0] and masks[1] and same_mask(*masks):  # (both masks alike: so is what's made of them, like Join;
             # groups apart, the first one's)
@@ -519,6 +525,7 @@ class JoinSplit:
                 part_glue(p, sh)
                 keep_velocity(p)
             if i in done:
+                carry_stops(self, [sh], parts)  # (Sustain's stops put by hand: each piece keeps the ones inside it)
                 picked += [len(new) + k for k, p in enumerate(parts) if pick is None or pick(p)]
             new += parts
         self.shapes[:] = new
