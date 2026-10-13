@@ -209,16 +209,21 @@ class TextTyping:
                 app.shapes_changed()
             else:  # nothing to see any more: the shape goes, the typing stays
                 ty["tx"], ty["axes"] = tx, axes
+                # (its own settings, Hz bass too, wait for the letters typed next, at its place in the list)
+                ty["kept"] = (ty["i"], {k: v for k, v in sh.items() if k not in ("strokes", "pts", "text", "name")})
                 del app.shapes[ty["i"]]
                 ty["i"] = None
                 app.select(None)
                 app.shapes_changed()
         else:
-            sh = dict(app.defaults, kind="custom", **custom_settings(app.custom_defaults))
+            at, kept = ty.get("kept") or (None, None)
+            sh = dict(kept) if kept else dict(app.defaults, kind="custom", **custom_settings(app.custom_defaults))
             if build(sh, tx, axes):
-                ty["i"] = len(app.shapes)  # before add_shape selects it (selecting another shape ends the typing)
+                ty.pop("kept", None)
+                at = len(app.shapes) if at is None or not ty["undo"] else min(at, len(app.shapes))
+                ty["i"] = at  # before add_shape selects it (selecting another shape ends the typing)
                 if ty["undo"]:
-                    app.shapes.append(sh)
+                    app.shapes.insert(at, sh)
                     app.select(ty["i"])
                     app.shapes_changed()
                 else:
