@@ -449,7 +449,7 @@ def split_custom(sh):
     for g in custom_groups(sh):
         new = json.loads(json.dumps(sh))
         new["strokes"] = [new["strokes"][i] for i in g]
-        refit(new)  # (a Hz bass's tones stay where they were)
+        refit(new, song_beats=True)  # (a Hz bass's tones stay where they were)
         if new.get("hz"):
             bs = [b for b, _ in new["pts"]]
             new["hz"] = hz_up_to(new["hz"], max(bs + [bs[1] + bs[2] - bs[0]]) - left_edge(new))

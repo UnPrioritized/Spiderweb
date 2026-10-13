@@ -642,10 +642,11 @@ def map_stroke(st, fn, su=1.0, sv=1.0):
     return new
 
 
-def refit(sh):
+def refit(sh, song_beats=False):
     """Fit a custom shape's box around its drawing again (after a stroke was added or changed): the strokes go back
     to filling 0..1, the frame points move so nothing changes on the roll. A flat drawing keeps its box size that
-    way and sits in the middle."""
+    way and sits in the middle. A Hz bass's tones follow the box's left edge (user); song_beats: they stay on
+    their beats in the song instead (Split)."""
     pts = [p for st in sh["strokes"] for p in stroke_points(st)]
     if not pts:
         return
@@ -661,7 +662,7 @@ def refit(sh):
     to_bp = frame_to_bp(sh["pts"])
     left = left_edge(sh)
     sh["pts"] = [list(to_bp(ul, vl)), list(to_bp(ul + w, vl)), list(to_bp(ul, vl + h))]
-    if sh.get("hz"):  # (its tones count from the box's left edge: they stay where they were)
+    if sh.get("hz") and song_beats:  # (its tones count from the box's left edge: they stay where they were)
         sh["hz"] = shifted_hz(sh["hz"], left - left_edge(sh))
     for st in sh["strokes"]:  # (each stroke stays the same dict: a formula window may be holding it)
         new = map_stroke(st, lambda u, v: ((u - ul) / w, (v - vl) / h), 1 / w, 1 / h)
