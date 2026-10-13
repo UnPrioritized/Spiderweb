@@ -14,7 +14,7 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.sustain import MOST_GAP, auto_gap, is_sustained
+from notes.sustain import MOST_GAP, MOST_PAST, MOST_POINTS, auto_gap, is_sustained, stop_share, stop_tick
 from window.widgets import LocalUndo, Scrub, Tooltip, remember_place
 
 
@@ -70,6 +70,25 @@ class SustainWindow(tk.Toplevel):
         row = self.new_row(box)
         self.length_row(row, "every")
         self.length_row(row, "from", tick=False)
+        stops = [(t.get("sustain") or {}).get("stops") or {} for t in self.tgts]
+        self.points = [list(s.get("at", [])) for s in stops]  # (each shape's stops put by hand: shares)
+        self.stops_on = tk.BooleanVar(value=any(s and not s.get("off") for s in stops))
+        self.past = tk.BooleanVar(value=any(s.get("past") for s in stops))
+        row = self.new_row(box)
+        self.stops_tick = ttk.Checkbutton(row, text=tr("sustain.stops"), variable=self.stops_on, command=self.change)
+        self.stops_tick.pack(side="left")
+        Tooltip(self.stops_tick, tr("sustain.stops_tip"))
+        self.add_btn = ttk.Button(row, text=tr("sustain.add_stop"), command=self.add_stop)
+        self.add_btn.pack(side="left", padx=(6, 0))
+        Tooltip(self.add_btn, tr("sustain.add_stop_tip"))
+        self.clear_btn = ttk.Button(row, text=tr("sustain.clear_stops"), command=self.clear_stops)
+        self.clear_btn.pack(side="left", padx=(4, 0))
+        self.count = ttk.Label(row, text="")
+        self.count.pack(side="left", padx=(6, 0))
+        row = self.new_row(box)
+        self.past_tick = ttk.Checkbutton(row, text=tr("sustain.past"), variable=self.past, command=self.change)
+        self.past_tick.pack(side="left", padx=(int(16 * app.scale), 0))
+        Tooltip(self.past_tick, tr("sustain.past_tip"))
         row = ttk.Frame(box)
         row.pack(anchor="e", pady=(10, 0))
         ttk.Button(row, text=tr("range_window.ok"), command=self.ok).pack(side="left")
@@ -156,6 +175,42 @@ class SustainWindow(tk.Toplevel):
         self.store()
         self.hist.mark(key)
 
+    def bare_notes(self, t):
+        """Shape t's notes without Sustain (what its stops are shares of)."""
+        return np.asarray(self.app.notes_of({k: v for k, v in t.items() if k != "sustain"}))
+
+    def add_stop(self):
+        """A stop on the next snap line after each shape's last usable stop (none: after its first note's start);
+        never past its end unless "Allow past the shape's end" is ticked."""
+        snap, added = self.app.snap_ticks(), False
+        for t, pts in zip(self.tgts, self.points):
+            notes = self.bare_notes(t)
+            if not len(notes) or len(pts) >= MOST_POINTS:
+                continue
+            hi = int(notes[:, 1].max())
+            used = [stop_tick(notes, f) for f in pts if f < 1 or self.past.get()]
+            ref = max(used) if used else int(notes[:, 0].min())
+            tick = (ref // snap + 1) * snap
+            if tick == hi and self.past.get():  # (a stop right on the end does nothing)
+                tick += snap
+            f = stop_share(notes, tick)
+            if f is None or (tick >= hi and not self.past.get()) or f > MOST_PAST:
+                continue
+            pts.append(f)
+            pts.sort()
+            added = True
+        if not added:
+            return self.app.status.show(tr("sustain.no_room"))
+        self.stops_on.set(True)
+        self.store()
+        self.hist.mark()
+
+    def clear_stops(self):
+        for pts in self.points:
+            pts.clear()
+        self.store()
+        self.hist.mark()
+
     def ticks(self, beats):
         return int(round(beats * self.app.ppq))
 
@@ -172,10 +227,15 @@ class SustainWindow(tk.Toplevel):
 
     def state(self):
         return json.dumps([self.on_var.get(), self.mode.get(), self.gap_var.get(),
-                           {k: [r[0] and r[0].get(), r[1].get()] for k, r in self.rows.items()}])
+                           {k: [r[0] and r[0].get(), r[1].get()] for k, r in self.rows.items()},
+                           self.stops_on.get(), self.past.get(), self.points])
 
     def put_state(self, state):
-        on, mode, gap, rows = json.loads(state)
+        on, mode, gap, rows, stops_on, past, points = json.loads(state)
+        self.stops_on.set(stops_on)
+        self.past.set(past)
+        for pts, was in zip(self.points, points):
+            pts[:] = was
         self.on_var.set(on)
         self.mode.set(mode)
         self.gap_var.set(gap)
@@ -198,7 +258,7 @@ class SustainWindow(tk.Toplevel):
     def store(self):
         """Put the window's settings on the shapes and show them."""
         on, mode, gap = self.on_var.get(), self.mode.get(), self.gap()
-        for t, old in zip(self.tgts, self.old):
+        for t, old, pts in zip(self.tgts, self.old, self.points):
             if not on:
                 t.pop("sustain", None)
             elif mode == "auto":
@@ -213,11 +273,17 @@ class SustainWindow(tk.Toplevel):
                 self.put_length(t, old, "from", "every")
                 if not t["sustain"].get("from"):
                     t["sustain"].pop("from", None)
+                if self.stops_on.get() or pts:  # (unticked: the stops kept for ticking again)
+                    t["sustain"]["stops"] = dict({"at": list(pts)}, **({"past": True} if self.past.get() else {}),
+                                                 **({} if self.stops_on.get() else {"off": True}))
+        n = sum(len(p) for p in self.points)
+        self.count.config(text=tr("sustain.stops_n", n=n) if n != 1 else tr("sustain.stops_one"))
         self.seen = self.gap_var.get()  # (the box as last used: typed past it without Enter = OK takes it)
         for r in self.rows.values():
             r[4] = r[1].get()
         state = "normal" if on else "disabled"
-        for w in [self.auto_btn, self.own_btn, self.gap_box] + [w for r in self.rows.values() for w in r[2:4] if w]:
+        for w in [self.auto_btn, self.own_btn, self.gap_box, self.stops_tick, self.add_btn, self.clear_btn,
+                  self.past_tick] + [w for r in self.rows.values() for w in r[2:4] if w]:
             w.config(state=state)
         self.app.shapes_changed()
 

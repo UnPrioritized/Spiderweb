@@ -4,6 +4,12 @@ A group is the notes on one key with no real gap between them. Small gaps, like 
 
 Hold over gaps up to: Auto works out the gap from the shape's own notes (the most common gap between notes on a key) and shows it in ticks. Or type your own number of ticks: a bigger number than a hole holds the notes across the hole too. The number follows the PPQ, so changing the PPQ keeps the look.
 
+Each note at most: each note is held to this many ticks long at most, instead of to the end of its group. It never goes past the group's end, and notes that are already longer stay as they are.
+
+Stop every: the sustain stops every this many ticks, counted from the shape's first note ("starting at" moves the stops later). At a stop, every note sounding there ends, and one new note per key starts on the same tick, so the sustain starts again with no gap and the shape keeps its look. A resized shape gets more or fewer stops.
+
+Stop at my points: stops you put yourself. Add stop puts one on the next snap line after the last stop, Clear points takes them all away. These stops stretch with the shape when it's resized. With Allow past the shape's end ticked, a stop can sit past the end: the last notes on each key are then held on until it, so the shape gets longer.
+
 Changes show on the piano roll at once. OK keeps them as one undo step, Cancel or Esc puts everything back. The menu item has a tick while a selected shape is sustained, and the Shapes list says (Sustained). Untick Sustain notes in the window to take it off.
 
 Sustain comes last, after the outline gate, Colours, glue and the Claw machine / Strum / Chop pages: it only makes notes longer.

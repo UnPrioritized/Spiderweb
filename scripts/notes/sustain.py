@@ -5,8 +5,10 @@ sh["sustain"] = {} (the hold gap worked out by itself), + "gap": beats (typed), 
 this long). Each key row on its own: notes whose gaps are no longer than the hold gap make one group, and every note
 of a group ends where the group's last note ends (stacked on the same key), or at its start + "most" if that comes
 first (never shorter than it was). Longer gaps are holes in the shape and stay empty, so its look is kept.
-Stops ("every": beats from the first note's start, + "from"): every note sounding across one ends there and the
-sustain starts again on the same tick, one note per key (no gap: the look is kept).
+Stops ("every": beats from the first note's start, + "from"; "stops": {"at": [share of the notes' time, from the
+first start to the last end before Sustain, so they stretch with the shape], "past"?, "off"? (kept while unticked)}):
+every note sounding across one ends there and the sustain starts again on the same tick, one note per key (no gap:
+the look is kept). "past": a stop put past the last end holds each key row's last group on to it.
 Done last, after everything else that makes the shape's notes; only lengths change. A sustained shape keeps its
 overlaps in every Channels mode, other shapes still fix their clashes with it (engine.render).
 """
@@ -18,6 +20,8 @@ import numpy as np
 MOST_GAP = 10 ** 4  # beats a typed hold gap may be
 MOST_STOPS = 10 ** 6  # stops made by "every"
 MOST_PIECES = 20 * 10 ** 6  # notes the stops may cut the notes into (like Chop's limit)
+MOST_POINTS = 10 ** 4  # stops put by hand
+MOST_PAST = 1000  # how far past the end (in the notes' lengths) a stop put by hand may be
 
 
 def clean_sustain(s):
@@ -37,6 +41,20 @@ def clean_sustain(s):
         at = _beats(s.get("from"))
         if at:
             out["from"] = at
+    stops = s.get("stops")
+    if isinstance(stops, dict):
+        at, raw = [], stops.get("at")
+        for f in raw if isinstance(raw, list) else []:
+            try:
+                f = float(f)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(f) and 0 < f <= MOST_PAST:
+                at.append(f)
+        out["stops"] = {"at": sorted(set(at))[:MOST_POINTS]}
+        for key in ("past", "off"):
+            if stops.get(key) is True:
+                out["stops"][key] = True
     return out
 
 
@@ -96,10 +114,11 @@ def hold_gap(sus, notes, ppq):
     return auto_gap(notes)
 
 
-def sustained(notes, sus, ppq):
+def sustained(notes, sus, ppq, reach=None):
     """notes (start, end, pitch, velocity) with each group's notes held to the group's last end (or to their start +
-    "most" if that comes first; never shorter)."""
-    if len(notes) < 2:
+    "most" if that comes first; never shorter). reach: each key row's last group held on to this tick (a stop past
+    the shape's end)."""
+    if len(notes) < (1 if reach is not None else 2):
         return notes
     gap = hold_gap(sus, notes, ppq)
     order, gaps = row_order(notes)
@@ -107,6 +126,11 @@ def sustained(notes, sus, ppq):
     first = np.flatnonzero(new)
     group = np.cumsum(new) - 1
     ends = np.maximum.reduceat(notes[order, 1], first)[group]
+    if reach is not None:
+        p = notes[order, 2]
+        last = np.flatnonzero(np.append(p[1:] != p[:-1], True))  # (each row's last note)
+        row = np.cumsum(np.append(0, p[1:] != p[:-1]))
+        ends = np.where(group == group[last][row], np.maximum(ends, reach), ends)
     if "most" in sus:
         ends = np.maximum(notes[order, 1], np.minimum(ends, notes[order, 0] + max(1, round(sus["most"] * ppq))))
     out = notes.copy()
@@ -117,21 +141,41 @@ def sustained(notes, sus, ppq):
 def held(notes, tracks, sus, ppq):
     """A sustained shape's notes and tracks (engine.fx_notes): sustained, then cut at its stops."""
     stops = stop_ticks(notes, sus, ppq)
-    notes = sustained(notes, sus, ppq)
+    reach = int(stops[-1]) if len(stops) and stops[-1] > notes[:, 1].max() else None
+    notes = sustained(notes, sus, ppq, reach)
     return cut_at(notes, tracks, stops) if len(stops) else (notes, tracks)
 
 
 def stop_ticks(notes, sus, ppq):
-    """Where the sustain stops (sorted ticks inside the notes' time, from the notes before Sustain): "every" beats
-    from the first note's start (+ "from")."""
-    if not len(notes) or "every" not in sus:
+    """Where the sustain stops (sorted ticks inside the notes' time, from the notes before Sustain; past the last
+    end too with "past"): "every" beats from the first note's start (+ "from"), and the ones put by hand."""
+    if not len(notes):
         return np.zeros(0, np.int64)
     lo, hi = int(notes[:, 0].min()), int(notes[:, 1].max())
-    step = max(1, round(sus["every"] * ppq))
-    first = lo + round(sus.get("from", 0) * ppq)
-    k0 = max(0, (lo - first) // step + 1)  # (the first stop past the start)
-    k1 = min((hi - 1 - first) // step + 1, k0 + MOST_STOPS)
-    return first + step * np.arange(k0, max(k0, k1), dtype=np.int64)
+    got = [np.zeros(0, np.int64)]
+    if "every" in sus:
+        step = max(1, round(sus["every"] * ppq))
+        first = lo + round(sus.get("from", 0) * ppq)
+        k0 = max(0, (lo - first) // step + 1)  # (the first stop past the start)
+        k1 = min((hi - 1 - first) // step + 1, k0 + MOST_STOPS)
+        got.append(first + step * np.arange(k0, max(k0, k1), dtype=np.int64))
+    stops = sus.get("stops")
+    if stops and not stops.get("off") and stops["at"]:
+        at = lo + np.round(np.asarray(stops["at"], float) * (hi - lo)).astype(np.int64)
+        got.append(at[(at > lo) & ((at < hi) | bool(stops.get("past")))])
+    return np.unique(np.concatenate(got))
+
+
+def stop_tick(notes, f):
+    """A stop put by hand (share f) as a tick, for these notes (before Sustain)."""
+    lo, hi = int(notes[:, 0].min()), int(notes[:, 1].max())
+    return lo + int(round(f * (hi - lo)))
+
+
+def stop_share(notes, tick):
+    """stop_tick turned back: the share for a stop at this tick (None: notes with no length)."""
+    lo, hi = int(notes[:, 0].min()), int(notes[:, 1].max())
+    return (tick - lo) / (hi - lo) if hi > lo else None
 
 
 def cut_at(notes, tracks, stops):
