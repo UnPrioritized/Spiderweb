@@ -37,6 +37,7 @@ from window.hz_live import LiveKeys
 from window.hz_loud import LoudPane
 from window.hz_preview import Preview
 from window.hz_synth import open_synth
+from window.hz_trace import TraceWindow
 from window.preview_settings import PreviewSettings, auto_box, no_spaces, open_settings  # noqa: F401
 from window.snap_picker import SnapPicker
 from window.tool_picker import ToolPicker
@@ -167,7 +168,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         b = ttk.Button(f, text=tr("hz.synth"), command=lambda: open_synth(self), takefocus=False)
         b.pack(side="left", padx=(0, 6))
         Tooltip(b, tr("hz.synth_tip"))
-        self.trace_win = None  # the Wave shape window (hz_trace.py; its button is in Settings…, user)
+        self.trace_win = None  # the Hz shape window (hz_trace.py; its button is in Settings…, user; holds Note length)
         b = ttk.Button(f, text=tr("hz.settings"), command=lambda: open_settings(self), takefocus=False)
         b.pack(side="left", padx=(0, 10))
         Tooltip(b, tr("hz.settings_tip"))
@@ -265,6 +266,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.preview = Preview(self)
         self.live = LiveKeys(self)
         self.settings_window = PreviewSettings(self)  # (hidden until Settings…)
+        self.trace_win = TraceWindow(self, hidden=True)  # (... and Hz shape…: Note length rows, always there)
         if app.hz_preview["on"]:  # (on last time: on again, if its soundfont is still there)
             self.after_idle(self.preview_again)
 

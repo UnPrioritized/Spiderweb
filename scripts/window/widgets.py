@@ -127,6 +127,12 @@ def box_text(e):
     return str(e.tk.globalgetvar(name)) if name else e.get()
 
 
+def no_spaces(var):
+    """A box's spaces taken out (Space types one there, user; numbers have none) when the box is left."""
+    if " " in var.get():
+        var.set(var.get().replace(" ", ""))
+
+
 def good(e):
     """A number box's value taken: kept as its last good value (bad() goes back to it), shown as normal."""
     e.good_text = box_text(e)

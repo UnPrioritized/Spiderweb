@@ -1,4 +1,5 @@
-"""The Hz bass window's "Wave shape…" window (user, 2026-10-10; notes/CLAUDE.md "DRAWN WAVE SHAPE"): a line drawn
+"""The Hz bass window's "Hz shape…" window (user, 2026-10-10, was "Wave shape…"; notes/CLAUDE.md "HZ SHAPE WINDOW";
+Note length rows under the drawing since 2026-10-13: length_rows): a line drawn
 through one wave of the Hz bass (left to right) over its keys (bottom to top); every key row hits wherever the line
 crosses it (hzbass.trace_hits). Straight lines from point to point. The line is stretched to all the keys, so the
 key rows are drawn between its lowest and highest point, each with a dot where it hits.
@@ -20,7 +21,8 @@ from tkinter import ttk
 from files.lang import tr
 from notes.hzbass import CURVE_STEPS, START_TRACE, TRACE_POINTS, clean_extra, key_range, trace_hits, trace_line
 from window import look
-from window.widgets import Tooltip, remember_place
+from window.hz_gates import LENGTH_UNITS
+from window.widgets import Scrub, Tooltip, no_spaces, remember_place
 
 GRID = 16  # grid lines each way (snapped to)
 PAD = 14  # px round the drawing area (x scale)
@@ -33,9 +35,29 @@ SHAPES = {"saw": [[0.0, 0.0], [1.0, 1.0]],
           "square": [[0.0, 0.0], [0.0, 1.0], [0.5, 1.0], [0.5, 0.0], [1.0, 0.0]]}
 
 
+def length_box(app, parent, var, apply, label=None):
+    """A Note length box ("[100] [% of a wave ▾]"): a frame (not placed) with .entry, .unit (the dropdown:
+    LENGTH_UNITS) and .scrub. apply() on Enter, leaving the box, each step of the number and a unit picked."""
+    f = ttk.Frame(parent)
+    f.entry = ttk.Entry(f, textvariable=var, width=7)
+    f.entry.pack(side="left", padx=(0, 4))
+    names = [tr("hz.length_" + u) for u in LENGTH_UNITS]
+    f.unit = ttk.Combobox(f, values=names, state="readonly", width=max(map(len, names)) + 1)
+    f.unit.current(0)
+    f.unit.pack(side="left")
+    f.unit.bind("<<ComboboxSelected>>", lambda e: apply())
+    f.entry.bind("<Return>", lambda e: apply())
+    f.entry.bind("<FocusOut>", lambda e: no_spaces(var) or apply())
+    f.scrub = Scrub(app, [(f.entry, var, apply)], (1, 10, 1), 1, 100, label=label)
+    for w in (f.entry, f.unit):
+        Tooltip(w, tr("hz.length_tip"))
+    return f
+
+
 def open_trace(hz):
-    """Hz bass window → Wave shape…: the window opened (or brought up)."""
+    """Hz bass window → Settings… → Hz shape…: the window shown (it's made with the Hz bass window, hidden)."""
     if hz.trace_win is not None and hz.trace_win.winfo_exists():
+        hz.sync()  # (its Note length rows as the Hz bass shown has them)
         hz.trace_win.deiconify()
         hz.trace_win.lift()
     else:
@@ -50,14 +72,17 @@ def shown_trace(extra):
 
 
 class TraceWindow(tk.Toplevel):
-    def __init__(self, hz):
+    def __init__(self, hz, hidden=False):
+        """hidden: made with the Hz bass window, shown by Hz shape… (open_trace)."""
         super().__init__(hz)
+        if hidden:
+            self.withdraw()
         self.hz, self.app = hz, hz.app
         s = self.s = hz.app.scale
         self.title(tr("hz.trace_title"))
         self.transient(hz)
-        self.geometry(f"{round(420 * s)}x{round(400 * s)}")
-        self.minsize(round(260 * s), round(240 * s))
+        self.geometry(f"{round(420 * s)}x{round(500 * s)}")
+        self.minsize(round(300 * s), round(340 * s))
         self.pts = shown_trace(hz.extra)
         self.drag = None  # {"i": point number, "was": points, "before": fx state, ...} while the mouse holds one
         self.placed = False  # (the last press put a new point in)
@@ -67,6 +92,7 @@ class TraceWindow(tk.Toplevel):
         hint = ttk.Label(self, text=tr("hz.trace_hint"), foreground=look.HINT, padding=(8, 0, 8, 8))
         hint.pack(side="bottom", fill="x")  # (the rows under the drawing first: they always show)
         hint.bind("<Configure>", lambda e: hint.config(wraplength=max(1, e.width - round(16 * s))))
+        self.length_rows(hz)
         bar = ttk.Frame(self, padding=(8, 2, 8, 6))
         bar.pack(side="bottom", fill="x")
         b = ttk.Button(bar, text=tr("hz.trace_reset"), command=self.reset, takefocus=False)
@@ -91,6 +117,36 @@ class TraceWindow(tk.Toplevel):
         c.bind("<Escape>", lambda e: self.cancel_drag())
         self.protocol("WM_DELETE_WINDOW", self.close)
         remember_place(self, "hz_trace")
+
+    def length_rows(self, hz):
+        """Note length (moved here from Settings…, user 2026-10-13): the Hz bass's, the layer picked's own (with
+        layers only), the last note sticking out. The boxes are the Hz bass window's (hz.length_row...; hz_gates
+        show_length / on_length): this window is made with it and only hidden when closed, so they're always there.
+        Changes are undo steps of the Hz bass window, like the drawing's."""
+        app = self.app
+        box = ttk.Frame(self, padding=(8, 0, 8, 6))
+        box.pack(side="bottom", fill="x")
+        lb = ttk.Label(box, text=tr("hz.length"))
+        lb.grid(row=0, column=0, sticky="e", padx=(0, 8), pady=2)
+        hz.length_row = length_box(app, box, hz.length_var, hz.on_length, lb)
+        hz.length_row.grid(row=0, column=1, sticky="w", pady=2)
+        Tooltip(lb, tr("hz.length_tip"))
+        lb = hz.own_label = ttk.Label(box, text=tr("hz.own_length"))
+        lb.grid(row=1, column=0, sticky="e", padx=(0, 8), pady=2)
+        f = hz.own_frame = ttk.Frame(box)
+        f.grid(row=1, column=1, sticky="w", pady=2)
+        names = [tr("hz.own_same"), tr("hz.own_own")]
+        hz.own_pick = ttk.Combobox(f, values=names, state="readonly", width=max(map(len, names)))
+        hz.own_pick.current(0)
+        hz.own_pick.pack(side="left", padx=(0, 8))
+        hz.own_pick.bind("<<ComboboxSelected>>", lambda e: hz.on_own_pick())
+        hz.own_row = length_box(app, f, hz.own_var, hz.on_own_length)
+        for w in (lb, hz.own_pick):
+            Tooltip(w, tr("hz.own_length_tip"))
+        hz.stick_box = ttk.Checkbutton(box, text=tr("hz.stick"), variable=hz.stick, command=hz.on_stick,
+                                       takefocus=False)
+        hz.stick_box.grid(row=2, column=1, sticky="w", pady=2)
+        hz.stick_tip = Tooltip(hz.stick_box, tr("hz.stick_tip"))
 
     # ------------------------------------------------------------ where things are
 

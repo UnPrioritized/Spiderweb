@@ -8,9 +8,9 @@ Zoomed in, drag the red line in a note up or down to tune that note alone (whole
 
 In the window's Hz settings…: Pitch moves every tone in cents (100 = one key). Gates: Alternating = gates of two sizes take turns so the tone is exact; Fixed = every gate is a whole number of ticks, a little off.
 
-Wave shape… (in Hz settings…) sets where in each wave the keys hit: draw a line through one wave (left to right) over the Hz bass's keys (bottom to top). The pitch stays the same; the texture changes. A key hits wherever the line crosses its row, so a zigzag makes more notes. Shapes has ready ones (Saw, Triangle, Sine, Square); Reset goes back to a straight line (every key hits together).
+Hz shape… (in Hz settings…) sets how the notes look inside one wave. Its drawing sets where in each wave the keys hit: draw a line through one wave (left to right) over the Hz bass's keys (bottom to top). The pitch stays the same; the texture changes. A key hits wherever the line crosses its row, so a zigzag makes more notes. Shapes has ready ones (Saw, Triangle, Sine, Square); Reset goes back to a straight line (every key hits together).
 
-Note length (in Hz settings…) sets how long each repeat lasts: 100 % = until the next one starts, less = a gap after each one, or a number of ticks. With layers, This layer gives the picked layer a length of its own. Last note sticks out of the shape lets the last repeat before a gap or the end keep a whole wave.
+Note length (in Hz shape…, under the drawing) sets how long each repeat lasts: 100 % = until the next one starts, less = a gap after each one. % of a wave = that much of one wave of the note's tone, so short notes trace the drawn line on every pitch (a fraction works too: 1/8 = 12.5 %); % of the note = that much of how long each note is; or a number of ticks. Shorter notes change the look, hardly the sound. With layers, This layer gives the picked layer a length of its own. Last note sticks out of the shape lets the last repeat before a gap or the end keep a whole wave.
 
 Auto gates (what a new Hz bass starts with): a note that holds still gets Fixed gates when they're off its tone by no more than the threshold (the number next to Gates, in cents), else Alternating ones. A slide is always Alternating.
 
