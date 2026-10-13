@@ -1,9 +1,10 @@
 """
 Sustain (right-click "Sustain..."): a shape's notes held on, made for lagging out MIDI players.
 
-sh["sustain"] = {} (the hold gap worked out by itself) or {"gap": beats} (typed). Each key row on its own: notes
-whose gaps are no longer than the hold gap make one group, and every note of a group ends where the group's last
-note ends (stacked on the same key). Longer gaps are holes in the shape and stay empty, so its look is kept.
+sh["sustain"] = {} (the hold gap worked out by itself), + "gap": beats (typed), + "most": beats (each note at most
+this long). Each key row on its own: notes whose gaps are no longer than the hold gap make one group, and every note
+of a group ends where the group's last note ends (stacked on the same key), or at its start + "most" if that comes
+first (never shorter than it was). Longer gaps are holes in the shape and stay empty, so its look is kept.
 Done last, after everything else that makes the shape's notes; only lengths change. A sustained shape keeps its
 overlaps in every Channels mode, other shapes still fix their clashes with it (engine.render).
 """
@@ -19,13 +20,23 @@ def clean_sustain(s):
     """sh["sustain"] from a file -> valid, or None (not sustained)."""
     if not isinstance(s, dict):
         return None
+    out = {}
+    gap = _beats(s.get("gap"))
+    if gap is not None:
+        out["gap"] = gap
+    most = _beats(s.get("most"))
+    if most:  # (0 = held no longer than the notes are: nothing)
+        out["most"] = most
+    return out
+
+
+def _beats(v):
+    """A length in beats from a file (0..MOST_GAP), or None."""
     try:
-        gap = float(s["gap"]) if "gap" in s else None
+        v = float(v)
     except (TypeError, ValueError):
-        gap = None
-    if gap is None or not math.isfinite(gap):
-        return {}
-    return {"gap": min(max(gap, 0.0), MOST_GAP)}
+        return None
+    return min(max(v, 0.0), MOST_GAP) if math.isfinite(v) else None
 
 
 def is_sustained(sh):
@@ -76,7 +87,8 @@ def hold_gap(sus, notes, ppq):
 
 
 def sustained(notes, sus, ppq):
-    """notes (start, end, pitch, velocity) with each group's notes held to the group's last end."""
+    """notes (start, end, pitch, velocity) with each group's notes held to the group's last end (or to their start +
+    "most" if that comes first; never shorter)."""
     if len(notes) < 2:
         return notes
     gap = hold_gap(sus, notes, ppq)
@@ -84,9 +96,11 @@ def sustained(notes, sus, ppq):
     new = (gaps < 0) | (gaps > gap)  # (a new group: a row's first note, or after a hole)
     first = np.flatnonzero(new)
     group = np.cumsum(new) - 1
-    ends = np.maximum.reduceat(notes[order, 1], first)
+    ends = np.maximum.reduceat(notes[order, 1], first)[group]
+    if "most" in sus:
+        ends = np.maximum(notes[order, 1], np.minimum(ends, notes[order, 0] + max(1, round(sus["most"] * ppq))))
     out = notes.copy()
-    out[order, 1] = ends[group]
+    out[order, 1] = ends
     return out
 
 
