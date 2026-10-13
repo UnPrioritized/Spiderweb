@@ -462,7 +462,8 @@ class SustainWindow(tk.Toplevel):
 
     def auto_of(self, t):
         """Shape t's Auto gap in ticks (from its notes without Sustain)."""
-        return auto_gap(bare_notes(self.app, t))
+        notes = bare_notes(self.app, t)
+        return self.remembered(notes, "auto", lambda: auto_gap(notes))
 
     def show(self):
         """The window as the settings are: the points counted, what can be used greyed or not."""
