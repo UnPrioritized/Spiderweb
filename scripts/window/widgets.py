@@ -100,7 +100,7 @@ def name_list(cb):
     then the saved ones (set_names), letters typed jump (letter_jump), names keep the box's width. The divider can't
     be picked: a click on it changes nothing, the mouse wheel steps over it."""
     keep_width(cb)
-    letter_jump(cb)
+    cb.jump = letter_jump(cb)
     cb.divider_at = None
     cb.name_before = cb.get()
     pop = cb.tk.call("ttk::combobox::PopdownWindow", cb)

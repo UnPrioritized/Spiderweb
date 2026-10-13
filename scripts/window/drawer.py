@@ -217,6 +217,16 @@ def library_names():
     return top + sorted((n for n in names if not built_in_name(n)), key=str.lower)
 
 
+def library_lists():
+    """The side panel's Shape box (user 2026-10-14, like the Hz shape box): (the built-in shapes as in
+    library_names, the saved ones NEWEST first: last saved / changed on top)."""
+    saved = list(_saved().values())
+    by_lower = {n.lower(): n for n, _ in saved}
+    top = [by_lower.get(b.lower(), b) for b in BUILT_IN]
+    rest = [(n, (stamp(p) or (0, 0))[0]) for n, p in saved if not built_in_name(n)]
+    return top, [n for n, _ in sorted(rest, key=lambda r: (-r[1], r[0].lower()))]
+
+
 def load_shape(name):
     """The strokes of a library shape, or None if it's missing or broken."""
     return load_drawing(name)[0]

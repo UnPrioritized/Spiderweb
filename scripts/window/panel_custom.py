@@ -10,14 +10,14 @@ from notes.areas import most_colours
 from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, edge_gate, gap_lines,
                           gate_ticks, hz_gate, join_strokes, map_stroke, normalize_areas, normalize_strokes, open_paths)
 from window import look
-from window.drawer import Drawer, clean_name, library_names, load_drawing, save_shape, shape_stamp
+from window.drawer import Drawer, clean_name, library_lists, library_names, load_drawing, save_shape, shape_stamp
 from window.panel_funnel import GATE_STEPS
 from files.mathexpr import calc, fmt
 from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
 from notes.hzbass import AUTO, all_tones, auto_picks, each_layer, layers_of, shortest_gate
 from window.hz_window import open_hz
 from window.range_window import open_range_graph
-from window.widgets import Scrub, Tooltip, bad, good, grid_shown, keep_width, leave_box, unchanged
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown, leave_box, name_list, set_names, unchanged
 
 GAP_COLOR = look.WARN  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
 MISSING_MARK = "✕ "  # in the Shape box: a placed shape whose library shape was renamed or deleted (user, 2026-10-05)
@@ -71,7 +71,7 @@ class CustomPanel:
         row = self.custom_shape_row = ttk.Frame(box)
         row.pack(fill="x")
         ttk.Label(row, text=tr("panel_custom.shape")).pack(side="left")
-        self.custom_combo = keep_width(ttk.Combobox(row, textvariable=self.custom_pick, state="readonly", width=18,
+        self.custom_combo = name_list(ttk.Combobox(row, textvariable=self.custom_pick, state="readonly", width=18,
                                                     postcommand=self.refresh_custom_names))
         self.custom_combo.pack(side="left", padx=(5, 0))
         self.custom_combo.bind("<<ComboboxSelected>>", lambda e: self.on_custom_pick())
@@ -217,7 +217,7 @@ class CustomPanel:
         self.custom_info.pack(fill="x", pady=(2, 0))
 
     def refresh_custom_names(self):
-        self.custom_combo.config(values=library_names())
+        set_names(self.custom_combo, *library_lists())
 
     def custom_template(self, name):
         """A library shape ready to place: (strokes filling the 0..1 box, width/height as drawn, its areas coloured
