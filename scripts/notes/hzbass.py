@@ -260,15 +260,30 @@ def note_lengths(hz, notes, ppq, stick=True, sh=None):
         before = np.concatenate([[False], ~last[:-1] & (k[:-1] == k[1:])])
         full = np.where(last & before, np.minimum(np.maximum(now, np.concatenate([[0], now[:-1]])), room), now)
     if "beats" in got:
-        new = np.minimum(length_ticks(got, ppq), full)
+        new = np.full(len(s), float(length_ticks(got, ppq)))
     elif "wave" in got:
         waves = wave_ticks(sh, ppq, s, k) if sh is not None else None
         new = full if waves is None else np.where(np.isnan(waves), full,
-                                                  np.minimum(np.floor(np.nan_to_num(waves) * got["wave"] + 0.5), full))
+                                                  np.floor(np.nan_to_num(waves) * got["wave"] + 0.5))
     else:
         new = np.floor(full * got["pct"] / 100.0 + 0.5)
+    # A note cut by the next one on its key (a chord's other tone hitting it): the next one lasts at least to where
+    # the cut one would have ended (user; like Single channel), never past the end of the run they're in.
+    chain = np.ones(len(s), bool)  # (starts a run: no note before it on its key reaching it)
+    chain[1:] = (k[1:] != k[:-1]) | (s[1:] > s[:-1] + full[:-1])
+    group = np.cumsum(chain) - 1
+    run_end = np.maximum.reduceat(s + full, np.flatnonzero(chain))[group]
+    want = np.minimum(s + np.maximum(new, 1).astype(np.int64), run_end)
+    lo = int(want.min())
+    shift = int(want.max()) - lo + 1
+    reach = np.maximum.accumulate(want - lo + group * shift) - group * shift + lo  # (latest wanted end so far)
+    before = np.concatenate([[0], reach[:-1]])
+    before[chain] = 0
+    end = np.maximum(want, before)
+    nxt = np.concatenate([~chain[1:], [False]])  # (cut where the next note of its run starts)
+    end[:-1] = np.where(nxt[:-1], np.minimum(end[:-1], s[1:]), end[:-1])
     out = notes.copy()
-    out[o, 1] = s + np.maximum(new, 1).astype(np.int64)
+    out[o, 1] = np.maximum(end, s + 1)
     return out
 
 
