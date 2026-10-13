@@ -10,8 +10,8 @@ from tkinter import messagebox, ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
-from notes.hzbass import (AUTO, AUTO_MOST, EXTRAS, FULL_LENGTH, HZ_DEFAULTS, LENGTH_BEATS, TUNE, all_tones, clean_fit,
-                          clean_from, clean_extra, clean_fx, clean_length, clean_lfo, clean_line, clean_loop, clean_off,
+from notes.hzbass import (AUTO, AUTO_MOST, EXTRAS, FULL_LENGTH, HZ_DEFAULTS, LENGTH_BEATS, LENGTH_WAVE, TUNE,
+                          all_tones, clean_fit, clean_from, clean_extra, clean_fx, clean_length, clean_lfo, clean_line, clean_loop, clean_off,
                           clean_sustain, clean_tones, fit_length, held_fixed, left_edge, length_ticks, sound_span)
 from window import look
 from window.hz_effects import AMOUNT
@@ -19,7 +19,18 @@ from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, bad, good, remember_plac
 
 
 GATE_MODES = ("auto", "mixed", "fixed")  # the Gates dropdown's choices, in order
-LENGTH_UNITS = ("pct", "ticks")  # the Note length's units, in order (hzbass.clean_length)
+LENGTH_UNITS = ("wave", "pct", "ticks")  # the Note length's units, in order (hzbass.clean_length; % of a wave first,
+# user)
+
+
+def wave_text(share):
+    """A share of a wave as its box shows it: % with up to 3 decimals, no trailing zeros (1/8 = "12.5")."""
+    return f"{share * 100:.3f}".rstrip("0").rstrip(".")
+
+
+def as_made(length):
+    """100 % of a wave = the notes as made (FULL_LENGTH: left out of the save, like 100 % of the note)."""
+    return FULL_LENGTH if length == {"wave": 1.0} else length
 
 
 def gate_mode(hz):
@@ -296,15 +307,29 @@ class HzGates:
     # ------------------------------------------------------------ Note length (Settings…)
 
     def length_of(self, var, row, now):
-        """A Note length box as a Hz bass's length ({"pct": whole} / {"beats": whole ticks at this PPQ}; a wrong
-        value: back to its last good one), or None. now = the length it has: the same number of ticks gives it back
-        (after a PPQ change the ticks shown are rounded: leaving the box mustn't change it)."""
+        """A Note length box as a Hz bass's length ({"wave": share} / {"pct": whole} / {"beats": whole ticks at this
+        PPQ}; a wrong value: back to its last good one), or None. now = the length it has: the same number shown
+        gives it back (after a PPQ change the ticks shown are rounded: leaving the box mustn't change it). % of a
+        wave: any number from LENGTH_WAVE (as %) to 100, a typed fraction ("1/8", at most 1) = that share of a wave,
+        kept exact (user)."""
         unit = LENGTH_UNITS[row.unit.current()]
         ppq = self.app.ppq
-        hi = 100 if unit == "pct" else math.floor(LENGTH_BEATS * ppq)
+        hi = 100 if unit != "ticks" else math.floor(LENGTH_BEATS * ppq)
         row.scrub.hi = hi
         for again in (False, True):
             try:
+                if unit == "wave":
+                    text = var.get()
+                    v = float(calc(text))
+                    share = v if "/" in text and 0 < v <= 1 else v / 100  # (a fraction of a wave: 1/8 = 12.5 %)
+                    if LENGTH_WAVE - 1e-12 <= share <= 1:
+                        good(row.entry)
+                        if now and "wave" in now and wave_text(now["wave"]) == wave_text(share):
+                            share = now["wave"]  # (the box shows it rounded: left unchanged = kept exact)
+                        if wave_text(share) != text:
+                            var.set(wave_text(share))
+                        return {"wave": share}
+                    raise ValueError  # (past 100: 100, below)
                 v = int(round(float(calc(var.get()))))
                 if 1 <= v <= hi:
                     good(row.entry)
@@ -318,7 +343,7 @@ class HzGates:
             except (ValueError, ZeroDivisionError, OverflowError):
                 pass
             if not again:
-                if unit == "pct":  # (ticks -> %: a number past 100 isn't wrong, just too big)
+                if unit != "ticks":  # (ticks -> %: a number past 100 isn't wrong, just too big)
                     try:
                         if float(calc(var.get())) > 100:
                             var.set("100")
@@ -329,10 +354,16 @@ class HzGates:
         return None
 
     def put_length(self, var, row, length):
-        ticks = "beats" in length
-        row.unit.current(LENGTH_UNITS.index("ticks" if ticks else "pct"))
-        row.scrub.hi = math.floor(LENGTH_BEATS * self.app.ppq) if ticks else 100
-        var.set(str(length_ticks(length, self.app.ppq) if ticks else int(length["pct"])))
+        """A Note length shown in its box. As made (FULL_LENGTH) = 100 % of a wave (the first choice; they look the
+        same, as_made) or of the note, whichever the dropdown shows (picking one at 100 % never flips it)."""
+        if length == FULL_LENGTH:
+            unit = "pct" if LENGTH_UNITS[max(0, row.unit.current())] == "pct" else "wave"
+        else:
+            unit = "ticks" if "beats" in length else "wave" if "wave" in length else "pct"
+        row.unit.current(LENGTH_UNITS.index(unit))
+        row.scrub.hi = math.floor(LENGTH_BEATS * self.app.ppq) if unit == "ticks" else 100
+        var.set(str(length_ticks(length, self.app.ppq)) if unit == "ticks" else
+                wave_text(length.get("wave", 1.0)) if unit == "wave" else str(int(length["pct"])))
         good(row.entry)
 
     def length_target(self):
@@ -359,7 +390,7 @@ class HzGates:
         sh = self.length_target()
         got = self.length_of(self.length_var, self.length_row, sh and sh["hz"].get("length"))
         if got is not None:
-            got = clean_length(got)
+            got = as_made(clean_length(got))
             self.set_shared(tr("hz.step_length"), "length", None if got == FULL_LENGTH else got)
         self.redraw()
 
@@ -391,7 +422,7 @@ class HzGates:
     def on_own_length(self):
         got = self.length_of(self.own_var, self.own_row, self.extra.get("own_length"))
         if got is not None:
-            self.set_own(clean_length(got))
+            self.set_own(as_made(clean_length(got)))
         self.redraw()
 
     def show_length(self, sh, hz):

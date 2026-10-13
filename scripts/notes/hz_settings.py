@@ -119,6 +119,7 @@ START_TRACE = ((0.0, 0.0), (0.0, 1.0))  # ... as it starts: straight up at the w
 CURVE_STEPS = 24  # ... a bent piece is made of this many straight ones (trace_line)
 FULL_LENGTH = {"pct": 100.0}  # hz["length"]: every repeat as long as it is made (left out of the saved Hz bass)
 LENGTH_BEATS = 1 << 16  # ... the most beats it can be (never longer than the note as made anyway)
+LENGTH_WAVE = 0.001  # ... the shortest share of a wave ({"wave": 0..1}; 0.1 %)
 
 
 def group_count(value):
@@ -433,16 +434,17 @@ def clean_trace(trace):
 
 
 def clean_length(length):
-    """A Note length checked (hz["length"], the Hz bass's; hz["own_length"], a layer's own): {"pct": 1..100, whole}
-    = each repeat lasts that share of how long it does now, {"beats": > 0} = that long (typed and shown in whole
-    ticks; kept in beats so a PPQ change keeps the look, user), never longer than it is now; None when broken."""
+    """A Note length checked (hz["length"], the Hz bass's; hz["own_length"], a layer's own): {"wave": 0..1} = each
+    repeat lasts that share of one wave of its tone (shown as %; a typed fraction kept exact, user), {"pct": 1..100,
+    whole} = that share of how long it does now, {"beats": > 0} = that long (typed and shown in whole ticks; kept in
+    beats so a PPQ change keeps the look, user); never longer than it is now. None when broken."""
     if not isinstance(length, dict):
         return None
-    for unit, lo, hi in (("pct", 1.0, 100.0), ("beats", MIN_LEN, LENGTH_BEATS)):
+    for unit, lo, hi in (("wave", LENGTH_WAVE, 1.0), ("pct", 1.0, 100.0), ("beats", MIN_LEN, LENGTH_BEATS)):
         v = length.get(unit)
         if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
             v = max(lo, min(hi, v))
-            return {unit: float(v) if unit == "beats" else float(round(v))}  # (whole %, user)
+            return {unit: float(round(v)) if unit == "pct" else float(v)}  # (whole %, user)
     return None
 
 

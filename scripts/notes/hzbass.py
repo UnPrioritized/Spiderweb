@@ -32,7 +32,8 @@ Each layer heard (heard_layers: mute / solo) makes its notes as a Hz bass of its
 engine._notes_tracks.
 hz["grow"] = the shape is kept as long as its tones (fit_length). hz["own"] = made with the Hz bass tool: a box
 that is nothing but its tones (it goes when its last tone is deleted; the panel shows the keys it repeats).
-hz["length"] = the Note length (clean_length: % or beats, shown in ticks; missing = 100 %), a layer's own in hz["own_length"] (one of EXTRAS, so
+hz["length"] = the Note length (clean_length: share of a wave, % of the note or beats shown in ticks; missing = 100 %
+of the note), a layer's own in hz["own_length"] (one of EXTRAS, so
 Copy sound and presets carry it); hz["stick"] = the last note of each run keeps a whole wave, even past the shape.
 Both only change the notes' ends once they're made (note_lengths), never which repeats there are.
 
@@ -194,10 +195,43 @@ def squares(sh, ppq):
 LENGTH_KEYS = ("length", "own_length", "stick")
 
 
-def note_lengths(hz, notes, ppq, stick=True):
+@functools.lru_cache(maxsize=16)
+def _waves(hz_json, left, ppq):
+    runs = tone_runs(json.loads(hz_json), left, ppq)
+    starts = np.concatenate([s for s, _, _ in runs]) if runs else np.zeros(0)
+    waves = np.concatenate([e - s for s, e, _ in runs]) if runs else np.zeros(0)
+    o = np.argsort(starts, kind="stable")
+    return starts[o], waves[o]
+
+
+def wave_ticks(sh, ppq, starts):
+    """How long one wave of the tone is (ticks, not rounded) at each of these start ticks: the wave that started last
+    at or before it (before the first: the first one), of every stretch of tone as heard (tone_runs: slides, glides,
+    the Pitch line, bends; with effects the KeyGrid's runs, so OSC B and reverb tails too). A chord: the newest
+    wave of any of its tones. No placed tones: the shape's spam gate (one wave of the Hz bass's own tone). None when
+    there's nothing to go by."""
+    if not sh["hz"].get("tones"):
+        gate = sh.get("gate")
+        return np.full(len(starts), gate * ppq) if isinstance(gate, (int, float)) and gate > 0 else None
+    grid = squares(sh, ppq)
+    if isinstance(grid, KeyGrid):
+        ws, wl = grid.flat["starts"], grid.flat["waves"]
+        o = np.argsort(ws, kind="stable")
+        ws, wl = ws[o], wl[o]
+    else:
+        hz = {k: v for k, v in live(sh["hz"], left_edge(sh)).items() if k not in LENGTH_KEYS}
+        ws, wl = _waves(json.dumps(hz, sort_keys=True), left_edge(sh), ppq)
+    if not len(ws):
+        return None
+    i = np.searchsorted(ws, np.asarray(starts, float) + 0.5, "right") - 1  # (a start rounded to its tick: + 0.5)
+    return wl[np.maximum(i, 0)]
+
+
+def note_lengths(hz, notes, ppq, stick=True, sh=None):
     """A Hz bass layer's notes ((start, end, key) ticks, as made: each lasting until the next one on its key starts)
-    with its Note length (a layer's own, else the Hz bass's): each lasts that share of how long it does now ("pct") or
-    that many beats in whole ticks, at least 1 (follows a PPQ change), never longer than it is now ("beats").
+    with its Note length (a layer's own, else the Hz bass's): each lasts that share of one wave of its tone ("wave":
+    wave_ticks, needs sh, the shape the notes are of), that share of how long it does now ("pct") or that many beats
+    in whole ticks (follows a PPQ change; "beats"); at least 1 tick, never longer than it is now.
     hz["stick"] (stick=False: a funnel, no notes past its wall): the last note of each run (cut where its tones end)
     is first made a whole wave, as long as the one before it (a lone one: as it is), even past the shape. Never past
     the next note on its key."""
@@ -222,6 +256,9 @@ def note_lengths(hz, notes, ppq, stick=True):
         full = np.where(last & before, np.minimum(np.maximum(now, np.concatenate([[0], now[:-1]])), room), now)
     if "beats" in got:
         new = np.minimum(length_ticks(got, ppq), full)
+    elif "wave" in got:
+        waves = wave_ticks(sh, ppq, s) if sh is not None else None
+        new = full if waves is None else np.minimum(np.floor(waves * got["wave"] + 0.5), full)
     else:
         new = np.floor(full * got["pct"] / 100.0 + 0.5)
     out = notes.copy()
