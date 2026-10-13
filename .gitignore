@@ -8,6 +8,7 @@ dev/
 shapes/
 autosave*.json
 errors*.log
+spiderweb-*.log
 curves.json
 icon.png
 /*.json

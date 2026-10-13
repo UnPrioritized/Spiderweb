@@ -1,4 +1,4 @@
-"""The program's version and its folder (output goes there; autosave, settings, shapes, errors.log in user/)."""
+"""The program's version and its folder (output and the logs go there; autosave, settings, shapes in user/)."""
 
 import os
 import sys
@@ -10,7 +10,7 @@ WEBSITE = "https://github.com/UnPrioritized/Spiderweb"  # new versions, the sour
 # the folder the .exe is in instead.
 HERE = (os.path.dirname(sys.executable) if getattr(sys, "frozen", False)
         else os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-# The app's own files (autosave, settings, presets, saved shapes, errors.log): one folder, so the spiderweb folder
+# The app's own files (autosave, settings, presets, saved shapes): one folder, so the spiderweb folder
 # holds only the program and the user's own files
 USER = os.path.join(HERE, "user")
 # What older versions kept loose in the spiderweb folder (move_old_files puts them in USER)

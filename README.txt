@@ -62,7 +62,7 @@ not run the .exe, run it from source instead (below): the code is all there
 to read.
 
 Exported MIDI goes in the same folder as the .exe; your autosave, settings,
-presets, saved shapes and errors.log go in its "user" folder. To update to a
+presets and saved shapes go in its "user" folder. To update to a
 new version, replace just Spiderweb.exe in that folder; everything else stays.
 
 Spiderweb can look on GitHub for a new version when it starts (it asks you
@@ -104,9 +104,10 @@ Good to know
 - Everything you do is saved on its own (user/autosave.json). Each time Spiderweb
   starts, the previous session is also kept as autosave-backup.json; open it
   with Open... if something went wrong.
-- If Spiderweb runs into an error, the details go to user/errors.log in its
-  folder. Please include that file when you report a problem (on the
-  website's Issues page).
+- If Spiderweb runs into an error, the details go to spiderweb-error.log next
+  to it. If it closes by itself, spiderweb-crash.log there says where (it's
+  written the next time Spiderweb starts). Please include these files when
+  you report a problem (on the website's Issues page).
 
 Running from source
 -------------------

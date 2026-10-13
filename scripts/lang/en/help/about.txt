@@ -10,6 +10,6 @@ Spiderweb can look there for a new version by itself (set how often in Settings,
 
 All of the code was written by an AI model (Claude Opus 5.5, by Anthropic). Kanade Tachibana directed the project: decided what it should do, tested it and asked for changes.
 
-Spiderweb's folder holds the MIDI files you generate (output) and the user folder: your autosave (and autosave-backup), settings, presets, your shape library (shapes) and errors.log, where the details go if something goes wrong.
+Spiderweb's folder holds the MIDI files you generate (output) and the user folder: your autosave (and autosave-backup), settings, presets, and your shape library (shapes). If something goes wrong, spiderweb-error.log and spiderweb-crash.log sit right next to Spiderweb.
 
 The sound parts (BASS and BASSMIDI, used by Built-in BASSMIDI and the Hz bass preview) aren't under the MIT License: they are free for non-commercial use only (see the README).

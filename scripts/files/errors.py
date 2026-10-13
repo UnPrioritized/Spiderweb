@@ -1,5 +1,7 @@
-"""Errors: the details go to errors.log (user/ next to spiderweb.py / Spiderweb.exe) and the user is told once per session.
-The .exe and pythonw have no console, so without this an error would just be invisible."""
+"""Errors: the details go to spiderweb-error.log and the user is told once per session; a crash that ends the program
+goes to spiderweb-crash.log. Both sit right next to spiderweb.py / Spiderweb.exe (not in user/: the user should find
+them easily), or in user/ when that folder can't be written to. The .exe and pythonw have no console, so without
+this an error would just be invisible."""
 
 import os
 import platform
@@ -9,15 +11,16 @@ import time
 import traceback
 
 from files.lang import tr
-from files.about import USER, VERSION
+from files.about import HERE, USER, VERSION
 from files.system import error_box
 
-LOG = os.path.join(USER, "errors.log")
-OLD_LOG = os.path.join(USER, "errors-old.log")  # errors.log moves here when it gets big
+LOG = os.path.join(HERE, "spiderweb-error.log")
+OLD_LOG = os.path.join(HERE, "spiderweb-error-old.log")  # the log moves here when it gets big
 MAX_LOG = 1_000_000  # bytes
 CRASH_NOW = os.path.join(USER, "crash-now.log")  # this run's: faulthandler writes here if Spiderweb crashes
-CRASH_LOG = os.path.join(USER, "crash.log")  # every crash so far (crash-now.log moved in on the next start)
-OLD_CRASH_LOG = os.path.join(USER, "crash-old.log")
+CRASH_LOG = os.path.join(HERE, "spiderweb-crash.log")  # every crash so far (crash-now.log moved in on the next start)
+OLD_CRASH_LOG = os.path.join(HERE, "spiderweb-crash-old.log")
+OLD_NAMES = ((os.path.join(USER, "errors.log"), LOG), (os.path.join(USER, "errors-old.log"), OLD_LOG))
 
 _app = None
 _crash_file = None  # (kept open the whole run: faulthandler writes into it)  # the window, once there is one
@@ -39,17 +42,40 @@ def write_log(exc_type, exc, tb, where):
         return True
     if sys.stderr:  # started from a console: show it there too
         print(head, text, sep="\n", file=sys.stderr)
-    try:
-        if os.path.getsize(LOG) > MAX_LOG:
-            os.replace(LOG, OLD_LOG)
-    except OSError:
-        pass
-    try:
-        with open(LOG, "a", encoding="utf-8") as f:
-            f.write(f"{head}\n{text}\n")
+    return append(LOG, OLD_LOG, f"{head}\n{text}\n")
+
+
+def append(path, old, text):
+    """Adds text to a log (moved to old first when it's big; the folder can't be written to: the one in USER).
+    True if it could be written."""
+    global LOG, OLD_LOG, CRASH_LOG, OLD_CRASH_LOG
+    for p, o in ((path, old), (os.path.join(USER, os.path.basename(path)), os.path.join(USER, os.path.basename(old)))):
+        try:
+            if os.path.getsize(p) > MAX_LOG:
+                os.replace(p, o)
+        except OSError:
+            pass
+        try:
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(text)
+        except OSError:
+            continue
+        if path == LOG:  # (the message names where it went)
+            LOG, OLD_LOG = p, o
+        elif path == CRASH_LOG:
+            CRASH_LOG, OLD_CRASH_LOG = p, o
         return True
-    except OSError:
-        return False
+    return False
+
+
+def move_old_logs():
+    """errors.log in user/ (older versions) becomes spiderweb-error.log next to Spiderweb, once."""
+    for old, new in OLD_NAMES:
+        if os.path.exists(old) and not os.path.exists(new):
+            try:
+                os.replace(old, new)
+            except OSError:
+                pass
 
 
 def tell_user(saved, fatal=False, memory=False):
@@ -94,8 +120,8 @@ def report(exc_type, exc, tb, where="", fatal=False):
 
 def watch_crashes():
     """A crash inside a DLL or compiled code (BASS, Numba, Tk) ends the program before Python can log anything.
-    faulthandler then writes what every thread was doing into crash-now.log; the next start moves that into
-    crash.log. A run that ended normally leaves only its start line, which the next start drops."""
+    faulthandler then writes what every thread was doing into user/crash-now.log; the next start moves that into
+    spiderweb-crash.log. A run that ended normally leaves only its start line, which the next start drops."""
     global _crash_file
     import faulthandler
     try:
@@ -103,17 +129,8 @@ def watch_crashes():
             last = f.read().strip()
     except OSError:
         last = ""
-    if "\n" in last:  # (more than the start line: the last run crashed)
-        try:
-            if os.path.getsize(CRASH_LOG) > MAX_LOG:
-                os.replace(CRASH_LOG, OLD_CRASH_LOG)
-        except OSError:
-            pass
-        try:
-            with open(CRASH_LOG, "a", encoding="utf-8") as f:
-                f.write(last + "\n\n")
-        except OSError:
-            return  # (crash-now.log kept for the next start rather than lost)
+    if "\n" in last and not append(CRASH_LOG, OLD_CRASH_LOG, last + "\n\n"):  # (more than the start line: crashed)
+        return  # (crash-now.log kept for the next start rather than lost)
     try:
         _crash_file = open(CRASH_NOW, "w", encoding="utf-8")
         _crash_file.write(f"==== started {time.strftime('%Y-%m-%d %H:%M:%S')}   Spiderweb {VERSION}   Python "
