@@ -19,6 +19,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
+from files.mathexpr import calc
 from notes.hzbass import CURVE_STEPS, START_TRACE, TRACE_POINTS, clean_extra, key_range, trace_hits, trace_line
 from window import look
 from window.hz_gates import LENGTH_UNITS
@@ -49,9 +50,22 @@ def length_box(app, parent, var, apply, label=None):
     f.entry.bind("<Return>", lambda e: apply())
     f.entry.bind("<FocusOut>", lambda e: no_spaces(var) or apply())
     f.scrub = Scrub(app, [(f.entry, var, apply)], (1, 10, 1), 1, 100, label=label)
+    wave = lambda: LENGTH_UNITS[max(0, f.unit.current())] == "wave"
+    f.scrub.read = lambda text: wave_percent(text) if wave() else calc(text)  # (a typed 1/8 steps from 12.5, hunt)
+
+    def step_for(value, n, state):  # (% of a wave: 0.1 steps at 1 % and under, so 0.1..1 % can be reached, hunt)
+        step = f.scrub.step_size(state)
+        return 0.1 if wave() and (value < 1 - 1e-9 or (value <= 1 + 1e-9 and n < 0)) else step
+    f.scrub.step_for = step_for
     for w in (f.entry, f.unit):
         Tooltip(w, tr("hz.length_tip"))
     return f
+
+
+def wave_percent(text):
+    """A "% of a wave" box's text as %: a fraction of at most 1 ("1/8") = that share of a wave (12.5)."""
+    v = float(calc(text))
+    return v * 100 if "/" in text and 0 < v <= 1 else v
 
 
 def open_trace(hz):

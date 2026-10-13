@@ -197,34 +197,39 @@ LENGTH_KEYS = ("length", "own_length", "stick")
 
 @functools.lru_cache(maxsize=16)
 def _waves(hz_json, left, ppq):
-    runs = tone_runs(json.loads(hz_json), left, ppq)
-    starts = np.concatenate([s for s, _, _ in runs]) if runs else np.zeros(0)
-    waves = np.concatenate([e - s for s, e, _ in runs]) if runs else np.zeros(0)
-    o = np.argsort(starts, kind="stable")
-    return starts[o], waves[o]
+    """_squares' repeats (start ticks) and how long the wave each came from is (ticks): a chord's from its own tone."""
+    hz = dict(json.loads(hz_json), _memo={})
+    runs = tone_runs(hz, left, ppq)
+    if not runs:
+        return np.zeros(0, np.int64), np.zeros(0)
+    starts = np.concatenate([s for s, _, _ in runs])
+    waves = np.concatenate([e - s for s, e, _ in runs])
+    sq, which = _grid(starts, _limits(hz, left, ppq, starts))
+    return sq[:, 0], waves[which]
 
 
-def wave_ticks(sh, ppq, starts):
-    """How long one wave of the tone is (ticks, not rounded) at each of these start ticks: the wave that started last
-    at or before it (before the first: the first one), of every stretch of tone as heard (tone_runs: slides, glides,
-    the Pitch line, bends; with effects the KeyGrid's runs, so OSC B and reverb tails too). A chord: the newest
-    wave of any of its tones. No placed tones: the shape's spam gate (one wave of the Hz bass's own tone). None when
-    there's nothing to go by."""
+def wave_ticks(sh, ppq, starts, keys):
+    """How long one wave is (ticks, not rounded) for each note (start ticks, keys) of a Hz bass shape: the wave of the
+    repeat it starts in (as heard: slides, glides, the Pitch line, bends; with effects each key's own repeats, so
+    its oscillator, Voice copy, echo or reverb tail: KeyGrid.wave_at). A chord: its own tone's. No placed tones: the
+    shape's spam gate (one wave of the Hz bass's own tone). None when there's nothing to go by."""
     if not sh["hz"].get("tones"):
         gate = sh.get("gate")
         return np.full(len(starts), gate * ppq) if isinstance(gate, (int, float)) and gate > 0 else None
     grid = squares(sh, ppq)
     if isinstance(grid, KeyGrid):
-        ws, wl = grid.flat["starts"], grid.flat["waves"]
-        o = np.argsort(ws, kind="stable")
-        ws, wl = ws[o], wl[o]
-    else:
-        hz = {k: v for k, v in live(sh["hz"], left_edge(sh)).items() if k not in LENGTH_KEYS}
-        ws, wl = _waves(json.dumps(hz, sort_keys=True), left_edge(sh), ppq)
+        out = np.full(len(starts), np.nan)
+        for key in np.unique(keys):
+            rows = np.flatnonzero(keys == key)
+            got = grid.wave_at(int(key), starts[rows])
+            if got is not None:
+                out[rows] = got
+        return out  # (a key with no repeats of its own: NaN, as made)
+    hz = {k: v for k, v in live(sh["hz"], left_edge(sh)).items() if k not in LENGTH_KEYS}
+    ws, wl = _waves(json.dumps(hz, sort_keys=True), left_edge(sh), ppq)
     if not len(ws):
         return None
-    i = np.searchsorted(ws, np.asarray(starts, float) + 0.5, "right") - 1  # (a start rounded to its tick: + 0.5)
-    return wl[np.maximum(i, 0)]
+    return wl[np.maximum(np.searchsorted(ws, starts, "right") - 1, 0)]
 
 
 def note_lengths(hz, notes, ppq, stick=True, sh=None):
@@ -257,8 +262,9 @@ def note_lengths(hz, notes, ppq, stick=True, sh=None):
     if "beats" in got:
         new = np.minimum(length_ticks(got, ppq), full)
     elif "wave" in got:
-        waves = wave_ticks(sh, ppq, s) if sh is not None else None
-        new = full if waves is None else np.minimum(np.floor(waves * got["wave"] + 0.5), full)
+        waves = wave_ticks(sh, ppq, s, k) if sh is not None else None
+        new = full if waves is None else np.where(np.isnan(waves), full,
+                                                  np.minimum(np.floor(np.nan_to_num(waves) * got["wave"] + 0.5), full))
     else:
         new = np.floor(full * got["pct"] / 100.0 + 0.5)
     out = notes.copy()

@@ -315,7 +315,7 @@ class HzGates:
         unit = LENGTH_UNITS[row.unit.current()]
         ppq = self.app.ppq
         hi = 100 if unit != "ticks" else math.floor(LENGTH_BEATS * ppq)
-        row.scrub.hi = hi
+        row.scrub.hi, row.scrub.lo = hi, LENGTH_WAVE * 100 if unit == "wave" else 1
         for again in (False, True):
             try:
                 if unit == "wave":
@@ -330,8 +330,9 @@ class HzGates:
                             var.set(wave_text(share))
                         return {"wave": share}
                     raise ValueError  # (past 100: 100, below)
-                v = int(round(float(calc(var.get()))))
-                if 1 <= v <= hi:
+                raw = float(calc(var.get()))
+                v = max(1, int(round(raw))) if raw > 0 else int(round(raw))  # (0.1 % of a wave -> 1 % / 1 tick: a
+                if 1 <= v <= hi:  # unit switched from a tiny share never stays refused under the new name, hunt)
                     good(row.entry)
                     if str(v) != var.get():
                         var.set(str(v))
@@ -362,6 +363,7 @@ class HzGates:
             unit = "ticks" if "beats" in length else "wave" if "wave" in length else "pct"
         row.unit.current(LENGTH_UNITS.index(unit))
         row.scrub.hi = math.floor(LENGTH_BEATS * self.app.ppq) if unit == "ticks" else 100
+        row.scrub.lo = LENGTH_WAVE * 100 if unit == "wave" else 1
         var.set(str(length_ticks(length, self.app.ppq)) if unit == "ticks" else
                 wave_text(length.get("wave", 1.0)) if unit == "wave" else str(int(length["pct"])))
         good(row.entry)

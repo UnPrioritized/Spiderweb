@@ -309,18 +309,21 @@ class Scrub:
         return big if state & SHIFT else fine if state & CTRL else step
 
     def change(self, boxes, n, state, gesture):
-        """Every box (that's on and holds a number) n steps up (minus: down)."""
+        """Every box (that's on and holds a number) n steps up (minus: down). self.read (optional): the box's text ->
+        its number (default calc); self.step_for (optional): (number, n, state) -> the step size there."""
         d = n * self.step_size(state)
+        read = getattr(self, "read", None) or calc
+        step_for = getattr(self, "step_for", None)
 
         def run():
             for entry, var, apply in boxes:
                 if str(entry.cget("state")) == "disabled":
                     continue
                 try:  # (an empty box for shapes with different numbers: from the first one's, same_or_blank)
-                    value = float(calc(var.get() or getattr(entry, "blank_from", None) or ""))
+                    value = float(read(var.get() or getattr(entry, "blank_from", None) or ""))
                 except (ValueError, ZeroDivisionError):
                     continue
-                value = round(value + d, 6)
+                value = round(value + (n * step_for(value, n, state) if step_for else d), 6)
                 if self.lo is not None:
                     value = max(self.lo, value)
                 if self.hi is not None:

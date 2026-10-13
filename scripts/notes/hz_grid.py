@@ -101,6 +101,7 @@ class KeyGrid:
     def __init__(self, hz, left, ppq, lo, n):
         hz = dict(hz, _memo={})  # (its own: what's worked out once for all the notes, cached)
         self.lo, self.n, self.got, self.mine = lo, max(1, n), {}, {}
+        self.wave_of = {}  # (each key's repeats: how long the wave each came from is, ticks; wave_at)
         self.copies, self.same = copies(hz), bool((hz.get("voice") or {}).get("same"))
         self.gains = blend_gains(hz)  # (each copy's loudness: Blend)
         self.random = (hz.get("voice") or {}).get("random", 0.0)  # (Random start: see starting_points)
@@ -608,6 +609,7 @@ class KeyGrid:
                 rows = np.concatenate([g[0] for g in got]).astype(np.int64)
                 starts = np.concatenate([g[1] for g in got])
                 limits, until, hear, fx_late = limits[rows], until[rows], hear[rows], fx_late[rows]
+                waves = waves[rows]
                 grid, crushed, osc = grid[rows], crushed[rows], osc[rows]
                 fade = fade[rows] if fade is not None else None
                 gap = gap[rows] if gap is not None else None
@@ -631,6 +633,7 @@ class KeyGrid:
             env[keep] = np.minimum(1.0, pre * self.squeezed(hear[keep]))
         all_starts, all_limits, all_env, all_quiet = [starts[keep]], [limits[keep]], [env[keep]], [quiet[keep]]
         all_gain = [np.ones(int(keep.sum()))]
+        all_waves = [waves[keep]]  # (an echo: the wave it copies)
         if self.echo and len(run):  # (the whole sound again, later and quieter: one more line of notes each)
             made = all_starts[0], all_limits[0], all_env[0], all_quiet[0]
             most = self.lift("echo")  # (the compressor after it may bring a quiet one up)
@@ -651,8 +654,10 @@ class KeyGrid:
                     all_env.append(made[2])
                 all_gain.append(np.full(len(made[0]), 1.0 if late_comp else gain))
                 all_quiet.append(made[3])
+                all_waves.append(all_waves[0])
         if len(run):
             st, li = np.concatenate(all_starts), np.concatenate(all_limits)
+            wv = np.concatenate(all_waves)
             env, qu = np.concatenate(all_env), np.concatenate(all_quiet)
             sets = len(all_starts)  # (the sound and its echoes)
             mixed = env * np.tile(mix[keep], sets)
@@ -666,17 +671,18 @@ class KeyGrid:
             qu = qu | (pe[:, 1] <= 0)  # (the layer's line at 0: silence)
             if len(oscs) > 1 and qu.any():  # (both oscillators: one too quiet while the other sounds never cuts it)
                 drop = silent_beside(st, li, qu, np.tile(osc[keep], sets))
-                st, li, fa, qu, pe = st[~drop], li[~drop], fa[~drop], qu[~drop], pe[~drop]
+                st, li, fa, qu, pe, wv = st[~drop], li[~drop], fa[~drop], qu[~drop], pe[~drop], wv[~drop]
             # (Blend, OSC B: repeats on one tick = the loudest one, left out only if all are)
             if (self.gains != 1.0).any() or "blend" in self.moved or self.osc2:
                 first = np.lexsort((-fa, qu))
-                st, li, fa, qu, pe = st[first], li[first], fa[first], qu[first], pe[first]
+                st, li, fa, qu, pe, wv = st[first], li[first], fa[first], qu[first], pe[first], wv[first]
             sq, which = _grid(st, li)
-            factor, mine = fa[which], pe[which, 0] > 0
+            factor, mine, wv = fa[which], pe[which, 0] > 0, wv[which]
             heard = ~qu[which]  # (volume 0: left out once every repeat has its end)
-            sq, factor, mine = sq[heard], factor[heard], mine[heard]
+            sq, factor, mine, wv = sq[heard], factor[heard], mine[heard], wv[heard]
         else:
-            sq, factor, mine = np.zeros((0, 2), np.int64), np.zeros(0), np.zeros(0, bool)
+            sq, factor, mine, wv = np.zeros((0, 2), np.int64), np.zeros(0), np.zeros(0, bool), np.zeros(0)
+        self.wave_of[key] = wv
         factor.setflags(write=False)
         mine.setflags(write=False)
         self.mine[key] = mine  # (which take their note's own velocity: factor)
@@ -817,6 +823,16 @@ class KeyGrid:
     def squares(self, key):
         """A key's repeats: (start, end) ticks in order, none overlapping."""
         return self.made(key)[0]
+
+    def wave_at(self, key, starts):
+        """How long the wave is (ticks) that each of a key's notes (start ticks) came from: its own repeat's (its
+        oscillator, Voice copy, echo, reverb tail; moved by off pitch / vibrato), the repeat it starts in; None when
+        the key has none."""
+        sq = self.made(key)[0]
+        if not len(sq):
+            return None
+        at = np.maximum(np.searchsorted(sq[:, 0], starts, "right") - 1, 0)
+        return self.wave_of[key][at]
 
     def factor(self, key, starts):
         """What the effects make of the velocity of a key's notes (start ticks): 0..1 for each to multiply it by."""
