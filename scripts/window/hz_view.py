@@ -35,7 +35,9 @@ def shape_length(sh):
         return b1 - b0
     (b0, _), (b1, _), (b2, _) = sh["pts"]
     bs = (b0, b1, b2, b1 + b2 - b0)
-    return max(bs) - min(bs)
+    tx = sh.get("text")
+    grown = tx["grow"] * tx.get("k", 1.0) if tx and tx.get("grow", 0.0) > 0 else 0.0  # (both sides: left_edge)
+    return max(bs) - min(bs) + 2 * grown
 
 
 class HzView:

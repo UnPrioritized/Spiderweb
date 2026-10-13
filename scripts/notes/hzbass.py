@@ -234,7 +234,11 @@ def left_edge(sh):
     if sh["kind"] == "funnel":
         return funnel_box(sh)[0]
     (b0, _), (b1, _), (b2, _) = sh["pts"]
-    return min(b0, b1, b2, b1 + b2 - b0)
+    left = min(b0, b1, b2, b1 + b2 - b0)
+    tx = sh.get("text")
+    if tx and tx.get("grow", 0.0) > 0:  # (grown letters reach past the box: text.text_polys, as many beats)
+        left -= tx["grow"] * tx.get("k", 1.0)
+    return left
 
 
 def shifted_hz(hz, d):
