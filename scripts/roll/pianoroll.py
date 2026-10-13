@@ -15,6 +15,7 @@ from files.lang import tr
 from notes.between import copied as between_copied, group_of, keep_pushes, push_sizes, whole_groups
 from notes.custom import box_frame, fill_plan, fill_test
 from notes.engine import cached_arrays, make_shape
+from notes.hzbass import left_edge, shifted_hz
 from notes.joined import all_tumours
 from notes.mask import OFF, ROW, is_mask, mask_area
 from notes.paths import KEYS
@@ -330,6 +331,17 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if self.limit is None:
             self.limit = self.limits(before.values())
         return before, self.drag, self.box_kept
+
+    def hz_hold(self, sh):
+        """A drag that moves a Hz bass's left edge (resize, skew): its tones as the drag started (each step from
+        them: none lost on the way)."""
+        if sh.get("hz") and self.hz_held is None:
+            self.hz_held = (copy.deepcopy(sh["hz"]), left_edge(sh))
+
+    def hz_stay(self, sh):
+        """... and back on the same song beats after the step (they count from the left edge)."""
+        if sh.get("hz") and self.hz_held:
+            sh["hz"] = shifted_hz(self.hz_held[0], self.hz_held[1] - left_edge(sh))
 
     def unmoved(self, step):
         """After a drag step (held_step): True if it changed nothing (the mouse moved, but the point snapped to
@@ -1046,7 +1058,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             _, k, orig, side, start = self.drag
             pt = self.resize_point(orig, k, side, start, e)
             step = self.held_step([self.app.sel])
+            self.hz_hold(self.app.selected())
             self.app.selected()["pts"] = self.resize_custom(orig, k, pt, e.state & CTRL, side)
+            self.hz_stay(self.app.selected())
             if self.unmoved(step):
                 return
             if self.stayed_inside(step):
@@ -1054,7 +1068,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         elif kind == "skew":  # slides in whole grid steps / keys, wherever it was grabbed
             _, k, orig, start = self.drag
             step = self.held_step([self.app.sel])
+            self.hz_hold(self.app.selected())
             self.app.selected()["pts"] = self.skew_custom(orig, k, *self.drag_steps(start, e))
+            self.hz_stay(self.app.selected())
             if self.unmoved(step):
                 return
             if self.stayed_inside(step):
