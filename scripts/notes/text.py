@@ -202,10 +202,6 @@ def build(sh, tx, axes):
     if y1 - y0 < 1e-6:
         y0, y1 = y0 - 0.01, y1 + 0.01
     w, h = x1 - x0, y1 - y0
-    if sh.get("hz"):  # (a Hz bass's tones count from the box's left edge: they stay on their beats in the song)
-        from notes.hzbass import left_edge, shifted_hz
-        left = left_edge(sh)
-        sh["hz"] = shifted_hz(sh["hz"], left - min(to_roll(axes, x, y)[0] for x in (x0, x1) for y in (y0, y1)))
     sh["strokes"] = [{"kind": "curve", "pts": [[round((x - x0) / w, 7), round((y - y0) / h, 7)] for x, y in c]}
                      for _, c in contours]
     sh["pts"] = [list(to_roll(axes, x0, y0)), list(to_roll(axes, x1, y0)), list(to_roll(axes, x0, y1))]
