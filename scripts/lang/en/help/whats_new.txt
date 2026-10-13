@@ -6,6 +6,12 @@ What's new:
 
 • Hz bass: Wave shape… is now Hz shape…, and Note length moved into it. Note length can be a % of a wave (the new first choice), so short notes trace the drawn line on every pitch; a fraction like 1/8 works too. Faint bars show each note's length (drag a bar's end to change them all), and small strips show how the notes look at low and high pitches.
 
+• Hz bass preview: picking another Hz bass puts the play line back at its first note, and the sound is made half a second after your changes settle (Space makes it at once).
+
+• Error logs are now spiderweb-error.log and spiderweb-crash.log, right next to Spiderweb. If Spiderweb ever closes by itself, spiderweb-crash.log says where it happened: please include it when you report a problem.
+
+• Fixes: Spiderweb could close by itself while an Hz bass preview played after picking another Hz bass.
+
 Version 1.5.2
 
 What's new:

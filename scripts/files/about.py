@@ -3,7 +3,7 @@
 import os
 import sys
 
-VERSION = "1.5.2"
+VERSION = "1.5.3"
 WEBSITE = "https://github.com/UnPrioritized/Spiderweb"  # new versions, the source code, problem reports
 
 # The spiderweb folder (scripts/<group>/ is two levels down); the .exe build unpacks to a temp folder, so there it's
