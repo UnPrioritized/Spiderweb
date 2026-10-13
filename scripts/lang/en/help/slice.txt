@@ -1,5 +1,3 @@
-Beta: Slice is new and may still change in later versions.
-
 Pick Slice (K) and drag a straight line across shapes. When you let go, every line, polyline, freehand stroke, curve and arc it crosses is cut in two there (more pieces if it crosses more than once). The pieces stay where they were and end up selected.
 [clip:slice-line]
 

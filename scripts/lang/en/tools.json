@@ -500,7 +500,7 @@
  "range_window.spread": "Notes per gate",
  "range_window.spread_at": "{g} ticks: {n} notes",
  "range_window.spread_at_many": "{g0}–{g1} ticks: {n} notes",
- "chop.window_title": "Chop (beta)",
+ "chop.window_title": "Chop",
  "chop.step": "Chop",
  "chop.shape": "Shape: {shape_label}",
  "chop.n_shapes": "{n} shapes (they all get the same settings)",

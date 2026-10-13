@@ -1,5 +1,3 @@
-Beta: Chop is new and may still change in later versions.
-
 Select one or more shapes, then right-click one: Chop… (or press Alt+U). Every note is cut into pieces in a rhythm, shown on the piano roll at once. Accept keeps it (one Ctrl+Z takes it back); X or Esc puts the notes back.
 [clip:chop-window]
 
