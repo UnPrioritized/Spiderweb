@@ -111,7 +111,7 @@
  "hz.fx_vibrato": "Vibrato",
  "hz.fx_vibrato_tip": "Vibrato: the tone itself goes a little up and down, 5 times every two beats (or as the synth window's Rate knob says). 100 % = 5 % of its pitch each way. Click it to put it on.",
  "hz.fx_pitch": "Pitch",
- "hz.fx_pitch_tip": "Pitch: bends the tone up or down. 50 % = as placed, 100 % = 12 keys up, 0 % = 12 keys down. Points stick to whole keys (hold Shift for in between). With Repeat every: a wobble; Once per note: a drop or rise at each note. Click it to put it on.",
+ "hz.fx_pitch_tip": "Pitch: bends the tone up or down. 50 % = as placed, 100 % = Range keys up, 0 % = Range keys down (the Pitch box's Range in the synth window, 12 to start with). Points stick to whole keys (hold Shift for in between). With Repeat every: a wobble; Once per note: a drop or rise at each note. Click it to put it on.",
  "hz.fx_value_keys": "{name} {n} keys",
  "hz.fx_sine": "Sine",
  "hz.fx_sine_tip": "Sine: every key hits 16 times in each wave, loud then soft like a sine wave. It takes the overtones away: a soft, pure tone. 0 % = the plain tone. Many more notes. Click it to put it on.",

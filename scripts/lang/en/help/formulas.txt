@@ -1,6 +1,8 @@
-Right-click a curve → Formula (a Curve tool curve, a line, a polyline, an arc, a stroke of a live shape or of the drawer, or highlighted funnel curves). It has two parts, and a curve can have both at once. (On a line, polyline or arc it works the same way: below, "curve" means them too. On a polyline the pattern runs along all of it, round its corners.)
+Right-click a curve, line, polyline or arc → Formula. Live shape strokes, drawer strokes and highlighted funnel curves have it too. It has two parts, and a curve can have both at once.
 
-Shape of the line: the line takes a shape. One that ends where it starts (Circle, Flower, Heart, Figure 8) is as wide as from the curve's start (A) to its end (B) and sits on that line; the others start at A and end at B. They're round as the piano roll looks when you pick them.
+Below, "curve" means all of these. On a polyline the pattern runs along all of it, round its corners.
+
+Shape of the line: the line takes a shape. One that ends where it starts (Circle, Flower, Heart, Figure 8) is as wide as from the curve's start (A) to its end (B) and sits on that line; the others (Spiral, Slow start, Fast start, S-curve, Reverse S, Quarter circle, Exponential, Logarithmic) start at A and end at B. They look round at the zoom you have when you pick them.
 [clip:formulas-shapes]
 
 Pattern along the line: a pattern repeats along the line (along its shape, if it has one): Wave, Zigzag, Bounce, Square wave, Sawtooth, Teeth, Spikes, Half circles, Stair steps, Swell, Fading wave, Curls. Loops = how many times (4.5 works too). Its height is in keys. Curls: the line runs back over itself in little loops; "curl" over 1 makes loops, under 1 a wave.
@@ -16,7 +18,9 @@ When its two halves match (like Wave, Bounce, S-curve or Circle), the points com
 
 The grid shows the numbers (x from 0 to 1 along one loop; y in keys); the mouse wheel zooms, dragging empty space (or middle-dragging) moves around, and Fit view shows all of it again. Save puts it in your list (patterns.json in the user folder next to Spiderweb), and from then on it's in the Formula menu too.
 
-Your own formula: tick Edit formula. A pattern is y of x for one loop (x goes from 0 to 1, y = how far to the side); a shape is x(t) and y(t), t going from 0 to 1 while it's drawn. Any other name in it (like height) gets its own number box. Works: numbers, + - * / ^ ( ), pi, e, sin cos tan asin acos atan sqrt exp ln log abs min max floor.
+Your own formula: tick Edit formula. A pattern is y of x for one loop (x goes from 0 to 1, y = how far to the side); a shape is x(t) and y(t), t going from 0 to 1 while it's drawn. Any other name in it (like height) gets its own number box. A pattern's "along =" box can move the line forward or back along the curve, in loops; going back makes it run over itself, like Curls.
+
+Works: numbers, + - * / ^ % ( ), pi, e, sin cos tan asin acos atan sinh cosh tanh sqrt exp ln log log10 log2 abs min max floor ceil round pow. log is the same as ln (the natural log); use log10 for base 10.
 
 Remove formula takes them off (the curve you drew is left). Turn into plain curve makes what you see into ordinary anchors and handles (a line, polyline or arc becomes a curve); if its two halves match, it gets Symmetric halves.
 

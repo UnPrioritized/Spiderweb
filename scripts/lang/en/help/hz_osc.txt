@@ -9,7 +9,9 @@ OSC A: the Waveform and how much of it is used (Shape), and Octave below (every 
 
 OSC B: a second oscillator. Click its light or name to switch it on: every note you placed is then played a second time, with OSC B's own Waveform, Shape and Mode, tuned by Octave, Semi (keys) and Fine (cents) from the note, as loud as its Level. Everything else (Volume, Pitch, the LFOs, Tone, Character, Voice, Arpeggio and the FX tab) works on both.
 
-Plays on: Every key = every key of the shape plays both oscillators (about twice the notes); Split keys = the keys take turns, one OSC A, the next OSC B (no extra notes). While OSC B is on, OSC A's light switches OSC A's own notes on and off (to hear OSC B alone), as in most synths. With Fine, OSC B's notes get alternating gates, even with Fixed gates, so the few cents are heard.
+Plays on: Every key = every key of the shape plays both oscillators (about twice the notes); Split keys = the keys take turns, one OSC A, the next OSC B (no extra notes).
+
+While OSC B is on, OSC A's light switches OSC A's own notes on and off (to hear OSC B alone), as in most synths. With Fine, OSC B's notes get alternating gates, even with Fixed gates, so the few cents are heard.
 
 Mode (in OSC A and OSC B) changes the shape of each wave one more way. Only the picked mode's knobs are shown.
 
@@ -23,13 +25,17 @@ Growl = every other wave lands a bit late: a lower tone under it.
 
 Bitcrush = the notes moved onto a coarse grid: rough and gritty.
 
-Pitch: each note starts Amount keys up (or down) and glides to its own tone in Time.
+Pitch: each note starts Amount keys up (or down) and glides to its own tone in Time. Range = how far the Pitch line and note bends can go (1 to 48 keys); turning it keeps the line's shape, so the whole bend gets bigger or smaller.
 
 Vibrato and Tremolo (the LFOs, as synths call them) wobble the tone and the loudness: Rate = how many times a beat, Depth = how much. Delay = how long each note stays plain before the wobble starts, Rise = how long the wobble then takes to grow to full Depth.
 
 Timing (in each LFO box) = how the Rate knob moves: Free = any speed; Straight = only note lengths, in step with the beat (1/4 = once a beat, 1/8 = twice); Triplets = 3 in the time of 2 of those (1/8T); Dotted = one and a half times as long (1/8D). The note length shows beside the Rate, and each wheel or arrow step goes to the next one.
 
-Tone: Sweep makes one part of the shape's keys loud (Start) and can move it to End in Time after each note starts; Key track moves it up for higher notes (down below 0), counted from the Hz bass's own tone; Wah = loud and quiet stripes over the keys. The picture shows which keys are loud over time (darker = louder, the highest keys at the top).
+Tone:
+• Sweep makes one part of the shape's keys loud (Start) and can move it to End in Time after each note starts.
+• Key track moves it up for higher notes (down below 0), counted from the Hz bass's own tone.
+• Wah = loud and quiet stripes over the keys.
+The picture shows which keys are loud over time (darker = louder, the highest keys at the top).
 
 Character: Slant, Groups, Off pitch and Noisy make the keys hit at different spots of the wave, which changes the colour of the tone; the picture shows eight keys' notes over four waves.
 
@@ -43,7 +49,7 @@ Click a macro to pick it: the knobs show the picked macro's rings. Right-click i
 MOD tab: things that move knobs over time, during each note.
 LFO 3 and LFO 4 go up and down over and over, with their own Shape and Rate. Plays: Free = running on from the shape's start, Each note = starting over at each note, Once = one wave from each note's start, then staying at its end.
 ENV 2 and ENV 3 rise over Attack from each note's start, fall over Decay to Sustain, stay there while the note is held, and fall to 0 over Release after it.
-Velocity = each note's own loudness (an Arpeggio step's Loudness).
+Velocity = each note's own loudness (for Arpeggio steps: the step's Loudness).
 Note = how high each note is.
 [clip:hz_osc-mod]
 
@@ -51,7 +57,8 @@ To link one, drag its name from the strip over the OSC and FX tabs onto a knob, 
 
 These knobs can move:
 
-• Shape, Octave below, Volume Attack, Decay, Sustain and Release (a running envelope gets faster or slower as its time moves; drawn by hand on the DRAW tab, its times can't move), Pitch Amount and Time, Vibrato Rate (its wave goes faster or slower from where it is, no jumps), Depth, Delay and Rise, Tremolo Rate, Depth, Delay and Rise.
+• Shape, Octave below, Volume Attack, Decay, Sustain and Release, Pitch Amount and Time, Vibrato Rate (its wave goes faster or slower from where it is, no jumps), Depth, Delay and Rise, Tremolo Rate, Depth, Delay and Rise.
+Moving an envelope's time speeds up or slows down the part that's playing. A line drawn by hand on the Draw tab keeps its times.
 
 • Sweep Start / End and Time, Key track, Wah, Slant, Groups, Off pitch, Noisy, Blend, Detune, Random start, Glide and Curve (these two and Random start read once, as each note starts).
 
@@ -63,7 +70,8 @@ These knobs can move:
 
 • LFO 3 and LFO 4 Rate (on the MOD tab: drag another box's name onto it; an LFO can't move its own).
 
-• On the FX tab: Chorus Depth and Rate, Flanger Rate, Depth and Mix, Echo Time (each note's echoes are spaced by the Time at the moment that note plays) and Fade, Reverb Length (read as each note ends), Scatter and Level, Compressor Threshold, Ratio, Attack, Release and Gain. The FX tab's effects work on the whole sound, so an envelope, Velocity or Note moving them follows the newest note (as in many synths).
+• On the FX tab: Chorus Depth and Rate, Flanger Rate, Depth and Mix, Echo Time (each note's echoes are spaced by the Time at the moment that note plays) and Fade, Reverb Length (read as each note ends), Scatter and Level, Compressor Threshold, Ratio, Attack, Release and Gain.
+The FX tab's effects work on the whole sound, so an envelope, Velocity or Note moving them follows the newest note (as in many synths).
 
 Sweep and Shape move only while the Sweep is on and a waveform is picked. A knob moves only while it does something: Tremolo Depth needs a Tremolo Rate, Key track the Sweep, Blend 3 voices or more, Detune 2, a Mode's knob that Mode.
 

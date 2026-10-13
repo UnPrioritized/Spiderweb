@@ -1,4 +1,4 @@
-Middle-click on a funnel's line (any tool) to start curves there (a diamond); middle-click near a curve to add an anchor. The curves work like any curve: drag the anchors and handle dots (see Curves: anchors and handles). A start's two curves are linked, so they change together (see Linking funnel curves).
+With the funnel selected, middle-click on its line (any tool) to start curves there (a diamond); middle-click near a curve to add an anchor. The curves work like any curve: drag the anchors and handle dots (see Curves: anchors and handles). A start's two curves are linked, so they change together (see Linking funnel curves).
 [clip:funnel_curves-start-and-handles]
 
 Highlighting: with the funnel selected and the Select tool, click one of its lines or curves again to highlight it (purple). A curve comes with the curves linked to it (teal); Ctrl+click adds or removes just one.

@@ -1,6 +1,6 @@
 Click on the piano roll and type (Enter = new line, Esc = done). The letters become a custom shape, so they can be filled, moved, resized, turned and skewed.
 
-Panel: font, size (font size, or rows = how many keys capital letters are), weight and italic, plus:
+Panel: font, size (font size, or rows = how many keys tall the capital letters are), weight and italic, plus:
 
 Letter spacing: extra room between the letters, in 1/1000 of the font size. Minus numbers pull them closer together.
 [clip:text-letterspace]
@@ -20,4 +20,8 @@ Threshold (Fill / Spam): how much of a key's height has to be inside a letter fo
 Grow: makes the letters' strokes thicker, in keys (minus = thinner). Big values can look odd in tight corners.
 [clip:text-grow]
 
-Click a text with the Text tool (or double-click it with Select) to retype it. Drag, Shift+arrows, double-click (a word) or Ctrl+A select letters; Ctrl+C / X / V copy, cut and paste them.
+Spam text can be a Hz bass too: one tone for all the letters, and the text keeps its own length (see Hz bass).
+
+Letters the font doesn't have are taken from another font. If no font on the PC has a letter, the status line says so.
+
+Click a text with the Text tool (or double-click it with Select, or right-click → Edit text) to retype it. Drag, Shift+arrows, double-click (a word) or Ctrl+A select letters; Ctrl+C / X / V copy, cut and paste them.

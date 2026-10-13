@@ -9,5 +9,7 @@ The notes stay the same, and so do the velocities (where shapes play at the same
 
 What changes (Spiderweb asks first when it applies): tumours become fixed points, and "Last note: starts on it" is dropped.
 
-Going back: Split into separate shapes (Ctrl+Shift+G, or right-click → Split back into the old shapes) gives the old shapes back exactly as they were, tumours and all, as long as the drawing wasn't changed (moving the whole shape is fine; resizing, turning, flipping or editing its strokes isn't: then it splits into groups of touching strokes instead). Ctrl+Z always works.
+Going back: Split into separate shapes (Ctrl+Shift+G, or right-click → Split back into the old shapes) gives the old shapes back exactly as they were, tumours and all.
+
+That works as long as the drawing wasn't changed: moving the whole shape is fine, but after resizing, turning, flipping or editing its strokes it splits into groups of touching strokes instead. Ctrl+Z always works.
 [clip:turn_live-back]

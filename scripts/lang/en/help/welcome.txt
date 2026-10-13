@@ -1,6 +1,6 @@
 Draw lines, curves and shapes on the piano roll; every key they cross gets notes, like drawing notes by hand but in one stroke.
 
-1. Pick a tool at the top and draw. The arrow next to Line opens every drawing tool (Polyline, Freehand, Curve, Arc, Custom shape, Funnel, Text…); the pin next to one gives it its own button.
+1. Pick a tool at the top and draw. The ▾ arrow next to the drawing tool button (Line at first) opens every drawing tool (Polyline, Freehand, Curve, Arc, Custom shape, Funnel, Text…); the pin next to one gives it its own button.
 
 2. Select a shape to change it: drag its points, or change its settings in the panel on the right.
 

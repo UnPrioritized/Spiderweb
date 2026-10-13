@@ -6,7 +6,9 @@ Like the Claw machine, you can keep working in the main window while it's open, 
 
 A chord = all the notes of a shape that start on the same tick (on a filled shape, each column of notes). A note on its own is left alone.
 
-It works like the strum tool found in other piano rolls. Each knob has a box under it with its real value (times in ticks); type a number there to go past where the knob reaches. Turn a knob by dragging it up / down (Shift = fine), with the mouse wheel or the arrow keys; hold the right mouse button on it to point it at the mouse; middle-click puts it back to 0.
+It works like the strum tool found in other piano rolls. Each knob has a box under it with its real value (times in ticks); type a number there to go past where the knob reaches.
+
+Turn a knob by dragging it up / down (Shift = fine), with the mouse wheel or the arrow keys; hold the right mouse button on it to point it at the mouse; middle-click puts it back to 0.
 
 Start, Time: how much later each note starts than the one before. Turned right, the lowest note starts first; left, the highest. Tension: right = small steps first, each step bigger (100 = each twice the last); left = big steps first, each smaller (-100 = each half the last).
 

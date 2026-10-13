@@ -12,4 +12,4 @@ All of the code was written by an AI model (Claude Opus 5.5, by Anthropic). Kana
 
 Spiderweb's folder holds the MIDI files you generate (output) and the user folder: your autosave (and autosave-backup), settings, presets, your shape library (shapes) and errors.log, where the details go if something goes wrong.
 
-Look (Settings, the ⚙ button): Light, Dark, or Follow Windows (the same as your Windows setting). Restart Spiderweb to see the new look.
+The sound parts (BASS and BASSMIDI, used by Built-in BASSMIDI and the Hz bass preview) aren't under the MIT License: they are free for non-commercial use only (see the README).

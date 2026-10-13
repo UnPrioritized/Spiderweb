@@ -1,6 +1,8 @@
-The red line is the tone you hear; the middle of a row is the exact tone (a green line when you zoom in). It bends with everything that moves the tone: slides, Glide, the Pitch line and envelope, and the Vibrato's wave (fading in with its line).
+The red line is the tone you hear; the middle of a row is the exact tone (a green line when you zoom in). It bends with everything that moves the tone: slides, Glide, note bends, the Pitch line and envelope, and the Vibrato's wave (fading in with its line). Untick Red line (at the top of the window) to hide the line and its dots; slides and tunes stay.
 
-Every repeat lasts a whole number of ticks, so each one is a little off, more at a low PPQ: the faint line behind the red one shows every repeat's own pitch. With Alternating gates the repeats take turns being too high and too low (the faint line jumps) and the average, the red line, is exact. With Fixed gates every repeat is off the same way, so the red line itself sits off to one side.
+Every repeat lasts a whole number of ticks, so each one is a little off, more at a low PPQ: the faint line behind the red one shows every repeat's own pitch.
+
+With Alternating gates the repeats take turns being too high and too low (the faint line jumps) and the average, the red line, is exact. With Fixed gates every repeat is off the same way, so the red line itself sits off to one side.
 
 Zoomed in, drag the red line in a note up or down to tune that note alone (whole cents, Shift = finer; it sticks to the exact tone). Double-click the red line to put the tune back to 0. Right-click a note and pick Tune… to type it.
 
@@ -11,5 +13,7 @@ Wave shape… (in Hz settings…) sets where in each wave the keys hit: draw a l
 Note length (in Hz settings…) sets how long each repeat lasts: 100 % = until the next one starts, less = a gap after each one, or a number of ticks. With layers, This layer gives the picked layer a length of its own. Last note sticks out of the shape lets the last repeat before a gap or the end keep a whole wave.
 
 Auto gates (what a new Hz bass starts with): a note that holds still gets Fixed gates when they're off its tone by no more than the threshold (the number next to Gates, in cents), else Alternating ones. A slide is always Alternating.
+
+A note can also have gates of its own: right-click it → Use fixed gates or Use alternating gates. Picking from the window's Gates list puts every note back on the Hz bass's gates.
 
 In the window a band around each note's tone shows the threshold: green = Fixed, orange = Alternating. Hold the mouse over a note to see how far off Fixed gates would be. Right-click a note and pick Own Auto threshold… to give it (and the other selected notes) a threshold of its own. About 5 cents is where most ears start to hear it; the highest is 50 (half a key).

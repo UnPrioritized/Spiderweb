@@ -1,8 +1,8 @@
 Draw the funnel's line, then its wall (drag each, or click twice). Either can come first; a wall earlier in time than the line's start makes a reverse funnel. Ctrl while drawing or dragging the wall keeps it centred on the line.
 
-Middle-click on the line (any tool) to start a curve there: curves go to both ends of the wall. Middle-click near a curve to add an anchor it goes through. The curves have anchors and handles (see Funnel curves).
+With the funnel selected, middle-click on its line (any tool) to start a curve there: curves go to both ends of the wall. Middle-click near a curve to add an anchor it goes through. The curves have anchors and handles (see Funnel curves).
 
-With a funnel selected, a line drawn to (or from) its wall is added to it (two-line funnels). Lines on the other side of the wall make their own half, with its own notes running to the wall: they just start (or end) on the wall; the wall setting is for the first line's side.
+With a funnel selected, a line drawn to (or from) its wall is added to it (two-line funnels). A line on the other side of the wall makes a second half. Its notes always run to the wall (they start or end on it); the wall setting only changes the first line's half.
 
 Panel: the wall (notes end on it, or start on it), the inside (spam or long notes) and the gate.
 

@@ -2,6 +2,12 @@ With Select, drag on empty space: the box selects every shape it touches (Ctrl+d
 
 The box stays after you let go. Drag its sides or corners to stretch the shapes it selected (the other side stays put), or drag inside it to move them. Dragged past the edge of the piano roll, the view scrolls.
 
+Ctrl+drag after a box draws another box (they all count together). Ctrl+drag inside the boxes moves a copy of everything in them.
+
+Right-click inside the boxes with two or more shapes selected: a menu with what works on all of them at once (Formula, Tumours, note tools, Join, flip, turn, delete…).
+
+Click a shape that's already selected to pick the next shape under it (handy where shapes overlap).
+
 Ctrl+C / Ctrl+V: copy / paste at the play line (snapped to the grid); with Select, double-click empty space to paste there. Ctrl+C also puts the shapes on the clipboard as text, to share them (see Sharing shapes). Ctrl+X: cut (copy, then delete). Ctrl+D: duplicate. Del: delete.
 
 Ctrl+H / Ctrl+J: flip sideways / upside down (sideways also mirrors velocities).
@@ -10,4 +16,4 @@ Ctrl+Left / Ctrl+Right: turn 90° as it looks on screen (the zoom decides how ma
 
 Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z): undo / redo. While something is half drawn, Ctrl+Z just drops that.
 
-Settings in the panel (velocity, last note…) change every selected shape.
+Settings in the panel (velocity, last note…) change every selected shape. Where the selected shapes differ, a dropdown says Mixed, a number box is empty and a tick box is half-ticked: picking or typing a value sets it on all of them.

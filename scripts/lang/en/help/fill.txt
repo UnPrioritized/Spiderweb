@@ -50,13 +50,19 @@ Range… (next to the gate, Spam and Outline spam) opens a window where the gate
 
 From is the shape's gate, to is the second gate, and the graph sets how it gets there: the straight line gives every whole-tick gate between the two an equal share, like a gate distribution, so most notes get the short gates. Beside the graph, "Notes per gate" shows how many notes get each gate (red: a gate no note gets; point at a bar for its numbers).
 
+The buttons under the graph give it a ready shape: Straight, More short gates, More long gates, Hill or Valley. To change it by hand, drag a point, click to add one, or right-click a point to delete it.
+
 Smooth uses every whole-tick gate between the two. Steps lets the gate only halve or double from the first one (the first, half of it, a quarter…), so the shape is made of sections of equal notes; the graph still says where each step comes.
 
-Left to right (time): every key is cut at the same places, starting at the shape's left edge; with "Each key row by itself" every row instead runs the whole range along its own length (each piece of a row on its own, or across the gaps with "Across gaps in a row"), and a row too short for any note gets one note of the first gate.
+Left to right (time): every key is cut at the same places, starting at the shape's left edge.
+
+With "Each key row by itself", every row instead runs the whole range along its own length, each piece of a row on its own. "Across gaps in a row" runs it across the gaps instead. A row too short for any note gets one note of the first gate.
 
 Low to high or Top to bottom (keys): each key gets its own gate. "Fit to the shape's edges" stretches or trims each row's first and last note so the notes reach exactly to the shape's edges, with no blank and nothing sticking out.
 
-Hz bass (Spam and Outline spam): spam so fast that the repeats sound like a tone. Tick it and type the key whose tone you want (like A1); the gate is worked out from that tone, the BPM and the PPQ. Every key is in step, so more keys make the tone thicker, not different. Notes… opens a window to place several tones, chords and slides (see Hz bass).
+Hz bass (Spam and Outline spam): spam so fast that the repeats sound like a tone. Tick it, then press Notes… to place the tones in the Hz bass window (one tone, or several, chords and slides; see Hz bass). The gate is worked out from the tone, the BPM and the PPQ. Every key is in step, so more keys make the tone thicker, not different.
+
+A gate Range is switched off while Hz bass is on. If the BPM changes later, the panel says the tone is off now and shows an "Update Hz bass" button.
 
 Gaps: where the outline isn't closed (red dots in the drawer), Fill and Spam close it with straight lines, shown dashed, and the buttons turn orange. Loose ends that nearly touch (within 1/64 beat and 1 key) are joined to each other first. Every open part left is closed from its end back to its start.
 
@@ -67,14 +73,20 @@ Close the gaps yourself to decide exactly where the edge goes.
 
 A line whose ends both land on a line (another one, or partway along itself) isn't a gap. It splits the area it crosses: both sides stay as they were (filled or empty), and the line keeps its own notes.
 
-Normal / Outline (the box next to Fill and Spam): Outline puts the notes along the edge of what's filled on a channel of their own (with Overlaps cancel out ticked that's every edge, around every filled bit; unticked, only the outer edge) and the inside's on another, with the same gate so they line up (where both would play, the outline's note is kept). It needs Channels: Multi channel; with the others it's all one channel and the box turns orange.
+Normal / Outline (the box next to Fill and Spam): Outline puts the notes along the edge of what's filled on a channel of their own, and the inside's on another.
+
+With Overlaps cancel out ticked, every edge counts, around every filled bit; unticked, only the outer edge. Both use the same gate so they line up (where both would play, the outline's note is kept). Outline needs Channels: Multi channel; with the others it's all one channel and the box turns orange.
 [clip:fill-outline]
 
-Coloured areas: with Fill or Spam, the areas you coloured in the drawer (see Drawer: Areas) each get a colour of their own, and Empty ones get no notes. With Outline on, "Outline between colours" (under Fill and Spam) puts the notes where two colours meet on the outline too; unticked, the outline is only where the filled part ends. A shape has at most 15 colours, 16 with "Use channel 10" (the outline and the plain fill count too): past that the extra colours share the last one, and the panel says so in orange.
+Coloured areas: with Fill or Spam, the areas you coloured in the drawer (see Drawer: Areas) each get a colour of their own, and Empty ones get no notes.
+
+With Outline on, "Outline between colours" (under Fill and Spam) puts the notes where two colours meet on the outline too; unticked, the outline is only where the filled part ends.
+
+A shape has at most 15 colours, 16 with "Use channel 10" (the outline and the plain fill count too): past that the extra colours share the last one, and the panel says so in orange.
 
 Outline gate (with Empty, Outline spam, or Fill / Spam set to Outline): makes the outline at least this many ticks thick, so it doesn't get thin where the shape is steep. It grows into the inside, so the shape's edge stays where it is; where the shape is thinner than that, all of it becomes outline. While you change the number, a red line on the piano roll shows where the inside now ends.
 
-Even band shrinks the inside the same way on every side, top and bottom too, as the shape looked when it was first drawn: a circle or an arc shrinks into a smaller one even if you zoom differently now (then it can look uneven on screen, but it is right for the shape). Grow sideways just makes each short outline note longer toward the middle of its key.
+Even band shrinks the inside the same way on every side, top and bottom too, as the shape looked when it was first drawn: a circle or an arc shrinks into a smaller one even if you zoom differently now. At another zoom the band can look uneven on screen; that's expected. Grow sideways just makes each short outline note longer toward the middle of its key.
 
 Overlaps cancel out (ticked unless you change it): where outlines overlap, the overlap stays empty, and a shape inside a shape makes a hole. Untick it to fill everything the lines close in: overlaps and holes too, also where one line crosses itself. (Text always fills its letters the way the font means them.)
 

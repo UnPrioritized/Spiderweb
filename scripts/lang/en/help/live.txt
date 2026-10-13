@@ -2,7 +2,7 @@ With Live shape on, Line, Polyline, Freehand, Curve, Arc, Circle and Polygon dra
 
 While it's on, the selected shape's points show (purple squares): drag them with Select. Points in the same spot move together, and a point dropped on another one joins it.
 
-Select tool: click a stroke of the selected shape to pick it: Del deletes it, a curve shows its handles, a freehand stroke can be straightened. Ctrl+C / Ctrl+V, Ctrl+H / Ctrl+J and Ctrl+Left / Ctrl+Right copy, paste, flip and turn just that stroke. Esc unpicks it: then they work on the whole shape again.
+Select tool: click a stroke of the selected shape to pick it: Del deletes it, a curve shows its handles, a freehand stroke can be straightened. Ctrl+C / Ctrl+X / Ctrl+V, Ctrl+H / Ctrl+J and Ctrl+Left / Ctrl+Right copy, cut, paste, flip and turn just that stroke. Esc unpicks it: then they work on the whole shape again.
 
 A copied stroke is pasted into the selected custom shape, a grid step later and a key lower each time (nothing selected: into a new shape).
 

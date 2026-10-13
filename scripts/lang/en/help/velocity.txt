@@ -1,7 +1,7 @@
-The pane under the piano roll shows every note's velocity. Draw over the bars with Linear, Curve, Pencil or Formula. With a shape selected, only its notes change (the others fade); with nothing selected, every note under the drag.
+Tick Velocity pane (top) to show or hide it. The pane under the piano roll shows every note's velocity. Draw over the bars with Linear, Curve, Pencil or Formula. With a shape selected, only its notes change (the others fade); with nothing selected, every note under the drag.
 
 Formula: drag it like Linear; a pattern (Wave, Zigzag, Bounce or one you saved) swings the velocity up and down around the line. Pick the pattern, its Loops and height (in velocity steps) next to the tool buttons: changing them changes the line you just drew, until Enter or a click elsewhere.
 
-Linear / Curve: drag it, then drag its end squares to move the ends (Ctrl = level with the other end) or a curve's round handle to bend it. Ctrl while drawing = flat. Hold Shift to snap the ends to the grid and, with a shape selected, onto its first / last note. Enter or a click outside the pane = done.
+Linear / Curve: drag it, then drag its end squares to move the ends (Ctrl = level with the other end) or a curve's round handle to bend it. Ctrl while drawing = flat. Hold Shift to snap the ends to the grid and, with a shape selected, onto its first / last note. Enter, Esc or a click outside the pane = done.
 
-The velocities move and stretch with the shape. Typing a start / end velocity in the panel goes back to a straight ramp. Drag the bar above the pane to resize it; Velocity pane (top) hides it.
+The velocities move and stretch with the shape. Typing a start / end velocity in the panel goes back to a straight ramp. Drag the bar above the pane to resize it.

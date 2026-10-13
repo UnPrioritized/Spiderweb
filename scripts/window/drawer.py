@@ -1952,7 +1952,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
     def slice_along(self, a, b):
         """The Slice tool's line a-b (and its Mirror copies) cuts the strokes it crosses: the picked ones if any,
         else every one the board can change (never hidden / locked ones). Each cut stroke's pieces take its place
-        and layer ("Line 3", "Line 3 (2)"...), all picked afterwards. Nothing crossed: nothing happens."""
+        and layer ("Line 3", "Line 3 (2)"...), not picked afterwards. Nothing crossed: nothing happens."""
         picked = self.movable()
         idx = set(picked or [i for i in range(len(self.strokes)) if self.pickable(i)])
         self.cut_strokes([(ka, kb, idx) for ka, kb in self.knife_copies(a, b)], picked, "drawer.slice_nothing")

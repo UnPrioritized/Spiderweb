@@ -1,4 +1,8 @@
-Everything is saved on its own (autosave.json in the user folder next to Spiderweb) and comes back next time; each time Spiderweb starts, the previous session is kept as autosave-backup.json. Save… / Open… keep and open project files (.json). Opening one replaces what's on the piano roll (Undo can't bring it back), so if your shapes aren't saved in a project file, Spiderweb asks to save them first. Shapes are stored in beats, so changing PPQ doesn't move them.
+Everything is saved on its own (autosave.json in the user folder next to Spiderweb) and comes back next time; each time Spiderweb starts, the previous session is kept as autosave-backup.json. If the autosave ever can't be opened, it's kept aside and the backup opens instead (Spiderweb tells you).
+
+Save… (Ctrl+S) / Open… keep and open project files (.json). Opening one replaces what's on the piano roll (Undo can't bring it back), so if your shapes aren't saved in a project file, Spiderweb asks to save them first.
+
+Shapes are stored in beats, so changing PPQ doesn't move them.
 
 Generate MIDI writes the file set under Output file, with the PPQ, BPM and beats per bar from Project. PPQ 32767 or higher: many MIDI programs can't open the file (the box turns red).
 

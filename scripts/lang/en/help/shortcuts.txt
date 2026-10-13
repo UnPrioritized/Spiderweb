@@ -1,8 +1,10 @@
-Tools: V Select, K Slice, L Line, P Polyline, F Freehand, C Curve, A Arc, S Custom shape, O Circle, Q Polygon, N Funnel, X Text, H Hz bass, I Image. G = Live shape on / off.
+Tools: V Select, K Slice, L Line, P Polyline, F Freehand, C Curve, A Arc, S Custom shape, O Circle, Q Polygon, N Funnel, X Text, H Hz bass, I Image. G = Live shape on / off. M = Mask on / off.
 
-Drawing: Shift = don't snap. Ctrl = perfect (circle, equal-sided polygon or star, proportions). Right-click or Esc = cancel what's half drawn. Enter / double-click = finish a polyline.
+Drawing: Shift = don't snap. Ctrl = perfect (circle, equal-sided polygon or star, proportions). Esc = cancel what's half drawn. Enter, double-click or right-click = finish a polyline (right-click drops an unfinished arc or a shape started with a click).
 
-Mouse: right-click a shape = its menu, empty space = deselect. Double right-click = Select ↔ last tool. Right-drag = listen. Middle-click = add a point / anchor / funnel curve start. Middle-drag = scroll.
+Mouse: right-click a shape = its menu, empty space = deselect. Right-click a curve's anchor, a funnel's point or a picked stroke's point = remove it. Double right-click = Select ↔ last tool. Right-drag = listen. Middle-click = add a point / anchor / funnel curve start. Middle-drag = scroll.
+
+Select: click a selected shape again = the next shape under it. Ctrl+drag after a box = another box; Ctrl+drag inside the box = move a copy.
 
 Wheel = scroll, Shift+wheel = sideways, Ctrl+wheel = zoom, Ctrl+Shift+wheel = zoom time, Alt+wheel = zoom pitch.
 
@@ -15,3 +17,5 @@ Curves: Alt+drag a handle = sharp corner, Alt+drag an anchor = new handles, Ctrl
 Number boxes: drag the name, Up / Down, wheel; Shift = big steps, Ctrl = small.
 
 F1 = Help. Ctrl+S = save. Ctrl+Shift+C = Copy to Domino (notes copied in Domino paste with Ctrl+V).
+
+The drawer and the Hz bass window have keys of their own: see their pages.

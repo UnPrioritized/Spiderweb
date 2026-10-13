@@ -1,6 +1,6 @@
 Select a line, polyline, freehand stroke, curve or arc, click Tumours… in the panel (or right-click it: Tumours…) and tick Tumours in the window that opens: bumps along it. Changes show on the piano roll at once: Accept (or Enter) keeps them as one undo step, X or Esc puts the lines back as they were, Reset puts every setting back to its default.
 
-The window can stay open: it shows whatever you select (selecting other shapes keeps what you did to the last ones). The line's points stay draggable; the line as drawn shows faint and dashed.
+The window can stay open: it shows whatever you select (selecting other shapes keeps what you did to the last ones). The line's points stay draggable; the line as drawn shows faint and dashed. With several shapes selected they all change together; when only some have tumours, clicking the half-ticked Tumours box gives the others these tumours too.
 [clip:tumours-menu]
 [clip:tumours-window]
 
@@ -24,14 +24,16 @@ Slant (square bumps only): 0 = a square, 100 = the top narrows to a point, minus
 
 Graphs: the … button next to Size, Length, Distance, Rotation or Slant opens a graph of that number along the whole line (from its start on the left to its end on the right). 100 % = the number in the box, so the box still scales the whole graph. Drag the points (Shift = free), click to add one, or pick a preset or type a formula.
 
-Right-click a point: Value… types its exact place along the line and its value (in %, or as the number it makes), Delete point removes it (not when only two are left; deleting an end makes the next point the new end). Show picks how high the graph is shown, or type your own From / to. Ctrl+Z / Ctrl+Y undo and redo the graph's changes while the window is open.
+Right-click a point: Value… types its exact place along the line and its value (in %, or as the number it makes), Delete point removes it (not when only two are left; deleting an end makes the next point the new end).
+
+Show picks how high the graph is shown, or type your own From / to. Ctrl+Z / Ctrl+Y undo and redo the graph's changes while the window is open.
 
 The part outside the tumour Range is greyed out. A number following a graph says "× graph" in blue; Flat (off) removes it. The piano roll shows the change as you go; OK keeps it, Cancel (or Esc) puts the graph back as it was.
 [clip:tumours-graph-window]
 [clip:tumours-graph]
 [clip:tumours-graph-example]
 
-Side: alternating, left, right or random.
+Side: alternating, left, right or random. With random, New random picks the sides again.
 [clip:tumours-side]
 
 Straight or Bent with the line: this only matters where the line curves under a bump (long bumps on a curve, arc or circle). Straight builds each bump on a straight shortcut from where it starts to where it ends, so it looks angular. Bent with the line makes it follow the curve underneath, so the whole thing stays round. On a straight line both look the same.

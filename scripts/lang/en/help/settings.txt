@@ -4,9 +4,13 @@ Look tab:
 
 • Look: Light, Dark, or Follow Windows. Restart Spiderweb to see the new look.
 
-• Note colours: the colours of the notes on the piano roll, one per MIDI channel (the numbers under them). Default is built in and never changes; New… makes your own palette from the one in use, and Rename… / Delete work on yours. Click a colour to change it (changing Default makes a copy first). Random picks soft colours, Gradient… blends from a first to a last colour. Switching palettes shows at once.
+• Note colours: the colours of the notes on the piano roll, one per MIDI channel (the numbers under them; channel 10's colour is used only when a project ticks Use channel 10). Default is built in and never changes; New… makes your own palette from the one in use, and Rename… / Delete work on yours. Switching palettes shows at once.
 
-• Size, Font and Text size: how big everything is, the font, and the text a little smaller or larger. Buttons: how buttons and boxes are drawn (System's own, Plain, Raised, Outlined, Flat), and Edges how thick their edges are. The Preview beside them shows a pick at once; the rest of Spiderweb changes after a restart. Reset to default puts them back.
+• Click a colour to change it (changing Default makes a copy first). Random picks soft colours, Gradient… blends from a first to a last colour.
+
+• Size, Font and Text size: how big everything is, the font, and the text a little smaller or larger. The Preview beside them shows a pick at once; the rest of Spiderweb changes after a restart.
+
+• Buttons: how buttons and boxes are drawn (System's own, Plain, Raised, Outlined, Flat), and Edges how thick their edges are. Reset to default puts size, font, text size, buttons and shape lines back.
 
 • Shape lines: how thick shapes' lines are on the piano roll. This one shows at once.
 

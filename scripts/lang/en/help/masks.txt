@@ -1,4 +1,6 @@
-A mask shapes a note pattern without cutting it. Draw your pattern first (often many shapes), then tick Mask (M) on the toolbar and draw over it: whatever you draw now becomes a mask. The shapes under it show only inside the mask; the rest is drawn faint. Nothing is cut: the shapes under it stay whole and still sound and export, so you can move or change the mask at any time. Below: a pattern alone (left), and with a circle mask over it (right).
+A mask shapes a note pattern without cutting it. Draw your pattern first (often many shapes), then tick Mask (M) on the toolbar and draw over it: whatever you draw now becomes a mask. The shapes under it show only inside the mask; the rest is drawn faint.
+
+Nothing is cut: the shapes under it stay whole and still sound and export, so you can move or change the mask at any time. Below: a pattern alone (left), and with a circle mask over it (right).
 [clip:masks-basic]
 
 Any drawing tool makes a mask, Live shape too (paint with the mask like a brush). To turn a shape you already drew into a mask, select it and tick Mask in the side panel; untick it to make it a normal shape again. A mask's line is always shown, dashed.
@@ -7,7 +9,11 @@ Mask preview (the tick next to Mask on the toolbar): untick it to see the shapes
 
 A mask covers every shape it touches, never other masks. To use a mask's notes as the pattern, untick Mask on it.
 
-What shows: a Fill or Spam mask shows its whole inside. Other closed shapes show their inside too (between their own notes), or only a band along their line when Shows is set to Along the line. Open lines (lines, curves, freehand) always show a band along the line. Thickness is how wide that band is, in keys, even all the way round. With Inside it widens the inside past the outline. Below: Shows set to Inside (left) and Along the line (right), then a line mask with a Thickness of 1 (left) and 4 (right).
+What shows: a Fill or Spam mask shows its whole inside. Other closed shapes show the area inside their outline too, or only a band along their line when Shows is set to Along the line. Open lines (lines, curves, freehand) always show a band along the line.
+
+Thickness is how wide that band is, in keys, even all the way round. With Inside it widens the inside past the outline.
+
+Below: Shows set to Inside (left) and Along the line (right), then a line mask with a Thickness of 1 (left) and 4 (right).
 [clip:masks-shows]
 [clip:masks-thickness]
 

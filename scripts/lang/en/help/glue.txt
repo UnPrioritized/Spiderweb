@@ -6,4 +6,4 @@ Notes with a gap between them, even one tick, stay apart. The glued note keeps t
 
 The glue is kept with the shape: moving, resizing or reshaping it glues the new notes the same way, and the boxes move and stretch with it. Glue another part to add to it. Right-click → Remove glue takes all of it off the selected shapes.
 
-The glue comes first: Claw machine, Strum and Chop pages on the same shape work on the glued notes.
+The glue comes first: Claw machine, Strum, Chop and Copy along a path pages on the same shape work on the glued notes.

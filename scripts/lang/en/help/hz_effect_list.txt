@@ -8,7 +8,7 @@ Noisy: every repeat is late by a random bit.
 
 Vibrato: the tone goes a little up and down.
 
-Pitch: bends the tone up or down, up to 12 keys each way (points stick to whole keys; Shift = in between).
+Pitch: bends the tone up or down, up to the Pitch box's Range each way in the synth window (12 keys to start with; points stick to whole keys; Shift = in between).
 
 Volume: how loud (0 % = silence, no notes there).
 

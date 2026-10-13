@@ -1,9 +1,11 @@
-The line stops at the end of each note, and the tone jumps at the next note. To make it slide instead, select two notes (the second one starting at or after the end of the first), right-click and pick Slide between the selected notes; or middle-click a note where the slide should start and another note where it should end.
+The line stops at the end of each note, and the tone jumps at the next note. To make it slide instead, select two notes (the second one starting at or after the end of the first), right-click and pick Slide between the selected notes; or middle-click a note where the slide should start and another note where it should end. Right-click works too: a note → Start a slide here, then right-click the other note.
 [clip:hz_slides-slide]
 
-Two dots show: drag them to change the slide. Middle-click a dot to remove the slide.
+Two dots show: drag them to change the slide. Middle-click a dot (or right-click it → Delete this slide) to remove the slide.
 
-A small square sits on the slide: drag it up or down to bend the slide. It sticks where the slide is straight (Shift = free). Right-click a dot or the square to pick Single curve (one arc) or Double curve (an S: drag one way for slow ends, the other way for quick ends). A hollow square follows the Glide curve knob while Glide is on (else it's straight); a filled one has its own bend. Double-click the square to make it follow the knob again.
+A small square sits on the slide: drag it up or down to bend the slide. It sticks where the slide is straight (Shift = free). Right-click a dot or the square to pick Single curve (one arc) or Double curve (an S: drag one way for slow ends, the other way for quick ends).
+
+A hollow square follows the Glide curve knob while Glide is on (else it's straight); a filled one has its own bend. Double-click the square to make it follow the knob again.
 
 A slide belongs to its two notes: notes added later don't change it.
 
@@ -14,4 +16,6 @@ A note can also bend on its own, with the Bend tool (B): click a note to add a p
 
 A small square sits half way between two points: drag it up or down to curve that piece (it sticks where the piece is straight, Shift = free; double-click it to make it straight again). The line stretches with the note, and it bends the note on top of everything else, as far as the Pitch box's Range. A slide leaves from the bent pitch and arrives at the bent pitch.
 
-Right-click a note → Bend: Copy bend copies its bend line, Paste bend gives it to the note (or to all the selected notes, if it's one of them; the line stretches to each note), Clear bend takes it away. Below them are ready shapes that replace the bend: Scoop up (from 2 keys below onto the note in its first 1/8 beat), Fall off (down 5 keys in its last 1/4 beat) and Wobble (half a key up and down, 4 times a beat). They can be changed afterwards with the Bend tool.
+Right-click a note → Bend: Copy bend copies its bend line, Paste bend gives it to the note (or to all the selected notes, if it's one of them; the line stretches to each note), Clear bend takes it away.
+
+Below them are ready shapes that replace the bend: Scoop up (from 2 keys below onto the note in its first 1/8 beat), Fall off (down 5 keys in its last 1/4 beat) and Wobble (half a key up and down, 4 times a beat). They can be changed afterwards with the Bend tool.

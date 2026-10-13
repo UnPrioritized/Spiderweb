@@ -1,4 +1,4 @@
-Select one or more shapes, then right-click one: Sustain…. On each key, every note is held on until the last note of its group ends, so the notes pile up on top of each other. Made for lagging out MIDI players: far more notes sound at once, while the shape looks the same.
+Select one or more shapes, then right-click one: Sustain… On each key, every note is held on until the last note of its group ends, so the notes pile up on top of each other. Made for lagging out MIDI players: far more notes sound at once, while the shape looks the same.
 
 A group is the notes on one key with no real gap between them. Small gaps, like the spacing between a spam shape's notes, are held over. Bigger gaps are holes in the shape (the inside of a ring, the space between letters) and stay empty, so the shape keeps its look.
 
@@ -10,13 +10,19 @@ Stop every: the sustain stops every this many ticks, counted from the shape's fi
 
 Stop at my points: stops you put yourself. Add stop puts one on the next snap line after the last stop, Clear points takes them all away. These stops stretch with the shape when it's resized. With Allow past the shape's end ticked, a stop can sit past the end: the last notes on each key are then held on until it, so the shape gets longer.
 
-While the shape is selected, the piano roll shows these stops as lines. With the Select tool, drag a line to move its stop (it sticks to the snap lines; hold Shift to place it freely), or right-click a line to remove it. Right-click the shape for Add sustain stop here. While the Sustain window is open, double-click the shape to add a stop there.
+While the shape is selected, the piano roll shows these stops as lines. With the Select tool, drag a line to move its stop (it sticks to the snap lines; hold Shift to place it freely), or right-click a line to remove it. Ctrl+click and Ctrl+drag leave the lines alone.
 
-Lengths in: show the numbers in ticks or in beats (typing 1/3 in beats works too). Each box can also be dragged sideways, like its unit.
+To add a stop, right-click the shape → Add sustain stop here, or double-click the shape while the Sustain window is open. With a lot of notes and many stops there can be too many pieces: then the stops aren't put on, and the window says so.
 
-Changes show on the piano roll at once, and the piano roll can still be used while the window is open: the window follows the selection. OK keeps the changes as one undo step, Cancel or Esc puts back what changed. Ctrl+Z steps back through the changes made in the window, on the piano roll too while it's open. The menu item has a tick while a selected shape is sustained, and the Shapes list says (Sustained). Untick Sustain notes in the window to take it off.
+Lengths in: show the numbers in ticks or in beats (typing 1/3 in beats works too). Drag a box (or the unit beside it) sideways to change its number.
 
-Sustain comes last, after the outline gate, Colours, glue and the Claw machine / Strum / Chop pages: it only makes notes longer.
+Changes show on the piano roll at once, and the piano roll can still be used while the window is open: the window follows the selection. OK keeps the changes as one undo step, Cancel or Esc puts back what changed. Ctrl+Z steps back through the changes made in the window, on the piano roll too while it's open.
+
+With several shapes selected, each keeps its own settings until you change that row; a half-ticked box means they differ.
+
+The menu item has a tick while a selected shape is sustained, and the Shapes list says (Sustained). Untick Sustain notes in the window to take it off.
+
+Sustain comes last, after the outline gate, Colours, Gate aware flip, glue and the Claw machine / Strum / Chop / Copy along a path pages: it only makes notes longer.
 
 Channels: a sustained shape keeps its overlaps in every Channels mode, even Single channel. Other shapes still fix their own overlaps, and their notes end where a sustained note on the same key starts.
 

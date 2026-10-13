@@ -1,4 +1,4 @@
-The History list (tick History in the toolbar; it shows in the side panel, between Project and Shapes) shows every change as a step, the oldest at the top: Start is how things were before the oldest step still kept (the last 300 are kept). The highlighted step is where you are now.
+The History list (tick History in the toolbar; it shows in the side panel, between Project and Shapes) shows every change as a step, the oldest at the top: Start = how things were before the oldest step in the list (the last 300 are kept). The highlighted step is where you are now.
 
 Click a step to go back to it: everything after it is undone and turns grey. Click a grey step to go forward again. Making a new change while steps are grey drops them (like Ctrl+Z and then changing something). Ctrl+Z / Ctrl+Y move up and down the same list. Typing in one box, or dragging a number box, is one step.
 

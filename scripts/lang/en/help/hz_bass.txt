@@ -6,8 +6,12 @@ A window opens with a small piano roll of its own: the notes you place there are
 
 To change the keys it repeats later, drag the top or bottom side of its box on the main piano roll.
 
+The notes count from the shape's start: drag its left side and every note moves with it, keeping its length (nothing is stretched). Moving only the end leaves the notes where they are.
+
 With short gates the tone wobbles (Alternating) or is off (Fixed): an orange line in the panel says so. A higher PPQ fixes it. After the BPM changes, the tone is off: an orange line says so, and Update Hz bass makes it right again.
 
 Any custom shape with Spam or Outline spam can have Hz bass too: tick Hz bass in the panel for one tone, or press Notes… to place notes for it. The shape keeps its length (notes past its end aren't used) unless Shape length follows the notes is ticked in the window's Hz settings….
+
+Spam text can have one too: one tone for all the letters, and the text keeps its own length. Funnels too: see Funnel.
 
 The rest is in the Hz bass section of this Help: placing notes, the tone, slides, the preview, effects and the synth window.

@@ -1,9 +1,11 @@
-The Image tool opens the image window. Open an image there (PNG, JPG, GIF, WebP, BMP or TIFF), set it up, then drag the handle at the bottom right into the piano roll (you hold the image by its middle; its start snaps to the grid, hold Shift to place it exactly) or press "Place at the play line". A placed image always stays inside the piano roll's keys.
+The Image tool opens the image window. Open an image there (PNG, JPG, GIF, WebP, BMP or TIFF; without Pillow installed only PNG and GIF), set it up, then drag the handle at the bottom right into the piano roll (you hold the image by its middle; its start snaps to the grid, hold Shift to place it exactly) or press "Place at the play line". A placed image always stays inside the piano roll's keys.
 [clip:picture-window]
 
 Made for: Falling notes = the keys run across the image (players with the keyboard at the bottom). Piano roll = the keys run up the image (players and editors with the keys on the left). An image shows the right way up in one of them only. Piano roll gives a wide image about three times the detail, because the keys go along its short side.
 
 Hold the mouse button on the preview, or hold Space, to see the original image in its place.
+
+See-through parts: Empty = they make no notes; Keep their colour = they get notes like the rest. Adjust the image first: Brightness, Contrast and Saturation change the image before it's turned into notes.
 
 Every slider is only a suggestion: try them and judge by eye. Double-click a slider to put it back to its suggested value; "Back to suggested" puts them all back.
 
@@ -11,9 +13,11 @@ Size: Keys = how many keys tall (or wide) the image is. Steps per key = how much
 
 A big image is made with a progress bar on the preview: press Cancel there (or Esc) to stop it (the image and its settings go back to how they were). Past a million grid cells (up to that many notes) you're asked first.
 
-Colours: an image has at most 15 colours, one per channel (channel 10 is left out unless Use channel 10 is ticked). Click a colour to pick it yourself; it stays as picked (a corner mark). Right-click it to let Spiderweb pick it again. Focus on: whole = every part of the image counts the same; details = faces, eyes and edges get their colours first.
+Colours: an image has at most 15 colours, one per channel (channel 10 is left out unless Use channel 10 is ticked). Click a colour to pick it yourself; it stays as picked (a corner mark). Right-click it to let Spiderweb pick it again.
 
-Blending mixes neighbouring colours so the eye sees colours in between. Spread is the closest to the original; Keep details stops it from washing away small things like a mouth or eyes. Pattern is a fixed even pattern. None = only the nearest colour.
+Focus on: whole = every part of the image counts the same; details = faces, eyes and edges get their colours first.
+
+Blending mixes neighbouring colours so the eye sees colours in between. Spread is the closest to the original; Keep details stops it from washing away small things like a mouth or eyes. Pattern is a fixed even pattern. None = only the nearest colour. Strength = how much it mixes. Sharpen makes edges crisper.
 
 Player look (second tab) only changes the preview, so it matches the player you use: flat notes, or notes with a dark outline and shading. "Join same-colour notes into one" changes the notes too: on = fewer, longer notes.
 
@@ -23,7 +27,7 @@ The colours you see are what each channel should look like in the player: a MIDI
 
 Colour list for the player (Player look tab): Copy colours puts the colours on the clipboard as text for your player's settings, in the format picked.
 
-"Colour by": Channel numbers them by channel (for a player that colours by channel); "in order" numbers them 1, 2, 3 (for a player that colours tracks in order). "What Copy gives" shows the exact text.
+"Colour by": Channel numbers them by channel (for a player that colours by channel); "Track + channel (in order)" numbers them 1, 2, 3 (for a player that colours tracks in order). "What Copy gives" shows the exact text.
 
 Edit formats… opens the format editor: Start, Each colour and End boxes, tags to click in, and the text it gives as you type. Built-in formats can't change: editing one makes your own copy.
 
@@ -32,5 +36,7 @@ Paste colours… reads colours out of any text (a whole player settings file is 
 Use channel 10: 16 colours, colour 10 on channel 10. Many players draw channel 10's notes, but they play no sound (or drums). Other shapes use channel 10 only when the project's "Use channel 10" is ticked under Multi channel; then this tick is on for every image too.
 
 Several images in one project share one set of colours (a player has only one). Share sets how much this image counts when they compete for colours.
+
+To change a placed image, double-click it (or right-click → Change its look…), change the settings, then press "Apply to the placed image". The same menu has Use another image…, Undo turn / skew and Back to the image's own shape.
 
 Resizing a placed image makes its notes again from the image file, so it stays sharp. If the file is gone, the image still plays as it is (stretched), and the image window offers to find the file. If the file changed since it was placed, you're asked whether to use the new version. Keep images in your project's folder: they're saved relative to it, so both can move together.

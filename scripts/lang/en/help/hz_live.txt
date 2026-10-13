@@ -1,4 +1,4 @@
-In the Hz bass window, press Synth… (it turns Preview on). The synth window has three tabs (the big buttons at the top left): OSC (the knobs), FX (the effects) and Draw (the effects' lines for one note, big), and a keyboard along the bottom.
+In the Hz bass window, press Synth… (it turns Preview on). The synth window has four tabs (the big buttons at the top left): OSC (the knobs), FX (the effects), MOD (things that move knobs over time) and Draw (the effects' lines for one note, big), and a keyboard along the bottom.
 
 Click and hold a key to hear the Hz bass of that key, as a note placed there would sound: its keys, gates and effects. Let go, and the falls after the sustain points play. Drag sideways to play other keys. Hold several letters (or letters and the mouse) to play keys together, as on a synth; keys pressed at the same moment start together, as a chord.
 

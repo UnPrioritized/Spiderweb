@@ -1,0 +1,9 @@
+The Shapes list (side panel, below Project) shows every shape on the piano roll, one row each: its number, its name, how many notes it makes and, with Multi channel, how many channels it spreads over. A row turns orange when its shape needs more channels than there are colours, so colours and channels repeat.
+
+The list is in the order the shapes were made, the newest at the bottom. Further down = on top: where the insides of shapes overlap, a click picks the one on top. Masks in one group are worked through from the top of the list down (the oldest first).
+
+Click a row to select that shape; Ctrl+click or Shift+click selects more. Selecting on the piano roll highlights the rows too.
+
+Duplicate copies the selected shapes one snap step later (one beat with Snap off). Delete removes the selected shapes. Delete all asks first; Ctrl+Z brings them back either way.
+
+Some rows say more: (Sustained) or (Gates flipped) after the name, and an Add between group is one row (clicking it selects the whole group).

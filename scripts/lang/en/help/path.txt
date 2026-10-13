@@ -2,9 +2,9 @@ Select one or more shapes, then right-click one: Copy along a path…. The shape
 
 Click on the piano roll where the path ends: that's B. Until you click, the copies follow the mouse. Then drag B, or the round middle point, to bend the path. Going up, A is the shape's bottom-left corner and B the last copy's top-right corner; going down, the corners swap, so the copies always stay between the points.
 
-Add point puts another point after the last one: it follows the mouse until you click. Right-click a point to remove it. The boxes under the settings show the picked point as bar, beat, tick and key: type there to put it exactly. Shift while dragging = off the grid. While the window is open, Ctrl+Z / Ctrl+Y on the piano roll take back or bring back its changes one at a time, like inside the window.
+Add point puts another point after the last one: it follows the mouse until you click. Right-click a point to remove it. Reset takes every point away: click on the piano roll again to place B. The boxes under the settings show the picked point as bar, beat, tick and key: type there to put it exactly. Shift while dragging = off the grid. While the window is open, Ctrl+Z / Ctrl+Y on the piano roll take back or bring back its changes one at a time, like inside the window.
 
-Like the Claw machine, the path is a page kept with the shape: moving or reshaping the shape moves the path and every copy along with it. Several selected shapes travel together as one group. Opening it from the menu on a shape that has a path shows its last path; click + on top for another one, a tab to change one the shape has, or the small × beside a tab to take it off.
+Like the Claw machine's settings, the path is saved with the shape: moving or reshaping the shape moves the path and every copy along with it. Several selected shapes travel together as one group. Opening it from the menu on a shape that has a path shows its last path; click + on top for another one, a tab to change one the shape has, or the small × beside a tab to take it off.
 
 Path: Straight, Curve (a bend through the round middle point) or Arc (a piece of a circle through it). Dragging a middle point on a straight path makes it a curve. Below, left to right: Straight, Curve and Arc, with the same middle point.
 [clip:path-kind]
@@ -12,7 +12,17 @@ Path: Straight, Curve (a bend through the round middle point) or Arc (a piece of
 Formula: a pattern laid along the whole path, like a curve's Formula (Wave, Zigzag, Curls…, or your own saved ones). Loops = how many times it repeats from A to the last point; the other boxes are the numbers in its formula, like height. Custom… opens the formula window to pick, change, draw or type one. Below: a Wave with 2 loops on a straight path.
 [clip:path-formula]
 
-Spacing: One copy every (a note length, or ticks) puts a copy each time the path goes that much later; Number of copies spreads that many evenly along it (the shape itself is the first). Copies on the points: a copy's corner sits right on each point. Half copies at the points: where the path turns, the copies carry on past the point, and only the parts on the near side are kept, so the turn is as full as the rest. Below: a path up to B and down to C, with Copies on the points ticked (left: a copy right on B) and unticked (right: spaced evenly straight through B).
+Spacing:
+
+• One copy every (a note length, or ticks): a copy each time the path goes that much later.
+
+• Number of copies: spreads that many evenly along it (the shape itself is the first).
+
+• Copies on the points: a copy's corner sits right on each point.
+
+• Half copies at the points (Speed: Even only): where the path turns, the copies carry on past the point, and only the parts on the near side are kept, so the turn is as full as the rest.
+
+Below: a path up to B and down to C, with Copies on the points ticked (left: a copy right on B) and unticked (right: spaced evenly straight through B).
 [clip:path-spacing]
 
 Speed: Even, Speed up (close together at A, further apart towards the end) or Slow down. Below, left to right: Even, Speed up, Slow down.
@@ -33,6 +43,8 @@ On top: where copies cover each other, which one is drawn on top. The one under 
 Range: Keep inside keeps only the notes from the lowest key to the highest key, the shape's own too; the rest are cut off. These keys stay put when the shape moves (dotted lines on the piano roll). Below: without it (left) and with it (right).
 [clip:path-range]
 
-Turn into plain shapes: every copy becomes a shape of its own notes, in the colours it showed, so you can move, cut or change each one by hand. With Mirror at the peak, a copy and its mirror image are two shapes. Anything done to the shape after its path (a flip, a turn, Claw machine, Strum, Sustain…) is already in the copies' notes. The shape itself stays as drawn, without this path. The window closes; one Ctrl+Z takes it back.
+Turn into plain shapes: every copy becomes a shape of its own notes, in the colours it showed, so you can move, cut or change each one by hand. With Mirror at the peak, a copy and its mirror image are two shapes.
+
+Anything done to the shape after its path (a flip, a turn, Claw machine, Strum, Sustain…) is already in the copies' notes. The shape itself stays as drawn, without this path. The window closes; one Ctrl+Z takes it back.
 
 Notes past the lowest or highest key, or before the song's start, are cut off.
