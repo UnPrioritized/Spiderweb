@@ -271,12 +271,12 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
     # ------------------------------------------------------------ what it shows
 
     def target(self):
-        """The shape whose tones are shown: the one selected custom shape (not text or pasted notes) or funnel when
+        """The shape whose tones are shown: the one selected custom shape (text too, not pasted notes) or funnel when
         it's a Hz bass, or the one the window was opened for (a spam shape's / funnel's Notes… button: self.chosen),
         or None. Any other shape is left alone (user: one stray click turned it into a Hz bass)."""
         app = self.app
         sh = app.selected()
-        if (sh and len(app.sels) == 1 and sh["kind"] in HZ_KINDS and not sh.get("text") and "notes" not in sh
+        if (sh and len(app.sels) == 1 and sh["kind"] in HZ_KINDS and "notes" not in sh
                 and (sh.get("hz") or sh is self.chosen)):
             return sh
         return None
@@ -316,7 +316,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
             self.grow.set(True)
         else:
             text = tr("hz.shape", name=self.app.shape_label(sh))
-            if sh["kind"] == "funnel":  # (a funnel keeps the length it's drawn)
+            if sh["kind"] == "funnel" or sh.get("text"):  # (a funnel / text keeps the length it's drawn, user)
                 self.grow.set(False)
             elif all_tones(hz):  # (any layer's notes: the Hz bass's own setting, whichever layer is picked)
                 self.grow.set(bool(hz.get("grow")))
@@ -336,8 +336,9 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.show_stale()
         self.show_clash(sh)
         self.after_idle(self.layout)  # (its width changed)
-        # (a funnel keeps the length it's drawn)
-        self.grow_box.config(state="normal" if sh is not None and sh["kind"] != "funnel" else "disabled")
+        # (a funnel / text keeps the length it's drawn)
+        self.grow_box.config(state="normal" if sh is not None and sh["kind"] != "funnel" and not sh.get("text")
+                             else "disabled")
         if bool(self.layers.box.winfo_manager()) != self.app.hz_layers.get():  # (a project opened)
             self.layers.show(self.app.hz_layers.get())
         if self.every_tone() and not self.fitted:

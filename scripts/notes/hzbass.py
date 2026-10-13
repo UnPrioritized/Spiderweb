@@ -297,8 +297,8 @@ def hz_up_to(hz, width):
 
 def fit_length(sh):
     """hz["grow"]: the shape made as long as its tones and the falls after them (stretched from its left edge). Not a
-    funnel: it keeps the length it's drawn."""
-    if sh["kind"] == "funnel":
+    funnel or text: it keeps the length it's drawn (user)."""
+    if sh["kind"] == "funnel" or sh.get("text"):
         return
     span = max(max(sound_span(l) for l in layers_of(sh["hz"])), MIN_LEN)  # (every layer's notes)
     (b0, _), (b1, _), (b2, _) = sh["pts"]
