@@ -1067,7 +1067,7 @@
  "help.glue.words": "glue join merge combine fewer notes less note count reduce long notes touching",
  "help.sustain.title": "Sustain",
  "help.sustain.tip": "Each key's notes are held on until the last note of their group ends, piling up on top of each other: made for lagging out MIDI players. Holes in the shape stay empty, so it keeps its look.",
- "help.sustain.words": "sustain hold held long notes overlap overlapping stack pile lag laggy player gap holes length at most stop stops every points past end",
+ "help.sustain.words": "sustain hold held long notes overlap overlapping stack pile lag laggy player gap holes length at most stop stops every points past end line lines drag beats ticks",
  "help.masks.title": "Masks",
  "help.masks.tip": "A mask shows the shapes under it only inside it, without cutting them: they stay whole and still sound. Apply mask makes a new shape of what shows. Combine masks to add, subtract or intersect them.",
  "help.masks.words": "mask masks preview cut cutter cookie hole invert reveal brush apply masked notes combine group add subtract intersect border",

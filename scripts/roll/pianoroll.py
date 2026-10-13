@@ -1277,6 +1277,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             # double-click acts on the shape under the mouse when it was pressed, and only once)
         if self.draft and self.draft["kind"] == "poly":
             self.finish_poly()
+        elif self.stop_double(e):  # the Sustain window open: a stop added on its shape
+            pass
         elif self.app.tool.get() == "select" and self.text_at(e.x, e.y) is not None:
             self.edit_text(e)  # double-click a text: type in it
         elif self.app.tool.get() == "select" and self.picture_at(e) is not None:
@@ -1382,6 +1384,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if self.holding():
             return
         if not self.draft and self.path_right(e):  # Copy along a path: a point removed / the added one dropped
+            return
+        if self.stop_right(e):  # a sustained shape's stop line: removed
             return
         finished = bool(self.draft and self.draft["kind"] in ("poly", "arc"))
         if self.follow:  # a shape started with a click, not finished: dropped

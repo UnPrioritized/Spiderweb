@@ -10,7 +10,11 @@ Stop every: the sustain stops every this many ticks, counted from the shape's fi
 
 Stop at my points: stops you put yourself. Add stop puts one on the next snap line after the last stop, Clear points takes them all away. These stops stretch with the shape when it's resized. With Allow past the shape's end ticked, a stop can sit past the end: the last notes on each key are then held on until it, so the shape gets longer.
 
-Changes show on the piano roll at once. OK keeps them as one undo step, Cancel or Esc puts everything back. The menu item has a tick while a selected shape is sustained, and the Shapes list says (Sustained). Untick Sustain notes in the window to take it off.
+While the shape is selected, the piano roll shows these stops as lines. With the Select tool, drag a line to move its stop (it sticks to the snap lines; hold Shift to place it freely), or right-click a line to remove it. Right-click the shape for Add sustain stop here. While the Sustain window is open, double-click the shape to add a stop there.
+
+Lengths in: show the numbers in ticks or in beats (typing 1/3 in beats works too). Each box can also be dragged sideways, like its unit.
+
+Changes show on the piano roll at once, and the piano roll can still be used while the window is open: the window follows the selection. OK keeps the changes as one undo step, Cancel or Esc puts back what changed. Ctrl+Z steps back through the changes made in the window, on the piano roll too while it's open. The menu item has a tick while a selected shape is sustained, and the Shapes list says (Sustained). Untick Sustain notes in the window to take it off.
 
 Sustain comes last, after the outline gate, Colours, glue and the Claw machine / Strum / Chop pages: it only makes notes longer.
 

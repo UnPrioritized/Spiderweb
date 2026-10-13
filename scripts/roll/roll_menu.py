@@ -18,7 +18,8 @@ from window.claw_window import open_claw
 from window.path_window import open_path
 from window.strum_window import open_strum
 from window.chop_window import open_chop, quick_chop
-from window.sustain_window import any_sustained, open_sustain, sustain_targets
+from notes.sustain import is_sustained
+from window.sustain_window import any_sustained, open_sustain, sustain_targets, target_indices
 from window.widgets import symmetry_menu
 
 
@@ -144,6 +145,9 @@ class ShapeMenu:
             item(tr("roll_menu.quick_chop"), tr("roll_menu.ctrl_u"), lambda: quick_chop(app), keys=True)
             self.glue_items(item)
         self.sustain_item(m)
+        if is_sustained(sh) and i in target_indices(app):  # (where on the shape: roll_sustain.py)
+            f = self.stop_here(i, at)
+            item(tr("sustain.add_here"), "", lambda: self.add_stop_here(i, f), f is not None)
         self.between_items(item, i)
         self.merge_menu(m)
         self.mask_items(item)
