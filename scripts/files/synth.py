@@ -23,6 +23,7 @@ from collections import deque
 
 import numpy as np
 
+from files import errors
 from files.about import HERE
 from files.system import WINDOWS
 
@@ -212,6 +213,11 @@ class Synth:
             if old:
                 self._old.add(old)
         self._free_unused()
+        try:
+            size = f"{os.path.getsize(path) / 2 ** 20:.0f} MB"
+        except OSError:
+            size = "size ?"
+        errors.note("soundfont", f"{os.path.basename(path)}, {size}")
 
     def _take(self):
         """The font to use, counted as in use until _give."""

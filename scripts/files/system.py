@@ -45,6 +45,44 @@ def free_memory():
     return None
 
 
+def total_memory():
+    """Bytes of memory this PC has, or None if the system won't say."""
+    if WINDOWS:
+        st = _MemoryStatus()
+        st.dwLength = ctypes.sizeof(st)
+        try:
+            return st.ullTotalPhys if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)) else None
+        except (AttributeError, OSError):
+            return None
+    try:
+        with open("/proc/meminfo", encoding="ascii") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def cpu_name():
+    """The processor's name (e.g. "AMD Ryzen 7 5800X 8-Core Processor"), or "" if the system won't say."""
+    if WINDOWS:
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as key:
+                return str(winreg.QueryValueEx(key, "ProcessorNameString")[0]).strip()
+        except OSError:
+            return ""
+    try:
+        with open("/proc/cpuinfo", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith("model name"):
+                    return line.split(":", 1)[1].strip()
+    except (OSError, IndexError):
+        pass
+    return ""
+
+
 def dark_system():
     """True when the system's apps are set to dark (Windows: Settings → Colours); False when light or unknown (the
     other systems for now)."""

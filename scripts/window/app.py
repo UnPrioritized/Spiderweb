@@ -2158,7 +2158,9 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
                 except SynthError:
                     self.font_failed = True
                     raise
-            return Live(self.synth, self.play_voices, limiter=self.play_limiter.get())
+            live = Live(self.synth, self.play_voices, limiter=self.play_limiter.get())
+            self.note_builtin()
+            return live
         finally:
             self.busy(None)
 
@@ -2235,17 +2237,27 @@ class App(ProjectFiles, CustomPanel, ColoursPanel, MaskPanel, PolygonPanel, Free
                 self.overload.set_limit(v)  # (its thread sends it: heard at once)
             elif self.out.name == BUILTIN and self.out.handle:
                 self.out.handle.set_voices(v)
+            self.note_builtin()
             self.schedule_autosave()
 
     def on_play_guard(self):
         self.overload.set_guard(self.play_guard.get())
+        self.note_builtin()
         self.schedule_autosave()
 
     def on_play_limiter(self):
         """Heard at once while Built-in BASSMIDI is open."""
         if self.out.name == BUILTIN and self.out.handle:
             self.out.handle.set_limiter(self.play_limiter.get())
+        self.note_builtin()
         self.schedule_autosave()
+
+    def note_builtin(self):
+        """Built-in BASSMIDI's settings in the logs (errors.note), once it has been opened."""
+        if self.synth is not None:
+            errors.note("Built-in BASSMIDI", f"voice limit {self.play_voices}, lower it by itself "
+                                             f"{'on' if self.play_guard.get() else 'off'}, limiter "
+                                             f"{'on' if self.play_limiter.get() else 'off'}")
 
     def set_playhead(self, beat):
         self.playhead = max(0.0, beat)

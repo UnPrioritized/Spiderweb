@@ -17,6 +17,7 @@ import time
 
 import numpy as np
 
+from files import errors
 from files.lang import tr
 from files.synth import RATE, Player, Synth, SynthError, events
 from notes.engine import CLASH
@@ -102,6 +103,8 @@ class Preview:
         except SynthError as e:
             return str(e)
         self.synth = self.app.synth
+        errors.note("Hz preview", f"on, voice limit {self.cfg['voices']}, no FX "
+                                  f"{'on' if self.cfg['nofx'] else 'off'}, {WORKERS} pieces at once")
         self.clear()
         if self.synth.font_path != self.cfg["font"] and not (self.load and self.load.is_alive()):
             self._load_font()  # (one still opening: tick opens the one picked once it's done)
@@ -132,6 +135,8 @@ class Preview:
 
     def stop(self):
         """Preview off: nothing plays, nothing is made, no grey."""
+        if self.synth is not None:
+            errors.note("Hz preview", "off")
         self.stop_play()
         if self._tick:
             self.win.after_cancel(self._tick)

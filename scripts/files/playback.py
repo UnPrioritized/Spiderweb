@@ -137,6 +137,12 @@ class MidiOut:
         if self.handle and self.name == name:
             return None
         self.close()
+        err = self._open(name)
+        from files import errors
+        errors.note("MIDI out", name if err is None else f"{name} (couldn't open)")
+        return err
+
+    def _open(self, name):
         if name == BUILTIN:
             from files.synth import SynthError
             try:

@@ -27,6 +27,44 @@ _crash_file = None  # (kept open the whole run: faulthandler writes into it)  # 
 _told = False
 _told_memory = False  # (out of memory said once too, apart from other errors)
 _seen = {}  # error text -> times it happened this session (an error on every mouse move would flood the log)
+# What this PC and session use (PC, screen, MIDI out, soundfont, Hz preview...): topic -> text. Each change is a
+# line in the crash log at once (a crash can't write anything more), and the error log's next entry gets the lines
+# changed since its last one. Lines start with NOTE so the next start can tell them from a crash's own lines.
+NOTE = "-- "
+_state = {}
+_state_logged = {}  # what the error log was last told
+_state_lock = threading.Lock()
+
+
+def note(topic, text):
+    """Remembers what's in use now (e.g. note("soundfont", "Piano.sf2, 340 MB")): the logs show it with a crash /
+    an error. File names only, never folders (their names can hold the user's name, and logs get shared)."""
+    with _state_lock:
+        if _state.get(topic) == text:
+            return
+        _state[topic] = text
+        if _crash_file is not None:
+            try:
+                _crash_file.write(f"{NOTE}{time.strftime('%H:%M:%S')} {topic}: {text}\n")
+                _crash_file.flush()
+            except (OSError, ValueError):
+                pass
+
+
+def _state_lines():
+    """The state lines the error log hasn't been told yet."""
+    with _state_lock:
+        changed = {k: v for k, v in _state.items() if _state_logged.get(k) != v}
+        _state_logged.update(changed)
+    return "".join(f"{NOTE}{k}: {v}\n" for k, v in changed.items())
+
+
+def pc_text():
+    """The PC in one line: processor, cores, memory, exe or source."""
+    from files.system import cpu_name, free_memory, total_memory
+    gb = lambda n: "?" if n is None else f"{n / 2 ** 30:.1f} GB"
+    return (f"{cpu_name() or 'processor ?'}, {os.cpu_count() or '?'} cores, {gb(total_memory())} memory "
+            f"({gb(free_memory())} free), {'exe' if getattr(sys, 'frozen', False) else 'source'}")
 
 
 def write_log(exc_type, exc, tb, where):
@@ -40,6 +78,9 @@ def write_log(exc_type, exc, tb, where):
                 "further repeats aren't logged.\n")
     elif times > 2:
         return True
+    lines = _state_lines()
+    if lines:
+        head += "\n" + lines.rstrip("\n")
     if sys.stderr:  # started from a console: show it there too
         print(head, text, sep="\n", file=sys.stderr)
     return append(LOG, OLD_LOG, f"{head}\n{text}\n")
@@ -121,7 +162,8 @@ def report(exc_type, exc, tb, where="", fatal=False):
 def watch_crashes():
     """A crash inside a DLL or compiled code (BASS, Numba, Tk) ends the program before Python can log anything.
     faulthandler then writes what every thread was doing into user/crash-now.log; the next start moves that into
-    spiderweb-crash.log. A run that ended normally leaves only its start line, which the next start drops."""
+    spiderweb-crash.log. A run that ended normally leaves only its start line and note lines (what was in use), which
+    the next start drops."""
     global _crash_file
     import faulthandler
     try:
@@ -129,7 +171,8 @@ def watch_crashes():
             last = f.read().strip()
     except OSError:
         last = ""
-    if "\n" in last and not append(CRASH_LOG, OLD_CRASH_LOG, last + "\n\n"):  # (more than the start line: crashed)
+    crashed = any(line.strip() and not line.startswith(("==== ", NOTE)) for line in last.splitlines())
+    if crashed and not append(CRASH_LOG, OLD_CRASH_LOG, last + "\n\n"):
         return  # (crash-now.log kept for the next start rather than lost)
     try:
         _crash_file = open(CRASH_NOW, "w", encoding="utf-8")
@@ -139,12 +182,21 @@ def watch_crashes():
         faulthandler.enable(_crash_file, all_threads=True)
     except (OSError, ValueError, RuntimeError):
         pass
+    try:
+        note("PC", pc_text())
+    except Exception:  # (only a log line: never stops Spiderweb from starting)
+        pass
 
 
 def install(app):
     """Catch errors in the window's callbacks (clicks, keys, timers) and in other threads (playback)."""
     global _app
     _app = app
+    try:  # (screen size in pixels, scaling as Windows' "%": 96 dots an inch = 100 %)
+        note("screen", f"{app.winfo_screenwidth()}x{app.winfo_screenheight()}, "
+                       f"{round(app.winfo_fpixels('1i') / 96 * 100)} %")
+    except Exception:
+        pass
     app.report_callback_exception = lambda t, e, tb: report(t, e, tb, "(in the window)")
     threading.excepthook = lambda a: report(a.exc_type, a.exc_value, a.exc_traceback,
                                            f"(in thread {a.thread.name if a.thread else '?'})")

@@ -50,6 +50,8 @@ def _load():
         if importlib.util.find_spec("numba") is not None:  # (there but not working: worth a line in errors.log)
             from files import errors
             errors.write_log(*sys.exc_info(), "(loading the compiled loops; the slower code is used)")
+    from files import errors
+    errors.note("speed-ups", f"Numba {'on' if _loops else 'off'}, Pillow {'on' if pillow() else 'off'}")
     report = os.environ.get("SPIDERWEB_SPEED_REPORT")  # (the exe test asks how it went)
     if report:
         with open(report, "w", encoding="utf-8") as f:
