@@ -2,7 +2,7 @@ Layers in the Hz bass window's toolbar shows the layers list on the left (it's h
 
 Click a layer to pick it: you place and edit only its notes, and the other layers' notes show faded. + adds a layer. M mutes a layer, S plays it alone (solo).
 
-Right-click a layer to rename it, change its colour, delete it, move it up or down, or copy its sound to another layer. You can also drag a row to move it, or click a picked layer's name again to rename it.
+Right-click a layer to rename it, change its colour, delete it, move it up or down, or copy its sound to another layer. You can also drag a row to move it, or click a picked layer's name again to rename it. The Delete key removes the picked layer.
 
 Slides only go between notes of the same layer.
 

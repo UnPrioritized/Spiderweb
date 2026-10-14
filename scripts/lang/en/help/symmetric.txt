@@ -1,4 +1,4 @@
-Right-click a curve → Symmetric halves: one half follows the other. The curve gets an odd number of anchors with the middle one on the line of symmetry; editing one half rewrites the other.
+Right-click a curve (or a curve stroke in a live shape) → Symmetric halves: one half follows the other. Joined curves don't have it. The curve gets an odd number of anchors with the middle one on the line of symmetry; editing one half rewrites the other.
 
 Mirrored (like an arch): the second half is the first one reflected.
 [clip:symmetric-arch]

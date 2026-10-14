@@ -19,10 +19,10 @@ Push: the steps travel straight from one shape to the next unless pushed. The pa
 
 Click a shape's line in the picture to pick which one the pad pushes (the first shape, the last, or a key shape; the picked one has a pale yellow band). Pushing the last shape sets the way the steps arrive at it. Notes pushed past the top key or below key 0 are cut off. Smooth through keys lets the steps go through each key shape without a corner.
 
-The group stays linked: move or reshape the first or last shape and the steps follow. A spot where both shapes are the same (a shared start) stays put in every step. Change a step yourself and it becomes a key shape: the steps on each side change towards it. Right-click a key → Not a key any more makes it a step again.
+The group stays linked: move or reshape the first or last shape and the steps follow. A spot where both shapes are the same (a shared start) stays put in every step. Change a step's shape yourself and it becomes a key shape: the steps on each side change towards it. A step whose velocity or Sustain you change stays a step and keeps them (right-click → Velocity from the group again undoes the velocity). Right-click a key → Not a key any more makes it a step again.
 
 Velocities, tumours and formulas change step by step too. A tumour or formula only one of the shapes has (or two that can't change into each other) shrinks to nothing by the middle step, then the other one grows from there. Settings that are only on or off switch at the middle step. Glue, Colours and the Claw machine, Strum, Chop and Copy along a path pages are kept only when both shapes have the same ones (their numbers change step by step). Sustain is kept when both shapes are sustained; a typed gap changes step by step.
 
-The Shapes list shows the group as one row; clicking it selects the whole group. Right-click a shape of the group: Edit add between… (or double-click it), Select the whole group, Unlink.
+The Shapes list shows the group as one row; clicking it selects the whole group. Right-click a shape of the group: Edit add between… (or double-click it), Select the whole group, Unlink (make them plain shapes).
 
 Deleting the first or last shape makes the rest plain shapes. Join, Turn into live shape, Split and Slice unlink the group first. Copying the whole group makes a new group; copying a single step gives a plain shape.

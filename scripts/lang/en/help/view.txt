@@ -2,6 +2,6 @@ Wheel = scroll up / down, Shift+wheel = sideways. Ctrl+wheel = zoom both ways, C
 
 Scrollbars (under and right of the piano roll): drag the bar to scroll, drag one of its two ends to zoom, click beside it to go one screen that way. The − and + buttons at the end of each scrollbar zoom out / in. The bar under the piano roll reaches 8 bars past the last note.
 
-Show lines / Show notes (top) hide the drawn lines or the notes. Keys outside a real 88-key piano are greyed on the keyboard. A shape wholly above the top key shows a small red up arrow at the top of the piano roll: click it to grab the shape.
+Show lines / Show notes (top) hide the drawn lines or the notes. Keys outside a real 88-key piano are greyed on the keyboard (with 256 keys: the keys above the usual 128). A shape wholly above the top key shows a small red up arrow at the top of the piano roll: click it to grab the shape.
 
 Snap and grid: Snap (top) is the grid that points, moves and pastes snap to (Shift = free). Off, Bar, or a note length: a note with a dot = dotted (3/8 = a dotted quarter), a 3 = triplets (1/6 = quarter-note triplets). Custom… opens Customised snap: a number of notes (3 / 16 = three 16th notes), a dotted (.) or double-dotted (..) note, divided by a number (3 = triplets); it shows how long that is in beats and ticks.

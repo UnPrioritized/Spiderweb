@@ -6,7 +6,7 @@ Handles: drag the dot at the end of a blue handle line to steer the curve (its d
 Anchors: drag an anchor to move it; its handles come along. The curve's two ends are anchors too (the squares, Select tool).
 [clip:curves_pen-move-anchor]
 
-Adding and removing: middle-click the curve to add an anchor there (then drag it like any other). Right-click an anchor to remove it, or a handle dot to pull it back in (a corner).
+Adding and removing: middle-click the curve to add an anchor there (then drag it like any other). Right-click an anchor to remove it (not the middle one of a symmetric curve), or a handle dot to pull it back in (a corner).
 [clip:curves_pen-add-remove-anchor]
 
 Corners: Alt+drag a handle = move only that one (a sharp corner). Alt+drag an anchor = pull new handles out of it.

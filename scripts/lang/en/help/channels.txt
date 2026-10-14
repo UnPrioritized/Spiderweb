@@ -8,7 +8,7 @@ Multi channel: shapes whose notes clash go on different channels, each on its ow
 
 Use channel 10 (16 colours), under Multi channel: channel 10 is used too, so there are 16 colours instead of 15 (a shape, Colours and the drawer's areas can then have 16). Many synths play channel 10 as drums, and many black MIDI players stay silent there. Built-in BASSMIDI plays it as a piano. Black MIDI players only show the colour. Saved with the project.
 
-Some shapes can spread over several channels: pasted notes (by track), images (by their colour list), merged shapes (each part keeps its own colours), live shapes made with Turn into live shape (by the shape each stroke came from), and Fill / Spam set to Outline (the outline and the inside). The shape list says how many. Above 15 (16 with Use channel 10) it shows in orange, and from there the colours and channel numbers repeat.
+Some shapes can spread over several channels: pasted notes (by track), images (by their colour list), merged shapes (each part keeps its own colours), live shapes made with Turn into live shape (by the shape each stroke came from), Fill / Spam set to Outline (the outline and the inside), Nested and Tiles (each step or tile), Add between (each shape of the group) and Copy along a path (its Colours choice). The shape list says how many. Above 15 (16 with Use channel 10) it shows in orange, and from there the colours and channel numbers repeat.
 
 Every channel has its own note colour (Settings → Look → Note colours).
 

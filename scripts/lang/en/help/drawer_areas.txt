@@ -5,6 +5,6 @@ On the piano roll the colours count only with Fill or Spam. Each colour number g
 
 The line under the colours says how many colours the shape will use, with and without "Outline" on (the shape's own colour counts too, where an area is left as normal). A shape has at most 15 (16 when the project ticks "Use channel 10", which also shows a 16th colour here): past that the line turns orange, and on the piano roll the extra colours share the last one.
 
-To split an area without adding notes, draw a fill line through it (right-click the stroke → Fill line). Lines that end a bit past an edge split best.
+To split an area without adding notes, draw a fill line through it (right-click the stroke → Fill line (no notes)). Lines that end a bit past an edge split best.
 
 Very thin slivers may take the colour of the area next to them.

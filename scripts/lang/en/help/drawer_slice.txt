@@ -6,4 +6,4 @@ With strokes picked (Select tool), only those are cut; otherwise every stroke th
 
 The pieces stay where they were, in the same layer and group. They aren't picked afterwards, so a click picks the one piece to delete. A coloured area that is no longer closed after the cut loses its colour. Curves, arcs and polylines stay curves, arcs and polylines; circles and freehand strokes become polylines. Right-click or Esc while dragging drops the line. Ctrl+Z undoes a cut.
 
-To cut one open stroke at one spot, right-click it → Split here (with any tool): it's cut at the mouse's spot, which sticks to points and crossings or goes to the grid like when drawing (Shift = exactly at the mouse). Closed strokes need the Slice tool, so Split here is greyed out on them.
+To cut one open stroke at one spot, right-click it → Split here (with any tool but Areas): it's cut at the mouse's spot, which sticks to nearby points and crossings (no grid; Shift = exactly at the mouse). Closed strokes need the Slice tool, so Split here is greyed out on them.

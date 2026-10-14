@@ -18,7 +18,7 @@ An arc becomes two arcs of the same circle; a freehand stroke is cut at its near
 Each half keeps the velocities it had, and its tumours stay where they were: each half gets its part of the Range and graphs (Fit is turned off, keeping the distance it had worked out). Only a bump across the cut is cut off, random sides are picked again and Lead in starts again at the cut.
 [clip:join-split-here]
 
-Split into separate shapes (Ctrl+Shift+G, or right-click): a joined curve goes back to one curve per piece (and per shape that kept its own tumours). A custom shape, like one drawn with Live shape, splits into one shape per group of strokes that touch each other. Each part keeps the velocities it had.
+Split into separate shapes (Ctrl+Shift+G, or right-click): a joined curve goes back to one curve per piece (and per shape that kept its own tumours). A custom shape, like one drawn with Live shape, splits into one shape per group of strokes that touch each other. A live shape made with Turn into live shape and not changed since shows Split back into the old shapes instead: it gives the old shapes back. Each part keeps the velocities it had.
 [clip:join-split-shapes]
 
 Notes: a joined curve plays like one curve, so where two lines meet it doesn't start a new note the way two separate lines would.

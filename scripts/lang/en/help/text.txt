@@ -24,4 +24,4 @@ Spam text can be a Hz bass too: one tone for all the letters, and the text keeps
 
 Letters the font doesn't have are taken from another font. If no font on the PC has a letter, the status line says so.
 
-Click a text with the Text tool (or double-click it with Select, or right-click → Edit text) to retype it. Drag, Shift+arrows, double-click (a word) or Ctrl+A select letters; Ctrl+C / X / V copy, cut and paste them.
+Click a text with the Text tool (or double-click it with Select, or right-click → Edit text) to retype it. Drag, Shift+arrows, double-click (a word) or Ctrl+A select letters; Ctrl+C / X / V copy, cut and paste them (with no letters selected, Ctrl+C copies the whole shape).

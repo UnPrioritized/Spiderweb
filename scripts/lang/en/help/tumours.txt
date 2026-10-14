@@ -1,4 +1,4 @@
-Select a line, polyline, freehand stroke, curve or arc, click Tumours… in the panel (or right-click it: Tumours…) and tick Tumours in the window that opens: bumps along it. Changes show on the piano roll at once: Accept (or Enter) keeps them as one undo step, X or Esc puts the lines back as they were, Reset puts every setting back to its default.
+Select a line, polyline, freehand stroke, curve or arc, click Tumours… in the panel (or right-click it: Tumours…) and tick Tumours in the window that opens: bumps along it. Changes show on the piano roll at once: Accept (or Enter, when you're not typing in a box) keeps them as one undo step, X or Esc puts the lines back as they were, Reset puts every setting back to its default and removes the graphs.
 
 The window can stay open: it shows whatever you select (selecting other shapes keeps what you did to the last ones). The line's points stay draggable; the line as drawn shows faint and dashed. With several shapes selected they all change together; when only some have tumours, clicking the half-ticked Tumours box gives the others these tumours too.
 [clip:tumours-menu]

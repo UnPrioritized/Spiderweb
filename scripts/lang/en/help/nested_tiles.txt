@@ -12,11 +12,11 @@ The inside is filled with copies of the shape, each one inside the one before. S
 
 Shrink by picks how the copies are made:
 
-Scaling toward the centre point: each copy is a true smaller copy of the shape. It shrinks toward the centre point, which is the small ring with a cross on the selected shape. Drag it with any tool to move it. It starts in the middle of the filled part and moves, flips and turns along with the shape.
+Scaling (toward the centre point): each copy is a true smaller copy of the shape. It shrinks toward the centre point, which is the small ring with a cross on the selected shape. Drag it with any tool to move it. It starts in the middle of the filled part and moves, flips and turns along with the shape.
 
 Even band (follows the outline): every step is equally thick all the way round and follows each bend, like the Outline gate. This suits long, curved or thin shapes. It has no centre point. Sharp points can come out on the inner steps of an oval: that's how an even band works on a shape that is flat along its sides and tight at its ends.
 
-Blend toward the centre point: the steps follow the outline near the edge and round off smoothly into the centre point, without sharp points. Round toward the centre goes from 0 % (the same as Even band) to 100 % (fully rounded into the point).
+Blend (toward the centre point): the steps follow the outline near the edge and round off smoothly into the centre point, without sharp points. Round toward the centre goes from 0 % (the same as Even band) to 100 % (fully rounded into the point).
 
 All three are measured in the proportions the shape was first drawn in, so a circle's steps stay round however its box was stretched.
 

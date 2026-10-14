@@ -1,4 +1,4 @@
-Right-click a curve, line, polyline or arc → Formula. Live shape strokes, drawer strokes and highlighted funnel curves have it too. It has two parts, and a curve can have both at once.
+Right-click a curve, line, polyline or arc → Formula. Live shape strokes, drawer strokes, polygon sides and highlighted funnel curves have it too. It has two parts, and a curve can have both at once.
 
 Below, "curve" means all of these. On a polyline the pattern runs along all of it, round its corners.
 

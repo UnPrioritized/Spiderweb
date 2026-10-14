@@ -4,6 +4,6 @@ Each key row of the sliding shape moves on its own, until its note meets the oth
 
 Both become one shape ("Merged notes" in the Shapes list), and it's selected. Rows that have nothing to meet slide by the smallest slide and become a shape of their own, "Merge leftovers". If no row meets anything, nothing is merged.
 
-A merged shape can be moved, turned, slanted and stretched like a custom shape, and the custom panel's settings go into both parts. Each part keeps its own colours. When both shapes are sustained with the same settings, the merged shape is sustained too. Split into separate shapes (Ctrl+Shift+G) gives the two parts back.
+A merged shape can be moved, turned, slanted and stretched like a custom shape, and the custom panel's settings go into both parts. Each part keeps its own colours. When both shapes are sustained with the same settings, the merged shape is sustained too. Split back into the old shapes (Ctrl+Shift+G, or right-click) gives the two parts back.
 
 Images can't be merged.

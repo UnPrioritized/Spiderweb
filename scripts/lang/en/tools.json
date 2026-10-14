@@ -744,7 +744,7 @@
  "sustain.auto": "Auto ({n} ticks)",
  "sustain.auto_one": "Auto (1 tick)",
  "sustain.auto_each": "Auto (each shape works out its own)",
- "sustain.auto_tip": "Works out the gap from the shape's own notes: the most common gap between notes on a key.\nLonger gaps are holes in the shape (like the inside of a ring) and stay empty, so the shape keeps its look.",
+ "sustain.auto_tip": "Works out the gap from the shape's own notes: the most common gap between notes on a key, plus half of it.\nLonger gaps are holes in the shape (like the inside of a ring) and stay empty, so the shape keeps its look.",
  "sustain.ticks": "ticks",
  "sustain.beats": "beats",
  "sustain.unit": "Lengths in:",

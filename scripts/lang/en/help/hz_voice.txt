@@ -23,7 +23,7 @@ Chord = which notes. Notes held runs through every note held: a note added while
 The other Chord choices add a chord's notes to every note.
 Scale + Root = every note of the run moves to the nearest note of that scale, so it stays in key.
 
-Pattern Steps = your own steps, played in a loop. A grid shows up under the picture: one column for each step. Pick a lane over the grid, then click or drag across the columns. Middle-click a step = that lane back to its start.
+Pattern Steps = your own steps, played in a loop. A grid shows up under the picture: one column for each step. Pick a lane over the grid, then click or drag across the columns. Middle-click a step = that step back to its start (in the picked lane).
 [clip:hz_voice-steps]
 
 The lanes:

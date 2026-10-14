@@ -4,7 +4,7 @@ The box stays after you let go. Drag its sides or corners to stretch the shapes 
 
 Ctrl+drag after a box draws another box (they all count together). Ctrl+drag inside the boxes moves a copy of everything in them.
 
-Right-click inside the boxes with two or more shapes selected: a menu with what works on all of them at once (Formula, Tumours, note tools, Join, flip, turn, delete…).
+Right-click inside the boxes with two or more shapes selected: a menu with what works on all of them at once (Formula, Tumours, note tools, Join, Turn into live shape, Add between, Copy along a path, Mask, flip, turn, delete…).
 
 Click a shape that's already selected to pick the next shape under it (handy where shapes overlap).
 

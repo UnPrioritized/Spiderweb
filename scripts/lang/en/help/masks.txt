@@ -3,7 +3,7 @@ A mask shapes a note pattern without cutting it. Draw your pattern first (often 
 Nothing is cut: the shapes under it stay whole and still sound and export, so you can move or change the mask at any time. Below: a pattern alone (left), and with a circle mask over it (right).
 [clip:masks-basic]
 
-Any drawing tool makes a mask, Live shape too (paint with the mask like a brush). To turn a shape you already drew into a mask, select it and tick Mask in the side panel; untick it to make it a normal shape again. A mask's line is always shown, dashed.
+Any drawing tool makes a mask, Live shape too, but Hz bass never does (paint with the mask like a brush). To turn a shape you already drew into a mask, select it and tick Mask in the side panel; untick it to make it a normal shape again. A mask's line is always shown, dashed.
 
 Mask preview (the tick next to Mask on the toolbar): untick it to see the shapes under masks whole again, without the faint parts; only the masks' dashed lines stay. It only changes what you see.
 

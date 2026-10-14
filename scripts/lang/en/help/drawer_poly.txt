@@ -1,1 +1,1 @@
-Click points, or drag each piece. Click the first point again to close it; double-click or right-click stops. Right-click it: Formula (a shape or a pattern along it, see Formulas).
+Click points, or drag each piece. Click the first point again to close it; double-click, right-click or Enter stops. Right-click it: Formula (a shape or a pattern along it, see Formulas).
