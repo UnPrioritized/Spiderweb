@@ -16,6 +16,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   wave_fill      hzbass.wave_ticks: each note's wave length, one key at a time
   hz_expand ... hz_finish  hz_grid.KeyGrid.made for the plain settings (made_fast): a key's repeats
   key_order      np.lexsort by key, then up to 3 more columns (runs already in order merged: quick)
+  ring_runs      roll_draw.ring_parts' runs: the selection's red outline, each key row's notes joined
   clash_pairs    engine.clash_pairs (Multi channel): which owners' stretches clash
   nearest        picture._dist2(...).argmin(1) (Image to notes): each colour's nearest palette colour
   spread_line    picture._spread: the error spreading, one slanted line at a time (its OKLab left to NumPy)
@@ -495,6 +496,28 @@ def key_order(key, a, b, c):
             part = order[at[g]:at[g + 1]]
             _runs_sort(part, a, b, c, tmp[at[g]:at[g + 1]])
     return order
+
+
+@njit(cache=CACHE, nogil=True)
+def ring_runs(s, e, k, order, gap, big):
+    """roll_draw.ring_parts' runs: the notes in (key, start) order joined while the next starts within gap ticks of
+    the reach so far (key * big added, as there) -> each run's key, start, end."""
+    n = len(order)
+    rk, ra, rb = np.empty(n, np.int64), np.empty(n, np.int64), np.empty(n, np.int64)
+    m = 0
+    i = order[0]
+    reach = e[i] + k[i] * big
+    rk[0], ra[0] = k[i], s[i]
+    for j in range(1, n):
+        i = order[j]
+        at = s[i] + k[i] * big
+        if at > reach + gap:
+            rb[m] = reach - rk[m] * big
+            m += 1
+            rk[m], ra[m] = k[i], s[i]
+        reach = max(reach, e[i] + k[i] * big)
+    rb[m] = reach - rk[m] * big
+    return rk[:m + 1], ra[:m + 1], rb[:m + 1]
 
 
 @njit(cache=CACHE, nogil=True)
@@ -1379,6 +1402,7 @@ def warm():
     note_stretches(np.zeros((1, 4), np.int64), True, 0, np.zeros(0, np.int64))
     clash_levels(np.zeros((1, 3), np.int64), np.array([0, 1, 1], np.int64), i1.copy())
     key_order(i1, i1, i1, i1)
+    ring_runs(i1, i1, i1, i1, 0.5, 1)
     clash_pairs(np.zeros((1, 4), np.int64), 1)
     wave_fill(i1, 0, 1, i1, np.zeros(1), np.zeros(1))
     note_ends(i1, i1 + 1, i1, True, 2, 0.0, 50.0, True, np.zeros(1), 0.0, np.int64(1) << 40)

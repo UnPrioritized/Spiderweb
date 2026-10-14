@@ -8,7 +8,7 @@ import numpy as np
 
 from notes.custom import custom_note_count, edge_inner, gap_lines, role_of
 from files.lang import tr
-from files.speed import loops
+from files.speed import key_sort, loops
 from notes.engine import cached_arrays, shape_key, shape_notes_tracks
 from notes.joined import all_tumours
 from notes.mask import mask_units, unit_of
@@ -77,23 +77,30 @@ def piece_runs(x0, y0, x1, y1):
     return runs
 
 
-def ring_parts(notes, gap):
+def ring_parts(notes, gap, cols=None):
     """
     The outline round the selected shapes' notes (start, end, key), small gaps in a row (< gap ticks) closed:
     (sides, tops). sides = (tick, key0, key1, right): one side line over keys key0..key1. tops = (t0, t1, key, up):
     the top (up = 1) or bottom (0) edge of a key row's notes where the row beside it has none.
+    cols = (starts, ends, keys) instead of notes (no copy of millions of notes).
     """
-    s, e, k = (notes[:, i].astype(np.int64) for i in (0, 1, 2))
+    s, e, k = ((np.asarray(c, np.int64) for c in cols) if cols is not None else
+               (notes[:, i].astype(np.int64) for i in (0, 1, 2)))
     big = int(e.max()) + int(gap) + 2
-    order = np.lexsort((s, k))
-    s, e = s[order] + k[order] * big, e[order] + k[order] * big
-    reach = np.maximum.accumulate(e)
-    new = np.ones(len(s), bool)
-    new[1:] = s[1:] > reach[:-1] + gap
-    first = np.flatnonzero(new)
-    last = np.append(first[1:], len(s)) - 1
-    rk = s[first] // big
-    ra, rb = s[first] - rk * big, reach[last] - rk * big  # runs: key, start, end
+    fast = loops()
+    if fast:  # (the compiled loop: the same runs; a 5M-note shape zoomed out ~350 -> ~70 ms a zoom step)
+        s, e, k = (np.ascontiguousarray(v) for v in (s, e, k))
+        rk, ra, rb = fast.ring_runs(s, e, k, key_sort(k, s), float(gap), big)
+    else:
+        order = np.lexsort((s, k))
+        s, e = s[order] + k[order] * big, e[order] + k[order] * big
+        reach = np.maximum.accumulate(e)
+        new = np.ones(len(s), bool)
+        new[1:] = s[1:] > reach[:-1] + gap
+        first = np.flatnonzero(new)
+        last = np.append(first[1:], len(s)) - 1
+        rk = s[first] // big
+        ra, rb = s[first] - rk * big, reach[last] - rk * big  # runs: key, start, end
     # sides: one per run end, joined over neighbouring keys at the same tick
     sides = []
     for t, right in ((ra, 0), (rb, 1)):
@@ -584,10 +591,11 @@ class RollDrawing:
             wa, wb = math.floor(va - span), math.ceil(va + 2 * span)
             near = (e > wa) & (s < wb)
             if near.all():  # (all of it: good wherever the view goes)
-                notes, wa, wb = np.column_stack([s, e, k]), -math.inf, math.inf
+                cols, wa, wb = (s, e, k), -math.inf, math.inf
             else:  # (cut at the stretch's ends: the side lines there are a screen away from the view)
-                notes = np.column_stack([np.maximum(s[near], wa), np.minimum(e[near], wb), k[near]])
-            got = self._ring = (app.drawn, key, ring_parts(notes, RING_GAP / ax) if len(notes) else None, (wa, wb))
+                cols = (np.maximum(s[near], wa), np.minimum(e[near], wb), k[near])
+            parts = ring_parts(None, RING_GAP / ax, cols) if len(cols[0]) else None
+            got = self._ring = (app.drawn, key, parts, (wa, wb))
         return got[2]
 
     def draw_ring(self, w, h):
