@@ -10,7 +10,7 @@ from tkinter import messagebox, ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
-from notes.hzbass import (AUTO, AUTO_MOST, EXTRAS, FULL_LENGTH, HZ_DEFAULTS, LENGTH_BEATS, LENGTH_WAVE, TUNE,
+from notes.hzbass import (AUTO, AUTO_MOST, EXTRAS, FULL_LENGTH, HZ_DEFAULTS, LENGTH_BEATS, LENGTH_WAVE, START_TRACE, TUNE,
                           all_tones, clean_fit, clean_from, clean_extra, clean_fx, clean_length, clean_lfo, clean_line, clean_loop, clean_off,
                           clean_sustain, clean_tones, fit_length, held_fixed, left_edge, length_ticks, sound_span)
 from window import look
@@ -382,10 +382,10 @@ class HzGates:
         """The Note length the layer picked plays: its own, else the Hz bass's main one (100 % with none)."""
         return self.extra.get("own_length") or hz.get("own_length") or hz.get("length") or FULL_LENGTH
 
-    def put_lengths(self, name, others=False, **what):
-        """Note length settings of the Hz bass shown changed, one undo step of this window (made here whatever has
-        the keyboard, hunt): "length" / "stick" every layer's, "own_length" / "trace" the layer picked's (None = left
-        out); others: no other layer keeps a length of its own."""
+    def put_lengths(self, name, others=(), **what):
+        """Hz shape settings of the Hz bass shown changed, one undo step of this window (made here whatever has the
+        keyboard, hunt): "length" / "stick" / "main_trace" every layer's, "own_length" / "trace" the layer picked's
+        (None = left out); others = keys no other layer keeps ("own_length", "trace": Use for all layers)."""
         sh = self.length_target()
         if sh is None:
             return
@@ -394,10 +394,10 @@ class HzGates:
             if v is None:
                 hz.pop(k, None)
             else:
-                hz[k] = v
+                hz[k] = copy.deepcopy(v)
         if others and hz.get("layers"):
             picked = hz.get("layer", 0)
-            hz["layers"] = [{k: v for k, v in e.items() if k != "own_length"} if i != picked else e
+            hz["layers"] = [{k: v for k, v in e.items() if k not in others} if i != picked else e
                             for i, e in enumerate(hz["layers"])]
         if hz == sh["hz"]:
             return
@@ -436,24 +436,72 @@ class HzGates:
         sh = self.length_target()
         if sh is not None:
             got = self.shown_length(sh["hz"])
-            self.put_lengths(tr("hz.step_length_all"), others=True, own_length=None,
+            self.put_lengths(tr("hz.step_length_all"), others=("own_length",), own_length=None,
                              length=None if got == FULL_LENGTH else got)
 
     def on_length_back(self):
         """Back to the main length: the layer picked's own length goes."""
         self.put_lengths(tr("hz.step_length"), own_length=None)
 
+    def main_trace(self, hz):
+        """The Hz bass's main drawn line (every layer without its own plays it): points, straight up with none."""
+        return hz.get("main_trace") or [list(p) for p in START_TRACE]
+
+    def put_trace(self, pts):
+        """The line drawn in Hz shape… kept like the Note length (user 2026-10-14): 2+ layers = the layer picked's
+        own (the same as the main one = none); one layer = the main line (an own one from before goes)."""
+        sh = self.length_target()
+        if sh is None:
+            return
+        hz = sh["hz"]
+        if self.layered(hz):
+            self.put_lengths(tr("hz.step_wave"), trace=None if pts == self.main_trace(hz) else pts)
+        else:
+            self.put_lengths(tr("hz.step_wave"), trace=None,
+                             main_trace=None if pts == [list(p) for p in START_TRACE] else pts)
+
+    def on_trace_all(self):
+        """Use for all layers (the line): the layer picked's line becomes the main one, no layer keeps its own."""
+        sh = self.length_target()
+        if sh is not None:
+            pts = self.extra.get("trace") or self.main_trace(sh["hz"])
+            self.put_lengths(tr("hz.step_wave_all"), others=("trace",), trace=None,
+                             main_trace=None if pts == [list(p) for p in START_TRACE] else pts)
+
+    def on_trace_back(self):
+        """Back to the main line: the layer picked's own line goes."""
+        self.put_lengths(tr("hz.step_wave"), trace=None)
+
     def reset_shape(self):
-        """Reset in Hz shape…: the line straight and the layer picked back to the main length; one layer: the main
-        length back to 100 % and the last note not sticking out too. One undo step. False: no Hz bass holds them."""
+        """Reset in Hz shape…: the layer picked back to the main line and length; one layer: the main line straight,
+        the main length back to 100 % and the last note not sticking out too. One undo step. False: no Hz bass
+        holds them."""
         sh = self.length_target()
         if sh is None:
             return False
         what = dict(trace=None, own_length=None)
         if not self.layered(sh["hz"]):
-            what.update(length=None, stick=None)
+            what.update(main_trace=None, length=None, stick=None)
         self.put_lengths(tr("hz.step_reset_shape"), **what)
         return True
+
+    def show_own(self, row, layered, own, any_own):
+        """A line under a Hz shape setting (row = (frame, mark, Use for all layers, Back to the main), 2+ layers):
+        whose it is + the buttons that do something. Empty without layers (the frame keeps its height: the
+        drawing never jumps, user)."""
+        frame, mark, every, back = row
+        if layered:
+            mark.config(text=tr("hz.own_mark" if own else "hz.main_mark"), foreground=look.VALUE if own else look.HINT)
+        want = [mark] + ([every] if any_own else []) + ([back] if own else []) if layered else []
+        if frame.pack_slaves() != want:
+            for w in frame.pack_slaves():
+                w.pack_forget()
+            for w in want:
+                w.pack(side="left", padx=(0, 6))
+
+    def others_have(self, hz, key):
+        picked = hz.get("layer", 0)
+        return any(e.get(key) for i, e in enumerate(hz.get("layers") or ()) if i != picked)
 
     def show_length(self, sh, hz):
         """The Note length rows as the Hz bass shown has them (greyed with no Hz bass). The box = what the layer
@@ -463,19 +511,9 @@ class HzGates:
         own = (self.extra.get("own_length") or hz.get("own_length")) if ok else None
         self.put_length(self.length_var, self.length_row, own or hz.get("length") or FULL_LENGTH)
         layered = ok and self.layered(hz)
-        if bool(self.own_frame.winfo_manager()) != layered:
-            self.own_frame.grid() if layered else self.own_frame.grid_remove()
-        if layered:
-            picked = hz.get("layer", 0)
-            any_own = bool(own) or any(e.get("own_length") for i, e in enumerate(hz["layers"]) if i != picked)
-            self.own_mark.config(text=tr("hz.length_own" if own else "hz.length_main"),
-                                 foreground=look.VALUE if own else look.HINT)
-            want = [self.own_mark] + ([self.all_btn] if any_own else []) + ([self.back_btn] if own else [])
-            if self.own_frame.pack_slaves() != want:
-                for w in self.own_frame.pack_slaves():
-                    w.pack_forget()
-                for w in want:
-                    w.pack(side="left", padx=(0, 6))
+        self.show_own(self.length_own_row, layered, bool(own), bool(own) or self.others_have(hz, "own_length"))
+        own_line = ok and bool(self.extra.get("trace"))
+        self.show_own(self.trace_own_row, layered, own_line, own_line or self.others_have(hz, "trace"))
         self.stick.set(bool(hz.get("stick")))
         funnel = sh is not None and sh["kind"] == "funnel"
         self.stick_tip.text = tr("hz.stick_tip") + ("\n" + tr("hz.stick_funnel") if funnel else "")

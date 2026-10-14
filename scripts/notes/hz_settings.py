@@ -428,9 +428,14 @@ def clean_trace(trace):
                 q += [min(1.0, max(-1.0, bx)), min(1.0, max(-1.0, by))]
             out.append(q)
     out = out[:TRACE_POINTS]
-    if len(out) < 2 or out == [list(p) for p in START_TRACE]:
-        return []
-    return out
+    return out if len(out) >= 2 else []  # (as it starts kept: a layer's own straight line over the main one)
+
+
+def layer_trace(hz):
+    """The drawn wave shape a layer plays: its own (hz["trace"]), else the Hz bass's main one (hz["main_trace"],
+    every layer's; user 2026-10-14). None = straight up, as it starts (the old sound: no KeyGrid needed for it)."""
+    got = hz.get("trace") or hz.get("main_trace")
+    return None if not got or got == [list(p) for p in START_TRACE] else got
 
 
 def clean_length(length):
@@ -765,7 +770,7 @@ def has_fx(hz):
              or any(s["level"] != 1.0 for s in (arp.get("steps") or ())[:arp.get("count", STEPS)])
              or bool(hz.get("loud")))  # (loudness lines: each note's, the layer's)
     return ((bool(hz.get("fx")) or len(copies(hz)) > 1 or bool((hz.get("voice") or {}).get("random"))
-             or bool(hz.get("mode")) or bool(hz.get("osc2")) or bool(hz.get("trace")) or quiet
+             or bool(hz.get("mode")) or bool(hz.get("osc2")) or bool(layer_trace(hz)) or quiet
              or bool((hz.get("mod") or {}).get("links"))
              or any(not e.get("off") for e in hz.get("rack") or ())) and bool(hz.get("tones")))
 
@@ -893,6 +898,9 @@ def clean_hz(hz):
         out["length"] = length
     if hz.get("stick") is True:
         out["stick"] = True
+    main_trace = clean_trace(hz.get("main_trace"))
+    if main_trace and main_trace != [list(p) for p in START_TRACE]:
+        out["main_trace"] = main_trace
     loud = clean_line(hz.get("loud")) if isinstance(hz.get("loud"), list) else []
     if any(p[1] != 1.0 for p in loud):  # (at 100 % all along: it changes nothing, left out)
         out["loud"] = loud

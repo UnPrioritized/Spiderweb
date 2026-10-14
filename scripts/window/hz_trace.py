@@ -208,9 +208,16 @@ def open_trace(hz):
     return hz.trace_win
 
 
-def shown_trace(extra):
-    """The wave shape a Hz bass's settings have (as it starts when there's none): a list of [x, y]."""
-    return [list(p) for p in extra.get("trace") or START_TRACE]
+def own_trace(pts):
+    """The line drawn as kept before a Hz bass holds it: none when it's as it starts."""
+    pts = [list(p) for p in pts]
+    return None if pts == [list(p) for p in START_TRACE] else pts
+
+
+def shown_trace(extra, hz=None):
+    """The wave shape the layer picked plays: its own (extra), else the Hz bass's main one (hz), else as it starts:
+    a list of [x, y]."""
+    return [list(p) for p in extra.get("trace") or (hz or {}).get("main_trace") or START_TRACE]
 
 
 class TraceWindow(tk.Toplevel):
@@ -225,7 +232,7 @@ class TraceWindow(tk.Toplevel):
         self.transient(hz)
         self.geometry(f"{round(460 * s)}x{round(660 * s)}")
         self.minsize(round(360 * s), round(640 * s))  # (the drawing kept usable, ~200 px, under the strips, hunt)
-        self.pts = shown_trace(hz.extra)
+        self.pts = shown_trace(hz.extra, (hz.target() or {}).get("hz"))
         self.drag = None  # {"i": point number, "was": points, "before": fx state, ...} while the mouse holds one
         self.bar = None  # while a note's end is dragged: {"x": press x, "from": its length (waves), "pct": now, ...}
         self.ends = []  # each note's end drawn: (px x, px y, its length in waves) (bar_at)
@@ -239,7 +246,10 @@ class TraceWindow(tk.Toplevel):
         hint.pack(side="bottom", fill="x")  # (the rows under the drawing first: they always show)
         hint.bind("<Configure>", lambda e: hint.config(wraplength=max(1, e.width - round(16 * s))))
         self.length_rows(hz)
-        bar = ttk.Frame(self, padding=(8, 2, 8, 6))
+        f = self.own_row(self, "trace", hz.on_trace_all, hz.on_trace_back)
+        f.pack(side="bottom", fill="x", padx=8, pady=(0, 6))
+        hz.trace_own_row = f.parts
+        bar = ttk.Frame(self, padding=(8, 2, 8, 2))
         bar.pack(side="bottom", fill="x")
         b = ttk.Button(bar, text=tr("hz.trace_reset"), command=self.reset, takefocus=False)
         b.pack(side="left")
@@ -292,19 +302,30 @@ class TraceWindow(tk.Toplevel):
         hz.length_row = length_box(app, box, hz.length_var, hz.on_length, lb)
         hz.length_row.grid(row=0, column=1, sticky="w", pady=2)
         Tooltip(lb, tr("hz.length_tip"))
-        f = hz.own_frame = ttk.Frame(box)
-        f.grid(row=1, column=1, sticky="w", pady=(0, 2))
-        f.grid_remove()
-        hz.own_mark = ttk.Label(f, text="")
-        Tooltip(hz.own_mark, tr("hz.length_layer_tip"))
-        hz.all_btn = ttk.Button(f, text=tr("hz.length_all"), command=hz.on_length_all, takefocus=False)
-        Tooltip(hz.all_btn, tr("hz.length_all_tip"))
-        hz.back_btn = ttk.Button(f, text=tr("hz.length_back"), command=hz.on_length_back, takefocus=False)
-        Tooltip(hz.back_btn, tr("hz.length_back_tip"))
+        box.columnconfigure(1, weight=1)
+        f = self.own_row(box, "length", hz.on_length_all, hz.on_length_back)
+        f.grid(row=1, column=1, sticky="we", pady=(0, 2))
+        hz.length_own_row = f.parts
         hz.stick_box = ttk.Checkbutton(box, text=tr("hz.stick"), variable=hz.stick, command=hz.on_stick,
                                        takefocus=False)
         hz.stick_box.grid(row=2, column=1, sticky="w", pady=2)
         hz.stick_tip = Tooltip(hz.stick_box, tr("hz.stick_tip"))
+
+    def own_row(self, parent, what, every, back):
+        """The line under the shapes bar / the Note length box with layers (hz_gates.show_own): whose the setting
+        is, Use for all layers, Back to the main ... (what = "length" / "trace"). ALWAYS as tall as a button, also
+        empty, so nothing in the window moves when its buttons come and go (user 2026-10-14)."""
+        f = ttk.Frame(parent)
+        mark = ttk.Label(f, text="")
+        Tooltip(mark, tr(f"hz.{what}_layer_tip"))
+        b1 = ttk.Button(f, text=tr("hz.use_for_all"), command=every, takefocus=False)
+        Tooltip(b1, tr(f"hz.{what}_all_tip"))
+        b2 = ttk.Button(f, text=tr(f"hz.{what}_back"), command=back, takefocus=False)
+        Tooltip(b2, tr(f"hz.{what}_back_tip"))
+        f.config(height=b1.winfo_reqheight())
+        f.pack_propagate(False)
+        f.parts = (f, mark, b1, b2)
+        return f
 
     # ------------------------------------------------------------ where things are
 
@@ -440,7 +461,7 @@ class TraceWindow(tk.Toplevel):
         """The shape from the Hz bass window (another Hz bass shown, undo...), unless the mouse holds a point. Drawn
         again only when something it shows changed (the Hz bass window redraws often: dragging, scrolling)."""
         if self.drag is None:
-            self.pts = shown_trace(self.hz.extra)
+            self.pts = shown_trace(self.hz.extra, (self.hz.target() or {}).get("hz"))
         if self.drawn != self.look_now():
             self.draw()
         sh = self.hz.target()
@@ -881,7 +902,10 @@ class TraceWindow(tk.Toplevel):
         """The shape drawn becomes the Hz bass's: one undo step of the Hz bass window (was: the points before).
         Nothing there to hold it yet (no step made): a step of this window's own (local_step)."""
         hz, app = self.hz, self.app
-        hz.extra = clean_extra(dict(hz.extra, trace=[list(p) for p in self.pts]))
+        if hz.length_target() is not None:  # (a Hz bass holds it: its main line or the layer's own, user 2026-10-14)
+            self.local, self.local_redo = [], []
+            return hz.put_trace([list(p) for p in self.pts])
+        hz.extra = clean_extra(dict(hz.extra, trace=own_trace(self.pts)))
         if hz.fx.now() == before:
             return
         top = app.undo_stack[-1] if app.undo_stack else None
@@ -910,7 +934,7 @@ class TraceWindow(tk.Toplevel):
             return False
         dst.append([list(p) for p in self.pts])
         self.pts = src.pop()
-        self.hz.extra = clean_extra(dict(self.hz.extra, trace=[list(p) for p in self.pts]))
+        self.hz.extra = clean_extra(dict(self.hz.extra, trace=own_trace(self.pts)))
         self.hz.fx.tidy()
         self.draw()
         return True

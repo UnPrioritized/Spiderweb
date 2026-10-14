@@ -182,17 +182,33 @@ class PresetBar:
         before = self.fx.state()
         kept = {k: copy.deepcopy(v) for k, v in hz.extra.items()  # (the layer's Note length, and its drawn line
                 if k == "own_length" or (k == "trace" and "trace" not in sound)}  # when the preset has none: kept,
-        hz.set_fx(dict(copy.deepcopy(sound_only(sound)), **kept))  # user 2026-10-14)
-        picked = (key, name, sound_text(hz.fx_settings()))  # (as put in: a line kept shows no *)
+        sound = sound_only(sound)  # user 2026-10-14)
+        if sound.get("trace") and sound["trace"] == self.main_line():  # (the main line already: not this layer's own)
+            sound.pop("trace")
+        hz.set_fx(dict(copy.deepcopy(sound), **kept))
+        picked = (key, name, sound_text(self.heard()))  # (as put in: a line kept shows no *)
         self.preset, self.preset_mark = picked, None  # (none while it's being put in: nothing shown changes it)
         if self.fx.now() != before:
             hz.fx.tidy()
             hz.commit(tr("hz.step_preset", name=name), copy.deepcopy(hz.tones), before)
-        called_off = sound_text(hz.fx_settings()) != picked[2]  # (too many notes: No)
+        called_off = sound_text(self.heard()) != picked[2]  # (too many notes: No)
         self.preset = None if called_off else picked
         self.mark_preset()
         self.redraw()
         self.show_knobs()
+
+    def main_line(self):
+        """The Hz bass's main drawn line (every layer without its own plays it), or None."""
+        sh = self.hz.target()
+        return ((sh or {}).get("hz") or {}).get("main_trace")
+
+    def heard(self):
+        """The sound as a preset keeps it: the window's settings, the line being the layer's own or else the main one
+        (one layer keeps its line there)."""
+        got = sound_only(self.hz.fx_settings())
+        if "trace" not in got and self.main_line():
+            got["trace"] = copy.deepcopy(self.main_line())
+        return got
 
     def step_preset(self, d):
         """◀ ▶: the preset before / after the one picked (round the list)."""
@@ -214,7 +230,7 @@ class PresetBar:
             if name.casefold() not in ours:
                 break
             prompt = tr("hz.preset_name_taken", name=name)
-        sound = sound_only(self.hz.fx_settings())
+        sound = self.heard()
         if not change_presets(name, sound, self):
             return
         self.yours = load_presets()
@@ -263,7 +279,7 @@ class PresetBar:
     def show_preset(self):
         """The name shown: the preset picked (a * once the sound has changed), else one the sound is the same as,
         else none."""
-        now = sound_text(self.hz.fx_settings())
+        now = sound_text(self.heard())
         if self.preset is not None and not self.preset_holds():  # (another shape, or undone past picking it: its
             self.preset = None  # name would say this sound came from it, user)
         if self.preset is None or self.preset[2] != now:

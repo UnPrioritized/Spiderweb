@@ -14,8 +14,8 @@ The faint bars in the drawing show how long each key's notes last. Drag the end 
 
 The strips under the drawing show how the notes look in the piano roll at a few pitches, low on the left and high on the right: the Hz bass's lowest, middle and highest notes (a few octaves apart when it has none). Each shows the same stretch of time, so a higher pitch shows more waves. Effects aren't shown there.
 
-With layers, there is one main length and each layer can have its own: a length typed or dragged changes only the layer picked, and the line under the box says "This layer only". Layers you haven't changed, and new layers, use the main length. Use for all layers makes this length the main one for every layer; Back to the main length undoes this layer's own. Presets and Copy sound leave a layer's length alone.
+With layers, the line and the Note length each have a main one and each layer can have its own: a line drawn or a length typed changes only the layer picked, and the line under it says "This layer only". Layers you haven't changed, and new layers, use the main ones. Use for all layers makes this layer's the main one for every layer; Back to the main shape / length undoes this layer's own. Presets leave a layer's length alone, and its line too unless the preset has one; Copy sound copies the line, not the length.
 
-Reset straightens the line and puts this layer back on the main length (with one layer: Note length back to 100 % and Last note sticks out unticked), as one undo step.
+Reset puts this layer back on the main line and length (with one layer: line straight, Note length back to 100 % and Last note sticks out unticked), as one undo step.
 
 Last note sticks out of the shape lets the last note before a gap or the end keep a whole wave.
