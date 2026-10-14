@@ -69,6 +69,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.limit = None        # how far the shapes being edited may reach (limits)
         self._pan = None
         self._panned = False     # the middle button moved further than a click's 3 px (pan_to)
+        self._panning = False    # the middle button is held (redraw: the notes as one picture, moved along)
         self._saved_view = None
         self._tiles = None       # grid + notes as one picture when there are too many notes for canvas items
         self._note_pic = None    # what that picture shows (see redraw)
@@ -1480,6 +1481,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         On a selected funnel: a curve start (on its line) or an anchor, like a click with the Funnel tool.
         On a selected curve: an anchor there, like a click with the Curve tool. Not while the left button holds
         something (a held point's number would change)."""
+        self._panning = False
         sh = self.point_shape()
         if (not self._pan or self._panned or abs(e.x - self._pan[0]) > 3 or abs(e.y - self._pan[1]) > 3 or self.draft
                 or self.drag or not sh or sh["kind"] not in ("poly", "funnel", "curve", "custom")
@@ -1522,6 +1524,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def start_pan(self, e):
         self._pan = (e.x, e.y, self.view_t, self.view_top)
         self._panned = False
+        self._panning = True
 
     def pan_to(self, e):
         if self.pan_view(e):

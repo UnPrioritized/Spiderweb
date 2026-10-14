@@ -435,8 +435,10 @@ class RollDrawing:
                 self._note_pic = None
             else:
                 rects = self.note_rects(w, h) if app.show_notes.get() else None
-                if rects is not None and len(rects[0]) > w * h // 2000:
-                    # Lots of notes: paint grid + notes as one picture (thousands of canvas items redraw slowly)
+                if rects is not None and (len(rects[0]) > w * h // 2000 or self._panning):
+                    # Lots of notes: paint grid + notes as one picture (thousands of canvas items redraw slowly).
+                    # Panning: always (the picture is moved along, ~12 ms a move; canvas items drawn again at every
+                    # move took 35-80 ms on the user's screen with ~1000 notes)
                     self.paint_image(w, h, rows, cols, rects)
                     self._note_pic = None if drafted else pic
                 else:
@@ -827,7 +829,10 @@ class RollDrawing:
         """
         top = self.ruler_h
         rows = [(top, h, look.ROLL_BG)]
+        # (one more key each side, the ones off the picture dropped below: a key just past the edge can still have
+        # its line rounded onto it, and panning moved that edge into view without the line until painted whole)
         p_lo, p_hi = self.visible_pitches(h)
+        p_lo, p_hi = max(0, p_lo - 1), min(self.app.keys - 1, p_hi + 1)
         edo = self.app.edo()
         size, black = (EDO, EDO_BLACK) if edo else (12, BLACK)
         for p in range(p_lo, p_hi + 1):
@@ -845,6 +850,8 @@ class RollDrawing:
             rows.append((self.row_y(0)[1], h, look.OUTSIDE_KEYS))
         if self.p2y(self.app.keys - 0.5) > top:
             rows.append((top, self.row_y(self.app.keys - 1)[0], look.OUTSIDE_KEYS))
+        top = int(top)  # (the picture's first pixel row, under the ruler)
+        rows = [r for r in rows if (top <= r[0] < h if r[1] is None else r[1] > top and r[0] < h)]
         return rows, self.grid_cols(w)
 
     def row_y(self, p):
@@ -854,7 +861,9 @@ class RollDrawing:
     def grid_cols(self, w):
         """Vertical grid lines [(x, color)]: snap lines, beats, bars (the velocity pane uses them too)."""
         cols = []
-        b_lo, b_hi = self.x2t(self.kb_w), self.x2t(w)
+        # (a pixel more each side, the ones off the picture dropped at the end: a line just past the edge can still
+        # be rounded onto it, and panning moved that edge into view without the line until painted whole)
+        b_lo, b_hi = self.x2t(self.kb_w - 1), self.x2t(w + 1)
         sb = self.app.snap_beats()
         if sb and sb < 1 and sb * self.sx >= 8:
             i = math.ceil(b_lo / sb)
@@ -876,7 +885,7 @@ class RollDrawing:
             if b >= 0:
                 cols.append((round(self.t2x(b)), look.GRID_BAR))
             b += step
-        return cols
+        return [c for c in cols if int(self.kb_w) <= c[0] < w]
 
     def draw_grid(self, w, h, rows, cols):
         x0, top = self.kb_w, self.ruler_h
@@ -1130,10 +1139,13 @@ class RollDrawing:
         img[max(dy, 0):ih + min(dy, 0), max(dx, 0):iw + min(dx, 0)] = (
             old[max(-dy, 0):ih + min(-dy, 0), max(-dx, 0):iw + min(-dx, 0)])
         strips = []
+        # (moved right / down: one pixel more, the picture's old first column / row: it was under the keyboard /
+        # ruler (they end part way into a pixel) and not painted like the rest; moved into view it was a wrong line
+        # until painted whole)
         if dx:
-            strips.append((kb, top, kb + dx, h) if dx > 0 else (w + dx, top, w, h))
+            strips.append((kb, top, kb + dx + 1, h) if dx > 0 else (w + dx, top, w, h))
         if dy:
-            strips.append((kb, top, w, top + dy) if dy > 0 else (kb, h + dy, w, h))
+            strips.append((kb, top, w, top + dy + 1) if dy > 0 else (kb, h + dy, w, h))
         for x0, y0, x1, y1 in strips:
             rects = self.note_rects(w, h, clip=(x0, y0, x1, y1))
             img[y0 - top:y1 - top, x0 - kb:x1 - kb] = self.paint_region(rows, cols, rects, (x0, y0, x1, y1))
