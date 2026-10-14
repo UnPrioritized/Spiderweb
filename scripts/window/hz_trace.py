@@ -51,7 +51,8 @@ STRIP_WAVES = 48  # ... the most waves the highest shows
 STRIP_WAIT = 120  # ms: while the mouse holds something, the strips drawn again once it rests this long
 FIXED_STRIPS = (21, 33, 45, 57)  # ... their keys while the Hz bass has no notes (an octave apart; no names shown)
 # the starting shapes of the Shapes ▾ menu (my picks): a saw = each key once, the others each key twice a wave
-SHAPES = {"saw": [[0.0, 0.0], [1.0, 1.0]],
+SHAPES = {"straight": [list(p) for p in START_TRACE],  # (as it starts: shown after Reset, hunt)
+          "saw": [[0.0, 0.0], [1.0, 1.0]],
           "triangle": [[0.0, 0.0], [0.5, 1.0], [1.0, 0.0]],
           "sine": [[i / 32, round(0.5 - 0.5 * math.cos(2 * math.pi * i / 32), 6)] for i in range(33)],
           "square": [[0.0, 0.0], [0.0, 1.0], [0.5, 1.0], [0.5, 0.0], [1.0, 0.0]]}
@@ -277,10 +278,11 @@ class TraceWindow(tk.Toplevel):
         remember_place(self, "hz_shape")  # (not "hz_trace": the window grew for the strips, an old size would squash)
 
     def length_rows(self, hz):
-        """Note length (moved here from Settings…, user 2026-10-13): the Hz bass's, the layer picked's own (with
-        layers only), the last note sticking out. The boxes are the Hz bass window's (hz.length_row...; hz_gates
-        show_length / on_length): this window is made with it and only hidden when closed, so they're always there.
-        Changes are undo steps of the Hz bass window, like the drawing's."""
+        """Note length (moved here from Settings…, user 2026-10-13): ONE box = what the layer picked plays (2+
+        layers: changing it gives that layer its own, user 2026-10-14; a line under it says whose it is, Use for all
+        layers / Back to the main length), the last note sticking out. The widgets are the Hz bass window's
+        (hz.length_row...; hz_gates show_length / on_length): this window is made with it and only hidden when
+        closed, so they're always there. Changes are undo steps of the Hz bass window, like the drawing's."""
         app = self.app
         box = ttk.Frame(self, padding=(8, 0, 8, 6))
         box.pack(side="bottom", fill="x")
@@ -289,18 +291,15 @@ class TraceWindow(tk.Toplevel):
         hz.length_row = length_box(app, box, hz.length_var, hz.on_length, lb)
         hz.length_row.grid(row=0, column=1, sticky="w", pady=2)
         Tooltip(lb, tr("hz.length_tip"))
-        lb = hz.own_label = ttk.Label(box, text=tr("hz.own_length"))
-        lb.grid(row=1, column=0, sticky="e", padx=(0, 8), pady=2)
         f = hz.own_frame = ttk.Frame(box)
-        f.grid(row=1, column=1, sticky="w", pady=2)
-        names = [tr("hz.own_same"), tr("hz.own_own")]
-        hz.own_pick = ttk.Combobox(f, values=names, state="readonly", width=max(map(len, names)))
-        hz.own_pick.current(0)
-        hz.own_pick.pack(side="left", padx=(0, 8))
-        hz.own_pick.bind("<<ComboboxSelected>>", lambda e: hz.on_own_pick())
-        hz.own_row = length_box(app, f, hz.own_var, hz.on_own_length)
-        for w in (lb, hz.own_pick):
-            Tooltip(w, tr("hz.own_length_tip"))
+        f.grid(row=1, column=1, sticky="w", pady=(0, 2))
+        f.grid_remove()
+        hz.own_mark = ttk.Label(f, text="")
+        Tooltip(hz.own_mark, tr("hz.length_layer_tip"))
+        hz.all_btn = ttk.Button(f, text=tr("hz.length_all"), command=hz.on_length_all, takefocus=False)
+        Tooltip(hz.all_btn, tr("hz.length_all_tip"))
+        hz.back_btn = ttk.Button(f, text=tr("hz.length_back"), command=hz.on_length_back, takefocus=False)
+        Tooltip(hz.back_btn, tr("hz.length_back_tip"))
         hz.stick_box = ttk.Checkbutton(box, text=tr("hz.stick"), variable=hz.stick, command=hz.on_stick,
                                        takefocus=False)
         hz.stick_box.grid(row=2, column=1, sticky="w", pady=2)
@@ -618,11 +617,8 @@ class TraceWindow(tk.Toplevel):
             self.canvas.config(cursor=want)
 
     def length_box(self):
-        """The Note length box the drawing's notes have: (variable, row, apply): the layer picked's own when it has
-        one, else the Hz bass's."""
+        """The Note length box: (variable, row, apply) (one box: on_length knows whose length it is)."""
         hz = self.hz
-        if hz.own_pick.current() == 1 and hz.own_row.winfo_manager():
-            return hz.own_var, hz.own_row, hz.on_own_length
         return hz.length_var, hz.length_row, hz.on_length
 
     def on_press(self, e):
@@ -769,8 +765,13 @@ class TraceWindow(tk.Toplevel):
         return self.cancel_drag if self.drag is not None or self.bar is not None else None
 
     def reset(self):
-        """Back to straight up at the wave's start (every key together): one undo step."""
-        self.use(START_TRACE)
+        """Back to straight up at the wave's start (every key together) and the layer's Note length back to the
+        main one (one layer: to 100 %, not sticking out; user 2026-10-14): one undo step. No Hz bass yet: the line."""
+        if self.drag is not None or self.bar is not None:
+            return
+        if not self.hz.reset_shape():
+            self.use(START_TRACE)
+        self.refresh()
 
     def use(self, pts):
         """The line replaced by these points (Reset, a starting shape): one undo step (none when it's the same)."""

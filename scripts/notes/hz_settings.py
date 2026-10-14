@@ -908,9 +908,10 @@ def clean_hz(hz):
 
 # ---------------------------------------------------------------- layers
 
-# one layer's own ("tones" and "loud" = its notes and its loudness line: not its sound, which Copy sound to copies)
+# one layer's own ("tones", "loud" and "own_length" = its notes, loudness line and Note length: not its sound, which
+# Copy sound to copies)
 SOUND = ("tones", "fx", "loop", "off", "amount", "from", "fit", "sustain", "lfo", "loud") + EXTRAS
-NOT_SOUND = ("tones", "loud")
+NOT_SOUND = ("tones", "loud", "own_length")
 LAYERS = 64  # the most layers in one Hz bass (user, 2026-10-09: was 16)
 LAYER_NAME = 40  # characters: the longest layer name
 

@@ -1,7 +1,7 @@
 Hz shape… (Hz bass window → Hz settings… → Hz shape…) sets how a Hz bass's notes look inside each wave of its tone, and how long they last. The pitch stays the same; mostly the look changes, and the texture of the sound a little.
 [clip:hz_shape-window]
 
-The drawing is one wave of the tone (left to right) over the Hz bass's keys (bottom to top). A key hits wherever the line crosses its row (the green dots), so a zigzag makes more notes: the text over the buttons says how many more. The line is stretched to cover all the keys. The shapes box has ready ones (Saw, Triangle, Sine, Square), then the ones you saved, newest first; typing a letter while its list is open jumps to a name. Reset goes back to a straight line up at the start, where every key hits together.
+The drawing is one wave of the tone (left to right) over the Hz bass's keys (bottom to top). A key hits wherever the line crosses its row (the green dots), so a zigzag makes more notes: the text over the buttons says how many more. The line is stretched to cover all the keys. The shapes box has ready ones (Straight, Saw, Triangle, Sine, Square), then the ones you saved, newest first; typing a letter while its list is open jumps to a name. Straight is the line as it starts: straight up at the start, where every key hits together.
 
 Save… keeps the line drawn under a name. Delete takes the saved shape picked in the box out again (you're asked first); it's greyed out for the ready-made shapes and for a line that isn't saved.
 
@@ -14,4 +14,8 @@ The faint bars in the drawing show how long each key's notes last. Drag the end 
 
 The strips under the drawing show how the notes look in the piano roll at a few pitches, low on the left and high on the right: the Hz bass's lowest, middle and highest notes (a few octaves apart when it has none). Each shows the same stretch of time, so a higher pitch shows more waves. Effects aren't shown there.
 
-With layers, This layer gives the picked layer a length of its own. Last note sticks out of the shape lets the last note before a gap or the end keep a whole wave.
+With layers, there is one main length and each layer can have its own: a length typed or dragged changes only the layer picked, and the line under the box says "This layer only". Layers you haven't changed, and new layers, use the main length. Use for all layers makes this length the main one for every layer; Back to the main length undoes this layer's own. Presets and Copy sound leave a layer's length alone.
+
+Reset straightens the line and puts this layer back on the main length (with one layer: Note length back to 100 % and Last note sticks out unticked), as one undo step.
+
+Last note sticks out of the shape lets the last note before a gap or the end keep a whole wave.

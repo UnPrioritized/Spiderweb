@@ -374,85 +374,113 @@ class HzGates:
         sh = self.target()
         return sh if sh is not None and sh.get("hz") else None
 
-    def set_shared(self, name, key, value):
-        """A setting of the whole Hz bass (every layer's: "length", "stick"), None = left out: one undo step."""
+    def layered(self, hz):
+        """2+ layers: the Note length box is the layer picked's (its own once changed; user 2026-10-14)."""
+        return len(hz.get("layers") or ()) > 1
+
+    def shown_length(self, hz):
+        """The Note length the layer picked plays: its own, else the Hz bass's main one (100 % with none)."""
+        return self.extra.get("own_length") or hz.get("own_length") or hz.get("length") or FULL_LENGTH
+
+    def put_lengths(self, name, others=False, **what):
+        """Note length settings of the Hz bass shown changed, one undo step of this window (made here whatever has
+        the keyboard, hunt): "length" / "stick" every layer's, "own_length" / "trace" the layer picked's (None = left
+        out); others: no other layer keeps a length of its own."""
         sh = self.length_target()
-        if sh is None or sh["hz"].get(key) == value:
+        if sh is None:
+            return
+        hz = dict(sh["hz"])
+        for k, v in what.items():
+            if v is None:
+                hz.pop(k, None)
+            else:
+                hz[k] = v
+        if others and hz.get("layers"):
+            picked = hz.get("layer", 0)
+            hz["layers"] = [{k: v for k, v in e.items() if k != "own_length"} if i != picked else e
+                            for i, e in enumerate(hz["layers"])]
+        if hz == sh["hz"]:
             return
         app = self.app
-        app.push_undo(name=name)
-        sh["hz"] = dict({k: v for k, v in sh["hz"].items() if k != key}, **({} if value is None else {key: value}))
+        self.own_step = True
+        try:
+            app.push_undo(name=name)
+        finally:
+            self.own_step = False
+        sh["hz"] = hz
         app.shapes_changed()
         app.sync_hz_panels()
         self.sync()
         app.schedule_autosave()
 
     def on_length(self):
-        """The Note length box typed, stepped or dragged, or its unit picked."""
+        """The Note length box typed, stepped or dragged, or its unit picked. 2+ layers: the layer picked's own
+        (the same as the main length = none); one layer: the main length (an own one from before goes)."""
         sh = self.length_target()
-        got = self.length_of(self.length_var, self.length_row, sh and sh["hz"].get("length"))
-        if got is not None:
+        hz = sh["hz"] if sh is not None else {}
+        got = self.length_of(self.length_var, self.length_row, self.shown_length(hz) if sh is not None else None)
+        if got is not None and sh is not None:
             got = as_made(clean_length(got))
-            self.set_shared(tr("hz.step_length"), "length", None if got == FULL_LENGTH else got)
+            if self.layered(hz):
+                self.put_lengths(tr("hz.step_length"),
+                                 own_length=None if got == (hz.get("length") or FULL_LENGTH) else got)
+            else:
+                self.put_lengths(tr("hz.step_length"), length=None if got == FULL_LENGTH else got, own_length=None)
         self.redraw()
 
     def on_stick(self):
-        self.set_shared(tr("hz.step_stick"), "stick", True if self.stick.get() else None)
+        self.put_lengths(tr("hz.step_stick"), stick=True if self.stick.get() else None)
 
-    def set_own(self, length):
-        """The layer picked's own Note length (None: the Hz bass's): one undo step, kept with its sound."""
+    def on_length_all(self):
+        """Use for all layers: the layer picked's length becomes the main one, no layer keeps its own."""
+        sh = self.length_target()
+        if sh is not None:
+            got = self.shown_length(sh["hz"])
+            self.put_lengths(tr("hz.step_length_all"), others=True, own_length=None,
+                             length=None if got == FULL_LENGTH else got)
+
+    def on_length_back(self):
+        """Back to the main length: the layer picked's own length goes."""
+        self.put_lengths(tr("hz.step_length"), own_length=None)
+
+    def reset_shape(self):
+        """Reset in Hz shape…: the line straight and the layer picked back to the main length; one layer: the main
+        length back to 100 % and the last note not sticking out too. One undo step. False: no Hz bass holds them."""
         sh = self.length_target()
         if sh is None:
-            return
-        if not all_tones(sh["hz"]):  # (no notes: the window's commit keeps no sound; a preset's own length on a
-            return self.set_shared(tr("hz.step_length"), "own_length", length)  # Hz bass without notes, hunt)
-        before = self.fx.state()
-        self.extra = clean_extra(dict(self.extra, own_length=length))
-        if self.fx.now() != before:
-            self.fx.tidy()
-            self.commit(tr("hz.step_length"), copy.deepcopy(self.tones), before)
-
-    def on_own_pick(self):
-        """This layer: Same as the Hz bass / Its own length (starting as the Hz bass's)."""
-        sh = self.length_target()
-        own = self.own_pick.current() == 1
-        if sh is not None:
-            self.set_own(clean_length(sh["hz"].get("length") or FULL_LENGTH) if own else None)
-        self.canvas.focus_set()
-        self.sync()
-
-    def on_own_length(self):
-        got = self.length_of(self.own_var, self.own_row, self.extra.get("own_length"))
-        if got is not None:
-            self.set_own(as_made(clean_length(got)))
-        self.redraw()
+            return False
+        what = dict(trace=None, own_length=None)
+        if not self.layered(sh["hz"]):
+            what.update(length=None, stick=None)
+        self.put_lengths(tr("hz.step_reset_shape"), **what)
+        return True
 
     def show_length(self, sh, hz):
-        """The Note length rows as the Hz bass shown has them (greyed with no Hz bass); This layer only with layers
-        or a length of its own (a preset's on a Hz bass without layers: it wins, so it must show, hunt), its box only
-        with a length of its own."""
+        """The Note length rows as the Hz bass shown has them (greyed with no Hz bass). The box = what the layer
+        picked plays; with 2+ layers a line under it says whose length it is, with Use for all layers (any layer
+        has its own) and Back to the main length (this one has)."""
         ok = sh is not None and bool(hz)
-        self.put_length(self.length_var, self.length_row, hz.get("length") or FULL_LENGTH)
         own = (self.extra.get("own_length") or hz.get("own_length")) if ok else None
-        self.own_pick.current(1 if own else 0)
-        if own:
-            self.put_length(self.own_var, self.own_row, own)
-            if not self.own_row.winfo_manager():
-                self.own_row.pack(side="left")
-        elif self.own_row.winfo_manager():
-            self.own_row.pack_forget()
-        layered = ok and (bool(hz.get("layers")) or bool(own))
-        for w in (self.own_label, self.own_frame):
-            if bool(w.winfo_manager()) != layered:
-                w.grid() if layered else w.grid_remove()
+        self.put_length(self.length_var, self.length_row, own or hz.get("length") or FULL_LENGTH)
+        layered = ok and self.layered(hz)
+        if bool(self.own_frame.winfo_manager()) != layered:
+            self.own_frame.grid() if layered else self.own_frame.grid_remove()
+        if layered:
+            picked = hz.get("layer", 0)
+            any_own = bool(own) or any(e.get("own_length") for i, e in enumerate(hz["layers"]) if i != picked)
+            self.own_mark.config(text=tr("hz.length_own" if own else "hz.length_main"),
+                                 foreground=look.VALUE if own else look.HINT)
+            want = [self.own_mark] + ([self.all_btn] if any_own else []) + ([self.back_btn] if own else [])
+            if self.own_frame.pack_slaves() != want:
+                for w in self.own_frame.pack_slaves():
+                    w.pack_forget()
+                for w in want:
+                    w.pack(side="left", padx=(0, 6))
         self.stick.set(bool(hz.get("stick")))
         funnel = sh is not None and sh["kind"] == "funnel"
         self.stick_tip.text = tr("hz.stick_tip") + ("\n" + tr("hz.stick_funnel") if funnel else "")
-        state = "normal" if ok else "disabled"
-        for row in (self.length_row, self.own_row):
-            row.entry.config(state=state)
-            row.unit.config(state="readonly" if ok else "disabled")
-        self.own_pick.config(state="readonly" if ok else "disabled")
+        self.length_row.entry.config(state="normal" if ok else "disabled")
+        self.length_row.unit.config(state="readonly" if ok else "disabled")
         self.stick_box.config(state="normal" if ok and not funnel else "disabled")
 
     def pitch(self):
