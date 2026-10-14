@@ -17,15 +17,16 @@ Ways ("way"):
 sh["nested"] = {"way", "steps" (copies, the shape itself counts), "last" (the last copy's size, 0..1), "spacing"
 (-100..100: + = the copies closer together toward the last one), "turn" (degrees per step), "colours" (how many
 channels the steps take turns over), "skip" (True = every other step left empty), "at" ([u, v] in the shape's box,
-only once moved; missing = the middle of the filled part)}."""
+only once moved; missing = the middle of the filled part), "mix" (Blend: 0 = Even band .. 1 = all rounded), "of"
+(Scaling: {"name", "strokes"} = the copies are this library shape, filling the shape's box; missing = itself)}."""
 
 import json
 import math
 
 import numpy as np
 
-from notes.custom import (cut_out, drawn_view, edge_loops, find_spans, fill_plan, frame_to_bp, frame_to_uv,
-                          inside_rows, merged_rows)
+from notes.custom import (clean_strokes, cut_out, drawn_view, edge_loops, find_spans, fill_plan, frame_to_bp,
+                          frame_to_uv, inside_rows, merged_rows)
 from notes.shrink import field, inner_rows, proportion
 
 WAYS = ("scale", "band", "blend")
@@ -57,6 +58,11 @@ def clean_nested(c):
     if not math.isfinite(out["last"]):
         out["last"] = 0.0
     out["skip"] = c.get("skip") is True
+    of = c.get("of")
+    if isinstance(of, dict):  # Copies of another library shape (Scaling): its own copy of the drawing
+        strokes = clean_strokes(of.get("strokes"))
+        if strokes:
+            out["of"] = {"name": str(of.get("name", ""))[:100], "strokes": strokes}
     at = c.get("at")
     if isinstance(at, (list, tuple)) and len(at) == 2:
         try:
@@ -267,7 +273,10 @@ def blend_steps(sh, ppq, base, centre, view):
 
 
 def scaled_steps(sh, ppq, base, centre, view):
-    """Scaling: step i = the shape's box made smaller and turned round the centre point (exact, like its own)."""
+    """Scaling: step i = the shape's box made smaller and turned round the centre point (exact, like its own); with
+    "of", the copies are another drawing filling the same box (the shape itself stays the first step)."""
+    of = sh["nested"].get("of")
+    drawing = dict(sh, strokes=of["strokes"]) if of else sh
     steps = []
     for i, (size, turn) in enumerate(step_sizes(sh["nested"])):
         if i == 0:
@@ -276,7 +285,7 @@ def scaled_steps(sh, ppq, base, centre, view):
         if size < 1e-4:
             steps.append(np.zeros((0, 3), np.int64))
             continue
-        copy = dict(sh, pts=moved_frame(sh["pts"], centre, size, turn, view))
+        copy = dict(drawing, pts=moved_frame(sh["pts"], centre, size, turn, view))
         sp = np.asarray(find_spans(copy, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]
         steps.append(cut_out(sp, cut_out(sp, base)) if len(sp) else sp)  # (only where the shape is)
     return steps

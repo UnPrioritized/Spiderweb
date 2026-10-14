@@ -3,13 +3,16 @@ Turn, Colours and Every other one empty. Mixed into App."""
 
 import copy
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.nested import MOST_COLOURS, MOST_STEPS, NESTED_DEFAULTS
 from window import look
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
+from window.drawer import library_lists
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, name_list, set_names, unchanged
+
+SAME_SHAPE = tr("panel_custom.nested_of_same")
 
 NOTES_CHOICES = [("fill", tr("panel_custom.fill")), ("spam", tr("panel_custom.spam"))]
 # the number boxes: (setting, label, unit, lowest, highest, Scrub steps, setting -> box, box -> setting); two a row
@@ -58,6 +61,17 @@ class NestedPanel:
         for w in (lb, self.nested_way_box):
             Tooltip(w, tr("panel_custom.nested_way_tip"))
         self.nested_rows.append(row)
+        row = ttk.Frame(opts)  # Scaling: the copies made of another library shape ("of")
+        lb = ttk.Label(row, text=tr("panel_custom.nested_of"))
+        lb.pack(side="left")
+        self.nested_of_box = name_list(ttk.Combobox(row, state="readonly", width=22,
+                                                    postcommand=self.refresh_nested_names))
+        self.nested_of_box.pack(side="left", padx=4)
+        self.nested_of_box.bind("<<ComboboxSelected>>", lambda e: (self.on_nested_of(), self.roll.focus_set()))
+        for w in (lb, self.nested_of_box):
+            Tooltip(w, tr("panel_custom.nested_of_tip"))
+        self.nested_rows.append(row)
+        self.nested_way_rows[row] = "scale"
         for line in BOXES:
             row = ttk.Frame(opts)
             for n, (key, text, unit, lo, hi, steps, _, _) in enumerate(line):
@@ -93,6 +107,8 @@ class NestedPanel:
         self._loading = True
         self.nested_notes_box.current(1 if t.get("fill") == "spam" else 0)
         self.nested_way_box.current([w for w, _ in WAY_CHOICES].index(cfg.get("way", "scale")))
+        self.refresh_nested_names()
+        self.nested_of_box.set(cfg["of"]["name"] if cfg.get("of") else SAME_SHAPE)
         for line in BOXES:
             for key, _, _, _, _, _, shown, _ in line:
                 e, var = self.nested_boxes[key]
@@ -105,6 +121,23 @@ class NestedPanel:
         """{row: shown} for sync_custom's show_custom_rows (on: Nested is the Inside fill shown)."""
         way = (t.get("nested") or NESTED_DEFAULTS).get("way", "scale")
         return {w: on and self.nested_way_rows.get(w, way) == way for w in self.nested_rows}
+
+    def refresh_nested_names(self):
+        """Copies of: "Same as the shape" and the built-in shapes, then the saved ones (newest first)."""
+        top, saved = library_lists()
+        set_names(self.nested_of_box, [SAME_SHAPE] + list(top), saved)
+
+    def on_nested_of(self):
+        """A shape picked in Copies of: the copies are made of it (its own copy of the drawing goes into each
+        shape, like a placed shape's), or of the shape itself again."""
+        name = self.nested_of_box.get()
+        if name == SAME_SHAPE:
+            return self.set_nested("of", None)
+        tpl = self.custom_template(name)
+        if not tpl:
+            messagebox.showerror(tr("panel_custom.spiderweb"), tr("panel_custom.couldn_t_read_the_shape", name=name))
+            return self.sync_custom()
+        self.set_nested("of", {"name": name, "strokes": copy.deepcopy(tpl[0])})
 
     def nested_targets(self):
         """The custom targets that have a Nested fill (the settings for new ones too)."""
@@ -150,7 +183,9 @@ class NestedPanel:
         tgts = [t for t in self.nested_targets() if t["nested"].get(key) != value]
 
         def put(t):
-            t["nested"] = dict(t["nested"], **{key: value})
+            t["nested"] = dict(t["nested"], **{key: copy.deepcopy(value)})
+            if value is None:  # (off: not kept at all)
+                t["nested"].pop(key)
 
         self.change_nested(tgts, put, NESTED_UNDO)
 
