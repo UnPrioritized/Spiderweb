@@ -31,8 +31,10 @@ NESTED_UNDO = tr("panel_custom.nested")
 
 
 def nested_on(t):
-    """Custom shape (or the settings for new ones) t with a Nested fill."""
-    return bool(t.get("nested")) and t.get("fill") in ("fill", "spam")
+    """Custom shape (or the settings for new ones) t with a Nested fill (never text, pasted notes or Hz bass: their
+    notes don't use it, custom.has_nested)."""
+    return (bool(t.get("nested")) and t.get("fill") in ("fill", "spam") and not t.get("text") and "notes" not in t
+            and not t.get("hz"))
 
 
 class NestedPanel:

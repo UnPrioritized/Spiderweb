@@ -341,7 +341,8 @@ class CustomPanel:
             gaps = len(open_paths(tpl[0])) if tpl else 0
         fill, gate = tgts[0]["fill"], tgts[0]["gate"]
         # (Nested / Tiles = a Fill / Spam with its steps / tiles)
-        shown = "nested" if nested_on(tgts[0]) else "tiles" if tiles_on(tgts[0]) else fill
+        # (never for text or the Hz bass tool: their shapes don't take them, even when new shapes have one)
+        shown = fill if text else "nested" if nested_on(tgts[0]) else "tiles" if tiles_on(tgts[0]) else fill
         missing = placed and not text and self.not_in_library(tgts[0])  # (no shape picker: nothing to miss)
         self.custom_combo.config(style="Missing.TCombobox" if missing else "TCombobox")
         if missing and not self.missing_note.winfo_manager():
@@ -419,7 +420,7 @@ class CustomPanel:
                 self.borders_box: fill in ("fill", "spam") and apart and shown not in PATTERN_FILLS
                 and self.coloured_areas(tgts, placed, name)}
         rows.update(self.nested_row_states(tgts[0], shown == "nested"))
-        rows.update(self.tiles_row_states(shown == "tiles"))
+        rows.update(self.tiles_row_states(tgts[0], shown == "tiles"))
         self.show_custom_rows({w for w, on in rows.items() if on})
         if not placed and live:
             info = tr("panel_custom.live_shape_what_you_draw_goes")
@@ -697,8 +698,10 @@ class CustomPanel:
             return self.sync_hz_panels()
 
         def changed(t):
+            # (Nested / Tiles don't mix with Hz bass: switched on, they're taken off)
+            no_pattern = ("nested", "tiles") if hz else ()
             if t is self.custom_defaults:  # (shared with the Hz bass tool: new spam shapes keep their own gate and
-                rest = {k: v for k, v in t.items() if k not in ("hz", "before_hz")}  # Range, user)
+                rest = {k: v for k, v in t.items() if k not in ("hz", "before_hz") + no_pattern}  # Range, user)
                 return dict(rest, hz=dict(t.get("hz") or {"auto": AUTO}, bpm=float(bpm), **hz)) if hz else rest
             if not hz:  # (off: the spam gate and Range it had before come back, user)
                 rest = {k: v for k, v in t.items() if k not in ("hz", "before_hz")}
@@ -708,7 +711,7 @@ class CustomPanel:
                     if was.get("range") and rest.get("range_kept"):
                         rest["range"] = rest.pop("range_kept")
                 return rest
-            rest = {k: v for k, v in t.items() if k != "hz"}
+            rest = {k: v for k, v in t.items() if k not in ("hz",) + no_pattern}
             # (a new one: Auto gates, user)
             new = dict(rest, hz=dict(t.get("hz") or {"auto": AUTO}, bpm=float(bpm), **hz), gate=hz_gate(hz, bpm))
             if not t.get("hz"):  # (switched on: what it had is kept; a Range doesn't work with Hz bass, user)

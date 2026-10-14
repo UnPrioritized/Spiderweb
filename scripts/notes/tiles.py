@@ -14,7 +14,6 @@ sh["tiles"] = {"of": {"name", "strokes"} (the tile's drawing, filling its box), 
 down and every other column side to side), "by" (tile colours: "diag" / "cols" / "rows" / "checker" / "one"),
 "colours" (how many channels), "whole" (True = only tiles the outline doesn't cut), "at"}."""
 
-import bisect
 import json
 import math
 
@@ -30,7 +29,10 @@ TILES_DEFAULTS = {"of": {"name": "Circle", "strokes": CIRCLE}, "keys": 12, "leng
                   "gap": 0.25, "layout": "grid", "flip": "none", "by": "diag", "colours": 4, "whole": False}
 MOST_KEYS = 128
 MOST_COLOURS = 15
-MOST_TILES = 200000  # (past this many tiles the fill gives up: a tile of one key in a huge shape)
+MOST_BEATS = 10 ** 4  # (the longest tile length / gap kept)
+MOST_TILES = 1000000  # (past this many tiles, or MOST_NOTES of their notes, the fill is left empty: the panel says so)
+MOST_NOTES = 8000000
+KEPT_BYTES = 300 * 2 ** 20  # (tiles_spans remembered: dropped past this much memory)
 _spans = {}  # tiles_spans, remembered
 
 
@@ -49,7 +51,7 @@ def clean_tiles(c):
         out["gap_keys"] = max(0, min(MOST_KEYS, int(c.get("gap_keys", out["gap_keys"]))))
         for k in ("length", "gap"):
             x = float(c.get(k, out[k]))
-            out[k] = max(1e-6 if k == "length" else 0.0, min(10 ** 4, x)) if math.isfinite(x) else out[k]
+            out[k] = max(1e-6 if k == "length" else 0.0, min(MOST_BEATS, x)) if math.isfinite(x) else out[k]
         out["colours"] = max(1, min(MOST_COLOURS, int(c.get("colours", out["colours"]))))
     except (TypeError, ValueError):
         return None
@@ -91,11 +93,79 @@ def tiles_spans(sh, ppq, centre):
            tuple(round(c, 9) for c in centre))
     got = _spans.get(key)
     if got is None:
-        if len(_spans) > 60:
+        if len(_spans) > 60 or sum(a.nbytes for a in _spans.values()) > KEPT_BYTES:
             _spans.clear()
         got = _spans[key] = find_tiles(sh, ppq, centre)
         got.flags.writeable = False
     return got
+
+
+def too_many(sh, ppq):
+    """The Tiles fill is left empty: too many tiles (or their notes) for this shape (the panel says so)."""
+    from notes.nested import centre_bp
+    base = inside_rows(sh, ppq)
+    return bool(len(base)) and tile_grid(sh, ppq, base, centre_bp(sh, ppq), count=True) is None
+
+
+def tile_grid(sh, ppq, base, centre, count=False):
+    """Every tile that could touch the inside's key rows: (i, j, their notes' (start, end, key), each note's
+    tile), or None when they're more than MOST_TILES or their notes more than MOST_NOTES. count: only whether
+    they're too many (None) or not (True), without making their notes."""
+    cfg = sh["tiles"]
+    tw, th = cfg["length"] * ppq, cfg["keys"]  # (ticks, keys)
+    sx, sy = tw + cfg["gap"] * ppq, th + cfg["gap_keys"]
+    x0 = centre[0] * ppq - tw / 2  # (the tile on the centre point: its box's left edge, bottom row on a whole key)
+    y0 = int(math.floor(centre[1] - th / 2 + 0.5))
+    keys = base[:, 2]
+    lo_k, hi_k = int(keys.min()), int(keys.max())
+    first = np.full(hi_k - lo_k + 1, np.inf)
+    last = np.full(hi_k - lo_k + 1, -np.inf)
+    np.minimum.at(first, keys - lo_k, base[:, 0])
+    np.maximum.at(last, keys - lo_k, base[:, 1])
+    brick = cfg["layout"] == "brick"
+    i_all, j_all, total = [], [], 0
+    for j in range(math.floor((lo_k - y0 - th) / sy), math.ceil((hi_k - y0) / sy) + 1):
+        k0, k1 = max(lo_k, y0 + j * sy), min(hi_k, y0 + j * sy + th - 1)  # (the keys this row of tiles covers)
+        if k0 > k1:
+            continue
+        a, b = first[k0 - lo_k:k1 - lo_k + 1].min(), last[k0 - lo_k:k1 - lo_k + 1].max()
+        if not a < b:
+            continue
+        shift = sx / 2 if brick and j % 2 else 0.0
+        i0, i1 = math.floor((a - x0 - shift - tw) / sx), math.ceil((b - x0 - shift) / sx)
+        total += i1 - i0 + 1
+        if total > MOST_TILES:
+            return None
+        i_all.append(np.arange(i0, i1 + 1, dtype=np.int64))
+        j_all.append(np.full(i1 - i0 + 1, j, np.int64))
+    if not i_all:
+        return np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros((0, 3), np.int64), np.zeros(0, np.int64)
+    ii, jj = np.concatenate(i_all), np.concatenate(j_all)
+    shift = np.where(brick & (jj % 2 == 1), sx / 2, 0.0)
+    dt = np.floor(x0 + shift + ii * sx + 0.5).astype(np.int64)
+    dk = y0 + jj * sy
+    odd_i, odd_j = ii % 2 == 1, jj % 2 == 1
+    fh = odd_i & (cfg["flip"] in ("h", "hv"))
+    fv = odd_i & (cfg["flip"] == "v") | odd_j & (cfg["flip"] == "hv")
+    spans, tids, notes = [], [], 0
+    for h in (False, True):
+        for v in (False, True):
+            at = np.flatnonzero((fh == h) & (fv == v))
+            if not len(at):
+                continue
+            pat = tile_pattern(sh, ppq, h, v)
+            notes += len(pat) * len(at)
+            if notes > MOST_NOTES:
+                return None
+            if len(pat) and not count:
+                off = np.column_stack([dt[at], dt[at], dk[at]])
+                spans.append((off[:, None, :] + pat[None, :, :]).reshape(-1, 3))
+                tids.append(np.repeat(at, len(pat)))
+    if count:
+        return True
+    if not spans:
+        return ii, jj, np.zeros((0, 3), np.int64), np.zeros(0, np.int64)
+    return ii, jj, np.concatenate(spans), np.concatenate(tids)
 
 
 def find_tiles(sh, ppq, centre):
@@ -104,80 +174,42 @@ def find_tiles(sh, ppq, centre):
     base = inside_rows(sh, ppq)
     if not len(base):
         return none
-    tw, th = cfg["length"] * ppq, cfg["keys"]  # (ticks, keys)
-    sx, sy = tw + cfg["gap"] * ppq, th + cfg["gap_keys"]
-    # the tile on the centre point: its box's left edge / bottom row (whole keys)
-    x0 = centre[0] * ppq - tw / 2
-    y0 = int(math.floor(centre[1] - th / 2 + 0.5))
-    lo_t, hi_t = int(base[:, 0].min()), int(base[:, 1].max())
-    lo_k, hi_k = int(base[:, 2].min()), int(base[:, 2].max())
-    j0, j1 = math.floor((lo_k - y0 - th) / sy), math.ceil((hi_k - y0) / sy)
-    i0, i1 = math.floor((lo_t - x0 - tw - sx) / sx), math.ceil((hi_t - x0) / sx)
-    if (j1 - j0 + 1) * (i1 - i0 + 1) > MOST_TILES:
+    grid = tile_grid(sh, ppq, base, centre)
+    if grid is None:  # (too many: left empty, the panel says why)
         return none
-    patterns = {}
-    pieces, ids = [], []
-    tiles = []  # (i, j) of each tile
-    for j in range(j0, j1 + 1):
-        shift = sx / 2 if cfg["layout"] == "brick" and j % 2 else 0.0
-        for i in range(i0, i1 + 1):
-            fh = cfg["flip"] in ("h", "hv") and i % 2 == 1
-            fv = (cfg["flip"] == "v" and i % 2 == 1) or (cfg["flip"] == "hv" and j % 2 == 1)
-            pat = patterns.get((fh, fv))
-            if pat is None:
-                pat = patterns[(fh, fv)] = tile_pattern(sh, ppq, fh, fv)
-            if not len(pat):
-                continue
-            dt = int(math.floor(x0 + shift + i * sx + 0.5))
-            dk = y0 + j * sy
-            if dt + pat[:, 1].max() <= lo_t or dt + pat[:, 0].min() >= hi_t or dk + th <= lo_k or dk > hi_k:
-                continue
-            pieces.append(pat + [dt, dt, dk])
-            ids.append(np.full(len(pat), len(tiles), np.int64))
-            tiles.append((i, j))
-    if not pieces:
+    ii, jj, spans, tid = grid
+    if not len(spans):
         return none
-    spans = np.concatenate(pieces)
-    tid = np.concatenate(ids)
-    got, gid, cut = clip(spans, tid, base, len(tiles))
+    got, gid, cut = clip(spans, tid, base, len(ii))
     if cfg["whole"]:
         keep = ~cut[gid]
         got, gid = got[keep], gid[keep]
     if not len(got):
         return none
-    ij = np.asarray(tiles, np.int64)[gid]
-    n = cfg["colours"]
+    i, j = ii[gid], jj[gid]
     by = cfg["by"]
-    colour = (ij[:, 0] + ij[:, 1] if by == "diag" else ij[:, 0] if by == "cols" else ij[:, 1] if by == "rows"
-              else (ij[:, 0] + ij[:, 1]) & 1 if by == "checker" else np.zeros(len(ij), np.int64)) % n
+    colour = (i + j if by == "diag" else i if by == "cols" else j if by == "rows"
+              else (i + j) & 1 if by == "checker" else np.zeros(len(i), np.int64)) % cfg["colours"]
     out = np.column_stack([got, colour]).astype(np.int64)
     return out[np.lexsort((out[:, 0], out[:, 2]))]
 
 
 def clip(spans, tid, base, count):
-    """The tiles' (start, end, key) stretches cut to the shape's inside: (pieces, each piece's tile, cut[tile] =
-    some of that tile lay outside the shape)."""
-    rows = {}
-    for s, e, k in base.tolist():
-        rows.setdefault(k, []).append((s, e))
-    starts = {k: [a for a, _ in sorted(v)] for k, v in rows.items()}
-    ends = {k: [b for _, b in sorted(v)] for k, v in rows.items()}
-    out, oid = [], []
+    """The tiles' (start, end, key) stretches cut to the shape's inside (its stretches don't overlap on a key):
+    (pieces, each piece's tile, cut[tile] = some of that tile lay outside the shape)."""
+    lo = int(min(spans[:, 0].min(), base[:, 0].min()))
+    big = int(max(spans[:, 1].max(), base[:, 1].max())) - lo + 1
+    b = base[np.lexsort((base[:, 0], base[:, 2]))]
+    b_start, b_end = b[:, 2] * big + (b[:, 0] - lo), b[:, 2] * big + (b[:, 1] - lo)
+    first = np.searchsorted(b_end, spans[:, 2] * big + (spans[:, 0] - lo), "right")  # (the first ending after it starts)
+    n = np.maximum(np.searchsorted(b_start, spans[:, 2] * big + (spans[:, 1] - lo), "left") - first, 0)
+    which = np.repeat(np.arange(len(spans)), n)
+    k = np.repeat(first, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
+    s, e = np.maximum(spans[which, 0], b[k, 0]), np.minimum(spans[which, 1], b[k, 1])
+    ok = e > s
+    pieces = np.column_stack([s[ok], e[ok], spans[which[ok], 2]]).astype(np.int64).reshape(-1, 3)
+    inside = np.bincount(which[ok], (e - s)[ok], len(spans))
     cut = np.zeros(count, bool)
-    for (s, e, k), t in zip(spans.tolist(), tid.tolist()):
-        st, en = starts.get(k), ends.get(k)
-        if not st:
-            cut[t] = True
-            continue
-        n = bisect.bisect_right(en, s)  # (the first stretch of the row ending after s)
-        inside = 0
-        while n < len(st) and st[n] < e:
-            a, b = max(s, st[n]), min(e, en[n])
-            if b > a:
-                out.append((a, b, k))
-                oid.append(t)
-                inside += b - a
-            n += 1
-        if inside < e - s:
-            cut[t] = True
-    return np.asarray(out, np.int64).reshape(-1, 3), np.asarray(oid, np.int64), cut
+    cut[tid[inside < spans[:, 1] - spans[:, 0]]] = True
+    return pieces, tid[which[ok]], cut
+

@@ -9,10 +9,10 @@ from tkinter import messagebox, ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.tiles import BY, FLIPS, LAYOUTS, MOST_COLOURS, MOST_KEYS, TILES_DEFAULTS
+from notes.tiles import BY, FLIPS, LAYOUTS, MOST_BEATS, MOST_COLOURS, MOST_KEYS, TILES_DEFAULTS, too_many
 from window import look
 from window.drawer import library_lists
-from window.panel_nested import NOTES_CHOICES, nested_on
+from window.panel_nested import NOTES_CHOICES
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, name_list, set_names, unchanged
 
 # the number boxes: (setting, label, unit, lowest, highest, Scrub steps, in ticks); two a row
@@ -28,7 +28,8 @@ TILES_UNDO = tr("panel_custom.tiles")
 
 def tiles_on(t):
     """Custom shape (or the settings for new ones) t with a Tiles fill (Nested wins if it has both)."""
-    return bool(t.get("tiles")) and t.get("fill") in ("fill", "spam") and not nested_on(t)
+    return (bool(t.get("tiles")) and t.get("fill") in ("fill", "spam") and not t.get("text") and "notes" not in t
+            and not t.get("hz") and not t.get("nested"))
 
 
 class TilesPanel:
@@ -103,6 +104,10 @@ class TilesPanel:
                 for w in (lb, e):
                     Tooltip(w, tr("panel_custom.tiles_colours_tip"))
                 self.tiles_boxes["colours"] = (e, var)
+        # too many tiles for the shape: it's left empty (tiles.too_many)
+        self.tiles_warn = ttk.Label(opts, text=tr("panel_custom.tiles_too_many"), foreground=look.WARN,
+                                    font=look.font(8), wraplength=int(260 * self.scale), justify="left")
+        self.tiles_rows.append(self.tiles_warn)
         self.tiles_whole_var = tk.BooleanVar(value=False)
         b = ttk.Checkbutton(opts, text=tr("panel_custom.tiles_whole"), variable=self.tiles_whole_var,
                             command=lambda: self.set_tiles("whole", self.tiles_whole_var.get()))
@@ -131,9 +136,11 @@ class TilesPanel:
         self.tiles_whole_var.set(bool(cfg.get("whole")))
         self._loading = False
 
-    def tiles_row_states(self, on):
-        """{row: shown} for sync_custom's show_custom_rows (on: Tiles is the Inside fill shown)."""
-        return {w: on for w in self.tiles_rows}
+    def tiles_row_states(self, t, on):
+        """{row: shown} for sync_custom's show_custom_rows (on: Tiles is the Inside fill shown); the warning only
+        while t (a placed shape) has too many tiles."""
+        warn = on and t is not self.custom_defaults and too_many(t, self.ppq)
+        return {w: on and (w is not self.tiles_warn or warn) for w in self.tiles_rows}
 
     def refresh_tiles_names(self):
         set_names(self.tiles_of_box, *library_lists())
@@ -195,7 +202,7 @@ class TilesPanel:
         lo, hi, ticks = (spec[3], spec[4], spec[6]) if spec else (1, MOST_COLOURS, False)
         try:
             x = math.floor(calc(var.get()) + 0.5)
-            if not lo <= x <= hi:
+            if not lo <= x <= hi or ticks and x > MOST_BEATS * self.ppq:  # (no more than a saved shape keeps)
                 raise ValueError
         except (ValueError, ZeroDivisionError):
             bad(e)

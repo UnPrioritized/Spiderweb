@@ -263,7 +263,7 @@ class LiveKeys:
             lo, hi = key_range(sh)
         else:
             new = dict(app.defaults, kind="custom", name=tr("hz.name"), strokes=[copy.deepcopy(BOX_STROKE)],
-                       **custom_settings(app.custom_defaults))
+                       **custom_settings(app.custom_defaults, patterns=False))
             new["fill"] = "spam"
             hz = win.new_hz(self.bpm)
             lo, hi = app.hz_defaults["lo"], app.hz_defaults["hi"]

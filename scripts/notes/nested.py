@@ -33,6 +33,7 @@ WAYS = ("scale", "band", "blend")
 NESTED_DEFAULTS = {"way": "scale", "steps": 8, "last": 0.0, "spacing": 0, "turn": 0.0, "colours": 4, "skip": False,
                    "mix": 1.0}
 MOST_STEPS = 60
+RECOLOUR = ("colours", "skip")  # (settings that only change the steps' colours, not their shapes)
 MOST_COLOURS = 15
 _spans = {}  # nested_spans, remembered
 
@@ -120,6 +121,17 @@ def centre_bp(sh, ppq):
             float((w * rows[:, 2]).sum() / total))
 
 
+def handle_bp(sh, ppq):
+    """Where the centre handle shows: centre_bp, but a sliced piece's is its whole's (its notes are made from the
+    whole, sliced.source)."""
+    if sh.get("cut"):
+        from notes.sliced import source
+        got = source(sh)
+        if got and centre_key(got[0]):
+            return centre_bp(got[0], ppq)
+    return centre_bp(sh, ppq)
+
+
 def centre_uv(sh, ppq):
     """The centre point in the shape's box (u, v), or None if the box is flat."""
     at = sh[centre_key(sh)].get("at")
@@ -158,44 +170,55 @@ def nested_spans(sh, ppq):
     """(start, end, key, colour) ticks of every stretch filled, colour 0 = the shape's own (like custom.area_spans;
     an empty step left out). Remembered."""
     cfg = sh["nested"]
-    key = (json.dumps([sh["strokes"], sh["pts"], cfg, sh.get("round")]), bool(sh.get("union")), ppq)
-    got = _spans.get(key)
+    shaped = {k: v for k, v in cfg.items() if k not in RECOLOUR}
+    key = (json.dumps([sh["strokes"], sh["pts"], shaped, sh.get("round")]), bool(sh.get("union")), ppq)
+    got = _spans.get(key)  # (the steps, before their colours: Colours / Every other one empty only recolour)
     if got is None:
         if len(_spans) > 60:
             _spans.clear()
-        got = _spans[key] = find_nested(sh, ppq)
-        got.flags.writeable = False
-    return got
+        got = _spans[key] = (nested_steps(sh, ppq), {})
+    steps, coloured = got
+    paint = tuple(cfg[k] for k in RECOLOUR)
+    out = coloured.get(paint)
+    if out is None:
+        out = coloured[paint] = painted(steps, cfg)
+        out.flags.writeable = False
+    return out
 
 
 def find_nested(sh, ppq):
+    """nested_spans, worked out again (not remembered)."""
+    return painted(nested_steps(sh, ppq), sh["nested"])
+
+
+def nested_steps(sh, ppq):
+    """Each step's (start, end, key) stretches, the shape itself first ([] when there's nothing to fill)."""
     cfg = sh["nested"]
     base = inside_rows(sh, ppq)
-    none = np.zeros((0, 4), np.int64)
     if not len(base):
-        return none
+        return []
     centre, view = centre_bp(sh, ppq), view_of(sh)
     if view[1] <= 0:
-        return np.column_stack([base, np.zeros(len(base), np.int64)])
+        return [base]
     if cfg["way"] == "band":
-        steps = band_steps(sh, ppq, base, view)
-    elif cfg["way"] == "blend":
-        steps = blend_steps(sh, ppq, base, centre, view)
-    else:
-        steps = scaled_steps(sh, ppq, base, centre, view)
-    return painted(steps, cfg)
+        return band_steps(sh, ppq, base, view)
+    if cfg["way"] == "blend":
+        return blend_steps(sh, ppq, base, centre, view)
+    return scaled_steps(sh, ppq, base, centre, view)
 
 
 def band_steps(sh, ppq, base, view):
     """Even band: step i = the inside shrunk inward by (1 - its size) of the deepest spot's distance to the outline
     (shrink.inner_rows, exact like the outline gate, in the view it was first drawn in)."""
     loops, walled = edge_loops(sh)
-    keys = range(int(base[:, 2].min()), int(base[:, 2].max()) + 1)
     deepest = deepest_field(sh, view)[1]
     steps = [base]
     for size, _ in step_sizes(sh["nested"])[1:]:
         r = (1 - size) * deepest
-        steps.append(inner_rows(loops, walled, keys, r, ppq, view) if r > 0 else base)
+        before = steps[-1]  # (a deeper step lies inside the one before: only its key rows are worked out)
+        keys = sorted(set(before[:, 2].tolist())) if len(before) else []
+        steps.append(inner_rows(loops, walled, keys, r, ppq, view) if r > 0 and keys else
+                     before if r <= 0 else np.zeros((0, 3), np.int64))
     return steps
 
 

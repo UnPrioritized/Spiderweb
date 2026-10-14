@@ -136,12 +136,14 @@ def near_rows(seg, ys, r):
     row, lo, hi = row[got], lo[got], hi[got]
     order = np.lexsort((hi, lo, row))
     row, lo, hi = row[order], lo[order], hi[order]
-    for k, a, b in zip(row.tolist(), lo.tolist(), hi.tolist()):  # (merged like merge: touching ones join)
-        o = out[k]
-        if o and a <= o[-1][1]:
-            o[-1][1] = max(o[-1][1], b)
-        else:
-            o.append([a, b])
+    # merged like merge, line by line (touching ones join: a stretch starting at or before the furthest end so far
+    # goes on the one before; a Python loop over every stretch was most of a deep Nested Even band's time)
+    cuts = np.r_[0, np.flatnonzero(row[1:] != row[:-1]) + 1, len(row)]
+    for s, e in zip(cuts[:-1].tolist(), cuts[1:].tolist()):
+        a, b = lo[s:e], hi[s:e]
+        new = np.r_[True, a[1:] > np.maximum.accumulate(b)[:-1]]
+        at = np.flatnonzero(new)
+        out[int(row[s])] = np.column_stack([a[at], np.maximum.reduceat(b, at)]).tolist()
     return out
 
 

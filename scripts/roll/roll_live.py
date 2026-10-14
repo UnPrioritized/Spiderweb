@@ -14,7 +14,7 @@ from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half
 from notes.custom import (add_stroke, box_frame, carried_spots, carry_areas, custom_settings, frame_to_bp, frame_to_uv,
                           map_stroke, new_live_shape, plain_stroke, refit, settled_areas, stroke_bp,
                           stroke_ends, stroke_points, uv_k)
-from notes.nested import centre_bp, set_centre, uses_centre
+from notes.nested import handle_bp, set_centre, uses_centre
 from notes.pattern import has_formula
 from notes.polygon import polygon_aspect, polygon_strokes
 from roll.roll_funnel import seg_dist
@@ -231,7 +231,7 @@ class LiveDrawing:
         if st:
             out += [(*to_bp(*st["pts"][j]), (kind, j), True) for j, kind in pen_handles(st["pts"]) if kind != "end"]
         if uses_centre(sh):  # Nested / Tiles: the centre point ("centre",), any tool (nested.py)
-            out.append((*centre_bp(sh, self.app.ppq), ("centre",), True))
+            out.append((*handle_bp(sh, self.app.ppq), ("centre",), True))
         return out
 
     def drag_stroke_point(self, sh, hid, e):

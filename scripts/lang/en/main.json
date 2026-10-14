@@ -426,6 +426,7 @@
  "panel_custom.tiles_colours_tip": "How many channels the tiles take turns over. Each one is a colour of its own with Multi channel.",
  "panel_custom.tiles_whole": "Only whole tiles",
  "panel_custom.tiles_whole_tip": "Leaves out every tile the outline cuts, so only whole tiles are left.",
+ "panel_custom.tiles_too_many": "Too many tiles for this shape, so it's left empty. Make the tiles bigger or the gaps wider.",
  "panel_custom.tiles_needs_multi": "\n\nTiles get their colours only with Channels set to Multi channel.",
  "panel_custom.nested_needs_multi":"\n\nNested steps get their colours only with Channels set to Multi channel.",
  "panel_custom.inside_fill": "Inside fill",

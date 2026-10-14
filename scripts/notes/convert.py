@@ -23,7 +23,7 @@ from notes.tumour import LINE_KINDS
 
 CAN_TURN = LINE_KINDS + ("custom",)
 # a custom shape's own inside settings the live shape made of it keeps (besides fill / gate / align / ends)
-OWN_SETTINGS = CUSTOM_FLAGS + ("edge", "edge_mode", "range", "range_kept", "before_hz")
+OWN_SETTINGS = CUSTOM_FLAGS + ("edge", "edge_mode", "range", "range_kept", "before_hz", "nested", "tiles")
 
 
 def has_tumours(sh):
@@ -158,6 +158,10 @@ def to_live(shapes, paths, defaults, custom_defaults, k=None):
                   if to_bp]
     if areas:
         new["areas"] = areas
+    for key in ("nested", "tiles"):  # (Nested's / Tiles' centre point: on the same spot)
+        at = (new.get(key) or {}).get("at")
+        if at and first and to_uv:
+            new[key]["at"] = [round(x, 6) for x in to_uv(*frame_to_bp(first["pts"])(*at))]
     new["from"] = {"shapes": json.loads(json.dumps(shapes)), "strokes": json.loads(json.dumps(new["strokes"])),
                    "pts": [list(p) for p in new["pts"]], "vel": velocities(new)}
     return new

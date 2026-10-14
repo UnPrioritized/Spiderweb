@@ -217,7 +217,8 @@ class TextTyping:
                 app.shapes_changed()
         else:
             at, kept = ty.get("kept") or (None, None)
-            sh = dict(kept) if kept else dict(app.defaults, kind="custom", **custom_settings(app.custom_defaults))
+            sh = dict(kept) if kept else dict(app.defaults, kind="custom",
+                                              **custom_settings(app.custom_defaults, patterns=False))
             if build(sh, tx, axes):
                 ty.pop("kept", None)
                 at = len(app.shapes) if at is None or not ty["undo"] else min(at, len(app.shapes))

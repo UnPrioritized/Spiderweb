@@ -645,7 +645,7 @@ class HzGates:
                 return self.redraw()
             lo, hi = app.hz_defaults["lo"], app.hz_defaults["hi"]
             new = dict(app.defaults, kind="custom", name=tr("hz.name"), strokes=[copy.deepcopy(BOX_STROKE)],
-                       **custom_settings(app.custom_defaults))
+                       **custom_settings(app.custom_defaults, patterns=False))
             new.update(fill="spam", pts=box_frame(app.hz_start, lo, app.hz_start + sound_span(dict(fx, tones=tones)), hi),
                        hz=dict(self.new_hz(bpm), tones=copy.deepcopy(tones), grow=True, own=True,
                                **copy.deepcopy(fx), **({"loud": copy.deepcopy(self.loud)} if self.loud else {})))

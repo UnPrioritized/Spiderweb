@@ -91,13 +91,14 @@ def clean_cycle(c):
     return out
 
 
-def custom_settings(cd):
+def custom_settings(cd, patterns=True):
     """The fill settings a new custom shape gets from cd (the settings for new ones). Never Hz bass (user: new
-    shapes start without it; the Hz bass tool adds its own, from cd["hz"])."""
+    shapes start without it; the Hz bass tool adds its own, from cd["hz"]). patterns=False: no Nested / Tiles
+    either (text and the Hz bass tool can't use them)."""
     out = {k: cd[k] for k in ("fill", "gate", "align", "ends")}
     out.update({k: True for k in CUSTOM_FLAGS if cd.get(k)})
     for key in ("nested", "tiles"):  # (Inside fill Nested / Tiles; a new shape starts at its own middle)
-        if cd.get(key):
+        if cd.get(key) and patterns:
             out[key] = {k: v for k, v in cd[key].items() if k != "at"}
     if cd.get("edge"):
         out["edge"] = cd["edge"]
