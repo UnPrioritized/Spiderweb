@@ -12,7 +12,7 @@ import threading
 import numpy as np
 
 from files.lang import tr
-from files.speed import loops
+from files.speed import key_sort, loops
 from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX_STROKE, block_notes, check_notes,
                           clean_curve, clean_cycle,
                           clean_strokes, custom_notes_groups, custom_strokes, cycle_turns, cycling)
@@ -394,6 +394,19 @@ def note_array(notes, columns):
     return np.asarray(notes, np.int64).reshape(-1, columns)
 
 
+def unique_inverse(a):
+    """np.unique(a, return_inverse=True) of a 1-D array, the inverse flat. Whole numbers in a small range (tracks,
+    keys): counted instead of sorted (millions of a Hz bass's notes: a sort took ~0.1 s)."""
+    if a.dtype.kind in "iu" and len(a) and int(a.max()) - int(a.min()) <= max(1 << 20, len(a)):
+        lo = int(a.min())
+        there = np.bincount(a - lo) > 0
+        ids = np.flatnonzero(there)
+        at = np.cumsum(there) - 1
+        return (ids + lo).astype(a.dtype), at[a - lo]
+    ids, which = np.unique(a, return_inverse=True)
+    return ids, which.ravel()
+
+
 def unique_rows(a):
     """a without rows that repeat an earlier row (order kept)."""
     keep = unique_index(a)
@@ -404,7 +417,11 @@ def unique_index(a):
     """The rows unique_rows keeps."""
     if len(a) < 2:
         return np.arange(len(a))
-    order = np.lexsort(a.T[::-1])  # stable: within repeats the earliest comes first
+    if a.dtype == np.int64 and a.ndim == 2 and a.shape[1] in (3, 4):  # (notes: by key, then start, end, track;
+        c = a.T  # any order bringing repeats together does, and keys sort quickest)
+        order = key_sort(c[2], c[0], c[1], c[3] if a.shape[1] == 4 else c[1])
+    else:
+        order = np.lexsort(a.T[::-1])  # stable: within repeats the earliest comes first
     b = a[order]
     new = np.ones(len(a), bool)
     new[1:] = (b[1:] != b[:-1]).any(axis=1)
@@ -722,6 +739,15 @@ def clash_levels(lists):
     out = [np.zeros(len(n), np.int64) for n in lists]
     if len(lists) < 2:
         return out
+    fast = loops()
+    lens = [len(n) for n in lists]
+    if fast and sum(lens):  # (the compiled loop: the same levels)
+        rows = np.concatenate([n[:, :3] for n in lists]).astype(np.int64, copy=False)
+        if int(rows[:, 2].max()) - int(rows[:, 2].min()) <= 4 * len(rows) + 1024:  # (else: too spread for a table)
+            offs = np.concatenate([[0], np.cumsum(lens)]).astype(np.int64)
+            lv = np.zeros(len(rows), np.int64)
+            fast.clash_levels(rows, offs, lv)
+            return np.split(lv, offs[1:-1])
     span = max([int(n[:, 1].max()) for n in lists if len(n)] or [0]) + 1
     placed = []  # per level: its notes' key * span + start (sorted), and the latest end so far on that key
     for notes, lv in zip(lists, out):
@@ -923,8 +949,9 @@ def stretches(notes, owner, split="key"):
         notes = np.ascontiguousarray(notes, np.int64)
         out, m = fast.note_stretches(notes, split == "key", owner, np.zeros(0, np.int64))
         if m < 0:
-            key = notes[:, 2] if split == "key" else np.zeros(len(notes), np.int64)
-            out, m = fast.note_stretches(notes, split == "key", owner, np.lexsort((notes[:, 0], key)))
+            key = np.ascontiguousarray(notes[:, 2]) if split == "key" else np.zeros(len(notes), np.int64)
+            s = np.ascontiguousarray(notes[:, 0])
+            out, m = fast.note_stretches(notes, split == "key", owner, fast.key_order(key, s, s, s))
         return out if m == len(out) else out[:m].copy()
     flat = notes[:, 1] <= notes[:, 0]
     key = notes[:, 2] if split == "key" else np.zeros(len(notes), np.int64)
@@ -949,6 +976,11 @@ def clash_pairs(items, chunk=1 << 22):
     does a stretch without a length). Worked out in chunks of about `chunk` pairs at a time."""
     if not len(items):
         return set()
+    fast = loops()
+    n = int(items[:, 3].max()) + 1
+    if fast and n <= 4096 and items[:, 3].min() >= 0:  # (the compiled sweep: the same pairs)
+        a, b = np.nonzero(fast.clash_pairs(np.ascontiguousarray(items, np.int64), n))
+        return set(zip(a.tolist(), b.tolist()))
     order = np.lexsort((items[:, 3], items[:, 2], items[:, 1], items[:, 0]))
     k, s, e, o = (items[order, c] for c in range(4))
     vals, rank = np.unique(np.concatenate([s, e]), return_inverse=True)  # (ticks as ranks: no overflow)
@@ -1132,8 +1164,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                 unit_of.append(len(units))
                 units.append(lst)
                 continue
-            ids, which = np.unique(tr, return_inverse=True)
-            which = which.ravel()
+            ids, which = unique_inverse(np.asarray(tr))
             if pid is not None:  # (a piece of a paste: each track joins that track's unit in the other pieces)
                 if pid not in paste_units:  # (all its tracks' units at once, in track order: channels as before the cut)
                     every = np.unique(np.concatenate([np.asarray(t2) for t2, p2 in zip(tracks, pastes)
@@ -1156,7 +1187,13 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
             unit_of.append(len(units) + which)
             if sep:
                 forced.append(range(len(units), len(units) + len(ids)))
-            mine = [lst[which == k] for k in range(len(ids))]
+            if len(ids) > 1:  # (each track's notes in their order: one sort by track, not a pass per track)
+                o = key_sort(which.astype(np.int64), np.arange(len(which)))
+                cut = np.searchsorted(which[o], np.arange(len(ids) + 1))
+                every = lst[o]
+                mine = [every[a:b] for a, b in zip(cut[:-1].tolist(), cut[1:].tolist())]
+            else:
+                mine = [lst]
             if back[len(unit_of) - 1]:  # (each colour's channel as unflipped: counted from where it starts then)
                 starts = unflipped_starts(lst)
                 for k in range(len(ids)):

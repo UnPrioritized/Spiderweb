@@ -63,6 +63,32 @@ def loops():
     return _loops
 
 
+def key_sort(key, *cols):
+    """np.lexsort((..., cols[1], cols[0], key)): rows by key, then each column in turn, rows alike in their order.
+    The compiled loop for whole-number columns and a small key range (keys of a piano roll), else NumPy's."""
+    import numpy as np
+    fast = _loops
+    n = len(key)
+    if (fast and 0 < len(cols) <= 3 and n > 1 and all(getattr(c, "dtype", None) == np.int64 for c in (key, *cols))
+            and int(key.max()) - int(key.min()) <= max(65536, n)):
+        a = [np.ascontiguousarray(c) for c in cols]
+        a += [a[-1]] * (3 - len(a))  # (the last column again: changes no order)
+        return fast.key_order(np.ascontiguousarray(key), *a)
+    return np.lexsort((*cols[::-1], key))
+
+
+def key_rows(keys):
+    """(key, rows) for each key in keys, lowest first; rows as np.flatnonzero(keys == key)."""
+    import numpy as np
+    keys = np.asarray(keys)
+    if not len(keys):
+        return []
+    order = key_sort(keys, keys) if keys.dtype == np.int64 else np.argsort(keys, kind="stable")
+    sk = keys[order]
+    cut = np.concatenate([[0], np.flatnonzero(sk[1:] != sk[:-1]) + 1, [len(sk)]])
+    return [(sk[a], order[a:b]) for a, b in zip(cut[:-1].tolist(), cut[1:].tolist())]
+
+
 def without_loops():
     """True = the compiled loops won't come (no Numba, it failed, or turned off); False while they still load."""
     return _failed or not _started

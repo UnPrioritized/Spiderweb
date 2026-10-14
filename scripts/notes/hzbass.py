@@ -122,6 +122,7 @@ import json
 
 import numpy as np
 
+from files.speed import key_rows, key_sort, loops
 from notes.hz_settings import *  # noqa: F401,F403
 from notes.hz_lines import *  # noqa: F401,F403
 from notes.hz_lines import _shifted_line, _turned_repeat
@@ -175,9 +176,8 @@ def velocity_parts(sh, ppq, starts, keys):
     if not grid.loud:
         return None
     out, own = np.ones(len(starts)), np.zeros(len(starts), bool)
-    for key in np.unique(keys):
-        rows = np.flatnonzero(keys == key)
-        out[rows], own[rows] = grid.factor(int(key), starts[rows]), grid.own(int(key), starts[rows])
+    for key, rows in key_rows(keys):
+        out[rows], own[rows] = grid.factor_own(int(key), starts[rows])
     return out, own
 
 
@@ -219,8 +219,18 @@ def wave_ticks(sh, ppq, starts, keys):
     grid = squares(sh, ppq)
     if isinstance(grid, KeyGrid):
         out = np.full(len(starts), np.nan)
-        for key in np.unique(keys):
-            rows = np.flatnonzero(keys == key)
+        fast = loops()
+        starts, keys = np.asarray(starts), np.asarray(keys)
+        if (fast and starts.dtype == np.int64 and keys.dtype == np.int64 and len(keys)
+                and not (keys[1:] < keys[:-1]).any()):  # (sorted by key, as note_lengths has them: compiled)
+            cut = np.concatenate([[0], np.flatnonzero(keys[1:] != keys[:-1]) + 1, [len(keys)]]).tolist()
+            for a, b in zip(cut[:-1], cut[1:]):
+                sq = grid.made(int(keys[a]))[0]
+                if len(sq):  # (a key with no repeats of its own: NaN, as made)
+                    fast.wave_fill(starts, a, b, np.ascontiguousarray(sq[:, 0]),
+                                   np.ascontiguousarray(grid.wave_of[int(keys[a])]), out)
+            return out
+        for key, rows in key_rows(keys):
             got = grid.wave_at(int(key), starts[rows])
             if got is not None:
                 out[rows] = got
@@ -244,9 +254,26 @@ def note_lengths(hz, notes, ppq, stick=True, sh=None):
     stick = stick and hz.get("stick")
     if not len(notes) or (got == FULL_LENGTH and not stick):
         return notes
-    o = np.lexsort((notes[:, 0], notes[:, 2]))
+    o = key_sort(notes[:, 2], notes[:, 0])
     s, e, k = notes[o, 0], notes[o, 1], notes[o, 2]
     big = np.int64(1) << 40
+    fast = loops()
+    if (fast and notes.dtype == np.int64 and int(s.min()) >= 0 and int(s.max()) < big and int(k.min()) >= 0
+            and int(k.max()) < 1 << 20):  # (the compiled loop: the same ends)
+        mode, beats, pct, wv, wf = 3, 0.0, 0.0, np.zeros(1), 0.0
+        if "beats" in got:
+            mode, beats = 0, float(length_ticks(got, ppq))
+        elif "wave" in got:
+            waves = wave_ticks(sh, ppq, s, k) if sh is not None else None
+            if waves is not None:
+                mode, wv, wf = 1, np.asarray(waves, np.float64), float(got["wave"])
+        else:
+            mode, pct = 2, got["pct"]
+        whole = isinstance(pct, (int, np.integer)) and not isinstance(pct, bool)  # (int x int: as NumPy does)
+        out = notes.copy()
+        out[o, 1] = fast.note_ends(np.ascontiguousarray(s), np.ascontiguousarray(e), np.ascontiguousarray(k),
+                                   bool(stick), mode, beats, float(pct), whole, wv, wf, big)
+        return out
     keyed = k.astype(np.int64) * big + s
     j = np.searchsorted(keyed, keyed, "right")  # (the next note on its key, starting later)
     has = j < len(s)

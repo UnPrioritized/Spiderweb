@@ -6,6 +6,7 @@ import math
 
 import numpy as np
 
+from files.speed import loops
 from notes.hz_settings import (CRUSH, FM_INDEX, FX, GROWL, HZ_DEFAULTS, MODE_AMOUNTS, MOD_RACK, MOD_SETTINGS,
                                NOT_EACH, OFF_PITCH, OSC2_TUNE, SOFT, SPEED_KNOBS, SUB, TIME_STEP, TREMOLO,
                                TREMOLO_DEPTH, VEL_FX, VIBRATO, VIBRATO_RATE, VOICES, WAH, WAVES, blend_gains, copies,
@@ -408,6 +409,81 @@ class KeyGrid:
         """The highest a knob that makes no line can be (plain: as set): as far as the MOD tab's links can take it."""
         return setting_most(self.hz, name, plain) if name in self.moved else plain
 
+    def fast_cache(self):
+        """Once per KeyGrid: the flat arrays' cos / sin values that don't depend on the key row."""
+        c = self.__dict__.get("_fast")
+        if c is not None:
+            return c
+        f, each = self.flat, self.each
+        vib_rate = np.repeat(each["vib_rate"], each["n"])
+        vib = vib_rate * f["since"]
+        vf = 1.0 + VIBRATO * f["vibrato"] * np.sin(2.0 * np.pi * vib)
+        trem = self.runs[0]["trem"]
+        tf = trem[0] + trem[1] * (1.0 + np.cos(2.0 * np.pi * f["turns"])) / 2.0
+        c = self._fast = {"vf": vf, "tf": tf, "one": np.ones(len(f["beat"]))}
+        return c
+
+    def fast_ok(self):
+        """Whether this KeyGrid's settings are all plain enough for made_fast (else made's NumPy code does it)."""
+        ok = self.__dict__.get("_fast_ok")
+        if ok is not None:
+            return ok
+        f = self.flat
+        ok = bool(not self.echo and not self.reverb and not self.comp and not self.shaped and not self.osc2
+                  and not self.a_off and not self.flanger and not self.chorus and self.starting is None
+                  and not self.moved and not self.track and not any(self.trem_in) and "tremolo_in" not in self.timed
+                  and not self.hz.get("loud") and bool(np.all(self.gains == 1.0)) and self.runs
+                  and not any(m.get("kind") for m in self.modes)
+                  and not self.each["tail"].any() and f["limits"].dtype in (np.float64, np.int64)
+                  and f["beat"].dtype == np.float64)
+        self._fast_ok = ok
+        return ok
+
+    def made_fast(self, key):
+        """made() with the compiled loops (fast_ok: the plain settings), the same numbers; None = made() does it."""
+        x = min(1.0, max(0.0, (key - self.lo) / self.n))
+        xv = min(1.0, max(0.0, (key - self.lo) / max(1, self.n - 1)))
+        noise = np.random.default_rng(1000 + key)
+        row = key - self.lo
+        which = list(range(len(self.copies))) if self.same else [row % len(self.copies)]
+        cents = [self.copies[i] for i in which]
+        f, each, c = self.flat, self.each, self.fast_cache()
+        runs_sel = np.arange(len(self.runs), dtype=np.int64)
+        copy_sel = np.array(which, np.int64)
+        scale_c = np.array([2.0 ** (-cc / 1200.0) for cc in cents])
+        part, number, src, w, st0, run_p, ok = loops().hz_expand(
+            runs_sel, copy_sel, scale_c, each["n"], each["offsets"], each["prev"], each["moves"], len(self.runs),
+            x, OFF_PITCH, f["offpitch"], c["vf"], f["waves"], f["starts"])
+        if not ok or len(part) == 0:
+            return None
+        hits = np.asarray(trace_hits(self.trace, (key - self.lo + 0.5) / self.n), float) if self.trace else np.zeros(0)
+        part2, num2, src2, w2, st2, late, nsrc, noisy_p, place, took = loops().hz_late(
+            part, number, src, w, st0, hits, bool(self.trace), x, f["slant"], f["groups"], f["noisy"], len(run_p))
+        drawn = noise.random(int(took))
+        loud_sw, c1 = c["one"], c["one"]
+        if self.loud and f["swept"].any():
+            where = f["sweep"]
+            swept = 0.08 + 0.92 * np.clip(np.cos(np.pi * (xv - where)), 0.0, 1.0) ** 4
+            loud_sw = np.where(f["swept"], swept, 1.0)
+        has_wah = bool(self.loud and f["wah"].any())
+        if has_wah:
+            c1 = 1.0 + np.cos(2.0 * np.pi * WAH * f["wah"] * (xv - 0.5))
+        until_p = each["until"][run_p]
+        sq, factor, mine, wv, K = loops().hz_finish(
+            part2, num2, src2, w2, st2, late, nsrc, noisy_p, place, drawn, until_p, self.gains[copy_sel],
+            bool(self.loud), has_wah, f["has_volume"], f["volume"], f["level"], f["octave"], f["own"], f["layer"],
+            f["limits"], loud_sw, c1, c["tf"], SOFT)
+        if K == 0:
+            return None
+        if f["limits"].dtype != np.float64:  # (whole ticks in the limits: the grid is whole too, as _grid makes it)
+            sq = sq.astype(f["limits"].dtype)
+        self.wave_of[key] = wv
+        factor.setflags(write=False)
+        mine.setflags(write=False)
+        self.mine[key] = mine
+        got = self.got[key] = (sq, factor)
+        return got
+
     def made(self, key):
         """A key's repeats, (start, end) ticks in order, none overlapping, and each one's part of the velocity.
         Every run x Voice copy is a "part" (in that order); all parts are worked out together, in one set of arrays
@@ -415,6 +491,10 @@ class KeyGrid:
         got = self.got.get(key)
         if got is not None:
             return got
+        if loops() and self.fast_ok():  # (the compiled loops: the same numbers)
+            got = self.made_fast(key)
+            if got is not None:
+                return got
         x = min(1.0, max(0.0, (key - self.lo) / self.n))  # where the key is among the shape's keys, 0 = the lowest
         xv = min(1.0, max(0.0, (key - self.lo) / max(1, self.n - 1)))  # (for loudness: 1 = the highest key)
         noise = np.random.default_rng(1000 + key)  # (the same every time: the key is the seed)
@@ -841,6 +921,15 @@ class KeyGrid:
             return np.ones(len(starts))
         at = np.minimum(np.searchsorted(sq[:, 0], starts), len(sq) - 1)
         return np.where(sq[at, 0] == starts, factor[at], 1.0)
+
+    def factor_own(self, key, starts):
+        """factor and own together (one search for both)."""
+        sq, factor = self.made(key)
+        if not len(sq):
+            return np.ones(len(starts)), np.zeros(len(starts), bool)
+        at = np.minimum(np.searchsorted(sq[:, 0], starts), len(sq) - 1)
+        hit = sq[at, 0] == starts
+        return np.where(hit, factor[at], 1.0), hit & self.mine[key][at]
 
     def own(self, key, starts):
         """Which of a key's notes (start ticks) have their note's own velocity from its loudness line: their factor

@@ -9,6 +9,7 @@ import zlib
 import numpy as np
 
 from files.lang import tr
+from files.speed import key_rows
 from notes.arc import arc_k, arc_points, ellipse_bezier
 from notes.areas import ALL_COLOURS, COLOURS, _maps, area_map, inside_loops  # (areas coloured by hand)
 from notes.faces import faces  # (what's filled when it isn't plain even-odd: fill_test)
@@ -1760,8 +1761,7 @@ def chop_keys(stretches, grid, count=False, fit=False, keep=False):
     q = stretches[:, 2]
     n = np.zeros(len(stretches), np.int64)
     parts, owners = [], []
-    for key in np.unique(q):
-        rows = np.flatnonzero(q == key)
+    for key, rows in key_rows(q):
         sq = grid.squares(int(key))
         n[rows] = chop_grid(stretches[rows], sq, True, fit, keep)
         if not count:
