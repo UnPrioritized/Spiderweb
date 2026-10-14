@@ -673,6 +673,9 @@ def refit(sh, song_beats=False):
         st.update(new)
     if sh.get("areas"):
         sh["areas"] = [[(u - ul) / w, (v - vl) / h, c] for u, v, c in sh["areas"]]
+    at = (sh.get("nested") or {}).get("at")
+    if at:  # (Nested's centre point stays where it is on the roll)
+        sh["nested"] = dict(sh["nested"], at=[(at[0] - ul) / w, (at[1] - vl) / h])
     r = sh.get("round")
     if r:  # (still the view it was drawn in, like an arc's k: drawn_view)
         sh["round"] = r * h / w if isinstance(r, (int, float)) else [x * h / w for x in r]

@@ -1476,6 +1476,14 @@ class RollDrawing:
                     self.create_rectangle(x - q, y - q, x + q, y + q, fill=look.HANDLE_FILL, outline=STROKE_POINT_COLOR,
                                           width=2)
                     continue
+                if kind == "centre":  # Nested's centre point: a ring with a cross, on a white edge
+                    q, c = r + 2 * s, r + 6 * s
+                    for width, colour in ((max(3, round(3.5 * s)), look.HANDLE_FILL), (max(1, round(1.5 * s)),
+                                                                                     look.HANDLE)):
+                        self.create_line(x - c, y, x + c, y, fill=colour, width=width)
+                        self.create_line(x, y - c, x, y + c, fill=colour, width=width)
+                        self.create_oval(x - q, y - q, x + q, y + q, outline=colour, width=width)
+                    continue
                 if kind != "start":
                     color = colors.get(i[1:3], HANDLE_COLOR)
             elif sh["kind"] == "curve":  # a curve's ends stay squares, like a line's
