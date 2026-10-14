@@ -413,6 +413,8 @@ class RollDrawing:
             self.after_cancel(self._exact)
             self._exact = None
         moved = self.pan_pixels(old, pic, w, h)
+        last, self._last_pic = self._last_pic, pic  # (only the view moved since the last redraw: scrolling)
+        scrolled = last is not None and last[0] is pic[0] and last[1][0] == pic[1][0] and last[1][1:3] != pic[1][1:3]
         carried = self.carried()
         if carried is None:
             self._carry = None
@@ -435,10 +437,10 @@ class RollDrawing:
                 self._note_pic = None
             else:
                 rects = self.note_rects(w, h) if app.show_notes.get() else None
-                if rects is not None and (len(rects[0]) > w * h // 2000 or self._panning):
+                if rects is not None and (len(rects[0]) > w * h // 2000 or self._panning or scrolled):
                     # Lots of notes: paint grid + notes as one picture (thousands of canvas items redraw slowly).
-                    # Panning: always (the picture is moved along, ~12 ms a move; canvas items drawn again at every
-                    # move took 35-80 ms on the user's screen with ~1000 notes)
+                    # Panning / scrolling (scrollbar, wheel): always (the picture is moved along, ~12 ms a move;
+                    # canvas items drawn again at every move took 35-80 ms on the user's screen with ~1000 notes)
                     self.paint_image(w, h, rows, cols, rects)
                     self._note_pic = None if drafted else pic
                 else:
