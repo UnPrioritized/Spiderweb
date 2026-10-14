@@ -19,8 +19,11 @@ BOXES = [
     [("spacing", "nested_spacing", "", -100, 100, (1, 10, 1), int, lambda x: int(round(x))),
      ("colours", "nested_colours", "", 1, MOST_COLOURS, (1, 1, 1), int, int)],
     [("turn", "nested_turn", "nested_turn_unit", -180, 180, (1, 10, 0.1), float, float)],  # (Scaling only)
+    [("mix", "nested_mix", "%", 0, 100, (1, 10, 0.1), lambda v: round(v * 100, 6), lambda x: x / 100)],  # (Blend)
 ]
-WAY_CHOICES = [("scale", tr("panel_custom.nested_way_scale")), ("band", tr("panel_custom.nested_way_band"))]
+WAY_CHOICES = [("scale", tr("panel_custom.nested_way_scale")), ("band", tr("panel_custom.nested_way_band")),
+               ("blend", tr("panel_custom.nested_way_blend"))]
+ONLY_FOR = {"turn": "scale", "mix": "blend"}  # (rows of the boxes only one way uses)
 NESTED_UNDO = tr("panel_custom.nested")
 
 
@@ -34,7 +37,7 @@ class NestedPanel:
 
     def _build_nested(self, opts):
         """The Nested rows, put in self.custom_rows (shown by sync_custom while Nested is the Inside fill)."""
-        self.nested_rows, self.nested_boxes = [], {}
+        self.nested_rows, self.nested_boxes, self.nested_way_rows = [], {}, {}
         row = ttk.Frame(opts)
         lb = ttk.Label(row, text=tr("panel_custom.nested_notes"))
         lb.pack(side="left")
@@ -74,7 +77,8 @@ class NestedPanel:
                     Tooltip(w, tr("panel_custom." + text + "_tip"))
                 self.nested_boxes[key] = (e, var)
             self.nested_rows.append(row)
-        self.nested_turn_row = row
+            if line[0][0] in ONLY_FOR:
+                self.nested_way_rows[row] = ONLY_FOR[line[0][0]]
         self.nested_skip_var = tk.BooleanVar(value=False)
         b = ttk.Checkbutton(opts, text=tr("panel_custom.nested_skip"), variable=self.nested_skip_var,
                             command=lambda: self.set_nested("skip", self.nested_skip_var.get()))
@@ -100,7 +104,7 @@ class NestedPanel:
     def nested_row_states(self, t, on):
         """{row: shown} for sync_custom's show_custom_rows (on: Nested is the Inside fill shown)."""
         way = (t.get("nested") or NESTED_DEFAULTS).get("way", "scale")
-        return {w: on and (w is not self.nested_turn_row or way == "scale") for w in self.nested_rows}
+        return {w: on and self.nested_way_rows.get(w, way) == way for w in self.nested_rows}
 
     def nested_targets(self):
         """The custom targets that have a Nested fill (the settings for new ones too)."""
