@@ -1439,6 +1439,32 @@ class RollDrawing:
             self.create_line(*[v for b, p in path for v in (self.t2x(b), self.p2y(p))], fill=color,
                              width=max(4, round(4 * self.scale)), capstyle="round", joinstyle="round")
 
+    def centre_mark(self):
+        """The Nested / Tiles centre point's picture: a ring with a cross on a white edge, built pixel by pixel so it
+        is the same on every side (Tk's lines and ovals land a pixel off from each other). Kept per scale + colours."""
+        s, fill, line = self.scale, look.HANDLE_FILL, look.HANDLE
+        marks = self.__dict__.setdefault("_centre_marks", {})
+        if (s, fill, line) in marks:
+            return marks[s, fill, line]
+        q, c = 6 * s, round(10 * s)  # ring radius, arm length
+        half = (max(1, round(1.5 * s)) - 1) // 2  # the arms: 2 * half + 1 px wide (an odd width stays centred)
+        ring = half + 0.65  # the ring as thick as the arms
+        e = max(1, round(s))  # the white edge
+        m = c + e
+        n = 2 * m + 1
+        on = {(px, py) for py in range(n) for px in range(n)
+              if (abs(py - m) <= half or abs(px - m) <= half) and max(abs(px - m), abs(py - m)) <= c
+              or abs(math.hypot(px - m, py - m) - q) < ring}
+        img = tk.PhotoImage(master=self, width=n, height=n)  # (pixels left unset stay see-through)
+        for py in range(n):
+            for px in range(n):
+                if (px, py) in on:
+                    img.put(line, (px, py))
+                elif any((px + a, py + b) in on for a in range(-e, e + 1) for b in range(-e, e + 1)):
+                    img.put(fill, (px, py))
+        marks[s, fill, line] = img
+        return img
+
     def draw_handles(self, sh):
         s = self.scale
         # the handle lines of the anchors: blue on a white edge, so they show on notes
@@ -1477,12 +1503,7 @@ class RollDrawing:
                                           width=2)
                     continue
                 if kind == "centre":  # Nested's centre point: a ring with a cross, on a white edge
-                    q, c = r + 2 * s, r + 6 * s
-                    for width, colour in ((max(3, round(3.5 * s)), look.HANDLE_FILL), (max(1, round(1.5 * s)),
-                                                                                     look.HANDLE)):
-                        self.create_line(x - c, y, x + c, y, fill=colour, width=width)
-                        self.create_line(x, y - c, x, y + c, fill=colour, width=width)
-                        self.create_oval(x - q, y - q, x + q, y + q, outline=colour, width=width)
+                    self.create_image(round(x), round(y), image=self.centre_mark())
                     continue
                 if kind != "start":
                     color = colors.get(i[1:3], HANDLE_COLOR)
