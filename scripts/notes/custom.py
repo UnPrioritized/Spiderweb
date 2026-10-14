@@ -96,6 +96,8 @@ def custom_settings(cd):
     shapes start without it; the Hz bass tool adds its own, from cd["hz"])."""
     out = {k: cd[k] for k in ("fill", "gate", "align", "ends")}
     out.update({k: True for k in CUSTOM_FLAGS if cd.get(k)})
+    if cd.get("nested"):  # (Inside fill Nested, nested.py; a new shape starts at its own middle)
+        out["nested"] = {k: v for k, v in cd["nested"].items() if k != "at"}
     if cd.get("edge"):
         out["edge"] = cd["edge"]
     if cd.get("edge_mode") == "sideways":
@@ -914,8 +916,25 @@ def find_spans(sh, ppq):
 # ---------------------------------------------------------------- areas coloured by hand (areas.py)
 
 def has_areas(sh):
-    """Fill / Spam with areas given a colour of their own or emptied (sh["areas"]; not text or pasted notes)."""
-    return bool(sh.get("areas")) and sh.get("fill") in ("fill", "spam") and not sh.get("text") and "notes" not in sh
+    """Fill / Spam with areas given a colour of their own or emptied (sh["areas"]; not text or pasted notes; Nested
+    fills take their place)."""
+    return (bool(sh.get("areas")) and sh.get("fill") in ("fill", "spam") and not sh.get("text") and "notes" not in sh
+            and not has_nested(sh))
+
+
+def has_nested(sh):
+    """Inside fill Nested (nested.py): Fill / Spam cut into steps, each a smaller copy of the shape (not text, pasted
+    notes or Hz bass)."""
+    return (bool(sh.get("nested")) and sh.get("fill") in ("fill", "spam") and not sh.get("text")
+            and "notes" not in sh and not sh.get("hz"))
+
+
+def coloured_spans(sh, ppq):
+    """(start, end, key, colour) of a shape with areas coloured by hand or a Nested fill, else None."""
+    if has_nested(sh):
+        from notes.nested import nested_spans
+        return nested_spans(sh, ppq)
+    return area_spans(sh, ppq) if has_areas(sh) else None
 
 
 def uv_points(pts, path):
@@ -2120,8 +2139,8 @@ def custom_note_count(sh, ppq):
     if sh["fill"] == "empty" or not fillable(sh["strokes"]):
         return None
     flat = np.concatenate([flat_notes(sh, ppq), edge_notes(sh, ppq)])
-    if has_areas(sh):
-        spans = area_spans(sh, ppq)[:, :3]
+    if has_areas(sh) or has_nested(sh):
+        spans = coloured_spans(sh, ppq)[:, :3]
         if sh["fill"] == "spam":  # (chopped as whole stretches, whatever their colours)
             spans = merged_rows(spans)
     else:
@@ -2228,8 +2247,8 @@ def range_stretches(sh, ppq):
         return np.asarray(outline_groups(sh, ppq)[0], np.int64).reshape(-1, 3)
     if not fillable(sh["strokes"]):
         return np.zeros((0, 3), np.int64)
-    if has_areas(sh):
-        rows = merged_rows(area_spans(sh, ppq)[:, :3])
+    if has_areas(sh) or has_nested(sh):
+        rows = merged_rows(coloured_spans(sh, ppq)[:, :3])
     else:
         rows = np.asarray(inside_spans(sh, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]
     return np.concatenate([rows, flat_notes(sh, ppq), edge_lines(sh, ppq)[0]]).astype(np.int64)
@@ -2429,9 +2448,9 @@ def _notes_groups(sh, ppq):
         return outline_groups(sh, ppq, spam=True)
     if sh["fill"] == "empty" or not fillable(sh["strokes"]):
         return outline_groups(sh, ppq)
-    area = None  # (areas coloured by hand: each stretch's colour, 0 = the shape's own)
-    if has_areas(sh):
-        got = area_spans(sh, ppq)
+    area = None  # (areas coloured by hand / Nested steps: each stretch's colour, 0 = the shape's own)
+    if has_areas(sh) or has_nested(sh):
+        got = coloured_spans(sh, ppq)
         spans, area = got[:, :3], got[:, 3]
         rows = merged_rows(spans)  # (what's filled, whatever its colour)
     else:
@@ -2457,7 +2476,7 @@ def _notes_groups(sh, ppq):
             if g:
                 ks, ss, es = merged_by_key(thicker(sh, outline, rows, g, ppq))
                 outline = np.column_stack([ss, es, ks]).astype(np.int64).reshape(-1, 3)
-            if area is not None and sh.get("borders"):
+            if area is not None and sh.get("borders") and has_areas(sh):
                 outline = merged_rows(np.concatenate([outline, border_parts(spans, border_lines(sh, ppq))]))
                 while True:  # (the lines' notes too: each piece left takes the colour where it is, so again)
                     fl = cut_out(flat, outline)
@@ -2498,7 +2517,7 @@ def _notes_groups(sh, ppq):
             edge = on_edge(notes) | near_edge(notes, rows, g)
         else:  # (the even band: every note not wholly in the shrunk inside)
             edge = on_edge(notes) | ~covered(notes, inner_ticks(sh, ppq, g, rows))
-        if area is not None and sh.get("borders"):
+        if area is not None and sh.get("borders") and has_areas(sh):
             border = border_lines(sh, ppq)
             both = np.concatenate([spans, notes[len(main):]]), np.concatenate([area, ids[len(main):]])
             edge |= colour_edges(notes, np.concatenate([border, touching_parts(*both, border)]))
@@ -2520,7 +2539,7 @@ def tracks_apart(sh):
     if sh["kind"] != "custom":
         return cycling(sh)
     return ("notes" in sh or bool(sh.get("apart") and sh.get("fill") in ("fill", "spam")) or cycling(sh)
-            or has_areas(sh) and any(a[2] for a in sh["areas"]) or coloured_strokes(sh))
+            or has_areas(sh) and any(a[2] for a in sh["areas"]) or coloured_strokes(sh) or has_nested(sh))
 
 
 def capped_colours(groups, most=COLOURS):

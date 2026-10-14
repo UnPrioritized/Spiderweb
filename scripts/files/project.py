@@ -16,6 +16,7 @@ from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, cle
 from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_shape
 from notes.hzbass import clean_hz
 from notes.mask import MASK_DEFAULTS, THICKNESS, clean_mask
+from notes.nested import clean_nested
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
 from notes.paths import KEYS
 from notes.picture import paths_for_file
@@ -350,6 +351,11 @@ class ProjectFiles:
         out.pop("edge_mode", None)
         if custom.get("edge_mode") == "sideways":
             out["edge_mode"] = "sideways"
+        out.pop("nested", None)
+        nested = clean_nested(custom.get("nested"))
+        if nested and out["fill"] in ("fill", "spam"):  # (Inside fill Nested)
+            nested.pop("at", None)
+            out["nested"] = nested
         out.pop("hz", None)
         if clean_hz(custom.get("hz")):
             out["hz"] = clean_hz(custom["hz"])

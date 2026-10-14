@@ -23,6 +23,7 @@ from notes.hzbass import HZ_KINDS, clean_hz, heard_layers, layers_of, note_lengt
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
+from notes.nested import clean_nested
 from notes.chop import apply_chop
 from notes.claw import apply_claw
 from notes.copypath import apply_path
@@ -173,6 +174,9 @@ def clean_shape(sh):
         out["align"] = sh.get("align") if sh.get("align") in ALIGNS else "auto"
         out["ends"] = sh.get("ends") if sh.get("ends") in ENDS else "drop"
         out.update({k: True for k in CUSTOM_FLAGS if sh.get(k) is True})
+        nested = clean_nested(sh.get("nested")) if out["fill"] in ("fill", "spam") else None
+        if nested:  # Inside fill Nested (nested.py)
+            out["nested"] = nested
         if sh.get("gate_flip") is True:  # its gates laid from the right (gateflip.py)
             out["gate_flip"] = True
         try:  # the smallest outline gate in beats (custom.grow_inward)
