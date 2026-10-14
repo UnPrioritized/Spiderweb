@@ -58,9 +58,14 @@ class ClawWindow(ToolWindow):
         dial.grid(row=2, column=1, sticky="w", pady=4)
         self.knob = Knob(dial, s, self.on_knob, pressed=self.knob_pressed)
         self.knob.pack(side="left")
-        self.knob_text = ttk.Label(dial, text="", width=5, foreground=look.HINT)
-        self.knob_text.pack(side="left", padx=(6, 0))
-        Tooltip(self.knob, tr("claw.tip_dist"))
+        var = self.vars["dist"] = tk.StringVar()  # (a box beside the knob, user)
+        e = self.entries["dist"] = ttk.Entry(dial, textvariable=var, width=6, justify="center")
+        e.pack(side="left", padx=(10, 0))
+        e.bind("<Return>", lambda ev: (self.on_entry("dist"), "break")[1])
+        e.bind("<FocusOut>", lambda ev: self.on_entry("dist"))
+        Scrub(self.app, [(e, var, lambda: self.on_entry("dist", False))], (1, 10, 0.1), -100, 100, drag_box=True)
+        for w in (self.knob, e):
+            Tooltip(w, tr("claw.tip_dist") + "\n" + tr("claw.tip_dist_box"))
         self.ticks = {}
         for r, key, text, tip in ((3, "stretch", tr("claw.stretch_to_compensate"), tr("claw.tip_stretch")),
                                   (4, "short", tr("claw.remove_short_notes"), tr("claw.tip_short"))):
@@ -133,12 +138,14 @@ class ClawWindow(ToolWindow):
 
     def on_entry(self, key, done=True):
         e, var = self.entries[key], self.vars[key]
-        lo, hi = {"keep": (1, MAX_COUNT), "skip": (0, MAX_COUNT), "pct": (0, 100), "cut": (1, 99)}[key]
+        lo, hi = {"keep": (1, MAX_COUNT), "skip": (0, MAX_COUNT), "pct": (0, 100), "cut": (1, 99),
+                  "dist": (-100, 100)}[key]
         try:
             v = float(calc(var.get()))
             if not lo <= v <= hi or key in ("keep", "skip") and v != int(v):
                 raise ValueError
         except (ValueError, ZeroDivisionError):
+            e.good_text = fmt(self.claw[key])  # (back to what is in use: the knob may have moved since)
             bad(e)
             return
         good(e)
@@ -180,9 +187,8 @@ class ClawWindow(ToolWindow):
 
         for key, (b, choices) in self.menus.items():
             config(b, text=next((t for v, t in choices if v == c[key] and t != "-"), ""))
-        if self.knob.value != c["dist"]:
+        if not self.knob.drag and abs(self.knob.value - c["dist"]) > 1e-9:
             self.knob.set(c["dist"])
-        config(self.knob_text, text=f"{c['dist']:g}")
         for key, var in self.ticks.items():
             if var.get() != c[key]:
                 var.set(c[key])
@@ -208,7 +214,8 @@ class ClawWindow(ToolWindow):
 
     def on_knob(self, value, done):
         self.claw["dist"] = value
-        self.knob_text.config(text=f"{value:g}")
+        self.vars["dist"].set(fmt(value))
+        self.entries["dist"].config(style="TEntry")
         self.preview(done)
         self.undo.mark("dist")
         if done:

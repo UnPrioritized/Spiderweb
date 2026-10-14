@@ -132,6 +132,7 @@ class StrumWindow(ToolWindow):
             if not lo <= v <= hi:
                 raise ValueError
         except (ValueError, ZeroDivisionError):
+            e.good_text = fmt(self.shown(key))  # (back to what is in use: the knob may have moved since)
             bad(e)
             return
         good(e)
