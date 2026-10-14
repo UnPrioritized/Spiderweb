@@ -21,6 +21,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   nearest        picture._dist2(...).argmin(1) (Image to notes): each colour's nearest palette colour
   spread_line    picture._spread: the error spreading, one slanted line at a time (its OKLab left to NumPy)
   area_spots     faces.Faces.area_at: the area each spot is in (custom shapes' Fill / Spam, area colours)
+  smooth_sor     nested.smooth_values' loop (Nested fill, Blend)
   limit_dsp      synth.live_limit as a callback BASS's sound thread calls itself (Built-in BASSMIDI's limiter: it
                  never waits for Python); the same maths within float rounding
 The first start compiles them (about a second, in the background); the result is kept in __pycache__ for the next
@@ -1343,6 +1344,18 @@ def limit_dsp(dsp, channel, buf, length, user):
 
 
 @njit(cache=CACHE, nogil=True)
+def smooth_sor(flat, red, black, wide, om, times):
+    """nested.smooth_values' loop: red-black over-relaxation on a grid with a zero border (flat), red / black = the
+    cells each half changes, the same sums in the same order."""
+    for _ in range(times):
+        for part in (red, black):
+            for i in part:
+                g = (flat[i - 1] + flat[i + 1] + flat[i - wide] + flat[i + wide]) / 4
+                here = flat[i]
+                flat[i] = here + om * (g - here)
+
+
+@njit(cache=CACHE, nogil=True)
 def area_spots(x, y, levels, start, off, lab, outside, edge, ex, ey, es, x0, y0, x1, y1, eps):
     """faces.Faces.area_at for every spot (x, y): the same halving over its slab's lines, and the same recount of
     every line of the slab for a spot right by one (worked out as _x does, so the very same numbers)."""
@@ -1421,3 +1434,4 @@ def warm():
               np.ones(1), f1, f1, np.ones(1), np.full(1, 9, np.int64), np.ones(1), np.ones(1), np.ones(1), 0.01)
     hz_order(np.arange(300, dtype=np.int64))
     area_spots(f1, f1, np.zeros(2), i2, i2, i2, 0, i1, f1, f1, f1, f1, f1, f1, f1, f)
+    smooth_sor(np.zeros(9), np.array([4], np.int64), np.zeros(0, np.int64), 3, 1.9, 1)

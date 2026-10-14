@@ -25,6 +25,7 @@ import math
 
 import numpy as np
 
+from files import speed
 from notes.custom import (clean_strokes, cut_out, drawn_view, edge_loops, find_spans, fill_plan, frame_to_bp,
                           frame_to_uv, has_nested, has_tiles, inside_rows, merged_rows)
 from notes.shrink import field, inner_rows, proportion
@@ -249,15 +250,25 @@ def smooth_values(f, step, cx, cy, x0, y0):
         d2 = (jj - jc) ** 2 + (ii - ic) ** 2
     hot = inside & (d2 <= max(1.0, max(h, w) / 60) ** 2)
     free = inside & ~hot
-    u = np.where(hot, 1.0, 0.0)
+    # (worked in place on a copy with a zero border, only on the cells each half changes: the same sums as the whole
+    # grid at once, much quicker while the centre point is dragged)
+    pad = np.zeros((h + 2, w + 2))
+    pad[1:-1, 1:-1] = np.where(hot, 1.0, 0.0)
+    flat, wide = pad.reshape(-1), w + 2
     red = free & ((jj + ii) % 2 == 0)
     black = free & ~red
     om = 1.9
-    for _ in range(4 * max(h, w)):
-        for part in (red, black):
-            p = np.pad(u, 1)
-            g = (p[1:-1, :-2] + p[1:-1, 2:] + p[:-2, 1:-1] + p[2:, 1:-1]) / 4
-            u = np.where(part, u + om * (g - u), u)
+    cells = [np.flatnonzero(np.pad(part, 1)) for part in (red, black)]
+    fast = speed.loops()
+    if fast:  # (the same, as a compiled loop: files/fastloops.py)
+        fast.smooth_sor(flat, *cells, wide, om, 4 * max(h, w))
+    else:
+        for _ in range(4 * max(h, w)):
+            for at in cells:
+                g = (flat[at - 1] + flat[at + 1] + flat[at - wide] + flat[at + wide]) / 4
+                here = flat[at]
+                flat[at] = here + om * (g - here)
+    u = pad[1:-1, 1:-1].copy()
     # evened out by each level's average distance from the centre point (falling as the level rises): 1 - that
     # over the outline's. (By the distance to the outline instead, every spot deeper in than the centre point got
     # the top value: one big middle step when the point was moved off the middle.)

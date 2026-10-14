@@ -872,6 +872,106 @@ def row_spans(polys, q, edges=None):
     return merge_spans(left[pair], right[pair + 1])
 
 
+def rows_spans(edges, q0, q1, ppq):
+    """[(pitch, start tick, end tick)] of rows q0..q1: row_spans for every row at once (the same sums, so exactly
+    the same notes; row by row was most of a Nested fill's time), in ticks like find_spans."""
+    xa, ya, xb, yb = edges
+    none = []
+    if q1 < q0 or not len(xa):
+        return none
+    mn, mx = np.minimum(ya, yb), np.maximum(ya, yb)
+
+    def first_row(v, below):  # the first row q with v < q + 0.5 (below) / the last with v > q - 0.5
+        q = np.floor(v + 0.5)
+        if below:
+            q = np.where(v < q - 0.5, q - 1, q)
+            return np.where(v < q + 0.5, q, q + 1)
+        q = np.where(v > q + 0.5, q + 1, q)
+        return np.where(v > q - 0.5, q, q - 1)
+    r0 = np.maximum(first_row(mn, True), q0).astype(np.int64)
+    r1 = np.minimum(first_row(mx, False), q1).astype(np.int64)
+    n = np.maximum(r1 - r0 + 1, 0)
+    if not n.sum():
+        return none
+    # every edge with every row it reaches, row by row and in each row in the edges' order (as row_spans)
+    e = np.repeat(np.arange(len(xa)), n)
+    row = np.repeat(r0, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
+    order = np.lexsort((e, row))
+    e, row = e[order], row[order]
+    # each row's levels: its bottom and top edge and every corner strictly between them
+    rows = np.arange(q0, q1 + 1)
+    ys = np.concatenate([ya, yb])
+    vq = np.floor(ys + 0.5)
+    lv_row, lv_val = [rows, rows], [rows - 0.5, rows + 0.5]
+    for d in (-1, 0, 1):
+        q = vq + d
+        on = (ys > q - 0.5) & (ys < q + 0.5) & (q >= q0) & (q <= q1)
+        lv_row.append(q[on].astype(np.int64))
+        lv_val.append(ys[on])
+    lv_row, lv_val = np.concatenate(lv_row), np.concatenate(lv_val)
+    order = np.lexsort((lv_val, lv_row))
+    lv_row, lv_val = lv_row[order], lv_val[order]
+    keep = np.ones(len(lv_row), bool)
+    keep[1:] = (lv_row[1:] != lv_row[:-1]) | (lv_val[1:] != lv_val[:-1])
+    lv_row, levels = lv_row[keep], lv_val[keep]
+    off = np.searchsorted(lv_row, rows)  # (where each row's levels start)
+
+    lo, hi = row - 0.5, row + 0.5
+
+    def below(v):  # how many of its row's levels are under v (searchsorted in that row's levels)
+        k = len(levels)
+        allrow = np.concatenate([lv_row, row])
+        allval = np.concatenate([levels, v])
+        is_level = np.concatenate([np.ones(k, np.int64), np.zeros(len(v), np.int64)])
+        o = np.lexsort((is_level, allval, allrow))  # (a query before levels equal to it: side "left")
+        before = np.cumsum(is_level[o]) - is_level[o]
+        got = np.empty(len(v), np.int64)
+        q = o >= k
+        got[o[q] - k] = before[q]
+        return got - off[row - q0]
+    first = below(np.maximum(mn[e], lo))
+    n = below(np.minimum(mx[e], hi)) - first
+    first += off[row - q0]
+    e = np.repeat(e, n)
+    gap = np.repeat(first, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
+    if not len(gap):
+        return none
+    y0, y1 = levels[gap], levels[gap + 1]
+    mid = (y0 + y1) / 2
+    xa, ya, xb, yb = xa[e], ya[e], xb[e], yb[e]
+
+    def x_at(y):
+        return xa + (xb - xa) * (y - ya) / (yb - ya)
+
+    order = np.lexsort((x_at(mid), gap))
+    gap = gap[order]
+    left, right = np.minimum(x_at(y0), x_at(y1))[order], np.maximum(x_at(y0), x_at(y1))[order]
+    new = np.ones(len(gap), bool)
+    new[1:] = gap[1:] != gap[:-1]
+    at = np.arange(len(gap))
+    rank = at - np.maximum.accumulate(np.where(new, at, 0))
+    pair = np.flatnonzero((rank % 2 == 0) & np.append(~new[1:], False))
+    if not len(pair):
+        return none
+    a, b, q = left[pair], right[pair + 1], lv_row[gap[pair]]
+    # merge_spans row by row: the running end compared as ranks, so one row's ends never reach the next row
+    order = np.lexsort((b, a, q))
+    a, b, q = a[order], b[order], q[order]
+    _, rk = np.unique(np.concatenate([a, b]), return_inverse=True)
+    m = len(rk) + 1
+    ka, kb = (q - q0) * m + rk[:len(a)], (q - q0) * m + rk[len(a):]
+    new = np.ones(len(a), bool)
+    new[1:] = (q[1:] != q[:-1]) | (ka[1:] > np.maximum.accumulate(kb)[:-1])
+    at = np.flatnonzero(new)
+    q, s, t = q[at], np.floor(a[at] * ppq + 0.5), np.floor(np.maximum.reduceat(b, at) * ppq + 0.5)
+    # a bit under a tick only if the row has nothing else (find_spans)
+    some = np.zeros(q1 - q0 + 1, bool)
+    some[q[t > s] - q0] = True
+    keep = (t > s) | ~some[q - q0]
+    s, t = s[keep].astype(np.int64), t[keep].astype(np.int64)
+    return list(zip(q[keep].tolist(), s.tolist(), np.maximum(t, s + 1).tolist()))
+
+
 def merge_spans(a, b):
     """Ranges from a[i] to b[i] -> [[start, end]] in order, the ones that touch or overlap made one."""
     if not len(a):
@@ -907,11 +1007,13 @@ def find_spans(sh, ppq):
     edges = None if tx else poly_edges(polys)
     if walled:  # (every piece of a row between two lines: filled as fill_test says)
         edges += (np.zeros(len(edges[0]), np.int64),)
+    q0, q1 = max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps)))
+    if not tx and not walled:
+        return rows_spans(edges, q0, q1, ppq)
     out = []
-    for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1):
+    for q in range(q0, q1 + 1):
         row = [(math.floor(a * ppq + 0.5), math.floor(b * ppq + 0.5)) for a, b, *_ in (
-            threshold_spans(polys, q, tx["threshold"]) if tx else
-            row_pieces(edges, q, walled, as_normal) if walled else row_spans(polys, q, edges))]
+            threshold_spans(polys, q, tx["threshold"]) if tx else row_pieces(edges, q, walled, as_normal))]
         # a bit under a tick only if the row has nothing else (like find_area_spans): two shapes sharing a stretch
         # of the same side made a column of 1-tick notes along it where they overlap
         some = any(e > s for s, e in row)
