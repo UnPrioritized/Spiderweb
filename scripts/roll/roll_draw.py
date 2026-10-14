@@ -557,22 +557,36 @@ class RollDrawing:
 
     def ring_now(self):
         """The red line round the selected shapes' notes (user: the notes keep their colours, even with short
-        gates): ring_parts, worked out once per selection / notes / zoom, or None."""
+        gates): ring_parts, worked out once per selection / notes / zoom, or None. Only for the notes from a screen
+        before the view to a screen after it (a shape of millions of notes zoomed in: millions of pieces, ~1 s each
+        zoom step and every pan step slow), made again when the view gets near that stretch's ends."""
         app = self.app
         if not app.sels or not app.show_notes.get() or not len(app.drawn):
             return None
         ppq, ax = app.ppq, self.sx / app.ppq
         key = (frozenset(app.sels), self.sx, ppq)
-        if self._ring is None or self._ring[0] is not app.drawn or self._ring[1] != key:
+        span = max(1.0, self.winfo_width() - self.kb_w) / ax  # (the view's width in ticks)
+        va = self.view_t * ppq
+        pad = 16 / ax  # (the ring's pixels reach a little past its notes' ends)
+        got = self._ring
+        if (got is None or got[0] is not app.drawn or got[1] != key or va - pad < got[3][0]
+                or va + span + pad > got[3][1]):
             fast = loops()
             kept = self.paint_order(fast) if fast else None
             if kept is not None:  # (the selected shapes' notes are already together there, last)
                 (s, e, k, _, first, _), others = kept
-                notes = np.column_stack([s[first[others]:], e[first[others]:], k[first[others]:]])
+                s, e, k = s[first[others]:], e[first[others]:], k[first[others]:]
             else:
                 notes = app.drawn[np.isin(app.drawn[:, 5], list(app.sels))]
-            self._ring = (app.drawn, key, ring_parts(notes, RING_GAP / ax) if len(notes) else None)
-        return self._ring[2]
+                s, e, k = notes[:, 0], notes[:, 1], notes[:, 2]
+            wa, wb = math.floor(va - span), math.ceil(va + 2 * span)
+            near = (e > wa) & (s < wb)
+            if near.all():  # (all of it: good wherever the view goes)
+                notes, wa, wb = np.column_stack([s, e, k]), -math.inf, math.inf
+            else:  # (cut at the stretch's ends: the side lines there are a screen away from the view)
+                notes = np.column_stack([np.maximum(s[near], wa), np.minimum(e[near], wb), k[near]])
+            got = self._ring = (app.drawn, key, ring_parts(notes, RING_GAP / ax) if len(notes) else None, (wa, wb))
+        return got[2]
 
     def draw_ring(self, w, h):
         """The ring as lines on the canvas, when the notes are canvas rectangles (in the notes' picture it's painted
