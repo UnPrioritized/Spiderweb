@@ -274,6 +274,7 @@ class TraceWindow(tk.Toplevel):
         c.bind("<ButtonPress-3>", self.on_right)
         c.bind("<Motion>", self.on_motion)
         c.bind("<Escape>", lambda e: self.cancel_drag())
+        self.bind("<F1>", lambda e: (self.app.open_help("hz_shape"), "break")[1])  # (its page: the hint is short)
         self.protocol("WM_DELETE_WINDOW", self.close)
         remember_place(self, "hz_shape")  # (not "hz_trace": the window grew for the strips, an old size would squash)
 
@@ -442,6 +443,12 @@ class TraceWindow(tk.Toplevel):
             self.pts = shown_trace(self.hz.extra)
         if self.drawn != self.look_now():
             self.draw()
+        sh = self.hz.target()
+        hz = (sh or {}).get("hz") or {}
+        title = (tr("hz.trace_title_layer", layer=self.hz.layers.name_of(hz, hz.get("layer", 0)))
+                 if hz.get("layers") else tr("hz.trace_title"))  # (the layer picked, user 2026-10-14)
+        if self.title() != title:
+            self.title(title)
 
     def check_local(self):
         """This window's own undo steps are forgotten once the shape they were made for changed: a Hz bass holds
