@@ -8,6 +8,8 @@ Ways ("way"):
   (custom.drawn_view), so a circle's copies stay circles however the box was stretched. Each copy = the shape with
   its box moved, so its inside is worked out exactly like the shape's own (custom.find_spans). The smaller copy is
   on top; copies are cut where they reach past the shape.
+- "band" (Even band): the inside shrunk inward step by step, every step equally thick all round, like the outline
+  gate's even band (shrink.inner_rows, exact, in the drawn view). No centre point and no turn.
 
 sh["nested"] = {"way", "steps" (copies, the shape itself counts), "last" (the last copy's size, 0..1), "spacing"
 (-100..100: + = the copies closer together toward the last one), "turn" (degrees per step), "colours" (how many
@@ -19,11 +21,11 @@ import math
 
 import numpy as np
 
-from notes.custom import (cut_out, drawn_view, find_spans, fill_plan, frame_to_bp, frame_to_uv, inside_rows,
-                          merged_rows)
-from notes.shrink import proportion
+from notes.custom import (cut_out, drawn_view, edge_loops, find_spans, fill_plan, frame_to_bp, frame_to_uv,
+                          inside_rows, merged_rows)
+from notes.shrink import field, inner_rows, proportion
 
-WAYS = ("scale",)
+WAYS = ("scale", "band")
 NESTED_DEFAULTS = {"way": "scale", "steps": 8, "last": 0.0, "spacing": 0, "turn": 0.0, "colours": 4, "skip": False}
 MOST_STEPS = 60
 MOST_COLOURS = 15
@@ -58,6 +60,11 @@ def clean_nested(c):
         except (TypeError, ValueError):
             pass
     return out
+
+
+def uses_centre(sh):
+    """The Nested way uses the centre point (its handle shows): not Even band."""
+    return sh["nested"].get("way") != "band"
 
 
 def step_sizes(cfg):
@@ -143,8 +150,32 @@ def find_nested(sh, ppq):
     centre, view = centre_bp(sh, ppq), view_of(sh)
     if view[1] <= 0:
         return np.column_stack([base, np.zeros(len(base), np.int64)])
+    if cfg["way"] == "band":
+        steps = band_steps(sh, ppq, base, view)
+    else:
+        steps = scaled_steps(sh, ppq, base, centre, view)
+    return painted(steps, cfg)
+
+
+def band_steps(sh, ppq, base, view):
+    """Even band: step i = the inside shrunk inward by (1 - its size) of the deepest spot's distance to the outline
+    (shrink.inner_rows, exact like the outline gate, in the view it was first drawn in)."""
+    loops, walled = edge_loops(sh)
+    keys = range(int(base[:, 2].min()), int(base[:, 2].max()) + 1)
+    pts = np.concatenate([np.asarray(p, float).reshape(-1, 2) for p in loops if len(p)])
+    reach = float(max(np.ptp(pts[:, 0]), np.ptp(pts[:, 1] * view[1]))) or 1.0
+    deepest = float(field(loops, walled, reach, view)[3].max())
+    steps = [base]
+    for size, _ in step_sizes(sh["nested"])[1:]:
+        r = (1 - size) * deepest
+        steps.append(inner_rows(loops, walled, keys, r, ppq, view) if r > 0 else base)
+    return steps
+
+
+def scaled_steps(sh, ppq, base, centre, view):
+    """Scaling: step i = the shape's box made smaller and turned round the centre point (exact, like its own)."""
     steps = []
-    for i, (size, turn) in enumerate(step_sizes(cfg)):
+    for i, (size, turn) in enumerate(step_sizes(sh["nested"])):
         if i == 0:
             steps.append(base)
             continue
@@ -154,6 +185,12 @@ def find_nested(sh, ppq):
         copy = dict(sh, pts=moved_frame(sh["pts"], centre, size, turn, view))
         sp = np.asarray(find_spans(copy, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]
         steps.append(cut_out(sp, cut_out(sp, base)) if len(sp) else sp)  # (only where the shape is)
+    return steps
+
+
+def painted(steps, cfg):
+    """The steps' stretches, each later (smaller) one over the ones before, with their colours."""
+    none = np.zeros((0, 4), np.int64)
     out, covered = [], np.zeros((0, 3), np.int64)
     every = 2 if cfg["skip"] else 1
     for i in range(len(steps) - 1, -1, -1):  # (the later, smaller copy on top)

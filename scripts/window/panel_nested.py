@@ -17,9 +17,10 @@ BOXES = [
     [("steps", "nested_steps", "", 2, MOST_STEPS, (1, 5, 1), int, int),
      ("last", "nested_last", "%", 0, 100, (1, 10, 0.1), lambda v: round(v * 100, 6), lambda x: x / 100)],
     [("spacing", "nested_spacing", "", -100, 100, (1, 10, 1), int, lambda x: int(round(x))),
-     ("turn", "nested_turn", "nested_turn_unit", -180, 180, (1, 10, 0.1), float, float)],
-    [("colours", "nested_colours", "", 1, MOST_COLOURS, (1, 1, 1), int, int)],
+     ("colours", "nested_colours", "", 1, MOST_COLOURS, (1, 1, 1), int, int)],
+    [("turn", "nested_turn", "nested_turn_unit", -180, 180, (1, 10, 0.1), float, float)],  # (Scaling only)
 ]
+WAY_CHOICES = [("scale", tr("panel_custom.nested_way_scale")), ("band", tr("panel_custom.nested_way_band"))]
 NESTED_UNDO = tr("panel_custom.nested")
 
 
@@ -44,6 +45,16 @@ class NestedPanel:
         for w in (lb, self.nested_notes_box):
             Tooltip(w, tr("panel_custom.nested_notes_tip"))
         self.nested_rows.append(row)
+        row = ttk.Frame(opts)  # how the copies are made (nested.WAYS)
+        lb = ttk.Label(row, text=tr("panel_custom.nested_way"))
+        lb.pack(side="left")
+        self.nested_way_box = ttk.Combobox(row, values=[t for _, t in WAY_CHOICES], state="readonly", width=26)
+        self.nested_way_box.pack(side="left", padx=4)
+        self.nested_way_box.bind("<<ComboboxSelected>>", lambda e: (
+            self.set_nested("way", WAY_CHOICES[e.widget.current()][0]), self.roll.focus_set()))
+        for w in (lb, self.nested_way_box):
+            Tooltip(w, tr("panel_custom.nested_way_tip"))
+        self.nested_rows.append(row)
         for line in BOXES:
             row = ttk.Frame(opts)
             for n, (key, text, unit, lo, hi, steps, _, _) in enumerate(line):
@@ -62,13 +73,13 @@ class NestedPanel:
                 for w in (lb, e):
                     Tooltip(w, tr("panel_custom." + text + "_tip"))
                 self.nested_boxes[key] = (e, var)
-            if line is BOXES[-1]:  # (the tick beside the last box)
-                self.nested_skip_var = tk.BooleanVar(value=False)
-                b = ttk.Checkbutton(row, text=tr("panel_custom.nested_skip"), variable=self.nested_skip_var,
-                                    command=lambda: self.set_nested("skip", self.nested_skip_var.get()))
-                b.pack(side="left", padx=(12, 0))
-                Tooltip(b, tr("panel_custom.nested_skip_tip"))
             self.nested_rows.append(row)
+        self.nested_turn_row = row
+        self.nested_skip_var = tk.BooleanVar(value=False)
+        b = ttk.Checkbutton(opts, text=tr("panel_custom.nested_skip"), variable=self.nested_skip_var,
+                            command=lambda: self.set_nested("skip", self.nested_skip_var.get()))
+        Tooltip(b, tr("panel_custom.nested_skip_tip"))
+        self.nested_rows.append(b)
         for row in self.nested_rows:
             self.custom_rows.append((row, dict(anchor="w", padx=(20, 0), pady=(1, 0))))
 
@@ -77,6 +88,7 @@ class NestedPanel:
         cfg = t.get("nested") or NESTED_DEFAULTS
         self._loading = True
         self.nested_notes_box.current(1 if t.get("fill") == "spam" else 0)
+        self.nested_way_box.current([w for w, _ in WAY_CHOICES].index(cfg.get("way", "scale")))
         for line in BOXES:
             for key, _, _, _, _, _, shown, _ in line:
                 e, var = self.nested_boxes[key]
@@ -84,6 +96,11 @@ class NestedPanel:
                 e.config(style="TEntry")
         self.nested_skip_var.set(bool(cfg.get("skip")))
         self._loading = False
+
+    def nested_row_states(self, t, on):
+        """{row: shown} for sync_custom's show_custom_rows (on: Nested is the Inside fill shown)."""
+        way = (t.get("nested") or NESTED_DEFAULTS).get("way", "scale")
+        return {w: on and (w is not self.nested_turn_row or way == "scale") for w in self.nested_rows}
 
     def nested_targets(self):
         """The custom targets that have a Nested fill (the settings for new ones too)."""

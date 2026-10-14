@@ -412,7 +412,7 @@ class CustomPanel:
                 self.cancel_box: fill in ("fill", "spam") and not text,
                 self.borders_box: fill in ("fill", "spam") and apart and shown != "nested"
                 and self.coloured_areas(tgts, placed, name)}
-        rows.update({w: shown == "nested" for w in self.nested_rows})
+        rows.update(self.nested_row_states(tgts[0], shown == "nested"))
         self.show_custom_rows({w for w, on in rows.items() if on})
         if not placed and live:
             info = tr("panel_custom.live_shape_what_you_draw_goes")
