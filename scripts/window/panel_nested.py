@@ -162,6 +162,7 @@ class NestedPanel:
         for t in tgts:
             if t["fill"] not in ("fill", "spam"):
                 t["fill"] = "fill"
+            t.pop("tiles", None)  # (one or the other)
             if not t.get("nested"):
                 t["nested"] = dict(NESTED_DEFAULTS)
         self.shapes_changed()

@@ -17,6 +17,7 @@ from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
 from notes.hzbass import AUTO, all_tones, auto_picks, each_layer, layers_of, shortest_gate
 from window.hz_window import open_hz
 from window.panel_nested import nested_on
+from window.panel_tiles import tiles_on
 from window.range_window import open_range_graph
 from window.widgets import Scrub, Tooltip, bad, good, grid_shown, leave_box, name_list, set_names, unchanged
 
@@ -29,8 +30,10 @@ FILL_CHOICES = [
     ("spam", tr("panel_custom.spam"), tr("panel_custom.the_inside_filled_with_back_to")),
     ("outline_spam", tr("panel_custom.outline_spam"), tr("panel_custom.just_the_outline_chopped_into_notes")),
     ("nested", tr("panel_custom.nested"), tr("panel_custom.nested_tip")),  # (a Fill / Spam with sh["nested"])
+    ("tiles", tr("panel_custom.tiles"), tr("panel_custom.tiles_tip")),  # (a Fill / Spam with sh["tiles"])
 ]
-APART_FILLS = ("fill", "spam", "nested")  # the choices with a Normal / Outline dropdown beside them
+APART_FILLS = ("fill", "spam", "nested", "tiles")  # the choices with a Normal / Outline dropdown beside them
+PATTERN_FILLS = ("nested", "tiles")  # (shown in the panel, not stored as sh["fill"])
 CUSTOM_NAMES = {"fill": tr("panel_custom.inside_fill"), "gate": tr("panel_custom.spam_gate"),
                 "align": tr("panel_custom.spam_start"), "ends": tr("panel_custom.spam_ends"),
                 "union": tr("panel_custom.overlaps_cancel_out"),
@@ -112,7 +115,8 @@ class CustomPanel:
         # the rows under the choices: only the ones that do something for the chosen Inside are shown, so the
         # panel grows as options are picked (user; show_custom_rows)
         self.custom_rows, self._custom_shown = [], None
-        self._build_nested(opts)  # (Nested: its own rows first, panel_nested.py)
+        self._build_nested(opts)  # (Nested / Tiles: their own rows first, panel_nested.py / panel_tiles.py)
+        self._build_tiles(opts)
         # with "Outline" and areas coloured in the drawer: where two colours meet is outline too
         self.borders_var = tk.BooleanVar(value=False)
         self.borders_box = ttk.Checkbutton(opts, text=tr("panel_custom.borders"), variable=self.borders_var,
@@ -336,7 +340,8 @@ class CustomPanel:
             name, tpl = self.custom_shape, self.custom_template(self.custom_shape)
             gaps = len(open_paths(tpl[0])) if tpl else 0
         fill, gate = tgts[0]["fill"], tgts[0]["gate"]
-        shown = "nested" if nested_on(tgts[0]) else fill  # (Nested = a Fill / Spam with its steps)
+        # (Nested / Tiles = a Fill / Spam with its steps / tiles)
+        shown = "nested" if nested_on(tgts[0]) else "tiles" if tiles_on(tgts[0]) else fill
         missing = placed and not text and self.not_in_library(tgts[0])  # (no shape picker: nothing to miss)
         self.custom_combo.config(style="Missing.TCombobox" if missing else "TCombobox")
         if missing and not self.missing_note.winfo_manager():
@@ -374,8 +379,9 @@ class CustomPanel:
         self.range_btn.config(state="normal" if spam and not hz else "disabled")
         for value in self.fill_buttons:  # (Hz bass needs a spam fill: Empty / Fill hidden until it's unticked, user)
             if value not in SPAM_FILLS:
-                grid_shown(self.fill_buttons[value], not hz and not (value == "nested" and text))
+                grid_shown(self.fill_buttons[value], not hz and not (value in PATTERN_FILLS and text))
         self.sync_nested(tgts[0])
+        self.sync_tiles(tgts[0])
         ranged = spam and not hz and bool(rg)  # (Range: its own grid from the shape's left edge, so no ends / start)
         for b in self.align_buttons:  # (stretched gates fill each key exactly: where they start doesn't matter)
             b.config(state="normal" if spam and not hz and ends != "stretch" else "disabled")
@@ -404,15 +410,16 @@ class CustomPanel:
         if wanted > most:
             self.colours_warn.config(text=tr("panel_custom.too_many_colours", n=wanted, most=most))
         rows = {self.colours_warn: wanted > most, self.gate_row: spam and not hz,
-                self.hz_row: spam and shown != "nested", self.hz_info: self.hz_short_on,
+                self.hz_row: spam and shown not in PATTERN_FILLS, self.hz_info: self.hz_short_on,
                 self.hz_stale: self.hz_stale_on, self.ends_row: spam and not hz and not ranged,
                 self.start_row: spam and not hz and ends != "stretch" and not ranged,
                 self.edge_row: outline,
                 self.edge_mode_row: outline and bool(tgts[0].get("edge")),
                 self.cancel_box: fill in ("fill", "spam") and not text,
-                self.borders_box: fill in ("fill", "spam") and apart and shown != "nested"
+                self.borders_box: fill in ("fill", "spam") and apart and shown not in PATTERN_FILLS
                 and self.coloured_areas(tgts, placed, name)}
         rows.update(self.nested_row_states(tgts[0], shown == "nested"))
+        rows.update(self.tiles_row_states(shown == "tiles"))
         self.show_custom_rows({w for w, on in rows.items() if on})
         if not placed and live:
             info = tr("panel_custom.live_shape_what_you_draw_goes")
@@ -437,8 +444,8 @@ class CustomPanel:
                     info += tr("panel_custom.areas_need_fill")
                 elif self.channel_mode.get() != "auto" and any(a[2] for t in tgts for a in t.get("areas", ())):
                     info += tr("panel_custom.areas_need_multi")
-            if shown == "nested" and self.channel_mode.get() != "auto":
-                info += tr("panel_custom.nested_needs_multi")
+            if shown in PATTERN_FILLS and self.channel_mode.get() != "auto":
+                info += tr("panel_custom." + shown + "_needs_multi")
         else:
             info = tr("panel_custom.drag_a_box_on_the_piano_2")
         if placed and tool != "text":
@@ -489,6 +496,8 @@ class CustomPanel:
         """A custom shape setting (fill / gate / align / the on-off CUSTOM_FLAGS) changed in the panel."""
         if self._loading:
             return
+        if key == "fill" and value == "tiles":  # (a Fill / Spam with its tiles: panel_tiles.py)
+            return self.pick_tiles()
         if key == "fill" and value == "nested":  # (a Fill / Spam with its steps: panel_nested.py)
             return self.pick_nested()
         tgts = self.custom_targets()
@@ -496,7 +505,7 @@ class CustomPanel:
         def same(ts):
             return all(abs(t[key] - value) < 1e-12 if key == "gate" else abs(t.get(key, 0) - value) < 1e-12
                        if key == "edge" else bool(t.get(key)) == value if key in CUSTOM_FLAGS
-                       else t.get(key) == value and not (key == "fill" and nested_on(t)) for t in ts)
+                       else t.get(key) == value and not (key == "fill" and (nested_on(t) or tiles_on(t))) for t in ts)
 
         if same(tgts):  # (nothing to change: no Hz bass warning either)
             return self.sync_custom()
@@ -513,6 +522,7 @@ class CustomPanel:
             t[key] = value
             if key == "fill":  # (another Inside fill picked: no Nested steps any more)
                 t.pop("nested", None)
+                t.pop("tiles", None)
             if key == "gate" and t.get("range"):  # (a new gate typed in the panel = one flat gate again, user;
                 t["range_kept"] = t.pop("range")  # kept for the Range window to bring back)
             if not value and (key in ("edge", "edge_mode") or key in CUSTOM_FLAGS and t is not self.custom_defaults):

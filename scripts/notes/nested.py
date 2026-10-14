@@ -26,7 +26,7 @@ import math
 import numpy as np
 
 from notes.custom import (clean_strokes, cut_out, drawn_view, edge_loops, find_spans, fill_plan, frame_to_bp,
-                          frame_to_uv, inside_rows, merged_rows)
+                          frame_to_uv, has_nested, has_tiles, inside_rows, merged_rows)
 from notes.shrink import field, inner_rows, proportion
 
 WAYS = ("scale", "band", "blend")
@@ -74,9 +74,24 @@ def clean_nested(c):
     return out
 
 
+def centre_key(sh):
+    """Which setting holds the shape's centre point: "nested", "tiles" (tiles.py: where one tile sits), or None."""
+    if has_nested(sh):
+        return "nested"
+    return "tiles" if has_tiles(sh) else None
+
+
 def uses_centre(sh):
-    """The Nested way uses the centre point (its handle shows): not Even band."""
-    return sh["nested"].get("way") != "band"
+    """The shape's fill uses the centre point (its handle shows): Nested but not Even band, and Tiles."""
+    key = centre_key(sh)
+    return key == "tiles" or key == "nested" and sh["nested"].get("way") != "band"
+
+
+def set_centre(sh, u, v):
+    """The centre point moved to (u, v) in the shape's box."""
+    key = centre_key(sh)
+    if key:
+        sh[key] = dict(sh[key], at=[round(u, 6), round(v, 6)])
 
 
 def step_sizes(cfg):
@@ -92,7 +107,7 @@ def step_sizes(cfg):
 
 def centre_bp(sh, ppq):
     """The centre point in beats / pitch: the one set (u, v in the box), else the middle of the filled part."""
-    at = sh["nested"].get("at")
+    at = sh[centre_key(sh)].get("at")
     if at:
         return frame_to_bp(sh["pts"])(*at)
     rows = inside_rows(sh, ppq)
@@ -107,7 +122,7 @@ def centre_bp(sh, ppq):
 
 def centre_uv(sh, ppq):
     """The centre point in the shape's box (u, v), or None if the box is flat."""
-    at = sh["nested"].get("at")
+    at = sh[centre_key(sh)].get("at")
     if at:
         return tuple(at)
     to_uv = frame_to_uv(sh["pts"])

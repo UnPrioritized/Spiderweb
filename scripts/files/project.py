@@ -17,6 +17,7 @@ from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, cl
 from notes.hzbass import clean_hz
 from notes.mask import MASK_DEFAULTS, THICKNESS, clean_mask
 from notes.nested import clean_nested
+from notes.tiles import clean_tiles
 from notes.funnel import FUNNEL_DEFAULTS, clean_funnel
 from notes.paths import KEYS
 from notes.picture import paths_for_file
@@ -356,6 +357,11 @@ class ProjectFiles:
         if nested and out["fill"] in ("fill", "spam"):  # (Inside fill Nested)
             nested.pop("at", None)
             out["nested"] = nested
+        out.pop("tiles", None)
+        tiles = clean_tiles(custom.get("tiles"))
+        if tiles and not nested and out["fill"] in ("fill", "spam"):  # (Inside fill Tiles)
+            tiles.pop("at", None)
+            out["tiles"] = tiles
         out.pop("hz", None)
         if clean_hz(custom.get("hz")):
             out["hz"] = clean_hz(custom["hz"])
