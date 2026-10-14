@@ -1,5 +1,19 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
+Version 1.5.4
+
+What's new:
+
+• Hz shape: Save… keeps the line you drew under a name. Saved lines show in Shapes under the ready-made ones, newest first, and Delete takes one out.
+
+• Every list of saved names (shapes, presets, formulas, palettes...) shows the ready-made ones first, then a divider, then yours newest first. Typing a letter jumps to the first name starting with it.
+
+• Error and crash logs now also say which PC, screen, speed-ups, MIDI out, soundfont (name and size), Built-in BASSMIDI and Hz preview settings were used, so problems are easier to track down. Only file names are written, never folders.
+
+• Fixed the Hz bass preview crash: the soundfont player could throw away samples while another part was still loading them (use after free). It happened mostly with big .sfz soundfonts.
+
+• Fixes: in Hz bass chords, a note cut by another tone's hit keeps its longer gate in the next note; Hz shape keeps its line on an Hz bass with no notes yet and after undoing the first note, and dragging stays smooth with many keys.
+
 Version 1.5.3
 
 What's new:
