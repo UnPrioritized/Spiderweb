@@ -1,0 +1,47 @@
+Two Inside fills build a pattern out of your own shapes. Pick them under Inside in the side panel, like Fill and Spam.
+
+Both of them give each part its own colour, so set Channels to Multi channel to see them (a shape can have at most 15 colours, the outline and its own colour count too).
+
+Notes: Fill makes one long note per key in each part. Spam chops the whole inside into notes of the spam gate, and each note takes the colour of the part its middle is in. The Spam rows (Gate, Ends, Start, Range…) work as usual.
+
+The Normal / Outline dropdown next to them works like Fill's and Spam's: with Outline, the edge gets a channel of its own, and the Outline gate makes that edge thicker. The parts fill what's left inside.
+
+Nested
+
+The inside is filled with copies of the shape, each one inside the one before. Steps is how many copies, the shape itself counts as the first one. The last copy is drawn on top.
+
+Shrink by picks how the copies are made:
+
+Scaling toward the centre point: each copy is a true smaller copy of the shape. It shrinks toward the centre point, which is the small ring with a cross on the selected shape. Drag it with any tool to move it. It starts in the middle of the filled part and moves, flips and turns along with the shape.
+
+Even band (follows the outline): every step is equally thick all the way round and follows each bend, like the Outline gate. This suits long, curved or thin shapes. It has no centre point. Sharp points can come out on the inner steps of an oval: that's how an even band works on a shape that is flat along its sides and tight at its ends.
+
+Blend toward the centre point: the steps follow the outline near the edge and round off smoothly into the centre point, without sharp points. Round toward the centre goes from 0 % (the same as Even band) to 100 % (fully rounded into the point).
+
+All three are measured in the proportions the shape was first drawn in, so a circle's steps stay round however its box was stretched.
+
+Last size: how big the last, smallest copy is (0 % = the copies shrink down to a point, so the last one has no notes).
+
+Spacing: 0 = even steps. Above 0 the steps get closer together toward the last copy, below 0 closer together near the outline.
+
+Turn (Scaling only): each copy is turned a little more than the one before, for a spiral.
+
+Copies of (Scaling only): the copies can be another shape from your library, made to fit the same box. The shape itself stays the outermost step.
+
+Colours: how many channels the steps take turns over. Every other one empty leaves every other step without notes, so the copies show as separate rings.
+
+Tiles
+
+The inside is filled with another shape repeated like wallpaper and cut where it meets the outline.
+
+Tile shape: the shape each tile is made of, from your library. Height (keys) and Length (ticks) are one tile's size. The two Gap boxes are the empty keys between rows and the empty ticks between tiles side by side.
+
+Layout: Grid, or Bricks, where every other row is moved half a tile sideways.
+
+Flip: every other tile flipped side to side or upside down, or both ways (every other row upside down, every other column side to side).
+
+Tile colours: the next colour along each diagonal, each column or each row, a checkerboard, or one colour for all. Colours is how many channels they take turns over.
+
+Only whole tiles leaves out every tile the outline cuts.
+
+Tiles always lie level on the piano roll, on whole keys. One tile sits on the centre point: drag its handle to slide the whole wallpaper. Turning the shape turns its outline, the tiles stay level.
