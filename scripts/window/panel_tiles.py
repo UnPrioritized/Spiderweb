@@ -12,8 +12,8 @@ from files.mathexpr import calc, fmt
 from notes.tiles import BY, FLIPS, LAYOUTS, MOST_BEATS, MOST_COLOURS, MOST_KEYS, TILES_DEFAULTS, too_many
 from window import look
 from window.drawer import library_lists
-from window.panel_nested import NOTES_CHOICES
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, name_list, set_names, unchanged
+from window.panel_nested import DROP_WIDTH, NOTES_CHOICES, drop_row
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, set_names, unchanged
 
 # the number boxes: (setting, label, unit, lowest, highest, Scrub steps, in ticks); two a row
 BOXES = [
@@ -44,33 +44,23 @@ class TilesPanel:
             self.tiles_rows.append(row)
             return row
 
-        row = row_of()
-        lb = ttk.Label(row, text=tr("panel_custom.nested_notes"))
-        lb.pack(side="left")
-        self.tiles_notes_box = ttk.Combobox(row, values=[t for _, t in NOTES_CHOICES], state="readonly", width=6)
-        self.tiles_notes_box.pack(side="left", padx=4)
+        row, self.tiles_notes_box = drop_row(self, opts, "nested_notes", [t for _, t in NOTES_CHOICES])
+        self.tiles_rows.append(row)
         self.tiles_notes_box.bind("<<ComboboxSelected>>", lambda e: (
             self.set_tiles_fill(NOTES_CHOICES[e.widget.current()][0]), self.roll.focus_set()))
-        for w in (lb, self.tiles_notes_box):
-            Tooltip(w, tr("panel_custom.nested_notes_tip"))
-        row = row_of()
-        lb = ttk.Label(row, text=tr("panel_custom.tiles_of"))
-        lb.pack(side="left")
-        self.tiles_of_box = name_list(ttk.Combobox(row, state="readonly", width=22,
-                                                   postcommand=self.refresh_tiles_names))
-        self.tiles_of_box.pack(side="left", padx=4)
+        row, self.tiles_of_box = drop_row(self, opts, "tiles_of", names=self.refresh_tiles_names)
+        self.tiles_rows.append(row)
         self.tiles_of_box.bind("<<ComboboxSelected>>", lambda e: (self.on_tiles_of(), self.roll.focus_set()))
-        for w in (lb, self.tiles_of_box):
-            Tooltip(w, tr("panel_custom.tiles_of_tip"))
         for line in BOXES:
             row = row_of()
             for n, (key, text, unit, lo, hi, steps, _) in enumerate(line):
                 lb = ttk.Label(row, text=tr("panel_custom." + text))
-                lb.pack(side="left", padx=(12 if n else 0, 0))
+                lb.grid(row=0, column=3 * n, sticky="w", padx=(12 if n else 0, 0))
                 var = tk.StringVar()
-                e = ttk.Entry(row, textvariable=var, width=6)
-                e.pack(side="left", padx=4)
-                ttk.Label(row, text=tr("panel_custom." + unit), foreground=look.HINT).pack(side="left")
+                e = ttk.Entry(row, textvariable=var, width=5)
+                e.grid(row=0, column=3 * n + 1, sticky="w", padx=4)
+                ttk.Label(row, text=tr("panel_custom." + unit), foreground=look.HINT).grid(
+                    row=0, column=3 * n + 2, sticky="w")
                 apply = (lambda left=False, key=key: self.on_tiles_box(key, left))
                 e.bind("<Return>", lambda ev, apply=apply: apply())
                 leave_box(self, e, var, apply)
@@ -79,24 +69,14 @@ class TilesPanel:
                     Tooltip(w, tr("panel_custom." + text + "_tip"))
                 self.tiles_boxes[key] = (e, var)
         for key, values in DROPS:
-            row = row_of()
-            lb = ttk.Label(row, text=tr("panel_custom.tiles_" + key))
-            lb.pack(side="left")
-            box = ttk.Combobox(row, values=[tr("panel_custom.tiles_" + key + "_" + v) for v in values],
-                               state="readonly", width=24)
-            box.pack(side="left", padx=4)
-            box.bind("<<ComboboxSelected>>", lambda e, key=key, values=values: (
-                self.set_tiles(key, values[e.widget.current()]), self.roll.focus_set()))
-            for w in (lb, box):
-                Tooltip(w, tr("panel_custom.tiles_" + key + "_tip"))
-            self.tiles_drops[key] = box
-            if key == "by":  # (how many colours, on the row under it)
+            texts = [tr("panel_custom.tiles_" + key + "_" + v) for v in values]
+            if key == "by":  # "Colours [4] by [Diagonals]": how many colours, then which tile gets which
                 row = row_of()
                 lb = ttk.Label(row, text=tr("panel_custom.nested_colours"))
-                lb.pack(side="left")
+                lb.grid(row=0, column=0, sticky="w")
                 var = tk.StringVar()
-                e = ttk.Entry(row, textvariable=var, width=4)
-                e.pack(side="left", padx=4)
+                e = ttk.Entry(row, textvariable=var, width=5)
+                e.grid(row=0, column=1, sticky="w", padx=4)
                 apply = (lambda left=False: self.on_tiles_box("colours", left))
                 e.bind("<Return>", lambda ev: apply())
                 leave_box(self, e, var, apply)
@@ -104,6 +84,19 @@ class TilesPanel:
                 for w in (lb, e):
                     Tooltip(w, tr("panel_custom.tiles_colours_tip"))
                 self.tiles_boxes["colours"] = (e, var)
+                by = ttk.Label(row, text=tr("panel_custom.tiles_by"))
+                by.grid(row=0, column=2, sticky="w")
+                box = ttk.Combobox(row, values=texts, state="readonly", width=DROP_WIDTH)
+                box.grid(row=0, column=3, columnspan=3, sticky="w", padx=(12, 0))
+                for w in (by, box):
+                    Tooltip(w, tr("panel_custom.tiles_by_tip"))
+            else:
+                row, box = drop_row(self, opts, "tiles_" + key, texts)
+                self.tiles_rows.append(row)
+            box.bind("<<ComboboxSelected>>", lambda e, key=key, values=values: (
+                self.set_tiles(key, values[e.widget.current()]), self.roll.focus_set()))
+            self.tiles_drops[key] = box
+        self.tiles_table = list(self.tiles_rows)  # (lined up with the Nested ones, panel_custom)
         # too many tiles for the shape: it's left empty (tiles.too_many)
         self.tiles_warn = ttk.Label(opts, text=tr("panel_custom.tiles_too_many"), foreground=look.WARN,
                                     font=look.font(8), wraplength=int(260 * self.scale), justify="left")

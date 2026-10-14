@@ -27,6 +27,7 @@ BOXES = [
 WAY_CHOICES = [("scale", tr("panel_custom.nested_way_scale")), ("band", tr("panel_custom.nested_way_band")),
                ("blend", tr("panel_custom.nested_way_blend"))]
 ONLY_FOR = {"turn": "scale", "mix": "blend"}  # (rows of the boxes only one way uses)
+DROP_WIDTH = 14  # every Nested / Tiles dropdown (short choices; the tooltips tell the rest)
 NESTED_UNDO = tr("panel_custom.nested")
 
 
@@ -37,54 +38,58 @@ def nested_on(t):
             and not t.get("hz"))
 
 
+def drop_row(app, opts, text, values=(), names=None):
+    """A row of a label and a dropdown for the Nested / Tiles rows (grid, lined up by widgets.line_up; the dropdown
+    spans to the row's end, so every one is as wide as the others). names: a name list (postcommand)."""
+    row = ttk.Frame(opts)
+    lb = ttk.Label(row, text=tr("panel_custom." + text))
+    lb.grid(row=0, column=0, sticky="w")
+    if names:
+        box = name_list(ttk.Combobox(row, state="readonly", width=DROP_WIDTH, postcommand=names))
+    else:
+        box = ttk.Combobox(row, values=values, state="readonly", width=DROP_WIDTH)
+    box.grid(row=0, column=1, columnspan=5, sticky="w", padx=4)
+    for w in (lb, box):
+        Tooltip(w, tr("panel_custom." + text + "_tip"))
+    return row, box
+
+
 class NestedPanel:
     """Mixed into App (beside CustomPanel, which places these rows under the Inside choices)."""
 
     def _build_nested(self, opts):
         """The Nested rows, put in self.custom_rows (shown by sync_custom while Nested is the Inside fill)."""
         self.nested_rows, self.nested_boxes, self.nested_way_rows = [], {}, {}
-        row = ttk.Frame(opts)
-        lb = ttk.Label(row, text=tr("panel_custom.nested_notes"))
-        lb.pack(side="left")
-        self.nested_notes_box = ttk.Combobox(row, values=[t for _, t in NOTES_CHOICES], state="readonly", width=6)
-        self.nested_notes_box.pack(side="left", padx=4)
+        self.nested_table = []  # (the rows lined up with the Tiles ones, panel_tiles)
+        row, self.nested_notes_box = drop_row(self, opts, "nested_notes", [t for _, t in NOTES_CHOICES])
         self.nested_notes_box.bind("<<ComboboxSelected>>", lambda e: (
             self.set_nested_notes(NOTES_CHOICES[e.widget.current()][0]), self.roll.focus_set()))
-        for w in (lb, self.nested_notes_box):
-            Tooltip(w, tr("panel_custom.nested_notes_tip"))
         self.nested_rows.append(row)
-        row = ttk.Frame(opts)  # how the copies are made (nested.WAYS)
-        lb = ttk.Label(row, text=tr("panel_custom.nested_way"))
-        lb.pack(side="left")
-        self.nested_way_box = ttk.Combobox(row, values=[t for _, t in WAY_CHOICES], state="readonly", width=26)
-        self.nested_way_box.pack(side="left", padx=4)
+        # how the copies are made (nested.WAYS)
+        row, self.nested_way_box = drop_row(self, opts, "nested_way", [t for _, t in WAY_CHOICES])
         self.nested_way_box.bind("<<ComboboxSelected>>", lambda e: (
             self.set_nested("way", WAY_CHOICES[e.widget.current()][0]), self.roll.focus_set()))
-        for w in (lb, self.nested_way_box):
-            Tooltip(w, tr("panel_custom.nested_way_tip"))
         self.nested_rows.append(row)
-        row = ttk.Frame(opts)  # Scaling: the copies made of another library shape ("of")
-        lb = ttk.Label(row, text=tr("panel_custom.nested_of"))
-        lb.pack(side="left")
-        self.nested_of_box = name_list(ttk.Combobox(row, state="readonly", width=22,
-                                                    postcommand=self.refresh_nested_names))
-        self.nested_of_box.pack(side="left", padx=4)
+        # Scaling: the copies made of another library shape ("of")
+        row, self.nested_of_box = drop_row(self, opts, "nested_of", names=self.refresh_nested_names)
         self.nested_of_box.bind("<<ComboboxSelected>>", lambda e: (self.on_nested_of(), self.roll.focus_set()))
-        for w in (lb, self.nested_of_box):
-            Tooltip(w, tr("panel_custom.nested_of_tip"))
         self.nested_rows.append(row)
         self.nested_way_rows[row] = "scale"
+        self.nested_table += self.nested_rows
         for line in BOXES:
             row = ttk.Frame(opts)
+            if line[0][0] != "mix":  # (its long label stays out of the table)
+                self.nested_table.append(row)
             for n, (key, text, unit, lo, hi, steps, _, _) in enumerate(line):
                 lb = ttk.Label(row, text=tr("panel_custom." + text))
-                lb.pack(side="left", padx=(12 if n else 0, 0))
+                lb.grid(row=0, column=3 * n, sticky="w", padx=(12 if n else 0, 0))
                 var = tk.StringVar()
                 e = ttk.Entry(row, textvariable=var, width=5)
-                e.pack(side="left", padx=4)
-                if unit:
+                e.grid(row=0, column=3 * n + 1, sticky="w", padx=4)
+                if unit:  # (a lone box's unit may reach past the second column)
                     ttk.Label(row, text=unit if unit == "%" else tr("panel_custom." + unit),
-                              foreground=look.HINT).pack(side="left")
+                              foreground=look.HINT).grid(row=0, column=3 * n + 2, sticky="w",
+                                                         columnspan=1 if len(line) > 1 else 4)
                 apply = (lambda left=False, key=key: self.on_nested_box(key, left))
                 e.bind("<Return>", lambda ev, apply=apply: apply())
                 leave_box(self, e, var, apply)

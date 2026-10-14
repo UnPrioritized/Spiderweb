@@ -19,7 +19,7 @@ from window.hz_window import open_hz
 from window.panel_nested import nested_on
 from window.panel_tiles import tiles_on
 from window.range_window import open_range_graph
-from window.widgets import Scrub, Tooltip, bad, good, grid_shown, leave_box, name_list, set_names, unchanged
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown, leave_box, line_up, name_list, set_names, unchanged
 
 GAP_COLOR = look.WARN  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
 MISSING_MARK = "✕ "  # in the Shape box: a placed shape whose library shape was renamed or deleted (user, 2026-10-05)
@@ -130,10 +130,11 @@ class CustomPanel:
         g = self.gate_row = ttk.Frame(opts)
         self.custom_rows.append((g, dict(anchor="w", padx=(20, 0))))
         lb = ttk.Label(g, text=tr("panel_custom.gate"))
-        lb.pack(side="left")
+        lb.grid(row=0, column=0, sticky="w")  # (Gate / Ends / Start: in the Nested / Tiles rows' columns, line_up)
         self.gate_entry = ttk.Entry(g, textvariable=self.gate_var, width=7)
-        self.gate_entry.pack(side="left", padx=4)
-        ttk.Label(g, text=tr("panel_custom.ticks_enter_to_apply"), foreground=look.HINT).pack(side="left")
+        self.gate_entry.grid(row=0, column=1, sticky="w", padx=4)
+        ttk.Label(g, text=tr("panel_custom.ticks_enter_to_apply"), foreground=look.HINT).grid(row=0, column=2,
+                                                                                            sticky="w")
         self.gate_entry.bind("<Return>", lambda e: self.on_gate())
         leave_box(self, self.gate_entry, self.gate_var, self.on_gate)
         self._hz_ok = None  # the shapes skip_hz was OK'd for (not asked again while they stay selected)
@@ -144,7 +145,7 @@ class CustomPanel:
         # Range (gaterange.py): the gate goes from this one to a second one across the shape, along a graph. All
         # of it is set in its own window (user: room for more options there, not in the panel)
         self.range_btn = ttk.Button(g, text=tr("panel_custom.range"), command=lambda: open_range_graph(self))
-        self.range_btn.pack(side="left", padx=(8, 0))
+        self.range_btn.grid(row=0, column=3, columnspan=3, sticky="w", padx=(8, 0))
         Tooltip(self.range_btn, tr("panel_custom.range_tip"))
         # Hz bass: the gate is one wave of a tone (custom.py). Only the switch, Notes… and the warnings here (user);
         # the rest is in the Hz bass window
@@ -167,24 +168,27 @@ class CustomPanel:
             self.custom_rows.append((w, dict(anchor="w", padx=(20, 0))))
         e = self.ends_row = ttk.Frame(opts)
         self.custom_rows.append((e, dict(anchor="w", padx=(20, 0), pady=(1, 0))))
-        ttk.Label(e, text=tr("panel_custom.ends")).pack(side="left")
+        ttk.Label(e, text=tr("panel_custom.ends")).grid(row=0, column=0, sticky="w")
         self.ends_var = tk.StringVar(value=END_CHOICES[0][1])
         self.ends_box = ttk.Combobox(e, textvariable=self.ends_var, values=[t for _, t in END_CHOICES],
                                      state="readonly", width=15)
-        self.ends_box.pack(side="left", padx=4)
+        self.ends_box.grid(row=0, column=1, columnspan=5, sticky="w", padx=4)
         self.ends_box.bind("<<ComboboxSelected>>", lambda ev: (
             self.set_custom("ends", ENDS[self.ends_box.current()]), self.roll.focus_set()))
         Tooltip(self.ends_box, tr("panel_custom.ends_tip"))
         a = self.start_row = ttk.Frame(opts)
         self.custom_rows.append((a, dict(anchor="w", padx=(20, 0), pady=(1, 0))))
-        ttk.Label(a, text=tr("panel_custom.start")).pack(side="left")
+        ttk.Label(a, text=tr("panel_custom.start")).grid(row=0, column=0, sticky="w")
+        choices = ttk.Frame(a)
+        choices.grid(row=0, column=1, columnspan=5, sticky="w")
         self.align_buttons = []
         for value, text, tip in ALIGN_CHOICES:
-            b = ttk.Radiobutton(a, text=text, value=value, variable=self.align_var,
+            b = ttk.Radiobutton(choices, text=text, value=value, variable=self.align_var,
                                 command=lambda: self.set_custom("align", self.align_var.get()))
             b.pack(side="left", padx=(4, 0))
             Tooltip(b, tip)
             self.align_buttons.append(b)
+        line_up(self.nested_table + self.tiles_table, labels=[g, e, a])
         # the smallest outline gate (custom.grow_inward): thin outline notes grow into the inside
         o = self.edge_row = ttk.Frame(opts)
         self.custom_rows.append((o, dict(anchor="w", padx=(20, 0), pady=(1, 0))))

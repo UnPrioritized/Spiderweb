@@ -26,6 +26,27 @@ def fit_dropdowns(root):
     root.bind_class("TCombobox", "<Map>", lambda e: fit_dropdown(e.widget), add="+")
 
 
+def line_up(rows, labels=()):
+    """Rows (frames laid out with grid) line up like one table: each column as wide as its widest cell in any of
+    them. A cell spanning several columns doesn't count (a dropdown or a long unit at a row's end). labels: rows
+    lined up by their first column only (their labels count too)."""
+    widest = {}
+    for row in list(rows) + list(labels):
+        for w in row.grid_slaves(column=None if row in rows else 0):
+            info = w.grid_info()
+            if int(info["columnspan"]) > 1:
+                continue
+            pad = info["padx"]
+            pad = sum(int(p) for p in (pad if isinstance(pad, tuple) else str(pad).split()))
+            c = int(info["column"])
+            widest[c] = max(widest.get(c, 0), w.winfo_reqwidth() + pad)
+    for row in rows:
+        for c, px in widest.items():
+            row.columnconfigure(c, minsize=px)
+    for row in labels:
+        row.columnconfigure(0, minsize=widest.get(0, 0))
+
+
 def keep_width(cb):
     """This dropdown keeps the width it was given (its choices are names someone typed, not texts)."""
     cb.keep_width = True
