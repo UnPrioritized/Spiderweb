@@ -437,10 +437,12 @@ class RollDrawing:
                 self._note_pic = None
             else:
                 rects = self.note_rects(w, h) if app.show_notes.get() else None
-                if rects is not None and (len(rects[0]) > w * h // 2000 or self._panning or scrolled):
+                if rects is not None and (len(rects[0]) > w * h // 2000 or self._panning or scrolled
+                                          or ((rects[0] == rects[2]) | (rects[1] == rects[3])).any()):
                     # Lots of notes: paint grid + notes as one picture (thousands of canvas items redraw slowly).
                     # Panning / scrolling (scrollbar, wheel): always (the picture is moved along, ~12 ms a move;
-                    # canvas items drawn again at every move took 35-80 ms on the user's screen with ~1000 notes)
+                    # canvas items drawn again at every move took 35-80 ms on the user's screen with ~1000 notes).
+                    # A note 1 px wide or tall: the picture too (a canvas rectangle makes it 2 px; user: 1 px everywhere)
                     self.paint_image(w, h, rows, cols, rects)
                     self._note_pic = None if drafted else pic
                 else:

@@ -1390,7 +1390,7 @@ def warm():
     i0, f0 = np.zeros(0, np.int64), np.zeros(0)
     p, nm, sr, w, s, rp, _ = hz_expand(i1, i1, np.ones(1), i1 + 1, i1, i1 - 1, b, 1, 0.5, 0.1, f1, np.ones(1),
                                        np.ones(1), f1)
-    p, nm, sr, w, s, late, ns, npp, place, took = hz_late(p, nm, sr, w, s, f1, True, 0.5, f1, np.ones(1), f1, 1)
+    p, nm, sr, w, s, late, ns, npp, place, took = hz_late(p, nm, sr, w, s, f1, True, 0.5, f1, np.ones(1, np.int64), f1, 1)
     hz_finish(p, nm, sr, w, s, late, ns, npp, place, np.zeros(1), np.full(1, 9.0), np.ones(1), True, True, b, f1,
               np.ones(1), f1, f1, np.ones(1), np.full(1, 9.0), np.ones(1), np.ones(1), np.ones(1), 0.01)
     hz_finish(p, nm, sr, w, s, late, ns, npp, place, np.zeros(1), np.full(1, 9.0), np.ones(1), True, True, b, f1,
