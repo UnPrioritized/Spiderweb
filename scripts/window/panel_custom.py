@@ -19,7 +19,8 @@ from window.hz_window import open_hz
 from window.panel_nested import nested_on
 from window.panel_tiles import tiles_on
 from window.range_window import open_range_graph
-from window.widgets import Scrub, Tooltip, bad, good, grid_shown, leave_box, line_up, name_list, set_names, unchanged
+from window.widgets import (Scrub, Tooltip, bad, good, grid_shown, leave_box, line_up, name_list, set_names, unchanged,
+                            unit_word)
 
 GAP_COLOR = look.WARN  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
 MISSING_MARK = "✕ "  # in the Shape box: a placed shape whose library shape was renamed or deleted (user, 2026-10-05)
@@ -133,8 +134,8 @@ class CustomPanel:
         lb.grid(row=0, column=0, sticky="w")  # (Gate / Ends / Start: in the Nested / Tiles rows' columns, line_up)
         self.gate_entry = ttk.Entry(g, textvariable=self.gate_var, width=7)
         self.gate_entry.grid(row=0, column=1, sticky="w", padx=4)
-        ttk.Label(g, text=tr("panel_custom.ticks_enter_to_apply"), foreground=look.HINT).grid(row=0, column=2,
-                                                                                            sticky="w")
+        unit_word(ttk.Label(g, foreground=look.HINT), self.gate_var, "unit.ticks", "unit.tick").grid(row=0, column=2,
+                                                                                                   sticky="w")
         self.gate_entry.bind("<Return>", lambda e: self.on_gate())
         leave_box(self, self.gate_entry, self.gate_var, self.on_gate)
         self._hz_ok = None  # the shapes skip_hz was OK'd for (not asked again while they stay selected)
@@ -197,7 +198,8 @@ class CustomPanel:
         self.edge_var = tk.StringVar()
         self.edge_entry = ttk.Entry(o, textvariable=self.edge_var, width=7)
         self.edge_entry.pack(side="left", padx=4)
-        ttk.Label(o, text=tr("panel_custom.edge_unit"), foreground=look.HINT).pack(side="left")
+        unit_word(ttk.Label(o, foreground=look.HINT), self.edge_var, "panel_custom.edge_unit",
+                  "panel_custom.edge_unit_one").pack(side="left")
         for w in (lb, self.edge_entry):
             Tooltip(w, tr("panel_custom.edge_tip"))
         o = self.edge_mode_row = ttk.Frame(opts)

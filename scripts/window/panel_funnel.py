@@ -9,7 +9,7 @@ from notes.funnel import funnel_reversed, gate_ticks
 from notes.hzbass import HZ_DEFAULTS, shortest_gate
 from files.mathexpr import calc
 from window import look
-from window.widgets import Scrub, Tooltip, bad, good, grid_shown, leave_box, unchanged
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown, leave_box, unchanged, unit_word
 
 # Funnel panel: (setting, label, [(value, text, tooltip)])
 FUNNEL_CHOICES = [
@@ -76,7 +76,7 @@ class FunnelPanel:
         e.bind("<Return>", lambda ev: self.on_funnel_entry())
         leave_box(self, e, var, lambda left: self.on_funnel_entry(left))
         Scrub(self, [(e, var, self.on_funnel_entry)], GATE_STEPS, 1, 10 ** 7, label=lb)
-        ttk.Label(row, text=tr("unit.ticks"), foreground=look.HINT).pack(side="left")
+        unit_word(ttk.Label(row, foreground=look.HINT), var, "unit.ticks", "unit.tick").pack(side="left")
         self.funnel_gate_tip = Tooltip(e, "")
         # Range (gaterange.py, the same window as a custom shape's): the gate goes from this one at the line start
         # to a second one at the wall, along a graph, smoothly or in steps, evenly or with the curve

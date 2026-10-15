@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from files.lang import tr
+from files.lang import tr, trn
 from notes.between import copied as between_copied, group_of, keep_pushes, push_sizes, whole_groups
 from notes.custom import box_frame, fill_plan, fill_test
 from notes.engine import cached_arrays, make_shape
@@ -1076,8 +1076,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                     self.draft["pts"][2] = [2 * mid[0] - pt[0], 2 * mid[1] - pt[1]]
             self.request_redraw()
             text = self.position_text(e) or ""
-            self.app.show_position(tr("pianoroll.new_funnel_notes", text=text,
-                                      note_count=self.app.note_count(self.draft)))
+            n = self.app.note_count(self.draft)
+            self.app.show_position(tr("pianoroll.new_funnel_notes", text=text, notes=trn("n.notes", n, n=n)))
         elif kind == "resize":
             _, k, orig, side, start = self.drag
             pt = self.resize_point(orig, k, side, start, e)

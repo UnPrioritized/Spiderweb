@@ -6,7 +6,8 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc
 from notes.custom import CYCLE_ALL, CYCLE_MAX, CYCLES, row_restart_ok
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
+from window.widgets import (Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged, unit_word,
+                            unit_text)
 
 CYCLE_CHOICES = [(None, tr("colours.off"))] + [(v, tr("colours." + v)) for v in CYCLES]
 # "Each key row" (cycle["rows"]): off, counted from each row's first note, back from its last
@@ -53,6 +54,8 @@ class ColoursPanel:
             self.cycle_entries.append(e)
         self.cycle_unit = ttk.Label(c, text="")
         self.cycle_unit.pack(side="left")
+        self.cycle_unit_key = ""  # (its text key: "1 step" / "2 steps" follow the box, show_cycle_unit)
+        self.cycle_vars[0].trace_add("write", lambda *_: self.show_cycle_unit())
         # "Each key row" (not By key: every row would be one colour)
         c = self.cycle_rows_row = ttk.Frame(rows)
         c.pack(anchor="w", pady=(1, 0))
@@ -77,7 +80,7 @@ class ColoursPanel:
             Scrub(self, [(e, var, lambda: self.on_cycle("shift"))], (1, 4 if i else 3, 1), lo, hi,
                   label=None if i else lb, drag_box=True)
             e.mixed_tip = Tooltip(e, tr("colours.shift_tip"))  # (one tip: Mixed's sentence goes on top, sync_colours)
-            ttk.Label(c, text=tr(unit)).pack(side="left")
+            unit_word(ttk.Label(c), var, unit, unit + "_one").pack(side="left")
             self.shift_entries.append(e)
         for e, var, what in ([(self.cycle_n_entry, self.cycle_n_var, "n")] +
                              [(e, v, "every") for e, v in zip(self.cycle_entries, self.cycle_vars)] +
@@ -151,7 +154,8 @@ class ColoursPanel:
                 self.cycle_slash.pack(side="left")
                 self.cycle_entries[1].pack(side="left", padx=4)
             self.cycle_unit.pack(side="left")
-        self.cycle_unit.config(text=tr("colours.unit_" + (by or "step")) if by or not on else "")
+        self.cycle_unit_key = "colours.unit_" + (by or "step") if by or not on else ""
+        self.show_cycle_unit()
         lonely = bool(cy) and self.channel_mode.get() != "auto"
         self.cycle_box.config(state="readonly" if tgts else "disabled",
                               style="Gap.TCombobox" if lonely else "TCombobox")
@@ -172,6 +176,13 @@ class ColoursPanel:
                 self.cycle_every_row.pack(anchor="w", padx=(20, 0), pady=(1, 0))
             else:
                 self.cycle_every_row.pack_forget()
+
+    def show_cycle_unit(self):
+        key = self.cycle_unit_key
+        text = (tr(key) if key == "colours.unit_time" else unit_text(self.cycle_vars[0].get(), key, key + "_one")
+                if key else "")
+        if self.cycle_unit.cget("text") != text:
+            self.cycle_unit.config(text=text)
 
     def on_cycle(self, what, left=None):
         """The Colours dropdown (what = "by") or one of its number boxes ("n" = channels, "every"). Only what was

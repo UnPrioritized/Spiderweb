@@ -15,14 +15,14 @@ from tkinter import ttk
 
 import numpy as np
 
-from files.lang import tr
+from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes.custom import SPAM_FILLS, gate_ticks, range_gates
 from notes.funnel import funnel_gates, funnel_range
 from notes.gaterange import DIRS, STRAIGHT, clean_range, gate_steps, halved, steps_of, steps_to, y_gate
 from window import big_ask, look
 from window.panel_funnel import GATE_STEPS
-from window.widgets import LocalUndo, Scrub, Tooltip, remember_place
+from window.widgets import LocalUndo, Scrub, Tooltip, remember_place, unit_word
 
 
 def _power(k):
@@ -88,7 +88,8 @@ class RangeGraph(tk.Toplevel):
             Scrub(app, [(e, var, lambda k=key: self.on_gate(k))], GATE_STEPS, 1, 10 ** 7, label=lb)
             for w in (lb, e):
                 Tooltip(w, tr(f"range_window.{key}_tip"))
-        ttk.Label(row, text=tr("range_window.ticks_unit"), foreground=look.HINT).pack(side="left")
+        unit_word(ttk.Label(row, foreground=look.HINT), self.gate_vars["to"], "unit.ticks", "unit.tick").pack(
+            side="left")
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(4, 0))
         ttk.Label(row, text=tr("range_window.across")).pack(side="left")
@@ -307,7 +308,7 @@ class RangeGraph(tk.Toplevel):
         for btn in self.preset_btns:
             btn.config(state="normal" if on else "disabled")
         self.info.config(text=tr("range_window.info", a=a, b=b) +
-                         (tr("range_window.notes", n=self.count) if self.count else "") +
+                         (trn("range_window.notes", self.count, n=self.count) if self.count else "") +
                          (tr("range_window.no_step") if on and self.memo[0].get("halves") and a != b
                           and not steps_to(a, b) else ""))  # (Steps: no halving / doubling fits)
 
@@ -396,7 +397,7 @@ class RangeGraph(tk.Toplevel):
             y = k / 4
             g = y_gate(a, b, y, halves)
             cv.create_line(x0, self.y2c(y), x1, self.y2c(y), fill=look.CHART_GRID)
-            cv.create_text(x0 - 4 * s, self.y2c(y), text=tr("range_window.ticks", n=g), anchor="e", fill=look.LABEL,
+            cv.create_text(x0 - 4 * s, self.y2c(y), text=trn("n.ticks", g, n=g), anchor="e", fill=look.LABEL,
                            font=look.font(7))
         cv.create_rectangle(x0, top, x1, bot, outline=look.CHART_FRAME)
         ends = {"time": ("left", "right"), "keys": ("low", "high"), "keys_down": ("high", "low")}[self.memo[0]["dir"]]
@@ -428,7 +429,8 @@ class RangeGraph(tk.Toplevel):
         at = self.pts[self.drag] if self.drag is not None else self.hover
         if at is not None and on:
             g = y_gate(a, b, float(at[1]), halves)
-            cv.create_text(x1 - 4 * s, top + 4 * s, text=tr("range_window.at", at=fmt(round(at[0] * 100, 1)), n=g),
+            cv.create_text(x1 - 4 * s, top + 4 * s, text=tr("range_window.at", at=fmt(round(at[0] * 100, 1)),
+                                                                 ticks=trn("n.ticks", g, n=g)),
                            anchor="ne", fill=look.VALUE, font=look.font(8))
 
     def chart_bins(self):
@@ -488,8 +490,9 @@ class RangeGraph(tk.Toplevel):
         if self.bar_hover is not None and self.bar_hover < len(bins):
             i = self.bar_hover
             g0, g1 = a + sign * i * per, a + sign * min(len(self.counts) - 1, (i + 1) * per - 1)
-            text = (tr("range_window.spread_at", g=g0, n=int(bins[i])) if g0 == g1 else
-                    tr("range_window.spread_at_many", g0=g0, g1=g1, n=int(bins[i])))
+            notes = trn("n.notes", int(bins[i]), n=int(bins[i]))
+            text = (tr("range_window.spread_at", ticks=trn("n.ticks", g0, n=g0), notes=notes) if g0 == g1 else
+                    tr("range_window.spread_at_many", g0=g0, g1=g1, notes=notes))
             ch.create_text(self.cw - 6 * s, int(4 * s), text=text, anchor="ne", fill=look.VALUE, font=look.font(8))
 
     def on_bar_hover(self, x):

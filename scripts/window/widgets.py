@@ -659,6 +659,28 @@ class Tooltip:
             self.tip = None
 
 
+def unit_text(text, many, one):
+    """The unit word for a number box's text: key one while it holds exactly 1 or -1 ("1 tick"), else many."""
+    try:
+        n = abs(float(calc(text)))
+    except Exception:
+        n = None
+    return tr(one) if n == 1 else tr(many)
+
+
+def unit_word(label, var, many, one):
+    """A unit word beside a number box (label: a ttk.Label): unit_text, following the box as it's typed. Returns
+    the label."""
+    def put(*_):
+        text = unit_text(var.get(), many, one)
+        if label.winfo_exists() and label.cget("text") != text:
+            label.config(text=text)
+    trace = var.trace_add("write", put)
+    label.bind("<Destroy>", lambda e: var.trace_remove("write", trace) if e.widget is label else None, add="+")
+    put()
+    return label
+
+
 def symmetry_menu(m, current, choose):
     """"Symmetric halves ▸" in menu m for a curve (current = its "sym" or None); choose(mode or None)."""
     sub = tk.Menu(m, tearoff=0)

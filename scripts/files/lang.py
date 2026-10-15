@@ -5,7 +5,8 @@ empty line = a new paragraph). A key or file missing from a language is shown in
 done bit by bit. An old one-file translation lang/<code>.json still reads. The program asks for a text by its key:
 tr("join.button").
 
-Texts with numbers in them have {name} places, e.g. "Split into {n} shapes": tr("...", n=3).
+Texts with numbers in them have {name} places, e.g. "Split into {n} shapes": tr("...", n=3). A text whose word
+changes for one thing has a second key ending "_one" ("Split into {n} shape"): trn("...", 1, n=1) picks it.
 
 Languages are looked for next to Spiderweb (a lang folder beside spiderweb.py or the .exe) first, then the ones
 built in. Settings → Language picks one (user/settings.ini [language] code), put on at the next start; each names
@@ -27,6 +28,7 @@ DEVICES = re.compile(r"(con|prn|aux|nul|com\d|lpt\d)", re.I)  # (Windows device 
 TEMPLATE = "_template"  # (Settings → Language's "Start a translation": a copy of the English folder to fill in)
 COPIED = "_english.json"  # (in a template: the English texts as copied, so ones left untranslated follow English)
 _texts = {}
+_translated = set()  # (keys the language in use has itself: trn)
 problems = {}  # file name (e.g. "ko/main.json") -> why it couldn't be read (the last time _load tried it)
 
 
@@ -225,7 +227,9 @@ def texts():
     if not _texts:
         _texts.update(_load("en"))
         if LANGUAGE != "en":
-            _texts.update({k: v for k, v in _load(LANGUAGE).items() if _usable(k, v)})
+            own = {k: v for k, v in _load(LANGUAGE).items() if _usable(k, v)}
+            _texts.update(own)
+            _translated.update(own)
     return _texts
 
 
@@ -267,6 +271,21 @@ def tr(key_, **values):
         except Exception:  # (a translation with a broken {place}: shown as it is)
             pass
     return text
+
+
+def trn(key_, count_, **values):
+    """tr for a text holding a count: key + "_one" when the count is exactly 1. A translation that has the key but
+    not its "_one" keeps its own key (never half English)."""
+    one = key_ + "_one"
+    found = _english if _only_english else texts()
+    if count_ != 1 or one not in found or (key_ in _translated and one not in _translated and not _only_english):
+        return tr(key_, **values)
+    return tr(one, **values)
+
+
+def plural(n, one, many):
+    """A word for n things (keys): one when n is exactly 1."""
+    return tr(one) if n == 1 else tr(many)
 
 
 ODD_PLACE = re.compile(r"(?<!\{)\{[^{}:!]*[.\[]")  # ({name.x} / {name[0]}: never filled in, shown as typed)

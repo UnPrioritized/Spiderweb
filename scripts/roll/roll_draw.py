@@ -7,7 +7,7 @@ import tkinter as tk
 import numpy as np
 
 from notes.custom import custom_note_count, edge_inner, gap_lines, role_of
-from files.lang import tr
+from files.lang import tr, trn
 from files.speed import key_sort, loops
 from notes.engine import cached_arrays, shape_key, shape_notes_tracks
 from notes.joined import all_tumours
@@ -377,7 +377,8 @@ class RollDrawing:
         shape makes, once they're known."""
         text = self._draft_text = self._draft_text if text is None else text
         n = self.draft_count() if self.draft else None
-        self.app.show_position(text if n is None else tr("pianoroll.new_shape_notes", text=text, note_count=n))
+        self.app.show_position(text if n is None else tr("pianoroll.new_shape_notes", text=text,
+                                                                   notes=trn("n.notes", n, n=n)))
 
     def keep_draft(self):
         """The shape being drawn / placed is added: the app takes the notes already made for it."""

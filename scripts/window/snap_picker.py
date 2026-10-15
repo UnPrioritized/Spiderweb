@@ -9,7 +9,7 @@ import tkinter as tk
 import zlib
 from tkinter import ttk
 
-from files.lang import tr
+from files.lang import tr, trn
 from files.snap import (COUNT_RANGE, DIV_RANGE, DOTS, NOTE_RANGE, SNAP_LIST, custom_parts, custom_snap, snap_text,
                         whole_notes)
 from files.mathexpr import fmt
@@ -211,9 +211,9 @@ class CustomSnapWindow(tk.Toplevel):
             return
         beats = whole_notes(snap) * 4
         ppq = self.app.ppq
-        self.info.config(text=tr("snap.length", beats=f"{float(beats):.4f}".rstrip("0").rstrip("."),
-                                 ticks=fmt(round(float(beats * ppq), 2)),
-                                 ppq=ppq), foreground=look.HINT)
+        b, t = f"{float(beats):.4f}".rstrip("0").rstrip("."), fmt(round(float(beats * ppq), 2))
+        self.info.config(text=tr("snap.length", beats=trn("n.beats", float(b), n=b),
+                                 ticks=trn("n.ticks", float(t), n=t), ppq=ppq), foreground=look.HINT)
 
     def ok(self):
         snap = self.snap()

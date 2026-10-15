@@ -26,7 +26,7 @@ from window import big_ask, look
 from window.formula_host import FormulaHost
 from window.pattern_dialog import load_patterns, saved_pattern
 from window.tool_window import ToolWindow
-from window.widgets import Scrub, Tooltip, bad, good, grid_shown, name_index, name_list, set_names
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown, name_index, name_list, set_names, unit_word
 
 LENGTHS = [s for s, _ in SNAP_LIST if s != "off"]  # "one copy every" choices (the snap list's note lengths)
 CHOICES = {"kind": KINDS, "speed": SPEEDS, "colours": COLOURS, "flip": FLIPS, "way": WAYS, "top": TOPS}
@@ -80,7 +80,8 @@ class PathWindow(ToolWindow):
         self.length_box.bind("<<ComboboxSelected>>", lambda e: self.put_length(LENGTHS[e.widget.current()]))
         Tooltip(self.length_box, tr("path.tip_every"))
         self.number(sp, 0, 2, "every", tr("path.tip_every_ticks"), (1, 10, 1))
-        ttk.Label(sp, text=tr("unit.ticks"), foreground=look.HINT).grid(row=0, column=3, sticky="w", padx=(4, 0))
+        unit_word(ttk.Label(sp, foreground=look.HINT), self.vars["every"], "unit.ticks", "unit.tick").grid(
+            row=0, column=3, sticky="w", padx=(4, 0))
         count = ttk.Radiobutton(sp, text=tr("path.count"), variable=self.mode, value="count",
                                 command=lambda: self.put("mode", "count"))
         count.grid(row=1, column=0, sticky="w", pady=(4, 0))

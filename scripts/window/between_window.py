@@ -14,7 +14,7 @@ from tkinter import ttk
 
 import numpy as np
 
-from files.lang import tr
+from files.lang import tr, trn
 from files.mathexpr import calc
 from notes import between
 from notes.areas import most_colours
@@ -805,7 +805,8 @@ class BetweenGroups:
                 uses = tr("app.channels_2", chans=used) if used > 1 else ""
                 n = sum(1 for j in row if self.shapes[j]["between"]["role"] in ("step", "key"))
                 total = sum(counts[j] for j in row)
-                text = tr("between.row_one" if total == 1 else "between.row", i=i + 1, n=n, counts=total, uses=uses)
+                text = tr("between.row", i=i + 1, steps=trn("n.steps", n, n=n), notes=trn("n.notes", total, n=total),
+                          uses=uses)
             else:
                 used = chans[i]
                 uses = tr("app.channels_2", chans=used) if used > 1 else ""

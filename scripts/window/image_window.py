@@ -18,7 +18,7 @@ from files.lang import tr
 from files.speed import Photo
 from notes import picture as P
 from window import look
-from window.widgets import Tooltip, name_list, placed, set_names
+from window.widgets import Tooltip, name_list, placed, set_names, unit_word
 
 PREVIEW_W, PREVIEW_H = 900, 520  # the preview's size to start with (it grows with the window)
 KB = 36  # the keyboard drawn beside the preview, in pixels
@@ -275,7 +275,7 @@ class ImageWindow(tk.Toplevel):
         r.pack(fill="x", pady=1)
         ttk.Label(r, text=tr("image.step"), width=15).pack(side="left")  # (one grid step's length)
         self.number_box(r, "step")
-        ttk.Label(r, text=tr("image.ticks")).pack(side="left", padx=3)
+        unit_word(ttk.Label(r), self.vars["step"], "unit.ticks", "unit.tick").pack(side="left", padx=3)
 
         f = self.section(t1, "image.colours")
         self.slider(f, "colours", 2, 15, lambda v: str(round(v)), whole=True, label="image.how_many")

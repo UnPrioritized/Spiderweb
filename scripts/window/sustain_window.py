@@ -23,7 +23,7 @@ from files.mathexpr import calc, fmt
 from notes.sustain import (MOST_GAP, MOST_PAST, MOST_PIECES, MOST_POINTS, auto_gap, is_sustained, stop_share, stop_tick,
                            carry_shares, stop_ticks, sustained, too_many_pieces)
 from window import look
-from window.widgets import LocalUndo, Scrub, Tooltip, remember_place
+from window.widgets import LocalUndo, Scrub, Tooltip, remember_place, unit_text
 
 
 def target_indices(app):
@@ -116,7 +116,7 @@ class SustainWindow(tk.Toplevel):
         e.pack(side="left")
         e.bind("<Return>", lambda ev: (self.on_gap(), "break")[1])  # (not OK: the window stays)
         e.bind("<FocusOut>", lambda ev: self.on_gap())
-        lb = self.gap_unit = self.unit_label(row)
+        lb = self.gap_unit = self.unit_label(row, self.gap_var)
         self.scrub(e, self.gap_var, self.on_gap, lb, 0)
         for w in (self.own_btn, e, lb):
             Tooltip(w, tr("sustain.own_tip"))
@@ -180,11 +180,21 @@ class SustainWindow(tk.Toplevel):
         row.pack(anchor="w", pady=(2, 0))
         return row
 
-    def unit_label(self, row):
-        lb = ttk.Label(row, text=tr("sustain." + self.unit.get()))
+    def unit_label(self, row, var):
+        """"ticks" / "beats" beside a box ("1 tick" while it holds 1)."""
+        lb = ttk.Label(row)
         lb.pack(side="left", padx=(4, 0))
-        self.units.append(lb)
+        self.units.append((lb, var))
+        var.trace_add("write", lambda *_: self.put_units())
+        self.put_units()
         return lb
+
+    def put_units(self):
+        key = "sustain." + self.unit.get()
+        for lb, var in self.units:
+            text = unit_text(var.get(), key, key[:-1])  # (sustain.ticks -> sustain.tick)
+            if lb.cget("text") != text:
+                lb.config(text=text)
 
     def scrub(self, e, var, apply, lb, lo):
         """The box stepped by dragging it or its unit sideways, Up / Down, the wheel. lo: its lowest, in ticks."""
@@ -216,7 +226,7 @@ class SustainWindow(tk.Toplevel):
         e.pack(side="left", padx=(4, 0))
         e.bind("<Return>", lambda ev: (self.on_length(key), "break")[1])
         e.bind("<FocusOut>", lambda ev: self.on_length(key))
-        lb = self.unit_label(row)
+        lb = self.unit_label(row, var)
         self.scrub(e, var, lambda: self.on_length(key), lb, 1 if tick else 0)
         for x in (w, e, lb):
             Tooltip(x, tr("sustain.%s_tip" % key))
@@ -417,8 +427,7 @@ class SustainWindow(tk.Toplevel):
         for r, b in zip(self.rows.values(), seen[1:]):
             if b is not None:
                 r[4] = self.text_of(b)
-        for lb in self.units:
-            lb.config(text=tr("sustain." + self.unit.get()))
+        self.put_units()
         self.put_limits()
         try:
             settings.put("sustain", "unit", self.unit.get())

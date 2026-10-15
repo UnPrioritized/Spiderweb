@@ -5,7 +5,7 @@ import random
 import tkinter as tk
 from tkinter import ttk
 
-from files.lang import tr
+from files.lang import plural, tr
 from files.mathexpr import calc, fmt
 from notes.claw import CLAW_DEFAULTS, COUNTS, MAX_COUNT, PERIODS, TRASHES, clean_claw
 from window import look
@@ -14,7 +14,7 @@ from window.widgets import Scrub, Tooltip, bad, good, grid_shown
 
 MODES = [("time", tr("claw.by_time")), ("notes", tr("claw.by_notes")), ("keys", tr("claw.by_keys")),
          ("chords", tr("claw.by_chords")), ("random", tr("claw.random"))]
-UNITS = {"notes": tr("claw.unit_notes"), "keys": tr("claw.unit_keys"), "chords": tr("claw.unit_chords")}
+UNITS = {m: (f"claw.unit_{m}_one", f"claw.unit_{m}") for m in ("notes", "keys", "chords")}  # (keys: one, many)
 
 
 def period_name(beats):
@@ -206,8 +206,10 @@ class ClawWindow(ToolWindow):
                 self.cut_box.grid_remove()
             else:
                 self.cut_box.grid()
-            for u in self.units:
-                u.config(text=UNITS.get(c["mode"], ""))
+        for u, key in zip(self.units, ("keep", "skip")):
+            text = plural(c[key], *UNITS[c["mode"]]) if c["mode"] in UNITS else ""
+            if u.cget("text") != text:
+                u.config(text=text)
         config(self.entries["cut"], state="normal" if c["shorten"] else "disabled")
         for w in self.cut_row:
             grid_shown(w, c["shorten"])

@@ -14,7 +14,7 @@ from tkinter import filedialog, ttk, messagebox
 
 import numpy as np
 
-from files.lang import size as lang_size, tr
+from files.lang import size as lang_size, tr, trn
 from notes.areas import most_colours
 from notes.custom import CUSTOM_DEFAULTS, capped_colours, custom_note_count, tracks_apart
 from window import big_ask, look
@@ -1369,7 +1369,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
     def delete_all(self):
         if not self.shapes:
             return
-        if not messagebox.askyesno(tr("app.spiderweb_2"), tr("app.are_you_sure_you_want_to", n=len(self.shapes)),
+        if not messagebox.askyesno(tr("app.spiderweb_2"), trn("app.are_you_sure_you_want_to", len(self.shapes), n=len(self.shapes)),
                                    icon="warning", parent=self):
             return
         self.roll.cancel_draft()  # first: it refreshes the panel, which must still see the old shapes
@@ -1993,15 +1993,15 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
 
     def update_status(self):
         parts = [self._position] if self._position else []
-        parts.append(tr("app.one_shape_notes" if len(self.shapes) == 1 else "app.shapes_notes",
-                        n=len(self.shapes), n2=len(self.rendered)))
+        parts.append(tr("app.shapes_notes", shapes=trn("n.shapes", len(self.shapes), n=len(self.shapes)),
+                        notes=trn("n.notes", len(self.rendered), n=len(self.rendered))))
         if self.channel_mode.get() == "auto" and self.slot_count:
             parts.append(tr("app.one_track") if self.slot_count == 1 else
                          tr("app.tracks_one_channel_each", slot_count=self.slot_count))
         if self.sels:
             shapes = tr("app.shapes_2", n=len(self.sels)) if len(self.sels) > 1 else ""
-            parts.append(tr("app.selected_notes", shapes=shapes,
-                            value=sum(self.note_counts[i] for i in self.sels if i < len(self.note_counts))))
+            n = sum(self.note_counts[i] for i in self.sels if i < len(self.note_counts))
+            parts.append(tr("app.selected_notes", shapes=shapes, notes=trn("n.notes", n, n=n)))
         self.status.show("     ".join(parts))
 
     def in_drawer(self, e):
