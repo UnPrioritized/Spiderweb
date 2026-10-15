@@ -257,9 +257,10 @@ class ChopWindow(ToolWindow):
         self.ticks_entry.bind("<Return>", lambda e: (self.on_ticks(), "break")[1])
         self.ticks_entry.bind("<FocusOut>", lambda e: self.on_ticks())
         Scrub(self.app, [(self.ticks_entry, self.ticks_var, lambda: self.on_ticks(False))], (1, 10, 1), 1,
-              MAX_TICKS, label=lb)
+              MAX_TICKS, label=lb, drag_box=True)
         Tooltip(self.ticks_entry, tr("chop.tip_ticks"))
-        ttk.Label(row, text=tr("chop.ticks"), foreground=look.HINT).pack(side="left", padx=(5, 0))
+        self.ticks_unit = ttk.Label(row, text=tr("chop.ticks"), foreground=look.HINT)
+        self.ticks_unit.pack(side="left", padx=(5, 0))
         self.snap.trace_add("write", lambda *_: self.on_snap())
 
         lb = ttk.Label(box, text=tr("chop.velocity"))
@@ -454,6 +455,9 @@ class ChopWindow(ToolWindow):
                 and not self.strip.drag):
             self.strip.show(c["steps"], c["pieces"], c["fixed"])
         ticks = fmt(round(step_ticks(c, self.app.ppq), 2))
+        unit = tr("chop.tick" if ticks == "1" else "chop.ticks")
+        if self.ticks_unit.cget("text") != unit:
+            self.ticks_unit.config(text=unit)
         for var, entry, text in ((self.steps_var, self.steps_entry, str(c["steps"])),
                                  (self.vel_var, self.vel_entry, fmt(c["vel"])),
                                  (self.ticks_var, self.ticks_entry, ticks)):
