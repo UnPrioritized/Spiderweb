@@ -262,14 +262,21 @@ class FormatWindow(tk.Toplevel):
         f = CL.clean_format(dict(self.fmt, name=name))
         if not f:
             return False
-        items = [g for g in CL.load_formats() if g["name"].casefold() != name.casefold()] + [f]
+        if not self.save_file(lambda n: n.casefold() == name.casefold(), [f]):
+            return False
+        self.yours, self.fmt = CL.load_formats(), copy.deepcopy(f)
+        self.show_format()
+        return True
+
+    def save_file(self, drop, add=()):
+        """CL.change_formats, saying what went wrong. True when saved."""
         try:
-            CL.save_formats(items)
+            kept = CL.change_formats(drop, add)
         except OSError as e:
             messagebox.showerror(tr("fmt.title"), tr("fmt.cant_save", path=CL.FORMATS_FILE, e=e), parent=self)
             return False
-        self.yours, self.fmt = items, copy.deepcopy(f)
-        self.show_format()
+        if kept:
+            messagebox.showwarning(tr("fmt.title"), tr("fmt.file_broken", path=kept), parent=self)
         return True
 
     def save_as(self):
@@ -282,23 +289,17 @@ class FormatWindow(tk.Toplevel):
         old = self.fmt["name"]
         name = simpledialog.askstring(tr("fmt.title"), tr("fmt.name_ask"), parent=self, initialvalue=old)
         if name and name.strip() and name.strip() != old:
-            if self.store(name.strip()[:100]):
-                items = [g for g in self.yours if g["name"] != old]
-                CL.save_formats(items)
-                self.yours = items
+            if self.store(name.strip()[:100]) and self.save_file(lambda n: n == old):
+                self.yours = CL.load_formats()
                 self.show_format()
 
     def delete(self):
         name = self.fmt["name"]
         if not messagebox.askyesno(tr("fmt.title"), tr("fmt.delete_ask", name=name), parent=self):
             return
-        items = [g for g in CL.load_formats() if g["name"] != name]
-        try:
-            CL.save_formats(items)
-        except OSError as e:
-            messagebox.showerror(tr("fmt.title"), tr("fmt.cant_save", path=CL.FORMATS_FILE, e=e), parent=self)
+        if not self.save_file(lambda n: n == name):
             return
-        self.yours, self.fmt, self.cur = items, copy.deepcopy(self.built[0]), 0
+        self.yours, self.fmt, self.cur = CL.load_formats(), copy.deepcopy(self.built[0]), 0
         self.show_format()
 
     # ------------------------------------------------------------ the output

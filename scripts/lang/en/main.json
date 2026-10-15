@@ -160,6 +160,7 @@
  "fmt.mine": "{name} (mine)",
  "fmt.built_in_name": "That name belongs to a built-in format: pick another one.",
  "fmt.cant_save": "Couldn't save the formats file:\n{path}\n\n{e}",
+ "fmt.file_broken": "The file with your colour formats couldn't be read (it's damaged), so a new one is started. The old one was kept as:\n{path}",
  "fmt.name_ask": "Name of the format:",
  "fmt.delete_ask": "Delete the format \"{name}\"?",
  "fmt.status": "{colours}, {lists}",

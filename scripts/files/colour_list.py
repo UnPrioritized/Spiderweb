@@ -7,13 +7,12 @@ least this many colours (0 = just the picture's), "filler": the colour written f
 "each" only: {n} {n0} {n:2} {hex} {HEX} {r} {g} {b} {a}; {{ and }} = a plain { and }. Lists are written one after
 another, a line apart. The user's formats are kept in spiderweb/colour_formats.json (built-in ones can't change)."""
 
-import json
 import os
 import re
 
+from files import saved_lists
 from files.about import USER
 from files.lang import tr
-from files.safefile import write_text
 
 FORMATS_FILE = os.path.join(USER, "colour_formats.json")
 TAG = re.compile(r"\{\{|\}\}|\{[^{}\s]*\}?")
@@ -123,18 +122,19 @@ def clean_format(f):
 
 
 def load_formats():
-    """The user's formats ([] when there's no file or it can't be read)."""
-    try:
-        with open(FORMATS_FILE, encoding="utf-8") as f:
-            items = json.load(f).get("formats", [])
-    except (OSError, ValueError, AttributeError):
-        return []
-    return [g for g in (clean_format(f) for f in items if isinstance(items, list)) if g]
+    """The user's formats ([] when there's no file or it can't be read; one that can't be read: left out)."""
+    return saved_lists.entries(FORMATS_FILE, "formats", clean_format)
+
+
+def change_formats(drop, add=()):
+    """The user's formats whose name drop(name) says yes to removed, add's put on the end, every other one kept as
+    saved. Returns where a damaged file was kept aside (tell the user), else None. OSError if it can't be written."""
+    return saved_lists.change(FORMATS_FILE, "formats", drop, add, ensure_ascii=False)
 
 
 def save_formats(items):
-    """The user's formats -> the file. Raises OSError if it can't be written."""
-    write_text(FORMATS_FILE, json.dumps({"formats": items}, indent=1, ensure_ascii=False))
+    """The user's formats replaced by items (ones that can't be read kept as saved). OSError if it can't be written."""
+    return change_formats(lambda n: True, items)
 
 
 # ------------------------------------------------------------------ Paste colours: colours read out of any text

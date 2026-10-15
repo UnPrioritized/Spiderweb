@@ -17,6 +17,7 @@ from tkinter import ttk, messagebox
 
 from files.lang import tr
 from files.mathexpr import calc, fmt, formula
+from files import saved_lists
 from files.about import USER
 from files.safefile import write_text
 from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_point, fit_symmetric, handle_lines,
@@ -43,28 +44,28 @@ def load_patterns(layer="pattern"):
     maybe "loop"}]."""
     if layer == "shape" and os.path.exists(OLD_CURVES_FILE):
         move_old_curves()
-    try:
-        with open(PATTERNS_FILE, encoding="utf-8") as f:
-            data = json.load(f)
-        out = []
-        for p in data.get(FILE_KEYS[layer], []):
-            item = {"name": str(p["name"]), "vars": {str(a): float(b) for a, b in dict(p.get("vars", {})).items()}}
-            for key in (("x", "y") if layer == "shape" else ("formula", "along")):
-                if key != "along" or str(p.get(key, "")).strip():
-                    item[key] = str(p.get(key, ""))
-            loop = clean_loop(p["loop"]) if isinstance(p.get("loop"), dict) else None
-            if loop:
-                item["loop"] = loop
-            out.append(keep_sym(item, p))
-        return out
-    except (OSError, ValueError, TypeError, KeyError, AttributeError):
-        return []
+
+    def clean(p):
+        item = {"name": str(p["name"]), "vars": {str(a): float(b) for a, b in dict(p.get("vars", {})).items()}}
+        for key in (("x", "y") if layer == "shape" else ("formula", "along")):
+            if key != "along" or str(p.get(key, "")).strip():
+                item[key] = str(p.get(key, ""))
+        loop = clean_loop(p["loop"]) if isinstance(p.get("loop"), dict) else None
+        if loop:
+            item["loop"] = loop
+        return keep_sym(item, p)
+    return saved_lists.entries(PATTERNS_FILE, FILE_KEYS[layer], clean)
+
+
+def save_pattern(name, item, layer="pattern"):
+    """The saved pattern / shape `name` replaced by item (None: deleted), every other one kept as saved. Returns
+    where a damaged file was kept aside (tell the user), else None. OSError when it can't be written."""
+    return saved_lists.change(PATTERNS_FILE, FILE_KEYS[layer], lambda n: n == name, [item] if item else ())
 
 
 def save_patterns(items, layer="pattern"):
-    data = {key: load_patterns(other) for other, key in FILE_KEYS.items() if other != layer}
-    data[FILE_KEYS[layer]] = items
-    write_text(PATTERNS_FILE, json.dumps(data, indent=1))
+    """The layer's whole list replaced by items (entries that can't be read and the other layer kept as saved)."""
+    return saved_lists.change(PATTERNS_FILE, FILE_KEYS[layer], lambda n: True, items)
 
 
 def move_old_curves():
@@ -372,11 +373,8 @@ class FormulaDialog(tk.Toplevel):
         if self.pat.get("loop"):
             item["loop"] = copy.deepcopy(self.pat["loop"])
         keep_sym(item, self.pat)
-        try:
-            save_patterns([p for p in self.saved if p["name"] != name] + [item], self.layer)
-        except OSError as e:
-            return messagebox.showerror(tr("pattern_dialog.spiderweb"), tr("pattern_dialog.couldn_t_save", e=e),
-                                        parent=self)
+        if not self.save_file(name, item):
+            return
         self.pat.update(name=name, preset="")
         self.fill_list()
         i = next(i for i, (kind, _, n) in enumerate(self.items) if kind == "saved" and n == name)
@@ -393,12 +391,20 @@ class FormulaDialog(tk.Toplevel):
         if not messagebox.askyesno(tr("pattern_dialog.spiderweb"), tr("pattern_dialog.delete_saved", name=name),
                                    parent=self):
             return
+        if self.save_file(name, None):
+            self.fill_list()
+
+    def save_file(self, name, item):
+        """save_pattern, saying what went wrong. True when saved."""
         try:
-            save_patterns([p for p in self.saved if p["name"] != name], self.layer)
+            kept = save_pattern(name, item, self.layer)
         except OSError as e:
-            return messagebox.showerror(tr("pattern_dialog.spiderweb"), tr("pattern_dialog.couldn_t_save", e=e),
-                                        parent=self)
-        self.fill_list()
+            messagebox.showerror(tr("pattern_dialog.spiderweb"), tr("pattern_dialog.couldn_t_save", e=e), parent=self)
+            return False
+        if kept:
+            messagebox.showwarning(tr("pattern_dialog.spiderweb"), tr("pattern_dialog.file_broken", path=kept),
+                                   parent=self)
+        return True
 
     # ------------------------------------------------------------ the formulas and their numbers
     def on_edit_mode(self):

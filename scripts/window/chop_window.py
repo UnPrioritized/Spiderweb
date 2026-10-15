@@ -5,15 +5,14 @@ showing one repeat of the rhythm where pieces can be drawn (drag), deleted (righ
 velocities as % of each note or fixed 1..127 and how much they count, and Absolute (the rhythm follows the song's
 grid)."""
 
-import json
 import os
 import tkinter as tk
-from tkinter import simpledialog, ttk
+from tkinter import messagebox, simpledialog, ttk
 
+from files import saved_lists
 from files.about import USER
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from files.safefile import write_text
 from files.snap import SNAPS, snap_beats, snap_text
 from notes.chop import (CHOP_DEFAULTS, MAX_STEPS, RHYTHMS, clean_chop, clean_pieces, rhythm, step_ticks, switched,
                         too_many, top)
@@ -29,24 +28,26 @@ MAX_TICKS = 10 ** 7
 
 
 def load_rhythms():
-    """The user's saved rhythms [{"name", "steps", "pieces", "fixed"}]."""
+    """The user's saved rhythms [{"name", "steps", "pieces", "fixed"}] (one that can't be read: left out)."""
+    def clean(r):
+        steps = max(1, min(MAX_STEPS, int(r["steps"])))
+        fixed = r.get("fixed") is True
+        pieces = clean_pieces(r["pieces"], steps, fixed)
+        return pieces and {"name": str(r["name"]), "steps": steps, "pieces": pieces, "fixed": fixed}
+    return saved_lists.entries(RHYTHMS_FILE, "rhythms", clean)
+
+
+def save_rhythm(name, item, parent):
+    """The saved rhythm `name` replaced by item (None: deleted), every other one kept as saved; what went wrong is
+    said. True when saved."""
     try:
-        with open(RHYTHMS_FILE, encoding="utf-8") as f:
-            data = json.load(f)
-        out = []
-        for r in data.get("rhythms", []):
-            steps = max(1, min(MAX_STEPS, int(r["steps"])))
-            fixed = r.get("fixed") is True
-            pieces = clean_pieces(r["pieces"], steps, fixed)
-            if pieces:
-                out.append({"name": str(r["name"]), "steps": steps, "pieces": pieces, "fixed": fixed})
-        return out
-    except (OSError, ValueError, TypeError, KeyError, AttributeError):
-        return []
-
-
-def save_rhythms(items):
-    write_text(RHYTHMS_FILE, json.dumps({"rhythms": items}, indent=1))
+        kept = saved_lists.change(RHYTHMS_FILE, "rhythms", lambda n: n == name, [item] if item else ())
+    except OSError as e:
+        messagebox.showerror(tr("chop.save_title"), tr("chop.couldn_t_save", e=e), parent=parent)
+        return False
+    if kept:
+        messagebox.showwarning(tr("chop.save_title"), tr("chop.file_broken", path=kept), parent=parent)
+    return True
 
 
 def piece_beats(snap, app):
@@ -340,16 +341,13 @@ class ChopWindow(ToolWindow):
             if name.casefold() not in taken:
                 break
             prompt = tr("chop.name_taken", name=name)
-        items = [r for r in load_rhythms() if r["name"] != name]
-        items.append({"name": name, "steps": self.cfg["steps"], "pieces": self.cfg["pieces"],
-                      "fixed": self.cfg["fixed"]})
-        save_rhythms(items)
-        self.put("name", name)
+        if save_rhythm(name, {"name": name, "steps": self.cfg["steps"], "pieces": self.cfg["pieces"],
+                              "fixed": self.cfg["fixed"]}, self):
+            self.put("name", name)
 
     def delete_rhythm(self):
-        name = self.cfg["name"]
-        save_rhythms([r for r in load_rhythms() if r["name"] != name])
-        self.put("name", "")
+        if save_rhythm(self.cfg["name"], None, self):
+            self.put("name", "")
 
     # ---- the numbers
 
