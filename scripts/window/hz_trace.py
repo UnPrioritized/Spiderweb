@@ -30,7 +30,7 @@ from files.lang import tr
 from files.mathexpr import calc
 from files.safefile import write_text
 from notes.hz_settings import clean_trace
-from notes.hzbass import (CURVE_STEPS, FULL_LENGTH, HZ_DEFAULTS, START_TRACE, TRACE_POINTS, clean_extra, hz_gate,
+from notes.hzbass import (FULL_LENGTH, HZ_DEFAULTS, START_TRACE, TRACE_POINTS, clean_extra, hz_gate,
                           key_range, length_ticks, trace_hits, trace_line)
 from roll.roll_shared import SLOT_COLORS
 from window import look

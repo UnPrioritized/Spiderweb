@@ -132,11 +132,6 @@ def change_formats(drop, add=()):
     return saved_lists.change(FORMATS_FILE, "formats", drop, add, ensure_ascii=False)
 
 
-def save_formats(items):
-    """The user's formats replaced by items (ones that can't be read kept as saved). OSError if it can't be written."""
-    return change_formats(lambda n: True, items)
-
-
 # ------------------------------------------------------------------ Paste colours: colours read out of any text
 
 OFF = re.compile(r"^\s*(;|//|#(?![0-9A-Fa-f]{6}\b))")  # a switched-off line (a "#ff8800" line is a colour)

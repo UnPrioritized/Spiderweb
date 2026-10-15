@@ -88,9 +88,6 @@ def slot_colours(use10):
     return COLOURS_16 if use10 else COLOURS_15
 
 
-def channel_place(ch):
-    """MIDI channel (0-based) -> its place in SLOT_COLORS."""
-    return int(COLOURS_16[ch % 16])
 SELECTED_COLOR = ("#ffb65c", "#9a4b00")
 DRAFT_COLOR = ("#9be39b", "#1d6b1d")
 GHOST_COLOR = look.GHOST_NOTE  # (notes a mask hides: mask.py)

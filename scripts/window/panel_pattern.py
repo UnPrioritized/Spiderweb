@@ -12,7 +12,7 @@ from files.mathexpr import calc, fmt
 from notes.pattern import FORMULA_KINDS, MAX_LOOPS, formula_shape, loop_points, most_loops
 from notes.polygon import update_polygon
 from window import look
-from window.formula_host import SYM_CHOICES, RollHost, layer_name, set_loop_sym, sym_label
+from window.formula_host import SYM_CHOICES, layer_name, set_loop_sym, sym_label
 from window.panel_custom import GAP_COLOR
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
 
@@ -85,32 +85,8 @@ class PatternPanel:
             update_polygon(sh)
         self.shapes_changed()
 
-    # ------------------------------------------------------------ the right-click menu's Formula items
-    # (formula_host.py: the same menu / window works on drawer strokes and funnel curves)
-    def set_formula(self, layer, preset, saved=None):
-        """A preset (None: none) or a saved one (pattern_dialog.load_patterns) as the shape of / pattern along every
-        selected curve."""
-        RollHost(self).set_formula(layer, preset, saved)
-
-    def set_pattern(self, preset, saved=None):
-        self.set_formula("pattern", preset, saved)
-
-    def set_shape(self, preset, saved=None):
-        self.set_formula("shape", preset, saved)
-
-    def remove_formulas(self):
-        """Remove formula: the selected curves back to their plain (dotted) path."""
-        RollHost(self).remove()
-
-    def open_formula_dialog(self, layer):
-        RollHost(self).open_dialog(layer)
-
-    def plain_curve(self):
-        """Turn into plain curve: the shapes / patterns become ordinary anchors and handles (tumours stay a
-        setting)."""
-        RollHost(self).plain()
-
     # ------------------------------------------------------------ the panel
+    # (the right-click menu's Formula items: formula_host.py, the same menu / window for every kind of line)
     def sync_pattern(self):
         self._rows["pattern"] = bool(self.patterned())
         self.layout_rows()

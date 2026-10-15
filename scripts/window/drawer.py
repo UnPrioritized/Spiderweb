@@ -227,11 +227,6 @@ def library_lists():
     return top, [n for n, _ in sorted(rest, key=lambda r: (-r[1], r[0].lower()))]
 
 
-def load_shape(name):
-    """The strokes of a library shape, or None if it's missing or broken."""
-    return load_drawing(name)[0]
-
-
 def placed_strokes(strokes):
     """A drawing's strokes as a placed shape gets them: hidden ones left out (layers list), lines that meet end to
     end joined (custom.join_strokes), no layer data. None if nothing is left."""

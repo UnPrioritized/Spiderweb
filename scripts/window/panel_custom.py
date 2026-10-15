@@ -8,13 +8,13 @@ from tkinter import ttk, messagebox, simpledialog
 from files.lang import tr, trn
 from notes.areas import most_colours
 from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, edge_gate, gap_lines,
-                          gate_ticks, hz_gate, join_strokes, map_stroke, normalize_areas, normalize_strokes, open_paths)
+                          gate_ticks, join_strokes, map_stroke, normalize_areas, normalize_strokes, open_paths)
 from window import look
 from window.drawer import Drawer, clean_name, library_lists, library_names, load_drawing, save_shape, shape_stamp
 from window.panel_funnel import GATE_STEPS
 from files.mathexpr import calc, fmt
 from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
-from notes.hzbass import AUTO, all_tones, auto_picks, each_layer, layers_of, shortest_gate
+from notes.hzbass import AUTO, all_tones, auto_picks, each_layer, hz_gate, layers_of, shortest_gate
 from window.hz_window import open_hz
 from window.panel_nested import nested_on
 from window.panel_tiles import tiles_on

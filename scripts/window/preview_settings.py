@@ -32,9 +32,6 @@ def open_settings(win):
     win.settings_window.show()
 
 
-open_preview_settings = open_settings  # (its old name)
-
-
 def auto_box(app, parent, var, apply):
     """The Auto gates threshold box ("within [3] cents"): a frame (not packed) with .entry. apply() on Enter,
     leaving the box, and each step of the number."""

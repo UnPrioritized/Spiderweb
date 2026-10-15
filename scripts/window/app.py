@@ -42,7 +42,7 @@ from notes.text import TEXT_DEFAULTS
 from files.mathexpr import calc, calc_int, fmt
 from window.panel_colours import ColoursPanel
 from window.panel_mask import MaskPanel
-from window.panel_custom import GAP_COLOR, CustomPanel
+from window.panel_custom import CustomPanel
 from window.panel_nested import NestedPanel
 from window.panel_tiles import TilesPanel
 from window.panel_freehand import FreehandPanel
@@ -1916,7 +1916,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         size, so they stay sharp (user); the box snaps to whole keys and grid steps. Without the picture file they
         keep their notes, stretched."""
         from notes import picture as P
-        from notes.custom import box_frame, frame_upright, pack_notes
+        from notes.custom import frame_upright, pack_notes
         for sh in self.shapes:
             p = sh.get("picture")
             if not p or "pal" not in p["set"] or not frame_upright(sh["pts"]):

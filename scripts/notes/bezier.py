@@ -621,11 +621,6 @@ def _unit_rows(v):
     return np.where(n > 1e-12, v / np.where(n > 1e-12, n, 1.0), 0.0)
 
 
-def _unit(v):
-    d = math.hypot(v[0], v[1])
-    return v / d if d else np.zeros(2)
-
-
 def _chord_params(pts):
     u = np.concatenate([[0.0], np.cumsum(np.hypot(*(pts[1:] - pts[:-1]).T))])
     return u / u[-1]

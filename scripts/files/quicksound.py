@@ -107,11 +107,6 @@ class QuickSound:
                                 gate + int(RING * RATE), VOICES, self.nofx, stats=st)
         return got[:st.get("end", len(got))]
 
-    @staticmethod
-    def gate_of(frames):
-        """A note's length rounded to GATE_STEP apart (frames)."""
-        return max(1, int(round(GATE_STEP ** round(math.log(max(1.0, frames)) / math.log(GATE_STEP)))))
-
     def plan(self, starts, keys, vels, gates, most=None):
         """For notes (arrays in start order: start frame, key, velocity 1..127, length in frames): the chords to lay
         ([(start frame, (keys, step velocity, gate), gain)]: notes starting together with the same step, length and

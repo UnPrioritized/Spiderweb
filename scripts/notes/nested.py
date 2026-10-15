@@ -150,15 +150,6 @@ def handle_bp(sh, ppq):
     return centre_bp(sh, ppq)
 
 
-def centre_uv(sh, ppq):
-    """The centre point in the shape's box (u, v), or None if the box is flat."""
-    at = sh[centre_key(sh)].get("at")
-    if at:
-        return tuple(at)
-    to_uv = frame_to_uv(sh["pts"])
-    return to_uv(*centre_bp(sh, ppq)) if to_uv else None
-
-
 def view_of(sh):
     """The view the shape is measured in (shrink.py's (a, c)): as first drawn, else as wide as it's tall."""
     got = drawn_view(sh)
@@ -202,11 +193,6 @@ def nested_spans(sh, ppq):
         out = coloured[paint] = painted(steps, cfg)
         out.flags.writeable = False
     return out
-
-
-def find_nested(sh, ppq):
-    """nested_spans, worked out again (not remembered)."""
-    return painted(nested_steps(sh, ppq), sh["nested"])
 
 
 def nested_steps(sh, ppq):

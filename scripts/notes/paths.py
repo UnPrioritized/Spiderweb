@@ -19,10 +19,6 @@ KEYS = (128, 256)  # the project's key range: the MIDI standard 0-127, or 0-255 
 TOP_KEY = KEYS[-1] - 1  # the highest key a shape can ever make (the project's range filters the rest)
 
 
-def lerp(a, b, u):
-    return (a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u)
-
-
 # ---------------------------------------------------------------- path -> notes
 
 def pitch_of(y):

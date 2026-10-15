@@ -12,7 +12,7 @@ import numpy as np
 from files.lang import tr, trn
 from notes.arc import arc_circle, arc_points
 from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live, velocity_changed
-from notes.bezier import anchor_count, nearest, split
+from notes.bezier import nearest, split
 from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_notes_tracks, shape_path
 from notes.gateflip import lifted, put_back, turn_velocities

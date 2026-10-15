@@ -63,11 +63,6 @@ def save_pattern(name, item, layer="pattern"):
     return saved_lists.change(PATTERNS_FILE, FILE_KEYS[layer], lambda n: n == name, [item] if item else ())
 
 
-def save_patterns(items, layer="pattern"):
-    """The layer's whole list replaced by items (entries that can't be read and the other layer kept as saved)."""
-    return saved_lists.change(PATTERNS_FILE, FILE_KEYS[layer], lambda n: True, items)
-
-
 def move_old_curves():
     """The funnel's saved curve formulas (y of x, stretched to go from 0 to 1) become saved shapes; curves.json is
     renamed curves-old.json (kept, just in case)."""

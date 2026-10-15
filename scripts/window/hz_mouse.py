@@ -14,7 +14,7 @@ from files.domino_clip import get_from_clipboard, read_notes
 from files.lang import tr, trnum
 from files.snap import snap_beats
 from files.system import double_click_ms
-from notes.hzbass import LAYERS, TUNE, bend_for, can_slide, handle_u, left_edge, next_id, pitch
+from notes.hzbass import LAYERS, TUNE, bend_for, can_slide, handle_u, left_edge, next_id
 from roll.roll_shared import (BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, SELECT_CURSOR, SHIFT, boxes_side,
                               boxes_upright, grid_span)
 

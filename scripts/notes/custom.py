@@ -21,8 +21,8 @@ from notes.polygon import side_paths
 from notes.smooth import clean_level, smooth_path
 from notes.paths import (TOP_KEY, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
-from notes.hzbass import (HZ_DEFAULTS, KeyGrid, clean_hz, heard_layers, hz_gate, hz_of, left_edge, off_cents,
-                          shifted_hz, squares, threshold)  # (Hz bass: hzbass.py)
+from notes.hzbass import (HZ_DEFAULTS, KeyGrid, heard_layers, left_edge, off_cents, shifted_hz, squares,
+                          threshold)  # (Hz bass: hzbass.py)
 from notes.shrink import (SAMPLES, inner_lines, inner_rows, merge as shrink_merge, minus as shrink_minus,
                           near_lines as shrink_near, proportion as shrink_proportion,
                           segments as shrink_segments)  # (the outline gate's even band)
@@ -377,11 +377,6 @@ def nearest_on(p, seg, scale):
     dist = np.hypot(*(q - at).T)
     i = int(np.argmin(dist))
     return float(dist[i]), tuple((at[i] / k).tolist())
-
-
-def open_ends(strokes):
-    """The loose ends of the drawing once touching strokes are joined."""
-    return [end for path in open_paths(strokes) for end in (path[0], path[-1])]
 
 
 def strokes_closed(strokes):

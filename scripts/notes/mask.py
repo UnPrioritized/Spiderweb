@@ -157,12 +157,6 @@ def unit_of(units, i):
     return next((u for u in units if i in u), None)
 
 
-def in_group(units, i):
-    """Is shape i a mask in a group of 2 or more?"""
-    u = unit_of(units, i)
-    return bool(u) and len(u) > 1
-
-
 def loops_of(sh):
     """A closed shape's outline loops (beat, key arrays), [] for an open line (slice.cutter_loops)."""
     from notes.slice import cutter_loops
@@ -398,11 +392,6 @@ def free_colour(shapes, members, ppq, nkeys, notes_of):
 def unmasked(rendered, shapes):
     """The rows of rendered a mask can cover (not masks' own: a mask is never masked)."""
     return rendered[~np.isin(rendered[:, 5], [i for i, sh in enumerate(shapes) if is_mask(sh)])]
-
-
-def shown_by(notes, sh, ppq, nkeys, notes_of):
-    """What one mask on its own shows of notes (shown_in)."""
-    return shown_in(notes, mask_area(sh, ppq, nkeys, notes_of) + (sh["mask"]["invert"],))
 
 
 def unit_shown(notes, shapes, unit, ppq, nkeys, notes_of):

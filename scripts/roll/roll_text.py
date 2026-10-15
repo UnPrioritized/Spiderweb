@@ -275,11 +275,6 @@ class TextTyping:
 
     # ------------------------------------------------------------ caret
 
-    def caret_spots(self):
-        """[(x, baseline)] in em units for every caret position (see text.layout)."""
-        tx, _ = self.typing_state()
-        return layout(tx)[1]
-
     def caret_at(self, e):
         """The caret position nearest to the mouse."""
         tx, axes = self.typing_state()

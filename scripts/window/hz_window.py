@@ -28,7 +28,7 @@ from files.about import ICONS
 from files.lang import tr
 from files.mathexpr import fmt
 from notes.engine import CLASH
-from notes.hzbass import AUTO, AUTO_MOST, FX, HZ_KINDS, all_tones, clean_line, clean_tones, left_edge
+from notes.hzbass import AUTO, FX, HZ_KINDS, all_tones, clean_line, clean_tones, left_edge
 from roll.roll_shared import CTRL, grab_while_panning
 from roll.zoombar import add_zoom_bars
 from window import look
@@ -39,7 +39,7 @@ from window.hz_loud import LoudPane
 from window.hz_preview import Preview
 from window.hz_synth import open_synth
 from window.hz_trace import TraceWindow
-from window.preview_settings import PreviewSettings, auto_box, no_spaces, open_settings  # noqa: F401
+from window.preview_settings import PreviewSettings, open_settings
 from window.snap_picker import SnapPicker
 from window.tool_picker import ToolPicker
 from window.widgets import Tooltip, placed

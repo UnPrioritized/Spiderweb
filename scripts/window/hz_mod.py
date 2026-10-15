@@ -16,7 +16,7 @@ import numpy as np
 
 from files.lang import english_width, tr
 from files.mathexpr import calc, fmt
-from notes.hzbass import (LFO_RATES, MOD_ENV, MOD_ENVS, MOD_LINKS, MOD_NEED_LINE, MOD_SETTINGS, NEUTRAL, WAVES,
+from notes.hzbass import (LFO_RATES, MOD_ENVS, MOD_LINKS, MOD_NEED_LINE, MOD_SETTINGS, NEUTRAL, WAVES,
                           MOD_LFO_MODES, MOD_LFO_SHAPES, MOD_LFOS, MOD_SOURCES, TIMINGS, adsr_line, line_at, loop_shape,
                           mod_start, mod_value, setting_base)
 from window.hz_knobs import (BYPASS, KINDS, KNOBS, PERCENTS, UPDOWN, Dial, knob_of, note_name, shown, snap_rate,

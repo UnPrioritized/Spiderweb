@@ -130,7 +130,7 @@ from notes.hz_glide import *  # noqa: F401,F403
 from notes.hz_modulate import *  # noqa: F401,F403
 from notes.hz_arp import *  # noqa: F401,F403
 from notes.hz_runs import *  # noqa: F401,F403
-from notes.hz_runs import _grid, _heard, _limits, _spans, _squares, _whole
+from notes.hz_runs import _grid, _limits, _squares
 from notes.hz_grid import *  # noqa: F401,F403
 
 
