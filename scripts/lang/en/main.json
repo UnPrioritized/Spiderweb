@@ -996,7 +996,7 @@
  "project.saving_midi": "Saving the MIDI file…",
  "project.saving_dms": "Saving the Domino file…",
  "project.saved_dms": "Saved {n:,} notes on {tracks} track(s) for Domino:\n{path}",
- "project.dms_long_gates": "\n\n{long:,} notes are longer than 65535 ticks. Domino opens them fine, but saving the song as a MIDI file from Domino cuts them to 65535 ticks. For a MIDI file with their full length, use Generate MIDI here.",
+ "project.dms_long_gates": "\n\n{long:,} notes are longer than 65535 ticks. Domino keeps them in this file, but cuts them to 65535 ticks in any MIDI file it saves or opens. Other MIDI players play the file from Generate MIDI at full length.",
  "project.too_long_for_domino": "This song is too long for a Domino file (its ticks stop at {longest:,}). Try a lower PPQ.",
  "project.copying_for_domino": "Copying the notes for Domino…",
  "project.pasting_from_domino": "Pasting the notes from Domino…",
