@@ -9,7 +9,7 @@ Draw your own in the strip under the list: press on empty space to put a piece t
 
 Grid sets how finely you can draw (3 for triplets). Save… keeps it in the list under a name; Delete removes a saved one.
 
-Steps: how long one repeat of the rhythm is. Step length: how long one step is (shorter = a faster rhythm and more notes). Pick a note length from the list, or type the length in ticks in the box beside it. For 1-tick pieces, pick "1 tick" at the top of the list or type 1.
+Steps: how long one repeat of the rhythm is. Step length: how long one step is (shorter = a faster rhythm and more notes). Pick a note length from the list, or type the length in ticks in the box beside it. For 1-tick pieces, pick Off at the top of the list or type 1.
 
 Velocity: "% of each note" (the start) makes every piece a share of its note's own velocity, so velocity ramps and changes you made stay; the dotted line is 100 % (the note's own), and dragging sticks to it (Shift = no sticking). "Fixed (1–127)" makes every piece exactly the velocity drawn, whatever its note had. Switching keeps the pieces about as loud (100 % = 127).
 
