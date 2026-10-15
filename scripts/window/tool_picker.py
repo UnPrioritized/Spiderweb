@@ -10,7 +10,7 @@ from tkinter import ttk
 from files.lang import tr
 from window import look
 from window.help_texts import BY_ID, TOOL_TOPICS
-from window.snap_picker import SIZE, _png, _segment
+from window.snap_picker import SIZE, png_bytes, near_segment
 from window.widgets import Tooltip
 
 FIRST = "line"  # the tool the button shows on the very first start
@@ -22,8 +22,8 @@ GROUP = ("custom", "circle", "polygon")
 
 def _pin_inside(x, y):
     """A push pin, leaning right."""
-    return (_segment(x, y, 2.5, 13.5, 6.5, 9.5, 1.3) or _segment(x, y, 4.2, 7.6, 8.4, 11.8, 1.8) or
-            _segment(x, y, 6.0, 10.0, 10.5, 5.5, 4.2) or _segment(x, y, 8.2, 2.2, 13.8, 7.8, 2.6))
+    return (near_segment(x, y, 2.5, 13.5, 6.5, 9.5, 1.3) or near_segment(x, y, 4.2, 7.6, 8.4, 11.8, 1.8) or
+            near_segment(x, y, 6.0, 10.0, 10.5, 5.5, 4.2) or near_segment(x, y, 8.2, 2.2, 13.8, 7.8, 2.6))
 
 
 def _arrow_inside(x, y):
@@ -37,7 +37,7 @@ def _let_go_on(e):
 
 
 def _picture(size, rgb, inside=_pin_inside):
-    return tk.PhotoImage(data=base64.b64encode(_png(inside, size, rgb)), format="png")
+    return tk.PhotoImage(data=base64.b64encode(png_bytes(inside, size, rgb)), format="png")
 
 
 class RestTip(Tooltip):

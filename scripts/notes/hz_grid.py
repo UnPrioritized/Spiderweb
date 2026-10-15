@@ -14,7 +14,7 @@ from notes.hz_settings import (CRUSH, FM_INDEX, FX, GROWL, HZ_DEFAULTS, MODE_AMO
 from notes.hz_glide import legato_links, links, note_span, pitch
 from notes.hz_lines import line_at, note_vel
 from notes.hz_modulate import TIMED, fx_at, setting_at, setting_base, setting_most, timed_line
-from notes.hz_runs import _grid, _limits, follows, tails, tone_runs
+from notes.hz_runs import repeat_grid, repeat_limits, follows, tails, tone_runs
 
 
 def compress(loud, comp):
@@ -188,7 +188,7 @@ class KeyGrid:
             first = prev["number"][-1] + 1 if prev is not None else 0  # (waves counted along the chain)
             run = {"starts": starts, "waves": nexts - starts, "number": first + np.arange(len(starts)), "beat": beat,
                    "prev": j,
-                   "limits": _limits(hz, left, ppq, starts),
+                   "limits": repeat_limits(hz, left, ppq, starts),
                    # (a repeat moved past its own tone's end, its fall included, is left out: the next tone may
                    # touch it)
                    "until": (left + n0["t"] + n0["len"] + tail.get(n0["id"], 0.0)) * ppq if whose[1] is None
@@ -475,7 +475,7 @@ class KeyGrid:
             f["limits"], loud_sw, c1, c["tf"], SOFT)
         if K == 0:
             return None
-        if f["limits"].dtype != np.float64:  # (whole ticks in the limits: the grid is whole too, as _grid makes it)
+        if f["limits"].dtype != np.float64:  # (whole ticks in the limits: the grid is whole too, as repeat_grid makes it)
             sq = sq.astype(f["limits"].dtype)
         self.wave_of[key] = wv
         factor.setflags(write=False)
@@ -756,7 +756,7 @@ class KeyGrid:
             if (self.gains != 1.0).any() or "blend" in self.moved or self.osc2:
                 first = np.lexsort((-fa, qu))
                 st, li, fa, qu, pe, wv = st[first], li[first], fa[first], qu[first], pe[first], wv[first]
-            sq, which = _grid(st, li)
+            sq, which = repeat_grid(st, li)
             factor, mine, wv = fa[which], pe[which, 0] > 0, wv[which]
             heard = ~qu[which]  # (volume 0: left out once every repeat has its end)
             sq, factor, mine, wv = sq[heard], factor[heard], mine[heard], wv[heard]

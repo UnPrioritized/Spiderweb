@@ -28,7 +28,7 @@ GGO_GLYPH_INDEX, GGI_MARK_NONEXISTING_GLYPHS, SYMBOL_CHARSET = 0x80, 1, 2
 CMAP = struct.unpack("<I", b"cmap")[0]  # (GetFontData's table name)
 
 
-def _no_width(ch):
+def no_width(ch):
     """Joiners and variation selectors (an emoji's "show in colour" mark): nothing to draw, take no room."""
     o = ord(ch)
     return o in (0x200C, 0x200D) or 0xFE00 <= o <= 0xFE0F or 0xE0100 <= o <= 0xE01EF
@@ -223,12 +223,12 @@ class Font:
         """True if ch takes room but neither this font nor any font it borrows from has it (it shows as a box /
         "?"). Never for symbol fonts."""
         if ch not in self._missing:
-            self._missing[ch] = not (ch.isspace() or _no_width(ch) or self.symbol or self.has(ch)
+            self._missing[ch] = not (ch.isspace() or no_width(ch) or self.symbol or self.has(ch)
                                      or backup_font(self, ch))
         return self._missing[ch]
 
     def _read(self, ch, backup=True):
-        if _no_width(ch):
+        if no_width(ch):
             return 0.0, []
         if backup and not self.symbol and not self.has(ch):  # from another font that has it
             other = backup_font(self, ch)

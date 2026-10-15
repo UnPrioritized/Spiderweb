@@ -269,15 +269,15 @@ class FtFont:
     def missing(self, ch):
         """True if ch takes room but neither this font nor any font it borrows from has it (it shows as a box /
         "?"). Never for symbol fonts."""
-        from notes.fonts import _no_width, backup_font
+        from notes.fonts import no_width, backup_font
         if ch not in self._missing:
-            self._missing[ch] = not (ch.isspace() or _no_width(ch) or self.symbol or self.has(ch)
+            self._missing[ch] = not (ch.isspace() or no_width(ch) or self.symbol or self.has(ch)
                                      or backup_font(self, ch))
         return self._missing[ch]
 
     def _read(self, ch, backup=True):
-        from notes.fonts import _no_width, backup_font
-        if _no_width(ch):
+        from notes.fonts import no_width, backup_font
+        if no_width(ch):
             return 0.0, []
         if backup and not self.symbol and not self.has(ch):  # from another font that has it
             other = backup_font(self, ch)

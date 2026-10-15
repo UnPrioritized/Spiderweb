@@ -24,7 +24,7 @@ def most_colours(all16):
 
 REACH = 3  # cells: a fill line's loose ends go this much further, so one ending right on a line still splits (and
 # for drawing the areas exact, a point this near a line is joined to it, see landed)
-_maps = {}
+area_maps = {}
 
 
 def clean_areas(areas):
@@ -42,13 +42,13 @@ def clean_areas(areas):
 
 def area_map(loops, cuts, key=None):
     """The AreaMap of these lines (closed loops and fill lines, (u, v) point lists), remembered by key."""
-    got = _maps.get(key) if key is not None else None
+    got = area_maps.get(key) if key is not None else None
     if got is None:
         got = AreaMap(loops, cuts)
         if key is not None:
-            if len(_maps) > 20:
-                _maps.clear()
-            _maps[key] = got
+            if len(area_maps) > 20:
+                area_maps.clear()
+            area_maps[key] = got
     return got
 
 

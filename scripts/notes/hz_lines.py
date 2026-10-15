@@ -222,7 +222,7 @@ def loop_shape(kind, every, seed=None, name=None):
     return [[p[0] * every, round(p[1], 4), *p[2:]] for p in pts]
 
 
-def _shifted_line(pts, d):
+def shifted_line(pts, d):
     """An effect line's points d beats later; past the left edge (beat 0) it starts with its value there."""
     if not pts:
         return pts
@@ -237,7 +237,7 @@ def _shifted_line(pts, d):
     return [head] + keep
 
 
-def _turned_repeat(pts, d, every):
+def turned_repeat(pts, d, every):
     """One repeat's points (0..every) for its repeat starting d beats later: the same points, the ones going past
     its end coming round to its start (in the same order, so the line is exactly the same)."""
     s = d % every

@@ -28,7 +28,7 @@ def _ellipse(x, y, cx, cy, rx, ry, turn):
     return ((dx * c + dy * s) / rx) ** 2 + ((-dx * s + dy * c) / ry) ** 2 <= 1
 
 
-def _segment(x, y, ax, ay, bx, by, width):
+def near_segment(x, y, ax, ay, bx, by, width):
     vx, vy = bx - ax, by - ay
     t = max(0.0, min(1.0, ((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy)))
     return math.hypot(x - ax - t * vx, y - ay - t * vy) <= width / 2
@@ -44,13 +44,13 @@ def _note_inside(note, dots, triplet):
         head = _ellipse(x, y, 6.2, 12.6, 3.3, 2.3, tilt)
         if note == 2:  # a half note: open head
             head = head and not _ellipse(x, y, 6.2, 12.6, 2.4, 1.0, tilt)
-        if head or _segment(x, y, 9.2, 12.2, 9.2, 1.6, 1.2):
+        if head or near_segment(x, y, 9.2, 12.2, 9.2, 1.6, 1.2):
             return True
         flags = {8: 1, 16: 2, 32: 3}.get(note, 0)
         gap = 2.0 if flags == 3 else 2.4
         for k in range(flags):
             y0 = 1.6 + k * gap
-            if _segment(x, y, 9.2, y0, 12.6, y0 + 3.2, 1.3):
+            if near_segment(x, y, 9.2, y0, 12.6, y0 + 3.2, 1.3):
                 return True
         if dots and math.hypot(x - 13.3, y - 12.8) <= 1.2:
             return True
@@ -64,17 +64,17 @@ def _note_inside(note, dots, triplet):
 
 def _bar_inside(x, y):
     """A bar: two bar lines with the staff between them."""
-    return (_segment(x, y, 2.5, 3, 2.5, 13, 1.3) or _segment(x, y, 13.5, 3, 13.5, 13, 1.3) or
-            any(_segment(x, y, 2.5, h, 13.5, h, 0.8) for h in (4.5, 8, 11.5)))
+    return (near_segment(x, y, 2.5, 3, 2.5, 13, 1.3) or near_segment(x, y, 13.5, 3, 13.5, 13, 1.3) or
+            any(near_segment(x, y, 2.5, h, 13.5, h, 0.8) for h in (4.5, 8, 11.5)))
 
 
 def _wrench_inside(x, y):
     """A spanner (settings)."""
     jaw = math.hypot(x - 11.3, y - 4.7) <= 3.3 and not math.hypot(x - 13.2, y - 2.8) <= 2.0
-    return jaw or _segment(x, y, 3.2, 12.8, 10.0, 6.0, 2.4)
+    return jaw or near_segment(x, y, 3.2, 12.8, 10.0, 6.0, 2.4)
 
 
-def _png(inside, size, rgb=None):
+def png_bytes(inside, size, rgb=None):
     """The picture as PNG bytes in the look's picture colour (or rgb), its edges smoothed (4 x 4 samples per pixel),
     see-through around it."""
     rgb = rgb or look.rgb(look.ICON)
@@ -97,7 +97,7 @@ def picture(what, size):
     """A PhotoImage: what = a note (whole-note fraction, dots, triplet), "bar", "custom" or None (empty)."""
     inside = (_bar_inside if what == "bar" else _wrench_inside if what == "custom" else
               (lambda x, y: False) if what is None else _note_inside(*what))
-    return tk.PhotoImage(data=base64.b64encode(_png(inside, size)), format="png")
+    return tk.PhotoImage(data=base64.b64encode(png_bytes(inside, size)), format="png")
 
 
 # ---------------------------------------------------------------- the dropdown

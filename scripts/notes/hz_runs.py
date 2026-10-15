@@ -397,7 +397,7 @@ def bent(hz, left, ppq, starts, nexts, tone=None, keys=None):
     return at[:-1], at[1:]
 
 
-def _limits(hz, left, ppq, starts):
+def repeat_limits(hz, left, ppq, starts):
     """For each repeat (start ticks, not rounded): the tick the sound it's in ends at (the end of the tones that
     touch or overlap around it, their falls included: tails)."""
     at, ends = cached(hz, ("limits", left, ppq), lambda: _spans(hz, left, ppq))
@@ -451,7 +451,7 @@ def _heard(hz_json, left, ppq, bpm):
     lasts = {}
     for i in sorted(range(len(runs)), key=lambda i: runs[i][0][0]):  # (a stretch after the one it goes on from)
         starts, nexts, whose = runs[i]
-        limits = _limits(hz, left, ppq, starts)
+        limits = repeat_limits(hz, left, ppq, starts)
         j, chained = after[i]
         wobble, lasts[i] = vibrato_keys(hz, starts / ppq - left, whose[0], lasts.get(j) if chained else None)
         mean = nexts - starts  # (the wave as made: with mixed gates the whole-tick ones come to this on average)
@@ -477,16 +477,16 @@ def heard(hz, left, ppq, bpm):
 
 
 @functools.lru_cache(maxsize=16)
-def _squares(hz_json, left, ppq):
+def repeat_squares(hz_json, left, ppq):
     hz = dict(json.loads(hz_json), _memo={})
     got = [s for s, _, _ in tone_runs(hz, left, ppq)]
     if not got:
         return np.zeros((0, 2), np.int64)
     starts = np.concatenate(got)
-    return _grid(starts, _limits(hz, left, ppq, starts))[0]
+    return repeat_grid(starts, repeat_limits(hz, left, ppq, starts))[0]
 
 
-def _grid(starts, limits):
+def repeat_grid(starts, limits):
     """Repeats (start ticks, not rounded; the tick each one's sound ends at) -> (start, end) whole ticks in order,
     each lasting until the next one starts; and which repeat each of them is."""
     if not len(starts):

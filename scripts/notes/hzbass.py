@@ -29,7 +29,7 @@ by (custom.chop_grid), so a chord takes one channel. Nothing sounds where no ton
 LAYERS (like a DAW's tracks): hz["layers"] (clean_layers) = more sets of notes in one Hz bass, each with its own
 sound; the picked one's notes and sound are where a Hz bass without layers has them, so all editing works on it.
 Each layer heard (heard_layers: mute / solo) makes its notes as a Hz bass of its own, put together by
-engine._notes_tracks.
+engine.kind_notes_tracks.
 hz["grow"] = the shape is kept as long as its tones (fit_length). hz["own"] = made with the Hz bass tool: a box
 that is nothing but its tones (it goes when its last tone is deleted; the panel shows the keys it repeats).
 hz["length"] = the Note length (clean_length: share of a wave, % of the note or beats shown in ticks; missing = 100 %
@@ -71,7 +71,7 @@ own tone's end is left out):
   "pitch": unlike the others it DOES change the pitch: the tone bent up or down by the line, 0.5 = as placed, 1 / 0 =
   PITCH keys up / down, or the Pitch box's Range (hz["lfo"]["bend_range"]; bent, in tone_runs, so the red line shows it and every key is in step).
 With effects every key has its own repeats (KeyGrid, custom.chop_keys); without any, nothing changes.
-Five more change how hard the keys hit instead (KeyGrid.factor -> velocity_factor, used by engine._notes_tracks on
+Five more change how hard the keys hit instead (KeyGrid.factor -> velocity_factor, used by engine.kind_notes_tracks on
 top of the shape's own velocity; loudness goes with velocity squared):
   "volume": how loud, 1 = as the shape's velocity, 0 = silence (repeats softer than SOFT are left out, and the one
   before them still ends where it would have).
@@ -125,12 +125,12 @@ import numpy as np
 from files.speed import key_rows, key_sort, loops
 from notes.hz_settings import *  # noqa: F401,F403
 from notes.hz_lines import *  # noqa: F401,F403
-from notes.hz_lines import _shifted_line, _turned_repeat
+from notes.hz_lines import shifted_line, turned_repeat
 from notes.hz_glide import *  # noqa: F401,F403
 from notes.hz_modulate import *  # noqa: F401,F403
 from notes.hz_arp import *  # noqa: F401,F403
 from notes.hz_runs import *  # noqa: F401,F403
-from notes.hz_runs import _grid, _limits, _squares
+from notes.hz_runs import repeat_grid, repeat_limits, repeat_squares
 from notes.hz_grid import *  # noqa: F401,F403
 
 
@@ -189,7 +189,7 @@ def squares(sh, ppq):
     if has_fx(hz):
         lo, hi = key_range(sh)
         return _key_grid(hz_json, left_edge(sh), ppq, lo, hi - lo + 1)
-    return _squares(hz_json, left_edge(sh), ppq)
+    return repeat_squares(hz_json, left_edge(sh), ppq)
 
 
 LENGTH_KEYS = ("length", "own_length", "stick")
@@ -197,14 +197,14 @@ LENGTH_KEYS = ("length", "own_length", "stick")
 
 @functools.lru_cache(maxsize=16)
 def _waves(hz_json, left, ppq):
-    """_squares' repeats (start ticks) and how long the wave each came from is (ticks): a chord's from its own tone."""
+    """repeat_squares' repeats (start ticks) and how long the wave each came from is (ticks): a chord's from its own tone."""
     hz = dict(json.loads(hz_json), _memo={})
     runs = tone_runs(hz, left, ppq)
     if not runs:
         return np.zeros(0, np.int64), np.zeros(0)
     starts = np.concatenate([s for s, _, _ in runs])
     waves = np.concatenate([e - s for s, e, _ in runs])
-    sq, which = _grid(starts, _limits(hz, left, ppq, starts))
+    sq, which = repeat_grid(starts, repeat_limits(hz, left, ppq, starts))
     return sq[:, 0], waves[which]
 
 
@@ -357,11 +357,11 @@ def shifted_hz(hz, d):
     for name, pts in (hz.get("fx") or {}).items():
         if name in froms:  # (counted from each note: the edge doesn't matter)
             continue
-        hz["fx"][name] = _turned_repeat(pts, d, loop[name]) if name in loop else _shifted_line(pts, d)
+        hz["fx"][name] = turned_repeat(pts, d, loop[name]) if name in loop else shifted_line(pts, d)
     for name, pts in (hz.get("amount") or {}).items():
-        hz["amount"][name] = _shifted_line(pts, d)
+        hz["amount"][name] = shifted_line(pts, d)
     if hz.get("loud"):
-        hz["loud"] = _shifted_line(hz["loud"], d)
+        hz["loud"] = shifted_line(hz["loud"], d)
     if hz.get("mod"):  # (the Free LFOs: counted that much later, so they stay in step too)
         phase = hz["mod"].get("phase", 0.0) + d
         hz["mod"].pop("phase", None)

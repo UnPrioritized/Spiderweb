@@ -151,9 +151,9 @@ class MidiOut:
             self.name = name
             return None
         if name == KDMAPI:
-            from files.synth import SynthError, _load
+            from files.synth import SynthError, load_dlls
             try:
-                _load()  # (ours first, as for the Windows devices below)
+                load_dlls()  # (ours first, as for the Windows devices below)
             except SynthError:
                 pass
             try:
@@ -174,9 +174,9 @@ class MidiOut:
         # The preview synth's BASS is loaded first: some MIDI-out devices run on BASS too and load theirs by name;
         # loaded before ours, the preview can't make sound (measured with one, 2026-10-01). Loaded after, they
         # share ours and both work.
-        from files.synth import SynthError, _load
+        from files.synth import SynthError, load_dlls
         try:
-            _load()
+            load_dlls()
         except SynthError:
             pass
         h = wintypes.HANDLE()

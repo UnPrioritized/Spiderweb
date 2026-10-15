@@ -489,7 +489,7 @@ def fx_notes(sh, ppq, keys, get):
         notes, tracks = get({k: v for k, v in sh.items() if k != "sustain"})
         return held(notes, tracks, sh["sustain"], ppq) if is_sustained(sh) else (notes, tracks)
     if "picture" in sh:  # (no glue / chop / claw / strum on a picture: its notes are its picture, user)
-        return _notes_tracks(sh, ppq, keys)
+        return kind_notes_tracks(sh, ppq, keys)
     fx = sh.get("fx")
     if fx:
         if len(fx) > DEEP and not getattr(_warming, "on", False):
@@ -524,7 +524,7 @@ def fx_notes(sh, ppq, keys, get):
     if is_pasted_flipped(sh) or is_gate_flipped(sh):  # (each run on a key mirrored inside itself, gateflip.py)
         notes, tracks = get({k: v for k, v in sh.items() if k not in ("gate_flip", "glue")})
         return with_glue(*mirrored_runs(notes, tracks, bool(sh.get("own_vel"))), sh, ppq)
-    return with_glue(*_notes_tracks(sh, ppq, keys), sh, ppq)
+    return with_glue(*kind_notes_tracks(sh, ppq, keys), sh, ppq)
 
 
 def tagged_notes(sh, k, ppq, keys):
@@ -727,10 +727,10 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
 
 
 def layered_notes(sh, ppq, keys):
-    """_notes_tracks of a Hz bass with layers: each layer heard makes its notes as a Hz bass of its own, in order.
+    """kind_notes_tracks of a Hz bass with layers: each layer heard makes its notes as a Hz bass of its own, in order.
     A note on a key an earlier layer sounds at the same time goes on another channel (user): its track + CLASH x its
     clash_levels level."""
-    got = [_notes_tracks(dict(sh, hz=hz), ppq, keys) for hz in heard_layers(sh["hz"])]
+    got = [kind_notes_tracks(dict(sh, hz=hz), ppq, keys) for hz in heard_layers(sh["hz"])]
     if not got:
         return np.zeros((0, 4), np.int64), None
     notes = np.concatenate([n for n, _ in got])
@@ -784,7 +784,7 @@ def clash_levels(lists):
     return out
 
 
-def _notes_tracks(sh, ppq, keys):
+def kind_notes_tracks(sh, ppq, keys):
     # cut by the Slice tool: the whole's notes on its side (sliced.py; a line too when cut from a piece as it was)
     if sh.get("cut") and (sh["kind"] in ("custom", "funnel") or (sh["cut"].get("whole") or {}).get("cut")):
         got = piece_notes(sh, ppq, keys, shape_notes_tracks)  # (the whole's glue / pages done first)

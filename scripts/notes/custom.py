@@ -11,7 +11,7 @@ import numpy as np
 from files.lang import tr
 from files.speed import key_rows
 from notes.arc import arc_k, arc_points, ellipse_bezier
-from notes.areas import ALL_COLOURS, COLOURS, _maps, area_map, inside_loops  # (areas coloured by hand)
+from notes.areas import ALL_COLOURS, COLOURS, area_maps, area_map, inside_loops  # (areas coloured by hand)
 from notes.faces import faces  # (what's filled when it isn't plain even-odd: fill_test)
 from notes.gaterange import RangeKeys, RangeRows, clean_range, range_grid  # (a spam gate going from one to another)
 from notes.bezier import sample
@@ -1149,8 +1149,8 @@ def shape_areas(sh):
     if any(c is None for c in closers) or uv_points(sh["pts"], [[0, 0]]) is None:
         return None
     key = (json.dumps(sh["strokes"]), json.dumps([np.round(c, 6).tolist() for c in closers]))
-    if key in _maps:
-        return _maps[key]
+    if key in area_maps:
+        return area_maps[key]
     loops = [uv_points(sh["pts"], p) for p in plan["polys"] + plan["attached"]]
     cuts = [uv_points(sh["pts"], p) for p in area_cuts(sh)]
     return area_map(loops, cuts, key)

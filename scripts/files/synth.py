@@ -90,7 +90,7 @@ def _pin(*paths):
         k32.GetModuleHandleExW(1, path, ctypes.byref(ctypes.c_void_p()))  # (1 = GET_MODULE_HANDLE_EX_FLAG_PIN)
 
 
-def _load():
+def load_dlls():
     """(bass, bassmidi), loaded once. SynthError when they can't be."""
     global _dlls
     if _dlls:
@@ -192,7 +192,7 @@ class Synth:
     """BASS started once, with a soundfont. can_play = False when there's no sound device (render still works)."""
 
     def __init__(self):
-        self.bass, self.midi = _load()
+        self.bass, self.midi = load_dlls()
         self.play_device = None  # (BASS's number for the sound device, once it opened)
         if not self._init(_DEVICE_DEFAULT):
             self._init(_DEVICE_NONE)  # (sound can still be made, not played: the device is asked for again)

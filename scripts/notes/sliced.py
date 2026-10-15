@@ -289,7 +289,7 @@ def source(sh):
 
 
 def paths_of(sh):
-    """The paths a line kind's notes are made from, each first to last point in time (engine._notes_tracks)."""
+    """The paths a line kind's notes are made from, each first to last point in time (engine.kind_notes_tracks)."""
     from notes.engine import cached_arrays
     arrs = cached_arrays(sh)
     arrs = [dedupe(np.concatenate(arrs))] if len(arrs) == 1 else [dedupe(a) for a in arrs]
@@ -297,7 +297,7 @@ def paths_of(sh):
 
 
 def spotted_notes(sh, ppq, end_dot):
-    """A line kind's (start, end, key) notes, as engine._notes_tracks makes them, and each one's spot."""
+    """A line kind's (start, end, key) notes, as engine.kind_notes_tracks makes them, and each one's spot."""
     paths = paths_of(sh)
     if len(paths) > 1:  # a joined curve's pieces: each like a line
         got = [path_notes(a * [ppq, 1], end_dot, where=True) for a in paths]
@@ -310,7 +310,7 @@ def spotted_notes(sh, ppq, end_dot):
 
 
 def piece_notes(sh, ppq, keys, make):
-    """A custom piece's (notes, tracks): the whole's (make = engine._notes_tracks), cut at every cut like a knife went
+    """A custom piece's (notes, tracks): the whole's (make = engine.kind_notes_tracks), cut at every cut like a knife went
     through them (user: a spam note across it leaves a sliver; spam keeps the whole's grid, an Empty shape's cut side
     makes no notes), the parts on its side kept; velocities over its own time when they were changed. None: not a
     piece any more. (Also a line piece cut from a piece with pages of its own: its whole's notes, its knife cuts.)"""
@@ -542,14 +542,14 @@ def run_origins(sh, notes, ppq):
     """A sliced Fill piece's chop (user: the rhythm goes on across the cut): where each of its notes' run started in
     the whole shape (chop.run_starts there), or None."""
     from notes.chop import run_starts
-    from notes.engine import _notes_tracks
+    from notes.engine import kind_notes_tracks
     got = source(sh)
     if got is None:
         return None
     text = json.dumps(got[0], sort_keys=True)
     whole = next((v[0] for k, v in _wholes.items() if k[0] == text and k[1] == ppq), None)
     if whole is None:
-        whole = _notes_tracks(got[0], ppq, 256)[0]
+        whole = kind_notes_tracks(got[0], ppq, 256)[0]
     if not len(whole):
         return None
     rs = run_starts(whole)

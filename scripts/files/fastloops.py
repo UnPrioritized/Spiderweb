@@ -1096,7 +1096,7 @@ def hz_order(wg):
 def hz_finish(part, number, src, w, st0, late, nsrc, noisy_p, place, drawn, until_p, gains_sel, has_loud, has_wah,
               hv, vol_f, lev, oct_f, own_f, layer_f, lim_f, loud_sw, c1, tf, soft_thr):
     """The noise, the starts, the loudness (wah, tremolo, volume, Octave below), the repeats kept, the velocity parts,
-    and the grid of notes (_grid): returns (sq, factor, mine, wv, K) with the repeats heard (K = repeats kept)."""
+    and the grid of notes (repeat_grid): returns (sq, factor, mine, wv, K) with the repeats heard (K = repeats kept)."""
     M = len(part)
     C = len(gains_sel)
     st = np.empty(M)
@@ -1142,7 +1142,7 @@ def hz_finish(part, number, src, w, st0, late, nsrc, noisy_p, place, drawn, unti
         K += 1
     if K == 0:
         return np.zeros((0, 2)), np.zeros(0), np.zeros(0, np.bool_), np.zeros(0), 0
-    # (_grid: the repeats on one whole tick are one group: the longest limit of them, ends at the next start)
+    # (repeat_grid: the repeats on one whole tick are one group: the longest limit of them, ends at the next start)
     wg = np.empty(K, np.int64)
     for i in range(K):
         wg[i] = np.int64(np.floor(st[i] + 0.5))
