@@ -244,7 +244,10 @@ class Synth:
         font = self._font_init(path)
         if not font:
             err = self.bass.BASS_ErrorGetCode()
-            bad = self.silent_samples(path)[1] if path.lower().endswith(".sfz") else []
+            try:
+                bad = self.silent_samples(path)[1] if path.lower().endswith(".sfz") else []
+            except OSError:
+                bad = []  # (the .sfz itself gone or unreadable: the plain "couldn't be read")
             if bad:  # (an SFZ with nothing left that plays: the files to blame listed)
                 raise SynthError("synth.bad_font_files", name=os.path.basename(path), files=silent_list(path, bad))
             raise SynthError("synth.bad_font", name=os.path.basename(path), err=err)
@@ -308,7 +311,7 @@ class Synth:
         bad = []
         for i, name in enumerate(names):
             if cancel is not None and i % 50 == 0 and cancel():
-                break
+                return 0, [], False  # (stopped: the SFZ isn't opened either)
             if not os.path.isfile(name):
                 bad.append((name, "missing"))
                 continue

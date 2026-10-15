@@ -52,6 +52,8 @@ def read(path, cancel=None):
         state["spaced"] = state["spaced"] or bool(_SPACED.search(text))
         pos = 0
         for m in _INCLUDE.finditer(text):  # (an included file sits where its line was)
+            if text[text.rfind("\n", 0, m.start()) + 1:m.start()].lstrip().startswith("//"):
+                continue  # (a // line is a comment: the synth skips its #include too)
             lines(text[pos:m.start()])
             pos = m.end()
             inc = os.path.normpath(os.path.join(folder, _name(m.group(1), defines)))

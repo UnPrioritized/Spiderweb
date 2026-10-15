@@ -2266,7 +2266,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
             if job.is_alive():
                 self.after(200, done)
             elif result and result[0][1] and not result[0][2] and self._sample_check == me and self.winfo_exists():
-                focus = self.focus_get()
+                try:
+                    focus = self.focus_get()
+                except KeyError:
+                    focus = None  # (a dropdown's list open: Tk's own widget, unknown here)
                 messagebox.showwarning(
                     tr("synth.silent_title"),
                     trn("synth.silent", len(result[0][1]), name=os.path.basename(path), n=f"{len(result[0][1]):,}")
