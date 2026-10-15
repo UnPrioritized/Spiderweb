@@ -11,7 +11,8 @@ from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, clean_shape
 from notes.sustain import is_sustained
 from notes.mask import (GROUP_KEYS, MASK_DEFAULTS, MODES, MOST_SIZE, SHOWS, THICKNESS, can_mask, free_colour, is_mask,
-                        is_solid, loops_of, mask_units, new_group_id, tidy_groups, unit_of, unit_shown, unmasked)
+                        is_solid, loops_of, mask_units, new_group_id, slot_pal, slot_rule, tidy_groups, unit_of,
+                        unit_shown, unmasked)
 from window import look
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged, unit_word
 
@@ -274,10 +275,13 @@ class MaskPanel:
         new = {**SHAPE_DEFAULTS, **self.defaults, **notes_shape(rows, self.ppq, tr("mask.applied")), "made": "mask"}
         new.pop("cycle", None)  # (Colours for new shapes: not on it, the notes keep the colours they had)
         new.pop("sustain", None)
+        if picture or multi:  # (its slots keep the channels they have now, whatever comes in later: hunt)
+            new["slots10"] = bool(self.picture_use10)
         if picture:
             new["own_slots"] = True
             first = self.shapes[int(owners[0])]
-            new["picture_notes"] = {"pal": first["picture"]["set"].get("pal")}
+            new["picture_notes"] = {"pal": slot_pal(first["picture"]["set"].get("pal"), slot_rule(first),
+                                                    self.picture_use10)}
         if any(is_sustained(self.shapes[o]) for o in np.unique(owners).tolist()):
             new["held"] = True
         sh = clean_shape(new)

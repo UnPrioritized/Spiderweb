@@ -255,6 +255,8 @@ def clean_shape(sh):
             if o is True or (isinstance(o, list) and len(o) == 2 and all(
                     isinstance(v, (int, float)) and math.isfinite(v) for v in o)):
                 out["own_slots"] = o if o is True else [float(v) for v in o]
+            if isinstance(sh.get("slots10"), bool):  # (its slots' channel rule when made: mask.slot_rule)
+                out["slots10"] = sh["slots10"]
             pn = sh.get("picture_notes")
             if isinstance(pn, dict):  # (the picture's colours, picture.clean_settings' "pal": a list of #rrggbb)
                 pal = pn.get("pal")

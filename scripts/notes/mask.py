@@ -59,6 +59,39 @@ def pinned_slots(sh, mode):
     return isinstance(o, list) and mode == "auto"
 
 
+SKIP10 = [c for c in range(16) if c != 9]  # (engine.CHANNELS: the channels when channel 10 isn't used)
+
+
+def slot_rule(sh):
+    """How a pinned shape's tracks (pinned_slots) give channels: True = slot k is channel k (channel 10 used), False =
+    channel 10 skipped, None = as the project's now (Apply mask copies made before this was kept). A picture: its own
+    "Use channel 10"; Apply mask's copy: sh["slots10"], the project's when it was made (hunt: kept its channels)."""
+    if "picture" in sh:
+        return sh["picture"]["set"].get("use10", False) is True
+    got = sh.get("slots10")
+    return got if isinstance(got, bool) else None
+
+
+def as_used(tracks, rule, use10):
+    """A pinned shape's tracks as slots of the project's channel rule now (use10), each on the channel it was made
+    for: made with channel 10 skipped, now used = moved to the same channel among 16 (hunt: colours 10-15 slid down
+    a channel when the project's Use channel 10 was ticked or a channel-10 picture came in)."""
+    if rule is not False or not use10 or tracks is None:
+        return tracks
+    t = np.asarray(tracks, np.int64)
+    return t // 15 * 16 + np.array(SKIP10, np.int64)[t % 15]
+
+
+def slot_pal(pal, rule, use10):
+    """A picture palette (colour k = track k) for painting by slot now (as_used): colour k at its slot."""
+    if not pal or rule is not False or not use10:
+        return pal
+    out = ["C0C0C0"] * 16
+    for k, h in enumerate(pal[:15]):
+        out[SKIP10[k]] = h
+    return out
+
+
 def picture_like(sh):
     """Painted in the pictures' colours: a picture, or Apply mask's notes copied from one."""
     return "picture" in sh or "picture_notes" in sh

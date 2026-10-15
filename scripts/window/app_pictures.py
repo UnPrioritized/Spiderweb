@@ -44,19 +44,58 @@ class Pictures:
                 continue
             t.update(pal=list(s["pal"]), locked=list(s.get("locked", [])), use10=s.get("use10", False),
                      colours=len(s["pal"]))
-            pic = self.picture_for(p)
-            if pic is None:
+            got = self.picture_notes_in(sh, pal)
+            if got is None:
                 missing += 1
-                continue
-            steps, keys = p["grid"]
-            rows, cols = (steps, keys) if t["view"] == "fall" else (keys, steps)
-            cl, al = P.cells(pic, rows, cols)
-            cl = P.adjust(cl, t["brightness"], t["contrast"], t["saturation"], t["sharpen"])
-            got, _, _ = P.grid_notes(P.quantise(cl, pal, t["blend"], t["strength"], t["keep"], al, t["empty"]),
-                                     t["view"], t["join"])
-            if len(got):
+            elif len(got):
                 sh["notes"] = pack_notes(got)
         return missing
+
+    def picture_notes_in(self, sh, pal):
+        """A placed picture's notes made again from its own file in these colours (linear), None without the file."""
+        from notes import picture as P
+        p = sh["picture"]
+        t = p["set"]
+        pic = self.picture_for(p)
+        if pic is None:
+            return None
+        steps, keys = p["grid"]
+        rows, cols = (steps, keys) if t["view"] == "fall" else (keys, steps)
+        cl, al = P.cells(pic, rows, cols)
+        cl = P.adjust(cl, t["brightness"], t["contrast"], t["saturation"], t["sharpen"])
+        return P.grid_notes(P.quantise(cl, pal, t["blend"], t["strength"], t["keep"], al, t["empty"]), t["view"],
+                            t["join"])[0]
+
+    def fit_pasted_pictures(self, first):
+        """Pasted / duplicated pictures (shapes from first on) take the channel-10 setting of the pictures already
+        here (one for the project). Without it, a 16-colour one loses its 16th colour, its notes going to the
+        nearest of the others (made again from its file when it's there; hunt, user). Returns how many lost one."""
+        from notes import picture as P
+        from notes.custom import pack_notes, unpack_notes
+        here = next((sh["picture"]["set"] for sh in self.shapes[:first] if "picture" in sh), None)
+        if here is None:
+            return 0
+        want = here.get("use10", False)
+        cut = 0
+        for sh in self.shapes[first:]:
+            t = (sh.get("picture") or {}).get("set")
+            if t is None or t.get("use10", False) == want:
+                continue
+            pal = t.get("pal") or []
+            if want or len(pal) <= 15 or self.all16():
+                t["use10"] = want or len(pal) > 15  # (16 colours with the project's tick: kept, channel 10 too)
+                continue
+            lin = np.array([P.lin_of(h) for h in pal])
+            got = self.picture_notes_in(sh, lin[:15])
+            if got is None:  # (no file: colour 16's notes take the nearest colour)
+                got = np.array(unpack_notes(sh["notes"]))
+                near = int(np.argmin(((lin[:15] - lin[15]) ** 2).sum(1)))
+                got[got[:, 4] >= 15, 4] = near
+            if len(got):
+                sh["notes"] = pack_notes(got)
+            t.update(pal=pal[:15], colours=15, use10=False, locked=[k for k in t.get("locked", []) if k < 15])
+            cut += 1
+        return cut
 
     def picture_state(self, info):
         """"ok", "missing" (no file there), "unreadable" (a kind only Pillow reads, and it isn't installed) or

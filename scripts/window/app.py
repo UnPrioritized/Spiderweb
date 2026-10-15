@@ -30,8 +30,8 @@ from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
                             turn_velocities, why_not as gate_why_not)
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
 from notes.hzbass import fit_length
-from notes.mask import (MASK_DEFAULTS, can_mask, is_mask, mask_view, picture_like, pinned_slots, silent,
-                        tidy_groups)
+from notes.mask import (MASK_DEFAULTS, as_used, can_mask, is_mask, mask_view, picture_like, pinned_slots, silent,
+                        slot_pal, slot_rule, tidy_groups)
 from notes.merge import velocity_reversed as merge_vrev
 from notes.sustain import is_sustained
 from notes.pattern import moved_formulas
@@ -137,11 +137,16 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False):
     wanted = [0 if t is None or "notes" in sh else len(np.unique(np.asarray(t) % CLASH)) for sh, (_, t) in zip(shapes, got)]
     most = most_colours(all16)
     got = [(n, capped_colours(t % CLASH, most) + t // CLASH * CLASH if w > most else t) for (n, t), w in zip(got, wanted)]
-    # (pictures using channel 10 too: one setting for the project, kept with every picture)
-    use10 = next((sh["picture"]["set"].get("use10", False) for sh in shapes if "picture" in sh), False)
+    # (pictures using channel 10 too: one setting for the project, kept with every picture; an Apply mask copy made
+    # while channel 10 was used keeps it in use, hunt)
+    pins = [pinned_slots(sh, mode) for sh in shapes]
+    rules = [slot_rule(sh) if pin else None for sh, pin in zip(shapes, pins)]
+    use10 = any(r is True for r in rules)
+    # (pinned tracks made with channel 10 skipped stay on their channels while it's used: mask.as_used)
+    got = [(n, as_used(t, r, use10 or all16)) for (n, t), r in zip(got, rules)]
     # (with all16 the shapes use channel 10 too, but only as their 16th: render's "all")
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
-                             [pinned_slots(sh, mode) for sh in shapes], "all" if all16 else use10, between_turns(shapes),
+                             pins, "all" if all16 else use10, between_turns(shapes),
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
                              [is_sustained(sh) or sh.get("held") is True for sh in shapes],
                              [colours_back(sh) for sh in shapes])
@@ -1102,8 +1107,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         self.play_changed()
         # placed pictures: their notes are drawn in the picture's own colours (the first picture's: they share them)
         self.picture_owners = np.array([picture_like(sh) for sh in self.shapes], bool)
-        self.picture_pal = next((sh["picture"]["set"].get("pal") for sh in self.shapes if "picture" in sh),
-                                next((sh["picture_notes"].get("pal") for sh in self.shapes if "picture_notes" in sh), None))
+        self.picture_pal = self.slots_pal()
         counts = self.note_counts = np.bincount(self.rendered[:, 5], minlength=len(self.shapes)).tolist()
         chans = [1] * len(self.shapes)  # Multi channel: how many channels each shape spreads over
         if self.channel_mode.get() == "auto" and len(self.rendered):
@@ -1116,6 +1120,15 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         self.update_status()
         self.schedule_autosave()
         self.sync_history()
+
+    def slots_pal(self):
+        """The picture colours by slot as the notes have them now (the first picture's, else the first copy's)."""
+        src = next((sh for sh in self.shapes if "picture" in sh), None) or next(
+            (sh for sh in self.shapes if "picture_notes" in sh), None)
+        if src is None:
+            return None
+        pal = src["picture"]["set"].get("pal") if "picture" in src else src["picture_notes"].get("pal")
+        return slot_pal(pal, slot_rule(src), self.picture_use10)
 
     def notes_rested(self, show=True):
         """The mouse rests mid-drag: the notes are made in a background thread (the window keeps answering the mouse;
@@ -1379,10 +1392,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         fresh_marks(self.shapes[first:])
         between_copied(self.shapes, first)  # (a whole Add between group: a new group; parts of one: plain shapes)
         clamped = 0 if self.all16() else len(self.over_15(self.shapes[first:]))
+        cut = self.fit_pasted_pictures(first)  # (pictures: the project's one channel-10 setting)
         self.select_many(range(first, len(self.shapes)), len(self.shapes) - 1)
         self.shapes_changed()
-        if clamped:
-            self.status.config(text=trn("app.pasted_15", clamped, n=clamped))
+        said = [trn("app.pasted_15", clamped, n=clamped)] if clamped else []
+        said += [trn("app.pasted_picture_15", cut, n=cut)] if cut else []
+        if said:
+            self.status.config(text="  ".join(said))
         return clamped
 
     def over_15(self, shapes, clamp=True):
