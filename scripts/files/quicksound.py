@@ -50,7 +50,7 @@ class QuickSound:
     def __init__(self, synth, budget_mb=1000, nofx=False):
         self.synth, self.nofx = synth, nofx  # (nofx: recorded without reverb / chorus)
         self.budget = budget_mb * 1e6
-        self.font = None  # the soundfont the recordings are of
+        self.font = None  # the soundfont the recordings are of (Synth.font_key)
         self.kept = collections.OrderedDict()  # (keys, step velocity, gate frames) -> float16 rows, least used first
         self.size = 0  # bytes in kept
         self.lock = threading.Lock()
@@ -69,9 +69,9 @@ class QuickSound:
 
     def check_font(self):
         """A new soundfont in the synth: everything recorded goes."""
-        if self.synth.font_path != self.font:
+        if self.synth.font_key != self.font:
             with self.lock:
-                self.font, self.curve = self.synth.font_path, None
+                self.font, self.curve = self.synth.font_key, None
                 self.kept.clear()
                 self.size = 0
                 self.asked.clear()
@@ -94,7 +94,7 @@ class QuickSound:
         steps = sorted({int(np.argmin(np.abs(level - w))) + 1 for w in np.linspace(level[0], level[-1], STEPS)})
         near = [min(steps, key=lambda s: abs(level[s - 1] - level[v - 1])) for v in range(1, 128)]
         curve = (np.array([0] + near), np.array([0.0] + [amp[v - 1] / amp[s - 1] for v, s in zip(range(1, 128), near)]))
-        if self.synth.font_path == font:
+        if self.synth.font_key == font:
             self.curve = curve
 
     # ------------------------------------------------------------ recordings and chords

@@ -19,6 +19,7 @@ import os
 import struct
 import sys
 import threading
+import time
 from collections import deque
 
 import numpy as np
@@ -170,6 +171,23 @@ def events(notes, ppq, bpm, chans=None):
     return ev
 
 
+def silent_list(path, bad):
+    """Synth.silent_samples' files as text for a message: the first 8 by their place in the soundfont's folder,
+    "…and N more", what missing / can't be read means."""
+    from files.lang import tr, trn
+    folder = os.path.dirname(path)
+
+    def shown(name):
+        try:
+            return os.path.relpath(name, folder)
+        except ValueError:  # (another drive)
+            return name
+    lines = [tr("synth.silent_" + why, file=shown(name)) for name, why in bad[:8]]
+    if len(bad) > 8:
+        lines.append(trn("synth.silent_more", len(bad) - 8, n=f"{len(bad) - 8:,}"))
+    return "\n".join(lines) + "\n\n" + tr("synth.silent_why")
+
+
 class Synth:
     """BASS started once, with a soundfont. can_play = False when there's no sound device (render still works)."""
 
@@ -179,6 +197,8 @@ class Synth:
         if not self._init(_DEVICE_DEFAULT):
             self._init(_DEVICE_NONE)  # (sound can still be made, not played: the device is asked for again)
         self.font, self.font_path = 0, None
+        self.opened = 0  # set_font calls so far (the same file opened again is a new font: see font_key)
+        self.stale = False  # True = open the soundfont again even if it's the same file (it was picked again)
         self._lock = threading.Lock()
         self._users = {}  # font -> renders using it now (an old font is only closed when none are left)
         self._old = set()  # fonts replaced, to close once unused
@@ -212,11 +232,22 @@ class Synth:
 
     def set_font(self, path):
         """Opens a soundfont (.sf2 / .sfz); the old one is closed. SynthError if it can't be read."""
-        # (file names: UTF-16 on Windows, UTF-8 bytes elsewhere)
-        font = (self.midi.BASS_MIDI_FontInit(path, _UNICODE) if WINDOWS else
-                self.midi.BASS_MIDI_FontInit(os.fsencode(path), 0))
+        if path.lower().endswith(".sfz"):
+            try:
+                spaced = sfz.read(path)[1]
+            except OSError:
+                spaced = False  # (BASSMIDI says it can't be read)
+            if spaced:  # (opens, silent, and crashed Spiderweb when it was closed: refused before BASSMIDI sees it)
+                raise SynthError("synth.sfz_spaced", name=os.path.basename(path))
+        if path == self.font_path:
+            self._close_first()
+        font = self._font_init(path)
         if not font:
-            raise SynthError("synth.bad_font", name=os.path.basename(path), err=self.bass.BASS_ErrorGetCode())
+            err = self.bass.BASS_ErrorGetCode()
+            bad = self.silent_samples(path)[1] if path.lower().endswith(".sfz") else []
+            if bad:  # (an SFZ with nothing left that plays: the files to blame listed)
+                raise SynthError("synth.bad_font_files", name=os.path.basename(path), files=silent_list(path, bad))
+            raise SynthError("synth.bad_font", name=os.path.basename(path), err=err)
         # A packed soundfont opens even when its samples' format can't be read (FLAC / WavPack need BASS add-ons
         # we don't ship): its notes would be silent, so the piano is loaded now to find out
         if path.lower().endswith(".sf2pack") and not self.midi.BASS_MIDI_FontLoad(font, 0, 0) and \
@@ -225,6 +256,7 @@ class Synth:
             raise SynthError("synth.pack_codec", name=os.path.basename(path))
         with self._lock:
             old, self.font, self.font_path = self.font, font, path
+            self.opened, self.stale = self.opened + 1, False
             if old:
                 self._old.add(old)
         self._free_unused()
@@ -234,12 +266,45 @@ class Synth:
             size = "size ?"
         errors.note("soundfont", f"{os.path.basename(path)}, {size}")
 
+    def _close_first(self, wait=3.0):
+        """The open soundfont closed before the same file is opened again: BASSMIDI shares sample files between
+        open copies, so a sample that failed stays silent while any copy is open (measured 2026-10-16). Sound
+        still being made with it is waited for (wait seconds at most; then it's closed once that ends)."""
+        with self._lock:
+            old, self.font = self.font, 0
+            if old:
+                self._old.add(old)
+        end = time.monotonic() + wait
+        while old and self._users.get(old) and time.monotonic() < end:
+            time.sleep(0.02)
+        self._free_unused()
+
+    def _font_init(self, path):
+        """BASSMIDI's handle for the soundfont at path (0 = it can't be read). File names: UTF-16 on Windows, UTF-8
+        bytes elsewhere."""
+        return (self.midi.BASS_MIDI_FontInit(path, _UNICODE) if WINDOWS else
+                self.midi.BASS_MIDI_FontInit(os.fsencode(path), 0))
+
+    def needs_open(self, path):
+        """True when path isn't the open soundfont, or it was picked again (BASSMIDI keeps a sample that failed
+        once silent until the font is opened anew, also after the file comes back: hunt 2026-10-16)."""
+        return self.font_path != path or self.stale
+
+    @property
+    def font_key(self):
+        """Which opening of which soundfont is in use (None = none): recordings of it are good while it's the same."""
+        return (self.font_path, self.opened) if self.font_path else None
+
     def silent_samples(self, path, cancel=None):
-        """(An .sfz) (samples, [(file name, "missing" / "unreadable")]): the sample files it names that the synth
-        can't play, so their keys stay silent. BASSMIDI opens such an SFZ without a word. Which formats play
-        depends on the PC (measured on Windows: WAV, OGG, MP3, FLAC through Windows' own decoder yes; Opus no), so
-        each file is opened, not judged by its name. cancel() = True stops early (what was found so far)."""
-        names = sfz.samples(path)
+        """(An .sfz) (samples, [(file name, "missing" / "unreadable")], refused): the sample files it names that the
+        synth can't play, so their sounds are missing. BASSMIDI opens such an SFZ without a word, unless nothing
+        is left that plays (refused = True: set_font then says "couldn't be read" with the list). Which formats
+        play depends on the PC (measured on Windows: WAV, OGG, MP3, FLAC through Windows' own decoder yes; Opus
+        no), so each file is opened, not judged by its name. cancel() = True stops early (what was found so far)."""
+        try:
+            names, spaced = sfz.read(path, cancel)
+        except sfz.Stopped:
+            return 0, [], False
         bad = []
         for i, name in enumerate(names):
             if cancel is not None and i % 50 == 0 and cancel():
@@ -253,7 +318,13 @@ class Synth:
                 self.bass.BASS_StreamFree(h)
             else:
                 bad.append((name, "unreadable"))
-        return len(names), bad
+        refused = spaced
+        if bad and not spaced:  # (never opened when spaced: freeing it crashes)
+            font = self._font_init(path)
+            refused = not font
+            if font:
+                self.midi.BASS_MIDI_FontFree(font)
+        return len(names), bad, refused
 
     def _take(self):
         """The font to use, counted as in use until _give."""

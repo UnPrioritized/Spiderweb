@@ -67,7 +67,7 @@ from roll.roll_draw import painting_order
 from files import errors, speed
 from files.about import ICONS, VERSION
 from files.playback import BUILTIN, DEFAULT_DEVICE, MidiOut, Player, devices
-from files.synth import FONT_TYPES, Live, Synth, SynthError
+from files.synth import FONT_TYPES, Live, Synth, SynthError, silent_list
 from files.midi_out import PPQ_WARN
 from files.domino_clip import DOMINO_STARTS, on_clipboard
 from files.clipboard import RAW, copy_count, get_text, put_text
@@ -2171,7 +2171,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         try:
             if self.synth is None:
                 self.synth = Synth()
-            if self.synth.font_path != font:
+            if self.synth.needs_open(font):
                 try:
                     self.synth.set_font(font)
                 except SynthError:
@@ -2235,12 +2235,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
             self.scrub_end()
             self.out.close()
         self.sync_builtin()
+        if self.synth is not None:
+            self.synth.stale = True  # (picked again = opened again: samples put back since then are found)
         self.check_samples(self.hz_preview["font"])
 
     def check_samples(self, path):
         """(An .sfz just picked) its sound files checked in the background: missing ones or ones in a format the
-        synth can't read = one warning, as the synth opens such a soundfont without a word and those keys stay
-        silent. Another soundfont picked meanwhile = this check stops, nothing said."""
+        synth can't read = one warning, as the synth opens such a soundfont without a word and those sounds are
+        missing. A soundfont the synth refuses altogether: nothing here, its "couldn't be read" lists them. Only
+        the newest pick's check speaks (another pick meanwhile, even of the same file, stops this one)."""
+        self._sample_check = getattr(self, "_sample_check", 0) + 1
         if not path or not path.lower().endswith(".sfz"):
             return
         try:
@@ -2248,11 +2252,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
                 self.synth = Synth()
         except SynthError:
             return  # (said when the synth is used)
-        synth, result = self.synth, []
+        synth, result, me = self.synth, [], self._sample_check
 
         def work():
             try:
-                result.append(synth.silent_samples(path, cancel=lambda: self.hz_preview["font"] != path))
+                result.append(synth.silent_samples(path, cancel=lambda: self._sample_check != me))
             except OSError:
                 pass  # (the soundfont itself unreadable: the synth says so when it opens it)
         job = threading.Thread(target=work, daemon=True)
@@ -2261,28 +2265,14 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         def done():
             if job.is_alive():
                 self.after(200, done)
-            elif result and result[0][1] and self.hz_preview["font"] == path and self.winfo_exists():
-                self.warn_silent(path, result[0][1])
+            elif result and result[0][1] and not result[0][2] and self._sample_check == me and self.winfo_exists():
+                focus = self.focus_get()
+                messagebox.showwarning(
+                    tr("synth.silent_title"),
+                    trn("synth.silent", len(result[0][1]), name=os.path.basename(path), n=f"{len(result[0][1]):,}")
+                    + "\n\n" + silent_list(path, result[0][1]),
+                    parent=focus.winfo_toplevel() if focus else self)
         self.after(200, done)
-
-    def warn_silent(self, path, bad):
-        """The silent_samples warning: the first few files, by their place in the soundfont's folder."""
-        folder = os.path.dirname(path)
-
-        def shown(name):
-            try:
-                return os.path.relpath(name, folder)
-            except ValueError:  # (another drive)
-                return name
-        lines = [tr("synth.silent_" + why, file=shown(name)) for name, why in bad[:8]]
-        if len(bad) > 8:
-            lines.append(trn("synth.silent_more", len(bad) - 8, n=len(bad) - 8))
-        focus = self.focus_get()
-        messagebox.showwarning(
-            tr("synth.silent_title"),
-            trn("synth.silent", len(bad), name=os.path.basename(path), n=f"{len(bad):,}") + "\n\n"
-            + "\n".join(lines) + "\n\n" + tr("synth.silent_why"),
-            parent=focus.winfo_toplevel() if focus else self)
 
     def on_play_voices(self, left=False):
         e = self.voices_entry  # (in Settings → Sound)

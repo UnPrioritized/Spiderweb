@@ -107,7 +107,7 @@ class Preview:
         errors.note("Hz preview", f"on, voice limit {self.cfg['voices']}, no FX "
                                   f"{'on' if self.cfg['nofx'] else 'off'}, {WORKERS} pieces at once")
         self.clear()
-        if self.synth.font_path != self.cfg["font"] and not (self.load and self.load.is_alive()):
+        if self.synth.needs_open(self.cfg["font"]) and not (self.load and self.load.is_alive()):
             self._load_font()  # (one still opening: tick opens the one picked once it's done)
         if not self._tick:
             self._tick = self.win.after(0, self.tick)
