@@ -637,11 +637,22 @@ class Tooltip:
 
     def schedule(self):
         self.hide()
-        self.job = self.widget.after(400, self.show)
+        self.job = self.later(400, self.show)
+
+    def later(self, ms, func):
+        """after() on the main window, not the widget: a widget closed before it runs would leave Tk calling a
+        command that is gone (an error box); func checks alive() itself."""
+        return self.owner._root().after(ms, func)
+
+    def alive(self):
+        try:
+            return bool(self.widget.winfo_exists() and self.owner.winfo_exists())
+        except tk.TclError:
+            return False
 
     def show(self):
         self.job = None
-        if not self.text:
+        if not self.text or not self.alive():
             return
         w = self.widget
         self.tip = tk.Toplevel(self.owner)
@@ -651,11 +662,15 @@ class Tooltip:
         tk.Label(self.tip, text=self.text, justify="left", background=look.TIP_BG, relief="solid",
                  borderwidth=1, padx=6, pady=4, wraplength=round(lang_size("size.tooltip_width", TIP_WIDTH) * w.winfo_fpixels("1i") / 96)).pack()
         self.tip.update_idletasks()
-        # kept inside the window (the panel sits at its right edge)
+        # kept inside the window (the panel sits at its right edge), but never past its left edge or the screen's
+        # (a narrow window at the screen's left: the text's start stays readable)
         top = self.owner.winfo_toplevel()
         x, y = self.spot()
         x = min(x, top.winfo_rootx() + top.winfo_width() - self.tip.winfo_reqwidth() - 4)
-        self.tip.wm_geometry(f"+{x}+{y}")
+        left = top.winfo_rootx()
+        if not on_screen(w, left, y):
+            left = w.winfo_pointerx() - 12  # (the mouse is on a screen)
+        self.tip.wm_geometry(f"+{max(x, left)}+{y}")
 
     def spot(self):
         """Under the widget, or under the mouse for a tall one (a list as tall as the window: not at its bottom)."""
@@ -666,7 +681,7 @@ class Tooltip:
 
     def hide(self):
         if self.job:
-            self.widget.after_cancel(self.job)
+            self.owner._root().after_cancel(self.job)
             self.job = None
         if self.tip:
             self.tip.destroy()
@@ -677,10 +692,13 @@ class ListTip(Tooltip):
     """A list's row whose text is cut off at the list's right edge shows its whole text while the mouse rests on
     it, under that row."""
 
+    WATCH_MS = 250  # while the mouse rests on a row: how often the row is checked for a refill / scroll under it
+
     def __init__(self, listbox, owner=None):
         super().__init__(listbox, "", owner)
-        self.row = None
+        self.row, self.y, self.watch_job = None, 0, None
         listbox.bind("<Motion>", self.motion, add="+")
+        listbox.bind("<ButtonRelease-1>", self.let_go, add="+")
 
     @classmethod
     def dropdown(cls, cb):
@@ -691,7 +709,19 @@ class ListTip(Tooltip):
         tip = cls(lb, cb)
         Tooltip.RAW[lb._w] = lb.tooltips
         cb.tk.call("bind", pop, "<Unmap>", "+" + cb.register(lambda: (setattr(tip, "row", None), tip.hide())))
+        cb.bind("<Destroy>", lambda e: Tooltip.RAW.pop(lb._w, None) if e.widget is cb else None, add="+")
         return tip
+
+    def under(self, y):
+        """The row at height y, and its text when it is cut off ("" when it fits, and for a divider row)."""
+        lb = self.widget
+        i = lb.nearest(y)
+        box = lb.bbox(i) if i >= 0 else None
+        if not box or not box[1] <= y < box[1] + box[3]:
+            return None, ""
+        edge = lb.winfo_width() - int(lb.cget("borderwidth")) - int(lb.cget("highlightthickness"))
+        text = lb.get(i) if box[0] + box[2] > edge else ""
+        return i, "" if text == DIVIDER else text
 
     def enter(self, e):
         self.motion(e)
@@ -699,23 +729,48 @@ class ListTip(Tooltip):
     def motion(self, e):
         if e.state & self.BUTTONS:
             return
-        lb = self.widget
-        i = lb.nearest(e.y)
-        box = lb.bbox(i) if i >= 0 else None
-        row = i if box and box[1] <= e.y < box[1] + box[3] else None
+        self.y = e.y
+        row, text = self.under(e.y)
         if row == self.row:
             return
-        self.row, self.used = row, False  # (another row: its tip may show again after a click)
+        self.row, self.text, self.used = row, text, False  # (another row: its tip may show again after a click)
         self.hide()
-        edge = lb.winfo_width() - int(lb.cget("borderwidth")) - int(lb.cget("highlightthickness"))
-        self.text = lb.get(row) if row is not None and box[0] + box[2] > edge else ""
-        if self.text == DIVIDER:  # (a name list's divider row)
-            self.text = ""
-        if self.text:
+        if text:
             self.schedule()
+        if row is not None and self.watch_job is None:
+            self.watch_job = self.later(self.WATCH_MS, self.watch)
+
+    def watch(self):
+        """The list filled again or scrolled under a resting mouse: the tip goes and the row is forgotten, so the
+        next small move shows the row's own text."""
+        self.watch_job = None
+        if self.row is None or not self.alive():
+            return
+        if self.under(self.y) != (self.row, self.text):
+            self.hide()
+            self.row = None
+            return
+        self.watch_job = self.later(self.WATCH_MS, self.watch)
+
+    def show(self):
+        if self.alive() and self.row is not None and self.under(self.y) != (self.row, self.text):
+            self.job, self.row = None, None  # (changed in the wait)
+            return
+        super().show()
+
+    def let_go(self, e):
+        """A drag through the rows counts as using the list: the row let go on is taken as the one under the mouse,
+        so its tip doesn't pop up on the next nudge."""
+        self.y = e.y
+        self.row, self.text = self.under(e.y)
+        self.used = True
+        self.hide()
 
     def leave(self, e):
         self.row = None
+        if self.watch_job:
+            self.owner._root().after_cancel(self.watch_job)
+            self.watch_job = None
         super().leave(e)
 
     def spot(self):
