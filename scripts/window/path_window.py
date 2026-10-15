@@ -25,7 +25,7 @@ from roll.roll_shared import note_name
 from window import big_ask, look
 from window.formula_host import FormulaHost
 from window.pattern_dialog import load_patterns, saved_pattern
-from window.speed_graph import SpeedGraph, start_graph
+from window.speed_graph import SpeedGraph, start_curve
 from window.tool_window import ToolWindow
 from window.widgets import Scrub, Tooltip, bad, good, grid_shown, name_index, name_list, set_names, unit_word
 
@@ -592,14 +592,14 @@ class PathWindow(ToolWindow):
         if key == "speed" and value == "custom":
             if value == self.cfg["speed"]:
                 return self.open_graph()
-            if not self.cfg.get("graph"):  # (a graph drawn before is kept)
-                self.cfg["graph"] = start_graph(self.cfg["speed"])
+            if not self.cfg.get("curve"):  # (a curve drawn before is kept)
+                self.cfg["curve"] = start_curve(self.cfg["speed"])
             self.put(key, value)
             return self.open_graph()
         self.put(key, value)  # (Straight keeps the bends, hidden: Curve / Arc bring them back; user)
 
     def open_graph(self):
-        """Speed: Custom's graph window (graph_window.py's, speed_graph.py)."""
+        """Speed: Custom's curve window (speed_graph.py)."""
         if self.cfg.get("speed") != "custom":
             return
         if not self.graph_window:

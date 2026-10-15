@@ -25,7 +25,7 @@ Spacing:
 Below: a path up to B and down to C, with Copies on the points ticked (left: a copy right on B) and unticked (right: spaced evenly straight through B).
 [clip:path-spacing]
 
-Speed: Even, Speed up (close together at A, further apart towards the end), Slow down, or Custom: draw how fast the copies go on a graph (the Graph… button beside it). On the graph, left = the first copy, right = the last; higher = further apart, lower = closer together, 0 = on top of each other. Below, left to right: Even, Speed up, Slow down.
+Speed: Even, Speed up (close together at A, further apart towards the end), Slow down, or Custom: place the copies yourself on a graph (the Graph… button beside it). Left to right are the copies, first to last; bottom to top is where each one lands on the path. A straight line is Even. Drag the round handle in the middle of a piece to bend it: where the line is flat the copies bunch up, where it's steep they spread out. Add points for more pieces. Below, left to right: Even, Speed up, Slow down.
 [clip:path-speed]
 
 Size: how big the first and the last copy are, in %; the ones between grow or shrink step by step. Below: 100 % to 100 % (left) and 100 % to 250 % (right).

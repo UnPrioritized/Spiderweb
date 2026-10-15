@@ -27,9 +27,10 @@ and flips work on the whole group. A page's settings (PATH_DEFAULTS' keys):
            it: each run gets as many of the path's steps as fit, evened out to land on its ends
   "k"      beats per key on screen when the path was made (how long it is, and how round an arc is, as seen then)
   "speed"  "even" / "up" (bunched at A, further apart towards the end) / "down" (the other way) / "custom" (user,
-           2026-10-16: the "graph" says how fast)
-  "graph"  Speed Custom: [[place 0..1 from the first copy to the last, speed (1 = 100 %)], ...]: high = the copies
-           far apart there, low = bunched up, 0 = on top of each other (None: Even)
+           2026-10-16: the "curve" says where each copy lands)
+  "curve"  Speed Custom: [[copy 0..1 (first .. last), place 0..1 along the path (A .. the end), bend], ...] from
+           [0, 0] to [1, 1], both always rising (flat = copies on one spot); bend = the next stretch's handle height
+           0..1 at its middle (0.5 straight; curve_at). None: Even
   "size"   [first copy %, last copy %]: each copy grows / shrinks from its corner on the path (key rows sampled like
            a stretched picture: no gaps between rows)
   "colours" "keep" / "shift" (every colour of copy n = n x step channels on, round the "most" colours) / "turn"
@@ -63,7 +64,7 @@ TOPS = ("last", "first")
 PATH_DEFAULTS = {"pts": None, "mids": None, "kind": "straight", "mode": "every", "every": 0.25, "count": 8,
                  "k": 0.25, "speed": "even", "size": [100.0, 100.0], "colours": "keep", "step": 1, "most": 15,
                  "flip": "none", "way": "keys", "top": "last", "half": True, "anchor": True,
-                 "inside": False, "low": 0, "high": 127, "pattern": None, "graph": None,
+                 "inside": False, "low": 0, "high": 127, "pattern": None, "curve": None,
                  "grp": [0.0, 0.0, 0.0, 0.0]}
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # the points' names
 MOST_POINTS = len(LETTERS) - 1  # B .. Z
@@ -77,10 +78,10 @@ MOST_NOTES = 20_000_000  # notes with the copies: past it the last copies are le
 FAR = 1e6  # beats / keys: a path point further than this from A is a broken file
 SAMPLES = 1024  # points along each stretch
 SPEED_POWER = 2.0  # how bunched up Speed up / Slow down are
-SPEED_LIMIT = 10.0  # the Speed graph's highest point (1000 %)
-SPEED_GRAPHS = {"even": [[0.0, 1.0], [1.0, 1.0]], "up": [[0.0, 0.0], [1.0, 2.0]],  # (Speed up / Slow down as a graph:
-                "down": [[0.0, 2.0], [1.0, 0.0]]}                                  # the same places)
-GRAPH_POINTS = 200  # the most points a Speed graph keeps
+SPEED_CURVES = {"even": [[0.0, 0.0, 0.5], [1.0, 1.0, 0.5]], "up": [[0.0, 0.0, 0.25], [1.0, 1.0, 0.5]],
+                "down": [[0.0, 0.0, 0.75], [1.0, 1.0, 0.5]]}  # (Speed up / Slow down as a curve: the same places)
+CURVE_POINTS = 200  # the most points a Speed curve keeps
+BEND_LIMITS = (0.02, 0.98)  # a bend handle's height in its stretch
 
 
 def _pt(v):
@@ -140,7 +141,7 @@ def clean_path(c):
         out["low"], out["high"] = out["high"], out["low"]
     if c.get("pattern") is not None:
         out["pattern"] = clean_pattern(c["pattern"])
-    out["graph"] = clean_graph(c.get("graph"))
+    out["curve"] = clean_curve(c.get("curve"))
     grp = c.get("grp")
     if isinstance(grp, (list, tuple)) and len(grp) == 4:
         got = [_num(v, -FAR, FAR) for v in grp]
@@ -149,19 +150,42 @@ def clean_path(c):
     return out
 
 
-def clean_graph(g):
-    """A Speed graph from a file -> valid points (ends at 0 and 1, in order, speeds 0 .. SPEED_LIMIT), or None."""
+def clean_curve(g):
+    """A Speed curve from a file -> valid points (from [0, 0] to [1, 1], both rising, bends in BEND_LIMITS), or
+    None."""
     if not isinstance(g, (list, tuple)) or len(g) < 2:
         return None
     out = []
-    for p in g[:GRAPH_POINTS]:
-        ok = isinstance(p, (list, tuple)) and len(p) == 2
+    for p in g[:CURVE_POINTS]:
+        ok = isinstance(p, (list, tuple)) and len(p) in (2, 3)
         u = _num(p[0], 0.0, 1.0) if ok else None
-        v = _num(p[1], 0.0, SPEED_LIMIT) if ok else None
-        if u is None or v is None:
+        v = _num(p[1], 0.0, 1.0) if ok else None
+        m = _num(p[2] if len(p) == 3 else 0.5, *BEND_LIMITS) if ok else None
+        if None in (u, v, m):
             return None
-        out.append([max(u, out[-1][0]) if out else u, v])
-    out[0][0], out[-1][0] = 0.0, 1.0
+        out.append([max(u, out[-1][0]), max(v, out[-1][1]), m] if out else [u, v, m])
+    out[0][:2], out[-1][:2] = [0.0, 0.0], [1.0, 1.0]
+    return out
+
+
+def bent(t, m):
+    """A stretch 0..1 bent so its middle is at height m (0.5: straight): t ** e under the line, 1 - (1 - t) ** e
+    over it (a bend halfway down = t², the old Speed up; halfway up = Slow down)."""
+    if abs(m - 0.5) < 1e-9:
+        return t
+    if m < 0.5:
+        return t ** (math.log(m) / math.log(0.5))
+    return 1 - (1 - t) ** (math.log(1 - m) / math.log(0.5))
+
+
+def curve_at(curve, u):
+    """Speed curve: places 0..1 along the path for copies u 0..1 (an array)."""
+    u = np.clip(np.asarray(u, float), 0.0, 1.0)
+    out = np.zeros_like(u)
+    for (u0, p0, m), (u1, p1, _) in zip(curve, curve[1:]):
+        inside = (u >= u0) & (u <= u1)
+        t = (u[inside] - u0) / (u1 - u0) if u1 > u0 else np.ones(int(inside.sum()))
+        out[inside] = p0 + (p1 - p0) * bent(t, m)
     return out
 
 
@@ -323,17 +347,6 @@ def _track(cfg, size, n=SAMPLES):
     return np.concatenate(got_p), np.concatenate(got_f), np.concatenate(got_r), np.concatenate(got_d)
 
 
-def graph_curve(graph):
-    """A Speed graph -> (even steps 0..1, the places 0..1 they land on): how far the copies got, added up (all 0 =
-    Even). Always rising a little, so it reads backwards too."""
-    gu, gv = np.array([p[0] for p in graph]), np.array([p[1] for p in graph])
-    u = np.unique(np.r_[np.linspace(0.0, 1.0, SAMPLES + 1), gu])
-    v = np.interp(u, gu, gv)
-    got = np.r_[0.0, np.cumsum((v[1:] + v[:-1]) / 2 * np.diff(u))]
-    got = (got / got[-1] if got[-1] > 1e-12 else u) + u * 1e-9
-    return u, got / got[-1]
-
-
 def eased(u, cfg):
     """Places 0..1 along the copies' run, bunched up as the page's Speed says."""
     speed = cfg["speed"]
@@ -341,8 +354,8 @@ def eased(u, cfg):
         return u ** SPEED_POWER
     if speed == "down":
         return 1 - (1 - u) ** SPEED_POWER
-    if speed == "custom" and cfg.get("graph"):
-        return np.interp(u, *graph_curve(cfg["graph"]))
+    if speed == "custom" and cfg.get("curve"):
+        return curve_at(cfg["curve"], u)
     return u
 
 
@@ -353,9 +366,10 @@ def unease(u, cfg):
         return u ** (1 / SPEED_POWER)
     if speed == "down":
         return 1 - (1 - u) ** (1 / SPEED_POWER)
-    if speed == "custom" and cfg.get("graph"):
-        steps, places = graph_curve(cfg["graph"])
-        return float(np.interp(u, places, steps))
+    if speed == "custom" and cfg.get("curve"):  # (read backwards: always rising a little, so flat parts read too)
+        steps = np.unique(np.r_[np.linspace(0.0, 1.0, SAMPLES + 1), [p[0] for p in cfg["curve"]]])
+        places = curve_at(cfg["curve"], steps) + steps * 1e-9
+        return float(np.interp(u, places / places[-1], steps))
     return u
 
 
