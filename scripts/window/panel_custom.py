@@ -5,7 +5,7 @@ import math
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 
-from files.lang import tr
+from files.lang import tr, trn
 from notes.areas import most_colours
 from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, edge_gate, gap_lines,
                           gate_ticks, hz_gate, join_strokes, map_stroke, normalize_areas, normalize_strokes, open_paths)
@@ -329,10 +329,12 @@ class CustomPanel:
             self.custom_fill_row.pack_forget()
             own = all(t.get("own_vel") for t in tgts)
             if all("picture" in t for t in tgts):  # placed pictures (image_window.py)
-                self.custom_info.config(text=tr("image.panel", value=sum(self.note_count(t) for t in tgts)))
+                n = sum(self.note_count(t) for t in tgts)
+                self.custom_info.config(text=trn("image.panel", n, value=n))
                 return
             self.custom_info.config(text=(
-                tr("panel_custom.pasted_notes", value=sum(self.note_count(t) for t in tgts))
+                trn("panel_custom.pasted_notes", sum(self.note_count(t) for t in tgts),
+                    value=sum(self.note_count(t) for t in tgts))
                 + (tr("panel_custom.they_keep_their_own_velocities_until")
                    if own else "")
                 + tr("panel_custom.drag_a_corner_or_side_to")))
@@ -442,7 +444,8 @@ class CustomPanel:
             # (a merged shape: its own notes, not its two shapes' as they were: some rows may be "Merge leftovers")
             counted = ([self.shapes[i] for i in sorted(self.sels) if self.shapes[i]["kind"] == "custom"]
                        if any(self.merge_part(t) for t in tgts) else tgts)
-            info = tr("panel_custom.n_notes", n=sum(self.note_count(t) for t in counted))
+            total = sum(self.note_count(t) for t in counted)
+            info = trn("panel_custom.n_notes", total, n=total)
             if gaps and fill in ("fill", "spam"):
                 info += (tr("panel_custom.one_gap_in_the_outline_filled") if gaps == 1 else
                          tr("panel_custom.gaps_in_the_outline_filled_as", gaps=gaps))

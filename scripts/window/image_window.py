@@ -14,7 +14,7 @@ from tkinter import colorchooser, filedialog, messagebox, ttk
 import numpy as np
 
 from files import speed
-from files.lang import tr
+from files.lang import tr, trn
 from files.speed import Photo
 from notes import picture as P
 from window import look
@@ -498,7 +498,7 @@ class ImageWindow(tk.Toplevel):
         self.use10_tick.state(["disabled" if project else "!disabled"])
         self.use10_tip.text = tr("image.use10_project" if project else "image.use10_tip")
         n = len(self.others())
-        self.share_note.config(text=tr("image.share_note", n=n) if n else tr("image.share_alone"))
+        self.share_note.config(text=trn("image.share_note", n, n=n) if n else tr("image.share_alone"))
 
     # ------------------------------------------------------------ the colour list
 
@@ -616,7 +616,7 @@ class ImageWindow(tk.Toplevel):
         self.show_settings()
         self.made_for = (self.made_for[0], None)
         self.remake()
-        self.app.status.config(text=tr("image.pasted", n=len(cols)))
+        self.app.status.config(text=trn("image.pasted", len(cols), n=len(cols)))
 
     def step_ticks(self):
         return max(1, round(self.s["step"] * self.app.ppq))
@@ -914,8 +914,9 @@ class ImageWindow(tk.Toplevel):
         self.draw_keys(x, y, w, h, view)
         rows, steps, keys = P.grid_notes(self.grid, view)
         notes = len(rows) if s["join"] else int((self.grid >= 0).sum())
-        self.info.config(text=tr("image.info", keys=keys, steps=steps, notes=f"{notes:,}",
-                                 used=len(np.unique(self.grid[self.grid >= 0])), colours=len(self.pal)))
+        self.info.config(text=tr("image.info", keys=trn("n.keys", keys, n=keys), steps=trn("n.steps", steps, n=steps),
+                                 notes=trn("n.notes", notes, n=notes), used=len(np.unique(self.grid[self.grid >= 0])),
+                                 colours=trn("n.colours", len(self.pal), n=len(self.pal))))
 
     def outline_px(self, w, h, view=None):
         """The outline's width in the preview (w x h px): as wide next to a key as in the player's window (its
@@ -1125,7 +1126,7 @@ class ImageWindow(tk.Toplevel):
         missing = app.sync_pictures(new["picture"]["set"], i)
         app.shapes_changed()
         app.status.config(text=tr("image.applied", name=new["name"]) +
-                          (tr("image.others_missing", n=missing) if missing else ""))
+                          (trn("image.others_missing", missing, n=missing) if missing else ""))
 
     # ------------------------------------------------------------ closing
 

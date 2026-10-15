@@ -551,7 +551,9 @@ class RollDrawing:
         xs = [self.t2x(b) for b in (b0, b1, b2, b1 + b2 - b0)]
         ys = [self.p2y(p) for p in (p0, p1, p2, p1 + p2 - p0)]
         p = sh["picture"]
-        text = tr("image.label", name=sh.get("name") or "?", keys=p["grid"][1], colours=len(p["set"].get("pal", ())))
+        keys, colours = p["grid"][1], len(p["set"].get("pal", ()))
+        text = tr("image.label", name=sh.get("name") or "?", keys=trn("n.keys", keys, n=keys),
+                  colours=trn("n.colours", colours, n=colours))
         x, y = min(xs), min(ys) - 4
         t = self.create_text(x + 5, y - 9, text=text, anchor="w", font=look.font(9, family=look.TK))
         bx = self.bbox(t)

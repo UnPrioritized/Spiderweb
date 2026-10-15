@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from files.lang import tr
+from files.lang import tr, trn
 from notes.arc import arc_circle, arc_points
 from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live, velocity_changed
 from notes.bezier import anchor_count, nearest, split
@@ -285,7 +285,8 @@ class JoinSplit:
         self.shapes[pair[0]:pair[0]] = new
         self.select(pair[0])  # (the merged shape, user: leftovers are dealt with later)
         self.shapes_changed()
-        self.status.config(text=tr("join_split.merged_left", n=len(np.unique(rest[:, 2]))) if len(rest)
+        rows = len(np.unique(rest[:, 2])) if len(rest) else 0
+        self.status.config(text=trn("join_split.merged_left", rows, n=rows) if len(rest)
                            else tr("join_split.merged_done"))
 
     def pieces(self):
@@ -505,8 +506,9 @@ class JoinSplit:
         self.select_many(picked, picked[0])
         self.shapes_changed()
         n = sum(len(p) for p in done.values())
-        self.status.config(text=tr("join_split.sliced", shapes=len(done), n=n) +
-                           (tr("join_split.slice_partly_too", n=skipped) if skipped else ""))
+        self.status.config(text=tr("join_split.sliced", shapes=trn("n.shapes", len(done), n=len(done)),
+                                   pieces=trn("n.pieces", n, n=n)) +
+                           (trn("join_split.slice_partly_too", skipped, n=skipped) if skipped else ""))
 
     def put_pieces(self, done, plain, name, pick=None):
         """Cut shapes replaced by their pieces (done: shape number -> pieces; plain: pasted notes, kept as they

@@ -11,7 +11,7 @@ from tkinter import messagebox, simpledialog, ttk
 
 from files import clipboard
 from files import colour_list as CL
-from files.lang import tr
+from files.lang import tr, trn
 from window import look
 from window.widgets import name_list, remember_place, set_names
 
@@ -347,8 +347,9 @@ class FormatWindow(tk.Toplevel):
         out.config(state="disabled")
         bad = CL.unknown(pieces)
         n = len(self.colours())
-        self.status.config(text=tr("fmt.status", n=n, lists=len(self.fmt["lists"])) +
-                           (tr("fmt.status_bad", bad=bad) if bad else ""), foreground=look.FMT_BAD if bad else look.INFO)
+        lists = len(self.fmt["lists"])
+        self.status.config(text=tr("fmt.status", colours=trn("n.colours", n, n=n), lists=trn("n.lists", lists, n=lists)) +
+                           (trn("fmt.status_bad", bad, bad=bad) if bad else ""), foreground=look.FMT_BAD if bad else look.INFO)
 
     def copy(self):
         copy_colours(self, self.fmt, self.colours(), self.by(), self.use10())
@@ -363,7 +364,7 @@ def copy_colours(parent, fmt, colours, by, use10):
     """The colour list in this format -> the clipboard (asks first when it has unknown tags). True if copied."""
     pieces = CL.write(fmt, colours, by, use10)
     bad = CL.unknown(pieces)
-    if bad and not messagebox.askyesno(tr("fmt.title"), tr("fmt.copy_anyway", bad=bad), parent=parent):
+    if bad and not messagebox.askyesno(tr("fmt.title"), trn("fmt.copy_anyway", bad, bad=bad), parent=parent):
         return False
     if not clipboard.put_text(CL.text_of(pieces)):
         messagebox.showwarning(tr("fmt.title"), tr("fmt.clipboard_busy"), parent=parent)

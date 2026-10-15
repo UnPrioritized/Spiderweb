@@ -5,7 +5,7 @@ from tkinter import ttk
 
 import numpy as np
 
-from files.lang import tr
+from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, clean_shape
@@ -256,7 +256,8 @@ class MaskPanel:
         self.shapes[:] = out
         self.select_many(picked, picked[0])
         self.shapes_changed()
-        self.status.config(text=tr("mask.apply_done", n=len(picked), notes=count))
+        self.status.config(text=tr("mask.apply_done", shapes=trn("n.shapes", len(picked), n=len(picked)),
+                                   notes=trn("n.notes", count, n=count)))
 
     def copied(self, got, picture):
         """Shown rows (rendered's columns) -> one "Masked notes" shape, or None. Each note keeps its colour: copied

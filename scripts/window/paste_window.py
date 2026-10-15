@@ -8,7 +8,7 @@ from tkinter import ttk
 
 from files import clipboard
 from files import colour_list as CL
-from files.lang import tr
+from files.lang import tr, trn
 from window import look
 from window.widgets import remember_place
 
@@ -98,12 +98,12 @@ class PasteWindow(tk.Toplevel):
         for w in self.found.winfo_children() + self.where.winfo_children():
             w.destroy()
         n = len(self.lists)
-        self.found.config(text=tr("paste.found", n=n) if n else tr("paste.none_found"))
+        self.found.config(text=trn("paste.found", n, n=n) if n else tr("paste.none_found"))
         for gi, (pattern, found) in enumerate(self.lists):
             row = ttk.Frame(self.found)
             row.pack(fill="x", pady=2)
             ttk.Radiobutton(row, variable=self.pick, value=gi, command=self.show,
-                            text=tr("paste.list", pattern=pattern[:40], n=len(found))).pack(side="left")
+                            text=trn("paste.list", len(found), pattern=pattern[:40], n=len(found))).pack(side="left")
             sw = ttk.Frame(row)
             sw.pack(side="right")
             for c in found[:32]:

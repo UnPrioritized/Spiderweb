@@ -1399,7 +1399,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         self.select_many(range(first, len(self.shapes)), len(self.shapes) - 1)
         self.shapes_changed()
         if clamped:
-            self.status.config(text=tr("app.pasted_15", n=clamped))
+            self.status.config(text=trn("app.pasted_15", clamped, n=clamped))
         return clamped
 
     def over_15(self, shapes, clamp=True):
@@ -1442,7 +1442,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
                     sh["glue"] = glue_added(sh.get("glue"), shares)
         after = sum(len(self.notes_of(sh)) for sh in shapes)
         self.shapes_changed()
-        self.status.config(text=tr("app.glued", before=before, after=after))
+        self.status.config(text=tr("app.glued", notes=trn("n.notes", before, n=before), after=after))
 
     def unglue_selected(self):
         """Right-click → Remove glue: the selected shapes' notes as they were before any glue."""
@@ -1470,7 +1470,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
             self.clipboard = copy.deepcopy([self.shapes[i] for i in sorted(self.sels)])
             self.clip_kind = "shapes"
             line = shapes_line(self.clipboard)  # (also on the Windows clipboard as text, to share: share.py)
-            msg = tr("app.copied_shape_s_ctrl_v_pastes", n=len(self.clipboard))
+            msg = trn("app.copied_shape_s_ctrl_v_pastes", len(self.clipboard), n=len(self.clipboard))
             if put_text(line):
                 self.remember_clip()
                 if len(line) > LONG_LINE:
@@ -1543,15 +1543,15 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         self.clipboard, self.clip_kind = shapes, "shapes"
         clamped = self.paste(whole=True, at=at)
         made = made_by(got)
-        notes = ([tr("app.shared_left_out", n=left)] if left else []) + (
+        notes = ([trn("app.shared_left_out", left, n=left)] if left else []) + (
             [tr(f"share.made_{made[0]}", version=made[1])] if made else [])
-        msg = tr("app.pasted_shared", n=len(shapes))
+        msg = trn("app.pasted_shared", len(shapes), n=len(shapes))
         if left:
             msg += tr("app.shared_left_out_short", n=left)
         if made:
             msg += tr("app.shared_made_short", version=made[1])
         if clamped:
-            msg += " " + tr("app.pasted_15", n=clamped)
+            msg += " " + trn("app.pasted_15", clamped, n=clamped)
         self.status.config(text=msg)
         if notes:
             messagebox.showwarning(tr("app.spiderweb_2"), "\n\n".join(notes), parent=self)
@@ -1821,7 +1821,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         self.select(len(self.shapes) - 1)
         self.shapes_changed()
         self.status.config(text=tr("image.placed", name=sh["name"]) +
-                           (tr("image.others_missing", n=missing) if missing else ""))
+                           (trn("image.others_missing", missing, n=missing) if missing else ""))
 
     def sync_pictures(self, s, skip):
         """Every other placed picture takes the colours in settings s (one set for all, user): their notes made

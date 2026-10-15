@@ -4,7 +4,7 @@ import math
 import tkinter as tk
 from tkinter import ttk
 
-from files.lang import tr
+from files.lang import tr, trn
 from notes.funnel import funnel_reversed, gate_ticks
 from notes.hzbass import HZ_DEFAULTS, shortest_gate
 from files.mathexpr import calc
@@ -170,7 +170,8 @@ class FunnelPanel:
         if draft and draft["kind"] == "funnel" and len(draft["pts"]) == 2:
             info = (note + " " if note else "") + tr("panel_funnel.now_draw_the_wall_ctrl_centred")
         elif placed:
-            info = tr("panel_funnel.notes", value=sum(self.note_count(x) for x in tgts))
+            total = sum(self.note_count(x) for x in tgts)
+            info = trn("panel_funnel.notes", total, value=total)
             parts = self.roll.parts_text()
             if parts:
                 info += (tr("panel_funnel.highlighted_right_click_curve_shapes_del", parts=parts))

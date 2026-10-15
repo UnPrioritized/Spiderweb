@@ -11,7 +11,7 @@ from tkinter import filedialog, messagebox
 
 import numpy as np
 
-from files.lang import tr
+from files.lang import tr, trn
 from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape
 from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_shape
 from notes.hzbass import clean_hz
@@ -231,7 +231,7 @@ class ProjectFiles:
                                       VERSION=VERSION))
         lost = len(data.get("shapes", [])) - len(shapes)
         if lost:
-            self.load_notes.append(tr("project.shapes_left_out", n=lost))
+            self.load_notes.append(trn("project.shapes_left_out", lost, n=lost))
         self.load_lost = bool(newer or lost)  # (the autosave as it was is worth keeping aside)
 
         def get(fn):  # one setting read from the file: None if it's broken
@@ -645,8 +645,9 @@ class ProjectFiles:
         if (self.rendered[:, 2] > 127).any():
             note += tr("project.it_has_keys_above_127_256")
         messagebox.showinfo(tr("project.spiderweb"),
-                            tr("project.saved_notes_on_track_s_one", n=len(self.rendered), channels=channels, path=path,
-                               note=note))
+                            tr("project.saved_notes_on_track_s_one", notes=trn("n.notes", len(self.rendered),
+                                                                               n=len(self.rendered)),
+                               tracks=trn("n.tracks", channels, n=channels), path=path, note=note))
 
     def export_dms(self):
         """Export to Domino: every note in a .dms file (Domino's own song file, PPQ up to 65535) next to the MIDI
@@ -690,9 +691,10 @@ class ProjectFiles:
         finally:
             self.busy(None)
         tracks = int(notes[:, 4].max()) + 1
-        text = (tr("project.saved_dms", n=len(notes), tracks=tracks, path=path)
-                + (tr("project.notes_above_key_127_left_out", high=high) if high else "")
-                + (tr("project.dms_long_gates", long=long, most=GATE_MAX) if long else ""))
+        text = (tr("project.saved_dms", notes=trn("n.notes", len(notes), n=len(notes)),
+                   tracks=trn("n.tracks", tracks, n=tracks), path=path)
+                + (trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
+                + (trn("project.dms_long_gates", long, long=long, most=GATE_MAX) if long else ""))
         (messagebox.showwarning if long else messagebox.showinfo)(tr("project.spiderweb"), text)
 
     def copy_to_domino(self):
@@ -735,13 +737,13 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_use_the_clipboard_another"))
             return
         what = ((tr("project.one_note") if len(notes) == 1 else tr("project.n_notes", n=len(notes))) if self.sels else
-                tr("project.all_notes", n=len(notes)))
+                trn("project.all_notes", len(notes), n=len(notes)))
         where = tr("project.the_track") if tracks == 1 else tr("project.the_first_of_tracks", tracks=tracks)
         how = (tr("project.paste_at_the_cursor") if self.domino_start() == "note" else
                tr("project.double_click_a_bar_line_to"))
         self.status.config(text=tr("project.copied_for_domino_ppq_in_domino", what=what, ppq=ppq, where=where, how=how)
-                                + (tr("project.notes_above_key_127_left_out", high=high) if high else "")
-                                + (tr("project.long_gates_cut", long=long, most=GATE_MAX) if long else ""))
+                                + (trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
+                                + (trn("project.long_gates_cut", long, long=long, most=GATE_MAX) if long else ""))
         self.tips.show("domino", wait=True)
 
     def busy(self, text):
