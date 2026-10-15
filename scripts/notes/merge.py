@@ -383,7 +383,7 @@ def turned_notes(sh, ppq):
         return np.zeros((0, 5), np.int64)
     t_all, k_all = float(rows[:, 1].max()), float(rows[:, 2].max() + 1)
     cb, cp = [b0, b1, b2, b1 + b2 - b0], [p0, p1, p2, p1 + p2 - p0]
-    lo_k, hi_k = int(np.ceil(min(cp))), int(np.floor(max(cp)))
+    lo_k, hi_k = int(np.ceil(min(cp) - 1e-9)), int(np.floor(max(cp) + 1e-9))  # (the edges: see inside below)
     t0, span = min(cb), max(cb) - min(cb)
     n = max(1, int(np.ceil(span * ppq)))
     if hi_k < lo_k:
@@ -394,7 +394,10 @@ def turned_notes(sh, ppq):
     bb = t0 + (np.arange(n) + 0.5)[None, :] * step
     u = ((bb - b0) * vp - (kk - p0) * vb) / det
     v = ((kk - p0) * ub - up * (bb - b0)) / det
-    inside = (u >= 0) & (u < 1) & (v >= 0) & (v < 1)
+    # (a row's middle right on an edge: the bottom / left one in, the top / right one out, also when a move left
+    # the box a hair off; else the row came and went as it was moved, user)
+    e = 1e-9
+    inside = (u >= -e) & (u < 1 - e) & (v >= -e) & (v < 1 - e)
     key = np.clip((v * k_all).astype(np.int64), 0, int(k_all) - 1)
     tick = u * t_all
     order = np.lexsort((rows[:, 0], rows[:, 2]))  # by key, then start (notes on one key don't overlap)

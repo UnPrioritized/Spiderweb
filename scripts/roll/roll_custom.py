@@ -122,9 +122,15 @@ class CustomBox:
     def resize_point(self, orig, k, side, start, e):
         """Where the dragged corner / side is going (beats/pitch). A grid-aligned box snaps it onto the grid; a
         turned or skewed one moves it from where it was by the mouse's movement in whole grid steps (snapping the
-        spot itself would pull it off the mouse). Shift = free."""
+        spot itself would pull it off the mouse). Shift = free. Pasted notes / images: their box's top and bottom
+        snap BETWEEN key rows, where they sit (on a row's middle that row's notes came and went, user)."""
         if self.grid_aligned(orig):
-            return self.event_pt(e)
+            pt = self.event_pt(e)
+            sh = self.app.selected()
+            if sh and sh.get("kind") == "custom" and "notes" in sh and self.app.snap_beats() and not e.state & SHIFT:
+                y = min(max(e.y, self.ruler_h), self.winfo_height())
+                pt[1] = min(max(round(self.y2p(y) - 0.5) + 0.5, -0.5), self.app.keys - 0.5)
+            return pt
         c = self.custom_corners({"pts": orig})
         b, p = c[k] if not side else [(c[k][i] + c[(k + 1) % 4][i]) / 2 for i in (0, 1)]
         db, dp = self.drag_steps(start, e)
