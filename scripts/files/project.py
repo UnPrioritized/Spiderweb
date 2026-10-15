@@ -689,9 +689,11 @@ class ProjectFiles:
         finally:
             self.busy(None)
         tracks = int(notes[:, 4].max()) + 1
-        messagebox.showinfo(tr("project.spiderweb"),
-                            tr("project.saved_dms", n=len(notes), tracks=tracks, path=path)
-                            + (tr("project.notes_above_key_127_left_out", high=high) if high else ""))
+        long = int((notes[:, 1] - notes[:, 0] > 65535).sum())  # (Domino's MIDI save cuts gates to 65535)
+        text = (tr("project.saved_dms", n=len(notes), tracks=tracks, path=path)
+                + (tr("project.notes_above_key_127_left_out", high=high) if high else "")
+                + (tr("project.dms_long_gates", long=long) if long else ""))
+        (messagebox.showwarning if long else messagebox.showinfo)(tr("project.spiderweb"), text)
 
     def copy_to_domino(self):
         """Ctrl+Shift+C: the selected shapes' notes (all notes when nothing is selected) on the clipboard, for
