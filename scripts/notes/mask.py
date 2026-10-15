@@ -394,33 +394,81 @@ def unmasked(rendered, shapes):
     return rendered[~np.isin(rendered[:, 5], [i for i, sh in enumerate(shapes) if is_mask(sh)])]
 
 
-def unit_shown(notes, shapes, unit, ppq, nkeys, notes_of):
+def unit_shown(notes, shapes, unit, ppq, nkeys, notes_of, lookup=None):
     """What masks worked out together show of notes (shown_in). Apply mask makes exactly these."""
-    return shown_in(notes, unit_area(shapes, unit, ppq, nkeys, notes_of))
+    return shown_in(notes, unit_area(shapes, unit, ppq, nkeys, notes_of), lookup)
 
 
-def shown_in(notes, got):
+class Lookup:
+    """Notes (rendered rows) looked up quickly by many masks at once (mask_view): by key row and by shape, each sorted
+    once when first asked, so a mask reads only the notes on its own key rows instead of every note."""
+
+    def __init__(self, notes):
+        self.notes, self._by = notes, {}
+
+    def _sorted(self, col):
+        """(the notes' row numbers in order of column col, where each value's rows start), None for a negative value."""
+        if col not in self._by:
+            v = self.notes[:, col]
+            got = None
+            if v.min() >= 0:
+                small = v.astype(np.uint16) if v.max() < 1 << 16 else v  # (stable sorts of 16-bit numbers: radix)
+                got = np.argsort(small, kind="stable"), np.concatenate([[0], np.cumsum(np.bincount(v))])
+            self._by[col] = got
+        return self._by[col]
+
+    def near(self, lo_k, hi_k, lo_t, hi_t):
+        """The rows of the notes on keys lo_k..hi_k sounding between ticks lo_t and hi_t, in order."""
+        got = self._sorted(2)
+        notes = self.notes
+        if got is None:
+            return np.flatnonzero((notes[:, 2] >= lo_k) & (notes[:, 2] <= hi_k) & (notes[:, 1] > lo_t)
+                                  & (notes[:, 0] < hi_t))
+        order, starts = got
+        lo_k, hi_k = max(int(lo_k), 0), min(int(hi_k), len(starts) - 2)
+        if lo_k > hi_k:
+            return np.zeros(0, np.int64)
+        rows = order[starts[lo_k]:starts[hi_k + 1]]
+        return np.sort(rows[(notes[rows, 1] > lo_t) & (notes[rows, 0] < hi_t)])
+
+    def of(self, owners):
+        """The rows of the notes of these shapes, in order."""
+        got = self._sorted(5)
+        if got is None:
+            return np.flatnonzero(np.isin(self.notes[:, 5], owners))
+        order, starts = got
+        return np.sort(np.concatenate([order[starts[o]:starts[o + 1]] for o in owners.tolist()
+                                       if o < len(starts) - 1] or [np.zeros(0, np.int64)]))
+
+
+def shown_in(notes, got, lookup=None):
     """What an area (unit_area's) shows of notes (rendered rows, no masks' own): (the shapes it covers, the rows that
-    show, start and end trimmed)."""
+    show, start and end trimmed). lookup: a Lookup of notes (many masks: each reads only its own key rows)."""
     none = np.zeros(0, np.int64), notes[:0]
     a, b, ra, rb, invert = got
     if not len(ra) or not len(notes):
         return none
-    # (only the notes near the reach are looked at closely: millions of others cost one quick pass)
+    # (only the notes near the reach are looked at closely: millions of others cost one quick pass, or none)
     rows = (ra - OFF) // ROW
     lo_t, hi_t = int((ra - OFF - rows * ROW).min()), int((rb - OFF - rows * ROW).max())
-    near = np.flatnonzero((notes[:, 2] >= rows.min()) & (notes[:, 2] <= rows.max()) & (notes[:, 1] > lo_t)
-                          & (notes[:, 0] < hi_t))
+    if lookup is None:
+        near = np.flatnonzero((notes[:, 2] >= rows.min()) & (notes[:, 2] <= rows.max()) & (notes[:, 1] > lo_t)
+                              & (notes[:, 0] < hi_t))
+    else:
+        near = lookup.near(rows.min(), rows.max(), lo_t, hi_t)
     hit = kept_parts(notes[near], ra, rb, False)[0]  # (the shapes it covers: by its reach, own notes in it)
     if not hit.any():
         return none
     mine = np.unique(notes[near[hit], 5])
     if invert:  # (every note of the shapes it touches: the ones away from the hole show whole)
-        near = np.flatnonzero(np.isin(notes[:, 5], mine))
+        near = np.flatnonzero(np.isin(notes[:, 5], mine)) if lookup is None else lookup.of(mine)
     _, idx, ps, pe = kept_parts(notes[near], a, b, invert)
     got = notes[near[idx]].copy()
     got[:, 0], got[:, 1] = ps, pe
     return mine, got
+
+
+_shown = {"notes": None, "units": {}}  # (mask_view's last notes under the masks and what each mask showed of them)
 
 
 def mask_view(rendered, shapes, ppq, nkeys, notes_of, pattern=None):
@@ -431,15 +479,24 @@ def mask_view(rendered, shapes, ppq, nkeys, notes_of, pattern=None):
     units = mask_units(shapes)
     _room[0] = max(16, 2 * sum(map(len, units)))
     if not units or not len(rendered):
+        _shown.update(notes=None, units={})  # (not kept: many MB)
         return rendered, set()
+    from notes.engine import shape_key
     owner = rendered[:, 5]
     notes = unmasked(rendered if pattern is None else pattern, shapes)
     covered, parts = set(), []
+    lookup = Lookup(notes) if len(units) > 1 else None  # (sorting once costs about what one mask's full pass does)
+    # (the notes under the masks as last time: only masks changed since are worked out again, e.g. the one dragged)
+    last = _shown["units"] if _shown["notes"] is not None and _shown["notes"].shape == notes.shape and \
+        np.array_equal(_shown["notes"], notes) else {}
+    shown = {}
     for unit in units:
-        mine, got = unit_shown(notes, shapes, unit, ppq, nkeys, notes_of)
+        key = (tuple(shape_key(shapes[i]) for i in unit), ppq, nkeys)
+        mine, got = shown[key] = last.get(key) or unit_shown(notes, shapes, unit, ppq, nkeys, notes_of, lookup)
         if len(mine):
             covered.update(mine.tolist())
             parts.append(got)
+    _shown.update(notes=notes, units=shown)
     if not covered:
         return rendered, set()
     under = np.isin(owner, list(covered))
