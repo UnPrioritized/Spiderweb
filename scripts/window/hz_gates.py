@@ -2,7 +2,6 @@
 Pitch, the Effects / Red line toggles, and every change saved into the shape as one undo step."""
 
 import copy
-import json
 import math
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -14,6 +13,7 @@ from notes.hzbass import (AUTO, AUTO_MOST, EXTRAS, FULL_LENGTH, HZ_DEFAULTS, LEN
                           all_tones, clean_fit, clean_from, clean_extra, clean_fx, clean_length, clean_lfo, clean_line, clean_loop, clean_off,
                           clean_sustain, clean_tones, fit_length, held_fixed, left_edge, length_ticks, sound_span)
 from window import look
+from window.history import load_state
 from window.hz_effects import AMOUNT
 from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, bad, good, remember_place, unit_word
 
@@ -142,7 +142,7 @@ class HzGates:
         got = ask_live(self, self.app, prompt, orig[held], lo, hi, steps, apply)
         if got is None and state["pushed"]:  # Cancel: the shape back as it was, its step taken out. Not app.undo:
             app = self.app  # that drops a slide's first mark or a half drawn shape instead (user)
-            shapes = json.loads(app.undo_stack.pop()[0])
+            shapes = load_state(app.undo_stack.pop()[0])
             sh = self.target()
             if sh is not None and app.sel < len(shapes):
                 sh.clear()

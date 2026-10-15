@@ -276,8 +276,12 @@ class ProjectFiles:
         pg = get(lambda: clean_polygon(data.get("polygon_defaults")))
         playhead = get(lambda: float(data.get("playhead", 0)))
 
-        for key, value in boxes.items():
-            self.pvar[key].set(value)
+        self._opening = True  # (each box set would make the notes again: once, below)
+        try:
+            for key, value in boxes.items():
+                self.pvar[key].set(value)
+        finally:
+            self._opening = False
         self.channel_mode.set(mode if mode in CHANNEL_MODES else "single")
         self.use_ch10.set(data.get("use_ch10") is True)
         self.keys_var.set(str(KEYS[1] if data.get("keys") == KEYS[1] else KEYS[0]))

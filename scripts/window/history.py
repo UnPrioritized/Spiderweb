@@ -1,15 +1,72 @@
 """The History panel: every undo step by name, oldest at the top; click one to go back (or forward) to it. The
 toolbar's History box shows / hides it (off on a fresh start). It sits in the side panel between Project and Shapes;
 Undock puts it in a window of its own (Dock, or closing that window, puts it back). The steps themselves are
-App.undo_stack / redo_stack: (shapes as JSON, name, (selected shape numbers, main one, kept Select boxes)) steps."""
+App.undo_stack / redo_stack: (shapes as undo_state, name, (selected shape numbers, main one, kept Select boxes))
+steps."""
 
 import json
 import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
+from notes.engine import BIG_TEXT
 from window import look
 from window.widgets import ListTip, Tooltip, placed
+
+BIG_MARK = "\0big:"  # (a big text's place in an undo state's JSON: no saved text holds this character)
+
+
+def _big_texts(sh):
+    """The places a big text (pasted / image notes, many MB) sits in a shape: (dict, key) pairs. In the shape
+    itself or in one of a merge recipe's parts."""
+    got = [(sh, k) for k, v in sh.items() if isinstance(v, str) and len(v) > BIG_TEXT]
+    merge = sh.get("merge")
+    if isinstance(merge, dict) and isinstance(merge.get("parts"), list):
+        got += [(p, k) for p in merge["parts"] if isinstance(p, dict)
+                for k, v in p.items() if isinstance(v, str) and len(v) > BIG_TEXT]
+    return got
+
+
+def undo_state(shapes):
+    """The shapes as an undo step keeps them: their JSON, or with big texts (JSON, the texts) where the JSON has
+    a mark in each one's place. The texts are the shapes' own strings, shared, never copied (a 4 M-note paste is
+    60 MB: every step copying it ran out of memory). Equal states = equal shapes."""
+    places = [p for sh in shapes for p in _big_texts(sh)]
+    if not places:
+        return json.dumps(shapes)
+    texts = tuple(d[k] for d, k in places)
+    for i, (d, k) in enumerate(places):
+        d[k] = BIG_MARK + str(i)
+    try:
+        return json.dumps(shapes), texts
+    finally:
+        for (d, k), text in zip(places, texts):
+            d[k] = text
+
+
+def as_state(state, shapes):
+    """A state given as plain JSON (json.dumps of the shapes, made by a tool window) -> undo_state's, its big
+    texts swapped for the same ones in shapes (shared, not kept twice)."""
+    if not isinstance(state, str) or len(state) <= BIG_TEXT:
+        return state
+    got = undo_state(json.loads(state))
+    if isinstance(got, str):
+        return got
+    same = {d[k]: d[k] for sh in shapes for d, k in _big_texts(sh)}
+    return got[0], tuple(same.get(t, t) for t in got[1])
+
+
+def load_state(state):
+    """An undo state -> the shapes (big texts put back as the very strings kept)."""
+    if isinstance(state, str):
+        return json.loads(state)
+    shapes = json.loads(state[0])
+    for sh in shapes:
+        for d, k in [(sh, k) for k, v in sh.items() if isinstance(v, str) and v.startswith(BIG_MARK)] + [
+                (p, k) for p in (sh.get("merge") or {}).get("parts") or () if isinstance(p, dict)
+                for k, v in p.items() if isinstance(v, str) and v.startswith(BIG_MARK)]:
+            d[k] = state[1][int(d[k][len(BIG_MARK):])]
+    return shapes
 
 START = tr("history.start")  # the first row: the oldest state still kept
 FUTURE = look.FUTURE  # steps undone (Ctrl+Y / clicking them brings them back; a new change drops them)
@@ -110,7 +167,8 @@ class HistoryPanel:
 
     def drop_empty_step(self, before):
         """The last step changed nothing (e.g. a click on a shape without dragging it): it's taken out, so it
-        doesn't show in the History (before: the shapes as JSON now, before the next change)."""
+        doesn't show in the History (before: the shapes as JSON / undo_state now, before the next change)."""
+        before = as_state(before, self.shapes)
         if self.undo_stack and self.undo_stack[-1][0] == before and not self.redo_stack:
             kept = getattr(self, "_redo_kept", None)
             if kept and kept[1] == len(self.undo_stack):
@@ -122,7 +180,7 @@ class HistoryPanel:
     def settle_history(self):
         """After a mouse drag: a step that changed nothing goes."""
         if self.undo_stack and not self.redo_stack and not self.roll.drag:
-            self.drop_empty_step(json.dumps(self.shapes))
+            self.drop_empty_step(undo_state(self.shapes))
             self.sync_history()
 
     # ------------------------------------------------------------ docked / undocked

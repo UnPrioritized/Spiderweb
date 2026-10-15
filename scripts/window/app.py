@@ -4,6 +4,7 @@ panel_pattern.py (those panel sections),
 project.py (files, autosave, MIDI export), widgets.py (tooltips), font_dialog.py (picking a font)."""
 
 import copy
+import itertools
 import json
 import math
 import os
@@ -61,7 +62,7 @@ from window.join_split import JoinSplit
 from window.between_window import BetweenGroups
 from notes.between import (copied as between_copied, keep_pushes, push_sizes, sync_groups, turns as between_turns,
                            whole_groups)
-from window.history import HistoryPanel, edit_name
+from window.history import HistoryPanel, as_state, edit_name, load_state, undo_state
 from roll.pianoroll import PianoRoll
 from roll.roll_draw import painting_order
 from files import errors, speed
@@ -239,6 +240,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         self._edit_key = None
         self._scrub = None  # the number box being stepped (scrub_step)
         self._loading = False
+        self._opening = False  # (load_file filling in the project boxes)
         self._autosave_job = None
         self._autosave_failed = False  # (told once until it works again: ProjectFiles.autosave)
         self._saved_shapes = None  # the shapes as last saved in / opened from a project file (json)
@@ -897,6 +899,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
             return False
 
     def on_project_change(self):
+        if self._opening:  # (a project being opened: done once its boxes are all filled in, load_file)
+            return
         for key, lo, hi in (("ppq", 1, 65535), ("beats", 1, 32)):
             try:
                 setattr(self, key, calc_int(self.pvar[key].get(), lo, hi))
@@ -998,13 +1002,23 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         """shape_notes_tracks, remembered. Each note tool page goes on top of the notes remembered without it
         (trying a page's settings doesn't make the notes before it again)."""
         key = (shape_key(sh), self.ppq, self.keys)
-        if key not in self._notes_cache:
+        cache = self._notes_cache
+        got = cache.pop(key, None)
+        if got is None:
             got = fx_notes(sh, self.ppq, self.keys, self.notes_tracks)
-            if len(self._notes_cache) > 500:
-                self._notes_cache.clear()
-            self._notes_cache[key] = got
             self._notes_worked += 1
-        return self._notes_cache[key]
+        cache[key] = got  # (last = used most recently: trim_notes forgets the oldest first)
+        self.trim_notes()
+        return got
+
+    def trim_notes(self):
+        """The notes remembered for at most 500 shapes, or 3 for each shape in the project: past that, the ones
+        used longest ago are forgotten (forgetting them all made every edit with over 500 shapes slow)."""
+        cache = self._notes_cache
+        most = max(500, 3 * len(self.shapes))
+        if len(cache) > most:
+            for k in list(itertools.islice(cache, len(cache) - most // 2)):
+                del cache[k]
 
     def shapes_changed(self, now=False, moving=False):
         """Recalculate every note (overlaps depend on all shapes together) and refresh the screen.
@@ -1199,9 +1213,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         job["thread"].join()
         if job["got"] is None:
             return None
-        if len(self._notes_cache) + len(job["own"]) > 500:
-            self._notes_cache.clear()
         self._notes_cache.update(job["own"])
+        self.trim_notes()
         if job["own"]:
             self._notes_time = job["time"]
         self.roll.ready_order(job["got"][2], *job["drawn"])
@@ -2361,7 +2374,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         else:
             self._scrub = None
         own = bool(self.hz_window and self.hz_window.own_step)  # (made there, whatever has the keyboard now)
-        self.add_undo_step(state or json.dumps(self.shapes), name, hz=own or self.in_hz())
+        self.add_undo_step(state or undo_state(self.shapes), name, hz=own or self.in_hz())
         if sc and sc["active"]:
             sc["at"] = len(self.undo_stack)  # (take_back_scrub: still the last step?)
 
@@ -2381,9 +2394,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         self._scrub = None
 
     def add_undo_step(self, before, name=None, sel=None, hz=False):
-        """push_undo without its checks (before: the shapes as JSON). The selection is kept with it (sel: the one
-        from when `before` was saved, sel_state(); default: now): undo puts it back with the shapes (shapes are
-        picked by number, which can point at another shape after undo). hz: made in the Hz bass window (key_undo)."""
+        """push_undo without its checks (before: the shapes as JSON or history.undo_state). The selection is kept with
+        it (sel: the one from when `before` was saved, sel_state(); default: now): undo puts it back with the shapes
+        (shapes are picked by number, which can point at another shape after undo). hz: made in the Hz bass window
+        (key_undo)."""
+        before = as_state(before, self.shapes)
         self.drop_empty_step(before)
         self.undo_stack.append((before, name or tr("app.change"), sel or self.sel_state(), hz))
         self._trimmed = self.undo_stack[:-300]  # (put back by drop_empty_step if this step changes nothing)
@@ -2429,7 +2444,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         if self.hz_window and self.hz_window.pending:  # a slide started in the Hz bass window: just drop its mark
             self.hz_window.pending = None
             return self.hz_window.redraw()
-        self.drop_empty_step(json.dumps(self.shapes))  # (a click that changed nothing isn't a step)
+        self.drop_empty_step(undo_state(self.shapes))  # (a click that changed nothing isn't a step)
         self._restore(self.undo_stack, self.redo_stack)
 
     def redo(self):
@@ -2487,7 +2502,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
             hz.pending = None
             return hz.redraw()
         if not redo:
-            self.drop_empty_step(json.dumps(self.shapes))
+            self.drop_empty_step(undo_state(self.shapes))
         src = self.redo_stack if redo else self.undo_stack
         if src and not src[-1][3]:
             hz.bell()
@@ -2503,7 +2518,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
             return
         hz_was = self.hz_window and self.hz_window.before_restore()
         self.roll.cancel_draft()
-        now, sel_now = json.dumps(self.shapes), self.sel_state()
+        now, sel_now = undo_state(self.shapes), self.sel_state()
         ch10 = None
         for _ in range(min(count, len(src))):
             state, name, picked, hz = src.pop()
@@ -2517,7 +2532,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
             self.use_ch10.set(ch10)
         state, picked = now, sel_now
         self._redo_kept = self._trimmed = None
-        self.shapes = json.loads(state)
+        self.shapes = load_state(state)
         self.sels, self.sel = set(picked[0]), picked[1]
         self.sels = {i for i in self.sels if i < len(self.shapes)}
         self.parts = set()
