@@ -14,7 +14,7 @@ from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half
 from notes.custom import (add_stroke, box_frame, carried_spots, carry_areas, custom_settings, frame_to_bp, frame_to_uv,
                           map_stroke, new_live_shape, plain_stroke, refit, settled_areas, stroke_bp,
                           stroke_ends, stroke_points, uv_k)
-from notes.nested import handle_bp, set_centre, uses_centre
+from notes.nested import centre_key, handle_bp, reset_centre, set_centre, uses_centre
 from notes.pattern import has_formula
 from notes.polygon import polygon_aspect, polygon_strokes
 from roll.roll_funnel import seg_dist
@@ -311,6 +311,14 @@ class LiveDrawing:
         if old:
             sh["areas"] = carry_areas(old, sh)
         return hid
+
+    def reset_centre(self, sh):
+        """Right-click on Nested's / Tiles' centre point: back to the middle of the filled part (one undo step)."""
+        key = centre_key(sh)
+        if key and "at" in sh[key]:  # (not moved yet: nothing to do, no undo step)
+            self.app.push_undo(name=tr("roll_live.reset_the_centre_point"))
+            reset_centre(sh)
+            self.app.shape_edited()
 
     def delete_stroke_handle(self, sh, hid):
         """Right-click on the picked curve stroke's anchor (removed) or handle (pulled back in)."""

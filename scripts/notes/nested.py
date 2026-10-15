@@ -96,6 +96,13 @@ def set_centre(sh, u, v):
         sh[key] = dict(sh[key], at=[round(u, 6), round(v, 6)])
 
 
+def reset_centre(sh):
+    """The centre point back where it starts (the middle of the filled part)."""
+    key = centre_key(sh)
+    if key:
+        sh[key] = {k: v for k, v in sh[key].items() if k != "at"}
+
+
 def step_sizes(cfg):
     """Each copy's (size, turn in radians), the shape itself first."""
     n, last = cfg["steps"], cfg["last"]

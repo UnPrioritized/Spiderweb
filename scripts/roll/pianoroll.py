@@ -1402,6 +1402,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         hid = None if self.draft or finished or self.sx is None else self.hit_handle(e.x, e.y, True)
         if isinstance(hid, tuple) and hid[0] == "pt":
             hid = None  # a stroke's point: right-click works as on the stroke (its menu)
+        if hid == ("centre",):  # Nested's / Tiles' centre point: back to where it starts
+            self.reset_centre(self.app.selected())
+            return
         if isinstance(hid, tuple) and self.app.selected()["kind"] == "custom":  # a picked curve stroke's point
             self.delete_stroke_handle(self.app.selected(), hid)
             return

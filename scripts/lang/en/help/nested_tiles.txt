@@ -12,7 +12,7 @@ The inside is filled with copies of the shape, each one inside the one before. S
 
 Shrink by picks how the copies are made:
 
-Scaling (toward the centre point): each copy is a true smaller copy of the shape. It shrinks toward the centre point, which is the small ring with a cross on the selected shape. Drag it with any tool to move it. It starts in the middle of the filled part and moves, flips and turns along with the shape.
+Scaling (toward the centre point): each copy is a true smaller copy of the shape. It shrinks toward the centre point, which is the small ring with a cross on the selected shape. Drag it with any tool to move it, or right-click it to put it back. It starts in the middle of the filled part and moves, flips and turns along with the shape.
 
 Even band (follows the outline): every step is equally thick all the way round and follows each bend, like the Outline gate. This suits long, curved or thin shapes. It has no centre point. Sharp points can come out on the inner steps of an oval: that's how an even band works on a shape that is flat along its sides and tight at its ends.
 
@@ -44,4 +44,4 @@ Tile colours: the next colour along each diagonal, each column or each row, a ch
 
 Only whole tiles leaves out every tile the outline cuts.
 
-Tiles always lie level on the piano roll, on whole keys. One tile sits on the centre point: drag its handle to slide the whole wallpaper. Turning the shape turns its outline, the tiles stay level.
+Tiles always lie level on the piano roll, on whole keys. One tile sits on the centre point: drag its handle to slide the whole wallpaper, or right-click it to put it back in the middle. Turning the shape turns its outline, the tiles stay level.

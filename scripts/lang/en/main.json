@@ -811,6 +811,7 @@
  "roll_live.draw_into_the_live_shape": "Draw into the live shape",
  "roll_live.the_middle_anchor_of_a_symmetric": "The middle anchor of a symmetric curve stays (turn Symmetric halves off to remove it).",
  "roll_live.remove_a_point": "Remove a point",
+ "roll_live.reset_the_centre_point": "Reset the centre point",
  "roll_live.add_an_anchor": "Add an anchor",
  "roll_live.symmetric_halves": "Symmetric halves",
  "roll_live.delete_a_stroke": "Delete a stroke",
