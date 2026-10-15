@@ -28,7 +28,7 @@ from roll.roll_shared import ALT, grab_while_panning
 from window import look
 from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
 from window.panel_custom import GAP_COLOR
-from window.widgets import LocalUndo, Scrub, Tooltip, bad, good, remember_place
+from window.widgets import ListTip, LocalUndo, Scrub, Tooltip, bad, good, remember_place
 
 PATTERNS_FILE = os.path.join(USER, "patterns.json")
 OLD_CURVES_FILE = os.path.join(USER, "curves.json")  # the funnel's saved curve formulas (before shapes of curves)
@@ -177,6 +177,7 @@ class FormulaDialog(tk.Toplevel):
                                   font=look.font(9))
         self.listbox.pack(fill="y", expand=True)
         self.listbox.bind("<<ListboxSelect>>", self.on_pick)
+        ListTip(self.listbox)
         ttk.Button(left, text=tr("pattern_dialog.delete"), command=self.delete).pack(anchor="w", pady=(4, 0))
 
         right = ttk.Frame(body, padding=(10, 0, 0, 0))

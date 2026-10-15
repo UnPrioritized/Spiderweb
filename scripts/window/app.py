@@ -82,7 +82,7 @@ from window.settings_window import open_settings
 from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
-from window.widgets import (REDO_KEYS, UNDO_KEYS, Scrub, StatusLine, Tooltip, bad, fit_dropdowns, good, grid_shown,
+from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, StatusLine, Tooltip, bad, fit_dropdowns, good, grid_shown,
                             keep_width, letter_jump, remember_good, watch_bad)
 
 
@@ -677,6 +677,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         self.listbox.pack(side="left", fill="x", expand=True)
         sb.pack(side="left", fill="y")
         self.listbox.bind("<<ListboxSelect>>", self.on_list_select)
+        ListTip(self.listbox)
         # hand the keys back to the roll, so Space plays instead of picking a list row
         self.listbox.bind("<ButtonRelease-1>", lambda e: self.roll.focus_set(), add="+")
         btns = ttk.Frame(box)

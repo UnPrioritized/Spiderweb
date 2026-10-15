@@ -48,7 +48,10 @@ def line_up(rows, labels=()):
 
 
 def keep_width(cb):
-    """This dropdown keeps the width it was given (its choices are names someone typed, not texts)."""
+    """This dropdown keeps the width it was given (its choices are names someone typed, not texts); a name cut off
+    in its open list shows whole in a tip (ListTip)."""
+    if not getattr(cb, "keep_width", False):
+        ListTip.dropdown(cb)
     cb.keep_width = True
     return cb
 
@@ -603,13 +606,17 @@ class Tooltip:
     # labels, tabs) would otherwise win over a plain <ButtonPress> and the box stayed up while they were used
     TAG = "Tooltip"
 
-    def __init__(self, widget, text):
+    RAW = {}  # Tk's own widgets (a dropdown's list): path -> their tooltips (the event has only the path)
+
+    def __init__(self, widget, text, owner=None):
         self.widget, self.text, self.tip, self.job, self.used = widget, text, None, None, False
+        self.owner = owner or widget  # (the box is made in its window)
         if not widget.bind_class(self.TAG, "<Enter>"):  # (once per Tk)
             for seq, name in (("<Enter>", "enter"), ("<Leave>", "leave"), ("<ButtonPress>", "use"),
                               ("<MouseWheel>", "use"), ("<KeyPress>", "use")):
-                widget.bind_class(self.TAG, seq, lambda e, n=name: [getattr(t, n)(e) for t in
-                                                                    getattr(e.widget, "tooltips", ())] and None)
+                widget.bind_class(self.TAG, seq, lambda e, n=name: [
+                    getattr(t, n)(e) for t in getattr(e.widget, "tooltips", None)
+                    or Tooltip.RAW.get(str(e.widget), ())] and None)
         if not hasattr(widget, "tooltips"):
             widget.tooltips = []
             widget.bindtags((self.TAG,) + widget.bindtags())
@@ -637,20 +644,25 @@ class Tooltip:
         if not self.text:
             return
         w = self.widget
-        self.tip = tk.Toplevel(w)
+        self.tip = tk.Toplevel(self.owner)
         self.tip.wm_overrideredirect(True)
+        if self.owner is not w:  # (over a dropdown's open list, which stays on top)
+            self.tip.attributes("-topmost", True)
         tk.Label(self.tip, text=self.text, justify="left", background=look.TIP_BG, relief="solid",
                  borderwidth=1, padx=6, pady=4, wraplength=round(lang_size("size.tooltip_width", TIP_WIDTH) * w.winfo_fpixels("1i") / 96)).pack()
         self.tip.update_idletasks()
-        # under the widget, or under the mouse for a tall one (a list as tall as the window: not at its bottom);
         # kept inside the window (the panel sits at its right edge)
-        top = w.winfo_toplevel()
-        if w.winfo_height() > TALL:
-            x, y = w.winfo_pointerx(), w.winfo_pointery() + 20
-        else:
-            x, y = w.winfo_rootx() + 12, w.winfo_rooty() + w.winfo_height() + 4
+        top = self.owner.winfo_toplevel()
+        x, y = self.spot()
         x = min(x, top.winfo_rootx() + top.winfo_width() - self.tip.winfo_reqwidth() - 4)
         self.tip.wm_geometry(f"+{x}+{y}")
+
+    def spot(self):
+        """Under the widget, or under the mouse for a tall one (a list as tall as the window: not at its bottom)."""
+        w = self.widget
+        if w.winfo_height() > TALL:
+            return w.winfo_pointerx(), w.winfo_pointery() + 20
+        return w.winfo_rootx() + 12, w.winfo_rooty() + w.winfo_height() + 4
 
     def hide(self):
         if self.job:
@@ -659,6 +671,59 @@ class Tooltip:
         if self.tip:
             self.tip.destroy()
             self.tip = None
+
+
+class ListTip(Tooltip):
+    """A list's row whose text is cut off at the list's right edge shows its whole text while the mouse rests on
+    it, under that row."""
+
+    def __init__(self, listbox, owner=None):
+        super().__init__(listbox, "", owner)
+        self.row = None
+        listbox.bind("<Motion>", self.motion, add="+")
+
+    @classmethod
+    def dropdown(cls, cb):
+        """The same on a dropdown's open list (Tk makes that list itself: a Python handle on it here)."""
+        pop = cb.tk.call("ttk::combobox::PopdownWindow", cb)
+        lb = tk.Listbox.__new__(tk.Listbox)
+        lb.tk, lb._w, lb.master, lb.children, lb._tclCommands = cb.tk, pop + ".f.l", cb, {}, None
+        tip = cls(lb, cb)
+        Tooltip.RAW[lb._w] = lb.tooltips
+        cb.tk.call("bind", pop, "<Unmap>", "+" + cb.register(lambda: (setattr(tip, "row", None), tip.hide())))
+        return tip
+
+    def enter(self, e):
+        self.motion(e)
+
+    def motion(self, e):
+        if e.state & self.BUTTONS:
+            return
+        lb = self.widget
+        i = lb.nearest(e.y)
+        box = lb.bbox(i) if i >= 0 else None
+        row = i if box and box[1] <= e.y < box[1] + box[3] else None
+        if row == self.row:
+            return
+        self.row, self.used = row, False  # (another row: its tip may show again after a click)
+        self.hide()
+        edge = lb.winfo_width() - int(lb.cget("borderwidth")) - int(lb.cget("highlightthickness"))
+        self.text = lb.get(row) if row is not None and box[0] + box[2] > edge else ""
+        if self.text == DIVIDER:  # (a name list's divider row)
+            self.text = ""
+        if self.text:
+            self.schedule()
+
+    def leave(self, e):
+        self.row = None
+        super().leave(e)
+
+    def spot(self):
+        lb = self.widget
+        box = lb.bbox(self.row) if self.row is not None else None
+        if not box:
+            return super().spot()
+        return lb.winfo_rootx() + 12, lb.winfo_rooty() + box[1] + box[3] + 2
 
 
 ONE = {"unit.keys": "unit.key", "unit.ticks": "unit.tick", "unit.degrees": "unit.degree", "unit.beats": "unit.beat",

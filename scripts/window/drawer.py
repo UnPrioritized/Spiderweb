@@ -33,7 +33,7 @@ from window.formula_host import DrawerHost, formula_menu
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
 from window.layers import DrawerLayers, pasted
 from window.sticky import BEND, REACH, Targets, key_points
-from window.widgets import REDO_KEYS, UNDO_KEYS, Tooltip, remember_place, symmetry_menu
+from window.widgets import REDO_KEYS, UNDO_KEYS, ListTip, Tooltip, remember_place, symmetry_menu
 
 LIBRARY = os.path.join(USER, "shapes")
 # Always in the library (not files). A saved shape with the same name is used instead; deleting it brings these back.
@@ -647,6 +647,7 @@ class Drawer(DrawerLayers, tk.Toplevel):
         self.listbox.pack(side="left", fill="x", expand=True)
         sb.pack(side="left", fill="y")
         lb = self.listbox
+        ListTip(lb)
         lb.bind("<Double-Button-1>", lambda e: (self.stop_slow_click(), self.open_selected()))
         lb.bind("<ButtonPress-1>", self.list_press)
         # Keys while the list has the keyboard work on the list (the drawing's own keys: click the board). Blue =

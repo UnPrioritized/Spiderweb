@@ -7,7 +7,7 @@ from tkinter import ttk
 from files.lang import tr
 from notes.fonts import font_families
 from window import look
-from window.widgets import remember_place
+from window.widgets import ListTip, remember_place
 
 SAMPLE = "AaBbCc 0123"
 
@@ -35,6 +35,7 @@ class FontDialog(tk.Toplevel):
         row = ttk.Frame(box)
         row.pack(fill="both", expand=True)
         self.listbox = tk.Listbox(row, activestyle="none", exportselection=False, font=look.font(10))
+        ListTip(self.listbox)
         sb = ttk.Scrollbar(row, orient="vertical", command=self.listbox.yview)
         self.listbox.config(yscrollcommand=sb.set)
         self.listbox.pack(side="left", fill="both", expand=True)

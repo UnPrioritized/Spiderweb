@@ -9,7 +9,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from window import look
-from window.widgets import Tooltip, placed
+from window.widgets import ListTip, Tooltip, placed
 
 START = tr("history.start")  # the first row: the oldest state still kept
 FUTURE = look.FUTURE  # steps undone (Ctrl+Y / clicking them brings them back; a new change drops them)
@@ -57,6 +57,7 @@ class HistoryPanel:
         lst.pack(side="left", fill="both", expand=True)
         sb.pack(side="left", fill="y")
         lst.bind("<<ListboxSelect>>", lambda e: self.history_clicked(lst))
+        ListTip(lst)
         lst.bind("<ButtonRelease-1>", lambda e: self.roll.focus_set(), add="+")  # (keys back to the piano roll)
         self.history_list = lst
         return frame
