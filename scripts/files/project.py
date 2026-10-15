@@ -26,7 +26,7 @@ from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
-from files.domino_clip import DOMINO_STARTS, LONGEST, clip_data, dms_data, dms_path, get_from_clipboard, put_on_clipboard, read_notes
+from files.domino_clip import DOMINO_STARTS, GATE_MAX, LONGEST, clip_data, cut_gates, dms_data, dms_path, get_from_clipboard, put_on_clipboard, read_notes
 from files.midi_out import MAX_DELTA, PPQ_WARN, long_silences, write_midi
 from files.playback import keep_saved
 from files.about import HERE, USER, VERSION
@@ -670,6 +670,7 @@ class ProjectFiles:
             return
         if not ask_big(self, "dms", len(notes)):
             return
+        notes, long = cut_gates(notes)
         path = dms_path(output_path(self.pvar["output"].get()))
         if os.path.exists(path) and not messagebox.askyesno(
                 tr("project.confirm_save_as"), tr("project.already_exists_do_you_want_to",
@@ -689,10 +690,9 @@ class ProjectFiles:
         finally:
             self.busy(None)
         tracks = int(notes[:, 4].max()) + 1
-        long = int((notes[:, 1] - notes[:, 0] > 65535).sum())  # (Domino's MIDI save cuts gates to 65535)
         text = (tr("project.saved_dms", n=len(notes), tracks=tracks, path=path)
                 + (tr("project.notes_above_key_127_left_out", high=high) if high else "")
-                + (tr("project.dms_long_gates", long=long) if long else ""))
+                + (tr("project.dms_long_gates", long=long, most=GATE_MAX) if long else ""))
         (messagebox.showwarning if long else messagebox.showinfo)(tr("project.spiderweb"), text)
 
     def copy_to_domino(self):
@@ -722,6 +722,7 @@ class ProjectFiles:
         if not ask_big(self, "domino", len(notes)) or not (self.all16() or ask_drums(self, tracks)):
             return
         self.busy(tr("project.copying_for_domino"))  # (millions of notes take a few seconds)
+        notes, long = cut_gates(notes)
         try:
             raw = clip_data(notes, ppq, beats * ppq, self.domino_start())
             copied = put_on_clipboard(raw)
@@ -739,7 +740,8 @@ class ProjectFiles:
         how = (tr("project.paste_at_the_cursor") if self.domino_start() == "note" else
                tr("project.double_click_a_bar_line_to"))
         self.status.config(text=tr("project.copied_for_domino_ppq_in_domino", what=what, ppq=ppq, where=where, how=how)
-                                + (tr("project.notes_above_key_127_left_out", high=high) if high else ""))
+                                + (tr("project.notes_above_key_127_left_out", high=high) if high else "")
+                                + (tr("project.long_gates_cut", long=long, most=GATE_MAX) if long else ""))
         self.tips.show("domino", wait=True)
 
     def busy(self, text):

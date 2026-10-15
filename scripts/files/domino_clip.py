@@ -65,6 +65,20 @@ DOMINO_STARTS = [  # (saved value, dropdown text): where copied / pasted notes s
 ]
 
 
+GATE_MAX = 65535  # Domino's longest gate: anything done to a longer note snaps it back to this
+
+
+def cut_gates(notes):
+    """notes: (start, end, ...) rows -> (notes with every gate cut to GATE_MAX, how many were cut). Copied only when
+    a note is cut."""
+    long = notes[:, 1] - notes[:, 0] > GATE_MAX
+    count = int(long.sum())
+    if count:
+        notes = notes.copy()
+        notes[long, 1] = notes[long, 0] + GATE_MAX
+    return notes, count
+
+
 def item(tag, body):
     return struct.pack("<HI", tag, len(body)) + body
 
