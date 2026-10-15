@@ -37,7 +37,7 @@ from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, 
 from roll.roll_sustain import SustainStops
 from roll.roll_text import TextTyping
 
-
+EDGE = 0.5  # keys a shape's lines may go past the lowest / highest key's middle: its notes stay on that key
 class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
                 PathEditing, SustainStops, tk.Canvas):
     def __init__(self, parent, app, scale):
@@ -294,9 +294,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if not arrays:
                 continue
             a = np.concatenate(arrays)
-            # (a notes shape's box is half a key past its notes: its notes reach the first / last key, user)
-            pad = 0.5 if sh.get("kind") == "custom" and "notes" in sh else 0.0
-            got.append((a[:, 0].min(), a[:, 1].min() + pad, a[:, 1].max() - pad, a[:, 0].max()))
+            got.append((a[:, 0].min(), a[:, 1].min(), a[:, 1].max(), a[:, 0].max()))
         if not got:
             return None
         return (float(min(g[0] for g in got)), float(min(g[1] for g in got)), float(max(g[2] for g in got)),
@@ -305,15 +303,46 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def limits(self, shapes, top=None):
         """How far these shapes may go: beat 0 and the lowest / highest key (top: another highest), or as far past
         them as they already are (user: a shape past an edge isn't pushed back; it just can't go further). None:
-        no limits (nothing drawn)."""
+        no limits (nothing drawn). The lines may go half a key past the lowest / highest key's middle: a line
+        there still plays that key, and a filled shape / pasted notes' box fills only rows whose middle it covers
+        (user: every shape must reach the bottom key)."""
         r = self.reach(shapes)
-        return r and (min(0.0, r[0]), min(0.0, r[1]), max(self.app.keys - 1.0 if top is None else top, r[2]))
+        top = self.app.keys - 1.0 if top is None else top
+        # (a line exactly half a key over the top key would play the key above: just under it, but a notes
+        # shape's box may lie on it)
+        if not all(sh.get("kind") == "custom" and "notes" in sh for sh in shapes):
+            top -= 1e-6
+        return r and (min(0.0, r[0]), min(-EDGE, r[1]), max(top + EDGE, r[2]))
 
     def move_room(self, sh):
         """How far a shape can be moved (beats left, keys down, keys up) before it passes the limits: up to the
-        256 keys' highest even at 128 keys (user: put away up there; it isn't played or saved in the MIDI)."""
+        256 keys' highest even at 128 keys (user: put away up there; it isn't played or saved in the MIDI). Its
+        notes count too: a move by whole keys moves them by as much, so it goes on until its lowest note is on
+        the lowest key (user: every shape reaches it, also when its lines sit between key rows)."""
         r, lim = self.reach([sh]), self.limits([sh], KEYS[1] - 1)
-        return r and (r[0] - lim[0], r[1] - lim[1], lim[2] - r[2])
+        if not r:
+            return r
+        left, down, up = r[0] - lim[0], r[1] - lim[1], lim[2] - r[2]
+        keys = self.notes_keys(sh, r)
+        if keys:
+            down = max(down, keys[0])
+            if keys[1] is not None:
+                up = max(up, KEYS[1] - 1 - keys[1])
+        return left, down, up
+
+    def notes_keys(self, sh, r):
+        """(lowest key, highest key or None when unknown) of a shape's notes as if no key was cut off at the
+        bottom, or None (no notes). r: its reach. A shape whose lines go past the bottom: its notes made a few
+        keys higher (moved by whole keys: the same notes), so none is lost under the lowest key."""
+        app = self.app
+        lift = max(0, math.ceil(-EDGE - r[1]))
+        notes = app.notes_of(dict(sh, pts=[[b, p + lift] for b, p in sh["pts"]]) if lift else sh)
+        if not len(notes):
+            return None
+        keys = notes[:, 2]
+        # (the highest only when nothing could be cut off at the top: 256 keys, lines inside)
+        high = int(keys.max()) - lift if app.keys == KEYS[1] and r[2] + lift < KEYS[1] - 1 + EDGE else None
+        return int(keys.min()) - lift, high
 
     def in_room(self, db, dp, e, room):
         """A move by (db beats, dp keys) cut short where a shape would pass the limits (room: move_room): in whole
@@ -638,7 +667,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         out = []
         for i, sh in enumerate(self.app.shapes):
             r = self.reach([sh])
-            if r and r[1] > top:
+            if r and r[1] >= top:
                 x = self.t2x((r[0] + r[3]) / 2)
                 if self.kb_w <= x <= w:
                     out.append((i, x))
