@@ -1057,8 +1057,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         # (other drags make the notes AND repaint them all at every step: the repaint counts too)
         slow = slow or not moving and busy + self.roll.paint_time > 0.15
         # (moving: also whenever the piano roll shows its notes as one picture, which it can carry along)
-        if not now and (self.roll.drag or self.scrubbing) and (slow or moving and (busy > 0.03 or self.roll._img is not None)):
+        # (Nested's / Tiles' centre point: the notes are all it shows, so they follow it in the background, user)
+        follow = self.roll.drag and self.roll.drag[0] == "handle" and self.roll.drag[1] == ("centre",)
+        if not now and (self.roll.drag or self.scrubbing) and (
+                slow or follow and busy > 0.03 or moving and (busy > 0.03 or self.roll._img is not None)):
             self.notes_late = True
+            if follow:  # (one at a time: when it's made, _coming_check shows it and starts the next spot's)
+                if not (self._coming and not self._coming["done"]):
+                    self._late_notes = self.after_idle(self._make_coming, True, True)
+                self.roll.request_redraw()
+                return
             # the notes are made in the background once the mouse rests: quick enough to paint = the real notes
             # show then, else they wait for the mouse to be let go (and are ready by then)
             self._late_notes = self.after(120 if moving else 250, self.notes_rested, not (moving and slow))
@@ -1079,7 +1087,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
             else:
                 self.split_box.pack_forget()
                 self.ch10_tick.pack_forget()
-        made = self.notes_made()
+        made = self.notes_made(any_spot=now == "follow")
         for sh in self.shapes:  # a piece whose outline was changed is a shape of its own now (sliced.py)
             if "cut" in sh and moved_by(as_made(sh)) is None:
                 completed(sh)  # (with the whole's glue / note tool pages)
@@ -1134,7 +1142,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         return (tuple(shape_key(sh) for sh in self.shapes), self.ppq, self.keys,
                 self.channel_mode.get(), SPLIT_CHOICES[max(self.split_box.current(), 0)][0], self.all16())
 
-    def _make_coming(self, show):
+    def _make_coming(self, show, follow=False):
+        """follow: shown when made even if the shapes have moved on since (then the next spot's are made)."""
         self._late_notes = None
         show = show or not (self.roll.drag or self.scrubbing)  # (the drag called off: no let go to wait for)
         job, key = self._coming, self.notes_key()
@@ -1150,7 +1159,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         for sh in shapes:
             if "cut" in sh and moved_by(as_made(sh)) is None:
                 completed(sh)
-        job = self._coming = {"key": key, "show": show, "done": False, "got": None, "own": {}, "stop": False}
+        job = self._coming = {"key": key, "show": show, "done": False, "got": None, "own": {}, "stop": False,
+                              "follow": follow}
         known = self._notes_cache  # (only read in the thread; its own new notes go to job["own"])
         sels, fast = frozenset(self.sels), speed.loops()
 
@@ -1201,12 +1211,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
                 self.shapes_changed(now=True)
         elif self.notes_key() == job["key"]:
             self.shapes_changed(now=True)
+        elif job["follow"] and held:  # (the centre point moved on meanwhile: these shown, the new spot's made)
+            self.shapes_changed(now="follow")
+            self.notes_late = True
+            self._make_coming(True, True)
 
-    def notes_made(self):
+    def notes_made(self, any_spot=False):
         """The notes made in the background for the shapes exactly as they are now (waited for if still being made),
-        else None. Called by shapes_changed, which then makes them itself."""
+        else None. Called by shapes_changed, which then makes them itself. any_spot: a finished job's notes even if
+        the shapes have changed since."""
         job, self._coming = self._coming, None
-        if job is None or job["key"] != self.notes_key():
+        if job is None or job["key"] != self.notes_key() and not (any_spot and job["done"]):
             if job:  # (made for another spot: stopped, so it doesn't slow down making these)
                 job["stop"] = True
             return None
