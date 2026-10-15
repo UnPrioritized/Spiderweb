@@ -129,6 +129,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     colour_list.py   picture colours as text for a player's settings (formats), and colours read out of any text
     playback.py      playing through Windows MIDI out
     synth.py         the built-in synth (Hz bass preview): BASS + BASSMIDI DLLs in scripts/bass/
+    sfz.py           the sample files an SFZ soundfont names (checked when one is picked)
     quicksound.py    the quick sound: single soundfont notes recorded once, copies laid at each note (live keys)
     speed.py         optional speed-ups: Numba's compiled loops loaded in the background, Pillow for pictures
     fastloops.py     the compiled loops (Numba) for lots of notes: notes on screen, painting, the overlap step
