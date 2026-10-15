@@ -23,7 +23,7 @@ from collections import deque
 
 import numpy as np
 
-from files import errors
+from files import errors, sfz
 from files.about import HERE
 from files.system import WINDOWS
 
@@ -121,7 +121,8 @@ def _load():
                             ("BASS_ChannelGetAttribute", [u, u, ctypes.POINTER(f)], i),
                             ("BASS_ChannelSetDSP", [u, _DSPPROC, p, i], u), ("BASS_ChannelRemoveDSP", [u, u], i),
                             ("BASS_SetConfig", [u, u], i), ("BASS_GetConfig", [u], u),
-                            ("BASS_SetDevice", [u], i), ("BASS_GetDevice", [], u)):
+                            ("BASS_SetDevice", [u], i), ("BASS_GetDevice", [], u),
+                            ("BASS_StreamCreateFile", [u, p, ctypes.c_uint64, ctypes.c_uint64, u], u)):
         fn = getattr(bass, name)
         fn.argtypes, fn.restype = args, res
     for name, args, res in (("BASS_MIDI_FontInit", [ctypes.c_wchar_p if WINDOWS else ctypes.c_char_p, u], u), ("BASS_MIDI_FontFree", [u], i),
@@ -232,6 +233,27 @@ class Synth:
         except OSError:
             size = "size ?"
         errors.note("soundfont", f"{os.path.basename(path)}, {size}")
+
+    def silent_samples(self, path, cancel=None):
+        """(An .sfz) (samples, [(file name, "missing" / "unreadable")]): the sample files it names that the synth
+        can't play, so their keys stay silent. BASSMIDI opens such an SFZ without a word. Which formats play
+        depends on the PC (measured on Windows: WAV, OGG, MP3, FLAC through Windows' own decoder yes; Opus no), so
+        each file is opened, not judged by its name. cancel() = True stops early (what was found so far)."""
+        names = sfz.samples(path)
+        bad = []
+        for i, name in enumerate(names):
+            if cancel is not None and i % 50 == 0 and cancel():
+                break
+            if not os.path.isfile(name):
+                bad.append((name, "missing"))
+                continue
+            h = self.bass.BASS_StreamCreateFile(0, name if WINDOWS else os.fsencode(name), 0, 0,
+                                                _STREAM_DECODE | (_UNICODE if WINDOWS else 0))
+            if h:
+                self.bass.BASS_StreamFree(h)
+            else:
+                bad.append((name, "unreadable"))
+        return len(names), bad
 
     def _take(self):
         """The font to use, counted as in use until _give."""

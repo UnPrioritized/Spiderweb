@@ -2235,6 +2235,54 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
             self.scrub_end()
             self.out.close()
         self.sync_builtin()
+        self.check_samples(self.hz_preview["font"])
+
+    def check_samples(self, path):
+        """(An .sfz just picked) its sound files checked in the background: missing ones or ones in a format the
+        synth can't read = one warning, as the synth opens such a soundfont without a word and those keys stay
+        silent. Another soundfont picked meanwhile = this check stops, nothing said."""
+        if not path or not path.lower().endswith(".sfz"):
+            return
+        try:
+            if self.synth is None:
+                self.synth = Synth()
+        except SynthError:
+            return  # (said when the synth is used)
+        synth, result = self.synth, []
+
+        def work():
+            try:
+                result.append(synth.silent_samples(path, cancel=lambda: self.hz_preview["font"] != path))
+            except OSError:
+                pass  # (the soundfont itself unreadable: the synth says so when it opens it)
+        job = threading.Thread(target=work, daemon=True)
+        job.start()
+
+        def done():
+            if job.is_alive():
+                self.after(200, done)
+            elif result and result[0][1] and self.hz_preview["font"] == path and self.winfo_exists():
+                self.warn_silent(path, result[0][1])
+        self.after(200, done)
+
+    def warn_silent(self, path, bad):
+        """The silent_samples warning: the first few files, by their place in the soundfont's folder."""
+        folder = os.path.dirname(path)
+
+        def shown(name):
+            try:
+                return os.path.relpath(name, folder)
+            except ValueError:  # (another drive)
+                return name
+        lines = [tr("synth.silent_" + why, file=shown(name)) for name, why in bad[:8]]
+        if len(bad) > 8:
+            lines.append(trn("synth.silent_more", len(bad) - 8, n=len(bad) - 8))
+        focus = self.focus_get()
+        messagebox.showwarning(
+            tr("synth.silent_title"),
+            trn("synth.silent", len(bad), name=os.path.basename(path), n=f"{len(bad):,}") + "\n\n"
+            + "\n".join(lines) + "\n\n" + tr("synth.silent_why"),
+            parent=focus.winfo_toplevel() if focus else self)
 
     def on_play_voices(self, left=False):
         e = self.voices_entry  # (in Settings → Sound)
