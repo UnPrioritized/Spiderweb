@@ -9,7 +9,7 @@ import numpy as np
 import tkinter as tk
 from tkinter import ttk
 
-from files.lang import tr
+from files.lang import tr, trn
 from notes.hzbass import RACK, SOFT, compress
 from window.hz_knobs import RACK_KNOBS
 from window.synth_look import BG, DIM, EDGE, HEAD_FONT, LIGHT_OFF, MID, PANEL, PIC, TEXT, bright, mix
@@ -302,7 +302,7 @@ class SynthRack:
             top = h - pad - v["echo_fade"] ** i * (h - 3 * pad)
             c.create_rectangle(x, top, x + bw, h - pad, fill=colour if i else "#6b737e", outline="")
         c.create_line(pad, h - pad, w - pad, h - pad, fill=MID)
-        self.rack_text(c, tr("hz.rack_echo_notes", n=len(heard) - 1))
+        self.rack_text(c, trn("hz.rack_echo_notes", len(heard) - 1, n=len(heard) - 1))
 
     def draw_rack_reverb(self, c, colour):
         """A note, then its tone ringing on: fading, its waves more and more scattered."""

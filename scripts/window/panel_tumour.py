@@ -3,7 +3,7 @@ and a button that opens the tumour window (tumour_window.py), where the settings
 
 from tkinter import ttk
 
-from files.lang import tr
+from files.lang import tr, trn
 from notes.joined import shown_tumour
 from notes.tumour import LINE_KINDS
 from window import look
@@ -62,7 +62,8 @@ class TumourPanel:
         elif len(tgts) > 1:
             text = tr("panel_tumour.tumours_on_of", n=len(on), n2=len(tgts))
         else:
-            text = tr("panel_tumour.keys", dict=dict(SHAPE_CHOICES)[on[0]['shape']], size=round(on[0]['size'], 2))
+            size = round(on[0]['size'], 2)
+            text = trn("panel_tumour.keys", size, dict=dict(SHAPE_CHOICES)[on[0]['shape']], size=size)
             if on[0].get("graphs"):
                 text += tr("panel_tumour.with_graphs")
         self.tumour_summary.config(text=text)

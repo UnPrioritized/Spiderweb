@@ -35,7 +35,7 @@ from tkinter import ttk
 
 import numpy as np
 
-from files.lang import tr
+from files.lang import tr, trn
 from files.mathexpr import calc
 from files.snap import SNAPS, snap_beats, snap_text
 from notes.hzbass import (BEND, ENVELOPES, FROM_MODES, FX, FX_START, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, bend_of, bent_part,
@@ -648,9 +648,11 @@ class FxPane:
             n = int(group_count(value))
             return tr("hz.fx_value_groups" if n > 1 else "hz.fx_value_together", name=tr("hz.fx_" + name), n=n)
         if name == "tremolo":
-            return tr("hz.fx_value_beat", name=tr("hz.fx_" + name), n=f"{value * TREMOLO:.3g}")
+            n = f"{value * TREMOLO:.3g}"
+            return trn("hz.fx_value_beat", float(n), name=tr("hz.fx_" + name), n=n)
         if name == "pitch":
-            return tr("hz.fx_value_keys", name=tr("hz.fx_" + name), n=f"{(value - 0.5) * 2 * keys:+.3g}")
+            n = f"{(value - 0.5) * 2 * keys:+.3g}"
+            return trn("hz.fx_value_keys", abs(float(n)), name=tr("hz.fx_" + name), n=n)
         if name in ("offpitch", "vibrato"):  # how far apart the lowest and the highest key's tones are / how far
             most = OFF_PITCH if name == "offpitch" else VIBRATO  # the pitch goes up and down
             return tr("hz.fx_value", name=tr("hz.fx_" + name), value=f"{value * most * 100:.3g}")

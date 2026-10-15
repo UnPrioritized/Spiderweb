@@ -27,7 +27,7 @@ from tkinter import font as tkfont, ttk
 
 import numpy as np
 
-from files.lang import english_width, tr
+from files.lang import english_width, tr, trnum
 from files.mathexpr import calc, fmt
 from notes.hzbass import (ARP, ARP_PATTERNS, BLEND, CHORDS, CRUSH, DETUNE, FAST, GLIDE_CURVE, GROUPS, GROWL, LFO, LOOP,
                           MODES, OFF_BOXES, OFF_PITCH, OSC2, PITCH, RACK, RATE_TOP, SCALES, SOFT, START_COUNT,
@@ -41,7 +41,7 @@ from window.hz_effects import AMOUNT, FX_COLOR
 from window.hz_steps import StepEditor
 from window.synth_look import (DIM, EDGE, ENTRY, GRID, MID, PANEL, PIC, TEXT, Box, bright, dark_list, mix)
 from window.tool_window import Knob
-from window.widgets import Scrub, Tooltip, grid_shown
+from window.widgets import Scrub, Tooltip, grid_shown, unit_word
 
 KNOB_BODY, KNOB_RIM, KNOB_TRACK, KNOB_FOCUS = "#474d57", "#5c636e", "#1a1d22", "#9aa3ae"
 TIME_KNOB = 4.0  # beats a time knob goes to (along a curve: fine near 0)
@@ -78,6 +78,7 @@ KINDS = {"time": ("hz.synth_beats", 0.0, TIME_MOST, (0.05, 0.25, 0.01), TIME_KNO
          "osc_octave": (None, OSC2["octave"][0], OSC2["octave"][1], (1, 1, 1), None),
          "fine": ("hz.synth_cents", OSC2["fine"][0], OSC2["fine"][1], (1, 10, 0.1), None)}
 PERCENTS = ("percent", "width", "gate", "swing", "bend")  # (kept 0..1, shown and typed in %)
+PLURAL_UNITS = ("hz.synth_beats", "hz.synth_keys", "hz.synth_cents")  # (their "_one" key: for 1)
 UPDOWN = ("keys", "pitch", "bend", "osc_octave", "fine")  # (knobs with 0 in the middle)
 # the LFO boxes' Rate knobs that can move by note lengths (Timing dropdown; hzbass.TIMINGS), and how a timing's rates
 # are to the plain note lengths' (1/4 = 1 a beat)
@@ -818,6 +819,8 @@ class SynthKnobs:
         unit, lo, hi, steps, _ = KINDS[kind]
         if unit:
             self.unit_labels[key] = ttk.Label(row, text=tr(unit), style="Synth.Box.Dim.TLabel")
+            if unit in PLURAL_UNITS:  # ("1 beat" while the box holds 1; others like "a beat" keep their text)
+                unit_word(self.unit_labels[key], var, unit)
             self.unit_labels[key].pack(side="left", padx=(2, 0))
         e.bind("<Return>", lambda ev: (self.on_box(key), self.keyboard_back(e), "break")[2])
         e.bind("<FocusOut>", lambda ev: self.on_box(key))
@@ -1476,8 +1479,8 @@ class SynthKnobs:
             c.create_text(c.winfo_width() / 2, c.winfo_height() / 2, text=tr("hz.synth_osc2_off"), fill=TEXT,
                           font=font)
         elif abs(keys) > 1e-9:
-            c.create_text(3 * self.s, 2 * self.s, text=tr("hz.synth_osc2_tune", keys=("+" if keys > 0 else "")
-                                                         + fmt(round(keys, 2))), anchor="nw", fill=DIM, font=font)
+            c.create_text(3 * self.s, 2 * self.s, text=trnum("hz.synth_osc2_tune", "keys", ("+" if keys > 0 else "")
+                                                            + fmt(round(keys, 2))), anchor="nw", fill=DIM, font=font)
 
     def draw_wave(self, c, osc=""):
         """Two waves' notes, one bar each, as tall as it hits (and how many notes a wave takes); osc = "osc2_": OSC
@@ -1671,7 +1674,7 @@ class SynthKnobs:
             y = h - pad - (n["key"] - lo + 1) * rh
             c.create_rectangle(x0, y + 1, x1, y + rh - 1, fill=mix(colour, PIC, 0.8 * (1 - n.get("level", 1.0))),
                                outline="")  # (a quiet step fainter)
-        c.create_text(w - 3 * s, 2 * s, text=tr("hz.synth_arp_notes", n=fmt(arp["speed"])), anchor="ne",
+        c.create_text(w - 3 * s, 2 * s, text=trnum("hz.synth_arp_notes", "n", fmt(arp["speed"])), anchor="ne",
                       fill=DIM, font=("Segoe UI", 7))
 
     def draw_adsr_dot(self):

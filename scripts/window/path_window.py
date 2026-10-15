@@ -13,7 +13,7 @@ from tkinter import ttk
 
 import numpy as np
 
-from files.lang import tr
+from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from files.snap import SNAP_LIST, snap_beats, snap_text
 from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KEY_LIMITS, KINDS, LETTERS, MOST_POINTS,
@@ -372,7 +372,7 @@ class PathWindow(ToolWindow):
         app.shapes[:] = out
         app.select_many(picked, picked[0])
         app.shapes_changed()
-        app.status.config(text=tr("path.plain_done", n=total))
+        app.status.config(text=trn("path.plain_done", total, n=total))
 
     def shown_slots(self, notes, tag, tracks, i):
         """Each note's channel slot on the piano roll now (app.rendered: shape i's notes found by start, end and key);
@@ -821,7 +821,8 @@ class PathWindow(ToolWindow):
             info = tr("path.click_b")
         else:
             cl = clean_path(c)
-            info = tr("path.n_copies", n=len(shifts(cl, ppq, fr[1]))) if cl else ""
+            copies = len(shifts(cl, ppq, fr[1])) if cl else 0
+            info = trn("path.n_copies", copies, n=copies) if cl else ""
             if cl and cl["flip"] == "mirror" and peak(cl, fr[1]) is None:
                 info += "\n" + tr("path.no_peak")
         config(self.info, text=info)

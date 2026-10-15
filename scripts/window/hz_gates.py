@@ -15,7 +15,7 @@ from notes.hzbass import (AUTO, AUTO_MOST, EXTRAS, FULL_LENGTH, HZ_DEFAULTS, LEN
                           clean_sustain, clean_tones, fit_length, held_fixed, left_edge, length_ticks, sound_span)
 from window import look
 from window.hz_effects import AMOUNT
-from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, bad, good, remember_place
+from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, bad, good, remember_place, unit_word
 
 
 GATE_MODES = ("auto", "mixed", "fixed")  # the Gates dropdown's choices, in order
@@ -55,7 +55,7 @@ def ask_live(win, app, prompt, value, lo, hi, steps, on_change):
     var = tk.StringVar(value=fmt(value))
     entry = ttk.Entry(row, textvariable=var, width=9)
     entry.pack(side="left")
-    lb = ttk.Label(row, text=tr("panel_custom.hz_cents"), foreground=look.HINT)
+    lb = unit_word(ttk.Label(row, foreground=look.HINT), var, "unit.cents")
     lb.pack(side="left", padx=(4, 0))
     Scrub(app, [(entry, var, None)], steps, lo, hi, label=lb, drag_box=True)
     got = {"value": None}

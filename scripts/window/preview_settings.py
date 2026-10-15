@@ -14,7 +14,7 @@ import os
 import tkinter as tk
 from tkinter import filedialog, ttk
 
-from files.lang import tr
+from files.lang import tr, trn
 from files.mathexpr import calc
 from files.synth import FONT_TYPES
 from notes.hzbass import AUTO_MOST
@@ -22,7 +22,7 @@ from window import look
 from window.hz_gates import GATE_MODES
 from window.hz_preview import LIVE_MB, VOICES, WORKERS
 from window.hz_trace import open_trace
-from window.widgets import Scrub, Tooltip, bad, good, no_spaces, remember_place
+from window.widgets import Scrub, Tooltip, bad, good, no_spaces, remember_place, unit_word
 
 ORANGE = look.WARN
 
@@ -43,7 +43,7 @@ def auto_box(app, parent, var, apply):
     lb.pack(side="left")
     f.entry = ttk.Entry(f, textvariable=var, width=4)
     f.entry.pack(side="left", padx=(4, 2))
-    ttk.Label(f, text=tr("panel_custom.hz_cents"), foreground=look.HINT).pack(side="left", padx=(0, 4))
+    unit_word(ttk.Label(f, foreground=look.HINT), var, "unit.cents").pack(side="left", padx=(0, 4))
     f.entry.bind("<Return>", lambda e: apply())
     f.entry.bind("<FocusOut>", lambda e: no_spaces(var) or apply())
     Scrub(app, [(f.entry, var, apply)], (0.5, 5, 0.1), 0, AUTO_MOST, label=lb)
@@ -82,7 +82,7 @@ class PreviewSettings(tk.Toplevel):
         f.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
         win.pitch_entry = ttk.Entry(f, textvariable=win.pitch_var, width=6)
         win.pitch_entry.pack(side="left")
-        ttk.Label(f, text=tr("panel_custom.hz_cents"), foreground=look.HINT).pack(side="left", padx=(4, 0))
+        unit_word(ttk.Label(f, foreground=look.HINT), win.pitch_var, "unit.cents").pack(side="left", padx=(4, 0))
         for w in (lb, win.pitch_entry):
             Tooltip(w, tr("panel_custom.hz_cents_tip"))
         win.pitch_entry.bind("<Return>", lambda e: win.on_pitch())
@@ -230,7 +230,8 @@ class PreviewSettings(tk.Toplevel):
             colour = ORANGE if full else look.DARK_TEXT
             if p.speed:
                 slow = p.speed < 1.0
-                speed = tr("ps.speed", speed=f"{p.speed:.1f}", n=WORKERS) + ("  " + tr("ps.slow") if slow else "")
+                speed = (trn("ps.speed", WORKERS, speed=f"{p.speed:.1f}", n=WORKERS) +
+                         ("  " + tr("ps.slow") if slow else ""))
             else:
                 slow, speed = False, tr("ps.speed_none")
         if (self.used.cget("text"), str(self.used.cget("foreground"))) != (used, colour):

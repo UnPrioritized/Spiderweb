@@ -6,7 +6,7 @@ import time
 
 import numpy as np
 
-from files.lang import tr
+from files.lang import tr, trn, trnum
 from files.mathexpr import fmt
 from notes.hzbass import (HZ_DEFAULTS, all_tones, auto_state, bend_range, can_slide, glide, handle_u, heard, hz_of, layers_of,
                           funnel_box, left_edge, links, pitch, slide_knob, slide_part)
@@ -487,14 +487,15 @@ class HzView:
         text = tr("hz.one_note") if n == 1 else tr("hz.n_notes", n=n)
         sh = self.target()
         if sh is not None and all_tones(sh.get("hz") or {}):  # (every layer's: what the piano roll gets)
-            text += "     " + tr("hz.repeats", n=f"{self.app.note_count(sh):,}")
+            made = self.app.note_count(sh)
+            text += "     " + trn("hz.repeats", made, n=f"{made:,}")
         if e is not None and e.x >= self.kb_w and e.y >= self.ruler_h:
             k = self.key_at(e.y)
             cents = ((sh or {}).get("hz") or HZ_DEFAULTS)["cents"]
             text += "     " + tr("hz.position", beat=fmt(max(0.0, self.beat_at(e.x)) + 1), key=note_name(k),
                                  hz=f"{hz_of(k, cents):.2f}")
         if self.drag and self.drag["kind"] == "tune":
-            text += "     " + tr("hz.tune", cents=f"{self.tones[self.drag['i']]['cents']:+g}")
+            text += "     " + trnum("hz.tune", "cents", f"{self.tones[self.drag['i']]['cents']:+g}")
         text += self.bend_status()
         hit = self.hit(e.x, e.y) if e is not None and not self.drag else None
         held = self.drag["kind"] if self.drag else hit and hit[0]

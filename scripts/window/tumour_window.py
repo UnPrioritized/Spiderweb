@@ -14,7 +14,7 @@ from notes.tumour import GRAPH_KEYS, TUMOUR_DEFAULTS, clean_graph
 from window import look
 from window.graph_window import GraphWindow
 from window.panel_custom import GAP_COLOR
-from window.widgets import LocalUndo, Scrub, Tooltip, bad, good, grid_shown, placed, unchanged
+from window.widgets import LocalUndo, Scrub, Tooltip, bad, good, grid_shown, placed, unchanged, unit_text
 
 SHAPE_CHOICES = [("triangle", tr("tumour_window.triangle")), ("square", tr("tumour_window.square")),
                  ("circle", tr("tumour_window.circle")), ("parabola", tr("tumour_window.parabola"))]
@@ -23,12 +23,12 @@ SIDE_CHOICES = [("alt", tr("tumour_window.alternating")), ("left", tr("tumour_wi
 WRAP_CHOICES = [("simple", tr("tumour_window.straight")), ("wrap", tr("tumour_window.bent_with_the_line"))]
 # the number boxes: (setting, label, unit, quick change steps (step, Shift step, Ctrl step) for widgets.Scrub,
 # lowest, highest (as typed))
-NUMBERS = [("size", tr("tumour_window.size"), tr("unit.keys"), (0.1, 1, 0.01), 0, 1000),
-           ("length", tr("tumour_window.length"), tr("unit.ticks"), (1, 10, 0.1), 0, 10 ** 7),
-           ("dist", tr("tumour_window.distance"), tr("unit.ticks"), (1, 10, 0.1), 1, 10 ** 7),
-           ("rot", tr("tumour_window.rotation"), tr("unit.degrees"), (1, 15, 0.1), -180, 180),
-           ("slant", tr("tumour_window.slant"), "%", (1, 10, 0.1), -100, 100),
-           ("ease", tr("tumour_window.lead_in"), tr("unit.ticks"), (1, 10, 0.1), 0, 10 ** 7)]
+NUMBERS = [("size", tr("tumour_window.size"), "unit.keys", (0.1, 1, 0.01), 0, 1000),  # (units: text keys)
+           ("length", tr("tumour_window.length"), "unit.ticks", (1, 10, 0.1), 0, 10 ** 7),
+           ("dist", tr("tumour_window.distance"), "unit.ticks", (1, 10, 0.1), 1, 10 ** 7),
+           ("rot", tr("tumour_window.rotation"), "unit.degrees", (1, 15, 0.1), -180, 180),
+           ("slant", tr("tumour_window.slant"), "unit.percent", (1, 10, 0.1), -100, 100),
+           ("ease", tr("tumour_window.lead_in"), "unit.ticks", (1, 10, 0.1), 0, 10 ** 7)]
 TICKS = ("length", "dist", "ease")  # stored in beats, shown in ticks
 TIPS = {
     "size": tr("tumour_window.how_far_the_bumps_stick_out"),
@@ -60,6 +60,7 @@ class TumourWindow(tk.Toplevel):
         self.entries = {}  # setting -> its entry box
         self.widgets = []  # everything greyed out while tumours are off
         self.graph_btns, self.units = {}, {}  # setting -> its "…" button / unit label
+        self.graphed = set()  # (settings following a graph: "× graph" after their unit)
         self.graph_window = None
 
         box = ttk.Frame(self, padding=8)
@@ -91,8 +92,9 @@ class TumourWindow(tk.Toplevel):
                 b.grid(row=r, column=2, sticky="w", padx=(0, 5))
                 Tooltip(b, tr("tumour_window.a_graph_this_number_changes_along"))
                 self.widgets.append(b)
-            u = self.units[key] = ttk.Label(box, text=unit, foreground=look.HINT)
+            u = self.units[key] = ttk.Label(box, text=tr(unit), foreground=look.HINT)
             u.grid(row=r, column=3, sticky="w")
+            var.trace_add("write", lambda *_, key=key: self.show_unit(key))
             Tooltip(e, TIPS[key])
             self.widgets.append(e)
             self.entries[key] = e
@@ -318,11 +320,9 @@ class TumourWindow(tk.Toplevel):
             else:
                 self.reroll.pack_forget()
         # a number following a graph: blue, "× graph" after its unit
-        graphs = tm.get("graphs") or {}
-        for key, _, unit, *_ in NUMBERS:
-            if key in self.graph_btns:
-                self.units[key].config(text=tr("tumour_window.graph", unit=unit) if key in graphs else unit,
-                                       foreground=look.VALUE if key in graphs else look.HINT)
+        self.graphed = set(tm.get("graphs") or {})
+        for key, *_ in NUMBERS:
+            self.show_unit(key)
         if self.graph_window:
             self.graph_window.sync()
         own = bool(tgts) and any(t.get("tumours") for t in tgts)
@@ -382,6 +382,19 @@ class TumourWindow(tk.Toplevel):
             return
         self.set(key, value, group=True)
         self.app.sync_tumour()
+
+    def show_unit(self, key):
+        """The unit after a box ("1 key" / "2 keys"), blue + "× graph" while it follows a graph."""
+        u = self.units.get(key)
+        if u is None:
+            return
+        word = unit_text(self.vars[key].get(), next(unit for k, _, unit, *_ in NUMBERS if k == key))
+        graph = key in self.graphed and key in self.graph_btns
+        text = tr("tumour_window.graph", unit=word) if graph else word
+        if u.cget("text") != text:
+            u.config(text=text, foreground=look.VALUE if graph else look.HINT)
+        elif str(u.cget("foreground")) != str(look.VALUE if graph else look.HINT):
+            u.config(foreground=look.VALUE if graph else look.HINT)
 
     def open_graph(self, key, label, unit):
         if self.graph_window and self.graph_window.key != key:

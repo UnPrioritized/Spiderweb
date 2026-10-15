@@ -11,7 +11,7 @@ import numpy as np
 from files import clipboard
 from files.clipboard import copy_count
 from files.domino_clip import get_from_clipboard, read_notes
-from files.lang import tr
+from files.lang import tr, trnum
 from files.snap import snap_beats
 from files.system import double_click_ms
 from notes.hzbass import LAYERS, TUNE, bend_for, can_slide, handle_u, left_edge, next_id, pitch
@@ -719,7 +719,7 @@ class HzMouse:
         if hz.get("auto") is not None:
             menu.add_command(label=tr("hz.box_auto"), command=lambda: self.type_auto(first))
             if any("auto" in self.tones[j] for j in self.sel):
-                menu.add_command(label=tr("hz.auto_shared", cents=f"{hz['auto']:g}"),
+                menu.add_command(label=trnum("hz.auto_shared", "cents", f"{hz['auto']:g}"),
                                  command=lambda: self.set_auto(first, None))
         self.gate_items(menu, first)
         self.bend_items(menu, first)
@@ -737,16 +737,16 @@ class HzMouse:
         pairs = self.pairs()
         menu = tk.Menu(self, tearoff=0)
         if hit and hit[0] not in DOTS:
-            menu.add_command(label=tr("hz.tune_type", cents=f"{self.tones[hit[1]]['cents']:+g}"),
+            menu.add_command(label=trnum("hz.tune_type", "cents", f"{self.tones[hit[1]]['cents']:+g}"),
                              command=lambda: self.type_tune(hit[1]))
             hz = (self.target() or {}).get("hz") or {}
             if hz.get("auto") is not None:  # Auto gates: the note's own threshold
                 n = self.tones[hit[1]]
-                menu.add_command(label=tr("hz.auto_own", cents=f"{n.get('auto', hz['auto']):g}"),
+                menu.add_command(label=trnum("hz.auto_own", "cents", f"{n.get('auto', hz['auto']):g}"),
                                  command=lambda: self.type_auto(hit[1]))
                 picked = self.sel if hit[1] in self.sel else {hit[1]}
                 if any("auto" in self.tones[j] for j in picked):
-                    menu.add_command(label=tr("hz.auto_shared", cents=f"{hz['auto']:g}"),
+                    menu.add_command(label=trnum("hz.auto_shared", "cents", f"{hz['auto']:g}"),
                                      command=lambda: self.set_auto(hit[1], None))
             self.gate_items(menu, hit[1])
             self.bend_items(menu, hit[1])  # (its own bend line: copy, paste, clear; hz_bend.py)

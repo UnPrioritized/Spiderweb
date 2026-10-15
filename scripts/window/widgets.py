@@ -659,16 +659,25 @@ class Tooltip:
             self.tip = None
 
 
-def unit_text(text, many, one):
-    """The unit word for a number box's text: key one while it holds exactly 1 or -1 ("1 tick"), else many."""
+ONE = {"unit.keys": "unit.key", "unit.ticks": "unit.tick", "unit.degrees": "unit.degree", "unit.beats": "unit.beat",
+       "unit.steps": "unit.step", "unit.cents": "unit.cent"}  # (unit keys -> their key for 1)
+
+
+def unit_text(text, many, one=None):
+    """The unit word for a number box's text: key one (default: ONE's, else many + "_one" if there is one) while it
+    holds exactly 1 or -1 ("1 tick"), else many."""
     try:
         n = abs(float(calc(text)))
     except Exception:
         n = None
-    return tr(one) if n == 1 else tr(many)
+    if n != 1:
+        return tr(many)
+    one = one or ONE.get(many) or many + "_one"
+    got = tr(one)
+    return tr(many) if got == one else got  # (no such key: the usual word)
 
 
-def unit_word(label, var, many, one):
+def unit_word(label, var, many, one=None):
     """A unit word beside a number box (label: a ttk.Label): unit_text, following the box as it's typed. Returns
     the label."""
     def put(*_):

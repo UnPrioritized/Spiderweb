@@ -13,7 +13,7 @@ from notes.tiles import BY, FLIPS, LAYOUTS, MOST_BEATS, MOST_COLOURS, MOST_KEYS,
 from window import look
 from window.drawer import library_lists
 from window.panel_nested import DROP_WIDTH, NOTES_CHOICES, drop_row
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, set_names, unchanged
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, set_names, unchanged, unit_word
 
 # the number boxes: (setting, label, unit, lowest, highest, Scrub steps, in ticks); two a row
 BOXES = [
@@ -59,7 +59,7 @@ class TilesPanel:
                 var = tk.StringVar()
                 e = ttk.Entry(row, textvariable=var, width=5)
                 e.grid(row=0, column=3 * n + 1, sticky="w", padx=4)
-                ttk.Label(row, text=tr("panel_custom." + unit), foreground=look.HINT).grid(
+                unit_word(ttk.Label(row, foreground=look.HINT), var, "panel_custom." + unit).grid(
                     row=0, column=3 * n + 2, sticky="w")
                 apply = (lambda left=False, key=key: self.on_tiles_box(key, left))
                 e.bind("<Return>", lambda ev, apply=apply: apply())

@@ -13,7 +13,7 @@ from notes.sustain import is_sustained
 from notes.mask import (GROUP_KEYS, MASK_DEFAULTS, MODES, MOST_SIZE, SHOWS, THICKNESS, can_mask, free_colour, is_mask,
                         is_solid, loops_of, mask_units, new_group_id, tidy_groups, unit_of, unit_shown, unmasked)
 from window import look
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged, unit_word
 
 SHOW_CHOICES = [(v, tr("mask.show_" + v)) for v in SHOWS]
 MODE_CHOICES = [(v, tr("mask.mode_" + v)) for v in MODES]
@@ -56,7 +56,7 @@ class MaskPanel:
         e.pack(side="left", padx=4)
         Scrub(self, [(e, self.mask_size_var, lambda: self.on_mask("size"))], (0.5, 4, 0.1), 0, MOST_SIZE, label=lb,
               drag_box=True)
-        ttk.Label(c, text=tr("mask.keys"), foreground=look.HINT).pack(side="left")
+        unit_word(ttk.Label(c, foreground=look.HINT), self.mask_size_var, "unit.keys").pack(side="left")
         e.bind("<Return>", lambda ev: self.on_mask("size"))
         leave_box(self, e, self.mask_size_var, lambda left, e=e: self.on_mask("size", left and e))
         self.mask_invert = tk.BooleanVar(self, value=False)

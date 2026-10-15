@@ -16,7 +16,7 @@ from notes.joined import shown_tumour
 from notes.tumour import GRAPH_LIMIT, TUMOUR_DEFAULTS
 from window import look
 from window.panel_custom import GAP_COLOR
-from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, placed, remember_place
+from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, placed, remember_place, unit_text, unit_word
 
 FLAT = [[0.0, 1.0], [1.0, 1.0]]
 PRESETS = [(tr("graph_window.flat_off"), FLAT), (tr("graph_window.rise"), [[0.0, 0.0], [1.0, 1.0]]),
@@ -333,8 +333,8 @@ class GraphWindow(tk.Toplevel):
 
     def value_text(self, f):
         """What f (a multiplier) makes of the box's number, as the box shows it."""
-        return tr("graph_window.text", f=fmt(round(f * 100, 1)), v=fmt(round(self.box_number() * f, 2)),
-                  unit=self.unit)
+        v = fmt(round(self.box_number() * f, 2))
+        return tr("graph_window.text", f=fmt(round(f * 100, 1)), v=v, unit=unit_text(v, self.unit))
 
     def f_snap(self):
         """Dragging moves points in steps of this (5 %, finer when the view is small)."""
@@ -508,8 +508,9 @@ class PointDialog(tk.Toplevel):
         box = ttk.Frame(self, padding=10)
         box.pack(fill="both", expand=True)
         self.vars, self.boxes = {}, {}
-        rows = [("along", tr("graph_window.along"), fmt(round(u * 100, 4)), "%", (1, 10, 0.1), 0, 100),
-                ("value", tr("graph_window.value_box"), fmt(round(f * 100, 4)), "%", (5, 25, 1), -LIMIT, LIMIT)]
+        rows = [("along", tr("graph_window.along"), fmt(round(u * 100, 4)), "unit.percent", (1, 10, 0.1), 0, 100),
+                ("value", tr("graph_window.value_box"), fmt(round(f * 100, 4)), "unit.percent", (5, 25, 1), -LIMIT,
+                 LIMIT)]
         if abs(self.number) > 1e-12:
             rows.append(("number", "=", fmt(round(self.number * f, 4)), gw.unit, (1, 10, 0.1), None, None))
         for r, (key, text, value, unit, steps, lo, hi) in enumerate(rows):
@@ -518,7 +519,7 @@ class PointDialog(tk.Toplevel):
             var = self.vars[key] = tk.StringVar(value=value)
             e = self.boxes[key] = ttk.Entry(box, textvariable=var, width=10)
             e.grid(row=r, column=1, sticky="w", padx=(6, 4), pady=2)
-            ttk.Label(box, text=unit).grid(row=r, column=2, sticky="w")
+            unit_word(ttk.Label(box), var, unit).grid(row=r, column=2, sticky="w")
             if key == "along" and self.end:
                 e.config(state="disabled")  # (the ends stay at the line's start / end)
                 continue

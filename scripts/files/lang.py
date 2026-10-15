@@ -283,6 +283,15 @@ def trn(key_, count_, **values):
     return tr(one, **values)
 
 
+def trnum(key_, place, text, **values):
+    """trn for a number already written as text ("+1", "1,000") put in {place}: "_one" when it's 1 or -1."""
+    try:
+        count = abs(float(str(text).replace(",", "")))
+    except ValueError:
+        count = None
+    return trn(key_, count, **{place: text}, **values)
+
+
 def plural(n, one, many):
     """A word for n things (keys): one when n is exactly 1."""
     return tr(one) if n == 1 else tr(many)

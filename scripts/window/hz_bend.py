@@ -19,7 +19,7 @@ import tkinter as tk
 
 import numpy as np
 
-from files.lang import tr
+from files.lang import tr, trn
 from files.mathexpr import fmt
 from notes.hzbass import SLIDE_BEND, bend_range, line_at, note_bend, pitch
 from roll.roll_shared import SHIFT
@@ -270,7 +270,7 @@ class HzBend:
         if not d or d["kind"] != "bendpt":
             return ""
         k = self.tones[d["i"]]["bend"][d["j"]][1]
-        return "     " + tr("hz.bend_keys", keys=("+" if k > 0 else "") + fmt(k))
+        return "     " + trn("hz.bend_keys", abs(float(fmt(k))), keys=("+" if k > 0 else "") + fmt(k))
 
     def bend_items(self, menu, i):
         """The right-click menu's Bend submenu for note i (and the other selected notes when it's one of them): Copy

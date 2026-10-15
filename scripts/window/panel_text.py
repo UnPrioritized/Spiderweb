@@ -9,14 +9,14 @@ from notes.fonts import DEFAULT_FONT, WEIGHTS
 from notes.text import TEXT_DEFAULTS, build, restyle, shown_size, text_axes, text_font, with_arial
 from window import look
 from window.font_dialog import FontDialog
-from window.widgets import Scrub, Tooltip, bad, good, leave_box
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, unit_word
 
 # number boxes: setting -> (label, unit, smallest, largest)
-ENTRIES = {"size": (tr("panel_text.size"), "", 0.01, 2000),
-           "tracking": (tr("panel_text.letter_spacing"), tr("panel_text.1000_em"), -1000, 10000),
-           "leading": (tr("panel_text.line_spacing"), "%", 1, 1000),
-           "threshold": (tr("panel_text.threshold"), "%", 0, 100),
-           "grow": (tr("panel_text.grow"), tr("unit.keys"), -100, 100)}
+ENTRIES = {"size": (tr("panel_text.size"), "", 0.01, 2000),  # (units: text keys)
+           "tracking": (tr("panel_text.letter_spacing"), "panel_text.1000_em", -1000, 10000),
+           "leading": (tr("panel_text.line_spacing"), "unit.percent", 1, 1000),
+           "threshold": (tr("panel_text.threshold"), "unit.percent", 0, 100),
+           "grow": (tr("panel_text.grow"), "unit.keys", -100, 100)}
 # quick changes (widgets.Scrub): (step, Shift step, Ctrl step)
 STEPS = {"size": (1, 10, 0.1), "tracking": (10, 100, 1), "leading": (5, 25, 1), "threshold": (1, 10, 0.1),
          "grow": (0.1, 1, 0.01)}
@@ -69,7 +69,8 @@ class TextPanel:
             Scrub(self, [(e, self.text_vars[key], lambda key=key: self.on_text_entry(key))], STEPS[key], lo, hi,
                   label=lb)
             if unit:
-                ttk.Label(row, text=unit, foreground=look.HINT).pack(side="left", padx=(3, 0))
+                unit_word(ttk.Label(row, foreground=look.HINT), self.text_vars[key], unit).pack(side="left",
+                                                                                                padx=(3, 0))
             if key in TIPS:
                 Tooltip(e, TIPS[key])
             if key == "size":
