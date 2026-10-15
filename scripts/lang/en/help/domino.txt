@@ -12,9 +12,9 @@ Channels set to Multi channel: each channel with notes becomes a track, in chann
 
 Ticks are copied as they are: with a different PPQ in Domino the notes come out longer or shorter, so set the same PPQ in both (or use that on purpose). With 256 keys, notes above key 127 are left out (Domino has 128 keys).
 
-Pasting works the other way: select notes in Domino, press Ctrl+C there, then press Ctrl+V here. The start of what you copied (or its first note, see the dropdown) lands on the play line (snapped to the grid), like pasting in Domino, and ticks are taken as they are. With the Select tool, a double-click on empty space pastes them there instead.
+Pasting works the other way: select notes in Domino, press Ctrl+C there, then press Ctrl+V here (or Paste on the Domino row). The start of what you copied (or its first note, see the dropdown) lands on the play line (snapped to the grid), like pasting in Domino, and ticks are taken as they are. With the Select tool, a double-click on empty space pastes them there instead.
 
-Ctrl+V pastes whatever was copied last: notes copied in Domino after your last copy in Spiderweb come in as Pasted notes, a shape copied here after them pastes that shape.
+Ctrl+V pastes whatever was copied last: notes copied in Domino after your last copy in Spiderweb come in as Pasted notes, a shape copied here after them pastes that shape. The Paste button always takes the notes copied in Domino.
 
 The notes of every copied track become one shape (Pasted notes); controllers and other events are left out. Each note remembers its track: with Multi channel every track gets a channel of its own (even tracks that never overlap), with Single channel all of them go on one channel and overlaps are removed.
 

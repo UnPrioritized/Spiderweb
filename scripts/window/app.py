@@ -653,7 +653,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         ttk.Label(domino, text=tr("app.domino_row")).pack(side="left")
         for text, tip, command, gap in (("app.domino_export", "app.domino_export_tip", self.export_dms, 0),
                                         ("app.domino_copy", "app.ctrl_shift_c_copies_the_selected",
-                                         self.copy_to_domino, 4)):  # (the same gap as Open… / Save…)
+                                         self.copy_to_domino, 4),  # (the same gap as Open… / Save…)
+                                        ("app.domino_paste", "app.domino_paste_tip",
+                                         lambda: self.paste_from_domino(), 0)):  # (user: missed it)
             b = ttk.Button(domino, text=tr(text), command=command)
             b.pack(side="right", padx=gap)
             Tooltip(b, tr(tip))
