@@ -28,8 +28,8 @@ import math
 import numpy as np
 
 from files import speed
-from notes.custom import (clean_strokes, cut_out, drawn_view, edge_loops, find_spans, fill_plan, frame_to_bp,
-                          frame_to_uv, has_nested, has_tiles, inside_rows, merged_rows, poly_edges, rows_spans)
+from notes.custom import (carried_fill, clean_strokes, cut_out, drawn_view, edge_loops, find_spans, fill_plan,
+                          frame_spans, frame_to_bp, frame_to_uv, has_nested, has_tiles, inside_rows, merged_rows, poly_edges, rows_spans)
 from notes.paths import TOP_KEY, pitch_of
 from notes.shrink import field, inner_rows, proportion
 
@@ -348,6 +348,7 @@ def scaled_steps(sh, ppq, base, centre, view):
     way = -1 if mirrored(sh) else 1  # (a flipped shape's copies turn the other way: its fill is a mirror image)
     angle = way * math.radians(cfg.get("angle", 0.0))
     plan = morph_plan(sh, drawing, centre, view, angle) if of and cfg.get("morph") else None
+    carried = False  # (carried_fill, once a copy needs it)
     steps = []
     for i, ((size, turn), f) in enumerate(zip(step_sizes(cfg), step_shares(cfg))):
         turn *= way
@@ -366,8 +367,11 @@ def scaled_steps(sh, ppq, base, centre, view):
             else:  # (plain even-odd loops: straight to their rows, no outline work for these one-off copies)
                 to_bp = frame_to_bp(frame)
                 found = loop_spans([np.column_stack(to_bp(l[:, 0], l[:, 1])) for l in loops], ppq)
-        else:
-            found = find_spans(dict(drawing, pts=moved_frame(sh["pts"], centre, size, turn + angle, view)), ppq)
+        else:  # (the drawing's lines and areas worked out once, in the shape's box: each copy only moves them)
+            frame = moved_frame(sh["pts"], centre, size, turn + angle, view)
+            if carried is False:
+                carried = carried_fill(dict(drawing, pts=sh["pts"]))
+            found = frame_spans(carried, frame, ppq) if carried else find_spans(dict(drawing, pts=frame), ppq)
         sp = np.asarray(found, np.int64).reshape(-1, 3)[:, [1, 2, 0]]
         steps.append(cut_out(sp, cut_out(sp, base)) if len(sp) else sp)  # (only where the shape is)
     return steps

@@ -1026,6 +1026,51 @@ def find_spans(sh, ppq):
     return out
 
 
+def carried_fill(sh):
+    """What find_spans fills, kept in the shape's own box (u, v) for copies of it in other boxes (frame_spans; Nested:
+    the lines and areas worked out once, not again for every copy): (walls in u, v, (union, faces) when fill_test
+    decides, else None), or None when the box is flat. Not text."""
+    walled = fill_test(sh)
+    uv = [uv_points(sh["pts"], p) for p in (walls(sh) if walled else fill_plan(sh)["polys"])]
+    fc = shape_faces(sh) if walled else None
+    if any(p is None for p in uv) or walled and fc is None:
+        return None
+    return uv, (bool(sh.get("union")), fc) if walled else None
+
+
+def frame_spans(carried, frame, ppq):
+    """find_spans of the shape carried_fill was made from, its box moved to frame (moved / resized / turned)."""
+    uv, walled = carried
+    to_bp = frame_to_bp(frame)
+    polys = [np.column_stack(to_bp(p[:, 0], p[:, 1])) for p in uv]
+    edges = poly_edges(polys)
+    if not polys or not len(edges[0]):
+        return []
+    ys = np.concatenate([p[:, 1] for p in polys])
+    q0, q1 = max(0, pitch_of(float(ys.min()))), min(TOP_KEY, pitch_of(float(ys.max())))
+    if not walled:
+        return rows_spans(edges, q0, q1, ppq)
+    union, fc = walled
+
+    def test(x, y):  # (fill_test's, with the faces at hand)
+        x, y = np.asarray(x, float), np.asarray(y, float)
+        if not x.size:
+            return np.zeros(len(x), bool)
+        at = uv_points(frame, np.column_stack([x.reshape(len(x), -1)[:, 0], y.reshape(len(y), -1)[:, 0]]))
+        if at is None:
+            return np.zeros(len(x), bool)
+        d = fc.depth_at(at[:, 0], at[:, 1])
+        return d >= 1 if union else d % 2 == 1
+    edges += (np.zeros(len(edges[0]), np.int64),)
+    out = []
+    for q in range(q0, q1 + 1):  # (as find_spans)
+        row = [(math.floor(a * ppq + 0.5), math.floor(b * ppq + 0.5)) for a, b, *_ in row_pieces(edges, q, test,
+                                                                                                    as_normal)]
+        some = any(e > s for s, e in row)
+        out += [(q, s, max(e, s + 1)) for s, e in row if e > s or not some]
+    return out
+
+
 # ---------------------------------------------------------------- areas coloured by hand (areas.py)
 
 def has_areas(sh):
