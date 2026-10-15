@@ -597,13 +597,21 @@ class Tooltip:
     is used (clicked, dragged, wheel, keys), the box stays away until the mouse leaves it with no button held."""
 
     BUTTONS = 0x1f00  # (event.state: a mouse button is held)
+    # its own bind tag, first on the widget: the widget's own <ButtonPress-1> / wheel bindings (knobs, number box
+    # labels, tabs) would otherwise win over a plain <ButtonPress> and the box stayed up while they were used
+    TAG = "Tooltip"
 
     def __init__(self, widget, text):
         self.widget, self.text, self.tip, self.job, self.used = widget, text, None, None, False
-        widget.bind("<Enter>", self.enter, add="+")
-        widget.bind("<Leave>", self.leave, add="+")
-        for seq in ("<ButtonPress>", "<MouseWheel>", "<KeyPress>"):
-            widget.bind(seq, lambda e: self.use(), add="+")
+        if not widget.bind_class(self.TAG, "<Enter>"):  # (once per Tk)
+            for seq, name in (("<Enter>", "enter"), ("<Leave>", "leave"), ("<ButtonPress>", "use"),
+                              ("<MouseWheel>", "use"), ("<KeyPress>", "use")):
+                widget.bind_class(self.TAG, seq, lambda e, n=name: [getattr(t, n)(e) for t in
+                                                                    getattr(e.widget, "tooltips", ())] and None)
+        if not hasattr(widget, "tooltips"):
+            widget.tooltips = []
+            widget.bindtags((self.TAG,) + widget.bindtags())
+        widget.tooltips.append(self)
 
     def enter(self, e):
         if not self.used and not e.state & self.BUTTONS:
@@ -614,7 +622,7 @@ class Tooltip:
         if not e.state & self.BUTTONS:
             self.used = False
 
-    def use(self):
+    def use(self, e=None):
         self.used = True
         self.hide()
 
