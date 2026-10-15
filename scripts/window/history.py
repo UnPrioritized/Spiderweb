@@ -1,4 +1,4 @@
-"""The History panel: every undo step by name, oldest at the top; click one to go back (or forward) to it. The
+"""Undo / redo (Ctrl+Z / Ctrl+Y, push_undo, _restore) and the History panel: every undo step by name, oldest at the top; click one to go back (or forward) to it. The
 toolbar's History box shows / hides it (off on a fresh start). It sits in the side panel between Project and Shapes;
 Undock puts it in a window of its own (Dock, or closing that window, puts it back). The steps themselves are
 App.undo_stack / redo_stack: (shapes as undo_state, name, (selected shape numbers, main one, kept Select boxes))
@@ -247,3 +247,193 @@ class HistoryPanel:
         self.sync_history(force=True)
         self.roll.focus_set()
 
+
+    # ------------------------------------------------------------ undo / redo
+
+    def settle_windows(self):
+        """The windows trying changes out (note tools, tumours, sustain) keep them as their own steps. Several at
+        once: the first step takes back what ALL of them tried, the next all but the first's... (each step was
+        made from the shapes as they are, which hold every window's tries: undoing them all came back to one)."""
+        ws = [w for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window,
+                          self.tumour_window, self.sustain_window) if w]
+        waiting = [w for w in ws if w.pending()]
+        for w in ws:
+            w.settle(also=waiting[waiting.index(w) + 1:] if w in waiting else ())
+
+    def push_undo(self, state=None, name=None):
+        """Remember the shapes (or `state`, shapes saved earlier as JSON) for Ctrl+Z; name = what the step does
+        (the History panel)."""
+        self.settle_windows()  # (the claw / strum / tumours / sustain being tried out are kept first, as own steps)
+        sc = self._scrub
+        if sc and sc["active"]:  # stepping a number box: only its first step takes an undo step
+            if sc["pushed"]:
+                return
+            sc["pushed"] = True
+        else:
+            self._scrub = None
+        own = bool(self.hz_window and self.hz_window.own_step)  # (made there, whatever has the keyboard now)
+        self.add_undo_step(state or undo_state(self.shapes), name, hz=own or self.in_hz())
+        if sc and sc["active"]:
+            sc["at"] = len(self.undo_stack)  # (take_back_scrub: still the last step?)
+
+    def take_back_scrub(self, gesture):
+        """Ctrl+Z while a number box's label is held (Scrub.cancel): its step goes, not even kept for redo; the
+        steps undone before it and the oldest ones the 300 limit dropped come back."""
+        sc = self._scrub
+        if sc and sc["gesture"] is gesture and sc["pushed"] and sc.get("at") == len(self.undo_stack):
+            kept, trimmed = self._redo_kept, self._trimmed
+            self._restore(self.undo_stack, self.redo_stack)
+            self.redo_stack.pop()
+            if kept:
+                self.redo_stack[:] = kept[0]
+            if trimmed:
+                self.undo_stack[:0] = trimmed
+            self.sync_history()
+        self._scrub = None
+
+    def add_undo_step(self, before, name=None, sel=None, hz=False):
+        """push_undo without its checks (before: the shapes as JSON or history.undo_state). The selection is kept with
+        it (sel: the one from when `before` was saved, sel_state(); default: now): undo puts it back with the shapes
+        (shapes are picked by number, which can point at another shape after undo). hz: made in the Hz bass window
+        (key_undo)."""
+        before = as_state(before, self.shapes)
+        self.drop_empty_step(before)
+        self.undo_stack.append((before, name or tr("app.change"), sel or self.sel_state(), hz))
+        self._trimmed = self.undo_stack[:-300]  # (put back by drop_empty_step if this step changes nothing)
+        del self.undo_stack[:-300]
+        # the undone steps are kept aside until this step turns out to change something (a click on a shape that
+        # doesn't drag it mustn't throw them away: drop_empty_step brings them back)
+        self._redo_kept = (self.redo_stack[:], len(self.undo_stack)) if self.redo_stack else None
+        self.redo_stack.clear()
+        self._edit_key = None
+        self.sync_history()
+
+    def sel_state(self):
+        """The selection as an undo step keeps it: (selected shape numbers, the main one, the kept Select boxes or
+        None, the Hz bass window's HzWindow.sel_state() or None, the picked stroke, the funnel's highlighted parts,
+        the one of them clicked)."""
+        boxes = self.roll.kept_box()
+        return (sorted(self.sels), self.sel, boxes and list(boxes), self.hz_window and self.hz_window.sel_state(),
+                self.stroke, list(self.parts), self.part_main)
+
+    def scrub_step(self, gesture, run):
+        """run() steps a number box (widgets.Scrub). The steps of one gesture (a label drag, or arrows / wheel on the
+        same box with nothing else in between) share one undo step."""
+        if not self._scrub or self._scrub["gesture"] is not gesture:
+            self._scrub = {"gesture": gesture, "pushed": False, "active": False}
+        sc = self._scrub
+        sc["active"] = True
+        try:
+            run()
+        finally:
+            sc["active"] = False
+
+    def begin_edit(self, key):
+        """Typing in one box counts as a single undo step until you move to another box."""
+        if key != self._edit_key:
+            self.push_undo(name=edit_name(key))
+            self._edit_key = key
+
+    def undo(self):
+        if self.roll.drop_hz_keys():  # (a new Hz bass's keys being dragged: just called off)
+            return
+        if self.roll.draft or self.roll.typing_empty():  # something half drawn (a funnel waiting for its wall, a
+            return self.roll.cancel_draft()                # polyline, a text caret with nothing typed): just drop it
+        if self.hz_window and self.hz_window.pending:  # a slide started in the Hz bass window: just drop its mark
+            self.hz_window.pending = None
+            return self.hz_window.redraw()
+        self.drop_empty_step(undo_state(self.shapes))  # (a click that changed nothing isn't a step)
+        self._restore(self.undo_stack, self.redo_stack)
+
+    def redo(self):
+        if self.roll.hz_keys_held():  # (a new Hz bass's keys being dragged: nothing)
+            return
+        self._restore(self.redo_stack, self.undo_stack)
+
+    def key_undo(self, e, redo=False):
+        """Ctrl+Z / Ctrl+Y. In the Hz bass window only its own changes (user: the piano roll behind stays as it
+        is): a step made elsewhere is next = a ding and a word in its status line."""
+        hz = self.hz_window
+        if self.grabbed_elsewhere():
+            return None  # (a pop-up without its own undo: the shapes it works on stay as they are)
+        if self.vel.edit:  # a velocity line held: Ctrl+Z throws it away (no step), Ctrl+Y does nothing
+            return "break" if redo else (self.vel.drop(), "break")[1]
+        if self.held_scrub:  # a number box's label held: Ctrl+Z = back to the press (no step), Ctrl+Y nothing
+            return "break" if redo else (self.held_scrub.cancel(), "break")[1]
+        if self.in_settings(e.widget):
+            return "break"  # (Settings has no undo; the shapes behind stay as they are)
+        if not self.in_hz(e.widget):
+            if self.box_drawn():
+                return "break"
+            if self.path_window and self.path_window.local_step(redo):  # (its points are dragged on the piano roll)
+                return "break"
+            if self.sustain_window and self.sustain_window.local_step(redo):  # (its stops are dragged there)
+                return "break"
+            return self.redo() if redo else self.undo()
+        if hz.drag:  # the mouse held there: Ctrl+Z only puts back what's being dragged (no step), Ctrl+Y nothing
+            return None if redo else hz.cancel_drag()
+        held = hz.held_fx()  # (the same for an effect's points and the synth window's knobs)
+        if held:
+            return None if redo else held()
+        if hz.draft is not None and (hz.draft.get("held") is not None or not redo):  # a path being drawn: it
+            return None if redo else (hz.drop_draft(), "break")[1]  # goes, nothing made (Ctrl+Y: nothing)
+        tw = hz.trace_win  # (the Wave shape window's changes no Hz bass held yet: its own steps)
+        if tw and tw.winfo_exists() and str(e.widget).startswith(str(tw)) and tw.local_step(redo):
+            return "break"
+        if not redo and hz.pending:  # a slide started: just drop its mark
+            hz.pending = None
+            return hz.redraw()
+        if not redo:
+            self.drop_empty_step(undo_state(self.shapes))
+        src = self.redo_stack if redo else self.undo_stack
+        if src and not src[-1][3]:
+            hz.bell()
+            return hz.status.config(text=tr("hz.redo_elsewhere" if redo else "hz.undo_elsewhere"))
+        self._restore(src, self.undo_stack if redo else self.redo_stack)
+
+    def _restore(self, src, dst, count=1):
+        """count steps from src to dst (a History jump: the steps on the way only move, the shapes are made once)."""
+        self.settle_windows()  # (so Ctrl+Z here takes back the claw / strum / tumours / sustain being tried out)
+        if not src:
+            if self.roll.holding():  # (nothing to take back: still lets go, or the rest of the drag had no step)
+                self.roll.cancel_draft()
+            return
+        hz_was = self.hz_window and self.hz_window.before_restore()
+        self.roll.cancel_draft()
+        now, sel_now = undo_state(self.shapes), self.sel_state()
+        ch10 = None
+        for _ in range(min(count, len(src))):
+            state, name, picked, hz = src.pop()
+            mark = tuple(picked[7:8])  # (CH10_OFF: unticking "Use channel 10" made it: undo ticks it, redo unticks)
+            if mark:
+                ch10 = src is self.undo_stack
+                picked = tuple(picked[:7])
+            dst.append((now, name, tuple(sel_now) + mark, hz))
+            now, sel_now = state, picked
+        if ch10 is not None:
+            self.use_ch10.set(ch10)
+        state, picked = now, sel_now
+        self._redo_kept = self._trimmed = None
+        self.shapes = load_state(state)
+        self.sels, self.sel = set(picked[0]), picked[1]
+        self.sels = {i for i in self.sels if i < len(self.shapes)}
+        self.parts = set()
+        self.stroke = None
+        if self.sel not in self.sels:
+            self.sel = max(self.sels, default=None)
+        # the Select boxes, the picked stroke and the funnel's highlighted parts come back as they were (only while
+        # they still go with the same selection)
+        same = self.sels == set(picked[0])
+        self.roll.box_kept = (picked[2], set(self.sels)) if picked[2] and same else None
+        if same:
+            self.stroke, self.parts, self.part_main = picked[4], set(picked[5]), picked[6]
+        self._edit_key = self._scrub = None
+        self.sync_panel()
+        self.shapes_changed()
+        if ch10 is not None:
+            self.sync_colours()
+            self.show_colour_limit()
+        if self.hz_window:
+            self.hz_window.after_restore(hz_was)
+            if self.sels == set(picked[0]):
+                self.hz_window.restore_sel(picked[3])

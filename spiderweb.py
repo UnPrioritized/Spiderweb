@@ -5,7 +5,9 @@ Draw lines, polylines, freehand strokes, curves, arcs and text on a piano roll a
 
 Files (the scripts live in scripts/, one subfolder per group):
   window/            the main window and its side panel
-    app.py           main window: toolbar, side panel, shapes, playback, undo
+    app.py           main window: toolbar, side panel, shapes
+    app_playback.py  playing the notes, right-drag listening, MIDI out + Built-in BASSMIDI's settings
+    app_pictures.py  placed pictures (Image to notes): placing, editing, notes made again
     panel_custom.py  the panel's custom shape settings, opening the drawer
     panel_colours.py the panel's Colours row (notes taking turns over channels)
     panel_funnel.py  the panel's funnel settings
@@ -15,7 +17,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     pattern_dialog.py the Custom... windows for a curve's shape and pattern (presets, formulas, edited by hand)
     formula_host.py  where formulas go (piano roll curves, drawer strokes, funnel curves) + the Formula menu
     tumour_window.py the tumour window: the tumour settings (bumps along lines)
-    history.py       the History list (named undo steps; docked in the side panel or its own window)
+    history.py       undo / redo and the History list (named undo steps; docked in the side panel or its own window)
     graph_window.py  a tumour setting's graph (the number changing along the line)
     join_split.py    Join (shapes -> one curve) and Split (cut in two, pieces -> separate shapes)
     panel_freehand.py  the panel's Straighten setting for freehand strokes

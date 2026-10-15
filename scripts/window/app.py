@@ -1,17 +1,17 @@
-"""Main window: toolbar, side panel, shapes, playback and undo.
+"""Main window: toolbar, side panel, shapes.
 Its other parts: panel_custom.py / panel_funnel.py / panel_tumour.py (+ tumour_window.py) / panel_text.py /
-panel_pattern.py (those panel sections),
+panel_pattern.py (those panel sections), app_playback.py (playing, MIDI out), app_pictures.py (placed pictures),
+history.py (undo and the History panel),
 project.py (files, autosave, MIDI export), widgets.py (tooltips), font_dialog.py (picking a font)."""
 
 import copy
 import itertools
-import json
 import math
 import os
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, ttk, messagebox
+from tkinter import ttk, messagebox
 
 import numpy as np
 
@@ -23,7 +23,7 @@ from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, point_names,
-                          render, shape_key, slot_track_channel)
+                          render, shape_key)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
@@ -54,7 +54,7 @@ from window.panel_text import TextPanel
 from window.claw_window import open_claw
 from window.strum_window import open_strum
 from window.chop_window import open_chop, quick_chop
-from window.hz_preview import VOICES, clean_settings as clean_preview
+from window.hz_preview import clean_settings as clean_preview
 from window.builtin_settings import Overload, open_builtin_settings
 from window.panel_tumour import TumourPanel
 from notes.joined import all_tumours, is_joined
@@ -62,13 +62,14 @@ from window.join_split import JoinSplit
 from window.between_window import BetweenGroups
 from notes.between import (copied as between_copied, keep_pushes, push_sizes, sync_groups, turns as between_turns,
                            whole_groups)
-from window.history import HistoryPanel, as_state, edit_name, load_state, undo_state
+from window.app_pictures import Pictures
+from window.app_playback import Playback
+from window.history import HistoryPanel
 from roll.pianoroll import PianoRoll
 from roll.roll_draw import painting_order
 from files import errors, speed
 from files.about import ICONS, VERSION
 from files.playback import BUILTIN, DEFAULT_DEVICE, MidiOut, Player, devices
-from files.synth import FONT_TYPES, Live, Synth, SynthError, silent_list
 from files.midi_out import PPQ_WARN
 from files.domino_clip import DOMINO_STARTS, on_clipboard
 from files.clipboard import RAW, copy_count, get_text, put_text
@@ -83,7 +84,7 @@ from window.settings_window import open_settings
 from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
-from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, fit_dropdowns, good, grid_shown,
+from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, fit_dropdowns, good,
                             keep_width, letter_jump, remember_good, watch_bad)
 
 
@@ -148,7 +149,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False):
 
 
 class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, MaskPanel, PolygonPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
-          HistoryPanel, ScrollingSide, tk.Tk):
+          Playback, Pictures, HistoryPanel, ScrollingSide, tk.Tk):
     def __init__(self, autosave=AUTOSAVE):
         super().__init__()
         errors.install(self)
@@ -1790,89 +1791,6 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
             self.after_idle(self.open_image)
         self.tips.show(TOOL_TOPICS.get(self.tool.get()))
 
-    def open_image(self):
-        """The image window (Picture tool)."""
-        from window.image_window import ImageWindow
-        return ImageWindow.open(self)
-
-    def add_picture(self, sh):
-        """A picture placed from the image window: a new shape, selected, one undo step."""
-        self.push_undo(name=tr("image.step_name"))
-        self.shapes.append(sh)
-        missing = self.sync_pictures(sh["picture"]["set"], len(self.shapes) - 1)
-        self.select(len(self.shapes) - 1)
-        self.shapes_changed()
-        self.status.config(text=tr("image.placed", name=sh["name"]) +
-                           (trn("image.others_missing", missing, n=missing) if missing else ""))
-
-    def sync_pictures(self, s, skip):
-        """Every other placed picture takes the colours in settings s (one set for all, user): their notes made
-        again with them (from their own picture files; a missing file keeps its notes, whose colours then shift).
-        Returns how many files were missing."""
-        from notes import picture as P
-        from notes.custom import pack_notes
-        pal = np.array([P.lin_of(h) for h in s["pal"]])
-        missing = 0
-        for j, sh in enumerate(self.shapes):
-            if j == skip or "picture" not in sh:
-                continue
-            p = sh["picture"]
-            t = p["set"]
-            if (t.get("pal"), t.get("locked", []), t.get("use10", False)) == (s["pal"], s.get("locked", []),
-                                                                              s.get("use10", False)):
-                continue
-            t.update(pal=list(s["pal"]), locked=list(s.get("locked", [])), use10=s.get("use10", False),
-                     colours=len(s["pal"]))
-            pic = self.picture_for(p)
-            if pic is None:
-                missing += 1
-                continue
-            steps, keys = p["grid"]
-            rows, cols = (steps, keys) if t["view"] == "fall" else (keys, steps)
-            cl, al = P.cells(pic, rows, cols)
-            cl = P.adjust(cl, t["brightness"], t["contrast"], t["saturation"], t["sharpen"])
-            got, _, _ = P.grid_notes(P.quantise(cl, pal, t["blend"], t["strength"], t["keep"], al, t["empty"]),
-                                     t["view"], t["join"])
-            if len(got):
-                sh["notes"] = pack_notes(got)
-        return missing
-
-    def picture_state(self, info):
-        """"ok", "missing" (no file there), "unreadable" (a kind only Pillow reads, and it isn't installed) or
-        "changed" (its fingerprint isn't the one it was made from)."""
-        from notes import picture as P
-        if not os.path.isfile(info["file"]):
-            return "missing"
-        if not P.readable(info["file"]):
-            return "unreadable"
-        return "ok" if self.picture_for(info) is not None else "changed"
-
-    def edit_picture(self, i):
-        """Double-click / "Change its look..." on a placed picture: the image window with its picture and settings,
-        changes going to it."""
-        if 0 <= i < len(self.shapes) and "picture" in self.shapes[i]:
-            self.open_image().edit(i)
-
-    def picture_for(self, info):
-        """The placed picture's own picture file, read (kept while it's unchanged), or None if it's missing or its
-        fingerprint isn't the one it was made from."""
-        from notes import picture as P
-        path = info["file"]
-        try:
-            st = os.stat(path)
-        except OSError:
-            return None
-        key = (path, st.st_mtime_ns, st.st_size)
-        got = self._pictures.get(key)
-        if got is None:
-            try:
-                got = P.load(path, self)
-            except Exception:  # (unreadable now)
-                return None
-            self._pictures = {k: v for k, v in self._pictures.items() if k[0] != path}
-            self._pictures[key] = got
-        return got if not info["sig"] or got.sig == info["sig"] else None
-
     def remake_merges(self):
         """Merged shapes whose parts' settings were changed in the panel (custom_targets), or made at another PPQ /
         key range than the project's now: made again (merge.refit). A recipe seen for the first time (new, loaded,
@@ -1891,72 +1809,6 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
                 refit(sh)
             seen[id(m)] = key
         self._merge_keys = seen
-
-    def remake_pictures(self):
-        """Placed pictures resized (box not turned): their notes made again from the ORIGINAL picture at the new
-        size, so they stay sharp (user); the box snaps to whole keys and grid steps. Without the picture file they
-        keep their notes, stretched."""
-        from notes import picture as P
-        from notes.custom import frame_upright, pack_notes
-        for sh in self.shapes:
-            p = sh.get("picture")
-            if not p or "pal" not in p["set"] or not frame_upright(sh["pts"]):
-                continue
-            s, (steps0, keys0) = p["set"], p["grid"]
-            (b0, k0), (b1, _), (_, k2) = sh["pts"]
-            width, height = b1 - b0, k2 - k0
-            keys, steps = max(1, round(abs(height))), max(1, round(abs(width) / s["step"]))
-            if (steps, keys) == (steps0, keys0) or keys > 256:
-                continue
-            pic = self.picture_for(p)
-            if pic is None:
-                continue
-            rows, cols = (steps, keys) if s["view"] == "fall" else (keys, steps)
-            if rows * cols > 4_000_000:  # (a box dragged huge: kept stretched)
-                continue
-            cl, al = P.cells(pic, rows, cols)
-            cl = P.adjust(cl, s["brightness"], s["contrast"], s["saturation"], s["sharpen"])
-            pal = np.array([P.lin_of(h) for h in s["pal"]])
-            grid = P.quantise(cl, pal, s["blend"], s["strength"], s["keep"], al, s["empty"])
-            got, t, k = P.grid_notes(grid, s["view"], s["join"])
-            if not len(got):
-                continue
-            sh["notes"] = pack_notes(got)
-            p["grid"] = [t, k]
-            s["keys"] = keys
-            sgn_b, sgn_k = (1 if width >= 0 else -1), (1 if height >= 0 else -1)
-            sh["pts"] = [[b0, k0], [b0 + sgn_b * t * s["step"], k0], [b0, k0 + sgn_k * k]]
-
-    def replace_picture(self, i):
-        """Right-click → Use another picture...: the image window for this picture, asking for the new file."""
-        if 0 <= i < len(self.shapes) and "picture" in self.shapes[i]:
-            w = self.open_image()
-            w.edit(i, ask=False)  # (one file picker, even when its file is missing / changed)
-            w.ask_file()
-
-    def picture_box(self, i, own_shape=False):
-        """The placed picture upright again: its grid's own size, centred where it is (own_shape: as wide as the
-        picture's own shape for its keys, its bottom left kept). One undo step; the notes are made again."""
-        sh = self.shapes[i]
-        p = sh["picture"]
-        s, (steps, keys) = p["set"], p["grid"]
-        (b0, k0), (b1, k1), (b2, k2) = sh["pts"]
-        if own_shape:
-            w, h = p["size"]
-            steps = max(1, round(keys * h / w if s["view"] == "fall" else keys * w / h)) * s["steps"]
-            left, low = min(b0, b1, b2, b1 + b2 - b0), min(k0, k1, k2, k1 + k2 - k0)
-        else:
-            left = (b1 + b2) / 2 - steps * s["step"] / 2
-            low = (k1 + k2) / 2 - keys / 2
-        self.push_undo(name=tr("image.menu_own_shape") if own_shape else tr("image.menu_unturn"))
-        sh["pts"] = [[left, low], [left + steps * s["step"], low], [left, low + keys]]
-        self.shapes_changed()  # (remake_pictures makes its notes for the new size, if its picture file is there)
-
-    def unturn_picture(self, i):
-        self.picture_box(i)
-
-    def picture_own_shape(self, i):
-        self.picture_box(i, own_shape=True)
 
     def note_tool_sels(self):
         """The selected shapes that take note tools (claw, strum, chop, glue): not pictures (user)."""
@@ -2029,429 +1881,6 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
             return True
         return g is not None and g.winfo_toplevel() is not self
 
-    # ------------------------------------------------------------ playback
-
-    def toggle_play(self):
-        if self.player.running:
-            self.stop_play()
-        else:
-            self.start_play()
-
-    def start_play(self, keep=False):
-        """keep = started again at once (play line moved while playing, new PPQ): Built-in BASSMIDI keeps a voice
-        limit lowered by itself."""
-        self.scrub_end()
-        try:
-            ppq, bpm, beats = self.read_project()
-        except ValueError as e:
-            messagebox.showerror(tr("app.spiderweb_2"), str(e))
-            return
-        dev = self.midi_device.get()
-        if dev == BUILTIN and not self.hz_preview["font"] and not self.pick_soundfont():
-            return
-        self.fresh_builtin()
-        err = self.out.open(dev)
-        while err and dev == BUILTIN and self.font_failed:  # (moved, gone or broken: offer another, hunt 2026-10-09)
-            if not messagebox.askyesno(tr("app.spiderweb_2"), err + "\n\n" + tr("synth.pick_other"), parent=self) \
-                    or not self.pick_soundfont():
-                return
-            err = self.out.open(dev)
-        if err:
-            messagebox.showerror(tr("app.spiderweb_2"), err)
-            return
-        if self.hz_window:  # (one thing plays at a time, user)
-            self.hz_window.preview.stop_play()
-            self.hz_window.draw_preview()
-        self.player.start(self.rendered, ppq, bpm, self.playhead, self.play_end(ppq, beats, self.playhead),
-                          self.picture_use10)
-        if self.out.name == BUILTIN:
-            self.overload.start(self.out.handle, self.play_voices, self.play_guard.get(), keep)
-        elif self.out.edo:
-            self.status.config(text=tr("app.edo31_audio_builtin_only"))
-        self.play_btn.config(text=tr("app.stop_space"))
-        self.roll.show_playhead(start=True)
-        self._play_job = self.after(15, self._play_tick)
-
-    def play_end(self, ppq, beats, start):
-        """Where playing stops: a quarter bar after the last note ends (or after the play line if already past
-        it), rounded up to the next quarter-bar line."""
-        quarter = beats / 4
-        last = (int(self.rendered[:, 1].max()) if len(self.rendered) else 0) / ppq
-        return math.ceil((max(last, start) + quarter) / quarter - 1e-9) * quarter
-
-    def play_changed(self):
-        """The notes or the project's numbers changed while playing: it plays on with them from where it is (a new
-        PPQ: started again from there)."""
-        if not self.player.running:
-            return
-        try:
-            ppq, bpm, beats = self.read_project()
-        except ValueError:
-            return  # (a number being typed: plays on as it was)
-        if ppq != self.player.ppq or ppq != self.ppq:
-            self.stop_play()
-            if ppq == self.ppq:
-                self.start_play(keep=True)
-            return
-        # (the end: never before where it is, so a note deleted at the end doesn't stop it at once)
-        self.player.update(self.rendered, bpm, self.play_end(ppq, beats, self.player.position()), self.picture_use10)
-
-    def _play_tick(self):
-        self._play_job = None
-        self.playhead = self.player.position()
-        if not self.player.running:
-            self.stop_play()
-            return
-        self.roll.show_playhead()
-        self.show_overload()
-        self._play_job = self.after(15, self._play_tick)
-
-    def stop_play(self):
-        if self._play_job:
-            self.after_cancel(self._play_job)
-            self._play_job = None
-        if self.player.running or self.player.thread is not None:
-            self.playhead = self.player.position()
-            self.player.stop()
-            self.roll.show_playhead()
-            self.schedule_autosave()
-        self.overload.stop()
-        self.show_overload()
-        self.play_btn.config(text=tr("app.play_space"))
-
-    def show_overload(self):
-        """The red text next to Built-in BASSMIDI's Settings button (and in its window): "Overloaded", with the
-        voices playing when the limit was lowered by itself."""
-        text = self.overload.text()
-        if text != self.overload_text:
-            self.overload_text = text
-            self.overload_label.config(text=text)
-            if self.builtin_window is not None:
-                self.builtin_window.refresh()
-
-    # ------------------------------------------------------------ Built-in BASSMIDI (MIDI out)
-
-    def midi_device_picked(self):
-        """MIDI out picked: the old one stops and closes (the same one picked again changes nothing)."""
-        if self.midi_device.get() == self._device_was:
-            return
-        self._device_was = self.midi_device.get()
-        self.stop_play()
-        self.out.close()
-        self.sync_builtin()
-        self.edo_warn()
-        self.schedule_autosave()
-
-    def make_live(self):
-        """(MidiOut.open) The built-in synth started for playing, with the soundfont (the Hz bass preview's) and
-        voice limit set now. Raises SynthError (font_failed = True when the soundfont couldn't be read)."""
-        self.font_failed = False
-        font = self.hz_preview["font"]
-        if not font:
-            raise SynthError("synth.no_font")
-        self.busy(tr("app.opening_soundfont"))  # (a big soundfont takes a moment)
-        try:
-            if self.synth is None:
-                self.synth = Synth()
-            if self.synth.needs_open(font):
-                try:
-                    self.synth.set_font(font)
-                except SynthError:
-                    self.font_failed = True
-                    raise
-            live = Live(self.synth, self.play_voices, limiter=self.play_limiter.get())
-            self.note_builtin()
-            return live
-        finally:
-            self.busy(None)
-
-    def sync_builtin(self):
-        """Built-in BASSMIDI's row (its Settings button) shows only while it's the MIDI out."""
-        if not hasattr(self, "builtin_row"):
-            return
-        on = self.midi_device.get() == BUILTIN
-        for w in self.builtin_row:
-            grid_shown(w, on)
-        w = self.builtin_window  # (in Settings → Sound while that's open)
-        if w is not None and w.winfo_exists():
-            if on:
-                w.refresh()  # (the soundfont's name)
-            else:
-                w.take_voices()
-            w.master.winfo_toplevel().show_builtin()
-
-    def ask_soundfont(self, parent, title):
-        """The soundfont file picker (shared soundfont: Built-in BASSMIDI and the Hz bass preview), over parent with
-        the title text key. True = one was picked (it's the shared one now)."""
-        cfg = self.hz_preview
-        path = filedialog.askopenfilename(
-            parent=parent, title=tr(title),
-            initialdir=os.path.dirname(cfg["font"]) if cfg["font"] else None,
-            filetypes=[(tr("hz.preview_fonts"), FONT_TYPES), (tr("hz.preview_all"), "*.*")])
-        if not path:
-            return False
-        cfg["font"] = os.path.normpath(path)
-        self.schedule_autosave()
-        self.soundfont_changed()  # (Settings → Sound shows the new name)
-        return True
-
-    def pick_soundfont(self):
-        """Pick the soundfont (shared by Built-in BASSMIDI and the Hz bass preview). True = one was picked."""
-        if not self.ask_soundfont(self, "app.pick_soundfont_title"):
-            return False
-        hz = self.hz_window
-        if hz is not None:  # (the preview makes its sound again with it)
-            if hz.settings_window and hz.settings_window.winfo_exists():
-                hz.settings_window.remake()
-            elif hz.preview_on.get():
-                err = hz.preview.remake()
-                if err:
-                    hz.preview_failed(err)
-        return True
-
-    def fresh_builtin(self):
-        """Built-in BASSMIDI open with another soundfont than the shared one (one picked where nobody told this
-        window, e.g. the Hz window asking when its file is gone): closed, so it opens the new one."""
-        live = self.out.handle
-        if self.out.name == BUILTIN and live and live.font_path != self.hz_preview["font"]:
-            self.out.close()
-
-    def soundfont_changed(self):
-        """The shared soundfont was changed (here or in the Hz bass preview's settings): Built-in BASSMIDI opens it
-        at the next note."""
-        if self.out.name == BUILTIN:
-            self.stop_play()
-            self.scrub_end()
-            self.out.close()
-        self.sync_builtin()
-        if self.synth is not None:
-            self.synth.stale = True  # (picked again = opened again: samples put back since then are found)
-        self.check_samples(self.hz_preview["font"])
-
-    def check_samples(self, path):
-        """(An .sfz just picked) its sound files checked in the background: missing ones or ones in a format the
-        synth can't read = one warning, as the synth opens such a soundfont without a word and those sounds are
-        missing. A soundfont the synth refuses altogether: nothing here, its "couldn't be read" lists them. Only
-        the newest pick's check speaks (another pick meanwhile, even of the same file, stops this one)."""
-        self._sample_check = getattr(self, "_sample_check", 0) + 1
-        if not path or not path.lower().endswith(".sfz"):
-            return
-        try:
-            if self.synth is None:
-                self.synth = Synth()
-        except SynthError:
-            return  # (said when the synth is used)
-        synth, result, me = self.synth, [], self._sample_check
-
-        def work():
-            try:
-                result.append(synth.silent_samples(path, cancel=lambda: self._sample_check != me))
-            except OSError:
-                pass  # (the soundfont itself unreadable: the synth says so when it opens it)
-        job = threading.Thread(target=work, daemon=True)
-        job.start()
-
-        def done():
-            if job.is_alive():
-                self.after(200, done)
-            elif result and result[0][1] and not result[0][2] and self._sample_check == me and self.winfo_exists():
-                try:
-                    focus = self.focus_get()
-                except KeyError:
-                    focus = None  # (a dropdown's list open: Tk's own widget, unknown here)
-                messagebox.showwarning(
-                    tr("synth.silent_title"),
-                    trn("synth.silent", len(result[0][1]), name=os.path.basename(path), n=f"{len(result[0][1]):,}")
-                    + "\n\n" + silent_list(path, result[0][1]),
-                    parent=focus.winfo_toplevel() if focus else self)
-        self.after(200, done)
-
-    def on_play_voices(self, left=False):
-        e = self.voices_entry  # (in Settings → Sound)
-        try:
-            v = int(round(float(calc(self.voices_var.get()))))
-            if not VOICES[0] <= v <= VOICES[1]:
-                raise ValueError
-        except (ValueError, ZeroDivisionError):
-            if e is not None and e.winfo_exists():
-                bad(e)
-            return
-        if e is not None and e.winfo_exists():
-            good(e)
-        if str(v) != self.voices_var.get():
-            self.voices_var.set(str(v))
-        if v != self.play_voices:
-            self.play_voices = v
-            if self.overload.running:
-                self.overload.set_limit(v)  # (its thread sends it: heard at once)
-            elif self.out.name == BUILTIN and self.out.handle:
-                self.out.handle.set_voices(v)
-            self.note_builtin()
-            self.schedule_autosave()
-
-    def on_play_guard(self):
-        self.overload.set_guard(self.play_guard.get())
-        self.note_builtin()
-        self.schedule_autosave()
-
-    def on_play_limiter(self):
-        """Heard at once while Built-in BASSMIDI is open."""
-        if self.out.name == BUILTIN and self.out.handle:
-            self.out.handle.set_limiter(self.play_limiter.get())
-        self.note_builtin()
-        self.schedule_autosave()
-
-    def note_builtin(self):
-        """Built-in BASSMIDI's settings in the logs (errors.note), once it has been opened."""
-        if self.synth is not None:
-            errors.note("Built-in BASSMIDI", f"voice limit {self.play_voices}, lower it by itself "
-                                             f"{'on' if self.play_guard.get() else 'off'}, limiter "
-                                             f"{'on' if self.play_limiter.get() else 'off'}")
-
-    def set_playhead(self, beat):
-        self.playhead = max(0.0, beat)
-        self.roll.show_playhead()
-        self.schedule_autosave()
-
-    def scrub(self, t_from, t_to):
-        """Right-drag listening: sound the notes under the mouse (tick t_to) and any it just swept past."""
-        self.fresh_builtin()
-        if not self.out.handle:
-            err = self.out.open(self.midi_device.get())
-            if err:
-                self.status.config(text=err)
-                return False
-        lo, hi = min(t_from, t_to), max(t_from, t_to)
-        now = {}  # (channel, key) -> (start of the latest note there, velocity)
-        near = self.roll.visible_notes(lo, hi)
-        s_, e_ = near[:, 0], near[:, 1]
-        tuned = self.out.tuned  # (31-EDO: a row is one channel whatever its colour: kept by row)
-        for s, e, p, v, slot, _ in near[((lo <= s_) & (s_ <= hi)) | ((s_ <= t_to) & (t_to < e_))].tolist():
-            k = (0 if tuned else slot_track_channel(slot, self.picture_use10)[1], p)
-            if k not in now or s > now[k][0]:
-                now[k] = (s, v)
-        held = self._scrub_held
-        if self.out.edo and self.out.name != BUILTIN and now and not held:
-            self.status.config(text=tr("app.edo31_audio_builtin_only"))
-        for k in [k for k in held if k not in now]:
-            self.out.note(*k, 0, rows=True)
-            del held[k]
-        for (ch, p), (s, v) in now.items():
-            if held.get((ch, p)) != s:  # a new note on this key (back-to-back spam notes each sound)
-                if (ch, p) in held:
-                    self.out.note(ch, p, 0, rows=True)
-                self.out.note(ch, p, v, rows=True)
-                held[(ch, p)] = s
-        self.set_playhead(t_to / self.ppq)
-        return True
-
-    def scrub_end(self):
-        for ch, p in self._scrub_held:
-            self.out.note(ch, p, 0, rows=True)
-        self._scrub_held.clear()
-
-    # ------------------------------------------------------------ undo
-
-    def settle_windows(self):
-        """The windows trying changes out (note tools, tumours, sustain) keep them as their own steps. Several at
-        once: the first step takes back what ALL of them tried, the next all but the first's... (each step was
-        made from the shapes as they are, which hold every window's tries: undoing them all came back to one)."""
-        ws = [w for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window,
-                          self.tumour_window, self.sustain_window) if w]
-        waiting = [w for w in ws if w.pending()]
-        for w in ws:
-            w.settle(also=waiting[waiting.index(w) + 1:] if w in waiting else ())
-
-    def push_undo(self, state=None, name=None):
-        """Remember the shapes (or `state`, shapes saved earlier as JSON) for Ctrl+Z; name = what the step does
-        (the History panel)."""
-        self.settle_windows()  # (the claw / strum / tumours / sustain being tried out are kept first, as own steps)
-        sc = self._scrub
-        if sc and sc["active"]:  # stepping a number box: only its first step takes an undo step
-            if sc["pushed"]:
-                return
-            sc["pushed"] = True
-        else:
-            self._scrub = None
-        own = bool(self.hz_window and self.hz_window.own_step)  # (made there, whatever has the keyboard now)
-        self.add_undo_step(state or undo_state(self.shapes), name, hz=own or self.in_hz())
-        if sc and sc["active"]:
-            sc["at"] = len(self.undo_stack)  # (take_back_scrub: still the last step?)
-
-    def take_back_scrub(self, gesture):
-        """Ctrl+Z while a number box's label is held (Scrub.cancel): its step goes, not even kept for redo; the
-        steps undone before it and the oldest ones the 300 limit dropped come back."""
-        sc = self._scrub
-        if sc and sc["gesture"] is gesture and sc["pushed"] and sc.get("at") == len(self.undo_stack):
-            kept, trimmed = self._redo_kept, self._trimmed
-            self._restore(self.undo_stack, self.redo_stack)
-            self.redo_stack.pop()
-            if kept:
-                self.redo_stack[:] = kept[0]
-            if trimmed:
-                self.undo_stack[:0] = trimmed
-            self.sync_history()
-        self._scrub = None
-
-    def add_undo_step(self, before, name=None, sel=None, hz=False):
-        """push_undo without its checks (before: the shapes as JSON or history.undo_state). The selection is kept with
-        it (sel: the one from when `before` was saved, sel_state(); default: now): undo puts it back with the shapes
-        (shapes are picked by number, which can point at another shape after undo). hz: made in the Hz bass window
-        (key_undo)."""
-        before = as_state(before, self.shapes)
-        self.drop_empty_step(before)
-        self.undo_stack.append((before, name or tr("app.change"), sel or self.sel_state(), hz))
-        self._trimmed = self.undo_stack[:-300]  # (put back by drop_empty_step if this step changes nothing)
-        del self.undo_stack[:-300]
-        # the undone steps are kept aside until this step turns out to change something (a click on a shape that
-        # doesn't drag it mustn't throw them away: drop_empty_step brings them back)
-        self._redo_kept = (self.redo_stack[:], len(self.undo_stack)) if self.redo_stack else None
-        self.redo_stack.clear()
-        self._edit_key = None
-        self.sync_history()
-
-    def sel_state(self):
-        """The selection as an undo step keeps it: (selected shape numbers, the main one, the kept Select boxes or
-        None, the Hz bass window's HzWindow.sel_state() or None, the picked stroke, the funnel's highlighted parts,
-        the one of them clicked)."""
-        boxes = self.roll.kept_box()
-        return (sorted(self.sels), self.sel, boxes and list(boxes), self.hz_window and self.hz_window.sel_state(),
-                self.stroke, list(self.parts), self.part_main)
-
-    def scrub_step(self, gesture, run):
-        """run() steps a number box (widgets.Scrub). The steps of one gesture (a label drag, or arrows / wheel on the
-        same box with nothing else in between) share one undo step."""
-        if not self._scrub or self._scrub["gesture"] is not gesture:
-            self._scrub = {"gesture": gesture, "pushed": False, "active": False}
-        sc = self._scrub
-        sc["active"] = True
-        try:
-            run()
-        finally:
-            sc["active"] = False
-
-    def begin_edit(self, key):
-        """Typing in one box counts as a single undo step until you move to another box."""
-        if key != self._edit_key:
-            self.push_undo(name=edit_name(key))
-            self._edit_key = key
-
-    def undo(self):
-        if self.roll.drop_hz_keys():  # (a new Hz bass's keys being dragged: just called off)
-            return
-        if self.roll.draft or self.roll.typing_empty():  # something half drawn (a funnel waiting for its wall, a
-            return self.roll.cancel_draft()                # polyline, a text caret with nothing typed): just drop it
-        if self.hz_window and self.hz_window.pending:  # a slide started in the Hz bass window: just drop its mark
-            self.hz_window.pending = None
-            return self.hz_window.redraw()
-        self.drop_empty_step(undo_state(self.shapes))  # (a click that changed nothing isn't a step)
-        self._restore(self.undo_stack, self.redo_stack)
-
-    def redo(self):
-        if self.roll.hz_keys_held():  # (a new Hz bass's keys being dragged: nothing)
-            return
-        self._restore(self.redo_stack, self.undo_stack)
-
     def in_hz(self, widget=None):
         """The Hz bass window (or a window of its own) has the keyboard (widget: the one a key was pressed in)."""
         if not self.hz_window:
@@ -2467,94 +1896,6 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         """A Select box being drawn on the main piano roll: shortcuts do nothing until it's let go (user: like many
         MIDI programs)."""
         return bool(self.roll.drag) and self.roll.drag[0] == "box"
-
-    def key_undo(self, e, redo=False):
-        """Ctrl+Z / Ctrl+Y. In the Hz bass window only its own changes (user: the piano roll behind stays as it
-        is): a step made elsewhere is next = a ding and a word in its status line."""
-        hz = self.hz_window
-        if self.grabbed_elsewhere():
-            return None  # (a pop-up without its own undo: the shapes it works on stay as they are)
-        if self.vel.edit:  # a velocity line held: Ctrl+Z throws it away (no step), Ctrl+Y does nothing
-            return "break" if redo else (self.vel.drop(), "break")[1]
-        if self.held_scrub:  # a number box's label held: Ctrl+Z = back to the press (no step), Ctrl+Y nothing
-            return "break" if redo else (self.held_scrub.cancel(), "break")[1]
-        if self.in_settings(e.widget):
-            return "break"  # (Settings has no undo; the shapes behind stay as they are)
-        if not self.in_hz(e.widget):
-            if self.box_drawn():
-                return "break"
-            if self.path_window and self.path_window.local_step(redo):  # (its points are dragged on the piano roll)
-                return "break"
-            if self.sustain_window and self.sustain_window.local_step(redo):  # (its stops are dragged there)
-                return "break"
-            return self.redo() if redo else self.undo()
-        if hz.drag:  # the mouse held there: Ctrl+Z only puts back what's being dragged (no step), Ctrl+Y nothing
-            return None if redo else hz.cancel_drag()
-        held = hz.held_fx()  # (the same for an effect's points and the synth window's knobs)
-        if held:
-            return None if redo else held()
-        if hz.draft is not None and (hz.draft.get("held") is not None or not redo):  # a path being drawn: it
-            return None if redo else (hz.drop_draft(), "break")[1]  # goes, nothing made (Ctrl+Y: nothing)
-        tw = hz.trace_win  # (the Wave shape window's changes no Hz bass held yet: its own steps)
-        if tw and tw.winfo_exists() and str(e.widget).startswith(str(tw)) and tw.local_step(redo):
-            return "break"
-        if not redo and hz.pending:  # a slide started: just drop its mark
-            hz.pending = None
-            return hz.redraw()
-        if not redo:
-            self.drop_empty_step(undo_state(self.shapes))
-        src = self.redo_stack if redo else self.undo_stack
-        if src and not src[-1][3]:
-            hz.bell()
-            return hz.status.config(text=tr("hz.redo_elsewhere" if redo else "hz.undo_elsewhere"))
-        self._restore(src, self.undo_stack if redo else self.redo_stack)
-
-    def _restore(self, src, dst, count=1):
-        """count steps from src to dst (a History jump: the steps on the way only move, the shapes are made once)."""
-        self.settle_windows()  # (so Ctrl+Z here takes back the claw / strum / tumours / sustain being tried out)
-        if not src:
-            if self.roll.holding():  # (nothing to take back: still lets go, or the rest of the drag had no step)
-                self.roll.cancel_draft()
-            return
-        hz_was = self.hz_window and self.hz_window.before_restore()
-        self.roll.cancel_draft()
-        now, sel_now = undo_state(self.shapes), self.sel_state()
-        ch10 = None
-        for _ in range(min(count, len(src))):
-            state, name, picked, hz = src.pop()
-            mark = tuple(picked[7:8])  # (CH10_OFF: unticking "Use channel 10" made it: undo ticks it, redo unticks)
-            if mark:
-                ch10 = src is self.undo_stack
-                picked = tuple(picked[:7])
-            dst.append((now, name, tuple(sel_now) + mark, hz))
-            now, sel_now = state, picked
-        if ch10 is not None:
-            self.use_ch10.set(ch10)
-        state, picked = now, sel_now
-        self._redo_kept = self._trimmed = None
-        self.shapes = load_state(state)
-        self.sels, self.sel = set(picked[0]), picked[1]
-        self.sels = {i for i in self.sels if i < len(self.shapes)}
-        self.parts = set()
-        self.stroke = None
-        if self.sel not in self.sels:
-            self.sel = max(self.sels, default=None)
-        # the Select boxes, the picked stroke and the funnel's highlighted parts come back as they were (only while
-        # they still go with the same selection)
-        same = self.sels == set(picked[0])
-        self.roll.box_kept = (picked[2], set(self.sels)) if picked[2] and same else None
-        if same:
-            self.stroke, self.parts, self.part_main = picked[4], set(picked[5]), picked[6]
-        self._edit_key = self._scrub = None
-        self.sync_panel()
-        self.shapes_changed()
-        if ch10 is not None:
-            self.sync_colours()
-            self.show_colour_limit()
-        if self.hz_window:
-            self.hz_window.after_restore(hz_was)
-            if self.sels == set(picked[0]):
-                self.hz_window.restore_sel(picked[3])
 
     def velocity_height(self):
         if self.show_velocity.get() and self.vel_box.winfo_ismapped() and self.vel_box.winfo_height() > 1:
