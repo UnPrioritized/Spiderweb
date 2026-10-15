@@ -81,7 +81,8 @@ class NestedPanel:
         self.nested_morph_var = tk.BooleanVar(value=False)
         b = self.nested_morph_row = ttk.Checkbutton(
             opts, text=tr("panel_custom.nested_morph"), variable=self.nested_morph_var,
-            command=lambda: self.set_nested("morph", self.nested_morph_var.get()))
+            command=lambda: (self.nested_morph_row.state(["!alternate"]),
+                             self.set_nested("morph", self.nested_morph_var.get())))
         Tooltip(b, tr("panel_custom.nested_morph_tip"))
         self.nested_rows.append(b)
         self.nested_way_rows[b] = "scale"
@@ -125,7 +126,10 @@ class NestedPanel:
         self.nested_way_box.current([w for w, _ in WAY_CHOICES].index(cfg.get("way", "scale")))
         self.refresh_nested_names()
         self.nested_of_box.set(cfg["of"]["name"] if cfg.get("of") else SAME_SHAPE)
-        self.nested_morph_var.set(bool(cfg.get("morph")))
+        # Morph into it: the shapes that have another drawing; half-ticked when only some of them morph
+        morphs = {bool(x["nested"].get("morph")) for x in self.nested_targets() if x["nested"].get("of")}
+        self.nested_morph_var.set(morphs == {True})
+        self.nested_morph_row.state(["alternate" if len(morphs) > 1 else "!alternate"])
         for line in BOXES:
             for key, _, _, _, _, _, shown, _ in line:
                 e, var = self.nested_boxes[key]
@@ -139,7 +143,8 @@ class NestedPanel:
         cfg = t.get("nested") or NESTED_DEFAULTS
         way = cfg.get("way", "scale")
         out = {w: on and self.nested_way_rows.get(w, way) == way for w in self.nested_rows}
-        out[self.nested_morph_row] &= bool(cfg.get("of"))  # (Morph into it: only with another drawing picked)
+        # (Morph into it: only with another drawing picked, in any of the shapes)
+        out[self.nested_morph_row] &= any((x.get("nested") or {}).get("of") for x in [t] + self.nested_targets())
         return out
 
     def refresh_nested_names(self):

@@ -404,6 +404,8 @@ DRAWN_FRAME = [[0.0, 0.0], [TOUCH_BEATS / LAND_SHARE, 0.0], [0.0, TOUCH_KEYS / L
 ON_LINE = 0.01  # placed: an end landing this close (in TOUCH_BEATS / TOUCH_KEYS) needs no line closing it
 SAME_SIZE = 0.98  # two coloured areas this close in size count as equally big (row_done: they meet in the middle)
 _plans = {}
+_plan_chars = [0]  # (how much outline the remembered plans hold, roughly: their keys' length)
+PLAN_CHARS = 20_000_000
 _spans = {}  # inside_spans, remembered
 _faces_of = {}  # shape_faces, remembered
 _inner = {}  # inner_ticks, remembered
@@ -443,8 +445,11 @@ def fill_plan(sh):
     got = _plans.get(key)
     if got is not None:
         return got
-    if len(_plans) > 300:
+    # (also by size: Nested copies of a drawing with many pieces are each a big new outline, every centre move)
+    if len(_plans) > 300 or _plan_chars[0] > PLAN_CHARS:
         _plans.clear()
+        _plan_chars[0] = 0
+    _plan_chars[0] += len(key[0]) + len(key[1])
     paths = join_paths(role_paths(sh)[None])
     polys = [p for p in paths if path_closed(p)]
     opens = [list(map(tuple, p)) for p in paths if not path_closed(p)]
