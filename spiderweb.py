@@ -30,6 +30,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     help.py          the tip popups and the Help window (F1, searchable)
     updates.py       update checks: the "how often?" question, the update popup, What's new after an update
     drawer.py        the custom shape drawer window and the shape library (shapes/*.json)
+    drawer_areas.py  the drawer's Areas tool (colouring areas by hand) and colour swatches
+    drawer_mouse.py  the mouse on the drawer's board (drawing, Select, sticking), copy / paste / flip / turn
     sticky.py        the drawer's sticky lines: points stick to other strokes' points, crossings and lines
     velocity.py      the velocity pane under the piano roll
     hz_window.py     the Hz bass window: a small piano roll where its notes are placed

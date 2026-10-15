@@ -8,7 +8,7 @@ from window.formula_host import FunnelHost, PolygonHost, RollHost, StrokeHost, f
 from notes.areas import most_colours
 from notes.convert import originals
 from notes.custom import ROLES
-from window.drawer import colour_menu
+from window.drawer_mouse import colour_menu
 from notes.joined import is_joined
 from notes.mask import is_mask
 from notes.funnel import inside_out, new_start, turned_curve
