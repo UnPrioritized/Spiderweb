@@ -5,6 +5,7 @@ this an error would just be invisible."""
 
 import os
 import platform
+import re
 import sys
 import threading
 import time
@@ -67,9 +68,36 @@ def pc_text():
             f"({gb(free_memory())} free), {'exe' if getattr(sys, 'frozen', False) else 'source'}")
 
 
+def _folder_rules():
+    """(pattern, short name) for the folders hidden in the logs, longest first: Spiderweb's own (and the exe's
+    unpacked files) -> <Spiderweb>, the user's home folder -> ~."""
+    folders = [(HERE, "<Spiderweb>"), (getattr(sys, "_MEIPASS", ""), "<Spiderweb>"), (os.path.expanduser("~"), "~")]
+    rules = []
+    for folder, name in sorted(folders, key=lambda f: -len(f[0])):
+        folder = os.path.normpath(folder).rstrip("\\/") if folder else ""
+        if len(folder) < 4:  # (not there, a drive's root, or "~" not found)
+            continue
+        # (an error's message quotes paths with doubled backslashes: 'C:\\Users\\...')
+        pattern = r"[\\/]+".join(re.escape(part) for part in re.split(r"[\\/]", folder))
+        rules.append((re.compile(pattern + r"(?=[\\/\s\"',;)\]]|$)", re.IGNORECASE if os.name == "nt" else 0),
+                      name.replace("\\", "\\\\")))
+    return rules
+
+
+_FOLDERS = _folder_rules()
+
+
+def hide_folders(text):
+    """Logs get shared and folder names can hold the user's name: Spiderweb's folder becomes <Spiderweb>, the home
+    folder ~ (file names stay)."""
+    for pattern, name in _FOLDERS:
+        text = pattern.sub(name, text)
+    return text
+
+
 def write_log(exc_type, exc, tb, where):
     """Adds the error to errors.log. True if it could be written."""
-    text = "".join(traceback.format_exception(exc_type, exc, tb))
+    text = hide_folders("".join(traceback.format_exception(exc_type, exc, tb)))
     head = (f"==== {time.strftime('%Y-%m-%d %H:%M:%S')}   Spiderweb {VERSION}   Python {platform.python_version()}"
             f"   {platform.platform()}   {where}")
     times = _seen[text] = _seen.get(text, 0) + 1
@@ -172,7 +200,7 @@ def watch_crashes():
     except OSError:
         last = ""
     crashed = any(line.strip() and not line.startswith(("==== ", NOTE)) for line in last.splitlines())
-    if crashed and not append(CRASH_LOG, OLD_CRASH_LOG, last + "\n\n"):
+    if crashed and not append(CRASH_LOG, OLD_CRASH_LOG, hide_folders(last) + "\n\n"):
         return  # (crash-now.log kept for the next start rather than lost)
     try:
         _crash_file = open(CRASH_NOW, "w", encoding="utf-8")
