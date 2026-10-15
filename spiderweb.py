@@ -113,6 +113,7 @@ Files (the scripts live in scripts/, one subfolder per group):
   files/            saving, MIDI, sound
     project.py       project files, autosave (+ its backup), MIDI export
     safefile.py      saving without half-written files
+    saved_lists.py   the user's lists kept in one file (patterns, rhythms, colour formats): a damaged one loses nothing
     errors.py        spiderweb-error.log and the "something went wrong" message; spiderweb-crash.log when the
                      program dies outright (both next to Spiderweb)
     about.py         version number, the program's folder, the user folder (moving old files in)
