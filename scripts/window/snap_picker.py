@@ -105,9 +105,9 @@ def picture(what, size):
 class SnapPicker:
     """A button showing the snap (picture + name) that opens the list. var: the app's snap (files/snap.py texts).
     names: {snap: text} shown in place of the usual names (Chop: "off" = "1 tick"; a value not in the list = no
-    picture, no tick in the list)."""
+    picture, no tick in the list). tip: the button's tooltip in place of the snap's own."""
 
-    def __init__(self, app, parent, var, names=None):
+    def __init__(self, app, parent, var, names=None, tip=None):
         self.app, self.var, self.names = app, var, names or {}
         size = max(SIZE, round(SIZE * app.scale))
         self.pics = {snap: picture("bar" if snap == "bar" else what, size) for snap, what in SNAP_LIST}
@@ -121,7 +121,7 @@ class SnapPicker:
         self.menu.add_radiobutton(label=tr("snap.custom"), image=self.custom_pic, compound="left",
                                   variable=self.pick, value="custom", command=self.open_custom)
         self.button.config(menu=self.menu)
-        Tooltip(self.button, tr("snap.tip"))
+        Tooltip(self.button, tip or tr("snap.tip"))
         # (watches the snap only while the button is there: one left behind by a closed Hz bass window
         # configured its gone button, an error on the next snap change / project opened)
         trace = var.trace_add("write", lambda *_: self.show())

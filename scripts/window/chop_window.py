@@ -247,9 +247,9 @@ class ChopWindow(ToolWindow):
         row.grid(row=6, column=1, sticky="w", pady=2)
         self.snap = tk.StringVar(value=CHOP_DEFAULTS["snap"])
         self.snap_picker = SnapPicker(self.app, row, self.snap,
-                                      names={"off": tr("chop.one_tick"), TYPED: tr("chop.typed_ticks")})
+                                      names={"off": tr("chop.one_tick"), TYPED: tr("chop.typed_ticks")},
+                                      tip=tr("chop.tip_step_length"))
         self.snap_picker.button.pack(side="left")
-        Tooltip(self.snap_picker.button, tr("chop.tip_step_length"))
         ttk.Label(row, text=tr("chop.equals"), foreground=look.HINT).pack(side="left", padx=(6, 4))
         self.ticks_var = tk.StringVar()
         self.ticks_entry = ttk.Entry(row, textvariable=self.ticks_var, width=7)
