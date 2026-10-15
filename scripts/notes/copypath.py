@@ -26,7 +26,10 @@ and flips work on the whole group. A page's settings (PATH_DEFAULTS' keys):
            from a mock-up; True to start). Either way a copy ends right on each turning point. Number of copies with
            it: each run gets as many of the path's steps as fit, evened out to land on its ends
   "k"      beats per key on screen when the path was made (how long it is, and how round an arc is, as seen then)
-  "speed"  "even" / "up" (bunched at A, further apart towards the end) / "down" (the other way)
+  "speed"  "even" / "up" (bunched at A, further apart towards the end) / "down" (the other way) / "custom" (user,
+           2026-10-16: the "graph" says how fast)
+  "graph"  Speed Custom: [[place 0..1 from the first copy to the last, speed (1 = 100 %)], ...]: high = the copies
+           far apart there, low = bunched up, 0 = on top of each other (None: Even)
   "size"   [first copy %, last copy %]: each copy grows / shrinks from its corner on the path (key rows sampled like
            a stretched picture: no gaps between rows)
   "colours" "keep" / "shift" (every colour of copy n = n x step channels on, round the "most" colours) / "turn"
@@ -52,7 +55,7 @@ from notes.pattern import clean_pattern, pattern_paths
 
 KINDS = ("straight", "curve", "arc")
 MODES = ("every", "count")
-SPEEDS = ("even", "up", "down")
+SPEEDS = ("even", "up", "down", "custom")
 COLOURS = ("keep", "shift", "turn", "one")
 FLIPS = ("none", "each", "mirror")
 WAYS = ("keys", "time", "both")
@@ -60,7 +63,8 @@ TOPS = ("last", "first")
 PATH_DEFAULTS = {"pts": None, "mids": None, "kind": "straight", "mode": "every", "every": 0.25, "count": 8,
                  "k": 0.25, "speed": "even", "size": [100.0, 100.0], "colours": "keep", "step": 1, "most": 15,
                  "flip": "none", "way": "keys", "top": "last", "half": True, "anchor": True,
-                 "inside": False, "low": 0, "high": 127, "pattern": None, "grp": [0.0, 0.0, 0.0, 0.0]}
+                 "inside": False, "low": 0, "high": 127, "pattern": None, "graph": None,
+                 "grp": [0.0, 0.0, 0.0, 0.0]}
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # the points' names
 MOST_POINTS = len(LETTERS) - 1  # B .. Z
 EVERY_LIMITS = (1e-6, 1024.0)  # beats
@@ -73,6 +77,10 @@ MOST_NOTES = 20_000_000  # notes with the copies: past it the last copies are le
 FAR = 1e6  # beats / keys: a path point further than this from A is a broken file
 SAMPLES = 1024  # points along each stretch
 SPEED_POWER = 2.0  # how bunched up Speed up / Slow down are
+SPEED_LIMIT = 10.0  # the Speed graph's highest point (1000 %)
+SPEED_GRAPHS = {"even": [[0.0, 1.0], [1.0, 1.0]], "up": [[0.0, 0.0], [1.0, 2.0]],  # (Speed up / Slow down as a graph:
+                "down": [[0.0, 2.0], [1.0, 0.0]]}                                  # the same places)
+GRAPH_POINTS = 200  # the most points a Speed graph keeps
 
 
 def _pt(v):
@@ -132,11 +140,28 @@ def clean_path(c):
         out["low"], out["high"] = out["high"], out["low"]
     if c.get("pattern") is not None:
         out["pattern"] = clean_pattern(c["pattern"])
+    out["graph"] = clean_graph(c.get("graph"))
     grp = c.get("grp")
     if isinstance(grp, (list, tuple)) and len(grp) == 4:
         got = [_num(v, -FAR, FAR) for v in grp]
         if None not in got:
             out["grp"] = got
+    return out
+
+
+def clean_graph(g):
+    """A Speed graph from a file -> valid points (ends at 0 and 1, in order, speeds 0 .. SPEED_LIMIT), or None."""
+    if not isinstance(g, (list, tuple)) or len(g) < 2:
+        return None
+    out = []
+    for p in g[:GRAPH_POINTS]:
+        ok = isinstance(p, (list, tuple)) and len(p) == 2
+        u = _num(p[0], 0.0, 1.0) if ok else None
+        v = _num(p[1], 0.0, SPEED_LIMIT) if ok else None
+        if u is None or v is None:
+            return None
+        out.append([max(u, out[-1][0]) if out else u, v])
+    out[0][0], out[-1][0] = 0.0, 1.0
     return out
 
 
@@ -298,28 +323,47 @@ def _track(cfg, size, n=SAMPLES):
     return np.concatenate(got_p), np.concatenate(got_f), np.concatenate(got_r), np.concatenate(got_d)
 
 
-def eased(u, speed):
-    """Places 0..1 along the copies' run, bunched up as Speed says."""
+def graph_curve(graph):
+    """A Speed graph -> (even steps 0..1, the places 0..1 they land on): how far the copies got, added up (all 0 =
+    Even). Always rising a little, so it reads backwards too."""
+    gu, gv = np.array([p[0] for p in graph]), np.array([p[1] for p in graph])
+    u = np.unique(np.r_[np.linspace(0.0, 1.0, SAMPLES + 1), gu])
+    v = np.interp(u, gu, gv)
+    got = np.r_[0.0, np.cumsum((v[1:] + v[:-1]) / 2 * np.diff(u))]
+    got = (got / got[-1] if got[-1] > 1e-12 else u) + u * 1e-9
+    return u, got / got[-1]
+
+
+def eased(u, cfg):
+    """Places 0..1 along the copies' run, bunched up as the page's Speed says."""
+    speed = cfg["speed"]
     if speed == "up":
         return u ** SPEED_POWER
     if speed == "down":
         return 1 - (1 - u) ** SPEED_POWER
+    if speed == "custom" and cfg.get("graph"):
+        return np.interp(u, *graph_curve(cfg["graph"]))
     return u
 
 
-def unease(u, speed):
+def unease(u, cfg):
     """eased the other way round: a place 0..1 -> where it is in the copies' even steps."""
+    speed = cfg["speed"]
     if speed == "up":
         return u ** (1 / SPEED_POWER)
     if speed == "down":
         return 1 - (1 - u) ** (1 / SPEED_POWER)
+    if speed == "custom" and cfg.get("graph"):
+        steps, places = graph_curve(cfg["graph"])
+        return float(np.interp(u, places, steps))
     return u
 
 
 def _counted(along, spans, count, speed):
     """Number of copies: places along the samples (sample number + part of the way to the next). Each run gets a
     copy on both its ends (user: the last copy going up and the first going down touch at the point), the rest
-    shared out by how long the runs are (bunched up as Speed says, over the whole path)."""
+    shared out by how long the runs are (bunched up as Speed says (speed = the page's settings), over the whole
+    path)."""
     total = along[-1]
     if total <= 0:
         return np.zeros(count)
@@ -395,10 +439,10 @@ def _places(cfg, size):
             pos, steps = _spaced(along, spans, cfg["count"])
             half = _halves(p, along, moved, f, down, spans, steps, ways, size)
         else:
-            pos = _counted(along, spans, cfg["count"], cfg["speed"])
+            pos = _counted(along, spans, cfg["count"], cfg)
         pos = np.array(pos, float)
     else:
-        pos, steps = _every(along, moved[:, 0], spans, cfg["every"], cfg["speed"])
+        pos, steps = _every(along, moved[:, 0], spans, cfg["every"], cfg)
         pos = sorted(set(pos) | {float(hi) for _, hi in spans[:-1]})  # (user: a copy ends right on each turn)
         if halves:
             half = _halves(p, along, moved, f, down, spans, steps, ways, size)

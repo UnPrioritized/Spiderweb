@@ -25,6 +25,7 @@ from roll.roll_shared import note_name
 from window import big_ask, look
 from window.formula_host import FormulaHost
 from window.pattern_dialog import load_patterns, saved_pattern
+from window.speed_graph import SpeedGraph, start_graph
 from window.tool_window import ToolWindow
 from window.widgets import Scrub, Tooltip, bad, good, grid_shown, name_index, name_list, set_names, unit_word
 
@@ -43,6 +44,7 @@ class PathWindow(ToolWindow):
     taking = False  # (take_typing at work)
     est = 0  # notes the shown settings make, about (asked past big_ask.BIG)
     pick = 0  # the point the bar / beat / tick / key boxes show (0 = B)
+    graph_window = None  # Speed: Custom's graph (speed_graph.py), while open
 
     def clean(self, cfg):
         return clean_path(cfg)
@@ -95,7 +97,10 @@ class PathWindow(ToolWindow):
             tick.grid(row=r, column=0, columnspan=4, sticky="w", pady=(4, 0))
             Tooltip(tick, tr(f"path.tip_{key}"))
             self.ticks[key] = (tick, var)
-        self.choice(box, 3, "speed", tr("path.speed"))
+        speed = self.choice(box, 3, "speed", tr("path.speed"))
+        self.graph_button = ttk.Button(speed, text=tr("path.graph"), command=self.open_graph)
+        self.graph_button.grid(row=0, column=1, sticky="w", padx=(4, 0))  # (Speed: Custom only)
+        Tooltip(self.graph_button, tr("path.tip_graph"))
 
         self.label(box, 4, tr("path.size"))
         size = ttk.Frame(box)
@@ -309,6 +314,10 @@ class PathWindow(ToolWindow):
 
     def accept(self):
         self.drop_loose()
+        g = self.graph_window
+        if g and g.job:  # (the last change on the graph counts)
+            g.after_cancel(g.job)
+            g.store()
         super().accept()
 
     def plain_shapes(self):
@@ -580,7 +589,32 @@ class PathWindow(ToolWindow):
     # ---- settings
 
     def put_choice(self, key, value):
+        if key == "speed" and value == "custom":
+            if value == self.cfg["speed"]:
+                return self.open_graph()
+            if not self.cfg.get("graph"):  # (a graph drawn before is kept)
+                self.cfg["graph"] = start_graph(self.cfg["speed"])
+            self.put(key, value)
+            return self.open_graph()
         self.put(key, value)  # (Straight keeps the bends, hidden: Curve / Arc bring them back; user)
+
+    def open_graph(self):
+        """Speed: Custom's graph window (graph_window.py's, speed_graph.py)."""
+        if self.cfg.get("speed") != "custom":
+            return
+        if not self.graph_window:
+            self.graph_window = SpeedGraph(self)
+        self.graph_window.lift()
+        self.graph_window.focus_set()
+
+    def drop_graph(self):
+        """The graph window closes; a change it hasn't put on the page yet is dropped."""
+        g = self.graph_window
+        if g:
+            if g.job:
+                g.after_cancel(g.job)
+                g.job = None
+            g.close()
 
     # ---- the formula along the path (pattern.py: the same presets / saved ones / Custom… as a curve's)
 
@@ -788,6 +822,12 @@ class PathWindow(ToolWindow):
         config(self.ticks["half"][0], state="normal" if c["speed"] == "even" and c["anchor"] else "disabled")
         config(self.entries["step"], state="normal" if c["colours"] != "keep" else "disabled")
         config(self.combos["way"], state="readonly" if c["flip"] == "each" else "disabled")
+        grid_shown(self.graph_button, c["speed"] == "custom")
+        if self.graph_window:
+            if c["speed"] == "custom":
+                self.graph_window.sync()
+            else:
+                self.drop_graph()
         self.show_formula()
         for key in ("low", "high"):
             put_text(key, str(c[key]))
@@ -870,6 +910,7 @@ class PathWindow(ToolWindow):
         return False
 
     def close(self):
+        self.drop_graph()
         super().close()
         self.app.roll.request_redraw()
 
