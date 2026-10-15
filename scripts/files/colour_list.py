@@ -19,6 +19,8 @@ TAG = re.compile(r"\{\{|\}\}|\{[^{}\s]*\}?")
 GOOD = re.compile(r"^\{(n|n0|n:\d|hex|HEX|r|g|b|a)\}$")
 SEPS = {"line": "\n", "comma": ",", "space": " ", "none": ""}
 CHANNELS_ALL = list(range(16))  # (0-based)
+MOST_LISTS = 8  # lists in one format
+BUILT = "builtin:"  # a built-in format is saved as this + its id (its name changes with the language, hunt)
 
 
 def built_in():
@@ -36,6 +38,17 @@ def built_in():
     ]
 
 
+def key_of(f):
+    """What a picture saves for its format: a built-in one by its id, the user's own by name."""
+    return BUILT + f["id"] if f.get("id") else f["name"]
+
+
+def find(formats, key):
+    """The format saved as key (key_of; a built-in one's name works too: older saves), else None."""
+    return next((f for f in formats if key_of(f) == key), None) or next((f for f in formats if f["name"] == key),
+                                                                         None)
+
+
 def unescape(s):
     """The custom text between colours with its codes worked out -> (text, ok); a broken code = (s, False)."""
     try:
@@ -45,10 +58,12 @@ def unescape(s):
 
 
 def numbers(count, by, use10=False):
-    """{n} of each colour: by "channel" = its MIDI channel number (10 left out unless use10), else 1, 2, 3..."""
+    """{n} of each colour: by "channel" = its MIDI channel number (10 left out unless use10; extra filler colours
+    past the channels get the numbers not used yet: 10, then 17, 18 ..., hunt), else 1, 2, 3..."""
     if by == "channel":
         chans = [c + 1 for c in CHANNELS_ALL if use10 or c != 9]
-        return [chans[k] if k < len(chans) else k + 1 for k in range(count)]
+        chans += ([] if use10 else [10]) + list(range(17, count + 2))
+        return chans[:count]
     return list(range(1, count + 1))
 
 
@@ -113,7 +128,7 @@ def clean_format(f):
         return None
     pad = f.get("pad", 0)
     filler = f.get("filler", "000000")
-    return {"name": f["name"].strip()[:100], "lists": lists[:8],
+    return {"name": f["name"].strip()[:100], "lists": lists[:MOST_LISTS],
             "sep": f.get("sep") if f.get("sep") in list(SEPS) + ["custom"] else "line",
             "custom": f.get("custom", "") if isinstance(f.get("custom"), str) else "",
             "alpha": f.get("alpha", "FF") if isinstance(f.get("alpha"), str) else "FF",
@@ -134,35 +149,49 @@ def change_formats(drop, add=()):
 
 # ------------------------------------------------------------------ Paste colours: colours read out of any text
 
-OFF = re.compile(r"^\s*(;|//|#(?![0-9A-Fa-f]{6}\b))")  # a switched-off line (a "#ff8800" line is a colour)
+# a switched-off line (a "#ff8800" / "#ff8800ee" line is a colour)
+OFF = re.compile(r"^\s*(;|//|#(?![0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?\b))")
 RGB3 = re.compile(r'R\s*=\s*"?(\d{1,3})"?\s*,?\s*G\s*=\s*"?(\d{1,3})"?\s*,?\s*B\s*=\s*"?(\d{1,3})"?', re.I)
-HEX = re.compile(r"(?<![0-9A-Za-z])#?([0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?(?![0-9A-Za-z])")
-NUM3 = re.compile(r"(?<![\d.])(\d{1,3})\s*[,; ]\s*(\d{1,3})\s*[,; ]\s*(\d{1,3})(?![\d.])")
+HEX = re.compile(r"(?<![0-9A-Za-z])(?:#|0[xX])?([0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?(?![0-9A-Za-z])")
+NUMS = re.compile(r"(?<![\d.])\d{1,3}(?:\s*[,; ]\s*\d{1,3}){2,3}(?![\d.])")  # 3 numbers (R G B) or 4
 
 
 def read_colours(text):
     """Colours in any text -> (lists, switched-off line numbers). lists: [(pattern, [(line, start, end, "RRGGBB",
     alpha or None, number or None)])], grouped by how their lines look (the line with its digits and colour taken
-    out), in the order first seen; number = the first number before the colour on its line (a channel number)."""
-    groups, skipped = {}, []
+    out), in the order first seen; number = the first number before the colour on its line (a channel number).
+    4 numbers in a row: R G B + see-through, or a channel number + R G B when a list's first numbers are all
+    different channel numbers (and the last ones not all the same, or the first ones counting 1, 2, 3...)."""
+    groups, skipped, fours = {}, [], {}
     for ln, line in enumerate(text.split("\n"), 1):
         if OFF.match(line):
             skipped.append(ln)
             continue
-        for rx, kind in ((RGB3, "rgb"), (HEX, "hex"), (NUM3, "rgb")):
+        for rx, kind in ((RGB3, "rgb"), (HEX, "hex"), (NUMS, "nums")):
             m = rx.search(line)
             if not m:
                 continue
             if kind == "hex":
                 hexs, alpha = m.group(1).upper(), m.group(2)
             else:
-                rgb = [int(v) for v in m.groups()]
+                rgb = [int(v) for v in (m.groups() if kind == "rgb" else re.findall(r"\d+", m.group()))]
                 if max(rgb) > 255:
                     continue
-                hexs, alpha = "%02X%02X%02X" % tuple(rgb), None
+                hexs, alpha = "%02X%02X%02X" % tuple(rgb[:3]), None
             num = re.search(r"\d+", line[:m.start()])
             key = re.sub(r"\d+", "..", (line[:m.start()] + "…" + line[m.end():]).strip())
             groups.setdefault(key, []).append((ln, m.start(), m.end(), hexs, alpha.upper() if alpha else None,
                                                int(num.group()) if num else None))
+            if kind == "nums" and len(rgb) == 4:
+                fours.setdefault(key, []).append(rgb)
             break
+    for key, rows in fours.items():
+        found = groups[key]
+        if len(rows) != len(found):
+            continue
+        first, last = [r[0] for r in rows], [r[3] for r in rows]
+        counted = sorted(first) == list(range(min(first), min(first) + len(first))) and min(first) <= 1  # (1, 2, 3..)
+        if len(set(first)) == len(first) and max(first) <= 16 and (
+                len(rows) > 1 and (len(set(last)) > 1 or counted) or len(rows) == 1 and first[0] >= 1):
+            groups[key] = [c[:3] + ("%02X%02X%02X" % tuple(r[1:]), None, r[0]) for c, r in zip(found, rows)]
     return list(groups.items()), skipped

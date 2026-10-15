@@ -34,6 +34,7 @@ class FormatWindow(tk.Toplevel):
         self.built = CL.built_in()
         self.yours = CL.load_formats()
         self.fmt = copy.deepcopy(self.find(picked) or self.built[0])
+        self.saved = copy.deepcopy(self.fmt)  # the format as saved (edits since = asked about before they're lost)
         self.cur = 0  # the list shown
         self.show_ws = tk.BooleanVar(value=True)
         self.build()
@@ -155,7 +156,9 @@ class FormatWindow(tk.Toplevel):
             ttk.Radiobutton(self.lists_row, text=tr("fmt.list_n", n=k + 1), width=8, style="Toolbutton",
                             variable=self.list_var, value=k,
                             command=lambda k=k: self.show_list(k)).pack(side="left", padx=2)
-        ttk.Button(self.lists_row, text=tr("fmt.add_list"), command=self.add_list).pack(side="left", padx=(8, 2))
+        ttk.Button(self.lists_row, text=tr("fmt.add_list"), command=self.add_list,
+                   state="normal" if len(self.fmt["lists"]) < CL.MOST_LISTS else "disabled").pack(side="left",
+                                                                                                   padx=(8, 2))
         ttk.Button(self.lists_row, text=tr("fmt.remove_list"), command=self.remove_list,
                    state="normal" if len(self.fmt["lists"]) > 1 else "disabled").pack(side="left")
         self.edit.config(text=tr("fmt.list_n", n=self.cur + 1))
@@ -234,6 +237,8 @@ class FormatWindow(tk.Toplevel):
         self.typed("each")
 
     def add_list(self):
+        if len(self.fmt["lists"]) >= CL.MOST_LISTS:  # (what the file keeps)
+            return
         self.mine()
         self.fmt["lists"].append({"start": "\n", "each": self.fmt["lists"][-1]["each"], "end": ""})
         self.cur = len(self.fmt["lists"]) - 1
@@ -248,23 +253,42 @@ class FormatWindow(tk.Toplevel):
 
     def pick(self, name):
         f = self.find(name)
-        if f:
+        if f and name != self.fmt["name"]:
+            if not self.may_leave():
+                self.box.set(self.fmt["name"])
+                return
             self.fmt, self.cur = copy.deepcopy(f), 0
+            self.saved = copy.deepcopy(self.fmt)
             self.show_format()
+
+    def may_leave(self):
+        """Edits not saved yet: "Save the changes?" (Yes = Save as with a name; hunt). False = stay with them."""
+        if self.fmt == self.saved:
+            return True
+        got = messagebox.askyesnocancel(tr("fmt.title"), tr("fmt.save_changes", name=self.fmt["name"]), parent=self)
+        if got is None:
+            return False
+        return self.save_as() if got else True
 
     # ------------------------------------------------------------ saving
 
     def store(self, name):
-        """The format being edited saved as `name` (replacing one of the user's with that name)."""
+        """The format being edited saved as `name` (another of the user's with that name: asked first)."""
         if any(f["name"].casefold() == name.casefold() for f in self.built):
             messagebox.showwarning(tr("fmt.title"), tr("fmt.built_in_name"), parent=self)
             return False
         f = CL.clean_format(dict(self.fmt, name=name))
         if not f:
             return False
+        own = self.saved["name"] if any(g["name"] == self.saved["name"] for g in self.yours) else None
+        taken = next((g["name"] for g in self.yours if g["name"].casefold() == name.casefold() and g["name"] != own),
+                     None)
+        if taken and not messagebox.askyesno(tr("fmt.title"), tr("fmt.replace_ask", name=taken), parent=self):
+            return False
         if not self.save_file(lambda n: n.casefold() == name.casefold(), [f]):
             return False
         self.yours, self.fmt = CL.load_formats(), copy.deepcopy(f)
+        self.saved, self.cur = copy.deepcopy(f), 0
         self.show_format()
         return True
 
@@ -280,16 +304,19 @@ class FormatWindow(tk.Toplevel):
         return True
 
     def save_as(self):
+        """True when saved. A name to choose: one of yours is offered, never a made-up "(mine)" one (user)."""
+        saved = any(f["name"] == self.fmt["name"] for f in self.yours)
         name = simpledialog.askstring(tr("fmt.title"), tr("fmt.name_ask"), parent=self,
-                                      initialvalue="" if self.is_built() else self.fmt["name"])
-        if name and name.strip():
-            self.store(name.strip()[:100])
+                                      initialvalue=self.fmt["name"] if saved else "")
+        return bool(name and name.strip()) and self.store(name.strip()[:100])
 
     def rename(self):
         old = self.fmt["name"]
         name = simpledialog.askstring(tr("fmt.title"), tr("fmt.name_ask"), parent=self, initialvalue=old)
         if name and name.strip() and name.strip() != old:
-            if self.store(name.strip()[:100]) and self.save_file(lambda n: n == old):
+            new = name.strip()[:100]
+            # (a new name differing only in capitals: store already replaced it)
+            if self.store(new) and (old.casefold() == new.casefold() or self.save_file(lambda n: n == old)):
                 self.yours = CL.load_formats()
                 self.show_format()
 
@@ -300,6 +327,7 @@ class FormatWindow(tk.Toplevel):
         if not self.save_file(lambda n: n == name):
             return
         self.yours, self.fmt, self.cur = CL.load_formats(), copy.deepcopy(self.built[0]), 0
+        self.saved = copy.deepcopy(self.fmt)
         self.show_format()
 
     # ------------------------------------------------------------ the output
@@ -356,6 +384,8 @@ class FormatWindow(tk.Toplevel):
         copy_colours(self, self.fmt, self.colours(), self.by(), self.use10())
 
     def close(self):
+        if not self.may_leave():
+            return
         name = self.fmt["name"] if self.find(self.fmt["name"]) else self.box.get()
         self.destroy()
         self.done(name if self.find(name) else None)

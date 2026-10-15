@@ -77,9 +77,12 @@ class PasteWindow(tk.Toplevel):
         out = {}
         if self.by == "channel" and all(c[5] is not None for c in found):  # by the channel number on each line
             chans = [c + 1 for c in range(16) if self.use10 or c != 9]
-            for c in found:
-                if c[5] in chans:
-                    out[chans.index(c[5])] = (c[3], c[4])
+            nums = [c[5] for c in found]
+            if 0 in nums and max(nums) <= 15:  # (counted from 0, like the {n0} tag writes them, hunt)
+                nums = [n + 1 for n in nums]
+            for c, n in zip(found, nums):
+                if n in chans:
+                    out[chans.index(n)] = (c[3], c[4])
         else:
             for k, c in enumerate(found):
                 out[k] = (c[3], c[4])

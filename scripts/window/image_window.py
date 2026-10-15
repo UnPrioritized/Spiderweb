@@ -545,20 +545,32 @@ class ImageWindow(tk.Toplevel):
         return CL.built_in() + CL.load_formats()
 
     def format(self):
-        """The format picked (the first built-in one if its name isn't there any more)."""
+        """The format picked (the first built-in one if it isn't there any more)."""
+        from files import colour_list as CL
         all_ = self.formats()
-        return next((f for f in all_ if f["name"] == self.s.get("fmt")), all_[0])
+        return CL.find(all_, self.s.get("fmt")) or all_[0]
 
     def colours_hex(self):
         return [P.hex_of(c) for c in self.pal] if self.pal is not None else []
 
     def set_fmt(self, name):
-        self.s["fmt"] = name
+        """The format with this name picked (saved by key_of: a built-in one by its id)."""
+        from files import colour_list as CL
+        f = next((f for f in self.formats() if f["name"] == name), None)
+        if f:
+            self.s["fmt"] = CL.key_of(f)
+        self.remember()
         self.show_gives()
 
     def set_by(self, by):
         self.s["by"] = by
+        self.remember()
         self.show_gives()
+
+    def remember(self):
+        """The window opens with these settings next time (Format / Colour by: kept at once, hunt)."""
+        path = self.pic.path if self.pic else (self.app.image_last or ("",))[0]  # ("" = no picture to open)
+        self.app.image_last = (path, dict(self.s))
 
     def show_gives(self):
         """The "What Copy gives" box."""
@@ -593,7 +605,7 @@ class ImageWindow(tk.Toplevel):
 
         def done(name):
             if name:
-                self.s["fmt"] = name
+                self.set_fmt(name)
             self.show_settings()
             self.show_gives()
 
@@ -656,8 +668,7 @@ class ImageWindow(tk.Toplevel):
         """A setting changed: the picture is made again (a slider: once it rests); a look setting: drawn again."""
         self.s[key] = value
         if key in LOOK_ONLY:
-            if self.pic:
-                self.app.image_last = (self.pic.path, dict(self.s))
+            self.remember()
             self.redraw()
             return
         if self.late:
