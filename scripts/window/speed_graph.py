@@ -84,6 +84,12 @@ class SpeedGraph(tk.Toplevel):
         self.bind("<Return>", lambda e: self.ok())
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.hist = LocalUndo(self, lambda: json.dumps(self.pts), self.put_state)
+        for k in UNDO_KEYS + REDO_KEYS:  # (in place of LocalUndo's: a drag held first)
+            self.bind(k, lambda e, d=-1 if k in UNDO_KEYS else 1: (self.undo_key(d), "break")[1])
+        for seq in ("<Key>", "<Control-Key>", "<Alt-Key>"):  # (the piano roll's shortcuts wait, like the path window)
+            self.bind(seq, lambda e: "break")
+        self.bind("<F1>", lambda e: (self.app.open_help(pw.KEY), "break")[1])
+        self.press_state = None  # a drag: the curve and the path window's undo steps at the press (undo_key)
         self.sync()
         self.update_idletasks()
         self.geometry(f"+{pw.winfo_rootx() + pw.winfo_width() + int(8 * s)}+{pw.winfo_rooty()}")
@@ -150,6 +156,27 @@ class SpeedGraph(tk.Toplevel):
             self.pts = json.loads(state)
             self.draw()
             self.store()
+
+    def undo_key(self, d):
+        """Ctrl+Z (d -1) / Ctrl+Y (1) here. While something is dragged, Ctrl+Z puts the curve back as it was at the
+        press, with no step (the mouse still held moves nothing), and Ctrl+Y does nothing (like the knobs')."""
+        if not self.drag:
+            return self.hist.undo() if d < 0 else self.hist.redo()
+        if d > 0:
+            return
+        if self.job:
+            self.after_cancel(self.job)
+            self.job = None
+        self.drag = None
+        pts, states, at = self.press_state
+        pw = self.pw
+        pw.undo.states, pw.undo.at, pw.undo.key = states, at, None
+        self.pts = json.loads(pts)
+        if pw.cfg.get("curve") != self.pts:
+            pw.cfg["curve"] = [list(p) for p in self.pts]
+            pw.show()
+            pw.preview()
+        self.draw()
 
     def ok(self):
         if self.job:
@@ -236,26 +263,29 @@ class SpeedGraph(tk.Toplevel):
     # ------------------------------------------------------------ mouse
 
     def hit(self, x, y):
-        """("pt", i) / ("bend", i) under (x, y), points first, or None."""
+        """("pt", i) / ("bend", i) nearest (x, y), or None. The two ends (they can't move) only when nothing else is
+        there (hunt: a point dragged onto the start was stuck under it; a short piece's handle under a point)."""
         r = 8 * self.s
-        best = None
+        found = []
+        last = len(self.pts) - 1
         for i, (u, p, _) in enumerate(self.pts):
             d = max(abs(self.u2x(u) - x), abs(self.p2y(p) - y))
-            if d <= r and (best is None or d < best[0]):
-                best = (d, ("pt", i))
-        if best:
-            return best[1]
-        for i in range(len(self.pts) - 1):
+            if d <= r:
+                found.append((i in (0, last), d, 0, ("pt", i)))
+        for i in range(last):
             h = self.handle(i)
             if h:
                 d = max(abs(self.u2x(h[0]) - x), abs(self.p2y(h[1]) - y))
-                if d <= r and (best is None or d < best[0]):
-                    best = (d, ("bend", i))
-        return best and best[1]
+                if d <= r:
+                    found.append((False, d, 1, ("bend", i)))
+        return min(found)[3] if found else None
 
     def press(self, e):
         if not self.live():
             return
+        pw = self.pw
+        self.press_state = (json.dumps(self.pts), list(pw.undo.states), pw.undo.at)
+        pw.undo.key = None  # (each drag a step of its own in the path window's undo, hunt)
         got = self.hit(e.x, e.y)
         if got is None:  # (a new point here, on the stretch it splits; both halves keep its bend)
             if len(self.pts) >= CURVE_POINTS:
@@ -327,7 +357,7 @@ class SpeedGraph(tk.Toplevel):
     def menu(self, e):
         """Right-click a point: type where it is, or delete it; a bend handle: straight."""
         got = self.hit(e.x, e.y)
-        if got is None or not self.live():
+        if got is None or not self.live() or self.drag:  # (not while something is held, hunt)
             return
         what, i = got
         m = tk.Menu(self, tearoff=0)
@@ -376,6 +406,8 @@ class PointDialog(tk.Toplevel):
         self.resizable(False, False)
         for k in UNDO_KEYS + REDO_KEYS:  # (they'd reach the main window's undo)
             self.bind(k, lambda e: "break")
+        for seq in ("<Control-Key>", "<Alt-Key>"):  # (the piano roll's shortcuts too; the boxes' own keys still work)
+            self.bind(seq, lambda e: "break")
         box = ttk.Frame(self, padding=10)
         box.pack(fill="both", expand=True)
         self.vars, self.boxes = {}, {}

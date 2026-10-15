@@ -18,7 +18,7 @@ from files.mathexpr import calc, fmt
 from files.snap import SNAP_LIST, snap_beats, snap_text
 from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KEY_LIMITS, KINDS, LETTERS, MOST_POINTS,
                             PATH_DEFAULTS, SIZE_LIMITS, SPEEDS, STEP_LIMITS, TOPS, WAYS, all_points, clean_path,
-                            peak, shifts, track)
+                            peak, shifts, speed_of, track)
 from notes.engine import tagged_notes
 from notes.pattern import MAX_LOOPS, PATTERN_PRESETS, loop_points, new_pattern, pattern_name
 from roll.roll_shared import note_name
@@ -45,6 +45,7 @@ class PathWindow(ToolWindow):
     est = 0  # notes the shown settings make, about (asked past big_ask.BIG)
     pick = 0  # the point the bar / beat / tick / key boxes show (0 = B)
     graph_window = None  # Speed: Custom's graph (speed_graph.py), while open
+    graph_job = None  # (closing it waits a moment: graph_gone)
 
     def clean(self, cfg):
         return clean_path(cfg)
@@ -90,7 +91,7 @@ class PathWindow(ToolWindow):
         Tooltip(count, tr("path.tip_count"))
         self.number(sp, 1, 1, "count", tr("path.tip_count"), (1, 10, 1))
         self.ticks = {}
-        for r, key in ((2, "anchor"), (3, "half")):
+        for r, key in ((2, "anchor"), (3, "half"), (4, "restart")):
             var = tk.BooleanVar(value=True)
             tick = ttk.Checkbutton(sp, text=tr(f"path.{key}"), variable=var,
                                    command=lambda k=key, v=var: self.put(k, v.get()))
@@ -98,6 +99,9 @@ class PathWindow(ToolWindow):
             Tooltip(tick, tr(f"path.tip_{key}"))
             self.ticks[key] = (tick, var)
         speed = self.choice(box, 3, "speed", tr("path.speed"))
+        self.wheeled = False  # (Custom picked with the mouse wheel: the graph doesn't open by itself, hunt)
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):  # (before the dropdown's own wheel step)
+            self.combos["speed"].bind(seq, lambda e: self.wheel_pick(), add="+")
         self.graph_button = ttk.Button(speed, text=tr("path.graph"), command=self.open_graph)
         self.graph_button.grid(row=0, column=1, sticky="w", padx=(4, 0))  # (Speed: Custom only)
         Tooltip(self.graph_button, tr("path.tip_graph"))
@@ -590,13 +594,26 @@ class PathWindow(ToolWindow):
 
     def put_choice(self, key, value):
         if key == "speed" and value == "custom":
-            if value == self.cfg["speed"]:
-                return self.open_graph()
-            if not self.cfg.get("curve"):  # (a curve drawn before is kept)
-                self.cfg["curve"] = start_curve(self.cfg["speed"])
-            self.put(key, value)
-            return self.open_graph()
+            wheeled, self.wheeled = self.wheeled, False
+            if value != self.cfg["speed"]:
+                if not self.cfg.get("curve"):  # (a curve drawn before is kept)
+                    self.cfg["curve"] = start_curve(self.cfg["speed"])
+                self.put(key, value)
+            if not wheeled:  # (picked with the mouse wheel: Graph… opens it)
+                self.open_graph()
+            return
         self.put(key, value)  # (Straight keeps the bends, hidden: Curve / Arc bring them back; user)
+
+    def wheel_pick(self):
+        """The wheel is about to step the Speed dropdown (its own wheel comes after this)."""
+        self.wheeled = True
+        self.after_idle(lambda: setattr(self, "wheeled", False))
+
+    def graph_gone(self):
+        """Speed isn't Custom any more (after a moment, so a page only passing by doesn't count): its graph closes."""
+        self.graph_job = None
+        if self.cfg.get("speed") != "custom":
+            self.drop_graph()
 
     def open_graph(self):
         """Speed: Custom's curve window (speed_graph.py)."""
@@ -819,15 +836,17 @@ class PathWindow(ToolWindow):
         for key, (tick, var) in self.ticks.items():
             if var.get() != c[key]:
                 var.set(c[key])
-        config(self.ticks["half"][0], state="normal" if c["speed"] == "even" and c["anchor"] else "disabled")
+        even = speed_of(c) == "even"
+        config(self.ticks["half"][0], state="normal" if even and c["anchor"] else "disabled")
+        config(self.ticks["restart"][0], state="normal" if not even and c["anchor"] else "disabled")
         config(self.entries["step"], state="normal" if c["colours"] != "keep" else "disabled")
         config(self.combos["way"], state="readonly" if c["flip"] == "each" else "disabled")
         grid_shown(self.graph_button, c["speed"] == "custom")
         if self.graph_window:
             if c["speed"] == "custom":
                 self.graph_window.sync()
-            else:
-                self.drop_graph()
+            elif not self.graph_job:  # (only if it stays so: a main window step shows other pages on the way, hunt)
+                self.graph_job = self.after_idle(self.graph_gone)
         self.show_formula()
         for key in ("low", "high"):
             put_text(key, str(c[key]))
@@ -910,6 +929,9 @@ class PathWindow(ToolWindow):
         return False
 
     def close(self):
+        if self.graph_job:
+            self.after_cancel(self.graph_job)
+            self.graph_job = None
         self.drop_graph()
         super().close()
         self.app.roll.request_redraw()

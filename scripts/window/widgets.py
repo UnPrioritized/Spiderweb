@@ -565,6 +565,8 @@ class LocalUndo:
     def mark(self, key=None):
         state = self.get()
         if state == self.states[self.at]:
+            if key is None:  # (a gesture ended: the next keyed change is a step of its own, hunt)
+                self.key = None
             return
         del self.states[self.at + 1:]
         if key is not None and key == self.key and self.at > 0:

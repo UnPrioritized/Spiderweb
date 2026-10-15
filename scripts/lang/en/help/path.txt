@@ -22,6 +22,8 @@ Spacing:
 
 • Half copies at the points (Speed: Even only, with Copies on the points ticked): where the path turns, the copies carry on past the point, and only the parts on the near side are kept, so the turn is as full as the rest.
 
+• Speed starts again at each point (with Copies on the points ticked, when Speed isn't Even): each part of the path (A to B, B to C, …) gets the whole Speed on its own, so the bunching starts again after every point. Unticked, the Speed runs once over the whole path.
+
 Below: a path up to B and down to C, with Copies on the points ticked (left: a copy right on B) and unticked (right: spaced evenly straight through B).
 [clip:path-spacing]
 

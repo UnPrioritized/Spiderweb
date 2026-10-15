@@ -31,6 +31,9 @@ and flips work on the whole group. A page's settings (PATH_DEFAULTS' keys):
   "curve"  Speed Custom: [[copy 0..1 (first .. last), place 0..1 along the path (A .. the end), bend], ...] from
            [0, 0] to [1, 1], both always rising (flat = copies on one spot); bend = the next stretch's handle height
            0..1 at its middle (0.5 straight; curve_at). None: Even
+  "restart" Speed starts again at each point (with Copies on the points): each run gets the whole Speed (user
+           2026-10-16, a tick); off: once over the whole path. Pages from before it: on for One copy every with
+           Speed up / Slow down (as they were)
   "size"   [first copy %, last copy %]: each copy grows / shrinks from its corner on the path (key rows sampled like
            a stretched picture: no gaps between rows)
   "colours" "keep" / "shift" (every colour of copy n = n x step channels on, round the "most" colours) / "turn"
@@ -64,7 +67,7 @@ TOPS = ("last", "first")
 PATH_DEFAULTS = {"pts": None, "mids": None, "kind": "straight", "mode": "every", "every": 0.25, "count": 8,
                  "k": 0.25, "speed": "even", "size": [100.0, 100.0], "colours": "keep", "step": 1, "most": 15,
                  "flip": "none", "way": "keys", "top": "last", "half": True, "anchor": True,
-                 "inside": False, "low": 0, "high": 127, "pattern": None, "curve": None,
+                 "inside": False, "low": 0, "high": 127, "pattern": None, "curve": None, "restart": False,
                  "grp": [0.0, 0.0, 0.0, 0.0]}
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # the points' names
 MOST_POINTS = len(LETTERS) - 1  # B .. Z
@@ -119,7 +122,7 @@ def clean_path(c):
     mids = list(mids) if isinstance(mids, (list, tuple)) else []
     out["pts"] = pts
     out["mids"] = [None if m is None else _pt(m) for m in (mids + [None] * len(pts))[:len(pts)]]
-    for key in ("half", "anchor", "inside"):
+    for key in ("half", "anchor", "inside", "restart"):
         if isinstance(c.get(key), bool):
             out[key] = c[key]
     for key, choices in (("kind", KINDS), ("mode", MODES), ("speed", SPEEDS), ("colours", COLOURS), ("flip", FLIPS),
@@ -142,6 +145,8 @@ def clean_path(c):
     if c.get("pattern") is not None:
         out["pattern"] = clean_pattern(c["pattern"])
     out["curve"] = clean_curve(c.get("curve"))
+    if "restart" not in c:  # (pages from before the tick: One copy every's Speed up / Slow down started again)
+        out["restart"] = out["mode"] == "every" and out["speed"] in ("up", "down")
     grp = c.get("grp")
     if isinstance(grp, (list, tuple)) and len(grp) == 4:
         got = [_num(v, -FAR, FAR) for v in grp]
@@ -373,24 +378,46 @@ def unease(u, cfg):
     return u
 
 
+def speed_of(cfg):
+    """The page's Speed, a Custom line still straight from corner to corner counting as Even (hunt: the same
+    places, half copies included)."""
+    c = cfg.get("curve")
+    if cfg["speed"] == "custom" and (not c or all(abs(u - p) < 1e-9 and (abs(m - 0.5) < 1e-9 or i == len(c) - 1)
+                                                  for i, (u, p, m) in enumerate(c))):
+        return "even"
+    return cfg["speed"]
+
+
+def _run_places(along, spans, speed):
+    """Each run's start and end as places 0..1 in the copies' even steps: the whole path once (Speed starts again
+    at each point off), or 0..1 for every run (on). [(a, b)], and how to make them lengths along the path:
+    [(run start, length)]."""
+    total = along[-1]
+    if speed.get("restart"):
+        return [(0.0, 1.0) for _ in spans], [(along[lo], along[hi] - along[lo]) for lo, hi in spans]
+    return ([(unease(along[lo] / total, speed), unease(along[hi] / total, speed)) for lo, hi in spans],
+            [(0.0, total)] * len(spans))
+
+
 def _counted(along, spans, count, speed):
     """Number of copies: places along the samples (sample number + part of the way to the next). Each run gets a
     copy on both its ends (user: the last copy going up and the first going down touch at the point), the rest
     shared out by how long the runs are (bunched up as Speed says (speed = the page's settings), over the whole
-    path)."""
+    path, or each run on its own with Speed starts again at each point)."""
     total = along[-1]
     if total <= 0:
         return np.zeros(count)
     if count < 2 * len(spans):  # (too few for both ends of every run: spread over the whole path)
         spans = [(spans[0][0], spans[-1][1])]
-    v = [(unease(along[lo] / total, speed), unease(along[hi] / total, speed)) for lo, hi in spans]
-    room = np.array([b - a for a, b in v])
+    v, scale = _run_places(along, spans, speed)
+    room = np.array([along[hi] - along[lo] for lo, hi in spans]) if speed.get("restart") else \
+        np.array([b - a for a, b in v])
     share = room / room.sum() * (count - 2 * len(spans)) if room.sum() > 0 else np.zeros(len(spans))
     n = np.floor(share).astype(int)
     n[np.argsort(n - share)[:count - 2 * len(spans) - n.sum()]] += 1  # (largest remainders)
     pos = []
-    for (lo, hi), (a, b), k in zip(spans, v, n + 2):
-        pos.extend(_along_pos(along, lo, hi, eased(np.linspace(a, b, k), speed) * total))
+    for (lo, hi), (a, b), (s0, length), k in zip(spans, v, scale, n + 2):
+        pos.extend(_along_pos(along, lo, hi, s0 + eased(np.linspace(a, b, k), speed) * length))
     return np.array(pos)
 
 
@@ -411,14 +438,23 @@ def _spaced(along, spans, count):
 def _every(along, start, spans, every, speed):
     """One copy every: each run gets one copy per step of time its copies' starts span (start: each sample's, in
     beats), spread EVENLY along it (user: a curve's copies bunched up where it flattened out, timed by the grid); a
-    straight run's copies land right on the steps. (Places along the samples, each run's spacing in length.)"""
+    straight run's copies land right on the steps. Bunched up as Speed says over the whole path, or each run on its
+    own with Speed starts again at each point (the old way). (Places along the samples, each run's spacing in
+    length.)"""
     pos, steps = [], []
-    for lo, hi in spans:
+    v, scale = _run_places(along, spans, speed) if along[-1] > 0 else ([(0.0, 1.0)] * len(spans), None)
+    for (lo, hi), (a, b), i in zip(spans, v, range(len(spans))):
         span, room = abs(start[hi] - start[lo]), along[hi] - along[lo]
         n = min(MOST_COPIES, int(span / every + 1e-9))
         step = room * every / span if span > 0 else 0.0
-        u = eased(np.arange(n + 1) / n, speed) * n if n else np.zeros(1)
-        pos.extend(_along_pos(along, lo, hi, along[lo] + u * step))
+        if n and speed.get("restart"):  # (each run on its own: as it always was)
+            at = along[lo] + eased(np.arange(n + 1) / n, speed) * n * step
+        elif n and scale:  # (the copies' even steps, i x every of the run's time, as places in the run's share)
+            s0, length = scale[i]
+            at = s0 + eased(a + np.arange(n + 1) * (every / span) * (b - a), speed) * length
+        else:
+            at = along[lo] + np.zeros(1)
+        pos.extend(_along_pos(along, lo, hi, at))
         steps.append(step)
     return pos[:MOST_COPIES], steps
 
@@ -442,7 +478,7 @@ def _places(cfg, size):
     m = len(p)
     spans = [(int(np.flatnonzero(run == r)[0]), int(np.flatnonzero(run == r)[-1])) for r in range(int(run.max()) + 1)]
     ways = [(wt, wk) for _, _, wt, wk in runs(all_points(cfg, size))]
-    halves = cfg["half"] and cfg["speed"] == "even" and cfg["anchor"]
+    halves = cfg["half"] and speed_of(cfg) == "even" and cfg["anchor"]
     half = []
     if not cfg["anchor"]:  # (user: evenly spaced through the points, none sitting on them)
         spans = [(0, m - 1)]
@@ -457,7 +493,8 @@ def _places(cfg, size):
         pos = np.array(pos, float)
     else:
         pos, steps = _every(along, moved[:, 0], spans, cfg["every"], cfg)
-        pos = sorted(set(pos) | {float(hi) for _, hi in spans[:-1]})  # (user: a copy ends right on each turn)
+        have = set(pos)  # (user: a copy ends right on each turn; copies on one spot (a flat Speed line) all kept)
+        pos = sorted(pos + [float(hi) for _, hi in spans[:-1] if float(hi) not in have])
         if halves:
             half = _halves(p, along, moved, f, down, spans, steps, ways, size)
         pos = np.array(pos, float)[:MOST_COPIES]
