@@ -28,6 +28,10 @@ Turn (Scaling only): each copy is turned a little more than the one before, for 
 
 Copies of (Scaling only): the copies can be another shape from your library, made to fit the same box. The shape itself stays the outermost step.
 
+Morph into it (shown once another shape is picked in Copies of): the steps change from your shape into the picked one bit by bit. The first step is your shape, the last step is the picked one, and every step in between is a mix. Each piece of your shape goes with the nearest piece of the other one. Pieces with no partner shrink away to nothing, or grow out of nothing. Very different shapes can twist or cross themselves on the middle steps.
+
+Copy angle (Scaling only): turns the copies by this much, round the centre point, before anything else. With Morph into it, the steps change into the turned shape without spinning. Turn adds its own turn on top.
+
 Colours: how many channels the steps take turns over. Every other one empty leaves every other step without notes, so the copies show as separate rings.
 
 Tiles

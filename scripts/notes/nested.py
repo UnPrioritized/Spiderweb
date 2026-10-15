@@ -18,7 +18,9 @@ sh["nested"] = {"way", "steps" (copies, the shape itself counts), "last" (the la
 (-100..100: + = the copies closer together toward the last one), "turn" (degrees per step), "colours" (how many
 channels the steps take turns over), "skip" (True = every other step left empty), "at" ([u, v] in the shape's box,
 only once moved; missing = the middle of the filled part), "mix" (Blend: 0 = Even band .. 1 = all rounded), "of"
-(Scaling: {"name", "strokes"} = the copies are this library shape, filling the shape's box; missing = itself)}."""
+(Scaling: {"name", "strokes"} = the copies are this library shape, filling the shape's box; missing = itself),
+"angle" (Scaling: degrees the copies' drawing is turned first, round the centre point; Turn adds on top), "morph"
+(Scaling with "of": True = the steps change from the shape into that drawing bit by bit, morph_plan)}."""
 
 import json
 import math
@@ -32,8 +34,9 @@ from notes.shrink import field, inner_rows, proportion
 
 WAYS = ("scale", "band", "blend")
 NESTED_DEFAULTS = {"way": "scale", "steps": 8, "last": 0.0, "spacing": 0, "turn": 0.0, "colours": 4, "skip": False,
-                   "mix": 1.0}
+                   "mix": 1.0, "angle": 0.0, "morph": False}
 MOST_STEPS = 60
+MORPH_POINTS = 200  # points spread round every piece of an outline while morphing
 RECOLOUR = ("colours", "skip")  # (settings that only change the steps' colours, not their shapes)
 MOST_COLOURS = 15
 _spans = {}  # nested_spans, remembered
@@ -52,6 +55,8 @@ def clean_nested(c):
         out["spacing"] = max(-100, min(100, int(round(float(c.get("spacing", 0))))))
         turn = float(c.get("turn", 0))
         out["turn"] = max(-180.0, min(180.0, turn)) if math.isfinite(turn) else 0.0
+        angle = float(c.get("angle", 0))
+        out["angle"] = max(-180.0, min(180.0, angle)) if math.isfinite(angle) else 0.0
         out["colours"] = max(1, min(MOST_COLOURS, int(c.get("colours", out["colours"]))))
         mix = float(c.get("mix", out["mix"]))
         out["mix"] = max(0.0, min(1.0, mix)) if math.isfinite(mix) else 1.0
@@ -60,6 +65,7 @@ def clean_nested(c):
     if not math.isfinite(out["last"]):
         out["last"] = 0.0
     out["skip"] = c.get("skip") is True
+    out["morph"] = c.get("morph") is True
     of = c.get("of")
     if isinstance(of, dict):  # Copies of another library shape (Scaling): its own copy of the drawing
         strokes = clean_strokes(of.get("strokes"))
@@ -103,15 +109,17 @@ def reset_centre(sh):
         sh[key] = {k: v for k, v in sh[key].items() if k != "at"}
 
 
+def step_shares(cfg):
+    """How far along each step is, Spacing taken in: 0 = the shape itself .. 1 = the last copy."""
+    n = cfg["steps"]
+    g = 2.0 ** (-cfg["spacing"] / 50)
+    return [(i / (n - 1) if n > 1 else 0.0) ** g for i in range(n)]
+
+
 def step_sizes(cfg):
     """Each copy's (size, turn in radians), the shape itself first."""
-    n, last = cfg["steps"], cfg["last"]
-    g = 2.0 ** (-cfg["spacing"] / 50)
-    out = []
-    for i in range(n):
-        t = i / (n - 1) if n > 1 else 0.0
-        out.append((1 + (last - 1) * t ** g, math.radians(cfg["turn"] * i)))
-    return out
+    last = cfg["last"]
+    return [(1 + (last - 1) * t, math.radians(cfg["turn"] * i)) for i, t in enumerate(step_shares(cfg))]
 
 
 def centre_bp(sh, ppq):
@@ -330,21 +338,107 @@ def blend_steps(sh, ppq, base, centre, view):
 
 def scaled_steps(sh, ppq, base, centre, view):
     """Scaling: step i = the shape's box made smaller and turned round the centre point (exact, like its own); with
-    "of", the copies are another drawing filling the same box (the shape itself stays the first step)."""
-    of = sh["nested"].get("of")
+    "of", the copies are another drawing filling the same box (the shape itself stays the first step), turned by
+    "angle" first. With "morph" (and "of"), each copy's drawing is the shape's outline part way into the other's."""
+    cfg = sh["nested"]
+    of = cfg.get("of")
     drawing = dict(sh, strokes=of["strokes"]) if of else sh
+    angle = math.radians(cfg.get("angle", 0.0))
+    plan = morph_plan(sh, drawing, centre, view, angle) if of and cfg.get("morph") else None
     steps = []
-    for i, (size, turn) in enumerate(step_sizes(sh["nested"])):
+    for i, ((size, turn), f) in enumerate(zip(step_sizes(cfg), step_shares(cfg))):
         if i == 0:
             steps.append(base)
             continue
         if size < 1e-4:
             steps.append(np.zeros((0, 3), np.int64))
             continue
-        copy = dict(drawing, pts=moved_frame(sh["pts"], centre, size, turn, view))
+        if plan:  # (the angle is in the plan's drawing already)
+            copy = dict(sh, strokes=morph_strokes(plan, f), pts=moved_frame(sh["pts"], centre, size, turn, view))
+        else:
+            copy = dict(drawing, pts=moved_frame(sh["pts"], centre, size, turn + angle, view))
         sp = np.asarray(find_spans(copy, ppq), np.int64).reshape(-1, 3)[:, [1, 2, 0]]
         steps.append(cut_out(sp, cut_out(sp, base)) if len(sp) else sp)  # (only where the shape is)
     return steps
+
+
+def view_loops(sh, view):
+    """The closed loops a drawing's inside is made of (fill_plan), each as MORPH_POINTS points spread evenly along it
+    in the view (a, c), all going the same way round."""
+    a, c = view
+    out = []
+    for poly in fill_plan(sh)["polys"]:
+        p = np.asarray(poly, float).reshape(-1, 2)
+        if len(p) < 3:
+            continue
+        p = np.column_stack([p[:, 0] + a * p[:, 1], c * p[:, 1]])
+        q = np.vstack([p, p[:1]])
+        along = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(q, axis=0).T))])
+        if along[-1] <= 1e-12:
+            continue
+        d = np.arange(MORPH_POINTS) * along[-1] / MORPH_POINTS
+        p = np.column_stack([np.interp(d, along, q[:, 0]), np.interp(d, along, q[:, 1])])
+        out.append(p[::-1] if loop_area(p) < 0 else p)
+    return out
+
+
+def loop_area(p):
+    """Signed area of a closed loop of points."""
+    x, y = p[:, 0], p[:, 1]
+    return float((x * np.roll(y, -1) - np.roll(x, -1) * y).sum() / 2)
+
+
+def lined_up(p, q):
+    """q's points started at the one that makes them travel the shortest way from p's (same count, same way round)."""
+    n = len(p)
+    at = (np.arange(n)[:, None] + np.arange(n)[None, :]) % n  # (row k = q started at its point k)
+    return q[at[int(np.argmin(((q[at] - p[None]) ** 2).sum(axis=(1, 2))))]]
+
+
+def morph_plan(sh, drawing, centre, view, angle):
+    """How the shape's outline turns into the drawing's (turned `angle` round the centre point first), or None when
+    either has nothing to fill: {"pairs": [(from, to)] point arrays in the view, "view", "to_uv"}. Each piece of the
+    shape goes with the nearest piece of the drawing (where it is + how big; the nearest pairs first); one with no
+    partner shrinks to its own middle, one of the drawing's grows from its own middle."""
+    to_uv = frame_to_uv(sh["pts"])
+    A, B = view_loops(sh, view), view_loops(drawing, view)
+    if to_uv is None or not A or not B:
+        return None
+    if angle:
+        a, c = view
+        cx, cy = centre[0] + a * centre[1], c * centre[1]
+        co, si = math.cos(angle), math.sin(angle)
+        B = [np.column_stack([cx + co * (p[:, 0] - cx) - si * (p[:, 1] - cy),
+                              cy + si * (p[:, 0] - cx) + co * (p[:, 1] - cy)]) for p in B]
+    spot = lambda p: (p.mean(axis=0), math.sqrt(abs(loop_area(p))))
+    sa, sb = [spot(p) for p in A], [spot(p) for p in B]
+    tries = sorted((math.dist(ca, cb) + abs(ra - rb), i, j) for i, (ca, ra) in enumerate(sa)
+                   for j, (cb, rb) in enumerate(sb))
+    used_a, used_b, pairs = set(), set(), []
+    for _, i, j in tries:
+        if i not in used_a and j not in used_b:
+            used_a.add(i)
+            used_b.add(j)
+            pairs.append((A[i], lined_up(A[i], B[j])))
+    pairs += [(p, np.repeat(sa[i][0][None], len(p), axis=0)) for i, p in enumerate(A) if i not in used_a]
+    pairs += [(np.repeat(sb[j][0][None], len(p), axis=0), p) for j, p in enumerate(B) if j not in used_b]
+    return {"pairs": pairs, "view": view, "to_uv": to_uv}
+
+
+def morph_strokes(plan, f):
+    """The drawing f of the way (0 = the shape, 1 = the other drawing) as closed polyline strokes in the shape's
+    box; pieces shrunk to a point left out."""
+    a, c = plan["view"]
+    out = []
+    for p, q in plan["pairs"]:
+        x = p + (q - p) * f
+        if np.ptp(x[:, 0]) < 1e-9 and np.ptp(x[:, 1]) < 1e-9:
+            continue
+        pitch = x[:, 1] / c
+        u, v = plan["to_uv"](x[:, 0] - a * pitch, pitch)
+        pts = np.column_stack([u, v]).tolist()
+        out.append({"kind": "poly", "pts": pts + [pts[0]]})
+    return out
 
 
 def painted(steps, cfg):

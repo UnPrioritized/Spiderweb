@@ -1,5 +1,5 @@
-"""The side panel's rows for Inside fill "Nested" (notes/nested.py): Notes Fill / Spam, Steps, Last size, Spacing,
-Turn, Colours and Every other one empty. Mixed into App."""
+"""The side panel's rows for Inside fill "Nested" (notes/nested.py): Notes Fill / Spam, Shrink by, Copies of, Morph
+into it, Copy angle, Steps, Last size, Spacing, Turn, Colours and Every other one empty. Mixed into App."""
 
 import copy
 import tkinter as tk
@@ -17,6 +17,7 @@ SAME_SHAPE = tr("panel_custom.nested_of_same")
 NOTES_CHOICES = [("fill", tr("panel_custom.fill")), ("spam", tr("panel_custom.spam"))]
 # the number boxes: (setting, label, unit, lowest, highest, Scrub steps, setting -> box, box -> setting); two a row
 BOXES = [
+    [("angle", "nested_angle", "nested_angle_unit", -180, 180, (1, 10, 0.1), float, float)],  # (Scaling only)
     [("steps", "nested_steps", "", 2, MOST_STEPS, (1, 5, 1), int, int),
      ("last", "nested_last", "%", 0, 100, (1, 10, 0.1), lambda v: round(v * 100, 6), lambda x: x / 100)],
     [("spacing", "nested_spacing", "", -100, 100, (1, 10, 1), int, lambda x: int(round(x))),
@@ -26,7 +27,7 @@ BOXES = [
 ]
 WAY_CHOICES = [("scale", tr("panel_custom.nested_way_scale")), ("band", tr("panel_custom.nested_way_band")),
                ("blend", tr("panel_custom.nested_way_blend"))]
-ONLY_FOR = {"turn": "scale", "mix": "blend"}  # (rows of the boxes only one way uses)
+ONLY_FOR = {"angle": "scale", "turn": "scale", "mix": "blend"}  # (rows of the boxes only one way uses)
 DROP_WIDTH = 14  # every Nested / Tiles dropdown (short choices; the tooltips tell the rest)
 NESTED_UNDO = tr("panel_custom.nested")
 
@@ -76,6 +77,14 @@ class NestedPanel:
         self.nested_rows.append(row)
         self.nested_way_rows[row] = "scale"
         self.nested_table += self.nested_rows
+        # Scaling, Copies of another drawing: the steps change into it bit by bit ("morph")
+        self.nested_morph_var = tk.BooleanVar(value=False)
+        b = self.nested_morph_row = ttk.Checkbutton(
+            opts, text=tr("panel_custom.nested_morph"), variable=self.nested_morph_var,
+            command=lambda: self.set_nested("morph", self.nested_morph_var.get()))
+        Tooltip(b, tr("panel_custom.nested_morph_tip"))
+        self.nested_rows.append(b)
+        self.nested_way_rows[b] = "scale"
         for line in BOXES:
             row = ttk.Frame(opts)
             if line[0][0] != "mix":  # (its long label stays out of the table)
@@ -116,6 +125,7 @@ class NestedPanel:
         self.nested_way_box.current([w for w, _ in WAY_CHOICES].index(cfg.get("way", "scale")))
         self.refresh_nested_names()
         self.nested_of_box.set(cfg["of"]["name"] if cfg.get("of") else SAME_SHAPE)
+        self.nested_morph_var.set(bool(cfg.get("morph")))
         for line in BOXES:
             for key, _, _, _, _, _, shown, _ in line:
                 e, var = self.nested_boxes[key]
@@ -126,8 +136,11 @@ class NestedPanel:
 
     def nested_row_states(self, t, on):
         """{row: shown} for sync_custom's show_custom_rows (on: Nested is the Inside fill shown)."""
-        way = (t.get("nested") or NESTED_DEFAULTS).get("way", "scale")
-        return {w: on and self.nested_way_rows.get(w, way) == way for w in self.nested_rows}
+        cfg = t.get("nested") or NESTED_DEFAULTS
+        way = cfg.get("way", "scale")
+        out = {w: on and self.nested_way_rows.get(w, way) == way for w in self.nested_rows}
+        out[self.nested_morph_row] &= bool(cfg.get("of"))  # (Morph into it: only with another drawing picked)
+        return out
 
     def refresh_nested_names(self):
         """Copies of: "Same as the shape" and the built-in shapes, then the saved ones (newest first)."""
