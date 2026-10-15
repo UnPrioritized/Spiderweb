@@ -287,16 +287,11 @@ def formula_menu(m, host, picks):
 
 # ---------------------------------------------------------------- the piano roll's curve shapes
 
-class RollHost(FormulaHost):
+class AppHost(FormulaHost):
+    """Holders in the piano roll's shapes: undo steps are the main window's."""
+
     def __init__(self, app):
         self.app = self.parent = app
-
-    def targets(self):
-        return self.app.pattern_targets()
-
-    def fresh(self, holder, layer):
-        roll = self.app.roll
-        return {"k": roll.sy / roll.sx if roll.sx else 0.25, "scale": 1.0}  # as the piano roll looks now
 
     def begin(self, name):
         self.app.push_undo(name=name)
@@ -317,6 +312,15 @@ class RollHost(FormulaHost):
     def commit(self, snap, name):
         self.app.push_undo(snap[0], name)
         self.app.sync_panel()
+
+
+class RollHost(AppHost):
+    def targets(self):
+        return self.app.pattern_targets()
+
+    def fresh(self, holder, layer):
+        roll = self.app.roll
+        return {"k": roll.sy / roll.sx if roll.sx else 0.25, "scale": 1.0}  # as the piano roll looks now
 
     def bake(self, sh):
         from notes.joined import shown_tumour
@@ -532,7 +536,7 @@ class FunnelHost(FormulaHost):
 
 # ---------------------------------------------------------------- a polygon's sides (polygon.py)
 
-class PolygonHost(FormulaHost):
+class PolygonHost(AppHost):
     """The selected polygons: the holders are their settings (sh["polygon"]), whose shape every side becomes (from its
     corner to the next) and whose pattern is laid along every side (their strokes are made again after each change).
     A pattern's sizes: hundredths of the polygon's height, so it grows with it; round as the piano roll looks when
@@ -541,9 +545,6 @@ class PolygonHost(FormulaHost):
     number_tip = "panel_pattern.number_tip_polygon"
     plain_label = "roll_menu.turn_into_plain_lines"
     asks_big = False  # (bake changes the polygon's shape, not the holder; plain lines aren't slow to show)
-
-    def __init__(self, app):
-        self.app = self.parent = app
 
     def targets(self):
         return [sh["polygon"] for sh in self.app.polygon_shapes()]
@@ -561,28 +562,11 @@ class PolygonHost(FormulaHost):
         if layer == "pattern" and not before.get("pattern"):  # (every side gets all the loops, to start with)
             holder["pattern"]["each"] = True
 
-    def begin(self, name):
-        self.app.push_undo(name=name)
-
     def changed(self, final=True):
         from notes.polygon import update_polygon
         for sh in self.app.polygon_shapes():
             update_polygon(sh)
-        self.app.shapes_changed()
-        if final:
-            self.app.sync_panel()
-        else:
-            self.app.sync_pattern()
-
-    def snapshot(self):
-        return json.dumps(self.app.shapes), super().snapshot()
-
-    def restore(self, snap):
-        super().restore(snap[1])
-
-    def commit(self, snap, name):
-        self.app.push_undo(snap[0], name)
-        self.app.sync_panel()
+        super().changed(final)
 
     def loop_length(self, holder, pat):
         """One loop along a side (Each piece) or round the whole outline (Across all), in hundredths."""

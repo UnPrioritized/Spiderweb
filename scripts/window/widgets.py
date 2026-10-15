@@ -331,6 +331,91 @@ def remember_good(root):
     root.bind_class("TEntry", "<FocusIn>", got, add="+")
 
 
+class ScrollingSide:
+    """A window's side panel that scrolls (scrollbar, mouse wheel) when everything in it doesn't fit; otherwise it's
+    stretched to the window's height (the main window, the drawer)."""
+    SIDE_SKIP = (tk.Listbox, tk.Text, ttk.Combobox)  # (the wheel over these leaves the panel alone)
+
+    def make_side(self, width):
+        """The panel, side_width pixels wide (wider by the scrollbar while it shows): its frame to fill."""
+        self.side_width = width
+        box = self.side_box = ttk.Frame(self, width=width)
+        box.pack(side="right", fill="y")
+        box.pack_propagate(False)
+        c = self.side_canvas = tk.Canvas(box, highlightthickness=0, bd=0,
+                                         bg=ttk.Style().lookup("TFrame", "background") or "SystemButtonFace")
+        self.side_bar = ttk.Scrollbar(box, orient="vertical", command=c.yview)
+        c.configure(yscrollcommand=self.side_bar.set)
+        c.pack(side="left", fill="both", expand=True)
+        side = self.side = ttk.Frame(c, padding=(6, 0, 6, 6))
+        self._side_win = c.create_window(0, 0, window=side, anchor="nw")
+        c.bind("<Configure>", lambda e: self.fit_side())
+        side.bind("<Configure>", lambda e: self.after_idle(self.fit_side))
+        self.bind("<MouseWheel>", self.side_wheel, add="+")
+        return side
+
+    def fit_side(self):
+        c, side = self.side_canvas, self.side
+        need, have = side.winfo_reqheight(), c.winfo_height()
+        # room to spare: stretched to the panel's height; too tall: its own height (0), so
+        # it keeps following what it needs
+        c.itemconfigure(self._side_win, width=c.winfo_width(), height=have if need < have else 0)
+        c.configure(scrollregion=(0, 0, c.winfo_width(), max(need, have)))
+        if need > have + 1:
+            if not self.side_bar.winfo_ismapped():  # the panel gets wider by the scrollbar, not narrower inside
+                self.side_box.config(width=self.side_width + self.side_bar.winfo_reqwidth())
+                self.side_bar.pack(side="right", fill="y", before=c)
+        elif self.side_bar.winfo_ismapped():
+            self.side_bar.pack_forget()
+            self.side_box.config(width=self.side_width)
+            c.yview_moveto(0)
+
+    def scroll_side(self, e, anyway=False):
+        """The wheel over the panel scrolls it (not over SIDE_SKIP widgets unless anyway). True when it did."""
+        if (str(e.widget).startswith(str(self.side_canvas)) and self.side_bar.winfo_ismapped()
+                and (anyway or not isinstance(e.widget, self.SIDE_SKIP))):
+            self.side_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
+            return True
+        return False
+
+    def side_wheel(self, e):
+        self.scroll_side(e)
+
+
+class PointGraph:
+    """A small graph of points [u, y] (both 0..1) on a canvas self.w x self.h with margins self.ml / mr / mt / mb,
+    self.pts the points, self.s the scale (Add between's Spread, Gate Range's graph)."""
+    U_SNAP, Y_SNAP = 1 / 40, 1 / 20  # dragging moves points in these steps (Shift = free)
+
+    def u2x(self, u):
+        return self.ml + u * (self.w - self.ml - self.mr)
+
+    def y2c(self, y):
+        return self.mt + (1 - y) * (self.h - self.mt - self.mb)
+
+    def x2u(self, x):
+        return min(1.0, max(0.0, (x - self.ml) / (self.w - self.ml - self.mr)))
+
+    def c2y(self, c):
+        return min(1.0, max(0.0, 1 - (c - self.mt) / (self.h - self.mt - self.mb)))
+
+    def point_at(self, x, y):
+        """The point under the canvas spot x, y (the nearest within 8 px), or None."""
+        r = 8 * self.s
+        best = None
+        for i, (u, v) in enumerate(self.pts):
+            d = max(abs(self.u2x(u) - x), abs(self.y2c(v) - y))
+            if d <= r and (best is None or d < best[0]):
+                best = (d, i)
+        return None if best is None else best[1]
+
+    def snapped(self, e):
+        u, y = self.x2u(e.x), self.c2y(e.y)
+        if not e.state & SHIFT:
+            u, y = round(u / self.U_SNAP) * self.U_SNAP, round(y / self.Y_SNAP) * self.Y_SNAP
+        return u, y
+
+
 class StatusLine(ttk.Label):
     """The main window's status line. Text put in with config(text=...) is a message: it stays HOLD_MS (user: the
     mouse position wrote over it at once), then the line goes back to what show() gave last (position, counts)."""

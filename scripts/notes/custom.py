@@ -138,6 +138,24 @@ def colour_of(st):
     return st.get("colour", 0) if st.get("role") != "cut" else 0
 
 
+def clean_of_at(c, out):
+    """A saved Nested / Tiles fill's "of" (copies of another library shape: its own copy of the drawing) and "at"
+    (the centre point, u, v in the shape's box) put into out when they're valid."""
+    of = c.get("of")
+    if isinstance(of, dict):
+        strokes = clean_strokes(of.get("strokes"))
+        if strokes:
+            out["of"] = {"name": str(of.get("name", ""))[:100], "strokes": strokes}
+    at = c.get("at")
+    if isinstance(at, (list, tuple)) and len(at) == 2:
+        try:
+            u, v = float(at[0]), float(at[1])
+            if math.isfinite(u) and math.isfinite(v):
+                out["at"] = [u, v]
+        except (TypeError, ValueError):
+            pass
+
+
 def clean_strokes(strokes):
     out = []
     for st in strokes or []:
@@ -834,6 +852,23 @@ def poly_edges(polys):
     return tuple(np.ascontiguousarray(v[keep]) for v in (a[:, 0], a[:, 1], b[:, 0], b[:, 1]))
 
 
+def row_gaps(ya, yb, lo, hi):
+    """The row lo..hi cut at every level where an edge (from ya to yb, each one crossing the row) starts or ends
+    inside it: between two neighbouring levels no corner lies, so every edge is a straight piece there and each pair
+    of crossings is a trapezoid. -> (e, gap, y0, y1, mid): every edge (e = its place) with every gap between two
+    levels it runs through, edge by edge (so in each gap they keep their order); the gap's levels and middle.
+    No "does it cross the middle" test: two levels a hair apart have a middle equal to one of them, and the test
+    then lost an edge there, so the rest of the row swapped inside and outside."""
+    ys = np.concatenate([ya, yb])
+    levels = np.unique(np.concatenate([[lo, hi], ys[(ys > lo) & (ys < hi)]]))
+    first = np.searchsorted(levels, np.maximum(np.minimum(ya, yb), lo))
+    n = np.searchsorted(levels, np.minimum(np.maximum(ya, yb), hi)) - first
+    e = np.repeat(np.arange(len(ya)), n)
+    gap = np.repeat(first, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
+    y0, y1 = levels[gap], levels[gap + 1]
+    return e, gap, y0, y1, (y0 + y1) / 2
+
+
 def row_spans(polys, q, edges=None):
     """Time ranges (in beats) where the closed polygons' inside (even-odd, so holes stay empty) touches pitch
     row q anywhere between its bottom and top edge. edges: poly_edges(polys), when it's at hand (many rows)."""
@@ -843,19 +878,7 @@ def row_spans(polys, q, edges=None):
     if not len(here):
         return []
     xa, ya, xb, yb = xa[here], ya[here], xb[here], yb[here]
-    # Between two neighbouring levels no corner lies, so every edge is a straight piece and each pair of
-    # crossings is a trapezoid: its time range is the widest of its two sides.
-    ys = np.concatenate([ya, yb])
-    levels = np.unique(np.concatenate([[lo, hi], ys[(ys > lo) & (ys < hi)]]))
-    # every edge with every gap between two levels it runs through (edge by edge, so in each gap they keep their
-    # order). No "does it cross the middle" test: two levels a hair apart have a middle equal to one of them, and
-    # the test then lost an edge there, so the rest of the row swapped inside and outside.
-    first = np.searchsorted(levels, np.maximum(np.minimum(ya, yb), lo))
-    n = np.searchsorted(levels, np.minimum(np.maximum(ya, yb), hi)) - first
-    e = np.repeat(np.arange(len(here)), n)
-    gap = np.repeat(first, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
-    y0, y1 = levels[gap], levels[gap + 1]
-    mid = (y0 + y1) / 2
+    e, gap, y0, y1, mid = row_gaps(ya, yb, lo, hi)
     xa, ya, xb, yb = xa[e], ya[e], xb[e], yb[e]
 
     def x_at(y):
@@ -1655,14 +1678,7 @@ def row_cut(edges, q):
         return None
     xa, ya, xb, yb, lid = xa[here], ya[here], xb[here], yb[here], lid[here]
     near = (xa, ya, xb, yb, lid)  # (for the row's middle line, centre_spots)
-    ys = np.concatenate([ya, yb])
-    levels = np.unique(np.concatenate([[lo, hi], ys[(ys > lo) & (ys < hi)]]))
-    first = np.searchsorted(levels, np.maximum(np.minimum(ya, yb), lo))
-    n = np.searchsorted(levels, np.minimum(np.maximum(ya, yb), hi)) - first
-    e = np.repeat(np.arange(len(here)), n)
-    gap = np.repeat(first, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
-    y0, y1 = levels[gap], levels[gap + 1]
-    mid = (y0 + y1) / 2
+    e, gap, y0, y1, mid = row_gaps(ya, yb, lo, hi)
     xa, ya, xb, yb, lid = xa[e], ya[e], xb[e], yb[e], lid[e]
 
     def x_at(y):

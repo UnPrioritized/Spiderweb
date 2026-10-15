@@ -12,11 +12,10 @@
 
 import os
 import tkinter as tk
-from tkinter import filedialog, ttk
+from tkinter import ttk
 
 from files.lang import tr, trn
 from files.mathexpr import calc
-from files.synth import FONT_TYPES
 from notes.hzbass import AUTO_MOST
 from window import look
 from window.hz_gates import GATE_MODES
@@ -244,17 +243,8 @@ class PreviewSettings(tk.Toplevel):
             self.live_used.config(text=live, foreground=lc)
 
     def pick_font(self):
-        cfg = self.app.hz_preview
-        path = filedialog.askopenfilename(
-            parent=self, title=tr("hz.preview_pick_font"),
-            initialdir=os.path.dirname(cfg["font"]) if cfg["font"] else None,
-            filetypes=[(tr("hz.preview_fonts"), FONT_TYPES), (tr("hz.preview_all"), "*.*")])
-        if not path:
-            return
-        cfg["font"] = os.path.normpath(path)
-        self.app.schedule_autosave()
-        self.app.soundfont_changed()  # (Built-in BASSMIDI plays with it too)
-        self.remake()
+        if self.app.ask_soundfont(self, "hz.preview_pick_font"):
+            self.remake()
 
     def on_voices(self):
         try:

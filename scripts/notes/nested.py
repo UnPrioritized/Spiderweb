@@ -28,7 +28,7 @@ import math
 import numpy as np
 
 from files import speed
-from notes.custom import (carried_fill, clean_strokes, cut_out, drawn_view, edge_loops, find_spans, fill_plan,
+from notes.custom import (carried_fill, clean_of_at, cut_out, drawn_view, edge_loops, find_spans, fill_plan,
                           frame_spans, frame_to_bp, frame_to_uv, has_nested, has_tiles, inside_rows, merged_rows, poly_edges, rows_spans)
 from notes.paths import TOP_KEY, pitch_of
 from notes.shrink import field, inner_rows, proportion
@@ -68,19 +68,7 @@ def clean_nested(c):
         out["last"] = 0.0
     out["skip"] = c.get("skip") is True
     out["morph"] = c.get("morph") is True
-    of = c.get("of")
-    if isinstance(of, dict):  # Copies of another library shape (Scaling): its own copy of the drawing
-        strokes = clean_strokes(of.get("strokes"))
-        if strokes:
-            out["of"] = {"name": str(of.get("name", ""))[:100], "strokes": strokes}
-    at = c.get("at")
-    if isinstance(at, (list, tuple)) and len(at) == 2:
-        try:
-            u, v = float(at[0]), float(at[1])
-            if math.isfinite(u) and math.isfinite(v):
-                out["at"] = [u, v]
-        except (TypeError, ValueError):
-            pass
+    clean_of_at(c, out)  # (Copies of another library shape: Scaling)
     return out
 
 

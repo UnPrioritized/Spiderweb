@@ -38,8 +38,9 @@ def segment(a, b, pad):
     return [[a[0] - pad, a[1]], [a[0], a[1]], [b[0], b[1]], [b[0] + pad, b[1]]]
 
 
-def curve_env(a, b, c, pad):
-    """A curve from a to b bent towards c (beat, velocity) as envelope points, reaching pad beats past both ends."""
+def curve_env(a, b, c, pad, lo=1.0, hi=127.0):
+    """A curve from a to b bent towards c (beat, velocity) as envelope points, reaching pad beats past both ends;
+    values kept in lo..hi."""
     if a[0] > b[0]:
         a, b = b, a
     if a[0] == b[0]:
@@ -50,7 +51,7 @@ def curve_env(a, b, c, pad):
         t = i / CURVE_STEPS
         s = 1 - t
         pts.append([s * s * a[0] + 2 * s * t * cx + t * t * b[0],
-                    max(1.0, min(127.0, s * s * a[1] + 2 * s * t * c[1] + t * t * b[1]))])
+                    max(lo, min(hi, s * s * a[1] + 2 * s * t * c[1] + t * t * b[1]))])
     return [[a[0] - pad, a[1]]] + pts + [[b[0] + pad, b[1]]]
 
 
@@ -89,11 +90,12 @@ def formula_env(a, b, pat, pad, ppq=None):
     return [[a[0] - pad, pts[0][1]]] + pts + [[b[0] + pad, pts[-1][1]]]
 
 
-def limit_bend(a, b, c):
-    """c with its velocity pulled in just enough that the curve a -> b stays inside 1..127 (same shape, no flat top)."""
-    hi = 127 + ((127 - a[1]) * (127 - b[1])) ** 0.5
-    lo = 1 - ((a[1] - 1) * (b[1] - 1)) ** 0.5
-    return [c[0], min(max(c[1], lo), hi)]
+def limit_bend(a, b, c, lo=1, top=127):
+    """c with its velocity pulled in just enough that the curve a -> b stays inside lo..top (same shape, no flat
+    top)."""
+    hi = top + ((top - a[1]) * (top - b[1])) ** 0.5
+    low = lo - ((a[1] - lo) * (b[1] - lo)) ** 0.5
+    return [c[0], min(max(c[1], low), hi)]
 
 
 def curve_mid(a, b, c):

@@ -19,7 +19,7 @@ import math
 
 import numpy as np
 
-from notes.custom import box_frame, clean_strokes, find_spans, inside_rows
+from notes.custom import box_frame, clean_of_at, find_spans, inside_rows
 
 LAYOUTS = ("grid", "brick")
 FLIPS = ("none", "h", "v", "hv")
@@ -41,11 +41,6 @@ def clean_tiles(c):
     if not isinstance(c, dict):
         return None
     out = dict(TILES_DEFAULTS)
-    of = c.get("of")
-    if isinstance(of, dict):
-        strokes = clean_strokes(of.get("strokes"))
-        if strokes:
-            out["of"] = {"name": str(of.get("name", ""))[:100], "strokes": strokes}
     try:
         out["keys"] = max(1, min(MOST_KEYS, int(c.get("keys", out["keys"]))))
         out["gap_keys"] = max(0, min(MOST_KEYS, int(c.get("gap_keys", out["gap_keys"]))))
@@ -59,14 +54,7 @@ def clean_tiles(c):
         if c.get(k) in ok:
             out[k] = c[k]
     out["whole"] = c.get("whole") is True
-    at = c.get("at")
-    if isinstance(at, (list, tuple)) and len(at) == 2:
-        try:
-            u, v = float(at[0]), float(at[1])
-            if math.isfinite(u) and math.isfinite(v):
-                out["at"] = [u, v]
-        except (TypeError, ValueError):
-            pass
+    clean_of_at(c, out)
     return out
 
 

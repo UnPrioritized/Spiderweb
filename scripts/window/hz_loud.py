@@ -24,36 +24,12 @@ from notes.hzbass import clean_line, left_edge
 from roll.roll_shared import CTRL, SELECTED_COLOR, SHIFT, SLOT_COLORS, fade
 from window import look
 from window.hz_layers import layer_colour
-from window.velocity import CURVE_STEPS, curve_mid, segment
+from window.velocity import curve_env, curve_mid, limit_bend, segment
 from window.widgets import Tooltip
 
 TOP = 127.0  # the pane counts both lines in velocity steps: the layer's 100 % = 127
 NOTE_LEVELS = (127, 96, 64, 32)
 LAYER_LEVELS = (1.0, 0.75, 0.5, 0.25, 0.0)
-
-
-def curve_line(a, b, c, pad, lo):
-    """The curve a -> b bent towards c (beat, value) as points, values kept in lo..TOP, reaching pad beats past both
-    ends (velocity.curve_env, with the layer's 0 allowed)."""
-    if a[0] > b[0]:
-        a, b = b, a
-    if a[0] == b[0]:
-        return segment(a, b, pad)
-    cx = min(max(c[0], a[0]), b[0])
-    pts = []
-    for i in range(CURVE_STEPS + 1):
-        t = i / CURVE_STEPS
-        s = 1 - t
-        pts.append([s * s * a[0] + 2 * s * t * cx + t * t * b[0],
-                    max(lo, min(TOP, s * s * a[1] + 2 * s * t * c[1] + t * t * b[1]))])
-    return [[a[0] - pad, a[1]]] + pts + [[b[0] + pad, b[1]]]
-
-
-def bend_limit(a, b, c, lo):
-    """c with its value pulled in just enough that the curve a -> b stays inside lo..TOP (velocity.limit_bend)."""
-    hi = TOP + ((TOP - a[1]) * (TOP - b[1])) ** 0.5
-    low = lo - ((a[1] - lo) * (b[1] - lo)) ** 0.5
-    return [c[0], min(max(c[1], low), hi)]
 
 
 def tidy_line(pts):
@@ -240,7 +216,7 @@ class LoudPane:
     def draw_handles(self, a, b, c, kind, lw):
         """The red line / curve with square handles on its ends and a curve's round handle in the middle."""
         cv, win, r = self.canvas, self.win, 4 * self.s
-        pts = curve_line(a, b, c, 0, self.lowest())[1:-1]
+        pts = curve_env(a, b, c, 0, self.lowest(), TOP)[1:-1]
         if len(pts) >= 2:
             cv.create_line(*[q for x, v in pts for q in (win.x_of(x), self.y_of(v))], fill=look.CHART_LINE, width=lw)
         if a[0] == b[0]:
@@ -325,9 +301,9 @@ class LoudPane:
     def bend(self, a, b, c):
         """The line drawn = the curve a -> b bent towards c (a straight line for Linear)."""
         ed = self.edit
-        c = bend_limit(a, b, c, self.lowest())
+        c = limit_bend(a, b, c, self.lowest(), TOP)
         ed["curve"] = (a, b, c)
-        ed["drawn"] = curve_line(a, b, c, self.pad_beats(), self.lowest())
+        ed["drawn"] = curve_env(a, b, c, self.pad_beats(), self.lowest(), TOP)
         self.redraw()
 
     def pad_beats(self):

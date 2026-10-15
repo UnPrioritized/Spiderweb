@@ -627,18 +627,9 @@ class ProjectFiles:
         if long_silences(self.rendered) and not messagebox.askokcancel(
                 tr("project.spiderweb"), tr("project.long_silences", ppq=ppq, beats=MAX_DELTA // ppq), icon="warning"):
             return
-        self.busy(tr("project.saving_midi"))  # (millions of notes take a few seconds)
-        try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            write_midi(path, ppq, bpm, beats, self.rendered, self.picture_use10)
-        except OSError as e:
-            messagebox.showerror(tr("project.spiderweb"), couldnt_save(e))
+        if not self.write_out(path, "project.saving_midi",  # (millions of notes take a few seconds)
+                              lambda: write_midi(path, ppq, bpm, beats, self.rendered, self.picture_use10)):
             return
-        except MemoryError:
-            messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))
-            return
-        finally:
-            self.busy(None)
         channels =self.slot_count if self.channel_mode.get() == "auto" else 1
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
                 if ppq >= PPQ_WARN else "")
@@ -648,6 +639,23 @@ class ProjectFiles:
                             tr("project.saved_notes_on_track_s_one", notes=trn("n.notes", len(self.rendered),
                                                                                n=len(self.rendered)),
                                tracks=trn("n.tracks", channels, n=channels), path=path, note=note))
+
+    def write_out(self, path, busy, write):
+        """write() makes the file at path (its folder made first), with the busy text key showing. False when it
+        couldn't (said in plain words)."""
+        self.busy(tr(busy))
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            write()
+        except OSError as e:
+            messagebox.showerror(tr("project.spiderweb"), couldnt_save(e))
+            return False
+        except MemoryError:
+            messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))
+            return False
+        finally:
+            self.busy(None)
+        return True
 
     def export_dms(self):
         """Export to Domino: every note in a .dms file (Domino's own song file, PPQ up to 65535) next to the MIDI
@@ -678,18 +686,9 @@ class ProjectFiles:
                                                   basename=os.path.basename(path)),
                 icon="warning", default="no"):
             return
-        self.busy(tr("project.saving_dms"))
-        try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            write_bytes(path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16()))
-        except OSError as e:
-            messagebox.showerror(tr("project.spiderweb"), couldnt_save(e))
+        if not self.write_out(path, "project.saving_dms", lambda: write_bytes(
+                path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16()))):
             return
-        except MemoryError:
-            messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))
-            return
-        finally:
-            self.busy(None)
         tracks = int(notes[:, 4].max()) + 1
         text = (tr("project.saved_dms", notes=trn("n.notes", len(notes), n=len(notes)),
                    tracks=trn("n.tracks", tracks, n=tracks), path=path)

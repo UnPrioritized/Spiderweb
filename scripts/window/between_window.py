@@ -22,7 +22,7 @@ from notes.engine import cached_path
 from notes.gateflip import all_flipped
 from notes.sustain import is_sustained
 from window import look
-from window.widgets import LocalUndo, Scrub, Tooltip, remember_place
+from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, remember_place
 
 
 def _power(k):
@@ -36,12 +36,11 @@ def _s_curve(k):
 PRESETS = [("between.even", between.STRAIGHT), ("between.near_first", _power(2)),
            ("between.near_last", _power(0.5)), ("between.near_ends", _s_curve(0.5)),
            ("between.near_middle", _s_curve(2))]
-U_SNAP, Y_SNAP = 1 / 40, 1 / 20  # dragging moves points in these steps (Shift = free)
 PREVIEW_POINTS = 100000  # the preview's steps drawn with at most about this many points in all
 PAD_STICK = 8  # the push pad's middle pulls the stick in within this many px (Shift = not)
 
 
-class BetweenWindow(tk.Toplevel):
+class BetweenWindow(PointGraph, tk.Toplevel):
     def __init__(self, app, gid, before, name, opened_on=None):
         """gid: the group (made already); before: the shapes as JSON before the window (Cancel puts them back, OK
         makes one undo step from them, called name); opened_on: the shape it was opened from (the pad starts on it
@@ -588,18 +587,6 @@ class BetweenWindow(tk.Toplevel):
     def pts(self):
         return self.set["graph"]
 
-    def u2x(self, u):
-        return self.ml + u * (self.w - self.ml - self.mr)
-
-    def y2c(self, y):
-        return self.mt + (1 - y) * (self.h - self.mt - self.mb)
-
-    def x2u(self, x):
-        return min(1.0, max(0.0, (x - self.ml) / (self.w - self.ml - self.mr)))
-
-    def c2y(self, c):
-        return min(1.0, max(0.0, 1 - (c - self.mt) / (self.h - self.mt - self.mb)))
-
     def draw(self):
         cv, s = self.canvas, self.s
         cv.delete("all")
@@ -627,21 +614,6 @@ class BetweenWindow(tk.Toplevel):
         if at is not None:
             cv.create_text(x1 - 4 * s, top + 4 * s, anchor="ne", fill=look.VALUE, font=look.font(8),
                            text=tr("between.at", n=round(at[0] * (n + 1), 1), y=round(at[1] * 100)))
-
-    def point_at(self, x, y):
-        r = 8 * self.s
-        best = None
-        for i, (u, v) in enumerate(self.pts):
-            d = max(abs(self.u2x(u) - x), abs(self.y2c(v) - y))
-            if d <= r and (best is None or d < best[0]):
-                best = (d, i)
-        return None if best is None else best[1]
-
-    def snapped(self, e):
-        u, y = self.x2u(e.x), self.c2y(e.y)
-        if not e.state & 0x1:
-            u, y = round(u / U_SNAP) * U_SNAP, round(y / Y_SNAP) * Y_SNAP
-        return u, y
 
     def press(self, e):
         i = self.point_at(e.x, e.y)

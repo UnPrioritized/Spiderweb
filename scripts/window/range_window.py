@@ -22,7 +22,7 @@ from notes.funnel import funnel_gates, funnel_range
 from notes.gaterange import DIRS, STRAIGHT, clean_range, gate_steps, halved, steps_of, steps_to, y_gate
 from window import big_ask, look
 from window.panel_funnel import GATE_STEPS
-from window.widgets import LocalUndo, Scrub, Tooltip, remember_place, unit_word
+from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, remember_place, unit_word
 
 
 def _power(k):
@@ -32,13 +32,12 @@ def _power(k):
 PRESETS = [("range_window.straight", STRAIGHT), ("range_window.short_longer", _power(2)),
            ("range_window.long_longer", _power(0.5)), ("range_window.hill", [[0, 0], [0.5, 1], [1, 0]]),
            ("range_window.valley", [[0, 1], [0.5, 0], [1, 1]])]
-U_SNAP, Y_SNAP = 1 / 40, 1 / 20  # dragging moves points in these steps (Shift = free)
 OFF_COLOR = look.CHART_OFF  # the graph while the Range is off
 BAR, BAR_HOT, NONE = look.RANGE_BAR, look.RANGE_BAR_HOT, look.RANGE_NONE  # notes per gate: bars, the one pointed at, gates with none
 BAR_PX = 3  # bars at least this wide: more gates than fit share a bar
 
 
-class RangeGraph(tk.Toplevel):
+class RangeGraph(PointGraph, tk.Toplevel):
     def __init__(self, app, tgts=None):
         super().__init__(app)
         self.app = app
@@ -372,18 +371,6 @@ class RangeGraph(tk.Toplevel):
 
     # ---- drawing
 
-    def u2x(self, u):
-        return self.ml + u * (self.w - self.ml - self.mr)
-
-    def y2c(self, y):
-        return self.mt + (1 - y) * (self.h - self.mt - self.mb)
-
-    def x2u(self, x):
-        return min(1.0, max(0.0, (x - self.ml) / (self.w - self.ml - self.mr)))
-
-    def c2y(self, c):
-        return min(1.0, max(0.0, 1 - (c - self.mt) / (self.h - self.mt - self.mb)))
-
     def draw(self):
         cv, s = self.canvas, self.s
         on = self.on_var.get()
@@ -504,21 +491,6 @@ class RangeGraph(tk.Toplevel):
         self.draw_chart()
 
     # ---- mouse
-
-    def point_at(self, x, y):
-        r = 8 * self.s
-        best = None
-        for i, (u, v) in enumerate(self.pts):
-            d = max(abs(self.u2x(u) - x), abs(self.y2c(v) - y))
-            if d <= r and (best is None or d < best[0]):
-                best = (d, i)
-        return None if best is None else best[1]
-
-    def snapped(self, e):
-        u, y = self.x2u(e.x), self.c2y(e.y)
-        if not e.state & 0x1:
-            u, y = round(u / U_SNAP) * U_SNAP, round(y / Y_SNAP) * Y_SNAP
-        return u, y
 
     def press(self, e):
         if not self.on_var.get():

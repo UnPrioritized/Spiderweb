@@ -3,10 +3,9 @@ play line)."""
 
 import os
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import messagebox, ttk
 
 from files.lang import tr
-from files.synth import FONT_TYPES
 from notes.engine import slot_track_channel
 from window import look
 from window.hz_view import GREEN, GREY, ORANGE, PLAY_LINE
@@ -100,17 +99,7 @@ class HzSound:
 
     def ask_font(self):
         """The soundfont picker: True when one was picked (it's the preview's now)."""
-        cfg = self.app.hz_preview
-        path = filedialog.askopenfilename(
-            parent=self, title=tr("hz.preview_pick_font"),
-            initialdir=os.path.dirname(cfg["font"]) if cfg["font"] else None,
-            filetypes=[(tr("hz.preview_fonts"), FONT_TYPES), (tr("hz.preview_all"), "*.*")])
-        if not path:
-            return False
-        cfg["font"] = os.path.normpath(path)
-        self.app.soundfont_changed()  # (shared with Built-in BASSMIDI: Settings → Sound shows the new name)
-        self.app.schedule_autosave()
-        return True
+        return self.app.ask_soundfont(self, "hz.preview_pick_font")
 
     def preview_failed(self, err, font=False):
         """The synth or the soundfont didn't work: the preview goes off and says why. font: the soundfont couldn't

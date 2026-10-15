@@ -33,7 +33,7 @@ from window.formula_host import DrawerHost, formula_menu
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
 from window.layers import DrawerLayers, pasted
 from window.sticky import BEND, REACH, Targets, key_points
-from window.widgets import REDO_KEYS, UNDO_KEYS, ListTip, Tooltip, remember_place, symmetry_menu
+from window.widgets import REDO_KEYS, UNDO_KEYS, ListTip, ScrollingSide, Tooltip, remember_place, symmetry_menu
 
 LIBRARY = os.path.join(USER, "shapes")
 # Always in the library (not files). A saved shape with the same name is used instead; deleting it brings these back.
@@ -315,7 +315,7 @@ def clean_name(name):
 
 # ---------------------------------------------------------------- window
 
-class Drawer(DrawerLayers, tk.Toplevel):
+class Drawer(DrawerLayers, ScrollingSide, tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
@@ -734,41 +734,9 @@ class Drawer(DrawerLayers, tk.Toplevel):
     def build_side(self):
         """The side panel: the layers list takes the room that's left; when that would make it shorter than its
         least rows (long warning texts, a small window), the panel scrolls instead (scrollbar, mouse wheel)."""
-        box = self.side_box = ttk.Frame(self, width=int(300 * self.scale))
-        box.pack(side="right", fill="y")
-        box.pack_propagate(False)
-        c = self.side_canvas = tk.Canvas(box, highlightthickness=0, bd=0,
-                                         bg=ttk.Style().lookup("TFrame", "background") or "SystemButtonFace")
-        self.side_bar = ttk.Scrollbar(box, orient="vertical", command=c.yview)
-        c.configure(yscrollcommand=self.side_bar.set)
-        c.pack(side="left", fill="both", expand=True)
-        side = self.side = ttk.Frame(c, padding=(6, 0, 6, 6))
-        self._side_win = c.create_window(0, 0, window=side, anchor="nw")
-        c.bind("<Configure>", lambda e: self.fit_side())
-        side.bind("<Configure>", lambda e: self.after_idle(self.fit_side))
-        self.bind("<MouseWheel>", self.side_wheel, add="+")
-        return side
+        return self.make_side(int(300 * self.scale))
 
-    def fit_side(self):
-        """Like the main window's side panel (App.fit_side)."""
-        c, side = self.side_canvas, self.side
-        need, have = side.winfo_reqheight(), c.winfo_height()
-        c.itemconfigure(self._side_win, width=c.winfo_width(), height=have if need < have else 0)
-        c.configure(scrollregion=(0, 0, c.winfo_width(), max(need, have)))
-        if need > have + 1:
-            if not self.side_bar.winfo_ismapped():  # the panel gets wider by the scrollbar, not narrower inside
-                self.side_box.config(width=int(300 * self.scale) + self.side_bar.winfo_reqwidth())
-                self.side_bar.pack(side="right", fill="y", before=c)
-        elif self.side_bar.winfo_ismapped():
-            self.side_bar.pack_forget()
-            self.side_box.config(width=int(300 * self.scale))
-            c.yview_moveto(0)
-
-    def side_wheel(self, e):
-        """The mouse wheel over the side panel scrolls it (the lists scroll themselves)."""
-        if (str(e.widget).startswith(str(self.side_canvas)) and self.side_bar.winfo_ismapped()
-                and not isinstance(e.widget, (tk.Listbox, ttk.Treeview, ttk.Combobox))):
-            self.side_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
+    SIDE_SKIP = (tk.Listbox, ttk.Treeview, ttk.Combobox)  # (the lists scroll themselves)
 
     def hotkey(self, fn):
         """A drawer shortcut that leaves text boxes alone (the name box, a layer being renamed)."""

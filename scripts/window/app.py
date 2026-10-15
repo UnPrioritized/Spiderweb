@@ -82,7 +82,7 @@ from window.settings_window import open_settings
 from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
-from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, StatusLine, Tooltip, bad, fit_dropdowns, good, grid_shown,
+from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, fit_dropdowns, good, grid_shown,
                             keep_width, letter_jump, remember_good, watch_bad)
 
 
@@ -147,7 +147,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False):
 
 
 class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, MaskPanel, PolygonPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
-          HistoryPanel, tk.Tk):
+          HistoryPanel, ScrollingSide, tk.Tk):
     def __init__(self, autosave=AUTOSAVE):
         super().__init__()
         errors.install(self)
@@ -483,21 +483,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
     def _build_side(self):
         """The side panel: scrolls (scrollbar, mouse wheel) when everything in it doesn't fit; otherwise the help
         text at the bottom takes the room that's left."""
-        self.side_width = int(lang_size("size.panel_width", 330) * self.scale * look.WIDE)  # (a translation may widen it)
-        box = self.side_box = ttk.Frame(self, width=self.side_width)
-        box.pack(side="right", fill="y")
-        box.pack_propagate(False)
-        c = self.side_canvas = tk.Canvas(box, highlightthickness=0, bd=0,
-                                         bg=ttk.Style().lookup("TFrame", "background") or "SystemButtonFace")
-        self.side_bar = ttk.Scrollbar(box, orient="vertical", command=c.yview)
-        c.configure(yscrollcommand=self.side_bar.set)
-        c.pack(side="left", fill="both", expand=True)
-        side = self.side = ttk.Frame(c, padding=(6, 0, 6, 6))
-        self._side_win = c.create_window(0, 0, window=side, anchor="nw")
-        c.bind("<Configure>", lambda e: self.fit_side())
-        side.bind("<Configure>", lambda e: self.after_idle(self.fit_side))
-        self.bind("<MouseWheel>", self.side_wheel, add="+")
-        self._side_wheel_at = 0.0
+        side = self.make_side(int(lang_size("size.panel_width", 330) * self.scale * look.WIDE))  # (a translation
+        self._side_wheel_at = 0.0  # may widen it)
         own = self.bind_class("TCombobox", "<MouseWheel>")  # (a dropdown's own wheel: next / last choice)
 
         def drop_wheel(e):
@@ -510,29 +497,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         fit_dropdowns(self)
         return side
 
-    def fit_side(self):
-        c, side = self.side_canvas, self.side
-        need, have = side.winfo_reqheight(), c.winfo_height()
-        # room to spare: stretched to the panel's height; too tall: its own height (0), so
-        # it keeps following what it needs
-        c.itemconfigure(self._side_win, width=c.winfo_width(), height=have if need < have else 0)
-        c.configure(scrollregion=(0, 0, c.winfo_width(), max(need, have)))
-        if need > have + 1:
-            if not self.side_bar.winfo_ismapped():  # the panel gets wider by the scrollbar, not narrower inside
-                self.side_box.config(width=self.side_width + self.side_bar.winfo_reqwidth())
-                self.side_bar.pack(side="right", fill="y", before=c)
-        elif self.side_bar.winfo_ismapped():
-            self.side_bar.pack_forget()
-            self.side_box.config(width=self.side_width)
-            c.yview_moveto(0)
-
     def side_wheel(self, e, dropdown=False):
         """The mouse wheel over the side panel scrolls it (lists scroll themselves; dropdowns and number boxes
         with the keyboard change, unless the panel is already scrolling: side_gliding)."""
-        w = str(e.widget)
-        if (w.startswith(str(self.side_canvas)) and self.side_bar.winfo_ismapped()
-                and (dropdown or not isinstance(e.widget, (tk.Listbox, tk.Text, ttk.Combobox)))):
-            self.side_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
+        if self.scroll_side(e, dropdown):
             self._side_wheel_at = time.monotonic()
 
     SIDE_GLIDE = 0.5  # seconds: a wheel turned within this of the last panel scroll keeps scrolling the panel (user)
@@ -2199,18 +2167,25 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
                 w.take_voices()
             w.master.winfo_toplevel().show_builtin()
 
-    def pick_soundfont(self):
-        """Pick the soundfont (shared by Built-in BASSMIDI and the Hz bass preview). True = one was picked."""
+    def ask_soundfont(self, parent, title):
+        """The soundfont file picker (shared soundfont: Built-in BASSMIDI and the Hz bass preview), over parent with
+        the title text key. True = one was picked (it's the shared one now)."""
         cfg = self.hz_preview
         path = filedialog.askopenfilename(
-            parent=self, title=tr("app.pick_soundfont_title"),
+            parent=parent, title=tr(title),
             initialdir=os.path.dirname(cfg["font"]) if cfg["font"] else None,
             filetypes=[(tr("hz.preview_fonts"), FONT_TYPES), (tr("hz.preview_all"), "*.*")])
         if not path:
             return False
         cfg["font"] = os.path.normpath(path)
         self.schedule_autosave()
-        self.soundfont_changed()
+        self.soundfont_changed()  # (Settings → Sound shows the new name)
+        return True
+
+    def pick_soundfont(self):
+        """Pick the soundfont (shared by Built-in BASSMIDI and the Hz bass preview). True = one was picked."""
+        if not self.ask_soundfont(self, "app.pick_soundfont_title"):
+            return False
         hz = self.hz_window
         if hz is not None:  # (the preview makes its sound again with it)
             if hz.settings_window and hz.settings_window.winfo_exists():
