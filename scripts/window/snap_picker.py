@@ -103,10 +103,12 @@ def picture(what, size):
 # ---------------------------------------------------------------- the dropdown
 
 class SnapPicker:
-    """A button showing the snap (picture + name) that opens the list. var: the app's snap (files/snap.py texts)."""
+    """A button showing the snap (picture + name) that opens the list. var: the app's snap (files/snap.py texts).
+    names: {snap: text} shown in place of the usual names (Chop: "off" = "1 tick"; a value not in the list = no
+    picture, no tick in the list)."""
 
-    def __init__(self, app, parent, var):
-        self.app, self.var = app, var
+    def __init__(self, app, parent, var, names=None):
+        self.app, self.var, self.names = app, var, names or {}
         size = max(SIZE, round(SIZE * app.scale))
         self.pics = {snap: picture("bar" if snap == "bar" else what, size) for snap, what in SNAP_LIST}
         self.custom_pic = picture("custom", size)
@@ -114,7 +116,7 @@ class SnapPicker:
         self.button = ttk.Menubutton(parent, compound="left", direction="below")
         self.menu = tk.Menu(self.button, tearoff=False)
         for snap, _ in SNAP_LIST:
-            self.menu.add_radiobutton(label=snap_text(snap), image=self.pics[snap], compound="left",
+            self.menu.add_radiobutton(label=self.names.get(snap, snap_text(snap)), image=self.pics[snap], compound="left",
                                       variable=self.pick, value=snap, command=lambda s=snap: var.set(s))
         self.menu.add_radiobutton(label=tr("snap.custom"), image=self.custom_pic, compound="left",
                                   variable=self.pick, value="custom", command=self.open_custom)
@@ -131,7 +133,7 @@ class SnapPicker:
         snap = self.var.get()
         custom = custom_parts(snap) is not None
         self.pick.set("custom" if custom else snap)
-        self.button.config(text=snap_text(snap), image=self.custom_pic if custom else self.pics.get(snap, ""))
+        self.button.config(text=self.names.get(snap, snap_text(snap)), image=self.custom_pic if custom else self.pics.get(snap, ""))
 
     def open_custom(self):
         self.show()  # (the tick goes back to the snap in use until the window says otherwise)

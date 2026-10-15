@@ -14,7 +14,7 @@ from files.about import USER
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from files.safefile import write_text
-from files.snap import snap_beats, snap_text
+from files.snap import SNAPS, snap_beats, snap_text
 from notes.chop import (CHOP_DEFAULTS, MAX_STEPS, RHYTHMS, clean_chop, clean_pieces, rhythm, step_ticks, switched,
                         too_many, top)
 from window import look
@@ -24,6 +24,8 @@ from window.widgets import Scrub, Tooltip, bad, good
 
 RHYTHMS_FILE = os.path.join(USER, "rhythms.json")
 CELLS = (1, 2, 3, 4, 6, 8)  # the strip's grid: cells per step
+TYPED = "ticks"  # cfg["snap"] when the step length was typed in ticks (cfg["len"] holds it)
+MAX_TICKS = 10 ** 7
 
 
 def load_rhythms():
@@ -239,15 +241,25 @@ class ChopWindow(ToolWindow):
               label=lb)
         Tooltip(self.steps_entry, tr("chop.tip_steps"))
 
-        ttk.Label(box, text=tr("chop.step_length")).grid(row=6, column=0, sticky="e", padx=(0, 8), pady=2)
+        lb = ttk.Label(box, text=tr("chop.step_length"))
+        lb.grid(row=6, column=0, sticky="e", padx=(0, 8), pady=2)
         row = ttk.Frame(box)
         row.grid(row=6, column=1, sticky="w", pady=2)
         self.snap = tk.StringVar(value=CHOP_DEFAULTS["snap"])
-        self.snap_picker = SnapPicker(self.app, row, self.snap)
+        self.snap_picker = SnapPicker(self.app, row, self.snap,
+                                      names={"off": tr("chop.one_tick"), TYPED: tr("chop.typed_ticks")})
         self.snap_picker.button.pack(side="left")
         Tooltip(self.snap_picker.button, tr("chop.tip_step_length"))
-        self.ticks_text = ttk.Label(row, text="", foreground=look.HINT)
-        self.ticks_text.pack(side="left", padx=(6, 0))
+        ttk.Label(row, text=tr("chop.equals"), foreground=look.HINT).pack(side="left", padx=(6, 4))
+        self.ticks_var = tk.StringVar()
+        self.ticks_entry = ttk.Entry(row, textvariable=self.ticks_var, width=7)
+        self.ticks_entry.pack(side="left")
+        self.ticks_entry.bind("<Return>", lambda e: (self.on_ticks(), "break")[1])
+        self.ticks_entry.bind("<FocusOut>", lambda e: self.on_ticks())
+        Scrub(self.app, [(self.ticks_entry, self.ticks_var, lambda: self.on_ticks(False))], (1, 10, 1), 1,
+              MAX_TICKS, label=lb)
+        Tooltip(self.ticks_entry, tr("chop.tip_ticks"))
+        ttk.Label(row, text=tr("chop.ticks"), foreground=look.HINT).pack(side="left", padx=(5, 0))
         self.snap.trace_add("write", lambda *_: self.on_snap())
 
         lb = ttk.Label(box, text=tr("chop.velocity"))
@@ -366,9 +378,32 @@ class ChopWindow(ToolWindow):
             self.cfg["name"] = ""
             self.put("steps", v, done)
 
+    def on_ticks(self, done=True):
+        """Ticks typed for one step: 1 = "off" (1 tick at any PPQ), a list snap's length = that snap, else kept as
+        typed (the picker shows "Typed")."""
+        ppq = self.app.ppq
+        try:
+            v = float(calc(self.ticks_var.get()))
+            if not (1 <= v <= MAX_TICKS and v == int(v) and v / ppq <= 10 ** 4):
+                raise ValueError
+        except (ValueError, ZeroDivisionError, OverflowError):
+            bad(self.ticks_entry)
+            return
+        good(self.ticks_entry)
+        v = int(v)
+        if v == round(step_ticks(self.cfg, ppq), 2):
+            return
+        snap = "off" if v == 1 else next((s for s in SNAPS if s != "off" and
+                                          round((snap_beats(s, self.app.beats) or 0) * ppq, 6) == v), TYPED)
+        self.cfg["len"] = v / ppq if snap == TYPED else piece_beats(snap, self.app)
+        self.cfg["snap"] = snap
+        if self.snap.get() != snap:
+            self.snap.set(snap)  # (on_snap: nothing left to change)
+        self.put("snap", snap, done)
+
     def on_snap(self):
         snap = self.snap.get()
-        if snap != self.cfg["snap"]:
+        if snap != self.cfg["snap"] and snap != TYPED:
             self.cfg["len"] = piece_beats(snap, self.app)
             self.put("snap", snap)
 
@@ -418,15 +453,16 @@ class ChopWindow(ToolWindow):
         if ((self.strip.steps, self.strip.pieces, self.strip.fixed) != (c["steps"], c["pieces"], c["fixed"])
                 and not self.strip.drag):
             self.strip.show(c["steps"], c["pieces"], c["fixed"])
+        ticks = fmt(round(step_ticks(c, self.app.ppq), 2))
         for var, entry, text in ((self.steps_var, self.steps_entry, str(c["steps"])),
-                                 (self.vel_var, self.vel_entry, fmt(c["vel"]))):
+                                 (self.vel_var, self.vel_entry, fmt(c["vel"])),
+                                 (self.ticks_var, self.ticks_entry, ticks)):
             if var.get() != text:
                 var.set(text)
             if str(entry.cget("style")) != "TEntry":
                 entry.config(style="TEntry")
-        if c["snap"] and self.snap.get() != c["snap"]:
-            self.snap.set(c["snap"])
-        self.ticks_text.config(text=tr("chop.ticks", ticks=fmt(round(step_ticks(c, self.app.ppq), 2))))
+        if self.snap.get() != (c["snap"] or TYPED):  # (no snap kept: shown as typed ticks)
+            self.snap.set(c["snap"] or TYPED)
 
     def preview(self, now=True):
         super().preview(now)
