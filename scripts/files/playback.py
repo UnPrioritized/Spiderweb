@@ -7,12 +7,11 @@ import os
 import sys
 import threading
 import time
-from ctypes import wintypes
 
 import numpy as np
 
 from files.lang import tr
-from files.system import WINDOWS
+from files.system import WINDOWS, wintypes
 from notes.engine import CHANNELS
 
 MAPPER_NAME = "Windows default (MIDI Mapper)"

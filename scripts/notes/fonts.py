@@ -14,10 +14,9 @@ Elsewhere (Linux) Font is fonts_ft.FtFont: the same, read with fontconfig + Free
 import bisect
 import ctypes
 import struct
-from ctypes import wintypes
 
 from files.lang import tr
-from files.system import WINDOWS
+from files.system import WINDOWS, wintypes
 
 EM = 2048  # the font is asked for at this many units per em (fine enough for any size)
 # where letters a font lacks are looked for, after the ones Windows lists for that font (first that has it wins)

@@ -7,6 +7,14 @@ import sys
 WINDOWS = sys.platform == "win32"
 ALT = 0x20000 if WINDOWS else 0x8  # Alt held, in a Tk event's state (Linux: Mod1)
 
+try:
+    from ctypes import wintypes  # Windows' C types (import it from here, never from ctypes)
+except (ImportError, ValueError):  # (Linux on an older Python can't load it: files describing Windows calls still
+    class _PlainTypes:             # have to load, so every name is a plain int there; Windows calls never run)
+        def __getattr__(self, name):
+            return ctypes.c_int
+    wintypes = _PlainTypes()
+
 
 def double_click_ms():
     """How quick a second click has to be to make a double click (the system's setting; 500 ms when unknown)."""

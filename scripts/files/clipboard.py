@@ -4,10 +4,9 @@ Elsewhere (Linux, untested) only text works, through Tk's clipboard (what Spider
 unless the desktop keeps clipboards); RAW is False there (no Domino buttons)."""
 
 import ctypes
-from ctypes import wintypes
 
 from files.lang import tr
-from files.system import WINDOWS
+from files.system import WINDOWS, wintypes
 
 TEXT = 13  # CF_UNICODETEXT
 RAW = WINDOWS  # raw bytes in any format (put / get / registered) work
