@@ -810,6 +810,39 @@ def new_live_shape(defaults, custom_defaults, k=None):
     return sh
 
 
+def can_fit_upright(sh):
+    """Fit box to drawing works on it: a drawn custom shape (not text, pasted notes, Hz bass, merged notes, or one
+    with note tool pages: their turn steps belong to the box) whose box is turned or skewed."""
+    return (sh["kind"] == "custom" and bool(sh.get("strokes")) and not sh.get("text") and "notes" not in sh
+            and not sh.get("hz") and not sh.get("merge") and not sh.get("fx") and not frame_upright(sh["pts"]))
+
+
+def fit_upright(sh):
+    """A turned / skewed custom shape's box made straight again (along time and keys) and fitted round its drawing,
+    which stays where it is (ellipses become curves, like Turn into live shape). Coloured areas, Nested's / Tiles'
+    centre and the view it was drawn in go along."""
+    old_bp = frame_to_bp(sh["pts"])
+    view = drawn_view(sh)
+    new = {"kind": "custom", "strokes": [], "pts": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]}  # (beats / keys: drawn_view's
+    #                                                                                   (a, c) as it is)
+    if view:
+        new["round"] = view[1] if abs(view[0]) < 1e-12 else [view[0], view[1]]
+    for k in range(len(sh["strokes"])):
+        add_stroke(new, stroke_bp(sh, k))
+    to_uv = frame_to_uv(new["pts"])
+    if to_uv is None:
+        return
+    if sh.get("areas"):
+        sh["areas"] = [[*(round(x, 6) for x in to_uv(*old_bp(u, v))), c] for u, v, c in sh["areas"]]
+    for key in ("nested", "tiles"):
+        at = (sh.get(key) or {}).get("at")
+        if at:
+            sh[key] = dict(sh[key], at=[round(x, 6) for x in to_uv(*old_bp(*at))])
+    sh["strokes"], sh["pts"] = new["strokes"], new["pts"]
+    if "round" in new:
+        sh["round"] = new["round"]
+
+
 def outline_notes(sh, ppq, only=None):
     """(start, end, pitch) notes along every stroke of a custom shape (only: just these stroke numbers), like
     lines. Fill lines make none."""

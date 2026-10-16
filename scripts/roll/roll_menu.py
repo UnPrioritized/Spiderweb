@@ -7,7 +7,7 @@ from files.lang import tr
 from window.formula_host import FunnelHost, PolygonHost, RollHost, StrokeHost, formula_menu
 from notes.areas import most_colours
 from notes.convert import originals
-from notes.custom import ROLES
+from notes.custom import ROLES, can_fit_upright, fit_upright
 from window.drawer_mouse import colour_menu
 from notes.joined import is_joined
 from notes.mask import is_mask
@@ -134,6 +134,8 @@ class ShapeMenu:
                     state="disabled" if sh["strokes"][k].get("role") == "cut" else "normal")
                 m.add_cascade(label=tr("roll_menu.this_stroke"), menu=sub)
             item(tr("roll_menu.save_drawing_to_the_shape_library"), "", lambda: app.save_to_library(sh))
+            if not sh.get("text"):  # (greyed while the box is straight: it already hugs the drawing)
+                item(tr("roll_menu.fit_box_to_drawing"), "", lambda: self.fit_box(i), can_fit_upright(sh))
         if app.note_tool_sels():  # (right under Save drawing, user)
             item(tr("roll_menu.copy_path"), "", lambda: open_path(app))
         if app.tumour_targets():
@@ -171,6 +173,14 @@ class ShapeMenu:
             m.tk_popup(e.x_root, e.y_root)
         finally:
             m.grab_release()
+
+    def fit_box(self, i):
+        """A turned / skewed custom shape's box straight again round its drawing (custom.fit_upright). One step."""
+        app = self.app
+        app.push_undo(name=tr("roll_menu.fit_box_to_drawing"))
+        fit_upright(app.shapes[i])
+        self.box_kept = None  # (a kept Select box was round the old box)
+        app.shapes_changed()
 
     def show_box_menu(self, e, i=None):
         """Right-click inside the kept Select boxes with several shapes selected: only what works on all of them
