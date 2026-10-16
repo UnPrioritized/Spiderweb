@@ -104,19 +104,29 @@ def preview_parts(sh, ppq, keys):
 
 def part_rows(parts, ppq, keys):
     """Each shape's notes as (start, end, pitch, velocity, track) rows: its own colours (areas, outline colours,
-    Colours turns) kept, the second shape's after the first's (user: each keeps its colours; with Multi channel
-    they stay apart like the shapes were, as Turn into live shape does). Without their Sustain: the merged shape
-    holds that itself (sustain.py)."""
-    from notes.engine import shape_notes_tracks
-    out, first = [], 0
+    Colours turns) kept (user 2026-10-16: always the colours they had). Track = the channel slot each colour gets
+    with Multi channel when the two shapes stand as they are (engine.assign_slots, like render): shapes apart share
+    slots, overlapping ones stay apart; render counts a merged shape's tracks in order (ordered), so track k keeps
+    slot k. Without their Sustain: the merged shape holds that itself (sustain.py)."""
+    from notes.custom import tracks_apart
+    from notes.engine import assign_slots, shape_notes_tracks, unique_inverse
+    from notes.gateflip import colours_back, unflipped_starts
+    units, forced, firsts, made = [], [], [], []
     for p in parts:
         notes, tracks = shape_notes_tracks({k: v for k, v in p.items() if k != "sustain"}, ppq, keys)
         notes = np.asarray(notes, np.int64).reshape(-1, 4)
         tracks = np.zeros(len(notes), np.int64) if tracks is None or not len(tracks) else np.asarray(tracks, np.int64)
-        tracks = tracks - (tracks.min() if len(tracks) else 0)
-        out.append(np.column_stack([notes, tracks + first]))
-        first += int(tracks.max()) + 1 if len(tracks) else 1
-    return out
+        ids, which = unique_inverse(tracks) if len(tracks) else (tracks, tracks)
+        starts = unflipped_starts(notes) if len(notes) and colours_back(p) else notes[:, 0]
+        mine = range(len(units), len(units) + len(ids))
+        for k in range(len(ids)):
+            units.append(notes[which == k])
+            firsts.append(int(starts[which == k].min()))
+        if len(ids) > 1 and tracks_apart(p):
+            forced.append(mine)
+        made.append((notes, which, mine.start))
+    slots = np.asarray(assign_slots(units, "key", forced, firsts) if units else [], np.int64)
+    return [np.column_stack([notes, slots[at + which] if len(which) else which]) for notes, which, at in made]
 
 
 def merged(parts, right, ppq, keys):
@@ -131,15 +141,15 @@ def merged(parts, right, ppq, keys):
 def edge_moves(m):
     """How far each part's notes' first start and last end went in the merge, [(d0, d1)] in beats (the sliding
     one's rows each slid their own way), for giving the parts the merged shape's velocities on Split."""
-    rows = part_rows(m["parts"], m["ppq"], m["keys"])
+    rows = [np.column_stack([r, np.full(len(r), i, np.int64)])  # (+ which part each note is from)
+            for i, r in enumerate(part_rows(m["parts"], m["ppq"], m["keys"]))]
     got = merged(rows, m["right"], m["ppq"], m["keys"])
     if got is None or not all(len(r) for r in rows):
         return [(0.0, 0.0)] * 2
     now = np.concatenate(got)
-    first = int(rows[1][:, 4].min())  # (the second part's tracks come after the first's)
     out = []
     for i, was in enumerate(rows):
-        mine = now[(now[:, 4] >= first) == (i == 1)]
+        mine = now[now[:, 5] == i]
         out.append(((mine[:, 0].min() - was[:, 0].min()) / m["ppq"], (mine[:, 1].max() - was[:, 1].max()) / m["ppq"]))
     return out
 

@@ -1106,7 +1106,7 @@ SPLITS = ("key", "time")
 
 
 def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None, pastes=None,
-           held=None, back=None):
+           held=None, back=None, ordered=None):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -1130,6 +1130,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     back: per shape True if it's gate flipped (gateflip.py colours_back): with "auto" its tracks get channels as if
     they started where they do unflipped (gateflip.unflipped_starts), so each colour keeps its unflipped channel. A
     paste's pieces: the whole paste's tracks counted that way, flipped pieces unflipped.
+    ordered: per shape True if its tracks take channels in track order, all counted as starting at its first note (a
+    Gate sensitive merge: track k = the slot its colour had before, merge.part_rows).
     """
     pastes = pastes or [None] * len(note_lists)
     tracks = tracks or [None] * len(note_lists)
@@ -1137,6 +1139,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     fixed = fixed or [False] * len(note_lists)
     teams = teams or [None] * len(note_lists)
     back = back or [False] * len(note_lists)
+    ordered = ordered or [False] * len(note_lists)
     firsts, paste_back, paste_first = {}, set(), {}  # (unit -> the tick it counts as starting at: assign_slots first)
     made = {}
 
@@ -1208,6 +1211,10 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                 starts = unflipped_starts(lst)
                 for k in range(len(ids)):
                     firsts[len(units) + k] = int(starts[which == k].min())
+            if ordered[len(unit_of) - 1]:  # (one start for all: ties go by unit, so by track)
+                s0 = int(lst[:, 0].min())
+                for k in range(len(ids)):
+                    firsts[len(units) + k] = s0
             units += mine
         for pid in paste_back:
             for u in paste_units[pid]:

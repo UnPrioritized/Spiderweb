@@ -149,7 +149,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False):
                              pins, "all" if all16 else use10, between_turns(shapes),
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
                              [is_sustained(sh) or sh.get("held") is True for sh in shapes],
-                             [colours_back(sh) for sh in shapes])
+                             [colours_back(sh) for sh in shapes], [bool(sh.get("merge")) for sh in shapes])
     return wanted, use10 or all16, rendered, slots
 
 
