@@ -9,7 +9,7 @@ Tumours: each shape keeps its own tumours after joining (even when they're the s
 
 Each shape keeps its velocities (where shapes play at the same time, the first selected one's win). Last note: on or off, whichever keeps the most last notes where they were.
 
-Glue, Colours, Sustain, Gate aware flip, a mask and the note tool pages (Claw machine, Strum, Chop, Copy along a path) are kept only when all the shapes have the same ones. If something would be dropped, or some last notes would move, Spiderweb asks first.
+Glue (on the whole shape; glue in a box is always dropped), Colours, Sustain, Gate aware flip, a mask and the note tool pages (Claw machine, Strum, Chop, Copy along a path) are kept only when all the shapes have the same ones. If something would be dropped, or some last notes would move, Spiderweb asks first.
 
 Split here: right-click a line, polyline, freehand stroke, curve or arc where you want to cut it → Split here. On an anchor or a polyline point it's cut there; anywhere else a point is added there first.
 

@@ -12,6 +12,6 @@ Hz shape… (in Hz settings…) sets how the notes look inside each wave and how
 
 Auto gates (what a new Hz bass starts with): a note that holds still gets Fixed gates when they're off its tone by no more than the threshold (the number next to Gates, in cents), else Alternating ones. A slide is always Alternating.
 
-A note can also have gates of its own: right-click it → Use fixed gates or Use alternating gates. Picking from the window's Gates list puts every note back on the Hz bass's gates.
+A note can also have gates of its own: right-click it → Use fixed gates or Use alternating gates. Picking from the Gates list in Hz settings… puts every note back on the Hz bass's gates.
 
 In the window a band around each note's tone shows the threshold: green = Fixed, orange = Alternating. Hold the mouse over a note to see how far off Fixed gates would be. Right-click a note and pick Own Auto threshold… to give it (and the other selected notes) a threshold of its own. About 5 cents is where most ears start to hear it; the highest is 50 (half a key).

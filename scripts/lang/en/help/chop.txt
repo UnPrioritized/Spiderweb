@@ -1,4 +1,4 @@
-Select one or more shapes, then right-click one: Chop… (or press Alt+U). Every note is cut into pieces in a rhythm, shown on the piano roll at once. Accept keeps it (one Ctrl+Z takes it back); X or Esc puts the notes back.
+Select one or more shapes, then right-click one: Chop… (or press Alt+U). Every note is cut into pieces in a rhythm, shown on the piano roll at once. Accept keeps it (one Ctrl+Z takes it back); X or Esc puts the notes back. Reset goes back to the start: the Even rhythm, 1/16 steps.
 [clip:chop-window]
 
 Quick chop (Ctrl+U, also in the right-click menu): cuts the notes into even pieces as long as the snap. With the snap off, the pieces are 1 tick long.

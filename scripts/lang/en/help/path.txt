@@ -1,4 +1,4 @@
-Select one or more shapes, then right-click one: Copy along a path…. The shape is copied again and again along a path from A to B, and on through more points if you add them. The copies change on the piano roll while you try settings. Accept keeps them (one Ctrl+Z takes them back); X or Esc puts the notes back as they were.
+Select one or more shapes, then right-click one: Copy along a path…. The shape is copied again and again along a path from A to B, and on through more points if you add them. The copies change on the piano roll while you try settings. Accept (or Enter) keeps them (one Ctrl+Z takes them back); X or Esc puts the notes back as they were.
 
 Click on the piano roll where the path ends: that's B. Until you click, the copies follow the mouse. Then drag B, or the round middle point, to bend the path. Going up, A is the shape's bottom-left corner and B the last copy's top-right corner; going down, the corners swap, so the copies always stay between the points.
 

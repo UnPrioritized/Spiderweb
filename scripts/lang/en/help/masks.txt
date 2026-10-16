@@ -19,7 +19,7 @@ Below: Shows set to Inside (left) and Along the line (right), then a line mask w
 
 A note across the mask's edge is cut exactly there, and every piece is kept, however short.
 
-Own notes sound (a border): ticked, the mask's own notes sound like any shape's, as a border, and the pattern never overlaps them. Unticked, the mask is a pure cutter: only its dashed line shows. Below: ticked (left) and unticked (right).
+Own notes sound (a border): ticked, the mask's own notes sound like any shape's, as a border, and the pattern never overlaps them (on a Fill or Spam mask, whose notes fill its whole inside, the pattern shows over them). Unticked, the mask is a pure cutter: only its dashed line shows. Below: ticked (left) and unticked (right).
 [clip:masks-own]
 
 Invert (cut a hole): the pattern shows everywhere except inside the mask, like a cookie cutter.

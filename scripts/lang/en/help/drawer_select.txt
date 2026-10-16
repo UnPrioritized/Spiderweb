@@ -4,7 +4,7 @@ Dragged points stick to other strokes like new ones. A moved stroke sticks too: 
 
 Drag on empty space to draw a box: every stroke it touches is selected, and the box stays until you click outside it. Ctrl+drag adds another box, Ctrl+click adds or removes one stroke. Dragging one of the selected strokes, or anywhere inside the box, moves them all; right-click inside the box (or on one of them) for what works on all of them at once. A click on empty space deselects. Del deletes the selected strokes.
 
-Right-click a stroke = its menu (add point / anchor, symmetric curve halves, Split here, Formula for lines, polylines, curves and arcs, its role, Outline colour, delete, copy, paste, Invert selection, Hide / Lock selected, flip, turn); empty space = deselect; while drawing a polyline = finish it.
+Right-click a stroke = its menu (add point / anchor, symmetric curve halves, Split here, Formula for lines, polylines, curves and arcs, its role, Outline colour, delete, copy, paste, Invert selection, Hide / Lock selected, Group / Ungroup, flip, turn); empty space = deselect; while drawing a polyline = finish it.
 
 A stroke's role: Outline and fill (normal) makes notes and makes the inside for Fill and Spam. Outline only (not filled, drawn dashed) makes notes on top of the fill, but cuts no hole and closes no gap. Fill line (no notes, drawn in thin dashes) makes no notes and doesn't change what's filled: it splits the inside into areas you can give their own colour.
 
