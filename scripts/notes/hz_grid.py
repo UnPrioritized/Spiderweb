@@ -588,12 +588,18 @@ class KeyGrid:
         order = np.lexsort((number, part))
         part, number, src, waves, starts = part[order], number[order], src[order], waves[order], starts[order]
         late = np.zeros(len(part))
+        cap = None  # (Height: how many waves past its start each repeat's note may last at most)
         if self.heights:  # (Height: the drawn wave shape squashed / stretched wave by wave, so each repeat has its
             times = height_times(f["height"][src]) if "height" in (self.hz.get("fx") or {}) else np.ones(len(src))
             if "height_rand" in (self.hz.get("fx") or {}):  # (each wave its own random height round it, every key
                 u = wave_draws(self.chain_heads()[run[part]], number)  # the same)
                 times = np.clip(times * (1.0 + f["height_rand"][src] * (2.0 * u - 1.0)), 0.0, HEIGHT_MOST)
             again, late = height_hits(self.trace, (key - self.lo + 0.5) / self.n, times, self.height_at, self.n)
+            has = np.zeros(len(part), bool)
+            has[again] = True  # (a wave this key is quiet in: the note before ends where it starts, a gap shows)
+            quiet_next = np.concatenate([(part[1:] == part[:-1]) & ~has[1:], [False]])
+            cap = np.where(quiet_next[again], 1.0 - late, np.inf)  # (waves from the hit: to its wave's end, moved
+            # along with the hit by the lateness added below)
             part, number, src, waves, starts = part[again], number[again], src[again], waves[again], starts[again]
         elif self.trace:  # (the drawn wave shape: every wave hits where its line crosses this key row, maybe several
             hits = trace_hits(self.trace, (key - self.lo + 0.5) / self.n)  # times: each one a repeat of its own)
@@ -659,6 +665,9 @@ class KeyGrid:
         if self.comp and tailed.any() and not self.after("reverb"):  # (a tail after it: as at its note's end)
             hear = np.where(tailed, each["beat0"][run][part], hear)
         limits = f["limits"][src]
+        if cap is not None and np.isfinite(cap).any():
+            capped = np.floor(starts + np.where(np.isfinite(cap), cap, 0.0) * waves + 0.5)
+            limits = np.where(np.isfinite(cap), np.minimum(limits, capped), limits).astype(limits.dtype)
         until = each["until"][run][part]
         fade = f["echo_fade"][src] if "echo_fade" in self.moved else None  # (the echo's, each repeat's own)
         gap = f["echo_time"][src] if "echo_time" in self.moved else None
