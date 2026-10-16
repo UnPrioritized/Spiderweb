@@ -13,6 +13,8 @@ import tkinter as tk
 _loops = None
 _started = False
 _failed = False
+save_loops = True  # False = the saved loops failed this start: made again without saving (fastloops reads it)
+_build = None
 
 
 def start():
@@ -39,9 +41,7 @@ def _load():
     import time
     began = time.perf_counter()
     try:
-        from files import fastloops
-        fastloops.warm()
-        _loops = fastloops
+        _loops = _warm_loops()
         how = "compiled loops ready in %.1f s" % (time.perf_counter() - began)
     except Exception:  # no Numba (or it can't compile here): the NumPy code is used
         global _failed
@@ -56,6 +56,64 @@ def _load():
     if report:
         with open(report, "w", encoding="utf-8") as f:
             f.write(how + "\nPillow: " + ("yes" if pillow() else "no") + "\n")
+
+
+def _warm_loops():
+    """fastloops, compiled (or loaded). Saved loops that fail (a damaged file; one that can't be saved: disk full,
+    path too long) are thrown away and the loops made again without saving; the next start saves them anew."""
+    global save_loops
+    import importlib
+    import importlib.util
+    import sys
+    try:
+        from files import fastloops
+        fastloops.warm()
+        return fastloops
+    except Exception:
+        if not save_loops or importlib.util.find_spec("numba") is None:
+            raise
+        first = sys.exc_info()[1]
+    from files import errors
+    errors.note("compiled loops", "saved ones failed, made again: " + repr(first)[:200])
+    save_loops = False
+    _forget_saved()
+    sys.modules.pop("files.fastloops", None)
+    fastloops = importlib.import_module("files.fastloops")
+    fastloops.warm()
+    return fastloops
+
+
+def loops_folder():
+    """Where the saved compiled loops are: the exe's user/compiled-loops/<version>-<the exe's fingerprint>, from
+    the source scripts/files/__pycache__ (Numba's own place)."""
+    global _build
+    import sys
+    if not getattr(sys, "frozen", False):
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), "__pycache__")
+    from files import about
+    if _build is None:
+        import hashlib
+        h = hashlib.sha256()
+        with open(sys.executable, "rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                h.update(block)
+        _build = "%s-%s" % (about.VERSION, h.hexdigest()[:10])
+    return os.path.join(about.USER, "compiled-loops", _build)
+
+
+def _forget_saved():
+    """Deletes the saved compiled loops (this build's only)."""
+    folder = loops_folder()
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return
+    for name in names:
+        if name.startswith("fastloops.") and name.endswith((".nbi", ".nbc")):
+            try:
+                os.remove(os.path.join(folder, name))
+            except OSError:
+                pass
 
 
 def loops():

@@ -42,18 +42,30 @@ from files.synth import (LIM_BLOCK, LIM_CEILING, LIM_DELAY, LIM_ENV, LIM_FALL, L
 
 def keep_exe_loops():
     """The exe unpacks to a new temp folder each start, so Numba can't find its saved loops by the source file's
-    place: they go to user/compiled-loops instead (made again when missing). Numba checks them against the exe file
-    itself (a new build = compiled again) and the processor (another PC = compiled again). False = the folder
-    can't be written (the loops are compiled each start)."""
-    from files import about, lang, safefile
-    folder = os.path.join(about.USER, "compiled-loops")
+    place: they go to user/compiled-loops/<this build> instead (speed.loops_folder; made again when missing, the
+    newest 3 builds kept: an older build's file can never pass for this one's). Numba also checks the processor
+    (another PC = compiled again). False = the folder can't be written (the loops are compiled each start)."""
+    from files import about, lang, safefile, speed
+    folder = speed.loops_folder()
+    top = os.path.dirname(folder)
     try:
         os.makedirs(folder, exist_ok=True)
-        readme = os.path.join(folder, "README.txt")
+        os.utime(folder)  # (last used: the newest builds are kept)
+        readme = os.path.join(top, "!README.txt")  # ("!": on top when sorted by name)
         if not os.path.exists(readme):
             safefile.write_text(readme, lang.tr("speed.loops_readme"))
+        test = os.path.join(folder, "x" * 80 + ".tmp")  # (longer than Numba's names: path too long / read-only = off)
+        with open(test, "wb") as f:
+            f.write(b"0")
+        os.remove(test)
     except OSError:
         return False
+    import shutil
+    builds = sorted((os.path.join(top, n) for n in os.listdir(top) if os.path.isdir(os.path.join(top, n))),
+                    key=os.path.getmtime, reverse=True)
+    for old in builds[3:]:
+        if old != folder:
+            shutil.rmtree(old, ignore_errors=True)
 
     class ExeLocator(caching._SourceFileBackedLocatorMixin, caching._CacheLocator):
         def __init__(self, py_func, py_file):
@@ -72,11 +84,18 @@ def keep_exe_loops():
                 return None
             return self
 
-    caching.CacheImpl._locator_classes.insert(0, ExeLocator)
+    caching.CacheImpl._locator_classes[:] = [ExeLocator]  # (no other place: Numba's own ones would pile up in AppData)
     return True
 
 
-CACHE = keep_exe_loops() if getattr(sys, "frozen", False) else True
+def _cache():
+    from files import speed
+    if not speed.save_loops:  # (the saved ones failed this start: made without saving)
+        return False
+    return keep_exe_loops() if getattr(sys, "frozen", False) else True
+
+
+CACHE = _cache()
 
 
 @njit(cache=CACHE, nogil=True)
