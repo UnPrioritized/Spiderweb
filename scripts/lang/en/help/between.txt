@@ -6,7 +6,7 @@ In the window:
 
 • Reverse pairs the first shape's start with the second's end; switch it if the steps twist through each other.
 
-• Each shape its own colour gives every shape of the group its own channel, taking turns past the number of colours (needs Channels: Multi channel).
+• Each shape its own colour gives every shape of the group its own channel, taking turns past the number of colours (needs Channels: Multi channel). The taking turns over box beside it = how many colours (at most 15, 16 with Use channel 10).
 
 • The picture at the top shows the group: drag the first or last shape's points to change them.
 

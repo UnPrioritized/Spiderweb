@@ -48,4 +48,6 @@ Tile colours: the next colour along each diagonal, each column or each row, a ch
 
 Only whole tiles leaves out every tile the outline cuts.
 
+Too many tiles for the shape (or too many notes in them): the shape is left empty and the panel says so. Make the tiles bigger or the gaps wider.
+
 Tiles always lie level on the piano roll, on whole keys. One tile sits on the centre point: drag its handle to slide the whole wallpaper, or right-click it to put it back in the middle. Turning the shape turns its outline, the tiles stay level.

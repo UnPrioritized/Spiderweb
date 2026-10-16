@@ -4,4 +4,4 @@ Each key the line crosses gets one note, starting where the line reaches that ke
 
 Last note (panel): the last note ends on the line's end, or starts exactly on it.
 
-Right-click it: Formula (a shape or a pattern along it, see Formulas).
+Right-click it: Formula (a shape or a pattern along it, see Formulas), Tumours… (bumps along it, see Tumours), Copy along a path… (see Copy along a path) and Split here (see Join). With two open lines selected: Add between… (see Add between).

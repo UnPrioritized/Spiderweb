@@ -32,7 +32,7 @@ Vibrato and Tremolo (the LFOs, as synths call them) wobble the tone and the loud
 Timing (in each LFO box) = how the Rate knob moves: Free = any speed; Straight = only note lengths, in step with the beat (1/4 = once a beat, 1/8 = twice); Triplets = 3 in the time of 2 of those (1/8T); Dotted = one and a half times as long (1/8D). The note length shows beside the Rate, and each wheel or arrow step goes to the next one.
 
 Tone:
-• Sweep makes one part of the shape's keys loud (Start) and can move it to End in Time after each note starts.
+• Sweep makes one part of the shape's keys loud (Start) and can move it to End in Time after each note starts. Its On tick switches it on and off; turning one of its knobs ticks On too.
 • Key track moves it up for higher notes (down below 0), counted from the Hz bass's own tone.
 • Wah = loud and quiet stripes over the keys.
 The picture shows which keys are loud over time (darker = louder, the highest keys at the top).

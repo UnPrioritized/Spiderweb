@@ -6,9 +6,9 @@ Random start = each copy starts its wave at a random point at every new note.
 
 Voices on = whether the keys take turns playing them (Split keys, no extra notes) or every key plays all of them (Same keys, more notes).
 
-Glide = each note slides in from the tone of the note before it, taking that long (Only notes that touch: only when it starts right where that note ends). Curve = how it slides: middle = straight, right = fast first then settling (the classic bass slide), left = slow first.
+Glide = each note slides in from the tone of the note before it, taking that long (the Only notes that touch tick beside it: only when it starts right where that note ends). Curve = how it slides: middle = straight, right = fast first then settling (the classic bass slide), left = slow first.
 
-Legato = a note that starts right where another ends carries on from it as one long note: no new Attack, and no Release until the last one ends (the effects that play once per note go on too). It works on the Arpeggio's notes as well: at Gate 100 % the whole run gets one envelope, under 100 % each note starts over.
+Legato (the tick under Only notes that touch) = a note that starts right where another ends carries on from it as one long note: no new Attack, and no Release until the last one ends (the effects that play once per note go on too). It works on the Arpeggio's notes as well: at Gate 100 % the whole run gets one envelope, under 100 % each note starts over.
 
 The picture shows which copies eight keys play and a glide. Voice is a setting of its own, not a line.
 

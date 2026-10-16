@@ -1,4 +1,4 @@
-An effect can also start at each note, like an envelope: in the Repeat every… window, set Plays to Once per note. Its line then plays once from the start of every note, for as long as Lasts says, and stays on its last value until the note ends.
+An effect can also start at each note, like an envelope: in the Repeat every… window, set Plays to Once per note (All the way, the first choice, = the line runs over the whole shape, repeating, whatever the notes do). Its line then plays once from the start of every note, for as long as Lasts says, and stays on its last value until the note ends.
 
 Restart at each note repeats it but starts it over at every note. Tick Stretch to each note to make it last as long as each note instead.
 

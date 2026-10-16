@@ -1,6 +1,6 @@
 The drawer (Custom shape → Drawer…) is where you draw shapes for your library. Its tools work like the piano roll's: Select (V), Slice (K) (see Drawer: Slice), Eraser (E), Line (L), Polyline (P), Freehand (F), Curve (C), Arc (A), Square (S) and Circle (O). Areas (B) colours the areas inside (see Drawer: Areas). Drag a stroke out, or click where it starts and click where it ends (right-click or Esc cancels).
 
-Grid (top bar) sets how many grid squares the board has across (4 to 64). Clear removes everything drawn (Ctrl+Z brings it back). Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes.
+Grid (top bar) sets how many grid squares the board has across (4 to 64). Clear removes everything drawn (Ctrl+Z brings it back). Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes. Help (F1) opens these pages.
 
 Points stick to other strokes when the mouse is near them: to their points first, then to where two lines cross, then anywhere along a line (a purple mark shows where). A point stuck to a line is exactly on it, so the outline counts as closed there. Away from lines, points snap to the grid. Shift draws freely.
 

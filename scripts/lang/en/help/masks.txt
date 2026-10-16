@@ -11,7 +11,7 @@ A mask covers every shape it touches, never other masks. To use a mask's notes a
 
 What shows: a Fill or Spam mask shows its whole inside. Other closed shapes show the area inside their outline too, or only a band along their line when Shows is set to Along the line. Open lines (lines, curves, freehand) always show a band along the line.
 
-Thickness is how wide that band is, in keys, even all the way round. With Inside it widens the inside past the outline.
+Thickness is how wide that band is, in keys, even all the way round. With Inside it widens the inside past the outline. A Fill or Spam mask has no band, so its Thickness box is greyed out.
 
 Below: Shows set to Inside (left) and Along the line (right), then a line mask with a Thickness of 1 (left) and 4 (right).
 [clip:masks-shows]

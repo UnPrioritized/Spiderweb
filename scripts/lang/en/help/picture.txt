@@ -25,7 +25,7 @@ The outline's px are your player's: how thick it looks depends on the player's w
 
 The colours you see are what each channel should look like in the player: a MIDI file has no colours, only channels. The notes on the piano roll keep their channels: colour 1 = channel 1, and so on, whatever the Channels setting is. Any other shape on the same channel takes that colour in the player too.
 
-Colour list for the player (Player look tab): Copy colours puts the colours on the clipboard as text for your player's settings, in the format picked.
+Colour list for the player (Player look tab): Copy colours puts the colours on the clipboard as text for your player's settings, in the format picked under Format.
 
 "Colour by": Channel numbers them by channel (for a player that colours by channel); "Track + channel (in order)" numbers them 1, 2, 3 (for a player that colours tracks in order). "What Copy gives" shows the exact text.
 
