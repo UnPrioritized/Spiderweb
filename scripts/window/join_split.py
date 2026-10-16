@@ -71,12 +71,14 @@ class JoinSplit:
         """A greyed-out Inside row for lines: says how to fill them."""
         row = self.line_fill_row = ttk.Frame(self.settings)
         lb = ttk.Label(row, text=tr("join_split.inside"), foreground=look.FAINT_TEXT)
-        lb.pack(side="left")
+        lb.pack(side="left", anchor="n")
         Tooltip(lb, LINE_FILL_TIP)  # (one on each part: one on the row too showed twice over a choice)
+        opts = ttk.Frame(row)  # (one under the other, like a custom shape's Inside: side by side cut "Outline spam")
+        opts.pack(side="left", padx=(5, 0))
         for text in (tr("join_split.empty"), tr("join_split.fill"), tr("join_split.spam"),
                      tr("join_split.outline_spam")):
-            b = ttk.Radiobutton(row, text=text, value=text, state="disabled")
-            b.pack(side="left", padx=(5, 0))
+            b = ttk.Radiobutton(opts, text=text, value=text, state="disabled")
+            b.pack(anchor="w")
             Tooltip(b, LINE_FILL_TIP)
 
     def sync_line_fill(self):

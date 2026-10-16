@@ -18,7 +18,7 @@ from files.lang import tr, trn
 from files.speed import Photo
 from notes import picture as P
 from window import look
-from window.widgets import Tooltip, name_list, placed, set_names, unit_word
+from window.widgets import Tooltip, fit_screen, name_list, placed, set_names, unit_word
 
 PREVIEW_W, PREVIEW_H = 900, 520  # the preview's size to start with (it grows with the window)
 KB = 36  # the keyboard drawn beside the preview, in pixels
@@ -156,6 +156,7 @@ class ImageWindow(tk.Toplevel):
         self.title(tr("image.window_title"))
         self.transient(app)
         self.geometry(placed(self, app.image_pos) or "1500x760")
+        fit_screen(self)
         self.pic, self.s = None, dict(P.SUGGESTED, share=1.0)
         last = app.image_last
         if last:

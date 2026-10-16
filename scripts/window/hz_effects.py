@@ -103,6 +103,7 @@ class FxPane:
         self.dots = None  # the moving dots as drawn
         self.row_h, self.pad = round(15 * self.s), round(9 * self.s)
         self.edge = round(4 * self.s)  # the top edge: drag it = the pane's height
+        self.names_top = 0  # how far the effects' names are scrolled (pixels), when the pane is too short for all
         start_h = max(round(112 * self.s), round(8 * self.s) + len(FX) * self.row_h)
         c = self.canvas = tk.Canvas(win, background=self.LOOK["bg"], highlightthickness=0,
                                     height=win.app.hz_fx_h or start_h)
@@ -464,8 +465,12 @@ class FxPane:
                 for x, y, _, _ in self.handles(name):
                     c.create_oval(x - r, y - r, x + r, y + r, fill=pal["point"], outline=colour, width=1)
         c.create_rectangle(0, 0, kb, h, fill=pal["names"], outline="")  # the effects
+        over = self.names_over()
+        self.names_top = min(max(0, self.names_top), over)
         for i, name in enumerate(FX):
-            y = 4 * s + i * self.row_h + self.row_h / 2
+            y = 4 * s + i * self.row_h + self.row_h / 2 - self.names_top
+            if y < -self.row_h or y > h + self.row_h:
+                continue
             lit = self.active in (None, name)
             colour = self.colour(name) if lit else self.faint(self.colour(name), pal["names_dim"])
             r = 3 * s
@@ -475,6 +480,11 @@ class FxPane:
                 c.create_line(4 * s, y + r, 4 * s + 2 * r, y - r, fill=colour)
             c.create_text(8 * s + 2 * r, y, text=tr("hz.fx_" + name), anchor="w", fill=colour,
                           font=look.font(8, "bold" if self.active == name else "normal"))
+        if over:  # too short for every name: a small scrollbar at the names' right edge
+            c.create_rectangle(*self.names_bar(), fill=pal["grid"], outline="")
+            x0, _, x1, _ = self.names_bar()
+            t0, t1 = self.names_thumb()
+            c.create_rectangle(x0, t0, x1, t1, fill=pal["edge"], outline="")
         for v in (0.0, 0.5, 1.0):  # what the heights mean (Height highlighted: its own, the middle = as drawn)
             n = float(height_times(v)) if self.active == "height" else v
             c.create_text(w - 4 * s, self.y_of(v), text=f"{n * 100:.0f} %", anchor="e", fill=pal["text"],
@@ -565,10 +575,35 @@ class FxPane:
 
     # ------------------------------------------------------------ mouse
 
+    def names_over(self):
+        """How many pixels of the effects' names don't fit the pane's height (0: all fit)."""
+        return max(0, round(8 * self.s) + len(FX) * self.row_h - self.canvas.winfo_height())
+
+    def names_bar(self):
+        """(x0, y0, x1, y1) of the names' scrollbar (shown only when names_over)."""
+        kb = self.win.kb_w
+        return kb - round(6 * self.s), 0, kb - round(2 * self.s), self.canvas.winfo_height()
+
+    def names_thumb(self):
+        """(top, bottom) of the scrollbar's thumb."""
+        h = self.canvas.winfo_height()
+        full = h + self.names_over()
+        return self.names_top * h / full, (self.names_top + h) * h / full
+
+    def on_names_bar(self, x):
+        return self.names_over() > 0 and self.names_bar()[0] - round(2 * self.s) <= x < self.win.kb_w
+
+    def scroll_names(self, top):
+        top = min(max(0, round(top)), self.names_over())
+        if top != self.names_top:
+            self.names_top = top
+            self.redraw()
+
     def name_at(self, x, y):
         """The effect whose name is under the mouse (the left column), or None."""
-        i = int((y - 4 * self.s) // self.row_h)
-        return FX[i] if x < self.win.kb_w and y >= 4 * self.s and 0 <= i < len(FX) else None
+        i = int((y + self.names_top - 4 * self.s) // self.row_h)
+        return (FX[i] if x < self.win.kb_w and not self.on_names_bar(x) and y + self.names_top >= 4 * self.s
+                and 0 <= i < len(FX) else None)
 
     def on_box(self, x):
         """True when x is on the small squares before the names (switch an effect off / on)."""
@@ -669,6 +704,13 @@ class FxPane:
         if e.y < self.edge:
             self.drag = {"kind": "size", "y": e.y_root, "h": self.canvas.winfo_height()}
             return
+        if self.on_names_bar(e.x):  # the names' scrollbar: off the thumb = jumps there first
+            t0, t1 = self.names_thumb()
+            if not t0 <= e.y <= t1:
+                h = self.canvas.winfo_height()
+                self.scroll_names((e.y - (t1 - t0) / 2) * (h + self.names_over()) / h)
+            self.drag = {"kind": "names", "y": e.y, "top": self.names_top}
+            return
         name = self.name_at(e.x, e.y)
         if name:
             self.drag = {"kind": "name", "fx": name, "box": self.on_box(e.x)}
@@ -752,6 +794,9 @@ class FxPane:
             win.app.hz_fx_h = min(most, max(least, d["h"] - (e.y_root - d["y"])))
             self.canvas.config(height=win.app.hz_fx_h)
             return
+        if d and d["kind"] == "names":
+            h = self.canvas.winfo_height()
+            return self.scroll_names(d["top"] + (e.y - d["y"]) * (h + self.names_over()) / h)
         if d and d["kind"] == "bend":
             return self.drag_bend(d, e)
         if d and d["kind"] == "box":
@@ -826,6 +871,8 @@ class FxPane:
             return
         if d["kind"] == "size":
             return win.app.schedule_autosave()
+        if d["kind"] == "names":
+            return
         if d["kind"] == "draw":
             if not d["moved"] and d["faint"]:  # (a click on a faint line: a point there)
                 return self.click_point(d["fx"], d["x0"], d["y0"], e)
@@ -1368,9 +1415,12 @@ class FxPane:
             menu.tk_popup(e.x_root, e.y_root)
 
     def on_wheel(self, e):
-        """The time of the notes above: wheel = sideways, Ctrl = zoom around the mouse."""
+        """The time of the notes above: wheel = sideways, Ctrl = zoom around the mouse. Over the effects' names when
+        they don't all fit: scrolls them."""
         win = self.win
         up = e.delta > 0
+        if e.x < win.kb_w and not e.state & CTRL and self.names_over():
+            return self.scroll_names(self.names_top + (-3 if up else 3) * self.row_h)
         if e.state & CTRL:
             b = win.beat_at(e.x)
             win.sx = min(MAX_SX, max(MIN_SX, win.sx * (1.25 if up else 0.8)))

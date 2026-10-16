@@ -84,7 +84,7 @@ from window.settings_window import open_settings
 from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
-from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, fit_dropdowns, good,
+from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, fit_dropdowns, fit_screen, good,
                             keep_width, letter_jump, remember_good, watch_bad)
 
 
@@ -171,6 +171,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         # (never bigger than the screen: a big Size on a small screen put the window's edges off it)
         self.minsize(min(int(1000 * s), int(self.winfo_screenwidth() * 0.9)),
                      min(int(600 * s), int(self.winfo_screenheight() * 0.85)))
+        fit_screen(self)  # (its size grows with the screen scaling: kept above the taskbar)
         self.autosave_path = autosave
 
         self.shapes = []

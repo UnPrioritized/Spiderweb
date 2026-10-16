@@ -26,6 +26,30 @@ def double_click_ms():
     return 500
 
 
+class _MonitorInfo(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT), ("rcWork", wintypes.RECT),
+                ("dwFlags", wintypes.DWORD)]
+
+
+def work_area(widget, x, y):
+    """(left, top, right, bottom) in screen pixels of the room windows have on the screen nearest the point (x, y):
+    Windows = that monitor less its taskbar; elsewhere the whole screen Tk knows."""
+    if WINDOWS:
+        try:
+            user32 = ctypes.windll.user32
+            find = ctypes.WINFUNCTYPE(ctypes.c_void_p, wintypes.POINT, wintypes.DWORD)(("MonitorFromPoint", user32))
+            monitor = find(wintypes.POINT(int(x), int(y)), 2)  # (2: the nearest monitor)
+            info = _MonitorInfo()
+            info.cbSize = ctypes.sizeof(info)
+            ask = ctypes.WINFUNCTYPE(wintypes.BOOL, ctypes.c_void_p, ctypes.c_void_p)(("GetMonitorInfoW", user32))
+            if monitor and ask(monitor, ctypes.byref(info)):
+                r = info.rcWork
+                return r.left, r.top, r.right, r.bottom
+        except (OSError, AttributeError):
+            pass
+    return 0, 0, widget.winfo_screenwidth(), widget.winfo_screenheight()
+
+
 class _MemoryStatus(ctypes.Structure):
     _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
                 ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),

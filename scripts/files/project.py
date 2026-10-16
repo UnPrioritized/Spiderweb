@@ -470,10 +470,11 @@ class ProjectFiles:
                 self.hz_tools = win["hz_tools"]
             if isinstance(win.get("hz_view"), dict):  # (its zoom + scroll: checked when the window opens)
                 self.hz_view = win["hz_view"]
-            from window.widgets import placed
+            from window.widgets import fit_screen, placed
             geo = placed(self, win.get("geometry", "") if isinstance(win.get("geometry"), str) else "")
             if geo:
                 self.geometry(geo)
+                fit_screen(self)  # (saved on a bigger screen / at a smaller scaling)
             if win.get("maximized"):
                 self.update_idletasks()
                 self.state("zoomed")

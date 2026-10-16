@@ -42,7 +42,7 @@ from window.hz_trace import TraceWindow
 from window.preview_settings import PreviewSettings, open_settings
 from window.snap_picker import SnapPicker
 from window.tool_picker import ToolPicker
-from window.widgets import Tooltip, placed
+from window.widgets import Tooltip, fit_screen, placed
 # the window is made of these parts (each a mixin of HzWindow); shape_length / DOUBLE_MS are handed on from here
 from window.hz_view import RED, HzView, shape_length  # noqa: F401
 from window.hz_sound import HzSound
@@ -74,6 +74,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         s = self.s = app.scale
         self.geometry(placed(self, app.hz_pos) if re.fullmatch(POS, app.hz_pos or "") else f"{round(820 * s)}x{round(700 * s)}")
         self.minsize(round(420 * s), round(260 * s))
+        fit_screen(self)
         self.tones, self.sel = [], set()  # the notes shown (hzbass tones) and which are selected
         self.drag = None
         self.chosen = None  # the shape the window was opened for (open_hz), until another one is selected
@@ -317,7 +318,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
             self.fx_of = id(sh) if sh is not None else None
         if sh is None:
             text = (tr("hz.hint_new", beat=fmt(self.app.hz_start + 1)) if self.app.hz_start is not None
-                    else tr("hz.hint_none"))
+                    else tr("hz.hint_none_short"))  # (the whole hint is in the piano roll's middle)
             self.grow.set(True)
         else:
             text = tr("hz.shape", name=self.app.shape_label(sh))

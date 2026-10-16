@@ -202,6 +202,39 @@ def placed(widget, geo):
     return geo or ""
 
 
+def fit_screen(win):
+    """Keeps a window whole on its screen, above the taskbar (a big Size / screen scaling on a small screen opened
+    windows past its bottom edge): one that can be resized is made smaller, then moved in. Call it after the window
+    has its first size / place (remember_place does)."""
+    from files.system import work_area
+    if win.state() == "zoomed":
+        return
+    win.update_idletasks()
+    m = re.fullmatch(r"(\d+)x(\d+)\+(-?\d+)\+(-?\d+)", win.wm_geometry())
+    if not m:
+        return
+    w, h, x, y = map(int, m.groups())
+    if w <= 1 or h <= 1:  # (no size given: as big as it asks)
+        w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+    if win.winfo_ismapped():  # the frame Windows adds: the title bar and the edges (not shown yet: about as big)
+        side, title = max(0, win.winfo_rootx() - win.winfo_x()), max(0, win.winfo_rooty() - win.winfo_y())
+    else:
+        k = getattr(look, "SCREEN_DPI", 96) / 96
+        side, title = round(8 * k), round(31 * k)
+    left, top, right, bottom = work_area(win, x + w // 2, y + h // 2)
+    sizes = any(win.resizable())
+    nw = min(w, right - left - 2 * side) if sizes else w
+    nh = min(h, bottom - top - title - side) if sizes else h
+    nx = max(left, min(x, right - nw - 2 * side))
+    ny = max(top, min(y, bottom - nh - title - side))
+    if (nw, nh, nx, ny) == (w, h, x, y):
+        return
+    if sizes:
+        least_w, least_h = win.minsize()
+        win.minsize(min(least_w, nw), min(least_h, nh))
+    win.geometry(f"{nw}x{nh}+{nx}+{ny}" if sizes else f"+{nx}+{ny}")
+
+
 PLACE = r"(\d+x\d+)?\+-?\d+\+-?\d+"  # a remembered window place: "WxH+X+Y" (one that can be resized) or "+X+Y"
 
 
@@ -216,6 +249,7 @@ def remember_place(win, name):
         geo = geo[geo.index("+"):] if "+" in geo else ""
     if geo:
         win.geometry(geo)
+    fit_screen(win)
 
     def keep(e=None):
         if (e is None or e.widget is win) and win.winfo_ismapped():
