@@ -37,7 +37,7 @@ Tone:
 • Wah = loud and quiet stripes over the keys.
 The picture shows which keys are loud over time (darker = louder, the highest keys at the top).
 
-Character: Slant, Groups, Off pitch and Noisy make the keys hit at different spots of the wave, which changes the colour of the tone; the picture shows eight keys' notes over four waves.
+Character: Slant, Groups, Off pitch and Noisy make the keys hit at different spots of the wave, which changes the colour of the tone; the picture shows eight keys' notes over four waves. Height makes the drawn wave shape (Hz shape…) taller or shorter (100 % = as drawn, up to 400 % grows past the Hz bass onto more keys), Random gives every wave its own height, and Grows from picks the key row that stays put (Middle, Bottom or Top).
 
 Macros (the strip over the OSC and FX tabs): four big knobs that each turn several knobs at once, e.g. one knob that moves the Sweep and adds Vibrato together. Drag a macro's name onto any knob and hold it there for half a second (the knob gets a coloured outline), then let go to link them. Passing over other knobs on the way links nothing.
 [clip:hz_osc-macros]
@@ -60,7 +60,7 @@ These knobs can move:
 • Shape, Octave below, Volume Attack, Decay, Sustain and Release, Pitch Amount and Time, Vibrato Rate (its wave goes faster or slower from where it is, no jumps), Depth, Delay and Rise, Tremolo Rate, Depth, Delay and Rise.
 Moving an envelope's time speeds up or slows down the part that's playing. A line drawn by hand on the Draw tab keeps its times.
 
-• Sweep Start / End and Time, Key track, Wah, Slant, Groups, Off pitch, Noisy, Blend, Detune, Random start, Glide and Curve (these two and Random start read once, as each note starts).
+• Sweep Start / End and Time, Key track, Wah, Slant, Groups, Off pitch, Noisy, Height, Random height, Blend, Detune, Random start, Glide and Curve (these two and Random start read once, as each note starts).
 
 • Arpeggio Speed (the run goes faster or slower from where it is), Gate and Swing (read as each step starts; an envelope, Velocity or Note moving them follows the note held longest).
 

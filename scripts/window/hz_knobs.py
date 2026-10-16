@@ -35,7 +35,8 @@ from notes.hzbass import (ARP, ARP_PATTERNS, BLEND, CHORDS, CRUSH, DETUNE, FAST,
                           VOICES, WAH, WAVES, adsr_line,
                           arpeggiated,
                           blend_gains, glide_left, clean_arp, clean_extra, clean_mode, clean_steps, clean_voice, copies,
-                          group_count, line_at, osc2_shift, wave_hits)
+                          group_count, line_at, osc2_shift, wave_hits, HEIGHT_FROM, HEIGHT_MOST, height_times,
+                          height_value)
 from roll.roll_shared import NOTE_NAMES
 from window.hz_effects import AMOUNT, FX_COLOR
 from window.hz_steps import StepEditor
@@ -76,8 +77,9 @@ KINDS = {"time": ("hz.synth_beats", 0.0, TIME_MOST, (0.05, 0.25, 0.01), TIME_KNO
                         (0.5, 2, 0.1), RACK["compressor"]["ratio"][1]),
          "gain": ("hz.synth_db", RACK["compressor"]["gain"][0], RACK["compressor"]["gain"][1], (1, 6, 0.1), None),
          "osc_octave": (None, OSC2["octave"][0], OSC2["octave"][1], (1, 1, 1), None),
-         "fine": ("hz.synth_cents", OSC2["fine"][0], OSC2["fine"][1], (1, 10, 0.1), None)}
-PERCENTS = ("percent", "width", "gate", "swing", "bend")  # (kept 0..1, shown and typed in %)
+         "fine": ("hz.synth_cents", OSC2["fine"][0], OSC2["fine"][1], (1, 10, 0.1), None),
+         "height": ("hz.synth_percent", 0.0, 100.0 * HEIGHT_MOST, (1, 10, 0.1), None)}  # (100 % in the middle)
+PERCENTS = ("percent", "width", "gate", "swing", "bend", "height")  # (kept 0..1 (Height 0..4), shown and typed in %)
 PLURAL_UNITS = ("hz.synth_beats", "hz.synth_keys", "hz.synth_cents")  # (their "_one" key: for 1)
 UPDOWN = ("keys", "pitch", "bend", "osc_octave", "fine")  # (knobs with 0 in the middle)
 # the LFO boxes' Rate knobs that can move by note lengths (Timing dropdown; hzbass.TIMINGS), and how a timing's rates
@@ -108,7 +110,7 @@ BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain",
          "tone": (("sweep_start", "percent", 1.0), ("sweep_end", "percent", 0.0), ("sweep_time", "time", 1.0),
                   ("sweep_track", "bend", 0.0), ("wah", "percent", 0.0)),
          "character": (("slant", "percent", 0.0), ("groups", "groups", 1.0), ("offpitch", "percent", 0.0),
-                       ("noisy", "percent", 0.0)),
+                       ("noisy", "percent", 0.0), ("height", "height", 1.0), ("height_rand", "percent", 0.0)),
          "voice": (("voices", "voices", 1.0), ("detune", "cents", 20.0), ("blend", "percent", BLEND),
                    ("random", "percent", 0.0), ("glide", "time", 0.0), ("curve", "bend", GLIDE_CURVE)),
          "arp": tuple((f"arp_{k}", k, start) for k, (_, _, start) in ARP.items()),
@@ -134,7 +136,8 @@ COLOURS = {k: bright(v) for k, v in {
     "arp": "#c0398a", "osc2": "#2f9e6e"}.items()}
 # the lines each box writes (its header light is lit while one of them changes the sound) and its own setting
 BOX_LINES = {"volume": ("volume",), "wave": tuple(WAVES) + ("octave",), "pitch": ("pitch",), "vibrato": ("vibrato",),
-             "tremolo": ("tremolo",), "tone": ("sweep", "wah"), "character": ("slant", "offpitch", "noisy", "groups")}
+             "tremolo": ("tremolo",), "tone": ("sweep", "wah"),
+             "character": ("slant", "offpitch", "noisy", "groups", "height", "height_rand")}
 BOX_EXTRA = {"wave": "mode", "voice": "voice", "arp": "arp", "osc2": "osc2"}
 # the boxes a click on the light / name switches off and on (Bypass: the lines in hz["off"], the own setting moved to
 # hz["bypass"]; the Arpeggio's click is its On instead)
@@ -147,14 +150,15 @@ WAVE_NAMES = ("none",) + tuple(WAVES)
 START = dict({key: start for key, (_, _, start) in KNOBS.items()}, wave="none", sweep=False, same=False,
              touching=False, legato=False, mode="off", rack=(), rack_off=(), arp_on=False, arp_pattern="up",
              arp_chord="placed", arp_scale="off", arp_root=0, vibrato_timing="free", tremolo_timing="free",
-             osc2_on=False, osc2_wave="none", osc2_split=False, osc2_mode="off", osc2_a_off=False,
+             osc2_on=False, osc2_wave="none", osc2_split=False, osc2_mode="off", osc2_a_off=False, height_from="middle",
              arp_steps=[dict(s) for s in START_STEPS], arp_count=START_COUNT)
 ARP_CHOICES = ("pattern", "chord", "scale", "root")  # (the Arpeggio box's dropdowns)
 ARP_KEYS = ARP_CHOICES + tuple(ARP) + ("steps", "count")  # (all it has)
 KEEP = (tuple(KNOBS) + ("same", "touching", "osc2_split", "osc2_a_off") + tuple(f"arp_{w}" for w in ARP_CHOICES)
         + ("osc2_wave", "osc2_mode", "arp_steps", "arp_count"))
 CHOICES = {"arp_pattern": ARP_PATTERNS, "arp_chord": tuple(CHORDS), "arp_scale": ("off",) + tuple(SCALES),
-           "arp_root": tuple(range(12)), "osc2_wave": WAVE_NAMES, "osc2_mode": MODE_NAMES}
+           "arp_root": tuple(range(12)), "osc2_wave": WAVE_NAMES, "osc2_mode": MODE_NAMES,
+           "height_from": tuple(HEIGHT_FROM)}
 
 
 def text_key(key):
@@ -404,6 +408,14 @@ def read_character(win, was):
             made = made and v is not None
             got[name] = v if v is not None else max(p[1] for p in win.fxl[name])
     got["groups"] = float(group_count(got["groups"])) if "groups" in win.fxl else 1.0
+    got["height"], got["height_rand"] = 1.0, 0.0
+    for name in ("height", "height_rand"):
+        if name in win.fxl:
+            v = flat(win, name)
+            made = made and v is not None
+            v = v if v is not None else max(p[1] for p in win.fxl[name])
+            got[name] = float(height_times(v)) if name == "height" else v
+    got["height_from"] = win.extra.get("height_from") or "middle"
     return got, made
 
 
@@ -624,6 +636,8 @@ def knob_of(kind, v):
     most = KINDS[kind][4]
     if most:
         return min(100.0, 100 * math.sqrt(max(0.0, v) / most))
+    if kind == "height":  # (as its line: the middle = 100 %)
+        return max(0.0, min(100.0, 100 * height_value(v)))
     lo, hi = KINDS[kind][1:3]
     if kind in UPDOWN:  # (-hi .. hi)
         return max(-100.0, min(100.0, 100 * shown(kind, v) / hi))
@@ -641,6 +655,8 @@ def value_of(kind, k):
         return round(hi * k / 100, 1)
     if kind in ("percent", "bend"):
         return k / 100
+    if kind == "height":  # (whole %; 100 % in the middle)
+        return round(float(height_times(k / 100)), 2)
     x = lo + (hi - lo) * k / 100
     if kind in COUNTS:
         return float(round(x))
@@ -725,6 +741,9 @@ class SynthKnobs:
                 col += 1
                 if key in ("random", "curve"):  # (Voices on after the copies' knobs, the tick boxes after Glide's)
                     self.voice_cell(box, col, key)
+                    col += 1
+                if key == "height_rand":  # (Height's Grows from after its knobs)
+                    self.grows_cell(box, col)
                     col += 1
             if name == "arp":
                 for what in ARP_CHOICES[1:]:  # (Chord, Scale, Root after the knobs)
@@ -832,6 +851,25 @@ class SynthKnobs:
         for w in (k, e):
             Tooltip(w, tip + "\n" + tr("hz.synth_tip_knob"))
         return cell
+
+    def grows_cell(self, box, col):
+        """The Character box's Grows from dropdown: the key row that stays put while Height changes."""
+        cell = ttk.Frame(box, style="Synth.Box.TFrame")
+        cell.grid(row=0, column=col, padx=6, sticky="n")
+        ttk.Label(cell, text=tr("hz.fx_height_from"), style="Synth.Box.TLabel").pack()
+        def make():
+            return [tr(f"hz.synth_height_{w}") for w in HEIGHT_FROM]
+        names = make()
+        var = tk.StringVar(value=names[0])
+        cb = ttk.Combobox(cell, textvariable=var, values=names, state="readonly",
+                          width=english_width(make), style="Synth.TCombobox")
+        dark_list(cb)
+        cb.pack(pady=(12, 0))
+        cb.bind("<<ComboboxSelected>>", lambda e: (
+            self.change("character", "height_from", tuple(HEIGHT_FROM)[e.widget.current()]),
+            self.keyboard_back(e.widget)))
+        Tooltip(cb, tr("hz.synth_tip_height_from"))
+        self.grows_pick = (var, names)
 
     def timing_cell(self, box, name):
         """An LFO box's Timing dropdown (column 0): Free, or its Rate only at note lengths (straight, triplets,
@@ -1156,6 +1194,13 @@ class SynthKnobs:
             fx.drop("groups")
             if v["groups"] > 1:
                 self.fxl["groups"] = [[0.0, (v["groups"] - 1) / (GROUPS - 1)]]
+            fx.drop("height")
+            if abs(v["height"] - 1.0) > 1e-9:  # (100 %: as drawn, no line)
+                self.fxl["height"] = [[0.0, height_value(v["height"])]]
+            fx.drop("height_rand")
+            if v["height_rand"] > 0:
+                self.fxl["height_rand"] = [[0.0, v["height_rand"]]]
+            self.set_extra("height_from", v["height_from"])
         if was_off:
             self.switch_box(box, True)
         elif box in self.extra.get("bypass", {}).get("boxes", ()):  # (switched on elsewhere, e.g. its lines on the
@@ -1334,6 +1379,10 @@ class SynthKnobs:
             var, names, ids = getattr(self, f"{key}_pick")
             if var.get() != names[ids.index(self.vals[key])]:
                 var.set(names[ids.index(self.vals[key])])
+        var, names = self.grows_pick
+        name = names[tuple(HEIGHT_FROM).index(self.vals["height_from"])]
+        if var.get() != name:
+            var.set(name)
         for box, (var, names) in self.timing_picks.items():
             timing = self.vals[f"{box}_timing"]
             if var.get() != names[TIMINGS.index(timing)]:
@@ -1597,10 +1646,13 @@ class SynthKnobs:
         sx, rh = (w - 2 * pad) / waves, (h - 2 * pad) / keys
         colour = self.pic_colour("character")
         groups = int(v["groups"])
+        at, tall = HEIGHT_FROM[v["height_from"]], max(v["height"], 1.0 / keys)
         for k in range(1, waves):
             c.create_line(pad + k * sx, pad, pad + k * sx, h - pad, fill=GRID, dash=(3, 3))
         for i in range(keys):
             x = i / keys
+            if not 0.0 <= at + ((i + 0.5) / keys - at) / tall <= 1.0:  # (a key the Height doesn't reach: quiet)
+                continue
             noise = np.random.default_rng(1000 + i)
             stretch = 1.0 + OFF_PITCH * v["offpitch"] * (x - 0.5)
             y = h - pad - (i + 1) * rh

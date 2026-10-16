@@ -505,6 +505,12 @@ def height_times(v):
     return np.where(v <= 0.5, 2.0 * v, 1.0 + (v - 0.5) * 2.0 * (HEIGHT_MOST - 1.0))
 
 
+def height_value(times):
+    """height_times turned back: the "height" line's value (0..1) for a shape `times` x as tall as drawn."""
+    times = min(HEIGHT_MOST, max(0.0, float(times)))
+    return times / 2.0 if times <= 1.0 else 0.5 + (times - 1.0) / (2.0 * (HEIGHT_MOST - 1.0))
+
+
 def clean_height_from(got):
     """hz["height_from"] checked: "bottom" / "top", else None (the middle)."""
     return got if got in ("bottom", "top") else None
