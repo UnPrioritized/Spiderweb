@@ -121,7 +121,10 @@ class KeyGrid:
         self.trace = trace_line(layer_trace(hz)) if layer_trace(hz) else None  # (the drawn wave shape: where in each
         # wave each key row hits; bent pieces as straight ones)
         fx = hz.get("fx") or {}
-        self.heights = "height" in fx or "height_rand" in fx  # (the Height lines: each wave its own hits)
+        linked = {link["to"] for link in (hz.get("mod") or {}).get("links", ())}
+        self.heights = (  # (the Height lines: each wave its own hits; a line doing nothing: the fast way kept)
+            any(p[1] != 0.5 for p in fx.get("height", ())) or any(p[1] > 0 for p in fx.get("height_rand", ()))
+            or bool({"height", "height_rand"} & linked & set(fx)))
         if self.heights and self.trace is None:  # (straight up, as it starts: every key at the wave's start)
             self.trace = [list(p) for p in START_TRACE]
         self.height_at = HEIGHT_FROM.get(hz.get("height_from"), 0.5)
@@ -472,7 +475,7 @@ class KeyGrid:
 
     def made_fast(self, key):
         """made() with the compiled loops (fast_ok: the plain settings), the same numbers; None = made() does it."""
-        x = min(1.0, max(0.0, (key - self.lo) / self.n))
+        x = min((self.n - 1) / self.n, max(0.0, (key - self.lo) / self.n))  # (as made's)
         xv = min(1.0, max(0.0, (key - self.lo) / max(1, self.n - 1)))
         noise = np.random.default_rng(1000 + key)
         row = key - self.lo
@@ -526,7 +529,9 @@ class KeyGrid:
             got = self.made_fast(key)
             if got is not None:
                 return got
-        x = min(1.0, max(0.0, (key - self.lo) / self.n))  # where the key is among the shape's keys, 0 = the lowest
+        # where the key is among the shape's keys, 0 = the lowest (a key a Height grows onto: as the edge row, so
+        # Groups / Slant don't push it a wave on)
+        x = min((self.n - 1) / self.n, max(0.0, (key - self.lo) / self.n))
         xv = min(1.0, max(0.0, (key - self.lo) / max(1, self.n - 1)))  # (for loudness: 1 = the highest key)
         noise = np.random.default_rng(1000 + key)  # (the same every time: the key is the seed)
         row = key - self.lo
@@ -612,10 +617,10 @@ class KeyGrid:
                 times = np.clip(times * (1.0 + f["height_rand"][src] * (2.0 * u - 1.0)), 0.0, HEIGHT_MOST)
             again, late = height_hits(self.trace, (key - self.lo + 0.5) / self.n, times, self.height_at, self.n)
             has = np.zeros(len(part), bool)
-            has[again] = True  # (a wave this key is quiet in: the note before ends where it starts, a gap shows)
-            quiet_next = np.concatenate([(part[1:] == part[:-1]) & ~has[1:], [False]])
-            cap = np.where(quiet_next[again], 1.0 - late, np.inf)  # (waves from the hit: to its wave's end, moved
-            # along with the hit by the lateness added below)
+            has[again] = True  # (a wave this key is quiet in, or the next note's / slide's / tail's first waves
+            # maybe: the note before lasts one wave at most, a gap shows; never held half a wave, user)
+            quiet_next = np.concatenate([(part[1:] != part[:-1]) | ~has[1:], [True]])
+            cap = np.where(quiet_next[again], 1.0, np.inf)  # (waves from the hit)
             part, number, src, waves, starts = part[again], number[again], src[again], waves[again], starts[again]
         elif self.trace:  # (the drawn wave shape: every wave hits where its line crosses this key row, maybe several
             hits = trace_hits(self.trace, (key - self.lo + 0.5) / self.n)  # times: each one a repeat of its own)

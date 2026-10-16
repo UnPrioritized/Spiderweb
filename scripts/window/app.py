@@ -17,7 +17,7 @@ import numpy as np
 
 from files.lang import size as lang_size, tr, trn
 from notes.areas import most_colours
-from notes.custom import CUSTOM_DEFAULTS, capped_colours, custom_note_count, tracks_apart
+from notes.custom import CUSTOM_DEFAULTS, capped_colours, custom_note_count, set_key_top, tracks_apart
 from window import big_ask, look
 from window.help import Tips, open_help
 from window.updates import Updates
@@ -285,6 +285,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         self.channel_split = "key"  # what counts as an overlap for Multi channel (engine.SPLITS)
         self.use_ch10 = tk.BooleanVar(value=False)  # Multi channel uses channel 10 too: 16 colours (all16)
         self.keys = 128  # the project's key range: 0 .. keys - 1 (paths.KEYS)
+        set_key_top(self.keys)
         self.keys_var = tk.StringVar(value=str(KEYS[0]))
         self.edo31 = tk.BooleanVar(value=False)  # 256 keys shown as 31-EDO (the look only: edo())
         self.edo31_audio = tk.BooleanVar(value=False)  # ... and played that way (Built-in BASSMIDI)
@@ -922,6 +923,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
                 ok = False
             (good if ok else lambda e: bad(e, typing=True))(self.project_entries["bpm"])
         self.keys = KEYS[1] if self.keys_var.get() == str(KEYS[1]) else KEYS[0]
+        set_key_top(self.keys)
         self.sync_edo()
         self.roll.clamp_view()
         warn = self.ppq >= PPQ_WARN

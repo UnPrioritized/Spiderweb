@@ -865,11 +865,21 @@ class SynthKnobs:
                           width=english_width(make), style="Synth.TCombobox")
         dark_list(cb)
         cb.pack(pady=(12, 0))
-        cb.bind("<<ComboboxSelected>>", lambda e: (
-            self.change("character", "height_from", tuple(HEIGHT_FROM)[e.widget.current()]),
-            self.keyboard_back(e.widget)))
+        cb.bind("<<ComboboxSelected>>", lambda e: (self.on_grows(tuple(HEIGHT_FROM)[e.widget.current()]),
+                                                    self.keyboard_back(e.widget)))
         Tooltip(cb, tr("hz.synth_tip_height_from"))
         self.grows_pick = (var, names)
+
+    def on_grows(self, where):
+        """Grows from picked: only that setting changes, one undo step (the box's lines stay as drawn, user)."""
+        before = self.fx.state()
+        self.vals["height_from"] = where
+        self.set_extra("height_from", where)
+        self.keep_vals()
+        self.redraw()
+        self.show_knobs()
+        if self.fx.now() != before:
+            self.commit_fx(before)
 
     def timing_cell(self, box, name):
         """An LFO box's Timing dropdown (column 0): Free, or its Rate only at note lengths (straight, triplets,

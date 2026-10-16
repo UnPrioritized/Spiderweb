@@ -1989,7 +1989,13 @@ def chop_keys(stretches, grid, count=False, fit=False, keep=False):
     return notes[np.repeat(first, m) + np.arange(int(m.sum())) - np.repeat(np.cumsum(m) - m, m)]
 
 
-KEY_TOP = 255  # the highest key a Height can grow onto (256 keys; fewer: the notes past the top are dropped later)
+KEY_TOP = 127  # the highest key a Height can grow onto: the project's top key (set_key_top)
+
+
+def set_key_top(keys):
+    """The project's key count changed (App): a Height grows only onto keys it has (none made and counted past)."""
+    global KEY_TOP
+    KEY_TOP = keys - 1
 
 
 def keys_chopped(stretches, grid, count=False, fit=False, keep=False):
