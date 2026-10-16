@@ -360,6 +360,7 @@ def unit_area(shapes, unit, ppq, nkeys, notes_of):
     """The area of masks worked out together (mask_units): (starts, ends, reach starts, reach ends, inverted). Each
     member's area (its Invert = everywhere but there) joins the result by its mode, the first adding (user); the reach
     = every member's (the shapes any of them touches are covered). Sounding own notes stay free of the pattern."""
+    # (separate Invert masks over the same shapes, worked_units: their holes all cut, as if Intersect-grouped)
     first = shapes[unit[0]]
     a, b, ra, rb = mask_area(first, ppq, nkeys, notes_of)
     cur, neg, reach = (a, b), first["mask"]["invert"], (ra, rb)
@@ -372,7 +373,7 @@ def unit_area(shapes, unit, ppq, nkeys, notes_of):
         a, b, ra, rb = mask_area(sh, ppq, nkeys, notes_of)
         reach, own = joined(reach, (ra, rb)), joined(own, own_area(sh, ppq, nkeys, notes_of))
         # (kept as spans + "everywhere but these": not x = neg; A - B = A and not B)
-        x, nx, mode = (a, b), m["invert"], m.get("mode", "add")
+        x, nx, mode = (a, b), m["invert"], m.get("mode", "add") if "group" in m else "intersect"
         if mode == "subtract":
             nx, mode = not nx, "intersect"
         if mode == "add":
@@ -474,13 +475,12 @@ class Lookup:
                                        if o < len(starts) - 1] or [np.zeros(0, np.int64)]))
 
 
-def shown_in(notes, got, lookup=None):
-    """What an area (unit_area's) shows of notes (rendered rows, no masks' own): (the shapes it covers, the rows that
-    show, start and end trimmed). lookup: a Lookup of notes (many masks: each reads only its own key rows)."""
-    none = np.zeros(0, np.int64), notes[:0]
-    a, b, ra, rb, invert = got
+def covers(notes, ra, rb, lookup=None, rows_too=False):
+    """The shapes a reach (ra, rb) covers (their notes in it), a sorted array; lookup as shown_in's. rows_too: also
+    the rows of notes looked at (near the reach)."""
+    none = np.zeros(0, np.int64)
     if not len(ra) or not len(notes):
-        return none
+        return (none, none) if rows_too else none
     # (only the notes near the reach are looked at closely: millions of others cost one quick pass, or none)
     rows = (ra - OFF) // ROW
     lo_t, hi_t = int((ra - OFF - rows * ROW).min()), int((rb - OFF - rows * ROW).max())
@@ -489,10 +489,61 @@ def shown_in(notes, got, lookup=None):
                               & (notes[:, 0] < hi_t))
     else:
         near = lookup.near(rows.min(), rows.max(), lo_t, hi_t)
-    hit = kept_parts(notes[near], ra, rb, False)[0]  # (the shapes it covers: by its reach, own notes in it)
-    if not hit.any():
+    hit = kept_parts(notes[near], ra, rb, False)[0]  # (by its reach, own notes in it)
+    mine = np.unique(notes[near[hit], 5]) if hit.any() else none
+    return (mine, near) if rows_too else mine
+
+
+def worked_units(shapes, notes, ppq, nkeys, notes_of, lookup=None, known=None):
+    """mask_units as the masks are worked out (preview + Apply): separate Invert masks covering a shape in common
+    become one unit, all their holes cut in one copy of it (user 2026-10-16: drawn apart, each one's copy filled the
+    others' holes); Apply on any of them = that unit. known: {mask's shape_key: covers} to reuse, filled in."""
+    from notes.engine import shape_key
+    units = mask_units(shapes)
+    holes = [u[0] for u in units if len(u) == 1 and shapes[u[0]]["mask"]["invert"]]
+    if len(holes) < 2:
+        return units
+    parent = {i: i for i in holes}
+
+    def root(i):
+        while parent[i] != i:
+            parent[i] = i = parent[parent[i]]
+        return i
+    owner = {}  # (covered shape: the first hole over it)
+    for i in holes:
+        key = (shape_key(shapes[i]), ppq, nkeys)
+        got = None if known is None else known.get(key)
+        if got is None:
+            got = covers(notes, *mask_area(shapes[i], ppq, nkeys, notes_of)[2:], lookup)
+            if known is not None:
+                known[key] = got
+        for o in got.tolist():
+            if o in owner:
+                parent[root(i)] = root(owner[o])
+            else:
+                owner[o] = i
+    joined_up = {}
+    for i in holes:
+        joined_up.setdefault(root(i), []).append(i)
+    out = []
+    for u in units:
+        if len(u) == 1 and u[0] in parent:
+            together = joined_up[root(u[0])]
+            if together[0] == u[0]:  # (once, where its first member is)
+                out.append(sorted(together))
+        else:
+            out.append(u)
+    return out
+
+
+def shown_in(notes, got, lookup=None):
+    """What an area (unit_area's) shows of notes (rendered rows, no masks' own): (the shapes it covers, the rows that
+    show, start and end trimmed). lookup: a Lookup of notes (many masks: each reads only its own key rows)."""
+    none = np.zeros(0, np.int64), notes[:0]
+    a, b, ra, rb, invert = got
+    mine, near = covers(notes, ra, rb, lookup, rows_too=True)
+    if not len(mine):
         return none
-    mine = np.unique(notes[near[hit], 5])
     if invert:  # (every note of the shapes it touches: the ones away from the hole show whole)
         near = np.flatnonzero(np.isin(notes[:, 5], mine)) if lookup is None else lookup.of(mine)
     _, idx, ps, pe = kept_parts(notes[near], a, b, invert)
@@ -512,7 +563,7 @@ def mask_view(rendered, shapes, ppq, nkeys, notes_of, pattern=None):
     units = mask_units(shapes)
     _room[0] = max(16, 2 * sum(map(len, units)))
     if not units or not len(rendered):
-        _shown.update(notes=None, units={})  # (not kept: many MB)
+        _shown.update(notes=None, units={}, covers={})  # (not kept: many MB)
         return rendered, set()
     from notes.engine import shape_key
     owner = rendered[:, 5]
@@ -520,8 +571,11 @@ def mask_view(rendered, shapes, ppq, nkeys, notes_of, pattern=None):
     covered, parts = set(), []
     lookup = Lookup(notes) if len(units) > 1 else None  # (sorting once costs about what one mask's full pass does)
     # (the notes under the masks as last time: only masks changed since are worked out again, e.g. the one dragged)
-    last = _shown["units"] if _shown["notes"] is not None and _shown["notes"].shape == notes.shape and \
-        np.array_equal(_shown["notes"], notes) else {}
+    same = _shown["notes"] is not None and _shown["notes"].shape == notes.shape and np.array_equal(_shown["notes"], notes)
+    last = _shown["units"] if same else {}
+    keys = {shape_key(shapes[i]) for u in units for i in u}  # (holes' covered shapes as last time: masks still here)
+    known = {k: v for k, v in _shown.get("covers", {}).items() if k[0] in keys} if same else {}
+    units = worked_units(shapes, notes, ppq, nkeys, notes_of, lookup, known)
     shown = {}
     for unit in units:
         key = (tuple(shape_key(shapes[i]) for i in unit), ppq, nkeys)
@@ -529,7 +583,7 @@ def mask_view(rendered, shapes, ppq, nkeys, notes_of, pattern=None):
         if len(mine):
             covered.update(mine.tolist())
             parts.append(got)
-    _shown.update(notes=notes, units=shown)
+    _shown.update(notes=notes, units=shown, covers=known)
     if not covered:
         return rendered, set()
     under = np.isin(owner, list(covered))

@@ -12,7 +12,7 @@ from notes.engine import SHAPE_DEFAULTS, clean_shape
 from notes.sustain import is_sustained
 from notes.mask import (GROUP_KEYS, MASK_DEFAULTS, MODES, MOST_SIZE, SHOWS, THICKNESS, can_mask, free_colour, is_mask,
                         is_solid, loops_of, mask_units, new_group_id, slot_pal, slot_rule, tidy_groups, unit_of,
-                        unit_shown, unmasked)
+                        unit_shown, unmasked, worked_units)
 from window import look
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged, unit_word
 
@@ -222,7 +222,7 @@ class MaskPanel:
         "Masked notes", just under the mask in the list (user: the shapes under it unchanged, the mask stays to be
         moved and applied again; its own sounding notes copied too). The notes as the preview shows them, velocities and
         channels as they sound (track = the channel each came out on). A mask in a group = the whole group, once,
-        before its first member (user). The new shapes are selected; one undo step."""
+        before its first member (user); separate Invert masks over one shape the same (mask.worked_units). The new shapes are selected; one undo step."""
         self.commit_typing()
         masks = self.mask_indices()
         if not masks:
@@ -230,7 +230,7 @@ class MaskPanel:
         if self.notes_late:  # (notes still catching up with a drag: made now)
             self.shapes_changed(now=True)
         notes = unmasked(self.pattern, self.shapes)  # (as they sound without the masks' own notes)
-        units = mask_units(self.shapes)
+        units = worked_units(self.shapes, notes, self.ppq, self.keys, self.notes_of)
         made, count = {}, 0
         for unit in [u for u in units if set(u) & set(masks)]:
             i = unit[0]
