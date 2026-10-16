@@ -11,7 +11,7 @@ import webbrowser
 from tkinter import font as tkfont, ttk
 
 from files.lang import size as lang_size, tr
-from files.about import BANNER, BANNER_HALF, HERE, LICENSE, VERSION, WEBSITE
+from files.about import BANNER, HERE, LICENSE, VERSION, WEBSITE
 from files.system import open_path
 from window import look
 from window.widgets import placed, remember_place
@@ -336,6 +336,8 @@ class HelpWindow(tk.Toplevel):
         self.text.configure(yscrollcommand=tsb.set)
         self.text.pack(side="left", fill="both", expand=True)
         tsb.pack(side="right", fill="y")
+        self._banner_label, self._banner_job = None, None
+        self.text.bind("<Configure>", self.banner_later, add="+")
         self.text.tag_configure("title", font=look.font(14, "bold"), spacing3=8)
         self.text.tag_configure("section", font=look.font(9), foreground=look.HINT)
         self.text.tag_configure("hit", background=look.SEARCH_HIT)
@@ -496,13 +498,55 @@ class HelpWindow(tk.Toplevel):
             t.tag_bind(tag, "<Leave>", lambda e: (t.config(cursor="arrow"), t.tag_remove("hover", "1.0", "end")))
 
     def about_banner(self):
-        """The About page's picture (half size, full size on big screen scaling), if it's there."""
-        try:  # (kept in self, or Tk forgets the picture)
-            self._banner = tk.PhotoImage(file=BANNER if self.scale >= 1.5 else BANNER_HALF)
-        except tk.TclError:
+        """The About page's picture (half its file's size, growing with the screen scaling up to the whole file), if
+        it's there. Never wider than the page: a narrower window shrinks it, a wider one gives it back up to that
+        size (fit_banner)."""
+        from notes.picture import pixels
+        try:
+            self._banner_pixels = pixels(BANNER, self)
+        except (tk.TclError, OSError, ValueError):
             return
-        self.embed(tk.Label(self.text, image=self._banner, borderwidth=0))
+        w = self._banner_pixels[0].shape[1]
+        self._banner_most = min(w, round(w / 2 * self.scale))
+        self._banner = None  # (the picture shown, kept in self, or Tk forgets it)
+        self._banner_label = tk.Label(self.text, borderwidth=0)
+        self.fit_banner()
+        self.embed(self._banner_label)
         self.text.insert("end", "\n\n")
+
+    def banner_later(self, e=None):
+        """The page's width changed: the About picture fitted once the window rests for a moment."""
+        if self._banner_label is None:
+            return
+        if self._banner_job:
+            self.after_cancel(self._banner_job)
+        self._banner_job = self.after(80, self.banner_now)
+
+    def banner_now(self):
+        self._banner_job = None
+        self.fit_banner()
+
+    def fit_banner(self):
+        """The About picture made as wide as the page has room for (at most its own size)."""
+        label = getattr(self, "_banner_label", None)
+        if label is None or not label.winfo_exists():
+            return
+        from files import speed
+        from notes.picture import resized
+        rgb, alpha = self._banner_pixels
+        h, w = rgb.shape[:2]
+        self.text.update_idletasks()
+        room = self.text.winfo_width() - 2 * int(self.text.cget("padx")) - 4
+        most = self._banner_most
+        width = most if room < 50 else max(50, min(most, room))  # (not shown yet: its own size)
+        if self._banner is not None and self._banner.size[0] == width:
+            return
+        height = max(1, round(h * width / w))
+        under = [c // 257 for c in self.winfo_rgb(self.text.cget("background"))]
+        photo = speed.Photo(self, width, height)
+        photo.put(resized(rgb, alpha, width, height, under))
+        label.config(image=photo.photo)
+        self._banner = photo
 
     def about_buttons(self):
         """The About page's website link and buttons: the website, the license, Spiderweb's folder."""

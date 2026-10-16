@@ -109,19 +109,7 @@ def file_patterns():
 def load(path, tk_root):
     """Reads the picture file -> Picture. With Pillow: PNG, JPG, GIF, WebP, BMP, TIFF... (photos turned the way
     they're shown); without: PNG / GIF through Tk. Raises tk.TclError / OSError / ValueError if it can't be read."""
-    if speed.pillow():
-        rgb, alpha = _pillow_pixels(path)
-    else:
-        import tkinter as tk
-        img = tk.PhotoImage(master=tk_root, file=path)
-        try:
-            w, h = img.width(), img.height()
-            rgb = _ppm_pixels(tk_root.tk.call(img, "data", "-format", "ppm"))
-            alpha = None
-            if _has_alpha(path):
-                alpha = _alpha(img, tk_root, w, h)
-        finally:
-            img = None
+    rgb, alpha = pixels(path, tk_root)
     h, w = rgb.shape[:2]
     # a side longer than MAX_SIDE: blocks of k x k pixels averaged, a side thinner than k not more than it has (a
     # 1-pixel-wide strip stays 1 wide); the picture keeps its own shape through its size
@@ -131,6 +119,43 @@ def load(path, tk_root):
     if alpha is not None:
         alpha = _shrink(alpha, ky, kx)
     return Picture(lin, alpha, (w, h), path, fingerprint(path))
+
+
+def pixels(path, tk_root):
+    """(rows x cols x 3 uint8, alpha 0..1 or None) of a picture file: read by Pillow when it's there, else by Tk
+    (PNG / GIF only). Raises tk.TclError / OSError / ValueError if it can't be read."""
+    if speed.pillow():
+        return _pillow_pixels(path)
+    import tkinter as tk
+    img = tk.PhotoImage(master=tk_root, file=path)
+    try:
+        w, h = img.width(), img.height()
+        rgb = _ppm_pixels(tk_root.tk.call(img, "data", "-format", "ppm"))
+        return rgb, (_alpha(img, tk_root, w, h) if _has_alpha(path) else None)
+    finally:
+        img = None
+
+
+def _box_weights(n, m):
+    """m x n matrix averaging n pixels into m (each new pixel = the old ones under it, parts of pixels counted by
+    how much of them it covers)."""
+    edges = np.arange(m + 1) * (n / m)
+    lo, hi = edges[:-1, None], edges[1:, None]
+    i = np.arange(n)[None, :]
+    wt = np.clip(np.minimum(hi, i + 1) - np.maximum(lo, i), 0, None)
+    return wt / wt.sum(axis=1, keepdims=True)
+
+
+def resized(rgb, alpha, w, h, under):
+    """The picture made w x h (smaller: averaged in linear light, so thin lines stay even), see-through parts laid
+    on the colour under (r, g, b 0..255) -> rows x cols x 3 uint8."""
+    lin = to_lin(rgb.astype(np.float32) / 255)
+    if alpha is not None:
+        a = alpha[..., None].astype(np.float32)
+        lin = lin * a + to_lin(np.array(under, np.float32) / 255) * (1 - a)
+    ry, rx = _box_weights(lin.shape[0], h), _box_weights(lin.shape[1], w)
+    out = np.einsum("yr,rcz,xc->yxz", ry, lin, rx, optimize=True)
+    return np.clip(np.round(to_srgb(out) * 255), 0, 255).astype(np.uint8)
 
 
 def _shrink(a, ky, kx, lut=None):
