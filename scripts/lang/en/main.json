@@ -92,7 +92,7 @@
  "mask.undo_on": "Make mask",
  "mask.undo_off": "Mask back to a shape",
  "mask.apply": "Apply mask",
- "mask.apply_tip": "Makes a new shape of the notes the mask shows, exactly as you see them. The shapes under it don't change, and the mask stays, so you can move it and apply it again. While Own notes sound is ticked, its border notes are copied too. A mask in a group applies the whole group.",
+ "mask.apply_tip": "Makes a new shape of the notes the mask shows, exactly as you see them. The shapes under it don't change, and the mask stays, so you can move it and apply it again. While Own notes sound is ticked, its border notes are copied too. A mask in a group applies the whole group. Invert masks over the same shape apply together: one copy with all their holes.",
  "mask.applied": "Masked notes",
  "mask.apply_undo": "Apply mask",
  "mask.apply_nothing": "Nothing applied: no notes show through the mask",

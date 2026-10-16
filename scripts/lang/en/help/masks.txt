@@ -38,6 +38,6 @@ Combining masks: select two or more masks, right-click: Combine masks. They then
 Below: two circle masks in one group, the right one set to Add, Subtract and Intersect (left to right).
 [clip:masks-modes]
 
-The masks are worked through in the Shapes list's order, top first, and the first one always adds. Invert works on each mask by itself before its Mode. Apply mask on any mask of a group applies the whole group. Right-click: Separate masks takes the selected masks out of their group. Masks not in a group each work on their own.
+The masks are worked through in the Shapes list's order, top first, and the first one always adds. Invert works on each mask by itself before its Mode. Apply mask on any mask of a group applies the whole group. Right-click: Separate masks takes the selected masks out of their group. Masks not in a group each work on their own, except holes: Invert masks (or groups that leave a hole) over the same shape work together, so every hole stays cut, and Apply mask on any of them makes one copy with all the holes. Select one hole to see its partners light up.
 
 Clicking: a click where the pattern shows through a mask picks the mask. A plain click on the selected shape picks the next shape under the mouse, round again; a drag still moves the selected one.

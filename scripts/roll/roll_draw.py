@@ -11,7 +11,7 @@ from files.lang import tr, trn
 from files.speed import key_sort, loops
 from notes.engine import cached_arrays, shape_key, shape_notes_tracks
 from notes.joined import all_tumours
-from notes.mask import mask_units, unit_of
+from notes.mask import mask_joined, mask_units, unit_of
 from notes.merge import preview_parts, slid_preview
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
 from notes.paths import KEYS
@@ -487,17 +487,20 @@ class RollDrawing:
                 return look.MASK_GROUPS[app.shapes[i]["mask"].get("colour", 0) % len(look.MASK_GROUPS)][picked]
             return look.MASK_LINE_PICKED if picked else look.MASK_LINE
 
+        # holes worked out together with a selected one (mask.worked_units): in their picked colour (user 2026-10-16)
+        partners = {i for u in (mask_joined() if app.mask_preview.get() else ()) if set(u) & set(app.sels)
+                    for i in u if i < len(app.shapes) and app.shapes[i].get("mask")}
         for i, sh in enumerate(app.shapes):  # (Settings → Look's Shape lines: their thickness, a selected one's a pixel more)
             if i in app.sels:
                 continue
             if sh.get("mask"):  # a mask: always shown, dashed (so it isn't forgotten, mask.py)
-                self.draw_path(sh, mask_colour(i, False), look.LINES, dash=MASK_DASH)
+                self.draw_path(sh, mask_colour(i, i in partners), look.LINES + (i in partners), dash=MASK_DASH)
             elif app.show_lines.get():
                 self.draw_path(sh, look.MASKED_LINE if i in covered else look.SHAPE_LINE, look.LINES)
         for i in app.sels:
             sh = app.shapes[i]
-            if sh.get("mask"):
-                self.draw_path(sh, mask_colour(i, True), look.LINES + 1, dash=MASK_DASH)
+            if sh.get("mask"):  # (two pixels more: a selected mask was hard to see, user)
+                self.draw_path(sh, mask_colour(i, True), look.LINES + 2, dash=MASK_DASH)
             else:
                 self.draw_path(sh, look.SHAPE_LINE_PICKED, look.LINES + 1)
         for i in app.sels:
