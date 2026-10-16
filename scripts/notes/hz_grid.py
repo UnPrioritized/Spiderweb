@@ -288,6 +288,22 @@ class KeyGrid:
             out[i] = drawn[seed][o * VOICES:(o + 1) * VOICES]
         return out
 
+    def reach(self):
+        """How many keys (below, above) the shape's own a Height over 100 % can grow onto (the tallest it gets
+        anywhere, round its Grows from row), once per KeyGrid."""
+        got = self.__dict__.get("_reach")
+        if got is None:
+            fx, f = self.hz.get("fx") or {}, self.flat
+            most = 1.0
+            if self.heights and len(f["beat"]):
+                most = float(height_times(f["height"]).max()) if "height" in fx else 1.0
+                if "height_rand" in fx:
+                    most *= 1.0 + float(f["height_rand"].max())
+            grow = (min(most, HEIGHT_MOST) - 1.0) * self.n
+            got = self._reach = ((math.ceil(self.height_at * grow - 1e-9), math.ceil((1.0 - self.height_at) * grow
+                                                                                     - 1e-9)) if grow > 0 else (0, 0))
+        return got
+
     def chain_heads(self):
         """Each run's chain of slides' start beat in the song (as starting_points counts it), once per KeyGrid."""
         got = self.__dict__.get("_heads")

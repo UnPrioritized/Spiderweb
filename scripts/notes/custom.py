@@ -1962,7 +1962,38 @@ def chop_grid(stretches, squares, count=False, fit=False, keep=False):
 
 
 def chop_keys(stretches, grid, count=False, fit=False, keep=False):
-    """chop for Hz bass whose tones have effects: every key has its own repeats (hzbass.KeyGrid)."""
+    """chop for Hz bass whose tones have effects: every key has its own repeats (hzbass.KeyGrid). A Height over
+    100 % grows past the shape's keys (KeyGrid.reach): its lowest / highest row's stretches copied onto the keys
+    below / above, each copy's notes counted as its row's (so the stretches' order and counts still hold)."""
+    below, above = grid.reach() if hasattr(grid, "reach") else (0, 0)
+    if not (below or above) or not len(stretches):
+        return keys_chopped(stretches, grid, count, fit, keep)
+    lo, hi = grid.lo, grid.lo + grid.n - 1
+    rows, extra = np.arange(len(stretches)), [stretches]
+    owner = [rows]
+    for edge, keys in ((lo, range(lo - 1, max(-1, lo - below - 1), -1)),
+                       (hi, range(hi + 1, min(KEY_TOP, hi + above) + 1))):
+        at = rows[stretches[:, 2] == edge]
+        for k in keys:
+            copy = stretches[at].copy()
+            copy[:, 2] = k
+            extra.append(copy)
+            owner.append(at)
+    ext, owner = np.concatenate(extra), np.concatenate(owner)
+    n = keys_chopped(ext, grid, True, fit, keep)
+    if count:
+        return np.bincount(owner, n, len(stretches)).astype(np.int64)
+    notes = keys_chopped(ext, grid, False, fit, keep)
+    o = np.argsort(owner, kind="stable")  # (each stretch's own notes, then its copies')
+    first, m = (np.cumsum(n) - n)[o], n[o]
+    return notes[np.repeat(first, m) + np.arange(int(m.sum())) - np.repeat(np.cumsum(m) - m, m)]
+
+
+KEY_TOP = 255  # the highest key a Height can grow onto (256 keys; fewer: the notes past the top are dropped later)
+
+
+def keys_chopped(stretches, grid, count=False, fit=False, keep=False):
+    """chop_keys on the stretches as they are."""
     q = stretches[:, 2]
     n = np.zeros(len(stretches), np.int64)
     parts = []

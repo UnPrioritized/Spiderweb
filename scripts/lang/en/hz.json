@@ -105,7 +105,7 @@
  "hz.fx_noisy": "Noisy",
  "hz.fx_noisy_tip": "Noisy: every repeat is late by a random bit. 100 % = up to one whole wave. Click it to put it on.",
  "hz.fx_height": "Height",
- "hz.fx_height_tip": "Height: the drawn wave shape (Hz shape…) gets taller or shorter. 100 % = as drawn, lower = keys it no longer reaches go quiet, higher (up to 400 %) = it goes past the top and bottom keys and is cut off there, so the keys hit closer together. Right-click → Repeat every + Shape → Sine for a shape that grows and shrinks. Click it to put it on.",
+ "hz.fx_height_tip": "Height: the drawn wave shape (Hz shape…) gets taller or shorter. 100 % = as drawn, lower = keys it no longer reaches go quiet, higher (up to 400 %) = it grows past the Hz bass onto the keys above and below. Right-click → Repeat every + Shape → Sine for a shape that grows and shrinks. Click it to put it on.",
  "hz.fx_height_rand": "Random height",
  "hz.fx_height_rand_tip": "Random height: every wave gets its own height, a random bit taller or shorter than Height says (the same for all keys). 100 % = anywhere from flat to twice as tall. Click it to put it on.",
  "hz.fx_height_from": "Grows from",
