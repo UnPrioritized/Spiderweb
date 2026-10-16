@@ -10,7 +10,7 @@ from tkinter import colorchooser, font as tkfont, messagebox, ttk
 from files import lang, settings
 from files.lang import tr
 from files.playback import BUILTIN, devices
-from files.system import WINDOWS, open_path
+from files.system import WINDOWS, open_path, work_area
 from window import button_look, look, palettes
 from window.builtin_settings import BuiltinPanel
 from window.drawer import clean_name
@@ -128,6 +128,42 @@ def open_settings(app, tab=None):
     return w
 
 
+class ScrollPage(ttk.Frame):
+    """A tab whose page scrolls when the screen is too short for the whole window (user 2026-10-16: on a small
+    screen at a big Size, Look's bottom row was under the taskbar). .page = the frame to fill."""
+    SKIP = (ttk.Combobox, tk.Listbox, tk.Text)  # (the wheel over these leaves the page alone)
+
+    def __init__(self, tabs, padding=(12, 10, 12, 12)):
+        super().__init__(tabs)
+        self.most = None  # the tallest the page shows (None = all of it)
+        c = self.canvas = tk.Canvas(self, highlightthickness=0, bd=0,
+                                    bg=ttk.Style().lookup("TFrame", "background") or "SystemButtonFace")
+        self.bar = ttk.Scrollbar(self, orient="vertical", command=c.yview)
+        c.configure(yscrollcommand=self.bar.set)
+        c.pack(side="left", fill="both", expand=True)
+        self.page = ttk.Frame(c, padding=padding)
+        c.create_window(0, 0, window=self.page, anchor="nw")
+        self.page.bind("<Configure>", lambda e: self.fit())
+
+    def fit(self):
+        """As big as the page, or as tall as self.most with a scrollbar."""
+        w, h = self.page.winfo_reqwidth(), self.page.winfo_reqheight()
+        shown = h if self.most is None else max(1, min(h, self.most))
+        self.canvas.configure(width=w, height=shown, scrollregion=(0, 0, w, h))
+        if h > shown:
+            if not self.bar.winfo_manager():
+                self.bar.pack(side="right", fill="y", before=self.canvas)
+        elif self.bar.winfo_manager():
+            self.bar.pack_forget()
+            self.canvas.yview_moveto(0)
+
+    def wheel(self, e):
+        if (self.bar.winfo_manager() and str(e.widget).startswith(str(self.canvas))
+                and not isinstance(e.widget, self.SKIP)
+                and not (isinstance(e.widget, ttk.Entry) and e.widget.focus_get() is e.widget)):
+            self.canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
+
+
 class SettingsWindow(tk.Toplevel):
 
     def __init__(self, app):
@@ -138,9 +174,10 @@ class SettingsWindow(tk.Toplevel):
         self.resizable(False, False)
         tabs = self.tabs = ttk.Notebook(self)
         tabs.pack(fill="both", expand=True, padx=8, pady=8)
-        self.pages = {}
-        page = self.pages["look"] = ttk.Frame(tabs, padding=(12, 10, 12, 12))
-        tabs.add(page, text=tr("settings.look_tab"))
+        self.pages = {}  # tab name -> its ScrollPage (.page = what's in it)
+        tab = self.pages["look"] = ScrollPage(tabs)
+        page = tab.page
+        tabs.add(tab, text=tr("settings.look_tab"))
         ttk.Label(page, text=tr("look.look")).grid(row=0, column=0, sticky="e", padx=(0, 8), pady=3)
         self.look = look_box(page)
         self.look.grid(row=0, column=1, sticky="w", pady=3)
@@ -150,8 +187,9 @@ class SettingsWindow(tk.Toplevel):
         self.build_palettes(page, 11)
         self.build_sound()
         # General: updates (how often to look, and looking now: the answer shows under the row), then tips
-        page = self.pages["general"] = ttk.Frame(tabs, padding=(12, 10, 12, 12))
-        tabs.add(page, text=tr("settings.general_tab"))
+        tab = self.pages["general"] = ScrollPage(tabs)
+        page = tab.page
+        tabs.add(tab, text=tr("settings.general_tab"))
         updates = app.updates
         row = ttk.Frame(page)
         row.pack(anchor="w")
@@ -167,11 +205,32 @@ class SettingsWindow(tk.Toplevel):
         self.build_language()
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
+        self.bind("<MouseWheel>", lambda e: self.pages and self.nametowidget(self.tabs.select()).wheel(e), add="+")
+        self.fit_pages()
         self.update_idletasks()  # (first time: in the middle of the main window)
         self.geometry("+%d+%d" % (app.winfo_rootx() + (app.winfo_width() - self.winfo_reqwidth()) // 2,
                                   app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3))
         remember_place(self, "settings")
         self.focus_set()
+
+    def fit_pages(self):
+        """The pages no taller than the screen above the taskbar leaves room for (the rest scrolls). Kept for pages
+        that grow later (palettes, Built-in BASSMIDI's settings)."""
+        app = self.app
+        tabs = list(self.pages.values())
+        for t in tabs:  # (all of each page first: the window's own height)
+            t.most = None
+            t.fit()
+        self.update_idletasks()
+        left, top, right, bottom = work_area(self, app.winfo_rootx() + app.winfo_width() // 2,
+                                             app.winfo_rooty() + app.winfo_height() // 2)
+        k = getattr(look, "SCREEN_DPI", 96) / 96
+        room = bottom - top - round(40 * k)  # (the title bar + edges)
+        tallest = max(t.page.winfo_reqheight() for t in tabs)
+        most = max(round(150 * app.scale), tallest - (self.winfo_reqheight() - room))
+        for t in tabs:
+            t.most = most
+            t.fit()
 
     def close(self):
         """Esc / X: a voice limit typed without Enter is taken first."""
@@ -200,8 +259,9 @@ class SettingsWindow(tk.Toplevel):
     # ------------------------------------------------------------ language (lang.languages; next start, like the look)
 
     def build_language(self):
-        page = self.pages["language"] = ttk.Frame(self.tabs, padding=(12, 10, 12, 12))
-        self.tabs.add(page, text=tr("settings.language_tab"))
+        tab = self.pages["language"] = ScrollPage(self.tabs)
+        page = tab.page
+        self.tabs.add(tab, text=tr("settings.language_tab"))
         found = lang.languages()
         saved = lang.read_language()
         if saved not in dict(found):  # (its file was removed: shown as its code, still the saved pick)
@@ -267,8 +327,9 @@ class SettingsWindow(tk.Toplevel):
     def build_sound(self):
         """MIDI out (the same choice as the side panel's) and, while Built-in BASSMIDI is picked, its settings."""
         app = self.app
-        page = self.pages["sound"] = ttk.Frame(self.tabs, padding=(12, 10, 12, 12))
-        self.tabs.add(page, text=tr("settings.sound_tab"))
+        tab = self.pages["sound"] = ScrollPage(self.tabs)
+        page = tab.page
+        self.tabs.add(tab, text=tr("settings.sound_tab"))
         page.columnconfigure(1, weight=1)
         ttk.Label(page, text=tr("app.midi_out")).grid(row=0, column=0, sticky="e", padx=(0, 8), pady=3)
         dev = self.midi_box = ttk.Combobox(page, textvariable=app.midi_device, state="readonly", values=devices(),

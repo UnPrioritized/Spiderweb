@@ -474,7 +474,7 @@ class ProjectFiles:
             geo = placed(self, win.get("geometry", "") if isinstance(win.get("geometry"), str) else "")
             if geo:
                 self.geometry(geo)
-                fit_screen(self)  # (saved on a bigger screen / at a smaller scaling)
+            fit_screen(self)  # (saved on a bigger screen / at a smaller scaling; the first size grows with it too)
             if win.get("maximized"):
                 self.update_idletasks()
                 self.state("zoomed")

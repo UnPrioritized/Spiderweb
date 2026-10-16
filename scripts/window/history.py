@@ -11,7 +11,7 @@ from tkinter import ttk
 from files.lang import tr
 from notes.engine import BIG_TEXT
 from window import look
-from window.widgets import ListTip, Tooltip, placed
+from window.widgets import ListTip, Tooltip, fit_screen, placed
 
 BIG_MARK = "\0big:"  # (a big text's place in an undo state's JSON: no saved text holds this character)
 
@@ -222,6 +222,7 @@ class HistoryPanel:
         win.transient(self)
         win.minsize(int(200 * self.scale), int(160 * self.scale))
         win.geometry(placed(win, self.history_pos) or f"{int(260 * self.scale)}x{int(360 * self.scale)}")
+        fit_screen(win)
         self.history_frame = self._history_list(win, 16)
         self.history_frame.pack(fill="both", expand=True, padx=6, pady=6)
         win.protocol("WM_DELETE_WINDOW", self.toggle_history_dock)

@@ -12,11 +12,12 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, formula, fmt
+from files.system import work_area
 from notes.joined import shown_tumour
 from notes.tumour import GRAPH_LIMIT, TUMOUR_DEFAULTS
 from window import look
 from window.panel_custom import GAP_COLOR
-from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, placed, remember_place, unit_text, unit_word
+from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, fit_screen, placed, remember_place, unit_text, unit_word
 
 FLAT = [[0.0, 1.0], [1.0, 1.0]]
 PRESETS = [(tr("graph_window.flat_off"), FLAT), (tr("graph_window.rise"), [[0.0, 0.0], [1.0, 1.0]]),
@@ -121,9 +122,17 @@ class GraphWindow(tk.Toplevel):
         self._storing = False
         self.hist = LocalUndo(self, lambda: json.dumps(self.pts), self.put_state)
         self.sync(fit_view=True)
-        # where it was last time, else beside the tumour window
+        # where it was last time, else beside the tumour window (on its left when there's no room on its right)
         self.update_idletasks()
-        self.geometry(placed(self, self.app.graph_pos) or f"+{tw.winfo_rootx() + tw.winfo_width() + int(8 * s)}+{tw.winfo_rooty()}")
+        geo = placed(self, self.app.graph_pos)
+        if not geo:
+            x, gap, w = tw.winfo_rootx() + tw.winfo_width() + int(8 * s), int(8 * s), self.winfo_reqwidth()
+            left, _, right, _ = work_area(self, tw.winfo_rootx(), tw.winfo_rooty())
+            if x + w + gap > right and tw.winfo_rootx() - gap - w - 2 * gap >= left:
+                x = tw.winfo_rootx() - gap - w - 2 * gap  # (the frame's edges too)
+            geo = f"+{x}+{tw.winfo_rooty()}"
+        self.geometry(geo)
+        fit_screen(self)
         self.bind("<Configure>", self.remember, add="+")
 
     # ------------------------------------------------------------ the shapes' graph

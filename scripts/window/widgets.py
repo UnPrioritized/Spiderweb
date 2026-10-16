@@ -205,9 +205,42 @@ def placed(widget, geo):
 def fit_screen(win):
     """Keeps a window whole on its screen, above the taskbar (a big Size / screen scaling on a small screen opened
     windows past its bottom edge): one that can be resized is made smaller, then moved in. Call it after the window
-    has its first size / place (remember_place does)."""
+    has its first size / place (remember_place does). A window not shown yet is fitted once its contents are made
+    (measuring it now showed it empty first): one that can't be resized just before it shows, one that can right
+    after (until then Tk gives its size as 1x1). One that can't be resized is moved in again when it grows (rows
+    shown, another page)."""
+    if not any(win.resizable()) and not getattr(win, "_fit_size", None):
+        win._fit_size = [None]
+
+        def grown(e):
+            if e.widget is win and win._fit_size[0] not in (None, (e.width, e.height)):
+                win.after_idle(lambda: win.winfo_exists() and _fit_screen(win))
+            if e.widget is win:
+                win._fit_size[0] = (e.width, e.height)
+        win.bind("<Configure>", grown, add="+")
+    if win.winfo_ismapped():
+        _fit_screen(win)
+        return
+
+    def made():
+        if not win.winfo_exists():
+            return
+        if not any(win.resizable()):
+            _fit_screen(win)
+            return
+        once = []
+
+        def shown(e):
+            if e.widget is win and not once:
+                once.append(True)
+                _fit_screen(win)
+        win.bind("<Map>", shown, add="+")
+    win.after_idle(made)
+
+
+def _fit_screen(win):
     from files.system import work_area
-    if win.state() == "zoomed":
+    if win.state() in ("zoomed", "withdrawn"):
         return
     win.update_idletasks()
     m = re.fullmatch(r"(\d+)x(\d+)\+(-?\d+)\+(-?\d+)", win.wm_geometry())

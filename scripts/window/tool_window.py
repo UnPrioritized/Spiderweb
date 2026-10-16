@@ -16,7 +16,7 @@ from files.lang import tr
 from notes.fx import copied, is_page, pages
 from notes.sliced import steps_kept
 from window import look
-from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Tooltip, placed
+from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Tooltip, fit_screen, placed
 
 NEW = "new"  # the "+" tab
 TOOL_WINDOWS = ("claw_window", "strum_window", "chop_window", "path_window")  # (the app's open note tool windows)
@@ -213,6 +213,7 @@ class ToolWindow(tk.Toplevel):
         self.resizable(False, False)
         if placed(self, getattr(app, self.POS)):  # (not off every screen)
             self.geometry(placed(self, getattr(app, self.POS)))
+        fit_screen(self)  # (once it's made: whole on the screen)
         self.cfg = dict(self.DEFAULTS)
         self.at = None  # the page shown: {shape number: its place in the shape's fx}, None = "+" (a new page)
         self.late, self.took = None, 0.0  # (preview)
