@@ -189,6 +189,11 @@ def parts_notes(r, first, tails, counts=False, spot=None):
     p = np.floor(y + 0.5).astype(np.int64)
     k_parts = len(first)
     last = np.append(first[1:] - 1, len(r) - 1)
+    # a part starting / ending exactly on the edge between two rows (a circle's tip there) belongs to the row it
+    # goes into / comes from: else the row above gets a 1-tick note there, sticking out past the tip
+    f, g = first[last > first], last[last > first]
+    p[f[(np.abs(y[f] + 0.5 - p[f]) < 1e-9) & (y[f + 1] < y[f])]] -= 1
+    p[g[(np.abs(y[g] + 0.5 - p[g]) < 1e-9) & (y[g - 1] < y[g])]] -= 1
     seg = np.ones(max(0, len(r) - 1), bool)
     seg[last[:-1]] = False
     j = np.nonzero(seg)[0]
