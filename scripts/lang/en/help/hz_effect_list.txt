@@ -6,9 +6,9 @@ Off pitch: every key repeats a little faster or slower, so the keys drift apart 
 
 Noisy: every repeat is late by a random bit.
 
-Height: the drawn wave shape (Hz shape…) gets taller or shorter: 100 % = as drawn, lower = the keys it no longer reaches go quiet, higher (up to 400 %) = it grows past the Hz bass onto the keys above and below (never past the piano roll's lowest and highest keys). Right-click → Grows from picks the key row that stays put: the middle, the bottom or the top. With Repeat every and the Sine shape it grows and shrinks over and over.
+Height: the drawn wave shape (Hz shape…) gets taller or shorter: 100 % = as drawn, lower = the keys it no longer reaches go quiet, higher (up to 400 %) = it grows past the Hz bass onto the keys above and below (never past the piano roll's lowest and highest keys). Right-click → Grows from picks the key row that stays put: the middle, the bottom or the top. With Repeat every and the Sine shape it grows and shrinks over and over. A funnel's Hz bass only shrinks: it never grows past its own keys.
 
-Random height: every wave gets its own height, a random bit taller or shorter than Height says (100 % = anywhere from flat to twice as tall).
+Random height: every wave gets its own height, a random bit taller or shorter than Height says (100 % = anywhere from flat to twice as tall, but never past 400 %).
 
 Vibrato: the tone goes a little up and down.
 
