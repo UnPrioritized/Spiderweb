@@ -37,14 +37,31 @@ class DrawerAreas:
         """The most colours a shape can have in this project (16 with "Use channel 10")."""
         return most_colours(self.app.all16())
 
+    def swatch_grid(self):
+        """(swatch size, swatches per row) fitting the canvas's width: smaller swatches first, then more rows."""
+        count, w = self.most_colours() + 1, self.swatches.winfo_width()
+        if w <= 1:  # (not shown yet)
+            return self.swatch, count
+        least = max(10, round(12 * self.scale))
+        rows = 1
+        while True:
+            cols = -(-count // rows)
+            k = min(self.swatch, (w - 2) // cols - 2)
+            if k >= least or cols == 1:
+                return max(k, 4), cols
+            rows += 1
+
     def draw_swatches(self):
-        c, k = self.swatches, self.swatch
+        c = self.swatches
         c.delete("all")
         most = self.most_colours()
         self.area_pick = min(self.area_pick, most)  # (the 16th picked, then "Use channel 10" turned off)
-        c.config(width=(most + 1) * (k + 2) + 2)
+        k, cols = self.swatch_grid()
+        rows = -(-(most + 1) // cols)
+        if int(c.cget("height")) != rows * (k + 2) + 2:
+            c.config(height=rows * (k + 2) + 2)
         for n in range(most + 1):
-            x, y = 2 + n * (k + 2), 2
+            x, y = 2 + n % cols * (k + 2), 2 + n // cols * (k + 2)
             on = n == self.area_pick
             c.create_rectangle(x, y, x + k, y + k, fill=area_color(n) if n else AREA_EMPTY,
                                outline=look.SWATCH_EDGE_ON if on else look.SWATCH_EDGE, width=2 if on else 1)
@@ -52,19 +69,21 @@ class DrawerAreas:
                 c.create_line(x + 3, y + 3, x + k - 3, y + k - 3, fill=look.STROKE)
                 c.create_line(x + k - 3, y + 3, x + 3, y + k - 3, fill=look.STROKE)
 
-    def swatch_at(self, x):
-        n = int((x - 2) // (self.swatch + 2))
-        return n if 0 <= n <= self.most_colours() else None
+    def swatch_at(self, x, y):
+        k, cols = self.swatch_grid()
+        col, row = int((x - 2) // (k + 2)), int((y - 2) // (k + 2))
+        n = row * cols + col
+        return n if 0 <= col < cols and row >= 0 and n <= self.most_colours() else None
 
     def pick_swatch(self, e):
-        n = self.swatch_at(e.x)
+        n = self.swatch_at(e.x, e.y)
         if n is not None:
             self.area_pick = n
             self.draw_swatches()
             self.swatch_tip(e)
 
     def swatch_tip(self, e):
-        n = self.swatch_at(e.x)
+        n = self.swatch_at(e.x, e.y)
         if n is not None:
             self.pos_label.config(text=tr("drawer.area_empty") if n == 0 else tr("drawer.area_n", n=n))
 

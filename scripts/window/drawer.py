@@ -13,7 +13,7 @@ from files.lang import tr
 from notes.bezier import handle_lines, pen_handles
 import numpy as np
 
-from notes.areas import ALL_COLOURS, clean_areas
+from notes.areas import clean_areas
 from notes.custom import (clean_strokes, colour_of, join_strokes, plain_stroke, role_of, settled_areas,
                           stroke_points)
 from roll.roll_shared import SLOT_COLORS
@@ -440,10 +440,11 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
         self.area_bar = ttk.Frame(side)
         ttk.Label(self.area_bar, text=tr("drawer.area_colour")).pack(anchor="w")
         k = self.swatch = max(14, round(16 * self.scale))
-        self.swatches = tk.Canvas(self.area_bar, width=(ALL_COLOURS + 1) * (k + 2) + 2, height=k + 4,
+        self.swatches = tk.Canvas(self.area_bar, width=1, height=k + 4,  # (fills the panel's width: draw_swatches
                                   highlightthickness=0, background=ttk.Style().lookup("TFrame", "background")
-                                  or "SystemButtonFace", cursor="hand2")
-        self.swatches.pack(anchor="w", pady=(3, 0))
+                                  or "SystemButtonFace", cursor="hand2")  # fits the swatches into it)
+        self.swatches.pack(fill="x", pady=(3, 0))
+        self.swatches.bind("<Configure>", lambda e: self.draw_swatches())
         self.swatches.bind("<ButtonPress-1>", self.pick_swatch)
         self.swatches.bind("<Motion>", self.swatch_tip)
         self.swatches.bind("<Leave>", lambda e: self.pos_label.config(text=""))
