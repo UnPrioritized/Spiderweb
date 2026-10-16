@@ -1,5 +1,33 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
+Version 1.6.0
+
+What's new:
+
+• Inside fill Nested: smaller copies of the shape inside each other, each step its own colour. Steps can shrink by Scaling, by Even band (every step equally thick, following each bend) or by Blend (steps round off into the centre point). The copies can be another shape from your library, and Morph into it changes them into a picked shape step by step. The centre point is a handle on the shape: drag it with any tool, right-click it to put it back in the middle.
+
+• Inside fill Tiles: another shape repeated like wallpaper inside (tile size, gaps, grid or bricks, flips, tile colours, only whole tiles). Drag the centre point to slide them.
+
+• Copy along a path: Speed Custom lets you draw a graph, so the copies bunch up or spread out along the path.
+
+• Hz bass: Height and Random height effect lines, and Height knobs in the synth window. Over 100 % the Hz bass grows onto more keys (funnels only shrink); quiet keys leave gaps. Random height stops at 400 %.
+
+• Hz shape: one main line and one main note length. A layer you change gets its own (Use for all layers / Back to the main shape), and Reset puts the length back too.
+
+• Picking an SFZ soundfont warns about missing or unreadable sample files.
+
+• Domino row: the Paste button is back (pastes notes copied in Domino at the play line). Export and Copy to Domino cut notes longer than 65,535 ticks and say so.
+
+• Masks are easier to see, and several Invert masks on one shape now cut all their holes together.
+
+• Spiderweb.exe saves its speed-ups after the first start, so later starts are quick.
+
+• Faster: zooming, panning and letting go of huge shapes (about 3x), Hz bass notes and layers, Nested copies and their centre point, and opening and undoing in huge projects.
+
+• Texts say "1 note", never "1 notes" or "note(s)".
+
+• Fixes: every shape can be moved down to the bottom key; the box round pasted notes stays round them; Gate sensitive merge no longer changes note colours; Ctrl+Z in the image window no longer undoes the piano roll; one damaged saved colour list, pattern or rhythm no longer loses the rest; windows fit on small screens; Spiderweb starts on Linux with older Python; error logs no longer show your folder paths.
+
 Version 1.5.4
 
 What's new:
