@@ -1167,8 +1167,9 @@ def shape_faces(sh):
     """faces.Faces of walls(sh) in the shape's own box (u, v), so it stays the same wherever the shape is put (None
     if the box is flat). Remembered like fill_plan (fill_test asks for every key row)."""
     key = (json.dumps(sh["strokes"]), json.dumps(sh["pts"]))
-    if key in _faces_of:
-        return _faces_of[key]
+    got = _faces_of.get(key, _faces_of)  # (read once: another thread may clear it; None is a value kept)
+    if got is not _faces_of:
+        return got
     plan = fill_plan(sh)
     closers = [uv_points(sh["pts"], c) for c in plan["closers"]]
     if any(c is None for c in closers) or uv_points(sh["pts"], [[0, 0]]) is None:
@@ -1964,18 +1965,23 @@ def chop_keys(stretches, grid, count=False, fit=False, keep=False):
     """chop for Hz bass whose tones have effects: every key has its own repeats (hzbass.KeyGrid)."""
     q = stretches[:, 2]
     n = np.zeros(len(stretches), np.int64)
-    parts, owners = [], []
+    parts = []
     for key, rows in key_rows(q):
         sq = grid.squares(int(key))
         n[rows] = chop_grid(stretches[rows], sq, True, fit, keep)
         if not count:
-            parts.append(chop_grid(stretches[rows], sq, fit=fit, keep=keep))
-            owners.append(np.repeat(rows, n[rows]))
+            parts.append((rows, chop_grid(stretches[rows], sq, fit=fit, keep=keep)))
     if count:
         return n
     if not parts:
         return np.zeros((0, 3), np.int64)
-    return np.concatenate(parts)[np.argsort(np.concatenate(owners), kind="stable")]
+    # (each key's notes put straight where they go, in the stretches' order: no sort of every note)
+    out = np.empty((int(n.sum()), 3), np.result_type(*(p.dtype for _, p in parts)))
+    first = np.cumsum(n) - n
+    for rows, part in parts:
+        m = n[rows]
+        out[np.repeat(first[rows] - (np.cumsum(m) - m), m) + np.arange(len(part))] = part
+    return out
 
 
 def range_spans(stretches, join):

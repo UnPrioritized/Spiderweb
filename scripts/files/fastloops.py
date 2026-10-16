@@ -657,6 +657,41 @@ def clash_pairs(items, n):
 
 
 @njit(cache=CACHE, nogil=True)
+def _first_at(arr, n, x, hint):
+    """How many of arr[:n] (sorted) are below x, searched outwards from hint (the answer nearby: a step or two when
+    the questions come in order), then halved down as a plain binary search."""
+    if hint > n:
+        hint = n
+    if hint < n and arr[hint] < x:  # (further on)
+        lo = hint + 1
+        step = 1
+        hi = lo
+        while hi < n and arr[hi] < x:
+            lo = hi + 1
+            step *= 2
+            hi = lo + step - 1
+        if hi > n:
+            hi = n
+    else:  # (here or before)
+        hi = hint
+        step = 1
+        lo = hi - 1
+        while lo > 0 and arr[lo] >= x:
+            hi = lo
+            step *= 2
+            lo = hi - step
+        if lo < 0:
+            lo = 0
+    while lo < hi:
+        mid = (lo + hi) >> 1
+        if arr[mid] < x:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+@njit(cache=CACHE, nogil=True)
 def clash_levels(rows, offs, out):
     """engine.clash_levels: rows = (n, 3) int64 (start, end, key) of all lists one after another; offs: where each
     list starts (+ end). out: the level of each note (filled). A note goes on the lowest level where no note of an EARLIER list on its key
@@ -727,22 +762,15 @@ def clash_levels(rows, offs, out):
                 bidx = bidx[perm]
             # the level of each note of this list (all against the earlier lists' notes only)
             top = 0
+            hint = np.zeros(len(cnt), np.int64)  # (per level: the last answer, where the next search starts)
             for t in range(m):
                 x = bidx[t]
                 sx = rows[x, 0]
                 ex = rows[x, 1]
                 lv = 0
                 while lv < used:
-                    cc = cnt[lv]
-                    s_arr = cs[lv]
-                    lo = 0
-                    hi = cc
-                    while lo < hi:  # how many starts are before its end
-                        mid = (lo + hi) >> 1
-                        if s_arr[mid] < ex:
-                            lo = mid + 1
-                        else:
-                            hi = mid
+                    lo = _first_at(cs[lv], cnt[lv], ex, hint[lv])  # how many starts are before its end
+                    hint[lv] = lo
                     if lo > 0 and ce[lv][lo - 1] > sx:
                         lv += 1
                     else:

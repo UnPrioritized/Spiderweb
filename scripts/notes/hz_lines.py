@@ -105,18 +105,25 @@ def bend_from(n):
     return {"bend": n["bend"], "bend_at": list(n.get("bend_at") or (n["t"], n["len"]))}
 
 
-def line_at(pts, beat, every=None):
-    """A line's value at beat (a number or an array): through its points (each line between two bent as the first
-    one says), flat before the first and after the last; every = the points are one repeat of that many beats,
-    repeated from beat 0 (the last point leads on to the next repeat's first)."""
+def line_arrays(pts, every=None):
+    """line_at's points as arrays (beats, values, bends), for a caller asking about the same line many times."""
     if every:
         pts = [[pts[-1][0] - every, *pts[-1][1:]]] + list(pts) + [[pts[0][0] + every, *pts[0][1:]]]
+    return (np.array([p[0] for p in pts], float), np.array([p[1] for p in pts], float),
+            np.array([bend_of(p) for p in pts]))
+
+
+def line_at(pts, beat, every=None, arrays=None):
+    """A line's value at beat (a number or an array): through its points (each line between two bent as the first
+    one says), flat before the first and after the last; every = the points are one repeat of that many beats,
+    repeated from beat 0 (the last point leads on to the next repeat's first). arrays = line_arrays(pts, every)
+    made already."""
+    if every:
         beat = np.mod(np.asarray(beat, float), every)
-    xs, vs = np.array([p[0] for p in pts], float), np.array([p[1] for p in pts], float)
+    xs, vs, bends = line_arrays(pts, every) if arrays is None else arrays
     beat = np.asarray(beat, float)
     if len(xs) == 1:
         return np.full(beat.shape, vs[0])
-    bends = np.array([bend_of(p) for p in pts])
     j = np.clip(np.searchsorted(xs, beat, side="right") - 1, 0, len(xs) - 2)
     w = xs[j + 1] - xs[j]
     u = np.where(w > 0, np.clip((beat - xs[j]) / np.where(w > 0, w, 1.0), 0.0, 1.0), 1.0)

@@ -728,11 +728,23 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
     return a
 
 
+_layer_pool = []  # (made the first time a Hz bass has 2+ layers)
+
+
 def layered_notes(sh, ppq, keys):
     """kind_notes_tracks of a Hz bass with layers: each layer heard makes its notes as a Hz bass of its own, in order.
     A note on a key an earlier layer sounds at the same time goes on another channel (user): its track + CLASH x its
-    clash_levels level."""
-    got = [kind_notes_tracks(dict(sh, hz=hz), ppq, keys) for hz in heard_layers(sh["hz"])]
+    clash_levels level. The layers are made side by side in threads (a 5-layer 128-key one: 1.5 s -> 1.2 s; caches
+    they share are read once, then filled)."""
+    layers = heard_layers(sh["hz"])
+    if len(layers) > 1:
+        if not _layer_pool:
+            from concurrent.futures import ThreadPoolExecutor
+            import os
+            _layer_pool.append(ThreadPoolExecutor(min(8, os.cpu_count() or 1), "hz-layer"))
+        got = list(_layer_pool[0].map(lambda hz: kind_notes_tracks(dict(sh, hz=hz), ppq, keys), layers))
+    else:
+        got = [kind_notes_tracks(dict(sh, hz=hz), ppq, keys) for hz in layers]
     if not got:
         return np.zeros((0, 4), np.int64), None
     notes = np.concatenate([n for n, _ in got])
@@ -955,6 +967,10 @@ def stretches(notes, owner, split="key"):
     = one stretch): anything with a length that overlaps a stretch overlaps one of its notes. Notes without a length
     stay on their own. split="time": every note counts as key 0."""
     fast = loops()
+    if fast and split != "key" and len(notes):
+        # (by key first: notes mostly come by key and start, so that's quick, and far fewer stretches come out; those
+        # joined across the keys are the same stretches, touching ones joining either way)
+        notes = stretches(notes, owner, "key")[:, [1, 2, 0]]
     if fast:  # (the compiled loop: the same rows; a spam shape's notes mostly come by key and start already)
         notes = np.ascontiguousarray(notes, np.int64)
         out, m = fast.note_stretches(notes, split == "key", owner, np.zeros(0, np.int64))

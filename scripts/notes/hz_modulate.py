@@ -9,7 +9,7 @@ from notes.hz_settings import (ADSR_KNOBS, ARP_KNOBS, BLEND, FAST, GLIDE_CURVE, 
                                MOD_ENVS, MOD_LFOS, MOD_RACK, MOD_SETTINGS, NEUTRAL, OSC2, OSC2_TUNE, TIMED_KNOBS,
                                TIMED_NAMES, TIME_STEP, TREMOLO_DEPTH, VIBRATO_RATE, WAVES, mod_start, osc2_shift,
                                rack_on)
-from notes.hz_lines import adsr_line, env_value, line_at, loop_shape, note_vel, same_points, sustained
+from notes.hz_lines import adsr_line, env_value, line_arrays, line_at, loop_shape, note_vel, same_points, sustained
 from notes.hz_glide import cached, note_beats, note_span, pitch
 
 
@@ -44,14 +44,15 @@ def fx_at(hz, name, beat, tone=None, sources=None):
     elif span is not None:
         s0, end = span
         v = sustained(pts, every, at, np.asarray(beat, float) - s0, np.asarray(end) - s0)
-    elif mode:
-        v = line_at(pts, note_beats(hz, name, beat, tone), every if mode == "restart" else None)
-    else:
-        v = line_at(pts, beat, every)
+    else:  # (the line's points as arrays once per run of note making: asked for again and again)
+        ev = (every if mode == "restart" else None) if mode else every
+        arrays = cached(hz, ("line", name, ev), lambda: line_arrays(pts, ev))
+        v = line_at(pts, note_beats(hz, name, beat, tone) if mode else beat, ev, arrays)
     amount = (hz.get("amount") or {}).get(name) if every else None
     if amount:
         still = NEUTRAL.get(name, 0.0)
-        v = still + (v - still) * line_at(amount, beat)
+        v = still + (v - still) * line_at(amount, beat, arrays=cached(hz, ("amount", name),
+                                                                       lambda: line_arrays(amount)))
     moved = mod_turn(hz, (name, "wave") if name in WAVES else (name,), beat, tone, sources, v)
     return v if moved is None else np.clip(moved, 0.0, 1.0)
 
