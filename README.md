@@ -2,11 +2,11 @@
 
 **Spiderweb turns drawings into MIDI notes.** Instead of placing notes one by one, you draw on a piano roll (it looks
 and works much like Domino's) and every key your drawing crosses gets a note: a slanted line becomes a smooth
-staircase of notes, a filled circle becomes a round block of notes. It's made for black MIDI.
+staircase of notes, a filled circle becomes a round block of notes.
 
 ![Spiderweb's main window: a star, an oval, a funnel, curves and the word "Spiderweb" made of coloured notes](pictures/hero_dark.png)
 
-### [⬇ Download the newest Spiderweb.exe](https://github.com/UnPrioritized/Spiderweb/releases/latest)
+### [Download the newest Spiderweb.exe](https://github.com/UnPrioritized/Spiderweb/releases/latest)
 
 Windows, nothing to install. Linux and Windows users can also [run it from source](#running-from-source).
 
