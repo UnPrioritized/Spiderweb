@@ -17,11 +17,12 @@ WAVES = {"sine": lambda p: (1.0 + np.cos(2.0 * np.pi * p)) / 2.0,  # the wavefor
          "saw": lambda p: 1.0 - p,
          "triangle": lambda p: 1.0 - np.abs(2.0 * p - 1.0)}
 # the effects a Hz bass can have
-FX = ("slant", "groups", "offpitch", "noisy", "vibrato", "pitch") + VEL_FX + tuple(WAVES)
-NEUTRAL = {"volume": 1.0, "pitch": 0.5}  # the value where an effect does nothing (0 for the others)
+FX = ("slant", "groups", "offpitch", "noisy", "height", "height_rand", "vibrato", "pitch") + VEL_FX + tuple(WAVES)
+NEUTRAL = {"volume": 1.0, "pitch": 0.5, "height": 0.5}  # the value where an effect does nothing (0 for the others)
 FLAT, RAMP, FULL = [[0.0, 0.5], [1.0, 0.5]], [[0.0, 0.0], [1.0, 1.0]], [[0.0, 1.0], [1.0, 1.0]]
 # the line an effect starts with, u = 0..1 over the tones (or what's in view when there are none)
-FX_START = dict({name: RAMP for name in FX}, offpitch=FLAT, tremolo=FLAT, vibrato=FLAT, volume=FULL, pitch=FLAT)
+FX_START = dict({name: RAMP for name in FX}, offpitch=FLAT, tremolo=FLAT, vibrato=FLAT, volume=FULL, pitch=FLAT,
+                height=FLAT)
 SUB = 16  # waveforms: hits in one wave
 SOFT = 0.003  # ... a hit with less than this much of the full loudness is left out (velocity 7 of 127)
 VIBRATO = 0.05  # "vibrato" at 1: the pitch goes this much (x the tone) up and down
@@ -52,6 +53,9 @@ FAST = 0.5  # their bend: fast first, then settling ((1 - u)^2, the drop the use
 GROUPS = 6  # "groups" at 1
 PITCH = 12.0  # "pitch": keys up at 1 (and down at 0; 0.5 = the tone as placed), unless hz["lfo"]["bend_range"]
 OFF_PITCH = 0.02  # "offpitch" at 1: the highest key's tone is this much (x the tone) below the lowest key's
+HEIGHT_MOST = 4.0  # "height" at 1: the drawn wave shape this many times as tall (0.5 = as drawn, 0 = flat)
+# hz["height_from"] (the key row that stays put while the height changes; missing = the middle one): 0..1 among keys
+HEIGHT_FROM = {"middle": 0.5, "bottom": 0.0, "top": 1.0}
 # hz["mode"] (the Wave box's Mode): kind -> its settings (lowest, highest, where its knob starts). fm: the wave's
 # place pushed back and forth by a wobble `ratio` x the tone, `depth` (x FM_INDEX) falling to 0 over `time` beats
 # from each note's start (0: stays); pulse: only the first `width` of each wave, widening to half and back `rate`
@@ -494,6 +498,63 @@ def trace_hits(line, y):
     return (x0[keep] + t[keep] * (x1[keep] - x0[keep])).tolist()
 
 
+def height_times(v):
+    """The "height" line's value (0..1) as how many times as tall as drawn the wave shape is: 0.5 = 1x, 0 = flat,
+    1 = HEIGHT_MOST (in a straight line from 0.5 to each end)."""
+    v = np.asarray(v, float)
+    return np.where(v <= 0.5, 2.0 * v, 1.0 + (v - 0.5) * 2.0 * (HEIGHT_MOST - 1.0))
+
+
+def clean_height_from(got):
+    """hz["height_from"] checked: "bottom" / "top", else None (the middle)."""
+    return got if got in ("bottom", "top") else None
+
+
+def height_hits(line, y, times, at, rows):
+    """trace_hits for every repeat at once, the drawn wave shape `times` x as tall (an array, one per repeat),
+    squashed or stretched round `at` (0..1 among the keys: the row that stays put). Never flatter than one key row
+    of `rows`, so the row at `at` still plays. Taller than the keys: the part past the lowest / highest key is cut
+    off (no new keys); shorter: the keys it no longer reaches have no hits. Returns (repeat of each hit, where in
+    its wave 0..1), in repeat order, each repeat's hits in trace_hits' order."""
+    a = np.asarray(line, float)
+    lo, hi = a[:, 1].min(), a[:, 1].max()
+    times = np.maximum(np.asarray(times, float), 1.0 / max(1, rows))
+    level = at + (y - at) / times  # (where on the line as drawn, 0..1 from its lowest point, this row is)
+    level = np.where(np.abs(level) < 1e-9, 0.0, np.where(np.abs(level - 1.0) < 1e-9, 1.0, level))
+    inside = (level >= 0.0) & (level <= 1.0)
+    if hi - lo < 1e-12:  # (a flat line: every key once, at its first point)
+        which = np.flatnonzero(inside)
+        return which, np.full(len(which), float(a[0, 0]))
+    x0, y0, x1, y1 = a[:-1, 0], a[:-1, 1], a[1:, 0], a[1:, 1]
+    last = np.arange(len(x0)) == len(x0) - 1
+    which, xs = [], []
+    rows_of = np.flatnonzero(inside)
+    step = max(1, 4_000_000 // max(1, len(x0)))  # (repeats x pieces kept small)
+    for s in range(0, len(rows_of), step):
+        r = rows_of[s:s + step]
+        yy = (lo + level[r] * (hi - lo))[:, None]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t = (yy - y0) / (y1 - y0)
+        keep = (y0 != y1) & (((t >= 0.0) & (t < 1.0)) | ((t == 1.0) & last))
+        i, p = np.nonzero(keep)
+        which.append(r[i])
+        xs.append(x0[p] + t[i, p] * (x1[p] - x0[p]))
+    if not which:
+        return np.zeros(0, np.int64), np.zeros(0)
+    return np.concatenate(which), np.concatenate(xs)
+
+
+def wave_draws(head, number):
+    """A random number 0..1 for each wave, the same for every key row (a wave = its chain of slides' start beat in
+    the song, head, and its number along the chain), and the same every time the notes are made."""
+    z = (np.round(np.asarray(head, float) * 65536).astype(np.int64).astype(np.uint64) * np.uint64(0x9E3779B97F4A7C15)
+         + np.asarray(number, np.int64).astype(np.uint64) * np.uint64(0xBF58476D1CE4E5B9) + np.uint64(0x94D049BB133111EB))
+    z = (z ^ (z >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+    z = (z ^ (z >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+    z = z ^ (z >> np.uint64(31))
+    return (z >> np.uint64(11)).astype(np.float64) / float(1 << 53)
+
+
 def copies(hz):
     """The tones of the Voice box's copies, in cents from the note's (one copy: [0])."""
     v = hz.get("voice") or {}
@@ -632,7 +693,7 @@ TIME_STEP = 1 / 1024  # beats: how finely a moved envelope is worked out (fewer 
 # the synth window's box each effect is in: a box switched off (hz["bypass"]["boxes"]) stops its links too
 MOD_BOXES = dict({w: "wave" for w in tuple(WAVES) + ("wave", "octave")}, volume="volume", pitch="pitch", vibrato="vibrato",
                  tremolo="tremolo", sweep="tone", wah="tone", slant="character", offpitch="character",
-                 noisy="character", groups="character")
+                 noisy="character", groups="character", height="character", height_rand="character")
 
 
 def mod_start():
@@ -685,7 +746,7 @@ def clean_mod(mod):
 
 CLEAN_EXTRA = {"voice": clean_voice, "mode": clean_mode, "rack": clean_rack, "arp": clean_arp, "bypass": clean_bypass,
                "kept": clean_kept, "macro": clean_macro, "osc2": clean_osc2, "mod": clean_mod, "trace": clean_trace,
-               "own_length": clean_length}
+               "own_length": clean_length, "height_from": clean_height_from}
 EXTRAS = tuple(CLEAN_EXTRA)  # the synth window's own settings (not lines), each checked by its CLEAN_EXTRA
 
 

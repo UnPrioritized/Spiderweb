@@ -38,8 +38,8 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc
 from files.snap import SNAPS, snap_beats, snap_text
-from notes.hzbass import (BEND, ENVELOPES, FROM_MODES, FX, FX_START, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, bend_of, bent_part,
-                          chains, group_count, legato_links, line_at,
+from notes.hzbass import (BEND, ENVELOPES, FROM_MODES, FX, FX_START, HEIGHT_FROM, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, bend_of, bent_part,
+                          chains, clean_extra, group_count, height_times, legato_links, line_at,
                           loop_off, loop_on, loop_shape, sound_span, sustained, tones_span)
 from roll.roll_shared import BOX_STILL, CTRL, MAX_SX, MIN_SX, SELECT_CURSOR, SHIFT
 from window import look
@@ -51,7 +51,8 @@ REPEAT_LINE = look.HZ_GREEN  # where each repeat would start while the Repeat ev
 PLAY_LINE = look.PLAY_LINE  # the preview's play line (as in the notes above)
 FX_COLOR = {"volume": "#9b2d5f", "slant": "#8a3ff0", "groups": "#0a8f8f", "offpitch": "#d0189a", "noisy": "#8a5a14",
             "vibrato": "#00a5d8", "pitch": "#4b0082", "sweep": "#7f8c00", "wah": "#2c3e6b", "tremolo": "#e0607a",
-            "octave": "#1d6b3a", "sine": "#b060c0", "square": "#606060", "saw": "#c0a000", "triangle": "#c05a30"}
+            "octave": "#1d6b3a", "sine": "#b060c0", "square": "#606060", "saw": "#c0a000", "triangle": "#c05a30",
+            "height": "#7a5ab0", "height_rand": "#a0607a"}
 FX_COLOR = {k: look.readable(v) for k, v in FX_COLOR.items()}  # (lighter in the dark look)
 
 
@@ -474,8 +475,9 @@ class FxPane:
                 c.create_line(4 * s, y + r, 4 * s + 2 * r, y - r, fill=colour)
             c.create_text(8 * s + 2 * r, y, text=tr("hz.fx_" + name), anchor="w", fill=colour,
                           font=look.font(8, "bold" if self.active == name else "normal"))
-        for v in (0.0, 0.5, 1.0):  # what the heights mean
-            c.create_text(w - 4 * s, self.y_of(v), text=f"{v * 100:.0f} %", anchor="e", fill=pal["text"],
+        for v in (0.0, 0.5, 1.0):  # what the heights mean (Height highlighted: its own, the middle = as drawn)
+            n = float(height_times(v)) if self.active == "height" else v
+            c.create_text(w - 4 * s, self.y_of(v), text=f"{n * 100:.0f} %", anchor="e", fill=pal["text"],
                           font=look.font(7))
         c.create_line(kb, 0, kb, h, fill=pal["edge"])
         c.create_line(0, 0, w, 0, fill=pal["edge"])
@@ -653,6 +655,8 @@ class FxPane:
         if name == "pitch":
             n = f"{(value - 0.5) * 2 * keys:+.3g}"
             return trn("hz.fx_value_keys", abs(float(n)), name=tr("hz.fx_" + name), n=n)
+        if name == "height":  # (as many times as tall as drawn: 50 % of the line = 100 %)
+            return tr("hz.fx_value", name=tr("hz.fx_" + name), value=f"{float(height_times(value)) * 100:.4g}")
         if name in ("offpitch", "vibrato"):  # how far apart the lowest and the highest key's tones are / how far
             most = OFF_PITCH if name == "offpitch" else VIBRATO  # the pitch goes up and down
             return tr("hz.fx_value", name=tr("hz.fx_" + name), value=f"{value * most * 100:.3g}")
@@ -1292,6 +1296,15 @@ class FxPane:
         self.active = name
         win.commit_fx(before)
 
+    def set_height_from(self, where):
+        """The Height lines' key row that stays put (hz["height_from"]; the middle = left out), one undo step."""
+        win = self.win
+        if (win.extra.get("height_from") or "middle") == where:
+            return
+        before = self.state()
+        win.extra = clean_extra(dict(win.extra, height_from=where))
+        win.commit_fx(before)
+
     def on_menu(self, e):
         if self.drag:  # (the left button holds something: nothing, like the notes; the menu would take its let-go)
             return "break"
@@ -1339,6 +1352,13 @@ class FxPane:
                 self.is_off = tk.BooleanVar(self.win, value=target in self.win.off)
                 menu.add_checkbutton(label=tr("hz.fx_bypass"), variable=self.is_off,
                                      command=lambda: self.switch(target))
+            if target in ("height", "height_rand"):  # (the key row that stays put while the height changes)
+                grows = tk.Menu(menu, tearoff=0)
+                self.height_from = tk.StringVar(self.win, value=self.win.extra.get("height_from") or "middle")
+                for where in HEIGHT_FROM:
+                    grows.add_radiobutton(label=tr("hz.fx_height_" + where), value=where, variable=self.height_from,
+                                          command=lambda w=where: self.set_height_from(w))
+                menu.add_cascade(label=tr("hz.fx_height_from"), menu=grows)
         on = [fx for fx in ([target] if target else FX) if fx in self.win.fxl]  # (only the effects that are on; user)
         if on and target:
             menu.add_separator()

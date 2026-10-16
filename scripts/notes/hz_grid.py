@@ -7,10 +7,11 @@ import math
 import numpy as np
 
 from files.speed import loops
-from notes.hz_settings import (CRUSH, FM_INDEX, FX, GROWL, HZ_DEFAULTS, MODE_AMOUNTS, MOD_RACK, MOD_SETTINGS,
-                               NOT_EACH, OFF_PITCH, OSC2_TUNE, SOFT, SPEED_KNOBS, SUB, TIME_STEP, TREMOLO,
-                               TREMOLO_DEPTH, VEL_FX, VIBRATO, VIBRATO_RATE, VOICES, WAH, WAVES, blend_gains, copies,
-                               group_count, layer_trace, osc2_shift, rack_on, trace_hits, trace_line)
+from notes.hz_settings import (CRUSH, FM_INDEX, FX, GROWL, HEIGHT_FROM, HEIGHT_MOST, HZ_DEFAULTS, MODE_AMOUNTS,
+                               MOD_RACK, MOD_SETTINGS, NOT_EACH, OFF_PITCH, OSC2_TUNE, SOFT, SPEED_KNOBS, START_TRACE,
+                               SUB, TIME_STEP, TREMOLO, TREMOLO_DEPTH, VEL_FX, VIBRATO, VIBRATO_RATE, VOICES, WAH,
+                               WAVES, blend_gains, copies, group_count, height_hits, height_times, layer_trace,
+                               osc2_shift, rack_on, trace_hits, trace_line, wave_draws)
 from notes.hz_glide import legato_links, links, note_span, pitch
 from notes.hz_lines import line_at, note_vel
 from notes.hz_modulate import TIMED, fx_at, setting_at, setting_base, setting_most, timed_line
@@ -119,6 +120,11 @@ class KeyGrid:
         self.a_off = bool((self.osc2 or {}).get("a_off"))  # (OSC A switched off: only OSC B sounds)
         self.trace = trace_line(layer_trace(hz)) if layer_trace(hz) else None  # (the drawn wave shape: where in each
         # wave each key row hits; bent pieces as straight ones)
+        fx = hz.get("fx") or {}
+        self.heights = "height" in fx or "height_rand" in fx  # (the Height lines: each wave its own hits)
+        if self.heights and self.trace is None:  # (straight up, as it starts: every key at the wave's start)
+            self.trace = [list(p) for p in START_TRACE]
+        self.height_at = HEIGHT_FROM.get(hz.get("height_from"), 0.5)
         # (the knobs that aren't lines the MOD tab moves, each run's values worked out in made_runs; setting_at)
         self.hz = hz
         self.moved = {link["to"] for link in (hz.get("mod") or {}).get("links", ())
@@ -282,6 +288,15 @@ class KeyGrid:
             out[i] = drawn[seed][o * VOICES:(o + 1) * VOICES]
         return out
 
+    def chain_heads(self):
+        """Each run's chain of slides' start beat in the song (as starting_points counts it), once per KeyGrid."""
+        got = self.__dict__.get("_heads")
+        if got is None:
+            f, at = self.flat, np.minimum(self.each["offsets"], len(self.flat["beat"]) - 1)
+            got = self._heads = (self.left + f["beat"][at] - f["since"][at] if len(f["beat"])
+                                 else np.zeros(len(self.runs)))
+        return got
+
     def pack(self):
         """Every run's numbers end to end (self.flat: one array each, each repeat's value), and each run's own in
         self.each, so made() works out all of a key's repeats at once instead of run by run (an arpeggio makes
@@ -429,7 +444,7 @@ class KeyGrid:
         if ok is not None:
             return ok
         f = self.flat
-        ok = bool(not self.echo and not self.reverb and not self.comp and not self.shaped and not self.osc2
+        ok = bool(not self.heights and not self.echo and not self.reverb and not self.comp and not self.shaped and not self.osc2
                   and not self.a_off and not self.flanger and not self.chorus and self.starting is None
                   and not self.moved and not self.track and not any(self.trem_in) and "tremolo_in" not in self.timed
                   and not self.hz.get("loud") and bool(np.all(self.gains == 1.0)) and self.runs
@@ -573,7 +588,14 @@ class KeyGrid:
         order = np.lexsort((number, part))
         part, number, src, waves, starts = part[order], number[order], src[order], waves[order], starts[order]
         late = np.zeros(len(part))
-        if self.trace:  # (the drawn wave shape: every wave hits where its line crosses this key row, maybe several
+        if self.heights:  # (Height: the drawn wave shape squashed / stretched wave by wave, so each repeat has its
+            times = height_times(f["height"][src]) if "height" in (self.hz.get("fx") or {}) else np.ones(len(src))
+            if "height_rand" in (self.hz.get("fx") or {}):  # (each wave its own random height round it, every key
+                u = wave_draws(self.chain_heads()[run[part]], number)  # the same)
+                times = np.clip(times * (1.0 + f["height_rand"][src] * (2.0 * u - 1.0)), 0.0, HEIGHT_MOST)
+            again, late = height_hits(self.trace, (key - self.lo + 0.5) / self.n, times, self.height_at, self.n)
+            part, number, src, waves, starts = part[again], number[again], src[again], waves[again], starts[again]
+        elif self.trace:  # (the drawn wave shape: every wave hits where its line crosses this key row, maybe several
             hits = trace_hits(self.trace, (key - self.lo + 0.5) / self.n)  # times: each one a repeat of its own)
             if len(hits) != 1:
                 again = np.repeat(np.arange(len(part)), len(hits))
