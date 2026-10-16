@@ -88,11 +88,37 @@ def keep_exe_loops():
     return True
 
 
+def drop_stale(folder):
+    """From source Numba checks only this file, but synth.py's LIM_* numbers are built into the saved loops too:
+    when they differ from the ones the saved loops were made with, those are deleted (made again)."""
+    from files import safefile
+    now = repr((LIM_BLOCK, LIM_CEILING, LIM_DELAY, LIM_ENV, LIM_FALL, LIM_G0, LIM_G1, LIM_HEAD, LIM_MIX, LIM_N, LIM_ON,
+                LIM_PEAK, LIM_PREV, LIM_RING, LIM_SIZE, LIM_STEP))
+    mark = os.path.join(folder, "fastloops-synth.txt")
+    try:
+        with open(mark, encoding="utf-8") as f:
+            if f.read() == now:
+                return
+    except OSError:
+        pass
+    try:
+        os.makedirs(folder, exist_ok=True)
+        for name in os.listdir(folder):
+            if name.startswith("fastloops.") and name.endswith((".nbi", ".nbc")):
+                os.remove(os.path.join(folder, name))
+        safefile.write_text(mark, now)
+    except OSError:
+        pass
+
+
 def _cache():
     from files import speed
     if not speed.save_loops:  # (the saved ones failed this start: made without saving)
         return False
-    return keep_exe_loops() if getattr(sys, "frozen", False) else True
+    if getattr(sys, "frozen", False):  # (the exe: each build's own folder, so nothing goes stale)
+        return keep_exe_loops()
+    drop_stale(speed.loops_folder())
+    return True
 
 
 CACHE = _cache()
