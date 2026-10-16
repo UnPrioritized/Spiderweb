@@ -152,12 +152,12 @@ from files import errors  # noqa: E402 (needs the path above)
 
 
 def check_numpy():
-    """NumPy does the heavy note maths. Run from source without it: offer to install it (pip), True when it's there."""
-    try:
-        import numpy  # noqa: F401
+    """NumPy does the heavy note maths. Run from source without it: offer to install it (pip), True when it's there.
+    Only looks for it, never loads it: installing Numba next (offer_extras) can swap NumPy for another version, and
+    a loaded one leaves pip's half-removed copy behind and keeps Numba from loading until the next start."""
+    import importlib.util
+    if importlib.util.find_spec("numpy") is not None:
         return True
-    except ImportError:
-        pass
     import tkinter as tk
     from tkinter import messagebox
     root = tk.Tk()
@@ -174,10 +174,7 @@ def check_numpy():
     if ok:
         import importlib
         importlib.invalidate_caches()
-        try:
-            import numpy  # noqa: F401,F811
-        except ImportError:
-            ok = False
+        ok = importlib.util.find_spec("numpy") is not None
     if not ok:
         messagebox.showerror("Spiderweb", "Installing NumPy didn't work:\n\n" + output[-800:] + "\n\nTo try it "
                              "yourself, open a command prompt and type:\n\n" + command)
