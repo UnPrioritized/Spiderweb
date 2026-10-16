@@ -2,7 +2,7 @@
 screen in half the time, more picture file types). Spiderweb works the same without them, just slower: the NumPy /
 Tk code they replace is kept and used then.
 
-start() loads the compiled loops in the background (the first start compiles them: about a second); loops() is
+start() loads the compiled loops in the background (the first start compiles them: a few seconds); loops() is
 None until they're ready, then the fastloops module. SPIDERWEB_SPEED in the environment: "off" = never use them,
 "now" = load them at once instead of in the background (tests: the same code every run)."""
 

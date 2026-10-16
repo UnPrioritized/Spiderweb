@@ -24,20 +24,59 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   smooth_sor     nested.smooth_values' loop (Nested fill, Blend)
   limit_dsp      synth.live_limit as a callback BASS's sound thread calls itself (Built-in BASSMIDI's limiter: it
                  never waits for Python); the same maths within float rounding
-The first start compiles them (about a second, in the background); the result is kept in __pycache__ for the next
-starts (not in the exe: its files can't be kept, so it compiles each start)."""
+The first start compiles them (in the background); the result is kept for the next starts: in __pycache__, or in
+the exe's user/compiled-loops (keep_exe_loops)."""
 
 import math
+import os
 import sys
 
 import numpy as np
 from numba import carray, cfunc, njit, types
+from numba.core import caching
 from numba.typed import List
 
 from files.synth import (LIM_BLOCK, LIM_CEILING, LIM_DELAY, LIM_ENV, LIM_FALL, LIM_G0, LIM_G1, LIM_HEAD, LIM_MIX,
                          LIM_N, LIM_ON, LIM_PEAK, LIM_PREV, LIM_RING, LIM_SIZE, LIM_STEP)
 
-CACHE = not getattr(sys, "frozen", False)
+
+def keep_exe_loops():
+    """The exe unpacks to a new temp folder each start, so Numba can't find its saved loops by the source file's
+    place: they go to user/compiled-loops instead (made again when missing). Numba checks them against the exe file
+    itself (a new build = compiled again) and the processor (another PC = compiled again). False = the folder
+    can't be written (the loops are compiled each start)."""
+    from files import about, lang, safefile
+    folder = os.path.join(about.USER, "compiled-loops")
+    try:
+        os.makedirs(folder, exist_ok=True)
+        readme = os.path.join(folder, "README.txt")
+        if not os.path.exists(readme):
+            safefile.write_text(readme, lang.tr("speed.loops_readme"))
+    except OSError:
+        return False
+
+    class ExeLocator(caching._SourceFileBackedLocatorMixin, caching._CacheLocator):
+        def __init__(self, py_func, py_file):
+            self._py_file = py_file
+            self._lineno = py_func.__code__.co_firstlineno
+
+        def get_cache_path(self):
+            return folder
+
+        @classmethod
+        def from_function(cls, py_func, py_file):
+            self = cls(py_func, py_file)
+            try:
+                self.ensure_cache_path()
+            except OSError:
+                return None
+            return self
+
+    caching.CacheImpl._locator_classes.insert(0, ExeLocator)
+    return True
+
+
+CACHE = keep_exe_loops() if getattr(sys, "frozen", False) else True
 
 
 @njit(cache=CACHE, nogil=True)
