@@ -41,9 +41,8 @@ def move_old_files():
 
 # The window icons (made by make_icon.py); the .exe carries them inside, unpacked with the program
 ICONS = os.path.join(getattr(sys, "_MEIPASS", os.path.join(HERE, "scripts")), "icons")
-# The "Spiderweb" picture on the About page (written with the Text tool); -half = the same smoothly shrunk to half
+# The "Spiderweb" picture on the About page (written with the Text tool; Help shrinks it to fit)
 BANNER = os.path.join(ICONS, "spiderweb.png")
-BANNER_HALF = os.path.join(ICONS, "spiderweb-half.png")
 # The license: the copy next to Spiderweb, else the one the .exe carries inside
 LICENSE = os.path.join(HERE, "LICENSE")
 if not os.path.exists(LICENSE) and hasattr(sys, "_MEIPASS"):
