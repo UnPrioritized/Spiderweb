@@ -728,7 +728,43 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
     return a
 
 
-_layer_pool = []  # (made the first time a Hz bass has 2+ layers)
+class LayerPool:
+    """A few threads making Hz layers side by side. Daemon threads (closing Spiderweb never waits for a layer still
+    being made, as with the background notes thread), unlike ThreadPoolExecutor's."""
+
+    def __init__(self, n):
+        import queue
+        self.jobs = queue.SimpleQueue()
+        for i in range(n):
+            threading.Thread(target=self.work, name=f"hz-layer-{i}", daemon=True).start()
+
+    def work(self):
+        while True:
+            fut, f, x = self.jobs.get()
+            try:
+                fut.set_result(f(x))
+            except BaseException as e:  # (raised again in the caller, as it was)
+                fut.set_exception(e)
+
+    def map(self, f, xs):
+        """[f(x) for x in xs], made side by side; an error in one is raised here."""
+        from concurrent.futures import Future
+        futs = [Future() for _ in xs]
+        for fut, x in zip(futs, xs):
+            self.jobs.put((fut, f, x))
+        return [fut.result() for fut in futs]
+
+
+_layer_pool = []  # (made the first time a Hz bass has 2+ layers; only one, even when two threads ask at once)
+_pool_lock = threading.Lock()
+
+
+def layer_pool():
+    with _pool_lock:
+        if not _layer_pool:
+            import os
+            _layer_pool.append(LayerPool(min(8, os.cpu_count() or 1)))
+        return _layer_pool[0]
 
 
 def layered_notes(sh, ppq, keys):
@@ -738,11 +774,7 @@ def layered_notes(sh, ppq, keys):
     they share are read once, then filled)."""
     layers = heard_layers(sh["hz"])
     if len(layers) > 1:
-        if not _layer_pool:
-            from concurrent.futures import ThreadPoolExecutor
-            import os
-            _layer_pool.append(ThreadPoolExecutor(min(8, os.cpu_count() or 1), "hz-layer"))
-        got = list(_layer_pool[0].map(lambda hz: kind_notes_tracks(dict(sh, hz=hz), ppq, keys), layers))
+        got = layer_pool().map(lambda hz: kind_notes_tracks(dict(sh, hz=hz), ppq, keys), layers)
     else:
         got = [kind_notes_tracks(dict(sh, hz=hz), ppq, keys) for hz in layers]
     if not got:
