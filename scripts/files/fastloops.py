@@ -16,7 +16,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   wave_fill      hzbass.wave_ticks: each note's wave length, one key at a time
   hz_expand ... hz_finish  hz_grid.KeyGrid.made for the plain settings (made_fast): a key's repeats
   key_order      np.lexsort by key, then up to 3 more columns (runs already in order merged: quick)
-  radix_order    np.argsort(kind="stable") of whole numbers (Copy / Export to Domino: domino_clip.track_orders)
+  radix_order    np.argsort(kind="stable") of whole numbers (Copy / Export to Domino: domino_clip.start_key_order)
   ring_runs      roll_draw.ring_parts' runs: the selection's red outline, each key row's notes joined
   clash_pairs    engine.clash_pairs (Multi channel): which owners' stretches clash
   nearest        picture._dist2(...).argmin(1) (Image to notes): each colour's nearest palette colour
@@ -587,10 +587,10 @@ def key_order(key, a, b, c):
 @njit(cache=CACHE, nogil=True)
 def radix_order(k, bits):
     """np.argsort(k, kind="stable") for whole numbers 0 .. 2 ** bits - 1: 11 bits a pass, the keys carried along
-    (a pass where every key has the same digit is skipped)."""
+    (a pass where every key has the same digit is skipped). k is used as work space: changed afterwards."""
     n = len(k)
     order, o2 = np.arange(n), np.empty(n, np.int64)
-    k1, k2 = k.copy(), np.empty(n, np.int64)
+    k1, k2 = k, np.empty(n, np.int64)
     count = np.empty(2049, np.int64)
     shift = 0
     while shift < bits and n > 1:

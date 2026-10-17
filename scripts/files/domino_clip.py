@@ -33,6 +33,7 @@ LONGEST = 2 ** 31 - 1  # pasted notes are saved as 32-bit ticks (custom.pack_not
 PIECE = 1 << 20  # Export to Domino: notes made into note items and packed at a time
 DMS_LEVEL = 3  # zlib level for .dms files: the same size as the default 6, ~40 % quicker (measured at 10 M notes)
 BLOCK = 4 << 20  # Packer: bytes each core packs at a time
+BIG_TRACK = 1 << 16  # track_orders: a track with this many notes is sorted on its own (on one of the cores)
 
 SONG_START = bytes.fromhex("e80300000000e90300000000")  # 1000 (empty), 1001 = copyright text (empty)
 SONG_REST = bytes.fromhex(  # after 1002 = PPQ
@@ -60,6 +61,8 @@ NOTE = np.dtype([("tag", "<u2"), ("len", "<u4"),
                  ("t2", "<u2"), ("l2", "<u4"), ("key", "u1"),
                  ("t3", "<u2"), ("l3", "<u4"), ("vel", "u1"),
                  ("t4", "<u2"), ("l4", "<u4"), ("gate", "<u4")])
+# the most notes a copy / .dms holds: its unpacked size is a u32 (32 MB kept for the rest: 65,534 tracks ~13 MB)
+MOST_NOTES = (2 ** 32 - 2 ** 25) // NOTE.itemsize
 
 
 DOMINO_STARTS = [  # (saved value, dropdown text): where copied / pasted notes start (app.domino_start)
@@ -140,18 +143,22 @@ class Packer:
         return zlib.compress(b"", self.level)[:2] + b"".join(self.packed) + struct.pack(">I", self.check)
 
 
+def clip_span(notes, bar, start="bar"):
+    """(first, length): the tick the copy starts on and how long it runs (clip_data's start)."""
+    if start == "note":
+        first = int(notes[:, 0].min())
+        return first, max(int(notes[:, 1].max()) - first, 1)
+    first = int(notes[:, 0].min()) // bar * bar
+    return first, max(-(-(int(notes[:, 1].max()) - first) // bar) * bar, bar)
+
+
 def clip_data(notes, ppq, bar, start="bar"):
     """notes: (start, end, pitch, velocity, slot, ...) rows -> the clipboard bytes. One track per slot (channel)
     that has notes, in slot order, packed together (no empty tracks); Domino fills tracks downwards from the
     highlighted one. start "bar": the copy starts at the bar line at or before the first note (so the notes keep
     their place in the bar) and runs to the bar line after the last; "note": it starts on the first note and ends
     with the last, so the first note pastes right at Domino's cursor. Every track shares that stretch."""
-    if start == "note":
-        first = int(notes[:, 0].min())
-        length = max(int(notes[:, 1].max()) - first, 1)
-    else:
-        first = int(notes[:, 0].min()) // bar * bar
-        length = max(-(-(int(notes[:, 1].max()) - first) // bar) * bar, bar)
+    first, length = clip_span(notes, bar, start)
     end = item(2009, item(1001, struct.pack("<I", length)))
     with Packer(zlib.Z_DEFAULT_COMPRESSION) as z:
         order, cuts = track_orders(notes, int(notes[:, 4].max()) + 1, z.pool)
@@ -172,23 +179,48 @@ def dms_path(mid_path):
 def track_orders(notes, count, pool=None):
     """notes: (start, end, key, velocity, slot, ...) rows, keys 0..127, slots 0..count - 1 -> (order, cuts): the
     rows of slot s are order[cuts[s]:cuts[s + 1]], in time order, then by key, rows alike in their order (= a
-    np.lexsort per slot). Each slot is one sort of start * 128 + key: the compiled radix sort once it's ready
-    (10 M random notes, 1 track: 1.9 -> 0.4 s), the slots on several cores when pool is given."""
+    np.lexsort per slot). Slots with BIG_TRACK notes or more: one sort each, on several cores when pool is given;
+    the smaller ones all in one sort (handed to the cores one by one, 65,534 small tracks took 4 x longer).
+    10 M random notes, 1 track: 1.9 -> 0.4 s."""
     slots = notes[:, 4].astype(np.int16 if count < 2 ** 15 else np.int64)  # (16-bit: NumPy's quick stable sort)
     order = np.argsort(slots, kind="stable")
     del slots
     cuts = np.searchsorted(notes[order, 4], np.arange(count + 1))
+    sizes = np.diff(cuts)
+    small = np.repeat(sizes < BIG_TRACK, sizes)  # (each place in order: its slot is a small one)
+    if small.any():
+        rows = order[small]
+        order[small] = rows[start_key_order(notes, rows, True)]
+        del rows
+    del small
 
     def sort(slot):
         mine = order[cuts[slot]:cuts[slot + 1]]
-        if len(mine) > 1:
-            s = notes[mine, 0].astype(np.int64)
-            k = (s - s.min()) << 7 | notes[mine, 2]
-            fast = loops()
-            mine[:] = mine[fast.radix_order(k, int(k.max()).bit_length()) if fast else np.argsort(k, kind="stable")]
-    for _ in (pool.map(sort, range(count)) if pool else map(sort, range(count))):
+        mine[:] = mine[start_key_order(notes, mine)]
+    big = np.flatnonzero(sizes >= BIG_TRACK).tolist()
+    for _ in (pool.map(sort, big) if pool and len(big) > 1 else map(sort, big)):
         pass
     return order, cuts
+
+
+def start_key_order(notes, rows, by_slot=False):
+    """The order of rows by start, then key, rows alike in their order; by_slot: rows of several slots (in slot
+    order), each slot kept together. One sort of whole numbers ((slot,) start, key packed into one): the compiled
+    radix sort once it's ready, else NumPy's."""
+    k = notes[rows, 0].astype(np.int64)
+    k -= k.min()
+    bits = int(k.max()).bit_length() + 7
+    k <<= 7
+    k |= notes[rows, 2]
+    if by_slot:
+        slot = notes[rows, 4].astype(np.int64)
+        if bits + int(slot.max()).bit_length() > 62:  # (doesn't fit in one number: never with Domino's ticks)
+            return np.lexsort((notes[rows, 2], notes[rows, 0], slot))
+        slot <<= bits
+        k |= slot
+        del slot
+    fast = loops()
+    return fast.radix_order(k, int(k.max()).bit_length()) if fast else np.argsort(k, kind="stable")
 
 
 def note_items(notes, first=0):

@@ -26,7 +26,7 @@ from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
-from files.domino_clip import DOMINO_STARTS, GATE_MAX, LONGEST, clip_data, cut_gates, dms_data, dms_path, get_from_clipboard, put_on_clipboard, read_notes
+from files.domino_clip import DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data, dms_path, get_from_clipboard, put_on_clipboard, read_notes
 from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, write_midi
 from files.playback import keep_saved
 from files.about import HERE, USER, VERSION
@@ -687,6 +687,9 @@ class ProjectFiles:
         if int(notes[:, 1].max()) > LONGEST:
             messagebox.showerror(tr("project.spiderweb"), tr("project.too_long_for_domino", longest=LONGEST))
             return
+        if len(notes) > MOST_NOTES:
+            messagebox.showerror(tr("project.spiderweb"), tr("project.too_many_for_dms", notes=len(notes), most=MOST_NOTES))
+            return
         if not ask_big(self, "dms", len(notes)):
             return
         notes, long = cut_gates(notes)
@@ -727,6 +730,14 @@ class ProjectFiles:
         if not len(notes):
             messagebox.showerror(tr("project.spiderweb"), tr("project.no_notes_to_copy_draw_something")
                                  if not self.sels or high else tr("project.the_selected_shapes_have_no_notes"))
+            return
+        first, _ = clip_span(notes, beats * ppq, self.domino_start())
+        if int(notes[:, 1].max()) - first > LONGEST:  # (pasting it back would say "damaged")
+            messagebox.showerror(tr("project.spiderweb"), tr("project.too_long_to_copy_for_domino", longest=LONGEST))
+            return
+        if len(notes) > MOST_NOTES:
+            messagebox.showerror(tr("project.spiderweb"),
+                                 tr("project.too_many_to_copy_for_domino", notes=len(notes), most=MOST_NOTES))
             return
         tracks = len(np.unique(notes[:, 4]))
         # (no channel 10 question when the project uses it on purpose: "Use channel 10")
