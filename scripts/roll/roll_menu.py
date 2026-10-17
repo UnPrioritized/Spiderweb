@@ -24,7 +24,7 @@ from window.path_window import open_path
 from window.strum_window import open_strum
 from window.chop_window import open_chop, quick_chop
 from notes.sustain import is_sustained
-from window.sustain_window import any_sustained, open_sustain, sustain_targets, target_indices
+from window.sustain_window import any_sustained, carry_stops, open_sustain, sustain_targets, target_indices
 from window.widgets import symmetry_menu
 
 
@@ -217,6 +217,8 @@ class ShapeMenu:
         self.cancel_draft()
         app.push_undo(name=tr("roll_menu.split_into_letters"))
         picked = []  # (indices in the new list)
+        changed = False
+        rows = lambda ns: sorted(map(tuple, ns[:, :4].tolist()))
         for j in sorted(app.sels, reverse=True):  # (from the back: the shapes before it keep their numbers)
             sh = app.shapes[j]
             letters = split_letters(sh, app.notes_of, app.ppq)
@@ -228,12 +230,16 @@ class ShapeMenu:
                 p.pop("between", None)
                 piece_velocity(p, sh, span(p), whole)
                 part_glue(p, sh)
+            carry_stops(app, [sh], letters)  # (Sustain stops put by hand stay on their ticks)
+            changed = changed or rows(app.notes_of(sh)) != rows(np.concatenate([app.notes_of(p) for p in letters]))
             app.unlink_groups([j])
             app.shapes[j:j + 1] = letters
             picked = [d + len(letters) - 1 for d in picked] + list(range(j, j + len(letters)))
         self.box_kept = None
         app.select_many(picked, min(picked))
         app.shapes_changed()
+        if changed:  # (user: split anyway, but say so)
+            app.status.config(text=tr("roll_menu.split_notes_changed"))
 
     def text_to_custom(self):
         """The selected texts become plain custom shapes (text.to_custom). One step."""

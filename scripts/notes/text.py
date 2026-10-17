@@ -16,6 +16,8 @@ beats per key then).
 import copy
 import math
 
+import numpy as np
+
 from files.lang import tr
 from notes.bezier import segments
 from notes.fonts import DEFAULT_FONT, get_font
@@ -52,6 +54,9 @@ def clean_text(tx):
             anchor = [float(a) for a in tx["anchor"]]
             if len(anchor) == 2 and all(math.isfinite(a) for a in anchor):
                 out["anchor"] = anchor
+                way = [float(a) for a in tx["anchor_way"]]
+                if len(way) == 4 and all(math.isfinite(a) for a in way):
+                    out["anchor_way"] = way
         except (KeyError, TypeError, ValueError):
             pass
         if len(out["bbox"]) != 4:
@@ -284,13 +289,54 @@ def frame_uv(pts, b, p):
 
 def anchor_at(sh):
     """Where the text's anchor is on the roll (beat, pitch), or None (a text made before anchors: it stays put).
-    The anchor rides in the box, so moving / resizing / turning the text takes it along."""
+    The anchor rides in the box, so moving / resizing the text takes it along."""
     uv = sh["text"].get("anchor")
     if not uv:
         return None
     (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
     u, v = uv
     return (b0 + u * (b1 - b0) + v * (b2 - b0), p0 + u * (p1 - p0) + v * (p2 - p0))
+
+
+def frame_way(pts):
+    """Which way the box's sides point (unit steps): the same after moving / stretching, not after a turn, flip or
+    skew."""
+    (b0, p0), (b1, p1), (b2, p2) = pts
+    out = []
+    for db, dp in ((b1 - b0, p1 - p0), (b2 - b0, p2 - p0)):
+        n = math.hypot(db, dp) or 1.0
+        out += [round(db / n, 6), round(dp / n, 6)]
+    return out
+
+
+def letter_notes(sh, notes_of):
+    """The notes of the letters themselves: no Hz bass tones, note tool pages, gate Range or Sustain (the anchor
+    goes by the letters: a Hz tone starting later never moves the text)."""
+    return notes_of({k: v for k, v in sh.items() if k not in ("hz", "fx", "range", "sustain", "gate_flip")})
+
+
+def anchor_spot(sh, notes_of, ppq):
+    """The anchor to keep the text on while it's rebuilt, or None. Turned / flipped / skewed since it was put
+    there: where the text sits now instead (the letters don't line up on the old anchor any more: it jumped)."""
+    at = anchor_at(sh)
+    way = sh["text"].get("anchor_way")
+    if at and way and frame_way(sh["pts"]) != way:
+        ns = letter_notes(sh, notes_of)
+        if len(ns):
+            t, k = anchor_ref(sh["text"], ns)
+            at = (t / ppq, k)
+    return at
+
+
+def keep_anchor(sh, at):
+    """The anchor `at` (beat, pitch) kept in the text's box, with which way the box points."""
+    uv = frame_uv(sh["pts"], *at)
+    if uv:
+        sh["text"]["anchor"] = [round(uv[0], 9), round(uv[1], 9)]
+        sh["text"]["anchor_way"] = frame_way(sh["pts"])
+    else:
+        sh["text"].pop("anchor", None)
+        sh["text"].pop("anchor_way", None)
 
 
 def align_parts(tx):
@@ -321,24 +367,25 @@ def onto_anchor(sh, at, notes_of, ppq):
     bs, ps = [b for b, _ in corners], [p for _, p in corners]
     left = max(0.0, at[0] - ft * (max(bs) - min(bs)))
     bottom = max(-0.5, round(at[1]) - 0.5 - fk * (max(ps) - min(ps)))
-    db, dp = left - min(bs), bottom - min(ps)
+    # (whole ticks / keys here too: a box moved by part of a tick can land its edges on other ticks)
+    db, dp = round((left - min(bs)) * ppq) / ppq, round(bottom - min(ps))
     sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
-    ns = notes_of(sh)
-    if len(ns):
+    for n in range(4):  # (looked at again: an edge exactly half way between two ticks rounds either way, so a
+        ns = letter_notes(sh, notes_of)  # second try also moves it a quarter tick off that half way)
+        if not len(ns):
+            break
         t, k = anchor_ref(sh["text"], ns)
-        db = (round(at[0] * ppq) - t) / ppq
-        dp = round(at[1]) - k
-        sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
-    uv = frame_uv(sh["pts"], *at)
-    if uv:
-        sh["text"]["anchor"] = [round(uv[0], 9), round(uv[1], 9)]
-    else:
-        sh["text"].pop("anchor", None)
+        dt, dp = round(at[0] * ppq) - t, round(at[1]) - k
+        if not dt and not dp:
+            break
+        nudge = 0.25 if n == 1 and dt else 0.0
+        sh["pts"] = [[b + (dt + nudge) / ppq, p + dp] for b, p in sh["pts"]]
+    keep_anchor(sh, at)
 
 
 def rebuild(sh, tx, axes, notes_of, ppq):
     """build, keeping the text on its anchor (if it has one)."""
-    at = anchor_at(sh)
+    at = anchor_spot(sh, notes_of, ppq)
     if not build(sh, tx, axes):
         return False
     if at:
@@ -349,11 +396,10 @@ def rebuild(sh, tx, axes, notes_of, ppq):
 def set_anchor(sh, notes_of, ppq):
     """The anchor put where the text sits now (align_parts: its first note and lowest key for Left; nothing
     moves)."""
-    ns = notes_of(sh)
-    ref = anchor_ref(sh["text"], ns) if len(ns) else None
-    uv = frame_uv(sh["pts"], ref[0] / ppq, ref[1]) if ref else None
-    if uv:
-        sh["text"]["anchor"] = [round(uv[0], 9), round(uv[1], 9)]
+    ns = letter_notes(sh, notes_of)
+    if len(ns):
+        t, k = anchor_ref(sh["text"], ns)
+        keep_anchor(sh, (t / ppq, k))
 
 
 def split_letters(sh, notes_of, ppq):
@@ -366,7 +412,7 @@ def split_letters(sh, notes_of, ppq):
         if ch == "\n":
             continue
         one = copy.deepcopy({k: v for k, v in sh.items() if k not in ("strokes", "pts", "text", "name")})
-        letter = dict({k: v for k, v in tx.items() if k not in ("anchor", "bbox", "holes")}, text=ch)
+        letter = dict({k: v for k, v in tx.items() if k not in ("anchor", "anchor_way", "bbox", "holes")}, text=ch)
         own = layout(letter)[1][0]["o"]  # (where it would go alone: moved onto where it was)
         at = (places[j]["o"][0] - own[0], places[j]["o"][1] - own[1])
         if build(one, letter, (to_roll((O, X, Y), *at), X, Y)):
@@ -377,15 +423,70 @@ def split_letters(sh, notes_of, ppq):
 
 def to_custom(sh):
     """Turn into custom shape: the letters stay as they look (Grow baked into their lines), but it's a plain custom
-    shape now, filled by its rules (the notes can move a little: no threshold, overlaps cancel out)."""
+    shape now, filled by its rules (the notes can move a little: no threshold). A letter drawn from parts that
+    overlap (some fonts' A, K, X) stays solid: Overlaps cancel out goes off and its real holes (inside an O) are
+    emptied areas."""
+    from notes.custom import refit, stroke_points
+    from notes.hzbass import left_edge, shifted_hz
+    left = left_edge(sh)  # (a Hz bass's tones count from here, Grow included: they stay on their beats)
     tx = sh.pop("text")
     x0, y0, x1, y1 = tx["bbox"]
     if tx.get("grow"):
         polys = text_polys(dict(sh, text=tx))
         sh["strokes"] = [{"kind": "poly", "pts": [list(frame_uv(sh["pts"], b, p)) for b, p in poly]} for poly in polys]
     sh["round"] = (y1 - y0) / (x1 - x0)  # (the letters' own look: the outline gate shrinks them the same way)
-    from notes.custom import refit
-    refit(sh, song_beats=True)
+    refit(sh)
+    if sh.get("hz"):
+        sh["hz"] = shifted_hz(sh["hz"], left - left_edge(sh))
+    loops = [[tuple(p) for p in stroke_points(st)] for st in sh["strokes"]]
+    glyphs = [g for g, _ in layout(tx)[0]]
+    if len(glyphs) == len(loops) and parts_overlap(loops, glyphs):
+        sh["union"] = True
+        sh["areas"] = empty_areas(loops)
+
+
+def parts_overlap(loops, glyphs):
+    """Whether two outlines of one letter overlap with the same turn (the letter's parts drawn on top of each
+    other: the text fills them, a custom shape's even-odd fill would empty them)."""
+    def crosses(a, b):  # (any piece of a properly crossing a piece of b; pieces sharing an end don't count)
+        a, b = np.asarray(a, float), np.asarray(b, float)
+        ax, ay, bx, by = a[:-1, 0, None], a[:-1, 1, None], a[1:, 0, None], a[1:, 1, None]  # (pieces of a: rows)
+        cx, cy, dx, dy = b[None, :-1, 0], b[None, :-1, 1], b[None, 1:, 0], b[None, 1:, 1]  # (of b: columns)
+        d1 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx)
+        d2 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx)
+        d3 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+        d4 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax)
+        return bool(((d1 * d2 < 0) & (d3 * d4 < 0)).any())
+
+    box = [(min(x for x, _ in p), min(y for _, y in p), max(x for x, _ in p), max(y for _, y in p)) for p in loops]
+    if any(crosses(p, p) for p in loops):  # (one outline crossing itself: some fonts' A)
+        return True
+    for i in range(len(loops)):
+        for j in range(i + 1, len(loops)):
+            a, b = box[i], box[j]
+            if glyphs[i] != glyphs[j] or a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1]:
+                continue
+            if (area(loops[i]) > 0) != (area(loops[j]) > 0):
+                continue  # (a hole and its letter: fine either way)
+            if crosses(loops[i], loops[j]) or winding(loops[j], *loops[i][0]) or winding(loops[i], *loops[j][0]):
+                return True
+    return False
+
+
+def empty_areas(loops):
+    """Area colour spots (areas.py: [u, v, 0] = left empty) for every area the outlines close in that the text
+    leaves empty (its turns add up to none, nonzero rule): inside an O, or between an A's legs and its crossbar
+    when they're separate parts. With Overlaps cancel out off the rest is all filled."""
+    from notes.faces import faces
+    xs, ys, size, lab = faces(loops).pieces()
+    boxes = [(min(x for x, _ in p), min(y for _, y in p), max(x for x, _ in p), max(y for _, y in p)) for p in loops]
+    out = []
+    for g in sorted(set(lab.tolist())):
+        k = max(np.flatnonzero(lab == g), key=lambda i: size[i])  # (its biggest piece's middle)
+        x, y = float(xs[k]), float(ys[k])
+        if not sum(winding(p, x, y) for p, (a, b, c, d) in zip(loops, boxes) if a <= x <= c and b <= y <= d):
+            out.append([round(x, 9), round(y, 9), 0])
+    return out
 
 
 def shown_size(tx, axes):

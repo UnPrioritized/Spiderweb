@@ -5,7 +5,7 @@ import math
 
 from files.lang import tr
 from notes.custom import custom_settings
-from notes.text import (anchor_at, build, from_roll, layout, letter_matrix, missing_letters, new_axes, onto_anchor,
+from notes.text import (anchor_spot, build, from_roll, layout, letter_matrix, missing_letters, new_axes, onto_anchor,
                         rebuild, restyle, text_axes, text_font, with_arial)
 from roll.roll_shared import CTRL, SHIFT
 from window import look
@@ -208,7 +208,7 @@ class TextTyping:
                 ty["was"] = sh.get("name") or "?"  # (the History says what the text was if it's all erased)
                 app.push_undo(name=tr("roll_text.type", text=ty["was"]))
                 ty["undo"], ty["step"], ty["new"] = True, app.undo_stack[-1], False
-            at = anchor_at(sh)
+            at = anchor_spot(sh, app.notes_of, app.ppq)
             if rebuild(sh, tx, axes, app.notes_of, app.ppq):
                 app.shapes_changed()
             else:  # nothing to see any more: the shape goes, the typing stays

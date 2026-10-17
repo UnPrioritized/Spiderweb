@@ -235,6 +235,10 @@ class TextPanel:
         """Direction picked: the player ones turn each letter 90 and flip it (upright in a player), Piano roll
         puts them back; both can be changed after."""
         player = way != "roll"
+        txs = ([self.roll.typing_state()[0]] if self.roll.typing else
+               [sh["text"] for sh in self.text_shapes()] or [self.text_defaults])
+        if all(tx.get("direction", "roll") == way for tx in txs):
+            return  # (the same one picked again: a Letter turn typed stays)
         self.set_text_setting({"direction": way, "turn": 90.0 if player else 0.0, "flip": player})
 
     def on_text_entry(self, key, back=False):
