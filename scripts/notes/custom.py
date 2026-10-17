@@ -2720,13 +2720,13 @@ def cycle_turns(sh, notes, ppq, bottom=None):
 
 
 def with_rounds(sh, k, n):
-    """cycle_turns' turns from the steps k counted on: k mod n, + ROUND x the round for a shape made with "_rounds"
-    (rounds from 0: a Diagonal going down counts below the first)."""
+    """cycle_turns' turns from the steps k counted on: k mod n, + ROUND x the round for a shape made with "_rounds".
+    Rounds count from the shape's first step, not from turn 0 (user's v10: spam aligned to tick 0 started at turn 4,
+    so its last colours went into the next round's channels)."""
     turn = k % n
     if not sh.get("_rounds") or not len(k):
         return turn
-    r = k // n
-    return turn + (r - r.min()) * ROUND
+    return turn + (k - k.min()) // n * ROUND
 
 
 def row_restart_ok(sh):
