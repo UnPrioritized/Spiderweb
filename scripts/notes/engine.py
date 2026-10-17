@@ -1236,8 +1236,10 @@ def in_rounds(note_lists, slot_of, rounds, step):
             s = np.asarray(slot_of[i], np.int64)
             q = s // step - int(s.min()) // step  # (the block within a round)
             wide = int(q.max()) + 1
-            blocks = np.fromiter(itertools.islice(free, (int(r.max()) + 1) * wide), np.int64)
-            out[i] = s % step + step * blocks[r * wide + q]
+            had, r = np.unique(r, return_inverse=True)  # (only the rounds it has, no gaps: a piece sliced off mid-way
+            # keeps the whole shape's round numbers, user 2026-10-18)
+            blocks = np.fromiter(itertools.islice(free, len(had) * wide), np.int64)
+            out[i] = s % step + step * blocks[r.reshape(-1) * wide + q]
     return out, max([int(np.max(s)) + 1 for s, lst in zip(out, note_lists) if len(lst)] or [0])
 
 
