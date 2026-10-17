@@ -364,8 +364,11 @@ class JoinSplit:
         use10 = self.picture_use10
         if self.channel_mode.get() != "auto":  # (each note's Multi channel slot kept too, for Multi channel later)
             from window.app import all_notes  # (app.py imports this file)
-            _, use10, multi, _ = all_notes(self.shapes, self.ppq, self.keys, "auto", self.channel_split, self.all16(),
-                                           self.notes_tracks, order=self.in_order())
+            # (the project's ticks as they are: all16 / in_order / rounds_apart are off outside Multi channel, hunt)
+            all16 = self.use_ch10.get()
+            _, use10, multi, _ = all_notes(self.shapes, self.ppq, self.keys, "auto", self.channel_split, all16,
+                                           self.notes_tracks, rounds=self.new_rounds.get(),
+                                           order=all16 and self.ch10_order.get())
         new = {}
         for i in got:
             rows = self.rendered[owners == i]

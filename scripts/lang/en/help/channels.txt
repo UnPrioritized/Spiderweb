@@ -8,7 +8,7 @@ Multi channel: shapes whose notes clash go on different channels, each on its ow
 
 Use channel 10 (16 colours), under Multi channel: channel 10 is used too, so there are 16 colours instead of 15 (a shape, Colours and the drawer's areas can then have 16). Many synths play channel 10 as drums. With a piano-only soundfont, many MIDI players stay silent there and only show the notes' colour. Built-in BASSMIDI plays it as a piano. Saved with the project.
 
-Channels 1-16 in order, under Use channel 10: shapes take channels 1, 2, 3 … 16 in order, so a shape's 10th colour goes on channel 10. Off, channel 10 comes last (1-9, 11-16, then 10), so ticking Use channel 10 changes no colour. A shape with 10 or more colours changes colour when this is switched, because each channel keeps its own colour. Saved with the project.
+Channels 1-16 in order, under Use channel 10: shapes take channels 1, 2, 3 … 16 in order, so a shape's 10th colour goes on channel 10. Off, channel 10 comes last (1-9, 11-16, then 10), so ticking Use channel 10 changes no colour. When 10 or more channels are in use, the 10th and later change colour when this is switched, because each channel keeps its own colour. Saved with the project.
 
 New channels each Colours round, under Multi channel: when a shape's Colours start again from the first colour, the next round goes on new channels with the same colours (15 channels further on, 16 with Use channel 10). No two rounds share a channel, so in other programs each round is its own track and can be edited on its own. Shapes without Colours keep the first channels; the rounds come after them, shape by shape in the shape list's order. Saved with the project.
 

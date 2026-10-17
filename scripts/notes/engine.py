@@ -1192,11 +1192,15 @@ def mapped_slots(slots, use10):
 
 
 def unmapped_slot(s, use10):
-    """The assign_slots slot mapped_slots turns into slot s, or None (none does: channel 10 skipped)."""
-    for u in range(s + 1):  # (mapped_slots never makes a slot smaller)
-        if int(mapped_slots(np.array([u], np.int64), use10)[0]) == s:
-            return u
-    return None
+    """The assign_slots slot mapped_slots turns into slot s, or None (none does: channel 10 skipped). Worked out
+    directly: plain-notes shapes on thousands of slots ask for each one (hunt: a search made every edit slow)."""
+    block, ch = divmod(s, 16)
+    place = ch if ch < 9 else ch - 1  # (its place among CHANNELS)
+    if use10 == "all":
+        return block * 16 + (15 if ch == 9 else place)
+    if use10 == "order" or not use10:
+        return s
+    return None if ch == 9 else block * 15 + place
 
 
 def pushed_solid(note_lists, pinned, fixed, split, step):
@@ -1313,7 +1317,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                     ids, which = unique_inverse(pin)
                     for k, s in enumerate(ids.tolist()):
                         u = unmapped_slot(s, use10)
-                        if u is not None:  # (on channel 10: no other shape takes it anyway)
+                        if u is not None:  # (on channel 10 while shapes skip it: no other shape takes it anyway)
                             taken[len(units)] = u
                             if team is not None:  # (a step turned into plain notes: the other turns step round it)
                                 solid_teams.append((len(units), team))
