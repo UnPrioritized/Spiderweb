@@ -683,6 +683,8 @@ def refit(sh, song_beats=False):
     if h < 1e-9:
         vl, h = vl - 0.5, 1.0
     if abs(ul) < 1e-12 and abs(vl) < 1e-12 and abs(w - 1) < 1e-12 and abs(h - 1) < 1e-12:
+        if sh.get("fit"):  # (a fitted box hugs the drawing as it is now)
+            fit_upright(sh)
         return
     to_bp = frame_to_bp(sh["pts"])
     left = left_edge(sh)
@@ -702,6 +704,8 @@ def refit(sh, song_beats=False):
     r = sh.get("round")
     if r:  # (still the view it was drawn in, like an arc's k: drawn_view)
         sh["round"] = r * h / w if isinstance(r, (int, float)) else [x * h / w for x in r]
+    if sh.get("fit"):  # (a fitted box hugs the drawing as it is now)
+        fit_upright(sh)
 
 
 def stroke_ends(strokes):
@@ -812,37 +816,55 @@ def new_live_shape(defaults, custom_defaults, k=None):
     return sh
 
 
+# Fit box to drawing: the drawing and its frame (sh["pts"]) stay exactly as they are, so nothing it makes can change
+# (user: it must keep what the piano roll shows); sh["fit"] = the straight box round the drawing, as its three corners
+# (u0v0, u1v0, u0v1) in the frame's own u / v. Every move / flip / turn / stretch of the frame carries it along; the
+# box handles work on it and change the frame the same way (roll_custom.box_frame).
+
+def box_pts(sh):
+    """The box shown round a custom shape, as three corners like sh["pts"]: its frame, or the fitted box."""
+    fit = sh.get("fit")
+    if not fit:
+        return sh["pts"]
+    to_bp = frame_to_bp(sh["pts"])  # (no float noise: a straight box must count as straight, frame_upright)
+    return [[round(x, 9) + 0.0 for x in to_bp(u, v)] for u, v in fit]
+
+
+def frame_in_box(sh):
+    """The frame's points in the shown box's own u / v (they stay the same while box and frame change together),
+    or None without a fitted box."""
+    to_uv = frame_to_uv(box_pts(sh)) if sh.get("fit") else None
+    return [list(to_uv(*p)) for p in sh["pts"]] if to_uv else None
+
+
+def frame_from_box(box, inside):
+    """The frame for a shown box that changed (inside: frame_in_box from before the change)."""
+    to_bp = frame_to_bp(box)
+    return [list(to_bp(u, v)) for u, v in inside]
+
+
 def can_fit_upright(sh):
-    """Fit box to drawing works on it: a drawn custom shape (not text, pasted notes, Hz bass, merged notes, or one
-    with note tool pages: their turn steps belong to the box) whose box is turned or skewed."""
-    return (sh["kind"] == "custom" and bool(sh.get("strokes")) and not sh.get("text") and "notes" not in sh
-            and not sh.get("hz") and not sh.get("merge") and not sh.get("fx") and not frame_upright(sh["pts"]))
+    """Fit box to drawing works on it: a drawn custom shape (not text: its letters work from the box) whose shown
+    box is turned or skewed."""
+    return (sh["kind"] == "custom" and bool(sh.get("strokes")) and not sh.get("text") and "picture" not in sh
+            and not frame_upright(box_pts(sh)))
 
 
 def fit_upright(sh):
-    """A turned / skewed custom shape's box made straight again (along time and keys) and fitted round its drawing,
-    which stays where it is (ellipses become curves, like Turn into live shape). Coloured areas, Nested's / Tiles'
-    centre and the view it was drawn in go along."""
-    old_bp = frame_to_bp(sh["pts"])
-    view = drawn_view(sh)
-    new = {"kind": "custom", "strokes": [], "pts": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]}  # (beats / keys: drawn_view's
-    #                                                                                   (a, c) as it is)
-    if view:
-        new["round"] = view[1] if abs(view[0]) < 1e-12 else [view[0], view[1]]
-    for k in range(len(sh["strokes"])):
-        add_stroke(new, stroke_bp(sh, k))
-    to_uv = frame_to_uv(new["pts"])
-    if to_uv is None:
-        return
-    if sh.get("areas"):
-        sh["areas"] = [[*(round(x, 6) for x in to_uv(*old_bp(u, v))), c] for u, v, c in sh["areas"]]
-    for key in ("nested", "tiles"):
-        at = (sh.get(key) or {}).get("at")
-        if at:
-            sh[key] = dict(sh[key], at=[round(x, 6) for x in to_uv(*old_bp(*at))])
-    sh["strokes"], sh["pts"] = new["strokes"], new["pts"]
-    if "round" in new:
-        sh["round"] = new["round"]
+    """The shown box made straight (along time and keys) round the drawing as it is now (sh["fit"]). False (nothing
+    changed) when it can't be (no drawing, a flat frame)."""
+    to_uv = frame_to_uv(sh["pts"])
+    pts = [p for path in custom_strokes(sh) for p in path]
+    if to_uv is None or not pts:
+        return False
+    b0, b1 = min(b for b, _ in pts), max(b for b, _ in pts)
+    p0, p1 = min(p for _, p in pts), max(p for _, p in pts)
+    if b1 - b0 < 1e-9:
+        b0, b1 = b0 - 0.5, b1 + 0.5
+    if p1 - p0 < 1e-9:
+        p0, p1 = p0 - 0.5, p1 + 0.5
+    sh["fit"] = [list(to_uv(b, p)) for b, p in ((b0, p0), (b1, p0), (b0, p1))]
+    return True
 
 
 def outline_notes(sh, ppq, only=None):

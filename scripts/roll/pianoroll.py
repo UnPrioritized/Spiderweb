@@ -14,7 +14,7 @@ import numpy as np
 
 from files.lang import tr, trn
 from notes.between import copied as between_copied, group_of, keep_pushes, push_sizes, whole_groups
-from notes.custom import box_frame, fill_plan, fill_test
+from notes.custom import box_frame, box_pts, fill_plan, fill_test, frame_in_box
 from notes.engine import cached_arrays, make_shape, shape_key
 from notes.joined import all_tumours
 from notes.mask import OFF, ROW, is_mask, mask_area
@@ -70,6 +70,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.onto_grid = None    # beats added to a move so the earliest note lands on the grid (first_note_fix):
         #                          (all of them, {shape number: its own})
         self.grid_later = None   # a resize whose notes were too slow to snap while dragging: (make, beat) for let go
+        self.inside_fit = None   # a fitted box being dragged: the frame in it (custom.frame_in_box; frame_for_box)
         self.limit = None        # how far the shapes being edited may reach (limits)
         self._pan = None
         self._panned = False     # the middle button moved further than a click's 3 px (pan_to)
@@ -891,7 +892,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
         hit = self.custom_hit(e.x, e.y)
         if hit and hit[0] != "inside":  # the selected custom shape's corner / side: resize, just outside: turn / skew
-            orig = copy.deepcopy(app.selected()["pts"])
+            orig = copy.deepcopy(box_pts(app.selected()))  # (the box shown: a fitted one moves its frame along)
+            self.inside_fit = frame_in_box(app.selected())
             if kept:  # (the Select box stays where it is, user: like changing a note's length in a box)
                 self.box_kept = (kept, set(app.sels))
             app.push_undo(name=tr({"turn": "pianoroll.turn", "skew": "pianoroll.skew"}.get(hit[0], "pianoroll.resize")))
@@ -1158,11 +1160,12 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             _, k, orig, side, start = self.drag
             pt = self.resize_point(orig, k, side, start, e)
             step = self.held_step([self.app.sel])
-            self.app.selected()["pts"] = self.resize_custom(orig, k, pt, e.state & CTRL, side)
+            self.app.selected()["pts"] = self.frame_for_box(self.resize_custom(orig, k, pt, e.state & CTRL, side))
             if not e.state & SHIFT:
                 keep = e.state & CTRL
-                self.notes_onto_grid(self.app.selected(),
-                                     lambda b: self.resize_custom(orig, k, [b, pt[1]], keep, side), pt[0])
+                self.notes_onto_grid(
+                    self.app.selected(), lambda b: self.frame_for_box(self.resize_custom(orig, k, [b, pt[1]], keep, side)),
+                    pt[0])
             else:  # (free: a snap saved for let go from an earlier step is off, user)
                 self.grid_later = None
             if self.unmoved(step):
@@ -1172,7 +1175,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         elif kind == "skew":  # slides in whole grid steps / keys, wherever it was grabbed
             _, k, orig, start = self.drag
             step = self.held_step([self.app.sel])
-            self.app.selected()["pts"] = self.skew_custom(orig, k, *self.drag_steps(start, e))
+            self.app.selected()["pts"] = self.frame_for_box(self.skew_custom(orig, k, *self.drag_steps(start, e)))
             if self.unmoved(step):
                 return
             if self.stayed_inside(step):
@@ -1188,7 +1191,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if self.limit is None:
                 self.limit = self.limits([sh])
             was = sh["pts"]
-            sh["pts"] = self.turn_custom(orig, angle)
+            sh["pts"] = self.frame_for_box(self.turn_custom(orig, angle))
             if fx0 or steps:  # (its note tool pages' result is turned too, fx.py)
                 fx = fx_turned(fx_copied(fx0), math.degrees(angle), self.sy / self.sx, steps)
                 if fx:

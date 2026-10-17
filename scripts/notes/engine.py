@@ -170,6 +170,13 @@ def clean_shape(sh):
         areas = clean_areas(sh.get("areas"))
         if areas:  # areas coloured by hand (areas.py)
             out["areas"] = areas
+        fit = sh.get("fit")
+        try:  # Fit box to drawing: the straight box shown round it, in the frame's u / v (custom.box_pts)
+            fit = [[float(u), float(v)] for u, v in fit] if fit else None
+        except (TypeError, ValueError):
+            fit = None
+        if fit and len(fit) == 3 and all(math.isfinite(x) for p in fit for x in p):
+            out["fit"] = fit
         out["fill"] = sh.get("fill") if sh.get("fill") in FILLS else "empty"
         out["gate"] = max(1e-6, float(sh.get("gate", CUSTOM_DEFAULTS["gate"])))
         out["align"] = sh.get("align") if sh.get("align") in ALIGNS else "auto"

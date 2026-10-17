@@ -1,7 +1,10 @@
 """Piano roll: the right-click menu for shapes (and a funnel's highlighted lines / curves)."""
 
+import copy
 import tkinter as tk
 from types import SimpleNamespace
+
+import numpy as np
 
 from files.lang import tr
 from window.formula_host import FunnelHost, PolygonHost, RollHost, StrokeHost, formula_menu
@@ -175,10 +178,22 @@ class ShapeMenu:
             m.grab_release()
 
     def fit_box(self, i):
-        """A turned / skewed custom shape's box straight again round its drawing (custom.fit_upright). One step."""
+        """A turned / skewed custom shape's box straight again round its drawing (custom.fit_upright). One step. The
+        notes are checked: anything different = nothing done and a message (user: it must keep what's shown)."""
         app = self.app
+        sh = app.shapes[i]
+        was, before = copy.deepcopy(sh), app.notes_of(sh)
+        if not fit_upright(sh) or not np.array_equal(app.notes_of(sh), before):
+            sh.clear()
+            sh.update(was)
+            app.status.config(text=tr("roll_menu.fit_box_cant"))
+            return
+        fitted = copy.deepcopy(sh)
+        sh.clear()
+        sh.update(was)
         app.push_undo(name=tr("roll_menu.fit_box_to_drawing"))
-        fit_upright(app.shapes[i])
+        sh.clear()
+        sh.update(fitted)
         self.box_kept = None  # (a kept Select box was round the old box)
         app.shapes_changed()
 

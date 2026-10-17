@@ -5,6 +5,7 @@ import copy
 import math
 import tkinter as tk
 
+from notes.custom import box_pts, frame_from_box
 from roll.roll_shared import SELECT_CURSOR, SHIFT
 from window import look
 
@@ -35,8 +36,9 @@ class CustomBox:
         return [x / self.sx, y / self.sy]
 
     def custom_corners(self, sh):
-        """The four corners of a custom shape's box, in beats/pitch, going round: u0v0, u1v0, u1v1, u0v1."""
-        (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
+        """The four corners of a custom shape's box (a fitted one: custom.box_pts), in beats/pitch, going round:
+        u0v0, u1v0, u1v1, u0v1."""
+        (b0, p0), (b1, p1), (b2, p2) = box_pts(sh)
         return [(b0, p0), (b1, p1), (b1 + b2 - b0, p1 + p2 - p0), (b2, p2)]
 
     def custom_hit(self, x, y):
@@ -70,6 +72,11 @@ class CustomBox:
         if d <= 24 * s and not inside:
             return ("turn", k)
         return ("inside",) if inside else None
+
+    def frame_for_box(self, box):
+        """The selected shape's frame for its shown box dragged to box: the same as box without a fitted box, else
+        the frame that keeps its place in the box (inside_fit, taken at the press)."""
+        return frame_from_box(box, self.inside_fit) if self.inside_fit else box
 
     @staticmethod
     def inside_box(corners, x, y):
