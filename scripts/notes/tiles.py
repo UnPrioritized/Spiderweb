@@ -19,7 +19,7 @@ import math
 
 import numpy as np
 
-from notes.custom import box_frame, clean_of_at, find_spans, inside_rows
+from notes.custom import box_frame, in_turns, clean_of_at, find_spans, inside_rows
 
 LAYOUTS = ("grid", "brick")
 FLIPS = ("none", "h", "v", "hv")
@@ -78,7 +78,7 @@ def tiles_spans(sh, ppq, centre):
     """(start, end, key, colour) ticks of every stretch filled (like custom.area_spans). Remembered."""
     cfg = sh["tiles"]
     key = (json.dumps([sh["strokes"], sh["pts"], cfg, sh.get("round")]), bool(sh.get("union")), ppq,
-           tuple(round(c, 9) for c in centre))
+           tuple(round(c, 9) for c in centre), bool(sh.get("_rounds")))
     got = _spans.get(key)
     if got is None:
         if len(_spans) > 60 or sum(a.nbytes for a in _spans.values()) > KEPT_BYTES:
@@ -176,8 +176,9 @@ def find_tiles(sh, ppq, centre):
         return none
     i, j = ii[gid], jj[gid]
     by = cfg["by"]
-    colour = (i + j if by == "diag" else i if by == "cols" else j if by == "rows"
-              else (i + j) & 1 if by == "checker" else np.zeros(len(i), np.int64)) % cfg["colours"]
+    turn = (i + j if by == "diag" else i if by == "cols" else j if by == "rows"
+            else (i + j) & 1 if by == "checker" else np.zeros(len(i), np.int64))
+    colour = in_turns(turn, cfg["colours"], sh.get("_rounds"))
     out = np.column_stack([got, colour]).astype(np.int64)
     return out[np.lexsort((out[:, 0], out[:, 2]))]
 

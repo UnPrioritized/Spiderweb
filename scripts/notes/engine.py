@@ -629,6 +629,8 @@ def fx_step(notes, tracks, step, sh, ppq, keys=256):
     if tool == "path":  # (copies past the highest key are cut off: copypath.py)
         if tracks is None and step["cfg"] and step["cfg"]["colours"] != "keep":  # (one colour: group 0, so it turns)
             tracks = np.zeros(len(notes), np.int64)
+        if sh.get("_rounds") and step["cfg"]:  # ("New channels each Colours round": copies' rounds too)
+            step = dict(step, cfg=dict(step["cfg"], rounds=True))
         if step.get("tag") and step["cfg"]:  # (Turn into plain shapes: each note's copy rides along as one more
             # column of the notes, through the steps after it: tagged_notes)
             who = tracks if tracks is not None else np.zeros(len(notes), np.int64)
@@ -1224,28 +1226,36 @@ def pushed_solid(note_lists, pinned, fixed, split, step):
     return out
 
 
-def in_rounds(note_lists, slot_of, rounds, step):
+def in_rounds(note_lists, slot_of, rounds, step, teams=None):
     """render's slots with "New channels each Colours round" (user 2026-10-17: each round editable alone in other
     programs): every round of every shape with rounds, in shape order, gets step slots of its own past the ones the
     other shapes use, each note at the channel (colour) it has without the tick. -> (slots, slot count).
     The other shapes' blocks are left free of rounds, the rest are filled in order: a plain-notes shape frozen on
     round channels keeps them and the shapes around it keep theirs. A round needing more than step slots (a
-    layered Hz bass's clash tracks) takes as many blocks."""
+    layered Hz bass's clash tracks) takes as many blocks. teams (render's): the steps of an Add between group take
+    their rounds together, like one shape."""
     taken = set()
     for s, lst, r in zip(slot_of, note_lists, rounds):
         if r is None and len(lst):
             taken.update((np.unique(np.asarray(s, np.int64)) // step).tolist())
     free = (b for b in itertools.count() if b not in taken)
-    out = list(slot_of)
+    owners = {}  # (a shape, or an Add between group -> its shapes)
     for i, (lst, r) in enumerate(zip(note_lists, rounds)):
         if r is not None and len(lst):
-            s = np.asarray(slot_of[i], np.int64)
-            q = s // step - int(s.min()) // step  # (the block within a round)
-            wide = int(q.max()) + 1
-            had, r = np.unique(r, return_inverse=True)  # (only the rounds it has, no gaps: a piece sliced off mid-way
-            # keeps the whole shape's round numbers, user 2026-10-18)
-            blocks = np.fromiter(itertools.islice(free, len(had) * wide), np.int64)
-            out[i] = s % step + step * blocks[r.reshape(-1) * wide + q]
+            team = teams[i] if teams else None
+            owners.setdefault(i if team is None else ("team", team[0]), []).append(i)
+    out = list(slot_of)
+    for mine in owners.values():
+        s = np.concatenate([np.broadcast_to(np.asarray(slot_of[i], np.int64), len(rounds[i])) for i in mine])
+        q = s // step - int(s.min()) // step  # (the block within a round)
+        wide = int(q.max()) + 1
+        had, r = np.unique(np.concatenate([rounds[i] for i in mine]), return_inverse=True)  # (only the rounds it has,
+        # no gaps: a piece sliced off mid-way keeps the whole shape's round numbers, user 2026-10-18)
+        blocks = np.fromiter(itertools.islice(free, len(had) * wide), np.int64)
+        got = s % step + step * blocks[r.reshape(-1) * wide + q]
+        at = np.cumsum([0] + [len(rounds[i]) for i in mine])
+        for k, i in enumerate(mine):
+            out[i] = got[at[k]:at[k + 1]]
     return out, max([int(np.max(s)) + 1 for s, lst in zip(out, note_lists) if len(lst)] or [0])
 
 
@@ -1393,7 +1403,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
         slot_of = [pin if u is None else unit_slots[u] for u, pin in zip(unit_of, pinned)]
         count = int(unit_slots.max()) + 1 if len(units) else 0
         if rounds and any(r is not None for r in rounds):
-            slot_of, count = in_rounds(note_lists, slot_of, rounds, 16 if use10 else 15)
+            slot_of, count = in_rounds(note_lists, slot_of, rounds, 16 if use10 else 15, teams)
     else:  # (a Hz bass layer's clashing notes too: one channel, user)
         slot_of = [0 if pin is None else pin for pin in pinned]
         count = 1 if any(p is None for p in pinned) else 0

@@ -215,7 +215,7 @@
  "app.ch10_order": "Channels 1-16 in order",
  "app.ch10_order_tip": "Shapes take channels 1, 2, 3 … 16 in order, so a shape's 10th colour goes on channel 10.\nOff: channel 10 comes last (1-9, 11-16, then 10), so ticking Use channel 10 changes no colour.\nWhen 10 or more channels are in use, the 10th and later change colour when this is switched,\nbecause each channel keeps its own colour. Saved with the project.",
  "app.new_rounds": "New channels each Colours round",
- "app.new_rounds_tip": "When a shape's Colours start again from the first colour, the next round goes on new channels\nwith the same colours (15 channels further on, 16 with channel 10). No two rounds share a channel,\nso each round can be edited on its own in other programs. Shapes without Colours keep the first channels.\nSaved with the project.",
+ "app.new_rounds_tip": "When a shape's colours start again from the first colour, the next round goes on new channels\nwith the same colours (15 channels further on, 16 with channel 10). No two rounds share a channel,\nso each round can be edited on its own in other programs. Counts for Colours, Nested and Tiles fills,\nAdd between steps and Copy along a path's colours. Other shapes keep the first channels.\nSaved with the project.",
  "app.pasted_15": "{n} pasted shapes had 16 colours: brought down to 15 (this project doesn't use channel 10).",
  "app.pasted_15_one": "1 pasted shape had 16 colours: brought down to 15 (this project doesn't use channel 10).",
  "app.pasted_picture_15": "{n} pasted images had 16 colours: brought down to 15 (this project's images don't use channel 10).",

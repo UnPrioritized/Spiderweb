@@ -120,7 +120,8 @@ def part_rows(parts, ppq, keys, rounds=False):
         notes = np.asarray(notes, np.int64).reshape(-1, 4)
         tracks = np.zeros(len(notes), np.int64) if tracks is None or not len(tracks) else np.asarray(tracks, np.int64)
         if rounds:
-            laps.append(tracks // ROUND + after)
+            # (in order from 0: a Tiles fill's rounds left of its centre tile are below 0)
+            laps.append(unique_inverse(tracks // ROUND)[1].reshape(-1) + after if len(tracks) else tracks)
             tracks = tracks % ROUND
             after = int(laps[-1].max()) + 1 if len(tracks) else after + 1
         ids, which = unique_inverse(tracks) if len(tracks) else (tracks, tracks)
@@ -197,9 +198,10 @@ LAP = 1 << 16  # (with_rounds: track + LAP x round still fits the packed notes' 
 
 
 def has_colours(sh):
-    """Does sh take turns over colours ("Colours"), itself or any part of it (merges of merges too)?"""
-    from notes.custom import cycling
-    return cycling(sh) or any(isinstance(p, dict) and has_colours(p) for p in (sh.get("merge") or {}).get("parts", ()))
+    """Does sh take turns over colours that can start again ("Colours", a Nested / Tiles fill, Copy along a path's
+    colours: "New channels each Colours round"), itself or any part of it (merges of merges too)?"""
+    from notes.custom import cycling, has_pattern, path_colours
+    return cycling(sh) or has_pattern(sh) or path_colours(sh) or any(isinstance(p, dict) and has_colours(p) for p in (sh.get("merge") or {}).get("parts", ()))
 
 
 def with_rounds(sh):

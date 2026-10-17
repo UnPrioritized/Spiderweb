@@ -2555,9 +2555,14 @@ def custom_notes_groups(sh, ppq):
     turn = cycle_turns(sh, notes, ppq)
     if groups is None:
         return notes, turn
+    lap, groups, turn_lap, turn = groups // ROUND, groups % ROUND, turn // ROUND, turn % ROUND
     if sh.get("apart") and sh["fill"] in ("fill", "spam"):  # (0 = the outline, 1 = the inside, 1 + k = colour k)
-        return notes, np.where(groups == 0, 0, 1 + (groups - 1) * n + turn).astype(np.int64)
-    return notes, groups * n + turn
+        out = np.where(groups == 0, 0, 1 + (groups - 1) * n + turn).astype(np.int64)
+    else:
+        out = groups * n + turn
+    if lap.any():  # (a Nested / Tiles round and a Colours round: each pair its own round)
+        turn_lap = np.unique(np.column_stack([lap, turn_lap]), axis=0, return_inverse=True)[1].reshape(-1)
+    return notes, out + turn_lap * ROUND
 
 
 def cycling(sh):
@@ -2723,10 +2728,15 @@ def with_rounds(sh, k, n):
     """cycle_turns' turns from the steps k counted on: k mod n, + ROUND x the round for a shape made with "_rounds".
     Rounds count from the shape's first step, not from turn 0 (user's v10: spam aligned to tick 0 started at turn 4,
     so its last colours went into the next round's channels)."""
-    turn = k % n
     if not sh.get("_rounds") or not len(k):
-        return turn
-    return turn + (k - k.min()) // n * ROUND
+        return k % n
+    return k % n + (k - k.min()) // n * ROUND
+
+
+def in_turns(k, n, rounds):
+    """Turn k over n colours: k mod n, + ROUND x how many times the colours went round when rounds ("New channels
+    each Colours round": Nested / Tiles fills; with_rounds for Colours)."""
+    return k % n + k // n * ROUND if rounds else k % n
 
 
 def row_restart_ok(sh):
@@ -2893,13 +2903,18 @@ def tracks_apart(sh):
     """True if the shape's tracks must get channels of their own with Multi channel: pasted notes (each copied
     track keeps its own channel even when the tracks don't overlap), Fill / Spam with "Outline" (the outline
     and the inside) and "Colours" (each turn, any shape), and copies along a path that change colour (copypath.py)."""
-    if any(st["tool"] == "path" and not st.get("off") and (st.get("cfg") or {}).get("colours", "keep") != "keep"
-           for st in sh.get("fx") or ()):
+    if path_colours(sh):
         return True
     if sh["kind"] != "custom":
         return cycling(sh)
     return ("notes" in sh or bool(sh.get("apart") and sh.get("fill") in ("fill", "spam")) or cycling(sh)
             or has_areas(sh) and any(a[2] for a in sh["areas"]) or coloured_strokes(sh) or has_pattern(sh))
+
+
+def path_colours(sh):
+    """A Copy along a path page that changes the copies' colours (copypath.py)."""
+    return any(st["tool"] == "path" and not st.get("off") and (st.get("cfg") or {}).get("colours", "keep") != "keep"
+               for st in sh.get("fx") or ())
 
 
 def capped_colours(groups, most=COLOURS):

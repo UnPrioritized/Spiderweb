@@ -650,19 +650,35 @@ def scaled(x, s, at, key, by_key):
     return out
 
 
-def coloured(tracks, i, cfg, own):
+def coloured(tracks, i, cfg, own, laps=None):
     """Copy i's tracks (colour groups): Keep / Shift / Turn within its own (own = the shape's, sorted, rounds taken
-    off) / One each. A Colours round (custom.ROUND) stays: only the colour moves."""
+    off) / One each. A Colours round (custom.ROUND) stays: only the colour moves. laps: (lowest, how many) of the
+    copies' own rounds (copy_laps; "New channels each Colours round"): each time a copy's colours go round past the
+    last one = a round of its own too, paired with the shape's."""
     how, step, most = cfg["colours"], cfg["step"], cfg["most"]
-    lap = tracks - tracks % ROUND
+    lap = tracks // ROUND
     tracks = tracks % ROUND
     if how == "shift":
-        return (tracks + i * step) % most + lap
-    if how == "turn":
-        return own[(np.searchsorted(own, tracks) + i * step) % len(own)] + lap
-    if how == "one":
-        return np.full(len(tracks), (i * step) % most, tracks.dtype) + lap
-    return tracks + lap
+        k, n = tracks + i * step, most
+    elif how == "turn":
+        k, n = np.searchsorted(own, tracks) + i * step, len(own)
+    elif how == "one":
+        k, n = np.full(len(tracks), i * step, tracks.dtype), most
+    else:
+        return tracks + lap * ROUND
+    got = own[k % n] if how == "turn" else k % n
+    if laps is not None:
+        lap = lap * laps[1] + k // n - laps[0]
+    return got + lap * ROUND
+
+
+def copy_laps(cfg, own, n):
+    """(lowest, how many) of the rounds coloured() gives copies 0 .. n - 1 (copies' colours going round)."""
+    how, step = cfg["colours"], cfg["step"]
+    size = len(own) if how == "turn" else cfg["most"]
+    lo, hi = (0, len(own) - 1) if how == "turn" else (0, 0) if how == "one" else (int(own.min()), int(own.max()))
+    ends = [(t + i * step) // size for t in (lo, hi) for i in (0, n - 1)]
+    return min(ends), max(ends) - min(ends) + 1
 
 
 def mirrored_after(out, p, tag=0):
@@ -755,6 +771,7 @@ def apply_path(a, cfg, ppq, keys=256, tag=False):
     flips = down[:n] if cfg["flip"] == "each" else np.zeros(n, bool)
     col = a.shape[1] - 1 if a.shape[1] >= 5 and cfg["colours"] != "keep" else None
     own = np.unique(a[:, col] % ROUND) if col is not None else None
+    laps = copy_laps(cfg, own, n) if col is not None and cfg.get("rounds") else None
     order = np.argsort(a[:, 2], kind="stable")
     by_key = (a[order], a[order, 2])
     flip_key = None
@@ -788,7 +805,7 @@ def apply_path(a, cfg, ppq, keys=256, tag=False):
                 s = x[:, 0].copy()
                 x[:, 0], x[:, 1] = 2 * c - x[:, 1], 2 * c - s
         if col is not None:
-            x[:, col] = coloured(x[:, col], i, cfg, own)
+            x[:, col] = coloured(x[:, col], i, cfg, own, laps)
         if tag:
             x = np.column_stack([x, np.full(len(x), i, x.dtype)])
         total += len(x)

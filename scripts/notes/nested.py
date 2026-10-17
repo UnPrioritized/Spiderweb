@@ -29,7 +29,7 @@ import numpy as np
 
 from files import speed
 from notes.custom import (carried_fill, clean_of_at, cut_out, drawn_view, edge_loops, find_spans, fill_plan,
-                          frame_spans, frame_to_bp, frame_to_uv, has_nested, has_tiles, inside_rows, merged_rows, poly_edges, rows_spans)
+                          frame_spans, frame_to_bp, frame_to_uv, has_nested, has_tiles, in_turns, inside_rows, merged_rows, poly_edges, rows_spans)
 from notes.paths import TOP_KEY, pitch_of
 from notes.shrink import field, inner_rows, proportion
 
@@ -175,10 +175,11 @@ def nested_spans(sh, ppq):
             _spans.clear()
         got = _spans[key] = (nested_steps(sh, ppq), {})
     steps, coloured = got
-    paint = tuple(cfg[k] for k in RECOLOUR)
+    rounds = bool(sh.get("_rounds"))
+    paint = tuple(cfg[k] for k in RECOLOUR) + (rounds,)
     out = coloured.get(paint)
     if out is None:
-        out = coloured[paint] = painted(steps, cfg)
+        out = coloured[paint] = painted(steps, cfg, rounds)
         out.flags.writeable = False
     return out
 
@@ -482,8 +483,9 @@ def loop_spans(polys, ppq):
     return rows_spans(poly_edges(polys), q0, q1, ppq)
 
 
-def painted(steps, cfg):
-    """The steps' stretches, each later (smaller) one over the ones before, with their colours."""
+def painted(steps, cfg, rounds=False):
+    """The steps' stretches, each later (smaller) one over the ones before, with their colours. rounds: + ROUND x
+    each time the colours start again ("New channels each Colours round", custom.ROUND)."""
     none = np.zeros((0, 4), np.int64)
     out, covered = [], np.zeros((0, 3), np.int64)
     every = 2 if cfg["skip"] else 1
@@ -495,7 +497,7 @@ def painted(steps, cfg):
         covered = merged_rows(np.concatenate([covered, sp]))
         if i % every or not len(piece):
             continue
-        colour = (i // every) % cfg["colours"]
+        colour = in_turns(i // every, cfg["colours"], rounds)
         out.append(np.column_stack([piece, np.full(len(piece), colour, np.int64)]))
     if not out:
         return none

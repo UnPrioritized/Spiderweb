@@ -799,10 +799,14 @@ def ends_cross(a, b):
     return math.dist(a0, b1) + math.dist(a1, b0) < math.dist(a0, b0) + math.dist(a1, b1) - 1e-9
 
 
-def turns(shapes):
+def turns(shapes, laps=None):
     """Each shape's (group, colour turn) when its group gives each shape its own colour, else None. A shape with
-    Colours on keeps its own Colours (user: Colours always comes first)."""
+    Colours on keeps its own Colours (user: Colours always comes first). laps: a list, filled with each shape's
+    round of its group's colours (0 = the first time through; None = not a step of a group's colours: "New
+    channels each Colours round")."""
     out = [None] * len(shapes)
+    if laps is not None:
+        laps[:] = [None] * len(shapes)
     done = set()
     for i, sh in enumerate(shapes):
         if "team" in sh and not sh.get("cycle"):  # (its group unlinked by Turn into plain notes: its turn kept)
@@ -816,6 +820,8 @@ def turns(shapes):
             for k, i in enumerate(ordered(shapes, gid)):
                 if not shapes[i].get("cycle"):
                     out[i] = (gid, k % n)
+                    if laps is not None:
+                        laps[i] = k // n
     return out
 
 

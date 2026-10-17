@@ -128,13 +128,18 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     shape may use it, not only pictures). Touches no Tk: also made in a background thread (App.notes_rested).
     quiet: every mask's own notes left out (what the masks show: App.pattern). rounds: the project's "New channels
     each Colours round" (App.rounds_apart). order: its "Channels 1-16 in order" (App.in_order)."""
-    teams = between_turns(shapes)
+    team_laps = []
+    teams = between_turns(shapes, team_laps)
     # (each Colours shape's notes made with their rounds, then taken off the tracks: render's rounds; a merged shape's
-    # parts' rounds too, merge.part_rows; an Add between step is one channel, no rounds)
-    took = [rounds and mode == "auto" and has_colours(sh) and team is None for sh, team in zip(shapes, teams)]
+    # parts' rounds too, merge.part_rows; an Add between step = one channel, its round = its group's: in_rounds)
+    rounds = rounds and mode == "auto"
+    took = [rounds and has_colours(sh) and team is None for sh, team in zip(shapes, teams)]
     got = [notes_tracks(dict(sh, _rounds=True) if r else sh) for sh, r in zip(shapes, took)]
     laps = [np.asarray(t, np.int64) // ROUND if r and t is not None else None for (_, t), r in zip(got, took)]
     got = [(n, t % ROUND) if lap is not None else (n, t) for (n, t), lap in zip(got, laps)]
+    if rounds:
+        laps = [np.full(len(n), tl, np.int64) if tl is not None else lap
+                for (n, _), lap, tl in zip(got, laps, team_laps)]
     # (a mask whose own notes don't sound: none, mask.py)
     off = [silent(sh) or quiet and is_mask(sh) for sh in shapes]
     got = [(n[:0], None if t is None else t[:0]) if o else (n, t) for o, (n, t) in zip(off, got)]
