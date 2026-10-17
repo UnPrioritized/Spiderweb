@@ -22,8 +22,10 @@ from notes.fonts import DEFAULT_FONT, get_font
 
 UNITS = ("font", "rows")  # "font" = size is the font size (em) in keys, "rows" = capital letters are that many keys
 TEXT_ALIGNS = ("left", "center", "right")
+DIRECTIONS = ("roll", "across", "down")  # (layout)
 TEXT_DEFAULTS = {"font": DEFAULT_FONT,"size": 24.0, "unit": "font", "weight": 400, "italic": False, "tracking": 0.0,
-                 "leading": 100.0, "align": "left", "threshold": 50.0, "grow": 0.0}
+                 "leading": 100.0, "align": "left", "threshold": 50.0, "grow": 0.0, "direction": "roll", "turn": 0.0,
+                 "flip": False}
 SUB_ROWS = 20  # each key is looked at on this many lines for the threshold (5% steps)
 
 
@@ -31,10 +33,14 @@ def clean_text(tx):
     """Text settings from a file (or None if they're broken)."""
     try:
         out = {"text": str(tx.get("text", "")), "font": str(tx.get("font") or TEXT_DEFAULTS["font"])}
-        for key in ("size", "tracking", "leading", "threshold", "grow"):
+        for key in ("size", "tracking", "leading", "threshold", "grow", "turn"):
             out[key] = float(tx.get(key, TEXT_DEFAULTS[key]))
+        if not math.isfinite(out["turn"]):
+            out["turn"] = 0.0
         out["unit"] = tx.get("unit") if tx.get("unit") in UNITS else "font"
         out["align"] = tx.get("align") if tx.get("align") in TEXT_ALIGNS else "left"
+        out["direction"] = tx.get("direction") if tx.get("direction") in DIRECTIONS else "roll"
+        out["flip"] = bool(tx.get("flip", False))
         out["weight"] = min(1000, max(1, int(tx.get("weight", 400))))
         out["italic"] = bool(tx.get("italic", False))
         out["threshold"] = min(100.0, max(0.0, out["threshold"]))
@@ -80,16 +86,47 @@ def em_keys(tx, size=None):
 
 # ---------------------------------------------------------------- layout
 
+def letter_matrix(tx):
+    """How each letter is turned on its own spot: Flip letters (upside down) first, then Letter turn (degrees,
+    anticlockwise as the piano roll shows it), as (a, b, c, d): em point (x, y) -> (a x + b y, c x + d y).
+    Turned 90 and flipped = the letter's sideways and up swapped: upright in a falling-notes player."""
+    t = math.radians(tx.get("turn", 0.0))
+    cos, sin = (0.0 if abs(v) < 1e-12 else math.copysign(1.0, v) if abs(abs(v) - 1) < 1e-12 else v
+                for v in (math.cos(t), math.sin(t)))
+    f = -1.0 if tx.get("flip") else 1.0
+    return cos, -sin * f, sin, cos * f
+
+
 def layout(tx):
-    """The text laid out in em units: (contours, carets). contours = [(glyph number, Bezier points)];
-    carets = [(x, baseline)] for every place the caret can be (before each character, and at the very end)."""
+    """The text laid out in em units: (contours, places). contours = [(glyph number, Bezier points)]; places = one
+    for every spot the caret can be (before each character; a line's end), in text order: {"o": where the letter's
+    own (0, 0) went (em = o + letter_matrix x its point), "cell": its room as 4 em points (a line's end: none
+    wide), "caret": the caret line there (2 em points)}.
+    Direction: "roll" = letters along time, lines downwards (as typed in many programs); "across" = letters up the
+    keys, each next line earlier (in a player: reads across, lines fall in turn); "down" = letters along time in
+    steady steps, first letter first, each line a column next to the last (higher keys) at the same time; Align
+    there = letters lined up on the column's low keys / middle / high keys."""
     font = text_font(tx)
     step = font.line_height * tx["leading"] / 100
     track = tx["tracking"] / 1000
-    contours, carets = [], []
+    a, b, c, d = letter_matrix(tx)
+    turn = lambda x, y: (a * x + b * y, c * x + d * y)
+    asc, desc = font.ascent, font.descent
+    mid = (asc - desc) / 2
+    way = tx.get("direction", "roll")
+
+    def room(adv):  # (the letter's room turned, round its middle: half its size along time / keys)
+        pts = [turn(x - adv / 2, y - mid) for x, y in ((0, -desc), (adv, -desc), (adv, asc), (0, asc))]
+        return max(abs(x) for x, _ in pts), max(abs(y) for _, y in pts)
+
+    lines = tx["text"].split("\n")
+    if way == "down":  # every letter the same time (the longest), the column as wide as the widest letter
+        sizes = [room(font.glyph(ch)[0]) for line in lines for ch in line] or [room(0.5)]
+        slot, band = 2 * max(w for w, _ in sizes), 2 * max(h for _, h in sizes)
+        step = max(font.line_height, band) * tx["leading"] / 100  # (columns never overlap at 100%)
+    contours, places = [], []
     g = 0
-    for n, line in enumerate(tx["text"].split("\n")):
-        y = -n * step
+    for n, line in enumerate(lines):
         xs, x, prev = [], 0.0, None
         for ch in line:
             if prev is not None:
@@ -98,12 +135,32 @@ def layout(tx):
             x += font.glyph(ch)[0]
             prev = ch
         shift = {"left": 0.0, "center": -x / 2, "right": -x}[tx["align"]]
-        for ch, cx in zip(line, xs):
-            for c in font.glyph(ch)[1]:
-                contours.append((g, [[px + cx + shift, py + y] for px, py in c]))
-            g += 1
-        carets += [(cx + shift, y) for cx in xs] + [(x + shift, y)]
-    return contours, carets
+        for k in range(len(line) + 1):
+            adv = font.glyph(line[k])[0] if k < len(line) else 0.0
+            cx, cy = turn(adv / 2, mid)  # (where the letter's middle goes when it's turned)
+            edge = None
+            if way == "down":
+                s0 = k * (slot + track)
+                h = room(adv)[1]
+                at = (s0 + slot / 2, n * step + {"left": h, "center": band / 2, "right": band - h}[tx["align"]])
+                o = (at[0] - cx, at[1] - cy)
+                edge = [(s0, n * step), (s0 + slot, n * step), (s0 + slot, n * step + band), (s0, n * step + band)]
+            elif way == "across":
+                pos = (xs[k] if k < len(line) else x) + shift
+                o = (-n * step + mid - cx, pos + adv / 2 - cy)
+            else:  # (unturned: exactly where the letter starts, no rounding on the way)
+                o = ((xs[k] if k < len(line) else x) + shift + adv / 2 - cx, -n * step + mid - cy)
+                if (a, b, c, d) == (1.0, 0.0, 0.0, 1.0):
+                    o = ((xs[k] if k < len(line) else x) + shift, -n * step)
+            put = lambda x, y: (o[0] + a * x + b * y, o[1] + c * x + d * y)
+            cell = edge or [put(x, y) for x, y in ((0, -desc), (adv, -desc), (adv, asc), (0, asc))]
+            caret = [edge[0], edge[3]] if edge else [put(0, -desc), put(0, asc)]
+            places.append({"o": o, "cell": cell, "caret": caret})
+            if k < len(line):
+                for cont in font.glyph(line[k])[1]:
+                    contours.append((g, [list(put(px, py)) for px, py in cont]))
+                g += 1
+    return contours, places
 
 
 def flatten(pts, tol=0.004):
@@ -279,14 +336,16 @@ def split_letters(sh, notes_of, ppq):
     """Split into letters: each letter you can see as its own one-letter text (a copy of sh: fill, colour, gate
     ... kept) exactly where it was, so the notes stay the same; spaces go. [] if there's nothing to split."""
     tx, (O, X, Y) = sh["text"], text_axes(sh)
-    carets = layout(tx)[1]  # (the caret before character j = where it starts)
+    places = layout(tx)[1]  # (place j = where character j went)
     out = []
     for j, ch in enumerate(tx["text"]):
         if ch == "\n":
             continue
         one = copy.deepcopy({k: v for k, v in sh.items() if k not in ("strokes", "pts", "text", "name")})
-        letter = {k: v for k, v in tx.items() if k not in ("anchor", "bbox", "holes")}
-        if build(one, dict(letter, text=ch, align="left"), (to_roll((O, X, Y), *carets[j]), X, Y)):
+        letter = dict({k: v for k, v in tx.items() if k not in ("anchor", "bbox", "holes")}, text=ch)
+        own = layout(letter)[1][0]["o"]  # (where it would go alone: moved onto where it was)
+        at = (places[j]["o"][0] - own[0], places[j]["o"][1] - own[1])
+        if build(one, letter, (to_roll((O, X, Y), *at), X, Y)):
             set_anchor(one, notes_of, ppq)
             out.append(one)
     return out

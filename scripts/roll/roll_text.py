@@ -1,10 +1,12 @@
 """Piano roll: the Text tool. Click to put a blinking caret there and type straight onto the roll; click a text to
 retype it. The text is a custom shape with sh["text"] (notes/text.py); it's rebuilt on every key."""
 
+import math
+
 from files.lang import tr
 from notes.custom import custom_settings
-from notes.text import (anchor_at, build, from_roll, layout, missing_letters, new_axes, onto_anchor, rebuild, restyle,
-                        text_axes, text_font, with_arial)
+from notes.text import (anchor_at, build, from_roll, layout, letter_matrix, missing_letters, new_axes, onto_anchor,
+                        rebuild, restyle, text_axes, text_font, with_arial)
 from roll.roll_shared import CTRL, SHIFT
 from window import look
 
@@ -285,13 +287,14 @@ class TextTyping:
         em = from_roll(axes, self.x2t(e.x), self.y2p(e.y))
         if em is None:
             return len(tx["text"])
-        spots = layout(tx)[1]
-        font = text_font(tx)
-        mid = (font.ascent - font.descent) / 2
-        line_of = [tx["text"].count("\n", 0, j) for j in range(len(tx["text"]) + 1)]
-        base = {line_of[j]: y for j, (_, y) in enumerate(spots)}
-        n = min(base, key=lambda n: abs(em[1] - base[n] - mid))
-        return min((j for j in range(len(spots)) if line_of[j] == n), key=lambda j: abs(em[0] - spots[j][0]))
+        places = layout(tx)[1]
+
+        def away(j):  # (from the caret line there)
+            (xa, ya), (xb, yb) = places[j]["caret"]
+            dx, dy = xb - xa, yb - ya
+            t = max(0.0, min(1.0, ((em[0] - xa) * dx + (em[1] - ya) * dy) / (dx * dx + dy * dy or 1.0)))
+            return math.hypot(em[0] - xa - t * dx, em[1] - ya - t * dy)
+        return min(range(len(places)), key=away)
 
     def show_caret(self, on=True):
         """Draw the caret (on) and keep it blinking."""
@@ -307,27 +310,28 @@ class TextTyping:
     def draw_typing(self, caret):
         """The dashed box around the text being typed, the selected characters' highlight and (caret) the caret."""
         tx, axes = self.typing_state()
-        spots = layout(tx)[1]
-        font = text_font(tx)
+        places = layout(tx)[1]
         O, X, Y = axes
         xy = lambda x, y: (self.t2x(O[0] + x * X[0] + y * Y[0]), self.p2y(O[1] + x * X[1] + y * Y[1]))
-        up, down = font.ascent, font.descent
 
-        def rect(x0, x1, y0, y1, **kw):  # a box in em units (turns / slants with the text)
-            pts = [xy(x0, y0), xy(x1, y0), xy(x1, y1), xy(x0, y1)]
-            return self.create_polygon([v for p in pts for v in p], tags="caret", **kw)
+        def poly(pts, **kw):  # em points (turns / slants with the text)
+            return self.create_polygon([v for p in pts for v in xy(*p)], tags="caret", **kw)
 
         pad = 0.08
-        xs, ys = [x for x, _ in spots], [y for _, y in spots]
-        rect(min(xs) - pad, max(xs) + pad, min(ys) - down - pad, max(ys) + up + pad, fill="",
-             outline=look.TEXT_BOX, dash=(4, 3), width=max(1, round(self.scale)))
+        xs = [x for pl in places for x, _ in pl["cell"]]
+        ys = [y for pl in places for _, y in pl["cell"]]
+        x0, x1, y0, y1 = min(xs) - pad, max(xs) + pad, min(ys) - pad, max(ys) + pad
+        poly([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], fill="", outline=look.TEXT_BOX, dash=(4, 3),
+             width=max(1, round(self.scale)))
         s0, s1 = self.text_selection()
         text = tx["text"]
         for j in range(s0, s1):
-            x0, y = spots[j]
-            x1 = spots[j + 1][0] if text[j] != "\n" else x0 + 0.25  # a selected line break: a little stub
-            rect(x0, x1, y - down, y + up, fill=look.TEXT_BOX, outline="", stipple="gray50")
+            cell = places[j]["cell"]
+            if text[j] == "\n" and tx.get("direction", "roll") != "down":  # a selected line break: a little stub
+                (ax, ay), (bx, by) = places[j]["caret"]
+                ux, uy = letter_matrix(tx)[0] * 0.25, letter_matrix(tx)[2] * 0.25
+                cell = [(ax, ay), (ax + ux, ay + uy), (bx + ux, by + uy), (bx, by)]
+            poly(cell, fill=look.TEXT_BOX, outline="", stipple="gray50")
         if caret and s0 == s1:
-            x, y = spots[min(self.typing["caret"], len(spots) - 1)]
-            self.create_line(*xy(x, y - down), *xy(x, y + up), fill=look.TEXT_CARET,
-                             width=max(2, round(2 * self.scale)), tags="caret")
+            a, b = places[min(self.typing["caret"], len(places) - 1)]["caret"]
+            self.create_line(*xy(*a), *xy(*b), fill=look.TEXT_CARET, width=max(2, round(2 * self.scale)), tags="caret")

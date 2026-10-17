@@ -11,6 +11,15 @@ Line spacing: room between lines (Enter starts a new line), in % of the font's o
 [clip:text-linespace]
 
 Align: lines up several lines on their left side, their middle or their right side.
+
+Direction: which way the letters go.
+- Piano roll: along time, so the text reads normally here.
+- Player across: the text reads across the keys in a falling-notes player. Each new line arrives before the one above it.
+- Player down: the letters arrive one after another in steady steps, first letter first. Letter spacing adds or takes away time between them. Each new line becomes a column beside the first (higher keys), arriving at the same time. Align lines the letters up on the column's low keys, centre or high keys.
+
+Letters that would go past the highest key are cut off, never squeezed.
+
+Letter turn and Flip letters: turn each letter on its own spot (Flip turns it upside down first). The player directions set them to 90 and ticked, which stands the letters upright in a player; you can change them after, for example to 45.
 [clip:text-align]
 
 Text is a custom shape, so Empty, Fill, Spam and Outline spam work on its letters too (see Inside fill).

@@ -16,13 +16,17 @@ ENTRIES = {"size": (tr("panel_text.size"), "", 0.01, 2000),  # (units: text keys
            "tracking": (tr("panel_text.letter_spacing"), "panel_text.1000_em", -1000, 10000),
            "leading": (tr("panel_text.line_spacing"), "unit.percent", 1, 1000),
            "threshold": (tr("panel_text.threshold"), "unit.percent", 0, 100),
-           "grow": (tr("panel_text.grow"), "unit.keys", -100, 100)}
+           "grow": (tr("panel_text.grow"), "unit.keys", -100, 100),
+           "turn": (tr("panel_text.letter_turn"), "unit.degrees", -360, 360)}  # (its own row, under Direction)
 # quick changes (widgets.Scrub): (step, Shift step, Ctrl step)
 STEPS = {"size": (1, 10, 0.1), "tracking": (10, 100, 1), "leading": (5, 25, 1), "threshold": (1, 10, 0.1),
-         "grow": (0.1, 1, 0.01)}
+         "grow": (0.1, 1, 0.01), "turn": (5, 45, 1)}
 UNIT_CHOICES =[("font", tr("panel_text.font_size")), ("rows", tr("panel_text.rows"))]
 ALIGN_CHOICES = [("left", tr("panel_text.left")), ("center", tr("panel_text.centre")),
                  ("right", tr("panel_text.right"))]
+DOWN_ALIGNS = (tr("panel_text.low_keys"), tr("panel_text.centre"), tr("panel_text.high_keys"))  # (Player down)
+DIRECTION_CHOICES = [("roll", tr("panel_text.dir_roll")), ("across", tr("panel_text.dir_across")),
+                     ("down", tr("panel_text.dir_down"))]
 TIPS = {
     "unit": tr("panel_text.font_size_the_number_is_the"),
     "tracking": tr("panel_text.extra_room_between_letters_in_1"),
@@ -30,6 +34,9 @@ TIPS = {
     "threshold": tr("panel_text.how_much_of_a_key_s"),
     "grow": tr("panel_text.makes_the_letters_strokes_thicker_in"),
     "font": tr("panel_text.pick_the_font_you_can_type"),
+    "direction": tr("panel_text.direction_tip"),
+    "turn": tr("panel_text.letter_turn_tip"),
+    "flip": tr("panel_text.flip_letters_tip"),
 }
 
 
@@ -46,6 +53,8 @@ class TextPanel:
         self.text_weight = tk.StringVar()
         self.text_italic = tk.BooleanVar()
         self.text_align = tk.StringVar(value="left")
+        self.text_direction = tk.StringVar()
+        self.text_flip = tk.BooleanVar()
         self.font_dialog = None
 
         ttk.Label(box, text=tr("panel_text.text"), font=look.font(9, "bold")).grid(row=0, column=0, columnspan=2,
@@ -55,8 +64,7 @@ class TextPanel:
         self.font_btn.grid(row=1, column=1, sticky="ew", padx=(5, 0), pady=1)
         Tooltip(self.font_btn, TIPS["font"])
 
-        r = 2
-        for key in ENTRIES:
+        def number_box(r, key):  # label, box, unit word: the row's frame
             label, unit, lo, hi = ENTRIES[key]
             lb = ttk.Label(box, text=label)
             lb.grid(row=r, column=0, sticky="w", pady=1)
@@ -73,6 +81,13 @@ class TextPanel:
                                                                                                 padx=(3, 0))
             if key in TIPS:
                 Tooltip(e, TIPS[key])
+            return row
+
+        r = 2
+        for key in ENTRIES:
+            if key == "turn":
+                continue
+            row = number_box(r, key)
             if key == "size":
                 for value, text in UNIT_CHOICES:
                     b = ttk.Radiobutton(row, text=text, value=value, variable=self.text_unit, style="Toolbutton",
@@ -97,10 +112,26 @@ class TextPanel:
                 ttk.Label(box, text=tr("panel_text.align")).grid(row=r, column=0, sticky="w", pady=1)
                 row = ttk.Frame(box)
                 row.grid(row=r, column=1, sticky="w", padx=(5, 0), pady=1)
+                self.align_buttons = []
                 for value, text in ALIGN_CHOICES:
-                    ttk.Radiobutton(row, text=text, value=value, variable=self.text_align, style="Toolbutton",
-                                    command=lambda: self.set_text_setting({"align": self.text_align.get()})
-                                    ).pack(side="left", padx=(0, 1))
+                    b = ttk.Radiobutton(row, text=text, value=value, variable=self.text_align, style="Toolbutton",
+                                        command=lambda: self.set_text_setting({"align": self.text_align.get()}))
+                    b.pack(side="left", padx=(0, 1))
+                    self.align_buttons.append(b)
+                r += 1
+                # which way the letters go (and each letter turned / flipped on its own spot)
+                ttk.Label(box, text=tr("panel_text.direction")).grid(row=r, column=0, sticky="w", pady=1)
+                d = ttk.Combobox(box, textvariable=self.text_direction, state="readonly", width=14,
+                                 values=[name for _, name in DIRECTION_CHOICES])
+                d.grid(row=r, column=1, sticky="w", padx=(5, 0), pady=1)
+                d.bind("<<ComboboxSelected>>", lambda ev: self.set_direction(DIRECTION_CHOICES[ev.widget.current()][0]))
+                Tooltip(d, TIPS["direction"])
+                r += 1
+                row = number_box(r, "turn")
+                f = ttk.Checkbutton(row, text=tr("panel_text.flip_letters"), variable=self.text_flip,
+                                    command=lambda: self.set_text_setting({"flip": self.text_flip.get()}))
+                f.pack(side="left", padx=(8, 0))
+                Tooltip(f, TIPS["flip"])
                 r += 1
         self.text_info = ttk.Label(box, text="", foreground=look.HINT, font=look.font(8),
                                    wraplength=int(300 * self.scale), justify="left")
@@ -133,7 +164,7 @@ class TextPanel:
         tx, size = self.text_current()
         self._loading = True
         for key, var in self.text_vars.items():
-            value = size if key == "size" else tx[key]
+            value = size if key == "size" else tx.get(key, TEXT_DEFAULTS[key])
             var.set(fmt(round(value, 3)))
             self._text_shown[key] = var.get()
             self.text_entries[key].config(style="TEntry")
@@ -141,6 +172,11 @@ class TextPanel:
         self.text_weight.set(min(WEIGHTS, key=lambda w: abs(w[0] - tx["weight"]))[1])
         self.text_italic.set(tx["italic"])
         self.text_align.set(tx["align"])
+        way = tx.get("direction", "roll")
+        self.text_direction.set(dict(DIRECTION_CHOICES)[way])
+        self.text_flip.set(bool(tx.get("flip")))
+        for b, (_, text), down in zip(self.align_buttons, ALIGN_CHOICES, DOWN_ALIGNS):
+            b.config(text=down if way == "down" else text)  # (Player down: across the keys)
         self._loading = False
         self.font_btn.config(text=tr("panel_text.text_2", font=tx['font']))
         font = text_font(tx)
@@ -194,6 +230,12 @@ class TextPanel:
         self.sync_custom()
         if roll.typing and refocus:
             roll.focus_set()  # carry on typing
+
+    def set_direction(self, way):
+        """Direction picked: the player ones turn each letter 90 and flip it (upright in a player), Piano roll
+        puts them back; both can be changed after."""
+        player = way != "roll"
+        self.set_text_setting({"direction": way, "turn": 90.0 if player else 0.0, "flip": player})
 
     def on_text_entry(self, key, back=False):
         var, entry = self.text_vars[key], self.text_entries[key]
