@@ -27,14 +27,14 @@ from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
 from files.domino_clip import DOMINO_STARTS, GATE_MAX, LONGEST, clip_data, cut_gates, dms_data, dms_path, get_from_clipboard, put_on_clipboard, read_notes
-from files.midi_out import MAX_DELTA, PPQ_WARN, long_silences, write_midi
+from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, write_midi
 from files.playback import keep_saved
 from files.about import HERE, USER, VERSION
 from files.safefile import write_bytes, write_text
 from files.settings import save_app_settings, with_app_settings
 from files.snap import clean_snap
 from files.update_check import version_tuple
-from window.big_ask import ask as ask_big, ask_drums
+from window.big_ask import ask as ask_big, ask_domino_tracks, ask_drums
 
 AUTOSAVE = os.path.join(USER, "autosave.json")
 OUTPUT_DIR = os.path.join(HERE, "output")
@@ -622,6 +622,10 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"),
                                  tr("project.no_notes_yet_draw_something_inside", keys=self.keys - 1))
             return
+        tracks = int(self.rendered[:, 4].max()) + 1
+        if tracks > MAX_TRACKS:
+            messagebox.showerror(tr("project.spiderweb"), tr("project.too_many_tracks", tracks=tracks, most=MAX_TRACKS))
+            return
         if not ask_big(self, "midi", len(self.rendered)):
             return
         path = output_path(self.pvar["output"].get())
@@ -683,7 +687,7 @@ class ProjectFiles:
         if int(notes[:, 1].max()) > LONGEST:
             messagebox.showerror(tr("project.spiderweb"), tr("project.too_long_for_domino", longest=LONGEST))
             return
-        if not ask_big(self, "dms", len(notes)):
+        if not ask_big(self, "dms", len(notes)) or not ask_domino_tracks(self, int(notes[:, 4].max()) + 1):
             return
         notes, long = cut_gates(notes)
         path = dms_path(output_path(self.pvar["output"].get()))
@@ -726,7 +730,8 @@ class ProjectFiles:
             return
         tracks = len(np.unique(notes[:, 4]))
         # (no channel 10 question when the project uses it on purpose: "Use channel 10")
-        if not ask_big(self, "domino", len(notes)) or not (self.all16() or ask_drums(self, tracks)):
+        if (not ask_big(self, "domino", len(notes)) or not ask_domino_tracks(self, tracks)
+                or not (self.all16() or ask_drums(self, tracks))):
             return
         self.busy(tr("project.copying_for_domino"))  # (millions of notes take a few seconds)
         notes, long = cut_gates(notes)

@@ -10,6 +10,7 @@ from notes.engine import slot_track_channel
 
 PPQ_WARN = 32767  # a PPQ this high or higher: many MIDI programs can't open the file; still written
 MAX_DELTA = (1 << 28) - 1  # the longest wait between two events a MIDI file can hold (4 bytes)
+MAX_TRACKS = 65535 - 1  # note tracks a MIDI file can hold (its header counts 16 bits, the tempo track is one)
 PIECE = 1 << 20  # events made at a time without the speed-ups
 END = b"\x00\xFF\x2F\x00"  # end-of-track
 

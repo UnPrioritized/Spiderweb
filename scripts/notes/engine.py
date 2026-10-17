@@ -5,6 +5,7 @@ The maths for each kind lives in its own file: paths.py (lines, polylines, freeh
 (custom shapes), funnel.py (funnels), envelope.py (velocities).
 """
 
+import itertools
 import json
 import math
 import threading
@@ -1220,14 +1221,23 @@ def pushed_solid(note_lists, pinned, fixed, split, step):
 def in_rounds(note_lists, slot_of, rounds, step):
     """render's slots with "New channels each Colours round" (user 2026-10-17: each round editable alone in other
     programs): every round of every shape with rounds, in shape order, gets step slots of its own past the ones the
-    other shapes use, each note at the channel (colour) it has without the tick. -> (slots, slot count)."""
-    used = [int(np.max(s)) for s, lst, r in zip(slot_of, note_lists, rounds) if r is None and len(lst)]
-    block = (max(used) + step) // step if used else 0
+    other shapes use, each note at the channel (colour) it has without the tick. -> (slots, slot count).
+    The other shapes' blocks are left free of rounds, the rest are filled in order: a plain-notes shape frozen on
+    round channels keeps them and the shapes around it keep theirs. A round needing more than step slots (a
+    layered Hz bass's clash tracks) takes as many blocks."""
+    taken = set()
+    for s, lst, r in zip(slot_of, note_lists, rounds):
+        if r is None and len(lst):
+            taken.update((np.unique(np.asarray(s, np.int64)) // step).tolist())
+    free = (b for b in itertools.count() if b not in taken)
     out = list(slot_of)
     for i, (lst, r) in enumerate(zip(note_lists, rounds)):
         if r is not None and len(lst):
-            out[i] = np.asarray(slot_of[i], np.int64) % step + step * (block + r)
-            block += int(r.max()) + 1
+            s = np.asarray(slot_of[i], np.int64)
+            q = s // step - int(s.min()) // step  # (the block within a round)
+            wide = int(q.max()) + 1
+            blocks = np.fromiter(itertools.islice(free, (int(r.max()) + 1) * wide), np.int64)
+            out[i] = s % step + step * blocks[r * wide + q]
     return out, max([int(np.max(s)) + 1 for s, lst in zip(out, note_lists) if len(lst)] or [0])
 
 

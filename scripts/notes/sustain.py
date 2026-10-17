@@ -299,9 +299,12 @@ def cut_by(normal, held):
     if not len(normal) or not len(held):
         return normal
     lo = int(min(normal[:, 0].min(), held[:, 0].min()))
-    hk = (held[:, 4] * 256 + held[:, 2]) << 40 | (held[:, 0] - lo)
+    # (each key + slot pair numbered: slot * 256 + key ran out of room past slot 32767, many Colours rounds)
+    _, pair = np.unique(np.concatenate([held[:, [4, 2]], normal[:, [4, 2]]]), axis=0, return_inverse=True)
+    pair = pair.reshape(-1).astype(np.int64)
+    hk = pair[:len(held)] << 40 | (held[:, 0] - lo)
     hk = np.unique(hk)
-    nk = (normal[:, 4] * 256 + normal[:, 2]) << 40 | (normal[:, 0] - lo)
+    nk = pair[len(held):] << 40 | (normal[:, 0] - lo)
     at = np.searchsorted(hk, nk, side="right")
     ok = at < len(hk)
     nxt = hk[np.minimum(at, len(hk) - 1)]

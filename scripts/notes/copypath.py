@@ -55,6 +55,7 @@ import math
 
 import numpy as np
 
+from notes.custom import ROUND
 from notes.pattern import clean_pattern, pattern_paths
 
 KINDS = ("straight", "curve", "arc")
@@ -650,15 +651,18 @@ def scaled(x, s, at, key, by_key):
 
 
 def coloured(tracks, i, cfg, own):
-    """Copy i's tracks (colour groups): Keep / Shift / Turn within its own (own = the shape's, sorted) / One each."""
+    """Copy i's tracks (colour groups): Keep / Shift / Turn within its own (own = the shape's, sorted, rounds taken
+    off) / One each. A Colours round (custom.ROUND) stays: only the colour moves."""
     how, step, most = cfg["colours"], cfg["step"], cfg["most"]
+    lap = tracks - tracks % ROUND
+    tracks = tracks % ROUND
     if how == "shift":
-        return (tracks + i * step) % most
+        return (tracks + i * step) % most + lap
     if how == "turn":
-        return own[(np.searchsorted(own, tracks) + i * step) % len(own)]
+        return own[(np.searchsorted(own, tracks) + i * step) % len(own)] + lap
     if how == "one":
-        return np.full(len(tracks), (i * step) % most, tracks.dtype)
-    return tracks
+        return np.full(len(tracks), (i * step) % most, tracks.dtype) + lap
+    return tracks + lap
 
 
 def mirrored_after(out, p, tag=0):
@@ -750,7 +754,7 @@ def apply_path(a, cfg, ppq, keys=256, tag=False):
     size = (cfg["size"][0] + (cfg["size"][1] - cfg["size"][0]) * u) / 100
     flips = down[:n] if cfg["flip"] == "each" else np.zeros(n, bool)
     col = a.shape[1] - 1 if a.shape[1] >= 5 and cfg["colours"] != "keep" else None
-    own = np.unique(a[:, col]) if col is not None else None
+    own = np.unique(a[:, col] % ROUND) if col is not None else None
     order = np.argsort(a[:, 2], kind="stable")
     by_key = (a[order], a[order, 2])
     flip_key = None

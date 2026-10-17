@@ -96,9 +96,10 @@ def clip_data(notes, ppq, bar, start="bar"):
         first = int(notes[:, 0].min()) // bar * bar
         length = max(-(-(int(notes[:, 1].max()) - first) // bar) * bar, bar)
     end = item(2009, item(1001, struct.pack("<I", length)))
-    tracks = b""
-    for slot in np.unique(notes[:, 4]).tolist():
-        tracks += item(1003, TRACK_HEAD + note_items(notes[notes[:, 4] == slot], first) + end + TRACK_TAIL)
+    s = notes[np.lexsort((notes[:, 2], notes[:, 0], notes[:, 4]))]  # (one sort: by track, each in time order)
+    cuts = np.flatnonzero(np.diff(s[:, 4])) + 1
+    tracks = b"".join(item(1003, TRACK_HEAD + note_rows(part, first).tobytes() + end + TRACK_TAIL)
+                      for part in np.split(s, cuts))
     data = SONG_START + item(1002, struct.pack("<H", ppq)) + SONG_REST + tracks + SONG_TAIL
     return MAGIC + struct.pack("<I", len(data)) + zlib.compress(data)
 
