@@ -8,7 +8,8 @@ note away from it changes by g + g*r + ... + g*r^(k-1), g = the strength, r from
 Start ("start" on): "time" beats per note; + = the lowest note first (it stays, the others start later), - = the
 highest first. Whole notes move, unless "preserve" (the ends stay). "ahead": the tension works the other way round
 and the strum is moved earlier, so its last note sits on the chord's start (a note it would push before tick 0
-starts at 0, its length kept). No note moves more than CAP beats. "vel": velocity taken off per note,
+starts at 0, its length kept). No note moves more than CAP beats (the ones that would keep their strum order there,
+a tick apart). "vel": velocity taken off per note,
 + = quieter after the first note struck, - = quieter before the last one (never under 1).
 End ("end" on): "end_time" beats: the ends come earlier; + = the last note struck keeps its end, - = the first.
 "chop": every note is first cut wherever another note starts while it's held, so those pieces strum too.
@@ -25,7 +26,9 @@ LIMITS = {"time": (-4.0, 4.0), "tension": (-100.0, 100.0), "vel": (-127.0, 127.0
 FLAGS = ("start", "preserve", "ahead", "end", "chop", "alternate")
 STRUM_DEFAULTS = dict({k: 0.0 for k in LIMITS}, start=True, preserve=False, ahead=False, end=True, chop=False,
                       alternate=False)
-CAP = 64  # beats: no note moves further from its chord (a steep tension over a big chord would go on forever, user)
+# beats: no note moves further from its chord (a steep tension over a big chord would go on forever, user; 1000 bars
+# of 4/4, user 2026-10-17: FL's own goes on until it breaks past ~1300 bars, leaving the rest of the chord behind)
+CAP = 4000
 CHOP_MAX = 5_000_000  # pieces: more than this and the notes aren't chopped
 
 
@@ -49,14 +52,18 @@ def clean_strum(c):
     return out
 
 
-def steps(k, g, tension, cap):
-    """How far the note k steps from the anchor changes: g + g*r + ... (k of them), never past cap."""
+def steps(k, g, tension, cap, kept=False):
+    """How far the note k steps from the anchor changes: g + g*r + ... (k of them), never past cap. kept: the notes
+    past cap keep their order there, one more each (ticks: one tick apart, not all on one spot)."""
     r = 1 + tension / 100 if tension >= 0 else 1 + tension / 200
     k = np.asarray(k, float)
-    if r == 1:
-        return np.minimum(g * k, cap)
-    with np.errstate(over="ignore"):
-        return np.minimum(g * (np.power(r, k) - 1) / (r - 1), cap)
+    with np.errstate(over="ignore", invalid="ignore"):
+        out = g * k if r == 1 else g * (np.power(r, k) - 1) / (r - 1)
+    over = ~(out < cap)  # (an overflow is past it too)
+    if not kept or not over.any():
+        return np.where(over, cap, out)
+    first = np.flatnonzero(~(steps(np.arange(int(k.max()) + 1), g, tension, cap) < cap))[0]  # (the first step past
+    return np.where(over, cap + (k - first), out)  # cap: the same for every chord, steps only grow with k)
 
 
 def chop(a):
@@ -103,9 +110,9 @@ def apply_strum(a, st, ppq):
     if start and st["time"]:
         g = abs(st["time"]) * ppq
         if st["ahead"]:
-            off = steps(q, g, -st["tension"], cap) - steps(m - 1, g, -st["tension"], cap)
+            off = steps(q, g, -st["tension"], cap, True) - steps(m - 1, g, -st["tension"], cap, True)
         else:
-            off = steps(q, g, st["tension"], cap)
+            off = steps(q, g, st["tension"], cap, True)
         off = np.rint(off)
         late = np.maximum(0, -(ns + off))  # (pushed before tick 0: the note stops at 0, keeping its length)
         ns = ns + off + late
@@ -113,7 +120,7 @@ def apply_strum(a, st, ppq):
             ne = ne + off + late
     if st["end"] and st["end_time"]:
         k = m - 1 - q if st["end_time"] > 0 else q
-        ne = ne - np.rint(steps(k, abs(st["end_time"]) * ppq, st["end_tension"], cap))
+        ne = ne - np.rint(steps(k, abs(st["end_time"]) * ppq, st["end_tension"], cap, True))
     if start and st["vel"]:
         k = q if st["vel"] > 0 else m - 1 - q
         a[:, 3] = np.maximum(1, a[:, 3] - np.rint(steps(k, abs(st["vel"]), st["vel_tension"], VEL_KNOB))).astype(np.int64)
