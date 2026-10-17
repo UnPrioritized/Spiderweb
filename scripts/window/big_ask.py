@@ -19,8 +19,6 @@ BIG = 1_000_000  # notes: asked past this (making shapes, Copy to Domino)
 # Export to Domino 36-43)
 PER_NOTE = {"notes": 300, "midi": 55, "domino": 150, "dms": 45}
 DRUM_TRACK = 10  # Copy to Domino: asked when the copy fills this many tracks (ask_drums)
-DOMINO_TRACKS = 4096  # Copy / Export to Domino: asked past this many tracks (ask_domino_tracks)
-
 
 def gb(n):
     return f"{n / 1e9:.1f}"
@@ -61,17 +59,6 @@ def ask_drums(app, tracks):
     go, skip = dialog(app, tr("big_ask.title"), tr("big_ask.drums", tracks=tracks), False)
     if go and skip:
         app.big_skip.add("drums")
-    return go
-
-
-def ask_domino_tracks(app, tracks):
-    """Copy / Export to Domino with more than DOMINO_TRACKS tracks (the most Domino was seen opening; "New channels
-    each Colours round" gets there). True = go ahead."""
-    if tracks <= DOMINO_TRACKS or "domino_tracks" in app.big_skip:
-        return True
-    go, skip = dialog(app, tr("big_ask.title"), tr("big_ask.domino_tracks", tracks=tracks, most=DOMINO_TRACKS), False)
-    if go and skip:
-        app.big_skip.add("domino_tracks")
     return go
 
 

@@ -34,7 +34,7 @@ from files.safefile import write_bytes, write_text
 from files.settings import save_app_settings, with_app_settings
 from files.snap import clean_snap
 from files.update_check import version_tuple
-from window.big_ask import ask as ask_big, ask_domino_tracks, ask_drums
+from window.big_ask import ask as ask_big, ask_drums
 
 AUTOSAVE = os.path.join(USER, "autosave.json")
 OUTPUT_DIR = os.path.join(HERE, "output")
@@ -687,7 +687,7 @@ class ProjectFiles:
         if int(notes[:, 1].max()) > LONGEST:
             messagebox.showerror(tr("project.spiderweb"), tr("project.too_long_for_domino", longest=LONGEST))
             return
-        if not ask_big(self, "dms", len(notes)) or not ask_domino_tracks(self, int(notes[:, 4].max()) + 1):
+        if not ask_big(self, "dms", len(notes)):
             return
         notes, long = cut_gates(notes)
         path = dms_path(output_path(self.pvar["output"].get()))
@@ -730,8 +730,7 @@ class ProjectFiles:
             return
         tracks = len(np.unique(notes[:, 4]))
         # (no channel 10 question when the project uses it on purpose: "Use channel 10")
-        if (not ask_big(self, "domino", len(notes)) or not ask_domino_tracks(self, tracks)
-                or not (self.all16() or ask_drums(self, tracks))):
+        if not ask_big(self, "domino", len(notes)) or not (self.all16() or ask_drums(self, tracks)):
             return
         self.busy(tr("project.copying_for_domino"))  # (millions of notes take a few seconds)
         notes, long = cut_gates(notes)
