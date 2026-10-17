@@ -1,7 +1,8 @@
 """Text shapes: typed text in an installed font, turned into a custom shape (custom.py) of the letters' outlines.
 
 A text shape is a custom shape with sh["text"] = its settings (TEXT_DEFAULTS plus "text", "bbox", "cap", "k",
-"holes"). The letters are laid out in em units (fonts.py: 1.0 = font size, y up from the first line's baseline);
+"holes", maybe "anchor": the click it was typed at, in the box's 0..1; the text's first note starts there and its
+lowest note is on that key, onto_anchor). The letters are laid out in em units (fonts.py: 1.0 = font size, y up from the first line's baseline);
 "bbox" = where their outlines are in em units, and sh["pts"] (the custom shape's box) is where that bbox is on
 the roll. So em units -> beats / pitch is known from the shape itself (text_axes), and retyping or changing a
 setting keeps the text where it is, however it was moved, resized, turned or skewed.
@@ -40,6 +41,12 @@ def clean_text(tx):
         out["cap"] = float(tx.get("cap", 0.7)) or 0.7
         out["k"] = float(tx.get("k", 1.0)) or 1.0
         out["holes"] = sorted({int(i) for i in tx.get("holes", ())})
+        try:  # (a broken anchor only loses the anchor)
+            anchor = [float(a) for a in tx["anchor"]]
+            if len(anchor) == 2 and all(math.isfinite(a) for a in anchor):
+                out["anchor"] = anchor
+        except (KeyError, TypeError, ValueError):
+            pass
         if len(out["bbox"]) != 4:
             return None
         return out
@@ -208,6 +215,54 @@ def build(sh, tx, axes):
     font = text_font(tx)
     sh["text"] = dict(tx, bbox=[x0, y0, x1, y1], cap=font.cap, holes=find_holes(contours))
     sh["name"] = text_name(tx["text"])
+    return True
+
+
+def frame_uv(pts, b, p):
+    """(beat, pitch) -> where it is in the box sh["pts"] (0..1 both ways inside it), or None if the box is flat."""
+    (b0, p0), (b1, p1), (b2, p2) = pts
+    return from_roll(((b0, p0), (b1 - b0, p1 - p0), (b2 - b0, p2 - p0)), b, p)
+
+
+def anchor_at(sh):
+    """Where the text's anchor is on the roll (beat, pitch), or None (a text made before anchors: it stays put).
+    The anchor rides in the box, so moving / resizing / turning the text takes it along."""
+    uv = sh["text"].get("anchor")
+    if not uv:
+        return None
+    (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
+    u, v = uv
+    return (b0 + u * (b1 - b0) + v * (b2 - b0), p0 + u * (p1 - p0) + v * (p2 - p0))
+
+
+def onto_anchor(sh, at, notes_of, ppq):
+    """Slide the text so its first note starts at the anchor `at` (beat, pitch) and its lowest note is on the
+    anchor's key (a "g" tail too: the other letters sit higher), and keep the anchor in it. Whole ticks and whole
+    keys only, so the notes move exactly."""
+    # first the box's left / bottom onto the anchor (notes before beat 0 or under the lowest key aren't made)
+    (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
+    corners = sh["pts"] + [[b1 + b2 - b0, p1 + p2 - p0]]
+    db, dp = at[0] - min(b for b, _ in corners), round(at[1]) - 0.5 - min(p for _, p in corners)
+    sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
+    ns = notes_of(sh)
+    if len(ns):
+        db = (round(at[0] * ppq) - int(ns[:, 0].min())) / ppq
+        dp = round(at[1]) - int(ns[:, 2].min())
+        sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
+    uv = frame_uv(sh["pts"], *at)
+    if uv:
+        sh["text"]["anchor"] = [round(uv[0], 9), round(uv[1], 9)]
+    else:
+        sh["text"].pop("anchor", None)
+
+
+def rebuild(sh, tx, axes, notes_of, ppq):
+    """build, keeping the text on its anchor (if it has one)."""
+    at = anchor_at(sh)
+    if not build(sh, tx, axes):
+        return False
+    if at:
+        onto_anchor(sh, at, notes_of, ppq)
     return True
 
 

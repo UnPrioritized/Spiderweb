@@ -3,7 +3,8 @@ retype it. The text is a custom shape with sh["text"] (notes/text.py); it's rebu
 
 from files.lang import tr
 from notes.custom import custom_settings
-from notes.text import build, from_roll, layout, missing_letters, new_axes, restyle, text_axes, text_font, with_arial
+from notes.text import (anchor_at, build, from_roll, layout, missing_letters, new_axes, onto_anchor, rebuild, restyle,
+                        text_axes, text_font, with_arial)
 from roll.roll_shared import CTRL, SHIFT
 from window import look
 
@@ -56,7 +57,7 @@ class TextTyping:
             tx = dict(app.text_defaults, text="", k=self.sy / self.sx)
             tx["cap"] = text_font(tx).cap
             self.typing = {"i": None, "caret": 0, "anchor": 0, "tx": tx, "axes": new_axes(tx, b, p, tx["k"]),
-                           "undo": False}
+                           "undo": False, "at": (b, p)}  # (at: the text's first note starts here, onto_anchor)
         app.sync_text()
         self.show_caret()
 
@@ -205,10 +206,11 @@ class TextTyping:
                 ty["was"] = sh.get("name") or "?"  # (the History says what the text was if it's all erased)
                 app.push_undo(name=tr("roll_text.type", text=ty["was"]))
                 ty["undo"], ty["step"], ty["new"] = True, app.undo_stack[-1], False
-            if build(sh, tx, axes):
+            at = anchor_at(sh)
+            if rebuild(sh, tx, axes, app.notes_of, app.ppq):
                 app.shapes_changed()
             else:  # nothing to see any more: the shape goes, the typing stays
-                ty["tx"], ty["axes"] = tx, axes
+                ty["tx"], ty["axes"], ty["at"] = tx, axes, at
                 # (its own settings, Hz bass too, wait for the letters typed next, at its place in the list)
                 ty["kept"] = (ty["i"], {k: v for k, v in sh.items() if k not in ("strokes", "pts", "text", "name")})
                 del app.shapes[ty["i"]]
@@ -220,6 +222,8 @@ class TextTyping:
             sh = dict(kept) if kept else dict(app.defaults, kind="custom",
                                               **custom_settings(app.custom_defaults, patterns=False))
             if build(sh, tx, axes):
+                if ty.get("at"):
+                    onto_anchor(sh, ty["at"], app.notes_of, app.ppq)
                 ty.pop("kept", None)
                 at = len(app.shapes) if at is None or not ty["undo"] else min(at, len(app.shapes))
                 ty["i"] = at  # before add_shape selects it (selecting another shape ends the typing)
@@ -268,7 +272,7 @@ class TextTyping:
             ty["tx"], ty["axes"] = tx, axes
             self.set_text(tx["text"], ty["caret"])
         else:
-            build(self.app.shapes[ty["i"]], tx, axes)
+            rebuild(self.app.shapes[ty["i"]], tx, axes, self.app.notes_of, self.app.ppq)
             ty["undo"] = False  # the panel took its own undo step: the next key starts a new one
             self.tell_missing(tx)
         self.show_caret()

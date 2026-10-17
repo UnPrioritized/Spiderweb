@@ -1,5 +1,7 @@
 Click on the piano roll and type (Enter = new line, Esc = done). The letters become a custom shape, so they can be filled, moved, resized, turned and skewed.
 
+The text's first note starts right where you clicked, and its lowest note sits on the key you clicked (a letter with a tail, like "g", reaches down to it and lifts the rest). It stays there while you type or change settings; move the text to give it a new spot.
+
 Panel: font, size (font size, or rows = how many keys tall the capital letters are), weight and italic, plus:
 
 Letter spacing: extra room between the letters, in 1/1000 of the font size. Minus numbers pull them closer together.
@@ -8,7 +10,7 @@ Letter spacing: extra room between the letters, in 1/1000 of the font size. Minu
 Line spacing: room between lines (Enter starts a new line), in % of the font's own line spacing.
 [clip:text-linespace]
 
-Align: where the text sits on the spot you clicked. Left = it starts there, Centre = its middle is there, Right = it ends there. With several lines it also lines them up.
+Align: lines up several lines on their left side, their middle or their right side.
 [clip:text-align]
 
 Text is a custom shape, so Empty, Fill, Spam and Outline spam work on its letters too (see Inside fill).

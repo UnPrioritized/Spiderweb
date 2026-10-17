@@ -6,7 +6,7 @@ from tkinter import ttk, messagebox
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.fonts import DEFAULT_FONT, WEIGHTS
-from notes.text import TEXT_DEFAULTS, build, restyle, shown_size, text_axes, text_font, with_arial
+from notes.text import TEXT_DEFAULTS, rebuild, restyle, shown_size, text_axes, text_font, with_arial
 from window import look
 from window.font_dialog import FontDialog
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, unit_word
@@ -187,7 +187,8 @@ class TextPanel:
             if shapes:
                 self.push_undo(name=tr("panel_text.text_setting"))
             for sh in shapes:
-                build(sh, *restyle(sh["text"], text_axes(sh), with_arial(sh["text"], changes)))
+                rebuild(sh, *restyle(sh["text"], text_axes(sh), with_arial(sh["text"], changes)), self.notes_of,
+                        self.ppq)
         self.shapes_changed()
         self.sync_text()
         self.sync_custom()
