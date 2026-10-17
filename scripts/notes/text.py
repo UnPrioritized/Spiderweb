@@ -1,8 +1,8 @@
 """Text shapes: typed text in an installed font, turned into a custom shape (custom.py) of the letters' outlines.
 
 A text shape is a custom shape with sh["text"] = its settings (TEXT_DEFAULTS plus "text", "bbox", "cap", "k",
-"holes", maybe "anchor": the click it was typed at, in the box's 0..1; the text's first note starts there and its
-lowest note is on that key, onto_anchor). The letters are laid out in em units (fonts.py: 1.0 = font size, y up from the first line's baseline);
+"holes", maybe "anchor": the click it was typed at, in the box's 0..1; the part of the text Align picks sits
+there, e.g. Left = its first note starts there and its lowest note is on that key, onto_anchor). The letters are laid out in em units (fonts.py: 1.0 = font size, y up from the first line's baseline);
 "bbox" = where their outlines are in em units, and sh["pts"] (the custom shape's box) is where that bbox is on
 the roll. So em units -> beats / pitch is known from the shape itself (text_axes), and retyping or changing a
 setting keeps the text where it is, however it was moved, resized, turned or skewed.
@@ -293,19 +293,41 @@ def anchor_at(sh):
     return (b0 + u * (b1 - b0) + v * (b2 - b0), p0 + u * (p1 - p0) + v * (p2 - p0))
 
 
+def align_parts(tx):
+    """Which part of the text sits on its anchor, as (along time, across keys): 0 = start / lowest, 0.5 = middle,
+    1 = end / highest. Piano roll: Align picks along time (Left = the first note starts there, Centre = the middle,
+    Right = the last note ends there), the lowest note on the key. Player across / down: the first note in time,
+    Align picks across the keys (left / low = the lowest note, centre, right / high = the highest)."""
+    part = {"left": 0.0, "center": 0.5, "right": 1.0}[tx.get("align", "left")]
+    return (part, 0.0) if tx.get("direction", "roll") == "roll" else (0.0, part)
+
+
+def anchor_ref(tx, ns):
+    """The spot of notes ns (tick, key) that goes on the anchor (align_parts); whole ticks / keys."""
+    ft, fk = align_parts(tx)
+    t0, t1 = int(ns[:, 0].min()), int(ns[:, 1].max())
+    k0, k1 = int(ns[:, 2].min()), int(ns[:, 2].max())
+    return t0 + math.floor((t1 - t0) * ft), k0 + math.floor((k1 - k0) * fk)
+
+
 def onto_anchor(sh, at, notes_of, ppq):
-    """Slide the text so its first note starts at the anchor `at` (beat, pitch) and its lowest note is on the
-    anchor's key (a "g" tail too: the other letters sit higher), and keep the anchor in it. Whole ticks and whole
-    keys only, so the notes move exactly."""
-    # first the box's left / bottom onto the anchor (notes before beat 0 or under the lowest key aren't made)
+    """Slide the text so the part Align picks (align_parts) sits on the anchor `at` (beat, pitch): Left = its first
+    note starts there and its lowest note is on the anchor's key (a "g" tail too: the other letters sit higher), and
+    keep the anchor in it. Whole ticks and whole keys only, so the notes move exactly."""
+    # first the box roughly there (notes before beat 0 or under the lowest key aren't made: kept off those)
+    ft, fk = align_parts(sh["text"])
     (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
     corners = sh["pts"] + [[b1 + b2 - b0, p1 + p2 - p0]]
-    db, dp = at[0] - min(b for b, _ in corners), round(at[1]) - 0.5 - min(p for _, p in corners)
+    bs, ps = [b for b, _ in corners], [p for _, p in corners]
+    left = max(0.0, at[0] - ft * (max(bs) - min(bs)))
+    bottom = max(-0.5, round(at[1]) - 0.5 - fk * (max(ps) - min(ps)))
+    db, dp = left - min(bs), bottom - min(ps)
     sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
     ns = notes_of(sh)
     if len(ns):
-        db = (round(at[0] * ppq) - int(ns[:, 0].min())) / ppq
-        dp = round(at[1]) - int(ns[:, 2].min())
+        t, k = anchor_ref(sh["text"], ns)
+        db = (round(at[0] * ppq) - t) / ppq
+        dp = round(at[1]) - k
         sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
     uv = frame_uv(sh["pts"], *at)
     if uv:
@@ -325,9 +347,11 @@ def rebuild(sh, tx, axes, notes_of, ppq):
 
 
 def set_anchor(sh, notes_of, ppq):
-    """The anchor put on the text's first note and lowest key as it is now (nothing moves)."""
+    """The anchor put where the text sits now (align_parts: its first note and lowest key for Left; nothing
+    moves)."""
     ns = notes_of(sh)
-    uv = frame_uv(sh["pts"], int(ns[:, 0].min()) / ppq, int(ns[:, 2].min())) if len(ns) else None
+    ref = anchor_ref(sh["text"], ns) if len(ns) else None
+    uv = frame_uv(sh["pts"], ref[0] / ppq, ref[1]) if ref else None
     if uv:
         sh["text"]["anchor"] = [round(uv[0], 9), round(uv[1], 9)]
 

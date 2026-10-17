@@ -1,6 +1,6 @@
 Click on the piano roll and type (Enter = new line, Esc = done). The letters become a custom shape, so they can be filled, moved, resized, turned and skewed.
 
-The text's first note starts right where you clicked, and its lowest note sits on the key you clicked (a letter with a tail, like "g", reaches down to it and lifts the rest). It stays there while you type or change settings; move the text to give it a new spot.
+The text's notes start right where you clicked (with Align Left), and its lowest note sits on the key you clicked (a letter with a tail, like "g", reaches down to it and lifts the rest). It stays there while you type or change settings; move the text to give it a new spot.
 
 Panel: font, size (font size, or rows = how many keys tall the capital letters are), weight and italic, plus:
 
@@ -10,12 +10,12 @@ Letter spacing: extra room between the letters, in 1/1000 of the font size. Minu
 Line spacing: room between lines (Enter starts a new line), in % of the font's own line spacing.
 [clip:text-linespace]
 
-Align: lines up several lines on their left side, their middle or their right side.
+Align: where the text sits on the spot you clicked. Left = its first note starts there, Centre = its middle is there, Right = its last note ends there. With several lines it also lines them up. In the player directions Align works across the keys instead (see below), and the first note always starts at the click.
 
 Direction: which way the letters go.
 - Piano roll: along time, so the text reads normally here.
-- Player across: the text reads across the keys in a falling-notes player. Each new line arrives before the one above it.
-- Player down: the letters arrive one after another in steady steps, first letter first. Letter spacing adds or takes away time between them. Each new line becomes a column beside the first (higher keys), arriving at the same time. Align lines the letters up on the column's low keys, centre or high keys.
+- Player across: the text reads across the keys in a falling-notes player. Each new line arrives before the one above it. Align puts the lowest note (Left), the middle or the highest note (Right) on the key you clicked.
+- Player down: the letters arrive one after another in steady steps, first letter first. Letter spacing adds or takes away time between them. Each new line becomes a column beside the first (higher keys), arriving at the same time. Align lines the letters up on the column's low keys, centre or high keys, and puts the lowest note, the middle or the highest note on the key you clicked.
 
 Letters that would go past the highest key are cut off, never squeezed.
 
