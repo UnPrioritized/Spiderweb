@@ -9,7 +9,7 @@ Pasted notes are cut by time, and the line doesn't have to go all the way across
 
 Only some shapes or part of them: draw a Select box (or several, with Ctrl) first, then pick Slice. Only the shapes the boxes selected are cut, and only where the slice line is inside a box.
 
-The line's ends go to the snap grid in time and between two keys, so a flat cut runs between key rows. Hold Shift to place them exactly. Text, pictures, merged shapes (Gate sensitive merge) and Hz bass aren't cut.
+The line's ends go to the snap grid in time and between two keys, so a flat cut runs between key rows. Hold Shift to place them exactly. Pictures aren't cut. Text, merged shapes (Gate sensitive merge) and Hz bass are cut once you turn them into plain notes (see below).
 
 A shape with glue or Claw machine, Strum or Chop pages is cut through its notes instead, wherever they are (they can sit far from the drawing): the line has to go all the way across them. Both pieces keep the whole drawing, one on top of the other until you move one. The pages are done before the cut, so the pieces look exactly as the shape did. Pages added to a piece afterwards work on that piece only. Changing a piece's outline (or Turn into a complete shape) makes it a shape of its own: it gets all of the shape's notes back and the pages work on them again, so its look may change.
 
