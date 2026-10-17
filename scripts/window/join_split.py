@@ -475,7 +475,7 @@ class JoinSplit:
         boxes = roll.kept_box()
         segs = [(a, b)] if not boxes else [s for s in (clip_segment(a, b, box) for box in boxes) if s]
         targets = sorted(self.sels) if boxes else range(len(self.shapes))
-        done, out, skipped, plain, missed = {}, {}, 0, set(), 0
+        done, out, skipped, plain, missed, merges = {}, {}, 0, set(), 0, 0
         for i in targets:
             sh = self.shapes[i]
             if (sh["kind"] == "custom" and "notes" in sh and "picture" not in sh and "merge" not in sh
@@ -492,6 +492,8 @@ class JoinSplit:
                 plain.add(i)
                 missed += len(pieces) == 1 and crossed
             elif sh["kind"] in ("custom", "funnel") and ("notes" in sh or sh.get("text") or sh.get("hz")):
+                if sh.get("merge") and any(any(notes_across(self.notes_of(sh), sa, sb, self.ppq)) for sa, sb in segs):
+                    merges += 1  # (touched: say how to cut it, user 2026-10-17)
                 continue
             elif (sh["kind"] == "custom" or sh["kind"] in LINE_KINDS) and tooled(sh) or sh["kind"] == "funnel":
                 # (pages / glue: its notes are cut, wherever they are; both pieces keep the drawing, user. A funnel:
@@ -538,7 +540,8 @@ class JoinSplit:
             if len(pieces) > 1:
                 done[i] = pieces
         if not done:
-            self.status.config(text=tr("join_split.slice_partly") if skipped else
+            self.status.config(text=tr("join_split.slice_merged") if merges else
+                               tr("join_split.slice_partly") if skipped else
                                tr("join_split.slice_missed_notes") if missed else tr("join_split.slice_nothing"))
             return
         picked = self.put_pieces(done, plain, tr("join_split.slice"))
@@ -547,7 +550,8 @@ class JoinSplit:
         n = sum(len(p) for p in done.values())
         self.status.config(text=tr("join_split.sliced", shapes=trn("n.shapes", len(done), n=len(done)),
                                    pieces=trn("n.pieces", n, n=n)) +
-                           (trn("join_split.slice_partly_too", skipped, n=skipped) if skipped else ""))
+                           (trn("join_split.slice_partly_too", skipped, n=skipped) if skipped else "") +
+                           (trn("join_split.slice_merged_too", merges, n=merges) if merges else ""))
 
     def put_pieces(self, done, plain, name, pick=None):
         """Cut shapes replaced by their pieces (done: shape number -> pieces; plain: pasted notes, kept as they
