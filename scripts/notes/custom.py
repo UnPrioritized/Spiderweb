@@ -61,6 +61,9 @@ CUSTOM_FLAGS = ("union", "apart", "borders")
 CYCLES = ("step", "key", "time")
 CYCLE_MAX = 15  # (15 note colours; the Diagonal's shift stays within it)
 CYCLE_ALL = 16  # (the most channels to take turns over: 16 with "Use channel 10", the panel's box allows it then)
+# "New channels each Colours round" (the project's tick, app.all_notes): a shape made with a hidden "_rounds" gives
+# each note's turn + ROUND x its round (0 = the shape's first time through its colours), render's rounds
+ROUND = 1 << 32
 
 
 def clean_cycle(c):
@@ -2693,7 +2696,7 @@ def cycle_turns(sh, notes, ppq, bottom=None):
         k = np.floor(s * b / (4 * a * ppq) + 1e-9).astype(np.int64)
         if rows:
             k = row_restart(notes, k, back, notes[:, 2].astype(np.int64) if merge else colour_pieces(sh, notes, ppq))
-        return slant(k) % c["n"]
+        return with_rounds(sh, slant(k), c["n"])
     elif merge:  # by step: each key row's notes one after another (its two shapes' gates needn't line up in time)
         k, rows = row_steps_of(notes, back and rows), False
     elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS and (sh.get("hz") or {}).get("tones"):
@@ -2713,7 +2716,17 @@ def cycle_turns(sh, notes, ppq, bottom=None):
             k = np.empty(len(notes), np.int64)  # row, at other spots when gate flipped, hunt)
             k[o] = np.arange(len(notes))
         k = row_restart(notes, k, back, piece)
-    return slant(k // int(c["every"])) % c["n"]
+    return with_rounds(sh, slant(k // int(c["every"])), c["n"])
+
+
+def with_rounds(sh, k, n):
+    """cycle_turns' turns from the steps k counted on: k mod n, + ROUND x the round for a shape made with "_rounds"
+    (rounds from 0: a Diagonal going down counts below the first)."""
+    turn = k % n
+    if not sh.get("_rounds") or not len(k):
+        return turn
+    r = k // n
+    return turn + (r - r.min()) * ROUND
 
 
 def row_restart_ok(sh):

@@ -1207,8 +1207,22 @@ def pushed_solid(note_lists, pinned, fixed, split, step):
     return out
 
 
+def in_rounds(note_lists, slot_of, rounds, step):
+    """render's slots with "New channels each Colours round" (user 2026-10-17: each round editable alone in other
+    programs): every round of every shape with rounds, in shape order, gets step slots of its own past the ones the
+    other shapes use, each note at the channel (colour) it has without the tick. -> (slots, slot count)."""
+    used = [int(np.max(s)) for s, lst, r in zip(slot_of, note_lists, rounds) if r is None and len(lst)]
+    block = (max(used) + step) // step if used else 0
+    out = list(slot_of)
+    for i, (lst, r) in enumerate(zip(note_lists, rounds)):
+        if r is not None and len(lst):
+            out[i] = np.asarray(slot_of[i], np.int64) % step + step * (block + r)
+            block += int(r.max()) + 1
+    return out, max([int(np.max(s)) + 1 for s, lst in zip(out, note_lists) if len(lst)] or [0])
+
+
 def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None, pastes=None,
-           held=None, back=None, ordered=None):
+           held=None, back=None, ordered=None, rounds=None):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -1235,6 +1249,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     paste's pieces: the whole paste's tracks counted that way, flipped pieces unflipped.
     ordered: per shape True if its tracks take channels in track order, all counted as starting at its first note (a
     Gate sensitive merge: track k = the slot its colour had before, merge.part_rows).
+    rounds: per shape None, or each note's Colours round (custom.ROUND): with "auto" every round goes on channels of
+    its own, the same colours (in_rounds).
     """
     pastes = pastes or [None] * len(note_lists)
     tracks = tracks or [None] * len(note_lists)
@@ -1347,6 +1363,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                                   use10)
         slot_of = [pin if u is None else unit_slots[u] for u, pin in zip(unit_of, pinned)]
         count = int(unit_slots.max()) + 1 if len(units) else 0
+        if rounds and any(r is not None for r in rounds):
+            slot_of, count = in_rounds(note_lists, slot_of, rounds, 16 if use10 else 15)
     else:  # (a Hz bass layer's clashing notes too: one channel, user)
         slot_of = [0 if pin is None else pin for pin in pinned]
         count = 1 if any(p is None for p in pinned) else 0

@@ -187,7 +187,7 @@ class ProjectFiles:
             "version": 2, "app_version": VERSION,  # the file format, and the Spiderweb that saved it
             "ppq": self.pvar["ppq"].get(), "bpm": self.pvar["bpm"].get(), "beats": self.pvar["beats"].get(),
             "output": self.pvar["output"].get(), "channel_mode": self.channel_mode.get(), "channel_split": self.channel_split,
-            "use_ch10": bool(self.use_ch10.get()), "keys": self.keys, "edo31": bool(self.edo31.get()), "edo31_audio": bool(self.edo31_audio.get()),
+            "use_ch10": bool(self.use_ch10.get()), "new_rounds": bool(self.new_rounds.get()), "keys": self.keys, "edo31": bool(self.edo31.get()), "edo31_audio": bool(self.edo31_audio.get()),
             "domino_start": self.domino_start(),
             "snap": self.snap.get(), "defaults": self.defaults,
             "custom_defaults": dict(self.custom_defaults, shape=self.custom_shape),
@@ -284,6 +284,7 @@ class ProjectFiles:
             self._opening = False
         self.channel_mode.set(mode if mode in CHANNEL_MODES else "single")
         self.use_ch10.set(data.get("use_ch10") is True)
+        self.new_rounds.set(data.get("new_rounds") is True)
         self.keys_var.set(str(KEYS[1] if data.get("keys") == KEYS[1] else KEYS[0]))
         self.edo31.set(data.get("edo31") is True)
         self.edo31_audio.set(data.get("edo31_audio") is True)

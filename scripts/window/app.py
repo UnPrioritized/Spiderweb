@@ -17,7 +17,7 @@ import numpy as np
 
 from files.lang import size as lang_size, tr, trn
 from notes.areas import most_colours
-from notes.custom import CUSTOM_DEFAULTS, capped_colours, custom_note_count, set_key_top, tracks_apart
+from notes.custom import ROUND, CUSTOM_DEFAULTS, capped_colours, custom_note_count, cycling, set_key_top, tracks_apart
 from window import big_ask, look
 from window.help import Tips, open_help
 from window.updates import Updates
@@ -122,15 +122,23 @@ class Stopped(Exception):
     """Notes being made in the background (App.notes_rested) aren't wanted any more."""
 
 
-def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False):
+def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False):
     """Every shape's notes together, overlaps / channels worked out: (colours each shape asks for, channel 10 used
     (slot k = channel k, slot_track_channel), rendered, slot count). all16: the project's "Use channel 10" (every
     shape may use it, not only pictures). Touches no Tk: also made in a background thread (App.notes_rested).
-    quiet: every mask's own notes left out (what the masks show: App.pattern)."""
-    got = [notes_tracks(sh) for sh in shapes]
+    quiet: every mask's own notes left out (what the masks show: App.pattern). rounds: the project's "New channels
+    each Colours round" (App.rounds_apart)."""
+    teams = between_turns(shapes)
+    # (each Colours shape's notes made with their rounds, then taken off the tracks: render's rounds; an Add between
+    # step is one channel, no rounds)
+    took = [rounds and mode == "auto" and cycling(sh) and team is None for sh, team in zip(shapes, teams)]
+    got = [notes_tracks(dict(sh, _rounds=True) if r else sh) for sh, r in zip(shapes, took)]
+    laps = [np.asarray(t, np.int64) // ROUND if r and t is not None else None for (_, t), r in zip(got, took)]
+    got = [(n, t % ROUND) if lap is not None else (n, t) for (n, t), lap in zip(got, laps)]
     # (a mask whose own notes don't sound: none, mask.py)
-    got = [(n[:0], None if t is None else t[:0]) if silent(sh) or quiet and is_mask(sh) else (n, t)
-           for sh, (n, t) in zip(shapes, got)]
+    off = [silent(sh) or quiet and is_mask(sh) for sh in shapes]
+    got = [(n[:0], None if t is None else t[:0]) if o else (n, t) for o, (n, t) in zip(off, got)]
+    laps = [lap[:0] if o and lap is not None else lap for o, lap in zip(off, laps)]
     # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
     # merged into the last (pasted notes keep their tracks)
     # (a Hz bass layer's notes clashing with another's: another channel, not another colour asked for)
@@ -147,10 +155,10 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False):
     got = [(n, as_used(t, r, use10 or all16)) for (n, t), r in zip(got, rules)]
     # (with all16 the shapes use channel 10 too, but only as their 16th: render's "all")
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
-                             pins, "all" if all16 else use10, between_turns(shapes),
+                             pins, "all" if all16 else use10, teams,
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
                              [is_sustained(sh) or sh.get("held") is True for sh in shapes],
-                             [colours_back(sh) for sh in shapes], [bool(sh.get("merge")) for sh in shapes])
+                             [colours_back(sh) for sh in shapes], [bool(sh.get("merge")) for sh in shapes], laps)
     return wanted, use10 or all16, rendered, slots
 
 
@@ -285,6 +293,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         self.channel_mode = tk.StringVar(value="single")
         self.channel_split = "key"  # what counts as an overlap for Multi channel (engine.SPLITS)
         self.use_ch10 = tk.BooleanVar(value=False)  # Multi channel uses channel 10 too: 16 colours (all16)
+        self.new_rounds = tk.BooleanVar(value=False)  # each Colours round on channels of its own (rounds_apart)
         self.keys = 128  # the project's key range: 0 .. keys - 1 (paths.KEYS)
         set_key_top(self.keys)
         self.keys_var = tk.StringVar(value=str(KEYS[0]))
@@ -598,6 +607,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         self.ch10_tick = ttk.Checkbutton(ch, text=tr("app.use_ch10"), variable=self.use_ch10,
                                          command=self.on_use_ch10)
         Tooltip(self.ch10_tick, tr("app.use_ch10_tip"))
+        # (user 2026-10-17: a Colours round's channels never used again, so each round can be edited alone elsewhere)
+        self.rounds_tick = ttk.Checkbutton(ch, text=tr("app.new_rounds"), variable=self.new_rounds,
+                                           command=self.on_channel_mode)
+        Tooltip(self.rounds_tick, tr("app.new_rounds_tip"))
         r += 1
         ttk.Label(box, text=tr("app.midi_out")).grid(row=r, column=0, sticky="w", pady=(3, 0))
         dev = keep_width(ttk.Combobox(box, textvariable=self.midi_device, state="readonly", values=devices()))
@@ -949,6 +962,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         """True while Multi channel uses channel 10 too ("Use channel 10", shown only under Multi channel)."""
         return self.use_ch10.get() and self.channel_mode.get() == "auto"
 
+    def rounds_apart(self):
+        """True while each Colours round goes on channels of its own ("New channels each Colours round", Multi
+        channel only)."""
+        return self.new_rounds.get() and self.channel_mode.get() == "auto"
+
     def edo(self):
         """True while the piano roll shows 31-EDO (256 keys + its tick)."""
         return self.keys == KEYS[1] and self.edo31.get()
@@ -1078,16 +1096,18 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
             if multi:
                 self.split_box.pack(anchor="w", padx=(18, 0), pady=(1, 0))
                 self.ch10_tick.pack(anchor="w", padx=(18, 0), pady=(2, 0))
+                self.rounds_tick.pack(anchor="w", padx=(18, 0), pady=(2, 0))
             else:
                 self.split_box.pack_forget()
                 self.ch10_tick.pack_forget()
+                self.rounds_tick.pack_forget()
         made = self.notes_made(any_spot=now == "follow")
         for sh in self.shapes:  # a piece whose outline was changed is a shape of its own now (sliced.py)
             if "cut" in sh and moved_by(as_made(sh)) is None:
                 completed(sh)  # (with the whole's glue / note tool pages)
         if made is None:
             made = all_notes(self.shapes, self.ppq, self.keys, self.channel_mode.get(), self.channel_split,
-                             self.all16(), self.notes_tracks)
+                             self.all16(), self.notes_tracks, rounds=self.rounds_apart())
             if self._notes_worked != worked:
                 self._notes_time = time.perf_counter() - started
         wanted, self.picture_use10, self.rendered, self.slot_count = made
@@ -1142,7 +1162,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
     def notes_key(self):
         """Everything the notes are made from (shapes_changed): a background result is used only for exactly this."""
         return (tuple(shape_key(sh) for sh in self.shapes), self.ppq, self.keys,
-                self.channel_mode.get(), SPLIT_CHOICES[max(self.split_box.current(), 0)][0], self.all16())
+                self.channel_mode.get(), SPLIT_CHOICES[max(self.split_box.current(), 0)][0], self.all16(),
+                self.rounds_apart())
 
     def _make_coming(self, show, follow=False):
         """follow: shown when made even if the shapes have moved on since (then the next spot's are made)."""
@@ -1178,7 +1199,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         def work():
             started = time.perf_counter()
             try:
-                got = all_notes(shapes, *key[1:], notes_tracks)
+                got = all_notes(shapes, *key[1:6], notes_tracks, rounds=key[6])
                 # (the same time as shapes_changed's: making the notes only, not the orders below)
                 job["time"] = time.perf_counter() - started
                 if job["stop"]:
