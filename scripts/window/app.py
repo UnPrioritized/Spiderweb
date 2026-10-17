@@ -122,12 +122,12 @@ class Stopped(Exception):
     """Notes being made in the background (App.notes_rested) aren't wanted any more."""
 
 
-def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False):
+def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False, order=False):
     """Every shape's notes together, overlaps / channels worked out: (colours each shape asks for, channel 10 used
     (slot k = channel k, slot_track_channel), rendered, slot count). all16: the project's "Use channel 10" (every
     shape may use it, not only pictures). Touches no Tk: also made in a background thread (App.notes_rested).
     quiet: every mask's own notes left out (what the masks show: App.pattern). rounds: the project's "New channels
-    each Colours round" (App.rounds_apart)."""
+    each Colours round" (App.rounds_apart). order: its "Channels 1-16 in order" (App.in_order)."""
     teams = between_turns(shapes)
     # (each Colours shape's notes made with their rounds, then taken off the tracks: render's rounds; a merged shape's
     # parts' rounds too, merge.part_rows; an Add between step is one channel, no rounds)
@@ -153,9 +153,9 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     use10 = any(r is True for r in rules)
     # (pinned tracks made with channel 10 skipped stay on their channels while it's used: mask.as_used)
     got = [(n, as_used(t, r, use10 or all16)) for (n, t), r in zip(got, rules)]
-    # (with all16 the shapes use channel 10 too, but only as their 16th: render's "all")
+    # (with all16 the shapes use channel 10 too, but only as their 16th: render's "all"; in order: "order")
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
-                             pins, "all" if all16 else use10, teams,
+                             pins, ("order" if order else "all") if all16 else use10, teams,
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
                              [is_sustained(sh) or sh.get("held") is True for sh in shapes],
                              [colours_back(sh) for sh in shapes], [bool(sh.get("merge")) for sh in shapes], laps)
@@ -293,6 +293,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         self.channel_mode = tk.StringVar(value="single")
         self.channel_split = "key"  # what counts as an overlap for Multi channel (engine.SPLITS)
         self.use_ch10 = tk.BooleanVar(value=False)  # Multi channel uses channel 10 too: 16 colours (all16)
+        self.ch10_order = tk.BooleanVar(value=False)  # with Use channel 10: channels 1-16 in order (in_order)
         self.new_rounds = tk.BooleanVar(value=False)  # each Colours round on channels of its own (rounds_apart)
         self.keys = 128  # the project's key range: 0 .. keys - 1 (paths.KEYS)
         set_key_top(self.keys)
@@ -607,6 +608,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         self.ch10_tick = ttk.Checkbutton(ch, text=tr("app.use_ch10"), variable=self.use_ch10,
                                          command=self.on_use_ch10)
         Tooltip(self.ch10_tick, tr("app.use_ch10_tip"))
+        # (user 2026-10-18: shown only while Use channel 10 is ticked; off = channel 10 last, so ticking that changes
+        # no colour)
+        self.order_tick = ttk.Checkbutton(ch, text=tr("app.ch10_order"), variable=self.ch10_order,
+                                          command=self.on_channel_mode)
+        Tooltip(self.order_tick, tr("app.ch10_order_tip"))
         # (user 2026-10-17: a Colours round's channels never used again, so each round can be edited alone elsewhere)
         self.rounds_tick = ttk.Checkbutton(ch, text=tr("app.new_rounds"), variable=self.new_rounds,
                                            command=self.on_channel_mode)
@@ -962,6 +968,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         """True while Multi channel uses channel 10 too ("Use channel 10", shown only under Multi channel)."""
         return self.use_ch10.get() and self.channel_mode.get() == "auto"
 
+    def in_order(self):
+        """True while the shapes take channels 1-16 in order ("Channels 1-16 in order", only with all16)."""
+        return self.ch10_order.get() and self.all16()
+
     def rounds_apart(self):
         """True while each Colours round goes on channels of its own ("New channels each Colours round", Multi
         channel only)."""
@@ -1101,13 +1111,18 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
                 self.split_box.pack_forget()
                 self.ch10_tick.pack_forget()
                 self.rounds_tick.pack_forget()
+        if self.all16() != bool(self.order_tick.winfo_manager()):  # (only shown with Use channel 10, user)
+            if self.all16():
+                self.order_tick.pack(anchor="w", padx=(36, 0), pady=(2, 0), before=self.rounds_tick)
+            else:
+                self.order_tick.pack_forget()
         made = self.notes_made(any_spot=now == "follow")
         for sh in self.shapes:  # a piece whose outline was changed is a shape of its own now (sliced.py)
             if "cut" in sh and moved_by(as_made(sh)) is None:
                 completed(sh)  # (with the whole's glue / note tool pages)
         if made is None:
             made = all_notes(self.shapes, self.ppq, self.keys, self.channel_mode.get(), self.channel_split,
-                             self.all16(), self.notes_tracks, rounds=self.rounds_apart())
+                             self.all16(), self.notes_tracks, rounds=self.rounds_apart(), order=self.in_order())
             if self._notes_worked != worked:
                 self._notes_time = time.perf_counter() - started
         wanted, self.picture_use10, self.rendered, self.slot_count = made
@@ -1163,7 +1178,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         """Everything the notes are made from (shapes_changed): a background result is used only for exactly this."""
         return (tuple(shape_key(sh) for sh in self.shapes), self.ppq, self.keys,
                 self.channel_mode.get(), SPLIT_CHOICES[max(self.split_box.current(), 0)][0], self.all16(),
-                self.rounds_apart())
+                self.rounds_apart(), self.in_order())
 
     def _make_coming(self, show, follow=False):
         """follow: shown when made even if the shapes have moved on since (then the next spot's are made)."""
@@ -1199,7 +1214,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         def work():
             started = time.perf_counter()
             try:
-                got = all_notes(shapes, *key[1:6], notes_tracks, rounds=key[6])
+                got = all_notes(shapes, *key[1:6], notes_tracks, rounds=key[6], order=key[7])
                 # (the same time as shapes_changed's: making the notes only, not the orders below)
                 job["time"] = time.perf_counter() - started
                 if job["stop"]:

@@ -1184,6 +1184,8 @@ def mapped_slots(slots, use10):
     """assign_slots' slots (array) -> the slots used (render's use10)."""
     if use10 == "all":  # (channel 10 last of each 16: the first 15 as without it, so ticking changes no colour)
         return slots // 16 * 16 + LAST10[slots % 16]
+    if use10 == "order":  # ("Channels 1-16 in order": slot k = channel k)
+        return slots
     if use10:  # (0..8, 10..24, 26..40...: never a slot that is channel 10)
         return slots + (slots + 6) // 15
     return slots
@@ -1259,6 +1261,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     use10: the pictures use channel 10 too (slot k = channel k, slot_track_channel): the other shapes' slots skip
     every slot that would be channel 10 (shapes never use it, user). "all" = the project's "Use channel 10": slots
     are channels too, but the shapes take channel 10 only as the 16th (LAST10), so ticking it changes no colour.
+    "order" = the same with "Channels 1-16 in order": the shapes take channel 10 as their 10th.
     teams: per shape None, or (group, turn) for an Add between group giving each shape its own colour (between.py):
     with "auto" the group's shapes of one turn share a channel, and every turn of a group gets a different one (its
     shapes' own tracks are left out).

@@ -365,7 +365,7 @@ class JoinSplit:
         if self.channel_mode.get() != "auto":  # (each note's Multi channel slot kept too, for Multi channel later)
             from window.app import all_notes  # (app.py imports this file)
             _, use10, multi, _ = all_notes(self.shapes, self.ppq, self.keys, "auto", self.channel_split, self.all16(),
-                                           self.notes_tracks)
+                                           self.notes_tracks, order=self.in_order())
         new = {}
         for i in got:
             rows = self.rendered[owners == i]

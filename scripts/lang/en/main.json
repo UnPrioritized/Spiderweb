@@ -212,6 +212,8 @@
  "app.split_any_notes_at_the_same": "Split: any notes at the same time",
  "app.use_ch10": "Use channel 10 (16 colours)",
  "app.use_ch10_off": "Channel 10 off: 15 colours",
+ "app.ch10_order": "Channels 1-16 in order",
+ "app.ch10_order_tip": "Shapes take channels 1, 2, 3 … 16 in order, so a shape's 10th colour goes on channel 10.\nOff: channel 10 comes last (1-9, 11-16, then 10), so ticking Use channel 10 changes no colour.\nA shape with 10 or more colours changes colour when this is switched. Saved with the project.",
  "app.new_rounds": "New channels each Colours round",
  "app.new_rounds_tip": "When a shape's Colours start again from the first colour, the next round goes on new channels\nwith the same colours (15 channels further on, 16 with channel 10). No two rounds share a channel,\nso each round can be edited on its own in other programs. Shapes without Colours keep the first channels.\nSaved with the project.",
  "app.pasted_15": "{n} pasted shapes had 16 colours: brought down to 15 (this project doesn't use channel 10).",
