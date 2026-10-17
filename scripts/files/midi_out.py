@@ -73,6 +73,13 @@ def _events(notes, order, tick, last, ch):
     return out
 
 
+def empty_track(ch):
+    """An empty track's events, so editors still show its channel (a track has no channel of its own, only its
+    events do; with none they showed channel 1, user 2026-10-17): a channel prefix (FF 20) and a note-off for a note
+    never started (key 0, sounds nothing; Domino reads only this one, measured)."""
+    return bytes([0, 0xFF, 0x20, 1, ch, 0, 0x80 | ch, 0, 0])
+
+
 def long_silences(notes):
     """True if some track has a silence too long for one step (written with empty events in between)."""
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
@@ -115,7 +122,8 @@ def _pieces(notes, count, use10, start):
         del slots
     for track in range(count):
         channel = slot_track_channel(track, use10)[1]
-        events = track_events(notes if count == 1 else notes[order[cuts[track]:cuts[track + 1]]], channel)
+        mine = notes if count == 1 else notes[order[cuts[track]:cuts[track + 1]]]
+        events = track_events(mine, channel) if len(mine) else [empty_track(channel)]
         yield b"MTrk" + struct.pack(">I", sum(len(e) for e in events) + len(END))
         yield from events
         events = None
