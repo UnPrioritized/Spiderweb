@@ -6,8 +6,8 @@ period into n slices, and slice k is thrown away ("trash" = [k, n], or None): no
 edges are cut there, and the gap closes (later notes move earlier). "stretch": the result is stretched back to the
 shape's first length (the notes get longer too). "dist" (-100 .. 100) then bends time inside each period-long
 stretch of the new timeline: right (+) = long notes first, getting faster; left (-) = the other way round. A
-note's start and end are bent each in their own period. "short": notes the claw left shorter than SHORT beats are
-removed (notes that were that short already stay).
+note's start and end are bent each in their own period. Notes squeezed onto one key and tick: only the longest
+stays. "short": notes the claw left shorter than SHORT beats are removed (notes that were that short already stay).
 
 Counting modes: "notes" (in time order, low to high within a chord), "keys" (counted up from the shape's lowest
 key, so a key with no notes still counts), "chords" (notes starting together = one): keep "keep", throw away
@@ -117,7 +117,19 @@ def apply_claw(a, claw, ppq):
     starts = np.rint(xs[keep] + t0).astype(np.int64)
     a[:, 0] = starts
     a[:, 1] = np.maximum(np.rint(xe[keep] + t0).astype(np.int64), starts + 1)
-    return a
+    return unstacked(a)
+
+
+def unstacked(a):
+    """Notes squeezed onto the same key and start tick -> only the longest of them (FL keeps one, user 2026-10-18);
+    the rest keep their order."""
+    order = np.lexsort((a[:, 0] - a[:, 1], a[:, 0], a[:, 2]))
+    k, s = a[order, 2], a[order, 0]
+    first = np.ones(len(a), bool)
+    first[1:] = (k[1:] != k[:-1]) | (s[1:] != s[:-1])
+    if first.all():
+        return a
+    return a[np.sort(order[first])]
 
 
 def _picked(a, claw):
