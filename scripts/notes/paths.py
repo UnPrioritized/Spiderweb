@@ -15,6 +15,7 @@ import math
 import numpy as np
 
 EDGE = 0.5 - 1e-6  # half a pitch row, just inside the row
+ROW_EDGE = 1e-7  # a line point this close to the edge between two rows counts as on it (parts_notes)
 KEYS = (128, 256)  # the project's key range: the MIDI standard 0-127, or 0-255 (256-key MIDI)
 TOP_KEY = KEYS[-1] - 1  # the highest key a shape can ever make (the project's range filters the rest)
 
@@ -189,11 +190,18 @@ def parts_notes(r, first, tails, counts=False, spot=None):
     p = np.floor(y + 0.5).astype(np.int64)
     k_parts = len(first)
     last = np.append(first[1:] - 1, len(r) - 1)
-    # a part starting / ending exactly on the edge between two rows (a circle's tip there) belongs to the row it
-    # goes into / comes from: else the row above gets a 1-tick note there, sticking out past the tip
-    f, g = first[last > first], last[last > first]
-    p[f[(np.abs(y[f] + 0.5 - p[f]) < 1e-9) & (y[f + 1] < y[f])]] -= 1
-    p[g[(np.abs(y[g] + 0.5 - p[g]) < 1e-9) & (y[g - 1] < y[g])]] -= 1
+    # a point exactly on the edge between two rows (a circle's tip there; ROW_EDGE: a resize's float noise) whose
+    # neighbours in its part are all below it belongs to the row below: rounding it up made the row above a stray
+    # note where the line only touched the edge (user: notes past the box, longer / extra notes at a tip)
+    edge = np.abs(y + 0.5 - np.round(y + 0.5)) < ROW_EDGE
+    if edge.any():
+        p[edge] = np.round(y[edge] + 0.5).astype(np.int64)
+        starts_part, ends_part = np.zeros(len(r), bool), np.zeros(len(r), bool)
+        starts_part[first], ends_part[last] = True, True
+        lower_prev = np.append(False, y[:-1] < y[1:] - ROW_EDGE)
+        lower_next = np.append(y[1:] < y[:-1] - ROW_EDGE, False)
+        alone = starts_part & ends_part
+        p[edge & ~alone & (starts_part | lower_prev) & (ends_part | lower_next)] -= 1
     seg = np.ones(max(0, len(r) - 1), bool)
     seg[last[:-1]] = False
     j = np.nonzero(seg)[0]
@@ -238,6 +246,14 @@ def parts_notes(r, first, tails, counts=False, spot=None):
     tl = e_last[tails & (per >= 2)]
     tl = tl[starts[tl] == end_tick[tails & (per >= 2)]]
     ends[tl] = starts[tl] + np.maximum(1, ends[tl - 1] - starts[tl - 1])
+    # keys reached on a sloped part's very last tick (a tall circle's tip, nearly upright there): that tick's note
+    # ends where the part does instead of 1 tick past it (user: notes sticking out of the box). Upright parts (a
+    # square's side) and tails keep starting on their tick.
+    last_tick = (starts == end_tick[part]) & (np.floor(t[first] + 0.5).astype(np.int64)[part] < end_tick[part])
+    if tails.any():
+        last_tick[e_last[tails]] = False
+    starts[last_tick] -= 1
+    ends[last_tick] = starts[last_tick] + 1
     notes = np.column_stack([starts, ends, ep])
     out = (notes, per) if counts else (notes,)
     if spot is not None:

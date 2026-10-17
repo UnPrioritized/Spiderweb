@@ -1704,7 +1704,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         formulas and text along. Not a Hz bass's notes (user, like its box's corners)."""
         new = copy.deepcopy(sh)
         fn = lambda b, p: (ab + (b - ab) * kx, ap + (p - ap) * ky)
-        new["pts"] = [list(fn(b, p)) for b, p in sh["pts"]]
+        new["pts"] = [[round(v, 9) + 0.0 for v in fn(b, p)] for b, p in sh["pts"]]  # (no float noise: roll_custom.tidy)
         r = abs(kx / ky)  # (k = beats per key where it looks round: see rotate)
         if new["kind"] == "arc" or new["kind"] == "free" and "k" in new:
             new["k"] = new.get("k", 1.0) * r

@@ -558,7 +558,9 @@ def join_strokes(strokes):
 def custom_strokes(sh):
     if sh.get("text"):
         return text_polys(sh)
-    (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
+    # (float noise in the frame dropped: a side meant for 103.5 at 103.5000000000001 gave the row above a stray
+    # note, user; roll_custom.tidy keeps new ones clean)
+    (b0, p0), (b1, p1), (b2, p2) = ([round(b, 9), round(p, 9)] for b, p in sh["pts"])
     ub, up, vb, vp = b1 - b0, p1 - p0, b2 - b0, p2 - p0
     return [[(b0 + u * ub + v * vb, p0 + u * up + v * vp) for u, v in stroke_points(st)] for st in sh["strokes"]]
 

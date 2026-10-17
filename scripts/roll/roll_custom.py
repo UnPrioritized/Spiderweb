@@ -9,6 +9,12 @@ from roll.roll_shared import SELECT_CURSOR, SHIFT
 from window import look
 
 
+def tidy(pts):
+    """Frame points without the float noise screen units leave (a side meant for 103.5 at 103.5000000000001 gave
+    the row above a stray 1-tick note, user)."""
+    return [[round(b, 9) + 0.0, round(p, 9) + 0.0] for b, p in pts]
+
+
 class CustomBox:
     """Mixed into PianoRoll."""
 
@@ -184,8 +190,8 @@ class CustomBox:
                 a = math.copysign(abs(b) * ratio, a or 1)
         nu, nv = (eu[0] * a, eu[1] * a), (ev[0] * b, ev[1] * b)
         n0 = (opp[0] - ou * nu[0] - ov * nv[0], opp[1] - ou * nu[1] - ov * nv[1])
-        return [self.from_su(*n0), self.from_su(n0[0] + nu[0], n0[1] + nu[1]),
-                self.from_su(n0[0] + nv[0], n0[1] + nv[1])]
+        return tidy([self.from_su(*n0), self.from_su(n0[0] + nu[0], n0[1] + nu[1]),
+                     self.from_su(n0[0] + nv[0], n0[1] + nv[1])])
 
     def skew_custom(self, orig, k, db, dp):
         """Frame points of a custom shape with side k (0 bottom, 1 right, 2 top, 3 left) slid along itself by the
@@ -199,7 +205,7 @@ class CustomBox:
         t = (mx * (bx - ax) + my * (by - ay)) / ll / ll
         d = self.from_su(t * (bx - ax), t * (by - ay))
         moved = ((0, 1), (1,), (2,), (0, 2))[k]  # which frame points carry side k
-        return [[b + d[0], p + d[1]] if i in moved else list(orig[i]) for i, (b, p) in enumerate(orig)]
+        return tidy([[b + d[0], p + d[1]] if i in moved else list(orig[i]) for i, (b, p) in enumerate(orig)])
 
     def turn_custom(self, orig, angle):
         """Frame points of a custom shape turned by angle (radians, clockwise on screen) around its middle."""
@@ -207,7 +213,8 @@ class CustomBox:
         (x0, y0), (x1, y1), (x2, y2) = pts
         cx, cy = (x1 + x2) / 2, (y1 + y2) / 2  # middle of the box
         c, s = math.cos(-angle), math.sin(-angle)  # screen y points down, pitch up
-        return [self.from_su(cx + (x - cx) * c - (y - cy) * s, cy + (x - cx) * s + (y - cy) * c) for x, y in pts]
+        return tidy([self.from_su(cx + (x - cx) * c - (y - cy) * s, cy + (x - cx) * s + (y - cy) * c)
+                     for x, y in pts])
 
     def screen_angle(self, sh_pts, x, y):
         """Angle of the mouse around the middle of the box (clockwise on screen)."""
