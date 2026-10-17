@@ -7,8 +7,9 @@ from tkinter import ttk, messagebox, simpledialog
 
 from files.lang import tr, trn
 from notes.areas import most_colours
-from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, edge_gate, gap_lines,
-                          gate_ticks, join_strokes, map_stroke, normalize_areas, normalize_strokes, open_paths)
+from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, drawing_in_box,
+                          edge_gate, fit_upright, gap_lines, gate_ticks, join_strokes, map_stroke, normalize_areas,
+                          normalize_strokes, open_paths)
 from window import look
 from window.drawer import Drawer, clean_name, library_lists, library_names, load_drawing, save_shape, shape_stamp
 from window.panel_funnel import GATE_STEPS
@@ -489,6 +490,8 @@ class CustomPanel:
                 if tpl[1]:
                     t["round"] = 1 / tpl[1]
                 t.pop("polygon", None)  # (a polygon becomes that shape)
+                if t.get("fit"):  # (a fitted box hugs the new drawing)
+                    fit_upright(t)
             self.shapes_changed()
         if self.tool.get() in BOX_TOOLS:  # Circle / Polygon: a library shape picked = back to Custom shape
             self.tool.set("custom")
@@ -827,15 +830,15 @@ class CustomPanel:
                 tr("panel_custom.spiderweb"), tr("panel_custom.is_already_in_the_library_replace",
                                                  name=name), parent=self):
             return
-        (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
+        held, held_areas, ((b0, p0), (b1, p1), (b2, p2)) = drawing_in_box(sh)  # (a fitted box: as shown in it)
         w = math.hypot((b1 - b0) * self.roll.sx, (p1 - p0) * self.roll.sy)  # the box on screen
         h = math.hypot((b2 - b0) * self.roll.sx, (p2 - p0) * self.roll.sy)
         if w > 1e-9 and h > 1e-9:
             su, sv = (1.0, h / w) if w >= h else (w / h, 1.0)
-            strokes = [map_stroke(st, lambda u, v: (u * su, v * sv), su, sv) for st in sh["strokes"]]
-            areas = [[u * su, v * sv, c] for u, v, c in sh.get("areas", ())]
+            strokes = [map_stroke(st, lambda u, v: (u * su, v * sv), su, sv) for st in held]
+            areas = [[u * su, v * sv, c] for u, v, c in held_areas]
         else:
-            strokes, areas = copy.deepcopy(sh["strokes"]), copy.deepcopy(sh.get("areas", []))
+            strokes, areas = copy.deepcopy(held), copy.deepcopy(held_areas)
         try:
             save_shape(name, join_strokes(strokes), areas)
         except OSError as e:

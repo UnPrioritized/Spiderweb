@@ -826,8 +826,31 @@ def box_pts(sh):
     fit = sh.get("fit")
     if not fit:
         return sh["pts"]
-    to_bp = frame_to_bp(sh["pts"])  # (no float noise: a straight box must count as straight, frame_upright)
-    return [[round(x, 9) + 0.0 for x in to_bp(u, v)] for u, v in fit]
+    to_bp = frame_to_bp(sh["pts"])
+    (b0, p0), (b1, p1), (b2, p2) = (to_bp(u, v) for u, v in fit)
+    if abs(p1 - p0) < 1e-7:  # (a straight box counts as exactly straight, frame_upright / grid_aligned: rounding each
+        p1 = p0              # corner on its own could leave them 1e-9 apart)
+    if abs(b2 - b0) < 1e-7:
+        b2 = b0
+    return [[round(b, 9) + 0.0, round(p, 9) + 0.0] for b, p in ((b0, p0), (b1, p1), (b2, p2))]
+
+
+def drawing_in_box(sh):
+    """(strokes, areas, box) of a custom shape as its shown box holds them: as stored, or for a fitted box the drawing
+    in that box's own u / v (lines and curves exactly; ellipses, arcs, freehand and formula strokes as the lines
+    they make). Saving to the library uses it (user: saved as shown)."""
+    if not sh.get("fit"):
+        return sh["strokes"], sh.get("areas", []), sh["pts"]
+    to_box = frame_to_uv(sh["fit"])
+    strokes = []
+    for st in sh["strokes"]:
+        if st["kind"] in ("poly", "curve") and not has_formula(st):
+            strokes.append(map_stroke(st, to_box))
+        else:
+            own = {k: v for k, v in st.items() if k in ("role", "colour", "src")}
+            strokes.append(dict(own, kind="poly", pts=[list(to_box(u, v)) for u, v in stroke_points(st)]))
+    areas = [[*to_box(u, v), c] for u, v, c in sh.get("areas", ())]
+    return strokes, areas, box_pts(sh)
 
 
 def frame_in_box(sh):
@@ -844,10 +867,10 @@ def frame_from_box(box, inside):
 
 
 def can_fit_upright(sh):
-    """Fit box to drawing works on it: a drawn custom shape (not text: its letters work from the box) whose shown
-    box is turned or skewed."""
+    """Fit box to drawing works on it: a drawn custom shape (not text: its letters work from the box; not Hz bass:
+    its keys and length follow the box) whose shown box is turned or skewed."""
     return (sh["kind"] == "custom" and bool(sh.get("strokes")) and not sh.get("text") and "picture" not in sh
-            and not frame_upright(box_pts(sh)))
+            and not sh.get("hz") and not frame_upright(box_pts(sh)))
 
 
 def fit_upright(sh):

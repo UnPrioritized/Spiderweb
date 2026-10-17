@@ -211,6 +211,12 @@ def line_notes(pts, tail=False, at=None):
         if right > left and late.any():
             notes[late, 0] = right - 1
             notes[late, 1] = right
+            # a key whose own note already reaches that tick (a square's top / bottom row at its corner) gets no
+            # second 1-tick note on top of it (user: the corner row came out cut in two)
+            long = ~late & (notes[:, 1] >= right) & (notes[:, 0] < right - 1)
+            extra = late & np.isin(notes[:, 2], notes[long, 2])
+            if extra.any():
+                got = tuple(a[~extra] for a in got) if isinstance(got, tuple) else got[~extra]
     return got
 
 

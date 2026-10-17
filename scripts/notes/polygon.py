@@ -99,6 +99,9 @@ def update_polygon(sh):
     """A polygon custom shape's strokes made again from its settings (after they changed)."""
     if sh.get("polygon"):
         sh["strokes"] = polygon_strokes(sh["polygon"])
+        if sh.get("fit"):  # (a fitted box hugs the new drawing, custom.fit_upright)
+            from notes.custom import fit_upright
+            fit_upright(sh)
 
 
 def side_paths(pts):
