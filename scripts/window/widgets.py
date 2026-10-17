@@ -703,10 +703,11 @@ REDO_KEYS = ("<Control-y>", "<Control-Y>", "<Control-Shift-z>", "<Control-Shift-
 class LocalUndo:
     """Ctrl+Z / Ctrl+Y inside a pop-up window: its own steps, which never reach the main window's undo.
     get(): how it is now (a string, e.g. JSON); put(state): make it so. mark(key) after each change: changes with the
-    same key (not None) in a row are one step (typing in one box, stepping one number)."""
+    same key (not None) in a row are one step (typing in one box, stepping one number). main: () -> the main window's
+    last undo step, for windows whose Ctrl+Z on the piano roll steps theirs first (main_newer)."""
 
-    def __init__(self, win, get, put, limit=300):
-        self.get, self.put, self.limit = get, put, limit
+    def __init__(self, win, get, put, limit=300, main=None):
+        self.get, self.put, self.limit, self.main = get, put, limit, main
         self.reset()
         for k in UNDO_KEYS:
             win.bind(k, lambda e: (self.undo(), "break")[1])
@@ -716,6 +717,15 @@ class LocalUndo:
     def reset(self):
         """Start again from how it is now (nothing to undo)."""
         self.states, self.at, self.key = [self.get()], 0, None
+        self.seen()
+
+    def seen(self):
+        """The main window's steps so far are older than this window's (its own settled step, a step of it made)."""
+        self.main_was = self.main() if self.main else None
+
+    def main_newer(self):
+        """Has the main window made a step since this window's last one (a shape changed while open)?"""
+        return self.main is not None and self.main() is not self.main_was
 
     def mark(self, key=None):
         state = self.get()
@@ -733,6 +743,7 @@ class LocalUndo:
                 del self.states[0]
                 self.at -= 1
         self.key = key
+        self.seen()
 
     def undo(self):
         self.step(-1)

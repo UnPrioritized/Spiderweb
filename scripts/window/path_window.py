@@ -578,11 +578,16 @@ class PathWindow(ToolWindow):
 
     def local_step(self, redo):
         """Ctrl+Z / Ctrl+Y pressed on the piano roll while open (App.key_undo): the points are dragged there, so this
-        window's own steps go first (user); none left = False (the main window's undo). A point held is let go."""
+        window's own steps go first (user); none left = False (the main window's undo). A point held is let go. A
+        shape changed on the piano roll after them: that step goes first, and the window's steps before it are kept
+        in the step it made then (user: Ctrl+Z took a point away, not the change)."""
         roll = self.app.roll
         if roll.drag and roll.drag[0] == "path":
             roll.drag = None
         u = self.undo
+        if u.main_newer():
+            u.reset()
+            return False
         if u.get() != u.states[u.at]:
             u.mark()
         if not (u.at < len(u.states) - 1 if redo else u.at > 0):

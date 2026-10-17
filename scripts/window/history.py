@@ -309,6 +309,10 @@ class HistoryPanel:
         self._edit_key = None
         self.sync_history()
 
+    def last_step(self):
+        """The newest undo step (None: none), for LocalUndo(main=...)."""
+        return self.undo_stack[-1] if self.undo_stack else None
+
     def sel_state(self):
         """The selection as an undo step keeps it: (selected shape numbers, the main one, the kept Select boxes or
         None, the Hz bass window's HzWindow.sel_state() or None, the picked stroke, the funnel's highlighted parts,

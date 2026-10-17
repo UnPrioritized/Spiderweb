@@ -228,7 +228,7 @@ class ToolWindow(tk.Toplevel):
         self.build_tabs(top, head)
         self.build(box)
         self.targets = []
-        self.undo = LocalUndo(self, self.undo_state, self.put_state)
+        self.undo = LocalUndo(self, self.undo_state, self.put_state, main=app.last_step)
         self.turning = None  # a knob held: (it, how it was at the press, the inside undo steps then)
         for k in UNDO_KEYS + REDO_KEYS:  # (in place of LocalUndo's: a knob held first)
             self.bind(k, lambda e, d=-1 if k in UNDO_KEYS else 1: (self.undo_key(d), "break")[1])
@@ -604,6 +604,7 @@ class ToolWindow(tk.Toplevel):
             sel = self.saved_sel
             self.saved_sel, self.before = self.app.sel_state(), self.now
             self.app.add_undo_step(json.dumps(saved), tr(f"{self.KEY}.step"), sel)
+            self.undo.seen()  # (its own step: a step made after it on the piano roll is undone first, local_step)
 
     def put(self, key, value, done=True):
         """A setting changed: show it on the piano roll."""

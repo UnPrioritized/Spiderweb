@@ -163,7 +163,7 @@ class SustainWindow(tk.Toplevel):
         self.bind("<Return>", lambda ev: self.ok())
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.on, self.vals, self.offs, self.pasts = [], {k: [] for k in LENGTHS + ("from",)}, [], []
-        self.hist = LocalUndo(self, self.state, self.put_state)
+        self.hist = LocalUndo(self, self.state, self.put_state, main=app.last_step)
         self.bind("<Control-Key>", lambda e: "break")  # (the piano roll's shortcuts wait until it's closed)
         self.retarget(start=True)
         self.update_idletasks()
@@ -339,6 +339,7 @@ class SustainWindow(tk.Toplevel):
         sel, self.saved_sel, self.before = self.saved_sel, self.app.sel_state(), self.now
         self.kept = self.own_now()
         self.app.add_undo_step(json.dumps(saved), tr("sustain.step"), sel)
+        self.hist.seen()  # (its own step: a step made after it on the piano roll is undone first, local_step)
 
     def ppq_changed(self):
         """A project setting changed (App.on_project_change: every key press in its boxes). Only a new PPQ
@@ -378,6 +379,9 @@ class SustainWindow(tk.Toplevel):
         if roll.drag and roll.drag[0] == "sustop":
             roll.drag = None
         u = self.hist
+        if u.main_newer():  # (a shape changed on the piano roll after them: that step first, like Copy along a path)
+            u.reset()
+            return False
         if u.get() != u.states[u.at]:
             u.mark()
         if not (u.at < len(u.states) - 1 if redo else u.at > 0):
