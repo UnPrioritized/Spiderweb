@@ -10,7 +10,8 @@ import uuid
 import numpy as np
 
 from notes.bezier import anchor_count, sample, seg_point, segments, split
-from notes.custom import CURVE_STEPS, frame_to_uv, notes_shape, refit, stroke_points
+from notes.custom import (CURVE_STEPS, frame_to_uv, notes_shape, refit, shape_areas, split_areas,
+                          stroke_points)
 from notes.gaterange import part_range
 from notes.pattern import has_formula
 
@@ -266,10 +267,18 @@ def slice_custom(sh, a, b, ppq):
         return None
     ss = sorted(set(round(s, 9) for s in ss))
     cut_lines = []
+    amap = shape_areas(sh)
     for s0, s1 in zip(ss, ss[1:]):
         mid = a + (b - a) * (s0 + s1) / 2
-        if s1 - s0 > 1e-9 and inside(polys, mid):
-            cut_lines.append([list(a + (b - a) * s0), list(a + (b - a) * s1)])
+        if s1 - s0 <= 1e-9:
+            continue
+        line = {"kind": "poly", "pts": [list(a + (b - a) * s0), list(a + (b - a) * s1)]}
+        if inside(polys, mid):
+            cut_lines.append(line)
+        elif amap is not None and int(amap.cell([mid[0]], [mid[1]])[0]) not in (-1, amap.outside()):
+            # (a closed-in area even-odd leaves out: closed by a fill line, so its colour stays in it, user 2026-10-17;
+            # a plain line there doubled notes where the cut lines' ends meet)
+            cut_lines.append(dict(line, role="cut"))
     halves = {1: [], -1: []}
     for n, (st, poly) in enumerate(zip(sh["strokes"], polys)):
         pieces = stroke_pieces(st, poly, a, b, [u for u, _, _ in cuts[n]] if n in cuts else None)
@@ -278,15 +287,15 @@ def slice_custom(sh, a, b, ppq):
             k = side(stroke_points(piece), a, b)
             if k:
                 halves[k].append(dict(keep, **piece))
-    if not halves[1] or not halves[-1] or not cut_lines:
+    if not halves[1] or not halves[-1] or not any("role" not in line for line in cut_lines):
         return None
     out = []
     for k in (1, -1):
         new = copy.deepcopy({key: v for key, v in sh.items()
                              if key not in ("strokes", "areas", "polygon", "from", "name")})
         new["name"] = sh.get("name", "")
-        new["strokes"] = halves[k] + [{"kind": "poly", "pts": [list(p) for p in line]} for line in cut_lines]
-        areas = [list(ar) for ar in sh.get("areas", ()) if side([ar[:2]], a, b) == k]
+        new["strokes"] = halves[k] + copy.deepcopy(cut_lines)
+        areas = split_areas(sh, new)
         if areas:
             new["areas"] = areas
         refit(new)

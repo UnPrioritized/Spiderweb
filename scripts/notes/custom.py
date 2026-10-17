@@ -1442,6 +1442,45 @@ def settled_areas(old, new):
     return out
 
 
+def split_areas(old, piece):
+    """piece["areas"] for a piece cut off old (Slice: its strokes still in old's box, before refit): every area of the
+    piece takes the colour of the old area most of it came from, its spot moved into it when it isn't there, so both
+    halves keep the colours (user). An old area holding more spots: the last one in this piece's area, else the last
+    one (the one that showed). Returns the areas list."""
+    spots = old.get("areas") or []
+    a0, a1 = (shape_areas(old), shape_areas(piece)) if spots else (None, None)
+    if a0 is None or a1 is None:
+        return []
+    ys, xs = np.mgrid[0:a1.h:2, 0:a1.w:2]  # (every other cell of the piece's map, in u, v)
+    pts = (np.column_stack([xs.ravel(), ys.ravel()]) + 0.5) / a1.k + a1.lo
+    l0, l1 = a0.cell(*pts.T), a1.cell(*pts.T)
+    ok = (l0 >= 0) & (l0 != a0.outside()) & (l1 >= 0) & (l1 != a1.outside())
+    l0, l1, pts = l0[ok], l1[ok], pts[ok]
+    if not len(pts):
+        return []
+    n1 = a1.count
+    both = np.bincount(l0 * n1 + l1, minlength=a0.count * n1).reshape(a0.count, n1)
+    source = both.argmax(0)
+    there = np.flatnonzero(both.sum(0))
+    labs = a0.at(*np.asarray([a[:2] for a in spots], float).reshape(-1, 2).T).tolist()
+    now = a1.at(*np.asarray([a[:2] for a in spots], float).reshape(-1, 2).T).tolist()
+    out = []
+    for j in there:
+        mine = [i for i, lab in enumerate(labs) if lab >= 0 and lab == source[j]]
+        if not mine:
+            continue
+        inside = [i for i in mine if now[i] == j]
+        a = spots[(inside or mine)[-1]]
+        if inside:
+            out.append(list(a))
+            continue
+        here = pts[l1 == j]  # (into its area: the spot there nearest the middle of it)
+        mid = np.median(here, axis=0)
+        spot = here[np.argmin(np.hypot(*(here - mid).T))]
+        out.append([round(float(spot[0]), 6), round(float(spot[1]), 6), a[2]])
+    return out
+
+
 def carried_spots(strokes, idx, areas, frame):
     """For each coloured area's spot: whether it goes along when strokes idx are flipped / turned (all of them: the
     whole drawing). It does when those strokes close its area in more tightly than the others do (a bar turned
