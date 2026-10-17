@@ -15,7 +15,7 @@ import numpy as np
 from files.lang import tr, trn
 from notes.between import copied as between_copied, group_of, keep_pushes, push_sizes, whole_groups
 from notes.custom import box_frame, fill_plan, fill_test
-from notes.engine import cached_arrays, make_shape
+from notes.engine import cached_arrays, make_shape, shape_key
 from notes.joined import all_tumours
 from notes.mask import OFF, ROW, is_mask, mask_area
 from notes.paths import KEYS
@@ -67,7 +67,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.doubled = False  # a double-click's own press (never goes on to the next shape)
         self.by_area = False
         self.room = None         # how far each shape being moved can go: {shape number: move_room}
-        self.onto_grid = 0.0     # beats added to a move so the earliest note lands on the grid (first_note_fix)
+        self.onto_grid = None    # beats added to a move so the earliest note lands on the grid (first_note_fix):
+        #                          (all of them, {shape number: its own})
         self.grid_later = None   # a resize whose notes were too slow to snap while dragging: (make, beat) for let go
         self.limit = None        # how far the shapes being edited may reach (limits)
         self._pan = None
@@ -311,9 +312,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         (user: every shape must reach the bottom key)."""
         r = self.reach(shapes)
         top = self.app.keys - 1.0 if top is None else top
-        # (a line exactly half a key over the top key would play the key above: just under it, but a notes
-        # shape's box may lie on it)
-        if not all(sh.get("kind") == "custom" and "notes" in sh for sh in shapes):
+        # (a custom shape's lines may lie exactly half a key over the top key: a point on a row edge with the line
+        # below it plays the key below, paths.edges_settled; other kinds (a line's end on the edge plays the key
+        # above) stop just under it)
+        if not all(sh.get("kind") == "custom" for sh in shapes):
             top -= 1e-6
         return r and (min(0.0, r[0]), min(-EDGE, r[1]), max(top + EDGE, r[2]))
 
@@ -375,7 +377,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return
         self.grid_later = None
         goal, near = round(got / sb) * sb, 0.5 / app.ppq
-        best, tried = (abs(got - goal), x), (x, got)
+        best, tried, spare = (abs(got - goal), x), (x, got), []
         for _ in range(4):  # (secant steps: the edge follows the side about one to one, in whole ticks)
             if best[0] < near:
                 break
@@ -383,10 +385,16 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             nx = x + goal - got if px == x or abs(got - pe) < 1e-12 else x - (got - goal) * (x - px) / (got - pe)
             tried, x = (x, got), nx
             got = edge(x)
+            spare.append(shape_key(sh))
             if got is None:
                 break
-            best = min(best, (abs(got - goal), x))
+            if abs(got - goal) < best[0] - 1e-12:  # (only a spot really closer: else the box stays on the mouse's
+                best = (abs(got - goal), x)          # grid line, user)
         sh["pts"] = make(best[1])
+        keep = shape_key(sh)
+        for key in spare:  # (the tries' notes aren't kept: a long drag on a big shape filled memory with them)
+            if key != keep:
+                app._notes_cache.pop((key, app.ppq, app.keys), None)
 
     def notes_keys(self, sh, r):
         """(lowest key, highest key or None when unknown) of a shape's notes as if no key was cut off at the
@@ -402,15 +410,17 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         high = int(keys.max()) - lift if app.keys == KEYS[1] and r[2] + lift < KEYS[1] - 1 + EDGE else None
         return int(keys.min()) - lift, high
 
-    def in_room(self, db, dp, e, room):
+    def in_room(self, db, dp, e, room, fix=0.0):
         """A move by (db beats, dp keys) cut short where a shape would pass the limits (room: move_room): in whole
-        grid steps / keys like the move, unless Shift is held."""
+        grid steps / keys like the move, unless Shift is held. fix: the move's first_note_fix, so a shape stopped
+        at beat 0 still has its earliest note on a grid line (user)."""
         if not room:
             return db, dp
         left, down, up = room
         sb = self.app.snap_beats()
         if sb and not e.state & SHIFT:
-            left, down, up = math.floor(left / sb + 1e-9) * sb, math.floor(down + 1e-9), math.floor(up + 1e-9)
+            left = -(math.ceil((-left - fix) / sb - 1e-9) * sb + fix)
+            down, up = math.floor(down + 1e-9), math.floor(up + 1e-9)
         return max(db, -left), min(max(dp, -down), up)
 
     def held_step(self, idx):
@@ -1096,14 +1106,19 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 orig = self.copy_moved(orig)
             if self.room is None:  # (each shape stops at beat 0 and the lowest / highest key on its own, the Select
                 self.room = {j: self.move_room(self.app.shapes[j]) for j in orig}  # box and the rest go on: user)
-                self.onto_grid = self.first_note_fix(orig)
-            if self.app.snap_beats() and not e.state & SHIFT:
-                db += self.onto_grid
+                self.onto_grid = (self.first_note_fix(orig), {j: self.first_note_fix([j]) for j in orig})
+            # (straight up / down leaves the time alone: the earliest note snaps once the mouse goes sideways, user)
+            fix = self.onto_grid[0] if self.app.snap_beats() and not e.state & SHIFT and db else 0.0
+            go = {j: self.in_room(db + fix, dp, e, self.room[j], fix) for j in orig}
+            if fix and any(bj != db + fix for bj, _ in go.values()):  # one held back at beat 0: each snaps by its
+                own = self.onto_grid[1]  # own earliest note (else the rest took the held one's shift off the grid)
+                go = {j: self.in_room(db + own[j], dp, e, self.room[j], own[j]) for j in orig}
+            db += fix
             self.drag = ("move", start, orig, one, True, part)
             kept = self.box_kept
             moved = False
             for j, pts in orig.items():
-                bj, pj = self.in_room(db, dp, e, self.room[j])
+                bj, pj = go[j]
                 new = [[b + bj, p + pj] for b, p in pts]
                 moved = moved or new != self.app.shapes[j]["pts"]
                 self.app.shapes[j]["pts"] = new
@@ -1148,6 +1163,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 keep = e.state & CTRL
                 self.notes_onto_grid(self.app.selected(),
                                      lambda b: self.resize_custom(orig, k, [b, pt[1]], keep, side), pt[0])
+            else:  # (free: a snap saved for let go from an earlier step is off, user)
+                self.grid_later = None
             if self.unmoved(step):
                 return
             if self.stayed_inside(step):
@@ -1356,7 +1373,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             else:
                 self.cancel_draft()
         elif kind in ("resize", "turn", "skew") or kind == "handle" and self.app.selected()["kind"] == "custom":
-            if kind == "resize" and self.grid_later:  # (too slow to snap the notes while dragging: done now)
+            if kind == "resize" and self.grid_later and not e.state & SHIFT:  # (too slow to snap the notes while
+                #                                                              dragging: done now)
                 self.notes_onto_grid(self.app.selected(), *self.grid_later, late=False)
                 self.app.shape_edited()
             self.app.sync_custom()  # (a stroke's point dragged: its gaps may have closed)

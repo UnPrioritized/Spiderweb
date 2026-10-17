@@ -149,6 +149,33 @@ def path_notes(path, end_dot=False, where=False):
     return notes, (u % loop if loop else u)
 
 
+def edges_settled(pts):
+    """(tick, pitch) points with the ones ON a row edge (ROW_EDGE) given to a row: the row below when the path's
+    nearest points at another height on both sides are below (a square's top lying on the edge, a circle's top
+    touching it), else the row above (exactly on it). Was always the row above: a stray row of notes past the box
+    (user)."""
+    y = pts[:, 1]
+    edge = np.abs(y + 0.5 - np.round(y + 0.5)) < ROW_EDGE
+    if not edge.any():
+        return pts
+    n = len(pts)
+    level = np.append(True, np.abs(np.diff(y)) > ROW_EDGE)  # (a new height starts here)
+    run = np.cumsum(level) - 1
+    starts = np.flatnonzero(level)
+    ends = np.append(starts[1:] - 1, n - 1)
+    prev, nxt = starts[run] - 1, ends[run] + 1
+    if n > 2 and (pts[0] == pts[-1]).all() and len(starts) > 1:  # closed: round past the ends (the first and last
+        first_run, last_run = run == 0, run == run[-1]  # runs are the same height there)
+        prev = np.where(first_run, starts[-1] - 1, prev)
+        nxt = np.where(last_run, ends[0] + 1, nxt)
+    on = np.round(y + 0.5) - 0.5
+    has_p, has_n = prev >= 0, nxt < n
+    below = (~has_p | (y[np.maximum(prev, 0)] < on)) & (~has_n | (y[np.minimum(nxt, n - 1)] < on)) & (has_p | has_n)
+    out = pts.astype(float, copy=True)
+    out[edge, 1] = np.where(below[edge], on[edge] - 2 * ROW_EDGE, on[edge])  # (just under it: the row below)
+    return out
+
+
 def line_notes(pts, tail=False, at=None):
     """
     (tick, pitch) points -> (start, end, pitch) notes, before keep_longest. The path is split wherever it turns
@@ -157,6 +184,7 @@ def line_notes(pts, tail=False, at=None):
     tail: the last part of a piece ending on the path's last point has its last note start on it.
     at: each point's spot on the path: then -> (notes, each note's spot) (path_notes where).
     """
+    pts = edges_settled(pts)
     n = len(pts)
     cuts = direction_changes(pts[:, 0])
     lo, hi = np.append(0, cuts), np.append(cuts, n - 1)
@@ -175,7 +203,15 @@ def line_notes(pts, tail=False, at=None):
         tails = np.isin(last, piece_end) & (q[last] == pts[-1]).all(axis=1)
     size = last - first + 1
     ir = spans(first, last)
-    return parts_notes(q[ir], np.cumsum(size) - size, tails, spot=None if at is None else at[iq][ir])
+    got = parts_notes(q[ir], np.cumsum(size) - size, tails, spot=None if at is None else at[iq][ir])
+    if not tail:  # notes starting on the path's last tick (a square's right side) end there instead of 1 tick
+        notes = got[0] if isinstance(got, tuple) else got  # past it (user: notes sticking out of the box)
+        right, left = np.floor(pts[:, 0].max() + 0.5), np.floor(pts[:, 0].min() + 0.5)
+        late = notes[:, 0] >= right
+        if right > left and late.any():
+            notes[late, 0] = right - 1
+            notes[late, 1] = right
+    return got
 
 
 def parts_notes(r, first, tails, counts=False, spot=None):
