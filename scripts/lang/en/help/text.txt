@@ -37,6 +37,6 @@ Letters the font doesn't have are taken from another font. If no font on the PC 
 
 Click a text with the Text tool (or double-click it with Select, or right-click → Edit text) to retype it. Drag, Shift+arrows, double-click (a word) or Ctrl+A select letters; Ctrl+C / X / V copy, cut and paste them (with no letters selected, Ctrl+C copies the whole shape).
 
-Right-click → Split into letters: every letter becomes its own text, right where it was, with the same notes (spaces go). All of them stay selected, so you can move, turn or flip each one, or click one to retype it.
+Right-click → Split into letters: every letter becomes its own text, right where it was, with the same notes (spaces go). If letters overlap, or the text has Claw, Chop or a Gate range (they then work on each letter alone), some notes change and the status line says so. All of them stay selected, so you can move, turn or flip each one, or click one to retype it.
 
 Right-click → Turn into custom shape: the text becomes a normal custom shape, so you can edit its lines and use everything custom shapes have. It can't be retyped after that. Its notes can move a little: a custom shape fills a key wherever any of it is inside, so Fill and Spam come out a bit chunkier (like Threshold 0%), and Grow is kept in its lines.
