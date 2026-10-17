@@ -18,6 +18,8 @@ Ctrl+V pastes whatever was copied last: notes copied in Domino after your last c
 
 The notes of every copied track become one shape (Pasted notes); controllers and other events are left out. Each note remembers its track: with Multi channel every track gets a channel of its own (even tracks that never overlap), with Single channel all of them go on one channel and overlaps are removed.
 
+To freeze a shape, you don't need to copy it to Domino and back (that can move its notes to other channels): right-click it → Turn into plain notes. It becomes pasted notes and every note keeps its channel.
+
 Move, flip, turn, stretch or skew the shape like a custom shape: the notes go with its box. The notes keep their own velocities until you change the shape's velocity (in the panel or the velocity pane).
 
 Export (on the Domino row) saves every note as a Domino song file (.dms), next to the MIDI file in the Output file box, with the same name (spiderweb.mid → spiderweb.dms). Open it in Domino like any song. It can hold a PPQ up to 65535, where a MIDI file stops at 32767. The tracks, channels, tempo and beats per bar come out like Generate MIDI; notes above key 127 are left out. Notes longer than 65535 ticks are cut to 65535, the longest gate Domino can work with (Copy does the same).

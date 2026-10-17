@@ -169,6 +169,8 @@ class ShapeMenu:
             item(tr("roll_menu.make_complete"), "", app.make_complete)
         if app.live_problem() is None:
             item(tr("roll_menu.turn_into_live_shape"), tr("roll_menu.ctrl_r"), app.turn_into_live, keys=True)
+        if app.plain_targets():
+            item(tr("roll_menu.turn_into_plain_notes"), "", app.turn_into_plain_notes)
         if len(app.sels) == 1 and app.can_split_pieces(sh):
             label = (tr("roll_menu.split_back_into_the_shapes_it") if originals(sh) or sh.get("merge") else
                      tr("roll_menu.split_into_separate_shapes"))
@@ -292,6 +294,8 @@ class ShapeMenu:
              tr("roll_menu.ctrl_g"), app.join_selected, ok)
         if app.live_problem() is None:
             item(tr("roll_menu.turn_into_live_shape"), tr("roll_menu.ctrl_r"), app.turn_into_live)
+        if app.plain_targets():
+            item(tr("roll_menu.turn_into_plain_notes"), "", app.turn_into_plain_notes)
         if app.pieces():
             item(tr("roll_menu.make_complete"), "", app.make_complete)
         self.group_items(m, item, True, True, True)

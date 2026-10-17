@@ -271,7 +271,7 @@ def clean_shape(sh):
                 out["picture_notes"] = {"pal": list(pal) if ok else None}
             if sh.get("held") is True:
                 out["held"] = True
-            if sh.get("made") in ("mask", "leftovers", "path"):
+            if sh.get("made") in ("mask", "leftovers", "path", "plain"):
                 out["made"] = sh["made"]
             pic = clean_picture(sh.get("picture"))
             if pic:  # a picture made into notes (picture.py): the notes are its finished colours, track = slot
@@ -954,7 +954,7 @@ def kind_notes_tracks(sh, ppq, keys):
 
 # ---------------------------------------------------------------- overlaps and channels
 
-def assign_slots(note_lists, split="key", apart=(), first=None):
+def assign_slots(note_lists, split="key", apart=(), first=None, taken=None):
     """
     Auto channels: shapes whose notes overlap get different slots, shapes that don't clash reuse the lowest
     free one. Earlier shapes get the lower slots. split="key": only notes on the same key at the same time
@@ -962,6 +962,7 @@ def assign_slots(note_lists, split="key", apart=(), first=None):
     apart: groups of note list numbers that always get different slots (a custom shape's outline and inside).
     first: per list None, or the tick to count it as starting at instead (a gate aware flip's colours: where they
     start unflipped).
+    taken: {list number: its slot}, lists whose slot is set already (the others clashing with them step round it).
     """
     n = len(note_lists)
     busy = range(n)
@@ -991,7 +992,12 @@ def assign_slots(note_lists, split="key", apart=(), first=None):
              for notes, f in zip(note_lists, first or [None] * n)]
     order = sorted(range(n), key=lambda i: (first[i], i))
     slots, done = [0] * n, set()
+    for i, s in (taken or {}).items():
+        slots[i] = s
+        done.add(i)
     for i in order:
+        if i in done:
+            continue
         used = {slots[j] for j in clashes[i] if j in done}
         k = 0
         while k in used:
@@ -1160,6 +1166,23 @@ CHANNEL_MODES = ("raw", "single", "auto")
 SPLITS = ("key", "time")
 
 
+def mapped_slots(slots, use10):
+    """assign_slots' slots (array) -> the slots used (render's use10)."""
+    if use10 == "all":  # (channel 10 last of each 16: the first 15 as without it, so ticking changes no colour)
+        return slots // 16 * 16 + LAST10[slots % 16]
+    if use10:  # (0..8, 10..24, 26..40...: never a slot that is channel 10)
+        return slots + (slots + 6) // 15
+    return slots
+
+
+def unmapped_slot(s, use10):
+    """The assign_slots slot mapped_slots turns into slot s, or None (none does: channel 10 skipped)."""
+    for u in range(s + 1):  # (mapped_slots never makes a slot smaller)
+        if int(mapped_slots(np.array([u], np.int64), use10)[0]) == s:
+            return u
+    return None
+
+
 def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None, pastes=None,
            held=None, back=None, ordered=None):
     """
@@ -1171,7 +1194,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     track of the shape gets channels as if it were a shape of its own.
     apart: per shape True if its tracks must get different channels (pasted notes, Fill / Spam "Outline").
     fixed: per shape True if its tracks ARE its slots, whatever the mode (a picture's colours: slot k = the k-th
-    colour of the project's picture colours, so its channel never changes).
+    colour of the project's picture colours, so its channel never changes). "solid": the same, and with "auto" the
+    other shapes clashing with its notes take other slots (Turn into plain notes: it stands for the shape it was).
     use10: the pictures use channel 10 too (slot k = channel k, slot_track_channel): the other shapes' slots skip
     every slot that would be channel 10 (shapes never use it, user). "all" = the project's "Use channel 10": slots
     are channels too, but the shapes take channel 10 only as the 16th (LAST10), so ticking it changes no colour.
@@ -1214,8 +1238,16 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
         units, unit_of, forced = [], [], []  # the shapes, pasted notes split up by track; unit_of = each note's unit
         team_unit, team_units = {}, {}  # (group, turn) -> its unit; group -> its units
         paste_unit, paste_units = {}, {}  # (paste, track) -> its unit; paste -> its units
+        taken = {}  # (unit -> its slot before channel 10 is skipped: a "solid" pinned shape's tracks)
         for lst, tr, sep, pin, team, pid in zip(note_lists, tracks, apart, pinned, teams, pastes):
             if pin is not None:
+                if fixed[len(unit_of)] == "solid" and len(lst):
+                    ids, which = unique_inverse(pin)
+                    for k, s in enumerate(ids.tolist()):
+                        u = unmapped_slot(s, use10)
+                        if u is not None:  # (on channel 10: no other shape takes it anyway)
+                            taken[len(units)] = u
+                            units.append(lst[which == k])
                 unit_of.append(None)
                 continue
             if team is not None:
@@ -1277,12 +1309,9 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                     firsts[u] = paste_first[u]
         forced += [us for us in team_units.values() if len(us) > 1]
         forced += [us for us in paste_units.values() if len(us) > 1]  # (pasted tracks: always apart, tracks_apart)
-        unit_slots = np.array(assign_slots(units, split, forced, [firsts.get(u) for u in range(len(units))]),
-                              np.int64)
-        if use10 == "all":  # (channel 10 last of each 16: the first 15 as without it, so ticking changes no colour)
-            unit_slots = unit_slots // 16 * 16 + LAST10[unit_slots % 16]
-        elif use10:  # (0..8, 10..24, 26..40...: never a slot that is channel 10)
-            unit_slots = unit_slots + (unit_slots + 6) // 15
+        unit_slots = mapped_slots(np.array(assign_slots(units, split, forced, [firsts.get(u) for u in
+                                                                              range(len(units))], taken), np.int64),
+                                  use10)
         slot_of = [pin if u is None else unit_slots[u] for u, pin in zip(unit_of, pinned)]
         count = int(unit_slots.max()) + 1 if len(units) else 0
     else:  # (a Hz bass layer's clashing notes too: one channel, user)

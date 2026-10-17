@@ -16,7 +16,7 @@ from notes.bezier import nearest, split
 from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_notes_tracks, shape_path
 from notes.gateflip import lifted, put_back, turn_velocities
-from notes.mask import same_mask
+from notes.mask import is_mask, same_mask
 from notes.sustain import alike
 from notes.merge import edge_moves, merged, part_rows, reshaped_parts
 from notes.glue import for_part as glue_for_part, glue_box
@@ -309,6 +309,43 @@ class JoinSplit:
         self.shapes_changed()
         self.status.config(text=tr("join_split.made_complete") if len(got) == 1 else
                            tr("join_split.made_complete_n", n=len(got)))
+
+    def plain_targets(self):
+        """The selected shapes Turn into plain notes works on: not pasted notes already, pictures or masks (merged
+        shapes yes: user, so they can be sliced)."""
+        return [i for i in sorted(self.sels) if i < len(self.shapes) and (sh := self.shapes[i])
+                and ("notes" not in sh or sh.get("merge")) and "picture" not in sh and not is_mask(sh)]
+
+    def turn_into_plain_notes(self):
+        """Right-click → Turn into plain notes (user, 2026-10-17: people sent shapes to Domino and back to freeze them,
+        which moved their channels): each selected shape is replaced by a shape of its notes exactly as they sound
+        now, each note on the channel it has now (like Apply mask, App.copied). One step."""
+        self.commit_typing()
+        got = self.plain_targets()
+        if not got:
+            return
+        if self.notes_late:  # (notes still catching up with a drag: made now)
+            self.shapes_changed(now=True)
+        owners = self.rendered[:, 5]
+        new = {}
+        for i in got:
+            rows = self.rendered[owners == i]
+            if len(rows):  # (a shape with no notes stays as it is)
+                sh = self.shapes[i]
+                new[i] = self.copied(rows, False)
+                new[i]["made"] = "plain"
+                new[i]["name"] = tr("join_split.plain_name", name=self.shape_label(sh))
+        if not new:
+            self.status.config(text=tr("join_split.plain_nothing"))
+            return
+        self.roll.cancel_draft()
+        self.push_undo(name=tr("roll_menu.turn_into_plain_notes"))
+        self.unlink_groups(sorted(new))  # (an Add between group: plain shapes first, user)
+        for i, sh in new.items():
+            self.shapes[i] = sh
+        self.select_many(got, self.sel if self.sel in got else got[0])
+        self.shapes_changed()
+        self.status.config(text=trn("join_split.plain_done", len(new), n=len(new)))
 
     def can_split_pieces(self, sh):
         """A joined curve with more than one piece / shape in it, a live shape that can go back to the shapes it was

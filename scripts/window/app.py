@@ -139,7 +139,8 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False):
     got = [(n, capped_colours(t % CLASH, most) + t // CLASH * CLASH if w > most else t) for (n, t), w in zip(got, wanted)]
     # (pictures using channel 10 too: one setting for the project, kept with every picture; an Apply mask copy made
     # while channel 10 was used keeps it in use, hunt)
-    pins = [pinned_slots(sh, mode) for sh in shapes]
+    # (Turn into plain notes: "solid", other shapes step round its channels)
+    pins = [pinned_slots(sh, mode) and ("solid" if sh.get("made") == "plain" else True) for sh in shapes]
     rules = [slot_rule(sh) if pin else None for sh, pin in zip(shapes, pins)]
     use10 = any(r is True for r in rules)
     # (pinned tracks made with channel 10 skipped stay on their channels while it's used: mask.as_used)
@@ -1729,7 +1730,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
             return tr("mask.applied")
         if made == "leftovers":
             return tr("join_split.merge_leftovers")
-        if made == "path":  # (Copy along a path → Turn into plain shapes: "Line copy 2", named when made)
+        if made in ("path", "plain"):  # (Copy along a path → Turn into plain shapes: "Line copy 2", Turn into plain
+            # notes: "Custom: Circle (notes)", named when made)
             return sh.get("name") or "?"
         if ("picture" in sh or sh.get("merge") or  # (the picture's file name, user; "Merged notes")
                 "notes" in sh and sh.get("name") in (tr("join_split.merge_leftovers"),  # (plain notes, user; made
