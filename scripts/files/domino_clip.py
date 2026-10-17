@@ -23,6 +23,7 @@ import numpy as np
 
 from files import clipboard
 from files.lang import tr
+from files.speed import loops
 from notes.engine import slot_track_channel
 
 FORMAT = "MidiPortalSequence"
@@ -152,12 +153,11 @@ def clip_data(notes, ppq, bar, start="bar"):
         first = int(notes[:, 0].min()) // bar * bar
         length = max(-(-(int(notes[:, 1].max()) - first) // bar) * bar, bar)
     end = item(2009, item(1001, struct.pack("<I", length)))
-    s = notes[np.lexsort((notes[:, 2], notes[:, 0], notes[:, 4]))]  # (one sort: by track, each in time order)
-    cuts = np.flatnonzero(np.diff(s[:, 4])) + 1
-    tracks = b"".join(item(1003, TRACK_HEAD + note_rows(part, first).tobytes() + end + TRACK_TAIL)
-                      for part in np.split(s, cuts))
-    data = SONG_START + item(1002, struct.pack("<H", ppq)) + SONG_REST + tracks + SONG_TAIL
     with Packer(zlib.Z_DEFAULT_COMPRESSION) as z:
+        order, cuts = track_orders(notes, int(notes[:, 4].max()) + 1, z.pool)
+        tracks = b"".join(item(1003, TRACK_HEAD + note_rows(notes[order[a:b]], first).tobytes() + end + TRACK_TAIL)
+                          for a, b in zip(cuts[:-1].tolist(), cuts[1:].tolist()) if a < b)
+        data = SONG_START + item(1002, struct.pack("<H", ppq)) + SONG_REST + tracks + SONG_TAIL
         z.add(data)
         return MAGIC + struct.pack("<I", len(data)) + z.finish()
 
@@ -167,6 +167,28 @@ def dms_path(mid_path):
     "song.dms.mid" by output_path) is used as it is."""
     stem = os.path.splitext(mid_path)[0]
     return stem if stem.lower().endswith(".dms") else stem + ".dms"
+
+
+def track_orders(notes, count, pool=None):
+    """notes: (start, end, key, velocity, slot, ...) rows, keys 0..127, slots 0..count - 1 -> (order, cuts): the
+    rows of slot s are order[cuts[s]:cuts[s + 1]], in time order, then by key, rows alike in their order (= a
+    np.lexsort per slot). Each slot is one sort of start * 128 + key: the compiled radix sort once it's ready
+    (10 M random notes, 1 track: 1.9 -> 0.4 s), the slots on several cores when pool is given."""
+    slots = notes[:, 4].astype(np.int16 if count < 2 ** 15 else np.int64)  # (16-bit: NumPy's quick stable sort)
+    order = np.argsort(slots, kind="stable")
+    del slots
+    cuts = np.searchsorted(notes[order, 4], np.arange(count + 1))
+
+    def sort(slot):
+        mine = order[cuts[slot]:cuts[slot + 1]]
+        if len(mine) > 1:
+            s = notes[mine, 0].astype(np.int64)
+            k = (s - s.min()) << 7 | notes[mine, 2]
+            fast = loops()
+            mine[:] = mine[fast.radix_order(k, int(k.max()).bit_length()) if fast else np.argsort(k, kind="stable")]
+    for _ in (pool.map(sort, range(count)) if pool else map(sort, range(count))):
+        pass
+    return order, cuts
 
 
 def note_items(notes, first=0):
@@ -222,13 +244,9 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums):
     track_head(0, b"Conductor", len(events), True)
     feed(events + track_tail(0))
     count = int(notes[:, 4].max()) + 1 if len(notes) else 0
-    slots = notes[:, 4].astype(np.int16 if count < 2 ** 15 else np.int64)  # (16-bit: NumPy's quick stable sort)
-    order = np.argsort(slots, kind="stable")
-    del slots
-    cuts = np.searchsorted(notes[order, 4], np.arange(count + 1))
+    order, cuts = track_orders(notes, count, z.pool)
     for slot in range(count):
         mine = order[cuts[slot]:cuts[slot + 1]]
-        mine = mine[np.lexsort((notes[mine, 2], notes[mine, 0]))]  # (in time order, then by key)
         track_head(slot_track_channel(slot, use10)[1], b"", len(mine) * NOTE.itemsize)
         end = 0
         for at in range(0, len(mine), PIECE):

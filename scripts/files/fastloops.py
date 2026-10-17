@@ -16,6 +16,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   wave_fill      hzbass.wave_ticks: each note's wave length, one key at a time
   hz_expand ... hz_finish  hz_grid.KeyGrid.made for the plain settings (made_fast): a key's repeats
   key_order      np.lexsort by key, then up to 3 more columns (runs already in order merged: quick)
+  radix_order    np.argsort(kind="stable") of whole numbers (Copy / Export to Domino: domino_clip.track_orders)
   ring_runs      roll_draw.ring_parts' runs: the selection's red outline, each key row's notes joined
   clash_pairs    engine.clash_pairs (Multi channel): which owners' stretches clash
   nearest        picture._dist2(...).argmin(1) (Image to notes): each colour's nearest palette colour
@@ -580,6 +581,36 @@ def key_order(key, a, b, c):
         if at[g + 1] - at[g] > 1:
             part = order[at[g]:at[g + 1]]
             _runs_sort(part, a, b, c, tmp[at[g]:at[g + 1]])
+    return order
+
+
+@njit(cache=CACHE, nogil=True)
+def radix_order(k, bits):
+    """np.argsort(k, kind="stable") for whole numbers 0 .. 2 ** bits - 1: 11 bits a pass, the keys carried along
+    (a pass where every key has the same digit is skipped)."""
+    n = len(k)
+    order, o2 = np.arange(n), np.empty(n, np.int64)
+    k1, k2 = k.copy(), np.empty(n, np.int64)
+    count = np.empty(2049, np.int64)
+    shift = 0
+    while shift < bits and n > 1:
+        count[:] = 0
+        for i in range(n):
+            count[((k1[i] >> shift) & 2047) + 1] += 1
+        if count[((k1[0] >> shift) & 2047) + 1] == n:
+            shift += 11
+            continue
+        for d in range(2048):
+            count[d + 1] += count[d]
+        for i in range(n):
+            d = (k1[i] >> shift) & 2047
+            p = count[d]
+            o2[p] = order[i]
+            k2[p] = k1[i]
+            count[d] = p + 1
+        order, o2 = o2, order
+        k1, k2 = k2, k1
+        shift += 11
     return order
 
 
@@ -1527,6 +1558,7 @@ def warm():
     note_stretches(np.zeros((1, 4), np.int64), True, 0, np.zeros(0, np.int64))
     clash_levels(np.zeros((1, 3), np.int64), np.array([0, 1, 1], np.int64), i1.copy())
     key_order(i1, i1, i1, i1)
+    radix_order(i1, 1)
     ring_runs(i1, i1, i1, i1, 0.5, 1)
     clash_pairs(np.zeros((1, 4), np.int64), 1)
     wave_fill(i1, 0, 1, i1, np.zeros(1), np.zeros(1))
