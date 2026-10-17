@@ -13,6 +13,7 @@ O / A / B stay empty) and the threshold (how much of a key's height has to be in
 beats per key then).
 """
 
+import copy
 import math
 
 from files.lang import tr
@@ -209,8 +210,8 @@ def build(sh, tx, axes):
     if y1 - y0 < 1e-6:
         y0, y1 = y0 - 0.01, y1 + 0.01
     w, h = x1 - x0, y1 - y0
-    sh["strokes"] = [{"kind": "curve", "pts": [[round((x - x0) / w, 7), round((y - y0) / h, 7)] for x, y in c]}
-                     for _, c in contours]
+    # (not rounded: text_polys rounds where the letters land, the same for a split letter as in the whole text)
+    sh["strokes"] = [{"kind": "curve", "pts": [[(x - x0) / w, (y - y0) / h] for x, y in c]} for _, c in contours]
     sh["pts"] = [list(to_roll(axes, x0, y0)), list(to_roll(axes, x1, y0)), list(to_roll(axes, x0, y1))]
     font = text_font(tx)
     sh["text"] = dict(tx, bbox=[x0, y0, x1, y1], cap=font.cap, holes=find_holes(contours))
@@ -266,6 +267,44 @@ def rebuild(sh, tx, axes, notes_of, ppq):
     return True
 
 
+def set_anchor(sh, notes_of, ppq):
+    """The anchor put on the text's first note and lowest key as it is now (nothing moves)."""
+    ns = notes_of(sh)
+    uv = frame_uv(sh["pts"], int(ns[:, 0].min()) / ppq, int(ns[:, 2].min())) if len(ns) else None
+    if uv:
+        sh["text"]["anchor"] = [round(uv[0], 9), round(uv[1], 9)]
+
+
+def split_letters(sh, notes_of, ppq):
+    """Split into letters: each letter you can see as its own one-letter text (a copy of sh: fill, colour, gate
+    ... kept) exactly where it was, so the notes stay the same; spaces go. [] if there's nothing to split."""
+    tx, (O, X, Y) = sh["text"], text_axes(sh)
+    carets = layout(tx)[1]  # (the caret before character j = where it starts)
+    out = []
+    for j, ch in enumerate(tx["text"]):
+        if ch == "\n":
+            continue
+        one = copy.deepcopy({k: v for k, v in sh.items() if k not in ("strokes", "pts", "text", "name")})
+        letter = {k: v for k, v in tx.items() if k not in ("anchor", "bbox", "holes")}
+        if build(one, dict(letter, text=ch, align="left"), (to_roll((O, X, Y), *carets[j]), X, Y)):
+            set_anchor(one, notes_of, ppq)
+            out.append(one)
+    return out
+
+
+def to_custom(sh):
+    """Turn into custom shape: the letters stay as they look (Grow baked into their lines), but it's a plain custom
+    shape now, filled by its rules (the notes can move a little: no threshold, overlaps cancel out)."""
+    tx = sh.pop("text")
+    x0, y0, x1, y1 = tx["bbox"]
+    if tx.get("grow"):
+        polys = text_polys(dict(sh, text=tx))
+        sh["strokes"] = [{"kind": "poly", "pts": [list(frame_uv(sh["pts"], b, p)) for b, p in poly]} for poly in polys]
+    sh["round"] = (y1 - y0) / (x1 - x0)  # (the letters' own look: the outline gate shrinks them the same way)
+    from notes.custom import refit
+    refit(sh, song_beats=True)
+
+
 def shown_size(tx, axes):
     """The number in the size box for text at these axes (it follows resizing the box on the roll)."""
     e = axes_em(axes, tx.get("k", 1.0))
@@ -293,19 +332,22 @@ def text_name(text):
 def text_polys(sh):
     """The letters' outlines as closed polygons in beats / pitch, grown / shrunk by the grow setting."""
     tx = sh["text"]
-    (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
-    ub, up, vb, vp = b1 - b0, p1 - p0, b2 - b0, p2 - p0
+    x0, y0, x1, y1 = tx["bbox"]
+    w, h = x1 - x0, y1 - y0
+    O, X, Y = text_axes(sh)
     polys = []
-    for st in sh["strokes"]:
-        poly = [(b0 + u * ub + v * vb, p0 + u * up + v * vp) for u, v in flatten(st["pts"], 0.002)]
-        polys.append(poly)
+    for st in sh["strokes"]:  # (curves cut into steps in em units: a split letter gets the same steps as the whole)
+        em = flatten([(x0 + u * w, y0 + v * h) for u, v in st["pts"]], 0.001)
+        polys.append([(O[0] + x * X[0] + y * Y[0], O[1] + x * X[1] + y * Y[1]) for x, y in em])
     grow = tx.get("grow", 0.0)
     if grow:
         k = tx.get("k", 1.0)
         holes = set(tx.get("holes", ()))
         polys = [[(x * k, y) for x, y in offset([(b / k, p) for b, p in poly], -grow if i in holes else grow)]
                  for i, poly in enumerate(polys)]
-    return polys
+    # float noise dropped: letter edges often sit exactly half way between two ticks (font sizes are round
+    # numbers), so noise picked the tick, and a split letter (Split into letters) could land a tick off the whole
+    return [[(round(b, 9), round(p, 9)) for b, p in poly] for poly in polys]
 
 
 def offset(poly, d):

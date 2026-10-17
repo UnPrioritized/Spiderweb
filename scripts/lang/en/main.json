@@ -933,6 +933,8 @@
  "roll_menu.add_anchor_here": "Add anchor here",
  "roll_menu.add_point_here": "Add point here",
  "roll_menu.edit_text": "Edit text",
+ "roll_menu.split_into_letters": "Split into letters",
+ "roll_menu.text_to_custom": "Turn into custom shape",
  "roll_menu.delete_this_stroke": "Delete this stroke",
  "roll_menu.copy_this_stroke": "Copy this stroke",
  "roll_menu.paste_stroke_into_this_shape": "Paste stroke into this shape",

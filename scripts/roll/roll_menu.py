@@ -12,7 +12,9 @@ from notes.areas import most_colours
 from notes.convert import originals
 from notes.custom import ROLES, can_fit_upright, fit_upright
 from window.drawer_mouse import colour_menu
-from notes.joined import is_joined
+from notes.joined import is_joined, piece_velocity
+from notes.text import split_letters, to_custom
+from window.join_split import part_glue, span
 from notes.mask import is_mask
 from notes.funnel import inside_out, new_start, turned_curve
 from notes.tumour import LINE_KINDS
@@ -92,6 +94,7 @@ class ShapeMenu:
             self.formula_menu(m, PolygonHost(app))
         if sh.get("text") and len(app.sels) == 1:
             item(tr("roll_menu.edit_text"), "", lambda: self.edit_text(at))
+            self.text_items(item)
         if "picture" in sh and len(app.sels) == 1:  # a placed picture (picture.py, image_window.py)
             item(tr("image.menu_look"), tr("image.menu_double"), lambda: app.edit_picture(i), keys=True)
             item(tr("image.menu_other"), "", lambda: app.replace_picture(i))
@@ -197,6 +200,52 @@ class ShapeMenu:
         self.box_kept = None  # (a kept Select box was round the old box)
         app.shapes_changed()
 
+    def text_items(self, item):
+        """Split into letters (not Hz bass: its tones belong to the whole text) and Turn into custom shape, for the
+        selected texts."""
+        shapes = [self.app.shapes[j] for j in self.app.sels]
+        whole = not any(sh.get("cut") for sh in shapes)  # (a sliced piece's notes come from the whole text)
+        item(tr("roll_menu.split_into_letters"), "", self.split_letters, whole and not any(sh.get("hz") for sh in shapes)
+             and any(sum(not c.isspace() for c in sh["text"]["text"]) > 1 for sh in shapes))
+        item(tr("roll_menu.text_to_custom"), "", self.text_to_custom, whole)
+
+    def split_letters(self):
+        """Each selected text becomes one-letter texts where its letters were (text.split_letters), all selected,
+        velocities kept where they were. One step."""
+        app = self.app
+        self.end_typing()
+        self.cancel_draft()
+        app.push_undo(name=tr("roll_menu.split_into_letters"))
+        picked = []  # (indices in the new list)
+        for j in sorted(app.sels, reverse=True):  # (from the back: the shapes before it keep their numbers)
+            sh = app.shapes[j]
+            letters = split_letters(sh, app.notes_of, app.ppq)
+            if len(letters) < 2:
+                picked.append(j)
+                continue
+            whole = span(sh)
+            for p in letters:
+                p.pop("between", None)
+                piece_velocity(p, sh, span(p), whole)
+                part_glue(p, sh)
+            app.unlink_groups([j])
+            app.shapes[j:j + 1] = letters
+            picked = [d + len(letters) - 1 for d in picked] + list(range(j, j + len(letters)))
+        self.box_kept = None
+        app.select_many(picked, min(picked))
+        app.shapes_changed()
+
+    def text_to_custom(self):
+        """The selected texts become plain custom shapes (text.to_custom). One step."""
+        app = self.app
+        self.end_typing()
+        self.cancel_draft()
+        app.push_undo(name=tr("roll_menu.text_to_custom"))
+        for j in app.sels:
+            to_custom(app.shapes[j])
+        app.select_many(app.sels, app.sel)  # (the panel shows custom shape settings now)
+        app.shapes_changed()
+
     def show_box_menu(self, e, i=None):
         """Right-click inside the kept Select boxes with several shapes selected: only what works on all of them
         at once (user asked; each shape's own options are left out). i: the shape right-clicked on, if any."""
@@ -215,6 +264,8 @@ class ShapeMenu:
             self.formula_menu(m)
         elif len(app.polygon_shapes()) == n:
             self.formula_menu(m, PolygonHost(app))
+        if all(app.shapes[j].get("text") for j in app.sels):
+            self.text_items(item)
         if app.note_tool_sels():  # (where the one shape's menu has it: under Save drawing, user)
             item(tr("roll_menu.copy_path"), "", lambda: open_path(app))
         if app.tumour_targets():
