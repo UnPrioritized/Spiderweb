@@ -161,6 +161,9 @@ def clean_shape(sh):
     bt = clean_between(sh.get("between")) if out["kind"] in BETWEEN_KINDS else None
     if bt:  # one of an Add between group (between.py)
         out["between"] = bt
+    tm = sh.get("team")
+    if not bt and isinstance(tm, list) and len(tm) == 2 and isinstance(tm[0], str) and type(tm[1]) is int:
+        out["team"] = list(tm)  # (its group's colour turn, kept when Turn into plain notes unlinked it: between.turns)
     if out["kind"] == "custom":
         strokes = clean_strokes(sh.get("strokes"))
         if len(out["pts"]) != 3 or not strokes:
@@ -1183,6 +1186,27 @@ def unmapped_slot(s, use10):
     return None
 
 
+def pushed_solid(note_lists, pinned, fixed, split, step):
+    """render's pinned tracks with each "solid" shape's track that clashes with an earlier "solid" shape's on the same
+    slot moved up by step slots (15, 16 with channel 10 used) until it's free: the same channel (colour), another
+    track (user, 2026-10-17: a copy of plain notes ate the original's notes)."""
+    placed = {}  # slot -> earlier solid tracks' stretches there
+    out = list(pinned)
+    for i, (lst, pin) in enumerate(zip(note_lists, pinned)):
+        if fixed[i] != "solid" or pin is None or not len(lst):
+            continue
+        ids, which = unique_inverse(pin)
+        new = pin.copy()
+        for k, s in enumerate(ids.tolist()):
+            mine = lst[which == k]
+            while s in placed and clash_pairs(np.concatenate(placed[s] + [stretches(mine, 1, split)])):
+                s += step
+            placed.setdefault(s, []).append(stretches(mine, 0, split))
+            new[which == k] = s
+        out[i] = new
+    return out
+
+
 def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None, pastes=None,
            held=None, back=None, ordered=None):
     """
@@ -1233,12 +1257,15 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
         return made[i]
 
     pinned = [np.asarray(tr, np.int64) if fx and tr is not None else None for tr, fx in zip(tracks, fixed)]
+    if mode == "auto":
+        pinned = pushed_solid(note_lists, pinned, fixed, split, 16 if use10 else 15)
     top = max([int(p.max()) + 1 for p in pinned if p is not None and len(p)] or [0])
     if mode == "auto":
         units, unit_of, forced = [], [], []  # the shapes, pasted notes split up by track; unit_of = each note's unit
         team_unit, team_units = {}, {}  # (group, turn) -> its unit; group -> its units
         paste_unit, paste_units = {}, {}  # (paste, track) -> its unit; paste -> its units
         taken = {}  # (unit -> its slot before channel 10 is skipped: a "solid" pinned shape's tracks)
+        solid_teams = []  # (unit, (group, turn)) of those tracks
         for lst, tr, sep, pin, team, pid in zip(note_lists, tracks, apart, pinned, teams, pastes):
             if pin is not None:
                 if fixed[len(unit_of)] == "solid" and len(lst):
@@ -1247,6 +1274,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                         u = unmapped_slot(s, use10)
                         if u is not None:  # (on channel 10: no other shape takes it anyway)
                             taken[len(units)] = u
+                            if team is not None:  # (a step turned into plain notes: the other turns step round it)
+                                solid_teams.append((len(units), team))
                             units.append(lst[which == k])
                 unit_of.append(None)
                 continue
@@ -1308,6 +1337,10 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                 if u in paste_first:
                     firsts[u] = paste_first[u]
         forced += [us for us in team_units.values() if len(us) > 1]
+        forced += [(p, u) for p, team in solid_teams for t, u in team_unit.items() if t[0] == team[0] and t != team]
+        for p, team in solid_teams:  # (its own turn's shapes: its channel, as when it was one of them)
+            if team in team_unit:
+                taken.setdefault(team_unit[team], taken[p])
         forced += [us for us in paste_units.values() if len(us) > 1]  # (pasted tracks: always apart, tracks_apart)
         unit_slots = mapped_slots(np.array(assign_slots(units, split, forced, [firsts.get(u) for u in
                                                                               range(len(units))], taken), np.int64),

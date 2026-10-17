@@ -804,7 +804,9 @@ def turns(shapes):
     Colours on keeps its own Colours (user: Colours always comes first)."""
     out = [None] * len(shapes)
     done = set()
-    for sh in shapes:
+    for i, sh in enumerate(shapes):
+        if "team" in sh and not sh.get("cycle"):  # (its group unlinked by Turn into plain notes: its turn kept)
+            out[i] = tuple(sh["team"])
         gid = group_of(sh)
         if not gid or gid in done:
             continue
@@ -822,6 +824,8 @@ def copied(shapes, start=0):
     (a new one; copied without any of its steps: they're made again, added at the end); otherwise the copies are
     plain shapes (user)."""
     copies = shapes[start:]
+    for sh in copies:  # (a kept colour turn: the shape's own, not its copies')
+        sh.pop("team", None)
     gids = {group_of(sh) for sh in copies} - {None}
     count = len(shapes)
     for gid in sorted(gids):

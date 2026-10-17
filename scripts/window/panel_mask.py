@@ -260,15 +260,17 @@ class MaskPanel:
         self.status.config(text=tr("mask.apply_done", shapes=trn("n.shapes", len(picked), n=len(picked)),
                                    notes=trn("n.notes", count, n=count)))
 
-    def copied(self, got, picture):
+    def copied(self, got, picture, multi=None):
         """Shown rows (rendered's columns) -> one "Masked notes" shape, or None. Each note keeps its colour: copied
         from a picture = its channel slot for good, painted in the picture's colours; in Multi channel its slot while
         it stays where it's made (on the shapes it came from, which would push it onto other channels), moved away =
         channels like any shape; in Single channel the shape it came from (Multi channel later: one colour each).
-        Copied from a sustained shape: its overlaps kept (user: sounds as the preview)."""
+        Copied from a sustained shape: its overlaps kept (user: sounds as the preview). multi: as in Multi channel
+        (None = the project's mode)."""
         if not len(got):
             return None
-        multi = self.channel_mode.get() == "auto"
+        if multi is None:
+            multi = self.channel_mode.get() == "auto"
         owners = got[:, 5]
         track = got[:, 4] if picture or multi else np.unique(owners, return_inverse=True)[1].ravel()
         rows = np.column_stack([got[:, 0], got[:, 1] - got[:, 0], got[:, 2], got[:, 3], track])

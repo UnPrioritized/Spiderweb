@@ -11,12 +11,13 @@ import numpy as np
 
 from files.lang import tr, trn
 from notes.arc import arc_circle, arc_points
+from notes.between import group_of, turns as between_turns
 from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live, velocity_changed
 from notes.bezier import nearest, split
-from notes.custom import notes_shape
+from notes.custom import notes_shape, pack_notes, unpack_notes
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_notes_tracks, shape_path
 from notes.gateflip import lifted, put_back, turn_velocities
-from notes.mask import is_mask, same_mask
+from notes.mask import SKIP10, is_mask, same_mask
 from notes.sustain import alike
 from notes.merge import edge_moves, merged, part_rows, reshaped_parts
 from notes.glue import for_part as glue_for_part, glue_box
@@ -33,6 +34,32 @@ from window.sustain_window import carry_stops
 from window.widgets import Tooltip
 
 TOUCH_PX = 8  # ends closer than this on screen (times the display scaling) count as touching, like Live shape snaps
+
+
+def multi_slots(rows, multi):
+    """A shape's rendered rows with each note's slot from its rows in Multi channel (multi; Turn into plain notes in
+    Single channel / As drawn: Multi channel later shows its colours, hunt): the note starting there on its key, else
+    the slot most of its notes have."""
+    rows = rows.copy()
+    if not len(multi):
+        return rows
+    have = {(s, k): slot for s, k, slot in multi[:, [0, 2, 4]].tolist()}
+    most = int(np.bincount(multi[:, 4]).argmax())
+    rows[:, 4] = [have.get((s, k), most) for s, k in rows[:, [0, 2]].tolist()]
+    return rows
+
+
+def without10(sh, use10):
+    """A Turn into plain notes shape keeps channel 10 in use only if one of its notes is on it (hunt): else its tracks
+    are made as with channel 10 skipped (the same channels), so unticking Use channel 10 drops it."""
+    rows = unpack_notes(sh["notes"])
+    if use10 and len(rows) and not (rows[:, 4] % 16 == 9).any():
+        rows = rows.copy()
+        t = rows[:, 4]
+        rows[:, 4] = t // 16 * 15 + np.array([SKIP10.index(c) if c != 9 else 0 for c in range(16)])[t % 16]
+        sh["notes"] = pack_notes(rows)
+    sh["slots10"] = bool(use10 and (rows[:, 4] % 16 == 9).any())
+    return sh
 
 
 def span(sh):
@@ -86,6 +113,13 @@ class JoinSplit:
             i < len(self.shapes) and self.shapes[i]["kind"] in LINE_KINDS for i in self.sels)
         self.layout_rows()
 
+    def kind_word(self, sh):
+        """What a shape is, for "(... selected)" reasons: plain notes made from a shape = pasted notes (hunt: said
+        "custom", from its name "Custom: Circle (notes)")."""
+        if sh.get("made") == "plain" and not sh.get("merge"):
+            return tr("app.pasted_notes")
+        return self.plain_label(sh).split(":")[0]
+
     def live_problem(self):
         """Why the selection can't be turned into a live shape (None = it can)."""
         sels = [i for i in self.sels if i < len(self.shapes)]
@@ -93,7 +127,7 @@ class JoinSplit:
             return tr("join_split.select_the_shapes_to_turn_into", JOIN_KINDS=JOIN_KINDS)
         shapes = [self.shapes[i] for i in sels]
         if any(sh["kind"] not in CAN_TURN or sh.get("text") or "notes" in sh for sh in shapes):
-            other = sorted({self.plain_label(sh).split(":")[0] for sh in shapes
+            other = sorted({self.kind_word(sh) for sh in shapes
                             if sh["kind"] not in CAN_TURN or sh.get("text") or "notes" in sh})
             return tr("join_split.only_and_custom_shapes_can_be", JOIN_KINDS=JOIN_KINDS,
                       join=tr("roll_funnel.and").join(other).lower())
@@ -138,7 +172,7 @@ class JoinSplit:
         sels = [i for i in self.sels if i < len(self.shapes)]
         if len(sels) < 2:
             return tr("join_split.select_two_or_more_to_join", JOIN_KINDS=JOIN_KINDS.replace(' and ', ' or '))
-        other = sorted({self.plain_label(self.shapes[i]).split(":")[0] for i in sels
+        other = sorted({self.kind_word(self.shapes[i]) for i in sels
                         if self.shapes[i]["kind"] not in LINE_KINDS})
         if other:
             return tr("join_split.only_can_be_joined_selected", JOIN_KINDS=JOIN_KINDS,
@@ -327,12 +361,19 @@ class JoinSplit:
         if self.notes_late:  # (notes still catching up with a drag: made now)
             self.shapes_changed(now=True)
         owners = self.rendered[:, 5]
+        use10 = self.picture_use10
+        if self.channel_mode.get() != "auto":  # (each note's Multi channel slot kept too, for Multi channel later)
+            from window.app import all_notes  # (app.py imports this file)
+            _, use10, multi, _ = all_notes(self.shapes, self.ppq, self.keys, "auto", self.channel_split, self.all16(),
+                                           self.notes_tracks)
         new = {}
         for i in got:
             rows = self.rendered[owners == i]
             if len(rows):  # (a shape with no notes stays as it is)
                 sh = self.shapes[i]
-                new[i] = self.copied(rows, False)
+                if self.channel_mode.get() != "auto":
+                    rows = multi_slots(rows, multi[multi[:, 5] == i])
+                new[i] = without10(self.copied(rows, False, True), use10)
                 new[i]["made"] = "plain"
                 new[i]["name"] = tr("join_split.plain_name", name=self.shape_label(sh))
         if not new:
@@ -340,7 +381,15 @@ class JoinSplit:
             return
         self.roll.cancel_draft()
         self.push_undo(name=tr("roll_menu.turn_into_plain_notes"))
-        self.unlink_groups(sorted(new))  # (an Add between group: plain shapes first, user)
+        turns = between_turns(self.shapes)  # (an Add between group: unlinked, user; each shape keeps its colour turn)
+        gids = {group_of(self.shapes[i]) for i in new} - {None}
+        for i, sh in enumerate(self.shapes):
+            if group_of(sh) in gids and turns[i] is not None:
+                sh["team"] = list(turns[i])
+        for i in new:
+            if turns[i] is not None:
+                new[i]["team"] = list(turns[i])
+        self.unlink_groups(sorted(new))
         for i, sh in new.items():
             self.shapes[i] = sh
         self.select_many(got, self.sel if self.sel in got else got[0])
