@@ -102,20 +102,27 @@ def preview_parts(sh, ppq, keys):
 # "apart": keys whose rows became the "Merge leftovers" shape}. Project files leave its "notes" out; loading makes
 # them again from the recipe.
 
-def part_rows(parts, ppq, keys):
+def part_rows(parts, ppq, keys, rounds=False):
     """Each shape's notes as (start, end, pitch, velocity, track) rows: its own colours (areas, outline colours,
     Colours turns) kept (user 2026-10-16: always the colours they had). Track = the channel slot each colour gets
     with Multi channel when the two shapes stand as they are (engine.assign_slots, like render): shapes apart share
     slots, overlapping ones stay apart; render counts a merged shape's tracks in order (ordered), so track k keeps
-    slot k. Without their Sustain: the merged shape holds that itself (sustain.py)."""
-    from notes.custom import tracks_apart
+    slot k. Without their Sustain: the merged shape holds that itself (sustain.py). rounds: + a 6th column, each
+    note's Colours round ("New channels each Colours round"): the first part's rounds, then the second's (a part
+    without Colours = one round)."""
+    from notes.custom import ROUND, tracks_apart
     from notes.engine import assign_slots, shape_notes_tracks, unique_inverse
     from notes.gateflip import colours_back, unflipped_starts
-    units, forced, firsts, made = [], [], [], []
+    units, forced, firsts, made, laps, after = [], [], [], [], [], 0
     for p in parts:
-        notes, tracks = shape_notes_tracks({k: v for k, v in p.items() if k != "sustain"}, ppq, keys)
+        p = {k: v for k, v in p.items() if k != "sustain"}
+        notes, tracks = shape_notes_tracks(dict(p, _rounds=True) if rounds else p, ppq, keys)
         notes = np.asarray(notes, np.int64).reshape(-1, 4)
         tracks = np.zeros(len(notes), np.int64) if tracks is None or not len(tracks) else np.asarray(tracks, np.int64)
+        if rounds:
+            laps.append(tracks // ROUND + after)
+            tracks = tracks % ROUND
+            after = int(laps[-1].max()) + 1 if len(tracks) else after + 1
         ids, which = unique_inverse(tracks) if len(tracks) else (tracks, tracks)
         starts = unflipped_starts(notes) if len(notes) and colours_back(p) else notes[:, 0]
         mine = range(len(units), len(units) + len(ids))
@@ -126,7 +133,8 @@ def part_rows(parts, ppq, keys):
             forced.append(mine)
         made.append((notes, which, mine.start))
     slots = np.asarray(assign_slots(units, "key", forced, firsts) if units else [], np.int64)
-    return [np.column_stack([notes, slots[at + which] if len(which) else which]) for notes, which, at in made]
+    out = [np.column_stack([notes, slots[at + which] if len(which) else which]) for notes, which, at in made]
+    return [np.column_stack([o, lap]) for o, lap in zip(out, laps)] if rounds else out
 
 
 def merged(parts, right, ppq, keys):
@@ -165,17 +173,47 @@ def recipe_shape(m):
     """custom.notes_shape of the recipe's notes ("notes" packed, "pts" = their box where they were made), or None
     (no notes at all). No row meeting any more (a part's settings changed): both as they are, nothing slid."""
     from notes.custom import notes_shape
-    parts = part_rows(m["parts"], m["ppq"], m["keys"])
+    out = recipe_rows(m)
+    if out is None:
+        return None
+    notes = np.column_stack([out[:, 0], out[:, 1] - out[:, 0], out[:, 2], out[:, 3], out[:, 4]])
+    return notes_shape(notes, m["ppq"], "")
+
+
+def recipe_rows(m, rounds=False):
+    """The recipe's merged (start, end, pitch, velocity, track[, round]) rows (part_rows), in the order its packed
+    notes keep them, or None (no notes)."""
+    parts = part_rows(m["parts"], m["ppq"], m["keys"], rounds)
     got = merged(parts, m["right"], m["ppq"], m["keys"])
     if got is None:
         out = np.concatenate(parts)
     else:
         out, rest = got
         out = np.concatenate([out, rest[~np.isin(rest[:, 2], m["apart"])]])  # (not the ones made "Merge leftovers")
-    if not len(out):
+    return out if len(out) else None
+
+
+LAP = 1 << 16  # (with_rounds: track + LAP x round still fits the packed notes' 32 bits)
+
+
+def has_colours(sh):
+    """Does sh take turns over colours ("Colours"), itself or any part of it (merges of merges too)?"""
+    from notes.custom import cycling
+    return cycling(sh) or any(isinstance(p, dict) and has_colours(p) for p in (sh.get("merge") or {}).get("parts", ()))
+
+
+def with_rounds(sh):
+    """The merged shape sh with its packed notes' tracks as track + LAP x each note's Colours round (its parts'
+    rounds, recipe_rows), so they ride through whatever places its notes; None = can't (notes not the recipe's)."""
+    from notes.custom import pack_notes, unpack_notes
+    rows = unpack_notes(sh["notes"])
+    out = recipe_rows(sh["merge"], True)
+    if out is None or len(out) != len(rows) or out[:, 4].max() >= LAP or out[:, 5].max() >= 1 << 14:
         return None
-    notes = np.column_stack([out[:, 0], out[:, 1] - out[:, 0], out[:, 2], out[:, 3], out[:, 4]])
-    return notes_shape(notes, m["ppq"], "")
+    t0, k0 = int(out[:, 0].min()), int(out[:, 2].min())
+    if not np.array_equal(rows[:, :5], np.column_stack([out[:, :2] - t0, out[:, 2] - k0, out[:, 3:5]])):
+        return None
+    return dict(sh, notes=pack_notes(np.column_stack([rows[:, :4], rows[:, 4] + LAP * out[:, 5]])))
 
 
 # PANEL SETTINGS (user: the merged shape acts as one custom shape, but its outline is never edited, it's made of
@@ -337,15 +375,15 @@ def reshaped_parts(sh):
     return parts, slide, from_left, (L, o, least / m["ppq"])
 
 
-def reshaped_notes(sh, ppq, keys):
-    """The merged shape's notes, (start, end, pitch, velocity, track) rows, when its box was turned / slanted /
-    stretched: the parts made again that way and merged again (rows that newly meet nothing stay in it, user), or
-    None (see reshaped_parts)."""
+def reshaped_notes(sh, ppq, keys, rounds=False):
+    """The merged shape's notes, (start, end, pitch, velocity, track[, round: part_rows]) rows, when its box was
+    turned / slanted / stretched: the parts made again that way and merged again (rows that newly meet nothing stay
+    in it, user), or None (see reshaped_parts)."""
     got = reshaped_parts(sh)
     if not got:
         return None
     parts, slide, from_left, (L, o, least) = got
-    rows = part_rows(parts, ppq, keys)
+    rows = part_rows(parts, ppq, keys, rounds)
     stay, moved = rows[1 - slide], rows[slide]
     apart = sh["merge"]["apart"]
     if len(moved) and apart:  # (rows made "Merge leftovers": their notes stay out, found where they were drawn)

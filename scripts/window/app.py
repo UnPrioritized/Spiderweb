@@ -17,7 +17,7 @@ import numpy as np
 
 from files.lang import size as lang_size, tr, trn
 from notes.areas import most_colours
-from notes.custom import ROUND, CUSTOM_DEFAULTS, capped_colours, custom_note_count, cycling, set_key_top, tracks_apart
+from notes.custom import ROUND, CUSTOM_DEFAULTS, capped_colours, custom_note_count, set_key_top, tracks_apart
 from window import big_ask, look
 from window.help import Tips, open_help
 from window.updates import Updates
@@ -32,7 +32,7 @@ from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
 from notes.hzbass import fit_length
 from notes.mask import (MASK_DEFAULTS, as_used, can_mask, is_mask, mask_view, picture_like, pinned_slots, silent,
                         slot_pal, slot_rule, tidy_groups)
-from notes.merge import velocity_reversed as merge_vrev
+from notes.merge import has_colours, velocity_reversed as merge_vrev
 from notes.sustain import is_sustained
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
@@ -129,9 +129,9 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     quiet: every mask's own notes left out (what the masks show: App.pattern). rounds: the project's "New channels
     each Colours round" (App.rounds_apart)."""
     teams = between_turns(shapes)
-    # (each Colours shape's notes made with their rounds, then taken off the tracks: render's rounds; an Add between
-    # step is one channel, no rounds)
-    took = [rounds and mode == "auto" and cycling(sh) and team is None for sh, team in zip(shapes, teams)]
+    # (each Colours shape's notes made with their rounds, then taken off the tracks: render's rounds; a merged shape's
+    # parts' rounds too, merge.part_rows; an Add between step is one channel, no rounds)
+    took = [rounds and mode == "auto" and has_colours(sh) and team is None for sh, team in zip(shapes, teams)]
     got = [notes_tracks(dict(sh, _rounds=True) if r else sh) for sh, r in zip(shapes, took)]
     laps = [np.asarray(t, np.int64) // ROUND if r and t is not None else None for (_, t), r in zip(got, took)]
     got = [(n, t % ROUND) if lap is not None else (n, t) for (n, t), lap in zip(got, laps)]

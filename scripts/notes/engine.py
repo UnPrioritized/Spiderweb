@@ -32,14 +32,15 @@ from notes.fx import (clean_fx, flip_shape, groups, idle, mirrored, notes_box, r
                       turn_notes, turn_pts, turn_shape, velocities)
 from notes.gaterange import clean_range
 from notes.gateflip import is_flipped as is_gate_flipped, is_pasted_flipped, mirrored_runs, unflipped_starts
-from notes.merge import clean_merge, recipe_notes, reshaped_notes as merge_reshaped, turned_notes as merge_turned
+from notes.merge import (LAP as merge_lap, clean_merge, recipe_notes, reshaped_notes as merge_reshaped,
+                         turned_notes as merge_turned, with_rounds as merge_rounds)
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
 from notes.sustain import clean_sustain, cut_by, held, is_sustained
 from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
-from notes.custom import frame_upright, notes_resampled
+from notes.custom import ROUND, frame_upright, notes_resampled
 from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
 from notes.mask import clean_mask
@@ -870,16 +871,25 @@ def kind_notes_tracks(sh, ppq, keys):
     elif sh["kind"] == "custom" and "notes" in sh:
         # (a merged shape turned / slanted / stretched: its parts the same way, merged again; else a turned / skewed
         # picture or merged shape: each key row sampled across it, not its notes tilted)
-        raw = merge_reshaped(sh, ppq, keys) if "merge" in sh else None
+        # ("New channels each Colours round": its parts' rounds, ridden along on the tracks: merge.with_rounds)
+        laps = sh.get("_rounds") and "merge" in sh and not cycling(sh)
+        raw = merge_reshaped(sh, ppq, keys, bool(laps)) if "merge" in sh else None
         if raw is not None:
-            pass
-        elif not frame_upright(sh["pts"]) and ("picture" in sh or "merge" in sh):
-            raw = turned_notes(sh, ppq) if "picture" in sh else merge_turned(sh, ppq)
-        elif "picture" not in sh and notes_resampled(sh):  # (plain notes turned / taller: like a turned image too)
-            raw = merge_turned(sh, ppq)
+            if laps:
+                raw = np.column_stack([raw[:, :4], raw[:, 4] + raw[:, 5] * merge_lap])
         else:
-            raw = block_notes(sh, ppq)
+            if laps:
+                got = merge_rounds(sh)
+                sh, laps = (sh, False) if got is None else (got, True)
+            if not frame_upright(sh["pts"]) and ("picture" in sh or "merge" in sh):
+                raw = turned_notes(sh, ppq) if "picture" in sh else merge_turned(sh, ppq)
+            elif "picture" not in sh and notes_resampled(sh):  # (plain notes turned / taller: like a turned image too)
+                raw = merge_turned(sh, ppq)
+            else:
+                raw = block_notes(sh, ppq)
         raw, own = raw[:, :3], raw[:, 3:5]
+        if laps:
+            own = np.column_stack([own[:, 0], own[:, 1] % merge_lap + own[:, 1] // merge_lap * ROUND])
     elif sh["kind"] == "custom":
         raw, groups = custom_notes_groups(sh, ppq)
     elif sh["kind"] == "funnel":
