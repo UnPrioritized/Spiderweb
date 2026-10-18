@@ -167,6 +167,12 @@ def name_list(cb):
         return None
     tag = f"NameList{cb}"
     cb.bind_class(tag, "<<ComboboxSelected>>", picked)
+
+    def wheel(e):  # (what it shows NOW is where the wheel starts: set by the program since, e.g. undo, counts)
+        if not cb.list_open:
+            cb.name_before = cb.get()
+    for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):  # (before the dropdown's own wheel step)
+        cb.bind_class(tag, seq, wheel)
     cb.bindtags((tag,) + cb.bindtags())
     return cb
 
