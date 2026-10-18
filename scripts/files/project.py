@@ -407,6 +407,7 @@ class ProjectFiles:
                               "velocity_height": self.velocity_height() / self.scale,
                               "midi_device": self.midi_device.get(), "play_voices": self.play_voices,
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
+                              "domino_256": self.domino256.get(),
                               "live": self.live.get(), "mask": self.mask.get(), "mask_defaults": self.mask_defaults,
                               "mask_preview": self.mask_preview.get(),
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
@@ -526,6 +527,7 @@ class ProjectFiles:
                 self.voices_var.set(str(v))
             self.play_guard.set(win.get("play_voice_guard") is True)
             self.play_limiter.set(win.get("play_limiter") is True)
+            self.domino256.set(win.get("domino_256") is True)
             self.sync_builtin()
             pos = win.get("history_window")
             if isinstance(pos, str) and re.fullmatch(r"(\d+x\d+)?\+-?\d+\+-?\d+", pos):

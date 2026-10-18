@@ -121,6 +121,7 @@ APP_KEYS = {
     "seen_version": ("updates", "seen_version", str),
     "tips_on": ("tips", "show_tips", bool),
     "tips_seen": ("tips", "seen", list),
+    "domino_256": ("domino", "keys_256", bool),
 }
 NOT_HERE = "not_in_settings_ini"  # (window key: the app settings this file couldn't take, kept in the autosave)
 # the ones the autosave keeps inside its "hz_preview" settings (1.5.1 sweep: all app-wide): window key -> key there

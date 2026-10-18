@@ -210,6 +210,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.play_voices = 1000  # Built-in BASSMIDI's voice limit (user; with the window settings)
         self.play_guard = tk.BooleanVar(self, value=False)  # lowered by itself while overloaded (user: off to start)
         self.play_limiter = tk.BooleanVar(self, value=False)  # (off to start, as in the driver it copies)
+        self.domino256 = tk.BooleanVar(self, value=False)  # Settings → General: keys above 127 to / from Domino (mod)
         self.overload, self.overload_text = Overload(), ""  # (red next to the Settings button while it plays)
         self.builtin_window = self.voices_entry = None  # (window/builtin_settings.py)
         self._play_job = None

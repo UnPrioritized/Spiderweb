@@ -202,6 +202,7 @@ class SettingsWindow(tk.Toplevel):
             status.config(text=tr("updates.checking")),
             updates.check(report=lambda msg: status.winfo_exists() and status.config(text=msg)))).pack(side="left")
         self.build_tips(page)
+        self.build_domino(page)
         self.build_language()
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
@@ -255,6 +256,14 @@ class SettingsWindow(tk.Toplevel):
             note.config(text=tr("help.done_every_tip_shows_again_the"))
         ttk.Button(row, text=tr("help.show_all_tips_again"), takefocus=False, command=again).pack(side="left")
         note.pack(side="left", padx=(6, 0))
+
+    def build_domino(self, page):
+        """(Experimental) Domino 256 keys: Copy / Paste / Export to Domino keep keys above 127 (off: left out)."""
+        ttk.Separator(page).pack(fill="x", pady=(12, 8))
+        ttk.Checkbutton(page, text=tr("settings.domino_256"), variable=self.app.domino256, takefocus=False,
+                        command=self.app.schedule_autosave).pack(anchor="w")
+        ttk.Label(page, text=tr("settings.domino_256_hint"), foreground=look.HINT,
+                  wraplength=round(360 * self.app.scale), justify="left").pack(anchor="w", pady=(4, 0))
 
     # ------------------------------------------------------------ language (lang.languages; next start, like the look)
 
