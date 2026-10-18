@@ -93,11 +93,17 @@ def png_bytes(inside, size, rgb=None):
             chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
 
 
+_drawn = {}  # (what, size, colour) -> the picture's PNG text (drawn once: every Hz / Chop window has a picker)
+
+
 def picture(what, size):
     """A PhotoImage: what = a note (whole-note fraction, dots, triplet), "bar", "custom" or None (empty)."""
-    inside = (_bar_inside if what == "bar" else _wrench_inside if what == "custom" else
-              (lambda x, y: False) if what is None else _note_inside(*what))
-    return tk.PhotoImage(data=base64.b64encode(png_bytes(inside, size)), format="png")
+    key = (what, size, look.rgb(look.ICON))
+    if key not in _drawn:
+        inside = (_bar_inside if what == "bar" else _wrench_inside if what == "custom" else
+                  (lambda x, y: False) if what is None else _note_inside(*what))
+        _drawn[key] = base64.b64encode(png_bytes(inside, size))
+    return tk.PhotoImage(data=_drawn[key], format="png")
 
 
 # ---------------------------------------------------------------- the dropdown
