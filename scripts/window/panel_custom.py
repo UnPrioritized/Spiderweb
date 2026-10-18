@@ -21,7 +21,7 @@ from window.panel_nested import nested_on
 from window.panel_ripples import ripples_on
 from window.panel_tiles import tiles_on
 from window.range_window import open_range_graph
-from window.widgets import (Scrub, Tooltip, bad, good, grid_shown, leave_box, line_up, name_list, set_names, unchanged,
+from window.widgets import (Scrub, Tooltip, bad, good, leave_box, line_up, name_index, name_list, set_names, unchanged,
                             unit_word)
 
 GAP_COLOR = look.WARN  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
@@ -91,31 +91,28 @@ class CustomPanel:
                                       font=look.font(8), wraplength=int(300 * self.scale), justify="left")
         row = self.custom_fill_row = ttk.Frame(box)
         row.pack(fill="x", pady=(4, 0))
-        ttk.Label(row, text=tr("panel_custom.inside")).pack(side="left", anchor="n")
+        ttk.Label(row, text=tr("panel_custom.inside")).pack(side="left", anchor="n", pady=(2, 0))
         opts = ttk.Frame(row)
         opts.pack(side="left", padx=(5, 0))
-        self.fill_buttons = {}
-        self.fill_tips = {}  # (Fill / Spam also say why they're orange (one gap) or greyed out (more))
-        ttk.Style(self).configure("Gap.TRadiobutton", foreground=GAP_COLOR)
         ttk.Style(self).configure("Gap.TCombobox", foreground=GAP_COLOR)
         ttk.Style(self).configure("Missing.TCombobox", foreground=MISSING_COLOR)
+        pick = ttk.Frame(opts)
+        pick.pack(anchor="w")
+        # one dropdown (user 2026-10-18: the radio buttons grew too tall): the plain fills, a grey line, the
+        # patterns (name_list's divider). Orange = the outline has gaps Fill / Spam close (its tip says so)
+        self.fill_box = name_list(ttk.Combobox(pick, state="readonly", width=12))
+        self.fill_box.keep_width = False  # (texts, not names: it fits translations like other dropdowns)
+        self.fill_box.pack(side="left")
+        self.fill_box.bind("<<ComboboxSelected>>", lambda e: self.on_fill_pick())
+        self.fill_tip = Tooltip(self.fill_box, "")
+        self.fill_offered = []  # the values in the dropdown now, in order (Hz bass / text leave some out)
         self.apart_var = tk.StringVar(value=APART_CHOICES[0])
-        self.apart_boxes, self.apart_tips = {}, {}  # Fill / Spam: Normal, or Outline (on a channel of its own)
-        rows = ttk.Frame(opts)  # (a grid, so the Fill and Spam dropdowns line up)
-        rows.pack(anchor="w", fill="x")
-        for row, (value, text, tip) in enumerate(FILL_CHOICES):
-            b = ttk.Radiobutton(rows, text=text, value=value, variable=self.fill_var,
-                                command=lambda: self.set_custom("fill", self.fill_var.get()))
-            b.grid(row=row, column=0, sticky="w", columnspan=1 if value in APART_FILLS else 2)
-            self.fill_buttons[value] = b
-            self.fill_tips[value] = Tooltip(b, tip)
-            if value in APART_FILLS:
-                drop = ttk.Combobox(rows, textvariable=self.apart_var, values=APART_CHOICES, state="readonly",
-                                    width=8)
-                drop.grid(row=row, column=1, sticky="w", padx=(14, 0))
-                drop.bind("<<ComboboxSelected>>", lambda e: (
-                    self.set_custom("apart", e.widget.current() == 1), self.roll.focus_set()))
-                self.apart_boxes[value], self.apart_tips[value] = drop, Tooltip(drop, APART_TIP)
+        # Fill / Spam / patterns: Normal, or Outline (on a channel of its own)
+        self.apart_box = ttk.Combobox(pick, textvariable=self.apart_var, values=APART_CHOICES, state="readonly",
+                                      width=8)
+        self.apart_box.bind("<<ComboboxSelected>>", lambda e: (
+            self.set_custom("apart", e.widget.current() == 1), self.roll.focus_set()))
+        self.apart_tip = Tooltip(self.apart_box, APART_TIP)
         # the rows under the choices: only the ones that do something for the chosen Inside are shown, so the
         # panel grows as options are picked (user; show_custom_rows)
         self.custom_rows, self._custom_shown = [], None
@@ -376,24 +373,24 @@ class CustomPanel:
         self.gate_tip.text = tr("panel_custom.gate_ranged_tip", a=gate_ticks(gate, self.ppq),
                                 b=gate_ticks(rg["to"], self.ppq)) if rg else ""
         self._loading = False
-        for value, b in self.fill_buttons.items():
-            b.config(style="Gap.TRadiobutton" if gaps and value in APART_FILLS else "TRadiobutton")
-        for value, _, base in FILL_CHOICES:
-            gap = (tr("panel_custom.the_outline_has_a_gap_it")
-                   if gaps == 1 else
-                   tr("panel_custom.the_outline_has_gaps_each_is", gaps=gaps)
-                   if gaps else "")
-            if gap:
-                gap += tr("panel_custom.ends_that_nearly_touch_1_64")
-            self.fill_tips[value].text = base + ("\n\n" + gap if gap and value in APART_FILLS else "")
+        gap = (tr("panel_custom.the_outline_has_a_gap_it") if gaps == 1 else
+               tr("panel_custom.the_outline_has_gaps_each_is", gaps=gaps) if gaps else "")
+        if gap:
+            gap += tr("panel_custom.ends_that_nearly_touch_1_64")
+        texts = {value: (text, tip) for value, text, tip in FILL_CHOICES}
+        self.fill_box.config(style="Gap.TCombobox" if gaps and shown in APART_FILLS else "TCombobox")
+        self.fill_tip.text = texts[shown][1] + ("\n\n" + gap if gap and shown in APART_FILLS else "")
         spam = fill in SPAM_FILLS
         hz = self.sync_hz(tgts, spam, placed)  # (Hz bass: its own gate and grid, so gate / ends / start are off)
         self.gate_entry.config(state="normal" if spam and not hz else "disabled")
         self.ends_box.config(state="readonly" if spam and not hz else "disabled")
         self.range_btn.config(state="normal" if spam and not hz else "disabled")
-        for value in self.fill_buttons:  # (Hz bass needs a spam fill: Empty / Fill hidden until it's unticked, user)
-            if value not in SPAM_FILLS:
-                grid_shown(self.fill_buttons[value], not hz and not (value in PATTERN_FILLS and text))
+        # (Hz bass needs a spam fill: Empty / Fill / patterns left out until it's unticked, user; text: no patterns)
+        self.fill_offered = [v for v, _, _ in FILL_CHOICES
+                             if v in SPAM_FILLS or not hz and not (v in PATTERN_FILLS and text)]
+        set_names(self.fill_box, [texts[v][0] for v in self.fill_offered if v not in PATTERN_FILLS],
+                  [texts[v][0] for v in self.fill_offered if v in PATTERN_FILLS])
+        self.fill_box.set(texts[shown][0])
         self.sync_nested(tgts[0])
         self.sync_tiles(tgts[0])
         self.sync_ripples(tgts[0])
@@ -407,11 +404,13 @@ class CustomPanel:
         self.borders_var.set(bool(tgts[0].get("borders")))
         self._loading = False
         lonely = apart and self.channel_mode.get() != "auto"  # (Outline without Multi channel: all one channel)
-        for value, box in self.apart_boxes.items():
-            box.config(state="readonly" if shown == value else "disabled",
-                       style="Gap.TCombobox" if lonely and shown == value else "TCombobox")
-            grid_shown(box, shown == value)  # (only next to the chosen one)
-            self.apart_tips[value].text = APART_TIP + (APART_NEEDS if lonely else "")
+        self.apart_box.config(style="Gap.TCombobox" if lonely else "TCombobox")
+        self.apart_tip.text = APART_TIP + (APART_NEEDS if lonely else "")
+        if bool(self.apart_box.winfo_manager()) != (shown in APART_FILLS):  # (only for the ones it's for)
+            if shown in APART_FILLS:
+                self.apart_box.pack(side="left", padx=(8, 0))
+            else:
+                self.apart_box.pack_forget()
         outline = fill in ("empty", "outline_spam") or apart  # (Fill / Spam: only with "Outline")
         self.edge_entry.config(state="normal" if outline else "disabled")
         self._loading = True
@@ -503,6 +502,13 @@ class CustomPanel:
             self.tool.set("custom")
         self.sync_custom()
         self.schedule_autosave()
+
+    def on_fill_pick(self):
+        """An Inside fill picked in its dropdown (the grey line between plain fills and patterns picks nothing)."""
+        k = name_index(self.fill_box)
+        if 0 <= k < len(self.fill_offered):
+            self.set_custom("fill", self.fill_offered[k])
+        self.roll.focus_set()
 
     def coloured_areas(self, tgts, placed, name):
         """Some area of these shapes (or of the library shape new ones are made of) has a colour (areas.py)."""

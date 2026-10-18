@@ -62,7 +62,8 @@ def fit_dropdown(cb):
     if not isinstance(cb, ttk.Combobox) or getattr(cb, "keep_width", False):
         return
     try:
-        values = tuple(str(v) for v in cb.cget("values")) + tuple(getattr(cb, "fit_also", ()))
+        values = (tuple(str(v) for v in cb.cget("values") if str(v) != DIVIDER)  # (name_list's grey line: no room)
+                  + tuple(getattr(cb, "fit_also", ())))
         if not values or getattr(cb, "fitted_for", None) == values:
             return
         cb.fitted_for = values
