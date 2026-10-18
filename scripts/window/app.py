@@ -215,7 +215,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.domino256 = tk.BooleanVar(self, value=False)  # Settings → General: keys above 127 to / from Domino (mod)
         self.keep_colours = tk.BooleanVar(self, value=False)  # Settings → General: overlapping shapes move whole to
         # the next row of channels (render keep)
-        self.overload, self.overload_text = Overload(), ""  # (red beside Play while it can't keep up)
+        self.overload, self.overload_text = Overload(), ""  # (red on the status line while it can't keep up)
         self.builtin_window = self.voices_entry = None  # (window/builtin_settings.py)
         self._play_job = None
         self._scrub_held = {}
@@ -453,19 +453,22 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         ttk.Button(bar, text=tr("app.redo"), command=self.redo).pack(side="left", padx=(4, 0))
         self.play_btn = ttk.Button(bar, text=tr("app.play_space"), width=14, command=self.toggle_play, takefocus=False)
         self.play_btn.pack(side="left", padx=(12, 0))
-        # (Built-in BASSMIDI's red "Overloaded" while it can't keep up; packed only then: show_overload)
         self.voices_var = tk.StringVar(value=str(self.play_voices))
-        self.overload_label = ttk.Label(bar, text="", foreground=look.ERROR)
-        help_btn = ttk.Button(bar, text=tr("app.help_f1"), command=self.open_help, takefocus=False)
-        help_btn.pack(side="left", padx=(12, 0))
+        # Help + Settings: always at the top right corner, whatever row the buttons are on (user)
+        corner = self.corner = ttk.Frame(top)
+        corner.grid(row=0, column=2, sticky="e", padx=(8, 0))  # (centred in the row, like the buttons beside it)
+        help_btn = ttk.Button(corner, text=tr("app.help_f1"), command=self.open_help, takefocus=False)
+        help_btn.pack(side="left", padx=(0, 4))
         Tooltip(help_btn, tr("app.every_tip_searchable_opens_at_the"))
-        # Settings: always at the top right corner, whatever row the buttons are on (user)
-        b = self.gear = ttk.Button(top, text="⚙", width=3, command=lambda: open_settings(self), takefocus=False)
-        b.grid(row=0, column=2, sticky="e", padx=(8, 0))  # (centred in the row, like the buttons beside it)
+        b = self.gear = ttk.Button(corner, text="⚙", width=3, command=lambda: open_settings(self), takefocus=False)
+        b.pack(side="left")
         Tooltip(b, tr("settings.button_tip"))
 
         self.status = StatusLine(self, text="", padding=(6, 2), font=look.font(9))
         self.status.pack(side="bottom", fill="x")
+        # (Built-in BASSMIDI's red "Overloaded" while it can't keep up: the status line's right end, placed only
+        # then (show_overload), so nothing moves, user 2026-10-18)
+        self.overload_label = ttk.Label(self.status, text="", foreground=look.ERROR, font=look.font(9))
 
         side = self._build_side()
         self._build_project(side)
@@ -510,7 +513,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def fit_toolbar(self):
         """The view settings and buttons: right of the tools when both fit in the window's width, else below them."""
         top = self.toolbar
-        need = (self.tool_bar.winfo_reqwidth() + self.option_bar.winfo_reqwidth() + self.gear.winfo_reqwidth()
+        need = (self.tool_bar.winfo_reqwidth() + self.option_bar.winfo_reqwidth() + self.corner.winfo_reqwidth()
                 + int(32 * self.scale))
         rows = 1 if need <= top.winfo_width() - 12 else 2
         if rows == self._toolbar_rows:

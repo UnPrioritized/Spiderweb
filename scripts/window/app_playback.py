@@ -110,16 +110,16 @@ class Playback:
         self.play_btn.config(text=tr("app.play_space"))
 
     def show_overload(self):
-        """The red text beside the Play button (and in Settings → Sound): "Overloaded", with the
+        """The red text at the status line's right end (and in Settings → Sound): "Overloaded", with the
         voices playing when the limit was lowered by itself."""
         text = self.overload.text()
         if text != self.overload_text:
             self.overload_text = text
             self.overload_label.config(text=text)
             if text:
-                self.overload_label.pack(side="left", padx=(6, 0), after=self.play_btn)
+                self.overload_label.place(relx=1.0, rely=0.5, anchor="e", x=-6)
             else:
-                self.overload_label.pack_forget()
+                self.overload_label.place_forget()
             if self.builtin_window is not None:
                 self.builtin_window.refresh()
 
