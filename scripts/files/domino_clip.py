@@ -178,7 +178,7 @@ def dms_path(mid_path):
 
 
 def track_orders(notes, count, pool=None):
-    """notes: (start, end, key, velocity, slot, ...) rows, keys 0..127, slots 0..count - 1 -> (order, cuts): the
+    """notes: (start, end, key, velocity, slot, ...) rows, keys 0..255, slots 0..count - 1 -> (order, cuts): the
     rows of slot s are order[cuts[s]:cuts[s + 1]], in time order, then by key, rows alike in their order (= a
     np.lexsort per slot). Slots with BIG_TRACK notes or more: one sort each, on several cores when pool is given;
     the smaller ones all in one sort (handed to the cores one by one, 65,534 small tracks took 4 x longer).
@@ -210,8 +210,8 @@ def start_key_order(notes, rows, by_slot=False):
     radix sort once it's ready, else NumPy's."""
     k = notes[rows, 0].astype(np.int64)
     k -= k.min()
-    bits = int(k.max()).bit_length() + 7
-    k <<= 7
+    bits = int(k.max()).bit_length() + 8
+    k <<= 8  # (keys up to 255: the Domino 256 keys setting)
     k |= notes[rows, 2]
     if by_slot:
         slot = notes[rows, 4].astype(np.int64)
@@ -252,7 +252,7 @@ def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True):
     midi_out.track_slots), each with its own
     channel (Domino refuses a track mixing channels); a track on channel 10 is marked as a drum track like Domino
     does, unless drums is False (the project's "Use channel 10": wanted for its colour). Keys above 127 must be
-    left out first.
+    left out first, unless the Domino 256 keys setting is on (the mod reads the key byte up to 255).
     Packed as it's made, PIECE notes at a time: the whole unpacked file (40 bytes a note) never sits in memory, and
     the notes are cut into tracks by one sort instead of a search through all of them for each track."""
     with Packer(DMS_LEVEL) as z:
@@ -335,10 +335,11 @@ def note_run(body, i):
     return got, i
 
 
-def read_notes(raw):
+def read_notes(raw, top=127):
     """Clipboard bytes -> (notes, ppq): (tick, gate, key, velocity, track) rows of every track's notes, ticks
     counted from the start of the copied stretch, track = which copied track (0 = the first); ppq = the PPQ it was
-    copied at (None if missing). ValueError if raw isn't Domino's data."""
+    copied at (None if missing). Keys above top left out (255: Domino's 256 keys mod). ValueError if raw isn't
+    Domino's data."""
     if not raw.startswith(MAGIC) or len(raw) < len(MAGIC) + 4:
         raise ValueError(tr("domino_clip.not_domino_s_data"))
     try:
@@ -372,7 +373,7 @@ def read_notes(raw):
     rows = np.concatenate([np.column_stack([r["tick"], r["gate"], r["key"], r["vel"],
                                             np.full(len(r), k)]).astype(np.int64) for r, k in runs]
                           + [np.array(odd, np.int64).reshape(-1, 5)])
-    rows = rows[rows[:, 2] <= 127]
+    rows = rows[rows[:, 2] <= top]
     if len(rows) and int((rows[:, 0] + rows[:, 1]).max()) > LONGEST:
         raise ValueError(tr("domino_clip.domino_s_data_is_damaged"))
     rows[:, 1] = np.maximum(rows[:, 1], 1)

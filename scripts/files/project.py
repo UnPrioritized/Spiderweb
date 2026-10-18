@@ -690,7 +690,8 @@ class ProjectFiles:
         self.catch_up_notes()
         notes = self.rendered
         high = int((notes[:, 2] > 127).sum()) if self.keys > 128 else 0  # (256 keys: Domino only has 128)
-        if high:
+        mod = high and self.domino256.get()  # (kept: only Domino's 256 keys mod opens them)
+        if high and not mod:
             notes = notes[notes[:, 2] <= 127]
         if not len(notes):
             messagebox.showerror(tr("project.spiderweb"),
@@ -718,7 +719,8 @@ class ProjectFiles:
         tracks = len(track_slots(notes, self.pad_tracks()))
         text = (tr("project.saved_dms", notes=trn("n.notes", len(notes), n=len(notes)),
                    tracks=trn("n.tracks", tracks, n=tracks), path=path)
-                + (trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
+                + (tr("project.dms_keys_256") if mod else
+                   trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
                 + (trn("project.dms_long_gates", long, long=long, most=GATE_MAX) if long else ""))
         (messagebox.showwarning if long else messagebox.showinfo)(tr("project.spiderweb"), text)
 
@@ -739,7 +741,9 @@ class ProjectFiles:
         if self.sels:
             notes = notes[np.isin(notes[:, 5], sorted(self.sels))]
         high = int((notes[:, 2] > 127).sum())  # (256 keys: Domino only has 128)
-        notes = notes[notes[:, 2] <= 127]
+        mod = high and self.domino256.get()  # (kept: only Domino's 256 keys mod opens them)
+        if not mod:
+            notes = notes[notes[:, 2] <= 127]
         if not len(notes):
             messagebox.showerror(tr("project.spiderweb"), tr("project.no_notes_to_copy_draw_something")
                                  if not self.sels or high else tr("project.the_selected_shapes_have_no_notes"))
@@ -775,7 +779,8 @@ class ProjectFiles:
         how = (tr("project.paste_at_the_cursor") if self.domino_start() == "note" else
                tr("project.double_click_a_bar_line_to"))
         self.status.config(text=tr("project.copied_for_domino_ppq_in_domino", what=what, ppq=ppq, where=where, how=how)
-                                + (trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
+                                + (tr("project.copied_keys_256") if mod else
+                                   trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
                                 + (trn("project.long_gates_cut", long, long=long, most=GATE_MAX) if long else ""))
         self.tips.show("domino", wait=True)
 
@@ -805,7 +810,11 @@ class ProjectFiles:
         self.busy(tr("project.pasting_from_domino"))  # (millions of notes take a few seconds)
         try:
             raw = get_from_clipboard()
-            notes, their_ppq = read_notes(raw) if raw else (None, None)
+            notes, their_ppq = read_notes(raw, 255) if raw else (None, None)
+            high = 0
+            if notes is not None and not (self.domino256.get() and self.keys > 128):  # (the mod's keys above 127)
+                high = int((notes[:, 2] > 127).sum())
+                notes = notes[notes[:, 2] <= 127]
             if notes is not None and len(notes):
                 if self.domino_start() == "note":  # the first note on the play line, without the copy's empty lead
                     notes[:, 0] -= notes[:, 0].min()
@@ -841,7 +850,7 @@ class ProjectFiles:
             self.busy(None)
         n = len(notes)
         note = (tr("project.they_were_copied_at_ppq_ticks", their_ppq=their_ppq) if their_ppq and their_ppq != self.ppq
-                else "")
+                else "") + (trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
         self.status.config(text=tr("project.pasted_one_note_from_domino", note=note) if n == 1 else
                            tr("project.pasted_note_from_domino_as_one", n=n, note=note))
         self.tips.show("domino", wait=True)

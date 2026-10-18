@@ -1126,6 +1126,8 @@
  "project.copied_for_domino_ppq_in_domino": "Copied {what} for Domino (PPQ {ppq}) — in Domino, pick {where} and {how}",
  "project.notes_above_key_127_left_out": " ({high:,} notes above key 127 left out)",
  "project.notes_above_key_127_left_out_one": " (1 note above key 127 left out)",
+ "project.dms_keys_256": "\n\nIt has keys above 127: only the 256 keys mod of Domino can open it.",
+ "project.copied_keys_256": " (keys above 127: paste in the 256 keys mod of Domino only)",
  "project.couldn_t_read_the_notes_on": "Couldn't read the notes on the clipboard ({e}).",
  "project.no_notes_from_domino_on_the": "No notes from Domino on the clipboard — select notes in Domino and press Ctrl+C there first.",
  "project.what_was_copied_in_domino_has": "What was copied in Domino has no notes (only notes are pasted).",
