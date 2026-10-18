@@ -292,6 +292,7 @@ class ProjectFiles:
         self.edo31.set(data.get("edo31") is True)
         self.edo31_audio.set(data.get("edo31_audio") is True)
         self.split_box.current(SPLITS.index(split) if split in SPLITS else 0)
+        self.sync_channels_fold()
         if start in starts:
             self.domino_box.current(starts.index(start))
         if "snap" in data:
@@ -404,6 +405,7 @@ class ProjectFiles:
                               "maximized": self.wm_state() == "zoomed",
                               "velocity": self.show_velocity.get(), "history": self.show_history.get(),
                               "show_lines": self.show_lines.get(), "show_notes": self.show_notes.get(),
+                              "channels_folded": self.channels_folded.get(),
                               "velocity_height": self.velocity_height() / self.scale,
                               "midi_device": self.midi_device.get(), "play_voices": self.play_voices,
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
@@ -500,6 +502,7 @@ class ProjectFiles:
             self.mask_defaults = dict(MASK_DEFAULTS, **{k: got[k] for k in THICKNESS})
             self.show_lines.set(win.get("show_lines") is not False)
             self.show_notes.set(win.get("show_notes") is not False)
+            self.channels_folded.set(win.get("channels_folded") is True)
             for key, attr in (("tumour_window", "tumour_pos"), ("graph_window", "graph_pos"),
                               ("claw_window", "claw_pos"), ("strum_window", "strum_pos"), ("chop_window", "chop_pos"),
                               ("path_window", "path_pos")):

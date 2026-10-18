@@ -88,7 +88,7 @@ from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, fit_dropdowns, good,
-                            keep_width, letter_jump, remember_good, watch_bad)
+                            grid_shown, keep_width, letter_jump, remember_good, watch_bad)
 
 
 VEL_KEYS = ("vel0", "vel1")
@@ -313,6 +313,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.ch10_order = tk.BooleanVar(value=False)  # with Use channel 10: channels 1-16 in order (in_order)
         self.new_rounds = tk.BooleanVar(value=False)  # each Colours round on channels of its own (rounds_apart)
         self.pad_rounds = tk.BooleanVar(value=True)  # with it: empty tracks for a round's unused channels (pad_tracks)
+        self.channels_folded = tk.BooleanVar(value=False)  # Project's Channels rows folded to one grey line (autosave)
         self._used_tracks = (None, 0)  # (rendered, how many slots have notes: update_status)
         self.keys = 128  # the project's key range: 0 .. keys - 1 (paths.KEYS)
         set_key_top(self.keys)
@@ -608,9 +609,28 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         ttk.Entry(out, textvariable=self.pvar["output"]).pack(side="left", fill="x", expand=True)
         ttk.Button(out, text="…", width=3, command=self.browse_output).pack(side="left", padx=(3, 0))
         r += 1
-        ttk.Label(box, text=tr("app.channels")).grid(row=r, column=0, sticky="nw", pady=(3, 0))
-        ch = ttk.Frame(box)
+        # (user 2026-10-18: the header folds the rows; folded = one grey line of short words for what's on)
+        # (the arrow in a spot of its own: ▶ and ▼ differ in width, the word must not jump)
+        head = ttk.Frame(box)
+        head.grid(row=r, column=0, sticky="nw", pady=(3, 0))
+        self.channels_head = ttk.Label(head, width=2, cursor="hand2")
+        self.channels_head.pack(side="left")
+        name = ttk.Label(head, text=tr("app.channels"), cursor="hand2")
+        name.pack(side="left")
+        ch = self.channels_rows = ttk.Frame(box)
         ch.grid(row=r, column=1, sticky="w", padx=5, pady=(3, 0))
+        self.channels_short = ttk.Label(box, foreground=look.HINT, cursor="hand2")
+        self.channels_short.grid(row=r, column=1, sticky="w", padx=5, pady=(3, 0))
+        for w in (self.channels_head, name, self.channels_short):
+            Tooltip(w, tr("app.channels_fold_tip"))
+            w.bind("<Button-1>", lambda e: self.channels_folded.set(not self.channels_folded.get()))
+        # (a long line wraps under itself instead of being cut at the panel's edge)
+        # (reqwidth: winfo_width is 1 until the window is drawn)
+        box.bind("<Configure>", lambda e: self.channels_short.config(
+            wraplength=max(e.width - head.winfo_reqwidth() - int(30 * self.scale), 50)), add="+")
+        for var in (self.channel_mode, self.use_ch10, self.ch10_order, self.new_rounds, self.pad_rounds,
+                    self.keep_colours, self.channels_folded):
+            var.trace_add("write", lambda *a: self.sync_channels_fold())
         for value, text, tip in CHANNEL_CHOICES:
             b = ttk.Radiobutton(ch, text=text, value=value, variable=self.channel_mode,
                                 command=self.on_channel_mode)
@@ -619,7 +639,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         names = [name for _, name in SPLIT_CHOICES]
         self.split_box = ttk.Combobox(ch, state="readonly", values=names, width=max(map(len, names)))
         # (not packed here: shapes_changed shows it under Multi channel; with no autosave it never runs at start)
-        self.split_box.bind("<<ComboboxSelected>>", lambda e: self.shapes_changed())
+        self.split_box.bind("<<ComboboxSelected>>", lambda e: (self.shapes_changed(), self.sync_channels_fold()))
         self.split_box.current(0)
         Tooltip(self.split_box, SPLIT_TIP)
         # (shown under Multi channel too, user: most MIDI players play channel 10 as drums, some people only want
@@ -640,6 +660,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.pad_tick = ttk.Checkbutton(ch, text=tr("app.pad_rounds"), variable=self.pad_rounds,
                                         command=self.update_status)
         Tooltip(self.pad_tick, tr("app.pad_rounds_tip"))
+        self.sync_channels_fold()
         r += 1
         ttk.Label(box, text=tr("app.midi_out")).grid(row=r, column=0, sticky="w", pady=(3, 0))
         dev = keep_width(ttk.Combobox(box, textvariable=self.midi_device, state="readonly", values=devices()))
@@ -990,6 +1011,28 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def all16(self):
         """True while Multi channel uses channel 10 too ("Use channel 10", shown only under Multi channel)."""
         return self.use_ch10.get() and self.channel_mode.get() == "auto"
+
+    def sync_channels_fold(self):
+        """Project's Channels header: ▾ = the rows shown, ▸ = folded to a grey line naming what's on."""
+        if not hasattr(self, "channels_short"):  # (a trace before the panel is made)
+            return
+        folded = self.channels_folded.get()
+        self.channels_head.config(text="▶" if folded else "▼")
+        mode = self.channel_mode.get()
+        words = [tr("app.ch_short_" + mode)]
+        if mode == "auto":
+            words.append(tr("app.ch_short_" + SPLIT_CHOICES[max(self.split_box.current(), 0)][0]))
+            if self.all16():
+                words.append(tr("app.ch_short_ch10"))
+            if self.in_order():
+                words.append(tr("app.ch_short_order"))
+            if self.rounds_apart():
+                words.append(tr("app.ch_short_rounds"))
+            if (self.rounds_apart() or self.rows_apart()) and self.pad_rounds.get():
+                words.append(tr("app.ch_short_pad"))
+        self.channels_short.config(text=", ".join(words))
+        grid_shown(self.channels_rows, not folded)
+        grid_shown(self.channels_short, folded)
 
     def in_order(self):
         """True while the shapes take channels 1-16 in order ("Channels 1-16 in order", only with all16)."""
