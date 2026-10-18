@@ -304,6 +304,34 @@ def add_anchor(c, seg, t, new, to_screen, exact=False):
     return True
 
 
+def add_anchor_pair(c, seg, t, new, fn):
+    """add_anchor on a curve lying on itself the other way round under the mirror fn(u, v) (point j's mirror is
+    point len - 1 - j: drawn across the mirror line): its mirror anchor added too, so it stays its own mirror."""
+    pts, sharp = c["pts"], c.get("sharp", [])
+    if t in (0, 1) or seg in c.get("gaps", ()):
+        return False
+    s2, t2 = len(segments(pts)) - 1 - seg, 1 - t
+    if (s2, t2) == (seg, t):  # (the very middle: one anchor, on the line)
+        m = fn(*new)
+        return add_anchor(c, seg, t, ((new[0] + m[0]) / 2, (new[1] + m[1]) / 2), None, exact=True)
+    if s2 == seg:  # (both on the middle segment: the later first, then the earlier on what's left of it)
+        cuts = [(seg, max(t, t2)), (seg, min(t, t2) / max(t, t2))]
+    else:
+        cuts = sorted([(seg, t), (s2, t2)], reverse=True)
+    for s, tt in cuts:
+        pts = split(pts, s, tt)
+        sharp = [a + 1 if a > s else a for a in sharp]
+        shift_marks(c, s, 1)
+    at = 3 * (seg + 1 + ((s2, t2) < (seg, t)))
+    d = [new[0] - pts[at][0], new[1] - pts[at][1]]
+    for j in (at - 1, at, at + 1):
+        pts[j] = [pts[j][0] + d[0], pts[j][1] + d[1]]
+        pts[len(pts) - 1 - j] = list(fn(*pts[j]))
+    c["pts"] = pts
+    set_sharp(c, sharp)
+    return True
+
+
 def can_delete(c, i):
     """What a right-click on point i does: "anchor" (removed), "handle" (pulled back in), "middle" (a symmetric
     curve's middle anchor: stays) or None (the ends and their handles stay, you couldn't grab them again)."""

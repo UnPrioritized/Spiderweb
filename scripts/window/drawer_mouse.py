@@ -11,7 +11,7 @@ import numpy as np
 from files.lang import tr
 from files.system import ALT
 from notes.areas import COLOURS
-from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half_at, nearest, pen_handles,
+from notes.bezier import (add_anchor, add_anchor_pair, can_delete, delete_point, drag_point, half_at, nearest, pen_handles,
                           set_symmetry)
 from notes.custom import ROLES, carried_spots, carry_areas, role_of, stroke_points, takes_formula
 from notes.pattern import moved_formulas
@@ -741,7 +741,10 @@ class DrawerMouse:
                 return
             if what:
                 self.push_undo()
-                delete_point(st, j, self.to_xy, exact=True)
+                # a curve across the mirror line: its mirror point too (the later anchor first)
+                pair = {j, len(st["pts"]) - 1 - j} if self.own_turn(self.sel) else {j}
+                for k in sorted(pair, reverse=True):
+                    delete_point(st, k, self.to_xy, exact=True)
                 self.mirror_from([self.sel])
                 return self.changed()
         chosen = self.chosen()
@@ -857,7 +860,9 @@ class DrawerMouse:
         if near is not None and d > near:
             return
         before = self.snap()
-        if add_anchor(st, seg, t, self.event_pt(e), self.to_xy, exact=True):
+        turn = self.own_turn(self.sel)  # (a curve across the mirror line: its mirror anchor too)
+        if (add_anchor_pair(st, seg, t, self.event_pt(e), turn) if turn else
+                add_anchor(st, seg, t, self.event_pt(e), self.to_xy, exact=True)):
             self.push_undo(before)
             self.mirror_from([self.sel])
             self.changed()

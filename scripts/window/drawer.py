@@ -1066,6 +1066,15 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
                     j += s + 1 <= j
                     break
 
+    def own_turn(self, i):
+        """The mirror laying curve i onto itself the other way round (drawn across the mirror line: point j's
+        mirror is point len - 1 - j), or None. Not for a curve with symmetric halves (they do it themselves)."""
+        st, link = self.strokes[i], self.link_of(i)
+        if self.mirror_mode() == "off" or not link or st["kind"] != "curve" or st.get("sym"):
+            return None
+        p = st["pts"]
+        return next((fn for fn in link_fns(link) if all(spot(fn(*a)) == spot(b) for a, b in zip(p, p[::-1]))), None)
+
     def one_per_link(self, idx):
         """idx with only the first of each link's strokes (the selected stroke first): the others are made from it."""
         seen, out = set(), []
@@ -1192,15 +1201,18 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
                                 own = [own[0] or test[0] != cu + 1, own[1] or test[1] != cv + 1]
                 entries.append((i, None, link, targets, own, box))
                 continue
+            turn = self.own_turn(i)  # (a curve across the line: its handles pair out with in, by number)
             index = {}
             for k in members:
                 o = self.strokes[k]
-                for m, p in enumerate(o.get("pts", [])):
+                for m, p in enumerate(o.get("pts", []) if k != i or not turn else []):
                     index.setdefault((spot(p), point_role(o, m)), []).append((k, m))
             cu, cv = link["at"]
+            last = len(st.get("pts", [])) - 1
             for j, q in enumerate(st["pts"]):
                 role = point_role(st, j)
                 found = [(fn, k, m) for fn in fns for k, m in index.get((spot(fn(*q)), role), [])]
+                found += [(turn, i, last - j)] if turn else []
                 targets = [t for t in found if t[1:] != (i, j)]
                 # a joint on the mirror line (an end / corner, or a point that is its own mirror) stays on it, so
                 # the halves stay joined; a handle there may leave it (its partner goes the other way)
@@ -1208,6 +1220,13 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
                 keep = (joint and link["ways"] != "v" and abs(q[0] - cu) < 1e-6,
                         joint and link["ways"] != "h" and abs(q[1] - cv) < 1e-6)
                 entries.append((i, j, link, targets, keep, None))
+        if d[0] in ("points", "pen"):  # the held points (and their handles) first: on a stroke that is its own
+            held = {}                  # mirror, the side dragged leads, the other side follows
+            for a, b in (d[1] if d[0] == "points" else [d[1:3]]):
+                held.setdefault(a, []).append(b)
+            order = {i: n for n, i in enumerate(direct)}
+            entries.sort(key=lambda e: (order[e[0]], min((abs(e[1] - b) for b in held.get(e[0], [])), default=0)
+                                        if e[1] is not None else 0))
         return entries, whole, tuple(pinned)
 
     def mirror_moving(self):
