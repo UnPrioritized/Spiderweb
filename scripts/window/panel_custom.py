@@ -9,7 +9,7 @@ from files.lang import tr, trn
 from notes.areas import most_colours
 from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, drawing_in_box,
                           edge_gate, fit_upright, gap_lines, gate_ticks, join_strokes, map_stroke, normalize_areas,
-                          normalize_strokes, open_paths)
+                          normalize_strokes, open_paths, shelve_patterns)
 from window import look
 from window.drawer import Drawer, clean_name, library_lists, library_names, load_drawing, save_shape, shape_stamp
 from window.panel_funnel import GATE_STEPS
@@ -554,9 +554,8 @@ class CustomPanel:
             self.push_undo(name=CUSTOM_NAMES.get(key, key))
         for t in tgts:
             t[key] = value
-            if key == "fill":  # (another Inside fill picked: no Nested steps / tiles / rings any more)
-                for k in PATTERN_FILLS:
-                    t.pop(k, None)
+            if key == "fill":  # (another Inside fill picked: no Nested steps / tiles / rings, kept for later)
+                shelve_patterns(t)
             if key == "gate" and t.get("range"):  # (a new gate typed in the panel = one flat gate again, user;
                 t["range_kept"] = t.pop("range")  # kept for the Range window to bring back)
             if not value and (key in ("edge", "edge_mode") or key in CUSTOM_FLAGS and t is not self.custom_defaults):
@@ -731,9 +730,13 @@ class CustomPanel:
             return self.sync_hz_panels()
 
         def changed(t):
-            # (Nested / Tiles / Ripples don't mix with Hz bass: switched on, they're taken off)
+            # (Nested / Tiles / Ripples don't mix with Hz bass: switched on, they're taken off, settings kept)
             no_pattern = PATTERN_FILLS if hz else ()
-            if t is self.custom_defaults:  # (shared with the Hz bass tool: new spam shapes keep their own gate and
+            new_ones = t is self.custom_defaults
+            if hz:
+                t = dict(t)
+                shelve_patterns(t)
+            if new_ones:  # (shared with the Hz bass tool: new spam shapes keep their own gate and
                 rest = {k: v for k, v in t.items() if k not in ("hz", "before_hz") + no_pattern}  # Range, user)
                 return dict(rest, hz=dict(t.get("hz") or {"auto": AUTO}, bpm=float(bpm), **hz)) if hz else rest
             if not hz:  # (off: the spam gate and Range it had before come back, user)

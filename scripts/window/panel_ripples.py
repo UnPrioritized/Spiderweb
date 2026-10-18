@@ -8,7 +8,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.custom import frame_to_uv
+from notes.custom import frame_to_uv, shelve_patterns, unshelve
 from notes.ripples import (INSIDES, MOST_COLOURS, MOST_GROW, MOST_STEPS, OTHER, RIPPLES_DEFAULTS, framed,
                            handle_spots, set_source, source_middles, source_turn)
 from window import look
@@ -267,10 +267,9 @@ class RipplesPanel:
         def put(t):
             if t["fill"] not in ("fill", "spam"):
                 t["fill"] = "fill"
-            t.pop("nested", None)  # (one Inside pattern at a time)
-            t.pop("tiles", None)
-            if not t.get("ripples"):
-                t["ripples"] = copy.deepcopy(RIPPLES_DEFAULTS)
+            shelve_patterns(t, keep="ripples")  # (one Inside pattern at a time: the others' settings kept)
+            if not t.get("ripples"):  # (its own settings from before, else the defaults)
+                t["ripples"] = unshelve(t, "ripples") or copy.deepcopy(RIPPLES_DEFAULTS)
 
         self.change_nested(tgts, put, RIPPLES_UNDO)
         self.tips.show("fill", wait=True)

@@ -132,6 +132,20 @@ def sane(x):
     return True
 
 
+def clean_kept_patterns(kept):
+    """A saved shape's "patterns_kept" (custom.shelve_patterns: Nested / Tiles / Ripples settings while another
+    Inside fill is picked), each cleaned like the live one, no centre points; {} when nothing usable."""
+    if not isinstance(kept, dict):
+        return {}
+    out = {}
+    for key, clean in (("nested", clean_nested), ("tiles", clean_tiles), ("ripples", clean_ripples)):
+        c = clean(kept.get(key)) if isinstance(kept.get(key), dict) else None
+        if c:
+            c.pop("at", None)
+            out[key] = c
+    return out
+
+
 def clean_shape(sh):
     """Shape loaded from a file -> valid shape, or None if it's a kind we no longer support or has a number that
     can't be used."""
@@ -200,6 +214,9 @@ def clean_shape(sh):
                    else None)
         if ripples:  # Inside fill Ripples (ripples.py)
             out["ripples"] = ripples
+        kept = clean_kept_patterns(sh.get("patterns_kept"))
+        if kept:  # (patterns switched off: their settings come back when picked again, custom.shelve_patterns)
+            out["patterns_kept"] = kept
         if sh.get("gate_flip") is True:  # its gates laid from the right (gateflip.py)
             out["gate_flip"] = True
         try:  # the smallest outline gate in beats (custom.grow_inward)

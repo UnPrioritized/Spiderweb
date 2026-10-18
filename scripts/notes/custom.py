@@ -144,6 +144,31 @@ def colour_of(st):
 CENTRE_KEYS = ("nested", "tiles", "ripples")  # (fills with centre points in "at", kept in the shape's box)
 
 
+def shelve_patterns(t, keep=None):
+    """Takes the Inside patterns (Nested / Tiles / Ripples) off t, all but keep; each one's settings go to
+    t["patterns_kept"] and come back when it's picked again (unshelve; user 2026-10-18: a mouse wheel over Inside
+    lost them). Centre points aren't kept (the box may change meanwhile): back in the middle. The kept dict is
+    always a new one, so a copy of a shape can be shelved without touching the shape."""
+    kept = dict(t.get("patterns_kept") or {})
+    for key in CENTRE_KEYS:
+        if key != keep and key in t:
+            c = t.pop(key)
+            if c:
+                kept[key] = {k: v for k, v in c.items() if k != "at"}
+    if kept:
+        t["patterns_kept"] = kept
+
+
+def unshelve(t, key):
+    """The settings kept for pattern key on t (shelve_patterns), taken out of the kept ones; None = none kept."""
+    kept = dict(t.get("patterns_kept") or {})
+    c = kept.pop(key, None)
+    t.pop("patterns_kept", None)
+    if kept:
+        t["patterns_kept"] = kept
+    return c
+
+
 def moved_at(c, fn):
     """Fill settings c with their centre points ("at": one [u, v], or Ripples' list of [u, v] / None) put through
     fn(u, v) -> (u, v)."""

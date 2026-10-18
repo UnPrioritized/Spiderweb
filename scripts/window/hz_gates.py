@@ -684,9 +684,8 @@ class HzGates:
                 if not sh.get("hz"):  # (a spam shape's first notes: its gate and Range come back if Hz bass is
                     new["before_hz"] = {"gate": sh["gate"]}  # unticked; no Range with Hz bass, user)
                     new.pop("gate_flip", None)  # (no gate aware flip on a Hz bass: it couldn't be switched off)
-                    from window.panel_custom import PATTERN_FILLS
-                    for k in PATTERN_FILLS:  # (Nested / Tiles / Ripples don't mix with Hz bass, as the side panel's)
-                        new.pop(k, None)
+                    from notes.custom import shelve_patterns
+                    shelve_patterns(new)  # (Nested / Tiles / Ripples don't mix with Hz bass, as the side panel's)
                     if new.get("range"):  # (asked first, like the side panel's Hz bass box)
                         if not messagebox.askokcancel(tr("panel_custom.spiderweb"), tr("panel_custom.hz_range_off"),
                                                       icon="warning", parent=self):

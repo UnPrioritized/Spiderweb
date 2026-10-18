@@ -7,6 +7,7 @@ from tkinter import messagebox, ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
+from notes.custom import shelve_patterns, unshelve
 from notes.nested import MOST_COLOURS, MOST_STEPS, NESTED_DEFAULTS
 from window import look
 from window.drawer import library_lists
@@ -179,7 +180,8 @@ class NestedPanel:
             return self.sync_custom()
         placed = [t for t in tgts if t is not self.custom_defaults]
         new = [dict(t, fill=t["fill"] if t["fill"] in ("fill", "spam") else "fill",
-                    nested=t.get("nested") or dict(NESTED_DEFAULTS)) for t in placed]
+                    nested=t.get("nested") or (t.get("patterns_kept") or {}).get("nested") or dict(NESTED_DEFAULTS))
+               for t in placed]
         if not self.confirm_big(new):
             return self.sync_custom()
         if placed:
@@ -187,10 +189,9 @@ class NestedPanel:
         for t in tgts:
             if t["fill"] not in ("fill", "spam"):
                 t["fill"] = "fill"
-            t.pop("tiles", None)  # (one Inside pattern at a time)
-            t.pop("ripples", None)
-            if not t.get("nested"):
-                t["nested"] = dict(NESTED_DEFAULTS)
+            shelve_patterns(t, keep="nested")  # (one Inside pattern at a time: the others' settings kept)
+            if not t.get("nested"):  # (its own settings from before, else the defaults)
+                t["nested"] = unshelve(t, "nested") or dict(NESTED_DEFAULTS)
         self.shapes_changed()
         self.sync_custom()
         self.sync_colours()

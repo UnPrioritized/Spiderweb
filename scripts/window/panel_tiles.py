@@ -9,6 +9,7 @@ from tkinter import messagebox, ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
+from notes.custom import shelve_patterns, unshelve
 from notes.tiles import BY, FLIPS, LAYOUTS, MOST_BEATS, MOST_COLOURS, MOST_KEYS, TILES_DEFAULTS, too_many
 from window import look
 from window.drawer import library_lists
@@ -152,10 +153,9 @@ class TilesPanel:
         def put(t):
             if t["fill"] not in ("fill", "spam"):
                 t["fill"] = "fill"
-            t.pop("nested", None)  # (one Inside pattern at a time)
-            t.pop("ripples", None)
-            if not t.get("tiles"):
-                t["tiles"] = copy.deepcopy(TILES_DEFAULTS)
+            shelve_patterns(t, keep="tiles")  # (one Inside pattern at a time: the others' settings kept)
+            if not t.get("tiles"):  # (its own settings from before, else the defaults)
+                t["tiles"] = unshelve(t, "tiles") or copy.deepcopy(TILES_DEFAULTS)
 
         self.change_nested(tgts, put, TILES_UNDO)
         self.tips.show("fill", wait=True)

@@ -13,7 +13,7 @@ import numpy as np
 
 from files.lang import tr, trn
 from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape
-from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_shape
+from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape
 from notes.hzbass import clean_hz
 from notes.mask import MASK_DEFAULTS, THICKNESS, clean_mask
 from notes.nested import clean_nested
@@ -377,6 +377,11 @@ class ProjectFiles:
             ripples.pop("at", None)
             ripples.pop("turns", None)
             out["ripples"] = ripples
+        out.pop("patterns_kept", None)
+        kept = clean_kept_patterns(custom.get("patterns_kept"))  # (the patterns switched off: settings kept)
+        kept.get("ripples", {}).pop("turns", None)
+        if kept:
+            out["patterns_kept"] = kept
         out.pop("hz", None)
         if clean_hz(custom.get("hz")):
             out["hz"] = clean_hz(custom["hz"])
