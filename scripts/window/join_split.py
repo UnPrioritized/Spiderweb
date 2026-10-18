@@ -21,7 +21,7 @@ from notes.mask import SKIP10, is_mask, same_mask
 from notes.sustain import alike
 from notes.merge import edge_moves, merged, part_rows, reshaped_parts
 from notes.glue import for_part as glue_for_part, glue_box
-from notes.slice import clip_segment, crossings, slice_custom, slice_notes
+from notes.slice import EPS, clip_segment, crossings, slice_custom, slice_notes
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
                           rejoined, slice_in_two, split_here_ok, tooled)
 from notes.smooth import smooth_path
@@ -527,24 +527,28 @@ class JoinSplit:
         selected, and only inside the boxes. One undo step; the pieces end up selected."""
         roll = self.roll
         boxes = roll.kept_box()
-        segs = [(a, b)] if not boxes else [s for s in (clip_segment(a, b, box) for box in boxes) if s]
+        cuts = [(a, b, None)] if not boxes else [(*s, box) for s, box in ((clip_segment(a, b, box), box)
+                                                                           for box in boxes) if s]
+        segs = [(sa, sb) for sa, sb, _ in cuts]
         targets = sorted(self.sels) if boxes else range(len(self.shapes))
-        done, out, skipped, plain, missed, merges = {}, {}, 0, set(), 0, 0
+        done, out, skipped, plain, missed, merges, flat = {}, {}, 0, set(), 0, 0, False
         for i in targets:
             sh = self.shapes[i]
             if (sh["kind"] == "custom" and "notes" in sh and "picture" not in sh and "merge" not in sh
                     and not sh.get("text") and not sh.get("hz")):
                 # pasted notes: by time, each row the line crosses (slice.slice_notes); pieces = new pasted notes
                 pieces, crossed = [sh], False
-                for sa, sb in segs:
+                for sa, sb, box in cuts:
                     nxt = []
                     for p in pieces:
-                        got, hit = slice_notes(p, *self.all_rows(p), sa, sb, self.ppq)
+                        got, hit = slice_notes(p, *self.all_rows(p), sa, sb, self.ppq, box, self.keys)
                         crossed |= hit
                         nxt += got or [p]
                     pieces = nxt
                 plain.add(i)
-                missed += len(pieces) == 1 and crossed
+                if len(pieces) == 1 and crossed:
+                    missed += 1
+                    flat |= any(abs(sb[1] - sa[1]) < EPS for sa, sb in segs)
             elif sh["kind"] in ("custom", "funnel") and ("notes" in sh or sh.get("text") or sh.get("hz")):
                 if sh.get("merge") and any(any(notes_across(self.notes_of(sh), sa, sb, self.ppq)) for sa, sb in segs):
                     merges += 1  # (touched: say how to cut it, user 2026-10-17)
@@ -596,6 +600,7 @@ class JoinSplit:
         if not done:
             self.status.config(text=tr("join_split.slice_merged") if merges else
                                tr("join_split.slice_partly") if skipped else
+                               tr("join_split.slice_flat_missed") if flat else
                                tr("join_split.slice_missed_notes") if missed else tr("join_split.slice_nothing"))
             return
         picked = self.put_pieces(done, plain, tr("join_split.slice"))

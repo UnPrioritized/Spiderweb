@@ -337,19 +337,22 @@ def open_end(notes, end, ppq):
     return True
 
 
-def slice_notes(sh, notes, tracks, a, b, ppq):
+def slice_notes(sh, notes, tracks, a, b, ppq, box=None, seen=None):
     """Pasted notes (a custom shape holding notes, custom.py) cut by the Slice tool along a-b (beats, keys), by time
     (user, 2026-10-10: it needn't go all the way across): on each key row the line crosses, the notes before the
     spot it crosses at go to a new shape (user), a note sounding there cut in two at that tick; rows it doesn't cross
     stay whole with the notes after it. notes: its (start, end, key, velocity) notes as they sound now (rows above
     the top key too), tracks: each one's track. -> (the two halves, each a pasted-notes shape around its own notes
     with sh's other settings, or None: the line touches no note's row between its first note and last end, or one
-    side would be empty; crossed: the line went over the notes' box, for the status line)."""
+    side would be empty; crossed: the line went over the notes' box, for the status line). A flat line cuts by key
+    instead: flat_cut (box, seen: its kept Select box and the piano roll's key count)."""
     a, b = np.asarray(a, float), np.asarray(b, float)
     dk = b[1] - a[1]
-    if not len(notes) or abs(dk) < EPS:  # (a flat line runs between key rows: it crosses none)
+    if not len(notes):
         return None, False
     notes = np.asarray(notes, np.int64)[:, :4]
+    if abs(dk) < EPS:  # (a flat line runs between key rows: it crosses none)
+        return flat_cut(sh, notes, tracks, a, b, ppq, box, seen)
     lo, hi, keys = notes[:, 0], notes[:, 1], notes[:, 2]
     t0, t1, k0, k1 = int(lo.min()), int(hi.max()), int(keys.min()), int(keys.max())
     if (max(a[0], b[0]) * ppq <= t0 or min(a[0], b[0]) * ppq >= t1 or max(a[1], b[1]) < k0
@@ -375,14 +378,50 @@ def slice_notes(sh, notes, tracks, a, b, ppq):
     past = ~on & (((sk < 0) & open_end(notes, a, ppq)) | ((sk > 1) & open_end(notes, b, ppq)))
     side = past & (lo + hi < 2 * x)
     rest, before = (~on & ~side) | (on & (hi > x)), (on & (lo < x)) | side
+    cols = notes[:, 3], tracks
+    return _halves(sh, [np.column_stack([s0, s1 - s0, keys, *cols])[keep] for keep, s0, s1 in
+                        ((rest, np.where(on, np.maximum(lo, x), lo), hi), (before, lo, np.minimum(hi, x)))],
+                   ppq), crossed
+
+
+def flat_cut(sh, notes, tracks, a, b, ppq, box=None, seen=None):
+    """slice_notes with a flat line (user, 2026-10-18): the notes above it, only within its length, go to a new shape;
+    the rest (left, right and below) stays one piece; a note across one of its ends is cut in two at that tick.
+    Only cut with notes on both sides of it there: rows past the top key (seen) don't count, a kept Select box
+    (b0, p0, b1, p1) = only the rows inside it. notes: int (start, end, key, velocity). -> (halves or None,
+    crossed: it touched the notes' box)."""
+    tracks = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64)
+    lo, hi, keys = notes[:, 0], notes[:, 1], notes[:, 2]
+    ta, tb = sorted((int(round(a[0] * ppq)), int(round(b[0] * ppq))))
+    if ta >= tb:  # (a drag that snapped to one spot: no line)
+        return None, False
+    k = a[1]
+    crossed = bool(ta < hi.max() and tb > lo.min() and keys.min() - 0.5 - EPS <= k <= keys.max() + 0.5 + EPS)
+    along = (lo < tb) & (hi > ta)  # (sounding somewhere along it)
+    if box is not None:
+        along &= (keys > min(box[1], box[3])) & (keys < max(box[1], box[3]))
+    up = along & (keys > k + EPS)
+    shown = keys < seen if seen else True
+    if not (up & shown).any() or not (along & ~up & shown).any():
+        return None, crossed  # (nothing to see on one side of it there; nothing left behind: _halves)
+    cols = keys, notes[:, 3], tracks
+    stay = [np.column_stack([lo, hi - lo, *cols])[~up]]
+    for keep, s0, s1 in ((up & (lo < ta), lo, np.minimum(hi, ta)), (up & (hi > tb), np.maximum(lo, tb), hi)):
+        stay.append(np.column_stack([s0, s1 - s0, *cols])[keep])  # (the bits of notes sticking out past its ends)
+    s0, s1 = np.maximum(lo, ta), np.minimum(hi, tb)
+    return _halves(sh, [np.concatenate(stay), np.column_stack([s0, s1 - s0, *cols])[up]], ppq), crossed
+
+
+def _halves(sh, parts, ppq):
+    """slice_notes' two pieces: each (start, length, key, velocity, track) array -> a pasted-notes shape with sh's
+    other settings, sharing its paste id. None if one is empty."""
+    if any(not len(n) for n in parts):
+        return None
     paste = sh.get("paste") or uuid.uuid4().hex[:12]  # (its tracks keep their channels across the pieces: render)
     from notes.gateflip import colours_back
     mirrored = bool(colours_back(sh))  # (a gate flipped paste: the pieces keep its colours' channels)
-    parts = []
-    for keep, s0, s1 in ((rest, np.where(on, np.maximum(lo, x), lo), hi), (before, lo, np.minimum(hi, x))):
-        n = np.column_stack([s0, s1 - s0, keys, notes[:, 3], tracks])[keep]
-        if not len(n):
-            return None, crossed
+    out = []
+    for n in parts:
         half = {k: copy.deepcopy(v) for k, v in sh.items()
                 if k not in ("notes", "pts", "vel_env", "fx", "glue", "between", "gate_flip", "flip_colours")}
         # (pages / glue / a velocity line / a gate aware flip: in its notes)
@@ -391,8 +430,8 @@ def slice_notes(sh, notes, tracks, a, b, ppq):
             half["flip_colours"] = True
         if "name" not in sh:
             half.pop("name")
-        parts.append(half)
-    return parts, crossed
+        out.append(half)
+    return out
 
 
 # ---------------------------------------------------------------- cookie cutter (user, 2026-10-12)

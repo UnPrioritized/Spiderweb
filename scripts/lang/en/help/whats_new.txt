@@ -8,6 +8,8 @@ What's new:
 
 • Settings → General → Overlapping shapes keep their colours: with Multi channel, a shape that overlaps another moves whole to the next row of channels (15 further, 16 with channel 10), so it keeps its colours.
 
+• Slice tool: a flat line through pasted notes now cuts them into the notes above it and the rest. Only the notes within the line's length are lifted out.
+
 ## Version 1.6.0
 
 What's new:
