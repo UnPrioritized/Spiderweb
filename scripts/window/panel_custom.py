@@ -397,6 +397,10 @@ class CustomPanel:
         set_names(self.fill_box, [texts[v][0] for v in self.fill_offered if v not in PATTERN_FILLS],
                   [texts[v][0] for v in self.fill_offered if v in PATTERN_FILLS])
         self.fill_box.set(texts[shown][0])
+        # (in the open list too: the fills that close the gaps orange, like the box)
+        listed = list(self.fill_box.cget("values"))
+        self.fill_box.row_colours = {listed.index(texts[v][0]): GAP_COLOR for v in self.fill_offered
+                                     if gaps and v in APART_FILLS}
         self.sync_nested(tgts[0])
         self.sync_tiles(tgts[0])
         self.sync_ripples(tgts[0])

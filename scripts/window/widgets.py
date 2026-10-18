@@ -136,12 +136,16 @@ def name_list(cb):
     keep_width(cb)
     cb.jump = letter_jump(cb)
     cb.divider_at = None
+    cb.row_colours = {}  # {row in the open list: its text colour}
     cb.name_before = cb.get()
     pop = cb.tk.call("ttk::combobox::PopdownWindow", cb)
     lb = pop + ".f.l"
 
     def shown():  # (the list opened, just filled: the divider greyed, the name picked before kept)
         cb.name_before, cb.list_open = cb.get(), True
+        for k, colour in cb.row_colours.items():  # (rows with a colour of their own, e.g. orange = a warning)
+            if k < int(cb.tk.call(lb, "size")):
+                cb.tk.call(lb, "itemconfigure", k, "-foreground", colour)
         k = cb.divider_at
         if k is not None and k < int(cb.tk.call(lb, "size")):
             cb.tk.call(lb, "itemconfigure", k, "-foreground", look.HINT, "-selectforeground", look.HINT,
