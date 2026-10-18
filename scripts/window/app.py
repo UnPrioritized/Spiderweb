@@ -1110,8 +1110,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # (other drags make the notes AND repaint them all at every step: the repaint counts too)
         slow = slow or not moving and busy + self.roll.paint_time > 0.15
         # (moving: also whenever the piano roll shows its notes as one picture, which it can carry along)
-        # (Nested's / Tiles' centre point: the notes are all it shows, so they follow it in the background, user)
-        follow = self.roll.drag and self.roll.drag[0] == "handle" and self.roll.drag[1] == ("centre",)
+        # (Nested's / Tiles' / Ripples' centre points: the notes are all they show, so they follow in the background,
+        # user)
+        follow = (self.roll.drag and self.roll.drag[0] == "handle" and isinstance(self.roll.drag[1], tuple)
+                  and self.roll.drag[1][0] in ("centre", "ripple"))
         if not now and (self.roll.drag or self.scrubbing) and (
                 slow or follow and busy > 0.03 or moving and (busy > 0.03 or self.roll._img is not None)):
             self.notes_late = True
@@ -1386,7 +1388,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if ty and (ty["i"] not in self.sels if ty["i"] is not None else bool(self.sels)):
             self.roll.end_typing()  # another shape picked (or the text deleted): done typing
         self.parts = set()
-        self.stroke = None
+        self.stroke = self.ripple_pick = None
         self._edit_key = self._scrub = None
         self.sync_panel()
         self.roll.request_redraw()

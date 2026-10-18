@@ -324,7 +324,7 @@ class ProjectFiles:
         self.sel = None
         self.sels = set()
         self.parts = set()
-        self.stroke = None
+        self.stroke = self.ripple_pick = None
         self.undo_stack.clear()
         self.redo_stack.clear()
         self._redo_kept = None
@@ -374,6 +374,7 @@ class ProjectFiles:
         ripples = clean_ripples(custom.get("ripples"))
         if ripples and not nested and not tiles and out["fill"] in ("fill", "spam"):  # (Inside fill Ripples)
             ripples.pop("at", None)
+            ripples.pop("turns", None)
             out["ripples"] = ripples
         out.pop("hz", None)
         if clean_hz(custom.get("hz")):

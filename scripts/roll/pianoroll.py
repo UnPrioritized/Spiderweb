@@ -888,6 +888,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                     self.box_kept = (kept, set(app.sels))
                 app.push_undo(name=tr("pianoroll.drag_a_point"))
                 self.drag = ("handle", i)
+                if isinstance(i, tuple) and i[0] == "ripple":  # (a Ripples source's centre point: picked too)
+                    app.pick_source(i[1])
                 return
 
         hit = self.custom_hit(e.x, e.y)
@@ -1522,6 +1524,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             hid = None  # a stroke's point: right-click works as on the stroke (its menu)
         if hid == ("centre",):  # Nested's / Tiles' centre point: back to where it starts
             self.reset_centre(self.app.selected())
+            return
+        if isinstance(hid, tuple) and hid[0] == "ripple":  # a Ripples source's centre point: its menu
+            self.ripple_menu(self.app.selected(), hid[1], e)
             return
         if isinstance(hid, tuple) and self.app.selected()["kind"] == "custom":  # a picked curve stroke's point
             self.delete_stroke_handle(self.app.selected(), hid)

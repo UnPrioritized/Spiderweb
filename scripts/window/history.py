@@ -422,10 +422,13 @@ class HistoryPanel:
         state, picked = now, sel_now
         self._redo_kept = self._trimmed = None
         self.shapes = load_state(state)
+        was = set(self.sels)
         self.sels, self.sel = set(picked[0]), picked[1]
         self.sels = {i for i in self.sels if i < len(self.shapes)}
         self.parts = set()
         self.stroke = None
+        if self.sels != was:  # (the picked Ripples source stays while the same shape is selected)
+            self.ripple_pick = None
         if self.sel not in self.sels:
             self.sel = max(self.sels, default=None)
         # the Select boxes, the picked stroke and the funnel's highlighted parts come back as they were (only while

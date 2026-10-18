@@ -102,7 +102,7 @@ def custom_settings(cd, patterns=True):
     out.update({k: True for k in CUSTOM_FLAGS if cd.get(k)})
     for key in ("nested", "tiles", "ripples"):  # (Inside fill patterns; a new shape starts at its own middle)
         if cd.get(key) and patterns:
-            out[key] = {k: v for k, v in cd[key].items() if k != "at"}
+            out[key] = {k: v for k, v in cd[key].items() if k not in ("at", "turns")}
     if cd.get("edge"):
         out["edge"] = cd["edge"]
     if cd.get("edge_mode") == "sideways":
@@ -139,6 +139,20 @@ def role_of(st):
 def colour_of(st):
     """A stroke's outline colour (1 .. COLOURS, the same numbers as the areas': areas.py), 0 = the shape's own."""
     return st.get("colour", 0) if st.get("role") != "cut" else 0
+
+
+CENTRE_KEYS = ("nested", "tiles", "ripples")  # (fills with centre points in "at", kept in the shape's box)
+
+
+def moved_at(c, fn):
+    """Fill settings c with their centre points ("at": one [u, v], or Ripples' list of [u, v] / None) put through
+    fn(u, v) -> (u, v)."""
+    at = c.get("at")
+    if not at:
+        return c
+    if isinstance(at[0], (int, float)):
+        return dict(c, at=list(fn(*at)))
+    return dict(c, at=[list(fn(*p)) if p else None for p in at])
 
 
 def clean_of_at(c, out):
@@ -709,10 +723,9 @@ def refit(sh, song_beats=False):
         st.update(new)
     if sh.get("areas"):
         sh["areas"] = [[(u - ul) / w, (v - vl) / h, c] for u, v, c in sh["areas"]]
-    for key in ("nested", "tiles"):
-        at = (sh.get(key) or {}).get("at")
-        if at:  # (Nested's / Tiles' centre point stays where it is on the roll)
-            sh[key] = dict(sh[key], at=[(at[0] - ul) / w, (at[1] - vl) / h])
+    for key in CENTRE_KEYS:  # (Nested's / Tiles' / Ripples' centre points stay where they are on the roll)
+        if sh.get(key):
+            sh[key] = moved_at(sh[key], lambda u, v: ((u - ul) / w, (v - vl) / h))
     r = sh.get("round")
     if r:  # (still the view it was drawn in, like an arc's k: drawn_view)
         sh["round"] = r * h / w if isinstance(r, (int, float)) else [x * h / w for x in r]

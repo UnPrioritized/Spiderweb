@@ -16,7 +16,8 @@ exactly on each drawn source: sizes moved so a copy is 1), "turn" (degrees each 
 it; the ring at the drawn outline isn't turned, user), "spacing" (-100..100: + = the small rings closer together),
 "colours", "skip" (every other ring empty), "inside" (inside the drawn sources: "rings" / "empty" / "plain" = one
 colour), "at" ([[u, v] or None, ...] in the shape's box, one per source in the drawing's order, which flips and
-moves don't change; missing = its middle)}.
+moves don't change; missing = its middle), "turns" ([None (= Turn) / "other" (= -Turn) / degrees, ...] per source,
+the same way)}.
 Colours count from the drawn outline: the ring just inside it is colour 0, so Steps / Grow to don't change it."""
 
 import json
@@ -24,7 +25,7 @@ import math
 
 import numpy as np
 
-from notes.custom import cut_out, frame_to_bp, in_turns, merged_rows, poly_edges, rows_spans
+from notes.custom import cut_out, frame_to_bp, frame_to_uv, in_turns, merged_rows, poly_edges, rows_spans
 from notes.nested import mirrored, view_loops, view_of
 from notes.paths import TOP_KEY, pitch_of
 
@@ -65,7 +66,80 @@ def clean_ripples(c):
     if isinstance(at, list) and any(at):
         out["at"] = [[float(p[0]), float(p[1])] if isinstance(p, (list, tuple)) and len(p) == 2
                      and all(isinstance(x, (int, float)) and math.isfinite(x) for x in p) else None for p in at[:1000]]
+    turns = c.get("turns")
+    if isinstance(turns, list) and any(t is not None for t in turns):
+        out["turns"] = [OTHER if t == OTHER else max(-180.0, min(180.0, float(t)))
+                        if isinstance(t, (int, float)) and not isinstance(t, bool) and math.isfinite(t) else None
+                        for t in turns[:1000]]
     return out
+
+
+# ---------------------------------------------------------------- each source by hand
+
+OTHER = "other"  # (a source's turn: the other way round from Turn)
+_middles = {}  # source_middles, remembered
+
+
+def source_turn(cfg, n):
+    """Degrees source n's rings turn each: its own, else Turn (or the other way)."""
+    turns = cfg.get("turns") or []
+    own = turns[n] if n < len(turns) else None
+    return cfg["turn"] if own is None else -cfg["turn"] if own == OTHER else own
+
+
+def own_list(cfg, key, n, value):
+    """cfg's per-source list `key` with entry n set to value (None entries past the end; all None = no list)."""
+    got = list(cfg.get(key) or [])
+    got += [None] * (n + 1 - len(got))
+    got[n] = value
+    out = {k: v for k, v in cfg.items() if k != key}
+    if any(x is not None for x in got):
+        out[key] = got
+    return out
+
+
+def set_source(sh, key, n, value):
+    """Source n's own centre point ("at": [u, v] in the shape's box) or turn ("turns"); None = back as all."""
+    sh["ripples"] = own_list(sh["ripples"], key, n, value)
+
+
+def source_middles(sh):
+    """[(u, v), ...]: each source's middle in the shape's box, in the drawing's order. Remembered."""
+    key = json.dumps([sh["strokes"], sh["pts"], sh.get("round")])
+    got = _middles.get(key)
+    if got is not None:
+        return got
+    if len(_middles) > 30:
+        _middles.clear()
+    view, to_uv = view_of(sh), frame_to_uv(sh["pts"])
+    found = {}
+    if view[1] > 0 and to_uv:
+        a, c = view
+        for _, sources in parts(view_loops(sh, view)):
+            for n, src in sources:
+                x, y = middle(src[0])
+                found[n] = tuple(float(w) for w in to_uv(x - a * y / c, y / c))
+    got = _middles[key] = [found[n] for n in sorted(found)]
+    return got
+
+
+def centre_uv(sh, n):
+    """Source n's centre point (u, v) in the shape's box: its own, else its middle."""
+    at = sh["ripples"].get("at") or []
+    return tuple(at[n]) if n < len(at) and at[n] else source_middles(sh)[n]
+
+
+def handle_spots(sh):
+    """[(beat, pitch), ...]: where each source's centre point shows. A sliced piece: its whole's sources (its notes
+    are made from the whole, sliced.source), at the piece's own points."""
+    whole = sh
+    if sh.get("cut"):
+        from notes.sliced import source
+        got = source(sh)
+        if got and got[0].get("ripples"):
+            whole = got[0]
+    to_bp = frame_to_bp(whole["pts"])
+    return [to_bp(*centre_uv(whole, n)) for n in range(len(source_middles(whole)))]
 
 
 # ---------------------------------------------------------------- frames and sources
@@ -211,11 +285,11 @@ def frame_spots(frame):
 
 
 def auto_grow(frame, sources, mids, turned):
-    """The size the biggest copy needs so every spot of the frame lies in some source's copy (turned: copies turn,
-    so each source counts as its nearest reach all round)."""
+    """The size the biggest copy needs so every spot of the frame lies in some source's copy (turned, per source:
+    its copies turn, so it counts as its nearest reach all round)."""
     spots = frame_spots(frame)
     need = np.full(len(spots), np.inf)
-    for (_, src), c in zip(sources, mids):
+    for (_, src), c, turned in zip(sources, mids, turned):
         r = reach(src[0], c)
         d = spots - c
         if turned:
@@ -318,16 +392,17 @@ def ripple_rings(sh, ppq):
 
 def make_rings(sh, cfg, frame, sources, view, area, ppq):
     mids = centres(sh, sources, view)
-    grow = auto_grow(frame, sources, mids, bool(cfg["turn"])) if cfg["auto"] else cfg["grow"]
+    turns = [source_turn(cfg, n) for n, _ in sources]
+    grow = auto_grow(frame, sources, mids, [bool(t) for t in turns]) if cfg["auto"] else cfg["grow"]
     sizes, k1 = ring_sizes(cfg, grow)
     way = -1 if mirrored(sh) else 1  # (a flipped shape turns the other way: its fill is a mirror image)
     covered = np.zeros((0, 3), np.int64)
     pieces = []
     for k, size in enumerate(sizes):
-        a = way * math.radians(cfg["turn"]) * (k - k1)
-        co, si = math.cos(a) * size, math.sin(a) * size
         sets = []
-        for (_, src), c in zip(sources, mids):
+        for (_, src), c, t in zip(sources, mids, turns):
+            a = way * math.radians(t) * (k - k1)
+            co, si = math.cos(a) * size, math.sin(a) * size
             moved = [np.column_stack([c[0] + co * (p[:, 0] - c[0]) - si * (p[:, 1] - c[1]),
                                       c[1] + si * (p[:, 0] - c[0]) + co * (p[:, 1] - c[1])]) for p in src]
             sets.append(to_bp_loops(moved, view))

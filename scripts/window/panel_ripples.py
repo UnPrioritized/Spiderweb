@@ -8,7 +8,9 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.ripples import INSIDES, MOST_COLOURS, MOST_GROW, MOST_STEPS, RIPPLES_DEFAULTS, ripple_rings
+from notes.custom import frame_to_uv
+from notes.ripples import (INSIDES, MOST_COLOURS, MOST_GROW, MOST_STEPS, OTHER, RIPPLES_DEFAULTS, handle_spots,
+                           ripple_rings, set_source, source_turn)
 from window import look
 from window.panel_nested import NOTES_CHOICES, drop_row
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
@@ -23,6 +25,8 @@ BOXES = [
       lambda x: x / 100)],
 ]
 TICKS = [("edge", "ripples_edge"), ("skip", "ripples_skip")]
+TURN_WAYS = ("same", "other", "own")  # (the picked source's Turn dropdown)
+PICKED_LIMITS = {"turn": (-180, 180, (1, 10, 0.1)), "u": (-1000, 1000, (1, 10, 0.1)), "v": (-1000, 1000, (1, 10, 0.1))}
 RIPPLES_UNDO = tr("panel_custom.ripples")
 
 
@@ -85,8 +89,128 @@ class RipplesPanel:
         self.ripples_warn = ttk.Label(opts, text=tr("panel_custom.ripples_none"), foreground=look.WARN,
                                       font=look.font(8), wraplength=int(260 * self.scale), justify="left")
         self.ripples_rows.append(self.ripples_warn)
+        self._build_picked(opts)
         for row in self.ripples_rows:
             self.custom_rows.append((row, dict(anchor="w", padx=(20, 0), pady=(1, 0))))
+
+    def _build_picked(self, opts):
+        """The picked source's rows (a centre point clicked on the piano roll): "Picked source (2 of 3)", Turn
+        Same as all / Other way / Own [x], Centre u / v %."""
+        self.ripple_pick = None  # (the picked source's number: app.pick_source)
+        self.picked_title = ttk.Label(opts, font=look.font(9, "bold"))
+        Tooltip(self.picked_title, tr("panel_custom.ripples_picked_tip"))
+        self.picked_boxes, labels = {}, {}
+        turn_row, centre_row = ttk.Frame(opts), ttk.Frame(opts)
+        lb = ttk.Label(turn_row, text=tr("panel_custom.ripples_picked_turn"))
+        lb.grid(row=0, column=0, sticky="w")
+        self.picked_turn_box = ttk.Combobox(turn_row, state="readonly", width=12,
+                                            values=[tr("panel_custom.ripples_turn_" + w) for w in TURN_WAYS])
+        self.picked_turn_box.grid(row=0, column=1, sticky="w", padx=4)
+        self.picked_turn_box.bind("<<ComboboxSelected>>", lambda e: (
+            self.on_picked_way(TURN_WAYS[e.widget.current()]), self.roll.focus_set()))
+        for w in (lb, self.picked_turn_box):
+            Tooltip(w, tr("panel_custom.ripples_picked_turn_tip"))
+        spots = [("turn", turn_row, None, 2, "ripples_turn_unit"),
+                 ("u", centre_row, "ripples_picked_u", 1, "%"), ("v", centre_row, "ripples_picked_v", 4, "%")]
+        ttk.Label(centre_row, text=tr("panel_custom.ripples_picked_centre")).grid(row=0, column=0, sticky="w")
+        for key, row, text, col, unit in spots:
+            lb = labels[key] = ttk.Label(row, text=tr("panel_custom." + text)) if text else None
+            if lb:
+                lb.grid(row=0, column=col, sticky="w", padx=(8, 0))
+            var = tk.StringVar()
+            box = ttk.Entry(row, textvariable=var, width=6 if text else 5)
+            box.grid(row=0, column=col + 1, sticky="w", padx=4)
+            ttk.Label(row, text=unit if unit == "%" else tr("panel_custom." + unit),
+                      foreground=look.HINT).grid(row=0, column=col + 2, sticky="w")
+            self.picked_boxes[key] = (box, var)
+            apply = (lambda left=False, key=key: self.on_picked_box(key, left))
+            box.bind("<Return>", lambda ev, apply=apply: apply())
+            leave_box(self, box, var, apply)
+            lo, hi, steps = PICKED_LIMITS[key]
+            Scrub(self, [(box, var, apply)], steps, lo, hi, label=lb)
+            for w in (lb, box):
+                if w:
+                    Tooltip(w, tr("panel_custom.ripples_picked_" + ("turn" if key == "turn" else "centre") + "_tip"))
+        self.picked_rows = [self.picked_title, turn_row, centre_row]
+        self.ripples_rows += self.picked_rows
+
+    def picked_source(self):
+        """(the shape, its picked source's number, how many sources) while one placed Ripples shape is selected and
+        one of its centre points is picked, else None."""
+        n, tgts = self.ripple_pick, self.ripples_targets()
+        if n is None or len(tgts) != 1 or tgts[0] is self.custom_defaults:
+            return None
+        count = len(handle_spots(tgts[0]))
+        return (tgts[0], n, count) if n < count else None
+
+    def pick_source(self, n):
+        """Ripples source n of the selected shape picked (its centre point clicked; None = none)."""
+        if n != self.ripple_pick:
+            self.ripple_pick = n
+            self.sync_custom()
+            self.roll.request_redraw()
+
+    def set_source(self, n, key, value, name):
+        """Source n's own centre point ("at") or turn ("turns") of the selected shape; None = as all (one undo
+        step)."""
+        tgts = [t for t in self.ripples_targets() if t is not self.custom_defaults]
+        if len(tgts) == 1:
+            self.ripple_pick = n
+            self.change_nested(tgts, lambda t: set_source(t, key, n, value), name)
+
+    def sync_picked(self):
+        """The picked source's rows show its turn and centre point."""
+        got = self.picked_source()
+        if not got:
+            return
+        t, n, count = got
+        self.picked_title.config(text=tr("panel_custom.ripples_picked", n=n + 1, count=count))
+        turns = t["ripples"].get("turns") or []
+        own = turns[n] if n < len(turns) else None
+        self.picked_turn_box.current(0 if own is None else 1 if own == OTHER else 2)
+        e, var = self.picked_boxes["turn"]
+        var.set(fmt(source_turn(t["ripples"], n)))
+        e.config(state="normal" if own not in (None, OTHER) else "disabled", style="TEntry")
+        to_uv = frame_to_uv(t["pts"])
+        uv = to_uv(*handle_spots(t)[n]) if to_uv else (0.5, 0.5)
+        for key, x in zip(("u", "v"), uv):
+            e, var = self.picked_boxes[key]
+            var.set(fmt(round(x * 100, 4)))
+            e.config(style="TEntry")
+
+    def on_picked_way(self, way):
+        """Turn Same as all / Other way / Own picked for the picked source (Own starts at the turn it has now)."""
+        got = self.picked_source()
+        if self._loading or not got:
+            return
+        t, n, _ = got
+        value = {"same": None, "other": OTHER}.get(way, source_turn(t["ripples"], n))
+        self.set_source(n, "turns", value, tr("panel_custom.ripples_picked_turn"))
+
+    def on_picked_box(self, key, left=False):
+        """The picked source's Turn or Centre u / v box entered (left: only left, nothing unless changed)."""
+        e, var = self.picked_boxes[key]
+        got = self.picked_source()
+        if self._loading or not got or left and unchanged(e):
+            return
+        t, n, _ = got
+        lo, hi, _ = PICKED_LIMITS[key]
+        try:
+            x = calc(var.get())
+            if not lo <= x <= hi:
+                raise ValueError
+        except (ValueError, ZeroDivisionError):
+            bad(e)
+            return
+        good(e)
+        if key == "turn":
+            return self.set_source(n, "turns", float(x), tr("panel_custom.ripples_picked_turn"))
+        to_uv = frame_to_uv(t["pts"])
+        if not to_uv:
+            return
+        uv = list(to_uv(*handle_spots(t)[n]))  # (a sliced piece's too: kept in its own box, sliced.source)
+        uv["uv".index(key)] = x / 100
+        self.set_source(n, "at", [round(w, 6) for w in uv], tr("panel_custom.ripples_picked_centre"))
 
     def sync_ripples(self, t):
         """The Ripples rows show t's settings (the first target's)."""
@@ -104,13 +228,17 @@ class RipplesPanel:
         for key, var in self.ripples_ticks.items():
             var.set(bool(cfg.get(key, RIPPLES_DEFAULTS[key])))
         self.ripples_inside_box.current(INSIDES.index(cfg.get("inside", "rings")))
+        self.sync_picked()
         self._loading = False
 
     def ripples_row_states(self, t, on):
         """{row: shown} for sync_custom's show_custom_rows (on: Ripples is the Inside fill shown); the warning only
-        while t (a placed shape) has nothing drawn inside its outline."""
+        while t (a placed shape) has nothing drawn inside its outline, the picked source's rows only while one is
+        picked."""
         warn = on and t is not self.custom_defaults and not ripple_rings(t, self.ppq)
-        return {w: on and (w is not self.ripples_warn or warn) for w in self.ripples_rows}
+        picked = on and self.picked_source() is not None
+        return {w: on and (w is not self.ripples_warn or warn) and (w not in self.picked_rows or picked)
+                for w in self.ripples_rows}
 
     def ripples_targets(self):
         return [t for t in self.custom_targets() if ripples_on(t)]

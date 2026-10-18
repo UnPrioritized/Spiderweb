@@ -21,7 +21,7 @@ import math
 
 import numpy as np
 
-from notes.custom import frame_to_bp, frame_to_uv
+from notes.custom import CENTRE_KEYS, frame_to_bp, frame_to_uv, moved_at
 from notes.paths import dedupe, dot_segment_notes, path_notes
 
 # what makes a line kind's path (besides its points): changed = no longer the piece it was (end_dot too: "Last note"
@@ -304,11 +304,11 @@ def source(sh):
     if sh["kind"] == "custom":
         same_gate = cut.get("gate") is not None and close(velocity(sh, GATE), cut["gate"])
         src.update(velocity(cut["whole"] if same_gate else sh, GATE))
-        for key in ("nested", "tiles"):  # (Nested's / Tiles' centre point kept in the piece's box: the same spot
-            at = (src.get(key) or {}).get("at")  # in the whole's, which the notes are made from)
-            to_uv = frame_to_uv(src["pts"]) if at else None
-            if to_uv:
-                src[key] = dict(src[key], at=list(to_uv(*frame_to_bp(sh["pts"])(*at))))
+        for key in CENTRE_KEYS:  # (Nested's / Tiles' / Ripples' centre points kept in the piece's box: the same
+            to_uv = frame_to_uv(src["pts"]) if (src.get(key) or {}).get("at") else None  # spots in the whole's,
+            if to_uv:  # which the notes are made from)
+                to_bp = frame_to_bp(sh["pts"])
+                src[key] = moved_at(src[key], lambda u, v: to_uv(*to_bp(u, v)))
     return src, cut["part"], same_vel
 
 

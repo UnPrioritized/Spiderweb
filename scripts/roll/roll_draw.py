@@ -1445,10 +1445,11 @@ class RollDrawing:
             self.create_line(*[v for b, p in path for v in (self.t2x(b), self.p2y(p))], fill=color,
                              width=max(4, round(4 * self.scale)), capstyle="round", joinstyle="round")
 
-    def centre_mark(self):
-        """The Nested / Tiles centre point's picture: a ring with a cross on a white edge, built pixel by pixel so it
-        is the same on every side (Tk's lines and ovals land a pixel off from each other). Kept per scale + colours."""
-        s, fill, line = self.scale, look.HANDLE_FILL, look.HANDLE
+    def centre_mark(self, line=None):
+        """The Nested / Tiles / Ripples centre point's picture: a ring with a cross on a white edge, built pixel by
+        pixel so it is the same on every side (Tk's lines and ovals land a pixel off from each other). Kept per scale +
+        colours. line: its colour (the picked Ripples source's: PART_COLOR)."""
+        s, fill, line = self.scale, look.HANDLE_FILL, line or look.HANDLE
         marks = self.__dict__.setdefault("_centre_marks", {})
         if (s, fill, line) in marks:
             return marks[s, fill, line]
@@ -1510,6 +1511,10 @@ class RollDrawing:
                     continue
                 if kind == "centre":  # Nested's centre point: a ring with a cross, on a white edge
                     self.create_image(round(x), round(y), image=self.centre_mark())
+                    continue
+                if kind == "ripple":  # a Ripples source's centre point: the same, the picked one coloured
+                    picked = i[1] == self.app.ripple_pick
+                    self.create_image(round(x), round(y), image=self.centre_mark(PART_COLOR if picked else None))
                     continue
                 if kind != "start":
                     color = colors.get(i[1:3], HANDLE_COLOR)

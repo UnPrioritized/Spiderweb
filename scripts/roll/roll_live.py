@@ -7,14 +7,16 @@ curve stroke with its anchors / handles (bezier.py, like the Curve shape). The s
 import copy
 import json
 import math
+import tkinter as tk
 
 from files.lang import tr
 from notes.bezier import (add_anchor, can_delete, delete_point, drag_point, half_at, handle_lines, nearest, pen_handles,
                           set_symmetry)
 from notes.custom import (add_stroke, box_frame, carried_spots, carry_areas, custom_settings, frame_to_bp, frame_to_uv,
-                          map_stroke, new_live_shape, plain_stroke, refit, settled_areas, stroke_bp,
+                          has_ripples, map_stroke, new_live_shape, plain_stroke, refit, settled_areas, stroke_bp,
                           stroke_ends, stroke_points, uv_k)
 from notes.nested import centre_key, handle_bp, reset_centre, set_centre, uses_centre
+from notes.ripples import OTHER, handle_spots, set_source
 from notes.pattern import has_formula
 from notes.polygon import polygon_aspect, polygon_strokes
 from roll.roll_funnel import seg_dist
@@ -232,6 +234,8 @@ class LiveDrawing:
             out += [(*to_bp(*st["pts"][j]), (kind, j), True) for j, kind in pen_handles(st["pts"]) if kind != "end"]
         if uses_centre(sh):  # Nested / Tiles: the centre point ("centre",), any tool (nested.py)
             out.append((*handle_bp(sh, self.app.ppq), ("centre",), True))
+        if has_ripples(sh):  # Ripples: each source's centre point ("ripple", n), any tool (ripples.py)
+            out += [(b, p, ("ripple", n), True) for n, (b, p) in enumerate(handle_spots(sh))]
         return out
 
     def drag_stroke_point(self, sh, hid, e):
@@ -298,6 +302,11 @@ class LiveDrawing:
             if to_uv:
                 set_centre(sh, *to_uv(*self.event_pt(e)))
             return hid
+        if hid[0] == "ripple":  # a Ripples source's centre point: the same, one per source
+            to_uv = frame_to_uv(sh["pts"])
+            if to_uv:
+                set_source(sh, "at", hid[1], [round(x, 6) for x in to_uv(*self.event_pt(e))])
+            return hid
         old = self.before_edit(sh)
         if hid[0] == "pt":
             hid = self.drag_stroke_point(sh, hid, e)
@@ -319,6 +328,29 @@ class LiveDrawing:
             self.app.push_undo(name=tr("roll_live.reset_the_centre_point"))
             reset_centre(sh)
             self.app.shape_edited()
+
+    def ripple_menu(self, sh, n, e):
+        """Right-click on a Ripples source's centre point: it's picked, and a menu for it (each item one undo step,
+        greyed when it would change nothing)."""
+        app = self.app
+        app.pick_source(n)
+        cfg = sh["ripples"]
+        at, turns = cfg.get("at") or [], cfg.get("turns") or []
+        own_at = n < len(at) and at[n] is not None
+        own = turns[n] if n < len(turns) else None
+        # Turn the other way: Turn's way flipped; an own turn of x: -x
+        other = OTHER if own is None else None if own == OTHER else -own
+        m = tk.Menu(self, tearoff=0)
+        for text, key, value, on in (("ripples_back", "at", None, own_at),
+                                     ("ripples_other_way", "turns", other, own != OTHER and other != own),
+                                     ("ripples_like_others", "turns", None, own is not None)):
+            m.add_command(label=tr("panel_custom." + text), state="normal" if on else "disabled",
+                          command=lambda text=text, key=key, value=value: app.set_source(n, key, value,
+                                                                                         tr("panel_custom." + text)))
+        try:
+            m.tk_popup(e.x_root, e.y_root)
+        finally:
+            m.grab_release()
 
     def delete_stroke_handle(self, sh, hid):
         """Right-click on the picked curve stroke's anchor (removed) or handle (pulled back in)."""

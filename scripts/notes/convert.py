@@ -15,8 +15,8 @@ import math
 
 from files.lang import tr
 from notes.bezier import anchor_count
-from notes.custom import (CUSTOM_FLAGS, add_stroke, cycle_effect,custom_strokes, drawn_view, frame_to_bp, frame_to_uv,
-                          new_live_shape, stroke_bp)
+from notes.custom import (CENTRE_KEYS, CUSTOM_FLAGS, add_stroke, cycle_effect,custom_strokes, drawn_view, frame_to_bp,
+                          frame_to_uv, moved_at, new_live_shape, stroke_bp)
 from notes.hzbass import left_edge, shifted_hz
 from notes.joined import is_joined, join_velocity
 from notes.tumour import LINE_KINDS
@@ -158,10 +158,10 @@ def to_live(shapes, paths, defaults, custom_defaults, k=None):
                   if to_bp]
     if areas:
         new["areas"] = areas
-    for key in ("nested", "tiles"):  # (Nested's / Tiles' centre point: on the same spot)
-        at = (new.get(key) or {}).get("at")
-        if at and first and to_uv:
-            new[key]["at"] = [round(x, 6) for x in to_uv(*frame_to_bp(first["pts"])(*at))]
+    for key in CENTRE_KEYS:  # (Nested's / Tiles' / Ripples' centre points: on the same spots)
+        if new.get(key) and first and to_uv:
+            to_bp = frame_to_bp(first["pts"])
+            new[key] = moved_at(new[key], lambda u, v: [round(x, 6) for x in to_uv(*to_bp(u, v))])
     new["from"] = {"shapes": json.loads(json.dumps(shapes)), "strokes": json.loads(json.dumps(new["strokes"])),
                    "pts": [list(p) for p in new["pts"]], "vel": velocities(new)}
     return new
