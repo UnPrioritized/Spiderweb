@@ -1,6 +1,6 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
-## Version 1.7.0
+## Version 1.6.1
 
 What's new:
 
