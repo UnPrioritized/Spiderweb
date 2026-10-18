@@ -41,8 +41,8 @@ def row_lines(w):
 
 
 def without_group(st):
-    """A copy of the stroke out of its group (pasted copies are strokes of their own)."""
-    lay = {k: v for k, v in (st.get("layer") or {}).items() if k != "group"}
+    """A copy of the stroke out of its group and its Mirror link (pasted copies are strokes of their own)."""
+    lay = {k: v for k, v in (st.get("layer") or {}).items() if k not in ("group", "mirror")}
     st = {k: v for k, v in st.items() if k != "layer"}
     return dict(st, layer=lay) if lay else st
 

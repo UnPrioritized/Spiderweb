@@ -60,6 +60,26 @@ def mirror_fns(mode):
     return {"h": [h], "v": [v], "both": [h, v, lambda u, w: (1 - u, 1 - w)]}.get(mode, [])
 
 
+def link_fns(link):
+    """The ways a Mirror link maps a point: [fn(u, v) -> (u, v)], across the link's own middle "at" (the board's
+    middle until its strokes are moved together)."""
+    cu, cv = link["at"]
+    h, v = (lambda u, w: (2 * cu - u, w)), (lambda u, w: (u, 2 * cv - w))
+    return {"h": [h], "v": [v], "both": [h, v, lambda u, w: (2 * cu - u, 2 * cv - w)]}.get(link["ways"], [])
+
+
+def point_role(st, j):
+    """What point j of a stroke is, so only alike points pair up across the mirror: an end / anchor / corner (0), a
+    curve's handle out (1) or in (2), an arc's middle."""
+    if st["kind"] == "curve":
+        return j % 3
+    return "mid" if st["kind"] == "arc" and j == 1 else 0
+
+
+def spot(p):
+    return round(p[0], 6), round(p[1], 6)
+
+
 def seg_dist(p, a, b):
     """How far point p is from the piece a-b."""
     dx, dy = b[0] - a[0], b[1] - a[1]
@@ -594,6 +614,12 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
                     skip.add(a)
         elif drag and drag[0] in ("pen", "corner"):
             skip.add(drag[1])
+        for a, b in self.mirror_moving():  # (and their mirrored partners, which move too)
+            st = self.strokes[a]
+            if b is not None and st["kind"] == "poly" and not has_formula(st) and not st.get("smooth"):
+                skip_pts.add((a, b))
+            else:
+                skip.add(a)
         draft = self.draft
         if draft and draft["kind"] == "poly" and self.tool.get() == "poly":
             extra_pts = draft["pts"][:-2]
@@ -678,7 +704,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
         stick, or None (nothing in reach). Their points stick to the other strokes' points / crossings / lines, and
         their LINES too (user): a stroke's point onto one, or one resting on a stroke's line (sticky.touch_line).
         Several moved together (a select box, user): the nearest touch of any of them wins (stuck_stroke = which)."""
-        targets, view, best = self.stick_targets(frozenset(moving)), self.stick_view(), None
+        partners = {k for k, _ in self.mirror_moving()}  # (they move too, the other way)
+        targets, view, best = self.stick_targets(frozenset(moving) | frozenset(partners)), self.stick_view(), None
         k, ox, oy = view
         two_best = None
         reach = REACH * self.scale / k
@@ -787,6 +814,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
         new = [st] + self.mirrored(st)
         if len(new) > 1:  # (halves meeting on the mirror line: one line, user)
             new = join_strokes(new)
+        if self.mirror_mode() != "off":  # linked: edits on one are done mirrored on the others (user)
+            new = self.linked(new)
         self.strokes += new
         if st["kind"] == "curve":
             self.deselect()
@@ -929,6 +958,116 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
         if mode in ("v", "both") and abs(v - 0.5) * k < REACH:
             v = 0.5
         return [u, v]
+
+    def linked(self, new):
+        """A new stroke and its mirrored copies (in place) given one Mirror link: st["layer"]["mirror"]."""
+        ids = [(self.layer(i).get("mirror") or {}).get("id", 0) for i in range(len(self.strokes))]
+        link = {"id": max(ids, default=0) + 1, "ways": self.mirror_mode()}
+        for st in new:
+            st["layer"] = dict(st.get("layer") or {}, mirror=dict(link, at=[0.5, 0.5]))
+        return new
+
+    def link_of(self, i):
+        return self.layer(i).get("mirror")
+
+    def plan_mirror(self):
+        """At a drag's start (strokes not changed yet): how what it changes reaches the strokes linked by Mirror.
+        Returns (entries, whole): entries = [(stroke, point or None for a circle's box, link, [(fn, stroke, point)],
+        (u, v) kept on the mirror line, box before)], the grabbed stroke first; whole = links whose strokes are all
+        moved together (their mirror line goes along instead)."""
+        if self.mirror_mode() == "off":
+            return [], set()
+        d = self.drag
+        if d[0] == "points":
+            direct = [a for a, _ in d[1]]
+            lead = self.sel
+        elif d[0] == "stroke":
+            direct, lead = list(d[2]), d[4]
+        else:
+            direct, lead = [d[1]], d[1]
+        direct = sorted(set(direct), key=lambda i: (i != lead, i))
+        groups = {}
+        for i, st in enumerate(self.strokes):
+            link = self.link_of(i)
+            if link:
+                groups.setdefault(link["id"], []).append(i)
+        whole = {g for g, ks in groups.items() if d[0] == "stroke" and set(ks) <= set(direct)}
+        entries = []
+        for i in direct:
+            link = self.link_of(i)
+            if not link or link["id"] in whole:
+                continue
+            members, fns = groups[link["id"]], link_fns(link)
+            st = self.strokes[i]
+            if st["kind"] == "ellipse":
+                box = list(st["box"])
+                targets, own, (cu, cv) = [], [False, False], link["at"]
+                for fn in fns:
+                    m, test = self.map_stroke(st, fn, exact=True)["box"], fn(cu + 1, cv + 1)
+                    for k in members:
+                        o = self.strokes[k]
+                        if o["kind"] == "ellipse" and all(abs(a - b) < 1e-6 for a, b in zip(m, o["box"])):
+                            if k != i:
+                                targets.append((fn, k, None))
+                            else:  # (lying across the line: it stays even on both sides)
+                                own = [own[0] or test[0] != cu + 1, own[1] or test[1] != cv + 1]
+                entries.append((i, None, link, targets, own, box))
+                continue
+            index = {}
+            for k in members:
+                o = self.strokes[k]
+                for m, p in enumerate(o.get("pts", [])):
+                    index.setdefault((spot(p), point_role(o, m)), []).append((k, m))
+            cu, cv = link["at"]
+            for j, q in enumerate(st["pts"]):
+                role = point_role(st, j)
+                found = [(fn, k, m) for fn in fns for k, m in index.get((spot(fn(*q)), role), [])]
+                targets = [t for t in found if t[1:] != (i, j)]
+                # a joint on the mirror line (an end / corner, or a point that is its own mirror) stays on it, so
+                # the halves stay joined; a handle there may leave it (its partner goes the other way)
+                joint = role == 0 or len(targets) < len(found)
+                keep = (joint and link["ways"] != "v" and abs(q[0] - cu) < 1e-6,
+                        joint and link["ways"] != "h" and abs(q[1] - cv) < 1e-6)
+                entries.append((i, j, link, targets, keep, None))
+        return entries, whole
+
+    def mirror_moving(self):
+        """The (stroke, point or None) the drag held now moves on the mirrored side (none before it has moved)."""
+        plan = getattr(self, "mplan", None)
+        if not self.drag or not plan or plan[0] is not self.drag:
+            return set()
+        return {(k, m) for *_, targets, _, _ in plan[1] for _, k, m in targets}
+
+    def mirror_drag(self, entries):
+        """A drag's changes done mirrored on the linked strokes (plan_mirror), the grabbed stroke's first: a point on
+        the mirror line stays on it, a circle lying across it stays even on both sides."""
+        done = set()
+        for i, j, link, targets, keep, box in entries:
+            if (i, j) in done:
+                continue
+            done.add((i, j))
+            st, (cu, cv) = self.strokes[i], link["at"]
+            if j is None:
+                b = st["box"]
+                for axis, c in ((0, cu), (1, cv)):
+                    if keep[axis]:
+                        lo, hi = axis, axis + 2  # (the side the mouse moved sets how wide)
+                        r = abs((b[lo] if abs(b[lo] - box[lo]) > abs(b[hi] - box[hi]) else b[hi]) - c)
+                        b[lo], b[hi] = c - r, c + r
+                for fn, k, _ in targets:
+                    if (k, None) not in done:
+                        done.add((k, None))
+                        self.strokes[k] = dict(self.strokes[k], box=self.map_stroke(st, fn, exact=True)["box"])
+                continue
+            p = st["pts"][j]
+            if keep[0]:
+                p[0] = cu
+            if keep[1]:
+                p[1] = cv
+            for fn, k, m in targets:
+                if (k, m) not in done:
+                    done.add((k, m))
+                    self.strokes[k]["pts"][m] = list(fn(*p))
 
     def mirror_side(self, u, v):
         """Where the board shows the mirrored side (faint grey): [u, v] -> bool (numpy arrays work too)."""

@@ -248,6 +248,9 @@ class DrawerMouse:
             self.drag = self.drag[:3] + (e.x, e.y) + self.drag[5:]
             return self.redraw()
         old = self.areas and json.dumps(self.shown())  # (coloured areas keep their colours: carry_areas)
+        if getattr(self, "mplan", (None,))[0] is not self.drag:  # (worked out on the drag's first move)
+            self.mplan = (self.drag, *self.plan_mirror())
+        _, mirror, whole = self.mplan
         if kind == "points":
             pt = self.event_pt(e)
             for a, b in self.drag[1]:
@@ -286,8 +289,12 @@ class DrawerMouse:
                     st["box"] = [exact(u0 + du), exact(v0 + dv), exact(u1 + du), exact(v1 + dv)]
                 else:
                     st["pts"] = [[exact(u + du), exact(v + dv)] for u, v in st["pts"]]
+                link = (st.get("layer") or {}).get("mirror")
+                if link and link["id"] in whole:  # (all its mirrored strokes moved: their mirror line goes along)
+                    link["at"] = [exact(link["at"][0] + du), exact(link["at"][1] + dv)]
                 self.strokes[i] = st
             self.boxes = [[u0 + du, v0 + dv, u1 + du, v1 + dv] for u0, v0, u1, v1 in json.loads(boxes)]
+        self.mirror_drag(mirror)
         if old and old != json.dumps(self.shown()):
             frame = AREA_FRAME
             self.areas = carry_areas({"strokes": json.loads(old), "pts": frame, "areas": self.areas},
