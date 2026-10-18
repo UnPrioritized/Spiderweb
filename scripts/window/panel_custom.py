@@ -18,6 +18,7 @@ from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
 from notes.hzbass import AUTO, all_tones, auto_picks, each_layer, hz_gate, layers_of, shortest_gate
 from window.hz_window import open_hz
 from window.panel_nested import nested_on
+from window.panel_ripples import ripples_on
 from window.panel_tiles import tiles_on
 from window.range_window import open_range_graph
 from window.widgets import (Scrub, Tooltip, bad, good, grid_shown, leave_box, line_up, name_list, set_names, unchanged,
@@ -33,9 +34,10 @@ FILL_CHOICES = [
     ("outline_spam", tr("panel_custom.outline_spam"), tr("panel_custom.just_the_outline_chopped_into_notes")),
     ("nested", tr("panel_custom.nested"), tr("panel_custom.nested_tip")),  # (a Fill / Spam with sh["nested"])
     ("tiles", tr("panel_custom.tiles"), tr("panel_custom.tiles_tip")),  # (a Fill / Spam with sh["tiles"])
+    ("ripples", tr("panel_custom.ripples"), tr("panel_custom.ripples_tip")),  # (a Fill / Spam with sh["ripples"])
 ]
-APART_FILLS = ("fill", "spam", "nested", "tiles")  # the choices with a Normal / Outline dropdown beside them
-PATTERN_FILLS = ("nested", "tiles")  # (shown in the panel, not stored as sh["fill"])
+APART_FILLS = ("fill", "spam", "nested", "tiles", "ripples")  # the choices with a Normal / Outline dropdown beside them
+PATTERN_FILLS = ("nested", "tiles", "ripples")  # (shown in the panel, not stored as sh["fill"]: sh[that name])
 CUSTOM_NAMES = {"fill": tr("panel_custom.inside_fill"), "gate": tr("panel_custom.spam_gate"),
                 "align": tr("panel_custom.spam_start"), "ends": tr("panel_custom.spam_ends"),
                 "union": tr("panel_custom.overlaps_cancel_out"),
@@ -119,6 +121,7 @@ class CustomPanel:
         self.custom_rows, self._custom_shown = [], None
         self._build_nested(opts)  # (Nested / Tiles: their own rows first, panel_nested.py / panel_tiles.py)
         self._build_tiles(opts)
+        self._build_ripples(opts)
         # with "Outline" and areas coloured in the drawer: where two colours meet is outline too
         self.borders_var = tk.BooleanVar(value=False)
         self.borders_box = ttk.Checkbutton(opts, text=tr("panel_custom.borders"), variable=self.borders_var,
@@ -190,7 +193,7 @@ class CustomPanel:
             b.pack(side="left", padx=(4, 0))
             Tooltip(b, tip)
             self.align_buttons.append(b)
-        line_up(self.nested_table + self.tiles_table, labels=[g, e, a])
+        line_up(self.nested_table + self.tiles_table + self.ripples_table, labels=[g, e, a])
         # the smallest outline gate (custom.grow_inward): thin outline notes grow into the inside
         o = self.edge_row = ttk.Frame(opts)
         self.custom_rows.append((o, dict(anchor="w", padx=(20, 0), pady=(1, 0))))
@@ -349,9 +352,10 @@ class CustomPanel:
             name, tpl = self.custom_shape, self.custom_template(self.custom_shape)
             gaps = len(open_paths(tpl[0])) if tpl else 0
         fill, gate = tgts[0]["fill"], tgts[0]["gate"]
-        # (Nested / Tiles = a Fill / Spam with its steps / tiles)
+        # (Nested / Tiles / Ripples = a Fill / Spam with its steps / tiles / rings)
         # (never for text or the Hz bass tool: their shapes don't take them, even when new shapes have one)
-        shown = fill if text else "nested" if nested_on(tgts[0]) else "tiles" if tiles_on(tgts[0]) else fill
+        shown = (fill if text else "nested" if nested_on(tgts[0]) else "tiles" if tiles_on(tgts[0])
+                 else "ripples" if ripples_on(tgts[0]) else fill)
         missing = placed and not text and self.not_in_library(tgts[0])  # (no shape picker: nothing to miss)
         self.custom_combo.config(style="Missing.TCombobox" if missing else "TCombobox")
         if missing and not self.missing_note.winfo_manager():
@@ -392,6 +396,7 @@ class CustomPanel:
                 grid_shown(self.fill_buttons[value], not hz and not (value in PATTERN_FILLS and text))
         self.sync_nested(tgts[0])
         self.sync_tiles(tgts[0])
+        self.sync_ripples(tgts[0])
         ranged = spam and not hz and bool(rg)  # (Range: its own grid from the shape's left edge, so no ends / start)
         for b in self.align_buttons:  # (stretched gates fill each key exactly: where they start doesn't matter)
             b.config(state="normal" if spam and not hz and ends != "stretch" else "disabled")
@@ -430,6 +435,7 @@ class CustomPanel:
                 and self.coloured_areas(tgts, placed, name)}
         rows.update(self.nested_row_states(tgts[0], shown == "nested"))
         rows.update(self.tiles_row_states(tgts[0], shown == "tiles"))
+        rows.update(self.ripples_row_states(tgts[0], shown == "ripples"))
         self.show_custom_rows({w for w, on in rows.items() if on})
         if not placed and live:
             info = tr("panel_custom.live_shape_what_you_draw_goes")
@@ -513,12 +519,15 @@ class CustomPanel:
             return self.pick_tiles()
         if key == "fill" and value == "nested":  # (a Fill / Spam with its steps: panel_nested.py)
             return self.pick_nested()
+        if key == "fill" and value == "ripples":  # (a Fill / Spam with its rings: panel_ripples.py)
+            return self.pick_ripples()
         tgts = self.custom_targets()
 
         def same(ts):
             return all(abs(t[key] - value) < 1e-12 if key == "gate" else abs(t.get(key, 0) - value) < 1e-12
                        if key == "edge" else bool(t.get(key)) == value if key in CUSTOM_FLAGS
-                       else t.get(key) == value and not (key == "fill" and (nested_on(t) or tiles_on(t))) for t in ts)
+                       else t.get(key) == value and not (key == "fill" and (nested_on(t) or tiles_on(t) or ripples_on(t)))
+                       for t in ts)
 
         if same(tgts):  # (nothing to change: no Hz bass warning either)
             return self.sync_custom()
@@ -533,9 +542,9 @@ class CustomPanel:
             self.push_undo(name=CUSTOM_NAMES.get(key, key))
         for t in tgts:
             t[key] = value
-            if key == "fill":  # (another Inside fill picked: no Nested steps any more)
-                t.pop("nested", None)
-                t.pop("tiles", None)
+            if key == "fill":  # (another Inside fill picked: no Nested steps / tiles / rings any more)
+                for k in PATTERN_FILLS:
+                    t.pop(k, None)
             if key == "gate" and t.get("range"):  # (a new gate typed in the panel = one flat gate again, user;
                 t["range_kept"] = t.pop("range")  # kept for the Range window to bring back)
             if not value and (key in ("edge", "edge_mode") or key in CUSTOM_FLAGS and t is not self.custom_defaults):
@@ -710,8 +719,8 @@ class CustomPanel:
             return self.sync_hz_panels()
 
         def changed(t):
-            # (Nested / Tiles don't mix with Hz bass: switched on, they're taken off)
-            no_pattern = ("nested", "tiles") if hz else ()
+            # (Nested / Tiles / Ripples don't mix with Hz bass: switched on, they're taken off)
+            no_pattern = PATTERN_FILLS if hz else ()
             if t is self.custom_defaults:  # (shared with the Hz bass tool: new spam shapes keep their own gate and
                 rest = {k: v for k, v in t.items() if k not in ("hz", "before_hz") + no_pattern}  # Range, user)
                 return dict(rest, hz=dict(t.get("hz") or {"auto": AUTO}, bpm=float(bpm), **hz)) if hz else rest

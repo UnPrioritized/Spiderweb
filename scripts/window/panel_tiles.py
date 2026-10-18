@@ -152,7 +152,8 @@ class TilesPanel:
         def put(t):
             if t["fill"] not in ("fill", "spam"):
                 t["fill"] = "fill"
-            t.pop("nested", None)
+            t.pop("nested", None)  # (one Inside pattern at a time)
+            t.pop("ripples", None)
             if not t.get("tiles"):
                 t["tiles"] = copy.deepcopy(TILES_DEFAULTS)
 

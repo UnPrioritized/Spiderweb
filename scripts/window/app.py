@@ -46,6 +46,7 @@ from window.panel_mask import MaskPanel
 from window.panel_custom import CustomPanel
 from window.panel_nested import NestedPanel
 from window.panel_tiles import TilesPanel
+from window.panel_ripples import RipplesPanel
 from window.panel_freehand import FreehandPanel
 from window.panel_funnel import FunnelPanel
 from window.panel_pattern import PatternPanel
@@ -167,7 +168,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     return wanted, use10 or all16, rendered, slots
 
 
-class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, MaskPanel, PolygonPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
+class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, MaskPanel, PolygonPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
           Playback, Pictures, HistoryPanel, ScrollingSide, tk.Tk):
     def __init__(self, autosave=AUTOSAVE):
         super().__init__()
