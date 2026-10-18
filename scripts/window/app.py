@@ -17,7 +17,8 @@ import numpy as np
 
 from files.lang import size as lang_size, tr, trn
 from notes.areas import most_colours
-from notes.custom import ROUND, CUSTOM_DEFAULTS, capped_colours, custom_note_count, set_key_top, tracks_apart
+from notes.custom import (ROUND, CUSTOM_DEFAULTS, capped_colours, custom_note_count, has_pattern, set_key_top,
+                          tracks_apart)
 from window import big_ask, look
 from window.help import Tips, open_help
 from window.updates import Updates
@@ -160,11 +161,14 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     # (pinned tracks made with channel 10 skipped stay on their channels while it's used: mask.as_used)
     got = [(n, as_used(t, r, use10 or all16)) for (n, t), r in zip(got, rules)]
     # (with all16 the shapes use channel 10 too, but only as their 16th: render's "all"; in order: "order")
+    # (merged shapes and Nested / Tiles / Ripples fills take channels by colour number, not by which colour starts
+    # first: a flipped or moved copy keeps its colours, user)
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
                              pins, ("order" if order else "all") if all16 else use10, teams,
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
                              [is_sustained(sh) or sh.get("held") is True for sh in shapes],
-                             [colours_back(sh) for sh in shapes], [bool(sh.get("merge")) for sh in shapes], laps)
+                             [colours_back(sh) for sh in shapes],
+                             [bool(sh.get("merge")) or has_pattern(sh) for sh in shapes], laps)
     return wanted, use10 or all16, rendered, slots
 
 
