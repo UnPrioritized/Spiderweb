@@ -1,5 +1,11 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
+Version 1.7.0
+
+What's new:
+
+• Inside fill Ripples: rings grow out from the shapes you draw inside a custom shape's outline, each ring a bigger copy of its shape and a colour of its own. Where the rings of two shapes meet, the smaller one wins. Steps, Colours, Spacing, Turn for spirals, and Grow to. Without an outer outline, or with Cut at the outline unticked, the rings grow out freely. Each shape's centre point is a handle: drag it, or click it to give that shape its own turn and centre.
+
 Version 1.6.0
 
 What's new:
