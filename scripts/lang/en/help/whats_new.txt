@@ -10,6 +10,28 @@ What's new:
 
 • Slice tool: a flat line through pasted notes now cuts them into the notes above it and the rest. Only the notes within the line's length are lifted out.
 
+• Inside fills are now a dropdown, with a line before the patterns; fills that close gaps show in orange. Nested, Tiles and Ripples keep their settings when you pick another fill and come back.
+
+• Right-click menu: Turn into plain notes (the shape's notes become pasted notes you can Slice) and Fit box to drawing (the box hugs the drawing, the notes don't change).
+
+• Text: Direction (Piano roll, Player across, Player down) for falling-notes players, plus Letter turn and Flip letters. Right-click a text for Split into letters or Turn into custom shape. A new text's first note starts at the click.
+
+• Multi channel: New channels each Colours round (with Fill each round with empty tracks), and Channels 1-16 in order under Use channel 10. Merged shapes whose parts have their own Colours get Colours rounds too.
+
+• Settings → General → (Experimental) Domino 256 keys: for the 256 keys mod of Domino. Copy, Export and Paste keep keys above 127.
+
+• Copy and Export to Domino are much faster with many notes or tracks (they use several cores) and no longer ask past 4,096 tracks.
+
+• Drawer Mirror: mirrored strokes stay linked, so dragging, deleting, hiding, flipping, turning or colouring one changes its copies too. Ctrl+Shift drag changes one side only; the stroke menu has Unlink mirror and Mirror this stroke again.
+
+• Moving and resizing snap the notes to the grid, not the box.
+
+• Claw keeps only the longest note when notes land on the same key and tick. Strum goes up to 1000 bars.
+
+• Window: MIDI out is only in Settings → Sound, Settings opens on General, the Help button sits at the top right beside Settings, and the Overloaded warning is at the right end of the status line. The Project box's Channels rows can be folded. Help pages have headings and more pictures, and match the program again.
+
+• Fixes: flipped shapes mirror their notes exactly; outline tips and squares on a key edge no longer add stray notes; sliced pieces keep their notes and area colours when moved; turned or flipped texts no longer jump when retyped; Nested, Tiles and Ripples with Colours use every colour; the toolbar's Play button is no longer cut off in narrow windows; the mouse wheel on dropdowns works right after undo; MIDI export keeps the channel number of empty tracks.
+
 ## Version 1.6.0
 
 What's new:
