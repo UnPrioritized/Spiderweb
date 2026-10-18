@@ -10,7 +10,7 @@ import uuid
 import numpy as np
 
 from notes.bezier import anchor_count, sample, seg_point, segments, split
-from notes.custom import (CURVE_STEPS, frame_to_uv, notes_shape, refit, shape_areas, split_areas,
+from notes.custom import (CURVE_STEPS, filled_uv, frame_to_uv, has_areas, notes_shape, refit, shape_areas, split_areas,
                           stroke_points)
 from notes.gaterange import part_range
 from notes.pattern import has_formula
@@ -254,7 +254,7 @@ def slice_custom(sh, a, b, ppq):
     if np.hypot(*(b - a)) < EPS:
         return None
     polys = [stroke_points(st) for st in sh["strokes"]]
-    ss, cuts = [], {}
+    each, cuts, at = {}, {}, {}
     for n, (st, poly) in enumerate(zip(sh["strokes"], polys)):
         got = crossings(poly, a, b, whole_line=True)
         if any(s < -1e-6 or s > 1 + 1e-6 for _, s in got):
@@ -262,28 +262,56 @@ def slice_custom(sh, a, b, ppq):
         if st["kind"] == "curve" and exact(st):  # (where it really crosses: the halves keep the curve)
             cuts[n] = curve_cuts(st["pts"], a, b)
             got = [(pt, s) for _, pt, s in cuts[n]]
-        ss += [s for _, s in got]
-    if len(ss) < 2:
+        each[n] = [s for _, s in got]
+        for pt, s in got:  # (the cut lines end exactly where the pieces do: a hair's gap left Overlaps cancel out
+            at.setdefault(round(s, 9), [float(x) for x in pt])  # off filling nothing, its loops open)
+    if sum(map(len, each.values())) < 2:
         return None
-    ss = sorted(set(round(s, 9) for s in ss))
-    cut_lines = []
     amap = shape_areas(sh)
-    for s0, s1 in zip(ss, ss[1:]):
-        mid = a + (b - a) * (s0 + s1) / 2
-        if s1 - s0 <= 1e-9:
-            continue
-        line = {"kind": "poly", "pts": [list(a + (b - a) * s0), list(a + (b - a) * s1)]}
-        if inside(polys, mid):
-            cut_lines.append(line)
-        elif amap is not None and int(amap.cell([mid[0]], [mid[1]])[0]) not in (-1, amap.outside()):
-            # (a closed-in area even-odd leaves out: closed by a fill line, so its colour stays in it, user 2026-10-17;
-            # a plain line there doubled notes where the cut lines' ends meet)
-            cut_lines.append(dict(line, role="cut"))
+    groups = [list(range(len(polys)))]
+    if sh.get("union") and sh.get("fill") in ("fill", "spam") and not has_areas(sh):
+        # (Overlaps cancel out off: each closed stroke closed along the cut by lines of its own, so its pieces stay
+        # a loop like the whole's; one lid for all left the inner ones lines ending on a line = notes of their own)
+        groups = [[n] for n, p in enumerate(polys) if is_closed(p) and "role" not in sh["strokes"][n]]
+        rest = [n for n in range(len(polys)) if [n] not in groups]
+        groups += [rest] if rest else []
+    cut_lines = []
+    ss = sorted(set(round(s, 9) for got in each.values() for s in got))
+    for group in groups:
+        mine, last = [polys[n] for n in group], None
+        for s0, s1 in zip(ss, ss[1:]):
+            mid = a + (b - a) * (s0 + s1) / 2
+            if s1 - s0 <= 1e-9:
+                continue
+            line = {"kind": "poly", "pts": [list(at[s0]), list(at[s1])]}
+            if inside(mine, mid) or (len(groups) == 1 and sh.get("union")
+                                     and filled_uv(sh, [mid[0]], [mid[1]])[0]):
+                # (Overlaps cancel out off: the bands even-odd leaves out are filled too, so they need their edge)
+                pass
+            elif len(groups) == 1 and amap is not None and int(amap.cell([mid[0]], [mid[1]])[0]) not in (-1, amap.outside()):
+                # (a closed-in area even-odd leaves out: closed by a fill line, so its colour stays in it, user
+                # 2026-10-17; a plain line there doubled notes where the cut lines' ends meet)
+                line["role"] = "cut"
+            else:
+                last = None
+                continue
+            if last is not None and last.get("role") == line.get("role"):
+                # (one line on from the last: ends meeting doubled notes; a point at every crossing it passes, or
+                # the faces where other lines end on it got lost)
+                last["pts"].append(line["pts"][-1])
+            else:
+                cut_lines.append(line)
+                last = line
     halves = {1: [], -1: []}
     for n, (st, poly) in enumerate(zip(sh["strokes"], polys)):
         pieces = stroke_pieces(st, poly, a, b, [u for u, _, _ in cuts[n]] if n in cuts else None)
         keep = {k: st[k] for k in ("role", "colour") if k in st}
+        ends = np.array(list(at.values()), float).reshape(-1, 2)
         for piece in pieces:
+            for i in (0, -1):  # (a curve split at a crossing ends a hair off the point found: onto it)
+                d = np.hypot(*(ends - piece["pts"][i]).T)
+                if len(d) and d.min() < 1e-6:
+                    piece["pts"][i] = list(ends[int(np.argmin(d))])
             k = side(stroke_points(piece), a, b)
             if k:
                 halves[k].append(dict(keep, **piece))
