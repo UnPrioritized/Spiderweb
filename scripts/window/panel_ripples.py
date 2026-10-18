@@ -50,13 +50,14 @@ class RipplesPanel:
             row = ttk.Frame(opts)
             for n, (key, text, unit, lo, hi, steps, _, _) in enumerate(line):
                 lb = ttk.Label(row, text=tr("panel_custom." + text))
-                lb.grid(row=0, column=3 * n, sticky="w", padx=(12 if n else 0, 0))
+                lb.grid(row=0, column=3 * n, sticky="w", padx=(8 if n else 0, 0))
                 var = tk.StringVar()
                 e = ttk.Entry(row, textvariable=var, width=5)
                 e.grid(row=0, column=3 * n + 1, sticky="w", padx=4)
-                if unit:
+                if unit:  # (a lone box's unit may reach past the second column, like Nested's: no room taken)
                     ttk.Label(row, text=unit if unit == "%" else tr("panel_custom." + unit),
-                              foreground=look.HINT).grid(row=0, column=3 * n + 2, sticky="w")
+                              foreground=look.HINT).grid(row=0, column=3 * n + 2, sticky="w",
+                                                         columnspan=1 if len(line) > 1 or line[0][0] == "grow" else 4)
                 apply = (lambda left=False, key=key: self.on_ripples_box(key, left))
                 e.bind("<Return>", lambda ev, apply=apply: apply())
                 leave_box(self, e, var, apply)

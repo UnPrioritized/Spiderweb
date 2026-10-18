@@ -92,7 +92,7 @@ class NestedPanel:
                 self.nested_table.append(row)
             for n, (key, text, unit, lo, hi, steps, _, _) in enumerate(line):
                 lb = ttk.Label(row, text=tr("panel_custom." + text))
-                lb.grid(row=0, column=3 * n, sticky="w", padx=(12 if n else 0, 0))
+                lb.grid(row=0, column=3 * n, sticky="w", padx=(8 if n else 0, 0))
                 var = tk.StringVar()
                 e = ttk.Entry(row, textvariable=var, width=5)
                 e.grid(row=0, column=3 * n + 1, sticky="w", padx=4)

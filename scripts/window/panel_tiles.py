@@ -55,7 +55,7 @@ class TilesPanel:
             row = row_of()
             for n, (key, text, unit, lo, hi, steps, _) in enumerate(line):
                 lb = ttk.Label(row, text=tr("panel_custom." + text))
-                lb.grid(row=0, column=3 * n, sticky="w", padx=(12 if n else 0, 0))
+                lb.grid(row=0, column=3 * n, sticky="w", padx=(8 if n else 0, 0))
                 var = tk.StringVar()
                 e = ttk.Entry(row, textvariable=var, width=5)
                 e.grid(row=0, column=3 * n + 1, sticky="w", padx=4)
@@ -87,7 +87,7 @@ class TilesPanel:
                 by = ttk.Label(row, text=tr("panel_custom.tiles_by"))
                 by.grid(row=0, column=2, sticky="w")
                 box = ttk.Combobox(row, values=texts, state="readonly", width=DROP_WIDTH)
-                box.grid(row=0, column=3, columnspan=3, sticky="w", padx=(12, 0))
+                box.grid(row=0, column=3, columnspan=3, sticky="w", padx=(8, 0))
                 for w in (by, box):
                     Tooltip(w, tr("panel_custom.tiles_by_tip"))
             else:

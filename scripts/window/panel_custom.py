@@ -189,7 +189,7 @@ class CustomPanel:
         for value, text, tip in ALIGN_CHOICES:
             b = ttk.Radiobutton(choices, text=text, value=value, variable=self.align_var,
                                 command=lambda: self.set_custom("align", self.align_var.get()))
-            b.pack(side="left", padx=(4, 0))
+            b.pack(side="left", padx=(0 if self.align_buttons else 4, 0))  # (tight: room for the dark look's)
             Tooltip(b, tip)
             self.align_buttons.append(b)
         # the smallest outline gate (custom.grow_inward): thin outline notes grow into the inside
@@ -208,8 +208,11 @@ class CustomPanel:
         self.custom_rows.append((m, dict(anchor="w", pady=(1, 0))))
         self.edge_mode_box = ttk.Combobox(m, values=[t for _, t in EDGE_CHOICES], state="readonly", width=15)
         self.edge_mode_box.grid(row=0, column=1, sticky="w", padx=4)  # (under the Outline gate box)
-        # (one column for the boxes: Gate, Hz bass, Ends, Start, Outline gate and the Nested / Tiles / Ripples rows)
-        line_up(self.nested_table + self.tiles_table + self.ripples_table, labels=[g, h, e, a, o, m])
+        # one column for the boxes: Gate, Hz bass, Ends, Start, Outline gate and the Nested / Tiles / Ripples rows;
+        # the columns after it from each pattern's own rows (all three's widest together cut Tiles off)
+        for table in (self.nested_table, self.tiles_table, self.ripples_table):
+            line_up(table)
+        line_up([], labels=[g, h, e, a, o, m] + self.nested_table + self.tiles_table + self.ripples_table)
         self.edge_mode_box.bind("<<ComboboxSelected>>", lambda e: (self.set_custom(
             "edge_mode", EDGE_CHOICES[self.edge_mode_box.current()][0]), self.roll.focus_set()))
         Tooltip(self.edge_mode_box, tr("panel_custom.edge_mode_tip"))
