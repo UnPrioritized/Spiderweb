@@ -1,6 +1,6 @@
-In the Hz bass window, pressing the mouse places a note at once, and it follows the mouse until you let go. A note that is there moves the same way; drag either end to change its length. A new note is as long as the last one you clicked or resized. While you hold a note, its key sounds on the MIDI-out device.
+In the Hz bass window, with Pencil, pressing the mouse places a note at once, and it follows the mouse until you let go. A note that is there moves the same way; drag either end to change its length. A new note is as long as the last one you clicked or resized. While you hold a note, its key sounds on the MIDI-out device.
 
-Select (V) and Pencil (P) are at the top of the window; double right-click switches between the two. With Select, dragging on empty space draws a box that selects the notes it touches (Ctrl adds them); with Pencil, Ctrl+drag does it. The box snaps to the grid like on the piano roll.
+Select (V) and Pencil (P) are at the top of the window; double right-click switches between Select and the tool you used last (Pencil or a drawing tool). With Select, dragging on empty space draws a box that selects the notes it touches (Ctrl adds them); with Pencil, Ctrl+drag does it. The box snaps to the grid like on the piano roll.
 
 Drag the box's right side to make all its notes longer or shorter by the same amount (they keep their starts), or drag inside it to move them.
 

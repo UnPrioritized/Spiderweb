@@ -8,7 +8,7 @@ Right-click → Shape → Drop, Rise or Pluck gives a ready-made one (pitch: fal
 
 Changes faster than about half a beat at 120 BPM are hard to hear: the tone only changes once per wave. Volume sounds about the same in its top half (a rendered file is usually already as loud as it gets there), so a fade is heard mostly near 0 %.
 
-A line that plays once per note can have a sustain point, like a synth's envelope: right-click one of its points → Sustain here until the note ends (it turns into a diamond). The line plays up to that point, stays there for as long as the note lasts, and the rest of it (the fall) plays after the note ends.
+A line that plays once per note (with Stretch to each note unticked) can have a sustain point, like a synth's envelope: right-click one of its points → Sustain here until the note ends (it turns into a diamond). The line plays up to that point, stays there for as long as the note lasts, and the rest of it (the fall) plays after the note ends.
 [clip:hz_envelope-sustain]
 
 The note keeps sounding during the fall, even under the notes after it (both sound there, like a chord), unless a note of the same tone starts. A slide doesn't end the note.

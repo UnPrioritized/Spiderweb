@@ -1,3 +1,3 @@
 Hold the mouse button and draw.
 
-Straighten (panel, 0-100) makes it perfect: 0 = as you drew it, higher = straighter lines and smoother curves. A stroke that ends where it started becomes a perfect circle, ellipse, square, rectangle or triangle. The higher, the simpler (a slightly oval loop becomes an ellipse, then a circle). The stroke as drawn is kept, so change it any time. New strokes use the last number you picked.
+Straighten (panel, 0-100) makes it perfect: 0 = as you drew it, higher = straighter lines and smoother curves. A stroke that ends where it started becomes a perfect circle, ellipse, square, rectangle, triangle or another straight-sided shape (up to six sides). The higher, the simpler (a slightly oval loop becomes an ellipse, then a circle). The stroke as drawn is kept, so change it any time. New strokes use the last number you picked.

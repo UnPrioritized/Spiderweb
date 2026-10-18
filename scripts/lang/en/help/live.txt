@@ -4,6 +4,6 @@ While it's on, the selected shape's points show (purple squares): drag them with
 
 Select tool: click a stroke of the selected shape to pick it: Del deletes it, a curve shows its handles, a freehand stroke can be straightened. Ctrl+C / Ctrl+X / Ctrl+V, Ctrl+H / Ctrl+J and Ctrl+Left / Ctrl+Right copy, cut, paste, flip and turn just that stroke. Esc unpicks it: then they work on the whole shape again.
 
-A copied stroke is pasted into the selected custom shape, a grid step later and a key lower each time (nothing selected: into a new shape).
+A copied stroke is pasted into the selected custom shape, a grid step later (a quarter beat with Snap off) and a key lower each time (nothing selected: into a new shape).
 
 Right-click a stroke for its menu. It also has Formula for a line, polyline, arc or curve stroke (see Formulas), and saving the drawing to the shape library. Its "This stroke" part sets the stroke's role and outline colour, like the drawer's (see Drawer: Select and editing).

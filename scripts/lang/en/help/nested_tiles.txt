@@ -1,4 +1,4 @@
-Two Inside fills build a pattern out of your own shapes. Pick them under Inside in the side panel, like Fill and Spam.
+Two Inside fills build a pattern out of your own shapes. Pick them under Inside in the side panel, like Fill and Spam. Their settings (and Ripples') are kept when you pick another Inside fill, and come back when you pick them again.
 
 Both of them give each part its own colour, so set Channels to Multi channel to see them (a shape can have at most 15 colours, the outline and its own colour count too).
 

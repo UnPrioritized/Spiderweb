@@ -56,7 +56,7 @@ Smooth uses every whole-tick gate between the two. Steps lets the gate only halv
 
 Left to right (time): every key is cut at the same places, starting at the shape's left edge.
 
-With "Each key row by itself", every row instead runs the whole range along its own length, each piece of a row on its own. "Across gaps in a row" runs it across the gaps instead. A row too short for any note gets one note of the first gate.
+With "Each key row by itself" (Left to right only), every row instead runs the whole range along its own length, each piece of a row on its own. "Across gaps in a row" runs it across the gaps instead. A row too short for any note gets one note of the first gate.
 
 Low to high or Top to bottom (keys): each key gets its own gate. "Fit to the shape's edges" stretches or trims each row's first and last note so the notes reach exactly to the shape's edges, with no blank and nothing sticking out.
 

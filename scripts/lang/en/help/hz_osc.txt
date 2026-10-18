@@ -3,7 +3,7 @@ The OSC tab of the synth window sets the sound the way most synths do. Turn a kn
 
 The light on each box's header is lit while that box changes the sound. Click the light or the box's name to switch the box off (bypass): its name goes grey and it does nothing, but its knobs are kept, and you can still turn them; click again to switch it back on.
 
-Volume: Attack = how long the sound takes to get loud after you press a key, Decay = how long it then takes to drop to the Sustain level, Sustain = how loud it stays while you hold the key, Release = how long it fades out after you let go. Times are in beats. The picture under the knobs shows the envelope: the blue part is while the key is held, and a dot runs along it while a key sounds.
+Volume: Attack = how long the sound takes to get loud after you press a key, Decay = how long it then takes to drop to the Sustain level, Sustain = how loud it stays while you hold the key, Release = how long it fades out after you let go. Times are in beats. The picture under the knobs shows the envelope: the shaded part is while the key is held, and a dot runs along it while a key sounds.
 
 OSC A: the Waveform and how much of it is used (Shape), and Octave below (every other wave softer, so the tone an octave lower comes in); the picture shows two waves' notes, one bar each, as tall as it hits.
 
@@ -35,7 +35,7 @@ Tone:
 • Sweep makes one part of the shape's keys loud (Start) and can move it to End in Time after each note starts. Its On tick switches it on and off; turning one of its knobs ticks On too.
 • Key track moves it up for higher notes (down below 0), counted from the Hz bass's own tone.
 • Wah = loud and quiet stripes over the keys.
-The picture shows which keys are loud over time (darker = louder, the highest keys at the top).
+The picture shows which keys are loud over time (brighter = louder, the highest keys at the top).
 
 Character: Slant, Groups, Off pitch and Noisy make the keys hit at different spots of the wave, which changes the colour of the tone; the picture shows eight keys' notes over four waves. Height makes the drawn wave shape (Hz shape…) taller or shorter (100 % = as drawn, up to 400 % grows past the Hz bass onto more keys), Random gives every wave its own height, and Grows from picks the key row that stays put (Middle, Bottom or Top).
 
@@ -73,6 +73,6 @@ Moving an envelope's time speeds up or slows down the part that's playing. A lin
 • On the FX tab: Chorus Depth and Rate, Flanger Rate, Depth and Mix, Echo Time (each note's echoes are spaced by the Time at the moment that note plays) and Fade, Reverb Length (read as each note ends), Scatter and Level, Compressor Threshold, Ratio, Attack, Release and Gain.
 The FX tab's effects work on the whole sound, so an envelope, Velocity or Note moving them follows the newest note (as in many synths).
 
-Sweep and Shape move only while the Sweep is on and a waveform is picked. A knob moves only while it does something: Tremolo Depth needs a Tremolo Rate, Key track the Sweep, Blend 3 voices or more, Detune 2, a Mode's knob that Mode.
+Sweep moves only while the Sweep is on, and Shape only while a waveform is picked. A knob moves only while it does something: Tremolo Depth needs a Tremolo Rate, Key track the Sweep, Blend 3 voices or more, Detune 2, a Mode's knob that Mode.
 
 The Links list on the MOD tab shows every link: its source, the knob it moves, how far (Amount, below 0 = the other way) and Both ways (the knob swings below and above where it's set, instead of only going up from it). + Add link adds one; ✕ removes one.

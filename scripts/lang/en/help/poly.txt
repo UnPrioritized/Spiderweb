@@ -1,6 +1,6 @@
 Click point after point, or drag each piece. Double-click, right-click or Enter finishes it; Esc cancels.
 
-Selected polyline: drag its squares to move points; middle-click on it adds a point where it fits best.
+Selected polyline: drag its squares to move points; middle-click adds a point at the mouse, put in the line where it fits best.
 
 Last note (panel) works at every point: each piece is its own line.
 

@@ -1620,7 +1620,7 @@ class SynthKnobs:
                     False)
 
     def draw_tone(self, c):
-        """Which of the shape's keys are loud (the darker, the louder; the highest keys at the top) over a note's
+        """Which of the shape's keys are loud (the brighter, the louder; the highest keys at the top) over a note's
         start: the Sweep moving from Start to End (dashed line: Time), Wah's stripes."""
         v = self.pv
         w, h, pad = c.winfo_width(), c.winfo_height(), 6 * self.s
