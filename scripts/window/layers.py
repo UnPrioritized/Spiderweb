@@ -124,6 +124,10 @@ class DrawerLayers:
         (first drawn first), if it changes too. One undo step; strokes hidden go out of the picks; a group's
         strokes are put back together."""
         new = {}
+        for i, ch in list(changes.items()):  # (Mirror: a stroke hidden / locked takes its linked strokes along)
+            for k in self.with_partners([i]):
+                if k not in changes and {"hidden", "lock"} >= set(ch):
+                    changes[k] = ch
         for i, ch in changes.items():
             lay = dict(self.layer(i))
             for k, v in ch.items():

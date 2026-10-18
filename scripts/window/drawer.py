@@ -68,6 +68,19 @@ def link_fns(link):
     return {"h": [h], "v": [v], "both": [h, v, lambda u, w: (2 * cu - u, 2 * cv - w)]}.get(link["ways"], [])
 
 
+WAY_NAMES = {"h": ["h"], "v": ["v"], "both": ["h", "v", "hv"]}  # (mirror_fns' copies, in order)
+
+
+def way_fn(way, at):
+    """The mirror taking a stroke of one way to one of another (way = the letters they differ in), across at."""
+    cu, cv = at
+    return lambda u, w: (2 * cu - u if "h" in way else u, 2 * cv - w if "v" in way else w)
+
+
+def way_apart(a, b):
+    return "".join(c for c in "hv" if (c in a) != (c in b))
+
+
 def point_role(st, j):
     """What point j of a stroke is, so only alike points pair up across the mirror: an end / anchor / corner (0), a
     curve's handle out (1) or in (2), an arc's middle."""
@@ -811,11 +824,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
         if pts is not None:
             st = {"kind": "poly", "pts": pts}
         self.push_undo()
-        new = [st] + self.mirrored(st)
-        if len(new) > 1:  # (halves meeting on the mirror line: one line, user)
-            new = join_strokes(new)
-        if self.mirror_mode() != "off":  # linked: edits on one are done mirrored on the others (user)
-            new = self.linked(new)
+        new = self.with_copies(st)  # (linked: edits on one are done mirrored on the others, user)
         self.strokes += new
         if st["kind"] == "curve":
             self.deselect()
@@ -931,14 +940,18 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
             picked = names.index(self.mirror.get()) if self.mirror.get() in names else 0  # the box's text follows)
         return MIRRORS[picked]
 
-    def mirrored(self, st):
+    def mirrored(self, st, ways=None):
         """A new stroke's mirrored copies (Mirror; none that would lie on the stroke itself or on another copy).
-        Not rounded: a point stuck exactly on a line stays exactly on that line's mirrored copy."""
+        Not rounded: a point stuck exactly on a line stays exactly on that line's mirrored copy. ways: a dict that
+        gets {id(copy): its way, "h" / "v" / "hv"}."""
         out = []
-        for fn in mirror_fns(self.mirror_mode()):
+        mode = self.mirror_mode()
+        for fn, way in zip(mirror_fns(mode), WAY_NAMES.get(mode, [])):
             m = self.map_stroke(st, fn, exact=True)
             if not any(same_stroke(m, s) for s in [st] + out):
                 out.append(m)
+                if ways is not None:
+                    ways[id(m)] = way
         return out
 
     def mirror_lines(self):
@@ -959,12 +972,92 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
             v = 0.5
         return [u, v]
 
-    def linked(self, new):
-        """A new stroke and its mirrored copies (in place) given one Mirror link: st["layer"]["mirror"]."""
+    def linked(self, new, ways):
+        """A new stroke and its mirrored copies (in place) given one Mirror link: st["layer"]["mirror"] = {"id",
+        "ways" (the Mirror choice), "at" (mirrored across), "way": which copy it is ("" = the one drawn, "h", "v",
+        "hv"; none for a line joined with its copies)}."""
         ids = [(self.layer(i).get("mirror") or {}).get("id", 0) for i in range(len(self.strokes))]
         link = {"id": max(ids, default=0) + 1, "ways": self.mirror_mode()}
-        for st in new:
-            st["layer"] = dict(st.get("layer") or {}, mirror=dict(link, at=[0.5, 0.5]))
+        for st, way in zip(new, ways):
+            st["layer"] = dict(st.get("layer") or {}, mirror=dict(link, at=[0.5, 0.5], **(
+                {"way": way} if way is not None else {})))
+        return new
+
+    def mirror_mates(self, i):
+        """The strokes linked with stroke i by Mirror, i too ([i] when it has no link)."""
+        link = self.link_of(i)
+        if not link:
+            return [i]
+        return [k for k in range(len(self.strokes)) if (self.link_of(k) or {}).get("id") == link["id"]]
+
+    def with_partners(self, idx):
+        """idx and, while Mirror is on, every stroke linked with them (deleting / hiding one does the others)."""
+        if self.mirror_mode() == "off":
+            return list(idx)
+        return sorted({k for i in idx for k in self.mirror_mates(i)})
+
+    def mirror_from(self, leads):
+        """After a one-go edit (a menu, flip / turn, a formula) on strokes leads: the strokes linked with them made
+        their mirror images again, keeping their own layer data (a line joined with its copies: only its role and
+        colour)."""
+        if self.mirror_mode() == "off":
+            return
+        done = set(leads)
+        for i in leads:
+            link = self.link_of(i)
+            if not link:
+                continue
+            for k in self.mirror_mates(i):
+                if k in done:
+                    continue
+                done.add(k)
+                own, src = self.link_of(k), self.strokes[i]
+                if "way" in link and "way" in own:
+                    new = self.map_stroke(src, way_fn(way_apart(link["way"], own["way"]), link["at"]), exact=True)
+                else:
+                    new = {key: v for key, v in self.strokes[k].items() if key not in ("role", "colour")}
+                    new.update({key: src[key] for key in ("role", "colour") if key in src})
+                new.pop("layer", None)
+                self.strokes[k] = dict(new, layer=self.strokes[k]["layer"])
+
+    def unlink_mirror(self, i):
+        """Right-click "Unlink mirror": stroke i and the strokes linked with it are strokes of their own."""
+        self.push_undo()
+        for k in self.mirror_mates(i):
+            lay = {key: v for key, v in self.layer(k).items() if key != "mirror"}
+            st = {key: v for key, v in self.strokes[k].items() if key != "layer"}
+            self.strokes[k] = dict(st, layer=lay) if lay else st
+        self.changed(settle=False)
+
+    def mirror_again(self, i):
+        """Right-click "Mirror this stroke again": stroke i's linked copies (if any) replaced by new ones, as if it
+        was just drawn (also for strokes drawn before Mirror links, or with Mirror off)."""
+        self.push_undo()
+        self.keep_names()
+        st = {key: v for key, v in self.strokes[i].items() if key != "layer"}
+        lay = {key: v for key, v in self.layer(i).items() if key not in ("mirror", "name")}
+        others = [k for k in self.mirror_mates(i) if k != i]
+        new = self.with_copies(st)
+        for s in new:  # (in its group, hidden / locked like it; the first keeps its name)
+            s["layer"] = dict(lay, **s.get("layer", {}))
+        if self.layer(i).get("name"):
+            new[0]["layer"]["name"] = self.layer(i)["name"]
+        self.strokes[i] = new[0]  # (it stays where it is in the list, the copies on top like new strokes)
+        self.strokes += new[1:]
+        self.deselect()
+        self.remove_strokes(others, partners=False)
+        self.changed()
+
+    def with_copies(self, st):
+        """A stroke just drawn and its mirrored copies: halves meeting on the mirror line joined (user), all given
+        one Mirror link (while Mirror is on)."""
+        ways = {id(st): ""}
+        new = drawn = [st] + self.mirrored(st, ways)
+        if len(new) > 1:
+            new = join_strokes(new)
+        if self.mirror_mode() != "off":  # (a line joined with its copy: no way, it mirrors itself)
+            new = self.linked(new, [ways.get(id(s), next((ways[id(d)] for d in drawn if same_stroke(s, d)), None))
+                                    for s in new])
         return new
 
     def link_of(self, i):

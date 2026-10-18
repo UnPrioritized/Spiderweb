@@ -367,7 +367,13 @@ class DrawerHost(FormulaHost):
     def begin(self, name):
         self.drawer.push_undo()
 
+    def mirror(self):
+        d = self.drawer  # (Mirror: the strokes linked with it follow)
+        if d.sel is not None:
+            d.mirror_from([d.sel])
+
     def changed(self, final=True):
+        self.mirror()
         self.drawer.changed()
 
     def snapshot(self):
@@ -378,9 +384,11 @@ class DrawerHost(FormulaHost):
         # match the strokes put back, so nothing to settle)
         d.areas, d._settled = json.loads(snap[0])[1], None
         super().restore(snap[1])
+        self.mirror()
 
     def commit(self, snap, name):
         self.drawer.push_undo(snap[0])
+        self.mirror()
         self.drawer.changed()
 
 

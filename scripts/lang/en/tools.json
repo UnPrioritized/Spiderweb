@@ -251,6 +251,8 @@
  "drawer.add_anchor_here": "Add anchor here",
  "drawer.add_point_here": "Add point here",
  "drawer.delete_stroke": "Delete stroke",
+ "drawer.mirror_again": "Mirror this stroke again",
+ "drawer.unlink_mirror": "Unlink mirror",
  "drawer.del": "Del",
  "drawer.copy_stroke": "Copy stroke",
  "drawer.delete_strokes": "Delete {n} strokes",

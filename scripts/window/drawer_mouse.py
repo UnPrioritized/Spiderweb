@@ -121,9 +121,11 @@ class DrawerMouse:
     def deselect(self):
         self.sel, self.picks, self.boxes = None, set(), []
 
-    def remove_strokes(self, idx):
-        """Deletes those strokes; the selection keeps pointing at the same strokes (its boxes go if a selected
-        one is deleted)."""
+    def remove_strokes(self, idx, partners=True):
+        """Deletes those strokes (partners: and the strokes Mirror links with them); the selection keeps pointing at
+        the same strokes (its boxes go if a selected one is deleted)."""
+        if partners:
+            idx = self.with_partners(idx)
         if set(idx) & set(self.chosen()):
             self.boxes = []
         self.keep_names()  # (the others' names don't count along again)
@@ -196,7 +198,7 @@ class DrawerMouse:
 
     def select_press(self, e):
         r = max(7, 8 * self.scale)
-        ctrl = e.state & CTRL
+        ctrl = e.state & CTRL and not e.state & SHIFT  # (Ctrl+Shift: a drag on this side only, not Ctrl's picking)
         for i, j, u, v in self.handles():
             x, y = self.to_screen(u, v)
             if abs(x - e.x) <= r and abs(y - e.y) <= r and not ctrl:
@@ -294,7 +296,8 @@ class DrawerMouse:
                     link["at"] = [exact(link["at"][0] + du), exact(link["at"][1] + dv)]
                 self.strokes[i] = st
             self.boxes = [[u0 + du, v0 + dv, u1 + du, v1 + dv] for u0, v0, u1, v1 in json.loads(boxes)]
-        self.mirror_drag(mirror)
+        if not (e.state & CTRL and e.state & SHIFT):  # (Ctrl+Shift held: this side only)
+            self.mirror_drag(mirror)
         if old and old != json.dumps(self.shown()):
             frame = AREA_FRAME
             self.areas = carry_areas({"strokes": json.loads(old), "pts": frame, "areas": self.areas},
@@ -437,10 +440,19 @@ class DrawerMouse:
     def transform(self, idx, fn, turned=False):
         self.push_undo()
         going = self.carried_areas(idx)
+        whole = {i for i in idx if set(self.mirror_mates(i)) <= set(idx)}  # (all its linked strokes: the line goes too)
+        swap = {"h": "v", "v": "h", "hv": "hv", "": "", "both": "both"}
         for i in idx:
             self.strokes[i] = self.map_stroke(self.strokes[i], fn)
             if turned and self.strokes[i]["kind"] == "arc":  # still round (see arc.py)
                 self.strokes[i]["k"] = 1 / self.strokes[i].get("k", 1.0)
+            link = self.link_of(i)
+            if link and i in whole:
+                link = dict(link, at=list(fn(*link["at"])))
+                if turned:  # (a left / right mirror turned is a top / bottom one)
+                    link.update({key: swap[link[key]] for key in ("ways", "way") if key in link})
+                self.strokes[i]["layer"] = dict(self.layer(i), mirror=link)
+        self.mirror_from(idx)
         self.areas = [[*(round(x, 5) for x in fn(u, v)), c] if go else [u, v, c]
                       for (u, v, c), go in zip(self.areas, going)]
         boxes = []
@@ -702,6 +714,7 @@ class DrawerMouse:
             if what:
                 self.push_undo()
                 delete_point(st, j, self.to_xy, exact=True)
+                self.mirror_from([self.sel])
                 return self.changed()
         chosen = self.chosen()
         if chosen and self.in_boxes(e.x, e.y):  # inside the select box: what works on all of them
@@ -794,6 +807,12 @@ class DrawerMouse:
                       state="normal" if self.clipboard else "disabled")
         m.add_separator()
         self.layer_menu_items(m, [i])
+        if self.mirror_mode() != "off" or self.link_of(i):
+            m.add_separator()
+            m.add_command(label=tr("drawer.mirror_again"), command=lambda: self.mirror_again(i),
+                          state="normal" if self.mirror_mode() != "off" else "disabled")
+            m.add_command(label=tr("drawer.unlink_mirror"), command=lambda: self.unlink_mirror(i),
+                          state="normal" if self.link_of(i) else "disabled")
         self.add_flip_turn(m)
         try:
             m.tk_popup(e.x_root, e.y_root)
@@ -812,6 +831,7 @@ class DrawerMouse:
         before = self.snap()
         if add_anchor(st, seg, t, self.event_pt(e), self.to_xy, exact=True):
             self.push_undo(before)
+            self.mirror_from([self.sel])
             self.changed()
 
     def add_poly_point(self, i, e):
@@ -831,6 +851,7 @@ class DrawerMouse:
         k = min(range(len(pts) - 1), key=dist)
         self.push_undo()
         pts.insert(k + 1, pt)
+        self.mirror_from([i])
         self.changed()
 
     def set_curve_symmetry(self, i, mode, e):
@@ -839,6 +860,7 @@ class DrawerMouse:
             return
         self.push_undo()
         set_symmetry(st, mode, half_at(st["pts"], self.to_xy, e.x, e.y), self.to_xy, exact=True)
+        self.mirror_from([i])
         self.changed()
 
     def set_role(self, idx, role):
@@ -851,6 +873,7 @@ class DrawerMouse:
             st.pop("role", None)
             if role != "both":
                 st["role"] = role
+        self.mirror_from([i for i in idx if any(self.strokes[i] is s for s in sts)])
         self.changed()
 
     def set_stroke_colour(self, idx, colour):
@@ -865,6 +888,7 @@ class DrawerMouse:
             st.pop("colour", None)
             if colour:
                 st["colour"] = colour
+        self.mirror_from([i for i in idx if any(self.strokes[i] is s for s in sts)])
         self.changed()
 
     def delete_stroke(self, i):
