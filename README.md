@@ -15,7 +15,8 @@ Windows, nothing to install. Linux and Windows users can also [run it from sourc
 - **Draw** lines, polylines, freehand strokes, curves, arcs, circles, polygons, stars, funnels, text, and shapes you
   draw yourself.
 - **Fill** shapes with notes: one long note per key, or chopped into notes of any length (spam). Inside fills can be
-  smaller copies of the shape (Nested) or another shape repeated like wallpaper (Tiles).
+  smaller copies of the shape (Nested), another shape repeated like wallpaper (Tiles), or rings growing out from
+  shapes drawn inside (Ripples).
 - **Shape the notes:** add bumps along lines (tumours), shape the velocities, and put overlapping shapes on
   different channels.
 - **Hz bass:** spam so fast it sounds like a tone, with a synth window (knobs, effects, layers) and a preview you
@@ -81,6 +82,14 @@ mouse shortcuts.
   tunings like 31edo). Most MIDI programs, Domino included, only read keys 0-127, and Spiderweb's own playback skips
   the keys above 127.
 
+**Limits**
+- Shapes make their notes as a whole: you can't move a single note or change its gate on its own. Change the shape
+  instead (its points, box, fill and note settings).
+- Editing the notes in Domino and pasting them back works, but it can change which channels they are on. To keep the
+  colours (channels), right-click the shape and pick **Turn into plain notes** instead: the notes stay on their
+  channels, and you can cut them with the Slice tool.
+- Domino can't hold notes longer than 65,535 ticks. Copy and Export to Domino cut them to that length and tell you.
+
 **Autosave and problems**
 - Everything you do is saved on its own (`user/autosave.json`). Each time Spiderweb starts, the previous session is
   also kept as `autosave-backup.json`: open it with Open... if something went wrong.
@@ -120,7 +129,7 @@ versions, these are known to work:
 pip install numpy==2.5.3 numba==0.68.0 pillow==12.3.0
 ```
 
-**Playback** goes to the MIDI out picked under Project: Windows' MIDI output, Built-in BASSMIDI (Spiderweb's own
+**Playback** goes to the MIDI out picked in Settings → Sound: Windows' MIDI output, Built-in BASSMIDI (Spiderweb's own
 synth, with a soundfont you pick; the only choice on Linux), or OmniMIDI (KDMAPI) when OmniMIDI is installed. The
 Hz bass window's Preview always uses the built-in synth (no MIDI device needed).
 

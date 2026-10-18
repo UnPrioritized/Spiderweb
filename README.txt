@@ -16,7 +16,8 @@ What it can do
   stars, funnels, text, and shapes you draw yourself.
 - Fill: shapes with notes, one long note per key or chopped into notes of
   any length (spam). Inside fills can be smaller copies of the shape
-  (Nested) or another shape repeated like wallpaper (Tiles).
+  (Nested), another shape repeated like wallpaper (Tiles), or rings
+  growing out from shapes drawn inside (Ripples).
 - Shape the notes: add bumps along lines (tumours), shape the velocities,
   and put overlapping shapes on different channels.
 - Hz bass: spam so fast it sounds like a tone, with a synth window (knobs,
@@ -140,10 +141,10 @@ Tested with Python 3.14.7, NumPy 2.5.3, Numba 0.68.0 and Pillow 12.3.0. If
 something misbehaves with other versions, these are known to work:
   pip install numpy==2.5.3 numba==0.68.0 pillow==12.3.0
 
-Playback goes to the MIDI out picked under Project: Windows' MIDI output,
-Built-in BASSMIDI (Spiderweb's own synth, with a soundfont you pick; the
-only choice on Linux), or OmniMIDI (KDMAPI) when OmniMIDI is installed. The
-Hz bass window's Preview always uses the built-in synth (no MIDI device
+Playback goes to the MIDI out picked in Settings → Sound: Windows' MIDI
+output, Built-in BASSMIDI (Spiderweb's own synth, with a soundfont you pick;
+the only choice on Linux), or OmniMIDI (KDMAPI) when OmniMIDI is installed.
+The Hz bass window's Preview always uses the built-in synth (no MIDI device
 needed).
 
 Building the .exe yourself: install PyInstaller once (pip install
