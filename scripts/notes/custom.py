@@ -214,8 +214,9 @@ def clean_layer(layer):
             out[key] = True
     m = layer.get("mirror")  # (drawer Mirror: {"id": its linked strokes' number, "ways": "h" / "v" / "both", "at":
     try:  # the [u, v] mirrored across, "way": which copy}; edits on one are done mirrored on the others)
-        if isinstance(m["id"], int) and m["ways"] in ("h", "v", "both"):
-            out["mirror"] = {"id": m["id"], "ways": m["ways"], "at": [float(m["at"][0]), float(m["at"][1])]}
+        at = [float(m["at"][0]), float(m["at"][1])]
+        if isinstance(m["id"], int) and m["ways"] in ("h", "v", "both") and all(abs(c) < 1e6 for c in at):
+            out["mirror"] = {"id": m["id"], "ways": m["ways"], "at": at}  # (abs < 1e6: no "nan" / "inf" either)
             if m.get("way") in ("", "h", "v", "hv"):
                 out["mirror"]["way"] = m["way"]
     except (KeyError, TypeError, ValueError, IndexError):

@@ -252,7 +252,8 @@ class DrawerMouse:
         old = self.areas and json.dumps(self.shown())  # (coloured areas keep their colours: carry_areas)
         if getattr(self, "mplan", (None,))[0] is not self.drag:  # (worked out on the drag's first move)
             self.mplan = (self.drag, *self.plan_mirror())
-        _, mirror, whole = self.mplan
+        _, mirror, whole, pinned = self.mplan
+        one_side = e.state & CTRL and e.state & SHIFT  # (Ctrl+Shift held: this side only)
         if kind == "points":
             pt = self.event_pt(e)
             for a, b in self.drag[1]:
@@ -283,7 +284,10 @@ class DrawerMouse:
                 else:
                     n = int(self.grid_n.get())
                     du, dv = round(du * n) / n, round(dv * n) / n
-            exact = (lambda c: c) if self.stuck else (lambda c: round(c, 5))  # (stuck: exactly on that line)
+            if not one_side and (pinned[0] and du or pinned[1] and dv):  # (lying across a mirror line: it stays
+                du, dv = (0 if pinned[0] else du), (0 if pinned[1] else dv)  # on it, only moving along it)
+                self.stuck = self.stuck2 = None
+            exact =(lambda c: c) if self.stuck else (lambda c: round(c, 5))  # (stuck: exactly on that line)
             for i, orig in origs.items():
                 st = json.loads(orig)
                 if st["kind"] == "ellipse":
@@ -296,7 +300,7 @@ class DrawerMouse:
                     link["at"] = [exact(link["at"][0] + du), exact(link["at"][1] + dv)]
                 self.strokes[i] = st
             self.boxes = [[u0 + du, v0 + dv, u1 + du, v1 + dv] for u0, v0, u1, v1 in json.loads(boxes)]
-        if not (e.state & CTRL and e.state & SHIFT):  # (Ctrl+Shift held: this side only)
+        if not one_side:
             self.mirror_drag(mirror)
         if old and old != json.dumps(self.shown()):
             frame = AREA_FRAME
@@ -364,15 +368,17 @@ class DrawerMouse:
         (not hidden or locked ones)."""
         return self.movable() if self.chosen() else [i for i in range(len(self.strokes)) if self.pickable(i)]
 
-    def copy(self):
+    def copy(self, partners=False):
+        """partners: with the strokes Mirror links with them (Cut deletes those too)."""
         if self.strokes:
-            self.clipboard = json.dumps([self.strokes[i] for i in self.targets()])
+            idx = self.with_partners(self.targets()) if partners else self.targets()
+            self.clipboard = json.dumps([self.strokes[i] for i in idx])
             self.pastes = 0
 
     def cut(self):
         """Ctrl+X: the selected strokes copied, then deleted (nothing selected: nothing, not the whole drawing)."""
         if self.chosen() and self.movable() and not self.holding() and self.tool.get() in ("select", "slice"):
-            self.copy()
+            self.copy(partners=True)
             self.delete_selected_stroke()
 
     def paste(self):
@@ -381,7 +387,15 @@ class DrawerMouse:
             return
         self.pastes += 1
         d = self.pastes / int(self.grid_n.get())
-        new = [pasted(self.map_stroke(st, lambda u, v: (u + d, v - d))) for st in json.loads(self.clipboard)]
+        copied = json.loads(self.clipboard)
+        new = [pasted(self.map_stroke(st, lambda u, v: (u + d, v - d))) for st in copied]
+        links, ids = {}, [self.next_link_id()]  # (a stroke pasted with its mirror copies: linked again, as a new set)
+        for st, p in zip(copied, new):
+            link = (st.get("layer") or {}).get("mirror")
+            if link:
+                links.setdefault(link["id"], (link, []))[1].append(p)
+        for link, group in links.values():
+            self.link_up(group, link["ways"], [link["at"][0] + d, link["at"][1] - d], ids)
         self.push_undo()
         self.strokes += new
         self.sel = len(self.strokes) - 1  # the pasted strokes are selected, so they can be moved together
@@ -439,8 +453,22 @@ class DrawerMouse:
 
     def transform(self, idx, fn, turned=False):
         self.push_undo()
-        going = self.carried_areas(idx)
-        whole = {i for i in idx if set(self.mirror_mates(i)) <= set(idx)}  # (all its linked strokes: the line goes too)
+        table = self.mirror_table()
+        whole = {i for i in idx if set(self.mirror_mates(i, table)) <= set(idx)}  # (all its linked strokes: the
+        # line goes too)
+        leads = self.one_per_link(idx)  # (Mirror: the rest of a link made from the first, so they all match)
+        mirrored, kinds = set(), {}  # the strokes made from a lead, by what the change does to them (fn as seen
+        for i in leads:  # in the mirror)
+            for k in self.partners(i, table) if i not in whole else []:
+                g = self.partner_fn(i, k)
+                if g and k not in mirrored:
+                    mirrored.add(k)
+                    a, b = self.link_of(i), self.link_of(k)
+                    key = ("h" in a["way"]) != ("h" in b["way"]), ("v" in a["way"]) != ("v" in b["way"]), tuple(a["at"])
+                    kinds.setdefault(key, ((lambda g: lambda u, v: g(*fn(*g(u, v))))(g), []))[1].append(k)
+        going = self.carried_areas([i for i in idx if i not in mirrored])
+        going_k = [(self.carried_areas(ks), f) for f, ks in kinds.values()]  # (a copy's colour comes along too)
+        moves = [fn if go else next((f for gone, f in going_k if gone[a]), None) for a, go in enumerate(going)]
         swap = {"h": "v", "v": "h", "hv": "hv", "": "", "both": "both"}
         for i in idx:
             self.strokes[i] = self.map_stroke(self.strokes[i], fn)
@@ -452,9 +480,9 @@ class DrawerMouse:
                 if turned:  # (a left / right mirror turned is a top / bottom one)
                     link.update({key: swap[link[key]] for key in ("ways", "way") if key in link})
                 self.strokes[i]["layer"] = dict(self.layer(i), mirror=link)
-        self.mirror_from(idx)
-        self.areas = [[*(round(x, 5) for x in fn(u, v)), c] if go else [u, v, c]
-                      for (u, v, c), go in zip(self.areas, going)]
+        self.mirror_from(leads)
+        self.areas = [[*(round(x, 5) for x in f(u, v)), c] if f else [u, v, c]
+                      for (u, v, c), f in zip(self.areas, moves)]
         boxes = []
         for u0, v0, u1, v1 in self.boxes:  # the select boxes go along
             us, vs = zip(*(fn(u, v) for u, v in ((u0, v0), (u1, v1))))
@@ -851,6 +879,7 @@ class DrawerMouse:
         k = min(range(len(pts) - 1), key=dist)
         self.push_undo()
         pts.insert(k + 1, pt)
+        self.mirror_point(i, k + 1)
         self.mirror_from([i])
         self.changed()
 

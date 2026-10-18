@@ -369,7 +369,7 @@ class DrawerHost(FormulaHost):
 
     def mirror(self):
         d = self.drawer  # (Mirror: the strokes linked with it follow)
-        if d.sel is not None:
+        if d.sel is not None and not getattr(self, "putting_back", False):
             d.mirror_from([d.sel])
 
     def changed(self, final=True):
@@ -382,9 +382,17 @@ class DrawerHost(FormulaHost):
     def restore(self, snap):
         d = self.drawer  # (the coloured areas as they were too: changed() may have moved them while trying; they
         # match the strokes put back, so nothing to settle)
-        d.areas, d._settled = json.loads(snap[0])[1], None
-        super().restore(snap[1])
-        self.mirror()
+        strokes, d.areas = json.loads(snap[0])
+        d._settled = None
+        holders = {id(h) for h, _ in snap[1]}
+        for k, st in enumerate(strokes[:len(d.strokes)]):  # (the other strokes exactly as they were: a copy edited
+            if id(d.strokes[k]) not in holders:  # on its own isn't made the mirror image again)
+                d.strokes[k] = st
+        self.putting_back = True
+        try:
+            super().restore(snap[1])
+        finally:
+            self.putting_back = False
 
     def commit(self, snap, name):
         self.drawer.push_undo(snap[0])
