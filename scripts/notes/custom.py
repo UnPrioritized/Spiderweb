@@ -2599,6 +2599,12 @@ def custom_notes_groups(sh, ppq):
         turn_lap = np.where(groups == 0, 0, turn_lap)  # (the outline takes no turns: one channel, hunt)
     else:
         out = groups * n + turn
+    if has_pattern(sh) and len(np.unique(out)) > COLOURS:  # (Nested / Tiles / Ripples colours x Colours turns too
+        # many to pair: mixed, colour + turn going round, else all past the 15th merged into one, user 2026-10-18)
+        if sh.get("apart") and sh["fill"] in ("fill", "spam"):
+            out = np.where(groups == 0, 0, 1 + (groups - 1 + turn) % (COLOURS - 1)).astype(np.int64)
+        else:
+            out = (groups + turn) % COLOURS
     if lap.any() and len(turn_lap):  # (a Nested / Tiles round and a Colours round: each pair its own round, as
         lo = int(turn_lap.min())  # one number)
         turn_lap = lap * (int(turn_lap.max()) - lo + 1) + turn_lap - lo
