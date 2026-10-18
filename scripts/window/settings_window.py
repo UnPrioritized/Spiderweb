@@ -1,6 +1,6 @@
 """The Settings window (the ⚙ button at the end of the toolbar): the app's own settings, not the project's: no undo.
-Tabs: Look (light / dark, Size / Font / Text size, saved in user/settings.ini; the note colour palettes,
-palettes.py), Sound (MIDI out + Built-in BASSMIDI's settings), General (update checks, tips), Language. All saved in
+Tabs: General (update checks, tips), Look (light / dark, Size / Font / Text size, saved in user/settings.ini; the
+note colour palettes, palettes.py), Sound (MIDI out + Built-in BASSMIDI's settings), Language. All saved in
 user/settings.ini. Never opens by itself (user)."""
 
 import os
@@ -205,6 +205,8 @@ class SettingsWindow(tk.Toplevel):
         self.build_keep_colours(page)
         self.build_domino(page)
         self.build_language()
+        tabs.insert(0, self.pages["general"])  # (General first, user 2026-10-18)
+        tabs.select(0)
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<MouseWheel>", lambda e: self.pages and self.nametowidget(self.tabs.select()).wheel(e), add="+")
