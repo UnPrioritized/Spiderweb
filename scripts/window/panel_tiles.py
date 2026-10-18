@@ -87,7 +87,7 @@ class TilesPanel:
                 self.tiles_boxes["colours"] = (e, var)
                 by = ttk.Label(row, text=tr("panel_custom.tiles_by"))
                 by.grid(row=0, column=2, sticky="w")
-                box = ttk.Combobox(row, values=texts, state="readonly", width=DROP_WIDTH)
+                box = ttk.Combobox(row, values=texts, state="readonly", width=12)  # (grows to fit: fit_dropdowns)
                 box.grid(row=0, column=3, columnspan=3, sticky="w", padx=(8, 0))
                 for w in (by, box):
                     Tooltip(w, tr("panel_custom.tiles_by_tip"))

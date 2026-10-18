@@ -755,7 +755,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._build_funnel()
         self.points_box = ttk.Frame(self.settings)
         self.points_box.pack(fill="x", pady=(6, 0))
-        label_column([lb, self.colours_word, self.shape_word, self.inside_word])  # (their boxes start at one place)
+        # their boxes start at one place, the funnel's too; Colours' rows start under its dropdown, like Inside's.
+        # (Not "Last note": 7 px wider, it pushed Tiles' rows past the panel's edge; it never shows with them)
+        widest = label_column([lb, self.colours_word, self.shape_word, self.inside_word])
+        self.funnel_box.columnconfigure(0, minsize=widest)
+        self.cycle_rows_pad = widest + 5  # (panel_colours sync_colours packs the rows there)
+        self.cycle_every_row.pack_configure(padx=(self.cycle_rows_pad, 0))
+        label_column(self.cycle_words)
 
     def build_points(self):
         """Tick/pitch boxes for each point of the selected line or curve."""

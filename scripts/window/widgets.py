@@ -49,10 +49,11 @@ def line_up(rows, labels=()):
 
 def label_column(labels):
     """Labels packed at the left of their own rows: padded to the widest one, so what comes after them starts at
-    one place (like a table's first column)."""
+    one place (like a table's first column). Returns that width in pixels."""
     widest = max(lb.winfo_reqwidth() for lb in labels)
     for lb in labels:
         lb.pack_configure(padx=(0, widest - lb.winfo_reqwidth()))
+    return widest
 
 
 def keep_width(cb):

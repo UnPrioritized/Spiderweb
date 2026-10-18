@@ -39,10 +39,11 @@ class ColoursPanel:
         self.cycle_n_scrub = Scrub(self, [(self.cycle_n_entry, self.cycle_n_var, lambda: self.on_cycle("n"))],
                                    (1, 3, 1), 2, self.cycle_most(), label=lb, drag_box=True)
         rows = self.cycle_every_row = ttk.Frame(box)  # (channels + these rows: only shown while Colours is on, user)
-        rows.pack(anchor="w", padx=(20, 0), pady=(1, 0))
+        rows.pack(anchor="w", pady=(1, 0))  # (under the dropdown: app._build_shape_settings)
         c = ttk.Frame(rows)
         c.pack(anchor="w")
-        ttk.Label(c, text=tr("colours.every")).pack(side="left")
+        self.cycle_words = [ttk.Label(c, text=tr("colours.every"))]  # (one column: app._build_shape_settings)
+        self.cycle_words[0].pack(side="left")
         self.cycle_vars = [tk.StringVar(), tk.StringVar()]  # steps / keys, or the note length's a / b
         self.cycle_entries = []
         for i, var in enumerate(self.cycle_vars):
@@ -60,7 +61,8 @@ class ColoursPanel:
         # "Each key row" (not By key: every row would be one colour)
         c = self.cycle_rows_row = ttk.Frame(rows)
         c.pack(anchor="w", pady=(1, 0))
-        ttk.Label(c, text=tr("colours.rows")).pack(side="left")
+        self.cycle_words.append(ttk.Label(c, text=tr("colours.rows")))
+        self.cycle_words[-1].pack(side="left")
         self.cycle_rows_box = ttk.Combobox(c, values=[t for _, t in ROW_CHOICES], state="readonly",
                                            width=max(len(t) for _, t in ROW_CHOICES))
         self.cycle_rows_box.pack(side="left", padx=4)
@@ -71,6 +73,7 @@ class ColoursPanel:
         c.pack(anchor="w", pady=(1, 0))
         lb = ttk.Label(c, text=tr("colours.shift"))
         lb.pack(side="left")
+        self.cycle_words.append(lb)
         Tooltip(lb, tr("colours.shift_tip"))
         self.shift_vars = [tk.StringVar(), tk.StringVar()]
         self.shift_entries = []
@@ -174,7 +177,7 @@ class ColoursPanel:
         row = bool(cy) and not mixed
         if row != bool(self.cycle_every_row.winfo_manager()):
             if row:
-                self.cycle_every_row.pack(anchor="w", padx=(20, 0), pady=(1, 0))
+                self.cycle_every_row.pack(anchor="w", padx=(self.cycle_rows_pad, 0), pady=(1, 0))
             else:
                 self.cycle_every_row.pack_forget()
 
