@@ -727,10 +727,12 @@ class LocalUndo:
         """Has the main window made a step since this window's last one (a shape changed while open)?"""
         return self.main is not None and self.main() is not self.main_was
 
-    def mark(self, key=None):
+    def mark(self, key=None, end=False):
+        """end: the last change of a keyed gesture (a drag let go): it joins the gesture's step, then the gesture
+        is over (a slow preview catching up on let go made a second step, so Ctrl+Z seemed to do nothing)."""
         state = self.get()
         if state == self.states[self.at]:
-            if key is None:  # (a gesture ended: the next keyed change is a step of its own, hunt)
+            if key is None or end:  # (a gesture ended: the next keyed change is a step of its own, hunt)
                 self.key = None
             return
         del self.states[self.at + 1:]
@@ -742,7 +744,7 @@ class LocalUndo:
             if len(self.states) > self.limit:
                 del self.states[0]
                 self.at -= 1
-        self.key = key
+        self.key = None if end else key
         self.seen()
 
     def undo(self):

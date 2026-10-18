@@ -574,7 +574,7 @@ class PathWindow(ToolWindow):
         self.cfg.update(pts=pts, mids=mids, k=k)
         self.show()
         self.preview(done)
-        self.undo.mark(None if done else which)
+        self.undo.mark(which, end=done)
 
     def local_step(self, redo):
         """Ctrl+Z / Ctrl+Y pressed on the piano roll while open (App.key_undo): the points are dragged there, so this

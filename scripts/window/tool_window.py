@@ -611,7 +611,7 @@ class ToolWindow(tk.Toplevel):
         self.cfg[key] = value
         self.show()
         self.preview(done)
-        self.undo.mark(None if done else key)
+        self.undo.mark(key, end=done)
 
     def preview(self, now=True):
         """The piano roll shows the settings (on "+": as a new page, added to each selected shape). While a number
