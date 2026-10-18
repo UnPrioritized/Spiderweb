@@ -13,7 +13,7 @@ from files.playback import BUILTIN
 from files.synth import FONT_TYPES, Live, Synth, SynthError, silent_list
 from notes.engine import slot_track_channel
 from window.hz_preview import VOICES
-from window.widgets import bad, good, grid_shown
+from window.widgets import bad, good
 
 
 class Playback:
@@ -110,12 +110,16 @@ class Playback:
         self.play_btn.config(text=tr("app.play_space"))
 
     def show_overload(self):
-        """The red text next to Built-in BASSMIDI's Settings button (and in its window): "Overloaded", with the
+        """The red text beside the Play button (and in Settings → Sound): "Overloaded", with the
         voices playing when the limit was lowered by itself."""
         text = self.overload.text()
         if text != self.overload_text:
             self.overload_text = text
             self.overload_label.config(text=text)
+            if text:
+                self.overload_label.pack(side="left", padx=(6, 0), after=self.play_btn)
+            else:
+                self.overload_label.pack_forget()
             if self.builtin_window is not None:
                 self.builtin_window.refresh()
 
@@ -154,12 +158,8 @@ class Playback:
             self.busy(None)
 
     def sync_builtin(self):
-        """Built-in BASSMIDI's row (its Settings button) shows only while it's the MIDI out."""
-        if not hasattr(self, "builtin_row"):
-            return
+        """Settings → Sound shows Built-in BASSMIDI's settings only while it's the MIDI out."""
         on = self.midi_device.get() == BUILTIN
-        for w in self.builtin_row:
-            grid_shown(w, on)
         w = self.builtin_window  # (in Settings → Sound while that's open)
         if w is not None and w.winfo_exists():
             if on:

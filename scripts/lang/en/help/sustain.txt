@@ -30,4 +30,4 @@ Colours don't split a group: with Colours taking turns along a key, the whole ro
 
 A Hz bass and an image can't be sustained: holding a Hz bass's repeats would ruin the sound, and an image's notes are its picture.
 
-Spiderweb's own playback can lower the voice limit when it can't keep up (if "Lower it by itself when overloaded" is ticked in Sound settings…), so it can sound lighter than the lag other players get from the MIDI file.
+Spiderweb's own playback can lower the voice limit when it can't keep up (if "Lower it by itself when overloaded" is ticked in Settings (⚙) → Sound), so it can sound lighter than the lag other players get from the MIDI file.

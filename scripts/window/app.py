@@ -58,7 +58,7 @@ from window.claw_window import open_claw
 from window.strum_window import open_strum
 from window.chop_window import open_chop, quick_chop
 from window.hz_preview import clean_settings as clean_preview
-from window.builtin_settings import Overload, open_builtin_settings
+from window.builtin_settings import Overload
 from window.panel_tumour import TumourPanel
 from notes.joined import all_tumours, is_joined
 from window.join_split import JoinSplit
@@ -72,7 +72,7 @@ from roll.pianoroll import PianoRoll
 from roll.roll_draw import painting_order
 from files import errors, speed
 from files.about import ICONS, VERSION
-from files.playback import BUILTIN, DEFAULT_DEVICE, MidiOut, Player, devices
+from files.playback import BUILTIN, DEFAULT_DEVICE, MidiOut, Player
 from files.midi_out import PPQ_WARN, track_slots
 from files.domino_clip import DOMINO_STARTS, on_clipboard
 from files.clipboard import RAW, copy_count, get_text, put_text
@@ -88,7 +88,7 @@ from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, fit_dropdowns, good,
-                            grid_shown, keep_width, letter_jump, remember_good, watch_bad)
+                            grid_shown, remember_good, watch_bad)
 
 
 VEL_KEYS = ("vel0", "vel1")
@@ -215,7 +215,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.domino256 = tk.BooleanVar(self, value=False)  # Settings → General: keys above 127 to / from Domino (mod)
         self.keep_colours = tk.BooleanVar(self, value=False)  # Settings → General: overlapping shapes move whole to
         # the next row of channels (render keep)
-        self.overload, self.overload_text = Overload(), ""  # (red next to the Settings button while it plays)
+        self.overload, self.overload_text = Overload(), ""  # (red beside Play while it can't keep up)
         self.builtin_window = self.voices_entry = None  # (window/builtin_settings.py)
         self._play_job = None
         self._scrub_held = {}
@@ -453,6 +453,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         ttk.Button(bar, text=tr("app.redo"), command=self.redo).pack(side="left", padx=(4, 0))
         self.play_btn = ttk.Button(bar, text=tr("app.play_space"), width=14, command=self.toggle_play, takefocus=False)
         self.play_btn.pack(side="left", padx=(12, 0))
+        # (Built-in BASSMIDI's red "Overloaded" while it can't keep up; packed only then: show_overload)
+        self.voices_var = tk.StringVar(value=str(self.play_voices))
+        self.overload_label = ttk.Label(bar, text="", foreground=look.ERROR)
         help_btn = ttk.Button(bar, text=tr("app.help_f1"), command=self.open_help, takefocus=False)
         help_btn.pack(side="left", padx=(12, 0))
         Tooltip(help_btn, tr("app.every_tip_searchable_opens_at_the"))
@@ -662,26 +665,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         Tooltip(self.pad_tick, tr("app.pad_rounds_tip"))
         self.sync_channels_fold()
         r += 1
-        ttk.Label(box, text=tr("app.midi_out")).grid(row=r, column=0, sticky="w", pady=(3, 0))
-        dev = keep_width(ttk.Combobox(box, textvariable=self.midi_device, state="readonly", values=devices()))
-        letter_jump(dev)
-        dev.configure(postcommand=lambda: dev.configure(values=devices()))  # re-list when it opens
-        dev.grid(row=r, column=1, sticky="ew", padx=5, pady=(3, 0))
-        r += 1
-        # Built-in BASSMIDI's own row (shown only while it's picked, sync_builtin): its Settings… window + the red
-        # "Overloaded" while it can't keep up (user)
-        cell = ttk.Frame(box)
-        cell.grid(row=r, column=1, sticky="ew", padx=5, pady=(3, 0))
-        self.voices_var = tk.StringVar(value=str(self.play_voices))
-        self.builtin_btn = ttk.Button(cell, text=tr("app.builtin_settings"),
-                                      command=lambda: open_builtin_settings(self))
-        self.builtin_btn.pack(side="left")
-        Tooltip(self.builtin_btn, tr("app.builtin_settings_tip"))
-        self.overload_label = ttk.Label(cell, text="", foreground=look.ERROR)
-        self.overload_label.pack(side="left", padx=(6, 0))
-        self.builtin_row = (cell,)
-        self.sync_builtin()
-        r += 1
+        # (MIDI out: only in Settings → Sound now, user 2026-10-18; "Overloaded" is beside Play)
         names = [name for _, name in DOMINO_STARTS]
         ttk.Label(box, text=tr("app.domino_start")).grid(row=r, column=0, sticky="w", pady=(6, 0))
         self.domino_box = ttk.Combobox(box, state="readonly", values=names)

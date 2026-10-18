@@ -14,8 +14,7 @@ Look tab:
 
 • Shape lines: how thick shapes' lines are on the piano roll. This one shows at once.
 
-Sound tab: the MIDI out used for playback, and with Built-in BASSMIDI its soundfont, voice limit, lowering it by itself when it can't keep up, and Use OmniMIDI Limiter. The Sound settings… button under MIDI out opens this tab.
-
+Sound tab: the MIDI out used for playback, and with Built-in BASSMIDI its soundfont, voice limit, lowering it by itself when it can't keep up, and Use OmniMIDI Limiter.
 General tab: how often to look for a new version (and Check now), tips on or off, and Show all tips again.
 
 Language tab: the language of every text, shown after a restart. Start a translation saves a copy of the English texts to fill in.
