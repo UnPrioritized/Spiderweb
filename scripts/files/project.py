@@ -758,13 +758,18 @@ class ProjectFiles:
                                  tr("project.too_many_to_copy_for_domino", notes=len(notes), most=MOST_NOTES))
             return
         tracks = len(np.unique(notes[:, 4]))
+        pad_from = None
+        if self.rows_apart():  # (shapes moved a row of channels on: the empty tracks between keep them there)
+            step = 16 if self.picture_use10 else 15
+            pad_from = int(notes[:, 4].min()) // step * step
+            tracks = int(notes[:, 4].max()) + 1 - pad_from
         # (no channel 10 question when the project uses it on purpose: "Use channel 10")
         if not ask_big(self, "domino", len(notes)) or not (self.all16() or ask_drums(self, tracks)):
             return
         self.busy(tr("project.copying_for_domino"))  # (millions of notes take a few seconds)
         notes, long = cut_gates(notes)
         try:
-            raw = clip_data(notes, ppq, beats * ppq, self.domino_start())
+            raw = clip_data(notes, ppq, beats * ppq, self.domino_start(), pad_from)
             copied = put_on_clipboard(raw)
         except MemoryError:
             messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))

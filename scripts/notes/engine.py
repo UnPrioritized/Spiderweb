@@ -987,7 +987,7 @@ def _kind_notes_tracks(sh, ppq, keys):
 
 # ---------------------------------------------------------------- overlaps and channels
 
-def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shape_of=None, step=15):
+def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shape_of=None, step=15, loose=()):
     """
     Auto channels: shapes whose notes overlap get different slots, shapes that don't clash reuse the lowest
     free one. Earlier shapes get the lower slots. split="key": only notes on the same key at the same time
@@ -998,7 +998,9 @@ def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shap
     taken: {list number: its slot}, lists whose slot is set already (the others clashing with them step round it).
     shape_of: per list the shape it belongs to (Settings → General "Overlapping shapes keep their colours"): each shape
     gets its slots as if alone, and one clashing with an earlier shape moves WHOLE by step slots (15, 16 with channel
-    10 used) until nothing clashes: the same colours on the next row of channels (user 2026-10-18).
+    10 used) until nothing clashes: the same colours on the next row of channels (user 2026-10-18). A taken list of
+    the same shape stays and its colour counts as used. loose: shapes whose slots are moved again after (Colours
+    rounds on channels of their own): never moved, nor stepped round.
     """
     n = len(note_lists)
     busy = range(n)
@@ -1032,20 +1034,26 @@ def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shap
         slots[i] = s
         done.add(i)
     if shape_of is not None:
-        shapes = {}  # (shape -> its lists, shapes in order of their first note)
+        shapes, fixed = {}, {}  # (shape -> its lists, shapes in order of their first note; -> its lists with a slot)
         for i in order:
             if i not in done:
                 shapes.setdefault(shape_of[i], []).append(i)
-        for mine in shapes.values():
-            own = {}  # (its slots as if no other shape were there)
+        for i in done:  # (an Add between step turned into plain notes: its group's other steps step round its colour)
+            fixed.setdefault(shape_of[i], set()).add(i)
+        for key, mine in shapes.items():
+            own, pinned = {}, fixed.get(key, set())  # (its slots as if no other shape were there)
             for i in mine:
-                used = {own[j] for j in clashes[i] if j in own}
+                used = {own[j] for j in clashes[i] if j in own} | {slots[j] % step for j in clashes[i] if j in pinned}
                 k = 0
                 while k in used:
                     k += 1
                 own[i] = k
-            rows = {(slots[j] - own[i]) // step for i in mine for j in clashes[i]
-                    if j in done and (slots[j] - own[i]) % step == 0 and slots[j] >= own[i]}
+            if key in loose:  # (its slots move again anyway: in_rounds)
+                rows = set()
+            else:
+                rows = {(slots[j] - own[i]) // step for i in mine for j in clashes[i]
+                        if j in done and j not in pinned and shape_of[j] not in loose
+                        and (slots[j] - own[i]) % step == 0 and slots[j] >= own[i]}
             row = 0
             while row in rows:
                 row += 1
@@ -1441,7 +1449,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
             if team in team_unit:
                 taken.setdefault(team_unit[team], taken[p])
         forced += [us for us in paste_units.values() if len(us) > 1]  # (pasted tracks: always apart, tracks_apart)
-        shape_of = None
+        shape_of, loose = None, set()
         if keep:  # (each unit's shape: an Add between group / a paste = one shape)
             shape_of = list(range(len(units)))
             for i, u in enumerate(unit_of):
@@ -1451,9 +1459,13 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                     pastes[i] is not None and tracks[i] is not None) else ("shape", i)
                 for v in np.unique(np.asarray(u)).tolist():
                     shape_of[v] = key
+            for p, team in solid_teams:  # (a step turned into plain notes still belongs to its group)
+                shape_of[p] = ("team", team[0])
+            loose = {shape_of[v] for i, u in enumerate(unit_of) if u is not None and rounds and rounds[i] is not None
+                     for v in np.unique(np.asarray(u)).tolist()}
         unit_slots = mapped_slots(np.array(assign_slots(units, split, forced, [firsts.get(u) for u in
                                                                               range(len(units))], taken, shape_of,
-                                                        16 if use10 in ("all", "order") else 15), np.int64),
+                                                        16 if use10 in ("all", "order") else 15, loose), np.int64),
                                   use10)
         slot_of = [pin if u is None else unit_slots[u] for u, pin in zip(unit_of, pinned)]
         count = int(unit_slots.max()) + 1 if len(units) else 0

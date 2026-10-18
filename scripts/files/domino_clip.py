@@ -153,10 +153,11 @@ def clip_span(notes, bar, start="bar"):
     return first, max(-(-(int(notes[:, 1].max()) - first) // bar) * bar, bar)
 
 
-def clip_data(notes, ppq, bar, start="bar"):
+def clip_data(notes, ppq, bar, start="bar", pad_from=None):
     """notes: (start, end, pitch, velocity, slot, ...) rows -> the clipboard bytes. One track per slot (channel)
-    that has notes, in slot order, packed together (no empty tracks); Domino fills tracks downwards from the
-    highlighted one. start "bar": the copy starts at the bar line at or before the first note (so the notes keep
+    that has notes, in slot order, packed together (no empty tracks; pad_from: every slot from that one on gets a
+    track, empty ones too: Overlapping shapes keep their colours, rows of channels); Domino fills tracks downwards
+    from the highlighted one. start "bar": the copy starts at the bar line at or before the first note (so the notes keep
     their place in the bar) and runs to the bar line after the last; "note": it starts on the first note and ends
     with the last, so the first note pastes right at Domino's cursor. Every track shares that stretch."""
     first, length = clip_span(notes, bar, start)
@@ -164,7 +165,8 @@ def clip_data(notes, ppq, bar, start="bar"):
     with Packer(zlib.Z_DEFAULT_COMPRESSION) as z:
         order, cuts = track_orders(notes, int(notes[:, 4].max()) + 1, z.pool)
         tracks = b"".join(item(1003, TRACK_HEAD + note_rows(notes[order[a:b]], first).tobytes() + end + TRACK_TAIL)
-                          for a, b in zip(cuts[:-1].tolist(), cuts[1:].tolist()) if a < b)
+                          for s, (a, b) in enumerate(zip(cuts[:-1].tolist(), cuts[1:].tolist()))
+                          if a < b or pad_from is not None and s >= pad_from)
         data = SONG_START + item(1002, struct.pack("<H", ppq)) + SONG_REST + tracks + SONG_TAIL
         z.add(data)
         return MAGIC + struct.pack("<I", len(data)) + z.finish()

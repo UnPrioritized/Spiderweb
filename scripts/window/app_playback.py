@@ -50,6 +50,8 @@ class Playback:
         if self.hz_window:  # (one thing plays at a time, user)
             self.hz_window.preview.stop_play()
             self.hz_window.draw_preview()
+        # (Overlapping shapes keep their colours: shapes overlapping on a key share its channel, render keep)
+        self.player.shared = self.rows_apart()
         self.player.start(self.rendered, ppq, bpm, self.playhead, self.play_end(ppq, beats, self.playhead),
                           self.picture_use10)
         if self.out.name == BUILTIN:

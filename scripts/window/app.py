@@ -1012,8 +1012,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def pad_tracks(self):
         """True if the saved MIDI / .dms gets a track for every channel up to the last one used, empty ones too
-        (midi_out.track_slots); False only with the rounds tick and "Fill each round with empty tracks" off."""
-        return not (self.rounds_apart() and not self.pad_rounds.get())
+        (midi_out.track_slots); False only with the rounds tick (or Settings' "Overlapping shapes keep their
+        colours", rows_apart) and "Keep empty tracks" off."""
+        return not ((self.rounds_apart() or self.rows_apart()) and not self.pad_rounds.get())
+
+    def rows_apart(self):
+        """True while overlapping shapes move to the next row of channels (Settings → General, Multi channel only)."""
+        return self.keep_colours.get() and self.channel_mode.get() == "auto"
 
     def edo(self):
         """True while the piano roll shows 31-EDO (256 keys + its tick)."""
@@ -1156,8 +1161,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.order_tick.pack(anchor="w", padx=(36, 0), pady=(2, 0), before=self.rounds_tick)
             else:
                 self.order_tick.pack_forget()
-        if self.rounds_apart() != bool(self.pad_tick.winfo_manager()):  # (only shown with the rounds tick, user)
-            if self.rounds_apart():
+        padding = self.rounds_apart() or self.rows_apart()
+        if padding != bool(self.pad_tick.winfo_manager()):  # (only shown with the rounds tick / rows, user)
+            if padding:
                 self.pad_tick.pack(anchor="w", padx=(36, 0), pady=(2, 0), after=self.rounds_tick)
             else:
                 self.pad_tick.pack_forget()
