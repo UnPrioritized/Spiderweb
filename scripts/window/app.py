@@ -1664,25 +1664,44 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         k = 0 if sideways else 1
         vals = [pt[k] for sh in shapes for pt in cached_path(sh)]
         mid2 = min(vals) + max(vals)  # twice the middle
+        even = self.notes_middle(shapes, sideways, mid2)
         self.push_undo(name=tr("app.flip_sideways") if sideways else tr("app.flip_upside_down"))
         sizes = push_sizes(self.shapes, whole_groups(self.shapes, self.sels))  # (Add between pushes flip too)
         for sh in shapes:
             steps = steps_kept(sh)  # (a piece of a shape with pages: a flip step too, it stays a piece)
-            frm = sh["pts"]
+            frm, was = sh["pts"], sh.get("fx")
+            fx = fx_flipped(was, "time" if sideways else "keys", steps) if was or steps else was
+            # (the true middle for a shape given a flip step: its pages' notes come from its drawing flipped back in
+            # its own box (engine.unflipped / turned_back), that gives back the drawing it had; and for a text:
+            # rebuilt, it slides onto its anchor by whole ticks, a box moved part of a tick came back a tick off)
+            m2 = mid2 if fx is not was or sh.get("text") else even
             if sh.get("merge"):  # (its parts' velocities: each sideways flip turns them round, merge.py)
                 sh["merge"]["vrev"] = merge_vrev(sh) != sideways
-            flip_shape(sh, sideways, mid2)
-            turned_piece(sh, frm, lambda w: flip_shape(w, sideways, mid2))  # (a funnel piece stays one)
-            if sh.get("fx") or steps:  # (its note tool pages' result is flipped too, fx.py)
-                fx = fx_flipped(sh.get("fx"), "time" if sideways else "keys", steps)
-                if fx:
-                    sh["fx"] = fx
-                else:
-                    sh.pop("fx", None)
+            flip_shape(sh, sideways, m2)
+            turned_piece(sh, frm, lambda w: flip_shape(w, sideways, m2))  # (a funnel piece stays one)
+            if fx:  # (its note tool pages' result is flipped too, fx.py)
+                sh["fx"] = fx
+            else:
+                sh.pop("fx", None)
         keep_pushes(self.shapes, sizes, lambda v: (-v[0], v[1]) if sideways else (v[0], -v[1]))
-        self.roll.move_kept_box(lambda b, p: (mid2 - b, p) if sideways else (b, mid2 - p))  # (flips too)
+        self.roll.move_kept_box(lambda b, p: (even - b, p) if sideways else (b, even - p))  # (flips too)
         self.sync_panel()
         self.shapes_changed()
+
+    def notes_middle(self, shapes, sideways, mid2):
+        """Twice the middle a flip mirrors shapes around: their drawings' own notes' middle (first start + last end,
+        lowest + highest key, as fx.notes_box), so each column / row lands on its partner and the flipped notes are
+        the mirror note for note (user 2026-10-18: the drawing's middle between two key rows gave a different
+        heart). mid2 (the drawing's) when none has notes of its own (Hz bass, pictures)."""
+        got = [self.notes_of({k: v for k, v in sh.items() if k not in ("fx", "_m", "sustain", "range")})
+               for sh in shapes if not sh.get("hz") and "picture" not in sh]
+        got = [n for n in got if len(n)]
+        if not got:
+            return mid2
+        a = np.concatenate(got)
+        if sideways:
+            return (int(a[:, 0].min()) + int(a[:, 1].max())) / self.ppq
+        return int(a[:, 2].min()) + int(a[:, 2].max())
 
     def gate_flip_state(self):
         """The right-click "Gate aware flip" for the selected shapes: (shapes it switches, on: ticked, why: None or
