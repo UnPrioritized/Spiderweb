@@ -12,6 +12,8 @@ Channels 1-16 in order, under Use channel 10: shapes take channels 1, 2, 3 … 1
 
 New channels each Colours round, under Multi channel: when a shape's Colours start again from the first colour, the next round goes on new channels with the same colours (15 channels further on, 16 with Use channel 10). No two rounds share a channel, so in other programs each round is its own track and can be edited on its own. It counts for every colour that starts again: Colours, the rings of a Nested fill, the tiles of a Tiles fill, the steps of an Add between group (the whole group together) and the copies of Copy along a path. Other shapes keep the first channels; the rounds come after them, shape by shape in the shape list's order. Saved with the project.
 
+Fill each round with empty tracks, under it (on to start): the MIDI file and Export to Domino get a track for every channel of every round, empty ones too, so each round takes the same number of tracks. Untick it to write only the tracks that have notes. Every note keeps its channel and colour either way.
+
 Some shapes can spread over several channels: pasted notes (by track), images (by their colour list), merged shapes (each part keeps its own colours), live shapes made with Turn into live shape (by the shape each stroke came from), Fill / Spam set to Outline (the outline and the inside), Nested and Tiles (each step or tile), Add between (each shape of the group) and Copy along a path (its Colours choice). The shape list says how many. Above 15 (16 with Use channel 10) it shows in orange, and from there the colours and channel numbers repeat.
 
 Every channel has its own note colour (Settings → Look → Note colours).

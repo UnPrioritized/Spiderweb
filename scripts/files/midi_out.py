@@ -99,10 +99,18 @@ def _chunk(data):
 
 
 
-def write_midi(path, ppq, bpm, beats, notes, use10=False):
+def track_slots(notes, pad=True):
+    """The slots written as tracks, in order: every slot up to the last one used (pad: empty ones too, so each
+    shows its channel), or only the ones with notes ("Fill each round with empty tracks" off)."""
+    if not len(notes):
+        return np.zeros(0, np.int64)
+    return np.arange(int(notes[:, 4].max()) + 1) if pad else np.unique(np.asarray(notes[:, 4], np.int64))
+
+
+def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True):
     """notes: [start, end, pitch, velocity, slot, ...]. Every slot gets its own track with a single channel
-    (use10: channel 10 used too, slot_track_channel). Nothing marks channel 10 as not drums (user, 2026-10-12: no
-    messages that could switch something on in their own setup)."""
+    (use10: channel 10 used too, slot_track_channel; pad: track_slots). Nothing marks channel 10 as not drums
+    (user, 2026-10-12: no messages that could switch something on in their own setup)."""
     head = bytearray()
     head += vlq(0) + b"\xFF\x51\x03" + round(60_000_000 / bpm).to_bytes(3, "big")
     head += vlq(0) + bytes([0xFF, 0x58, 4, beats, 2, 24, 8])
@@ -110,10 +118,12 @@ def write_midi(path, ppq, bpm, beats, notes, use10=False):
 
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
     count = int(notes[:, 4].max()) + 1 if len(notes) else 0
-    write_bytes(path, _pieces(notes, count, use10, b"MThd" + struct.pack(">IHHH", 6, 1, count + 1, ppq) + _chunk(head)))
+    tracks = track_slots(notes, pad)
+    write_bytes(path, _pieces(notes, count, tracks, use10,
+                              b"MThd" + struct.pack(">IHHH", 6, 1, len(tracks) + 1, ppq) + _chunk(head)))
 
 
-def _pieces(notes, count, use10, start):
+def _pieces(notes, count, tracks, use10, start):
     """write_midi's file as pieces, one track at a time (a big file is never whole in memory)."""
     yield start
     if count > 1:  # (one sort finds every track's notes, in their own order)
@@ -121,7 +131,7 @@ def _pieces(notes, count, use10, start):
         order = np.argsort(slots, kind="stable")
         cuts = np.searchsorted(slots[order], np.arange(count + 1))
         del slots
-    for track in range(count):
+    for track in tracks.tolist():
         channel = slot_track_channel(track, use10)[1]
         mine = notes if count == 1 else notes[order[cuts[track]:cuts[track + 1]]]
         events = track_events(mine, channel) if len(mine) else [empty_track(channel)]

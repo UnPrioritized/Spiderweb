@@ -23,6 +23,7 @@ import numpy as np
 
 from files import clipboard
 from files.lang import tr
+from files.midi_out import track_slots
 from files.speed import loops
 from notes.engine import slot_track_channel
 
@@ -244,20 +245,21 @@ def time_signature(beats):
     return item(2015, item(1001, struct.pack("<I", 0)) + item(2001, bytes([beats])) + item(2002, bytes([4])))
 
 
-def dms_data(notes, ppq, bpm, beats, use10=False, drums=True):
+def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True):
     """notes: [start, end, pitch, velocity, slot, ...] -> a .dms file (Domino's own song file, which can hold a
     PPQ up to 65535 where a MIDI file stops at 32767). It's the clipboard's format with a Conductor track first
-    (tempo + time signature), then one track per slot like the MIDI export (empty ones too), each with its own
+    (tempo + time signature), then one track per slot like the MIDI export (empty ones too unless not pad:
+    midi_out.track_slots), each with its own
     channel (Domino refuses a track mixing channels); a track on channel 10 is marked as a drum track like Domino
     does, unless drums is False (the project's "Use channel 10": wanted for its colour). Keys above 127 must be
     left out first.
     Packed as it's made, PIECE notes at a time: the whole unpacked file (40 bytes a note) never sits in memory, and
     the notes are cut into tracks by one sort instead of a search through all of them for each track."""
     with Packer(DMS_LEVEL) as z:
-        return dms_pack(z, notes, ppq, bpm, beats, use10, drums)
+        return dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad)
 
 
-def dms_pack(z, notes, ppq, bpm, beats, use10, drums):
+def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True):
     """dms_data's work: the file's data fed to the Packer z as it's made."""
     feed = z.add
 
@@ -277,7 +279,7 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums):
     feed(events + track_tail(0))
     count = int(notes[:, 4].max()) + 1 if len(notes) else 0
     order, cuts = track_orders(notes, count, z.pool)
-    for slot in range(count):
+    for slot in track_slots(notes, pad).tolist():
         mine = order[cuts[slot]:cuts[slot + 1]]
         track_head(slot_track_channel(slot, use10)[1], b"", len(mine) * NOTE.itemsize)
         end = 0

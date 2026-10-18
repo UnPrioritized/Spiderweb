@@ -27,7 +27,7 @@ from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
 from files.domino_clip import DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data, dms_path, get_from_clipboard, put_on_clipboard, read_notes
-from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, write_midi
+from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, track_slots, write_midi
 from files.playback import keep_saved
 from files.about import HERE, USER, VERSION
 from files.safefile import write_bytes, write_text
@@ -187,7 +187,7 @@ class ProjectFiles:
             "version": 2, "app_version": VERSION,  # the file format, and the Spiderweb that saved it
             "ppq": self.pvar["ppq"].get(), "bpm": self.pvar["bpm"].get(), "beats": self.pvar["beats"].get(),
             "output": self.pvar["output"].get(), "channel_mode": self.channel_mode.get(), "channel_split": self.channel_split,
-            "use_ch10": bool(self.use_ch10.get()), "ch10_order": bool(self.ch10_order.get()), "new_rounds": bool(self.new_rounds.get()), "keys": self.keys, "edo31": bool(self.edo31.get()), "edo31_audio": bool(self.edo31_audio.get()),
+            "use_ch10": bool(self.use_ch10.get()), "ch10_order": bool(self.ch10_order.get()), "new_rounds": bool(self.new_rounds.get()), "pad_rounds": bool(self.pad_rounds.get()),"keys": self.keys, "edo31": bool(self.edo31.get()), "edo31_audio": bool(self.edo31_audio.get()),
             "domino_start": self.domino_start(),
             "snap": self.snap.get(), "defaults": self.defaults,
             "custom_defaults": dict(self.custom_defaults, shape=self.custom_shape),
@@ -286,6 +286,7 @@ class ProjectFiles:
         self.use_ch10.set(data.get("use_ch10") is True)
         self.ch10_order.set(data.get("ch10_order") is True)
         self.new_rounds.set(data.get("new_rounds") is True)
+        self.pad_rounds.set(data.get("pad_rounds") is not False)
         self.keys_var.set(str(KEYS[1] if data.get("keys") == KEYS[1] else KEYS[0]))
         self.edo31.set(data.get("edo31") is True)
         self.edo31_audio.set(data.get("edo31_audio") is True)
@@ -623,7 +624,7 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"),
                                  tr("project.no_notes_yet_draw_something_inside", keys=self.keys - 1))
             return
-        tracks = int(self.rendered[:, 4].max()) + 1
+        tracks = len(track_slots(self.rendered, self.pad_tracks()))
         if tracks > MAX_TRACKS:
             messagebox.showerror(tr("project.spiderweb"), tr("project.too_many_tracks", tracks=tracks, most=MAX_TRACKS))
             return
@@ -639,9 +640,10 @@ class ProjectFiles:
                 tr("project.spiderweb"), tr("project.long_silences", ppq=ppq, beats=MAX_DELTA // ppq), icon="warning"):
             return
         if not self.write_out(path, "project.saving_midi",  # (millions of notes take a few seconds)
-                              lambda: write_midi(path, ppq, bpm, beats, self.rendered, self.picture_use10)):
+                              lambda: write_midi(path, ppq, bpm, beats, self.rendered, self.picture_use10,
+                                                 self.pad_tracks())):
             return
-        channels =self.slot_count if self.channel_mode.get() == "auto" else 1
+        channels = tracks if self.channel_mode.get() == "auto" else 1
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
                 if ppq >= PPQ_WARN else "")
         if (self.rendered[:, 2] > 127).any():
@@ -701,9 +703,10 @@ class ProjectFiles:
                 icon="warning", default="no"):
             return
         if not self.write_out(path, "project.saving_dms", lambda: write_bytes(
-                path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16()))):
+                path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16(),
+                               pad=self.pad_tracks()))):
             return
-        tracks = int(notes[:, 4].max()) + 1
+        tracks = len(track_slots(notes, self.pad_tracks()))
         text = (tr("project.saved_dms", notes=trn("n.notes", len(notes), n=len(notes)),
                    tracks=trn("n.tracks", tracks, n=tracks), path=path)
                 + (trn("project.notes_above_key_127_left_out", high, high=high) if high else "")

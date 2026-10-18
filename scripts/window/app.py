@@ -70,7 +70,7 @@ from roll.roll_draw import painting_order
 from files import errors, speed
 from files.about import ICONS, VERSION
 from files.playback import BUILTIN, DEFAULT_DEVICE, MidiOut, Player, devices
-from files.midi_out import PPQ_WARN
+from files.midi_out import PPQ_WARN, track_slots
 from files.domino_clip import DOMINO_STARTS, on_clipboard
 from files.clipboard import RAW, copy_count, get_text, put_text
 from files.share import LONG_LINE, FIND, ShareError, made_by, read_shapes, shapes_line, unpack
@@ -300,6 +300,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         self.use_ch10 = tk.BooleanVar(value=False)  # Multi channel uses channel 10 too: 16 colours (all16)
         self.ch10_order = tk.BooleanVar(value=False)  # with Use channel 10: channels 1-16 in order (in_order)
         self.new_rounds = tk.BooleanVar(value=False)  # each Colours round on channels of its own (rounds_apart)
+        self.pad_rounds = tk.BooleanVar(value=True)  # with it: empty tracks for a round's unused channels (pad_tracks)
+        self._used_tracks = (None, 0)  # (rendered, how many slots have notes: update_status)
         self.keys = 128  # the project's key range: 0 .. keys - 1 (paths.KEYS)
         set_key_top(self.keys)
         self.keys_var = tk.StringVar(value=str(KEYS[0]))
@@ -622,6 +624,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         self.rounds_tick = ttk.Checkbutton(ch, text=tr("app.new_rounds"), variable=self.new_rounds,
                                            command=self.on_channel_mode)
         Tooltip(self.rounds_tick, tr("app.new_rounds_tip"))
+        # (user 2026-10-18: shown only while it's ticked; off = only tracks with notes are written, channels kept)
+        self.pad_tick = ttk.Checkbutton(ch, text=tr("app.pad_rounds"), variable=self.pad_rounds,
+                                        command=self.update_status)
+        Tooltip(self.pad_tick, tr("app.pad_rounds_tip"))
         r += 1
         ttk.Label(box, text=tr("app.midi_out")).grid(row=r, column=0, sticky="w", pady=(3, 0))
         dev = keep_width(ttk.Combobox(box, textvariable=self.midi_device, state="readonly", values=devices()))
@@ -982,6 +988,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         channel only)."""
         return self.new_rounds.get() and self.channel_mode.get() == "auto"
 
+    def pad_tracks(self):
+        """True if the saved MIDI / .dms gets a track for every channel up to the last one used, empty ones too
+        (midi_out.track_slots); False only with the rounds tick and "Fill each round with empty tracks" off."""
+        return not (self.rounds_apart() and not self.pad_rounds.get())
+
     def edo(self):
         """True while the piano roll shows 31-EDO (256 keys + its tick)."""
         return self.keys == KEYS[1] and self.edo31.get()
@@ -1121,6 +1132,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
                 self.order_tick.pack(anchor="w", padx=(36, 0), pady=(2, 0), before=self.rounds_tick)
             else:
                 self.order_tick.pack_forget()
+        if self.rounds_apart() != bool(self.pad_tick.winfo_manager()):  # (only shown with the rounds tick, user)
+            if self.rounds_apart():
+                self.pad_tick.pack(anchor="w", padx=(36, 0), pady=(2, 0), after=self.rounds_tick)
+            else:
+                self.pad_tick.pack_forget()
         made = self.notes_made(any_spot=now == "follow")
         for sh in self.shapes:  # a piece whose outline was changed is a shape of its own now (sliced.py)
             if "cut" in sh and moved_by(as_made(sh)) is None:
@@ -1891,8 +1907,14 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         parts.append(tr("app.shapes_notes", shapes=trn("n.shapes", len(self.shapes), n=len(self.shapes)),
                         notes=trn("n.notes", len(self.rendered), n=len(self.rendered))))
         if self.channel_mode.get() == "auto" and self.slot_count:
-            parts.append(tr("app.one_track") if self.slot_count == 1 else
-                         tr("app.tracks_one_channel_each", slot_count=self.slot_count))
+            if self.pad_tracks():
+                tracks = self.slot_count
+            else:  # (counted once per notes made: the status line changes with every mouse move)
+                if self._used_tracks[0] is not self.rendered:
+                    self._used_tracks = (self.rendered, len(track_slots(self.rendered, False)))
+                tracks = self._used_tracks[1]
+            parts.append(tr("app.one_track") if tracks == 1 else
+                         tr("app.tracks_one_channel_each", slot_count=tracks))
         if self.sels:
             shapes = tr("app.shapes_2", n=len(self.sels)) if len(self.sels) > 1 else ""
             n = sum(self.note_counts[i] for i in self.sels if i < len(self.note_counts))
