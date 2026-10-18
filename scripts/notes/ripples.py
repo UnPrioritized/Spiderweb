@@ -1,19 +1,22 @@
 """Inside fill "Ripples" (sh["ripples"]): rings that grow out from shapes drawn inside the outline, each ring a
 colour of its own (with Multi channel, like Nested's steps). The shape keeps its Fill / Spam (sh["fill"]).
 
-The drawing is read by its closed loops: the outermost ones are the FRAME (it only cuts the rings off, it makes
-none of its own); loops right inside the frame are the SOURCES (a loop inside a source, like a donut's hole, is part
-of that source). Ring k = every source scaled by size k round its own centre point (and turned), in the view the
-shape was first drawn in (nested.view_of: a heart stays a heart however the box was stretched). Where copies meet,
-the smaller one wins (rings in order, smallest first, each only where no smaller one is), which makes the seams.
-Copies are cut to the frame; frame left over past the biggest copy stays empty.
+The drawing is read by its closed loops: a loop no other loop holds is a FRAME (it only cuts the rings off, it makes
+none of its own); a loop a frame holds is a SOURCE (a loop inside a source, like a donut's hole, is part of that
+source). "Holds" = most of the loop's outline lies inside the other's (so where a stroke starts, a side shared with
+the frame or a heart poking out past it don't matter; two crossing hearts are two sources). Each frame is filled
+only from its own sources (user: two boxes = two separate pictures). Ring k = every source scaled by size k round
+its own centre point (and turned), in the view the shape was first drawn in (nested.view_of: a heart stays a heart
+however the box was stretched). Where copies meet, the smaller one wins (rings in order, smallest first, each only
+where no smaller one is), which makes the seams. Frame left over past the biggest copy stays empty.
 
 sh["ripples"] = {"steps" (rings, up to MOST_STEPS), "grow" (the biggest copy's size, 1 = as drawn; used when "auto"
-is off), "auto" (True = the biggest copy just reaches every spot of the frame), "edge" (True = one ring edge lies
+is off), "auto" (True = the biggest copy just reaches every spot of its frame), "edge" (True = one ring edge lies
 exactly on each drawn source: sizes moved so a copy is 1), "turn" (degrees each ring turns more than the one inside
 it; the ring at the drawn outline isn't turned, user), "spacing" (-100..100: + = the small rings closer together),
 "colours", "skip" (every other ring empty), "inside" (inside the drawn sources: "rings" / "empty" / "plain" = one
-colour), "at" ([[u, v] or None, ...] in the shape's box, one per source left to right; missing = its middle)}.
+colour), "at" ([[u, v] or None, ...] in the shape's box, one per source in the drawing's order, which flips and
+moves don't change; missing = its middle)}.
 Colours count from the drawn outline: the ring just inside it is colour 0, so Steps / Grow to don't change it."""
 
 import json
@@ -21,7 +24,7 @@ import math
 
 import numpy as np
 
-from notes.custom import cut_out, fill_plan, frame_to_bp, in_turns, merged_rows, poly_edges, rows_spans
+from notes.custom import cut_out, frame_to_bp, in_turns, merged_rows, poly_edges, rows_spans
 from notes.nested import mirrored, view_loops, view_of
 from notes.paths import TOP_KEY, pitch_of
 
@@ -33,6 +36,7 @@ MOST_COLOURS = 15
 MOST_GROW = 50.0  # (5000 %)
 RAYS = 720  # directions a source's reach is measured in (Auto)
 GRID = 64  # frame spots checked across (Auto), plus its corners
+SAMPLES = 96  # points spread round a loop to tell what holds it
 RECOLOUR = ("colours", "skip", "inside")  # (settings that only change the rings' colours, not their shapes)
 _rings = {}  # ripple_rings, remembered
 
@@ -64,34 +68,95 @@ def clean_ripples(c):
     return out
 
 
-def inside_point(loop, others):
-    """How many of the other loops hold this loop (tested at the middle of its first side)."""
-    x, y = (loop[0] + loop[1]) / 2
-    n = 0
-    for o in others:
-        xa, ya = o[:, 0], o[:, 1]
-        xb, yb = np.roll(xa, -1), np.roll(ya, -1)
-        cross = (ya > y) != (yb > y)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            xs = xa + (y - ya) * (xb - xa) / (yb - ya)
-        n += int(np.count_nonzero(cross & (x < xs)) % 2)
-    return n
+# ---------------------------------------------------------------- frames and sources
+
+CHUNK = 2_000_000  # (points x sides worked out at once: a 5000-point loop would need GBs in one go)
+
+
+def chunked(f):
+    """f(points, loop, ...) run on the points a chunk at a time."""
+    def run(pts, loop, *more):
+        step = max(1, CHUNK // max(1, len(loop)))
+        if len(pts) <= step:
+            return f(pts, loop, *more)
+        return np.concatenate([f(pts[i:i + step], loop, *more) for i in range(0, len(pts), step)])
+    return run
+
+
+@chunked
+def inside_many(pts, loop):
+    """Which of the points lie inside the loop (even-odd)."""
+    xa, ya = loop[:, 0], loop[:, 1]
+    xb, yb = np.roll(xa, -1), np.roll(ya, -1)
+    x, y = pts[:, :1], pts[:, 1:]
+    cross = (ya > y) != (yb > y)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        xs = xa + (y - ya) * (xb - xa) / (yb - ya)
+    return (np.count_nonzero(cross & (x < xs), axis=1) % 2).astype(bool)
+
+
+@chunked
+def near_many(pts, loop, eps):
+    """Which of the points lie on the loop's outline (within eps)."""
+    a, b = loop, np.roll(loop, -1, axis=0)
+    d = b - a
+    ll = (d ** 2).sum(axis=1)
+    rel = pts[:, None, :] - a[None]
+    t = np.clip((rel * d[None]).sum(axis=2) / np.where(ll > 0, ll, 1)[None], 0, 1)
+    gap = rel - t[..., None] * d[None]
+    return (np.hypot(gap[..., 0], gap[..., 1]) <= eps).any(axis=1)
+
+
+def spread_round(loop, n=SAMPLES):
+    """n points evenly along the loop's outline, its corners too."""
+    closed = np.concatenate([loop, loop[:1]])
+    seg = np.hypot(*np.diff(closed, axis=0).T)
+    at = np.concatenate([[0], np.cumsum(seg)])
+    if at[-1] <= 0:
+        return loop
+    t = np.linspace(0, at[-1], n, endpoint=False)
+    even = np.column_stack([np.interp(t, at, closed[:, 0]), np.interp(t, at, closed[:, 1])])
+    return np.concatenate([even, loop])
+
+
+def loop_area(p):
+    x, y = p[:, 0], p[:, 1]
+    return abs(float((x * np.roll(y, -1) - np.roll(x, -1) * y).sum())) / 2
 
 
 def parts(loops):
-    """(frame loops, sources): each source = [its outline, the loops inside it...], left to right (by its middle)."""
-    depth = [inside_point(p, loops[:i] + loops[i + 1:]) for i, p in enumerate(loops)]
-    frame = [p for p, d in zip(loops, depth) if d == 0]
-    outer = [p for p, d in zip(loops, depth) if d == 1]
-    sources = [[p] for p in outer]
-    for p, d in zip(loops, depth):
-        if d >= 2:
-            for src in sources:
-                if inside_point(p, [src[0]]):
-                    src.append(p)
-                    break
-    sources.sort(key=lambda s: tuple(np.round(middle(s[0]), 9)))
-    return frame, sources
+    """[(frame loop, [(n, [its outline, the loops inside it...]), ...]), ...]: every frame with its sources, n =
+    the source's place in the drawing's order (counted over all frames)."""
+    if not loops:
+        return []
+    allp = np.concatenate(loops)
+    eps = 1e-7 * max(float(np.ptp(allp, axis=0).max()), 1e-12)
+    areas = [loop_area(p) for p in loops]
+    spots = [spread_round(p) for p in loops]
+    holders = []
+    for i, p in enumerate(loops):
+        got = []
+        for j, q in enumerate(loops):
+            if j == i or areas[j] <= areas[i]:
+                continue
+            s = spots[i][~near_many(spots[i], q, eps)]
+            if len(s) and np.count_nonzero(inside_many(s, q)) * 2 > len(s):
+                got.append(j)
+        holders.append(got)
+    depth = [len(h) for h in holders]
+    frames = {i: [] for i in range(len(loops)) if depth[i] == 0}
+    sources = {}
+    for i in range(len(loops)):
+        if depth[i] == 1:
+            sources[i] = [loops[i]]
+            frames[holders[i][0]].append(i)
+    for i in range(len(loops)):  # (deeper loops: part of the smallest source holding them)
+        if depth[i] >= 2:
+            mine = [j for j in holders[i] if j in sources]
+            if mine:
+                sources[min(mine, key=lambda j: areas[j])].append(loops[i])
+    order = {i: n for n, i in enumerate(sorted(sources))}
+    return [(loops[f], [(order[i], sources[i]) for i in srcs]) for f, srcs in frames.items() if srcs]
 
 
 def middle(p):
@@ -107,12 +172,12 @@ def middle(p):
 
 def centres(sh, sources, view):
     """Each source's centre point in the view: its "at" (u, v in the shape's box), else its middle."""
-    at = (sh["ripples"].get("at") or [])
+    at = sh["ripples"].get("at") or []
     a, c = view
     to_bp = frame_to_bp(sh["pts"])
     out = []
-    for i, src in enumerate(sources):
-        uv = at[i] if i < len(at) else None
+    for n, src in sources:
+        uv = at[n] if n < len(at) else None
         if uv:
             b, p = to_bp(*uv)
             out.append(np.array([b + a * p, c * p]))
@@ -120,6 +185,8 @@ def centres(sh, sources, view):
             out.append(middle(src[0]))
     return out
 
+
+# ---------------------------------------------------------------- ring sizes
 
 def reach(outline, centre):
     """How far the outline is from the centre in RAYS directions (the farthest crossing; 0 where none)."""
@@ -137,36 +204,24 @@ def reach(outline, centre):
 
 def frame_spots(frame):
     """Spots across the frame (a grid, only those inside it) and its corners, for Auto."""
-    pts = np.concatenate(frame)
-    (x0, y0), (x1, y1) = pts.min(axis=0), pts.max(axis=0)
+    (x0, y0), (x1, y1) = frame.min(axis=0), frame.max(axis=0)
     gx, gy = np.meshgrid(np.linspace(x0, x1, GRID), np.linspace(y0, y1, GRID))
     g = np.column_stack([gx.ravel(), gy.ravel()])
-    inside = np.zeros(len(g), bool)
-    for p in frame:
-        xa, ya = p[:, 0], p[:, 1]
-        xb, yb = np.roll(xa, -1), np.roll(ya, -1)
-        y = g[:, 1:2]
-        cross = (ya > y) != (yb > y)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            xs = xa + (y - ya) * (xb - xa) / (yb - ya)
-        inside ^= (np.count_nonzero(cross & (g[:, :1] < xs), axis=1) % 2).astype(bool)
-    return np.concatenate([g[inside], pts])
+    return np.concatenate([g[inside_many(g, frame)], frame])
 
 
 def auto_grow(frame, sources, mids, turned):
-    """The size the biggest copy needs so every frame spot lies in some source's copy (turned: copies turn, so each
-    source counts as its nearest reach all round)."""
+    """The size the biggest copy needs so every spot of the frame lies in some source's copy (turned: copies turn,
+    so each source counts as its nearest reach all round)."""
     spots = frame_spots(frame)
     need = np.full(len(spots), np.inf)
-    for src, c in zip(sources, mids):
+    for (_, src), c in zip(sources, mids):
         r = reach(src[0], c)
         d = spots - c
         if turned:
-            least = r[r > 0].min() if (r > 0).any() else 0
-            rr = np.full(len(spots), least)
+            rr = np.full(len(spots), r[r > 0].min() if (r > 0).any() else 0)
         else:
-            i = np.round(np.arctan2(d[:, 1], d[:, 0]) / (2 * math.pi) * RAYS).astype(int) % RAYS
-            rr = r[i]
+            rr = r[np.round(np.arctan2(d[:, 1], d[:, 0]) / (2 * math.pi) * RAYS).astype(int) % RAYS]
         with np.errstate(divide="ignore", invalid="ignore"):
             need = np.minimum(need, np.where(rr > 0, np.hypot(d[:, 0], d[:, 1]) / rr, np.inf))
     worst = need[np.isfinite(need)]
@@ -185,6 +240,8 @@ def ring_sizes(cfg, grow):
         return [x * f for x in s], k1
     return s, min(range(n), key=lambda k: abs(s[k] - 1))
 
+
+# ---------------------------------------------------------------- notes
 
 def to_bp_loops(loops, view):
     """Loops in the view (no point twice, nested.view_loops) -> closed ones in beats / pitch."""
@@ -207,6 +264,26 @@ def spans_of(loops_bp, ppq):
     return np.asarray(found, np.int64).reshape(-1, 3)[:, [1, 2, 0]]
 
 
+def union_spans(sets, ppq):
+    """Several sets of closed loops (beats / pitch), each filled even-odd, together (where any of them is): one
+    pass over the key rows for them all, each set moved along time into a lane of its own so they can't cancel each
+    other out, then moved back (a pass per source was most of the time with many sources)."""
+    if len(sets) == 1:
+        return spans_of(sets[0], ppq)
+    lows = [math.floor(min(float(p[:, 0].min()) for p in s)) for s in sets]
+    wide = max(float(max(p[:, 0].max() for p in s)) - lo for s, lo in zip(sets, lows)) + 2
+    lane = int(math.ceil(wide))
+    shifts = [j * lane - lo for j, lo in enumerate(lows)]
+    moved = [p + np.array([sh, 0.0]) for s, sh in zip(sets, shifts) for p in s]
+    found = spans_of(moved, ppq)
+    if not len(found):
+        return found
+    j = np.clip(found[:, 0] // (lane * ppq), 0, len(sets) - 1)
+    back = np.asarray(shifts, np.int64)[j] * ppq
+    found = np.column_stack([found[:, 0] - back, found[:, 1] - back, found[:, 2]])
+    return merged_rows(found)
+
+
 def within(spans, area):
     """Only the parts of the stretches inside the area."""
     if not len(spans) or not len(area):
@@ -215,8 +292,9 @@ def within(spans, area):
 
 
 def ripple_rings(sh, ppq):
-    """(pieces, k1, drawn): pieces[k] = ring k's own stretches (only where no smaller ring is, cut to the frame),
-    k1 = the ring at the drawn outline, drawn = the drawn sources' insides (cut to the frame). Remembered."""
+    """[(pieces, k1, drawn), ...] for each frame: pieces[k] = ring k's own stretches (only where no smaller ring is,
+    cut to the frame), k1 = the ring at the drawn outline, drawn = the drawn sources' insides (cut to the frame).
+    Remembered."""
     cfg = sh["ripples"]
     shaped = {k: v for k, v in cfg.items() if k not in RECOLOUR}
     key = (json.dumps([sh["strokes"], sh["pts"], shaped, sh.get("round")]), ppq)
@@ -225,62 +303,74 @@ def ripple_rings(sh, ppq):
         return got
     if len(_rings) > 30:
         _rings.clear()
-    none = ([], 0, np.zeros((0, 3), np.int64))
+    got = []
     view = view_of(sh)
-    if view[1] <= 0:
-        got = none
-    else:
-        frame, sources = parts(view_loops(sh, view))
-        got = make_rings(sh, cfg, frame, sources, view, ppq) if frame and sources else none
+    if view[1] > 0:
+        taken = np.zeros((0, 3), np.int64)  # (frames that overlap: the earlier one keeps the overlap)
+        for frame, sources in parts(view_loops(sh, view)):
+            area = merged_rows(spans_of(to_bp_loops([frame], view), ppq))
+            area = cut_out(area, taken) if len(taken) and len(area) else area
+            taken = merged_rows(np.concatenate([taken, area]))
+            got.append(make_rings(sh, cfg, frame, sources, view, area, ppq))
     _rings[key] = got
     return got
 
 
-def make_rings(sh, cfg, frame, sources, view, ppq):
+def make_rings(sh, cfg, frame, sources, view, area, ppq):
     mids = centres(sh, sources, view)
-    turned = bool(cfg["turn"])
-    grow = auto_grow(frame, sources, mids, turned) if cfg["auto"] else cfg["grow"]
+    grow = auto_grow(frame, sources, mids, bool(cfg["turn"])) if cfg["auto"] else cfg["grow"]
     sizes, k1 = ring_sizes(cfg, grow)
     way = -1 if mirrored(sh) else 1  # (a flipped shape turns the other way: its fill is a mirror image)
-    area = merged_rows(spans_of(to_bp_loops(frame, view), ppq))
     covered = np.zeros((0, 3), np.int64)
     pieces = []
     for k, size in enumerate(sizes):
         a = way * math.radians(cfg["turn"]) * (k - k1)
         co, si = math.cos(a) * size, math.sin(a) * size
-        found = []
-        for src, c in zip(sources, mids):
-            moved = []
-            for p in src:
-                x, y = p[:, 0] - c[0], p[:, 1] - c[1]
-                moved.append(np.column_stack([c[0] + co * x - si * y, c[1] + si * x + co * y]))
-            found.append(spans_of(to_bp_loops(moved, view), ppq))
-        ring = merged_rows(np.concatenate(found)) if found else np.zeros((0, 3), np.int64)
+        sets = []
+        for (_, src), c in zip(sources, mids):
+            moved = [np.column_stack([c[0] + co * (p[:, 0] - c[0]) - si * (p[:, 1] - c[1]),
+                                      c[1] + si * (p[:, 0] - c[0]) + co * (p[:, 1] - c[1])]) for p in src]
+            sets.append(to_bp_loops(moved, view))
+        ring = union_spans(sets, ppq)
         piece = cut_out(ring, covered) if len(covered) and len(ring) else ring
         covered = merged_rows(np.concatenate([covered, ring]))
         pieces.append(within(piece, area))
-    drawn = within(merged_rows(np.concatenate([spans_of(to_bp_loops(s, view), ppq) for s in sources])), area)
+    drawn = within(union_spans([to_bp_loops(src, view) for _, src in sources], ppq), area)
     return pieces, k1, drawn
+
+
+def edge_outline(sh):
+    """The loops the outline gate shrinks (custom.edge_loops), in beats / pitch: only the frames (the sources are
+    filled with rings, not holes), and with Inside the sources "empty" the sources too."""
+    view = view_of(sh)
+    if view[1] <= 0:
+        return []
+    out = []
+    for frame, sources in parts(view_loops(sh, view)):
+        loops = [frame] + ([p for _, src in sources for p in src] if sh["ripples"]["inside"] == "empty" else [])
+        out += [p.tolist() for p in to_bp_loops(loops, view)]
+    return out
 
 
 def ripple_spans(sh, ppq):
     """(start, end, key, colour) ticks of every stretch filled (like nested.nested_spans)."""
     cfg = sh["ripples"]
-    pieces, k1, drawn = ripple_rings(sh, ppq)
     rounds = bool(sh.get("_rounds"))
     every = 2 if cfg["skip"] else 1
-    lift = (k1 // every // cfg["colours"] + 1) * cfg["colours"]  # (keeps every turn >= 0, ring k1 still colour 0)
     out = []
-    for k, piece in enumerate(pieces):
-        d = k1 - k  # (the ring just inside the drawn outline first)
-        if d % every or not len(piece):
-            continue
-        if cfg["inside"] != "rings" and len(drawn):
-            piece = cut_out(piece, drawn)
-        colour = in_turns((-d) // every + lift, cfg["colours"], rounds)
-        out.append(np.column_stack([piece, np.full(len(piece), colour, np.int64)]))
-    if cfg["inside"] == "plain" and len(drawn):
-        out.append(np.column_stack([drawn, np.full(len(drawn), in_turns(lift, cfg["colours"], rounds), np.int64)]))
+    for pieces, k1, drawn in ripple_rings(sh, ppq):
+        lift = (k1 // every // cfg["colours"] + 1) * cfg["colours"]  # (keeps every turn >= 0, ring k1 colour 0)
+        for k, piece in enumerate(pieces):
+            d = k1 - k  # (the ring just inside the drawn outline first)
+            if d % every or not len(piece):
+                continue
+            if cfg["inside"] != "rings" and len(drawn):
+                piece = cut_out(piece, drawn)
+            colour = in_turns((-d) // every + lift, cfg["colours"], rounds)
+            out.append(np.column_stack([piece, np.full(len(piece), colour, np.int64)]))
+        if cfg["inside"] == "plain" and len(drawn):
+            out.append(np.column_stack([drawn, np.full(len(drawn), in_turns(lift, cfg["colours"], rounds),
+                                                       np.int64)]))
     out = [o for o in out if len(o)]
     if not out:
         return np.zeros((0, 4), np.int64)

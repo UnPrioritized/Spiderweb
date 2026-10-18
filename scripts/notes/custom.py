@@ -2414,7 +2414,10 @@ def near_edge(notes, spans, g):
 
 def edge_loops(sh):
     """The lines the inside is made of (fill_plan's loops; text: its letters), and fill_test (None: even-odd; then
-    every line given is part of a loop, else it's walls(sh))."""
+    every line given is part of a loop, else it's walls(sh)). Ripples: only its frames (ripples.edge_outline)."""
+    if has_ripples(sh):
+        from notes.ripples import edge_outline
+        return edge_outline(sh), None
     tx = sh.get("text")
     walled = fill_test(sh)
     return (custom_strokes(sh) if tx else walls(sh) if walled else fill_plan(sh)["polys"]), walled
@@ -2428,6 +2431,8 @@ def inner_ticks(sh, ppq, g, spans):
            drawn_view(sh))
     if has_areas(sh):  # (what the coloured areas fill, shrunk from its own edge)
         key += (json.dumps(sh["areas"]), bool(sh.get("borders")))
+    if has_ripples(sh):  # (Ripples: its frames, + its sources with Inside the sources "empty")
+        key += ("ripples", sh["ripples"]["inside"] == "empty")
     got = _inner.get(key)
     if got is None:
         if len(_inner) > 100:
