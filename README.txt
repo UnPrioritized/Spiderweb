@@ -92,6 +92,17 @@ PPQ and keys
   Domino included, only read keys 0-127, and Spiderweb's own playback skips
   the keys above 127.
 
+Limits
+- Shapes make their notes as a whole: you can't move a single note or change
+  its gate on its own. Change the shape instead (its points, box, fill and
+  note settings).
+- Editing the notes in Domino and pasting them back works, but it can change
+  which channels they are on. To keep the colours (channels), right-click
+  the shape and pick Turn into plain notes instead: the notes stay on their
+  channels, and you can cut them with the Slice tool.
+- Domino can't hold notes longer than 65,535 ticks. Copy and Export to
+  Domino cut them to that length and tell you.
+
 Autosave and problems
 - Everything you do is saved on its own (user/autosave.json). Each time
   Spiderweb starts, the previous session is also kept as
