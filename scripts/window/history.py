@@ -13,6 +13,8 @@ from notes.engine import BIG_TEXT
 from window import look
 from window.widgets import ListTip, Tooltip, fit_screen, placed
 
+CH10_OFF = "ch10_off"  # (an undo step's mark: made by unticking "Use channel 10", App.on_use_ch10)
+
 BIG_MARK = "\0big:"  # (a big text's place in an undo state's JSON: no saved text holds this character)
 
 
@@ -316,10 +318,10 @@ class HistoryPanel:
     def sel_state(self):
         """The selection as an undo step keeps it: (selected shape numbers, the main one, the kept Select boxes or
         None, the Hz bass window's HzWindow.sel_state() or None, the picked stroke, the funnel's highlighted parts,
-        the one of them clicked)."""
+        the one of them clicked, the picked Ripples source)."""
         boxes = self.roll.kept_box()
         return (sorted(self.sels), self.sel, boxes and list(boxes), self.hz_window and self.hz_window.sel_state(),
-                self.stroke, list(self.parts), self.part_main)
+                self.stroke, list(self.parts), self.part_main, self.ripple_pick)
 
     def scrub_step(self, gesture, run):
         """run() steps a number box (widgets.Scrub). The steps of one gesture (a label drag, or arrows / wheel on the
@@ -411,10 +413,11 @@ class HistoryPanel:
         ch10 = None
         for _ in range(min(count, len(src))):
             state, name, picked, hz = src.pop()
-            mark = tuple(picked[7:8])  # (CH10_OFF: unticking "Use channel 10" made it: undo ticks it, redo unticks)
+            # (CH10_OFF last: unticking "Use channel 10" made it: undo ticks it, redo unticks)
+            mark = tuple(picked[-1:]) if picked[-1] == CH10_OFF else ()
             if mark:
                 ch10 = src is self.undo_stack
-                picked = tuple(picked[:7])
+                picked = tuple(picked[:-1])
             dst.append((now, name, tuple(sel_now) + mark, hz))
             now, sel_now = state, picked
         if ch10 is not None:
@@ -437,6 +440,8 @@ class HistoryPanel:
         self.roll.box_kept = (picked[2], set(self.sels)) if picked[2] and same else None
         if same:
             self.stroke, self.parts, self.part_main = picked[4], set(picked[5]), picked[6]
+            if len(picked) > 7:  # (the Ripples source the undone change was made on, hunt)
+                self.ripple_pick = picked[7]
         self._edit_key = self._scrub = None
         self.sync_panel()
         self.shapes_changed()

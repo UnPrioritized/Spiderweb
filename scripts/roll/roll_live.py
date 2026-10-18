@@ -16,7 +16,7 @@ from notes.custom import (add_stroke, box_frame, carried_spots, carry_areas, cus
                           has_ripples, map_stroke, new_live_shape, plain_stroke, refit, settled_areas, stroke_bp,
                           stroke_ends, stroke_points, uv_k)
 from notes.nested import centre_key, handle_bp, reset_centre, set_centre, uses_centre
-from notes.ripples import OTHER, handle_spots, set_source
+from notes.ripples import OTHER, handle_spots, own_list, set_source, source_turn
 from notes.pattern import has_formula
 from notes.polygon import polygon_aspect, polygon_strokes
 from roll.roll_funnel import seg_dist
@@ -340,9 +340,10 @@ class LiveDrawing:
         own = turns[n] if n < len(turns) else None
         # Turn the other way: Turn's way flipped; an own turn of x: -x
         other = OTHER if own is None else None if own == OTHER else -own
+        turned = source_turn(own_list(cfg, "turns", n, other), n) != source_turn(cfg, n)  # (Turn 0: nothing, hunt)
         m = tk.Menu(self, tearoff=0)
         for text, key, value, on in (("ripples_back", "at", None, own_at),
-                                     ("ripples_other_way", "turns", other, own != OTHER and other != own),
+                                     ("ripples_other_way", "turns", other, own != OTHER and turned),
                                      ("ripples_like_others", "turns", None, own is not None)):
             m.add_command(label=tr("panel_custom." + text), state="normal" if on else "disabled",
                           command=lambda text=text, key=key, value=value: app.set_source(n, key, value,

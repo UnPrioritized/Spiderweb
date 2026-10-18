@@ -9,8 +9,8 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import frame_to_uv
-from notes.ripples import (INSIDES, MOST_COLOURS, MOST_GROW, MOST_STEPS, OTHER, RIPPLES_DEFAULTS, handle_spots,
-                           ripple_rings, set_source, source_turn, uses_auto)
+from notes.ripples import (INSIDES, MOST_COLOURS, MOST_GROW, MOST_STEPS, OTHER, RIPPLES_DEFAULTS, framed,
+                           handle_spots, set_source, source_middles, source_turn)
 from window import look
 from window.panel_nested import NOTES_CHOICES, drop_row
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
@@ -80,6 +80,8 @@ class RipplesPanel:
             Tooltip(b, tr("panel_custom." + text + "_tip"))
             self.ripples_rows.append(b)
             self.ripples_ticks[key] = var
+            if key == "trim":
+                self.ripples_trim_tick = b
         texts = [tr("panel_custom.ripples_inside_" + v) for v in INSIDES]
         row, self.ripples_inside_box = drop_row(self, opts, "ripples_inside", texts)
         self.ripples_inside_box.bind("<<ComboboxSelected>>", lambda e: (
@@ -157,6 +159,9 @@ class RipplesPanel:
         tgts = [t for t in self.ripples_targets() if t is not self.custom_defaults]
         if len(tgts) == 1:
             self.ripple_pick = n
+            now = tgts[0]["ripples"].get(key) or []
+            if (now[n] if n < len(now) else None) == value:  # (nothing changes: no undo step, Redo kept, hunt)
+                return
             self.change_nested(tgts, lambda t: set_source(t, key, n, value), name)
 
     def sync_picked(self):
@@ -192,8 +197,8 @@ class RipplesPanel:
         """The picked source's Turn or Centre u / v box entered (left: only left, nothing unless changed)."""
         e, var = self.picked_boxes[key]
         got = self.picked_source()
-        if self._loading or not got or left and unchanged(e):
-            return
+        if self._loading or not got or (left or key != "turn") and unchanged(e):  # (an untouched Centre box on
+            return  # Enter too: else it pins the point where it is, hunt)
         t, n, _ = got
         lo, hi, _ = PICKED_LIMITS[key]
         try:
@@ -226,12 +231,14 @@ class RipplesPanel:
         auto = cfg.get("auto", True)
         self.ripples_auto_var.set(auto)
         # (Auto fills a frame the rings are cut to: none drawn, or Cut at the outline off = Grow to is used)
-        usable = cfg.get("trim", True) and (t is self.custom_defaults or not t.get("ripples")
-                                            or uses_auto(t, self.ppq))
+        # (Cut at the outline: only with a frame drawn round the sources, hunt)
+        frame = t is self.custom_defaults or not t.get("ripples") or framed(t)
+        usable = cfg.get("trim", True) and frame
         self.ripples_auto_tick.config(state="normal" if usable else "disabled")
         self.ripples_boxes["grow"][0].config(state="disabled" if auto and usable else "normal")
         for key, var in self.ripples_ticks.items():
             var.set(bool(cfg.get(key, RIPPLES_DEFAULTS[key])))
+        self.ripples_trim_tick.config(state="normal" if frame else "disabled")
         self.ripples_inside_box.current(INSIDES.index(cfg.get("inside", "rings")))
         self.sync_picked()
         self._loading = False
@@ -240,7 +247,7 @@ class RipplesPanel:
         """{row: shown} for sync_custom's show_custom_rows (on: Ripples is the Inside fill shown); the warning only
         while t (a placed shape) has nothing drawn inside its outline, the picked source's rows only while one is
         picked."""
-        warn = on and t is not self.custom_defaults and not ripple_rings(t, self.ppq)
+        warn = on and t is not self.custom_defaults and not source_middles(t)
         picked = on and self.picked_source() is not None
         return {w: on and (w is not self.ripples_warn or warn) and (w not in self.picked_rows or picked)
                 for w in self.ripples_rows}

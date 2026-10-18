@@ -1000,9 +1000,10 @@ def row_spans(polys, q, edges=None):
     return merge_spans(left[pair], right[pair + 1])
 
 
-def rows_spans(edges, q0, q1, ppq):
+def rows_spans(edges, q0, q1, ppq, wind=False):
     """[(pitch, start tick, end tick)] of rows q0..q1: row_spans for every row at once (the same sums, so exactly
-    the same notes; row by row was most of a Nested fill's time), in ticks like find_spans."""
+    the same notes; row by row was most of a Nested fill's time), in ticks like find_spans. wind: filled where the
+    loops wind round at all (nonzero), not even-odd."""
     xa, ya, xb, yb = edges
     none = []
     if q1 < q0 or not len(xa):
@@ -1077,11 +1078,24 @@ def rows_spans(edges, q0, q1, ppq):
     new = np.ones(len(gap), bool)
     new[1:] = gap[1:] != gap[:-1]
     at = np.arange(len(gap))
-    rank = at - np.maximum.accumulate(np.where(new, at, 0))
-    pair = np.flatnonzero((rank % 2 == 0) & np.append(~new[1:], False))
-    if not len(pair):
-        return none
-    a, b, q = left[pair], right[pair + 1], lv_row[gap[pair]]
+    first_at = np.maximum.accumulate(np.where(new, at, 0))
+    if wind:  # (each crossing's way up or down: in from where the count leaves 0, out where it's back at 0)
+        d = np.sign(yb - ya)[order].astype(np.int64)
+        run = np.cumsum(d)
+        run -= (run - d)[first_at]
+        was = run - d
+        ins, outs = np.flatnonzero((was == 0) & (run != 0)), np.flatnonzero((was != 0) & (run == 0))
+        wind = len(ins) == len(outs)  # (always, for closed loops; else even-odd as a fallback)
+        if wind:
+            if not len(ins):
+                return none
+            a, b, q = left[ins], right[outs], lv_row[gap[ins]]
+    if not wind:
+        rank = at - first_at
+        pair = np.flatnonzero((rank % 2 == 0) & np.append(~new[1:], False))
+        if not len(pair):
+            return none
+        a, b, q = left[pair], right[pair + 1], lv_row[gap[pair]]
     # merge_spans row by row: the running end compared as ranks, so one row's ends never reach the next row
     order = np.lexsort((b, a, q))
     a, b, q = a[order], b[order], q[order]
@@ -2599,12 +2613,14 @@ def custom_notes_groups(sh, ppq):
         turn_lap = np.where(groups == 0, 0, turn_lap)  # (the outline takes no turns: one channel, hunt)
     else:
         out = groups * n + turn
-    if has_pattern(sh) and len(np.unique(out)) > COLOURS:  # (Nested / Tiles / Ripples colours x Colours turns too
-        # many to pair: mixed, colour + turn going round, else all past the 15th merged into one, user 2026-10-18)
-        if sh.get("apart") and sh["fill"] in ("fill", "spam"):
-            out = np.where(groups == 0, 0, 1 + (groups - 1 + turn) % (COLOURS - 1)).astype(np.int64)
-        else:
-            out = (groups + turn) % COLOURS
+    most = sh.get("_most", COLOURS)  # (16 with "Use channel 10": App's all_notes)
+    if has_pattern(sh) and len(np.unique(out)) > most:  # (Nested / Tiles / Ripples colours x Colours turns too many
+        # to pair: the pairs go round the colours, else all past the 15th merged into one, user 2026-10-18)
+        inner = groups != 0 if sh.get("apart") and sh["fill"] in ("fill", "spam") else np.ones(len(out), bool)
+        room = most - 1 if not inner.all() else most  # (the outline keeps colour 0 to itself)
+        rank = np.unique(out[inner], return_inverse=True)[1].reshape(-1)  # (pairs counted, none skipped)
+        out = out.copy()
+        out[inner] = rank % room + (most - room)
     if lap.any() and len(turn_lap):  # (a Nested / Tiles round and a Colours round: each pair its own round, as
         lo = int(turn_lap.min())  # one number)
         turn_lap = lap * (int(turn_lap.max()) - lo + 1) + turn_lap - lo

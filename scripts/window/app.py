@@ -16,7 +16,7 @@ from tkinter import ttk, messagebox
 import numpy as np
 
 from files.lang import size as lang_size, tr, trn
-from notes.areas import most_colours
+from notes.areas import ALL_COLOURS, most_colours
 from notes.custom import (ROUND, CUSTOM_DEFAULTS, capped_colours, custom_note_count, has_pattern, set_key_top,
                           tracks_apart)
 from window import big_ask, look
@@ -66,7 +66,7 @@ from notes.between import (copied as between_copied, keep_pushes, push_sizes, sy
                            whole_groups)
 from window.app_pictures import Pictures
 from window.app_playback import Playback
-from window.history import HistoryPanel
+from window.history import CH10_OFF, HistoryPanel
 from roll.pianoroll import PianoRoll
 from roll.roll_draw import painting_order
 from files import errors, speed
@@ -101,7 +101,6 @@ DRAW_TOOLS = [("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"), 
               ("curve", tr("app.curve"), "c"), ("arc", tr("app.arc"), "a"), ("custom", tr("app.custom_shape"), "s"),
               ("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q"), ("funnel", tr("app.funnel"), "n"),
               ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h"), ("picture", tr("app.picture"), "i")]
-CH10_OFF = "ch10_off"  # (an undo step's mark: made by unticking "Use channel 10", App.on_use_ch10)
 MAX_POINT_BOXES = 40  # a curve with more points than this lists none in the panel (a line saying so instead)
 CHANNEL_CHOICES = [
     ("raw", tr("app.as_drawn"),
@@ -136,7 +135,9 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     # parts' rounds too, merge.part_rows; an Add between step = one channel, its round = its group's: in_rounds)
     rounds = rounds and mode == "auto"
     took = [rounds and has_colours(sh) and team is None for sh, team in zip(shapes, teams)]
-    got = [notes_tracks(dict(sh, _rounds=True) if r else sh) for sh, r in zip(shapes, took)]
+    wide = all16 and mode == "auto"  # (a Nested / Tiles / Ripples fill with Colours: its pairs go round 16 colours)
+    shapes_as = [dict(sh, _most=ALL_COLOURS) if wide and has_pattern(sh) and sh.get("cycle") else sh for sh in shapes]
+    got = [notes_tracks(dict(sh, _rounds=True) if r else sh) for sh, r in zip(shapes_as, took)]
     laps = [np.asarray(t, np.int64) // ROUND if r and t is not None else None for (_, t), r in zip(got, took)]
     got = [(n, t % ROUND) if lap is not None else (n, t) for (n, t), lap in zip(got, laps)]
     if rounds:

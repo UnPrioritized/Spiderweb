@@ -1526,6 +1526,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.reset_centre(self.app.selected())
             return
         if isinstance(hid, tuple) and hid[0] == "ripple":  # a Ripples source's centre point: its menu
+            self.app.commit_typing()  # (a number typed for the picked source goes to it first, hunt)
             self.ripple_menu(self.app.selected(), hid[1], e)
             return
         if isinstance(hid, tuple) and self.app.selected()["kind"] == "custom":  # a picked curve stroke's point

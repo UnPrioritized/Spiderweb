@@ -104,24 +104,50 @@ def set_source(sh, key, n, value):
     sh["ripples"] = own_list(sh["ripples"], key, n, value)
 
 
-def source_middles(sh):
-    """[(u, v), ...]: each source's middle in the shape's box, in the drawing's order. Remembered."""
+def recall(cache, key):
+    """What remember kept under key (None: nothing), now counted as used last."""
+    got = cache.pop(key, None)
+    if got is not None:
+        cache[key] = got
+    return got
+
+
+def remember(cache, key, value, most=30):
+    """value kept in cache under key; past `most` the one used longest ago goes (forgetting them all made a heavy
+    shape's rings worked out again whenever it was clicked, hunt)."""
+    while len(cache) >= most:
+        cache.pop(next(iter(cache)))
+    cache[key] = value
+    return value
+
+
+def layout(sh):
+    """(each source's middle (u, v) in the shape's box in the drawing's order, a frame drawn round sources): only
+    which loops hold which, no rings (the side panel asks at every refresh). Remembered."""
     key = json.dumps([sh["strokes"], sh["pts"], sh.get("round")])
-    got = _middles.get(key)
+    got = recall(_middles, key)
     if got is not None:
         return got
-    if len(_middles) > 30:
-        _middles.clear()
     view, to_uv = view_of(sh), frame_to_uv(sh["pts"])
-    found = {}
+    found, framed = {}, False
     if view[1] > 0 and to_uv:
         a, c = view
-        for _, sources in parts(view_loops(sh, view)):
+        for frame, sources in parts(view_loops(sh, view)):
+            framed = framed or frame is not None
             for n, src in sources:
                 x, y = middle(src[0])
                 found[n] = tuple(float(w) for w in to_uv(x - a * y / c, y / c))
-    got = _middles[key] = [found[n] for n in sorted(found)]
-    return got
+    return remember(_middles, key, ([found[n] for n in sorted(found)], framed))
+
+
+def source_middles(sh):
+    """[(u, v), ...]: each source's middle in the shape's box, in the drawing's order."""
+    return layout(sh)[0]
+
+
+def framed(sh):
+    """A frame is drawn round the sources (not lone loops growing free): Cut at the outline means something."""
+    return layout(sh)[1]
 
 
 def centre_uv(sh, n):
@@ -335,28 +361,29 @@ def to_bp_loops(loops, view):
     return out
 
 
-def spans_of(loops_bp, ppq):
-    """(start, end, key) of closed loops in beats / pitch, filled even-odd (nested.loop_spans)."""
+def spans_of(loops_bp, ppq, wind=False):
+    """(start, end, key) of closed loops in beats / pitch, filled even-odd (nested.loop_spans). wind: Overlaps
+    cancel out off, every area closed in (where a loop crosses itself and the holes too: nonzero)."""
     if not loops_bp:
         return np.zeros((0, 3), np.int64)
     ps = np.concatenate(loops_bp)[:, 1]
     q0, q1 = max(0, pitch_of(float(ps.min()))), min(TOP_KEY, pitch_of(float(ps.max())))
-    found = rows_spans(poly_edges(loops_bp), q0, q1, ppq)
+    found = rows_spans(poly_edges(loops_bp), q0, q1, ppq, wind)
     return np.asarray(found, np.int64).reshape(-1, 3)[:, [1, 2, 0]]
 
 
-def union_spans(sets, ppq):
+def union_spans(sets, ppq, wind=False):
     """Several sets of closed loops (beats / pitch), each filled even-odd, together (where any of them is): one
     pass over the key rows for them all, each set moved along time into a lane of its own so they can't cancel each
     other out, then moved back (a pass per source was most of the time with many sources)."""
     if len(sets) == 1:
-        return spans_of(sets[0], ppq)
+        return spans_of(sets[0], ppq, wind)
     lows = [math.floor(min(float(p[:, 0].min()) for p in s)) for s in sets]
     wide = max(float(max(p[:, 0].max() for p in s)) - lo for s, lo in zip(sets, lows)) + 2
     lane = int(math.ceil(wide))
     shifts = [j * lane - lo for j, lo in enumerate(lows)]
     moved = [p + np.array([sh, 0.0]) for s, sh in zip(sets, shifts) for p in s]
-    found = spans_of(moved, ppq)
+    found = spans_of(moved, ppq, wind)
     if not len(found):
         return found
     j = np.clip(found[:, 0] // (lane * ppq), 0, len(sets) - 1)
@@ -378,12 +405,11 @@ def ripple_rings(sh, ppq):
     frame), framed = a frame was drawn round them (not the lone ones). Remembered."""
     cfg = sh["ripples"]
     shaped = {k: v for k, v in cfg.items() if k not in RECOLOUR}
-    key = (json.dumps([sh["strokes"], sh["pts"], shaped, sh.get("round")]), ppq)
-    got = _rings.get(key)
+    wind = bool(sh.get("union"))  # (Overlaps cancel out off: every area closed in, like Nested)
+    key = (json.dumps([sh["strokes"], sh["pts"], shaped, sh.get("round")]), wind, ppq)
+    got = recall(_rings, key)
     if got is not None:
         return got
-    if len(_rings) > 30:
-        _rings.clear()
     got = []
     view = view_of(sh)
     if view[1] > 0:
@@ -391,7 +417,7 @@ def ripple_rings(sh, ppq):
         for frame, sources in parts(view_loops(sh, view)):
             cut = frame is not None and cfg["trim"]
             if cut:
-                area = merged_rows(spans_of(to_bp_loops([frame], view), ppq))
+                area = merged_rows(spans_of(to_bp_loops([frame], view), ppq, wind))
                 area = cut_out(area, taken) if len(taken) and len(area) else area
                 keep = (lambda s, area=area: within(s, area))
             else:  # (no frame, or Cut at the outline off: the rings go as far as they grow, user)
@@ -401,18 +427,13 @@ def ripple_rings(sh, ppq):
                 area = merged_rows(np.concatenate([drawn] + pieces))
             taken = merged_rows(np.concatenate([taken, area]))
             got.append((pieces, k1, drawn, frame is not None))
-    _rings[key] = got
-    return got
-
-
-def uses_auto(sh, ppq):
-    """Auto (fill the frame) means something here: Cut at the outline on, and a frame drawn round the sources."""
-    return sh["ripples"]["trim"] and any(framed for *_, framed in ripple_rings(sh, ppq))
+    return remember(_rings, key, got)
 
 
 def make_rings(sh, cfg, frame, sources, view, keep, ppq):
     """(pieces, k1, drawn) of one frame (ripple_rings), each put through keep (cut to the frame / off what earlier
     frames took). frame None = not cut to one: Grow to, never Auto."""
+    wind = bool(sh.get("union"))
     mids = centres(sh, sources, view)
     turns = [source_turn(cfg, n) for n, _ in sources]
     fill = cfg["auto"] and frame is not None
@@ -429,11 +450,11 @@ def make_rings(sh, cfg, frame, sources, view, keep, ppq):
             moved = [np.column_stack([c[0] + co * (p[:, 0] - c[0]) - si * (p[:, 1] - c[1]),
                                       c[1] + si * (p[:, 0] - c[0]) + co * (p[:, 1] - c[1])]) for p in src]
             sets.append(to_bp_loops(moved, view))
-        ring = union_spans(sets, ppq)
+        ring = union_spans(sets, ppq, wind)
         piece = cut_out(ring, covered) if len(covered) and len(ring) else ring
         covered = merged_rows(np.concatenate([covered, ring]))
         pieces.append(keep(piece))
-    drawn = keep(union_spans([to_bp_loops(src, view) for _, src in sources], ppq))
+    drawn = keep(union_spans([to_bp_loops(src, view) for _, src in sources], ppq, wind))
     return pieces, k1, drawn
 
 
