@@ -17,7 +17,8 @@ it; the ring at the drawn outline isn't turned, user), "spacing" (-100..100: + =
 "colours", "skip" (every other ring empty), "inside" (inside the drawn sources: "rings" / "empty" / "plain" = one
 colour), "at" ([[u, v] or None, ...] in the shape's box, one per source in the drawing's order, which flips and
 moves don't change; missing = its middle), "turns" ([None (= Turn) / "other" (= -Turn) / degrees, ...] per source,
-the same way)}.
+the same way), "trim" (True = Cut at the outline: rings stop at their frame; off = they grow past it to Grow to)}.
+A drawing with no frame (no loop holds another) grows rings out of every loop to Grow to, uncut.
 Colours count from the drawn outline: the ring just inside it is colour 0, so Steps / Grow to don't change it."""
 
 import json
@@ -31,7 +32,7 @@ from notes.paths import TOP_KEY, pitch_of
 
 INSIDES = ("rings", "empty", "plain")
 RIPPLES_DEFAULTS = {"steps": 60, "grow": 5.0, "auto": True, "edge": True, "turn": 0.0, "spacing": 0, "colours": 4,
-                    "skip": False, "inside": "rings"}
+                    "skip": False, "inside": "rings", "trim": True}
 MOST_STEPS = 120
 MOST_COLOURS = 15
 MOST_GROW = 50.0  # (5000 %)
@@ -57,7 +58,7 @@ def clean_ripples(c):
         out["colours"] = max(1, min(MOST_COLOURS, int(c.get("colours", out["colours"]))))
     except (TypeError, ValueError, OverflowError):
         return None
-    for k in ("auto", "edge", "skip"):
+    for k in ("auto", "edge", "skip", "trim"):
         if k in c:
             out[k] = c[k] is True
     if c.get("inside") in INSIDES:
@@ -200,7 +201,8 @@ def loop_area(p):
 
 def parts(loops):
     """[(frame loop, [(n, [its outline, the loops inside it...]), ...]), ...]: every frame with its sources, n =
-    the source's place in the drawing's order (counted over all frames)."""
+    the source's place in the drawing's order (counted over all frames). No loop holding another: [(None, [every
+    loop as a source])] (rings grow out from them with no frame, user)."""
     if not loops:
         return []
     allp = np.concatenate(loops)
@@ -229,8 +231,13 @@ def parts(loops):
             mine = [j for j in holders[i] if j in sources]
             if mine:
                 sources[min(mine, key=lambda j: areas[j])].append(loops[i])
+    # (no loop holds another: each is a source, no frame; an empty frame beside a filled one stays empty, user)
+    lone = [] if sources else list(frames)
+    for i in lone:
+        sources[i] = [loops[i]]
     order = {i: n for n, i in enumerate(sorted(sources))}
-    return [(loops[f], [(order[i], sources[i]) for i in srcs]) for f, srcs in frames.items() if srcs]
+    out = [(loops[f], [(order[i], sources[i]) for i in srcs]) for f, srcs in frames.items() if srcs]
+    return out + ([(None, [(order[i], sources[i]) for i in lone])] if lone else [])
 
 
 def middle(p):
@@ -366,9 +373,9 @@ def within(spans, area):
 
 
 def ripple_rings(sh, ppq):
-    """[(pieces, k1, drawn), ...] for each frame: pieces[k] = ring k's own stretches (only where no smaller ring is,
-    cut to the frame), k1 = the ring at the drawn outline, drawn = the drawn sources' insides (cut to the frame).
-    Remembered."""
+    """[(pieces, k1, drawn, framed), ...] for each frame: pieces[k] = ring k's own stretches (only where no smaller
+    ring is, cut to the frame), k1 = the ring at the drawn outline, drawn = the drawn sources' insides (cut to the
+    frame), framed = a frame was drawn round them (not the lone ones). Remembered."""
     cfg = sh["ripples"]
     shaped = {k: v for k, v in cfg.items() if k not in RECOLOUR}
     key = (json.dumps([sh["strokes"], sh["pts"], shaped, sh.get("round")]), ppq)
@@ -382,18 +389,34 @@ def ripple_rings(sh, ppq):
     if view[1] > 0:
         taken = np.zeros((0, 3), np.int64)  # (frames that overlap: the earlier one keeps the overlap)
         for frame, sources in parts(view_loops(sh, view)):
-            area = merged_rows(spans_of(to_bp_loops([frame], view), ppq))
-            area = cut_out(area, taken) if len(taken) and len(area) else area
+            cut = frame is not None and cfg["trim"]
+            if cut:
+                area = merged_rows(spans_of(to_bp_loops([frame], view), ppq))
+                area = cut_out(area, taken) if len(taken) and len(area) else area
+                keep = (lambda s, area=area: within(s, area))
+            else:  # (no frame, or Cut at the outline off: the rings go as far as they grow, user)
+                keep = (lambda s, taken=taken: cut_out(s, taken) if len(s) and len(taken) else s)
+            pieces, k1, drawn = make_rings(sh, cfg, frame if cut else None, sources, view, keep, ppq)
+            if not cut:
+                area = merged_rows(np.concatenate([drawn] + pieces))
             taken = merged_rows(np.concatenate([taken, area]))
-            got.append(make_rings(sh, cfg, frame, sources, view, area, ppq))
+            got.append((pieces, k1, drawn, frame is not None))
     _rings[key] = got
     return got
 
 
-def make_rings(sh, cfg, frame, sources, view, area, ppq):
+def uses_auto(sh, ppq):
+    """Auto (fill the frame) means something here: Cut at the outline on, and a frame drawn round the sources."""
+    return sh["ripples"]["trim"] and any(framed for *_, framed in ripple_rings(sh, ppq))
+
+
+def make_rings(sh, cfg, frame, sources, view, keep, ppq):
+    """(pieces, k1, drawn) of one frame (ripple_rings), each put through keep (cut to the frame / off what earlier
+    frames took). frame None = not cut to one: Grow to, never Auto."""
     mids = centres(sh, sources, view)
     turns = [source_turn(cfg, n) for n, _ in sources]
-    grow = auto_grow(frame, sources, mids, [bool(t) for t in turns]) if cfg["auto"] else cfg["grow"]
+    fill = cfg["auto"] and frame is not None
+    grow = auto_grow(frame, sources, mids, [bool(t) for t in turns]) if fill else cfg["grow"]
     sizes, k1 = ring_sizes(cfg, grow)
     way = -1 if mirrored(sh) else 1  # (a flipped shape turns the other way: its fill is a mirror image)
     covered = np.zeros((0, 3), np.int64)
@@ -409,20 +432,21 @@ def make_rings(sh, cfg, frame, sources, view, area, ppq):
         ring = union_spans(sets, ppq)
         piece = cut_out(ring, covered) if len(covered) and len(ring) else ring
         covered = merged_rows(np.concatenate([covered, ring]))
-        pieces.append(within(piece, area))
-    drawn = within(union_spans([to_bp_loops(src, view) for _, src in sources], ppq), area)
+        pieces.append(keep(piece))
+    drawn = keep(union_spans([to_bp_loops(src, view) for _, src in sources], ppq))
     return pieces, k1, drawn
 
 
 def edge_outline(sh):
-    """The loops the outline gate shrinks (custom.edge_loops), in beats / pitch: only the frames (the sources are
-    filled with rings, not holes), and with Inside the sources "empty" the sources too."""
+    """The loops the outline gate shrinks (custom.edge_loops), in beats / pitch: only the frames the rings are cut
+    to (the sources are filled with rings, not holes), and with Inside the sources "empty" the sources too."""
     view = view_of(sh)
     if view[1] <= 0:
         return []
     out = []
     for frame, sources in parts(view_loops(sh, view)):
-        loops = [frame] + ([p for _, src in sources for p in src] if sh["ripples"]["inside"] == "empty" else [])
+        loops = [frame] if frame is not None and sh["ripples"]["trim"] else []
+        loops += [p for _, src in sources for p in src] if sh["ripples"]["inside"] == "empty" else []
         out += [p.tolist() for p in to_bp_loops(loops, view)]
     return out
 
@@ -433,7 +457,7 @@ def ripple_spans(sh, ppq):
     rounds = bool(sh.get("_rounds"))
     every = 2 if cfg["skip"] else 1
     out = []
-    for pieces, k1, drawn in ripple_rings(sh, ppq):
+    for pieces, k1, drawn, _ in ripple_rings(sh, ppq):
         lift = (k1 // every // cfg["colours"] + 1) * cfg["colours"]  # (keeps every turn >= 0, ring k1 colour 0)
         for k, piece in enumerate(pieces):
             d = k1 - k  # (the ring just inside the drawn outline first)

@@ -10,7 +10,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import frame_to_uv
 from notes.ripples import (INSIDES, MOST_COLOURS, MOST_GROW, MOST_STEPS, OTHER, RIPPLES_DEFAULTS, handle_spots,
-                           ripple_rings, set_source, source_turn)
+                           ripple_rings, set_source, source_turn, uses_auto)
 from window import look
 from window.panel_nested import NOTES_CHOICES, drop_row
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
@@ -24,7 +24,7 @@ BOXES = [
     [("grow", "ripples_grow", "%", 100, MOST_GROW * 100, (10, 100, 1), lambda v: round(v * 100, 6),
       lambda x: x / 100)],
 ]
-TICKS = [("edge", "ripples_edge"), ("skip", "ripples_skip")]
+TICKS = [("trim", "ripples_trim"), ("edge", "ripples_edge"), ("skip", "ripples_skip")]
 TURN_WAYS = ("same", "other", "own")  # (the picked source's Turn dropdown)
 PICKED_LIMITS = {"turn": (-180, 180, (1, 10, 0.1)), "u": (-1000, 1000, (1, 10, 0.1)), "v": (-1000, 1000, (1, 10, 0.1))}
 RIPPLES_UNDO = tr("panel_custom.ripples")
@@ -70,6 +70,7 @@ class RipplesPanel:
                                     command=lambda: self.set_ripples("auto", self.ripples_auto_var.get()))
                 b.grid(row=0, column=3, columnspan=3, sticky="w", padx=(12, 0))
                 Tooltip(b, tr("panel_custom.ripples_auto_tip"))
+                self.ripples_auto_tick = b
             self.ripples_rows.append(row)
         self.ripples_table = list(self.ripples_rows)  # (lined up with the Nested / Tiles ones, panel_custom)
         for key, text in TICKS:
@@ -224,7 +225,11 @@ class RipplesPanel:
                 e.config(style="TEntry")
         auto = cfg.get("auto", True)
         self.ripples_auto_var.set(auto)
-        self.ripples_boxes["grow"][0].config(state="disabled" if auto else "normal")
+        # (Auto fills a frame the rings are cut to: none drawn, or Cut at the outline off = Grow to is used)
+        usable = cfg.get("trim", True) and (t is self.custom_defaults or not t.get("ripples")
+                                            or uses_auto(t, self.ppq))
+        self.ripples_auto_tick.config(state="normal" if usable else "disabled")
+        self.ripples_boxes["grow"][0].config(state="disabled" if auto and usable else "normal")
         for key, var in self.ripples_ticks.items():
             var.set(bool(cfg.get(key, RIPPLES_DEFAULTS[key])))
         self.ripples_inside_box.current(INSIDES.index(cfg.get("inside", "rings")))

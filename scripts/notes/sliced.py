@@ -400,12 +400,15 @@ def knife_cut(notes, tracks, halves, d, ppq):
 
 
 def tooled(sh):
-    """Do sh's notes come from glue / note tool pages (its own, or its whole's for a piece)? Then the Slice tool cuts
-    its notes, not its drawing (user, 2026-10-06: they can sit far off the drawing)."""
-    if sh.get("fx") or sh.get("glue"):
+    """Do sh's notes come from glue / note tool pages or a Ripples fill (its own, or its whole's for a piece)? Then
+    the Slice tool cuts its notes, not its drawing (user, 2026-10-06: they can sit far off the drawing; Ripples: its
+    rings grow past it, and half a drawn heart would grow other rings)."""
+    def notes_apart(s):
+        return bool(s.get("fx") or s.get("glue") or s.get("ripples"))
+    if notes_apart(sh):
         return True
     got = source(sh) if sh.get("cut") else None
-    return bool(got and (got[0].get("fx") or got[0].get("glue")))
+    return bool(got and notes_apart(got[0]))
 
 
 def notes_across(notes, a, b, ppq):
