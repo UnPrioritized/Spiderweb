@@ -115,7 +115,7 @@ for _id, _section in TOPIC_LIST:
     TOPICS.append(_t)
 for _t in TOPICS:  # "page" = the text with its clips (Help window); "text" = without (drawer's help, search)
     _t["page"] = _t["text"]
-    _t["text"] = re.sub(r"\n*\[clip:[^\]]*\]\n*", "\n\n", _t["text"]).strip()
+    _t["text"] = re.sub(r"(?m)^## ", "", re.sub(r"\n*\[clip:[^\]]*\]\n*", "\n\n", _t["text"])).strip()
 BY_ID = {t["id"]: t for t in TOPICS}
 # tips that follow another one: "Got it" on the first shows the second (the first time only)
 NEXT = {"welcome": "view"}

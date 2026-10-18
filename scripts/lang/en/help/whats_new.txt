@@ -1,12 +1,12 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
-Version 1.7.0
+## Version 1.7.0
 
 What's new:
 
 • Inside fill Ripples: rings grow out from the shapes you draw inside a custom shape's outline, each ring a bigger copy of its shape and a colour of its own. Where the rings of two shapes meet, the smaller one wins. Steps, Colours, Spacing, Turn for spirals, and Grow to. Without an outer outline, or with Cut at the outline unticked, the rings grow out freely. Each shape's centre point is a handle: drag it, or click it to give that shape its own turn and centre.
 
-Version 1.6.0
+## Version 1.6.0
 
 What's new:
 
@@ -34,7 +34,7 @@ What's new:
 
 • Fixes: every shape can be moved down to the bottom key; the box round pasted notes stays round them; Gate sensitive merge no longer changes note colours; Ctrl+Z in the image window no longer undoes the piano roll; one damaged saved colour list, pattern or rhythm no longer loses the rest; windows fit on small screens; Spiderweb starts on Linux with older Python; error logs no longer show your folder paths.
 
-Version 1.5.4
+## Version 1.5.4
 
 What's new:
 
@@ -48,7 +48,7 @@ What's new:
 
 • Fixes: in Hz bass chords, a note cut by another tone's hit keeps its longer gate in the next note; Hz shape keeps its line on an Hz bass with no notes yet and after undoing the first note, and dragging stays smooth with many keys.
 
-Version 1.5.3
+## Version 1.5.3
 
 What's new:
 
@@ -60,7 +60,7 @@ What's new:
 
 • Fixes: Spiderweb could close by itself while an Hz bass preview played after picking another Hz bass.
 
-Version 1.5.2
+## Version 1.5.2
 
 What's new:
 
@@ -74,7 +74,7 @@ What's new:
 
 • Fixes: Hz bass notes stay on their beats when a shape's left side is dragged or its text is retyped; text erased and typed again keeps its settings; a shape fits its notes again after its box is changed.
 
-Version 1.5.1
+## Version 1.5.1
 
 Before you update:
 
@@ -118,7 +118,7 @@ What's new:
 
 • Many fixes.
 
-Version 1.5.0
+## Version 1.5.0
 
 Before you update: a lot changed inside Spiderweb, so a project or shape made in 1.4.0 can come out a little different. Keep a copy of your projects, your autosave and your shapes folder, and keep the old Spiderweb.exe for a while so you can compare. A project saved in 1.5.0 may not open fully in 1.4.0.
 
@@ -172,7 +172,7 @@ What's new:
 
 • Linux: Spiderweb should run on Linux too. Nobody has tested it there yet, so please report how it goes.
 
-Version 1.4.0
+## Version 1.4.0
 
 • Hz bass tool (H): spam so fast it sounds like a tone. Drag where it starts on the piano roll, then place notes in the window that opens (chords, slides). The red line there is the tone you really hear. Preview plays the Hz bass alone through a built-in synth with your soundfont.
 
@@ -214,7 +214,7 @@ Version 1.4.0
 
 • Join, Split and Turn into live shape left the Shapes box: they're in the right-click menu and on Ctrl+G, Ctrl+Shift+G and Ctrl+L.
 
-Version 1.3.0
+## Version 1.3.0
 
 • Polygon tool (Q), next to Circle, instead of Square and Triangle: pick how many points it has and its kind in the panel (polygon, star, or crossing star). Its sides can have a shape or a pattern (right-click → Formula).
 
@@ -244,7 +244,7 @@ Version 1.3.0
 
 • Curves fitted from drawn paths follow long, wiggly paths with fewer anchors, and sharp corners stay sharp.
 
-Version 1.2.0
+## Version 1.2.0
 
 • Inside fill: Spam ends (round, keep, drop, no slivers, stretch), Normal / Outline, Overlaps cancel out, and outlines with gaps can be filled.
 
@@ -258,10 +258,10 @@ Version 1.2.0
 
 • History panel, Keys 128 / 256, picking shapes by their notes, Paste from Domino can start at the bar line, more tips, and typing anywhere in Help searches.
 
-Version 1.1.0
+## Version 1.1.0
 
 • Copy to Domino (Ctrl+Shift+C) and Paste from Domino (Ctrl+Shift+V).
 
-Version 1.0.0
+## Version 1.0.0
 
 • The first version.

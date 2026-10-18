@@ -340,6 +340,7 @@ class HelpWindow(tk.Toplevel):
         self.text.bind("<Configure>", self.banner_later, add="+")
         self.text.tag_configure("title", font=look.font(14, "bold"), spacing3=8)
         self.text.tag_configure("section", font=look.font(9), foreground=look.HINT)
+        self.text.tag_configure("heading", font=look.font(12, "bold"), spacing1=6)
         self.text.tag_configure("hit", background=look.SEARCH_HIT)
         self.text.tag_configure("link", foreground=look.LINK)
         self.text.tag_configure("hover", underline=True)
@@ -456,6 +457,9 @@ class HelpWindow(tk.Toplevel):
             for i in range(1, int(t.index("end").split(".")[0])):
                 if t.get(f"{i}.0") == "•":
                     t.tag_add("bullet", f"{i}.0", f"{i}.end")
+                elif t.get(f"{i}.0", f"{i}.3") == "## ":  # ("## Name" line = a heading)
+                    t.delete(f"{i}.0", f"{i}.3")
+                    t.tag_add("heading", f"{i}.0", f"{i}.end")
             for w in set(self.query.get().lower().split()):
                 start = "1.0"
                 while True:

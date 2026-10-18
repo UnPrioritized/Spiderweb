@@ -6,9 +6,10 @@ Notes: Fill makes one long note per key in each part. Spam chops the whole insid
 
 The Normal / Outline dropdown next to them works like Fill's and Spam's: with Outline, the edge gets a channel of its own, and the Outline gate makes that edge thicker. The parts fill what's left inside.
 
-Nested
+## Nested
 
 The inside is filled with copies of the shape, each one inside the one before. Steps is how many copies, the shape itself counts as the first one. The last copy is drawn on top.
+[clip:nested-scaling]
 
 Shrink by picks how the copies are made:
 
@@ -34,9 +35,10 @@ Copy angle (Scaling only): turns the copies by this much, round the centre point
 
 Colours: how many channels the steps take turns over. Every other one empty leaves every other step without notes, so the copies show as separate rings.
 
-Tiles
+## Tiles
 
 The inside is filled with another shape repeated like wallpaper and cut where it meets the outline.
+[clip:tiles-bricks]
 
 Tile shape: the shape each tile is made of, from your library. Height (keys) and Length (ticks) are one tile's size. The two Gap boxes are the empty keys between rows and the empty ticks between tiles side by side.
 
