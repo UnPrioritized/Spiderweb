@@ -3,7 +3,7 @@
 import re
 import sys
 import tkinter as tk
-from tkinter import ttk
+from tkinter import font as tkfont, ttk
 
 from files.lang import size as lang_size, tr
 from files.mathexpr import calc, fmt
@@ -492,21 +492,50 @@ class StatusLine(ttk.Label):
         super().__init__(master, **kw)
         self._normal = ""
         self._job = None
+        self._full = kw.get("text", "")  # (the text before cutting it short for the reserved right end)
+        self.reserve = 0  # pixels kept free at the right end (the red "Overloaded"): longer text ends in "…"
+        self.bind("<Configure>", lambda e: self.reserve and self._put(self._full), add="+")
 
     def configure(self, cnf=None, **kw):
-        if "text" in kw or (isinstance(cnf, dict) and "text" in cnf):
+        if isinstance(cnf, dict) and "text" in cnf:
+            kw, cnf = dict(cnf, **kw), None
+        if "text" in kw:
             if self._job:
                 self.after_cancel(self._job)
             self._job = self.after(self.HOLD_MS, self.release)
+            self._put(kw.pop("text"))
+            if not kw:
+                return None
         return super().configure(cnf, **kw)
 
     config = configure
+
+    def keep_free(self, px):
+        """Keep px pixels free at the right end (0 = none); the text is cut short to fit beside them."""
+        self.reserve = px
+        self._put(self._full)
+
+    def _put(self, text):
+        self._full = text = str(text)
+        room = self.winfo_width() - self.reserve
+        if self.reserve and text:
+            font = tkfont.Font(font=self.cget("font") or "TkDefaultFont")
+            if font.measure(text) > room:
+                lo, hi = 0, len(text)  # (the longest start that fits with "…")
+                while lo < hi:
+                    mid = (lo + hi + 1) // 2
+                    if font.measure(text[:mid] + "…") <= room:
+                        lo = mid
+                    else:
+                        hi = mid - 1
+                text = text[:lo].rstrip() + "…"
+        super().configure(text=text)
 
     def show(self, text):
         """The line's usual text: shown now, or when the message on it is done."""
         self._normal = text
         if not self._job:
-            super().configure(text=text)
+            self._put(text)
 
     def release(self):
         """The message is done (its time is up, or e.g. a busy "Copying…" ended): the usual text back."""
@@ -514,7 +543,7 @@ class StatusLine(ttk.Label):
             self.after_cancel(self._job)
             self._job = None
         if self.winfo_exists():
-            super().configure(text=self._normal)
+            self._put(self._normal)
 
     def destroy(self):
         if self._job:

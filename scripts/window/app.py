@@ -524,7 +524,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             # (columnspan / pady set again: grid keeps the two-row ones, which put it over the gear's column)
             self.option_bar.grid(row=0, column=1, columnspan=1, sticky="e", pady=0)
         else:
-            self.option_bar.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+            # (all 3 columns: the Help + Settings corner sits on row 0 only, so row 1 gets the whole width)
+            self.option_bar.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
     def _build_side(self):
         """The side panel: scrolls (scrollbar, mouse wheel) when everything in it doesn't fit; otherwise the help

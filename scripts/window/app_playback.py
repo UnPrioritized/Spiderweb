@@ -120,6 +120,8 @@ class Playback:
                 self.overload_label.place(relx=1.0, rely=0.5, anchor="e", x=-6)
             else:
                 self.overload_label.place_forget()
+            # (a long status message stops short of it with "…" instead of running under it)
+            self.status.keep_free(self.overload_label.winfo_reqwidth() + 18 if text else 0)
             if self.builtin_window is not None:
                 self.builtin_window.refresh()
 
