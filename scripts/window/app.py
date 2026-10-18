@@ -88,7 +88,7 @@ from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, fit_dropdowns, good,
-                            grid_shown, remember_good, watch_bad)
+                            grid_shown, label_column, remember_good, watch_bad)
 
 
 VEL_KEYS = ("vel0", "vel1")
@@ -755,6 +755,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._build_funnel()
         self.points_box = ttk.Frame(self.settings)
         self.points_box.pack(fill="x", pady=(6, 0))
+        label_column([lb, self.colours_word, self.shape_word, self.inside_word])  # (their boxes start at one place)
 
     def build_points(self):
         """Tick/pitch boxes for each point of the selected line or curve."""

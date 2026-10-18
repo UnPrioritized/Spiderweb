@@ -47,6 +47,14 @@ def line_up(rows, labels=()):
         row.columnconfigure(0, minsize=widest.get(0, 0))
 
 
+def label_column(labels):
+    """Labels packed at the left of their own rows: padded to the widest one, so what comes after them starts at
+    one place (like a table's first column)."""
+    widest = max(lb.winfo_reqwidth() for lb in labels)
+    for lb in labels:
+        lb.pack_configure(padx=(0, widest - lb.winfo_reqwidth()))
+
+
 def keep_width(cb):
     """This dropdown keeps the width it was given (its choices are names someone typed, not texts); a name cut off
     in its open list shows whole in a tip (ListTip)."""

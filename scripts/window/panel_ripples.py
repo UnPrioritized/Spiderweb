@@ -94,7 +94,7 @@ class RipplesPanel:
         self.ripples_rows.append(self.ripples_warn)
         self._build_picked(opts)
         for row in self.ripples_rows:
-            self.custom_rows.append((row, dict(anchor="w", padx=(20, 0), pady=(1, 0))))
+            self.custom_rows.append((row, dict(anchor="w", pady=(1, 0))))
 
     def _build_picked(self, opts):
         """The picked source's rows (a centre point clicked on the piano roll): "Picked source (2 of 3)", Turn

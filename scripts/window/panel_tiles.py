@@ -107,7 +107,7 @@ class TilesPanel:
         Tooltip(b, tr("panel_custom.tiles_whole_tip"))
         self.tiles_rows.append(b)
         for row in self.tiles_rows:
-            self.custom_rows.append((row, dict(anchor="w", padx=(20, 0), pady=(1, 0))))
+            self.custom_rows.append((row, dict(anchor="w", pady=(1, 0))))
 
     def shown_tiles(self, key, cfg):
         """A Tiles box's number as shown: keys as they are, lengths in whole ticks."""

@@ -116,7 +116,7 @@ class NestedPanel:
         Tooltip(b, tr("panel_custom.nested_skip_tip"))
         self.nested_rows.append(b)
         for row in self.nested_rows:
-            self.custom_rows.append((row, dict(anchor="w", padx=(20, 0), pady=(1, 0))))
+            self.custom_rows.append((row, dict(anchor="w", pady=(1, 0))))
 
     def sync_nested(self, t):
         """The Nested rows show t's settings (the first target's, like the other Inside rows)."""
