@@ -6,6 +6,8 @@ What's new:
 
 • Inside fill Ripples: rings grow out from the shapes you draw inside a custom shape's outline, each ring a bigger copy of its shape and a colour of its own. Where the rings of two shapes meet, the smaller one wins. Steps, Colours, Spacing, Turn for spirals, and Grow to. Without an outer outline, or with Cut at the outline unticked, the rings grow out freely. Each shape's centre point is a handle: drag it, or click it to give that shape its own turn and centre.
 
+• Settings → General → Overlapping shapes keep their colours: with Multi channel, a shape that overlaps another moves whole to the next row of channels (15 further, 16 with channel 10), so it keeps its colours.
+
 ## Version 1.6.0
 
 What's new:

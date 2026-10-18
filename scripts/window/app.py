@@ -124,12 +124,14 @@ class Stopped(Exception):
     """Notes being made in the background (App.notes_rested) aren't wanted any more."""
 
 
-def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False, order=False):
+def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False, order=False,
+              keep=False):
     """Every shape's notes together, overlaps / channels worked out: (colours each shape asks for, channel 10 used
     (slot k = channel k, slot_track_channel), rendered, slot count). all16: the project's "Use channel 10" (every
     shape may use it, not only pictures). Touches no Tk: also made in a background thread (App.notes_rested).
     quiet: every mask's own notes left out (what the masks show: App.pattern). rounds: the project's "New channels
-    each Colours round" (App.rounds_apart). order: its "Channels 1-16 in order" (App.in_order)."""
+    each Colours round" (App.rounds_apart). order: its "Channels 1-16 in order" (App.in_order). keep: Settings →
+    General "Overlapping shapes keep their colours" (render keep)."""
     team_laps = []
     teams = between_turns(shapes, team_laps)
     # (each Colours shape's notes made with their rounds, then taken off the tracks: render's rounds; a merged shape's
@@ -170,7 +172,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
                              [is_sustained(sh) or sh.get("held") is True for sh in shapes],
                              [colours_back(sh) for sh in shapes],
-                             [bool(sh.get("merge")) or has_pattern(sh) for sh in shapes], laps)
+                             [bool(sh.get("merge")) or has_pattern(sh) for sh in shapes], laps, keep)
     return wanted, use10 or all16, rendered, slots
 
 
@@ -211,6 +213,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.play_guard = tk.BooleanVar(self, value=False)  # lowered by itself while overloaded (user: off to start)
         self.play_limiter = tk.BooleanVar(self, value=False)  # (off to start, as in the driver it copies)
         self.domino256 = tk.BooleanVar(self, value=False)  # Settings → General: keys above 127 to / from Domino (mod)
+        self.keep_colours = tk.BooleanVar(self, value=False)  # Settings → General: overlapping shapes move whole to
+        # the next row of channels (render keep)
         self.overload, self.overload_text = Overload(), ""  # (red next to the Settings button while it plays)
         self.builtin_window = self.voices_entry = None  # (window/builtin_settings.py)
         self._play_job = None
@@ -1163,7 +1167,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 completed(sh)  # (with the whole's glue / note tool pages)
         if made is None:
             made = all_notes(self.shapes, self.ppq, self.keys, self.channel_mode.get(), self.channel_split,
-                             self.all16(), self.notes_tracks, rounds=self.rounds_apart(), order=self.in_order())
+                             self.all16(), self.notes_tracks, rounds=self.rounds_apart(), order=self.in_order(),
+                             keep=self.keep_colours.get())
             if self._notes_worked != worked:
                 self._notes_time = time.perf_counter() - started
         wanted, self.picture_use10, self.rendered, self.slot_count = made
@@ -1219,7 +1224,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """Everything the notes are made from (shapes_changed): a background result is used only for exactly this."""
         return (tuple(shape_key(sh) for sh in self.shapes), self.ppq, self.keys,
                 self.channel_mode.get(), SPLIT_CHOICES[max(self.split_box.current(), 0)][0], self.all16(),
-                self.rounds_apart(), self.in_order())
+                self.rounds_apart(), self.in_order(), self.keep_colours.get())
 
     def _make_coming(self, show, follow=False):
         """follow: shown when made even if the shapes have moved on since (then the next spot's are made)."""
@@ -1255,7 +1260,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         def work():
             started = time.perf_counter()
             try:
-                got = all_notes(shapes, *key[1:6], notes_tracks, rounds=key[6], order=key[7])
+                got = all_notes(shapes, *key[1:6], notes_tracks, rounds=key[6], order=key[7], keep=key[8])
                 # (the same time as shapes_changed's: making the notes only, not the orders below)
                 job["time"] = time.perf_counter() - started
                 if job["stop"]:

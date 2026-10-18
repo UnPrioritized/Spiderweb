@@ -122,6 +122,7 @@ APP_KEYS = {
     "tips_on": ("tips", "show_tips", bool),
     "tips_seen": ("tips", "seen", list),
     "domino_256": ("domino", "keys_256", bool),
+    "keep_colours": ("channels", "keep_colours", bool),
 }
 NOT_HERE = "not_in_settings_ini"  # (window key: the app settings this file couldn't take, kept in the autosave)
 # the ones the autosave keeps inside its "hz_preview" settings (1.5.1 sweep: all app-wide): window key -> key there

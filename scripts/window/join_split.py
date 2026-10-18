@@ -368,7 +368,8 @@ class JoinSplit:
             all16 = self.use_ch10.get()
             _, use10, multi, _ = all_notes(self.shapes, self.ppq, self.keys, "auto", self.channel_split, all16,
                                            self.notes_tracks, rounds=self.new_rounds.get(),
-                                           order=all16 and self.ch10_order.get())
+                                           order=all16 and self.ch10_order.get(),
+                                           keep=self.keep_colours.get())
         new = {}
         for i in got:
             rows = self.rendered[owners == i]
