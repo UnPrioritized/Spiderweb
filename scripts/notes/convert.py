@@ -23,7 +23,7 @@ from notes.tumour import LINE_KINDS
 
 CAN_TURN = LINE_KINDS + ("custom",)
 # a custom shape's own inside settings the live shape made of it keeps (besides fill / gate / align / ends)
-OWN_SETTINGS = CUSTOM_FLAGS + ("edge", "edge_mode", "range", "range_kept", "before_hz", "nested", "tiles")
+OWN_SETTINGS = CUSTOM_FLAGS + ("edge", "edge_mode", "range", "range_kept", "before_hz", "nested", "tiles", "ripples")
 
 
 def has_tumours(sh):

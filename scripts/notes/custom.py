@@ -1187,7 +1187,7 @@ def has_areas(sh):
     """Fill / Spam with areas given a colour of their own or emptied (sh["areas"]; not text or pasted notes; Nested
     fills take their place)."""
     return (bool(sh.get("areas")) and sh.get("fill") in ("fill", "spam") and not sh.get("text") and "notes" not in sh
-            and not has_nested(sh) and not has_tiles(sh))
+            and not has_nested(sh) and not has_tiles(sh) and not has_ripples(sh))
 
 
 def has_nested(sh):
@@ -1204,13 +1204,21 @@ def has_tiles(sh):
             and "notes" not in sh and not sh.get("hz") and not sh.get("nested"))
 
 
+def has_ripples(sh):
+    """Inside fill Ripples (ripples.py): Fill / Spam filled with rings growing out from the shapes drawn inside the
+    outline (as has_nested; Nested / Tiles win if a shape somehow has one too)."""
+    return (bool(sh.get("ripples")) and sh.get("fill") in ("fill", "spam") and not sh.get("text")
+            and "notes" not in sh and not sh.get("hz") and not sh.get("nested") and not sh.get("tiles"))
+
+
 def has_pattern(sh):
-    """A Nested or Tiles fill: its notes coloured like areas (coloured_spans)."""
-    return has_nested(sh) or has_tiles(sh)
+    """A Nested, Tiles or Ripples fill: its notes coloured like areas (coloured_spans)."""
+    return has_nested(sh) or has_tiles(sh) or has_ripples(sh)
 
 
 def coloured_spans(sh, ppq):
-    """(start, end, key, colour) of a shape with areas coloured by hand or a Nested / Tiles fill, else None."""
+    """(start, end, key, colour) of a shape with areas coloured by hand or a Nested / Tiles / Ripples fill, else
+    None."""
     if has_nested(sh):
         from notes.nested import nested_spans
         return nested_spans(sh, ppq)
@@ -1218,6 +1226,9 @@ def coloured_spans(sh, ppq):
         from notes.nested import centre_bp
         from notes.tiles import tiles_spans
         return tiles_spans(sh, ppq, centre_bp(sh, ppq))
+    if has_ripples(sh):
+        from notes.ripples import ripple_spans
+        return ripple_spans(sh, ppq)
     return area_spans(sh, ppq) if has_areas(sh) else None
 
 

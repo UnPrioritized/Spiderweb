@@ -26,6 +26,7 @@ from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
 from notes.nested import clean_nested
 from notes.tiles import clean_tiles
+from notes.ripples import clean_ripples
 from notes.chop import apply_chop
 from notes.claw import apply_claw
 from notes.copypath import apply_path
@@ -195,6 +196,10 @@ def clean_shape(sh):
         tiles = clean_tiles(sh.get("tiles")) if out["fill"] in ("fill", "spam") and not nested else None
         if tiles:  # Inside fill Tiles (tiles.py)
             out["tiles"] = tiles
+        ripples = (clean_ripples(sh.get("ripples")) if out["fill"] in ("fill", "spam") and not nested and not tiles
+                   else None)
+        if ripples:  # Inside fill Ripples (ripples.py)
+            out["ripples"] = ripples
         if sh.get("gate_flip") is True:  # its gates laid from the right (gateflip.py)
             out["gate_flip"] = True
         try:  # the smallest outline gate in beats (custom.grow_inward)
