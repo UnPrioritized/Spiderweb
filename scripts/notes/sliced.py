@@ -262,6 +262,30 @@ def moved(sh, d):
     return dict(sh, pts=[[b + d[0], p + d[1]] for b, p in sh["pts"]])
 
 
+def made_at_cut(sh, ppq, keys, make):
+    """A moved piece's (notes, tracks) (user, 2026-10-18: a sliced shape keeps its notes however it's moved): made
+    where it was cut, then moved along (Strum, Claw, Chop, Colours by time, the spam grid go by where the notes sit
+    in the song, and a Strum by the notes the piano roll's edges leave), cut off only at the edges where it is now.
+    make = engine's notes of a shape as it is. None: not a moved piece."""
+    d = moved_by(sh)
+    if d is None or abs(d[0]) < 1e-9 and abs(d[1]) < 1e-9:
+        return None
+    from notes.engine import cached_arrays
+    ks = np.concatenate(cached_arrays(sh["cut"]["whole"]))[:, 1]  # (the whole where it was cut: lifted onto the
+    up = max(0, math.ceil(-float(ks.min()) - 1e-9))  # keys, so none of its notes go missing there)
+    room = max(keys, math.ceil(float(ks.max()) + 1e-9) + up + 1)
+    if abs(d[0]) < 1e-9 and abs(d[1] - up) < 1e-9:  # (lifted already: made as it is)
+        return None
+    notes, tracks = make(moved(sh, (-d[0], -d[1] + up)), ppq, room)
+    notes = notes.copy()
+    notes[:, :2] += round(d[0] * ppq)
+    notes[:, 2] += round(d[1]) - up
+    keep = (notes[:, 2] >= 0) & (notes[:, 2] < keys) & (notes[:, 1] > 0)
+    notes = notes[keep]
+    notes[:, 0] = np.maximum(notes[:, 0], 0)
+    return notes, None if tracks is None else np.asarray(tracks)[keep]
+
+
 def source(sh):
     """A sliced piece -> (the shape its notes are made from: the whole, moved as far as the piece was, with its
     glue and note tool pages and the piece's other settings; its part; whether its velocities are the whole's), else

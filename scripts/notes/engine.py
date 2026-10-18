@@ -46,8 +46,8 @@ from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
 from notes.mask import clean_mask
 from notes.mould import clip_to, mould_cut, piece_loops
-from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_cut, moved_by, piece_knives, piece_notes,
-                          run_origins, source, spotted_notes, whole_made)
+from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_cut, made_at_cut, moved_by, piece_knives,
+                          piece_notes, run_origins, source, spotted_notes, whole_made)
 from notes.smooth import clean_level, smooth_path
 from notes.text import clean_text
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
@@ -850,6 +850,11 @@ def clash_levels(lists):
 
 
 def kind_notes_tracks(sh, ppq, keys):
+    got = made_at_cut(sh, ppq, keys, _kind_notes_tracks) if sh.get("cut") else None  # (a moved sliced piece)
+    return got if got is not None else _kind_notes_tracks(sh, ppq, keys)
+
+
+def _kind_notes_tracks(sh, ppq, keys):
     # cut by the Slice tool: the whole's notes on its side (sliced.py; a line too when cut from a piece as it was)
     if sh.get("cut") and (sh["kind"] in ("custom", "funnel") or (sh["cut"].get("whole") or {}).get("cut")):
         got = piece_notes(sh, ppq, keys, shape_notes_tracks)  # (the whole's glue / pages done first)
