@@ -14,6 +14,7 @@ from files.lang import tr
 from notes.envelope import env_at, env_values, paint_env, tidy_env, velocity_env
 from notes.fx import with_velocity
 from notes.pattern import loop_points
+from notes.ripples import free_span, grows_free
 from roll.roll_shared import (CTRL, DRAFT_COLOR, SHIFT, SELECTED_COLOR, SLOT_COLORS, cached_path, fade,
                               grab_while_panning, slot_colours)
 from window import look
@@ -27,6 +28,16 @@ FEWEST_PER_LOOP = 4  # (user: a little rougher is fine; 8 made 60,000 points at 
 # Bar colours, lowest first (higher ones are drawn on top): faded slots, normal slots, selected shape, shape being drawn
 LAYERS = ([(fade(f), fade(b, 0.55)) for f, b in SLOT_COLORS] + list(SLOT_COLORS) + [SELECTED_COLOR, DRAFT_COLOR])
 NORMAL, SELECTED, DRAFT = len(SLOT_COLORS), 2 * len(SLOT_COLORS), 2 * len(SLOT_COLORS) + 1
+
+
+def time_span(sh, ppq):
+    """(first, last) beat a shape's velocity line runs over: its drawing's, or its Ripples rings' when they grow
+    past it (engine makes the notes' velocities over the same span)."""
+    got = free_span(sh, ppq) if grows_free(sh) else None
+    if got:
+        return got[0] / ppq, got[1] / ppq
+    bs = [b for b, _ in cached_path(sh)]
+    return min(bs), max(bs)
 
 
 def segment(a, b, pad):
@@ -331,8 +342,7 @@ class VelocityPane(tk.Canvas):
             had = bases.get(i) if bases else None  # (a shape the end was moved over: from what it has now)
             base = had[2] if had else velocity_env(sh)
             fx = had[4] if had else sh.get("fx")
-            bs = [b for b, _ in cached_path(sh)]
-            lo, hi = min(bs), max(bs)
+            lo, hi = time_span(sh, app.ppq)
             if hi > lo:
                 pts = [[(b - lo) / (hi - lo), v] for b, v in drawn]
                 env = tidy_env(paint_env(base, pts))
@@ -361,8 +371,7 @@ class VelocityPane(tk.Canvas):
         for i, (sh, env, _, span, _) in cv["done"].items():
             if i >= len(shapes) or shapes[i] is not sh or sh.get("vel_env") is not env:
                 break
-            bs = [b for b, _ in cached_path(sh)]
-            if (min(bs), max(bs)) != span:
+            if time_span(sh, self.app.ppq) != span:
                 break
         else:
             return cv

@@ -26,7 +26,7 @@ from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
 from notes.nested import clean_nested
 from notes.tiles import clean_tiles
-from notes.ripples import clean_ripples
+from notes.ripples import clean_ripples, free_span, grows_free
 from notes.chop import apply_chop
 from notes.claw import apply_claw
 from notes.copypath import apply_path
@@ -48,7 +48,7 @@ from notes.polygon import clean_polygon, polygon_strokes
 from notes.mask import clean_mask
 from notes.mould import clip_to, mould_cut, piece_loops
 from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_cut, made_at_cut, moved_by, piece_knives,
-                          piece_notes, run_origins, source, spotted_notes, whole_made)
+                          piece_notes, run_origins, source, spotted_notes, steps_kept, whole_made)
 from notes.smooth import clean_level, smooth_path
 from notes.text import clean_text
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
@@ -149,7 +149,7 @@ def clean_shape(sh):
     cut = clean_cut(sh["cut"]) if isinstance(sh.get("cut"), dict) else None
     if cut:  # a piece cut from another shape, keeping its notes (sliced.py)
         out["cut"] = cut
-    fx = clean_fx(sh, steps=bool(cut) and whole_made(cut))
+    fx = clean_fx(sh, steps=bool(cut) and (whole_made(cut) or bool(sh.get("ripples"))))  # (sliced.steps_kept)
     if fx:  # Chop / Claw machine / Strum pages, flips and velocities after them (fx.py)
         out["fx"] = fx
     cy = clean_cycle(sh.get("cycle"))
@@ -577,7 +577,7 @@ def before_step(sh):
     pages: sliced.steps_kept)."""
     fx, last = sh["fx"], sh["fx"][-1]
     rest = dict(sh, fx=fx[:-1]) if len(fx) > 1 else {k: v for k, v in sh.items() if k != "fx"}
-    if last["tool"] in ("flip", "turn") and idle(fx[:-1]) and not (sh.get("cut") and whole_made(sh["cut"])):
+    if last["tool"] in ("flip", "turn") and idle(fx[:-1]) and not steps_kept(sh):
         return rest, None
     if last["tool"] == "flip":
         rest["_m"] = toggled(sh.get("_m"), last["axis"])
@@ -927,6 +927,8 @@ def _kind_notes_tracks(sh, ppq, keys):
         raw = path_notes(path, end_dot)
     t_lo = float(path[:, 0].min())
     t_hi = float(path[:, 0].max())
+    if grows_free(vel_sh):  # (Ripples rings past the drawing: the velocity line runs over them, velocity.time_span)
+        t_lo, t_hi = free_span(vel_sh, ppq) or (t_lo, t_hi)
     env = velocity_env(vel_sh)
     raw = note_array(raw, 3)
     if sh["kind"] in HZ_KINDS and sh.get("hz") and "notes" not in sh and not piece:  # (a Hz bass's Note length)

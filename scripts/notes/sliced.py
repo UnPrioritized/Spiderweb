@@ -215,10 +215,11 @@ def whole_made(cut):
 
 
 def steps_kept(sh):
-    """sh is a piece whose notes come from its whole's glue / pages: flipping / turning it is a flip / turn step on
-    its notes, like on a shape with pages (user, 2026-10-07: it became a shape of its own, all the whole's notes
-    back), and it stays a piece (its notes are made from its drawing turned / flipped back: engine.as_made)."""
-    return bool(sh.get("cut")) and whole_made(sh["cut"])
+    """sh is a piece whose notes come from its whole's glue / pages or its Ripples rings (the piece keeps the
+    whole's fill): flipping / turning it is a flip / turn step on its notes, like on a shape with pages (user,
+    2026-10-07: it became a shape of its own, all the whole's notes back), and it stays a piece (its notes are made
+    from its drawing turned / flipped back: engine.as_made)."""
+    return bool(sh.get("cut")) and (whole_made(sh["cut"]) or bool(sh.get("ripples")))
 
 
 def split_here_ok(sh):

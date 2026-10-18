@@ -150,6 +150,21 @@ def framed(sh):
     return layout(sh)[1]
 
 
+def grows_free(sh):
+    """Its rings aren't cut to a frame (none drawn, or Cut at the outline off): they can run past the piano roll's
+    edges, where they're cut off."""
+    return bool(sh.get("ripples")) and not (framed(sh) and sh["ripples"].get("trim", True))
+
+
+def free_span(sh, ppq):
+    """(first start, last end) ticks of rings growing free (grows_free), from tick 0 on: what a velocity line runs
+    over (the drawing's own span left the rings past it at one velocity). None: no rings."""
+    s = ripple_spans(sh, ppq)
+    if not len(s):
+        return None
+    return max(0, int(s[:, 0].min())), int(s[:, 1].max())
+
+
 def centre_uv(sh, n):
     """Source n's centre point (u, v) in the shape's box: its own, else its middle."""
     at = sh["ripples"].get("at") or []
@@ -443,13 +458,8 @@ def make_rings(sh, cfg, frame, sources, view, keep, ppq):
     covered = np.zeros((0, 3), np.int64)
     pieces = []
     for k, size in enumerate(sizes):
-        sets = []
-        for (_, src), c, t in zip(sources, mids, turns):
-            a = way * math.radians(t) * (k - k1)
-            co, si = math.cos(a) * size, math.sin(a) * size
-            moved = [np.column_stack([c[0] + co * (p[:, 0] - c[0]) - si * (p[:, 1] - c[1]),
-                                      c[1] + si * (p[:, 0] - c[0]) + co * (p[:, 1] - c[1])]) for p in src]
-            sets.append(to_bp_loops(moved, view))
+        sets = [to_bp_loops(copy_of(src, c, size, way * math.radians(t) * (k - k1)), view)
+                for (_, src), c, t in zip(sources, mids, turns)]
         ring = union_spans(sets, ppq, wind)
         piece = cut_out(ring, covered) if len(covered) and len(ring) else ring
         covered = merged_rows(np.concatenate([covered, ring]))
@@ -458,17 +468,84 @@ def make_rings(sh, cfg, frame, sources, view, keep, ppq):
     return pieces, k1, drawn
 
 
+def copy_of(src, c, size, a):
+    """The loops src scaled by size and turned by a (radians) round c, in the view."""
+    co, si = math.cos(a) * size, math.sin(a) * size
+    return [np.column_stack([c[0] + co * (p[:, 0] - c[0]) - si * (p[:, 1] - c[1]),
+                             c[1] + si * (p[:, 0] - c[0]) + co * (p[:, 1] - c[1])]) for p in src]
+
+
+def biggest_ring(sh, sources, view):
+    """The outer edge of rings not cut to a frame: every source's biggest copy (loops in the view)."""
+    cfg = sh["ripples"]
+    sizes, k1 = ring_sizes(cfg, cfg["grow"])
+    way = -1 if mirrored(sh) else 1
+    k = len(sizes) - 1
+    return [p for (n, src), c in zip(sources, centres(sh, sources, view))
+            for p in copy_of(src, c, sizes[k], way * math.radians(source_turn(cfg, n)) * (k - k1))]
+
+
+def inside_any(loops, x, y):
+    """For each spot (x, y): inside at least one of the closed loops (even-odd within each loop)."""
+    x, y = np.asarray(x, float).reshape(-1), np.asarray(y, float).reshape(-1)
+    out = np.zeros(len(x), bool)
+    for p in loops:
+        p = np.asarray(p, float)
+        x0, y0, x1, y1 = p[:-1, 0], p[:-1, 1], p[1:, 0], p[1:, 1]
+        across = (y0[None] > y[:, None]) != (y1[None] > y[:, None])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            at = x0[None] + (y[:, None] - y0[None]) * (x1 - x0)[None] / (y1 - y0)[None]
+        out |= (across & (x[:, None] < at)).sum(axis=1) % 2 == 1
+    return out
+
+
 def edge_outline(sh):
-    """The loops the outline gate shrinks (custom.edge_loops), in beats / pitch: only the frames the rings are cut
-    to (the sources are filled with rings, not holes), and with Inside the sources "empty" the sources too."""
+    """(loops, fill test) the outline gate shrinks (custom.edge_loops), in beats / pitch: the frames the rings are
+    cut to (the sources are filled with rings, not holes), and with Inside the sources "empty" the sources too.
+    Rings not cut to a frame (none drawn, or Cut at the outline off): the edge of their biggest ring instead, the
+    copies of several sources joined (test: inside any of them, out of the empty sources)."""
     view = view_of(sh)
     if view[1] <= 0:
-        return []
-    out = []
+        return [], None
+    outer, holes, free = [], [], False
     for frame, sources in parts(view_loops(sh, view)):
-        loops = [frame] if frame is not None and sh["ripples"]["trim"] else []
-        loops += [p for _, src in sources for p in src] if sh["ripples"]["inside"] == "empty" else []
-        out += [p.tolist() for p in to_bp_loops(loops, view)]
+        if frame is not None and sh["ripples"]["trim"]:
+            outer.append(frame)
+        else:
+            outer += biggest_ring(sh, sources, view)
+            free = True
+        holes += [p for _, src in sources for p in src] if sh["ripples"]["inside"] == "empty" else []
+    outer, holes = [p.tolist() for p in to_bp_loops(outer, view)], [p.tolist() for p in to_bp_loops(holes, view)]
+    if not free:
+        return outer + holes, None
+
+    def test(x, y):
+        x, y = np.asarray(x, float), np.asarray(y, float)
+        x, y = x.reshape(len(x), -1)[:, 0], y.reshape(len(y), -1)[:, 0]
+        return inside_any(outer, x, y) & ~inside_any(holes, x, y)
+    test.mode = "ripples"
+    return outside_parts(outer) + holes, test
+
+
+def outside_parts(loops):
+    """The loops' lines without the stretches inside another of them (joined copies: the band follows only their
+    outer edge, not where they cross inside), as polylines."""
+    out = []
+    for i, p in enumerate(loops):
+        p = np.asarray(p, float)
+        others = loops[:i] + loops[i + 1:]
+        mid = (p[:-1] + p[1:]) / 2
+        keep = ~inside_any(others, mid[:, 0], mid[:, 1]) if others else np.ones(len(mid), bool)
+        run = []
+        for j, k in enumerate(keep):
+            if k:
+                run = run or [p[j].tolist()]
+                run.append(p[j + 1].tolist())
+            elif run:
+                out.append(run)
+                run = []
+        if run:
+            out.append(run)
     return out
 
 

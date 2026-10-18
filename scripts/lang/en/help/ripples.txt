@@ -42,6 +42,6 @@ No frame: when no closed shape holds the others, every shape you drew is a sourc
 
 Each source has its own centre point, the small ring with a cross on the selected shape. Its rings grow from there. Drag it with any tool to move it.
 
-Click a centre point to pick that source. The panel then shows Picked source, with its own Turn (Same as all, Other way, or Own with its own angle) and its own Centre, typed as u and v (0 % to 100 % across the source's box).
+Click a centre point to pick that source. The panel then shows Picked source, with its own Turn (Same as all, Other way, or Own with its own angle) and its own Centre, typed as u and v (0 % to 100 % across the whole shape's box).
 
 Right-click a centre point for Back to the middle, Turn the other way and Turn like the others.

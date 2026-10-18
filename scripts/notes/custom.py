@@ -2444,7 +2444,7 @@ def edge_loops(sh):
     every line given is part of a loop, else it's walls(sh)). Ripples: only its frames (ripples.edge_outline)."""
     if has_ripples(sh):
         from notes.ripples import edge_outline
-        return edge_outline(sh), None
+        return edge_outline(sh)
     tx = sh.get("text")
     walled = fill_test(sh)
     return (custom_strokes(sh) if tx else walls(sh) if walled else fill_plan(sh)["polys"]), walled
@@ -2459,7 +2459,7 @@ def inner_ticks(sh, ppq, g, spans):
     if has_areas(sh):  # (what the coloured areas fill, shrunk from its own edge)
         key += (json.dumps(sh["areas"]), bool(sh.get("borders")))
     if has_ripples(sh):  # (Ripples: its frames, + its sources with Inside the sources "empty")
-        key += ("ripples", sh["ripples"]["inside"] == "empty")
+        key += ("ripples", json.dumps({k: v for k, v in sh["ripples"].items() if k not in ("colours", "skip")}))
     got = _inner.get(key)
     if got is None:
         if len(_inner) > 100:
@@ -2492,6 +2492,8 @@ def edge_inner(sh, ppq):
     if sh.get("edge_mode") == "sideways":
         return "rows", cut_out(spans, grow_inward(outline_notes(sh, ppq), spans, g))
     loops, walled = edge_loops(sh)
+    if not loops:
+        return None
     if has_areas(sh):  # (worked out exactly on the notes' lines across each key and joined up: the grid over the
         # whole shape was too coarse for hairline gaps between areas, user saw it zigzag)
         keys = list(range(int(spans[:, 2].min()), int(spans[:, 2].max()) + 1))
@@ -2543,6 +2545,9 @@ def custom_note_count(sh, ppq):
     flat = np.concatenate([flat_notes(sh, ppq), edge_notes(sh, ppq)])
     if has_areas(sh) or has_pattern(sh):
         spans = coloured_spans(sh, ppq)[:, :3]
+        # (Ripples rings growing free run before tick 0 / past the keys: dropped when made, so not counted)
+        spans = spans[(spans[:, 1] > 0) & (spans[:, 2] >= 0) & (spans[:, 2] <= KEY_TOP)]
+        spans[:, 0] = np.maximum(spans[:, 0], 0)
         if sh["fill"] == "spam":  # (chopped as whole stretches, whatever their colours)
             spans = merged_rows(spans)
     else:

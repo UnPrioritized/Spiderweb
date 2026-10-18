@@ -38,6 +38,7 @@ from notes.sustain import is_sustained
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
 from notes.polygon import POLYGON_DEFAULTS
+from notes.ripples import grows_free
 from notes.sliced import completed, fresh_marks, moved_by, steps_kept, turned_piece
 from notes.smooth import SMOOTH_DEFAULT
 from notes.text import TEXT_DEFAULTS
@@ -1700,7 +1701,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """Twice the middle a flip mirrors shapes around: their drawings' own notes' middle (first start + last end,
         lowest + highest key, as fx.notes_box), so each column / row lands on its partner and the flipped notes are
         the mirror note for note (user 2026-10-18: the drawing's middle between two key rows gave a different
-        heart). mid2 (the drawing's) when none has notes of its own (Hz bass, pictures)."""
+        heart). mid2 (the drawing's) when none has notes of its own (Hz bass, pictures), or with Ripples growing
+        free (rings cut off at the piano roll's edges move the notes' middle: flipping twice drifted)."""
+        if any(grows_free(sh) for sh in shapes):
+            return mid2
         got = [self.notes_of({k: v for k, v in sh.items() if k not in ("fx", "_m", "sustain", "range")})
                for sh in shapes if not sh.get("hz") and "picture" not in sh]
         got = [n for n in got if len(n)]
