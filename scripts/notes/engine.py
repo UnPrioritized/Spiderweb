@@ -41,7 +41,7 @@ from notes.sustain import clean_sustain, cut_by, held, is_sustained
 from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
-from notes.custom import ROUND, frame_upright, notes_resampled
+from notes.custom import ROUND, frame_upright, notes_resampled, path_colours
 from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
 from notes.mask import clean_mask
@@ -164,8 +164,10 @@ def clean_shape(sh):
     if bt:  # one of an Add between group (between.py)
         out["between"] = bt
     tm = sh.get("team")
-    if not bt and isinstance(tm, list) and len(tm) == 2 and isinstance(tm[0], str) and type(tm[1]) is int:
-        out["team"] = list(tm)  # (its group's colour turn, kept when Turn into plain notes unlinked it: between.turns)
+    if (not bt and isinstance(tm, list) and len(tm) in (2, 3) and isinstance(tm[0], str)
+            and all(type(t) is int for t in tm[1:])):
+        # (its group's colour turn, kept when Turn into plain notes unlinked it, + its repeat: between.turns)
+        out["team"] = list(tm)
     if out["kind"] == "custom":
         strokes = clean_strokes(sh.get("strokes"))
         if len(out["pts"]) != 3 or not strokes:
@@ -709,7 +711,7 @@ def whole_tools(whole, raw, spots, tracks, ppq):
     if whole.get("glue") and len(a):
         a = apply_glue(a, whole["glue"], glue_box(np.concatenate(cached_arrays(whole))), ppq, True)
     a = run_steps(a, whole.get("fx") or [], whole, ppq)
-    return a[:, :4], spots[a[:, 4]], a[:, 5] if tracks is not None else None
+    return a[:, :4], spots[a[:, 4]], a[:, 5] if tracks is not None or path_colours(whole) else None
 
 
 def run_steps(a, fx, sh, ppq, m=(), pre=()):
@@ -737,6 +739,9 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
             a = mirrored(a, [last["axis"]], notes_box(a))
         elif last["tool"] == "turn":  # (velocity, track: not spot)
             a = turn_notes(a, last["deg"], last["r"] * ppq, 256, groups(a[:, 3::2]))[0]
+        elif last["tool"] == "path":  # (the last column = the tracks: the copies' colours go on them, hunt)
+            notes, tr = fx_step(a[:, :-1], a[:, -1], last, sh, ppq)
+            a = np.column_stack([notes, tr])
         else:
             a = fx_step(a, None, last, sh, ppq)[0]
     return a

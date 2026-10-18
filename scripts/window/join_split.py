@@ -384,11 +384,12 @@ class JoinSplit:
             return
         self.roll.cancel_draft()
         self.push_undo(name=tr("roll_menu.turn_into_plain_notes"))
-        turns = between_turns(self.shapes)  # (an Add between group: unlinked, user; each shape keeps its colour turn)
+        laps = []  # (an Add between group: unlinked, user; each shape keeps its colour turn and its repeat, so with
+        turns = between_turns(self.shapes, laps)  # "Repeated colours get new channels" it stays on its channels, hunt)
         gids = {group_of(self.shapes[i]) for i in new} - {None}
         for i, sh in enumerate(self.shapes):
             if group_of(sh) in gids and turns[i] is not None:
-                sh["team"] = list(turns[i])
+                sh["team"] = list(turns[i]) + ([laps[i]] if laps[i] is not None else [])
         for i in new:
             if turns[i] is not None:
                 new[i]["team"] = list(turns[i])

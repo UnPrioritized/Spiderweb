@@ -2558,10 +2558,12 @@ def custom_notes_groups(sh, ppq):
     lap, groups, turn_lap, turn = groups // ROUND, groups % ROUND, turn // ROUND, turn % ROUND
     if sh.get("apart") and sh["fill"] in ("fill", "spam"):  # (0 = the outline, 1 = the inside, 1 + k = colour k)
         out = np.where(groups == 0, 0, 1 + (groups - 1) * n + turn).astype(np.int64)
+        turn_lap = np.where(groups == 0, 0, turn_lap)  # (the outline takes no turns: one channel, hunt)
     else:
         out = groups * n + turn
-    if lap.any():  # (a Nested / Tiles round and a Colours round: each pair its own round)
-        turn_lap = np.unique(np.column_stack([lap, turn_lap]), axis=0, return_inverse=True)[1].reshape(-1)
+    if lap.any() and len(turn_lap):  # (a Nested / Tiles round and a Colours round: each pair its own round, as
+        lo = int(turn_lap.min())  # one number)
+        turn_lap = lap * (int(turn_lap.max()) - lo + 1) + turn_lap - lo
     return notes, out + turn_lap * ROUND
 
 
@@ -2736,7 +2738,7 @@ def with_rounds(sh, k, n):
 def in_turns(k, n, rounds):
     """Turn k over n colours: k mod n, + ROUND x how many times the colours went round when rounds ("New channels
     each Colours round": Nested / Tiles fills; with_rounds for Colours)."""
-    return k % n + k // n * ROUND if rounds else k % n
+    return k % n + k // n * ROUND if rounds and n > 1 else k % n  # (one colour never repeats, hunt)
 
 
 def row_restart_ok(sh):
@@ -2912,9 +2914,11 @@ def tracks_apart(sh):
 
 
 def path_colours(sh):
-    """A Copy along a path page that changes the copies' colours (copypath.py)."""
+    """A Copy along a path page that changes the copies' colours (copypath.py), on sh or on the whole it was sliced
+    from (its pages made the piece's notes, sliced.py; hunt: the copies all took one channel)."""
+    whole = (sh.get("cut") or {}).get("whole")
     return any(st["tool"] == "path" and not st.get("off") and (st.get("cfg") or {}).get("colours", "keep") != "keep"
-               for st in sh.get("fx") or ())
+               for st in sh.get("fx") or ()) or isinstance(whole, dict) and path_colours(whole)
 
 
 def capped_colours(groups, most=COLOURS):

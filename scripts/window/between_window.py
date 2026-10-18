@@ -763,17 +763,21 @@ class BetweenGroups:
     def row_of(self, i):
         return next((r for r, row in enumerate(self.shape_rows()) if i in row), None)
 
-    def fill_shape_list(self, counts, chans, many):
-        """The Shapes list from scratch (counts / chans: per shape; many: the channel count shown orange)."""
+    def fill_shape_list(self, counts, chans, many, tints=None):
+        """The Shapes list from scratch (counts / chans: per shape; many: the channel count shown orange; tints: per
+        shape the colours used, App.colours_used: with repeats on new channels the orange goes by these)."""
         self.listbox.delete(0, "end")
         rendered = getattr(self, "rendered", None)
         for r, row in enumerate(self.shape_rows()):
             i = row[0]
             sh = self.shapes[i]
             if len(row) > 1 or between.group_of(sh):
-                used = chans[i]
+                used = warn = chans[i]
                 if rendered is not None and len(rendered) and self.channel_mode.get() == "auto":
-                    used = len(np.unique(rendered[np.isin(rendered[:, 5], row), 4]))
+                    slots = rendered[np.isin(rendered[:, 5], row), 4]
+                    used = warn = len(np.unique(slots))
+                    if tints is not None:
+                        warn = len(np.unique(slots % (16 if self.picture_use10 else 15)))
                 uses = tr("app.channels_2", chans=used) if used > 1 else ""
                 n = sum(1 for j in row if self.shapes[j]["between"]["role"] in ("step", "key"))
                 total = sum(counts[j] for j in row)
@@ -781,6 +785,7 @@ class BetweenGroups:
                           uses=uses)
             else:
                 used = chans[i]
+                warn = used if tints is None else tints[i]
                 uses = tr("app.channels_2", chans=used) if used > 1 else ""
                 label = self.shape_label(sh)
                 if all_flipped(sh):  # (its gates laid from the right: gateflip.py)
@@ -790,5 +795,5 @@ class BetweenGroups:
                 text = tr("app.notes_one" if counts[i] == 1 else "app.notes", i=i + 1,
                           shape_label=label, counts=counts[i], uses=uses)
             self.listbox.insert("end", text)
-            if used > many:  # (past this the note colours and channel numbers repeat)
+            if warn > many:  # (past this the note colours and channel numbers repeat)
                 self.listbox.itemconfig(r, foreground=look.WARN, selectforeground=look.GAP_PICKED)

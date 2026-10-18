@@ -771,7 +771,9 @@ def apply_path(a, cfg, ppq, keys=256, tag=False):
     flips = down[:n] if cfg["flip"] == "each" else np.zeros(n, bool)
     col = a.shape[1] - 1 if a.shape[1] >= 5 and cfg["colours"] != "keep" else None
     own = np.unique(a[:, col] % ROUND) if col is not None else None
-    laps = copy_laps(cfg, own, n) if col is not None and cfg.get("rounds") else None
+    # (one colour to go round never repeats: Turn on a shape of one colour, or one colour to shift over, hunt)
+    turns = col is not None and (len(own) if cfg["colours"] == "turn" else cfg["most"]) > 1
+    laps = copy_laps(cfg, own, n) if turns and cfg.get("rounds") else None
     order = np.argsort(a[:, 2], kind="stable")
     by_key = (a[order], a[order, 2])
     flip_key = None

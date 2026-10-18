@@ -809,8 +809,10 @@ def turns(shapes, laps=None):
         laps[:] = [None] * len(shapes)
     done = set()
     for i, sh in enumerate(shapes):
-        if "team" in sh and not sh.get("cycle"):  # (its group unlinked by Turn into plain notes: its turn kept)
-            out[i] = tuple(sh["team"])
+        if "team" in sh and not sh.get("cycle"):  # (its group unlinked by Turn into plain notes: its turn kept, and
+            out[i] = tuple(sh["team"][:2])  # its repeat when kept: a plain-notes shape keeps only its turn, hunt)
+            if laps is not None and len(sh["team"]) > 2:
+                laps[i] = sh["team"][2]
         gid = group_of(sh)
         if not gid or gid in done:
             continue
@@ -820,8 +822,8 @@ def turns(shapes, laps=None):
             for k, i in enumerate(ordered(shapes, gid)):
                 if not shapes[i].get("cycle"):
                     out[i] = (gid, k % n)
-                    if laps is not None:
-                        laps[i] = k // n
+                    if laps is not None:  # (one colour never repeats, hunt)
+                        laps[i] = k // n if n > 1 else 0
     return out
 
 

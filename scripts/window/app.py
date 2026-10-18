@@ -988,6 +988,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
         channel only)."""
         return self.new_rounds.get() and self.channel_mode.get() == "auto"
 
+    def colours_used(self):
+        """With "Repeated colours get new channels": how many colours each shape's notes use (channels within one
+        repeat; the Shapes list's orange goes by these, not by its channels, hunt), else None."""
+        r = self.rendered
+        if not self.rounds_apart() or not len(r):
+            return None
+        step = 16 if self.picture_use10 else 15
+        pairs = np.unique(r[:, 5] * step + r[:, 4] % step)
+        return np.bincount(pairs // step, minlength=len(self.shapes)).tolist()
+
     def pad_tracks(self):
         """True if the saved MIDI / .dms gets a track for every channel up to the last one used, empty ones too
         (midi_out.track_slots); False only with the rounds tick and "Fill each round with empty tracks" off."""
@@ -1173,7 +1183,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, ColoursPanel, Mask
             pairs = np.unique(self.rendered[:, 5] * (self.slot_count + 1) + self.rendered[:, 4])
             chans = np.bincount(pairs // (self.slot_count + 1), minlength=len(self.shapes)).tolist()
         # (an Add between group is one row: between_window.py)
-        self.fill_shape_list(counts, chans, most_colours(self.all16()))
+        self.fill_shape_list(counts, chans, most_colours(self.all16()), self.colours_used())
         self.sync_list_selection()
         self.roll.request_redraw()
         self.update_status()
