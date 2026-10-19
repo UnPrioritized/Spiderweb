@@ -39,6 +39,8 @@ from roll.roll_sustain import SustainStops
 from roll.roll_text import TextTyping
 
 EDGE = 0.5  # keys a shape's lines may go past the lowest / highest key's middle: its notes stay on that key
+RULER_TOP = 1000.5  # the top of a Select box made along the ruler (every key; no box dragged on the piano roll gets
+#                     this high, so the two kinds stay apart: ruler_boxes)
 class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
                 PathEditing, SustainStops, tk.Canvas):
     def __init__(self, parent, app, scale):
@@ -61,6 +63,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.box_ruler = False   # the Select box is dragged along the ruler: every key (ruler_box)
         self.box_resume = False  # ... and it was playing when the ruler was pressed
         self.time_only = False   # a move started on the ruler's black band: only in time
+        self.box_drop = False    # a Ctrl+drag box with the ruler's bands kept: they go once it's a box
         self.dup = None          # Ctrl+press in the kept boxes: {"click": shape under the mouse}; the copies are
         #                          made at the first move ("done" then)
         self.grabbed = None      # the shape a move drag was started on (None: all selected, the kept boxes moved)
@@ -183,7 +186,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         b0, b1 = grid_span(self.x2t(x), self.x2t(cx), tick if self.box_shift0 else step or tick,
                            tick if self.box_shift else step or tick)
         if self.box_ruler:  # (dragged along the ruler: every key)
-            return b0, self.app.keys - 0.5, b1, -0.5
+            return b0, RULER_TOP, b1, -0.5
         top = self.app.keys - 1
         p0, p1 = sorted(min(max(round(self.y2p(v)), 0), top) for v in (y, cy))
         return b0, p1 + 0.5, b1, p0 - 0.5
@@ -207,6 +210,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.drag = ("box", b, p, min(max(mx, self.kb_w), self.winfo_width()),
                      min(max(my, self.ruler_h), self.winfo_height()), base, primary)
         self.box_shift = bool(state & SHIFT)
+        if self.box_drop and self.box_area():  # (Ctrl+drag with the ruler's bands kept: now a box, they go)
+            self.box_drop, self.box_more = False, []
+            self.app.select(None)
+            self.drag = self.drag[:5] + (set(), None)
         self.draw_select_box()
 
     def box_pick(self):
@@ -246,16 +253,18 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         MIDI programs (Ctrl adds to the boxes kept, Shift = whole ticks; a click still moves the play line)."""
         app = self.app
         _, playing, x, state, kept = self.drag
-        self.box_more = list(kept or []) if state & CTRL else []
-        if not state & CTRL:
+        ctrl = state & CTRL and not (kept and not self.ruler_boxes(kept))  # (Select boxes kept: they go, with
+        self.box_more = list(kept or []) if ctrl else []                     # what they selected, user)
+        if not ctrl:
             app.select(None)
         self.box_ruler, self.box_resume, self.box_shift0 = True, playing, bool(state & SHIFT)
         self.drag = ("box", self.x2t(x), 0.0, x, self.ruler_h, set(app.sels), app.sel)
 
-    def ruler_boxes(self, boxes):
-        """The Select boxes that hold every key (made along the ruler): the ruler is black under them."""
-        top = self.app.keys - 0.5
-        return [a for a in boxes or () if max(a[1], a[3]) >= top - 1e-9 and min(a[1], a[3]) <= -0.5 + 1e-9]
+    @staticmethod
+    def ruler_boxes(boxes):
+        """The Select boxes made along the ruler (top RULER_TOP: every key): the ruler is black under them. They and
+        boxes dragged on the piano roll are never kept together (user): starting one kind drops the other."""
+        return [a for a in boxes or () if a[1] >= RULER_TOP - 0.5]
 
     def ruler_band(self, e, kept):
         """The mouse on the ruler's black band (ruler_boxes of the kept boxes): a drag there moves what they selected
@@ -515,9 +524,11 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return
         new = []
         for b0, top, b1, bottom in kept:
-            pts = [fn(b, p) for b in (b0, b1) for p in (top, bottom)]
+            band = top >= RULER_TOP - 0.5  # (a ruler band: its time goes along, it stays every key)
+            pts = [fn(b, p) for b in (b0, b1) for p in ((self.app.keys - 0.5, -0.5) if band else (top, bottom))]
             bs, ps = [b for b, _ in pts], [p for _, p in pts]
-            new.append((min(bs), math.ceil(max(ps) - 0.5 - 1e-9) + 0.5, max(bs), math.floor(min(ps) + 0.5 + 1e-9) - 0.5))
+            new.append((min(bs), RULER_TOP, max(bs), -0.5) if band else
+                       (min(bs), math.ceil(max(ps) - 0.5 - 1e-9) + 0.5, max(bs), math.floor(min(ps) + 0.5 + 1e-9) - 0.5))
         self.box_kept = (new, set(self.app.sels))
 
     def clamp_view(self):
@@ -888,7 +899,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.focus_set()
         kept, self.box_kept, self.box_moving, self.dup = self.kept_box(), None, None, None
         self.grabbed = self.cycle = self.cycled = self.area_pick = None
-        self.box_in = self.box_ruler = self.box_resume = self.time_only = False
+        self.box_in = self.box_ruler = self.box_resume = self.time_only = self.box_drop = False
         self.room = self.limit = self.grid_later = None
         if self.follow and self.sx is not None:  # a shape started with a click: this click finishes it
             self.drag, self.follow = self.follow, None
@@ -1023,6 +1034,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 self.box_more = list(kept or []) if e.state & CTRL else []  # the box to the boxes kept);
                 if not e.state & CTRL:  # a click without dragging moves the play line here
                     app.select(None)
+                elif self.ruler_boxes(kept):  # (Ctrl with the ruler's bands kept: once it's a box they go, with
+                    self.box_drop = True       # what they selected, user; a Ctrl+click changes nothing)
                 self.drag = ("box", self.x2t(e.x), self.y2p(e.y), e.x, e.y, set(app.sels), app.sel)
                 self.box_shift0 = bool(e.state & SHIFT)
                 return
@@ -1170,7 +1183,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 moved = moved or new != self.app.shapes[j]["pts"]
                 self.app.shapes[j]["pts"] = new
             if self.box_moving:
-                self.box_kept = ([(b0 + db, top + dp, b1 + db, bottom + dp) for b0, top, b1, bottom in self.box_moving],
+                self.box_kept = ([(b0 + db, top, b1 + db, bottom) if top >= RULER_TOP - 0.5 else  # (a ruler band:
+                                  (b0 + db, top + dp, b1 + db, bottom + dp)                         # time only)
+                                  for b0, top, b1, bottom in self.box_moving],
                                  set(self.app.sels))
             if moved or self.box_kept != kept:  # (snapped to where they already were: nothing to redo)
                 self.app.shape_edited(moving=True)
@@ -1625,9 +1640,11 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if sc["tick"] is None:
             i = None if self.draft else self.menu_shape(sc["x"], sc["y"])
             kept = None if self.draft or not self.app.sels else self.kept_box()
-            if kept and sc["deselect"] and boxes_side([self.box_rect(a) for a in kept], sc["x"], sc["y"], 0) == (0, 0):
-                # inside the kept Select boxes: the menu for all they selected, or (just one shape) that shape's own
-                # menu, anywhere in the boxes (user)
+            rects = [self.box_rect(a) for a in kept or () if a not in self.ruler_boxes(kept)]
+            if kept and sc["deselect"] and (self.ruler_band(SimpleNamespace(x=sc["x"], y=sc["y"]), kept)
+                                            or rects and boxes_side(rects, sc["x"], sc["y"], 0) == (0, 0)):
+                # inside the kept Select boxes (or on the ruler's black band: user): the menu for all they selected,
+                # or (just one shape) that shape's own menu, anywhere in the boxes (user)
                 if len(self.app.sels) > 1:
                     self.show_box_menu(e, i)
                 else:
