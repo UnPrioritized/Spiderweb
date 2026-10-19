@@ -661,7 +661,7 @@ class StatusLine(ttk.Label):
         pad = [str(p) for p in self.tk.splitlist(self.cget("padding"))]  # (the line's own: left [top right bottom])
         pad = self.winfo_fpixels(pad[0]) + self.winfo_fpixels(pad[2 if len(pad) > 2 else 0]) if pad else 0
         room = self.winfo_width() - self.reserve - pad
-        self.tip.text = ""
+        whole = ""  # (the tip: the whole text when it's cut short)
         if text and self.winfo_width() > 1:
             font = tkfont.Font(font=self.cget("font") or "TkDefaultFont")
             if font.measure(text) > room:
@@ -673,7 +673,8 @@ class StatusLine(ttk.Label):
                     else:
                         hi = mid - 1
                 text = text[:lo].rstrip() + "…"
-                self.tip.text = self._full
+                whole = self._full
+        self.tip.set_text(whole)
         super().configure(text=text)
 
     def show(self, text):
@@ -1009,7 +1010,23 @@ class Tooltip:
         left = top.winfo_rootx()
         if not on_screen(w, left, y):
             left = w.winfo_pointerx() - 12  # (the mouse is on a screen)
+        # no room below (the status line of a maximized window): above the widget instead (hunt 2026-10-19)
+        from files.system import work_area
+        _, room_top, _, room_bottom = work_area(w, max(x, left), w.winfo_rooty())
+        tall = self.tip.winfo_reqheight()
+        if y + tall > room_bottom:
+            above = (w.winfo_pointery() - 20 if w.winfo_height() > TALL else w.winfo_rooty() - 4) - tall
+            y = max(room_top, above)
         self.tip.wm_geometry(f"+{max(x, left)}+{y}")
+
+    def set_text(self, text):
+        """New text; a box already up shows it at once (none for empty text)."""
+        if text == self.text:
+            return
+        self.text = text
+        if self.tip:
+            self.hide()
+            self.show()
 
     def spot(self):
         """Under the widget, or under the mouse for a tall one (a list as tall as the window: not at its bottom)."""
