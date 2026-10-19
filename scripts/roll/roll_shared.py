@@ -137,6 +137,23 @@ def grab_while_panning(widget):
     widget.bind("<ButtonRelease-2>", release, add="+")
 
 
+def bind_double_right(widget, single, double):
+    """Right clicks on the widget: single(e), and double(e) for a double right click. Clicks spammed in a row go in
+    pairs (user, like many MIDI programs: every 2nd click is a double click; Tk alone makes every click after the
+    first one a double click)."""
+    widget._right_paired = False
+
+    def press(e):
+        widget._right_paired = False
+        return single(e)
+
+    def twice(e):
+        widget._right_paired = not widget._right_paired
+        return double(e) if widget._right_paired else single(e)
+    widget.bind("<ButtonPress-3>", press)
+    widget.bind("<Double-Button-3>", twice)
+
+
 def line_touches_box(px, py, x0, y0, x1, y1):
     """A line through the screen points (px, py: arrays) touches the box x0 < x1, y0 < y1 (one point: is in it)."""
     if len(px) == 1:

@@ -32,9 +32,9 @@ from window.hz_window import open_hz
 from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
 from roll.roll_path import PathEditing
-from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, MAX_SX, MIN_SX, PICK, SHIFT, boxes_side,
-                              boxes_upright, cached_path, cached_strokes, grab_while_panning, grid_span, line_touches_box,
-                              mouse_trail, note_name)
+from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, MAX_SX, MIN_SX, PICK, SHIFT,
+                              bind_double_right, boxes_side, boxes_upright, cached_path, cached_strokes,
+                              grab_while_panning, grid_span, line_touches_box, mouse_trail, note_name)
 from roll.roll_sustain import SustainStops
 from roll.roll_text import TextTyping
 
@@ -121,10 +121,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.bind("<ButtonRelease-1>", self.on_release)
         self.bind("<Double-Button-1>", self.on_double)
         self.bind("<Motion>", self.on_motion)
-        self.bind("<ButtonPress-3>", self.on_right)
+        bind_double_right(self, self.on_right, lambda e: self.app.toggle_select_tool())
         self.bind("<B3-Motion>", self.on_right_drag)
         self.bind("<ButtonRelease-3>", self.on_right_release)
-        self.bind("<Double-Button-3>", lambda e: self.app.toggle_select_tool())
         self._scrub = None  # right-drag listening
         self.bind("<ButtonPress-2>", self.start_pan)
         self.bind("<B2-Motion>", self.pan_to)

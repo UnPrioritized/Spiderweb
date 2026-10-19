@@ -29,7 +29,7 @@ from files.lang import tr
 from files.mathexpr import fmt
 from notes.engine import CLASH
 from notes.hzbass import AUTO, FX, HZ_KINDS, all_tones, clean_line, clean_tones, left_edge
-from roll.roll_shared import CTRL, grab_while_panning
+from roll.roll_shared import CTRL, bind_double_right, grab_while_panning
 from roll.zoombar import add_zoom_bars
 from window import look
 from window.hz_effects import FxPane
@@ -238,8 +238,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         c.bind("<B2-Motion>", self.pan_move)
         c.bind("<ButtonRelease-2>", self.on_middle)
         grab_while_panning(c)
-        c.bind("<ButtonPress-3>", self.on_menu)
-        c.bind("<Double-Button-3>", self.toggle_tool)
+        bind_double_right(c, self.on_menu, self.toggle_tool)
         self.menu_wait = None  # a right click on empty space: its menu, waiting to see if it's a double click
         c.bind("<Motion>", self.on_motion)
         c.bind("<MouseWheel>", self.on_wheel)
