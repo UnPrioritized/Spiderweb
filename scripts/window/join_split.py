@@ -261,12 +261,12 @@ class JoinSplit:
         sels = sorted(i for i in self.sels if i < len(self.shapes))
         return sels if len(sels) == 2 else None
 
-    def gate_merge(self, to_right):
+    def gate_merge(self, to_right, apart=False):
         """Right-click → Gate sensitive merge ▸ Merge to right / left (user; no anchor, anywhere in the menu works):
         to the right = the shape on the left slides right, each key row until it meets the other shape's notes;
         to the left = the shape on the right slides left (notes/merge.py). Both become one custom shape of plain
         notes (Ctrl+Z: both again). Rows with nothing to meet slide by the smallest slide and become a shape of
-        their own right after it (user: to delete or keep later). "Keep as two shapes" ticked: merge_apart."""
+        their own right after it (user: to delete or keep later). apart ("..., keep two shapes"): merged_apart."""
         self.commit_typing()  # (a number typed in a panel box: to the two shapes before they're replaced)
         pair = self.merge_pair()
         if not pair:
@@ -274,7 +274,7 @@ class JoinSplit:
         if any("picture" in self.shapes[i] for i in pair):  # (user: an image keeps its own colours, so not merged)
             self.status.config(text=tr("join_split.merge_no_image"))
             return
-        if self.merge_apart.get():
+        if apart:
             return self.merged_apart(pair, to_right)
         parts = [copy.deepcopy(self.shapes[i]) for i in pair]
         flips = lifted(parts)  # (both gate flipped: the merged shape is, each row across both, user 2026-10-11)
@@ -328,7 +328,7 @@ class JoinSplit:
                            else tr("join_split.merged_done"))
 
     def merged_apart(self, pair, to_right):
-        """gate_merge with "Keep as two shapes" ticked (user 2026-10-19): the other shape stays as it is; the one
+        """gate_merge's "..., keep two shapes" (user 2026-10-19): the other shape stays as it is; the one
         that slid becomes fixed notes, exactly as they sounded, "Merged notes", rows with nothing to meet slid by
         the smallest slide inside it. Split gives back the shape it was (merge.unmerged)."""
         plan = slide_plan(part_rows([self.shapes[i] for i in pair], self.ppq, self.keys), to_right)

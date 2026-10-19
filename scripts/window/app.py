@@ -298,8 +298,6 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.mask = tk.BooleanVar(value=False)  # what's drawn becomes a mask (mask.py)
         self.mask_preview = tk.BooleanVar(value=True)  # masks hide what's outside them (off = the pattern drawn whole)
         self.mask_defaults = dict(MASK_DEFAULTS)  # a new mask's settings: the last ones set in the panel
-        # Gate sensitive merge menu's "Keep as two shapes" (user 2026-10-19; JoinSplit.gate_merge), remembered
-        self.merge_apart = tk.BooleanVar(value=False)
         self.draw_tool = "line"  # the drawing tool a double right-click goes back to
         self.snap = tk.StringVar(value=DEFAULT_SNAP)
         self.hz_snap = tk.StringVar(value=DEFAULT_SNAP)  # the Hz bass window's own snap
@@ -368,7 +366,6 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                                                   self.roll.request_redraw(),
                                                   self.live.get() and self.tips.show("live")))
         self.mask.trace_add("write", lambda *_: (self.schedule_autosave(), self.roll.request_redraw()))
-        self.merge_apart.trace_add("write", lambda *_: self.schedule_autosave())
         self.mask_preview.trace_add("write", lambda *_: (self.schedule_autosave(), any(map(is_mask, self.shapes)) and
                                                          self.shapes_changed()))
         self.snap.trace_add("write", lambda *_: self.roll.request_redraw())

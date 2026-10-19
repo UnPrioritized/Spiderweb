@@ -339,11 +339,15 @@ class ShapeMenu:
         if not app.merge_pair():
             return
         sub = tk.Menu(m, tearoff=0)
-        for right in (True, False):
-            sub.add_command(label=tr("join_split.merge_right" if right else "join_split.merge_left"),
-                            command=lambda right=right: app.gate_merge(right))
-        sub.add_separator()  # (the way to merge, user 2026-10-19: one shape holding both, or the other left as it is)
-        sub.add_checkbutton(label=tr("join_split.merge_apart"), variable=app.merge_apart)
+        # (one shape holding both, or the other left as it is: an item each, user 2026-10-19; a tick closed the
+        # menu, which can't stay open on Windows)
+        for apart in (False, True):
+            if apart:
+                sub.add_separator()
+            for right in (True, False):
+                key = "join_split.merge_right" if right else "join_split.merge_left"
+                sub.add_command(label=tr(key + "_apart" if apart else key),
+                                command=lambda right=right, apart=apart: app.gate_merge(right, apart))
         m.add_cascade(label=tr("join_split.merge_menu"), menu=sub)
 
     def sustain_item(self, m):
