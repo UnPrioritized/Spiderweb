@@ -916,7 +916,11 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.box_in, self.time_only = True, True
             self.box_moving = boxes_upright(kept)[0]
             self.box_kept = (self.box_moving, set(app.sels))
-            app.push_undo(name=tr("pianoroll.move"))
+            if e.state & CTRL and app.sels:  # (Ctrl: a copy of them moves, like Ctrl+drag in a Select box)
+                app.push_undo(name=tr("app.duplicate"))
+                self.dup = {"click": None}
+            else:
+                app.push_undo(name=tr("pianoroll.move"))
             self.drag = ("move", self.event_pt(e), {j: copy.deepcopy(app.shapes[j]["pts"]) for j in app.sels}, None,
                          False, False)
             return
@@ -1524,7 +1528,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             hit = None if over else self.custom_hit(e.x, e.y)
             on_box = (self.on_kept_box(self.kept_box(), e) if not over and not (hit and hit[0] != "inside")
                       and self.app.tool.get() == "select" and not self.draft else None)
-            self.set_cursor("fleur" if over else BOX_CURSORS[on_box] if on_box else self.custom_cursor(hit))
+            if e.y < self.ruler_h and not over:  # (the bar numbers: the plain pointer, like many MIDI programs)
+                self.set_cursor("arrow")
+            else:
+                self.set_cursor("fleur" if over else BOX_CURSORS[on_box] if on_box else self.custom_cursor(hit))
         if self.follow:  # a shape started with a click follows the mouse
             self.drag, self.follow = self.follow, None
             self.on_drag(e)
