@@ -577,6 +577,7 @@ class JoinSplit:
             if own:
                 n = np.asarray(self.notes_of(sh), np.int64).reshape(-1, 4)
                 rows = np.column_stack([n, np.zeros((len(n), 1), np.int64), np.full((len(n), 1), i, np.int64)])
+                slots = self.own_slots(i, use10)
             if len(rows):  # (a shape with no notes stays as it is)
                 if own or not auto:
                     rows = multi_slots(rows, slots)
@@ -588,6 +589,25 @@ class JoinSplit:
                 new[i]["made"] = "plain"
                 new[i]["name"] = tr("join_split.plain_name", name=self.shape_label(sh))
         return new
+
+    def own_slots(self, i, use10):
+        """Shape i's rendered rows in Multi channel as if alone (with its Add between group: its colour turn): its
+        own colours, not moved off them by shapes overlapping it where it was (Gate sensitive merge slides it away
+        from them; user 2026-10-19: a clash before the merge pinned it on the next round of channels). use10: the
+        project's slot numbering (slot k = channel k)."""
+        from window.app import all_notes  # (app.py imports this file)
+        sh = self.shapes[i]
+        gid = group_of(sh)
+        alone = [s for s in self.shapes if s is sh or gid is not None and group_of(s) == gid]
+        all16 = self.use_ch10.get()
+        _, used10, rows, _ = all_notes(alone, self.ppq, self.keys, "auto", self.channel_split, all16, self.notes_tracks,
+                                       rounds=self.new_rounds.get(), order=all16 and self.ch10_order.get())
+        rows = rows[rows[:, 5] == next(k for k, s in enumerate(alone) if s is sh)].copy()
+        rows[:, 5] = i
+        if use10 and not used10:  # (made with channel 10 skipped: the same channels in the project's numbering)
+            t = rows[:, 4]
+            rows[:, 4] = t // 15 * 16 + np.asarray(SKIP10)[t % 15]
+        return rows
 
     def put_plain(self, new):
         """plain_copies' shapes in place of the ones they were made of (no undo step: the caller's)."""
