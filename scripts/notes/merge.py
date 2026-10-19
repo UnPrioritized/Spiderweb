@@ -1,10 +1,12 @@
-"""Gate sensitive merge (user, 2026-10-08, first try: plain notes): two shapes' notes become one. The shape that
-stays keeps its notes; each key row of the other one slides sideways in time on its own until its notes meet the
-staying shape's note on that key (gate end = next start), lengths kept. Rows with no note of the staying shape on
-their key ("leftovers") slide by the smallest slide a row made and are handed back apart (user: their own shape,
-to delete or keep)."""
+"""Gate sensitive merge (user, 2026-10-08): each key row of one shape slides sideways in time on its own until its
+notes meet the other shape's note on that key (gate end = next start), lengths kept. Rows with no note of the
+staying shape on their key ("leftovers") slide by the smallest slide a row made.
 
-import json
+Since 2026-10-19 (user): the staying shape stays as it is, the sliding one becomes fixed notes (leftovers in it)
+that remember the shape they were (sh["unmerge"]): Split gives it back. Before, both became ONE shape saved as a
+recipe (sh["merge"], below): files holding one are turned into fixed notes when opened (converted)."""
+
+import copy
 import math
 
 import numpy as np
@@ -63,44 +65,95 @@ def _merge(stay, slide, from_left, rest_slides=True):
     return out, rest, least, late, by_key
 
 
-def preview_parts(sh, ppq, keys):
-    """The merged shape's shapes placed where their notes are, for the outline gate's preview line: [(shape, how far
-    each key row of it slid in beats {key: beats} or None)]; the sliding one per row, roughly (a line crossing
-    rows goes with the row at its middle). [] = can't tell."""
-    m = sh["merge"]
-    got = reshaped_parts(sh)
-    if got:
-        parts, slide, from_left, (L, o, least) = got
-        rows = part_rows(parts, ppq, keys)
-        upright = abs(L[0, 0]) <= 1e-9 * max(1.0, abs(L[1, 0]))
-        done = None if upright else _merge(rows[1 - slide], rows[slide], from_left, rest_slides=False)
-        slid = {k: v / ppq for k, v in done[4].items()} if done else {}  # (rows not met: where they are)
-        return [(p, slid if i == slide else None) for i, p in enumerate(parts)]
-    sides = made_sides(m)
-    if not sides:
-        return []
-    slide, from_left, least, late = sides
-    a, b = part_rows(m["parts"], m["ppq"], m["keys"])
-    done = _merge((a, b)[1 - slide], (a, b)[slide], from_left)
-    at = m.get("at") or sh["pts"][0]
-    db, dp = sh["pts"][0][0] - at[0] + late / m["ppq"], sh["pts"][0][1] - at[1]
-    out = []
-    for i, p in enumerate(m["parts"]):
-        q = mapped_part(p, lambda b, k: [b + db, k + dp])
-        if q is None:
-            continue
-        if i == slide:  # (every row of it: met = its own slide, the rest the smallest)
-            ks = np.unique((a, b)[slide][:, 2])
-            out.append((q, {int(k) + round(dp): done[4].get(int(k), least) / m["ppq"] for k in ks}))
-        else:
-            out.append((q, None))
+def slide_plan(parts, right):
+    """How Merge to right / left slides two shapes' (start, end, pitch, ...) rows: (which part slides (right: the
+    one on the left, by middles), each met key row's slide {key: ticks}, the smallest slide (the rows with nothing
+    to meet), how much later everything goes to stay after tick 0), or None when no row meets."""
+    a, b = (np.asarray(p, np.int64).reshape(len(p), -1) for p in parts)
+    if not len(a) or not len(b):
+        return None
+    left = 1 if comes_from_left(a, b) else 0
+    slide = left if right else 1 - left
+    got = _merge((a, b)[1 - slide], (a, b)[slide], right)
+    return got and (slide, got[4], got[2], got[3])
+
+
+def clean_unmerge(u, clean_shape):
+    """A merge's fixed notes' memory from a file (sh["unmerge"]: "parts" = the shapes Split gives back as they were
+    when merged, "box" = the notes' box then, "slid" = its smallest slide in beats, "vrev" = flipped sideways an odd number of times since, "ordered" =
+    tracks take channels in order (turned from an older merged shape)) -> valid, or None."""
+    try:
+        parts = [clean_shape(p) for p in u["parts"] if isinstance(p, dict)]
+        box = [[float(b), float(p)] for b, p in u["box"]]
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not parts or not all(parts) or len(box) != 3 or not all(math.isfinite(x) for pt in box for x in pt):
+        return None
+    out = {"parts": parts, "box": box}
+    if isinstance(u.get("slid"), (int, float)) and math.isfinite(u["slid"]):
+        out["slid"] = float(u["slid"])
+    for k in ("vrev", "ordered"):
+        if u.get(k) is True:
+            out[k] = True
     return out
 
 
-# THE RECIPE (user: saved as both shapes + the way, not the notes): the merged shape is a custom shape of plain
-# notes with sh["merge"] = {"parts": [the two shapes as they were], "right": Merge to right?, "ppq", "keys",
-# "apart": keys whose rows became the "Merge leftovers" shape}. Project files leave its "notes" out; loading makes
-# them again from the recipe.
+def unmerged(sh):
+    """Split of a merge's fixed notes: the shapes they were made from, moved / turned / slanted / stretched / flipped
+    the way the notes' box was since (a shape that can't be turned that way: only moved, as far as the box's
+    corner)."""
+    u = sh["unmerge"]
+    parts = copy.deepcopy(u["parts"])
+    got = box_map(u["box"], sh["pts"])
+    if got is None:
+        return parts
+    L, o = got
+    if not np.allclose(L, np.eye(2), atol=1e-9) or u.get("vrev"):
+        d = u.get("slid", 0.0)  # (turned round where its notes are: first as far as it slid, the smallest slide)
+        turned = [mapped_part(p, lambda b, k: [float(x) for x in L @ (b + d, k) + o], L, bool(u.get("vrev")))
+                  for p in parts]
+        if all(q is not None for q in turned):
+            return turned
+    db, dp = (float(x) for x in np.asarray(sh["pts"][0], float) - np.asarray(u["box"][0], float))
+    for p in parts:
+        p["pts"] = [[b + db, k + dp] for b, k in p["pts"]]
+    return parts
+
+
+def converted(sh):
+    """An older merged shape (sh["merge"], the recipe below; cleaned) -> fixed notes exactly as it made them (its
+    Colours, velocities, pages baked in; Sustain and a mask kept on it), remembering both shapes: Split gives them
+    back where the old Split did. Its tracks still take channels in order ("ordered"), so no colour changes."""
+    from notes.custom import notes_shape
+    from notes.engine import SHAPE_DEFAULTS, shape_notes_tracks
+    from notes.gateflip import put_back
+    m = sh["merge"]
+    notes, tracks = shape_notes_tracks({k: v for k, v in sh.items() if k != "sustain"}, m["ppq"], m["keys"])
+    notes = np.asarray(notes, np.int64).reshape(-1, 4)
+    if not len(notes):
+        return None
+    tracks = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64)
+    rows = np.column_stack([notes[:, 0], notes[:, 1] - notes[:, 0], notes[:, 2], notes[:, 3], tracks])
+    new = {**SHAPE_DEFAULTS, **notes_shape(rows, m["ppq"], sh.get("name") or "")}
+    for k in ("sustain", "mask"):
+        if k in sh:
+            new[k] = sh[k]
+    got = reshaped_parts(sh)
+    if got:  # (turned / slanted / stretched: the parts that way, the sliding one where it slid)
+        back = got[0]
+    else:
+        db, dp = (sh["pts"][0][0] - m["at"][0], sh["pts"][0][1] - m["at"][1]) if m.get("at") else (0, 0)
+        back = copy.deepcopy(m["parts"])
+        for p in back:
+            p["pts"] = [[b + db, q + dp] for b, q in p["pts"]]
+    put_back(back, m.get("flips"))
+    new["unmerge"] = {"parts": back, "box": [list(p) for p in new["pts"]], "ordered": True}
+    return new
+
+
+# THE OLD RECIPE (kept to open older files: converted): the merged shape was a custom shape of plain notes with
+# sh["merge"] = {"parts": [the two shapes as they were], "right": Merge to right?, "ppq", "keys", "apart": keys
+# whose rows became the "Merge leftovers" shape}. Project files left its "notes" out; loading makes them again.
 
 def part_rows(parts, ppq, keys, rounds=False):
     """Each shape's notes as (start, end, pitch, velocity, track) rows: its own colours (areas, outline colours,
@@ -163,22 +216,6 @@ def merged(parts, right, ppq, keys):
     return gate_merge(b, a, True) if right else gate_merge(a, b, False)
 
 
-def edge_moves(m):
-    """How far each part's notes' first start and last end went in the merge, [(d0, d1)] in beats (the sliding
-    one's rows each slid their own way), for giving the parts the merged shape's velocities on Split."""
-    rows = [np.column_stack([r, np.full(len(r), i, np.int64)])  # (+ which part each note is from)
-            for i, r in enumerate(part_rows(m["parts"], m["ppq"], m["keys"]))]
-    got = merged(rows, m["right"], m["ppq"], m["keys"])
-    if got is None or not all(len(r) for r in rows):
-        return [(0.0, 0.0)] * 2
-    now = np.concatenate(got)
-    out = []
-    for i, was in enumerate(rows):
-        mine = now[now[:, 5] == i]
-        out.append(((mine[:, 0].min() - was[:, 0].min()) / m["ppq"], (mine[:, 1].max() - was[:, 1].max()) / m["ppq"]))
-    return out
-
-
 def recipe_notes(m):
     """The merged shape's packed notes (custom.notes_shape) made from its recipe, or None. Leftover rows stay in
     it (user: never removed without the user's say)."""
@@ -234,36 +271,6 @@ def with_rounds(sh):
     if not np.array_equal(rows[:, :5], np.column_stack([out[:, :2] - t0, out[:, 2] - k0, out[:, 3:5]])):
         return None
     return dict(sh, notes=pack_notes(np.column_stack([rows[:, :4], rows[:, 4] + LAP * out[:, 5]])))
-
-
-# PANEL SETTINGS (user: the merged shape acts as one custom shape, but its outline is never edited, it's made of
-# two shapes): the custom shape panel changes both parts (App.custom_targets), then refit makes the notes again.
-
-BIG_KEYS = ("strokes", "pts", "areas", "polygon", "from", "cut", "text", "notes", "picture", "merge")
-
-
-def settings_key(m):
-    """The parts' settings (not their drawings) as one string: changed = refit."""
-    return json.dumps([{k: v for k, v in p.items() if k not in BIG_KEYS} for p in m["parts"]], sort_keys=True)
-
-
-def refit(sh):
-    """A merged shape made again from its parts after their settings changed: new notes, its box fitted to them,
-    still moved / turned / slanted / stretched as it was."""
-    m = sh["merge"]
-    got = recipe_shape(m)
-    if not got:
-        return
-    was = m.get("box")
-    mp = box_map(was, sh["pts"]) if was else None
-    if mp is None:  # (an old recipe: only moved)
-        at = m.get("at") or sh["pts"][0]
-        mp = np.eye(2), np.asarray(sh["pts"][0], float) - np.asarray(at, float)
-    L, o = mp
-    made = [[float(b), float(p)] for b, p in got["pts"]]
-    sh["notes"] = got["notes"]
-    sh["pts"] = [[float(x) for x in L @ pt + o] for pt in made]
-    m["box"], m["at"] = made, list(made[0])
 
 
 # TURNED / SLANTED / STRETCHED (user: like one custom shape, gates kept): both parts get the same turn / slant /
@@ -353,21 +360,6 @@ def flipped_settings(q, L, vrev=None):
     return q
 
 
-def velocity_reversed(sh):
-    """Do the merged shape sh's parts' velocities run the other way? Its sideways flips counted (m["vrev"]), or for
-    an older recipe worked out from its box as before."""
-    m = sh["merge"]
-    if "vrev" in m:
-        return m["vrev"]
-    got = m.get("box") and box_map(m["box"], sh["pts"])
-    if not got:
-        return False
-    L = got[0]
-    if abs(L[0, 0]) < abs(L[1, 0]):
-        L = np.array([[0, -1], [1, 0]] if L[1, 0] < 0 else [[0, 1], [-1, 0]], float) @ L
-    return bool(np.linalg.det(L) < 0 and L[0, 0] < 0)
-
-
 def reshaped_parts(sh):
     """(the two parts turned / slanted / stretched with the merged shape's box, the sliding one at its smallest
     slide; sliding part's index; from the left?; (L, o, smallest slide in beats)) or None (only moved, an old
@@ -416,22 +408,6 @@ def reshaped_notes(sh, ppq, keys, rounds=False):
     merged_rows = (gate_merge(stay, moved, from_left, rest_slides=False) if len(stay) and len(moved) and not upright
                    else None)
     return np.concatenate(merged_rows) if merged_rows else np.concatenate([stay, moved])
-
-
-def slid_preview(got, slid, ppq):
-    """custom.edge_inner's preview (("rows", (start, end, key) ticks) or ("lines", (b0, k0, b1, k1, b_in, k_in))
-    with each key row moved as far as it slid (slid: {key: beats}; a line goes with the row at its middle, an edge
-    between two rows with the one on its inner side)."""
-    kind, a = got
-    if kind == "rows":
-        a = np.array(a, np.int64, copy=True)
-        a[:, :2] += np.round(np.array([slid.get(int(k), 0.0) for k in a[:, 2]]) * ppq).astype(np.int64)[:, None]
-        return kind, a
-    a = np.array(a, float, copy=True)
-    mid = (a[:, 1] + a[:, 3]) / 2
-    rows = np.round(mid + np.clip(a[:, 5] - mid, -0.25, 0.25)).astype(np.int64)
-    a[:, [0, 2, 4]] += np.array([slid.get(int(k), 0.0) for k in rows])[:, None]
-    return kind, a
 
 
 MOST_SAMPLES = 20_000_000  # (key rows x time steps, like a turned picture's)

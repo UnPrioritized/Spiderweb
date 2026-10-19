@@ -34,8 +34,8 @@ from notes.fx import (clean_fx, flip_shape, groups, idle, mirrored, notes_box, r
                       turn_notes, turn_pts, turn_shape, velocities)
 from notes.gaterange import clean_range
 from notes.gateflip import is_flipped as is_gate_flipped, is_pasted_flipped, mirrored_runs, unflipped_starts
-from notes.merge import (LAP as merge_lap, clean_merge, recipe_notes, reshaped_notes as merge_reshaped,
-                         turned_notes as merge_turned, with_rounds as merge_rounds)
+from notes.merge import (LAP as merge_lap, clean_merge, clean_unmerge, converted as merge_converted, recipe_notes,
+                         reshaped_notes as merge_reshaped, turned_notes as merge_turned, with_rounds as merge_rounds)
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
 from notes.sustain import clean_sustain, cut_by, held, is_sustained
@@ -148,7 +148,12 @@ def clean_kept_patterns(kept):
 
 def clean_shape(sh):
     """Shape loaded from a file -> valid shape, or None if it's a kind we no longer support or has a number that
-    can't be used."""
+    can't be used. An older Gate sensitive merge (one shape holding both) -> its fixed notes (merge.converted)."""
+    out = _clean_shape(sh)
+    return merge_converted(out) if out and "merge" in out else out
+
+
+def _clean_shape(sh):
     if sh.get("kind") not in KINDS or len(sh.get("pts", [])) < 1 or not sane(sh):
         return None
     out = clean_basics(sh)
@@ -284,6 +289,9 @@ def clean_shape(sh):
                 out["flip_colours"] = True
             if isinstance(sh.get("paste"), str):  # pieces sliced from one paste: its tracks share channels (render)
                 out["paste"] = sh["paste"]
+            um = clean_unmerge(sh["unmerge"], clean_shape) if isinstance(sh.get("unmerge"), dict) else None
+            if um:  # a Gate sensitive merge's fixed notes: the shape they were, for Split (merge.py)
+                out["unmerge"] = um
             # Apply mask's notes (mask.py): track = the channel slot it had (True: from a picture, always kept; [beat,
             # key]: Multi channel, while its first point is there), painted in the picture's colours, overlaps kept
             # (copied from a sustained shape), what it is (its name in any language)
@@ -904,6 +912,7 @@ def _kind_notes_tracks(sh, ppq, keys):
     if piece:
         raw, spots = spotted_notes(sh, ppq, end_dot)
     elif sh["kind"] == "custom" and "notes" in sh:
+        # (an older merged shape, only while it's turned into fixed notes when opened, merge.converted)
         # (a merged shape turned / slanted / stretched: its parts the same way, merged again; else a turned / skewed
         # picture or merged shape: each key row sampled across it, not its notes tilted)
         # ("New channels each Colours round": its parts' rounds, ridden along on the tracks: merge.with_rounds)

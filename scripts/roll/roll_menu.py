@@ -172,7 +172,7 @@ class ShapeMenu:
         if app.plain_targets():
             item(tr("roll_menu.turn_into_plain_notes"), "", app.turn_into_plain_notes)
         if len(app.sels) == 1 and app.can_split_pieces(sh):
-            label = (tr("roll_menu.split_back_into_the_shapes_it") if originals(sh) or sh.get("merge") else
+            label = (tr("roll_menu.split_back_into_the_shapes_it") if originals(sh) or sh.get("unmerge") else
                      tr("roll_menu.split_into_separate_shapes"))
             item(label, tr("roll_menu.ctrl_shift_g"), lambda: app.split_pieces(i), keys=True)
         # (with a stroke picked, the keys work on it)

@@ -20,9 +20,9 @@ BIG_MARK = "\0big:"  # (a big text's place in an undo state's JSON: no saved tex
 
 def _big_texts(sh):
     """The places a big text (pasted / image notes, many MB) sits in a shape: (dict, key) pairs. In the shape
-    itself or in one of a merge recipe's parts."""
+    itself or in one of the shapes a merge's notes Split back into."""
     got = [(sh, k) for k, v in sh.items() if isinstance(v, str) and len(v) > BIG_TEXT]
-    merge = sh.get("merge")
+    merge = sh.get("unmerge")
     if isinstance(merge, dict) and isinstance(merge.get("parts"), list):
         got += [(p, k) for p in merge["parts"] if isinstance(p, dict)
                 for k, v in p.items() if isinstance(v, str) and len(v) > BIG_TEXT]
@@ -65,7 +65,7 @@ def load_state(state):
     shapes = json.loads(state[0])
     for sh in shapes:
         for d, k in [(sh, k) for k, v in sh.items() if isinstance(v, str) and v.startswith(BIG_MARK)] + [
-                (p, k) for p in (sh.get("merge") or {}).get("parts") or () if isinstance(p, dict)
+                (p, k) for p in (sh.get("unmerge") or {}).get("parts") or () if isinstance(p, dict)
                 for k, v in p.items() if isinstance(v, str) and v.startswith(BIG_MARK)]:
             d[k] = state[1][int(d[k][len(BIG_MARK):])]
     return shapes
