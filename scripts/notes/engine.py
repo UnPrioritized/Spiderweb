@@ -1317,10 +1317,12 @@ def unmapped_slot(s, use10):
     return None if ch == 9 else block * 15 + place
 
 
-def pushed_solid(note_lists, pinned, fixed, split, step):
+def pushed_solid(note_lists, pinned, fixed, split, step, use10=False):
     """render's pinned tracks with each "solid" shape's track that clashes with an earlier "solid" shape's on the same
     slot moved up by step slots (15, 16 with channel 10 used) until it's free: the same channel (colour), another
-    track (user, 2026-10-17: a copy of plain notes ate the original's notes)."""
+    track (user, 2026-10-17: a copy of plain notes ate the original's notes). step 1 (Settings → General "Overlapping
+    shapes keep their colours" off; user 2026-10-20: 352 path copies made 646 channels, most empty): the next free
+    slot, never one the shapes skip (channel 10, unmapped_slot)."""
     placed = {}  # slot -> earlier solid tracks' stretches there
     out = list(pinned)
     for i, (lst, pin) in enumerate(zip(note_lists, pinned)):
@@ -1332,6 +1334,8 @@ def pushed_solid(note_lists, pinned, fixed, split, step):
             mine = lst[which == k]
             while s in placed and clash_pairs(np.concatenate(placed[s] + [stretches(mine, 1, split)])):
                 s += step
+                while step == 1 and unmapped_slot(s, use10) is None:
+                    s += 1
             placed.setdefault(s, []).append(stretches(mine, 0, split))
             new[which == k] = s
         out[i] = new
@@ -1436,7 +1440,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
 
     pinned = [np.asarray(tr, np.int64) if fx and tr is not None else None for tr, fx in zip(tracks, fixed)]
     if mode == "auto":
-        pinned = pushed_solid(note_lists, pinned, fixed, split, 16 if use10 else 15)
+        pinned = pushed_solid(note_lists, pinned, fixed, split, (16 if use10 else 15) if keep else 1, use10)
     top = max([int(p.max()) + 1 for p in pinned if p is not None and len(p)] or [0])
     if mode == "auto":
         units, unit_of, forced = [], [], []  # the shapes, pasted notes split up by track; unit_of = each note's unit
