@@ -506,16 +506,44 @@ def shape_key(sh):
     picked is the same shape (the same notes: picking a layer makes nothing again)."""
     if (sh.get("hz") or {}).get("layer"):
         sh = dict(sh, hz=with_layers(sh["hz"], layers_of(sh["hz"]), 0))
-    big = sorted(k for k, v in sh.items() if isinstance(v, str) and len(v) > BIG_TEXT)
-    if not big:
-        return json.dumps(sh, sort_keys=True)
-    return (json.dumps({k: v for k, v in sh.items() if k not in big}, sort_keys=True),
-            tuple((k, sh[k]) for k in big))
+    texts = []
+    out = without_big(sh, texts)
+    return json.dumps(out, sort_keys=True) if not texts else (json.dumps(out, sort_keys=True), tuple(texts))
+
+
+BIG_MARK = "\0big:"  # (a big text's place in shape_key's JSON: no saved text holds this character)
+
+
+def without_big(sh, texts):
+    """sh with every big text (BIG_TEXT; also inside a Gate sensitive merge's shapes, merges of merges too: a big
+    paste merged was copied out again at every change) swapped for a mark, the texts added to texts in order."""
+    out = {}
+    for k, v in sh.items():
+        if isinstance(v, str) and len(v) > BIG_TEXT:
+            out[k] = BIG_MARK + str(len(texts))
+            texts.append(v)
+        elif k in ("merge", "unmerge") and isinstance(v, dict) and isinstance(v.get("parts"), list):
+            out[k] = dict(v, parts=[without_big(p, texts) if isinstance(p, dict) else p for p in v["parts"]])
+        else:
+            out[k] = v
+    return out
+
+
+def with_big(sh, texts):
+    """without_big's sh with the very texts put back (changes sh)."""
+    for k, v in sh.items():
+        if isinstance(v, str) and v.startswith(BIG_MARK):
+            sh[k] = texts[int(v[len(BIG_MARK):])]
+        elif k in ("merge", "unmerge") and isinstance(v, dict) and isinstance(v.get("parts"), list):
+            for p in v["parts"]:
+                if isinstance(p, dict):
+                    with_big(p, texts)
+    return sh
 
 
 def from_key(key):
     """A copy of the shape shape_key was made from (big texts shared: a string never changes)."""
-    return json.loads(key) if isinstance(key, str) else dict(json.loads(key[0]), **dict(key[1]))
+    return json.loads(key) if isinstance(key, str) else with_big(json.loads(key[0]), key[1])
 
 
 DEEP = 50  # steps: more, and fx_notes makes the notes before each one first (see there)

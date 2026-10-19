@@ -454,6 +454,9 @@ def _halves(sh, parts, ppq):
                 if k not in ("notes", "pts", "vel_env", "fx", "glue", "between", "gate_flip", "flip_colours", "unmerge")}
         # (pages / glue / a velocity line / a gate aware flip: in its notes; a merge's notes cut: no Split back)
         half.update(notes_shape(n, ppq, sh.get("name")), paste=paste)
+        if "unmerge" in sh:  # (no Split back any more: not called "Merged notes", hunt)
+            from files.lang import tr
+            half["name"] = tr("join_split.plain_name", name=sh.get("name") or "")
         if mirrored:
             half["flip_colours"] = True
         if "name" not in sh:

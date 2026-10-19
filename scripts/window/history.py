@@ -9,21 +9,20 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
-from notes.engine import BIG_TEXT
+from notes.engine import BIG_MARK, BIG_TEXT, with_big
 from notes.merge import merge_parts
 from window import look
 from window.widgets import ListTip, Tooltip, fit_screen, placed
 
 CH10_OFF = "ch10_off"  # (an undo step's mark: made by unticking "Use channel 10", App.on_use_ch10)
 
-BIG_MARK = "\0big:"  # (a big text's place in an undo state's JSON: no saved text holds this character)
-
 
 def _big_texts(sh):
     """The places a big text (pasted / image notes, many MB) sits in a shape: (dict, key) pairs. In the shape
-    itself or in one of a merge's parts (its recipe, or the shape its notes Split back into)."""
+    itself or in a merge's parts (its recipe, or the shape its notes Split back into), merges of merges too."""
     got = [(sh, k) for k, v in sh.items() if isinstance(v, str) and len(v) > BIG_TEXT]
-    got += [(p, k) for p in merge_parts(sh) for k, v in p.items() if isinstance(v, str) and len(v) > BIG_TEXT]
+    for p in merge_parts(sh):
+        got += _big_texts(p)
     return got
 
 
@@ -60,12 +59,7 @@ def load_state(state):
     """An undo state -> the shapes (big texts put back as the very strings kept)."""
     if isinstance(state, str):
         return json.loads(state)
-    shapes = json.loads(state[0])
-    for sh in shapes:
-        for d, k in [(sh, k) for k, v in sh.items() if isinstance(v, str) and v.startswith(BIG_MARK)] + [
-                (p, k) for p in merge_parts(sh) for k, v in p.items() if isinstance(v, str) and v.startswith(BIG_MARK)]:
-            d[k] = state[1][int(d[k][len(BIG_MARK):])]
-    return shapes
+    return [with_big(sh, state[1]) for sh in json.loads(state[0])]
 
 START = tr("history.start")  # the first row: the oldest state still kept
 FUTURE = look.FUTURE  # steps undone (Ctrl+Y / clicking them brings them back; a new change drops them)

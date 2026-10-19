@@ -106,10 +106,17 @@ def clean_unmerge(u, clean_shape):
     return out
 
 
+def low_corner(box):
+    """A box's (3 corners: the 4th = 1 + 2 - 0) earliest time and lowest key, as an array."""
+    b = np.asarray(box, float)
+    return np.vstack([b, b[1] + b[2] - b[0]]).min(axis=0)
+
+
 def unmerged(sh):
     """Split of a two-shapes merge's notes: the shape they were made from, moved / turned / slanted / stretched /
     flipped the way the notes' box was since (a shape that can't be turned that way: only moved, as far as the
-    box's corner)."""
+    box's lowest, earliest corner). Moved, flipped, stretched: where it was before it slid, carried along (user
+    2026-10-19, one rule); turned / slanted: round where its notes are (time no longer runs along time)."""
     u = sh["unmerge"]
     parts = copy.deepcopy(u["parts"])
     got = box_map(u["box"], sh["pts"])
@@ -117,12 +124,13 @@ def unmerged(sh):
         return parts
     L, o = got
     if not np.allclose(L, np.eye(2), atol=1e-9) or u.get("vrev"):
-        d = u.get("slid", 0.0)  # (turned round where its notes are: first as far as it slid, the smallest slide)
+        level = abs(L[0, 1]) < 1e-9 and abs(L[1, 0]) < 1e-9  # (time still along time: flips / stretches)
+        d = 0.0 if level else u.get("slid", 0.0)  # (turned: first as far as it slid, the smallest slide)
         turned = [mapped_part(p, lambda b, k: [float(x) for x in L @ (b + d, k) + o], L, bool(u.get("vrev")))
                   for p in parts]
         if all(q is not None for q in turned):
             return turned
-    db, dp = (float(x) for x in np.asarray(sh["pts"][0], float) - np.asarray(u["box"][0], float))
+    db, dp = (float(x) for x in low_corner(sh["pts"]) - low_corner(u["box"]))  # (a flip moves the first corner)
     for p in parts:
         p["pts"] = [[b + db, k + dp] for b, k in p["pts"]]
     return parts

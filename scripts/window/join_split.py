@@ -43,9 +43,14 @@ def multi_slots(rows, multi):
     rows = rows.copy()
     if not len(multi):
         return rows
-    have = {(s, k): slot for s, k, slot in multi[:, [0, 2, 4]].tolist()}
     most = int(np.bincount(multi[:, 4]).argmax())
-    rows[:, 4] = [have.get((s, k), most) for s, k in rows[:, [0, 2]].tolist()]
+    have = multi[:, 0].astype(np.int64) * 1024 + multi[:, 2]  # (start and key as one number: keys < 1024)
+    o = np.argsort(have, kind="stable")
+    have, slot = have[o], multi[o, 4]
+    want = rows[:, 0].astype(np.int64) * 1024 + rows[:, 2]
+    at = np.searchsorted(have, want, side="right") - 1  # (two notes starting on one spot: the later one, as before)
+    found = (at >= 0) & (have[np.maximum(at, 0)] == want)
+    rows[:, 4] = np.where(found, slot[np.maximum(at, 0)], most)
     return rows
 
 
@@ -331,7 +336,8 @@ class JoinSplit:
         """gate_merge's "..., keep two shapes" (user 2026-10-19): the other shape stays as it is; the one
         that slid becomes fixed notes, exactly as they sounded, "Merged notes", rows with nothing to meet slid by
         the smallest slide inside it. Split gives back the shape it was (merge.unmerged)."""
-        plan = slide_plan(part_rows([self.shapes[i] for i in pair], self.ppq, self.keys), to_right)
+        # (the shapes' own notes as they sound, Sustain too: the very notes the sliding one keeps, plain_copies own)
+        plan = slide_plan([self.notes_of(self.shapes[i]) for i in pair], to_right)
         if plan is None:
             self.status.config(text=tr("join_split.merge_no_meet"))
             return
@@ -342,13 +348,17 @@ class JoinSplit:
             return
 
         left = set()  # (its key rows with nothing to meet)
+        met = np.array(sorted(by_key), np.int64)
+        moves = np.array([by_key[k] for k in met.tolist()], np.int64)
 
         def slid(rows):
-            left.update(set(rows[:, 2].tolist()) - set(by_key))
+            at = np.clip(np.searchsorted(met, rows[:, 2]), 0, max(0, len(met) - 1))
+            hit = met[at] == rows[:, 2]
+            left.update(np.unique(rows[~hit, 2]).tolist())
             rows = rows.copy()
-            rows[:, :2] += (np.array([by_key.get(k, least) for k in rows[:, 2].tolist()], np.int64) + late)[:, None]
+            rows[:, :2] += (np.where(hit, moves[at], least) + late)[:, None]
             return rows
-        new = self.plain_copies([i], slid).get(i)
+        new = self.plain_copies([i], slid, own=True).get(i)
         if new is None:
             self.status.config(text=tr("join_split.merge_no_meet"))
             return
@@ -359,9 +369,14 @@ class JoinSplit:
                           "slid": (least + late) / self.ppq}
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.merge"))
-        if late:  # (slid before the song's start: everything waits)
-            stay["pts"] = [[b + late / self.ppq, p] for b, p in stay["pts"]]
+        if late:  # (slid before the song's start: everything waits; an Add between group as a whole, hunt)
+            gid = group_of(stay)
+            for j, sh in enumerate(self.shapes):
+                if sh is stay or j != i and gid is not None and group_of(sh) == gid:
+                    sh["pts"] = [[b + late / self.ppq, p] for b, p in sh["pts"]]
         self.put_plain({i: new})
+        if new.get("team"):  # (an Add between step: Split gives it back on its colour turn, like the notes, hunt)
+            was["team"] = list(new["team"])
         self.select(i)
         self.shapes_changed()
         self.status.config(text=trn("join_split.merged_apart_left", len(left), n=len(left)) if left
@@ -411,10 +426,11 @@ class JoinSplit:
         self.shapes_changed()
         self.status.config(text=trn("join_split.plain_done", len(new), n=len(new)))
 
-    def plain_copies(self, got, moved=None):
+    def plain_copies(self, got, moved=None, own=False):
         """Turn into plain notes' new shapes: {i: a shape of shape i's notes exactly as they sound now, each note on
         the channel it has now} for the shapes in got that have notes. moved(rows): their rendered rows changed
-        first (Gate sensitive merge: slid)."""
+        first (Gate sensitive merge: slid). own: the shape's own notes, not as other shapes overlapping them cut
+        them (Single channel; merge slides it away from them, hunt), each on its channel all the same."""
         if self.notes_late:  # (notes still catching up with a drag: made now)
             self.shapes_changed(now=True)
         owners = self.rendered[:, 5]
@@ -428,12 +444,17 @@ class JoinSplit:
                                            order=all16 and self.ch10_order.get(),
                                            keep=self.keep_colours.get())
         new = {}
+        auto = self.channel_mode.get() == "auto"
         for i in got:
             rows = self.rendered[owners == i]
+            sh = self.shapes[i]
+            slots = rows if auto else multi[multi[:, 5] == i]
+            if own:
+                n = np.asarray(self.notes_of(sh), np.int64).reshape(-1, 4)
+                rows = np.column_stack([n, np.zeros((len(n), 1), np.int64), np.full((len(n), 1), i, np.int64)])
             if len(rows):  # (a shape with no notes stays as it is)
-                sh = self.shapes[i]
-                if self.channel_mode.get() != "auto":
-                    rows = multi_slots(rows, multi[multi[:, 5] == i])
+                if own or not auto:
+                    rows = multi_slots(rows, slots)
                 new[i] = without10(self.copied(moved(rows) if moved else rows, False, True), use10)
                 new[i]["made"] = "plain"
                 new[i]["name"] = tr("join_split.plain_name", name=self.shape_label(sh))
