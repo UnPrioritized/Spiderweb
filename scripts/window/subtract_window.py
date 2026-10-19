@@ -421,13 +421,17 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         for w in (self.by_label, self.by_unit):
             w.config(foreground="" if on else look.LABEL_OFF)
         self.by_label.config(text=tr("subtract.from" if vary else "subtract.by"))
-        if vary and not self.to_box.winfo_manager():  # (the second number and the graph only while it's used)
+        # (the second number and the graph only while it's used; each checked by itself: opened with it ticked, the
+        # graph stayed hidden)
+        if vary and not self.to_box.winfo_manager():
             self.to_label.pack(side="left", padx=(6, 0), before=self.by_unit)
             self.to_box.pack(side="left", padx=(4, 0), before=self.by_unit)
+        if vary and not self.graph_part.winfo_manager():
             self.graph_part.pack(anchor="w", fill="x", before=self.after_graph)
-        elif not vary and self.to_box.winfo_manager():
+        if not vary:
             for w in (self.to_label, self.to_box, self.graph_part):
-                w.pack_forget()
+                if w.winfo_manager():
+                    w.pack_forget()
         time = (self.g or {}).get("dir", "time") == "time"  # (each key row by itself: left to right only)
         rows = time and bool((self.g or {}).get("rows"))
         self.rows_check.state(["!disabled"] if time else ["disabled"])
