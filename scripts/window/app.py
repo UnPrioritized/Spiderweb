@@ -33,7 +33,7 @@ from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
 from notes.hzbass import fit_length
 from notes.mask import (MASK_DEFAULTS, as_used, can_mask, is_mask, mask_view, picture_like, pinned_slots, silent,
                         slot_pal, slot_rule, tidy_groups)
-from notes.merge import has_colours
+from notes.merge import has_colours, merge_parts, velocity_reversed as merge_vrev
 from notes.sustain import is_sustained
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
@@ -134,8 +134,8 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     General "Overlapping shapes keep their colours" (render keep)."""
     team_laps = []
     teams = between_turns(shapes, team_laps)
-    # (each Colours shape's notes made with their rounds, then taken off the tracks: render's rounds; an Add between
-    # step = one channel, its round = its group's: in_rounds)
+    # (each Colours shape's notes made with their rounds, then taken off the tracks: render's rounds; a merged shape's
+    # parts' rounds too, merge.part_rows; an Add between step = one channel, its round = its group's: in_rounds)
     rounds = rounds and mode == "auto"
     took = [rounds and has_colours(sh) and team is None for sh, team in zip(shapes, teams)]
     wide = all16 and mode == "auto"  # (a Nested / Tiles / Ripples fill with Colours: its pairs go round 16 colours)
@@ -165,15 +165,14 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     # (pinned tracks made with channel 10 skipped stay on their channels while it's used: mask.as_used)
     got = [(n, as_used(t, r, use10 or all16)) for (n, t), r in zip(got, rules)]
     # (with all16 the shapes use channel 10 too, but only as their 16th: render's "all"; in order: "order")
-    # (merged shapes from older files and Nested / Tiles / Ripples fills take channels by colour number, not by which
-    # colour starts first: a flipped or moved copy keeps its colours, user)
+    # (merged shapes and Nested / Tiles / Ripples fills take channels by colour number, not by which colour starts
+    # first: a flipped or moved copy keeps its colours, user)
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
                              pins, ("order" if order else "all") if all16 else use10, teams,
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
                              [is_sustained(sh) or sh.get("held") is True for sh in shapes],
                              [colours_back(sh) for sh in shapes],
-                             [bool((sh.get("unmerge") or {}).get("ordered")) or has_pattern(sh) for sh in shapes],
-                             laps, keep,
+                             [bool(sh.get("merge")) or has_pattern(sh) for sh in shapes], laps, keep,
                              [r and not has_colours(sh, turns=True) for sh, r in zip(shapes, took)])
     return wanted, use10 or all16, rendered, slots
 
@@ -283,6 +282,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.colours_wanted = []  # per shape, how many colours (tracks) its notes ask for (shapes_changed)
         self.leave_boxes = {}  # side panel box -> what takes its number when it's left (widgets.leave_box)
         self._notes_worked = 0  # shapes whose notes had to be worked out (not remembered)
+        self._merge_keys = {}  # merged shapes' parts' settings when last seen (remake_merges)
         self._notes_time = 0.0  # how long that took the last time
         self._mask_time = 0.0  # ... and the masks' preview (mask.mask_view)
         self._late_notes = None  # while dragging: notes left until the mouse rests
@@ -298,6 +298,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.mask = tk.BooleanVar(value=False)  # what's drawn becomes a mask (mask.py)
         self.mask_preview = tk.BooleanVar(value=True)  # masks hide what's outside them (off = the pattern drawn whole)
         self.mask_defaults = dict(MASK_DEFAULTS)  # a new mask's settings: the last ones set in the panel
+        # Gate sensitive merge menu's "Keep as two shapes" (user 2026-10-19; JoinSplit.gate_merge), remembered
+        self.merge_apart = tk.BooleanVar(value=False)
         self.draw_tool = "line"  # the drawing tool a double right-click goes back to
         self.snap = tk.StringVar(value=DEFAULT_SNAP)
         self.hz_snap = tk.StringVar(value=DEFAULT_SNAP)  # the Hz bass window's own snap
@@ -366,6 +368,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                                                   self.roll.request_redraw(),
                                                   self.live.get() and self.tips.show("live")))
         self.mask.trace_add("write", lambda *_: (self.schedule_autosave(), self.roll.request_redraw()))
+        self.merge_apart.trace_add("write", lambda *_: self.schedule_autosave())
         self.mask_preview.trace_add("write", lambda *_: (self.schedule_autosave(), any(map(is_mask, self.shapes)) and
                                                          self.shapes_changed()))
         self.snap.trace_add("write", lambda *_: self.roll.request_redraw())
@@ -975,7 +978,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """A point typed on a spam custom shape / funnel: past big_ask's 1 M notes = asked first. Counted only when
         the most it could make is past that (counting a funnel 10^9 ticks long took 12 s by itself); far past it
         the most is asked about."""
-        if sh["kind"] not in ("custom", "funnel") or trial.get("hz"):
+        if sh["kind"] not in ("custom", "funnel") or sh.get("merge") or trial.get("hz"):
             return True
         beats = [p[0] for p in trial["pts"]]
         keys = [p[1] for p in trial["pts"]]
@@ -1181,6 +1184,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.after_idle(self.sync_title)  # (a step changed by hand is a key now)
         if tidy_groups(self.shapes):  # (masks: a group of one = on its own, the first member Add; mask.py)
             self.after_idle(self.sync_mask)
+        self.remake_merges()
         for sh in self.shapes:  # ("Shape length follows the notes": after any change to its box too, hunt)
             if (sh.get("hz") or {}).get("grow"):
                 fit_length(sh)
@@ -1561,12 +1565,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def over_15(self, shapes, clamp=True):
         """The shapes whose Colours / Add between turns go over 15 channels (only allowed with "Use channel 10"),
-        brought down to 15 (clamp). The shapes a merge's notes Split back into count with them."""
+        brought down to 15 (clamp). Merged shapes' parts count with them."""
         most = most_colours(False)
         found = []
         for sh in shapes:
             over = []
-            for t in [sh] + (sh["unmerge"]["parts"] if sh.get("unmerge") else []):
+            for t in [sh] + merge_parts(sh):
                 if (t.get("cycle") or {}).get("n", 0) > most:
                     over.append((t["cycle"], "n"))
                 b = (t.get("between") or {}).get("set")
@@ -1763,8 +1767,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             # its own box (engine.unflipped / turned_back), that gives back the drawing it had; and for a text:
             # rebuilt, it slides onto its anchor by whole ticks, a box moved part of a tick came back a tick off)
             m2 = mid2 if fx is not was or sh.get("text") else even
-            if sh.get("unmerge") and sideways:  # (the shape Split gives back: each sideways flip turns its
-                sh["unmerge"]["vrev"] = not sh["unmerge"].get("vrev")  # velocities round, merge.unmerged)
+            if sh.get("merge"):  # (its parts' velocities: each sideways flip turns them round, merge.py)
+                sh["merge"]["vrev"] = merge_vrev(sh) != sideways
+            if sh.get("unmerge") and sideways:  # (kept as two shapes: the shape Split gives back, the same)
+                sh["unmerge"]["vrev"] = not sh["unmerge"].get("vrev")
             flip_shape(sh, sideways, m2)
             turned_piece(sh, frm, lambda w: flip_shape(w, sideways, m2))  # (a funnel piece stays one)
             if fx:  # (its note tool pages' result is flipped too, fx.py)
@@ -1851,6 +1857,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         frms = [sh["pts"] for sh in shapes]
         for sh in shapes:
             steps = steps_kept(sh)  # (a piece of a shape with pages: a turn step too, it stays a piece)
+            if sh.get("merge"):  # (a turn leaves its parts' velocities as they are)
+                sh["merge"]["vrev"] = merge_vrev(sh)
             turn_shape(sh, clockwise, r, cb, cp)
             if sh.get("fx") or steps:  # (its note tool pages' result is turned too, fx.py)
                 fx = fx_turned(sh.get("fx"), 90 if clockwise else -90, r, steps)
@@ -1908,7 +1916,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if made in ("path", "plain"):  # (Copy along a path → Turn into plain shapes: "Line copy 2", Turn into plain
             # notes: "Custom: Circle (notes)", named when made)
             return sh.get("name") or "?"
-        if ("picture" in sh or sh.get("unmerge") or  # (the picture's file name, user; "Merged notes")
+        if ("picture" in sh or sh.get("merge") or sh.get("unmerge") or  # (the picture's file name, user; "Merged notes")
                 "notes" in sh and sh.get("name") in (tr("join_split.merge_leftovers"),  # (plain notes, user; made
                                                      tr("mask.applied"))):  # before "made")
             return sh.get("name") or "?"
@@ -1924,7 +1932,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def note_count(self, sh):
         """Notes a shape makes (quick for spam, which can be millions)."""
-        n = (custom_note_count(sh, self.ppq) if sh["kind"] == "custom" else
+        n = (None if sh.get("merge") else  # (turned / slanted: made again from its shapes, merge.py)
+             custom_note_count(sh, self.ppq) if sh["kind"] == "custom" else
              funnel_note_count(sh, self.ppq) if sh["kind"] == "funnel" else None)
         return len(self.notes_of(sh)) if n is None else n
 
@@ -1984,6 +1993,25 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self.tool.get() == "picture":
             self.after_idle(self.open_image)
         self.tips.show(TOOL_TOPICS.get(self.tool.get()))
+
+    def remake_merges(self):
+        """Merged shapes whose parts' settings were changed in the panel (custom_targets), or made at another PPQ /
+        key range than the project's now: made again (merge.refit). A recipe seen for the first time (new, loaded,
+        undone) is taken as it is."""
+        from notes.merge import refit, settings_key
+        seen = {}
+        for sh in self.shapes:
+            m = sh.get("merge")
+            if not m:
+                continue
+            key = settings_key(m)
+            if (m["ppq"], m["keys"]) != (self.ppq, self.keys):  # (its gates in whole ticks of the project's PPQ)
+                m["ppq"], m["keys"] = self.ppq, self.keys
+                refit(sh)
+            elif self._merge_keys.get(id(m), key) != key:
+                refit(sh)
+            seen[id(m)] = key
+        self._merge_keys = seen
 
     def note_tool_sels(self):
         """The selected shapes that take note tools (claw, strum, chop, glue): not pictures (user)."""

@@ -16,6 +16,7 @@ from notes.joined import is_joined, piece_velocity
 from notes.text import split_letters, to_custom
 from window.join_split import part_glue, span
 from notes.mask import is_mask
+from notes.merge import merge_parts
 from notes.funnel import inside_out, new_start, turned_curve
 from notes.tumour import LINE_KINDS
 from roll.roll_shared import SHIFT
@@ -172,7 +173,7 @@ class ShapeMenu:
         if app.plain_targets():
             item(tr("roll_menu.turn_into_plain_notes"), "", app.turn_into_plain_notes)
         if len(app.sels) == 1 and app.can_split_pieces(sh):
-            label = (tr("roll_menu.split_back_into_the_shapes_it") if originals(sh) or sh.get("unmerge") else
+            label = (tr("roll_menu.split_back_into_the_shapes_it") if originals(sh) or merge_parts(sh) else
                      tr("roll_menu.split_into_separate_shapes"))
             item(label, tr("roll_menu.ctrl_shift_g"), lambda: app.split_pieces(i), keys=True)
         # (with a stroke picked, the keys work on it)
@@ -341,6 +342,8 @@ class ShapeMenu:
         for right in (True, False):
             sub.add_command(label=tr("join_split.merge_right" if right else "join_split.merge_left"),
                             command=lambda right=right: app.gate_merge(right))
+        sub.add_separator()  # (the way to merge, user 2026-10-19: one shape holding both, or the other left as it is)
+        sub.add_checkbutton(label=tr("join_split.merge_apart"), variable=app.merge_apart)
         m.add_cascade(label=tr("join_split.merge_menu"), menu=sub)
 
     def sustain_item(self, m):
