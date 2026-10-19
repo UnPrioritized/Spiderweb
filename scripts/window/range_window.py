@@ -48,7 +48,7 @@ class RangeGraph(PointGraph, tk.Toplevel):
         self.w, self.h, self.cw = int(440 * s), int(220 * s), int(300 * s)
         self.ml, self.mb = chart_edges(s, (trn("n.ticks", 99999, n=99999),), 56, 22)  # (wider fonts: room)
         self.mr, self.mt = int(12 * s), int(10 * s)
-        self.chart_left = chart_edges(s, ("9999999",), 40, 0)[0]  # (the chart's note counts)
+        self.chart_left = chart_edges(s, ("99999999",), 40, 0)[0]  # (the chart's note counts)
         self.tgts = tgts or app.custom_targets()
         # funnels (or the settings for new ones): from the line start to the wall, so no Across / rows / Fit; they
         # can follow the curve
