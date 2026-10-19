@@ -26,6 +26,7 @@ from window.strum_window import open_strum
 from window.chop_window import open_chop, quick_chop
 from notes.sustain import is_sustained
 from window.sustain_window import any_sustained, carry_stops, open_sustain, sustain_targets, target_indices
+from window.merge_window import open_merge
 from window.widgets import symmetry_menu
 
 
@@ -333,22 +334,11 @@ class ShapeMenu:
             item(tr("mask.separate"), "", app.separate_masks)
 
     def merge_menu(self, m):
-        """Gate sensitive merge ▸ Merge to right / Merge to left (two shapes selected; no anchor: where the menu was
-        opened doesn't matter, user)."""
+        """Gate sensitive merge… (two shapes selected; no anchor: where the menu was opened doesn't matter, user): its
+        window (merge_window.py; user 2026-10-19: four ways x two kinds was too many menu items)."""
         app = self.app
-        if not app.merge_pair():
-            return
-        sub = tk.Menu(m, tearoff=0)
-        # (one shape holding both, or the other left as it is: an item each, user 2026-10-19; a tick closed the
-        # menu, which can't stay open on Windows)
-        for apart in (False, True):
-            if apart:
-                sub.add_separator()
-            for right in (True, False):
-                key = "join_split.merge_right" if right else "join_split.merge_left"
-                sub.add_command(label=tr(key + "_apart" if apart else key),
-                                command=lambda right=right, apart=apart: app.gate_merge(right, apart))
-        m.add_cascade(label=tr("join_split.merge_menu"), menu=sub)
+        if app.merge_pair():
+            m.add_command(label=tr("join_split.merge_menu"), command=lambda: open_merge(app))
 
     def sustain_item(self, m):
         """Sustain… (sustain_window.py), ticked while a selected shape is sustained; greyed when every selected shape

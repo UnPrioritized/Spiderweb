@@ -57,6 +57,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     path_window.py   the Copy along a path window (path kind, spacing, where B is)
     range_window.py  the spam gate Range's graph window
     sustain_window.py  the Sustain window (on / off, the gap held over: Auto or typed)
+    merge_window.py  the Gate sensitive merge window (which way, keep two shapes)
     between_window.py  the Add between window (preview, steps, graph) + a group in the main window (list row, menu)
     image_window.py  image to notes: the picture, its sliders, the player-look preview, placing it
     format_window.py the colour list format editor (live output, tags, codes, the user's formats)

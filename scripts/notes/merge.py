@@ -80,6 +80,68 @@ def slide_plan(parts, right):
     return got and (slide, got[4], got[2], got[3])
 
 
+def lower_one(parts):
+    """0 or 1: which of two shapes' (start, end, pitch, ...) rows sits lower, by their middle key."""
+    a, b = (np.asarray(p, np.int64).reshape(len(p), -1) for p in parts)
+    return 0 if a[:, 2].mean() <= b[:, 2].mean() else 1
+
+
+def slid_up_down(stay, rows, up, top):
+    """Merge up / down (user 2026-10-19, from their pictures): rows (start, end, pitch, ...) are cut where stay's
+    notes start and end; each time piece slides as a block (up, or down) until one of its notes is right under
+    (over) a stay note sounding then; nothing in its way = up to key top (down to key 0). A note whose pieces slide
+    alike stays whole. Returns (the rows slid, True if a piece had nothing in its way), or None when none met."""
+    stay = np.asarray(stay, np.int64).reshape(len(stay), -1)
+    rows = np.asarray(rows, np.int64).reshape(len(rows), -1)
+    if not len(stay) or not len(rows):
+        return None
+    sk, rk = (stay[:, 2], rows[:, 2]) if up else (top - stay[:, 2], top - rows[:, 2])  # (down = up, upside down)
+    cuts = np.unique(stay[:, :2])
+    count = len(cuts) + 1  # (time pieces: piece t between cuts t - 1 and t)
+
+    def sounding(notes, keys):  # (each note's time pieces first .. end - 1, its notes sorted by key)
+        order = np.argsort(keys, kind="stable")
+        return (np.searchsorted(cuts, notes[order, 0], "right"), np.searchsorted(cuts, notes[order, 1], "left") + 1,
+                keys[order])
+    s_first, s_end, s_keys = sounding(stay, sk)
+    r_first, r_end, r_keys = sounding(rows, rk)
+
+    def held(first, end, keys, k):  # (the time pieces a note on key k sounds in)
+        a, b = np.searchsorted(keys, k), np.searchsorted(keys, k, "right")
+        diff = np.bincount(first[a:b], minlength=count + 1) - np.bincount(end[a:b], minlength=count + 1)
+        return np.cumsum(diff)[:count] > 0
+    far = np.int64(1 << 20)
+    near = np.full(count, far)  # (per time piece: the lowest stay key above the keys done so far)
+    least = np.full(count, far)  # (per time piece: how far its block can slide)
+    high = np.full(count, -1)  # (its highest key)
+    r_has, s_has = set(np.unique(r_keys).tolist()), set(np.unique(s_keys).tolist())
+    for k in sorted(r_has | s_has, reverse=True):  # (top down: a key sees only the stay keys above it)
+        if k in r_has:
+            on = held(r_first, r_end, r_keys, k)
+            least = np.where(on & (near < far), np.minimum(least, near - k - 1), least)
+            high = np.where(on & (high < 0), k, high)
+        if k in s_has:
+            near[held(s_first, s_end, s_keys, k)] = k
+    used = high >= 0
+    if not (used & (least < far)).any():
+        return None
+    move = np.where(used, np.maximum(np.minimum(least, top - high), 0), 0)  # (never past the top key)
+    cuts = cuts[np.flatnonzero(move[1:] != move[:-1])]  # (notes are only cut where the slide changes)
+    lo = np.searchsorted(cuts, rows[:, 0], "right")  # (cuts strictly inside each note: lo .. hi - 1)
+    hi = np.searchsorted(cuts, rows[:, 1], "left")
+    n = np.maximum(hi - lo, 0) + 1
+    src = np.repeat(np.arange(len(rows)), n)
+    j = np.arange(len(src)) - np.repeat(np.cumsum(n) - n, n)  # (piece number in its note)
+    last = max(len(cuts) - 1, 0)
+    out = rows[src].copy()
+    if len(cuts):
+        out[:, 0] = np.where(j == 0, out[:, 0], cuts[np.clip(lo[src] + j - 1, 0, last)])
+        out[:, 1] = np.where(j == n[src] - 1, out[:, 1], cuts[np.clip(lo[src] + j, 0, last)])
+    step = move[np.searchsorted(np.unique(stay[:, :2]), out[:, 0], "right")]
+    out[:, 2] += step if up else -step
+    return out, bool((used & (least >= far)).any())
+
+
 def merge_parts(sh):
     """The shapes kept inside a Gate sensitive merge: its recipe's (sh["merge"]) or the one its notes Split back
     into (sh["unmerge"])."""

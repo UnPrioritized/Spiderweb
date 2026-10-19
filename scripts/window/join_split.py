@@ -19,7 +19,8 @@ from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, sh
 from notes.gateflip import lifted, put_back, turn_velocities
 from notes.mask import SKIP10, is_mask, same_mask
 from notes.sustain import alike
-from notes.merge import edge_moves, merge_parts, merged, part_rows, reshaped_parts, slide_plan, unmerged
+from notes.merge import (edge_moves, lower_one, merge_parts, merged, part_rows, reshaped_parts, slid_up_down,
+                         slide_plan, unmerged)
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import EPS, clip_segment, crossings, slice_custom, slice_notes
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
@@ -271,7 +272,8 @@ class JoinSplit:
         to the right = the shape on the left slides right, each key row until it meets the other shape's notes;
         to the left = the shape on the right slides left (notes/merge.py). Both become one custom shape of plain
         notes (Ctrl+Z: both again). Rows with nothing to meet slide by the smallest slide and become a shape of
-        their own right after it (user: to delete or keep later). apart ("..., keep two shapes"): merged_apart."""
+        their own right after it (user: to delete or keep later). apart ("..., keep two shapes"): merged_apart.
+        to_right "up" / "down": merged_up_down. Asked from the Gate sensitive merge window (merge_window.py)."""
         self.commit_typing()  # (a number typed in a panel box: to the two shapes before they're replaced)
         pair = self.merge_pair()
         if not pair:
@@ -279,6 +281,8 @@ class JoinSplit:
         if any("picture" in self.shapes[i] for i in pair):  # (user: an image keeps its own colours, so not merged)
             self.status.config(text=tr("join_split.merge_no_image"))
             return
+        if to_right in ("up", "down"):  # (keep two shapes only, for now: user 2026-10-19)
+            return self.merged_up_down(pair, to_right == "up")
         if apart:
             return self.merged_apart(pair, to_right)
         parts = [copy.deepcopy(self.shapes[i]) for i in pair]
@@ -362,11 +366,47 @@ class JoinSplit:
         if new is None:
             self.status.config(text=tr("join_split.merge_no_meet"))
             return
+        self.put_merged(i, new, (least + late) / self.ppq, stay, late)
+        self.status.config(text=trn("join_split.merged_apart_left", len(left), n=len(left)) if left
+                           else tr("join_split.merged_apart_done"))
+
+    def merged_up_down(self, pair, up):
+        """Merge up / down, keep two shapes (user 2026-10-19): the lower shape (up; down: the upper one) is cut where
+        the other's notes start and end, each piece slides until it meets them (merge.slid_up_down); it becomes
+        fixed notes like merged_apart's."""
+        notes = [self.notes_of(self.shapes[k]) for k in pair]
+        if not all(len(n) for n in notes):
+            self.status.config(text=tr("join_split.merge_no_meet_up" if up else "join_split.merge_no_meet_down"))
+            return
+        slide = lower_one(notes) if up else 1 - lower_one(notes)
+        i, stay, top = pair[slide], notes[1 - slide], self.keys - 1
+        if slid_up_down(stay, notes[slide], up, top) is None:
+            self.status.config(text=tr("join_split.merge_no_meet_up" if up else "join_split.merge_no_meet_down"))
+            return
+        if is_mask(self.shapes[i]):
+            self.status.config(text=tr("join_split.merge_no_mask"))
+            return
+        wall = []
+
+        def slid(rows):
+            out, hit = slid_up_down(stay, rows, up, top)
+            wall.append(hit)
+            return out
+        new = self.plain_copies([i], slid, own=True).get(i)
+        if new is None:
+            return
+        self.put_merged(i, new, 0.0)
+        self.status.config(text=tr(("join_split.merged_up_wall" if up else "join_split.merged_down_wall")
+                                   if any(wall) else "join_split.merged_up_down_done"))
+
+    def put_merged(self, i, new, slid, stay=None, late=0):
+        """A two-shapes merge's fixed notes (new, from plain_copies) in place of shape i, remembering the shape it was
+        for Split; late ticks: stay (and its Add between group) moves later too. One undo step."""
         was = copy.deepcopy(self.shapes[i])
         was.pop("between", None)  # (its Add between group is unlinked)
         new["name"] = tr("join_split.merged")
         new["unmerge"] = {"parts": [was], "box": [list(p) for p in new["pts"]],  # (moved / turned since: it too)
-                          "slid": (least + late) / self.ppq}
+                          "slid": slid}
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.merge"))
         if late:  # (slid before the song's start: everything waits; an Add between group as a whole, hunt)
@@ -379,8 +419,6 @@ class JoinSplit:
             was["team"] = list(new["team"])
         self.select(i)
         self.shapes_changed()
-        self.status.config(text=trn("join_split.merged_apart_left", len(left), n=len(left)) if left
-                           else tr("join_split.merged_apart_done"))
 
     def pieces(self):
         """The selected shapes that are pieces cut from another shape, keeping their notes (sliced.py)."""
