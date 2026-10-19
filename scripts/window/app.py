@@ -423,9 +423,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             Tooltip(b, BY_ID[TOOL_TOPICS[key]]["tip"])
         line = ttk.Separator(bar, orient="vertical")
         line.pack(side="left", fill="y", padx=(3, 3), pady=2)
-        self.tool_picker = ToolPicker(self, bar, DRAW_TOOLS)  # the drawing tool picked last + the list
+        # the drawing tool picked last + the list; its pinned tools' buttons go in the bar too (fit_toolbar)
+        self.tool_picker = ToolPicker(self, bar, DRAW_TOOLS, inline=True)
         self.tool_picker.frame.pack(side="left", padx=1)
         self._tools_together = ((line, self.tool_picker.frame),)  # (wrapped: the line stays before the tools)
+        self._tools_line = line
         live = ttk.Checkbutton(bar, text=tr("app.live_shape_g"), variable=self.live)
         live.pack(side="left", padx=(12, 0))
         Tooltip(live, BY_ID["live"]["tip"])
@@ -462,7 +464,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.voices_var = tk.StringVar(value=str(self.play_voices))
         # Help + Settings: always at the top right corner, whatever row the buttons are on (user)
         corner = self.corner = ttk.Frame(top)
-        corner.grid(row=0, column=2, sticky="e", padx=(8, 0))  # (centred in the row, like the buttons beside it)
+        corner.grid(row=0, column=2, sticky="ne", padx=(8, 0))  # (at the top: the tools may wrap onto more lines)
         help_btn = ttk.Button(corner, text=tr("app.help_f1"), command=self.open_help, takefocus=False)
         help_btn.pack(side="left", padx=(0, 4))
         Tooltip(help_btn, tr("app.every_tip_searchable_opens_at_the"))
@@ -525,7 +527,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return
         if self._toolbar_wrap is None:
             again = lambda: self.winfo_exists() and self.fit_toolbar()  # noqa: E731  (a button grew / shrank)
-            self._toolbar_wrap = (WrapRow(self.tool_bar, together=self._tools_together, changed=again),
+            tp = self.tool_picker
+
+            def tool_groups():  # (the pinned tools' buttons right after the picker, each wrapping on its own; room
+                out = []  # kept for the picker's longest tool name and the closed Circle / Polygon group)
+                for g in self._toolbar_wrap[0].groups:
+                    out.append((g, tp.label_room() if tp.frame in g else 0))
+                    if tp.frame in g:
+                        out += tp.parts()
+                return out
+            self._toolbar_wrap = (WrapRow(self.tool_bar, together=self._tools_together, changed=again,
+                                          items=tool_groups, drop=(self._tools_line,)),
                                   WrapRow(self.option_bar, together=self._toolbar_together, changed=again))
         tools, options = self._toolbar_wrap
         corner = self.corner.winfo_reqwidth() + int(8 * self.scale)

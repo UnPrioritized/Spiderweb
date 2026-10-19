@@ -370,10 +370,14 @@ class WrapRow:
     """The widgets packed side by side in a frame, laid out again on more lines when the room given is too narrow
     for one (like words). together = tuples of widgets kept on one line (a label and its box). Made once they're
     all packed; the owner calls fit(room) when its width changes, and changed() is called (when idle) whenever
-    one of the widgets changes size (a pinned tool, a longer text)."""
+    one of the widgets changes size (a pinned tool, a longer text).
+    items: when the widgets come and go (pinned tools), a function giving the groups to lay out now, in order, as
+    (widgets, extra px): extra = room kept for the group as if wider (a group that opens beside a button: the
+    toolbar doesn't jump a line when it does). A widget not packed at the start gives its pack options as
+    widget.wrap_opts. drop = widgets (a separator line) left out where their group starts a line."""
 
-    def __init__(self, frame, together=(), changed=None):
-        self.frame = frame
+    def __init__(self, frame, together=(), changed=None, items=None, drop=()):
+        self.frame, self.items, self.drop, self.changed = frame, items, set(drop), changed
         slaves = frame.pack_slaves()
         self.opts = {w: {k: v for k, v in w.pack_info().items() if k != "in"} for w in slaves}
         self.groups, seen = [], set()
@@ -383,58 +387,78 @@ class WrapRow:
                 group = [x for x in slaves if x in group]
                 seen.update(group)
                 self.groups.append(group)
-        self.lines, self.laid = [], None
-        if changed:
-            sizes = {}
+        self.lines, self.laid, self.packed, self.sizes, self.watched = [], None, [], {}, set()
+        self.watch(slaves)
 
-            def resized(e):
-                if e.widget in self.opts and sizes.get(e.widget) != (e.width, e.height):
-                    sizes[e.widget] = (e.width, e.height)
-                    frame.after_idle(changed)
-            for w in slaves:
-                w.bind("<Configure>", resized, add="+")
+    def watch(self, widgets):
+        if not self.changed:
+            return
+        for w in widgets:
+            if str(w) not in self.watched:
+                self.watched.add(str(w))
+                w.bind("<Configure>", self.resized, add="+")
 
-    def width(self, group):
+    def resized(self, e):
+        if self.sizes.get(str(e.widget)) != (e.width, e.height):
+            self.sizes[str(e.widget)] = (e.width, e.height)
+            self.frame.after_idle(self.changed)
+
+    def now(self):
+        """The groups to lay out: [(widgets, extra px)]."""
+        if self.items:
+            return [(list(g), extra) for g, extra in self.items() if g]
+        return [(g, 0) for g in self.groups]
+
+    def opts_of(self, w):
+        return self.opts.get(w) or getattr(w, "wrap_opts", {"side": "left"})
+
+    def width(self, group, extra=0):
         def pad(p):
             return sum(int(v) for v in (p if isinstance(p, tuple) else str(p).split()))
-        return sum(w.winfo_reqwidth() + pad(self.opts[w].get("padx", 0)) for w in group)
+        return extra + sum(w.winfo_reqwidth() + pad(self.opts_of(w).get("padx", 0)) for w in group)
 
     def natural(self):
         """The width all of it takes on one line."""
-        return sum(self.width(g) for g in self.groups)
+        return sum(self.width(g, x) for g, x in self.now())
 
     def widest(self):
         """The width of its widest group (a line can't be narrower without cutting it)."""
-        return max((self.width(g) for g in self.groups), default=0)
+        return max((self.width(g, x) for g, x in self.now()), default=0)
 
     def fit(self, room):
         """Lines filled from the first, each as full as room allows (a group wider than room gets a line of its
         own). Returns how many lines."""
+        groups = self.now()
         laid, line, used = [], 0, 0
-        for g in self.groups:
-            w = self.width(g)
+        for g, extra in groups:
+            w = self.width(g, extra)
             if used and used + w > room:
                 line, used = line + 1, 0
-            laid.append(line)
+            laid.append((line, used == 0))
             used += w
-        laid = tuple(laid)
-        if laid != self.laid:
-            self.laid = laid
+        key = tuple((tuple(str(w) for w in g), at) for (g, _), at in zip(groups, laid))
+        if key != self.laid:
+            self.laid = key
             while len(self.lines) <= line:
                 f = ttk.Frame(self.frame)
                 f.lower()  # (made after the widgets: kept under them, or it would hide them)
                 self.lines.append(f)
-            for g in self.groups:
-                for w in g:
+            for w in self.packed:
+                if w.winfo_exists():
                     w.pack_forget()
             for i, f in enumerate(self.lines):
                 if i <= line:
                     f.pack(side="top", fill="x", pady=(2 if i else 0, 0))  # (fill: side="right" ones at the end)
                 else:
                     f.pack_forget()
-            for g, i in zip(self.groups, laid):
+            self.packed = []
+            for (g, _), (i, first) in zip(groups, laid):
                 for w in g:
-                    w.pack(in_=self.lines[i], **self.opts[w])
+                    if w in self.drop and first and i > 0 and w is g[0]:
+                        continue
+                    w.pack(in_=self.lines[i], **self.opts_of(w))
+                    self.packed.append(w)
+            self.watch(w for g, _ in groups for w in g)
         return line + 1
 
 

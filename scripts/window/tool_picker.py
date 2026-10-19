@@ -5,6 +5,7 @@ The main window's toolbar has one; the Hz bass window has its own (var / owner /
 
 import base64
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 
 from files.lang import tr
@@ -58,10 +59,11 @@ class RestTip(Tooltip):
 class ToolPicker:
     """tools: [(key, label, hot)] in list order. Packs itself into parent; var (app.tool) is the tool in use. owner =
     the window it's in (app), tips = {key: tip} (the Help topics' tips), group = tools pinned together (GROUP), fit =
-    called when its width changed (app.fit_toolbar)."""
+    called when its width changed (app.fit_toolbar). inline = the pinned tools' buttons are made in parent itself
+    and left for fit to place (parts(): the main toolbar wraps them one by one, hunt 2026-10-19)."""
 
-    def __init__(self, app, parent, tools, var=None, owner=None, tips=None, group=GROUP, fit=None):
-        self.app, self.tools = app, tools
+    def __init__(self, app, parent, tools, var=None, owner=None, tips=None, group=GROUP, fit=None, inline=False):
+        self.app, self.tools, self.parent, self.inline = app, tools, parent, inline
         self.var, self.owner, self.group = var or app.tool, owner or app, group
         self.tips = tips or {key: BY_ID[TOOL_TOPICS[key]]["tip"] for key, _, _ in tools}
         self.fit = fit or app.fit_toolbar
@@ -104,23 +106,32 @@ class ToolPicker:
             self.main.pack(side="left", before=self.arrow)
         if self.pinned:  # (a new frame: an emptied one keeps its old width, holding Live shape off to the right)
             self.pinned.destroy()
-        self.pinned = ttk.Frame(self.frame)
-        if self.pins:
+        for b in getattr(self, "pin_buttons", ()):
+            b.destroy()
+        self.pin_buttons = []  # (inline: the pinned buttons in order, the group's frame after its button)
+        self.pinned = None if self.inline else ttk.Frame(self.frame)
+        if self.pins and not self.inline:
             self.pinned.pack(side="left")
+        into = self.parent if self.inline else self.pinned
         self.group_box = None
         for key, _, _ in self.tools:
             if key not in self.pins or key in self.group[1:]:
                 continue
             if self.group and key == self.group[0]:  # (lit while any of the group is the tool: they all make
-                b = ttk.Checkbutton(self.pinned, text=self.label[key], variable=self.group_lit,  # custom shapes)
+                b = ttk.Checkbutton(into, text=self.label[key], variable=self.group_lit,  # custom shapes)
                                     style="Toolbutton", command=lambda: self.var.set(self.group[0]))
             else:
-                b = ttk.Radiobutton(self.pinned, text=self.label[key], value=key, variable=self.var,
+                b = ttk.Radiobutton(into, text=self.label[key], value=key, variable=self.var,
                                     style="Toolbutton", takefocus=False)
-            b.pack(side="left", padx=(2, 0))
+            if self.inline:
+                b.wrap_opts = {"side": "left", "padx": (2, 0)}
+                self.pin_buttons.append(b)
+            else:
+                b.pack(side="left", padx=(2, 0))
             Tooltip(b, self.tips[key])
             if self.group and key == self.group[0]:  # the rest of the group opens beside it while one of them is the tool
-                g = self.group_box = ttk.Frame(self.pinned)
+                g = self.group_box = ttk.Frame(into)
+                g.wrap_opts = {"side": "left"}
                 self.group_after = b
                 ttk.Separator(g, orient="vertical").pack(side="left", fill="y", padx=(2, 1), pady=2)
                 for k in self.group[1:]:
@@ -135,12 +146,34 @@ class ToolPicker:
         on = self.var.get() in self.group
         self.group_lit.set(on)
         g = self.group_box
-        if g and on != bool(g.winfo_manager()):
+        if g and not self.inline and on != bool(g.winfo_manager()):
             if on:
                 g.pack(side="left", after=self.group_after)
             else:
                 g.pack_forget()
         self.owner.after_idle(self.fit)
+
+    def parts(self):
+        """inline: the pinned buttons as the toolbar's groups [(widgets, extra px)]. The group's frame stays beside
+        its button; while it's closed its width is kept as room anyway, so opening it doesn't add a line."""
+        out = []
+        for b in self.pin_buttons:
+            if self.group_box is not None and b is getattr(self, "group_after", None):
+                g = self.group_box
+                on = self.var.get() in self.group
+                out.append(([b, g], 0) if on else ([b], g.winfo_reqwidth()))
+            else:
+                out.append(([b], 0))
+        return out
+
+    def label_room(self):
+        """Pixels the main button may still grow by (its widest tool name against the one shown), kept as room so
+        picking another tool doesn't add a toolbar line."""
+        if not self.main.winfo_manager():
+            return 0
+        font = tkfont.nametofont(look.TK)
+        free = [self.label[k] for k, _, _ in self.tools if k not in self.pins]
+        return max(0, max(map(font.measure, free), default=0) - font.measure(str(self.main.cget("text"))))
 
     def tool_changed(self):
         """A drawing tool picked any way (list, key) shows on the button, unless it has its own pinned button."""
