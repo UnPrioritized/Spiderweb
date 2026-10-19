@@ -1,7 +1,7 @@
 """Gate sensitive merge window (user 2026-10-19: picked over an 8-item submenu): the way (Right / Left / Up / Down,
 laid out like arrow keys) + "Keep two shapes", then Merge (JoinSplit.gate_merge). Stays open and follows the
 selection (says which shape moves, or why it can't: JoinSplit.merge_problem); the picks are kept until Spiderweb
-closes. Up / Down only keep two shapes for now; without the tick only two shapes."""
+closes. Without the tick (one shape) only two shapes."""
 
 import tkinter as tk
 from tkinter import ttk

@@ -284,6 +284,8 @@ def preview_parts(sh, ppq, keys):
     each key row of it slid in beats {key: beats} or None)]; the sliding one per row, roughly (a line crossing
     rows goes with the row at its middle). [] = can't tell."""
     m = sh["merge"]
+    if m.get("way") in ("up", "down"):  # (no key row slides sideways)
+        return []
     got = reshaped_parts(sh)
     if got:
         parts, slide, from_left, (L, o, least) = got
@@ -379,12 +381,65 @@ def merged(parts, right, ppq, keys):
     return gate_merge(b, a, True) if right else gate_merge(a, b, False)
 
 
+def merged_up_down(parts, up, keys, slide=None, spans=None, was_time=None):
+    """Merge up / down as ONE shape (user 2026-10-19): two shapes' rows (start, end, pitch, velocity, ...) ->
+    (both, the moving one's pieces with nothing in their way: up to the top key / down to key 0), or None when none
+    met. slide: which part moves (None: merge.mover's). A recipe made again (spans: [[start, end] ticks] of the pieces
+    made "Merge leftovers"): those left out; pieces newly with nothing in their way stay in it, slid by the smallest
+    slide (like left / right's rows; was_time(ticks): where a piece's time was when made, a flipped / stretched box)."""
+    a, b = (np.asarray(p, np.int64).reshape(len(p), -1) for p in parts)
+    if not len(a) or not len(b):
+        return None
+    if slide is None:
+        slide = mover([a, b], "up" if up else "down")
+    stay, moving = (a, b)[1 - slide], (a, b)[slide]
+    plan = up_down_plan([stay], moving, up, keys - 1)
+    if plan is None:
+        return None
+    rows, wall = up_down_rows(plan, moving)
+    if spans is not None:
+        mid = (rows[:, 0] + rows[:, 1]) / 2
+        if was_time is not None:
+            mid = was_time(mid)
+        s = np.asarray(spans, float).reshape(-1, 2)
+        out = ((mid[:, None] >= s[None, :, 0]) & (mid[:, None] < s[None, :, 1])).any(axis=1) if len(s) else wall & False
+        at = np.searchsorted(plan["cuts"], rows[:, 0], "right")
+        back = plan["move"][at] if up else -plan["move"][at]
+        rows = rows.copy()
+        # (newly: the smallest slide; flipped / stretched (was_time): the moving part sits at it already)
+        rows[:, 2] = np.where(wall, rows[:, 2] - back + (0 if was_time else plan["slid"]), rows[:, 2])
+        rows, wall = rows[~(wall & out)], wall[~(wall & out)] & False
+    return np.concatenate([stay, rows[~wall]]), rows[wall]
+
+
+def spans_of(rows):
+    """[[start, end]] ticks: the time the rows cover, overlapping / touching ones joined (Merge up / down's leftovers,
+    the recipe's "spans")."""
+    rows = np.asarray(rows, np.int64)
+    if not len(rows):
+        return []
+    o = np.argsort(rows[:, 0], kind="stable")
+    s, e = rows[o, 0], np.maximum.accumulate(rows[o, 1])
+    new = np.r_[True, s[1:] > e[:-1]]
+    ends = np.r_[np.flatnonzero(new)[1:] - 1, len(s) - 1]
+    return [[int(x), int(y)] for x, y in zip(s[new], e[ends])]
+
+
+def merged_by(parts, m, spans=None, was_time=None):
+    """The recipe's way of merging two parts' rows: merged_up_down (m["way"] up / down; spans in beats, "spans") or
+    merged (right / left)."""
+    if m.get("way") in ("up", "down"):
+        ticks = None if spans is None else (np.asarray(spans, float).reshape(-1, 2) * m["ppq"]).tolist()
+        return merged_up_down(parts, m["way"] == "up", m["keys"], m.get("slide"), ticks, was_time)
+    return merged(parts, m["right"], m["ppq"], m["keys"])
+
+
 def edge_moves(m):
     """How far each part's notes' first start and last end went in the merge, [(d0, d1)] in beats (the sliding
     one's rows each slid their own way), for giving the parts the merged shape's velocities on Split."""
     rows = [np.column_stack([r, np.full(len(r), i, np.int64)])  # (+ which part each note is from)
             for i, r in enumerate(part_rows(m["parts"], m["ppq"], m["keys"]))]
-    got = merged(rows, m["right"], m["ppq"], m["keys"])
+    got = merged_by(rows, m)
     if got is None or not all(len(r) for r in rows):
         return [(0.0, 0.0)] * 2
     now = np.concatenate(got)
@@ -417,6 +472,10 @@ def recipe_rows(m, rounds=False):
     """The recipe's merged (start, end, pitch, velocity, track[, round]) rows (part_rows), in the order its packed
     notes keep them, or None (no notes)."""
     parts = part_rows(m["parts"], m["ppq"], m["keys"], rounds)
+    if m.get("way") in ("up", "down"):  # (its leftovers' times left out, pieces newly with nothing in their way kept)
+        got = merged_by(parts, m, spans=m.get("spans", []))
+        out = np.concatenate(parts) if got is None else got[0]
+        return out if len(out) else None
     got = merged(parts, m["right"], m["ppq"], m["keys"])
     if got is None:
         out = np.concatenate(parts)
@@ -497,6 +556,21 @@ def made_sides(m):
     slide = left if m["right"] else 1 - left
     got = _merge((a, b)[1 - slide], (a, b)[slide], m["right"])
     return got and (slide, m["right"], got[2], got[3])
+
+
+def made_keys(m):
+    """Merge up / down recipe: (moving part's index, its smallest slide in keys, + = up) as made; None = none met."""
+    from notes.engine import shape_notes
+    a, b = (np.asarray(shape_notes({k: v for k, v in p.items() if k != "sustain"}, m["ppq"], m["keys"]),
+                       np.int64).reshape(-1, 4) for p in m["parts"])
+    if not len(a) or not len(b):
+        return None
+    up = m["way"] == "up"
+    slide = m.get("slide")
+    if slide is None:
+        slide = mover([a, b], m["way"])
+    plan = up_down_plan([(a, b)[1 - slide]], (a, b)[slide], up, m["keys"] - 1)
+    return plan and (slide, plan["slid"])
 
 
 def box_map(was, now):
@@ -593,6 +667,21 @@ def reshaped_parts(sh):
     if not got or np.allclose(got[0], np.eye(2), atol=1e-9) and not m.get("vrev"):
         return None  # (moved only; flipped both ways and half turned back still has its velocities turned round)
     L, o = got
+    if m.get("way") in ("up", "down"):  # (flipped / stretched only: turned / slanted = sampled, turned_notes)
+        if abs(L[0, 1]) > 1e-9 or abs(L[1, 0]) > 1e-9:
+            return None
+        got = made_keys(m)
+        if not got:
+            return None
+        slide, kslid = got
+        parts = []
+        for i, p in enumerate(m["parts"]):
+            d = kslid if i == slide else 0
+            q = mapped_part(p, lambda b, k, d=d: [float(x) for x in L @ (b, k + d) + o], L, m.get("vrev"))
+            if q is None:
+                return None
+            parts.append(q)
+        return parts, slide, None, (L, o, kslid)
     sides = made_sides(m)
     if not sides:
         return None
@@ -620,6 +709,12 @@ def reshaped_notes(sh, ppq, keys, rounds=False):
         return None
     parts, slide, from_left, (L, o, least) = got
     rows = part_rows(parts, ppq, keys, rounds)
+    m = sh["merge"]
+    if m.get("way") in ("up", "down"):  # (flipped upside down: the other way; its leftovers' times found back)
+        up = (m["way"] == "up") == (L[1, 1] > 0)
+        spans = (np.asarray(m.get("spans", []), float).reshape(-1, 2) * ppq).tolist()
+        again = merged_up_down(rows, up, keys, slide, spans, lambda t: (t / ppq - o[0]) / L[0, 0] * ppq)
+        return np.concatenate(again) if again else np.concatenate(rows)
     stay, moved = rows[1 - slide], rows[slide]
     apart = sh["merge"]["apart"]
     if len(moved) and apart:  # (rows made "Merge leftovers": their notes stay out, found where they were drawn)
@@ -718,6 +813,15 @@ def clean_merge(m, clean_shape):
     if len(parts) != 2 or not all(parts) or not 1 <= ppq <= 65535 or keys not in (128, 256):
         return None
     out = {"parts": parts, "right": m.get("right") is True, "ppq": ppq, "keys": keys, "apart": apart}
+    if m.get("way") in ("up", "down"):  # (Merge up / down: which part moved, its leftovers' times in beats)
+        out["way"] = m["way"]
+        if m.get("slide") in (0, 1):
+            out["slide"] = m["slide"]
+        try:
+            spans = [[float(a), float(b)] for a, b in m.get("spans", [])]
+        except (TypeError, ValueError):
+            spans = []
+        out["spans"] = [s for s in spans if all(map(math.isfinite, s))]
     if at and len(at) == 2 and all(map(math.isfinite, at)):
         out["at"] = at  # (its box's first corner when made: Split moves the parts as far as it moved)
     try:

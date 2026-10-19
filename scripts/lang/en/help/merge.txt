@@ -8,13 +8,13 @@ A row inside a hollow shape, or overlapping it, goes out to its outer edge.
 
 ## Up and down
 
-Up: the shape with the lowest note moves up. Down: the shape with the highest note moves down. The moving shape is cut where the other shape's notes start and end, and each piece slides as a block until its notes sit right under (or over) the other shape's notes. A shape that's wholly below a piece (above it, for Down) isn't in its way. Up and down only work with "Keep two shapes" for now.
+Up: the shape with the lowest note moves up. Down: the shape with the highest note moves down. The moving shape is cut where the other shape's notes start and end, and each piece slides as a block until its notes sit right under (or over) the other shape's notes. A shape that's wholly below a piece (above it, for Down) isn't in its way.
 
 ## One shape
 
 Without "Keep two shapes", both become one shape ("Merged notes" in the Shapes list). Only two shapes can be merged this way.
 
-It can be moved, turned, slanted and stretched like a custom shape, and the custom panel's settings go into both parts. Each part keeps its own colours. When both shapes are sustained with the same settings, the merged shape is sustained too. Split back into the old shapes (Ctrl+Shift+G, or right-click) gives the two parts back.
+It can be moved, turned, slanted and stretched like a custom shape, and the custom panel's settings go into both parts. Each part keeps its own colours. When both shapes are sustained with the same settings, the merged shape is sustained too. A shape merged up or down is turned and slanted as it looks, like a turned picture. Split back into the old shapes (Ctrl+Shift+G, or right-click) gives the two parts back.
 
 ## Keep two shapes
 

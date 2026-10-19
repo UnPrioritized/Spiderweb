@@ -20,8 +20,8 @@ from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, sh
 from notes.gateflip import lifted, put_back, turn_velocities
 from notes.mask import SKIP10, is_mask, same_mask
 from notes.sustain import alike
-from notes.merge import (box_map, edge_moves, merge_parts, merged, mover, part_rows, reshaped_parts, side_plan,
-                         unmerged, up_down_plan, up_down_rows)
+from notes.merge import (box_map, edge_moves, merge_parts, merged, merged_up_down, mover, part_rows, reshaped_parts,
+                         side_plan, spans_of, unmerged, up_down_plan, up_down_rows)
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.slice import EPS, clip_segment, crossings, slice_custom, slice_notes
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
@@ -293,8 +293,6 @@ class JoinSplit:
         sels = self.merge_sels() if apart else self.merge_pair()
         if not sels:
             return tr("merge_window.need_two")
-        if not apart and way in ("up", "down"):
-            return tr("merge_window.need_keep")
         if not apart and len(sels) > 2:
             return tr("join_split.merge_two_only")
         if any("picture" in self.shapes[i] for i in sels):  # (user: an image keeps its own colours, so not merged)
@@ -330,7 +328,6 @@ class JoinSplit:
         self.commit_typing()  # (a number typed in a panel box: to the two shapes before they're replaced)
         pair = self.merge_pair()
         way = to_right if to_right in ("up", "down") else "right" if to_right else "left"
-        apart = apart or way in ("up", "down")  # (up / down: keep two shapes only, for now: user 2026-10-19)
         problem = self.merge_problem(way, apart)
         if problem:
             self.status.config(text=problem)
@@ -340,9 +337,12 @@ class JoinSplit:
         parts = [copy.deepcopy(self.shapes[i]) for i in pair]
         flips = lifted(parts)  # (both gate flipped: the merged shape is, each row across both, user 2026-10-11)
         rows = part_rows(parts, self.ppq, self.keys)
-        got = merged(rows, to_right, self.ppq, self.keys)
+        updown = way in ("up", "down")
+        slide = mover(rows, way) if updown else None  # (up / down: which part moved, kept in the recipe)
+        got = merged_up_down(rows, way == "up", self.keys, slide) if updown else merged(rows, to_right, self.ppq,
+                                                                                         self.keys)
         if got is None:
-            self.status.config(text=tr("join_split.merge_no_meet"))
+            self.status.config(text=tr("join_split.merge_no_meet_" + way if updown else "join_split.merge_no_meet"))
             return
 
         def shape(rows, name, made=None):  # (track = each shape's own colours, merge.part_rows)
@@ -368,10 +368,14 @@ class JoinSplit:
                 sh["mask"] = copy.deepcopy(masks[0])
         for p in parts:
             p.pop("between", None)  # (its Add between group is unlinked)
-        new[0]["merge"] = {"parts": parts, "right": bool(to_right),
-                           "ppq": self.ppq, "keys": self.keys, "apart": sorted(set(rest[:, 2].tolist())),
+        new[0]["merge"] = {"parts": parts, "right": bool(to_right) and not updown,
+                           "ppq": self.ppq, "keys": self.keys,
+                           "apart": [] if updown else sorted(set(rest[:, 2].tolist())),
                            "at": list(new[0]["pts"][0]),  # (where its box was: Split moves the parts as far as it)
                            "box": [list(p) for p in new[0]["pts"]]}  # (turned / slanted since: the parts too)
+        if updown:  # (up / down, user 2026-10-19: the leftovers' times, so a remake leaves them out)
+            new[0]["merge"].update(way=way, slide=int(slide),
+                                   spans=[[a / self.ppq, b / self.ppq] for a, b in spans_of(rest)])
         if flips:
             new[0]["merge"]["flips"] = flips
             for sh in new:  # (the leftovers too: they were flipped)
@@ -385,8 +389,12 @@ class JoinSplit:
         self.select(pair[0])  # (the merged shape, user: leftovers are dealt with later)
         self.shapes_changed()
         rows = len(np.unique(rest[:, 2])) if len(rest) else 0
-        self.status.config(text=trn("join_split.merged_left", rows, n=rows) if len(rest)
-                           else tr("join_split.merged_done"))
+        if updown:
+            self.status.config(text=tr("join_split.merged_one_" + way + "_wall") if len(rest)
+                               else tr("join_split.merged_one_up_down_done"))
+        else:
+            self.status.config(text=trn("join_split.merged_left", rows, n=rows) if len(rest)
+                               else tr("join_split.merged_done"))
 
     def merged_apart(self, sels, way):
         """gate_merge's "Keep two shapes" (user 2026-10-19), any number of shapes: one moves (merge_mover), the
