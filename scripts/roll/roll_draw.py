@@ -535,6 +535,8 @@ class RollDrawing:
             self.tag_lower("made", "frame")
             self.dtag("made")
             self.draw_playhead(keep=True)
+        self.tag_raise("rulerpick")  # (over the ruler, under the play line)
+        self.tag_raise("playhead")
         if self.typing:
             self.show_caret()
 
@@ -804,6 +806,7 @@ class RollDrawing:
             boxes = self.kept_box() or []
         draw_boxes(self, [self.box_rect(b) for b in boxes], self.kb_w, self.ruler_h, self.scale,
                    tags="selbox")
+        self.draw_ruler_pick(boxes)
 
     def draw_slice(self):
         """The Slice tool's line while it's dragged: dashed, a dot at each end."""
@@ -1608,15 +1611,38 @@ class RollDrawing:
         beats = self.app.beats
         self.create_rectangle(0, 0, w, top, fill=look.RULER_BG, outline="", tags="frame")
         self.create_line(0, top, w, top, fill=look.ROLL_EDGE, tags="frame")
+        for x, label in self.ruler_marks(w):
+            self.create_line(x, top - 6, x, top, fill=look.RULER_TICK, tags="frame")
+            self.create_text(x + 3, top / 2, text=label, anchor="w", fill=look.RULER_TEXT,
+                             font=look.font(8, fit=True), tags="frame")
+        self.create_rectangle(0, 0, kb, top, fill=look.RULER_BG, outline="", tags="frame")
+
+    def ruler_marks(self, w):
+        """(x, bar number) of each number on the ruler, from the keyboard to w."""
+        beats, marks = self.app.beats, []
         step = beats
         while step * self.sx < 40:
             step *= 2
-        b = math.floor(max(0.0, self.x2t(kb)) / step) * step
+        b = math.floor(max(0.0, self.x2t(self.kb_w)) / step) * step
         while b <= self.x2t(w):
             x = self.t2x(b)
-            if x >= kb:
-                self.create_line(x, top - 6, x, top, fill=look.RULER_TICK, tags="frame")
-                self.create_text(x + 3, top / 2, text=str(int(b // beats) + 1), anchor="w", fill=look.RULER_TEXT,
-                                 font=look.font(8, fit=True), tags="frame")
+            if x >= self.kb_w:
+                marks.append((x, str(int(b // beats) + 1)))
             b += step
-        self.create_rectangle(0, 0, kb, top, fill=look.RULER_BG, outline="", tags="frame")
+        return marks
+
+    def draw_ruler_pick(self, boxes):
+        """The ruler black under the Select boxes that hold every key (a drag along the ruler: like many MIDI
+        programs), its numbers white there."""
+        w, top = self.winfo_width(), self.ruler_h
+        for x0, x1 in sorted(sorted((self.t2x(a[0]), self.t2x(a[2]))) for a in self.ruler_boxes(boxes)):
+            x0, x1 = max(x0, self.kb_w), min(x1, w)
+            if x0 >= x1:
+                continue
+            self.create_rectangle(x0, 0, x1, top, fill=look.RULER_PICK, outline="", tags=("selbox", "rulerpick"))
+            for x, label in self.ruler_marks(w):
+                if x0 <= x < x1:
+                    self.create_line(x, top - 6, x, top, fill=look.RULER_PICK_TEXT, tags=("selbox", "rulerpick"))
+                    self.create_text(x + 3, top / 2, text=label, anchor="w", fill=look.RULER_PICK_TEXT,
+                                     font=look.font(8, fit=True), tags=("selbox", "rulerpick"))
+        self.tag_raise("playhead")

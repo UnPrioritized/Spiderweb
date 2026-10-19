@@ -10,7 +10,7 @@ Wheel = scroll, Shift+wheel = sideways, Ctrl+wheel = zoom, Ctrl+Shift+wheel = zo
 
 Editing: Del delete, Ctrl+D duplicate, Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) undo / redo (see History), Ctrl+A select all, Ctrl+C / Ctrl+X / Ctrl+V copy / cut / paste, Ctrl+H / Ctrl+J flip, Ctrl+Left / Ctrl+Right turn 90°, Ctrl+G join into one curve, Ctrl+Shift+G split into separate shapes, Ctrl+R turn into live shape, Alt+W claw machine, Alt+S strum, Alt+U chop, Ctrl+U quick chop, Esc clear highlight / unpick a stroke. With a stroke of a live shape picked, the copy / paste / flip / turn keys work on that stroke.
 
-Playing: Space play / stop. Click or drag the bar numbers = move the play line.
+Playing: Space play / stop. Click the bar numbers = move the play line. Drag along them = select every key in that time.
 
 Curves: Alt+drag a handle = sharp corner, Alt+drag an anchor = new handles, Ctrl = change only this curve (linked funnel curves).
 

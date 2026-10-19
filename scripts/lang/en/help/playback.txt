@@ -1,4 +1,4 @@
-Space (or Play) plays from the play line through the MIDI out picked in Settings (⚙) → Sound; the blue line follows and the view jumps along. Click or drag the bar numbers (or click empty space with Select) to move the play line. Playing stops a quarter bar after the last note.
+Space (or Play) plays from the play line through the MIDI out picked in Settings (⚙) → Sound; the blue line follows and the view jumps along. Click the bar numbers (or click empty space with Select) to move the play line; dragging along them selects (see Selecting). Playing stops a quarter bar after the last note.
 
 Built-in BASSMIDI (in the MIDI out list) plays through Spiderweb's own synth, with a soundfont you pick (the Hz bass preview uses the same one). Pressing Play with no soundfont yet asks for one. Settings (⚙) → Sound changes the soundfont and the Voice limit: how many sounds can ring at once.
 
