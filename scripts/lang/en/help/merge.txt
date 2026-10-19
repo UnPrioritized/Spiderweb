@@ -1,9 +1,29 @@
-Select two shapes, right-click one of them → Gate sensitive merge, then pick a side. Merge to right: the shape on the left slides right. Merge to left: the shape on the right slides left. Where you right-click doesn't matter.
+Select two or more shapes, right-click one of them → Gate sensitive merge… and a small window opens: pick a way (Up, Left, Right or Down), tick "Keep two shapes" or not, then press Merge. Where you right-click doesn't matter. The window stays open and follows the selection, so you can try another way right away (Ctrl+Z takes a merge back). It says which shape will move, or why it can't merge.
 
-Each key row of the sliding shape moves on its own, until its note meets the other shape's note on the same key (it ends where that one starts). The notes keep their lengths, so a straight block takes on the other shape's slanted edge.
+## Left and right
 
-Both become one shape ("Merged notes" in the Shapes list), and it's selected. Rows that have nothing to meet slide by the smallest slide and become a shape of their own, "Merge leftovers". If no row meets anything, nothing is merged.
+Merge to right: the shape on the left slides right. Merge to left: the shape on the right slides left. Each key row of the sliding shape moves on its own, until its note meets the other shape's note on the same key (it ends where that one starts). The notes keep their lengths, so a straight block takes on the other shape's slanted edge.
 
-A merged shape can be moved, turned, slanted and stretched like a custom shape, and the custom panel's settings go into both parts. Each part keeps its own colours. When both shapes are sustained with the same settings, the merged shape is sustained too. Split back into the old shapes (Ctrl+Shift+G, or right-click) gives the two parts back.
+A row inside a hollow shape, or overlapping it, goes out to its outer edge.
 
-Images can't be merged.
+## Up and down
+
+Up: the shape with the lowest note moves up. Down: the shape with the highest note moves down. The moving shape is cut where the other shape's notes start and end, and each piece slides as a block until its notes sit right under (or over) the other shape's notes. A shape that's wholly below a piece (above it, for Down) isn't in its way. Up and down only work with "Keep two shapes" for now.
+
+## One shape
+
+Without "Keep two shapes", both become one shape ("Merged notes" in the Shapes list). Only two shapes can be merged this way.
+
+It can be moved, turned, slanted and stretched like a custom shape, and the custom panel's settings go into both parts. Each part keeps its own colours. When both shapes are sustained with the same settings, the merged shape is sustained too. Split back into the old shapes (Ctrl+Shift+G, or right-click) gives the two parts back.
+
+## Keep two shapes
+
+With "Keep two shapes", the other shapes stay as they are. The one that moves becomes fixed notes ("Merged notes"), exactly as they sounded, on the shape's own channels. Split (Ctrl+Shift+G, or right-click) gives the shape back as it was before it moved.
+
+With three or more shapes, one moves and all the others are what it meets. Merging a Merged notes the same way again moves it again; if it already touches, another shape moves to meet it instead. If nothing would move, nothing is merged.
+
+## Leftovers
+
+Rows or pieces that have nothing to meet become a shape of their own, "Merge leftovers", so you can delete or keep them. Left and right: they slide by the smallest slide. Up and down: they go to the top key (or key 0). Split of the Merged notes takes its leftovers back too.
+
+If nothing meets anything, nothing is merged. Images can't be merged, and masks only as one shape.
