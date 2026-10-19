@@ -97,11 +97,13 @@ def side_plan(stays, slide, right):
 
 def mover(parts, way, skip=None):
     """Which of several shapes' (start, end, pitch, ...) rows moves in a Gate sensitive merge "way" (right / left /
-    up / down), not skip: right = the earliest by middle time, left = the latest, up = the one with the lowest note,
-    down = the highest (ties: by middle key). (A Merged notes made this way before moves again first:
-    JoinSplit.merge_mover.)"""
+    up / down), not one in skip: right = the earliest by middle time, left = the latest, up = the one with the lowest
+    note, down = the highest (ties: by middle key); None when all are skipped. (A Merged notes made this way before
+    moves again first: JoinSplit.merge_mover.)"""
     rows = [np.asarray(p, np.int64).reshape(len(p), -1) for p in parts]
-    ks = [k for k in range(len(rows)) if k != skip]
+    ks = [k for k in range(len(rows)) if k not in (skip or ())]
+    if not ks:
+        return None
     if way in ("right", "left"):
         mid = {k: rows[k][:, :2].mean() for k in ks}
         return (min if way == "right" else max)(ks, key=mid.get)

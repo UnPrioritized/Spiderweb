@@ -270,12 +270,23 @@ class JoinSplit:
         return sels if len(sels) >= 2 else None
 
     def merge_sels(self):
-        """merge_pair without "Merge leftovers" whose Merged notes is selected too (they're part of it, not a wall:
-        after a merge all stay selected), or None when fewer than 2 are left."""
+        """merge_pair, or None when fewer than 2 are left without "Merge leftovers" whose Merged notes is selected too
+        (after a merge all stay selected: they're part of it, merge_own)."""
         sels = self.merge_pair() or []
-        ids = {(self.shapes[i].get("unmerge") or {}).get("id") for i in sels} - {None}
-        sels = [i for i in sels if self.shapes[i].get("leftover_of") not in ids]
-        return sels if len(sels) >= 2 else None
+        return sels if len(sels) - sum(map(len, self.merge_own(sels).values())) >= 2 else None
+
+    def merge_own(self, sels):
+        """{place in sels of a Merged notes: places of its own "Merge leftovers" selected with it}: never moved by
+        themselves; no wall when it moves (hunt), a wall when another shape moves (user 2026-10-19: notes went
+        behind them)."""
+        ids = {(self.shapes[i].get("unmerge") or {}).get("id"): k for k, i in enumerate(sels)}
+        ids.pop(None, None)
+        own = {}
+        for k, i in enumerate(sels):
+            m = ids.get(self.shapes[i].get("leftover_of"))
+            if m is not None:
+                own.setdefault(m, set()).add(k)
+        return own
 
     def merge_problem(self, way, apart):
         """Why Gate sensitive merge can't go the way picked (the window's hint, greyed Merge), or None."""
@@ -303,10 +314,11 @@ class JoinSplit:
         notes = [np.asarray(self.notes_of(self.shapes[i]), np.int64).reshape(-1, 4) for i in sels]
         if not all(len(n) for n in notes):
             return None, None, notes
+        lone = set().union(*self.merge_own(sels).values())  # (leftovers never move by themselves)
         again = [k for k, i in enumerate(sels) if (self.shapes[i].get("unmerge") or {}).get("way") == way]
         if len(again) == 1:
-            return again[0], mover(notes, way, skip=again[0]), notes
-        return mover(notes, way), None, notes
+            return again[0], mover(notes, way, skip=lone | {again[0]}), notes
+        return mover(notes, way, skip=lone), None, notes
 
     def gate_merge(self, to_right, apart=False):
         """Right-click → Gate sensitive merge ▸ Merge to right / left (user; no anchor, anywhere in the menu works):
@@ -383,10 +395,11 @@ class JoinSplit:
         It becomes fixed notes exactly as they sounded, "Merged notes"; what had nothing to meet = a "Merge
         leftovers" shape of its own (user, hunt: to delete later). Split gives back the shape it was (unmerged)."""
         k, alt, notes = self.merge_mover(sels, way)
-        got = self.merge_slide(notes, k, way)
+        own = self.merge_own(sels)
+        got = self.merge_slide(notes, k, way, own.get(k, ()))
         if alt is not None and (isinstance(got, str) or not got["moved"]):
             # (the Merged notes moves again only if it would move: else the others' own mover meets it, hunt)
-            other = self.merge_slide(notes, alt, way)
+            other = self.merge_slide(notes, alt, way, own.get(alt, ()))
             if not isinstance(other, str) and other["moved"]:
                 k, got = alt, other
         if isinstance(got, str):
@@ -421,12 +434,12 @@ class JoinSplit:
             self.status.config(text=trn("join_split.merged_apart_left", rows, n=rows) if rows
                                else tr("join_split.merged_apart_done"))
 
-    def merge_slide(self, notes, k, way):
+    def merge_slide(self, notes, k, way, skip=()):
         """How shape k of notes (each selected shape's own notes) slides onto the others' (each on its own): {"rows":
         rows -> (rows slid, True where a leftover), "moved", "late" ticks, "slid" beats, "kslid" keys}, or the
         message saying why it can't."""
         # (the shapes' own notes as they sound, Sustain too: the very notes the moving one keeps, plain_copies own)
-        stays = [n for j, n in enumerate(notes) if j != k]
+        stays = [n for j, n in enumerate(notes) if j != k and j not in skip]  # (skip: its own leftovers)
         if way in ("up", "down"):
             plan = up_down_plan(stays, notes[k], way == "up", self.keys - 1)
             if plan is None:
