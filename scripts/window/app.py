@@ -1900,7 +1900,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             w["pts"] = [[b + db, p + dp] for b, p in w["pts"]]
         for sh, frm in zip(shapes, frms):  # (a funnel piece stays one)
             turned_piece(sh, frm, turned)
-        self.roll.move_kept_box(lambda b, p: (cb + sign * (p - cp) * r + db, cp - sign * (b - cb) / r + dp))  # (too)
+        self.roll.move_kept_box(lambda b, p: (cb + sign * (p - cp) * r + db, cp - sign * (b - cb) / r + dp),
+                                turned=True)  # (too)
         self.sync_panel()
         self.shapes_changed()
 

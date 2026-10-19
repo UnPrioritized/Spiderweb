@@ -324,6 +324,7 @@ class ProjectFiles:
         self.playhead = max(0.0, playhead) if playhead is not None and math.isfinite(playhead) else 0.0
         self.sel = None
         self.sels = set()
+        self.roll.box_kept = None  # (an empty Select box / ruler band too)
         self.parts = set()
         self.stroke = self.ripple_pick = None
         self.undo_stack.clear()

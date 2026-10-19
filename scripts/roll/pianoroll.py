@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from files.lang import tr, trn
+from files.system import double_click_ms
 from notes.between import copied as between_copied, group_of, keep_pushes, push_sizes, whole_groups
 from notes.custom import box_frame, box_pts, fill_plan, fill_test, frame_in_box
 from notes.engine import cached_arrays, make_shape, shape_key
@@ -41,6 +42,8 @@ from roll.roll_text import TextTyping
 EDGE = 0.5  # keys a shape's lines may go past the lowest / highest key's middle: its notes stay on that key
 RULER_TOP = 1000.5  # the top of a Select box made along the ruler (every key; no box dragged on the piano roll gets
 #                     this high, so the two kinds stay apart: ruler_boxes)
+DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
+
 class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
                 PathEditing, SustainStops, tk.Canvas):
     def __init__(self, parent, app, scale):
@@ -122,10 +125,11 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.bind("<ButtonRelease-1>", self.on_release)
         self.bind("<Double-Button-1>", self.on_double)
         self.bind("<Motion>", self.on_motion)
-        bind_double_right(self, self.on_right, lambda e: self.app.toggle_select_tool())
+        bind_double_right(self, self.on_right, self.on_double_right)
         self.bind("<B3-Motion>", self.on_right_drag)
         self.bind("<ButtonRelease-3>", self.on_right_release)
         self._scrub = None  # right-drag listening
+        self.menu_wait = None  # a right-click in the kept Select boxes: their menu, after the double-click time
         self.bind("<ButtonPress-2>", self.start_pan)
         self.bind("<B2-Motion>", self.pan_to)
         self.bind("<ButtonRelease-2>", self.on_middle_release)
@@ -519,15 +523,22 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.box_kept = None
         return None
 
-    def move_kept_box(self, fn):
+    def move_kept_box(self, fn, turned=False):
         """The shapes in the kept Select boxes were turned / flipped: the boxes go along, each corner by fn(beat,
-        key) -> (beat, key), the keys out to whole rows."""
+        key) -> (beat, key), the keys out to whole rows. turned: a ruler band then covers the shapes' time, out to
+        the grid (turning its every-key height made it far too wide)."""
         kept = self.kept_box()
         if not kept:
             return
         new = []
         for b0, top, b1, bottom in kept:
             band = top >= RULER_TOP - 0.5  # (a ruler band: its time goes along, it stays every key)
+            reach = self.reach([self.app.shapes[j] for j in self.app.sels]) if band and turned else None
+            if reach:
+                step = self.app.snap_beats() or 1 / self.app.ppq
+                new.append((max(0.0, math.floor(reach[0] / step + 1e-9) * step), RULER_TOP,
+                            max(math.ceil(reach[3] / step - 1e-9) * step, step), -0.5))
+                continue
             pts = [fn(b, p) for b in (b0, b1) for p in ((self.app.keys - 0.5, -0.5) if band else (top, bottom))]
             bs, ps = [b for b, _ in pts], [p for _, p in pts]
             new.append((min(bs), RULER_TOP, max(bs), -0.5) if band else
@@ -811,12 +822,13 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             strokes = strokes + [p for _, p in PianoRoll.origin_strokes(sh)]
         return strokes
 
-    def shapes_in_box(self, x0, y0, x1, y1, among=None):
+    def shapes_in_box(self, x0, y0, x1, y1, among=None, own=None):
         """The shapes a box on screen (x0 < x1, y0 < y1) touches: a piece of their line, or one of their notes
         while the notes are shown. A line has to go into the box: one that only reaches its edge doesn't count (user:
         a shape ending on the grid line where the box starts isn't picked). A note too: one ending where the box starts
         (or starting where it ends) doesn't count, nor one on the key row just past its top / bottom (user).
-        among: just these shape numbers."""
+        among: just these shape numbers. own = (shape number, its notes): those notes instead of the shown ones (a
+        shape just drawn: in a big song the shown notes come later)."""
         found = set()
         e = 1e-6  # (a line ending on the edge is exactly there on screen too)
         for i, sh in enumerate(self.app.shapes):
@@ -827,10 +839,14 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 if line_touches_box(self.t2x(pts[:, 0]), self.p2y(pts[:, 1]), x0 + e, y0 + e, x1 - e, y1 - e):
                     found.add(i)
                     break
-        if self.app.show_notes.get() and len(self.app.rendered):
+        if self.app.show_notes.get() and (len(self.app.rendered) or own):
             ppq = self.app.ppq
             t0, t1 = self.x2t(x0) * ppq, self.x2t(x1) * ppq
-            ns = self.visible_notes(t0, t1)
+            if own:
+                mine = np.asarray(own[1], float).reshape(len(own[1]), -1)[:, :3]  # (start, end, key; then its number)
+                ns = np.column_stack([mine, np.zeros((len(mine), 2)), np.full(len(mine), own[0])])
+            else:
+                ns = self.visible_notes(t0, t1)
             # (the keys whose row's middle is in the box; e: screen pixels turned back into ticks aren't exact)
             k0, k1 = math.ceil(self.y2p(y1) - e), math.floor(self.y2p(y0) + e)
             ns = ns[(ns[:, 2] >= k0) & (ns[:, 2] <= k1) & (ns[:, 0] < t1 - e) & (ns[:, 1] > t0 + e)]
@@ -904,11 +920,14 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def on_press(self, e):
         self.app.commit_typing()  # (a number typed in a panel box goes to the shapes picked now, before this click)
         self.focus_set()
+        self.drop_menu_wait()
         kept, self.box_kept, self.box_moving, self.dup = self.kept_box(), None, None, None
         self.grabbed = self.cycle = self.cycled = self.area_pick = None
         self.box_in = self.box_ruler = self.box_resume = self.time_only = self.box_drop = False
         self.room = self.limit = self.grid_later = None
         if self.follow and self.sx is not None:  # a shape started with a click: this click finishes it
+            if kept and self.follow[0] != "hzkeys":  # (the Select boxes stay, as when dragged: add_drawn)
+                self.box_kept = (kept, set(self.app.sels))
             self.drag, self.follow = self.follow, None
             self.on_drag(e)
             self.on_release(e, second=True)
@@ -1368,8 +1387,11 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                              set(self.app.sels))
             if self.box_resume:  # (the ruler pressed while playing: it plays on from there)
                 self.app.start_play(keep=True)
-        elif kind == "seek" and self.drag[1]:
-            self.app.start_play(keep=True)  # it was playing: carry on from the new spot
+        elif kind == "seek":
+            if self.drag[4]:  # (a Select box / ruler band was kept: it goes with what it selected, like many MIDI
+                self.app.select(None)  # programs)
+            if self.drag[1]:
+                self.app.start_play(keep=True)  # it was playing: carry on from the new spot
         elif kind == "move" and self.time_only and not self.drag[4]:  # the ruler's black band clicked: the play line
             playing = self.app.player.running
             self.app.stop_play()
@@ -1388,6 +1410,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.app.set_playhead(self.event_pt(e)[0])
             if playing or self.box_resume:  # (box_resume: the ruler pressed while playing)
                 self.app.start_play(keep=True)
+        elif kind == "box" and not self.box_area() and self.box_resume:  # (a short Ctrl+drag on the ruler: plays on)
+            self.app.start_play(keep=True)
         elif (kind == "move" and not self.drag[4] and not self.dup and self.cycle is not None
               and abs(e.x - self.cycle[1]) < 4 and abs(e.y - self.cycle[2]) < 4  # (a real click, not a short drag)
               and (nxt := self.next_at(e.x, e.y, self.cycle[0])) is not None):  # (the selected one clicked: the
@@ -1584,10 +1608,25 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         else:
             self.cancel_draft()
 
+    def on_double_right(self, e):
+        """Double right-click: Select <-> the last drawing tool. Nothing while the left button is down (a shape /
+        point / box held or a Select box being drawn: the drag goes on)."""
+        if self.holding() or e.state & 0x100:
+            return
+        self.drop_menu_wait()
+        self.app.toggle_select_tool()
+
+    def drop_menu_wait(self):
+        """The kept Select boxes' menu waiting for a possible second right-click: not shown."""
+        if self.menu_wait:
+            self.after_cancel(self.menu_wait)
+            self.menu_wait = None
+
     def on_right(self, e):
         """Right-click: finish a polyline being drawn, otherwise deselect (any tool).
         A right-drag listens to the notes under the mouse instead (any tool). Nothing while the left button holds
         something (a point removed under a held one: wrong point / error)."""
+        self.drop_menu_wait()
         if self.holding():
             return
         if not self.draft and self.path_right(e):  # Copy along a path: a point removed / the added one dropped
@@ -1663,9 +1702,13 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 # inside the kept Select boxes (or on the ruler's black band: user): the menu for all they selected,
                 # or (just one shape) that shape's own menu, anywhere in the boxes (user)
                 if len(self.app.sels) > 1:
-                    self.show_box_menu(e, i)
+                    show = lambda: self.show_box_menu(e, i)  # noqa: E731
                 else:
-                    self.show_menu(e, next(iter(self.app.sels)))
+                    show = lambda: self.show_menu(e, next(iter(self.app.sels)))  # noqa: E731
+                if i is not None:
+                    show()
+                else:  # (empty space: waits, so a double right-click still switches the tool, like the Hz window)
+                    self.menu_wait = self.after(DOUBLE_MS, lambda: (setattr(self, "menu_wait", None), show()))
             elif i is not None and sc["deselect"]:  # near a shape (or on its notes): its menu
                 self.show_menu(e, i)
             elif sc["deselect"]:
@@ -1689,7 +1732,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if not kept:
             return
         i = len(self.app.shapes) - 1
-        inside = any(self.shapes_in_box(*self.box_rect(a), among={i}) for a in kept)
+        own = (i, self.app.notes_of(self.app.shapes[i]))  # (its own notes: the shown ones can come later, also
+        inside = any(self.shapes_in_box(*self.box_rect(a), among={i}, own=own) for a in kept)  # no long sort)
         self.app.select_many(sels | {i} if inside else sels, i if inside else primary)
         self.box_kept = (kept, set(self.app.sels))
 
