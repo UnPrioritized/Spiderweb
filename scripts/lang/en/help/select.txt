@@ -2,6 +2,6 @@ Click a shape (its line or one of its notes) to select it; Ctrl+click selects mo
 
 Drag on empty space to draw a box: it selects every shape it touches (its line or one of its notes). Ctrl+drag adds them to the ones selected. Click empty space (no drag) to move the play line there.
 
-Right-click a shape (or one of its notes) = its menu (delete, duplicate, copy, flip, turn, add a point…). Right-click empty space = deselect. Double right-click switches between Select and the last drawing tool.
+Right-click a shape (or one of its notes) = its menu (delete, duplicate, copy, flip, turn, add a point…). Right-click empty space = deselect (a Select box stays: click empty space to drop it). Double right-click switches between Select and the last drawing tool.
 
 Blue curve handles can be dragged with any tool.

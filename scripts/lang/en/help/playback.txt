@@ -4,6 +4,6 @@ Built-in BASSMIDI (in the MIDI out list) plays through Spiderweb's own synth, wi
 
 When the computer can't keep up, a red "Overloaded" shows at the right end of the status line at the bottom: lower the Voice limit, or tick "Lower it by itself when overloaded" in Settings (⚙) → Sound.
 
-Right-drag (any tool) = listen to the notes under the mouse, like scrubbing.
+Right-drag (any tool) = listen to the notes under the mouse, like scrubbing: a second line follows the mouse, the play line stays where it is.
 
 OmniMIDI (KDMAPI) shows in the MIDI out list when OmniMIDI is installed. It plays straight through OmniMIDI with your own OmniMIDI settings, skipping Windows' MIDI layers, so many notes play more smoothly.
