@@ -42,7 +42,7 @@ from window.hz_trace import TraceWindow
 from window.preview_settings import PreviewSettings, open_settings
 from window.snap_picker import SnapPicker
 from window.tool_picker import ToolPicker
-from window.widgets import Tooltip, fit_screen, placed, set_least
+from window.widgets import ShortLabel, Tooltip, fit_screen, placed, set_least
 # the window is made of these parts (each a mixin of HzWindow); shape_length / DOUBLE_MS are handed on from here
 from window.hz_view import RED, HzView, shape_length  # noqa: F401
 from window.hz_sound import HzSound
@@ -177,15 +177,15 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         Tooltip(b, tr("hz.settings_tip"))
         self.settings_window = None  # Settings… (preview_settings.py; made at the end, once the preview is there)
         self.synth_win = None  # the synth window (hz_synth.py)
-        f = piece()
-        self.what = ttk.Label(f, text="", foreground=look.INFO)
-        self.what.pack(side="left", padx=(0, 10))
+        f = self.name_piece = piece()  # (stretches over the room left: a long name ends in "…", never widens the window)
+        self.what = ShortLabel(f, least=10, text="", foreground=look.INFO)
+        self.what.pack(side="left", fill="x", expand=True, padx=(0, 10))
         # the BPM changed since the Hz bass was made: said in red in the shape's place, with the button (user)
         self.stale = ttk.Label(f, text=tr("hz.stale"), foreground=RED)
         self.stale_btn = ttk.Button(f, text=tr("panel_custom.hz_update"), command=app.update_hz, takefocus=False)
         self.stale_shown = False
         # two layers on the same key at the same time: the later layer's notes go on another channel, said in orange
-        self.clash = ttk.Label(f, text="", foreground=look.WARN)
+        self.clash = ShortLabel(f, text="", foreground=look.WARN)
         Tooltip(self.clash, tr("hz.clash_tip"))
         f = piece("right")
         b = ttk.Checkbutton(f, text=tr("hz.layers_btn"), variable=app.hz_layers, command=self.on_layers,
@@ -369,10 +369,10 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
             self.stale_btn.pack(side="right", padx=(0, 10))
             self.stale.pack(side="left", padx=(0, 6))
         else:
-            self.what.pack(side="left", padx=(0, 10))
+            self.what.pack(side="left", fill="x", expand=True, padx=(0, 10))
         if self.clash.winfo_manager():  # (the orange text stays after them)
             self.clash.pack_forget()
-            self.clash.pack(side="left", padx=(0, 10))
+            self.clash.pack(side="left", fill="x", expand=True, padx=(0, 10))
         self.after_idle(self.layout)
 
     def show_clash(self, sh):
@@ -394,7 +394,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         if not text:
             self.clash.pack_forget()
         elif not self.clash.winfo_manager():
-            self.clash.pack(side="left", padx=(0, 10))
+            self.clash.pack(side="left", fill="x", expand=True, padx=(0, 10))
         self.after_idle(self.layout)
 
     def before_restore(self):
@@ -481,8 +481,9 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
             f.pack_forget()
         for right_first in ("right", "left"):  # (packed first = gets its room first: the hint at the end is the one
             for (f, side), row in zip(self.pieces, laid):  # cut off when even a row of its own is too narrow)
-                if side == right_first:
-                    f.pack(in_=self.rows[row], side=side)
+                if side == right_first:  # (the name's piece takes the room left in its row)
+                    f.pack(in_=self.rows[row], side=side,
+                           **({"fill": "x", "expand": True} if f is self.name_piece else {}))
         for i, r in enumerate(self.rows):
             if i <= max(laid):
                 r.pack(fill="x", pady=(4, 0) if i else 0)

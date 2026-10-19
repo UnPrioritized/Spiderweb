@@ -646,6 +646,62 @@ class PointGraph:
         return u, y
 
 
+def shortened(label, text, reserve=0):
+    """text as a one-line ttk label shows it: whole when it fits in the label's width (less its padding and
+    reserve px), else its longest start that fits followed by "…"."""
+    if not text or label.winfo_width() <= 1:
+        return text
+    pad = [str(p) for p in label.tk.splitlist(label.cget("padding"))]  # (left [top right bottom])
+    pad = label.winfo_fpixels(pad[0]) + label.winfo_fpixels(pad[2 if len(pad) > 2 else 0]) if pad else 0
+    room = label.winfo_width() - reserve - pad
+    font = tkfont.Font(font=label.cget("font") or "TkDefaultFont")
+    if font.measure(text) <= room:
+        return text
+    lo, hi = 0, len(text)  # (the longest start that fits with "…")
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if font.measure(text[:mid] + "…") <= room:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo].rstrip() + "…"
+
+
+class ShortLabel(ttk.Label):
+    """A one-line label that asks for only `least` letters' room, so a long text never makes its window wider:
+    packed with fill="x", expand=True, it shows as much as the room it's given holds, ending in "…" with the whole
+    text in a tip when cut (hunt 2026-10-19: the velocity hint beside the Formula boxes, a long shape name in the
+    Hz window). config(text=) / cget("text") are the whole text."""
+
+    def __init__(self, master, least=12, **kw):
+        text = kw.pop("text", "")
+        super().__init__(master, width=least, **kw)
+        self._full = ""
+        self.tip = Tooltip(self, "")
+        self.bind("<Configure>", lambda e: self._put(self._full), add="+")
+        self._put(text)
+
+    def configure(self, cnf=None, **kw):
+        if isinstance(cnf, dict) and "text" in cnf:
+            kw, cnf = dict(cnf, **kw), None
+        if "text" in kw:
+            self._put(kw.pop("text"))
+            if not kw:
+                return None
+        return super().configure(cnf, **kw)
+
+    config = configure
+
+    def cget(self, key):
+        return self._full if key == "text" else super().cget(key)
+
+    def _put(self, text):
+        self._full = str(text)
+        shown = shortened(self, self._full)
+        self.tip.set_text(self._full if shown != self._full else "")
+        super().configure(text=shown)
+
+
 class StatusLine(ttk.Label):
     """The main window's status line. Text put in with config(text=...) is a message: it stays HOLD_MS (user: the
     mouse position wrote over it at once), then the line goes back to what show() gave last (position, counts)."""
@@ -681,25 +737,10 @@ class StatusLine(ttk.Label):
         self._put(self._full)
 
     def _put(self, text):
-        self._full = text = str(text)
-        pad = [str(p) for p in self.tk.splitlist(self.cget("padding"))]  # (the line's own: left [top right bottom])
-        pad = self.winfo_fpixels(pad[0]) + self.winfo_fpixels(pad[2 if len(pad) > 2 else 0]) if pad else 0
-        room = self.winfo_width() - self.reserve - pad
-        whole = ""  # (the tip: the whole text when it's cut short)
-        if text and self.winfo_width() > 1:
-            font = tkfont.Font(font=self.cget("font") or "TkDefaultFont")
-            if font.measure(text) > room:
-                lo, hi = 0, len(text)  # (the longest start that fits with "…")
-                while lo < hi:
-                    mid = (lo + hi + 1) // 2
-                    if font.measure(text[:mid] + "…") <= room:
-                        lo = mid
-                    else:
-                        hi = mid - 1
-                text = text[:lo].rstrip() + "…"
-                whole = self._full
-        self.tip.set_text(whole)
-        super().configure(text=text)
+        self._full = str(text)
+        shown = shortened(self, self._full, self.reserve)
+        self.tip.set_text(self._full if shown != self._full else "")  # (the tip: the whole text when it's cut)
+        super().configure(text=shown)
 
     def show(self, text):
         """The line's usual text: shown now, or when the message on it is done."""

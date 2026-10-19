@@ -88,7 +88,7 @@ from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, fit_dropdowns, good,
-                            grid_shown, label_column, remember_good, watch_bad, WrapRow, wrap_to_room)
+                            grid_shown, label_column, remember_good, watch_bad, ShortLabel, WrapRow)
 
 
 VEL_KEYS = ("vel0", "vel1")
@@ -504,8 +504,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if key == "formula":
                 Tooltip(b, tr("app.formula_tip"))
         self.vel_formula_bar = VelocityFormulaBar(vbar, self)  # (shown while Formula is the tool)
-        self.vel_hint = wrap_to_room(ttk.Label(vbar, text=tr("app.ctrl_flat_shift_snap_enter_done"),
-                                               foreground=look.HINT, font=look.font(8)))
+        # (one line: beside the Formula boxes it ends in "…", the whole hint in a tip; hunt 2026-10-19: wrapped,
+        # it was a thin column and the graph jumped)
+        self.vel_hint = ShortLabel(vbar, least=8, text=tr("app.ctrl_flat_shift_snap_enter_done"),
+                                   foreground=look.HINT, font=look.font(8))
         self.vel_hint.pack(side="left", fill="x", expand=True, padx=(10, 0))
         self.vel_tool.trace_add("write", lambda *_: self.show_vel_formula())
         self.vel = VelocityPane(self.vel_box, self, s)
