@@ -259,18 +259,21 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
     def ruler_band(self, e, kept):
         """The mouse on the ruler's black band (ruler_boxes of the kept boxes): a drag there moves what they selected
-        along in time."""
-        if e.y >= self.ruler_h or e.x < self.kb_w or self.sx is None or not self.app.sels:
+        along in time (also when they selected nothing: only the band moves, like Domino)."""
+        if e.y >= self.ruler_h or e.x < self.kb_w or self.sx is None:
             return False
         return any(min(self.t2x(a[0]), self.t2x(a[2])) <= e.x <= max(self.t2x(a[0]), self.t2x(a[2]))
                    for a in self.ruler_boxes(kept))
 
     def on_kept_box(self, kept, e):
         """Where the mouse is on the kept Select boxes (boxes_side), or None. With Ctrl only inside counts (a drag
-        there moves a copy; on a side Ctrl starts another box)."""
-        if not kept or not self.app.sels:
+        there moves a copy; on a side Ctrl starts another box). A box over nothing works too: it moves / stretches
+        alone (like Domino). Boxes over every key (made along the ruler) aren't drawn on the piano roll: only their
+        black band on the ruler takes the mouse."""
+        boxes = [a for a in kept or () if a not in self.ruler_boxes(kept)]
+        if not boxes:
             return None
-        side = boxes_side([self.box_rect(a) for a in kept], e.x, e.y, 5 * self.scale)
+        side = boxes_side([self.box_rect(a) for a in boxes], e.x, e.y, 5 * self.scale)
         return None if side and side != (0, 0) and e.state & CTRL else side
 
     def stretch_to(self, e):
@@ -995,7 +998,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             elif kept and not on_box and i in app.sels and not e.state & CTRL:
                 self.box_moving = boxes_upright(kept)[0]  # one it selected, grabbed outside it: it goes along too
                 self.box_kept = (self.box_moving, set(app.sels))  # (user; a click there still picks just that one)
-            if on_box and e.state & CTRL:  # Ctrl inside the kept Select box: a drag moves a COPY of all it selected
+            if on_box and e.state & CTRL and app.sels:  # Ctrl inside the kept Select box: a drag moves a COPY of all it selected
                 app.push_undo(name=tr("app.duplicate"))  # (user; let go without moving = a Ctrl+click)
                 self.dup = {"click": i}
                 self.drag = ("move", pt, {j: copy.deepcopy(app.shapes[j]["pts"]) for j in app.sels}, None, False,

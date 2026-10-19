@@ -1994,7 +1994,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self.hz_window:
             self.hz_window.sync()
         self.roll.cancel_draft()
-        self.roll.config(cursor={"select": "arrow", "text": "xterm"}.get(self.tool.get(), "crosshair"))
+        self.roll.set_cursor({"select": "arrow", "text": "xterm"}.get(self.tool.get(), "crosshair"))  # (remembered:
+        #                                                                    else the next pointer it had was skipped)
         self.tool_picker.tool_changed()
         self.sync_freehand()
         self.sync_text()

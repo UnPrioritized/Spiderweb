@@ -804,7 +804,8 @@ class RollDrawing:
             boxes = self.box_more + [b for b in (self.box_area(),) if b]
         else:
             boxes = self.kept_box() or []
-        draw_boxes(self, [self.box_rect(b) for b in boxes], self.kb_w, self.ruler_h, self.scale,
+        whole = self.ruler_boxes(boxes)  # (over every key: only the ruler's black band shows it, like Domino)
+        draw_boxes(self, [self.box_rect(b) for b in boxes if b not in whole], self.kb_w, self.ruler_h, self.scale,
                    tags="selbox")
         self.draw_ruler_pick(boxes)
 
