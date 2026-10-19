@@ -320,6 +320,108 @@ def grid_shown(w, on):
         w.grid_remove()
 
 
+def wrap_to_room(label):
+    """A label packed with fill="x" (expand=True when packed side by side, and packed after its neighbours, so
+    they get their room first): its text wraps onto more lines when it's given less room than one line needs,
+    instead of being cut at the edge (user 2026-10-19: no cut texts, also with other Windows languages' wider
+    fonts). NEVER in a frame that takes its width from what's in it (the Image window's settings): each wrap
+    makes it narrower, which wraps it again, on and on (froze the window)."""
+    edge = []  # (the label's own edges beside its text: measured once, while it isn't wrapped yet)
+
+    def fit(e):
+        if e.width <= 1:
+            return
+        if not edge:
+            text = str(label.cget("text"))
+            font = tkfont.Font(font=label.cget("font") or "TkDefaultFont")
+            edge.append(max(4, label.winfo_reqwidth() - max(font.measure(t) for t in text.split("\n"))))
+        room = max(1, e.width - edge[0])
+        if str(label.cget("wraplength")) != str(room):
+            label.configure(wraplength=room)
+    label.bind("<Configure>", fit, add="+")
+    return label
+
+
+def chart_edges(s, left_texts, left, bottom):
+    """A graph's left and bottom margins (pixels): at least left / bottom (at 100 % scaling), wider / taller when
+    the labels drawn there (look.font(7): left_texts beside the plot, a line under it) need more in this font."""
+    f = tkfont.Font(font=look.font(7))
+    return (max(int(left * s), max(f.measure(t) for t in left_texts) + int(6 * s)),
+            max(int(bottom * s), f.metrics("linespace") + int(6 * s)))
+
+
+class WrapRow:
+    """The widgets packed side by side in a frame, laid out again on more lines when the room given is too narrow
+    for one (like words). together = tuples of widgets kept on one line (a label and its box). Made once they're
+    all packed; the owner calls fit(room) when its width changes, and changed() is called (when idle) whenever
+    one of the widgets changes size (a pinned tool, a longer text)."""
+
+    def __init__(self, frame, together=(), changed=None):
+        self.frame = frame
+        slaves = frame.pack_slaves()
+        self.opts = {w: {k: v for k, v in w.pack_info().items() if k != "in"} for w in slaves}
+        self.groups, seen = [], set()
+        for w in slaves:
+            if w not in seen:
+                group = next((t for t in together if w in t), (w,))
+                group = [x for x in slaves if x in group]
+                seen.update(group)
+                self.groups.append(group)
+        self.lines, self.laid = [], None
+        if changed:
+            sizes = {}
+
+            def resized(e):
+                if e.widget in self.opts and sizes.get(e.widget) != (e.width, e.height):
+                    sizes[e.widget] = (e.width, e.height)
+                    frame.after_idle(changed)
+            for w in slaves:
+                w.bind("<Configure>", resized, add="+")
+
+    def width(self, group):
+        def pad(p):
+            return sum(int(v) for v in (p if isinstance(p, tuple) else str(p).split()))
+        return sum(w.winfo_reqwidth() + pad(self.opts[w].get("padx", 0)) for w in group)
+
+    def natural(self):
+        """The width all of it takes on one line."""
+        return sum(self.width(g) for g in self.groups)
+
+    def widest(self):
+        """The width of its widest group (a line can't be narrower without cutting it)."""
+        return max((self.width(g) for g in self.groups), default=0)
+
+    def fit(self, room):
+        """Lines filled from the first, each as full as room allows (a group wider than room gets a line of its
+        own). Returns how many lines."""
+        laid, line, used = [], 0, 0
+        for g in self.groups:
+            w = self.width(g)
+            if used and used + w > room:
+                line, used = line + 1, 0
+            laid.append(line)
+            used += w
+        laid = tuple(laid)
+        if laid != self.laid:
+            self.laid = laid
+            while len(self.lines) <= line:
+                f = ttk.Frame(self.frame)
+                f.lower()  # (made after the widgets: kept under them, or it would hide them)
+                self.lines.append(f)
+            for g in self.groups:
+                for w in g:
+                    w.pack_forget()
+            for i, f in enumerate(self.lines):
+                if i <= line:
+                    f.pack(side="top", fill="x", pady=(2 if i else 0, 0))  # (fill: side="right" ones at the end)
+                else:
+                    f.pack_forget()
+            for g, i in zip(self.groups, laid):
+                for w in g:
+                    w.pack(in_=self.lines[i], **self.opts[w])
+        return line + 1
+
+
 def box_text(e):
     """What a box holds (from its variable: while that's being set, the box itself still shows the old text).
     globalgetvar: typing in a box sets its variable from inside Tk's own key code, where a plain getvar looks for
@@ -424,8 +526,9 @@ class ScrollingSide:
     SIDE_SKIP = (tk.Listbox, tk.Text, ttk.Combobox)  # (the wheel over these leaves the panel alone)
 
     def make_side(self, width):
-        """The panel, side_width pixels wide (wider by the scrollbar while it shows): its frame to fill."""
-        self.side_width = width
+        """The panel, side_width pixels wide (wider by the scrollbar while it shows; wider still when the font
+        makes texts wider than the usual one, look.WIDE): its frame to fill."""
+        self.side_width = width = int(width * look.WIDE)
         box = self.side_box = ttk.Frame(self, width=width)
         box.pack(side="right", fill="y")
         box.pack_propagate(False)
@@ -512,9 +615,11 @@ class StatusLine(ttk.Label):
         super().__init__(master, **kw)
         self._normal = ""
         self._job = None
-        self._full = kw.get("text", "")  # (the text before cutting it short for the reserved right end)
-        self.reserve = 0  # pixels kept free at the right end (the red "Overloaded"): longer text ends in "…"
-        self.bind("<Configure>", lambda e: self.reserve and self._put(self._full), add="+")
+        self._full = kw.get("text", "")  # (the text before cutting it short to fit)
+        self.reserve = 0  # pixels kept free at the right end (the red "Overloaded")
+        # (text longer than the line ends in "…", the whole of it in a tip; user 2026-10-19: no texts cut off)
+        self.tip = Tooltip(self, "")
+        self.bind("<Configure>", lambda e: self._put(self._full), add="+")
 
     def configure(self, cnf=None, **kw):
         if isinstance(cnf, dict) and "text" in cnf:
@@ -537,8 +642,11 @@ class StatusLine(ttk.Label):
 
     def _put(self, text):
         self._full = text = str(text)
-        room = self.winfo_width() - self.reserve
-        if self.reserve and text:
+        pad = [str(p) for p in self.tk.splitlist(self.cget("padding"))]  # (the line's own: left [top right bottom])
+        pad = self.winfo_fpixels(pad[0]) + self.winfo_fpixels(pad[2 if len(pad) > 2 else 0]) if pad else 0
+        room = self.winfo_width() - self.reserve - pad
+        self.tip.text = ""
+        if text and self.winfo_width() > 1:
             font = tkfont.Font(font=self.cget("font") or "TkDefaultFont")
             if font.measure(text) > room:
                 lo, hi = 0, len(text)  # (the longest start that fits with "…")
@@ -549,6 +657,7 @@ class StatusLine(ttk.Label):
                     else:
                         hi = mid - 1
                 text = text[:lo].rstrip() + "…"
+                self.tip.text = self._full
         super().configure(text=text)
 
     def show(self, text):

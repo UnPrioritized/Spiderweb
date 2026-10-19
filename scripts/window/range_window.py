@@ -22,7 +22,7 @@ from notes.funnel import funnel_gates, funnel_range
 from notes.gaterange import DIRS, STRAIGHT, clean_range, gate_steps, halved, steps_of, steps_to, y_gate
 from window import big_ask, look
 from window.panel_funnel import GATE_STEPS
-from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, remember_place, unit_word
+from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place, unit_word
 
 
 def _power(k):
@@ -46,7 +46,9 @@ class RangeGraph(PointGraph, tk.Toplevel):
         self.resizable(False, False)
         s = self.s = app.scale
         self.w, self.h, self.cw = int(440 * s), int(220 * s), int(300 * s)
-        self.ml, self.mr, self.mt, self.mb = int(56 * s), int(12 * s), int(10 * s), int(22 * s)
+        self.ml, self.mb = chart_edges(s, (trn("n.ticks", 99999, n=99999),), 56, 22)  # (wider fonts: room)
+        self.mr, self.mt = int(12 * s), int(10 * s)
+        self.chart_left = chart_edges(s, ("9999999",), 40, 0)[0]  # (the chart's note counts)
         self.tgts = tgts or app.custom_targets()
         # funnels (or the settings for new ones): from the line start to the wall, so no Across / rows / Fit; they
         # can follow the curve
@@ -423,7 +425,7 @@ class RangeGraph(PointGraph, tk.Toplevel):
     def chart_bins(self):
         """(gates per bar, notes in each bar, plot left, plot width)."""
         s = self.s
-        left, width = int(40 * s), self.cw - int(40 * s) - int(8 * s)
+        left, width = self.chart_left, self.cw - self.chart_left - int(8 * s)
         per = max(1, math.ceil(len(self.counts) * BAR_PX * s / width))
         bins = np.add.reduceat(self.counts, np.arange(0, len(self.counts), per))
         return per, bins, left, width
@@ -444,7 +446,7 @@ class RangeGraph(PointGraph, tk.Toplevel):
         ch.create_text(int(6 * s), int(4 * s), text=tr("range_window.spread"), anchor="nw", fill=look.LABEL,
                        font=look.font(8))
         if self.counts is None:
-            ch.create_rectangle(int(40 * s), top, self.cw - int(8 * s), bot, outline=OFF_COLOR)
+            ch.create_rectangle(self.chart_left, top, self.cw - int(8 * s), bot, outline=OFF_COLOR)
             return
         a, b = self.gates()
         sign = 1 if b >= a else -1

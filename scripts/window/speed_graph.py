@@ -16,7 +16,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.copypath import BEND_LIMITS, CURVE_POINTS, SPEED_CURVES, curve_at
 from window import look
-from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, remember_place
+from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, chart_edges, remember_place
 
 PRESETS = [(tr("path.even"), SPEED_CURVES["even"]), (tr("path.up"), SPEED_CURVES["up"]),
            (tr("path.down"), SPEED_CURVES["down"]),
@@ -43,7 +43,8 @@ class SpeedGraph(tk.Toplevel):
         self.resizable(False, False)
         s = self.s = self.app.scale
         self.w, self.h = int(420 * s), int(300 * s)
-        self.ml, self.mr, self.mt, self.mb = int(46 * s), int(12 * s), int(10 * s), int(22 * s)
+        self.ml, self.mb = chart_edges(s, ("100 %",), 46, 22)  # (wider fonts: room for their labels)
+        self.mr, self.mt = int(12 * s), int(10 * s)
         self.pts = start_curve("even")
         self.drag = None  # ("pt" / "bend", i)
         self.job = None

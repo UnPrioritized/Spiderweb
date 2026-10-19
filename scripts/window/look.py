@@ -382,14 +382,27 @@ def apply_size(root):
             if points < 0:  # (in pixels on some Linux setups: as points, so Size grows them too)
                 points = round(-points * 72 / dpi)
             f.configure(size=max(6, points + STEP), **({"family": family} if family else {}))
-        try:  # how much wider texts came out (a picked font / bigger text): the side panel grows by as much
-            sample = "Domino start  First note at tick 0  Output file  Generate"
-            usual = tkfont.Font(root=root, family=USUAL_FAMILY, size=USUAL_SIZE).measure(sample)
-            WIDE = max(1.0, tkfont.nametofont("TkDefaultFont", root=root).measure(sample) / usual)
-        except (tkinter.TclError, ZeroDivisionError):
-            pass
     if size != "system":
         root.tk.call("tk", "scaling", size / 100 * 96 / 72)
+    WIDE = text_wider(root)
+
+
+def text_wider(root):
+    """How many times wider texts come out than in the font the windows were laid out for (Segoe UI 9: the
+    side panel's 330 px): a wider system font (Chinese Windows' Microsoft YaHei UI, Linux's), a picked Font or a
+    bigger Text size. Never under 1."""
+    import tkinter
+    from tkinter import font as tkfont
+    sample = "Domino start  First note at tick 0  Output file  Generate"
+    try:
+        made = tkfont.Font(root=root, family="Segoe UI", size=9)
+        if made.actual("family") == "Segoe UI":
+            usual = made.measure(sample)
+        else:  # (not on this computer: its width at 9 points, 96 pixels an inch, at this screen's pixels)
+            usual = 284 * root.winfo_fpixels("1i") / 96
+        return max(1.0, tkfont.nametofont("TkDefaultFont", root=root).measure(sample) / usual)
+    except (tkinter.TclError, ZeroDivisionError):
+        return 1.0
 
 
 def apply(root):

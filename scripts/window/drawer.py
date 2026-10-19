@@ -32,7 +32,7 @@ from window.drawer_mouse import CTRL, MOD_KEYS, SHIFT, STICK_RANK, DrawerMouse
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
 from window.layers import DrawerLayers
 from window.sticky import BEND, REACH, Targets, key_points
-from window.widgets import REDO_KEYS, UNDO_KEYS, ListTip, ScrollingSide, Tooltip, remember_place
+from window.widgets import REDO_KEYS, UNDO_KEYS, ListTip, ScrollingSide, Tooltip, remember_place, wrap_to_room
 
 LIBRARY = os.path.join(USER, "shapes")
 # Always in the library (not files). A saved shape with the same name is used instead; deleting it brings these back.
@@ -465,9 +465,10 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
         b = ttk.Button(btns, text=tr("drawer.import"), command=self.import_shared)
         b.pack(side="left", padx=4)
         Tooltip(b, tr("drawer.import_tip"))
-        self.pos_label = ttk.Label(side, text="", foreground=look.INFO, font=look.font(9))
+        self.pos_label = wrap_to_room(ttk.Label(side, text="", foreground=look.INFO, font=look.font(9),
+                                                justify="left"))
         self.pos_label.pack(fill="x", pady=(8, 0))
-        self.state_label = ttk.Label(side, text="", wraplength=int(285 * self.scale), justify="left")
+        self.state_label = wrap_to_room(ttk.Label(side, text="", justify="left"))
         self.state_label.pack(fill="x", pady=(8, 0))
         # the Areas tool's colours (shown only with that tool): Empty, then 1 .. COLOURS
         self.area_bar = ttk.Frame(side)
@@ -481,8 +482,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
         self.swatches.bind("<ButtonPress-1>", self.pick_swatch)
         self.swatches.bind("<Motion>", self.swatch_tip)
         self.swatches.bind("<Leave>", lambda e: self.pos_label.config(text=""))
-        self.colours_used = ttk.Label(self.area_bar, text="", wraplength=int(285 * self.scale), justify="left")
-        self.colours_used.pack(anchor="w", pady=(3, 0))
+        self.colours_used = wrap_to_room(ttk.Label(self.area_bar, text="", justify="left"))
+        self.colours_used.pack(fill="x", pady=(3, 0))
         ttk.Button(self.area_bar, text=tr("drawer.areas_reset"), command=self.reset_areas).pack(anchor="w",
                                                                                               pady=(6, 0))
         self.build_layers(side)  # (where the tool's help was: that's behind Help now, user)

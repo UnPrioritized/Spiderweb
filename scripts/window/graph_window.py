@@ -17,7 +17,8 @@ from notes.joined import shown_tumour
 from notes.tumour import GRAPH_LIMIT, TUMOUR_DEFAULTS
 from window import look
 from window.panel_custom import GAP_COLOR
-from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, fit_screen, placed, remember_place, unit_text, unit_word
+from window.widgets import (REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, chart_edges, fit_screen, placed, remember_place,
+                            unit_text, unit_word)
 
 FLAT = [[0.0, 1.0], [1.0, 1.0]]
 PRESETS = [(tr("graph_window.flat_off"), FLAT), (tr("graph_window.rise"), [[0.0, 0.0], [1.0, 1.0]]),
@@ -51,7 +52,8 @@ class GraphWindow(tk.Toplevel):
         self.resizable(False, False)
         s = self.s = self.app.scale
         self.w, self.h = int(440 * s), int(220 * s)
-        self.ml, self.mr, self.mt, self.mb = int(46 * s), int(12 * s), int(10 * s), int(22 * s)
+        self.ml, self.mb = chart_edges(s, ("-100 %", "100 %", "-25.5 %"), 46, 22)  # (wider fonts: room for them)
+        self.mr, self.mt = int(12 * s), int(10 * s)
         self.pts = [list(p) for p in FLAT]
         self.drag = None  # {"i": point being dragged}
         self.job = None

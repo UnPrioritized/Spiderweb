@@ -446,37 +446,49 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.app.schedule_autosave()
 
     def layout(self):
-        """The toolbar in one row, or two when the window is too narrow: the pieces keep their order, the ones that
-        don't fit go to the second row (the right-hand piece stays at the right)."""
+        """The toolbar in one row, or more when the window is too narrow: the pieces keep their order, the ones that
+        don't fit go to the next row (the right-hand piece stays at the right, on the last row; one more row when
+        it doesn't fit there either)."""
         if not self.winfo_exists():
             return
         room = self.bar.winfo_width() - 16
         left = [f for f, side in self.pieces if side == "left"]
         right = [f for f, side in self.pieces if side == "right"]
         widths = {f: f.winfo_reqwidth() for f, side in self.pieces}
+        least = max(round(420 * self.app.scale), max(widths.values()) + 32)  # (the widest piece never cut off)
+        if self.minsize()[0] != least:
+            self.minsize(least, round(260 * self.app.scale))
         if room <= 1 or sum(widths.values()) <= room:
             laid = {f: 0 for f in widths}
         else:
-            laid, used = {}, 0
+            laid, row, used = {}, 0, 0
             for f in left:
+                if used and used + widths[f] > room:
+                    row, used = row + 1, 0
+                laid[f] = row
                 used += widths[f]
-                laid[f] = 0 if used <= room and all(v == 0 for v in laid.values()) else 1
-            laid.update({f: 1 for f in right})
+            if row == 0 or used + sum(widths[f] for f in right) > room:
+                row += 1  # (wrapped: the right-hand piece never on the first row, as before)
+            laid.update({f: row for f in right})
         laid = tuple(laid[f] for f, side in self.pieces)
         if laid == self.laid:
             return
         self.laid = laid
+        while len(self.rows) <= max(laid):
+            r = ttk.Frame(self.bar)
+            r.lower()  # (made after the pieces: kept under them, or it would hide them)
+            self.rows.append(r)
         for f, side in self.pieces:
             f.pack_forget()
         for right_first in ("right", "left"):  # (packed first = gets its room first: the hint at the end is the one
-            for (f, side), row in zip(self.pieces, laid):  # cut off when even two rows are too narrow)
+            for (f, side), row in zip(self.pieces, laid):  # cut off when even a row of its own is too narrow)
                 if side == right_first:
                     f.pack(in_=self.rows[row], side=side)
-        self.rows[0].pack(fill="x")
-        if 1 in laid:
-            self.rows[1].pack(fill="x", pady=(4, 0))
-        else:
-            self.rows[1].pack_forget()
+        for i, r in enumerate(self.rows):
+            if i <= max(laid):
+                r.pack(fill="x", pady=(4, 0) if i else 0)
+            else:
+                r.pack_forget()
 
     # ------------------------------------------------------------ into the shape
 

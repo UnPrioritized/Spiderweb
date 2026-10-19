@@ -31,6 +31,7 @@ import math
 from fractions import Fraction
 import random
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 
 import numpy as np
@@ -418,9 +419,10 @@ class FxPane:
         for n in win.tones:  # where the notes are, faintly
             c.create_rectangle(max(kb, win.x_of(n["t"])), h - 3 * s, max(kb, win.x_of(n["t"] + n["len"])), h,
                                fill=pal["notes"], outline="")
-        if not fx:
-            c.create_text((kb + w) / 2, h / 2, text=tr("hz.fx_hint"), fill=pal["hint"], width=w - kb - 40 * s,
-                          justify="center")
+        if not fx:  # (kept clear of the "50 %" at the right, on both sides so it stays in the middle)
+            free = tkfont.Font(font=look.font(7)).measure("100 %") + 12 * s
+            c.create_text((kb + w) / 2, h / 2, text=tr("hz.fx_hint"), fill=pal["hint"],
+                          width=max(40, w - kb - 2 * free), justify="center")
         order = sorted(self.names(), key=lambda k: base(k) == self.active)  # (the highlighted one on top)
         trying = self.copies_of(self.trying, *self.trying_how) if self.trying else None
         for _, o, _, _ in trying or ():  # Repeat every… being typed: where each would start

@@ -22,7 +22,7 @@ from notes.engine import cached_path
 from notes.gateflip import all_flipped
 from notes.sustain import is_sustained
 from window import look
-from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, remember_place
+from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place
 
 
 def _power(k):
@@ -52,7 +52,8 @@ class BetweenWindow(PointGraph, tk.Toplevel):
         self.resizable(False, False)
         s = self.s = app.scale
         self.w, self.h, self.ph = int(380 * s), int(140 * s), int(200 * s)
-        self.ml, self.mr, self.mt, self.mb = int(40 * s), int(12 * s), int(10 * s), int(22 * s)
+        self.ml, self.mb = chart_edges(s, (tr("between.first"), tr("between.last")), 40, 22)  # (wider fonts)
+        self.mr, self.mt = int(12 * s), int(10 * s)
         self.sel_before = (set(app.sels), app.sel)
         self.set = between.settings_of(app.shapes, gid)
         self.kept_turns = self.set["colours"] or most_colours(app.all16())

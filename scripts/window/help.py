@@ -14,7 +14,7 @@ from files.lang import size as lang_size, tr
 from files.about import BANNER, HERE, LICENSE, VERSION, WEBSITE
 from files.system import open_path
 from window import look
-from window.widgets import placed, remember_place
+from window.widgets import WrapRow, placed, remember_place
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS, NEXT, SECTION_NAMES, SECTIONS, SEE, TOOL_TOPICS, TOPICS
 
 TOOL_TIPS = set(TOOL_TOPICS.values()) | set(DRAWER_TOOL_TOPICS.values())
@@ -353,6 +353,16 @@ class HelpWindow(tk.Toplevel):
         self.bind("<Key>", lambda e: self.type_to_search(e, search))
         self.fill_list()
         search.focus_set()
+        # (never narrower than the bottom row's tick, button and version beside the topic list: cut off in a wider
+        # font or a longer translation otherwise)
+        # the bottom row onto two lines when the window is too narrow for it (the note after "Show all tips again",
+        # a wider font, a longer translation: cut off otherwise); never narrower than its widest piece
+        def fit(*_):
+            if self.winfo_exists() and right.winfo_width() > 1:
+                row.fit(right.winfo_width() - int(12 * s))
+                self.minsize(max(int(600 * s), left.winfo_reqwidth() + row.widest() + int(24 * s)), int(360 * s))
+        row = WrapRow(bottom, changed=fit)
+        right.bind("<Configure>", fit, add="+")
 
     def type_to_search(self, e, search):
         """Typing anywhere in the window types into the search box (Backspace too)."""

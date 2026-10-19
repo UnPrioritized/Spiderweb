@@ -88,7 +88,7 @@ from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, fit_dropdowns, good,
-                            grid_shown, label_column, remember_good, watch_bad)
+                            grid_shown, label_column, remember_good, watch_bad, WrapRow, wrap_to_room)
 
 
 VEL_KEYS = ("vel0", "vel1")
@@ -421,9 +421,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                                 style="Toolbutton")
             b.pack(side="left", padx=1)
             Tooltip(b, BY_ID[TOOL_TOPICS[key]]["tip"])
-        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=(3, 3), pady=2)
+        line = ttk.Separator(bar, orient="vertical")
+        line.pack(side="left", fill="y", padx=(3, 3), pady=2)
         self.tool_picker = ToolPicker(self, bar, DRAW_TOOLS)  # the drawing tool picked last + the list
         self.tool_picker.frame.pack(side="left", padx=1)
+        self._tools_together = ((line, self.tool_picker.frame),)  # (wrapped: the line stays before the tools)
         live = ttk.Checkbutton(bar, text=tr("app.live_shape_g"), variable=self.live)
         live.pack(side="left", padx=(12, 0))
         Tooltip(live, BY_ID["live"]["tip"])
@@ -435,10 +437,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         b.pack(side="left", padx=(4, 0))
         Tooltip(b, tr("mask.preview_tip"))
         bar = self.option_bar = ttk.Frame(top)
-        self._toolbar_rows = None
+        self._toolbar_rows = self._toolbar_wrap = None
         top.bind("<Configure>", lambda e: self.fit_toolbar())
-        ttk.Label(bar, text=tr("app.snap")).pack(side="left", padx=(0, 4))
-        SnapPicker(self, bar, self.snap).button.pack(side="left")
+        snap = ttk.Label(bar, text=tr("app.snap"))
+        snap.pack(side="left", padx=(0, 4))
+        snap_box = SnapPicker(self, bar, self.snap).button
+        snap_box.pack(side="left")
+        self._toolbar_together = ((snap, snap_box),)  # (wrapped onto more lines: kept side by side)
         redraw = lambda: (self.roll.request_redraw(), self.schedule_autosave())
         ttk.Checkbutton(bar, text=tr("app.show_lines"), variable=self.show_lines,
                         command=redraw).pack(side="left", padx=(12, 0))
@@ -497,9 +502,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if key == "formula":
                 Tooltip(b, tr("app.formula_tip"))
         self.vel_formula_bar = VelocityFormulaBar(vbar, self)  # (shown while Formula is the tool)
-        self.vel_hint = ttk.Label(vbar, text=tr("app.ctrl_flat_shift_snap_enter_done"),
-                                  foreground=look.HINT, font=look.font(8))
-        self.vel_hint.pack(side="left", padx=(10, 0))
+        self.vel_hint = wrap_to_room(ttk.Label(vbar, text=tr("app.ctrl_flat_shift_snap_enter_done"),
+                                               foreground=look.HINT, font=look.font(8)))
+        self.vel_hint.pack(side="left", fill="x", expand=True, padx=(10, 0))
         self.vel_tool.trace_add("write", lambda *_: self.show_vel_formula())
         self.vel = VelocityPane(self.vel_box, self, s)
         self.vel.pack(fill="both", expand=True)  # the pane itself is added when it's turned on (off at first)
@@ -512,11 +517,21 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.vel_formula_bar.pack_forget()
 
     def fit_toolbar(self):
-        """The view settings and buttons: right of the tools when both fit in the window's width, else below them."""
+        """The view settings and buttons: right of the tools when both fit in the window's width, else below them;
+        either part wraps onto more lines when even its own row is too narrow (pinned tools, wider fonts)."""
         top = self.toolbar
-        need = (self.tool_bar.winfo_reqwidth() + self.option_bar.winfo_reqwidth() + self.corner.winfo_reqwidth()
-                + int(32 * self.scale))
-        rows = 1 if need <= top.winfo_width() - 12 else 2
+        room = top.winfo_width() - 12
+        if room <= 1:
+            return
+        if self._toolbar_wrap is None:
+            again = lambda: self.winfo_exists() and self.fit_toolbar()  # noqa: E731  (a button grew / shrank)
+            self._toolbar_wrap = (WrapRow(self.tool_bar, together=self._tools_together, changed=again),
+                                  WrapRow(self.option_bar, together=self._toolbar_together, changed=again))
+        tools, options = self._toolbar_wrap
+        corner = self.corner.winfo_reqwidth() + int(8 * self.scale)
+        rows = 1 if tools.natural() + options.natural() + corner + int(24 * self.scale) <= room else 2
+        tools.fit(10 ** 6 if rows == 1 else room - corner)
+        options.fit(10 ** 6 if rows == 1 else room)
         if rows == self._toolbar_rows:
             return
         self._toolbar_rows = rows
@@ -531,7 +546,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def _build_side(self):
         """The side panel: scrolls (scrollbar, mouse wheel) when everything in it doesn't fit; otherwise the help
         text at the bottom takes the room that's left."""
-        side = self.make_side(int(lang_size("size.panel_width", 330) * self.scale * look.WIDE))  # (a translation
+        side = self.make_side(int(lang_size("size.panel_width", 330) * self.scale))  # (a translation
         self._side_wheel_at = 0.0  # may widen it)
         own = self.bind_class("TCombobox", "<MouseWheel>")  # (a dropdown's own wheel: next / last choice)
 

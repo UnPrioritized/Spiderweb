@@ -18,7 +18,7 @@ from files.lang import tr, trn
 from files.speed import Photo
 from notes import picture as P
 from window import look
-from window.widgets import Tooltip, fit_screen, name_list, placed, set_names, unit_word
+from window.widgets import Tooltip, fit_screen, name_list, placed, set_names, unit_word, wrap_to_room
 
 PREVIEW_W, PREVIEW_H = 900, 520  # the preview's size to start with (it grows with the window)
 KB = 36  # the keyboard drawn beside the preview, in pixels
@@ -191,14 +191,15 @@ class ImageWindow(tk.Toplevel):
         body.pack(fill="both", expand=True)
         left = ttk.Frame(body)
         left.pack(side="left", fill="both", expand=True)
-        bar = ttk.Frame(left)
+        bar = self.top_row = ttk.Frame(left)
         bar.pack(fill="x", pady=(0, 6))
         ttk.Label(bar, text=tr("image.made_for")).pack(side="left")
         self.view = tk.StringVar(value=self.s["view"])
         for v, t in (("fall", tr("image.falling")), ("roll", tr("image.roll_view"))):
             ttk.Radiobutton(bar, text=t, variable=self.view, value=v, command=lambda: self.put("view", self.view.get())
                             ).pack(side="left", padx=4)
-        ttk.Label(bar, text=tr("image.hold_hint"), foreground=look.HINT).pack(side="left", padx=16)
+        wrap_to_room(ttk.Label(bar, text=tr("image.hold_hint"), foreground=look.HINT, justify="left")).pack(
+            side="left", fill="x", expand=True, padx=16)
         self.what = ttk.Label(left, text=tr("image.preview_title"), font=look.font(10, "bold", family=look.TK))
         self.what.pack(anchor="w")
         self.cv = tk.Canvas(left, width=PREVIEW_W, height=PREVIEW_H, background=look.IMG_PREVIEW_BG, highlightthickness=1,
@@ -207,10 +208,10 @@ class ImageWindow(tk.Toplevel):
         self.cv.bind("<Configure>", lambda e: self.resized(e.width, e.height))
         self.cv.bind("<ButtonPress-1>", lambda e: self.hold(True))
         self.cv.bind("<ButtonRelease-1>", lambda e: self.hold(False))
-        info = ttk.Frame(left)
+        info = self.info_row = ttk.Frame(left)
         info.pack(side="bottom", fill="x", pady=(8, 0), before=self.cv)  # (a short window shrinks the preview)
-        self.info = ttk.Label(info, text="", foreground=look.INFO)
-        self.info.pack(side="left")
+        self.info = wrap_to_room(ttk.Label(info, text="", foreground=look.INFO, justify="left"))  # (packed after
+        # the buttons beside it: they get their room first)
         self.prog = ttk.Frame(left, padding=8, borderwidth=1, relief="solid")  # (on the preview while a big picture is made:
         self.prog_text = ttk.Label(self.prog, text="")             # show_bar; nothing moves, user)
         self.prog_text.pack(anchor="w")
@@ -225,7 +226,10 @@ class ImageWindow(tk.Toplevel):
         self.handle.bind("<B1-Motion>", self.drag_move)
         self.handle.bind("<ButtonRelease-1>", self.drag_end)
         ttk.Button(info, text=tr("image.place"), command=self.place_at_play_line).pack(side="right", padx=8)
+        self.info.pack(side="left", fill="x", expand=True)
         self.apply_btn = ttk.Button(info, text=tr("image.apply"), command=self.apply)  # (packed while editing)
+        for ev in ("<Map>", "<Unmap>"):  # (the window's least width counts it: fit_side)
+            self.apply_btn.bind(ev, lambda e: self.after_idle(self.fit_side), add="+")
         self.editing = None  # the placed picture this window changes: (its shape, number, picture id), or None
 
         # the settings: scroll (scrollbar, mouse wheel) when the window is too short for them (user)
@@ -389,6 +393,22 @@ class ImageWindow(tk.Toplevel):
         elif self.side_bar.winfo_ismapped():
             self.side_bar.pack_forget()
             c.yview_moveto(0)
+        # never narrower than the settings + the preview's rows of buttons (their texts cut off otherwise; the
+        # hint lines beside them wrap instead)
+        def row(f, skip):
+            total = 0
+            for w in f.pack_slaves():
+                if w is not skip:
+                    p = w.pack_info()["padx"]
+                    total += w.winfo_reqwidth() + sum(int(v) for v in (p if isinstance(p, tuple) else str(p).split()))
+            return total
+        hint = self.top_row.pack_slaves()[-1]
+        s = self.app.scale  # (the info line beside the buttons keeps room for a few words a line)
+        least = (side.winfo_reqwidth() + self.side_bar.winfo_reqwidth() + int(60 * s)
+                 + max(row(self.top_row, hint), row(self.info_row, self.info)) + int(220 * s))
+        least = max(least, side.winfo_reqwidth() + self.what.winfo_reqwidth() + int(60 * s))
+        if self.minsize()[0] != least:
+            self.minsize(least, int(360 * self.app.scale))
 
     def side_wheel(self, e):
         """The mouse wheel over the settings scrolls them (boxes and lists that scroll themselves keep it)."""
@@ -905,7 +925,8 @@ class ImageWindow(tk.Toplevel):
         if not self.pic or self.grid is None or self.made is None:
             if not self.making:  # (making: the progress box says so)
                 cv.create_text(self.view_size[0] // 2, self.view_size[1] // 2, fill=look.FAINTER_TEXT,
-                               text=tr("image.no_picture", kinds=_kinds()))
+                               text=tr("image.no_picture", kinds=_kinds()), justify="center",
+                               width=max(40, self.view_size[0] - 40))  # (wraps in a narrow preview)
                 self.info.config(text="")
             return
         pic, made, _ = self.made  # (what the shown grid was made from; the look settings: the window's own)
@@ -1059,7 +1080,7 @@ class ImageWindow(tk.Toplevel):
         self.locked = {k: P.lin_of(pal[k]) for k in p["set"].get("locked", []) if k < len(pal)}
         self.show_settings()
         if not self.apply_btn.winfo_manager():
-            self.apply_btn.pack(side="right", padx=(0, 8))
+            self.apply_btn.pack(side="right", padx=(0, 8), before=self.info)  # (before: its room first)
         state = self.app.picture_state(p)
         if state == "ok":
             self.pic = self.app.picture_for(p)
