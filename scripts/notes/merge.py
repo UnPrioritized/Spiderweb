@@ -381,12 +381,13 @@ def merged(parts, right, ppq, keys):
     return gate_merge(b, a, True) if right else gate_merge(a, b, False)
 
 
-def merged_up_down(parts, up, keys, slide=None, spans=None, was_time=None):
+def merged_up_down(parts, up, keys, slide=None, spans=None, was_time=None, need_room=False):
     """Merge up / down as ONE shape (user 2026-10-19): two shapes' rows (start, end, pitch, velocity, ...) ->
     (both, the moving one's pieces with nothing in their way: up to the top key / down to key 0), or None when none
     met. slide: which part moves (None: merge.mover's). A recipe made again (spans: [[start, end] ticks] of the pieces
     made "Merge leftovers"): those left out; pieces newly with nothing in their way stay in it, slid by the smallest
-    slide (like left / right's rows; was_time(ticks): where a piece's time was when made, a flipped / stretched box)."""
+    slide (like left / right's rows; was_time(ticks): where a piece's time was when made, a flipped / stretched box).
+    need_room: False (not None) when a piece can't go out under the other shape (key 0 / the top key in the way)."""
     a, b = (np.asarray(p, np.int64).reshape(len(p), -1) for p in parts)
     if not len(a) or not len(b):
         return None
@@ -396,18 +397,21 @@ def merged_up_down(parts, up, keys, slide=None, spans=None, was_time=None):
     plan = up_down_plan([stay], moving, up, keys - 1)
     if plan is None:
         return None
+    if need_room and not plan["room"]:  # (out under the other shape would pass key 0 / the top key)
+        return False
     rows, wall = up_down_rows(plan, moving)
     if spans is not None:
         mid = (rows[:, 0] + rows[:, 1]) / 2
         if was_time is not None:
             mid = was_time(mid)
         s = np.asarray(spans, float).reshape(-1, 2)
-        out = ((mid[:, None] >= s[None, :, 0]) & (mid[:, None] < s[None, :, 1])).any(axis=1) if len(s) else wall & False
+        s = s[np.argsort(s[:, 0])]  # (apart from each other: the one starting last before each middle)
+        at = np.searchsorted(s[:, 0], mid, "right") - 1
+        out = (at >= 0) & (mid < s[np.maximum(at, 0), 1]) if len(s) else wall & False
         at = np.searchsorted(plan["cuts"], rows[:, 0], "right")
         back = plan["move"][at] if up else -plan["move"][at]
         rows = rows.copy()
-        # (newly: the smallest slide; flipped / stretched (was_time): the moving part sits at it already)
-        rows[:, 2] = np.where(wall, rows[:, 2] - back + (0 if was_time else plan["slid"]), rows[:, 2])
+        rows[:, 2] = np.where(wall, rows[:, 2] - back + plan["slid"], rows[:, 2])  # (newly: the smallest slide)
         rows, wall = rows[~(wall & out)], wall[~(wall & out)] & False
     return np.concatenate([stay, rows[~wall]]), rows[wall]
 
@@ -493,7 +497,7 @@ def has_colours(sh, turns=False):
     colours: "New channels each Colours round"; colours given by hand used more than once, custom.paints), itself or
     any part of it (merges of merges too)? turns: only colours that take turns (not the ones given by hand)."""
     from notes.custom import cycling, has_pattern, paints, path_colours
-    return (cycling(sh) or has_pattern(sh) or path_colours(sh) or not turns and paints(sh)
+    return (cycling(sh) or has_pattern(sh) or path_colours(sh) or not turns and paints(sh) or bool(sh.get("lapped"))
             or any(isinstance(p, dict) and has_colours(p, turns) for p in (sh.get("merge") or {}).get("parts", ())))
 
 
@@ -658,7 +662,7 @@ def velocity_reversed(sh):
     return bool(np.linalg.det(L) < 0 and L[0, 0] < 0)
 
 
-def reshaped_parts(sh):
+def reshaped_parts(sh, split=False):
     """(the two parts turned / slanted / stretched with the merged shape's box, the sliding one at its smallest
     slide; sliding part's index; from the left?; (L, o, smallest slide in beats)) or None (only moved, an old
     recipe, nothing met, a part that can't be turned)."""
@@ -667,8 +671,12 @@ def reshaped_parts(sh):
     if not got or np.allclose(got[0], np.eye(2), atol=1e-9) and not m.get("vrev"):
         return None  # (moved only; flipped both ways and half turned back still has its velocities turned round)
     L, o = got
-    if m.get("way") in ("up", "down"):  # (flipped / stretched only: turned / slanted = sampled, turned_notes)
-        if abs(L[0, 1]) > 1e-9 or abs(L[1, 0]) > 1e-9:
+    if m.get("way") in ("up", "down"):
+        # (flipped / stretched: both where they were before it slid, merged again (from where it slid, a piece out
+        # under the other shape went over it, hunt); turned / slanted: the notes sampled (turned_notes), Split (split)
+        # = round where its notes are, the moving one at its smallest slide)
+        level = abs(L[0, 1]) <= 1e-9 and abs(L[1, 0]) <= 1e-9
+        if not level and not split:
             return None
         got = made_keys(m)
         if not got:
@@ -676,7 +684,7 @@ def reshaped_parts(sh):
         slide, kslid = got
         parts = []
         for i, p in enumerate(m["parts"]):
-            d = kslid if i == slide else 0
+            d = kslid if i == slide and not level else 0
             q = mapped_part(p, lambda b, k, d=d: [float(x) for x in L @ (b, k + d) + o], L, m.get("vrev"))
             if q is None:
                 return None

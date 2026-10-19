@@ -69,6 +69,7 @@
  "join_split.merged_one_up_down_done": "Merged: each piece slid until it met the other shape's notes.",
  "join_split.merged_one_up_wall": "Merged. Some pieces had nothing in their way: they went up to the top key and are a shape of their own now (\"Merge leftovers\").",
  "join_split.merged_one_down_wall": "Merged. Some pieces had nothing in their way: they went down to the lowest key and are a shape of their own now (\"Merge leftovers\").",
+ "join_split.merge_mask_mixed": "A mask and a shape that isn't one can't be merged (the mask's notes are only a preview): nothing merged.",
  "merge_window.need_two": "Select two or more shapes to merge.",
  "join_split.merged_apart_done": "Merged: each key row slid in until it met the other shape's notes. The shape that slid is fixed notes now (Split gives it back).",
  "join_split.merged_apart_left": "Merged. {n} key rows had nothing to meet: they slid as little as the row that slid least and are a shape of their own now (\"Merge leftovers\"). The shape that slid is fixed notes now (Split gives it back).",

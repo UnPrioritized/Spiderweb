@@ -265,6 +265,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.note_counts = []  # notes per shape in rendered
         self.notes_late = False  # the notes are behind the shapes (a drag going on: see shapes_changed)
         self.scrubbing = False  # a number box's label is being dragged (widgets.Scrub): slow notes wait too
+        self._merge_time, self._merges_owed = 0.0, False  # (remake_merges' last time; put off while scrubbing)
         self.held_scrub = None  # that Scrub (shortcuts / Delete wait, Ctrl+Z cancels it)
         self._trimmed = None  # the oldest steps the 300 limit dropped for the last step (add_undo_step)
         self.rendered_pts = []  # each shape's first point when rendered was made
@@ -1184,12 +1185,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.after_idle(self.sync_title)  # (a step changed by hand is a key now)
         if tidy_groups(self.shapes):  # (masks: a group of one = on its own, the first member Add; mask.py)
             self.after_idle(self.sync_mask)
-        self.remake_merges()
+        if not now and self.scrubbing and self._merge_time > 0.03:  # (a big merged shape: made when the mouse rests)
+            self._merges_owed = True
+        else:
+            started = time.perf_counter()
+            self.remake_merges()
+            self._merge_time, self._merges_owed = time.perf_counter() - started, False
         for sh in self.shapes:  # ("Shape length follows the notes": after any change to its box too, hunt)
             if (sh.get("hz") or {}).get("grow"):
                 fit_length(sh)
         busy = self._notes_time + self._mask_time  # (the masks' preview is made after the notes, mask.py)
-        slow = busy > 0.15
+        slow = busy > 0.15 or self._merges_owed
         # (other drags make the notes AND repaint them all at every step: the repaint counts too)
         slow = slow or not moving and busy + self.roll.paint_time > 0.15
         # (moving: also whenever the piano roll shows its notes as one picture, which it can carry along)
@@ -1295,6 +1301,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """The mouse rests mid-drag: the notes are made in a background thread (the window keeps answering the mouse;
         moved again = thrown away). show: put on screen once made (else kept for when the mouse is let go)."""
         # (after the mouse moves still waiting to be handled: a slow redraw can make the timer run out first)
+        if self._merges_owed:  # (merged shapes put off while a number box label is dragged: made now, hunt)
+            self.remake_merges()
+            self._merges_owed = False
         self._late_notes = self.after_idle(self._make_coming, show)
 
     def notes_key(self):

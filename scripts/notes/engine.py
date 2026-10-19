@@ -307,6 +307,8 @@ def clean_shape(sh):
                 out["made"] = sh["made"]
             if isinstance(sh.get("leftover_of"), str):  # (a two-shapes merge's leftovers: its Split takes them back)
                 out["leftover_of"] = sh["leftover_of"][:64]
+            if sh.get("lapped") is True:  # (merge leftovers: each note's Colours round on its track, + LAP x round)
+                out["lapped"] = True
             pic = clean_picture(sh.get("picture"))
             if pic:  # a picture made into notes (picture.py): the notes are its finished colours, track = slot
                 out["picture"] = pic
@@ -940,13 +942,14 @@ def _kind_notes_tracks(sh, ppq, keys):
         # (a merged shape turned / slanted / stretched: its parts the same way, merged again; else a turned / skewed
         # picture or merged shape: each key row sampled across it, not its notes tilted)
         # ("New channels each Colours round": its parts' rounds, ridden along on the tracks: merge.with_rounds)
-        laps = sh.get("_rounds") and "merge" in sh and not cycling(sh)
+        # (a merge's "Merge leftovers" made with rounds ("lapped"): its tracks carry them already, + LAP x round)
+        laps = sh.get("_rounds") and ("merge" in sh or sh.get("lapped")) and not cycling(sh)
         raw = merge_reshaped(sh, ppq, keys, bool(laps)) if "merge" in sh else None
         if raw is not None:
             if laps:
                 raw = np.column_stack([raw[:, :4], raw[:, 4] + raw[:, 5] * merge_lap])
         else:
-            if laps:
+            if laps and "merge" in sh:
                 got = merge_rounds(sh)
                 sh, laps = (sh, False) if got is None else (got, True)
             if not frame_upright(sh["pts"]) and ("picture" in sh or "merge" in sh):
@@ -958,6 +961,8 @@ def _kind_notes_tracks(sh, ppq, keys):
         raw, own = raw[:, :3], raw[:, 3:5]
         if laps:
             own = np.column_stack([own[:, 0], own[:, 1] % merge_lap + own[:, 1] // merge_lap * ROUND])
+        elif sh.get("lapped"):  # (rounds off: its colours only)
+            own = np.column_stack([own[:, 0], own[:, 1] % merge_lap])
     elif sh["kind"] == "custom":
         raw, groups = custom_notes_groups(sh, ppq)
     elif sh["kind"] == "funnel":

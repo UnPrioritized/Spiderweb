@@ -61,9 +61,11 @@ class MergeWindow(tk.Toplevel):
         hint = tr("merge_window.hint_" + way)
         if problem:
             hint += "\n\n" + problem
-        elif keep:
-            sels = app.merge_sels()
+        else:  # (both kinds, hunt)
+            sels = app.merge_sels() if keep else app.merge_pair()
             k, alt, _ = app.merge_mover(sels, way)
+            if not keep:
+                alt = None
             name = app.shape_label(app.shapes[sels[k]])
             hint += "\n\n" + (tr("merge_window.moves", name=name) if alt is None else
                               tr("merge_window.moves_or", name=name, other=app.shape_label(app.shapes[sels[alt]])))
