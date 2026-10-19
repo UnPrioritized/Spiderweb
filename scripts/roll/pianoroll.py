@@ -99,6 +99,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self._redraw_pending = False
         self._late_redraw = None  # request_redraw(delay)'s timer
         self._grid_key = self._frame_key = self._playhead_x = None  # what the kept canvas items show (redraw)
+        self.scrub_t = None  # right-drag listening: where its own line is (beats), roll_draw.draw_playhead
         self._draft_made = None  # the shape being drawn / placed: (notes_tracks key, its notes and tracks or None
         # past PREVIEW_LIMIT, its note count or None)
         self._draft_time = 0.0   # seconds making them took the last time
@@ -1624,7 +1625,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self._scrub = {"x": e.x, "y": e.y, "tick": None, "deselect": not finished}
         elif not finished:
             self.cancel_draft()
-            self.app.select(None)
+            if not self.kept_box():
+                self.app.select(None)
 
     def scrub_tick(self, e):
         return max(0.0, self.x2t(max(e.x, self.kb_w))) * self.app.ppq
@@ -1665,7 +1667,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 self.show_menu(e, i)
             elif sc["deselect"]:
                 self.cancel_draft()
-                self.app.select(None)
+                if not self.kept_box():  # (a Select box / ruler band stays with what it selected: user, like
+                    self.app.select(None)  # many MIDI programs; a left click on empty space drops it)
         else:
             self.app.scrub_end()
 

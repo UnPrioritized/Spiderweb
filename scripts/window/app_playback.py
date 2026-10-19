@@ -332,10 +332,14 @@ class Playback:
                     self.out.note(ch, p, 0, rows=True)
                 self.out.note(ch, p, v, rows=True)
                 held[(ch, p)] = s
-        self.set_playhead(t_to / self.ppq)
+        self.roll.scrub_t = t_to / self.ppq  # (a line of its own: the play line stays where it is, user)
+        self.roll.draw_playhead()
         return True
 
     def scrub_end(self):
         for ch, p in self._scrub_held:
             self.out.note(ch, p, 0, rows=True)
         self._scrub_held.clear()
+        if self.roll.scrub_t is not None:
+            self.roll.scrub_t = None
+            self.roll.draw_playhead()

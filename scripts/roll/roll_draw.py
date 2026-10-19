@@ -834,6 +834,10 @@ class RollDrawing:
             self.create_line(x, top, x, h, fill=look.PLAY_LINE, width=max(1, round(s)), tags="playhead")
             self.create_polygon(x - 5 * s, top - 8 * s, x + 5 * s, top - 8 * s, x, top, fill=look.PLAY_LINE,
                                 tags="playhead")
+        x = None if self.scrub_t is None else round(self.t2x(self.scrub_t))
+        if x is not None and self.kb_w <= x <= w:  # right-drag listening: a line of its own, no arrow (the play
+            self.create_line(x, self.ruler_h, x, h, fill=look.PLAY_LINE,  # line stays put; user)
+                             width=max(1, round(self.scale)), tags="playhead")
 
     def show_playhead(self, start=False):
         """Move the play line; while playing, turn the page when it gets near the right edge
