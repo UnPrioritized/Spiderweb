@@ -4,8 +4,9 @@ staying shape's note on that key (gate end = next start), lengths kept. Rows wit
 their key ("leftovers") slide by the smallest slide a row made and are handed back apart (user: their own shape,
 to delete or keep).
 
-"Keep as two shapes" (menu tick, user 2026-10-19): the staying shape stays as it is, the sliding one becomes fixed
-notes (leftovers in it) remembering the shape it was (sh["unmerge"]): Split gives it back (unmerged)."""
+"Keep two shapes" (the merge window's tick, user 2026-10-19; any number of shapes): the others stay as they are,
+the one that moves becomes fixed notes remembering the shape it was (sh["unmerge"]): Split gives it back
+(unmerged); its leftovers are a "Merge leftovers" shape of their own. Also up / down (up_down_plan)."""
 
 import copy
 import json
@@ -67,30 +68,67 @@ def _merge(stay, slide, from_left, rest_slides=True):
     return out, rest, least, late, by_key
 
 
-def slide_plan(parts, right):
-    """How Merge to right / left slides two shapes' (start, end, pitch, ...) rows: (which part slides (right: the
-    one on the left, by middles), each met key row's slide {key: ticks}, the smallest slide (the rows with nothing
-    to meet), how much later everything goes to stay after tick 0), or None when no row meets."""
-    a, b = (np.asarray(p, np.int64).reshape(len(p), -1) for p in parts)
-    if not len(a) or not len(b):
-        return None
-    left = 1 if comes_from_left(a, b) else 0
-    slide = left if right else 1 - left
-    got = _merge((a, b)[1 - slide], (a, b)[slide], right)
-    return got and (slide, got[4], got[2], got[3])
+def side_plan(stay, slide, right):
+    """How Merge to right / left (keep two shapes) slides the slide rows (start, end, pitch, ...) onto stay's: (each
+    met key row's slide {key: ticks}, the smallest slide (the rows with nothing to meet), how much later everything
+    goes to stay after tick 0), or None when no row meets."""
+    got = _merge(stay, slide, right)
+    return got and (got[4], got[2], got[3])
 
 
-def lower_one(parts):
-    """0 or 1: which of two shapes' (start, end, pitch, ...) rows sits lower, by their middle key."""
-    a, b = (np.asarray(p, np.int64).reshape(len(p), -1) for p in parts)
-    return 0 if a[:, 2].mean() <= b[:, 2].mean() else 1
+def mover(parts, way, again=None):
+    """Which of several shapes' (start, end, pitch, ...) rows moves in a Gate sensitive merge "way" (right / left /
+    up / down): again (a Merged notes made this way before: it moves again, user 2026-10-19), else right = the
+    earliest by middle time, left = the latest, up = the one with the lowest note, down = the highest (ties: by
+    middle key)."""
+    if again is not None:
+        return again
+    rows = [np.asarray(p, np.int64).reshape(len(p), -1) for p in parts]
+    if way in ("right", "left"):
+        mid = [r[:, :2].mean() for r in rows]
+        return int(np.argmin(mid) if way == "right" else np.argmax(mid))
+    if way == "up":
+        return min(range(len(rows)), key=lambda k: (rows[k][:, 2].min(), rows[k][:, 2].mean()))
+    return max(range(len(rows)), key=lambda k: (rows[k][:, 2].max(), rows[k][:, 2].mean()))
 
 
-def slid_up_down(stay, rows, up, top):
+def spread(first, end, vals, count, low):
+    """Per time piece 0 .. count-1: the lowest (low; else highest) of vals over the notes sounding through pieces
+    first .. end-1 (a tree of halves: each note touches ~2 log(count) parts, not every piece; None where nothing
+    sounds = 1 << 40 / -1)."""
+    empty = (1 << 40) if low else -1
+    size = 1 << max(1, (count - 1).bit_length())
+    tree = np.full(2 * size, empty, np.int64)
+    put = np.minimum.at if low else np.maximum.at
+    lo, hi, vals = first + size, end + size, np.asarray(vals, np.int64)
+    while len(lo):
+        keep = lo < hi
+        if keep.sum() * 2 < len(keep):  # (done ones dropped now and then: dropping costs as much as a step)
+            lo, hi, vals, keep = lo[keep], hi[keep], vals[keep], keep[keep]
+        odd = keep & (lo & 1).astype(bool)
+        put(tree, lo[odd], vals[odd])
+        lo += odd
+        odd = keep & (hi & 1).astype(bool)
+        hi -= odd
+        put(tree, hi[odd], vals[odd])
+        lo >>= 1
+        hi >>= 1
+    pick = np.minimum if low else np.maximum
+    at = 1
+    while at < size:  # (each part's value down to its halves)
+        top = tree[at:2 * at]
+        tree[2 * at:4 * at:2] = pick(tree[2 * at:4 * at:2], top)
+        tree[2 * at + 1:4 * at:2] = pick(tree[2 * at + 1:4 * at:2], top)
+        at *= 2
+    return tree[size:size + count]
+
+
+def up_down_plan(stay, rows, up, top):
     """Merge up / down (user 2026-10-19, from their pictures): rows (start, end, pitch, ...) are cut where stay's
-    notes start and end; each time piece slides as a block (up, or down) until one of its notes is right under
-    (over) a stay note sounding then; nothing in its way = up to key top (down to key 0). A note whose pieces slide
-    alike stays whole. Returns (the rows slid, True if a piece had nothing in its way), or None when none met."""
+    notes start and end; each time piece slides as a block until its highest note is right under the LOWEST stay
+    note sounding then (down: over the highest; the outer edge, like left / right's rows); nothing in its way = up
+    to key top (down to key 0), a leftover. None when no piece meets stay; else a plan for up_down_rows, its
+    "moved" False when no piece moves, "slid" = its smallest slide of the pieces that met (keys, + = up)."""
     stay = np.asarray(stay, np.int64).reshape(len(stay), -1)
     rows = np.asarray(rows, np.int64).reshape(len(rows), -1)
     if not len(stay) or not len(rows):
@@ -99,34 +137,29 @@ def slid_up_down(stay, rows, up, top):
     cuts = np.unique(stay[:, :2])
     count = len(cuts) + 1  # (time pieces: piece t between cuts t - 1 and t)
 
-    def sounding(notes, keys):  # (each note's time pieces first .. end - 1, its notes sorted by key)
-        order = np.argsort(keys, kind="stable")
-        return (np.searchsorted(cuts, notes[order, 0], "right"), np.searchsorted(cuts, notes[order, 1], "left") + 1,
-                keys[order])
-    s_first, s_end, s_keys = sounding(stay, sk)
-    r_first, r_end, r_keys = sounding(rows, rk)
-
-    def held(first, end, keys, k):  # (the time pieces a note on key k sounds in)
-        a, b = np.searchsorted(keys, k), np.searchsorted(keys, k, "right")
-        diff = np.bincount(first[a:b], minlength=count + 1) - np.bincount(end[a:b], minlength=count + 1)
-        return np.cumsum(diff)[:count] > 0
-    far = np.int64(1 << 20)
-    near = np.full(count, far)  # (per time piece: the lowest stay key above the keys done so far)
-    least = np.full(count, far)  # (per time piece: how far its block can slide)
-    high = np.full(count, -1)  # (its highest key)
-    r_has, s_has = set(np.unique(r_keys).tolist()), set(np.unique(s_keys).tolist())
-    for k in sorted(r_has | s_has, reverse=True):  # (top down: a key sees only the stay keys above it)
-        if k in r_has:
-            on = held(r_first, r_end, r_keys, k)
-            least = np.where(on & (near < far), np.minimum(least, near - k - 1), least)
-            high = np.where(on & (high < 0), k, high)
-        if k in s_has:
-            near[held(s_first, s_end, s_keys, k)] = k
+    def sounding(notes):  # (each note sounds through time pieces first .. end - 1)
+        return np.searchsorted(cuts, notes[:, 0], "right"), np.searchsorted(cuts, notes[:, 1], "left") + 1
+    low = spread(*sounding(stay), sk, count, True)
+    first, end = sounding(rows)
+    high, least = spread(first, end, rk, count, False), spread(first, end, rk, count, True)
     used = high >= 0
-    if not (used & (least < far)).any():
+    met = used & (low < (1 << 40))
+    if not met.any():
         return None
-    move = np.where(used, np.maximum(np.minimum(least, top - high), 0), 0)  # (never past the top key)
-    cuts = cuts[np.flatnonzero(move[1:] != move[:-1])]  # (notes are only cut where the slide changes)
+    move = np.where(met, low - 1 - high, top - high)
+    move = np.where(used, np.maximum(move, -least), 0)  # (never below key 0)
+    wall = used & ~met
+    code = move * 2 + wall
+    hit = move[met]
+    return {"cuts": cuts, "change": cuts[np.flatnonzero(code[1:] != code[:-1])], "move": move, "wall": wall,
+            "up": up, "moved": bool((move[used] != 0).any()), "slid": int(hit[np.argmin(np.abs(hit))]) * (1 if up else -1)}
+
+
+def up_down_rows(plan, rows):
+    """up_down_plan's rows (the same notes, any more columns after pitch) cut where the slide changes and slid ->
+    (rows, True where a row is a leftover)."""
+    rows = np.asarray(rows, np.int64).reshape(len(rows), -1)
+    cuts = plan["change"]  # (notes are only cut where the slide changes)
     lo = np.searchsorted(cuts, rows[:, 0], "right")  # (cuts strictly inside each note: lo .. hi - 1)
     hi = np.searchsorted(cuts, rows[:, 1], "left")
     n = np.maximum(hi - lo, 0) + 1
@@ -137,9 +170,18 @@ def slid_up_down(stay, rows, up, top):
     if len(cuts):
         out[:, 0] = np.where(j == 0, out[:, 0], cuts[np.clip(lo[src] + j - 1, 0, last)])
         out[:, 1] = np.where(j == n[src] - 1, out[:, 1], cuts[np.clip(lo[src] + j, 0, last)])
-    step = move[np.searchsorted(np.unique(stay[:, :2]), out[:, 0], "right")]
-    out[:, 2] += step if up else -step
-    return out, bool((used & (least >= far)).any())
+    at = np.searchsorted(plan["cuts"], out[:, 0], "right")
+    out[:, 2] += plan["move"][at] if plan["up"] else -plan["move"][at]
+    return out, plan["wall"][at]
+
+
+def slid_up_down(stay, rows, up, top):
+    """up_down_plan + up_down_rows in one: (rows slid, True if a piece had nothing in its way) or None."""
+    plan = up_down_plan(stay, rows, up, top)
+    if plan is None:
+        return None
+    out, wall = up_down_rows(plan, rows)
+    return out, bool(wall.any())
 
 
 def merge_parts(sh):
@@ -151,8 +193,9 @@ def merge_parts(sh):
 
 def clean_unmerge(u, clean_shape):
     """A two-shapes merge's memory from a file (sh["unmerge"]: "parts" = the shape Split gives back as it was when
-    merged, "box" = the notes' box then, "slid" = its smallest slide in beats, "vrev" = flipped sideways an odd
-    number of times since) -> valid, or None."""
+    merged, "box" = the notes' box then, "slid" = its smallest slide in beats, "kslid" = in keys (up / down),
+    "vrev" = flipped sideways an odd number of times since, "way" = right / left / up / down (merged that way
+    again: it moves again), "id" = its "Merge leftovers" shape's "leftover_of") -> valid, or None."""
     try:
         parts = [clean_shape(p) for p in u["parts"] if isinstance(p, dict)]
         box = [[float(b), float(p)] for b, p in u["box"]]
@@ -161,8 +204,13 @@ def clean_unmerge(u, clean_shape):
     if not parts or not all(parts) or len(box) != 3 or not all(math.isfinite(x) for pt in box for x in pt):
         return None
     out = {"parts": parts, "box": box}
-    if isinstance(u.get("slid"), (int, float)) and math.isfinite(u["slid"]):
-        out["slid"] = float(u["slid"])
+    for k in ("slid", "kslid"):
+        if isinstance(u.get(k), (int, float)) and math.isfinite(u[k]):
+            out[k] = float(u[k])
+    if u.get("way") in ("right", "left", "up", "down"):
+        out["way"] = u["way"]
+    if isinstance(u.get("id"), str):
+        out["id"] = u["id"][:64]
     if u.get("vrev") is True:
         out["vrev"] = True
     return out
@@ -178,7 +226,8 @@ def unmerged(sh):
     """Split of a two-shapes merge's notes: the shape they were made from, moved / turned / slanted / stretched /
     flipped the way the notes' box was since (a shape that can't be turned that way: only moved, as far as the
     box's lowest, earliest corner). Moved, flipped, stretched: where it was before it slid, carried along (user
-    2026-10-19, one rule); turned / slanted: round where its notes are (time no longer runs along time)."""
+    2026-10-19, one rule); turned / slanted: round where its notes are (time no longer runs along time); up / down
+    flipped upside down: where its notes are too."""
     u = sh["unmerge"]
     parts = copy.deepcopy(u["parts"])
     got = box_map(u["box"], sh["pts"])
@@ -188,7 +237,9 @@ def unmerged(sh):
     if not np.allclose(L, np.eye(2), atol=1e-9) or u.get("vrev"):
         level = abs(L[0, 1]) < 1e-9 and abs(L[1, 0]) < 1e-9  # (time still along time: flips / stretches)
         d = 0.0 if level else u.get("slid", 0.0)  # (turned: first as far as it slid, the smallest slide)
-        turned = [mapped_part(p, lambda b, k: [float(x) for x in L @ (b + d, k) + o], L, bool(u.get("vrev")))
+        # (up / down: also turned, or flipped upside down: else it lands off the piano roll, hunt)
+        dk = 0.0 if level and L[1, 1] > 0 else u.get("kslid", 0.0)
+        turned = [mapped_part(p, lambda b, k: [float(x) for x in L @ (b + d, k + dk) + o], L, bool(u.get("vrev")))
                   for p in parts]
         if all(q is not None for q in turned):
             return turned

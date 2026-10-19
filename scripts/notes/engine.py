@@ -305,6 +305,8 @@ def clean_shape(sh):
                 out["held"] = True
             if sh.get("made") in ("mask", "leftovers", "path", "plain"):
                 out["made"] = sh["made"]
+            if isinstance(sh.get("leftover_of"), str):  # (a two-shapes merge's leftovers: its Split takes them back)
+                out["leftover_of"] = sh["leftover_of"][:64]
             pic = clean_picture(sh.get("picture"))
             if pic:  # a picture made into notes (picture.py): the notes are its finished colours, track = slot
                 out["picture"] = pic

@@ -451,7 +451,8 @@ def _halves(sh, parts, ppq):
     out = []
     for n in parts:
         half = {k: copy.deepcopy(v) for k, v in sh.items()
-                if k not in ("notes", "pts", "vel_env", "fx", "glue", "between", "gate_flip", "flip_colours", "unmerge")}
+                if k not in ("notes", "pts", "vel_env", "fx", "glue", "between", "gate_flip", "flip_colours", "unmerge",
+                              "leftover_of")}
         # (pages / glue / a velocity line / a gate aware flip: in its notes; a merge's notes cut: no Split back)
         half.update(notes_shape(n, ppq, sh.get("name")), paste=paste)
         if "unmerge" in sh:  # (no Split back any more: not called "Merged notes", hunt)
