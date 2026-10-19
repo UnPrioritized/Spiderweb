@@ -183,10 +183,13 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if abs(cx - x) < BOX_STILL and (self.box_ruler or abs(cy - y) < BOX_STILL):
             return None
         tick, step = 1 / self.app.ppq, self.app.snap_beats()
+        if self.box_ruler:  # (dragged along the ruler: every key; both ends on the NEAREST grid line, user, like
+            # many MIDI programs; none while they round to the same line)
+            s0, s1 = (tick if sh else step or tick for sh in (self.box_shift0, self.box_shift))
+            b0, b1 = sorted((round(self.x2t(x) / s0) * s0, round(self.x2t(cx) / s1) * s1))
+            return (b0, RULER_TOP, b1, -0.5) if b1 - b0 > 1e-9 else None
         b0, b1 = grid_span(self.x2t(x), self.x2t(cx), tick if self.box_shift0 else step or tick,
                            tick if self.box_shift else step or tick)
-        if self.box_ruler:  # (dragged along the ruler: every key)
-            return b0, RULER_TOP, b1, -0.5
         top = self.app.keys - 1
         p0, p1 = sorted(min(max(round(self.y2p(v)), 0), top) for v in (y, cy))
         return b0, p1 + 0.5, b1, p0 - 0.5
