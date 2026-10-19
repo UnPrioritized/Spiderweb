@@ -13,12 +13,13 @@ TIMEOUT = 8  # seconds before giving up (no connection)
 
 
 def version_tuple(text):
-    """"v1.3.0" / "1.3" -> (1, 3, 0); None if it isn't a version number."""
-    m = re.fullmatch(r"v?(\d+(?:\.\d+)*)", str(text).strip())
+    """"v1.3.0" / "1.3" -> (1, 3, 0, 1); "1.6.2-beta" -> (1, 6, 2, 0): a test build comes before its release (so
+    the release still counts as newer); None if it isn't a version number."""
+    m = re.fullmatch(r"v?(\d+(?:\.\d+)*)(-?[A-Za-z][\w.]*)?", str(text).strip())
     if not m:
         return None
-    parts = [int(p) for p in m.group(1).split(".")]
-    return tuple(parts + [0] * (3 - len(parts)))
+    parts = [int(p) for p in m.group(1).split(".")][:3]
+    return tuple(parts + [0] * (3 - len(parts))) + (0 if m.group(2) else 1,)
 
 
 def newer_releases():
@@ -38,7 +39,7 @@ def newer_releases():
         v = version_tuple(rel.get("tag_name", ""))
         if v is None or v <= mine:
             continue
-        found.append((v, {"version": ".".join(map(str, v)), "url": str(rel.get("html_url") or ""),
+        found.append((v, {"version": ".".join(map(str, v[:3])), "url": str(rel.get("html_url") or ""),
                           "notes": plain_notes(rel.get("body") or "")}))
     found.sort(key=lambda f: f[0], reverse=True)
     return [f[1] for f in found]
