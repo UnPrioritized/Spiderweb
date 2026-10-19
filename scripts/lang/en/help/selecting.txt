@@ -2,7 +2,7 @@ With Select, drag on empty space: the box selects every shape it touches (Ctrl+d
 
 The box stays after you let go. Drag its sides or corners to stretch the shapes it selected (the other side stays put), or drag inside it to move them. Dragged past the edge of the piano roll, the view scrolls.
 
-Drag along the bar numbers (with any tool) to select every key in that time: the box covers the whole keyboard and the bar numbers turn black above it. Drag the black part sideways to move what it selected in time only; click it to move the play line.
+Drag along the bar numbers (with any tool) to select every key in that time: the bar numbers turn black there. Drag the black part sideways to move what it selected in time only; click it to move the play line.
 
 Ctrl+drag after a box draws another box (they all count together). Ctrl+drag inside the boxes moves a copy of everything in them.
 
