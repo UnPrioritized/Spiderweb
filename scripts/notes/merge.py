@@ -135,7 +135,23 @@ def part_rows(parts, ppq, keys, rounds=False):
         made.append((notes, which, mine.start))
     slots = np.asarray(assign_slots(units, "key", forced, firsts) if units else [], np.int64)
     out = [np.column_stack([notes, slots[at + which] if len(which) else which]) for notes, which, at in made]
+    if rounds and not any(has_colours(p, turns=True) for p in parts):
+        laps = colour_laps(out, laps)
     return [np.column_stack([o, lap]) for o, lap in zip(out, laps)] if rounds else out
+
+
+def colour_laps(rows, laps):
+    """part_rows' rounds when only colours given by hand repeat (no part takes turns): each colour counted on its
+    own, so a colour's next piece (in this part or the next) is its next repeat and a colour used once stays
+    (user 2026-10-19)."""
+    if not any(len(r) for r in rows):
+        return laps
+    slot = np.concatenate([r[:, 4] for r in rows])
+    lap = np.concatenate(laps)
+    pair, at = np.unique(np.column_stack([slot, lap]), axis=0, return_inverse=True)  # (sorted: slot, then lap)
+    rank = np.arange(len(pair)) - np.searchsorted(pair[:, 0], pair[:, 0])  # (its place among its slot's laps)
+    got = rank[at.reshape(-1)]
+    return np.split(got, np.cumsum([len(r) for r in rows])[:-1])
 
 
 def merged(parts, right, ppq, keys):
@@ -197,11 +213,13 @@ def recipe_rows(m, rounds=False):
 LAP = 1 << 16  # (with_rounds: track + LAP x round still fits the packed notes' 32 bits)
 
 
-def has_colours(sh):
+def has_colours(sh, turns=False):
     """Does sh take turns over colours that can start again ("Colours", a Nested / Tiles fill, Copy along a path's
-    colours: "New channels each Colours round"), itself or any part of it (merges of merges too)?"""
-    from notes.custom import cycling, has_pattern, path_colours
-    return cycling(sh) or has_pattern(sh) or path_colours(sh) or any(isinstance(p, dict) and has_colours(p) for p in (sh.get("merge") or {}).get("parts", ()))
+    colours: "New channels each Colours round"; colours given by hand used more than once, custom.paints), itself or
+    any part of it (merges of merges too)? turns: only colours that take turns (not the ones given by hand)."""
+    from notes.custom import cycling, has_pattern, paints, path_colours
+    return (cycling(sh) or has_pattern(sh) or path_colours(sh) or not turns and paints(sh)
+            or any(isinstance(p, dict) and has_colours(p, turns) for p in (sh.get("merge") or {}).get("parts", ())))
 
 
 def with_rounds(sh):

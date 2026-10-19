@@ -2632,7 +2632,7 @@ def custom_notes_groups(sh, ppq):
     (sh["cycle"]): every group split into its turns (cycle_turns); with "Outline" the outline stays one group."""
     notes, groups = _notes_groups(sh, ppq)
     if not cycling(sh) or not len(notes):
-        return notes, groups
+        return notes, (paint_rounds(sh, notes, groups, ppq) if sh.get("_rounds") else groups)
     n = sh["cycle"]["n"]
     turn = cycle_turns(sh, notes, ppq)
     if groups is None:
@@ -2655,6 +2655,81 @@ def custom_notes_groups(sh, ppq):
         lo = int(turn_lap.min())  # one number)
         turn_lap = lap * (int(turn_lap.max()) - lo + 1) + turn_lap - lo
     return notes, out + turn_lap * ROUND
+
+
+def paints(sh):
+    """Some area or stroke of the shape is given a colour by hand (area colours, outline colours): with "New
+    channels each Colours round" each separate piece of one colour after the first is a repeat (paint_rounds)."""
+    return (sh.get("kind") == "custom" and not cycling(sh) and not has_pattern(sh)
+            and (has_areas(sh) and any(a[2] > 0 for a in sh["areas"]) or coloured_strokes(sh)))
+
+
+def paint_rounds(sh, notes, groups, ppq):
+    """_notes_groups' groups + ROUND x each note's repeat (user 2026-10-19): the notes of one colour given by hand
+    that touch make one piece, the first piece (by its first note) keeps the channels, each next one is the next
+    repeat. The shape's own colour and its "Outline" never repeat."""
+    if groups is None or not paints(sh):
+        return groups
+    groups = np.asarray(groups, np.int64)
+    if sh["fill"] in ("empty", "outline_spam") or not fillable(sh["strokes"]):
+        found = stroke_groups(sh)  # (outline_groups: group n = the n-th (source, colour))
+        colour = np.asarray([c for (_, c) in sorted(found)] if found else [0], np.int64)[groups]
+    else:
+        colour = groups - 1 if sh.get("apart") and sh["fill"] in ("fill", "spam") else groups  # (0 outline, 1 own)
+    spam = sh["fill"] in SPAM_FILLS
+    rounds = np.zeros(len(notes), np.int64)
+    for c in np.unique(colour[colour > 0]).tolist():
+        mine = np.flatnonzero(colour == c)
+        piece = touching_pieces(notes[mine], gate_ticks(sh["gate"], ppq) if spam else 0)
+        first = np.full(int(piece.max()) + 1, np.iinfo(np.int64).max)
+        np.minimum.at(first, piece, notes[mine, 0])
+        rank = np.empty(len(first), np.int64)
+        rank[np.argsort(first, kind="stable")] = np.arange(len(first))
+        rounds[mine] = rank[piece]
+    return groups + rounds * ROUND
+
+
+def touching_pieces(notes, gap=0):
+    """Which piece each (start, end, key) note is in: notes on one key or on keys next to each other that overlap or
+    are at most gap ticks apart in time are in one piece. Piece numbers 0, 1, ..."""
+    n = len(notes)
+    if not n:
+        return np.zeros(0, np.int64)
+    o = np.lexsort((notes[:, 0], notes[:, 2]))
+    s, e, k = notes[o, 0], notes[o, 1], notes[o, 2]
+    # runs: notes on one key touching one after another (reach = the latest end so far on the key)
+    new = np.r_[True, k[1:] != k[:-1]]
+    reach = e.copy()
+    at = np.flatnonzero(new)
+    for a, b in zip(at.tolist(), np.r_[at[1:], n].tolist()):
+        reach[a:b] = np.maximum.accumulate(e[a:b])
+    new[1:] |= s[1:] > reach[:-1] + gap
+    run = np.cumsum(new) - 1
+    m = int(run[-1]) + 1
+    rk = k[new]
+    rs = s[new]
+    re_ = np.zeros(m, np.int64)
+    np.maximum.at(re_, run, e)
+    lo = int(rs.min()) - gap - 1
+    wide = int(re_.max()) - lo + 2 * gap + 2
+    ks, ke = rk * wide + (rs - lo), rk * wide + (re_ - lo)
+    first = np.searchsorted(ke, (rk + 1) * wide + (rs - lo - gap), "left")  # runs on the next key touching this one
+    cnt = np.maximum(np.searchsorted(ks, (rk + 1) * wide + (re_ - lo + gap), "right") - first, 0)
+    a = np.repeat(np.arange(m), cnt)
+    b = np.repeat(first, cnt) + np.arange(int(cnt.sum())) - np.repeat(np.cumsum(cnt) - cnt, cnt)
+    lab = np.arange(m)
+    while len(a):  # (as areas.AreaMap._label: the smallest run number of each piece passed along)
+        low = np.minimum(lab[a], lab[b])
+        new_lab = lab.copy()
+        np.minimum.at(new_lab, a, low)
+        np.minimum.at(new_lab, b, low)
+        new_lab = new_lab[new_lab]
+        if np.array_equal(new_lab, lab):
+            break
+        lab = new_lab
+    out = np.empty(n, np.int64)
+    out[o] = np.unique(lab, return_inverse=True)[1].reshape(-1)[run]
+    return out
 
 
 def cycling(sh):
