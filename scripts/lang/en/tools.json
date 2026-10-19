@@ -816,7 +816,7 @@
  "subtract.on": "Subtract from gates",
  "subtract.on_tip": "Every note ends a little earlier, so a blank space shows between notes that touch. Only the end of a note moves: its start stays where it is. A note never gets shorter than 1 tick.\nDone last, after everything else that makes the notes (Sustain too).",
  "subtract.by": "Subtract",
- "subtract.by_tip": "How many ticks each note ends earlier. The number follows the PPQ.",
+ "subtract.by_tip": "How many ticks each note ends earlier (0 = none: with a graph, where no gap starts). The number follows the PPQ.",
  "subtract.ticks": "ticks",
  "subtract.tick": "tick",
  "subtract.touch": "Only notes that touch the next one",

@@ -81,7 +81,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.by_unit.pack(side="left", padx=(4, 0))
         for var in (self.by_var, self.to_var):
             var.trace_add("write", lambda *_: self.put_unit())
-        Scrub(app, [(self.by_box, self.by_var, lambda: self.on_box("by"))], lambda: (1, 10, 1), 1, None,
+        Scrub(app, [(self.by_box, self.by_var, lambda: self.on_box("by"))], lambda: (1, 10, 1), 0, None,
               label=self.by_unit, drag_box=True, no_undo=True)
         for w in (self.by_label, self.by_box, self.by_unit):
             Tooltip(w, tr("subtract.by_tip"))
@@ -120,7 +120,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         e.bind("<Return>", lambda ev: (self.on_box(key), "break")[1])  # (not OK: the window stays)
         e.bind("<FocusOut>", lambda ev: self.on_box(key))
         if key == "to":
-            Scrub(self.app, [(e, var, lambda: self.on_box("to"))], lambda: (1, 10, 1), 1, None, label=label,
+            Scrub(self.app, [(e, var, lambda: self.on_box("to"))], lambda: (1, 10, 1), 0, None, label=label,
                   drag_box=True, no_undo=True)
             Tooltip(e, tr("subtract.to_tip"))
         return e
@@ -216,8 +216,8 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.show_controls()
 
     def new_graph(self):
-        """The graph settings a shape gets the first time it changes across: To = 4 times its amount."""
-        b = next((b for b in self.bys if b is not None), 1 / self.app.ppq)
+        """The graph settings a shape gets the first time it changes across: To = 4 times its amount (0: 4 ticks)."""
+        b = next((b for b in self.bys if b is not None), 1 / self.app.ppq) or 1 / self.app.ppq
         return {"to": min(b * 4, MOST), "graph": [list(p) for p in STRAIGHT], "dir": "time"}
 
     def show_controls(self):
@@ -298,14 +298,14 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         return fmt(ticks_of(beats, self.app.ppq))
 
     def read(self, text, ppq=None):
-        """Typed ticks -> beats (whole ticks, at least 1, at most MOST beats), or None (empty, not a number, under
-        1). ppq: the one it was typed for (default the project's)."""
+        """Typed ticks -> beats (whole ticks, 0 or more, at most MOST beats), or None (empty, not a number, under
+        0). ppq: the one it was typed for (default the project's)."""
         ppq = ppq or self.app.ppq
         try:
             v = calc(text)
         except (ValueError, ZeroDivisionError):
             return None
-        if not math.isfinite(v) or v < 0.5:
+        if not math.isfinite(v) or v < 0:
             return None
         return min(math.floor(v + 0.5) / ppq, MOST)
 
@@ -317,7 +317,8 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         if what == "on":
             self.on = [self.on_var.get()] * n
             if self.on_var.get():  # (shapes with no amount yet: the box's, else 1 tick)
-                b = self.read(self.by_var.get()) or 1 / self.app.ppq
+                b = self.read(self.by_var.get())
+                b = 1 / self.app.ppq if b is None else b
                 self.bys = [v if v is not None else b for v in self.bys]
         elif what == "touch":
             self.touches = [self.touch_var.get()] * n

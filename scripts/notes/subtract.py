@@ -2,7 +2,8 @@
 Gate subtract (right-click "Gate subtract..."): every note of a shape ends a little earlier, so a blank space shows
 between notes that touched. Only the end moves (the start is the rhythm); a note never gets shorter than 1 tick.
 
-sh["subtract"] = {"by": beats (kept in beats like every length: a PPQ change keeps the look; whole ticks, at least 1),
+sh["subtract"] = {"by": beats (kept in beats like every length: a PPQ change keeps the look; whole ticks, 0 or more:
+0 = nothing off, user, so a graph can start from no gap),
 "touch": True (only notes the next note on their key starts on or before the end of; default: every note)}
 + the graph ("vary": True while it's used; the rest kept while it's off so ticking again brings it back): "to": beats,
 "graph": [[u, y]], "dir": "time" / "keys" / "keys_down", "rows", "join", "count" (as Gate Range's, gaterange.py).
@@ -29,7 +30,7 @@ def _beats(v):
         v = float(v)
     except (TypeError, ValueError):
         return None
-    return min(v, MOST) if math.isfinite(v) and v > 0 else None
+    return min(v, MOST) if math.isfinite(v) and v >= 0 else None  # (0: nothing off there, e.g. a graph's start)
 
 
 def clean_subtract(s):
@@ -58,8 +59,8 @@ def is_subtracted(sh):
 
 
 def ticks_of(beats, ppq):
-    """An amount in whole ticks (at least 1)."""
-    return max(1, int(round(beats * ppq)))
+    """An amount in whole ticks (at least 1 unless it's 0)."""
+    return max(1, int(round(beats * ppq))) if beats > 0 else 0
 
 
 def touching(notes):
