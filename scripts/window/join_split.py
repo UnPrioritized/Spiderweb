@@ -61,12 +61,13 @@ def without10(sh, use10):
     """A Turn into plain notes shape keeps channel 10 in use only if one of its notes is on it (hunt): else its tracks
     are made as with channel 10 skipped (the same channels), so unticking Use channel 10 drops it."""
     rows = unpack_notes(sh["notes"])
-    if use10 and len(rows) and not (rows[:, 4] % 16 == 9).any():
+    on10 = bool(use10 and len(rows) and (rows[:, 4] % 16 == 9).any())
+    if use10 and len(rows) and not on10:
         rows = rows.copy()
         t = rows[:, 4]
         rows[:, 4] = t // 16 * 15 + np.array([SKIP10.index(c) if c != 9 else 0 for c in range(16)])[t % 16]
         sh["notes"] = pack_notes(rows)
-    sh["slots10"] = bool(use10 and (rows[:, 4] % 16 == 9).any())
+    sh["slots10"] = on10  # (asked before renumbering: channel 11 becomes slot 9 there, user 2026-10-20)
     return sh
 
 

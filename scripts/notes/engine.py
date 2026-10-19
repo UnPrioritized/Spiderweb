@@ -1322,7 +1322,8 @@ def pushed_solid(note_lists, pinned, fixed, split, step, use10=False):
     slot moved up by step slots (15, 16 with channel 10 used) until it's free: the same channel (colour), another
     track (user, 2026-10-17: a copy of plain notes ate the original's notes). step 1 (Settings → General "Overlapping
     shapes keep their colours" off; user 2026-10-20: 352 path copies made 646 channels, most empty): the next free
-    slot, never one the shapes skip (channel 10, unmapped_slot)."""
+    slot in the order the other shapes take them (with "Use channel 10": channel 10 last of each 16, unless "1-16 in
+    order"; user 2026-10-20), never one they skip (channel 10, unmapped_slot)."""
     placed = {}  # slot -> earlier solid tracks' stretches there
     out = list(pinned)
     for i, (lst, pin) in enumerate(zip(note_lists, pinned)):
@@ -1333,6 +1334,10 @@ def pushed_solid(note_lists, pinned, fixed, split, step, use10=False):
         for k, s in enumerate(ids.tolist()):
             mine = lst[which == k]
             while s in placed and clash_pairs(np.concatenate(placed[s] + [stretches(mine, 1, split)])):
+                u = unmapped_slot(s, use10) if step == 1 else None
+                if u is not None:
+                    s = int(mapped_slots(np.array([u + 1]), use10)[0])
+                    continue
                 s += step
                 while step == 1 and unmapped_slot(s, use10) is None:
                     s += 1
