@@ -62,9 +62,11 @@ class MergeWindow(tk.Toplevel):
         if problem:
             hint += "\n\n" + problem
         elif keep:
-            sels = app.merge_pair()
-            moving = app.shapes[sels[app.merge_mover(sels, way)[0]]]
-            hint += "\n\n" + tr("merge_window.moves", name=app.shape_label(moving))
+            sels = app.merge_sels()
+            k, alt, _ = app.merge_mover(sels, way)
+            name = app.shape_label(app.shapes[sels[k]])
+            hint += "\n\n" + (tr("merge_window.moves", name=name) if alt is None else
+                              tr("merge_window.moves_or", name=name, other=app.shape_label(app.shapes[sels[alt]])))
         self.hint.config(text=hint)
         self.go.state(["disabled"] if problem else ["!disabled"])
 

@@ -32,7 +32,17 @@ def gate_merge(stay, slide, from_left=None, rest_slides=True):
 
 def _merge(stay, slide, from_left, rest_slides=True):
     """gate_merge, and also the smallest slide, how much later everything went (to stay after tick 0) and each met
-    key row's slide {key: ticks}."""
+    key row's slide {key: ticks}. stay a list (keep two shapes, several shapes): each shape on its own; one wholly
+    behind the row on its key (all its notes there end before the row starts: right; left: start after it ends)
+    is left out (hunt 2026-10-19: rows slid backwards behind it)."""
+    shapes = None
+    if isinstance(stay, list):
+        shapes = []
+        for s in stay:
+            s = np.asarray(s, np.int64).reshape(len(s), -1)
+            s = s[np.argsort(s[:, 2], kind="stable")]
+            shapes.append((s, s[:, 2]))
+        stay = np.concatenate([s for s, _ in shapes]) if shapes else np.zeros((0, 4), np.int64)
     stay = np.asarray(stay, np.int64)
     moved = np.array(slide, np.int64, copy=True)
     if not len(stay) or not len(moved):
@@ -42,10 +52,19 @@ def _merge(stay, slide, from_left, rest_slides=True):
     met = np.zeros(len(moved), bool)
     shifts, by_key = [], {}
     for key in np.unique(moved[:, 2]):
-        here = stay[stay[:, 2] == key]
+        rows = moved[:, 2] == key
+        if shapes is None:
+            here = stay[stay[:, 2] == key]
+        else:
+            got = []
+            for s, keys in shapes:
+                h = s[np.searchsorted(keys, key):np.searchsorted(keys, key, "right")]
+                if len(h) and (h[:, 1].max() > moved[rows, 0].min() if from_left
+                               else h[:, 0].min() < moved[rows, 1].max()):
+                    got.append(h)
+            here = np.concatenate(got) if got else stay[:0]
         if not len(here):
             continue
-        rows = moved[:, 2] == key
         if from_left:  # its last note's end meets the staying shape's first note on this key
             shift = here[:, 0].min() - moved[rows, 1].max()
         else:  # its first note's start meets the staying shape's last note's end
@@ -68,28 +87,27 @@ def _merge(stay, slide, from_left, rest_slides=True):
     return out, rest, least, late, by_key
 
 
-def side_plan(stay, slide, right):
-    """How Merge to right / left (keep two shapes) slides the slide rows (start, end, pitch, ...) onto stay's: (each
-    met key row's slide {key: ticks}, the smallest slide (the rows with nothing to meet), how much later everything
-    goes to stay after tick 0), or None when no row meets."""
-    got = _merge(stay, slide, right)
+def side_plan(stays, slide, right):
+    """How Merge to right / left (keep two shapes) slides the slide rows (start, end, pitch, ...) onto the stays
+    (a list: each shape's rows): (each met key row's slide {key: ticks}, the smallest slide (the rows with nothing to
+    meet), how much later everything goes to stay after tick 0), or None when no row meets."""
+    got = _merge(list(stays), slide, right)
     return got and (got[4], got[2], got[3])
 
 
-def mover(parts, way, again=None):
+def mover(parts, way, skip=None):
     """Which of several shapes' (start, end, pitch, ...) rows moves in a Gate sensitive merge "way" (right / left /
-    up / down): again (a Merged notes made this way before: it moves again, user 2026-10-19), else right = the
-    earliest by middle time, left = the latest, up = the one with the lowest note, down = the highest (ties: by
-    middle key)."""
-    if again is not None:
-        return again
+    up / down), not skip: right = the earliest by middle time, left = the latest, up = the one with the lowest note,
+    down = the highest (ties: by middle key). (A Merged notes made this way before moves again first:
+    JoinSplit.merge_mover.)"""
     rows = [np.asarray(p, np.int64).reshape(len(p), -1) for p in parts]
+    ks = [k for k in range(len(rows)) if k != skip]
     if way in ("right", "left"):
-        mid = [r[:, :2].mean() for r in rows]
-        return int(np.argmin(mid) if way == "right" else np.argmax(mid))
+        mid = {k: rows[k][:, :2].mean() for k in ks}
+        return (min if way == "right" else max)(ks, key=mid.get)
     if way == "up":
-        return min(range(len(rows)), key=lambda k: (rows[k][:, 2].min(), rows[k][:, 2].mean()))
-    return max(range(len(rows)), key=lambda k: (rows[k][:, 2].max(), rows[k][:, 2].mean()))
+        return min(ks, key=lambda k: (rows[k][:, 2].min(), rows[k][:, 2].mean()))
+    return max(ks, key=lambda k: (rows[k][:, 2].max(), rows[k][:, 2].mean()))
 
 
 def spread(first, end, vals, count, low):
@@ -123,36 +141,46 @@ def spread(first, end, vals, count, low):
     return tree[size:size + count]
 
 
-def up_down_plan(stay, rows, up, top):
-    """Merge up / down (user 2026-10-19, from their pictures): rows (start, end, pitch, ...) are cut where stay's
-    notes start and end; each time piece slides as a block until its highest note is right under the LOWEST stay
-    note sounding then (down: over the highest; the outer edge, like left / right's rows); nothing in its way = up
-    to key top (down to key 0), a leftover. None when no piece meets stay; else a plan for up_down_rows, its
-    "moved" False when no piece moves, "slid" = its smallest slide of the pieces that met (keys, + = up)."""
-    stay = np.asarray(stay, np.int64).reshape(len(stay), -1)
+def up_down_plan(stays, rows, up, top):
+    """Merge up / down (user 2026-10-19, from their pictures): rows (start, end, pitch, ...) are cut where the stays'
+    (a list: each shape's rows) notes start and end; each time piece slides as a block until its highest note is
+    right under the LOWEST note sounding then of the shapes not wholly below it (down: mirrored; the outer edge,
+    like left / right's rows: a line inside a hollow shape goes out under it; a shape wholly below is left out, hunt);
+    nothing in its way = up to key top (down to key 0), a leftover. None when no piece meets them; else a plan for
+    up_down_rows: "moved" False when no piece moves, "room" False when a piece can't go under (key 0 / top in the
+    way), "slid" = the smallest slide of the pieces that met (keys, + = up)."""
+    stays = [np.asarray(s, np.int64).reshape(len(s), -1) for s in stays]
+    stays = [s for s in stays if len(s)]
     rows = np.asarray(rows, np.int64).reshape(len(rows), -1)
-    if not len(stay) or not len(rows):
+    if not stays or not len(rows):
         return None
-    sk, rk = (stay[:, 2], rows[:, 2]) if up else (top - stay[:, 2], top - rows[:, 2])  # (down = up, upside down)
-    cuts = np.unique(stay[:, :2])
+    rk = rows[:, 2] if up else top - rows[:, 2]  # (down = up, upside down)
+    cuts = np.unique(np.concatenate([s[:, :2].ravel() for s in stays]))
     count = len(cuts) + 1  # (time pieces: piece t between cuts t - 1 and t)
 
     def sounding(notes):  # (each note sounds through time pieces first .. end - 1)
         return np.searchsorted(cuts, notes[:, 0], "right"), np.searchsorted(cuts, notes[:, 1], "left") + 1
-    low = spread(*sounding(stay), sk, count, True)
     first, end = sounding(rows)
     high, least = spread(first, end, rk, count, False), spread(first, end, rk, count, True)
+    far = 1 << 40
+    low = np.full(count, far, np.int64)
+    for s in stays:  # (per shape: left out where all its notes are below the piece's lowest)
+        sk, at = (s[:, 2] if up else top - s[:, 2]), sounding(s)
+        s_low, s_high = spread(*at, sk, count, True), spread(*at, sk, count, False)
+        low = np.where(s_high >= least, np.minimum(low, s_low), low)
     used = high >= 0
-    met = used & (low < (1 << 40))
+    met = used & (low < far)
     if not met.any():
         return None
     move = np.where(met, low - 1 - high, top - high)
-    move = np.where(used, np.maximum(move, -least), 0)  # (never below key 0)
+    room = not (used & (move < -least)).any()  # (under it would be past key 0)
+    move = np.where(used, np.maximum(move, -least), 0)
     wall = used & ~met
     code = move * 2 + wall
     hit = move[met]
     return {"cuts": cuts, "change": cuts[np.flatnonzero(code[1:] != code[:-1])], "move": move, "wall": wall,
-            "up": up, "moved": bool((move[used] != 0).any()), "slid": int(hit[np.argmin(np.abs(hit))]) * (1 if up else -1)}
+            "up": up, "moved": bool((move[used] != 0).any()), "room": room,
+            "slid": int(hit[np.argmin(np.abs(hit))]) * (1 if up else -1)}
 
 
 def up_down_rows(plan, rows):
@@ -177,7 +205,7 @@ def up_down_rows(plan, rows):
 
 def slid_up_down(stay, rows, up, top):
     """up_down_plan + up_down_rows in one: (rows slid, True if a piece had nothing in its way) or None."""
-    plan = up_down_plan(stay, rows, up, top)
+    plan = up_down_plan([stay], rows, up, top)
     if plan is None:
         return None
     out, wall = up_down_rows(plan, rows)

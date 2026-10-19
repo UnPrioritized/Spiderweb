@@ -269,9 +269,17 @@ class JoinSplit:
         sels = sorted(i for i in self.sels if i < len(self.shapes))
         return sels if len(sels) >= 2 else None
 
+    def merge_sels(self):
+        """merge_pair without "Merge leftovers" whose Merged notes is selected too (they're part of it, not a wall:
+        after a merge all stay selected), or None when fewer than 2 are left."""
+        sels = self.merge_pair() or []
+        ids = {(self.shapes[i].get("unmerge") or {}).get("id") for i in sels} - {None}
+        sels = [i for i in sels if self.shapes[i].get("leftover_of") not in ids]
+        return sels if len(sels) >= 2 else None
+
     def merge_problem(self, way, apart):
         """Why Gate sensitive merge can't go the way picked (the window's hint, greyed Merge), or None."""
-        sels = self.merge_pair()
+        sels = self.merge_sels() if apart else self.merge_pair()
         if not sels:
             return tr("merge_window.need_two")
         if not apart and way in ("up", "down"):
@@ -281,21 +289,24 @@ class JoinSplit:
         if any("picture" in self.shapes[i] for i in sels):  # (user: an image keeps its own colours, so not merged)
             return tr("join_split.merge_no_image")
         if apart:
-            k = self.merge_mover(sels, way)[0]
-            if k is None:
-                return tr("join_split.merge_no_notes")
-            if is_mask(self.shapes[sels[k]]):  # (a mask's notes are a preview, not something to keep)
+            # (a mask's notes are a preview, not something to keep or to meet: a silent one was a wall, hunt)
+            if any(is_mask(self.shapes[i]) for i in sels):
                 return tr("join_split.merge_no_mask")
+            if self.merge_mover(sels, way)[0] is None:
+                return tr("join_split.merge_no_notes")
         return None
 
     def merge_mover(self, sels, way):
-        """(Which of sels moves (place in sels; None when a shape has no notes), each one's notes): merge.mover; a
-        Merged notes made this way before moves again (hunt)."""
+        """(Which of sels moves (place in sels; None when a shape has no notes), the one moving instead when that's a
+        Merged notes which wouldn't move (or None), each one's notes): a Merged notes made this way before moves
+        again (user 2026-10-19) if it would move, else merge.mover among the others (hunt: a new shape meets it)."""
         notes = [np.asarray(self.notes_of(self.shapes[i]), np.int64).reshape(-1, 4) for i in sels]
         if not all(len(n) for n in notes):
-            return None, notes
+            return None, None, notes
         again = [k for k, i in enumerate(sels) if (self.shapes[i].get("unmerge") or {}).get("way") == way]
-        return mover(notes, way, again[0] if len(again) == 1 else None), notes
+        if len(again) == 1:
+            return again[0], mover(notes, way, skip=again[0]), notes
+        return mover(notes, way), None, notes
 
     def gate_merge(self, to_right, apart=False):
         """Right-click → Gate sensitive merge ▸ Merge to right / left (user; no anchor, anywhere in the menu works):
@@ -313,7 +324,7 @@ class JoinSplit:
             self.status.config(text=problem)
             return
         if apart:
-            return self.merged_apart(pair, way)
+            return self.merged_apart(self.merge_sels(), way)
         parts = [copy.deepcopy(self.shapes[i]) for i in pair]
         flips = lifted(parts)  # (both gate flipped: the merged shape is, each row across both, user 2026-10-11)
         rows = part_rows(parts, self.ppq, self.keys)
@@ -371,41 +382,22 @@ class JoinSplit:
         up / down: cut where their notes start and end, each piece slides until it meets them (merge.up_down_plan).
         It becomes fixed notes exactly as they sounded, "Merged notes"; what had nothing to meet = a "Merge
         leftovers" shape of its own (user, hunt: to delete later). Split gives back the shape it was (unmerged)."""
-        k, notes = self.merge_mover(sels, way)
-        i = sels[k]
-        stays = [j for j in sels if j != i]
-        # (the shapes' own notes as they sound, Sustain too: the very notes the moving one keeps, plain_copies own)
-        stay = np.concatenate([n for j, n in enumerate(notes) if j != k])
-        late, slid, kslid = 0, 0.0, 0.0
-        if way in ("up", "down"):
-            up = way == "up"
-            plan = up_down_plan(stay, notes[k], up, self.keys - 1)
-            if plan is None:
-                self.status.config(text=tr("join_split.merge_no_meet_" + way))
-                return
-            moved, kslid = plan["moved"], float(plan["slid"])
-
-            def slid_rows(rows):
-                return up_down_rows(plan, rows)
-        else:
-            plan = side_plan(stay, notes[k], way == "right")
-            if plan is None:
-                self.status.config(text=tr("join_split.merge_no_meet"))
-                return
-            by_key, least, late = plan
-            moved, slid = late or any(by_key.values()), (least + late) / self.ppq
-            met = np.array(sorted(by_key), np.int64)
-            moves = np.array([by_key[r] for r in met.tolist()], np.int64)
-
-            def slid_rows(rows):
-                at = np.clip(np.searchsorted(met, rows[:, 2]), 0, len(met) - 1)
-                hit = met[at] == rows[:, 2]
-                rows = rows.copy()
-                rows[:, :2] += (np.where(hit, moves[at], least) + late)[:, None]
-                return rows, ~hit
-        if not moved:  # (already touching: no step, nothing frozen, hunt)
+        k, alt, notes = self.merge_mover(sels, way)
+        got = self.merge_slide(notes, k, way)
+        if alt is not None and (isinstance(got, str) or not got["moved"]):
+            # (the Merged notes moves again only if it would move: else the others' own mover meets it, hunt)
+            other = self.merge_slide(notes, alt, way)
+            if not isinstance(other, str) and other["moved"]:
+                k, got = alt, other
+        if isinstance(got, str):
+            self.status.config(text=got)
+            return
+        if not got["moved"]:  # (already touching: no step, nothing frozen, hunt)
             self.status.config(text=tr("join_split.merge_nothing_moved"))
             return
+        i = sels[k]
+        stays = [j for j in sels if j != i]
+        slid_rows, late, slid, kslid = got["rows"], got["late"], got["slid"], got["kslid"]
         left = []
 
         def part(rest):
@@ -428,6 +420,36 @@ class JoinSplit:
             rows = len(np.unique(left[0][:, 2])) if left and rest is not None else 0
             self.status.config(text=trn("join_split.merged_apart_left", rows, n=rows) if rows
                                else tr("join_split.merged_apart_done"))
+
+    def merge_slide(self, notes, k, way):
+        """How shape k of notes (each selected shape's own notes) slides onto the others' (each on its own): {"rows":
+        rows -> (rows slid, True where a leftover), "moved", "late" ticks, "slid" beats, "kslid" keys}, or the
+        message saying why it can't."""
+        # (the shapes' own notes as they sound, Sustain too: the very notes the moving one keeps, plain_copies own)
+        stays = [n for j, n in enumerate(notes) if j != k]
+        if way in ("up", "down"):
+            plan = up_down_plan(stays, notes[k], way == "up", self.keys - 1)
+            if plan is None:
+                return tr("join_split.merge_no_meet_" + way)
+            if not plan["room"]:  # (out under / over a shape it overlaps: past key 0 / the top key, hunt)
+                return tr("join_split.merge_no_room_" + way)
+            return {"rows": lambda rows: up_down_rows(plan, rows), "moved": plan["moved"], "late": 0, "slid": 0.0,
+                    "kslid": float(plan["slid"])}
+        plan = side_plan(stays, notes[k], way == "right")
+        if plan is None:
+            return tr("join_split.merge_no_meet")
+        by_key, least, late = plan
+        met = np.array(sorted(by_key), np.int64)
+        moves = np.array([by_key[r] for r in met.tolist()], np.int64)
+
+        def slid_rows(rows):
+            at = np.clip(np.searchsorted(met, rows[:, 2]), 0, len(met) - 1)
+            hit = met[at] == rows[:, 2]
+            rows = rows.copy()
+            rows[:, :2] += (np.where(hit, moves[at], least) + late)[:, None]
+            return rows, ~hit
+        return {"rows": slid_rows, "moved": bool(late or any(by_key.values())), "late": late,
+                "slid": (least + late) / self.ppq, "kslid": 0.0}
 
     def put_merged(self, i, new, rest, stays, late, way, slid, kslid):
         """A two-shapes merge's fixed notes (new, from plain_copies) in place of shape i, remembering the shape it was
@@ -628,11 +650,13 @@ class JoinSplit:
         if sh.get("unmerge"):  # merged keeping two shapes: the shape its notes were, moved along with them
             self.replace_shape(i, unmerged(sh), velocity=False, name=tr("join_split.split_back_into_the_old_shapes"))
             mid = sh["unmerge"].get("id")
-            lone = next((j for j, s in enumerate(self.shapes) if mid and s.get("leftover_of") == mid), None)
-            if lone is not None:  # (its "Merge leftovers" while still there: back in it too, user 2026-10-19)
-                self.unlink_groups([lone])
-                del self.shapes[lone]
-                self.select(i - (lone < i))
+            # (its "Merge leftovers" while still there, every merge's: back in it too, user 2026-10-19, hunt)
+            lone = [j for j, s in enumerate(self.shapes) if mid and s.get("leftover_of") == mid]
+            if lone:
+                self.unlink_groups(lone)
+                for j in reversed(lone):
+                    del self.shapes[j]
+                self.select(i - sum(j < i for j in lone))
                 self.shapes_changed()
             self.status.config(text=tr("join_split.back_to_the_shape_it_was"))
             return
