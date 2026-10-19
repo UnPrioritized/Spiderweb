@@ -147,13 +147,14 @@ class HistoryPanel:
     def history_jump(self, row):
         """Undo / redo until row is the current step."""
         self.roll.cancel_draft()
+        self.settle_windows()  # (a window's try kept as its own step FIRST, then counted: hunt, it landed short)
         self._history_jumping = True  # (no list refresh on the way)
         try:
             n = len(self.undo_stack) - row
             if n > 0:
                 self._restore(self.undo_stack, self.redo_stack, n)
-            elif n < 0:
-                self._restore(self.redo_stack, self.undo_stack, -n)
+            elif n < 0 and self.redo_stack:  # (a step kept just now drops the redo steps: nothing to go forward to)
+                self._restore(self.redo_stack, self.undo_stack, min(-n, len(self.redo_stack)))
         finally:
             self._history_jumping = False
         self.sync_history(force=True)

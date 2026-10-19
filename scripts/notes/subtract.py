@@ -23,6 +23,7 @@ import numpy as np
 from notes.gaterange import DIRS, STRAIGHT, clean_graph, keys_up
 
 MOST = 10 ** 4  # beats a typed amount may be
+EPS = 1e-7  # rounding margin when the graph's height picks a whole tick
 
 
 def _beats(v):
@@ -112,7 +113,8 @@ def amounts(notes, sub, ppq):
     b = ticks_of(r["to"], ppq)
     y = np.interp(places(notes, r), [p[0] for p in r["graph"]], [p[1] for p in r["graph"]])
     n = abs(b - a) + 1
-    return a + (1 if b >= a else -1) * np.minimum(n - 1, (y * n).astype(np.int64))
+    # (EPS: a note right where the amount steps up gets the same tick in a sliced piece's cut graph, hunt)
+    return a + (1 if b >= a else -1) * np.minimum(n - 1, np.floor(y * n + EPS).astype(np.int64))
 
 
 def part_subtract(sub, whole, part, ppq):
@@ -134,7 +136,7 @@ def part_subtract(sub, whole, part, ppq):
     us, ys = [p[0] for p in r["graph"]], [p[1] for p in r["graph"]]
     pts = [[u0, float(np.interp(u0, us, ys))]] + [[u, y] for u, y in r["graph"] if u0 < u < u1]
     pts.append([u1, float(np.interp(u1, us, ys))])
-    band = [min(n - 1, int(y * n)) for _, y in pts]
+    band = [min(n - 1, math.floor(y * n + EPS)) for _, y in pts]
     j0, j1 = min(band), max(band)
     m = j1 - j0 + 1
     width = u1 - u0

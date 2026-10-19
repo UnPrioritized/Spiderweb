@@ -144,6 +144,16 @@ def steps_of(graph, a, b, halves=False):
     return _steps(tuple(map(tuple, graph)), a, b, bool(halves))
 
 
+def few_steps(graph, a, b, halves=False, most=2000):
+    """Are there at most `most` steps? Worked out only when the graph can't have far more (millions took a second
+    each time a point moved, hunt): each straight piece crosses at most that many whole gates."""
+    n = abs(b - a) + 1
+    cuts = sum(abs(y1 - y0) * n + 2 for (_, y0), (_, y1) in zip(graph, graph[1:]))
+    if cuts <= most:
+        return True
+    return cuts <= 100 * most and len(steps_of(graph, a, b, halves)[0]) <= most
+
+
 def gate_steps(graph, a, b, halves=False):
     """[(u0, u1, gate)]: where along the shape each gate holds (in order, next to each other)."""
     u0, u1, g = steps_of(graph, a, b, halves)

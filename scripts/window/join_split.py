@@ -695,10 +695,13 @@ class JoinSplit:
         for p in parts:
             p.pop("between", None)
         whole = span(old)
-        for p in parts if velocity else ():
+        for p in parts if velocity else ():  # (pieces of it, not the shapes it was made of back)
             piece_velocity(p, old, span(p), whole)
             part_glue(p, old)
             keep_velocity(p)
+        if velocity:  # (like Slice, hunt: Sustain's stops put by hand kept per piece, Gate subtract's graph cut)
+            carry_stops(self, [old], parts)
+            carry_subtract(self, old, parts)
         self.shapes[i:i + 1] = parts
         self.select_many(range(i, i + len(parts)), i)
         self.shapes_changed()

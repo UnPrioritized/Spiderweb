@@ -20,7 +20,7 @@ import numpy as np
 
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
-from notes.gaterange import DIRS, STRAIGHT, gate_steps, steps_of, y_gate
+from notes.gaterange import DIRS, STRAIGHT, few_steps, gate_steps, y_gate
 from notes.subtract import MOST, is_subtracted, part_subtract, ticks_of
 from window import look
 from window.range_window import PRESETS
@@ -58,11 +58,24 @@ def carry_subtract(app, whole, pieces):
             p["subtract"] = part_subtract(p["subtract"], notes, bare_notes(app, p), app.ppq)
 
 
-def put_own(sh, sub):
+def own_part(sh):
+    """What the window changes on a shape: its Gate subtract, and an Add between step's mark for one of its own
+    ("-": none), like the Sustain window."""
+    return [sh.get("subtract"), (sh.get("between") or {}).get("sub", "-")]
+
+
+def put_own(sh, part):
+    sub, mark = part
     if sub is None:
         sh.pop("subtract", None)
     else:
         sh["subtract"] = sub
+    b = sh.get("between")
+    if isinstance(b, dict):
+        if mark == "-":
+            b.pop("sub", None)
+        else:
+            b["sub"] = mark
 
 
 class SubtractWindow(PointGraph, tk.Toplevel):
@@ -121,7 +134,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.bind("<Escape>", lambda ev: self.cancel())
         self.bind("<Return>", lambda ev: self.ok())
         self.protocol("WM_DELETE_WINDOW", self.cancel)
-        self.on, self.bys, self.touches, self.varies, self.g = [], [], [], [], None
+        self.on, self.bys, self.touches, self.varies, self.g, self.g_all, self.owns = [], [], [], [], None, False, []
         self.hist = LocalUndo(self, self.state, self.put_state, main=app.last_step)
         self.bind("<Control-Key>", lambda e: "break")  # (the piano roll's shortcuts wait until it's closed)
         self.retarget(start=True)
@@ -206,11 +219,15 @@ class SubtractWindow(PointGraph, tk.Toplevel):
     def sub_now(self):
         return json.dumps([t.get("subtract") for t in self.tgts])
 
+    def own_now(self):
+        return json.dumps([own_part(t) for t in self.tgts])
+
     def retarget(self, start=False):
         """Work on the selected shapes (start: opened, which puts Gate subtract on)."""
         self.idx = target_indices(self.app)
         self.saved_sel = self.app.sel_state()  # (for the undo step)
-        self.before = self.kept = self.sub_now()  # (kept: put back by Cancel)
+        self.before = self.sub_now()
+        self.kept = self.own_now()  # (put back by Cancel)
         self.load(start)
         if start and self.idx:
             self.store()
@@ -228,8 +245,10 @@ class SubtractWindow(PointGraph, tk.Toplevel):
             self.bys = [b if b is not None else 1 / self.app.ppq for b in self.bys]
         self.touches = [bool(s and s.get("touch")) for s in subs]
         self.varies = [bool(s and s.get("vary")) for s in subs]
-        got = next((s for s in subs if s and "to" in s), None)  # (the graph shown: the first shape's)
-        self.g = {k: got[k] for k in GRAPH_KEYS if k in got} if got else None
+        # each shape's own graph (kept until a graph control is used: then the one shown goes to all, hunt)
+        self.owns = [{k: s[k] for k in GRAPH_KEYS if k in s} if s and "to" in s else None for s in subs]
+        self.g = json.loads(json.dumps(next((o for o in self.owns if o), None)))  # (shown: the first shape's)
+        self.g_all = False
         self.show_controls()
 
     def new_graph(self):
@@ -292,7 +311,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         for w in (self, *also):
             w.put_back(saved)
         sel, self.saved_sel, self.before = self.saved_sel, self.app.sel_state(), self.now
-        self.kept = self.sub_now()
+        self.kept = self.own_now()
         self.app.add_undo_step(json.dumps(saved), tr("subtract.step"), sel)
         self.hist.seen()
 
@@ -330,6 +349,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         """A tick changed ("on", "touch", "vary"): every shape takes it (a half-ticked one: a click = all on)."""
         if not self.idx:
             return
+        self.take_typing()
         n = len(self.idx)
         if what == "on":
             self.on = [self.on_var.get()] * n
@@ -351,6 +371,9 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         """A graph setting changed: every shape takes the graph settings."""
         if not self.idx or not self.g:
             return
+        if self.drag is None:  # (a drag: once, at its press)
+            self.take_typing()
+        self.g_all = True  # (from now on every shape takes the graph shown)
         self.g[key] = value
         if key in ("rows", "join", "count") and not value:
             del self.g[key]
@@ -371,6 +394,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
             self.bys = [beats] * len(self.idx)
         elif self.g:
             self.g["to"] = beats
+            self.g_all = True
         self.show_controls()
         self.store()
         self.hist.mark(key)
@@ -445,7 +469,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         cv.create_text(x0, bot + 4 * s, text=tr(ends[0]), anchor="nw", fill=look.LABEL, font=look.font(7))
         cv.create_text(x1, bot + 4 * s, text=tr(ends[1]), anchor="ne", fill=look.LABEL, font=look.font(7))
         span = (b - a) or 1
-        if len(steps_of(self.pts, a, b)[0]) <= 2000:
+        if few_steps(self.pts, a, b):
             line = []
             for u0, u1, g in gate_steps(self.pts, a, b):
                 y = self.y2c((g - a) / span if b != a else 0)
@@ -471,6 +495,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
     def press(self, e):
         if not self.g:
             return
+        self.take_typing()
         i = self.point_at(e.x, e.y)
         if i is None:
             u, y = self.snapped(e)
@@ -524,11 +549,11 @@ class SubtractWindow(PointGraph, tk.Toplevel):
     # ---- undo inside, storing
 
     def state(self):
-        return json.dumps([self.on, self.bys, self.touches, self.varies, self.g])
+        return json.dumps([self.on, self.bys, self.touches, self.varies, self.g, self.g_all])
 
     def put_state(self, state):
         self.drag = None
-        self.on, self.bys, self.touches, self.varies, self.g = json.loads(state)
+        self.on, self.bys, self.touches, self.varies, self.g, self.g_all = json.loads(state)
         self.show_controls()
         self.store()
 
@@ -541,8 +566,11 @@ class SubtractWindow(PointGraph, tk.Toplevel):
             sub = {"by": self.bys[i]}
             if self.touches[i]:
                 sub["touch"] = True
-            if self.g:  # (kept while unticked too: ticking again brings it back)
-                sub.update(json.loads(json.dumps(self.g)))
+            # (its own graph until a graph control is used; none of its own and ticked: the one shown. Kept while
+            # unticked too: ticking again brings it back)
+            g = self.g if self.g_all or (self.varies[i] and not self.owns[i]) else self.owns[i]
+            if g:
+                sub.update(json.loads(json.dumps(g)))
                 if self.varies[i]:
                     sub["vary"] = True
             t["subtract"] = sub
@@ -552,20 +580,26 @@ class SubtractWindow(PointGraph, tk.Toplevel):
 
     # ---- closing
 
+    def take_typing(self):
+        """Numbers typed without Enter count too (OK, or a tick / dropdown / the graph used next: clicking the graph
+        leaves the box the keyboard, so it never takes its number by itself, hunt)."""
+        if not any(self.on):
+            return
+        if self.by_var.get() != self.seen[0]:
+            self.on_box("by")
+        if self.to_var.get() != self.seen[1] and self.to_box.winfo_manager():
+            self.on_box("to")
+
     def ok(self):
-        if any(self.on):  # (numbers typed without Enter count too)
-            if self.by_var.get() != self.seen[0]:
-                self.on_box("by")
-            if self.to_var.get() != self.seen[1] and self.to_box.winfo_manager():
-                self.on_box("to")
+        self.take_typing()
         self.settle()
         self.close()
 
     def cancel(self):
-        if self.idx and self.idx[-1] < len(self.app.shapes) and self.sub_now() != self.kept:
-            self.app.roll.cancel_draft()
-            for i, sub in zip(self.idx, json.loads(self.kept)):
-                put_own(self.app.shapes[i], sub)
+        if self.idx and self.idx[-1] < len(self.app.shapes) and self.own_now() != self.kept:
+            self.app.roll.cancel_draft()  # (as it was: an Add between step tried out stays one)
+            for i, part in zip(self.idx, json.loads(self.kept)):
+                put_own(self.app.shapes[i], part)
         self.close()
         self.app.shapes_changed()
 

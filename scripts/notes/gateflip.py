@@ -154,8 +154,13 @@ _same = [None, None, False]  # (the notes and tracks last asked about, and the a
 
 def turn_velocities(sh):
     """The velocities turned round, as a sideways flip does (switching the gate aware flip on / off): the line, and
-    velocities drawn after its note tool pages."""
+    velocities drawn after its note tool pages. Gate subtract's graph across time too (user 2026-10-19: every key
+    row exactly reversed; subtract.py)."""
     reverse_velocity(sh)
+    sub = sh.get("subtract")
+    if isinstance(sub, dict) and "graph" in sub:
+        from notes.gaterange import flipped_range
+        sh["subtract"] = flipped_range(sub, True)
     for step in sh.get("fx") or ():
         if step["tool"] == "vel":
             step["pts"] = [[1 - u, v] for u, v in reversed(step["pts"])]

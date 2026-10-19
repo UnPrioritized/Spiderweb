@@ -19,7 +19,7 @@ from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes.custom import SPAM_FILLS, gate_ticks, range_gates
 from notes.funnel import funnel_gates, funnel_range
-from notes.gaterange import DIRS, STRAIGHT, clean_range, gate_steps, halved, steps_of, steps_to, y_gate
+from notes.gaterange import DIRS, STRAIGHT, clean_range, few_steps, gate_steps, halved, steps_to, y_gate
 from window import big_ask, look
 from window.panel_funnel import GATE_STEPS
 from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place, unit_word
@@ -400,7 +400,7 @@ class RangeGraph(PointGraph, tk.Toplevel):
                        font=look.font(7))
         # the whole-tick gates the notes get (pale steps)
         span = (b - a) or 1
-        if on and len(steps_of(self.pts, a, b, halves)[0]) <= 2000:
+        if on and few_steps(self.pts, a, b, halves):
             line = []
             for u0, u1, g in gate_steps(self.pts, a, b, halves):
                 y = self.y2c((g - a) / span if b != a else 0)

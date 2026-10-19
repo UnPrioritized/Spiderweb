@@ -92,6 +92,11 @@ def clean_between(b):
             sus = False if b["sus"] is False else clean_sustain(b["sus"])
             if sus is not None:
                 out["sus"] = sus
+        if b["role"] == "step" and "sub" in b:  # (its own Gate subtract, alike)
+            from notes.subtract import clean_subtract
+            sub = False if b["sub"] is False else clean_subtract(b["sub"])
+            if sub is not None:
+                out["sub"] = sub
     return out
 
 
@@ -431,17 +436,28 @@ def with_vel(step, vel):
 
 
 def _no_own(sh):
-    """sh without what a step may have of its own and stay a step: velocity and Sustain."""
-    return {k: v for k, v in _no_vel(sh).items() if k != "sustain"}
+    """sh without what a step may have of its own and stay a step: velocity, Sustain and Gate subtract."""
+    return {k: v for k, v in _no_vel(sh).items() if k not in OWN}
 
 
-def with_sus(step, sus):
-    """A made step with a step's own Sustain (sustain.py; False = off): Sustain changed on a step by hand keeps it a
-    step, like its velocity."""
-    out = {k: v for k, v in step.items() if k != "sustain"}
+OWN = {"sustain": "sus", "subtract": "sub"}  # a step's own settings -> their marks in sh["between"]
+
+
+def with_sus(step, sus, key="sustain"):
+    """A made step with a step's own Sustain (sustain.py; False = off) or Gate subtract (key "subtract"): changed on
+    a step by hand keeps it a step, like its velocity."""
+    out = {k: v for k, v in step.items() if k != key}
     if sus is not False:
-        out["sustain"] = json.loads(json.dumps(sus))
+        out[key] = json.loads(json.dumps(sus))
     return out
+
+
+def with_own(step, b):
+    """A made step with every own setting its mark in b (sh["between"]) holds."""
+    for key, mark in OWN.items():
+        if mark in b:
+            step = with_sus(step, b[mark], key)
+    return step
 
 
 def _clean_vel(v):
@@ -695,19 +711,19 @@ def sync_groups(shapes):
             want = now.at(b["at"])[0]
             if b.get("vel"):
                 want = with_vel(want, b["vel"])
-            if "sus" in b:
-                want = with_sus(want, b["sus"])
+            want = with_own(want, b)
             mine = _plain(sh)
             if close(mine, want):
                 continue
-            if close(_no_own(mine), _no_own(want)):  # (only its velocity / Sustain: a step with its own, user)
+            if close(_no_own(mine), _no_own(want)):  # (only its velocity / Sustain / Gate subtract: its own, user)
                 if not close(mine, dict(_no_vel(mine), **{k: want[k] for k in VEL_KEYS if k in want})):
                     b["vel"] = {k: sh[k] for k in VEL_KEYS if k in sh}
-                if mine.get("sustain") != want.get("sustain"):
-                    b["sus"] = json.loads(json.dumps(mine.get("sustain", False)))
+                for key, mark in OWN.items():
+                    if mine.get(key) != want.get(key):
+                        b[mark] = json.loads(json.dumps(mine.get(key, False)))
                 continue
             b["role"] = "key"
-            for k in ("sig", "vel", "sus"):
+            for k in ("sig", "vel", "sus", "sub"):
                 b.pop(k, None)
             changed = keyed = True
         if keyed:
@@ -719,9 +735,8 @@ def sync_groups(shapes):
             new, sig = now.at(b["at"])
             if b.get("vel"):
                 new = with_vel(new, b["vel"])
-            if "sus" in b:
-                new = with_sus(new, b["sus"])
-            if b.get("vel") or "sus" in b:
+            new = with_own(new, b)
+            if b.get("vel") or any(m in b for m in OWN.values()):
                 sig = fingerprint(new)
             if b.get("sig") == sig and old == sig:
                 continue
@@ -729,7 +744,7 @@ def sync_groups(shapes):
             sh.update(json.loads(json.dumps(new)))
             sh["between"] = dict({"id": gid, "role": "step", "at": b["at"], "sig": sig},
                                  **({"vel": b["vel"]} if b.get("vel") else {}),
-                                 **({"sus": b["sus"]} if "sus" in b else {}))
+                                 **{m: b[m] for m in OWN.values() if m in b})
             changed = True
     return changed
 
