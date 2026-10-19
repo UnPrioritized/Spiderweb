@@ -4,7 +4,7 @@ staying shape's note on that key (gate end = next start), lengths kept. Rows wit
 their key ("leftovers") slide by the smallest slide a row made and are handed back apart (user: their own shape,
 to delete or keep).
 
-"Keep two shapes" (the merge window's tick, user 2026-10-19; any number of shapes): the others stay as they are,
+"Keep shapes separate" (the merge window's tick, user 2026-10-19; any number of shapes): the others stay as they are,
 the one that moves becomes fixed notes remembering the shape it was (sh["unmerge"]): Split gives it back
 (unmerged); its leftovers are a "Merge leftovers" shape of their own. Also up / down (up_down_plan)."""
 
@@ -32,7 +32,7 @@ def gate_merge(stay, slide, from_left=None, rest_slides=True):
 
 def _merge(stay, slide, from_left, rest_slides=True):
     """gate_merge, and also the smallest slide, how much later everything went (to stay after tick 0) and each met
-    key row's slide {key: ticks}. stay a list (keep two shapes, several shapes): each shape on its own; one wholly
+    key row's slide {key: ticks}. stay a list (keep shapes separate, several shapes): each shape on its own; one wholly
     behind the row on its key (all its notes there end before the row starts: right; left: start after it ends)
     is left out (hunt 2026-10-19: rows slid backwards behind it)."""
     shapes = None
@@ -88,7 +88,7 @@ def _merge(stay, slide, from_left, rest_slides=True):
 
 
 def side_plan(stays, slide, right):
-    """How Merge to right / left (keep two shapes) slides the slide rows (start, end, pitch, ...) onto the stays
+    """How Merge to right / left (keep shapes separate) slides the slide rows (start, end, pitch, ...) onto the stays
     (a list: each shape's rows): (each met key row's slide {key: ticks}, the smallest slide (the rows with nothing to
     meet), how much later everything goes to stay after tick 0), or None when no row meets."""
     got = _merge(list(stays), slide, right)

@@ -285,7 +285,7 @@ def clean_shape(sh):
             if isinstance(sh.get("paste"), str):  # pieces sliced from one paste: its tracks share channels (render)
                 out["paste"] = sh["paste"]
             um = clean_unmerge(sh["unmerge"], clean_shape) if isinstance(sh.get("unmerge"), dict) else None
-            if um:  # a Gate sensitive merge kept as two shapes: the shape its notes were, for Split (merge.py)
+            if um:  # a Gate sensitive merge kept as separate shapes: the shape its notes were, for Split (merge.py)
                 out["unmerge"] = um
             # Apply mask's notes (mask.py): track = the channel slot it had (True: from a picture, always kept; [beat,
             # key]: Multi channel, while its first point is there), painted in the picture's colours, overlaps kept

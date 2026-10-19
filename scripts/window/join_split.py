@@ -264,7 +264,7 @@ class JoinSplit:
         self.tips.show("join", wait=True)
 
     def merge_pair(self):
-        """The selected shapes Gate sensitive merge can use (2 or more: "Keep two shapes" takes any number, hunt),
+        """The selected shapes Gate sensitive merge can use (2 or more: "Keep shapes separate" takes any number, hunt),
         or None."""
         sels = sorted(i for i in self.sels if i < len(self.shapes))
         return sels if len(sels) >= 2 else None
@@ -342,7 +342,7 @@ class JoinSplit:
         if way in ("up", "down"):
             slide = mover(rows, way)  # (kept in the recipe)
             got = merged_up_down(rows, way == "up", self.keys, slide, need_room=True)
-            if got is False:  # (like Keep two shapes, hunt)
+            if got is False:  # (like Keep shapes separate, hunt)
                 return tr("join_split.merge_no_room_" + way)
         else:
             slide, got = None, merged(rows, way == "right", self.ppq, self.keys)
@@ -368,7 +368,7 @@ class JoinSplit:
         to the right = the shape on the left slides right, each key row until it meets the other shape's notes;
         to the left = the shape on the right slides left (notes/merge.py). Both become one custom shape of plain
         notes (Ctrl+Z: both again). Rows with nothing to meet slide by the smallest slide and become a shape of
-        their own right after it (user: to delete or keep later). apart ("..., keep two shapes"): merged_apart.
+        their own right after it (user: to delete or keep later). apart ("..., keep shapes separate"): merged_apart.
         to_right "up" / "down": merged_up_down. Asked from the Gate sensitive merge window (merge_window.py)."""
         self.commit_typing()  # (a number typed in a panel box: to the two shapes before they're replaced)
         pair = self.merge_pair()
@@ -442,7 +442,7 @@ class JoinSplit:
                                else tr("join_split.merged_done"))
 
     def merged_apart(self, sels, way):
-        """gate_merge's "Keep two shapes" (user 2026-10-19), any number of shapes: one moves (merge_mover), the
+        """gate_merge's "Keep shapes separate" (user 2026-10-19), any number of shapes: one moves (merge_mover), the
         others stay as they are and are what it meets. Right / left: each key row slides until it meets their notes;
         up / down: cut where their notes start and end, each piece slides until it meets them (merge.up_down_plan).
         It becomes fixed notes exactly as they sounded, "Merged notes"; what had nothing to meet = a "Merge
@@ -727,7 +727,7 @@ class JoinSplit:
             self.replace_shape(i, back, velocity=False, name=tr("join_split.split_back_into_the_old_shapes"))
             self.status.config(text=tr("join_split.back_to_the_shapes_it_was", n=2))
             return
-        if sh.get("unmerge"):  # merged keeping two shapes: the shape its notes were, moved along with them
+        if sh.get("unmerge"):  # merged keeping shapes separate: the shape its notes were, moved along with them
             self.replace_shape(i, unmerged(sh), velocity=False, name=tr("join_split.split_back_into_the_old_shapes"))
             mid = sh["unmerge"].get("id")
             # (its "Merge leftovers" while still there, every merge's: back in it too, user 2026-10-19, hunt)

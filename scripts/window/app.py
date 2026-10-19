@@ -1778,7 +1778,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             m2 = mid2 if fx is not was or sh.get("text") else even
             if sh.get("merge"):  # (its parts' velocities: each sideways flip turns them round, merge.py)
                 sh["merge"]["vrev"] = merge_vrev(sh) != sideways
-            if sh.get("unmerge") and sideways:  # (kept as two shapes: the shape Split gives back, the same)
+            if sh.get("unmerge") and sideways:  # (kept as separate shapes: the shape Split gives back, the same)
                 sh["unmerge"]["vrev"] = not sh["unmerge"].get("vrev")
             flip_shape(sh, sideways, m2)
             turned_piece(sh, frm, lambda w: flip_shape(w, sideways, m2))  # (a funnel piece stays one)

@@ -1,4 +1,4 @@
-Select two or more shapes, right-click one of them → Gate sensitive merge… and a small window opens: pick a way (Up, Left, Right or Down), tick "Keep two shapes" or not, then press Merge. Where you right-click doesn't matter. The window stays open and follows the selection, so you can try another way right away (Ctrl+Z takes a merge back). It says which shape will move, or why it can't merge.
+Select two or more shapes, right-click one of them → Gate sensitive merge… and a small window opens: pick a way (Up, Left, Right or Down), tick "Keep shapes separate" or not, then press Merge. Where you right-click doesn't matter. The window stays open and follows the selection, so you can try another way right away (Ctrl+Z takes a merge back). It says which shape will move, or why it can't merge.
 
 ## Left and right
 
@@ -12,13 +12,13 @@ Up: the shape with the lowest note moves up. Down: the shape with the highest no
 
 ## One shape
 
-Without "Keep two shapes", both become one shape ("Merged notes" in the Shapes list). Only two shapes can be merged this way.
+Without "Keep shapes separate", both become one shape ("Merged notes" in the Shapes list). Only two shapes can be merged this way.
 
 It can be moved, turned, slanted and stretched like a custom shape, and the custom panel's settings go into both parts. Each part keeps its own colours. When both shapes are sustained with the same settings, the merged shape is sustained too. A shape merged up or down is turned and slanted as it looks, like a turned picture. Split back into the old shapes (Ctrl+Shift+G, or right-click) gives the two parts back.
 
-## Keep two shapes
+## Keep shapes separate
 
-With "Keep two shapes", the other shapes stay as they are. The one that moves becomes fixed notes ("Merged notes"), exactly as they sounded, on the shape's own channels. Split (Ctrl+Shift+G, or right-click) gives the shape back as it was before it moved.
+With "Keep shapes separate", the other shapes stay as they are. The one that moves becomes fixed notes ("Merged notes"), exactly as they sounded, on the shape's own channels. Split (Ctrl+Shift+G, or right-click) gives the shape back as it was before it moved.
 
 With three or more shapes, one moves and all the others are what it meets. Merging a Merged notes the same way again moves it again; if it already touches, another shape moves to meet it instead. If nothing would move, nothing is merged.
 
