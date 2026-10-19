@@ -611,15 +611,7 @@ class JoinSplit:
         if self.notes_late:  # (notes still catching up with a drag: made now)
             self.shapes_changed(now=True)
         owners = self.rendered[:, 5]
-        use10 = self.picture_use10
-        if self.channel_mode.get() != "auto":  # (each note's Multi channel slot kept too, for Multi channel later)
-            from window.app import all_notes  # (app.py imports this file)
-            # (the project's ticks as they are: all16 / in_order / rounds_apart are off outside Multi channel, hunt)
-            all16 = self.use_ch10.get()
-            _, use10, multi, _ = all_notes(self.shapes, self.ppq, self.keys, "auto", self.channel_split, all16,
-                                           self.notes_tracks, rounds=self.new_rounds.get(),
-                                           order=all16 and self.ch10_order.get(),
-                                           keep=self.keep_colours.get())
+        use10, multi = self.multi_rendered()
         new = {}
         auto = self.channel_mode.get() == "auto"
         for i in got:
@@ -641,6 +633,19 @@ class JoinSplit:
                 new[i]["made"] = "plain"
                 new[i]["name"] = tr("join_split.plain_name", name=self.shape_label(sh))
         return new
+
+    def multi_rendered(self):
+        """(slot numbering: channel 10 used, every note as in Multi channel): the shown notes in Multi channel, else
+        worked out as if it were (each note's Multi channel slot kept too, for Multi channel later)."""
+        if self.channel_mode.get() == "auto":
+            return self.picture_use10, self.rendered
+        from window.app import all_notes  # (app.py imports this file)
+        # (the project's ticks as they are: all16 / in_order / rounds_apart are off outside Multi channel, hunt)
+        all16 = self.use_ch10.get()
+        _, use10, multi, _ = all_notes(self.shapes, self.ppq, self.keys, "auto", self.channel_split, all16,
+                                       self.notes_tracks, rounds=self.new_rounds.get(),
+                                       order=all16 and self.ch10_order.get(), keep=self.keep_colours.get())
+        return use10, multi
 
     def own_slots(self, i, use10):
         """Shape i's rendered rows in Multi channel as if alone (with its Add between group: its colour turn): its

@@ -1323,17 +1323,21 @@ def pushed_solid(note_lists, pinned, fixed, split, step, use10=False):
     track (user, 2026-10-17: a copy of plain notes ate the original's notes). step 1 (Settings → General "Overlapping
     shapes keep their colours" off; user 2026-10-20: 352 path copies made 646 channels, most empty): the next free
     slot in the order the other shapes take them (with "Use channel 10": channel 10 last of each 16, unless "1-16 in
-    order"; user 2026-10-20), never one they skip (channel 10, unmapped_slot)."""
-    placed = {}  # slot -> earlier solid tracks' stretches there
+    order"; user 2026-10-20), never one they skip (channel 10, unmapped_slot). A moved track never lands on a slot
+    the same shape's other tracks use (hunt 2026-10-20: two colours folded onto one channel). Every slot a track
+    clashes on is found in one go (hunt: trying slot after slot, 200 copies x 15 colours took 286 s)."""
+    placed = PlacedSpans()
     out = list(pinned)
     for i, (lst, pin) in enumerate(zip(note_lists, pinned)):
         if fixed[i] != "solid" or pin is None or not len(lst):
             continue
         ids, which = unique_inverse(pin)
         new = pin.copy()
+        now = ids.tolist()  # (the shape's tracks' slots: moved ones' new slots, the rest as they are)
         for k, s in enumerate(ids.tolist()):
-            mine = lst[which == k]
-            while s in placed and clash_pairs(np.concatenate(placed[s] + [stretches(mine, 1, split)])):
+            mine = sorted_spans(lst[which == k], split)
+            bad = placed.clashing(mine) | (set(now) - {s})
+            while s in bad:
                 u = unmapped_slot(s, use10) if step == 1 else None
                 if u is not None:
                     s = int(mapped_slots(np.array([u + 1]), use10)[0])
@@ -1341,10 +1345,60 @@ def pushed_solid(note_lists, pinned, fixed, split, step, use10=False):
                 s += step
                 while step == 1 and unmapped_slot(s, use10) is None:
                     s += 1
-            placed.setdefault(s, []).append(stretches(mine, 0, split))
+            placed.add(mine, s)
+            now[k] = s
             new[which == k] = s
         out[i] = new
     return out
+
+
+SPAN_KEY, SPAN_OFF = 1 << 42, 1 << 40  # (sorted_spans: key x SPAN_KEY + tick + SPAN_OFF, ticks never reach 2^40)
+
+
+def sorted_spans(notes, split):
+    """A track's stretches (stretches: what overlaps them overlaps its notes) as sorted, apart (start, end) codes
+    with the key in them (split "time": all key 0); ones without a length dropped (they clash with nothing)."""
+    st = stretches(notes, 0, split)
+    st = st[st[:, 2] > st[:, 1]]
+    base = st[:, 0] * SPAN_KEY + SPAN_OFF
+    order = np.argsort(base + st[:, 1], kind="stable")
+    return (base + st[:, 1])[order], (base + st[:, 2])[order], st[:, 1].min(initial=0), st[:, 2].max(initial=0)
+
+
+class PlacedSpans:
+    """pushed_solid's tracks placed so far: each one's sorted_spans and slot, with its first and last tick, so a new
+    track is only compared with the ones near it in time."""
+
+    def __init__(self):
+        self.spans, self.slots = [], []
+        self.bounds = np.zeros((2, 64), np.int64)  # (each track's first and last tick; grows by doubling)
+
+    def add(self, mine, slot):
+        lo, hi, t0, t1 = mine
+        if len(lo):
+            n = len(self.spans)
+            if n == self.bounds.shape[1]:
+                self.bounds = np.concatenate([self.bounds, np.zeros_like(self.bounds)], axis=1)
+            self.bounds[:, n] = t0, t1
+            self.spans.append((lo, hi))
+            self.slots.append(slot)
+
+    def clashing(self, mine):
+        """The slots of placed tracks that clash with mine (same key, overlapping: touching doesn't)."""
+        lo, hi, t0, t1 = mine
+        if not len(lo) or not self.spans:
+            return set()
+        b = self.bounds[:, :len(self.spans)]
+        near = np.flatnonzero((b[0] < t1) & (b[1] > t0)).tolist()
+        if not near:
+            return set()
+        plo = np.concatenate([self.spans[j][0] for j in near])
+        phi = np.concatenate([self.spans[j][1] for j in near])
+        slot = np.repeat(np.array([self.slots[j] for j in near], np.int64), [len(self.spans[j][0]) for j in near])
+        at = np.searchsorted(hi, plo, "right")  # (mine's first span ending after each placed one starts)
+        hit = at < len(lo)
+        hit[hit] = lo[at[hit]] < phi[hit]
+        return set(np.unique(slot[hit]).tolist())
 
 
 def in_rounds(note_lists, slot_of, rounds, step, teams=None, stay=None):

@@ -24,6 +24,7 @@ from notes.pattern import MAX_LOOPS, PATTERN_PRESETS, loop_points, new_pattern, 
 from roll.roll_shared import note_name
 from window import big_ask, look
 from window.formula_host import FormulaHost
+from window.join_split import without10
 from window.pattern_dialog import load_patterns, saved_pattern
 from window.speed_graph import SpeedGraph, start_curve
 from window.tool_window import ToolWindow
@@ -336,6 +337,8 @@ class PathWindow(ToolWindow):
         app, ppq = self.app, self.app.ppq
         if app.notes_late:  # (notes still catching up with a drag: made now, so the colours shown are known)
             app.shapes_changed(now=True)
+        # (outside Multi channel each copy keeps its Multi channel colours too, like Turn into plain notes: hunt)
+        use10, shown = app.multi_rendered()
         made = {}
         for i in self.targets:
             sh = app.shapes[i]
@@ -346,7 +349,7 @@ class PathWindow(ToolWindow):
             if not len(notes) or notes.shape[1] < 5:
                 continue
             tag = notes[:, -1]
-            slots = self.shown_slots(notes, tag, tracks, i)
+            slots = self.shown_slots(notes, tag, tracks, i, shown)
             order = np.argsort(tag, kind="stable")  # (each copy's notes cut out once: one scan per copy was slow)
             cuts = np.flatnonzero(np.diff(tag[order])) + 1
             news = []
@@ -354,7 +357,9 @@ class PathWindow(ToolWindow):
                 if not len(x) or tag[x[0]] == 0:
                     continue
                 rows = np.column_stack([notes[x, :4], slots[x], np.full(len(x), i)])
-                new = app.copied(rows, False)  # (like Apply mask: the colours as they show, user)
+                # (like Apply mask: the colours as they show, user; channel 10 kept in use only if a note is on it,
+                # like Turn into plain notes: hunt)
+                new = without10(app.copied(rows, False, True), use10)
                 new["made"] = "path"
                 new["name"] = tr("path.plain_name", name=app.shape_label(sh), n=len(news) + 2)
                 news.append(new)
@@ -387,10 +392,9 @@ class PathWindow(ToolWindow):
         app.shapes_changed()
         app.status.config(text=trn("path.plain_done", total, n=total))
 
-    def shown_slots(self, notes, tag, tracks, i):
-        """Each note's channel slot on the piano roll now (app.rendered: shape i's notes found by start, end and key);
-        one not found there: its copy's most common one, else its colour group."""
-        r = self.app.rendered
+    def shown_slots(self, notes, tag, tracks, i, r):
+        """Each note's channel slot in Multi channel now (r: the rendered notes, join_split.multi_rendered; shape i's
+        notes found by start, end and key); one not found there: its copy's most common one, else its colour group."""
         r = r[r[:, 5] == i] if r is not None and len(r) else np.zeros((0, 6), np.int64)
         own = tracks if tracks is not None else np.zeros(len(notes), np.int64)
         both = np.concatenate([r[:, :3], notes[:, :3]]).astype(np.int64)
