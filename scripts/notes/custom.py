@@ -2665,28 +2665,110 @@ def paints(sh):
 
 
 def paint_rounds(sh, notes, groups, ppq):
-    """_notes_groups' groups + ROUND x each note's repeat (user 2026-10-19): the notes of one colour given by hand
-    that touch make one piece, the first piece (by its first note) keeps the channels, each next one is the next
-    repeat. The shape's own colour and its "Outline" never repeat."""
-    if groups is None or not paints(sh):
+    """_notes_groups' groups + ROUND x each note's repeat (user 2026-10-19): each separate piece of one colour given
+    by hand, the first piece (by its first note) keeps the channels, each next one is the next repeat. The shape's
+    own colour and its "Outline" never repeat. Pieces: Fill / Spam = the drawer's areas (paint_pieces); outlines =
+    the notes of one colour that touch (spam: within a gate)."""
+    if not paints(sh) or not len(notes):
         return groups
+    outline = sh["fill"] in ("empty", "outline_spam") or not fillable(sh["strokes"])
+    found = stroke_groups(sh) if outline else None  # (outline_groups: group n = the n-th (source, colour))
+    one = groups is None
+    if one:  # (all one group: an outline colour on every stroke still repeats, hunt)
+        if not outline:
+            return groups
+        groups = np.zeros(len(notes), np.int64)
     groups = np.asarray(groups, np.int64)
-    if sh["fill"] in ("empty", "outline_spam") or not fillable(sh["strokes"]):
-        found = stroke_groups(sh)  # (outline_groups: group n = the n-th (source, colour))
-        colour = np.asarray([c for (_, c) in sorted(found)] if found else [0], np.int64)[groups]
+    if outline:
+        colour = np.asarray([c for (_, c) in sorted(found)] if found else [colour_of(sh["strokes"][0])],
+                            np.int64)[groups]
     else:
         colour = groups - 1 if sh.get("apart") and sh["fill"] in ("fill", "spam") else groups  # (0 outline, 1 own)
-    spam = sh["fill"] in SPAM_FILLS
+    gap = gate_ticks(sh["gate"], ppq) if outline and sh["fill"] in SPAM_FILLS else 0
     rounds = np.zeros(len(notes), np.int64)
     for c in np.unique(colour[colour > 0]).tolist():
         mine = np.flatnonzero(colour == c)
-        piece = touching_pieces(notes[mine], gate_ticks(sh["gate"], ppq) if spam else 0)
+        piece = touching_pieces(notes[mine], gap) if outline else paint_pieces(sh, notes[mine], c, ppq)
         first = np.full(int(piece.max()) + 1, np.iinfo(np.int64).max)
         np.minimum.at(first, piece, notes[mine, 0])
         rank = np.empty(len(first), np.int64)
         rank[np.argsort(first, kind="stable")] = np.arange(len(first))
         rounds[mine] = rank[piece]
+    if one and not rounds.any():
+        return None
     return groups + rounds * ROUND
+
+
+_blobs = {}
+
+
+def paint_blobs(sh):
+    """(the drawer's AreaMap of sh, each of its areas' piece number) for paint_pieces, or None (no map): areas
+    painted one colour that share a line are one piece (one blob of one colour; their notes run into each other)."""
+    drawn = shape_areas({"strokes": sh["strokes"], "pts": DRAWN_FRAME})
+    if drawn is None:
+        return None
+    key = (json.dumps(sh["strokes"]), json.dumps(sh["areas"]))
+    got = _blobs.get(key)
+    if got is not None and got[0] is drawn:
+        return got
+    paint = area_paint(sh, drawn)
+    lab = drawn.labels
+    h, w = lab.shape
+    pairs = set()
+    for dy in range(0, 3):  # (areas 2 cells or less apart: only a line between them)
+        for dx in range(-2, 3):
+            if dy == 0 and dx <= 0:
+                continue
+            a = lab[0:h - dy, max(0, -dx):w - max(0, dx)]
+            b = lab[dy:h, max(0, dx):w - max(0, -dx)]
+            ok = (a >= 0) & (b >= 0) & (a != b)
+            a, b = a[ok], b[ok]
+            same = (paint[a] == paint[b]) & (paint[a] > 0)
+            pairs.update(zip(a[same].tolist(), b[same].tolist()))
+    root = list(range(drawn.count))
+
+    def top(i):
+        while root[i] != i:
+            root[i] = root[root[i]]
+            i = root[i]
+        return i
+    for a, b in pairs:
+        root[top(a)] = top(b)
+    blob = np.asarray([top(i) for i in range(drawn.count)] + [-1], np.int64)  # (last: walls)
+    if len(_blobs) > 50:
+        _blobs.clear()
+    got = _blobs[key] = (drawn, blob, paint)
+    return got
+
+
+def paint_pieces(sh, notes, c, ppq):
+    """Which piece each (start, end, key) note of area colour c is in (paint_rounds): the drawer's area its middle
+    is in (paint_blobs; user's hunt: an outline gate pinching an area, a thin band of another colour or a Turn page
+    must not change the pieces). A note not in an area of colour c (a line, a border) goes with the area the notes
+    it touches are in, else the notes it touches are a piece of their own."""
+    piece = touching_pieces(notes)
+    got = paint_blobs(sh)
+    if got is None:
+        return piece
+    drawn, blob, paint = got
+    uv = uv_points(sh["pts"], np.column_stack([(notes[:, 0] + notes[:, 1]) / 2 / ppq, notes[:, 2]]))
+    if uv is None:
+        return piece
+    lab = drawn.fine_at(uv[:, 0], uv[:, 1])
+    lab = np.where((lab >= 0) & (lab < drawn.count), lab, drawn.count)
+    mine = np.where(paint[lab] == c, blob[lab], -1)
+    pn = int(piece.max()) + 1
+    has = mine >= 0
+    if has.any():  # (each touching piece: the area most of its notes in an area are in)
+        pair, count = np.unique(piece[has] * (drawn.count + 1) + mine[has], return_counts=True)
+        o = np.lexsort((-count, pair // (drawn.count + 1)))
+        o = o[np.r_[True, (pair[o] // (drawn.count + 1))[1:] != (pair[o] // (drawn.count + 1))[:-1]]]
+        took = np.full(pn, -1, np.int64)
+        took[pair[o] // (drawn.count + 1)] = pair[o] % (drawn.count + 1)
+        mine = np.where(has, mine, took[piece])
+    out = np.where(mine >= 0, mine, drawn.count + 1 + piece)
+    return np.unique(out, return_inverse=True)[1].reshape(-1)
 
 
 def touching_pieces(notes, gap=0):

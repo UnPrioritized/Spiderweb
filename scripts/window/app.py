@@ -172,7 +172,8 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
                              [is_sustained(sh) or sh.get("held") is True for sh in shapes],
                              [colours_back(sh) for sh in shapes],
-                             [bool(sh.get("merge")) or has_pattern(sh) for sh in shapes], laps, keep)
+                             [bool(sh.get("merge")) or has_pattern(sh) for sh in shapes], laps, keep,
+                             [r and not has_colours(sh, turns=True) for sh, r in zip(shapes, took)])
     return wanted, use10 or all16, rendered, slots
 
 

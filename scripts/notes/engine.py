@@ -1293,18 +1293,22 @@ def pushed_solid(note_lists, pinned, fixed, split, step):
     return out
 
 
-def in_rounds(note_lists, slot_of, rounds, step, teams=None):
+def in_rounds(note_lists, slot_of, rounds, step, teams=None, stay=None):
     """render's slots with "New channels each Colours round" (user 2026-10-17: each round editable alone in other
     programs): every round of every shape with rounds, in shape order, gets step slots of its own past the ones the
     other shapes use, each note at the channel (colour) it has without the tick. -> (slots, slot count).
     The other shapes' blocks are left free of rounds, the rest are filled in order: a plain-notes shape frozen on
     round channels keeps them and the shapes around it keep theirs. A round needing more than step slots (a
     layered Hz bass's clash tracks) takes as many blocks. teams (render's): the steps of an Add between group take
-    their rounds together, like one shape."""
+    their rounds together, like one shape. stay: per shape True if its first round keeps the slots it has without
+    the tick, only the later rounds moving (colours given by hand, custom.paint_rounds: a colour used once never
+    moves, hunt)."""
+    stay = stay or [False] * len(rounds)
     taken = set()
-    for s, lst, r in zip(slot_of, note_lists, rounds):
-        if r is None and len(lst):
-            taken.update((np.unique(np.asarray(s, np.int64)) // step).tolist())
+    for s, lst, r, st in zip(slot_of, note_lists, rounds, stay):
+        if (r is None or st) and len(lst):
+            s = np.broadcast_to(np.asarray(s, np.int64), len(lst))
+            taken.update((np.unique(s if r is None else s[np.asarray(r) == 0]) // step).tolist())
     free = (b for b in itertools.count() if b not in taken)
     owners = {}  # (a shape, or an Add between group -> its shapes)
     for i, (lst, r) in enumerate(zip(note_lists, rounds)):
@@ -1314,12 +1318,17 @@ def in_rounds(note_lists, slot_of, rounds, step, teams=None):
     out = list(slot_of)
     for mine in owners.values():
         s = np.concatenate([np.broadcast_to(np.asarray(slot_of[i], np.int64), len(rounds[i])) for i in mine])
-        q = s // step - int(s.min()) // step  # (the block within a round)
-        wide = int(q.max()) + 1
-        had, r = np.unique(np.concatenate([rounds[i] for i in mine]), return_inverse=True)  # (only the rounds it has,
-        # no gaps: a piece sliced off mid-way keeps the whole shape's round numbers, user 2026-10-18)
-        blocks = np.fromiter(itertools.islice(free, len(had) * wide), np.int64)
-        got = s % step + step * blocks[r.reshape(-1) * wide + q]
+        rr = np.concatenate([rounds[i] for i in mine])
+        move = rr != 0 if any(stay[i] for i in mine) else np.ones(len(s), bool)
+        got = s.copy()
+        if move.any():
+            sm = s[move]
+            q = sm // step - int(sm.min()) // step  # (the block within a round)
+            wide = int(q.max()) + 1
+            had, r = np.unique(rr[move], return_inverse=True)  # (only the rounds it has, no gaps: a piece sliced
+            # off mid-way keeps the whole shape's round numbers, user 2026-10-18)
+            blocks = np.fromiter(itertools.islice(free, len(had) * wide), np.int64)
+            got[move] = sm % step + step * blocks[r.reshape(-1) * wide + q]
         at = np.cumsum([0] + [len(rounds[i]) for i in mine])
         for k, i in enumerate(mine):
             out[i] = got[at[k]:at[k + 1]]
@@ -1327,7 +1336,7 @@ def in_rounds(note_lists, slot_of, rounds, step, teams=None):
 
 
 def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None, pastes=None,
-           held=None, back=None, ordered=None, rounds=None, keep=False):
+           held=None, back=None, ordered=None, rounds=None, keep=False, stay=None):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -1356,7 +1365,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     ordered: per shape True if its tracks take channels in track order, all counted as starting at its first note (a
     Gate sensitive merge: track k = the slot its colour had before, merge.part_rows).
     rounds: per shape None, or each note's Colours round (custom.ROUND): with "auto" every round goes on channels of
-    its own, the same colours (in_rounds).
+    its own, the same colours (in_rounds). stay: per shape True if its first round keeps its slots (in_rounds).
     keep: with "auto" a shape clashing with an earlier one moves whole to the next row of channels, its colours kept
     (assign_slots shape_of; an Add between group and a paste's pieces move as one shape).
     """
@@ -1487,7 +1496,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
         slot_of = [pin if u is None else unit_slots[u] for u, pin in zip(unit_of, pinned)]
         count = int(unit_slots.max()) + 1 if len(units) else 0
         if rounds and any(r is not None for r in rounds):
-            slot_of, count = in_rounds(note_lists, slot_of, rounds, 16 if use10 else 15, teams)
+            slot_of, count = in_rounds(note_lists, slot_of, rounds, 16 if use10 else 15, teams, stay)
     else:  # (a Hz bass layer's clashing notes too: one channel, user)
         slot_of = [0 if pin is None else pin for pin in pinned]
         count = 1 if any(p is None for p in pinned) else 0
