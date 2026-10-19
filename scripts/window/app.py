@@ -356,8 +356,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.updates.start()  # (What's new after an update; asks about / looks for updates)
         speed.start()  # (the compiled loops for lots of notes, if Numba is there: loaded in the background)
 
-        for v in self.pvar.values():
-            v.trace_add("write", lambda *_: self.on_project_change())
+        for k, v in self.pvar.items():  # (the output file name changes no notes: typing it remade them all, slow)
+            v.trace_add("write", lambda *_, k=k: self.schedule_autosave() if k == "output" else self.on_project_change(True))
         for k, v in self.fvars.items():
             v.trace_add("write", lambda *_, k=k: self.on_field(k))
         self.end_dot.trace_add("write", lambda *_: self.on_end_dot())
@@ -998,9 +998,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         except ValueError:
             return False
 
-    def on_project_change(self):
+    def on_project_change(self, typed=False):
+        """typed: a key in the PPQ / BPM / Beats per bar box. The notes are remade only for a new PPQ or Keys (BPM
+        and beats per bar change no notes: Hz bass keeps its own BPM; remaking them made typing lag)."""
         if self._opening:  # (a project being opened: done once its boxes are all filled in, load_file)
             return
+        before = (self.ppq, self.keys)
         for key, lo, hi in (("ppq", 1, 65535), ("beats", 1, 32)):
             try:
                 setattr(self, key, calc_int(self.pvar[key].get(), lo, hi))
@@ -1016,6 +1019,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 ok = False
             (good if ok else lambda e: bad(e, typing=True))(self.project_entries["bpm"])
         self.keys = KEYS[1] if self.keys_var.get() == str(KEYS[1]) else KEYS[0]
+        if typed and (self.ppq, self.keys) == before:
+            self.play_changed()  # (a new BPM heard while playing)
+            self.roll.request_redraw()  # (bar lines)
+            self.sync_custom()  # (Hz bass "BPM changed" lines)
+            self.sync_funnel()
+            if self.hz_window:
+                self.hz_window.show_stale()
+                self.hz_window.redraw()
+            self.schedule_autosave()
+            return
         set_key_top(self.keys)
         self.sync_edo()
         self.roll.clamp_view()
