@@ -32,6 +32,7 @@ from notes.joined import (custom_groups, join_shapes, join_velocity, joined_end_
 from notes.tumour import LINE_KINDS, split_tumour
 from roll.roll_shared import cached_path, cached_strokes
 from window import look
+from window.subtract_window import carry_subtract
 from window.sustain_window import carry_stops
 from window.widgets import Tooltip
 
@@ -406,6 +407,10 @@ class JoinSplit:
             for sh in new:                                          # like Join; stops put by hand: on their ticks)
                 sh["sustain"] = copy.deepcopy(sus[0])
             carry_stops(self, [self.shapes[i] for i in pair], new)
+        subs = [self.shapes[i].get("subtract") for i in pair]
+        if subs[0] is not None and subs[0] == subs[1]:  # (both Gate subtract alike: so are the merged notes)
+            for sh in new:
+                sh["subtract"] = copy.deepcopy(subs[0])
         masks = [self.shapes[i].get("mask") for i in pair]
         if masks[0] and masks[1] and same_mask(*masks):  # (both masks alike: so is what's made of them, like Join;
             # groups apart, the first one's)
@@ -914,6 +919,7 @@ class JoinSplit:
                 keep_velocity(p)
             if i in done:
                 carry_stops(self, [sh], parts)  # (Sustain's stops put by hand: each piece keeps the ones inside it)
+                carry_subtract(self, sh, parts)  # (Gate subtract's graph across the shape: cut per piece)
                 picked += [len(new) + k for k, p in enumerate(parts) if pick is None or pick(p)]
             new += parts
         self.shapes[:] = new
@@ -921,8 +927,8 @@ class JoinSplit:
 
     def all_rows(self, sh):
         """A pasted-notes shape's notes and tracks for the Slice tool, rows moved past the top key too (they're hidden
-        but kept: a slice mustn't lose them). Without its Sustain: the pieces keep that as a setting (sustain.py)."""
-        sh = {k: v for k, v in sh.items() if k != "sustain"}
+        but kept: a slice mustn't lose them). Without its Sustain / Gate subtract: the pieces keep those as settings."""
+        sh = {k: v for k, v in sh.items() if k not in ("sustain", "subtract")}
         (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
         if max(p0, p1, p2, p1 + p2 - p0) <= self.keys - 0.5:
             return self.notes_tracks(sh)

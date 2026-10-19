@@ -293,6 +293,9 @@ class Pair:
         x, y = a.get("sustain"), b.get("sustain")
         if x is not None and y is not None:  # (both ends sustained: typed gaps change step by step, else the middle)
             out["sustain"] = mix(x, y, f)
+        x, y = a.get("subtract"), b.get("subtract")
+        if x is not None and y is not None:  # (both ends with Gate subtract: amounts / graph step by step)
+            out["subtract"] = mix(x, y, f)
         return clean_shape(out)
 
 

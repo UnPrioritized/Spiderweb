@@ -325,7 +325,7 @@ def part_rows(parts, ppq, keys, rounds=False):
     Colours turns) kept (user 2026-10-16: always the colours they had). Track = the channel slot each colour gets
     with Multi channel when the two shapes stand as they are (engine.assign_slots, like render): shapes apart share
     slots, overlapping ones stay apart; render counts a merged shape's tracks in order (ordered), so track k keeps
-    slot k. Without their Sustain: the merged shape holds that itself (sustain.py). rounds: + a 6th column, each
+    slot k. Without their Sustain / Gate subtract: the merged shape holds those itself. rounds: + a 6th column, each
     note's Colours round ("New channels each Colours round"): the first part's rounds, then the second's (a part
     without Colours = one round)."""
     from notes.custom import ROUND, tracks_apart
@@ -333,7 +333,7 @@ def part_rows(parts, ppq, keys, rounds=False):
     from notes.gateflip import colours_back, unflipped_starts
     units, forced, firsts, made, laps, after = [], [], [], [], [], 0
     for p in parts:
-        p = {k: v for k, v in p.items() if k != "sustain"}
+        p = {k: v for k, v in p.items() if k not in ("sustain", "subtract")}
         notes, tracks = shape_notes_tracks(dict(p, _rounds=True) if rounds else p, ppq, keys)
         notes = np.asarray(notes, np.int64).reshape(-1, 4)
         tracks = np.zeros(len(notes), np.int64) if tracks is None or not len(tracks) else np.asarray(tracks, np.int64)
@@ -555,7 +555,8 @@ def made_sides(m):
     """(sliding part's index, from the left?, its smallest slide, how much later all went) as the recipe was made,
     ticks at m["ppq"]; None = nothing met."""
     from notes.engine import shape_notes
-    a, b = (shape_notes({k: v for k, v in p.items() if k != "sustain"}, m["ppq"], m["keys"]) for p in m["parts"])
+    a, b = (shape_notes({k: v for k, v in p.items() if k not in ("sustain", "subtract")}, m["ppq"], m["keys"])
+            for p in m["parts"])
     left = 1 if len(a) and len(b) and comes_from_left(a, b) else 0
     slide = left if m["right"] else 1 - left
     got = _merge((a, b)[1 - slide], (a, b)[slide], m["right"])
@@ -565,7 +566,8 @@ def made_sides(m):
 def made_keys(m):
     """Merge up / down recipe: (moving part's index, its smallest slide in keys, + = up) as made; None = none met."""
     from notes.engine import shape_notes
-    a, b = (np.asarray(shape_notes({k: v for k, v in p.items() if k != "sustain"}, m["ppq"], m["keys"]),
+    a, b = (np.asarray(shape_notes({k: v for k, v in p.items() if k not in ("sustain", "subtract")}, m["ppq"],
+                                   m["keys"]),
                        np.int64).reshape(-1, 4) for p in m["parts"])
     if not len(a) or not len(b):
         return None

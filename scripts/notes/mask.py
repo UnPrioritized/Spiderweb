@@ -207,7 +207,7 @@ def area_source(sh):
     note tool pages, gate or colours), else the mask itself."""
     if not is_solid(sh):
         return sh
-    out = {k: v for k, v in sh.items() if k not in ("fx", "glue", "sustain", "cycle", "edge", "areas")}
+    out = {k: v for k, v in sh.items() if k not in ("fx", "glue", "sustain", "subtract", "cycle", "edge", "areas")}
     out["fill"] = "fill"
     return out
 

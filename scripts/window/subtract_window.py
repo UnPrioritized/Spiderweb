@@ -21,7 +21,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes.gaterange import DIRS, STRAIGHT, gate_steps, steps_of, y_gate
-from notes.subtract import MOST, is_subtracted, ticks_of
+from notes.subtract import MOST, is_subtracted, part_subtract, ticks_of
 from window import look
 from window.range_window import PRESETS
 from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place, unit_text
@@ -39,6 +39,23 @@ def target_indices(app):
 
 def subtract_targets(app):
     return [app.shapes[i] for i in target_indices(app)]
+
+
+def bare_notes(app, sh):
+    """Shape sh's notes before Gate subtract."""
+    return np.asarray(app.notes_of({k: v for k, v in sh.items() if k != "subtract"}), np.int64).reshape(-1, 4)
+
+
+def carry_subtract(app, whole, pieces):
+    """Pieces cut off shape whole (Slice, Split here, Split into letters) that took its Gate subtract: a graph across
+    the shape is cut so each note keeps its amount (subtract.part_subtract)."""
+    sub = whole.get("subtract")
+    if not isinstance(sub, dict) or not sub.get("vary"):
+        return
+    notes = bare_notes(app, whole)
+    for p in pieces:
+        if isinstance(p.get("subtract"), dict):
+            p["subtract"] = part_subtract(p["subtract"], notes, bare_notes(app, p), app.ppq)
 
 
 def put_own(sh, sub):

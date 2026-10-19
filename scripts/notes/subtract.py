@@ -115,6 +115,38 @@ def amounts(notes, sub, ppq):
     return a + (1 if b >= a else -1) * np.minimum(n - 1, (y * n).astype(np.int64))
 
 
+def part_subtract(sub, whole, part, ppq):
+    """A piece cut off a shape whose graph runs across it (Slice, Split here, Split into letters): its own graph, so
+    each of its notes keeps the amount it had. whole / part = their notes before Gate subtract. The graph cut over
+    the piece's stretch, the amounts between its lowest and highest each the same stretch of y as before (as
+    gaterange.part_range). Each key row by itself, no graph, no notes: as it is."""
+    if not sub.get("vary") or "to" not in sub or sub["dir"] == "time" and sub.get("rows") or not len(whole) \
+            or not len(part):
+        return sub
+    down = sub["dir"] == "keys_down"
+    r = keys_up(sub)
+    col = 0 if r["dir"] == "time" else 2
+    w0, w1 = int(whole[:, col].min()), int(whole[:, col].max())
+    span = max(w1 - w0, 1)
+    u0, u1 = (min(1.0, max(0.0, (int(f(part[:, col])) - w0) / span)) for f in (np.min, np.max))
+    a, b = ticks_of(sub["by"], ppq), ticks_of(r["to"], ppq)
+    n = abs(b - a) + 1
+    us, ys = [p[0] for p in r["graph"]], [p[1] for p in r["graph"]]
+    pts = [[u0, float(np.interp(u0, us, ys))]] + [[u, y] for u, y in r["graph"] if u0 < u < u1]
+    pts.append([u1, float(np.interp(u1, us, ys))])
+    band = [min(n - 1, int(y * n)) for _, y in pts]
+    j0, j1 = min(band), max(band)
+    m = j1 - j0 + 1
+    width = u1 - u0
+    graph = [[(u - u0) / width if width > 1e-12 else float(k > 0), min(1.0, max(0.0, (y * n - j0) / m))]
+             for k, (u, y) in enumerate(pts)]
+    graph[0][0], graph[-1][0] = 0.0, 1.0
+    if down:
+        graph = [[1 - u, y] for u, y in reversed(graph)]
+    sign = 1 if b >= a else -1
+    return dict(sub, by=(a + sign * j0) / ppq, to=(a + sign * j1) / ppq, graph=graph)
+
+
 def subtracted(notes, sub, ppq):
     """notes (start, end, pitch, velocity, ...) with their ends moved earlier (engine.fx_notes). Never under 1 tick,
     never longer than they were."""

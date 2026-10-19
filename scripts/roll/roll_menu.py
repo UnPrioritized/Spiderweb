@@ -27,7 +27,7 @@ from window.chop_window import open_chop, quick_chop
 from notes.sustain import is_sustained
 from window.sustain_window import any_sustained, carry_stops, open_sustain, sustain_targets, target_indices
 from window.merge_window import open_merge
-from window.subtract_window import any_subtracted, open_subtract, subtract_targets
+from window.subtract_window import any_subtracted, carry_subtract, open_subtract, subtract_targets
 from window.widgets import symmetry_menu
 
 
@@ -236,6 +236,7 @@ class ShapeMenu:
                 piece_velocity(p, sh, span(p), whole)
                 part_glue(p, sh)
             carry_stops(app, [sh], letters)  # (Sustain stops put by hand stay on their ticks)
+            carry_subtract(app, sh, letters)  # (Gate subtract's graph across the text: cut per letter)
             changed = changed or rows(app.notes_of(sh)) != rows(np.concatenate([app.notes_of(p) for p in letters]))
             app.unlink_groups([j])
             app.shapes[j:j + 1] = letters
