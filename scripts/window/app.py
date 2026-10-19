@@ -238,6 +238,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.chop_pos = ""  # (and the chop window)
         self.path_window = None  # Copy along a path (path_window.py)
         self.sustain_window = None  # Sustain… (sustain_window.py)
+        self.subtract_window = None  # Gate subtract… (subtract_window.py)
         self.merge_window = None  # Gate sensitive merge… (merge_window.py)
         self.path_pos = ""
         self.hz_window = None  # the Hz bass window (hz_window.py)
@@ -877,7 +878,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_list_selection()
         self.sync_line_fill()
         for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window, self.sustain_window,
-                  self.merge_window):
+                  self.subtract_window, self.merge_window):
             if w:
                 w.sync()
         if self.hz_window:
@@ -1033,7 +1034,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_tumour()
         self.sync_text()
         for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window, self.sustain_window,
-                  self.merge_window):
+                  self.subtract_window, self.merge_window):
             if w:
                 w.ppq_changed()  # (numbers shown in ticks)
 
@@ -1799,7 +1800,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         free (rings cut off at the piano roll's edges move the notes' middle: flipping twice drifted)."""
         if any(grows_free(sh) for sh in shapes):
             return mid2
-        got = [self.notes_of({k: v for k, v in sh.items() if k not in ("fx", "_m", "sustain", "range")})
+        got = [self.notes_of({k: v for k, v in sh.items() if k not in ("fx", "_m", "sustain", "range", "subtract")})
                for sh in shapes if not sh.get("hz") and "picture" not in sh]
         got = [n for n in got if len(n)]
         if not got:

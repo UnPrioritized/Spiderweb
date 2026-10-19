@@ -20,6 +20,7 @@ from notes import between
 from notes.areas import most_colours
 from notes.engine import cached_path
 from notes.gateflip import all_flipped
+from notes.subtract import is_subtracted
 from notes.sustain import is_sustained
 from window import look
 from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place
@@ -793,6 +794,8 @@ class BetweenGroups:
                     label = tr("gate_flip.list", name=label)
                 if is_sustained(sh):  # (its notes held on: sustain.py)
                     label = tr("sustain.list", name=label)
+                if is_subtracted(sh):  # (its gates made shorter: subtract.py)
+                    label = tr("subtract.list", name=label)
                 text = tr("app.notes_one" if counts[i] == 1 else "app.notes", i=i + 1,
                           shape_label=label, counts=counts[i], uses=uses)
             self.listbox.insert("end", text)

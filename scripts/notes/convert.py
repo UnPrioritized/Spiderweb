@@ -86,7 +86,7 @@ def keeps_notes(sh):
 
 
 NOTE_SETTINGS = (("glue", "convert.glue"), ("fx", "convert.fx"), ("cycle", "colours.colours"),
-                 ("sustain", "sustain.title"), ("gate_flip", "roll_menu.gate_flip"), ("mask", "mask.panel_tick"))
+                 ("sustain", "sustain.title"), ("subtract", "subtract.title"), ("gate_flip", "roll_menu.gate_flip"), ("mask", "mask.panel_tick"))
 
 
 def shared_settings(shapes):

@@ -38,6 +38,7 @@ from notes.merge import (LAP as merge_lap, clean_merge, clean_unmerge, recipe_no
                          reshaped_notes as merge_reshaped, turned_notes as merge_turned, with_rounds as merge_rounds)
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
+from notes.subtract import clean_subtract, is_subtracted, subtracted
 from notes.sustain import clean_sustain, cut_by, held, is_sustained
 from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
@@ -353,6 +354,9 @@ def clean_shape(sh):
     sus = clean_sustain(sh.get("sustain"))
     if sus is not None:  # its notes held on (sustain.py)
         out["sustain"] = sus
+    sub = clean_subtract(sh.get("subtract"))
+    if sub is not None:  # its gates made shorter (subtract.py)
+        out["subtract"] = sub
     return out
 
 
@@ -558,6 +562,9 @@ def fx_notes(sh, ppq, keys, get):
     """shape_notes_tracks' work: the notes, then its glue, then its note tool pages one after another (fx.py).
     get(shape) = another shape's notes and tracks (remembered by the caller: the steps before the last one, the
     notes flipped back). A hidden "_m" = the notes made flipped along those axes (the steps before a flip)."""
+    if "subtract" in sh:  # (gates made shorter at the very end, after Sustain too: subtract.py)
+        notes, tracks = get({k: v for k, v in sh.items() if k != "subtract"})
+        return (subtracted(notes, sh["subtract"], ppq), tracks) if is_subtracted(sh) else (notes, tracks)
     if "sustain" in sh:  # (held on last, after everything else: sustain.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "sustain"})
         return held(notes, tracks, sh["sustain"], ppq) if is_sustained(sh) else (notes, tracks)

@@ -312,7 +312,7 @@ def frame_way(pts):
 def letter_notes(sh, notes_of):
     """The notes of the letters themselves: no Hz bass tones, note tool pages, gate Range or Sustain (the anchor
     goes by the letters: a Hz tone starting later never moves the text)."""
-    return notes_of({k: v for k, v in sh.items() if k not in ("hz", "fx", "range", "sustain", "gate_flip")})
+    return notes_of({k: v for k, v in sh.items() if k not in ("hz", "fx", "range", "sustain", "subtract", "gate_flip")})
 
 
 def anchor_spot(sh, notes_of, ppq):

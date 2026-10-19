@@ -27,6 +27,7 @@ from window.chop_window import open_chop, quick_chop
 from notes.sustain import is_sustained
 from window.sustain_window import any_sustained, carry_stops, open_sustain, sustain_targets, target_indices
 from window.merge_window import open_merge
+from window.subtract_window import any_subtracted, open_subtract, subtract_targets
 from window.widgets import symmetry_menu
 
 
@@ -349,6 +350,9 @@ class ShapeMenu:
         self._sustain_var = tk.BooleanVar(value=any_sustained(app))  # (kept: the tick shows)
         m.add_checkbutton(label=tr("sustain.menu"), variable=self._sustain_var, command=lambda: open_sustain(app),
                           state="normal" if sustain_targets(app) else "disabled")
+        self._subtract_var = tk.BooleanVar(value=any_subtracted(app))  # Gate subtract… (subtract_window.py), alike
+        m.add_checkbutton(label=tr("subtract.menu"), variable=self._subtract_var, command=lambda: open_subtract(app),
+                          state="normal" if subtract_targets(app) else "disabled")
 
     def glue_items(self, item):
         """Glue (glue.py): in the kept Select boxes if there are any, else all the selected shapes' notes."""

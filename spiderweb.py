@@ -57,6 +57,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     path_window.py   the Copy along a path window (path kind, spacing, where B is)
     range_window.py  the spam gate Range's graph window
     sustain_window.py  the Sustain window (on / off, the gap held over: Auto or typed)
+    subtract_window.py the Gate subtract window (on / off, ticks, only notes that touch)
     merge_window.py  the Gate sensitive merge window (which way, keep two shapes)
     between_window.py  the Add between window (preview, steps, graph) + a group in the main window (list row, menu)
     image_window.py  image to notes: the picture, its sliders, the player-look preview, placing it
@@ -112,6 +113,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     strum.py         strum: each chord's notes start one after another (and end, velocity)
     copypath.py      copy along a path: the shape's notes copied from A to B (straight / curve / arc)
     sustain.py       sustain: each key row's notes held to their group's end (overlaps kept), done last
+    subtract.py      gate subtract: every note ends a few ticks earlier (start kept), done after Sustain
     fx.py            a shape's Claw machine / Strum / Chop pages in order, flips and velocities after them
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes
     picture.py       image to notes: a picture file -> a grid of up to 16 colours (picking, blending, details)

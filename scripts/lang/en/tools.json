@@ -809,5 +809,18 @@
  "sustain.from": "starting at",
  "sustain.from_tip": "Moves the stops later by this much, so they needn't line up with the shape's start.",
  "sustain.list": "{name} (Sustained)",
- "gate_flip.list": "{name} (Gates flipped)"
+ "gate_flip.list": "{name} (Gates flipped)",
+ "subtract.menu": "Gate subtract…",
+ "subtract.title": "Gate subtract",
+ "subtract.step": "Gate subtract",
+ "subtract.on": "Subtract from gates",
+ "subtract.on_tip": "Every note ends a little earlier, so a blank space shows between notes that touch. Only the end of a note moves: its start stays where it is. A note never gets shorter than 1 tick.\nDone last, after everything else that makes the notes (Sustain too).",
+ "subtract.by": "Subtract",
+ "subtract.by_tip": "How many ticks each note ends earlier. The number follows the PPQ.",
+ "subtract.ticks": "ticks",
+ "subtract.tick": "tick",
+ "subtract.touch": "Only notes that touch the next one",
+ "subtract.touch_tip": "Only notes where the next note on the same key starts right at their end (or before it). Notes that already have a gap after them stay as they are.",
+ "subtract.nothing": "No shape that can take Gate subtract is selected.",
+ "subtract.list": "{name} (Subtracted)"
 }
