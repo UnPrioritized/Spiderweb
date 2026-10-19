@@ -42,7 +42,7 @@ from window.hz_trace import TraceWindow
 from window.preview_settings import PreviewSettings, open_settings
 from window.snap_picker import SnapPicker
 from window.tool_picker import ToolPicker
-from window.widgets import Tooltip, fit_screen, placed
+from window.widgets import Tooltip, fit_screen, placed, set_least
 # the window is made of these parts (each a mixin of HzWindow); shape_length / DOUBLE_MS are handed on from here
 from window.hz_view import RED, HzView, shape_length  # noqa: F401
 from window.hz_sound import HzSound
@@ -456,8 +456,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         right = [f for f, side in self.pieces if side == "right"]
         widths = {f: f.winfo_reqwidth() for f, side in self.pieces}
         least = max(round(420 * self.app.scale), max(widths.values()) + 32)  # (the widest piece never cut off)
-        if self.minsize()[0] != least:
-            self.minsize(least, round(260 * self.app.scale))
+        set_least(self, least, round(260 * self.app.scale))
         if room <= 1 or sum(widths.values()) <= room:
             laid = {f: 0 for f in widths}
         else:

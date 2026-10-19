@@ -288,6 +288,22 @@ def _fit_screen(win):
     win.geometry(f"{nw}x{nh}+{nx}+{ny}" if sizes else f"+{nx}+{ny}")
 
 
+def set_least(win, w, h):
+    """win.minsize(w, h), never more than its screen has room for above the taskbar (Windows' frame counted): a
+    window that needs more room for its texts than a small screen has stays on the screen (hunt 2026-10-19)."""
+    from files.system import work_area
+    if win.winfo_ismapped():
+        side, title = max(0, win.winfo_rootx() - win.winfo_x()), max(0, win.winfo_rooty() - win.winfo_y())
+    else:
+        k = getattr(look, "SCREEN_DPI", 96) / 96
+        side, title = round(8 * k), round(31 * k)
+    left, top, right, bottom = work_area(win, win.winfo_rootx() + win.winfo_width() // 2,
+                                         win.winfo_rooty() + win.winfo_height() // 2)
+    least = (max(1, min(int(w), right - left - 2 * side)), max(1, min(int(h), bottom - top - title - side)))
+    if tuple(win.minsize()) != least:
+        win.minsize(*least)
+
+
 PLACE = r"(\d+x\d+)?\+-?\d+\+-?\d+"  # a remembered window place: "WxH+X+Y" (one that can be resized) or "+X+Y"
 
 

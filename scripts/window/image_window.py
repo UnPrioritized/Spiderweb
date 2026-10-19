@@ -18,7 +18,7 @@ from files.lang import tr, trn
 from files.speed import Photo
 from notes import picture as P
 from window import look
-from window.widgets import Tooltip, fit_screen, name_list, placed, set_names, unit_word, wrap_to_room
+from window.widgets import Tooltip, fit_screen, name_list, placed, set_least, set_names, unit_word, wrap_to_room
 
 PREVIEW_W, PREVIEW_H = 900, 520  # the preview's size to start with (it grows with the window)
 KB = 36  # the keyboard drawn beside the preview, in pixels
@@ -407,8 +407,7 @@ class ImageWindow(tk.Toplevel):
         least = (side.winfo_reqwidth() + self.side_bar.winfo_reqwidth() + int(60 * s)
                  + max(row(self.top_row, hint), row(self.info_row, self.info)) + int(220 * s))
         least = max(least, side.winfo_reqwidth() + self.what.winfo_reqwidth() + int(60 * s))
-        if self.minsize()[0] != least:
-            self.minsize(least, int(360 * self.app.scale))
+        set_least(self, least, int(360 * s))  # (a small screen: never past its edge, the lines wrap more)
 
     def side_wheel(self, e):
         """The mouse wheel over the settings scrolls them (boxes and lists that scroll themselves keep it)."""

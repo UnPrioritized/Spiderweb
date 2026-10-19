@@ -14,7 +14,7 @@ from files.lang import size as lang_size, tr
 from files.about import BANNER, HERE, LICENSE, VERSION, WEBSITE
 from files.system import open_path
 from window import look
-from window.widgets import WrapRow, placed, remember_place
+from window.widgets import WrapRow, placed, remember_place, set_least
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS, NEXT, SECTION_NAMES, SECTIONS, SEE, TOOL_TOPICS, TOPICS
 
 TOOL_TIPS = set(TOOL_TOPICS.values()) | set(DRAWER_TOOL_TOPICS.values())
@@ -360,7 +360,7 @@ class HelpWindow(tk.Toplevel):
         def fit(*_):
             if self.winfo_exists() and right.winfo_width() > 1:
                 row.fit(right.winfo_width() - int(12 * s))
-                self.minsize(max(int(600 * s), left.winfo_reqwidth() + row.widest() + int(24 * s)), int(360 * s))
+                set_least(self, max(int(600 * s), left.winfo_reqwidth() + row.widest() + int(24 * s)), int(360 * s))
         row = WrapRow(bottom, changed=fit)
         right.bind("<Configure>", fit, add="+")
 
