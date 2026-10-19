@@ -123,13 +123,13 @@ class LiveDrawing:
         if target is None and not app.live.get():
             new = dict(sh)
             del new["draw"]
-            app.add_shape(new)
+            self.add_drawn(new)
             return True
         if target is None:
             target = new_live_shape(app.defaults, app.custom_defaults, self.sy / self.sx)  # (drawn as it looks now)
             for st in sts:
                 k = add_stroke(target, st)
-            app.add_shape(target)
+            app.add_shape(target)  # (selected, box or not: the next strokes go into it)
         else:
             app.push_undo(name=tr("roll_live.draw_into_the_live_shape"))
             old = self.before_edit(target)

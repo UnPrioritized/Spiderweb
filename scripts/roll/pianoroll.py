@@ -807,14 +807,17 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             strokes = strokes + [p for _, p in PianoRoll.origin_strokes(sh)]
         return strokes
 
-    def shapes_in_box(self, x0, y0, x1, y1):
+    def shapes_in_box(self, x0, y0, x1, y1, among=None):
         """The shapes a box on screen (x0 < x1, y0 < y1) touches: a piece of their line, or one of their notes
         while the notes are shown. A line has to go into the box: one that only reaches its edge doesn't count (user:
         a shape ending on the grid line where the box starts isn't picked). A note too: one ending where the box starts
-        (or starting where it ends) doesn't count, nor one on the key row just past its top / bottom (user)."""
+        (or starting where it ends) doesn't count, nor one on the key row just past its top / bottom (user).
+        among: just these shape numbers."""
         found = set()
         e = 1e-6  # (a line ending on the edge is exactly there on screen too)
         for i, sh in enumerate(self.app.shapes):
+            if among is not None and i not in among:
+                continue
             for stroke in self.pick_strokes(sh):
                 pts = np.asarray(stroke, float).reshape(-1, 2)
                 if line_touches_box(self.t2x(pts[:, 0]), self.p2y(pts[:, 1]), x0 + e, y0 + e, x1 - e, y1 - e):
@@ -827,7 +830,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             # (the keys whose row's middle is in the box; e: screen pixels turned back into ticks aren't exact)
             k0, k1 = math.ceil(self.y2p(y1) - e), math.floor(self.y2p(y0) + e)
             ns = ns[(ns[:, 2] >= k0) & (ns[:, 2] <= k1) & (ns[:, 0] < t1 - e) & (ns[:, 1] > t0 + e)]
-            found.update(int(v) for v in np.unique(ns[:, 5]) if 0 <= v < len(self.app.shapes))
+            found.update(int(v) for v in np.unique(ns[:, 5]) if 0 <= v < len(self.app.shapes)
+                         and (among is None or int(v) in among))
         return found
 
     def hit_shape(self, x, y, among=None, lines_only=False):
@@ -992,6 +996,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if tool == "picture":  # (only the image window's handle places it, user: a click placed it by mistake)
             app.open_image()
             return
+        if kept and tool != "select":  # a drawing tool: the Select boxes stay (add_drawn, user)
+            self.box_kept = (kept, set(app.sels))
         if tool == "funnel" and self.draft and len(self.draft["pts"]) == 2:
             # the funnel's line is drawn, now its wall
             self.draft["pts"] += [list(pt), list(pt)]
@@ -1667,7 +1673,19 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.keep_draft()
         sh, self.draft = self.draft, None
         if not self.live_commit(sh):  # a stroke of a live shape / a circle or polygon: done there
-            self.app.add_shape(sh)
+            self.add_drawn(sh)
+
+    def add_drawn(self, sh):
+        """A shape drawn: added. While a Select box (or ruler band) is shown it stays, with what it selected; the
+        new shape joins the selection only when it lands in the box (user, like many MIDI programs; else it's not selected)."""
+        kept, sels, primary = self.kept_box(), set(self.app.sels), self.app.sel
+        self.app.add_shape(sh)
+        if not kept:
+            return
+        i = len(self.app.shapes) - 1
+        inside = any(self.shapes_in_box(*self.box_rect(a), among={i}) for a in kept)
+        self.app.select_many(sels | {i} if inside else sels, i if inside else primary)
+        self.box_kept = (kept, set(self.app.sels))
 
     def cancel_draft(self):
         self.end_typing()
