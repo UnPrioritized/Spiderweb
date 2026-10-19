@@ -131,6 +131,8 @@ def flip_shape(sh, sideways, mid2):
     for k in ("range", "range_kept"):  # (a spam gate range runs the other way, the one kept while off too; a
         if sh.get(k) and sh["kind"] != "funnel":  # funnel's runs from its line start to its wall, wherever it is)
             sh[k] = flipped_range(sh[k], sideways)
+    if "graph" in (sh.get("subtract") or {}):  # (Gate subtract's graph, like the Range's: subtract.py)
+        sh["subtract"] = flipped_range(sh["subtract"], sideways)
     stops = (sh.get("sustain") or {}).get("stops")
     if sideways and stops and stops.get("at"):  # (Sustain's stops put by hand: shares of the notes' time; past the
         at = sorted(1 - f if f < 1 else f for f in stops["at"])  # end ones stay)
@@ -334,4 +336,6 @@ def turn_shape(sh, clockwise, r, cb, cp):
     for k in ("range", "range_kept"):
         if sh.get(k) and sh["kind"] != "funnel":
             sh[k] = turned_range(sh[k], clockwise)
+    if "graph" in (sh.get("subtract") or {}):  # (Gate subtract's graph: subtract.py)
+        sh["subtract"] = turned_range(sh["subtract"], clockwise)
     return sh
