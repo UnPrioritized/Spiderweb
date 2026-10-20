@@ -239,8 +239,13 @@ class HzMouse:
         if on_box:  # inside it: all it selected moves, held by the first note                    # a Ctrl+click
             hit = ("note", min(self.sel, key=lambda i: self.tones[i]["t"]))
         if hit is None:
-            if e.x >= self.kb_w and e.y < self.ruler_h and self.preview_on.get():  # the bar numbers: the play line
-                return self.put_play_line(self.beat_at(e.x))
+            if e.x >= self.kb_w and e.y < self.ruler_h:  # the bar numbers: the play line; a kept box goes with what
+                if kept:                                 # it selected (user, like many MIDI programs)
+                    self.sel = set()
+                    self.redraw()
+                if self.preview_on.get():
+                    self.put_play_line(self.beat_at(e.x))
+                return
             if e.x < self.kb_w or e.y < self.ruler_h:
                 return
             if e.state & CTRL or self.tool.get() in ("select", "bend"):  # a box that selects the notes it touches
