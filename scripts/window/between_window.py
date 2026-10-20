@@ -42,10 +42,11 @@ PAD_STICK = 8  # the push pad's middle pulls the stick in within this many px (S
 
 
 class BetweenWindow(PointGraph, tk.Toplevel):
-    def __init__(self, app, gid, before, name, opened_on=None):
+    def __init__(self, app, gid, before, name, opened_on=None, sel_before=None):
         """gid: the group (made already); before: the shapes as JSON before the window (Cancel puts them back, OK
         makes one undo step from them, called name); opened_on: the shape it was opened from (the pad starts on it
-        when it's the first / last shape or a key)."""
+        when it's the first / last shape or a key); sel_before: app.sel_state() from before the group was selected
+        (Cancel and the OK step's undo put it back)."""
         super().__init__(app)
         self.app, self.gid, self.before, self.name = app, gid, before, name
         self.title(tr("between.title"))
@@ -55,7 +56,8 @@ class BetweenWindow(PointGraph, tk.Toplevel):
         self.w, self.h, self.ph = int(380 * s), int(140 * s), int(200 * s)
         self.ml, self.mb = chart_edges(s, (tr("between.first"), tr("between.last")), 40, 22)  # (wider fonts)
         self.mr, self.mt = int(12 * s), int(10 * s)
-        self.sel_before = (set(app.sels), app.sel)
+        self.sel_was = sel_before or app.sel_state()
+        self.sel_before = (set(self.sel_was[0]), self.sel_was[1])
         self.set = between.settings_of(app.shapes, gid)
         self.kept_turns = self.set["colours"] or most_colours(app.all16())
         self.closed = False
@@ -288,7 +290,7 @@ class BetweenWindow(PointGraph, tk.Toplevel):
         self.on_turns()
         self.closed = True
         if json.dumps(self.app.shapes) != self.before:
-            self.app.add_undo_step(self.before, self.name, sel=self.app.sel_state())
+            self.app.add_undo_step(self.before, self.name, sel=self.sel_was)
         self.close()
 
     def cancel(self):
@@ -682,12 +684,13 @@ class BetweenGroups:
         if not pair:
             return
         self.roll.cancel_draft()
-        before = json.dumps(self.shapes)
+        self.settle_windows()  # (another window's try = its own step first, while the shape numbers still fit it)
+        before, sel = json.dumps(self.shapes), self.sel_state()
         self.shapes[:], gid = between.start_group(self.shapes, *pair, most_colours(self.all16()))
         got = between.ordered(self.shapes, gid)
         self.select_many(got, got[0])
         self.shapes_changed()
-        BetweenWindow(self, gid, before, tr("between.step_add"))
+        BetweenWindow(self, gid, before, tr("between.step_add"), sel_before=sel)
         self.tips.show("between", wait=True)
 
     def edit_between(self, i):
@@ -696,9 +699,12 @@ class BetweenGroups:
         if not gid:
             return
         self.roll.cancel_draft()
+        self.settle_windows()
+        sel = self.sel_state()
         got = between.ordered(self.shapes, gid)
         self.select_many(got, got[0])
-        BetweenWindow(self, gid, json.dumps(self.shapes), tr("between.step_edit"), opened_on=self.shapes[i])
+        BetweenWindow(self, gid, json.dumps(self.shapes), tr("between.step_edit"), opened_on=self.shapes[i],
+                      sel_before=sel)
 
     def select_group(self, i):
         got = between.ordered(self.shapes, between.group_of(self.shapes[i]))

@@ -289,6 +289,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._notes_time = 0.0  # how long that took the last time
         self._mask_time = 0.0  # ... and the masks' preview (mask.mask_view)
         self._late_notes = None  # while dragging: notes left until the mouse rests
+        self.shapes_gen = 0  # +1 at every shapes_changed (windows working out something slow from the shapes: same?)
         self._coming = None  # notes being made in the background while a drag rests (notes_rested)
         self._position = None
         self._normal_geometry = None
@@ -1060,6 +1061,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                   self.subtract_window, self.merge_window):
             if w:
                 w.ppq_changed()  # (numbers shown in ticks)
+        if self.image_window and self.keys != before[1]:
+            self.image_window.show_settings()  # (its Keys inside the new key range)
 
     def all16(self):
         """True while Multi channel uses channel 10 too ("Use channel 10", shown only under Multi channel)."""
@@ -1202,6 +1205,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         mouse rests or is let go (now: catch up). moving: shapes are dragged to another place: the piano roll shows
         their notes going along (roll_draw.paint_carried), and they catch up when the mouse rests (if that's quick)
         or is let go."""
+        self.shapes_gen += 1
         if self._late_notes:
             self.after_cancel(self._late_notes)
             self._late_notes = None

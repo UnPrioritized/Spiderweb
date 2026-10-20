@@ -495,6 +495,11 @@ class ImageWindow(tk.Toplevel):
         s = self.s
         if not self.uses10() and s["colours"] > 15:  # (the project's "Use channel 10" turned off / another opened)
             self.put("colours", 15)
+        if s["keys"] > self.app.keys:  # (the project's Keys turned down / another opened: inside its key range)
+            self.put("keys", self.app.keys)
+        w = getattr(self, "paste_win", None)
+        if w and w.winfo_exists():  # (Paste colours follows Colour by / Use channel 10)
+            w.read()
         for k, v in self.vars.items():
             if k.endswith("_label"):
                 continue
@@ -634,7 +639,11 @@ class ImageWindow(tk.Toplevel):
 
     def paste_colours(self):
         from window.paste_window import PasteWindow
-        PasteWindow(self, self.s["by"], self.uses10(), self.s["colours"], self.pasted)
+        w = getattr(self, "paste_win", None)
+        if w and w.winfo_exists():  # (one at a time: it follows this window's settings)
+            w.lift()
+            return w.focus_set()
+        self.paste_win = PasteWindow(self, lambda: self.s["by"], self.uses10, lambda: self.s["colours"], self.pasted)
 
     def pasted(self, slots, lock, alpha):
         """Paste colours' "Use these colours": the picture takes them (locked, or as a starting point)."""
@@ -696,7 +705,8 @@ class ImageWindow(tk.Toplevel):
         self.late = self.after(WAIT_MS if later else 1, self.remake)
 
     def suggested(self):
-        keep = {k: self.s[k] for k in ("view", "step") + LOOK_ONLY}
+        keep = {k: self.s[k] for k in ("view", "step", "fmt", "by") + LOOK_ONLY if k in self.s}  # (the colour
+        # list's Format and Colour by stay as picked, like back_to_made)
         self.s = dict(P.SUGGESTED, share=1.0, **keep)
         self.locked, self.start = {}, {}
         self.show_settings()
@@ -1167,6 +1177,12 @@ class ImageWindow(tk.Toplevel):
             self.app.image_pos = self.geometry()
 
     def close(self):
+        from window.format_window import FormatWindow
+        for w in self.winfo_children():  # (the colour format editor goes with it: its "Save the changes?" first)
+            if isinstance(w, FormatWindow):
+                w.close()
+                if w.winfo_exists():  # (Cancel: both stay open)
+                    return
         if self.late:
             self.after_cancel(self.late)
         self.stop_making()

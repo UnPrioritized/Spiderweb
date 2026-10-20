@@ -102,7 +102,7 @@ def dialog(parent, title, text, strong):
     yes = ttk.Button(btns, text=tr("big_ask.yes"), command=lambda: close(True))
     yes.pack(side="right", padx=(0, 6))
     first = no if strong else yes
-    win.bind("<Return>", lambda e: close(first is yes))
+    win.bind("<Return>", lambda e: close(yes is (e.widget if e.widget in (yes, no) else first)))  # (the highlighted)
     win.bind("<Escape>", lambda e: close(False))
     win.protocol("WM_DELETE_WINDOW", lambda: close(False))
     win.update_idletasks()

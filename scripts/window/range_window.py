@@ -555,6 +555,7 @@ class RangeGraph(PointGraph, tk.Toplevel):
 
 
 def open_range_graph(app):
+    app.settle_windows()  # (a claw / sustain... being tried = its own step before this window's)
     tgts = app.skip_hz(app.custom_targets())  # (a Hz bass picked too: left out, after a warning)
     if tgts:
         RangeGraph(app, tgts)
@@ -562,6 +563,7 @@ def open_range_graph(app):
 
 def open_funnel_range(app):
     """The same window for the selected funnels (or the settings for new ones)."""
+    app.settle_windows()
     tgts = app.skip_hz(app.funnel_targets())  # (a Hz bass funnel picked too: left out, after a warning)
     if tgts and not app.funnel_draft():
         RangeGraph(app, tgts)

@@ -16,6 +16,7 @@ class MergeWindow(tk.Toplevel):
         super().__init__(app)
         self.withdraw()
         self.app = app
+        self.seen = None  # what sync worked out the hint for
         app.merge_window = self
         self.title(tr("join_split.merge"))
         self.transient(app)
@@ -40,7 +41,7 @@ class MergeWindow(tk.Toplevel):
         ttk.Button(row, text=tr("merge_window.close"), command=self.close).pack(side="right")
         self.go = ttk.Button(row, text=tr("merge_window.merge"), command=self.merge)
         self.go.pack(side="right", padx=(0, 6))
-        self.bind("<Return>", lambda e: self.merge())
+        self.bind("<Return>", self.enter)
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.sync()
@@ -57,6 +58,10 @@ class MergeWindow(tk.Toplevel):
         app = self.app
         way, keep = self.way.get(), self.keep.get()
         app.merge_way, app.merge_keep = way, keep
+        seen = (way, keep, tuple(sorted(app.sels)), app.sel, app.shapes_gen, len(app.shapes))
+        if seen == self.seen:  # (worked out already: a whole merge's work on big shapes, every panel sync)
+            return
+        self.seen = seen
         problem = app.merge_problem(way, keep)
         hint = tr("merge_window.hint_" + way)
         if problem:
@@ -71,6 +76,13 @@ class MergeWindow(tk.Toplevel):
                               tr("merge_window.moves_or", name=name, other=app.shape_label(app.shapes[sels[alt]])))
         self.hint.config(text=hint)
         self.go.state(["disabled"] if problem else ["!disabled"])
+
+    def enter(self, e):
+        """Enter: the button that has the keyboard (Tab to Close + Enter = close), else Merge."""
+        if isinstance(e.widget, ttk.Button):
+            e.widget.invoke()
+        else:
+            self.merge()
 
     def ppq_changed(self):
         pass

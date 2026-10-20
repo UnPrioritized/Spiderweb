@@ -341,11 +341,17 @@ class ChopWindow(ToolWindow):
             if name.casefold() not in taken:
                 break
             prompt = tr("chop.name_taken", name=name)
+        if any(r["name"] == name for r in load_rhythms()) and not messagebox.askyesno(
+                tr("chop.save_title"), tr("chop.replace_ask", name=name), icon="warning", default="no", parent=self):
+            return
         if save_rhythm(name, {"name": name, "steps": self.cfg["steps"], "pieces": self.cfg["pieces"],
                               "fixed": self.cfg["fixed"]}, self):
             self.put("name", name)
 
     def delete_rhythm(self):
+        if not messagebox.askyesno(tr("chop.save_title"), tr("chop.delete_ask", name=self.cfg["name"]),
+                                   icon="warning", default="no", parent=self):
+            return
         if save_rhythm(self.cfg["name"], None, self):
             self.put("name", "")
 

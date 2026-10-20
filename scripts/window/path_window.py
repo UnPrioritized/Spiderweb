@@ -220,6 +220,9 @@ class PathWindow(ToolWindow):
         return out
 
     def group(self):
+        memo = getattr(self, "group_memo", None)
+        if memo:  # (worked out once per preview: every shape's page asked for it, slow with many shapes)
+            return memo[0]
         boxes = self.boxes()
         if not boxes:
             return None
@@ -910,8 +913,12 @@ class PathWindow(ToolWindow):
         self.show_plain()
 
     def preview(self, now=True):
-        if self.big_ok(now):
-            super().preview(now)
+        self.group_memo = (self.group(),)
+        try:
+            if self.big_ok(now):
+                super().preview(now)
+        finally:
+            self.group_memo = None
         self.show_plain()
         self.app.roll.request_redraw()
 

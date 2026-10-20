@@ -14,14 +14,16 @@ from window.widgets import remember_place
 
 
 class PasteWindow(tk.Toplevel):
-    """by / use10: how the slots are counted; colours_wanted: how many the picture has; done(slots, locked, alpha):
-    called with {slot: "RRGGBB"}, True = lock them, alpha = the see-through value found (or None)."""
+    """by / use10: how the slots are counted; colours_wanted: how many the picture has (each a value, or a function
+    giving the image window's setting now); done(slots, locked, alpha): called with {slot: "RRGGBB"}, True = lock
+    them, alpha = the see-through value found (or None)."""
 
     def __init__(self, parent, by, use10, colours_wanted, done):
         super().__init__(parent)
         self.title(tr("paste.title"))
         self.transient(parent)
-        self.by, self.use10, self.wanted, self.done = by, use10, colours_wanted, done
+        self._now = (by, use10, colours_wanted)
+        self.done = done
         self.lists, self.skipped = [], []
         box = ttk.Frame(self, padding=10)
         box.pack(fill="both", expand=True)
@@ -135,6 +137,14 @@ class PasteWindow(tk.Toplevel):
         if note:
             ttk.Label(self.where, text=note, foreground=look.SOFT_TEXT).pack(anchor="w", pady=(4, 0))
         self.use_btn.config(state="normal" if slots else "disabled")
+
+    def _get(self, i):
+        v = self._now[i]
+        return v() if callable(v) else v
+
+    by = property(lambda self: self._get(0))
+    use10 = property(lambda self: self._get(1))
+    wanted = property(lambda self: self._get(2))
 
     def use(self):
         slots = self.slots()
