@@ -389,6 +389,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.bind_all("<space>", self.hotkey(self.toggle_play, main_only=True, while_held=True))  # (pop-ups: not the main playback)
         for k in ("<Control-x>", "<Control-X>"):  # (main window only: Ctrl+X in Help / pop-ups cut the shapes behind)
             self.bind_all(k, self.hotkey(self.cut_selected, main_only=True))
+        # Delete pressed while a toolbar / panel button has the keyboard (Ctrl+A works there): the piano roll's own
+        # Delete, with its mid-drag / velocity line rules (the roll handles its own key itself)
+        self.bind_all("<Delete>", lambda e: None if e.widget is self.roll else
+                      self.hotkey(lambda: self.roll.on_key(e), main_only=True, while_held=True)(e))
         for keys, fn in (("Control-c Control-C", self.copy_selected),
                          ("Control-Shift-c Control-Shift-C", self.copy_to_domino),
                          ("Control-g Control-G", self.join_selected),
