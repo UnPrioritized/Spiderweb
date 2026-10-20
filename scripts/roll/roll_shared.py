@@ -101,6 +101,8 @@ GRAB_CURSOR = "{@" + os.path.join(ICONS, "grab.cur").replace("\\", "/") + "}"  #
 PIANO_88 = range(21, 109)  # A0 to C8, the keys of a real piano
 BOX_STILL = 4  # a Select box moved less than this many pixels from where it started is still a click
 BOX_SCROLL_MS = 100  # a Select box dragged past the edge scrolls the view a beat (3 keys up / down) this often
+RULER_TOP = 1000.5  # the top of a Select box made along the ruler (every key; no box dragged on a piano roll gets
+#                     this high, so the two kinds stay apart: ruler_boxes; both piano rolls)
 # px per beat: how far the wheel / bars / buttons zoom time (both rolls). Low enough for Fit view on any song (at
 # 0.05 a very long one went past it, and "-" then zoomed in)
 MIN_SX, MAX_SX = 1e-5, 100000.0
@@ -205,6 +207,12 @@ def boxes_side(rects, x, y, reach):
 def boxes_around(rects):
     """The one box (x0, y0, x1, y1) around several (x0 < x1, y0 < y1 each)."""
     return (min(r[0] for r in rects), min(r[1] for r in rects), max(r[2] for r in rects), max(r[3] for r in rects))
+
+
+def ruler_boxes(boxes):
+    """The Select boxes made along the ruler (top RULER_TOP: every key): the ruler is black under them. They and
+    boxes dragged on the piano roll are never kept together (user): starting one kind drops the other."""
+    return [a for a in boxes or () if a[1] >= RULER_TOP - 0.5]
 
 
 def boxes_upright(areas):

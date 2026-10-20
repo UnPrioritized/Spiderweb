@@ -10,7 +10,8 @@ from files.lang import tr, trn, trnum
 from files.mathexpr import fmt
 from notes.hzbass import (HZ_DEFAULTS, all_tones, auto_state, bend_range, can_slide, glide, handle_u, heard, hz_of, layers_of,
                           funnel_box, left_edge, links, pitch, slide_knob, slide_part)
-from roll.roll_shared import (ALT, CTRL, MAX_SX, MIN_SX, SELECTED_COLOR, SHIFT, SLOT_COLORS, draw_boxes, fade, note_name)
+from roll.roll_shared import (ALT, CTRL, MAX_SX, MIN_SX, SELECTED_COLOR, SHIFT, SLOT_COLORS, draw_boxes, fade, note_name,
+                              ruler_boxes)
 from window import look
 from window.hz_layers import layer_colour
 from window.widgets import StatusLine
@@ -279,7 +280,8 @@ class HzView:
         self.draw_draft(own)  # (a path being drawn, and the notes it would make: hz_draw.py)
         d = self.drag  # the Select box (with the ones kept when Ctrl+drag adds it), or the last ones (kept_box)
         boxes = d["more"] + [b for b in (self.box_area(),) if b] if d and d["kind"] == "box" else self.kept_box() or []
-        draw_boxes(c, [self.box_rect(b) for b in boxes], kb, rh, s)
+        bands = ruler_boxes(boxes)  # (over every key: only the bar numbers' black band shows it, like the main roll)
+        draw_boxes(c, [self.box_rect(b) for b in boxes if b not in bands], kb, rh, s)
         c.create_rectangle(0, 0, kb, h, fill=look.HZ_KEYS, outline="", tags="frame")  # keys (the preview's grey
         # goes under this: draw_preview)
         for k in range(k_lo, k_hi + 1):
@@ -298,12 +300,22 @@ class HzView:
         every = 1  # (zoomed far out: every 2nd, 4th... bar number, so they don't run into each other)
         while every * beats * self.sx < 40 * s:
             every *= 2
-        n = max(0, math.floor(self.beat_at(kb) / beats / every) * every)
+        n, marks = max(0, math.floor(self.beat_at(kb) / beats / every) * every), []
         while n * beats <= self.beat_at(w):
             x = self.x_of(n * beats)
             if x >= kb:
-                c.create_text(x + 3, rh / 2, text=str(n + 1), anchor="w", fill=look.LABEL, font=look.font(8, fit=True))
+                marks.append((x, str(n + 1)))
             n += every
+        for x, label in marks:
+            c.create_text(x + 3, rh / 2, text=label, anchor="w", fill=look.LABEL, font=look.font(8, fit=True))
+        for x0, x1 in sorted(sorted((self.x_of(a[0]), self.x_of(a[2]))) for a in bands):  # the bar numbers black
+            x0, x1 = max(x0, kb), min(x1, w)  # under a band, the numbers white there (like the main piano roll)
+            if x0 < x1:
+                c.create_rectangle(x0, 0, x1, rh, fill=look.RULER_PICK, outline="")
+                for x, label in marks:
+                    if x0 <= x < x1:
+                        c.create_text(x + 3, rh / 2, text=label, anchor="w", fill=look.RULER_PICK_TEXT,
+                                      font=look.font(8, fit=True))
         c.create_line(0, rh, w, rh, fill=look.HZ_EDGE)
         if not self.can_place():
             c.create_text((kb + w) / 2, (rh + h) / 2, text=tr("hz.hint_none"), fill=look.HINT,

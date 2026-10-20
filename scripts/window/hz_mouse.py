@@ -16,8 +16,8 @@ from files.lang import tr, trnum
 from files.snap import snap_beats
 from files.system import double_click_ms
 from notes.hzbass import LAYERS, TUNE, bend_for, can_slide, handle_u, left_edge, next_id
-from roll.roll_shared import (BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, SELECT_CURSOR, SHIFT, boxes_side,
-                              boxes_upright, grid_span)
+from roll.roll_shared import (BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, RULER_TOP, SELECT_CURSOR, SHIFT,
+                              boxes_side, boxes_upright, grid_span, ruler_boxes)
 
 
 TUNE_STICK = 3.0  # cents: a dragged tune this near the exact tone sticks to it (at any zoom; was 5 px, user)
@@ -40,12 +40,18 @@ class HzMouse:
     def box_area(self, d=None):
         """The Select box being dragged (d: this box drag instead) as (beat, key, beat, key) corners, a key being
         the top of its row: out to whole snap steps and whole keys (grid_span; Shift / snap off = whole ticks, keys
-        still whole: user), so it's never thinner than one step and one key. None while it's still a click."""
+        still whole: user), so it's never thinner than one step and one key. None while it's still a click. Dragged
+        along the bar numbers (d["ruler"]): every key, both ends on the NEAREST grid line (none while they round to
+        the same one), like the main piano roll."""
         d = d or self.drag
         (x, y), (cx, cy) = self.box_from(d), d["to"]
-        if abs(cx - x) < BOX_STILL and abs(cy - y) < BOX_STILL:
+        if abs(cx - x) < BOX_STILL and (d.get("ruler") or abs(cy - y) < BOX_STILL):
             return None
         tick, step = 1 / self.app.ppq, self.snap_beats()
+        if d.get("ruler"):
+            s0, s1 = (tick if d.get(sh) else step or tick for sh in ("shift0", "shift"))
+            b0, b1 = sorted((max(0.0, round(self.beat_at(x) / s0) * s0), max(0.0, round(self.beat_at(cx) / s1) * s1)))
+            return (b0, RULER_TOP, b1, -1) if b1 - b0 > 1e-9 else None
         b0, b1 = grid_span(self.beat_at(x), self.beat_at(cx), tick if d.get("shift0") else step or tick,
                            tick if d.get("shift") else step or tick)
         k0, k1 = sorted((self.key_at(y), self.key_at(cy)))
@@ -70,6 +76,9 @@ class HzMouse:
         d["to"] = (min(max(x, self.kb_w), self.canvas.winfo_width()),
                    min(max(y, self.ruler_h), self.canvas.winfo_height()))
         d["shift"] = bool(state & SHIFT)
+        if d.get("drop") and self.box_area(d):  # (Ctrl+drag with the bar numbers' bands kept: now a box, they go
+            d.update(drop=False, more=[], base=set())  # with what they selected, user; a Ctrl+click changes nothing)
+            self.sel = set()
         self.redraw()
 
     def box_pick(self, d):
@@ -89,7 +98,7 @@ class HzMouse:
             return
         x, y, _ = d["mouse"]
         dx = (x > self.canvas.winfo_width()) - (x < self.kb_w)
-        dy = (y > self.canvas.winfo_height()) - (y < self.ruler_h)
+        dy = 0 if d.get("ruler") else (y > self.canvas.winfo_height()) - (y < self.ruler_h)
         if not dx and not dy:
             return
         t0, top = self.t0, self.top
@@ -126,12 +135,16 @@ class HzMouse:
 
     def box_move_to(self, d, e):
         """A kept Select box over nothing dragged from inside: it goes with the mouse, whole snap steps (Shift =
-        free) and whole keys, kept at beat 0 and the keys' ends. Notes it's moved onto aren't picked up."""
+        free) and whole keys, kept at beat 0 and the keys' ends (a band on the bar numbers: time only). Notes it's
+        moved onto aren't picked up."""
         sb, dt = self.snap_beats(), self.beat_at(e.x) - d["beat"]
         if sb and not e.state & SHIFT:
             dt = round(dt / sb) * sb
         boxes = d["box"]
         dt = max(dt, -min(min(b0, b1) for b0, _, b1, _ in boxes))
+        if d.get("time_only"):
+            self.box_kept = ([(b0 + dt, top, b1 + dt, bottom) for b0, top, b1, bottom in boxes], set())
+            return self.redraw()
         dk = self.key_at(e.y) - d["key"]
         dk = max(-1 - min(min(t, u) for _, t, _, u in boxes), min(127 - max(max(t, u) for _, t, _, u in boxes), dk))
         self.box_kept = ([(b0 + dt, top + dk, b1 + dt, bottom + dk) for b0, top, b1, bottom in boxes], set())
@@ -199,7 +212,9 @@ class HzMouse:
         note there wins), or None. The left side, top and bottom do nothing (user, like many MIDI programs); a slide's dot
         wins over it all. With Ctrl only inside counts, notes too (a drag there moves a copy; Select tool only). A box
         over nothing works too (it moves / stretches alone, user: like many MIDI programs). The Select / Bend tools
-        only: a drawing tool draws there (drawn_into)."""
+        only: a drawing tool draws there (drawn_into). Bands made along the bar numbers don't count here: only
+        their black part on the bar numbers takes the mouse (ruler_band)."""
+        kept = [a for a in kept or () if a[1] < RULER_TOP - 0.5]
         if not kept or hit and hit[0] in DOTS or self.tool.get() not in ("select", "bend"):
             return None
         side = boxes_side([self.box_rect(a) for a in kept], e.x, e.y, 5 * self.s)
@@ -218,8 +233,8 @@ class HzMouse:
         empty = (SELECT_CURSOR if inside and self.tool.get() in ("select", "bend") else
                  self.pencil if inside and self.can_place() and not e.state & CTRL else "")
         on_box = self.on_kept_box(self.kept_box(), e, hit)
-        if on_box:
-            self.canvas.config(cursor=BOX_CURSORS[on_box])
+        if on_box or self.ruler_band(e, self.kept_box()):  # (the bar numbers' band: moves in time)
+            self.canvas.config(cursor=BOX_CURSORS[on_box] if on_box else "sb_h_double_arrow")
             return self.show_status(e)
         self.canvas.config(cursor={"in": "sb_h_double_arrow", "out": "sb_h_double_arrow", "left": "sb_h_double_arrow",
                                    "right": "sb_h_double_arrow", "tune": "sb_v_double_arrow",
@@ -269,22 +284,18 @@ class HzMouse:
         if on_box:  # inside it: all it selected moves, held by the first note                    # a Ctrl+click
             hit = ("note", min(self.sel, key=lambda i: self.tones[i]["t"]))
         if hit is None:
-            if e.x >= self.kb_w and e.y < self.ruler_h:  # the bar numbers: the play line; a kept box goes with what
-                if kept:                                 # it selected (user, like many MIDI programs)
-                    self.sel = set()
-                    self.redraw()
-                if self.preview_on.get():
-                    self.put_play_line(self.beat_at(e.x))
-                return
+            if e.x >= self.kb_w and e.y < self.ruler_h:  # the bar numbers
+                return self.ruler_press(e, kept, before)
             if e.x < self.kb_w or e.y < self.ruler_h:
                 return
             if e.state & CTRL or self.tool.get() in ("select", "bend"):  # a box that selects the notes it touches
                 add = e.state & CTRL and self.tool.get() in ("select", "bend")  # (Ctrl: added to the selection and the
-                base = set(self.sel) if add else set()  # boxes kept)
+                base = set(self.sel) if add else set()  # boxes kept; the bar numbers' bands go once it's a box)
                 self.sel = set(base)
                 self.drag = {"kind": "box", "from": (self.beat_at(e.x), self.top - (e.y - self.ruler_h) / self.sy),
                              "to": (e.x, e.y), "base": base, "before": before,
-                             "more": list(kept or []) if add else [], "shift0": bool(e.state & SHIFT)}
+                             "more": list(kept or []) if add else [], "shift0": bool(e.state & SHIFT),
+                             "drop": bool(add and ruler_boxes(kept))}
                 return self.redraw()
             if not self.can_place():
                 return
@@ -330,6 +341,42 @@ class HzMouse:
                 self.drag.update(dup=dup, name=tr("hz.step_duplicate"))
         self.redraw()
 
+    def ruler_press(self, e, kept, before):
+        """A press on the bar numbers (any tool), like the main piano roll. On a band made along them (ruler_band):
+        a drag moves what it selected in time only (Ctrl: a copy; nothing selected: the band alone), a click puts
+        the play line there. Elsewhere the play line goes there, and dragged sideways it becomes a band over every
+        key (seek -> box, see on_drag; Ctrl adds to the bands kept, Shift = whole ticks). Kept boxes go, with what
+        they selected (user: also Select boxes with Ctrl, the two kinds are never kept together)."""
+        if self.ruler_band(e, kept):
+            boxes = boxes_upright(kept)[0]
+            self.box_kept = (boxes, set(self.sel))
+            if not self.sel:
+                self.drag = {"kind": "boxmove", "box": boxes, "beat": self.beat_at(e.x), "key": 0, "before": before,
+                             "time_only": True, "x": e.x}
+                return self.redraw()
+            i = min(self.sel, key=lambda j: self.tones[j]["t"])  # (held by the earliest note, like a box's inside)
+            self.drag = {"kind": "note", "i": i, "before": before, "beat": self.beat_at(e.x),
+                         "key": self.tones[i]["key"], "orig": copy.deepcopy(self.tones), "x": e.x, "y": e.y, "moved": False, "slide": None,
+                         "whole": True, "name": tr("hz.step_move"), "box": boxes, "inside": True, "time_only": True}
+            if e.state & CTRL:
+                self.drag.update(dup={"click": None}, name=tr("hz.step_duplicate"))
+            return self.redraw()
+        bands = ruler_boxes(kept)
+        add = bool(e.state & CTRL and bands and len(bands) == len(kept))
+        if kept and not add:
+            self.sel = set()
+        if self.preview_on.get():
+            self.put_play_line(self.beat_at(e.x))
+        self.drag = {"kind": "seek", "x": e.x, "state": e.state, "kept": kept if add else None, "before": before}
+        self.redraw()
+
+    def ruler_band(self, e, kept):
+        """True when the mouse is on the bar numbers over a band made along them (ruler_boxes of the kept boxes)."""
+        if e.y >= self.ruler_h or e.x < self.kb_w:
+            return False
+        return any(min(self.x_of(a[0]), self.x_of(a[2])) <= e.x <= max(self.x_of(a[0]), self.x_of(a[2]))
+                   for a in ruler_boxes(kept))
+
     def on_double(self, e):
         """A double click on a note deletes it, when the button is let go with nothing changed (so a click and then
         a quick drag still moves it). With Select on empty space it pastes the copied notes there (user, like the
@@ -374,6 +421,15 @@ class HzMouse:
             return self.stretch_to(d, e)
         if d["kind"] == "boxmove":
             return self.box_move_to(d, e)
+        if d["kind"] == "seek":  # the bar numbers dragged sideways: a band over every key (box_area)
+            if abs(e.x - d["x"]) >= BOX_STILL:
+                base = set(self.sel) if d["kept"] else set()
+                self.drag = {"kind": "box", "ruler": True, "from": (self.beat_at(d["x"]), self.top),
+                             "to": (d["x"], self.ruler_h), "base": base, "before": d["before"],
+                             "more": list(d["kept"] or []), "shift0": bool(d["state"] & SHIFT)}
+                self.sel = base
+                self.on_drag(e)
+            return
         n = self.tones[d["i"]]
         beat, short = self.beat_at(e.x), self.shortest(e)
         if d["kind"] == "new":
@@ -422,7 +478,8 @@ class HzMouse:
                 self.tones[j]["cents"] = max(-TUNE, min(TUNE, round(d["orig"][j]["cents"] + moved, 6)))
         else:  # move every selected note: the one held goes to the grid line nearest to where it's dragged
             far = abs(beat - d["beat"]) * self.sx  # (in the song: the wheel can move the view under a still mouse)
-            if not d["moved"] and far < 4 and abs(e.y - d["y"]) < 4 and self.key_at(e.y) == d["key"]:
+            if not d["moved"] and far < 4 and (d.get("time_only") or abs(e.y - d["y"]) < 4
+                                               and self.key_at(e.y) == d["key"]):
                 return
             d["moved"] = True
             if d.get("dup") and not d.get("copied"):
@@ -431,7 +488,7 @@ class HzMouse:
             orig = d["orig"]
             held = orig[d["i"]]
             dt = 0.0 if far < 4 else self.snap(held["t"] + beat - d["beat"], e) - held["t"]
-            dk = self.key_at(e.y) - d["key"]
+            dk = 0 if d.get("time_only") else self.key_at(e.y) - d["key"]  # (the bar numbers' band: time only)
             dt = max(dt, -min(orig[i]["t"] for i in self.sel))
             dk = max(-min(orig[i]["key"] for i in self.sel), min(127 - max(orig[i]["key"] for i in self.sel), dk))
             for i in self.sel:
@@ -619,10 +676,17 @@ class HzMouse:
                 self.box_pick(d)
             if self.box_area(d) or d["more"] and e.state & CTRL:
                 self.box_kept = (d["more"] + [self.box_area(d)] if self.box_area(d) else d["more"], set(self.sel))
-            elif (not e.state & CTRL and self.tool.get() in ("select", "bend")
+            elif (not e.state & CTRL and self.tool.get() in ("select", "bend") and not d.get("ruler")
                     and self.preview_on.get()):  # a click, not a drag: the play line goes there
                 self.put_play_line(self.snap(d["from"][0], e))
             return self.redraw()
+        if d["kind"] == "seek":  # (the bar numbers clicked: the play line went there at the press; a Ctrl+click
+            if d["kept"]:        # with bands kept changes nothing)
+                self.box_kept = (d["kept"], set(self.sel))
+            return self.redraw()
+        clicked = d.get("time_only") and abs(e.x - d["x"]) < 4 and not d.get("moved")
+        if clicked and self.preview_on.get():  # the bar numbers' band clicked: the play line goes there
+            self.put_play_line(self.beat_at(e.x))
         if d["kind"] == "boxmove":  # (nothing in it: the box stays where it was let go)
             return self.redraw()
         if d.get("dup") and not d["moved"] and d["dup"]["click"] is not None:  # a Ctrl+click: in / out
@@ -730,7 +794,8 @@ class HzMouse:
         kept = self.kept_box() if not (hit and hit[0] in DOTS) else None
         # inside the kept Select boxes: the menu for all they selected; just one note: its own menu, anywhere in
         # the boxes (user, like the main piano roll)
-        if kept and boxes_side([self.box_rect(a) for a in kept], e.x, e.y, 0) == (0, 0):
+        if kept and (self.ruler_band(e, kept) or boxes_side(  # (a band: only its black part on the bar numbers)
+                [self.box_rect(a) for a in kept if a[1] < RULER_TOP - 0.5], e.x, e.y, 0) == (0, 0)):
             one = ("note", next(iter(self.sel))) if len(self.sel) == 1 else None
             show = (lambda: self.show_menu(e, one)) if one else (lambda: self.show_box_menu(e))
             if hit:
@@ -887,7 +952,8 @@ class HzMouse:
         that slide. A Select box being drawn: nothing (user, like many MIDI programs). The other notes stay as they are now; the drag ends (one undo step) and
         the pointer is the one for where the mouse is. A note still being placed just goes (no step)."""
         d = self.drag
-        if d["kind"] in ("box", "boxmove"):  # (nothing selected by it yet / in it: user, like many MIDI programs)
+        if d["kind"] in ("box", "boxmove", "seek"):  # (nothing selected by it yet / in it: user, like many MIDI
+            #                                           programs)
             return
         if d["kind"] == "new":
             return self.cancel_drag()

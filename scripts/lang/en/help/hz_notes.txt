@@ -2,7 +2,9 @@ In the Hz bass window, with Pencil, pressing the mouse places a note at once, an
 
 Select (V) and Pencil (P) are at the top of the window; double right-click switches between Select and the tool you used last (Pencil or a drawing tool). With Select, dragging on empty space draws a box that selects the notes it touches (Ctrl adds them); with Pencil, Ctrl+drag does it. The box snaps to the grid like on the piano roll.
 
-Drag the box's right side to make all its notes longer or shorter by the same amount (they keep their starts), or drag inside it to move them.
+Drag the box's right side to make all its notes longer or shorter by the same amount (they keep their starts), or drag inside it to move them (a box over nothing moves on its own). The box stays while you draw; new notes drawn inside it join the selection.
+
+Drag along the bar numbers (with any tool) to select every key in that time: the bar numbers turn black there. Drag the black part sideways to move what it selected in time only (Ctrl+drag for a copy); click it to move the play line.
 
 Ctrl+click picks several, Ctrl+A all; Delete removes the selected notes. Double-click a note to delete it.
 

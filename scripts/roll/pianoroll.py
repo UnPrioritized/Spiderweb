@@ -34,14 +34,12 @@ from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
 from roll.roll_path import PathEditing
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, MAX_SX, MIN_SX, PICK, SHIFT,
-                              bind_double_right, boxes_side, boxes_upright, cached_path, cached_strokes,
-                              grab_while_panning, grid_span, line_touches_box, mouse_trail, note_name)
+                              RULER_TOP, bind_double_right, boxes_side, boxes_upright, cached_path, cached_strokes,
+                              grab_while_panning, grid_span, line_touches_box, mouse_trail, note_name, ruler_boxes)
 from roll.roll_sustain import SustainStops
 from roll.roll_text import TextTyping
 
 EDGE = 0.5  # keys a shape's lines may go past the lowest / highest key's middle: its notes stay on that key
-RULER_TOP = 1000.5  # the top of a Select box made along the ruler (every key; no box dragged on the piano roll gets
-#                     this high, so the two kinds stay apart: ruler_boxes)
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
 
 class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
@@ -268,11 +266,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.box_ruler, self.box_resume, self.box_shift0 = True, playing, bool(state & SHIFT)
         self.drag = ("box", self.x2t(x), 0.0, x, self.ruler_h, set(app.sels), app.sel)
 
-    @staticmethod
-    def ruler_boxes(boxes):
-        """The Select boxes made along the ruler (top RULER_TOP: every key): the ruler is black under them. They and
-        boxes dragged on the piano roll are never kept together (user): starting one kind drops the other."""
-        return [a for a in boxes or () if a[1] >= RULER_TOP - 0.5]
+    ruler_boxes = staticmethod(ruler_boxes)  # (roll_shared: the Hz window's too)
 
     def ruler_band(self, e, kept):
         """The mouse on the ruler's black band (ruler_boxes of the kept boxes): a drag there moves what they selected

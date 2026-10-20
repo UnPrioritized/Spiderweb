@@ -14,11 +14,13 @@ What's new:
 
 • Moving a shape snaps the end of its last note to the grid too: the start or the end, whichever is nearer the mouse.
 
+• Hz bass window: drag along the bar numbers to select every key, Select boxes stay while you draw, and a box over nothing can be moved and stretched, like on the piano roll.
+
 • Right-drag listening shows its own line and leaves the play line where it was.
 
 • Plain notes (Turn into plain notes, path copies turned into plain shapes) follow Settings → General → Overlapping shapes keep their colours: off, an overlapping one takes the next free channels.
 
-• Fixes: merging no longer leaves gaps where a row is shorter; plain shapes keep their colours apart and no longer move a channel onto channel 10; quick right-clicks no longer switch tools; no more typing lag in the output name, BPM and beats per bar boxes; texts no longer get cut off with wider system fonts; the toolbar's pinned tools wrap and Help stays at the top right.
+• Fixes: merging no longer leaves gaps where a row is shorter; plain shapes keep their colours apart and no longer move a channel onto channel 10; quick right-clicks no longer switch tools; no more typing lag in the output name, BPM and beats per bar boxes; texts no longer get cut off with wider system fonts; the toolbar's pinned tools wrap and Help stays at the top right; Delete and Ctrl+A work after clicking a toolbar button, also in the Hz bass window.
 
 ## Version 1.6.1
 
