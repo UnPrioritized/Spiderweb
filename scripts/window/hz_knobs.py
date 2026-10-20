@@ -742,6 +742,9 @@ class SynthKnobs:
                 if key in ("random", "curve"):  # (Voices on after the copies' knobs, the tick boxes after Glide's)
                     self.voice_cell(box, col, key)
                     col += 1
+                if key == "curve":  # (then the CC lines' channels)
+                    self.cc_cell(box, col)
+                    col += 1
                 if key == "height_rand":  # (Height's Grows from after its knobs)
                     self.grows_cell(box, col)
                     col += 1
@@ -817,6 +820,26 @@ class SynthKnobs:
                                  command=lambda: self.change("voice", "legato", self.legato_var.get()))
             cb.pack(pady=(4, 0), anchor="w")
             Tooltip(cb, tr("hz.synth_tip_legato"))
+
+    def cc_cell(self, box, col):
+        """The Voice box's CC dropdown (user 2026-10-21): One channel / Own channel per note (hz["cc_own"], the whole
+        Hz bass's, every layer: not a sound a preset carries; hz_cc.voices)."""
+        cell = ttk.Frame(box, style="Synth.Box.TFrame")
+        cell.grid(row=0, column=col, padx=6, sticky="n")
+        ttk.Label(cell, text=tr("hz.synth_cc"), style="Synth.Box.TLabel").pack()
+        self.cc_names = [tr("hz.synth_cc_one"), tr("hz.synth_cc_own")]
+        self.cc_var = tk.StringVar(value=self.cc_names[0])
+        cb = ttk.Combobox(cell, textvariable=self.cc_var, values=self.cc_names, state="readonly", width=18,
+                          style="Synth.TCombobox")
+        dark_list(cb)
+        cb.pack(pady=(12, 0))
+        cb.bind("<<ComboboxSelected>>", lambda e: (self.set_cc_own(e.widget.current() == 1),
+                                                   self.keyboard_back(e.widget)))
+        Tooltip(cb, tr("hz.synth_tip_cc"))
+
+    def set_cc_own(self, on):
+        """The CC dropdown picked: one undo step (none when it's as it was)."""
+        self.hz.put_lengths(tr("hz.step_cc_own"), cc_own=True if on else None)
 
     def dial_cell(self, box, col, key, kind, start, colour):
         """A knob with its name over it and its value's box under it."""
@@ -1408,6 +1431,10 @@ class SynthKnobs:
             self.touching_var.set(self.vals["touching"])
         if self.legato_var.get() != self.vals["legato"]:
             self.legato_var.set(self.vals["legato"])
+        sh = self.hz.target()
+        name = self.cc_names[int(bool(((sh or {}).get("hz") or {}).get("cc_own")))]
+        if self.cc_var.get() != name:
+            self.cc_var.set(name)
         self.light_boxes()
         self.draw_pics()
         self.show_macros()

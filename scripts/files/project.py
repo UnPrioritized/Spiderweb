@@ -751,7 +751,7 @@ class ProjectFiles:
     def cc_messages(self, ppq, bpm, only=None):
         """The Hz basses' CC lines as MIDI messages on the slots (tracks) their notes are on: {slot: [(tick, status,
         data 1, data 2)]} (hz_cc.slot_events; only = the shapes' numbers to take, None: all)."""
-        return slot_events(self.shapes, self.rendered, ppq, bpm, only)
+        return slot_events(self.shapes, self.rendered, ppq, bpm, only, self.voice_slots)
 
     def write_out(self, path, busy, write):
         """write() makes the file at path (its folder made first), with the busy text key showing. False when it

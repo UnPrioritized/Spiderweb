@@ -839,6 +839,12 @@ def has_cc(hz):
                for n in src.get("fx") or ())
 
 
+def own_channels(hz):
+    """True when the Hz bass plays each note on a channel of its own (the Voice box's "CC: Own channel per note",
+    hz["cc_own"], every layer's; hz_cc.voices): only while it has CC lines, else its notes are as without it."""
+    return isinstance(hz, dict) and hz.get("cc_own") is True and has_cc(hz)
+
+
 def clean_off(off, fx):
     """The effects switched off (Bypass: their lines kept, no effect) checked: those in fx, in FX order."""
     off = off if isinstance(off, list) else ()
@@ -1035,6 +1041,8 @@ def clean_hz(hz):
         out["length"] = length
     if hz.get("stick") is True:
         out["stick"] = True
+    if hz.get("cc_own") is True:
+        out["cc_own"] = True
     main_trace = clean_trace(hz.get("main_trace"))
     if main_trace and main_trace != [list(p) for p in START_TRACE]:
         out["main_trace"] = main_trace

@@ -25,7 +25,7 @@ from files import clipboard
 from files.lang import tr
 from files.midi_out import track_slots
 from files.speed import loops
-from notes.engine import slot_track_channel
+from notes.engine import slot_port, slot_ports, slot_track_channel
 
 FORMAT = "MidiPortalSequence"
 MAGIC = b"PortalSequenceData"
@@ -302,8 +302,9 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None):
     """dms_data's work: the file's data fed to the Packer z as it's made."""
     feed = z.add
 
-    def track_head(channel, name, events, conductor=False):  # events = how many bytes of events follow
-        head = (item(1000, b"\0\0") + item(1001, bytes([channel])) + item(1002, name) + item(1003, bytes([conductor]))
+    def track_head(channel, name, events, conductor=False, port=0):  # events = how many bytes of events follow
+        head = (item(1000, struct.pack("<H", port)) + item(1001, bytes([channel])) + item(1002, name)
+                + item(1003, bytes([conductor]))
                 + item(1004, bytes([channel == 9 and drums and not conductor])) + TRACK_SETTINGS)
         feed(struct.pack("<HI", 1003, len(head) + events + len(track_tail(0))) + head)
 
@@ -318,17 +319,19 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None):
     feed(events + track_tail(0))
     count = int(notes[:, 4].max()) + 1 if len(notes) else 0
     order, cuts = track_orders(notes, count, z.pool)
+    ports = slot_ports(count, cc, use10)  # (Output port A, B, ... as the MIDI export's)
     for slot in track_slots(notes, pad).tolist():
         mine = order[cuts[slot]:cuts[slot + 1]]
+        port = slot_port(slot, use10) if ports else 0
         if (cc or {}).get(slot):  # (a Hz bass's CC messages among its notes: made whole, they're few tracks)
             part = notes[mine]
             pieces = with_cc(note_rows(part), cc[slot])
-            track_head(slot_track_channel(slot, use10)[1], b"", sum(len(p) for p in pieces))
+            track_head(slot_track_channel(slot, use10)[1], b"", sum(len(p) for p in pieces), port=port)
             for p in pieces:
                 feed(bytes(p))
             feed(track_tail(max(int(part[:, 1].max()) if len(part) else 0, cc[slot][-1][0])))
             continue
-        track_head(slot_track_channel(slot, use10)[1], b"", len(mine) * NOTE.itemsize)
+        track_head(slot_track_channel(slot, use10)[1], b"", len(mine) * NOTE.itemsize, port=port)
         end = 0
         for at in range(0, len(mine), PIECE):
             part = notes[mine[at:at + PIECE]]

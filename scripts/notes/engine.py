@@ -21,8 +21,9 @@ from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX
 from notes.between import KINDS as BETWEEN_KINDS, clean_between
 from notes.envelope import env_values, velocity_env
 from notes.joined import clean_joined, is_joined, joined_paths
-from notes.hzbass import (HZ_KINDS, clean_hz, heard_layers, layers_of, note_lengths, velocity_parts, with_layers,
-                          without_cc)
+from notes.hzbass import (HZ_KINDS, clean_hz, heard_layers, layers_of, left_edge, note_lengths, own_channels,
+                          velocity_parts, with_layers, without_cc)
+from notes.hz_cc import voice_hz, voices
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
@@ -543,11 +544,13 @@ def shape_notes_tracks(sh, ppq, keys=128):
 
 def made_from(sh):
     """sh as its notes are made from: a Hz bass without its CC lines (hz_settings.without_cc: they make no notes,
-    they're MIDI messages, hz_cc.py)."""
+    they're MIDI messages, hz_cc.py). Own channel per note stays only while it has some (own_channels)."""
     hz = sh.get("hz")
     if not isinstance(hz, dict):
         return sh
     got = without_cc(hz)
+    if hz.get("cc_own") and not own_channels(hz):
+        got = {k: v for k, v in got.items() if k != "cc_own"}
     return sh if got is hz else dict(sh, hz=got)
 
 
@@ -919,6 +922,21 @@ def layered_notes(sh, ppq, keys):
     return notes, tracks + levels * CLASH
 
 
+def voiced_notes(sh, ppq, keys):
+    """kind_notes_tracks of a Hz bass with its own channel per note (hz_cc.voices): each voice's notes made as a Hz
+    bass of their own (so chord lines don't merge), track = the voice."""
+    played, got = voices(sh["hz"], left_edge(sh))
+    mine = {}
+    for li, v, tones in got:
+        mine.setdefault((v, li), []).extend(tones)
+    notes, tracks = [np.zeros((0, 4), np.int64)], [np.zeros(0, np.int64)]
+    for (v, li), tones in sorted(mine.items(), key=lambda e: e[0]):
+        n, _ = kind_notes_tracks(dict(sh, hz=voice_hz(played, li, tones)), ppq, keys)
+        notes.append(np.asarray(n, np.int64).reshape(-1, 4))
+        tracks.append(np.full(len(notes[-1]), v, np.int64))
+    return np.concatenate(notes), np.concatenate(tracks)
+
+
 def clash_levels(lists):
     """Note lists ((start, end, key, ...) rows), in order -> per list, each note's level: 0 = no note of an earlier
     list on its key at the same time, else the lowest level where none is (notes touching end to start don't clash)."""
@@ -973,6 +991,8 @@ def _kind_notes_tracks(sh, ppq, keys):
         got = piece_notes(sh, ppq, keys, shape_notes_tracks)  # (the whole's glue / pages done first)
         if got is not None:
             return got
+    if sh["kind"] in HZ_KINDS and (sh.get("hz") or {}).get("cc_own"):  # (made_from keeps it only with CC lines)
+        return voiced_notes(sh, ppq, keys)
     if sh["kind"] in HZ_KINDS and (sh.get("hz") or {}).get("layers"):
         return layered_notes(sh, ppq, keys)
     end_dot = sh.get("end_dot", False)
@@ -1540,7 +1560,7 @@ def in_rounds(note_lists, slot_of, rounds, step, teams=None, stay=None):
 
 
 def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None, pastes=None,
-           held=None, back=None, ordered=None, rounds=None, keep=False, stay=None):
+           held=None, back=None, ordered=None, rounds=None, keep=False, stay=None, voice_slots=None):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -1572,6 +1592,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     its own, the same colours (in_rounds). stay: per shape True if its first round keeps its slots (in_rounds).
     keep: with "auto" a shape clashing with an earlier one moves whole to the next row of channels, its colours kept
     (assign_slots shape_of; an Add between group and a paste's pieces move as one shape).
+    voice_slots: {shape's number: None} to be told, with "auto", which slot each of its tracks got: filled in as
+    {track: slot} (a Hz bass with its own channel per note: each voice's CC lines go on its slot, hz_cc).
     """
     pastes = pastes or [None] * len(note_lists)
     tracks = tracks or [None] * len(note_lists)
@@ -1603,6 +1625,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
         paste_unit, paste_units = {}, {}  # (paste, track) -> its unit; paste -> its units
         taken = {}  # (unit -> its slot before channel 10 is skipped: a "solid" pinned shape's tracks)
         solid_teams = []  # (unit, (group, turn)) of those tracks
+        told = {}  # (shape's number -> its track numbers, its first unit: voice_slots)
         for lst, tr, sep, pin, team, pid in zip(note_lists, tracks, apart, pinned, teams, pastes):
             if pin is not None:
                 if fixed[len(unit_of)] == "solid" and len(lst):
@@ -1650,6 +1673,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                 if b:  # (a gate flipped piece: the whole paste's tracks by where they start unflipped, below)
                     paste_back.add(pid)
                 continue
+            if voice_slots is not None and len(unit_of) in voice_slots:
+                told[len(unit_of)] = (ids, len(units))
             unit_of.append(len(units) + which)
             if sep:
                 forced.append(range(len(units), len(units) + len(ids)))
@@ -1698,6 +1723,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                                                         16 if use10 in ("all", "order") else 15, loose), np.int64),
                                   use10)
         slot_of = [pin if u is None else unit_slots[u] for u, pin in zip(unit_of, pinned)]
+        for i, (ids, base) in told.items():
+            voice_slots[i] = dict(zip(ids.tolist(), unit_slots[base:base + len(ids)].tolist()))
         count = int(unit_slots.max()) + 1 if len(units) else 0
         if rounds and any(r is not None for r in rounds):
             slot_of, count = in_rounds(note_lists, slot_of, rounds, 16 if use10 else 15, teams, stay)
@@ -1725,3 +1752,19 @@ def slot_track_channel(slot, use10=False):
     """Slot number -> (track index, MIDI channel 0-15), one channel per track, skipping the drum channel (use10:
     not skipping it: slot k = channel k; render keeps the other shapes off those slots)."""
     return slot, slot % 16 if use10 else CHANNELS[slot % len(CHANNELS)]
+
+
+PORTS = 16  # MIDI ports players tell apart (measured: port 16 = port 0)
+
+
+def slot_port(slot, use10=False):
+    """The port of a slot's track when ports are written (slot_ports): each round of the channels its own, so slots
+    on one channel number never share a channel (16 rounds; a 17th is the 1st again)."""
+    return slot // (16 if use10 else len(CHANNELS)) % PORTS
+
+
+def slot_ports(slots, cc, use10=False):
+    """True when the tracks get ports (MIDI export, .dms): only with CC lines going out (a Hz bass's: hz_cc) and
+    more slots than one round of channels, so a CC can't reach another slot's notes on the same channel number (user
+    2026-10-21, picked over sharing channels); without CC lines files stay as they always were."""
+    return bool(cc) and slots > (16 if use10 else len(CHANNELS))

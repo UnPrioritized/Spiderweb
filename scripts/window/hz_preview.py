@@ -19,11 +19,11 @@ import numpy as np
 
 from files import errors
 from files.lang import tr
-from files.synth import RATE, Player, Synth, SynthError, events
+from files.synth import RATE, STREAM_PORTS, Player, Synth, SynthError, events
 from files.synth import cc_events as synth_cc
-from notes.hz_cc import cc_events, cc_key
-from notes.engine import CLASH
-from notes.hzbass import all_tones, left_edge
+from notes.hz_cc import cc_events, cc_key, voice_events
+from notes.engine import CHANNELS, CLASH
+from notes.hzbass import all_tones, left_edge, own_channels
 
 CHUNK = 2.0  # seconds of sound made in one piece
 AHEAD = 60.0  # seconds made ahead of the play line (or the view's left edge)
@@ -204,13 +204,20 @@ class Preview:
             return
         old, same_time = self.ev, (ppq, bpm) == (self.ppq, self.bpm)
         self.notes, self.ppq, self.bpm, self.shape = notes, ppq, bpm, shape
-        # (a layer's notes clashing with another's: on another channel with Multi channel, as in the MIDI)
-        chans = np.asarray(tracks) // CLASH if multi and tracks is not None and len(tracks) else None
-        # (its CC lines on every channel its notes are on, as in the MIDI)
-        used = (sorted({c + (c >= 9) for c in np.minimum(np.unique(chans), 14).tolist()}) if chans is not None
-                else [0])
-        cc = synth_cc([(t, s, a, b, c) for t, s, a, b in cc_events(sh, ppq, bpm) for c in used]) if sh else None
-        ev = events(notes, ppq, bpm, chans, cc) if notes is not None and len(notes) else None
+        voiced = multi and sh is not None and own_channels(sh.get("hz")) and tracks is not None
+        if voiced:  # (own channel per note: each voice on its own channel, port after port, with its own lines)
+            place = np.array([p * 16 + c for p in range(STREAM_PORTS) for c in CHANNELS], np.int64)
+            chans = place[np.asarray(tracks, np.int64) % len(place)]
+            cc = synth_cc([(t, s, a, b, int(place[v % len(place)])) for v, got in voice_events(sh, ppq, bpm).items()
+                           for t, s, a, b in got])
+        else:
+            # (a layer's notes clashing with another's: on another channel with Multi channel, as in the MIDI)
+            chans = np.asarray(tracks) // CLASH if multi and tracks is not None and len(tracks) else None
+            # (its CC lines on every channel its notes are on, as in the MIDI)
+            used = (sorted({c + (c >= 9) for c in np.minimum(np.unique(chans), 14).tolist()}) if chans is not None
+                    else [0])
+            cc = synth_cc([(t, s, a, b, c) for t, s, a, b in cc_events(sh, ppq, bpm) for c in used]) if sh else None
+        ev = events(notes, ppq, bpm, chans, cc, voiced) if notes is not None and len(notes) else None
         if ev is None or len(ev) <= 3:  # (no notes, or only ones above key 127, which can't sound: nothing to play)
             self.ev, self.span, self.last = None, (0, 0), 0
             self.clear()

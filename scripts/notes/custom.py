@@ -22,7 +22,7 @@ from notes.polygon import side_paths
 from notes.smooth import clean_level, smooth_path
 from notes.paths import (TOP_KEY, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
-from notes.hzbass import (HZ_DEFAULTS, KeyGrid, heard_layers, left_edge, off_cents, shifted_hz, squares,
+from notes.hzbass import (HZ_DEFAULTS, KeyGrid, heard_layers, left_edge, off_cents, own_channels, shifted_hz, squares,
                           threshold)  # (Hz bass: hzbass.py)
 from notes.shrink import (SAMPLES, inner_lines, inner_rows, merge as shrink_merge, minus as shrink_minus,
                           near_lines as shrink_near, proportion as shrink_proportion,
@@ -3190,7 +3190,10 @@ def _notes_groups(sh, ppq):
 def tracks_apart(sh):
     """True if the shape's tracks must get channels of their own with Multi channel: pasted notes (each copied
     track keeps its own channel even when the tracks don't overlap), Fill / Spam with "Outline" (the outline
-    and the inside) and "Colours" (each turn, any shape), and copies along a path that change colour (copypath.py)."""
+    and the inside) and "Colours" (each turn, any shape), copies along a path that change colour (copypath.py), and
+    a Hz bass with its own channel per note (each voice its own: hz_cc.voices)."""
+    if own_channels(sh.get("hz")):
+        return True
     if path_colours(sh):
         return True
     if sh["kind"] != "custom":

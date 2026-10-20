@@ -10,7 +10,8 @@ from files import errors
 from files.lang import tr, trn
 from files.mathexpr import calc
 from files.playback import BUILTIN, cc_list
-from files.synth import FONT_TYPES, Live, Synth, SynthError, silent_list
+from notes.engine import slot_ports
+from files.synth import FONT_TYPES, LIVE_PORTS, Live, Synth, SynthError, silent_list
 from notes.engine import slot_track_channel
 from window.hz_preview import VOICES
 from window.widgets import bad, good
@@ -53,7 +54,7 @@ class Playback:
         # (Overlapping shapes keep their colours: shapes overlapping on a key share its channel, render keep)
         self.player.shared = self.rows_apart()
         self.player.start(self.rendered, ppq, bpm, self.playhead, self.play_end(ppq, beats, self.playhead),
-                          self.picture_use10, cc_list(self.cc_messages(ppq, bpm), self.picture_use10))
+                          self.picture_use10, *self.play_cc(ppq, bpm))
         if self.out.name == BUILTIN:
             self.overload.start(self.out.handle, self.play_voices, self.play_guard.get(), keep)
         elif self.out.edo:
@@ -85,7 +86,14 @@ class Playback:
             return
         # (the end: never before where it is, so a note deleted at the end doesn't stop it at once)
         self.player.update(self.rendered, bpm, self.play_end(ppq, beats, self.player.position()), self.picture_use10,
-                           cc_list(self.cc_messages(ppq, bpm), self.picture_use10))
+                           *self.play_cc(ppq, bpm))
+
+    def play_cc(self, ppq, bpm):
+        """(the Hz basses' CC lines for the player, whether the slots go on ports): ports as the MIDI export writes
+        them (engine.slot_ports), Built-in BASSMIDI only (other MIDI outs have one port: 16 channels)."""
+        msgs = self.cc_messages(ppq, bpm)
+        ports = LIVE_PORTS if self.out.name == BUILTIN and slot_ports(self.slot_count, msgs, self.picture_use10) else 0
+        return cc_list(msgs, self.picture_use10, ports), ports
 
     def _play_tick(self):
         self._play_job = None

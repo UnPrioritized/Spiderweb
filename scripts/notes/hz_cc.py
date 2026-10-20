@@ -15,21 +15,77 @@ Rules (measured with several players before it was built, dev/data/planned-featu
 - then every CC the lines used goes back to where players start it (CC_START; the Pitch wheel's bend range back to
   2 keys), so nothing is left on the channel for what plays on it after (user);
 - a value is sent STEPS times a beat at most, only when it changes.
-The Pitch wheel sends its bend range (RPN 0 = WHEEL_KEYS) before its first value."""
+The Pitch wheel sends its bend range (RPN 0 = WHEEL_KEYS) before its first value.
+
+Own channel per note (the Voice box's "CC" dropdown, own_channels; user 2026-10-21, like MPE in synths): each note
+with what joins it (its slides, Legato, Glide) is a VOICE made as a Hz bass of its own (no chord lines merging),
+on a channel of its own with its own CC lines (a line played once per note follows its own note). A voice is
+busy from LEAD before its first note until RING after its sound ends (the lines' run-on), then the next note may
+take it; MOST_VOICES busy at once = a new note takes the one that's been ringing longest (my pick: the quietest)."""
 
 import json
 import math
 
 import numpy as np
 
-from notes.hzbass import (CC_FX, CC_NUMBER, CC_START, WHEEL_KEYS, cc_midi, fx_at, has_cc, heard_layers, left_edge,
-                          live, sound_span)
+from notes.hzbass import (CC_FX, CC_NUMBER, CC_START, WHEEL_KEYS, cc_midi, fx_at, glide_tones, has_cc, heard_layers,
+                          left_edge, legato_links, links, live, own_channels, sound_span)
 
 STEPS = 96  # values a beat at most
 LEAD = 0.05  # seconds the first values come before the first note
 RING = 3.0  # seconds the lines run on past the end of the sound
 CONTROL, BEND = 0xB0, 0xE0  # (MIDI status bytes, channel 0)
 DEFAULT_BEND_RANGE = 2  # keys: the bend range players start with (put back at the end)
+MOST_VOICES = 240  # voices at once: 15 channels a port x 16 ports (a 17th port is the 1st again)
+
+
+def voices(hz, left):
+    """Own channel per note: (each heard layer as played (live: the Arpeggio's notes), [(layer number, voice,
+    tones of one note and what joins it)] in time order). Voices count from 0; each is one track."""
+    per_beat = float(hz["bpm"]) / 60.0  # (beats a second)
+    played, groups = [], []
+    for li, layer in enumerate(heard_layers(hz)):
+        layer = live(layer, left)
+        played.append(layer)
+        tones = layer.get("tones") or ()
+        top = {n["id"]: n["id"] for n in tones}
+
+        def root(i):
+            while top[i] != i:
+                top[i] = top[top[i]]
+                i = top[i]
+            return i
+        pairs = ([(a["id"], b["id"]) for a, b, _ in links(tones)]
+                 + [(a["id"], b["id"]) for a, b in legato_links(layer.get("voice"), tones)]
+                 + [(a["id"], b) for b, got in glide_tones(layer).items() for a in got])
+        for a, b in pairs:
+            top[root(a)] = root(b)
+        joined = {}
+        for n in tones:
+            joined.setdefault(root(n["id"]), []).append(n)
+        for g in joined.values():
+            start = min(n["t"] for n in g) - LEAD * per_beat
+            end = sound_span(dict(layer, tones=g)) + RING * per_beat + 1.0 / STEPS
+            groups.append((start, end, li, g))
+    groups.sort(key=lambda g: g[0])
+    busy, out = [], []  # (each voice: the beat it's free again)
+    for start, end, li, g in groups:
+        v = next((v for v, b in enumerate(busy) if b <= start + 1e-9), None)
+        if v is None and len(busy) < MOST_VOICES:
+            v = len(busy)
+            busy.append(end)
+        elif v is None:
+            v = min(range(len(busy)), key=busy.__getitem__)
+        busy[v] = max(busy[v], end)
+        out.append((li, v, g))
+    return played, out
+
+
+def voice_hz(played, li, tones):
+    """One voice's tones of layer li as a Hz bass of their own (voices)."""
+    out = {k: v for k, v in played[li].items() if k not in ("cc_own", "layers", "layer", "_memo")}
+    out["tones"] = sorted(tones, key=lambda n: n["t"])
+    return out
 
 
 def bend_range(keys):
@@ -46,17 +102,24 @@ def message(name, value):
     return CONTROL, CC_NUMBER[name], value
 
 
-def cc_events(sh, ppq, bpm):
+def cc_events(sh, ppq, bpm, layers=None):
     """A Hz bass shape's CC lines as [(tick, status, data 1, data 2)] in time order (status without the channel),
-    [] when it has none (or no notes). Messages on one tick stay in their order (the bend range before its value)."""
+    [] when it has none (or no notes). Messages on one tick stay in their order (the bend range before its value).
+    layers = one voice's (each heard layer as played with only the voice's tones: own channel per note): its lines
+    follow the voice's own notes, whichever layer they're in."""
     hz = sh.get("hz")
     if sh.get("kind") is None or not isinstance(hz, dict) or not has_cc(hz):
         return []
     left = left_edge(sh)
-    layers = [live(l, left) for l in heard_layers(hz)]
+    voice = layers is not None
+    if not voice:
+        layers = [live(l, left) for l in heard_layers(hz)]
     tones = [n for l in layers for n in l.get("tones") or ()]
     if not tones:
         return []
+    if voice:
+        tones.sort(key=lambda n: n["t"])
+        layers = [dict(l, tones=tones) if l.get("fx") else l for l in layers if l.get("tones") or l.get("fx")]
     per_beat = bpm / 60.0  # (beats a second)
     first = left + min(n["t"] for n in tones) - LEAD * per_beat  # (song beats)
     end = left + max(sound_span(l) for l in layers) + RING * per_beat
@@ -99,19 +162,37 @@ def cc_key(hz):
                       for key in ("fx", "loop", "from", "sustain", "amount", "fit", "off")]
                      + [src.get("mod") if any(l.get("to") in CC_FX for l in (src.get("mod") or {}).get("links", ()))
                         else None, src.get("voice"), (src.get("solo"), src.get("mute"))])
+    parts.append(hz.get("cc_own"))
     return json.dumps(parts, sort_keys=True)
 
 
-def slot_events(shapes, rendered, ppq, bpm, only=None):
+def voice_events(sh, ppq, bpm):
+    """Own channel per note: {voice: its CC messages} (cc_events of each voice's own notes)."""
+    played, got = voices(sh["hz"], left_edge(sh))
+    mine = {}
+    for li, v, tones in got:
+        mine.setdefault(v, [[] for _ in played])[li].extend(tones)
+    return {v: cc_events(sh, ppq, bpm, [dict(l, tones=t) for l, t in zip(played, per)]) for v, per in mine.items()}
+
+
+def slot_events(shapes, rendered, ppq, bpm, only=None, voice_slots=None):
     """{slot: [(tick, status, data 1, data 2)]}: every Hz bass's CC messages on each slot (= channel, track) its
     notes are on in rendered ((start, end, pitch, velocity, slot, owner) rows, owner = the shape's number). only =
-    the shapes' numbers to take (None: all). Several shapes on one slot: their messages merged in time order."""
+    the shapes' numbers to take (None: all). Several shapes on one slot: their messages merged in time order.
+    voice_slots = {shape's number: {voice: slot}} (render's, Multi channel): a Hz bass with its own channel per note
+    sends each voice's lines on that voice's slot only; without one (Single channel) as one channel."""
     out = {}
     if not len(rendered):
         return out
     rendered = np.asarray(rendered)
     for i, sh in enumerate(shapes):
         if only is not None and i not in only or not has_cc(sh.get("hz") or {}):
+            continue
+        slots = (voice_slots or {}).get(i)
+        if slots is not None and own_channels(sh["hz"]):
+            for v, events in voice_events(sh, ppq, bpm).items():
+                if events and v in slots:
+                    out.setdefault(int(slots[v]), []).extend(events)
             continue
         events = cc_events(sh, ppq, bpm)
         if not events:

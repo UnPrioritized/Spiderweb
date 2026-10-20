@@ -12,7 +12,7 @@ import numpy as np
 
 from files.lang import tr
 from files.system import WINDOWS, wintypes
-from notes.engine import CHANNELS
+from notes.engine import CHANNELS, slot_port
 from notes.hz_settings import CC_NUMBER, CC_START
 
 MAPPER_NAME = "Windows default (MIDI Mapper)"
@@ -24,10 +24,11 @@ MAPPER = 0xFFFFFFFF
 # 31-EDO sound (Built-in BASSMIDI only): row r = 31-EDO step r above C0. Each step of the octave has its own
 # channel (EDO_FIRST + step), pitch-bent once when the synth opens (EDO_BENDS, at the usual +-2 key bend range),
 # so any number of notes can sound at once and the note colours' channels don't matter. A message to channel 16
-# or past carries the first channel of its group of 16 in its top byte (synth.Live.send).
+# or past carries its group of 16's number in its top byte (synth.Live.send). Channels 16-95 = ports 2-6's
+# (a Hz bass's own channel per note: synth.LIVE_PORTS), so 31-EDO's come after them.
 STACKED = 512  # notes still sounding on one channel at Stop past which it gets one "all notes off" (Player.stop)
 EDO = 31
-EDO_FIRST = 16
+EDO_FIRST = 96  # (synth.LIVE_PORTS x 16)
 _EDO_KEYS = np.array([round(s * 1200 / EDO / 100) for s in range(EDO)], np.int64)  # nearest key above C, per step
 EDO_BENDS = [8192 + round((s * 1200 / EDO - 100 * int(_EDO_KEYS[s])) / 100 * 4096) for s in range(EDO)]
 
@@ -37,7 +38,7 @@ def edo_code(rows):
     rows = np.asarray(rows, np.int64)
     step = rows % EDO
     ch = EDO_FIRST + step
-    return (ch & 15) | (12 + 12 * (rows // EDO) + _EDO_KEYS[step]) << 8 | (ch - ch % 16) << 24
+    return (ch & 15) | (12 + 12 * (rows // EDO) + _EDO_KEYS[step]) << 8 | (ch >> 4) << 24
 
 try:
     _winmm = ctypes.WinDLL("winmm")
@@ -222,7 +223,7 @@ class _Ons:
     """The notes to play, in the order they start: only the order is worked out (the notes stay where they are, so
     millions take little memory), and they're turned into Python numbers a batch at a time as they're played."""
 
-    def __init__(self, notes, t0, t1, use10, tune=False):
+    def __init__(self, notes, t0, t1, use10, tune=False, ports=0):
         s = notes[:, 0]
         if tune:  # (31-EDO: every row fits in the synth's 128 keys)
             keep = np.flatnonzero((s >= t0) & (s < t1))
@@ -234,6 +235,8 @@ class _Ons:
             keep, starts = keep[order], starts[order]
             del order
         self.notes, self.keep, self.starts, self.use10, self.tune = notes, keep, starts, use10, tune
+        self.ports = ports  # (the synth's ports, 0 = none: each slot on its port's channels as the MIDI
+        # export writes them, engine.slot_ports, round again past the last)
 
     def __len__(self):
         return len(self.keep)
@@ -250,6 +253,8 @@ class _Ons:
                             part[:, 3].tolist()))
         slot = part[:, 4]
         ch = slot % 16 if self.use10 else np.array(CHANNELS, np.int64)[slot % len(CHANNELS)]  # (slot_track_channel)
+        if self.ports:
+            ch = ch | slot // (16 if self.use10 else len(CHANNELS)) % self.ports << 24  # (slot_port)
         return list(zip(part[:, 0].tolist(), part[:, 1].tolist(), (ch | part[:, 2] << 8).tolist(),
                         part[:, 3].tolist()))
 
@@ -261,12 +266,15 @@ CC_RESET = [(CC_NUMBER[n], CC_START[n]) for n in CC_NUMBER]
 RANGE_RESET = [(101, 0), (100, 0), (6, 2), (38, 0), (101, 127), (100, 127)]
 
 
-def cc_list(messages, use10):
+def cc_list(messages, use10, ports=0):
     """{slot: [(tick, status, data 1, data 2)]} (hz_cc.slot_events) -> [(tick, message)] in time order, each a short
-    MIDI message on its slot's channel (as _Ons.batch / slot_track_channel)."""
+    MIDI message on its slot's channel (as _Ons.batch / slot_track_channel; ports = the synth's ports: + its port
+    << 24)."""
     out = []
     for slot, events in messages.items():
         ch = slot % 16 if use10 else CHANNELS[slot % len(CHANNELS)]
+        if ports:
+            ch |= slot_port(slot, use10) % ports << 24
         out += [(t, s | ch | a << 8 | b << 16) for t, s, a, b in events]
     out.sort(key=lambda e: e[0])
     return out
@@ -283,17 +291,18 @@ def cc_before(ccs, tick):
         if kind == 0xB0 and (m >> 8) & 0x7F in RPN:
             out.append(m)
         else:
-            last[m & 0x7FFF if kind == 0xB0 else m & 0xFF] = m
+            last[(m & 0x7FFF if kind == 0xB0 else m & 0xFF) | m & 0xFF000000] = m  # (its port too)
     return out + list(last.values())
 
 
 def _cc_kind(m):
     """(channel, CC number / "bend") of a message cc_list made, for Player.stop's putting back; None: one of the
     bend range's (put back with the pitch bend)."""
+    ch = m & 0xFF00000F  # (with its port)
     if m & 0xF0 == 0xE0:
-        return m & 0x0F, "bend"
+        return ch, "bend"
     n = (m >> 8) & 0x7F
-    return (m & 0x0F, n) if n in dict(CC_RESET) else (m & 0x0F, None)
+    return (ch, n) if n in dict(CC_RESET) else (ch, None)
 
 
 class Player:
@@ -309,6 +318,7 @@ class Player:
         self.cc_sent = set()  # (channel, CC number or "bend") a Hz bass's CC lines sent a value on: put back at stop
         self.tune = False  # (31-EDO: see start)
         self.shared = False  # (set before start: overlapping notes may share a channel, a key sounds until its last)
+        self.ports = False  # (see start)
         self._clock = None
         self._swap = None  # new notes ready for the playing thread (_Ons)
         self._wanted = None  # new notes waiting to be put in order (notes, use10)
@@ -320,10 +330,13 @@ class Player:
     def running(self):
         return self.thread is not None and self.thread.is_alive()
 
-    def start(self, notes, ppq, bpm, start_beat, stop_beat, use10=False, cc=()):
+    def start(self, notes, ppq, bpm, start_beat, stop_beat, use10=False, cc=(), ports=0):
         """Play from start_beat until stop_beat (notes: rendered [start, end, pitch, vel, slot, ...] in ticks, never
         changed in place; use10: the slots use channel 10 too, engine.slot_track_channel; cc = other MIDI messages,
-        cc_list: the values before start_beat are sent first). 31-EDO: no cc (its channels aren't the notes')."""
+        cc_list: the values before start_beat are sent first; ports: the synth's ports, each slot on its port's
+        channels (engine.slot_ports; Built-in BASSMIDI only, synth.LIVE_PORTS). 31-EDO: no cc (its channels aren't
+        the notes')."""
+        self.ports = 0 if self.out.tuned else ports
         self.stop()
         self.ppq, self.start_beat, self.stop_beat = ppq, start_beat, stop_beat
         self.tune = self.out.tuned  # (31-EDO: kept until the next start, so note-offs match their note-ons)
@@ -336,11 +349,12 @@ class Player:
         self.thread = threading.Thread(target=self._run, args=(notes, use10, () if self.tune else cc), daemon=True)
         self.thread.start()
 
-    def update(self, notes, bpm, stop_beat, use10=False, cc=()):
+    def update(self, notes, bpm, stop_beat, use10=False, cc=(), ports=0):
         """The notes / tempo changed while playing (same PPQ): play on with them. Notes already sounding end where
         they would have; new notes starting before the line aren't played (like a start from the line)."""
         if not self.running:
             return
+        self.ports = 0 if self.tune else ports
         self.stop_beat = stop_beat
         spt = 60 / bpm / self.ppq
         clock = self._clock
@@ -361,7 +375,7 @@ class Player:
                     self._sorting = False
                     return
                 (gen, notes, use10, cc), self._wanted = self._wanted, None
-            ons = _Ons(notes, self.start_beat * self.ppq, self.stop_beat * self.ppq, use10, self.tune)
+            ons = _Ons(notes, self.start_beat * self.ppq, self.stop_beat * self.ppq, use10, self.tune, self.ports)
             if self._wanted is None and gen == self._gen:  # (changed again meanwhile: those first)
                 self._swap = (ons, cc)
 
@@ -379,7 +393,7 @@ class Player:
         t0 = self.start_beat * self.ppq
         tune = self.tune
         shared = tune or self.shared
-        ons = _Ons(notes, t0, self.stop_beat * self.ppq, use10, tune)
+        ons = _Ons(notes, t0, self.stop_beat * self.ppq, use10, tune, self.ports)
         del notes
         self._clock = (clock(), t0, self.spt)
         held = self.held = {}

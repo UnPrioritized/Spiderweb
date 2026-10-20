@@ -52,6 +52,11 @@ _CONFIG_UPDATEPERIOD = 1
 _CONFIG_MIDI_COMPACT = 0x10400
 _EV_END, _EV_NOTE, _EV_PROGRAM, _EV_PITCH, _EV_DRUMS, _EV_TEMPO = 0, 1, 2, 4, 6, 62
 _EV_PITCHRANGE = 5
+MOST_CHANNELS = 128  # a BASSMIDI stream's most channels (measured 2026-10-21: 129+ refused, error 20; an event
+# list's notes past 127 silent)
+STREAM_PORTS = MOST_CHANNELS // 16  # ports (16 channels each) the Hz preview's stream has
+LIVE_PORTS = 6  # ... Live's: then 31-EDO's channels (playback.EDO_FIRST)
+LIVE_CHANNELS = MOST_CHANNELS
 # the control changes a Hz bass's CC lines send (hz_cc.py) as BASSMIDI's own events: Volume, Pan, Expression, Cutoff
 _EV_CC = {7: 12, 10: 13, 11: 14, 74: 25}
 _EVENTS_RAW = 0x10000
@@ -167,11 +172,11 @@ def cc_events(messages):
     return np.array(out, EVENT) if out else np.zeros(0, EVENT)
 
 
-def events(notes, ppq, bpm, chans=None, cc=None):
+def events(notes, ppq, bpm, chans=None, cc=None, exact=False):
     """The notes (rows start, end, key, velocity, ... in ticks) as BASSMIDI's event list: one channel (chans: each
-    note's channel, never 10's), program 0, one tempo. At the same tick a note's end comes before the next start.
-    Keys above 127 are left out. cc = BASSMIDI events (cc_events) put among them: on a shared tick after the
-    notes' ends, before their starts."""
+    note's channel, never 10's; exact: chans are the stream's channels as they are, past 16 too), program 0, one
+    tempo. At the same tick a note's end comes before the next start. Keys above 127 are left out. cc = BASSMIDI
+    events (cc_events) put among them: on a shared tick after the notes' ends, before their starts."""
     notes = np.asarray(notes)
     keep = notes[:, 2] <= 127 if len(notes) else np.zeros(0, bool)
     notes = notes[keep] if len(notes) else notes.reshape(0, 4)
@@ -184,7 +189,9 @@ def events(notes, ppq, bpm, chans=None, cc=None):
     body["tick"][:n], body["tick"][n:] = notes[:, 0], notes[:, 1]
     body["param"][:n] = notes[:, 2] | (np.clip(notes[:, 3], 1, 127) << 8)
     body["param"][n:] = notes[:, 2]  # (velocity 0 = the note ends)
-    if chans is not None:
+    if chans is not None and exact:
+        body["chan"][:n] = body["chan"][n:] = np.asarray(chans, np.int64)[keep]
+    elif chans is not None:
         c = np.minimum(np.asarray(chans, np.int64)[keep], 14)
         body["chan"][:n] = body["chan"][n:] = c + (c >= 9)
     if cc is not None and len(cc):
@@ -636,7 +643,8 @@ def live_limit(st, x):
 
 
 class Live:
-    """A BASSMIDI stream with 48 channels (0-15 as on any GM synth, but 10 is a piano too; 16-46 = 31-EDO's steps, each
+    """A BASSMIDI stream with LIVE_CHANNELS channels (0-15 as on any GM synth, but 10 is a piano too; 16-95 =
+    ports 2-6's channels, 16 each, for a Hz bass's own channel per note; 96-126 = 31-EDO's steps, each
     pitch-bent once here, playback.EDO_BENDS) that sounds each message the moment it's sent, set up like the
     common BASSMIDI MIDI-out driver (user, 2026-10-07: Player's Limiter + Python feeding the sound pumped and stuttered next to it): BASS plays the stream itself, straight into the sound device's mix (no
     Python in the sound thread, so a busy window can't starve it), full volume and no limiter (too loud = clipped,
@@ -655,8 +663,8 @@ class Live:
             raise SynthError("synth.no_device")
         bass, midi = synth.bass, synth.midi
         self.synth, self.font_path = synth, synth.font_path
-        self.handle = midi.BASS_MIDI_StreamCreate(48, _SAMPLE_FLOAT | _MIDI_ASYNC | (_MIDI_NOFX if nofx else 0),
-                                                  RATE)
+        self.handle = midi.BASS_MIDI_StreamCreate(LIVE_CHANNELS,
+                                                  _SAMPLE_FLOAT | _MIDI_ASYNC | (_MIDI_NOFX if nofx else 0), RATE)
         if not self.handle:
             raise SynthError("synth.failed", err=bass.BASS_ErrorGetCode())
         self.font = synth._take()
@@ -674,12 +682,14 @@ class Live:
             self.set_limiter(True)
         # channel 10 plays the piano like the others (user, 2026-10-11: "Use channel 10" is for its colour; nothing
         # in Spiderweb is meant as drums)
-        midi.BASS_MIDI_StreamEvent(h, 9, _EV_DRUMS, 0)
+        for port in range(LIVE_PORTS):  # (every port's channel 10)
+            midi.BASS_MIDI_StreamEvent(h, port * 16 + 9, _EV_DRUMS, 0)
         midi.BASS_MIDI_StreamLoadSamples(h)  # (program 0: no wait at the first notes)
         from files.playback import EDO_BENDS, EDO_FIRST
+        self._rpn = {}  # (channel past 16, CC 101 / 100: the bend range being set, send)
         for step, bend in enumerate(EDO_BENDS):
             ch = EDO_FIRST + step
-            self.send(0xE0 | ch & 15 | (bend & 0x7F) << 8 | (bend >> 7) << 16 | (ch - ch % 16) << 24)
+            self.send(0xE0 | ch & 15 | (bend & 0x7F) << 8 | (bend >> 7) << 16 | (ch >> 4) << 24)
         if not bass.BASS_ChannelPlay(h, 0):
             err = bass.BASS_ErrorGetCode()
             self.close()
@@ -732,19 +742,27 @@ class Live:
 
     def send(self, msg):
         """One short MIDI message (status | data1 << 8 | data2 << 16, as a MIDI-out device takes it; channels past 16:
-        + the first channel of its group of 16 << 24, the status naming the channel within it). Those go one event
+        + its group of 16's number << 24 (= its port), the status naming the channel within it). Those go one event
         at a time naming the channel: raw messages with the group added to the mode all land on the group's FIRST
-        channel (measured 2026-10-10). Only note on / off and pitch bend are sent there."""
+        channel (measured 2026-10-10). Only note on / off, pitch bend, the CCs in _EV_CC and the bend range (RPN 0)
+        are sent there."""
         if not self.handle:
             return
         if msg < 1 << 24:
             self.synth.midi.BASS_MIDI_StreamEvents(self.handle, _EVENTS_RAW, ctypes.byref(ctypes.c_uint32(msg)), 3)
             return
-        ch, kind, a, b = (msg >> 24) + (msg & 15), msg & 0xF0, (msg >> 8) & 0x7F, (msg >> 16) & 0x7F
+        ch, kind, a, b = (msg >> 24) * 16 + (msg & 15), msg & 0xF0, (msg >> 8) & 0x7F, (msg >> 16) & 0x7F
+        event = self.synth.midi.BASS_MIDI_StreamEvent
         if kind == 0xE0:
-            self.synth.midi.BASS_MIDI_StreamEvent(self.handle, ch, _EV_PITCH, a | b << 7)
+            event(self.handle, ch, _EV_PITCH, a | b << 7)
         elif kind in (0x80, 0x90):
-            self.synth.midi.BASS_MIDI_StreamEvent(self.handle, ch, _EV_NOTE, a | (b << 8 if kind == 0x90 else 0))
+            event(self.handle, ch, _EV_NOTE, a | (b << 8 if kind == 0x90 else 0))
+        elif kind == 0xB0 and a in _EV_CC:
+            event(self.handle, ch, _EV_CC[a], b)
+        elif kind == 0xB0 and a in (101, 100):
+            self._rpn[ch, a] = b
+        elif kind == 0xB0 and a == 6 and self._rpn.get((ch, 101)) == 0 and self._rpn.get((ch, 100)) == 0:
+            event(self.handle, ch, _EV_PITCHRANGE, b)
 
     def position(self):
         """Bytes of sound made so far (8 a frame)."""

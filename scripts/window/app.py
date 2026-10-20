@@ -30,7 +30,7 @@ from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
                             turn_velocities, why_not as gate_why_not)
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
-from notes.hzbass import fit_length
+from notes.hzbass import fit_length, own_channels
 from notes.mask import (MASK_DEFAULTS, as_used, can_mask, is_mask, mask_view, picture_like, pinned_slots, silent,
                         slot_pal, slot_rule, tidy_groups)
 from notes.merge import has_colours, merge_parts, velocity_reversed as merge_vrev
@@ -127,7 +127,8 @@ class Stopped(Exception):
 def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False, order=False,
               keep=False):
     """Every shape's notes together, overlaps / channels worked out: (colours each shape asks for, channel 10 used
-    (slot k = channel k, slot_track_channel), rendered, slot count). all16: the project's "Use channel 10" (every
+    (slot k = channel k, slot_track_channel), rendered, slot count, {Hz bass's number: {voice: slot}} for those with
+    their own channel per note (render voice_slots)). all16: the project's "Use channel 10" (every
     shape may use it, not only pictures). Touches no Tk: also made in a background thread (App.notes_rested).
     quiet: every mask's own notes left out (what the masks show: App.pattern). rounds: the project's "New channels
     each Colours round" (App.rounds_apart). order: its "Channels 1-16 in order" (App.in_order). keep: Settings →
@@ -153,7 +154,9 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
     # merged into the last (pasted notes keep their tracks)
     # (a Hz bass layer's notes clashing with another's: another channel, not another colour asked for)
-    wanted = [0 if t is None or "notes" in sh else len(np.unique(np.asarray(t) % CLASH)) for sh, (_, t) in zip(shapes, got)]
+    # (a Hz bass with its own channel per note: one channel a voice, not a colour asked for)
+    wanted = [0 if t is None or "notes" in sh or own_channels(sh.get("hz")) else len(np.unique(np.asarray(t) % CLASH))
+              for sh, (_, t) in zip(shapes, got)]
     most = most_colours(all16)
     got = [(n, capped_colours(t % CLASH, most) + t // CLASH * CLASH if w > most else t) for (n, t), w in zip(got, wanted)]
     # (pictures using channel 10 too: one setting for the project, kept with every picture; an Apply mask copy made
@@ -167,14 +170,15 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     # (with all16 the shapes use channel 10 too, but only as their 16th: render's "all"; in order: "order")
     # (merged shapes and Nested / Tiles / Ripples fills take channels by colour number, not by which colour starts
     # first: a flipped or moved copy keeps its colours, user)
+    voice_slots = {i: None for i, sh in enumerate(shapes) if own_channels(sh.get("hz"))} if mode == "auto" else {}
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
                              pins, ("order" if order else "all") if all16 else use10, teams,
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
                              [is_sustained(sh) or sh.get("held") is True for sh in shapes],
                              [colours_back(sh) for sh in shapes],
                              [bool(sh.get("merge")) or has_pattern(sh) for sh in shapes], laps, keep,
-                             [r and not has_colours(sh, turns=True) for sh, r in zip(shapes, took)])
-    return wanted, use10 or all16, rendered, slots
+                             [r and not has_colours(sh, turns=True) for sh, r in zip(shapes, took)], voice_slots)
+    return wanted, use10 or all16, rendered, slots, {i: s for i, s in voice_slots.items() if s is not None}
 
 
 class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, MaskPanel, PolygonPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
@@ -260,7 +264,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.hz_defaults = {"lo": 48, "hi": 58}  # the keys a new Hz bass repeats
         self.hz_preview = clean_preview({})  # the Hz bass preview's settings (hz_preview.py; with the window's)
         self.synth = None  # the built-in synth (files/synth.py), started when the preview or Built-in BASSMIDI is first used
-        self.rendered, self.slot_count = NO_NOTES, 0  # (start, end, pitch, velocity, slot, owner) rows
+        self.rendered, self.slot_count, self.voice_slots = NO_NOTES, 0, {}  # (start, end, pitch, velocity, slot, owner) rows
         self.drawn, self.mask_covered = NO_NOTES, set()  # the notes as painted with the masks (mask.mask_view)
         self.pattern = NO_NOTES  # rendered without the masks' own notes: what masks show (= rendered but in Single)
         self.note_counts = []  # notes per shape in rendered
@@ -1285,7 +1289,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                              keep=self.keep_colours.get())
             if self._notes_worked != worked:
                 self._notes_time = time.perf_counter() - started
-        wanted, self.picture_use10, self.rendered, self.slot_count = made
+        wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots = made
         started = time.perf_counter()
         self.pattern = self.rendered
         if self.channel_mode.get() == "single" and any(is_mask(sh) and not silent(sh) for sh in self.shapes):

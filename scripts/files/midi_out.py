@@ -6,7 +6,7 @@ import numpy as np
 
 from files.safefile import write_bytes
 from files.speed import loops
-from notes.engine import slot_track_channel
+from notes.engine import slot_port, slot_ports, slot_track_channel
 
 PPQ_WARN = 32767  # a PPQ this high or higher: many MIDI programs can't open the file; still written
 MAX_DELTA = (1 << 28) - 1  # the longest wait between two events a MIDI file can hold (4 bytes)
@@ -130,7 +130,8 @@ def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None):
     """notes: [start, end, pitch, velocity, slot, ...]. Every slot gets its own track with a single channel
     (use10: channel 10 used too, slot_track_channel; pad: track_slots). Nothing marks channel 10 as not drums
     (user, 2026-10-12: no messages that could switch something on in their own setup). cc = {slot: messages} for
-    the slots' tracks (the Hz basses' CC lines the user drew: hz_cc.slot_events)."""
+    the slots' tracks (the Hz basses' CC lines the user drew: hz_cc.slot_events); with them past one round of
+    channels every track starts with its port (FF 21: engine.slot_ports)."""
     head = bytearray()
     head += vlq(0) + b"\xFF\x51\x03" + round(60_000_000 / bpm).to_bytes(3, "big")
     head += vlq(0) + bytes([0xFF, 0x58, 4, beats, 2, 24, 8])
@@ -151,11 +152,14 @@ def _pieces(notes, count, tracks, use10, start, cc):
         order = np.argsort(slots, kind="stable")
         cuts = np.searchsorted(slots[order], np.arange(count + 1))
         del slots
+    ports = slot_ports(count, cc, use10)
     for track in tracks.tolist():
         channel = slot_track_channel(track, use10)[1]
         mine = notes if count == 1 else notes[order[cuts[track]:cuts[track + 1]]]
         events = (cc_track(mine, channel, cc[track]) if cc.get(track) else track_events(mine, channel) if len(mine)
                   else [empty_track(channel)])
+        if ports:
+            events = [bytes([0, 0xFF, 0x21, 1, slot_port(track, use10)])] + events
         yield b"MTrk" + struct.pack(">I", sum(len(e) for e in events) + len(END))
         yield from events
         events = None

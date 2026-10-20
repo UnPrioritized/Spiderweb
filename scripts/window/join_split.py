@@ -646,7 +646,7 @@ class JoinSplit:
         from window.app import all_notes  # (app.py imports this file)
         # (the project's ticks as they are: all16 / in_order / rounds_apart are off outside Multi channel, hunt)
         all16 = self.use_ch10.get()
-        _, use10, multi, _ = all_notes(self.shapes, self.ppq, self.keys, "auto", self.channel_split, all16,
+        _, use10, multi, _, _ = all_notes(self.shapes, self.ppq, self.keys, "auto", self.channel_split, all16,
                                        self.notes_tracks, rounds=self.new_rounds.get(),
                                        order=all16 and self.ch10_order.get(), keep=self.keep_colours.get())
         return use10, multi
@@ -661,7 +661,7 @@ class JoinSplit:
         gid = group_of(sh)
         alone = [s for s in self.shapes if s is sh or gid is not None and group_of(s) == gid]
         all16 = self.use_ch10.get()
-        _, used10, rows, _ = all_notes(alone, self.ppq, self.keys, "auto", self.channel_split, all16, self.notes_tracks,
+        _, used10, rows, _, _ = all_notes(alone, self.ppq, self.keys, "auto", self.channel_split, all16, self.notes_tracks,
                                        rounds=self.new_rounds.get(), order=all16 and self.ch10_order.get())
         rows = rows[rows[:, 5] == next(k for k, s in enumerate(alone) if s is sh)].copy()
         rows[:, 5] = i
