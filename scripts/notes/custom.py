@@ -3333,6 +3333,7 @@ def check_notes(text):
     except (TypeError, ValueError, zlib.error):
         return False
     return (len(rows) > 0 and (rows[:, 0] >= 0).all() and (rows[:, 1] > rows[:, 0]).all() and (rows[:, 2] >= 0).all()
+            and (rows[:, 2] <= 10 ** 4).all()  # (engine.KEYS_FAR: key rows past it are a changed file)
             and (rows[:, 3] >= 1).all() and (rows[:, 3] <= 127).all() and (rows[:, 4] >= 0).all())
 
 

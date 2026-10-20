@@ -1727,17 +1727,39 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             messagebox.showerror(tr("app.spiderweb_2"), tr("app.shared_newer") if e.why == "newer" else
                                  tr("app.shared_broken"), parent=self)
             return
-        if not self.confirm_big(shapes):
+        except MemoryError:
+            messagebox.showerror(tr("app.spiderweb_2"), tr("big_ask.out_of_memory"), parent=self)
             return
-        if any("merge" in sh for sh in shapes):
-            try:
-                shapes, left = read_shapes(got)
-            except ShareError:
-                messagebox.showerror(tr("app.spiderweb_2"), tr("app.shared_broken"), parent=self)
+        if not big_ask.ask_shapes(self, len(shapes)):
+            return
+        top = self.last_step()
+        try:
+            if not self.confirm_big(shapes):
                 return
-        self.remember_clip()
-        self.clipboard, self.clip_kind = shapes, "shapes"
-        clamped = self.paste(whole=True, at=at)
+            if any("merge" in sh for sh in shapes):
+                try:
+                    shapes, left = read_shapes(got)
+                except ShareError:
+                    messagebox.showerror(tr("app.spiderweb_2"), tr("app.shared_broken"), parent=self)
+                    return
+            clip = self.clipboard, self.clip_kind, self.seen_clip
+            self.remember_clip()
+            self.clipboard, self.clip_kind = shapes, "shapes"
+            clamped = self.paste(whole=True, at=at)
+        except Exception as e:  # (out of memory, or anything else: the shapes never stay half pasted, user)
+            if self.last_step() is not top:  # (the paste's step: taken back, not kept for Ctrl+Y)
+                kept = self._redo_kept
+                self._restore(self.undo_stack, self.redo_stack)
+                self.redo_stack.pop()
+                if kept:
+                    self.redo_stack[:] = kept[0]
+                self.sync_history()
+            if self.clipboard is shapes:  # (Ctrl+V again tries the line again, not an older copy)
+                self.clipboard, self.clip_kind, self.seen_clip = clip
+            if not isinstance(e, MemoryError):
+                raise
+            messagebox.showerror(tr("app.spiderweb_2"), tr("big_ask.out_of_memory"), parent=self)
+            return
         made = made_by(got)
         notes = ([trn("app.shared_left_out", left, n=left)] if left else []) + (
             [tr(f"share.made_{made[0]}", version=made[1])] if made else [])

@@ -8,6 +8,7 @@ import numpy as np
 
 HZ_DEFAULTS = {"key": 33, "cents": 0.0}
 MIN_LEN = 1 / 65536  # beats: a tone is never shorter (under a tick at the highest PPQ: one tick is always possible)
+LONGEST = 1e7  # beats: a tone starting or lasting past this is a changed file (engine.BEATS_FAR), left out
 TUNE = 50.0  # cents: how far a placed tone's own tune goes, up or down (half a key)
 AUTO = 3.0  # cents: Auto gates' threshold to start with
 AUTO_MOST = 50.0  # ... and the highest (past half a key, a fixed tone is nearer the next key than its own)
@@ -881,7 +882,7 @@ def clean_tones(tones):
             continue
         ok = all(math.isfinite(v) for v in [tone["t"], tone["len"], tone["cents"], tone.get("auto", 0.0), *leads]
                  + [v for s in tone["to"] for v in (s["out"], s["in"])])
-        if 0 <= tone["key"] <= 127 and ok:
+        if 0 <= tone["key"] <= 127 and ok and tone["t"] <= LONGEST and tone["len"] <= LONGEST:
             out.append(tone)
             old.append(leads if "id" not in n else None)
     order = sorted(range(len(out)), key=lambda i: (out[i]["t"], out[i]["key"]))

@@ -205,18 +205,24 @@ class ProjectFiles:
             "view": self.roll.view_state(), "playhead": self.playhead,
         }
 
-    def load_file(self, path, quiet=False):
+    def load_file(self, path, quiet=False, text=None):
         """Opens a project. Everything in it is read and checked before anything changes: a file that can't be
         used leaves the project as it was; a broken setting keeps the one there is now; a shape that can't be read
-        is left out and self.load_notes says so (tell_load_notes)."""
+        is left out and self.load_notes says so (tell_load_notes). Running out of memory (or any other error) while
+        its notes are made puts the project as it was back (user 2026-10-20: a shape stuck failing at every redraw).
+        text: the project as text instead of the file at path (put_back)."""
         self.load_notes = []
         try:
-            data, size = read_json(path), os.path.getsize(path)
+            data, size = (read_json(path), os.path.getsize(path)) if text is None else (json.loads(text), len(text))
             if not isinstance(data.get("shapes", []), list):
                 raise ValueError(tr("project.not_a_spiderweb_project"))
         except (OSError, ValueError) as e:
             if not quiet:
                 messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_open_project", e=e))
+            return False
+        except MemoryError:
+            if not quiet:
+                messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))
             return False
         wholes = data["wholes"] if isinstance(data.get("wholes"), list) else []
 
@@ -231,12 +237,17 @@ class ProjectFiles:
                     if sh:
                         out.append(sh)
             return out
-        with merges_unmade():  # (merged shapes' notes made only once the count is OK'd: they can be millions)
-            shapes = read()
-        if not quiet and not self.fits_memory(shapes, data.get("ppq")):
+        try:
+            with merges_unmade():  # (merged shapes' notes made only once the count is OK'd: they can be millions)
+                shapes = read()
+            if not quiet and not self.fits_memory(shapes, data.get("ppq")):
+                return False
+            if any("merge" in sh for sh in shapes):
+                shapes = read()
+        except MemoryError:
+            if not quiet:
+                messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))
             return False
-        if any("merge" in sh for sh in shapes):
-            shapes = read()
         shapes = paths_for_file(shapes, os.path.dirname(os.path.abspath(path)), False)  # (pictures' files)
         made = version_tuple(data.get("app_version")) if isinstance(data.get("app_version"), str) else None
         newer = made and made > version_tuple(VERSION) or type(data.get("version")) is int and data["version"] > 2
@@ -290,6 +301,7 @@ class ProjectFiles:
         pg = get(lambda: clean_polygon(data.get("polygon_defaults")))
         playhead = get(lambda: float(data.get("playhead", 0)))
 
+        was = project_json(self.project_data()), self.undo_stack[:], self.redo_stack[:], self._redo_kept
         self._opening = True  # (each box set would make the notes again: once, below)
         try:
             for key, value in boxes.items():
@@ -343,7 +355,19 @@ class ProjectFiles:
         self.undo_stack.clear()
         self.redo_stack.clear()
         self._redo_kept = None
-        self.on_project_change()
+        try:
+            self.on_project_change()
+        except Exception as e:  # (its notes couldn't be made: the project as it was, its undo steps too)
+            notes = self.load_notes
+            self.load_file(path, quiet=True, text=was[0])
+            self.undo_stack[:], self.redo_stack[:], self._redo_kept = was[1:]
+            self.load_notes = notes
+            self.sync_history()
+            if not isinstance(e, MemoryError):
+                raise
+            if not quiet:
+                messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))
+            return False
         self.show_colour_limit()  # (its "Use channel 10" in the open drawer / Image window)
         return True
 

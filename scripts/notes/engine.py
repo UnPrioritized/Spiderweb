@@ -117,6 +117,8 @@ def clean_basics(sh):
 
 
 FAR = 1e12  # no number in a shape is ever this big (a beat that far is long past what a MIDI file can reach)
+BEATS_FAR = 1e7  # a shape reaching past this beat (months of music) or key is a changed file: its notes alone could
+KEYS_FAR = 1e4  # take all the memory there is (keys are 0-255; hz_settings.LONGEST for Hz tones)
 
 
 def sane(x):
@@ -375,7 +377,22 @@ def clean_shape(sh):
     sub = clean_subtract(sh.get("subtract"))
     if sub is not None:  # its gates made shorter (subtract.py)
         out["subtract"] = sub
-    return out
+    # (again on what was read: a number written as text, "nan" or "1e400", got past sane as text; and where it
+    # reaches, its strokes too)
+    return out if sane(out) and within_reach(out) else None
+
+
+def within_reach(sh):
+    """True if a shape from a file stays within BEATS_FAR beats / KEYS_FAR keys (a custom shape's strokes too, as
+    placed by its frame)."""
+    pts = list(sh["pts"])
+    if sh["kind"] == "custom" and len(pts) == 3:
+        us = [u for st in sh["strokes"] for u in (st["box"][0::2] if "box" in st else [p[0] for p in st["pts"]])]
+        vs = [v for st in sh["strokes"] for v in (st["box"][1::2] if "box" in st else [p[1] for p in st["pts"]])]
+        (b0, p0), (b1, p1), (b2, p2) = pts
+        pts += [(b0 + u * (b1 - b0) + v * (b2 - b0), p0 + u * (p1 - p0) + v * (p2 - p0))
+                for u in (min(us), max(us)) for v in (min(vs), max(vs))]
+    return all(abs(b) <= BEATS_FAR and abs(p) <= KEYS_FAR for b, p in pts)
 
 
 def clean_hz_of(sh, out):

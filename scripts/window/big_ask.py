@@ -4,7 +4,8 @@ restart). Something that won't fit in the free memory at all is always asked, ti
 Actions: "notes" = making a shape with more than BIG notes (App.confirm_big, Range window), "midi" = Generate
 MIDI (memory only), "domino" = Copy to Domino (more than BIG notes: the program it's pasted into gets slow),
 "dms" = Export to Domino (more than BIG notes, like Copy), "open" = Open project (only when it won't fit at all).
-The same window warns before Copy to Domino fills a 10th track (ask_drums, "drums") and before an image with more
+The same window warns before Copy to Domino fills a 10th track (ask_drums, "drums"), before pasting more than
+1,000 shapes (ask_shapes, "shapes") and before an image with more
 than a million grid cells is made (image_window.big_ok, "image")."""
 
 import tkinter as tk
@@ -19,6 +20,7 @@ BIG = 1_000_000  # notes: asked past this (making shapes, Copy to Domino)
 # Export to Domino 36-43)
 PER_NOTE = {"notes": 300, "open": 300, "midi": 55, "domino": 150, "dms": 45}
 DRUM_TRACK = 10  # Copy to Domino: asked when the copy fills this many tracks (ask_drums)
+MANY_SHAPES = 1000  # pasting more shapes than this is asked first (ask_shapes)
 
 def gb(n):
     return f"{n / 1e9:.1f}"
@@ -49,6 +51,17 @@ def ask(app, action, notes, parent=None):
     go, skip = dialog(parent or app, tr("big_ask.title"), "\n\n".join(lines + [tr("big_ask.go")]), strong)
     if go and skip:
         app.big_skip.add(action)
+    return go
+
+
+def ask_shapes(app, count):
+    """Pasting more than MANY_SHAPES shapes (user 2026-10-20: a 3 KB shared line of 2,000 copies of one shape took
+    4 minutes to work out where they overlap, with far fewer notes than BIG). True = go ahead."""
+    if count <= MANY_SHAPES or "shapes" in app.big_skip:
+        return True
+    go, skip = dialog(app, tr("big_ask.title"), tr("big_ask.shapes", n=count), False)
+    if go and skip:
+        app.big_skip.add("shapes")
     return go
 
 
