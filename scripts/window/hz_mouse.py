@@ -116,6 +116,20 @@ class HzMouse:
         self.redraw()
         self.show_status(e)
 
+    def box_move_to(self, d, e):
+        """A kept Select box over nothing dragged from inside: it goes with the mouse, whole snap steps (Shift =
+        free) and whole keys, kept at beat 0 and the keys' ends. Notes it's moved onto aren't picked up."""
+        sb, dt = self.snap_beats(), self.beat_at(e.x) - d["beat"]
+        if sb and not e.state & SHIFT:
+            dt = round(dt / sb) * sb
+        boxes = d["box"]
+        dt = max(dt, -min(min(b0, b1) for b0, _, b1, _ in boxes))
+        dk = self.key_at(e.y) - d["key"]
+        dk = max(-1 - min(min(t, u) for _, t, _, u in boxes), min(127 - max(max(t, u) for _, t, _, u in boxes), dk))
+        self.box_kept = ([(b0 + dt, top + dk, b1 + dt, bottom + dk) for b0, top, b1, bottom in boxes], set())
+        self.redraw()
+        self.show_status(e)
+
     def sel_state(self):
         """The selected notes as the main window's undo step keeps them (App.sel_state): (their numbers, the kept
         Select boxes or None, how many notes there are), or None (no Hz bass shown)."""
@@ -175,8 +189,9 @@ class HzMouse:
     def on_kept_box(self, kept, e, hit):
         """Where the mouse is on the kept Select boxes: (1, 0) the right side (its corners too), (0, 0) inside (a
         note there wins), or None. The left side, top and bottom do nothing (user, like many MIDI programs); a slide's dot
-        wins over it all. With Ctrl only inside counts, notes too (a drag there moves a copy; Select tool only)."""
-        if not kept or not self.sel or hit and hit[0] in DOTS:
+        wins over it all. With Ctrl only inside counts, notes too (a drag there moves a copy; Select tool only). A box
+        over nothing works too (it moves / stretches alone, user: like many MIDI programs)."""
+        if not kept or hit and hit[0] in DOTS:
             return None
         side = boxes_side([self.box_rect(a) for a in kept], e.x, e.y, 5 * self.s)
         if e.state & CTRL:  # (the pencil's Ctrl+drag is its only box: a new one there)
@@ -231,6 +246,12 @@ class HzMouse:
             self.box_kept = (boxes, set(self.sel))
             self.drag = {"kind": "stretch", "side": on_box, "area": area, "boxes": boxes, "box": boxes,
                          "before": before, "orig": copy.deepcopy(self.tones), "name": tr("hz.step_stretch")}
+            return self.redraw()
+        if on_box and not self.sel:  # inside a box over nothing: it moves alone (Ctrl too: there's nothing to copy)
+            boxes = boxes_upright(kept)[0]
+            self.box_kept = (boxes, set())
+            self.drag = {"kind": "boxmove", "box": boxes, "beat": self.beat_at(e.x), "key": self.key_at(e.y),
+                         "before": before}
             return self.redraw()
         dup = None
         if on_box and e.state & CTRL:  # Ctrl inside: a drag moves a COPY of all it selected (user); let go without
@@ -338,6 +359,8 @@ class HzMouse:
             return
         if d["kind"] == "stretch":
             return self.stretch_to(d, e)
+        if d["kind"] == "boxmove":
+            return self.box_move_to(d, e)
         n = self.tones[d["i"]]
         beat, short = self.beat_at(e.x), self.shortest(e)
         if d["kind"] == "new":
@@ -586,6 +609,8 @@ class HzMouse:
             elif (not e.state & CTRL and self.tool.get() in ("select", "bend")
                     and self.preview_on.get()):  # a click, not a drag: the play line goes there
                 self.put_play_line(self.snap(d["from"][0], e))
+            return self.redraw()
+        if d["kind"] == "boxmove":  # (nothing in it: the box stays where it was let go)
             return self.redraw()
         if d.get("dup") and not d["moved"] and d["dup"]["click"] is not None:  # a Ctrl+click: in / out
             self.sel = set(self.sel) ^ {d["dup"]["click"]}
@@ -847,7 +872,7 @@ class HzMouse:
         that slide. A Select box being drawn: nothing (user, like many MIDI programs). The other notes stay as they are now; the drag ends (one undo step) and
         the pointer is the one for where the mouse is. A note still being placed just goes (no step)."""
         d = self.drag
-        if d["kind"] == "box":  # (nothing selected by it yet: user, like many MIDI programs)
+        if d["kind"] in ("box", "boxmove"):  # (nothing selected by it yet / in it: user, like many MIDI programs)
             return
         if d["kind"] == "new":
             return self.cancel_drag()
