@@ -161,7 +161,7 @@ def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None):
     their place in the bar) and runs to the bar line after the last; "note": it starts on the first note and ends
     with the last, so the first note pastes right at Domino's cursor. Every track shares that stretch (made longer
     for CC messages past the last note). cc = {slot: messages} (hz_cc.slot_events): control items on its track."""
-    cc = cc or {}
+    cc = domino_cc(cc)
     first, length = clip_span(notes, bar, start)
     length = max([length] + [ev[-1][0] - first + 1 for ev in cc.values() if ev])
     end = item(2009, item(1001, struct.pack("<I", length)))
@@ -249,16 +249,21 @@ def note_rows(notes, first=0):
     return rows
 
 
+RPN_CCS = (101, 100, 6, 38)  # (the pitch bend range's messages)
+
+
+def domino_cc(cc):
+    """{slot: messages} with what Domino can't hold left out: pitch bends and their bend range (the user's Domino
+    dropped every bend when it opened a MIDI file, 2026-10-21), so only plain control changes stay."""
+    kept = {s: [e for e in ev if e[1] == 0xB0 and e[2] not in RPN_CCS] for s, ev in (cc or {}).items()}
+    return {s: ev for s, ev in kept.items() if ev}
+
+
 def cc_item(tick, status, one, two):
-    """A MIDI message of a Hz bass's CC lines (hz_cc.py: control change or pitch bend, status without the channel) as
-    Domino's control item: CCM = the CC number (130 = pitch bend), the value stored minus where Domino's General MIDI
-    module counts it from (Pan and pitch bend from their middle, DMS_SPEC.md 7.1)."""
-    if status == 0xE0:
-        ccm, value = 130, (one | two << 7) - 8192
-    else:
-        ccm, value = one, two - (64 if one == 10 else 0)
-    return item(2003, item(1001, struct.pack("<I", tick)) + item(2001, struct.pack("<H", ccm))
-                + item(2002, item(0, struct.pack("<f", 0.0))) + item(2003, item(0, struct.pack("<f", value))))
+    """A control change of a Hz bass's CC lines (hz_cc.py, status without the channel) as Domino's control item:
+    CCM = the CC number, the value as is (measured: the user's Domino stores Pan 0-127 too, not from its middle)."""
+    return item(2003, item(1001, struct.pack("<I", tick)) + item(2001, struct.pack("<H", one))
+                + item(2002, item(0, struct.pack("<f", 0.0))) + item(2003, item(0, struct.pack("<f", float(two)))))
 
 
 def with_cc(rows, events, first=0):
@@ -294,7 +299,7 @@ def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True, cc=None)
     the notes are cut into tracks by one sort instead of a search through all of them for each track. cc = {slot:
     messages} (hz_cc.slot_events): control items on its track."""
     with Packer(DMS_LEVEL) as z:
-        return dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad, cc or {})
+        return dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad, domino_cc(cc))
 
 
 def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None):
