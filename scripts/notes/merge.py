@@ -50,9 +50,10 @@ def _merge(stay, slide, from_left, rest_slides=True):
     if from_left is None:
         from_left = comes_from_left(stay, moved)
     met = np.zeros(len(moved), bool)
-    shifts, by_key = [], {}
+    shifts, by_key, room = [], {}, True
     for key in np.unique(moved[:, 2]):
         rows = moved[:, 2] == key
+        behind = []
         if shapes is None:
             here = stay[stay[:, 2] == key]
         else:
@@ -62,6 +63,8 @@ def _merge(stay, slide, from_left, rest_slides=True):
                 if len(h) and (h[:, 1].max() > moved[rows, 0].min() if from_left
                                else h[:, 0].min() < moved[rows, 1].max()):
                     got.append(h)
+                elif len(h):
+                    behind.append(h)
             here = np.concatenate(got) if got else stay[:0]
         if not len(here):
             continue
@@ -69,6 +72,10 @@ def _merge(stay, slide, from_left, rest_slides=True):
             shift = here[:, 0].min() - moved[rows, 1].max()
         else:  # its first note's start meets the staying shape's last note's end
             shift = here[:, 1].max() - moved[rows, 0].min()
+        if behind:  # (slid back onto a shape left out as wholly behind: it can't go through it, audit)
+            b = np.concatenate(behind)
+            room = room and bool(moved[rows, 0].min() + shift >= b[:, 1].max() if from_left
+                                 else moved[rows, 1].max() + shift <= b[:, 0].min())
         moved[rows, :2] += shift
         met |= rows
         shifts.append(int(shift))
@@ -84,15 +91,16 @@ def _merge(stay, slide, from_left, rest_slides=True):
     if late:  # (slid before the song's start: everything waits)
         out[:, :2] += late
         rest[:, :2] += late
-    return out, rest, least, late, by_key
+    return out, rest, least, late, by_key, room
 
 
 def side_plan(stays, slide, right):
     """How Merge to right / left (keep shapes separate) slides the slide rows (start, end, pitch, ...) onto the stays
     (a list: each shape's rows): (each met key row's slide {key: ticks}, the smallest slide (the rows with nothing to
-    meet), how much later everything goes to stay after tick 0), or None when no row meets."""
+    meet), how much later everything goes to stay after tick 0, False when a row would go onto a shape left out as
+    behind it), or None when no row meets."""
     got = _merge(list(stays), slide, right)
-    return got and (got[4], got[2], got[3])
+    return got and (got[4], got[2], got[3], got[5])
 
 
 def mover(parts, way, skip=None):
@@ -167,16 +175,19 @@ def up_down_plan(stays, rows, up, top):
     high, least = spread(first, end, rk, count, False), spread(first, end, rk, count, True)
     far = 1 << 40
     low = np.full(count, far, np.int64)
+    under = np.full(count, -1, np.int64)  # (the highest note of the shapes left out)
     for s in stays:  # (per shape: left out where all its notes are below the piece's lowest)
         sk, at = (s[:, 2] if up else top - s[:, 2]), sounding(s)
         s_low, s_high = spread(*at, sk, count, True), spread(*at, sk, count, False)
         low = np.where(s_high >= least, np.minimum(low, s_low), low)
+        under = np.where(s_high >= least, under, np.maximum(under, s_high))
     used = high >= 0
     met = used & (low < far)
     if not met.any():
         return None
     move = np.where(met, low - 1 - high, top - high)
-    room = not (used & (move < -least)).any()  # (under it would be past key 0)
+    # (under it would be past key 0, or onto a shape left out as wholly below: it can't go through it, audit)
+    room = not (used & ((move < -least) | (least + move <= under))).any()
     move = np.where(used, np.maximum(move, -least), 0)
     wall = used & ~met
     code = move * 2 + wall

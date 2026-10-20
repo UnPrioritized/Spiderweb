@@ -575,7 +575,8 @@ def run_origins(sh, notes, ppq):
     if got is None:
         return None
     text = json.dumps(got[0], sort_keys=True)
-    whole = next((v[0] for k, v in _wholes.items() if k[0] == text and k[1] == ppq), None)
+    # (a copy of the list: the background notes thread may add one meanwhile, audit)
+    whole = next((v[0] for k, v in list(_wholes.items()) if k[0] == text and k[1] == ppq), None)
     if whole is None:
         whole = kind_notes_tracks(got[0], ppq, 256)[0]
     if not len(whole):

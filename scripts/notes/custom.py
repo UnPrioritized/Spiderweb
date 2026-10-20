@@ -479,6 +479,69 @@ def near_ends(p, q):
     return abs(p[0] - q[0]) <= TOUCH_BEATS + 1e-9 and abs(p[1] - q[1]) <= TOUCH_KEYS + 1e-9
 
 
+def close_gaps(opens, polys):
+    """The nearest two loose ends that count as touching, joined, until there are none (a part whose own two ends
+    touch is closed into polys). Ties: the earlier part first. The near pairs are found once, from a grid: looking
+    at every pair again after each join took 132 s for 1000 dashes (audit). -> (the open parts left, closers)."""
+    cell = TOUCH_BEATS + 1e-9, TOUCH_KEYS + 1e-9
+    ends, grid = [], {}
+    for a in opens:
+        ends += [a[0], a[-1]]  # (end 2i: part i's start, 2i + 1: its end)
+    for e, p in enumerate(ends):
+        grid.setdefault((math.floor(p[0] / cell[0]), math.floor(p[1] / cell[1])), []).append(e)
+    near = []
+    for (cx, cy), here in grid.items():
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for e in here:
+                    for f in grid.get((cx + dx, cy + dy), ()):
+                        p, q = ends[e], ends[f]
+                        if e < f and near_ends(p, q):
+                            near.append((max(abs(p[0] - q[0]) / TOUCH_BEATS, abs(p[1] - q[1]) / TOUCH_KEYS), e, f))
+    near.sort()
+    pts = dict(enumerate(opens))  # each part left, by its place: a joined part takes the earlier one's
+    first = {i: 2 * i for i in pts}
+    last = {i: 2 * i + 1 for i in pts}
+    owner = [e // 2 for e in range(len(ends))]  # (only asked for ends not used yet)
+    used = [False] * len(ends)
+
+    def order(e, f):  # (which of two touching pairs the old one-pair-at-a-time scan took first)
+        i, j = owner[e], owner[f]
+        if i == j:
+            return None if len(pts[i]) < 3 else (i, i, 0, last[i], first[i])
+        if i > j:
+            e, f, i, j = f, e, j, i
+        return i, j, (1 if e == last[i] else 3) + (f == last[j]), e, f
+
+    closers, k = [], 0
+    while k < len(near):
+        best, t = None, k
+        while t < len(near) and near[t][0] == near[k][0]:
+            _, e, f = near[t]
+            got = None if used[e] or used[f] else order(e, f)
+            if got is not None and (best is None or got < best):
+                best = got
+            t += 1
+        if best is None:
+            k = t
+            continue
+        i, j, how, e, f = best
+        used[e] = used[f] = True
+        closers.append([ends[e], ends[f]])
+        a = pts.pop(i)
+        if how == 0:
+            polys.append(a + [a[0]])
+            continue
+        b = pts.pop(j)
+        a = a if how in (1, 2) else a[::-1]
+        b = b if how in (1, 3) else b[::-1]
+        pts[i] = a + b
+        first[i] = last[i] if how in (3, 4) else first[i]
+        last[i] = first[j] if how in (2, 4) else last[j]
+        owner[last[i]] = i
+    return [pts[i] for i in sorted(pts)], closers
+
+
 def flat_path(path):
     """The open path never gets further than half a key (up / down) or 1/64 beat (sideways) from the straight line
     between its ends: it has no inside worth filling (a straight line, a very gentle curve)."""
@@ -517,35 +580,8 @@ def fill_plan(sh):
     paths = join_paths(role_paths(sh)[None])
     polys = [p for p in paths if path_closed(p)]
     opens = [list(map(tuple, p)) for p in paths if not path_closed(p)]
-    closers = []
-    while True:  # the nearest two loose ends that count as touching, joined, until there are none
-        best = None
-        for i, a in enumerate(opens):
-            for j in range(i, len(opens)):
-                b = opens[j]
-                pairs = [(a[-1], a[0], 0)] if i == j else [(a[-1], b[0], 1), (a[-1], b[-1], 2), (a[0], b[0], 3),
-                                                            (a[0], b[-1], 4)]
-                for p, q, how in pairs:
-                    if i == j and len(a) < 3:
-                        continue
-                    if near_ends(p, q):
-                        d = max(abs(p[0] - q[0]) / TOUCH_BEATS, abs(p[1] - q[1]) / TOUCH_KEYS)
-                        if best is None or d < best[0]:
-                            best = (d, i, j, how, p, q)
-        if best is None:
-            break
-        _, i, j, how, p, q = best
-        closers.append([p, q])
-        a, b = opens[i], opens[j]
-        if how == 0:
-            polys.append(a + [a[0]])
-            del opens[i]
-            continue
-        a = a if how in (1, 2) else a[::-1]
-        b = b if how in (1, 3) else b[::-1]
-        opens[i] = a + b
-        del opens[j]
-    lines = [np.asarray(p, float).reshape(-1, 2) for p in polys + opens]
+    opens, closers = close_gaps(opens, polys)
+    lines =[np.asarray(p, float).reshape(-1, 2) for p in polys + opens]
     seg = np.concatenate([np.column_stack([p[:-1], p[1:]]) for p in lines if len(p) > 1] or [np.zeros((0, 4))])
     first = np.cumsum([0] + [max(len(p) - 1, 0) for p in lines])
     scale = (1 / TOUCH_BEATS, 1 / TOUCH_KEYS)
@@ -2477,7 +2513,9 @@ def edge_loops(sh):
 
 def inner_ticks(sh, ppq, g, spans):
     """The shape shrunk inward by the outline gate g (ticks) as (start, end, key) notes on the keys of its inside
-    (shrink.inner_rows: a smaller copy of its own outline). Remembered."""
+    (shrink.inner_rows: a smaller copy of its own outline). Remembered. An inside filling nothing: none."""
+    if not len(spans):
+        return np.zeros((0, 3), np.int64)
     keys = sorted(set(spans[:, 2].tolist()))
     key = (json.dumps([sh["strokes"], sh["pts"], sh.get("text")]), bool(sh.get("union")), ppq, g, keys[0], keys[-1],
            drawn_view(sh))
@@ -2958,7 +2996,7 @@ def cycle_turns(sh, notes, ppq, bottom=None):
     elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS and sh.get("range") and not sh.get("hz"):
         k = range_steps(sh, notes, ppq)
     elif sh.get("kind") == "custom" and sh.get("fill") in SPAM_FILLS:
-        g = max(1.0, sh["gate"] * ppq)
+        g = float(spam_gate(sh, ppq))  # (the gate chop cut with: whole ticks unless Hz bass)
         x0 = 0 if sh.get("align") == "aligned" and not sh.get("hz") else int(s.min())
         k = np.floor((s - x0) / g + 0.5).astype(np.int64)
     else:

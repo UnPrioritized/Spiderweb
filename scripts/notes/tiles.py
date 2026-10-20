@@ -81,7 +81,8 @@ def tiles_spans(sh, ppq, centre):
            tuple(round(c, 9) for c in centre), bool(sh.get("_rounds")))
     got = _spans.get(key)
     if got is None:
-        if len(_spans) > 60 or sum(a.nbytes for a in _spans.values()) > KEPT_BYTES:
+        # (a copy of the list: the background notes thread may add one meanwhile, audit)
+        if len(_spans) > 60 or sum(a.nbytes for a in list(_spans.values())) > KEPT_BYTES:
             _spans.clear()
         got = _spans[key] = find_tiles(sh, ppq, centre)
         got.flags.writeable = False

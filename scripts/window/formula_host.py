@@ -323,22 +323,8 @@ class RollHost(AppHost):
         return {"k": roll.sy / roll.sx if roll.sx else 0.25, "scale": 1.0}  # as the piano roll looks now
 
     def bake(self, sh):
-        from notes.joined import shown_tumour
-        from notes.pattern import baked
-        got = baked(sh)
-        tm = shown_tumour(sh)
-        for key in ("shape", "pattern", "sym", "tumours", "splits", "gaps", "sharp", "k"):
-            sh.pop(key, None)
-        sh["kind"] = "curve"  # (a line / an arc becomes a curve)
-        sh["pts"] = got["pts"]
-        if got["sharp"]:
-            sh["sharp"] = got["sharp"]
-        if got["gaps"]:
-            sh["gaps"] = got["gaps"]
-        if got["sym"]:
-            sh["sym"] = got["sym"]
-        if tm:
-            sh["tumour"] = tm
+        from notes.pattern import bake_shape
+        bake_shape(sh)  # (a line / an arc becomes a curve)
 
 
 

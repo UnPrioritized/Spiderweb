@@ -16,6 +16,7 @@ import numpy as np
 
 from files import speed
 
+MOST_SAMPLES = 20_000_000  # a turned picture's key rows x time steps at most (coarser steps past it)
 MAX_SIDE = 2400  # bigger pictures are averaged down first (memory; detail past the note grid is lost anyway)
 
 SUGGESTED = {  # the "Back to suggested" values (user: only a suggestion; every one is a slider)
@@ -682,8 +683,11 @@ def turned_notes(sh, ppq):
     step = sh["picture"]["set"]["step"]
     lo_k, hi_k = int(np.ceil(min(cp))), int(np.floor(max(cp)))
     t0, n = min(cb), int(np.ceil((max(cb) - min(cb)) / step))
-    if hi_k < lo_k or n < 1 or (hi_k - lo_k + 1) * n > 20_000_000:
+    if hi_k < lo_k or n < 1:
         return np.zeros((0, 5), np.int64)
+    if (hi_k - lo_k + 1) * n > MOST_SAMPLES:  # (coarser steps then, like a merged shape; it lost every note, audit)
+        n = max(1, MOST_SAMPLES // (hi_k - lo_k + 1))
+        step = (max(cb) - min(cb)) / n
     kk = np.arange(lo_k, hi_k + 1, dtype=float)[:, None]
     bb = t0 + (np.arange(n) + 0.5)[None, :] * step
     u = ((bb - b0) * vp - (kk - p0) * vb) / det

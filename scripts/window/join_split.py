@@ -23,6 +23,7 @@ from notes.sustain import alike
 from notes.merge import (LAP, box_map, edge_moves, low_corner, merge_parts, merged, merged_up_down, mover,
                          part_rows, reshaped_parts, side_plan, spans_of, unmerged, up_down_plan, up_down_rows)
 from notes.glue import for_part as glue_for_part, glue_box
+from notes.pattern import bake_shape, has_formula
 from notes.slice import EPS, clip_segment, crossings, slice_custom, slice_notes
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
                           rejoined, slice_in_two, split_here_ok, tooled)
@@ -504,8 +505,10 @@ class JoinSplit:
         plan = side_plan(stays, notes[k], way == "right")
         if plan is None:
             return tr("join_split.merge_no_meet")
-        by_key, least, late = plan
-        met = np.array(sorted(by_key), np.int64)
+        by_key, least, late, room = plan
+        if not room:
+            return tr("join_split.merge_no_room_side")
+        met =np.array(sorted(by_key), np.int64)
         moves = np.array([by_key[r] for r in met.tolist()], np.int64)
 
         def slid_rows(rows):
@@ -782,8 +785,9 @@ class JoinSplit:
         if not got:
             self.status.config(text=tr("join_split.can_t_split_there_that_s"))
             return
+        baked = has_formula(self.shapes[i])
         self.replace_shape(i, list(got), name=tr("join_split.split_here"))
-        self.status.config(text=tr("join_split.split_in_two"))
+        self.status.config(text=tr("join_split.split_in_two_baked" if baked else "join_split.split_in_two"))
         self.tips.show("join", wait=True)
 
     def cut_at(self, sh, at, mark=None):
@@ -799,6 +803,9 @@ class JoinSplit:
 
     def _cut_at(self, sh, at):
         roll = self.roll
+        if has_formula(sh):  # (each half would lay the whole formula again: made into a plain curve first, as Split
+            sh = copy.deepcopy(sh)  # does; the halves still make the whole's notes)
+            bake_shape(sh)
         if sh["kind"] == "curve":
             c = copy.deepcopy(sh)
             seg, t, _ = nearest(sh["pts"], roll.to_xy, at.x, at.y, gaps=sh.get("gaps", ()))

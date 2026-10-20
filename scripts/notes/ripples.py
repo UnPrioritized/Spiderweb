@@ -79,6 +79,7 @@ def clean_ripples(c):
 
 OTHER = "other"  # (a source's turn: the other way round from Turn)
 _middles = {}  # source_middles, remembered
+_parts = {}  # parts: which loop holds which, remembered
 
 
 def source_turn(cfg, n):
@@ -247,14 +248,25 @@ def parts(loops):
     if not loops:
         return []
     allp = np.concatenate(loops)
+    # (remembered by the loops' look, not their place: a plain move asked again took seconds per drag step with
+    # freehand sources, audit)
+    key = (len(loops), tuple(map(len, loops)), np.round(allp - allp.min(axis=0), 9).tobytes())
+    got = recall(_parts, key)
+    if got is not None:
+        return of_loops(got, loops)
     eps = 1e-7 * max(float(np.ptp(allp, axis=0).max()), 1e-12)
     areas = [loop_area(p) for p in loops]
     spots = [spread_round(p) for p in loops]
+    boxes = [(p.min(axis=0) - eps, p.max(axis=0) + eps) for p in loops]
     holders = []
     for i, p in enumerate(loops):
         got = []
         for j, q in enumerate(loops):
             if j == i or areas[j] <= areas[i]:
+                continue
+            lo, hi = boxes[j]  # (most spots outside q's box: can't be held; the same answer, without the slow part)
+            inbox = np.count_nonzero(((spots[i] >= lo) & (spots[i] <= hi)).all(axis=1))
+            if inbox * 2 <= len(spots[i]):
                 continue
             s = spots[i][~near_many(spots[i], q, eps)]
             if len(s) and np.count_nonzero(inside_many(s, q)) * 2 > len(s):
@@ -265,20 +277,26 @@ def parts(loops):
     sources = {}
     for i in range(len(loops)):
         if depth[i] == 1:
-            sources[i] = [loops[i]]
+            sources[i] = [i]
             frames[holders[i][0]].append(i)
     for i in range(len(loops)):  # (deeper loops: part of the smallest source holding them)
         if depth[i] >= 2:
             mine = [j for j in holders[i] if j in sources]
             if mine:
-                sources[min(mine, key=lambda j: areas[j])].append(loops[i])
+                sources[min(mine, key=lambda j: areas[j])].append(i)
     # (no loop holds another: each is a source, no frame; an empty frame beside a filled one stays empty, user)
     lone = [] if sources else list(frames)
     for i in lone:
-        sources[i] = [loops[i]]
+        sources[i] = [i]
     order = {i: n for n, i in enumerate(sorted(sources))}
-    out = [(loops[f], [(order[i], sources[i]) for i in srcs]) for f, srcs in frames.items() if srcs]
-    return out + ([(None, [(order[i], sources[i]) for i in lone])] if lone else [])
+    found = [(f, srcs) for f, srcs in frames.items() if srcs] + ([(None, lone)] if lone else [])
+    got = remember(_parts, key, [(f, [(order[i], sources[i]) for i in srcs]) for f, srcs in found])
+    return of_loops(got, loops)
+
+
+def of_loops(plan, loops):
+    """parts' plan (loop numbers) -> the loops themselves."""
+    return [(None if f is None else loops[f], [(n, [loops[k] for k in ks]) for n, ks in srcs]) for f, srcs in plan]
 
 
 def middle(p):

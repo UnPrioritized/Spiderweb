@@ -546,6 +546,26 @@ def baked(sh):
     return {"pts": pts, "sharp": sharp, "gaps": gaps, "sym": sym}
 
 
+def bake_shape(sh):
+    """Turn into plain curve, in place: a line / arc / curve shape's formulas become ordinary anchors and handles (a
+    line / an arc becomes a curve; a joined curve's tumours one setting, as the tumour window shows them)."""
+    from notes.joined import shown_tumour
+    got = baked(sh)
+    tm = shown_tumour(sh)
+    for key in ("shape", "pattern", "sym", "tumours", "splits", "gaps", "sharp", "k"):
+        sh.pop(key, None)
+    sh["kind"] = "curve"
+    sh["pts"] = got["pts"]
+    if got["sharp"]:
+        sh["sharp"] = got["sharp"]
+    if got["gaps"]:
+        sh["gaps"] = got["gaps"]
+    if got["sym"]:
+        sh["sym"] = got["sym"]
+    if tm:
+        sh["tumour"] = tm
+
+
 def pattern_paths(paths, p):
     """The pattern laid along each path ((beat, pitch) point lists: a curve's pieces), as (beat, pitch) lists.
     Unchanged if the formula can't be worked out."""
