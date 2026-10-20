@@ -14,7 +14,7 @@ import numpy as np
 
 from files.lang import tr, trn
 from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape
-from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape
+from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape, merges_unmade
 from notes.hzbass import clean_hz
 from notes.mask import MASK_DEFAULTS, THICKNESS, clean_mask
 from notes.nested import clean_nested
@@ -218,16 +218,25 @@ class ProjectFiles:
             if not quiet:
                 messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_open_project", e=e))
             return False
-        shapes = []
         wholes = data["wholes"] if isinstance(data.get("wholes"), list) else []
-        with allowance(size):  # (pasted notes made to unpack far bigger than the file: left out)
-            for sh in data.get("shapes", []):
-                try:
-                    sh = clean_shape(unpack_wholes(sh, wholes)) if isinstance(sh, dict) else None
-                except Exception:  # (damaged, or written in a way this Spiderweb doesn't know)
-                    sh = None
-                if sh:
-                    shapes.append(sh)
+
+        def read():
+            out = []
+            with allowance(size):  # (pasted notes made to unpack far bigger than the file: left out)
+                for sh in data.get("shapes", []):
+                    try:
+                        sh = clean_shape(unpack_wholes(sh, wholes)) if isinstance(sh, dict) else None
+                    except Exception:  # (damaged, or written in a way this Spiderweb doesn't know)
+                        sh = None
+                    if sh:
+                        out.append(sh)
+            return out
+        with merges_unmade():  # (merged shapes' notes made only once the count is OK'd: they can be millions)
+            shapes = read()
+        if not quiet and not self.fits_memory(shapes, data.get("ppq")):
+            return False
+        if any("merge" in sh for sh in shapes):
+            shapes = read()
         shapes = paths_for_file(shapes, os.path.dirname(os.path.abspath(path)), False)  # (pictures' files)
         made = version_tuple(data.get("app_version")) if isinstance(data.get("app_version"), str) else None
         newer = made and made > version_tuple(VERSION) or type(data.get("version")) is int and data["version"] > 2
@@ -432,6 +441,15 @@ class ProjectFiles:
         # pictures in the project's folder (or one inside it) are saved relative to it: they move together
         data["shapes"] = paths_for_file(data["shapes"], os.path.dirname(os.path.abspath(path)), True)
         write_text(path, project_json(data))
+
+    def fits_memory(self, shapes, ppq):
+        """Open project: asked only when its notes won't fit in the free memory (user 2026-10-20: never just for
+        many notes, the user's own big projects open as before). ppq = the file's. True = go ahead."""
+        try:
+            ppq = int(ppq) if 1 <= int(ppq) <= 65535 else None
+        except (TypeError, ValueError):
+            ppq = None
+        return ask_big(self, "open", sum(self.notes_about(sh, ppq) for sh in shapes))
 
     def load_autosave(self):
         """At start: the autosave. If it won't open it's kept aside (renamed, never overwritten) and the backup

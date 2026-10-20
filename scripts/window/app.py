@@ -23,7 +23,7 @@ from window import big_ask, look
 from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
-from notes.engine import (CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, point_names,
+from notes.engine import (CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           render, shape_key)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
@@ -1702,7 +1702,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 got = unpack(text)
                 if got["kind"] != "shapes":
                     return None
-                read_shapes(got)
+                with merges_unmade():  # (only whether it can be pasted)
+                    read_shapes(got)
             except ShareError:
                 return None
         return text
@@ -1720,13 +1721,20 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if got["kind"] == "drawing":
                 messagebox.showinfo(tr("app.spiderweb_2"), tr("app.shared_drawing"), parent=self)
                 return
-            shapes, left = read_shapes(got)
+            with merges_unmade():  # (merged shapes' notes made only once the count is OK'd: they can be millions)
+                shapes, left = read_shapes(got)
         except ShareError as e:
             messagebox.showerror(tr("app.spiderweb_2"), tr("app.shared_newer") if e.why == "newer" else
                                  tr("app.shared_broken"), parent=self)
             return
         if not self.confirm_big(shapes):
             return
+        if any("merge" in sh for sh in shapes):
+            try:
+                shapes, left = read_shapes(got)
+            except ShareError:
+                messagebox.showerror(tr("app.spiderweb_2"), tr("app.shared_broken"), parent=self)
+                return
         self.remember_clip()
         self.clipboard, self.clip_kind = shapes, "shapes"
         clamped = self.paste(whole=True, at=at)
@@ -1958,15 +1966,23 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                     tr("app.joined", curve=KINDS['curve']))
         return tr("app.custom", value=sh.get('name') or '?') if sh["kind"] == "custom" else KINDS[sh["kind"]]
 
-    def note_count(self, sh):
-        """Notes a shape makes (quick for spam, which can be millions)."""
+    def note_count(self, sh, ppq=None):
+        """Notes a shape makes (quick for spam, which can be millions). ppq: another than the project's."""
+        ppq = ppq or self.ppq
         n = (None if sh.get("merge") else  # (turned / slanted: made again from its shapes, merge.py)
-             custom_note_count(sh, self.ppq) if sh["kind"] == "custom" else
-             funnel_note_count(sh, self.ppq) if sh["kind"] == "funnel" else None)
+             custom_note_count(sh, ppq) if sh["kind"] == "custom" else
+             funnel_note_count(sh, ppq) if sh["kind"] == "funnel" else None)
         return len(self.notes_of(sh)) if n is None else n
 
+    def notes_about(self, sh, ppq=None):
+        """note_count, but a merged shape = what its parts make (quick, never made for it: its own may not be made
+        yet, engine.merges_unmade; a little more than its own when rows were left over), for the questions."""
+        if sh.get("merge"):
+            return sum(self.notes_about(p, ppq) for p in sh["merge"]["parts"])
+        return self.note_count(sh, ppq)
+
     def confirm_big(self, shapes):
-        return self.ask_notes(sum(self.note_count(sh) for sh in shapes))
+        return self.ask_notes(sum(self.notes_about(sh) for sh in shapes))
 
     def ask_notes(self, n):
         """True = go ahead making n notes (asked past big_ask.BIG)."""

@@ -3,7 +3,7 @@ Yes / No + "Don't ask again until Spiderweb is closed", remembered PER ACTION (A
 restart). Something that won't fit in the free memory at all is always asked, ticked or not.
 Actions: "notes" = making a shape with more than BIG notes (App.confirm_big, Range window), "midi" = Generate
 MIDI (memory only), "domino" = Copy to Domino (more than BIG notes: the program it's pasted into gets slow),
-"dms" = Export to Domino (more than BIG notes, like Copy).
+"dms" = Export to Domino (more than BIG notes, like Copy), "open" = Open project (only when it won't fit at all).
 The same window warns before Copy to Domino fills a 10th track (ask_drums, "drums") and before an image with more
 than a million grid cells is made (image_window.big_ok, "image")."""
 
@@ -17,7 +17,7 @@ BIG = 1_000_000  # notes: asked past this (making shapes, Copy to Domino)
 # memory each note takes while it's done (measured: 20 M notes in the window ~6 GB in all, copying 4 M notes
 # 0.57 GB; 10 M notes, 1-300 tracks: Generate MIDI 20-32 bytes a note, 51 on one track without the speed-ups,
 # Export to Domino 36-43)
-PER_NOTE = {"notes": 300, "midi": 55, "domino": 150, "dms": 45}
+PER_NOTE = {"notes": 300, "open": 300, "midi": 55, "domino": 150, "dms": 45}
 DRUM_TRACK = 10  # Copy to Domino: asked when the copy fills this many tracks (ask_drums)
 
 def gb(n):
@@ -32,8 +32,10 @@ def trouble(app, action, notes):
         lines.append(tr(f"big_ask.{action}", n=notes))
     if free is not None and need > free:
         strong = True
+        if action == "open":
+            lines.append(tr("big_ask.open", n=notes))
         lines.append(tr("big_ask.wont_fit", need=gb(need), free=gb(free)))
-    elif free is not None and need > free / 2:
+    elif free is not None and need > free / 2 and action != "open":
         lines.append(tr("big_ask.memory", need=gb(need), free=gb(free)))
     return ([] if action in app.big_skip and not strong else lines), strong
 

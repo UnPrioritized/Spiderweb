@@ -2597,8 +2597,8 @@ def custom_note_count(sh, ppq):
     """How many notes a custom shape makes, without making them (spam can be millions)."""
     if "notes" in sh:
         return len(unpack_notes(sh["notes"]))
-    if sh.get("apart") and sh["fill"] in ("fill", "spam"):
-        return None  # (made to count them)
+    if sh.get("apart") and sh["fill"] == "fill":
+        return None  # (made to count them: the outline cuts the long notes. Spam "Outline" = the same notes)
     if (sh.get("hz") or {}).get("layers") and not sh.get("cut"):  # each layer heard makes its own (engine)
         counts = [custom_note_count(dict(sh, hz=hz), ppq) for hz in heard_layers(sh["hz"])]
         return None if None in counts else sum(counts)

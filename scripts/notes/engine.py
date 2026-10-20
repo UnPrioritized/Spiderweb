@@ -9,6 +9,7 @@ import itertools
 import json
 import math
 import threading
+from contextlib import contextmanager
 
 import numpy as np
 
@@ -43,7 +44,7 @@ from notes.sustain import clean_sustain, cut_by, held, is_sustained
 from notes.bezier import anchor_count, sample
 from notes.paths import dedupe, dot_segment_notes, path_notes
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
-from notes.custom import ROUND, frame_upright, notes_resampled, path_colours
+from notes.custom import ROUND, frame_upright, notes_resampled, pack_notes, path_colours
 from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
 from notes.mask import clean_mask
@@ -145,6 +146,22 @@ def clean_kept_patterns(kept):
             c.pop("at", None)
             out[key] = c
     return out
+
+
+_unmade = threading.local()
+
+
+@contextmanager
+def merges_unmade():
+    """clean_shape inside (this thread): a merged shape saved without its notes gets a one-note stand-in instead of
+    its notes made again (they can be millions: asked about first, counted from its parts, App.note_count). Only
+    for counting: the shapes are cleaned again to be used."""
+    kept = getattr(_unmade, "on", False)
+    _unmade.on = True
+    try:
+        yield
+    finally:
+        _unmade.on = kept
 
 
 def clean_shape(sh):
@@ -274,7 +291,8 @@ def clean_shape(sh):
                 out["gate_flip"] = True
                 sh = {k: v for k, v in sh.items() if k != "notes"}
             if "notes" not in sh:  # (left out of project files: made again)
-                sh = dict(sh, notes=recipe_notes(mg))
+                sh = dict(sh, notes=pack_notes([[0, 1, 0, 1, 0]]) if getattr(_unmade, "on", False) else
+                          recipe_notes(mg))
         if "notes" in sh:  # pasted notes (custom.py): the strokes are just the box
             if not isinstance(sh["notes"], str) or not check_notes(sh["notes"]):
                 return None

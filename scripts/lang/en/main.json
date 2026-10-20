@@ -412,6 +412,7 @@
  "big_ask.notes": "This makes about {n:,} notes, which can make Spiderweb slow.",
  "big_ask.domino": "This copies {n:,} notes: pasting that many can make the program you paste into slow.",
  "big_ask.dms": "This saves {n:,} notes for Domino: opening a file with that many can make Domino slow.",
+ "big_ask.open": "This project makes about {n:,} notes.",
  "big_ask.memory": "It needs about {need} GB of memory ({free} GB free now).",
  "big_ask.wont_fit": "It needs about {need} GB of memory, but only {free} GB is free now: it will likely fail, or make this PC very slow. Closing other programs frees memory.",
  "big_ask.go": "Go ahead?",
