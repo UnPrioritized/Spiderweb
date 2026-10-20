@@ -87,6 +87,12 @@ class LayerStrip:
         sh = self.win.target()
         return (sh or {}).get("hz") or None
 
+    def edited_hz(self):
+        """hz() for a change to the layers: a path drawn but not made yet becomes notes in its own layer first, as
+        another tool picked does (it was thrown away, hunt)."""
+        self.win.make_draft()
+        return self.hz()
+
     def picked(self):
         hz = self.hz()
         return hz.get("layer", 0) if hz else 0
@@ -294,6 +300,11 @@ class LayerStrip:
         if sh is None:
             return
         if step:
+            trial = dict(sh, hz=hz, pts=copy.deepcopy(sh["pts"]))  # (a layer added / unmuted / its sound copied can
+            if hz.get("grow"):                                       # make many more notes: asked)
+                fit_length(trial)
+            if app.notes_about(trial) > app.notes_about(sh) and not app.confirm_big([trial]):
+                return win.sync()
             win.drop_drag()
             win.own_step = True
             try:
@@ -309,14 +320,14 @@ class LayerStrip:
         win.sync()
 
     def pick(self, i):
-        hz = self.hz()
+        hz = self.edited_hz()
         if hz is None or i == hz.get("layer", 0) or not hz.get("layers"):
             return
         self.put(with_layers(hz, layers_of(hz), i), None)
 
     def add(self):
         """A new empty layer under the others, picked (its sound as a new Hz bass's)."""
-        hz = self.hz()
+        hz = self.edited_hz()
         if hz is None:
             return
         hz = plain_layers(copy.deepcopy(hz))
@@ -344,7 +355,7 @@ class LayerStrip:
     def remove(self, i):
         """Layer i goes, with its notes (the last one stays). No notes left in a Hz bass made with the Hz bass tool:
         it goes, like when its last note is deleted (a new one can start at the same spot)."""
-        hz = self.hz()
+        hz = self.edited_hz()
         if hz is None or len(hz.get("layers") or ()) < 2 or not 0 <= i < len(hz["layers"]):
             return self.win.bell()
         every, info = layers_of(hz), list(hz["layers"])
@@ -375,7 +386,7 @@ class LayerStrip:
     def move(self, i, j):
         """Layer i put at place j in the list (the others close up around it); the picked one stays picked. Names
         given by place ("Layer 2") are kept as they were."""
-        hz = self.hz()
+        hz = self.edited_hz()
         n = len((hz or {}).get("layers") or ())
         if i == j or not (0 <= i < n and 0 <= j < n):
             return
@@ -390,7 +401,7 @@ class LayerStrip:
 
     def change(self, i, step, **what):
         """Layer i's name / colour / mute / solo set (None = taken out)."""
-        hz = self.hz()
+        hz = self.edited_hz()
         if hz is None:
             return
         hz = plain_layers(copy.deepcopy(hz))
@@ -406,7 +417,7 @@ class LayerStrip:
 
     def copy_sound(self, i, k):
         """Layer i's whole sound (knobs, effect lines, MOD...: not its notes) onto layer k."""
-        hz = self.hz()
+        hz = self.edited_hz()
         if hz is None or not hz.get("layers"):
             return
         every = layers_of(hz)

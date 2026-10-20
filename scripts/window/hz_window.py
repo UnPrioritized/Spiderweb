@@ -426,11 +426,15 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
                  self.extra) = copy.deepcopy(first[1])
                 self.loud = copy.deepcopy(first[2])
             app.roll.request_redraw()
-        elif was and was[0] == "start" and len(app.shapes) > was[1]:
-            last = app.shapes[-1]
-            if hz_made(last) and abs(left_edge(last) - app.hz_start) < 1e-9:
+        elif was and was[0] == "start" and len(app.shapes) > was[1] and app.hz_start is not None:
+            # (the Hz bass made there is back, wherever it is in the list (not only the newest shape, hunt): no
+            # start spot left for a second one on top)
+            j = next((j for j in range(len(app.shapes) - 1, -1, -1) if hz_made(app.shapes[j])
+                      and abs(left_edge(app.shapes[j]) - app.hz_start) < 1e-9
+                      and hz_keys(app.shapes[j]) == app.hz_defaults), None)
+            if j is not None:
                 app.hz_start = None
-                app.select(len(app.shapes) - 1)
+                app.select(j)
         self.sync()
         self.chosen_at = None
 

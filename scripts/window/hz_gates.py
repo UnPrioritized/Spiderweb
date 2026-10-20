@@ -115,7 +115,12 @@ def hz_keys(sh):
     return {"lo": round(min(ps)), "hi": round(max(ps))}
 
 
+KEPT_SHAPE = ("length", "main_trace", "stick")  # a Hz bass made here losing its last note: kept for the next one there
+
+
 class HzGates:
+    kept_shape = None  # (start beat, its KEPT_SHAPE settings): see commit
+
     def live_edit(self, i, prompt, get, put, lo, hi, steps, name):
         """A number of note i (the selected notes' too when it's one of them) in a small window whose box can be
         typed in or dragged (user): every valid value is tried out at once (the notes here, the shape, the
@@ -136,8 +141,11 @@ class HzGates:
                 if n["id"] in orig:
                     put(n, max(lo, min(hi, round(orig[n["id"]] + moved, 6))))
             if self.tones != was:
-                self.commit(name, before, push=not state["pushed"])
-                state["pushed"] = True
+                top = self.app.last_step()
+                # (a copy: a No to the many-notes question puts these back as the window's own notes)
+                self.commit(name, copy.deepcopy(before), push=not state["pushed"])
+                if self.app.last_step() is not top:  # (only a step really made is taken out by Cancel)
+                    state["pushed"] = True
 
         got = ask_live(self, self.app, prompt, orig[held], lo, hi, steps, apply)
         if got is None and state["pushed"]:  # Cancel: the shape back as it was, its step taken out. Not app.undo:
@@ -402,6 +410,13 @@ class HzGates:
         if hz == sh["hz"]:
             return
         app = self.app
+        trial = dict(sh, hz=hz)  # (a zigzag line / Square makes many times the notes: asked like other edits)
+        if app.notes_about(trial) > app.notes_about(sh) and not app.confirm_big([trial]):
+            self.sync()  # (No: everything as the shape has it, the Hz shape line too once its drag is over)
+            tw = self.trace_win
+            if tw and tw.winfo_exists():
+                self.after_idle(lambda: tw.winfo_exists() and tw.refresh())
+            return
         self.own_step = True
         try:
             app.push_undo(name=name)
@@ -648,7 +663,9 @@ class HzGates:
                        **custom_settings(app.custom_defaults, patterns=False))
             new.update(fill="spam", pts=box_frame(app.hz_start, lo, app.hz_start + sound_span(dict(fx, tones=tones)), hi),
                        hz=dict(self.new_hz(bpm), tones=copy.deepcopy(tones), grow=True, own=True,
-                               **copy.deepcopy(fx), **({"loud": copy.deepcopy(self.loud)} if self.loud else {})))
+                               **copy.deepcopy(fx), **({"loud": copy.deepcopy(self.loud)} if self.loud else {}),
+                               **copy.deepcopy(self.kept_shape[1] if self.kept_shape
+                                               and abs(self.kept_shape[0] - app.hz_start) < 1e-9 else {})))
             new.pop("range", None)  # (no gate Range with Hz bass, user)
             if more:
                 new["hz"] = self.layers.with_more(new["hz"], more)
@@ -710,7 +727,12 @@ class HzGates:
                 sh.update(new)
             else:  # ... from a Hz bass made here: it goes, a new one can start at the same spot, same keys
                 app.hz_start, app.hz_defaults = left_edge(sh), hz_keys(sh)
-                self.first_fx = None
+                # its sound waits for the next first note there (user: every note cut and pasted back lost the
+                # knobs and lines): the lines / knobs stay in the window (sync leaves them), its Note length and Hz
+                # shape line are kept for it
+                self.first_fx = (app.hz_start, self.fx.state(), copy.deepcopy(self.loud))
+                self.kept_shape = (app.hz_start, {k: copy.deepcopy(sh["hz"][k]) for k in KEPT_SHAPE if k in sh["hz"]})
+                self.fx_of = None
                 del app.shapes[app.sel]
                 self.tones = []
                 app.select(None)
