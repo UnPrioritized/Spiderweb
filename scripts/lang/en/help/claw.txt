@@ -11,7 +11,7 @@ The pages are kept with the shape: the outline stays as you drew it, and moving,
 
 Flipping or turning the shape (Turn 90°, or dragging just outside a custom shape's corner) flips or turns what they made, where it is. Turned, each note becomes short notes on the key rows it crosses (a column of them for 90°), so there are more notes.
 
-Images take no note tools: Claw machine, Strum, Chop, glue and Sustain skip them.
+Images take no note tools: Claw machine, Strum, Chop, glue, Sustain and Gate subtract skip them.
 
 Velocities drawn or typed afterwards replace theirs; a page added after that works on the new velocities.
 [clip:claw-time]

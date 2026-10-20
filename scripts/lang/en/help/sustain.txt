@@ -22,7 +22,7 @@ With several shapes selected, each keeps its own settings until you change that 
 
 The menu item has a tick while a selected shape is sustained, and the Shapes list says (Sustained). Untick Sustain notes in the window to take it off.
 
-Sustain comes last, after the outline gate, Colours, Gate aware flip, glue and the Claw machine / Strum / Chop / Copy along a path pages: it only makes notes longer.
+Sustain comes after the outline gate, Colours, Gate aware flip, glue and the Claw machine / Strum / Chop / Copy along a path pages: it only makes notes longer. Only Gate subtract comes after it.
 
 Channels: a sustained shape keeps its overlaps in every Channels mode, even Single channel. Other shapes still fix their own overlaps, and their notes end where a sustained note on the same key starts.
 

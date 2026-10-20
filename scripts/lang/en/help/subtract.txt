@@ -1,0 +1,41 @@
+Select one or more shapes, then right-click one: Gate subtract… Every note gets a little shorter, so a blank space shows between notes that touched. Notes keep their keys, colours and velocities, and the shape keeps its look.
+
+## Note end and Note start
+
+The window has two tabs. Note end: each note ends earlier, its start stays where it is. Note start: each note starts later, its end stays where it is. Tick "Subtract from the note end" or "Subtract from the note start" on a tab to use that side. You can use one side or both.
+
+With both sides, a note can be shortened at both ends. If the two together would take more than the note has, both are made smaller by the same share, so the note always keeps at least 1 tick.
+
+Subtract: how many ticks come off each note on that side (0 = none). Drag the box or the word beside it sideways to change the number. The number follows the PPQ, so changing the PPQ keeps the look.
+
+Only notes that touch the next one (Note end) / Only notes the one before touches (Note start): only notes with no gap on that side are shortened. Notes that already have a gap there stay as they are. All colours on a key count together.
+
+## Change across the shape
+
+Tick Change across the shape to make the amount change from the first number to the second along a graph, instead of being the same for every note. Each side has its own graph.
+
+Across: Left to right (time) goes from the shape's first note to its last. Low to high and Top to bottom give each key row its own amount, from the lowest key to the highest or the other way.
+
+Each key row by itself (Left to right only): every key row runs the whole graph, from its first note to its last. Where a row has a hole, each piece runs the graph again, unless Across gaps in a row is ticked. Along a row: By time (halfway along the row's time = halfway along the graph) or By note count (the middle note = halfway, however long the notes are).
+
+The graph works like a Range's: drag a point to move it (Shift = free), click the line or empty space to add one, right-click a point to delete it. The buttons under it are ready-made graphs. The pale steps are the whole ticks the notes really get.
+
+## Using the window
+
+Changes show on the piano roll at once, and the piano roll can still be used while the window is open: the window follows the selection. OK keeps the changes as one undo step, Cancel or Esc puts back what changed. Ctrl+Z steps back through the changes made in the window.
+
+With several shapes selected, each keeps its own settings until you change them; a half-ticked box means they differ. A graph is the first shape's until you change something about it, then every shape takes it.
+
+The menu item has a tick while a selected shape has it, and the Shapes list says (Subtracted). Untick Subtract from gates in the window to take it off.
+
+## With other features
+
+Gate subtract comes last, after everything else that makes the notes: the outline gate, Colours, Gate aware flip, glue, the Claw machine / Strum / Chop / Copy along a path pages and Sustain. They all work on the notes at full length, so Gate subtract never changes what they do.
+
+Flipping the shape sideways swaps the two sides: a note end becomes a note start, so a flipped copy is the mirror image of the original, gaps included. Switching Gate aware flip on or off swaps them too. A graph turns round with the shape when it runs across that way.
+
+Slicing and splitting keep it on every piece, and a graph across the shape is cut so every note keeps its gap. Join, Turn into live shape and Gate sensitive merge keep it when all the shapes have the same settings. An Add between group gets it step by step when both ends have it, and a step can have its own.
+
+Turn into plain notes, Apply mask copies and mask areas are made without it.
+
+A Hz bass and an image can't have it: a Hz bass has its own note lengths, and an image's notes are its picture.

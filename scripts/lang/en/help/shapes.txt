@@ -6,4 +6,4 @@ Click a row to select that shape; Ctrl+click or Shift+click selects more. Select
 
 Duplicate copies the selected shapes one snap step later (one beat with Snap off). Delete removes the selected shapes. Delete all asks first; Ctrl+Z brings them back either way.
 
-Some rows say more: (Sustained) or (Gates flipped) after the name, and an Add between group is one row (clicking it selects the whole group).
+Some rows say more: (Sustained), (Gates flipped) or (Subtracted) after the name, and an Add between group is one row (clicking it selects the whole group).

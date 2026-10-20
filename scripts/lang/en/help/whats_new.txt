@@ -1,5 +1,23 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
+## Version 1.6.2
+
+What's new:
+
+• Gate subtract (right-click → Gate subtract…): every note gets a little shorter, so a blank space shows between notes that touched. Take it from the note end, the note start or both. The amount can change across the shape along a graph, by time, by key or along each key row. It comes last, so Strum, Claw and the other note tools work as before. Flipping sideways swaps the end and the start, so a flipped copy mirrors its gaps.
+
+• Gate sensitive merge has its own window: Up, Left, Right or Down, and Keep shapes separate to merge any number of shapes, each left as it is, with the moving one turned into fixed notes. Merging up or down works as one shape too. The window says which shape moves, or why it can't merge.
+
+• Ruler selecting: drag along the bar numbers (with any tool) to select every key in that time. Drag the black bar to move it in time, Ctrl+drag for a copy, right-click it for the selection's menu.
+
+• Select boxes stay while you draw with another tool, and a shape drawn inside one joins the selection. Right-clicking empty space no longer drops it.
+
+• Right-drag listening shows its own line and leaves the play line where it was.
+
+• Plain notes (Turn into plain notes, path copies turned into plain shapes) follow Settings → General → Overlapping shapes keep their colours: off, an overlapping one takes the next free channels.
+
+• Fixes: merging no longer leaves gaps where a row is shorter; plain shapes keep their colours apart and no longer move a channel onto channel 10; quick right-clicks no longer switch tools; no more typing lag in the output name, BPM and beats per bar boxes; texts no longer get cut off with wider system fonts; the toolbar's pinned tools wrap and Help stays at the top right.
+
 ## Version 1.6.1
 
 What's new:

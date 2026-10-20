@@ -14,7 +14,7 @@ Up: the shape with the lowest note moves up. Down: the shape with the highest no
 
 Without "Keep shapes separate", both become one shape ("Merged notes" in the Shapes list). Only two shapes can be merged this way.
 
-It can be moved, turned, slanted and stretched like a custom shape, and the custom panel's settings go into both parts. Each part keeps its own colours. When both shapes are sustained with the same settings, the merged shape is sustained too. A shape merged up or down is turned and slanted as it looks, like a turned picture. Split back into the old shapes (Ctrl+Shift+G, or right-click) gives the two parts back.
+It can be moved, turned, slanted and stretched like a custom shape, and the custom panel's settings go into both parts. Each part keeps its own colours. When both shapes are sustained with the same settings, the merged shape is sustained too; the same for Gate subtract. A shape merged up or down is turned and slanted as it looks, like a turned picture. Split back into the old shapes (Ctrl+Shift+G, or right-click) gives the two parts back.
 
 ## Keep shapes separate
 

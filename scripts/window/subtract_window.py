@@ -676,6 +676,8 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.take_typing()
         self.settle()
         self.close()
+        if any(self.ons) and self.idx:
+            self.app.tips.show("subtract", wait=True)  # (the first time: what it does)
 
     def cancel(self):
         if self.idx and self.idx[-1] < len(self.app.shapes) and self.own_now() != self.kept:
