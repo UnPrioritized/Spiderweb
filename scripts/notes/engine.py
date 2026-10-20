@@ -1112,62 +1112,84 @@ def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shap
         for i, notes in enumerate(note_lists):
             whole.setdefault(group[i], []).append(notes)
         joined = [stretches(np.concatenate(ls), g, split) for g, ls in whole.items()]
-        clashing = {g for pair in clash_pairs(np.concatenate(joined)) for g in pair}
+        clashing = set(np.concatenate(clash_arrays(np.concatenate(joined))).tolist())
         busy = [i for i in range(n) if group[i] in clashing]
     parts = [stretches(note_lists[i], i, split) for i in busy]
-    clashes = [set() for _ in range(n)]
-    for a, b in clash_pairs(np.concatenate(parts) if parts else np.zeros((0, 4), np.int64)):
-        clashes[a].add(b)
-        clashes[b].add(a)
+    # each list's clashes as one array (near(i)): thousands of shapes on top of each other = millions of pairs
+    a, b = clash_arrays(np.concatenate(parts) if parts else np.zeros((0, 4), np.int64))
+    ends = [a, b]
+    starts = [b, a]
     for group in apart:
-        for a in group:
-            clashes[a] |= set(group) - {a}
+        g = np.asarray(sorted(set(group)), np.int64)
+        if len(g) > 1:
+            x, y = np.meshgrid(g, g)
+            off = x != y
+            starts.append(x[off])
+            ends.append(y[off])
+    starts, ends = np.concatenate(starts), np.concatenate(ends)
+    by = np.argsort(starts, kind="stable")
+    ends = ends[by]
+    at = np.searchsorted(starts[by], np.arange(n + 1)).tolist()
+
+    def near(i):
+        return ends[at[i]:at[i + 1]]
 
     first = [f if f is not None else int(notes[:, 0].min()) if len(notes) else math.inf
              for notes, f in zip(note_lists, first or [None] * n)]
     order = sorted(range(n), key=lambda i: (first[i], i))
-    slots, done = [0] * n, set()
+    slots, done = np.zeros(n, np.int64), np.zeros(n, bool)
     for i, s in (taken or {}).items():
         slots[i] = s
-        done.add(i)
+        done[i] = True
     if shape_of is not None:
         shapes, fixed = {}, {}  # (shape -> its lists, shapes in order of their first note; -> its lists with a slot)
         for i in order:
-            if i not in done:
+            if not done[i]:
                 shapes.setdefault(shape_of[i], []).append(i)
-        for i in done:  # (an Add between step turned into plain notes: its group's other steps step round its colour)
-            fixed.setdefault(shape_of[i], set()).add(i)
+        for i in np.flatnonzero(done).tolist():  # (an Add between step turned into plain notes: its group's other
+            fixed.setdefault(shape_of[i], []).append(i)  # steps step round its colour)
+        roomy = np.array([s not in loose for s in shape_of], bool)  # (shapes stepped round)
+        own, pinned = np.full(n, -1, np.int64), np.zeros(n, bool)  # (-1: not this shape's)
         for key, mine in shapes.items():
-            own, pinned = {}, fixed.get(key, set())  # (its slots as if no other shape were there)
+            pins = fixed.get(key, [])  # (its slots as if no other shape were there)
+            pinned[pins] = True
             for i in mine:
-                used = {own[j] for j in clashes[i] if j in own} | {slots[j] % step for j in clashes[i] if j in pinned}
-                k = 0
-                while k in used:
-                    k += 1
-                own[i] = k
-            if key in loose:  # (its slots move again anyway: in_rounds)
-                rows = set()
-            else:
-                rows = {(slots[j] - own[i]) // step for i in mine for j in clashes[i]
-                        if j in done and j not in pinned and shape_of[j] not in loose
-                        and (slots[j] - own[i]) % step == 0 and slots[j] >= own[i]}
+                j = near(i)
+                own[i] = least_free(np.concatenate([own[j], slots[j[pinned[j]]] % step]))
+            rows = set()
+            if key not in loose:  # (its slots move again anyway: in_rounds)
+                for i in mine:
+                    j = near(i)
+                    d = slots[j[done[j] & ~pinned[j] & roomy[j]]] - own[i]
+                    rows.update((d[(d >= 0) & (d % step == 0)] // step).tolist())
             row = 0
             while row in rows:
                 row += 1
-            for i in mine:
-                slots[i] = own[i] + row * step
-            done.update(mine)
-        return slots
+            pinned[pins] = False
+            mine = np.asarray(mine, np.int64)
+            slots[mine] = own[mine] + row * step
+            done[mine] = True
+            own[mine] = -1
+        return slots.tolist()
     for i in order:
-        if i in done:
-            continue
-        used = {slots[j] for j in clashes[i] if j in done}
+        if not done[i]:
+            j = near(i)
+            slots[i] = least_free(slots[j[done[j]]])
+            done[i] = True
+    return slots.tolist()
+
+
+def least_free(used):
+    """The smallest whole number 0, 1, 2... not in `used` (an array; numbers below 0 don't count)."""
+    if len(used) < 64:
+        used = set(used.tolist())
         k = 0
         while k in used:
             k += 1
-        slots[i] = k
-        done.add(i)
-    return slots
+        return k
+    u = np.unique(used[used >= 0])
+    gap = np.flatnonzero(u != np.arange(len(u)))
+    return int(gap[0]) if len(gap) else len(u)
 
 
 def stretches(notes, owner, split="key"):
@@ -1204,17 +1226,26 @@ def stretches(notes, owner, split="key"):
     return np.concatenate(out).astype(np.int64).reshape(-1, 4)
 
 
+CLASH_TABLE = 1 << 28  # (bytes the compiled sweep's table of owner pairs may take: about 46,000 owners)
+
+
 def clash_pairs(items, chunk=1 << 22):
-    """(key, start, end, owner) stretches -> the set of (a, b) owner pairs (a < b) that clash: on the same key, one
-    starting before the other ends (in start, end, owner order; one starting where the other ends doesn't clash, nor
-    does a stretch without a length). Worked out in chunks of about `chunk` pairs at a time."""
+    """(key, start, end, owner) stretches -> the set of (a, b) owner pairs (a < b) that clash (clash_arrays)."""
+    a, b = clash_arrays(items, chunk)
+    return set(zip(a.tolist(), b.tolist()))
+
+
+def clash_arrays(items, chunk=1 << 22):
+    """(key, start, end, owner) stretches -> arrays a, b of the owner pairs (a < b) that clash, sorted by a then b:
+    on the same key, one starting before the other ends (in start, end, owner order; one starting where the other
+    ends doesn't clash, nor does a stretch without a length). Worked out in chunks of about `chunk` pairs at a
+    time."""
     if not len(items):
-        return set()
+        return np.zeros(0, np.int64), np.zeros(0, np.int64)
     fast = loops()
     n = int(items[:, 3].max()) + 1
-    if fast and n <= 4096 and items[:, 3].min() >= 0:  # (the compiled sweep: the same pairs)
-        a, b = np.nonzero(fast.clash_pairs(np.ascontiguousarray(items, np.int64), n))
-        return set(zip(a.tolist(), b.tolist()))
+    if fast and n * ((n + 63) >> 6) * 8 <= CLASH_TABLE and items[:, 3].min() >= 0:  # (the compiled sweep: the same)
+        return fast.clash_pairs(np.ascontiguousarray(items, np.int64), n)
     order = np.lexsort((items[:, 3], items[:, 2], items[:, 1], items[:, 0]))
     k, s, e, o = (items[order, c] for c in range(4))
     vals, rank = np.unique(np.concatenate([s, e]), return_inverse=True)  # (ticks as ranks: no overflow)
@@ -1224,7 +1255,7 @@ def clash_pairs(items, chunk=1 << 22):
     cnt = np.maximum(np.searchsorted(ps, pe, "left") - np.arange(len(ps)) - 1, 0)  # later ones starting before its end
     total = np.cumsum(cnt)
     n = int(o.max()) + 1
-    out, start = set(), 0
+    out, start = [np.zeros(0, np.int64)], 0
     while start < len(ps):
         stop = max(start + 1, int(np.searchsorted(total, (total[start - 1] if start else 0) + chunk, "right")))
         c = cnt[start:stop]
@@ -1233,10 +1264,10 @@ def clash_pairs(items, chunk=1 << 22):
             j = i + 1 + np.arange(len(i)) - np.repeat(np.cumsum(c) - c, c)
             a, b = o[i], o[j]
             m = a != b
-            code = np.unique(np.minimum(a[m], b[m]) * n + np.maximum(a[m], b[m]))
-            out.update(zip((code // n).tolist(), (code % n).tolist()))
+            out.append(np.unique(np.minimum(a[m], b[m]) * n + np.maximum(a[m], b[m])))
         start = stop
-    return out
+    code = np.unique(np.concatenate(out))
+    return code // n, code % n
 
 
 def running_max(values, groups):

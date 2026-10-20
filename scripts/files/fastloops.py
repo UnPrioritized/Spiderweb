@@ -18,7 +18,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   key_order      np.lexsort by key, then up to 3 more columns (runs already in order merged: quick)
   radix_order    np.argsort(kind="stable") of whole numbers (Copy / Export to Domino: domino_clip.start_key_order)
   ring_runs      roll_draw.ring_parts' runs: the selection's red outline, each key row's notes joined
-  clash_pairs    engine.clash_pairs (Multi channel): which owners' stretches clash
+  clash_pairs    engine.clash_arrays (Multi channel): which owners' stretches clash
   nearest        picture._dist2(...).argmin(1) (Image to notes): each colour's nearest palette colour
   spread_line    picture._spread: the error spreading, one slanted line at a time (its OKLab left to NumPy)
   area_spots     faces.Faces.area_at: the area each spot is in (custom shapes' Fill / Spam, area colours)
@@ -638,15 +638,18 @@ def ring_runs(s, e, k, order, gap, big):
 
 @njit(cache=CACHE, nogil=True)
 def clash_pairs(items, n):
-    """engine.clash_pairs: (key, start, end, owner) rows, owners below n -> an n x n table, True where owners a < b
-    clash: in (key, start, end, owner) order, a later one on the same key starting before an earlier one ends.
-    Swept key by key: each owner's latest end so far, the owners still sounding at each start."""
+    """engine.clash_arrays: (key, start, end, owner) rows, owners below n -> arrays a, b of the owner pairs a < b
+    that clash, sorted by a then b: in (key, start, end, owner) order, a later one on the same key starting before
+    an earlier one ends. Swept key by key: each owner's latest end so far, the owners still sounding at each start;
+    pairs marked in an n x n table of bits (n / 64 words a row)."""
     k = np.ascontiguousarray(items[:, 0])
     s = np.ascontiguousarray(items[:, 1])
     e = np.ascontiguousarray(items[:, 2])
     o = np.ascontiguousarray(items[:, 3])
     order = key_order(k, s, e, o)
-    hit = np.zeros((n, n), np.bool_)
+    words = (n + 63) >> 6
+    hit = np.zeros((n, words), np.uint64)
+    one = np.uint64(1)
     latest = np.full(n, np.iinfo(np.int64).min, np.int64)
     on = np.zeros(n, np.bool_)
     act = np.empty(n, np.int64)
@@ -665,7 +668,8 @@ def clash_pairs(items, n):
                     act[j] = a
                     j += 1
                     if a != b:
-                        hit[min(a, b), max(a, b)] = True
+                        lo, hi = min(a, b), max(a, b)
+                        hit[lo, hi >> 6] |= one << np.uint64(hi & 63)
                 else:
                     on[a] = False
             na = j
@@ -684,7 +688,28 @@ def clash_pairs(items, n):
                 break
             latest[o[r]] = np.iinfo(np.int64).min
         na = 0
-    return hit
+    count = 0
+    for a in range(n):
+        for w in range(words):
+            x = hit[a, w]
+            while x:
+                x &= x - one
+                count += 1
+    pa = np.empty(count, np.int64)
+    pb = np.empty(count, np.int64)
+    c = 0
+    for a in range(n):
+        for w in range(words):
+            x = hit[a, w]
+            bit = 0
+            while x:
+                if x & one:
+                    pa[c] = a
+                    pb[c] = (w << 6) + bit
+                    c += 1
+                x >>= one
+                bit += 1
+    return pa, pb
 
 
 @njit(cache=CACHE, nogil=True)
