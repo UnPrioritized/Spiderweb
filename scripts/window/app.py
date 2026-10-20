@@ -2140,8 +2140,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 return None  # (the Hz bass window: its own keys only, nothing done to the main piano roll behind)
             if self.image_window and str(w).startswith(str(self.image_window)):
                 return None  # (the image window and its pop-ups: Ctrl+C there copies their text, not the shapes)
-            if self.in_settings(w):
-                return None  # (the Settings window: app settings only, the shapes behind stay as they are)
+            if self.app_only(w):
+                return None  # (Settings, Help, the update popup: the shapes behind stay as they are)
             if self.grabbed_elsewhere():
                 return None  # (a window like Range… is working on the picked shapes: nothing changes behind it)
             if main_only and not (isinstance(w, tk.Misc) and w.winfo_toplevel() is self):
@@ -2160,6 +2160,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return self.focus_get() is box
         except (KeyError, tk.TclError):  # (a dropdown's list has it)
             return True
+
+    def app_only(self, w):
+        """w is in a window about Spiderweb itself (Settings, Help, a tip, the update popup: their class has
+        APP_ONLY): keys pressed there never change the shapes behind it."""
+        if self.in_settings(w):
+            return True
+        try:
+            return getattr(w.winfo_toplevel(), "APP_ONLY", False)
+        except (AttributeError, tk.TclError):  # (Tk's own widgets come as a name: a dropdown's list)
+            return False
 
     def in_settings(self, w):
         """w is in the Settings window (or one of its pop-ups)."""

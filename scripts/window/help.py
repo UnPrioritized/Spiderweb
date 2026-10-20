@@ -193,9 +193,13 @@ class Tips:
 class TipPopup(tk.Toplevel):
     """A small window in the top right corner of the roll (or the drawer): the tip, "More…" (the Help window at
     that topic), "Got it". It doesn't block anything."""
+    APP_ONLY = True  # (keys pressed here never change the shapes: App.app_only)
 
     def __init__(self, tips, parent, topic_id):
-        f = parent.focus_get()  # (before this window exists)
+        try:
+            f = parent.focus_get()  # (before this window exists)
+        except (KeyError, tk.TclError):  # (a dropdown's list has it: older Pythons raise)
+            f = None
         super().__init__(parent)
         self.tips, self.parent = tips, parent
         s = self.scale = tips.app.scale
@@ -277,6 +281,7 @@ class TipPopup(tk.Toplevel):
 class HelpWindow(tk.Toplevel):
     """Every topic: a list by section with a search box (all the words typed have to be in the topic), the chosen
     topic on the right (the words searched for highlighted), its clip if there is one."""
+    APP_ONLY = True  # (Ctrl+Z / Ctrl+A / Ctrl+V... here never change the shapes behind it: App.app_only)
 
     def __init__(self, app):
         super().__init__(app)

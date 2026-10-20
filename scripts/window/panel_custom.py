@@ -298,9 +298,13 @@ class CustomPanel:
         self.sync_custom()
         self.sync_funnel()
 
-    def merge_part(self, t):
-        """t is a drawing inside a merged shape: its settings change from the panel, its outline never (user)."""
-        return any(t is p for sh in self.shapes if sh.get("merge") for p in sh["merge"]["parts"])
+    def merge_part(self, t, parts=None):
+        """t is a drawing inside a merged shape: its settings change from the panel, its outline never (user).
+        parts: merge_part_ids() worked out once for many shapes (thousands selected: slow one at a time)."""
+        return id(t) in (self.merge_part_ids() if parts is None else parts)
+
+    def merge_part_ids(self):
+        return {id(p) for sh in self.shapes if sh.get("merge") for p in sh["merge"]["parts"]}
 
     def sync_custom(self):
         tgts = self.custom_targets()
@@ -319,7 +323,8 @@ class CustomPanel:
         self.sync_polygon()
         # text: no library shape to pick (its letters are the shape; a Hz bass made with the Hz bass tool is a
         # musical tool, not a shape, user: its box is only its notes)
-        text = (all(t.get("text") or "notes" in t or hz_tool(t) or self.merge_part(t) for t in tgts) if placed
+        parts = self.merge_part_ids()
+        text = (all(t.get("text") or "notes" in t or hz_tool(t) or self.merge_part(t, parts) for t in tgts) if placed
                 else tool in ("text", "hz"))
         # pasted notes: nothing to fill either (the notes are the shape)
         pasted = placed and all("notes" in t for t in tgts)
@@ -428,7 +433,8 @@ class CustomPanel:
         self._loading = False
         self.edge_mode_box.config(state="readonly" if outline and tgts[0].get("edge") else "disabled")
         self.cancel_box.config(state="normal" if fill in ("fill", "spam") and not text else "disabled")
-        wanted = max([self.colours_wanted[i] for i, s in enumerate(self.shapes) if any(s is t for t in tgts)
+        ids = {id(t) for t in tgts}
+        wanted = max([self.colours_wanted[i] for i, s in enumerate(self.shapes) if id(s) in ids
                       and i < len(self.colours_wanted)] or [0])
         most = most_colours(self.all16())
         if wanted > most:
@@ -459,7 +465,7 @@ class CustomPanel:
         elif placed:
             # (a merged shape: its own notes, not its two shapes' as they were: some rows may be "Merge leftovers")
             counted = ([self.shapes[i] for i in sorted(self.sels) if self.shapes[i]["kind"] == "custom"]
-                       if any(self.merge_part(t) for t in tgts) else tgts)
+                       if any(self.merge_part(t, parts) for t in tgts) else tgts)
             total = sum(self.note_count(t) for t in counted)
             info = trn("panel_custom.n_notes", total, n=total)
             if gaps and fill in ("fill", "spam"):
@@ -491,9 +497,10 @@ class CustomPanel:
             messagebox.showerror(tr("panel_custom.spiderweb"), tr("panel_custom.couldn_t_read_the_shape", name=name))
             return self.sync_custom()
         self.custom_shape = name
+        parts = self.merge_part_ids()
         tgts = [t for t in self.custom_targets()
                 if t is not self.custom_defaults and not t.get("text") and "notes" not in t and not hz_tool(t)
-                and not self.merge_part(t)]  # (a merged shape's outline is never changed, user)
+                and not self.merge_part(t, parts)]  # (a merged shape's outline is never changed, user)
         if tgts:
             self.push_undo(name=tr("panel_custom.custom_shape"))
             for t in tgts:
@@ -673,7 +680,8 @@ class CustomPanel:
         on = bool(hz) and spam
         # (one made with the Hz bass tool is nothing but its notes: no switching it off, it's deleted instead)
         tool_made = placed and any(hz_tool(t) for t in tgts)
-        merged = placed and any(self.merge_part(t) for t in tgts)  # (its Notes… window can't reach the shapes in it)
+        parts = self.merge_part_ids()  # (its Notes… window can't reach the shapes in a merged one)
+        merged = placed and any(self.merge_part(t, parts) for t in tgts)
         self.hz_check.config(state="normal" if spam and not new_off and not tool_made and not merged else "disabled")
         self.hz_check_tip.text = tr("panel_custom.hz_tip") + (tr("panel_custom.hz_not_merged") if merged else "")
         bpm = self.current_bpm()

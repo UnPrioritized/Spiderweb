@@ -172,10 +172,14 @@ def on_top(win, parent, name, focus=True):
 
 class UpdateQuestion(tk.Toplevel):
     """Asked once: look for updates, and how often. Closing it with X asks again at the next start."""
+    APP_ONLY = True  # (keys pressed here never change the shapes: App.app_only)
 
     def __init__(self, updates):
         app = updates.app
-        f = app.focus_get()  # (before this window exists)
+        try:
+            f = app.focus_get()  # (before this window exists)
+        except (KeyError, tk.TclError):  # (a dropdown's list has it: older Pythons raise)
+            f = None
         super().__init__(app)
         self.updates = updates
         s = app.scale
@@ -206,6 +210,7 @@ class UpdateQuestion(tk.Toplevel):
 class UpdatePopup(tk.Toplevel):
     """A newer version is out: which, what's new in it (every newer version's notes, newest first), the download
     page (the browser opens the GitHub release; nothing downloads by itself), Later, and how often to look."""
+    APP_ONLY = True  # (keys pressed here never change the shapes: App.app_only)
 
     def __init__(self, updates, found):
         app = updates.app

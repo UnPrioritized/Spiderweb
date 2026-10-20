@@ -368,8 +368,8 @@ class HistoryPanel:
             return "break" if redo else (self.vel.drop(), "break")[1]
         if self.held_scrub:  # a number box's label held: Ctrl+Z = back to the press (no step), Ctrl+Y nothing
             return "break" if redo else (self.held_scrub.cancel(), "break")[1]
-        if self.in_settings(e.widget):
-            return "break"  # (Settings has no undo; the shapes behind stay as they are)
+        if self.app_only(e.widget):
+            return "break"  # (Settings / Help / the update popup have no undo; the shapes behind stay as they are)
         if self.image_window and str(e.widget).startswith(str(self.image_window)):
             return "break"  # (the image window and its pop-ups: their text boxes only, the piano roll stays, hunt)
         if not self.in_hz(e.widget):

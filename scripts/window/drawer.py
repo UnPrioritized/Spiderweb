@@ -530,6 +530,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
                 return None
             if (self.knife or self.erasing()) and fn not in (self.undo, self.redo):  # (flip / turn / copy / paste
                 return "break"  # wait while a Slice line / eraser box is held; undo / redo drop it)
+            if self.holding() and fn not in (self.undo, self.redo, self.cut):  # (strokes held: flip / turn / copy /
+                return "break"  # paste wait too, like the piano roll; Ctrl+X = Delete's own rule)
             fn()
             return "break"
         return handler
@@ -1485,6 +1487,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
         self.open_shape(name, strokes, areas)
 
     def open_shape(self, name, strokes, areas=()):
+        self.follow, self.arc_bend, self.knife, self.drag = None, False, None, None  # (half drawn: dropped)
         self.strokes, self.undo_stack, self.draft = strokes, [], None
         self.deselect()
         self.areas = [list(a) for a in areas]
