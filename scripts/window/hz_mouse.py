@@ -804,9 +804,7 @@ class HzMouse:
                 self.after_cancel(self.menu_wait)
             self.menu_wait = self.after(DOUBLE_MS, show)
             return
-        if kept:  # a right click outside the boxes drops them (user), the selection stays
-            self.box_kept = None
-            self.redraw()
+        # (a right click outside the boxes keeps them, like the main piano roll: a left click drops them, user)
         if not hit:
             if self.menu_wait:
                 self.after_cancel(self.menu_wait)
