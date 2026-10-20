@@ -116,6 +116,14 @@ class HzMouse:
         self.redraw()
         self.show_status(e)
 
+    def drawn_into(self, boxes, sel0, new):
+        """Notes new drawn while the Select boxes were kept: the boxes stay with what they selected (sel0), and the
+        new notes touching them join it; the others aren't selected (user, like the main piano roll)."""
+        self.sel = set(sel0) | {i for i in new if any(
+            min(b0, b1) < self.tones[i]["t"] + self.tones[i]["len"] and self.tones[i]["t"] < max(b0, b1)
+            and min(t, u) < self.tones[i]["key"] <= max(t, u) for b0, t, b1, u in boxes)}
+        self.box_kept = (boxes, set(self.sel))
+
     def box_move_to(self, d, e):
         """A kept Select box over nothing dragged from inside: it goes with the mouse, whole snap steps (Shift =
         free) and whole keys, kept at beat 0 and the keys' ends. Notes it's moved onto aren't picked up."""
@@ -190,12 +198,13 @@ class HzMouse:
         """Where the mouse is on the kept Select boxes: (1, 0) the right side (its corners too), (0, 0) inside (a
         note there wins), or None. The left side, top and bottom do nothing (user, like many MIDI programs); a slide's dot
         wins over it all. With Ctrl only inside counts, notes too (a drag there moves a copy; Select tool only). A box
-        over nothing works too (it moves / stretches alone, user: like many MIDI programs)."""
-        if not kept or hit and hit[0] in DOTS:
+        over nothing works too (it moves / stretches alone, user: like many MIDI programs). The Select / Bend tools
+        only: a drawing tool draws there (drawn_into)."""
+        if not kept or hit and hit[0] in DOTS or self.tool.get() not in ("select", "bend"):
             return None
         side = boxes_side([self.box_rect(a) for a in kept], e.x, e.y, 5 * self.s)
-        if e.state & CTRL:  # (the pencil's Ctrl+drag is its only box: a new one there)
-            return (0, 0) if side == (0, 0) and self.tool.get() in ("select", "bend") else None
+        if e.state & CTRL:
+            return (0, 0) if side == (0, 0) else None
         if side and side[0] == 1:
             return 1, 0
         return (0, 0) if side == (0, 0) and not hit else None
@@ -285,6 +294,10 @@ class HzMouse:
             self.tones.append(tone)
             self.sel = {len(self.tones) - 1}
             self.drag = {"kind": "new", "i": len(self.tones) - 1, "before": before, "name": tr("hz.step_place")}
+            if kept:  # (the Select boxes stay while drawing: drawn_into on let go)
+                self.sel |= sel0
+                self.box_kept = (kept, set(self.sel))
+                self.drag.update(into=sel0, keep_box=kept)
             self.sound(tone["key"])
         else:
             kind, i = hit[:2]
@@ -623,6 +636,8 @@ class HzMouse:
         if d["kind"] in ("left", "right"):
             self.last_len = self.tones[d["i"]]["len"]
         placed = self.tones[d["i"]]["id"] if d["kind"] == "new" else None
+        if d.get("into") is not None:
+            self.drawn_into(d["keep_box"], d["into"], [d["i"]])
         if d["kind"] == "stretch":  # the box goes back to its size, the notes stay longer / shorter (user)
             box = d["boxes"]
         else:

@@ -146,7 +146,8 @@ class HzDraw:
             self.make_draft()
         if not self.can_place():
             return True
-        self.sel, self.box_kept = set(), None
+        if not self.kept_box():  # (the Select boxes stay while drawing, with what they selected: drawn_into)
+            self.sel, self.box_kept = set(), None
         tool = self.tool.get()
         if tool == "free":
             self.draft = {"tool": tool, "pts": [self.path_point(e, free=True)], "held": "free", "x": e.x, "y": e.y,
@@ -317,8 +318,12 @@ class HzDraw:
         if tones:
             before = copy.deepcopy(self.tones)
             self.sel_before = (before, self.sel_state())
+            kept = self.kept_box()
             self.tones += copy.deepcopy(tones)
-            self.sel = set(range(len(before), len(self.tones)))
+            if kept:
+                self.drawn_into(kept, self.sel, range(len(before), len(self.tones)))
+            else:
+                self.sel = set(range(len(before), len(self.tones)))
             self.commit(tr("hz.step_trace"), before)
         else:
             self.redraw()
