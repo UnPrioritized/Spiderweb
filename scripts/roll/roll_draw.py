@@ -1194,22 +1194,28 @@ class RollDrawing:
 
     def carried(self):
         """While shapes are dragged to another place and their notes are left for later (app.shapes_changed):
-        (dx, dy), how far they are from where the notes on screen have them, in pixels. Else None."""
+        (dx, dy, apart), how far they are from where the notes on screen have them, in pixels; apart: they didn't all
+        go as far (one held back at an edge). Else None."""
         app = self.app
         if not (self.drag and self.drag[0] == "move" and app.notes_late and app.show_notes.get()) or self.draft:
             return None
-        j = next(iter(self.drag[2]), None)
-        if j is None or j >= len(app.shapes) or j >= len(app.rendered_pts):
+        got = set()
+        for j in self.drag[2]:
+            if j >= len(app.shapes) or j >= len(app.rendered_pts):
+                return None
+            (b, p), (b0, p0) = app.shapes[j]["pts"][0], app.rendered_pts[j]
+            got.add((round((b - b0) * self.sx), round((p0 - p) * self.sy)))
+        if not got:
             return None
-        (b, p), (b0, p0) = app.shapes[j]["pts"][0], app.rendered_pts[j]
-        return round((b - b0) * self.sx), round((p0 - p) * self.sy)
+        return (*min(got), len(got) > 1)
 
-    def paint_carried(self, w, h, rows, cols, fixed, dx, dy):
+    def paint_carried(self, w, h, rows, cols, fixed, dx, dy, apart=False):
         """While shapes are dragged and their notes are left for later (slow to make): the other shapes' notes shown
         as usual, made once, and the dragged shapes' notes as they were, as ONE see-through picture slid (dx, dy)
         pixels further every time (Tk only moves it: painting the notes again at every move took 25-35 ms on the
         user's screen). What they really turn into at the new place, overlaps and all, is worked out when the mouse
-        is let go."""
+        is let go. apart: the dragged shapes didn't all go as far: their lines only, until the notes catch up (one
+        slid picture would show some notes in the wrong place, user)."""
         app = self.app
         kb, top = int(self.kb_w), int(self.ruler_h)
         iw, ih = w - kb, h - top
@@ -1232,6 +1238,8 @@ class RollDrawing:
             colors = note_tables(app.picture_pal)[0]
             for x0, y0, x1, y1, color in zip(*(v.tolist() for v in self.note_rects(w, h, only=False))):
                 self.create_rectangle(x0, y0, x1, y1, fill=colors[color][0], outline=colors[color][1])
+        if apart:
+            return
         a = c["area"]  # the dragged notes' picture holds the part of the screen they come from, and around it
         if a is None or a[0] > kb - dx or a[1] > top - dy or a[2] < w - dx or a[3] < h - dy:
             a = c["area"] = (kb - dx - iw // 2, top - dy - ih // 2, w - dx + iw // 2, h - dy + ih // 2)

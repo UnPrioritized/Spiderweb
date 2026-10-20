@@ -1275,6 +1275,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             _, k, orig, side, start = self.drag
             pt = self.resize_point(orig, k, side, start, e)
             step = self.held_step([self.app.sel])
+            later = self.grid_later  # (a step stopped at the edge: its snap for let go is dropped too)
             self.app.selected()["pts"] = self.frame_for_box(self.resize_custom(orig, k, pt, e.state & CTRL, side))
             if not e.state & SHIFT:
                 keep = e.state & CTRL
@@ -1287,6 +1288,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 return
             if self.stayed_inside(step):
                 self.app.shape_edited()
+            else:
+                self.grid_later = later
         elif kind == "skew":  # slides in whole grid steps / keys, wherever it was grabbed
             _, k, orig, start = self.drag
             step = self.held_step([self.app.sel])
@@ -1506,8 +1509,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         elif kind in ("resize", "turn", "skew") or kind == "handle" and self.app.selected()["kind"] == "custom":
             if kind == "resize" and self.grid_later and not e.state & SHIFT:  # (too slow to snap the notes while
                 #                                                              dragging: done now)
+                step = self.held_step([self.app.sel])
                 self.notes_onto_grid(self.app.selected(), *self.grid_later, late=False)
-                self.app.shape_edited()
+                if self.stayed_inside(step):  # (the snap would pass an edge: it stays where it stopped)
+                    self.app.shape_edited()
             self.app.sync_custom()  # (a stroke's point dragged: its gaps may have closed)
         elif kind == "stretch":  # the box goes back to its size, the shapes stay stretched (user)
             self.box_kept = (self.drag[4], set(self.app.sels))
@@ -1650,6 +1655,12 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         A right-drag listens to the notes under the mouse instead (any tool). Nothing while the left button holds
         something (a point removed under a held one: wrong point / error)."""
         self.drop_menu_wait()
+        if self.drag and self.drag[0] in ("box", "slice"):  # a Select box / slice line being drawn: called off
+            box = self.drag[0] == "box"                     # wherever the mouse is, no menu (user, like Domino)
+            self.cancel_draft()
+            if box and not self.kept_box():
+                self.app.select(None)
+            return
         if self.holding():
             return
         if not self.draft and self.path_right(e):  # Copy along a path: a point removed / the added one dropped
@@ -1730,8 +1741,12 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                     show = lambda: self.show_menu(e, next(iter(self.app.sels)))  # noqa: E731
                 if i is not None:
                     show()
-                else:  # (empty space: waits, so a double right-click still switches the tool, like the Hz window)
-                    self.menu_wait = self.after(DOUBLE_MS, lambda: (setattr(self, "menu_wait", None), show()))
+                else:  # (empty space: waits, so a double right-click still switches the tool, like the Hz window;
+                    # the selection or boxes changed meanwhile (Delete, Ctrl+Z): no menu)
+                    sels = set(self.app.sels)
+                    self.menu_wait = self.after(DOUBLE_MS, lambda: (
+                        setattr(self, "menu_wait", None),
+                        self.app.sels == sels and self.kept_box() == kept and show()))
             elif i is not None and sc["deselect"]:  # near a shape (or on its notes): its menu
                 self.show_menu(e, i)
             elif sc["deselect"]:
