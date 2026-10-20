@@ -1,6 +1,7 @@
 """The Gate subtract window (right-click "Gate subtract..."; subtract.py): the selected shapes' notes end a few ticks
 earlier and / or start a few ticks later, so a blank space shows between notes that touched. "Subtract from gates" on
-/ off, then two tabs, "Note end" and "Note start" (user 2026-10-20), each with "Use this side", how many ticks, "Only
+/ off, then two tabs, "Note start" and "Note end" (user 2026-10-20: start first, and the side a shape gets when
+opened without one), each with "Use this side", how many ticks, "Only
 notes that touch the next one" (start: "...the one before"), and "Change across the shape": the amount goes from the
 first number to a second one along a graph (like Gate Range's: across time or keys, each key row by itself + across
 gaps, along a row by time or by note count; drag points, click to add one, right-click one to delete it; presets).
@@ -22,21 +23,23 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes.gaterange import DIRS, STRAIGHT, few_steps, gate_steps, y_gate
-from notes.subtract import MOST, end_side, is_subtracted, part_subtract, ticks_of, with_sides
+from notes.subtract import (MOST, box_of, cut_marks, empty_side, end_side, is_subtracted, marked, part_subtract,
+                            side_used, subtracts, ticks_of, touched, touching, with_sides)
 from window import look
 from window.range_window import PRESETS
 from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place, unit_text
 
 GRAPH_KEYS = ("to", "graph", "dir", "rows", "join", "count")  # (a side's graph settings, shared by all)
 ALONG = ("time", "count")  # "Along a row:" choices (count = by note count)
-SIDES = ("end", "start")  # the tabs (sh["subtract"] = the end side, its "start" = the start side)
+SIDES = ("start", "end")  # the tabs, Note start first (user 2026-10-20; sh["subtract"] = the end side, its
+# "start" = the start side)
 SIDE_LISTS = ("use", "bys", "touches", "varies", "owns", "g", "g_all")  # (each tab's, see side_data)
 
 
 def side_data():
     """One tab's settings: per shape "use" (Use this side), "bys", "touches", "varies", "owns" (its own graph); "g" =
     the graph shown, "g_all" = a graph control was used (every shape takes g)."""
-    return {"use": [], "bys": [], "touches": [], "varies": [], "owns": [], "g": None, "g_all": False}
+    return {"use": [], "bys": [], "touches": [], "varies": [], "owns": [], "g": None, "g_all": False, "cuts": []}
 
 
 def _side_list(key):
@@ -63,14 +66,43 @@ def bare_notes(app, sh):
 
 def carry_subtract(app, whole, pieces):
     """Pieces cut off shape whole (Slice, Split here, Split into letters) that took its Gate subtract: a graph across
-    the shape is cut so each note keeps its amount (subtract.part_subtract)."""
+    the shape is cut so each note keeps its amount (subtract.part_subtract), and "Only notes that touch" keeps the
+    notes that touched one now in another piece (cut marks, subtract.cut_marks; hunt 2026-10-20)."""
     sub = whole.get("subtract")
-    if not isinstance(sub, dict) or not sub.get("vary") and not (sub.get("start") or {}).get("vary"):
+    if not isinstance(sub, dict):
         return
-    notes = bare_notes(app, whole)
-    for p in pieces:
-        if isinstance(p.get("subtract"), dict):
-            p["subtract"] = part_subtract(p["subtract"], notes, bare_notes(app, p), app.ppq)
+    sides = [(end_side(sub), "end"), (sub.get("start"), "start")]
+    vary = any(s and s.get("vary") for s, _ in sides)
+    touch = [(s, k) for s, k in sides if s and s.get("touch")]
+    if not vary and not touch:
+        return
+    pieces = [p for p in pieces if isinstance(p.get("subtract"), dict)]
+    own = [bare_notes(app, p) for p in pieces]
+    if vary:
+        notes = bare_notes(app, whole)
+        for p, n in zip(pieces, own):
+            p["subtract"] = part_subtract(p["subtract"], notes, n, app.ppq)
+    if not touch or not any(len(n) for n in own):
+        return
+    every = np.concatenate([n for n in own if len(n)])
+    whole_notes = bare_notes(app, whole)
+    for side, key in touch:
+        col = 1 if key == "end" else 0
+        fn = touching if key == "end" else touched
+        flags = fn(every)
+        if side.get("cuts") and len(whole_notes):  # (the whole's own marks, from an earlier cut: on its box)
+            flags |= marked(every, side["cuts"], col, box_of(whole_notes))
+        at = 0
+        for p, n in zip(pieces, own):
+            mine = flags[at:at + len(n)] & ~fn(n) if len(n) else np.zeros(0, bool)
+            at += len(n)
+            s = p["subtract"] if key == "end" else p["subtract"].get("start")
+            if not s:
+                continue
+            s.pop("cuts", None)
+            cuts = cut_marks(n, mine, col) if len(n) else []
+            if cuts:
+                s["cuts"] = cuts
 
 
 def own_part(sh):
@@ -116,7 +148,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
                                        command=lambda: self.put_all("on"))
         self.on_tick.pack(anchor="w")
         Tooltip(self.on_tick, tr("subtract.on_tip"))
-        self.side = "end"
+        self.side = "start"
         self.side_var = tk.StringVar(value=self.side)
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(8, 0))
@@ -266,27 +298,40 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.hist.reset()
 
     def load(self, start):
-        """Each shape's settings from the shapes (start: all on, the end side 1 tick where there was none), then the
-        controls. Opened on shapes using only the start side: that tab."""
+        """Each shape's settings from the shapes, then the controls. start (opened from the menu): all on, and a shape
+        with no side used gets the Note start side (1 tick where it had none; user 2026-10-20: the first tab). Opened
+        on the Note start tab unless only the end side is used."""
         subs = [t.get("subtract") if is_subtracted(t) else None for t in self.tgts]
         self.ons = [start or s is not None for s in subs]
         for side in SIDES:
+            # (an empty side = none: one a flip left with 0 ticks gets 1 tick when used, hunt 2026-10-20)
             ss = [s and (end_side(s) if side == "end" else s.get("start")) for s in subs]
+            ss = [None if empty_side(s) else s for s in ss]
             d = self.sides[side]
-            d["use"] = [bool(s) and not s.get("off") or start and side == "end" and not s for s in ss]
+            d["use"] = [side_used(s) for s in ss]
             d["bys"] = [s["by"] if s else None for s in ss]
-            if start and side == "end":
-                d["bys"] = [b if b is not None else 1 / self.app.ppq for b in d["bys"]]
             d["touches"] = [bool(s and s.get("touch")) for s in ss]
             d["varies"] = [bool(s and s.get("vary")) for s in ss]
+            d["cuts"] = [s.get("cuts") if s else None for s in ss]  # (kept as they are: subtract.cut_marks)
             # each shape's own graph (kept until a graph control is used: then the one shown goes to all, hunt)
             d["owns"] = [{k: s[k] for k in GRAPH_KEYS if k in s} if s and "to" in s else None for s in ss]
             d["g"] = json.loads(json.dumps(next((o for o in d["owns"] if o), None)))  # (shown: the first shape's)
             d["g_all"] = False
-        if start and not any(self.sides["end"]["use"]) and any(self.sides["start"]["use"]):
-            self.side = "start"
+        if start:
+            self.use_first()
+            ends, starts = self.sides["end"]["use"], self.sides["start"]["use"]
+            self.side = "end" if any(ends) and not any(starts) else "start"
         self.side_var.set(self.side)
         self.show_controls()
+
+    def use_first(self):
+        """Shapes with neither side used: the Note start side used (1 tick where it has no amount)."""
+        ends, starts = self.sides["end"], self.sides["start"]
+        for i in range(len(self.ons)):
+            if self.ons[i] and not ends["use"][i] and not starts["use"][i]:
+                starts["use"][i] = True
+                if starts["bys"][i] is None:
+                    starts["bys"][i] = 1 / self.app.ppq
 
     def pick_side(self):
         """A tab clicked: its settings shown (a number typed on the other one goes to it first)."""
@@ -411,13 +456,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         n = len(self.idx)
         if what == "on":
             self.ons = [self.on_var.get()] * n
-            if self.on_var.get():  # (shapes with neither side used: the end side, 1 tick where no amount)
-                ends = self.sides["end"]
-                for i in range(n):
-                    if not ends["use"][i] and not self.sides["start"]["use"][i]:
-                        ends["use"][i] = True
-                    if ends["bys"][i] is None:
-                        ends["bys"][i] = 1 / self.app.ppq
+            self.use_first()
         if what in ("on", "use"):
             if what == "use":
                 self.use = [self.use_var.get()] * n
@@ -626,7 +665,12 @@ class SubtractWindow(PointGraph, tk.Toplevel):
 
     def put_state(self, state):
         self.drag = None
-        self.ons, self.sides = json.loads(state)
+        ons, sides = json.loads(state)
+        changed = [s for s in SIDES if sides[s] != self.sides[s]]
+        if changed and self.side not in changed:  # (Ctrl+Z / Ctrl+Y show the tab they change, hunt 2026-10-20)
+            self.side = changed[0]
+            self.side_var.set(self.side)
+        self.ons, self.sides = ons, sides
         self.show_controls()
         self.store()
 
@@ -638,6 +682,8 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         sub = {"by": d["bys"][i]}
         if d["touches"][i]:
             sub["touch"] = True
+            if d["cuts"][i]:  # (a piece's notes that touched another piece: kept)
+                sub["cuts"] = d["cuts"][i]
         if not d["use"][i]:  # (kept while unused: using it again brings them back)
             sub["off"] = True
         # (its own graph until a graph control is used; none of its own and ticked: the one shown. Kept while
@@ -698,7 +744,8 @@ def open_subtract(app):
     w = app.subtract_window
     if w:  # (already open: it follows the selection; the menu item puts Gate subtract on)
         w.sync()
-        if w.idx and not all(w.ons):
+        used = [a or b for a, b in zip(w.sides["end"]["use"], w.sides["start"]["use"])]
+        if w.idx and (not all(w.ons) or not all(used)):  # (or a shape with no side used: Note start on)
             w.on_var.set(True)
             w.put_all("on")
         w.lift()
@@ -708,4 +755,4 @@ def open_subtract(app):
 
 
 def any_subtracted(app):
-    return any(is_subtracted(app.shapes[i]) for i in app.sels if i < len(app.shapes))
+    return any(subtracts(app.shapes[i]) for i in app.sels if i < len(app.shapes))

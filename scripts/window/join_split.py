@@ -32,6 +32,7 @@ from notes.joined import (custom_groups, join_shapes, join_velocity, joined_end_
 from notes.tumour import LINE_KINDS, split_tumour
 from roll.roll_shared import cached_path, cached_strokes
 from window import look
+from notes.subtract import plain_subtract, same_subtract
 from window.subtract_window import carry_subtract
 from window.sustain_window import carry_stops
 from window.widgets import Tooltip
@@ -409,9 +410,9 @@ class JoinSplit:
                 sh["sustain"] = copy.deepcopy(sus[0])
             carry_stops(self, [self.shapes[i] for i in pair], new)
         subs = [self.shapes[i].get("subtract") for i in pair]
-        if subs[0] is not None and subs[0] == subs[1]:  # (both Gate subtract alike: so are the merged notes)
-            for sh in new:
-                sh["subtract"] = copy.deepcopy(subs[0])
+        if subs[0] is not None and subs[1] is not None and same_subtract(*subs):  # (both alike: so are the merged
+            for sh in new:                                                        # notes)
+                sh["subtract"] = plain_subtract(copy.deepcopy(subs[0]))
         masks = [self.shapes[i].get("mask") for i in pair]
         if masks[0] and masks[1] and same_mask(*masks):  # (both masks alike: so is what's made of them, like Join;
             # groups apart, the first one's)

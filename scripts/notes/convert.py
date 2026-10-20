@@ -106,6 +106,9 @@ def shared_settings(shapes):
         if key == "mask" and all(vals):  # (masks alike but their groups: the first one's, hunt 2026-10-12)
             from notes.mask import same_mask
             same = [vals[0] if same_mask(v, vals[0]) else v for v in vals]
+        if key == "subtract":  # (empty sides and cut marks don't count; the shape made of them has no marks)
+            from notes.subtract import plain_subtract
+            same = vals = [plain_subtract(v) for v in vals]
         if all(v == same[0] for v in same) and (key != "glue" or vals[0] is True):
             keep[key] = json.loads(json.dumps(vals[0]))
         else:
