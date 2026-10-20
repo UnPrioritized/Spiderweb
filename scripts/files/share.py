@@ -18,7 +18,7 @@ import zlib
 
 from files.about import VERSION as APP
 from files.project import short_shape
-from files.unzip import unzip
+from files.unzip import allowance, unzip
 from files.update_check import version_tuple
 from notes.areas import clean_areas
 from notes.custom import clean_strokes
@@ -56,12 +56,22 @@ def unpack(text):
         raise ShareError("newer")
     data = DATA.match(re.sub(r"\s+", "", found.group(2))).group()
     try:
-        got = json.loads(unzip(base64.b64decode(data[:len(data) // 4 * 4], validate=True)).decode("utf-8"))
+        raw = base64.b64decode(data[:len(data) // 4 * 4], validate=True)
+        body = unzip(raw)
+        got = json.loads(body.decode("utf-8"))
     except (binascii.Error, zlib.error, UnicodeDecodeError, ValueError, RecursionError):
         raise ShareError("broken") from None
     if not isinstance(got, dict) or got.get("kind") not in ("shapes", "drawing"):
         raise ShareError("broken")
+    got = Unpacked(got)
+    got.packed, got.used = len(raw), len(body)
     return got
+
+
+class Unpacked(dict):
+    """unpack's dict, + packed (the line's zlib bytes) and used (what its JSON unpacked to): the pasted notes in it
+    share what's left of that allowance (files.unzip)."""
+    packed, used = None, 0
 
 
 def made_by(got):
@@ -90,18 +100,21 @@ def _file_name_only(sh):
 
 def read_shapes(got):
     """An unpacked "shapes" dict -> (the shapes, checked like a project file's, how many couldn't be read and were
-    left out). Raises ShareError("broken") if none can be used."""
+    left out). Raises ShareError("broken") if none can be used, or if its pasted notes unpack far bigger than the
+    line could hold (files.unzip.allowance: a line made to, not one of them is pasted)."""
     out, left = [], 0
-    for sh in got.get("shapes") if isinstance(got.get("shapes"), list) else ():
-        try:
-            sh = clean_shape(sh) if isinstance(sh, dict) else None
-        except (AttributeError, KeyError, TypeError, ValueError, IndexError):
-            sh = None
-        if sh:
-            out.append(sh)
-        else:
-            left += 1
-    if not out:
+    with allowance(got.packed or 0) as share:
+        share.left -= got.used
+        for sh in got.get("shapes") if isinstance(got.get("shapes"), list) else ():
+            try:
+                sh = clean_shape(sh) if isinstance(sh, dict) else None
+            except (AttributeError, KeyError, TypeError, ValueError, IndexError):
+                sh = None
+            if sh:
+                out.append(sh)
+            else:
+                left += 1
+    if not out or share.over:
         raise ShareError("broken")
     return out, left
 

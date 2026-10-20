@@ -3317,7 +3317,7 @@ def unpack_notes(text):
         if len(_unpacked) > 20:
             _unpacked.clear()
         tracks = text.startswith(TRACKS)
-        got = np.frombuffer(unzip(base64.b64decode(text[len(TRACKS):] if tracks else text)), "<i4")
+        got = np.frombuffer(unzip(base64.b64decode(text[len(TRACKS):] if tracks else text), key=text), "<i4")
         got = got.reshape(-1, 5 if tracks else 4).astype(np.int64)
         if not tracks:
             got = np.column_stack([got, np.zeros(len(got), np.int64)])

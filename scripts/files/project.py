@@ -36,6 +36,7 @@ from files.errors import write_log
 from files.safefile import write_bytes, write_text
 from files.settings import save_app_settings, with_app_settings
 from files.snap import clean_snap
+from files.unzip import allowance
 from files.update_check import version_tuple
 from window.big_ask import ask as ask_big, ask_drums
 
@@ -210,7 +211,7 @@ class ProjectFiles:
         is left out and self.load_notes says so (tell_load_notes)."""
         self.load_notes = []
         try:
-            data = read_json(path)
+            data, size = read_json(path), os.path.getsize(path)
             if not isinstance(data.get("shapes", []), list):
                 raise ValueError(tr("project.not_a_spiderweb_project"))
         except (OSError, ValueError) as e:
@@ -219,13 +220,14 @@ class ProjectFiles:
             return False
         shapes = []
         wholes = data["wholes"] if isinstance(data.get("wholes"), list) else []
-        for sh in data.get("shapes", []):
-            try:
-                sh = clean_shape(unpack_wholes(sh, wholes)) if isinstance(sh, dict) else None
-            except Exception:  # (damaged, or written in a way this Spiderweb doesn't know)
-                sh = None
-            if sh:
-                shapes.append(sh)
+        with allowance(size):  # (pasted notes made to unpack far bigger than the file: left out)
+            for sh in data.get("shapes", []):
+                try:
+                    sh = clean_shape(unpack_wholes(sh, wholes)) if isinstance(sh, dict) else None
+                except Exception:  # (damaged, or written in a way this Spiderweb doesn't know)
+                    sh = None
+                if sh:
+                    shapes.append(sh)
         shapes = paths_for_file(shapes, os.path.dirname(os.path.abspath(path)), False)  # (pictures' files)
         made = version_tuple(data.get("app_version")) if isinstance(data.get("app_version"), str) else None
         newer = made and made > version_tuple(VERSION) or type(data.get("version")) is int and data["version"] > 2
