@@ -637,18 +637,22 @@ def ring_runs(s, e, k, order, gap, big):
 
 
 @njit(cache=CACHE, nogil=True)
-def clash_pairs(items, n):
+def clash_pairs(items, n, most):
     """engine.clash_arrays: (key, start, end, owner) rows, owners below n -> arrays a, b of the owner pairs a < b
-    that clash, sorted by a then b: in (key, start, end, owner) order, a later one on the same key starting before
+    that clash, sorted by a then b, and True (False + nothing: the table would take more than `most` bytes): in (key, start, end, owner) order, a later one on the same key starting before
     an earlier one ends. Swept key by key: each owner's latest end so far, the owners still sounding at each start;
-    pairs marked in an n x n table of bits (n / 64 words a row)."""
+    pairs listed (repeats too) until the list gets long, then marked in an n x n table of bits (n / 64 words a row:
+    the same pair on every key of thousands of stacked shapes)."""
     k = np.ascontiguousarray(items[:, 0])
     s = np.ascontiguousarray(items[:, 1])
     e = np.ascontiguousarray(items[:, 2])
     o = np.ascontiguousarray(items[:, 3])
     order = key_order(k, s, e, o)
     words = (n + 63) >> 6
-    hit = np.zeros((n, words), np.uint64)
+    listed = np.empty(min(1 << 20, max(16, 4 * len(order))), np.int64)
+    nl = 0
+    hit = np.zeros((0, words), np.uint64)
+    count = -1  # (pairs in the table; -1 = no table yet)
     one = np.uint64(1)
     latest = np.full(n, np.iinfo(np.int64).min, np.int64)
     on = np.zeros(n, np.bool_)
@@ -669,7 +673,25 @@ def clash_pairs(items, n):
                     j += 1
                     if a != b:
                         lo, hi = min(a, b), max(a, b)
-                        hit[lo, hi >> 6] |= one << np.uint64(hi & 63)
+                        if count < 0 and nl < len(listed):
+                            listed[nl] = lo * n + hi
+                            nl += 1
+                        else:
+                            if count < 0:  # (the list is full: the table from here on)
+                                if n * words * 8 > most:  # (too big: the caller's NumPy way)
+                                    return listed[:0], listed[:0], False
+                                hit = np.zeros((n, words), np.uint64)
+                                count = 0
+                                for x2 in range(nl):
+                                    p, q = listed[x2] // n, listed[x2] % n
+                                    bit = one << np.uint64(q & 63)
+                                    if not hit[p, q >> 6] & bit:
+                                        hit[p, q >> 6] |= bit
+                                        count += 1
+                            bit = one << np.uint64(hi & 63)
+                            if not hit[lo, hi >> 6] & bit:
+                                hit[lo, hi >> 6] |= bit
+                                count += 1
                 else:
                     on[a] = False
             na = j
@@ -688,13 +710,14 @@ def clash_pairs(items, n):
                 break
             latest[o[r]] = np.iinfo(np.int64).min
         na = 0
-    count = 0
-    for a in range(n):
-        for w in range(words):
-            x = hit[a, w]
-            while x:
-                x &= x - one
-                count += 1
+    if count < 0:
+        code = np.sort(listed[:nl])
+        c = 0
+        for x in range(nl):
+            if x == 0 or code[x] != code[x - 1]:
+                code[c] = code[x]
+                c += 1
+        return code[:c] // n, code[:c] % n, True
     pa = np.empty(count, np.int64)
     pb = np.empty(count, np.int64)
     c = 0
@@ -709,7 +732,7 @@ def clash_pairs(items, n):
                     c += 1
                 x >>= one
                 bit += 1
-    return pa, pb
+    return pa, pb, True
 
 
 @njit(cache=CACHE, nogil=True)
@@ -1585,7 +1608,7 @@ def warm():
     key_order(i1, i1, i1, i1)
     radix_order(i1, 1)
     ring_runs(i1, i1, i1, i1, 0.5, 1)
-    clash_pairs(np.zeros((1, 4), np.int64), 1)
+    clash_pairs(np.zeros((1, 4), np.int64), 1, 1 << 28)
     wave_fill(i1, 0, 1, i1, np.zeros(1), np.zeros(1))
     note_ends(i1, i1 + 1, i1, True, 2, 0.0, 50.0, True, np.zeros(1), 0.0, np.int64(1) << 40)
     nearest(np.zeros((1, 3)), np.zeros((1, 3)))
