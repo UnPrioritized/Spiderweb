@@ -268,7 +268,8 @@ class Player:
         self._clock = None
         self._swap = None  # new notes ready for the playing thread (_Ons)
         self._wanted = None  # new notes waiting to be put in order (notes, use10)
-        self._sorting = None  # the thread putting them in order
+        self._sorting = False  # a thread is putting them in order (cleared by it under _lock as it ends)
+        self._lock = threading.Lock()
         self._gen = 0  # one for each start (a sort left from an earlier play is thrown away)
 
     @property
@@ -302,14 +303,19 @@ class Player:
             now = time.perf_counter()
             self._clock = (now, clock[1] + (now - clock[0]) / clock[2], spt)
         self.spt = spt
-        self._wanted = (self._gen, notes, use10)
-        if self._sorting is None or not self._sorting.is_alive():
-            self._sorting = threading.Thread(target=self._sort, daemon=True)
-            self._sorting.start()
+        with self._lock:  # (a thread just ending would miss these notes: it says it's done under the same lock)
+            self._wanted = (self._gen, notes, use10)
+            if not self._sorting:
+                self._sorting = True
+                threading.Thread(target=self._sort, daemon=True).start()
 
     def _sort(self):
-        while self._wanted is not None:
-            (gen, notes, use10), self._wanted = self._wanted, None
+        while True:
+            with self._lock:
+                if self._wanted is None:
+                    self._sorting = False
+                    return
+                (gen, notes, use10), self._wanted = self._wanted, None
             ons = _Ons(notes, self.start_beat * self.ppq, self.stop_beat * self.ppq, use10, self.tune)
             if self._wanted is None and gen == self._gen:  # (changed again meanwhile: those first)
                 self._swap = ons

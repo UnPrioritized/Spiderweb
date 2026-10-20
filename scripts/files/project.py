@@ -5,6 +5,7 @@ import json
 import math
 import os
 import re
+import sys
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -31,6 +32,7 @@ from files.domino_clip import DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip
 from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, track_slots, write_midi
 from files.playback import keep_saved
 from files.about import HERE, USER, VERSION
+from files.errors import write_log
 from files.safefile import write_bytes, write_text
 from files.settings import save_app_settings, with_app_settings
 from files.snap import clean_snap
@@ -175,7 +177,7 @@ def project_json(data):
                 lines.append('"wholes": [\n  ' + ",\n  ".join(short_shape(w) for w in wholes) + "\n ]")
         else:
             if isinstance(v, dict):
-                v = {a: short_num(b, 6) for a, b in v.items()}
+                v = {a: short_num(b) for a, b in v.items()}  # (12 digits like shapes: a long default gate stays exact)
             lines.append(f"{json.dumps(k)}: {json.dumps(v)}")
     return "{\n " + ",\n ".join(lines) + "\n}\n"
 
@@ -481,14 +483,22 @@ class ProjectFiles:
         win = with_app_settings(win)  # (user/settings.ini's sound / updates / tips)
         if win and not win.get("seen_version") and isinstance(data.get("app_version"), str):
             win["seen_version"] = data["app_version"]  # (settings.ini deleted: no What's new for the same version)
-        try:
-            self.tips.restore(win)
-            self.updates.restore(win)
-            self.tool_picker.restore(win)
-            if isinstance(win.get("hz_tools"), dict):  # (the Hz bass window's tools button: window/hz_draw.py)
-                self.hz_tools = win["hz_tools"]
-            if isinstance(win.get("hz_view"), dict):  # (its zoom + scroll: checked when the window opens)
-                self.hz_view = win["hz_view"]
+        def kept(group):
+            """One group put back; a broken one is skipped and logged, the rest still come back."""
+            try:
+                group()
+            except (OSError, ValueError, AttributeError, TypeError, tk.TclError):
+                write_log(*sys.exc_info(), "(putting the window back as it was)")
+
+        kept(lambda: self.tips.restore(win))
+        kept(lambda: self.updates.restore(win))
+        kept(lambda: self.tool_picker.restore(win))
+        if isinstance(win.get("hz_tools"), dict):  # (the Hz bass window's tools button: window/hz_draw.py)
+            self.hz_tools = win["hz_tools"]
+        if isinstance(win.get("hz_view"), dict):  # (its zoom + scroll: checked when the window opens)
+            self.hz_view = win["hz_view"]
+
+        def size():
             from window.widgets import fit_screen, placed
             geo = placed(self, win.get("geometry", "") if isinstance(win.get("geometry"), str) else "")
             if geo:
@@ -497,8 +507,14 @@ class ProjectFiles:
             if win.get("maximized"):
                 self.update_idletasks()
                 self.state("zoomed")
+        kept(size)
+
+        def velocity_height():
             if "velocity_height" in win:
                 self._vel_height = max(int(50 * self.scale), int(float(win["velocity_height"]) * self.scale))
+        kept(velocity_height)
+
+        def ticks():
             if win.get("midi_device") and keep_saved(str(win["midi_device"])):
                 self.midi_device.set(str(win["midi_device"]))
             self.live.set(win.get("live") is True)
@@ -509,6 +525,9 @@ class ProjectFiles:
             self.show_lines.set(win.get("show_lines") is not False)
             self.show_notes.set(win.get("show_notes") is not False)
             self.channels_folded.set(win.get("channels_folded") is True)
+        kept(ticks)
+
+        def places():
             for key, attr in (("tumour_window", "tumour_pos"), ("graph_window", "graph_pos"),
                               ("claw_window", "claw_pos"), ("strum_window", "strum_pos"), ("chop_window", "chop_pos"),
                               ("path_window", "path_pos")):
@@ -516,8 +535,8 @@ class ProjectFiles:
                 if isinstance(pos, str) and re.fullmatch(r"\+-?\d+\+-?\d+", pos):
                     setattr(self, attr, pos)
             from window.widgets import PLACE  # (every other window's place: widgets.remember_place)
-            places = win.get("places") if isinstance(win.get("places"), dict) else {}
-            self.window_places = {k: v for k, v in list(places.items())[:100] if isinstance(k, str) and len(k) <= 40
+            saved = win.get("places") if isinstance(win.get("places"), dict) else {}
+            self.window_places = {k: v for k, v in list(saved.items())[:100] if isinstance(k, str) and len(k) <= 40
                                   and isinstance(v, str) and re.fullmatch(PLACE, v)}
             pos = win.get("hz_window")
             if isinstance(pos, str) and re.fullmatch(r"\d+x\d+\+-?\d+\+-?\d+", pos):
@@ -528,6 +547,9 @@ class ProjectFiles:
             h = win.get("hz_loud_height")
             if isinstance(h, int) and not isinstance(h, bool) and 0 < h < 10000:
                 self.hz_loud_h = h
+        kept(places)
+
+        def sound():
             from window.hz_preview import VOICES, clean_settings
             self.hz_preview = clean_settings(win.get("hz_preview"))
             v = win.get("play_voices")
@@ -539,6 +561,9 @@ class ProjectFiles:
             self.domino256.set(win.get("domino_256") is True)
             self.keep_colours.set(win.get("keep_colours") is True)
             self.sync_builtin()
+        kept(sound)
+
+        def history():
             pos = win.get("history_window")
             if isinstance(pos, str) and re.fullmatch(r"(\d+x\d+)?\+-?\d+\+-?\d+", pos):
                 self.history_pos = pos
@@ -546,11 +571,13 @@ class ProjectFiles:
             if win.get("history") is True:  # it starts off; on again if it was on last time
                 self.show_history.set(True)
                 self.toggle_history(tip=False)
+        kept(history)
+
+        def velocity():
             if win.get("velocity") is True:  # it starts off; on again if it was on last time
                 self.show_velocity.set(True)
                 self.toggle_velocity(tip=False)
-        except (OSError, ValueError, AttributeError, TypeError, tk.TclError):
-            pass
+        kept(velocity)
 
     def schedule_autosave(self):
         if self._autosave_job:
@@ -562,7 +589,9 @@ class ProjectFiles:
         try:
             self.write_json(self.autosave_path, window=True)
             self._autosave_failed = False
-        except OSError as e:
+        except Exception as e:  # (not only the disk: any failure is told the same way)
+            if not isinstance(e, OSError):
+                write_log(*sys.exc_info(), "(autosave)")
             if not self._autosave_failed:  # (told once, again only if it worked in between)
                 self._autosave_failed = True
                 self.after_idle(lambda e=e: self.tell_autosave_failed(e))
@@ -583,7 +612,9 @@ class ProjectFiles:
         try:
             self.write_json(self.autosave_path, window=True)
             return True
-        except OSError as e:
+        except Exception as e:
+            if not isinstance(e, OSError):
+                write_log(*sys.exc_info(), "(autosave on closing)")
             answer = messagebox.askyesnocancel(tr("project.spiderweb"),
                                                tr("project.autosave_failed_closing", path=self.autosave_path, e=e),
                                                icon="warning", default="yes", parent=self)
