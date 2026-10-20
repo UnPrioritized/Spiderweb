@@ -145,7 +145,7 @@ def spread(first, end, vals, count, low):
 
 def up_down_plan(stays, rows, up, top):
     """Merge up / down (user 2026-10-19, from their pictures): rows (start, end, pitch, ...) are cut where the stays'
-    (a list: each shape's rows) notes start and end; each time piece slides as a block until its highest note is
+    (a list: each shape's rows) notes and its own start and end; each time piece slides as a block until its highest note is
     right under the LOWEST note sounding then of the shapes not wholly below it (down: mirrored; the outer edge,
     like left / right's rows: a line inside a hollow shape goes out under it; a shape wholly below is left out, hunt);
     nothing in its way = up to key top (down to key 0), a leftover. None when no piece meets them; else a plan for
@@ -157,7 +157,8 @@ def up_down_plan(stays, rows, up, top):
     if not stays or not len(rows):
         return None
     rk = rows[:, 2] if up else top - rows[:, 2]  # (down = up, upside down)
-    cuts = np.unique(np.concatenate([s[:, :2].ravel() for s in stays]))
+    # (its own note ends cut too, user 2026-10-20: a shorter bottom row left the rest hanging a key above)
+    cuts = np.unique(np.concatenate([s[:, :2].ravel() for s in stays] + [rows[:, :2].ravel()]))
     count = len(cuts) + 1  # (time pieces: piece t between cuts t - 1 and t)
 
     def sounding(notes):  # (each note sounds through time pieces first .. end - 1)
