@@ -153,18 +153,25 @@ def clip_span(notes, bar, start="bar"):
     return first, max(-(-(int(notes[:, 1].max()) - first) // bar) * bar, bar)
 
 
-def clip_data(notes, ppq, bar, start="bar", pad_from=None):
+def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None):
     """notes: (start, end, pitch, velocity, slot, ...) rows -> the clipboard bytes. One track per slot (channel)
     that has notes, in slot order, packed together (no empty tracks; pad_from: every slot from that one on gets a
     track, empty ones too: Overlapping shapes keep their colours, rows of channels); Domino fills tracks downwards
     from the highlighted one. start "bar": the copy starts at the bar line at or before the first note (so the notes keep
     their place in the bar) and runs to the bar line after the last; "note": it starts on the first note and ends
-    with the last, so the first note pastes right at Domino's cursor. Every track shares that stretch."""
+    with the last, so the first note pastes right at Domino's cursor. Every track shares that stretch (made longer
+    for CC messages past the last note). cc = {slot: messages} (hz_cc.slot_events): control items on its track."""
+    cc = cc or {}
     first, length = clip_span(notes, bar, start)
+    length = max([length] + [ev[-1][0] - first + 1 for ev in cc.values() if ev])
     end = item(2009, item(1001, struct.pack("<I", length)))
     with Packer(zlib.Z_DEFAULT_COMPRESSION) as z:
         order, cuts = track_orders(notes, int(notes[:, 4].max()) + 1, z.pool)
-        tracks = b"".join(item(1003, TRACK_HEAD + note_rows(notes[order[a:b]], first).tobytes() + end + TRACK_TAIL)
+
+        def events(s, a, b):
+            rows = note_rows(notes[order[a:b]], first)
+            return b"".join(bytes(p) for p in with_cc(rows, cc[s], first)) if cc.get(s) else rows.tobytes()
+        tracks = b"".join(item(1003, TRACK_HEAD + events(s, a, b) + end + TRACK_TAIL)
                           for s, (a, b) in enumerate(zip(cuts[:-1].tolist(), cuts[1:].tolist()))
                           if a < b or pad_from is not None and s >= pad_from)
         data = SONG_START + item(1002, struct.pack("<H", ppq)) + SONG_REST + tracks + SONG_TAIL
@@ -242,12 +249,40 @@ def note_rows(notes, first=0):
     return rows
 
 
+def cc_item(tick, status, one, two):
+    """A MIDI message of a Hz bass's CC lines (hz_cc.py: control change or pitch bend, status without the channel) as
+    Domino's control item: CCM = the CC number (130 = pitch bend), the value stored minus where Domino's General MIDI
+    module counts it from (Pan and pitch bend from their middle, DMS_SPEC.md 7.1)."""
+    if status == 0xE0:
+        ccm, value = 130, (one | two << 7) - 8192
+    else:
+        ccm, value = one, two - (64 if one == 10 else 0)
+    return item(2003, item(1001, struct.pack("<I", tick)) + item(2001, struct.pack("<H", ccm))
+                + item(2002, item(0, struct.pack("<f", 0.0))) + item(2003, item(0, struct.pack("<f", value))))
+
+
+def with_cc(rows, events, first=0):
+    """A track's note items (NOTE rows in time order) with its control items (cc_item) put in among them by tick,
+    before the notes on their tick: byte pieces. Ticks from first (a message before it: on it)."""
+    starts = rows["tick"].astype(np.int64)
+    out, at = [], 0
+    for tick, status, one, two in events:
+        tick = max(0, tick - first)
+        i = int(np.searchsorted(starts, tick, "left"))
+        if i > at:
+            out.append(rows[at:i].view(np.uint8))
+            at = i
+        out.append(cc_item(tick, status, one, two))
+    out.append(rows[at:].view(np.uint8))
+    return out
+
+
 def time_signature(beats):
     """The Conductor track's time signature at tick 0: beats / 4, as the MIDI export writes it."""
     return item(2015, item(1001, struct.pack("<I", 0)) + item(2001, bytes([beats])) + item(2002, bytes([4])))
 
 
-def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True):
+def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True, cc=None):
     """notes: [start, end, pitch, velocity, slot, ...] -> a .dms file (Domino's own song file, which can hold a
     PPQ up to 65535 where a MIDI file stops at 32767). It's the clipboard's format with a Conductor track first
     (tempo + time signature), then one track per slot like the MIDI export (empty ones too unless not pad:
@@ -256,12 +291,13 @@ def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True):
     does, unless drums is False (the project's "Use channel 10": wanted for its colour). Keys above 127 must be
     left out first, unless the Domino 256 keys setting is on (the mod reads the key byte up to 255).
     Packed as it's made, PIECE notes at a time: the whole unpacked file (40 bytes a note) never sits in memory, and
-    the notes are cut into tracks by one sort instead of a search through all of them for each track."""
+    the notes are cut into tracks by one sort instead of a search through all of them for each track. cc = {slot:
+    messages} (hz_cc.slot_events): control items on its track."""
     with Packer(DMS_LEVEL) as z:
-        return dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad)
+        return dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad, cc or {})
 
 
-def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True):
+def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None):
     """dms_data's work: the file's data fed to the Packer z as it's made."""
     feed = z.add
 
@@ -283,6 +319,14 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True):
     order, cuts = track_orders(notes, count, z.pool)
     for slot in track_slots(notes, pad).tolist():
         mine = order[cuts[slot]:cuts[slot + 1]]
+        if (cc or {}).get(slot):  # (a Hz bass's CC messages among its notes: made whole, they're few tracks)
+            part = notes[mine]
+            pieces = with_cc(note_rows(part), cc[slot])
+            track_head(slot_track_channel(slot, use10)[1], b"", sum(len(p) for p in pieces))
+            for p in pieces:
+                feed(bytes(p))
+            feed(track_tail(max(int(part[:, 1].max()) if len(part) else 0, cc[slot][-1][0])))
+            continue
         track_head(slot_track_channel(slot, use10)[1], b"", len(mine) * NOTE.itemsize)
         end = 0
         for at in range(0, len(mine), PIECE):

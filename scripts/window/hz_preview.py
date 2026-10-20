@@ -20,6 +20,8 @@ import numpy as np
 from files import errors
 from files.lang import tr
 from files.synth import RATE, Player, Synth, SynthError, events
+from files.synth import cc_events as synth_cc
+from notes.hz_cc import cc_events, cc_key
 from notes.engine import CLASH
 from notes.hzbass import all_tones, left_edge
 
@@ -197,14 +199,18 @@ class Preview:
         notes, tracks = (self.app.notes_tracks(sh) if sh is not None and all_tones(sh.get("hz") or {})  # (any layer's)
                          else (None, None))
         multi = self.app.channel_mode.get() == "auto"
-        shape = (id(sh), left_edge(sh), multi) if sh is not None else None
+        shape = (id(sh), left_edge(sh), multi, cc_key(sh.get("hz"))) if sh is not None else None
         if notes is self.notes and (ppq, bpm) == (self.ppq, self.bpm) and shape == self.shape:
             return
         old, same_time = self.ev, (ppq, bpm) == (self.ppq, self.bpm)
         self.notes, self.ppq, self.bpm, self.shape = notes, ppq, bpm, shape
         # (a layer's notes clashing with another's: on another channel with Multi channel, as in the MIDI)
         chans = np.asarray(tracks) // CLASH if multi and tracks is not None and len(tracks) else None
-        ev = events(notes, ppq, bpm, chans) if notes is not None and len(notes) else None
+        # (its CC lines on every channel its notes are on, as in the MIDI)
+        used = (sorted({c + (c >= 9) for c in np.minimum(np.unique(chans), 14).tolist()}) if chans is not None
+                else [0])
+        cc = synth_cc([(t, s, a, b, c) for t, s, a, b in cc_events(sh, ppq, bpm) for c in used]) if sh else None
+        ev = events(notes, ppq, bpm, chans, cc) if notes is not None and len(notes) else None
         if ev is None or len(ev) <= 3:  # (no notes, or only ones above key 127, which can't sound: nothing to play)
             self.ev, self.span, self.last = None, (0, 0), 0
             self.clear()

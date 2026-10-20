@@ -1,0 +1,123 @@
+"""Hz bass CC lines (hz_settings.CC_FX) as MIDI messages: Cutoff (CC 74), Expression (CC 11), Channel volume (CC 7),
+Pan (CC 10) and Pitch wheel (pitch bend). They make no notes (the notes are made without them: without_cc); a
+MIDI player applies them to the WHOLE channel, so they go on every channel the Hz bass's notes are on (a layer's
+notes clashing with another's are on another channel: they get them too).
+
+One channel for the whole Hz bass: each line is read over the whole Hz bass (fx_at with no tone: a line played once
+per note follows the newest note, like the synth window's FX tab). Layers: each CC line comes from the first heard
+layer that has it.
+
+Rules (measured with several players before it was built, dev/data/planned-features.md "CC lines for Hz bass"):
+- the values start LEAD seconds before the first note (a player that glides to a new value would glide during the
+  first note otherwise), at tick 0 at the earliest;
+- they run on RING seconds past the end of the sound (falls, echo, reverb: sound_span), so a wobble doesn't stop
+  dead while the notes still ring;
+- then every CC the lines used goes back to where players start it (CC_START; the Pitch wheel's bend range back to
+  2 keys), so nothing is left on the channel for what plays on it after (user);
+- a value is sent STEPS times a beat at most, only when it changes.
+The Pitch wheel sends its bend range (RPN 0 = WHEEL_KEYS) before its first value."""
+
+import json
+import math
+
+import numpy as np
+
+from notes.hzbass import (CC_FX, CC_NUMBER, CC_START, WHEEL_KEYS, cc_midi, fx_at, has_cc, heard_layers, left_edge,
+                          live, sound_span)
+
+STEPS = 96  # values a beat at most
+LEAD = 0.05  # seconds the first values come before the first note
+RING = 3.0  # seconds the lines run on past the end of the sound
+CONTROL, BEND = 0xB0, 0xE0  # (MIDI status bytes, channel 0)
+DEFAULT_BEND_RANGE = 2  # keys: the bend range players start with (put back at the end)
+
+
+def bend_range(keys):
+    """The messages setting the pitch bend range to `keys` whole keys (RPN 0, then the RPN closed again so a later
+    Data entry changes nothing): [(status, number, value)]."""
+    return [(CONTROL, 101, 0), (CONTROL, 100, 0), (CONTROL, 6, keys), (CONTROL, 38, 0), (CONTROL, 101, 127),
+            (CONTROL, 100, 127)]
+
+
+def message(name, value):
+    """(status, data 1, data 2) of a CC line's MIDI value."""
+    if name == "cc_wheel":
+        return BEND, value & 0x7F, value >> 7
+    return CONTROL, CC_NUMBER[name], value
+
+
+def cc_events(sh, ppq, bpm):
+    """A Hz bass shape's CC lines as [(tick, status, data 1, data 2)] in time order (status without the channel),
+    [] when it has none (or no notes). Messages on one tick stay in their order (the bend range before its value)."""
+    hz = sh.get("hz")
+    if sh.get("kind") is None or not isinstance(hz, dict) or not has_cc(hz):
+        return []
+    left = left_edge(sh)
+    layers = [live(l, left) for l in heard_layers(hz)]
+    tones = [n for l in layers for n in l.get("tones") or ()]
+    if not tones:
+        return []
+    per_beat = bpm / 60.0  # (beats a second)
+    first = left + min(n["t"] for n in tones) - LEAD * per_beat  # (song beats)
+    end = left + max(sound_span(l) for l in layers) + RING * per_beat
+    step = max(1, ppq // STEPS)
+    t0 = max(0, math.floor(first * ppq))
+    ticks = np.arange(t0, max(t0, math.ceil(end * ppq)) + 1, step, dtype=np.int64)
+    beats = ticks / ppq - left
+    out = []
+    used = []
+    for name in CC_FX:
+        src = next((l for l in layers if name in (l.get("fx") or {})), None)
+        if src is None:
+            continue
+        used.append(name)
+        if name == "cc_wheel":
+            out += [(t0, *m) for m in bend_range(WHEEL_KEYS)]
+        vals = cc_midi(name, fx_at(src, name, beats))
+        keep = np.ones(len(vals), bool)
+        keep[1:] = vals[1:] != vals[:-1]
+        out += [(t, *message(name, v)) for t, v in zip(ticks[keep].tolist(), vals[keep].tolist())]
+    last = int(ticks[-1]) + step  # back to where players start, once the lines have ended
+    for name in used:
+        if name == "cc_wheel":
+            out += [(last, *message(name, CC_START[name]))] + [(last, *m) for m in bend_range(DEFAULT_BEND_RANGE)]
+        else:
+            out.append((last, *message(name, CC_START[name])))
+    out.sort(key=lambda e: e[0])  # (stable: a tick's messages keep their order)
+    return out
+
+
+def cc_key(hz):
+    """A short text that changes when what the CC lines send may change while the notes stay the same (the lines,
+    their repeats / sustain / bypass, MOD links to them, the Voice box's Legato): for the preview's "anything new?"."""
+    if not isinstance(hz, dict) or not has_cc(hz):
+        return ""
+    parts = []
+    for src in [hz] + [e for e in hz.get("layers") or () if isinstance(e, dict)]:
+        parts.append([{k: v for k, v in (src.get(key) or {}).items() if k in CC_FX} if isinstance(src.get(key), dict)
+                      else [k for k in src.get(key) or () if k in CC_FX]
+                      for key in ("fx", "loop", "from", "sustain", "amount", "fit", "off")]
+                     + [src.get("mod") if any(l.get("to") in CC_FX for l in (src.get("mod") or {}).get("links", ()))
+                        else None, src.get("voice"), (src.get("solo"), src.get("mute"))])
+    return json.dumps(parts, sort_keys=True)
+
+
+def slot_events(shapes, rendered, ppq, bpm, only=None):
+    """{slot: [(tick, status, data 1, data 2)]}: every Hz bass's CC messages on each slot (= channel, track) its
+    notes are on in rendered ((start, end, pitch, velocity, slot, owner) rows, owner = the shape's number). only =
+    the shapes' numbers to take (None: all). Several shapes on one slot: their messages merged in time order."""
+    out = {}
+    if not len(rendered):
+        return out
+    rendered = np.asarray(rendered)
+    for i, sh in enumerate(shapes):
+        if only is not None and i not in only or not has_cc(sh.get("hz") or {}):
+            continue
+        events = cc_events(sh, ppq, bpm)
+        if not events:
+            continue
+        for slot in np.unique(rendered[rendered[:, 5] == i, 4]).tolist():
+            out.setdefault(int(slot), []).extend(events)
+    for events in out.values():
+        events.sort(key=lambda e: e[0])
+    return out

@@ -39,9 +39,10 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc
 from files.snap import SNAPS, snap_beats, snap_text
-from notes.hzbass import (BEND, ENVELOPES, FROM_MODES, FX, FX_START, HEIGHT_FROM, LOOP_SHAPES, OFF_PITCH, PITCH, TREMOLO, VIBRATO, bend_of, bent_part,
-                          chains, clean_extra, group_count, height_times, legato_links, line_at,
-                          loop_off, loop_on, loop_shape, sound_span, sustained, tones_span)
+from notes.hzbass import (BEND, CC_FX, ENVELOPES, FROM_MODES, FX, FX_START, HEIGHT_FROM, LOOP_SHAPES, NOTE_FX, OFF_PITCH,
+                          PITCH, TREMOLO, VIBRATO, WHEEL_KEYS, bend_of, bent_part, cc_db, cc_midi, chains, clean_extra,
+                          group_count, height_times, legato_links, line_at, loop_off, loop_on, loop_shape, sound_span,
+                          sustained, tones_span)
 from roll.roll_shared import BOX_STILL, CTRL, MAX_SX, MIN_SX, SELECT_CURSOR, SHIFT
 from window import look
 from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, remember_place
@@ -53,8 +54,10 @@ PLAY_LINE = look.PLAY_LINE  # the preview's play line (as in the notes above)
 FX_COLOR = {"volume": "#9b2d5f", "slant": "#8a3ff0", "groups": "#0a8f8f", "offpitch": "#d0189a", "noisy": "#8a5a14",
             "vibrato": "#00a5d8", "pitch": "#4b0082", "sweep": "#7f8c00", "wah": "#2c3e6b", "tremolo": "#e0607a",
             "octave": "#1d6b3a", "sine": "#b060c0", "square": "#606060", "saw": "#c0a000", "triangle": "#c05a30",
-            "height": "#7a5ab0", "height_rand": "#a0607a"}
+            "height": "#7a5ab0", "height_rand": "#a0607a", "cc_cutoff": "#4f6f9f", "cc_expression": "#9f4f6f",
+            "cc_volume": "#6f5a2f", "cc_pan": "#2f6f5f", "cc_wheel": "#7f3fbf"}
 FX_COLOR = {k: look.readable(v) for k, v in FX_COLOR.items()}  # (lighter in the dark look)
+ROWS = NOTE_FX + (None,) + CC_FX  # the names column: the effects, a "CC" divider row (None), the CC lines
 
 
 AMOUNT = ":amount"  # (the window's key for an effect's amount line: effect + AMOUNT)
@@ -106,7 +109,8 @@ class FxPane:
         self.row_h, self.pad = round(15 * self.s), round(9 * self.s)
         self.edge = round(4 * self.s)  # the top edge: drag it = the pane's height
         self.names_top = 0  # how far the effects' names are scrolled (pixels), when the pane is too short for all
-        start_h = max(round(112 * self.s), round(8 * self.s) + len(FX) * self.row_h)
+        # (as tall as the effects' names: the CC lines' scroll in, so the notes above keep their room)
+        start_h = max(round(112 * self.s), round(8 * self.s) + len(NOTE_FX) * self.row_h)
         c = self.canvas = tk.Canvas(win, background=self.LOOK["bg"], highlightthickness=0,
                                     height=win.app.hz_fx_h or start_h)
         c.bind("<Configure>", lambda e: self.redraw())
@@ -477,9 +481,17 @@ class FxPane:
         c.create_rectangle(0, 0, kb, h, fill=pal["names"], outline="")  # the effects
         over = self.names_over()
         self.names_top = min(max(0, self.names_top), over)
-        for i, name in enumerate(FX):
+        for i, name in enumerate(ROWS):
             y = 4 * s + i * self.row_h + self.row_h / 2 - self.names_top
             if y < -self.row_h or y > h + self.row_h:
+                continue
+            if name is None:  # the CC lines' divider: a line with its name on it
+                c.create_line(4 * s, y, kb - 8 * s, y, fill=pal["grid"])
+                label = c.create_text(8 * s, y, text=tr("hz.fx_cc_head"), anchor="w", fill=pal["text"],
+                                      font=look.font(7))
+                box = c.bbox(label)
+                c.tag_lower(c.create_rectangle(box[0] - 2 * s, box[1], box[2] + 2 * s, box[3], fill=pal["names"],
+                                               outline=""), label)
                 continue
             lit = self.active in (None, name)
             colour = self.colour(name) if lit else self.faint(self.colour(name), pal["names_dim"])
@@ -495,9 +507,10 @@ class FxPane:
             x0, _, x1, _ = self.names_bar()
             t0, t1 = self.names_thumb()
             c.create_rectangle(x0, t0, x1, t1, fill=pal["edge"], outline="")
-        for v in (0.0, 0.5, 1.0):  # what the heights mean (Height highlighted: its own, the middle = as drawn)
-            n = float(height_times(v)) if self.active == "height" else v
-            c.create_text(w - 4 * s, self.y_of(v), text=f"{n * 100:.0f} %", anchor="e", fill=pal["text"],
+        for v in (0.0, 0.5, 1.0):  # what the heights mean (Height highlighted: its own, the middle = as drawn; a CC
+            n = float(height_times(v)) if self.active == "height" else v  # line: its own units)
+            text = self.scale_text(self.active, v) if self.active in CC_FX else None
+            c.create_text(w - 4 * s, self.y_of(v), text=text or f"{n * 100:.0f} %", anchor="e", fill=pal["text"],
                           font=look.font(7))
         c.create_line(kb, 0, kb, h, fill=pal["edge"])
         c.create_line(0, 0, w, 0, fill=pal["edge"])
@@ -587,7 +600,7 @@ class FxPane:
 
     def names_over(self):
         """How many pixels of the effects' names don't fit the pane's height (0: all fit)."""
-        return max(0, round(8 * self.s) + len(FX) * self.row_h - self.canvas.winfo_height())
+        return max(0, round(8 * self.s) + len(ROWS) * self.row_h - self.canvas.winfo_height())
 
     def names_bar(self):
         """(x0, y0, x1, y1) of the names' scrollbar (shown only when names_over)."""
@@ -609,11 +622,15 @@ class FxPane:
             self.names_top = top
             self.redraw()
 
+    def row_at(self, x, y):
+        """The names column's row under the mouse (ROWS: an effect, None = the CC divider), or False."""
+        i = int((y + self.names_top - 4 * self.s) // self.row_h)
+        return (ROWS[i] if x < self.win.kb_w and not self.on_names_bar(x) and y + self.names_top >= 4 * self.s
+                and 0 <= i < len(ROWS) else False)
+
     def name_at(self, x, y):
         """The effect whose name is under the mouse (the left column), or None."""
-        i = int((y + self.names_top - 4 * self.s) // self.row_h)
-        return (FX[i] if x < self.win.kb_w and not self.on_names_bar(x) and y + self.names_top >= 4 * self.s
-                and 0 <= i < len(FX) else None)
+        return self.row_at(x, y) or None
 
     def on_box(self, x):
         """True when x is on the small squares before the names (switch an effect off / on)."""
@@ -681,6 +698,8 @@ class FxPane:
                                                        if at is not None and abs(p[0] - at) < 1e-9 else ""))
         elif hit and hit[0] == "bend":
             self.say(tr("hz.fx_bend_tip"))
+        elif self.row_at(e.x, e.y) is None:  # (the CC divider)
+            self.say(tr("hz.fx_cc_head_tip"))
         else:
             self.say("")
 
@@ -688,17 +707,48 @@ class FxPane:
         """Keys the Pitch line bends at its top and bottom (the Pitch box's Range)."""
         return self.win.lfo.get("bend_range", PITCH)
 
+    def keys_of(self, name):
+        """Keys a line bends at its top and bottom (its points stick to whole keys), None for lines that aren't a
+        pitch: the Pitch line (pitch_keys), the Pitch wheel (WHEEL_KEYS)."""
+        return self.pitch_keys() if name == "pitch" else WHEEL_KEYS if name == "cc_wheel" else None
+
+    @staticmethod
+    def scale_text(name, value):
+        """What a height of the pane (0 / 0.5 / 1) means for a CC line, at the pane's right edge (None: as %)."""
+        if name in ("cc_cutoff", "cc_pan"):
+            return (str(int(cc_midi(name, value))) if name == "cc_cutoff" else
+                    tr("hz.fx_pan_left" if value < 0.5 else "hz.fx_pan_right" if value > 0.5 else "hz.fx_pan_middle"))
+        if name in ("cc_expression", "cc_volume"):
+            db = cc_db(value)
+            return tr("hz.fx_silent") if db is None else f"{db:+.0f} dB" if db else "0 dB"
+        if name == "cc_wheel":
+            return f"{(value - 0.5) * 2 * WHEEL_KEYS:+.0f}" if value != 0.5 else "0"
+        return None
+
     @staticmethod
     def value_text(name, value, keys=PITCH):
         if name.endswith(AMOUNT):
             return tr("hz.fx_value_amount", name=tr("hz.fx_" + base(name)), value=f"{value * 100:.4g}")
+        if name == "cc_cutoff":
+            return tr("hz.fx_value_cutoff", name=tr("hz.fx_" + name), value=int(cc_midi(name, value)))
+        if name in ("cc_expression", "cc_volume"):
+            db = cc_db(value)
+            return (tr("hz.fx_value_silent", name=tr("hz.fx_" + name)) if db is None else
+                    tr("hz.fx_value_db", name=tr("hz.fx_" + name), value=f"{db:.1f}",
+                       cc=int(cc_midi(name, value))))
+        if name == "cc_pan":
+            n = int(cc_midi(name, value)) - 64
+            return tr("hz.fx_value_pan_left" if n < 0 else "hz.fx_value_pan_right" if n > 0 else "hz.fx_value_pan_middle",
+                      name=tr("hz.fx_" + name), value=round(abs(n) / (64 if n < 0 else 63) * 100))
+        if name == "cc_wheel":
+            keys = WHEEL_KEYS
         if name == "groups":
             n = int(group_count(value))
             return tr("hz.fx_value_groups" if n > 1 else "hz.fx_value_together", name=tr("hz.fx_" + name), n=n)
         if name == "tremolo":
             n = f"{value * TREMOLO:.3g}"
             return trn("hz.fx_value_beat", float(n), name=tr("hz.fx_" + name), n=n)
-        if name == "pitch":
+        if name in ("pitch", "cc_wheel"):
             n = f"{(value - 0.5) * 2 * keys:+.3g}"
             return trn("hz.fx_value_keys", abs(float(n)), name=tr("hz.fx_" + name), n=n)
         if name == "height":  # (as many times as tall as drawn: 50 % of the line = 100 %)
@@ -832,9 +882,10 @@ class FxPane:
                     at = win.snap(win.beat_at(e.x) - o, e) + o
                 at = (at - o) / sc
         v = self.value_at(e.y)
-        if name == "pitch" and not e.state & SHIFT:  # (whole keys; Shift = in between)
-            v = 0.5 + round((v - 0.5) * 2 * self.pitch_keys()) / (2 * self.pitch_keys())
-        v = round(v, 3 if e.state & SHIFT else 2 if name != "pitch" else 6)
+        keys = self.keys_of(name)
+        if keys and not e.state & SHIFT:  # (whole keys; Shift = in between)
+            v = 0.5 + round((v - 0.5) * 2 * keys) / (2 * keys)
+        v = round(v, 3 if e.state & SHIFT else 2 if not keys else 6)
         b0, v0 = d["orig"][(name, i)]
         db, dv = self.limited(d["orig"], at - b0, v - v0)
         for (n, j), (b, u) in d["orig"].items():
@@ -1064,8 +1115,9 @@ class FxPane:
         beat = max(0.0, beat)
         g = int(math.floor(beat / d["step"] + (0 if d["hold"] else 0.5)))
         v = self.value_at(y)
-        if d["fx"] == "pitch" and not e.state & SHIFT:  # (whole keys, like the points)
-            v = 0.5 + round((v - 0.5) * 2 * self.pitch_keys()) / (2 * self.pitch_keys())
+        keys = self.keys_of(d["fx"])
+        if keys and not e.state & SHIFT:  # (whole keys, like the points)
+            v = 0.5 + round((v - 0.5) * 2 * keys) / (2 * keys)
         v = round(v, 4)
         last = d.get("last")
         if last is not None and abs(g - last[0]) > 1:  # (a fast mouse: the cells in between too)
@@ -1401,7 +1453,7 @@ class FxPane:
                 shapes.add_command(label=tr("hz.fx_shape_" + kind), command=lambda k=kind: self.set_shape(target, k))
             shapes.add_separator()
             for kind in ENVELOPES:
-                shapes.add_command(label=tr("hz.fx_shape_%s%s" % (kind, "_pitch" if target == "pitch" else "")),
+                shapes.add_command(label=tr("hz.fx_shape_%s%s" % (kind, "_pitch" if self.keys_of(target) else "")),
                                    command=lambda k=kind: self.set_shape(target, k))
             menu.add_cascade(label=tr("hz.fx_shape"), menu=shapes)
             if target in self.win.loops:

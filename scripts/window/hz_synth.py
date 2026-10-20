@@ -24,10 +24,10 @@ import numpy as np
 
 from files.lang import tr
 from notes.engine import shape_notes_tracks
-from notes.hzbass import ENVELOPES, FX, FX_START, line_at, sound_span
+from notes.hzbass import ENVELOPES, FX_START, line_at, sound_span
 from roll.roll_shared import note_name
 from window import look
-from window.hz_effects import AMOUNT, FxPane
+from window.hz_effects import AMOUNT, ROWS, FxPane
 from window.hz_knobs import SynthKnobs
 from window.hz_live import free_sound_later, keep_sound
 from notes.hzbass import MACROS
@@ -154,7 +154,7 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
         s = self.s
         self.title(tr("hz.synth_title"))
         self.show_title()
-        names_h = round(8 * s) + len(FX) * round(15 * s)  # (the pane tall enough for all the effects' names)
+        names_h = round(8 * s) + len(ROWS) * round(15 * s)  # (the pane tall enough for all the effects' names)
         self.minsize(round(400 * s), round(260 * s))
         self.kb_w = hz.kb_w
         self.sx, self.t0 = 100.0, 0.0

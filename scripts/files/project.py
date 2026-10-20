@@ -16,6 +16,7 @@ from files.lang import tr, trn
 from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape
 from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape, merges_unmade
 from notes.hzbass import clean_hz
+from notes.hz_cc import slot_events
 from notes.mask import MASK_DEFAULTS, THICKNESS, clean_mask
 from notes.nested import clean_nested
 from notes.tiles import clean_tiles
@@ -735,7 +736,7 @@ class ProjectFiles:
             return
         if not self.write_out(path, "project.saving_midi",  # (millions of notes take a few seconds)
                               lambda: write_midi(path, ppq, bpm, beats, self.rendered, self.picture_use10,
-                                                 self.pad_tracks())):
+                                                 self.pad_tracks(), self.cc_messages(ppq, bpm))):
             return
         channels = tracks if self.channel_mode.get() == "auto" else 1
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
@@ -746,6 +747,11 @@ class ProjectFiles:
                             tr("project.saved_notes_on_track_s_one", notes=trn("n.notes", len(self.rendered),
                                                                                n=len(self.rendered)),
                                tracks=trn("n.tracks", channels, n=channels), path=path, note=note))
+
+    def cc_messages(self, ppq, bpm, only=None):
+        """The Hz basses' CC lines as MIDI messages on the slots (tracks) their notes are on: {slot: [(tick, status,
+        data 1, data 2)]} (hz_cc.slot_events; only = the shapes' numbers to take, None: all)."""
+        return slot_events(self.shapes, self.rendered, ppq, bpm, only)
 
     def write_out(self, path, busy, write):
         """write() makes the file at path (its folder made first), with the busy text key showing. False when it
@@ -799,7 +805,7 @@ class ProjectFiles:
             return
         if not self.write_out(path, "project.saving_dms", lambda: write_bytes(
                 path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16(),
-                               pad=self.pad_tracks()))):
+                               pad=self.pad_tracks(), cc=self.cc_messages(ppq, bpm)))):
             return
         tracks = len(track_slots(notes, self.pad_tracks()))
         text = (tr("project.saved_dms", notes=trn("n.notes", len(notes), n=len(notes)),
@@ -817,7 +823,7 @@ class ProjectFiles:
             messagebox.showinfo(tr("project.spiderweb"), tr("project.notes_clipboard_windows_only"))
             return
         try:
-            ppq, _, beats = self.read_project()
+            ppq, bpm, beats = self.read_project()
         except ValueError as e:
             messagebox.showerror(tr("project.spiderweb"), str(e))
             return
@@ -853,7 +859,8 @@ class ProjectFiles:
         self.busy(tr("project.copying_for_domino"))  # (millions of notes take a few seconds)
         notes, long = cut_gates(notes)
         try:
-            raw = clip_data(notes, ppq, beats * ppq, self.domino_start(), pad_from)
+            raw = clip_data(notes, ppq, beats * ppq, self.domino_start(), pad_from,
+                            self.cc_messages(ppq, bpm, set(self.sels) if self.sels else None))
             copied = put_on_clipboard(raw)
         except MemoryError:
             messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))

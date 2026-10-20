@@ -46,8 +46,27 @@ def _events(notes, order, tick, last, ch):
     tick, on, note = tick[order] >> 1, (order & 1) ^ 1, order >> 1
     key = notes[note, 2]
     vel = notes[note, 3] * on
+    return _encode(tick, np.where(on == 1, 0x90 | ch, 0x80 | ch), key, vel, last)
+
+
+def cc_track(notes, ch, events):
+    """track_events for a track with other MIDI messages too (a Hz bass's CC lines: hz_cc.slot_events, [(tick,
+    status, data 1, data 2)], status without the channel): on a shared tick the note-offs first, then the messages
+    (in their order), then the note-ons (a note starts with the values set on its tick)."""
+    n = len(notes)
+    ev = np.asarray(events, np.int64).reshape(-1, 4)
+    tick = np.concatenate([notes[:, 1], ev[:, 0], notes[:, 0]])
+    kind = np.repeat(np.arange(3), [n, len(ev), n])
+    order = np.lexsort((kind, tick))  # (stable: alike ones keep their order)
+    status = np.concatenate([np.full(n, 0x80 | ch), ev[:, 1] | ch, np.full(n, 0x90 | ch)])
+    one = np.concatenate([notes[:, 2], ev[:, 2], notes[:, 2]])
+    two = np.concatenate([np.zeros(n, np.int64), ev[:, 3], notes[:, 3]])
+    return [_encode(tick[order], status[order], one[order], two[order], 0)]
+
+
+def _encode(tick, status, key, vel, last):
+    """Events (3-byte messages) in time order as bytes, delta times from last (the tick before the first)."""
     delta = np.diff(tick, prepend=last)
-    status = np.where(on == 1, 0x90 | ch, 0x80 | ch)
     if len(delta) and delta.max() > MAX_DELTA:
         # a silence too long for one step: empty text events (FF 01 00, 3 bytes like a note's) every MAX_DELTA
         fill = np.maximum(delta - 1, 0) // MAX_DELTA  # (fillers before each event)
@@ -107,10 +126,11 @@ def track_slots(notes, pad=True):
     return np.arange(int(notes[:, 4].max()) + 1) if pad else np.unique(np.asarray(notes[:, 4], np.int64))
 
 
-def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True):
+def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None):
     """notes: [start, end, pitch, velocity, slot, ...]. Every slot gets its own track with a single channel
     (use10: channel 10 used too, slot_track_channel; pad: track_slots). Nothing marks channel 10 as not drums
-    (user, 2026-10-12: no messages that could switch something on in their own setup)."""
+    (user, 2026-10-12: no messages that could switch something on in their own setup). cc = {slot: messages} for
+    the slots' tracks (the Hz basses' CC lines the user drew: hz_cc.slot_events)."""
     head = bytearray()
     head += vlq(0) + b"\xFF\x51\x03" + round(60_000_000 / bpm).to_bytes(3, "big")
     head += vlq(0) + bytes([0xFF, 0x58, 4, beats, 2, 24, 8])
@@ -120,10 +140,10 @@ def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True):
     count = int(notes[:, 4].max()) + 1 if len(notes) else 0
     tracks = track_slots(notes, pad)
     write_bytes(path, _pieces(notes, count, tracks, use10,
-                              b"MThd" + struct.pack(">IHHH", 6, 1, len(tracks) + 1, ppq) + _chunk(head)))
+                              b"MThd" + struct.pack(">IHHH", 6, 1, len(tracks) + 1, ppq) + _chunk(head), cc or {}))
 
 
-def _pieces(notes, count, tracks, use10, start):
+def _pieces(notes, count, tracks, use10, start, cc):
     """write_midi's file as pieces, one track at a time (a big file is never whole in memory)."""
     yield start
     if count > 1:  # (one sort finds every track's notes, in their own order)
@@ -134,7 +154,8 @@ def _pieces(notes, count, tracks, use10, start):
     for track in tracks.tolist():
         channel = slot_track_channel(track, use10)[1]
         mine = notes if count == 1 else notes[order[cuts[track]:cuts[track + 1]]]
-        events = track_events(mine, channel) if len(mine) else [empty_track(channel)]
+        events = (cc_track(mine, channel, cc[track]) if cc.get(track) else track_events(mine, channel) if len(mine)
+                  else [empty_track(channel)])
         yield b"MTrk" + struct.pack(">I", sum(len(e) for e in events) + len(END))
         yield from events
         events = None

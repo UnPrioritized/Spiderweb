@@ -7,7 +7,7 @@ import math
 import numpy as np
 
 from files.speed import loops
-from notes.hz_settings import (CRUSH, FM_INDEX, FX, GROWL, HEIGHT_FROM, HEIGHT_MOST, HZ_DEFAULTS, MODE_AMOUNTS,
+from notes.hz_settings import (CRUSH, FM_INDEX, GROWL, NOTE_FX, HEIGHT_FROM, HEIGHT_MOST, HZ_DEFAULTS, MODE_AMOUNTS,
                                MOD_RACK, MOD_SETTINGS, NOT_EACH, OFF_PITCH, OSC2_TUNE, SOFT, SPEED_KNOBS, START_TRACE,
                                SUB, TIME_STEP, TREMOLO, TREMOLO_DEPTH, VEL_FX, VIBRATO, VIBRATO_RATE, VOICES, WAH,
                                WAVES, blend_gains, copies, group_count, height_hits, height_times, layer_trace,
@@ -204,7 +204,7 @@ class KeyGrid:
                    else np.inf}
             fx = hz.get("fx") or {}
             sources = {}  # (the MOD tab's sources: worked out once for the run)
-            for name in FX:  # (each tone counts from its own start, like a synth's voice)
+            for name in NOTE_FX:  # (each tone counts from its own start, like a synth's voice)
                 run[name] = fx_at(hz, name, beat, n0, sources)
             mono = {}  # (the Effects tab's: from the newest note, for the whole sound)
             for name in self.moved:  # (the MOD tab's knobs that aren't lines: from each note too)
@@ -323,7 +323,7 @@ class KeyGrid:
         runs = self.runs
         n = np.array([len(r["starts"]) for r in runs], np.int64)
         names = ["starts", "waves", "beat", "limits", "since", "trem_since", "turns", "swept", "has_volume", "groups",
-                 "track", "level", "own", "layer", *FX, *sorted(self.moved), *self.timed, *self.turned,
+                 "track", "level", "own", "layer", *NOTE_FX, *sorted(self.moved), *self.timed, *self.turned,
                  *("has_" + name for name in WAVES)]
         self.flat = {k: np.concatenate([np.broadcast_to(np.asarray(r[k]), (len(r["starts"]),)) for r in runs])
                      if runs else np.zeros(0) for k in names}

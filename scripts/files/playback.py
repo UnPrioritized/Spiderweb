@@ -13,6 +13,7 @@ import numpy as np
 from files.lang import tr
 from files.system import WINDOWS, wintypes
 from notes.engine import CHANNELS
+from notes.hz_settings import CC_NUMBER, CC_START
 
 MAPPER_NAME = "Windows default (MIDI Mapper)"
 BUILTIN = "Built-in BASSMIDI"  # (the user's name for it; like a device's name it's saved, so not translated)
@@ -253,6 +254,48 @@ class _Ons:
                         part[:, 3].tolist()))
 
 
+RPN = (101, 100, 6, 38)  # (the CCs that set the bend range: sent in their order, never thinned out)
+# what a Hz bass's CC lines are put back to on a channel when playing stops (hz_settings.CC_START: where players
+# start them, user: nothing left on the channel), the bend range back to 2 keys
+CC_RESET = [(CC_NUMBER[n], CC_START[n]) for n in CC_NUMBER]
+RANGE_RESET = [(101, 0), (100, 0), (6, 2), (38, 0), (101, 127), (100, 127)]
+
+
+def cc_list(messages, use10):
+    """{slot: [(tick, status, data 1, data 2)]} (hz_cc.slot_events) -> [(tick, message)] in time order, each a short
+    MIDI message on its slot's channel (as _Ons.batch / slot_track_channel)."""
+    out = []
+    for slot, events in messages.items():
+        ch = slot % 16 if use10 else CHANNELS[slot % len(CHANNELS)]
+        out += [(t, s | ch | a << 8 | b << 16) for t, s, a, b in events]
+    out.sort(key=lambda e: e[0])
+    return out
+
+
+def cc_before(ccs, tick):
+    """The messages of ccs (cc_list) before tick a player starting there sends first: each CC's and the pitch
+    bend's last value on each channel (the bend range's messages all, in order)."""
+    last, out = {}, []
+    for t, m in ccs:
+        if t >= tick:
+            break
+        kind = m & 0xF0
+        if kind == 0xB0 and (m >> 8) & 0x7F in RPN:
+            out.append(m)
+        else:
+            last[m & 0x7FFF if kind == 0xB0 else m & 0xFF] = m
+    return out + list(last.values())
+
+
+def _cc_kind(m):
+    """(channel, CC number / "bend") of a message cc_list made, for Player.stop's putting back; None: one of the
+    bend range's (put back with the pitch bend)."""
+    if m & 0xF0 == 0xE0:
+        return m & 0x0F, "bend"
+    n = (m >> 8) & 0x7F
+    return (m & 0x0F, n) if n in dict(CC_RESET) else (m & 0x0F, None)
+
+
 class Player:
     """Plays notes on a background thread so the window stays responsive; position() says where it is. The notes
     and tempo can change while it plays (update): it plays on with the new ones from where it is."""
@@ -263,6 +306,7 @@ class Player:
         self._stop = threading.Event()
         self._switch = sys.getswitchinterval()
         self.held = {}  # (channel | key << 8) -> how many notes on it are sounding right now
+        self.cc_sent = set()  # (channel, CC number or "bend") a Hz bass's CC lines sent a value on: put back at stop
         self.tune = False  # (31-EDO: see start)
         self.shared = False  # (set before start: overlapping notes may share a channel, a key sounds until its last)
         self._clock = None
@@ -276,9 +320,10 @@ class Player:
     def running(self):
         return self.thread is not None and self.thread.is_alive()
 
-    def start(self, notes, ppq, bpm, start_beat, stop_beat, use10=False):
+    def start(self, notes, ppq, bpm, start_beat, stop_beat, use10=False, cc=()):
         """Play from start_beat until stop_beat (notes: rendered [start, end, pitch, vel, slot, ...] in ticks, never
-        changed in place; use10: the slots use channel 10 too, engine.slot_track_channel)."""
+        changed in place; use10: the slots use channel 10 too, engine.slot_track_channel; cc = other MIDI messages,
+        cc_list: the values before start_beat are sent first). 31-EDO: no cc (its channels aren't the notes')."""
         self.stop()
         self.ppq, self.start_beat, self.stop_beat = ppq, start_beat, stop_beat
         self.tune = self.out.tuned  # (31-EDO: kept until the next start, so note-offs match their note-ons)
@@ -288,10 +333,10 @@ class Player:
         self._swap = self._wanted = None
         self._stop.clear()
         sys.setswitchinterval(0.001)  # hand the thread the processor quickly while the window redraws
-        self.thread = threading.Thread(target=self._run, args=(notes, use10), daemon=True)
+        self.thread = threading.Thread(target=self._run, args=(notes, use10, () if self.tune else cc), daemon=True)
         self.thread.start()
 
-    def update(self, notes, bpm, stop_beat, use10=False):
+    def update(self, notes, bpm, stop_beat, use10=False, cc=()):
         """The notes / tempo changed while playing (same PPQ): play on with them. Notes already sounding end where
         they would have; new notes starting before the line aren't played (like a start from the line)."""
         if not self.running:
@@ -304,7 +349,7 @@ class Player:
             self._clock = (now, clock[1] + (now - clock[0]) / clock[2], spt)
         self.spt = spt
         with self._lock:  # (a thread just ending would miss these notes: it says it's done under the same lock)
-            self._wanted = (self._gen, notes, use10)
+            self._wanted = (self._gen, notes, use10, () if self.tune else cc)
             if not self._sorting:
                 self._sorting = True
                 threading.Thread(target=self._sort, daemon=True).start()
@@ -315,10 +360,10 @@ class Player:
                 if self._wanted is None:
                     self._sorting = False
                     return
-                (gen, notes, use10), self._wanted = self._wanted, None
+                (gen, notes, use10, cc), self._wanted = self._wanted, None
             ons = _Ons(notes, self.start_beat * self.ppq, self.stop_beat * self.ppq, use10, self.tune)
             if self._wanted is None and gen == self._gen:  # (changed again meanwhile: those first)
-                self._swap = ons
+                self._swap = (ons, cc)
 
     def position(self):
         """Current beat."""
@@ -328,7 +373,7 @@ class Player:
         t, tick, spt = clock
         return min(self.stop_beat, (tick + (time.perf_counter() - t) / spt) / self.ppq)
 
-    def _run(self, notes, use10):
+    def _run(self, notes, use10, ccs=()):
         clock, sleep, stop = time.perf_counter, time.sleep, self._stop
         send = self.out.send
         t0 = self.start_beat * self.ppq
@@ -338,6 +383,11 @@ class Player:
         del notes
         self._clock = (clock(), t0, self.spt)
         held = self.held = {}
+        sent = self.cc_sent = set()
+        for m in cc_before(ccs, t0):  # (the CC lines' values where it starts)
+            send(m)
+            sent.add(_cc_kind(m))
+        j = next((n for n, (t, _) in enumerate(ccs) if t >= t0), len(ccs))
         offs = []  # (end tick, channel | key << 8) of the notes sounding
         batch, k, i = [], 0, 0
         done = t0 - 1  # the last tick played
@@ -345,14 +395,18 @@ class Player:
             if stop.is_set():
                 return
             if self._swap is not None:
-                ons, self._swap = self._swap, None
+                (ons, ccs), self._swap = self._swap, None
                 batch, k, i = [], 0, ons.first_after(done)
+                j = next((n for n, (t, _) in enumerate(ccs) if t > done), len(ccs))
             if k == len(batch) and i < len(ons):
                 batch, k = ons.batch(i), 0
                 i += len(batch)
             on = batch[k] if k < len(batch) else None
-            off = bool(offs) and (on is None or offs[0][0] <= on[0])  # (note-offs before note-ons on the same tick)
-            tick = offs[0][0] if off else on[0] if on is not None else None
+            c = ccs[j] if j < len(ccs) else None
+            # (on the same tick: note-offs, then the other messages, then note-ons)
+            off = bool(offs) and (on is None or offs[0][0] <= on[0]) and (c is None or offs[0][0] <= c[0])
+            other = not off and c is not None and (on is None or c[0] <= on[0])
+            tick = offs[0][0] if off else c[0] if other else on[0] if on is not None else None
             t_now, tick_now, spt = self._clock
             t1 = self.stop_beat * self.ppq
             if tick is None or tick >= t1:  # nothing more to play: wait for the end
@@ -366,6 +420,11 @@ class Player:
                 sleep(min(wait, 0.01))
                 continue  # (stopped, new notes or a new tempo meanwhile: looked at again)
             done = tick
+            if other:
+                send(c[1])
+                sent.add(_cc_kind(c[1]))
+                j += 1
+                continue
             if off:
                 key = heapq.heappop(offs)[1]
                 n = held.get(key, 0) - 1
@@ -407,6 +466,15 @@ class Player:
                         self.out.send(0x80 | key)
             for ch in many:
                 self.out.send(0xB0 | ch | 123 << 8)
+            # (a Hz bass's CC lines: every channel they sent a value on gets its start values back, user)
+            for ch, kind in sorted(self.cc_sent, key=str):
+                if kind == "bend":
+                    self.out.send(0xE0 | ch | 64 << 16)
+                    for n, v in RANGE_RESET:
+                        self.out.send(0xB0 | ch | n << 8 | v << 16)
+                elif kind is not None:
+                    self.out.send(0xB0 | ch | kind << 8 | dict(CC_RESET)[kind] << 16)
+            self.cc_sent = set()
             self.held = {}
             self._swap = self._wanted = None
             sys.setswitchinterval(self._switch)

@@ -9,7 +9,7 @@ from tkinter import filedialog, messagebox
 from files import errors
 from files.lang import tr, trn
 from files.mathexpr import calc
-from files.playback import BUILTIN
+from files.playback import BUILTIN, cc_list
 from files.synth import FONT_TYPES, Live, Synth, SynthError, silent_list
 from notes.engine import slot_track_channel
 from window.hz_preview import VOICES
@@ -53,7 +53,7 @@ class Playback:
         # (Overlapping shapes keep their colours: shapes overlapping on a key share its channel, render keep)
         self.player.shared = self.rows_apart()
         self.player.start(self.rendered, ppq, bpm, self.playhead, self.play_end(ppq, beats, self.playhead),
-                          self.picture_use10)
+                          self.picture_use10, cc_list(self.cc_messages(ppq, bpm), self.picture_use10))
         if self.out.name == BUILTIN:
             self.overload.start(self.out.handle, self.play_voices, self.play_guard.get(), keep)
         elif self.out.edo:
@@ -84,7 +84,8 @@ class Playback:
                 self.start_play(keep=True)
             return
         # (the end: never before where it is, so a note deleted at the end doesn't stop it at once)
-        self.player.update(self.rendered, bpm, self.play_end(ppq, beats, self.player.position()), self.picture_use10)
+        self.player.update(self.rendered, bpm, self.play_end(ppq, beats, self.player.position()), self.picture_use10,
+                           cc_list(self.cc_messages(ppq, bpm), self.picture_use10))
 
     def _play_tick(self):
         self._play_job = None

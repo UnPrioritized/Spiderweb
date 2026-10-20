@@ -17,13 +17,45 @@ WAVES = {"sine": lambda p: (1.0 + np.cos(2.0 * np.pi * p)) / 2.0,  # the wavefor
          "square": lambda p: (p < 0.5).astype(float),
          "saw": lambda p: 1.0 - p,
          "triangle": lambda p: 1.0 - np.abs(2.0 * p - 1.0)}
-# the effects a Hz bass can have
-FX = ("slant", "groups", "offpitch", "noisy", "height", "height_rand", "vibrato", "pitch") + VEL_FX + tuple(WAVES)
-NEUTRAL = {"volume": 1.0, "pitch": 0.5, "height": 0.5}  # the value where an effect does nothing (0 for the others)
+# the effects that change the notes a Hz bass makes
+NOTE_FX = ("slant", "groups", "offpitch", "noisy", "height", "height_rand", "vibrato", "pitch") + VEL_FX + tuple(WAVES)
+# ... and the CC lines: no notes, they become MIDI messages on the channels the Hz bass's notes are on (hz_cc.py):
+# Cutoff (CC 74), Expression (CC 11), Channel volume (CC 7), Pan (CC 10), Pitch wheel (pitch bend, WHEEL_KEYS)
+CC_FX = ("cc_cutoff", "cc_expression", "cc_volume", "cc_pan", "cc_wheel")
+FX = NOTE_FX + CC_FX  # the effects a Hz bass can have
+WHEEL_KEYS = 12  # the Pitch wheel line's top / bottom: this many keys up / down (sent as the bend range, RPN 0)
+CC_DB = 60.0  # Expression / Channel volume lines: dB from the bottom (silent at 0) to the top (full)
+# the value where an effect does nothing (0 for the others); the CC lines' = where a player starts (CC_START)
+NEUTRAL = {"volume": 1.0, "pitch": 0.5, "height": 0.5, "cc_cutoff": 0.5, "cc_expression": 1.0, "cc_volume": 0.93,
+           "cc_pan": 0.5, "cc_wheel": 0.5}
 FLAT, RAMP, FULL = [[0.0, 0.5], [1.0, 0.5]], [[0.0, 0.0], [1.0, 1.0]], [[0.0, 1.0], [1.0, 1.0]]
-# the line an effect starts with, u = 0..1 over the tones (or what's in view when there are none)
-FX_START = dict({name: RAMP for name in FX}, offpitch=FLAT, tremolo=FLAT, vibrato=FLAT, volume=FULL, pitch=FLAT,
-                height=FLAT)
+# the line an effect starts with, u = 0..1 over the tones (or what's in view when there are none); a CC line: flat
+# where it changes nothing
+FX_START = dict({name: RAMP for name in NOTE_FX}, offpitch=FLAT, tremolo=FLAT, vibrato=FLAT, volume=FULL, pitch=FLAT,
+                height=FLAT, **{name: [[0.0, NEUTRAL[name]], [1.0, NEUTRAL[name]]] for name in CC_FX})
+CC_NUMBER = {"cc_cutoff": 74, "cc_expression": 11, "cc_volume": 7, "cc_pan": 10}  # (Pitch wheel: a pitch bend)
+CC_START = {"cc_cutoff": 64, "cc_expression": 127, "cc_volume": 100, "cc_pan": 64, "cc_wheel": 8192}  # (players'
+# own starting values: every channel a Hz bass's CC lines used is put back to them after the lines end, user)
+
+
+def cc_midi(name, value):
+    """A CC line's values (0..1, an array) as the MIDI values sent: Cutoff / Pan 0..127 (0.5 = 64), Expression /
+    Channel volume by loudness (CC_DB dB from 0 to 1 along the General MIDI curve, 40 log10(v / 127) dB; 0 = 0,
+    silent), Pitch wheel 0..16383 (0.5 = 8192)."""
+    v = np.clip(np.asarray(value, float), 0.0, 1.0)
+    if name == "cc_wheel":
+        return np.minimum(16383, np.floor(v * 16384)).astype(np.int64)
+    if name in ("cc_expression", "cc_volume"):
+        with np.errstate(divide="ignore"):
+            cc = np.round(127.0 * 10.0 ** ((v - 1.0) * CC_DB / 40.0))
+        return np.where(v <= 0.0, 0, cc).astype(np.int64)
+    return np.minimum(127, np.floor(v * 128)).astype(np.int64)
+
+
+def cc_db(value):
+    """An Expression / Channel volume line's value as the dB its MIDI value gives (None: silent)."""
+    cc = int(cc_midi("cc_volume", value))
+    return 40.0 * math.log10(cc / 127.0) if cc else None
 SUB = 16  # waveforms: hits in one wave
 SOFT = 0.003  # ... a hit with less than this much of the full loudness is left out (velocity 7 of 127)
 VIBRATO = 0.05  # "vibrato" at 1: the pitch goes this much (x the tone) up and down
@@ -771,6 +803,42 @@ def clean_sustain(sustain, loop, froms, fit):
     return {name: out[name] for name in FX if name in out}
 
 
+def without_cc(hz):
+    """hz (every layer) without its CC lines and the MOD links to them: they make no notes, so the notes are made
+    from this (a CC line drawn makes nothing again, and nothing of it reaches the notes: its sustain fall, a repeat).
+    hz itself when it has none."""
+    def strip(src):
+        links = (src.get("mod") or {}).get("links") or ()
+        if not any(n in CC_FX for n in src.get("fx") or ()) and not any(l.get("to") in CC_FX for l in links):
+            return src
+        out = dict(src)
+        for key in ("fx", "loop", "from", "sustain", "amount"):
+            if isinstance(src.get(key), dict):
+                out[key] = {k: v for k, v in src[key].items() if k not in CC_FX}
+        for key in ("fit", "off"):
+            if isinstance(src.get(key), list):
+                out[key] = [k for k in src[key] if k not in CC_FX]
+        for key in ("fx", "loop", "from", "sustain", "amount", "fit", "off"):
+            if key in out and not out[key]:
+                del out[key]
+        if links:
+            out["mod"] = dict(src["mod"], links=[l for l in links if l.get("to") not in CC_FX])
+        out.pop("_memo", None)
+        return out
+    out = strip(hz)
+    if isinstance(hz.get("layers"), list):
+        layers = [strip(e) if isinstance(e, dict) else e for e in hz["layers"]]
+        if any(a is not b for a, b in zip(layers, hz["layers"])):
+            out = dict(out, layers=layers)
+    return out
+
+
+def has_cc(hz):
+    """True when some layer of the Hz bass has a CC line."""
+    return any(n in CC_FX for src in [hz] + [e for e in hz.get("layers") or () if isinstance(e, dict)]
+               for n in src.get("fx") or ())
+
+
 def clean_off(off, fx):
     """The effects switched off (Bypass: their lines kept, no effect) checked: those in fx, in FX order."""
     off = off if isinstance(off, list) else ()
@@ -832,14 +900,15 @@ def old_fx(tones):
 def has_fx(hz):
     """True when every key needs its own repeats (KeyGrid): placed tones with effects, several copies (Voice), a
     Random start, a wave mode, OSC B, a drawn wave shape or Arpeggio steps quieter than full (as played, or still to
-    be played)."""
+    be played). The CC lines (CC_FX) and MOD links to them make no notes: not counted."""
     arp = hz.get("arp") or {}
     quiet = (any(n.get("level", 1.0) != 1.0 or n.get("vel") for n in hz.get("tones") or ())
              or any(s["level"] != 1.0 for s in (arp.get("steps") or ())[:arp.get("count", STEPS)])
              or bool(hz.get("loud")))  # (loudness lines: each note's, the layer's)
-    return ((bool(hz.get("fx")) or len(copies(hz)) > 1 or bool((hz.get("voice") or {}).get("random"))
+    return ((any(name not in CC_FX for name in hz.get("fx") or ()) or len(copies(hz)) > 1
+             or bool((hz.get("voice") or {}).get("random"))
              or bool(hz.get("mode")) or bool(hz.get("osc2")) or bool(layer_trace(hz)) or quiet
-             or bool((hz.get("mod") or {}).get("links"))
+             or any(link["to"] not in CC_FX for link in (hz.get("mod") or {}).get("links", ()))
              or any(not e.get("off") for e in hz.get("rack") or ())) and bool(hz.get("tones")))
 
 

@@ -51,6 +51,9 @@ _ATTRIB_VOL, _ATTRIB_BUFFER = 2, 13
 _CONFIG_UPDATEPERIOD = 1
 _CONFIG_MIDI_COMPACT = 0x10400
 _EV_END, _EV_NOTE, _EV_PROGRAM, _EV_PITCH, _EV_DRUMS, _EV_TEMPO = 0, 1, 2, 4, 6, 62
+_EV_PITCHRANGE = 5
+# the control changes a Hz bass's CC lines send (hz_cc.py) as BASSMIDI's own events: Volume, Pan, Expression, Cutoff
+_EV_CC = {7: 12, 10: 13, 11: 14, 74: 25}
 _EVENTS_RAW = 0x10000
 
 EVENT = np.dtype([("event", "<u4"), ("param", "<u4"), ("chan", "<u4"), ("tick", "<u4"), ("pos", "<u4")])
@@ -147,10 +150,28 @@ def load_dlls():
     return _dlls
 
 
-def events(notes, ppq, bpm, chans=None):
+def cc_events(messages):
+    """MIDI messages [(tick, status, data 1, data 2, channel)] (a Hz bass's CC lines, hz_cc.py) as BASSMIDI events:
+    pitch bend, the CCs in _EV_CC, and the bend range set with RPN 0 (CC 101 / 100 = 0, then CC 6); the rest left
+    out. An EVENT array (pos 0), in their order."""
+    out, rpn = [], {}
+    for tick, status, one, two, ch in messages:
+        if status == 0xE0:
+            out.append((_EV_PITCH, one | two << 7, ch, tick, 0))
+        elif status == 0xB0 and one in _EV_CC:
+            out.append((_EV_CC[one], two, ch, tick, 0))
+        elif status == 0xB0 and one in (101, 100):
+            rpn[ch, one] = two
+        elif status == 0xB0 and one == 6 and rpn.get((ch, 101)) == 0 and rpn.get((ch, 100)) == 0:
+            out.append((_EV_PITCHRANGE, two, ch, tick, 0))
+    return np.array(out, EVENT) if out else np.zeros(0, EVENT)
+
+
+def events(notes, ppq, bpm, chans=None, cc=None):
     """The notes (rows start, end, key, velocity, ... in ticks) as BASSMIDI's event list: one channel (chans: each
     note's channel, never 10's), program 0, one tempo. At the same tick a note's end comes before the next start.
-    Keys above 127 are left out."""
+    Keys above 127 are left out. cc = BASSMIDI events (cc_events) put among them: on a shared tick after the
+    notes' ends, before their starts."""
     notes = np.asarray(notes)
     keep = notes[:, 2] <= 127 if len(notes) else np.zeros(0, bool)
     notes = notes[keep] if len(notes) else notes.reshape(0, 4)
@@ -166,7 +187,14 @@ def events(notes, ppq, bpm, chans=None):
     if chans is not None:
         c = np.minimum(np.asarray(chans, np.int64)[keep], 14)
         body["chan"][:n] = body["chan"][n:] = c + (c >= 9)
-    ev[2:-1] = body[np.lexsort((np.r_[np.ones(n), np.zeros(n)], body["tick"]))]
+    if cc is not None and len(cc):
+        ev = np.zeros(2 * n + len(cc) + 3, EVENT)
+        ev[0], ev[1] = (_EV_TEMPO, int(round(60e6 / bpm)), 0, 0, 0), (_EV_PROGRAM, 0, 0, 0, 0)
+        body = np.concatenate([body, cc])
+        kind = np.r_[np.full(n, 2), np.zeros(n), np.ones(len(cc))]  # (ends, then the CCs, then starts)
+    else:
+        kind = np.r_[np.ones(n), np.zeros(n)]
+    ev[2:-1] = body[np.lexsort((kind, body["tick"]))]
     ev[-1] = (_EV_END, 0, 0, ev[-2]["tick"], 0)
     return ev
 

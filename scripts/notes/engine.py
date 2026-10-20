@@ -21,7 +21,8 @@ from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX
 from notes.between import KINDS as BETWEEN_KINDS, clean_between
 from notes.envelope import env_values, velocity_env
 from notes.joined import clean_joined, is_joined, joined_paths
-from notes.hzbass import HZ_KINDS, clean_hz, heard_layers, layers_of, note_lengths, velocity_parts, with_layers
+from notes.hzbass import (HZ_KINDS, clean_hz, heard_layers, layers_of, note_lengths, velocity_parts, with_layers,
+                          without_cc)
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
@@ -529,6 +530,7 @@ def shape_notes(sh, ppq, keys=128):
 def shape_notes_tracks(sh, ppq, keys=128):
     """shape_notes, and for pasted notes which track each note came from, for a custom shape made of other shapes
     which of them (one number per row; None for every other shape)."""
+    sh = made_from(sh)
     done = {}
 
     def get(s):
@@ -539,6 +541,16 @@ def shape_notes_tracks(sh, ppq, keys=128):
     return get(sh)
 
 
+def made_from(sh):
+    """sh as its notes are made from: a Hz bass without its CC lines (hz_settings.without_cc: they make no notes,
+    they're MIDI messages, hz_cc.py)."""
+    hz = sh.get("hz")
+    if not isinstance(hz, dict):
+        return sh
+    got = without_cc(hz)
+    return sh if got is hz else dict(sh, hz=got)
+
+
 BIG_TEXT = 100_000  # characters: a text this long (pasted / image notes, packed) is kept apart by shape_key
 
 
@@ -546,7 +558,9 @@ def shape_key(sh):
     """A shape as a key of the notes it makes (equal for exactly the same shape): its JSON text, with big texts
     (pasted / image notes, many MB) kept as the strings themselves, so they're never written out again: comparing
     the same string is instant (App.notes_key is asked at every rest of a drag). A Hz bass with another layer
-    picked is the same shape (the same notes: picking a layer makes nothing again)."""
+    picked is the same shape (the same notes: picking a layer makes nothing again), and so is one with other CC
+    lines (made_from)."""
+    sh = made_from(sh)
     if (sh.get("hz") or {}).get("layer"):
         sh = dict(sh, hz=with_layers(sh["hz"], layers_of(sh["hz"]), 0))
     texts = []
