@@ -23,7 +23,7 @@ from window import big_ask, look
 from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
-from notes.engine import (CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
+from notes.engine import (BEATS_FAR, CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           render, shape_key)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
@@ -464,8 +464,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         b.pack(side="left", padx=(8, 0))
         Tooltip(b, tr("app.history_tip"))
         ttk.Button(bar, text=tr("app.fit_view"), command=lambda: self.roll.fit_view()).pack(side="left", padx=(12, 0))
-        ttk.Button(bar, text=tr("app.undo"), command=self.undo).pack(side="left", padx=(12, 0))
-        ttk.Button(bar, text=tr("app.redo"), command=self.redo).pack(side="left", padx=(4, 0))
+        ttk.Button(bar, text=tr("app.undo"), command=self.undo_roll).pack(side="left", padx=(12, 0))
+        ttk.Button(bar, text=tr("app.redo"), command=lambda: self.undo_roll(True)).pack(side="left", padx=(4, 0))
         self.play_btn = ttk.Button(bar, text=tr("app.play_space"), width=14, command=self.toggle_play, takefocus=False)
         self.play_btn.pack(side="left", padx=(12, 0))
         self.voices_var = tk.StringVar(value=str(self.play_voices))
@@ -609,8 +609,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 row.grid(row=r, column=1, sticky="w", padx=5)
                 self.ppq_box = ttk.Combobox(row, textvariable=self.pvar[key], values=PPQS, width=7, height=12)
                 self.ppq_box.pack(side="left")
-                for seq in ("<Return>", "<FocusOut>"):  # a wrong PPQ: back to the last good one (user)
-                    self.ppq_box.bind(seq, lambda e: self.ppq_ok() or self.pvar["ppq"].set(str(self.ppq)), add="+")
+                # a typed PPQ counts on Enter / leaving the box / a pick from the list (user: each key remade the
+                # notes and rounded the tool windows' ticks at every half-typed PPQ); a wrong one: back to the last good
+                for seq in ("<Return>", "<FocusOut>", "<<ComboboxSelected>>"):
+                    self.ppq_box.bind(seq, lambda e: self.on_project_change(True, ppq_done=True) if self.ppq_ok()
+                                      else self.pvar["ppq"].set(str(self.ppq)), add="+")
                 # Many MIDI programs can't open a file with a PPQ of 32767 or more (above that it's SMPTE timing anyway)
                 self.ppq_warning = ttk.Label(row, text=tr("app.many_programs_can_t_open_this"), foreground=look.ERROR,
                                              font=look.font(8))
@@ -954,8 +957,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return
         tv, pv, te, pe = self.point_rows[i]
         values = []
-        # (tick 0 on, pitch 0-255 at 128 keys too: user)
-        for var, entry, hi in ((tv, te, math.inf), (pv, pe, KEYS[1] - 1)):
+        # (tick 0 on, pitch 0-255 at 128 keys too: user; ticks only as far as a saved file keeps a shape)
+        for var, entry, hi in ((tv, te, BEATS_FAR * self.ppq), (pv, pe, KEYS[1] - 1)):
             try:
                 value = float(calc(var.get()))
                 if not 0 <= value <= hi:
@@ -1002,13 +1005,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         except ValueError:
             return False
 
-    def on_project_change(self, typed=False):
+    def on_project_change(self, typed=False, ppq_done=False):
         """typed: a key in the PPQ / BPM / Beats per bar box. The notes are remade only for a new PPQ or Keys (BPM
-        and beats per bar change no notes: Hz bass keeps its own BPM; remaking them made typing lag)."""
+        and beats per bar change no notes: Hz bass keeps its own BPM; remaking them made typing lag). A PPQ typed
+        counts once done (ppq_done: Enter / left / picked from the list)."""
         if self._opening:  # (a project being opened: done once its boxes are all filled in, load_file)
             return
         before = (self.ppq, self.keys)
         for key, lo, hi in (("ppq", 1, 65535), ("beats", 1, 32)):
+            if key == "ppq" and typed and not ppq_done and self.typing_in(self.ppq_box):
+                continue  # (still being typed: taken on Enter / leaving it)
             try:
                 setattr(self, key, calc_int(self.pvar[key].get(), lo, hi))
                 if key in self.project_entries:
@@ -2143,6 +2149,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             fn()
             return "break"
         return handler
+
+    def typing_in(self, box):
+        """box has the keyboard (or its dropdown list is open)."""
+        try:
+            return self.focus_get() is box
+        except (KeyError, tk.TclError):  # (a dropdown's list has it)
+            return True
 
     def in_settings(self, w):
         """w is in the Settings window (or one of its pop-ups)."""

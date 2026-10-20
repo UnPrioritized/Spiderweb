@@ -879,6 +879,7 @@ class Scrub:
     def press(self, e, boxes=None):
         self.drag = {"x": e.x_root, "n": 0, "job": None, "gesture": object(), "state": e.state,
                      "boxes": boxes or self.boxes, "start": [var.get() for _, var, _ in boxes or self.boxes]}
+        self.app._edit_key = None  # (a new drag = a new undo step, even on the box typed in / dragged just before)
         self.app.scrubbing = True  # (slow notes are made when the mouse rests or is let go: App.shapes_changed)
         self.app.held_scrub = self  # (shortcuts / Delete wait, Ctrl+Z = cancel: App.key_undo)
 
@@ -948,16 +949,33 @@ class LocalUndo:
 
     def __init__(self, win, get, put, limit=300, main=None):
         self.get, self.put, self.limit, self.main = get, put, limit, main
+        self.root = win._root()  # (App: its held_scrub)
+        self.hold = None  # a number box label held: (its gesture, the steps before its first change)
         self.reset()
         for k in UNDO_KEYS:
-            win.bind(k, lambda e: (self.undo(), "break")[1])
+            win.bind(k, lambda e: (self.press_key(-1), "break")[1])
         for k in REDO_KEYS:
-            win.bind(k, lambda e: (self.redo(), "break")[1])
+            win.bind(k, lambda e: (self.press_key(1), "break")[1])
 
     def reset(self):
         """Start again from how it is now (nothing to undo)."""
         self.states, self.at, self.key = [self.get()], 0, None
         self.seen()
+
+    def press_key(self, d):
+        """Ctrl+Z (d -1) / Ctrl+Y (1). A number box label held: Ctrl+Z = back to the press with no step (the steps
+        it made go, redo kept), Ctrl+Y nothing, like the main window's."""
+        held = getattr(self.root, "held_scrub", None)
+        if not held:
+            return self.step(d)
+        if d > 0:
+            return
+        h, self.hold = self.hold, None
+        if h and held.drag and h[0] is held.drag["gesture"]:
+            self.states, self.at, self.key = h[1], h[2], None
+        held.cancel()
+        if self.get() != self.states[self.at]:
+            self.put(self.states[self.at])
 
     def seen(self):
         """The main window's steps so far are older than this window's (its own settled step, a step of it made)."""
@@ -975,6 +993,9 @@ class LocalUndo:
             if key is None or end:  # (a gesture ended: the next keyed change is a step of its own, hunt)
                 self.key = None
             return
+        held = getattr(self.root, "held_scrub", None)
+        if held and held.drag and not (self.hold and self.hold[0] is held.drag["gesture"]):
+            self.hold = (held.drag["gesture"], list(self.states), self.at)  # (press_key: back to before it)
         del self.states[self.at + 1:]
         if key is not None and key == self.key and self.at > 0:
             self.states[self.at] = state

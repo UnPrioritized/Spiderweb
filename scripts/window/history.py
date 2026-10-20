@@ -349,6 +349,15 @@ class HistoryPanel:
             return
         self._restore(self.redo_stack, self.undo_stack)
 
+    def undo_roll(self, redo=False):
+        """Ctrl+Z / Ctrl+Y on the piano roll and the toolbar's Undo / Redo: the Path / Sustain window's own steps
+        first (their points / stops are dragged on the piano roll)."""
+        if self.path_window and self.path_window.local_step(redo):
+            return "break"
+        if self.sustain_window and self.sustain_window.local_step(redo):
+            return "break"
+        return self.redo() if redo else self.undo()
+
     def key_undo(self, e, redo=False):
         """Ctrl+Z / Ctrl+Y. In the Hz bass window only its own changes (user: the piano roll behind stays as it
         is): a step made elsewhere is next = a ding and a word in its status line."""
@@ -366,11 +375,7 @@ class HistoryPanel:
         if not self.in_hz(e.widget):
             if self.box_drawn():
                 return "break"
-            if self.path_window and self.path_window.local_step(redo):  # (its points are dragged on the piano roll)
-                return "break"
-            if self.sustain_window and self.sustain_window.local_step(redo):  # (its stops are dragged there)
-                return "break"
-            return self.redo() if redo else self.undo()
+            return self.undo_roll(redo)
         if hz.drag:  # the mouse held there: Ctrl+Z only puts back what's being dragged (no step), Ctrl+Y nothing
             return None if redo else hz.cancel_drag()
         held = hz.held_fx()  # (the same for an effect's points and the synth window's knobs)
@@ -405,10 +410,15 @@ class HistoryPanel:
         ch10 = None
         for _ in range(min(count, len(src))):
             state, name, picked, hz = src.pop()
-            # (CH10_OFF last: unticking "Use channel 10" made it: undo ticks it, redo unticks)
-            mark = tuple(picked[-1:]) if picked[-1] == CH10_OFF else ()
-            if mark:
-                ch10 = src is self.undo_stack
+            # (CH10_OFF last: unticking "Use channel 10" made it: undo ticks it; on the redo side (CH10_OFF, the tick
+            # when it was undone): redo puts that back (ticked again by hand after the step = stays ticked))
+            last = picked[-1]
+            mark = ()
+            if last == CH10_OFF or type(last) is tuple and last[:1] == (CH10_OFF,):
+                if src is self.undo_stack:
+                    ch10, mark = True, ((CH10_OFF, bool(self.use_ch10.get()) if ch10 is None else ch10),)
+                else:
+                    ch10, mark = (last[1] if type(last) is tuple else False), (CH10_OFF,)
                 picked = tuple(picked[:-1])
             dst.append((now, name, tuple(sel_now) + mark, hz))
             now, sel_now = state, picked

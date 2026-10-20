@@ -263,7 +263,7 @@ class ToolWindow(tk.Toplevel):
             else:
                 self.turning = t
             return
-        self.undo.step(d)
+        self.undo.press_key(d)
 
     def ppq_changed(self):
         """The project's PPQ changed: numbers shown in ticks show the new ones."""
