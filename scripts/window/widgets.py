@@ -101,11 +101,25 @@ JUMP_MS = 1000  # name lists open: letters typed closer together than this make 
 DIVIDER = "─" * 12  # name lists: the row between the ready-made names and the saved ones (set_names)
 
 
+def open_list(cb):
+    """The Tk path of a dropdown's open list (Tk makes it itself: pop.f.l on Windows / Linux; a macOS user's Tk
+    kept it elsewhere, so it's looked for), or None when there's none: the extras on the list are left off."""
+    todo = [cb.tk.call("ttk::combobox::PopdownWindow", cb)]
+    while todo:
+        w = todo.pop(0)
+        if cb.tk.call("winfo", "class", w) == "Listbox":
+            return w
+        todo += cb.tk.splitlist(cb.tk.call("winfo", "children", w))
+    return None
+
+
 def letter_jump(cb):
     """Typing while the dropdown's list is open jumps to the first name starting with the letters typed (a pause of
     JUMP_MS starts a new word; the same letter again = the next name with it). Returns the jump function (tests)."""
-    lb = cb.tk.call("ttk::combobox::PopdownWindow", cb) + ".f.l"
+    lb = open_list(cb)
     jump = {"text": "", "at": 0}
+    if lb is None:
+        return lambda char, when: None
 
     def jump_to(char, when):
         if len(char) != 1 or not char.isprintable():
@@ -139,10 +153,12 @@ def name_list(cb):
     cb.row_colours = {}  # {row in the open list: its text colour}
     cb.name_before = cb.get()
     pop = cb.tk.call("ttk::combobox::PopdownWindow", cb)
-    lb = pop + ".f.l"
+    lb = open_list(cb)
 
     def shown():  # (the list opened, just filled: the divider greyed, the name picked before kept)
         cb.name_before, cb.list_open = cb.get(), True
+        if lb is None:
+            return
         for k, colour in cb.row_colours.items():  # (rows with a colour of their own, e.g. orange = a warning)
             if k < int(cb.tk.call(lb, "size")):
                 cb.tk.call(lb, "itemconfigure", k, "-foreground", colour)
@@ -1146,8 +1162,11 @@ class ListTip(Tooltip):
     def dropdown(cls, cb):
         """The same on a dropdown's open list (Tk makes that list itself: a Python handle on it here)."""
         pop = cb.tk.call("ttk::combobox::PopdownWindow", cb)
+        path = open_list(cb)
+        if path is None:
+            return
         lb = tk.Listbox.__new__(tk.Listbox)
-        lb.tk, lb._w, lb.master, lb.children, lb._tclCommands = cb.tk, pop + ".f.l", cb, {}, None
+        lb.tk, lb._w, lb.master, lb.children, lb._tclCommands = cb.tk, path, cb, {}, None
         tip = cls(lb, cb)
         Tooltip.RAW[lb._w] = lb.tooltips
         cb.tk.call("bind", pop, "<Unmap>", "+" + cb.register(lambda: (setattr(tip, "row", None), tip.hide())))
