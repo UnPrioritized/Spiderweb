@@ -18,6 +18,7 @@ import zlib
 
 from files.about import VERSION as APP
 from files.project import short_shape
+from files.update_check import version_tuple
 from notes.areas import clean_areas
 from notes.custom import clean_strokes
 from notes.engine import clean_shape, sane
@@ -70,9 +71,8 @@ def made_by(got):
     """An unpacked line -> None if this Spiderweb made it (or can't tell), else ("older" / "newer", its version):
     things may have changed since, so it may come out a little different."""
     made = got.get("app") or "1.4.0"
-    try:
-        theirs, ours = (tuple(int(x) for x in str(v).split(".")) for v in (made, APP))
-    except ValueError:
+    theirs, ours = version_tuple(made), version_tuple(APP)  # knows "1.6.2-beta" (before 1.6.2)
+    if theirs is None or ours is None:
         return None
     return None if theirs == ours else ("older" if theirs < ours else "newer", str(made))
 
