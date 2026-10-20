@@ -134,6 +134,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     domino_clip.py   Copy to / Paste from Domino (notes on the clipboard in Domino's own format)
     clipboard.py     the Windows clipboard (bytes in any format, and text)
     share.py         shapes / drawings as one line of text to share (packed, checked when pasted back)
+    unzip.py         unpacking outside data with a size limit (no "zip bomb" can fill the memory)
     colour_list.py   picture colours as text for a player's settings (formats), and colours read out of any text
     playback.py      playing through Windows MIDI out
     synth.py         the built-in synth (Hz bass preview): BASS + BASSMIDI DLLs in scripts/bass/

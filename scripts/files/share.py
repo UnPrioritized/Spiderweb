@@ -6,7 +6,7 @@ anything is unpacked. The JSON says what it holds: {"kind": "shapes", "shapes": 
 file saves them, in beats, so PPQ / BPM don't matter) or {"kind": "drawing", "name": ..., "strokes": [...],
 "areas": [...]} (as a saved library shape), plus "app": the Spiderweb version that made it (none = 1.4.0, the
 first with sharing; another version than this one = a heads-up, made_by). zlib's own check number catches a line
-that was cut off or changed. Everything unpacked goes through the same checks as a project file (clean_shape,
+that was cut off or changed; files.unzip refuses one that would unpack far too big. Everything unpacked goes through the same checks as a project file (clean_shape,
 clean_strokes, clean_areas).
 """
 
@@ -18,6 +18,7 @@ import zlib
 
 from files.about import VERSION as APP
 from files.project import short_shape
+from files.unzip import unzip
 from files.update_check import version_tuple
 from notes.areas import clean_areas
 from notes.custom import clean_strokes
@@ -55,11 +56,7 @@ def unpack(text):
         raise ShareError("newer")
     data = DATA.match(re.sub(r"\s+", "", found.group(2))).group()
     try:
-        unzip = zlib.decompressobj()
-        body = unzip.decompress(base64.b64decode(data[:len(data) // 4 * 4], validate=True))
-        if not unzip.eof:  # cut off
-            raise ValueError
-        got = json.loads(body.decode("utf-8"))
+        got = json.loads(unzip(base64.b64decode(data[:len(data) // 4 * 4], validate=True)).decode("utf-8"))
     except (binascii.Error, zlib.error, UnicodeDecodeError, ValueError, RecursionError):
         raise ShareError("broken") from None
     if not isinstance(got, dict) or got.get("kind") not in ("shapes", "drawing"):

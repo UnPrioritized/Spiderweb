@@ -10,6 +10,7 @@ import numpy as np
 
 from files.lang import tr
 from files.speed import key_rows
+from files.unzip import unzip
 from notes.arc import arc_k, arc_points, ellipse_bezier
 from notes.areas import ALL_COLOURS, COLOURS, area_maps, area_map, inside_loops  # (areas coloured by hand)
 from notes.faces import faces  # (what's filled when it isn't plain even-odd: fill_test)
@@ -3316,7 +3317,7 @@ def unpack_notes(text):
         if len(_unpacked) > 20:
             _unpacked.clear()
         tracks = text.startswith(TRACKS)
-        got = np.frombuffer(zlib.decompress(base64.b64decode(text[len(TRACKS):] if tracks else text)), "<i4")
+        got = np.frombuffer(unzip(base64.b64decode(text[len(TRACKS):] if tracks else text)), "<i4")
         got = got.reshape(-1, 5 if tracks else 4).astype(np.int64)
         if not tracks:
             got = np.column_stack([got, np.zeros(len(got), np.int64)])
