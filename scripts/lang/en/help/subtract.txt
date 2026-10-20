@@ -2,7 +2,7 @@ Select one or more shapes, then right-click one: Gate subtract… Every note get
 
 ## Note start and Note end
 
-The window has two tabs. Note start: each note starts later, its end stays where it is. Note end: each note ends earlier, its start stays where it is. Tick "Subtract from the note start" or "Subtract from the note end" on a tab to use that side. You can use one side or both. A shape that doesn't have Gate subtract yet starts with Note start, 1 tick.
+The window has two tabs. Note end: each note ends earlier, its start stays where it is, so the notes still sound at the same time. Note start: each note starts later, its end stays where it is. Tick "Subtract from the note end" or "Subtract from the note start" on a tab to use that side. You can use one side or both. A shape that doesn't have Gate subtract yet starts with Note end, 1 tick.
 
 With both sides, a note can be shortened at both ends. If the two together would take more than the note has, both are made smaller by the same share, so the note always keeps at least 1 tick.
 

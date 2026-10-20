@@ -1,6 +1,6 @@
 """The Gate subtract window (right-click "Gate subtract..."; subtract.py): the selected shapes' notes end a few ticks
 earlier and / or start a few ticks later, so a blank space shows between notes that touched. "Subtract from gates" on
-/ off, then two tabs, "Note start" and "Note end" (user 2026-10-20: start first, and the side a shape gets when
+/ off, then two tabs, "Note end" and "Note start" (user 2026-10-20: end first, and the side a shape gets when
 opened without one), each with "Use this side", how many ticks, "Only
 notes that touch the next one" (start: "...the one before"), and "Change across the shape": the amount goes from the
 first number to a second one along a graph (like Gate Range's: across time or keys, each key row by itself + across
@@ -31,7 +31,7 @@ from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, r
 
 GRAPH_KEYS = ("to", "graph", "dir", "rows", "join", "count")  # (a side's graph settings, shared by all)
 ALONG = ("time", "count")  # "Along a row:" choices (count = by note count)
-SIDES = ("start", "end")  # the tabs, Note start first (user 2026-10-20; sh["subtract"] = the end side, its
+SIDES = ("end", "start")  # the tabs, Note end first (user 2026-10-20: it doesn't move when notes sound; sh["subtract"] = the end side, its
 # "start" = the start side)
 SIDE_LISTS = ("use", "bys", "touches", "varies", "owns", "g", "g_all")  # (each tab's, see side_data)
 
@@ -148,7 +148,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
                                        command=lambda: self.put_all("on"))
         self.on_tick.pack(anchor="w")
         Tooltip(self.on_tick, tr("subtract.on_tip"))
-        self.side = "start"
+        self.side = "end"
         self.side_var = tk.StringVar(value=self.side)
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(8, 0))
@@ -299,8 +299,8 @@ class SubtractWindow(PointGraph, tk.Toplevel):
 
     def load(self, start):
         """Each shape's settings from the shapes, then the controls. start (opened from the menu): all on, and a shape
-        with no side used gets the Note start side (1 tick where it had none; user 2026-10-20: the first tab). Opened
-        on the Note start tab unless only the end side is used."""
+        with no side used gets the Note end side (1 tick where it had none; user 2026-10-20: the first tab). Opened
+        on the Note end tab unless only the start side is used."""
         subs = [t.get("subtract") if is_subtracted(t) else None for t in self.tgts]
         self.ons = [start or s is not None for s in subs]
         for side in SIDES:
@@ -320,18 +320,18 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         if start:
             self.use_first()
             ends, starts = self.sides["end"]["use"], self.sides["start"]["use"]
-            self.side = "end" if any(ends) and not any(starts) else "start"
+            self.side = "start" if any(starts) and not any(ends) else "end"
         self.side_var.set(self.side)
         self.show_controls()
 
     def use_first(self):
-        """Shapes with neither side used: the Note start side used (1 tick where it has no amount)."""
+        """Shapes with neither side used: the Note end side used (1 tick where it has no amount)."""
         ends, starts = self.sides["end"], self.sides["start"]
         for i in range(len(self.ons)):
             if self.ons[i] and not ends["use"][i] and not starts["use"][i]:
-                starts["use"][i] = True
-                if starts["bys"][i] is None:
-                    starts["bys"][i] = 1 / self.app.ppq
+                ends["use"][i] = True
+                if ends["bys"][i] is None:
+                    ends["bys"][i] = 1 / self.app.ppq
 
     def pick_side(self):
         """A tab clicked: its settings shown (a number typed on the other one goes to it first)."""
@@ -745,7 +745,7 @@ def open_subtract(app):
     if w:  # (already open: it follows the selection; the menu item puts Gate subtract on)
         w.sync()
         used = [a or b for a, b in zip(w.sides["end"]["use"], w.sides["start"]["use"])]
-        if w.idx and (not all(w.ons) or not all(used)):  # (or a shape with no side used: Note start on)
+        if w.idx and (not all(w.ons) or not all(used)):  # (or a shape with no side used: Note end on)
             w.on_var.set(True)
             w.put_all("on")
         w.lift()
