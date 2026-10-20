@@ -257,6 +257,10 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.bind("<space>", self.on_space)  # (anywhere in the window: the buttons don't take the keyboard)
         for k in ("<Control-a>", "<Control-A>"):
             c.bind(k, lambda e: (self.drag or self.loudness.held() or self.select_all_notes(), "break")[1])
+        for seq, fn in (("<Delete>", self.on_delete),  # (a toolbar button / another pane has the keyboard: the
+                        *((k, lambda: self.drag or self.loudness.held() or self.select_all_notes())  # same keys,
+                          for k in ("<Control-a>", "<Control-A>"))):                                # key_elsewhere)
+            self.bind(seq, lambda e, seq=seq, fn=fn: self.key_elsewhere(e, seq, fn))
         for k, tool in (("p", "pencil"), ("P", "pencil"), ("v", "select"), ("V", "select"), ("b", "bend"), ("B", "bend"),
                         *((h, t) for t, _, hot in self.draw_tools() for h in (hot, hot.upper()))):
             c.bind(f"<KeyPress-{k}>", lambda e, tool=tool: None if e.state & CTRL else  # (Ctrl+Y: redo, the

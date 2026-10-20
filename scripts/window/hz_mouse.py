@@ -4,6 +4,7 @@ slides made by middle-clicks, right-click menus, Delete, and Esc / Ctrl+Z while 
 import copy
 import math
 import tkinter as tk
+from tkinter import ttk
 from types import SimpleNamespace
 
 import numpy as np
@@ -822,6 +823,17 @@ class HzMouse:
             pass
         elif not self.fx.delete_key():
             self.delete_selected()
+        return "break"
+
+    def key_elsewhere(self, e, seq, fn):
+        """A notes key (Delete, Ctrl+A) pressed while a toolbar button or another pane has the keyboard: done for
+        the notes, like in the main window. The piano roll, a widget with its own (the Layers list) and typing boxes
+        keep theirs."""
+        w = e.widget
+        if (w is self.canvas or not isinstance(w, tk.Misc) or w.bind(seq)
+                or isinstance(w, (tk.Entry, ttk.Entry, tk.Spinbox, tk.Text)) and str(w.cget("state")) != "readonly"):
+            return None
+        fn()
         return "break"
 
     def delete_dragged(self):
