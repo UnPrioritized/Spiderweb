@@ -12,6 +12,8 @@ What's new:
 
 • Select boxes stay while you draw with another tool, and a shape drawn inside one joins the selection. Right-clicking empty space no longer drops it.
 
+• Moving a shape snaps the end of its last note to the grid too: the start or the end, whichever is nearer the mouse.
+
 • Right-drag listening shows its own line and leaves the play line where it was.
 
 • Plain notes (Turn into plain notes, path copies turned into plain shapes) follow Settings → General → Overlapping shapes keep their colours: off, an overlapping one takes the next free channels.

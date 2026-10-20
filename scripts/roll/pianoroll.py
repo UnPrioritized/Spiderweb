@@ -76,8 +76,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.doubled = False  # a double-click's own press (never goes on to the next shape)
         self.by_area = False
         self.room = None         # how far each shape being moved can go: {shape number: move_room}
-        self.onto_grid = None    # beats added to a move so the earliest note lands on the grid (first_note_fix):
-        #                          (all of them, {shape number: its own})
+        self.onto_grid = None    # where the notes of shapes being moved start and end (note_edges): (all of them,
+        #                          {shape number: its own}); a move sticks one of them to the grid (sticky_move)
+        self.press_beat = 0.0    # the press's beat, not snapped (sticky_move goes by how far the mouse really went)
         self.grid_later = None   # a resize whose notes were too slow to snap while dragging: (make, beat) for let go
         self.inside_fit = None   # a fitted box being dragged: the frame in it (custom.frame_in_box; frame_for_box)
         self.limit = None        # how far the shapes being edited may reach (limits)
@@ -384,16 +385,35 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 up = max(up, KEYS[1] - 1 - keys[1])
         return left, down, up
 
-    def first_note_fix(self, idx):
-        """How far (beats) shapes idx must go so their earliest note starts on the nearest grid line: a move adds it
-        to its whole grid steps (user: the earliest note snaps, not the box; a shape off the grid comes back on).
-        0 with nothing to play or snapping off."""
-        app, sb = self.app, self.app.snap_beats()
-        starts = [notes[:, 0].min() for notes in (app.notes_of(app.shapes[j]) for j in idx) if len(notes)]
-        if not sb or not starts:
-            return 0.0
-        first = float(min(starts)) / app.ppq
-        return round(first / sb) * sb - first
+    def note_edges(self, idx):
+        """(earliest note's start, last note's end) in beats of shapes idx, or None (nothing to play)."""
+        app = self.app
+        got = [(notes[:, 0].min(), notes[:, 1].max()) for notes in (app.notes_of(app.shapes[j]) for j in idx)
+               if len(notes)]
+        if not got:
+            return None
+        return float(min(a for a, _ in got)) / app.ppq, float(max(b for _, b in got)) / app.ppq
+
+    def sticky_move(self, edges, raw):
+        """A move of raw beats (the mouse's, not snapped) stuck to the nearest sticky point: where the earliest
+        note's start or the last note's end lands on a grid line (user: the notes snap, not the box; a shape off the
+        grid comes back on). Not moving counts as one too, so straight up / down leaves the time alone. (whole grid
+        steps, fix, edge): the move = steps + fix, fix = how far the stuck edge (0 start, 1 end, None: not moved)
+        was off the grid. (0, 0, None) with nothing to play or snapping off."""
+        best, got, sb = abs(raw), (0.0, 0.0, None), self.app.snap_beats()
+        if not sb or not edges:
+            return got
+        for side in (0, 1):  # (the start first: it wins when both are as near)
+            fix = self.edge_fix(edges, side)
+            steps = round((raw - fix) / sb) * sb
+            if abs(steps + fix - raw) < best - 1e-12:
+                best, got = abs(steps + fix - raw), (steps, fix, side)
+        return got
+
+    def edge_fix(self, edges, side):
+        """How far (beats) edges[side] (note_edges) is from the grid line nearest it; 0 for nothing to play."""
+        sb = self.app.snap_beats()
+        return round(edges[side] / sb) * sb - edges[side] if sb and edges and side is not None else 0.0
 
     def notes_onto_grid(self, sh, make, x, late=True):
         """A resize: sh["pts"] = make(beat) for the dragged corner / side at that beat, nudged so the notes' edge on
@@ -935,6 +955,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if e.x < self.kb_w or self.sx is None:
             return
         app = self.app
+        self.press_beat = self.event_pt(e, snap=False)[0]
         if app.tool.get() == "select":  # Select is the tool at the start, so its tip comes on first use
             app.tips.show("select", wait=True)
         if e.y < self.ruler_h and not self.draft and self.ruler_band(e, kept):
@@ -1198,13 +1219,21 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 orig = self.copy_moved(orig)
             if self.room is None:  # (each shape stops at beat 0 and the lowest / highest key on its own, the Select
                 self.room = {j: self.move_room(self.app.shapes[j]) for j in orig}  # box and the rest go on: user)
-                self.onto_grid = (self.first_note_fix(orig), {j: self.first_note_fix([j]) for j in orig})
-            # (straight up / down leaves the time alone: the earliest note snaps once the mouse goes sideways, user)
-            fix = self.onto_grid[0] if self.app.snap_beats() and not e.state & SHIFT and db else 0.0
+                self.onto_grid = (self.note_edges(orig), {j: self.note_edges([j]) for j in orig})
+            fix, side = 0.0, None
+            if self.app.snap_beats() and not e.state & SHIFT and self.onto_grid[0]:  # the nearest sticky point: the
+                raw = self.event_pt(e, snap=False, above=True)[0] - self.press_beat  # earliest note's start or the
+                db, fix, side = self.sticky_move(self.onto_grid[0], raw)               # last one's end (user)
             go = {j: self.in_room(db + fix, dp, e, self.room[j], fix) for j in orig}
-            if fix and any(bj != db + fix for bj, _ in go.values()):  # one held back at beat 0: each snaps by its
-                own = self.onto_grid[1]  # own earliest note (else the rest took the held one's shift off the grid)
-                go = {j: self.in_room(db + own[j], dp, e, self.room[j], own[j]) for j in orig}
+            held = [j for j in orig if go[j][0] != db + fix] if side is not None else []
+            if held:  # one held back at beat 0: it sits with its own earliest note on the grid, the rest stick by
+                own = self.onto_grid[1]  # their own edges (else they took the held one's shift off the grid)
+                rest = [own[j] for j in orig if j not in held and own[j]]
+                rdb, rfix, _ = (self.sticky_move((min(a for a, _ in rest), max(b for _, b in rest)), raw) if rest
+                                else (db, fix, None))
+                for j in orig:
+                    f = self.edge_fix(own[j], 0) if j in held else rfix
+                    go[j] = self.in_room((db if j in held else rdb) + f, dp, e, self.room[j], f)
             db += fix
             self.drag = ("move", start, orig, one, True, part)
             kept = self.box_kept
