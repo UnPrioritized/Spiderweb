@@ -83,6 +83,7 @@ def faint(colour, by=0.6):
 
 
 class FxPane:
+    _spans = None  # note_spans worked out: ((its notes), spans)
     # the pane's colours (the synth window's dark look has its own: hz_synth.LOOK)
     LOOK = {"bg": look.FX_BG, "grid": look.FX_GRID, "outside": look.FX_OUTSIDE, "notes": look.FX_NOTES,
             "hint": look.HINT, "repeat": look.FX_REPEAT, "names": look.FX_NAMES, "names_dim": 0.5,
@@ -129,12 +130,18 @@ class FxPane:
         return min(1.0, max(0.0, 1.0 - (y - self.pad) / max(1, h - 2 * self.pad)))
 
     def note_spans(self):
-        """[(start, end)] beats of each note (chain of slides; chains starting together: the longest), in order."""
-        spans = {}
+        """[(start, end)] beats of each note (chain of slides; chains starting together: the longest), in order.
+        Worked out once per redraw / mouse event (every point asked: 1 s a mouse move at 1000 notes, audit)."""
         tones = self.win.tones
+        key = (id(tones), len(tones), repr(self.win.extra.get("voice")))
+        if self._spans and self._spans[0] == key:
+            return self._spans[1]
+        spans = {}
         for s, e in chains(tones, legato_links(self.win.extra.get("voice"), tones)).values():
             spans[s] = max(spans.get(s, e), e)
-        return sorted(spans.items())
+        got = sorted(spans.items())
+        self._spans = (key, got)
+        return got
 
     def note_starts(self, every, fit):
         """[(beat, how many times one repeat is stretched)] where each note (chain of slides) starts, in order, for
@@ -401,6 +408,7 @@ class FxPane:
         return faint(colour, by)
 
     def redraw(self):
+        self._spans = None  # (the notes may have changed since: note_spans once again)
         c, win, s, pal = self.canvas, self.win, self.s, self.LOOK
         c.delete("all")
         self.drawn = {}
@@ -650,6 +658,7 @@ class FxPane:
         return name if any(self.on_line(k, x, y) for k in self.names() if base(k) != name) else None
 
     def on_motion(self, e):
+        self._spans = None
         self.mouse_x = e.x
         if e.y < self.edge:
             self.canvas.config(cursor="sb_v_double_arrow")
@@ -700,6 +709,7 @@ class FxPane:
         return tr("hz.fx_value", name=tr("hz.fx_" + name), value=f"{value * 100:.4g}")
 
     def on_press(self, e):
+        self._spans = None
         win = self.win
         win.canvas.focus_set()
         self.drag, self.pressed = None, True
@@ -957,13 +967,14 @@ class FxPane:
     def delete_points(self, which):
         """Points deleted (a set of (effect, number)); an effect left with none is taken off."""
         win = self.win
-        before = self.state()
+        d = self.drag  # (a point held: undo goes back to before the press, not to where it was dragged)
+        before = d["before"] if d and d["kind"] == "point" and "before" in d else self.state()
         for n, j in sorted(which, reverse=True):
             if abs(win.fxl[n][j][0] - win.sustains.get(n, math.nan)) < 1e-9:  # (its sustain point goes too)
                 del win.sustains[n]
             del win.fxl[n][j]
         for n in {n for n, _ in which}:
-            if not win.fxl[n]:
+            if n in win.fxl and not win.fxl[n]:  # (an amount line already went with its effect)
                 self.drop(n)
         self.drag, self.sel = None, set()
         win.commit_fx(before)

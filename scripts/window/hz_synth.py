@@ -234,7 +234,7 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
             c.bind(key, lambda e: (not self.fx.drag and self.fx.copy_points() and (self.hz.copied(None),
                                                                                    self.fx.delete_selected()), "break")[1])
         for key in ("<Control-v>", "<Control-V>"):
-            c.bind(key, lambda e: (self.fx.paste_points(), "break")[1])
+            c.bind(key, lambda e: (not self.fx.drag and self.fx.paste_points(), "break")[1])  # (nothing while held)
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.show_page()
         tag = f"SynthLetters{id(self)}"  # (a letter that plays a key, typed in a number box: the number taken, the
@@ -300,6 +300,20 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
             if (str(e.widget).startswith(str(c)) and bar.winfo_ismapped()
                     and not isinstance(e.widget, (Knob, tk.Entry, ttk.Entry))):
                 c.yview_scroll(-1 if e.delta > 0 else 1, "units")
+                self.wheel_at = time.monotonic()
+
+    GLIDE = 0.5  # seconds: as the side panel's SIDE_GLIDE
+
+    def gliding(self, e):
+        """The wheel over a dropdown in the Knobs / Effects tab while that tab is being scrolled: it scrolls on
+        instead of changing the dropdown (App's dropdown wheel asks; like the side panel, audit). True = done."""
+        for c, bar in ((self.knobs_canvas, self.knobs_bar), (self.rack_canvas, self.rack_bar)):
+            if (str(e.widget).startswith(str(c)) and bar.winfo_ismapped()
+                    and time.monotonic() - getattr(self, "wheel_at", 0.0) < self.GLIDE):
+                c.yview_scroll(-1 if e.delta > 0 else 1, "units")
+                self.wheel_at = time.monotonic()
+                return True
+        return False
 
     # ------------------------------------------------------------ the Hz bass window's lines (the pane works on these)
 

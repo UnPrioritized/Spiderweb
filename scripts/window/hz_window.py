@@ -248,8 +248,8 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         for k in ("<Control-x>", "<Control-X>"):
             c.bind(k, lambda e: self.cut_notes() or "break")
         for k in ("<Control-v>", "<Control-V>"):  # (what was copied last: notes copied in Domino, effect points, or
-            c.bind(k, lambda e: (self.drag or self.loudness.held()  # notes, at the play line; nothing while the
-                                 or self.paste_domino(self.play_line_beat())  # mouse is held)
+            c.bind(k, lambda e: (self.drag or self.loudness.held() or self.fx.drag  # notes, at the play line;
+                                 or self.paste_domino(self.play_line_beat())  # nothing while the mouse is held)
                                  or self.fx.paste_points() or self.paste_notes(self.play_line_beat()), "break")[1])
         c.bind("<Escape>", lambda e: self.on_escape())
         c.bind("<Return>", lambda e: self.make_draft() or self.loudness.confirm())  # (the path drawn: made; the

@@ -308,6 +308,13 @@ class LiveKeys:
             ppq = self.app.ppq
         self.ask(gen, ppq)
 
+    def given_up(self, gen):
+        """A make that failed (an error, or the soundfont couldn't be measured): the sound stops waiting for it, so
+        the next key pressed is made again and the player can stop (it waited for ever: silent keys, audit)."""
+        with self.lock:
+            if gen == self.gen:
+                self.cut, self.extending = math.inf, False
+
     def _make(self, sh, ppq, bpm, gen, p0, cut, qs):
         try:
             notes, _ = shape_notes_tracks(sh, ppq, 128)
@@ -321,7 +328,7 @@ class LiveKeys:
             if qs.measuring is not None:
                 qs.measuring.join()
             if not qs.ready():
-                return
+                return self.given_up(gen)
             sig = json.dumps([{k: v for k, v in sh["hz"].items() if k != "tones"}, key_range(sh)], sort_keys=True)
             laid, band = qs.plan_rough(starts, keys, vels, gates, max(self.band, self.bands.get(sig, 1)))
             # (chords: the keys of a wave together)
@@ -332,7 +339,7 @@ class LiveKeys:
             from files.errors import write_log
             import sys
             write_log(*sys.exc_info(), "live keys")
-            return
+            return self.given_up(gen)
         with self.lock:
             if gen != self.gen:
                 return

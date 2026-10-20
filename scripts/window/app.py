@@ -575,6 +575,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         def drop_wheel(e):
             if self.side_gliding(e.widget):
                 return self.side_wheel(e, dropdown=True) or "break"
+            synth = self.hz_window and self.hz_window.synth_win  # (its Knobs / Effects tab scrolling: the same)
+            if synth and synth.winfo_exists() and synth.gliding(e):
+                return "break"
             if own:
                 self.tk.eval(own.replace("%W", str(e.widget)).replace("%D", str(e.delta)))
             return None
