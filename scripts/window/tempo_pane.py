@@ -13,6 +13,7 @@ can't). The wheel over the numbers on the left zooms up / down (Shift scrolls), 
 wheel works as on the piano roll.
 """
 
+import json
 import math
 import tkinter as tk
 from tkinter import ttk
@@ -22,7 +23,7 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.tempo import (CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, clamp_bpm, curve, formula_fn,
-                         plans, shown_bpm)
+                         plans, shown_bpm, step_edges)
 from roll.zoombar import add_zoom_bars
 from roll.roll_shared import (BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, draw_boxes, grab_while_panning,
                               set_cursor)
@@ -30,7 +31,8 @@ from window import look
 from window.widgets import ShortLabel, Tooltip, unit_word
 
 BPM_SNAPS = (0, 0.1, 1, 5, 10)  # the BPM snap dropdown's steps (0 = off)
-NICE = (0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000)  # numbers filled in on zoom
+NICE = (0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000,
+        10000000)  # numbers filled in on zoom
 LABEL_GAP = 15  # px between two numbers on the left (times the window's scale)
 DRAWS = {"line": "line", "curve": "s", "formula": "formula"}  # pencil kind -> the curve the drawn part gets
 
@@ -108,6 +110,15 @@ class TempoBox(ttk.Frame):
         fit = ttk.Button(bar, text=tr("tempo.fit"), command=lambda: (self.pane.fit_view(), app.roll.focus_set()))
         fit.pack(side="right", padx=(6, 2))
         Tooltip(fit, tr("tempo.fit_tip"))
+        self.graph = ttk.Combobox(bar, state="readonly", width=11, values=[tr("tempo.scale_" + k) for k in SCALES])
+        self.graph.current(0)
+        self.graph.pack(side="right")
+        self.graph.bind("<<ComboboxSelected>>", lambda e: (self.pane.set_scale(self.graph.current() == 1),
+                                                           app.roll.focus_set()))
+        lb = ttk.Label(bar, text=tr("tempo.graph"))
+        lb.pack(side="right", padx=(6, 4))
+        for w in (lb, self.graph):
+            Tooltip(w, tr("tempo.graph_tip"))
         self.hint = ShortLabel(bar, least=8, text=tr("tempo.hint_point"), foreground=look.HINT, font=look.font(8))
         self.hint.pack(side="left", fill="x", expand=True, padx=(10, 0))
         holder = tk.Frame(self)
@@ -288,7 +299,8 @@ class TempoPane(tk.Canvas):
         self.bars = ()  # (add_zoom_bars: the scrollbar right of it)
         set_cursor(self, PENCIL_CURSOR)
         self.pad = int(8 * scale)  # room above the top number / below the bottom one
-        self.view = None  # (lowest, highest) log2 BPM shown; None = fitted on first draw
+        self.log = False  # the up / down scale: linear (False, default) or exponential (True)
+        self.view = None  # (lowest, highest) shown, in the scale's units (ax); None = fitted on first draw
         self.sel = []  # the picked points / catch-up lines (their own lists: they keep their place when sorted)
         self.part = None  # a picked part: its first point's list
         self.band = None  # the kept Select box (first, last beat): the pane's whole height
@@ -324,43 +336,69 @@ class TempoPane(tk.Canvas):
     def area(self):
         return self.pad, self.winfo_height() - 1 - self.pad
 
+    # The up / down scale (user 2026-10-21): linear by default (what many MIDI programs show, from 0 BPM), or
+    # exponential (each step up doubles: huge spikes fit). self.view = (lowest, highest) in its own units: BPM, or
+    # log2 BPM.
+
+    def ax(self, v):
+        return np.log2(np.maximum(v, 1e-9)) if self.log else np.asarray(v, float)
+
+    def unax(self, u):
+        return 2.0 ** u if self.log else u
+
+    def limits(self):
+        """(lowest, highest) the view can show: 0 BPM (linear) / the slowest a file holds, up to the fastest."""
+        return (math.log2(MIN_BPM), math.log2(MAX_BPM)) if self.log else (0.0, MAX_BPM)
+
+    def least_span(self):
+        return 0.02 if self.log else 0.5
+
     def b2y(self, v):
         lo, hi = self.view
         top, bot = self.area()
-        return bot - (np.log2(np.maximum(v, 1e-9)) - lo) / (hi - lo) * (bot - top)
+        return bot - (self.ax(v) - lo) / (hi - lo) * (bot - top)
 
-    def y2b(self, y):
+    def y2u(self, y):
         lo, hi = self.view
         top, bot = self.area()
-        return clamp_bpm(2 ** (lo + (bot - y) / max(1, bot - top) * (hi - lo)))
+        return lo + (bot - y) / max(1, bot - top) * (hi - lo)
+
+    def y2b(self, y):
+        return clamp_bpm(self.unax(self.y2u(y)))
+
+    def set_scale(self, log):
+        """Linear / exponential picked: the whole line fitted in the new scale."""
+        if log != self.log:
+            self.log = log
+            self.fit_view()
 
     def set_view(self, lo, hi):
-        """The BPMs shown, kept between the slowest and the fastest a MIDI file holds (user: stop there, like the
-        velocity pane at 0; the pane's padding stays below / above). Zoomed out past both: all of it."""
-        floor, roof = math.log2(MIN_BPM), math.log2(MAX_BPM)
-        span = min(hi - lo, roof - floor)
+        """The BPMs shown, kept between 0 (exponential: the slowest a file holds) and the fastest (user: stop there,
+        like the velocity pane at 0; the pane's padding stays below / above). Zoomed out past both: all of it."""
+        floor, roof = self.limits()
+        span = min(max(hi - lo, self.least_span()), roof - floor)
         lo = min(max(lo, floor), roof - span)
         self.view = (lo, lo + span)
         for bar in self.bars:
             bar.refresh()
 
-    # (the scrollbar right of the pane, roll/zoombar.py: measured in doublings down from the fastest tempo)
+    # (the scrollbar right of the pane, roll/zoombar.py: measured down from the fastest tempo)
 
     def bar_view(self, across):
         if self.view is None:
             return None
-        floor, roof = math.log2(MIN_BPM), math.log2(MAX_BPM)
+        floor, roof = self.limits()
         return roof - self.view[1], roof - self.view[0], roof - floor
 
     def bar_move(self, across, a):
         lo, hi = self.view
-        roof = math.log2(MAX_BPM)
+        roof = self.limits()[1]
         self.set_view(roof - a - (hi - lo), roof - a)
         self.request_redraw()
 
     def bar_zoom(self, across, a, b, which):
-        roof = math.log2(MAX_BPM)
-        if b - a > 0.02:
+        roof = self.limits()[1]
+        if b - a > self.least_span():
             self.set_view(roof - b, roof - a)
             self.request_redraw()
 
@@ -368,7 +406,7 @@ class TempoPane(tk.Canvas):
         """The "+" / "-" buttons: zoom around the middle (f > 1 = in)."""
         lo, hi = self.view
         mid, half = (lo + hi) / 2, (hi - lo) / 2 / f
-        if half > 0.01:
+        if 2 * half > self.least_span():
             self.set_view(mid - half, mid + half)
             self.request_redraw()
 
@@ -377,11 +415,16 @@ class TempoPane(tk.Canvas):
         tempo, base = self.app.tempo, self.base()
         vals = [base] + [p[1] for p in tempo["points"]]
         vals += [pl["bpm"] for _, pl in plans(tempo, base, self.app.ppq) if pl["ok"]]
-        lo, hi = math.log2(min(vals)), math.log2(max(vals))
-        if hi - lo < 2:  # (at least two doublings shown: a flat line in the middle)
-            mid = (hi + lo) / 2
-            lo, hi = mid - 1, mid + 1
-        self.set_view(lo - 0.35, hi + 0.35)
+        if self.log:
+            lo, hi = math.log2(min(vals)), math.log2(max(vals))
+            if hi - lo < 2:  # (at least two doublings shown: a flat line in the middle)
+                mid = (hi + lo) / 2
+                lo, hi = mid - 1, mid + 1
+            self.set_view(lo - 0.35, hi + 0.35)
+        else:
+            lo, hi = min(vals), max(vals)
+            pad = max((hi - lo) * 0.15, hi * 0.1, 1.0)
+            self.set_view(max(0.0, lo - pad), hi + pad)
         if redraw:
             self.request_redraw()
 
@@ -464,6 +507,7 @@ class TempoPane(tk.Canvas):
         if roll.sx is None or self.view is None:
             return
         roll.focus_set()  # (Space / Ctrl+Z keep working)
+        self.app.key_pane = self  # (Delete: the points picked here)
         if e.x < roll.kb_w:  # the numbers: drag to scroll up / down
             self.drag = {"kind": "view", "y": e.y, "view": self.view}
             return
@@ -682,27 +726,66 @@ class TempoPane(tk.Canvas):
         self.close_typing(True)
         if roll.sx is None or self.view is None or e.x < roll.kb_w or self.drag:
             return
+        self.app.key_pane = self
+        self.picked()
         tempo = self.app.tempo
         i, j = self.point_at(e.x, e.y), self.catch_at(e.x)
         item = tempo["points"][i] if i is not None else tempo["catch"][j] if j is not None else None
-        if item is not None:  # (removed directly, like a path point or a sustain stop; picked = all picked ones)
-            gone = self.sel if self.is_sel(item) and len(self.sel) > 1 else [item]
-            if len(gone) > 1:
-                name = "tempo.step_delete_many"
-            else:
-                name = "tempo.step_delete" if self.is_point(item) else "tempo.step_catch_delete"
-            self.app.push_undo(name=tr(name))
-            for key in ("points", "catch"):
-                tempo[key][:] = [it for it in tempo[key] if not any(it is g for g in gone)]
-            self.sel = [s for s in self.sel if not any(s is g for g in gone)]
-            return self.app.tempo_changed()
         b = self.snap_beat(roll.x2t(e.x), e)
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(label=tr("tempo.add_catch"), command=lambda: self.add_catch(b))
+        if item is not None:  # (user: right-click doesn't delete; Delete picked ones, or this menu)
+            gone = self.sel if self.is_sel(item) else [item]
+            menu.add_separator()
+            menu.add_command(label=tr("tempo.delete"), command=lambda: self.delete_items(gone))
         try:
             menu.tk_popup(e.x_root, e.y_root)
         finally:
             menu.grab_release()
+
+    def delete_items(self, gone):
+        """These points / catch-up lines go (one undo step)."""
+        tempo = self.app.tempo
+        gone = [g for g in gone if any(g is it for it in tempo["points"] + tempo["catch"])]
+        if not gone:
+            return
+        if len(gone) > 1:
+            name = "tempo.step_delete_many"
+        else:
+            name = "tempo.step_delete" if self.is_point(gone[0]) else "tempo.step_catch_delete"
+        self.app.push_undo(name=tr(name))
+        for key in ("points", "catch"):
+            tempo[key][:] = [it for it in tempo[key] if not any(it is g for g in gone)]
+        self.sel = [s for s in self.sel if not any(s is g for g in gone)]
+        self.app.tempo_changed()
+
+    def delete_picked(self):
+        """The Delete key while this pane was clicked last: the picked points / catch-up lines go. True when it
+        took the key (anything picked here; the Select box stays, empty, like the piano roll's)."""
+        self.picked()
+        if not self.sel or self.drag:
+            return False
+        self.delete_items(list(self.sel))
+        return True
+
+    def pick_state(self):
+        """What's picked, for an undo step (JSON): the Select box, the picked points / lines and part by place."""
+        tempo, part = self.app.tempo, self.picked()
+        return json.dumps({"band": list(self.band) if self.band else None, "points": self.sel_idx("points"),
+                           "catch": self.sel_idx("catch"), "part": part[1] if part and part[0] == "part" else None})
+
+    def restore_pick(self, text):
+        """An undo step's pick_state back (on the tempo line it brought back)."""
+        try:
+            got = json.loads(text)
+            tempo = self.app.tempo
+            self.band = tuple(got["band"]) if got.get("band") else None
+            self.sel = [tempo[key][i] for key in ("points", "catch") for i in got.get(key, ())
+                        if 0 <= i < len(tempo[key])]
+            part = got.get("part")
+            self.part = tempo["points"][part] if part is not None and 0 <= part < len(tempo["points"]) - 1 else None
+        except (ValueError, TypeError, KeyError, AttributeError):
+            self.band, self.sel, self.part = None, [], None
 
     def on_motion(self, e):
         self.show_position(e)
@@ -759,9 +842,9 @@ class TempoPane(tk.Canvas):
                 step = (hi - lo) * 0.1 * (1 if up else -1)
                 self.set_view(lo + step, hi + step)
             else:
-                at = math.log2(self.y2b(e.y))
+                at = self.y2u(e.y)
                 f = 0.8 if up else 1.25
-                if hi - lo > 0.02 or not up:
+                if hi - lo > self.least_span() or not up:
                     self.set_view(at - (at - lo) * f, at + (hi - at) * f)
             return self.request_redraw()
         if e.state & CTRL:
@@ -833,35 +916,41 @@ class TempoPane(tk.Canvas):
             self.after_idle(self.redraw)
 
     def labels(self):
-        """[(bpm, strong)] numbers for the left side: doublings of 15 first, then rounder numbers as they fit."""
+        """[(bpm, strong)] numbers for the left side: the project's BPM, the file's limits, (exponential: doublings
+        of 15), then rounder numbers as they fit."""
         lo, hi = self.view
         top, bot = self.area()
-        per = (bot - top) / max(1e-9, hi - lo)  # px per doubling
+        per = (bot - top) / max(1e-9, hi - lo)  # px per BPM / per doubling
         gap = LABEL_GAP * self.scale
         placed = []
 
+        def a(v):
+            return float(self.ax(v))
+
         def room(v):
-            y = math.log2(v) * per
-            return all(abs(y - math.log2(p) * per) >= gap for p, _ in placed)
+            return all(abs(a(v) - a(p)) * per >= gap for p, _ in placed)
 
         base = self.base()
-        if lo <= math.log2(base) <= hi:
+        if lo <= a(base) <= hi:
             placed.append((base, True))
+        if not self.log and lo <= 0 and room(0):  # (linear: 0 BPM at the bottom, like the velocity pane)
+            placed.append((0, False))
         for v in (MIN_BPM, MAX_BPM):  # (where the faint red lines are)
-            if lo - 1e-9 <= math.log2(v) <= hi + 1e-9 and room(v):
+            if lo - 1e-9 <= a(v) <= hi + 1e-9 and room(v):
                 placed.append((v, False))
-        for n in range(math.floor(lo - math.log2(15)), math.ceil(hi - math.log2(15)) + 1):
-            v = 15 * 2.0 ** n
-            if lo <= math.log2(v) <= hi and MIN_BPM <= v <= MAX_BPM and room(v):
-                placed.append((v, False))
-        lo_v, hi_v = 2 ** lo, 2 ** hi
+        if self.log:
+            for n in range(math.floor(lo - math.log2(15)), math.ceil(hi - math.log2(15)) + 1):
+                v = 15 * 2.0 ** n
+                if lo <= a(v) <= hi and MIN_BPM <= v <= MAX_BPM and room(v):
+                    placed.append((v, False))
+        lo_v, hi_v = self.unax(lo), self.unax(hi)
         for step in reversed(NICE):
             if step > hi_v:
                 continue
-            k0, k1 = math.ceil(lo_v / step), math.floor(hi_v / step)
+            k0, k1 = math.ceil(lo_v / step - 1e-9), math.floor(hi_v / step + 1e-9)
             if k1 - k0 > 400:
                 break
-            for k in range(max(1, k0), k1 + 1):
+            for k in range(max(1 if self.log else 0, k0), k1 + 1):
                 v = k * step
                 if room(v):
                     placed.append((v, False))
@@ -875,6 +964,13 @@ class TempoPane(tk.Canvas):
         beats = [roll.x2t(x) for x in xs]
         jumps = {p[0] for p in tempo["points"]} | {st["line"] for st, _ in worked}
         jumps |= {st["end"] for st, _ in worked if st["end"] is not None}
+        ppq, every = self.app.ppq, tempo.get("every", EVERY)
+        if every > 1 and every / ppq * roll.sx >= 3:  # (the interval's steps, upright too, while wide enough to see)
+            t0, t1 = roll.x2t(kb) * ppq, roll.x2t(w + 2) * ppq
+            for a, b in step_edges(tempo, worked, ppq):
+                k0 = max(1, math.ceil((t0 - a) / every))
+                for t in range(a + k0 * every, min(b, int(t1) + 1), every):
+                    jumps.add(t / ppq)
         for b in jumps:
             x = round(roll.t2x(b))
             if kb <= x <= w + 2:
@@ -882,7 +978,7 @@ class TempoPane(tk.Canvas):
                 beats += [b - 1e-9 * max(1.0, b), b]
         order = sorted(range(len(xs)), key=lambda k: (xs[k], beats[k]))
         xs, beats = np.array(xs)[order], np.array(beats)[order]
-        vals = shown_bpm(tempo, self.base(), beats, worked)
+        vals = shown_bpm(tempo, self.base(), beats, worked, ppq)
         return xs, beats, np.clip(self.b2y(vals), -50, self.winfo_height() + 50)
 
     def redraw(self):
@@ -922,6 +1018,10 @@ class TempoPane(tk.Canvas):
             if 0 <= y <= h:
                 self.create_rectangle(kb, y, w, past, fill=look.TEMPO_BAD_BG, outline="")
                 self.create_line(kb, y, w, y, fill=look.TEMPO_LIMIT, width=lw)
+        if not self.log:  # (0 BPM: the bottom, like the velocity pane's 0)
+            y = round(float(self.b2y(0)))
+            if 0 <= y <= h:
+                self.create_line(kb, y, w, y, fill=look.CHART_GRID_STRONG)
         y = float(self.b2y(base))
         self.create_line(kb, y, w, y, fill=look.TEMPO_BASE, dash=(4, 3), width=lw)
         # the line itself

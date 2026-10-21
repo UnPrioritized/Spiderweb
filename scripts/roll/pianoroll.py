@@ -999,6 +999,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def on_press(self, e):
         self.app.commit_typing()  # (a number typed in a panel box goes to the shapes picked now, before this click)
         self.focus_set()
+        self.app.key_pane = None  # (Delete is the piano roll's again)
         self.drop_menu_wait()
         kept = self.press_reset()
         if self.follow and self.sx is not None:  # a shape started with a click: this click finishes it
@@ -1974,6 +1975,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 self.finish_poly()
         elif k == "delete":
             sh = self.app.selected()
+            pane = getattr(self.app, "key_pane", None)
+            if pane is not None and not self.drag and pane.delete_picked():  # (the Tempo pane clicked last)
+                return
             if self.drag:
                 self.delete_dragged()
             elif self.funnel_parts():

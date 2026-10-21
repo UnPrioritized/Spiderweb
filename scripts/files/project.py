@@ -460,6 +460,7 @@ class ProjectFiles:
                               "velocity_height": self.velocity_height() / self.scale,
                               "tempo": self.show_tempo.get(), "tempo_height": self.tempo_height() / self.scale,
                               "tempo_view": list(self.tempo_pane.view) if self.tempo_pane.view else None,
+                              "tempo_log": self.tempo_pane.log,
                               "midi_device": self.midi_device.get(), "play_voices": self.play_voices,
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
                               "domino_256": self.domino256.get(), "keep_colours": self.keep_colours.get(),
@@ -571,10 +572,13 @@ class ProjectFiles:
         def tempo_height():
             if "tempo_height" in win:
                 self._tempo_height = max(int(60 * self.scale), int(float(win["tempo_height"]) * self.scale))
+            pane = self.tempo_pane
+            pane.log = win.get("tempo_log") is True  # (linear unless exponential was picked)
+            pane.box.graph.current(1 if pane.log else 0)
             view = win.get("tempo_view")
             if (isinstance(view, list) and len(view) == 2 and all(isinstance(v, (int, float)) for v in view)
-                    and all(math.isfinite(v) for v in view) and -2 < view[0] < view[1] < 30):
-                self.tempo_pane.view = (float(view[0]), float(view[1]))
+                    and all(math.isfinite(v) for v in view) and view[0] < view[1]):
+                pane.set_view(float(view[0]), float(view[1]))
         kept(tempo_height)
 
         def ticks():

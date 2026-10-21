@@ -312,11 +312,14 @@ class HistoryPanel:
     def sel_state(self):
         """The selection as an undo step keeps it: (selected shape numbers, the main one, the kept Select boxes or
         None, the Hz bass window's HzWindow.sel_state() or None, the picked stroke, the funnel's highlighted parts,
-        the one of them clicked, the picked Ripples source, the Tempo pane's line as JSON). The tempo line rides
-        here so every step carries it (it isn't a shape): undo / redo put it back with the shapes."""
+        the one of them clicked, the picked Ripples source, the Tempo pane's line as JSON, what the Tempo pane picked
+        as JSON). The tempo line rides here so every step carries it (it isn't a shape): undo / redo put it back with
+        the shapes."""
         boxes = self.roll.kept_box()
+        pane = getattr(self, "tempo_pane", None)
         return (sorted(self.sels), self.sel, boxes and list(boxes), self.hz_window and self.hz_window.sel_state(),
-                self.stroke, list(self.parts), self.part_main, self.ripple_pick, json.dumps(self.tempo))
+                self.stroke, list(self.parts), self.part_main, self.ripple_pick, json.dumps(self.tempo),
+                pane.pick_state() if pane else "{}")
 
     def step_tempo(self, step):
         """The tempo line (JSON) an undo step kept; the one now for a step made without it."""
@@ -455,6 +458,8 @@ class HistoryPanel:
                 self.ripple_pick = picked[7]
         if len(picked) > 8 and isinstance(picked[8], str):
             self.tempo = clean_tempo(json.loads(picked[8]))
+            if len(picked) > 9 and isinstance(picked[9], str) and picked[9].startswith("{"):
+                self.tempo_pane.restore_pick(picked[9])  # (its Select box and what was picked, user)
             self.tempo_changed()
         self._edit_key = self._scrub = None
         self.sync_panel()

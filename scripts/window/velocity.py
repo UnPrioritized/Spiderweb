@@ -199,6 +199,7 @@ class VelocityPane(tk.Canvas):
         self.app.vel_formula_bar.take_typing()  # (a Formula number typed without Enter: for the line drawn last)
         roll.cancel_draft()
         roll.focus_set()  # so Space / Ctrl+C etc. keep working
+        self.app.key_pane = None  # (Delete is the piano roll's again)
         if self.app.vel_tool.get() == "select":  # (user: the box over every key, moved in time like the ruler's)
             self.curve, self.band_drag = None, True
             roll.pane_press(e.x, e.state)

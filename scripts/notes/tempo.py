@@ -347,14 +347,42 @@ def plans(tempo, base, ppq):
     return _plans[key]
 
 
-def shown_bpm(tempo, base, beats, worked):
-    """What the pane draws: the drawn line with each working catch-up (worked = plans()) in its place."""
+def step_edges(tempo, worked, ppq):
+    """[(first tick, end tick)] of every curved stretch: curved parts and curved catch-ups, which change every
+    "every" ticks from their first tick (as the file has them)."""
+    pts = tempo["points"]
+    first = _first_ticks([p[0] for p in pts], ppq)
+    out = [(first[i], first[i + 1]) for i in range(len(pts) - 1)
+           if pts[i][2] != "hold" and pts[i][1] != pts[i + 1][1] and first[i + 1] > first[i]]
+    return out + [(int(round(st["line"] * ppq)), int(round(st["end"] * ppq))) for st, plan in worked
+                  if plan["ok"] and st["shape"] != "flat"]
+
+
+def stepped(tempo, beats, ppq, edges):
+    """beats moved back to the start of their interval step inside the curved stretches (step_edges): the value
+    the file has there."""
     beats = np.asarray(beats, float)
-    out = drawn_bpm(tempo, base, beats)
+    every = tempo.get("every", EVERY)
+    if every <= 1:
+        return beats
+    out = beats.copy()
+    tick = np.floor(beats * ppq + 1e-9)
+    for a, b in edges:
+        on = (tick >= a) & (tick < b)
+        out[on] = (a + (tick[on] - a) // every * every) / ppq
+    return out
+
+
+def shown_bpm(tempo, base, beats, worked, ppq=None):
+    """What the pane draws: the drawn line with each working catch-up (worked = plans()) in its place; with ppq,
+    curved stretches in the interval's steps (user: as jagged as the file)."""
+    beats = np.asarray(beats, float)
+    at = stepped(tempo, beats, ppq, step_edges(tempo, worked, ppq)) if ppq else beats
+    out = drawn_bpm(tempo, base, at)
     for st, plan in worked:
         if plan["ok"]:
             on = (beats >= st["line"]) & (beats < st["end"])
-            out[on] = catch_bpm(base, st, plan, beats[on])
+            out[on] = catch_bpm(base, st, plan, at[on] + (0.5 / ppq if ppq else 0))
     return out
 
 
