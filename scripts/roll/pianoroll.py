@@ -958,14 +958,49 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
     # ------------------------------------------------------------ mouse
 
-    def on_press(self, e):
-        self.app.commit_typing()  # (a number typed in a panel box goes to the shapes picked now, before this click)
-        self.focus_set()
-        self.drop_menu_wait()
+    def press_reset(self):
+        """A press starts afresh: the kept Select boxes (returned) and what the last drag left behind."""
         kept, self.box_kept, self.box_moving, self.dup = self.kept_box(), None, None, None
         self.grabbed = self.cycle = self.cycled = self.area_pick = None
         self.box_in = self.box_ruler = self.box_resume = self.time_only = self.box_drop = False
         self.room = self.limit = self.grid_later = None
+        return kept
+
+    def band_press(self, e, kept):
+        """The ruler's black band pressed: what its boxes selected moves along in time (like many MIDI programs)."""
+        app = self.app
+        self.box_in, self.time_only = True, True
+        self.box_moving = boxes_upright(kept)[0]
+        self.box_kept = (self.box_moving, set(app.sels))
+        if e.state & CTRL and app.sels:  # (Ctrl: a copy of them moves, like Ctrl+drag in a Select box)
+            app.push_undo(name=tr("app.duplicate"))
+            self.dup = {"click": None}
+        else:
+            app.push_undo(name=tr("pianoroll.move"))
+        self.drag = ("move", self.event_pt(e), {j: copy.deepcopy(app.shapes[j]["pts"]) for j in app.sels}, None,
+                     False, False)
+
+    def pane_press(self, x, state):
+        """A Select press in the velocity pane (user 2026-10-21): as on the ruler (its black band = moves what it
+        selected in time; a drag elsewhere = a band over every key; a click elsewhere drops the band and what it
+        selected), but the play line stays put. The pane hands its moves and let-go on with y = 0."""
+        if self.sx is None or self.draft:
+            return
+        self.app.commit_typing()
+        self.drop_menu_wait()
+        kept = self.press_reset()
+        e = SimpleNamespace(x=x, y=0, state=state)
+        self.press_beat = self.event_pt(e, snap=False)[0]
+        if self.ruler_band(e, kept):
+            self.band_press(e, kept)
+        else:
+            self.drag = ("seek", False, x, state, kept)
+
+    def on_press(self, e):
+        self.app.commit_typing()  # (a number typed in a panel box goes to the shapes picked now, before this click)
+        self.focus_set()
+        self.drop_menu_wait()
+        kept = self.press_reset()
         if self.follow and self.sx is not None:  # a shape started with a click: this click finishes it
             if kept and self.follow[0] != "hzkeys":  # (the Select boxes stay, as when dragged: add_drawn)
                 self.box_kept = (kept, set(self.app.sels))
@@ -980,17 +1015,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if app.tool.get() == "select":  # Select is the tool at the start, so its tip comes on first use
             app.tips.show("select", wait=True)
         if e.y < self.ruler_h and not self.draft and self.ruler_band(e, kept):
-            # the ruler's black band: what its boxes selected moves along in time (like many MIDI programs)
-            self.box_in, self.time_only = True, True
-            self.box_moving = boxes_upright(kept)[0]
-            self.box_kept = (self.box_moving, set(app.sels))
-            if e.state & CTRL and app.sels:  # (Ctrl: a copy of them moves, like Ctrl+drag in a Select box)
-                app.push_undo(name=tr("app.duplicate"))
-                self.dup = {"click": None}
-            else:
-                app.push_undo(name=tr("pianoroll.move"))
-            self.drag = ("move", self.event_pt(e), {j: copy.deepcopy(app.shapes[j]["pts"]) for j in app.sels}, None,
-                         False, False)
+            self.band_press(e, kept)
             return
         if e.y < self.ruler_h:  # the bar numbers: move the play line (dragged sideways: a Select box, ruler_box)
             playing = app.player.running

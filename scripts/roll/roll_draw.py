@@ -809,6 +809,9 @@ class RollDrawing:
         draw_boxes(self, [self.box_rect(b) for b in boxes if b not in whole], self.kb_w, self.ruler_h, self.scale,
                    tags="selbox")
         self.draw_ruler_pick(boxes)
+        vel = getattr(self.app, "vel", None)
+        if vel and (whole or vel.find_withtag("band")):  # (the velocity pane shows the bands too)
+            vel.request_redraw()
 
     def draw_slice(self):
         """The Slice tool's line while it's dragged: dashed, a dot at each end."""

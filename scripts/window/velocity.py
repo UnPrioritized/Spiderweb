@@ -15,8 +15,9 @@ from notes.envelope import env_at, env_values, paint_env, tidy_env, velocity_env
 from notes.fx import with_velocity
 from notes.pattern import loop_points
 from notes.ripples import free_span, grows_free
-from roll.roll_shared import (CTRL, DRAFT_COLOR, SHIFT, SELECTED_COLOR, SLOT_COLORS, cached_path, fade,
-                              grab_while_panning, slot_colours)
+from roll.roll_shared import (CTRL, DRAFT_COLOR, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, SELECTED_COLOR, SLOT_COLORS,
+                              cached_path, draw_boxes, fade, grab_while_panning, ruler_boxes, set_cursor,
+                              slot_colours)
 from window import look
 
 LEVELS = (127, 96, 64, 32, 0)
@@ -116,7 +117,9 @@ def curve_mid(a, b, c):
 
 class VelocityPane(tk.Canvas):
     def __init__(self, parent, app, scale):
-        super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
+        super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0)
+        set_cursor(self, PENCIL_CURSOR)
+        self.band_drag = False  # the Select tool's press went to the piano roll's ruler band (pane_press)
         self.app = app
         self.scale = scale
         self.top = int(7 * scale)  # gap above velocity 127
@@ -196,6 +199,11 @@ class VelocityPane(tk.Canvas):
         self.app.vel_formula_bar.take_typing()  # (a Formula number typed without Enter: for the line drawn last)
         roll.cancel_draft()
         roll.focus_set()  # so Space / Ctrl+C etc. keep working
+        if self.app.vel_tool.get() == "select":  # (user: the box over every key, moved in time like the ruler's)
+            self.curve, self.band_drag = None, True
+            roll.pane_press(e.x, e.state)
+            self.request_redraw()
+            return
         self.mouse = (e.x, e.y, e.state)
         pt = self.event_pt(e)
         cv = self.live_curve()
@@ -220,6 +228,10 @@ class VelocityPane(tk.Canvas):
         if e.state & 0x200 and self._pan:  # (the middle button too: Tk sends both-button moves here) pans
             self.mouse = (e.x, e.y, e.state & ~0x200)
             return self.pan_to(e)
+        if self.band_drag:
+            self.app.roll.on_drag(SimpleNamespace(x=e.x, y=0, state=e.state))
+            self.request_redraw()
+            return
         self.on_motion(e)
         ed = self.edit
         if not ed:
@@ -306,6 +318,20 @@ class VelocityPane(tk.Canvas):
         self.request_redraw()
 
     def on_release(self, e):
+        if self.band_drag:
+            self.band_drag = False
+            roll = self.app.roll
+            d = roll.drag
+            if d and d[0] == "move" and roll.time_only and not d[4]:  # (inside the box, not moved: the play line
+                roll.drag = None                                      # stays, unlike a click on the ruler's band)
+                if roll.box_timer:
+                    roll.after_cancel(roll.box_timer)
+                    roll.box_timer = None
+                self.app.settle_history()
+            else:
+                roll.on_release(SimpleNamespace(x=e.x, y=0, state=e.state))
+            self.request_redraw()
+            return
         ed, self.edit = self.edit, None
         if not ed or not ed["drawn"]:
             self.request_redraw()
@@ -401,7 +427,7 @@ class VelocityPane(tk.Canvas):
         if not self.edit:
             return
         self.edit = None
-        self.config(cursor="crosshair")
+        set_cursor(self, PENCIL_CURSOR)
         self.request_redraw()
 
     def follow_mouse(self):
@@ -426,10 +452,16 @@ class VelocityPane(tk.Canvas):
         if roll.sx is not None and e.x >= roll.kb_w:
             text = roll.time_text(e.x) + tr("velocity.velocity", y2v=round(self.y2v(e.y)))
         self.app.show_position(text)
-        cv = None if self.edit else self.live_curve()
-        want = "fleur" if cv and self.near_handle(cv, e) else "crosshair"
-        if self["cursor"] != want and not (self.edit and "handle" in self.edit):
-            self.config(cursor=want)
+        if self.band_drag:
+            return
+        if self.app.vel_tool.get() == "select":
+            want = "sb_h_double_arrow" if roll.sx is not None and roll.ruler_band(
+                SimpleNamespace(x=e.x, y=0), roll.kept_box()) else SELECT_CURSOR  # (on the box: moves in time)
+        else:
+            cv = None if self.edit else self.live_curve()
+            want = "fleur" if cv and self.near_handle(cv, e) else PENCIL_CURSOR
+        if not (self.edit and "handle" in self.edit):
+            set_cursor(self, want)
 
     def on_right(self, e):
         self.edit = None
@@ -505,7 +537,19 @@ class VelocityPane(tk.Canvas):
         cv = None if ed else self.live_curve()
         if cv:
             self.draw_curve_line(cv["a"], cv["b"], cv["c"], lw, kind=cv["kind"])
+        self.draw_bands(h, kb)
         self.draw_playhead()
+
+    def draw_bands(self, h, kb):
+        """The piano roll's boxes over every key (made here or along its ruler): the pane's whole height."""
+        roll = self.app.roll
+        if roll.drag and roll.drag[0] == "box" and roll.box_ruler:
+            boxes = roll.box_more + [b for b in (roll.box_area(),) if b]
+        else:
+            boxes = roll.kept_box() or []
+        rects = [(roll.t2x(a[0]), 1, roll.t2x(a[2]), h - 2) for a in ruler_boxes(boxes)]
+        if rects:
+            draw_boxes(self, rects, kb, 0, self.scale, tags="band")
 
     def draw_playhead(self):
         self.delete("playhead")

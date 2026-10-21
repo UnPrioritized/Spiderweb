@@ -98,6 +98,19 @@ SHIFT, CTRL = 0x1, 0x4
 # the Select tool's mouse pointer: a cross (its middle = the spot pointed at) with a small dotted box
 SELECT_CURSOR = "{@" + os.path.join(ICONS, "select.cur").replace("\\", "/") + "}"
 GRAB_CURSOR = "{@" + os.path.join(ICONS, "grab.cur").replace("\\", "/") + "}"  # a closed hand
+PENCIL_CURSOR = "{@" + os.path.join(ICONS, "pencil.cur").replace("\\", "/") + "}"  # its tip = the spot pointed at
+
+
+def set_cursor(widget, name):
+    """widget's mouse pointer (kept in widget._cursor, set only when it changes); one of our own files that can't be
+    read (Linux) = a built-in one instead."""
+    if getattr(widget, "_cursor", None) == name:
+        return
+    widget._cursor = name
+    try:
+        widget.config(cursor=name)
+    except Exception:  # (tk.TclError: the pointer's file can't be read)
+        widget.config(cursor={SELECT_CURSOR: "arrow", PENCIL_CURSOR: "pencil"}.get(name, "arrow"))
 PIANO_88 = range(21, 109)  # A0 to C8, the keys of a real piano
 BOX_STILL = 4  # a Select box moved less than this many pixels from where it started is still a click
 BOX_SCROLL_MS = 100  # a Select box dragged past the edge scrolls the view a beat (3 keys up / down) this often

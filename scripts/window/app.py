@@ -546,6 +546,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         vbar = ttk.Frame(self.vel_box, padding=(2, 2))
         vbar.pack(fill="x")
         ttk.Label(vbar, text=tr("app.velocity")).pack(side="left", padx=(2, 8))
+        b = ttk.Radiobutton(vbar, text=tr("app.select"), value="select", variable=self.vel_tool, style="Toolbutton")
+        b.pack(side="left", padx=1)
+        Tooltip(b, tr("velocity.select_tip"))
+        ttk.Separator(vbar, orient="vertical").pack(side="left", fill="y", padx=5)
         for key, label in (("line", tr("app.linear")), ("curve", tr("app.curve")), ("pencil", tr("app.pencil")),
                            ("formula", tr("app.formula"))):
             b = ttk.Radiobutton(vbar, text=label, value=key, variable=self.vel_tool, style="Toolbutton")
@@ -565,6 +569,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.tempo_pane = self.tempo_box.pane
 
     def show_vel_formula(self):
+        self.vel_hint.config(text=tr("velocity.select_hint" if self.vel_tool.get() == "select"
+                                     else "app.ctrl_flat_shift_snap_enter_done"))
         if self.vel_tool.get() == "formula":
             self.vel_formula_bar.fill_list()
             self.vel_formula_bar.pack(side="left", before=self.vel_hint)
