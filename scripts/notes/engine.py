@@ -121,6 +121,7 @@ def clean_basics(sh):
 FAR = 1e12  # no number in a shape is ever this big (a beat that far is long past what a MIDI file can reach)
 BEATS_FAR = 1e7  # a shape reaching past this beat (months of music) or key is a changed file: its notes alone could
 KEYS_FAR = 1e4  # take all the memory there is (keys are 0-255; hz_settings.LONGEST for Hz tones)
+ALL_KEYS = 256  # keys a note can be on (0-255): a whole channel taken, split by key (assign_slots extra)
 
 
 def sane(x):
@@ -1149,16 +1150,22 @@ def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shap
     10 used) until nothing clashes: the same colours on the next row of channels (user 2026-10-18). A taken list of
     the same shape stays and its colour counts as used. loose: shapes whose slots are moved again after (Colours
     rounds on channels of their own): never moved, nor stepped round.
-    extra: {list number: (start, end) ticks} it also counts as sounding then (split="time" only: a Hz bass's CC
-    lines, sent before its first note and on after its sound, hz_cc.cc_spans).
+    extra: {list number: (start, end) ticks} it also counts as sounding then ON EVERY KEY, either split (a Hz bass's
+    CC lines change the whole channel: sent before its first note and on after its sound, hz_cc.cc_spans).
     """
     n = len(note_lists)
-    extra = {i: span for i, span in (extra or {}).items() if span[1] > span[0]} if split != "key" else {}
+    extra = {i: span for i, span in (extra or {}).items() if span[1] > span[0]}
+
+    def span_rows(span, owner):
+        """An extra span as stretches clashing with anything then: one on each key (split="time": all key 0)."""
+        keys = np.arange(ALL_KEYS, dtype=np.int64) if split == "key" else np.zeros(1, np.int64)
+        return np.column_stack([keys, np.full(len(keys), span[0]), np.full(len(keys), span[1]),
+                                np.full(len(keys), owner)]).astype(np.int64)
 
     def rows(i):
-        """List i's stretches (stretches), its extra one too."""
+        """List i's stretches (stretches), its extra ones too."""
         got = stretches(note_lists[i], i, split)
-        return np.concatenate([got, np.array([[0, *extra[i], i]], np.int64)]) if i in extra else got
+        return np.concatenate([got, span_rows(extra[i], i)]) if i in extra else got
 
     busy = range(n)
     group = list(range(n))
@@ -1172,7 +1179,7 @@ def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shap
         for i, notes in enumerate(note_lists):
             whole.setdefault(group[i], []).append(notes)
         joined = [stretches(np.concatenate(ls), g, split) for g, ls in whole.items()]
-        joined += [np.array([[0, *span, group[i]]], np.int64) for i, span in extra.items()]
+        joined += [span_rows(span, group[i]) for i, span in extra.items()]
         clashing = set(np.concatenate(clash_arrays(np.concatenate(joined))).tolist())
         busy = [i for i in range(n) if group[i] in clashing]
     parts = [rows(i) for i in busy]
@@ -1621,8 +1628,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     (assign_slots shape_of; an Add between group and a paste's pieces move as one shape).
     voice_slots: {shape's number: None} to be told, with "auto", which slot each of its tracks got: filled in as
     {track: slot} (a Hz bass with its own channel per note: each voice's CC lines go on its slot, hz_cc).
-    busy: per shape None, or {track (None: every track): (start, end) ticks}: with "auto" and split="time" its
-    tracks also count as sounding then (a Hz bass's CC lines: their whole time, run-on too, hz_cc.cc_spans).
+    busy: per shape None, or {track (None: every track): (start, end) ticks}: with "auto" its tracks also count as
+    sounding then on every key (a Hz bass's CC lines: their whole time, run-on too, hz_cc.cc_spans).
     """
     pastes = pastes or [None] * len(note_lists)
     tracks = tracks or [None] * len(note_lists)

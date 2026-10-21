@@ -24,7 +24,7 @@ A MIDI message changes everything on its channel, so other shapes on the same ch
 
 When you play in Spiderweb, a Hz bass with CC lines is played on a channel of its own, as long as one is free. Built-in BASSMIDI has up to 90 channels; other MIDI outs have only 16.
 
-A MIDI file you export and Export to Domino keep the channels as they are. To keep other shapes out of it, pick Multi channel with "Split: any notes at the same time", so shapes that sound at the same time get different channels. There, a Hz bass with CC lines counts as sounding for as long as its lines are sent, their run-on after the sound too (see below), so no other shape gets its channel until then. Some shapes' colours may change because of it.
+A MIDI file you export and Export to Domino keep the channels as they are. To keep other shapes out of it, pick Multi channel. There, a Hz bass with CC lines has its channel to itself for as long as its lines are sent, from just before its first note to the end of their run-on (see below), whichever Split is picked: no other shape gets that channel then, on any key. Before and after that, other shapes may use the channel again. Some shapes' colours may change because of it. Images and Apply mask copies keep their own channels, so they can still share it.
 
 The Hz bass window says so in orange when the CC lines change other shapes: "CC also changes 2 other shapes" (in the MIDI file), or "CC reaches other notes while playing" (a MIDI out with only 16 channels, or Built-in BASSMIDI with all 90 in use). Point at it to see which shapes, numbered by their place in the Shapes list.
 

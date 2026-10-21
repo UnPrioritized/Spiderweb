@@ -191,19 +191,19 @@ def sends_cc(sh):
     return sh.get("kind") is not None and has_cc(sh.get("hz") or {})
 
 
-def cc_busy(shapes, ppq, mode, split):
+def cc_busy(shapes, ppq, mode):
     """all_notes' busy: per shape None, or {track: (start, end)} the times its CC lines are sent (hz_cc.cc_spans at the
-    Hz bass's own BPM, as its notes): Multi channel split by time keeps its channel for them, so another shape
-    doesn't take it while its lines (run-on too) change it (user 2026-10-21). None otherwise."""
-    if mode != "auto" or split == "key" or not any(sends_cc(sh) for sh in shapes):
+    Hz bass's own BPM, as its notes): Multi channel keeps its channel for them, on every key, so no other shape
+    takes it while its lines (run-on too) change it (user 2026-10-21: either split). None otherwise."""
+    if mode != "auto" or not any(sends_cc(sh) for sh in shapes):
         return None
     return [cc_spans(sh, ppq, float(sh["hz"]["bpm"])) or None if sends_cc(sh) else None for sh in shapes]
 
 
-def cc_texts(shapes, mode, split):
+def cc_texts(shapes, mode):
     """What cc_busy comes from, for App.notes_key (cheap: the times are worked out in the background): Auto's run-on
     and each CC Hz bass's whole text (shape_key leaves its lines out), None when cc_busy gives None."""
-    if mode != "auto" or split == "key" or not any(sends_cc(sh) for sh in shapes):
+    if mode != "auto" or not any(sends_cc(sh) for sh in shapes):
         return None
     return (hz_cc.auto_ring, tuple(json.dumps(dict(sh, hz={k: v for k, v in sh["hz"].items() if k != "_memo"}),
                                               sort_keys=True, default=repr) if sends_cc(sh) else None
@@ -1319,7 +1319,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             made = all_notes(self.shapes, self.ppq, self.keys, self.channel_mode.get(), self.channel_split,
                              self.all16(), self.notes_tracks, rounds=self.rounds_apart(), order=self.in_order(),
                              keep=self.keep_colours.get(),
-                             busy=self.cc_busy(self.channel_mode.get(), self.channel_split))
+                             busy=self.cc_busy(self.channel_mode.get()))
             if self._notes_worked != worked:
                 self._notes_time = time.perf_counter() - started
         wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots = made
@@ -1380,11 +1380,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """Everything the notes are made from (shapes_changed): a background result is used only for exactly this."""
         mode, split = self.channel_mode.get(), SPLIT_CHOICES[max(self.split_box.current(), 0)][0]
         return (tuple(shape_key(sh) for sh in self.shapes), self.ppq, self.keys, mode, split, self.all16(),
-                self.rounds_apart(), self.in_order(), self.keep_colours.get(), cc_texts(self.shapes, mode, split))
+                self.rounds_apart(), self.in_order(), self.keep_colours.get(), cc_texts(self.shapes, mode))
 
-    def cc_busy(self, mode, split, shapes=None):
+    def cc_busy(self, mode, shapes=None):
         """all_notes' busy for these shapes (cc_busy)."""
-        return cc_busy(self.shapes if shapes is None else shapes, self.ppq, mode, split)
+        return cc_busy(self.shapes if shapes is None else shapes, self.ppq, mode)
 
     def _make_coming(self, show, follow=False):
         """follow: shown when made even if the shapes have moved on since (then the next spot's are made)."""
@@ -1424,7 +1424,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             started = time.perf_counter()
             try:
                 busy = None if key[9] is None else cc_busy(  # (worked out here: a long Arpeggio's took 0.2 s)
-                    [json.loads(t) if t else {} for t in key[9][1]], key[1], key[4], key[5])
+                    [json.loads(t) if t else {} for t in key[9][1]], key[1], key[4])
                 got = all_notes(shapes, *key[1:6], notes_tracks, rounds=key[6], order=key[7], keep=key[8],
                                 busy=busy)
                 # (the same time as shapes_changed's: making the notes only, not the orders below)
