@@ -24,7 +24,7 @@ from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (BEATS_FAR, CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
-                          render, shape_key)
+                          one_voice, render, shape_key)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
@@ -1186,7 +1186,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def notes_tracks(self, sh):
         """shape_notes_tracks, remembered. Each note tool page goes on top of the notes remembered without it
-        (trying a page's settings doesn't make the notes before it again)."""
+        (trying a page's settings doesn't make the notes before it again). Outside Multi channel a Hz bass's notes
+        are made as for one channel (Own channel per note needs Multi channel)."""
+        if self.channel_mode.get() != "auto":
+            sh = one_voice(sh)
         key = (shape_key(sh), self.ppq, self.keys)
         cache = self._notes_cache
         got = cache.pop(key, None)
@@ -1368,10 +1371,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                               "follow": follow}
         known = self._notes_cache  # (only read in the thread; its own new notes go to job["own"])
         sels, fast = frozenset(self.sels), speed.loops()
+        voiced = self.channel_mode.get() == "auto"
 
         def notes_tracks(sh):
             if job["stop"]:
                 raise Stopped
+            if not voiced:
+                sh = one_voice(sh)
             k = (shape_key(sh), key[1], key[2])
             got = known.get(k) or job["own"].get(k)
             if got is None:

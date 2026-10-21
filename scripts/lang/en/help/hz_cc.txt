@@ -30,7 +30,11 @@ The lines run on 3 seconds after the sound ends, then every value goes back to w
 
 With one channel (the start), every note of the Hz bass shares one set of lines: a line that plays once per note follows the newest note, and a chord's notes all hear the same values.
 
-Voice box → CC → Own channel per note gives each note its own channel and its own lines. A note joined to others by slides, Legato or Glide counts as one note. It needs Multi channel.
+Voice box → CC → Own channel per note gives each note its own channel and its own lines. A note joined to others by slides, Legato or Glide counts as one note. It needs Multi channel, and changes nothing while every CC line is switched off.
+
+With the Arpeggio on, each step plays on the channel of the note you hold, like a synth's arpeggiator: 3 notes held use 3 channels, and each step starts its lines again.
+
+A Hz bass with no notes placed plays across its shape as one note: its lines run over the whole shape.
 
 Past 15 channels, every track of the MIDI file gets a port (A, B, C…), up to 240 channels. In Domino, give ports B, C… a device in the MIDI-OUT settings, or those tracks stay silent.
 

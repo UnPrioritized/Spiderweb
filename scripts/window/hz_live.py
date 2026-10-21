@@ -27,7 +27,7 @@ from files.lang import tr
 from files.quicksound import Mixer, QuickSound
 from files.synth import RATE, Player, SynthError
 from notes.custom import BOX_STROKE, box_frame, custom_settings
-from notes.engine import shape_notes_tracks
+from notes.engine import one_voice, shape_notes_tracks
 from notes.hz_cc import note_cc
 from notes.hzbass import EXTRAS, MIN_LEN, WHEEL_KEYS, key_range, sound_span
 from window import look
@@ -272,7 +272,7 @@ class LiveKeys:
             new.pop(k, None)
         new["hz"] = dict(hz, tones=tones, **copy.deepcopy(win.fx_settings()))
         new["pts"] = box_frame(0.0, lo, max(MIN_LEN, sound_span(new["hz"])), hi)
-        return new
+        return new if app.channel_mode.get() == "auto" else one_voice(new)  # (as the piano roll makes it)
 
     def ask(self, gen, ppq):
         """The take's notes made (in the background; held ones up to self.made beats), put in from where the list

@@ -859,19 +859,24 @@ def without_cc(hz):
 
 
 def has_cc(hz):
-    """True when some layer of the Hz bass has a CC line (or the MOD tab moves the Filter box's knobs: live gives it
-    its Cutoff line)."""
-    for src in [hz] + [e for e in hz.get("layers") or () if isinstance(e, dict)]:
-        if any(n in CC_FX for n in src.get("fx") or ()) or any(
-                link.get("to") in FILTER_KNOBS for link in (src.get("mod") or {}).get("links") or ()):
+    """True when a heard layer of the Hz bass sends CC: a CC line not switched off (Bypass), or the MOD tab moving
+    the Filter box's knobs while the box is on (live gives it its Cutoff line). Lines switched off or only in muted
+    layers send nothing, so they count as none (Own channel per note then changes nothing)."""
+    for src in heard_layers(hz):
+        off = src.get("off") or ()
+        if any(n in CC_FX and n not in off for n in src.get("fx") or ()) or (
+                "filter" not in (src.get("bypass") or {}).get("boxes", ()) and any(
+                    link.get("to") in CC_TARGETS for link in (src.get("mod") or {}).get("links") or ())):
             return True
     return False
 
 
 def own_channels(hz):
     """True when the Hz bass plays each note on a channel of its own (the Voice box's "CC: Own channel per note",
-    hz["cc_own"], every layer's; hz_cc.voices): only while it has CC lines, else its notes are as without it."""
-    return isinstance(hz, dict) and hz.get("cc_own") is True and has_cc(hz)
+    hz["cc_own"], every layer's; hz_cc.voices): only while it sends CC and has notes placed (a Hz bass playing
+    across its shape is one voice), else its notes are as without it."""
+    return (isinstance(hz, dict) and hz.get("cc_own") is True and has_cc(hz)
+            and any(l.get("tones") for l in layers_of(hz)))
 
 
 def clean_off(off, fx):

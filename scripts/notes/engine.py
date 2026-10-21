@@ -23,7 +23,7 @@ from notes.envelope import env_values, velocity_env
 from notes.joined import clean_joined, is_joined, joined_paths
 from notes.hzbass import (HZ_KINDS, clean_hz, heard_layers, layers_of, left_edge, note_lengths, own_channels,
                           velocity_parts, with_layers, without_cc)
-from notes.hz_cc import voice_hz, voices
+from notes.hz_cc import cc_fall, voice_hz, voices
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
@@ -544,14 +544,26 @@ def shape_notes_tracks(sh, ppq, keys=128):
 
 def made_from(sh):
     """sh as its notes are made from: a Hz bass without its CC lines (hz_settings.without_cc: they make no notes,
-    they're MIDI messages, hz_cc.py). Own channel per note stays only while it has some (own_channels)."""
+    they're MIDI messages, hz_cc.py). Own channel per note stays only while it has some (own_channels), as
+    {"fall": how long its lines go on after a note} (hz_cc.voices: a voice is busy until its lines end, so the notes
+    and the CC messages take the same channels). The same again for what it gives back."""
     hz = sh.get("hz")
     if not isinstance(hz, dict):
         return sh
     got = without_cc(hz)
-    if hz.get("cc_own") and not own_channels(hz):
-        got = {k: v for k, v in got.items() if k != "cc_own"}
+    if hz.get("cc_own") is True:
+        got = dict(got, cc_own={"fall": cc_fall(hz)}) if own_channels(hz) else {
+            k: v for k, v in got.items() if k != "cc_own"}
     return sh if got is hz else dict(sh, hz=got)
+
+
+def one_voice(sh):
+    """sh with every note on the Hz bass's one channel (Own channel per note left out: outside Multi channel the CC
+    goes out as one channel, so the notes are made as for one)."""
+    hz = sh.get("hz")
+    if not isinstance(hz, dict) or not hz.get("cc_own"):
+        return sh
+    return dict(sh, hz={k: v for k, v in hz.items() if k != "cc_own"})
 
 
 BIG_TEXT = 100_000  # characters: a text this long (pasted / image notes, packed) is kept apart by shape_key
@@ -614,6 +626,7 @@ def fx_notes(sh, ppq, keys, get):
     """shape_notes_tracks' work: the notes, then its glue, then its note tool pages one after another (fx.py).
     get(shape) = another shape's notes and tracks (remembered by the caller: the steps before the last one, the
     notes flipped back). A hidden "_m" = the notes made flipped along those axes (the steps before a flip)."""
+    sh = made_from(sh)  # (a Hz bass's CC lines make no notes: never from them, whoever asks)
     if "subtract" in sh:  # (gates made shorter at the very end, after Sustain too: subtract.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "subtract"})
         return (subtracted(notes, sh["subtract"], ppq), tracks) if is_subtracted(sh) else (notes, tracks)
@@ -991,7 +1004,7 @@ def _kind_notes_tracks(sh, ppq, keys):
         got = piece_notes(sh, ppq, keys, shape_notes_tracks)  # (the whole's glue / pages done first)
         if got is not None:
             return got
-    if sh["kind"] in HZ_KINDS and (sh.get("hz") or {}).get("cc_own"):  # (made_from keeps it only with CC lines)
+    if sh["kind"] in HZ_KINDS and isinstance((sh.get("hz") or {}).get("cc_own"), dict):  # (made_from's, with CC)
         return voiced_notes(sh, ppq, keys)
     if sh["kind"] in HZ_KINDS and (sh.get("hz") or {}).get("layers"):
         return layered_notes(sh, ppq, keys)

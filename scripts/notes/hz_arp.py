@@ -25,7 +25,8 @@ def arpeggiated(tones, arp, left=0.0, hz=None):
     tones, one every 1 / speed beats while any note is held, through the held notes' pitches (with the chord's steps
     and octaves) in the pattern's order; a note pressed meanwhile joins the run at its next step, a note let go drops
     out (user 2026-10-09). Once nothing is held the run ends; the next note starts a new one. Each keeps its note's tune and gates;
-    slides made by hand are left out (the run's notes are new ones). The "steps" pattern: the box's own steps
+    slides made by hand are left out (the run's notes are new ones; "held_by" = the note held: Own channel per note
+    plays them on its channel, like an MPE synth). The "steps" pattern: the box's own steps
     (STEPS) pick the held notes, low to high, each with its octave, loudness ("level" on the tone) and length.
     hz = the Hz bass played (its tones = these), for the MOD tab moving Speed / Gate / Swing (arp_moved)."""
     moved = {link["to"] for link in ((hz or {}).get("mod") or {}).get("links", ()) if link["to"] in ARP_KNOBS}
@@ -93,7 +94,7 @@ def arpeggiated(tones, arp, left=0.0, hz=None):
                 (key, cents), n = pick
                 if 0 <= key <= 127:
                     tone = {"t": t, "len": max(MIN_LEN, min(slot * gate(k), n["t"] + n["len"] - t)), "key": key,
-                            "cents": cents, "id": len(out) + 1, "to": []}
+                            "cents": cents, "id": len(out) + 1, "to": [], "held_by": n["id"]}
                     tone.update({f: n[f] for f in ("auto", "gate") if f in n})
                     if n.get("vel"):  # (its part of the held note's loudness line)
                         tone["vel"] = vel_part(n, t, tone["len"])
@@ -122,7 +123,7 @@ def stepped(steps, k, t, held, arp, at, end, gate):
     tj, slot = at(j)
     tone = {"t": t, "len": max(MIN_LEN, min(tj - t + slot * steps[j % count]["length"] * gate(j),
                                             n["t"] + n["len"] - t)),
-            "key": key, "cents": cents, "to": []}
+            "key": key, "cents": cents, "to": [], "held_by": n["id"]}
     if s["level"] < 1.0:
         tone["level"] = s["level"]
     tone.update({f: n[f] for f in ("auto", "gate") if f in n})

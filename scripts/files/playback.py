@@ -12,7 +12,7 @@ import numpy as np
 
 from files.lang import tr
 from files.system import WINDOWS, wintypes
-from notes.engine import CHANNELS, slot_port
+from notes.engine import CHANNELS
 from notes.hz_settings import CC_NUMBER, CC_START
 
 MAPPER_NAME = "Windows default (MIDI Mapper)"
@@ -273,8 +273,8 @@ def cc_list(messages, use10, ports=0):
     out = []
     for slot, events in messages.items():
         ch = slot % 16 if use10 else CHANNELS[slot % len(CHANNELS)]
-        if ports:
-            ch |= slot_port(slot, use10) % ports << 24
+        if ports:  # (the port its notes are on: _Ons.batch)
+            ch |= slot // (16 if use10 else len(CHANNELS)) % ports << 24
         out += [(t, s | ch | a << 8 | b << 16) for t, s, a, b in events]
     out.sort(key=lambda e: e[0])
     return out
@@ -303,6 +303,18 @@ def _cc_kind(m):
         return ch, "bend"
     n = (m >> 8) & 0x7F
     return (ch, n) if n in dict(CC_RESET) else (ch, None)
+
+
+def cc_reset(kinds):
+    """The messages putting (channel, CC number / "bend") kinds (_cc_kind's) back to where players start them."""
+    out = []
+    for ch, kind in sorted(kinds, key=str):
+        if kind == "bend":
+            out.append(0xE0 | ch | 64 << 16)
+            out += [0xB0 | ch | n << 8 | v << 16 for n, v in RANGE_RESET]
+        elif kind is not None:
+            out.append(0xB0 | ch | kind << 8 | dict(CC_RESET)[kind] << 16)
+    return out
 
 
 class Player:
@@ -412,6 +424,17 @@ class Player:
                 (ons, ccs), self._swap = self._swap, None
                 batch, k, i = [], 0, ons.first_after(done)
                 j = next((n for n, (t, _) in enumerate(ccs) if t > done), len(ccs))
+                # (the CC lines changed: each channel's values where it is now, heard at once; channels the lines
+                # no longer use put back, so nothing is left on them for what plays there)
+                now = cc_before(ccs, done + 1)
+                kinds = {_cc_kind(m) for _, m in ccs}
+                kinds |= {(ch, None) for ch, kind in kinds if kind == "bend"}
+                for m in cc_reset({kind for kind in sent - kinds if kind[1] is not None}):
+                    send(m)
+                sent &= kinds
+                for m in now:
+                    send(m)
+                    sent.add(_cc_kind(m))
             if k == len(batch) and i < len(ons):
                 batch, k = ons.batch(i), 0
                 i += len(batch)
@@ -481,13 +504,8 @@ class Player:
             for ch in many:
                 self.out.send(0xB0 | ch | 123 << 8)
             # (a Hz bass's CC lines: every channel they sent a value on gets its start values back, user)
-            for ch, kind in sorted(self.cc_sent, key=str):
-                if kind == "bend":
-                    self.out.send(0xE0 | ch | 64 << 16)
-                    for n, v in RANGE_RESET:
-                        self.out.send(0xB0 | ch | n << 8 | v << 16)
-                elif kind is not None:
-                    self.out.send(0xB0 | ch | kind << 8 | dict(CC_RESET)[kind] << 16)
+            for m in cc_reset(self.cc_sent):
+                self.out.send(m)
             self.cc_sent = set()
             self.held = {}
             self._swap = self._wanted = None
