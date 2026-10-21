@@ -14,11 +14,13 @@ wheel works as on the piano roll.
 """
 
 import math
+import os
 import tkinter as tk
 from tkinter import ttk
 
 import numpy as np
 
+from files.about import ICONS
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.tempo import CURVES, FORMULA, MAX_BPM, MIN_BPM, SHAPES, clamp_bpm, curve, formula_fn, plans, shown_bpm
@@ -233,8 +235,15 @@ class TempoBox(ttk.Frame):
 
 class TempoPane(tk.Canvas):
     def __init__(self, box, app, scale):
-        super().__init__(box, bg=look.ROLL_BG, highlightthickness=0, cursor="pencil")
+        super().__init__(box, bg=look.ROLL_BG, highlightthickness=0)
         self.box, self.app, self.scale = box, app, scale
+        self._cursor = None
+        self.pencil = ("@" + os.path.join(ICONS, "pencil.cur").replace("\\", "/"),)  # (the Hz window's: tip = the spot)
+        try:
+            self.config(cursor=self.pencil)
+        except tk.TclError:  # (the file can't be read: the built-in one)
+            self.pencil = "pencil"
+            self.config(cursor=self.pencil)
         self.pad = int(8 * scale)  # room above the top number / below the bottom one
         self.view = None  # (lowest, highest) log2 BPM shown; None = fitted on first draw
         self.sel = []  # the picked points / catch-up lines (their own lists: they keep their place when sorted)
@@ -284,7 +293,8 @@ class TempoPane(tk.Canvas):
     def fit_view(self, redraw=True):
         """Up / down zoom to show the whole tempo line (catch-ups too) with a little room."""
         tempo, base = self.app.tempo, self.base()
-        vals = [base] + [p[1] for p in tempo["points"]] + [pl["bpm"] for _, pl in plans(tempo, base) if pl["ok"]]
+        vals = [base] + [p[1] for p in tempo["points"]]
+        vals += [pl["bpm"] for _, pl in plans(tempo, base, self.app.ppq) if pl["ok"]]
         lo, hi = math.log2(min(vals)), math.log2(max(vals))
         if hi - lo < 2:  # (at least two doublings shown: a flat line in the middle)
             mid = (hi + lo) / 2
@@ -588,8 +598,9 @@ class TempoPane(tk.Canvas):
         elif self.catch_at(e.x) is not None:
             want = "sb_h_double_arrow"
         else:
-            want = "arrow" if self.box.tool.get() == "select" else "pencil"
-        if self["cursor"] != want and not self.drag:
+            want = "arrow" if self.box.tool.get() == "select" else self.pencil
+        if self._cursor != want and not self.drag:
+            self._cursor = want
             self.config(cursor=want)
 
     def show_position(self, e):
@@ -682,11 +693,11 @@ class TempoPane(tk.Canvas):
     def catch_result(self, j):
         """(text, can't) for catch-up line j: its BPM, or why it can't work."""
         tempo, base = self.app.tempo, self.base()
-        st, plan = plans(tempo, base)[j]
+        st, plan = plans(tempo, base, self.app.ppq)[j]
         if plan["empty"]:
             return tr("tempo.catch_empty"), True
         if not plan["ok"]:
-            if plan["latest"] is not None:
+            if plan["latest"] is not None and plan["latest"] < st["line"]:
                 return tr("tempo.catch_bad", where=self.app.bar_text(plan["latest"])), True
             return tr("tempo.catch_cant"), True
         key = "tempo.catch_bpm" if st["shape"] == "flat" else (
@@ -765,7 +776,7 @@ class TempoPane(tk.Canvas):
         tempo, base = app.tempo, self.base()
         top, bot = self.area()
         lw = max(1, round(self.scale))
-        worked = plans(tempo, base)
+        worked = plans(tempo, base, self.app.ppq)
         # stretches: the held part (amber) and its catch-up (teal; red when it can't work)
         for st, plan in worked:
             x1 = roll.t2x(st["line"])
@@ -796,12 +807,16 @@ class TempoPane(tk.Canvas):
                                  width=lw + 3)
         # catch-up lines and their words
         for j, (st, plan) in enumerate(worked):
-            x = roll.t2x(st["line"])
-            if x < kb - 5 or x > w + 5:
-                continue
             ok = plan["ok"]
             col = look.TEMPO_CATCH if ok else look.ERROR
             picked = self.is_sel(tempo["catch"][j])
+            if plan["latest"] is not None and (picked or not ok):  # (how far the line can go: dashed)
+                xl = roll.t2x(plan["latest"])
+                if kb <= xl <= w:
+                    self.create_line(xl, 0, xl, h, fill=look.ERROR, dash=(4, 3), width=lw)
+            x = roll.t2x(st["line"])
+            if x < kb - 5 or x > w + 5:
+                continue
             self.create_line(x, 0, x, h, fill=col, width=lw * (3 if picked else 2))
             r = 5 * self.scale
             self.create_polygon(x - r, 0, x + r, 0, x, r * 1.4, fill=col, outline=col)

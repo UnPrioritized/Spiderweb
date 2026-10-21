@@ -1220,7 +1220,7 @@
  "project.notes_above_key_127_left_out": " ({high:,} notes above key 127 left out)",
  "project.notes_above_key_127_left_out_one": " (1 note above key 127 left out)",
  "project.ports_dms": "\n\nIts Hz bass CC lines use more than 15 channels, so tracks past the 15th are on ports B, C… In Domino, give those ports a device in the MIDI-OUT settings, or those tracks stay silent.",
- "project.tempo_catch_failed": "\n\nThe catch-up starting at {where} can't work, so that stretch was written as drawn and everything after it is out of step with the project's BPM.",
+ "project.tempo_catch_failed": "\n\nThe catch-up starting at {where} can't work (pick it in the Tempo pane to see why), so that stretch was written as drawn and everything after it is out of step with the project's BPM.",
  "project.ports_midi":"\n\nIts Hz bass CC lines use more than 15 channels, so tracks past the 15th are on ports B, C… Some MIDI programs need a device set for each port, or those tracks stay silent.",
  "project.dms_keys_256":"\n\nIt has keys above 127: only the 256 keys mod of Domino can open it.",
  "project.copied_keys_256": " (keys above 127: paste in the 256 keys mod of Domino only)",
