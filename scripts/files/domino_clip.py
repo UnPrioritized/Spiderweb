@@ -315,15 +315,20 @@ def _f32_step(f, n):
 def tempo_items(tempo, sigs=(), first=0, end=None):
     """(Conductor item bytes, slow): tempo [(tick, us)] and time signatures [(tick, top, bottom power)] as Domino's
     tempo / time signature items, by tick (tempo first on a tick). first..end: only that stretch, ticks counted
-    from first, with what is in effect at first put on tick 0. slow = how many tempos can't come back exact."""
+    from first, with what is in effect at first put on tick 0, and what is in effect at end put on end when it
+    changed (user 2026-10-22: Domino ADDS a pasted Conductor's items, so without it the song after the paste
+    would stay at the copy's last tempo). slow = how many tempos can't come back exact."""
     tempo = sorted(tempo)
     sigs = sorted(sigs)
     out, slow = [], 0
 
     def take(rows):
         now = [(first,) + tuple(r[1:]) for r in rows if r[0] <= first][-1:]
-        return now + [r for r in rows if r[0] > first and (end is None or r[0] < end)
-                      and r[0] - first <= LONGEST]  # (past what Domino's ticks hold: left out)
+        got = now + [r for r in rows if r[0] > first and (end is None or r[0] < end)]
+        back = [(end,) + tuple(r[1:]) for r in rows if r[0] <= end][-1:] if end is not None and end > first else []
+        if back and got and tuple(back[0][1:]) != tuple(got[-1][1:]):
+            got += back
+        return [r for r in got if r[0] - first <= LONGEST]  # (past what Domino's ticks hold: left out)
     for tick, us in take(tempo):
         bpm, exact = dms_bpm(us)
         slow += not exact
