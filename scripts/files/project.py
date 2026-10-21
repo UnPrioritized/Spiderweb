@@ -28,11 +28,12 @@ from notes.picture import paths_for_file
 from notes.polygon import POLYGON_DEFAULTS, clean_polygon
 from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
-from notes.tempo import clean_tempo
+from notes.tempo import clean_tempo, has_tempo
 from notes.tempo_file import file_plan
 from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
-from files.domino_clip import DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data, dms_path, get_from_clipboard, put_on_clipboard, read_notes
+from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
+                               dms_path, get_from_clipboard, put_on_clipboard, read_notes, tempo_items)
 from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, track_slots, write_midi
 from files.playback import keep_saved
 from files.about import HERE, USER, VERSION
@@ -770,7 +771,6 @@ class ProjectFiles:
                               lambda: write_midi(path, ppq, bpm, beats, notes, self.picture_use10,
                                                  self.pad_tracks(), cc, plan["events"], plan["sigs"])):
             return
-        bad = plan["bad"]
         channels = tracks if self.channel_mode.get() == "auto" else 1
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
                 if ppq >= PPQ_WARN else "")
@@ -778,23 +778,30 @@ class ProjectFiles:
             note += tr("project.it_has_keys_above_127_256")
         if slot_ports(int(self.rendered[:, 4].max()) + 1, cc, self.picture_use10):  # (as write_midi decides)
             note += tr("project.ports_midi")
-        if bad:
-            note += tr("project.tempo_catch_failed", where=", ".join(self.bar_text(b) for b in bad))
+        note += self.tempo_notes(plan)
+        messagebox.showinfo(tr("project.spiderweb"),
+                            tr("project.saved_notes_on_track_s_one", notes=trn("n.notes", len(self.rendered),
+                                                                               n=len(self.rendered)),
+                               tracks=trn("n.tracks", channels, n=channels), path=path, note=note))
+
+    def tempo_notes(self, plan):
+        """The export message's lines about the Tempo pane (file_plan's warnings)."""
+        note = ""
+        if plan["bad"]:
+            note += tr("project.tempo_catch_failed", where=", ".join(self.bar_text(b) for b in plan["bad"]))
         if plan["jumps"]:
             note += tr("project.tempo_jump_notes", where=", ".join(self.bar_text(b) for b in plan["jumps"][:5]))
         if plan["hz"]:
             note += tr("project.tempo_hz", where=self.bar_text(plan["hz"][0]))
         if plan["dense"]:
             note += tr("project.tempo_dense", where=self.bar_text(plan["dense"][0]))
-        messagebox.showinfo(tr("project.spiderweb"),
-                            tr("project.saved_notes_on_track_s_one", notes=trn("n.notes", len(self.rendered),
-                                                                               n=len(self.rendered)),
-                               tracks=trn("n.tracks", channels, n=channels), path=path, note=note))
+        return note
 
-    def tempo_timed(self, ppq, bpm, beats, cc):
+    def tempo_timed(self, ppq, bpm, beats, cc, notes=None):
         """(notes, cc, file_plan) for the MIDI file: the Tempo pane's changes, notes and CC messages in Keep timing
-        parts moved to the ticks that keep their time (notes/tempo_file.py)."""
-        notes = self.rendered
+        parts moved to the ticks that keep their time (notes/tempo_file.py). notes: the ones going out (default:
+        every note)."""
+        notes = self.rendered if notes is None else notes
         ticks = [notes[:, 0], notes[:, 1]] + [np.array([m[0] for m in ms], np.int64) for ms in cc.values()]
         hz = [i for i, sh in enumerate(self.shapes) if sh.get("hz")]
         on = np.isin(notes[:, 5], hz) if hz else None
@@ -848,6 +855,7 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"),
                                  tr("project.no_notes_yet_draw_something_inside", keys=min(self.keys, 128) - 1))
             return
+        notes, cc, plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm), notes)
         if int(notes[:, 1].max()) > LONGEST:
             messagebox.showerror(tr("project.spiderweb"), tr("project.too_long_for_domino", longest=LONGEST))
             return
@@ -863,10 +871,10 @@ class ProjectFiles:
                                                   basename=os.path.basename(path)),
                 icon="warning", default="no"):
             return
-        cc = self.cc_messages(ppq, bpm)
+        tempo = plan["events"] if has_tempo(self.tempo) else None
         if not self.write_out(path, "project.saving_dms", lambda: write_bytes(
                 path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16(),
-                               pad=self.pad_tracks(), cc=cc))):
+                               pad=self.pad_tracks(), cc=cc, tempo=tempo, sigs=plan["sigs"]))):
             return
         tracks = len(track_slots(notes, self.pad_tracks()))
         ports = slot_ports(int(notes[:, 4].max()) + 1, cc, self.picture_use10)  # (as dms_data decides)
@@ -876,7 +884,10 @@ class ProjectFiles:
                    trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
                 + (trn("project.dms_long_gates", long, long=long, most=GATE_MAX) if long else "")
                 + (tr("project.ports_dms") if ports else ""))
-        (messagebox.showwarning if long or ports else messagebox.showinfo)(tr("project.spiderweb"), text)
+        slow = tempo_items(tempo)[1] if tempo else 0
+        warn = self.tempo_notes(plan) + (tr("project.dms_tempo_slow") if slow else "")
+        (messagebox.showwarning if long or ports or warn else messagebox.showinfo)(tr("project.spiderweb"),
+                                                                                    text + warn)
 
     def copy_to_domino(self):
         """Ctrl+Shift+C: the selected shapes' notes (all notes when nothing is selected) on the clipboard, for
