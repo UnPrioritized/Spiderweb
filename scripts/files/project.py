@@ -263,7 +263,8 @@ class ProjectFiles:
             if not quiet:
                 messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))
             return False
-        shapes = paths_for_file(shapes, os.path.dirname(os.path.abspath(path)), False)  # (pictures' files)
+        folder = os.path.dirname(os.path.abspath(path)) if path else HERE
+        shapes = paths_for_file(shapes, folder, False)  # (pictures' files)
         made = version_tuple(data.get("app_version")) if isinstance(data.get("app_version"), str) else None
         newer = made and made > version_tuple(VERSION) or type(data.get("version")) is int and data["version"] > 2
         if newer:  # (what that version added is left out)
@@ -361,6 +362,8 @@ class ProjectFiles:
         self.roll.cancel_draft()
         self.shapes = shapes
         self.tempo = tempo
+        if hasattr(self, "tempo_pane"):  # (the old project's Select box / picks / catch-up being added go)
+            self.tempo_pane.forget()
         self.tempo_changed()
         self.roll.set_view(data.get("view"))
         self.stop_play()

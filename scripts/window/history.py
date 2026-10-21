@@ -381,7 +381,8 @@ class HistoryPanel:
             return None  # (a pop-up without its own undo: the shapes it works on stay as they are)
         if self.vel.edit:  # a velocity line held: Ctrl+Z throws it away (no step), Ctrl+Y does nothing
             return "break" if redo else (self.vel.drop(), "break")[1]
-        self.tempo_pane.end_drag()  # (a tempo point held: let go, the step made at its first move takes it back)
+        if self.tempo_pane.end_drag():  # (a tempo point held: let go, the step made at its first move takes it
+            return "break"  # back; only a catch-up being added / a press that made no step called off: that's all)
         if self.held_scrub:  # a number box's label held: Ctrl+Z = back to the press (no step), Ctrl+Y nothing
             return "break" if redo else (self.held_scrub.cancel(), "break")[1]
         if self.app_only(e.widget):

@@ -67,8 +67,8 @@ class TempoBox(ttk.Frame):
         self.every_var = tk.StringVar(value=str(EVERY))
         self.every_box = ttk.Entry(bar, textvariable=self.every_var, width=6)
         self.every_box.pack(side="left", padx=(4, 0))
-        self.every_box.bind("<Return>", lambda e: self.typed_every())
-        self.every_box.bind("<FocusOut>", lambda e: self.typed_every())
+        self.every_box.bind("<Return>", lambda e: (self.typed_every(), app.roll.focus_set()))
+        self.every_box.bind("<FocusOut>", lambda e: self.left_box(self.typed_every))
         unit_word(ttk.Label(bar), self.every_var, "unit.ticks").pack(side="left", padx=(2, 0))
         for w in (lb, self.every_box):
             Tooltip(w, tr("tempo.every_tip"))
@@ -93,8 +93,9 @@ class TempoBox(ttk.Frame):
         self.bpm_var = tk.StringVar()
         self.bpm_box = ttk.Entry(row, textvariable=self.bpm_var, width=10)
         self.bpm_box.pack(side="left", padx=(4, 0))
-        self.bpm_box.bind("<Return>", lambda e: self.typed_bpm())
-        self.bpm_box.bind("<FocusOut>", lambda e: self.typed_bpm())
+        self.bpm_box.bind("<Return>", lambda e: (self.typed_bpm(), app.roll.focus_set()))
+        self.bpm_box.bind("<FocusOut>", lambda e: self.left_box(self.typed_bpm))
+        self.bpm_box.bind("<FocusIn>", lambda e: self.typing_for())
         self.part_row = row = ttk.Frame(row2)
         ttk.Label(row, text=tr("tempo.curve")).pack(side="left")
         self.curve = ttk.Combobox(row, state="readonly", width=20, values=[tr("tempo.curve_" + k) for k in CURVES])
@@ -118,7 +119,10 @@ class TempoBox(ttk.Frame):
         self.formula_var = tk.StringVar()
         self.formula_box = ttk.Entry(row2, textvariable=self.formula_var, width=16)
         self.formula_box.bind("<Return>", lambda e: self.typed_formula())
-        self.formula_box.bind("<FocusOut>", lambda e: self.typed_formula())
+        self.formula_box.bind("<FocusOut>", lambda e: self.left_box(self.typed_formula))
+        self.formula_box.bind("<FocusIn>", lambda e: self.typing_for())
+        self._typed_for = None  # (what the BPM / Formula box's typing goes to: what was picked when it was clicked)
+        self._committed = False
         self.formula_tip = Tooltip(self.formula_box, "")
         self.draw_formula = FORMULA  # what the Formula pencil draws
         self.result = ttk.Label(row2, text="", font=look.font(9))
@@ -212,12 +216,61 @@ class TempoBox(ttk.Frame):
     def bpm_snap(self):
         return BPM_SNAPS[max(0, self.snap.current())]
 
+    def typing_for(self):
+        """A box clicked: its typing goes to what's picked now, even if a pane click picks something else first."""
+        pick = self.pane.picked()
+        tempo = self.app.tempo
+        if pick and pick[0] == "point":
+            self._typed_for = ("point", [tempo["points"][i] for i in pick[1]])
+        elif pick:
+            self._typed_for = (pick[0], tempo["points" if pick[0] == "part" else "catch"][pick[1]])
+        else:
+            self._typed_for = None
+        self._committed = False
+
+    def target(self):
+        """(kind, item(s)) the typing goes to, still in the line; else what's picked now."""
+        tempo = self.app.tempo
+        alive = tempo["points"] + tempo["catch"]
+        if self._typed_for:
+            kind, it = self._typed_for
+            if kind == "point":
+                pts = [p for p in it if any(p is a for a in alive)]
+                if pts:
+                    return kind, pts
+            elif any(it is a for a in alive):
+                return kind, it
+        pick = self.pane.picked()
+        if not pick:
+            return None
+        if pick[0] == "point":
+            return "point", [tempo["points"][i] for i in pick[1]]
+        return pick[0], tempo["points" if pick[0] == "part" else "catch"][pick[1]]
+
+    def commit_typing(self):
+        """A press in the pane: a BPM / formula typed without Enter goes to what it was typed for first."""
+        focus = self.focus_get()
+        for box, done in ((self.bpm_box, self.typed_bpm), (self.formula_box, self.typed_formula),
+                          (self.every_box, self.typed_every)):
+            if focus is box:
+                done()
+                self._committed = True
+
+    def left_box(self, done):
+        """The box lost the keyboard: what's typed goes in, unless a pane press took it already."""
+        if self._committed:
+            self._committed = False
+            self._typed_for = None
+            return self.sync()
+        done()
+        self._typed_for = None
+
     def typed_bpm(self):
         """The BPM box: every picked point gets it."""
-        pick = self.pane.picked()
-        if not pick or pick[0] != "point":
+        got = self.target()
+        if not got or got[0] != "point":
             return
-        pts = [self.app.tempo["points"][i] for i in pick[1]]
+        pts = got[1]
         try:
             v = calc(self.bpm_var.get().replace(",", ""))
             if not (isinstance(v, (int, float)) and math.isfinite(v) and v > 0):
@@ -308,9 +361,9 @@ class TempoBox(ttk.Frame):
         self.app.roll.focus_set()
 
     def typed_formula(self):
-        pick = self.pane.picked()
+        got = self.target()
         text = self.formula_var.get().strip()
-        if not pick or pick[0] not in ("part", "catch"):
+        if not got or got[0] not in ("part", "catch"):
             if self.tool.get() == "formula" and text != self.draw_formula:
                 if formula_fn(text) is None:
                     self.app.status.config(text=tr("tempo.formula_bad"))
@@ -318,7 +371,8 @@ class TempoBox(ttk.Frame):
                 else:
                     self.draw_formula = text
             return
-        item = self.app.tempo["points" if pick[0] == "part" else "catch"][pick[1]]
+        pick, item = got
+        pick = (pick,)
         at = 3 if pick[0] == "part" else 2
         if text == (item[at] or FORMULA):
             return
@@ -543,17 +597,23 @@ class TempoPane(tk.Canvas):
     def start_placing(self):
         """Add catch-up BPM: drag the yellow area (what it counts), then the teal one (where its BPM plays). A kept
         Select box is the yellow area already."""
-        if self.band:
-            self.placing = {"step": 2, "a": self.band[0], "b": self.band[1], "hover": None}
+        if self.band:  # (the box comes back if it's called off)
+            self.placing = {"step": 2, "a": self.band[0], "b": self.band[1], "hover": None, "band": self.band}
             self.band = None
         else:
             self.placing = {"step": 1}
         self.box.hint.config(text=tr("tempo.hint_catch%d" % self.placing["step"]))
+        self.app.roll.focus_set()  # (Esc reaches it, whatever box had the keyboard)
         self.request_redraw()
 
     def cancel_placing(self):
+        """Adding a catch-up called off (Esc, right-click, another tool, Ctrl+Z): nothing left drawn, the kept
+        Select box it started from back."""
         if self.placing:
+            self.band = self.placing.get("band") or self.band
             self.placing = None
+            if self.drag and self.drag["kind"] == "catch1":
+                self.drag = None
             self.box.pick_tool_hint()
             self.request_redraw()
 
@@ -602,6 +662,7 @@ class TempoPane(tk.Canvas):
         self.close_typing(True)
         if roll.sx is None or self.view is None:
             return
+        self.box.commit_typing()  # (a BPM / formula typed without Enter: to what it was typed for, first)
         roll.focus_set()  # (Space / Ctrl+Z keep working)
         self.app.key_pane = self  # (Delete: the points picked here)
         if e.x < roll.kb_w:  # the numbers: drag to scroll up / down
@@ -736,6 +797,12 @@ class TempoPane(tk.Canvas):
                     s[1] = clamp_bpm(v + dv) if dv else v
             for s, k, a in d["starts"]:  # (a catch-up's edges set by hand go along)
                 s[k] = max(0.0, a + shift)
+            for s, b, v in d["orig"]:  # (a line dragged alone past its own hand-set edge: that edge automatic
+                # at once, as opening the file makes it, so undo / save + open give the same)
+                if v is None and catch_get(s, 3) is not None and s[3] >= s[0]:
+                    catch_set(s, 3, None)
+                if v is None and catch_get(s, 4) is not None and s[4] <= s[0]:
+                    catch_set(s, 4, None)
             for key in ("points", "catch"):
                 tempo[key].sort(key=lambda it: it[0])
 
@@ -798,9 +865,16 @@ class TempoPane(tk.Canvas):
                 self.set_sel([d["grab"]])
 
     def end_drag(self):
-        """Ctrl+Z while dragging: let go first (the step made at the first move takes it back)."""
-        self.drag = None
+        """Ctrl+Z while dragging: let go first (the step made at the first move takes it back). True when it only
+        called off something that made no undo step yet (a catch-up being added, a press not moved): Ctrl+Z / Ctrl+Y
+        stop there."""
+        d, self.drag = self.drag, None
+        only = bool(self.placing) or bool(d) and d["kind"] in ("box", "draw", "catch1", "view") or \
+            bool(d) and d.get("pushed") is False
         self.cancel_placing()
+        if d:
+            self.request_redraw()
+        return only
 
     def on_double(self, e):
         """Double-click on a point: type its BPM. Elsewhere: a press like any other."""
@@ -912,13 +986,21 @@ class TempoPane(tk.Canvas):
         self.app.tempo_changed()
 
     def delete_picked(self):
-        """The Delete key while this pane was clicked last: the picked points / catch-up lines go. True when it
-        took the key (anything picked here; the Select box stays, empty, like the piano roll's)."""
+        """The Delete key while this pane was clicked last: the picked points / catch-up lines go (the Select box
+        stays, empty, like the piano roll's). Always takes the key (user's pick in the hunt: never the piano
+        roll's shapes, which may be off screen); nothing while the mouse holds something here."""
         self.picked()
-        if not self.sel or self.drag:
-            return False
-        self.delete_items(list(self.sel))
+        if self.sel and not self.drag:
+            self.delete_items(list(self.sel))
         return True
+
+    def forget(self):
+        """Hidden / another project opened: the Select box, picks and a catch-up being added go, Delete and Esc
+        are the piano roll's again."""
+        self.placing, self.drag, self.band, self.sel, self.part = None, None, None, [], None
+        self.box.pick_tool_hint()
+        if getattr(self.app, "key_pane", None) is self:
+            self.app.key_pane = None
 
     def pick_state(self):
         """What's picked, for an undo step (JSON): the Select box, the picked points / lines and part by place."""

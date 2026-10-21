@@ -2291,6 +2291,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         else:
             self.tempo_height()
             self.tempo_pane.close_typing(True)
+            if self.tempo_pane.placing or getattr(self, "key_pane", None) is self.tempo_pane:
+                self.tempo_pane.cancel_placing()  # (Delete / Esc the piano roll's again; picks kept for later)
+                self.key_pane = None
             if str(self.tempo_box) in shown:
                 self.panes.forget(self.tempo_box)
             self.tempo_pane.delete("all")
