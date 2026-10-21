@@ -268,7 +268,11 @@ class PreviewSettings(tk.Toplevel):
         hz = (sh or {}).get("hz") or {}
         auto = typed_ring(hz) is None
         self.ring_auto.set(auto)
-        if self.focus_get() is not self.ring_entry:  # (a number being typed stays)
+        try:
+            typing = self.focus_get() is self.ring_entry
+        except KeyError:  # (a dropdown's list has the keyboard: Tk's own widget, unknown here)
+            typing = False
+        if not typing:  # (a number being typed stays)
             self.ring_var.set(fmt(round(ring_of(hz), 2)))
             good(self.ring_entry)
         self.ring_entry.config(state="disabled" if auto or not hz else "normal")
@@ -298,8 +302,9 @@ class PreviewSettings(tk.Toplevel):
             self.show_ring(self.win.length_target())  # (a wrong number: back to the last good one)
             return
         good(self.ring_entry)
-        self.ring_var.set(fmt(round(v, 3)))
-        self.win.put_lengths(tr("hz.step_ring"), ring=round(v, 3))
+        v = round(v, 2)  # (as the box shows it: leaving it unchanged changes nothing)
+        self.ring_var.set(fmt(v))
+        self.win.put_lengths(tr("hz.step_ring"), ring=v)
 
     def pick_font(self):
         if self.app.ask_soundfont(self, "hz.preview_pick_font"):

@@ -298,9 +298,10 @@ class Playback:
         if not set_auto_ring(seconds) or quiet:
             return
         if any(has_cc(sh.get("hz") or {}) and typed_ring(sh["hz"]) is None for sh in self.shapes):
-            self.shapes_changed()
-        if getattr(self, "hz_window", None):
-            self.hz_window.sync()
+            self.shapes_changed()  # (the Hz window's CC warning too)
+        win = getattr(self, "hz_window", None)
+        if win and win.settings_window:  # (only its run-on box: a whole sync mid-drag put the note dragged back)
+            win.settings_window.show_ring(win.target())
 
     def check_samples(self, path):
         """(An .sfz just picked) its sound files checked in the background: missing ones or ones in a format the

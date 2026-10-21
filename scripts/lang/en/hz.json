@@ -327,7 +327,7 @@
  "ps.ring": "CC run-on",
  "ps.ring_tip": "How long this Hz bass's CC lines go on after its sound ends. Then every value goes back to where players start. Make it as long as the sound's release, so the values don't jump while the notes still ring. With Multi channel and \"Split: any notes at the same time\", no other shape gets this Hz bass's channel until the run-on ends. 0 to {most} seconds.",
  "ps.ring_auto": "Auto",
- "ps.ring_auto_tip": "Ticked: as long as the soundfont's sound rings after a note (measured from the preview's soundfont; 3 seconds while none is picked).\nNot ticked: the time you type.",
+ "ps.ring_auto_tip": "Ticked: as long as the soundfont's sound rings after a note (measured once the preview or Built-in BASSMIDI has opened the soundfont; 3 seconds until then).\nNot ticked: the time you type.",
  "ps.live_mb": "Memory for live keys (MB)",
  "ps.live_mb_tip": "How much memory the live keys may keep for the notes they record from the soundfont. When it's full, the ones used least are thrown away and recorded again when needed (a short wait). All of them are freed a minute after the synth window closes.",
  "ps.live_used": "Live keys: {used} MB of {limit} MB kept",

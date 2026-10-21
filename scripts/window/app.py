@@ -6,6 +6,7 @@ project.py (files, autosave, MIDI export), widgets.py (tooltips), font_dialog.py
 
 import copy
 import itertools
+import json
 import math
 import os
 import threading
@@ -30,6 +31,7 @@ from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
                             turn_velocities, why_not as gate_why_not)
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
+from notes import hz_cc
 from notes.hz_cc import cc_spans
 from notes.hzbass import fit_length, has_cc, own_channels
 from notes.mask import (MASK_DEFAULTS, as_used, can_mask, is_mask, mask_view, picture_like, pinned_slots, silent,
@@ -180,8 +182,32 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                              [colours_back(sh) for sh in shapes],
                              [bool(sh.get("merge")) or has_pattern(sh) for sh in shapes], laps, keep,
                              [r and not has_colours(sh, turns=True) for sh, r in zip(shapes, took)], voice_slots,
-                             [dict(b) if b else None for b in busy] if busy else None)
+                             busy)
     return wanted, use10 or all16, rendered, slots, {i: s for i, s in voice_slots.items() if s is not None}
+
+
+def sends_cc(sh):
+    """A Hz bass shape sending CC lines."""
+    return sh.get("kind") is not None and has_cc(sh.get("hz") or {})
+
+
+def cc_busy(shapes, ppq, mode, split):
+    """all_notes' busy: per shape None, or {track: (start, end)} the times its CC lines are sent (hz_cc.cc_spans at the
+    Hz bass's own BPM, as its notes): Multi channel split by time keeps its channel for them, so another shape
+    doesn't take it while its lines (run-on too) change it (user 2026-10-21). None otherwise."""
+    if mode != "auto" or split == "key" or not any(sends_cc(sh) for sh in shapes):
+        return None
+    return [cc_spans(sh, ppq, float(sh["hz"]["bpm"])) or None if sends_cc(sh) else None for sh in shapes]
+
+
+def cc_texts(shapes, mode, split):
+    """What cc_busy comes from, for App.notes_key (cheap: the times are worked out in the background): Auto's run-on
+    and each CC Hz bass's whole text (shape_key leaves its lines out), None when cc_busy gives None."""
+    if mode != "auto" or split == "key" or not any(sends_cc(sh) for sh in shapes):
+        return None
+    return (hz_cc.auto_ring, tuple(json.dumps(dict(sh, hz={k: v for k, v in sh["hz"].items() if k != "_memo"}),
+                                              sort_keys=True, default=repr) if sends_cc(sh) else None
+                                   for sh in shapes))
 
 
 class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, MaskPanel, PolygonPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
@@ -1354,17 +1380,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """Everything the notes are made from (shapes_changed): a background result is used only for exactly this."""
         mode, split = self.channel_mode.get(), SPLIT_CHOICES[max(self.split_box.current(), 0)][0]
         return (tuple(shape_key(sh) for sh in self.shapes), self.ppq, self.keys, mode, split, self.all16(),
-                self.rounds_apart(), self.in_order(), self.keep_colours.get(), self.cc_busy(mode, split))
+                self.rounds_apart(), self.in_order(), self.keep_colours.get(), cc_texts(self.shapes, mode, split))
 
     def cc_busy(self, mode, split, shapes=None):
-        """all_notes' busy: per shape None, or the times its CC lines are sent ((track, (start, end)) pairs, hz_cc.
-        cc_spans at the Hz bass's own BPM, as its notes): Multi channel split by time keeps its channel for them, so
-        another shape doesn't take it while its lines (run-on too) change it (user 2026-10-21). None otherwise."""
-        shapes = self.shapes if shapes is None else shapes
-        if mode != "auto" or split == "key" or not any(has_cc((sh.get("hz") or {})) for sh in shapes):
-            return None
-        return tuple(tuple(cc_spans(sh, self.ppq, float(sh["hz"]["bpm"])).items()) or None
-                     if sh.get("kind") is not None and has_cc(sh.get("hz") or {}) else None for sh in shapes)
+        """all_notes' busy for these shapes (cc_busy)."""
+        return cc_busy(self.shapes if shapes is None else shapes, self.ppq, mode, split)
 
     def _make_coming(self, show, follow=False):
         """follow: shown when made even if the shapes have moved on since (then the next spot's are made)."""
@@ -1403,8 +1423,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         def work():
             started = time.perf_counter()
             try:
+                busy = None if key[9] is None else cc_busy(  # (worked out here: a long Arpeggio's took 0.2 s)
+                    [json.loads(t) if t else {} for t in key[9][1]], key[1], key[4], key[5])
                 got = all_notes(shapes, *key[1:6], notes_tracks, rounds=key[6], order=key[7], keep=key[8],
-                                busy=key[9])
+                                busy=busy)
                 # (the same time as shapes_changed's: making the notes only, not the orders below)
                 job["time"] = time.perf_counter() - started
                 if job["stop"]:
