@@ -34,7 +34,7 @@ from files.mathexpr import calc, fmt
 from notes.hzbass import (ARP, ARP_PATTERNS, BLEND, CHORDS, CRUSH, DETUNE, FAST, GLIDE_CURVE, GROUPS, GROWL, LFO, LOOP,
                           MODES, OFF_BOXES, OFF_PITCH, OSC2, PITCH, RACK, RATE_TOP, SCALES, SOFT, START_COUNT,
                           START_STEPS, MOD_BOXES, MOD_NEED_LINE, STEPS, SUB, TIMINGS, TREMOLO, TREMOLO_DEPTH, VIBRATO_RATE,
-                          VOICES, WAH, WAVES, adsr_line,
+                          VOICES, WAH, WAVES, FILTER_START, adsr_line, filter_line,
                           arpeggiated,
                           blend_gains, glide_left, clean_arp, clean_extra, clean_mode, clean_steps, clean_voice, copies,
                           group_count, line_at, osc2_shift, wave_hits, HEIGHT_FROM, HEIGHT_MOST, height_times,
@@ -111,8 +111,9 @@ BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain",
                      ("tremolo_wait", "time", 0.0), ("tremolo_rise", "time", 0.0)),
          "tone": (("sweep_start", "percent", 1.0), ("sweep_end", "percent", 0.0), ("sweep_time", "time", 1.0),
                   ("sweep_track", "bend", 0.0), ("wah", "percent", 0.0)),
-         "filter": (("cutoff", "percent", 0.5), ("filter_amount", "bend", 0.0), ("filter_attack", "time", 0.0),
-                    ("filter_decay", "time", 0.5), ("filter_sustain", "percent", 0.0), ("filter_release", "time", 0.0)),
+         "filter": tuple((k if k == "cutoff" else f"filter_{k}", kind, FILTER_START[k]) for k, kind in (
+             ("cutoff", "percent"), ("amount", "bend"), ("attack", "time"), ("decay", "time"), ("sustain", "percent"),
+             ("release", "time"))),
          "character": (("slant", "percent", 0.0), ("groups", "groups", 1.0), ("offpitch", "percent", 0.0),
                        ("noisy", "percent", 0.0), ("height", "height", 1.0), ("height_rand", "percent", 0.0)),
          "voice": (("voices", "voices", 1.0), ("detune", "cents", 20.0), ("blend", "percent", BLEND),
@@ -403,24 +404,23 @@ def read_tone(win, was):
     return got, made
 
 
-def filter_line(cutoff, amount, attack, decay, sustain, release):
-    """The Cutoff line (MIDI CC 74): (points, sustain point, length; None, None = all along): Cutoff moved by Amount
-    x an ADSR envelope from each note's start (adsr_line's, its values cut to 0..1), or flat at Cutoff (Amount 0)."""
-    if abs(amount) < 1e-9:
-        return [[0.0, cutoff]], None, None
-    pts, at, every = adsr_line(attack, decay, sustain, release)
-    return [[p[0], min(1.0, max(0.0, cutoff + amount * p[1])), *p[2:]] for p in pts], at, every
+def filter_vals(v):
+    """The Filter box's knobs (filter_amount...) as hz["filter"] keeps them (amount...)."""
+    return {k: v[k if k == "cutoff" else f"filter_{k}"] for k in FILTER_START}
 
 
 def read_filter(win, was):
-    """The Filter box: ({cutoff, filter_amount, filter_attack...}, made) as read_volume. Its knobs as they were when
-    they could have made the Cutoff line; a flat line = Cutoff alone; none = the middle (no CC sent)."""
+    """The Filter box: ({cutoff, filter_amount, filter_attack...}, made) as read_volume. Its knobs as it wrote the
+    Cutoff line (hz["filter"]), else as they were when they could have made it; a flat line = Cutoff alone; none =
+    the middle (no CC sent)."""
     keys = [k for k, _, _ in BOXES["filter"]]
-    got = {k: was[k] for k in keys}
+    kept = win.extra.get("filter")
+    got = {k: was[k] for k in keys} if kept is None else {k if k == "cutoff" else f"filter_{k}": v
+                                                          for k, v in kept.items()}
     pts = win.fxl.get("cc_cutoff")
     if not pts:
         return dict(got, cutoff=0.5, filter_amount=0.0), True
-    want, at, every = filter_line(*(was[k] for k in keys))
+    want, at, every = filter_line(**filter_vals(got))
     if (same_line(want, pts) and win.loops.get("cc_cutoff") == every and win.sustains.get("cc_cutoff") == at
             and (every is None or win.froms.get("cc_cutoff") == "note") and "cc_cutoff" not in win.fits
             and "cc_cutoff:amount" not in win.fxl):
@@ -1243,12 +1243,14 @@ class SynthKnobs:
                 self.fxl["wah"] = [[0.0, v["wah"]]]
         elif box == "filter":
             fx.drop("cc_cutoff")
-            pts, at, every = filter_line(*(v[k] for k, _, _ in BOXES["filter"]))
+            pts, at, every = filter_line(**filter_vals(v))
             if every is not None:
                 self.fxl["cc_cutoff"] = pts
                 self.loops["cc_cutoff"], self.froms["cc_cutoff"], self.sustains["cc_cutoff"] = every, "note", at
             elif abs(pts[0][1] - 0.5) > 1e-9:  # (the middle all along: no CC sent)
                 self.fxl["cc_cutoff"] = pts
+            # (the knobs kept with it: the MOD tab moves Amount / the envelope from them, hz_modulate.knob_filter)
+            self.set_extra("filter", filter_vals(v) if "cc_cutoff" in self.fxl else None)
         elif box == "arp":
             self.set_extra("arp", {k: v[f"arp_{k}"] for k in ARP_KEYS} if v["arp_on"] else None)
         elif box == "osc2":
@@ -1720,8 +1722,8 @@ class SynthKnobs:
         part as long as the envelope's rise and fall, then its release."""
         v = self.pv
         w, h, pad = c.winfo_width(), c.winfo_height(), 6 * self.s
-        pts, at, every = filter_line(*(v[k] for k, _, _ in BOXES["filter"]))
-        held = max(0.5, (at or 0.0) * 0.5)
+        pts, at, every = filter_line(**filter_vals(v))
+        held =max(0.5, (at or 0.0) * 0.5)
         total = (at or 0.0) + held + (every - at if every else 0.0)
         total = max(total, 1.0)
         b = np.linspace(0.0, total, 200)

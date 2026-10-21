@@ -28,8 +28,8 @@ import math
 
 import numpy as np
 
-from notes.hzbass import (CC_FX, CC_NUMBER, CC_START, WHEEL_KEYS, cc_midi, fx_at, glide_tones, has_cc, heard_layers,
-                          left_edge, legato_links, links, live, own_channels, sound_span)
+from notes.hzbass import (CC_FX, CC_NUMBER, CC_START, CC_TARGETS, WHEEL_KEYS, cc_midi, fx_at, glide_tones, has_cc,
+                          heard_layers, left_edge, legato_links, links, live, own_channels, sound_span)
 
 STEPS = 96  # values a beat at most
 LEAD = 0.05  # seconds the first values come before the first note
@@ -160,8 +160,9 @@ def cc_key(hz):
         parts.append([{k: v for k, v in (src.get(key) or {}).items() if k in CC_FX} if isinstance(src.get(key), dict)
                       else [k for k in src.get(key) or () if k in CC_FX]
                       for key in ("fx", "loop", "from", "sustain", "amount", "fit", "off")]
-                     + [src.get("mod") if any(l.get("to") in CC_FX for l in (src.get("mod") or {}).get("links", ()))
-                        else None, src.get("voice"), (src.get("solo"), src.get("mute"))])
+                     + [src.get("mod") if any(l.get("to") in CC_TARGETS for l in (src.get("mod") or {}).get("links", ()))
+                        else None, src.get("voice"), (src.get("solo"), src.get("mute")), src.get("filter"),
+                        (src.get("bypass") or {}).get("boxes")])
     parts.append(hz.get("cc_own"))
     return json.dumps(parts, sort_keys=True)
 

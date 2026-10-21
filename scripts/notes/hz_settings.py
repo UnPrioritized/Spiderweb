@@ -729,6 +729,12 @@ MOD_SETTINGS.update({name: (*RACK[kind][k][:2], RACK_CURVES.get((kind, k))) for 
 # the Volume line is as its knobs make it (knob_adsr)
 ADSR_KNOBS = ("attack", "decay", "release")
 MOD_SETTINGS.update({name: (0.0, TIME_MOST, TIME_TOP) for name in ADSR_KNOBS})
+# The Filter box (window/hz_knobs.py; the Cutoff line, a MIDI CC): its knobs as it wrote the line (hz["filter"],
+# hz_lines.filter_line) and those the MOD tab moves (timed_line, while the line is as the box made it): the times as
+# the Volume box's, Amount / Sustain read at every step. Like the CC lines they make no notes (without_cc).
+FILTER_START = {"cutoff": 0.5, "amount": 0.0, "attack": 0.0, "decay": 0.5, "sustain": 0.0, "release": 0.0}
+FILTER_KNOBS = ("filter_attack", "filter_decay", "filter_release", "filter_amount", "filter_sustain")
+CC_TARGETS = CC_FX + FILTER_KNOBS  # (MOD links that only change MIDI CC)
 TIME_STEP = 1 / 1024  # beats: how finely a moved envelope is worked out (fewer steps on very long notes)
 # the synth window's box each effect is in: a box switched off (hz["bypass"]["boxes"]) stops its links too
 MOD_BOXES = dict({w: "wave" for w in tuple(WAVES) + ("wave", "octave")}, volume="volume", pitch="pitch", vibrato="vibrato",
@@ -785,9 +791,24 @@ def clean_mod(mod):
     return {} if {k: v for k, v in out.items() if k != "phase"} == mod_start() else out
 
 
+def clean_filter(f):
+    """hz["filter"] checked: the Filter box's knobs as it wrote the Cutoff line ({cutoff 0..1, amount -1..1, attack /
+    decay / release in beats, sustain 0..1}), else None."""
+    if not isinstance(f, dict):
+        return None
+    out = {}
+    for k, plain in FILTER_START.items():
+        v = f.get(k, plain)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            return None
+        lo, hi = (-1.0, 1.0) if k == "amount" else (0.0, TIME_MOST) if k in ("attack", "decay", "release") else (0.0, 1.0)
+        out[k] = min(hi, max(lo, float(v)))
+    return out
+
+
 CLEAN_EXTRA = {"voice": clean_voice, "mode": clean_mode, "rack": clean_rack, "arp": clean_arp, "bypass": clean_bypass,
                "kept": clean_kept, "macro": clean_macro, "osc2": clean_osc2, "mod": clean_mod, "trace": clean_trace,
-               "own_length": clean_length, "height_from": clean_height_from}
+               "own_length": clean_length, "height_from": clean_height_from, "filter": clean_filter}
 EXTRAS = tuple(CLEAN_EXTRA)  # the synth window's own settings (not lines), each checked by its CLEAN_EXTRA
 
 
@@ -811,9 +832,11 @@ def without_cc(hz):
     hz itself when it has none."""
     def strip(src):
         links = (src.get("mod") or {}).get("links") or ()
-        if not any(n in CC_FX for n in src.get("fx") or ()) and not any(l.get("to") in CC_FX for l in links):
+        if (not any(n in CC_FX for n in src.get("fx") or ()) and not any(l.get("to") in CC_TARGETS for l in links)
+                and "filter" not in src):
             return src
         out = dict(src)
+        out.pop("filter", None)  # (the Filter box's knobs: only the Cutoff line's)
         for key in ("fx", "loop", "from", "sustain", "amount"):
             if isinstance(src.get(key), dict):
                 out[key] = {k: v for k, v in src[key].items() if k not in CC_FX}
@@ -824,7 +847,7 @@ def without_cc(hz):
             if key in out and not out[key]:
                 del out[key]
         if links:
-            out["mod"] = dict(src["mod"], links=[l for l in links if l.get("to") not in CC_FX])
+            out["mod"] = dict(src["mod"], links=[l for l in links if l.get("to") not in CC_TARGETS])
         out.pop("_memo", None)
         return out
     out = strip(hz)
@@ -836,9 +859,13 @@ def without_cc(hz):
 
 
 def has_cc(hz):
-    """True when some layer of the Hz bass has a CC line."""
-    return any(n in CC_FX for src in [hz] + [e for e in hz.get("layers") or () if isinstance(e, dict)]
-               for n in src.get("fx") or ())
+    """True when some layer of the Hz bass has a CC line (or the MOD tab moves the Filter box's knobs: live gives it
+    its Cutoff line)."""
+    for src in [hz] + [e for e in hz.get("layers") or () if isinstance(e, dict)]:
+        if any(n in CC_FX for n in src.get("fx") or ()) or any(
+                link.get("to") in FILTER_KNOBS for link in (src.get("mod") or {}).get("links") or ()):
+            return True
+    return False
 
 
 def own_channels(hz):
@@ -856,12 +883,13 @@ def clean_off(off, fx):
 # the envelope-like things whose time knobs the MOD tab moves (timed_line): name -> its knobs, how they're read. The
 # lines' (from them, as their knobs make them), then those worked out in KeyGrid: the Tremolo's Delay / Rise (how
 # much of it has come in), each Mode's Time (FM's depth falling, Sync's rise: how far through it)
-TIMED_NAMES = {"volume": ADSR_KNOBS, "pitch": ("time",), "sweep": ("sweep_time",),
+TIMED_NAMES = {"volume": ADSR_KNOBS, "pitch": ("time",), "sweep": ("sweep_time",), "cc_cutoff": FILTER_KNOBS,
                "vibrato": ("vibrato_wait", "vibrato_delay"), "tremolo_in": ("tremolo_wait", "tremolo_rise"),
                **{f"{osc}{kind}_in": (f"{osc}{kind}_time",) for osc in ("", "osc2_") for kind in ("fm", "sync")}}
 TIMED_KNOBS = {k: line for line, knobs in TIMED_NAMES.items() for k in knobs}
 MOD_SETTINGS.update({name: (0.0, TIME_MOST, TIME_TOP) for name in TIMED_KNOBS},
                     glide=(0.0, GLIDE, TIME_TOP), curve=(-1.0, 1.0, None))
+MOD_SETTINGS.update(filter_amount=(-1.0, 1.0, None), filter_sustain=(0.0, 1.0, None))  # (not times)
 # ... the speed knobs: how far through its waves each repeat is gets added up repeat by repeat (KeyGrid "_turns"), so
 # a speed moving makes the wave go faster or slower from where it is, never jump. Vibrato Rate (from each stretch's
 # start, as before), each Mode's Pulse Rate (from the note's start) and FM Ratio (wave by wave over the stretch)
@@ -916,7 +944,7 @@ def has_fx(hz):
     return ((any(name not in CC_FX for name in hz.get("fx") or ()) or len(copies(hz)) > 1
              or bool((hz.get("voice") or {}).get("random"))
              or bool(hz.get("mode")) or bool(hz.get("osc2")) or bool(layer_trace(hz)) or quiet
-             or any(link["to"] not in CC_FX for link in (hz.get("mod") or {}).get("links", ()))
+             or any(link["to"] not in CC_TARGETS for link in (hz.get("mod") or {}).get("links", ()))
              or any(not e.get("off") for e in hz.get("rack") or ())) and bool(hz.get("tones")))
 
 

@@ -14,6 +14,8 @@ They work like every other line: repeats, Plays once per note, sustain points, M
 
 The synth window's Filter box (MIDI CC) draws the Cutoff line for you: Cutoff, plus Amount and its own Attack, Decay, Sustain and Release, so the Cutoff moves at each note like a synth's filter. Drawing the line by hand on the Draw tab works too.
 
+The MOD tab's LFOs and envelopes can move every Filter knob. Amount and the envelope's knobs only move while the line is as the box made it (not drawn by hand).
+
 ## The whole channel hears them
 
 A MIDI message changes everything on its channel, so other shapes on the same channel are changed too.

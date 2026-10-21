@@ -8,9 +8,9 @@ import math
 
 import numpy as np
 
-from notes.hz_settings import (ADSR_KNOBS, GLIDE_CURVE, MOD_BOXES, MOD_NEED_LINE, NEUTRAL, VIBRATO,
-                               VIBRATO_RATE, bend_range, hz_of)
-from notes.hz_lines import adsr_line, note_bend
+from notes.hz_settings import (ADSR_KNOBS, FILTER_KNOBS, FILTER_START, GLIDE_CURVE, MOD_BOXES, MOD_NEED_LINE,
+                               NEUTRAL, VIBRATO, VIBRATO_RATE, bend_range, hz_of)
+from notes.hz_lines import adsr_line, filter_line, note_bend
 from notes.hz_glide import cached, chains, glide, glide_left, legato_links, links, note_span, pitch, slide_part
 from notes.hz_modulate import fx_at, longest_fall, plain_base, rack_tail, setting_at
 from notes.hz_arp import arpeggiated
@@ -33,7 +33,12 @@ def live(hz, left=0.0):
         hz.update(fx=dict(fx, volume=pts), loop=dict(hz.get("loop") or {}, volume=every),
                   sustain=dict(hz.get("sustain") or {}, volume=at), **{"from": dict(hz.get("from") or {}, volume="note")})
         fx = hz["fx"]
-    missing = [link["to"] for link in (hz.get("mod") or {}).get("links", ()) if link["to"] in MOD_BOXES
+    if ("cc_cutoff" not in fx and "filter" not in boxes_off and any(
+            link["to"] in FILTER_KNOBS for link in (hz.get("mod") or {}).get("links", ()))):
+        # (the Filter knobs moved with no Cutoff line: as the box has it, flat in the middle)
+        hz = {k: v for k, v in hz.items() if k not in ("_memo", "filter")}
+        hz["fx"] = fx = dict(fx, cc_cutoff=filter_line(**FILTER_START)[0])
+    missing =[link["to"] for link in (hz.get("mod") or {}).get("links", ()) if link["to"] in MOD_BOXES
                and link["to"] not in fx and link["to"] not in MOD_NEED_LINE and MOD_BOXES[link["to"]] not in boxes_off]
     if missing:  # (the MOD tab moves them from where they do nothing)
         hz = dict(hz, fx=dict(fx, **{name: [[0.0, NEUTRAL.get(name, 0.0)]] for name in missing}))

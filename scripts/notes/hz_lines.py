@@ -166,6 +166,16 @@ def adsr_line(attack, decay, sustain, release):
     return pts, at, max(LOOP[0], at + release)
 
 
+def filter_line(cutoff, amount, attack, decay, sustain, release):
+    """The Filter box's Cutoff line (a MIDI CC): (points, sustain point, length; None, None = all along): Cutoff moved
+    by Amount x an ADSR envelope from each note's start (adsr_line's, its values cut to 0..1), or flat at Cutoff
+    (Amount 0)."""
+    if abs(amount) < 1e-9:
+        return [[0.0, cutoff]], None, None
+    pts, at, every = adsr_line(attack, decay, sustain, release)
+    return [[p[0], min(1.0, max(0.0, cutoff + amount * p[1])), *p[2:]] for p in pts], at, every
+
+
 def env_line(e, x):
     """adsr_line's line at x beats (an array), worked out directly (its bends FAST / -FAST are squares: many times
     faster than line_at for the MOD tab's envelopes, hunt)."""

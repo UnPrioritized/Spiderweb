@@ -5,11 +5,12 @@ import math
 
 import numpy as np
 
-from notes.hz_settings import (ADSR_KNOBS, ARP_KNOBS, BLEND, FAST, GLIDE_CURVE, HZ_DEFAULTS, LFO_RATES, LOOP,
-                               MOD_ENVS, MOD_LFOS, MOD_RACK, MOD_SETTINGS, NEUTRAL, OSC2, OSC2_TUNE, TIMED_KNOBS,
-                               TIMED_NAMES, TIME_STEP, TREMOLO_DEPTH, VIBRATO_RATE, WAVES, mod_start, osc2_shift,
-                               rack_on)
-from notes.hz_lines import adsr_line, env_value, line_arrays, line_at, loop_shape, note_vel, same_points, sustained
+from notes.hz_settings import (ADSR_KNOBS, ARP_KNOBS, BLEND, CC_FX, FAST, FILTER_KNOBS, FILTER_START, GLIDE_CURVE,
+                               HZ_DEFAULTS, LFO_RATES, LOOP, MOD_ENVS, MOD_LFOS, MOD_RACK, MOD_SETTINGS, NEUTRAL, OSC2,
+                               OSC2_TUNE, TIMED_KNOBS, TIMED_NAMES, TIME_STEP, TREMOLO_DEPTH, VIBRATO_RATE, WAVES,
+                               mod_start, osc2_shift, rack_on)
+from notes.hz_lines import (adsr_line, env_value, filter_line, line_arrays, line_at, loop_shape, note_vel, same_points,
+                            sustained)
 from notes.hz_glide import cached, note_beats, note_span, pitch
 
 
@@ -76,8 +77,9 @@ def setting_base(hz, target):
     nothing: no Tremolo / Sweep line (Depth, Key track), under 3 voices (Blend), OSC B off or with no waveform
     (Shape), another Mode or the oscillator off (a Mode's knobs), the Voice box off (Glide, Curve); a time knob
     whose line was drawn otherwise."""
-    if target in ADSR_KNOBS and "volume" in (hz.get("bypass") or {}).get("boxes", ()):  # (the Volume box off)
-        return None
+    boxes_off = (hz.get("bypass") or {}).get("boxes", ())
+    if target in ADSR_KNOBS and "volume" in boxes_off or target in FILTER_KNOBS and "filter" in boxes_off:
+        return None  # (its box off)
     if target in TIMED_KNOBS:  # (a time knob: while its line is as the knobs make it)
         got = TIMED[TIMED_KNOBS[target]][1](hz)
         return got[target] if got else None
@@ -214,6 +216,20 @@ def knob_vibrato(hz):
     return None
 
 
+def knob_filter(hz):
+    """The Cutoff line as the Filter box made it (hz["filter"], filter_line; none written = as the box starts):
+    {cutoff, filter_amount, filter_attack, ...}, or None (no Cutoff line, drawn otherwise)."""
+    f = hz.get("filter") or FILTER_START
+    pts = (hz.get("fx") or {}).get("cc_cutoff")
+    want, at, every = filter_line(**f)
+    loop, sus = hz.get("loop") or {}, hz.get("sustain") or {}
+    if (not pts or not same_points(want, pts) or loop.get("cc_cutoff") != every or sus.get("cc_cutoff") != at
+            or every is not None and (hz.get("from") or {}).get("cc_cutoff") != "note"
+            or "cc_cutoff" in (hz.get("fit") or ()) or "cc_cutoff" in (hz.get("amount") or {})):
+        return None
+    return dict({f"filter_{k}": v for k, v in f.items() if k != "cutoff"}, cutoff=f["cutoff"])
+
+
 def name_bent(hz, name):
     """An effect's line stretched over each note, with a sustain point or an amount line (no knob makes those)."""
     return (name in (hz.get("fit") or ()) or name in (hz.get("sustain") or {})
@@ -232,6 +248,7 @@ TIMED = {"volume": (TIMED_NAMES["volume"], knob_adsr),
          "pitch": (TIMED_NAMES["pitch"], lambda hz: knob_bend(hz, "pitch", "time")),
          "sweep": (TIMED_NAMES["sweep"], lambda hz: knob_bend(hz, "sweep", "sweep_time")),
          "vibrato": (TIMED_NAMES["vibrato"], knob_vibrato),
+         "cc_cutoff": (TIMED_NAMES["cc_cutoff"], knob_filter),
          **{name: (knobs, knobs_set(*knobs)) for name, knobs in TIMED_NAMES.items() if name.endswith("_in")}}
 
 
@@ -259,23 +276,40 @@ def timed_line(hz, name, beat, tone):
     """An effect's line played once per note whose time knobs the MOD tab moves (TIMED: the Volume box's ADSR, Pitch
     Time, Sweep Time, Vibrato Delay / Rise), at beat (an array) for tone's note, or None (nothing moves them; drawn
     otherwise; no tone: as drawn). Worked out on a grid from the note's start: each stage as long as its knob says at
-    every step (as a synth's envelope, a running stage gets shorter or longer)."""
-    if tone is None or name not in TIMED:
+    every step (as a synth's envelope, a running stage gets shorter or longer). A CC line with no tone (one channel
+    for the whole Hz bass) follows the newest note, as mod_value does."""
+    if name not in TIMED or tone is None and name not in CC_FX:
         return None
     knobs, read = TIMED[name]
     linked = {link["to"] for link in (hz.get("mod") or {}).get("links", ()) if link["to"] in knobs}
     e = read(hz) if linked else None
     if e is None:
         return None
-    g, v = cached(hz, ("timed", name, tone.get("id")), lambda: timed_grid(hz, name, e, linked, tone))
-    return np.interp(np.asarray(beat, float), g, v)
+    beat = np.asarray(beat, float)
+    if tone is not None:
+        g, v = cached(hz, ("timed", name, tone.get("id")), lambda: timed_grid(hz, name, e, linked, tone))
+        return np.interp(beat, g, v)
+    tones = sorted(hz.get("tones") or (), key=lambda n: (n["t"], n["len"]))
+    if not tones:
+        return None
+    i = np.clip(np.searchsorted(np.array([n["t"] for n in tones]), beat, side="right") - 1, 0, len(tones) - 1)
+    out = np.empty(beat.shape)
+    for k in np.unique(i).tolist():
+        n = tones[k]
+        g, v = cached(hz, ("timed", name, n.get("id")), lambda: timed_grid(hz, name, e, linked, n))
+        out[i == k] = np.interp(beat[i == k], g, v)
+    return out
 
 
 def timed_grid(hz, name, e, linked, tone):
     """timed_line's (grid beats, the line's value there), from the note's start past its longest fall."""
     s0, end = note_span(hz, 0.0, tone)
     s0, end = float(s0), float(end)
-    span = end - s0 + cached(hz, "fall", lambda: longest_fall(hz)) + 2 * TIME_STEP
+    fall = cached(hz, "fall", lambda: longest_fall(hz))
+    if name == "cc_cutoff":  # (the Filter's own Release, as long as the MOD tab can make it)
+        r = e["filter_release"]
+        fall = max(fall, setting_most(hz, "filter_release", r) if "filter_release" in linked else r)
+    span = end - s0 + fall + 2 * TIME_STEP
     dt = max(TIME_STEP, span / 100000)
     g = s0 + np.arange(int(span / dt) + 2) * dt
     sources = {}
@@ -303,15 +337,29 @@ def timed_grid(hz, name, e, linked, tone):
         _, tw = stage("vibrato_wait", s0)
         p, _ = stage("vibrato_delay", tw)
         return g, e["depth"] * p
-    s = e["sustain"]  # (the Volume: ADSR)
-    top = 1.0 if e["decay"] > 0 or "decay" in linked else s  # (no decay: the rise goes straight to the sustain)
-    pa, ta = stage("attack", s0)
-    pd, td = stage("decay", ta)
+    if name == "cc_cutoff":  # (the Filter box: Cutoff + Amount x its ADSR; Amount / Sustain read at every step)
+        def knob(key):
+            return setting_at(hz, key, e[key], g, tone, sources) if key in linked else e[key]
+        env = adsr_grid(g, stage, ("filter_attack", "filter_decay", "filter_release"), knob("filter_sustain"),
+                        e["filter_decay"] > 0 or "filter_decay" in linked, s0, end)
+        return g, np.clip(e["cutoff"] + knob("filter_amount") * env, 0.0, 1.0)
+    # (the Volume: ADSR)
+    return g, adsr_grid(g, stage, ADSR_KNOBS, e["sustain"], e["decay"] > 0 or "decay" in linked, s0, end)
+
+
+def adsr_grid(g, stage, keys, s, decayed, s0, end):
+    """An ADSR envelope on timed_grid's grid g: stages of the (attack, decay, release) knobs `keys` (timed_grid's
+    stage), sustain level s (a number or one for each step); decayed = it has a decay (else the rise goes straight to
+    the sustain). The release starts at end from wherever it got."""
+    top = 1.0 if decayed else s
+    pa, ta = stage(keys[0], s0)
+    pd, td = stage(keys[1], ta)
     held = np.where(g < ta, top * pa ** 2, np.where(g < td, 1.0 + (s - 1.0) * (1.0 - (1.0 - pd) ** 2), s))
     left = float(np.interp(end, g, held))  # (where it got when the note ends: the fall starts from there)
-    pr, _ = stage("release", end)
-    fell = np.clip(s * (1.0 - pr) ** 2 + (left - s) * (1.0 - pr), 0.0, 1.0)
-    return g, np.where(g < end, held, fell)
+    pr, _ = stage(keys[2], end)
+    s_end = float(np.interp(end, g, np.broadcast_to(s, g.shape)))
+    fell = np.clip(s_end * (1.0 - pr) ** 2 + (left - s_end) * (1.0 - pr), 0.0, 1.0)
+    return np.where(g < end, held, fell)
 
 
 def setting_most(hz, target, base):
