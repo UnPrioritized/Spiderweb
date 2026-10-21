@@ -1639,8 +1639,8 @@ class RollDrawing:
         self.create_rectangle(0, 0, kb, top, fill=look.RULER_BG, outline="", tags="frame")
 
     def bar_y(self):
-        """The bar numbers' middle: the ruler's top half (the tempo changes go under them)."""
-        return 8 * self.scale
+        """The bar numbers' middle: the ruler's bottom half, by their ticks (the tempo changes go above them)."""
+        return self.ruler_h - 9 * self.scale
 
     def tempo_layout(self, w):
         """[(x, text, tip, colour)] of the tempo changes on the ruler (user 2026-10-22): a mark at each Tempo pane
@@ -1684,14 +1684,12 @@ class RollDrawing:
             return
         self.delete("tempomark")
         self._tempo_key, self.tempo_tips = key, []
-        y, end = top - 8 * s, -math.inf
-        for x, text, tip, colour in self.tempo_layout(w):
+        y, end, tags = 8 * s, -math.inf, ("frame", "tempomark")
+        marks = self.tempo_layout(w)
+        for i, (x, text, tip, colour) in enumerate(marks):
             if any(x0 <= x < x1 for x0, x1 in bands):
                 colour = look.RULER_PICK_TEXT
-            tags = ("frame", "tempomark")
-            self.create_line(x, top - 14 * s, x, top, fill=colour, tags=tags)
-            self.create_polygon(x - 3 * s, top - 14 * s, x + 3 * s, top - 14 * s, x, top - 10 * s, fill=colour,
-                                outline=colour, tags=tags)
+            self.create_line(x, 0, x, top, fill=colour, tags=tags)  # (on the exact tick, down to the bar line)
             right = x + 4 * s
             if text and x + 3 * s > end:
                 item = self.create_text(x + 3 * s, y, text=text, anchor="w", fill=colour, font=look.font(7, fit=True),
@@ -1699,6 +1697,10 @@ class RollDrawing:
                 right = self.bbox(item)[2]
                 end = right + 4 * s
             self.tempo_tips.append((x - 4 * s, right, tip))
+            # a faint line from its text on to the next change: how long the tempo lasts (user's mock-up)
+            x0, x1 = (right + 3 * s if right > x + 4 * s else x + 1), (marks[i + 1][0] if i + 1 < len(marks) else w) - 3 * s
+            if x1 > x0:
+                self.create_line(x0, round(y), x1, round(y), fill=look.RULER_TEMPO_LINE, tags=tags)
         self.tag_raise("playhead")
 
     def ruler_marks(self, w):

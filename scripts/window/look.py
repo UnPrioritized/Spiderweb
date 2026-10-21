@@ -171,7 +171,8 @@ KEY_EDGE_C, KEY_EDGE_F = pick("#606060", "#5a5a5c"), pick("#b0b0b0", "#8a8a8c") 
 KEY_TEXT = pick("#333", "#363637")
 ROLL_EDGE = pick("#808080", "#656567")  # beside the keys, under the ruler
 RULER_BG, RULER_TICK, RULER_TEXT = pick("#f0f0f0", "#434346"), pick("#555", "#a0a0a4"), pick("#333", "#e2e2e4")
-RULER_TEMPO = pick("#8a8a8a", "#a0a0a4")  # the tempo changes marked under the bar numbers (light)
+RULER_TEMPO = pick("#8a8a8a", "#a0a0a4")  # the tempo changes marked above the bar numbers (light)
+RULER_TEMPO_LINE = pick("#d2d2d2", "#5a5a5e")  # their line on to the next change (fainter still)
 RULER_PICK, RULER_PICK_TEXT =pick("#141414", "#e2e2e4"), pick("#ffffff", "#2f2f31")  # the ruler under a Select box
 #                                                                                       over every key (dark: turned)
 PLAY_LINE = pick("#0a50e0", "#d6e8ff")  # (dark: pale blue, the bright notes' blue hid a stronger one, user)
