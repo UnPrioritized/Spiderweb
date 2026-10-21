@@ -134,14 +134,11 @@ class HzMouse:
         self.box_kept = (boxes, set(self.sel))
 
     def box_move_to(self, d, e):
-        """A kept Select box over nothing dragged from inside: it goes with the mouse, whole snap steps (Shift =
-        free) and whole keys, kept at beat 0 and the keys' ends (a band on the bar numbers: time only). Notes it's
+        """A kept Select box over nothing dragged from inside: it goes with the mouse, its left side on the grid
+        (box_dt) and whole keys, kept at beat 0 and the keys' ends (a band on the bar numbers: time only). Notes it's
         moved onto aren't picked up."""
-        sb, dt = self.snap_beats(), self.beat_at(e.x) - d["beat"]
-        if sb and not e.state & SHIFT:
-            dt = round(dt / sb) * sb
         boxes = d["box"]
-        dt = max(dt, -min(min(b0, b1) for b0, _, b1, _ in boxes))
+        dt = self.box_dt(boxes, self.beat_at(e.x) - d["beat"], e, math.inf)
         if d.get("time_only"):
             self.box_kept = ([(b0 + dt, top, b1 + dt, bottom) for b0, top, b1, bottom in boxes], set())
             return self.redraw()
@@ -150,6 +147,22 @@ class HzMouse:
         self.box_kept = ([(b0 + dt, top + dk, b1 + dt, bottom + dk) for b0, top, b1, bottom in boxes], set())
         self.redraw()
         self.show_status(e)
+
+    def box_dt(self, boxes, dt, e, back):
+        """A move that takes the kept Select boxes along by the mouse's dt beats: their left side goes to the grid
+        line nearest where the mouse takes it, the notes move as much and keep their places off the grid (user, like
+        Domino and the main piano roll; the right side is never looked at). It all stops together on the last grid
+        line it can reach before anything passes beat 0 (back: how far left the notes can go). Shift / snap off =
+        whole ticks."""
+        left = min(min(b0, b1) for b0, _, b1, _ in boxes)
+        back, sb = min(back, left), self.snap_beats()
+        if not sb or e.state & SHIFT:
+            tick = 1 / self.app.ppq
+            return max(round(dt / tick) * tick, -back)
+        dt = round((left + dt) / sb) * sb - left
+        if dt < -back - 1e-9:  # (no grid line it can reach that way: it stays)
+            dt = min(0.0, math.ceil((left - back) / sb - 1e-9) * sb - left)
+        return dt
 
     def sel_state(self):
         """The selected notes as the main window's undo step keeps them (App.sel_state): (their numbers, the kept
@@ -487,9 +500,14 @@ class HzMouse:
                 n = self.tones[d["i"]]
             orig = d["orig"]
             held = orig[d["i"]]
-            dt = 0.0 if far < 4 else self.snap(held["t"] + beat - d["beat"], e) - held["t"]
+            first = min(orig[i]["t"] for i in self.sel)
+            if far < 4:
+                dt = 0.0
+            elif d.get("box"):  # (the kept Select box goes along: it sticks to the grid, not the note held)
+                dt = self.box_dt(d["box"], beat - d["beat"], e, first)
+            else:
+                dt = max(self.snap(held["t"] + beat - d["beat"], e) - held["t"], -first)
             dk = 0 if d.get("time_only") else self.key_at(e.y) - d["key"]  # (the bar numbers' band: time only)
-            dt = max(dt, -min(orig[i]["t"] for i in self.sel))
             dk = max(-min(orig[i]["key"] for i in self.sel), min(127 - max(orig[i]["key"] for i in self.sel), dk))
             for i in self.sel:
                 self.tones[i]["t"], self.tones[i]["key"] = orig[i]["t"] + dt, orig[i]["key"] + dk

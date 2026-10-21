@@ -404,6 +404,27 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 best, got = abs(steps + fix - raw), (steps, fix, side)
         return got
 
+    def box_step(self, db, dp, e, idx):
+        """A move that takes the kept Select box along (its inside, the ruler's band, a shape it selected): its
+        left side goes to the grid line nearest where the mouse takes it, the notes move as much and keep their
+        places off the grid (user, like Domino; the right side is never looked at). Everything stops together at
+        beat 0 and the keys' ends (user: like Domino), on the last grid line it can reach. Shift / snap off =
+        free. (db, dp) of the move."""
+        left = min(min(b0, b1) for b0, _, b1, _ in self.box_moving)
+        rooms = [self.room[j] for j in idx if self.room.get(j)]
+        back = min([left] + [r[0] for r in rooms])  # (how far left it can all go)
+        down, up = min([r[1] for r in rooms], default=math.inf), min([r[2] for r in rooms], default=math.inf)
+        sb = self.app.snap_beats()
+        if sb and not e.state & SHIFT:
+            raw = self.event_pt(e, snap=False, above=True)[0] - self.press_beat
+            db = round((left + raw) / sb) * sb - left
+            if db < -back - 1e-9:  # (no grid line it can reach that way: it stays)
+                db = min(0.0, math.ceil((left - back) / sb - 1e-9) * sb - left)
+            down, up = (math.floor(v + 1e-9) if v < math.inf else v for v in (down, up))
+        else:
+            db = max(db, -back)
+        return db, min(max(dp, -down), up)
+
     def edge_fix(self, edges, side):
         """How far (beats) edges[side] (note_edges) is from the grid line nearest it; 0 for nothing to play."""
         sb = self.app.snap_beats()
@@ -1211,14 +1232,18 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 return
             if self.dup and self.dup != "done":
                 orig = self.copy_moved(orig)
-            if self.room is None:  # (each shape stops at beat 0 and the lowest / highest key on its own, the Select
-                self.room = {j: self.move_room(self.app.shapes[j]) for j in orig}  # box and the rest go on: user)
-                self.onto_grid = (self.note_edges(orig), {j: self.note_edges([j]) for j in orig})
+            if self.room is None:  # (each shape stops at beat 0 and the lowest / highest key on its own, the rest go
+                self.room = {j: self.move_room(self.app.shapes[j]) for j in orig}  # on; with the box all stop: user)
+                self.onto_grid = ((None, {}) if self.box_moving else
+                                  (self.note_edges(orig), {j: self.note_edges([j]) for j in orig}))
             fix, side = 0.0, None
-            if self.app.snap_beats() and not e.state & SHIFT and self.onto_grid[0]:  # the nearest sticky point: the
-                raw = self.event_pt(e, snap=False, above=True)[0] - self.press_beat  # earliest note's start or the
-                db, fix, side = self.sticky_move(self.onto_grid[0], raw)               # last one's end (user)
-            go = {j: self.in_room(db + fix, dp, e, self.room[j], fix) for j in orig}
+            if self.box_moving:  # the kept Select box goes along: it sticks to the grid, not the notes (box_step)
+                db, dp = self.box_step(db, dp, e, orig)
+            elif self.app.snap_beats() and not e.state & SHIFT and self.onto_grid[0]:  # the nearest sticky point:
+                raw = self.event_pt(e, snap=False, above=True)[0] - self.press_beat  # the earliest note's start or
+                db, fix, side = self.sticky_move(self.onto_grid[0], raw)               # the last one's end (user)
+            go = ({j: (db, dp) for j in orig} if self.box_moving else
+                  {j: self.in_room(db + fix, dp, e, self.room[j], fix) for j in orig})
             held = [j for j in orig if go[j][0] != db + fix] if side is not None else []
             if held:  # one held back at beat 0: it sits with its own earliest note on the grid, the rest stick by
                 own = self.onto_grid[1]  # their own edges (else they took the held one's shift off the grid)
