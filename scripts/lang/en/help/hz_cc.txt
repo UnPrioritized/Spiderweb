@@ -1,0 +1,41 @@
+The lines under the "MIDI CC" row in the Effects pane make no notes. They go into the MIDI as messages, and the player changes the sound with them:
+
+Cutoff (CC 74): brighter or darker. The soundfont does the filtering, and some soundfonts don't react to it.
+
+Expression (CC 11) and Channel volume (CC 7): louder or quieter, without changing the notes' velocity.
+
+Pan (CC 10): left or right.
+
+Pitch wheel: bends every note up or down, up to 12 keys each way.
+
+They work like every other line: repeats, Plays once per note, sustain points, MOD tab links, presets.
+
+## Filter box
+
+The synth window's Filter box (MIDI CC) draws the Cutoff line for you: Cutoff, plus Amount and its own Attack, Decay, Sustain and Release, so the Cutoff moves at each note like a synth's filter. Drawing the line by hand on the Draw tab works too.
+
+## The whole channel hears them
+
+A MIDI message changes everything on its channel, so other shapes on the same channel are changed too.
+
+When you play in Spiderweb, a Hz bass with CC lines is played on a channel of its own, as long as one is free. Built-in BASSMIDI has plenty of channels; other MIDI outs have only 16.
+
+A MIDI file you export and Export to Domino keep the channels as they are. To keep other shapes out of it, pick Multi channel with "Split: any notes at the same time", so shapes that sound at the same time get different channels.
+
+The lines run on 3 seconds after the sound ends, then every value goes back to where players start, so shapes later on the channel aren't changed.
+
+## Own channel per note
+
+With one channel (the start), every note of the Hz bass shares one set of lines: a line that plays once per note follows the newest note, and a chord's notes all hear the same values.
+
+Voice box → CC → Own channel per note gives each note its own channel and its own lines. A note joined to others by slides, Legato or Glide counts as one note. It needs Multi channel.
+
+Past 15 channels, every track of the MIDI file gets a port (A, B, C…), up to 240 channels. In Domino, give ports B, C… a device in the MIDI-OUT settings, or those tracks stay silent.
+
+## Live keys
+
+The live keys in the synth window play the CC lines too, as a quick copy: Cutoff, Pan and the Pitch wheel in small steps, each note keeping the value it started with.
+
+## Pitch wheel in Domino
+
+Domino drops pitch bends unless the port has a Sound Source picked (for example GM Level 1 or GSm) in its MIDI-OUT settings.

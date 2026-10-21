@@ -26,4 +26,6 @@ Octave below: every other repeat is softer, so the tone an octave below comes in
 
 Sine, Square, Saw, Triangle: every key hits 16 times in each wave, loud and soft in the shape of that wave. Sine takes the overtones away (a soft, pure tone), Square and Triangle take every second one away (a hollow tone), Saw makes the high ones a little quieter. 0 % is the plain tone.
 
+Cutoff, Expression, Channel volume, Pan, Pitch wheel (under "MIDI CC"): sent as MIDI messages, not notes; see Hz bass MIDI CC lines.
+
 The waveforms make many more notes, up to 16 times as many: the count is at the bottom of the window.
