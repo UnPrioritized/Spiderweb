@@ -12,10 +12,21 @@ from files.mathexpr import calc
 from files.playback import BUILTIN, cc_list
 from files.synth import FONT_TYPES, LIVE_PORTS, Live, Synth, SynthError, silent_list
 from notes.engine import slot_track_channel
-from notes.hz_cc import cc_apart
-from notes.hzbass import has_cc
+from notes.hz_cc import cc_apart, set_auto_ring, typed_ring
+from notes.hzbass import RING_MOST, has_cc
 from window.hz_preview import VOICES
 from window.widgets import bad, good
+
+RING_KEYS = (24, 36, 48, 60, 72, 84)  # keys whose ring is measured for Auto's CC run-on (the longest counts)
+
+
+def font_sig(path):
+    """The soundfont file as its size, time changed and path (Auto's run-on measured for exactly it), None: none."""
+    try:
+        st = os.stat(path) if path else None
+    except OSError:
+        return None
+    return f"{st.st_size}:{int(st.st_mtime)}:{os.path.normpath(path)}" if st else None
 
 
 class Playback:
@@ -181,6 +192,7 @@ class Playback:
                     raise
             live = Live(self.synth, self.play_voices, limiter=self.play_limiter.get())
             self.note_builtin()
+            self.ring_check()  # (Auto's CC run-on: measured from it now if it isn't known)
             return live
         finally:
             self.busy(None)
@@ -243,6 +255,52 @@ class Playback:
         if self.synth is not None:
             self.synth.stale = True  # (picked again = opened again: samples put back since then are found)
         self.check_samples(self.hz_preview["font"])
+        self.ring_check()
+
+    def ring_check(self, quiet=False):
+        """Auto's CC run-on (hz_cc.auto_ring) for the soundfont picked: the time remembered for it, else measured in
+        the background once the synth has it open (Hz preview, Built-in BASSMIDI); 3 seconds (hz_cc.RING) until
+        then. quiet: only set (the settings being read at the start: the notes are made after)."""
+        cfg = self.hz_preview
+        sig = font_sig(cfg["font"])
+        if sig is not None and cfg.get("ring_font") == sig:
+            self.auto_ring_is(cfg["ring"], quiet)
+            return
+        self.auto_ring_is(None, quiet)
+        synth = getattr(self, "synth", None)  # (none yet while the settings are read at the start)
+        if (sig is None or synth is None or not synth.font_path
+                or os.path.normpath(synth.font_path) != os.path.normpath(cfg["font"]) or synth.stale
+                or getattr(self, "_ring_job", None) == sig):
+            return
+        self._ring_job, result = sig, []
+
+        def work():
+            try:
+                result.append(synth.ring_after(RING_KEYS, RING_MOST))
+            except SynthError:
+                pass
+        job = threading.Thread(target=work, daemon=True)
+        job.start()
+
+        def done():
+            if job.is_alive():
+                self.after(200, done)
+                return
+            self._ring_job = None
+            if result and font_sig(cfg["font"]) == sig and self.winfo_exists():
+                cfg["ring"], cfg["ring_font"] = math.ceil(result[0] * 10 - 1e-9) / 10, sig  # (up to a tenth)
+                self.schedule_autosave()
+                self.auto_ring_is(cfg["ring"])
+        self.after(200, done)
+
+    def auto_ring_is(self, seconds, quiet=False):
+        """Auto's CC run-on is this now (None: not known): Hz basses sending CC on Auto made again."""
+        if not set_auto_ring(seconds) or quiet:
+            return
+        if any(has_cc(sh.get("hz") or {}) and typed_ring(sh["hz"]) is None for sh in self.shapes):
+            self.shapes_changed()
+        if getattr(self, "hz_window", None):
+            self.hz_window.sync()
 
     def check_samples(self, path):
         """(An .sfz just picked) its sound files checked in the background: missing ones or ones in a format the

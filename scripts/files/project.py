@@ -598,6 +598,7 @@ class ProjectFiles:
         def sound():
             from window.hz_preview import VOICES, clean_settings
             self.hz_preview = clean_settings(win.get("hz_preview"))
+            self.ring_check(quiet=True)  # (Auto's CC run-on remembered for its soundfont)
             v = win.get("play_voices")
             if isinstance(v, int) and not isinstance(v, bool) and VOICES[0] <= v <= VOICES[1]:
                 self.play_voices = v

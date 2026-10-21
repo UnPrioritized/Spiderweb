@@ -11,6 +11,7 @@ costs nothing), so any change counts: this window, the main piano roll, undo, BP
 after the last change (at once while playing). Another shape picked: the play line goes back to its first note.
 Settings: app.hz_preview (kept with the window settings in the autosave; the soundfont is a path on this PC)."""
 
+import math
 import os
 import threading
 import time
@@ -52,6 +53,10 @@ def clean_settings(d):
     if isinstance(d.get("volume"), (int, float)) and 0 <= d["volume"] <= 1:
         got["volume"] = float(d["volume"])
     got["on"], got["nofx"] = d.get("on") is True, d.get("nofx") is True
+    ring = d.get("ring")  # (Auto's CC run-on measured for the soundfont "ring_font": App.ring_check)
+    if (isinstance(ring, (int, float)) and not isinstance(ring, bool) and math.isfinite(ring) and ring >= 0
+            and isinstance(d.get("ring_font"), str)):
+        got["ring"], got["ring_font"] = float(ring), d["ring_font"]
     return got
 
 
@@ -288,6 +293,7 @@ class Preview:
                 return self.win.preview_failed(err, font=True)
             else:
                 self.loaded_at = time.perf_counter()
+                self.app.ring_check()  # (Auto's CC run-on: measured from it now if it isn't known)
         self.look()
         for i, job in list(self.jobs.items()):
             if job.finished:

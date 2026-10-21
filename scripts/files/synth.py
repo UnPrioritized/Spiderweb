@@ -395,6 +395,19 @@ class Synth:
             self.bass.BASS_StreamFree(h)
             self._give(used)
 
+    def ring_after(self, keys, most):
+        """Seconds the soundfont's sound (program 0, no reverb / chorus) goes on after a note is let go: the longest
+        of `keys`, each played loud alone, at most `most` (one still sounding then counts as most)."""
+        gate, longest = RATE // 4, 0.0
+        for k in keys:
+            st = {}
+            self.render(events(np.array([[0, gate, k, 127]]), RATE, 60), RATE, 0, gate + int(most * RATE), 64,
+                        nofx=True, stats=st)
+            if "end" not in st:
+                return float(most)
+            longest = max(longest, (st["end"] - gate) / RATE)
+        return longest
+
     def render(self, ev, ppq, start, frames, voices, nofx=False, cancel=None, progress=None, stats=None):
         """`frames` frames of sound from `start` (frames from the song's start) as float32 rows (left, right).
         cancel = a threading.Event (set = stop: returns None); progress(frames done) after every piece;
