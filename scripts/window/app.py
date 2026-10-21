@@ -2314,6 +2314,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return
         self.tempo_box.sync()
         self.tempo_pane.request_redraw()
+        self.roll.draw_tempo_marks(self.roll.kept_box() or [])  # (the ruler's marks; shown with the pane hidden too)
         self.schedule_autosave()
         if self.player.running:  # (playing: on at the new tempo; while a drag goes on, once the mouse rests)
             if getattr(self, "_tempo_play_job", None):

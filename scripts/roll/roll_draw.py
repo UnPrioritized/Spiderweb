@@ -1,5 +1,6 @@
 """Piano roll: painting the grid, notes, shapes, handles, keyboard and ruler."""
 
+import json
 import math
 import time
 import tkinter as tk
@@ -17,6 +18,7 @@ from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funne
 from notes.paths import KEYS
 from notes.sliced import clip_strokes, moved_by, moved_mark, on_side, piece_knives
 from notes.sustain import is_sustained
+from notes.tempo import bpm_text, ruler_marks, short_bpm
 from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, GHOST_COLOR, PIANO_88, PREVIEW_LIMIT,
                               SELECTED_COLOR, SLOT_COLORS, draw_boxes, fade, note_name, slot_colours)
 from roll.tiles import Tiles, see_through
@@ -537,6 +539,7 @@ class RollDrawing:
             self.dtag("made")
             self.draw_playhead(keep=True)
         self.tag_raise("rulerpick")  # (over the ruler, under the play line)
+        self.tag_raise("tempomark")
         self.tag_raise("playhead")
         if self.typing:
             self.show_caret()
@@ -1631,9 +1634,72 @@ class RollDrawing:
         self.create_line(0, top, w, top, fill=look.ROLL_EDGE, tags="frame")
         for x, label in self.ruler_marks(w):
             self.create_line(x, top - 6, x, top, fill=look.RULER_TICK, tags="frame")
-            self.create_text(x + 3, top / 2, text=label, anchor="w", fill=look.RULER_TEXT,
+            self.create_text(x + 3, self.bar_y(), text=label, anchor="w", fill=look.RULER_TEXT,
                              font=look.font(8, fit=True), tags="frame")
         self.create_rectangle(0, 0, kb, top, fill=look.RULER_BG, outline="", tags="frame")
+
+    def bar_y(self):
+        """The bar numbers' middle: the ruler's top half (the tempo changes go under them)."""
+        return 8 * self.scale
+
+    def tempo_layout(self, w):
+        """[(x, text, tip, colour)] of the tempo changes on the ruler (user 2026-10-22): a mark at each Tempo pane
+        point / catch-up line on screen, the text BPMs to one decimal (tip: the full ones)."""
+        pane = getattr(self.app, "tempo_pane", None)
+        if pane is None:
+            return []
+        out = []
+        for b, kind, v in ruler_marks(self.app.tempo, pane.base(), self.app.ppq):
+            x = self.t2x(b)
+            if not self.kb_w <= x <= w:
+                continue
+            if kind == "catch":
+                tip = tr("tempo.mark_catch", bpm=bpm_text(v)) if v is not None else tr("tempo.not_possible")
+                out.append((x, tr("tempo.catch"), tip, look.TEMPO_CATCH if v is not None else look.ERROR))
+                continue
+            before, at, then = v
+            short, full = [], []
+            if before is not None and abs(before - at) > 1e-6 * at:
+                short.append(f"{short_bpm(before)} → {short_bpm(at)}")
+                full.append(f"{bpm_text(before)} → {bpm_text(at)}")
+            if then is not None:
+                way = "↗" if then > at else "↘"
+                short.append(f"{short_bpm(at)} {way} {short_bpm(then)}" if not short else f"{way} {short_bpm(then)}")
+                full.append(f"{bpm_text(at)} {way} {bpm_text(then)}" if not full else f"{way} {bpm_text(then)}")
+            out.append((x, " ".join(short), (" ".join(full) or bpm_text(at)) + " BPM", look.RULER_TEMPO))
+        return sorted(out, key=lambda m: m[0])
+
+    def draw_tempo_marks(self, boxes):
+        """The tempo changes under the bar numbers: a small mark on the exact tick, its text right of it (one that
+        would run into the one before shows only its mark); white over a ruler band. Kept while nothing they show
+        changed."""
+        if self.sx is None:
+            return
+        w, top, s = self.winfo_width(), self.ruler_h, self.scale
+        bands =tuple(sorted(sorted((self.t2x(a[0]), self.t2x(a[2]))) for a in self.ruler_boxes(boxes)))
+        pane = getattr(self.app, "tempo_pane", None)
+        key = (json.dumps(self.app.tempo), pane and pane.base(), self.app.ppq, w, top, self.kb_w, self.sx,
+               self.view_t, s, bands)
+        if key == self._tempo_key and self.find_withtag("tempomark"):
+            return
+        self.delete("tempomark")
+        self._tempo_key, self.tempo_tips = key, []
+        y, end = top - 8 * s, -math.inf
+        for x, text, tip, colour in self.tempo_layout(w):
+            if any(x0 <= x < x1 for x0, x1 in bands):
+                colour = look.RULER_PICK_TEXT
+            tags = ("frame", "tempomark")
+            self.create_line(x, top - 14 * s, x, top, fill=colour, tags=tags)
+            self.create_polygon(x - 3 * s, top - 14 * s, x + 3 * s, top - 14 * s, x, top - 10 * s, fill=colour,
+                                outline=colour, tags=tags)
+            right = x + 4 * s
+            if text and x + 3 * s > end:
+                item = self.create_text(x + 3 * s, y, text=text, anchor="w", fill=colour, font=look.font(7, fit=True),
+                                        tags=tags)
+                right = self.bbox(item)[2]
+                end = right + 4 * s
+            self.tempo_tips.append((x - 4 * s, right, tip))
+        self.tag_raise("playhead")
 
     def ruler_marks(self, w):
         """(x, bar number) of each number on the ruler, from the keyboard to w."""
@@ -1661,6 +1727,8 @@ class RollDrawing:
             for x, label in self.ruler_marks(w):
                 if x0 <= x < x1:
                     self.create_line(x, top - 6, x, top, fill=look.RULER_PICK_TEXT, tags=("selbox", "rulerpick"))
-                    self.create_text(x + 3, top / 2, text=label, anchor="w", fill=look.RULER_PICK_TEXT,
+                    self.create_text(x + 3, self.bar_y(), text=label, anchor="w", fill=look.RULER_PICK_TEXT,
                                      font=look.font(8, fit=True), tags=("selbox", "rulerpick"))
+        self.draw_tempo_marks(boxes)
+        self.tag_raise("tempomark")
         self.tag_raise("playhead")

@@ -25,12 +25,13 @@ the project BPM's. Every value written also survives Domino opening and saving t
 measured 2026-10-21, Domino keeps a tempo as a 32-bit BPM, f32(6e7 / us), and saves trunc(6e7 / bpm): half of all
 values lost 1 us each save)."""
 
+import bisect
 import json
 import math
 
 import numpy as np
 
-from files.mathexpr import formula
+from files.mathexpr import fmt, formula
 
 MIN_BPM = 60_000_000 / 0xFFFFFF  # ~3.58: the slowest a MIDI file holds (24-bit microseconds per beat)
 MAX_BPM = 60_000_000.0  # 1 microsecond per beat (faster = 0, which breaks the file; Domino writes that past it)
@@ -864,6 +865,66 @@ def file_segments(tempo, base, ppq, end=0):
         # (the drawn pieces cut where the catch-up goes; its values worked out with the pane's check)
         segs = _put(segs, beat_tick(st["line"], ppq), beat_tick(st["end"], ppq), plan["fit"])
     return segs, bad
+
+
+def bpm_text(v):
+    v = float(v)
+    return f"{v:,.0f}" if v >= 10000 else fmt(round(v, 3))
+
+
+def short_bpm(v):
+    """A BPM to one decimal (user: the ruler stays calm): 133.333 -> 133.3, 120.0 -> 120."""
+    v = float(v)
+    return f"{v:,.0f}" if v >= 10000 else fmt(round(v, 1))
+
+
+def ruler_marks(tempo, base, ppq):
+    """The tempo changes the piano roll's ruler marks (user 2026-10-22): [(beat, "point", (before, at, then))] for
+    each point (before = the BPM just before it, None at beat 0; then = where its part goes, None when it holds)
+    and [(beat, "catch", BPM or None when it can't work)] for each catch-up line."""
+    if not has_tempo(tempo):
+        return []
+    key = (json.dumps(tempo), base, ppq)
+    if key in _marks:
+        return _marks[key]
+    worked = plans(tempo, base, ppq)
+    pts, lines = tempo["points"], [st["line"] for st, _ in worked]
+    out = []
+    for i, p in enumerate(pts):
+        b = p[0]
+        before = float(shown_bpm(tempo, base, [b - 1e-9 * max(1.0, b)], worked)[0]) if b > 0 else None
+        then = None
+        if p[2] != "hold" and i + 1 < len(pts) and pts[i + 1][1] != p[1]:
+            cut = [x for x in lines if b < x < pts[i + 1][0]]  # (a catch-up line cuts the part short)
+            then = float(drawn_bpm(tempo, base, [min(cut)])[0]) if cut else float(pts[i + 1][1])
+        out.append((b, "point", (before, float(p[1]), then)))
+    out += [(st["line"], "catch", plan["bpm"] if plan["ok"] else None) for st, plan in worked]
+    if len(_marks) > 4:
+        _marks.clear()
+    _marks[key] = out
+    return out
+
+
+_marks = {}
+
+
+def bpm_at(tempo, base, ppq, tick):
+    """The exact BPM the file holds at a tick (Spiderweb's ticks, before Keep timing moves anything: what the pane
+    draws there); the project's BPM without a tempo line."""
+    if not has_tempo(tempo):
+        return float(base)
+    key = (json.dumps(tempo), base, ppq)
+    got = _at.get(key)
+    if got is None:  # (the play line moves every frame while playing: worked out once per tempo line)
+        runs = _runs(file_segments(tempo, base, ppq)[0])
+        if len(_at) > 4:
+            _at.clear()
+        got = _at[key] = ([t for t, _ in runs], [u for _, u in runs])
+    ticks, us = got
+    return 60_000_000 / us[max(0, bisect.bisect_right(ticks, tick) - 1)]
+
+
+_at = {}
 
 
 def file_seconds(events, ppq, tick):

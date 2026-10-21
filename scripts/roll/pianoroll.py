@@ -30,6 +30,7 @@ from roll.roll_funnel import FunnelEditing
 from roll.roll_hz import HzStart
 from window import look
 from window.hz_window import open_hz
+from window.widgets import Tooltip
 from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
 from roll.roll_path import PathEditing
@@ -48,7 +49,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
         self.app = app
         self.scale = scale
-        self.kb_w, self.ruler_h = 56 * scale, 20 * scale
+        self.kb_w, self.ruler_h = 56 * scale, 28 * scale  # (ruler: bar numbers, the tempo changes under them)
         # view: beat at left edge, pitch at top edge, pixels per beat, pixels per pitch row
         self.view_t, self.view_top, self.sx, self.sy = 0.0, 127.5, None, None
         self.draft = None  # shape being drawn
@@ -101,6 +102,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self._redraw_pending = False
         self._late_redraw = None  # request_redraw(delay)'s timer
         self._grid_key = self._frame_key = self._playhead_x = None  # what the kept canvas items show (redraw)
+        self._tempo_key, self.tempo_tips = None, []  # the ruler's tempo marks (draw_tempo_marks): [(x0, x1, tip)]
+        self.tempo_tip = Tooltip(self, "")  # (their full BPMs while the mouse rests on one)
         self.scrub_t = None  # right-drag listening: where its own line is (beats), roll_draw.draw_playhead
         self._draft_made = None  # the shape being drawn / placed: (notes_tracks key, its notes and tracks or None
         # past PREVIEW_LIMIT, its note count or None)
@@ -1631,8 +1634,19 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 and (app.clipboard and app.clip_kind != "stroke" or app.shared_clip(shapes_only=True) is not None
                      or app.domino_newer()))
 
+    def tempo_hover(self, e):
+        """The full BPMs of the ruler's tempo mark under the mouse in a tip box (none elsewhere)."""
+        tip = self.tempo_tip
+        text = next((t for x0, x1, t in self.tempo_tips if x0 <= e.x <= x1), "") if e.y < self.ruler_h else ""
+        if text != tip.text:
+            tip.hide()
+            tip.text = text
+            if text and not tip.used and not e.state & tip.BUTTONS:
+                tip.schedule()
+
     def on_motion(self, e):
         self.app.show_position(self.position_text(e))
+        self.tempo_hover(e)
         if not self.drag and not self.draft and (self.path_motion(e) or self.path_hit(e.x, e.y)):
             self.set_cursor("fleur")  # (Copy along a path: B follows the mouse, or a point of its path is under it)
             return

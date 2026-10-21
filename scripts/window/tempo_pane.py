@@ -24,8 +24,8 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from files.system import double_click_ms
-from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, bend_of, clamp_bpm, curve,
-                         formula_fn,
+from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, bend_of, bpm_at,
+                         bpm_text, clamp_bpm, curve, formula_fn,
                          catch_get, catch_set, keeps, layout,
                          plans, shown_bpm, step_edges)
 from roll.zoombar import add_zoom_bars
@@ -51,11 +51,6 @@ def part_kind(p, scale):
     return [p[2], p[3], p[4], keeps(p), list(bend_of(p))]
 
 
-def bpm_text(v):
-    v = float(v)
-    return f"{v:,.0f}" if v >= 10000 else fmt(round(v, 3))
-
-
 class TempoBox(ttk.Frame):
     """The Tempo pane with two bar rows on top: tools, BPM snap, Graph; then what's picked + a hint."""
 
@@ -64,7 +59,11 @@ class TempoBox(ttk.Frame):
         self.app = app
         bar = self.bar = ttk.Frame(self, padding=(2, 2))
         bar.pack(fill="x")
-        ttk.Label(bar, text=tr("tempo.tempo")).pack(side="left", padx=(2, 8))
+        ttk.Label(bar, text=tr("tempo.tempo")).pack(side="left", padx=(2, 4))
+        # the exact BPM at the play line (user 2026-10-22; a set width: playing doesn't push the tools about)
+        self.play_bpm = ttk.Label(bar, text="", width=13, foreground=look.INFO)
+        self.play_bpm.pack(side="left", padx=(0, 4))
+        Tooltip(self.play_bpm, tr("tempo.play_bpm_tip"))
         self.tool = tk.StringVar(value="point")  # select / point / line / formula
         self.last_pencil = "point"  # (double right-click: Select <-> this)
         self.tool_vars = {}
@@ -1681,7 +1680,17 @@ class TempoPane(tk.Canvas):
             ys = self.b2y(vals)
             self.create_line(*np.column_stack([xs, ys]).ravel().tolist(), fill=look.TEMPO_PICKED, width=lw + 2)
 
+    def show_play_bpm(self):
+        app = self.app
+        if not self.box.winfo_ismapped():  # (playing: every frame; worked out only while it shows)
+            return
+        v = bpm_at(app.tempo, self.base(), app.ppq, math.floor(app.playhead * app.ppq + 1e-9))
+        text = tr("tempo.play_bpm", bpm=f"{v:,.0f}" if v >= 10000 else fmt(round(v, 2)))
+        if self.box.play_bpm.cget("text") != text:
+            self.box.play_bpm.config(text=text)
+
     def draw_playhead(self):
+        self.show_play_bpm()
         self.delete("playhead")
         roll = self.app.roll
         if roll.sx is None or not self.winfo_ismapped():
