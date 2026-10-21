@@ -170,16 +170,15 @@ def catch_weight(shape, text, t):
 
 def stretches(tempo, base):
     """The catch-up lines' stretches: [{"from": beat the stretch (the yellow area + the catch-up) starts, "read":
-    the beat whose tempo it's paid back to (None: the tempo just before "from"), "manual": "from" set by hand,
+    the beat whose tempo it's paid back to (= "end"; None when there's no end), "manual": "from" set by hand,
     "line": the line's beat = where the catch-up starts, "end": where it ends (the next point or catch-up line
     after it; None when there's none), "shape", "text"}].
 
-    Where it starts (user 2026-10-21: the yellow area is what the catch-up counts from, dragged by its left edge
-    = catch[3]; a song may change tempo for real before a jump): by hand = there, paid back to the tempo there.
-    Else, walking back from the line, the last point at the BPM the line goes on at after the catch-up = the
-    tempo the jump left, paid back to that point's tempo; the stretch starts where the line leaves it (that point
-    when its part curves away, else the next point). None at that BPM: the first point after the stretch before,
-    paid back to the tempo just before it."""
+    Paid back to the tempo the line comes back to after the catch-up (user 2026-10-21: the yellow area counts
+    everything in it). Where it starts (the yellow area, dragged by its left edge = catch[3]; a song may change
+    tempo for real before a jump): by hand = there. Else, walking back from the line, the last point at the BPM
+    the line comes back to = where the jump left it; the stretch starts where the line leaves it (that point when
+    its part curves away, else the next point). None at that BPM: the first point after the stretch before."""
     out, prev = [], 0.0
     pts = tempo["points"]
     pb = [p[0] for p in pts]
@@ -190,8 +189,10 @@ def stretches(tempo, base):
         after = [x for x in pb if x > b] + lines[k + 1:k + 2]
         end = min(after) if after else None
         start, read = prev, None
+        if end is not None:
+            read = end  # (user: the yellow area counts everything in it, at the tempo the line comes back to)
         if end is not None and hand is not None:
-            start = read = max(prev, min(hand, b))
+            start = max(prev, min(hand, b))
         elif end is not None:
             on = float(drawn_bpm(tempo, base, [end])[0])
             cands = [i for i, x in enumerate(pb) if prev <= x < b]
@@ -202,7 +203,6 @@ def stretches(tempo, base):
                 if abs(pts[i][1] - on) <= 1e-9 * on:
                     leaves = pts[i][2] != "hold" and i + 1 < len(pts) and pts[i + 1][1] != pts[i][1]
                     start = pb[i] if leaves else (pb[cands[n + 1]] if n + 1 < len(cands) else b)
-                    read = pb[i]
                     break
         out.append({"from": start, "read": read, "manual": hand is not None, "line": b, "end": end,
                     "shape": shape, "text": text})
