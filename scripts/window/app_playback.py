@@ -105,6 +105,20 @@ class Playback:
         self.player.update(rendered, bpm, end, self.picture_use10, ccs, ports,
                            heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1))
 
+    def play_tempo(self):
+        """The tempo line changed while playing: the player goes on at the new speed (the notes stay)."""
+        self._tempo_play_job = None
+        if not self.player.running:
+            return
+        try:
+            ppq, bpm, beats = self.read_project()
+        except ValueError:
+            return
+        if ppq != self.player.ppq:
+            return self.play_changed()
+        end = int(self.player.stop_beat * ppq) + 1
+        self.player.set_tempo(bpm, heard_tempo(self.tempo, bpm, ppq, end))
+
     def play_parts(self, ppq, bpm):
         """play_apart's, the CC lines as the player's messages (cc_list)."""
         rendered, msgs, ports = self.play_apart(ppq, bpm)

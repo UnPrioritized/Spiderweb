@@ -39,6 +39,7 @@ SHAPES = ("flat", "ease", "ramp", "formula")
 FORMULA = "x^3"  # a new formula part's / catch-up's starting formula
 SCALES = ("lin", "exp")  # a part's BPM change: linear (default, user) / exponential (straight on the doubling scale)
 EVERY = 24  # ticks between the tempo changes of a curved part (user: like Domino's default; 1 = every tick)
+BLOCKS_FROM = 8  # an interval this long or more: a curved part worked out step by step, not tick by tick
 FAR = 1e7  # beats: past this a point is left out (as shapes' points, engine.BEATS_FAR)
 SAFE_REACH = 8192  # the farthest a Domino-safe value is from any value (measured: 5212 at the slowest tempos)
 SLOWEST = 16_777_211  # the slowest Domino-safe tempo (us per beat; a file holds up to 0xFFFFFF)
@@ -350,6 +351,18 @@ def _segments(tempo, base, base_u, ppq, t0, t1):
             out.append((a, b, base_u if bpm == base else int(nearest_safe([6e7 / bpm])[0])))
         else:  # (a new value every "every" ticks from the part's first tick, at the start of each)
             every = tempo.get("every", EVERY)
+            if every >= BLOCKS_FROM:  # (one entry per step, not per tick: long songs at a high PPQ stay quick)
+                starts = np.arange(edges[k] + (a - edges[k]) // every * every, b, every)
+                bpm = drawn_bpm(tempo, base, starts / ppq)
+                us = nearest_safe(6e7 / bpm)
+                us[bpm == base] = base_u
+                for s, u in zip(starts.tolist(), us.tolist()):
+                    lo, hi = max(s, a), min(s + every, b)
+                    if out and out[-1][1] == lo and isinstance(out[-1][2], int) and out[-1][2] == u:
+                        out[-1] = (out[-1][0], hi, u)
+                    else:
+                        out.append((lo, hi, u))
+                continue
             ticks = np.arange(a, b)
             bpm = drawn_bpm(tempo, base, (edges[k] + (ticks - edges[k]) // every * every) / ppq)
             us = nearest_safe(6e7 / bpm)

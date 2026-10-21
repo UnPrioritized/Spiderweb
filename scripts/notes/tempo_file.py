@@ -15,6 +15,8 @@ ignore time signatures; they only put the bar lines of MIDI programs on the bars
 Warnings for the export message: notes starting inside a jump (they play off time), Hz basses where the tempo
 really heard isn't the project's BPM (their tone is worked out from it)."""
 
+import json
+
 import numpy as np
 
 from notes.tempo import (EVERY, _fit_blocks, _fit_exact, _flat_pair, _put, _runs, base_us, beat_tick, domino_safe,
@@ -271,10 +273,19 @@ def heard_tempo(tempo, base, ppq, end=0):
     None without a tempo line."""
     if not has_tempo(tempo):
         return None
+    key = (json.dumps(tempo), base, ppq, end)
+    if key in _heard:  # (Play / each tempo edit while playing: remembered until the line changes)
+        return _heard[key]
     segs, _ = file_segments(tempo, base, ppq, end)
     for _, a, e, u in layout(tempo, base, ppq)["keeps"]:
         segs = _put(segs, a, segs[-1][1] if e is None else e, u)
-    return _runs(segs)
+    if len(_heard) > 4:
+        _heard.clear()
+    _heard[key] = out = _runs(segs)
+    return out
+
+
+_heard = {}
 
 
 NUDGE = 0.05  # bar compensation: a gap's ticks change by at most this share (or one tick), so its tempo a hair

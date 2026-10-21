@@ -2307,7 +2307,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.tempo_box.sync()
         self.tempo_pane.request_redraw()
         self.schedule_autosave()
-        self.play_changed()  # (playing: on at the new tempo)
+        if self.player.running:  # (playing: on at the new tempo; while a drag goes on, once the mouse rests)
+            if getattr(self, "_tempo_play_job", None):
+                self.after_cancel(self._tempo_play_job)
+            self._tempo_play_job = self.after(80 if self.tempo_pane.drag else 0, self.play_tempo)
 
     def bar_text(self, beat):
         """A beat as "bar 3 beat 2" (bar and beat counted from 1, beat may have a fraction)."""

@@ -402,6 +402,18 @@ class Player:
                 self._sorting = True
                 threading.Thread(target=self._sort, daemon=True).start()
 
+    def set_tempo(self, bpm, tempo=None):
+        """Only the tempo changed while playing: on at the new speed from the same spot, the notes untouched."""
+        if not self.running:
+            return
+        new = TimeMap(self.ppq, tempo or [(0, 60_000_000 / bpm)])
+        clock = self._clock
+        if clock is not None:
+            now = time.perf_counter()
+            t, sec, old = clock
+            self._clock = (now, new.sec(old.tick(sec + now - t)), new)
+        self.map = new
+
     def _sort(self):
         while True:
             with self._lock:
@@ -439,12 +451,18 @@ class Player:
         offs = []  # (end tick, channel | key << 8) of the notes sounding
         batch, k, i = [], 0, 0
         done = t0 - 1  # the last tick played
+        ons_at = [done, 0]  # (the tick of the last note-on handled, how many on it so far)
         while True:
             if stop.is_set():
                 return
             if self._swap is not None:
                 (ons, ccs), self._swap = self._swap, None
-                batch, k, i = [], 0, ons.first_after(done)
+                # (on from the notes of the tick it's on that weren't sent yet, not the next tick: a big chord
+                # mid-way keeps its other notes)
+                i = ons.first_after(done)
+                if ons_at[0] == done:
+                    i = min(i, ons.first_after(done - 1) + ons_at[1])
+                batch, k = [], 0
                 j = next((n for n, (t, _) in enumerate(ccs) if t > done), len(ccs))
                 # (the CC lines changed: each channel's values where it is now, heard at once; channels the lines
                 # no longer use put back, so nothing is left on them for what plays there)
@@ -497,6 +515,7 @@ class Player:
                     held.pop(key, None)
                 continue
             k += 1
+            ons_at = [tick, ons_at[1] + 1] if ons_at[0] == tick else [tick, 1]
             if wait < -0.1:
                 continue  # far behind (too many notes at once): skip late notes instead of smearing them
             s, e, key, vel = on
