@@ -43,7 +43,7 @@ def bpm_text(v):
 
 
 class TempoBox(ttk.Frame):
-    """The Tempo pane with its bar on top: tools, BPM snap, what's picked, a hint."""
+    """The Tempo pane with two bar rows on top: tools, BPM snap, Graph; then what's picked + a hint."""
 
     def __init__(self, parent, app, scale):
         super().__init__(parent)
@@ -77,15 +77,18 @@ class TempoBox(ttk.Frame):
         self.snap.current(BPM_SNAPS.index(1))
         self.snap.pack(side="left", padx=(4, 10))
         self.snap.bind("<<ComboboxSelected>>", lambda e: app.roll.focus_set())
-        # what's picked: one of these rows shows
-        self.point_row = row = ttk.Frame(bar)
+        # second row: what's picked (one of these rows shows) + the hint
+        row2 = ttk.Frame(self, padding=(2, 0, 2, 2))
+        row2.pack(fill="x")
+        ttk.Frame(row2, width=1, height=max(self.every_box.winfo_reqheight(), self.snap.winfo_reqheight())).pack(side="left")  # (keeps its height)
+        self.point_row = row = ttk.Frame(row2)
         ttk.Label(row, text=tr("tempo.bpm")).pack(side="left")
         self.bpm_var = tk.StringVar()
         self.bpm_box = ttk.Entry(row, textvariable=self.bpm_var, width=10)
         self.bpm_box.pack(side="left", padx=(4, 0))
         self.bpm_box.bind("<Return>", lambda e: self.typed_bpm())
         self.bpm_box.bind("<FocusOut>", lambda e: self.typed_bpm())
-        self.part_row = row = ttk.Frame(bar)
+        self.part_row = row = ttk.Frame(row2)
         ttk.Label(row, text=tr("tempo.curve")).pack(side="left")
         self.curve = ttk.Combobox(row, state="readonly", width=20, values=[tr("tempo.curve_" + k) for k in CURVES])
         self.curve.pack(side="left", padx=(4, 0))
@@ -95,18 +98,18 @@ class TempoBox(ttk.Frame):
         self.scale_box.bind("<<ComboboxSelected>>", lambda e: self.picked_scale())
         Tooltip(self.scale_box, tr("tempo.scale_tip"))
         self.draw_scale = "lin"  # what new drawn parts get (the last one picked)
-        self.catch_row = row = ttk.Frame(bar)
+        self.catch_row = row = ttk.Frame(row2)
         ttk.Label(row, text=tr("tempo.catch")).pack(side="left")
         self.shape = ttk.Combobox(row, state="readonly", width=12, values=[tr("tempo.shape_" + k) for k in SHAPES])
         self.shape.pack(side="left", padx=(4, 0))
         self.shape.bind("<<ComboboxSelected>>", lambda e: self.picked_shape())
         self.formula_var = tk.StringVar()
-        self.formula_box = ttk.Entry(bar, textvariable=self.formula_var, width=16)
+        self.formula_box = ttk.Entry(row2, textvariable=self.formula_var, width=16)
         self.formula_box.bind("<Return>", lambda e: self.typed_formula())
         self.formula_box.bind("<FocusOut>", lambda e: self.typed_formula())
         self.formula_tip = Tooltip(self.formula_box, "")
         self.draw_formula = FORMULA  # what the Formula pencil draws
-        self.result = ttk.Label(bar, text="", font=look.font(9))
+        self.result = ttk.Label(row2, text="", font=look.font(9))
         fit = ttk.Button(bar, text=tr("tempo.fit"), command=lambda: (self.pane.fit_view(), app.roll.focus_set()))
         fit.pack(side="right", padx=(6, 2))
         Tooltip(fit, tr("tempo.fit_tip"))
@@ -119,8 +122,8 @@ class TempoBox(ttk.Frame):
         lb.pack(side="right", padx=(6, 4))
         for w in (lb, self.graph):
             Tooltip(w, tr("tempo.graph_tip"))
-        self.hint = ShortLabel(bar, least=8, text=tr("tempo.hint_point"), foreground=look.HINT, font=look.font(8))
-        self.hint.pack(side="left", fill="x", expand=True, padx=(10, 0))
+        self.hint = ShortLabel(row2, least=8, text=tr("tempo.hint_point"), foreground=look.HINT, font=look.font(8))
+        self.hint.pack(side="left", fill="x", expand=True, padx=(2, 0))
         holder = tk.Frame(self)
         holder.pack(fill="both", expand=True)
         self.pane = TempoPane(holder, self, app, scale)
