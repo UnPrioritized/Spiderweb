@@ -234,13 +234,15 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def box_scroll(self):
         """A Select box dragged past the piano roll's edge: the view goes a beat that way (3 keys up / down) at
         once and then every BOX_SCROLL_MS while the mouse stays out there. The box stays where it is in the song
-        (left behind as the view moves) until the mouse moves again."""
+        (left behind as the view moves) until the mouse moves again. The kept Select box being moved too (user):
+        it goes along with the view, what it selected with it."""
         self.box_timer = None
-        if not self.drag or self.drag[0] != "box" or self.sx is None:
+        moving = bool(self.drag) and self.drag[0] == "move" and self.box_moving
+        if not self.drag or self.drag[0] != "box" and not moving or self.sx is None:
             return
-        mx, my, _ = self.box_mouse
+        mx, my, state = self.box_mouse
         dx = (mx > self.winfo_width()) - (mx < self.kb_w)
-        dy = 0 if self.box_ruler else (my > self.winfo_height()) - (my < self.ruler_h)
+        dy = 0 if (self.time_only if moving else self.box_ruler) else (my > self.winfo_height()) - (my < self.ruler_h)
         if not dx and not dy:
             return
         t, top = self.view_t, self.view_top
@@ -248,6 +250,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.view_t += dx * max(1, round(self.sx)) / self.sx
         self.view_top -= dy * max(1, round(3 * self.sy)) / self.sy
         self.clamp_view()
+        if moving:  # (the mouse stays put: the box goes on to where it now points in the song)
+            self.box_timer = self.after(BOX_SCROLL_MS, self.box_scroll)
+            self.on_drag(SimpleNamespace(x=mx, y=my, state=state))
+            return
         mx, my = (self.view_t - t) * self.sx, (self.view_top - top) * self.sy
         _, b, p, cx, cy, *rest = self.drag
         self.drag = ("box", b, p, cx - mx, cy + my, *rest)
@@ -1225,6 +1231,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if self.stayed_inside(step):
                 self.app.shape_edited()
         elif kind == "move":
+            if self.box_moving:  # (past the edge the view scrolls: box_scroll)
+                self.box_mouse = (e.x, e.y, e.state)
+                if self.box_timer is None:
+                    self.box_timer = self.after_idle(self.box_scroll)
             pt = self.event_pt(e, above=True)
             _, start, orig, one, _, part = self.drag
             db, dp = pt[0] - start[0], 0 if self.time_only else pt[1] - start[1]
@@ -1429,7 +1439,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if kind == "wall":
                 self.app.sync_funnel()
             return
-        if kind == "box" and self.box_timer:
+        if kind in ("box", "move") and self.box_timer:
             self.after_cancel(self.box_timer)
             self.box_timer = None
         if kind == "box" and (self.box_area() or self.box_more and e.state & CTRL):

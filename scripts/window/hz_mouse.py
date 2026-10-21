@@ -91,20 +91,26 @@ class HzMouse:
     def box_scroll(self):
         """A Select box dragged past the edge: the view goes a beat that way (3 keys up / down) at once and then
         every BOX_SCROLL_MS while the mouse stays out there, as on the main piano roll. The box stays where it is in
-        the song (left behind as the view moves) until the mouse moves again."""
+        the song (left behind as the view moves) until the mouse moves again. The kept Select box being moved too
+        (user): it goes along with the view, its notes with it."""
         self.box_timer = None
         d = self.drag
-        if not d or d["kind"] != "box":
+        moving = bool(d) and (d["kind"] == "boxmove" or d["kind"] == "note" and bool(d.get("box")))
+        if not d or d["kind"] != "box" and not moving:
             return
-        x, y, _ = d["mouse"]
+        x, y, state = d["mouse"]
         dx = (x > self.canvas.winfo_width()) - (x < self.kb_w)
-        dy = 0 if d.get("ruler") else (y > self.canvas.winfo_height()) - (y < self.ruler_h)
+        dy = 0 if d.get("ruler") or d.get("time_only") else (y > self.canvas.winfo_height()) - (y < self.ruler_h)
         if not dx and not dy:
             return
         t0, top = self.t0, self.top
         self.t0 += dx
         self.top -= dy * 3
         self.clamp_view()
+        if moving:  # (the mouse stays put: the box goes on to where it now points in the song)
+            self.box_timer = self.after(BOX_SCROLL_MS, self.box_scroll)
+            self.on_drag(SimpleNamespace(x=x, y=y, state=state))
+            return
         ex, ey = d["to"]
         d["to"] = (ex - (self.t0 - t0) * self.sx, ey + (self.top - top) * self.sy)
         self.redraw()
@@ -430,6 +436,10 @@ class HzMouse:
             if self.box_timer is None:
                 self.box_scroll()
             return
+        if d["kind"] == "boxmove" or d["kind"] == "note" and d.get("box"):  # (past the edge the view scrolls too)
+            d["mouse"] = (e.x, e.y, e.state)
+            if self.box_timer is None:
+                self.box_timer = self.after_idle(self.box_scroll)
         if d["kind"] == "stretch":
             return self.stretch_to(d, e)
         if d["kind"] == "boxmove":
@@ -684,12 +694,12 @@ class HzMouse:
             return
         d = self.drag
         self.drop_drag()
+        if self.box_timer:  # (a Select box drawn / moved past the edge: box_scroll)
+            self.after_cancel(self.box_timer)
+            self.box_timer = None
         if not d:
             return
         if d["kind"] == "box":
-            if self.box_timer:
-                self.after_cancel(self.box_timer)
-                self.box_timer = None
             if self.box_area(d):
                 self.box_pick(d)
             if self.box_area(d) or d["more"] and e.state & CTRL:
