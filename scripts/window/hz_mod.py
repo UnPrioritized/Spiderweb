@@ -142,8 +142,6 @@ class SynthMod:
         self.mod_rows_win = c.create_window(0, 0, window=self.mod_rows, anchor="nw")
         c.bind("<Configure>", lambda e: self.fit_mod_list())
         self.mod_rows.bind("<Configure>", lambda e: self.after_idle(self.fit_mod_list))
-        c.bind("<MouseWheel>", self.mod_list_wheel)
-        self.mod_rows.bind("<MouseWheel>", self.mod_list_wheel)
         self.mod_rows_for = None  # (the links the rows were made for)
         self.mod_amount_text = {}  # (each row's amount box: what it was last given to show)
 
@@ -159,10 +157,6 @@ class SynthMod:
         elif self.mod_list_bar.winfo_ismapped():
             self.mod_list_bar.pack_forget()
             c.yview_moveto(0)
-
-    def mod_list_wheel(self, e):
-        if self.mod_list_bar.winfo_ismapped():  # (a clicked box / knob keeps the wheel itself: widgets.wheel_ready)
-            self.mod_list_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
 
     def make_mod_rows(self, links):
         """The list's rows for these links: rows added or taken away at the end, each row's source, knob and
@@ -234,8 +228,6 @@ class SynthMod:
         x = ttk.Button(self.mod_rows, text="✕", width=3, style="Synth.TButton", command=lambda: self.mod_row_remove(i))
         x.grid(row=r, column=4, sticky="w")
         Tooltip(x, tr("hz.synth_tip_mod_remove"))
-        for w in (unit, c, x):
-            w.bind("<MouseWheel>", self.mod_list_wheel, add="+")
         self.mod_row_parts.append(((a, b, cell, c, x), src_var, knob_var, both))
         self.mod_amount_vars.append(var)
         self.mod_amount_boxes.append(e)

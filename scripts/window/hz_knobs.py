@@ -44,7 +44,7 @@ from window.hz_effects import AMOUNT, FX_COLOR
 from window.hz_steps import StepEditor
 from window.synth_look import (DIM, EDGE, ENTRY, GRID, MID, PANEL, PIC, TEXT, Box, bright, dark_list, mix)
 from window.tool_window import Knob
-from window.widgets import Scrub, Tooltip, grid_shown, unit_word
+from window.widgets import Scrub, Tooltip, grid_shown, unit_word, wheel_ready
 
 KNOB_BODY, KNOB_RIM, KNOB_TRACK, KNOB_FOCUS = "#474d57", "#5c636e", "#1a1d22", "#9aa3ae"
 TIME_KNOB = 4.0  # beats a time knob goes to (along a curve: fine near 0)
@@ -523,7 +523,7 @@ def paint_knob(k, start, turn, arc_from, arc):
     c, r = s / 2, s / 2 - m * 1.9
     a = math.radians(arc_from - arc)
     k.create_oval(c - r, c - r, c + r, c + r, fill=KNOB_BODY, width=max(1, m // 3),
-                  outline=KNOB_FOCUS if k.focus_get() is k else KNOB_RIM)
+                  outline=KNOB_FOCUS if wheel_ready(k) else KNOB_RIM)  # (lit = the wheel turns it)
     k.create_line(c + r * 0.25 * math.cos(a), c - r * 0.25 * math.sin(a), c + r * math.cos(a), c - r * math.sin(a),
                   fill="#f2f4f7" if k.enabled else DIM, width=2, capstyle="round")
     if k.hover:  # (a macro dragged over it: let go = linked)

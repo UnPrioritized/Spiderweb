@@ -293,19 +293,26 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
             c.yview_moveto(0)
 
     def knobs_wheel(self, e):
-        """The mouse wheel over the Knobs or the Effects tab scrolls it when it's too tall (a clicked knob / box turns
-        instead: it keeps the wheel, widgets.wheel_ready)."""
-        for c, bar in ((self.knobs_canvas, self.knobs_bar), (self.rack_canvas, self.rack_bar)):
+        """The mouse wheel over the Knobs or the Effects tab or the MOD tab's list scrolls it when it's too tall (a
+        clicked knob / box turns instead: it keeps the wheel, widgets.wheel_ready)."""
+        for c, bar in self.wheel_lists():
             if str(e.widget).startswith(str(c)) and bar.winfo_ismapped():
                 c.yview_scroll(-1 if e.delta > 0 else 1, "units")
                 self.wheel_at = time.monotonic()
+
+    def wheel_lists(self):
+        """(canvas, its scrollbar) of what the wheel scrolls in this window."""
+        return [(c, bar) for c, bar in ((getattr(self, "knobs_canvas", None), getattr(self, "knobs_bar", None)),
+                                        (getattr(self, "rack_canvas", None), getattr(self, "rack_bar", None)),
+                                        (getattr(self, "mod_list_canvas", None), getattr(self, "mod_list_bar", None)))
+                if c is not None]
 
     GLIDE = 0.5  # seconds: as the side panel's SIDE_GLIDE
 
     def gliding(self, e):
         """The wheel over a dropdown in the Knobs / Effects tab while that tab is being scrolled: it scrolls on
         instead of changing the dropdown (App's dropdown wheel asks; like the side panel, audit). True = done."""
-        for c, bar in ((self.knobs_canvas, self.knobs_bar), (self.rack_canvas, self.rack_bar)):
+        for c, bar in self.wheel_lists():
             if (str(e.widget).startswith(str(c)) and bar.winfo_ismapped()
                     and time.monotonic() - getattr(self, "wheel_at", 0.0) < self.GLIDE):
                 c.yview_scroll(-1 if e.delta > 0 else 1, "units")

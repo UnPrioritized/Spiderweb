@@ -42,6 +42,8 @@ class Knob(tk.Canvas):
         super().__init__(parent, width=size, height=size, highlightthickness=0, takefocus=True,
                          background=ttk.Style().lookup("TFrame", "background") or "#f0f0f0")
         self.value, self.changed, self.drag, self.color, self.enabled = 0.0, changed, None, color, True
+        self._wheel = True  # (widgets.wheel_widget)
+        self.mark_changed = self.draw  # (its ring: lit while the wheel turns it, widgets.took)
         self.pressed = pressed
         self.bind("<ButtonPress-1>", self.press)
         self.bind("<B1-Motion>", self.move)
@@ -71,7 +73,7 @@ class Knob(tk.Canvas):
     def draw(self):
         self.delete("all")
         s, m = self.size, max(3, self.size // 9)
-        ring = look.KNOB_RING_FOCUS if self.focus_get() is self else look.KNOB_RING
+        ring = look.KNOB_RING_FOCUS if wheel_ready(self) else look.KNOB_RING  # (lit = the wheel turns it)
         self.create_oval(m, m, s - m, s - m, outline=ring, width=max(2, m // 2))
         if self.value:
             self.create_arc(m, m, s - m, s - m, start=90, extent=-self.value / 100 * self.TURN, style="arc",
@@ -90,8 +92,8 @@ class Knob(tk.Canvas):
         self.drag, self.pointing = None, False
 
     def wheel(self, e):
-        """Turns it only once clicked (widgets.wheel_ready); otherwise the window under it scrolls."""
-        if not wheel_ready(self):
+        """Turns it only once clicked (widgets.wheel_ready); otherwise (or greyed) the window under it scrolls."""
+        if not wheel_ready(self) or not self.enabled:
             return None
         if wheel_turns(self, e):
             self.step(5 if e.delta > 0 else -5)

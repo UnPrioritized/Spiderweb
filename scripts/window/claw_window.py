@@ -164,7 +164,8 @@ class ClawWindow(ToolWindow):
             else:
                 m.add_command(label=text, command=lambda v=value: self.put(key, v))
         b["menu"] = m
-        b.bind("<ButtonPress-1>", lambda e: b.focus_set(), add="+")  # (clicked: the wheel steps it, wheel_ready)
+        b._wheel = True  # (clicked: the wheel steps it, widgets.wheel_ready)
+        b.bind("<ButtonPress-1>", lambda e: b.focus_set(), add="+")
         b.bind("<MouseWheel>", lambda e: (self.wheel_menu(key, 1 if e.delta < 0 else -1) if wheel_turns(b, e)
                                           else "break") if wheel_ready(b) else None)
         Tooltip(b, tip)

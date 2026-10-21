@@ -159,8 +159,7 @@ class ScrollPage(ttk.Frame):
 
     def wheel(self, e):
         if (self.bar.winfo_manager() and str(e.widget).startswith(str(self.canvas))
-                and not isinstance(e.widget, self.SKIP)
-                and not (isinstance(e.widget, ttk.Entry) and e.widget.focus_get() is e.widget)):
+                and not isinstance(e.widget, self.SKIP)):  # (a clicked box keeps the wheel itself)
             self.canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
 
 
