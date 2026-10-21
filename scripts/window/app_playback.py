@@ -10,9 +10,10 @@ from files import errors
 from files.lang import tr, trn
 from files.mathexpr import calc
 from files.playback import BUILTIN, cc_list
-from notes.engine import slot_ports
 from files.synth import FONT_TYPES, LIVE_PORTS, Live, Synth, SynthError, silent_list
 from notes.engine import slot_track_channel
+from notes.hz_cc import cc_apart
+from notes.hzbass import has_cc
 from window.hz_preview import VOICES
 from window.widgets import bad, good
 
@@ -53,8 +54,9 @@ class Playback:
             self.hz_window.draw_preview()
         # (Overlapping shapes keep their colours: shapes overlapping on a key share its channel, render keep)
         self.player.shared = self.rows_apart()
-        self.player.start(self.rendered, ppq, bpm, self.playhead, self.play_end(ppq, beats, self.playhead),
-                          self.picture_use10, *self.play_cc(ppq, bpm))
+        rendered, ccs, ports = self.play_parts(ppq, bpm)
+        self.player.start(rendered, ppq, bpm, self.playhead, self.play_end(ppq, beats, self.playhead),
+                          self.picture_use10, ccs, ports)
         if self.out.name == BUILTIN:
             self.overload.start(self.out.handle, self.play_voices, self.play_guard.get(), keep)
         elif self.out.edo:
@@ -85,15 +87,24 @@ class Playback:
                 self.start_play(keep=True)
             return
         # (the end: never before where it is, so a note deleted at the end doesn't stop it at once)
-        self.player.update(self.rendered, bpm, self.play_end(ppq, beats, self.player.position()), self.picture_use10,
-                           *self.play_cc(ppq, bpm))
+        rendered, ccs, ports = self.play_parts(ppq, bpm)
+        self.player.update(rendered, bpm, self.play_end(ppq, beats, self.player.position()), self.picture_use10, ccs,
+                           ports)
 
-    def play_cc(self, ppq, bpm):
-        """(the Hz basses' CC lines for the player, whether the slots go on ports): ports as the MIDI export writes
-        them (engine.slot_ports), Built-in BASSMIDI only (other MIDI outs have one port: 16 channels)."""
+    def play_parts(self, ppq, bpm):
+        """(the notes, the Hz basses' CC lines, the synth's ports) for the player: Built-in BASSMIDI puts slots on
+        its ports as the MIDI export does (engine.slot_ports; other MIDI outs have one port: 16 channels). A Hz
+        bass's CC lines never reach other shapes' notes while there's a free channel (hz_cc.cc_apart; files keep
+        their channels)."""
         msgs = self.cc_messages(ppq, bpm)
-        ports = LIVE_PORTS if self.out.name == BUILTIN and slot_ports(self.slot_count, msgs, self.picture_use10) else 0
-        return cc_list(msgs, self.picture_use10, ports), ports
+        if not msgs:
+            return self.rendered, [], 0
+        ports = LIVE_PORTS if self.out.name == BUILTIN else 0
+        owners = {int(o) for o in set(self.rendered[:, 5].tolist())}
+        per_shape = {i: self.cc_messages(ppq, bpm, {i}) for i in sorted(owners)
+                     if i < len(self.shapes) and has_cc(self.shapes[i].get("hz") or {})}
+        rendered, msgs = cc_apart(self.rendered, per_shape, self.picture_use10, ports)
+        return rendered, cc_list(msgs, self.picture_use10, ports), ports
 
     def _play_tick(self):
         self._play_job = None

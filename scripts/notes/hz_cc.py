@@ -201,6 +201,35 @@ def note_cc(sh, ppq, bpm, starts, tracks=None):
     return np.stack([vals["cc_cutoff"], vals["cc_pan"], vals["cc_wheel"]], axis=1), gain
 
 
+def cc_apart(rendered, per_shape, use10, ports=0):
+    """PLAYBACK ONLY (user 2026-10-21: other shapes on the piano roll heard a Hz bass's CC lines; files keep their
+    channels): each Hz bass's CC slot that other shapes' notes are on too goes to a slot of its own whose channel
+    (and port, ports = the player's) nothing else plays on; none free = left shared. per_shape = {shape's number:
+    slot_events of it alone}. Returns (rendered with the moved notes (a copy), {slot: messages})."""
+    per = 16 if use10 else 15  # (slots a round of channels: engine.CHANNELS without channel 10)
+
+    def place(slot):
+        return slot // per % ports if ports else 0, slot % per
+    rendered = np.array(rendered, np.int64).reshape(-1, 6)
+    used = {place(s) for s in np.unique(rendered[:, 4]).tolist()}
+    nxt = int(rendered[:, 4].max()) + 1 if len(rendered) else 0
+    out = {}
+    for i, messages in per_shape.items():
+        for s, events in messages.items():
+            on = rendered[:, 4] == s
+            mine = on & (rendered[:, 5] == i)
+            if (on & ~mine).any():
+                free = next((n for n in range(nxt, nxt + per * max(1, ports)) if place(n) not in used), None)
+                if free is not None:
+                    used.add(place(free))
+                    nxt = free + 1
+                    rendered[mine, 4] = s = free
+            out.setdefault(s, []).extend(events)
+    for events in out.values():
+        events.sort(key=lambda e: e[0])
+    return rendered, out
+
+
 def slot_events(shapes, rendered, ppq, bpm, only=None, voice_slots=None):
     """{slot: [(tick, status, data 1, data 2)]}: every Hz bass's CC messages on each slot (= channel, track) its
     notes are on in rendered ((start, end, pitch, velocity, slot, owner) rows, owner = the shape's number). only =
