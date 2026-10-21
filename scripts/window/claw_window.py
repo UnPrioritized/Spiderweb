@@ -10,7 +10,7 @@ from files.mathexpr import calc, fmt
 from notes.claw import CLAW_DEFAULTS, COUNTS, MAX_COUNT, PERIODS, TRASHES, clean_claw
 from window import look
 from window.tool_window import Knob, ToolWindow
-from window.widgets import Scrub, Tooltip, bad, good, grid_shown
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown, wheel_ready, wheel_turns
 
 MODES = [("time", tr("claw.by_time")), ("notes", tr("claw.by_notes")), ("keys", tr("claw.by_keys")),
          ("chords", tr("claw.by_chords")), ("random", tr("claw.random"))]
@@ -164,7 +164,9 @@ class ClawWindow(ToolWindow):
             else:
                 m.add_command(label=text, command=lambda v=value: self.put(key, v))
         b["menu"] = m
-        b.bind("<MouseWheel>", lambda e: self.wheel_menu(key, 1 if e.delta < 0 else -1))
+        b.bind("<ButtonPress-1>", lambda e: b.focus_set(), add="+")  # (clicked: the wheel steps it, wheel_ready)
+        b.bind("<MouseWheel>", lambda e: (self.wheel_menu(key, 1 if e.delta < 0 else -1) if wheel_turns(b, e)
+                                          else "break") if wheel_ready(b) else None)
         Tooltip(b, tip)
         self.menus[key] = (b, choices)
 

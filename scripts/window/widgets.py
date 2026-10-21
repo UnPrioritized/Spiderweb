@@ -576,10 +576,70 @@ def remember_good(root):
     root.bind_class("TEntry", "<FocusIn>", got, add="+")
 
 
+_glide = None  # App.wheel_gliding (set_glide)
+
+
+def set_glide(fn):
+    """fn(event) -> True when a scroll going on took the wheel (App.wheel_gliding: the side panel, the synth's tabs)."""
+    global _glide
+    _glide = fn
+
+
+_last = {}  # each window's widget last clicked or given the keyboard (took)
+
+
+def took(w):
+    """w was clicked / given the keyboard (click_first's bindings): the wheel may change it now (wheel_ready)."""
+    try:
+        _last[str(w.winfo_toplevel())] = str(w)
+    except (AttributeError, tk.TclError):  # (a dropdown's open list: Tk's own, no widget here)
+        pass
+
+
+def wheel_ready(w):
+    """CLICK FIRST (user 2026-10-21: knobs and choices changed while scrolling past them; like Windows' own boxes):
+    the mouse wheel changes a dropdown, number box, knob... only once it's the last thing clicked (or given the
+    keyboard) in its window; otherwise the wheel goes on to the window, which scrolls. Kept by took, not asked of
+    Tk's focus: that isn't set while another program has the keyboard."""
+    try:
+        return _last.get(str(w.winfo_toplevel())) == str(w)
+    except tk.TclError:
+        return False
+
+
+def wheel_turns(w, e):
+    """Should the wheel (event e) over w change its value? False: it's for the window (not clicked, or a scroll going
+    on took it). Value widgets return "break" when it's True and they changed."""
+    return wheel_ready(w) and not (_glide and _glide(e))
+
+
+def click_first(root, classes=("TCombobox", "TSpinbox", "Spinbox", "TScale", "Scale")):
+    """Tk's own wheel steps on these classes (every Shift / Alt one too) only by the click-first rule (wheel_turns);
+    every click / keyboard move remembered for it (took)."""
+    root.bind_all("<ButtonPress>", lambda e: took(e.widget), add="+")
+    root.bind_all("<FocusIn>", lambda e: took(e.widget), add="+")
+    for cls in classes:
+        for seq in root.bind_class(cls):
+            if "MouseWheel" not in seq and "Button-4" not in seq and "Button-5" not in seq:
+                continue
+            own = root.bind_class(cls, seq)
+
+            def wheel(e, own=own):
+                if not wheel_ready(e.widget):
+                    return None  # (on to the window: it scrolls)
+                if not (_glide and _glide(e)):
+                    script = own
+                    for k, v in (("%W", e.widget), ("%D", e.delta), ("%s", e.state), ("%x", e.x), ("%y", e.y)):
+                        script = script.replace(k, str(v))
+                    root.tk.eval(script)
+                return "break"
+            root.bind_class(cls, seq, wheel)
+
+
 class ScrollingSide:
     """A window's side panel that scrolls (scrollbar, mouse wheel) when everything in it doesn't fit; otherwise it's
     stretched to the window's height (the main window, the drawer)."""
-    SIDE_SKIP = (tk.Listbox, tk.Text, ttk.Combobox)  # (the wheel over these leaves the panel alone)
+    SIDE_SKIP = (tk.Listbox, tk.Text)  # (they scroll themselves; value widgets clicked take the wheel: wheel_turns)
 
     def make_side(self, width):
         """The panel, side_width pixels wide (wider by the scrollbar while it shows; wider still when the font
@@ -860,9 +920,10 @@ class Scrub:
         return "break"
 
     def wheel(self, e, box):
-        if self.app.focus_get() is not box[0] or self.app.side_gliding(box[0]):
-            return None  # not being typed in / the side panel is being scrolled: the panel scrolls
-        self.change([box], 1 if e.delta > 0 else -1, e.state, box[0])
+        if not wheel_ready(box[0]):
+            return None  # not clicked into: the panel scrolls
+        if wheel_turns(box[0], e):  # (else a scroll going on took it)
+            self.change([box], 1 if e.delta > 0 else -1, e.state, box[0])
         return "break"
 
     def box_press(self, e, box):

@@ -37,7 +37,6 @@ from window.hz_presets import PresetBar
 from window.hz_rack import SynthRack
 from window.synth_look import (BG, DIM, EDGE, GRID, MID, PANEL, PIC, TEXT, WARN, BigTab, bright, dark_title, mix,
                                styles)
-from window.tool_window import Knob
 from window.widgets import Tooltip, remember_place
 
 BLACK = (1, 3, 6, 8, 10)
@@ -294,11 +293,10 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
             c.yview_moveto(0)
 
     def knobs_wheel(self, e):
-        """The mouse wheel over the Knobs or the Effects tab scrolls it when it's too tall (not over a knob or a box:
-        they turn)."""
+        """The mouse wheel over the Knobs or the Effects tab scrolls it when it's too tall (a clicked knob / box turns
+        instead: it keeps the wheel, widgets.wheel_ready)."""
         for c, bar in ((self.knobs_canvas, self.knobs_bar), (self.rack_canvas, self.rack_bar)):
-            if (str(e.widget).startswith(str(c)) and bar.winfo_ismapped()
-                    and not isinstance(e.widget, (Knob, tk.Entry, ttk.Entry))):
+            if str(e.widget).startswith(str(c)) and bar.winfo_ismapped():
                 c.yview_scroll(-1 if e.delta > 0 else 1, "units")
                 self.wheel_at = time.monotonic()
 

@@ -161,7 +161,7 @@ class SynthMod:
             c.yview_moveto(0)
 
     def mod_list_wheel(self, e):
-        if self.mod_list_bar.winfo_ismapped() and not isinstance(e.widget, (tk.Entry, ttk.Entry, ttk.Combobox)):
+        if self.mod_list_bar.winfo_ismapped():  # (a clicked box / knob keeps the wheel itself: widgets.wheel_ready)
             self.mod_list_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
 
     def make_mod_rows(self, links):

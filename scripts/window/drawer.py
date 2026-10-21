@@ -521,7 +521,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
         least rows (long warning texts, a small window), the panel scrolls instead (scrollbar, mouse wheel)."""
         return self.make_side(int(300 * self.scale))
 
-    SIDE_SKIP = (tk.Listbox, ttk.Treeview, ttk.Combobox)  # (the lists scroll themselves)
+    SIDE_SKIP = (tk.Listbox, ttk.Treeview)  # (the lists scroll themselves)
 
     def hotkey(self, fn):
         """A drawer shortcut that leaves text boxes alone (the name box, a layer being renamed)."""

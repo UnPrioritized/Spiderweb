@@ -14,7 +14,7 @@ Playing: Space play / stop. Click the bar numbers = move the play line. Drag alo
 
 Curves: Alt+drag a handle = sharp corner, Alt+drag an anchor = new handles, Ctrl = change only this curve (linked funnel curves).
 
-Number boxes: drag the name, Up / Down, wheel; Shift = big steps, Ctrl = small.
+Number boxes: drag the name, Up / Down, wheel after a click; Shift = big steps, Ctrl = small.
 
 F1 = Help. Ctrl+S = save. Ctrl+Shift+C = Copy to Domino (notes copied in Domino paste with Ctrl+V).
 

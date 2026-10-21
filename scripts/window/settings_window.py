@@ -131,7 +131,7 @@ def open_settings(app, tab=None):
 class ScrollPage(ttk.Frame):
     """A tab whose page scrolls when the screen is too short for the whole window (user 2026-10-16: on a small
     screen at a big Size, Look's bottom row was under the taskbar). .page = the frame to fill."""
-    SKIP = (ttk.Combobox, tk.Listbox, tk.Text)  # (the wheel over these leaves the page alone)
+    SKIP = (tk.Listbox, tk.Text)  # (they scroll themselves; a clicked dropdown / box takes the wheel: wheel_ready)
 
     def __init__(self, tabs, padding=(12, 10, 12, 12)):
         super().__init__(tabs)

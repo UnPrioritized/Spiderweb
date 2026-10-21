@@ -16,7 +16,7 @@ from files.lang import tr
 from notes.fx import copied, is_page, pages
 from notes.sliced import steps_kept
 from window import look
-from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Tooltip, fit_screen, placed
+from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Tooltip, fit_screen, placed, wheel_ready, wheel_turns
 
 NEW = "new"  # the "+" tab
 TOOL_WINDOWS = ("claw_window", "strum_window", "chop_window", "path_window")  # (the app's open note tool windows)
@@ -51,7 +51,7 @@ class Knob(tk.Canvas):
         self.bind("<ButtonPress-3>", self.point_press)
         self.bind("<B3-Motion>", lambda e: self.pointing and self.point(e))
         self.bind("<ButtonRelease-3>", lambda e: self.point_release())
-        self.bind("<MouseWheel>", lambda e: self.step(5 if e.delta > 0 else -5))
+        self.bind("<MouseWheel>", self.wheel)
         for key, d in (("Up", 1), ("Right", 1), ("Down", -1), ("Left", -1)):
             self.bind(f"<{key}>", lambda e, d=d: self.step(d * (1 if e.state & 1 else 5)))
         self.bind("<FocusIn>", lambda e: self.draw())
@@ -88,6 +88,14 @@ class Knob(tk.Canvas):
     def call_off(self):
         """The turn going on ends: the mouse still held turns nothing (Ctrl+Z while held)."""
         self.drag, self.pointing = None, False
+
+    def wheel(self, e):
+        """Turns it only once clicked (widgets.wheel_ready); otherwise the window under it scrolls."""
+        if not wheel_ready(self):
+            return None
+        if wheel_turns(self, e):
+            self.step(5 if e.delta > 0 else -5)
+        return "break"
 
     def step(self, d):
         if self.enabled:

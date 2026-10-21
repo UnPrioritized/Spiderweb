@@ -6,6 +6,8 @@ What's new:
 
 • Hz bass MIDI CC lines: Cutoff, Expression, Channel volume, Pan and Pitch wheel, under a "MIDI CC" row in the Effects pane. They make no notes: they go into the MIDI as messages, and the player changes the sound with them. The synth window's Filter box (MIDI CC) draws the Cutoff line like a synth's filter, and the MOD tab can move its knobs. Voice box → CC → Own channel per note gives every note its own channel and its own lines (an Arpeggio's steps play on the held note's channel). The live keys play them too. The Hz bass window says in orange when the lines also change other shapes. See Help → Hz bass MIDI CC lines.
 
+• The mouse wheel changes a number box, dropdown or knob only after you click it, everywhere in Spiderweb. Scrolling a panel or the synth window past them no longer changes them by accident.
+
 • Gate subtract (right-click → Gate subtract…): every note gets a little shorter, so a blank space shows between notes that touched. Take it from the note end, the note start or both. The amount can change across the shape along a graph, by time, by key or along each key row. It comes last, so Strum, Claw and the other note tools work as before. Flipping sideways swaps the end and the start, so a flipped copy mirrors its gaps.
 
 • Gate sensitive merge has its own window: Up, Left, Right or Down, and Keep shapes separate to merge any number of shapes, each left as it is, with the moving one turned into fixed notes. Merging up or down works as one shape too. The window says which shape moves, or why it can't merge.

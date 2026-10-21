@@ -87,8 +87,8 @@ from window.settings_window import open_settings
 from window.tool_picker import ToolPicker
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
-from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, fit_dropdowns, good,
-                            grid_shown, label_column, remember_good, watch_bad, ShortLabel, WrapRow)
+from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, click_first,
+                            fit_dropdowns, good, grid_shown, set_glide, label_column, remember_good, watch_bad, ShortLabel, WrapRow)
 
 
 VEL_KEYS = ("vel0", "vel1")
@@ -574,20 +574,19 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         text at the bottom takes the room that's left."""
         side = self.make_side(int(lang_size("size.panel_width", 330) * self.scale))  # (a translation
         self._side_wheel_at = 0.0  # may widen it)
-        own = self.bind_class("TCombobox", "<MouseWheel>")  # (a dropdown's own wheel: next / last choice)
-
-        def drop_wheel(e):
-            if self.side_gliding(e.widget):
-                return self.side_wheel(e, dropdown=True) or "break"
-            synth = self.hz_window and self.hz_window.synth_win  # (its Knobs / Effects tab scrolling: the same)
-            if synth and synth.winfo_exists() and synth.gliding(e):
-                return "break"
-            if own:
-                self.tk.eval(own.replace("%W", str(e.widget)).replace("%D", str(e.delta)))
-            return None
-        self.bind_class("TCombobox", "<MouseWheel>", drop_wheel)
+        set_glide(self.wheel_gliding)
+        click_first(self)  # (dropdowns, spin boxes, sliders: the wheel only after a click)
         fit_dropdowns(self)
         return side
+
+    def wheel_gliding(self, e):
+        """A clicked dropdown / number box / knob under the wheel while the side panel or the synth's Knobs / Effects
+        tab is being scrolled: it scrolls on instead of changing (widgets.wheel_turns). True = taken."""
+        if self.side_gliding(e.widget):
+            self.side_wheel(e, dropdown=True)
+            return True
+        synth = self.hz_window and self.hz_window.synth_win
+        return bool(synth and synth.winfo_exists() and synth.gliding(e))
 
     def side_wheel(self, e, dropdown=False):
         """The mouse wheel over the side panel scrolls it (lists scroll themselves; dropdowns and number boxes

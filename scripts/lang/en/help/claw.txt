@@ -16,7 +16,7 @@ Images take no note tools: Claw machine, Strum, Chop, glue, Sustain and Gate sub
 Velocities drawn or typed afterwards replace theirs; a page added after that works on the new velocities.
 [clip:claw-time]
 
-Mode By time works like the claw machine found in other piano rolls. The mouse wheel over a dropdown (Mode, Period, Trash every) picks the next or previous choice.
+Mode By time works like the claw machine found in other piano rolls. Once you've clicked a dropdown (Mode, Period, Trash every), the mouse wheel over it picks the next or previous choice.
 
 Period: the claw works on this much time at a time, over and over, starting at the shape's first note.
 
@@ -24,7 +24,7 @@ Trash every: each period is cut into equal slices and one is thrown away. 1/4 = 
 
 Time dist: bends time inside each period. Turned right: long notes first, then faster and faster (a bouncing ball, a drum roll before a drop). Turned left: the other way round. It works even with Trash every at (none).
 
-Turn Time dist by dragging it up / down (Shift = fine), with the mouse wheel or the arrow keys; it stops at 0 for a moment on the way past. Hold the right mouse button on it to point it at the mouse. Middle-click (press the mouse wheel) puts it back to 0. Or type a value in the box beside it (-100 to 100).
+Turn Time dist by dragging it up / down (Shift = fine), with the mouse wheel (after a click on it) or the arrow keys; it stops at 0 for a moment on the way past. Hold the right mouse button on it to point it at the mouse. Middle-click (press the mouse wheel) puts it back to 0. Or type a value in the box beside it (-100 to 100).
 
 Stretch to compensate: stretches everything back to the shape's full length, so the notes get longer instead of ending sooner.
 

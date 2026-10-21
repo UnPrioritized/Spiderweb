@@ -412,7 +412,7 @@ class ImageWindow(tk.Toplevel):
     def side_wheel(self, e):
         """The mouse wheel over the settings scrolls them (boxes and lists that scroll themselves keep it)."""
         if (str(e.widget).startswith(str(self.side_canvas)) and self.side_bar.winfo_ismapped()
-                and not isinstance(e.widget, (tk.Listbox, tk.Text, ttk.Combobox, ttk.Spinbox))):
+                and not isinstance(e.widget, (tk.Listbox, tk.Text))):  # (a clicked box takes the wheel itself)
             self.side_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
 
     def number_box(self, parent, key):
