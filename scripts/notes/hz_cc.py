@@ -352,6 +352,20 @@ def remembered(make, sh, ppq, bpm):
     return got
 
 
+def cc_spans(sh, ppq, bpm):
+    """{track: (first tick, last tick)} a Hz bass's CC messages are sent over, the run-on and the values put back
+    included (None = every track: one channel; Own channel per note: each voice's), {} without CC lines. Multi
+    channel split by time counts it as sounding then, so no other shape takes its channel while its lines change it
+    (engine.assign_slots extra; user 2026-10-21)."""
+    hz = sh.get("hz")
+    if not isinstance(hz, dict) or not has_cc(hz):
+        return {}
+    if own_channels(hz):
+        return {v: (e[0][0], e[-1][0]) for v, e in remembered(voice_events, sh, ppq, bpm).items() if e}
+    e = remembered(cc_events, sh, ppq, bpm)
+    return {None: (e[0][0], e[-1][0])} if e else {}
+
+
 def slot_events(shapes, rendered, ppq, bpm, only=None, voice_slots=None):
     """{slot: [(tick, status, data 1, data 2)]}: every Hz bass's CC messages on each slot (= channel, track) its
     notes are on in rendered ((start, end, pitch, velocity, slot, owner) rows, owner = the shape's number). only =

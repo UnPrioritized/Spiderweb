@@ -1134,7 +1134,8 @@ def _kind_notes_tracks(sh, ppq, keys):
 
 # ---------------------------------------------------------------- overlaps and channels
 
-def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shape_of=None, step=15, loose=()):
+def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shape_of=None, step=15, loose=(),
+                 extra=None):
     """
     Auto channels: shapes whose notes overlap get different slots, shapes that don't clash reuse the lowest
     free one. Earlier shapes get the lower slots. split="key": only notes on the same key at the same time
@@ -1148,8 +1149,17 @@ def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shap
     10 used) until nothing clashes: the same colours on the next row of channels (user 2026-10-18). A taken list of
     the same shape stays and its colour counts as used. loose: shapes whose slots are moved again after (Colours
     rounds on channels of their own): never moved, nor stepped round.
+    extra: {list number: (start, end) ticks} it also counts as sounding then (split="time" only: a Hz bass's CC
+    lines, sent before its first note and on after its sound, hz_cc.cc_spans).
     """
     n = len(note_lists)
+    extra = {i: span for i, span in (extra or {}).items() if span[1] > span[0]} if split != "key" else {}
+
+    def rows(i):
+        """List i's stretches (stretches), its extra one too."""
+        got = stretches(note_lists[i], i, split)
+        return np.concatenate([got, np.array([[0, *extra[i], i]], np.int64)]) if i in extra else got
+
     busy = range(n)
     group = list(range(n))
     for g in apart:
@@ -1162,9 +1172,10 @@ def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shap
         for i, notes in enumerate(note_lists):
             whole.setdefault(group[i], []).append(notes)
         joined = [stretches(np.concatenate(ls), g, split) for g, ls in whole.items()]
+        joined += [np.array([[0, *span, group[i]]], np.int64) for i, span in extra.items()]
         clashing = set(np.concatenate(clash_arrays(np.concatenate(joined))).tolist())
         busy = [i for i in range(n) if group[i] in clashing]
-    parts = [stretches(note_lists[i], i, split) for i in busy]
+    parts = [rows(i) for i in busy]
     # each list's clashes as one array (near(i)): thousands of shapes on top of each other = millions of pairs
     a, b = clash_arrays(np.concatenate(parts) if parts else np.zeros((0, 4), np.int64))
     ends = [a, b]
@@ -1576,7 +1587,7 @@ def in_rounds(note_lists, slot_of, rounds, step, teams=None, stay=None):
 
 
 def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None, pastes=None,
-           held=None, back=None, ordered=None, rounds=None, keep=False, stay=None, voice_slots=None):
+           held=None, back=None, ordered=None, rounds=None, keep=False, stay=None, voice_slots=None, busy=None):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -1610,6 +1621,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     (assign_slots shape_of; an Add between group and a paste's pieces move as one shape).
     voice_slots: {shape's number: None} to be told, with "auto", which slot each of its tracks got: filled in as
     {track: slot} (a Hz bass with its own channel per note: each voice's CC lines go on its slot, hz_cc).
+    busy: per shape None, or {track (None: every track): (start, end) ticks}: with "auto" and split="time" its
+    tracks also count as sounding then (a Hz bass's CC lines: their whole time, run-on too, hz_cc.cc_spans).
     """
     pastes = pastes or [None] * len(note_lists)
     tracks = tracks or [None] * len(note_lists)
@@ -1642,7 +1655,9 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
         taken = {}  # (unit -> its slot before channel 10 is skipped: a "solid" pinned shape's tracks)
         solid_teams = []  # (unit, (group, turn)) of those tracks
         told = {}  # (shape's number -> its track numbers, its first unit: voice_slots)
+        extra = {}  # (unit -> the extra time it sounds: busy)
         for lst, tr, sep, pin, team, pid in zip(note_lists, tracks, apart, pinned, teams, pastes):
+            spans = busy[len(unit_of)] if busy else None
             if pin is not None:
                 if fixed[len(unit_of)] == "solid" and len(lst):
                     ids, which = unique_inverse(pin)
@@ -1666,6 +1681,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                 unit_of.append(u)
                 continue
             if tr is None or not len(lst):
+                if spans and spans.get(None) and len(lst):
+                    extra[len(units)] = spans[None]
                 unit_of.append(len(units))
                 units.append(lst)
                 continue
@@ -1691,6 +1708,11 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                 continue
             if voice_slots is not None and len(unit_of) in voice_slots:
                 told[len(unit_of)] = (ids, len(units))
+            if spans:
+                for k, t in enumerate(ids.tolist()):
+                    span = spans.get(t, spans.get(None))
+                    if span:
+                        extra[len(units) + k] = span
             unit_of.append(len(units) + which)
             if sep:
                 forced.append(range(len(units), len(units) + len(ids)))
@@ -1736,7 +1758,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                      for v in np.unique(np.asarray(u)).tolist()}
         unit_slots = mapped_slots(np.array(assign_slots(units, split, forced, [firsts.get(u) for u in
                                                                               range(len(units))], taken, shape_of,
-                                                        16 if use10 in ("all", "order") else 15, loose), np.int64),
+                                                        16 if use10 in ("all", "order") else 15, loose, extra),
+                                           np.int64),
                                   use10)
         slot_of = [pin if u is None else unit_slots[u] for u, pin in zip(unit_of, pinned)]
         for i, (ids, base) in told.items():
