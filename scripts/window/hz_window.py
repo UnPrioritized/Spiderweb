@@ -25,10 +25,12 @@ from tkinter import font as tkfont
 from tkinter import ttk
 
 from files.about import ICONS
-from files.lang import tr
+from files.lang import tr, trn
+from files.playback import BUILTIN
 from files.mathexpr import fmt
-from notes.engine import CLASH
-from notes.hzbass import AUTO, FX, HZ_KINDS, all_tones, clean_line, clean_tones, left_edge
+from notes.engine import CLASH, PORTS, slot_ports
+from notes.hz_cc import sharers
+from notes.hzbass import AUTO, FX, HZ_KINDS, all_tones, clean_line, clean_tones, has_cc, left_edge
 from roll.roll_shared import CTRL, bind_double_right, grab_while_panning
 from roll.zoombar import add_zoom_bars
 from window import look
@@ -187,6 +189,9 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         # two layers on the same key at the same time: the later layer's notes go on another channel, said in orange
         self.clash = ShortLabel(f, text="", foreground=look.WARN)
         Tooltip(self.clash, tr("hz.clash_tip"))
+        # its CC lines reaching other shapes' notes (in the MIDI file, or while playing), said in orange (user)
+        self.cc_warn = ShortLabel(f, text="", foreground=look.WARN)
+        self.cc_tip = Tooltip(self.cc_warn, "")
         f = piece("right")
         b = ttk.Checkbutton(f, text=tr("hz.layers_btn"), variable=app.hz_layers, command=self.on_layers,
                             style="Toolbutton", takefocus=False)
@@ -344,6 +349,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.what.config(text=text)
         self.show_stale()
         self.show_clash(sh)
+        self.show_cc()
         self.after_idle(self.layout)  # (its width changed)
         # (a funnel / text keeps the length it's drawn)
         self.grow_box.config(state="normal" if sh is not None and sh["kind"] != "funnel" and not sh.get("text")
@@ -373,9 +379,10 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
             self.stale.pack(side="left", padx=(0, 6))
         else:
             self.what.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        if self.clash.winfo_manager():  # (the orange text stays after them)
-            self.clash.pack_forget()
-            self.clash.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        for w in (self.clash, self.cc_warn):  # (the orange texts stay after them)
+            if w.winfo_manager():
+                w.pack_forget()
+                w.pack(side="left", fill="x", expand=True, padx=(0, 10))
         self.after_idle(self.layout)
 
     def show_clash(self, sh):
@@ -398,6 +405,54 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
             self.clash.pack_forget()
         elif not self.clash.winfo_manager():
             self.clash.pack(side="left", fill="x", expand=True, padx=(0, 10))
+            if self.cc_warn.winfo_manager():  # (it stays after the clash text)
+                self.cc_warn.pack_forget()
+                self.cc_warn.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self.after_idle(self.layout)
+
+    def show_cc(self):
+        """The orange text while the Hz bass's CC lines also change other shapes' notes (user 2026-10-21): in the MIDI
+        file (other shapes on its channel while the lines are sent: hz_cc.sharers), or while playing (a MIDI out
+        with 16 channels can't give it a channel of its own: App.play_apart). Its tip names them and what helps.
+        Not while the notes wait for a slow drag."""
+        app, sh = self.app, self.target()
+        if app.notes_late or not self.winfo_ismapped():  # (hidden: shown again = synced)
+            return
+        text = tip = ""
+        i = next((k for k, s in enumerate(app.shapes) if s is sh), None)
+        if i is not None and has_cc(sh.get("hz") or {}) and len(app.rendered):
+            try:
+                ppq, bpm, _ = app.read_project()
+            except ValueError:
+                ppq, bpm = app.ppq, sh["hz"]["bpm"]
+            use10, per = app.picture_use10, 16 if app.picture_use10 else 15
+            mine = app.cc_messages(ppq, bpm, {i})
+            ports = PORTS if slot_ports(int(app.rendered[:, 4].max()) + 1, mine, use10) else 0
+            in_file = sharers(app.rendered, i, mine, use10, ports)
+            in_play, own = set(), False
+            if app.midi_device.get() != BUILTIN and not app.out.tuned:  # (Built-in BASSMIDI: channels enough)
+                rendered, msgs, _ = app.play_apart(ppq, bpm)
+                slots = np.unique(rendered[rendered[:, 5] == i, 4]).tolist()
+                in_play = sharers(rendered, i, {s: msgs[s] for s in slots if s in msgs}, use10)
+                own = len({s % per for s in slots}) < len(slots)  # (its own notes past 15 channels)
+            names = sorted(in_file | in_play)
+            listed = ", ".join(app.shape_label(app.shapes[k]) for k in names[:5]) + ("…" if len(names) > 5 else "")
+            parts = []
+            if in_file:
+                text = trn("hz.cc_shared", len(in_file), n=len(in_file))
+                parts.append(tr("hz.cc_shared_tip", names=listed))
+            if not in_file and (in_play or own):  # (in the file too: its tip says it)
+                text = text or tr("hz.cc_play")
+                parts.append(tr("hz.cc_play_tip", names=listed) if in_play else tr("hz.cc_play_own_tip"))
+            tip = "\n\n".join(parts)
+        self.cc_tip.set_text(tip)
+        if text == self.cc_warn.cget("text"):
+            return
+        self.cc_warn.config(text=text)
+        if not text:
+            self.cc_warn.pack_forget()
+        elif not self.cc_warn.winfo_manager():
+            self.cc_warn.pack(side="left", fill="x", expand=True, padx=(0, 10))
         self.after_idle(self.layout)
 
     def before_restore(self):

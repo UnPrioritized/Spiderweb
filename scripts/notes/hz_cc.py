@@ -281,6 +281,26 @@ def cc_apart(rendered, per_shape, use10, ports=0):
     return rendered, out
 
 
+def sharers(rendered, i, messages, use10, ports=0):
+    """The other shapes (their numbers) with notes on a channel shape i's CC messages ({slot: messages}) go on, while
+    they're sent: what its CC lines change too (the Hz window's warning). ports = how many ports tell slots apart
+    (engine.PORTS when the file writes them, a player's; 0 = one port: slots 15 apart share a channel)."""
+    per = 16 if use10 else 15
+    rendered = np.asarray(rendered).reshape(-1, 6)
+    slots = rendered[:, 4]
+    near = rendered[:, 5] != i
+    out = set()
+    for s, events in messages.items():
+        if not events:
+            continue
+        on = slots % per == s % per
+        if ports:
+            on &= slots // per % ports == s // per % ports
+        m = on & near & (rendered[:, 0] < events[-1][0]) & (rendered[:, 1] > events[0][0])
+        out.update(np.unique(rendered[m, 5]).tolist())
+    return out
+
+
 KEPT_MOST = 64  # shapes' CC messages remembered (remembered)
 _kept = {}
 

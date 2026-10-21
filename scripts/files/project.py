@@ -14,7 +14,8 @@ import numpy as np
 
 from files.lang import tr, trn
 from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape
-from notes.engine import CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape, merges_unmade
+from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape,
+                          merges_unmade, slot_ports)
 from notes.hzbass import clean_hz
 from notes.hz_cc import slot_events
 from notes.mask import MASK_DEFAULTS, THICKNESS, clean_mask
@@ -734,15 +735,18 @@ class ProjectFiles:
         if long_silences(self.rendered) and not messagebox.askokcancel(
                 tr("project.spiderweb"), tr("project.long_silences", ppq=ppq, beats=MAX_DELTA // ppq), icon="warning"):
             return
+        cc = self.cc_messages(ppq, bpm)
         if not self.write_out(path, "project.saving_midi",  # (millions of notes take a few seconds)
                               lambda: write_midi(path, ppq, bpm, beats, self.rendered, self.picture_use10,
-                                                 self.pad_tracks(), self.cc_messages(ppq, bpm))):
+                                                 self.pad_tracks(), cc)):
             return
         channels = tracks if self.channel_mode.get() == "auto" else 1
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
                 if ppq >= PPQ_WARN else "")
         if (self.rendered[:, 2] > 127).any():
             note += tr("project.it_has_keys_above_127_256")
+        if slot_ports(int(self.rendered[:, 4].max()) + 1, cc, self.picture_use10):  # (as write_midi decides)
+            note += tr("project.ports_midi")
         messagebox.showinfo(tr("project.spiderweb"),
                             tr("project.saved_notes_on_track_s_one", notes=trn("n.notes", len(self.rendered),
                                                                                n=len(self.rendered)),
@@ -803,17 +807,20 @@ class ProjectFiles:
                                                   basename=os.path.basename(path)),
                 icon="warning", default="no"):
             return
+        cc = self.cc_messages(ppq, bpm)
         if not self.write_out(path, "project.saving_dms", lambda: write_bytes(
                 path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16(),
-                               pad=self.pad_tracks(), cc=self.cc_messages(ppq, bpm)))):
+                               pad=self.pad_tracks(), cc=cc))):
             return
         tracks = len(track_slots(notes, self.pad_tracks()))
+        ports = slot_ports(int(notes[:, 4].max()) + 1, cc, self.picture_use10)  # (as dms_data decides)
         text = (tr("project.saved_dms", notes=trn("n.notes", len(notes), n=len(notes)),
                    tracks=trn("n.tracks", tracks, n=tracks), path=path)
                 + (tr("project.dms_keys_256") if mod else
                    trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
-                + (trn("project.dms_long_gates", long, long=long, most=GATE_MAX) if long else ""))
-        (messagebox.showwarning if long else messagebox.showinfo)(tr("project.spiderweb"), text)
+                + (trn("project.dms_long_gates", long, long=long, most=GATE_MAX) if long else "")
+                + (tr("project.ports_dms") if ports else ""))
+        (messagebox.showwarning if long or ports else messagebox.showinfo)(tr("project.spiderweb"), text)
 
     def copy_to_domino(self):
         """Ctrl+Shift+C: the selected shapes' notes (all notes when nothing is selected) on the clipboard, for
