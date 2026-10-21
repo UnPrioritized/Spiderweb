@@ -18,6 +18,10 @@ What's new:
 
 • Moving a shape snaps the end of its last note to the grid too: the start or the end, whichever is nearer the mouse.
 
+• Moving with a Select box snaps the box's left side to the grid, and notes off the grid stay off it by the same amount, like in many MIDI programs. Everything in the box stops together at beat 0. The Hz bass window works the same way.
+
+• Hz bass CC lines run on a little after the sound ends, then go back to where players start. Set how long in the Hz bass window's Settings… → CC run-on (Auto measures it from the soundfont).
+
 • Hz bass window: drag along the bar numbers to select every key, Select boxes stay while you draw, and a box over nothing can be moved and stretched, like on the piano roll.
 
 • Right-drag listening shows its own line and leaves the play line where it was.

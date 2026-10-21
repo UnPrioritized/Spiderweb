@@ -1,6 +1,6 @@
 With Select, drag on empty space: the box selects every shape it touches (Ctrl+drag adds them). The box snaps to the grid, out to the next grid line as soon as the mouse crosses one (Shift = no snap). Ctrl+click selects more shapes (also in the Shapes list), Ctrl+A selects all.
 
-The box stays after you let go. Drag its sides or corners to stretch the shapes it selected (the other side stays put), or drag inside it to move them. Dragged past the edge of the piano roll, the view scrolls. It also stays when you pick a drawing tool: a shape drawn into it joins the selection, one drawn outside it isn't selected.
+The box stays after you let go. Drag its sides or corners to stretch the shapes it selected (the other side stays put), or drag inside it (or a shape it selected) to move them. While moving, the box's left side snaps to the grid and the notes move just as far, so notes off the grid stay off it by the same amount (Shift = free). Everything stops together at beat 0 and at the top and bottom keys. Dragged past the edge of the piano roll, the view scrolls. It also stays when you pick a drawing tool: a shape drawn into it joins the selection, one drawn outside it isn't selected.
 
 Drag along the bar numbers (with any tool) to select every key in that time: the bar numbers turn black there. Drag the black part sideways to move what it selected in time only; click it to move the play line.
 

@@ -1,6 +1,6 @@
 A selected custom shape (and text) shows a box. The mouse pointer changes to show what a drag will do.
 
-Move: drag anywhere inside it (Select tool). Its notes snap to the grid, not the box: the start of its earliest note or the end of its last note, whichever is nearer the mouse; Shift = free.
+Move: drag anywhere inside it (Select tool). Its notes snap to the grid, not the box: the start of its earliest note or the end of its last note, whichever is nearer the mouse; Shift = free. Shapes moved with a Select box follow the box instead (see Selecting).
 [clip:custom_edit-move]
 
 Resize: drag a corner square. The opposite corner stays put; Ctrl keeps its proportions. The notes on the side you drag snap to the grid (Shift = free).
