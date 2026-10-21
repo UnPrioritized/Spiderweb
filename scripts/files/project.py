@@ -711,14 +711,18 @@ class ProjectFiles:
         if not path or not self.may_replace(os.path.basename(path)):
             return
         if self.load_file(path):
-            self._saved_shapes = json.dumps(self.shapes)
+            self._saved_shapes = self.saved_key()
             self.sync_panel()
             self.tell_load_notes()
 
+    def saved_key(self):
+        """What Open project compares with the last save / open: the shapes and the tempo line."""
+        return json.dumps([self.shapes, self.tempo if has_tempo(self.tempo) else None])
+
     def may_replace(self, name):
-        """Before Open project replaces the shapes (Undo can't bring them back): if they aren't saved in a project
-        file as they are, asks to save them first. False = don't open."""
-        if not self.shapes or json.dumps(self.shapes) == self._saved_shapes:
+        """Before Open project replaces the shapes (Undo can't bring them back): if they (or the tempo line) aren't
+        saved in a project file as they are, asks to save them first. False = don't open."""
+        if not self.shapes and not has_tempo(self.tempo) or self.saved_key() == self._saved_shapes:
             return True
         answer = messagebox.askyesnocancel(tr("project.open_project"), tr("project.save_before_open", name=name),
                                            icon="warning", default="yes", parent=self)
@@ -737,7 +741,7 @@ class ProjectFiles:
         except OSError as e:
             messagebox.showerror(tr("project.spiderweb"), couldnt_save(e))
             return False
-        self._saved_shapes = json.dumps(self.shapes)
+        self._saved_shapes = self.saved_key()
         return True
 
     def browse_output(self):

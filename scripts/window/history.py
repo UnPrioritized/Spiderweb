@@ -294,8 +294,12 @@ class HistoryPanel:
         (shapes are picked by number, which can point at another shape after undo). hz: made in the Hz bass window
         (key_undo)."""
         before = as_state(before, self.shapes)
+        now = self.sel_state()
+        if sel and len(sel) > 8:  # (a step saved late, e.g. a tool window's try: the tempo line as it is now, its
+            # own edits meanwhile were steps of their own; undoing this one must not take them back)
+            sel = tuple(sel[:8]) + tuple(now[8:])
         self.drop_empty_step(before)
-        self.undo_stack.append((before, name or tr("app.change"), sel or self.sel_state(), hz))
+        self.undo_stack.append((before, name or tr("app.change"), sel or now, hz))
         self._trimmed = self.undo_stack[:-300]  # (put back by drop_empty_step if this step changes nothing)
         del self.undo_stack[:-300]
         # the undone steps are kept aside until this step turns out to change something (a click on a shape that

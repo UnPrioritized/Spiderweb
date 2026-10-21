@@ -63,13 +63,15 @@ def clean_tempo(data):
         return out
     seen = set()
     for p in data.get("points", []) if isinstance(data.get("points"), list) else []:
+        if not isinstance(p, list):  # (broken by hand: that point left out, the rest kept)
+            continue
         try:
             b, v = float(p[0]), float(p[1])
-            kind = p[2] if len(p) > 2 and p[2] in CURVES else "hold"
+            kind = p[2] if len(p) > 2 and isinstance(p[2], str) and p[2] in CURVES else "hold"
             text = p[3] if len(p) > 3 and isinstance(p[3], str) else ""
-            scale = p[4] if len(p) > 4 and p[4] in SCALES else "lin"
+            scale = p[4] if len(p) > 4 and isinstance(p[4], str) and p[4] in SCALES else "lin"
             keep = len(p) > 5 and p[5] is True
-        except (TypeError, ValueError, IndexError):
+        except (TypeError, ValueError, IndexError, OverflowError):
             continue
         if not (math.isfinite(b) and math.isfinite(v)) or not 0 <= b <= FAR or v <= 0:
             continue
@@ -84,17 +86,26 @@ def clean_tempo(data):
     out["bars"] = data.get("bars", True) is not False
     seen = set()
     for c in data.get("catch", []) if isinstance(data.get("catch"), list) else []:
+        if not isinstance(c, list):
+            continue
         try:
             b = float(c[0])
-            shape = c[1] if len(c) > 1 and c[1] in SHAPES else "flat"
+            shape = c[1] if len(c) > 1 and isinstance(c[1], str) and c[1] in SHAPES else "flat"
             text = c[2] if len(c) > 2 and isinstance(c[2], str) else ""
-        except (TypeError, ValueError, IndexError):
+        except (TypeError, ValueError, IndexError, OverflowError):
             continue
         if not math.isfinite(b) or not 0 < b <= FAR or round(b, 9) in seen:
             continue
         seen.add(round(b, 9))
-        start, end = (c[k] if len(c) > k and isinstance(c[k], (int, float)) and not isinstance(c[k], bool)
-                      and math.isfinite(c[k]) else None for k in (3, 4))
+
+        def edge(k):
+            x = c[k] if len(c) > k else None
+            try:
+                return float(x) if isinstance(x, (int, float)) and not isinstance(x, bool) \
+                    and math.isfinite(float(x)) else None
+            except OverflowError:
+                return None
+        start, end = edge(3), edge(4)
         item = [b, shape, text[:200]]
         catch_set(item, 3, start if start is not None and 0 <= start < b else None)
         catch_set(item, 4, end if end is not None and b < end <= FAR else None)
