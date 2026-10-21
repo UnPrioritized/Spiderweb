@@ -317,9 +317,10 @@ class RollDrawing:
         if not self._redraw_pending:
             self._redraw_pending = True
             self.after_idle(self.redraw)
-        pane = getattr(self.app, "vel", None)
-        if pane:
-            pane.request_redraw()  # same notes, same time axis
+        for name in ("vel", "tempo_pane"):
+            pane = getattr(self.app, name, None)
+            if pane:
+                pane.request_redraw()  # same notes, same time axis
 
     def _redraw_late(self):
         self._late_redraw = None
@@ -853,9 +854,10 @@ class RollDrawing:
             self.request_redraw()  # the full redraw puts the line back too
             return
         self.draw_playhead()
-        pane = getattr(self.app, "vel", None)
-        if pane:
-            pane.draw_playhead()
+        for name in ("vel", "tempo_pane"):
+            pane = getattr(self.app, name, None)
+            if pane:
+                pane.draw_playhead()
 
     def visible_pitches(self, h):
         return max(0, math.ceil(self.y2p(h) - 0.5)), min(self.app.keys - 1, math.floor(self.y2p(self.ruler_h) + 0.5))

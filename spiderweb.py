@@ -34,6 +34,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     drawer_mouse.py  the mouse on the drawer's board (drawing, Select, sticking), copy / paste / flip / turn
     sticky.py        the drawer's sticky lines: points stick to other strokes' points, crossings and lines
     velocity.py      the velocity pane under the piano roll
+    tempo_pane.py    the Tempo pane (under the velocity pane): tempo points, curves, catch-up lines
     hz_window.py     the Hz bass window: a small piano roll where its notes are placed
     hz_view.py       the Hz bass window's zoom, scrolling and drawing
     hz_sound.py      the Hz bass window's sound: the key held, the preview
@@ -115,6 +116,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     copypath.py      copy along a path: the shape's notes copied from A to B (straight / curve / arc)
     sustain.py       sustain: each key row's notes held to their group's end (overlaps kept), done last
     subtract.py      gate subtract: every note ends a few ticks earlier (start kept), done after Sustain
+    tempo.py         the project's tempo line: curves, catch-ups, exact Domino-safe tempo changes for the MIDI
     fx.py            a shape's Claw machine / Strum / Chop pages in order, flips and velocities after them
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes
     picture.py       image to notes: a picture file -> a grid of up to 16 colours (picking, blending, details)

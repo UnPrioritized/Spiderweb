@@ -11,6 +11,7 @@ from tkinter import ttk
 from files.lang import tr
 from notes.engine import BIG_MARK, BIG_TEXT, with_big
 from notes.merge import merge_parts
+from notes.tempo import clean_tempo
 from window import look
 from window.widgets import ListTip, Tooltip, fit_screen, placed
 
@@ -163,7 +164,8 @@ class HistoryPanel:
         """The last step changed nothing (e.g. a click on a shape without dragging it): it's taken out, so it
         doesn't show in the History (before: the shapes as JSON / undo_state now, before the next change)."""
         before = as_state(before, self.shapes)
-        if self.undo_stack and self.undo_stack[-1][0] == before and not self.redo_stack:
+        if (self.undo_stack and self.undo_stack[-1][0] == before and not self.redo_stack
+                and self.step_tempo(self.undo_stack[-1]) == json.dumps(self.tempo)):
             kept = getattr(self, "_redo_kept", None)
             if kept and kept[1] == len(self.undo_stack):
                 self.redo_stack[:] = kept[0]  # (the steps undone before it are back)
@@ -310,10 +312,16 @@ class HistoryPanel:
     def sel_state(self):
         """The selection as an undo step keeps it: (selected shape numbers, the main one, the kept Select boxes or
         None, the Hz bass window's HzWindow.sel_state() or None, the picked stroke, the funnel's highlighted parts,
-        the one of them clicked, the picked Ripples source)."""
+        the one of them clicked, the picked Ripples source, the Tempo pane's line as JSON). The tempo line rides
+        here so every step carries it (it isn't a shape): undo / redo put it back with the shapes."""
         boxes = self.roll.kept_box()
         return (sorted(self.sels), self.sel, boxes and list(boxes), self.hz_window and self.hz_window.sel_state(),
-                self.stroke, list(self.parts), self.part_main, self.ripple_pick)
+                self.stroke, list(self.parts), self.part_main, self.ripple_pick, json.dumps(self.tempo))
+
+    def step_tempo(self, step):
+        """The tempo line (JSON) an undo step kept; the one now for a step made without it."""
+        sel = step[2]
+        return sel[8] if len(sel) > 8 and isinstance(sel[8], str) else json.dumps(self.tempo)
 
     def scrub_step(self, gesture, run):
         """run() steps a number box (widgets.Scrub). The steps of one gesture (a label drag, or arrows / wheel on the
@@ -366,6 +374,7 @@ class HistoryPanel:
             return None  # (a pop-up without its own undo: the shapes it works on stay as they are)
         if self.vel.edit:  # a velocity line held: Ctrl+Z throws it away (no step), Ctrl+Y does nothing
             return "break" if redo else (self.vel.drop(), "break")[1]
+        self.tempo_pane.end_drag()  # (a tempo point held: let go, the step made at its first move takes it back)
         if self.held_scrub:  # a number box's label held: Ctrl+Z = back to the press (no step), Ctrl+Y nothing
             return "break" if redo else (self.held_scrub.cancel(), "break")[1]
         if self.app_only(e.widget):
@@ -444,6 +453,9 @@ class HistoryPanel:
             self.stroke, self.parts, self.part_main = picked[4], set(picked[5]), picked[6]
             if len(picked) > 7:  # (the Ripples source the undone change was made on, hunt)
                 self.ripple_pick = picked[7]
+        if len(picked) > 8 and isinstance(picked[8], str):
+            self.tempo = clean_tempo(json.loads(picked[8]))
+            self.tempo_changed()
         self._edit_key = self._scrub = None
         self.sync_panel()
         self.shapes_changed()

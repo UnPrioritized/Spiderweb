@@ -28,6 +28,7 @@ from notes.picture import paths_for_file
 from notes.polygon import POLYGON_DEFAULTS, clean_polygon
 from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
+from notes.tempo import clean_tempo, tempo_events
 from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
 from files.domino_clip import DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data, dms_path, get_from_clipboard, put_on_clipboard, read_notes
@@ -203,8 +204,10 @@ class ProjectFiles:
             "hz_loud": bool(self.hz_loud.get()),
             "funnel_defaults": self.funnel_defaults, "text_defaults": self.text_defaults,
             "polygon_defaults": self.polygon_defaults,
-            "free_smooth": self.free_smooth, "shapes": self.shapes,
-            "view": self.roll.view_state(), "playhead": self.playhead,
+            "free_smooth": self.free_smooth,
+            # (only when there is one: files without a tempo line stay as they were)
+            **({"tempo": self.tempo} if self.tempo["points"] or self.tempo["catch"] else {}),
+            "shapes": self.shapes, "view": self.roll.view_state(), "playhead": self.playhead,
         }
 
     def load_file(self, path, quiet=False, text=None):
@@ -302,6 +305,7 @@ class ProjectFiles:
         tx = get(lambda: clean_text(dict(table("text_defaults"), bbox=[0, 0, 1, 1])) if table("text_defaults") else None)
         pg = get(lambda: clean_polygon(data.get("polygon_defaults")))
         playhead = get(lambda: float(data.get("playhead", 0)))
+        tempo = clean_tempo(data.get("tempo"))
 
         was = project_json(self.project_data()), self.undo_stack[:], self.redo_stack[:], self._redo_kept
         self._opening = True  # (each box set would make the notes again: once, below)
@@ -346,6 +350,8 @@ class ProjectFiles:
             self.polygon_defaults = {k: pg[k] for k in POLYGON_DEFAULTS}
         self.roll.cancel_draft()
         self.shapes = shapes
+        self.tempo = tempo
+        self.tempo_changed()
         self.roll.set_view(data.get("view"))
         self.stop_play()
         self.playhead = max(0.0, playhead) if playhead is not None and math.isfinite(playhead) else 0.0
@@ -452,6 +458,8 @@ class ProjectFiles:
                               "show_lines": self.show_lines.get(), "show_notes": self.show_notes.get(),
                               "channels_folded": self.channels_folded.get(),
                               "velocity_height": self.velocity_height() / self.scale,
+                              "tempo": self.show_tempo.get(), "tempo_height": self.tempo_height() / self.scale,
+                              "tempo_view": list(self.tempo_pane.view) if self.tempo_pane.view else None,
                               "midi_device": self.midi_device.get(), "play_voices": self.play_voices,
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
                               "domino_256": self.domino256.get(), "keep_colours": self.keep_colours.get(),
@@ -560,6 +568,15 @@ class ProjectFiles:
                 self._vel_height = max(int(50 * self.scale), int(float(win["velocity_height"]) * self.scale))
         kept(velocity_height)
 
+        def tempo_height():
+            if "tempo_height" in win:
+                self._tempo_height = max(int(60 * self.scale), int(float(win["tempo_height"]) * self.scale))
+            view = win.get("tempo_view")
+            if (isinstance(view, list) and len(view) == 2 and all(isinstance(v, (int, float)) for v in view)
+                    and all(math.isfinite(v) for v in view) and -2 < view[0] < view[1] < 30):
+                self.tempo_pane.view = (float(view[0]), float(view[1]))
+        kept(tempo_height)
+
         def ticks():
             if win.get("midi_device") and keep_saved(str(win["midi_device"])):
                 self.midi_device.set(str(win["midi_device"]))
@@ -625,6 +642,12 @@ class ProjectFiles:
                 self.show_velocity.set(True)
                 self.toggle_velocity(tip=False)
         kept(velocity)
+
+        def tempo():
+            if win.get("tempo") is True:  # (after the velocity pane: it goes under it)
+                self.show_tempo.set(True)
+                self.toggle_tempo()
+        kept(tempo)
 
     def schedule_autosave(self):
         if self._autosave_job:
@@ -737,9 +760,10 @@ class ProjectFiles:
                 tr("project.spiderweb"), tr("project.long_silences", ppq=ppq, beats=MAX_DELTA // ppq), icon="warning"):
             return
         cc = self.cc_messages(ppq, bpm)
+        tempo, bad = tempo_events(self.tempo, bpm, ppq)
         if not self.write_out(path, "project.saving_midi",  # (millions of notes take a few seconds)
                               lambda: write_midi(path, ppq, bpm, beats, self.rendered, self.picture_use10,
-                                                 self.pad_tracks(), cc)):
+                                                 self.pad_tracks(), cc, tempo)):
             return
         channels = tracks if self.channel_mode.get() == "auto" else 1
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
@@ -748,6 +772,8 @@ class ProjectFiles:
             note += tr("project.it_has_keys_above_127_256")
         if slot_ports(int(self.rendered[:, 4].max()) + 1, cc, self.picture_use10):  # (as write_midi decides)
             note += tr("project.ports_midi")
+        if bad:
+            note += tr("project.tempo_catch_failed", where=", ".join(self.bar_text(b) for b in bad))
         messagebox.showinfo(tr("project.spiderweb"),
                             tr("project.saved_notes_on_track_s_one", notes=trn("n.notes", len(self.rendered),
                                                                                n=len(self.rendered)),

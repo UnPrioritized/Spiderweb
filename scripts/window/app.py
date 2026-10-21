@@ -82,12 +82,14 @@ from files.clipboard import RAW, copy_count, get_text, put_text
 from files.share import LONG_LINE, FIND, ShareError, made_by, read_shapes, shapes_line, unpack
 from files.project import AUTOSAVE, OUTPUT_DIR, ProjectFiles
 from files.snap import DEFAULT_SNAP, snap_beats
+from notes.tempo import empty as empty_tempo
 from roll.roll_shared import cached_path
 from roll.zoombar import add_zoom_bars
 from window.snap_picker import SnapPicker
 from window import palettes
 from window.settings_window import open_settings
 from window.tool_picker import ToolPicker
+from window.tempo_pane import TempoBox
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, click_first,
@@ -363,6 +365,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.vel_tool = tk.StringVar(value="line")
         self.midi_device = tk.StringVar(value=DEFAULT_DEVICE)
         self._vel_height = int(170 * s)
+        self.tempo = empty_tempo()  # the Tempo pane's line (notes/tempo.py), saved with the project, undo steps too
+        self.show_tempo = tk.BooleanVar(value=False)
+        self._tempo_height = int(150 * s)
         self.pvar = {
             "ppq": tk.StringVar(value="960"),
             "bpm": tk.StringVar(value="120"),
@@ -494,6 +499,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                         command=redraw).pack(side="left", padx=(8, 0))
         ttk.Checkbutton(bar, text=tr("app.velocity_pane"), variable=self.show_velocity,
                         command=self.toggle_velocity).pack(side="left", padx=(8, 0))
+        b = ttk.Checkbutton(bar, text=tr("app.tempo_pane"), variable=self.show_tempo, command=self.toggle_tempo)
+        b.pack(side="left", padx=(8, 0))
+        Tooltip(b, tr("app.tempo_pane_tip"))
         b = ttk.Checkbutton(bar, text=tr("app.history"), variable=self.show_history, command=self.toggle_history)
         b.pack(side="left", padx=(8, 0))
         Tooltip(b, tr("app.history_tip"))
@@ -553,6 +561,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.vel_tool.trace_add("write", lambda *_: self.show_vel_formula())
         self.vel = VelocityPane(self.vel_box, self, s)
         self.vel.pack(fill="both", expand=True)  # the pane itself is added when it's turned on (off at first)
+        self.tempo_box = TempoBox(self.panes, self, s)  # (under the velocity pane when both are on)
+        self.tempo_pane = self.tempo_box.pane
 
     def show_vel_formula(self):
         if self.vel_tool.get() == "formula":
@@ -1068,6 +1078,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if typed and (self.ppq, self.keys) == before:
             self.play_changed()  # (a new BPM heard while playing)
             self.roll.request_redraw()  # (bar lines)
+            self.tempo_changed()  # (the Tempo pane's BPM line and catch-ups)
             self.sync_custom()  # (Hz bass "BPM changed" lines)
             self.sync_funnel()
             if self.hz_window:
@@ -2257,10 +2268,48 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self._vel_height = self.vel_box.winfo_height()
         return self._vel_height
 
+    def tempo_height(self):
+        if self.show_tempo.get() and self.tempo_box.winfo_ismapped() and self.tempo_box.winfo_height() > 1:
+            self._tempo_height = self.tempo_box.winfo_height()
+        return self._tempo_height
+
+    def toggle_tempo(self):
+        shown = list(map(str, self.panes.panes()))
+        if self.show_tempo.get():
+            if str(self.tempo_box) not in shown:
+                self.panes.add(self.tempo_box, stretch="never", height=self._tempo_height,
+                               minsize=int(60 * self.scale))
+            self.update_idletasks()
+            self.tempo_box.sync()
+            self.tempo_pane.redraw()
+        else:
+            self.tempo_height()
+            self.tempo_pane.close_typing(True)
+            if str(self.tempo_box) in shown:
+                self.panes.forget(self.tempo_box)
+            self.tempo_pane.delete("all")
+        self.schedule_autosave()
+
+    def tempo_changed(self):
+        """The tempo line changed (an edit, undo, a project opened, the project's BPM): the pane and its bar show
+        it."""
+        if not hasattr(self, "tempo_box"):
+            return
+        self.tempo_box.sync()
+        self.tempo_pane.request_redraw()
+        self.schedule_autosave()
+
+    def bar_text(self, beat):
+        """A beat as "bar 3 beat 2" (bar and beat counted from 1, beat may have a fraction)."""
+        bar = int(beat // self.beats)
+        return tr("tempo.where", bar=bar + 1, beat=fmt(round(beat - bar * self.beats + 1, 3)))
+
     def toggle_velocity(self, tip=True):
         if self.show_velocity.get():
             if str(self.vel_box) not in map(str, self.panes.panes()):
-                self.panes.add(self.vel_box, stretch="never", height=self._vel_height, minsize=int(50 * self.scale))
+                more = {"before": self.tempo_box} if str(self.tempo_box) in map(str, self.panes.panes()) else {}
+                self.panes.add(self.vel_box, stretch="never", height=self._vel_height, minsize=int(50 * self.scale),
+                               **more)
             self.update_idletasks()  # lay it out now, so it's drawn fresh before it shows up
             self.vel.redraw()
             if tip:
