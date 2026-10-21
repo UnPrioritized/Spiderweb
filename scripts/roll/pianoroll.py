@@ -1964,6 +1964,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return "break"
         k = e.keysym.lower()
         if k == "escape":
+            pane = getattr(self.app, "key_pane", None)
+            if pane is not None and pane.placing:  # (the Tempo pane adding a catch-up: called off)
+                return pane.cancel_placing()
             if self.app.vel.confirm():  # (done with a velocity line / curve, like Enter)
                 return
             self.drop_hz_keys()

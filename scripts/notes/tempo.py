@@ -92,11 +92,28 @@ def clean_tempo(data):
         if not math.isfinite(b) or not 0 < b <= FAR or round(b, 9) in seen:
             continue
         seen.add(round(b, 9))
-        start = c[3] if len(c) > 3 and isinstance(c[3], (int, float)) and not isinstance(c[3], bool) else None
-        ok = start is not None and math.isfinite(start) and 0 <= start < b
-        out["catch"].append([b, shape, text[:200]] + ([float(start)] if ok else []))
+        start, end = (c[k] if len(c) > k and isinstance(c[k], (int, float)) and not isinstance(c[k], bool)
+                      and math.isfinite(c[k]) else None for k in (3, 4))
+        item = [b, shape, text[:200]]
+        catch_set(item, 3, start if start is not None and 0 <= start < b else None)
+        catch_set(item, 4, end if end is not None and b < end <= FAR else None)
+        out["catch"].append(item)
     out["catch"].sort(key=lambda c: c[0])
     return out
+
+
+def catch_set(c, k, v):
+    """A catch-up line's start (k = 3, the yellow area's left edge) or end (k = 4, the teal area's right edge) set
+    by hand, or None = where Spiderweb puts it. Kept short: [beat, shape, formula] when neither is set."""
+    while len(c) <= k:
+        c.append(None)
+    c[k] = None if v is None else float(v)
+    while len(c) > 3 and c[-1] is None:
+        c.pop()
+
+
+def catch_get(c, k):
+    return c[k] if len(c) > k else None
 
 
 _formulas = {}
@@ -168,6 +185,17 @@ def catch_weight(shape, text, t):
 
 # ------------------------------------------------------------ the drawn line and its stretches
 
+def catch_end(tempo, k):
+    """Where catch-up line k's catch-up ends: its teal area's right edge set by hand, else the next point; never
+    past the next catch-up line. None when nothing ends it."""
+    c, lines = tempo["catch"][k], [x[0] for x in tempo["catch"]]
+    after = [p[0] for p in tempo["points"] if p[0] > c[0]] + lines[k + 1:k + 2]
+    end = min(after) if after else None
+    if catch_get(c, 4) is not None:
+        end = min([catch_get(c, 4)] + lines[k + 1:k + 2])
+    return end
+
+
 def stretches(tempo, base):
     """The catch-up lines' stretches: [{"from": beat the stretch (the yellow area + the catch-up) starts, "read":
     the beat whose tempo it's paid back to (= "end"; None when there's no end), "manual": "from" set by hand,
@@ -182,12 +210,10 @@ def stretches(tempo, base):
     out, prev = [], 0.0
     pts = tempo["points"]
     pb = [p[0] for p in pts]
-    lines = [c[0] for c in tempo["catch"]]
     for k, c in enumerate(tempo["catch"]):
         b, shape, text = c[:3]
-        hand = c[3] if len(c) > 3 else None
-        after = [x for x in pb if x > b] + lines[k + 1:k + 2]
-        end = min(after) if after else None
+        hand, hand_end = catch_get(c, 3), catch_get(c, 4)
+        end = catch_end(tempo, k)
         start, read = prev, None
         if end is not None:
             read = end  # (user: the yellow area counts everything in it, at the tempo the line comes back to)
@@ -204,8 +230,8 @@ def stretches(tempo, base):
                     leaves = pts[i][2] != "hold" and i + 1 < len(pts) and pts[i + 1][1] != pts[i][1]
                     start = pb[i] if leaves else (pb[cands[n + 1]] if n + 1 < len(cands) else b)
                     break
-        out.append({"from": start, "read": read, "manual": hand is not None, "line": b, "end": end,
-                    "shape": shape, "text": text})
+        out.append({"from": start, "read": read, "manual": hand is not None, "manual_end": hand_end is not None,
+                    "line": b, "end": end, "shape": shape, "text": text})
         if end is not None:
             prev = end
     return out
@@ -394,19 +420,27 @@ def keeps(p):
 
 
 def keep_parts(tempo):
-    """[(point index, first beat, end beat or None = on to the song's end)] of the Keep timing parts. A part ends at
-    the next point, or at a catch-up line inside it (the catch-up's own part never moves notes)."""
-    pts, lines = tempo["points"], [c[0] for c in tempo["catch"]]
+    """[(point index, first beat, end beat or None = on to the song's end)] of the Keep timing parts, without the
+    catch-ups' own areas (line to end: a catch-up never moves notes), so a part may come in two pieces."""
+    pts = tempo["points"]
+    spans = [(c[0], catch_end(tempo, k)) for k, c in enumerate(tempo["catch"])]
     out = []
     for i, p in enumerate(pts):
         if not keeps(p):
             continue
-        end = pts[i + 1][0] if i + 1 < len(pts) else None
-        inside = [x for x in lines if p[0] <= x and (end is None or x < end)]
-        if inside:
-            end = min(inside)
-        if end is None or end > p[0]:
-            out.append((i, p[0], end))
+        pieces = [(p[0], pts[i + 1][0] if i + 1 < len(pts) else None)]
+        for lo, hi in spans:
+            cut = []
+            for a, e in pieces:
+                if (e is not None and lo >= e) or (hi is not None and hi <= a):
+                    cut.append((a, e))
+                    continue
+                if lo > a:
+                    cut.append((a, lo))
+                if hi is not None and (e is None or hi < e):
+                    cut.append((hi, e))
+            pieces = cut
+        out += [(i, a, e) for a, e in pieces if e is None or e > a]
     return out
 
 
@@ -428,13 +462,15 @@ def layout(tempo, base, ppq):
     first = _first_ticks([p[0] for p in tempo["points"]], ppq)
     spans = []  # (a, b or None, heard us) in the order they're found
     keeps_at = []
-    for i, b, end in kps:
+    for i, b, end in kps:  # (on a point: its part's first tick, as the drawn line changes there)
+        a = first[i] if b == tempo["points"][i][0] else int(round(b * ppq))
         e = None
         if end is not None:
             e = int(round(end * ppq))
             if i + 1 < len(first) and abs(end - tempo["points"][i + 1][0]) < 1e-12:
                 e = first[i + 1]
-        keeps_at.append((i, first[i], e))
+        if e is None or e > a:
+            keeps_at.append((i, a, e))
     todo = sorted([(int(round(st["from"] * ppq)), 0, n) for n, st in enumerate(sts)]
                   + [(a, 1, n) for n, (_, a, _) in enumerate(keeps_at)])
 
@@ -712,7 +748,7 @@ def file_segments(tempo, base, ppq, end=0):
     the tempo heard before it; one that can't work leaves its stretch as drawn (heard) and is listed."""
     base_u = round(60_000_000 / base)
     pts = tempo["points"]
-    last = max([p[0] for p in pts] + [c[0] for c in tempo["catch"]])
+    last = max([p[0] for p in pts] + [x for c in tempo["catch"] for x in (c[0], catch_get(c, 4)) if x is not None])
     end = max(end, int(round(last * ppq)) + 1)
     segs = _segments(tempo, base, base_u, ppq, 0, end)
     bad = []
