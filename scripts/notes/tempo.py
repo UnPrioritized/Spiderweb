@@ -92,7 +92,9 @@ def clean_tempo(data):
         if not math.isfinite(b) or not 0 < b <= FAR or round(b, 9) in seen:
             continue
         seen.add(round(b, 9))
-        out["catch"].append([b, shape, text[:200]])
+        start = c[3] if len(c) > 3 and isinstance(c[3], (int, float)) and not isinstance(c[3], bool) else None
+        ok = start is not None and math.isfinite(start) and 0 <= start < b
+        out["catch"].append([b, shape, text[:200]] + ([float(start)] if ok else []))
     out["catch"].sort(key=lambda c: c[0])
     return out
 
@@ -167,32 +169,43 @@ def catch_weight(shape, text, t):
 # ------------------------------------------------------------ the drawn line and its stretches
 
 def stretches(tempo, base):
-    """The catch-up lines' stretches: [{"from": beat the stretch starts, "line": the line's beat = where the
-    catch-up starts, "end": where it ends (the next point or catch-up line after it; None when there's none),
-    "shape", "text"}].
+    """The catch-up lines' stretches: [{"from": beat the stretch (the yellow area + the catch-up) starts, "read":
+    the beat whose tempo it's paid back to (None: the tempo just before "from"), "manual": "from" set by hand,
+    "line": the line's beat = where the catch-up starts, "end": where it ends (the next point or catch-up line
+    after it; None when there's none), "shape", "text"}].
 
-    Where it starts (user 2026-10-21: paid back to the tempo heard just before it, so a song may change tempo for
-    real before a jump): walking back from the line, the last point at the BPM the line goes on at after the
-    catch-up = the tempo the jump left; the stretch starts where the line leaves it (that point when its part
-    curves away, else the next point). None at that BPM: where the stretch before ended (or the song's start)."""
+    Where it starts (user 2026-10-21: the yellow area is what the catch-up counts from, dragged by its left edge
+    = catch[3]; a song may change tempo for real before a jump): by hand = there, paid back to the tempo there.
+    Else, walking back from the line, the last point at the BPM the line goes on at after the catch-up = the
+    tempo the jump left, paid back to that point's tempo; the stretch starts where the line leaves it (that point
+    when its part curves away, else the next point). None at that BPM: the first point after the stretch before,
+    paid back to the tempo just before it."""
     out, prev = [], 0.0
     pts = tempo["points"]
     pb = [p[0] for p in pts]
     lines = [c[0] for c in tempo["catch"]]
-    for k, (b, shape, text) in enumerate(tempo["catch"]):
+    for k, c in enumerate(tempo["catch"]):
+        b, shape, text = c[:3]
+        hand = c[3] if len(c) > 3 else None
         after = [x for x in pb if x > b] + lines[k + 1:k + 2]
         end = min(after) if after else None
-        start = prev
-        if end is not None:
+        start, read = prev, None
+        if end is not None and hand is not None:
+            start = read = max(prev, min(hand, b))
+        elif end is not None:
             on = float(drawn_bpm(tempo, base, [end])[0])
             cands = [i for i, x in enumerate(pb) if prev <= x < b]
+            if cands:
+                start = pb[cands[0]]
             for n in range(len(cands) - 1, -1, -1):
                 i = cands[n]
                 if abs(pts[i][1] - on) <= 1e-9 * on:
                     leaves = pts[i][2] != "hold" and i + 1 < len(pts) and pts[i + 1][1] != pts[i][1]
                     start = pb[i] if leaves else (pb[cands[n + 1]] if n + 1 < len(cands) else b)
+                    read = pb[i]
                     break
-        out.append({"from": start, "line": b, "end": end, "shape": shape, "text": text})
+        out.append({"from": start, "read": read, "manual": hand is not None, "line": b, "end": end,
+                    "shape": shape, "text": text})
         if end is not None:
             prev = end
     return out
@@ -437,6 +450,8 @@ def layout(tempo, base, ppq):
     bases, keep_u = [start_u] * len(sts), [start_u] * len(keeps_at)
     for t0, kind, n in todo:
         u = heard(t0 - 1)
+        if kind == 0 and sts[n]["read"] is not None:  # (the tempo at a point / where the area was dragged to)
+            u = heard(_first_ticks([sts[n]["read"]], ppq)[0])
         if kind == 0:
             bases[n] = u
             if sts[n]["end"] is not None:

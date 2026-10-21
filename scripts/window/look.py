@@ -234,6 +234,7 @@ CHART_POINT = pick("#ffffff", "#3c3c3f")  # inside the line's points
 TEMPO_LINE, TEMPO_PICKED = pick("#2f6fdb", "#7ab0ff"), pick("#1d4fb0", "#b8d4ff")
 TEMPO_CATCH, TEMPO_CATCH_BG = pick("#12a08a", "#3cc9b0"), pick("#d6f2ec", "#2f4a46")
 TEMPO_DRAWN_BG = pick("#fbefd9", "#4a4234")
+TEMPO_DRAWN_EDGE = pick("#d9a54a", "#b08a4a")  # the catch-up area's left edge (draggable)
 TEMPO_BAD_BG = pick("#fadcdc", "#553636")
 TEMPO_KEEP, TEMPO_KEEP_BG = pick("#8a4fc8", "#c39cf0"), pick("#ece2f8", "#3e3550")  # Keep timing parts
 TEMPO_LIMIT = pick("#e89a9a", "#9a5050")  # the slowest / fastest tempo a MIDI file holds (faint red)

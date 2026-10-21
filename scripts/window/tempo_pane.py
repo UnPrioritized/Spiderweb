@@ -517,6 +517,14 @@ class TempoPane(tk.Canvas):
                 return i
         return None
 
+    def start_at(self, x):
+        """The catch-up whose yellow area's left edge is at x (its index), or None."""
+        roll = self.app.roll
+        for j, (st, _) in enumerate(plans(self.app.tempo, self.base(), self.app.ppq)):
+            if st["end"] is not None and st["from"] < st["line"] and abs(roll.t2x(st["from"]) - x) <= 4 * self.scale:
+                return j
+        return None
+
     def part_at(self, beat):
         """The part at beat: its first point's index (after the last point: the last one, for Keep timing)."""
         pts = self.app.tempo["points"]
@@ -563,6 +571,12 @@ class TempoPane(tk.Canvas):
                 self.band = None
                 self.set_sel([item])
             return self.start_move(e, item, pushed=False)
+        j = self.start_at(e.x)
+        if j is not None:  # the yellow area's left edge: where the catch-up counts from
+            self.band = None
+            self.set_sel([tempo["catch"][j]])
+            self.drag = {"kind": "start", "item": tempo["catch"][j], "x": e.x, "pushed": False}
+            return
         b, v = self.snap_beat(roll.x2t(e.x), e), self.snap_bpm(self.y2b(e.y), e)
         if tool == "select":
             beat = roll.x2t(e.x)
@@ -589,6 +603,9 @@ class TempoPane(tk.Canvas):
         band = tuple(self.band) if self.band else None
         self.drag = {"kind": "move", "grab": item, "x": e.x, "y": e.y, "pushed": pushed,
                      "orig": [(s, s[0], s[1] if self.is_point(s) else None) for s in self.sel],
+                     # (a hand-set area start goes along when many move; one line dragged alone leaves it)
+                     "starts": [(s, s[3]) for s in self.sel if not self.is_point(s) and len(s) > 3
+                                and (band or len(self.sel) > 1)],
                      "press": self.app.roll.x2t(e.x), "band": band, "ref": band[0] if band else item[0],
                      "time_only": self.box.tool.get() == "select",
                      "v0": item[1] if item is not None and self.is_point(item) else None, "db": 0.0}
@@ -621,6 +638,16 @@ class TempoPane(tk.Canvas):
             d["b1"], d["v1"] = self.snap_beat(roll.x2t(e.x), e), self.snap_bpm(self.y2b(e.y), e)
             self.show_position(e)
             return self.request_redraw()
+        if d["kind"] == "start":
+            if not d["pushed"]:
+                if abs(e.x - d["x"]) < 3:
+                    return
+                self.app.push_undo(name=tr("tempo.step_catch_start"))
+                d["pushed"] = True
+            c = d["item"]
+            c[3:] = [min(self.snap_beat(roll.x2t(e.x), e), c[0] - 1.0 / max(1, self.app.ppq))]
+            self.app.tempo_changed()
+            return self.show_position(e)
         if not d["pushed"]:
             if abs(e.x - d["x"]) < 3 and abs(e.y - d["y"]) < 3:
                 return  # (a click, not a drag yet)
@@ -645,6 +672,8 @@ class TempoPane(tk.Canvas):
                 s[0] = max(b + shift, 0.0 if v is not None else one)
                 if v is not None:
                     s[1] = clamp_bpm(v + dv) if dv else v
+            for s, a in d["starts"]:  # (a catch-up area started by hand goes along)
+                s[3] = max(0.0, a + shift)
             for key in ("points", "catch"):
                 tempo[key].sort(key=lambda it: it[0])
 
@@ -691,6 +720,9 @@ class TempoPane(tk.Canvas):
                 self.request_redraw()
         elif d["kind"] == "draw":
             self.draw_part(d)
+        elif d["kind"] == "start":
+            if d["pushed"]:
+                self.app.settle_history()
         elif d["kind"] == "move":
             if d["pushed"]:
                 self.app.settle_history()
@@ -773,6 +805,10 @@ class TempoPane(tk.Canvas):
         b = self.snap_beat(roll.x2t(e.x), e)
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(label=tr("tempo.add_catch"), command=lambda: self.add_catch(b))
+        k = self.start_at(e.x) if item is None else None
+        if k is not None and len(tempo["catch"][k]) > 3:  # (the yellow area's edge, set by hand)
+            menu.add_separator()
+            menu.add_command(label=tr("tempo.catch_auto"), command=lambda: self.auto_start(tempo["catch"][k]))
         if item is not None:  # (user: right-click doesn't delete; Delete picked ones, or this menu)
             gone = self.sel if self.is_sel(item) else [item]
             menu.add_separator()
@@ -781,6 +817,13 @@ class TempoPane(tk.Canvas):
             menu.tk_popup(e.x_root, e.y_root)
         finally:
             menu.grab_release()
+
+    def auto_start(self, c):
+        """The yellow area's start back to where Spiderweb puts it (one undo step)."""
+        if len(c) > 3:
+            self.app.push_undo(name=tr("tempo.step_catch_start"))
+            del c[3:]
+            self.app.tempo_changed()
 
     def delete_items(self, gone):
         """These points / catch-up lines go (one undo step)."""
@@ -835,7 +878,7 @@ class TempoPane(tk.Canvas):
             want = "sb_v_double_arrow"
         elif self.point_at(e.x, e.y) is not None:
             want = "fleur"
-        elif self.catch_at(e.x) is not None:
+        elif self.catch_at(e.x) is not None or self.start_at(e.x) is not None:
             want = "sb_h_double_arrow"
         elif self.box.tool.get() != "select":
             want = PENCIL_CURSOR
@@ -1039,10 +1082,12 @@ class TempoPane(tk.Canvas):
         # stretches: the held part (amber) and its catch-up (teal; red when it can't work)
         for st, plan in worked:
             x1 = roll.t2x(st["line"])
-            first = [p[0] for p in tempo["points"] if st["from"] <= p[0] < st["line"]]
-            if first:
-                self.create_rectangle(max(kb, roll.t2x(first[0])), 0, max(kb, x1), h, fill=look.TEMPO_DRAWN_BG,
-                                      outline="")
+            if st["end"] is not None and st["from"] < st["line"]:  # (its left edge drags: where it counts from)
+                x0 = roll.t2x(st["from"])
+                self.create_rectangle(max(kb, x0), 0, max(kb, x1), h, fill=look.TEMPO_DRAWN_BG, outline="")
+                if x0 >= kb:
+                    self.create_line(x0, 0, x0, h, fill=look.TEMPO_DRAWN_EDGE, width=lw * (2 if st["manual"] else 1),
+                                     dash=() if st["manual"] else (3, 3))
             if st["end"] is not None:
                 self.create_rectangle(max(kb, x1), 0, max(kb, roll.t2x(st["end"])), h, outline="",
                                       fill=look.TEMPO_CATCH_BG if plan["ok"] else look.TEMPO_BAD_BG)
