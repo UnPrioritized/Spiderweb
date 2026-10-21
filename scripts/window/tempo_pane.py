@@ -284,6 +284,14 @@ class TempoPane(tk.Canvas):
         top, bot = self.area()
         return clamp_bpm(2 ** (lo + (bot - y) / max(1, bot - top) * (hi - lo)))
 
+    def set_view(self, lo, hi):
+        """The BPMs shown, kept between the slowest and the fastest a MIDI file holds (user: stop there, like the
+        velocity pane at 0; the pane's padding stays below / above). Zoomed out past both: all of it."""
+        floor, roof = math.log2(MIN_BPM), math.log2(MAX_BPM)
+        span = min(hi - lo, roof - floor)
+        lo = min(max(lo, floor), roof - span)
+        self.view = (lo, lo + span)
+
     def fit_view(self, redraw=True):
         """Up / down zoom to show the whole tempo line (catch-ups too) with a little room."""
         tempo, base = self.app.tempo, self.base()
@@ -293,7 +301,7 @@ class TempoPane(tk.Canvas):
         if hi - lo < 2:  # (at least two doublings shown: a flat line in the middle)
             mid = (hi + lo) / 2
             lo, hi = mid - 1, mid + 1
-        self.view = (lo - 0.35, hi + 0.35)
+        self.set_view(lo - 0.35, hi + 0.35)
         if redraw:
             self.request_redraw()
 
@@ -437,7 +445,7 @@ class TempoPane(tk.Canvas):
             lo, hi = d["view"]
             top, bot = self.area()
             shift = (e.y - d["y"]) / max(1, bot - top) * (hi - lo)
-            self.view = (lo + shift, hi + shift)
+            self.set_view(lo + shift, hi + shift)
             return self.request_redraw()
         if d["kind"] == "box":
             d["x1"] = e.x
@@ -653,7 +661,7 @@ class TempoPane(tk.Canvas):
         roll.clamp_view()
         top, bot = self.area()
         shift = (e.y - y0) / max(1, bot - top) * (hi - lo)
-        self.view = (lo + shift, hi + shift)
+        self.set_view(lo + shift, hi + shift)
         roll.request_redraw()
 
     def on_wheel(self, e):
@@ -667,12 +675,12 @@ class TempoPane(tk.Canvas):
             lo, hi = self.view
             if e.state & SHIFT:
                 step = (hi - lo) * 0.1 * (1 if up else -1)
-                self.view = (lo + step, hi + step)
+                self.set_view(lo + step, hi + step)
             else:
                 at = math.log2(self.y2b(e.y))
                 f = 0.8 if up else 1.25
                 if hi - lo > 0.02 or not up:
-                    self.view = (at - (at - lo) * f, at + (hi - at) * f)
+                    self.set_view(at - (at - lo) * f, at + (hi - at) * f)
             return self.request_redraw()
         if e.state & CTRL:
             b = roll.x2t(e.x)
@@ -757,6 +765,9 @@ class TempoPane(tk.Canvas):
         base = self.base()
         if lo <= math.log2(base) <= hi:
             placed.append((base, True))
+        for v in (MIN_BPM, MAX_BPM):  # (where the faint red lines are)
+            if lo - 1e-9 <= math.log2(v) <= hi + 1e-9 and room(v):
+                placed.append((v, False))
         for n in range(math.floor(lo - math.log2(15)), math.ceil(hi - math.log2(15)) + 1):
             v = 15 * 2.0 ** n
             if lo <= math.log2(v) <= hi and MIN_BPM <= v <= MAX_BPM and room(v):
@@ -824,6 +835,11 @@ class TempoPane(tk.Canvas):
         for v, strong in self.labels():
             y = round(float(self.b2y(v)))
             self.create_line(kb, y, w, y, fill=look.CHART_GRID_STRONG if strong else look.CHART_GRID)
+        for v, past in ((MIN_BPM, h), (MAX_BPM, 0)):  # (the slowest / fastest a file holds: past them faint red)
+            y = round(float(self.b2y(v)))
+            if 0 <= y <= h:
+                self.create_rectangle(kb, y, w, past, fill=look.TEMPO_BAD_BG, outline="")
+                self.create_line(kb, y, w, y, fill=look.TEMPO_LIMIT, width=lw)
         y = float(self.b2y(base))
         self.create_line(kb, y, w, y, fill=look.TEMPO_BASE, dash=(4, 3), width=lw)
         # the line itself
