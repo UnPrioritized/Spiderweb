@@ -9,14 +9,14 @@ tempo every "every" ticks (default 24).
 A catch-up line starts a catch-up (user 2026-10-21): the drawn tempo holds up to the line, then from the line to the
 next point (or catch-up line) Spiderweb works out a tempo so the whole stretch (stretches: from where the line left
 the tempo it comes back to) takes exactly as long as at the tempo heard just before it; the drawn line goes on from
-that point. The catch-up's shape: flat, ease back (fast first, settling to the BPM), ramp (up and back down) or a
-formula. A catch-up never moves notes: everything after it is in time.
+that point. The catch-up's shape: flat, fast then slow (settling to the BPM), slow then fast, up and down or a
+formula; the two eases bend by a handle (catch[5]). A catch-up never moves notes: everything after it is in time.
 
 Keep timing (a tick per part, point[5]): the part's notes keep the time they have at the tempo heard before it;
 the export moves them in ticks (notes/tempo_file.py). The part after the last point goes on to the song's end.
 
 Saved in the project as "tempo": {"points": [[beat, bpm, curve, formula, "lin" / "exp", keep timing], ...],
-"catch": [[beat, shape, formula], ...], "every": ticks, "bars": Fit bar lines}, beats like the shapes (a PPQ change
+"catch": [[beat, shape, formula, start, end, bend], ...], "every": ticks, "bars": Fit bar lines}, beats like the shapes (a PPQ change
 moves nothing).
 
 Exact timing (user's rule: tick and microsecond perfect, not "too small to hear"): a MIDI file's time is whole
@@ -37,7 +37,8 @@ MAX_BPM = 60_000_000.0  # 1 microsecond per beat (faster = 0, which breaks the f
 CURVES = ("hold", "line", "s", "formula")
 BEND = [0.5, 0.5]  # a line / S-curve part's bend (its curve's control point, 0..1 each way): straight
 OLD_CURVES = {"out": ("line", [0.5, 1.0]), "in": ("line", [0.5, 0.0])}  # (ease out / in before the bend handle)
-SHAPES = ("flat", "ease", "ramp", "formula")
+SHAPES = ("flat", "ease", "rise", "ramp", "formula")
+CATCH_BEND = [0.5, 0.0]  # a fast-then-slow / slow-then-fast catch-up's bend (control point: 0..1 along, push)
 FORMULA = "x^3"  # a new formula part's / catch-up's starting formula
 SCALES = ("lin", "exp")  # a part's BPM change: linear (default, user) / exponential (straight on the doubling scale)
 EVERY = 24  # ticks between the tempo changes of a curved part (user: like Domino's default; 1 = every tick)
@@ -119,6 +120,10 @@ def clean_tempo(data):
         item = [b, shape, text[:200]]
         catch_set(item, 3, start if start is not None and 0 <= start < b else None)
         catch_set(item, 4, end if end is not None and b < end <= FAR else None)
+        bend = c[5] if len(c) > 5 else None
+        if isinstance(bend, list) and len(bend) == 2 and all(
+                isinstance(x, (int, float)) and not isinstance(x, bool) and 0 <= x <= 1 for x in bend):
+            catch_set(item, 5, [float(x) for x in bend])
         out["catch"].append(item)
     out["catch"].sort(key=lambda c: c[0])
     return out
@@ -126,10 +131,11 @@ def clean_tempo(data):
 
 def catch_set(c, k, v):
     """A catch-up line's start (k = 3, the yellow area's left edge) or end (k = 4, the teal area's right edge) set
-    by hand, or None = where Spiderweb puts it. Kept short: [beat, shape, formula] when neither is set."""
+    by hand, or None = where Spiderweb puts it; k = 5: its bend [x, y] (None = CATCH_BEND). Kept short: [beat,
+    shape, formula] when none is set."""
     while len(c) <= k:
         c.append(None)
-    c[k] = None if v is None else float(v)
+    c[k] = None if v is None or v == CATCH_BEND else list(v) if k == 5 else float(v)
     while len(c) > 3 and c[-1] is None:
         c.pop()
 
@@ -209,12 +215,17 @@ def _apply(fn, t):
     return out
 
 
-def catch_weight(shape, text, t):
+def catch_weight(shape, text, t, bend=None):
     """The catch-up's shape at t (0..1): how much of its push each moment gets (0 = the project's BPM). Flat = the
-    same all along; ease back = most at the start, none at the end; ramp = up and back down."""
+    same all along; ease = fast then slow (all at the start, none at the end); rise = slow then fast; both bent by
+    their handle (bend: the control point, x along, y = push; CATCH_BEND: (1 - t)^2 / t^2); ramp = up and back
+    down."""
     t = np.asarray(t, float)
-    if shape == "ease":
-        return (1 - t) ** 2
+    cx, cy = bend or CATCH_BEND
+    if shape == "ease":  # (from 1 to 0: bent() upside down)
+        return 1 - bent(t, (cx, 1 - cy))
+    if shape == "rise":
+        return bent(t, (cx, cy))
     if shape == "ramp":
         return np.sin(np.pi * t)
     if shape == "formula":
@@ -246,17 +257,26 @@ def stretches(tempo, base):
     tempo for real before a jump): by hand = there. Else, walking back from the line, the last point at the BPM
     the line comes back to = where the jump left it; the stretch starts where the line leaves it (that point when
     its part curves away, else the next point). None at that BPM: the first point after the stretch before."""
-    out, prev = [], 0.0
     pts = tempo["points"]
     pb = [p[0] for p in pts]
-    for k, c in enumerate(tempo["catch"]):
+    ends = [catch_end(tempo, k) for k in range(len(tempo["catch"]))]
+    prevs, prev = [], 0.0
+    for end in ends:
+        prevs.append(prev)
+        prev = prev if end is None else end
+    out = [None] * len(ends)
+    for k in range(len(ends) - 1, -1, -1):  # (from the last: each may read the next one's)
+        c, end, prev = tempo["catch"][k], ends[k], prevs[k]
         b, shape, text = c[:3]
         hand, hand_end = catch_get(c, 3), catch_get(c, 4)
-        end = catch_end(tempo, k)
         start, read = prev, None
         if end is not None:  # (user: the yellow area counts everything in it, at the tempo the line comes back to:
             # the next point at or after the end, also when it ends at another catch-up line or by hand mid-stop)
             read = min([x for x in pb if x >= end - 1e-12] or [end])
+            nxt = out[k + 1] if k + 1 < len(out) else None
+            if nxt and nxt["read"] is not None and nxt["from"] < nxt["line"] and abs(nxt["from"] - read) <= 1e-9:
+                read = nxt["read"]  # (ending where the next stop starts: paid back to the tempo that one comes
+                #                     back to; user: a stretch pasted right after itself changes nothing)
         if end is not None and hand is not None and hand < b:
             start = max(prev, hand)
         elif end is not None:
@@ -270,11 +290,9 @@ def stretches(tempo, base):
                     leaves = pts[i][2] != "hold" and i + 1 < len(pts) and pts[i + 1][1] != pts[i][1]
                     start = pb[i] if leaves else (pb[cands[n + 1]] if n + 1 < len(cands) else b)
                     break
-        out.append({"from": start, "read": read, "manual": hand is not None and hand < b,
-                    "manual_end": hand_end is not None,
-                    "line": b, "end": end, "shape": shape, "text": text})
-        if end is not None:
-            prev = end
+        out[k] = {"from": start, "read": read, "manual": hand is not None and hand < b,
+                  "manual_end": hand_end is not None,
+                  "line": b, "end": end, "shape": shape, "text": text, "bend": catch_get(c, 5)}
     return out
 
 
@@ -306,10 +324,10 @@ def drawn_bpm(tempo, base, beats):
     return np.clip(out, MIN_BPM, MAX_BPM)
 
 
-def _solve_push(shape, text, beats, seconds, base, n=512):
-    """The push A that makes a catch-up of this shape (BPM = base x 2^(A x weight)) last `seconds` over `beats`.
-    None when it can't (a shape with no push anywhere, or past what a MIDI file can hold)."""
-    w = catch_weight(shape, text, (np.arange(n) + 0.5) / n)
+def _solve_push(st, beats, seconds, base, n=512):
+    """The push A that makes a catch-up of the stretch's shape (BPM = base x 2^(A x weight)) last `seconds` over
+    `beats`. None when it can't (a shape with no push anywhere, or past what a MIDI file can hold)."""
+    w = catch_weight(st["shape"], st["text"], (np.arange(n) + 0.5) / n, st.get("bend"))
     if not np.any(w > 1e-9) or np.any(w < -1e-9) or seconds <= 0:
         return None
     lo_b, hi_b = math.log2(MIN_BPM / base), math.log2(MAX_BPM / base)
@@ -465,11 +483,11 @@ def catch_plan(tempo, base, st, ppq, real=None):
         n, target = e - line, total - _us_sum(real(s0, line))
         if not n <= target <= n * SLOWEST:
             return None
-        push = _solve_push(st["shape"], st["text"], n / ppq, target / ppq / 1e6, bpm)
+        push = _solve_push(st, n / ppq, target / ppq / 1e6, bpm)
         if push is None:
             return None
         t = (np.arange(n) + 0.5) / n
-        ideal = 6e7 / np.clip(bpm * 2 ** (push * catch_weight(st["shape"], st["text"], t)), MIN_BPM, MAX_BPM)
+        ideal = 6e7 / np.clip(bpm * 2 ** (push * catch_weight(st["shape"], st["text"], t, st.get("bend"))), MIN_BPM, MAX_BPM)
         fit = _fit_blocks(ideal, target, every)  # (the file's own values: the pane says OK only when it works)
         return None if fit is None else (push, fit, target)
 
@@ -488,7 +506,7 @@ def catch_plan(tempo, base, st, ppq, real=None):
         out["latest"] = None if latest is None else latest / ppq
         return out
     push, fit, target = got
-    w = catch_weight(st["shape"], st["text"], np.linspace(0, 1, 257))
+    w = catch_weight(st["shape"], st["text"], np.linspace(0, 1, 257), st.get("bend"))
     top = bpm * 2 ** float((push * w).max() if push > 0 else (push * w).min())
     out.update(ok=True, push=push, bpm=clamp_bpm(top), target=target, fit=fit)
     return out
@@ -497,7 +515,7 @@ def catch_plan(tempo, base, st, ppq, real=None):
 def catch_bpm(base, st, plan, beats):
     """The catch-up's BPM at beats inside its part (for drawing), round the tempo heard before it."""
     t = (np.asarray(beats, float) - st["line"]) / max(1e-12, st["end"] - st["line"])
-    w = catch_weight(st["shape"], st["text"], np.clip(t, 0, 1))
+    w = catch_weight(st["shape"], st["text"], np.clip(t, 0, 1), st.get("bend"))
     return np.clip(st.get("base", base) * 2 ** (plan["push"] * w), MIN_BPM, MAX_BPM)
 
 

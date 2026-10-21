@@ -23,12 +23,14 @@ import numpy as np
 
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
-from notes.tempo import (BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, bend_of, clamp_bpm, curve,
+from files.system import double_click_ms
+from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, bend_of, clamp_bpm, curve,
                          formula_fn,
                          catch_get, catch_set, keeps, layout,
                          plans, shown_bpm, step_edges)
 from roll.zoombar import add_zoom_bars
-from roll.roll_shared import (BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, draw_boxes, grab_while_panning,
+from roll.roll_shared import (BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, bind_double_right, draw_boxes,
+                              grab_while_panning,
                               set_cursor)
 from window import look
 from window.widgets import ShortLabel, Tooltip, unit_word
@@ -37,6 +39,7 @@ BPM_SNAPS = (0, 0.1, 1, 5, 10)  # the BPM snap dropdown's steps (0 = off)
 NICE = (0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000,
         10000000)  # numbers filled in on zoom
 LABEL_GAP = 15  # px between two numbers on the left (times the window's scale)
+DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
 DRAWS = {"line": "line", "formula": "formula"}  # pencil kind -> the curve the drawn part gets (bent by its handle)
 
 
@@ -62,7 +65,8 @@ class TempoBox(ttk.Frame):
         bar = self.bar = ttk.Frame(self, padding=(2, 2))
         bar.pack(fill="x")
         ttk.Label(bar, text=tr("tempo.tempo")).pack(side="left", padx=(2, 8))
-        self.tool = tk.StringVar(value="point")  # select / point / line / curve / formula
+        self.tool = tk.StringVar(value="point")  # select / point / line / formula
+        self.last_pencil = "point"  # (double right-click: Select <-> this)
         self.tool_vars = {}
         for key, label in (("select", tr("app.select")), (None, None), ("line", tr("tempo.line_tool")),
                            ("formula", tr("app.formula"))):
@@ -163,12 +167,24 @@ class TempoBox(ttk.Frame):
             if k != key:
                 var.set(False)
         self.tool.set(key if on else "point")
+        if self.tool.get() != "select":
+            self.last_pencil = self.tool.get()
         self.pane.placing = None  # (adding a catch-up: called off)
         self.pick_tool_hint()
         self.pane.drag = None
         self.sync()
         self.pane.request_redraw()
         self.app.roll.focus_set()
+
+    def toggle_select(self):
+        """Double right-click on the pane: Select <-> the pencil used last (plain points, Line or Formula)."""
+        key = self.last_pencil if self.tool.get() == "select" else "select"
+        if key == "point":
+            self.tool_vars["select"].set(False)
+            key = "select"
+        else:
+            self.tool_vars[key].set(True)
+        self.pick_tool(key)
 
     def pick_tool_hint(self):
         self.hint.config(text=tr("tempo.hint_" + ("draw" if self.tool.get() in DRAWS else self.tool.get())))
@@ -421,7 +437,8 @@ class TempoPane(tk.Canvas):
         self.bind("<ButtonRelease-1>", self.on_release)
         self.bind("<Double-Button-1>", self.on_double)
         self.bind("<Motion>", self.on_motion)
-        self.bind("<ButtonPress-3>", self.on_right)
+        bind_double_right(self, self.on_right, self.on_double_right)
+        self.menu_wait = None  # a right-click on empty space: its menu, waiting to see if it's a double click
         self.bind("<ButtonPress-2>", self.start_pan)
         self.bind("<B2-Motion>", self.pan_to)
         self.bind("<MouseWheel>", self.on_wheel)
@@ -657,7 +674,8 @@ class TempoPane(tk.Canvas):
 
     def handle_pos(self, i):
         """(beat, BPM) of part i's round bend handle (the curve's middle; an S-curve: its first half's), None when
-        it has none (held / formula / the last part / both ends one BPM)."""
+        it has none (held / formula / the last part / both ends one BPM) or a working catch-up hides the line
+        there (user: it was left hanging in the air)."""
         pts = self.app.tempo["points"]
         if i is None or i + 1 >= len(pts) or pts[i][2] not in ("line", "s") or pts[i][1] == pts[i + 1][1]:
             return None
@@ -666,7 +684,30 @@ class TempoPane(tk.Canvas):
         x, y = (2 * cx + 1) / 4, (2 * cy + 1) / 4
         if p[2] == "s":
             x, y = x / 2, y / 2
-        return p[0] + (q[0] - p[0]) * x, self.along_bpm(p, q, y)
+        b = p[0] + (q[0] - p[0]) * x
+        if any(plan["ok"] and st["line"] <= b < st["end"] for st, plan in plans(self.app.tempo, self.base(),
+                                                                                 self.app.ppq)):
+            return None
+        return b, self.along_bpm(p, q, y)
+
+    def catch_handle_pos(self, j):
+        """(beat, BPM) of catch-up j's round bend handle (fast then slow / slow then fast: its curve's middle), None
+        when it has none (another shape, or it can't work)."""
+        st, plan = plans(self.app.tempo, self.base(), self.app.ppq)[j]
+        if st["shape"] not in ("ease", "rise") or not plan["ok"]:
+            return None
+        cx, cy = st["bend"] or CATCH_BEND
+        return (st["line"] + (st["end"] - st["line"]) * (2 * cx + 1) / 4,
+                clamp_bpm(st["base"] * 2 ** (plan["push"] * (2 * cy + 1) / 4)))
+
+    def handles(self):
+        """The picked part's / catch-up's bend handle: (("part", i) / ("catch", j), (beat, BPM)), or None."""
+        pick = self.picked()
+        if pick and pick[0] in ("part", "catch"):
+            at = (self.handle_pos if pick[0] == "part" else self.catch_handle_pos)(pick[1])
+            if at is not None:
+                return pick, at
+        return None
 
     def along_bpm(self, p, q, f):
         """The BPM f of the way from p's to q's (on its part's BPM change: linear / doubling)."""
@@ -675,18 +716,24 @@ class TempoPane(tk.Canvas):
         return p[1] + (q[1] - p[1]) * f
 
     def handle_at(self, x, y):
-        """The picked part's index when the mouse is on its bend handle."""
-        pick = self.picked()
-        if not pick or pick[0] != "part":
+        """("part", i) / ("catch", j) when the mouse is on the picked one's bend handle."""
+        got = self.handles()
+        if got is None:
             return None
-        at = self.handle_pos(pick[1])
-        if at is None:
-            return None
-        hx, hy = self.app.roll.t2x(at[0]), float(self.b2y(at[1]))
-        return pick[1] if math.hypot(hx - x, hy - y) <= 7 * self.scale else None
+        hx, hy = self.app.roll.t2x(got[1][0]), float(self.b2y(got[1][1]))
+        return got[0] if math.hypot(hx - x, hy - y) <= 7 * self.scale else None
 
-    def bend_to(self, i, e):
-        """The handle dragged to the mouse: the part's bend, kept between its two ends (never past A or B)."""
+    def bend_to(self, d, e):
+        """The handle dragged to the mouse: the bend, kept between its two ends (never past A or B). A catch-up's
+        BPM read with its push at the press (its BPM changes with the bend)."""
+        kind, i = d["handle"]
+        if kind == "catch":
+            st = d["st"]
+            fx = (self.app.roll.x2t(e.x) - st["line"]) / max(1e-12, st["end"] - st["line"])
+            fy = math.log2(max(MIN_BPM, self.y2b(e.y)) / st["base"]) / d["push"] if d["push"] else 0.5
+            catch_set(self.app.tempo["catch"][i], 5, [min(1.0, max(0.0, 2 * fx - 0.5)),
+                                                      min(1.0, max(0.0, 2 * fy - 0.5))])
+            return
         pts = self.app.tempo["points"]
         p, q = pts[i], pts[i + 1]
         fx = (self.app.roll.x2t(e.x) - p[0]) / max(1e-12, q[0] - p[0])
@@ -748,8 +795,11 @@ class TempoPane(tk.Canvas):
         i, j = self.point_at(e.x, e.y), self.catch_at(e.x)
         item = tempo["points"][i] if i is not None else tempo["catch"][j] if j is not None else None
         n = self.handle_at(e.x, e.y) if item is None else None
-        if n is not None:  # the picked part's bend handle
-            self.drag = {"kind": "bend", "part": n, "x": e.x, "y": e.y, "pushed": False}
+        if n is not None:  # the picked part's / catch-up's bend handle
+            self.drag = {"kind": "bend", "handle": n, "x": e.x, "y": e.y, "pushed": False}
+            if n[0] == "catch":
+                self.drag["st"], plan = plans(tempo, self.base(), self.app.ppq)[n[1]]
+                self.drag["push"] = plan["push"]
             return
         if item is not None:
             if tool == "select" and e.state & CTRL:
@@ -853,9 +903,9 @@ class TempoPane(tk.Canvas):
             if not d["pushed"]:
                 if abs(e.x - d["x"]) < 3 and abs(e.y - d["y"]) < 3:
                     return
-                self.app.push_undo(name=tr("tempo.step_bend"))
+                self.app.push_undo(name=tr("tempo.step_bend" if d["handle"][0] == "part" else "tempo.step_catch_bend"))
                 d["pushed"] = True
-            self.bend_to(d["part"], e)
+            self.bend_to(d, e)
             self.app.tempo_changed()
             return self.show_position(e)
         if d["kind"] in ("start", "end"):  # a catch-up's yellow left edge / teal right edge
@@ -1009,9 +1059,16 @@ class TempoPane(tk.Canvas):
             return
         i = self.point_at(e.x, e.y)
         n = self.handle_at(e.x, e.y) if i is None else None
-        if n is not None:  # (the bend handle: straight again)
+        if n is not None:  # (the bend handle: straight / the catch-up's own curve again)
             self.drag = None
-            p = self.app.tempo["points"][n]
+            if n[0] == "catch":
+                c = self.app.tempo["catch"][n[1]]
+                if catch_get(c, 5) is not None:
+                    self.app.push_undo(name=tr("tempo.step_catch_bend"))
+                    catch_set(c, 5, None)
+                    self.app.tempo_changed()
+                return
+            p = self.app.tempo["points"][n[1]]
             if bend_of(p) != BEND:
                 self.app.push_undo(name=tr("tempo.step_bend"))
                 p[6:] = [list(BEND)]
@@ -1080,11 +1137,41 @@ class TempoPane(tk.Canvas):
         self.app.key_pane = self
         self.picked()
         n = self.handle_at(e.x, e.y)
-        if n is not None:  # (the bend handle: an S-curve / a line again, user)
-            return self.toggle_s(n)
+        if n is not None and n[0] == "part":  # (the bend handle: an S-curve / a line again, user)
+            return self.toggle_s(n[1])
         tempo = self.app.tempo
         i, j = self.point_at(e.x, e.y), self.catch_at(e.x)
         item = tempo["points"][i] if i is not None else tempo["catch"][j] if j is not None else None
+        on_edge = item is None and (self.start_at(e.x) is not None or self.end_at(e.x) is not None)
+        if item is None and not on_edge and not self.in_band(e.x):  # (empty space: the menu waits to see if it's
+            self.drop_menu_wait()                                    # a double right-click, user)
+            self.menu_wait = self.after(DOUBLE_MS, lambda: self.right_menu(e, None))
+            return
+        self.right_menu(e, item)
+
+    def in_band(self, x):
+        return bool(self.band) and self.band[0] <= self.app.roll.x2t(x) <= self.band[1]
+
+    def drop_menu_wait(self):
+        if self.menu_wait:
+            self.after_cancel(self.menu_wait)
+            self.menu_wait = None
+
+    def on_double_right(self, e):
+        """Double right-click: Select <-> the pencil used last (user, like the piano roll); not inside the Select
+        box, nor while the left button is held."""
+        if self.drag or e.state & 0x100:
+            return
+        if self.placing or self.in_band(e.x) or e.x < self.app.roll.kb_w:
+            return self.on_right(e)
+        self.drop_menu_wait()
+        self.box.toggle_select()
+        self.on_motion(e)
+
+    def right_menu(self, e, item):
+        """The right-click menu: Add catch-up BPM here, an edge back to automatic, Delete for item."""
+        self.menu_wait = None
+        tempo = self.app.tempo
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(label=tr("tempo.add_catch"), command=self.start_placing)
         for k, at, key in ((3, self.start_at, "tempo.catch_auto"), (4, self.end_at, "tempo.catch_end_auto")):
@@ -1163,6 +1250,7 @@ class TempoPane(tk.Canvas):
                 item = [c[0] - lo] + list(c[1:3])
                 for k in (3, 4):
                     catch_set(item, k, None if catch_get(c, k) is None else catch_get(c, k) - lo)
+                catch_set(item, 5, catch_get(c, 5))
                 cs.append(item)
         if not pts and not cs:
             self.app.status.config(text=tr("tempo.copy_nothing"))
@@ -1201,6 +1289,7 @@ class TempoPane(tk.Canvas):
             for k in (3, 4):
                 v = catch_get(c, k)
                 catch_set(item, k, None if v is None else max(0.0, v + at))
+            catch_set(item, 5, catch_get(c, 5))
             new_c.append(item)
         for key, new in (("points", new_p), ("catch", new_c)):
             kept = [it for it in tempo[key] if not lo - 1e-9 <= it[0] <= hi + 1e-9]
@@ -1536,8 +1625,9 @@ class TempoPane(tk.Canvas):
             edge = look.TEMPO_CATCH if b in ends else look.TEMPO_LINE
             self.create_oval(x - r, y - r, x + r, y + r, fill=look.TEMPO_PICKED if on else look.CHART_POINT,
                              outline=edge, width=lw + 1)
-        at = self.handle_pos(pick[1]) if pick and pick[0] == "part" else None
-        if at is not None:  # the picked line's bend handle: round, like the velocity pane's curve
+        got = self.handles()
+        if got is not None:  # the picked line's / catch-up's bend handle: round, like the velocity pane's curve
+            at = got[1]
             x, y, r = roll.t2x(at[0]), float(self.b2y(at[1])), 5 * self.scale
             self.create_oval(x - r, y - r, x + r, y + r, fill=look.CHART_POINT, outline=look.TEMPO_PICKED,
                              width=lw + 1)
