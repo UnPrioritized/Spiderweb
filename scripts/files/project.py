@@ -805,16 +805,25 @@ class ProjectFiles:
             note += tr("project.tempo_dense", where=self.bar_text(plan["dense"][0]))
         return note
 
-    def tempo_timed(self, ppq, bpm, beats, cc, notes=None):
+    def tempo_timed(self, ppq, bpm, beats, cc, notes=None, upto=None):
         """(notes, cc, file_plan) for the MIDI file: the Tempo pane's changes, notes and CC messages in Keep timing
         parts moved to the ticks that keep their time (notes/tempo_file.py). notes: the ones going out (default:
-        every note)."""
+        every note); upto: only the ticks up to there count (Copy to Domino: the song up to the copy's end)."""
         notes = self.rendered if notes is None else notes
-        ticks = [notes[:, 0], notes[:, 1]] + [np.array([m[0] for m in ms], np.int64) for ms in cc.values()]
+        ticks = np.concatenate([notes[:, 0], notes[:, 1]]
+                               + [np.array([m[0] for m in ms], np.int64) for ms in cc.values()])
+        if upto is not None:
+            ticks = ticks[ticks <= upto]
         hz = [i for i, sh in enumerate(self.shapes) if sh.get("hz")]
         on = np.isin(notes[:, 5], hz) if hz else None
-        plan = file_plan(self.tempo, bpm, ppq, beats, np.concatenate(ticks), notes[:, 0],
-                         None if on is None else (notes[on, 0], notes[on, 1]))
+        if has_tempo(self.tempo):  # (a long Keep timing part of many notes takes a moment)
+            self.busy(tr("project.tempo_working"))
+        try:
+            plan = file_plan(self.tempo, bpm, ppq, beats, ticks, notes[:, 0],
+                             None if on is None else (notes[on, 0], notes[on, 1]))
+        finally:
+            if has_tempo(self.tempo):
+                self.busy(None)
         if self.tempo.get("points") and any(len(p) > 5 and p[5] is True for p in self.tempo["points"]):
             notes, cc = timed_ticks(plan, notes, cc)
         return notes, cc, plan
@@ -853,13 +862,15 @@ class ProjectFiles:
         notes = self.rendered
         high = int((notes[:, 2] > 127).sum()) if self.keys > 128 else 0  # (256 keys: Domino only has 128)
         mod = high and self.domino256.get()  # (kept: only Domino's 256 keys mod opens them)
-        if high and not mod:
-            notes = notes[notes[:, 2] <= 127]
-        if not len(notes):
+        if not len(notes) or high == len(notes) and not mod:
             messagebox.showerror(tr("project.spiderweb"),
                                  tr("project.no_notes_yet_draw_something_inside", keys=min(self.keys, 128) - 1))
             return
-        notes, cc, plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm), notes)
+        # (worked out with every note, as Generate MIDI does, so the files line up tick for tick; then the keys
+        # Domino can't hold left out)
+        notes, cc, plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm))
+        if high and not mod:
+            notes = notes[notes[:, 2] <= 127]
         if int(notes[:, 1].max()) > LONGEST:
             messagebox.showerror(tr("project.spiderweb"), tr("project.too_long_for_domino", longest=LONGEST))
             return
@@ -875,10 +886,14 @@ class ProjectFiles:
                                                   basename=os.path.basename(path)),
                 icon="warning", default="no"):
             return
-        tempo = plan["events"] if has_tempo(self.tempo) else None
+        tempo, sigs = None, plan["sigs"]
+        if has_tempo(self.tempo):  # (changes past the song's end make no sound: left out, Domino's ticks stop)
+            last = max([int(notes[:, 1].max())] + [ms[-1][0] for ms in cc.values() if ms]) + beats * ppq
+            tempo = [e for e in plan["events"] if e[0] <= min(last, LONGEST)]
+            sigs = [s for s in sigs if s[0] <= min(last, LONGEST)]
         if not self.write_out(path, "project.saving_dms", lambda: write_bytes(
                 path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16(),
-                               pad=self.pad_tracks(), cc=cc, tempo=tempo, sigs=plan["sigs"]))):
+                               pad=self.pad_tracks(), cc=cc, tempo=tempo, sigs=sigs))):
             return
         tracks = len(track_slots(notes, self.pad_tracks()))
         ports = slot_ports(int(notes[:, 4].max()) + 1, cc, self.picture_use10)  # (as dms_data decides)
@@ -909,11 +924,14 @@ class ProjectFiles:
         notes = self.rendered
         cc = self.cc_messages(ppq, bpm, set(self.sels) if self.sels else None)
         plan = None
-        if has_tempo(self.tempo):  # (the tempo line comes too: Keep timing worked out on the whole song)
-            plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm))[2]
-            notes, cc = timed_ticks(plan, notes, cc)
         if self.sels:
             notes = notes[np.isin(notes[:, 5], sorted(self.sels))]
+        heard = (int(notes[:, 0].min()) / ppq, int(notes[:, 1].max()) / ppq) if len(notes) else (0, 0)
+        if has_tempo(self.tempo) and len(notes):  # (the tempo line comes too: Keep timing worked out on the
+            # whole song up to the copy's last note, so it lines up with Generate MIDI)
+            upto = max([int(notes[:, 1].max())] + [ms[-1][0] for ms in cc.values() if ms])
+            plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm), upto=upto)[2]
+            notes, cc = timed_ticks(plan, notes, cc)
         high = int((notes[:, 2] > 127).sum())  # (256 keys: Domino only has 128)
         mod = high and self.domino256.get()  # (kept: only Domino's 256 keys mod opens them)
         if not mod:
@@ -965,10 +983,20 @@ class ProjectFiles:
                  tr("project.the_track") if tracks == 1 else tr("project.the_first_of_tracks", tracks=tracks))
         how = (tr("project.paste_at_the_cursor") if self.domino_start() == "note" else
                tr("project.double_click_a_bar_line_to"))
-        self.status.config(text=tr("project.copied_for_domino_ppq_in_domino", what=what, ppq=ppq, where=where, how=how)
-                                + (tr("project.copied_keys_256") if mod else
-                                   trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
-                                + (trn("project.long_gates_cut", long, long=long, most=GATE_MAX) if long else ""))
+        text = (tr("project.copied_for_domino_ppq_in_domino", what=what, ppq=ppq, where=where, how=how)
+                + (tr("project.copied_keys_256") if mod else
+                   trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
+                + (trn("project.long_gates_cut", long, long=long, most=GATE_MAX) if long else ""))
+        self.status.config(text=text)
+        warn = ""
+        if plan:  # (the tempo warnings as Export to Domino gives them; places only inside what was copied)
+            lo, hi = heard
+            inside = {k: [b for b in plan[k] if lo <= b <= hi] for k in ("jumps", "hz", "dense")}
+            warn = self.tempo_notes(dict(plan, **inside))
+            if conductor and tempo_items(plan["events"])[1]:
+                warn += tr("project.dms_tempo_slow")
+        if warn:
+            messagebox.showwarning(tr("project.spiderweb"), text + warn)
         self.tips.show("domino", wait=True)
 
     def busy(self, text):

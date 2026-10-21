@@ -322,7 +322,8 @@ def tempo_items(tempo, sigs=(), first=0, end=None):
 
     def take(rows):
         now = [(first,) + tuple(r[1:]) for r in rows if r[0] <= first][-1:]
-        return now + [r for r in rows if r[0] > first and (end is None or r[0] < end)]
+        return now + [r for r in rows if r[0] > first and (end is None or r[0] < end)
+                      and r[0] - first <= LONGEST]  # (past what Domino's ticks hold: left out)
     for tick, us in take(tempo):
         bpm, exact = dms_bpm(us)
         slow += not exact
@@ -371,7 +372,7 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=N
         events = (item(2008, item(1001, struct.pack("<I", 0)) + item(2001, item(0, struct.pack("<f", bpm))))
                   + time_signature(beats))
     track_head(0, b"Conductor", len(events), True)
-    feed(events + track_tail(max([0] + [r[0] for r in (tempo or [])] + [r[0] for r in (sigs or [])])))
+    feed(events + track_tail(min(LONGEST, max([0] + [r[0] for r in (tempo or [])] + [r[0] for r in (sigs or [])]))))
     count = int(notes[:, 4].max()) + 1 if len(notes) else 0
     order, cuts = track_orders(notes, count, z.pool)
     ports = slot_ports(count, cc, use10)  # (Output port A, B, ... as the MIDI export's)
