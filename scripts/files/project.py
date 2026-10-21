@@ -28,7 +28,8 @@ from notes.picture import paths_for_file
 from notes.polygon import POLYGON_DEFAULTS, clean_polygon
 from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
-from notes.tempo import clean_tempo, tempo_events
+from notes.tempo import clean_tempo
+from notes.tempo_file import file_plan
 from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
 from files.domino_clip import DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data, dms_path, get_from_clipboard, put_on_clipboard, read_notes
@@ -764,11 +765,12 @@ class ProjectFiles:
                 tr("project.spiderweb"), tr("project.long_silences", ppq=ppq, beats=MAX_DELTA // ppq), icon="warning"):
             return
         cc = self.cc_messages(ppq, bpm)
-        tempo, bad = tempo_events(self.tempo, bpm, ppq)
+        notes, cc, plan = self.tempo_timed(ppq, bpm, beats, cc)
         if not self.write_out(path, "project.saving_midi",  # (millions of notes take a few seconds)
-                              lambda: write_midi(path, ppq, bpm, beats, self.rendered, self.picture_use10,
-                                                 self.pad_tracks(), cc, tempo)):
+                              lambda: write_midi(path, ppq, bpm, beats, notes, self.picture_use10,
+                                                 self.pad_tracks(), cc, plan["events"], plan["sigs"])):
             return
+        bad = plan["bad"]
         channels = tracks if self.channel_mode.get() == "auto" else 1
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
                 if ppq >= PPQ_WARN else "")
@@ -778,10 +780,33 @@ class ProjectFiles:
             note += tr("project.ports_midi")
         if bad:
             note += tr("project.tempo_catch_failed", where=", ".join(self.bar_text(b) for b in bad))
+        if plan["jumps"]:
+            note += tr("project.tempo_jump_notes", where=", ".join(self.bar_text(b) for b in plan["jumps"][:5]))
+        if plan["hz"]:
+            note += tr("project.tempo_hz", where=self.bar_text(plan["hz"][0]))
+        if plan["dense"]:
+            note += tr("project.tempo_dense", where=self.bar_text(plan["dense"][0]))
         messagebox.showinfo(tr("project.spiderweb"),
                             tr("project.saved_notes_on_track_s_one", notes=trn("n.notes", len(self.rendered),
                                                                                n=len(self.rendered)),
                                tracks=trn("n.tracks", channels, n=channels), path=path, note=note))
+
+    def tempo_timed(self, ppq, bpm, beats, cc):
+        """(notes, cc, file_plan) for the MIDI file: the Tempo pane's changes, notes and CC messages in Keep timing
+        parts moved to the ticks that keep their time (notes/tempo_file.py)."""
+        notes = self.rendered
+        ticks = [notes[:, 0], notes[:, 1]] + [np.array([m[0] for m in ms], np.int64) for ms in cc.values()]
+        hz = [i for i, sh in enumerate(self.shapes) if sh.get("hz")]
+        on = np.isin(notes[:, 5], hz) if hz else None
+        plan = file_plan(self.tempo, bpm, ppq, beats, np.concatenate(ticks), notes[:, 0],
+                         None if on is None else (notes[on, 0], notes[on, 1]))
+        if self.tempo.get("points") and any(len(p) > 5 and p[5] is True for p in self.tempo["points"]):
+            moved = notes.copy()
+            moved[:, 0], moved[:, 1] = plan["map"](notes[:, 0]), plan["map"](notes[:, 1])
+            notes = moved
+            cc = {s: [(t, *m[1:]) for t, m in zip(plan["map"]([m[0] for m in ms]).tolist(), ms)]
+                  for s, ms in cc.items()}
+        return notes, cc, plan
 
     def cc_messages(self, ppq, bpm, only=None):
         """The Hz basses' CC lines as MIDI messages on the slots (tracks) their notes are on: {slot: [(tick, status,

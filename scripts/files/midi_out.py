@@ -126,32 +126,34 @@ def track_slots(notes, pad=True):
     return np.arange(int(notes[:, 4].max()) + 1) if pad else np.unique(np.asarray(notes[:, 4], np.int64))
 
 
-def tempo_track(bpm, beats, tempo=None):
+def tempo_track(bpm, beats, tempo=None, sigs=None):
     """The first track: the tempo (or the Tempo pane's changes, [(tick, microseconds per beat)] from
-    tempo.tempo_events, tick 0 first) and the time signature."""
+    tempo_file.file_plan, tick 0 first) and the time signature (or sigs = [(tick, top, bottom power)], tick 0
+    first)."""
     head = bytearray()
     tempo = tempo or [(0, round(60_000_000 / bpm))]
+    sigs = sigs or [(0, beats, 2)]
+    events = sorted([(t, 1, bytes([0xFF, 0x58, 4, n, d, 24, 8])) for t, n, d in sigs]
+                    + [(t, 0, b"\xFF\x51\x03" + int(us).to_bytes(3, "big")) for t, us in tempo])
     last = 0
-    for i, (tick, us) in enumerate(tempo):
+    for tick, _, data in events:
         delta = tick - last
         while delta > MAX_DELTA:  # (a wait too long for one step: empty text events, as in note tracks)
             head += vlq(MAX_DELTA) + b"\xFF\x01\x00"
             delta -= MAX_DELTA
-        head += vlq(delta) + b"\xFF\x51\x03" + int(us).to_bytes(3, "big")
+        head += vlq(delta) + data
         last = tick
-        if i == 0:
-            head += vlq(0) + bytes([0xFF, 0x58, 4, beats, 2, 24, 8])
     head += vlq(0) + b"\xFF\x2F\x00"
     return head
 
 
-def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tempo=None):
+def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tempo=None, sigs=None):
     """notes: [start, end, pitch, velocity, slot, ...]. Every slot gets its own track with a single channel
     (use10: channel 10 used too, slot_track_channel; pad: track_slots). Nothing marks channel 10 as not drums
     (user, 2026-10-12: no messages that could switch something on in their own setup). cc = {slot: messages} for
     the slots' tracks (the Hz basses' CC lines the user drew: hz_cc.slot_events); with them past one round of
-    channels every track starts with its port (FF 21: engine.slot_ports). tempo: tempo_track's."""
-    head = tempo_track(bpm, beats, tempo)
+    channels every track starts with its port (FF 21: engine.slot_ports). tempo, sigs: tempo_track's."""
+    head = tempo_track(bpm, beats, tempo, sigs)
 
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
     count = int(notes[:, 4].max()) + 1 if len(notes) else 0

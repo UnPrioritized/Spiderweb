@@ -117,6 +117,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     sustain.py       sustain: each key row's notes held to their group's end (overlaps kept), done last
     subtract.py      gate subtract: every note ends a few ticks earlier (start kept), done after Sustain
     tempo.py         the project's tempo line: curves, catch-ups, exact Domino-safe tempo changes for the MIDI
+    tempo_file.py    the tempo line in a MIDI file: Keep timing moves notes exactly, bar lines fitted, warnings
     fx.py            a shape's Claw machine / Strum / Chop pages in order, flips and velocities after them
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes
     picture.py       image to notes: a picture file -> a grid of up to 16 colours (picking, blending, details)
