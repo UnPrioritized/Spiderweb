@@ -31,7 +31,7 @@ from window.widgets import Scrub, Tooltip
 MOD_KNOBS = dict({"shape": "wave", "octave": "octave", "sustain": "volume", "amount": "pitch",
                   "vibrato_depth": "vibrato", "tremolo_rate": "tremolo", "sweep_start": "sweep", "sweep_end": "sweep",
                   "wah": "wah", "slant": "slant", "groups": "groups", "offpitch": "offpitch", "noisy": "noisy",
-                  "height": "height", "height_rand": "height_rand"},
+                  "height": "height", "height_rand": "height_rand", "cutoff": "cc_cutoff"},
                  **{key: key for key in MOD_SETTINGS if key in KNOBS}, **{key: key for key in LFO_RATES})
 # ... of them the MOD tab's own LFO Rate knobs (by (source, knob) in SynthMod.mod_dials): another source's box name
 # dragged onto one links it (never the LFO's own)

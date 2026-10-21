@@ -13,6 +13,8 @@ made shows them about where it is (with a note); turning one makes new lines fro
   (hz["lfo"]). Timing other than Free = the Rate moves by note lengths (straight, triplets, dotted).
   Tone: Sweep (on / off) from Start to End in Time = the Sweep line once per note, Key track (hz["lfo"]) = how far
   it follows each note's pitch; Wah = its line, flat.
+  Filter (MIDI CC; user 2026-10-21, Serum / Vital put it next to the oscillators): Cutoff, Amount and its own
+  Attack, Decay, Sustain, Release = the Cutoff line (CC 74) once per note (Amount 0: flat; Cutoff 50 %: none).
   Character: Slant, Groups, Off pitch, Noisy = their lines, flat.
   Voice: Voices, Detune, Blend, Random start, Voices on (split / same keys), Glide, Curve, Only notes that touch,
   Legato = hz["voice"] (not lines).
@@ -109,6 +111,8 @@ BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain",
                      ("tremolo_wait", "time", 0.0), ("tremolo_rise", "time", 0.0)),
          "tone": (("sweep_start", "percent", 1.0), ("sweep_end", "percent", 0.0), ("sweep_time", "time", 1.0),
                   ("sweep_track", "bend", 0.0), ("wah", "percent", 0.0)),
+         "filter": (("cutoff", "percent", 0.5), ("filter_amount", "bend", 0.0), ("filter_attack", "time", 0.0),
+                    ("filter_decay", "time", 0.5), ("filter_sustain", "percent", 0.0), ("filter_release", "time", 0.0)),
          "character": (("slant", "percent", 0.0), ("groups", "groups", 1.0), ("offpitch", "percent", 0.0),
                        ("noisy", "percent", 0.0), ("height", "height", 1.0), ("height_rand", "percent", 0.0)),
          "voice": (("voices", "voices", 1.0), ("detune", "cents", 20.0), ("blend", "percent", BLEND),
@@ -118,7 +122,7 @@ BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain",
          "osc2": tuple((f"osc2_{k}", kind, OSC2[k][2]) for k, kind in OSC2_KNOBS)
          + tuple((f"osc2_{key}", kind, MODES[m][key.split("_", 1)[1]][2]) for m, knobs in MODE_KNOBS.items()
                  for key, kind in knobs)}
-ROWS = (("volume", "wave", "osc2", "pitch"), ("vibrato", "tremolo", "tone", "character"), ("voice", "arp"))
+ROWS = (("volume", "wave", "osc2", "pitch"), ("vibrato", "tremolo", "tone", "filter", "character"), ("voice", "arp"))
 # the Effects tab's effects (hzbass.RACK, window/hz_rack.py): their knobs (knob = effect_setting) and kinds
 RACK_KNOBS = {"chorus": (("chorus_depth", "cents"), ("chorus_rate", "vib_rate")),
               "flanger": (("flanger_rate", "vib_rate"), ("flanger_depth", "percent"), ("flanger_mix", "percent")),
@@ -133,17 +137,17 @@ KNOBS.update({key: (fx, kind, RACK[fx][key.split("_", 1)[1]][2]) for fx, knobs i
 COLOURS = {k: bright(v) for k, v in {
     "volume": FX_COLOR["volume"], "wave": FX_COLOR["sine"], "pitch": FX_COLOR["pitch"], "vibrato": FX_COLOR["vibrato"],
     "tremolo": FX_COLOR["tremolo"], "tone": FX_COLOR["sweep"], "character": FX_COLOR["slant"], "voice": "#3a6ee0",
-    "arp": "#c0398a", "osc2": "#2f9e6e"}.items()}
+    "arp": "#c0398a", "osc2": "#2f9e6e", "filter": FX_COLOR["cc_cutoff"]}.items()}
 # the lines each box writes (its header light is lit while one of them changes the sound) and its own setting
 BOX_LINES = {"volume": ("volume",), "wave": tuple(WAVES) + ("octave",), "pitch": ("pitch",), "vibrato": ("vibrato",),
-             "tremolo": ("tremolo",), "tone": ("sweep", "wah"),
+             "tremolo": ("tremolo",), "tone": ("sweep", "wah"), "filter": ("cc_cutoff",),
              "character": ("slant", "offpitch", "noisy", "groups", "height", "height_rand")}
 BOX_EXTRA = {"wave": "mode", "voice": "voice", "arp": "arp", "osc2": "osc2"}
 # the boxes a click on the light / name switches off and on (Bypass: the lines in hz["off"], the own setting moved to
 # hz["bypass"]; the Arpeggio's click is its On instead)
 BYPASS = OFF_BOXES
 PICTURES = {"volume": (260, 90), "wave": (200, 90), "pitch": (150, 90), "vibrato": (230, 60), "tremolo": (150, 60),
-            "tone": (200, 90), "character": (220, 60), "voice": (230, 60), "arp": (260, 60), "osc2": (200, 90)}
+            "tone": (200, 90), "filter": (230, 90), "character": (220, 60), "voice": (230, 60), "arp": (260, 60), "osc2": (200, 90)}
 CHARACTER = ("slant", "offpitch", "noisy")  # (the Character box's lines that are just their value; Groups is counted)
 WAVE_NAMES = ("none",) + tuple(WAVES)
 # every knob and choice where it starts; those that do nothing right now are kept in hz["kept"] (hzbass.clean_kept)
@@ -399,6 +403,34 @@ def read_tone(win, was):
     return got, made
 
 
+def filter_line(cutoff, amount, attack, decay, sustain, release):
+    """The Cutoff line (MIDI CC 74): (points, sustain point, length; None, None = all along): Cutoff moved by Amount
+    x an ADSR envelope from each note's start (adsr_line's, its values cut to 0..1), or flat at Cutoff (Amount 0)."""
+    if abs(amount) < 1e-9:
+        return [[0.0, cutoff]], None, None
+    pts, at, every = adsr_line(attack, decay, sustain, release)
+    return [[p[0], min(1.0, max(0.0, cutoff + amount * p[1])), *p[2:]] for p in pts], at, every
+
+
+def read_filter(win, was):
+    """The Filter box: ({cutoff, filter_amount, filter_attack...}, made) as read_volume. Its knobs as they were when
+    they could have made the Cutoff line; a flat line = Cutoff alone; none = the middle (no CC sent)."""
+    keys = [k for k, _, _ in BOXES["filter"]]
+    got = {k: was[k] for k in keys}
+    pts = win.fxl.get("cc_cutoff")
+    if not pts:
+        return dict(got, cutoff=0.5, filter_amount=0.0), True
+    want, at, every = filter_line(*(was[k] for k in keys))
+    if (same_line(want, pts) and win.loops.get("cc_cutoff") == every and win.sustains.get("cc_cutoff") == at
+            and (every is None or win.froms.get("cc_cutoff") == "note") and "cc_cutoff" not in win.fits
+            and "cc_cutoff:amount" not in win.fxl):
+        return got, True
+    v = flat(win, "cc_cutoff")
+    if v is not None and not win.loops.get("cc_cutoff"):
+        return dict(got, cutoff=v, filter_amount=0.0), True
+    return got, False  # (drawn by hand: the knobs stay as they were)
+
+
 def read_character(win, was):
     """The Character box: ({slant, groups (how many), offpitch, noisy}, made) as read_volume."""
     got, made = {"slant": 0.0, "groups": 1.0, "offpitch": 0.0, "noisy": 0.0}, True
@@ -473,7 +505,8 @@ def read_rack(win, was):
 
 
 READ = {"volume": read_volume, "wave": read_wave, "pitch": read_pitch, "vibrato": read_vibrato,
-        "tremolo": read_tremolo, "tone": read_tone, "character": read_character, "voice": read_voice,
+        "tremolo": read_tremolo, "tone": read_tone, "filter": read_filter, "character": read_character,
+        "voice": read_voice,
         "arp": read_arp, "osc2": read_osc2}
 
 
@@ -1208,6 +1241,14 @@ class SynthKnobs:
             fx.drop("wah")
             if v["wah"] > 0:
                 self.fxl["wah"] = [[0.0, v["wah"]]]
+        elif box == "filter":
+            fx.drop("cc_cutoff")
+            pts, at, every = filter_line(*(v[k] for k, _, _ in BOXES["filter"]))
+            if every is not None:
+                self.fxl["cc_cutoff"] = pts
+                self.loops["cc_cutoff"], self.froms["cc_cutoff"], self.sustains["cc_cutoff"] = every, "note", at
+            elif abs(pts[0][1] - 0.5) > 1e-9:  # (the middle all along: no CC sent)
+                self.fxl["cc_cutoff"] = pts
         elif box == "arp":
             self.set_extra("arp", {k: v[f"arp_{k}"] for k in ARP_KEYS} if v["arp_on"] else None)
         elif box == "osc2":
@@ -1673,6 +1714,26 @@ class SynthKnobs:
         if v["sweep"] and every:
             xt = pad + v["sweep_time"] / total * (w - 2 * pad)
             c.create_line(xt, pad, xt, h - pad, fill=DIM, dash=(3, 3))
+
+    def draw_filter(self, c):
+        """The Cutoff over a note (bottom = closed, top = open; dashed: the middle, where players start), the held
+        part as long as the envelope's rise and fall, then its release."""
+        v = self.pv
+        w, h, pad = c.winfo_width(), c.winfo_height(), 6 * self.s
+        pts, at, every = filter_line(*(v[k] for k, _, _ in BOXES["filter"]))
+        held = max(0.5, (at or 0.0) * 0.5)
+        total = (at or 0.0) + held + (every - at if every else 0.0)
+        total = max(total, 1.0)
+        b = np.linspace(0.0, total, 200)
+        x = np.where(b < (at or 0.0) + held, np.minimum(b, at or 0.0), b - held)  # (the line's own beats)
+        y = line_at(pts, x)
+        if every is not None:
+            y = np.where(b < (at or 0.0) + held, y, line_at(pts, np.minimum(x, every)))
+        ym = h - pad - 0.5 * (h - 2 * pad)
+        c.create_line(pad, ym, w - pad, ym, fill=GRID, dash=(3, 3))
+        xs = pad + b / total * (w - 2 * pad)
+        ys = h - pad - y * (h - 2 * pad)
+        c.create_line(*np.column_stack([xs, ys]).ravel().tolist(), fill=self.pic_colour("filter"), width=2 * self.s)
 
     def draw_character(self, c):
         """Eight of the shape's keys (the highest at the top) and their notes over four waves: when each key hits

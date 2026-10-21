@@ -144,7 +144,8 @@ SCALES = {"major": (0, 2, 4, 5, 7, 9, 11), "minor": (0, 2, 3, 5, 7, 8, 10), "har
           "pentatonic": (0, 2, 4, 7, 9), "minor_pentatonic": (0, 3, 5, 7, 10), "blues": (0, 3, 5, 6, 7, 10)}
 CHORDS = {"placed": (0,), "octave": (0, 12), "fifth": (0, 7), "major": (0, 4, 7), "minor": (0, 3, 7),
           "seventh": (0, 4, 7, 10), "sus4": (0, 5, 7)}
-OFF_BOXES = ("volume", "wave", "pitch", "vibrato", "tremolo", "tone", "character", "voice")  # boxes that switch off
+OFF_BOXES = ("volume", "wave", "pitch", "vibrato", "tremolo", "tone", "filter", "character", "voice")  # boxes that
+# switch off
 VOICES = 8  # hz["voice"]: the most copies
 DETUNE = 100.0  # ... the most cents between the lowest and the highest copy
 GLIDE = 64.0  # ... the longest glide, in beats
@@ -732,7 +733,8 @@ TIME_STEP = 1 / 1024  # beats: how finely a moved envelope is worked out (fewer 
 # the synth window's box each effect is in: a box switched off (hz["bypass"]["boxes"]) stops its links too
 MOD_BOXES = dict({w: "wave" for w in tuple(WAVES) + ("wave", "octave")}, volume="volume", pitch="pitch", vibrato="vibrato",
                  tremolo="tremolo", sweep="tone", wah="tone", slant="character", offpitch="character",
-                 noisy="character", groups="character", height="character", height_rand="character")
+                 noisy="character", groups="character", height="character", height_rand="character",
+                 cc_cutoff="filter")
 
 
 def mod_start():
