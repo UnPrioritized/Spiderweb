@@ -15,8 +15,9 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr, trn
-from files.mathexpr import calc
-from notes.hzbass import AUTO_MOST
+from files.mathexpr import calc, fmt
+from notes.hz_cc import RING, ring_of, typed_ring
+from notes.hzbass import AUTO_MOST, RING_MOST
 from window import look
 from window.hz_gates import GATE_MODES
 from window.hz_preview import LIVE_MB, VOICES, WORKERS
@@ -111,6 +112,26 @@ class PreviewSettings(tk.Toplevel):
                                        takefocus=False)
         win.grow_box.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
         Tooltip(win.grow_box, tr("hz.grow_tip"))
+        r += 1
+
+        lb = ttk.Label(box, text=tr("ps.ring"))  # how long the CC lines go on after the sound (hz_cc.ring_of)
+        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        f = ttk.Frame(box)
+        f.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        self.ring_var = tk.StringVar(value=fmt(RING))
+        self.ring_auto = tk.BooleanVar(value=True)
+        e = self.ring_entry = ttk.Entry(f, textvariable=self.ring_var, width=6)
+        e.pack(side="left")
+        unit_word(ttk.Label(f, foreground=look.HINT), self.ring_var, "unit.seconds").pack(side="left", padx=(4, 10))
+        c = self.ring_tick = ttk.Checkbutton(f, text=tr("ps.ring_auto"), variable=self.ring_auto,
+                                             command=self.on_ring_auto, takefocus=False)
+        c.pack(side="left")
+        e.bind("<Return>", lambda ev: self.on_ring())
+        e.bind("<FocusOut>", lambda ev: no_spaces(self.ring_var) or self.on_ring())
+        Scrub(app, [(e, self.ring_var, self.on_ring)], (0.1, 1, 0.01), 0, RING_MOST, label=lb)
+        for w in (lb, e):
+            Tooltip(w, tr("ps.ring_tip", most=fmt(RING_MOST)))
+        Tooltip(c, tr("ps.ring_auto_tip"))
         r += 1
 
         b = ttk.Button(box, text=tr("hz.trace"), command=lambda: open_trace(win), takefocus=False)
@@ -241,6 +262,44 @@ class PreviewSettings(tk.Toplevel):
         lc = ORANGE if used >= cfg["live_mb"] * 0.98 else look.DARK_TEXT
         if (self.live_used.cget("text"), str(self.live_used.cget("foreground"))) != (live, lc):
             self.live_used.config(text=live, foreground=lc)
+
+    def show_ring(self, sh):
+        """The CC run-on row as the Hz bass shown has it (HzWindow.sync): Auto = the measured time, greyed."""
+        hz = (sh or {}).get("hz") or {}
+        auto = typed_ring(hz) is None
+        self.ring_auto.set(auto)
+        if self.focus_get() is not self.ring_entry:  # (a number being typed stays)
+            self.ring_var.set(fmt(round(ring_of(hz), 2)))
+            good(self.ring_entry)
+        self.ring_entry.config(state="disabled" if auto or not hz else "normal")
+        self.ring_tick.config(state="normal" if hz else "disabled")
+
+    def on_ring_auto(self):
+        """Auto ticked = the typed run-on goes; unticked = Auto's time kept as the typed one, to change."""
+        sh = self.win.length_target()
+        if sh is None or not sh.get("hz"):
+            return
+        hz = sh["hz"]
+        self.win.put_lengths(tr("hz.step_ring"), ring=None if self.ring_auto.get() else round(ring_of(hz), 2))
+        self.show_ring(sh)
+        if not self.ring_auto.get():
+            self.ring_entry.focus_set()
+
+    def on_ring(self):
+        """The run-on typed, stepped or dragged (only while Auto is off)."""
+        if self.ring_auto.get():
+            self.show_ring(self.win.length_target())
+            return
+        try:
+            v = float(calc(self.ring_var.get()))
+            if not 0.0 <= v <= RING_MOST:
+                raise ValueError
+        except (ValueError, ZeroDivisionError, OverflowError):
+            self.show_ring(self.win.length_target())  # (a wrong number: back to the last good one)
+            return
+        good(self.ring_entry)
+        self.ring_var.set(fmt(round(v, 3)))
+        self.win.put_lengths(tr("hz.step_ring"), ring=round(v, 3))
 
     def pick_font(self):
         if self.app.ask_soundfont(self, "hz.preview_pick_font"):

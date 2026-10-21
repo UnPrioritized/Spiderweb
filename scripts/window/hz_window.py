@@ -346,6 +346,8 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.pitch_entry.config(state="normal" if self.can_place() else "disabled")
         self.show_auto()
         self.show_length(sh, hz)
+        if self.settings_window:
+            self.settings_window.show_ring(sh)
         self.what.config(text=text)
         self.show_stale()
         self.show_clash(sh)

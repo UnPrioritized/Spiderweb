@@ -1438,6 +1438,8 @@
  "unit.step": "step",
  "unit.cents": "cents",
  "unit.cent": "cent",
+ "unit.seconds": "seconds",
+ "unit.second": "second",
  "n.notes": "{n:,} notes",
  "n.notes_one": "{n:,} note",
  "n.shapes": "{n:,} shapes",

@@ -12,6 +12,7 @@ LONGEST = 1e7  # beats: a tone starting or lasting past this is a changed file (
 TUNE = 50.0  # cents: how far a placed tone's own tune goes, up or down (half a key)
 AUTO = 3.0  # cents: Auto gates' threshold to start with
 AUTO_MOST = 50.0  # ... and the highest (past half a key, a fixed tone is nearer the next key than its own)
+RING_MOST = 60.0  # seconds: the longest CC run-on typed (hz["ring"]; hz_cc.ring_of)
 VEL_FX = ("volume", "sweep", "wah", "tremolo", "octave")  # the effects that change the velocity
 WAVES = {"sine": lambda p: (1.0 + np.cos(2.0 * np.pi * p)) / 2.0,  # the waveforms: loudness over one wave (p 0..1)
          "square": lambda p: (p < 0.5).astype(float),
@@ -1078,6 +1079,9 @@ def clean_hz(hz):
         out["stick"] = True
     if hz.get("cc_own") is True:
         out["cc_own"] = True
+    ring = hz.get("ring")  # (the CC lines' run-on typed, seconds; missing = Auto)
+    if isinstance(ring, (int, float)) and not isinstance(ring, bool) and math.isfinite(ring):
+        out["ring"] = max(0.0, min(RING_MOST, float(ring)))
     main_trace = clean_trace(hz.get("main_trace"))
     if main_trace and main_trace != [list(p) for p in START_TRACE]:
         out["main_trace"] = main_trace

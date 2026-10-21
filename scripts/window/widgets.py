@@ -1368,7 +1368,8 @@ class ListTip(Tooltip):
 
 
 ONE = {"unit.keys": "unit.key", "unit.ticks": "unit.tick", "unit.degrees": "unit.degree", "unit.beats": "unit.beat",
-       "unit.steps": "unit.step", "unit.cents": "unit.cent"}  # (unit keys -> their key for 1)
+       "unit.steps": "unit.step", "unit.cents": "unit.cent",
+       "unit.seconds": "unit.second"}  # (unit keys -> their key for 1)
 
 
 def unit_text(text, many, one=None):

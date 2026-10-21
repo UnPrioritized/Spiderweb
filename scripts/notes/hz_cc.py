@@ -10,8 +10,8 @@ layer that has it.
 Rules (measured with several players before it was built, dev/data/planned-features.md "CC lines for Hz bass"):
 - the values start LEAD seconds before the first note (a player that glides to a new value would glide during the
   first note otherwise), at tick 0 at the earliest;
-- they run on RING seconds past the end of the sound (falls, echo, reverb: sound_span), so a wobble doesn't stop
-  dead while the notes still ring;
+- they run on past the end of the sound (falls, echo, reverb: sound_span) for the Hz bass's run-on (ring_of: Hz
+  bass settings, typed or Auto), so a wobble doesn't stop dead while the notes still ring;
 - then every CC the lines used goes back to where players start it (CC_START; the Pitch wheel's bend range back to
   2 keys), so nothing is left on the channel for what plays on it after (user);
 - a value is sent STEPS times a beat at most, only when it changes.
@@ -20,7 +20,7 @@ The Pitch wheel sends its bend range (RPN 0 = WHEEL_KEYS) before its first value
 Own channel per note (the Voice box's "CC" dropdown, own_channels; user 2026-10-21, like MPE in synths): each note
 with what joins it (its slides, Legato, Glide) is a VOICE made as a Hz bass of its own (no chord lines merging),
 on a channel of its own with its own CC lines (a line played once per note follows its own note). A voice is
-busy from LEAD before its first note until RING after its sound and its lines' falls end (the lines' run-on), then
+busy from LEAD before its first note until the run-on after its sound and its lines' falls end (the lines' run-on), then
 the next note may take it; MOST_VOICES busy at once = a new note takes the one that's been ringing longest (my pick:
 the quietest). The notes and the messages take the SAME voices (voices strips the lines itself). An Arpeggio's steps
 play on their held note's voice (user picked MPE's way, hunt 2026-10-21). Only in Multi channel (App.notes_tracks:
@@ -31,16 +31,41 @@ import math
 
 import numpy as np
 
-from notes.hzbass import (CC_FX, CC_NUMBER, CC_START, CC_TARGETS, WHEEL_KEYS, cc_midi, fx_at, glide_tones, has_cc,
+from notes.hzbass import (CC_FX, CC_NUMBER, CC_START, CC_TARGETS, RING_MOST, WHEEL_KEYS, cc_midi, fx_at, glide_tones, has_cc,
                           funnel_box, heard_layers, key_range, left_edge, legato_links, links, live, own_channels,
                           rack_tail, sound_span, without_cc)
 
 STEPS = 96  # values a beat at most
 LEAD = 0.05  # seconds the first values come before the first note
-RING = 3.0  # seconds the lines run on past the end of the sound
+RING = 3.0  # seconds the lines run on past the end of the sound while Auto has measured nothing (no soundfont)
+auto_ring = RING  # Auto's run-on: how long the soundfont's sound rings after a note (set_auto_ring)
 CONTROL, BEND = 0xB0, 0xE0  # (MIDI status bytes, channel 0)
 DEFAULT_BEND_RANGE = 2  # keys: the bend range players start with (put back at the end)
 MOST_VOICES = 240  # voices at once: 15 channels a port x 16 ports (a 17th port is the 1st again)
+
+
+def typed_ring(hz):
+    """The run-on typed in the Hz bass settings (hz["ring"], seconds), None = Auto."""
+    r = hz.get("ring") if isinstance(hz, dict) else None
+    if isinstance(r, bool) or not isinstance(r, (int, float)) or not math.isfinite(r):
+        return None
+    return max(0.0, min(RING_MOST, float(r)))
+
+
+def ring_of(hz):
+    """Seconds the CC lines run on past the end of the sound: the typed run-on, else Auto's."""
+    r = typed_ring(hz)
+    return auto_ring if r is None else r
+
+
+def set_auto_ring(seconds):
+    """Auto's run-on measured (None: not known, RING). True when it changed (the notes may change: voices)."""
+    global auto_ring
+    new = RING if seconds is None else max(0.0, min(RING_MOST, float(seconds)))
+    if new == auto_ring:
+        return False
+    auto_ring = new
+    return True
 
 
 def cc_fall(hz):
@@ -62,6 +87,7 @@ def voices(hz, left):
     steps play on the channel of the note held (like an MPE synth: 3 notes held = 3 voices)."""
     own = hz.get("cc_own")
     fall = own["fall"] if isinstance(own, dict) else cc_fall(hz)
+    ring = own.get("ring", auto_ring) if isinstance(own, dict) else ring_of(hz)
     hz = without_cc(hz)
     per_beat = float(hz["bpm"]) / 60.0  # (beats a second)
     played, groups = [], []
@@ -90,7 +116,7 @@ def voices(hz, left):
             start = min(n["t"] for n in g) - LEAD * per_beat
             g_hz = dict(layer, tones=g)
             end = max(sound_span(g_hz), max(n["t"] + n["len"] for n in g) + fall + rack_tail(g_hz))
-            groups.append((start, end + RING * per_beat + 1.0 / STEPS, li, g))
+            groups.append((start, end + ring * per_beat + 1.0 / STEPS, li, g))
     groups.sort(key=lambda g: g[0])
     busy, out = [], []  # (each voice: the beat it's free again)
     for start, end, li, g in groups:
@@ -149,7 +175,7 @@ def cc_events(sh, ppq, bpm, layers=None):
         layers = [dict(l, tones=tones) if l.get("fx") else l for l in layers if l.get("tones") or l.get("fx")]
     per_beat = bpm / 60.0  # (beats a second)
     first = left + min(n["t"] for n in tones) - LEAD * per_beat  # (song beats)
-    end = left + max(sound_span(l) for l in layers) + RING * per_beat
+    end = left + max(sound_span(l) for l in layers) + ring_of(hz) * per_beat
     step = max(1, ppq // STEPS)
     t0 = max(0, math.floor(first * ppq))
     ticks = np.arange(t0, max(t0, math.ceil(end * ppq)) + 1, step, dtype=np.int64)
@@ -202,7 +228,7 @@ def cc_key(hz):
                      + [src.get("mod") if any(l.get("to") in CC_TARGETS for l in (src.get("mod") or {}).get("links", ()))
                         else None, src.get("voice"), (src.get("solo"), src.get("mute")), src.get("filter"),
                         (src.get("bypass") or {}).get("boxes")])
-    parts.append(hz.get("cc_own"))
+    parts.append([hz.get("cc_own"), ring_of(hz)])
     return json.dumps(parts, sort_keys=True)
 
 
@@ -315,7 +341,7 @@ def remembered(make, sh, ppq, bpm):
     at every edit while playing, and a long Arpeggio's took over a second (the window froze). Don't change what it
     gives back."""
     hz = sh["hz"]
-    key = (make.__name__, ppq, bpm, json.dumps(dict(sh, hz={k: v for k, v in hz.items() if k != "_memo"}),
+    key = (make.__name__, ppq, bpm, auto_ring, json.dumps(dict(sh, hz={k: v for k, v in hz.items() if k != "_memo"}),
                                               sort_keys=True, default=repr))
     got = _kept.pop(key, None)
     if got is None:

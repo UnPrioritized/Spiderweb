@@ -23,7 +23,7 @@ from notes.envelope import env_values, velocity_env
 from notes.joined import clean_joined, is_joined, joined_paths
 from notes.hzbass import (HZ_KINDS, clean_hz, heard_layers, layers_of, left_edge, note_lengths, own_channels,
                           velocity_parts, with_layers, without_cc)
-from notes.hz_cc import cc_fall, voice_hz, voices
+from notes.hz_cc import cc_fall, ring_of, voice_hz, voices
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
 from notes.areas import clean_areas
@@ -545,14 +545,17 @@ def shape_notes_tracks(sh, ppq, keys=128):
 def made_from(sh):
     """sh as its notes are made from: a Hz bass without its CC lines (hz_settings.without_cc: they make no notes,
     they're MIDI messages, hz_cc.py). Own channel per note stays only while it has some (own_channels), as
-    {"fall": how long its lines go on after a note} (hz_cc.voices: a voice is busy until its lines end, so the notes
-    and the CC messages take the same channels). The same again for what it gives back."""
+    {"fall": how long its lines go on after a note, "ring": their run-on} (hz_cc.voices: a voice is busy until its
+    lines end, so the notes and the CC messages take the same channels). The run-on (hz["ring"]) makes no notes
+    either. The same again for what it gives back."""
     hz = sh.get("hz")
     if not isinstance(hz, dict):
         return sh
     got = without_cc(hz)
+    if "ring" in got:
+        got = {k: v for k, v in got.items() if k != "ring"}
     if hz.get("cc_own") is True:
-        got = dict(got, cc_own={"fall": cc_fall(hz)}) if own_channels(hz) else {
+        got = dict(got, cc_own={"fall": cc_fall(hz), "ring": ring_of(hz)}) if own_channels(hz) else {
             k: v for k, v in got.items() if k != "cc_own"}
     return sh if got is hz else dict(sh, hz=got)
 

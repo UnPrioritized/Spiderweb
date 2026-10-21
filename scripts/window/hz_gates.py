@@ -115,7 +115,7 @@ def hz_keys(sh):
     return {"lo": round(min(ps)), "hi": round(max(ps))}
 
 
-KEPT_SHAPE = ("length", "main_trace", "stick", "cc_own")  # a Hz bass made here losing its last note: kept for the next
+KEPT_SHAPE = ("length", "main_trace", "stick", "cc_own", "ring")  # a Hz bass made here losing its last note: kept for the next
 # one there
 
 
