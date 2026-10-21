@@ -239,6 +239,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.stroke = None  # the selected custom shape's picked stroke (roll_live.py)
         self.part_main = None  # the highlighted part that was clicked (the others are its linked curves)
         self.clipboard = None
+        self.tempo_clip = None  # the Tempo pane's copy (tempo_pane.copy): its own, never the Windows clipboard
         self.seen_clip = None  # the Windows clipboard's copy count at Spiderweb's last copy (shared_clip)
         self.stroke_clip, self.clip_kind, self.stroke_pastes = None, None, 0  # a copied stroke (roll_live.py)
         self.playhead = 0.0  # beat of the play line
@@ -1728,7 +1729,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         return None if k is None else (sh, k)
 
     def copy_selected(self, whole=False):
-        """Ctrl+C: the selected shapes (or with curves highlighted: the curve's shape; a stroke picked: it)."""
+        """Ctrl+C: the selected shapes (or with curves highlighted: the curve's shape; a stroke picked: it). The
+        Tempo pane clicked last: its points and catch-ups."""
+        if not whole and getattr(self, "key_pane", None) is self.tempo_pane:
+            return self.tempo_pane.copy()
         if not whole and self.roll.curve_parts():
             return self.roll.copy_curve()
         if not whole and self.picked():
@@ -1750,6 +1754,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def cut_selected(self, whole=False):
         """Ctrl+X: what Ctrl+C and Delete work on (a funnel's highlighted curves, a picked stroke, else the selected
         shapes) copied, then deleted. whole (the menu's Cut): always the shapes."""
+        if not whole and getattr(self, "key_pane", None) is self.tempo_pane:
+            return self.tempo_pane.cut()
         if not whole and self.roll.curve_parts():
             self.roll.copy_curve()
             return self.roll.delete_parts()
@@ -1857,7 +1863,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """Paste the copied shapes so they start at the play line (snapped to the grid), or at beat `at` (a Select
         double-click: the mouse, snapped already). With curves highlighted and a curve copied: its shape onto them.
         Shapes shared as text or notes copied in Domino, copied after Spiderweb's last copy, come first
-        (paste_shared, paste_from_domino)."""
+        (paste_shared, paste_from_domino). The Tempo pane clicked last: its copied tempo at the play line."""
+        if not whole and at is None and getattr(self, "key_pane", None) is self.tempo_pane:
+            return self.tempo_pane.paste()
         text = self.shared_clip()
         if text == "":  # (busy: what's on it can't be told, so nothing older is pasted in its place)
             self.status.config(text=tr("app.clipboard_busy"))

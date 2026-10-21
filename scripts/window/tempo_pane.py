@@ -20,7 +20,7 @@ from tkinter import ttk
 
 import numpy as np
 
-from files.lang import tr
+from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes.tempo import (CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, clamp_bpm, curve, formula_fn,
                          catch_get, catch_set, keeps, layout,
@@ -677,6 +677,10 @@ class TempoPane(tk.Canvas):
             return
         tool = self.box.tool.get()
         self.picked()  # (what's picked still there)
+        if tool == "select" and e.state & CTRL and self.band and self.band[0] <= roll.x2t(e.x) <= self.band[1]:
+            self.start_move(e, None, pushed=False)  # (Ctrl+drag inside the Select box: copies, like Domino)
+            self.drag["copy"] = True
+            return
         i, j = self.point_at(e.x, e.y), self.catch_at(e.x)
         item = tempo["points"][i] if i is not None else tempo["catch"][j] if j is not None else None
         if item is not None:
@@ -728,6 +732,23 @@ class TempoPane(tk.Canvas):
                      "time_only": self.box.tool.get() == "select",
                      "v0": item[1] if item is not None and self.is_point(item) else None, "db": 0.0}
 
+    def copy_drag(self, d):
+        """A Ctrl+drag's first move: copies of what the Select box holds are what moves (the originals stay)."""
+        self.app.push_undo(name=tr("tempo.step_copy_drag"))
+        d["pushed"] = True
+        tempo, pairs = self.app.tempo, []
+        for s, b, v in d["orig"]:
+            c = list(s)
+            tempo["points" if v is not None else "catch"].append(c)
+            pairs.append((s, c))
+        swap = {id(s): c for s, c in pairs}
+        d["orig"] = [(swap[id(s)], b, v) for s, b, v in d["orig"]]
+        d["starts"] = [(swap[id(s)], k, a) for s, k, a in d["starts"]]
+        d["copies"] = [c for _, c in pairs]
+        self.sel = list(d["copies"])
+        for key in ("points", "catch"):
+            tempo[key].sort(key=lambda it: it[0])
+
     def is_point(self, item):
         return any(item is p for p in self.app.tempo["points"])
 
@@ -771,6 +792,10 @@ class TempoPane(tk.Canvas):
             catch_set(c, 3, min(b, c[0] - tick)) if d["kind"] == "start" else catch_set(c, 4, max(b, c[0] + tick))
             self.app.tempo_changed()
             return self.show_position(e)
+        if not d["pushed"] and d.get("copy"):
+            if abs(e.x - d["x"]) < 3:
+                return
+            self.copy_drag(d)
         if not d["pushed"]:
             if abs(e.x - d["x"]) < 3 and abs(e.y - d["y"]) < 3:
                 return  # (a click, not a drag yet)
@@ -840,10 +865,12 @@ class TempoPane(tk.Canvas):
         if not d:
             return
         if d["kind"] == "box":
-            if d["span"] is None:  # a click: the part there (or nothing)
+            if d["span"] is None:  # a click: the part there (or nothing), the play line there (user 2026-10-21)
                 part = self.part_at(self.app.roll.x2t(e.x))
                 pts = self.app.tempo["points"]
                 self.set_sel(d["before"] if d["ctrl"] else [], None if part is None else pts[part])
+                if not d["ctrl"]:
+                    self.move_line(e)
             else:
                 self.band = d["span"]  # (the box stays, like the piano roll's)
                 self.request_redraw()
@@ -858,11 +885,33 @@ class TempoPane(tk.Canvas):
             if d["pushed"]:
                 self.app.settle_history()
         elif d["kind"] == "move":
+            if d.get("copies") is not None:  # (Ctrl+drag let go: the copies replace what was where they landed,
+                # as a paste does; not moved = no copies)
+                tempo, cop = self.app.tempo, d["copies"]
+                moved = self.band and abs(d["db"]) > 1e-12
+                lo, hi = self.band if moved else (0, -1)
+                for key in ("points", "catch"):
+                    tempo[key][:] = [it for it in tempo[key] if (any(it is c for c in cop) and moved) or
+                                     not any(it is c for c in cop) and not lo - 1e-9 <= it[0] <= hi + 1e-9]
+                if not moved:
+                    self.sel = self.in_span(self.band) if self.band else []
+                self.app.tempo_changed()
             if d["pushed"]:
                 self.app.settle_history()
-            elif d["time_only"] and d["grab"] is not None and not e.state & CTRL:  # (a click on one of many: it)
-                self.band = None
-                self.set_sel([d["grab"]])
+            elif d["time_only"] and not e.state & CTRL:  # (a Select click: the play line there too)
+                if d["grab"] is not None:  # (a click on one of many: it)
+                    self.band = None
+                    self.set_sel([d["grab"]])
+                self.move_line(e)
+
+    def move_line(self, e):
+        """A Select click: the play line to the click (snapped like the piano roll's), playing on from there."""
+        app = self.app
+        playing = app.player.running
+        app.stop_play()
+        app.set_playhead(self.snap_beat(app.roll.x2t(e.x), e))
+        if playing:
+            app.start_play(keep=True)
 
     def end_drag(self):
         """Ctrl+Z while dragging: let go first (the step made at the first move takes it back). True when it only
@@ -993,6 +1042,81 @@ class TempoPane(tk.Canvas):
         if self.sel and not self.drag:
             self.delete_items(list(self.sel))
         return True
+
+    # ------------------------------------------------------------ copy / paste (user 2026-10-21, like Domino)
+
+    def copied_span(self):
+        """(first, last beat) Ctrl+C takes: the Select box, else from the first to the last picked item."""
+        if self.band:
+            return self.band
+        items = self.sel
+        if not items:
+            return None
+        beats = [it[0] for it in items]
+        return min(beats), max(beats)
+
+    def copy(self):
+        """Ctrl+C after clicking the pane: the points and catch-up lines in the Select box (or picked), each kept
+        as its distance from the box's start, so a paste keeps the gaps (a change one snap after the start lands
+        one snap after the play line)."""
+        span = self.copied_span()
+        if span is None:
+            self.app.status.config(text=tr("tempo.copy_nothing"))
+            return False
+        lo, hi = span
+        items = self.in_span(span) if self.band else list(self.sel)
+        tempo = self.app.tempo
+        pts = [[p[0] - lo] + list(p[1:]) for p in tempo["points"] if any(p is it for it in items)]
+        cs = []
+        for c in tempo["catch"]:
+            if any(c is it for it in items):
+                item = [c[0] - lo] + list(c[1:3])
+                for k in (3, 4):
+                    catch_set(item, k, None if catch_get(c, k) is None else catch_get(c, k) - lo)
+                cs.append(item)
+        if not pts and not cs:
+            self.app.status.config(text=tr("tempo.copy_nothing"))
+            return False
+        self.app.tempo_clip = {"length": hi - lo, "points": pts, "catch": cs}
+        n = len(pts) + len(cs)
+        self.app.status.config(text=trn("tempo.copied", n, n=n))
+        return True
+
+    def cut(self):
+        if self.copy():
+            self.delete_items([it for it in self.app.tempo["points"] + self.app.tempo["catch"]
+                               if (self.band and self.band[0] - 1e-9 <= it[0] <= self.band[1] + 1e-9)
+                               or (not self.band and self.is_sel(it))])
+
+    def paste(self):
+        """Ctrl+V after clicking the pane: the copied tempo at the play line, gaps kept; what was in that stretch
+        is replaced (one undo step). The pasted ones are picked, in a Select box."""
+        clip = getattr(self.app, "tempo_clip", None)
+        if not clip:
+            self.app.status.config(text=tr("tempo.paste_nothing"))
+            return
+        at = self.app.playhead
+        self.put_copies(clip, at, tr("tempo.step_paste"))
+
+    def put_copies(self, clip, at, name):
+        """clip's items placed from beat at, replacing what's in at .. at + length (one undo step)."""
+        tempo = self.app.tempo
+        lo, hi = at, at + clip["length"]
+        one = 1.0 / max(1, self.app.ppq)
+        self.app.push_undo(name=name)
+        new_p = [[max(0.0, p[0] + at)] + list(p[1:]) for p in clip["points"]]
+        new_c = []
+        for c in clip["catch"]:
+            item = [max(one, c[0] + at)] + list(c[1:3])
+            for k in (3, 4):
+                v = catch_get(c, k)
+                catch_set(item, k, None if v is None else max(0.0, v + at))
+            new_c.append(item)
+        for key, new in (("points", new_p), ("catch", new_c)):
+            kept = [it for it in tempo[key] if not lo - 1e-9 <= it[0] <= hi + 1e-9]
+            tempo[key][:] = sorted(kept + new, key=lambda it: it[0])
+        self.band, self.sel, self.part = ((lo, hi) if hi > lo else None), new_p + new_c, None
+        self.app.tempo_changed()
 
     def forget(self):
         """Hidden / another project opened: the Select box, picks and a catch-up being added go, Delete and Esc
