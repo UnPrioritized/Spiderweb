@@ -398,6 +398,10 @@ def _fit_exact(ideal, target):
     n = len(ideal)
     if n == 0 or not n <= target <= n * 0xFFFFFF:
         return None
+    if ideal.max() - ideal.min() < 1:  # a flat catch-up: two values at most (user saw 4 that looked alike)
+        got = _flat_pair(n, target)
+        if got is not None:
+            return got
     ideal = ideal * (target / ideal.sum())
     out = nearest_safe(ideal)
     body = out[:max(0, n - 2)]  # (the last two are picked as a pair at the end, to land exactly)
@@ -446,6 +450,44 @@ def _runs(segs):
             if not out or out[-1][1] != v:
                 out.append((t, v))
     return out
+
+
+PAIR_REACH = 48  # Domino-safe values tried on each side of a flat catch-up's tempo
+
+
+def _safe_side(start, way):
+    """Up to PAIR_REACH Domino-safe values from start (included when safe) going way (+1 / -1)."""
+    out, u = [], int(start) - way
+    while len(out) < PAIR_REACH:
+        nxt = int(next_safe(np.array([u]), way)[0])
+        if nxt == u or not 1 <= nxt <= 0xFFFFFF:
+            break
+        out.append(nxt)
+        u = nxt
+    return out
+
+
+def _flat_pair(n, target):
+    """n Domino-safe values adding up to exactly target, all one value or a run of A then a run of B (one or two
+    tempo changes); the pair nearest the average first. None if no such pair is near."""
+    q = target / n
+    downs, ups = _safe_side(math.floor(q), -1), _safe_side(math.ceil(q), 1)
+    best = None
+    for a in downs:
+        for b in ups:
+            if b == a:
+                if a * n == target:
+                    return np.full(n, a, np.int64)
+                continue
+            k, rest = divmod(n * b - target, b - a)  # (k ticks of a, the rest of b)
+            if rest == 0 and 0 <= k <= n:
+                far = (q - a) + (b - q)
+                if best is None or far < best[0]:
+                    best = (far, a, b, k)
+    if best is None:
+        return None
+    _, a, b, k = best
+    return np.concatenate([np.full(k, a, np.int64), np.full(n - k, b, np.int64)])
 
 
 def tempo_events(tempo, base, ppq):
