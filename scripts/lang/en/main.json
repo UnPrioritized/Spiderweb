@@ -294,7 +294,6 @@
  "app.tempo_pane": "Tempo pane",
  "app.tempo_pane_tip": "The tempo line under the piano roll: BPM changes, stops and catch-ups for the MIDI export.",
  "tempo.tempo": "Tempo",
- "tempo.play_bpm": "{bpm} BPM",
  "tempo.play_bpm_tip": "The exact tempo at the play line, as the MIDI file holds it.",
  "tempo.mark_catch": "Catch-up: {bpm} BPM",
  "tempo.bpm_snap": "BPM snap",

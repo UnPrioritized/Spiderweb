@@ -4,6 +4,7 @@ import json
 import math
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 
 import numpy as np
 
@@ -1642,17 +1643,16 @@ class RollDrawing:
         """The bar numbers' middle: the ruler's bottom half, by their ticks (the tempo changes go above them)."""
         return self.ruler_h - 9 * self.scale
 
-    def tempo_layout(self, w):
+    def tempo_layout(self):
         """[(x, text, tip, colour)] of the tempo changes on the ruler (user 2026-10-22): a mark at each Tempo pane
-        point / catch-up line on screen, the text BPMs to one decimal (tip: the full ones)."""
+        point / catch-up line (off screen too: their room is worked out from the song's start, so scrolling never
+        moves them), the text BPMs to one decimal (tip: the full ones)."""
         pane = getattr(self.app, "tempo_pane", None)
         if pane is None:
             return []
         out = []
         for b, kind, v in ruler_marks(self.app.tempo, pane.base(), self.app.ppq):
             x = self.t2x(b)
-            if not self.kb_w <= x <= w:
-                continue
             if kind == "catch":
                 tip = tr("tempo.mark_catch", bpm=bpm_text(v)) if v is not None else tr("tempo.not_possible")
                 out.append((x, tr("tempo.catch"), tip, look.TEMPO_CATCH if v is not None else look.ERROR))
@@ -1670,37 +1670,55 @@ class RollDrawing:
         return sorted(out, key=lambda m: m[0])
 
     def draw_tempo_marks(self, boxes):
-        """The tempo changes under the bar numbers: a small mark on the exact tick, its text right of it (one that
-        would run into the one before shows only its mark); white over a ruler band. Kept while nothing they show
-        changed."""
+        """The tempo changes above the bar numbers: a light line on the exact tick, its text right of it, then a
+        fainter line on to the next change (user's mock-up; none after the last). A change landing on the one
+        before's text isn't drawn (zoomed out: its BPMs join that one's tip). Ones scrolled past the keyboard slide
+        under it. White over a ruler band. Kept while nothing they show changed."""
         if self.sx is None:
             return
-        w, top, s = self.winfo_width(), self.ruler_h, self.scale
-        bands =tuple(sorted(sorted((self.t2x(a[0]), self.t2x(a[2]))) for a in self.ruler_boxes(boxes)))
+        w, top, s, kb = self.winfo_width(), self.ruler_h, self.scale, self.kb_w
+        bands = tuple(sorted(sorted((self.t2x(a[0]), self.t2x(a[2]))) for a in self.ruler_boxes(boxes)))
         pane = getattr(self.app, "tempo_pane", None)
-        key = (json.dumps(self.app.tempo), pane and pane.base(), self.app.ppq, w, top, self.kb_w, self.sx,
+        key = (json.dumps(self.app.tempo), pane and pane.base(), self.app.ppq, w, top, kb, self.sx,
                self.view_t, s, bands)
         if key == self._tempo_key and self.find_withtag("tempomark"):
             return
         self.delete("tempomark")
         self._tempo_key, self.tempo_tips = key, []
-        y, end, tags = 8 * s, -math.inf, ("frame", "tempomark")
-        marks = self.tempo_layout(w)
-        for i, (x, text, tip, colour) in enumerate(marks):
+        font = look.font(7, fit=True)
+        if getattr(self, "_tempo_font", (None,))[0] != font:
+            self._tempo_font = (font, tkfont.Font(font=font))
+        measure = self._tempo_font[1].measure
+        shown, end = [], -math.inf  # [x, text, tip, colour, text's right end]
+        for x, text, tip, colour in self.tempo_layout():
+            if shown and x < end:
+                if shown[-1][1]:  # (on the text before: joins its tip)
+                    shown[-1][2] += "\n" + tip
+                    continue
+                tip = shown.pop()[2] + "\n" + tip  # (on a mark with no text: this one, saying more, takes its place)
+            right = x + 3 * s + measure(text) if text else x
+            shown.append([x, text, tip, colour, right])
+            end = right + 4 * s if text else x + 2 * s
+        y, tags = 8 * s, ("frame", "tempomark")
+        for i, (x, text, tip, colour, right) in enumerate(shown):
+            if x > w:
+                break
+            nxt = shown[i + 1][0] if i + 1 < len(shown) else None
+            if right < kb and (nxt is None or nxt < kb):
+                continue
             if any(x0 <= x < x1 for x0, x1 in bands):
                 colour = look.RULER_PICK_TEXT
-            self.create_line(x, 0, x, top, fill=colour, tags=tags)  # (on the exact tick, down to the bar line)
-            right = x + 4 * s
-            if text and x + 3 * s > end:
-                item = self.create_text(x + 3 * s, y, text=text, anchor="w", fill=colour, font=look.font(7, fit=True),
-                                        tags=tags)
-                right = self.bbox(item)[2]
-                end = right + 4 * s
-            self.tempo_tips.append((x - 4 * s, right, tip))
-            # a faint line from its text on to the next change: how long the tempo lasts (user's mock-up)
-            x0, x1 = (right + 3 * s if right > x + 4 * s else x + 1), (marks[i + 1][0] if i + 1 < len(marks) else w) - 3 * s
-            if x1 > x0:
-                self.create_line(x0, round(y), x1, round(y), fill=look.RULER_TEMPO_LINE, tags=tags)
+            if x >= kb - 1:
+                self.create_line(x, 0, x, top, fill=colour, tags=tags)  # (on the exact tick, down to the bar line)
+            if text:
+                self.create_text(x + 3 * s, y, text=text, anchor="w", fill=colour, font=font, tags=tags)
+            self.tempo_tips.append((max(kb, x - 4 * s), max(right, x + 4 * s), tip))
+            if nxt is not None:  # (how long this tempo lasts)
+                x0, x1 = max(kb - 2, (right + 3 * s) if text else x + 1), min(w, nxt - 3 * s)
+                if x1 > x0:
+                    self.create_line(x0, round(y), x1, round(y), fill=look.RULER_TEMPO_LINE, tags=tags)
+        if shown:  # the keyboard's corner covers what slid past it
+            self.create_rectangle(0, 0, kb, top, fill=look.RULER_BG, outline="", tags=tags)
         self.tag_raise("playhead")
 
     def ruler_marks(self, w):

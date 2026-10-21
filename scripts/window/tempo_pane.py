@@ -61,9 +61,13 @@ class TempoBox(ttk.Frame):
         bar.pack(fill="x")
         ttk.Label(bar, text=tr("tempo.tempo")).pack(side="left", padx=(2, 4))
         # the exact BPM at the play line (user 2026-10-22; a set width: playing doesn't push the tools about)
-        self.play_bpm = ttk.Label(bar, text="", width=13, foreground=look.INFO)
-        self.play_bpm.pack(side="left", padx=(0, 4))
-        Tooltip(self.play_bpm, tr("tempo.play_bpm_tip"))
+        # (the number right-aligned in its own room, "BPM" after it: the word never moves, user)
+        self.play_bpm = ttk.Label(bar, text="", width=10, anchor="e", foreground=look.INFO)
+        self.play_bpm.pack(side="left")
+        unit = ttk.Label(bar, text=tr("tempo.bpm"), foreground=look.INFO)
+        unit.pack(side="left", padx=(3, 4))
+        for w in (self.play_bpm, unit):
+            Tooltip(w, tr("tempo.play_bpm_tip"))
         self.tool = tk.StringVar(value="point")  # select / point / line / formula
         self.last_pencil = "point"  # (double right-click: Select <-> this)
         self.tool_vars = {}
@@ -1685,7 +1689,7 @@ class TempoPane(tk.Canvas):
         if not self.box.winfo_ismapped():  # (playing: every frame; worked out only while it shows)
             return
         v = bpm_at(app.tempo, self.base(), app.ppq, math.floor(app.playhead * app.ppq + 1e-9))
-        text = tr("tempo.play_bpm", bpm=f"{v:,.0f}" if v >= 10000 else fmt(round(v, 2)))
+        text = f"{v:,.0f}" if v >= 10000 else fmt(round(v, 2))
         if self.box.play_bpm.cget("text") != text:
             self.box.play_bpm.config(text=text)
 
