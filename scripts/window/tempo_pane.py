@@ -2,11 +2,15 @@
 The Tempo pane under the piano roll (below the velocity pane when both are shown): the project's tempo line
 (notes/tempo.py) on a doubling scale, sharing the piano roll's time axis.
 
-Points: double-click empty space adds one, drag moves it (time snaps to the grid, BPM to the BPM snap; Shift free),
-double-click a point to type its BPM, right-click deletes it. A click between two points picks that part: its curve
-is set in the bar above. Catch-up lines (right-click empty space > Add catch-up line here) are dragged sideways;
-picked, the bar shows the catch-up's shape and the BPM it works out (red when it can't). The wheel over the numbers
-on the left zooms up / down (Shift scrolls), dragging them scrolls; elsewhere the wheel works as on the piano roll.
+Tools in the bar (user 2026-10-21): Select (a toggle: off = the pencil), then Linear / Curve / Formula (pencil
+kinds; none pressed = plain points). Pencil: a click adds a point (held, it follows the mouse), a drag on a point /
+catch-up line moves it; Linear / Curve / Formula drag a part from the press to the let-go (points between are
+replaced). Select: click picks a point / catch-up line / part, a box picks many, dragging moves what's picked (time
+snaps to the grid, BPM to the BPM snap; Shift free). Double-click a point: type its BPM. Right-click a point / line:
+delete it (all picked ones when it's picked); elsewhere a menu: Add catch-up BPM here. A catch-up line starts the
+catch-up, which ends at the next point; picked, the bar shows its shape and the BPM it works out (red when it
+can't). The wheel over the numbers on the left zooms up / down (Shift scrolls), dragging them scrolls; elsewhere the
+wheel works as on the piano roll.
 """
 
 import math
@@ -17,8 +21,7 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.tempo import (CURVES, FORMULA, MAX_BPM, MIN_BPM, SHAPES, catch_plan, clamp_bpm, formula_fn, shown_bpm,
-                         stretches)
+from notes.tempo import CURVES, FORMULA, MAX_BPM, MIN_BPM, SHAPES, clamp_bpm, curve, formula_fn, plans, shown_bpm
 from roll.roll_shared import CTRL, SHIFT, grab_while_panning
 from window import look
 from window.widgets import ShortLabel, Tooltip
@@ -26,6 +29,7 @@ from window.widgets import ShortLabel, Tooltip
 BPM_SNAPS = (0, 0.1, 1, 5, 10)  # the BPM snap dropdown's steps (0 = off)
 NICE = (0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000)  # numbers filled in on zoom
 LABEL_GAP = 15  # px between two numbers on the left (times the window's scale)
+DRAWS = {"line": "line", "curve": "s", "formula": "formula"}  # pencil kind -> the curve the drawn part gets
 
 
 def bpm_text(v):
@@ -34,7 +38,7 @@ def bpm_text(v):
 
 
 class TempoBox(ttk.Frame):
-    """The Tempo pane with its bar on top: BPM snap, what the picked point / part / catch-up line has, a hint."""
+    """The Tempo pane with its bar on top: tools, BPM snap, what's picked, a hint."""
 
     def __init__(self, parent, app, scale):
         super().__init__(parent)
@@ -42,7 +46,17 @@ class TempoBox(ttk.Frame):
         bar = self.bar = ttk.Frame(self, padding=(2, 2))
         bar.pack(fill="x")
         ttk.Label(bar, text=tr("tempo.tempo")).pack(side="left", padx=(2, 8))
-        ttk.Label(bar, text=tr("tempo.bpm_snap")).pack(side="left")
+        self.tool = tk.StringVar(value="point")  # select / point / line / curve / formula
+        self.tool_vars = {}
+        for key, label in (("select", tr("app.select")), (None, None), ("line", tr("app.linear")),
+                           ("curve", tr("app.curve")), ("formula", tr("app.formula"))):
+            if key is None:
+                ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=5)
+                continue
+            var = self.tool_vars[key] = tk.BooleanVar(value=False)
+            ttk.Checkbutton(bar, text=label, variable=var, style="Toolbutton", takefocus=False,
+                            command=lambda k=key: self.pick_tool(k)).pack(side="left", padx=1)
+        ttk.Label(bar, text=tr("tempo.bpm_snap")).pack(side="left", padx=(10, 0))
         self.snap = ttk.Combobox(bar, state="readonly", width=5,
                                  values=[tr("tempo.off") if s == 0 else fmt(s) for s in BPM_SNAPS])
         self.snap.current(BPM_SNAPS.index(1))
@@ -71,15 +85,29 @@ class TempoBox(ttk.Frame):
         self.formula_box.bind("<Return>", lambda e: self.typed_formula())
         self.formula_box.bind("<FocusOut>", lambda e: self.typed_formula())
         self.formula_tip = Tooltip(self.formula_box, "")
+        self.draw_formula = FORMULA  # what the Formula pencil draws
         self.result = ttk.Label(bar, text="", font=look.font(9))
         fit = ttk.Button(bar, text=tr("tempo.fit"), command=lambda: (self.pane.fit_view(), app.roll.focus_set()))
         fit.pack(side="right", padx=(6, 2))
         Tooltip(fit, tr("tempo.fit_tip"))
-        self.hint = ShortLabel(bar, least=8, text=tr("tempo.hint"), foreground=look.HINT, font=look.font(8))
+        self.hint = ShortLabel(bar, least=8, text=tr("tempo.hint_point"), foreground=look.HINT, font=look.font(8))
         self.hint.pack(side="left", fill="x", expand=True, padx=(10, 0))
         self.pane = TempoPane(self, app, scale)
         self.pane.pack(fill="both", expand=True)
         self._shown = None
+
+    def pick_tool(self, key):
+        """A tool button pressed: at most one is down; none down = the pencil's plain points."""
+        on = self.tool_vars[key].get()
+        for k, var in self.tool_vars.items():
+            if k != key:
+                var.set(False)
+        self.tool.set(key if on else "point")
+        self.hint.config(text=tr("tempo.hint_" + ("draw" if self.tool.get() in DRAWS else self.tool.get())))
+        self.pane.drag = None
+        self.sync()
+        self.pane.request_redraw()
+        self.app.roll.focus_set()
 
     # ------------------------------------------------------------ the bar follows what's picked
 
@@ -92,7 +120,8 @@ class TempoBox(ttk.Frame):
         formula = False
         if kind == "point":
             if self.focus_get() is not self.bpm_box:
-                self.bpm_var.set(bpm_text(tempo["points"][pick[1]][1]))
+                vals = {tempo["points"][i][1] for i in pick[1]}
+                self.bpm_var.set(bpm_text(vals.pop()) if len(vals) == 1 else "")
         elif kind == "part":
             p = tempo["points"][pick[1]]
             self.curve.current(CURVES.index(p[2]))
@@ -103,6 +132,8 @@ class TempoBox(ttk.Frame):
             self.shape.current(SHAPES.index(c[1]))
             formula = c[1] == "formula"
             text, tip = c[2] or FORMULA, tr("tempo.catch_formula_tip")
+        if not formula and kind is None and self.tool.get() == "formula":  # (the Formula pencil's formula)
+            formula, text, tip = True, self.draw_formula, tr("tempo.formula_tip")
         if formula:
             if self.focus_get() is not self.formula_box:
                 self.formula_var.set(text)
@@ -124,23 +155,29 @@ class TempoBox(ttk.Frame):
         return BPM_SNAPS[max(0, self.snap.current())]
 
     def typed_bpm(self):
+        """The BPM box: every picked point gets it."""
         pick = self.pane.picked()
         if not pick or pick[0] != "point":
             return
-        p = self.app.tempo["points"][pick[1]]
+        pts = [self.app.tempo["points"][i] for i in pick[1]]
         try:
             v = calc(self.bpm_var.get().replace(",", ""))
             if not (isinstance(v, (int, float)) and math.isfinite(v) and v > 0):
                 raise ValueError
         except (ValueError, ArithmeticError, TypeError, SyntaxError):
-            self.bpm_var.set(bpm_text(p[1]))
+            self.sync_bpm(pts)
             return
         v = clamp_bpm(v)
-        if v != p[1]:
+        if any(p[1] != v for p in pts):
             self.app.push_undo(name=tr("tempo.step_bpm"))
-            p[1] = v
+            for p in pts:
+                p[1] = v
             self.app.tempo_changed()
-        self.bpm_var.set(bpm_text(p[1]))
+        self.sync_bpm(pts)
+
+    def sync_bpm(self, pts):
+        vals = {p[1] for p in pts}
+        self.bpm_var.set(bpm_text(vals.pop()) if len(vals) == 1 else "")
 
     def picked_curve(self):
         pick = self.pane.picked()
@@ -170,11 +207,17 @@ class TempoBox(ttk.Frame):
 
     def typed_formula(self):
         pick = self.pane.picked()
+        text = self.formula_var.get().strip()
         if not pick or pick[0] not in ("part", "catch"):
+            if self.tool.get() == "formula" and text != self.draw_formula:
+                if formula_fn(text) is None:
+                    self.app.status.config(text=tr("tempo.formula_bad"))
+                    self.formula_var.set(self.draw_formula)
+                else:
+                    self.draw_formula = text
             return
         item = self.app.tempo["points" if pick[0] == "part" else "catch"][pick[1]]
         at = 3 if pick[0] == "part" else 2
-        text = self.formula_var.get().strip()
         if text == (item[at] or FORMULA):
             return
         if formula_fn(text) is None:
@@ -183,16 +226,19 @@ class TempoBox(ttk.Frame):
             return
         self.app.push_undo(name=tr("tempo.step_curve" if pick[0] == "part" else "tempo.step_catch_shape"))
         item[at] = text
+        if pick[0] == "part":
+            self.draw_formula = text
         self.app.tempo_changed()
 
 
 class TempoPane(tk.Canvas):
     def __init__(self, box, app, scale):
-        super().__init__(box, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
+        super().__init__(box, bg=look.ROLL_BG, highlightthickness=0, cursor="pencil")
         self.box, self.app, self.scale = box, app, scale
         self.pad = int(8 * scale)  # room above the top number / below the bottom one
         self.view = None  # (lowest, highest) log2 BPM shown; None = fitted on first draw
-        self.pick = None  # ("point" / "part" / "catch", index)
+        self.sel = []  # the picked points / catch-up lines (their own lists: they keep their place when sorted)
+        self.part = None  # a picked part: its first point's list
         self.drag = None
         self._pan = None
         self._redraw_pending = False
@@ -238,12 +284,7 @@ class TempoPane(tk.Canvas):
     def fit_view(self, redraw=True):
         """Up / down zoom to show the whole tempo line (catch-ups too) with a little room."""
         tempo, base = self.app.tempo, self.base()
-        vals = [base] + [p[1] for p in tempo["points"]]
-        for st in stretches(tempo, base):
-            if st["catch"] is not None:
-                plan = catch_plan(tempo, base, st)
-                if plan["ok"]:
-                    vals.append(plan["bpm"])
+        vals = [base] + [p[1] for p in tempo["points"]] + [pl["bpm"] for _, pl in plans(tempo, base) if pl["ok"]]
         lo, hi = math.log2(min(vals)), math.log2(max(vals))
         if hi - lo < 2:  # (at least two doublings shown: a flat line in the middle)
             mid = (hi + lo) / 2
@@ -252,19 +293,34 @@ class TempoPane(tk.Canvas):
         if redraw:
             self.request_redraw()
 
+    # ------------------------------------------------------------ what's picked
+
+    def is_sel(self, item):
+        return any(item is s for s in self.sel)
+
+    def sel_idx(self, key):
+        """Indices of the picked items in tempo[key] ("points" / "catch")."""
+        return [i for i, it in enumerate(self.app.tempo[key]) if self.is_sel(it)]
+
     def picked(self):
-        """The pick, if it still points at something."""
-        p, tempo = self.pick, self.app.tempo
-        if not p:
-            return None
-        n = len(tempo["points"]) - (1 if p[0] == "part" else 0) if p[0] != "catch" else len(tempo["catch"])
-        if 0 <= p[1] < n:
-            return p
-        self.pick = None
+        """What the bar shows: ("point", [indices]), ("part", i), ("catch", j) or None."""
+        tempo = self.app.tempo
+        self.sel = [s for s in self.sel if any(s is it for it in tempo["points"] + tempo["catch"])]
+        pts = tempo["points"]
+        if self.part is not None:
+            at = [i for i, p in enumerate(pts[:-1]) if p is self.part]
+            if at:
+                return ("part", at[0])
+            self.part = None
+        points, lines = self.sel_idx("points"), self.sel_idx("catch")
+        if points:
+            return ("point", points)
+        if len(lines) == 1:
+            return ("catch", lines[0])
         return None
 
-    def set_pick(self, pick):
-        self.pick = pick
+    def set_sel(self, items, part=None):
+        self.sel, self.part = list(items), part
         self.box.sync()
         self.request_redraw()
 
@@ -308,7 +364,7 @@ class TempoPane(tk.Canvas):
     # ------------------------------------------------------------ mouse
 
     def on_press(self, e):
-        roll = self.app.roll
+        roll, tempo = self.app.roll, self.app.tempo
         self.close_typing(True)
         if roll.sx is None or self.view is None:
             return
@@ -316,16 +372,38 @@ class TempoPane(tk.Canvas):
         if e.x < roll.kb_w:  # the numbers: drag to scroll up / down
             self.drag = {"kind": "view", "y": e.y, "view": self.view}
             return
-        i = self.point_at(e.x, e.y)
-        if i is not None:
-            self.drag = {"kind": "point", "i": i, "pushed": False, "x": e.x, "y": e.y}
-            return self.set_pick(("point", i))
-        j = self.catch_at(e.x)
-        if j is not None:
-            self.drag = {"kind": "catch", "i": j, "pushed": False, "x": e.x}
-            return self.set_pick(("catch", j))
-        part = self.part_at(roll.x2t(e.x))
-        self.set_pick(("part", part) if part is not None else None)
+        tool = self.box.tool.get()
+        i, j = self.point_at(e.x, e.y), self.catch_at(e.x)
+        item = tempo["points"][i] if i is not None else tempo["catch"][j] if j is not None else None
+        if item is not None:
+            if tool == "select" and e.state & CTRL:
+                if self.is_sel(item):  # (Ctrl+click on a picked one: unpicked)
+                    return self.set_sel([s for s in self.sel if s is not item])
+                self.set_sel(self.sel + [item])
+            elif not (tool == "select" and self.is_sel(item)):
+                self.set_sel([item])
+            return self.start_move(e, item, pushed=False)
+        b, v = self.snap_beat(roll.x2t(e.x), e), self.snap_bpm(self.y2b(e.y), e)
+        if tool == "select":
+            self.part = None
+            self.drag = {"kind": "box", "x": e.x, "y": e.y, "x1": e.x, "y1": e.y, "before": list(self.sel),
+                         "ctrl": bool(e.state & CTRL)}
+        elif tool == "point":
+            item = self.add_point(b, v)
+            if item is not None:
+                self.start_move(e, item, pushed=True)
+        else:
+            self.drag = {"kind": "draw", "b0": b, "v0": v, "b1": b, "v1": v, "x": e.x, "y": e.y}
+            self.request_redraw()
+
+    def start_move(self, e, item, pushed):
+        """Hold the picked items, item the one under the mouse (pushed: the step is made already: a new point)."""
+        self.drag = {"kind": "move", "grab": item, "x": e.x, "y": e.y, "pushed": pushed,
+                     "orig": [(s, s[0], s[1] if self.is_point(s) else None) for s in self.sel],
+                     "b0": item[0], "v0": item[1] if self.is_point(item) else None, "db": 0.0}
+
+    def is_point(self, item):
+        return any(item is p for p in self.app.tempo["points"])
 
     def on_drag(self, e):
         if e.state & 0x200 and self._pan:  # (the middle button too: pans)
@@ -333,65 +411,131 @@ class TempoPane(tk.Canvas):
         d = self.drag
         if not d:
             return
-        roll, tempo = self.app.roll, self.app.tempo
+        roll = self.app.roll
         if d["kind"] == "view":
             lo, hi = d["view"]
             top, bot = self.area()
             shift = (e.y - d["y"]) / max(1, bot - top) * (hi - lo)
             self.view = (lo + shift, hi + shift)
             return self.request_redraw()
+        if d["kind"] == "box":
+            d["x1"], d["y1"] = e.x, e.y
+            self.sel = d["before"] * d["ctrl"] + [s for s in self.in_box(d) if not (d["ctrl"] and
+                                                                                   any(s is o for o in d["before"]))]
+            self.box.sync()
+            return self.request_redraw()
+        if d["kind"] == "draw":
+            d["b1"], d["v1"] = self.snap_beat(roll.x2t(e.x), e), self.snap_bpm(self.y2b(e.y), e)
+            self.show_position(e)
+            return self.request_redraw()
         if not d["pushed"]:
-            if abs(e.x - d["x"]) < 3 and abs(e.y - d.get("y", e.y)) < 3:
+            if abs(e.x - d["x"]) < 3 and abs(e.y - d["y"]) < 3:
                 return  # (a click, not a drag yet)
-            self.app.push_undo(name=tr("tempo.step_move" if d["kind"] == "point" else "tempo.step_catch_move"))
+            many = len(d["orig"]) > 1
+            self.app.push_undo(name=tr("tempo.step_move_many" if many else "tempo.step_move" if d["v0"] is not None
+                                       else "tempo.step_catch_move"))
             d["pushed"] = True
-        one = 1.0 / max(1, self.app.ppq)
-        if d["kind"] == "point":
-            pts, i = tempo["points"], d["i"]
-            b = self.snap_beat(roll.x2t(e.x), e)
-            lo = pts[i - 1][0] + one if i > 0 else 0.0
-            hi = pts[i + 1][0] - one if i + 1 < len(pts) else math.inf
-            pts[i][0] = min(max(b, lo), hi)
-            pts[i][1] = self.snap_bpm(self.y2b(e.y), e)
-        else:
-            cs, i = tempo["catch"], d["i"]
-            b = self.snap_beat(roll.x2t(e.x), e)
-            lo = cs[i - 1][0] + one if i > 0 else one
-            hi = cs[i + 1][0] - one if i + 1 < len(cs) else math.inf
-            cs[i][0] = min(max(b, lo), hi)
+        self.move_to(d, e)
         self.app.tempo_changed()
         self.show_position(e)
 
+    def move_to(self, d, e):
+        """The held items moved by the mouse: all by the same beats (and BPM); the grabbed one snaps."""
+        roll, tempo = self.app.roll, self.app.tempo
+        one = 1.0 / max(1, self.app.ppq)
+        db = self.snap_beat(roll.x2t(e.x), e) - d["b0"]
+        db = max(db, max(-b for _, b, _ in d["orig"]))  # (nothing before the start)
+        dv = 0.0 if d["v0"] is None else self.snap_bpm(self.y2b(e.y), e) - d["v0"]
+
+        def place(shift):
+            for s, b, v in d["orig"]:
+                s[0] = max(b + shift, 0.0 if v is not None else one)
+                if v is not None:
+                    s[1] = clamp_bpm(v + dv) if dv else v
+            for key in ("points", "catch"):
+                tempo[key].sort(key=lambda it: it[0])
+
+        place(db)
+        for key in ("points", "catch"):  # (two on one beat: the time stays where it last worked)
+            beats = [it[0] for it in tempo[key]]
+            if any(beats[k + 1] - beats[k] < one / 2 for k in range(len(beats) - 1)):
+                place(d["db"])
+                return
+        d["db"] = db
+
+    def in_box(self, d):
+        roll = self.app.roll
+        x0, x1 = sorted((d["x"], d["x1"]))
+        y0, y1 = sorted((d["y"], d["y1"]))
+        tempo = self.app.tempo
+        out = [p for p in tempo["points"] if x0 <= roll.t2x(p[0]) <= x1 and y0 <= float(self.b2y(p[1])) <= y1]
+        return out + [c for c in tempo["catch"] if x0 <= roll.t2x(c[0]) <= x1]
+
     def on_release(self, e):
         d, self.drag = self.drag, None
-        if d and d.get("pushed"):
-            self.app.settle_history()
+        if not d:
+            return
+        if d["kind"] == "box":
+            if abs(e.x - d["x"]) < 3 and abs(e.y - d["y"]) < 3:  # a click: the part there (or nothing)
+                part = self.part_at(self.app.roll.x2t(e.x))
+                pts = self.app.tempo["points"]
+                self.set_sel(d["before"] if d["ctrl"] else [], None if part is None else pts[part])
+            else:
+                self.request_redraw()
+        elif d["kind"] == "draw":
+            self.draw_part(d)
+        elif d["kind"] == "move":
+            if d["pushed"]:
+                self.app.settle_history()
+            elif self.box.tool.get() == "select" and not e.state & CTRL:  # (a click on one of many: just it)
+                self.set_sel([d["grab"]])
 
     def end_drag(self):
         """Ctrl+Z while dragging: let go first (the step made at the first move takes it back)."""
         self.drag = None
 
     def on_double(self, e):
+        """Double-click on a point: type its BPM. Elsewhere: a press like any other."""
         roll = self.app.roll
         if roll.sx is None or self.view is None or e.x < roll.kb_w:
             return
-        self.drag = None
         i = self.point_at(e.x, e.y)
-        if i is not None:
-            return self.open_typing(i)
-        if self.catch_at(e.x) is not None:
-            return
-        self.add_point(self.snap_beat(roll.x2t(e.x), e), self.snap_bpm(self.y2b(e.y), e))
+        if i is None:
+            return self.on_press(e)
+        self.drag = None
+        self.open_typing(i)
 
     def add_point(self, b, v):
+        """A new point (picked); its part keeps the curve of the part it was put in. None when one is there."""
         pts = self.app.tempo["points"]
         if any(abs(p[0] - b) < 1e-9 for p in pts):
-            return
+            return None
         self.app.push_undo(name=tr("tempo.step_add"))
         at = sum(1 for p in pts if p[0] < b)
-        kind = pts[at - 1][2] if at > 0 else "hold"
-        pts.insert(at, [float(b), clamp_bpm(v), kind, pts[at - 1][3] if at > 0 else ""])
-        self.pick = ("point", at)
+        item = [float(b), clamp_bpm(v), pts[at - 1][2] if at > 0 else "hold", pts[at - 1][3] if at > 0 else ""]
+        pts.insert(at, item)
+        self.sel, self.part = [item], None
+        self.app.tempo_changed()
+        return item
+
+    def draw_part(self, d):
+        """Linear / Curve / Formula let go: a part from the press to here (the points between it replaced)."""
+        b0, v0, b1, v1 = d["b0"], d["v0"], d["b1"], d["v1"]
+        if b1 < b0:
+            b0, v0, b1, v1 = b1, v1, b0, v0
+        if b1 - b0 < 0.5 / max(1, self.app.ppq):
+            self.add_point(b0, v0)
+            return
+        pts = self.app.tempo["points"]
+        self.app.push_undo(name=tr("tempo.step_draw"))
+        before = [p for p in pts if p[0] <= b1 + 1e-9]
+        after_kind = (before[-1][2], before[-1][3]) if before else ("hold", "")  # (the part after keeps its curve)
+        kind = DRAWS[self.box.tool.get()]
+        text = self.box.draw_formula if kind == "formula" else ""
+        keep = [p for p in pts if p[0] < b0 - 1e-9 or p[0] > b1 + 1e-9]
+        first, last = [float(b0), clamp_bpm(v0), kind, text], [float(b1), clamp_bpm(v1), *after_kind]
+        pts[:] = sorted(keep + [first, last], key=lambda p: p[0])
+        self.sel, self.part = [], first
         self.app.tempo_changed()
 
     def add_catch(self, b):
@@ -400,9 +544,9 @@ class TempoPane(tk.Canvas):
         if any(abs(c[0] - b) < 1e-9 for c in cs):
             return
         self.app.push_undo(name=tr("tempo.step_catch_add"))
-        at = sum(1 for c in cs if c[0] < b)
-        cs.insert(at, [b, "flat", ""])
-        self.pick = ("catch", at)
+        item = [b, "flat", ""]
+        cs.insert(sum(1 for c in cs if c[0] < b), item)
+        self.sel, self.part = [item], None
         self.app.tempo_changed()
 
     def on_right(self, e):
@@ -411,21 +555,21 @@ class TempoPane(tk.Canvas):
         if roll.sx is None or self.view is None or e.x < roll.kb_w or self.drag:
             return
         tempo = self.app.tempo
-        i = self.point_at(e.x, e.y)
-        if i is not None:  # (removed directly, like a path point or a sustain stop)
-            self.app.push_undo(name=tr("tempo.step_delete"))
-            del tempo["points"][i]
-            self.pick = None
+        i, j = self.point_at(e.x, e.y), self.catch_at(e.x)
+        item = tempo["points"][i] if i is not None else tempo["catch"][j] if j is not None else None
+        if item is not None:  # (removed directly, like a path point or a sustain stop; picked = all picked ones)
+            gone = self.sel if self.is_sel(item) and len(self.sel) > 1 else [item]
+            if len(gone) > 1:
+                name = "tempo.step_delete_many"
+            else:
+                name = "tempo.step_delete" if self.is_point(item) else "tempo.step_catch_delete"
+            self.app.push_undo(name=tr(name))
+            for key in ("points", "catch"):
+                tempo[key][:] = [it for it in tempo[key] if not any(it is g for g in gone)]
+            self.sel = [s for s in self.sel if not any(s is g for g in gone)]
             return self.app.tempo_changed()
-        j = self.catch_at(e.x)
-        if j is not None:
-            self.app.push_undo(name=tr("tempo.step_catch_delete"))
-            del tempo["catch"][j]
-            self.pick = None
-            return self.app.tempo_changed()
-        b, v = self.snap_beat(roll.x2t(e.x), e), self.snap_bpm(self.y2b(e.y), e)
+        b = self.snap_beat(roll.x2t(e.x), e)
         menu = tk.Menu(self, tearoff=0)
-        menu.add_command(label=tr("tempo.add_point"), command=lambda: self.add_point(b, v))
         menu.add_command(label=tr("tempo.add_catch"), command=lambda: self.add_catch(b))
         try:
             menu.tk_popup(e.x_root, e.y_root)
@@ -444,7 +588,7 @@ class TempoPane(tk.Canvas):
         elif self.catch_at(e.x) is not None:
             want = "sb_h_double_arrow"
         else:
-            want = "crosshair"
+            want = "arrow" if self.box.tool.get() == "select" else "pencil"
         if self["cursor"] != want and not self.drag:
             self.config(cursor=want)
 
@@ -501,8 +645,9 @@ class TempoPane(tk.Canvas):
 
     def open_typing(self, i):
         self.close_typing(True)
-        self.set_pick(("point", i))
-        b, v = self.app.tempo["points"][i][:2]
+        item = self.app.tempo["points"][i]
+        self.set_sel([item])
+        b, v = item[:2]
         var = tk.StringVar(value=bpm_text(v))
         box = tk.Entry(self, textvariable=var, width=9, font=look.font(9), relief="solid", bd=1)
         x, y = self.app.roll.t2x(b), float(self.b2y(v))
@@ -513,15 +658,14 @@ class TempoPane(tk.Canvas):
         box.bind("<KP_Enter>", lambda e: self.close_typing(True))
         box.bind("<Escape>", lambda e: self.close_typing(False))
         box.bind("<FocusOut>", lambda e: self.close_typing(True))
-        self._typing = (box, var, i)
+        self._typing = (box, var, item)
 
     def close_typing(self, keep):
         if not self._typing:
             return
-        box, var, i = self._typing
+        box, var, p = self._typing
         self._typing = None
-        if keep and i < len(self.app.tempo["points"]):
-            p = self.app.tempo["points"][i]
+        if keep and any(p is q for q in self.app.tempo["points"]):
             try:
                 v = calc(var.get().replace(",", ""))
                 if isinstance(v, (int, float)) and math.isfinite(v) and v > 0 and clamp_bpm(v) != p[1]:
@@ -538,13 +682,12 @@ class TempoPane(tk.Canvas):
     def catch_result(self, j):
         """(text, can't) for catch-up line j: its BPM, or why it can't work."""
         tempo, base = self.app.tempo, self.base()
-        st = stretches(tempo, base)[j]
-        plan = catch_plan(tempo, base, st)
-        if plan.get("empty"):
+        st, plan = plans(tempo, base)[j]
+        if plan["empty"]:
             return tr("tempo.catch_empty"), True
         if not plan["ok"]:
-            if plan["earliest"] is not None and plan["earliest"] > st["line"]:
-                return tr("tempo.catch_bad", where=self.app.bar_text(plan["earliest"])), True
+            if plan["latest"] is not None:
+                return tr("tempo.catch_bad", where=self.app.bar_text(plan["latest"])), True
             return tr("tempo.catch_cant"), True
         key = "tempo.catch_bpm" if st["shape"] == "flat" else (
             "tempo.catch_top" if plan["bpm"] >= base else "tempo.catch_low")
@@ -589,6 +732,24 @@ class TempoPane(tk.Canvas):
                     placed.append((v, False))
         return placed
 
+    def line_xy(self, worked, w, kb):
+        """The tempo line as (xs, beats, ys): every 2 px, plus each jump drawn exactly upright (the beat just
+        before and the beat itself at the same x)."""
+        roll, tempo = self.app.roll, self.app.tempo
+        xs = list(np.arange(kb, w + 2, 2, dtype=float))
+        beats = [roll.x2t(x) for x in xs]
+        jumps = {p[0] for p in tempo["points"]} | {st["line"] for st, _ in worked}
+        jumps |= {st["end"] for st, _ in worked if st["end"] is not None}
+        for b in jumps:
+            x = round(roll.t2x(b))
+            if kb <= x <= w + 2:
+                xs += [x, x]
+                beats += [b - 1e-9 * max(1.0, b), b]
+        order = sorted(range(len(xs)), key=lambda k: (xs[k], beats[k]))
+        xs, beats = np.array(xs)[order], np.array(beats)[order]
+        vals = shown_bpm(tempo, self.base(), beats, worked)
+        return xs, beats, np.clip(self.b2y(vals), -50, self.winfo_height() + 50)
+
     def redraw(self):
         self._redraw_pending = False
         if not self.winfo_ismapped():
@@ -604,20 +765,17 @@ class TempoPane(tk.Canvas):
         tempo, base = app.tempo, self.base()
         top, bot = self.area()
         lw = max(1, round(self.scale))
-        # stretches: the drawn part (amber) and its catch-up (teal; red when it can't work)
-        plans = []
-        for j, st in enumerate(stretches(tempo, base)):
-            plan = catch_plan(tempo, base, st)
-            plans.append((st, plan))
-            if st["catch"] is None:
-                continue
-            x0, x1, x2 = (roll.t2x(st[k]) for k in ("from", "catch", "line"))
-            first = [p[0] for p in tempo["points"] if st["from"] <= p[0] < st["catch"]]
+        worked = plans(tempo, base)
+        # stretches: the held part (amber) and its catch-up (teal; red when it can't work)
+        for st, plan in worked:
+            x1 = roll.t2x(st["line"])
+            first = [p[0] for p in tempo["points"] if st["from"] <= p[0] < st["line"]]
             if first:
                 self.create_rectangle(max(kb, roll.t2x(first[0])), 0, max(kb, x1), h, fill=look.TEMPO_DRAWN_BG,
                                       outline="")
-            self.create_rectangle(max(kb, x1), 0, max(kb, x2), h, outline="",
-                                  fill=look.TEMPO_CATCH_BG if plan["ok"] else look.TEMPO_BAD_BG)
+            if st["end"] is not None:
+                self.create_rectangle(max(kb, x1), 0, max(kb, roll.t2x(st["end"])), h, outline="",
+                                      fill=look.TEMPO_CATCH_BG if plan["ok"] else look.TEMPO_BAD_BG)
         for x, c in roll.grid_cols(w):
             if x >= kb:
                 self.create_line(x, 0, x, h, fill=c)
@@ -627,40 +785,40 @@ class TempoPane(tk.Canvas):
         y = float(self.b2y(base))
         self.create_line(kb, y, w, y, fill=look.TEMPO_BASE, dash=(4, 3), width=lw)
         # the line itself
-        xs = np.arange(kb, w + 2, 2, dtype=float)
-        vals = shown_bpm(tempo, base, np.array([roll.x2t(x) for x in xs]))
-        ys = np.clip(self.b2y(vals), -50, h + 50)
+        xs, beats, ys = self.line_xy(worked, w, kb)
         self.create_line(*np.column_stack([xs, ys]).ravel().tolist(), fill=look.TEMPO_LINE, width=lw + 1)
         pick = self.picked()
         if pick and pick[0] == "part":  # the picked part, thicker
             a, b = tempo["points"][pick[1]][0], tempo["points"][pick[1] + 1][0]
-            on = (xs >= roll.t2x(a)) & (xs <= roll.t2x(b))
+            on = (beats >= a) & (beats < b)
             if on.sum() >= 2:
                 self.create_line(*np.column_stack([xs[on], ys[on]]).ravel().tolist(), fill=look.TEMPO_PICKED,
                                  width=lw + 3)
         # catch-up lines and their words
-        for j, (st, plan) in enumerate(plans):
+        for j, (st, plan) in enumerate(worked):
             x = roll.t2x(st["line"])
             if x < kb - 5 or x > w + 5:
                 continue
             ok = plan["ok"]
             col = look.TEMPO_CATCH if ok else look.ERROR
-            picked = pick == ("catch", j)
+            picked = self.is_sel(tempo["catch"][j])
             self.create_line(x, 0, x, h, fill=col, width=lw * (3 if picked else 2))
             r = 5 * self.scale
             self.create_polygon(x - r, 0, x + r, 0, x, r * 1.4, fill=col, outline=col)
-            if st["catch"] is not None:
-                text = bpm_text(plan["bpm"]) + " BPM" if ok else tr("tempo.not_possible")
-                xm = (max(kb, roll.t2x(st["catch"])) + x) / 2
-                self.create_text(xm, top + 8 * self.scale, text=text, fill=col, font=look.font(8, "bold"))
-        starts = {st["catch"] for st, _ in plans if st["catch"] is not None}
+            text = bpm_text(plan["bpm"]) + " BPM" if ok else tr("tempo.not_possible")
+            xe = roll.t2x(st["end"]) if st["end"] is not None else x + 80 * self.scale
+            self.create_text((x + min(xe, w)) / 2, top + 8 * self.scale, text=text, fill=col,
+                             font=look.font(8, "bold"))
+        self.draw_drag(lw)
+        ends = {st["end"] for st, _ in worked if st["end"] is not None}
         r = 4 * self.scale
-        for i, (b, v, _, _) in enumerate(tempo["points"]):
+        for p in tempo["points"]:
+            b, v = p[0], p[1]
             x, y = roll.t2x(b), float(self.b2y(v))
             if x < kb - r or x > w + r:
                 continue
-            on = pick == ("point", i)
-            edge = look.TEMPO_CATCH if b in starts else look.TEMPO_LINE
+            on = self.is_sel(p)
+            edge = look.TEMPO_CATCH if b in ends else look.TEMPO_LINE
             self.create_oval(x - r, y - r, x + r, y + r, fill=look.TEMPO_PICKED if on else look.CHART_POINT,
                              outline=edge, width=lw + 1)
         # the numbers on the left
@@ -672,6 +830,24 @@ class TempoPane(tk.Canvas):
                 self.create_text(kb - 5, y, text=bpm_text(v), anchor="e", fill=look.LABEL,
                                  font=look.font(7, "bold") if strong else look.font(7))
         self.draw_playhead()
+
+    def draw_drag(self, lw):
+        """A select box being dragged, or the part the Linear / Curve / Formula pencil is drawing."""
+        d, roll = self.drag, self.app.roll
+        if not d:
+            return
+        if d["kind"] == "box":
+            self.create_rectangle(d["x"], d["y"], d["x1"], d["y1"], outline=look.TEMPO_PICKED, dash=(3, 2))
+        elif d["kind"] == "draw" and d["b1"] != d["b0"]:
+            b0, v0, b1, v1 = d["b0"], d["v0"], d["b1"], d["v1"]
+            if b1 < b0:
+                b0, v0, b1, v1 = b1, v1, b0, v0
+            kind = DRAWS.get(self.box.tool.get(), "line")
+            t = np.linspace(0, 1, 129)
+            lv = math.log2(v0) + (math.log2(v1) - math.log2(v0)) * curve(kind, self.box.draw_formula, t)
+            xs = [roll.t2x(b0 + (b1 - b0) * k) for k in t]
+            ys = self.b2y(2 ** lv)
+            self.create_line(*np.column_stack([xs, ys]).ravel().tolist(), fill=look.TEMPO_PICKED, width=lw + 2)
 
     def draw_playhead(self):
         self.delete("playhead")

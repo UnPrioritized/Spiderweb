@@ -5,10 +5,11 @@ S-curve, ease out, ease in, or a formula of x from 0 to 1); curves run on the do
 straight part from 60 to 240 passes 120 halfway. Before the first point the tempo is the project's BPM, after the
 last one it holds the last point's.
 
-A catch-up line ends a stretch: from the last point before it up to the line, Spiderweb works out a catch-up tempo so
-the whole stretch (from the line before, or the song's start) takes exactly as long as at the project's BPM; after
-the line the project's BPM comes back. The catch-up's shape: flat, ease back (fast first, settling to the BPM),
-ramp (up and back down) or a formula. The notes are never moved: everything after a catch-up line is in time.
+A catch-up line starts a catch-up (user 2026-10-21): the drawn tempo holds up to the line, then from the line to the
+next point (or catch-up line) Spiderweb works out a tempo so the whole stretch (from where the catch-up before
+ended, or the song's start) takes exactly as long as at the project's BPM; the drawn line goes on from that point.
+The catch-up's shape: flat, ease back (fast first, settling to the BPM), ramp (up and back down) or a formula. The
+notes are never moved: everything after a catch-up is in time.
 
 Saved in the project as "tempo": {"points": [[beat, bpm, curve, formula], ...], "catch": [[beat, shape, formula],
 ...]}, beats like the shapes (a PPQ change moves nothing).
@@ -154,22 +155,24 @@ def catch_weight(shape, text, t):
 # ------------------------------------------------------------ the drawn line and its stretches
 
 def stretches(tempo, base):
-    """The catch-up lines' stretches: [{"from": beat the stretch starts (the line before, or 0), "catch": beat the
-    catch-up starts (the last point before the line), "line": the line's beat, "shape", "text"}] - None in "catch"
-    when no point is between the line before and this one (nothing to catch up)."""
+    """The catch-up lines' stretches: [{"from": beat the stretch starts (where the one before ended, or 0), "line":
+    the line's beat = where the catch-up starts, "end": where it ends (the next point or catch-up line after it;
+    None when there's none), "shape", "text"}]."""
     out, prev = [], 0.0
-    pts = tempo["points"]
-    for b, shape, text in tempo["catch"]:
-        inside = [p[0] for p in pts if prev <= p[0] < b]
-        out.append({"from": prev, "catch": max(inside) if inside else None, "line": b, "shape": shape,
-                    "text": text})
-        prev = b
+    pts = [p[0] for p in tempo["points"]]
+    lines = [c[0] for c in tempo["catch"]]
+    for k, (b, shape, text) in enumerate(tempo["catch"]):
+        after = [x for x in pts if x > b] + lines[k + 1:k + 2]
+        end = min(after) if after else None
+        out.append({"from": prev, "line": b, "end": end, "shape": shape, "text": text})
+        if end is not None:
+            prev = end
     return out
 
 
 def drawn_bpm(tempo, base, beats):
-    """The drawn line's BPM at beats (array): the points' curves, the project's BPM before the first point and after
-    each catch-up line until the next point. A catch-up's stretch shows the drawn line here (catch_bpm has its own)."""
+    """The drawn line's BPM at beats (array): the points' curves, the project's BPM before the first point. A
+    catch-up's part shows the drawn line here (catch_bpm has its own)."""
     beats = np.asarray(beats, float)
     pts = tempo["points"]
     out = np.full(beats.shape, float(base))
@@ -182,17 +185,12 @@ def drawn_bpm(tempo, base, beats):
     out[has] = 2 ** lv[idx[has]]
     for i in range(len(pts) - 1):
         kind = pts[i][2]
-        if kind == "hold" or pts[i][1] == pts[i + 1][1]:
+        if kind == "hold" or pts[i][1] == pts[i + 1][1] or pb[i + 1] <= pb[i]:
             continue
         on = idx == i
         if on.any():
             t = (beats[on] - pb[i]) / (pb[i + 1] - pb[i])
             out[on] = 2 ** (lv[i] + (lv[i + 1] - lv[i]) * curve(kind, pts[i][3], t))
-    # after a catch-up line: the project's BPM until the next point
-    for b, _, _ in tempo["catch"]:
-        nxt = pb[pb >= b]
-        stop = nxt[0] if len(nxt) else math.inf
-        out[(beats >= b) & (beats < stop)] = base
     return np.clip(out, MIN_BPM, MAX_BPM)
 
 
@@ -229,39 +227,57 @@ def _solve_push(shape, text, beats, seconds, base, n=512):
 
 
 def catch_plan(tempo, base, st):
-    """A stretch's catch-up worked out for the pane: {"ok", "push", "bpm" (flat: its BPM; else its fastest),
-    "earliest": the first beat the line could sit at for a flat catch-up to work (shown when it can't)}."""
-    if st["catch"] is None:
-        return {"ok": False, "push": None, "bpm": None, "earliest": None, "empty": True}
-    spent = _seconds(tempo, base, st["from"], st["catch"])
-    beats = st["line"] - st["catch"]
-    left = (st["line"] - st["from"]) * 60.0 / base - spent
-    earliest = st["from"] + spent * base / 60.0  # (a flat catch-up needs the stretch to outlast the drawn part)
+    """A stretch's catch-up worked out for the pane: {"ok", "push", "bpm" (flat: its BPM; else its fastest /
+    slowest), "latest": the last beat the line could sit at for a flat catch-up to work (shown when it can't),
+    "empty": nothing after the line to end on}."""
+    if st["end"] is None:
+        return {"ok": False, "push": None, "bpm": None, "latest": None, "empty": True}
+    spent = _seconds(tempo, base, st["from"], st["line"])
+    beats = st["end"] - st["line"]
+    left = (st["end"] - st["from"]) * 60.0 / base - spent
     push = _solve_push(st["shape"], st["text"], beats, left, base) if left > 0 and beats > 0 else None
     if push is None:
-        return {"ok": False, "push": None, "bpm": None, "earliest": earliest, "empty": False}
+        return {"ok": False, "push": None, "bpm": None, "latest": _latest(tempo, base, st), "empty": False}
     w = catch_weight(st["shape"], st["text"], np.linspace(0, 1, 257))
     top = base * 2 ** float((push * w).max() if push > 0 else (push * w).min())
-    return {"ok": True, "push": push, "bpm": clamp_bpm(top), "earliest": earliest, "empty": False}
+    return {"ok": True, "push": push, "bpm": clamp_bpm(top), "latest": None, "empty": False}
+
+
+def _latest(tempo, base, st):
+    """The last beat the catch-up line could start at and still leave time to catch up in (None: the line isn't
+    what's wrong, the shape is)."""
+    whole = (st["end"] - st["from"]) * 60.0 / base
+    if _seconds(tempo, base, st["from"], st["end"]) < whole:
+        return None
+    lo, hi = st["from"], st["end"]
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        if _seconds(tempo, base, st["from"], mid) < whole:
+            lo = mid
+        else:
+            hi = mid
+    return lo
 
 
 def catch_bpm(base, st, plan, beats):
-    """The catch-up's BPM at beats inside its stretch (for drawing)."""
-    t = (np.asarray(beats, float) - st["catch"]) / max(1e-12, st["line"] - st["catch"])
+    """The catch-up's BPM at beats inside its part (for drawing)."""
+    t = (np.asarray(beats, float) - st["line"]) / max(1e-12, st["end"] - st["line"])
     w = catch_weight(st["shape"], st["text"], np.clip(t, 0, 1))
     return np.clip(base * 2 ** (plan["push"] * w), MIN_BPM, MAX_BPM)
 
 
-def shown_bpm(tempo, base, beats):
-    """What the pane draws: the drawn line with each working catch-up in its place."""
+def plans(tempo, base):
+    """[(stretch, catch_plan)] for every catch-up line."""
+    return [(st, catch_plan(tempo, base, st)) for st in stretches(tempo, base)]
+
+
+def shown_bpm(tempo, base, beats, worked=None):
+    """What the pane draws: the drawn line with each working catch-up in its place (worked = plans(), if known)."""
     beats = np.asarray(beats, float)
     out = drawn_bpm(tempo, base, beats)
-    for st in stretches(tempo, base):
-        if st["catch"] is None:
-            continue
-        plan = catch_plan(tempo, base, st)
+    for st, plan in plans(tempo, base) if worked is None else worked:
         if plan["ok"]:
-            on = (beats >= st["catch"]) & (beats < st["line"])
+            on = (beats >= st["line"]) & (beats < st["end"])
             out[on] = catch_bpm(base, st, plan, beats[on])
     return out
 
@@ -385,27 +401,24 @@ def tempo_events(tempo, base, ppq):
     end = int(round(last * ppq)) + 1
     ticks, us = _drawn_events(tempo, base, base_u, ppq, 0, end)
     bad = []
-    for st in stretches(tempo, base):
-        if st["catch"] is None:
-            continue
-        s0, cs, ln = (int(round(st[k] * ppq)) for k in ("from", "catch", "line"))
-        if ln <= cs:
+    for st, plan in plans(tempo, base):
+        if st["end"] is None:
             bad.append(st["line"])
             continue
-        target = (ln - s0) * base_u - int(us[s0:cs].sum())
-        plan = catch_plan(tempo, base, st)
-        n = ln - cs
-        if plan["ok"]:
-            t = (np.arange(n) + 0.5) / n
-            ideal = 6e7 / np.clip(base * 2 ** (plan["push"] * catch_weight(st["shape"], st["text"], t)),
-                                  MIN_BPM, MAX_BPM)
-        else:
-            ideal = np.full(n, max(1.0, target / n))
-        got = _fit_exact(ideal, target) if plan["ok"] else None
+        s0, ln, e = (int(round(st[k] * ppq)) for k in ("from", "line", "end"))
+        n = e - ln
+        if not plan["ok"] or n <= 0:
+            bad.append(st["line"])
+            continue
+        target = (e - s0) * base_u - int(us[s0:ln].sum())
+        t = (np.arange(n) + 0.5) / n
+        ideal = 6e7 / np.clip(base * 2 ** (plan["push"] * catch_weight(st["shape"], st["text"], t)),
+                              MIN_BPM, MAX_BPM)
+        got = _fit_exact(ideal, target)
         if got is None:
             bad.append(st["line"])
             continue
-        us[cs:ln] = got
+        us[ln:e] = got
     events = _runs(ticks, us)
     events[0] = (0, base_u) if events[0][0] == 0 and events[0][1] == base_u else events[0]
     if events[0][0] != 0:
