@@ -1,6 +1,7 @@
 """Playback through a MIDI-OUT device: Windows' own (winmm.dll via ctypes, nothing to install) or the built-in synth
 (BUILTIN, files/synth.py's Live; the only one elsewhere)."""
 
+import bisect
 import ctypes
 import heapq
 import os
@@ -317,6 +318,26 @@ def cc_reset(kinds):
     return out
 
 
+class TimeMap:
+    """Seconds into the song at each tick, from tempo changes [(tick, microseconds a beat)] (tick 0 first): one BPM
+    is one change; the Tempo pane's line = tempo_file.heard_tempo."""
+
+    def __init__(self, ppq, changes):
+        self.ticks = [t for t, _ in changes]
+        self.spt = [u / 1e6 / ppq for _, u in changes]  # seconds a tick
+        self.secs = [0.0]
+        for i in range(1, len(changes)):
+            self.secs.append(self.secs[-1] + (self.ticks[i] - self.ticks[i - 1]) * self.spt[i - 1])
+
+    def sec(self, tick):
+        i = max(0, bisect.bisect_right(self.ticks, tick) - 1)
+        return self.secs[i] + (tick - self.ticks[i]) * self.spt[i]
+
+    def tick(self, sec):
+        i = max(0, bisect.bisect_right(self.secs, sec) - 1)
+        return self.ticks[i] + (sec - self.secs[i]) / self.spt[i]
+
+
 class Player:
     """Plays notes on a background thread so the window stays responsive; position() says where it is. The notes
     and tempo can change while it plays (update): it plays on with the new ones from where it is."""
@@ -342,17 +363,17 @@ class Player:
     def running(self):
         return self.thread is not None and self.thread.is_alive()
 
-    def start(self, notes, ppq, bpm, start_beat, stop_beat, use10=False, cc=(), ports=0):
+    def start(self, notes, ppq, bpm, start_beat, stop_beat, use10=False, cc=(), ports=0, tempo=None):
         """Play from start_beat until stop_beat (notes: rendered [start, end, pitch, vel, slot, ...] in ticks, never
         changed in place; use10: the slots use channel 10 too, engine.slot_track_channel; cc = other MIDI messages,
         cc_list: the values before start_beat are sent first; ports: the synth's ports, each slot on its port's
         channels (engine.slot_ports; Built-in BASSMIDI only, synth.LIVE_PORTS). 31-EDO: no cc (its channels aren't
-        the notes')."""
+        the notes'). tempo = [(tick, us)] tempo changes instead of the one bpm (the Tempo pane's)."""
         self.ports = 0 if self.out.tuned else ports
         self.stop()
         self.ppq, self.start_beat, self.stop_beat = ppq, start_beat, stop_beat
         self.tune = self.out.tuned  # (31-EDO: kept until the next start, so note-offs match their note-ons)
-        self.spt = 60 / bpm / ppq  # seconds a tick
+        self.map = TimeMap(ppq, tempo or [(0, 60_000_000 / bpm)])
         self._clock = None  # (the line waits at the start while the notes are put in order)
         self._gen += 1
         self._swap = self._wanted = None
@@ -361,19 +382,20 @@ class Player:
         self.thread = threading.Thread(target=self._run, args=(notes, use10, () if self.tune else cc), daemon=True)
         self.thread.start()
 
-    def update(self, notes, bpm, stop_beat, use10=False, cc=(), ports=0):
+    def update(self, notes, bpm, stop_beat, use10=False, cc=(), ports=0, tempo=None):
         """The notes / tempo changed while playing (same PPQ): play on with them. Notes already sounding end where
         they would have; new notes starting before the line aren't played (like a start from the line)."""
         if not self.running:
             return
         self.ports = 0 if self.tune else ports
         self.stop_beat = stop_beat
-        spt = 60 / bpm / self.ppq
+        new = TimeMap(self.ppq, tempo or [(0, 60_000_000 / bpm)])
         clock = self._clock
-        if spt != self.spt and clock is not None:  # (the same spot in the song now, at the new speed)
+        if clock is not None:  # (the same spot in the song now, at the new speed)
             now = time.perf_counter()
-            self._clock = (now, clock[1] + (now - clock[0]) / clock[2], spt)
-        self.spt = spt
+            t, sec, old = clock
+            self._clock = (now, new.sec(old.tick(sec + now - t)), new)
+        self.map = new
         with self._lock:  # (a thread just ending would miss these notes: it says it's done under the same lock)
             self._wanted = (self._gen, notes, use10, () if self.tune else cc)
             if not self._sorting:
@@ -396,8 +418,8 @@ class Player:
         clock = self._clock
         if clock is None:
             return self.start_beat
-        t, tick, spt = clock
-        return min(self.stop_beat, (tick + (time.perf_counter() - t) / spt) / self.ppq)
+        t, sec, tmap = clock
+        return min(self.stop_beat, tmap.tick(sec + time.perf_counter() - t) / self.ppq)
 
     def _run(self, notes, use10, ccs=()):
         clock, sleep, stop = time.perf_counter, time.sleep, self._stop
@@ -407,7 +429,7 @@ class Player:
         shared = tune or self.shared
         ons = _Ons(notes, t0, self.stop_beat * self.ppq, use10, tune, self.ports)
         del notes
-        self._clock = (clock(), t0, self.spt)
+        self._clock = (clock(), self.map.sec(t0), self.map)
         held = self.held = {}
         sent = self.cc_sent = set()
         for m in cc_before(ccs, t0):  # (the CC lines' values where it starts)
@@ -444,15 +466,15 @@ class Player:
             off = bool(offs) and (on is None or offs[0][0] <= on[0]) and (c is None or offs[0][0] <= c[0])
             other = not off and c is not None and (on is None or c[0] <= on[0])
             tick = offs[0][0] if off else c[0] if other else on[0] if on is not None else None
-            t_now, tick_now, spt = self._clock
+            t_now, sec_now, tmap = self._clock
             t1 = self.stop_beat * self.ppq
             if tick is None or tick >= t1:  # nothing more to play: wait for the end
-                wait = t_now + (t1 - tick_now) * spt - clock()
+                wait = t_now + tmap.sec(t1) - sec_now - clock()
                 if wait <= 0:
                     return
                 sleep(min(wait, 0.01))
                 continue
-            wait = t_now + (tick - tick_now) * spt - clock()
+            wait = t_now + tmap.sec(tick) - sec_now - clock()
             if wait > 0:
                 sleep(min(wait, 0.01))
                 continue  # (stopped, new notes or a new tempo meanwhile: looked at again)

@@ -2304,6 +2304,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.tempo_box.sync()
         self.tempo_pane.request_redraw()
         self.schedule_autosave()
+        self.play_changed()  # (playing: on at the new tempo)
 
     def bar_text(self, beat):
         """A beat as "bar 3 beat 2" (bar and beat counted from 1, beat may have a fraction)."""

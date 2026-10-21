@@ -14,6 +14,7 @@ from files.synth import FONT_TYPES, LIVE_PORTS, Live, Synth, SynthError, silent_
 from notes.engine import slot_track_channel
 from notes.hz_cc import cc_apart, set_auto_ring, typed_ring
 from notes.hzbass import RING_MOST, has_cc
+from notes.tempo_file import heard_tempo
 from window.hz_preview import VOICES
 from window.widgets import bad, good
 
@@ -66,8 +67,9 @@ class Playback:
         # (Overlapping shapes keep their colours: shapes overlapping on a key share its channel, render keep)
         self.player.shared = self.rows_apart()
         rendered, ccs, ports = self.play_parts(ppq, bpm)
-        self.player.start(rendered, ppq, bpm, self.playhead, self.play_end(ppq, beats, self.playhead),
-                          self.picture_use10, ccs, ports)
+        end = self.play_end(ppq, beats, self.playhead)
+        self.player.start(rendered, ppq, bpm, self.playhead, end, self.picture_use10, ccs, ports,
+                          heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1))
         if self.out.name == BUILTIN:
             self.overload.start(self.out.handle, self.play_voices, self.play_guard.get(), keep)
         elif self.out.edo:
@@ -99,8 +101,9 @@ class Playback:
             return
         # (the end: never before where it is, so a note deleted at the end doesn't stop it at once)
         rendered, ccs, ports = self.play_parts(ppq, bpm)
-        self.player.update(rendered, bpm, self.play_end(ppq, beats, self.player.position()), self.picture_use10, ccs,
-                           ports)
+        end = self.play_end(ppq, beats, self.player.position())
+        self.player.update(rendered, bpm, end, self.picture_use10, ccs, ports,
+                           heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1))
 
     def play_parts(self, ppq, bpm):
         """play_apart's, the CC lines as the player's messages (cc_list)."""

@@ -17,7 +17,7 @@ really heard isn't the project's BPM (their tone is worked out from it)."""
 
 import numpy as np
 
-from notes.tempo import (EVERY, _fit_blocks, _fit_exact, _flat_pair, _runs, file_segments, has_tempo,
+from notes.tempo import (EVERY, _fit_blocks, _fit_exact, _flat_pair, _put, _runs, file_segments, has_tempo,
                          layout)
 
 MAX_US = 0xFFFFFF  # the slowest tempo a file holds, in microseconds per beat
@@ -240,6 +240,18 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None):
             if bad.any():
                 out["hz"] = [int(s[bad].min()) / ppq]
     return out
+
+
+def heard_tempo(tempo, base, ppq, end=0):
+    """[(tick, us)] on Spiderweb's ticks for built-in playback: what a player of the MIDI file really plays where
+    (catch-ups in place, Keep timing parts at the tempo heard before them, so their notes sound when the file's do).
+    None without a tempo line."""
+    if not has_tempo(tempo):
+        return None
+    segs, _ = file_segments(tempo, base, ppq, end)
+    for _, a, e, u in layout(tempo, base, ppq)["keeps"]:
+        segs = _put(segs, a, segs[-1][1] if e is None else e, u)
+    return _runs(segs)
 
 
 def _fit_bar_lines(gaps, keeps, bar, lengths):
