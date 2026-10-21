@@ -128,15 +128,16 @@ class ZoomBar(tk.Canvas):
         self.refresh()
 
 
-def add_zoom_bars(box, roll, widget=None):
+def add_zoom_bars(box, roll, widget=None, axes=(True, False), up="keys"):
     """The roll in its box with a scrollbar under it and one right of it, each ending in "-" and "+" buttons.
-    roll has scale, bar_view, bar_move, bar_zoom and zoom_step, and gets bars; widget = what's shown (the roll)."""
+    roll has scale, bar_view, bar_move, bar_zoom and zoom_step, and gets bars; widget = what's shown (the roll).
+    axes: which bars (True = the one under it); up = what the right one's tips name ("keys" / "bpm")."""
     s = roll.scale
     box.rowconfigure(0, weight=1)
     box.columnconfigure(0, weight=1)
     (widget or roll).grid(row=0, column=0, sticky="nsew")
     bars = []
-    for across in (True, False):
+    for across in axes:
         row = tk.Frame(box, bg=TROUGH)
         row.grid(row=1, column=0, sticky="ew") if across else row.grid(row=0, column=1, sticky="ns")
         bar = ZoomBar(row, s, across, lambda across=across: roll.bar_view(across),
@@ -155,7 +156,8 @@ def add_zoom_bars(box, roll, widget=None):
             b.pack(fill="both", expand=True)
             # (held while its window closes: Tk's next repeat ran on the gone button, an error window)
             b.bind("<Destroy>", lambda e: e.widget.tk.eval("catch {after cancel $::tk::Priv(afterId)}"), add="+")
-            Tooltip(b, tr(f"zoombar.{tip}_{'time' if across else 'keys'}"))
+            Tooltip(b, tr(f"zoombar.{tip}_{'time' if across else up}"))
         bar.pack(side="left" if across else "top", fill="both", expand=True)
-    tk.Frame(box, bg=TROUGH).grid(row=1, column=1, sticky="nsew")  # the corner
+    if len(axes) == 2:
+        tk.Frame(box, bg=TROUGH).grid(row=1, column=1, sticky="nsew")  # the corner
     roll.bars = tuple(bars)

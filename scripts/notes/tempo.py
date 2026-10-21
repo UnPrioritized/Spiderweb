@@ -1,9 +1,10 @@
 """The project's tempo line (the Tempo pane, window/tempo_pane.py) and the tempo changes it writes into a MIDI file.
 
 The line is made of points, each an exact BPM at a beat. Each part between two points has a curve (hold, straight,
-S-curve, ease out, ease in, or a formula of x from 0 to 1); curves run on the doubling scale the pane shows, so a
-straight part from 60 to 240 passes 120 halfway. Before the first point the tempo is the project's BPM, after the
-last one it holds the last point's.
+S-curve, ease out, ease in, or a formula of x from 0 to 1) and a BPM change: linear (default: a straight part from
+60 to 240 passes 150 halfway) or exponential (straight on the pane's doubling scale: passes 120). Before the first
+point the tempo is the project's BPM, after the last one it holds the last point's. A curved part writes a new
+tempo every "every" ticks (default 24).
 
 A catch-up line starts a catch-up (user 2026-10-21): the drawn tempo holds up to the line, then from the line to the
 next point (or catch-up line) Spiderweb works out a tempo so the whole stretch (from where the catch-up before
@@ -11,8 +12,8 @@ ended, or the song's start) takes exactly as long as at the project's BPM; the d
 The catch-up's shape: flat, ease back (fast first, settling to the BPM), ramp (up and back down) or a formula. The
 notes are never moved: everything after a catch-up is in time.
 
-Saved in the project as "tempo": {"points": [[beat, bpm, curve, formula], ...], "catch": [[beat, shape, formula],
-...]}, beats like the shapes (a PPQ change moves nothing).
+Saved in the project as "tempo": {"points": [[beat, bpm, curve, formula, "lin" / "exp"], ...], "catch": [[beat,
+shape, formula], ...], "every": ticks}, beats like the shapes (a PPQ change moves nothing).
 
 Exact timing (user's rule: tick and microsecond perfect, not "too small to hear"): a MIDI file's time is whole
 numbers, ticks x microseconds per beat, so the catch-up is picked tick by tick to make each stretch's sum exactly
@@ -32,13 +33,14 @@ MAX_BPM = 60_000_000.0  # 1 microsecond per beat (faster = 0, which breaks the f
 CURVES = ("hold", "line", "s", "out", "in", "formula")
 SHAPES = ("flat", "ease", "ramp", "formula")
 FORMULA = "x^3"  # a new formula part's / catch-up's starting formula
-EMPTY = {"points": [], "catch": []}
+SCALES = ("lin", "exp")  # a part's BPM change: linear (default, user) / exponential (straight on the doubling scale)
+EVERY = 24  # ticks between the tempo changes of a curved part (user: like Domino's default; 1 = every tick)
 FAR = 1e7  # beats: past this a point is left out (as shapes' points, engine.BEATS_FAR)
 SAFE_REACH = 8192  # the farthest a Domino-safe value is from any value (measured: 5212 at the slowest tempos)
 
 
 def empty():
-    return {"points": [], "catch": []}
+    return {"points": [], "catch": [], "every": EVERY}
 
 
 def has_tempo(tempo):
@@ -60,6 +62,7 @@ def clean_tempo(data):
             b, v = float(p[0]), float(p[1])
             kind = p[2] if len(p) > 2 and p[2] in CURVES else "hold"
             text = p[3] if len(p) > 3 and isinstance(p[3], str) else ""
+            scale = p[4] if len(p) > 4 and p[4] in SCALES else "lin"
         except (TypeError, ValueError, IndexError):
             continue
         if not (math.isfinite(b) and math.isfinite(v)) or not 0 <= b <= FAR or v <= 0:
@@ -68,8 +71,10 @@ def clean_tempo(data):
         if key in seen:
             continue
         seen.add(key)
-        out["points"].append([b, clamp_bpm(v), kind, text[:200]])
+        out["points"].append([b, clamp_bpm(v), kind, text[:200], scale])
     out["points"].sort(key=lambda p: p[0])
+    every = data.get("every", EVERY)
+    out["every"] = every if isinstance(every, int) and not isinstance(every, bool) and 1 <= every <= 65535 else EVERY
     seen = set()
     for c in data.get("catch", []) if isinstance(data.get("catch"), list) else []:
         try:
@@ -180,18 +185,22 @@ def drawn_bpm(tempo, base, beats):
     if not pts:
         return out
     pb = np.array([p[0] for p in pts])
-    lv = np.log2(np.array([p[1] for p in pts]))
+    vs = np.array([p[1] for p in pts])
+    lv = np.log2(vs)
     idx = np.searchsorted(pb, beats, "right") - 1  # the point at or before each beat (-1: before the first)
     has = idx >= 0
-    out[has] = 2 ** lv[idx[has]]
+    out[has] = vs[idx[has]]
     for i in range(len(pts) - 1):
         kind = pts[i][2]
         if kind == "hold" or pts[i][1] == pts[i + 1][1] or pb[i + 1] <= pb[i]:
             continue
         on = idx == i
         if on.any():
-            t = (beats[on] - pb[i]) / (pb[i + 1] - pb[i])
-            out[on] = 2 ** (lv[i] + (lv[i + 1] - lv[i]) * curve(kind, pts[i][3], t))
+            c = curve(kind, pts[i][3], (beats[on] - pb[i]) / (pb[i + 1] - pb[i]))
+            if pts[i][4] == "exp":  # (the same ratio every beat: straight on the pane's doubling scale)
+                out[on] = 2 ** (lv[i] + (lv[i + 1] - lv[i]) * c)
+            else:  # linear: the same BPM added every beat
+                out[on] = vs[i] + (vs[i + 1] - vs[i]) * c
     return np.clip(out, MIN_BPM, MAX_BPM)
 
 
@@ -252,8 +261,10 @@ def _segments(tempo, base, base_u, ppq, t0, t1):
         if held:
             bpm = float(drawn_bpm(tempo, base, [a / ppq])[0])
             out.append((a, b, base_u if bpm == base else int(nearest_safe([6e7 / bpm])[0])))
-        else:
-            bpm = drawn_bpm(tempo, base, np.arange(a, b) / ppq)
+        else:  # (a new value every "every" ticks from the part's first tick, at the start of each)
+            every = tempo.get("every", EVERY)
+            ticks = np.arange(a, b)
+            bpm = drawn_bpm(tempo, base, (edges[k] + (ticks - edges[k]) // every * every) / ppq)
             us = nearest_safe(6e7 / bpm)
             us[bpm == base] = base_u  # (the project's own tempo, exactly as the file starts)
             out.append((a, b, us))
@@ -452,6 +463,38 @@ def _runs(segs):
     return out
 
 
+def _fit_blocks(ideal, target, every):
+    """_fit_exact with a new value only every `every` ticks (user: some programs don't like one per tick): each
+    block takes the Domino-safe value nearest what keeps the sum on track (what's off carried on to the next), the
+    last block lands exactly with one or two values (_flat_pair). A flat catch-up: two values at most anyway."""
+    n = len(ideal)
+    if every <= 1 or ideal.max() - ideal.min() < 1 or n <= every:
+        return _fit_exact(ideal, target)
+    if not n <= target <= n * 0xFFFFFF:
+        return None
+    starts = np.arange(0, n, every)
+    lens = np.diff(np.append(starts, n))
+    want = ideal[starts] * lens
+    want = want * (target / want.sum())  # (each block's share of the target)
+    out = np.empty(n, np.int64)
+    done, owed = 0, 0.0
+    for k in range(len(starts) - 1):
+        u = int(nearest_safe([(want[k] + owed) / lens[k]])[0])
+        out[starts[k]:starts[k] + lens[k]] = u
+        owed += want[k] - u * lens[k]
+        done += u * lens[k]
+    last, rest = lens[-1], target - done
+    if not last <= rest <= last * 0xFFFFFF:
+        return _fit_exact(ideal, target)
+    tail = _flat_pair(int(last), int(rest))
+    if tail is None:
+        tail = _fit_exact(np.full(int(last), rest / last), int(rest))
+        if tail is None:
+            return _fit_exact(ideal, target)
+    out[starts[-1]:] = tail
+    return out
+
+
 PAIR_REACH = 48  # Domino-safe values tried on each side of a flat catch-up's tempo
 
 
@@ -512,7 +555,7 @@ def tempo_events(tempo, base, ppq):
         t = (np.arange(n) + 0.5) / n
         ideal = 6e7 / np.clip(base * 2 ** (plan["push"] * catch_weight(st["shape"], st["text"], t)),
                               MIN_BPM, MAX_BPM)
-        got = _fit_exact(ideal, plan["target"])
+        got = _fit_blocks(ideal, plan["target"], tempo.get("every", EVERY))
         if got is None:
             bad.append(st["line"])
             continue
