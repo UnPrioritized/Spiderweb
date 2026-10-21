@@ -22,11 +22,11 @@ The MOD tab's LFOs and envelopes can move every Filter knob. Amount and the enve
 
 A MIDI message changes everything on its channel, so other shapes on the same channel are changed too.
 
-When you play in Spiderweb, a Hz bass with CC lines is played on a channel of its own, as long as one is free. Built-in BASSMIDI has plenty of channels; other MIDI outs have only 16.
+When you play in Spiderweb, a Hz bass with CC lines is played on a channel of its own, as long as one is free. Built-in BASSMIDI has up to 90 channels; other MIDI outs have only 16.
 
-A MIDI file you export and Export to Domino keep the channels as they are. To keep other shapes out of it, pick Multi channel with "Split: any notes at the same time", so shapes that sound at the same time get different channels.
+A MIDI file you export and Export to Domino keep the channels as they are. To keep other shapes out of it, pick Multi channel with "Split: any notes at the same time", so shapes that sound at the same time get different channels. The CC lines run on about 3 seconds after the sound (see below), so also leave that much room before another shape on its channel.
 
-The Hz bass window says so in orange when the CC lines change other shapes: "CC also changes 2 other shapes" (in the MIDI file), or "CC reaches other notes while playing" (a MIDI out with only 16 channels). Point at it to see which shapes.
+The Hz bass window says so in orange when the CC lines change other shapes: "CC also changes 2 other shapes" (in the MIDI file), or "CC reaches other notes while playing" (a MIDI out with only 16 channels, or Built-in BASSMIDI with all 90 in use). Point at it to see which shapes, numbered by their place in the Shapes list.
 
 The lines run on 3 seconds after the sound ends, then every value goes back to where players start, so shapes later on the channel aren't changed.
 

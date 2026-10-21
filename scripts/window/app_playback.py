@@ -96,17 +96,17 @@ class Playback:
         rendered, msgs, ports = self.play_apart(ppq, bpm)
         return rendered, cc_list(msgs, self.picture_use10, ports) if msgs else [], ports
 
-    def play_apart(self, ppq, bpm):
+    def play_apart(self, ppq, bpm, device=None):
         """(the notes, the Hz basses' CC lines {slot: messages}, the synth's ports) for the player: Built-in BASSMIDI
         puts slots on its ports as the MIDI export does (engine.slot_ports; other MIDI outs have one port: 16 channels). A Hz
         bass's CC lines never reach other shapes' notes while there's a free channel (hz_cc.cc_apart; files keep
-        their channels)."""
+        their channels). device = the MIDI out to plan for (None: the open one)."""
         per_shape = {i: self.cc_messages(ppq, bpm, {i}) for i, sh in enumerate(self.shapes)
                      if has_cc(sh.get("hz") or {})}
         per_shape = {i: got for i, got in per_shape.items() if got}
         if not per_shape:
             return self.rendered, {}, 0
-        ports = LIVE_PORTS if self.out.name == BUILTIN else 0
+        ports = LIVE_PORTS if (device or self.out.name) == BUILTIN else 0
         rendered, msgs = cc_apart(self.rendered, per_shape, self.picture_use10, ports)
         return rendered, msgs, ports
 

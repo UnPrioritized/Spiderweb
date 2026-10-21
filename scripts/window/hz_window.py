@@ -26,11 +26,10 @@ from tkinter import ttk
 
 from files.about import ICONS
 from files.lang import tr, trn
-from files.playback import BUILTIN
 from files.mathexpr import fmt
 from notes.engine import CLASH, PORTS, slot_ports
 from notes.hz_cc import sharers
-from notes.hzbass import AUTO, FX, HZ_KINDS, all_tones, clean_line, clean_tones, has_cc, left_edge
+from notes.hzbass import AUTO, FX, HZ_KINDS, all_tones, clean_line, clean_tones, has_cc, left_edge, own_channels
 from roll.roll_shared import CTRL, bind_double_right, grab_while_panning
 from roll.zoombar import add_zoom_bars
 from window import look
@@ -272,6 +271,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
                    "break" if self.drag or self.loudness.held() else  # program's own shortcuts; the mouse holding
                    self.tool.set(tool) or self.on_motion(e) or "break")  # something: waits, like the other keys)
         self.bind("<Configure>", self.remember)
+        self.bind("<Map>", lambda e: e.widget is self and self.show_cc())  # (skipped while not shown yet / minimised)
         self.protocol("WM_DELETE_WINDOW", self.close)
         c.focus_set()
         self.preview = Preview(self)
@@ -430,20 +430,21 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
             ports = PORTS if slot_ports(int(app.rendered[:, 4].max()) + 1, mine, use10) else 0
             in_file = sharers(app.rendered, i, mine, use10, ports)
             in_play, own = set(), False
-            if app.midi_device.get() != BUILTIN and not app.out.tuned:  # (Built-in BASSMIDI: channels enough)
-                rendered, msgs, _ = app.play_apart(ppq, bpm)
+            if not app.out.tuned:  # (31-EDO: channels by key row, not these)
+                device = app.midi_device.get()
+                rendered, msgs, live = app.play_apart(ppq, bpm, device)  # (Built-in BASSMIDI: 6 ports, 90 channels)
                 slots = np.unique(rendered[rendered[:, 5] == i, 4]).tolist()
-                in_play = sharers(rendered, i, {s: msgs[s] for s in slots if s in msgs}, use10)
-                own = len({s % per for s in slots}) < len(slots)  # (its own notes past 15 channels)
-            names = sorted(in_file | in_play)
-            listed = ", ".join(app.shape_label(app.shapes[k]) for k in names[:5]) + ("…" if len(names) > 5 else "")
+                in_play = sharers(rendered, i, {s: msgs[s] for s in slots if s in msgs}, use10, live) - in_file
+                if own_channels(sh["hz"]):  # (its own notes past the out's channels)
+                    own = len({(s // per % live if live else 0, s % per) for s in slots}) < len(slots)
             parts = []
             if in_file:
                 text = trn("hz.cc_shared", len(in_file), n=len(in_file))
-                parts.append(tr("hz.cc_shared_tip", names=listed))
-            if not in_file and (in_play or own):  # (in the file too: its tip says it)
+                parts.append(tr("hz.cc_shared_tip", names=self.cc_names(in_file)))
+            if in_play or own:
                 text = text or tr("hz.cc_play")
-                parts.append(tr("hz.cc_play_tip", names=listed) if in_play else tr("hz.cc_play_own_tip"))
+                key = "hz.cc_play_builtin" if live else "hz.cc_play"
+                parts.append(tr(key + "_tip", names=self.cc_names(in_play)) if in_play else tr(key + "_own_tip"))
             tip = "\n\n".join(parts)
         self.cc_tip.set_text(tip)
         if text == self.cc_warn.cget("text"):
@@ -454,6 +455,13 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         elif not self.cc_warn.winfo_manager():
             self.cc_warn.pack(side="left", fill="x", expand=True, padx=(0, 10))
         self.after_idle(self.layout)
+
+    def cc_names(self, numbers):
+        """The shapes (their numbers) for show_cc's tip, by their place in the Shapes list (alike names: "Line, Line")."""
+        app = self.app
+        numbers = sorted(k for k in numbers if k < len(app.shapes))  # (notes made before shapes went: their own)
+        return "; ".join(tr("hz.cc_name", n=k + 1, label=app.shape_label(app.shapes[k]))
+                         for k in numbers[:5]) + ("…" if len(numbers) > 5 else "")
 
     def before_restore(self):
         """Undo / redo is about to change the shapes: what's shown now (for after_restore)."""

@@ -258,9 +258,11 @@ def cc_apart(rendered, per_shape, use10, ports=0):
     used = {place(s) for s in np.unique(slots).tolist()}
     nxt = int(slots.max()) + 1 if len(rendered) else 0
     out, moves = {}, []
+    wanted = [s for messages in per_shape.values() for s in messages]
+    rows = np.flatnonzero(np.isin(slots, wanted))  # (one pass over the song, not one per slot)
     for i, messages in per_shape.items():
         for s, events in messages.items():
-            on = np.flatnonzero(slots == s)
+            on = rows[slots[rows] == s]
             if moves:  # (notes moved off it already: no longer there)
                 on = on[~np.isin(on, np.concatenate([m for m, _ in moves]))]
             mine = on[owners[on] == i]
@@ -286,17 +288,20 @@ def sharers(rendered, i, messages, use10, ports=0):
     they're sent: what its CC lines change too (the Hz window's warning). ports = how many ports tell slots apart
     (engine.PORTS when the file writes them, a player's; 0 = one port: slots 15 apart share a channel)."""
     per = 16 if use10 else 15
+    messages = {s: events for s, events in messages.items() if events}
+    if not messages:
+        return set()
     rendered = np.asarray(rendered).reshape(-1, 6)
+    first, last = min(e[0][0] for e in messages.values()), max(e[-1][0] for e in messages.values())
+    # (the notes sounding while any of its lines are sent, first: a big song took ~1 s per edit)
+    rendered = rendered[(rendered[:, 0] < last) & (rendered[:, 1] > first) & (rendered[:, 5] != i)]
     slots = rendered[:, 4]
-    near = rendered[:, 5] != i
     out = set()
     for s, events in messages.items():
-        if not events:
-            continue
         on = slots % per == s % per
         if ports:
             on &= slots // per % ports == s // per % ports
-        m = on & near & (rendered[:, 0] < events[-1][0]) & (rendered[:, 1] > events[0][0])
+        m = on & (rendered[:, 0] < events[-1][0]) & (rendered[:, 1] > events[0][0])
         out.update(np.unique(rendered[m, 5]).tolist())
     return out
 

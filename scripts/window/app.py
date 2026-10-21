@@ -1044,6 +1044,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.sync_funnel()
             if self.hz_window:
                 self.hz_window.show_stale()
+                self.hz_window.show_cc()  # (the CC lines' run-on after the sound is in seconds)
                 self.hz_window.redraw()
             self.schedule_autosave()
             return
