@@ -53,6 +53,21 @@ def bar_lengths(ppq):
     return np.array(sorted(out), np.int64)
 
 
+def bar_line(sigs, tick, ppq, after=False):
+    """The file's bar line at or before tick (after: at or after it), by the time signatures [(tick, top, bottom
+    power)] (file_plan's "sigs")."""
+    sigs = sorted(sigs)
+    i = max(0, [s[0] <= tick for s in sigs].count(True) - 1)
+    at, top, power = sigs[i]
+    unit = top * 4 * ppq // 2 ** power
+    line = at + (tick - at) // unit * unit
+    if after and line < tick:
+        line += unit
+        if i + 1 < len(sigs):
+            line = min(line, sigs[i + 1][0])
+    return line
+
+
 def signature(length, ppq):
     """(top, bottom as a power of two) for a bar this many ticks long; quarter notes first, as most programs show
     them. None when no time signature fits."""

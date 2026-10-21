@@ -29,7 +29,7 @@ from notes.polygon import POLYGON_DEFAULTS, clean_polygon
 from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.tempo import clean_tempo, has_tempo
-from notes.tempo_file import file_plan
+from notes.tempo_file import bar_line, file_plan
 from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
@@ -168,6 +168,14 @@ def short_shape(sh):
         return short_num(v) if k in ("gate", "gate0", "gate1", "k") else v
     # (a Gate sensitive merge's notes are made again from its recipe when loaded: merge.py)
     return json.dumps({k: short(k, v) for k, v in sh.items() if not (k == "notes" and "merge" in sh)})
+
+
+def timed_ticks(plan, notes, cc):
+    """(notes, cc) moved to the file's ticks by file_plan's map (Keep timing parts)."""
+    moved = notes.copy()
+    moved[:, 0], moved[:, 1] = plan["map"](notes[:, 0]), plan["map"](notes[:, 1])
+    return moved, {s: [(t, *m[1:]) for t, m in zip(plan["map"]([m[0] for m in ms]).tolist(), ms)]
+                   for s, ms in cc.items()}
 
 
 def project_json(data):
@@ -808,11 +816,7 @@ class ProjectFiles:
         plan = file_plan(self.tempo, bpm, ppq, beats, np.concatenate(ticks), notes[:, 0],
                          None if on is None else (notes[on, 0], notes[on, 1]))
         if self.tempo.get("points") and any(len(p) > 5 and p[5] is True for p in self.tempo["points"]):
-            moved = notes.copy()
-            moved[:, 0], moved[:, 1] = plan["map"](notes[:, 0]), plan["map"](notes[:, 1])
-            notes = moved
-            cc = {s: [(t, *m[1:]) for t, m in zip(plan["map"]([m[0] for m in ms]).tolist(), ms)]
-                  for s, ms in cc.items()}
+            notes, cc = timed_ticks(plan, notes, cc)
         return notes, cc, plan
 
     def cc_messages(self, ppq, bpm, only=None):
@@ -903,6 +907,11 @@ class ProjectFiles:
             return
         self.catch_up_notes()  # (a shape dragged in a big project: its notes wait for the mouse to rest)
         notes = self.rendered
+        cc = self.cc_messages(ppq, bpm, set(self.sels) if self.sels else None)
+        plan = None
+        if has_tempo(self.tempo):  # (the tempo line comes too: Keep timing worked out on the whole song)
+            plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm))[2]
+            notes, cc = timed_ticks(plan, notes, cc)
         if self.sels:
             notes = notes[np.isin(notes[:, 5], sorted(self.sels))]
         high = int((notes[:, 2] > 127).sum())  # (256 keys: Domino only has 128)
@@ -913,7 +922,14 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"), tr("project.no_notes_to_copy_draw_something")
                                  if not self.sels or high else tr("project.the_selected_shapes_have_no_notes"))
             return
-        first, _ = clip_span(notes, beats * ppq, self.domino_start())
+        span = conductor = None
+        if plan:  # (bar lines from the file's time signatures; only "from the bar line" takes them along)
+            bar = self.domino_start() == "bar"
+            lo, hi = int(notes[:, 0].min()), int(notes[:, 1].max())
+            first = bar_line(plan["sigs"], lo, ppq) if bar else lo
+            span = first, max((bar_line(plan["sigs"], hi, ppq, True) if bar else hi) - first, 1)
+            conductor = tempo_items(plan["events"], plan["sigs"] if bar else (), first, first + span[1])[0]
+        first = span[0] if span else clip_span(notes, beats * ppq, self.domino_start())[0]
         if int(notes[:, 1].max()) - first > LONGEST:  # (pasting it back would say "damaged")
             messagebox.showerror(tr("project.spiderweb"), tr("project.too_long_to_copy_for_domino", longest=LONGEST))
             return
@@ -933,8 +949,7 @@ class ProjectFiles:
         self.busy(tr("project.copying_for_domino"))  # (millions of notes take a few seconds)
         notes, long = cut_gates(notes)
         try:
-            raw = clip_data(notes, ppq, beats * ppq, self.domino_start(), pad_from,
-                            self.cc_messages(ppq, bpm, set(self.sels) if self.sels else None))
+            raw = clip_data(notes, ppq, beats * ppq, self.domino_start(), pad_from, cc, span, conductor)
             copied = put_on_clipboard(raw)
         except MemoryError:
             messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))
@@ -946,7 +961,8 @@ class ProjectFiles:
             return
         what = ((tr("project.one_note") if len(notes) == 1 else tr("project.n_notes", n=len(notes))) if self.sels else
                 trn("project.all_notes", len(notes), n=len(notes)))
-        where = tr("project.the_track") if tracks == 1 else tr("project.the_first_of_tracks", tracks=tracks)
+        where = (tr("project.the_conductor_track") if plan else
+                 tr("project.the_track") if tracks == 1 else tr("project.the_first_of_tracks", tracks=tracks))
         how = (tr("project.paste_at_the_cursor") if self.domino_start() == "note" else
                tr("project.double_click_a_bar_line_to"))
         self.status.config(text=tr("project.copied_for_domino_ppq_in_domino", what=what, ppq=ppq, where=where, how=how)

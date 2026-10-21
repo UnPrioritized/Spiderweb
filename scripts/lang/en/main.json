@@ -1238,6 +1238,7 @@
  "project.all_notes": "all {n:,} notes",
  "project.all_notes_one": "the only note",
  "project.the_track": "the track",
+ "project.the_conductor_track": "the Conductor track (the tempo comes too; the notes go on the tracks below it)",
  "project.the_first_of_tracks": "the first of {tracks} tracks",
  "project.paste_at_the_cursor": "paste at the cursor",
  "project.double_click_a_bar_line_to": "double-click in the piano roll to paste",

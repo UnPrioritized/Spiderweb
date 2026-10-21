@@ -50,6 +50,7 @@ TRACK_TAIL = bytes.fromhex(
 DMS_SONG_REST = bytes.fromhex(  # SONG_REST as a .dms that Domino saved has it
     "ef030400000001000000f1030400000000000000f403080000000000000000000000f5030400000001000000f6030400000000"
     "000000fb0300000000fc03040000000b000000fd030100000001fe030100000001ff03040000001100000000040100000001")
+CONDUCTOR_HEAD = TRACK_HEAD[:27] + b"\x01" + TRACK_HEAD[28:]  # (item 1003 = 01: Domino's Conductor track)
 TRACK_SETTINGS = TRACK_HEAD[35:]  # TRACK_HEAD after 1000, 1001 (channel), 1002 (name), 1003, 1004 (drum track)
 SONG_TAIL = bytes.fromhex(
     "ee0300000000f0031a000000e80300000000e9030400000001000000ea030400000001000000f90342000000640001000000"
@@ -153,16 +154,18 @@ def clip_span(notes, bar, start="bar"):
     return first, max(-(-(int(notes[:, 1].max()) - first) // bar) * bar, bar)
 
 
-def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None):
+def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None, span=None, conductor=None):
     """notes: (start, end, pitch, velocity, slot, ...) rows -> the clipboard bytes. One track per slot (channel)
     that has notes, in slot order, packed together (no empty tracks; pad_from: every slot from that one on gets a
     track, empty ones too: Overlapping shapes keep their colours, rows of channels); Domino fills tracks downwards
     from the highlighted one. start "bar": the copy starts at the bar line at or before the first note (so the notes keep
     their place in the bar) and runs to the bar line after the last; "note": it starts on the first note and ends
     with the last, so the first note pastes right at Domino's cursor. Every track shares that stretch (made longer
-    for CC messages past the last note). cc = {slot: messages} (hz_cc.slot_events): control items on its track."""
+    for CC messages past the last note). cc = {slot: messages} (hz_cc.slot_events): control items on its track.
+    span = (first, length) instead of clip_span's; conductor = tempo_items bytes: a Conductor track first (Domino
+    keeps it only when pasted on its Conductor track; tested by the user 2026-10-21)."""
     cc = cc or {}
-    first, length = clip_span(notes, bar, start)
+    first, length = span or clip_span(notes, bar, start)
     length = max([length] + [ev[-1][0] - first + 1 for ev in cc.values() if ev])
     end = item(2009, item(1001, struct.pack("<I", length)))
     with Packer(zlib.Z_DEFAULT_COMPRESSION) as z:
@@ -174,6 +177,8 @@ def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None):
         tracks = b"".join(item(1003, TRACK_HEAD + events(s, a, b) + end + TRACK_TAIL)
                           for s, (a, b) in enumerate(zip(cuts[:-1].tolist(), cuts[1:].tolist()))
                           if a < b or pad_from is not None and s >= pad_from)
+        if conductor is not None:
+            tracks = item(1003, CONDUCTOR_HEAD + conductor + end + TRACK_TAIL) + tracks
         data = SONG_START + item(1002, struct.pack("<H", ppq)) + SONG_REST + tracks + SONG_TAIL
         z.add(data)
         return MAGIC + struct.pack("<I", len(data)) + z.finish()
