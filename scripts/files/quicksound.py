@@ -21,7 +21,11 @@ past the memory and what the Mixer can add up in time (about 100 kinds sounding 
 are played together in bands, each as its middle key does (plan_rough: 2, 4, 8... keys a band, the finest that
 needs at most MOST_KINDS); anything that fits stays exact.
 Mixing (Mixer): the copies are added up in the frequency domain, block by block (a high key lays thousands of waves a
-second, each ringing seconds: added one by one, the sound device got a quarter of the sound at key 100)."""
+second, each ringing seconds: added one by one, the sound device got a quarter of the sound at key 100).
+CC lines (user 2026-10-21: live keys must have them): each note takes its channel's values where it starts. Channel
+volume / Expression = the copy turned down (BASSMIDI measured: exactly (CC 7 / 100)^2 x (CC 11 / 127)^2); Cutoff, Pan
+(a stereo sound pans its sides apart: no plain gain) and the Pitch wheel change the sound itself, so they're
+recorded with the chord in CC_STEP steps; too many kinds = coarser steps first when they're the cause (plan_rough)."""
 
 import collections
 import concurrent.futures
@@ -31,7 +35,7 @@ import threading
 
 import numpy as np
 
-from files.synth import RATE, SynthError, events
+from files.synth import RATE, SynthError, cc_events, events
 
 STEPS = 16
 GATE_STEP = 1.05
@@ -41,6 +45,17 @@ WORKERS = max(1, min(6, (os.cpu_count() or 2) - 2))
 VOICES = 100000  # (one note: never cut)
 PART = 2048  # frames in a block of the mixing
 MOST_KINDS = 100  # different recordings a made stretch of live notes may need before its keys go in bands
+CC_MIDDLE = np.array([64, 64, 8192])  # (a note's CC row: Cutoff, Pan, pitch bend; the players' own start values)
+CC_TOP = np.array([127, 127, 16383])
+CC_STEP = (8, 8, 1 / 64)  # the finest steps recorded: Cutoff / Pan values, the bend in keys (1/8 key: overtones
+# heard off, measured)
+MOST_ROUGH = 16  # CC steps up to this many times coarser (Cutoff / Pan: one step = all at the middle)
+
+
+def stepped(cc, rough, bend_keys):
+    """CC rows (n x 3, CC_MIDDLE's order) in steps rough x CC_STEP apart, counted from the middle."""
+    step = np.array([CC_STEP[0], CC_STEP[1], CC_STEP[2] * 8192 / bend_keys]) * rough
+    return np.clip(np.rint((cc - CC_MIDDLE) / step) * step + CC_MIDDLE, 0, CC_TOP).astype(np.int64)
 
 
 class QuickSound:
@@ -99,56 +114,80 @@ class QuickSound:
 
     # ------------------------------------------------------------ recordings and chords
 
-    def _play(self, keys, vel, gate):
-        """keys (one or several, together) played by the synth: their sound until it has died away."""
+    def _play(self, keys, vel, gate, cc=None):
+        """keys (one or several, together) played by the synth: their sound until it has died away. cc = (Cutoff,
+        Pan, bend, bend range in keys) set first (values at the players' start values: not sent)."""
         keys = (keys,) if isinstance(keys, int) else keys
+        msgs = []
+        if cc is not None:
+            cutoff, pan, bend, bend_keys = cc
+            msgs += [(0, 0xB0, 74, cutoff, 0)] if cutoff != CC_MIDDLE[0] else []
+            msgs += [(0, 0xB0, 10, pan, 0)] if pan != CC_MIDDLE[1] else []
+            if bend != CC_MIDDLE[2]:
+                msgs += [(0, 0xB0, 101, 0, 0), (0, 0xB0, 100, 0, 0), (0, 0xB0, 6, bend_keys, 0),
+                         (0, 0xE0, bend & 0x7F, bend >> 7, 0)]
         st = {}
-        got = self.synth.render(events(np.array([[0, gate, k, vel] for k in keys]), RATE, 60), RATE, 0,
-                                gate + int(RING * RATE), VOICES, self.nofx, stats=st)
+        got = self.synth.render(events(np.array([[0, gate, k, vel] for k in keys]), RATE, 60, cc=cc_events(msgs)),
+                                RATE, 0, gate + int(RING * RATE), VOICES, self.nofx, stats=st)
         return got[:st.get("end", len(got))]
 
-    def plan(self, starts, keys, vels, gates, most=None):
+    def plan(self, starts, keys, vels, gates, most=None, cc=None, scale=None, bend_keys=2):
         """For notes (arrays in start order: start frame, key, velocity 1..127, length in frames): the chords to lay
-        ([(start frame, (keys, step velocity, gate), gain)]: notes starting together with the same step, length and
-        loudness are one); None when they'd need more than `most` different ones. Needs ready()."""
+        ([(start frame, (keys, step velocity, gate[, cc]), gain)]: notes starting together with the same step,
+        length, loudness (and CC row) are one); None when they'd need more than `most` different ones. cc = each
+        note's CC row (Cutoff, Pan, bend; stepped already), scale = each one's gain from its CC loudness. Needs
+        ready()."""
         if not len(starts):
             return []
         steps, gains = self.curve
         vels = np.clip(vels, 1, 127)
         step, gain = steps[vels], gains[vels]
+        if scale is not None:
+            gain = gain * scale
         frames = np.maximum(1.0, gates)
         gate = np.maximum(1, np.rint(GATE_STEP ** np.rint(np.log(frames) / math.log(GATE_STEP)))).astype(np.int64)
         new = np.zeros(len(starts), bool)  # (a group starts where any of them changes)
         new[0] = True
-        for a in (starts, step, gate, gain):
+        for a in (starts, step, gate, gain) + (() if cc is None else tuple(cc.T)):
             new[1:] |= a[1:] != a[:-1]
         firsts = np.flatnonzero(new)
         ends = np.append(firsts[1:], len(starts))
         keys = np.asarray(keys, np.int64)
+        rows = [None] * len(firsts) if cc is None else [tuple(r) + (bend_keys,) for r in cc[firsts].tolist()]
         same = {}  # (the same keys again: one tuple)
         out, kinds = [], set()
-        for i, j, s, v, g, n in zip(firsts.tolist(), ends.tolist(), starts[firsts].tolist(), step[firsts].tolist(),
-                                    gate[firsts].tolist(), gain[firsts].tolist()):
+        for i, j, s, v, g, n, r in zip(firsts.tolist(), ends.tolist(), starts[firsts].tolist(), step[firsts].tolist(),
+                                       gate[firsts].tolist(), gain[firsts].tolist(), rows):
             raw = keys[i:j].tobytes()
             group = same.get(raw)
             if group is None:
                 group = same[raw] = tuple(keys[i:j].tolist())
-            out.append((s, (group, int(v), g), float(n)))
+            out.append((s, (group, int(v), g) if r is None else (group, int(v), g, r), float(n)))
             if most is not None:
                 kinds.add(out[-1][1])
                 if len(kinds) > most:
                     return None
         return out
 
-    def plan_rough(self, starts, keys, vels, gates, band=1):
+    def plan_rough(self, starts, keys, vels, gates, band=1, cc=None, scale=None, bend_keys=2):
         """plan, with neighbouring keys played together in bands of `band` keys or more (as few as needed so that at
-        most MOST_KINDS different recordings are needed; band 1 = every key as it is): (chords, keys a band)."""
+        most MOST_KINDS different recordings are needed; band 1 = every key as it is): (chords, keys a band). CC rows
+        (cc, scale, bend_keys: plan's, not stepped yet) go in coarser steps first when they make the kinds too many."""
         many = len(np.unique(keys))
+        rough = 1
+
+        def tried(band, cc, most):
+            s, k, v, g, c, n = banded(starts, keys, vels, gates, band, cc, scale)
+            return self.plan(s, k, v, g, most, c, n, bend_keys)
         while True:
-            got = self.plan(*banded(starts, keys, vels, gates, band), most=None if band >= many else MOST_KINDS)
+            last = band >= many and (cc is None or rough >= MOST_ROUGH)
+            got = tried(band, None if cc is None else stepped(cc, rough, bend_keys), None if last else MOST_KINDS)
             if got is not None:
                 return got, band
-            band *= 2
+            if cc is not None and rough < MOST_ROUGH and (band >= many or tried(band, None, MOST_KINDS) is not None):
+                rough *= 2  # (the CC rows make them too many)
+            else:
+                band *= 2
 
     def _keep(self, key, got):
         with self.lock:
@@ -211,12 +250,13 @@ class QuickSound:
         return bool(self.asked) or bool(self.measuring and self.measuring.is_alive())
 
 
-def banded(starts, keys, vels, gates, band):
+def banded(starts, keys, vels, gates, band, cc=None, scale=None):
     """Notes (arrays in start order) with neighbouring keys in bands of `band` (counted among the keys there are):
-    every key of a band plays the notes of its middle key (the others' are left out)."""
+    every key of a band plays the notes of its middle key (the others' are left out). cc / scale (plan's, None =
+    none) go along: (starts, keys, vels, gates, cc, scale)."""
     keys = np.asarray(keys, np.int64)
     if band <= 1 or not len(keys):
-        return starts, keys, vels, gates
+        return starts, keys, vels, gates, cc, scale
     have = np.unique(keys)
     first = np.searchsorted(have, keys) // band * band
     size = np.minimum(band, len(have) - first)
@@ -224,7 +264,8 @@ def banded(starts, keys, vels, gates, band):
     first, size = first[keep], size[keep]
     pick = np.repeat(np.arange(len(first)), size)  # (each kept note once for every key of its band)
     nth = np.arange(len(pick)) - np.repeat(np.cumsum(size) - size, size)
-    return starts[keep][pick], have[first[pick] + nth], vels[keep][pick], gates[keep][pick]
+    return (starts[keep][pick], have[first[pick] + nth], vels[keep][pick], gates[keep][pick],
+            None if cc is None else cc[keep][pick], None if scale is None else scale[keep][pick])
 
 
 def spectra(rec):

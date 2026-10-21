@@ -175,6 +175,32 @@ def voice_events(sh, ppq, bpm):
     return {v: cc_events(sh, ppq, bpm, [dict(l, tones=t) for l, t in zip(played, per)]) for v, per in mine.items()}
 
 
+def note_cc(sh, ppq, bpm, starts, tracks=None):
+    """What each note's channel holds where it starts (ticks; tracks = the voices with own channel per note), for
+    the live keys' quick sound: (rows of (Cutoff, Pan, pitch bend) MIDI values, gains from Channel volume x
+    Expression along the General MIDI curve, 1 at the players' start values), or (None, None) without CC lines."""
+    hz = sh.get("hz")
+    if not isinstance(hz, dict) or not has_cc(hz):
+        return None, None
+    own = own_channels(hz) and tracks is not None
+    lists = voice_events(sh, ppq, bpm) if own else {None: cc_events(sh, ppq, bpm)}
+    starts = np.asarray(starts, np.int64)
+    names = ("cc_cutoff", "cc_pan", "cc_wheel", "cc_volume", "cc_expression")
+    vals = {name: np.full(len(starts), CC_START[name], np.int64) for name in names}
+    number = {n: name for name, n in CC_NUMBER.items()}
+    for v, events in lists.items():
+        at = np.ones(len(starts), bool) if v is None else np.asarray(tracks) == v
+        for name in names:
+            got = [(t, a | b << 7) if s == BEND else (t, b) for t, s, a, b in events
+                   if (name == "cc_wheel") == (s == BEND) and (s == BEND or number.get(a) == name)]
+            if got:
+                ticks, values = np.array(got, np.int64).T
+                i = np.searchsorted(ticks, starts[at], "right") - 1
+                vals[name][at] = np.where(i >= 0, values[np.maximum(i, 0)], CC_START[name])
+    gain = (vals["cc_volume"] / CC_START["cc_volume"]) ** 2 * (vals["cc_expression"] / CC_START["cc_expression"]) ** 2
+    return np.stack([vals["cc_cutoff"], vals["cc_pan"], vals["cc_wheel"]], axis=1), gain
+
+
 def slot_events(shapes, rendered, ppq, bpm, only=None, voice_slots=None):
     """{slot: [(tick, status, data 1, data 2)]}: every Hz bass's CC messages on each slot (= channel, track) its
     notes are on in rendered ((start, end, pitch, velocity, slot, owner) rows, owner = the shape's number). only =

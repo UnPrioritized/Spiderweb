@@ -28,7 +28,8 @@ from files.quicksound import Mixer, QuickSound
 from files.synth import RATE, Player, SynthError
 from notes.custom import BOX_STROKE, box_frame, custom_settings
 from notes.engine import shape_notes_tracks
-from notes.hzbass import EXTRAS, MIN_LEN, key_range, sound_span
+from notes.hz_cc import note_cc
+from notes.hzbass import EXTRAS, MIN_LEN, WHEEL_KEYS, key_range, sound_span
 from window import look
 
 LEAD = 0.05  # seconds from a press / let-go to its sound (time for its notes to be made)
@@ -317,20 +318,25 @@ class LiveKeys:
 
     def _make(self, sh, ppq, bpm, gen, p0, cut, qs):
         try:
-            notes, _ = shape_notes_tracks(sh, ppq, 128)
+            notes, tracks = shape_notes_tracks(sh, ppq, 128)
             notes = np.asarray(notes)[:, :4] if len(notes) else np.zeros((0, 4))
-            notes = notes[notes[:, 2] <= 127]
+            heard = notes[:, 2] <= 127
+            notes = notes[heard]
+            cc, scale = note_cc(sh, ppq, bpm, notes[:, 0], None if tracks is None else np.asarray(tracks)[heard])
             to_frames = RATE * 60.0 / (ppq * bpm)
             starts = p0 + np.rint(notes[:, 0] * to_frames).astype(np.int64)
             gates = np.maximum(1, np.rint((notes[:, 1] - notes[:, 0]) * to_frames)).astype(np.int64)
             order = np.argsort(starts, kind="stable")
             starts, gates, keys, vels = starts[order], gates[order], notes[order, 2], notes[order, 3].astype(np.int64)
+            if cc is not None:  # (the CC lines: each note as its channel is where it starts)
+                cc, scale = cc[order], scale[order]
             if qs.measuring is not None:
                 qs.measuring.join()
             if not qs.ready():
                 return self.given_up(gen)
             sig = json.dumps([{k: v for k, v in sh["hz"].items() if k != "tones"}, key_range(sh)], sort_keys=True)
-            laid, band = qs.plan_rough(starts, keys, vels, gates, max(self.band, self.bands.get(sig, 1)))
+            laid, band = qs.plan_rough(starts, keys, vels, gates, max(self.band, self.bands.get(sig, 1)), cc, scale,
+                                       WHEEL_KEYS)
             # (chords: the keys of a wave together)
             starts = np.array([s for s, _, _ in laid], np.int64)
             recs = [c for _, c, _ in laid]
