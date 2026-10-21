@@ -41,6 +41,7 @@ SCALES = ("lin", "exp")  # a part's BPM change: linear (default, user) / exponen
 EVERY = 24  # ticks between the tempo changes of a curved part (user: like Domino's default; 1 = every tick)
 FAR = 1e7  # beats: past this a point is left out (as shapes' points, engine.BEATS_FAR)
 SAFE_REACH = 8192  # the farthest a Domino-safe value is from any value (measured: 5212 at the slowest tempos)
+SLOWEST = 16_777_211  # the slowest Domino-safe tempo (us per beat; a file holds up to 0xFFFFFF)
 
 
 def empty():
@@ -215,12 +216,13 @@ def stretches(tempo, base):
         hand, hand_end = catch_get(c, 3), catch_get(c, 4)
         end = catch_end(tempo, k)
         start, read = prev, None
-        if end is not None:
-            read = end  # (user: the yellow area counts everything in it, at the tempo the line comes back to)
-        if end is not None and hand is not None:
-            start = max(prev, min(hand, b))
+        if end is not None:  # (user: the yellow area counts everything in it, at the tempo the line comes back to:
+            # the next point at or after the end, also when it ends at another catch-up line or by hand mid-stop)
+            read = min([x for x in pb if x >= end - 1e-12] or [end])
+        if end is not None and hand is not None and hand < b:
+            start = max(prev, hand)
         elif end is not None:
-            on = float(drawn_bpm(tempo, base, [end])[0])
+            on = float(drawn_bpm(tempo, base, [read])[0])
             cands = [i for i, x in enumerate(pb) if prev <= x < b]
             if cands:
                 start = pb[cands[0]]
@@ -230,7 +232,8 @@ def stretches(tempo, base):
                     leaves = pts[i][2] != "hold" and i + 1 < len(pts) and pts[i + 1][1] != pts[i][1]
                     start = pb[i] if leaves else (pb[cands[n + 1]] if n + 1 < len(cands) else b)
                     break
-        out.append({"from": start, "read": read, "manual": hand is not None, "manual_end": hand_end is not None,
+        out.append({"from": start, "read": read, "manual": hand is not None and hand < b,
+                    "manual_end": hand_end is not None,
                     "line": b, "end": end, "shape": shape, "text": text})
         if end is not None:
             prev = end
@@ -286,6 +289,18 @@ def _solve_push(shape, text, beats, seconds, base, n=512):
         else:
             hi = mid
     return (lo + hi) / 2
+
+
+def beat_tick(b, ppq):
+    """The tick a beat starts on in the file: the smallest tick t with t / ppq >= b, the rule the drawn line's
+    points use (_first_ticks), so a catch-up ending on a point ends where the point's tempo starts."""
+    return _first_ticks([b], ppq)[0]
+
+
+def base_us(base):
+    """The project BPM's microseconds per beat with a tempo line: the nearest Domino-safe value (user's rule: every
+    value written survives a Domino save), at most a microsecond a beat off."""
+    return int(nearest_safe([60_000_000 / base])[0])
 
 
 def _first_ticks(pb, ppq):
@@ -379,31 +394,53 @@ def catch_plan(tempo, base, st, ppq, real=None):
     after the line to end on}. The whole stretch takes as long as at st["base_u"] (the tempo heard just before
     it; the project's BPM when not given). real(a, b) = the time ticks a..b really take (Keep timing parts at
     their heard tempo); the drawn line when not given."""
-    out = {"ok": False, "push": None, "bpm": None, "target": None, "latest": None, "empty": st["end"] is None}
+    out = {"ok": False, "push": None, "bpm": None, "target": None, "latest": None, "empty": st["end"] is None,
+           "fit": None}
     if st["end"] is None:
         return out
-    start_u = round(60_000_000 / base)
+    start_u = base_us(base)
     base_u = st.get("base_u") or start_u
     if real is None:
         def real(a, b):
             return _segments(tempo, base, start_u, ppq, a, b)
-    s0, ln, e = (int(round(st[k] * ppq)) for k in ("from", "line", "end"))
-    n = e - ln
-    if n <= 0:
+    s0, ln, e = (beat_tick(st[k], ppq) for k in ("from", "line", "end"))
+    if e - ln <= 0:
         return out
     total = (e - s0) * base_u
-    target = total - _us_sum(real(s0, ln))
-    latest = _latest_tick(real(s0, e), total, e)
-    out["latest"] = None if latest is None else latest / ppq
-    push = None
     bpm = 60_000_000 / base_u
-    if n <= target <= n * 0xFFFFFF:
+    every = tempo.get("every", EVERY)
+
+    def attempt(line):
+        """(push, ticks' values) with the catch-up starting at tick line; None when it can't be written."""
+        n, target = e - line, total - _us_sum(real(s0, line))
+        if not n <= target <= n * SLOWEST:
+            return None
         push = _solve_push(st["shape"], st["text"], n / ppq, target / ppq / 1e6, bpm)
-    if push is None:
+        if push is None:
+            return None
+        t = (np.arange(n) + 0.5) / n
+        ideal = 6e7 / np.clip(bpm * 2 ** (push * catch_weight(st["shape"], st["text"], t)), MIN_BPM, MAX_BPM)
+        fit = _fit_blocks(ideal, target, every)  # (the file's own values: the pane says OK only when it works)
+        return None if fit is None else (push, fit, target)
+
+    got = attempt(ln)
+    if got is None:
+        latest = _latest_tick(real(s0, e), total, e)  # (fastest possible: right for a flat catch-up)
+        if latest is not None and latest > s0 and st["shape"] != "flat":  # (others: the last line spot that works)
+            lo, hi = s0, min(latest, e - 1)
+            if attempt(lo) is None:
+                latest = None
+            else:
+                while hi - lo > 1:
+                    mid = (lo + hi) // 2
+                    lo, hi = (mid, hi) if attempt(mid) is not None else (lo, mid)
+                latest = lo
+        out["latest"] = None if latest is None else latest / ppq
         return out
+    push, fit, target = got
     w = catch_weight(st["shape"], st["text"], np.linspace(0, 1, 257))
     top = bpm * 2 ** float((push * w).max() if push > 0 else (push * w).min())
-    out.update(ok=True, push=push, bpm=clamp_bpm(top), target=target)
+    out.update(ok=True, push=push, bpm=clamp_bpm(top), target=target, fit=fit)
     return out
 
 
@@ -456,22 +493,25 @@ def layout(tempo, base, ppq):
     if key in _layouts:
         return _layouts[key]
     tempo = json.loads(key[0])  # (its own copy: what's remembered never changes with the line)
-    start_u = round(60_000_000 / base)
+    start_u = base_us(base)
     sts = stretches(tempo, base)
     kps = keep_parts(tempo)
-    first = _first_ticks([p[0] for p in tempo["points"]], ppq)
     spans = []  # (a, b or None, heard us) in the order they're found
     keeps_at = []
-    for i, b, end in kps:  # (on a point: its part's first tick, as the drawn line changes there)
-        a = first[i] if b == tempo["points"][i][0] else int(round(b * ppq))
-        e = None
-        if end is not None:
-            e = int(round(end * ppq))
-            if i + 1 < len(first) and abs(end - tempo["points"][i + 1][0]) < 1e-12:
-                e = first[i + 1]
+    for i, b, end in kps:  # (ticks by the points' rule: a part starts on the first tick at or after its beat)
+        a = beat_tick(b, ppq)
+        e = None if end is None else beat_tick(end, ppq)
         if e is None or e > a:
             keeps_at.append((i, a, e))
-    todo = sorted([(int(round(st["from"] * ppq)), 0, n) for n, st in enumerate(sts)]
+
+    def in_keep(t):
+        return any(a <= t and (e is None or t < e) for _, a, e in keeps_at)
+
+    # a catch-up inside a Keep timing part paid back to the tempo heard in it (the drawn line there is only for
+    # looks): worked out once the Keep timing pieces before its line are known
+    inner = {n for n, st in enumerate(sts) if st["read"] is not None and in_keep(beat_tick(st["line"], ppq) - 1)
+             and in_keep(beat_tick(st["read"], ppq))}
+    todo = sorted([(beat_tick(st["line"] if n in inner else st["from"], ppq), 0, n) for n, st in enumerate(sts)]
                   + [(a, 1, n) for n, (_, a, _) in enumerate(keeps_at)])
 
     def heard(t):
@@ -486,12 +526,12 @@ def layout(tempo, base, ppq):
     bases, keep_u = [start_u] * len(sts), [start_u] * len(keeps_at)
     for t0, kind, n in todo:
         u = heard(t0 - 1)
-        if kind == 0 and sts[n]["read"] is not None:  # (the tempo at a point / where the area was dragged to)
-            u = heard(_first_ticks([sts[n]["read"]], ppq)[0])
+        if kind == 0 and sts[n]["read"] is not None and n not in inner:  # (the tempo the line comes back to)
+            u = heard(beat_tick(sts[n]["read"], ppq))
         if kind == 0:
             bases[n] = u
             if sts[n]["end"] is not None:
-                spans.append((t0, int(round(sts[n]["end"] * ppq)), u))
+                spans.append((beat_tick(sts[n]["from"], ppq), beat_tick(sts[n]["end"], ppq), u))
         else:
             keep_u[n] = u
             spans.append((t0, keeps_at[n][2], u))
@@ -527,7 +567,7 @@ def step_edges(tempo, worked, ppq):
     first = _first_ticks([p[0] for p in pts], ppq)
     out = [(first[i], first[i + 1]) for i in range(len(pts) - 1)
            if pts[i][2] != "hold" and pts[i][1] != pts[i + 1][1] and first[i + 1] > first[i]]
-    return out + [(int(round(st["line"] * ppq)), int(round(st["end"] * ppq))) for st, plan in worked
+    return out + [(beat_tick(st["line"], ppq), beat_tick(st["end"], ppq)) for st, plan in worked
                   if plan["ok"] and st["shape"] != "flat"]
 
 
@@ -628,11 +668,10 @@ def _fit_exact(ideal, target):
         body[take] = nxt[take]
     out[:len(body)] = body
     rest = target - int(out[:max(0, n - 2)].sum())
-    if n == 1:
+    if n == 1:  # (only a Domino-safe value: else it can't, user's rule)
         out[0] = rest
-        return out if 1 <= rest <= 0xFFFFFF else None
-    # the last two: a Domino-safe pair adding up to what's left (exact first; a value that isn't safe only if no
-    # safe pair is near)
+        return out if 1 <= rest <= 0xFFFFFF and domino_safe([rest])[0] else None
+    # the last two: a Domino-safe pair adding up to what's left; none near = it can't
     half = rest / 2
     a0 = int(round(half))
     for k in range(SAFE_REACH):
@@ -641,12 +680,7 @@ def _fit_exact(ideal, target):
             if 1 <= a <= 0xFFFFFF and 1 <= b <= 0xFFFFFF and domino_safe([a, b]).all():
                 out[n - 2], out[n - 1] = a, b
                 return out
-    a = max(1, min(0xFFFFFF, a0))
-    b = rest - a
-    if not 1 <= b <= 0xFFFFFF:
-        return None
-    out[n - 2], out[n - 1] = a, b
-    return out
+    return None
 
 
 def _runs(segs):
@@ -669,7 +703,10 @@ def _fit_blocks(ideal, target, every):
     block takes the Domino-safe value nearest what keeps the sum on track (what's off carried on to the next), the
     last block lands exactly with one or two values (_flat_pair). A flat catch-up: two values at most anyway."""
     n = len(ideal)
-    if every <= 1 or ideal.max() - ideal.min() < 1 or n <= every:
+    if n <= every and every > 1:  # (one block, drawn as one step: one or two values like a flat catch-up)
+        got = _flat_pair(n, target) if n <= target <= n * 0xFFFFFF else None
+        return got if got is not None else _fit_exact(ideal, target)
+    if every <= 1 or ideal.max() - ideal.min() < 1:
         return _fit_exact(ideal, target)
     if not n <= target <= n * 0xFFFFFF:
         return None
@@ -746,26 +783,18 @@ def file_segments(tempo, base, ppq, end=0):
     """The file's tempo before Keep timing moves anything, as [(a, b, us)] from tick 0 to at least end, and the
     beats of catch-up lines that can't work. Each stretch with a working catch-up adds up exactly to the time of
     the tempo heard before it; one that can't work leaves its stretch as drawn (heard) and is listed."""
-    base_u = round(60_000_000 / base)
+    base_u = base_us(base)
     pts = tempo["points"]
     last = max([p[0] for p in pts] + [x for c in tempo["catch"] for x in (c[0], catch_get(c, 4)) if x is not None])
-    end = max(end, int(round(last * ppq)) + 1)
+    end = max(end, beat_tick(last, ppq) + 1)
     segs = _segments(tempo, base, base_u, ppq, 0, end)
     bad = []
     for st, plan in plans(tempo, base, ppq):
         if not plan["ok"]:
             bad.append(st["line"])
             continue
-        ln, e = int(round(st["line"] * ppq)), int(round(st["end"] * ppq))
-        n = e - ln
-        t = (np.arange(n) + 0.5) / n
-        ideal = 6e7 / np.clip(st["base"] * 2 ** (plan["push"] * catch_weight(st["shape"], st["text"], t)),
-                              MIN_BPM, MAX_BPM)
-        got = _fit_blocks(ideal, plan["target"], tempo.get("every", EVERY))
-        if got is None:
-            bad.append(st["line"])
-            continue
-        segs = _put(segs, ln, e, got)  # (the drawn pieces cut where the catch-up goes)
+        # (the drawn pieces cut where the catch-up goes; its values worked out with the pane's check)
+        segs = _put(segs, beat_tick(st["line"], ppq), beat_tick(st["end"], ppq), plan["fit"])
     return segs, bad
 
 

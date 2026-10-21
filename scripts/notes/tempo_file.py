@@ -17,8 +17,8 @@ really heard isn't the project's BPM (their tone is worked out from it)."""
 
 import numpy as np
 
-from notes.tempo import (EVERY, _fit_blocks, _fit_exact, _flat_pair, _put, _runs, file_segments, has_tempo,
-                         layout)
+from notes.tempo import (EVERY, _fit_blocks, _fit_exact, _flat_pair, _put, _runs, base_us, beat_tick, domino_safe,
+                         file_segments, has_tempo, layout)
 
 MAX_US = 0xFFFFFF  # the slowest tempo a file holds, in microseconds per beat
 PAIR_CACHE = 4096  # gaps up to this many ticks have their tempo pair remembered (black MIDI repeats the same gaps)
@@ -81,6 +81,13 @@ def signature(length, ppq):
     return None
 
 
+def _least(total):
+    """The fewest file ticks a gap of this time (ticks x us, array) can have: each tick at most MAX_US, and two
+    when one tick's value wouldn't be Domino-safe."""
+    least = np.maximum(1, -(-total // MAX_US))
+    return np.where((least == 1) & ~domino_safe(np.clip(total, 1, MAX_US)) & (total >= 2), 2, least)
+
+
 class _Pairs:
     """Gaps' tempos, remembered by (ticks, time): a long Keep timing part of spam has thousands of alike gaps."""
 
@@ -133,16 +140,19 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None):
     "dense": where notes in a Keep timing part are closer than one tick at its tempo (it stays faster there)}.
     ticks = every tick that must keep its time (note starts / ends, CC messages); starts = the note starts; hz =
     (starts, ends) of the Hz basses' notes. Spiderweb's own ticks, the project's PPQ."""
-    start_u = round(60_000_000 / base)
-    out = {"events": [(0, start_u)], "bad": [], "sigs": [(0, beats, 2)], "map": lambda t: np.asarray(t, np.int64),
-           "jumps": [], "hz": [], "dense": []}
+    out = {"events": [(0, round(60_000_000 / base))], "bad": [], "sigs": [(0, beats, 2)],
+           "map": lambda t: np.asarray(t, np.int64), "jumps": [], "hz": [], "dense": []}
     if not has_tempo(tempo):
         return out
+    start_u = base_us(base)
+    out["events"] = [(0, start_u)]
     ticks = np.asarray(ticks, np.int64).ravel()
     lay = layout(tempo, base, ppq)
     segs, out["bad"] = file_segments(tempo, base, ppq, int(ticks.max()) + 1 if len(ticks) else 0)
     end = segs[-1][1]
-    keeps = [(a, end if e is None else e, u) for _, a, e, u in lay["keeps"]]
+    last_tick = int(ticks.max()) if len(ticks) else 0
+    # a part on to the song's end stops at the last note (not a tick past it: no gap there to count)
+    keeps = [(a, last_tick if e is None else e, u) for _, a, e, u in lay["keeps"]]
     keeps = [(a, e, u) for a, e, u in keeps if e > a]
     every = tempo.get("every", EVERY)
     bar = beats * ppq
@@ -159,10 +169,15 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None):
         sums = np.concatenate([[0], np.cumsum(drawn, dtype=np.float64)])
         d = np.diff(n)
         total = d * u
-        k = np.rint(total / ((sums[n[1:] - a] - sums[n[:-1] - a]) / d)).astype(np.int64)
-        if (k < 1).any() and not out["dense"]:  # (notes under a tick apart at that tempo)
-            out["dense"] = [int(n[:-1][k < 1][0]) / ppq]
-        k = np.clip(k, np.maximum(1, -(-total // MAX_US)), total)
+        exact = total / ((sums[n[1:] - a] - sums[n[:-1] - a]) / d)  # (file ticks each gap needs at the drawn tempo)
+        real = np.isin(n, ticks)
+        close = real[:-1] & real[1:] & (exact < 1)  # (two notes under a tick apart at that tempo)
+        if close.any() and not out["dense"]:
+            out["dense"] = [int(n[:-1][close][0]) / ppq]
+        # rounded on a running total, so the part keeps the drawn tempo on average (gap by gap, regular spam
+        # rounded the same way every time: 60 BPM came out 48)
+        k = np.diff(np.concatenate([[0], np.rint(np.cumsum(exact))])).astype(np.int64)
+        k = np.clip(k, _least(total), total)
         gaps.append([n, total, k, drawn])
     if fit_bars and gaps:
         lengths = bar_lengths(ppq)
@@ -183,8 +198,16 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None):
             if curved:  # (a long gap over a curve: steps every "every" ticks, as drawn)
                 ideal = drawn[n0 - a + (np.arange(kj) * (n1 - n0)) // kj].astype(np.float64)
                 got = _fit_blocks(ideal, tj, every)
-            if got is None:
-                got = pairs.get(kj, tj)
+            if got is None:  # (no Domino-safe values for that many ticks: a tick more or less, rare)
+                for kk in [kj] + [kj + s * w for s in range(1, 9) for w in (1, -1)]:
+                    if int(_least(np.array([tj]))[0]) <= kk <= tj:
+                        got = pairs.get(kk, tj)
+                        if got is not None:
+                            kj = k[j] = kk
+                            break
+                if got is None:  # (nothing near: the nearest values, not Domino-safe)
+                    got = np.full(kj, tj // kj, np.int64)
+                    got[:tj - int(got.sum())] += 1
                 if last is not None and got[0] != last and got[-1] == last:
                     got = got[::-1]  # (the run goes on from the gap before: one change fewer)
             parts.append(got)
@@ -218,7 +241,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None):
     for st, plan in lay["worked"]:  # (a note in a jump plays off time where the time so far isn't the heard time)
         if not plan["ok"]:
             continue
-        s0, e = int(round(st["from"] * ppq)), int(round(st["end"] * ppq))
+        s0, e = beat_tick(st["from"], ppq), beat_tick(st["end"], ppq)
         on = starts[(starts > s0) & (starts < e)]
         if not len(on):
             continue
@@ -254,9 +277,13 @@ def heard_tempo(tempo, base, ppq, end=0):
     return _runs(segs)
 
 
+NUDGE = 0.05  # bar compensation: a gap's ticks change by at most this share (or one tick), so its tempo a hair
+
+
 def _fit_bar_lines(gaps, keeps, bar, lengths):
-    """Bar compensation: in each bar a Keep timing part changed, its last gap there gets a few ticks more / fewer
-    so the bar's length fits a time signature (the gap's time stays: only its tempo changes a hair)."""
+    """Bar compensation: in each bar a Keep timing part changed, the longest gaps there get a tick more / fewer
+    each so the bar's length fits a time signature (the gaps' time stays: only their tempo changes a hair). A bar
+    that can't be fitted gently stays as it is (no spikes: user's "a hair")."""
     owed = {}  # bar -> (ticks the bar has, [(part, gap)] in it)
     for p, ((a, e, _), (n, total, k, _)) in enumerate(zip(keeps, gaps)):
         for j in range(len(k)):
@@ -266,26 +293,54 @@ def _fit_bar_lines(gaps, keeps, bar, lengths):
     for m, (have, where) in owed.items():
         if not len(where):
             continue
-        p, j = where[-1]
-        total, k = gaps[p][1], gaps[p][2]
-        least, most = max(1, -(-int(total[j]) // MAX_US)), int(total[j])
+        ks = np.array([int(gaps[p][2][j]) for p, j in where], np.int64)
+        tots = np.array([int(gaps[p][1][j]) for p, j in where], np.int64)
+        room = np.maximum(1, (ks * NUDGE).astype(np.int64))  # (ticks each gap may give / take)
+        up, down = np.minimum(room, tots - ks), np.minimum(room, ks - _least(tots))
+        order = np.argsort(-ks, kind="stable")  # (longest gaps first)
         i = int(np.searchsorted(lengths, have))
         tries = sorted(lengths[max(0, i - 3):i + 3].tolist(), key=lambda x: abs(x - have))
         for want in tries:
-            kj = int(k[j]) + want - have
-            if least <= kj <= most:
-                k[j] = kj
+            delta = want - have
+            if delta == 0:
                 break
+            cap = (up if delta > 0 else down)[order]
+            if cap.sum() < abs(delta):
+                continue
+            share = np.zeros(len(ks), np.int64)
+            left = abs(delta)
+            while left:  # (one tick at a time round the longest gaps, up to each one's room)
+                for o, c in zip(order.tolist(), cap.tolist()):
+                    if left and abs(share[o]) < c:
+                        share[o] += 1 if delta > 0 else -1
+                        left -= 1
+            for (p, j), s in zip(where, share.tolist()):
+                gaps[p][2][j] += s
+            break
 
 
 def _signatures(keeps, gaps, bar, beats, ppq, to_file):
     """[(file tick, top, bottom power)]: a time signature wherever the bar length changes, up to the bar after the
     last Keep timing part (then the project's own)."""
     last = max(e for _, e, _ in keeps)
+    longest = int(max(bar_lengths(ppq)))
     out, prev = [], None
     for m in range(0, last // bar + 2):
         f0, f1 = (int(x) for x in to_file(np.array([m * bar, (m + 1) * bar])))
-        sig = signature(f1 - f0, ppq) or prev or (beats, 2)
+        sig = signature(f1 - f0, ppq)
+        if sig is None:  # (too long for one signature: as many of the longest as fit, then the rest)
+            at, rest = f0, f1 - f0
+            while rest > longest and signature(rest, ppq) is None:
+                s = signature(longest, ppq)
+                if s != prev:
+                    out.append((at, *s))
+                    prev = s
+                at, rest = at + longest, rest - longest
+            sig = signature(rest, ppq)
+            if sig is None:  # (the rest fits none: the next bar writes its own again, so its line is right)
+                prev = None
+                continue
+            f0 = at
         if sig != prev:
             out.append((f0, *sig))
             prev = sig
