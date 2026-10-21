@@ -34,7 +34,9 @@ from files.mathexpr import formula
 
 MIN_BPM = 60_000_000 / 0xFFFFFF  # ~3.58: the slowest a MIDI file holds (24-bit microseconds per beat)
 MAX_BPM = 60_000_000.0  # 1 microsecond per beat (faster = 0, which breaks the file; Domino writes that past it)
-CURVES = ("hold", "line", "s", "out", "in", "formula")
+CURVES = ("hold", "line", "s", "formula")
+BEND = [0.5, 0.5]  # a line / S-curve part's bend (its curve's control point, 0..1 each way): straight
+OLD_CURVES = {"out": ("line", [0.5, 1.0]), "in": ("line", [0.5, 0.0])}  # (ease out / in before the bend handle)
 SHAPES = ("flat", "ease", "ramp", "formula")
 FORMULA = "x^3"  # a new formula part's / catch-up's starting formula
 SCALES = ("lin", "exp")  # a part's BPM change: linear (default, user) / exponential (straight on the doubling scale)
@@ -68,10 +70,17 @@ def clean_tempo(data):
             continue
         try:
             b, v = float(p[0]), float(p[1])
-            kind = p[2] if len(p) > 2 and isinstance(p[2], str) and p[2] in CURVES else "hold"
+            kind = p[2] if len(p) > 2 and isinstance(p[2], str) else "hold"
+            bend = list(BEND) if kind != "s" else [0.5, 0.0]  # (an S-curve from before: much like it was)
+            kind, bend = OLD_CURVES.get(kind, (kind, bend))
+            kind = kind if kind in CURVES else "hold"
             text = p[3] if len(p) > 3 and isinstance(p[3], str) else ""
             scale = p[4] if len(p) > 4 and isinstance(p[4], str) and p[4] in SCALES else "lin"
             keep = len(p) > 5 and p[5] is True
+            got = p[6] if len(p) > 6 and isinstance(p[6], list) and len(p[6]) == 2 else None
+            if got and all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+                           for x in got):
+                bend = [min(1.0, max(0.0, float(x))) for x in got]
         except (TypeError, ValueError, IndexError, OverflowError):
             continue
         if not (math.isfinite(b) and math.isfinite(v)) or not 0 <= b <= FAR or v <= 0:
@@ -80,7 +89,7 @@ def clean_tempo(data):
         if key in seen:
             continue
         seen.add(key)
-        out["points"].append([b, clamp_bpm(v), kind, text[:200], scale, keep])
+        out["points"].append([b, clamp_bpm(v), kind, text[:200], scale, keep, bend])
     out["points"].sort(key=lambda p: p[0])
     every = data.get("every", EVERY)
     out["every"] = every if isinstance(every, int) and not isinstance(every, bool) and 1 <= every <= 65535 else EVERY
@@ -146,17 +155,34 @@ def formula_fn(text):
     return _formulas[text]
 
 
-def curve(kind, text, t):
-    """How far along (0 at the part's start point, 1 at its end) a part of this curve is at t (0..1, array)."""
+def bend_of(p):
+    """A point's part bend [x, y] (BEND = straight)."""
+    return p[6] if len(p) > 6 and p[6] else BEND
+
+
+def bent(t, bend):
+    """A curve from (0, 0) to (1, 1) bent through its control point bend (0..1 each way, so it never goes past
+    either end: user, like the velocity pane's curve), read at times t."""
+    cx, cy = bend
+    a = 1 - 2 * cx
+    if abs(a) < 1e-9:
+        s = t
+    else:  # (x(s) = a s^2 + 2 cx s: the place along the curve at each time)
+        s = (-2 * cx + np.sqrt(np.maximum(4 * cx * cx + 4 * a * t, 0))) / (2 * a)
+    s = np.clip(s, 0, 1)
+    return 2 * s * (1 - s) * cy + s * s
+
+
+def curve(kind, text, t, bend=None):
+    """How far along (0 at the part's start point, 1 at its end) a part of this curve is at t (0..1, array). Line:
+    bent by its handle (bend); S-curve: that bend on the first half, mirrored on the second."""
     t = np.asarray(t, float)
+    bend = bend or BEND
     if kind == "line":
-        return t
+        return t if bend == BEND else bent(t, bend)
     if kind == "s":
-        return t * t * (3 - 2 * t)
-    if kind == "out":
-        return 1 - (1 - t) ** 2
-    if kind == "in":
-        return t * t
+        lo = t < 0.5
+        return np.where(lo, bent(np.minimum(2 * t, 1), bend) / 2, 1 - bent(np.minimum(2 * (1 - t), 1), bend) / 2)
     if kind == "formula":
         return _apply(formula_fn(text), t)
     return np.zeros_like(t)  # hold: the start point's BPM, then a jump
@@ -272,7 +298,7 @@ def drawn_bpm(tempo, base, beats):
             continue
         on = idx == i
         if on.any():
-            c = curve(kind, pts[i][3], (beats[on] - pb[i]) / (pb[i + 1] - pb[i]))
+            c = curve(kind, pts[i][3], (beats[on] - pb[i]) / (pb[i + 1] - pb[i]), bend_of(pts[i]))
             if pts[i][4] == "exp":  # (the same ratio every beat: straight on the pane's doubling scale)
                 out[on] = 2 ** (lv[i] + (lv[i + 1] - lv[i]) * c)
             else:  # linear: the same BPM added every beat

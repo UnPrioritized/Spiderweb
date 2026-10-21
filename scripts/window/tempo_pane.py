@@ -13,6 +13,7 @@ can't). The wheel over the numbers on the left zooms up / down (Shift scrolls), 
 wheel works as on the piano roll.
 """
 
+import copy
 import json
 import math
 import tkinter as tk
@@ -22,7 +23,8 @@ import numpy as np
 
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
-from notes.tempo import (CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, clamp_bpm, curve, formula_fn,
+from notes.tempo import (BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, bend_of, clamp_bpm, curve,
+                         formula_fn,
                          catch_get, catch_set, keeps, layout,
                          plans, shown_bpm, step_edges)
 from roll.zoombar import add_zoom_bars
@@ -35,7 +37,15 @@ BPM_SNAPS = (0, 0.1, 1, 5, 10)  # the BPM snap dropdown's steps (0 = off)
 NICE = (0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000,
         10000000)  # numbers filled in on zoom
 LABEL_GAP = 15  # px between two numbers on the left (times the window's scale)
-DRAWS = {"line": "line", "curve": "s", "formula": "formula"}  # pencil kind -> the curve the drawn part gets
+DRAWS = {"line": "line", "formula": "formula"}  # pencil kind -> the curve the drawn part gets (bent by its handle)
+
+
+def part_kind(p, scale):
+    """What a new point's part takes from the part it was put in (p; None: before the first point): curve,
+    formula, BPM change, Keep timing, bend (its own copy)."""
+    if p is None:
+        return ["hold", "", scale, False, list(BEND)]
+    return [p[2], p[3], p[4], keeps(p), list(bend_of(p))]
 
 
 def bpm_text(v):
@@ -54,8 +64,8 @@ class TempoBox(ttk.Frame):
         ttk.Label(bar, text=tr("tempo.tempo")).pack(side="left", padx=(2, 8))
         self.tool = tk.StringVar(value="point")  # select / point / line / curve / formula
         self.tool_vars = {}
-        for key, label in (("select", tr("app.select")), (None, None), ("line", tr("app.linear")),
-                           ("curve", tr("app.curve")), ("formula", tr("app.formula"))):
+        for key, label in (("select", tr("app.select")), (None, None), ("line", tr("tempo.line_tool")),
+                           ("formula", tr("app.formula"))):
             if key is None:
                 ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=5)
                 continue
@@ -643,6 +653,60 @@ class TempoPane(tk.Canvas):
                 return i
         return None
 
+    # ------------------------------------------------------------ a line part's bend handle (user 2026-10-21)
+
+    def handle_pos(self, i):
+        """(beat, BPM) of part i's round bend handle (the curve's middle; an S-curve: its first half's), None when
+        it has none (held / formula / the last part / both ends one BPM)."""
+        pts = self.app.tempo["points"]
+        if i is None or i + 1 >= len(pts) or pts[i][2] not in ("line", "s") or pts[i][1] == pts[i + 1][1]:
+            return None
+        p, q = pts[i], pts[i + 1]
+        cx, cy = bend_of(p)
+        x, y = (2 * cx + 1) / 4, (2 * cy + 1) / 4
+        if p[2] == "s":
+            x, y = x / 2, y / 2
+        return p[0] + (q[0] - p[0]) * x, self.along_bpm(p, q, y)
+
+    def along_bpm(self, p, q, f):
+        """The BPM f of the way from p's to q's (on its part's BPM change: linear / doubling)."""
+        if p[4] == "exp":
+            return 2 ** (math.log2(p[1]) + (math.log2(q[1]) - math.log2(p[1])) * f)
+        return p[1] + (q[1] - p[1]) * f
+
+    def handle_at(self, x, y):
+        """The picked part's index when the mouse is on its bend handle."""
+        pick = self.picked()
+        if not pick or pick[0] != "part":
+            return None
+        at = self.handle_pos(pick[1])
+        if at is None:
+            return None
+        hx, hy = self.app.roll.t2x(at[0]), float(self.b2y(at[1]))
+        return pick[1] if math.hypot(hx - x, hy - y) <= 7 * self.scale else None
+
+    def bend_to(self, i, e):
+        """The handle dragged to the mouse: the part's bend, kept between its two ends (never past A or B)."""
+        pts = self.app.tempo["points"]
+        p, q = pts[i], pts[i + 1]
+        fx = (self.app.roll.x2t(e.x) - p[0]) / max(1e-12, q[0] - p[0])
+        v = self.y2b(e.y)
+        if p[4] == "exp":
+            fy = (math.log2(v) - math.log2(p[1])) / (math.log2(q[1]) - math.log2(p[1]))
+        else:
+            fy = (v - p[1]) / (q[1] - p[1])
+        if p[2] == "s":
+            fx, fy = fx * 2, fy * 2
+        p[6:] = [[min(1.0, max(0.0, 2 * fx - 0.5)), min(1.0, max(0.0, 2 * fy - 0.5))]]
+
+    def toggle_s(self, i):
+        """Right-click on the handle: the part an S-curve (the same bend, mirrored on its second half) / back to a
+        line (one undo step)."""
+        p = self.app.tempo["points"][i]
+        self.app.push_undo(name=tr("tempo.step_s"))
+        p[2] = "line" if p[2] == "s" else "s"
+        self.app.tempo_changed()
+
     def snap_beat(self, b, e):
         if e.state & SHIFT:
             return max(0.0, b)
@@ -683,6 +747,10 @@ class TempoPane(tk.Canvas):
             return
         i, j = self.point_at(e.x, e.y), self.catch_at(e.x)
         item = tempo["points"][i] if i is not None else tempo["catch"][j] if j is not None else None
+        n = self.handle_at(e.x, e.y) if item is None else None
+        if n is not None:  # the picked part's bend handle
+            self.drag = {"kind": "bend", "part": n, "x": e.x, "y": e.y, "pushed": False}
+            return
         if item is not None:
             if tool == "select" and e.state & CTRL:
                 self.band = None
@@ -738,7 +806,7 @@ class TempoPane(tk.Canvas):
         d["pushed"] = True
         tempo, pairs = self.app.tempo, []
         for s, b, v in d["orig"]:
-            c = list(s)
+            c = copy.deepcopy(s)
             tempo["points" if v is not None else "catch"].append(c)
             pairs.append((s, c))
         swap = {id(s): c for s, c in pairs}
@@ -781,6 +849,15 @@ class TempoPane(tk.Canvas):
             d["x1"] = e.x
             d["span"] = self.box_span(d, e)
             return self.request_redraw()
+        if d["kind"] == "bend":
+            if not d["pushed"]:
+                if abs(e.x - d["x"]) < 3 and abs(e.y - d["y"]) < 3:
+                    return
+                self.app.push_undo(name=tr("tempo.step_bend"))
+                d["pushed"] = True
+            self.bend_to(d["part"], e)
+            self.app.tempo_changed()
+            return self.show_position(e)
         if d["kind"] in ("start", "end"):  # a catch-up's yellow left edge / teal right edge
             if not d["pushed"]:
                 if abs(e.x - d["x"]) < 3:
@@ -881,7 +958,7 @@ class TempoPane(tk.Canvas):
                 self.placing = {"step": 2, "a": d["span"][0], "b": d["span"][1], "hover": None}
                 self.box.hint.config(text=tr("tempo.hint_catch2"))
             self.request_redraw()
-        elif d["kind"] in ("start", "end"):
+        elif d["kind"] in ("start", "end", "bend"):
             if d["pushed"]:
                 self.app.settle_history()
         elif d["kind"] == "move":
@@ -931,6 +1008,15 @@ class TempoPane(tk.Canvas):
         if roll.sx is None or self.view is None or e.x < roll.kb_w:
             return
         i = self.point_at(e.x, e.y)
+        n = self.handle_at(e.x, e.y) if i is None else None
+        if n is not None:  # (the bend handle: straight again)
+            self.drag = None
+            p = self.app.tempo["points"][n]
+            if bend_of(p) != BEND:
+                self.app.push_undo(name=tr("tempo.step_bend"))
+                p[6:] = [list(BEND)]
+                self.app.tempo_changed()
+            return
         if i is None:
             return self.on_press(e)
         self.drag = None
@@ -943,7 +1029,7 @@ class TempoPane(tk.Canvas):
             return None
         self.app.push_undo(name=tr("tempo.step_add"))
         at = sum(1 for p in pts if p[0] < b)
-        item = [float(b), clamp_bpm(v), *(pts[at - 1][2:6] if at > 0 else ("hold", "", self.box.draw_scale, False))]
+        item = [float(b), clamp_bpm(v), *part_kind(pts[at - 1] if at > 0 else None, self.box.draw_scale)]
         pts.insert(at, item)
         self.sel, self.part = [item], None
         self.app.tempo_changed()
@@ -961,12 +1047,13 @@ class TempoPane(tk.Canvas):
         self.app.push_undo(name=tr("tempo.step_draw"))
         before = [p for p in pts if p[0] <= b1 + 1e-9]
         # (the part after keeps its curve)
-        after_kind = before[-1][2:6] if before else ("hold", "", self.box.draw_scale, False)
+        after_kind = part_kind(before[-1] if before else None, self.box.draw_scale)
         kind = DRAWS[self.box.tool.get()]
         text = self.box.draw_formula if kind == "formula" else ""
         keep = [p for p in pts if p[0] < b0 - 1e-9 or p[0] > b1 + 1e-9]
         held = [p for p in pts if p[0] <= b0 + 1e-9]
-        first = [float(b0), clamp_bpm(v0), kind, text, self.box.draw_scale, bool(held) and keeps(held[-1])]
+        first = [float(b0), clamp_bpm(v0), kind, text, self.box.draw_scale, bool(held) and keeps(held[-1]),
+                 list(BEND)]
         last = [float(b1), clamp_bpm(v1), *after_kind]
         pts[:] = sorted(keep + [first, last], key=lambda p: p[0])
         self.sel, self.part = [], first
@@ -992,6 +1079,9 @@ class TempoPane(tk.Canvas):
             return self.cancel_placing()
         self.app.key_pane = self
         self.picked()
+        n = self.handle_at(e.x, e.y)
+        if n is not None:  # (the bend handle: an S-curve / a line again, user)
+            return self.toggle_s(n)
         tempo = self.app.tempo
         i, j = self.point_at(e.x, e.y), self.catch_at(e.x)
         item = tempo["points"][i] if i is not None else tempo["catch"][j] if j is not None else None
@@ -1066,7 +1156,7 @@ class TempoPane(tk.Canvas):
         lo, hi = span
         items = self.in_span(span) if self.band else list(self.sel)
         tempo = self.app.tempo
-        pts = [[p[0] - lo] + list(p[1:]) for p in tempo["points"] if any(p is it for it in items)]
+        pts = [[p[0] - lo] + copy.deepcopy(p[1:]) for p in tempo["points"] if any(p is it for it in items)]
         cs = []
         for c in tempo["catch"]:
             if any(c is it for it in items):
@@ -1104,7 +1194,7 @@ class TempoPane(tk.Canvas):
         lo, hi = at, at + clip["length"]
         one = 1.0 / max(1, self.app.ppq)
         self.app.push_undo(name=name)
-        new_p = [[max(0.0, p[0] + at)] + list(p[1:]) for p in clip["points"]]
+        new_p = [[max(0.0, p[0] + at)] + copy.deepcopy(p[1:]) for p in clip["points"]]
         new_c = []
         for c in clip["catch"]:
             item = [max(one, c[0] + at)] + list(c[1:3])
@@ -1157,7 +1247,7 @@ class TempoPane(tk.Canvas):
             want = "sb_v_double_arrow"
         elif self.placing:
             want = "sb_h_double_arrow"
-        elif self.point_at(e.x, e.y) is not None:
+        elif self.point_at(e.x, e.y) is not None or self.handle_at(e.x, e.y) is not None:
             want = "fleur"
         elif self.catch_at(e.x) is not None or self.start_at(e.x) is not None or self.end_at(e.x) is not None:
             want = "sb_h_double_arrow"
@@ -1446,6 +1536,11 @@ class TempoPane(tk.Canvas):
             edge = look.TEMPO_CATCH if b in ends else look.TEMPO_LINE
             self.create_oval(x - r, y - r, x + r, y + r, fill=look.TEMPO_PICKED if on else look.CHART_POINT,
                              outline=edge, width=lw + 1)
+        at = self.handle_pos(pick[1]) if pick and pick[0] == "part" else None
+        if at is not None:  # the picked line's bend handle: round, like the velocity pane's curve
+            x, y, r = roll.t2x(at[0]), float(self.b2y(at[1])), 5 * self.scale
+            self.create_oval(x - r, y - r, x + r, y + r, fill=look.CHART_POINT, outline=look.TEMPO_PICKED,
+                             width=lw + 1)
         # the numbers on the left
         self.create_rectangle(0, 0, kb, h, fill=look.RULER_BG, outline="")
         self.create_line(kb - 1, 0, kb - 1, h, fill=look.ROLL_EDGE)
