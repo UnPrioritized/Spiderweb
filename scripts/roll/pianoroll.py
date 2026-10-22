@@ -246,14 +246,18 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         """A Select box dragged past the piano roll's edge: the view goes a beat that way (3 keys up / down) at
         once and then every BOX_SCROLL_MS while the mouse stays out there. The box stays where it is in the song
         (left behind as the view moves) until the mouse moves again. The kept Select box being moved too (user):
-        it goes along with the view, what it selected with it."""
+        it goes along with the view, what it selected with it. A lasso being drawn / its point or handle held the
+        same (user 2026-10-22: only while the mouse is at or past the edge)."""
         self.box_timer = None
-        moving = bool(self.drag) and self.drag[0] == "move" and self.box_moving
-        if not self.drag or self.drag[0] != "box" and not moving or self.sx is None:
+        kind = self.drag[0] if self.drag else None
+        moving = kind == "move" and self.box_moving or kind in ("lasso_free", "lasso_poly", "lasso_point")
+        if kind != "box" and not moving or self.sx is None:
             return
         mx, my, state = self.box_mouse
-        dx = (mx > self.winfo_width()) - (mx < self.kb_w)
-        dy = 0 if (self.time_only if moving else self.box_ruler) else (my > self.winfo_height()) - (my < self.ruler_h)
+        at = int(kind.startswith("lasso"))  # (the lasso: AT the edge too)
+        dx = (mx > self.winfo_width() - 2 * at) - (mx < self.kb_w + at)
+        flat = self.time_only if kind == "move" else kind == "box" and self.box_ruler
+        dy = 0 if flat else (my > self.winfo_height() - 2 * at) - (my < self.ruler_h + at)
         if not dx and not dy:
             return
         t, top = self.view_t, self.view_top
@@ -1262,6 +1266,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.draw_slice()
         elif kind.startswith("lasso"):
             self.lasso_drag(e)
+            self.box_mouse = (e.x, e.y, e.state)  # (past the edge the view scrolls: box_scroll)
+            if self.box_timer is None:
+                self.box_timer = self.after_idle(self.box_scroll)
         elif kind == "textsel":
             self.text_drag(e)
         elif kind == "seek":
@@ -1480,6 +1487,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.drag = None
             return
         if kind.startswith("lasso"):
+            if self.box_timer:
+                self.after_cancel(self.box_timer)
+                self.box_timer = None
             self.lasso_release(e)
             return
         if kind == "slice":  # (a click without dragging cuts nothing)

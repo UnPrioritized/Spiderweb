@@ -3,9 +3,14 @@ cuts pasted notes where it goes (holes / bites, it needn't go all the way across
 loop crosses is cut there, EVERY SLIVER KEPT (no note lost), and the pieces go to two shapes, inside and outside.
 Inside = the loop going round it (a figure-8: both halves inside, user); the row's middle decides, like the Slice
 tool's line."""
+import math
+
 import numpy as np
 
+from notes.bezier import fit, seg_point, split
 from notes.slice import EPS, _halves
+
+FIT_PX = 2.0  # a freehand loop smoothed on closing stays this near the drawn line (screen pixels)
 
 
 def row_spans(loop, rows, ppq):
@@ -152,6 +157,63 @@ def path_middle(path):
     j = min(int(np.searchsorted(run, half, "right")) - 1, len(d) - 1)
     t = (half - run[j]) / d[j] if d[j] > 0 else 0.0
     return p[j] + (p[j + 1] - p[j]) * t
+
+
+def seg_controls(pts, hd, i):
+    """Piece i of a loop (point i to the next) as its 4 curve points, or None when it's straight. hd: each point's
+    handles [in, out, corner] or None (no handles: straight on both sides)."""
+    j = (i + 1) % len(pts)
+    a, b = pts[i], pts[j]
+    c1 = hd[i][1] if hd and hd[i] else a
+    c2 = hd[j][0] if hd and hd[j] else b
+    if c1 == a and c2 == b:
+        return None
+    return a, c1, c2, b
+
+
+def curved_loop(pts, hd, steps):
+    """The loop's line as points (curved pieces sampled, steps(i, controls) points each), back to the first by
+    itself."""
+    out = []
+    for i in range(len(pts)):
+        out.append(list(pts[i]))
+        c = seg_controls(pts, hd, i)
+        if c:
+            n = steps(i, c)
+            out += [list(seg_point(*c, k / n)) for k in range(1, n)]
+    return out
+
+
+def split_piece(pts, hd, i, t):
+    """A new point at t (0..1) on piece i; the line stays exactly the same (handles where it's curved). Returns the
+    new point's number."""
+    j = (i + 1) % len(pts)
+    c = seg_controls(pts, hd, i)
+    if c is None:
+        a, b = pts[i], pts[j]
+        pts.insert(i + 1, [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t])
+        hd.insert(i + 1, None)
+        return i + 1
+    flat = split([list(p) for p in c], 0, t)  # [a, a', d, m, e, c', b]
+    hd[i] = [list(hd[i][0]) if hd[i] else list(pts[i]), flat[1], hd[i][2] if hd[i] else True]
+    hd[j] = [flat[5], list(hd[j][1]) if hd[j] else list(pts[j]), hd[j][2] if hd[j] else True]
+    pts.insert(i + 1, flat[3])
+    hd.insert(i + 1, [flat[2], flat[4], False])
+    return i + 1
+
+
+def smooth_loop(xy):
+    """A freehand loop's screen points (closed straight back to the first) fitted with curves (like Straighten) ->
+    (points, handles [in, out, corner]) in screen pixels, at least 3 points."""
+    sharp = []
+    c = fit(list(map(tuple, xy)) + [tuple(xy[0])], FIT_PX, sharp)
+    while len(c) < 10:  # (fewer than 3 points: the longest piece halved)
+        s = max(range(len(c) // 3), key=lambda s: sum(math.dist(c[3 * s + k], c[3 * s + k + 1]) for k in range(3)))
+        c = split(c, s, 0.5)
+    n = len(c) // 3
+    pts = [list(c[3 * k]) for k in range(n)]
+    hd = [[list(c[3 * k - 1] if k else c[-2]), list(c[3 * k + 1]), k == 0 or k in sharp] for k in range(n)]
+    return pts, hd
 
 
 def tidy_loop(pts):

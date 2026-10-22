@@ -1,27 +1,55 @@
 """The Lasso tool on the piano roll (user 2026-10-22, planned-features.md "Lasso slice"; cutting: notes/lasso.py,
 JoinSplit.lasso_cut). Like a pen tool's lasso: Lasso = drag, let go closes it straight back to the start (Alt held =
-straight lines); Polygonal = click points, close on the first point / double-click / Enter (Backspace = last point
-off, Shift = 45°, Alt-drag = freehand). A closed loop WAITS: Enter cuts, Esc throws it away, a click elsewhere does
-nothing; its points drag, middle-click on it adds one, right-click one removes it."""
+straight lines) and smooths it into curves; Polygonal = click points, close on the first point / double-click / Enter
+(Backspace = last point off, Shift = 45°, Alt-drag = freehand). A closed loop WAITS: Enter cuts, Esc throws it away,
+a click elsewhere does nothing; its points drag, middle-click on it adds one, right-click one takes its handles off,
+then removes it. Curves like the Curve tool: Alt-drag a point = two handles pulled out of it, a handle dragged = the
+other turns with it, Alt-drag a handle = a corner. Drawing / holding at or past the edge scrolls the view."""
 import math
 
 from files.lang import tr
-from notes.lasso import tidy_loop
+from notes.bezier import seg_point
+from notes.lasso import curved_loop, seg_controls, smooth_loop, split_piece, tidy_loop
 from roll.roll_shared import ALT, CTRL, LONG_STROKE, SHIFT, shown_points
 from window import look
 
 CLOSE_PX = 8  # a Polygonal click this near the first point closes the loop
-POINT_PX = 6  # a waiting loop's point grabbed this near
+POINT_PX = 6  # a waiting loop's point / handle grabbed this near
 FREE_PX = 3  # a freehand point every this many pixels
+CURVE_PX = 2  # a curved piece drawn / cut as straight bits about this long on screen
+PULL_PX = 2  # handles pulled out less than this = none
 
 
 class LassoDrawing:
-    lasso = None  # {"pts": [[beat, key], ...], "mode": "free" / "poly", "closed", "hover": [beat, key] or None}
+    lasso = None  # {"pts": [[beat, key], ...], "mode": "free" / "poly", "closed", "hover": [beat, key] or None,
+    #                "hd": each point's handles [in, out, corner] or None, once closed}
 
     def lasso_pt(self, e):
-        """The mouse as (beat, key), free (no grid: the cut goes exactly along it), down to under key 0."""
+        """The mouse as (beat, key), free (no grid: the cut goes exactly along it), down to under key 0; past the
+        piano roll's edge = on the edge."""
+        x = min(max(e.x, self.kb_w), self.winfo_width())
         y = min(max(e.y, self.ruler_h), self.winfo_height())
-        return [max(0.0, self.x2t(e.x)), min(max(self.y2p(y), -0.5), self.app.keys - 0.5)]
+        return [max(0.0, self.x2t(x)), min(max(self.y2p(y), -0.5), self.app.keys - 0.5)]
+
+    def lasso_hd(self):
+        """The loop's handles, one per point (a loop set from outside without them gets none)."""
+        las = self.lasso
+        if len(las.get("hd") or ()) != len(las["pts"]):
+            las["hd"] = [None] * len(las["pts"])
+        return las["hd"]
+
+    def lasso_line(self, las=None):
+        """The loop as points along its line, curved pieces sampled (what's drawn and what cuts)."""
+        las = las or self.lasso
+
+        def steps(i, c):
+            xy = [self.to_xy(p) for p in c]
+            length = sum(math.dist(xy[k], xy[k + 1]) for k in range(3))
+            keys = max(p[1] for p in c) - min(p[1] for p in c)
+            return int(min(2000, max(8, length / (CURVE_PX * self.scale), 4 * keys)))
+        if not las["closed"] or not any(las.get("hd") or ()):
+            return [list(p) for p in las["pts"]]
+        return curved_loop(las["pts"], las["hd"], steps)
 
     def lasso_snap(self, pt, e, angle=True):
         """A clicked / dragged point (not freehand): its time on the snap grid (user 2026-10-23, B), Ctrl = free,
@@ -56,15 +84,35 @@ class LassoDrawing:
                 best = (d, i)
         return None if best is None else best[1]
 
+    def lasso_handle_at(self, x, y):
+        """The waiting loop's handle (point number, 0 = in / 1 = out) near the mouse, or None."""
+        best = None
+        for i, h in enumerate(self.lasso_hd()):
+            for side in (0, 1):
+                if h and h[side] != self.lasso["pts"][i]:
+                    hx, hy = self.to_xy(h[side])
+                    d = math.hypot(hx - x, hy - y)
+                    if d <= POINT_PX * self.scale and (best is None or d < best[0]):
+                        best = (d, (i, side))
+        return None if best is None else best[1]
+
+    def lasso_saved(self):
+        """The loop's points and handles as they are (put back by Ctrl+Z while one is held)."""
+        return ([list(p) for p in self.lasso["pts"]],
+                [None if h is None else [list(h[0]), list(h[1]), h[2]] for h in self.lasso_hd()])
+
     def lasso_press(self, e, kept):
         """A press with the Lasso tool."""
         if kept:  # (the kept Select boxes stay: only what's in them is cut, like Slice)
             self.box_kept = (kept, set(self.app.sels))
         las, pt = self.lasso, self.lasso_pt(e)
         if las and las["closed"]:
-            i = self.lasso_point_at(e.x, e.y)
-            if i is not None:
-                self.drag = ("lasso_point", i, list(las["pts"][i]))  # (where it was: Ctrl+Z mid-drag puts it back)
+            hit = self.lasso_handle_at(e.x, e.y)
+            i = None if hit else self.lasso_point_at(e.x, e.y)
+            if hit:  # (Alt: that handle alone from now on, a corner)
+                self.drag = ("lasso_point", hit[0], self.lasso_saved(), ("handle", hit[1]), bool(e.state & ALT))
+            elif i is not None:  # (Alt: new handles pulled out of it)
+                self.drag = ("lasso_point", i, self.lasso_saved(), "pull" if e.state & ALT else "move", False)
             return  # (a click elsewhere: nothing, user)
         if las and las["mode"] == "poly":
             if len(las["pts"]) >= 3 and math.dist(self.to_xy(las["pts"][0]), (e.x, e.y)) <= CLOSE_PX * self.scale:
@@ -79,11 +127,36 @@ class LassoDrawing:
             self.app.status.show(tr("pianoroll.lasso_" + ("poly" if mode == "poly" else "draw")))
         self.draw_lasso()
 
+    def lasso_held(self, e):
+        """A waiting loop's point or handle dragged."""
+        _, i, _, what, alt = self.drag
+        pts, hd = self.lasso["pts"], self.lasso_hd()
+        pt = self.lasso_pt(e)
+        if what == "move":  # (its handles go along)
+            new = self.lasso_snap(pt, e, angle=False)
+            d = [new[0] - pts[i][0], new[1] - pts[i][1]]
+            pts[i] = new
+            if hd[i]:
+                hd[i][:2] = [[h[0] + d[0], h[1] + d[1]] for h in hd[i][:2]]
+        elif what == "pull":  # (both sides alike, like the Curve tool)
+            a = pts[i]
+            hd[i] = [[2 * a[0] - pt[0], 2 * a[1] - pt[1]], pt, False]
+        else:
+            side, h = what[1], hd[i]
+            h[side] = pt
+            if alt or e.state & ALT:
+                h[2] = True
+            elif not h[2]:  # (a smooth point: the other handle turns with it, keeping its length on screen)
+                (ax, ay), (hx, hy), (ox, oy) = self.to_xy(pts[i]), self.to_xy(pt), self.to_xy(h[1 - side])
+                d, length = math.hypot(hx - ax, hy - ay), math.hypot(ox - ax, oy - ay)
+                if d > 0 and length > 0:
+                    h[1 - side] = [self.x2t(ax - (hx - ax) / d * length), self.y2p(ay - (hy - ay) / d * length)]
+
     def lasso_drag(self, e):
         las, kind = self.lasso, self.drag[0]
         pt = self.lasso_pt(e)
         if kind == "lasso_point":
-            las["pts"][self.drag[1]] = self.lasso_snap(pt, e, angle=False)
+            self.lasso_held(e)
         elif kind == "lasso_free" and e.state & ALT:  # (Alt: a straight line to the mouse)
             las["hover"] = pt
         elif kind == "lasso_free" or kind == "lasso_poly" and e.state & ALT:  # (Polygonal: Alt-drag = freehand)
@@ -98,11 +171,16 @@ class LassoDrawing:
         self.draw_lasso()
 
     def lasso_release(self, e):
-        kind, self.drag = self.drag[0], None
-        if kind == "lasso_free":
+        drag, self.drag = self.drag, None
+        if drag[0] == "lasso_free":
             if self.lasso["hover"]:
                 self.lasso["pts"].append(self.lasso["hover"])
             self.lasso_close()
+        elif drag[0] == "lasso_point" and drag[3] == "pull":  # (pulled out barely: no handles)
+            i = drag[1]
+            h = self.lasso_hd()[i]
+            if h and math.dist(self.to_xy(h[1]), self.to_xy(self.lasso["pts"][i])) < PULL_PX * self.scale:
+                self.lasso_hd()[i] = None
         self.draw_lasso()
 
     def lasso_motion(self, e):
@@ -115,13 +193,20 @@ class LassoDrawing:
         return True
 
     def lasso_close(self):
-        """The loop closed straight back to its start: it waits for Enter / Esc. Too small = gone."""
+        """The loop closed straight back to its start: it waits for Enter / Esc. Too small = gone. A freehand Lasso
+        loop is smoothed into curves (like Straighten; user 2026-10-22)."""
         las = self.lasso
         pts = tidy_loop(las["pts"])
         if pts is None:
             self.lasso = None
         else:
-            las.update(pts=pts, closed=True, hover=None)
+            hd = [None] * len(pts)
+            if las["mode"] == "free" and len(pts) > 3:
+                xy, hd = smooth_loop([self.to_xy(p) for p in pts])
+                back = lambda p: [self.x2t(p[0]), self.y2p(p[1])]
+                pts = [back(p) for p in xy]
+                hd = [[back(h[0]), back(h[1]), h[2]] for h in hd]
+            las.update(pts=pts, hd=hd, closed=True, hover=None)
             self.app.status.show(tr("pianoroll.lasso_ready"))
         self.drag = None
         self.draw_lasso()
@@ -137,7 +222,7 @@ class LassoDrawing:
         elif k in ("return", "kp_enter"):
             if las["closed"]:
                 if not self.drag:  # (the loop stays shown while it asks about plain notes, user; No = it stays)
-                    if self.app.lasso_cut(las["pts"]) is not None:
+                    if self.app.lasso_cut(self.lasso_line()) is not None:
                         self.drop_lasso()
             elif las["mode"] == "poly":
                 self.lasso_close()
@@ -162,11 +247,12 @@ class LassoDrawing:
     def lasso_undo(self):
         """Ctrl+Z / Undo / a History click while there's a loop: it acts on the loop, nothing else is undone (like a
         shape half drawn; hunt 2026-10-23, user saw an earlier change undone and half a loop left). A waiting loop's
-        point held = back where it was pressed; any other loop (being drawn, open, waiting) = gone. True when it did."""
+        point / handle held = back where it was pressed; any other loop (being drawn, open, waiting) = gone. True
+        when it did."""
         if not self.lasso:
             return False
         if self.drag and self.drag[0] == "lasso_point":
-            self.lasso["pts"][self.drag[1]] = self.drag[2]
+            self.lasso["pts"], self.lasso["hd"] = self.drag[2]
             self.drag = None
             self.draw_lasso()
         else:
@@ -178,8 +264,9 @@ class LassoDrawing:
         return bool(self.drag) and self.drag[0].startswith("lasso")
 
     def lasso_right(self, e):
-        """Right-click: an open Polygonal loop closes (like a polyline; too few points = gone), a waiting loop's
-        point is removed (3 points stay at least). True when it was the lasso's (no menu)."""
+        """Right-click: an open Polygonal loop closes (like a polyline; too few points = gone); on a waiting loop's
+        point its handles go first, then the point (3 points stay at least); on a handle its point's handles go.
+        True when it was the lasso's (no menu)."""
         las = self.lasso
         if las and not las["closed"] and not self.drag:
             if len(las["pts"]) >= 3:
@@ -189,31 +276,46 @@ class LassoDrawing:
             return True
         if not las or not las["closed"] or self.drag:
             return False
-        i = self.lasso_point_at(e.x, e.y)
+        hd, hit = self.lasso_hd(), self.lasso_handle_at(e.x, e.y)
+        i = hit[0] if hit else self.lasso_point_at(e.x, e.y)
         if i is None:
             return False
-        if len(las["pts"]) > 3:
+        if hd[i]:
+            hd[i] = None
+        elif len(las["pts"]) > 3:
             del las["pts"][i]
-            self.draw_lasso()
+            del hd[i]
+        self.draw_lasso()
         return True
 
     def lasso_middle(self, e):
-        """A middle click (no drag) on a waiting loop's line adds a point there. True when it was on the line."""
+        """A middle click (no drag) on a waiting loop's line adds a point there (on a curve: the curve stays as it
+        is). True when it was on the line."""
         las = self.lasso
         if not las or not las["closed"]:
             return False
-        pts = las["pts"]
+        pts, hd = las["pts"], self.lasso_hd()
         best = None
         for i in range(len(pts)):
-            (ax, ay), (bx, by) = self.to_xy(pts[i]), self.to_xy(pts[(i + 1) % len(pts)])
-            L = (bx - ax) ** 2 + (by - ay) ** 2
-            u = 0.0 if L == 0 else min(1.0, max(0.0, ((e.x - ax) * (bx - ax) + (e.y - ay) * (by - ay)) / L))
-            d = math.hypot(ax + u * (bx - ax) - e.x, ay + u * (by - ay) - e.y)
-            if best is None or d < best[0]:
-                best = (d, i)
+            c = seg_controls(pts, hd, i)
+            n = 64 if c else 1
+            line = ([self.to_xy(seg_point(*c, k / n)) for k in range(n + 1)] if c else
+                    [self.to_xy(pts[i]), self.to_xy(pts[(i + 1) % len(pts)])])
+            for k in range(n):
+                (ax, ay), (bx, by) = line[k], line[k + 1]
+                L = (bx - ax) ** 2 + (by - ay) ** 2
+                u = 0.0 if L == 0 else min(1.0, max(0.0, ((e.x - ax) * (bx - ax) + (e.y - ay) * (by - ay)) / L))
+                d = math.hypot(ax + u * (bx - ax) - e.x, ay + u * (by - ay) - e.y)
+                if best is None or d < best[0]:
+                    best = (d, i, (k + u) / n, bool(c))
         if best[0] > POINT_PX * self.scale:
             return False
-        pts.insert(best[1] + 1, self.lasso_snap(self.lasso_pt(e), e, angle=False))
+        _, i, t, curved = best
+        if curved:
+            split_piece(pts, hd, i, min(max(t, 1e-6), 1 - 1e-6))
+        else:
+            pts.insert(i + 1, self.lasso_snap(self.lasso_pt(e), e, angle=False))
+            hd.insert(i + 1, None)
         self.draw_lasso()
         return True
 
@@ -230,12 +332,12 @@ class LassoDrawing:
             self.draw_lasso()
 
     def draw_lasso(self):
-        """The loop: dashed in the cut colour; a waiting one with its points."""
+        """The loop: dashed in the cut colour; a waiting one with its points and handles."""
         self.delete("lasso")
         las = self.lasso
         if not las:
             return
-        pts = las["pts"] + ([las["hover"]] if las["hover"] else [])
+        pts = self.lasso_line() + ([las["hover"]] if las["hover"] else [])
         xy = [v for p in pts for v in self.to_xy(p)]
         if las["closed"]:
             xy += xy[:2]
@@ -243,6 +345,14 @@ class LassoDrawing:
         if len(xy) >= 4:
             self.create_line(*xy, fill=look.CUT, width=max(1, round(2 * s)), dash=(6, 3), tags="lasso")
         r = 3 * s
+        if las["closed"]:
+            for i, h in enumerate(self.lasso_hd()):
+                for side in (0, 1):
+                    if h and h[side] != las["pts"][i]:
+                        (ax, ay), (hx, hy) = self.to_xy(las["pts"][i]), self.to_xy(h[side])
+                        self.create_line(ax, ay, hx, hy, fill=look.CUT, width=max(1, round(s)), tags="lasso")
+                        self.create_oval(hx - r, hy - r, hx + r, hy + r, fill=look.HANDLE_FILL, outline=look.CUT,
+                                         tags="lasso")
         shown = (shown_points(len(las["pts"]), len(las["pts"]) <= LONG_STROKE) if las["closed"]
                  else range(len(las["pts"])) if las["mode"] == "poly" else (0,))
         for i in shown:
