@@ -350,7 +350,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         """The left button holds a shape, its point / handle / box, or the kept Select box's side: shortcuts wait
         (user)."""
         return bool(self.drag) and self.drag[0] in ("move", "handle", "resize", "skew", "turn", "stretch", "path",
-                                                     "sustop")
+                                                     "sustop", "lasso_free", "lasso_poly", "lasso_point")
 
     @staticmethod
     def reach(shapes):
@@ -1891,6 +1891,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.end_typing()
         funnel = bool(self.draft and self.draft["kind"] == "funnel")
         self.stop_tidy()  # (a sustain stop held: its stops in order again)
+        self.drop_lasso(unfinished=True)  # (a loop half drawn goes with its drag, never left stuck; hunt 2026-10-23)
         self.draft = None
         self.drag = None
         self.follow = None

@@ -53,7 +53,7 @@ class LassoDrawing:
         if las and las["closed"]:
             i = self.lasso_point_at(e.x, e.y)
             if i is not None:
-                self.drag = ("lasso_point", i)
+                self.drag = ("lasso_point", i, list(las["pts"][i]))  # (where it was: Ctrl+Z mid-drag puts it back)
             return  # (a click elsewhere: nothing, user)
         if las and las["mode"] == "poly":
             if len(las["pts"]) >= 3 and math.dist(self.to_xy(las["pts"][0]), (e.x, e.y)) <= CLOSE_PX * self.scale:
@@ -150,9 +150,34 @@ class LassoDrawing:
         self.lasso_close()
         return True
 
+    def lasso_undo(self):
+        """Ctrl+Z / Undo / a History click while there's a loop: it acts on the loop, nothing else is undone (like a
+        shape half drawn; hunt 2026-10-23, user saw an earlier change undone and half a loop left). A waiting loop's
+        point held = back where it was pressed; any other loop (being drawn, open, waiting) = gone. True when it did."""
+        if not self.lasso:
+            return False
+        if self.drag and self.drag[0] == "lasso_point":
+            self.lasso["pts"][self.drag[1]] = self.drag[2]
+            self.drag = None
+            self.draw_lasso()
+        else:
+            self.drop_lasso()
+        return True
+
+    def lasso_holding(self):
+        """The left button holds the lasso (drawing it or one of its points)."""
+        return bool(self.drag) and self.drag[0].startswith("lasso")
+
     def lasso_right(self, e):
-        """Right-click on a waiting loop's point removes it (3 points stay at least). True when it was on one."""
+        """Right-click: an open Polygonal loop closes (like a polyline; too few points = gone), a waiting loop's
+        point is removed (3 points stay at least). True when it was the lasso's (no menu)."""
         las = self.lasso
+        if las and not las["closed"] and not self.drag:
+            if len(las["pts"]) >= 3:
+                self.lasso_close()
+            else:
+                self.drop_lasso()
+            return True
         if not las or not las["closed"] or self.drag:
             return False
         i = self.lasso_point_at(e.x, e.y)
@@ -183,7 +208,12 @@ class LassoDrawing:
         self.draw_lasso()
         return True
 
-    def drop_lasso(self):
+    def drop_lasso(self, unfinished=False):
+        """The loop gone (unfinished: only one not closed yet; a waiting one stays, a point held going back)."""
+        if unfinished and self.lasso and self.lasso["closed"]:
+            if self.drag and self.drag[0] == "lasso_point":
+                self.lasso_undo()
+            return
         if self.lasso is not None:
             self.lasso = None
             if self.drag and self.drag[0].startswith("lasso"):

@@ -345,6 +345,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
         self.tool = tk.StringVar(value="select")  # (each tool's tip shows when it's picked, see help.py)
         self.lasso_mode = tk.StringVar(value="free")  # the Lasso tool's ▾: "free" (drag) / "poly" (click points)
+        self.lasso_mode.trace_add("write", lambda *_: hasattr(self, "roll") and self.roll.drop_lasso(unfinished=True))
+        # (another mode picked: a loop not closed yet goes, the next press starts one of the new kind; hunt)
         self.tips = Tips(self)
         self.updates = Updates(self)
         self.help_window = None
@@ -1726,6 +1728,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if not messagebox.askyesno(tr("app.spiderweb_2"), tr("app.new_ask"), icon="warning", parent=self):
             return
         self.roll.cancel_draft()  # first: it refreshes the panel, which must still see the old shapes
+        self.roll.drop_lasso()  # (a waiting loop would cut the new one)
         self.push_undo(name=tr("app.new"))
         state, name, sel, hz = self.undo_stack[-1]
         self.undo_stack[-1] = (state, name, tuple(sel) + ((BOXES,) + boxes,), hz)  # (the step's mark: _restore)

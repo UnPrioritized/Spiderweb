@@ -379,6 +379,7 @@ class ProjectFiles:
         if pg:
             self.polygon_defaults = {k: pg[k] for k in POLYGON_DEFAULTS}
         self.roll.cancel_draft()
+        self.roll.drop_lasso()  # (a waiting loop would cut the opened project, hunt 2026-10-23)
         self.shapes = shapes
         self.tempo = tempo
         # (only an autosave has them: the project file it belonged to, and whether it had unsaved changes)

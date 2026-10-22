@@ -154,7 +154,10 @@ class HistoryPanel:
             self.history_jump(cur[0])
 
     def history_jump(self, row):
-        """Undo / redo until row is the current step."""
+        """Undo / redo until row is the current step. A lasso loop there: it goes instead, like Ctrl+Z."""
+        if self.roll.lasso_undo():
+            self.sync_history(force=True)
+            return
         self.roll.cancel_draft()
         self.settle_windows()  # (a window's try kept as its own step FIRST, then counted: hunt, it landed short)
         self._history_jumping = True  # (no list refresh on the way)
@@ -360,6 +363,8 @@ class HistoryPanel:
     def undo(self):
         if self.roll.drop_hz_keys():  # (a new Hz bass's keys being dragged: just called off)
             return
+        if self.roll.lasso_undo():  # (a lasso loop drawn / open / waiting: it goes, a held point back; nothing undone)
+            return
         if self.roll.draft or self.roll.typing_empty():  # something half drawn (a funnel waiting for its wall, a
             return self.roll.cancel_draft()                # polyline, a text caret with nothing typed): just drop it
         if self.hz_window and self.hz_window.pending:  # a slide started in the Hz bass window: just drop its mark
@@ -369,7 +374,7 @@ class HistoryPanel:
         self._restore(self.undo_stack, self.redo_stack)
 
     def redo(self):
-        if self.roll.hz_keys_held():  # (a new Hz bass's keys being dragged: nothing)
+        if self.roll.hz_keys_held() or self.roll.lasso_holding():  # (a new Hz bass's keys / the lasso held: nothing)
             return
         self._restore(self.redo_stack, self.undo_stack)
 
