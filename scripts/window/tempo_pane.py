@@ -13,6 +13,7 @@ can't). The wheel over the numbers on the left zooms up / down (Shift scrolls), 
 wheel works as on the piano roll.
 """
 
+import bisect
 import copy
 import json
 import math
@@ -28,6 +29,7 @@ from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_
                          bpm_text, clamp_bpm, curve, drop_loose, formula_fn,
                          catch_get, catch_set, keeps, layout,
                          plans, shown_bpm, step_edges)
+from notes.tempo_file import dense_spots
 from roll.zoombar import add_zoom_bars
 from roll.roll_shared import (BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, bind_double_right, draw_boxes,
                               grab_while_panning,
@@ -40,6 +42,7 @@ NICE = (0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 
         10000000)  # numbers filled in on zoom
 LABEL_GAP = 15  # px between two numbers on the left (times the window's scale)
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
+DENSE_WAIT_MS = 300  # Keep timing notes too close: worked out this long after the tempo / notes stop changing
 DRAWS = {"line": "line", "formula": "formula"}  # pencil kind -> the curve the drawn part gets (bent by its handle)
 
 
@@ -442,6 +445,8 @@ class TempoPane(tk.Canvas):
         self.placing = None  # adding a catch-up: {"step": 1} (drag the yellow area) / {"step": 2, "a", "b", "hover"}
         self.bands = []  # the kept Select boxes [(first, last beat)]: the pane's whole height (Ctrl+drag adds one)
         self.live = None  # the line just drawn, its ends still movable: {"base", "ends", "first", "seen"}
+        self._dense = (None, [])  # (what it was worked out for, beats where Keep timing notes are too close)
+        self._dense_job = None
         self.drag = None
         self._pan = None
         self._redraw_pending = False
@@ -1327,6 +1332,42 @@ class TempoPane(tk.Canvas):
         lv["first"] = self.lay_part(b0, v0, b1, v1, old[2], old[3], like=old)
         self.live_seen()
 
+    def dense_key(self):
+        app = self.app
+        return json.dumps(app.tempo), self.base(), app.ppq, app.beats, id(app.rendered)
+
+    def dense_now(self):
+        """Beats where notes in a Keep timing part are too close for its tempo (tempo_file.dense_spots), as last
+        worked out; out of date = worked out again a moment after the changes stop (a big song takes a while)."""
+        if self._dense[0] != self.dense_key() and self._dense_job is None:
+            self._dense_job = self.after(DENSE_WAIT_MS, self.work_dense)
+        return self._dense[1]
+
+    def dense_at(self, x):
+        """True when x is on (within 3 px of) a "notes too close" line."""
+        dense, roll, r = self._dense[1], self.app.roll, 3 * self.scale
+        if not dense or roll.sx is None:
+            return False
+        i = bisect.bisect_left(dense, roll.x2t(x - r))
+        return i < len(dense) and roll.t2x(dense[i]) <= x + r
+
+    def work_dense(self):
+        self._dense_job = None
+        if self.drag or getattr(self.app, "notes_late", False):  # (still being dragged: later)
+            self._dense_job = self.after(DENSE_WAIT_MS, self.work_dense)
+            return
+        key, app = self.dense_key(), self.app
+        if key == self._dense[0] or not self.winfo_ismapped():  # (hidden: its next drawing asks again)
+            return
+        notes = app.rendered
+        ticks = np.concatenate([notes[:, 0], notes[:, 1]]) if len(notes) else np.zeros(0, np.int64)
+        try:
+            spots = sorted(dense_spots(app.tempo, self.base(), app.ppq, app.beats, ticks))
+        except MemoryError:
+            spots = []
+        self._dense = (key, spots)
+        self.request_redraw()
+
     def confirm(self):
         """Done with the live line (Enter, Esc, a click elsewhere): its squares go. True if there was one."""
         if self.live_line() is None:
@@ -1577,6 +1618,8 @@ class TempoPane(tk.Canvas):
             want, hint = "sb_h_double_arrow", "on_catch"
         elif self.start_at(e.x) is not None or self.end_at(e.x) is not None:
             want, hint = "sb_h_double_arrow", "on_edge"
+        elif self.dense_at(e.x):  # (an orange line: what it means)
+            want, hint = PENCIL_CURSOR if self.box.tool.get() != "select" else SELECT_CURSOR, "on_dense"
         elif self.box.tool.get() != "select":
             want = PENCIL_CURSOR
         elif self.in_band(e.x):
@@ -1796,10 +1839,10 @@ class TempoPane(tk.Canvas):
                 if st["manual_end"] and xe >= kb:  # (its right edge drags; set by hand: a solid line)
                     self.create_line(xe, 0, xe, h, fill=look.TEMPO_CATCH, width=lw * 2)
         ppq = self.app.ppq
-        keep_spans = [(max(kb, roll.t2x(a / ppq)), w if e is None else min(w, roll.t2x(e / ppq)), u)
-                      for _, a, e, u in layout(tempo, base, ppq)["keeps"]]
+        keep_spans = [(max(kb, roll.t2x(a / ppq)), w if e is None else min(w, roll.t2x(e / ppq)), u, a / ppq,
+                       math.inf if e is None else e / ppq) for _, a, e, u in layout(tempo, base, ppq)["keeps"]]
         keep_spans = [s for s in keep_spans if s[1] > s[0]]
-        for x0, x1, _ in keep_spans:  # Keep timing parts (purple), their notes keep the tempo heard before
+        for x0, x1, *_ in keep_spans:  # Keep timing parts (purple), their notes keep the tempo heard before
             self.create_rectangle(x0, 0, x1, h, fill=look.TEMPO_KEEP_BG, outline="")
         for x, c in roll.grid_cols(w):
             if x >= kb:
@@ -1818,11 +1861,20 @@ class TempoPane(tk.Canvas):
                 self.create_line(kb, y, w, y, fill=look.CHART_GRID_STRONG)
         y = float(self.b2y(base))
         self.create_line(kb, y, w, y, fill=look.TEMPO_BASE, dash=(4, 3), width=lw)
-        for x0, x1, u in keep_spans:  # (the tempo its notes keep: dashed, with the words on top)
+        dense = self.dense_now()
+        for x0, x1, u, b0, b1 in keep_spans:  # (the tempo its notes keep: dashed, with the words on top)
             y = float(self.b2y(60_000_000 / u))
             self.create_line(x0, y, x1, y, fill=look.TEMPO_KEEP, dash=(6, 3), width=lw + 1)
+            # notes too close for its tempo (user 2026-10-22: shown while editing, not only after the export): a
+            # dashed orange line on each spot (one per pixel)
+            bad = bisect.bisect_left(dense, b0 - 1e-9) < bisect.bisect_right(dense, b1 + 1e-9)
+            shown = dense[bisect.bisect_left(dense, max(b0, roll.x2t(x0)) - 1e-9):
+                          bisect.bisect_right(dense, min(b1, roll.x2t(x1)) + 1e-9)]
+            for x in np.unique(np.round(roll.t2x(np.asarray(shown, float)))).tolist() if shown else ():
+                self.create_line(x, 0, x, h, fill=look.WARN, dash=(3, 3), width=lw)
+            text, colour = (tr("tempo.keep_dense"), look.WARN) if bad else (tr("tempo.keep"), look.TEMPO_KEEP)
             if x1 - x0 > 70 * self.scale:
-                self.create_text((x0 + x1) / 2, top + 8 * self.scale, text=tr("tempo.keep"), fill=look.TEMPO_KEEP,
+                self.create_text((x0 + x1) / 2, top + 8 * self.scale, text=text, fill=colour,
                                  font=look.font(8, "bold"))
         # the line itself
         xs, beats, ys = self.line_xy(worked, w, kb)

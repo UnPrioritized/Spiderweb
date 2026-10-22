@@ -317,6 +317,8 @@
  "tempo.catch_end_auto": "End the catch-up at the next point",
  "tempo.step_catch_end": "Catch-up end",
  "tempo.keep": "Keep timing",
+ "tempo.keep_dense": "Keep timing: notes too close (tempo stays faster)",
+ "tempo.hint_on_dense": "Notes too close for this part's slower tempo: it stays faster here, the timing is still right. A higher PPQ helps.",
  "tempo.keep_tip": "The notes in this part keep the time they have at the tempo heard just before it: the export moves them in ticks, so only the scrolling changes. Players that follow ticks show the new tempo; the music sounds the same.",
  "tempo.step_keep": "Keep timing",
  "tempo.bars": "Fit bar lines",

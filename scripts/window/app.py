@@ -1346,6 +1346,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if self._notes_worked != worked:
                 self._notes_time = time.perf_counter() - started
         wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots = made
+        if getattr(self, "tempo_pane", None) is not None:  # (Keep timing notes too close: looked at again soon)
+            self.tempo_pane.dense_now()
         started = time.perf_counter()
         self.pattern = self.rendered
         if self.channel_mode.get() == "single" and any(is_mask(sh) and not silent(sh) for sh in self.shapes):

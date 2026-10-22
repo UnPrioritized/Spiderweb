@@ -135,6 +135,50 @@ def _spans_off(segs, keeps, start_u):
     return np.array(lo, np.int64), np.array(hi, np.int64)
 
 
+def keep_gaps(tempo, base, ppq, beats, ticks):
+    """The Keep timing parts' gaps between anchors: (layout, segs, bad catch-ups, keeps [(a, e, us)], gaps [[n,
+    total, file ticks, drawn]], dense = beats of EVERY gap whose two notes are under a tick apart at the part's
+    tempo (it stays faster there)). ticks = the ticks keeping their time (int64 array)."""
+    lay = layout(tempo, base, ppq)
+    segs, bad = file_segments(tempo, base, ppq, int(ticks.max()) + 1 if len(ticks) else 0)
+    last_tick = int(ticks.max()) if len(ticks) else 0
+    # a part on to the song's end stops at the last note (not a tick past it: no gap there to count)
+    keeps = [(a, last_tick if e is None else e, u) for _, a, e, u in lay["keeps"]]
+    keeps = [(a, e, u) for a, e, u in keeps if e > a]
+    bar = beats * ppq
+    fit_bars = tempo.get("bars", True) and bar > 0
+    # gaps between anchors, part by part: (first tick, end tick, time = ticks x heard us, file ticks)
+    gaps, dense = [], []
+    for a, e, u in keeps:
+        inside = ticks[(ticks > a) & (ticks < e)]
+        marks = [np.array([a, e], np.int64), inside]
+        if fit_bars:
+            marks.append(np.arange((a // bar + 1) * bar, e, bar, dtype=np.int64))
+        n = np.unique(np.concatenate(marks))
+        drawn = _per_tick(segs, a, e)
+        sums = np.concatenate([[0], np.cumsum(drawn, dtype=np.float64)])
+        d = np.diff(n)
+        total = d * u
+        exact = total / ((sums[n[1:] - a] - sums[n[:-1] - a]) / d)  # (file ticks each gap needs at the drawn tempo)
+        real = np.isin(n, ticks)
+        close = real[:-1] & real[1:] & (exact < 1)  # (two notes under a tick apart at that tempo)
+        dense += (n[:-1][close] / ppq).tolist()
+        # rounded on a running total, so the part keeps the drawn tempo on average (gap by gap, regular spam
+        # rounded the same way every time: 60 BPM came out 48)
+        k = np.diff(np.concatenate([[0], np.rint(np.cumsum(exact))])).astype(np.int64)
+        k = np.clip(k, _least(total), total)
+        gaps.append([n, total, k, drawn])
+    return lay, segs, bad, keeps, gaps, dense
+
+
+def dense_spots(tempo, base, ppq, beats, ticks):
+    """Beats where notes in a Keep timing part are under a tick apart at its tempo (the Tempo pane shows them while
+    editing, user 2026-10-22: the export's message came too late). [] without Keep timing parts."""
+    if not has_tempo(tempo) or not any(len(p) > 5 and p[5] is True for p in tempo.get("points", ())):
+        return []
+    return keep_gaps(tempo, base, ppq, beats, np.asarray(ticks, np.int64).ravel())[5]
+
+
 def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None):
     """What a MIDI file gets: {"events": [(tick, us)] tick 0 first, "bad": beats of catch-up lines that can't work,
     "sigs": [(tick, top, bottom power)] time signatures, "map": Spiderweb tick(s) -> file tick(s), "jumps": beats of
@@ -149,38 +193,11 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None):
     start_u = base_us(base)
     out["events"] = [(0, start_u)]
     ticks = np.asarray(ticks, np.int64).ravel()
-    lay = layout(tempo, base, ppq)
-    segs, out["bad"] = file_segments(tempo, base, ppq, int(ticks.max()) + 1 if len(ticks) else 0)
+    lay, segs, out["bad"], keeps, gaps, out["dense"] = keep_gaps(tempo, base, ppq, beats, ticks)
     end = segs[-1][1]
-    last_tick = int(ticks.max()) if len(ticks) else 0
-    # a part on to the song's end stops at the last note (not a tick past it: no gap there to count)
-    keeps = [(a, last_tick if e is None else e, u) for _, a, e, u in lay["keeps"]]
-    keeps = [(a, e, u) for a, e, u in keeps if e > a]
     every = tempo.get("every", EVERY)
     bar = beats * ppq
     fit_bars = tempo.get("bars", True) and bar > 0
-    # gaps between anchors, part by part: (first tick, end tick, time = ticks x heard us, file ticks)
-    gaps = []
-    for a, e, u in keeps:
-        inside = ticks[(ticks > a) & (ticks < e)]
-        marks = [np.array([a, e], np.int64), inside]
-        if fit_bars:
-            marks.append(np.arange((a // bar + 1) * bar, e, bar, dtype=np.int64))
-        n = np.unique(np.concatenate(marks))
-        drawn = _per_tick(segs, a, e)
-        sums = np.concatenate([[0], np.cumsum(drawn, dtype=np.float64)])
-        d = np.diff(n)
-        total = d * u
-        exact = total / ((sums[n[1:] - a] - sums[n[:-1] - a]) / d)  # (file ticks each gap needs at the drawn tempo)
-        real = np.isin(n, ticks)
-        close = real[:-1] & real[1:] & (exact < 1)  # (two notes under a tick apart at that tempo)
-        if close.any() and not out["dense"]:
-            out["dense"] = [int(n[:-1][close][0]) / ppq]
-        # rounded on a running total, so the part keeps the drawn tempo on average (gap by gap, regular spam
-        # rounded the same way every time: 60 BPM came out 48)
-        k = np.diff(np.concatenate([[0], np.rint(np.cumsum(exact))])).astype(np.int64)
-        k = np.clip(k, _least(total), total)
-        gaps.append([n, total, k, drawn])
     if fit_bars and gaps:
         lengths = bar_lengths(ppq)
         _fit_bar_lines(gaps, keeps, bar, lengths)
